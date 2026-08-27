@@ -14,5 +14,6 @@
   <ItemGroup>
     <Compile Include="..\_shared\FomodModel.cs" Link="FomodModel.cs" />
     <Compile Include="..\_shared\SyntheticOrder.cs" Link="SyntheticOrder.cs" />
+    <Compile Include="..\_shared\DetectorModel.cs" Link="DetectorModel.cs" />
   </ItemGroup>
 </Project>

@@ -232,6 +232,86 @@ Console.WriteLine("   Five corrections, one case each. No game data, no archives
 }
 
 // ---------------------------------------------------------------------------------------
+// The detector cores (_shared/DetectorModel.cs) — the decisions the probes run on, frozen.
+// ---------------------------------------------------------------------------------------
+// Two of these rules were WRONG in the wild before they had cases: the clobber check used direct
+// masters only (3 real false positives), and "material" used counts only (11 real re-cuts
+// invisible). Each case below is one of those failure modes, by construction.
+Console.WriteLine("\nPROOF — the detector cores (_shared/DetectorModel.cs)\n");
+{
+    // Master closure: direct, transitive chain, and diamond.
+    var direct = new IReadOnlySet<int>[]
+    {
+        new HashSet<int>(),          // 0
+        new HashSet<int> { 0 },      // 1 <- 0
+        new HashSet<int> { 1 },      // 2 <- 1 (so transitively 0)
+        new HashSet<int> { 1, 2 },   // 3 <- 1,2 (diamond over 0)
+    };
+    var clo = DetectorModel.MasterClosure(direct);
+    Check("core: closure keeps direct masters", clo[1].Contains(0), "1 -> 0");
+    Check("core: closure adds the transitive chain", clo[2].Contains(0), "2 -> 1 -> 0");
+    Check("core: diamond closes to the full ancestor set",
+          clo[3].SetEquals(new[] { 0, 1, 2 }), $"[{string.Join(",", clo[3].OrderBy(x => x))}]");
+
+    // FindClobber over a provider history [definer=0, A=1, B=2] with winner B.
+    var provs = new[] { 0, 1, 2 };
+    (int V, int T, int H) size0 = (10, 5, 111), sizeA = (12, 6, 222), sizeB = (12, 6, 333);
+    (int, int, bool)? Clob(Func<int, int, bool> dep, Func<int, (int, int, int)> size)
+        => DetectorModel.FindClobber(provs, dep, size);
+    (int, int, int) SizeOf(int p) => p == 1 ? sizeA : p == 2 ? sizeB : size0;
+
+    var hit = Clob((w, l) => false, SizeOf);
+    Check("core: unmastered later re-cut -> CLOBBER, material",
+          hit == (1, 2, true), $"{hit}");
+    Check("core: winner declares the loser (direct) -> no clobber",
+          Clob((w, l) => w == 2 && l == 1, SizeOf) is null, "declared dependency");
+    // The transitive case is the same call — the CLOSURE is the dependency function, which is
+    // exactly why the two rules are proven separately and composed.
+    Check("core: two providers only -> no clobber (definer + one editor)",
+          DetectorModel.FindClobber(new[] { 0, 2 }, (w, l) => false, SizeOf) is null, "nothing to revert");
+    Check("core: byte-identical forward -> NOT material",
+          Clob((w, l) => false, p => p == 0 ? (10, 5, 111) : (12, 6, 222)) == (1, 2, false),
+          "same verts, tris AND hash");
+    Check("core: same counts, moved geometry -> material (the hash class)",
+          Clob((w, l) => false, p => p == 0 ? (10, 5, 111) : p == 1 ? (12, 6, 222) : (12, 6, 999)) == (1, 2, true),
+          "counts tie, content hash differs — invisible to the count-only rule");
+    Check("core: winner masters the LATEST editor but not an earlier one -> earlier is the loser",
+          DetectorModel.FindClobber(new[] { 0, 1, 2, 3 }, (w, l) => w == 3 && l == 2, SizeOf) is { } e && e.Loser == 1,
+          "the hunt continues past declared dependencies");
+
+    // Populations.
+    Check("core: Bethesda-on-Bethesda clobber -> FLOOR",
+          DetectorModel.ClassifyClobber(true, true, false) == ClobberPopulation.BethesdaFloor, "class A");
+    Check("core: USSEP-as-loser -> its own class, not floor",
+          DetectorModel.ClassifyClobber(false, false, true) == ClobberPopulation.UssepDiscarded, "class B");
+    Check("core: dangle with neither end mod-touched -> FLOOR",
+          DetectorModel.ClassifyDangle(false, false) == DanglePopulation.BethesdaFloor, "class A");
+    Check("core: dangle with a mod-broken target -> finding",
+          DetectorModel.ClassifyDangle(false, true) == DanglePopulation.ModBrokeTarget, "class B");
+
+    // CameApart — the CHECK 2 decision.
+    Check("core: together then, drawn far apart now -> SPLIT",
+          DetectorModel.CameApart(true, 300, true, 2000, 600), "300u -> 2000u");
+    Check("core: moved TOGETHER -> no split",
+          !DetectorModel.CameApart(true, 300, true, 350, 600), "the whole scene relocated");
+    Check("core: different cells now -> SPLIT",
+          DetectorModel.CameApart(true, 300, false, float.PositiveInfinity, 600), "cells diverged");
+    Check("core: never near at authoring -> not a pair",
+          !DetectorModel.CameApart(true, 900, true, 9000, 600), "was > near");
+    Check("core: different cells at authoring -> not a pair",
+          !DetectorModel.CameApart(false, float.PositiveInfinity, false, float.PositiveInfinity, 600), "never together");
+
+    // Verify verdicts.
+    Check("core: verdict all/some/none/alt/unreadable",
+          DetectorModel.Verdict(true, 3, 3, 0) == "CONFIRMED"
+       && DetectorModel.Verdict(true, 1, 3, 0) == "PARTIAL"
+       && DetectorModel.Verdict(true, 0, 3, 0) == "UNRELATED"
+       && DetectorModel.Verdict(true, 0, 3, 2) == "ALTERNATIVE"
+       && DetectorModel.Verdict(false, 0, 3, 0) == "UNREADABLE",
+          "all five arms");
+}
+
+// ---------------------------------------------------------------------------------------
 // The synthetic load order — the thing everything else will now be validated against.
 // ---------------------------------------------------------------------------------------
 Console.WriteLine("\nPROOF — the synthetic load order (_shared/SyntheticOrder.cs)\n");
@@ -244,18 +324,42 @@ Console.WriteLine("\nPROOF — the synthetic load order (_shared/SyntheticOrder.
     foreach (var d in new[] { profile, data, overwrite }) Directory.CreateDirectory(d);
     foreach (var m in new[] { "ModA", "ModB", "ModOff" }) Directory.CreateDirectory(Path.Combine(mods, m));
 
+    // A minimal but REAL TES4 header: 24-byte record header, then HEDR + one MAST/DATA pair per
+    // master. This is what lets the missing-master rule be tested by construction — an empty file
+    // deliberately stays in the fixture too, because "cannot read the header" must mean "make no
+    // claim", never "assume no masters".
+    static byte[] PluginBytes(params string[] masters)
+    {
+        var body = new List<byte>();
+        void Sub(string type, byte[] payload)
+        {
+            body.AddRange(System.Text.Encoding.ASCII.GetBytes(type));
+            body.AddRange(BitConverter.GetBytes((ushort)payload.Length));
+            body.AddRange(payload);
+        }
+        Sub("HEDR", new byte[12]);
+        foreach (var m in masters) { Sub("MAST", System.Text.Encoding.ASCII.GetBytes(m + "\0")); Sub("DATA", new byte[8]); }
+        var full = new List<byte>();
+        full.AddRange(System.Text.Encoding.ASCII.GetBytes("TES4"));
+        full.AddRange(BitConverter.GetBytes(body.Count));
+        full.AddRange(new byte[16]);            // flags, form id, vc info, version — 24-byte header total
+        full.AddRange(body);
+        return full.ToArray();
+    }
+
     File.WriteAllText(Path.Combine(mods, "ModA", "A.esp"), "");
-    File.WriteAllText(Path.Combine(mods, "ModB", "B.esp"), "");
+    File.WriteAllBytes(Path.Combine(mods, "ModB", "B.esp"), PluginBytes("A.esp"));   // B depends on A
     File.WriteAllText(Path.Combine(mods, "ModOff", "Off.esp"), "");
     File.WriteAllText(Path.Combine(mods, "ModOff", "A.esp"), "");     // duplicate name in a DISABLED mod
+    File.WriteAllBytes(Path.Combine(mods, "ModOff", "Dep.esp"), PluginBytes("Ghost.esp"));  // masters a plugin that exists nowhere
     File.WriteAllText(Path.Combine(data, "Skyrim.esm"), "");
 
     // modlist.txt: TOP = highest priority.
     File.WriteAllText(Path.Combine(profile, "modlist.txt"), "+ModB\n+ModA\n-ModOff\n");
     // loadorder.txt lists EVERY plugin in order, inactive included.
-    File.WriteAllText(Path.Combine(profile, "loadorder.txt"), "Skyrim.esm\nA.esp\nOff.esp\nB.esp\n");
-    // plugins.txt omits the implicit master and leaves Off.esp unchecked.
-    File.WriteAllText(Path.Combine(profile, "plugins.txt"), "*A.esp\nOff.esp\n*B.esp\n");
+    File.WriteAllText(Path.Combine(profile, "loadorder.txt"), "Skyrim.esm\nA.esp\nOff.esp\nDep.esp\nB.esp\n");
+    // plugins.txt omits the implicit master and leaves Off.esp and Dep.esp unchecked.
+    File.WriteAllText(Path.Combine(profile, "plugins.txt"), "*A.esp\nOff.esp\nDep.esp\n*B.esp\n");
 
     var baseline = SyntheticOrder.Build(profile, mods, data, overwrite);
     Check("synth: baseline drops the unchecked plugin", baseline.LoadedCount == 3,
@@ -287,6 +391,24 @@ Console.WriteLine("\nPROOF — the synthetic load order (_shared/SyntheticOrder.
     Check("synth: REFUSES a plugin loadorder.txt does not list",
           ghost.Warnings.Any(w => w.Contains("REFUSED")) && ghost.LoadedCount == 3,
           "no invented position; load count unchanged");
+
+    // The missing-master rules (2026-08-27). The review enabled a patch whose master exists
+    // nowhere in the order; the model happily 'repaired' 9 records in a state the game cannot
+    // load. These cases make that impossible to reintroduce silently.
+    var dep = SyntheticOrder.Build(profile, mods, data, overwrite, enable: new[] { "Dep.esp" });
+    Check("synth: REFUSES to enable a plugin whose master is absent",
+          dep.Warnings.Any(w => w.Contains("REFUSED") && w.Contains("Ghost.esp")) && dep.LoadedCount == 3,
+          "an impossible game state is not modelled");
+
+    var orphan = SyntheticOrder.Build(profile, mods, data, overwrite, disable: new[] { "A.esp" });
+    Check("synth: disabling a master WARNS about its orphaned dependents",
+          orphan.Warnings.Any(w => w.Contains("MISSING MASTER") && w.Contains("B.esp")) && orphan.LoadedCount == 2,
+          "the state is built as asked, but loudly marked unloadable");
+
+    var unreadable = SyntheticOrder.Build(profile, mods, data, overwrite, enable: new[] { "Off.esp" });
+    Check("synth: an unreadable header SKIPS the check and says so",
+          unreadable.LoadedCount == 4 && unreadable.Warnings.Any(w => w.Contains("unreadable")),
+          "no header = no claim, never 'assume no masters'");
 
     try { Directory.Delete(root, true); } catch { }
 }

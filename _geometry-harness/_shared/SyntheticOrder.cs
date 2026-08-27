@@ -67,6 +67,50 @@ public static class SyntheticOrder
 
         var map = BuildFilenameMap(comp, modsDir, dataDir, overwriteDir);
 
+        // Two-phase: decide every plugin's loaded state first, THEN check masters against that
+        // state, THEN build the paths. Position alone is not enough for an honest what-if — a
+        // plugin whose master is absent cannot be loaded by the game at all, so an order
+        // containing it describes an IMPOSSIBLE configuration and every finding computed from it
+        // is fiction. (2026-08-27: the review demonstrated exactly that — enabling a patch whose
+        // master is nowhere in the order "repaired" 9 records; the game would have refused to
+        // start. The published negative control had the same defect, unnoticed.)
+        var state = new Dictionary<string, bool>(StringComparer.OrdinalIgnoreCase);
+        foreach (var name in comp.OrderedPluginNames) state[name] = Loaded(name);
+        var loadedNames = new HashSet<string>(state.Where(kv => kv.Value).Select(kv => kv.Key),
+                                              StringComparer.OrdinalIgnoreCase);
+
+        // A plugin this call is switching ON with a master absent from the result is REFUSED, the
+        // same way an unlisted plugin is: the alternative is inventing an impossible game state.
+        foreach (var name in comp.OrderedPluginNames)
+        {
+            if (!state[name] || !enableSet.Contains(name) || !map.TryGetValue(name, out var path)) continue;
+            var masters = TryReadMasters(path);
+            if (masters is null) { warnings.Add($"'{name}': master list unreadable, missing-master check skipped for it."); continue; }
+            var missing = masters.Where(m => !loadedNames.Contains(m)).ToList();
+            if (missing.Count == 0) continue;
+            state[name] = false;
+            loadedNames.Remove(name);
+            warnings.Add(
+                $"REFUSED to enable '{name}': it masters {string.Join(", ", missing.Select(m => $"'{m}'"))}, " +
+                "absent from the synthetic order. The game cannot load that state, so any finding computed " +
+                "from it would describe an impossible configuration.");
+        }
+
+        // Everything else that would be broken in the result — a --disable orphaning dependents, or
+        // a pre-existing gap — is warned about loudly rather than refused: the caller asked for
+        // this state, and the honest what-if answer includes "the game will not load it".
+        foreach (var name in comp.OrderedPluginNames)
+        {
+            if (!state[name] || !map.TryGetValue(name, out var path)) continue;
+            var masters = TryReadMasters(path);
+            if (masters is null) continue;
+            foreach (var m in masters.Where(m => !loadedNames.Contains(m)))
+                warnings.Add((disableSet.Contains(m)
+                    ? $"MISSING MASTER: disabling '{m}' orphans '{name}', which masters it"
+                    : $"MISSING MASTER: '{name}' masters '{m}', which is not loaded")
+                    + " — the game cannot load this order.");
+        }
+
         var orderedPaths = new List<string>(comp.OrderedPluginNames.Count);
         var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         int loaded = 0;
@@ -75,7 +119,7 @@ public static class SyntheticOrder
         {
             seen.Add(name);
             bool wasLoaded = !inactive.Contains(name);
-            bool nowLoaded = Loaded(name);
+            bool nowLoaded = state[name];
             if (wasLoaded != nowLoaded) applied.Add($"{(nowLoaded ? "ENABLED " : "DISABLED")} {name}");
             if (!nowLoaded) continue;
 
@@ -140,5 +184,44 @@ public static class SyntheticOrder
         return e.Equals(".esp", StringComparison.OrdinalIgnoreCase)
             || e.Equals(".esm", StringComparison.OrdinalIgnoreCase)
             || e.Equals(".esl", StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>The plugin's declared masters, read straight off the TES4 header (MAST subrecords).
+    /// Deliberately dependency-free — _shared must not pull Mutagen in — and header-only, so 490
+    /// plugins cost milliseconds. Returns null when the file is not a readable plugin (an empty or
+    /// truncated file makes no claim, and the caller must not invent one).</summary>
+    public static IReadOnlyList<string>? TryReadMasters(string path)
+    {
+        try
+        {
+            using var f = File.OpenRead(path);
+            Span<byte> hdr = stackalloc byte[24];
+            if (f.Read(hdr) != 24 || hdr[0] != (byte)'T' || hdr[1] != (byte)'E' || hdr[2] != (byte)'S' || hdr[3] != (byte)'4')
+                return null;
+            int size = BitConverter.ToInt32(hdr.Slice(4, 4));
+            if (size < 0 || size > 1 << 24) return null;
+            var body = new byte[size];
+            if (f.Read(body, 0, size) != size) return null;
+
+            var masters = new List<string>();
+            int i = 0;
+            while (i + 6 <= body.Length)
+            {
+                ushort len = BitConverter.ToUInt16(body, i + 4);
+                if (i + 6 + len > body.Length) break;
+                if (body[i] == (byte)'M' && body[i + 1] == (byte)'A' && body[i + 2] == (byte)'S' && body[i + 3] == (byte)'T')
+                {
+                    int end = i + 6 + len;
+                    int stop = end;
+                    while (stop > i + 6 && body[stop - 1] == 0) stop--;          // trailing NUL
+                    // Latin1, not GetEncoding(1252): code-page encodings need a provider registered
+                    // on .NET Core, and the two differ only in 0x80–0x9F, absent from plugin names.
+                    masters.Add(System.Text.Encoding.Latin1.GetString(body, i + 6, stop - (i + 6)));
+                }
+                i += 6 + len;
+            }
+            return masters;
+        }
+        catch { return null; }
     }
 }

@@ -14,10 +14,13 @@ using Mutagen.Bethesda.Skyrim;
 //
 // Three questions, three failure classes:
 //
-//   CLOBBERED  Mod A re-cuts a vanilla navmesh. Mod B re-cuts the SAME navmesh and wins. If B does
-//              not master A, B never saw A's work and has silently reverted it. This is invisible
-//              to a geometric check — the winning navmesh is perfectly self-consistent, it is just
-//              missing the hole another mod cut for its own objects.
+//   CLOBBERED  Mod A re-cuts a vanilla navmesh. Mod B re-cuts the SAME navmesh and wins. If B
+//              declares no dependency on A (direct or transitive), nothing shows B accounted for
+//              A's work — A's edit may be silently gone. (Declaring is not seeing: a CK author
+//              with A loaded inherits A's cut without mastering it, so the claim stops at "no
+//              declared dependency".) This is invisible to a geometric check — the winning navmesh
+//              is perfectly self-consistent, it is just missing the hole another mod cut for its
+//              own objects.
 //
 //   DELETED    A winning navmesh record that is deleted, or that arrives empty where an earlier
 //              provider had geometry. The classic hard break.
@@ -64,7 +67,8 @@ if (enablePlugins.Count > 0 || disablePlugins.Count > 0)
     Console.WriteLine($"SYNTHETIC load order: {paths.Count} plugins ({syn.LoadedCount} loaded per the modified set)");
     foreach (var a in syn.Applied) Console.WriteLine($"   {a}");
     if (syn.Applied.Count == 0) Console.WriteLine($"   (nothing changed — every named plugin was already in that state)");
-    foreach (var w in syn.Warnings.Where(w => w.Contains("REFUSED") || w.Contains("nothing to do")))
+    foreach (var w in syn.Warnings.Where(w => w.Contains("REFUSED") || w.Contains("nothing to do")
+                                           || w.Contains("MISSING MASTER") || w.Contains("unreadable")))
         Console.WriteLine($"   ⚠ {w}");
     Console.WriteLine();
 }
@@ -88,7 +92,11 @@ var pluginKey = new ModKey[paths.Count];
 var masterIdx = new HashSet<int>[paths.Count];
 var navProviders = new Dictionary<FormKey, List<int>>();                  // NAVM -> plugins, in order
 var navCell = new Dictionary<FormKey, FormKey>();                         // NAVM -> its cell
-var navSize = new Dictionary<(FormKey, int), (int V, int T)>();           // (NAVM, plugin) -> geometry size
+// (NAVM, plugin) -> geometry size AND a content hash over every vertex, triangle index and flag.
+// Counts alone were the "material" test until 2026-08-27; a re-cut that moves vertices without
+// changing their number was invisible, and the 20 "forwarded unchanged" records rested on an
+// "almost always". The hash decides it: same counts + same hash IS a byte-identical forward.
+var navSize = new Dictionary<(FormKey, int), (int V, int T, int H)>();
 var navDeleted = new Dictionary<(FormKey, int), bool>();
 var cellNavPlugins = new Dictionary<FormKey, SortedSet<int>>();           // cell -> plugins supplying navmesh
 var cellNewRefs = new Dictionary<(FormKey Cell, int Plugin), List<FormKey>>();   // base records a plugin INTRODUCES
@@ -108,11 +116,16 @@ var refExists = new HashSet<FormKey>();
 var refOverriders = new Dictionary<FormKey, List<int>>();   // placed ref -> every plugin that touches it
 var refGone = new HashSet<FormKey>();
 
+// Rule 6, applied to the plumbing: a plugin this loop cannot read contributes nothing, and that
+// must be COUNTED, not swallowed. The review found both detectors dropping unreadable plugins with
+// a bare catch{continue} and no output saying so.
+var unreadablePlugins = new List<string>();
+
 for (int p = 0; p < paths.Count; p++)
 {
     ISkyrimModGetter mod;
     try { mod = SkyrimMod.CreateFromBinaryOverlay(paths[p], SkyrimRelease.SkyrimSE); }
-    catch { pluginKey[p] = ModKey.Null; masterIdx[p] = new HashSet<int>(); continue; }
+    catch { unreadablePlugins.Add(Path.GetFileName(paths[p])); pluginKey[p] = ModKey.Null; masterIdx[p] = new HashSet<int>(); continue; }
 
     using (mod as IDisposable)
     {
@@ -173,7 +186,7 @@ for (int p = 0; p < paths.Count; p++)
                 if (!navProviders.TryGetValue(nav.FormKey, out var l)) navProviders[nav.FormKey] = l = new List<int>();
                 if (l.Count == 0 || l[^1] != p) l.Add(p);
                 navCell[nav.FormKey] = cp.Cell;
-                navSize[(nav.FormKey, p)] = (nav.Vertices.Count, nav.Triangles.Count);
+                navSize[(nav.FormKey, p)] = (nav.Vertices.Count, nav.Triangles.Count, NavGeomHash(nav));
                 navDeleted[(nav.FormKey, p)] = deletedHere.Contains(nav.FormKey);
                 if (!cellNavPlugins.TryGetValue(cp.Cell, out var s)) cellNavPlugins[cp.Cell] = s = new SortedSet<int>();
                 s.Add(p);
@@ -194,36 +207,79 @@ for (int p = 0; p < paths.Count; p++)
 }
 
 Console.WriteLine($"\nindexed {navProviders.Count:N0} navmesh records across {cellNavPlugins.Count:N0} cells  ({sw.Elapsed.TotalSeconds:0.0}s)");
+Console.WriteLine($"   plugins that could not be read (contribute nothing, counted per rule 6): {unreadablePlugins.Count:N0}"
+                + (unreadablePlugins.Count > 0 ? "  — " + string.Join(", ", unreadablePlugins) : ""));
+
+// TRANSITIVE master closure. The review found 3 of 28 clobber pairs where the winner masters an
+// intermediate that masters the loser — the winner's author demonstrably had the loser installed
+// (their dependency requires it), so "no declared dependency" was false one hop out. The rule
+// lives in _shared/DetectorModel.cs and is owned by proofprobe cases.
+var masterClosure = DetectorModel.MasterClosure(masterIdx);
 string Cell(FormKey c) => cellName.TryGetValue(c, out var v) ? (v.Edid ?? c.ToString()) + (v.Interior ? " (int)" : " (ext)") : c.ToString();
 bool Wanted(int p) => onlyPlugin is null || string.Equals(pluginKey[p].FileName, onlyPlugin, StringComparison.OrdinalIgnoreCase);
 
 // ---------------------------------------------------------------------------------------
-// CLOBBERED — B overrode the same navmesh A had already re-cut, without mastering A.
+// CLOBBERED — B overrode the same navmesh A had already re-cut, declaring no dependency on A.
 // ---------------------------------------------------------------------------------------
+// Precisely what is measured: the winner declares no dependency on the loser, DIRECT OR TRANSITIVE
+// (the closure matters: 3 pairs here had the winner mastering an intermediate that masters the
+// loser). What is NOT measured is visibility — an author re-saving a vanilla navmesh with the
+// loser's plugin loaded in the CK inherits its cut without gaining a master — so "reverted" and
+// "extended without declaring the dependency" are indistinguishable at this layer. The claim is
+// "no declared dependency", never "cannot have seen".
+// The decision itself is DetectorModel.FindClobber — proven by construction in proofprobe, so
+// this loop only feeds it providers, the closure, and the per-provider geometry triple.
 var clobber = new List<(FormKey Nav, int Loser, int Winner, int LoserT, int WinnerT, bool Material)>();
 foreach (var (nav, provs) in navProviders)
 {
-    if (provs.Count < 3) continue;              // needs a definer plus two competing editors
-    int winner = provs[^1];
-    for (int i = provs.Count - 2; i >= 1; i--)  // index 0 is the original definer
-    {
-        int loser = provs[i];
-        if (masterIdx[winner].Contains(loser)) continue;   // the winner SAW this edit; not a clobber
-        if (!Wanted(loser) && !Wanted(winner)) continue;
-        var lt = navSize.GetValueOrDefault((nav, loser));
-        var wt = navSize.GetValueOrDefault((nav, winner));
-        // Same vertex AND triangle count almost always means the winner forwarded the record
-        // unchanged rather than re-cutting it, which reverts nothing. Reported separately.
-        bool material = lt.V != wt.V || lt.T != wt.T;
-        clobber.Add((nav, loser, winner, lt.T, wt.T, material));
-        break;
-    }
+    var hit = DetectorModel.FindClobber(
+        provs,
+        (w, l) => masterClosure[w].Contains(l),
+        pi => navSize.GetValueOrDefault((nav, pi)),
+        (l, w) => Wanted(l) || Wanted(w));
+    if (hit is not { } h) continue;
+    clobber.Add((nav, h.Loser, h.Winner,
+                 navSize.GetValueOrDefault((nav, h.Loser)).T,
+                 navSize.GetValueOrDefault((nav, h.Winner)).T, h.Material));
 }
 
-Console.WriteLine($"\n==== CLOBBERED: one mod's navmesh work silently reverted by another ====");
+// Rule 12, finally applied to CLOBBERED itself. The count carried an unmeasured floor for two
+// sessions: Dawnguard × HearthFires is Bethesda re-cutting Bethesda — permanent, shipped that way,
+// and exactly the class-A population the dangling-link split already names. USSEP-as-loser is kept
+// as its own line (a mod discarding USSEP's navmesh fixes IS a finding, but it is a different
+// conversation from mod-on-mod, because nearly nothing masters USSEP on purpose).
+const string Ussep = "Unofficial Skyrim Special Edition Patch.esp";
+string ClobberClass((FormKey Nav, int Loser, int Winner, int LoserT, int WinnerT, bool Material) c) =>
+    DetectorModel.ClassifyClobber(
+        Vanilla.Contains(pluginKey[c.Loser].FileName.String),
+        Vanilla.Contains(pluginKey[c.Winner].FileName.String),
+        string.Equals(pluginKey[c.Loser].FileName.String, Ussep, StringComparison.OrdinalIgnoreCase)) switch
+    {
+        ClobberPopulation.BethesdaFloor => "A. Bethesda-on-Bethesda (permanent FLOOR)",
+        ClobberPopulation.UssepDiscarded => "B. USSEP's work discarded by a mod",
+        _ => "C. mod-on-mod",
+    };
+bool ClobberFloor((FormKey Nav, int Loser, int Winner, int LoserT, int WinnerT, bool Material) c) =>
+    ClobberClass(c).StartsWith("A.");
+
+var clobberFindings = clobber.Where(c => c.Material && !ClobberFloor(c)).ToList();
+Console.WriteLine($"\n==== CLOBBERED: one mod's navmesh work silently discarded by another ====");
 Console.WriteLine($"   navmesh records affected : {clobber.Count:N0}"
                 + $"   ({clobber.Count(c => c.Material):N0} where the geometry actually differs)");
-Console.WriteLine($"   (the winner does not master the loser, so it cannot have seen that edit)");
+Console.WriteLine($"   (the winner declares no dependency on the loser — direct or transitive — so nothing");
+Console.WriteLine($"    shows it accounted for that edit; whether the author SAW it is not decidable here)");
+Console.WriteLine($"   ---- the material records, split by population (rule 12) ----");
+foreach (var g in clobber.Where(c => c.Material).GroupBy(ClobberClass).OrderBy(g => g.Key))
+    Console.WriteLine($"   {g.Count(),4}  {g.Key}");
+Console.WriteLine($"   Findings are B and C: {clobberFindings.Count:N0} records. A is measured floor and excluded from --emit.");
+int sameCountMoved = clobber.Count(c =>
+{
+    var l = navSize.GetValueOrDefault((c.Nav, c.Loser));
+    var w = navSize.GetValueOrDefault((c.Nav, c.Winner));
+    return c.Material && l.V == w.V && l.T == w.T;
+});
+Console.WriteLine($"   (material by content hash; {sameCountMoved} of them have identical counts but moved geometry —");
+Console.WriteLine($"    a class the count-only test used before 2026-08-27 could not see)");
 foreach (var g in clobber.Where(c => c.Material)
                          .GroupBy(c => (Loser: pluginKey[c.Loser].FileName, Winner: pluginKey[c.Winner].FileName))
                          .OrderByDescending(g => g.Count()).Take(listN))
@@ -369,17 +425,13 @@ bool ModTouched(FormKey rec, string role)
 Console.WriteLine();
 Console.WriteLine($"   ---- the two ends of each dangling link, split by population ----");
 var byClass = dangleStruct.GroupBy(d =>
-{
-    bool src = ModTouched(d.Rec, d.RecRole);
-    bool dst = ModTouched(d.Other, d.OtherRole);
-    return (src, dst) switch
+    DetectorModel.ClassifyDangle(ModTouched(d.Rec, d.RecRole), ModTouched(d.Other, d.OtherRole)) switch
     {
-        (false, false) => "A. neither end touched by a mod   -> Bethesda's own, permanent FLOOR",
-        (false, true)  => "B. a mod re-cut the TARGET, breaking a vanilla index   -> cross-plugin",
-        (true, false)  => "C. a mod wrote the INDEX, target is vanilla            -> cross-plugin",
-        (true, true)   => "D. mods on both ends                                   -> cross-plugin",
-    };
-}).OrderBy(g => g.Key).ToList();
+        DanglePopulation.BethesdaFloor  => "A. neither end touched by a mod   -> Bethesda's own, permanent FLOOR",
+        DanglePopulation.ModBrokeTarget => "B. a mod re-cut the TARGET, breaking a vanilla index   -> cross-plugin",
+        DanglePopulation.ModWroteIndex  => "C. a mod wrote the INDEX, target is vanilla            -> cross-plugin",
+        _                               => "D. mods on both ends                                   -> cross-plugin",
+    }).OrderBy(g => g.Key).ToList();
 foreach (var g in byClass) Console.WriteLine($"   {g.Count(),4}  {g.Key}");
 Console.WriteLine($"   Only B, C and D are findings. A is the floor, and it is measured rather than assumed.");
 
@@ -447,7 +499,7 @@ foreach (var ((cell, plugin), bag) in cellNewRefs)
     if (navPlugins.Contains(plugin)) continue;                       // it navmeshed its own work
     // A later navmesh edit only accounts for these objects if that plugin could SEE them, which
     // means it masters the plugin that introduced them. A later edit by a stranger saw nothing.
-    if (navPlugins.Any(np => np > plugin && masterIdx[np].Contains(plugin))) continue;
+    if (navPlugins.Any(np => np > plugin && masterClosure[np].Contains(plugin))) continue;
     uncut.Add((cell, plugin, n, string.Join("+", navPlugins.Select(np => pluginKey[np].FileName))));
 }
 
@@ -472,19 +524,22 @@ if (emitPath is not null)
 {
     var conflicts = new List<Conflict>();
 
-    foreach (var g in clobber.Where(c => c.Material)
-                             .GroupBy(c => (c.Loser, c.Winner)))
+    // Floor stays out of the handoff. Feeding class-A records (Bethesda on both ends) to the
+    // verifier dressed 28 dangles and 3 clobber records up as defects for a whole session —
+    // the same reasoning that already kept UNCUT out of --emit.
+    foreach (var g in clobberFindings.GroupBy(c => (c.Loser, c.Winner)))
     {
         var loser = pluginKey[g.Key.Loser].FileName.String;
         var winner = pluginKey[g.Key.Winner].FileName.String;
         conflicts.Add(new Conflict(
             "CLOBBERED", loser, winner,
-            $"{g.Count()} navmesh record(s) re-cut by {loser} and then re-cut again by {winner}, which does not master it",
+            $"{g.Count()} navmesh record(s) re-cut by {loser} and then re-cut again by {winner}, which declares no dependency on it",
             g.Select(c => new ConflictRecord(c.Nav.ToString(), "navmesh",
                           $"{Cell(navCell.GetValueOrDefault(c.Nav))}  {c.LoserT} tris -> {c.WinnerT}")).ToList()));
     }
 
-    foreach (var d in dangleStruct)
+    int floorDangles = dangleStruct.Count(d => !ModTouched(d.Rec, d.RecRole) && !ModTouched(d.Other, d.OtherRole));
+    foreach (var d in dangleStruct.Where(d => ModTouched(d.Rec, d.RecRole) || ModTouched(d.Other, d.OtherRole)))
     {
         // A fix has to override the record carrying the bad index. The other end is context: a
         // patch that only re-states the target navmesh has not repaired the pointer into it.
@@ -502,8 +557,28 @@ if (emitPath is not null)
 
     ConflictIo.Write(emitPath, new ConflictFile("navownprobe", Instance,
         DateTime.UtcNow.ToString("yyyy-MM-dd HH:mm:ssZ"), conflicts));
-    Console.WriteLine($"\nemitted {conflicts.Count:N0} conflicts ({conflicts.Count(c => c.B.Length == 0)} with no second party to name) -> {emitPath}");
+    Console.WriteLine($"\nemitted {conflicts.Count:N0} conflicts ({conflicts.Count(c => c.B.Length == 0)} with no second party to name;"
+                    + $" {floorDangles} class-A dangles and the class-A clobbers withheld as floor) -> {emitPath}");
 }
 
 Console.WriteLine($"\nelapsed {sw.Elapsed.TotalSeconds:0.0}s");
 return 0;
+
+// FNV-1a over every vertex component, triangle index and flag, in record order. Not cryptographic
+// and does not need to be: it only has to make "byte-identical forward" and "re-cut" distinguishable.
+static int NavGeomHash(NavmeshGeometry nav)
+{
+    unchecked
+    {
+        int h = (int)2166136261;
+        void Mix(int v) => h = (h ^ v) * 16777619;
+        foreach (var v in nav.Vertices)
+        {
+            Mix(BitConverter.SingleToInt32Bits(v.X));
+            Mix(BitConverter.SingleToInt32Bits(v.Y));
+            Mix(BitConverter.SingleToInt32Bits(v.Z));
+        }
+        foreach (var t in nav.Triangles) { Mix(t.A); Mix(t.B); Mix(t.C); Mix(t.Flags); }
+        return h;
+    }
+}

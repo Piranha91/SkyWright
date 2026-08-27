@@ -83,12 +83,15 @@ var scenes = new Dictionary<FormKey, (FormKey Quest, int[] Actors)>();
 var packageTargets = new Dictionary<FormKey, int[]>();          // package -> alias ids it targets
 
 long placements = 0, questRecords = 0;
+// Rule 6, applied to the plumbing (2026-08-27): unreadable plugins are counted and named, never
+// silently skipped.
+var unreadablePlugins = new List<string>();
 
 for (int p = 0; p < paths.Count; p++)
 {
     ISkyrimModGetter mod;
     try { mod = SkyrimMod.CreateFromBinaryOverlay(paths[p], SkyrimRelease.SkyrimSE); }
-    catch { pluginKey[p] = ModKey.Null; masterIdx[p] = new HashSet<int>(); continue; }
+    catch { unreadablePlugins.Add(Path.GetFileName(paths[p])); pluginKey[p] = ModKey.Null; masterIdx[p] = new HashSet<int>(); continue; }
 
     using (mod as IDisposable)
     {
@@ -150,7 +153,14 @@ for (int p = 0; p < paths.Count; p++)
 }
 
 Console.WriteLine($"\nindexed {placements:N0} placements over {history.Count:N0} refs; "
-                + $"{quests.Count:N0} winning quests of {questRecords:N0} records  ({sw.Elapsed.TotalSeconds:0.0}s)\n");
+                + $"{quests.Count:N0} winning quests of {questRecords:N0} records  ({sw.Elapsed.TotalSeconds:0.0}s)");
+Console.WriteLine($"   plugins that could not be read (contribute nothing, counted per rule 6): {unreadablePlugins.Count:N0}"
+                + (unreadablePlugins.Count > 0 ? "  — " + string.Join(", ", unreadablePlugins) : "") + "\n");
+
+// TRANSITIVE master closure (2026-08-27). "What the quest's author saw" must include everything a
+// declared master itself depends on — the author had the whole chain installed. The rule lives in
+// _shared/DetectorModel.cs and is owned by proofprobe cases.
+var masterClosure = DetectorModel.MasterClosure(masterIdx);
 
 // ---------------------------------------------------------------------------------------
 // Resolution helpers
@@ -159,7 +169,7 @@ Snap? AsSeenBy(FormKey refKey, int byPlugin)
 {
     if (!history.TryGetValue(refKey, out var h)) return null;
     for (int i = h.Count - 1; i >= 0; i--)
-        if (h[i].Plugin == byPlugin || masterIdx[byPlugin].Contains(h[i].Plugin)) return h[i];
+        if (h[i].Plugin == byPlugin || masterClosure[byPlugin].Contains(h[i].Plugin)) return h[i];
     return null;
 }
 Snap? Winning(FormKey refKey) => history.TryGetValue(refKey, out var h) && h.Count > 0 ? h[^1] : null;
@@ -296,15 +306,33 @@ foreach (var b in broken.Take(listN)) Console.WriteLine(b);
 // now. Neither alias is broken on its own — each still points at its thing. What is broken is
 // the arrangement the quest assumed, which is exactly the Elisif-and-her-marker case and needs
 // no guess about which of the two is "the marker".
+// Rule 6: the aliases this check CANNOT judge, counted by reason instead of silently skipped.
+// Non-positional arms (FindMatchingRef*, Location, flags-only, the player ref) are out of scope by
+// design; the other three reasons are genuine blind spots and belong in the output.
+// (The counters accumulate only meaningfully on the first FindSplits call — the sensitivity sweep
+// below re-runs the check at other thresholds after they are printed.)
+long skipNonPositional = 0, skipMultiPlacement = 0, skipNoAuthoringView = 0, skipNoWinning = 0;
+
+// CHECK 2 as a function of the "together" threshold, so the sweep below can re-ask the question
+// at other settings over the same indexed data. The review showed the shortlist is threshold-
+// sensitive and non-monotonic (no-patch count 7 / 4 / 8 at 300 / 600 / 1200), which no single
+// number reveals.
+List<Split> FindSplits(float nearU)
+{
 var split = new List<Split>();
 foreach (var q in quests.Values)
 {
     var resolved = new List<(AliasInfo A, FormKey Ref, Snap Then, Snap Now)>();
     foreach (var a in q.Aliases)
     {
-        if (AliasRef(a) is not { } rk) continue;
-        if (AsSeenBy(rk, q.Plugin) is not { } then) continue;
-        if (Winning(rk) is not { } now) continue;
+        if (AliasRef(a) is not { } rk)
+        {
+            if (a.UniqueNpc is { } n0 && npcPlaced.TryGetValue(n0, out var l0) && l0.Count > 1) skipMultiPlacement++;
+            else skipNonPositional++;
+            continue;
+        }
+        if (AsSeenBy(rk, q.Plugin) is not { } then) { skipNoAuthoringView++; continue; }
+        if (Winning(rk) is not { } now) { skipNoWinning++; continue; }
         resolved.Add((a, rk, then, now));
     }
 
@@ -314,15 +342,14 @@ foreach (var q in quests.Values)
             var (a1, r1, t1, n1) = resolved[i];
             var (a2, r2, t2, n2) = resolved[j];
             if (r1 == r2) continue;
-            if (t1.Cell != t2.Cell) continue;                    // never were together
-            float was = Dist(t1.Pos, t2.Pos);
-            if (was > near) continue;                            // not a close arrangement
-
+            bool togetherThen = t1.Cell == t2.Cell;
+            float was = togetherThen ? Dist(t1.Pos, t2.Pos) : float.PositiveInfinity;
             bool apartNow = n1.Cell != n2.Cell;
             float isNow = apartNow ? float.PositiveInfinity : Dist(n1.Pos, n2.Pos);
-            // Split if they landed in different cells, or drew apart by more than the room they
-            // shared. A pair that moved TOGETHER — a whole scene relocated by one mod — is fine.
-            if (!apartNow && isNow <= MathF.Max(near, was * 3f)) continue;
+            // The split decision is DetectorModel.CameApart — proven by construction in proofprobe:
+            // together = same cell within nearU; split = different cells now, or drawn apart past
+            // max(nearU, 3× the authored distance). A pair that moved TOGETHER is fine.
+            if (!DetectorModel.CameApart(togetherThen, was, !apartNow, isNow, nearU)) continue;
 
             bool objTarget = q.Objectives.Any(o => o.TargetAliasIds.Contains(a1.Id) || o.TargetAliasIds.Contains(a2.Id));
             bool stated = statedPairs.TryGetValue(q.Key, out var sp) && sp.Contains(Pair(a1.Id, a2.Id));
@@ -344,9 +371,18 @@ foreach (var q in quests.Values)
                                 new[] { r1, r2 }, q.Key, moverList));
         }
 }
+return split;
+}
+
+var split = FindSplits(near);
 
 Console.WriteLine();
 Console.WriteLine($"==== CHECK 2: a quest's own aliases came apart (were within {near:0}u, same cell) ====");
+Console.WriteLine($"   ---- aliases the check could not judge (counted, not cleared) ----");
+Console.WriteLine($"   non-positional arm (runtime-resolved, location, flags-only, player) : {skipNonPositional:N0}");
+Console.WriteLine($"   UniqueActor with several placements (no single answer)              : {skipMultiPlacement:N0}");
+Console.WriteLine($"   no authoring-view position (quest plugin + closure contributed none): {skipNoAuthoringView:N0}");
+Console.WriteLine($"   no winning placement at all                                         : {skipNoWinning:N0}");
 Console.WriteLine($"   pairs split                        : {split.Count:N0}");
 Console.WriteLine($"   ...the quest STATES belong together: {split.Count(s => s.Stated):N0}   <- a scene or a package says so");
 Console.WriteLine($"   ...of those, NO patch reconciles   : {split.Count(s => s.Stated && !s.Patched):N0}   <- the shortlist");
@@ -379,6 +415,32 @@ if (split.Count > 0)
     Console.WriteLine($"\n   ---- by the quest's plugin ----");
     foreach (var g in split.GroupBy(s => s.QuestPlugin).OrderByDescending(g => g.Count()).Take(listN))
         Console.WriteLine($"   {g.Count(),5}  {g.Key}");
+}
+
+// ---------------------------------------------------------------------------------------
+// Sensitivity — the same question at half and double the threshold, every run.
+// ---------------------------------------------------------------------------------------
+// "4 with no patch" is a point estimate at an arbitrary knob, and it moves non-monotonically
+// (a smaller `near` also shrinks the moved-apart tolerance, so pairs ENTER the split set as the
+// threshold falls). A finding that appears at every setting is load-bearing; one that appears at
+// exactly one setting is an artifact of the knob and says so here instead of in a headline.
+{
+    var settings = new[] { near / 2f, near, near * 2f };
+    var perSetting = settings.Select(v => FindSplits(v)
+            .Where(s => s.Stated && !s.Patched)
+            .ToDictionary(s => (s.Quest, s.Alias1, s.Alias2), s => s)).ToArray();
+
+    Console.WriteLine();
+    Console.WriteLine($"==== SENSITIVITY: the stated-and-unpatched shortlist vs the 'together' threshold ====");
+    for (int i = 0; i < settings.Length; i++)
+        Console.WriteLine($"   near = {settings[i],6:0}u  ->  shortlist {perSetting[i].Count,3}");
+    var stable = perSetting.Skip(1).Aggregate(new HashSet<(string, string?, string?)>(perSetting[0].Keys),
+                                              (acc, d) => { acc.IntersectWith(d.Keys); return acc; });
+    Console.WriteLine($"   STABLE CORE (present at every setting): {stable.Count}");
+    foreach (var k in stable.OrderBy(k => k.Item1))
+        Console.WriteLine($"      {k.Item1}  ·  '{k.Item2}' + '{k.Item3}'");
+    var fringe = perSetting.SelectMany(d => d.Keys).Distinct().Count() - stable.Count;
+    Console.WriteLine($"   threshold-dependent fringe: {fringe} more appear at only some settings — leads, not findings.");
 }
 
 // ---------------------------------------------------------------------------------------

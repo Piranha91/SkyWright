@@ -337,6 +337,10 @@ void Verify(string file)
     int confirmed = 0, partial = 0, unrelated = 0, noCandidate = 0, unpaired = 0, unreadable = 0, weakPair = 0;
     int generatedSkipped = 0, alreadyActive = 0;
     var lines = new List<string>();
+    // Roadmap 2.4: the candidates a differential run can actually test — installed in THIS
+    // instance, inactive, and covering at least one broken record. Coverage is not repair; these
+    // are the inputs to differential-sweep.ps1, which decides what each one really does.
+    var differentialCandidates = new Dictionary<string, (int Hits, int Conflicts)>(StringComparer.OrdinalIgnoreCase);
 
     foreach (var c in cf.Conflicts)
     {
@@ -371,11 +375,9 @@ void Verify(string file)
         }
 
         var best = scored.OrderByDescending(s => s.Hit).ThenByDescending(s => s.Alt).ThenBy(s => (int)s.F.State).First();
-        string verdict = !best.Readable ? "UNREADABLE"
-                       : best.Hit == need.Count ? "CONFIRMED"
-                       : best.Hit > 0 ? "PARTIAL"
-                       : best.Alt > 0 ? "ALTERNATIVE"
-                       : "UNRELATED";
+        // The verdict rule lives in _shared/DetectorModel.cs, owned by proofprobe cases. CONFIRMED
+        // is COVERAGE (every necessary record overridden), not repair — see the differential run.
+        string verdict = DetectorModel.Verdict(best.Readable, best.Hit, need.Count, best.Alt);
         if (!best.Readable) unreadable++;
         else if (verdict == "CONFIRMED") confirmed++;
         else if (verdict == "PARTIAL") partial++;
@@ -409,6 +411,12 @@ void Verify(string file)
             alreadyActive++;
             lines.Add($"            -> ALREADY ACTIVE here and the conflict still stands: check load order, or the cover is partial.");
         }
+
+        foreach (var s in scored.Where(s => s.Readable && s.Hit > 0 && s.F.State == Where.Installed))
+        {
+            var cur = differentialCandidates.GetValueOrDefault(s.F.Plugin);
+            differentialCandidates[s.F.Plugin] = (cur.Hits + s.Hit, cur.Conflicts + 1);
+        }
     }
 
     Console.WriteLine($"   CONFIRMED (a candidate overrides every broken record) : {confirmed:N0}");
@@ -423,6 +431,13 @@ void Verify(string file)
     Console.WriteLine($"   generated plugins excluded from candidates (DynDOLOD, ParallaxGen, ...): {generatedSkipped:N0}");
     Console.WriteLine($"   * = one side is a plugin nearly everything masters (Skyrim.esm, USSEP...), so 'masters both'");
     Console.WriteLine($"     narrowed nothing and the record overlap is the entire evidence: {weakPair:N0} of the hits above.");
+    if (differentialCandidates.Count > 0)
+    {
+        Console.WriteLine($"   ---- DIFFERENTIAL CANDIDATES: installed here, inactive, cover >0 broken records ----");
+        Console.WriteLine($"   (coverage is not repair — run differential-sweep.ps1 over these to get a real verdict)");
+        foreach (var (plugin, v) in differentialCandidates.OrderByDescending(kv => kv.Value.Hits))
+            Console.WriteLine($"   {v.Hits,4} record(s) over {v.Conflicts,3} conflict(s)   {plugin}");
+    }
     foreach (var l in lines.Take(listN * 10)) Console.WriteLine(l);
 }
 
