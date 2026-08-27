@@ -31,9 +31,21 @@ using Mutagen.Bethesda.Skyrim;
 //
 // usage: navownprobe [--list N] [--plugin Name.esp]
 
-const string Instance = @"C:\Games\Skyrim VR\PiranhaRim VR";
-const string GamePath = @"C:\games\steam\steamapps\common\SkyrimVR";
-string profileDir = Path.Combine(Instance, "profiles", "PiranhaRimVR");
+// Defaults are the live VR instance; --instance / --game / --profile point every path at
+// another MO2 layout — the SE conflict-testing lab's pre-flight runs exist so a finding is
+// confirmed to reproduce in a minimal test order BEFORE anyone launches the game on it.
+string Instance = @"C:\Games\Skyrim VR\PiranhaRim VR";
+string GamePath = @"C:\games\steam\steamapps\common\SkyrimVR";
+string profileName = "PiranhaRimVR";
+{
+    for (int i = 0; i < args.Length; i++)
+    {
+        if (args[i] == "--instance" && i + 1 < args.Length) Instance = args[i + 1];
+        else if (args[i] == "--game" && i + 1 < args.Length) GamePath = args[i + 1];
+        else if (args[i] == "--profile" && i + 1 < args.Length) profileName = args[i + 1];
+    }
+}
+string profileDir = Path.Combine(Instance, "profiles", profileName);
 string modsDir = Path.Combine(Instance, "mods");
 string overwriteDir = Path.Combine(Instance, "overwrite");
 string dataDir = Path.Combine(GamePath, "Data");
