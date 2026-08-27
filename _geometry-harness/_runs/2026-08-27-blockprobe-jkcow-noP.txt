@@ -1,0 +1,67 @@
+load order: 489 plugins  (EXCLUDING JKs College of Winterhold - OCW Patch.esp)
+target    : JK's College of Winterhold.esp   position 414/489
+
+target touches 16 cells: 5,197 refs it INTRODUCES, 2,309 it overrides, 37 navmeshes it supplies
+winning state for those cells: 38,100 refs, 63 navmeshes, 41,583 base records  (5.5s)
+
+==== JK's College of Winterhold.esp — navmesh blockage ====
+references tested : 5,147   (no usable geometry 1,762, skipped 586)
+distinct meshes   : 854
+elapsed           : 3.3s
+
+   population                                        tested   blocked     rate
+   ALL target references                              5,147         2    0.04%
+     cells the target ALSO navmeshed                  5,143         2    0.04%
+     cells it did NOT navmesh                             4         0    0.00%
+
+   vanilla false-positive floor for comparison: 0.4%
+
+   ---- broad vs narrow: is the quiet REAL, or over-filtering? ----
+   refs whose box touched ANY navmesh triangle :   1,474 of 5,147  (28.6%)
+   navmesh triangles seen by the broad phase   :  23,820
+   triangles PARTIALLY inside (1-2 of 3 verts) :     166
+   refs the narrow phase rejected entirely     :   1,472
+   => the broad phase had material; narrow-phase rejection is a real judgement, not an empty query.
+
+   ---- rule comparison, all on the same 5,147 references ----
+   rule                                  refs      rate   vanilla floor
+   CONTAIN all-3 verts inside               2     0.04%      0.40%
+   CONTAIN any-1 vert inside               53     1.03%      4.00%
+   CROSS   clr32 in12                     497     9.66%     11.09%
+   SEVER   clr32 in12 step32               67     1.30%      2.84%
+   SEVER   clr32 in12 step48               46     0.89%      1.82%
+   navmesh triangles that could not be judged (inset consumed them): 3,356
+
+   ---- what SEVER catches (top meshes) ----
+      15 tri     9 refs  MoveableStatic Effects\MGMagicFirePillarMidden01.nif
+       8 tri     7 refs  Static       Dungeons\Riften\RatwayHall\RiftenRWHallArch02.nif
+       6 tri     5 refs  Static       ...Architecture\Exterior\XJKCoWArchFreeSlimShort.nif
+       5 tri     4 refs  SoulGem      Clutter\SoulGem\SoulGemCommon_full.nif
+       5 tri     4 refs  SoulGem      Clutter\SoulGem\SoulGemPetty_full.nif
+       4 tri     2 refs  Furniture    Furniture\EnchantingWorkbench.nif
+       4 tri     2 refs  Static       Dungeons\Riften\RatwayHall\RiftenRWHall1Way03.nif
+       4 tri     2 refs  Static       DLC01\Dungeons\Castle\Platforms\CasPlatStairSm01.nif
+       4 tri     1 refs  Static       ...itecture\Exterior\XJKCoWwinterholdextbridge01.nif
+       3 tri     3 refs  Tree         _BYOH\Plants\BYOHHouseIngrdGlowMushrm01.nif
+       3 tri     2 refs  Tree         Landscape\Trees\TreePineForestSnow03.nif
+       2 tri     2 refs  Static       ...eons\Riften\RatwayBarrel\RiftenRWRoomBWallV01.nif
+       2 tri     2 refs  Static       ...eons\Riften\RatwayBarrel\RiftenRWRoomBDoorV01.nif
+       2 tri     2 refs  Static       Dungeons\Riften\RatwayHall\RiftenRWHall1Way01.nif
+       2 tri     1 refs  Static       Dungeons\Riften\RatwayHall\RiftenRWHall1Way02.nif
+       2 tri     2 refs  Furniture    Furniture\Noble\NobleBedSingle01.nif
+       2 tri     1 refs  Static       Architecture\Winterhold\WinterholdGate01.nif
+       1 tri     1 refs  SoulGem      Clutter\SoulGem\SoulGemGreater_full.nif
+       1 tri     1 refs  Static       Furniture\Noble\NobleSideBoard01.nif
+       1 tri     1 refs  Static       ...eons\Riften\RatwayRoom\RiftenRWRoomCoreWall02.nif
+       1 tri     1 refs  Static       Dungeons\Riften\RatwayHall\RiftenRWHallDeadEnd01.nif
+       1 tri     1 refs  Static       ...eons\Riften\RatwayBarrel\RiftenRWRoomBDoorC04.nif
+       1 tri     1 refs  Static       Dungeons\Caves\Ice\Rocks\CaveIRockPileS02.nif
+       1 tri     1 refs  Static       Dungeons\Riften\RatwayHall\RiftenRWHall4Way01.nif
+       1 tri     1 refs  Static       Dungeons\Caves\Ice\RockWall\CaveIRWallStraight05.nif
+
+   ---- worst blockages ----
+       1 tri  own-nav  WinterholdCollegeMidden01    ...nterior\XJKCoWriftenrwroombstairs01.nif nav:...College of Winterhold.esp
+       1 tri  own-nav  WinterholdCollegeMidden01    ...\RatwayBarrel\RiftenRWRoomBStairs01.nif nav:...College of Winterhold.esp
+
+   ---- by cell ----
+        2 tri     2 refs  own-nav  WinterholdCollegeMidden01      nav:JK's College of Winterhold.esp

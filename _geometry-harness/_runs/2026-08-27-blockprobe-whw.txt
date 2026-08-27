@@ -1,0 +1,59 @@
+load order: 490 plugins
+target    : Whiterun Has Walls.esm   position 100/490
+
+target touches 38 cells: 333 refs it INTRODUCES, 293 it overrides, 0 navmeshes it supplies
+winning state for those cells: 28,195 refs, 138 navmeshes, 41,599 base records  (6.7s)
+
+==== Whiterun Has Walls.esm — navmesh blockage ====
+references tested : 360   (no usable geometry 118, skipped 121)
+distinct meshes   : 66
+elapsed           : 0.9s
+
+   population                                        tested   blocked     rate
+   ALL target references                                360         3    0.83%
+     cells the target ALSO navmeshed                      0         0    0.00%
+     cells it did NOT navmesh                           360         3    0.83%
+
+   vanilla false-positive floor for comparison: 0.4%
+
+   ---- broad vs narrow: is the quiet REAL, or over-filtering? ----
+   refs whose box touched ANY navmesh triangle :     159 of 360  (44.2%)
+   navmesh triangles seen by the broad phase   :   3,684
+   triangles PARTIALLY inside (1-2 of 3 verts) :     141
+   refs the narrow phase rejected entirely     :     156
+   => the broad phase had material; narrow-phase rejection is a real judgement, not an empty query.
+
+   ---- rule comparison, all on the same 360 references ----
+   rule                                  refs      rate   vanilla floor
+   CONTAIN all-3 verts inside               3     0.83%      0.40%
+   CONTAIN any-1 vert inside               25     6.94%      4.00%
+   CROSS   clr32 in12                      97    26.94%     11.09%
+   SEVER   clr32 in12 step32               52    14.44%      2.84%
+   SEVER   clr32 in12 step48               49    13.61%      1.82%
+   navmesh triangles that could not be judged (inset consumed them): 276
+
+   ---- what SEVER catches (top meshes) ----
+      25 tri     9 refs  Static       J3w3ls\Architecture\WhiteRun\J3_WRWallStrUp128.nif
+      20 tri    11 refs  Static       J3w3ls\Architecture\WhiteRun\J3_WRWallStr01.nif
+      17 tri     2 refs  Static       J3w3ls\Architecture\WhiteRun\J3_WRWallTower01.nif
+      16 tri     6 refs  Static       J3w3ls\Architecture\WhiteRun\J3_WRWallCurve45.nif
+      13 tri     7 refs  Static       ...s\Architecture\WhiteRun\J3_WRWallCurve30Up128.nif
+       9 tri     3 refs  Static       ...\Architecture\WhiteRun\J3_WRWallCurve30Up128A.nif
+       5 tri     3 refs  Static       ...chitecture\WhiteRun\J3_WRWallStrUp128Shift128.nif
+       4 tri     2 refs  Static       J3w3ls\Architecture\WhiteRun\J3_WRWallCurve60.nif
+       4 tri     3 refs  Static       J3w3ls\Architecture\WhiteRun\J3_WRWallCap01.nif
+       4 tri     1 refs  Static       ...e\WhiteRun\WRCityWalls\WRWallStrUp128Shift128.nif
+       4 tri     1 refs  Static       J3w3ls\Architecture\WhiteRun\J3_WRWallTowerCap01.nif
+       3 tri     1 refs  Static       ...chitecture\WhiteRun\J3_WRWallGateDrawBridge01.nif
+       3 tri     2 refs  Static       ...Architecture\WhiteRun\J3_WRWallCap01NoHighCol.nif
+       1 tri     1 refs  Static       ...\Architecture\WhiteRun\J3_WRWallGateTarTrap01.nif
+
+   ---- worst blockages ----
+       4 tri  NO-NAV   WhiterunExterior04           ...\WhiteRun\J3_WRWallGateDrawBridge01.nif nav:...xterior City Entrance.esp
+       3 tri  NO-NAV   WhiterunPlainsDistrict02     ...hitecture\WhiteRun\J3_WRWallCurve45.nif nav:...nsion - Navmesh Patch.esp
+       1 tri  NO-NAV   WhiterunPlainsDistrict01     ...hitecture\WhiteRun\J3_WRWallTower01.nif nav:...nsion - Navmesh Patch.esp
+
+   ---- by cell ----
+        4 tri     1 refs  NO-NAV   WhiterunExterior04             nav:...as Walls - Exterior City Entrance.esp
+        3 tri     1 refs  NO-NAV   WhiterunPlainsDistrict02       nav:...hiterun Expansion - Navmesh Patch.esp
+        1 tri     1 refs  NO-NAV   WhiterunPlainsDistrict01       nav:...hiterun Expansion - Navmesh Patch.esp
