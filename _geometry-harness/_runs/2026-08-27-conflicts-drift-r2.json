@@ -1,0 +1,412 @@
+{
+  "Probe": "driftprobe",
+  "Instance": "C:\\Games\\Skyrim VR\\PiranhaRim VR",
+  "GeneratedUtc": "2026-08-27 19:44:07Z",
+  "Conflicts": [
+    {
+      "Kind": "SPLIT",
+      "A": "Skyrim.esm",
+      "B": "OCW_Obscure\u0027s_CollegeofWinterhold.esp",
+      "Summary": "quest \u0027College Lectures\u0027 aliases \u0027Arniel\u0027 and \u0027Mirabelle\u0027 were 301u apart in WinterholdCollegeHallofAttainment (int), now in different cells (WinterholdCollegeHallofAttainment (int) vs WinterholdCollegeHallofDiligence (int))",
+      "Necessary": [
+        {
+          "FormKey": "01C1B9:Skyrim.esm",
+          "Role": "moved-ref",
+          "Label": "WinterholdCollegeHallofAttainment (int)"
+        }
+      ],
+      "Alternative": [
+        {
+          "FormKey": "0E0C67:Skyrim.esm",
+          "Role": "quest",
+          "Label": "College Lectures"
+        }
+      ]
+    },
+    {
+      "Kind": "SPLIT",
+      "A": "Skyrim.esm",
+      "B": "OCW_Obscure\u0027s_CollegeofWinterhold.esp",
+      "Summary": "quest \u0027College Lectures\u0027 aliases \u0027Enthir\u0027 and \u0027Mirabelle\u0027 were 483u apart in WinterholdCollegeHallofAttainment (int), now in different cells (WinterholdCollegeHallofAttainment (int) vs WinterholdCollegeHallofDiligence (int))",
+      "Necessary": [
+        {
+          "FormKey": "01C1B9:Skyrim.esm",
+          "Role": "moved-ref",
+          "Label": "WinterholdCollegeHallofAttainment (int)"
+        }
+      ],
+      "Alternative": [
+        {
+          "FormKey": "0E0C67:Skyrim.esm",
+          "Role": "quest",
+          "Label": "College Lectures"
+        }
+      ]
+    },
+    {
+      "Kind": "SPLIT",
+      "A": "Skyrim.esm",
+      "B": "Ultimate Markarth Expanded.esp",
+      "Summary": "quest \u0027DialogueMarkarthBlacksmithScene01\u0027 aliases \u0027Ghorz\u0027 and \u0027Tacitus\u0027 were 303u apart in MarkarthUnderStoneKeep (int), now 1,886u apart",
+      "Necessary": [
+        {
+          "FormKey": "019906:Skyrim.esm",
+          "Role": "moved-ref",
+          "Label": "MarkarthUnderStoneKeep (int)"
+        },
+        {
+          "FormKey": "019907:Skyrim.esm",
+          "Role": "moved-ref",
+          "Label": "MarkarthUnderStoneKeep (int)"
+        }
+      ],
+      "Alternative": [
+        {
+          "FormKey": "055A6E:Skyrim.esm",
+          "Role": "quest",
+          "Label": "DialogueMarkarthBlacksmithScene01"
+        }
+      ]
+    },
+    {
+      "Kind": "SPLIT",
+      "A": "Unofficial Skyrim Special Edition Patch.esp",
+      "B": "Grand Solitude - Pilgrim patch.esp",
+      "Summary": "quest \u0027Tending the Flames\u0027 aliases \u0027Silana\u0027 and \u0027Rorlund\u0027 were 137u apart in SolitudeTempleoftheDivines (int), now 1,800u apart",
+      "Necessary": [
+        {
+          "FormKey": "0198A7:Skyrim.esm",
+          "Role": "moved-ref",
+          "Label": "SolitudeTempleoftheDivines (int)"
+        },
+        {
+          "FormKey": "0198A5:Skyrim.esm",
+          "Role": "moved-ref",
+          "Label": "SolitudeTempleoftheDivines (int)"
+        }
+      ],
+      "Alternative": [
+        {
+          "FormKey": "06C0EA:Skyrim.esm",
+          "Role": "quest",
+          "Label": "Tending the Flames"
+        }
+      ]
+    },
+    {
+      "Kind": "SPLIT",
+      "A": "BetterQuestObjectives.esp",
+      "B": "BluePalaceTerrace.esp",
+      "Summary": "quest \u0027Tending the Flames\u0027 aliases \u0027MS05ElisifTheFair\u0027 and \u0027MS05Una\u0027 were 536u apart in SolitudeBluePalace (int), now 3,458u apart",
+      "Necessary": [
+        {
+          "FormKey": "0198C8:Skyrim.esm",
+          "Role": "moved-ref",
+          "Label": "SolitudeBluePalace (int)"
+        }
+      ],
+      "Alternative": [
+        {
+          "FormKey": "053511:Skyrim.esm",
+          "Role": "quest",
+          "Label": "Tending the Flames"
+        }
+      ]
+    },
+    {
+      "Kind": "SPLIT",
+      "A": "Skyrim.esm",
+      "B": "COTN - Falkreath.esp",
+      "Summary": "quest \u0027DialogueFalkreathHouseofArkayScene03\u0027 aliases \u0027Urunil\u0027 and \u0027Kust\u0027 were 101u apart in FalkreathHouseofArkay (int), now in different cells (FalkreathHouseofArkay (int) vs COTN_FalkreathKustsHouse (int))",
+      "Necessary": [
+        {
+          "FormKey": "019820:Skyrim.esm",
+          "Role": "moved-ref",
+          "Label": "FalkreathHouseofArkay (int)"
+        },
+        {
+          "FormKey": "019821:Skyrim.esm",
+          "Role": "moved-ref",
+          "Label": "FalkreathHouseofArkay (int)"
+        }
+      ],
+      "Alternative": [
+        {
+          "FormKey": "02B9BA:Skyrim.esm",
+          "Role": "quest",
+          "Label": "DialogueFalkreathHouseofArkayScene03"
+        }
+      ]
+    },
+    {
+      "Kind": "SPLIT",
+      "A": "Skyrim.esm",
+      "B": "COTN - Dawnstar.esp",
+      "Summary": "quest \u0027DialogueDawnstarWhiteHallSkaldJod02\u0027 aliases \u0027Skald\u0027 and \u0027Jod\u0027 were 294u apart in DawnstarTheWhiteHall (int), now 1,932u apart",
+      "Necessary": [
+        {
+          "FormKey": "01A6C0:Skyrim.esm",
+          "Role": "moved-ref",
+          "Label": "DawnstarTheWhiteHall (int)"
+        },
+        {
+          "FormKey": "01A6C1:Skyrim.esm",
+          "Role": "moved-ref",
+          "Label": "DawnstarTheWhiteHall (int)"
+        }
+      ],
+      "Alternative": [
+        {
+          "FormKey": "03D202:Skyrim.esm",
+          "Role": "quest",
+          "Label": "DialogueDawnstarWhiteHallSkaldJod02"
+        }
+      ]
+    },
+    {
+      "Kind": "SPLIT",
+      "A": "Skyrim.esm",
+      "B": "COTN - Dawnstar.esp",
+      "Summary": "quest \u0027DialogueDawnstarWhiteHallSkaldJod01\u0027 aliases \u0027Skald\u0027 and \u0027Jod\u0027 were 294u apart in DawnstarTheWhiteHall (int), now 1,932u apart",
+      "Necessary": [
+        {
+          "FormKey": "01A6C0:Skyrim.esm",
+          "Role": "moved-ref",
+          "Label": "DawnstarTheWhiteHall (int)"
+        },
+        {
+          "FormKey": "01A6C1:Skyrim.esm",
+          "Role": "moved-ref",
+          "Label": "DawnstarTheWhiteHall (int)"
+        }
+      ],
+      "Alternative": [
+        {
+          "FormKey": "03CDDA:Skyrim.esm",
+          "Role": "quest",
+          "Label": "DialogueDawnstarWhiteHallSkaldJod01"
+        }
+      ]
+    },
+    {
+      "Kind": "SPLIT",
+      "A": "Skyrim.esm",
+      "B": "Ultimate Markarth Expanded.esp",
+      "Summary": "quest \u0027DialogueMarkarthIntroBlacksmithScene\u0027 aliases \u0027Ghorza\u0027 and \u0027Tacitus\u0027 were 303u apart in MarkarthUnderStoneKeep (int), now 1,886u apart",
+      "Necessary": [
+        {
+          "FormKey": "019906:Skyrim.esm",
+          "Role": "moved-ref",
+          "Label": "MarkarthUnderStoneKeep (int)"
+        },
+        {
+          "FormKey": "019907:Skyrim.esm",
+          "Role": "moved-ref",
+          "Label": "MarkarthUnderStoneKeep (int)"
+        }
+      ],
+      "Alternative": [
+        {
+          "FormKey": "025F00:Skyrim.esm",
+          "Role": "quest",
+          "Label": "DialogueMarkarthIntroBlacksmithScene"
+        }
+      ]
+    },
+    {
+      "Kind": "SPLIT",
+      "A": "Skyrim.esm",
+      "B": "Ultimate Markarth Expanded.esp",
+      "Summary": "quest \u0027DialogueMarkarthBlacksmithScene02\u0027 aliases \u0027Ghorz\u0027 and \u0027Tacitus\u0027 were 303u apart in MarkarthUnderStoneKeep (int), now 1,886u apart",
+      "Necessary": [
+        {
+          "FormKey": "019906:Skyrim.esm",
+          "Role": "moved-ref",
+          "Label": "MarkarthUnderStoneKeep (int)"
+        },
+        {
+          "FormKey": "019907:Skyrim.esm",
+          "Role": "moved-ref",
+          "Label": "MarkarthUnderStoneKeep (int)"
+        }
+      ],
+      "Alternative": [
+        {
+          "FormKey": "025EF8:Skyrim.esm",
+          "Role": "quest",
+          "Label": "DialogueMarkarthBlacksmithScene02"
+        }
+      ]
+    },
+    {
+      "Kind": "SPLIT",
+      "A": "Skyrim.esm",
+      "B": "COTN - Winterhold.esp",
+      "Summary": "quest \u0027Winterhold Korir\u0027s House Scene 2\u0027 aliases \u0027KorirAlias\u0027 and \u0027ThaenaAlias\u0027 were 545u apart in WinterholdJarlsLonghouse (int), now 1,773u apart",
+      "Necessary": [
+        {
+          "FormKey": "01C1B5:Skyrim.esm",
+          "Role": "moved-ref",
+          "Label": "WinterholdJarlsLonghouse (int)"
+        },
+        {
+          "FormKey": "01C1B6:Skyrim.esm",
+          "Role": "moved-ref",
+          "Label": "WinterholdJarlsLonghouse (int)"
+        }
+      ],
+      "Alternative": [
+        {
+          "FormKey": "0379E1:Skyrim.esm",
+          "Role": "quest",
+          "Label": "Winterhold Korir\u0027s House Scene 2"
+        }
+      ]
+    },
+    {
+      "Kind": "SPLIT",
+      "A": "Skyrim.esm",
+      "B": "TGCotN Winterhold.esp",
+      "Summary": "quest \u0027Winterhold Korir\u0027s House Scene 2\u0027 aliases \u0027KorirAlias\u0027 and \u0027ThaenaAlias\u0027 were 545u apart in WinterholdJarlsLonghouse (int), now 1,773u apart",
+      "Necessary": [
+        {
+          "FormKey": "01C1B5:Skyrim.esm",
+          "Role": "moved-ref",
+          "Label": "WinterholdJarlsLonghouse (int)"
+        },
+        {
+          "FormKey": "01C1B6:Skyrim.esm",
+          "Role": "moved-ref",
+          "Label": "WinterholdJarlsLonghouse (int)"
+        }
+      ],
+      "Alternative": [
+        {
+          "FormKey": "0379E1:Skyrim.esm",
+          "Role": "quest",
+          "Label": "Winterhold Korir\u0027s House Scene 2"
+        }
+      ]
+    },
+    {
+      "Kind": "SPLIT",
+      "A": "Skyrim.esm",
+      "B": "COTN - Winterhold.esp",
+      "Summary": "quest \u0027Winterhold Korir\u0027s House Scene 1\u0027 aliases \u0027KorirAlias\u0027 and \u0027ThaenaAlias\u0027 were 545u apart in WinterholdJarlsLonghouse (int), now 1,773u apart",
+      "Necessary": [
+        {
+          "FormKey": "01C1B5:Skyrim.esm",
+          "Role": "moved-ref",
+          "Label": "WinterholdJarlsLonghouse (int)"
+        },
+        {
+          "FormKey": "01C1B6:Skyrim.esm",
+          "Role": "moved-ref",
+          "Label": "WinterholdJarlsLonghouse (int)"
+        }
+      ],
+      "Alternative": [
+        {
+          "FormKey": "0376F3:Skyrim.esm",
+          "Role": "quest",
+          "Label": "Winterhold Korir\u0027s House Scene 1"
+        }
+      ]
+    },
+    {
+      "Kind": "SPLIT",
+      "A": "Skyrim.esm",
+      "B": "TGCotN Winterhold.esp",
+      "Summary": "quest \u0027Winterhold Korir\u0027s House Scene 1\u0027 aliases \u0027KorirAlias\u0027 and \u0027ThaenaAlias\u0027 were 545u apart in WinterholdJarlsLonghouse (int), now 1,773u apart",
+      "Necessary": [
+        {
+          "FormKey": "01C1B5:Skyrim.esm",
+          "Role": "moved-ref",
+          "Label": "WinterholdJarlsLonghouse (int)"
+        },
+        {
+          "FormKey": "01C1B6:Skyrim.esm",
+          "Role": "moved-ref",
+          "Label": "WinterholdJarlsLonghouse (int)"
+        }
+      ],
+      "Alternative": [
+        {
+          "FormKey": "0376F3:Skyrim.esm",
+          "Role": "quest",
+          "Label": "Winterhold Korir\u0027s House Scene 1"
+        }
+      ]
+    },
+    {
+      "Kind": "SPLIT",
+      "A": "Unofficial Skyrim Special Edition Patch.esp",
+      "B": "Grand Solitude - Pilgrim patch.esp",
+      "Summary": "quest \u0027Temple Conversation 1\u0027 aliases \u0027Freir\u0027 and \u0027Silana\u0027 were 140u apart in SolitudeTempleoftheDivines (int), now 1,838u apart",
+      "Necessary": [
+        {
+          "FormKey": "0198A6:Skyrim.esm",
+          "Role": "moved-ref",
+          "Label": "SolitudeTempleoftheDivines (int)"
+        },
+        {
+          "FormKey": "0198A7:Skyrim.esm",
+          "Role": "moved-ref",
+          "Label": "SolitudeTempleoftheDivines (int)"
+        }
+      ],
+      "Alternative": [
+        {
+          "FormKey": "0367EE:Skyrim.esm",
+          "Role": "quest",
+          "Label": "Temple Conversation 1"
+        }
+      ]
+    },
+    {
+      "Kind": "SPLIT",
+      "A": "Unofficial Skyrim Special Edition Patch.esp",
+      "B": "Grand Solitude - Pilgrim patch.esp",
+      "Summary": "quest \u0027Temple Conversation 1\u0027 aliases \u0027Rorlund\u0027 and \u0027Silana\u0027 were 137u apart in SolitudeTempleoftheDivines (int), now 1,800u apart",
+      "Necessary": [
+        {
+          "FormKey": "0198A5:Skyrim.esm",
+          "Role": "moved-ref",
+          "Label": "SolitudeTempleoftheDivines (int)"
+        },
+        {
+          "FormKey": "0198A7:Skyrim.esm",
+          "Role": "moved-ref",
+          "Label": "SolitudeTempleoftheDivines (int)"
+        }
+      ],
+      "Alternative": [
+        {
+          "FormKey": "0367ED:Skyrim.esm",
+          "Role": "quest",
+          "Label": "Temple Conversation 1"
+        }
+      ]
+    },
+    {
+      "Kind": "SPLIT",
+      "A": "Unofficial Skyrim Special Edition Patch.esp",
+      "B": "OCW_Obscure\u0027s_CollegeofWinterhold.esp",
+      "Summary": "quest \u0027Good Intentions\u0027 aliases \u0027MG04QuaranirAlias\u0027 and \u0027MG04SavosArenAlias\u0027 were 193u apart in WinterholdCollegeArchMageQuarters (int), now 899u apart",
+      "Necessary": [
+        {
+          "FormKey": "01C1B8:Skyrim.esm",
+          "Role": "moved-ref",
+          "Label": "WinterholdCollegeArchMageQuarters (int)"
+        }
+      ],
+      "Alternative": [
+        {
+          "FormKey": "01F254:Skyrim.esm",
+          "Role": "quest",
+          "Label": "Good Intentions"
+        }
+      ]
+    }
+  ]
+}
