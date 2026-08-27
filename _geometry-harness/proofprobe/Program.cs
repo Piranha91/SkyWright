@@ -196,6 +196,25 @@ Console.WriteLine("   Five corrections, one case each. No game data, no archives
           Run(noRequired, new[] { "a.esp" }, Array.Empty<string>()).PathsTrusted, "fallback arm");
     Check("trust: no required files, nothing matched -> NOT trusted",
           !Run(noRequired, new[] { "zz.esp" }, Array.Empty<string>()).PathsTrusted, "fallback arm refuses");
+
+    // The threshold itself, pinned with n >= 2. Every earlier case used a single required file,
+    // for which "all found", "half found" and "any found" are indistinguishable — three different
+    // implementations passed the same suite, and the shipped code silently drifted to "half"
+    // while every document said "must be found". These three cases make the semantics ALL, and
+    // make any future drift fail by name.
+    var three = Fomod("<requiredInstallFiles>"
+        + "<file source=\"r1.esp\" destination=\"r1.esp\"/>"
+        + "<file source=\"r2.esp\" destination=\"r2.esp\"/>"
+        + "<file source=\"r3.esp\" destination=\"r3.esp\"/>"
+        + "</requiredInstallFiles>");
+    Check("trust threshold: 3 of 3 required found -> TRUSTED",
+          Run(three, new[] { "r1.esp", "r2.esp", "r3.esp" }, Array.Empty<string>()).PathsTrusted, "all present");
+    Check("trust threshold: 2 of 3 required found -> NOT trusted",
+          !Run(three, new[] { "r1.esp", "r2.esp" }, Array.Empty<string>()).PathsTrusted,
+          "one unconditional file missing = matching is broken (kills a HALF threshold)");
+    Check("trust threshold: 1 of 3 required found -> NOT trusted",
+          !Run(three, new[] { "r1.esp" }, Array.Empty<string>()).PathsTrusted,
+          "kills an ANY threshold");
 }
 
 // ---------------------------------------------------------------------------------------

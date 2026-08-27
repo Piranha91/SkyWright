@@ -145,8 +145,15 @@ public static class FomodModel
         // Two arms, because the first does not always apply. A FOMOD with no requiredInstallFiles
         // installs everything through options, so there is nothing unconditional to check — but the
         // mod folder is full, so SOME option's destination must match something on disk.
+        //
+        // ALL required files must be found, not a fraction. requiredInstallFiles are unconditional
+        // by the FOMOD spec, so a single miss means path matching is broken for this mod and no
+        // verdict about it can be believed. (2026-08-27: an earlier revision accepted HALF, which
+        // contradicted every description of this test and was pinned down only because the review
+        // caught the documents and the code disagreeing. proofprobe now holds n>=2 cases that
+        // distinguish all / half / any — see "trust threshold" there.)
         bool trusted = required.Count > 0
-            ? requiredFound * 2 >= required.Count
+            ? requiredFound == required.Count
             : options.Count > 0 && options.Any(o => o.Selected);
 
         return new FomodParse(options, required.Count, requiredFound, notOffered, trusted);

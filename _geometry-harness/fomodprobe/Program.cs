@@ -197,6 +197,11 @@ Console.WriteLine($"   paths wrongly, and every 'not selected' it would report i
 Console.WriteLine($"   it are excluded and counted rather than quietly reported:");
 Console.WriteLine($"      failed the trust test        : {parsed.Count - trusted.Count:N0}");
 Console.WriteLine($"      of which, no required files to test with : {parsed.Count(p => !p.PathsTrusted && p.RequiredFiles == 0):N0}");
+// The excluded set BY NAME, with the score that excluded each. A count alone let this list drift
+// from 2 to 9 across a refactor with nothing in the output saying which mods' verdicts vanished.
+foreach (var p in parsed.Where(p => !p.PathsTrusted).OrderBy(p => p.Mod, StringComparer.OrdinalIgnoreCase))
+    Console.WriteLine($"         NOT JUDGED  {p.Mod}   (required found {p.RequiredFound}/{p.RequiredFiles}"
+                    + (p.RequiredFiles == 0 ? ", no option destination matched anything on disk)" : ")"));
 
 long optTotal = trusted.Sum(r => (long)r.Options.Count);
 long optTaken = trusted.Sum(r => (long)r.Options.Count(o => o.Selected));
