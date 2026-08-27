@@ -57,11 +57,22 @@ public static class FomodModel
         // them from options nobody took would light up branches the installer never showed.
         var flags = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
 
+        // Rule 6 (2026-08-27) — THE GATE-OPTION CORRECTION. Whether an option was taken is decided
+        // from the files it delivered; an option that ships NO files (a "I've read the warning"
+        // checkbox, a category selector that only sets flags) leaves no disk evidence either way.
+        // Treating it as un-taken silently turned every step it gates into NEVER OFFERED and made
+        // whole patch-collection hubs unjudgeable — 8 of the trust test's 9 refusals were exactly
+        // this shape. A flag whose only setters are files-less options is therefore UNDECIDABLE,
+        // and a visibility test on it falls back to VISIBLE (the same fail-visible philosophy as
+        // an empty dependency block): the failure mode is a reported option, never a dropped one.
+        var undecidable = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
         bool DepsHold(XElement? deps)
         {
             if (deps is null) return true;
             var op = ((string?)deps.Attribute("operator") ?? "And").Trim();
             var tests = deps.Elements("flagDependency")
+                .Where(d => !undecidable.Contains((string?)d.Attribute("flag") ?? ""))
                 .Select(d => string.Equals(flags.GetValueOrDefault((string?)d.Attribute("flag") ?? "", ""),
                                            (string?)d.Attribute("value") ?? "", StringComparison.OrdinalIgnoreCase))
                 .ToList();
@@ -89,6 +100,13 @@ public static class FomodModel
                 foreach (var pl in grp.Element("plugins")?.Elements("plugin") ?? Enumerable.Empty<XElement>())
                 {
                     var dests = Dests(pl.Element("files")).ToList();
+
+                    // A files-less option's taken-ness is unknowable from disk, so every flag it
+                    // sets is undecidable from here on (gates precede what they gate in document
+                    // order, so this is collected before the gated steps are visited).
+                    if (dests.Count == 0)
+                        foreach (var fl in pl.Element("conditionFlags")?.Elements("flag") ?? Enumerable.Empty<XElement>())
+                            if ((string?)fl.Attribute("name") is { Length: > 0 } fn) undecidable.Add(fn.Trim());
 
                     // rule 2 — only RECOMMENDED / REQUIRED patterns say "this option is for you".
                     var conds = new List<string>();

@@ -106,20 +106,41 @@ var modsDir = Path.Combine(Instance, "mods");
 var targets = new List<(string Mod, string ModDir, string Archive)>();
 int noMeta = 0, noInstallFile = 0, archiveGone = 0;
 
+// EVERY folder each archive was installed into, enabled or not — MO2's "install each option as
+// its own mod" spreads ONE archive across MANY folders, and the trust test was still asking "did
+// the required files land in THIS folder". That is method rule 9 never applied to the trust test
+// itself: 8 of its 9 refusals were patch collections, i.e. exactly the multi-folder case. The
+// content a FOMOD delivered is the union over its folders; disabled folders count, because
+// presence on disk is what the trust test and Selected are about (activation is judged later,
+// instance-wide, as before).
+static string? InstallationFile(string modDir)
+{
+    var meta = Path.Combine(modDir, "meta.ini");
+    if (!File.Exists(meta)) return null;
+    foreach (var line in File.ReadLines(meta))
+        if (line.StartsWith("installationFile=", StringComparison.OrdinalIgnoreCase))
+            return line.Split('=', 2)[1].Trim();
+    return null;
+}
+
+var archiveFolders = new Dictionary<string, List<string>>(StringComparer.OrdinalIgnoreCase);
+foreach (var modDir in Directory.EnumerateDirectories(modsDir))
+{
+    if (InstallationFile(modDir) is { Length: > 0 } inst)
+    {
+        if (!archiveFolders.TryGetValue(inst, out var l)) archiveFolders[inst] = l = new List<string>();
+        l.Add(modDir);
+    }
+}
+
 foreach (var modDir in Directory.EnumerateDirectories(modsDir))
 {
     var mod = Path.GetFileName(modDir);
     if (onlyMod is not null && !mod.Contains(onlyMod, StringComparison.OrdinalIgnoreCase)) continue;
     if (!enabledMods.Contains(mod)) continue;
 
-    var meta = Path.Combine(modDir, "meta.ini");
-    if (!File.Exists(meta)) { noMeta++; continue; }
-
-    string? inst = null;
-    foreach (var line in File.ReadLines(meta))
-        if (line.StartsWith("installationFile=", StringComparison.OrdinalIgnoreCase))
-        { inst = line.Split('=', 2)[1].Trim(); break; }
-
+    if (!File.Exists(Path.Combine(modDir, "meta.ini"))) { noMeta++; continue; }
+    var inst = InstallationFile(modDir);
     if (string.IsNullOrWhiteSpace(inst)) { noInstallFile++; continue; }
     var archive = Path.Combine(Pool, inst);
     if (!File.Exists(archive)) { archiveGone++; continue; }
@@ -339,12 +360,18 @@ ModResult Examine(string mod, string modDir, string archive)
     var root = doc.Root;
     if (root is null) return r;
 
-    // What is actually on disk for this mod, as normalised relative paths.
+    // What this ARCHIVE actually put on disk, as normalised relative paths — the union over every
+    // mod folder installed from it (method rule 9, finally applied to the trust test: MO2's
+    // "install each option as its own mod" spreads one archive across many folders, and asking
+    // only this folder refused 8 patch collections a whole session).
+    var folders = archiveFolders.TryGetValue(Path.GetFileName(archive), out var shared) && shared.Count > 0
+        ? shared : new List<string> { modDir };
     var installed = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
     try
     {
-        foreach (var f in EnumerateFilesSafe(modDir))
-            installed.Add(Norm(Path.GetRelativePath(modDir, f)));
+        foreach (var dir in folders)
+            foreach (var f in EnumerateFilesSafe(dir))
+                installed.Add(Norm(Path.GetRelativePath(dir, f)));
     }
     catch { return r; }
 

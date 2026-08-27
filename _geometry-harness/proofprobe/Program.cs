@@ -182,6 +182,43 @@ Console.WriteLine("   Five corrections, one case each. No game data, no archives
 }
 
 // ---------------------------------------------------------------------------------------
+// Rule 6 — a files-less GATE option makes its flags UNDECIDABLE, and undecidable gates
+// fall back to visible.
+// ---------------------------------------------------------------------------------------
+// The real case: Czasior-style patch-collection hubs open with an "I'VE READ AND UNDERSTAND"
+// checkbox that ships no files and only sets flags; every later step is gated on them. Deciding
+// taken-ness from delivered files, that option can never be "taken", so whole hubs read as
+// NEVER OFFERED — 8 of the trust test's 9 refusals were exactly this shape.
+{
+    var xml = Fomod(Steps(
+        Step("gate", Group("g", "SelectAny",
+            "<plugin name=\"i-have-read\"><description>d</description><files/>" +
+            "<conditionFlags><flag name=\"GATE\">On</flag></conditionFlags></plugin>")) +
+        Step("payload", Group("g2", "SelectAny",
+            Plugin("real-option", "<file source=\"a.esp\" destination=\"a.esp\"/>")), "GATE", "On")));
+
+    var p = Run(xml, new[] { "a.esp" }, Array.Empty<string>());
+    Check("rule6: gated step is VISIBLE when the gate flag is undecidable",
+          p.Options.Any(o => o.Name == "real-option"), "the hub's payload steps are judged");
+    Check("rule6: ...and its on-disk option reads as taken (trust passes)",
+          p.Options.Single(o => o.Name == "real-option").Selected && p.PathsTrusted,
+          "8 unjudgeable patch collections come back");
+
+    // The counter-case that keeps rule 6 from swallowing rule 4: a flag set by an option that
+    // DOES ship files stays decidable, and its untaken branch stays NEVER OFFERED.
+    var decidable = Fomod(Steps(
+        Step("main", Group("g", "SelectExactlyOne",
+            Plugin("pick-A", "<file source=\"a.esp\" destination=\"a.esp\"/>", null, null, "BRANCH_A", "On") +
+            Plugin("pick-B", "<file source=\"b.esp\" destination=\"b.esp\"/>", null, null, "BRANCH_B", "On"))) +
+        Step("branchB", Group("g3", "SelectAny",
+            Plugin("b-extra", "<file source=\"bx.esp\" destination=\"bx.esp\"/>")), "BRANCH_B", "On")));
+    var p2 = Run(decidable, new[] { "a.esp" }, Array.Empty<string>());
+    Check("rule6: a flag from a FILE-carrying option stays decidable (rule 4 intact)",
+          p2.OptionsNotOffered == 1 && !p2.Options.Any(o => o.Name == "b-extra"),
+          "the untaken branch is still NEVER OFFERED");
+}
+
+// ---------------------------------------------------------------------------------------
 // The trust test — the self-check that refuses to report when path matching is broken.
 // ---------------------------------------------------------------------------------------
 {

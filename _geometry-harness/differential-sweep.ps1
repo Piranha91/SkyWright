@@ -10,12 +10,17 @@
 # A synthetic enable whose master set is not loadable is REFUSED by SyntheticOrder and shows up
 # here as INERT with a REFUSED warning in the navownprobe output — read the log, not just the verdict.
 #
-# usage:  .\differential-sweep.ps1 -Candidates "TGC Winterhold - OCW Patch.esp","Another patch.esp"
-#         [-OutDir _runs\sweep]
+# usage:  .\differential-sweep.ps1 [-OutDir _runs\sweep] "TGC Winterhold - OCW Patch.esp" "Another patch.esp"
+#         (candidates are plain trailing arguments — one per plugin — so `powershell -File` works;
+#          a comma-joined -Candidates list does NOT survive -File argument binding)
 param(
-    [Parameter(Mandatory = $true)][string[]]$Candidates,
-    [string]$OutDir = "$PSScriptRoot\_runs\sweep"
+    [string]$OutDir = "$PSScriptRoot\_runs\sweep",
+    [Parameter(ValueFromRemainingArguments = $true)][string[]]$Candidates
 )
+if (-not $Candidates -or $Candidates.Count -eq 0) {
+    Write-Error 'usage: differential-sweep.ps1 [-OutDir dir] "<Plugin.esp>" ["<Plugin2.esp>" ...]'
+    exit 2
+}
 
 $ErrorActionPreference = 'Stop'
 New-Item -ItemType Directory -Force -Path $OutDir | Out-Null
