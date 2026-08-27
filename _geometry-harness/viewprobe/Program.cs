@@ -32,9 +32,18 @@ using Image = SixLabors.ImageSharp.Image;
 // usage: viewprobe <CellEditorID|FormID> [--out DIR] [--size N] [--smoke]
 //                  [--angles a,b,c] [--elev N] [--no-nav] [--ref FORMID]
 
-const string Instance = @"C:\Games\Skyrim VR\PiranhaRim VR";
-const string GamePath = @"C:\games\steam\steamapps\common\SkyrimVR";
-string profileDir = Path.Combine(Instance, "profiles", "PiranhaRimVR");
+// Defaults are the live VR instance; --instance / --game / --profile point the render at another
+// MO2 layout (the SE conflict lab), so a field-test shot shows the exact state the tester will see.
+string Instance = @"C:\Games\Skyrim VR\PiranhaRim VR";
+string GamePath = @"C:\games\steam\steamapps\common\SkyrimVR";
+string profileName = "PiranhaRimVR";
+for (int i = 0; i < args.Length; i++)
+{
+    if (args[i] == "--instance" && i + 1 < args.Length) Instance = args[i + 1];
+    else if (args[i] == "--game" && i + 1 < args.Length) GamePath = args[i + 1];
+    else if (args[i] == "--profile" && i + 1 < args.Length) profileName = args[i + 1];
+}
+string profileDir = Path.Combine(Instance, "profiles", profileName);
 string modsDir = Path.Combine(Instance, "mods");
 string overwriteDir = Path.Combine(Instance, "overwrite");
 string dataDir = Path.Combine(GamePath, "Data");
@@ -68,6 +77,7 @@ for (int i = 1; i < args.Length; i++)
     else if (args[i] == "--euler") euler = true;
     else if (args[i] == "--angles" && i + 1 < args.Length)
         angles = args[++i].Split(',').Select(float.Parse).ToList();
+    else if (args[i] is "--instance" or "--game" or "--profile") i++;   // consumed above
 }
 Directory.CreateDirectory(outDir);
 

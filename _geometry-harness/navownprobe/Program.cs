@@ -132,6 +132,7 @@ var refGone = new HashSet<FormKey>();
 // must be COUNTED, not swallowed. The review found both detectors dropping unreadable plugins with
 // a bare catch{continue} and no output saying so.
 var unreadablePlugins = new List<string>();
+long permanentlyDisabledDoors = 0;
 
 for (int p = 0; p < paths.Count; p++)
 {
@@ -175,8 +176,22 @@ for (int p = 0; p < paths.Count; p++)
                 // and it is the same question a fix would have to answer.
                 if (!refOverriders.TryGetValue(po.FormKey, out var ov)) refOverriders[po.FormKey] = ov = new List<int>();
                 if (ov.Count == 0 || ov[^1] != p) ov.Add(p);
-                if (po.NavigationDoorLink is { } dl && !dl.NavMesh.IsNull)
+                // WINNER-TAKES-ALL INCLUDES REMOVAL (2026-08-27, caught writing a field card): a
+                // later override that DROPS NavigationDoorLink must erase the entry, or the vanilla
+                // link goes stale in the model — door 0177FB read as a dangling link when its
+                // winning override had removed the link entirely. Same for a door a city overhaul
+                // permanently disables (enable-parent = the player ref with opposite-state, the
+                // standard disable idiom): no NPC can ever use it, so its link belongs to no check.
+                bool permanentlyDisabled = po.EnableParent is { } ep
+                    && ep.Reference.FormKey.ID == 0x14
+                    && ep.Flags.HasFlag(EnableParent.Flag.SetEnableStateToOppositeOfParent);
+                if (po.NavigationDoorLink is { } dl && !dl.NavMesh.IsNull && !permanentlyDisabled)
                     doorNavLink[po.FormKey] = (dl.NavMesh.FormKey, dl.TeleportMarkerTriangle, p);
+                else
+                {
+                    doorNavLink.Remove(po.FormKey);
+                    if (permanentlyDisabled) permanentlyDisabledDoors++;
+                }
             }
             else if (rec is IModeledGetter mo && rec is ISkyrimMajorRecordGetter sm)
             {
@@ -416,6 +431,8 @@ string Overriders(FormKey rec, string role)
 Console.WriteLine();
 Console.WriteLine($"==== DANGLING NAVMESH LINKS (exact; no thresholds) ====");
 Console.WriteLine($"   checked: {doorTriChecked:N0} navmesh door triangles, {doorLinkChecked:N0} door->navmesh links, {edgeChecked:N0} edge links");
+Console.WriteLine($"   (doors whose winning override removed the link or permanently disabled them are out of scope;");
+Console.WriteLine($"    {permanentlyDisabledDoors:N0} permanently-disabled door overrides seen — counted per rule 6)");
 Console.WriteLine($"   findings: {dangling.Count:N0}");
 foreach (var g in dangling.GroupBy(d => d.Trim().Split(' ')[0]).OrderByDescending(g => g.Count()))
     Console.WriteLine($"      {g.Count(),6}  {g.Key}");
