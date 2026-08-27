@@ -1,0 +1,509 @@
+using System.Diagnostics;
+using HarnessShared;
+using HousecarlCore;
+using Mutagen.Bethesda.Plugins;
+using Mutagen.Bethesda.Skyrim;
+
+// NAVMESH OWNERSHIP — who actually supplies the navmesh the game will use, and whose work got
+// thrown away getting there.
+//
+// This is Tier 0 of the triage from Piranha's Whiterun hypothetical, and it deliberately contains
+// NO geometry. Milestone 4 spent two sessions learning that "is this object standing on walkable
+// navmesh" has no answer worth reading. "Which plugin's navmesh wins, and did that silently revert
+// another mod's navmesh work" has an exact answer, straight out of the records, in seconds.
+//
+// Three questions, three failure classes:
+//
+//   CLOBBERED  Mod A re-cuts a vanilla navmesh. Mod B re-cuts the SAME navmesh and wins. If B does
+//              not master A, B never saw A's work and has silently reverted it. This is invisible
+//              to a geometric check — the winning navmesh is perfectly self-consistent, it is just
+//              missing the hole another mod cut for its own objects.
+//
+//   DELETED    A winning navmesh record that is deleted, or that arrives empty where an earlier
+//              provider had geometry. The classic hard break.
+//
+//   UNCUT      A plugin introduces obstructing references into a cell, and NOTHING re-cut that
+//              cell's navmesh afterwards. Nobody can have accounted for those objects, because the
+//              last word on the navmesh was spoken before they existed.
+//
+// usage: navownprobe [--list N] [--plugin Name.esp]
+
+const string Instance = @"C:\Games\Skyrim VR\PiranhaRim VR";
+const string GamePath = @"C:\games\steam\steamapps\common\SkyrimVR";
+string profileDir = Path.Combine(Instance, "profiles", "PiranhaRimVR");
+string modsDir = Path.Combine(Instance, "mods");
+string overwriteDir = Path.Combine(Instance, "overwrite");
+string dataDir = Path.Combine(GamePath, "Data");
+
+int listN = 25;
+string? onlyPlugin = null;
+string? emitPath = null;
+var enablePlugins = new List<string>();
+var disablePlugins = new List<string>();
+for (int i = 0; i < args.Length; i++)
+{
+    if (args[i] == "--list" && i + 1 < args.Length) listN = int.Parse(args[++i]);
+    else if (args[i] == "--plugin" && i + 1 < args.Length) onlyPlugin = args[++i];
+    else if (args[i] == "--emit" && i + 1 < args.Length) emitPath = args[++i];
+    else if (args[i] == "--enable" && i + 1 < args.Length) enablePlugins.Add(args[++i]);
+    else if (args[i] == "--disable" && i + 1 < args.Length) disablePlugins.Add(args[++i]);
+}
+
+var sw = Stopwatch.StartNew();
+var comp = Mo2LoadOrder.ReadComposition(profileDir);
+var arch = ArchiveDiscovery.Discover(profileDir, modsDir, dataDir, overwriteDir, GamePath);
+using var assets = AssetResolver.Build(overwriteDir, modsDir, dataDir, comp.EnabledMods, arch.Archives);
+// The real order unless asked otherwise. --enable / --disable produce a SYNTHETIC order so a finding
+// can be tested against a known intervention without launching the game: enable the patch that
+// --verify says covers a conflict, and the conflict should disappear. See _shared/SyntheticOrder.cs.
+List<string> paths;
+if (enablePlugins.Count > 0 || disablePlugins.Count > 0)
+{
+    var syn = SyntheticOrder.Build(profileDir, modsDir, dataDir, overwriteDir, enablePlugins, disablePlugins);
+    paths = syn.OrderedPaths.ToList();
+    Console.WriteLine($"SYNTHETIC load order: {paths.Count} plugins ({syn.LoadedCount} loaded per the modified set)");
+    foreach (var a in syn.Applied) Console.WriteLine($"   {a}");
+    if (syn.Applied.Count == 0) Console.WriteLine($"   (nothing changed — every named plugin was already in that state)");
+    foreach (var w in syn.Warnings.Where(w => w.Contains("REFUSED") || w.Contains("nothing to do")))
+        Console.WriteLine($"   ⚠ {w}");
+    Console.WriteLine();
+}
+else
+{
+    var order = Mo2LoadOrder.Build(profileDir, modsDir, dataDir, overwriteDir);
+    paths = order.OrderedPaths.ToList();
+    Console.WriteLine($"load order: {paths.Count} plugins\n");
+}
+
+// Which base records can physically obstruct. XMarkers have no mesh and no collision; a dropped
+// coin is not a wall. Kept as data here rather than hard-coded judgement anywhere deeper.
+// Bethesda's own shipped content. A dangling link with no mod on either end is theirs and permanent.
+var Vanilla = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+{ "Skyrim.esm", "Update.esm", "Dawnguard.esm", "HearthFires.esm", "Dragonborn.esm", "SkyrimVR.esm", "_ResourcePack.esl" };
+
+var Obstructing = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+{ "Static", "MoveableStatic", "Tree", "Furniture", "Door", "Container", "Activator", "Flora" };
+
+var pluginKey = new ModKey[paths.Count];
+var masterIdx = new HashSet<int>[paths.Count];
+var navProviders = new Dictionary<FormKey, List<int>>();                  // NAVM -> plugins, in order
+var navCell = new Dictionary<FormKey, FormKey>();                         // NAVM -> its cell
+var navSize = new Dictionary<(FormKey, int), (int V, int T)>();           // (NAVM, plugin) -> geometry size
+var navDeleted = new Dictionary<(FormKey, int), bool>();
+var cellNavPlugins = new Dictionary<FormKey, SortedSet<int>>();           // cell -> plugins supplying navmesh
+var cellNewRefs = new Dictionary<(FormKey Cell, int Plugin), List<FormKey>>();   // base records a plugin INTRODUCES
+var cellName = new Dictionary<FormKey, (string? Edid, bool Interior)>();
+var baseType = new Dictionary<FormKey, string>();
+var baseMesh = new Dictionary<FormKey, string>();
+var baseObnd = new Dictionary<FormKey, Vec3>();     // labelled fallback only
+// Winner-takes-all, written in load order so the last write IS the winning state.
+var navTriCount = new Dictionary<FormKey, int>();
+var navDoorTris = new Dictionary<FormKey, (int Tri, FormKey Door)[]>();
+var navEdgeLinks = new Dictionary<FormKey, (FormKey Mesh, int Tri)[]>();
+// Winner-takes-all like the rest, but the PLUGIN is kept too: a dangling door link is a
+// disagreement between whoever last wrote the link and whoever last wrote the navmesh, and naming
+// both is what lets the patch verifier look the pair up.
+var doorNavLink = new Dictionary<FormKey, (FormKey Nav, int Tri, int Plugin)>();   // placed door -> its navmesh link
+var refExists = new HashSet<FormKey>();
+var refOverriders = new Dictionary<FormKey, List<int>>();   // placed ref -> every plugin that touches it
+var refGone = new HashSet<FormKey>();
+
+for (int p = 0; p < paths.Count; p++)
+{
+    ISkyrimModGetter mod;
+    try { mod = SkyrimMod.CreateFromBinaryOverlay(paths[p], SkyrimRelease.SkyrimSE); }
+    catch { pluginKey[p] = ModKey.Null; masterIdx[p] = new HashSet<int>(); continue; }
+
+    using (mod as IDisposable)
+    {
+        pluginKey[p] = mod.ModKey;
+        var mset = new HashSet<int>();
+        try
+        {
+            var names = mod.ModHeader.MasterReferences.Select(m => m.Master).ToHashSet();
+            for (int q = 0; q < p; q++) if (names.Contains(pluginKey[q])) mset.Add(q);
+        }
+        catch { }
+        masterIdx[p] = mset;
+
+        // Deletion lives on the record, not on the extracted geometry, so it is read directly.
+        var deletedHere = new HashSet<FormKey>();
+        foreach (var rec in mod.EnumerateMajorRecords())
+        {
+            if (rec is INavigationMeshGetter nm)
+            {
+                if (nm.IsDeleted) deletedHere.Add(nm.FormKey);
+                if (nm.Data is { } nd)
+                {
+                    navTriCount[nm.FormKey] = nd.Triangles.Count;
+                    navDoorTris[nm.FormKey] = nd.DoorTriangles.Select(d => ((int)d.TriangleBeforeDoor, d.Door.FormKey)).ToArray();
+                    navEdgeLinks[nm.FormKey] = nd.EdgeLinks.Select(e => (e.Mesh.FormKey, (int)e.TriangleIndex)).ToArray();
+                }
+            }
+            else if (rec is IPlacedObjectGetter po)
+            {
+                if (po.IsDeleted) { refGone.Add(po.FormKey); refExists.Remove(po.FormKey); }
+                else { refExists.Add(po.FormKey); refGone.Remove(po.FormKey); }
+                // Every plugin that touches this door, not just the last. A dangling DOOR-* finding
+                // names only one party, so there is no master PAIR for the patch verifier to look
+                // up — but "who else already overrides this exact record" is answerable right here,
+                // and it is the same question a fix would have to answer.
+                if (!refOverriders.TryGetValue(po.FormKey, out var ov)) refOverriders[po.FormKey] = ov = new List<int>();
+                if (ov.Count == 0 || ov[^1] != p) ov.Add(p);
+                if (po.NavigationDoorLink is { } dl && !dl.NavMesh.IsNull)
+                    doorNavLink[po.FormKey] = (dl.NavMesh.FormKey, dl.TeleportMarkerTriangle, p);
+            }
+            else if (rec is IModeledGetter mo && rec is ISkyrimMajorRecordGetter sm)
+            {
+                baseType[sm.FormKey] = rec.GetType().Name.Replace("BinaryOverlay", "");
+                if (mo.Model?.File is { } mf && !string.IsNullOrWhiteSpace(mf.GivenPath)) baseMesh[sm.FormKey] = mf.GivenPath;
+                if (rec is IObjectBoundedGetter ob && ob.ObjectBounds is { } bnd)
+                    baseObnd[sm.FormKey] = new Vec3(MathF.Abs(bnd.Second.X - bnd.First.X),
+                                                    MathF.Abs(bnd.Second.Y - bnd.First.Y),
+                                                    MathF.Abs(bnd.Second.Z - bnd.First.Z));
+            }
+        }
+
+        foreach (var cp in PlacementExtract.FromMod(mod))
+        {
+            cellName[cp.Cell] = (cp.CellEditorId, cp.Interior);
+
+            foreach (var nav in cp.Navmeshes)
+            {
+                if (!navProviders.TryGetValue(nav.FormKey, out var l)) navProviders[nav.FormKey] = l = new List<int>();
+                if (l.Count == 0 || l[^1] != p) l.Add(p);
+                navCell[nav.FormKey] = cp.Cell;
+                navSize[(nav.FormKey, p)] = (nav.Vertices.Count, nav.Triangles.Count);
+                navDeleted[(nav.FormKey, p)] = deletedHere.Contains(nav.FormKey);
+                if (!cellNavPlugins.TryGetValue(cp.Cell, out var s)) cellNavPlugins[cp.Cell] = s = new SortedSet<int>();
+                s.Add(p);
+            }
+
+            foreach (var r in cp.Refs)
+            {
+                if (r.InitiallyDisabled || r.Deleted) continue;
+                if (r.FormKey.ModKey != mod.ModKey) continue;                  // an override is not an introduction
+                if (r.Base is not { } bk) continue;
+                if (!baseType.TryGetValue(bk, out var bt) || !Obstructing.Contains(bt)) continue;
+                if (!cellNewRefs.TryGetValue((cp.Cell, p), out var bag)) cellNewRefs[(cp.Cell, p)] = bag = new List<FormKey>();
+                bag.Add(bk);
+            }
+        }
+    }
+    if ((p + 1) % 150 == 0) Console.WriteLine($"   ... {p + 1}/{paths.Count} plugins, {sw.Elapsed.TotalSeconds:0}s");
+}
+
+Console.WriteLine($"\nindexed {navProviders.Count:N0} navmesh records across {cellNavPlugins.Count:N0} cells  ({sw.Elapsed.TotalSeconds:0.0}s)");
+string Cell(FormKey c) => cellName.TryGetValue(c, out var v) ? (v.Edid ?? c.ToString()) + (v.Interior ? " (int)" : " (ext)") : c.ToString();
+bool Wanted(int p) => onlyPlugin is null || string.Equals(pluginKey[p].FileName, onlyPlugin, StringComparison.OrdinalIgnoreCase);
+
+// ---------------------------------------------------------------------------------------
+// CLOBBERED — B overrode the same navmesh A had already re-cut, without mastering A.
+// ---------------------------------------------------------------------------------------
+var clobber = new List<(FormKey Nav, int Loser, int Winner, int LoserT, int WinnerT, bool Material)>();
+foreach (var (nav, provs) in navProviders)
+{
+    if (provs.Count < 3) continue;              // needs a definer plus two competing editors
+    int winner = provs[^1];
+    for (int i = provs.Count - 2; i >= 1; i--)  // index 0 is the original definer
+    {
+        int loser = provs[i];
+        if (masterIdx[winner].Contains(loser)) continue;   // the winner SAW this edit; not a clobber
+        if (!Wanted(loser) && !Wanted(winner)) continue;
+        var lt = navSize.GetValueOrDefault((nav, loser));
+        var wt = navSize.GetValueOrDefault((nav, winner));
+        // Same vertex AND triangle count almost always means the winner forwarded the record
+        // unchanged rather than re-cutting it, which reverts nothing. Reported separately.
+        bool material = lt.V != wt.V || lt.T != wt.T;
+        clobber.Add((nav, loser, winner, lt.T, wt.T, material));
+        break;
+    }
+}
+
+Console.WriteLine($"\n==== CLOBBERED: one mod's navmesh work silently reverted by another ====");
+Console.WriteLine($"   navmesh records affected : {clobber.Count:N0}"
+                + $"   ({clobber.Count(c => c.Material):N0} where the geometry actually differs)");
+Console.WriteLine($"   (the winner does not master the loser, so it cannot have seen that edit)");
+foreach (var g in clobber.Where(c => c.Material)
+                         .GroupBy(c => (Loser: pluginKey[c.Loser].FileName, Winner: pluginKey[c.Winner].FileName))
+                         .OrderByDescending(g => g.Count()).Take(listN))
+{
+    var ex = g.First();
+    Console.WriteLine($"   {g.Count(),5} navmesh  {g.Key.Loser}");
+    Console.WriteLine($"            reverted by  {g.Key.Winner}    e.g. {ex.Nav} in {Cell(navCell.GetValueOrDefault(ex.Nav))}"
+                    + $"  ({ex.LoserT} tris -> {ex.WinnerT})");
+}
+
+// ---------------------------------------------------------------------------------------
+// DELETED / EMPTIED — the hard break.
+// ---------------------------------------------------------------------------------------
+var broken = new List<string>();
+foreach (var (nav, provs) in navProviders)
+{
+    int winner = provs[^1];
+    if (!Wanted(winner)) continue;
+    if (navDeleted.GetValueOrDefault((nav, winner)))
+        broken.Add($"   DELETED  {nav} in {Cell(navCell.GetValueOrDefault(nav))} by {pluginKey[winner].FileName}");
+    else if (provs.Count > 1)
+    {
+        var w = navSize.GetValueOrDefault((nav, winner));
+        var first = navSize.GetValueOrDefault((nav, provs[0]));
+        if (w.T == 0 && first.T > 0)
+            broken.Add($"   EMPTIED  {nav} in {Cell(navCell.GetValueOrDefault(nav))} by {pluginKey[winner].FileName} ({first.T} tris -> 0)");
+    }
+}
+Console.WriteLine($"\n==== DELETED or EMPTIED navmesh (hard break) ====");
+Console.WriteLine($"   findings: {broken.Count:N0}");
+foreach (var b in broken.Take(listN)) Console.WriteLine(b);
+
+// ---------------------------------------------------------------------------------------
+// DANGLING LINKS — a navmesh index pointing at a triangle that the winning record does not have.
+// ---------------------------------------------------------------------------------------
+// Validated against the real world before it was written: Skyrim's "Navigation Door Link" errors
+// and broken door teleports are a known, reported failure class, and the xEdit issue tracker has an
+// open report that xEdit mis-reports it for OVERRIDDEN doors (TES5Edit#1265). That is exactly the
+// case a winning-state resolver gets right and a per-plugin view cannot: the index has to be checked
+// against the navmesh the GAME will load, not the one the plugin shipped with.
+//
+// Three links, all exact, no thresholds:
+//   navmesh DoorTriangle -> a triangle index in ITSELF, plus a door reference that must still exist
+//   placed door          -> a navmesh and a triangle index in it
+//   navmesh EdgeLink     -> ANOTHER navmesh and a triangle index in that one (cross-cell pathing)
+var dangling = new List<string>();
+// The same findings, structurally, for --emit. Plugin indices are -1 where the detector genuinely
+// cannot name a second party (a link into a navmesh that is simply absent names no culprit).
+var dangleStruct = new List<(string Kind, FormKey Rec, string RecRole, FormKey Other, string OtherRole, int PluginA, int PluginB, string Summary)>();
+int doorTriChecked = 0, doorLinkChecked = 0, edgeChecked = 0;
+int NavOwner(FormKey nav) => navProviders.TryGetValue(nav, out var pr) && pr.Count > 0 ? pr[^1] : -1;
+
+foreach (var (nav, tris) in navDoorTris)
+{
+    if (!navTriCount.TryGetValue(nav, out var count)) continue;
+    foreach (var (tri, door) in tris)
+    {
+        doorTriChecked++;
+        if (tri >= count)
+        {
+            dangling.Add($"   DOOR-TRI   navmesh {nav} in {Cell(navCell.GetValueOrDefault(nav))} points at triangle {tri} of {count}");
+            dangleStruct.Add(("DOOR-TRI", nav, "navmesh", door, "door", NavOwner(nav), -1,
+                              $"navmesh {nav} in {Cell(navCell.GetValueOrDefault(nav))} points at triangle {tri} of {count}"));
+        }
+        else if (!door.IsNull && refGone.Contains(door))
+        {
+            dangling.Add($"   DOOR-GONE  navmesh {nav} in {Cell(navCell.GetValueOrDefault(nav))} links door {door}, which is DELETED in the winning state");
+            dangleStruct.Add(("DOOR-GONE", nav, "navmesh", door, "door", NavOwner(nav), -1,
+                              $"navmesh {nav} in {Cell(navCell.GetValueOrDefault(nav))} links door {door}, deleted in the winning state"));
+        }
+    }
+}
+
+foreach (var (door, link) in doorNavLink)
+{
+    doorLinkChecked++;
+    if (!navTriCount.TryGetValue(link.Nav, out var count))
+    {
+        dangling.Add($"   DOOR-NAV   door {door} links navmesh {link.Nav}, which is not in the winning state");
+        dangleStruct.Add(("DOOR-NAV", door, "door", link.Nav, "navmesh", link.Plugin, -1,
+                          $"door {door} links navmesh {link.Nav}, which is not in the winning state"));
+    }
+    else if (link.Tri >= count)
+    {
+        dangling.Add($"   DOOR-IDX   door {door} in {Cell(navCell.GetValueOrDefault(link.Nav))} points at triangle {link.Tri} of {count}");
+        dangleStruct.Add(("DOOR-IDX", door, "door", link.Nav, "navmesh", link.Plugin, NavOwner(link.Nav),
+                          $"door {door} in {Cell(navCell.GetValueOrDefault(link.Nav))} points at triangle {link.Tri} of {count}"));
+    }
+}
+
+foreach (var (nav, links) in navEdgeLinks)
+    foreach (var (mesh, tri) in links)
+    {
+        if (mesh.IsNull) continue;
+        edgeChecked++;
+        if (!navTriCount.TryGetValue(mesh, out var count))
+        {
+            dangling.Add($"   EDGE-NAV   navmesh {nav} in {Cell(navCell.GetValueOrDefault(nav))} edge-links {mesh}, which is not in the winning state");
+            dangleStruct.Add(("EDGE-NAV", nav, "navmesh", mesh, "navmesh", NavOwner(nav), -1,
+                              $"navmesh {nav} in {Cell(navCell.GetValueOrDefault(nav))} edge-links {mesh}, which is not in the winning state"));
+        }
+        else if (tri >= count)
+        {
+            dangling.Add($"   EDGE-IDX   navmesh {nav} in {Cell(navCell.GetValueOrDefault(nav))} edge-links {mesh} triangle {tri} of {count}");
+            dangleStruct.Add(("EDGE-IDX", nav, "navmesh", mesh, "navmesh", NavOwner(nav), NavOwner(mesh),
+                              $"navmesh {nav} in {Cell(navCell.GetValueOrDefault(nav))} edge-links {mesh} triangle {tri} of {count}"));
+        }
+    }
+
+// Who, in this load order, already overrides the record carrying the bad index? A dangling link
+// names one party, so the patch verifier has no master pair to look up; this is the record-level
+// answer to the same question, and it is the shortlist of plugins a fix could live in.
+string Overriders(FormKey rec, string role)
+{
+    var l = role == "navmesh"
+        ? navProviders.GetValueOrDefault(rec)
+        : refOverriders.GetValueOrDefault(rec);
+    if (l is null || l.Count == 0) return "(nothing in this order provides it)";
+    return string.Join(" -> ", l.Select(i => pluginKey[i].FileName.String));
+}
+
+Console.WriteLine();
+Console.WriteLine($"==== DANGLING NAVMESH LINKS (exact; no thresholds) ====");
+Console.WriteLine($"   checked: {doorTriChecked:N0} navmesh door triangles, {doorLinkChecked:N0} door->navmesh links, {edgeChecked:N0} edge links");
+Console.WriteLine($"   findings: {dangling.Count:N0}");
+foreach (var g in dangling.GroupBy(d => d.Trim().Split(' ')[0]).OrderByDescending(g => g.Count()))
+    Console.WriteLine($"      {g.Count(),6}  {g.Key}");
+foreach (var d in dangling.Take(listN)) Console.WriteLine(d);
+
+// ⚠️ NAMING ONE END IS NOT ENOUGH, and the first version of this made that mistake. A dangling
+// link has two ends: the record carrying the bad INDEX, and the record it points INTO. Printing
+// only the index end said "33 of these are provided by Skyrim.esm alone", which reads as "vanilla's
+// own fault" — and that is not what it means. Vanilla's index dangles the moment a MOD re-cuts the
+// navmesh it points into. Classifying both ends separates Bethesda's permanent floor from the
+// cross-plugin breakage this project exists to find, which is method rule 1 applied to a check that
+// had quietly gone absolute.
+bool ModTouched(FormKey rec, string role)
+{
+    var l = role == "navmesh" ? navProviders.GetValueOrDefault(rec) : refOverriders.GetValueOrDefault(rec);
+    return l is not null && l.Any(i => !Vanilla.Contains(pluginKey[i].FileName.String));
+}
+
+Console.WriteLine();
+Console.WriteLine($"   ---- the two ends of each dangling link, split by population ----");
+var byClass = dangleStruct.GroupBy(d =>
+{
+    bool src = ModTouched(d.Rec, d.RecRole);
+    bool dst = ModTouched(d.Other, d.OtherRole);
+    return (src, dst) switch
+    {
+        (false, false) => "A. neither end touched by a mod   -> Bethesda's own, permanent FLOOR",
+        (false, true)  => "B. a mod re-cut the TARGET, breaking a vanilla index   -> cross-plugin",
+        (true, false)  => "C. a mod wrote the INDEX, target is vanilla            -> cross-plugin",
+        (true, true)   => "D. mods on both ends                                   -> cross-plugin",
+    };
+}).OrderBy(g => g.Key).ToList();
+foreach (var g in byClass) Console.WriteLine($"   {g.Count(),4}  {g.Key}");
+Console.WriteLine($"   Only B, C and D are findings. A is the floor, and it is measured rather than assumed.");
+
+Console.WriteLine();
+Console.WriteLine($"   ---- who already overrides the record carrying each bad index (B/C/D only) ----");
+Console.WriteLine($"   (a dangling link names one party, so there is no master pair to look a patch up against;");
+Console.WriteLine($"    this is the record-level answer, and the shortlist of plugins a fix could live in)");
+foreach (var g in dangleStruct.Where(d => ModTouched(d.Rec, d.RecRole) || ModTouched(d.Other, d.OtherRole))
+                              .GroupBy(d => $"{Overriders(d.Rec, d.RecRole)}   ==> into: {Overriders(d.Other, d.OtherRole)}")
+                              .OrderByDescending(g => g.Count()).Take(listN))
+    Console.WriteLine($"   {g.Count(),4}  {g.Key}");
+
+// ---------------------------------------------------------------------------------------
+// Is this base record big enough to obstruct anything?
+// ---------------------------------------------------------------------------------------
+// The first run counted every Static, and Lux alone contributed 9,443 "obstructing" references —
+// candles and light fixtures. Type is necessary and nowhere near sufficient. Measured geometry per
+// the standing rule (OBND is not ground truth); OBND only when no mesh resolves, and counted so the
+// fallback's share is visible rather than blended in.
+float MinFootprint = 96f, MinHeight = 64f;
+var sizeCache = new Dictionary<FormKey, bool?>();
+int measured = 0, fellBack = 0, unknown = 0;
+
+bool IsBlocker(FormKey baseKey)
+{
+    if (sizeCache.TryGetValue(baseKey, out var hit)) return hit ?? false;
+
+    Vec3? size = null;
+    if (baseMesh.TryGetValue(baseKey, out var rel))
+    {
+        var full = rel.StartsWith("meshes", StringComparison.OrdinalIgnoreCase) ? rel : Path.Combine("meshes", rel);
+        var res = assets.ResolveForPlacement(full);
+        if (res.Sources.Count > 0)
+        {
+            var (bytes, _) = AssetResolver.ReadPlacementSource(res.Sources[0]);
+            if (bytes is not null)
+            {
+                var o = NifGeometry.Measure(bytes);
+                if (o.Model is { Bounds.IsEmpty: false } mdl) { size = mdl.Bounds.Size; measured++; }
+            }
+        }
+    }
+    if (size is null && baseObnd.TryGetValue(baseKey, out var ob)) { size = ob; fellBack++; }
+    if (size is null) { unknown++; sizeCache[baseKey] = false; return false; }
+
+    var v = size.Value;
+    bool blocker = MathF.Max(v.X, v.Y) >= MinFootprint && v.Z >= MinHeight;
+    sizeCache[baseKey] = blocker;
+    return blocker;
+}
+
+// ---------------------------------------------------------------------------------------
+// UNCUT — objects introduced after the last word on the navmesh.
+// ---------------------------------------------------------------------------------------
+// Not "these objects block the navmesh" — that question has no answer worth reading. This is the
+// weaker, exact claim: nobody re-cut the navmesh after these objects existed, so nobody can have
+// accounted for them. It is a statement about who did what, in what order, not about space.
+var uncut = new List<(FormKey Cell, int Plugin, int Refs, string NavOwners)>();
+foreach (var ((cell, plugin), bag) in cellNewRefs)
+{
+    if (!Wanted(plugin)) continue;
+    int n = bag.Count(IsBlocker);
+    if (n == 0) continue;
+    if (!cellNavPlugins.TryGetValue(cell, out var navPlugins) || navPlugins.Count == 0) continue;
+    if (navPlugins.Contains(plugin)) continue;                       // it navmeshed its own work
+    // A later navmesh edit only accounts for these objects if that plugin could SEE them, which
+    // means it masters the plugin that introduced them. A later edit by a stranger saw nothing.
+    if (navPlugins.Any(np => np > plugin && masterIdx[np].Contains(plugin))) continue;
+    uncut.Add((cell, plugin, n, string.Join("+", navPlugins.Select(np => pluginKey[np].FileName))));
+}
+
+Console.WriteLine($"\n==== UNCUT: obstructing refs introduced after the navmesh's last word ====");
+Console.WriteLine($"   cell/plugin pairs : {uncut.Count:N0}   ({uncut.Sum(u => u.Refs):N0} references)");
+Console.WriteLine($"   size source: {measured:N0} base records measured from the mesh, {fellBack:N0} from OBND (fallback), {unknown:N0} unresolvable");
+Console.WriteLine($"   blocker = footprint >= {MinFootprint:0}u and height >= {MinHeight:0}u");
+foreach (var g in uncut.GroupBy(u => pluginKey[u.Plugin].FileName).OrderByDescending(g => g.Sum(u => u.Refs)).Take(listN))
+    Console.WriteLine($"   {g.Sum(u => u.Refs),6} refs in {g.Count(),4} cells   {g.Key}");
+
+Console.WriteLine($"\n   ---- worst individual cells ----");
+foreach (var u in uncut.OrderByDescending(u => u.Refs).Take(listN))
+    Console.WriteLine($"   {u.Refs,5} refs  {pluginKey[u.Plugin].FileName,-46} into {Cell(u.Cell),-34} navmesh owned by {u.NavOwners}");
+
+// ---------------------------------------------------------------------------------------
+// --emit — hand the exact broken records to the patch verifier.
+// ---------------------------------------------------------------------------------------
+// Only the two EXACT checks are emitted. UNCUT is deliberately excluded: it is baseline-limited
+// (official Bethesda content trips it 5,100 times) and is ranking, not a finding, so feeding it to
+// a verifier would dress a ranking up as a defect.
+if (emitPath is not null)
+{
+    var conflicts = new List<Conflict>();
+
+    foreach (var g in clobber.Where(c => c.Material)
+                             .GroupBy(c => (c.Loser, c.Winner)))
+    {
+        var loser = pluginKey[g.Key.Loser].FileName.String;
+        var winner = pluginKey[g.Key.Winner].FileName.String;
+        conflicts.Add(new Conflict(
+            "CLOBBERED", loser, winner,
+            $"{g.Count()} navmesh record(s) re-cut by {loser} and then re-cut again by {winner}, which does not master it",
+            g.Select(c => new ConflictRecord(c.Nav.ToString(), "navmesh",
+                          $"{Cell(navCell.GetValueOrDefault(c.Nav))}  {c.LoserT} tris -> {c.WinnerT}")).ToList()));
+    }
+
+    foreach (var d in dangleStruct)
+    {
+        // A fix has to override the record carrying the bad index. The other end is context: a
+        // patch that only re-states the target navmesh has not repaired the pointer into it.
+        var necessary = new List<ConflictRecord> { new(d.Rec.ToString(), d.RecRole, Cell(navCell.GetValueOrDefault(d.Rec))) };
+        // For an unpaired finding this chain IS the deliverable: it names every plugin that already
+        // touches the broken record, which is where a fix would have to go.
+        var chain = Overriders(d.Rec, d.RecRole);
+        var other = new List<ConflictRecord> { new(d.Other.ToString(), d.OtherRole, null) };
+        conflicts.Add(new Conflict(
+            d.Kind,
+            d.PluginA >= 0 ? pluginKey[d.PluginA].FileName.String : "",
+            d.PluginB >= 0 ? pluginKey[d.PluginB].FileName.String : "",
+            d.Summary + $"   [record provided by: {chain}]", necessary, other));
+    }
+
+    ConflictIo.Write(emitPath, new ConflictFile("navownprobe", Instance,
+        DateTime.UtcNow.ToString("yyyy-MM-dd HH:mm:ssZ"), conflicts));
+    Console.WriteLine($"\nemitted {conflicts.Count:N0} conflicts ({conflicts.Count(c => c.B.Length == 0)} with no second party to name) -> {emitPath}");
+}
+
+Console.WriteLine($"\nelapsed {sw.Elapsed.TotalSeconds:0.0}s");
+return 0;

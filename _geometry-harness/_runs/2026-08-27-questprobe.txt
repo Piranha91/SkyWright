@@ -1,0 +1,353 @@
+public types scanned: 6,242
+
+=== QUEST  (60) ===
+   GetIsCrashLandRequestConditionData, GetIsHastyLandRequestConditionData, GetQuestCompletedConditionData, GetQuestRunningConditionData, GetQuestVariableConditionData, GetVMQuestVariableConditionData, GroupQuestConstants, IGetIsCrashLandRequestConditionData, IGetIsCrashLandRequestConditionDataGetter, IGetIsHastyLandRequestConditionData, IGetIsHastyLandRequestConditionDataGetter, IGetQuestCompletedConditionData, IGetQuestCompletedConditionDataGetter, IGetQuestRunningConditionData, IGetQuestRunningConditionDataGetter, IGetQuestVariableConditionData, IGetQuestVariableConditionDataGetter, IGetVMQuestVariableConditionData, IGetVMQuestVariableConditionDataGetter, IPerkQuestEffect, IPerkQuestEffectGetter, IQuest, IQuestAdapter, IQuestAdapterGetter, IQuestAlias, IQuestAliasGetter, IQuestFragmentAlias, IQuestFragmentAliasGetter, IQuestGetter, IQuestInternal, IQuestLogEntry, IQuestLogEntryGetter, IQuestObjective, IQuestObjectiveGetter, IQuestObjectiveTarget, IQuestObjectiveTargetGetter, IQuestScriptFragment, IQuestScriptFragmentGetter, IQuestStage, IQuestStageGetter, IQuestTarget, IQuestTargetGetter, IStoryManagerQuest, IStoryManagerQuestGetter, IStoryManagerQuestNode, IStoryManagerQuestNodeGetter, IStoryManagerQuestNodeInternal, PerkQuestEffect, Quest, QuestAdapter, QuestAlias, QuestFragmentAlias, QuestLogEntry, QuestObjective, QuestObjectiveTarget, QuestScriptFragment, QuestStage, QuestTarget, StoryManagerQuest, StoryManagerQuestNode
+
+=== ALIAS  (56) ===
+   ExternalAliasReference, FindMatchingRefNearAlias, GetInCurrentLocAliasConditionData, GetIsAliasRefConditionData, GetIsEditorLocAliasConditionData, GetKeywordDataForAliasConditionData, GetLocAliasRefTypeAliveCountConditionData, GetLocAliasRefTypeDeadCountConditionData, GetLocationAliasClearedConditionData, HasSameEditorLocAsRefAliasConditionData, IAliasVoiceType, IAliasVoiceTypeGetter, IExternalAliasReference, IExternalAliasReferenceGetter, IFindMatchingRefNearAlias, IFindMatchingRefNearAliasGetter, IGetInCurrentLocAliasConditionData, IGetInCurrentLocAliasConditionDataGetter, IGetIsAliasRefConditionData, IGetIsAliasRefConditionDataGetter, IGetIsEditorLocAliasConditionData, IGetIsEditorLocAliasConditionDataGetter, IGetKeywordDataForAliasConditionData, IGetKeywordDataForAliasConditionDataGetter, IGetLocAliasRefTypeAliveCountConditionData, IGetLocAliasRefTypeAliveCountConditionDataGetter, IGetLocAliasRefTypeDeadCountConditionData, IGetLocAliasRefTypeDeadCountConditionDataGetter, IGetLocationAliasClearedConditionData, IGetLocationAliasClearedConditionDataGetter, IHasSameEditorLocAsRefAliasConditionData, IHasSameEditorLocAsRefAliasConditionDataGetter, IIsInSameCurrentLocAsRefAliasConditionData, IIsInSameCurrentLocAsRefAliasConditionDataGetter, IIsLocAliasLoadedConditionData, IIsLocAliasLoadedConditionDataGetter, ILocAliasHasKeywordConditionData, ILocAliasHasKeywordConditionDataGetter, ILocAliasIsLocationConditionData, ILocAliasIsLocationConditionDataGetter, ILocationAliasReference, ILocationAliasReferenceGetter, IPackageTargetAlias, IPackageTargetAliasGetter, IQuestAlias, IQuestAliasGetter, IQuestFragmentAlias, IQuestFragmentAliasGetter, IsInSameCurrentLocAsRefAliasConditionData, IsLocAliasLoadedConditionData, LocAliasHasKeywordConditionData, LocAliasIsLocationConditionData, LocationAliasReference, PackageTargetAlias, QuestAlias, QuestFragmentAlias
+
+=== OBJECTIVE / TARGET  (9) ===
+   IQuestObjective, IQuestObjectiveGetter, IQuestObjectiveTarget, IQuestObjectiveTargetGetter, IQuestTarget, IQuestTargetGetter, QuestObjective, QuestObjectiveTarget, QuestTarget
+
+=== PACKAGE  (96) ===
+   APackageData, APackageTarget, GetCurrentAIPackageConditionData, GetIsCurrentPackageConditionData, GetNumericPackageDataConditionData, GetWithinPackageLocationConditionData, IAPackageData, IAPackageDataGetter, IAPackageTarget, IAPackageTargetGetter, IGetCurrentAIPackageConditionData, IGetCurrentAIPackageConditionDataGetter, IGetIsCurrentPackageConditionData, IGetIsCurrentPackageConditionDataGetter, IGetNumericPackageDataConditionData, IGetNumericPackageDataConditionDataGetter, IGetWithinPackageLocationConditionData, IGetWithinPackageLocationConditionDataGetter, IIsContinuingPackagePCNearConditionData, IIsContinuingPackagePCNearConditionDataGetter, IIsNullPackageDataConditionData, IIsNullPackageDataConditionDataGetter, IIsScenePackageRunningConditionData, IIsScenePackageRunningConditionDataGetter, IPackage, IPackageAdapter, IPackageAdapterGetter, IPackageBranch, IPackageBranchGetter, IPackageDataBool, IPackageDataBoolGetter, IPackageDataFloat, IPackageDataFloatGetter, IPackageDataInt, IPackageDataIntGetter, IPackageDataLocation, IPackageDataLocationGetter, IPackageDataObjectList, IPackageDataObjectListGetter, IPackageDataTarget, IPackageDataTargetGetter, IPackageDataTopic, IPackageDataTopicGetter, IPackageEvent, IPackageEventGetter, IPackageFlagsOverride, IPackageFlagsOverrideGetter, IPackageGetter, IPackageIdles, IPackageIdlesGetter, IPackageInternal, IPackageRoot, IPackageRootGetter, IPackageScriptFragments, IPackageScriptFragmentsGetter, IPackageTargetAlias, IPackageTargetAliasGetter, IPackageTargetLinkedReference, IPackageTargetLinkedReferenceGetter, IPackageTargetObjectID, IPackageTargetObjectIDGetter, IPackageTargetObjectType, IPackageTargetObjectTypeGetter, IPackageTargetSelf, IPackageTargetSelfGetter, IPackageTargetSpecificReference, IPackageTargetSpecificReferenceGetter, IPackageTargetUnknown, IPackageTargetUnknownGetter, IReadOnlySeparatedMasterPackage, IsContinuingPackagePCNearConditionData, IsNullPackageDataConditionData, IsScenePackageRunningConditionData, Package, PackageAdapter, PackageBranch, PackageDataBool, PackageDataFloat, PackageDataInt, PackageDataLocation, PackageDataObjectList, PackageDataTarget, PackageDataTopic, PackageEvent, PackageFlagsOverride, PackageIdles, PackageRoot, PackageScriptFragments, PackageTargetAlias, PackageTargetLinkedReference, PackageTargetObjectID, PackageTargetObjectType, PackageTargetSelf, PackageTargetSpecificReference, PackageTargetUnknown, SeparatedMasterPackage
+
+=== LOCATION  (84) ===
+   ALocationTarget, GameLocations, GetHitLocationConditionData, GetIsEditorLocationConditionData, GetKeywordDataForCurrentLocationConditionData, GetKeywordDataForLocationConditionData, GetLocationAliasClearedConditionData, GetLocationClearedConditionData, GetWithinPackageLocationConditionData, GroupLocationMarker, IALocationTarget, IALocationTargetGetter, IComplexLocation, IComplexLocationGetter, IGetHitLocationConditionData, IGetHitLocationConditionDataGetter, IGetIsEditorLocationConditionData, IGetIsEditorLocationConditionDataGetter, IGetKeywordDataForCurrentLocationConditionData, IGetKeywordDataForCurrentLocationConditionDataGetter, IGetKeywordDataForLocationConditionData, IGetKeywordDataForLocationConditionDataGetter, IGetLocationAliasClearedConditionData, IGetLocationAliasClearedConditionDataGetter, IGetLocationClearedConditionData, IGetLocationClearedConditionDataGetter, IGetWithinPackageLocationConditionData, IGetWithinPackageLocationConditionDataGetter, IIsLocationLoadedConditionData, IIsLocationLoadedConditionDataGetter, ILocAliasIsLocationConditionData, ILocAliasIsLocationConditionDataGetter, ILocation, ILocationAliasReference, ILocationAliasReferenceGetter, ILocationCell, ILocationCellGetter, ILocationCoordinate, ILocationCoordinateGetter, ILocationFallback, ILocationFallbackGetter, ILocationGetter, ILocationHasKeywordConditionData, ILocationHasKeywordConditionDataGetter, ILocationHasRefTypeConditionData, ILocationHasRefTypeConditionDataGetter, ILocationInternal, ILocationKeyword, ILocationKeywordGetter, ILocationObjectId, ILocationObjectIdGetter, ILocationObjectType, ILocationObjectTypeGetter, ILocationReferenceType, ILocationReferenceTypeGetter, ILocationReferenceTypeInternal, ILocationRefTypeReference, ILocationRefTypeReferenceGetter, ILocationTarget, ILocationTargetGetter, ILocationTargetRadius, ILocationTargetRadiusGetter, IPackageDataLocation, IPackageDataLocationGetter, IsLocationLoadedConditionData, LocAliasIsLocationConditionData, Location, LocationAliasReference, LocationCell, LocationCoordinate, LocationExt, LocationFallback, LocationHasKeywordConditionData, LocationHasRefTypeConditionData, LocationKeyword, LocationObjectId, LocationObjectType, LocationReferenceType, LocationRefTypeReference, LocationTarget, LocationTargetRadius, PackageDataLocation, RecordLocationMarker, WorldspaceCellLocationCache
+
+──────────── the quest graph ────────────
+
+### Mutagen.Bethesda.Skyrim.IQuestGetter
+    : ISkyrimMajorRecordGetter, IMajorRecordGetter, IFormVersionGetter, IMajorRecordIdentifierGetter, IFormKeyGetter, IFormLinkContainerGetter, IAssetLinkContainerGetter, IFormLinkIdentifier, ILinkIdentifier, IEquatable<IFormLinkGetter>
+    P IReadOnlyList<IQuestAliasGetter>                         Aliases
+    P ITranslatedStringGetter                                  Description
+    P IReadOnlyList<IConditionGetter>                          DialogConditions
+    P Nullable<RecordType>                                     Event
+    P IReadOnlyList<IConditionGetter>                          EventConditions
+    P String                                                   Filter
+    P Flag                                                     Flags
+    P ITranslatedStringGetter                                  Name
+    P Nullable<UInt32>                                         NextAliasID
+    P IReadOnlyList<IQuestObjectiveGetter>                     Objectives
+    P Byte                                                     Priority
+    P Byte                                                     QuestFormVersion
+    P IReadOnlyList<IQuestStageGetter>                         Stages
+    P IReadOnlyList<IFormLinkGetter<IGlobalGetter>>            TextDisplayGlobals
+    P TypeEnum                                                 Type
+    P Int32                                                    Unknown
+    P IQuestAdapterGetter                                      VirtualMachineAdapter
+
+### Mutagen.Bethesda.Skyrim.IQuestObjectiveGetter
+    : ILoquiObject, IBinaryItem, IFormLinkContainerGetter, ILoquiObject<IQuestObjectiveGetter>, ILoquiObjectGetter, IPrintable
+    P ITranslatedStringGetter                                  DisplayText
+    P Nullable<Flag>                                           Flags
+    P UInt16                                                   Index
+    P IReadOnlyList<IQuestObjectiveTargetGetter>               Targets
+
+### Mutagen.Bethesda.Skyrim.IQuestTargetGetter
+    : ILoquiObject, IBinaryItem, IFormLinkContainerGetter, ILoquiObject<IQuestTargetGetter>, ILoquiObjectGetter, IPrintable
+    P IReadOnlyList<IConditionGetter>                          Conditions
+    P TargetFlag                                               Flags
+    P IFormLinkGetter<IPlacedGetter>                           Target
+
+### Mutagen.Bethesda.Skyrim.IQuestObjectiveTargetGetter
+    : ILoquiObject, IBinaryItem, IFormLinkContainerGetter, ILoquiObject<IQuestObjectiveTargetGetter>, ILoquiObjectGetter, IPrintable
+    P Int32                                                    AliasID
+    P IReadOnlyList<IConditionGetter>                          Conditions
+    P TargetFlag                                               Flags
+
+### Mutagen.Bethesda.Skyrim.IFindMatchingRefNearAliasGetter
+    : ILoquiObject, IBinaryItem, ILoquiObject<IFindMatchingRefNearAliasGetter>, ILoquiObjectGetter, IPrintable
+    P Nullable<Int16>                                          AliasID
+    P Nullable<TypeEnum>                                       Type
+
+### Mutagen.Bethesda.Skyrim.IFindMatchingRefFromEventGetter
+    : ILoquiObject, IBinaryItem, ILoquiObject<IFindMatchingRefFromEventGetter>, ILoquiObjectGetter, IPrintable
+    P Nullable<EventMember>                                    EventData
+    P Nullable<RecordType>                                     FromEvent
+
+### Mutagen.Bethesda.Skyrim.ILocationAliasReferenceGetter
+    : ILoquiObject, IBinaryItem, IFormLinkContainerGetter, ILoquiObject<ILocationAliasReferenceGetter>, ILoquiObjectGetter, IPrintable
+    P Nullable<Int32>                                          AliasID
+    P IFormLinkNullableGetter<IKeywordGetter>                  Keyword
+    P IFormLinkNullableGetter<ILocationReferenceTypeGetter>    RefType
+
+### Mutagen.Bethesda.Skyrim.IExternalAliasReferenceGetter
+    : ILoquiObject, IBinaryItem, IFormLinkContainerGetter, ILoquiObject<IExternalAliasReferenceGetter>, ILoquiObjectGetter, IPrintable
+    P Nullable<Int32>                                          AliasID
+    P IFormLinkNullableGetter<IQuestGetter>                    Quest
+
+### Mutagen.Bethesda.Skyrim.ICreateReferenceToObjectGetter
+    : ILoquiObject, IBinaryItem, IFormLinkContainerGetter, ILoquiObject<ICreateReferenceToObjectGetter>, ILoquiObjectGetter, IPrintable
+    P Int16                                                    AliasID
+    P CreateEnum                                               Create
+    P Level                                                    Level
+    P IFormLinkGetter<ISkyrimMajorRecordGetter>                Object
+
+### Mutagen.Bethesda.Skyrim.IAPackageTargetGetter
+    : ILoquiObject, IBinaryItem, IFormLinkContainerGetter, ILoquiObject<IAPackageTargetGetter>, ILoquiObjectGetter, IPrintable
+    P Int32                                                    CountOrDistance
+
+### Mutagen.Bethesda.Skyrim.IPackageTargetSpecificReferenceGetter
+    : IAPackageTargetGetter, ILoquiObject, IBinaryItem, IFormLinkContainerGetter, ILoquiObject<IAPackageTargetGetter>, ILoquiObjectGetter, IPrintable, ILoquiObject<IPackageTargetSpecificReferenceGetter>
+    P IFormLinkGetter<IPlacedGetter>                           Reference
+
+### Mutagen.Bethesda.Skyrim.IPackageTargetAliasGetter
+    : IAPackageTargetGetter, ILoquiObject, IBinaryItem, IFormLinkContainerGetter, ILoquiObject<IAPackageTargetGetter>, ILoquiObjectGetter, IPrintable, ILoquiObject<IPackageTargetAliasGetter>
+    P Int32                                                    Alias
+
+### Mutagen.Bethesda.Skyrim.IPackageTargetObjectIDGetter
+    : IAPackageTargetGetter, ILoquiObject, IBinaryItem, IFormLinkContainerGetter, ILoquiObject<IAPackageTargetGetter>, ILoquiObjectGetter, IPrintable, ILoquiObject<IPackageTargetObjectIDGetter>
+    P IFormLinkGetter<IObjectIdGetter>                         Reference
+
+### Mutagen.Bethesda.Skyrim.IPackageDataLocationGetter
+    : IAPackageDataGetter, ILoquiObject, IBinaryItem, IFormLinkContainerGetter, ILoquiObject<IAPackageDataGetter>, ILoquiObjectGetter, IPrintable, INamedGetter, INamedRequiredGetter, IMajorRecordQueryableGetter
+    P ILocationTargetRadiusGetter                              Location
+
+### Mutagen.Bethesda.Skyrim.IPackageDataTargetGetter
+    : IAPackageDataGetter, ILoquiObject, IBinaryItem, IFormLinkContainerGetter, ILoquiObject<IAPackageDataGetter>, ILoquiObjectGetter, IPrintable, INamedGetter, INamedRequiredGetter, IMajorRecordQueryableGetter
+    P IAPackageTargetGetter                                    Target
+    P Types                                                    Type
+
+### Mutagen.Bethesda.Skyrim.IALocationTargetGetter
+    : ILoquiObject, IBinaryItem, IFormLinkContainerGetter, ILoquiObject<IALocationTargetGetter>, ILoquiObjectGetter, IPrintable
+
+### Mutagen.Bethesda.Skyrim.ILocationTargetGetter
+    : IALocationTargetGetter, ILoquiObject, IBinaryItem, IFormLinkContainerGetter, ILoquiObject<IALocationTargetGetter>, ILoquiObjectGetter, IPrintable, ILoquiObject<ILocationTargetGetter>
+    P IFormLinkGetter<IPlacedGetter>                           Link
+
+### Mutagen.Bethesda.Skyrim.IPatrolGetter
+    : ILoquiObject, IBinaryItem, IFormLinkContainerGetter, ILoquiObject<IPatrolGetter>, ILoquiObjectGetter, IPrintable
+    P IFormLinkGetter<IIdleAnimationGetter>                    Idle
+    P Single                                                   IdleTime
+    P Nullable<ReadOnlyMemorySlice<Byte>>                      SCHR
+    P Nullable<ReadOnlyMemorySlice<Byte>>                      SCTX
+    P IReadOnlyList<IATopicReferenceGetter>                    Topics
+
+### Mutagen.Bethesda.Skyrim.IQuestAliasGetter
+    : ILoquiObject, IBinaryItem, IFormLinkContainerGetter, IKeywordedGetter<IKeywordGetter>, IKeywordedGetter, IMajorRecordQueryableGetter, ILoquiObject<IQuestAliasGetter>, ILoquiObjectGetter, IPrintable, INamedGetter
+    P Nullable<Int32>                                          AliasIDToForceIntoWhenFilled
+    P IFormLinkNullableGetter<IFormListGetter>                 CombatOverridePackageList
+    P IReadOnlyList<IConditionGetter>                          Conditions
+    P ICreateReferenceToObjectGetter                           CreateReferenceToObject
+    P IFormLinkNullableGetter<IMessageGetter>                  DisplayName
+    P IExternalAliasReferenceGetter                            External
+    P IReadOnlyList<IFormLinkGetter<IFactionGetter>>           Factions
+    P IFindMatchingRefFromEventGetter                          FindMatchingRefFromEvent
+    P IFindMatchingRefNearAliasGetter                          FindMatchingRefNearAlias
+    P Nullable<Flag>                                           Flags
+    P IFormLinkNullableGetter<IPlacedGetter>                   ForcedReference
+    P IFormLinkNullableGetter<IFormListGetter>                 GuardWarnOverridePackageList
+    P UInt32                                                   ID
+    P IReadOnlyList<IContainerEntryGetter>                     Items
+    P IReadOnlyList<IFormLinkGetter<IKeywordGetter>>           Keywords
+    P ILocationAliasReferenceGetter                            Location
+    P String                                                   Name
+    P IFormLinkNullableGetter<IFormListGetter>                 ObserveDeadBodyOverridePackageList
+    P IReadOnlyList<IFormLinkGetter<IPackageGetter>>           PackageData
+    P IFormLinkNullableGetter<ILocationGetter>                 SpecificLocation
+    P IFormLinkNullableGetter<IFormListGetter>                 SpectatorOverridePackageList
+    P IReadOnlyList<IFormLinkGetter<ISpellGetter>>             Spells
+    P TypeEnum                                                 Type
+    P IFormLinkNullableGetter<INpcGetter>                      UniqueActor
+    P IFormLinkNullableGetter<IAliasVoiceTypeGetter>           VoiceTypes
+
+### Mutagen.Bethesda.Skyrim.IQuestFragmentAliasGetter
+    : ILoquiObject, IAssetLinkContainerGetter, IBinaryItem, IFormLinkContainerGetter, ILoquiObject<IQuestFragmentAliasGetter>, ILoquiObjectGetter, IPrintable
+    P UInt16                                                   ObjectFormat
+    P IScriptObjectPropertyGetter                              Property
+    P IReadOnlyList<IScriptEntryGetter>                        Scripts
+    P Int16                                                    Version
+
+### Mutagen.Bethesda.Skyrim.QuestAlias
+    : IEquatable<IQuestAliasGetter>, ILoquiObjectSetter<QuestAlias>, ILoquiObjectSetter, ILoquiObjectGetter, ILoquiObject, IPrintable, IClearable, ILoquiObject<QuestAlias>, IQuestAlias, IFormLinkContainer
+    P Nullable<Int32>                                          AliasIDToForceIntoWhenFilled
+    P IFormLinkNullable<IFormListGetter>                       CombatOverridePackageList
+    P ExtendedList<Condition>                                  Conditions
+    P CreateReferenceToObject                                  CreateReferenceToObject
+    P IFormLinkNullable<IMessageGetter>                        DisplayName
+    P ExternalAliasReference                                   External
+    P ExtendedList<IFormLinkGetter<IFactionGetter>>            Factions
+    P FindMatchingRefFromEvent                                 FindMatchingRefFromEvent
+    P FindMatchingRefNearAlias                                 FindMatchingRefNearAlias
+    P Nullable<Flag>                                           Flags
+    P IFormLinkNullable<IPlacedGetter>                         ForcedReference
+    P IFormLinkNullable<IFormListGetter>                       GuardWarnOverridePackageList
+    P UInt32                                                   ID
+    P ExtendedList<ContainerEntry>                             Items
+    P ExtendedList<IFormLinkGetter<IKeywordGetter>>            Keywords
+    P LocationAliasReference                                   Location
+    P String                                                   Name
+    P IFormLinkNullable<IFormListGetter>                       ObserveDeadBodyOverridePackageList
+    P ExtendedList<IFormLinkGetter<IPackageGetter>>            PackageData
+    P IFormLinkNullable<ILocationGetter>                       SpecificLocation
+    P IFormLinkNullable<IFormListGetter>                       SpectatorOverridePackageList
+    P ExtendedList<IFormLinkGetter<ISpellGetter>>              Spells
+    P TypeEnum                                                 Type
+    P IFormLinkNullable<INpcGetter>                            UniqueActor
+    P IFormLinkNullable<IAliasVoiceTypeGetter>                 VoiceTypes
+
+### Mutagen.Bethesda.Skyrim.IPackageGetter
+    : ISkyrimMajorRecordGetter, IMajorRecordGetter, IFormVersionGetter, IMajorRecordIdentifierGetter, IFormKeyGetter, IFormLinkContainerGetter, IAssetLinkContainerGetter, IFormLinkIdentifier, ILinkIdentifier, IEquatable<IFormLinkGetter>
+    P IFormLinkNullableGetter<ICombatStyleGetter>              CombatStyle
+    P IReadOnlyList<IConditionGetter>                          Conditions
+    P IReadOnlyDictionary<SByte,IAPackageDataGetter>           Data
+    P Int32                                                    DataInputVersion
+    P Flag                                                     Flags
+    P IPackageIdlesGetter                                      IdleAnimations
+    P InterruptFlag                                            InterruptFlags
+    P Interrupt                                                InterruptOverride
+    P IPackageEventGetter                                      OnBegin
+    P IPackageEventGetter                                      OnChange
+    P IPackageEventGetter                                      OnEnd
+    P IFormLinkNullableGetter<IQuestGetter>                    OwnerQuest
+    P IFormLinkGetter<IPackageGetter>                          PackageTemplate
+    P Speed                                                    PreferredSpeed
+    P IReadOnlyList<IPackageBranchGetter>                      ProcedureTree
+    P Byte                                                     ScheduleDate
+    P DayOfWeek                                                ScheduleDayOfWeek
+    P Int32                                                    ScheduleDurationInMinutes
+    P SByte                                                    ScheduleHour
+    P SByte                                                    ScheduleMinute
+    P SByte                                                    ScheduleMonth
+    P Types                                                    Type
+    P Byte                                                     Unknown
+    P UInt16                                                   Unknown2
+    P ReadOnlyMemorySlice<Byte>                                Unknown3
+    P Nullable<Int32>                                          Unknown4
+    P IPackageAdapterGetter                                    VirtualMachineAdapter
+    P ReadOnlyMemorySlice<Byte>                                XnamMarker
+
+### IPackageTargetGetter  -- NOT FOUND
+
+### IPackageLocationGetter  -- NOT FOUND
+
+### Mutagen.Bethesda.Skyrim.ILocationGetter
+    : ISkyrimMajorRecordGetter, IMajorRecordGetter, IFormVersionGetter, IMajorRecordIdentifierGetter, IFormKeyGetter, IFormLinkContainerGetter, IAssetLinkContainerGetter, IFormLinkIdentifier, ILinkIdentifier, IEquatable<IFormLinkGetter>
+    P Nullable<Color>                                          Color
+    P IReadOnlyList<IEnableParentReferenceGetter>              EnableParentReferencesAdded
+    P IReadOnlyList<IEnableParentReferenceGetter>              EnableParentReferencesStatic
+    P IFormLinkNullableGetter<IPlacedObjectGetter>             HorseMarkerRef
+    P IReadOnlyList<IFormLinkGetter<IPlacedGetter>>            InitiallyDisabledReferencesAdded
+    P IReadOnlyList<IFormLinkGetter<IPlacedGetter>>            InitiallyDisabledReferencesStatic
+    P IReadOnlyList<IFormLinkGetter<IKeywordGetter>>           Keywords
+    P IReadOnlyList<ILocationRefTypeReferenceGetter>           LocationRefTypeReferencesAdded
+    P IReadOnlyList<IFormLinkGetter<IPlacedSimpleGetter>>      LocationRefTypeReferencesRemoved
+    P IReadOnlyList<ILocationRefTypeReferenceGetter>           LocationRefTypeReferencesStatic
+    P IFormLinkNullableGetter<IMusicTypeGetter>                Music
+    P ITranslatedStringGetter                                  Name
+    P IFormLinkNullableGetter<ILocationGetter>                 ParentLocation
+    P IReadOnlyList<IPersistentActorReferenceGetter>           PersistentActorReferencesAdded
+    P IReadOnlyList<IFormLinkGetter<IPlacedSimpleGetter>>      PersistentActorReferencesRemoved
+    P IReadOnlyList<IPersistentActorReferenceGetter>           PersistentActorReferencesStatic
+    P IReadOnlyList<IUniqueActorReferenceGetter>               UniqueActorReferencesAdded
+    P IReadOnlyList<IFormLinkGetter<INpcGetter>>               UniqueActorReferencesRemoved
+    P IReadOnlyList<IUniqueActorReferenceGetter>               UniqueActorReferencesStatic
+    P IFormLinkNullableGetter<IFactionGetter>                  UnreportedCrimeFaction
+    P IFormLinkNullableGetter<IPlacedSimpleGetter>             WorldLocationMarkerRef
+    P Nullable<Single>                                         WorldLocationRadius
+    P IReadOnlyList<ILocationCoordinateGetter>                 WorldspaceCellsAdded
+    P IReadOnlyList<ILocationCoordinateGetter>                 WorldspaceCellsRemoved
+    P IReadOnlyList<ILocationCoordinateGetter>                 WorldspaceCellsStatic
+
+### Mutagen.Bethesda.Skyrim.IPlacedObjectGetter
+    : ISkyrimMajorRecordGetter, IMajorRecordGetter, IFormVersionGetter, IMajorRecordIdentifierGetter, IFormKeyGetter, IFormLinkContainerGetter, IAssetLinkContainerGetter, IFormLinkIdentifier, ILinkIdentifier, IEquatable<IFormLinkGetter>
+    P Nullable<ActionFlag>                                     Action
+    P IActivateParentsGetter                                   ActivateParents
+    P IAlphaGetter                                             Alpha
+    P IFormLinkNullableGetter<IPlacedThingGetter>              AttachRef
+    P IFormLinkNullableGetter<IPlaceableObjectGetter>          Base
+    P Nullable<P3Float>                                        BoundHalfExtents
+    P Nullable<Single>                                         Charge
+    P Nullable<UInt32>                                         CollisionLayer
+    P Nullable<ReadOnlyMemorySlice<Byte>>                      DistantLodData
+    P IFormLinkNullableGetter<IEmittanceGetter>                Emittance
+    P IEnableParentGetter                                      EnableParent
+    P IFormLinkNullableGetter<IEncounterZoneGetter>            EncounterZone
+    P Nullable<Int32>                                          FactionRank
+    P Nullable<Single>                                         FavorCost
+    P Nullable<Single>                                         HeadTrackingWeight
+    P IFormLinkNullableGetter<IImageSpaceGetter>               ImageSpace
+    P Boolean                                                  IsIgnoredBySandbox
+    P Boolean                                                  IsMultiBoundPrimitive
+    P Boolean                                                  IsOpenByDefault
+    P Nullable<Int32>                                          ItemCount
+    P IFormLinkNullableGetter<ILeveledItemGetter>              LeveledItemBaseObject
+    P Nullable<Level>                                          LevelModifier
+    P ILightDataGetter                                         LightData
+    P IFormLinkNullableGetter<ILightingTemplateGetter>         LightingTemplate
+    P IReadOnlyList<ILinkedReferencesGetter>                   LinkedReferences
+    P IReadOnlyList<IFormLinkGetter<IPlacedObjectGetter>>      LinkedRooms
+    P IReadOnlyList<IFormLinkGetter<IPlacedObjectGetter>>      LitWater
+    P IFormLinkNullableGetter<ILocationGetter>                 LocationReference
+    P IReadOnlyList<IFormLinkGetter<ILocationReferenceTypeGetter>> LocationRefTypes
+    P ILockDataGetter                                          Lock
+    P IMapMarkerGetter                                         MapMarker
+    P IFormLinkNullableGetter<IPlacedObjectGetter>             MultiBoundReference
+    P INavigationDoorLinkGetter                                NavigationDoorLink
+    P IBoundingGetter                                          OcclusionPlane
+    P IFormLinkNullableGetter<IOwnerGetter>                    Owner
+    P IPatrolGetter                                            Patrol
+    P IFormLinkNullableGetter<ILocationGetter>                 PersistentLocation
+    P IPlacementGetter                                         Placement
+    P IReadOnlyList<IPortalGetter>                             Portals
+    P IPlacedPrimitiveGetter                                   Primitive
+    P Nullable<Single>                                         Radius
+    P Nullable<ReadOnlyMemorySlice<Byte>>                      RagdollBipedData
+    P Nullable<ReadOnlyMemorySlice<Byte>>                      RagdollData
+    P IReadOnlyList<IWaterReflectionGetter>                    Reflections
+    P IBoundingGetter                                          RoomPortal
+    P Nullable<Single>                                         Scale
+    P IFormLinkNullableGetter<IPlacedObjectGetter>             SpawnContainer
+    P ITeleportDestinationGetter                               TeleportDestination
+    P IFormLinkNullableGetter<IMessageGetter>                  TeleportMessageBox
+    P Int16                                                    Unknown
+    P IVirtualMachineAdapterGetter                             VirtualMachineAdapter
+    P IWaterVelocityGetter                                     WaterVelocity
+    P Nullable<ReadOnlyMemorySlice<Byte>>                      XCVL
+    P Nullable<ReadOnlyMemorySlice<Byte>>                      XCZA
+    P IFormLinkNullableGetter<ICellGetter>                     XCZC
+    P IFormLinkNullableGetter<IPlacedGetter>                   XCZR
+    P Nullable<ReadOnlyMemorySlice<Byte>>                      XORD
+    P Nullable<ReadOnlyMemorySlice<Byte>>                      XWCN
+    P Nullable<ReadOnlyMemorySlice<Byte>>                      XWCS
+
+──────────── enums that decide resolution ────────────
+
+──────────── nested types under Quest / QuestAlias / PackageTarget ────────────
+
+### QuestAlias: 5 nested
+    class ErrorMask
+    enum  Flag  { ReservesLocationOrReference, Optional, QuestObject, AllowReuseInQuest, AllowDead, MatchingRefInLoadedArea, Essential, AllowDisabled, StoresText, AllowReserved, Protected, ForcedByAliases, AllowDestroyed, MatchingRefClosest, UsesStoredText, InitiallyDisabled, AllowCleared, ClearNamesWhenRemoved }
+    class Mask`1
+        P MaskItem<TItem,Mask<TItem>>                      CreateReferenceToObject
+        P MaskItem<TItem,Mask<TItem>>                      External
+        P MaskItem<TItem,Mask<TItem>>                      FindMatchingRefFromEvent
+        P MaskItem<TItem,Mask<TItem>>                      FindMatchingRefNearAlias
+        P MaskItem<TItem,Mask<TItem>>                      Location
+    class TranslationMask
+    enum  TypeEnum  { Reference, Location }
+
+### QuestObjective: 4 nested
+    class ErrorMask
+    enum  Flag  { OrWithPrevious }
+    class Mask`1
+    class TranslationMask
+
+### APackageTarget: 4 nested
+    class ErrorMask
+    class Mask`1
+    class TranslationMask
+    enum  Type  { SpecificReference, ObjectID, ObjectType, LinkedReference, RefAlias, Unknown, Self }
+
+### PackageDataLocation: 3 nested
+    class ErrorMask
+    class Mask`1
+        P MaskItem<TItem,Mask<TItem>>                      Location
+    class TranslationMask
+
+### ALocationTarget: 3 nested
+    class ErrorMask
+    class Mask`1
+    class TranslationMask
+

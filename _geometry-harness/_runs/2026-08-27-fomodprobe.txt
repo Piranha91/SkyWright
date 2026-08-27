@@ -1,0 +1,413 @@
+target: C:\Games\Skyrim VR\PiranhaRim VR  profile 'PiranhaRimVR'
+   490 active plugins, 514 enabled mods
+   1,357 distinct plugin files exist somewhere in this instance (490 of them active)
+   401 enabled mods whose source archive is on disk
+   not examined: 0 without meta.ini, 92 with no installationFile, 21 whose archive is gone
+   ... 100/401 archives, 1s
+   ... 200/401 archives, 3s
+   ... 300/401 archives, 10s
+   ... 400/401 archives, 23s
+
+==== FOMOD INSTALLS ====
+   archives read                : 401
+   ...that carry a FOMOD        : 83
+   ...whose ModuleConfig parsed : 83   (0 unreadable — counted, not assumed empty)
+   ...where path matching is TRUSTED: 74
+
+   The trust test is the detector validating itself before it reports anything.
+   A FOMOD's requiredInstallFiles are installed UNCONDITIONALLY, so if those files are
+   not found in the mod folder then this code is matching archive paths to installed
+   paths wrongly, and every 'not selected' it would report is worthless. Mods that fail
+   it are excluded and counted rather than quietly reported:
+      failed the trust test        : 9
+      of which, no required files to test with : 8
+
+==== OPTIONS ====
+   options offered across those FOMODs : 2,889
+   ...installed                        : 656
+   ...NOT installed                    : 2,233
+   ...of those, RULED OUT by an exclusive group where a sibling was taken : 58
+   NEVER OFFERED — in a step the installer did not show, given the branch taken : 422
+
+==== NOT SELECTED, and the FOMOD's OWN condition names a plugin active here ====
+   WRONG-VARIANT  an exclusive group where the option that WAS taken does not match
+                  this load order, and this one does : 1   <- the strongest tier
+   ABSENT    the patch exists nowhere in this instance : 23
+   INACTIVE  it IS on disk here, just not switched on  : 132
+   NO-PLUGIN the option ships no ESP, so it cannot be traced: 1
+   (a further 6 unselected options deliver a plugin that is already ACTIVE from elsewhere
+    — taken through another mod folder or installed by hand, and correctly not reported)
+   Not verified in game. This says the installer offered a patch for something you run;
+   whether you WANT it is a separate question the data cannot answer.
+
+   ════ WRONG-VARIANT (1) ════
+
+   ---- JK's College of Winterhold (Immersive and Obscure's) Combo Patches  (1 options) ----
+      'Midden Expanded ESP'   [step 'JK's and Obscure's College of Winterhold #2' / group 'Midden Expanded' (SelectAtMostOne)]
+         installs: JKs CoW - OCW - Midden Expanded ESP patch.esp
+         its condition names ACTIVE: middenexpandedSSE.esp
+         "Modifies placement position for several records, resolves navmesh conflicts. Designed for ESP version of the m"
+
+   ════ ABSENT (23) ════
+
+   ---- Capital Whiterun Expansion - Lux Orbis Patch  (6 options) ----
+      'Blue Palace Terrace and LotD'   [step 'Cities, towns and villages overhauls' / group 'Great Villages and Towns' (SelectAny)]
+         installs: Lux Orbis - LotD Blue Palace Terrace patch.esp
+         its condition names ACTIVE: bluePalaceTerrace.esp
+         "Patch for both Blue Palace Terrace and LotD to fix Erikur's lantern (credits to Baptiste Corbel) (ESPFE)"
+      'JK's Skyrim + COTN Dawnstar'   [step 'Cities, towns and villages overhauls' / group 'Dawnstar' (SelectAny)]
+         installs: Lux Orbis - JK's COTN Dawnstar patch.esp
+         its condition names ACTIVE: COTN - Dawnstar.esp
+         "Compatibility patch for JK's Skyrim and COTN Dawnstar (ESPFE). Not compatible out of the box with lantern mods"
+      'Morthal Where's Wares + COTN'   [step 'Cities, towns and villages overhauls' / group 'Morthal' (SelectAny)]
+         installs: Lux Orbis - COTN Morthal - Where's Wares.esp
+         its condition names ACTIVE: COTN - Morthal.esp
+         "Compatibility patch for Morthal Where's Wares and COTN Morthal (Credits to AgentW) (ESPFE)"
+      'JK's Skyrim + COTN Morthal'   [step 'Cities, towns and villages overhauls' / group 'Morthal' (SelectAny)]
+         installs: Lux Orbis - JK's COTN Morthal patch.esp
+         its condition names ACTIVE: COTN - Morthal.esp
+         "Compatibility patch for JK's Skyrim and COTN Morthal (ESPFE). Not compatible out of the box with lantern mods."
+      'Windhelm Revived Bridge and Capital Windhelm Expansion'   [step 'Cities, towns and villages overhauls' / group 'Windhelm' (SelectAny)]
+         installs: Lux Orbis - Capital Windhelm Bridge Revived patch.esp
+         its condition names ACTIVE: windhelmssE.esp
+         "Patch for Windhelm Revived Bridge and Capital Windhelm (credits to Miliyx)"
+      'JK's Skyrim + COTN Winterhold'   [step 'Cities, towns and villages overhauls' / group 'Winterhold' (SelectAny)]
+         installs: Lux Orbis - JK's COTN Winterhold patch.esp
+         its condition names ACTIVE: COTN - Winterhold.esp
+         "Compatibility patch for JK's Skyrim and COTN Winterhold. Not compatible out of the box with lantern mods nor T"
+
+   ---- Lux Orbis (patch hub)  (5 options) ----
+      'Blue Palace Terrace and LotD'   [step 'Cities, towns and villages overhauls' / group 'Great Villages and Towns' (SelectAny)]
+         installs: Lux Orbis - LotD Blue Palace Terrace patch.esp
+         its condition names ACTIVE: bluePalaceTerrace.esp
+         "Patch for both Blue Palace Terrace and LotD to fix Erikur's lantern (credits to Baptiste Corbel) (ESPFE)"
+      'JK's Skyrim + COTN Dawnstar'   [step 'Cities, towns and villages overhauls' / group 'Dawnstar' (SelectAny)]
+         installs: Lux Orbis - JK's COTN Dawnstar patch.esp
+         its condition names ACTIVE: COTN - Dawnstar.esp
+         "Compatibility patch for JK's Skyrim and COTN Dawnstar (ESPFE). Not compatible out of the box with lantern mods"
+      'Morthal Where's Wares + COTN'   [step 'Cities, towns and villages overhauls' / group 'Morthal' (SelectAny)]
+         installs: Lux Orbis - COTN Morthal - Where's Wares.esp
+         its condition names ACTIVE: COTN - Morthal.esp
+         "Compatibility patch for Morthal Where's Wares and COTN Morthal (Credits to AgentW) (ESPFE)"
+      'JK's Skyrim + COTN Morthal'   [step 'Cities, towns and villages overhauls' / group 'Morthal' (SelectAny)]
+         installs: Lux Orbis - JK's COTN Morthal patch.esp
+         its condition names ACTIVE: COTN - Morthal.esp
+         "Compatibility patch for JK's Skyrim and COTN Morthal (ESPFE). Not compatible out of the box with lantern mods."
+      'JK's Skyrim + COTN Winterhold'   [step 'Cities, towns and villages overhauls' / group 'Winterhold' (SelectAny)]
+         installs: Lux Orbis - JK's COTN Winterhold patch.esp
+         its condition names ACTIVE: COTN - Winterhold.esp
+         "Compatibility patch for JK's Skyrim and COTN Winterhold. Not compatible out of the box with lantern mods nor T"
+
+   ---- Lux - Pilgim patch  (4 options) ----
+      'COTN - Winterhold'   [step 'Authors collections of mods' / group 'JPSteel2 (COTN)' (SelectAny)]
+         installs: Lux - COTN Winterhold patch.esp, meshes
+         its condition names ACTIVE: COTN - Winterhold.esp
+         "Compatibility patch for Cities of the North - Winterhold. (ESPFE) Do not install if using TGCotN since that pa"
+      'The Great City of Winterhold V4'   [step 'Cities, towns and villages overhauls' / group 'Great Villages and Towns' (SelectAny)]
+         installs: Lux - The Great City of Winterhold V4 patch.esp, Meshes
+         its condition names ACTIVE: The Great City of Winterhold v4.esp
+         "Compatibility patch for The Great City of Winterhold V4 (ESPFE)"
+      'Myrwatch Tower'   [step 'Playable content' / group 'Creation Club Content' (SelectAny)]
+         installs: Lux - Myrwatch patch.esp, meshes
+         its condition names ACTIVE: cceejsse002-tower.esl
+         "Compatibility patch for Myrwatch player house, includes a fixed College window. That mod has the cell bug sinc"
+      'Wraithguard'   [step 'Playable content' / group 'Creation Club Content' (SelectAny)]
+         installs: Lux - Wraithguard patch.esp
+         its condition names ACTIVE: ccbgssse008-wraithguard.esl
+         "Compatibility patch for Creation Club's Wraithguard. That mod has the cell bug since it's both an ESL and an E"
+
+   ---- Lux - The great cities patch  (4 options) ----
+      'COTN - Winterhold'   [step 'Authors collections of mods' / group 'JPSteel2 (COTN)' (SelectAny)]
+         installs: Lux - COTN Winterhold patch.esp, meshes
+         its condition names ACTIVE: COTN - Winterhold.esp
+         "Compatibility patch for Cities of the North - Winterhold. (ESPFE) Do not install if using TGCotN since that pa"
+      'The Great City of Winterhold V4'   [step 'Cities, towns and villages overhauls' / group 'Great Villages and Towns' (SelectAny)]
+         installs: Lux - The Great City of Winterhold V4 patch.esp, Meshes
+         its condition names ACTIVE: The Great City of Winterhold v4.esp
+         "Compatibility patch for The Great City of Winterhold V4 (ESPFE)"
+      'Myrwatch Tower'   [step 'Playable content' / group 'Creation Club Content' (SelectAny)]
+         installs: Lux - Myrwatch patch.esp, meshes
+         its condition names ACTIVE: cceejsse002-tower.esl
+         "Compatibility patch for Myrwatch player house, includes a fixed College window. That mod has the cell bug sinc"
+      'Wraithguard'   [step 'Playable content' / group 'Creation Club Content' (SelectAny)]
+         installs: Lux - Wraithguard patch.esp
+         its condition names ACTIVE: ccbgssse008-wraithguard.esl
+         "Compatibility patch for Creation Club's Wraithguard. That mod has the cell bug since it's both an ESL and an E"
+
+   ---- Blue Palace Terrace Patch Collection  (3 options) ----
+      'Celestine'   [step 'Select patches' / group 'Blue Palace Terrace Patches' (SelectAny)]
+         installs: Celestine - BPT patch.esp
+         its condition names ACTIVE: BluePalaceTerrace.esp
+         "Patch for Celestine. Not needed together with the Open Cities patch."
+      'Seasonal Landscapes'   [step 'Select patches' / group 'Blue Palace Terrace Patches' (SelectAny)]
+         installs: BluePalaceTerrace - Seasonal Landscapes patch.esp, Meshes, Seasons, Textures
+         its condition names ACTIVE: BluePalaceTerrace.esp
+         "Adds full Seasonal Landscapes support to Blue Palace Terrace."
+      'Nature of the Wild Lands'   [step 'Select patches' / group 'Blue Palace Terrace Patches' (SelectAny)]
+         installs: Nature of the Wild Lands - Blue Palace Terrace patch.esp
+         its condition names ACTIVE: BluePalaceTerrace.esp
+         "Patch for Nature of the Wild Lands."
+
+   ---- Simplicity of Snow  (1 options) ----
+      'Nchuanthumz: Dwarven Home Patch'   [step 'Options' / group 'Patches' (SelectAny)]
+         installs: Simplicity of Snow - Dwemer Sanctuary Patch.esp
+         its condition names ACTIVE: ccafdsse001-dwesanctuary.esm
+         "Requires Nchuanthumz: Dwarven Home (https://en.uesp.net/wiki/Skyrim:Nchuanthumz:_Dwarven_Home)"
+
+   ════ INACTIVE (132) ════
+
+   ---- Lux - Pilgim patch  (41 options) ----
+      'Midden Expanded'   [step 'Authors collections of mods' / group 'Easierrider' (SelectAny)]
+         installs: Lux - Midden Expanded.esp
+         its condition names ACTIVE: middenexpandedSSE.esp
+         already on disk in: Lux - Patch Hub - Manual Installation
+         "Compatibility patch for The Midden Expanded (Credits to AgentW) (ESPFE)"
+      'JK's College of Winterhold'   [step 'Authors collections of mods' / group 'Jkrojmal' (SelectAny)]
+         installs: Lux - JK's College patch.esp, meshes
+         its condition names ACTIVE: JK's College of Winterhold.esp
+         already on disk in: Lux - Patch Hub - Manual Installation
+         "Compatibility patch for JK's College of Winterhold (ESPFE)"
+      'COTN - Morthal'   [step 'Authors collections of mods' / group 'JPSteel2 (COTN)' (SelectAny)]
+         installs: Lux - COTN Morthal patch.esp, meshes
+         its condition names ACTIVE: COTN - Morthal.esp
+         already on disk in: Lux - Patch Hub - Manual Installation
+         "Compatibility patch for Cities of the North - Morthal. (ESPFE)"
+      'COTN - Dawnstar'   [step 'Authors collections of mods' / group 'JPSteel2 (COTN)' (SelectAny)]
+         installs: Lux - COTN Dawnstar patch.esp
+         its condition names ACTIVE: COTN - Dawnstar.esp
+         already on disk in: Lux - Patch Hub - Manual Installation
+         "Compatibility patch for Cities of the North - Dawnstar. (ESPFE)"
+      'COTN - Falkreath'   [step 'Authors collections of mods' / group 'JPSteel2 (COTN)' (SelectAny)]
+         installs: Lux - COTN Falkreath patch.esp, meshes
+         its condition names ACTIVE: COTN - Falkreath.esp
+         already on disk in: Lux - Patch Hub - Manual Installation
+         "Compatibility patch for Cities of the North - Falkreath (ESPFE)."
+      'Capital Whiterun Expansion'   [step 'Authors collections of mods' / group 'Surjamte' (SelectAny)]
+         installs: Lux - Capital Whiterun patch.esp
+         its condition names ACTIVE: SurWR.esp
+         already on disk in: Lux - Patch Hub - Manual Installation
+         "Compatibility patch for Capital Whiterun Expansion (ESPFE)"
+      'Capital Windhelm Expansion'   [step 'Authors collections of mods' / group 'Surjamte' (SelectAny)]
+         installs: Lux - WindhelmSSE patch.esp
+         its condition names ACTIVE: WindhelmSSE.esp
+         already on disk in: Lux - Patch Hub - Manual Installation
+         "Compatibility patch for Surjamte's Capital Windhelm Expansion. (ESPFE)"
+      'COTN + TGC Dawnstar'   [step 'Cities, towns and villages overhauls' / group 'Dawnstar' (SelectAny)]
+         installs: Lux - TGC COTN Dawnstar patch.esp
+         its condition names ACTIVE: COTN Dawnstar - The Great City of Dawnstar Patch.esp
+         already on disk in: Lux - Patch Hub - Manual Installation
+         "Patch for COTN and TGC combo, do not use that patch along with the 3 way (JK TGC COTN) combo. (ESPFE)"
+      'Riften Southwoods District'   [step 'Cities, towns and villages overhauls' / group 'Riften' (SelectAny)]
+         installs: Lux - Riften Southwoods District patch.esp
+         its condition names ACTIVE: RiftenExtension.esp
+         already on disk in: Lux - Patch Hub - Manual Installation
+         "Patch for Riften Southwoods District (ESPFE)"
+      'Blue Palace Terrace'   [step 'Cities, towns and villages overhauls' / group 'Solitude' (SelectAny)]
+         installs: Lux - Blue Palace Terrace patch 3.esp
+         its condition names ACTIVE: BluePalaceTerrace.esp
+         already on disk in: Lux - Patch Hub - Manual Installation
+         "Compatibility patch for Drengin's Blue Palace Terrace. (ESPFE) (Thanks Drengin for helping me with scripts, yo"
+      ... and 31 more in this mod
+
+   ---- Lux - The great cities patch  (41 options) ----
+      'Midden Expanded'   [step 'Authors collections of mods' / group 'Easierrider' (SelectAny)]
+         installs: Lux - Midden Expanded.esp
+         its condition names ACTIVE: middenexpandedSSE.esp
+         already on disk in: Lux - Patch Hub - Manual Installation
+         "Compatibility patch for The Midden Expanded (Credits to AgentW) (ESPFE)"
+      'JK's College of Winterhold'   [step 'Authors collections of mods' / group 'Jkrojmal' (SelectAny)]
+         installs: Lux - JK's College patch.esp, meshes
+         its condition names ACTIVE: JK's College of Winterhold.esp
+         already on disk in: Lux - Patch Hub - Manual Installation
+         "Compatibility patch for JK's College of Winterhold (ESPFE)"
+      'COTN - Morthal'   [step 'Authors collections of mods' / group 'JPSteel2 (COTN)' (SelectAny)]
+         installs: Lux - COTN Morthal patch.esp, meshes
+         its condition names ACTIVE: COTN - Morthal.esp
+         already on disk in: Lux - Patch Hub - Manual Installation
+         "Compatibility patch for Cities of the North - Morthal. (ESPFE)"
+      'COTN - Dawnstar'   [step 'Authors collections of mods' / group 'JPSteel2 (COTN)' (SelectAny)]
+         installs: Lux - COTN Dawnstar patch.esp
+         its condition names ACTIVE: COTN - Dawnstar.esp
+         already on disk in: Lux - Patch Hub - Manual Installation
+         "Compatibility patch for Cities of the North - Dawnstar. (ESPFE)"
+      'COTN - Falkreath'   [step 'Authors collections of mods' / group 'JPSteel2 (COTN)' (SelectAny)]
+         installs: Lux - COTN Falkreath patch.esp, meshes
+         its condition names ACTIVE: COTN - Falkreath.esp
+         already on disk in: Lux - Patch Hub - Manual Installation
+         "Compatibility patch for Cities of the North - Falkreath (ESPFE)."
+      'Capital Whiterun Expansion'   [step 'Authors collections of mods' / group 'Surjamte' (SelectAny)]
+         installs: Lux - Capital Whiterun patch.esp
+         its condition names ACTIVE: SurWR.esp
+         already on disk in: Lux - Patch Hub - Manual Installation
+         "Compatibility patch for Capital Whiterun Expansion (ESPFE)"
+      'Capital Windhelm Expansion'   [step 'Authors collections of mods' / group 'Surjamte' (SelectAny)]
+         installs: Lux - WindhelmSSE patch.esp
+         its condition names ACTIVE: WindhelmSSE.esp
+         already on disk in: Lux - Patch Hub - Manual Installation
+         "Compatibility patch for Surjamte's Capital Windhelm Expansion. (ESPFE)"
+      'COTN + TGC Dawnstar'   [step 'Cities, towns and villages overhauls' / group 'Dawnstar' (SelectAny)]
+         installs: Lux - TGC COTN Dawnstar patch.esp
+         its condition names ACTIVE: COTN Dawnstar - The Great City of Dawnstar Patch.esp
+         already on disk in: Lux - Patch Hub - Manual Installation
+         "Patch for COTN and TGC combo, do not use that patch along with the 3 way (JK TGC COTN) combo. (ESPFE)"
+      'Riften Southwoods District'   [step 'Cities, towns and villages overhauls' / group 'Riften' (SelectAny)]
+         installs: Lux - Riften Southwoods District patch.esp
+         its condition names ACTIVE: RiftenExtension.esp
+         already on disk in: Lux - Patch Hub - Manual Installation
+         "Patch for Riften Southwoods District (ESPFE)"
+      'Blue Palace Terrace'   [step 'Cities, towns and villages overhauls' / group 'Solitude' (SelectAny)]
+         installs: Lux - Blue Palace Terrace patch 3.esp
+         its condition names ACTIVE: BluePalaceTerrace.esp
+         already on disk in: Lux - Patch Hub - Manual Installation
+         "Compatibility patch for Drengin's Blue Palace Terrace. (ESPFE) (Thanks Drengin for helping me with scripts, yo"
+      ... and 31 more in this mod
+
+   ---- Lux Orbis (patch hub)  (27 options) ----
+      'Tundra Homestead'   [step 'Authors collections of mods' / group 'Elianora' (SelectAny)]
+         installs: Lux Orbis - Tundra Homestead patch.esp
+         its condition names ACTIVE: cceejsse001-hstead.esm
+         already on disk in: Lux Orbis Patch Hub - Manual Installation
+         "Compatibility patch for Tundra Homestead (ESPFE)"
+      'JK's College of Winterhold'   [step 'Authors collections of mods' / group 'Jkrojmal' (SelectAny)]
+         installs: Lux Orbis - JK's College patch.esp
+         its condition names ACTIVE: JK's College of Winterhold.esp
+         already on disk in: Lux Orbis Patch Hub - Manual Installation
+         "Compatibility patch for JK's College of Winterhold (ESPFE)"
+      'COTN Dawnstar'   [step 'Authors collections of mods' / group 'JPSteel2 (COTN)' (SelectAny)]
+         installs: Lux Orbis - COTN Dawnstar patch.esp, meshes
+         its condition names ACTIVE: COTN - Dawnstar.esp
+         already on disk in: Lux Orbis Patch Hub - Manual Installation
+         "Compatibility patch for the Cities of the North - Dawnstar (ESPFE)"
+      'COTN Falkreath'   [step 'Authors collections of mods' / group 'JPSteel2 (COTN)' (SelectAny)]
+         installs: Lux Orbis - COTN Falkreath patch.esp, meshes
+         its condition names ACTIVE: COTN - Falkreath.esp
+         already on disk in: Lux Orbis Patch Hub - Manual Installation
+         "Compatibility patch for Cities of the North - Falkreath (ESPFE)."
+      'COTN Morthal'   [step 'Authors collections of mods' / group 'JPSteel2 (COTN)' (SelectAny)]
+         installs: Lux Orbis - COTN Morthal patch.esp
+         its condition names ACTIVE: COTN - Morthal.esp
+         already on disk in: Lux Orbis Patch Hub - Manual Installation
+         "Compatibility patch for the Cities of the North - Morthal (ESPFE)."
+      'COTN Winterhold'   [step 'Authors collections of mods' / group 'JPSteel2 (COTN)' (SelectAny)]
+         installs: Lux Orbis - COTN Winterhold patch.esp
+         its condition names ACTIVE: COTN - Winterhold.esp
+         already on disk in: Lux Orbis Patch Hub - Manual Installation
+         "Compatibility patch for the Cities of the North - Winterhold (ESPFE)."
+      'Capital Windhelm Expansion'   [step 'Authors collections of mods' / group 'Surjamte' (SelectAny)]
+         installs: Lux Orbis - Capital Windhelm Expansion patch.esp, meshes
+         its condition names ACTIVE: WindhelmSSE.esp
+         already on disk in: Lux Orbis Patch Hub - Manual Installation
+         "Compatibility patch for Capital Windhelm Expansion (ESPFE)."
+      'The Great City of Dawnstar'   [step 'Cities, towns and villages overhauls' / group 'Great Villages and Towns' (SelectAny)]
+         installs: Lux Orbis - The Great City of Dawnstar no light.esp, Lux Orbis - The Great City of Dawnstar patch.esp
+         its condition names ACTIVE: The Great City of Dawnstar.esp
+         already on disk in: Lux Orbis Patch Hub - Manual Installation
+         "Compatibility patch for The Great City of Dawnstar (ESPFE)."
+      'The Great City of Falkreath'   [step 'Cities, towns and villages overhauls' / group 'Great Villages and Towns' (SelectAny)]
+         installs: Lux Orbis - The Great City of Falkreath no light.esp, Lux Orbis - The Great City of Falkreath patch.esp
+         its condition names ACTIVE: The Great City of Falkreath.esp
+         already on disk in: Lux Orbis Patch Hub - Manual Installation
+         "Compatibility patch for The Great City of Falkreath (ESPFE)."
+      'The Great City of Morthal'   [step 'Cities, towns and villages overhauls' / group 'Great Villages and Towns' (SelectAny)]
+         installs: Lux Orbis - The Great City of Morthal no light.esp, Lux Orbis - The Great City of Morthal patch.esp
+         its condition names ACTIVE: The Great City of Morthal.esp
+         already on disk in: Lux Orbis Patch Hub - Manual Installation
+         "Compatibility patch for The Great City of Morthal (ESPFE)."
+      ... and 17 more in this mod
+
+   ---- Capital Whiterun Expansion - Lux Orbis Patch  (23 options) ----
+      'Tundra Homestead'   [step 'Authors collections of mods' / group 'Elianora' (SelectAny)]
+         installs: Lux Orbis - Tundra Homestead patch.esp
+         its condition names ACTIVE: cceejsse001-hstead.esm
+         already on disk in: Lux Orbis Patch Hub - Manual Installation
+         "Compatibility patch for Tundra Homestead (ESPFE)"
+      'JK's College of Winterhold'   [step 'Authors collections of mods' / group 'Jkrojmal' (SelectAny)]
+         installs: Lux Orbis - JK's College patch.esp
+         its condition names ACTIVE: JK's College of Winterhold.esp
+         already on disk in: Lux Orbis Patch Hub - Manual Installation
+         "Compatibility patch for JK's College of Winterhold (ESPFE)"
+      'COTN Morthal'   [step 'Authors collections of mods' / group 'JPSteel2 (COTN)' (SelectAny)]
+         installs: Lux Orbis - COTN Morthal patch.esp
+         its condition names ACTIVE: COTN - Morthal.esp
+         already on disk in: Lux Orbis Patch Hub - Manual Installation
+         "Compatibility patch for the Cities of the North - Morthal (ESPFE)."
+      'COTN Winterhold'   [step 'Authors collections of mods' / group 'JPSteel2 (COTN)' (SelectAny)]
+         installs: Lux Orbis - COTN Winterhold patch.esp
+         its condition names ACTIVE: COTN - Winterhold.esp
+         already on disk in: Lux Orbis Patch Hub - Manual Installation
+         "Compatibility patch for the Cities of the North - Winterhold (ESPFE)."
+      'The Great City of Dawnstar'   [step 'Cities, towns and villages overhauls' / group 'Great Villages and Towns' (SelectAny)]
+         installs: Lux Orbis - The Great City of Dawnstar no light.esp, Lux Orbis - The Great City of Dawnstar patch.esp
+         its condition names ACTIVE: The Great City of Dawnstar.esp
+         already on disk in: Lux Orbis Patch Hub - Manual Installation
+         "Compatibility patch for The Great City of Dawnstar (ESPFE)."
+      'The Great City of Falkreath'   [step 'Cities, towns and villages overhauls' / group 'Great Villages and Towns' (SelectAny)]
+         installs: Lux Orbis - The Great City of Falkreath no light.esp, Lux Orbis - The Great City of Falkreath patch.esp
+         its condition names ACTIVE: The Great City of Falkreath.esp
+         already on disk in: Lux Orbis Patch Hub - Manual Installation
+         "Compatibility patch for The Great City of Falkreath (ESPFE)."
+      'The Great City of Morthal'   [step 'Cities, towns and villages overhauls' / group 'Great Villages and Towns' (SelectAny)]
+         installs: Lux Orbis - The Great City of Morthal no light.esp, Lux Orbis - The Great City of Morthal patch.esp
+         its condition names ACTIVE: The Great City of Morthal.esp
+         already on disk in: Lux Orbis Patch Hub - Manual Installation
+         "Compatibility patch for The Great City of Morthal (ESPFE)."
+      'JK's College and Obscure College'   [step 'Cities, towns and villages overhauls' / group 'College of Winterhold' (SelectAny)]
+         installs: Lux Orbis - JK's College OCW patch.esp
+         its condition names ACTIVE: jk's college of Winterhold.esp, ocw_Obscure's_CollegeofWinterhold.esp
+         already on disk in: Lux Orbis Patch Hub - Manual Installation
+         "Small patch to fix a few conflicts between JK's College and Obscure College (ESPFE)"
+      'TGC + COTN Dawnstar'   [step 'Cities, towns and villages overhauls' / group 'Dawnstar' (SelectAny)]
+         installs: Lux Orbis - TGC COTN Dawnstar patch.esp
+         its condition names ACTIVE: COTN Dawnstar - The Great City of Dawnstar Patch.esp
+         already on disk in: Lux Orbis Patch Hub - Manual Installation
+         "Patch for TGC and COTN Dawnstar (ESPFE)"
+      'TGC + COTN Falkreath'   [step 'Cities, towns and villages overhauls' / group 'Falkreath' (SelectAny)]
+         installs: Lux Orbis - TGC COTN Falkreath.esp
+         its condition names ACTIVE: COTN Falkreath - The Great City of Falkreath patch.esp
+         already on disk in: Lux Orbis Patch Hub - Manual Installation
+         "Patch for TGC and COTN Falkreath (ESPFE)"
+      ... and 13 more in this mod
+
+   ════ NO-PLUGIN (1) ════
+
+   ---- Blue Palace Terrace Patch Collection  (1 options) ----
+      'Stones of Solitude'   [step 'Select patches' / group 'Blue Palace Terrace Patches' (SelectAny)]
+         installs: Stones of Solitude - Blue Palace Terrace_SWAP.ini
+         its condition names ACTIVE: BluePalaceTerrace.esp
+         "Patch for Stones of Solitude - Better Blended Rock Piles."
+
+   ---- DISTINCT patches behind the ABSENT findings: 14 ----
+   (the finding count is higher because MO2 installs one archive into several mod folders)
+      BluePalaceTerrace - Seasonal Landscapes patch.esp          for BluePalaceTerrace.esp
+      Celestine - BPT patch.esp                                  for BluePalaceTerrace.esp
+      Lux - COTN Winterhold patch.esp                            for COTN - Winterhold.esp
+      Lux - Myrwatch patch.esp                                   for cceejsse002-tower.esl
+      Lux - The Great City of Winterhold V4 patch.esp            for The Great City of Winterhold v4.esp
+      Lux - Wraithguard patch.esp                                for ccbgssse008-wraithguard.esl
+      Lux Orbis - Capital Windhelm Bridge Revived patch.esp      for windhelmssE.esp
+      Lux Orbis - COTN Morthal - Where's Wares.esp               for COTN - Morthal.esp
+      Lux Orbis - JK's COTN Dawnstar patch.esp                   for COTN - Dawnstar.esp
+      Lux Orbis - JK's COTN Morthal patch.esp                    for COTN - Morthal.esp
+      Lux Orbis - JK's COTN Winterhold patch.esp                 for COTN - Winterhold.esp
+      Lux Orbis - LotD Blue Palace Terrace patch.esp             for bluePalaceTerrace.esp
+      Nature of the Wild Lands - Blue Palace Terrace patch.esp   for BluePalaceTerrace.esp
+      Simplicity of Snow - Dwemer Sanctuary Patch.esp            for ccafdsse001-dwesanctuary.esm
+
+==== NOT SELECTED, delivers a plugin, but states no condition ====
+   findings: 113   — WEAKER: nothing here says the option applies to you.
+   Listed by mod only, because reading anything into an unconditioned option would be a guess.
+     23 options   Lux - Pilgim patch
+     23 options   Lux - The great cities patch
+     19 options   Lux Orbis (patch hub)
+     18 options   Capital Whiterun Expansion - Lux Orbis Patch
+      9 options   JK's College of Winterhold (Immersive and Obscure's) Combo Patches
+      8 options   Pilgrim - A Religion Overhaul
+      5 options   Lux Via
+      2 options   Rob's Bug Fixes - Capital Windhelm Expansion
+      2 options   Obscure's College of Winterhold
+      1 options   SkyVRaan - Shimmering VR Waters
+      1 options   Whiterun Has Walls Redone
+      1 options   Static Mesh Improvement Mod
+      1 options   Inferno - Fire Effects Redux
+
+elapsed 22.6s

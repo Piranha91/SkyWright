@@ -1,0 +1,37 @@
+self-check: EulerZyx vs Euler(.., Xyz) max element difference = 0.000000   OK — same matrix
+vanilla base records with a mesh: 19,554  (3.0s)
+
+   ... 1,000 cells, 27,398 candidates, 16s
+   ... 2,000 cells, 32,802 candidates, 27s
+   ... 3,000 cells, 38,938 candidates, 40s
+   ... 4,000 cells, 45,423 candidates, 54s
+   ... 5,000 cells, 51,865 candidates, 67s
+   ... 6,000 cells, 57,953 candidates, 78s
+
+==== EULER ORDER, measured ====
+cells swept                    : 6,208
+refs with <2 non-zero angles   : 401,750   (skipped — every order agrees on them)
+refs the orders barely move    : 150,956   (skipped — corner spread < 128u)
+refs where the orders DIFFER   : 60,753   (mean corner spread 532u)
+elapsed                        : 80.5s
+
+   order (axis applied first -> last)        refs   flagged      rate   verts buried  vert rate
+   XYZ                                     60,753     1,176     1.94%        115,864      1.85%
+   XZY                                     60,753     1,117     1.84%        105,202      1.71%   <== quietest
+   YXZ                                     60,753     1,143     1.88%        110,937      1.77%
+   YZX                                     60,753     1,264     2.08%        136,254      2.24%
+   ZXY                                     60,753     1,225     2.02%        117,783      1.88%
+   ZYX                                     60,753     1,209     1.99%        119,009      1.89%
+
+   XYZ is what SpatialOverlap.ToWorld composes today (Rz·Ry·Rx, X applied first).
+   A clear win for it turns the charter's 'evidence, not proof' into a measurement;
+   a tie means this population is too small or too symmetric to decide, and says so.
+
+   ---- how far an object's BASE sits from the floor under it (orientation-sensitive) ----
+   order         samples     median        p25        p75
+   XYZ            20,309      331.3      169.3      670.7
+   XZY            20,505      324.4      167.6      664.0
+   YXZ            20,403      331.2      170.0      666.2
+   YZX            20,447      322.5      162.5      646.4
+   ZXY            20,715      332.9      173.4      668.8
+   ZYX            20,473      331.0      172.3      660.5
