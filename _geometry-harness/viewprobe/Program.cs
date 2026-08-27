@@ -62,6 +62,17 @@ float elev = 28f;
 bool drawNav = true;
 string? highlight = null;
 var angles = new List<float> { 35f, 125f };
+// First-person textured mode ("see what the tester will see"): real textures via
+// CharacterViewer.Rendering, camera INSIDE the cell at eye height, game-style FOV.
+// --eye/--eye-ref implies --tex. Coordinates are SKYRIM's (a `getpos` line pastes straight in);
+// yaw matches the game's Z angle (0 = north/+Y, clockwise), positive pitch looks down.
+bool textured = false;
+System.Numerics.Vector3? eye = null, look = null;
+string? eyeRef = null, lookRef = null;
+float eyeHeight = 120f;                       // standing eye level; the player is 128u tall
+float? yaw = null; float pitch = 0f;
+float fov = 65f;                              // Skyrim SE's default world FOV
+bool keepFx = false;
 // --euler renders the SAME cell under all six Euler compositions. The numeric tests could not
 // separate them (0.62%-0.69%, then 1.84%-2.08%), which is itself a finding — but a wrong order
 // scatters kit pieces by hundreds of units, and that is trivially visible even when it is
@@ -77,6 +88,16 @@ for (int i = 1; i < args.Length; i++)
     else if (args[i] == "--euler") euler = true;
     else if (args[i] == "--angles" && i + 1 < args.Length)
         angles = args[++i].Split(',').Select(float.Parse).ToList();
+    else if (args[i] == "--tex") textured = true;
+    else if (args[i] == "--eye" && i + 1 < args.Length) { var p = args[++i].Split(','); eye = new(float.Parse(p[0]), float.Parse(p[1]), float.Parse(p[2])); textured = true; }
+    else if (args[i] == "--eye-ref" && i + 1 < args.Length) { eyeRef = args[++i]; textured = true; }
+    else if (args[i] == "--eye-height" && i + 1 < args.Length) eyeHeight = float.Parse(args[++i]);
+    else if (args[i] == "--look" && i + 1 < args.Length) { var p = args[++i].Split(','); look = new(float.Parse(p[0]), float.Parse(p[1]), float.Parse(p[2])); }
+    else if (args[i] == "--look-ref" && i + 1 < args.Length) lookRef = args[++i];
+    else if (args[i] == "--yaw" && i + 1 < args.Length) yaw = float.Parse(args[++i]);
+    else if (args[i] == "--pitch" && i + 1 < args.Length) pitch = float.Parse(args[++i]);
+    else if (args[i] == "--fov" && i + 1 < args.Length) fov = float.Parse(args[++i]);
+    else if (args[i] == "--fx") keepFx = true;
     else if (args[i] is "--instance" or "--game" or "--profile") i++;   // consumed above
 }
 Directory.CreateDirectory(outDir);
@@ -127,6 +148,93 @@ foreach (var path in order.OrderedPaths)
 if (cellKey is null) { Console.Error.WriteLine($"cell '{target}' not found in the active load order."); return 1; }
 Console.WriteLine($"cell {cellLabel} {(interior ? "(interior)" : "(exterior)")}  {cellKey}");
 Console.WriteLine($"winning state: {winRef.Count:N0} refs, {winNav.Count:N0} navmeshes  ({sw.Elapsed.TotalSeconds:0.0}s)");
+
+// ---------------------------------------------------------------------------------------
+// First-person textured mode — see TexturedScene.cs. Exits here; the flat diagnostic mode
+// below is unchanged and stays the default.
+// ---------------------------------------------------------------------------------------
+if (textured)
+{
+    FormKey? hiFp = null;
+    if (highlight is not null) { try { hiFp = FormKey.Factory(highlight); } catch { } }
+
+    System.Numerics.Vector3? RefPos(string spec, float lift)
+    {
+        try
+        {
+            var fk = FormKey.Factory(spec);
+            if (winRef.TryGetValue(fk, out var rr))
+                return new(rr.Position.X, rr.Position.Y, rr.Position.Z + lift);
+        }
+        catch { }
+        Console.Error.WriteLine($"'{spec}' is not a placed ref in this cell's winning state.");
+        return null;
+    }
+
+    var eyePos = eye ?? (eyeRef is not null ? RefPos(eyeRef, eyeHeight) : null);
+    if (eyePos is null)
+    {
+        Console.Error.WriteLine("first-person mode needs --eye X,Y,Z or --eye-ref FORMID (a `getpos` line pastes straight in).");
+        return 1;
+    }
+    System.Numerics.Vector3? lookPos = look ?? (lookRef is not null ? RefPos(lookRef, 96f) : null);
+    if (lookPos is null)
+    {
+        float yawDeg = yaw ?? 0f;                       // game convention: 0 = north (+Y), clockwise
+        float yr = float.DegreesToRadians(yawDeg), pr = float.DegreesToRadians(pitch);
+        var dir = new System.Numerics.Vector3(MathF.Sin(yr) * MathF.Cos(pr), MathF.Cos(yr) * MathF.Cos(pr), -MathF.Sin(pr));
+        lookPos = eyePos.Value + dir * 512f;
+    }
+
+    var scene = new List<ViewProbe.SceneRef>();
+    int fxSkipped = 0;
+    foreach (var r in winRef.Values)
+    {
+        if (r.InitiallyDisabled || r.Deleted) continue;
+        if (r.Base is not { } bk || !baseMesh.TryGetValue(bk, out var rel)) continue;
+        // Effect meshes (beams, mists, glows) are translucent volumes that drown a first-person
+        // shot; the game draws them subtly, this flat-lit pass cannot. Skipped by default,
+        // counted, and --fx puts them back.
+        if (!keepFx && rel.Replace('/', '\\').Contains(@"effects\", StringComparison.OrdinalIgnoreCase))
+        { fxSkipped++; continue; }
+        scene.Add(new ViewProbe.SceneRef(rel, r.Position, r.Rotation, r.Scale, hiFp is { } h && r.FormKey == h));
+    }
+    if (fxSkipped > 0) Console.WriteLine($"   ({fxSkipped} effect-mesh refs skipped; --fx to include them)");
+
+    var navTris = new List<(System.Numerics.Vector3, System.Numerics.Vector3, System.Numerics.Vector3)>();
+    if (drawNav)
+        foreach (var nav in winNav.Values)
+            foreach (var tri in nav.Triangles)
+            {
+                if ((tri.Flags & 0x08) != 0) continue;
+                if (tri.A < 0 || tri.B < 0 || tri.C < 0) continue;
+                if (tri.A >= nav.Vertices.Count || tri.B >= nav.Vertices.Count || tri.C >= nav.Vertices.Count) continue;
+                navTris.Add((V(nav.Vertices[tri.A]), V(nav.Vertices[tri.B]), V(nav.Vertices[tri.C])));
+            }
+
+    var modFolders = comp.EnabledMods.Select(m => Path.Combine(modsDir, m)).ToList();
+
+    var fpNws = new NativeWindowSettings
+    {
+        ClientSize = new OpenTK.Mathematics.Vector2i(size, size),
+        StartVisible = false,
+        StartFocused = false,
+        WindowBorder = WindowBorder.Hidden,
+        APIVersion = new Version(3, 3),
+        Profile = ContextProfile.Core,
+    };
+    using var fpGw = new GameWindow(GameWindowSettings.Default, fpNws);
+    fpGw.MakeCurrent();
+
+    string safe = new string(cellLabel.Select(c => char.IsLetterOrDigit(c) ? c : '_').ToArray());
+    string fpOut = Path.Combine(outDir, $"{safe}-fp.png");
+    int drawnShapes = ViewProbe.TexturedScene.RenderToPng(
+        scene, assets, dataDir, modFolders, overwriteDir,
+        (eyePos.Value, lookPos.Value, fov), navTris, size, fpOut);
+    Console.WriteLine($"wrote:\n   {fpOut}");
+    Console.WriteLine($"   eye {eyePos.Value.X:0},{eyePos.Value.Y:0},{eyePos.Value.Z:0} -> look {lookPos.Value.X:0},{lookPos.Value.Y:0},{lookPos.Value.Z:0}  fov {fov:0}°  ({drawnShapes:N0} shapes)");
+    return 0;
+}
 
 // ---------------------------------------------------------------------------------------
 // 2. Build world geometry
