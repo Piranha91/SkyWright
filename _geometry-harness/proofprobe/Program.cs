@@ -338,6 +338,21 @@ Console.WriteLine("\nPROOF — the detector cores (_shared/DetectorModel.cs)\n")
     Check("core: different cells at authoring -> not a pair",
           !DetectorModel.CameApart(false, float.PositiveInfinity, false, float.PositiveInfinity, 600), "never together");
 
+    // BoxOverlap — milestone 5's broad-phase decision.
+    var u = new System.Numerics.Vector3(0, 0, 0); var one = new System.Numerics.Vector3(1, 1, 1);
+    Check("core: disjoint boxes -> no overlap",
+          DetectorModel.BoxOverlap(u, one, new(2, 0, 0), new(3, 1, 1)) is null, "gap on X");
+    Check("core: exact contact -> no overlap (touch is how architecture is authored)",
+          DetectorModel.BoxOverlap(u, one, new(1, 0, 0), new(2, 1, 1)) is null, "shared face");
+    Check("core: half-overlapped unit cubes -> depth 0.5, fraction 0.5",
+          DetectorModel.BoxOverlap(u, one, new(0.5f, 0, 0), new(1.5f, 1, 1)) is { } o
+              && MathF.Abs(o.MinDepth - 0.5f) < 1e-5f && MathF.Abs(o.VolumeFraction - 0.5f) < 1e-5f,
+          "penetration measured");
+    Check("core: small box inside big box -> fraction 1",
+          DetectorModel.BoxOverlap(new(-5, -5, -5), new(5, 5, 5), new(-1, -1, -1), one) is { } c
+              && MathF.Abs(c.VolumeFraction - 1f) < 1e-5f,
+          "containment maxes the fraction");
+
     // Verify verdicts.
     Check("core: verdict all/some/none/alt/unreadable",
           DetectorModel.Verdict(true, 3, 3, 0) == "CONFIRMED"

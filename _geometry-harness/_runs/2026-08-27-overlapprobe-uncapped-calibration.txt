@@ -1,0 +1,75 @@
+load order: 490 plugins
+
+   ... 150/490 plugins, 7s
+   ... 300/490 plugins, 7s
+   ... 450/490 plugins, 7s
+
+indexed 1,165,997 winning refs (1,275,910 placements)  (7.3s)
+   plugins that could not be read (contribute nothing, counted per rule 6): 0
+
+candidates: 361,222 refs whose responsible plugin is not the base game
+   geometry: 14,332 base records measured from the mesh, 1,181 from OBND (labelled fallback), 137 with neither
+   skipped (counted, per rule 6): 0 deleted, 50,600 initially-disabled, 93,958 non-obstructing type, 10,649 no geometry, 649,568 base-game-responsible
+
+pairs checked: 8,510,028   (threshold: depth >= 16u AND fraction >= 0.25)
+
+==== THE FLOOR — same author, deliberate: how often one plugin's own objects interpenetrate ====
+   same-responsible pairs   :  7,679,487 checked, 1,528,031 deep  ( 19.90%)
+      exterior              :  1,121,052 checked, 374,843 deep  ( 33.44%)
+      interior              :  6,558,435 checked, 1,153,188 deep  ( 17.58%)
+   declared-dependency pairs:    457,130 checked,  79,990 deep  ( 17.50%)   <- coordination, also floor-ish
+
+==== CROSS-PLUGIN, NO DECLARED DEPENDENCY — the milestone 5 question ====
+   pairs checked: 373,411, deep overlaps: 190,527  ( 51.02%)
+       13  A. Bethesda-on-Bethesda (floor)
+   190,514  C. cross-plugin
+
+   ---- by mod pair (deep overlaps, class C) ----
+   48,848  JKs College of Winterhold - OCW Patch.esp  x  The Great City of Winterhold v4.esp
+          worst: Static vs MoveableStatic in 000D74:Skyrim.esm (ext)  depth 11337u  frac 1.00  [mo]  10DA27:Skyrim.esm / 00091C:JKs College of Winterhold - OCW Patch.esp
+   39,721  OCW_Obscure's_CollegeofWinterhold.esp  x  The Great City of Winterhold v4.esp
+          worst: Static vs MoveableStatic in 000D74:Skyrim.esm (ext)  depth 11337u  frac 1.00  [mo]  10DA27:Skyrim.esm / 6234BA:OCW_Obscure's_CollegeofWinterhold.esp
+   18,305  Obsidian Mountain Fogs.esp  x  Unofficial Skyrim Special Edition Patch.esp
+          worst: Static vs Static in 000D74:Skyrim.esm (ext)  depth 11246u  frac 1.00  [mm]  10D63E:Skyrim.esm / 09F992:Skyrim.esm
+   9,354  JK's College of Winterhold.esp  x  OCW_Obscure's_CollegeofWinterhold.esp
+          worst: MoveableStatic vs Static in WinterholdCollegeExterior (ext)  depth 1088u  frac 1.00  [om]  6234BA:OCW_Obscure's_CollegeofWinterhold.esp / 01EEAA:JK's College of Winterhold.esp
+   5,417  Unofficial Skyrim Special Edition Patch.esp  x  WindhelmSSE.esp
+          worst: Static vs MoveableStatic in 008F3C:Skyrim.esm (ext)  depth 5935u  frac 1.00  [mo]  01A0FA:Skyrim.esm / 0BE0C1:WindhelmSSE.esp
+   4,803  Lux Via.esp  x  Obsidian Mountain Fogs.esp
+          worst: Static vs MoveableStatic in 000D74:Skyrim.esm (ext)  depth 18494u  frac 1.00  [mo]  10EA09:Skyrim.esm / 0009BE:Lux Via.esp
+   4,158  Lux.esp  x  OCW_Obscure's_CollegeofWinterhold.esp
+          worst: MoveableStatic vs Activator in WinterholdCollegeMidden02 (int)  depth 707u  frac 1.00  [oo]  03C9D5:Skyrim.esm / 5EB890:OCW_Obscure's_CollegeofWinterhold.esp
+   3,662  Improved Mountain LOD and Z Fight Patch.esp  x  Obsidian Mountain Fogs.esp
+          worst: Static vs Static in 000D74:Skyrim.esm (ext)  depth 22714u  frac 1.00  [mm]  10E6FD:Skyrim.esm / 102728:Skyrim.esm
+   3,236  JK's College of Winterhold.esp  x  Lux.esp
+          worst: Static vs Activator in WinterholdCollegeMidden01 (int)  depth 521u  frac 1.00  [mo]  0E58B6:JK's College of Winterhold.esp / 02FBFE:Lux.esp
+   2,688  JKs College of Winterhold - OCW Patch.esp  x  Lux.esp
+          worst: MoveableStatic vs Furniture in WinterholdCollegeMidden01 (int)  depth 662u  frac 1.00  [om]  03C5DA:Skyrim.esm / 0AA0C3:OCW_Obscure's_CollegeofWinterhold.esp
+   2,608  JKs College of Winterhold - OCW Patch.esp  x  TGCotN Winterhold.esp
+          worst: Static vs MoveableStatic in WinterholdExterior03 (ext)  depth 4633u  frac 1.00  [mo]  062EC1:Skyrim.esm / 000919:JKs College of Winterhold - OCW Patch.esp
+   2,119  OCW_Obscure's_CollegeofWinterhold.esp  x  TGCotN Winterhold.esp
+          worst: Static vs MoveableStatic in 000D74:Skyrim.esm (ext)  depth 9770u  frac 1.00  [mo]  10DA1F:Skyrim.esm / 609E9B:OCW_Obscure's_CollegeofWinterhold.esp
+   1,780  Lux.esp  x  Unofficial Skyrim Special Edition Patch.esp
+          worst: Static vs Activator in DLC1GlacialCrevice01 (int)  depth 2528u  frac 1.00  [mo]  08420B:Unofficial Skyrim Special Edition Patch.esp / E44115:Lux.esp
+   1,677  Obsidian Mountain Fogs.esp  x  Ultimate Markarth Expanded.esp
+          worst: Static vs Static in 000D74:Skyrim.esm (ext)  depth 1875u  frac 1.00  [mm]  10F849:Skyrim.esm / 00E2DE:Ultimate Markarth.esp
+   1,613  Grand Solitude - The Walls of High King Erling.esp  x  Obsidian Mountain Fogs.esp
+          worst: Static vs Static in 000D74:Skyrim.esm (ext)  depth 8765u  frac 1.00  [mm]  10D5C3:Skyrim.esm / 058828:Skyrim.esm
+   1,599  Unofficial Skyrim Special Edition Patch.esp  x  cceejsse001-hstead.esm
+          worst: Static vs MoveableStatic in 009633:Skyrim.esm (ext)  depth 7444u  frac 1.00  [mo]  06E08A:Skyrim.esm / 000B97:cceejsse001-hstead.esm
+   1,506  Obsidian Mountain Fogs.esp  x  The Great City of Winterhold v4.esp
+          worst: Static vs Static in 000D74:Skyrim.esm (ext)  depth 2794u  frac 1.00  [mm]  10DA23:Skyrim.esm / 0732BB:Skyrim.esm
+   1,298  Lux Via.esp  x  Unofficial Skyrim Special Edition Patch.esp
+          worst: Static vs MoveableStatic in 009186:Skyrim.esm (ext)  depth 2920u  frac 1.00  [mo]  08BB53:Skyrim.esm / 0009BE:Lux Via.esp
+   1,253  Lux Via.esp  x  WindhelmSSE.esp
+          worst: MoveableStatic vs MoveableStatic in 0090CE:Skyrim.esm (ext)  depth 2546u  frac 1.00  [oo]  000E06:Lux Via.esp / 0BE0C1:WindhelmSSE.esp
+   1,146  Inigo.esp  x  Obsidian Mountain Fogs.esp
+          worst: Static vs MoveableStatic in 000D74:Skyrim.esm (ext)  depth 1958u  frac 1.00  [mm]  10DA15:Skyrim.esm / 0F0721:Skyrim.esm
+
+==== SENSITIVITY (class C deep-overlap count at other thresholds) ====
+   depth>=  8u frac>=0.13  ->  (not computable from this run's hit set — re-run with --depth 8 --frac 0.13)
+   depth>= 16u frac>=0.25  ->  190,514
+   depth>= 32u frac>=0.50  ->  157,404
+
+NOT verified in game; a broad-phase AABB hit is a candidate for eyes or a narrow phase, never a verdict.
+elapsed 44.6s

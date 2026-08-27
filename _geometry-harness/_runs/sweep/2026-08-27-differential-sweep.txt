@@ -1,0 +1,34 @@
+== base detection (no intervention)
+emitted 110 conflicts (13 with no second party to name; 28 class-A dangles and the class-A clobbers withheld as floor) -> C:\Users\Piranha\AppData\Local\Temp\claude\C--Games-Skyrim-VR-PiranhaRim-VR\0453f19d-a567-485b-8a75-c1b502287e29\scratchpad\sweep\base.json
+
+elapsed 32.3s
+== enabling 'TGC Winterhold - OCW Patch.esp'
+base    : C:\Users\Piranha\AppData\Local\Temp\claude\C--Games-Skyrim-VR-PiranhaRim-VR\0453f19d-a567-485b-8a75-c1b502287e29\scratchpad\sweep\base.json  (110 conflicts, 52 groups)
+changed : C:\Users\Piranha\AppData\Local\Temp\claude\C--Games-Skyrim-VR-PiranhaRim-VR\0453f19d-a567-485b-8a75-c1b502287e29\scratchpad\sweep\with-TGC_Winterhold_-_OCW_Patch.esp.json  (111 conflicts, 53 groups)
+
+   GONE    CLOBBERED  OCW_Obscure's_CollegeofWinterhold.esp  x  JK's College of Winterhold.esp   -2 record(s)
+   SHRANK  CLOBBERED  The Great City of Winterhold v4.esp  x  JKs College of Winterhold - OCW Patch.esp   -5 record(s)
+   GONE    CLOBBERED  The Great City of Winterhold v4.esp  x  OCW_Obscure's_CollegeofWinterhold.esp   -1 record(s)
+   NEW     CLOBBERED  middenexpandedSSE.esp  x  TGC Winterhold - OCW Patch.esp   +1 record(s)
+   NEW     CLOBBERED  TGC Winterhold - OCW Patch.esp  x  JKs College of Winterhold - OCW Patch.esp   +5 record(s)
+   NEW     CLOBBERED  TGC Winterhold - OCW Patch.esp  x  JK's College of Winterhold.esp   +2 record(s)
+
+   repaired: 8 record(s), 2 group(s) fully gone
+   created : 8 record(s), 3 new group(s)
+   verdict : DIFFERENTIAL-NEUTRAL  (net 0 record(s))
+
+   A verdict here outranks --verify's CONFIRMED: coverage says a patch touches the broken
+   records; only the differential says what actually happens to the conflict set.
+== enabling 'Ryns Whiterun City Limits - Capital Whiterun + SSewers patch.esp'
+   C:\Users\Piranha\AppData\Local\Temp\claude\C--Games-Skyrim-VR-PiranhaRim-VR\0453f19d-a567-485b-8a75-c1b502287e29\scratchpad\sweep\with-Ryns_Whiterun_City_Limits_-_Capital_Whiterun___SSewers_patch.esp.txt:3:   ⚠ REFUSED to enable 'Ryns Whiterun City Limits - Capital Whiterun + SSewers patch.esp': loadorder.txt does not list it, so it has no load-order position. Any position this code picked would be invented, and position decides which plugin wins a record. Register it in MO2 first, then re-run.
+base    : C:\Users\Piranha\AppData\Local\Temp\claude\C--Games-Skyrim-VR-PiranhaRim-VR\0453f19d-a567-485b-8a75-c1b502287e29\scratchpad\sweep\base.json  (110 conflicts, 52 groups)
+changed : C:\Users\Piranha\AppData\Local\Temp\claude\C--Games-Skyrim-VR-PiranhaRim-VR\0453f19d-a567-485b-8a75-c1b502287e29\scratchpad\sweep\with-Ryns_Whiterun_City_Limits_-_Capital_Whiterun___SSewers_patch.esp.json  (110 conflicts, 52 groups)
+
+   IDENTICAL — the change touched nothing the detector sees.
+
+   repaired: 0 record(s), 0 group(s) fully gone
+   created : 0 record(s), 0 new group(s)
+   verdict : DIFFERENTIAL-INERT  (net 0 record(s))
+
+   A verdict here outranks --verify's CONFIRMED: coverage says a patch touches the broken
+   records; only the differential says what actually happens to the conflict set.

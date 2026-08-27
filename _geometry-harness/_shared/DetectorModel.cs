@@ -1,3 +1,5 @@
+using System.Numerics;
+
 namespace HarnessShared;
 
 // THE DETECTOR CORES, extracted so they can be PROVEN — the same move FomodModel made for the
@@ -90,6 +92,25 @@ public static class DetectorModel
         if (!sameCellThen || wasApart > near) return false;    // never were together: not judgeable as a pair
         if (!sameCellNow) return true;
         return nowApart > MathF.Max(near, wasApart * 3f);
+    }
+
+    /// <summary>Milestone 5's broad-phase decision: do two world-space AABBs overlap, and how
+    /// hard? Null when they are disjoint or merely touching (exact contact is how adjacent
+    /// architecture is authored — the same reason the SAT treats touch as separation).
+    /// MinDepth is the smallest per-axis overlap extent — the separation one box would need to
+    /// move to stop overlapping. VolumeFraction is overlap volume over the SMALLER box's volume:
+    /// 1 means the smaller box is entirely inside the bigger one.</summary>
+    public static (float MinDepth, float VolumeFraction)? BoxOverlap(
+        Vector3 aMin, Vector3 aMax, Vector3 bMin, Vector3 bMax)
+    {
+        float ox = MathF.Min(aMax.X, bMax.X) - MathF.Max(aMin.X, bMin.X);
+        float oy = MathF.Min(aMax.Y, bMax.Y) - MathF.Max(aMin.Y, bMin.Y);
+        float oz = MathF.Min(aMax.Z, bMax.Z) - MathF.Max(aMin.Z, bMin.Z);
+        if (ox <= 0 || oy <= 0 || oz <= 0) return null;
+        float volA = MathF.Max(0, (aMax.X - aMin.X) * (aMax.Y - aMin.Y) * (aMax.Z - aMin.Z));
+        float volB = MathF.Max(0, (bMax.X - bMin.X) * (bMax.Y - bMin.Y) * (bMax.Z - bMin.Z));
+        float smaller = MathF.Max(1e-6f, MathF.Min(volA, volB));
+        return (MathF.Min(ox, MathF.Min(oy, oz)), MathF.Min(1f, ox * oy * oz / smaller));
     }
 
     /// <summary>The record-level verify verdict. CONFIRMED means every necessary record is
