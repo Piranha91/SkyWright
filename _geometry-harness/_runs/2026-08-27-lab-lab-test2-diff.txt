@@ -1,0 +1,12 @@
+base    : C:/Users/Piranha/AppData/Local/Temp/claude/C--Games-Skyrim-VR-PiranhaRim-VR/0453f19d-a567-485b-8a75-c1b502287e29/scratchpad/lab-test2-base.json  (11 conflicts, 10 groups)
+changed : C:/Users/Piranha/AppData/Local/Temp/claude/C--Games-Skyrim-VR-PiranhaRim-VR/0453f19d-a567-485b-8a75-c1b502287e29/scratchpad/lab-test2-fix.json  (11 conflicts, 10 groups)
+
+   SHRANK  CLOBBERED  middenexpandedSSE.esp  x  JKs College of Winterhold - OCW Patch.esp   -10 record(s)
+   SHRANK  CLOBBERED  middenexpandedSSE.esp  x  OCW_Obscure's_CollegeofWinterhold.esp   -1 record(s)
+
+   repaired: 11 record(s), 0 group(s) fully gone
+   created : 0 record(s), 0 new group(s)
+   verdict : DIFFERENTIAL-VERIFIED  (net +11 record(s))
+
+   A verdict here outranks --verify's CONFIRMED: coverage says a patch touches the broken
+   records; only the differential says what actually happens to the conflict set.

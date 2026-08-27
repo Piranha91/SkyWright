@@ -1,0 +1,167 @@
+load order: 85 plugins (9 ms)
+
+
+indexed 993,865 placements over 959,743 refs; 2,652 winning quests of 3,267 records  (6.1s)
+   plugins that could not be read (contribute nothing, counted per rule 6): 0
+
+==== CENSUS: how quest aliases resolve ====
+   alias arm                      aliases  objective targets
+   ForcedReference                  4,226              1,493
+   UniqueActor                      3,700                913
+   (none / conditions only)         2,913                379
+   FindMatchingRefFromEvent         2,530                 13
+   LocationAlias                    2,384                154
+   CreateReferenceToObject          1,221                236
+   FindMatchingRefNearAlias           365                  0
+   SpecificLocation                   255                  0
+   External                           217                 79
+   TOTAL                           17,811              3,267
+
+stated relationships: 2,150 winning scenes, 205 packages with an alias target
+   -> 5,065 alias pairs the data says belong together, across 1,213 quests
+
+==== CHECK 1: alias anchored to a reference that is gone ====
+   findings: 0
+
+==== CHECK 2: a quest's own aliases came apart (were within 600u, same cell) ====
+   ---- aliases the check could not judge (counted, not cleared) ----
+   non-positional arm (runtime-resolved, location, flags-only, player) : 10,082
+   UniqueActor with several placements (no single answer)              : 0
+   no authoring-view position (quest plugin + closure contributed none): 0
+   no winning placement at all                                         : 0
+   pairs split                        : 16
+   ...the quest STATES belong together: 4   <- a scene or a package says so
+   ...of those, NO patch reconciles   : 4   <- the shortlist
+   ...into DIFFERENT CELLS            : 0
+   ...where one is an objective target: 0
+
+   STATED                     Tending the Flames  [Unofficial Skyrim Special Edition Patch.esp]
+      'MS05ElisifTheFair' Npc ElisifTheFair
+      'MS05Una' Npc Una
+      were 536u apart in SolitudeBluePalace (int)
+      now 3,458u apart
+      moved by BluePalaceTerrace.esp
+
+   STATED                     Temple Conversation 1  [Unofficial Skyrim Special Edition Patch.esp]
+      'Freir' Npc Freir
+      'Silana' Npc SilanaPetreia
+      were 140u apart in SolitudeTempleoftheDivines (int)
+      now 1,838u apart
+      moved by Grand Solitude - Pilgrim patch.esp
+
+   STATED                     Tending the Flames  [Unofficial Skyrim Special Edition Patch.esp]
+      'Silana' Npc SilanaPetreia
+      'Rorlund' Npc Rorlund
+      were 137u apart in SolitudeTempleoftheDivines (int)
+      now 1,800u apart
+      moved by Grand Solitude - Pilgrim patch.esp
+
+   STATED                     Temple Conversation 1  [Unofficial Skyrim Special Edition Patch.esp]
+      'Rorlund' Npc Rorlund
+      'Silana' Npc SilanaPetreia
+      were 137u apart in SolitudeTempleoftheDivines (int)
+      now 1,800u apart
+      moved by Grand Solitude - Pilgrim patch.esp
+
+   proximity only             The Man Who Cried Wolf  [Unofficial Skyrim Special Edition Patch.esp]
+      'MS06Jarl' Npc ElisifTheFair
+      'MS06Una' Npc Una
+      were 536u apart in SolitudeBluePalace (int)
+      now 3,458u apart
+      moved by BluePalaceTerrace.esp
+
+   proximity only             Boethiah's Calling  [Unofficial Skyrim Special Edition Patch.esp]
+      'GuardASons' Npc GuardSolitudeSonsBluePalaceMaleGuard
+      'GuardCSons' Npc GuardSolitudeSonsBluePalace
+      were 98u apart in 037EE6:Skyrim.esm
+      now 1,365u apart
+      moved by BluePalaceTerrace.esp
+
+   proximity only             Boethiah's Calling  [Unofficial Skyrim Special Edition Patch.esp]
+      'GuardAImperial' Npc GuardSolitudeImperialBluePalace
+      'GuardCImperial' Npc GuardSolitudeImperialBluePalace
+      were 142u apart in 037EE6:Skyrim.esm
+      now 1,357u apart
+      moved by BluePalaceTerrace.esp
+
+   proximity only             Boethiah's Calling  [Unofficial Skyrim Special Edition Patch.esp]
+      'GuardASons' Npc GuardSolitudeSonsBluePalaceMaleGuard
+      'GuardDSons' Npc GuardSolitudeSonsBluePalace
+      were 148u apart in 037EE6:Skyrim.esm
+      now 1,288u apart
+      moved by BluePalaceTerrace.esp
+
+   proximity only             Boethiah's Calling  [Unofficial Skyrim Special Edition Patch.esp]
+      'GuardAImperial' Npc GuardSolitudeImperialBluePalace
+      'GuardDImperial' Npc GuardSolitudeImperialBluePalace
+      were 174u apart in 037EE6:Skyrim.esm
+      now 1,259u apart
+      moved by BluePalaceTerrace.esp
+
+   proximity only             Boethiah's Calling  [Unofficial Skyrim Special Edition Patch.esp]
+      'GuardBSons' Npc GuardSolitudeSonsBluePalace
+      'GuardDSons' Npc GuardSolitudeSonsBluePalace
+      were 99u apart in 037EE6:Skyrim.esm
+      now 755u apart
+      moved by BluePalaceTerrace.esp
+
+   proximity only             Boethiah's Calling  [Unofficial Skyrim Special Edition Patch.esp]
+      'GuardBImperial' Npc GuardSolitudeImperialBluePalace
+      'GuardDImperial' Npc GuardSolitudeImperialBluePalace
+      were 139u apart in 037EE6:Skyrim.esm
+      now 737u apart
+      moved by BluePalaceTerrace.esp
+
+   proximity only             Boethiah's Calling  [Unofficial Skyrim Special Edition Patch.esp]
+      'GuardASons' Npc GuardSolitudeSonsBluePalaceMaleGuard
+      'GuardBSons' Npc GuardSolitudeSonsBluePalace
+      were 114u apart in 037EE6:Skyrim.esm
+      now 734u apart
+      moved by BluePalaceTerrace.esp
+
+   proximity only             Boethiah's Calling  [Unofficial Skyrim Special Edition Patch.esp]
+      'GuardBImperial' Npc GuardSolitudeImperialBluePalace
+      'GuardCImperial' Npc GuardSolitudeImperialBluePalace
+      were 171u apart in 037EE6:Skyrim.esm
+      now 707u apart
+      moved by BluePalaceTerrace.esp
+
+   proximity only             Boethiah's Calling  [Unofficial Skyrim Special Edition Patch.esp]
+      'GuardAImperial' Npc GuardSolitudeImperialBluePalace
+      'GuardBImperial' Npc GuardSolitudeImperialBluePalace
+      were 99u apart in 037EE6:Skyrim.esm
+      now 680u apart
+      moved by BluePalaceTerrace.esp
+
+   proximity only             Boethiah's Calling  [Unofficial Skyrim Special Edition Patch.esp]
+      'GuardBSons' Npc GuardSolitudeSonsBluePalace
+      'GuardCSons' Npc GuardSolitudeSonsBluePalace
+      were 147u apart in 037EE6:Skyrim.esm
+      now 667u apart
+      moved by BluePalaceTerrace.esp
+
+   proximity only             Boethiah's Calling  [Unofficial Skyrim Special Edition Patch.esp]
+      'GuardCSons' Npc GuardSolitudeSonsBluePalace
+      'GuardDSons' Npc GuardSolitudeSonsBluePalace
+      were 107u apart in 037EE6:Skyrim.esm
+      now 608u apart
+      moved by BluePalaceTerrace.esp
+
+   ---- by the plugin that moved things ----
+      13  BluePalaceTerrace.esp
+       3  Grand Solitude - Pilgrim patch.esp
+
+   ---- by the quest's plugin ----
+      16  Unofficial Skyrim Special Edition Patch.esp
+
+==== SENSITIVITY: the stated-and-unpatched shortlist vs the 'together' threshold ====
+   near =    300u  ->  shortlist   7
+   near =    600u  ->  shortlist   4
+   near =   1200u  ->  shortlist   6
+   STABLE CORE (present at every setting): 3
+      Temple Conversation 1  ·  'Freir' + 'Silana'
+      Temple Conversation 1  ·  'Rorlund' + 'Silana'
+      Tending the Flames  ·  'Silana' + 'Rorlund'
+   threshold-dependent fringe: 7 more appear at only some settings — leads, not findings.
+
+elapsed 6.1s

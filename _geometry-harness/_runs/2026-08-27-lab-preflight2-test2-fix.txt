@@ -1,0 +1,137 @@
+SYNTHETIC load order: 93 plugins (93 loaded per the modified set)
+   ENABLED  JKs CoW - OCW - Midden Expanded ESP patch.esp
+
+
+indexed 19,563 navmesh records across 8,483 cells  (6.2s)
+   plugins that could not be read (contribute nothing, counted per rule 6): 0
+
+==== CLOBBERED: one mod's navmesh work silently discarded by another ====
+   navmesh records affected : 35   (17 where the geometry actually differs)
+   (the winner declares no dependency on the loser — direct or transitive — so nothing
+    shows it accounted for that edit; whether the author SAW it is not decidable here)
+   ---- the material records, split by population (rule 12) ----
+      7  A. Bethesda-on-Bethesda (permanent FLOOR)
+     10  C. mod-on-mod
+   Findings are B and C: 10 records. A is measured floor and excluded from --emit.
+   (material by content hash; 4 of them have identical counts but moved geometry —
+    a class the count-only test used before 2026-08-27 could not see)
+       7 navmesh  Dawnguard.esm
+            reverted by  HearthFires.esm    e.g. 0CB4F4:Skyrim.esm in WhiterunBreezehome (int)  (2 tris -> 135)
+       4 navmesh  middenexpandedSSE.esp
+            reverted by  JKs College of Winterhold - OCW Patch.esp    e.g. 10925C:Skyrim.esm in WinterholdCollegeExteriorBack (ext)  (58 tris -> 58)
+       3 navmesh  middenexpandedSSE.esp
+            reverted by  OCW_Obscure's_CollegeofWinterhold.esp    e.g. 1095C0:Skyrim.esm in WinterholdCollegeExteriorBack (ext)  (13 tris -> 13)
+       2 navmesh  OCW_Obscure's_CollegeofWinterhold.esp
+            reverted by  JK's College of Winterhold.esp    e.g. 100F51:Skyrim.esm in WinterholdExteriorBridge01 (ext)  (226 tris -> 224)
+       1 navmesh  ccBGSSSE025-AdvDSGS.esm
+            reverted by  Unofficial Skyrim Special Edition Patch.esp    e.g. 0CAD79:Skyrim.esm in SolitudeOrigin (ext)  (679 tris -> 679)
+
+==== DELETED or EMPTIED navmesh (hard break) ====
+   findings: 0
+
+==== DANGLING NAVMESH LINKS (exact; no thresholds) ====
+   checked: 2,310 navmesh door triangles, 2,312 door->navmesh links, 235,731 edge links
+   findings: 35
+          32  EDGE-IDX
+           3  DOOR-IDX
+   DOOR-IDX   door 016969:Skyrim.esm in 03837C:Skyrim.esm (ext) points at triangle 65 of 64
+   DOOR-IDX   door 002F96:Update.esm in 0093BA:Skyrim.esm (ext) points at triangle 412 of 412
+   DOOR-IDX   door 013821:Dawnguard.esm in DLC1RuunvaldExit (ext) points at triangle 382 of 379
+   EDGE-IDX   navmesh 100F51:Skyrim.esm in WinterholdExteriorBridge01 (ext) edge-links 03E57B:Skyrim.esm triangle 187 of 187
+   EDGE-IDX   navmesh 10F9A4:Skyrim.esm in 0096B7:Skyrim.esm (ext) edge-links 10F989:Skyrim.esm triangle 422 of 416
+   EDGE-IDX   navmesh 10F9A4:Skyrim.esm in 0096B7:Skyrim.esm (ext) edge-links 10F989:Skyrim.esm triangle 428 of 416
+   EDGE-IDX   navmesh 10F9A4:Skyrim.esm in 0096B7:Skyrim.esm (ext) edge-links 10F989:Skyrim.esm triangle 424 of 416
+   EDGE-IDX   navmesh 10F9A4:Skyrim.esm in 0096B7:Skyrim.esm (ext) edge-links 10F989:Skyrim.esm triangle 425 of 416
+   EDGE-IDX   navmesh 10F9A4:Skyrim.esm in 0096B7:Skyrim.esm (ext) edge-links 10F989:Skyrim.esm triangle 421 of 416
+   EDGE-IDX   navmesh 10F9A4:Skyrim.esm in 0096B7:Skyrim.esm (ext) edge-links 10F989:Skyrim.esm triangle 423 of 416
+   EDGE-IDX   navmesh 10F9A4:Skyrim.esm in 0096B7:Skyrim.esm (ext) edge-links 10F989:Skyrim.esm triangle 416 of 416
+   EDGE-IDX   navmesh 10F9A4:Skyrim.esm in 0096B7:Skyrim.esm (ext) edge-links 10F989:Skyrim.esm triangle 427 of 416
+   EDGE-IDX   navmesh 10F9A4:Skyrim.esm in 0096B7:Skyrim.esm (ext) edge-links 10F989:Skyrim.esm triangle 418 of 416
+   EDGE-IDX   navmesh 10F9A4:Skyrim.esm in 0096B7:Skyrim.esm (ext) edge-links 10F989:Skyrim.esm triangle 419 of 416
+   EDGE-IDX   navmesh 10F9A4:Skyrim.esm in 0096B7:Skyrim.esm (ext) edge-links 10F989:Skyrim.esm triangle 430 of 416
+   EDGE-IDX   navmesh 10539D:Skyrim.esm in 00BCF9:Skyrim.esm (ext) edge-links 105285:Skyrim.esm triangle 890 of 890
+   EDGE-IDX   navmesh 104E8D:Skyrim.esm in FortGreenwallExteriorEdge01 (ext) edge-links 08AD52:Skyrim.esm triangle 332 of 331
+   EDGE-IDX   navmesh 1017F8:Skyrim.esm in 00BB85:Skyrim.esm (ext) edge-links 079A55:Skyrim.esm triangle 504 of 504
+   EDGE-IDX   navmesh 103910:Skyrim.esm in DLC1ArkngthamzExterior02 (ext) edge-links 10390D:Skyrim.esm triangle 353 of 224
+   EDGE-IDX   navmesh 0E88EA:Skyrim.esm in 0093BB:Skyrim.esm (ext) edge-links 105B64:Skyrim.esm triangle 414 of 412
+   EDGE-IDX   navmesh 105A71:Skyrim.esm in BYOHHouse2Exterior02 (ext) edge-links 1050E4:Skyrim.esm triangle 387 of 387
+   EDGE-IDX   navmesh 0FD7E9:Skyrim.esm in 009B37:Skyrim.esm (ext) edge-links 0EAECC:Skyrim.esm triangle 1011 of 989
+   EDGE-IDX   navmesh 0FD7E8:Skyrim.esm in 009B37:Skyrim.esm (ext) edge-links 0EAECC:Skyrim.esm triangle 1012 of 989
+   EDGE-IDX   navmesh 03A627:Dragonborn.esm in 00EE53:Dragonborn.esm (ext) edge-links 025B41:Dragonborn.esm triangle 784 of 776
+   EDGE-IDX   navmesh 037782:Dragonborn.esm in 00EE75:Dragonborn.esm (ext) edge-links 025B41:Dragonborn.esm triangle 785 of 776
+
+   ---- the two ends of each dangling link, split by population ----
+     28  A. neither end touched by a mod   -> Bethesda's own, permanent FLOOR
+      5  B. a mod re-cut the TARGET, breaking a vanilla index   -> cross-plugin
+      2  D. mods on both ends                                   -> cross-plugin
+   Only B, C and D are findings. A is the floor, and it is measured rather than assumed.
+
+   ---- who already overrides the record carrying each bad index (B/C/D only) ----
+   (a dangling link names one party, so there is no master pair to look a patch up against;
+    this is the record-level answer, and the shortlist of plugins a fix could live in)
+      3  Skyrim.esm   ==> into: Skyrim.esm -> Unofficial Skyrim Special Edition Patch.esp
+      1  Update.esm -> cceejsse002-tower.esl   ==> into: Skyrim.esm -> Update.esm -> cceejsse002-tower.esl
+      1  Skyrim.esm -> Unofficial Skyrim Special Edition Patch.esp -> OCW_Obscure's_CollegeofWinterhold.esp -> JK's College of Winterhold.esp   ==> into: Skyrim.esm -> Unofficial Skyrim Special Edition Patch.esp -> OCW_Obscure's_CollegeofWinterhold.esp -> JK's College of Winterhold.esp -> JKs College of Winterhold - OCW Patch.esp
+      1  Skyrim.esm -> Update.esm   ==> into: Skyrim.esm -> Update.esm -> cceejsse002-tower.esl
+      1  Dragonborn.esm   ==> into: Dragonborn.esm -> Unofficial Skyrim Special Edition Patch.esp
+
+==== UNCUT: obstructing refs introduced after the navmesh's last word ====
+   cell/plugin pairs : 1,393   (7,585 references)
+   size source: 2,582 base records measured from the mesh, 13,462 from OBND (fallback), 0 unresolvable
+   blocker = footprint >= 96u and height >= 64u
+     5493 refs in  677 cells   Update.esm
+     1011 refs in  508 cells   Unofficial Skyrim Special Edition Patch.esp
+      182 refs in    7 cells   ccvsvsse004-beafarmer.esl
+      178 refs in   61 cells   ccBGSSSE001-Fish.esm
+      174 refs in    2 cells   Dragonborn.esm
+      143 refs in   28 cells   Dawnguard.esm
+      135 refs in    2 cells   cceejsse001-hstead.esm
+       41 refs in   38 cells   HearthFires.esm
+       40 refs in   10 cells   ccBGSSSE025-AdvDSGS.esm
+       20 refs in    4 cells   ccbgssse008-wraithguard.esl
+       13 refs in    2 cells   cceejsse002-tower.esl
+       12 refs in    2 cells   cceejsse004-hall.esl
+       11 refs in    1 cells   ccbgssse003-zombies.esl
+       11 refs in    3 cells   ccbgssse041-netchleather.esl
+       10 refs in    1 cells   ccbgssse059-ba_dragonplate.esl
+       10 refs in    1 cells   ccrmssse001-necrohouse.esl
+        9 refs in    1 cells   ccbgssse040-advobgobs.esl
+        9 refs in    4 cells   cckrtsse001_altar.esl
+        8 refs in    1 cells   ccedhsse002-splkntset.esl
+        8 refs in    1 cells   cceejsse005-cave.esm
+        7 refs in    3 cells   ccvsvsse002-pets.esl
+        6 refs in    3 cells   ccbgssse067-daedinv.esm
+        6 refs in    2 cells   cceejsse003-hollow.esl
+        5 refs in    1 cells   ccpewsse002-armsofchaos.esl
+        5 refs in    2 cells   ccvsvsse001-winter.esl
+
+   ---- worst individual cells ----
+     168 refs  Dragonborn.esm                                 into NavMeshGenCellDUPLICATE001 (int)   navmesh owned by Skyrim.esm
+      74 refs  Update.esm                                     into RiverwoodEdge01 (ext)              navmesh owned by Skyrim.esm
+      73 refs  ccvsvsse004-beafarmer.esl                      into 0099B4:Skyrim.esm (ext)            navmesh owned by Skyrim.esm+Dawnguard.esm
+      68 refs  cceejsse001-hstead.esm                         into 0EEJSSE001_Ext (ext)               navmesh owned by Skyrim.esm+Update.esm
+      67 refs  Update.esm                                     into 0097D0:Skyrim.esm (ext)            navmesh owned by Skyrim.esm
+      67 refs  cceejsse001-hstead.esm                         into 0095B9:Skyrim.esm (ext)            navmesh owned by Skyrim.esm+Update.esm
+      55 refs  ccBGSSSE001-Fish.esm                           into 008E9A:Skyrim.esm (ext)            navmesh owned by Skyrim.esm
+      53 refs  Update.esm                                     into 00BC8A:Skyrim.esm (ext)            navmesh owned by Skyrim.esm
+      51 refs  ccBGSSSE001-Fish.esm                           into ccPlaceholder18Interior01 (int)    navmesh owned by Update.esm
+      50 refs  Update.esm                                     into ChargenExit (ext)                  navmesh owned by Skyrim.esm
+      48 refs  Update.esm                                     into HelgenExterior (ext)               navmesh owned by Skyrim.esm
+      46 refs  Update.esm                                     into LeftHandMineExterior02 (ext)       navmesh owned by Skyrim.esm
+      45 refs  Update.esm                                     into HelgenRiverwoodCrossroads (ext)    navmesh owned by Skyrim.esm
+      43 refs  Update.esm                                     into FalkreathExterior04 (ext)          navmesh owned by Skyrim.esm
+      43 refs  Update.esm                                     into 01A274:Skyrim.esm (ext)            navmesh owned by Skyrim.esm
+      42 refs  Update.esm                                     into DushnikhYalExterior02 (ext)        navmesh owned by Skyrim.esm
+      40 refs  ccvsvsse004-beafarmer.esl                      into ccVSVSSE004FarmExterior02 (ext)    navmesh owned by Skyrim.esm+Dawnguard.esm
+      38 refs  Update.esm                                     into WhitewatchTowerExterior01 (ext)    navmesh owned by Skyrim.esm
+      38 refs  Update.esm                                     into HelgenExterior06 (ext)             navmesh owned by Skyrim.esm
+      36 refs  Update.esm                                     into GoldenglowEstateExterior04 (ext)   navmesh owned by Skyrim.esm
+      36 refs  Update.esm                                     into SteamcragCampExterior02 (ext)      navmesh owned by Skyrim.esm
+      35 refs  Update.esm                                     into HaltedStreamCampExterior02 (ext)   navmesh owned by Skyrim.esm
+      35 refs  Update.esm                                     into SleepingTreeCampExterior01 (ext)   navmesh owned by Skyrim.esm
+      35 refs  Dawnguard.esm                                  into HalloftheVigilantExterior01 (ext)  navmesh owned by Skyrim.esm
+      33 refs  Update.esm                                     into SoljundsSinkholeExterior (ext)     navmesh owned by Skyrim.esm
+
+emitted 11 conflicts (0 with no second party to name; 28 class-A dangles and the class-A clobbers withheld as floor) -> C:/Users/Piranha/AppData/Local/Temp/claude/C--Games-Skyrim-VR-PiranhaRim-VR/0453f19d-a567-485b-8a75-c1b502287e29/scratchpad/lab-test2-fix.json
+
+elapsed 9.8s
