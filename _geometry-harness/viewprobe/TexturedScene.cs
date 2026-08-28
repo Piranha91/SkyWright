@@ -123,6 +123,7 @@ static class TexturedScene
         string overwriteDir,
         (Vector3 Eye, Vector3 Look, float FovDeg) cam,     // Skyrim Z-up coordinates
         IReadOnlyList<(Vector3 A, Vector3 B, Vector3 C)> navTris,
+        IReadOnlyList<(Vector3 A, Vector3 B, Vector3 C)> redTris,   // the FINDING, always painted
         string navMode,                                    // off | filled | wire | both
         int size, string outPath)
     {
@@ -260,17 +261,18 @@ static class TexturedScene
         //           readable — the outlines are thin in-plane ribbons, not GL lines, so they
         //           depth-test like real geometry;
         //   both    a faint sheet plus the outlines.
-        if (navTris.Count > 0 && navMode != "off")
+        if ((navTris.Count > 0 || redTris.Count > 0) && navMode != "off")
         {
             bool fill = navMode is "filled" or "both";
             bool wire = navMode is "wire" or "both";
             var lift = new Vector3(0, 0, 2f);                           // Z-up lift before the swap
 
-            if (fill)
+            // Shared builders so the healthy (green) and finding (red) layers are the same
+            // geometry with different paint.
+            GlMesh BuildFill(IReadOnlyList<(Vector3 A, Vector3 B, Vector3 C)> tris, Vector4 color, string name)
             {
-                float alpha = navMode == "both" ? 0.16f : 0.35f;
                 var nv = new List<Vector3>(); var ni = new List<int>();
-                foreach (var (a, b, c) in navTris)
+                foreach (var (a, b, c) in tris)
                 {
                     int at = nv.Count;
                     nv.Add(YUp(a + lift)); nv.Add(YUp(b + lift)); nv.Add(YUp(c + lift));
@@ -278,23 +280,20 @@ static class TexturedScene
                 }
                 var flat = new Vector3[nv.Count]; var uv = new Vector2[nv.Count];
                 var col = new Vector4[nv.Count];
-                for (int i = 0; i < nv.Count; i++) { flat[i] = Vector3.UnitY; col[i] = new Vector4(0.2f, 0.95f, 0.45f, alpha); }
-                var navMesh = new GlMesh();
-                navMesh.Upload(Interleave(nv.ToArray(), flat, uv, flat, flat, col), ni.ToArray());
-                navMesh.ShapeName = "navmesh-fill";
-                navMesh.DiffuseTexture = textures.WhiteTexture;
-                navMesh.HasVertexColors = true;
-                navMesh.HasAlphaBlend = true;
-                navMesh.MaterialAlpha = alpha;
-                navMesh.IsDoubleSided = true;
-                navMesh.DepthWrite = false;
-                renderer.AddMesh(navMesh);
-                meshes.Add(navMesh);
+                for (int i = 0; i < nv.Count; i++) { flat[i] = Vector3.UnitY; col[i] = color; }
+                var mm = new GlMesh();
+                mm.Upload(Interleave(nv.ToArray(), flat, uv, flat, flat, col), ni.ToArray());
+                mm.ShapeName = name;
+                mm.DiffuseTexture = textures.WhiteTexture;
+                mm.HasVertexColors = true;
+                mm.HasAlphaBlend = true;
+                mm.MaterialAlpha = color.W;
+                mm.IsDoubleSided = true;
+                mm.DepthWrite = false;
+                return mm;
             }
-
-            if (wire)
+            GlMesh BuildWire(IReadOnlyList<(Vector3 A, Vector3 B, Vector3 C)> tris, Vector4 color, float halfWidth, string name)
             {
-                const float halfW = 2.2f;                               // ribbon half-width, world units
                 var wv = new List<Vector3>(); var wi = new List<int>();
                 void Ribbon(Vector3 p, Vector3 q, Vector3 n)
                 {
@@ -303,14 +302,14 @@ static class TexturedScene
                     dir = Vector3.Normalize(dir);
                     var side = Vector3.Cross(n, dir);
                     if (side.LengthSquared() < 1e-6f) side = Vector3.UnitZ;
-                    side = Vector3.Normalize(side) * halfW;
+                    side = Vector3.Normalize(side) * halfWidth;
                     int at = wv.Count;
                     wv.Add(YUp(p - side + lift)); wv.Add(YUp(p + side + lift));
                     wv.Add(YUp(q + side + lift)); wv.Add(YUp(q - side + lift));
                     wi.Add(at); wi.Add(at + 1); wi.Add(at + 2);
                     wi.Add(at); wi.Add(at + 2); wi.Add(at + 3);
                 }
-                foreach (var (a, b, c) in navTris)
+                foreach (var (a, b, c) in tris)
                 {
                     var n = Vector3.Cross(b - a, c - a);
                     n = n.LengthSquared() > 1e-10f ? Vector3.Normalize(n) : Vector3.UnitZ;
@@ -318,15 +317,47 @@ static class TexturedScene
                 }
                 var flat = new Vector3[wv.Count]; var uv = new Vector2[wv.Count];
                 var col = new Vector4[wv.Count];
-                for (int i = 0; i < wv.Count; i++) { flat[i] = Vector3.UnitY; col[i] = new Vector4(0.05f, 0.85f, 0.30f, 1f); }
-                var edges = new GlMesh();
-                edges.Upload(Interleave(wv.ToArray(), flat, uv, flat, flat, col), wi.ToArray());
-                edges.ShapeName = "navmesh-wire";
-                edges.DiffuseTexture = textures.WhiteTexture;
-                edges.HasVertexColors = true;
-                edges.IsDoubleSided = true;
-                renderer.AddMesh(edges);
-                meshes.Add(edges);
+                for (int i = 0; i < wv.Count; i++) { flat[i] = Vector3.UnitY; col[i] = color; }
+                var mm = new GlMesh();
+                mm.Upload(Interleave(wv.ToArray(), flat, uv, flat, flat, col), wi.ToArray());
+                mm.ShapeName = name;
+                mm.DiffuseTexture = textures.WhiteTexture;
+                mm.HasVertexColors = true;
+                mm.IsDoubleSided = true;
+                return mm;
+            }
+
+            if (fill)
+            {
+                float alpha = navMode == "both" ? 0.16f : 0.35f;
+                if (navTris.Count > 0)
+                {
+                    var m0 = BuildFill(navTris, new Vector4(0.2f, 0.95f, 0.45f, alpha), "navmesh-fill");
+                    renderer.AddMesh(m0); meshes.Add(m0);
+                }
+                if (redTris.Count > 0)
+                {
+                    var m1 = BuildFill(redTris, new Vector4(0.95f, 0.15f, 0.08f, MathF.Min(0.55f, alpha + 0.2f)), "navmesh-fill-red");
+                    renderer.AddMesh(m1); meshes.Add(m1);
+                }
+            }
+
+            if (wire)
+            {
+                if (navTris.Count > 0)
+                {
+                    var m0 = BuildWire(navTris, new Vector4(0.05f, 0.85f, 0.30f, 1f), 2.2f, "navmesh-wire");
+                    renderer.AddMesh(m0); meshes.Add(m0);
+                }
+            }
+            // The finding is ALWAYS outlined in red — wider than the green so it reads at a
+            // glance, in every mode that draws navmesh at all. In filled mode it also gets the
+            // red fill above; in wire mode the interior stays transparent so the surface (and
+            // whatever intersects it) stays visible.
+            if (redTris.Count > 0)
+            {
+                var m1 = BuildWire(redTris, new Vector4(1f, 0.12f, 0.05f, 1f), 3.4f, "navmesh-wire-red");
+                renderer.AddMesh(m1); meshes.Add(m1);
             }
         }
 

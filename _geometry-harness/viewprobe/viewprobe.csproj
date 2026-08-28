@@ -12,6 +12,9 @@
   <ItemGroup>
     <ProjectReference Include="..\..\src\housecarl-core\housecarl-core.csproj" />
     <ProjectReference Include="S:\Dev\SynthEBD\CharacterViewer.Rendering\CharacterViewer.Rendering.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <Compile Include="..\_shared\ConflictReport.cs" Link="ConflictReport.cs" />
     <PackageReference Include="SixLabors.ImageSharp" Version="3.1.11" />
   </ItemGroup>
 </Project>

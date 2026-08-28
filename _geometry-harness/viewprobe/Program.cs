@@ -83,6 +83,15 @@ string navMode = "filled";
 // is inspectable rather than guessed.
 bool showMarkers = false;
 bool listMeshes = false;
+// TROUBLESHOOTING OVERLAY. --conflicts <emit.json> reads a detector's emitted ConflictFile and
+// paints the implicated navmeshes RED in this cell — whole records for CLOBBERED, the named
+// navmesh ends for dangling links — and auto-highlights implicated doors orange. --red
+// "FORMKEY[:tri]" does the same by hand for one navmesh (optionally a single triangle). When
+// either is given and --nav was not, the mode defaults to WIRE: green outlines for healthy
+// navmesh, red for the finding — the troubleshooting default.
+string? conflictsPath = null;
+var redSpecs = new List<string>();
+bool navModeExplicit = false;
 // --euler renders the SAME cell under all six Euler compositions. The numeric tests could not
 // separate them (0.62%-0.69%, then 1.84%-2.08%), which is itself a finding — but a wrong order
 // scatters kit pieces by hundreds of units, and that is trivially visible even when it is
@@ -108,12 +117,15 @@ for (int i = 1; i < args.Length; i++)
     else if (args[i] == "--pitch" && i + 1 < args.Length) pitch = float.Parse(args[++i]);
     else if (args[i] == "--fov" && i + 1 < args.Length) fov = float.Parse(args[++i]);
     else if (args[i] == "--fx") keepFx = true;
-    else if (args[i] == "--nav" && i + 1 < args.Length) navMode = args[++i].ToLowerInvariant();
+    else if (args[i] == "--nav" && i + 1 < args.Length) { navMode = args[++i].ToLowerInvariant(); navModeExplicit = true; }
+    else if (args[i] == "--conflicts" && i + 1 < args.Length) conflictsPath = args[++i];
+    else if (args[i] == "--red" && i + 1 < args.Length) redSpecs.Add(args[++i]);
     else if (args[i] == "--markers") showMarkers = true;
     else if (args[i] == "--list-meshes") listMeshes = true;
     else if (args[i] is "--instance" or "--game" or "--profile") i++;   // consumed above
 }
 if (!drawNav) navMode = "off";
+if ((conflictsPath is not null || redSpecs.Count > 0) && !navModeExplicit) navMode = "wire";
 if (navMode is not ("off" or "filled" or "wire" or "both"))
 { Console.Error.WriteLine($"--nav '{navMode}' is not one of: off, filled, wire, both."); return 1; }
 Directory.CreateDirectory(outDir);
@@ -213,6 +225,46 @@ if (textured)
         lookPos = eyePos.Value + dir * 512f;
     }
 
+    // Which navmeshes (or single triangles) are the FINDING. null tri-set = the whole record.
+    var redNav = new Dictionary<FormKey, HashSet<int>?>();
+    var conflictDoors = new HashSet<FormKey>();
+    void MarkRed(FormKey fk, int? tri)
+    {
+        if (tri is null) { redNav[fk] = null; return; }
+        if (redNav.TryGetValue(fk, out var cur) && cur is null) return;   // whole-record already
+        if (!redNav.TryGetValue(fk, out cur) || cur is null) redNav[fk] = cur = new HashSet<int>();
+        cur.Add(tri.Value);
+    }
+    foreach (var spec in redSpecs)
+    {
+        var parts = spec.Split(':');
+        int? tri = null;
+        string keyText = spec;
+        if (parts.Length >= 3 && int.TryParse(parts[^1], out var t))
+        { tri = t; keyText = string.Join(':', parts[..^1]); }
+        try { MarkRed(FormKey.Factory(keyText), tri); }
+        catch { Console.Error.WriteLine($"--red '{spec}' is not FORMKEY[:tri]."); return 1; }
+    }
+    if (conflictsPath is not null)
+    {
+        HarnessShared.ConflictFile cf;
+        try { cf = HarnessShared.ConflictIo.Read(conflictsPath); }
+        catch (Exception ex) { Console.Error.WriteLine($"could not read '{conflictsPath}': {ex.Message}"); return 1; }
+        foreach (var c in cf.Conflicts)
+            foreach (var rec in c.Necessary.Concat(c.Alternative ?? Array.Empty<HarnessShared.ConflictRecord>()))
+            {
+                FormKey fk;
+                try { fk = FormKey.Factory(rec.FormKey); } catch { continue; }
+                if (rec.Role == "navmesh" && winNav.ContainsKey(fk)) MarkRed(fk, null);
+                else if (rec.Role == "door" && winRef.ContainsKey(fk)) conflictDoors.Add(fk);
+            }
+        int redHere = redNav.Count(kv => winNav.ContainsKey(kv.Key));
+        Console.WriteLine($"   conflicts overlay: {redHere} navmesh record(s) in this cell painted red, "
+                        + $"{conflictDoors.Count} door(s) highlighted (from {cf.Conflicts.Count} conflicts in {Path.GetFileName(conflictsPath)})");
+        if (redHere == 0 && conflictDoors.Count == 0)
+            Console.WriteLine($"   (no conflict in that file names a navmesh or door in THIS cell — nothing to paint)");
+    }
+
     var scene = new List<ViewProbe.SceneRef>();
     int fxSkipped = 0, markerSkipped = 0;
     var meshCensus = listMeshes ? new Dictionary<string, (int Count, string Class)>(StringComparer.OrdinalIgnoreCase) : null;
@@ -235,7 +287,7 @@ if (textured)
         // as a translucent extra layer instead of dropping them.
         if (isMarker && !showMarkers) { markerSkipped++; continue; }
         scene.Add(new ViewProbe.SceneRef(rel, r.Position, r.Rotation, r.Scale,
-                                         hiFp is { } h && r.FormKey == h, isMarker));
+                                         (hiFp is { } h && r.FormKey == h) || conflictDoors.Contains(r.FormKey), isMarker));
     }
     if (fxSkipped > 0) Console.WriteLine($"   ({fxSkipped} effect-mesh refs skipped; --fx to include them)");
     if (markerSkipped > 0) Console.WriteLine($"   ({markerSkipped} editor-marker refs skipped; --markers to include them translucently)");
@@ -247,15 +299,32 @@ if (textured)
     }
 
     var navTris = new List<(System.Numerics.Vector3, System.Numerics.Vector3, System.Numerics.Vector3)>();
+    var redTris = new List<(System.Numerics.Vector3, System.Numerics.Vector3, System.Numerics.Vector3)>();
     if (navMode != "off")
         foreach (var nav in winNav.Values)
-            foreach (var tri in nav.Triangles)
+        {
+            var reds = redNav.TryGetValue(nav.FormKey, out var rset) ? rset : null;
+            bool wholeRed = redNav.ContainsKey(nav.FormKey) && reds is null;
+            for (int ti = 0; ti < nav.Triangles.Count; ti++)
             {
+                var tri = nav.Triangles[ti];
                 if ((tri.Flags & 0x08) != 0) continue;
                 if (tri.A < 0 || tri.B < 0 || tri.C < 0) continue;
                 if (tri.A >= nav.Vertices.Count || tri.B >= nav.Vertices.Count || tri.C >= nav.Vertices.Count) continue;
-                navTris.Add((V(nav.Vertices[tri.A]), V(nav.Vertices[tri.B]), V(nav.Vertices[tri.C])));
+                var t3 = (V(nav.Vertices[tri.A]), V(nav.Vertices[tri.B]), V(nav.Vertices[tri.C]));
+                if (wholeRed || (reds is not null && reds.Contains(ti))) redTris.Add(t3);
+                else navTris.Add(t3);
             }
+        }
+
+    if (redTris.Count > 0)
+    {
+        var cen = System.Numerics.Vector3.Zero;
+        foreach (var (a, b, c) in redTris) cen += (a + b + c) / 3f;
+        cen /= redTris.Count;
+        Console.WriteLine($"   red navmesh centroid: {cen.X:0},{cen.Y:0},{cen.Z:0}  ({redTris.Count} triangles)");
+        Console.WriteLine($"   suggested view:  --eye {cen.X:0},{cen.Y - 450:0},{cen.Z + 260:0} --look {cen.X:0},{cen.Y:0},{cen.Z:0}");
+    }
 
     var modFolders = comp.EnabledMods.Select(m => Path.Combine(modsDir, m)).ToList();
 
@@ -275,7 +344,7 @@ if (textured)
     string fpOut = Path.Combine(outDir, $"{safe}-fp.png");
     int drawnShapes = ViewProbe.TexturedScene.RenderToPng(
         scene, assets, dataDir, modFolders, overwriteDir,
-        (eyePos.Value, lookPos.Value, fov), navTris, navMode, size, fpOut);
+        (eyePos.Value, lookPos.Value, fov), navTris, redTris, navMode, size, fpOut);
     Console.WriteLine($"wrote:\n   {fpOut}");
     Console.WriteLine($"   eye {eyePos.Value.X:0},{eyePos.Value.Y:0},{eyePos.Value.Z:0} -> look {lookPos.Value.X:0},{lookPos.Value.Y:0},{lookPos.Value.Z:0}  fov {fov:0}°  ({drawnShapes:N0} shapes)");
     return 0;
