@@ -326,16 +326,48 @@ drawn-before, exactly. That is what proves nothing *else* was dropped, which a p
 
 ### Compose cameras from measurements, not memory
 
-Guessed coordinates fail. The working sequence:
+**This section is the single source for camera placement.** Guessing world coordinates or ground
+height fails almost every time in an unfamiliar scene — six consecutive bad renders across
+Winterhold College and the Solitude Temple before the method below was adopted.
 
-1. flat diagnostic mode (no `--eye`) for the `bounds :` line and ref counts;
-2. a probe render with `--nav-at X,Y` for the walkable surface height, and `--refs-at` / `--pick` to
-   identify what is at a spot;
-3. only then the deliverable camera.
+The working sequence:
 
-Finding the right cell is its own step — ref count and persistent-ref count from the flat probe are
-a good proxy for "is this the interesting cell", and a cell's EditorID is not a reliable guide to
-what is in it.
+1. **`--eye-ref FORMID` / `--look-ref FORMID`** when the shot is about an actor or a door — the
+   camera lands exactly where the record says, at eye height. Always prefer this to coordinates.
+2. **Flat diagnostic mode** (no `--eye`) for the `bounds :` line and ref counts.
+3. **A cheap probe render** (`--size 320 --msaa 0 --nav off`) carrying `--nav-at X,Y` for the
+   walkable surface height and `--refs-at` / `--pick` to identify what is at a spot.
+4. Only then the deliverable camera.
+
+What that protects against:
+
+- **Ground heights vary wildly, including inside one cell.** A navmesh vertex from the same cell can
+  sit thousands of units below the deck the player walks on (Winterhold College courtyard z ≈ −7750,
+  shore below at −12300, tower features at −4600). "Somewhere around ground level" is not a number.
+- **Interior top-downs must slot the camera BETWEEN the target floor and the next storey.** Above
+  that you render rafters. `--nav-at` returns one row per level, which is how you find the gap
+  (Solitude Temple: gallery 1424, next floors 1712 / 2000 / 2288).
+- **Never put a first-person camera inside a building's footprint.** Exterior shells are
+  single-sided, so from inside, their walls back-face cull to nothing and the structure vanishes —
+  a door then reads as free-standing. Shoot from where a character would actually stand;
+  `--refs-at` at the camera spot shows which shell you may be standing inside.
+- **The `--conflicts` suggested view has no occlusion check.** It aims at the red centroid and can
+  land inside a boulder.
+- **The conflicts overlay paints red only for navmeshes in the TARGET cell**, and persistent refs
+  merge only within that cell's bounds — so pick the target cell to match what the shot must show.
+  Large statics are often persistent refs belonging to a neighbouring cell.
+- **Finding the right cell is its own step.** Ref count and persistent-ref count from the flat probe
+  are a good proxy for "is this the interesting cell"; a cell's EditorID is not a reliable guide to
+  what is in it.
+
+**Historical note, still open.** Several of those six failures had one root cause: viewprobe drew
+every rotated ref with its heading MIRRORED, because Skyrim REFR angles are clockwise-positive while
+`Matrix4x4.CreateRotation*` is right-handed counter-clockwise-positive. Fixed in viewprobe (commit
+`99e60ea`) — but `SpatialOverlap.ToWorld`, `blockprobe` and `navprobe` still carry the wrong-handed
+composition, and recalibrating them is an OPEN item. The six-order `--euler` test missed it entirely
+because all six orders shared the wrong sign; it was caught by annotating a render (an X pattern
+between walkway and navmesh, and a mirrored elevation bulge). A test that varies one parameter
+cannot find a bug in a term common to every variant.
 
 ---
 
