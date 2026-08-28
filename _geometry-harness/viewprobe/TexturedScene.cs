@@ -105,7 +105,8 @@ sealed class CvSettings : ICharacterViewerSettings
 
 /// <summary>One placed instance handed over from Program.cs: the mesh to draw and the Skyrim-space
 /// placement to draw it at.</summary>
-readonly record struct SceneRef(string MeshRelPath, Vec3 Position, Vec3 Rotation, float Scale, bool Highlight);
+readonly record struct SceneRef(string MeshRelPath, Vec3 Position, Vec3 Rotation, float Scale, bool Highlight,
+                                bool Marker = false);
 
 static class TexturedScene
 {
@@ -122,6 +123,7 @@ static class TexturedScene
         string overwriteDir,
         (Vector3 Eye, Vector3 Look, float FovDeg) cam,     // Skyrim Z-up coordinates
         IReadOnlyList<(Vector3 A, Vector3 B, Vector3 C)> navTris,
+        string navMode,                                    // off | filled | wire | both
         int size, string outPath)
     {
         var logger = new ConsoleCvLogger();
@@ -223,6 +225,16 @@ static class TexturedScene
                 {
                     mesh.DiffuseTexture = orange;
                 }
+                else if (r.Marker)
+                {
+                    // Markers are shown (only on --markers) as what they are: an editor overlay,
+                    // not world geometry — their own texture at half strength over the scene.
+                    string? md = b.TexturePaths.TryGetValue(0, out var mdp) ? mdp : null;
+                    mesh.DiffuseTexture = md is { Length: > 0 } ? textures.LoadTexture(md) : orange;
+                    mesh.HasAlphaBlend = true;
+                    mesh.MaterialAlpha = 0.5f;
+                    mesh.DepthWrite = false;
+                }
                 else
                 {
                     string? diffuse = b.TexturePaths.TryGetValue(0, out var d) ? d : null;
@@ -242,31 +254,80 @@ static class TexturedScene
             }
         }
 
-        // The navmesh overlay, translucent green over the real geometry — the probe's whole point.
-        if (navTris.Count > 0)
+        // The navmesh overlay — the probe's whole point. Three looks:
+        //   filled  the translucent green sheet (the original);
+        //   wire    every triangle outlined SOLID with no fill, so the surface underneath stays
+        //           readable — the outlines are thin in-plane ribbons, not GL lines, so they
+        //           depth-test like real geometry;
+        //   both    a faint sheet plus the outlines.
+        if (navTris.Count > 0 && navMode != "off")
         {
-            var nv = new List<Vector3>(); var ni = new List<int>();
-            foreach (var (a, b, c) in navTris)
+            bool fill = navMode is "filled" or "both";
+            bool wire = navMode is "wire" or "both";
+            var lift = new Vector3(0, 0, 2f);                           // Z-up lift before the swap
+
+            if (fill)
             {
-                int at = nv.Count;
-                var lift = new Vector3(0, 0, 2f);                       // Z-up lift before the swap
-                nv.Add(YUp(a + lift)); nv.Add(YUp(b + lift)); nv.Add(YUp(c + lift));
-                ni.Add(at); ni.Add(at + 1); ni.Add(at + 2);
+                float alpha = navMode == "both" ? 0.16f : 0.35f;
+                var nv = new List<Vector3>(); var ni = new List<int>();
+                foreach (var (a, b, c) in navTris)
+                {
+                    int at = nv.Count;
+                    nv.Add(YUp(a + lift)); nv.Add(YUp(b + lift)); nv.Add(YUp(c + lift));
+                    ni.Add(at); ni.Add(at + 1); ni.Add(at + 2);
+                }
+                var flat = new Vector3[nv.Count]; var uv = new Vector2[nv.Count];
+                var col = new Vector4[nv.Count];
+                for (int i = 0; i < nv.Count; i++) { flat[i] = Vector3.UnitY; col[i] = new Vector4(0.2f, 0.95f, 0.45f, alpha); }
+                var navMesh = new GlMesh();
+                navMesh.Upload(Interleave(nv.ToArray(), flat, uv, flat, flat, col), ni.ToArray());
+                navMesh.ShapeName = "navmesh-fill";
+                navMesh.DiffuseTexture = textures.WhiteTexture;
+                navMesh.HasVertexColors = true;
+                navMesh.HasAlphaBlend = true;
+                navMesh.MaterialAlpha = alpha;
+                navMesh.IsDoubleSided = true;
+                navMesh.DepthWrite = false;
+                renderer.AddMesh(navMesh);
+                meshes.Add(navMesh);
             }
-            var flat = new Vector3[nv.Count]; var uv = new Vector2[nv.Count];
-            var col = new Vector4[nv.Count];
-            for (int i = 0; i < nv.Count; i++) { flat[i] = Vector3.UnitY; col[i] = new Vector4(0.2f, 0.95f, 0.45f, 0.35f); }
-            var navMesh = new GlMesh();
-            navMesh.Upload(Interleave(nv.ToArray(), flat, uv, flat, flat, col), ni.ToArray());
-            navMesh.ShapeName = "navmesh-overlay";
-            navMesh.DiffuseTexture = textures.WhiteTexture;
-            navMesh.HasVertexColors = true;
-            navMesh.HasAlphaBlend = true;
-            navMesh.MaterialAlpha = 0.35f;
-            navMesh.IsDoubleSided = true;
-            navMesh.DepthWrite = false;
-            renderer.AddMesh(navMesh);
-            meshes.Add(navMesh);
+
+            if (wire)
+            {
+                const float halfW = 2.2f;                               // ribbon half-width, world units
+                var wv = new List<Vector3>(); var wi = new List<int>();
+                void Ribbon(Vector3 p, Vector3 q, Vector3 n)
+                {
+                    var dir = q - p;
+                    if (dir.LengthSquared() < 1e-6f) return;
+                    dir = Vector3.Normalize(dir);
+                    var side = Vector3.Cross(n, dir);
+                    if (side.LengthSquared() < 1e-6f) side = Vector3.UnitZ;
+                    side = Vector3.Normalize(side) * halfW;
+                    int at = wv.Count;
+                    wv.Add(YUp(p - side + lift)); wv.Add(YUp(p + side + lift));
+                    wv.Add(YUp(q + side + lift)); wv.Add(YUp(q - side + lift));
+                    wi.Add(at); wi.Add(at + 1); wi.Add(at + 2);
+                    wi.Add(at); wi.Add(at + 2); wi.Add(at + 3);
+                }
+                foreach (var (a, b, c) in navTris)
+                {
+                    var n = Vector3.Cross(b - a, c - a);
+                    n = n.LengthSquared() > 1e-10f ? Vector3.Normalize(n) : Vector3.UnitZ;
+                    Ribbon(a, b, n); Ribbon(b, c, n); Ribbon(c, a, n);
+                }
+                var flat = new Vector3[wv.Count]; var uv = new Vector2[wv.Count];
+                var col = new Vector4[wv.Count];
+                for (int i = 0; i < wv.Count; i++) { flat[i] = Vector3.UnitY; col[i] = new Vector4(0.05f, 0.85f, 0.30f, 1f); }
+                var edges = new GlMesh();
+                edges.Upload(Interleave(wv.ToArray(), flat, uv, flat, flat, col), wi.ToArray());
+                edges.ShapeName = "navmesh-wire";
+                edges.DiffuseTexture = textures.WhiteTexture;
+                edges.HasVertexColors = true;
+                edges.IsDoubleSided = true;
+                renderer.AddMesh(edges);
+                meshes.Add(edges);
+            }
         }
 
         // First-person camera: eye/look given in Skyrim coordinates, expressed on the OrbitCamera.

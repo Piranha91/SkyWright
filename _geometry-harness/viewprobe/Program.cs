@@ -73,6 +73,16 @@ float eyeHeight = 120f;                       // standing eye level; the player 
 float? yaw = null; float pitch = 0f;
 float fov = 65f;                              // Skyrim SE's default world FOV
 bool keepFx = false;
+// Navmesh render mode (textured mode): filled = the translucent green sheet; wire = transparent
+// triangles with SOLID outlines so the surface underneath stays readable; both = faint fill +
+// outlines; off = none. --no-nav remains an alias for off.
+string navMode = "filled";
+// Editor markers (dragon perches, heading markers, X markers...) are not world geometry: the
+// game never draws them. Filtered by default; --markers renders them translucently as an extra
+// layer. --list-meshes prints every distinct mesh with its classification, so what got filtered
+// is inspectable rather than guessed.
+bool showMarkers = false;
+bool listMeshes = false;
 // --euler renders the SAME cell under all six Euler compositions. The numeric tests could not
 // separate them (0.62%-0.69%, then 1.84%-2.08%), which is itself a finding — but a wrong order
 // scatters kit pieces by hundreds of units, and that is trivially visible even when it is
@@ -98,8 +108,14 @@ for (int i = 1; i < args.Length; i++)
     else if (args[i] == "--pitch" && i + 1 < args.Length) pitch = float.Parse(args[++i]);
     else if (args[i] == "--fov" && i + 1 < args.Length) fov = float.Parse(args[++i]);
     else if (args[i] == "--fx") keepFx = true;
+    else if (args[i] == "--nav" && i + 1 < args.Length) navMode = args[++i].ToLowerInvariant();
+    else if (args[i] == "--markers") showMarkers = true;
+    else if (args[i] == "--list-meshes") listMeshes = true;
     else if (args[i] is "--instance" or "--game" or "--profile") i++;   // consumed above
 }
+if (!drawNav) navMode = "off";
+if (navMode is not ("off" or "filled" or "wire" or "both"))
+{ Console.Error.WriteLine($"--nav '{navMode}' is not one of: off, filled, wire, both."); return 1; }
 Directory.CreateDirectory(outDir);
 
 // ---------------------------------------------------------------------------------------
@@ -114,6 +130,7 @@ var order = Mo2LoadOrder.Build(profileDir, modsDir, dataDir, overwriteDir);
 var winRef = new Dictionary<FormKey, PlacedRef>();
 var winNav = new Dictionary<FormKey, NavmeshGeometry>();
 var baseMesh = new Dictionary<FormKey, string>();
+var baseIsMarker = new HashSet<FormKey>();
 FormKey? cellKey = null;
 string cellLabel = target;
 bool interior = false;
@@ -126,7 +143,17 @@ foreach (var path in order.OrderedPaths)
     {
         foreach (var rec in m.EnumerateMajorRecords())
             if (rec is IModeledGetter mo && mo.Model?.File is { } f && !string.IsNullOrWhiteSpace(f.GivenPath))
-                baseMesh[((ISkyrimMajorRecordGetter)rec).FormKey] = f.GivenPath;
+            {
+                var smr = (ISkyrimMajorRecordGetter)rec;
+                baseMesh[smr.FormKey] = f.GivenPath;
+                // Editor-marker classification, from evidence the record itself carries: the
+                // Is-Marker header flag (0x00800000), a marker-named EditorID, or a model named
+                // *marker* / under the markers folder. The game renders none of these.
+                bool marker = (smr.MajorRecordFlagsRaw & 0x00800000) != 0
+                    || (smr.EditorID?.Contains("marker", StringComparison.OrdinalIgnoreCase) ?? false)
+                    || f.GivenPath.Contains("marker", StringComparison.OrdinalIgnoreCase);
+                if (marker) baseIsMarker.Add(smr.FormKey);
+            }
 
         foreach (var cp in PlacementExtract.FromMod(m))
         {
@@ -187,7 +214,8 @@ if (textured)
     }
 
     var scene = new List<ViewProbe.SceneRef>();
-    int fxSkipped = 0;
+    int fxSkipped = 0, markerSkipped = 0;
+    var meshCensus = listMeshes ? new Dictionary<string, (int Count, string Class)>(StringComparer.OrdinalIgnoreCase) : null;
     foreach (var r in winRef.Values)
     {
         if (r.InitiallyDisabled || r.Deleted) continue;
@@ -195,14 +223,31 @@ if (textured)
         // Effect meshes (beams, mists, glows) are translucent volumes that drown a first-person
         // shot; the game draws them subtly, this flat-lit pass cannot. Skipped by default,
         // counted, and --fx puts them back.
-        if (!keepFx && rel.Replace('/', '\\').Contains(@"effects\", StringComparison.OrdinalIgnoreCase))
-        { fxSkipped++; continue; }
-        scene.Add(new ViewProbe.SceneRef(rel, r.Position, r.Rotation, r.Scale, hiFp is { } h && r.FormKey == h));
+        bool isMarker = baseIsMarker.Contains(bk);
+        bool isFx = rel.Replace('/', '\\').Contains(@"effects\", StringComparison.OrdinalIgnoreCase);
+        if (meshCensus is not null)
+        {
+            var cls = isMarker ? "MARKER" : isFx ? "FX" : "geometry";
+            meshCensus[rel] = (meshCensus.TryGetValue(rel, out var c) ? c.Count + 1 : 1, cls);
+        }
+        if (!keepFx && isFx) { fxSkipped++; continue; }
+        // Editor markers are not world geometry; the game never draws them. --markers keeps them
+        // as a translucent extra layer instead of dropping them.
+        if (isMarker && !showMarkers) { markerSkipped++; continue; }
+        scene.Add(new ViewProbe.SceneRef(rel, r.Position, r.Rotation, r.Scale,
+                                         hiFp is { } h && r.FormKey == h, isMarker));
     }
     if (fxSkipped > 0) Console.WriteLine($"   ({fxSkipped} effect-mesh refs skipped; --fx to include them)");
+    if (markerSkipped > 0) Console.WriteLine($"   ({markerSkipped} editor-marker refs skipped; --markers to include them translucently)");
+    if (meshCensus is not null)
+    {
+        Console.WriteLine($"   ---- distinct meshes in this cell ({meshCensus.Count}) ----");
+        foreach (var kv in meshCensus.OrderByDescending(k => k.Value.Count))
+            Console.WriteLine($"   {kv.Value.Count,5}  {kv.Value.Class,-8}  {kv.Key}");
+    }
 
     var navTris = new List<(System.Numerics.Vector3, System.Numerics.Vector3, System.Numerics.Vector3)>();
-    if (drawNav)
+    if (navMode != "off")
         foreach (var nav in winNav.Values)
             foreach (var tri in nav.Triangles)
             {
@@ -230,7 +275,7 @@ if (textured)
     string fpOut = Path.Combine(outDir, $"{safe}-fp.png");
     int drawnShapes = ViewProbe.TexturedScene.RenderToPng(
         scene, assets, dataDir, modFolders, overwriteDir,
-        (eyePos.Value, lookPos.Value, fov), navTris, size, fpOut);
+        (eyePos.Value, lookPos.Value, fov), navTris, navMode, size, fpOut);
     Console.WriteLine($"wrote:\n   {fpOut}");
     Console.WriteLine($"   eye {eyePos.Value.X:0},{eyePos.Value.Y:0},{eyePos.Value.Z:0} -> look {lookPos.Value.X:0},{lookPos.Value.Y:0},{lookPos.Value.Z:0}  fov {fov:0}°  ({drawnShapes:N0} shapes)");
     return 0;
