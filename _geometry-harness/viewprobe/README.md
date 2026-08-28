@@ -342,11 +342,13 @@ The working sequence:
 What that protects against:
 
 - **Ground heights vary wildly, including inside one cell.** A navmesh vertex from the same cell can
-  sit thousands of units below the deck the player walks on (Winterhold College courtyard z ≈ −7750,
-  shore below at −12300, tower features at −4600). "Somewhere around ground level" is not a number.
+  sit thousands of units below the deck the player walks on — one measured exterior had its
+  courtyard at z ≈ −7750, the shore below it at −12300 and tower features at −4600. "Somewhere
+  around ground level" is not a number, and any figure quoted here was measured on ONE load order:
+  measure your own.
 - **Interior top-downs must slot the camera BETWEEN the target floor and the next storey.** Above
-  that you render rafters. `--nav-at` returns one row per level, which is how you find the gap
-  (Solitude Temple: gallery 1424, next floors 1712 / 2000 / 2288).
+  that you render rafters. `--nav-at` returns one row per level, which is how you find the gap — a
+  measured multi-storey interior returned 1424 for the gallery and 1712 / 2000 / 2288 above it.
 - **Never put a first-person camera inside a building's footprint.** Exterior shells are
   single-sided, so from inside, their walls back-face cull to nothing and the structure vanishes —
   a door then reads as free-standing. Shoot from where a character would actually stand;
