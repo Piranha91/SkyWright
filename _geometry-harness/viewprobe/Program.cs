@@ -103,6 +103,11 @@ string? navPlugin = null;
 // Terrain: LAND heightmaps for the target cell and its ring-1 neighbours, textured with each
 // quadrant's winning base landscape texture. --no-terrain turns it off.
 bool drawTerrain = true;
+// Landscape ALPHA LAYERS. A Skyrim road is not a placed mesh — it is a landscape texture
+// (LDirtPath01 and friends) painted onto the terrain as an alpha layer with a per-vertex
+// opacity map. Drawing only each quadrant's base layer drops every road, path and blend in the
+// scene, so the layers are rendered by default; --no-terrain-layers goes back to base-only.
+bool drawTerrainLayers = true;
 // Healthy-navmesh wire colour: auto (default) samples the rendered pixels UNDER the navmesh in a
 // first pass and picks the palette colour farthest from both the background and the reserved
 // conflict red; or force one of: green, cyan, magenta, yellow, blue.
@@ -121,6 +126,22 @@ bool dashUnderground = true, dashUnderStatics = true;
 // as staircases at any size. 0 or 1 turns it off, and the count is clamped to what the GL
 // context actually supports (reported in the per-render line).
 int msaa = 4;
+// --pick X,Y (repeatable) answers "what is at this pixel" by unprojecting the finished frame's
+// depth buffer: image coordinates in, Skyrim coordinates out. It is the bridge from something
+// noticed in a render to a query against the load order.
+var picks = new List<(int X, int Y)>();
+// --list-terrain prints what each cell quadrant is PAINTED with — base layer plus every alpha
+// layer, with how many of its 289 points actually carry opacity. Roads in Skyrim are painted
+// terrain, not placed meshes, so this is where a missing road shows up.
+bool listTerrain = false;
+// --nav-at X,Y answers "is there navmesh here" from the record rather than from the picture:
+// every winning triangle whose 2D footprint contains the point, INCLUDING the ones the render
+// filters out, and why each was filtered.
+var navAt = new List<(float X, float Y)>();
+// --refs-at X,Y[,R] lists every winning reference near a spot and says, per ref, whether the
+// render draws it and why not. "Is there an object here that isn't being rendered?" is a
+// question the picture cannot answer, because the answer is a thing you cannot see.
+var refsAt = new List<(float X, float Y, float R)>();
 // --euler renders the SAME cell under all six Euler compositions. The numeric tests could not
 // separate them (0.62%-0.69%, then 1.84%-2.08%), which is itself a finding — but a wrong order
 // scatters kit pieces by hundreds of units, and that is trivially visible even when it is
@@ -153,6 +174,7 @@ for (int i = 1; i < args.Length; i++)
     else if (args[i] == "--compare" && i + 1 < args.Length)
     { var p = args[++i].Split(','); if (p.Length == 2) compare = (p[0].Trim(), p[1].Trim()); }
     else if (args[i] == "--no-terrain") drawTerrain = false;
+    else if (args[i] == "--no-terrain-layers") drawTerrainLayers = false;
     else if (args[i] == "--sky" && i + 1 < args.Length)
     {
         var p = args[++i].Split(',');
@@ -165,6 +187,13 @@ for (int i = 1; i < args.Length; i++)
     else if (args[i] == "--no-nav-underground") dashUnderground = false;
     else if (args[i] == "--no-nav-under-statics") dashUnderStatics = false;
     else if (args[i] == "--msaa" && i + 1 < args.Length) msaa = int.Parse(args[++i]);
+    else if (args[i] == "--pick" && i + 1 < args.Length)
+    { var p = args[++i].Split(','); if (p.Length == 2) picks.Add((int.Parse(p[0]), int.Parse(p[1]))); }
+    else if (args[i] == "--list-terrain") listTerrain = true;
+    else if (args[i] == "--nav-at" && i + 1 < args.Length)
+    { var p = args[++i].Split(','); if (p.Length == 2) navAt.Add((float.Parse(p[0]), float.Parse(p[1]))); }
+    else if (args[i] == "--refs-at" && i + 1 < args.Length)
+    { var p = args[++i].Split(','); if (p.Length >= 2) refsAt.Add((float.Parse(p[0]), float.Parse(p[1]), p.Length > 2 ? float.Parse(p[2]) : 256f)); }
     else if (args[i] == "--nav-color" && i + 1 < args.Length) navColor = args[++i].ToLowerInvariant();
     else if (args[i] == "--markers") showMarkers = true;
     else if (args[i] == "--list-meshes") listMeshes = true;
@@ -215,7 +244,9 @@ if (compare is { } cmp0) { navVersionPlugins.Add(cmp0.A); navVersionPlugins.Add(
 var navByPlugin = new Dictionary<string, Dictionary<FormKey, NavmeshGeometry>>(StringComparer.OrdinalIgnoreCase);
 var baseMesh = new Dictionary<FormKey, string>();
 var baseIsMarker = new HashSet<FormKey>();
+var baseEditorId = new Dictionary<FormKey, string>();
 var ltexToTxst = new Dictionary<FormKey, FormKey>();
+var ltexEditorId = new Dictionary<FormKey, string>();
 var txstDiffuse = new Dictionary<FormKey, string>();
 FormKey? cellKey = null;
 string cellLabel = target;
@@ -232,7 +263,11 @@ foreach (var path in order.OrderedPaths)
             // Landscape texture chain: LTEX -> TXST -> diffuse path, winner-takes-all in load
             // order, so terrain quadrants can be drawn with their real winning textures.
             if (rec is ILandscapeTextureGetter lt)
-            { if (lt.TextureSet.FormKeyNullable is { } ts) ltexToTxst[lt.FormKey] = ts; continue; }
+            {
+                if (lt.TextureSet.FormKeyNullable is { } ts) ltexToTxst[lt.FormKey] = ts;
+                if (!string.IsNullOrWhiteSpace(lt.EditorID)) ltexEditorId[lt.FormKey] = lt.EditorID!;
+                continue;
+            }
             if (rec is ITextureSetGetter txst)
             { if (!string.IsNullOrWhiteSpace(txst.Diffuse?.GivenPath)) txstDiffuse[txst.FormKey] = txst.Diffuse!.GivenPath; continue; }
             bool collectedModel = false;
@@ -248,6 +283,7 @@ foreach (var path in order.OrderedPaths)
                     || (smr.EditorID?.Contains("marker", StringComparison.OrdinalIgnoreCase) ?? false)
                     || f.GivenPath.Contains("marker", StringComparison.OrdinalIgnoreCase);
                 if (marker) baseIsMarker.Add(smr.FormKey);
+                if (!string.IsNullOrWhiteSpace(smr.EditorID)) baseEditorId[smr.FormKey] = smr.EditorID!;
             }
             _ = collectedModel;
         }
@@ -416,6 +452,32 @@ if (textured)
         scene.Add(new ViewProbe.SceneRef(rel, r.Position, r.Rotation, r.Scale,
                                          (hiFp is { } h && r.FormKey == h) || conflictDoors.Contains(r.FormKey), isMarker));
     }
+    foreach (var (qx, qy, qr) in refsAt)
+    {
+        var near = winRef.Values
+            .Select(r => (Ref: r, D: MathF.Sqrt((r.Position.X - qx) * (r.Position.X - qx) + (r.Position.Y - qy) * (r.Position.Y - qy))))
+            .Where(x => x.D <= qr)
+            .OrderBy(x => x.D)
+            .ToList();
+        Console.WriteLine($"   ---- refs within {qr:0} u of {qx:0},{qy:0}: {near.Count} ----");
+        foreach (var (r, d) in near)
+        {
+            string why = r.Deleted ? "NOT DRAWN: deleted"
+                       : r.InitiallyDisabled ? "NOT DRAWN: initially disabled"
+                       : r.Base is not { } bk0 ? "NOT DRAWN: no base"
+                       : !baseMesh.TryGetValue(bk0, out _) ? "NOT DRAWN: base carries no model"
+                       : baseIsMarker.Contains(bk0) && !showMarkers ? "not drawn: editor marker (--markers)"
+                       : baseMesh[bk0].Replace('/', (char)92).Contains("effects" + (char)92, StringComparison.OrdinalIgnoreCase) && !keepFx ? "not drawn: FX (--fx)"
+                       : "drawn";
+            string bse = r.Base is { } bk1
+                ? bk1 + (baseEditorId.TryGetValue(bk1, out var be) ? $" {be}" : "")
+                  + (baseMesh.TryGetValue(bk1, out var bm) ? $"  {bm}" : "")
+                : "(none)";
+            Console.WriteLine($"      {d,6:0} u  {r.FormKey}  at {r.Position.X:0},{r.Position.Y:0},{r.Position.Z:0}"
+                            + $"  scale {r.Scale:0.00}  [{why}]  base {bse}");
+        }
+    }
+
     if (fxSkipped > 0) Console.WriteLine($"   ({fxSkipped} effect-mesh refs skipped; --fx to include them)");
     if (markerSkipped > 0) Console.WriteLine($"   ({markerSkipped} editor-marker refs skipped; --markers to include them translucently)");
     if (meshCensus is not null)
@@ -457,6 +519,8 @@ if (textured)
     // The placed rocks were floating in space without this; exteriors get actual ground now.
     // texture path ("" = none, off-white snow fallback) -> that patch's triangles.
     var terrainPatches = new Dictionary<string, List<(System.Numerics.Vector3, System.Numerics.Vector3, System.Numerics.Vector3)>>(StringComparer.OrdinalIgnoreCase);
+    // Painted layers, in draw order: diffuse path + triangles carrying a per-vertex opacity.
+    var terrainLayers = new List<(string Diffuse, List<(System.Numerics.Vector3 A, System.Numerics.Vector3 B, System.Numerics.Vector3 C, float Oa, float Ob, float Oc)> Tris)>();
     // The same decoded heightmaps, kept as a queryable field: the navmesh overlay asks it
     // whether a triangle is BELOW the ground that gets drawn, which is what separates "buried"
     // from "behind a rock" and earns the two different dashed layers.
@@ -466,6 +530,12 @@ if (textured)
         // grid -> winning heightmap + the base landscape texture per quadrant (LTEX FormKeys,
         // resolved to diffuse paths after the walk), by load order (later plugin wins).
         var landWin = new Dictionary<(int X, int Y), (float Offset, sbyte[,] Grad, FormKey?[] QuadLtex)>();
+        // grid -> every layer the WINNING LAND for that cell carries, base and alpha alike.
+        var landLayers = new Dictionary<(int X, int Y), List<(int Quadrant, int Layer, bool Alpha, FormKey? Tex, int Painted, float MaxOpacity, float[]? Opacity)>>();
+        // Per cell, per quadrant: the alpha layer promoted to stand in for a MISSING base layer
+        // (-1 = the quadrant had a real base). A quadrant with no BTXT states no ground at all;
+        // the honest stand-in is the layer that covers most of it, not a blank slab.
+        var landPromoted = new Dictionary<(int X, int Y), int[]>();
         foreach (var path in order.OrderedPaths)
         {
             ISkyrimModGetter m2;
@@ -499,18 +569,47 @@ if (textured)
                         // Base layer per quadrant (a non-alpha layer names the quadrant's ground
                         // texture; alpha layers blend on top and are out of scope for this pass).
                         var quad = new FormKey?[4];
+                        var census = new List<(int Quadrant, int Layer, bool Alpha, FormKey? Tex, int Painted, float MaxOpacity, float[]? Opacity)>();
+                        var promoted = new[] { -1, -1, -1, -1 };
                         try
                         {
                             foreach (var layer in c.Landscape.Layers)
                             {
-                                if (layer is IAlphaLayerGetter) continue;
-                                int qi = (int)layer.Header.Quadrant;
-                                if (qi is >= 0 and < 4 && quad[qi] is null && layer.Header.Texture.FormKeyNullable is { } lf)
-                                    quad[qi] = lf;
+                                int qi = layer.Header is { } lh ? (int)lh.Quadrant : -1;
+                                var tex = layer.Header?.Texture.FormKeyNullable;
+                                if (layer is IAlphaLayerGetter al)
+                                {
+                                    // 17x17 opacity points per quadrant, addressed by Position.
+                                    var op = new float[289];
+                                    int painted = 0; float maxOp = 0f;
+                                    foreach (var pt in al.AlphaLayerData)
+                                    {
+                                        if (pt.Position < op.Length) op[pt.Position] = pt.Opacity;
+                                        if (pt.Opacity > 0.004f) { painted++; if (pt.Opacity > maxOp) maxOp = pt.Opacity; }
+                                    }
+                                    census.Add((qi, layer.Header?.LayerNumber ?? -1, true, tex, painted, maxOp, op));
+                                    continue;
+                                }
+                                census.Add((qi, layer.Header?.LayerNumber ?? -1, false, tex, 289, 1f, null));
+                                if (qi is >= 0 and < 4 && quad[qi] is null && tex is { } lf) quad[qi] = lf;
+                            }
+                            // No base layer for a quadrant: stand in the alpha layer that paints the
+                            // most of it, and remember which, so it is not also drawn on top of itself.
+                            // Gated on the same switch as the overlays — --no-terrain-layers means
+                            // "ignore the alpha layers entirely", base stand-ins included, which is
+                            // what makes it a clean revert to the base-only picture.
+                            for (int q = 0; drawTerrainLayers && q < 4; q++)
+                            {
+                                if (quad[q] is not null) continue;
+                                var best = census.Where(l => l.Alpha && l.Quadrant == q && l.Tex is not null)
+                                                 .OrderByDescending(l => l.Painted).ToList();
+                                if (best.Count > 0 && best[0].Tex is { } bt) { quad[q] = bt; promoted[q] = best[0].Layer; }
                             }
                         }
                         catch { }
                         landWin[(gp.X, gp.Y)] = (vh.Offset, grad, quad);   // later plugin overwrites = wins
+                        landLayers[(gp.X, gp.Y)] = census;
+                        landPromoted[(gp.X, gp.Y)] = promoted;
                     }
                 }
             }
@@ -524,6 +623,12 @@ if (textured)
             var p = d.Replace('/', '\\');
             return p.StartsWith("textures\\", StringComparison.OrdinalIgnoreCase) ? p : "textures\\" + p;
         }
+
+        int promotedQuads = 0;
+        foreach (var pr in landPromoted.Values) promotedQuads += pr.Count(v => v >= 0);
+        if (promotedQuads > 0)
+            Console.WriteLine($"   terrain: {promotedQuads} quadrant(s) carry no base layer — "
+                            + $"stood in with their most-painted alpha layer");
 
         foreach (var ((gx, gy), (off, grad, quadLtex)) in landWin)
         {
@@ -552,6 +657,85 @@ if (textured)
                     bag.Add((P(x, y), P(x + 1, y), P(x + 1, y + 1)));
                     bag.Add((P(x, y), P(x + 1, y + 1), P(x, y + 1)));
                 }
+
+            // ---- the painted layers, in the record's own order ---------------------------
+            // Each alpha layer is its own sheet over the base: the layer's texture, the layer's
+            // per-vertex opacity in vertex alpha. Triangles nobody painted are dropped, which is
+            // most of them — a road is a thin ribbon across a 16x16 quadrant.
+            if (!drawTerrainLayers || !landLayers.TryGetValue((gx, gy), out var lyrs)) continue;
+            var promotedHere = landPromoted.TryGetValue((gx, gy), out var pq) ? pq : new[] { -1, -1, -1, -1 };
+            foreach (var l in lyrs.Where(l => l.Alpha && l.Opacity is not null && l.Quadrant is >= 0 and < 4)
+                                  .OrderBy(l => l.Layer))
+            {
+                if (promotedHere[l.Quadrant] == l.Layer) continue;      // it IS the base here
+                if (QuadDiffuse(l.Tex) is not { } lyrTex) continue;     // no resolvable texture: skip
+                int qx0 = (l.Quadrant & 1) * 16, qy0 = l.Quadrant >= 2 ? 16 : 0;
+                var op = l.Opacity!;
+                float Op(int lx, int ly) { int i = ly * 17 + lx; return i >= 0 && i < op.Length ? op[i] : 0f; }
+                var tris = new List<(System.Numerics.Vector3 A, System.Numerics.Vector3 B, System.Numerics.Vector3 C, float Oa, float Ob, float Oc)>();
+                for (int ly = 0; ly < 16; ly++)
+                    for (int lx = 0; lx < 16; lx++)
+                    {
+                        float o00 = Op(lx, ly), o10 = Op(lx + 1, ly), o11 = Op(lx + 1, ly + 1), o01 = Op(lx, ly + 1);
+                        if (o00 <= 0.004f && o10 <= 0.004f && o11 <= 0.004f && o01 <= 0.004f) continue;
+                        int x = qx0 + lx, y = qy0 + ly;
+                        tris.Add((P(x, y), P(x + 1, y), P(x + 1, y + 1), o00, o10, o11));
+                        tris.Add((P(x, y), P(x + 1, y + 1), P(x, y + 1), o00, o11, o01));
+                    }
+                if (tris.Count > 0) terrainLayers.Add((lyrTex, tris));
+            }
+        }
+        // VP_ALPHA_DUMP=gx,gy prints every alpha layer of that cell as a 17x17 opacity grid, in
+        // the SAME orientation the geometry builder reads it (lx fastest, ly down). It exists to
+        // settle one question that no amount of looking at a render can: whether Position is
+        // decoded x-fastest or y-fastest. A transposed map still draws a road-shaped ribbon —
+        // it just draws it mirrored — so the test is CONTINUITY at a quadrant seam: TopLeft's
+        // last column must agree with TopRight's first column where a paint crosses between them.
+        if (Environment.GetEnvironmentVariable("VP_ALPHA_DUMP") is { } dumpSpec)
+        {
+            var ds = dumpSpec.Split(',');
+            if (ds.Length == 2 && int.TryParse(ds[0], out int dgx) && int.TryParse(ds[1], out int dgy)
+                && landLayers.TryGetValue((dgx, dgy), out var dl))
+            {
+                var qn = new[] { "BottomLeft", "BottomRight", "TopLeft", "TopRight" };
+                foreach (var l in dl.Where(l => l.Alpha && l.Opacity is not null).OrderBy(l => l.Quadrant).ThenBy(l => l.Layer))
+                {
+                    Console.WriteLine($"   ---- cell ({dgx},{dgy}) {qn[Math.Clamp(l.Quadrant, 0, 3)]} alpha #{l.Layer} "
+                                    + $"{(l.Tex is { } lk && ltexEditorId.TryGetValue(lk, out var le) ? le : "?")} ----");
+                    for (int ly = 16; ly >= 0; ly--)     // print +Y upward, like a map
+                    {
+                        var sb = new System.Text.StringBuilder($"   ly{ly,2} ");
+                        for (int lx = 0; lx <= 16; lx++)
+                        {
+                            float o = l.Opacity![ly * 17 + lx];
+                            sb.Append(o <= 0.004f ? '.' : o >= 0.95f ? '#' : o >= 0.5f ? '+' : o >= 0.2f ? 'o' : ':');
+                        }
+                        Console.WriteLine(sb.ToString());
+                    }
+                }
+            }
+        }
+        if (listTerrain)
+        {
+            Console.WriteLine($"   ---- landscape layers, winning LAND per cell ({landLayers.Count} cell(s)) ----");
+            string TexName(FormKey? fk)
+                => fk is not { } k ? "(none)"
+                 : (ltexEditorId.TryGetValue(k, out var ed) ? ed : k.ToString())
+                   + " -> " + (QuadDiffuse(k) ?? "NO DIFFUSE RESOLVED");
+            foreach (var (grid, census) in landLayers.OrderBy(k => k.Key.Y).ThenBy(k => k.Key.X))
+            {
+                var names = new[] { "BottomLeft", "BottomRight", "TopLeft", "TopRight" };
+                Console.WriteLine($"   cell ({grid.X},{grid.Y}){(grid.X == tg.X && grid.Y == tg.Y ? "  <- TARGET" : "")}");
+                for (int q = 0; q < 4; q++)
+                {
+                    var inQ = census.Where(l => l.Quadrant == q).OrderBy(l => l.Alpha).ThenBy(l => l.Layer).ToList();
+                    if (inQ.Count == 0) { Console.WriteLine($"      {names[q],-12} (no layers at all)"); continue; }
+                    foreach (var l in inQ)
+                        Console.WriteLine($"      {names[q],-12} {(l.Alpha ? $"alpha #{l.Layer,-2}" : "BASE      ")}"
+                                        + $" {(l.Alpha ? $"{l.Painted,3}/289 pts, max {l.MaxOpacity:0.00}  " : "                     ")}"
+                                        + TexName(l.Tex));
+                }
+            }
         }
         int terrTotal = terrainPatches.Values.Sum(v => v.Count);
         if (terrTotal > 0)
@@ -559,6 +743,10 @@ if (textured)
                             + $"{terrainPatches.Count(kv => kv.Key.Length > 0)} distinct ground texture(s)");
         else
             Console.WriteLine($"   terrain: no LAND found for this cell (--no-terrain to silence)");
+        if (terrainLayers.Count > 0)
+            Console.WriteLine($"   terrain paint layers: {terrainLayers.Count} sheet(s), "
+                            + $"{terrainLayers.Sum(l => l.Tris.Count):N0} triangles, "
+                            + $"{terrainLayers.Select(l => l.Diffuse).Distinct(StringComparer.OrdinalIgnoreCase).Count()} distinct texture(s)");
     }
 
     // Ground height at a world X,Y, on the SAME 128-unit quads and the SAME diagonal split the
@@ -580,6 +768,68 @@ if (textured)
                              : h00 + (h11 - h01) * u + (h01 - h00) * v;
             return z * 8f;
         };
+
+    // What the render DROPS, said out loud: a triangle the picture never shows because it was
+    // filtered is indistinguishable from one that does not exist, unless the counts are printed.
+    {
+        int total = 0, deleted = 0, badIndex = 0;
+        foreach (var nav in winNav.Values)
+            foreach (var tri in nav.Triangles)
+            {
+                total++;
+                if ((tri.Flags & 0x08) != 0) { deleted++; continue; }
+                if (tri.A < 0 || tri.B < 0 || tri.C < 0
+                    || tri.A >= nav.Vertices.Count || tri.B >= nav.Vertices.Count || tri.C >= nav.Vertices.Count)
+                    badIndex++;
+            }
+        Console.WriteLine($"   navmesh triangles: {total:N0} in the winning records, "
+                        + $"{deleted:N0} flagged DELETED (0x08), {badIndex:N0} with out-of-range vertex indices, "
+                        + $"{total - deleted - badIndex:N0} drawable");
+    }
+
+    foreach (var (qx, qy) in navAt)
+    {
+        int hits = 0;
+        foreach (var nav in winNav.Values)
+            for (int ti = 0; ti < nav.Triangles.Count; ti++)
+            {
+                var tri = nav.Triangles[ti];
+                if (tri.A < 0 || tri.B < 0 || tri.C < 0
+                    || tri.A >= nav.Vertices.Count || tri.B >= nav.Vertices.Count || tri.C >= nav.Vertices.Count) continue;
+                var a = V(nav.Vertices[tri.A]); var b = V(nav.Vertices[tri.B]); var c = V(nav.Vertices[tri.C]);
+                // 2D barycentric containment; the navmesh is a surface, so XY is the right test.
+                float d = (b.Y - c.Y) * (a.X - c.X) + (c.X - b.X) * (a.Y - c.Y);
+                if (MathF.Abs(d) < 1e-6f) continue;
+                float u = ((b.Y - c.Y) * (qx - c.X) + (c.X - b.X) * (qy - c.Y)) / d;
+                float v = ((c.Y - a.Y) * (qx - c.X) + (a.X - c.X) * (qy - c.Y)) / d;
+                float w = 1f - u - v;
+                if (u < 0f || v < 0f || w < 0f) continue;
+                float z = u * a.Z + v * b.Z + w * c.Z;
+                string why = (tri.Flags & 0x08) != 0 ? "NOT DRAWN: flagged deleted (0x08)" : "drawn";
+                Console.WriteLine($"   nav-at {qx:0},{qy:0}: {nav.FormKey} tri {ti} covers it, z {z:0}, "
+                                + $"flags 0x{tri.Flags:X} — {why}");
+                hits++;
+            }
+        if (hits == 0)
+        {
+            // Nothing covers it: say how far the nearest triangle is, so "no navmesh here" can be
+            // told apart from "just outside a triangle".
+            float best = float.MaxValue; FormKey bk = FormKey.Null; int bi = -1;
+            foreach (var nav in winNav.Values)
+                for (int ti = 0; ti < nav.Triangles.Count; ti++)
+                {
+                    var tri = nav.Triangles[ti];
+                    if (tri.A < 0 || tri.B < 0 || tri.C < 0
+                        || tri.A >= nav.Vertices.Count || tri.B >= nav.Vertices.Count || tri.C >= nav.Vertices.Count) continue;
+                    var a = V(nav.Vertices[tri.A]); var b = V(nav.Vertices[tri.B]); var c = V(nav.Vertices[tri.C]);
+                    var cen = (a + b + c) / 3f;
+                    float dd = MathF.Sqrt((cen.X - qx) * (cen.X - qx) + (cen.Y - qy) * (cen.Y - qy));
+                    if (dd < best) { best = dd; bk = nav.FormKey; bi = ti; }
+                }
+            Console.WriteLine($"   nav-at {qx:0},{qy:0}: NO winning triangle covers this point"
+                            + (bi >= 0 ? $"; nearest is {bk} tri {bi}, {best:0} u away (centroid)" : "; no navmesh at all in this cell"));
+        }
+    }
 
     var (navTris, redTris) = BuildNavSets(winNav);
 
@@ -650,8 +900,9 @@ if (textured)
                string outFile, IReadOnlyList<string> captionLines)
         => ViewProbe.TexturedScene.RenderToPng(
                scene, assets, dataDir, modFolders, overwriteDir,
-               (eyePos.Value, lookPos.Value, fov), g, r, terrainPatches, navMode, navColor,
-               skyColor, terrainHeightAt, dashUnderground, dashUnderStatics, msaa, captionLines, size, outFile);
+               (eyePos.Value, lookPos.Value, fov), g, r, terrainPatches, terrainLayers, navMode, navColor,
+               skyColor, terrainHeightAt, dashUnderground, dashUnderStatics, msaa, picks,
+               captionLines, size, outFile);
 
     if (compare is { } cmp)
     {

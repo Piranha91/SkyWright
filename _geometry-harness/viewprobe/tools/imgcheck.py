@@ -2,17 +2,24 @@
 """imgcheck — the verification half of viewprobe's render discipline.
 
 Console counts describe the pipeline, not the picture, so every render claim in
-this project has to be checked against pixels. Three subcommands:
+this project has to be checked against pixels. Four subcommands:
 
   crop  IN OUT X Y W H [SCALE]  cut a region out (SCALE>1 magnifies) so a
                                 detail can actually be looked at.
   panel IN OUT N [OF] [GUTTER]  cut panel N (1-based) out of a stitched compare
                                 strip; OF defaults to 3, GUTTER to 4 px.
-  diff  A B                     pixel diff: identical? how many pixels differ,
-                                by how much, and where. This is the compare
-                                regression check (panel 2 == panel 3).
+  diff  A B [--tol N] [--skip-top N]
+                                pixel diff: identical? how many pixels differ,
+                                by how much, and where. --skip-top ignores the
+                                caption bar; --tol N passes when every
+                                difference is <= N per channel.
   hist  IN [X Y W H]            dominant colours in a region — what a claim
                                 like "the sky is pale blue" is actually made of.
+
+On tolerance: viewprobe is bit-reproducible EXCEPT with terrain paint layers
+and MSAA both on, where the driver's per-sample blending of coplanar sheets
+varies by ~1/255 on a handful of pixels between runs. Render the compare with
+--msaa 0 for a byte-exact regression check rather than reaching for --tol.
 """
 import sys
 from collections import Counter
@@ -41,29 +48,49 @@ def panel(a):
 
 
 def diff(a):
-    A = Image.open(a[0]).convert("RGB")
-    B = Image.open(a[1]).convert("RGB")
+    tol = 0
+    skip_top = 0
+    args = []
+    i = 0
+    while i < len(a):
+        if a[i] == "--tol":
+            tol = int(a[i + 1]); i += 2
+        elif a[i] == "--skip-top":
+            skip_top = int(a[i + 1]); i += 2
+        else:
+            args.append(a[i]); i += 1
+    A = Image.open(args[0]).convert("RGB")
+    B = Image.open(args[1]).convert("RGB")
     if A.size != B.size:
         print(f"DIFFERENT SIZE: {A.size} vs {B.size}")
         return 1
+    if skip_top:
+        A = A.crop((0, skip_top, A.width, A.height))
+        B = B.crop((0, skip_top, B.width, B.height))
     d = ImageChops.difference(A, B)
     bbox = d.getbbox()
+    total = A.width * A.height
     if bbox is None:
-        print(f"IDENTICAL  ({A.width}x{A.height}, 0 differing pixels)")
+        print(f"IDENTICAL  ({A.width}x{A.height}"
+              f"{f', below y={skip_top}' if skip_top else ''}, 0 differing pixels)")
         return 0
     px = d.load()
     n = 0
     worst = 0
+    over = 0
     for yy in range(bbox[1], bbox[3]):
         for xx in range(bbox[0], bbox[2]):
             m = max(px[xx, yy])
             if m:
                 n += 1
                 worst = max(worst, m)
-    total = A.width * A.height
-    print(f"DIFFERENT  {n:,}/{total:,} pixels ({100.0*n/total:.3f}%), "
-          f"max channel delta {worst}, bbox {bbox}")
-    return 1
+                if m > tol:
+                    over += 1
+    verdict = "WITHIN TOLERANCE" if over == 0 and tol else "DIFFERENT"
+    print(f"{verdict}  {n:,}/{total:,} pixels ({100.0 * n / total:.4f}%), "
+          f"max channel delta {worst}" + (f", {over:,} over tol {tol}" if tol else "")
+          + f", bbox {bbox}")
+    return 0 if over == 0 and tol else 1
 
 
 def hist(a):
@@ -75,7 +102,7 @@ def hist(a):
     tot = im.width * im.height
     print(f"{im.width}x{im.height} = {tot:,} px, {len(c):,} distinct colours")
     for col, k in c.most_common(12):
-        print(f"   {col}  {k:>8,}  {100.0*k/tot:5.2f}%")
+        print(f"   {col}  {k:>8,}  {100.0 * k / tot:5.2f}%")
     return 0
 
 

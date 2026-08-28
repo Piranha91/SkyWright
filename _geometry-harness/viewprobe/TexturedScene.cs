@@ -128,6 +128,7 @@ static class TexturedScene
         IReadOnlyList<(Vector3 A, Vector3 B, Vector3 C)> navTris,
         IReadOnlyList<(Vector3 A, Vector3 B, Vector3 C)> redTris,   // the FINDING, always painted
         IReadOnlyDictionary<string, List<(Vector3 A, Vector3 B, Vector3 C)>> terrainPatches, // diffuse path ("" = untextured) -> tris
+        IReadOnlyList<(string Diffuse, List<(Vector3 A, Vector3 B, Vector3 C, float Oa, float Ob, float Oc)> Tris)> terrainLayers,
         string navMode,                                    // off | filled | wire | both
         string navColor,                                   // auto | green | cyan | magenta | yellow | blue
         Vector3 skyColor,                                  // what the frame clears to (0..1 RGB)
@@ -135,6 +136,7 @@ static class TexturedScene
         bool dashUnderground,                              // dash navmesh buried under the terrain
         bool dashUnderStatics,                             // dash navmesh hidden behind geometry
         int msaa,                                          // multisample count; < 2 = off
+        IReadOnlyList<(int X, int Y)> picks,                // image pixels to report world coords for
         IReadOnlyList<string> captionLines,                // burned into the image, top-left
         int size, string outPath)
     {
@@ -317,6 +319,56 @@ static class TexturedScene
             renderer.AddMesh(terra);
             meshes.Add(terra);
         }
+        // PAINTED LAYERS over the base. Roads, paths and every ground blend in Skyrim live here
+        // and nowhere else, so a render without them is a render with no roads in it.
+        //
+        // They ride the library's DECAL channel: blended decals are drawn after the distance-
+        // sorted transparent set, in the order they were added, which is the one thing coplanar
+        // sheets actually need — a distance sort between two layers painted on the same triangle
+        // is a coin flip, and layer order is the author's stated intent. Depth test on (a rock in
+        // front still hides the road), depth write off (they are surface, not occluders).
+        int layerMeshes = 0;
+        foreach (var (texPath, layerTris) in terrainLayers)
+        {
+            if (layerTris.Count == 0) continue;
+            int texHandle = textures.LoadTexture(texPath);
+            if (texHandle == textures.WhiteTexture) continue;   // unresolvable: a white sheet is worse than none
+            var lv = new List<Vector3>(); var li = new List<int>();
+            var ln = new List<Vector3>(); var lc = new List<Vector4>();
+            var luv = new List<Vector2>();
+            foreach (var (a, b, c, oa, ob, oc) in layerTris)
+            {
+                var nrm = Vector3.Cross(b - a, c - a);
+                nrm = nrm.LengthSquared() > 1e-10f ? Vector3.Normalize(nrm) : Vector3.UnitZ;
+                float flatness = MathF.Max(0f, nrm.Z);
+                float shade = 0.75f + 0.25f * flatness * flatness;   // same relief cue as the base
+                int at = lv.Count;
+                lv.Add(YUp(a)); lv.Add(YUp(b)); lv.Add(YUp(c));
+                luv.Add(new Vector2(a.X / 256f, a.Y / 256f));
+                luv.Add(new Vector2(b.X / 256f, b.Y / 256f));
+                luv.Add(new Vector2(c.X / 256f, c.Y / 256f));
+                var ny = YUp(nrm);
+                ln.Add(ny); ln.Add(ny); ln.Add(ny);
+                lc.Add(new Vector4(shade, shade, shade, oa));
+                lc.Add(new Vector4(shade, shade, shade, ob));
+                lc.Add(new Vector4(shade, shade, shade, oc));
+                li.Add(at); li.Add(at + 1); li.Add(at + 2);
+            }
+            var sheet = new GlMesh();
+            sheet.Upload(Interleave(lv.ToArray(), ln.ToArray(), luv.ToArray(), ln.ToArray(), ln.ToArray(), lc.ToArray()), li.ToArray());
+            sheet.ShapeName = $"terrain-layer:{texPath}";
+            sheet.DiffuseTexture = texHandle;
+            sheet.HasVertexColors = true;      // the opacity map rides in vertex alpha
+            sheet.HasAlphaBlend = true;
+            sheet.IsDecal = true;              // draw after the sorted set, in insertion order
+            sheet.DepthWrite = false;
+            sheet.IsDoubleSided = true;
+            renderer.AddMesh(sheet);
+            meshes.Add(sheet);
+            layerMeshes++;
+        }
+        if (layerMeshes > 0) Console.WriteLine($"   terrain paint: {layerMeshes} painted layer sheet(s) drawn over the base");
+
         if (terrainTexturedPatches + terrainFallbackPatches > 0)
             Console.WriteLine($"   terrain paint: {terrainTexturedPatches} textured patch(es), {terrainFallbackPatches} untextured (snow fallback)");
 
@@ -546,11 +598,13 @@ static class TexturedScene
             if (navTris.Count > 0)
             {
                 var m0 = BuildFill(navTris, new Vector4(healthy.X, healthy.Y, healthy.Z, alpha), "navmesh-fill");
+                m0.IsDecal = true;             // same insertion-ordered channel, added after the ground
                 renderer.AddMesh(m0); meshes.Add(m0);
             }
             if (redTris.Count > 0)
             {
                 var m1 = BuildFill(redTris, new Vector4(0.95f, 0.15f, 0.08f, MathF.Min(0.55f, alpha + 0.2f)), "navmesh-fill-red");
+                m1.IsDecal = true;
                 renderer.AddMesh(m1); meshes.Add(m1);
             }
         }
@@ -722,8 +776,40 @@ static class TexturedScene
             };
         }
 
-        var pixels = Draw();
+        float[]? pickDepth = picks.Count > 0 ? new float[size * size] : null;
+        var pixels = Draw(pickDepth);
         if (wireProg != 0) { GL.DeleteProgram(wireProg); GL.DeleteVertexArray(wireVao); GL.DeleteBuffer(wireVbo); }
+
+        // --pick: "what is at this pixel". Reads the finished frame's depth and unprojects it,
+        // which is the only way to turn something SEEN in a render back into a coordinate that
+        // can be queried against the load order. Pixels are image coordinates — top-left origin,
+        // the numbers an image viewer shows — so the buffer's bottom-left origin is flipped here
+        // rather than in the caller's head.
+        if (pickDepth is not null)
+        {
+            var invVp = viewProj.Inverted();
+            foreach (var (ix, iy) in picks)
+            {
+                if (ix < 0 || ix >= size || iy < 0 || iy >= size)
+                { Console.WriteLine($"   pick {ix},{iy}: outside a {size}x{size} frame"); continue; }
+                int gy = size - 1 - iy;
+                float d = pickDepth[gy * size + ix];
+                if (d >= 0.999999f)
+                { Console.WriteLine($"   pick {ix},{iy}: background — no geometry under this pixel"); continue; }
+                float nx = (ix + 0.5f) / size * 2f - 1f;
+                float ny = (gy + 0.5f) / size * 2f - 1f;
+                var w4 = GlVec4.TransformRow(new GlVec4(nx, ny, d * 2f - 1f, 1f), invVp);
+                if (MathF.Abs(w4.W) < 1e-9f) { Console.WriteLine($"   pick {ix},{iy}: degenerate"); continue; }
+                var wy = new Vector3(w4.X / w4.W, w4.Y / w4.W, w4.Z / w4.W);
+                var ws = new Vector3(wy.X, -wy.Z, wy.Y);          // Y-up back to Skyrim's Z-up
+                string land = terrainHeightAt is not null && terrainHeightAt(ws.X, ws.Y) is { } tz
+                    ? $", LAND surface z {tz:0} ({(ws.Z - tz):+0;-0} vs the surface)"
+                    : ", no LAND here";
+                Console.WriteLine($"   pick {ix},{iy}: {ws.X:0},{ws.Y:0},{ws.Z:0}"
+                                + $"  cell ({(int)MathF.Floor(ws.X / 4096f)},{(int)MathF.Floor(ws.Y / 4096f)})"
+                                + $"  {Vector3.Distance(ws, cam.Eye):0} u from the eye{land}");
+            }
+        }
 
         GL.BindFramebuffer(FramebufferTarget.Framebuffer, 0);
         GL.DeleteFramebuffer(fbo); GL.DeleteTexture(colorTex); GL.DeleteRenderbuffer(depthRb);
