@@ -124,6 +124,7 @@ static class TexturedScene
         (Vector3 Eye, Vector3 Look, float FovDeg) cam,     // Skyrim Z-up coordinates
         IReadOnlyList<(Vector3 A, Vector3 B, Vector3 C)> navTris,
         IReadOnlyList<(Vector3 A, Vector3 B, Vector3 C)> redTris,   // the FINDING, always painted
+        IReadOnlyList<(Vector3 A, Vector3 B, Vector3 C)> terrainTris,
         string navMode,                                    // off | filled | wire | both
         int size, string outPath)
     {
@@ -253,6 +254,37 @@ static class TexturedScene
                 meshes.Add(mesh);
                 shapes++;
             }
+        }
+
+        // TERRAIN — flat-shaded LAND ground so exteriors are not floating rocks. Slope-tinted
+        // (greener flats, greyer steeps) for legibility; opaque, depth-written, real geometry.
+        if (terrainTris.Count > 0)
+        {
+            var tv = new List<Vector3>(); var ti = new List<int>();
+            var tn = new List<Vector3>(); var tc = new List<Vector4>();
+            foreach (var (a, b, c) in terrainTris)
+            {
+                var nrm = Vector3.Cross(b - a, c - a);
+                nrm = nrm.LengthSquared() > 1e-10f ? Vector3.Normalize(nrm) : Vector3.UnitZ;
+                float flatness = MathF.Max(0f, nrm.Z);                    // Z-up before the swap
+                var col = Vector4.Lerp(new Vector4(0.42f, 0.40f, 0.36f, 1f),
+                                       new Vector4(0.34f, 0.46f, 0.28f, 1f), flatness * flatness);
+                int at = tv.Count;
+                tv.Add(YUp(a)); tv.Add(YUp(b)); tv.Add(YUp(c));
+                var ny = YUp(nrm);
+                tn.Add(ny); tn.Add(ny); tn.Add(ny);
+                tc.Add(col); tc.Add(col); tc.Add(col);
+                ti.Add(at); ti.Add(at + 1); ti.Add(at + 2);
+            }
+            var uvT = new Vector2[tv.Count];
+            var terra = new GlMesh();
+            terra.Upload(Interleave(tv.ToArray(), tn.ToArray(), uvT, tn.ToArray(), tn.ToArray(), tc.ToArray()), ti.ToArray());
+            terra.ShapeName = "terrain";
+            terra.DiffuseTexture = textures.WhiteTexture;
+            terra.HasVertexColors = true;
+            terra.IsDoubleSided = true;
+            renderer.AddMesh(terra);
+            meshes.Add(terra);
         }
 
         // The navmesh overlay — the probe's whole point. Three looks:

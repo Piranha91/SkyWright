@@ -19,6 +19,14 @@ string Pretty(Type t)
     return n + "<" + string.Join(",", t.GetGenericArguments().Select(Pretty)) + ">";
 }
 
+// LAND terrain — grounded before viewprobe draws it (heightmap layout, offset semantics).
+Console.WriteLine("=== LAND terrain surface ===");
+Dump("ILandscapeGetter");
+Dump("LandscapeBinaryOverlay");
+Dump("ILandscapeVertexHeightMapGetter");
+Dump("LandscapeVertexHeightMapBinaryOverlay");
+Dump("ICellGetter");
+
 void Dump(string typeName)
 {
     Type t = null;

@@ -92,6 +92,15 @@ bool listMeshes = false;
 string? conflictsPath = null;
 var redSpecs = new List<string>();
 bool navModeExplicit = false;
+// --nav-plugin renders the navmesh AS ONE PLUGIN AUTHORED IT (that plugin's record versions,
+// nothing else) instead of the winning state. --compare "A.esp,B.esp" renders three panels with
+// one camera — A's navmesh, B's navmesh, the winning state — and stitches them side by side;
+// the contested records stay red in every panel, so the re-cut is visible as a before/after.
+string? navPlugin = null;
+(string A, string B)? compare = null;
+// Terrain: LAND heightmaps for the target cell and its ring-1 neighbours, so exteriors stand on
+// actual ground instead of floating placed rocks. --no-terrain turns it off.
+bool drawTerrain = true;
 // --euler renders the SAME cell under all six Euler compositions. The numeric tests could not
 // separate them (0.62%-0.69%, then 1.84%-2.08%), which is itself a finding — but a wrong order
 // scatters kit pieces by hundreds of units, and that is trivially visible even when it is
@@ -120,6 +129,10 @@ for (int i = 1; i < args.Length; i++)
     else if (args[i] == "--nav" && i + 1 < args.Length) { navMode = args[++i].ToLowerInvariant(); navModeExplicit = true; }
     else if (args[i] == "--conflicts" && i + 1 < args.Length) conflictsPath = args[++i];
     else if (args[i] == "--red" && i + 1 < args.Length) redSpecs.Add(args[++i]);
+    else if (args[i] == "--nav-plugin" && i + 1 < args.Length) navPlugin = args[++i];
+    else if (args[i] == "--compare" && i + 1 < args.Length)
+    { var p = args[++i].Split(','); if (p.Length == 2) compare = (p[0].Trim(), p[1].Trim()); }
+    else if (args[i] == "--no-terrain") drawTerrain = false;
     else if (args[i] == "--markers") showMarkers = true;
     else if (args[i] == "--list-meshes") listMeshes = true;
     else if (args[i] is "--instance" or "--game" or "--profile") i++;   // consumed above
@@ -141,6 +154,13 @@ var order = Mo2LoadOrder.Build(profileDir, modsDir, dataDir, overwriteDir);
 
 var winRef = new Dictionary<FormKey, PlacedRef>();
 var winNav = new Dictionary<FormKey, NavmeshGeometry>();
+FormKey targetWorldspace = FormKey.Null;
+(int X, int Y)? targetGrid = null;
+// Record versions per plugin, collected only for the plugins a panel needs.
+var navVersionPlugins = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+if (navPlugin is not null) navVersionPlugins.Add(navPlugin);
+if (compare is { } cmp0) { navVersionPlugins.Add(cmp0.A); navVersionPlugins.Add(cmp0.B); }
+var navByPlugin = new Dictionary<string, Dictionary<FormKey, NavmeshGeometry>>(StringComparer.OrdinalIgnoreCase);
 var baseMesh = new Dictionary<FormKey, string>();
 var baseIsMarker = new HashSet<FormKey>();
 FormKey? cellKey = null;
@@ -178,8 +198,19 @@ foreach (var path in order.OrderedPaths)
             cellKey ??= cp.Cell;
             cellLabel = cp.CellEditorId ?? cp.Cell.ToString();
             interior = cp.Interior;
+            targetWorldspace = cp.Worldspace;
+            targetGrid = cp.Grid;
             foreach (var r in cp.Refs) winRef[r.FormKey] = r;
-            foreach (var nav in cp.Navmeshes) winNav[nav.FormKey] = nav;
+            foreach (var nav in cp.Navmeshes)
+            {
+                winNav[nav.FormKey] = nav;
+                var pn = m.ModKey.FileName.String;
+                if (navVersionPlugins.Contains(pn))
+                {
+                    if (!navByPlugin.TryGetValue(pn, out var d)) navByPlugin[pn] = d = new();
+                    d[nav.FormKey] = nav;
+                }
+            }
         }
     }
 }
@@ -298,10 +329,17 @@ if (textured)
             Console.WriteLine($"   {kv.Value.Count,5}  {kv.Value.Class,-8}  {kv.Key}");
     }
 
-    var navTris = new List<(System.Numerics.Vector3, System.Numerics.Vector3, System.Numerics.Vector3)>();
-    var redTris = new List<(System.Numerics.Vector3, System.Numerics.Vector3, System.Numerics.Vector3)>();
-    if (navMode != "off")
-        foreach (var nav in winNav.Values)
+    // One navmesh SOURCE -> (green context, red finding) triangle sets. The red spec is applied
+    // per source, so a single-triangle red lands on THAT version's triangle — in a compare, the
+    // same record can be red-whole in every panel while its shape changes between them.
+    (List<(System.Numerics.Vector3, System.Numerics.Vector3, System.Numerics.Vector3)> Green,
+     List<(System.Numerics.Vector3, System.Numerics.Vector3, System.Numerics.Vector3)> Red)
+    BuildNavSets(IReadOnlyDictionary<FormKey, NavmeshGeometry> navs)
+    {
+        var green = new List<(System.Numerics.Vector3, System.Numerics.Vector3, System.Numerics.Vector3)>();
+        var red = new List<(System.Numerics.Vector3, System.Numerics.Vector3, System.Numerics.Vector3)>();
+        if (navMode == "off") return (green, red);
+        foreach (var nav in navs.Values)
         {
             var reds = redNav.TryGetValue(nav.FormKey, out var rset) ? rset : null;
             bool wholeRed = redNav.ContainsKey(nav.FormKey) && reds is null;
@@ -312,10 +350,85 @@ if (textured)
                 if (tri.A < 0 || tri.B < 0 || tri.C < 0) continue;
                 if (tri.A >= nav.Vertices.Count || tri.B >= nav.Vertices.Count || tri.C >= nav.Vertices.Count) continue;
                 var t3 = (V(nav.Vertices[tri.A]), V(nav.Vertices[tri.B]), V(nav.Vertices[tri.C]));
-                if (wholeRed || (reds is not null && reds.Contains(ti))) redTris.Add(t3);
-                else navTris.Add(t3);
+                if (wholeRed || (reds is not null && reds.Contains(ti))) red.Add(t3);
+                else green.Add(t3);
             }
         }
+        return (green, red);
+    }
+
+    // ---- TERRAIN: winning LAND heightmaps for the target cell + its ring-1 neighbours --------
+    // The placed rocks were floating in space without this; exteriors get actual ground now.
+    var terrainTris = new List<(System.Numerics.Vector3, System.Numerics.Vector3, System.Numerics.Vector3)>();
+    if (drawTerrain && !interior && targetGrid is { } tg)
+    {
+        // grid -> winning heightmap, resolved by load order (later plugin wins).
+        var landWin = new Dictionary<(int X, int Y), (float Offset, sbyte[,] Grad)>();
+        foreach (var path in order.OrderedPaths)
+        {
+            ISkyrimModGetter m2;
+            try { m2 = SkyrimMod.CreateFromBinaryOverlay(path, SkyrimRelease.SkyrimSE); } catch { continue; }
+            using (m2 as IDisposable)
+            {
+                foreach (var ws in m2.Worldspaces.Records)
+                {
+                    if (ws.FormKey != targetWorldspace) continue;
+                    IEnumerable<ICellGetter> Cells()
+                    {
+                        if (ws.TopCell is { } tc) yield return tc;
+                        foreach (var blk in ws.SubCells)
+                            foreach (var sub in blk.Items)
+                                foreach (var c in sub.Items)
+                                    yield return c;
+                    }
+                    foreach (var c in Cells())
+                    {
+                        if (c.Grid?.Point is not { } gp) continue;
+                        if (Math.Abs(gp.X - tg.X) > 1 || Math.Abs(gp.Y - tg.Y) > 1) continue;
+                        if (c.Landscape?.VertexHeightMap is not { } vh) continue;
+                        var grad = new sbyte[33, 33];
+                        try
+                        {
+                            for (int y = 0; y < 33; y++)
+                                for (int x = 0; x < 33; x++)
+                                    grad[x, y] = vh.HeightMap[x, y];
+                        }
+                        catch { continue; }
+                        landWin[(gp.X, gp.Y)] = (vh.Offset, grad);     // later plugin overwrites = wins
+                    }
+                }
+            }
+        }
+
+        foreach (var ((gx, gy), (off, grad)) in landWin)
+        {
+            // VHGT decode: row-start accumulator down the first column, then run along each row;
+            // stored values are gradients in 1/8 world units.
+            var h = new float[33, 33];
+            float rowStart = off;
+            for (int y = 0; y < 33; y++)
+            {
+                rowStart += grad[0, y];
+                float acc = rowStart;
+                h[0, y] = acc;
+                for (int x = 1; x < 33; x++) { acc += grad[x, y]; h[x, y] = acc; }
+            }
+            System.Numerics.Vector3 P(int x, int y) =>
+                new(gx * 4096f + x * 128f, gy * 4096f + y * 128f, h[x, y] * 8f);
+            for (int y = 0; y < 32; y++)
+                for (int x = 0; x < 32; x++)
+                {
+                    terrainTris.Add((P(x, y), P(x + 1, y), P(x + 1, y + 1)));
+                    terrainTris.Add((P(x, y), P(x + 1, y + 1), P(x, y + 1)));
+                }
+        }
+        if (terrainTris.Count > 0)
+            Console.WriteLine($"   terrain: {landWin.Count} cell(s) of LAND, {terrainTris.Count:N0} triangles");
+        else
+            Console.WriteLine($"   terrain: no LAND found for this cell (--no-terrain to silence)");
+    }
+
+    var (navTris, redTris) = BuildNavSets(winNav);
 
     if (redTris.Count > 0)
     {
@@ -341,10 +454,69 @@ if (textured)
     fpGw.MakeCurrent();
 
     string safe = new string(cellLabel.Select(c => char.IsLetterOrDigit(c) ? c : '_').ToArray());
+
+    int Render(IReadOnlyList<(System.Numerics.Vector3, System.Numerics.Vector3, System.Numerics.Vector3)> g,
+               IReadOnlyList<(System.Numerics.Vector3, System.Numerics.Vector3, System.Numerics.Vector3)> r,
+               string outFile)
+        => ViewProbe.TexturedScene.RenderToPng(
+               scene, assets, dataDir, modFolders, overwriteDir,
+               (eyePos.Value, lookPos.Value, fov), g, r, terrainTris, navMode, size, outFile);
+
+    if (compare is { } cmp)
+    {
+        // Three panels, one camera: A's navmesh, B's navmesh, the winning state. The world
+        // geometry and terrain are the winning state in all three — only the navmesh layer
+        // changes, which is exactly the thing being compared.
+        var panels = new (string Label, IReadOnlyDictionary<FormKey, NavmeshGeometry> Navs)[]
+        {
+            (cmp.A, navByPlugin.TryGetValue(cmp.A, out var da) ? da : new Dictionary<FormKey, NavmeshGeometry>()),
+            (cmp.B, navByPlugin.TryGetValue(cmp.B, out var db) ? db : new Dictionary<FormKey, NavmeshGeometry>()),
+            ("winning state", winNav),
+        };
+        foreach (var fk in redNav.Keys)
+            Console.WriteLine($"   contested {fk}: " + string.Join("  |  ",
+                panels.Select(p => p.Label + ": " + (p.Navs.TryGetValue(fk, out var nv) ? nv.Triangles.Count + " tris" : "not provided"))));
+
+        var panelFiles = new List<string>();
+        for (int pi = 0; pi < panels.Length; pi++)
+        {
+            var (label, navs) = panels[pi];
+            if (navs.Count == 0 && pi < 2)
+                Console.WriteLine($"   panel '{label}': provides NO navmesh in this cell -- panel shows world only");
+            var (g, r) = BuildNavSets(navs);
+            string pf = Path.Combine(outDir, $"{safe}-cmp{pi + 1}-{new string(label.Select(ch => char.IsLetterOrDigit(ch) ? ch : '_').ToArray())}.png");
+            Render(g, r, pf);
+            panelFiles.Add(pf);
+            Console.WriteLine($"   panel {pi + 1} ({label}): {g.Count:N0} green + {r.Count:N0} red navmesh tris -> {pf}");
+        }
+
+        // Stitch left->right: A | B | winning.
+        string stitched = Path.Combine(outDir, $"{safe}-compare.png");
+        using (var canvas = new Image<Rgba32>(size * 3 + 8, size))
+        {
+            canvas.Mutate(ctx =>
+            {
+                ctx.BackgroundColor(SixLabors.ImageSharp.Color.Black);
+                for (int pi = 0; pi < 3; pi++)
+                    using (var img = Image.Load<Rgba32>(panelFiles[pi]))
+                        ctx.DrawImage(img, new SixLabors.ImageSharp.Point(pi * (size + 4), 0), 1f);
+            });
+            canvas.SaveAsPng(stitched);
+        }
+        Console.WriteLine($"wrote:\n   {stitched}");
+        Console.WriteLine($"   panels left->right: [1] {cmp.A}   [2] {cmp.B}   [3] winning state (+conflict red)");
+        return 0;
+    }
+
+    if (navPlugin is not null)
+    {
+        var navs = navByPlugin.TryGetValue(navPlugin, out var d0) ? d0 : new Dictionary<FormKey, NavmeshGeometry>();
+        Console.WriteLine($"   navmesh source: {navPlugin} ({navs.Count} record version(s) in this cell)");
+        (navTris, redTris) = BuildNavSets(navs);
+    }
+
     string fpOut = Path.Combine(outDir, $"{safe}-fp.png");
-    int drawnShapes = ViewProbe.TexturedScene.RenderToPng(
-        scene, assets, dataDir, modFolders, overwriteDir,
-        (eyePos.Value, lookPos.Value, fov), navTris, redTris, navMode, size, fpOut);
+    int drawnShapes = Render(navTris, redTris, fpOut);
     Console.WriteLine($"wrote:\n   {fpOut}");
     Console.WriteLine($"   eye {eyePos.Value.X:0},{eyePos.Value.Y:0},{eyePos.Value.Z:0} -> look {lookPos.Value.X:0},{lookPos.Value.Y:0},{lookPos.Value.Z:0}  fov {fov:0}°  ({drawnShapes:N0} shapes)");
     return 0;
