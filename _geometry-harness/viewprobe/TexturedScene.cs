@@ -623,6 +623,14 @@ static class TexturedScene
         const int Visible = 0, Subterranean = 1, Hidden = 2;
         int runVisible = 0, runUnder = 0, runHidden = 0;
 
+        float occlRel = 1.002f, occlAbs = 1.5f;
+        if (Environment.GetEnvironmentVariable("VP_OCCL_SLACK") is { } slackSpec)
+        {
+            var sp2 = slackSpec.Split(',');
+            if (sp2.Length == 2 && float.TryParse(sp2[0], out var rr) && float.TryParse(sp2[1], out var aa))
+            { occlRel = rr; occlAbs = aa; Console.WriteLine($"   occlusion slack: x{occlRel} + {occlAbs} u (from VP_OCCL_SLACK)"); }
+        }
+
         // Window depth -> distance along the view axis, so the compare happens in world units
         // instead of in the wildly non-linear depth encoding a 4..131072 frustum produces.
         static float ViewDist(float winZ)
@@ -641,7 +649,14 @@ static class TexturedScene
             if (ScreenOf(pY) is not { } sp) return Visible;          // off-frame: nothing hides it
             float scene = ViewDist(sceneDepth[sp.Y * size + sp.X]);
             float mine = Vector3.Dot(pY - eyeY, viewFwd);
-            return mine > scene * 1.02f + 3f ? Hidden : Visible;
+            // Slack, and only as much as the numbers actually need. A 24-bit depth buffer over a
+            // 4..131072 frustum resolves ~0.06 world units at 2,000 out, so 2% + 3 u was ~40 u of
+            // blind zone there: an edge hidden by a mound but LESS than 40 u behind its surface
+            // classified "visible", got drawn solid, and was then clipped by that same mound —
+            // vanishing entirely instead of dashing. The navmesh rides 2 u above its own ground
+            // and is nearer than it along every view ray, so self-occlusion needs no more than
+            // this. Env VP_OCCL_SLACK="rel,abs" overrides both for diagnosis.
+            return mine > scene * occlRel + occlAbs ? Hidden : Visible;
         }
 
         // One edge -> solid runs + dashed runs, in Y-up viewer space, 6 floats a vertex
@@ -678,8 +693,28 @@ static class TexturedScene
             {
                 if (t1 - t0 < 1e-4f) return;
                 if (cls == Visible) runVisible++; else if (cls == Subterranean) runUnder++; else runHidden++;
-                bool dashed = (cls == Subterranean && dashUnderground) || (cls == Hidden && dashUnderStatics);
-                if (!dashed) { Ribbon(solid, t0, t1); return; }
+
+                // THE DEPTH BUFFER IS THE ARBITER, NOT THE CLASSIFIER.
+                //
+                // Every segment gets a SOLID, depth-tested copy — so it draws wherever it is
+                // genuinely visible and is clipped wherever it is not, per pixel, exactly. Every
+                // segment whose category is dashed also gets an always-visible DASHED copy, which
+                // is precisely what remains where the solid one was clipped. Over a segment that
+                // really is visible the dashes land on the solid line, same colour, same width,
+                // and change nothing.
+                //
+                // With both dash categories on — the default — the classification therefore has
+                // NO effect on the picture at all: solid where visible, dashed where hidden, and
+                // the GPU decides which. That is what makes it impossible for a segment to
+                // disappear, which is what a classifier deciding visibility on its own kept doing:
+                // any slack at all is a blind zone, and a rug, a plank edge or a shallow rise all
+                // fit inside one. The classification now only names the CATEGORY, for the two
+                // toggles and for the counts.
+                Ribbon(solid, t0, t1);
+                bool dashed = cls == Visible
+                    ? dashUnderground || dashUnderStatics       // may be hidden after all: cover it
+                    : (cls == Subterranean && dashUnderground) || (cls == Hidden && dashUnderStatics);
+                if (!dashed) return;
                 // Phase the dashes off the edge start, not off the run, so consecutive runs of
                 // the same edge join into one continuous dash pattern.
                 for (float t = t0 - (t0 % period); t < t1; t += period)
@@ -748,7 +783,9 @@ static class TexturedScene
                                : dashUnderground ? "underground only"
                                : dashUnderStatics ? "behind-geometry only" : "nothing (dashes off)";
                 Console.WriteLine($"   nav wire: {runVisible:N0} visible run(s), {runUnder:N0} subterranean, "
-                                + $"{runHidden:N0} behind geometry; dashed: {dashing}");
+                                + $"{runHidden:N0} behind geometry; dashed: {dashing}"
+                                + (dashUnderground && dashUnderStatics
+                                   ? "  (counts describe the classifier; the depth buffer decides the picture)" : ""));
             }
         }
 
