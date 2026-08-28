@@ -138,6 +138,17 @@ bool listTerrain = false;
 // every winning triangle whose 2D footprint contains the point, INCLUDING the ones the render
 // filters out, and why each was filtered.
 var navAt = new List<(float X, float Y)>();
+// --find-ltex SUBSTR answers "where is this ground texture actually painted": the matching
+// LTEX records, then a walk of the WHOLE target worldspace reporting the cells that paint
+// them and how heavily. Picking a demonstration cell by memory of where roads are is guessing;
+// this makes it a lookup.
+string? findLtex = null;
+// The render covers the target cell AND its ring of neighbours; a white dashed line along the
+// target's four edges says which is which. --no-cell-outline drops it.
+bool cellOutline = true;
+// In --compare, mark the navmesh vertices one plugin's version has and the other's does not with
+// small spheres, in every panel that contains them. --no-nav-diff drops them.
+bool navDiff = true;
 // --refs-at X,Y[,R] lists every winning reference near a spot and says, per ref, whether the
 // render draws it and why not. "Is there an object here that isn't being rendered?" is a
 // question the picture cannot answer, because the answer is a thing you cannot see.
@@ -190,6 +201,9 @@ for (int i = 1; i < args.Length; i++)
     else if (args[i] == "--pick" && i + 1 < args.Length)
     { var p = args[++i].Split(','); if (p.Length == 2) picks.Add((int.Parse(p[0]), int.Parse(p[1]))); }
     else if (args[i] == "--list-terrain") listTerrain = true;
+    else if (args[i] == "--find-ltex" && i + 1 < args.Length) findLtex = args[++i];
+    else if (args[i] == "--no-cell-outline") cellOutline = false;
+    else if (args[i] == "--no-nav-diff") navDiff = false;
     else if (args[i] == "--nav-at" && i + 1 < args.Length)
     { var p = args[++i].Split(','); if (p.Length == 2) navAt.Add((float.Parse(p[0]), float.Parse(p[1]))); }
     else if (args[i] == "--refs-at" && i + 1 < args.Length)
@@ -513,6 +527,72 @@ if (textured)
             }
         }
         return (green, red);
+    }
+
+    if (findLtex is not null)
+    {
+        string? Diffuse(FormKey lk)
+        {
+            if (!ltexToTxst.TryGetValue(lk, out var ts)) return null;
+            if (!txstDiffuse.TryGetValue(ts, out var d)) return null;
+            var pp = d.Replace('/', (char)92);
+            return pp.StartsWith("textures", StringComparison.OrdinalIgnoreCase) ? pp : "textures" + (char)92 + pp;
+        }
+        var wanted = ltexEditorId
+            .Where(kv => kv.Value.Contains(findLtex, StringComparison.OrdinalIgnoreCase))
+            .ToDictionary(kv => kv.Key, kv => kv.Value);
+        Console.WriteLine($"   ---- LTEX records matching '{findLtex}': {wanted.Count} ----");
+        foreach (var (fk, ed) in wanted.OrderBy(k => k.Value))
+            Console.WriteLine($"      {fk}  {ed}  ->  {Diffuse(fk) ?? "NO DIFFUSE RESOLVED"}");
+        if (wanted.Count > 0)
+        {
+            // grid -> (painted points across all quadrants, whether any quadrant uses it as BASE)
+            var hits = new Dictionary<(int X, int Y), (int Painted, bool Base, FormKey Cell, string? Ed)>();
+            foreach (var path in order.OrderedPaths)
+            {
+                ISkyrimModGetter ms;
+                try { ms = SkyrimMod.CreateFromBinaryOverlay(path, SkyrimRelease.SkyrimSE); } catch { continue; }
+                using (ms as IDisposable)
+                    foreach (var ws in ms.Worldspaces.Records)
+                    {
+                        if (ws.FormKey != targetWorldspace) continue;
+                        IEnumerable<ICellGetter> All()
+                        {
+                            if (ws.TopCell is { } tc) yield return tc;
+                            foreach (var blk in ws.SubCells)
+                                foreach (var sub in blk.Items)
+                                    foreach (var c in sub.Items)
+                                        yield return c;
+                        }
+                        foreach (var c in All())
+                        {
+                            if (c.Grid?.Point is not { } gp || c.Landscape is not { } ls) continue;
+                            int painted = 0; bool isBase = false;
+                            try
+                            {
+                                foreach (var layer in ls.Layers)
+                                {
+                                    if (layer.Header?.Texture.FormKeyNullable is not { } lk || !wanted.ContainsKey(lk)) continue;
+                                    if (layer is IAlphaLayerGetter al)
+                                        painted += al.AlphaLayerData.Count(pt => pt.Opacity > 0.004f);
+                                    else { isBase = true; painted += 289; }
+                                }
+                            }
+                            catch { }
+                            // A later plugin's LAND for the same cell REPLACES the earlier one, so
+                            // overwrite rather than accumulate — same winner rule as the terrain walk.
+                            if (painted > 0 || isBase) hits[(gp.X, gp.Y)] = (painted, isBase, c.FormKey, c.EditorID);
+                            else hits.Remove((gp.X, gp.Y));
+                        }
+                    }
+            }
+            Console.WriteLine($"   ---- cells painting it, top 20 of {hits.Count} ----");
+            foreach (var ((gx, gy), (painted, isBase, ck, ced)) in hits.OrderByDescending(k => k.Value.Painted).Take(20))
+                Console.WriteLine($"      cell ({gx,4},{gy,4})  {painted,5} painted point(s){(isBase ? "  (BASE)" : "      ")}"
+                                + $"  centre {gx * 4096 + 2048},{gy * 4096 + 2048}"
+                                + $"  {ck}{(string.IsNullOrWhiteSpace(ced) ? "" : "  " + ced)}");
+        }
+        return 0;
     }
 
     // ---- TERRAIN: winning LAND heightmaps for the target cell + its ring-1 neighbours --------
@@ -895,14 +975,26 @@ if (textured)
 
     string safe = new string(cellLabel.Select(c => char.IsLetterOrDigit(c) ? c : '_').ToArray());
 
+    // The target cell's own footprint, for the outline. Exteriors only — an interior has no grid
+    // and no neighbours to be confused with.
+    (float X0, float Y0, float X1, float Y1)? cellBounds = null;
+    if (cellOutline && !interior && targetGrid is { } tgb)
+        cellBounds = (tgb.X * 4096f, tgb.Y * 4096f, tgb.X * 4096f + 4096f, tgb.Y * 4096f + 4096f);
+
+    // Violet: not in the healthy palette (green/cyan/magenta/yellow/blue), not the reserved red,
+    // not the white of the cell outline, not the orange of an implicated door.
+    var diffColor = new System.Numerics.Vector4(0.72f, 0.28f, 1f, 1f);
+    var noDiff = Array.Empty<System.Numerics.Vector3>();
+
     int Render(IReadOnlyList<(System.Numerics.Vector3, System.Numerics.Vector3, System.Numerics.Vector3)> g,
                IReadOnlyList<(System.Numerics.Vector3, System.Numerics.Vector3, System.Numerics.Vector3)> r,
-               string outFile, IReadOnlyList<string> captionLines)
+               string outFile, IReadOnlyList<string> captionLines,
+               IReadOnlyList<System.Numerics.Vector3>? diffs = null)
         => ViewProbe.TexturedScene.RenderToPng(
                scene, assets, dataDir, modFolders, overwriteDir,
                (eyePos.Value, lookPos.Value, fov), g, r, terrainPatches, terrainLayers, navMode, navColor,
-               skyColor, terrainHeightAt, dashUnderground, dashUnderStatics, msaa, picks,
-               captionLines, size, outFile);
+               skyColor, terrainHeightAt, dashUnderground, dashUnderStatics, msaa, cellBounds,
+               diffs ?? noDiff, diffColor, picks, captionLines, size, outFile);
 
     if (compare is { } cmp)
     {
@@ -930,6 +1022,46 @@ if (textured)
             Console.WriteLine($"   contested {fk}: " + string.Join("  |  ",
                 panels.Select(p => p.Label + ": " + (p.Navs.TryGetValue(fk, out var nv) ? nv.Triangles.Count + " tris" : "not provided"))));
 
+        // ---- THE DIFF ------------------------------------------------------------------
+        // Which navmesh VERTICES does one plugin's version have that the other's does not? Only
+        // vertices a live (non-deleted, in-range) triangle actually uses count — an orphaned entry
+        // in the vertex list is not something the picture shows. Positions are quantised to 1/8 u
+        // so float noise cannot invent a difference; real navmesh vertices are units apart.
+        static long Q(float v) => (long)MathF.Round(v * 8f);
+        static IEnumerable<(long X, long Y, long Z, System.Numerics.Vector3 P)> LiveVerts(
+            IReadOnlyDictionary<FormKey, NavmeshGeometry> navs)
+        {
+            foreach (var nav in navs.Values)
+                foreach (var tri in nav.Triangles)
+                {
+                    if ((tri.Flags & 0x08) != 0) continue;
+                    foreach (var idx in new[] { tri.A, tri.B, tri.C })
+                    {
+                        if (idx < 0 || idx >= nav.Vertices.Count) continue;
+                        var p = V(nav.Vertices[idx]);
+                        yield return (Q(p.X), Q(p.Y), Q(p.Z), p);
+                    }
+                }
+        }
+        var keysA = new HashSet<(long, long, long)>(LiveVerts(panels[0].Navs).Select(v => (v.X, v.Y, v.Z)));
+        var keysB = new HashSet<(long, long, long)>(LiveVerts(panels[1].Navs).Select(v => (v.X, v.Y, v.Z)));
+        var changedKeys = new HashSet<(long, long, long)>(keysA);
+        changedKeys.SymmetricExceptWith(keysB);
+        // A panel shows the changed vertices IT has. For the two side panels that is exactly
+        // "mine and not theirs"; for the winning panel it is whichever of the two it inherited.
+        List<System.Numerics.Vector3> DiffFor(IReadOnlyDictionary<FormKey, NavmeshGeometry> navs)
+        {
+            var seen = new HashSet<(long, long, long)>();
+            var outp = new List<System.Numerics.Vector3>();
+            if (!navDiff) return outp;
+            foreach (var (x, y, z, p) in LiveVerts(navs))
+                if (changedKeys.Contains((x, y, z)) && seen.Add((x, y, z))) outp.Add(p);
+            return outp;
+        }
+        if (navDiff)
+            Console.WriteLine($"   nav diff: {changedKeys.Count} vertex position(s) differ between "
+                            + $"{cmp.A} ({keysA.Count} live vertices) and {cmp.B} ({keysB.Count})");
+
         var panelFiles = new List<string>();
         for (int pi = 0; pi < panels.Length; pi++)
         {
@@ -937,11 +1069,15 @@ if (textured)
             if (pi < 2 && (!navByPlugin.TryGetValue(label, out var ownNv) || ownNv.Count == 0))
                 Console.WriteLine($"   panel '{label}': provides NO navmesh version in this cell -- panel equals the winning state");
             var (g, r) = BuildNavSets(navs);
+            var diffs = DiffFor(navs);
             string pf = Path.Combine(outDir, $"{safe}-cmp{pi + 1}-{new string(label.Select(ch => char.IsLetterOrDigit(ch) ? ch : '_').ToArray())}.png");
             var cap = new List<string> { $"[{pi + 1}/3] {(pi == 2 ? "winning state (actual merged navmesh)" : $"cell navmesh if {label} won")} \u2014 {cellLabel}" };
             if (redNav.Count > 0) cap.Add(RedCaption(navs));
             if (DoorCaption() is { } dc) cap.Add(dc);
-            Render(g, r, pf, cap);
+            if (changedKeys.Count > 0 && navDiff)
+                cap.Add($"VIOLET spheres: {diffs.Count} navmesh vertex position(s) this version has and the other does not "
+                      + $"({changedKeys.Count} differ in total)");
+            Render(g, r, pf, cap, diffs);
             panelFiles.Add(pf);
             Console.WriteLine($"   panel {pi + 1} ({label}): {g.Count:N0} green + {r.Count:N0} red navmesh tris -> {pf}");
         }

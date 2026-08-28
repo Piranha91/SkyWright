@@ -136,6 +136,9 @@ static class TexturedScene
         bool dashUnderground,                              // dash navmesh buried under the terrain
         bool dashUnderStatics,                             // dash navmesh hidden behind geometry
         int msaa,                                          // multisample count; < 2 = off
+        (float X0, float Y0, float X1, float Y1)? cellBounds, // target cell footprint; null = no outline
+        IReadOnlyList<Vector3> diffVerts,                  // navmesh vertices unique to THIS panel
+        Vector4 diffColor,                                 // colour for those vertices' spheres
         IReadOnlyList<(int X, int Y)> picks,                // image pixels to report world coords for
         IReadOnlyList<string> captionLines,                // burned into the image, top-left
         int size, string outPath)
@@ -327,10 +330,17 @@ static class TexturedScene
         // sheets actually need — a distance sort between two layers painted on the same triangle
         // is a coin flip, and layer order is the author's stated intent. Depth test on (a rock in
         // front still hides the road), depth write off (they are surface, not occluders).
+        // Two env toggles for answering "is that wash really this texture, or is something wrong":
+        // VP_LAYER_ONLY=<substr> keeps only layers whose diffuse path matches, and
+        // VP_LAYER_SOLID=1 ignores the opacity map so the texture is drawn at full strength.
+        // Together they isolate one painted layer and show it as itself.
+        string? layerOnly = Environment.GetEnvironmentVariable("VP_LAYER_ONLY");
+        bool layerSolid = Environment.GetEnvironmentVariable("VP_LAYER_SOLID") == "1";
         int layerMeshes = 0;
         foreach (var (texPath, layerTris) in terrainLayers)
         {
             if (layerTris.Count == 0) continue;
+            if (layerOnly is { Length: > 0 } && !texPath.Contains(layerOnly, StringComparison.OrdinalIgnoreCase)) continue;
             int texHandle = textures.LoadTexture(texPath);
             if (texHandle == textures.WhiteTexture) continue;   // unresolvable: a white sheet is worse than none
             var lv = new List<Vector3>(); var li = new List<int>();
@@ -349,9 +359,9 @@ static class TexturedScene
                 luv.Add(new Vector2(c.X / 256f, c.Y / 256f));
                 var ny = YUp(nrm);
                 ln.Add(ny); ln.Add(ny); ln.Add(ny);
-                lc.Add(new Vector4(shade, shade, shade, oa));
-                lc.Add(new Vector4(shade, shade, shade, ob));
-                lc.Add(new Vector4(shade, shade, shade, oc));
+                lc.Add(new Vector4(shade, shade, shade, layerSolid ? 1f : oa));
+                lc.Add(new Vector4(shade, shade, shade, layerSolid ? 1f : ob));
+                lc.Add(new Vector4(shade, shade, shade, layerSolid ? 1f : oc));
                 li.Add(at); li.Add(at + 1); li.Add(at + 2);
             }
             var sheet = new GlMesh();
@@ -658,7 +668,9 @@ static class TexturedScene
             void Ribbon(List<float> dst, float t0, float t1)
             {
                 var a = YUp(p + dir * t0); var b = YUp(p + dir * t1);
-                void V(Vector3 v) { dst.Add(v.X); dst.Add(v.Y); dst.Add(v.Z); dst.Add(colour.X); dst.Add(colour.Y); dst.Add(colour.Z); }
+                // A ZERO normal tells the overlay shader "flat, exactly this colour", so every
+                // line keeps the colour it had before the spheres needed shading.
+                void V(Vector3 v) => Overlay.Vertex(dst, v, colour, Vector3.Zero);
                 V(a - side); V(a + side); V(b + side);
                 V(a - side); V(b + side); V(b - side);
             }
@@ -708,22 +720,27 @@ static class TexturedScene
         // Draw order is the precedence order: healthy solid, healthy dashes, then the finding
         // over both. A layer flagged false skips the depth test — that IS the "always visible"
         // part of a dashed line.
-        var layers = new List<(float[] Data, bool DepthTested)>();
+        // Data, whether it depth-tests, and whether back faces are culled. Culling matters for
+        // exactly one thing: a solid drawn WITHOUT a depth test paints whichever of its faces the
+        // buffer happened to receive last, so a sphere shows its far hemisphere and shades as if
+        // lit from behind. Culling the back faces makes the near hemisphere the only candidate.
+        // Ribbons are single-sided-by-accident and must NOT be culled.
+        var layers = new List<(float[] Data, bool DepthTested, bool CullBack)>();
         if (wantNav)
         {
             if (wireMode && navTris.Count > 0)
             {
                 var (s, d) = BuildWire(navTris, healthy, 2.2f);
-                if (s.Count > 0) layers.Add((s.ToArray(), true));
-                if (d.Count > 0) layers.Add((d.ToArray(), false));
+                if (s.Count > 0) layers.Add((s.ToArray(), true, false));
+                if (d.Count > 0) layers.Add((d.ToArray(), false, false));
             }
             // The finding is ALWAYS outlined, wider than the healthy wire, in every mode that
             // draws navmesh at all.
             if (redTris.Count > 0)
             {
                 var (s, d) = BuildWire(redTris, red, 3.4f);
-                if (s.Count > 0) layers.Add((s.ToArray(), true));
-                if (d.Count > 0) layers.Add((d.ToArray(), false));
+                if (s.Count > 0) layers.Add((s.ToArray(), true, false));
+                if (d.Count > 0) layers.Add((d.ToArray(), false, false));
             }
             if (runVisible + runUnder + runHidden > 0)
             {
@@ -733,6 +750,59 @@ static class TexturedScene
                 Console.WriteLine($"   nav wire: {runVisible:N0} visible run(s), {runUnder:N0} subterranean, "
                                 + $"{runHidden:N0} behind geometry; dashed: {dashing}");
             }
+        }
+
+        // ---- the target cell's footprint ------------------------------------------------
+        // Terrain is drawn for the target cell AND its ring of neighbours, and nothing in the
+        // picture says where one stops and the other starts. A white dashed line along the four
+        // edges, riding the ground, draws that boundary: inside it is the cell being examined,
+        // outside it is context. Always visible — a boundary you can only see on open flat ground
+        // is not a boundary you can navigate by.
+        if (cellBounds is { } cb && terrainHeightAt is not null)
+        {
+            var outline = new List<float>();
+            var white = new Vector3(1f, 1f, 1f);
+            void Edge(float ax, float ay, float bx, float by)
+            {
+                // ~64 u sampling: fine enough to hug a hillside, coarse enough to stay cheap.
+                int steps = Math.Max(1, (int)MathF.Ceiling(MathF.Max(MathF.Abs(bx - ax), MathF.Abs(by - ay)) / 64f));
+                var pts = new List<Vector3>(steps + 1);
+                for (int i = 0; i <= steps; i++)
+                {
+                    float f = (float)i / steps;
+                    float x = ax + (bx - ax) * f, y = ay + (by - ay) * f;
+                    float z = terrainHeightAt(x, y) ?? terrainHeightAt(ax, ay) ?? 0f;
+                    pts.Add(new Vector3(x, y, z + 6f));
+                }
+                Overlay.DashedPolyline(outline, pts, white, 3.0f, cam.Eye);
+            }
+            Edge(cb.X0, cb.Y0, cb.X1, cb.Y0);
+            Edge(cb.X1, cb.Y0, cb.X1, cb.Y1);
+            Edge(cb.X1, cb.Y1, cb.X0, cb.Y1);
+            Edge(cb.X0, cb.Y1, cb.X0, cb.Y0);
+            if (outline.Count > 0)
+            {
+                layers.Add((outline.ToArray(), false, false));
+                Console.WriteLine($"   cell outline: white dashes around {cb.X0:0},{cb.Y0:0} .. {cb.X1:0},{cb.Y1:0}");
+            }
+        }
+
+        // ---- the diff: navmesh vertices unique to this panel's version -------------------
+        // A re-cut navmesh moves vertices, and spotting that between two wire drawings is exactly
+        // what the eye is worst at. Spheres at the vertices THIS version has and the other one
+        // does not turn "spot the difference" into "look at the marked points". Always visible,
+        // and shaded — the only lit thing in the overlay — so they read as objects, not blobs.
+        if (diffVerts.Count > 0)
+        {
+            var spheres = new List<float>();
+            var dc = new Vector3(diffColor.X, diffColor.Y, diffColor.Z);
+            foreach (var v in diffVerts)
+            {
+                float d = MathF.Max(1f, Vector3.Distance(v, cam.Eye));
+                Overlay.Sphere(spheres, YUp(v + lift), Math.Clamp(d * 0.0055f, 2f, 90f), dc);
+            }
+            layers.Add((spheres.ToArray(), false, true));
+            Console.WriteLine($"   nav diff: {diffVerts.Count} vertex sphere(s) — vertices this version has and the other does not");
         }
 
         // The overlay pass itself: viewprobe's own flat shader, so an outline is the exact
@@ -745,10 +815,12 @@ static class TexturedScene
             wireVao = GL.GenVertexArray(); wireVbo = GL.GenBuffer();
             GL.BindVertexArray(wireVao);
             GL.BindBuffer(BufferTarget.ArrayBuffer, wireVbo);
-            GL.VertexAttribPointer(0, 3, VertexAttribPointerType.Float, false, 6 * sizeof(float), 0);
+            GL.VertexAttribPointer(0, 3, VertexAttribPointerType.Float, false, 9 * sizeof(float), 0);
             GL.EnableVertexAttribArray(0);
-            GL.VertexAttribPointer(1, 3, VertexAttribPointerType.Float, false, 6 * sizeof(float), 3 * sizeof(float));
+            GL.VertexAttribPointer(1, 3, VertexAttribPointerType.Float, false, 9 * sizeof(float), 3 * sizeof(float));
             GL.EnableVertexAttribArray(1);
+            GL.VertexAttribPointer(2, 3, VertexAttribPointerType.Float, false, 9 * sizeof(float), 6 * sizeof(float));
+            GL.EnableVertexAttribArray(2);
             GL.BindVertexArray(0);
 
             wireOverlay = () =>
@@ -760,14 +832,15 @@ static class TexturedScene
                 GL.BindVertexArray(wireVao);
                 GL.BindBuffer(BufferTarget.ArrayBuffer, wireVbo);
                 GL.Disable(EnableCap.Blend);
-                GL.Disable(EnableCap.CullFace);          // ribbons are two-sided by construction
                 GL.DepthMask(false);
-                foreach (var (data, depthTested) in layers)
+                foreach (var (data, depthTested, cullBack) in layers)
                 {
                     if (depthTested) { GL.Enable(EnableCap.DepthTest); GL.DepthFunc(DepthFunction.Lequal); }
                     else GL.Disable(EnableCap.DepthTest);
+                    if (cullBack) { GL.Enable(EnableCap.CullFace); GL.CullFace(CullFaceMode.Back); }
+                    else GL.Disable(EnableCap.CullFace);
                     GL.BufferData(BufferTarget.ArrayBuffer, data.Length * sizeof(float), data, BufferUsageHint.StreamDraw);
-                    GL.DrawArrays(PrimitiveType.Triangles, 0, data.Length / 6);
+                    GL.DrawArrays(PrimitiveType.Triangles, 0, data.Length / 9);
                 }
                 GL.Enable(EnableCap.DepthTest);
                 GL.Enable(EnableCap.CullFace);
@@ -864,6 +937,80 @@ static class TexturedScene
         return shapes;
     }
 
+    /// <summary>Overlay geometry that is not a navmesh edge: the dashed cell outline and the
+    /// diff spheres. Vertices are 9 floats — position, colour, normal — where a ZERO normal means
+    /// "flat, exactly this colour" and a real one means "shade me".</summary>
+    static class Overlay
+    {
+        public static void Vertex(List<float> dst, Vector3 p, Vector3 colour, Vector3 normal)
+        {
+            dst.Add(p.X); dst.Add(p.Y); dst.Add(p.Z);
+            dst.Add(colour.X); dst.Add(colour.Y); dst.Add(colour.Z);
+            dst.Add(normal.X); dst.Add(normal.Y); dst.Add(normal.Z);
+        }
+
+        /// <summary>A dashed ribbon along a Skyrim-space polyline, turned to face the camera so it
+        /// keeps its width whatever the ground underneath is doing. Dash length tracks distance,
+        /// so the dashes read the same size near and far.</summary>
+        public static void DashedPolyline(List<float> dst, IReadOnlyList<Vector3> pts, Vector3 colour,
+                                          float halfWidth, Vector3 eye)
+        {
+            float travelled = 0f;
+            for (int i = 0; i + 1 < pts.Count; i++)
+            {
+                var p = pts[i]; var q = pts[i + 1];
+                var seg = q - p;
+                float len = seg.Length();
+                if (len < 1e-4f) continue;
+                var dir = seg / len;
+                var mid = (p + q) * 0.5f;
+                float camLen = MathF.Max(1f, Vector3.Distance(mid, eye));
+                float on = Math.Clamp(camLen * 0.012f, 3f, 400f);
+                float period = on * 1.9f;
+                // Camera-facing: cross(view direction, segment direction) is the on-screen normal.
+                var toEye = Vector3.Normalize(eye - mid);
+                var side0 = Vector3.Cross(toEye, dir);
+                if (side0.LengthSquared() < 1e-8f) side0 = Vector3.UnitZ;
+                var side = YUp(Vector3.Normalize(side0) * halfWidth);
+                // Phase off the polyline start so consecutive segments keep one dash rhythm.
+                for (float t = -(travelled % period); t < len; t += period)
+                {
+                    float a = MathF.Max(t, 0f), b = MathF.Min(t + on, len);
+                    if (b <= a) continue;
+                    var pa = YUp(p + dir * a); var pb = YUp(p + dir * b);
+                    Vertex(dst, pa - side, colour, Vector3.Zero);
+                    Vertex(dst, pa + side, colour, Vector3.Zero);
+                    Vertex(dst, pb + side, colour, Vector3.Zero);
+                    Vertex(dst, pa - side, colour, Vector3.Zero);
+                    Vertex(dst, pb + side, colour, Vector3.Zero);
+                    Vertex(dst, pb - side, colour, Vector3.Zero);
+                }
+                travelled += len;
+            }
+        }
+
+        /// <summary>A small UV sphere at a Y-up centre. 10x6 is plenty: at these sizes the
+        /// silhouette is what reads, and the shading is what makes it a ball and not a disc.</summary>
+        public static void Sphere(List<float> dst, Vector3 centre, float radius, Vector3 colour)
+        {
+            const int Meridians = 10, Parallels = 6;
+            static Vector3 P(int i, int j)
+            {
+                float phi = MathF.PI * j / Parallels;                 // 0..pi, pole to pole
+                float theta = 2f * MathF.PI * i / Meridians;
+                return new Vector3(MathF.Sin(phi) * MathF.Cos(theta), MathF.Cos(phi), MathF.Sin(phi) * MathF.Sin(theta));
+            }
+            for (int j = 0; j < Parallels; j++)
+                for (int i = 0; i < Meridians; i++)
+                {
+                    var n00 = P(i, j); var n10 = P(i + 1, j); var n11 = P(i + 1, j + 1); var n01 = P(i, j + 1);
+                    void Emit(Vector3 n) => Vertex(dst, centre + n * radius, colour, n);
+                    if (j > 0) { Emit(n00); Emit(n10); Emit(n11); }
+                    if (j < Parallels - 1) { Emit(n00); Emit(n11); Emit(n01); }
+                }
+        }
+    }
+
     /// <summary>The wire overlay's own program: position + colour straight through, no lighting.
     /// A diagnostic outline should be the colour it says it is, and the always-visible layers need
     /// a draw the library's mesh path cannot express (depth test off, per layer).</summary>
@@ -872,18 +1019,30 @@ static class TexturedScene
         const string vs = @"#version 330 core
 layout(location=0) in vec3 aPos;
 layout(location=1) in vec3 aCol;
+layout(location=2) in vec3 aNrm;
 uniform mat4 u_view;
 uniform mat4 u_projection;
 out vec3 vCol;
-void main(){ vCol = aCol; gl_Position = u_projection * u_view * vec4(aPos, 1.0); }";
+out vec3 vNrm;
+void main(){ vCol = aCol; vNrm = aNrm; gl_Position = u_projection * u_view * vec4(aPos, 1.0); }";
 
         // x1.5, clamped: the palette entries are the values the auto-colour scorer reasons about,
         // and the library's flat-normal lighting used to land them on screen about half a stop
         // brighter. Keeping that keeps a cyan outline the same cyan it has always been.
         const string fs = @"#version 330 core
 in vec3 vCol;
+in vec3 vNrm;
 out vec4 frag;
-void main(){ frag = vec4(min(vCol * 1.5, vec3(1.0)), 1.0); }";
+void main(){
+    vec3 c = min(vCol * 1.5, vec3(1.0));
+    // A zero normal means flat: every line and ribbon takes this path, so their pixels are
+    // bit-for-bit what they were before shading existed. Only the diff spheres carry a normal.
+    if (dot(vNrm, vNrm) > 0.0001) {
+        vec3 n = normalize(vNrm);
+        c *= 0.45 + 0.55 * max(dot(n, normalize(vec3(0.40, 0.80, 0.45))), 0.0);
+    }
+    frag = vec4(c, 1.0);
+}";
 
         int v = GL.CreateShader(ShaderType.VertexShader); GL.ShaderSource(v, vs); GL.CompileShader(v); Check(v, "vertex");
         int f = GL.CreateShader(ShaderType.FragmentShader); GL.ShaderSource(f, fs); GL.CompileShader(f); Check(f, "fragment");
