@@ -74,7 +74,27 @@ string? eyeRef = null, lookRef = null;
 float eyeHeight = 120f;                       // standing eye level; the player is 128u tall
 float? yaw = null; float pitch = 0f;
 float fov = 65f;                              // Skyrim SE's default world FOV
+// EFFECT GEOMETRY is filtered in TWO places, because it comes in two shapes:
+//   • whole-file — a ref whose model path is under `effects\` (beams, mists, glows). Dropped
+//     here, at the ref, before the scene is even assembled.
+//   • per-shape — a shape carrying a BSEffectShaderProperty inside an otherwise solid mesh.
+//     Dropped in TexturedScene, which is where the NIF is actually read.
+// The second is not a refinement of the first, it is the case the first CANNOT express:
+// `Clutter\WoodFires\FireplaceWood01Burning.nif` is a single file holding 5 solid shapes (logs,
+// coals, ash) and 12 effect shapes (flames, smoke, heat warp), and no path rule can keep the
+// logs while dropping the flames. Found 2026-08-28: the flames were drawing as an opaque
+// iridescent slab across every lit hearth in the game, because NifMeshBuilder reads material
+// values off BSLightingShaderProperty ONLY — an effect-shader shape arrives fully lit and opaque.
+// --fx switches BOTH filters off.
 bool keepFx = false;
+// --fx-static is the middle setting between "drop the fire" and "draw it wrong": effect-shader
+// shapes inside otherwise-solid meshes are DRAWN, frozen at the frame the NIF stores, additive and
+// never writing depth. It rescues only the effect-shader kind — a normal map in the diffuse slot
+// stays skipped, since no blend mode makes that shadeable. It does NOT bring back whole-file
+// `effects\` refs either; those are ambient dust beams and mists, which is a different question.
+// Off by default: an additive flame still paints over the navmesh behind it, and the navmesh is
+// what this tool is for.
+bool fxStatic = false;
 // Navmesh render mode (textured mode): filled = the translucent green sheet; wire = transparent
 // triangles with SOLID outlines so the surface underneath stays readable; both = faint fill +
 // outlines; off = none. --no-nav remains an alias for off.
@@ -178,6 +198,7 @@ for (int i = 1; i < args.Length; i++)
     else if (args[i] == "--pitch" && i + 1 < args.Length) pitch = float.Parse(args[++i]);
     else if (args[i] == "--fov" && i + 1 < args.Length) fov = float.Parse(args[++i]);
     else if (args[i] == "--fx") keepFx = true;
+    else if (args[i] == "--fx-static") fxStatic = true;
     else if (args[i] == "--nav" && i + 1 < args.Length) { navMode = args[++i].ToLowerInvariant(); navModeExplicit = true; }
     else if (args[i] == "--conflicts" && i + 1 < args.Length) conflictsPath = args[++i];
     else if (args[i] == "--red" && i + 1 < args.Length) redSpecs.Add(args[++i]);
@@ -451,12 +472,16 @@ if (textured)
         if (r.Base is not { } bk || !baseMesh.TryGetValue(bk, out var rel)) continue;
         // Effect meshes (beams, mists, glows) are translucent volumes that drown a first-person
         // shot; the game draws them subtly, this flat-lit pass cannot. Skipped by default,
-        // counted, and --fx puts them back.
+        // counted, and --fx puts them back. This is the WHOLE-FILE rule only — a solid mesh that
+        // merely CONTAINS effect shapes stays, and its effect shapes are dropped per-shape in
+        // TexturedScene, which reports them on their own line (and names the meshes under
+        // --list-meshes). So a census entry reading "geometry" means "not an effects\ file", not
+        // "nothing in it is an effect".
         bool isMarker = baseIsMarker.Contains(bk);
         bool isFx = rel.Replace('/', '\\').Contains(@"effects\", StringComparison.OrdinalIgnoreCase);
         if (meshCensus is not null)
         {
-            var cls = isMarker ? "MARKER" : isFx ? "FX" : "geometry";
+            var cls = isMarker ? "MARKER" : isFx ? "FX-file" : "geometry";
             meshCensus[rel] = (meshCensus.TryGetValue(rel, out var c) ? c.Count + 1 : 1, cls);
         }
         if (!keepFx && isFx) { fxSkipped++; continue; }
@@ -994,7 +1019,7 @@ if (textured)
                scene, assets, dataDir, modFolders, overwriteDir,
                (eyePos.Value, lookPos.Value, fov), g, r, terrainPatches, terrainLayers, navMode, navColor,
                skyColor, terrainHeightAt, dashUnderground, dashUnderStatics, msaa, cellBounds,
-               diffs ?? noDiff, diffColor, picks, captionLines, size, outFile);
+               diffs ?? noDiff, diffColor, picks, captionLines, keepFx, fxStatic, listMeshes, size, outFile);
 
     if (compare is { } cmp)
     {

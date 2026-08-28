@@ -1,4 +1,4 @@
-using System.Numerics;
+﻿using System.Numerics;
 using CharacterViewer.Rendering;
 using HousecarlCore;
 using Mutagen.Bethesda.Plugins;
@@ -141,6 +141,9 @@ static class TexturedScene
         Vector4 diffColor,                                 // colour for those vertices' spheres
         IReadOnlyList<(int X, int Y)> picks,                // image pixels to report world coords for
         IReadOnlyList<string> captionLines,                // burned into the image, top-left
+        bool keepFx,                                       // --fx: draw effect-shader shapes too
+        bool fxStatic,                                     // --fx-static: draw them as a frozen frame
+        bool listEffectMeshes,                             // --list-meshes: name the meshes they came from
         int size, string outPath)
     {
         var logger = new ConsoleCvLogger();
@@ -183,6 +186,23 @@ static class TexturedScene
 
         var builtCache = new Dictionary<string, List<NifMeshBuilder.BuiltMesh>?>(StringComparer.OrdinalIgnoreCase);
         int shapes = 0, missingMesh = 0, texturedShapes = 0;
+        // Effect-shader shapes dropped this render: the total shape-draws, and how many such
+        // shapes each distinct mesh carries (a per-file property, so it is SET, not accumulated,
+        // however many refs place that mesh).
+        int fxShapesSkipped = 0, nmShapesSkipped = 0, fxRefCount = 0;
+        int fxStaticShapes = 0, fxStaticRefCount = 0;
+        // env VP_FXSTATIC_EMIT — brightness of the --fx-static stand-in. The real number is
+        // BSEffectShaderProperty.baseColorScale, which the builder does not read; until it does,
+        // this is the knob that stands in for it.
+        float fxStaticEmit = float.TryParse(Environment.GetEnvironmentVariable("VP_FXSTATIC_EMIT"),
+                                            out var fse) ? fse : 1f;
+        var fxByMesh = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        // env VP_SHAPE_DUMP=<substr> — the SHAPE-level companion to --list-meshes: for every mesh
+        // whose path matches, print what the builder actually read off each shape. --list-meshes
+        // says which files are in the cell; this says why one of their shapes draws as it does.
+        // Printed once per distinct mesh, at build time, before any skip decision.
+        string? shapeDump = Environment.GetEnvironmentVariable("VP_SHAPE_DUMP");
+        var shapeDumped = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var meshes = new List<GlMesh>();
         // Highlighted refs keep their own texture; their halo (an inflated inverted hull) is
         // emitted here and drawn by the OVERLAY pass, whose zero-normal vertices render as the
@@ -213,6 +233,24 @@ static class TexturedScene
             }
             if (built is null || built.Count == 0) { missingMesh++; continue; }
 
+            if (shapeDump is { Length: > 0 }
+                && rel.Contains(shapeDump, StringComparison.OrdinalIgnoreCase)
+                && shapeDumped.Add(rel))
+            {
+                Console.WriteLine($"   ---- shapes of {rel} ({built.Count} built) ----");
+                foreach (var b in built)
+                    Console.WriteLine(
+                        $"      {(b.HasEffectShader ? "EFFECT " : "lighting")}  {b.ShapeName,-22}"
+                      + $"  {b.Indices.Length / 3,6:N0} tri"
+                      + $"  blend={(b.HasAlphaBlend ? $"{b.SrcBlendIndex}->{b.DstBlendIndex}" : "off")}"
+                      + $"  matAlpha={b.MaterialAlpha:0.00}"
+                      + (b.HasEffectShader
+                          ? $"  base=({b.EffectBaseColor.X:0.00},{b.EffectBaseColor.Y:0.00},{b.EffectBaseColor.Z:0.00},a{b.EffectBaseColorAlpha:0.00})x{b.EffectBaseColorScale:0.00}"
+                          : $"  emis=({b.EmissiveColor.X:0.00},{b.EmissiveColor.Y:0.00},{b.EmissiveColor.Z:0.00})x{b.EmissiveMultiple:0.00}")
+                      + $"  zwrite={b.ZBufferWrite}"
+                      + $"  tex0={(b.TexturePaths.TryGetValue(0, out var t0) && t0.Length > 0 ? t0 : "(none)")}");
+            }
+
             // Skyrim-space placement. Skyrim's REFR angles are CLOCKWISE-positive (compass
             // headings; getangle z: 0=north, 90=east) while Matrix4x4.CreateRotation* is
             // right-handed counterclockwise-positive — so the angles must be NEGATED before
@@ -222,10 +260,50 @@ static class TexturedScene
                                            SpatialOverlap.EulerOrder.Xyz);
             var pos = new Vector3(r.Position.X, r.Position.Y, r.Position.Z);
 
+            bool refHadFx = false, refHadFxStatic = false;
             foreach (var b in built)
             {
                 int n = b.Positions.Length;
                 if (n == 0 || b.Indices.Length == 0) continue;
+
+                // UNSHADEABLE SHAPES — two kinds, both meaning "this renderer provably cannot
+                // draw this shape's material, so drawing it is worse than omitting it". Per
+                // SHAPE, not per model path: `Clutter\WoodFires\...Burning.nif` is one file
+                // holding 5 solid shapes (logs, coals, ash) and 12 effect shapes, so no path
+                // rule can drop the flames while keeping the logs. --fx puts both kinds back.
+                //
+                //  1. EFFECT SHADER. NifMeshBuilder reads material values off
+                //     BSLightingShaderProperty ONLY, so a shape on a BSEffectShaderProperty
+                //     (flames, smoke, light cones) arrives opaque, unflagged and fully lit and
+                //     draws as a solid slab over the room. The material was never read; there is
+                //     nothing to compensate for after the fact.
+                //
+                //  2. NORMAL MAP IN THE DIFFUSE SLOT. Slot 0 is sampled as diffuse. A shape
+                //     whose slot 0 is a `_n.dds` therefore paints NORMAL-MAP COLOURS — the
+                //     lilac/cyan/green of a tangent-space normal texture — under any lighting.
+                //     This is what the iridescent slab over every lit hearth actually was
+                //     (2026-08-28): `L2_Warp04:0`, Inferno's heat-shimmer plane, authored on a
+                //     LIGHTING shader with `effects\VaporTileNormal_n.dds` in slots 0 and 1, so
+                //     rule 1 does not see it. Bethesda's `_n` suffix is a hard convention — no
+                //     legitimate diffuse carries it — and the count is reported separately so
+                //     the rule's reach stays visible rather than assumed.
+                bool normalAsDiffuse = b.TexturePaths.TryGetValue(0, out var slot0)
+                                       && slot0.EndsWith("_n.dds", StringComparison.OrdinalIgnoreCase);
+                // --fx-static rescues kind 1 ONLY. Kind 2 stays skipped under it: a normal map in
+                // the diffuse slot is unshadeable however it is blended, and the warp plane is
+                // exactly the slab this whole thread was about.
+                bool drawStatic = fxStatic && b.HasEffectShader && !normalAsDiffuse;
+                if (!keepFx && !drawStatic && (b.HasEffectShader || normalAsDiffuse))
+                {
+                    if (b.HasEffectShader) fxShapesSkipped++; else nmShapesSkipped++;
+                    refHadFx = true;
+                    fxByMesh[rel] = fxByMesh.TryGetValue(rel, out var already)
+                        ? already
+                        : built.Count(x => x.HasEffectShader
+                                           || (x.TexturePaths.TryGetValue(0, out var s0)
+                                               && s0.EndsWith("_n.dds", StringComparison.OrdinalIgnoreCase)));
+                    continue;
+                }
                 var wp = new Vector3[n];
                 var wn = new Vector3[n];
                 var wt = new Vector3[n];
@@ -255,6 +333,12 @@ static class TexturedScene
                 mesh.DepthWrite = b.ZBufferWrite;
                 mesh.IsDecal = b.IsDecal;
                 mesh.SrcBlendIndex = b.SrcBlendIndex;
+                // The DESTINATION factor was being dropped here (found 2026-08-28 while adding
+                // --fx-static): only Src was copied, so GlMesh kept its default 7 = INV_SRC_ALPHA
+                // and every ADDITIVE shape in the game — dst 0 = ONE — was composited as ordinary
+                // alpha blending instead. Invisible on solid geometry, which is why it survived;
+                // it is the whole ball game for a flame.
+                mesh.DstBlendIndex = b.DstBlendIndex;
                 mesh.IsModelSpace = b.IsModelSpaceNormals;
 
                 if (r.Highlight)
@@ -338,10 +422,54 @@ static class TexturedScene
                     }
                 }
 
+                if (drawStatic)
+                {
+                    // THE STATIC-FRAME STAND-IN. Everything an effect shape needs is already in
+                    // hand except its material: the source texture resolves (nifly maps slot 0 to
+                    // BSEffectShaderProperty.sourceTexture), and the NiAlphaProperty — a separate
+                    // block, so the builder reads it fine — already says additive with no depth
+                    // write. What is missing is that BSEffectShaderProperty is never read, so the
+                    // shape arrives emissive-zero and draws LIT: a dark quad, and a dark quad added
+                    // to the frame adds nothing, which is why --fx showed no flames at all.
+                    //
+                    // So: force it unlit-ish by driving the existing emissive term (the shader
+                    // computes albedo * (diffuse + emissive), so a white emissive x1 yields roughly
+                    // albedo — the fire atlas's own colour — with the lighting no longer able to
+                    // darken it toward nothing). This is a STAND-IN, not the real thing: the real
+                    // thing reads baseColor / baseColorScale off the block and needs an unlit
+                    // branch in basic.frag. It is deliberately cheap and reversible.
+                    //
+                    // "First frame" is free: the block's stored values ARE the base state, and the
+                    // BSEffectShaderPropertyFloatControllers that would animate UV/alpha are simply
+                    // never run. Nothing here has to fake a clock.
+                    mesh.HasEmissive = true;
+                    mesh.EmissiveColor = b.EffectBaseColor;
+                    // The author's own baseColorScale (8-10 on this fire) is used as the intensity.
+                    // It is an HDR number the engine tonemaps and viewprobe cannot, so it DOES
+                    // clip — but it clips along the baseColor hue, which is what a fire core looks
+                    // like anyway. The earlier attempt blew out to flat white only because the
+                    // emissive was left WHITE, so every channel clipped equally; tinted, the same
+                    // magnitude reads as flame. Measured against a hand-swept ladder (x1 too faint
+                    // to see, x2 faint, x4 legible, x8 right) — and the authored value landing in
+                    // that window is the reason to use it rather than a constant of my choosing.
+                    // VP_FXSTATIC_EMIT scales it for taste.
+                    mesh.EmissiveMultiple = b.EffectBaseColorScale * fxStaticEmit;
+                    mesh.MaterialAlpha = b.EffectBaseColorAlpha;
+                    mesh.DepthWrite = false;          // never let a frozen flame occlude the room
+                    // Effect quads are authored double-sided (SLSF2_Double_Sided), but that flag
+                    // lives on the shader block the builder never reads, so they arrive
+                    // single-sided and roughly half of a flame rosette is back-face culled.
+                    mesh.IsDoubleSided = true;
+                    fxStaticShapes++;
+                    refHadFxStatic = true;
+                }
+
                 renderer.AddMesh(mesh);
                 meshes.Add(mesh);
                 shapes++;
             }
+            if (refHadFx) fxRefCount++;
+            if (refHadFxStatic) fxStaticRefCount++;
         }
 
         // TERRAIN — winning LAND heightmap, drawn with each quadrant's winning base landscape
@@ -509,7 +637,12 @@ static class TexturedScene
         {
             Target = new GlVec3(lookY.X, lookY.Y, lookY.Z),
             Distance = camDist,
-            Elevation = float.RadiansToDegrees(MathF.Asin(camOff.Y / camDist)),
+            // Clamped off vertical. OrbitCamera builds its view with Matrix4.LookAt(..., UnitY),
+            // which DEGENERATES when the view direction is parallel to up: an exactly-straight-down
+            // camera (--eye X,Y,Z --look X,Y,Z-N) produced a NaN view matrix and a frame of pure sky,
+            // with nothing in the console to say so. The flat plan path already shoots 89.5f for the
+            // same reason; this is that guard on the textured path.
+            Elevation = Math.Clamp(float.RadiansToDegrees(MathF.Asin(camOff.Y / camDist)), -89.5f, 89.5f),
             Azimuth = float.RadiansToDegrees(MathF.Atan2(camOff.X, camOff.Z)),
             FieldOfView = cam.FovDeg,
             NearPlane = NearPlane,
@@ -1076,6 +1209,18 @@ static class TexturedScene
         GL.DeleteTexture(orange);
         Console.WriteLine($"   textured: {shapes:N0} shapes ({texturedShapes:N0} with a real diffuse), {missingMesh:N0} refs without a resolvable mesh"
                         + $"; {size}x{size}, {(samples >= 2 ? samples + "x msaa" : "no msaa")}");
+        if (fxStaticShapes > 0)
+            Console.WriteLine($"   static effect shapes: {fxStaticShapes:N0} DRAWN on {fxStaticRefCount:N0} ref(s) "
+                            + "— --fx-static, frozen at the authored frame, additive, no depth write");
+        if (fxShapesSkipped + nmShapesSkipped > 0)
+        {
+            Console.WriteLine($"   unshadeable shapes: {fxShapesSkipped + nmShapesSkipped:N0} skipped on {fxRefCount:N0} ref(s) "
+                            + $"of {fxByMesh.Count:N0} mesh(es) — {fxShapesSkipped:N0} BSEffectShaderProperty, "
+                            + $"{nmShapesSkipped:N0} normal-map-as-diffuse; --fx to draw them");
+            if (listEffectMeshes)
+                foreach (var kv in fxByMesh.OrderByDescending(k => k.Value))
+                    Console.WriteLine($"      {kv.Value,4} unshadeable shape(s)  {kv.Key}");
+        }
         if (textures.MissingTexturePaths.Count > 0)
             Console.WriteLine($"   textures the resolver could NOT find (white fallback, counted per rule 6): {textures.MissingTexturePaths.Count:N0}");
         return shapes;
