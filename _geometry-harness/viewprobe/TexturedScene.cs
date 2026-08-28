@@ -184,6 +184,11 @@ static class TexturedScene
         var builtCache = new Dictionary<string, List<NifMeshBuilder.BuiltMesh>?>(StringComparer.OrdinalIgnoreCase);
         int shapes = 0, missingMesh = 0, texturedShapes = 0;
         var meshes = new List<GlMesh>();
+        // Highlighted refs keep their own texture; their halo (an inflated inverted hull) is
+        // emitted here and drawn by the OVERLAY pass, whose zero-normal vertices render as the
+        // exact flat colour — the library pass would shade the hull's inward faces to black.
+        var haloTris = new List<float>();
+        var haloOrange = new Vector3(255f / 255f, 90f / 255f, 26f / 255f);
 
         foreach (var r in refs)
         {
@@ -203,8 +208,13 @@ static class TexturedScene
             }
             if (built is null || built.Count == 0) { missingMesh++; continue; }
 
-            // Skyrim-space placement, the SAME composition the detectors use.
-            var rot = SpatialOverlap.Euler(r.Rotation, SpatialOverlap.EulerOrder.Xyz);
+            // Skyrim-space placement. Skyrim's REFR angles are CLOCKWISE-positive (compass
+            // headings; getangle z: 0=north, 90=east) while Matrix4x4.CreateRotation* is
+            // right-handed counterclockwise-positive — so the angles must be NEGATED before
+            // composing, or every rotated ref draws with its heading mirrored about north
+            // (found 2026-08-28: the Falkreath walkway crossed its own navmesh in an X).
+            var rot = SpatialOverlap.Euler(new Vec3(-r.Rotation.X, -r.Rotation.Y, -r.Rotation.Z),
+                                           SpatialOverlap.EulerOrder.Xyz);
             var pos = new Vector3(r.Position.X, r.Position.Y, r.Position.Z);
 
             foreach (var b in built)
@@ -244,7 +254,50 @@ static class TexturedScene
 
                 if (r.Highlight)
                 {
-                    mesh.DiffuseTexture = orange;
+                    // The implicated ref keeps its OWN texture; the highlight is a thick orange
+                    // OUTLINE — the same mesh inflated ~8u along its normals with flipped
+                    // winding, drawn depth-tested + back-culled by the overlay pass, so it
+                    // survives only where it pokes past the silhouette. (Was a flat orange
+                    // repaint, which deleted every scale cue — Piranha, 2026-08-28.)
+                    string? hd = b.TexturePaths.TryGetValue(0, out var hdp) ? hdp : null;
+                    mesh.DiffuseTexture = hd is { Length: > 0 } ? textures.LoadTexture(hd) : textures.WhiteTexture;
+                    if (mesh.DiffuseTexture != textures.WhiteTexture) texturedShapes++;
+
+                    // Inflate from the shape's own centroid, NOT along stored normals — this
+                    // door NIF's normals point inward, and a normal-inflated hull turns inside
+                    // out. Then normalize each hull triangle's winding geometrically so the
+                    // outward face is ALWAYS the culled one, whatever the source winding.
+                    const float rim = 8f;
+                    var centroid = Vector3.Zero;
+                    for (int i = 0; i < n; i++) centroid += wp[i];
+                    centroid /= n;
+                    var sp = new Vector3[n];
+                    for (int i = 0; i < n; i++)
+                    {
+                        var dir = wp[i] - centroid;
+                        sp[i] = dir.LengthSquared() > 1e-6f ? wp[i] + Vector3.Normalize(dir) * rim : wp[i];
+                    }
+                    for (int i = 0; i + 2 < b.Indices.Length; i += 3)
+                    {
+                        var p0 = sp[b.Indices[i]]; var p1 = sp[b.Indices[i + 1]]; var p2 = sp[b.Indices[i + 2]];
+                        var ng = Vector3.Cross(p1 - p0, p2 - p0);
+                        var outward = Vector3.Dot(ng, (p0 + p1 + p2) / 3f - centroid) > 0f;
+                        // emit with the geometric normal pointing INWARD: seen from outside the
+                        // hull, near faces are GL-back (culled) and only the far side survives
+                        // where it pokes past the silhouette — the rim.
+                        if (outward)
+                        {
+                            Overlay.Vertex(haloTris, p2, haloOrange, Vector3.Zero);
+                            Overlay.Vertex(haloTris, p1, haloOrange, Vector3.Zero);
+                            Overlay.Vertex(haloTris, p0, haloOrange, Vector3.Zero);
+                        }
+                        else
+                        {
+                            Overlay.Vertex(haloTris, p0, haloOrange, Vector3.Zero);
+                            Overlay.Vertex(haloTris, p1, haloOrange, Vector3.Zero);
+                            Overlay.Vertex(haloTris, p2, haloOrange, Vector3.Zero);
+                        }
+                    }
                 }
                 else if (r.Marker)
                 {
@@ -761,6 +814,8 @@ static class TexturedScene
         // lit from behind. Culling the back faces makes the near hemisphere the only candidate.
         // Ribbons are single-sided-by-accident and must NOT be culled.
         var layers = new List<(float[] Data, bool DepthTested, bool CullBack)>();
+        // Highlight halos: depth-tested (a rim, not an x-ray) and back-culled (inverted hull).
+        if (haloTris.Count > 0) layers.Add((haloTris.ToArray(), true, true));
         if (wantNav)
         {
             if (wireMode && navTris.Count > 0)
