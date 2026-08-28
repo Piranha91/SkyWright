@@ -6,6 +6,8 @@ using OpenTK.Graphics.OpenGL4;
 using SixLabors.ImageSharp;
 using SixLabors.ImageSharp.PixelFormats;
 using SixLabors.ImageSharp.Processing;
+using SixLabors.ImageSharp.Drawing.Processing;
+using SixLabors.Fonts;
 using Path = System.IO.Path;
 using Directory = System.IO.Directory;
 using File = System.IO.File;
@@ -124,8 +126,10 @@ static class TexturedScene
         (Vector3 Eye, Vector3 Look, float FovDeg) cam,     // Skyrim Z-up coordinates
         IReadOnlyList<(Vector3 A, Vector3 B, Vector3 C)> navTris,
         IReadOnlyList<(Vector3 A, Vector3 B, Vector3 C)> redTris,   // the FINDING, always painted
-        IReadOnlyList<(Vector3 A, Vector3 B, Vector3 C)> terrainTris,
+        IReadOnlyDictionary<string, List<(Vector3 A, Vector3 B, Vector3 C)>> terrainPatches, // diffuse path ("" = untextured) -> tris
         string navMode,                                    // off | filled | wire | both
+        string navColor,                                   // auto | green | cyan | magenta | yellow | blue
+        IReadOnlyList<string> captionLines,                // burned into the image, top-left
         int size, string outPath)
     {
         var logger = new ConsoleCvLogger();
@@ -256,115 +260,135 @@ static class TexturedScene
             }
         }
 
-        // TERRAIN — flat-shaded LAND ground so exteriors are not floating rocks. Slope-tinted
-        // (greener flats, greyer steeps) for legibility; opaque, depth-written, real geometry.
-        if (terrainTris.Count > 0)
+        // TERRAIN — winning LAND heightmap, drawn with each quadrant's winning base landscape
+        // texture (LTEX -> TXST diffuse). Patches whose texture cannot be resolved fall back to
+        // the slope-tint pseudocolour (greener flats, greyer steeps). Opaque, depth-written.
+        int terrainTexturedPatches = 0, terrainFallbackPatches = 0;
+        foreach (var (texPath, patchTris) in terrainPatches)
         {
+            if (patchTris.Count == 0) continue;
+            int texHandle = texPath.Length > 0 ? textures.LoadTexture(texPath) : textures.WhiteTexture;
+            bool textured = texPath.Length > 0 && texHandle != textures.WhiteTexture;
+            if (textured) terrainTexturedPatches++; else terrainFallbackPatches++;
+
             var tv = new List<Vector3>(); var ti = new List<int>();
             var tn = new List<Vector3>(); var tc = new List<Vector4>();
-            foreach (var (a, b, c) in terrainTris)
+            var tuv = new List<Vector2>();
+            foreach (var (a, b, c) in patchTris)
             {
                 var nrm = Vector3.Cross(b - a, c - a);
                 nrm = nrm.LengthSquared() > 1e-10f ? Vector3.Normalize(nrm) : Vector3.UnitZ;
                 float flatness = MathF.Max(0f, nrm.Z);                    // Z-up before the swap
-                var col = Vector4.Lerp(new Vector4(0.42f, 0.40f, 0.36f, 1f),
-                                       new Vector4(0.34f, 0.46f, 0.28f, 1f), flatness * flatness);
+                // Textured ground: near-white vertex colour, slightly darker on steeps so relief
+                // still reads. Fallback: the original pseudocolour.
+                var col = textured
+                    ? Vector4.Lerp(new Vector4(0.75f, 0.74f, 0.72f, 1f), new Vector4(1f, 1f, 1f, 1f), flatness * flatness)
+                    : Vector4.Lerp(new Vector4(0.42f, 0.40f, 0.36f, 1f), new Vector4(0.34f, 0.46f, 0.28f, 1f), flatness * flatness);
                 int at = tv.Count;
                 tv.Add(YUp(a)); tv.Add(YUp(b)); tv.Add(YUp(c));
+                // Landscape textures tile; ~2 grid squares (256 units) per repeat reads close to
+                // the game's default land tiling.
+                tuv.Add(new Vector2(a.X / 256f, a.Y / 256f));
+                tuv.Add(new Vector2(b.X / 256f, b.Y / 256f));
+                tuv.Add(new Vector2(c.X / 256f, c.Y / 256f));
                 var ny = YUp(nrm);
                 tn.Add(ny); tn.Add(ny); tn.Add(ny);
                 tc.Add(col); tc.Add(col); tc.Add(col);
                 ti.Add(at); ti.Add(at + 1); ti.Add(at + 2);
             }
-            var uvT = new Vector2[tv.Count];
             var terra = new GlMesh();
-            terra.Upload(Interleave(tv.ToArray(), tn.ToArray(), uvT, tn.ToArray(), tn.ToArray(), tc.ToArray()), ti.ToArray());
-            terra.ShapeName = "terrain";
-            terra.DiffuseTexture = textures.WhiteTexture;
+            terra.Upload(Interleave(tv.ToArray(), tn.ToArray(), tuv.ToArray(), tn.ToArray(), tn.ToArray(), tc.ToArray()), ti.ToArray());
+            terra.ShapeName = texPath.Length > 0 ? $"terrain:{texPath}" : "terrain";
+            terra.DiffuseTexture = texHandle;
             terra.HasVertexColors = true;
             terra.IsDoubleSided = true;
             renderer.AddMesh(terra);
             meshes.Add(terra);
         }
+        if (terrainTexturedPatches + terrainFallbackPatches > 0)
+            Console.WriteLine($"   terrain paint: {terrainTexturedPatches} textured patch(es), {terrainFallbackPatches} pseudocolour fallback");
 
         // The navmesh overlay — the probe's whole point. Three looks:
-        //   filled  the translucent green sheet (the original);
-        //   wire    every triangle outlined SOLID with no fill, so the surface underneath stays
-        //           readable — the outlines are thin in-plane ribbons, not GL lines, so they
-        //           depth-test like real geometry;
+        //   filled  the translucent sheet (the original);
+        //   wire    every triangle outlined SOLID with no fill (in-plane ribbons that depth-test
+        //           like real geometry);
         //   both    a faint sheet plus the outlines.
-        if ((navTris.Count > 0 || redTris.Count > 0) && navMode != "off")
+        //
+        // COLOUR. Red is RESERVED for the finding. The healthy colour defaults to "auto": the
+        // world is rendered once WITHOUT the overlay, the pixels underneath the navmesh are
+        // sampled, and the palette colour farthest from both that background and the reserved
+        // red wins — green on snow, cyan/magenta on grass, etc. --nav-color <name> forces one.
+        var lift = new Vector3(0, 0, 2f);                           // Z-up lift before the swap
+
+        GlMesh BuildFill(IReadOnlyList<(Vector3 A, Vector3 B, Vector3 C)> tris, Vector4 color, string name)
+        {
+            var nv = new List<Vector3>(); var ni = new List<int>();
+            foreach (var (a, b, c) in tris)
+            {
+                int at = nv.Count;
+                nv.Add(YUp(a + lift)); nv.Add(YUp(b + lift)); nv.Add(YUp(c + lift));
+                ni.Add(at); ni.Add(at + 1); ni.Add(at + 2);
+            }
+            var flat = new Vector3[nv.Count]; var uv = new Vector2[nv.Count];
+            var col = new Vector4[nv.Count];
+            for (int i = 0; i < nv.Count; i++) { flat[i] = Vector3.UnitY; col[i] = color; }
+            var mm = new GlMesh();
+            mm.Upload(Interleave(nv.ToArray(), flat, uv, flat, flat, col), ni.ToArray());
+            mm.ShapeName = name;
+            mm.DiffuseTexture = textures.WhiteTexture;
+            mm.HasVertexColors = true;
+            mm.HasAlphaBlend = true;
+            mm.MaterialAlpha = color.W;
+            mm.IsDoubleSided = true;
+            mm.DepthWrite = false;
+            return mm;
+        }
+        GlMesh BuildWire(IReadOnlyList<(Vector3 A, Vector3 B, Vector3 C)> tris, Vector4 color, float halfWidth, string name)
+        {
+            var wv = new List<Vector3>(); var wi = new List<int>();
+            void Ribbon(Vector3 p, Vector3 q, Vector3 n)
+            {
+                var dir = q - p;
+                if (dir.LengthSquared() < 1e-6f) return;
+                dir = Vector3.Normalize(dir);
+                var side = Vector3.Cross(n, dir);
+                if (side.LengthSquared() < 1e-6f) side = Vector3.UnitZ;
+                side = Vector3.Normalize(side) * halfWidth;
+                int at = wv.Count;
+                wv.Add(YUp(p - side + lift)); wv.Add(YUp(p + side + lift));
+                wv.Add(YUp(q + side + lift)); wv.Add(YUp(q - side + lift));
+                wi.Add(at); wi.Add(at + 1); wi.Add(at + 2);
+                wi.Add(at); wi.Add(at + 2); wi.Add(at + 3);
+            }
+            foreach (var (a, b, c) in tris)
+            {
+                var n = Vector3.Cross(b - a, c - a);
+                n = n.LengthSquared() > 1e-10f ? Vector3.Normalize(n) : Vector3.UnitZ;
+                Ribbon(a, b, n); Ribbon(b, c, n); Ribbon(c, a, n);
+            }
+            var flat = new Vector3[wv.Count]; var uv = new Vector2[wv.Count];
+            var col = new Vector4[wv.Count];
+            for (int i = 0; i < wv.Count; i++) { flat[i] = Vector3.UnitY; col[i] = color; }
+            var mm = new GlMesh();
+            mm.Upload(Interleave(wv.ToArray(), flat, uv, flat, flat, col), wi.ToArray());
+            mm.ShapeName = name;
+            mm.DiffuseTexture = textures.WhiteTexture;
+            mm.HasVertexColors = true;
+            mm.IsDoubleSided = true;
+            return mm;
+        }
+
+        var red = new Vector4(1f, 0.12f, 0.05f, 1f);
+        void AddNavMeshes(Vector4 healthy)
         {
             bool fill = navMode is "filled" or "both";
             bool wire = navMode is "wire" or "both";
-            var lift = new Vector3(0, 0, 2f);                           // Z-up lift before the swap
-
-            // Shared builders so the healthy (green) and finding (red) layers are the same
-            // geometry with different paint.
-            GlMesh BuildFill(IReadOnlyList<(Vector3 A, Vector3 B, Vector3 C)> tris, Vector4 color, string name)
-            {
-                var nv = new List<Vector3>(); var ni = new List<int>();
-                foreach (var (a, b, c) in tris)
-                {
-                    int at = nv.Count;
-                    nv.Add(YUp(a + lift)); nv.Add(YUp(b + lift)); nv.Add(YUp(c + lift));
-                    ni.Add(at); ni.Add(at + 1); ni.Add(at + 2);
-                }
-                var flat = new Vector3[nv.Count]; var uv = new Vector2[nv.Count];
-                var col = new Vector4[nv.Count];
-                for (int i = 0; i < nv.Count; i++) { flat[i] = Vector3.UnitY; col[i] = color; }
-                var mm = new GlMesh();
-                mm.Upload(Interleave(nv.ToArray(), flat, uv, flat, flat, col), ni.ToArray());
-                mm.ShapeName = name;
-                mm.DiffuseTexture = textures.WhiteTexture;
-                mm.HasVertexColors = true;
-                mm.HasAlphaBlend = true;
-                mm.MaterialAlpha = color.W;
-                mm.IsDoubleSided = true;
-                mm.DepthWrite = false;
-                return mm;
-            }
-            GlMesh BuildWire(IReadOnlyList<(Vector3 A, Vector3 B, Vector3 C)> tris, Vector4 color, float halfWidth, string name)
-            {
-                var wv = new List<Vector3>(); var wi = new List<int>();
-                void Ribbon(Vector3 p, Vector3 q, Vector3 n)
-                {
-                    var dir = q - p;
-                    if (dir.LengthSquared() < 1e-6f) return;
-                    dir = Vector3.Normalize(dir);
-                    var side = Vector3.Cross(n, dir);
-                    if (side.LengthSquared() < 1e-6f) side = Vector3.UnitZ;
-                    side = Vector3.Normalize(side) * halfWidth;
-                    int at = wv.Count;
-                    wv.Add(YUp(p - side + lift)); wv.Add(YUp(p + side + lift));
-                    wv.Add(YUp(q + side + lift)); wv.Add(YUp(q - side + lift));
-                    wi.Add(at); wi.Add(at + 1); wi.Add(at + 2);
-                    wi.Add(at); wi.Add(at + 2); wi.Add(at + 3);
-                }
-                foreach (var (a, b, c) in tris)
-                {
-                    var n = Vector3.Cross(b - a, c - a);
-                    n = n.LengthSquared() > 1e-10f ? Vector3.Normalize(n) : Vector3.UnitZ;
-                    Ribbon(a, b, n); Ribbon(b, c, n); Ribbon(c, a, n);
-                }
-                var flat = new Vector3[wv.Count]; var uv = new Vector2[wv.Count];
-                var col = new Vector4[wv.Count];
-                for (int i = 0; i < wv.Count; i++) { flat[i] = Vector3.UnitY; col[i] = color; }
-                var mm = new GlMesh();
-                mm.Upload(Interleave(wv.ToArray(), flat, uv, flat, flat, col), wi.ToArray());
-                mm.ShapeName = name;
-                mm.DiffuseTexture = textures.WhiteTexture;
-                mm.HasVertexColors = true;
-                mm.IsDoubleSided = true;
-                return mm;
-            }
-
             if (fill)
             {
                 float alpha = navMode == "both" ? 0.16f : 0.35f;
                 if (navTris.Count > 0)
                 {
-                    var m0 = BuildFill(navTris, new Vector4(0.2f, 0.95f, 0.45f, alpha), "navmesh-fill");
+                    var m0 = BuildFill(navTris, new Vector4(healthy.X, healthy.Y, healthy.Z, alpha), "navmesh-fill");
                     renderer.AddMesh(m0); meshes.Add(m0);
                 }
                 if (redTris.Count > 0)
@@ -373,22 +397,16 @@ static class TexturedScene
                     renderer.AddMesh(m1); meshes.Add(m1);
                 }
             }
-
-            if (wire)
+            if (wire && navTris.Count > 0)
             {
-                if (navTris.Count > 0)
-                {
-                    var m0 = BuildWire(navTris, new Vector4(0.05f, 0.85f, 0.30f, 1f), 2.2f, "navmesh-wire");
-                    renderer.AddMesh(m0); meshes.Add(m0);
-                }
+                var m0 = BuildWire(navTris, healthy, 2.2f, "navmesh-wire");
+                renderer.AddMesh(m0); meshes.Add(m0);
             }
-            // The finding is ALWAYS outlined in red — wider than the green so it reads at a
-            // glance, in every mode that draws navmesh at all. In filled mode it also gets the
-            // red fill above; in wire mode the interior stays transparent so the surface (and
-            // whatever intersects it) stays visible.
+            // The finding is ALWAYS outlined in red — wider than the healthy wire, in every mode
+            // that draws navmesh at all.
             if (redTris.Count > 0)
             {
-                var m1 = BuildWire(redTris, new Vector4(1f, 0.12f, 0.05f, 1f), 3.4f, "navmesh-wire-red");
+                var m1 = BuildWire(redTris, red, 3.4f, "navmesh-wire-red");
                 renderer.AddMesh(m1); meshes.Add(m1);
             }
         }
@@ -421,20 +439,114 @@ static class TexturedScene
         GL.RenderbufferStorage(RenderbufferTarget.Renderbuffer, RenderbufferStorage.DepthComponent24, size, size);
         GL.FramebufferRenderbuffer(FramebufferTarget.Framebuffer, FramebufferAttachment.DepthAttachment, RenderbufferTarget.Renderbuffer, depthRb);
 
-        GL.Viewport(0, 0, size, size);
-        GL.ClearColor(0.35f, 0.44f, 0.55f, 1f);          // sky-ish ground, not the diagnostic charcoal
-        GL.Clear(ClearBufferMask.ColorBufferBit | ClearBufferMask.DepthBufferBit);
-        renderer.Render(camera, size, size);
-        GL.Finish();
+        byte[] Draw()
+        {
+            GL.BindFramebuffer(FramebufferTarget.Framebuffer, fbo);
+            GL.Viewport(0, 0, size, size);
+            GL.ClearColor(0.35f, 0.44f, 0.55f, 1f);      // sky-ish ground, not the diagnostic charcoal
+            GL.Clear(ClearBufferMask.ColorBufferBit | ClearBufferMask.DepthBufferBit);
+            renderer.Render(camera, size, size);
+            GL.Finish();
+            var px = new byte[size * size * 4];
+            GL.BindFramebuffer(FramebufferTarget.Framebuffer, fbo);
+            GL.ReadPixels(0, 0, size, size, PixelFormat.Rgba, PixelType.UnsignedByte, px);
+            return px;
+        }
 
-        var pixels = new byte[size * size * 4];
-        GL.ReadPixels(0, 0, size, size, PixelFormat.Rgba, PixelType.UnsignedByte, pixels);
+        bool wantNav = (navTris.Count > 0 || redTris.Count > 0) && navMode != "off";
+        var palette = new (string Name, Vector4 Color)[]
+        {
+            ("green",   new Vector4(0.05f, 0.85f, 0.30f, 1f)),
+            ("cyan",    new Vector4(0.05f, 0.85f, 0.95f, 1f)),
+            ("magenta", new Vector4(0.90f, 0.20f, 0.95f, 1f)),
+            ("yellow",  new Vector4(1f, 0.88f, 0.10f, 1f)),
+            ("blue",    new Vector4(0.25f, 0.45f, 1f, 1f)),
+        };
+
+        byte[] pixels;
+        if (wantNav && navColor == "auto" && navTris.Count > 0)
+        {
+            // Pass 1: the world without the overlay. Sample the background exactly where the
+            // healthy navmesh will land, by pushing its triangle centroids through the same
+            // camera (LookAt + vertical-FOV perspective; GL buffer origin is bottom-left, which
+            // matches NDC directly since we sample BEFORE the vertical flip).
+            var bg = Draw();
+            var view = Matrix4x4.CreateLookAt(eyeY, lookY, Vector3.UnitY);
+            var proj = Matrix4x4.CreatePerspectiveFieldOfView(cam.FovDeg * MathF.PI / 180f, 1f, 4f, 131072f);
+            var vp = view * proj;
+            float sr = 0, sg = 0, sb = 0; int hits = 0;
+            int stride = Math.Max(1, navTris.Count / 600);
+            for (int i = 0; i < navTris.Count; i += stride)
+            {
+                var (a, b, c) = navTris[i];
+                var cen = YUp((a + b + c) / 3f + lift);
+                var clip = Vector4.Transform(new Vector4(cen, 1f), vp);
+                if (clip.W <= 0.01f) continue;
+                float nx = clip.X / clip.W, ny = clip.Y / clip.W, nz = clip.Z / clip.W;
+                if (nx < -1f || nx > 1f || ny < -1f || ny > 1f || nz < -1f || nz > 1f) continue;
+                int px = Math.Clamp((int)((nx * 0.5f + 0.5f) * size), 0, size - 1);
+                int py = Math.Clamp((int)((ny * 0.5f + 0.5f) * size), 0, size - 1);
+                int o = (py * size + px) * 4;
+                sr += bg[o] / 255f; sg += bg[o + 1] / 255f; sb += bg[o + 2] / 255f; hits++;
+            }
+            string chosen = "green"; var healthy = palette[0].Color;
+            if (hits > 0)
+            {
+                var mean = new Vector3(sr / hits, sg / hits, sb / hits);
+                float best = float.MinValue;
+                foreach (var (name, colr) in palette)
+                {
+                    var c3 = new Vector3(colr.X, colr.Y, colr.Z);
+                    // Contrast with what's under the mesh, plus distance from the reserved red.
+                    float score = (c3 - mean).Length() + 0.5f * (c3 - new Vector3(red.X, red.Y, red.Z)).Length();
+                    if (score > best) { best = score; chosen = name; healthy = colr; }
+                }
+                Console.WriteLine($"   nav colour: auto -> {chosen} (sampled {hits} points under the mesh, "
+                                + $"background {(int)(mean.X * 255)},{(int)(mean.Y * 255)},{(int)(mean.Z * 255)})");
+            }
+            else
+                Console.WriteLine("   nav colour: auto -> green (mesh not on screen; nothing to sample)");
+            AddNavMeshes(healthy);
+            pixels = Draw();
+        }
+        else
+        {
+            if (wantNav)
+            {
+                var pick = palette.FirstOrDefault(p => p.Name == navColor);
+                AddNavMeshes(pick.Name is null ? palette[0].Color : pick.Color);
+            }
+            pixels = Draw();
+        }
+
         GL.BindFramebuffer(FramebufferTarget.Framebuffer, 0);
         GL.DeleteFramebuffer(fbo); GL.DeleteTexture(colorTex); GL.DeleteRenderbuffer(depthRb);
 
         using (var img = Image.LoadPixelData<Rgba32>(pixels, size, size))
         {
             img.Mutate(x => x.Flip(FlipMode.Vertical));
+            if (captionLines.Count > 0)
+            {
+                // Burn the caption into the frame so it travels with the PNG into any viewer.
+                Font? font = null;
+                foreach (var famName in new[] { "Segoe UI", "Arial", "Verdana" })
+                    if (SystemFonts.TryGet(famName, out var fam)) { font = fam.CreateFont(15f, FontStyle.Bold); break; }
+                if (font is null)
+                    foreach (var fam in SystemFonts.Families) { font = fam.CreateFont(15f, FontStyle.Bold); break; }
+                if (font is not null)
+                {
+                    int lineH = 22, barH = 10 + lineH * captionLines.Count;
+                    var f2 = font;
+                    img.Mutate(x =>
+                    {
+                        x.Fill(SixLabors.ImageSharp.Color.FromRgba(8, 10, 14, 200), new SixLabors.ImageSharp.RectangleF(0, 0, size, barH));
+                        for (int i = 0; i < captionLines.Count; i++)
+                            x.DrawText(captionLines[i], f2, SixLabors.ImageSharp.Color.White, new SixLabors.ImageSharp.PointF(12, 7 + lineH * i));
+                    });
+                }
+                else
+                    Console.WriteLine("   caption: no system font found; image saved without caption");
+            }
             Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(outPath))!);
             img.SaveAsPng(outPath);
         }

@@ -98,9 +98,13 @@ bool navModeExplicit = false;
 // the contested records stay red in every panel, so the re-cut is visible as a before/after.
 string? navPlugin = null;
 (string A, string B)? compare = null;
-// Terrain: LAND heightmaps for the target cell and its ring-1 neighbours, so exteriors stand on
-// actual ground instead of floating placed rocks. --no-terrain turns it off.
+// Terrain: LAND heightmaps for the target cell and its ring-1 neighbours, textured with each
+// quadrant's winning base landscape texture. --no-terrain turns it off.
 bool drawTerrain = true;
+// Healthy-navmesh wire colour: auto (default) samples the rendered pixels UNDER the navmesh in a
+// first pass and picks the palette colour farthest from both the background and the reserved
+// conflict red; or force one of: green, cyan, magenta, yellow, blue.
+string navColor = "auto";
 // --euler renders the SAME cell under all six Euler compositions. The numeric tests could not
 // separate them (0.62%-0.69%, then 1.84%-2.08%), which is itself a finding — but a wrong order
 // scatters kit pieces by hundreds of units, and that is trivially visible even when it is
@@ -133,6 +137,7 @@ for (int i = 1; i < args.Length; i++)
     else if (args[i] == "--compare" && i + 1 < args.Length)
     { var p = args[++i].Split(','); if (p.Length == 2) compare = (p[0].Trim(), p[1].Trim()); }
     else if (args[i] == "--no-terrain") drawTerrain = false;
+    else if (args[i] == "--nav-color" && i + 1 < args.Length) navColor = args[++i].ToLowerInvariant();
     else if (args[i] == "--markers") showMarkers = true;
     else if (args[i] == "--list-meshes") listMeshes = true;
     else if (args[i] is "--instance" or "--game" or "--profile") i++;   // consumed above
@@ -163,6 +168,8 @@ if (compare is { } cmp0) { navVersionPlugins.Add(cmp0.A); navVersionPlugins.Add(
 var navByPlugin = new Dictionary<string, Dictionary<FormKey, NavmeshGeometry>>(StringComparer.OrdinalIgnoreCase);
 var baseMesh = new Dictionary<FormKey, string>();
 var baseIsMarker = new HashSet<FormKey>();
+var ltexToTxst = new Dictionary<FormKey, FormKey>();
+var txstDiffuse = new Dictionary<FormKey, string>();
 FormKey? cellKey = null;
 string cellLabel = target;
 bool interior = false;
@@ -174,10 +181,19 @@ foreach (var path in order.OrderedPaths)
     using (m as IDisposable)
     {
         foreach (var rec in m.EnumerateMajorRecords())
+        {
+            // Landscape texture chain: LTEX -> TXST -> diffuse path, winner-takes-all in load
+            // order, so terrain quadrants can be drawn with their real winning textures.
+            if (rec is ILandscapeTextureGetter lt)
+            { if (lt.TextureSet.FormKeyNullable is { } ts) ltexToTxst[lt.FormKey] = ts; continue; }
+            if (rec is ITextureSetGetter txst)
+            { if (!string.IsNullOrWhiteSpace(txst.Diffuse?.GivenPath)) txstDiffuse[txst.FormKey] = txst.Diffuse!.GivenPath; continue; }
+            bool collectedModel = false;
             if (rec is IModeledGetter mo && mo.Model?.File is { } f && !string.IsNullOrWhiteSpace(f.GivenPath))
             {
                 var smr = (ISkyrimMajorRecordGetter)rec;
                 baseMesh[smr.FormKey] = f.GivenPath;
+                collectedModel = true;
                 // Editor-marker classification, from evidence the record itself carries: the
                 // Is-Marker header flag (0x00800000), a marker-named EditorID, or a model named
                 // *marker* / under the markers folder. The game renders none of these.
@@ -186,6 +202,8 @@ foreach (var path in order.OrderedPaths)
                     || f.GivenPath.Contains("marker", StringComparison.OrdinalIgnoreCase);
                 if (marker) baseIsMarker.Add(smr.FormKey);
             }
+            _ = collectedModel;
+        }
 
         foreach (var cp in PlacementExtract.FromMod(m))
         {
@@ -359,11 +377,13 @@ if (textured)
 
     // ---- TERRAIN: winning LAND heightmaps for the target cell + its ring-1 neighbours --------
     // The placed rocks were floating in space without this; exteriors get actual ground now.
-    var terrainTris = new List<(System.Numerics.Vector3, System.Numerics.Vector3, System.Numerics.Vector3)>();
+    // texture path ("" = none, pseudocolour fallback) -> that patch's triangles.
+    var terrainPatches = new Dictionary<string, List<(System.Numerics.Vector3, System.Numerics.Vector3, System.Numerics.Vector3)>>(StringComparer.OrdinalIgnoreCase);
     if (drawTerrain && !interior && targetGrid is { } tg)
     {
-        // grid -> winning heightmap, resolved by load order (later plugin wins).
-        var landWin = new Dictionary<(int X, int Y), (float Offset, sbyte[,] Grad)>();
+        // grid -> winning heightmap + the base landscape texture per quadrant (LTEX FormKeys,
+        // resolved to diffuse paths after the walk), by load order (later plugin wins).
+        var landWin = new Dictionary<(int X, int Y), (float Offset, sbyte[,] Grad, FormKey?[] QuadLtex)>();
         foreach (var path in order.OrderedPaths)
         {
             ISkyrimModGetter m2;
@@ -394,13 +414,36 @@ if (textured)
                                     grad[x, y] = vh.HeightMap[x, y];
                         }
                         catch { continue; }
-                        landWin[(gp.X, gp.Y)] = (vh.Offset, grad);     // later plugin overwrites = wins
+                        // Base layer per quadrant (a non-alpha layer names the quadrant's ground
+                        // texture; alpha layers blend on top and are out of scope for this pass).
+                        var quad = new FormKey?[4];
+                        try
+                        {
+                            foreach (var layer in c.Landscape.Layers)
+                            {
+                                if (layer is IAlphaLayerGetter) continue;
+                                int qi = (int)layer.Header.Quadrant;
+                                if (qi is >= 0 and < 4 && quad[qi] is null && layer.Header.Texture.FormKeyNullable is { } lf)
+                                    quad[qi] = lf;
+                            }
+                        }
+                        catch { }
+                        landWin[(gp.X, gp.Y)] = (vh.Offset, grad, quad);   // later plugin overwrites = wins
                     }
                 }
             }
         }
 
-        foreach (var ((gx, gy), (off, grad)) in landWin)
+        string? QuadDiffuse(FormKey? ltex)
+        {
+            if (ltex is not { } lk) return null;
+            if (!ltexToTxst.TryGetValue(lk, out var ts)) return null;
+            if (!txstDiffuse.TryGetValue(ts, out var d)) return null;
+            var p = d.Replace('/', '\\');
+            return p.StartsWith("textures\\", StringComparison.OrdinalIgnoreCase) ? p : "textures\\" + p;
+        }
+
+        foreach (var ((gx, gy), (off, grad, quadLtex)) in landWin)
         {
             // VHGT decode: row-start accumulator down the first column, then run along each row;
             // stored values are gradients in 1/8 world units.
@@ -418,12 +461,19 @@ if (textured)
             for (int y = 0; y < 32; y++)
                 for (int x = 0; x < 32; x++)
                 {
-                    terrainTris.Add((P(x, y), P(x + 1, y), P(x + 1, y + 1)));
-                    terrainTris.Add((P(x, y), P(x + 1, y + 1), P(x, y + 1)));
+                    // Quadrant enum order: BottomLeft, BottomRight, TopLeft, TopRight.
+                    int qi = (y < 16 ? 0 : 2) + (x < 16 ? 0 : 1);
+                    var tex = QuadDiffuse(quadLtex[qi]);
+                    if (!terrainPatches.TryGetValue(tex ?? "", out var bag))
+                        terrainPatches[tex ?? ""] = bag = new List<(System.Numerics.Vector3, System.Numerics.Vector3, System.Numerics.Vector3)>();
+                    bag.Add((P(x, y), P(x + 1, y), P(x + 1, y + 1)));
+                    bag.Add((P(x, y), P(x + 1, y + 1), P(x, y + 1)));
                 }
         }
-        if (terrainTris.Count > 0)
-            Console.WriteLine($"   terrain: {landWin.Count} cell(s) of LAND, {terrainTris.Count:N0} triangles");
+        int terrTotal = terrainPatches.Values.Sum(v => v.Count);
+        if (terrTotal > 0)
+            Console.WriteLine($"   terrain: {landWin.Count} cell(s) of LAND, {terrTotal:N0} triangles, "
+                            + $"{terrainPatches.Count(kv => kv.Key.Length > 0)} distinct ground texture(s)");
         else
             Console.WriteLine($"   terrain: no LAND found for this cell (--no-terrain to silence)");
     }
@@ -441,6 +491,39 @@ if (textured)
 
     var modFolders = comp.EnabledMods.Select(m => Path.Combine(modsDir, m)).ToList();
 
+    // Runtime FormIDs for captions: the load-order prefix each plugin gets in THIS profile
+    // (ESL-flagged plugins share the FE space). Console-clickable numbers, straight in the image.
+    var fidPrefix = new Dictionary<string, uint>(StringComparer.OrdinalIgnoreCase);
+    {
+        int full = 0, light = 0;
+        foreach (var pp in order.OrderedPaths)
+        {
+            bool esl = pp.EndsWith(".esl", StringComparison.OrdinalIgnoreCase);
+            if (!esl)
+            {
+                try
+                {
+                    using var fs = System.IO.File.OpenRead(pp);
+                    Span<byte> hdr = stackalloc byte[12];
+                    if (fs.Read(hdr) == 12) esl = (BitConverter.ToUInt32(hdr[8..]) & 0x200) != 0;
+                }
+                catch { }
+            }
+            var name = Path.GetFileName(pp);
+            if (esl) fidPrefix[name] = 0xFE000000u | ((uint)light++ << 12);
+            else fidPrefix[name] = (uint)full++ << 24;
+        }
+    }
+    string RuntimeId(FormKey fk)
+        => fidPrefix.TryGetValue(fk.ModKey.FileName.String, out var pre)
+            ? ((pre & 0xFE000000u) == 0xFE000000u ? (pre | (fk.ID & 0xFFFu)) : (pre | fk.ID)).ToString("X8")
+            : "??" + fk.ID.ToString("X6");
+
+    string RedCaption(IReadOnlyDictionary<FormKey, NavmeshGeometry> navs)
+        => string.Join("   ", redNav.Keys.Select(fk =>
+               $"RED {fk} = FormID {RuntimeId(fk)}" +
+               (navs.TryGetValue(fk, out var nv) ? $" ({nv.Triangles.Count} tris)" : " (not provided)")));
+
     var fpNws = new NativeWindowSettings
     {
         ClientSize = new OpenTK.Mathematics.Vector2i(size, size),
@@ -457,10 +540,10 @@ if (textured)
 
     int Render(IReadOnlyList<(System.Numerics.Vector3, System.Numerics.Vector3, System.Numerics.Vector3)> g,
                IReadOnlyList<(System.Numerics.Vector3, System.Numerics.Vector3, System.Numerics.Vector3)> r,
-               string outFile)
+               string outFile, IReadOnlyList<string> captionLines)
         => ViewProbe.TexturedScene.RenderToPng(
                scene, assets, dataDir, modFolders, overwriteDir,
-               (eyePos.Value, lookPos.Value, fov), g, r, terrainTris, navMode, size, outFile);
+               (eyePos.Value, lookPos.Value, fov), g, r, terrainPatches, navMode, navColor, captionLines, size, outFile);
 
     if (compare is { } cmp)
     {
@@ -473,6 +556,7 @@ if (textured)
             (cmp.B, navByPlugin.TryGetValue(cmp.B, out var db) ? db : new Dictionary<FormKey, NavmeshGeometry>()),
             ("winning state", winNav),
         };
+        // (panel captions name the navmesh SOURCE; world geometry is the winning state in all three)
         foreach (var fk in redNav.Keys)
             Console.WriteLine($"   contested {fk}: " + string.Join("  |  ",
                 panels.Select(p => p.Label + ": " + (p.Navs.TryGetValue(fk, out var nv) ? nv.Triangles.Count + " tris" : "not provided"))));
@@ -485,7 +569,9 @@ if (textured)
                 Console.WriteLine($"   panel '{label}': provides NO navmesh in this cell -- panel shows world only");
             var (g, r) = BuildNavSets(navs);
             string pf = Path.Combine(outDir, $"{safe}-cmp{pi + 1}-{new string(label.Select(ch => char.IsLetterOrDigit(ch) ? ch : '_').ToArray())}.png");
-            Render(g, r, pf);
+            var cap = new List<string> { $"[{pi + 1}/3] {label} \u2014 {(pi == 2 ? "merged winning navmesh" : "navmesh as this plugin provides it")} \u2014 {cellLabel}" };
+            if (redNav.Count > 0) cap.Add(RedCaption(navs));
+            Render(g, r, pf, cap);
             panelFiles.Add(pf);
             Console.WriteLine($"   panel {pi + 1} ({label}): {g.Count:N0} green + {r.Count:N0} red navmesh tris -> {pf}");
         }
@@ -516,7 +602,9 @@ if (textured)
     }
 
     string fpOut = Path.Combine(outDir, $"{safe}-fp.png");
-    int drawnShapes = Render(navTris, redTris, fpOut);
+    var fpCap = new List<string> { $"{cellLabel} \u2014 {(navPlugin ?? "winning state")} \u2014 eye {eyePos.Value.X:0},{eyePos.Value.Y:0},{eyePos.Value.Z:0}" };
+    if (redNav.Count > 0) fpCap.Add(RedCaption(navPlugin is not null && navByPlugin.TryGetValue(navPlugin, out var np0) ? np0 : winNav));
+    int drawnShapes = Render(navTris, redTris, fpOut, fpCap);
     Console.WriteLine($"wrote:\n   {fpOut}");
     Console.WriteLine($"   eye {eyePos.Value.X:0},{eyePos.Value.Y:0},{eyePos.Value.Z:0} -> look {lookPos.Value.X:0},{lookPos.Value.Y:0},{lookPos.Value.Z:0}  fov {fov:0}°  ({drawnShapes:N0} shapes)");
     return 0;

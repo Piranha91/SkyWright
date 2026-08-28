@@ -26,6 +26,12 @@ Dump("LandscapeBinaryOverlay");
 Dump("ILandscapeVertexHeightMapGetter");
 Dump("LandscapeVertexHeightMapBinaryOverlay");
 Dump("ICellGetter");
+Dump("ILandscapeTextureGetter");
+Dump("IBaseLayerGetter");
+Dump("IAlphaLayerGetter");
+Dump("ILayerHeaderGetter");
+Dump("ITextureSetGetter");
+Dump("IAlphaLayerDataGetter");
 
 void Dump(string typeName)
 {

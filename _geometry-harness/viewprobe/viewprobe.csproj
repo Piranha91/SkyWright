@@ -16,5 +16,6 @@
   <ItemGroup>
     <Compile Include="..\_shared\ConflictReport.cs" Link="ConflictReport.cs" />
     <PackageReference Include="SixLabors.ImageSharp" Version="3.1.11" />
+    <PackageReference Include="SixLabors.ImageSharp.Drawing" Version="2.1.6" />
   </ItemGroup>
 </Project>
