@@ -799,7 +799,7 @@ static class TexturedScene
             foreach (var v in diffVerts)
             {
                 float d = MathF.Max(1f, Vector3.Distance(v, cam.Eye));
-                Overlay.Sphere(spheres, YUp(v + lift), Math.Clamp(d * 0.0055f, 2f, 90f), dc);
+                Overlay.Sphere(spheres, YUp(v + lift), Math.Clamp(d * 0.00275f, 1f, 45f), dc);
             }
             layers.Add((spheres.ToArray(), false, true));
             Console.WriteLine($"   nav diff: {diffVerts.Count} vertex sphere(s) — vertices this version has and the other does not");
