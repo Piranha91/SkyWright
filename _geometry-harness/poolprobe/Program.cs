@@ -11,11 +11,11 @@ using Mutagen.Bethesda.Skyrim;
 //
 // So this opens them. For every archive that no MO2 instance on this machine ever installed, read
 // the plugins inside and ask the same question the applicability filter asks: is every master this
-// plugin declares present and active in PiranhaRim right now? If it is, that archive is a patch
+// plugin declares present and active in the TARGET instance right now? If it is, that archive is a patch
 // that would install cleanly today, sitting unopened in a folder you already have.
 //
-// ARCHIVE GROUNDING, per the standing rule. Reading is done by the 7-Zip command line (7-Zip 24.09
-// on this machine), checked against its own usage output rather than assumed, so there is no
+// ARCHIVE GROUNDING, per the standing rule. Reading is done by the 7-Zip command line, checked
+// against its own usage output rather than assumed, so there is no
 // third-party library surface to guess at:
 //     7z l -slt -ba -sccUTF-8 <archive>            technical listing, one "Path = ..." per entry
 //     7z x -o<dir> <archive> <entry>               that entry to disk, keeping its filename
@@ -23,11 +23,13 @@ using Mutagen.Bethesda.Skyrim;
 //
 // usage: poolprobe [--list N] [--jobs N] [--max N]
 
-var roots = new List<string> { @"C:\Games\Skyrim VR", @"C:\Games\Skyrim AE", @"X:\Games\Skyrim Wabbajacks", @"S:\" };
-const string Pool = @"X:\Wabbajack Downloads";
-const string Instance = @"C:\Games\Skyrim VR\PiranhaRim VR";
-const string Profile = "PiranhaRimVR";
-const string SevenZip = @"C:\Program Files\7-Zip\7z.exe";
+// Nothing is compiled in — see ../_shared/HarnessTarget.cs. Search roots are a drive layout,
+// the most machine-specific thing a probe can carry.
+var roots = HarnessTarget.RequireRoots(HarnessTarget.SearchRoots.ToList());
+string Pool = HarnessTarget.Require(HarnessTarget.DownloadPool, "download pool directory", "downloadPool");
+string Instance = HarnessTarget.Require(HarnessTarget.Instance, "MO2 instance directory", "instance");
+string Profile = HarnessTarget.Require(HarnessTarget.Profile, "MO2 profile name", "profile");
+string SevenZip = HarnessTarget.Require(HarnessTarget.SevenZip, "path to 7z.exe", "sevenZip");
 
 int listN = 40;
 int jobs = Math.Max(2, Environment.ProcessorCount - 2);
@@ -354,7 +356,9 @@ static bool IsPlugin(string p)
         || e.Equals(".esl", StringComparison.OrdinalIgnoreCase);
 }
 
-static string Run7z(string arguments, string? _, out bool ok)
+// NOT static: it reads SevenZip, which is now a resolved local rather than a compile-time
+// const (see ../_shared/HarnessTarget.cs), and a static local function cannot capture one.
+string Run7z(string arguments, string? _, out bool ok)
 {
     ok = false;
     try

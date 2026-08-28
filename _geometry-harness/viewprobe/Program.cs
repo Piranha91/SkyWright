@@ -32,17 +32,23 @@ using Image = SixLabors.ImageSharp.Image;
 // usage: viewprobe <CellEditorID|FormID> [--out DIR] [--size N] [--smoke]
 //                  [--angles a,b,c] [--elev N] [--no-nav] [--ref FORMID]
 
-// Defaults are the live VR instance; --instance / --game / --profile point the render at another
-// MO2 layout (the SE conflict lab), so a field-test shot shows the exact state the tester will see.
-string Instance = @"C:\Games\Skyrim VR\PiranhaRim VR";
-string GamePath = @"C:\games\steam\steamapps\common\SkyrimVR";
-string profileName = "PiranhaRimVR";
+// WHERE THIS POINTS. Nothing is compiled in — see _shared/HarnessTarget.cs for the resolution
+// order (flags, then environment, then harness.local.json). --instance / --game / --profile aim
+// the render at a different MO2 layout, which is how a field-test shot shows the exact state the
+// tester will see rather than the state of whatever list happens to be configured. Require() runs
+// AFTER the flags, so passing --instance never trips it.
+string Instance = HarnessTarget.Instance;
+string GamePath = HarnessTarget.Game;
+string profileName = HarnessTarget.Profile;
 for (int i = 0; i < args.Length; i++)
 {
     if (args[i] == "--instance" && i + 1 < args.Length) Instance = args[i + 1];
     else if (args[i] == "--game" && i + 1 < args.Length) GamePath = args[i + 1];
     else if (args[i] == "--profile" && i + 1 < args.Length) profileName = args[i + 1];
 }
+Instance = HarnessTarget.Require(Instance, "MO2 instance directory", "instance", "--instance");
+GamePath = HarnessTarget.Require(GamePath, "game directory", "game", "--game");
+profileName = HarnessTarget.Require(profileName, "MO2 profile name", "profile", "--profile");
 string profileDir = Path.Combine(Instance, "profiles", profileName);
 string modsDir = Path.Combine(Instance, "mods");
 string overwriteDir = Path.Combine(Instance, "overwrite");

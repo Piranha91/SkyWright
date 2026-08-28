@@ -43,9 +43,13 @@ using Mutagen.Bethesda.Skyrim;
 // Defaults are the live VR instance; --instance / --game / --profile point every path at
 // another MO2 layout — the SE conflict-testing lab's pre-flight runs exist so a finding is
 // confirmed to reproduce in a minimal test order BEFORE anyone launches the game on it.
-string Instance = @"C:\Games\Skyrim VR\PiranhaRim VR";
-string GamePath = @"C:\games\steam\steamapps\common\SkyrimVR";
-string profileName = "PiranhaRimVR";
+// Nothing is compiled in — see _shared/HarnessTarget.cs. Flags win over the environment and
+// over harness.local.json; Require() runs AFTER them, so a run that passes --instance never
+// trips it, and a run that configures nothing fails with guidance instead of walking a
+// directory that isn't there.
+string Instance = HarnessTarget.Instance;
+string GamePath = HarnessTarget.Game;
+string profileName = HarnessTarget.Profile;
 {
     for (int i = 0; i < args.Length; i++)
     {
@@ -54,6 +58,9 @@ string profileName = "PiranhaRimVR";
         else if (args[i] == "--profile" && i + 1 < args.Length) profileName = args[i + 1];
     }
 }
+Instance = HarnessTarget.Require(Instance, "MO2 instance directory", "instance", "--instance");
+GamePath = HarnessTarget.Require(GamePath, "game directory", "game", "--game");
+profileName = HarnessTarget.Require(profileName, "MO2 profile name", "profile", "--profile");
 string profileDir = Path.Combine(Instance, "profiles", profileName);
 string modsDir = Path.Combine(Instance, "mods");
 string overwriteDir = Path.Combine(Instance, "overwrite");

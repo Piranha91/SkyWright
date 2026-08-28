@@ -42,10 +42,10 @@ using HarnessShared;
 //
 // usage: fomodprobe [--list N] [--mod Name] [--jobs N]
 
-const string Instance = @"C:\Games\Skyrim VR\PiranhaRim VR";
-const string Profile = "PiranhaRimVR";
-const string Pool = @"X:\Wabbajack Downloads";
-const string SevenZip = @"C:\Program Files\7-Zip\7z.exe";
+string Instance = HarnessTarget.Require(HarnessTarget.Instance, "MO2 instance directory", "instance");
+string Profile = HarnessTarget.Require(HarnessTarget.Profile, "MO2 profile name", "profile");
+string Pool = HarnessTarget.Require(HarnessTarget.DownloadPool, "download pool directory", "downloadPool");
+string SevenZip = HarnessTarget.Require(HarnessTarget.SevenZip, "path to 7z.exe", "sevenZip");
 
 int listN = 40;
 string? onlyMod = null;
@@ -416,7 +416,9 @@ static IEnumerable<string> EnumerateFilesSafe(string root)
     }
 }
 
-static byte[] Run7z(string arguments, out bool ok)
+// NOT static: it reads SevenZip, which is now a resolved local rather than a compile-time
+// const (see ../_shared/HarnessTarget.cs), and a static local function cannot capture one.
+byte[] Run7z(string arguments, out bool ok)
 {
     ok = false;
     try

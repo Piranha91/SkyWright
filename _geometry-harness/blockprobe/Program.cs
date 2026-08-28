@@ -17,9 +17,9 @@ using Mutagen.Bethesda.Skyrim;
 //
 // usage: blockprobe <TargetPlugin.esp> [--exclude Other.esp ...] [--list N]
 
-const string Instance = @"C:\Games\Skyrim VR\PiranhaRim VR";
-const string GamePath = @"C:\games\steam\steamapps\common\SkyrimVR";
-string profileDir = Path.Combine(Instance, "profiles", "PiranhaRimVR");
+string Instance = HarnessTarget.Require(HarnessTarget.Instance, "MO2 instance directory", "instance");
+string GamePath = HarnessTarget.Require(HarnessTarget.Game, "game directory", "game");
+string profileDir = Path.Combine(Instance, "profiles", HarnessTarget.Require(HarnessTarget.Profile, "MO2 profile name", "profile"));
 string modsDir = Path.Combine(Instance, "mods");
 string overwriteDir = Path.Combine(Instance, "overwrite");
 string dataDir = Path.Combine(GamePath, "Data");

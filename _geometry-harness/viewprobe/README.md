@@ -31,8 +31,9 @@ findings they demonstrate) lives with that instance, not here.
 
 ## CLI reference (first positional arg = CellEditorID or FormID)
 
-- **Instance/profile:** `--instance DIR --profile NAME --game DIR`. The compiled-in defaults point
-  at the author's own VR instance, so **pass all three explicitly** for any other setup.
+- **Instance/profile:** `--instance DIR --profile NAME --game DIR`. **Nothing is compiled in** —
+  see *Where it points* below. A run with none of it configured exits with guidance rather than
+  walking a directory that isn't there.
 - **Camera** (Skyrim coordinates; a `getpos`/`getangle` console line pastes straight in):
   `--eye X,Y,Z` | `--eye-ref FORMID` (+`--eye-height`, default 120), `--look X,Y,Z` |
   `--look-ref FORMID` | `--yaw DEG` (0 = north/+Y, clockwise) + `--pitch`, `--fov` (default 65).
@@ -98,6 +99,35 @@ all knowledge.
 | `VP_OCCL_SLACK="rel,abs"` | override the behind-geometry depth-compare slack (default `1.002,1.5`) |
 | `VP_DOOR_DEBUG=1` | print each conflict-implicated door's holding cell during the load walk |
 | `VP_CV_VERBOSE=1` | unmute the rendering library's logger |
+
+---
+
+## Where it points, and where its output goes
+
+This repo is the TOOL. Nothing about any particular mod list is compiled into it, and nothing a
+run produces should land back in it.
+
+**Target resolution** (`_shared/HarnessTarget.cs`, shared by every probe), first hit wins:
+
+1. the probe's own flags — `--instance`, `--profile`, `--game`, `--roots`;
+2. environment — `HOUSECARL_MO2_INSTANCE`, `HOUSECARL_MO2_PROFILE`, `HOUSECARL_GAME_PATH`,
+   `HOUSECARL_DOWNLOAD_POOL`, `HOUSECARL_SEVENZIP`, `HOUSECARL_SEARCH_ROOTS`;
+3. a JSON config — `HOUSECARL_HARNESS_CONFIG` names it outright, otherwise `harness.local.json`
+   found by walking up from the running binary. Copy `harness.local.example.json` to start.
+4. nothing → exit 2, naming every way to set it.
+
+**Keep the config outside this checkout.** A file naming your MO2 instance, profile and drive
+layout is a fact about your mod setup, not about the tool; `HOUSECARL_HARNESS_CONFIG` exists so it
+can live with that setup. `harness.local.json` beside the harness works too and is gitignored, but
+it is the fallback, not the intent.
+
+Windows paths in that JSON want **forward slashes** — a lone backslash is an invalid JSON escape,
+and the parser error for it is unhelpful enough that the loader adds its own hint.
+
+**Output belongs outside too.** `--out` takes a directory; point it at your own working area.
+Renders are large (a five-cell set runs to hundreds of MB) and every one of them is a picture of
+one specific load order, so they are neither reusable nor shareable. `_geometry-harness/_runs/` is
+gitignored for the same reason: probe transcripts name the plugins of whatever list produced them.
 
 ---
 

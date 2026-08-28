@@ -20,8 +20,8 @@ using Mutagen.Bethesda.Skyrim;
 //   DOWNLOAD   sitting in the shared archive pool, never installed   -> install it
 //
 // The third is the one worth having: a curated list is a second opinion from someone who shipped
-// these mods together on purpose. If FUS or Mad God's or LoreRim ships a patch for a pair
-// PiranhaRim has unpatched, that is a strong recommendation. If a list ships BOTH mods and NO
+// these mods together on purpose. If a curated list ships a patch for a pair the TARGET list
+// has unpatched, that is a strong recommendation. If a list ships BOTH mods and NO
 // patch, that is evidence the pair is tolerable — a weaker signal, but not nothing, and it is
 // reported too rather than silently read as "no data".
 //
@@ -32,9 +32,11 @@ using Mutagen.Bethesda.Skyrim;
 //
 // usage: patchprobe [--pair A.esp B.esp] [--verify conflicts.json] [--list N] [--roots "C:\a;D:\b"]
 
-var roots = new List<string> { @"C:\Games\Skyrim VR", @"C:\Games\Skyrim AE", @"X:\Games\Skyrim Wabbajacks", @"S:\" };
-string downloadPool = @"X:\Wabbajack Downloads";
-string target = @"C:\Games\Skyrim VR\PiranhaRim VR";
+// Nothing is compiled in — see ../_shared/HarnessTarget.cs. --roots overrides the sweep list;
+// Require runs after the flag loop so passing it never trips the check.
+var roots = HarnessTarget.SearchRoots.ToList();
+string downloadPool = HarnessTarget.DownloadPool;
+string target = HarnessTarget.Instance;
 var wantPairs = new List<(string A, string B)>();
 int listN = 30;
 var verifyFiles = new List<string>();
@@ -46,6 +48,9 @@ for (int i = 0; i < args.Length; i++)
     else if (args[i] == "--roots" && i + 1 < args.Length) { roots = args[++i].Split(';').ToList(); }
     else if (args[i] == "--verify" && i + 1 < args.Length) verifyFiles.Add(args[++i]);
 }
+roots = HarnessTarget.RequireRoots(roots, "--roots");
+downloadPool = HarnessTarget.Require(downloadPool, "download pool directory", "downloadPool");
+target = HarnessTarget.Require(target, "MO2 instance directory", "instance");
 
 var sw = Stopwatch.StartNew();
 
@@ -298,7 +303,7 @@ var Ubiquitous = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
 
 // GENERATED plugins are never an answer to "where can I get a patch". DynDOLOD, ParallaxGen,
 // Synthesis and Reqtificator write these from whatever load order they were run against, so the
-// copy sitting in another list describes THAT list's mods and paths, not PiranhaRim's. Worse, they
+// copy sitting in another list describes THAT list's mods and paths, not the target's. Worse, they
 // are regenerated: a fix imported from one goes stale on the next run. They do genuinely override
 // the records — the first run had DynDOLOD.esp and PG_1.esp filling candidate lists — so they are
 // excluded explicitly and COUNTED, not silently dropped.
@@ -469,7 +474,7 @@ else
     // Cross-list patches, filtered to the ones that would actually apply.
     // ---------------------------------------------------------------------------------------
     // The unfiltered version of this list was 6,417 plugins and unreadable, because most of them
-    // patch mods PiranhaRim does not have (Wyrmstooth, CBBE, Beyond Skyrim). A patch is only
+    // patch mods the target list does not have. A patch is only
     // installable if EVERY master it declares is present and active here — that is a hard,
     // checkable property of the file, not a heuristic, and it turns the list into "patches that
     // would apply to you right now".

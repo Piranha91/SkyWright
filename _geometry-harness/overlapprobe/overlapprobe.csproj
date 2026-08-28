@@ -13,6 +13,7 @@
     <ProjectReference Include="..\..\src\housecarl-core\housecarl-core.csproj" />
   </ItemGroup>
   <ItemGroup>
+    <Compile Include="..\_shared\HarnessTarget.cs" Link="HarnessTarget.cs" />
     <Compile Include="..\_shared\ConflictReport.cs" Link="ConflictReport.cs" />
     <Compile Include="..\_shared\DetectorModel.cs" Link="DetectorModel.cs" />
   </ItemGroup>
