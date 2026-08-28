@@ -57,7 +57,9 @@ if (args.Length == 0)
 
 string target = args[0];
 string outDir = Path.Combine(AppContext.BaseDirectory, "shots");
-int size = 1280;
+// Frame size, square, and the 3D render resolution as well as the PNG's — there is no
+// downsample step, so this IS the sharpness knob. 2560 because 1280 fell apart under a zoom.
+int size = 2560;
 float elev = 28f;
 bool drawNav = true;
 string? highlight = null;
@@ -105,6 +107,20 @@ bool drawTerrain = true;
 // first pass and picks the palette colour farthest from both the background and the reserved
 // conflict red; or force one of: green, cyan, magenta, yellow, blue.
 string navColor = "auto";
+// Background. The frame clears to a pale sky blue: what is behind the geometry IS sky, and
+// a sky-coloured gap reads as sky instead of as a hole in the render. --sky R,G,B overrides,
+// in either 0-255 or 0-1.
+var skyColor = new System.Numerics.Vector3(0.70f, 0.82f, 0.92f);
+// Navmesh the camera cannot see is still navmesh. Both hidden categories are redrawn as
+// ALWAYS-VISIBLE DASHED outlines by default — solid means "you can see this", dashed means
+// "it is here, something is in front of it". --no-nav-underground drops the buried-under-the-
+// terrain layer; --no-nav-under-statics drops the behind-geometry layer. Either one off puts
+// those segments back under the depth buffer, i.e. back to being silently invisible.
+bool dashUnderground = true, dashUnderStatics = true;
+// Multisampling. --size raises detail; this is what stops the overlay's diagonals from reading
+// as staircases at any size. 0 or 1 turns it off, and the count is clamped to what the GL
+// context actually supports (reported in the per-render line).
+int msaa = 4;
 // --euler renders the SAME cell under all six Euler compositions. The numeric tests could not
 // separate them (0.62%-0.69%, then 1.84%-2.08%), which is itself a finding — but a wrong order
 // scatters kit pieces by hundreds of units, and that is trivially visible even when it is
@@ -137,6 +153,18 @@ for (int i = 1; i < args.Length; i++)
     else if (args[i] == "--compare" && i + 1 < args.Length)
     { var p = args[++i].Split(','); if (p.Length == 2) compare = (p[0].Trim(), p[1].Trim()); }
     else if (args[i] == "--no-terrain") drawTerrain = false;
+    else if (args[i] == "--sky" && i + 1 < args.Length)
+    {
+        var p = args[++i].Split(',');
+        if (p.Length == 3)
+        {
+            var v = new System.Numerics.Vector3(float.Parse(p[0]), float.Parse(p[1]), float.Parse(p[2]));
+            skyColor = v.X > 1f || v.Y > 1f || v.Z > 1f ? v / 255f : v;      // 0-255 or 0-1, both fine
+        }
+    }
+    else if (args[i] == "--no-nav-underground") dashUnderground = false;
+    else if (args[i] == "--no-nav-under-statics") dashUnderStatics = false;
+    else if (args[i] == "--msaa" && i + 1 < args.Length) msaa = int.Parse(args[++i]);
     else if (args[i] == "--nav-color" && i + 1 < args.Length) navColor = args[++i].ToLowerInvariant();
     else if (args[i] == "--markers") showMarkers = true;
     else if (args[i] == "--list-meshes") listMeshes = true;
@@ -427,8 +455,12 @@ if (textured)
 
     // ---- TERRAIN: winning LAND heightmaps for the target cell + its ring-1 neighbours --------
     // The placed rocks were floating in space without this; exteriors get actual ground now.
-    // texture path ("" = none, pseudocolour fallback) -> that patch's triangles.
+    // texture path ("" = none, off-white snow fallback) -> that patch's triangles.
     var terrainPatches = new Dictionary<string, List<(System.Numerics.Vector3, System.Numerics.Vector3, System.Numerics.Vector3)>>(StringComparer.OrdinalIgnoreCase);
+    // The same decoded heightmaps, kept as a queryable field: the navmesh overlay asks it
+    // whether a triangle is BELOW the ground that gets drawn, which is what separates "buried"
+    // from "behind a rock" and earns the two different dashed layers.
+    var landHeights = new Dictionary<(int X, int Y), float[,]>();
     if (drawTerrain && !interior && targetGrid is { } tg)
     {
         // grid -> winning heightmap + the base landscape texture per quadrant (LTEX FormKeys,
@@ -506,6 +538,7 @@ if (textured)
                 h[0, y] = acc;
                 for (int x = 1; x < 33; x++) { acc += grad[x, y]; h[x, y] = acc; }
             }
+            landHeights[(gx, gy)] = h;
             System.Numerics.Vector3 P(int x, int y) =>
                 new(gx * 4096f + x * 128f, gy * 4096f + y * 128f, h[x, y] * 8f);
             for (int y = 0; y < 32; y++)
@@ -527,6 +560,26 @@ if (textured)
         else
             Console.WriteLine($"   terrain: no LAND found for this cell (--no-terrain to silence)");
     }
+
+    // Ground height at a world X,Y, on the SAME 128-unit quads and the SAME diagonal split the
+    // terrain mesh is built from — so "below the surface" here means below the surface that was
+    // actually drawn, not below some second opinion about where the ground is. Null outside the
+    // ring of cells that has LAND, which leaves those segments to the depth test instead.
+    Func<float, float, float?>? terrainHeightAt = null;
+    if (landHeights.Count > 0)
+        terrainHeightAt = (wx, wy) =>
+        {
+            int gx = (int)MathF.Floor(wx / 4096f), gy = (int)MathF.Floor(wy / 4096f);
+            if (!landHeights.TryGetValue((gx, gy), out var h)) return null;
+            float fx = (wx - gx * 4096f) / 128f, fy = (wy - gy * 4096f) / 128f;
+            int ix = Math.Clamp((int)MathF.Floor(fx), 0, 31), iy = Math.Clamp((int)MathF.Floor(fy), 0, 31);
+            float u = fx - ix, v = fy - iy;
+            float h00 = h[ix, iy], h10 = h[ix + 1, iy], h11 = h[ix + 1, iy + 1], h01 = h[ix, iy + 1];
+            // Lower triangle (x,y)-(x+1,y)-(x+1,y+1) when u >= v, upper one otherwise.
+            float z = u >= v ? h00 + (h10 - h00) * u + (h11 - h10) * v
+                             : h00 + (h11 - h01) * u + (h01 - h00) * v;
+            return z * 8f;
+        };
 
     var (navTris, redTris) = BuildNavSets(winNav);
 
@@ -597,7 +650,8 @@ if (textured)
                string outFile, IReadOnlyList<string> captionLines)
         => ViewProbe.TexturedScene.RenderToPng(
                scene, assets, dataDir, modFolders, overwriteDir,
-               (eyePos.Value, lookPos.Value, fov), g, r, terrainPatches, navMode, navColor, captionLines, size, outFile);
+               (eyePos.Value, lookPos.Value, fov), g, r, terrainPatches, navMode, navColor,
+               skyColor, terrainHeightAt, dashUnderground, dashUnderStatics, msaa, captionLines, size, outFile);
 
     if (compare is { } cmp)
     {
@@ -914,6 +968,10 @@ string RenderOne(float azDeg, float elDeg, string file)
 
     var px = new byte[size * size * 4];
     GL.ReadPixels(0, 0, size, size, PixelFormat.Rgba, PixelType.UnsignedByte, px);
+    // Opaque screenshot: the colour buffer's alpha is whatever the shader wrote (the navmesh
+    // sheet ships 0.42), and a PNG that carries it composites over whatever a viewer puts
+    // behind it. Same fix as the textured path.
+    for (int i = 3; i < px.Length; i += 4) px[i] = 255;
 
     using var img = Image.LoadPixelData<Rgba32>(px, size, size);
     img.Mutate(x => x.Flip(SixLabors.ImageSharp.Processing.FlipMode.Vertical));   // GL origin is bottom-left
