@@ -188,6 +188,11 @@ static class TexturedScene
         // emitted here and drawn by the OVERLAY pass, whose zero-normal vertices render as the
         // exact flat colour — the library pass would shade the hull's inward faces to black.
         var haloTris = new List<float>();
+        // Near faces (outward winding), for the deep-occlusion boost: they pass a GREATER
+        // depth test only when the occluder sits in front of the WHOLE hull — a wall, never
+        // the object itself or its own door-jamb — so the through-wall ghost gets a second
+        // blend layer and pops, while a visible object keeps only the light wash.
+        var haloNear = new List<float>();
         var haloOrange = new Vector3(255f / 255f, 90f / 255f, 26f / 255f);
 
         foreach (var r in refs)
@@ -282,20 +287,31 @@ static class TexturedScene
                         var p0 = sp[b.Indices[i]]; var p1 = sp[b.Indices[i + 1]]; var p2 = sp[b.Indices[i + 2]];
                         var ng = Vector3.Cross(p1 - p0, p2 - p0);
                         var outward = Vector3.Dot(ng, (p0 + p1 + p2) / 3f - centroid) > 0f;
-                        // emit with the geometric normal pointing INWARD: seen from outside the
-                        // hull, near faces are GL-back (culled) and only the far side survives
-                        // where it pokes past the silhouette — the rim.
+                        // Geometric normal pointing INWARD: seen from outside the hull, near
+                        // faces are GL-back (culled) and only the far side survives — the rim
+                        // where directly visible (solid Lequal pass), and the translucent ghost
+                        // wherever something in the scene is closer (Greater pass reuses this
+                        // same buffer). Far faces make the right ghost: a recessed door's jamb
+                        // sits BETWEEN the hull's near and far planes, so a near-face ghost has
+                        // a dead zone there (found by Piranha on door 02E14C), while the far
+                        // face is behind every occluder by construction.
                         if (outward)
                         {
                             Overlay.Vertex(haloTris, p2, haloOrange, Vector3.Zero);
                             Overlay.Vertex(haloTris, p1, haloOrange, Vector3.Zero);
                             Overlay.Vertex(haloTris, p0, haloOrange, Vector3.Zero);
+                            Overlay.Vertex(haloNear, p0, haloOrange, Vector3.Zero);
+                            Overlay.Vertex(haloNear, p1, haloOrange, Vector3.Zero);
+                            Overlay.Vertex(haloNear, p2, haloOrange, Vector3.Zero);
                         }
                         else
                         {
                             Overlay.Vertex(haloTris, p0, haloOrange, Vector3.Zero);
                             Overlay.Vertex(haloTris, p1, haloOrange, Vector3.Zero);
                             Overlay.Vertex(haloTris, p2, haloOrange, Vector3.Zero);
+                            Overlay.Vertex(haloNear, p2, haloOrange, Vector3.Zero);
+                            Overlay.Vertex(haloNear, p1, haloOrange, Vector3.Zero);
+                            Overlay.Vertex(haloNear, p0, haloOrange, Vector3.Zero);
                         }
                     }
                 }
@@ -814,8 +830,10 @@ static class TexturedScene
         // lit from behind. Culling the back faces makes the near hemisphere the only candidate.
         // Ribbons are single-sided-by-accident and must NOT be culled.
         var layers = new List<(float[] Data, bool DepthTested, bool CullBack)>();
-        // Highlight halos: depth-tested (a rim, not an x-ray) and back-culled (inverted hull).
-        if (haloTris.Count > 0) layers.Add((haloTris.ToArray(), true, true));
+        // Highlight halos: the SAME hull buffer is drawn twice — solid depth-tested rim here,
+        // then again as the translucent Greater-pass ghost (see the draw loop).
+        float[]? haloData = haloTris.Count > 0 ? haloTris.ToArray() : null;
+        if (haloData is not null) layers.Add((haloData, true, true));
         if (wantNav)
         {
             if (wireMode && navTris.Count > 0)
@@ -901,6 +919,8 @@ static class TexturedScene
         // palette colour rather than whatever the scene lighting does to it, and so the hidden
         // layers can drop the depth test.
         int wireProg = 0, wireVao = 0, wireVbo = 0;
+        var ghostData = haloData;
+        var ghostNearData = haloNear.Count > 0 ? haloNear.ToArray() : null;
         if (layers.Count > 0)
         {
             wireProg = OverlayShader();
@@ -925,6 +945,8 @@ static class TexturedScene
                 GL.BindBuffer(BufferTarget.ArrayBuffer, wireVbo);
                 GL.Disable(EnableCap.Blend);
                 GL.DepthMask(false);
+                int alphaLoc = GL.GetUniformLocation(wireProg, "u_alpha");
+                GL.Uniform1(alphaLoc, 1.0f);
                 foreach (var (data, depthTested, cullBack) in layers)
                 {
                     if (depthTested) { GL.Enable(EnableCap.DepthTest); GL.DepthFunc(DepthFunction.Lequal); }
@@ -933,6 +955,36 @@ static class TexturedScene
                     else GL.Disable(EnableCap.CullFace);
                     GL.BufferData(BufferTarget.ArrayBuffer, data.Length * sizeof(float), data, BufferUsageHint.StreamDraw);
                     GL.DrawArrays(PrimitiveType.Triangles, 0, data.Length / 9);
+                }
+                if (ghostData is not null)
+                {
+                    // The ghost: the hull's far faces again, drawn ONLY where the scene is
+                    // closer (DepthFunc GREATER), blended translucent. A hidden highlight reads
+                    // as an amber silhouette through whatever hides it; a visible one gets a
+                    // subtle wash (its own front surface is closer than the hull's far face),
+                    // so a recessed door whose rim hides behind the jamb still reads highlighted.
+                    GL.Enable(EnableCap.DepthTest); GL.DepthFunc(DepthFunction.Greater);
+                    GL.Enable(EnableCap.CullFace); GL.CullFace(CullFaceMode.Back);
+                    GL.Enable(EnableCap.Blend);
+                    GL.BlendFunc(BlendingFactor.SrcAlpha, BlendingFactor.OneMinusSrcAlpha);
+                    // 0.22 per layer: the hull's far-side surfaces stack (back face + frame
+                    // pieces ≈ 2 layers → ~0.4 combined), so the per-draw alpha must sit well
+                    // under the intended read or the wash turns back into a repaint.
+                    GL.Uniform1(alphaLoc, 0.22f);
+                    GL.BufferData(BufferTarget.ArrayBuffer, ghostData.Length * sizeof(float), ghostData, BufferUsageHint.StreamDraw);
+                    GL.DrawArrays(PrimitiveType.Triangles, 0, ghostData.Length / 9);
+                    if (ghostNearData is not null)
+                    {
+                        // Deep-occlusion boost: near faces pass GREATER only when the occluder
+                        // is in front of the whole hull (a wall), never for the object's own
+                        // surface or its jamb — so only the truly hidden case gets brighter.
+                        GL.Uniform1(alphaLoc, 0.25f);
+                        GL.BufferData(BufferTarget.ArrayBuffer, ghostNearData.Length * sizeof(float), ghostNearData, BufferUsageHint.StreamDraw);
+                        GL.DrawArrays(PrimitiveType.Triangles, 0, ghostNearData.Length / 9);
+                    }
+                    GL.Uniform1(alphaLoc, 1.0f);
+                    GL.Disable(EnableCap.Blend);
+                    GL.DepthFunc(DepthFunction.Lequal);
                 }
                 GL.Enable(EnableCap.DepthTest);
                 GL.Enable(EnableCap.CullFace);
@@ -1124,6 +1176,7 @@ void main(){ vCol = aCol; vNrm = aNrm; gl_Position = u_projection * u_view * vec
         const string fs = @"#version 330 core
 in vec3 vCol;
 in vec3 vNrm;
+uniform float u_alpha;   // 1.0 for every classic layer; <1 only for the highlight ghost pass
 out vec4 frag;
 void main(){
     vec3 c = min(vCol * 1.5, vec3(1.0));
@@ -1133,7 +1186,7 @@ void main(){
         vec3 n = normalize(vNrm);
         c *= 0.45 + 0.55 * max(dot(n, normalize(vec3(0.40, 0.80, 0.45))), 0.0);
     }
-    frag = vec4(c, 1.0);
+    frag = vec4(c, u_alpha);
 }";
 
         int v = GL.CreateShader(ShaderType.VertexShader); GL.ShaderSource(v, vs); GL.CompileShader(v); Check(v, "vertex");
