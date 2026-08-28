@@ -70,6 +70,19 @@ findings they demonstrate) lives with that instance, not here.
   `geometry`), `--out DIR`, `--size N` (default 2560; square, and the 3D render resolution as well
   as the PNG's — there is no downsample step, so `--size` IS the sharpness knob, with `--msaa` for
   the edges).
+- **Placed NPC actors:** `--npc FORMKEY[@X,Y,Z[,HEADING]][=label]` (repeatable; implies textured
+  mode) renders the NPC's actual character model — FaceGen head, skinned body, and the outfit the
+  RUNTIME will dress it in — at its winning placement or an explicit position (see *Placed NPC
+  actors* below). `--npc-no-outfit` drops the outfit layer; `--npc-puck on|off|auto` controls the
+  translucent ground disc + always-visible rim under each actor (auto = on when the camera looks
+  down steeper than 60°). Each actor gets an identity colour shared by its puck and its caption
+  line, assigned in `--npc` order.
+- **Dollhouse slice:** `--cull-above Z` drops every STATIC triangle whose vertices all sit above
+  that Skyrim z, so an interior top-down shows the storey the actors stand on instead of the roof
+  and upper floors over it. Walls spanning the cut keep standing (their lower vertices anchor
+  them); terrain, navmesh, NPC actors and the overlay are never sliced. The caption says
+  `SLICED above z N` — a render missing its roof must declare it, or the absence reads as a
+  finding. Per-render console line counts what was removed.
 
 ### Asking the render questions
 
@@ -220,6 +233,77 @@ gitignored for the same reason: probe transcripts name the plugins of whatever l
 
 ---
 
+## Placed NPC actors (`--npc`)
+
+"NPC X should be HERE" used to be a caption; now it is the character standing there. Each
+`--npc FORMKEY[@X,Y,Z[,HEADING]][=label]` puts the NPC's real model in the scene:
+
+- **The FormKey may be the placed ACHR or the NPC_ base** — a console click gives the ref, a
+  record query gives the base, and both work. With no `@position` the ref's own WINNING placement
+  is used (position, heading, ref scale; when the base is placed more than once the instance in
+  the rendered cell is preferred and all are listed). `@X,Y,Z[,HEADING]` is the "should be here"
+  case and overrides the ref (heading in degrees, `getangle z` convention; omitted = north). The
+  label after `=` names the actor in the caption and the console (`=` because a `:` would clash
+  with the FormKey's own).
+- **The character pipeline is `CharacterViewer.Rendering`'s `VM_CharacterViewer`, hosted
+  headless** exactly the way `GameWindowOffscreenRenderer` hosts it for NPC2's mugshots (inline
+  render-thread marshaller, `IsOffscreenRenderInstance`, `LoadAsync` +
+  `ProcessPendingSceneToCompletion`, `ApplyMeshOverrides`) — FaceGen head with tint, CPU skinning
+  to close the neck seam, weight morphs, wig/tail armatures, slot hiding, the works. The record
+  side (`NpcResolve.cs`) is adapted from NPC2's `NpcMeshResolver`: Traits template terminus,
+  WornArmor/Race.Skin ARMA walk race-filtered through `ArmorRace`, sex-appropriate world models,
+  TXST and AlternateTextures, RACE skeleton, QNAM/HCLR/weight, and world scale =
+  race height (sex) × NPC height × ref scale. A headless host must initialize ReactiveUI once
+  (`RxAppBuilder…WithWpf().BuildApp()` + an immediate main-thread scheduler) or the VM's ctor
+  throws — `NpcActorBuilder.CreateHost` owns that.
+- **The outfit is the RUNTIME's answer, not just the record field** (`NpcRuntimeOutfits.cs`,
+  adapted from NPC2's OutfitDistribution simulators, which were verified against the actual
+  SkyPatcher and SPID sources): the record winner's `DefaultOutfit` — routed through the
+  Inventory-template chain when that flag makes the record's own field dead — then SkyPatcher
+  `outfitDefault=` lines (`SKSE\Plugins\SkyPatcher\npc\**`, BFS file order, LAST matching line
+  wins, `hasPlugins`/`hasPluginsOr` line gates honoured), then SPID `Outfit`/`FinalOutfit` (and
+  outfit-shaped generic `Form =`) entries from `*_DISTR.ini` (first matching entry wins,
+  suspended when SkyPatcher moved the outfit away from the record's initial value — SPID's own
+  `IsSuspendedReplacement` rule). Config discovery walks the RECONSTRUCTED MO2 VFS (data dir +
+  enabled mod folders + overwrite, loose files only — both tools read the real filesystem, so
+  BSA-packed INIs are invisible to them and to this). The winning source is printed and lands in
+  the caption (`SkyPatcher: sub\file.ini (line N)` / `SPID: file.ini (line N)`); sub-100%-chance
+  SPID entries that would otherwise match are reported as "possible at runtime" and never
+  applied; record-level approximations (skill filters, teammate trait, …) are named.
+- **Placement is BAKED into the vertices** (`NpcActor.cs`): the VM's installed meshes are
+  rewritten in place (positions + normals/tangents/bitangents through the same negated-Euler
+  composition every static uses), because `GlRenderer` has one global model matrix. The builder's
+  Y-up character faces `-Z`, which un-swaps to Skyrim +Y = north — the ref convention — so no
+  facing fudge exists. The meshes are BORROWED into each panel's renderer and removed again
+  before it disposes (its `ClearMeshes` destroys what it holds); the owning VMs outlive every
+  panel and are disposed last.
+- **The puck** is two honest halves: a translucent fill disc on the decal channel (depth-tested —
+  covered by what covers it) and a thin always-visible rim in the overlay pass — an actor behind
+  a wall or under an upper floor still announces where it stands. Radius scales with the actor.
+  On a steep top-down, where a standing figure is a few dozen pixels, the puck is what makes the
+  placement legible; at eye level it stays out of the way (`auto`).
+- **Each actor wears an IDENTITY colour** — fill, rim, and its caption line all share it, so a
+  multi-actor render answers "who is who" from the caption alone. Assigned in `--npc` order from
+  a 5-colour palette (yellow, pink, green, blue, white — bright for the dark caption bar, clear
+  of the reserved conflict-RED / door-ORANGE / diff-VIOLET; cycles past five), and named on the
+  console per actor. The rim pre-divides by the overlay shader's ×1.5 lift so all three faces of
+  the marker land on the same colour.
+- **An EMPTY ring means the actor is occluded, and the console says so.** The actor and the fill
+  are depth-tested (honest), so an interior top-down shot from above the building shows only the
+  rim — the figure is under the roof and upper floors. Every render with actors checks each one
+  against the final frame's depth at its head (the same compare, same slack, as the navmesh dash
+  classifier, plus the actor's own headroom so its hood never reads as an occluder) and prints
+  `HIDDEN behind scene geometry … slice the view with --cull-above Z (e.g. N) or move the camera
+  below the occluder`, with the suggested cut computed from that actor's height. `--cull-above`
+  is the fix that keeps every actor in one frame when no interior camera can: slice the shell
+  off and the top-down becomes a floor plan with the figures standing in it.
+- **What it is not:** the figure stands in the NIF bind pose (A-pose) — there is no animation
+  system, so it reads as a mannequin at the spot, not someone sitting or leaning. SleepOutfit is
+  not simulated (the render depicts the awake actor), and a sub-100% SPID chance is reported, not
+  rolled.
+
+---
+
 ## Effect geometry: two filters, because it comes in two shapes
 
 "Is this an effect?" cannot be answered from the model path — that describes where a file lives,
@@ -325,6 +409,10 @@ control: layers with `--msaa 0` is byte-exact, and MSAA with `--no-terrain-layer
 
 So **run the compare regression with `--msaa 0`** and keep the byte-exact check, rather than
 loosening the check to a tolerance. Deliverable renders keep MSAA.
+
+`--npc` actors are deterministic (measured: a three-actor interior render is byte-identical
+across runs at `--msaa 0`); the puck's fill disc rides the same decal channel as the painted
+layers, so under MSAA it belongs to the same known 1/255 nondeterminism class.
 
 ---
 
@@ -442,3 +530,14 @@ the game was composited as ordinary alpha blending; invisible on solid geometry,
   render as water. No grass (a runtime system, arguably correct to omit).
 - Trees: full-model NIFs render; SpeedTree-style billboard LOD is absent (fine up close).
 - The compare stitches panels side by side at full size (wide file); no layout options.
+- NPC actors stand in the NIF bind pose — no animation, no furniture use. SPID `FinalOutfit` vs
+  regular `Outfit` evaluate in one interleaved first-match list (mirroring NPC2's source-verified
+  simulation) rather than as two passes; SleepOutfit is not simulated; a sub-100% SPID chance is
+  reported, never rolled. Runtime outfit configs are read loose-only from the reconstructed VFS —
+  faithful to both tools, but it means an INI a mod ships only inside a BSA is invisible.
+- `--cull-above` is all-three-verts-above, so a triangle STRADDLING the cut survives whole — a
+  wall keeps its full height (intended), but so does a mezzanine slab whose skirt dips below the
+  cut, which can leave an actor covered at a cut that "should" clear it. The occlusion advisory
+  catches exactly this (it fired on a straddling slab at the first cut tried); lower the cut
+  toward its suggested value. Navmesh above the cut still draws — slicing annotation layers is a
+  judgement the slice deliberately doesn't make.

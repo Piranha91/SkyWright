@@ -1,7 +1,9 @@
 using System.Diagnostics;
 using System.Numerics;
 using HousecarlCore;
+using Mutagen.Bethesda;                 // ToImmutableLinkCache over the --npc overlays
 using Mutagen.Bethesda.Plugins;
+using Mutagen.Bethesda.Plugins.Cache;
 using Mutagen.Bethesda.Skyrim;
 using OpenTK.Graphics.OpenGL4;
 using OpenTK.Windowing.Common;
@@ -184,6 +186,23 @@ var refsAt = new List<(float X, float Y, float R)>();
 // scatters kit pieces by hundreds of units, and that is trivially visible even when it is
 // statistically invisible. This is the test the numbers could not run.
 bool euler = false;
+// --npc FORMKEY[@X,Y,Z[,HEADING]][=label] (repeatable, textured mode): place the NPC's actual
+// character model — FaceGen head, skinned body, and the outfit the RUNTIME will dress it in
+// (record winner + SkyPatcher outfitDefault + SPID Outfit distribution, layered the way the
+// game layers them). The FormKey may be the NPC_ base or its placed ACHR; with no @position
+// the ref's own winning placement is used (heading in degrees, `getangle z` convention).
+// --npc-no-outfit renders the base character without the outfit layer.
+// --npc-puck on|off|auto draws a translucent yellow disc + always-visible rim under each
+// actor ("puck tracker") — auto (default) turns it on when the camera looks down steeply,
+// where a standing figure is a few dozen pixels and needs the marker.
+var npcSpecs = new List<string>();
+bool npcNoOutfit = false;
+string npcPuck = "auto";
+// --cull-above Z (textured mode): dollhouse slice — static triangles whose vertices ALL sit
+// above this Skyrim z are dropped, so an interior top-down shows the storey under the roof and
+// upper floors instead of their outsides. Walls spanning the cut keep standing; terrain,
+// navmesh, NPC actors and the overlay are never sliced. The caption names the cut.
+float? cullAbove = null;
 for (int i = 1; i < args.Length; i++)
 {
     if (args[i] == "--out" && i + 1 < args.Length) outDir = args[++i];
@@ -236,6 +255,10 @@ for (int i = 1; i < args.Length; i++)
     else if (args[i] == "--refs-at" && i + 1 < args.Length)
     { var p = args[++i].Split(','); if (p.Length >= 2) refsAt.Add((float.Parse(p[0]), float.Parse(p[1]), p.Length > 2 ? float.Parse(p[2]) : 256f)); }
     else if (args[i] == "--nav-color" && i + 1 < args.Length) navColor = args[++i].ToLowerInvariant();
+    else if (args[i] == "--npc" && i + 1 < args.Length) { npcSpecs.Add(args[++i]); textured = true; }
+    else if (args[i] == "--npc-no-outfit") npcNoOutfit = true;
+    else if (args[i] == "--npc-puck" && i + 1 < args.Length) npcPuck = args[++i].ToLowerInvariant();
+    else if (args[i] == "--cull-above" && i + 1 < args.Length) cullAbove = float.Parse(args[++i]);
     else if (args[i] == "--markers") showMarkers = true;
     else if (args[i] == "--list-meshes") listMeshes = true;
     else if (args[i] is "--instance" or "--game" or "--profile") i++;   // consumed above
@@ -244,6 +267,38 @@ if (!drawNav) navMode = "off";
 if ((conflictsPath is not null || redSpecs.Count > 0) && !navModeExplicit) navMode = "wire";
 if (navMode is not ("off" or "filled" or "wire" or "both"))
 { Console.Error.WriteLine($"--nav '{navMode}' is not one of: off, filled, wire, both."); return 1; }
+if (npcPuck is not ("on" or "off" or "auto"))
+{ Console.Error.WriteLine($"--npc-puck '{npcPuck}' is not one of: on, off, auto."); return 1; }
+
+// --npc spec parsing happens BEFORE the load walk: the walk watches for these
+// FormKeys (as placed ACHRs and as ACHR bases) wherever they live, the same way
+// implicated doors are watched.
+var npcParsed = new List<(FormKey Key, System.Numerics.Vector3? Pos, float? HeadingDeg, string? Label, string Raw)>();
+foreach (var rawSpec in npcSpecs)
+{
+    var s = rawSpec;
+    string? label = null;
+    int eqAt = s.IndexOf('=');                              // '=' — a ':' would clash with the FormKey's own
+    if (eqAt >= 0) { label = s[(eqAt + 1)..].Trim(); s = s[..eqAt]; }
+    System.Numerics.Vector3? npos = null;
+    float? nheading = null;
+    int atAt = s.IndexOf('@');
+    if (atAt >= 0)
+    {
+        var nums = s[(atAt + 1)..].Split(',');
+        s = s[..atAt];
+        if (nums.Length is not (3 or 4)) { Console.Error.WriteLine($"--npc '{rawSpec}': position must be @X,Y,Z or @X,Y,Z,HEADING."); return 1; }
+        try
+        {
+            npos = new System.Numerics.Vector3(float.Parse(nums[0]), float.Parse(nums[1]), float.Parse(nums[2]));
+            if (nums.Length == 4) nheading = float.Parse(nums[3]);
+        }
+        catch { Console.Error.WriteLine($"--npc '{rawSpec}': position is not numeric."); return 1; }
+    }
+    try { npcParsed.Add((FormKey.Factory(s.Trim()), npos, nheading, label, rawSpec)); }
+    catch { Console.Error.WriteLine($"--npc '{rawSpec}': '{s}' is not a FormKey (XXXXXX:Plugin.esp)."); return 1; }
+}
+var npcWatchKeys = new HashSet<FormKey>(npcParsed.Select(sp => sp.Key));
 Directory.CreateDirectory(outDir);
 
 // ---------------------------------------------------------------------------------------
@@ -275,6 +330,10 @@ if (conflictsPath is not null)
 // Persistent worldspace refs (doors above all) live in the worldspace's PERSISTENT cell, not the
 // exterior cell record — collect them separately, merge by position after the target is known.
 var persistentWin = new Dictionary<FormKey, (FormKey Ws, PlacedRef Ref)>();
+// --npc placement watch, same shape as the door watch: every PlacedNpc whose own FormKey OR
+// whose Base is a requested NPC, wherever it lives (per-ref "later plugin wins").
+var npcRefWhere = new Dictionary<FormKey, (FormKey Cell, string? CellEd, PlacedRef Ref)>();
+var npcBaseWhere = new Dictionary<FormKey, Dictionary<FormKey, (FormKey Cell, string? CellEd, PlacedRef Ref)>>();
 var winNav = new Dictionary<FormKey, NavmeshGeometry>();
 FormKey targetWorldspace = FormKey.Null;
 (int X, int Y)? targetGrid = null;
@@ -338,6 +397,18 @@ foreach (var path in order.OrderedPaths)
             if (cp.Worldspace != FormKey.Null)
                 foreach (var r in cp.Refs)
                     if (r.Persistent) persistentWin[r.FormKey] = (cp.Worldspace, r);   // later plugin wins
+            if (npcWatchKeys.Count > 0)
+                foreach (var r in cp.Refs)
+                {
+                    if (r.RecordType != "PlacedNpc") continue;
+                    if (npcWatchKeys.Contains(r.FormKey))
+                        npcRefWhere[r.FormKey] = (cp.Cell, cp.CellEditorId, r);         // later plugin wins
+                    if (r.Base is { } nb && npcWatchKeys.Contains(nb))
+                    {
+                        if (!npcBaseWhere.TryGetValue(nb, out var perRef)) npcBaseWhere[nb] = perRef = new();
+                        perRef[r.FormKey] = (cp.Cell, cp.CellEditorId, r);              // later plugin wins per ref
+                    }
+                }
             if (doorWatchKeys.Count > 0)
                 foreach (var r in cp.Refs)
                     if (doorWatchKeys.Contains(r.FormKey))
@@ -983,6 +1054,9 @@ if (textured)
             ? ((pre & 0xFE000000u) == 0xFE000000u ? (pre | (fk.ID & 0xFFFu)) : (pre | fk.ID)).ToString("X8")
             : "??" + fk.ID.ToString("X6");
 
+    // A render missing its roof must SAY the roof was cut, or the absence reads as a finding.
+    string CullCaption() => cullAbove is { } cca ? $" — SLICED above z {cca:0}" : "";
+
     string? DoorCaption()
         => conflictDoors.Count == 0 ? null
          : "ORANGE door " + string.Join("   ", conflictDoors.Select(fk => $"{fk} = FormID {RuntimeId(fk)}"));
@@ -991,6 +1065,54 @@ if (textured)
         => string.Join("   ", redNav.Keys.Select(fk =>
                $"RED {fk} = FormID {RuntimeId(fk)}" +
                (navs.TryGetValue(fk, out var nv) ? $" ({nv.Triangles.Count} tris)" : " (not provided)")));
+
+    // ---- --npc: pin each spec to (NPC base record, world placement) -------------------
+    // The spec FormKey may be the placed ACHR (a console click gives the ref) or the NPC_
+    // base; the load walk watched for both. Explicit @X,Y,Z is the "should be HERE" case
+    // and overrides the ref's own placement; explicit heading is degrees, `getangle z`
+    // convention. No placement anywhere and no @position is an error, not a guess.
+    var npcPlacements = new List<(FormKey NpcKey, ViewProbe.NpcPlacement Placement, string LabelHint)>();
+    foreach (var (key, pos, headingDeg, label, raw) in npcParsed)
+    {
+        FormKey npcKey = key;
+        System.Numerics.Vector3 p = default;
+        Vec3 rot = default;
+        float refScale = 1f;
+        bool placed = false;
+        if (npcRefWhere.TryGetValue(key, out var byRef))
+        {
+            if (byRef.Ref.Base is not { } nb)
+            { Console.Error.WriteLine($"--npc '{raw}': placed ref {key} has no base NPC."); return 1; }
+            npcKey = nb;
+            p = new(byRef.Ref.Position.X, byRef.Ref.Position.Y, byRef.Ref.Position.Z);
+            rot = byRef.Ref.Rotation;
+            refScale = byRef.Ref.Scale;
+            placed = true;
+            if (byRef.Cell != cellKey)
+                Console.WriteLine($"   [npc] ref {key} lives in {(byRef.CellEd ?? byRef.Cell.ToString())}, not the rendered cell");
+        }
+        else if (npcBaseWhere.TryGetValue(key, out var instances) && instances.Count > 0)
+        {
+            var all = instances.Values.ToList();
+            var inCell = all.Where(x => x.Cell == cellKey).ToList();
+            var pick = (inCell.Count > 0 ? inCell : all)[0];
+            if (all.Count > 1)
+                Console.WriteLine($"   [npc] {key} is placed {all.Count} time(s): " + string.Join("; ",
+                    all.Select(x => $"{x.Ref.FormKey} in {(x.CellEd ?? x.Cell.ToString())} at {x.Ref.Position.X:0},{x.Ref.Position.Y:0},{x.Ref.Position.Z:0}"))
+                    + $" — using {(inCell.Count > 0 ? "the one in the rendered cell" : "the first")}");
+            p = new(pick.Ref.Position.X, pick.Ref.Position.Y, pick.Ref.Position.Z);
+            rot = pick.Ref.Rotation;
+            refScale = pick.Ref.Scale;
+            placed = true;
+            if (pick.Cell != cellKey && inCell.Count == 0)
+                Console.WriteLine($"   [npc] {key}'s placement is in {(pick.CellEd ?? pick.Cell.ToString())}, not the rendered cell");
+        }
+        if (pos is { } explicitPos) { p = explicitPos; placed = true; }
+        if (!placed)
+        { Console.Error.WriteLine($"--npc '{raw}': no placed instance of {key} anywhere in the load order — give an explicit @X,Y,Z[,HEADING]."); return 1; }
+        if (headingDeg is { } hd) rot = new Vec3(0f, 0f, float.DegreesToRadians(hd));
+        npcPlacements.Add((npcKey, new ViewProbe.NpcPlacement(p, rot, refScale), label ?? ""));
+    }
 
     var fpNws = new NativeWindowSettings
     {
@@ -1003,6 +1125,107 @@ if (textured)
     };
     using var fpGw = new GameWindow(GameWindowSettings.Default, fpNws);
     fpGw.MakeCurrent();
+
+    // ---- --npc: build the actors on this context --------------------------------------
+    // Record side first (a full-order link cache over fresh overlays — the walk above
+    // disposed its own), then the runtime outfit stack, then one VM per NPC through the
+    // character pipeline, world-baked. The VMs (and these overlays) must outlive every
+    // panel: NpcCleanup() runs before each return below.
+    var npcActors = new List<ViewProbe.NpcActorRender>();
+    ViewProbe.NpcActorBuilder.Host? npcHost = null;
+    var npcLcMods = new List<ISkyrimModGetter>();
+    var npcCaptions = new List<(string Text, System.Numerics.Vector3 Color)>();
+    // Per-actor IDENTITY colours, assigned in --npc order and worn by all three
+    // faces of the marker at once — puck fill, rim, and the caption line — so a
+    // multi-actor render answers "who is who" without counting rings. Chosen
+    // bright (they sit on the dark caption bar) and clear of the reserved
+    // semantic colours: conflict RED, door ORANGE, diff-sphere VIOLET. The nav
+    // palette can still land on green/blue/yellow, but a filled ring plus a
+    // matching caption line is not mistakable for a navmesh wire. Cycles past 5.
+    var npcPalette = new (string Name, System.Numerics.Vector3 C)[]
+    {
+        ("yellow", new(1.00f, 0.88f, 0.10f)),
+        ("pink",   new(1.00f, 0.40f, 0.80f)),
+        ("green",  new(0.35f, 0.95f, 0.35f)),
+        ("blue",   new(0.40f, 0.75f, 1.00f)),
+        ("white",  new(1.00f, 1.00f, 1.00f)),
+    };
+    if (npcPlacements.Count > 0)
+    {
+        var swNpc = Stopwatch.StartNew();
+        foreach (var pp2 in order.OrderedPaths)
+        {
+            try { npcLcMods.Add(SkyrimMod.CreateFromBinaryOverlay(pp2, SkyrimRelease.SkyrimSE)); }
+            catch (Exception ex) { Console.Error.WriteLine($"   [npc] link cache: {Path.GetFileName(pp2)} skipped ({ex.Message})"); }
+        }
+        var npcLinkCache = npcLcMods.ToImmutableLinkCache<ISkyrimMod, ISkyrimModGetter>();
+        var npcPluginNames = order.OrderedPaths.Select(pp3 => Path.GetFileName(pp3)!).ToList();
+        var npcResolver = new ViewProbe.NpcRecordResolver(npcLcMods, npcPluginNames, npcLinkCache);
+        var outfitStack = new ViewProbe.NpcOutfitStack(dataDir, modFolders, overwriteDir,
+            npcResolver.IsPluginInstalled, npcResolver.ResolveSkyPatcherIdentifier,
+            npcResolver.ResolveSpidFilterForm, npcResolver.ResolveSpidFormIdentifier, npcLinkCache);
+        Console.WriteLine($"   [npc] runtime outfit configs: {outfitStack.SkyPatcherLineCount} SkyPatcher outfitDefault line(s) "
+                        + $"in {outfitStack.SkyPatcherFileCount} npc ini file(s); {outfitStack.SpidEntryCount} SPID outfit entr(ies) "
+                        + $"in {outfitStack.SpidFileCount} _DISTR file(s)");
+        npcHost = ViewProbe.NpcActorBuilder.CreateHost(assets, dataDir, modFolders, overwriteDir);
+        foreach (var (npcKey, placement, labelHint) in npcPlacements)
+        {
+            var rn = npcResolver.Resolve(npcKey);
+            if (rn is null) continue;
+            string label = string.IsNullOrEmpty(labelHint) ? rn.Name : labelHint;
+            ViewProbe.NpcOutfitResult? outfit = null;
+            List<CharacterViewer.Rendering.MeshOverride>? overrides = null;
+            if (!npcNoOutfit)
+            {
+                outfit = outfitStack.Resolve(rn.Winner, rn.Facts);
+                foreach (var note in outfit.RuntimeNotes) Console.WriteLine($"   [npc] {label}: {note}");
+                foreach (var apx in outfit.Approximations.Distinct()) Console.WriteLine($"   [npc] {label}: approximation: {apx}");
+                Console.WriteLine(outfit.OutfitKey is { } okey
+                    ? $"   [npc] {label}: outfit {okey} via {outfit.SourceDetail}"
+                    : $"   [npc] {label}: no outfit (record has none, no runtime layer assigns one)");
+                overrides = npcResolver.ResolveOutfitOverrides(rn.Winner, outfit.OutfitKey);
+                if (overrides.Count > 0) Console.WriteLine($"   [npc] {label}: {overrides.Count} attire piece(s)");
+            }
+            var (colourName, colour) = npcPalette[npcActors.Count % npcPalette.Length];
+            var actor = ViewProbe.NpcActorBuilder.Build(npcHost, rn, overrides, placement, label, colour);
+            if (actor is null) continue;
+            npcActors.Add(actor);
+            Console.WriteLine($"   [npc] {label}: identity colour {colourName} (puck + caption)");
+            string outfitTag = npcNoOutfit ? "no outfit (--npc-no-outfit)"
+                : outfit?.OutfitKey is null ? "no outfit"
+                : outfit.Source switch
+                {
+                    ViewProbe.NpcOutfitSource.SkyPatcher or ViewProbe.NpcOutfitSource.Spid => outfit.SourceDetail!,
+                    ViewProbe.NpcOutfitSource.InventoryTemplate => "outfit via inventory template",
+                    _ => "outfit: record DefaultOutfit",
+                };
+            npcCaptions.Add(($"NPC {label} {rn.NpcKey} at {placement.Position.X:0},{placement.Position.Y:0},{placement.Position.Z:0}"
+                          + $" heading {float.RadiansToDegrees(placement.Rotation.Z):0}° — {outfitTag}", colour));
+        }
+        Console.WriteLine($"   [npc] {npcActors.Count} actor(s) built  ({swNpc.Elapsed.TotalSeconds:0.0}s)");
+    }
+    float PitchDownDeg()
+    {
+        var d = lookPos.Value - eyePos.Value;
+        float horiz = MathF.Sqrt(d.X * d.X + d.Y * d.Y);
+        return float.RadiansToDegrees(MathF.Atan2(-d.Z, MathF.Max(horiz, 1e-3f)));
+    }
+    bool npcPucksOn = npcActors.Count > 0 && npcPuck switch
+    {
+        "on" => true,
+        "off" => false,
+        // auto: a steep look-down is where a standing figure shrinks to a few
+        // dozen pixels and needs the marker; eye-level shots read fine bare.
+        _ => PitchDownDeg() > 60f,
+    };
+    if (npcActors.Count > 0)
+        Console.WriteLine($"   [npc] pucks: {(npcPucksOn ? "on" : "off")} ({npcPuck}"
+                        + (npcPuck == "auto" ? $", camera {PitchDownDeg():0}° down" : "") + ")");
+    void NpcCleanup()
+    {
+        npcHost?.Disposer();
+        foreach (var m2 in npcLcMods) (m2 as IDisposable)?.Dispose();
+    }
 
     string safe = new string(cellLabel.Select(c => char.IsLetterOrDigit(c) ? c : '_').ToArray());
 
@@ -1024,8 +1247,8 @@ if (textured)
         => ViewProbe.TexturedScene.RenderToPng(
                scene, assets, dataDir, modFolders, overwriteDir,
                (eyePos.Value, lookPos.Value, fov), g, r, terrainPatches, terrainLayers, navMode, navColor,
-               skyColor, terrainHeightAt, dashUnderground, dashUnderStatics, msaa, cellBounds,
-               diffs ?? noDiff, diffColor, picks, captionLines, keepFx, fxStatic, listMeshes, size, outFile);
+               skyColor, terrainHeightAt, dashUnderground, dashUnderStatics, msaa, cullAbove, cellBounds,
+               diffs ?? noDiff, diffColor, picks, captionLines, npcCaptions, npcActors, npcPucksOn, keepFx, fxStatic, listMeshes, size, outFile);
 
     if (compare is { } cmp)
     {
@@ -1102,9 +1325,11 @@ if (textured)
             var (g, r) = BuildNavSets(navs);
             var diffs = DiffFor(navs);
             string pf = Path.Combine(outDir, $"{safe}-cmp{pi + 1}-{new string(label.Select(ch => char.IsLetterOrDigit(ch) ? ch : '_').ToArray())}.png");
-            var cap = new List<string> { $"[{pi + 1}/3] {(pi == 2 ? "winning state (actual merged navmesh)" : $"cell navmesh if {label} won")} \u2014 {cellLabel}" };
+            var cap = new List<string> { $"[{pi + 1}/3] {(pi == 2 ? "winning state (actual merged navmesh)" : $"cell navmesh if {label} won")} \u2014 {cellLabel}{CullCaption()}" };
             if (redNav.Count > 0) cap.Add(RedCaption(navs));
             if (DoorCaption() is { } dc) cap.Add(dc);
+            // NPC caption lines ride the separate coloured channel (npcCaptions),
+            // passed straight into the render call below.
             if (changedKeys.Count > 0 && navDiff)
                 cap.Add($"VIOLET spheres: {diffs.Count} navmesh vertex position(s) this version has and the other does not "
                       + $"({changedKeys.Count} differ in total)");
@@ -1128,6 +1353,7 @@ if (textured)
         }
         Console.WriteLine($"wrote:\n   {stitched}");
         Console.WriteLine($"   panels left->right: [1] {cmp.A}   [2] {cmp.B}   [3] winning state (+conflict red)");
+        NpcCleanup();
         return 0;
     }
 
@@ -1139,12 +1365,13 @@ if (textured)
     }
 
     string fpOut = Path.Combine(outDir, $"{safe}-fp.png");
-    var fpCap = new List<string> { $"{cellLabel} \u2014 {(navPlugin ?? "winning state")} \u2014 eye {eyePos.Value.X:0},{eyePos.Value.Y:0},{eyePos.Value.Z:0}" };
+    var fpCap = new List<string> { $"{cellLabel} \u2014 {(navPlugin ?? "winning state")} \u2014 eye {eyePos.Value.X:0},{eyePos.Value.Y:0},{eyePos.Value.Z:0}{CullCaption()}" };
     if (redNav.Count > 0) fpCap.Add(RedCaption(navPlugin is not null && navByPlugin.TryGetValue(navPlugin, out var np0) ? np0 : winNav));
     if (DoorCaption() is { } fdc) fpCap.Add(fdc);
     int drawnShapes = Render(navTris, redTris, fpOut, fpCap);
     Console.WriteLine($"wrote:\n   {fpOut}");
     Console.WriteLine($"   eye {eyePos.Value.X:0},{eyePos.Value.Y:0},{eyePos.Value.Z:0} -> look {lookPos.Value.X:0},{lookPos.Value.Y:0},{lookPos.Value.Z:0}  fov {fov:0}°  ({drawnShapes:N0} shapes)");
+    NpcCleanup();
     return 0;
 }
 

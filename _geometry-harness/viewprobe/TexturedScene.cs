@@ -116,6 +116,18 @@ static class TexturedScene
     // Z-up (Skyrim) -> Y-up (viewer): the exact swap NifMeshBuilder uses.
     static Vector3 YUp(Vector3 z) => new(z.X, z.Z, -z.Y);
 
+    /// <summary>MO2-style loose-file precedence, the ONE encoding of the
+    /// convention: the resolver iterates LAST-to-first, so hand it
+    /// lowest-priority-first with overwrite at the very end (it outranks every
+    /// mod). Shared by this scene's resolver and the NPC actor host's.</summary>
+    internal static List<string> ResolverFolders(IReadOnlyList<string> modFoldersHighestFirst, string overwriteDir)
+    {
+        var folders = new List<string>();
+        for (int i = modFoldersHighestFirst.Count - 1; i >= 0; i--) folders.Add(modFoldersHighestFirst[i]);
+        if (!string.IsNullOrWhiteSpace(overwriteDir) && Directory.Exists(overwriteDir)) folders.Add(overwriteDir);
+        return folders;
+    }
+
     /// <summary>Build, render and save. The GL context must already be current (Program.cs owns the
     /// hidden GameWindow). Returns the number of shapes drawn.</summary>
     public static int RenderToPng(
@@ -136,11 +148,15 @@ static class TexturedScene
         bool dashUnderground,                              // dash navmesh buried under the terrain
         bool dashUnderStatics,                             // dash navmesh hidden behind geometry
         int msaa,                                          // multisample count; < 2 = off
+        float? cullAbove,                                  // dollhouse slice: drop static triangles wholly above this Skyrim z
         (float X0, float Y0, float X1, float Y1)? cellBounds, // target cell footprint; null = no outline
         IReadOnlyList<Vector3> diffVerts,                  // navmesh vertices unique to THIS panel
         Vector4 diffColor,                                 // colour for those vertices' spheres
         IReadOnlyList<(int X, int Y)> picks,                // image pixels to report world coords for
-        IReadOnlyList<string> captionLines,                // burned into the image, top-left
+        IReadOnlyList<string> captionLines,                // burned into the image, top-left (white)
+        IReadOnlyList<(string Text, Vector3 Color)> npcCaptionLines, // per-actor caption lines, drawn AFTER the white ones in each actor's identity colour
+        IReadOnlyList<NpcActorRender> npcActors,           // placed characters — meshes BORROWED (see below), never disposed here
+        bool npcPucks,                                     // per-actor-coloured ground disc + always-visible rim under each actor
         bool keepFx,                                       // --fx: draw effect-shader shapes too
         bool fxStatic,                                     // --fx-static: draw them as a frozen frame
         bool listEffectMeshes,                             // --list-meshes: name the meshes they came from
@@ -149,11 +165,7 @@ static class TexturedScene
         var logger = new ConsoleCvLogger();
         var gate = new CharacterViewerLogGate { Verbose = Environment.GetEnvironmentVariable("VP_CV_VERBOSE") == "1" };
 
-        // MO2-style precedence for loose files: the resolver iterates LAST-to-first, so hand it
-        // lowest-priority-first and put overwrite at the very end (it outranks every mod).
-        var folders = new List<string>();
-        for (int i = modFoldersHighestFirst.Count - 1; i >= 0; i--) folders.Add(modFoldersHighestFirst[i]);
-        if (!string.IsNullOrWhiteSpace(overwriteDir) && Directory.Exists(overwriteDir)) folders.Add(overwriteDir);
+        var folders = ResolverFolders(modFoldersHighestFirst, overwriteDir);
 
         var resolver = new GameAssetResolver(new HcDataFolder(dataDir), new HcBsaProvider(assets), gate, logger);
         resolver.SetAdditionalFolders(folders);
@@ -191,6 +203,7 @@ static class TexturedScene
         // however many refs place that mesh).
         int fxShapesSkipped = 0, nmShapesSkipped = 0, fxRefCount = 0;
         int fxStaticShapes = 0, fxStaticRefCount = 0;
+        int cullTrisDropped = 0, cullShapesDropped = 0;
         // env VP_FXSTATIC_EMIT — brightness of the --fx-static stand-in. The real number is
         // BSEffectShaderProperty.baseColorScale, which the builder does not read; until it does,
         // this is the knob that stands in for it.
@@ -321,8 +334,31 @@ static class TexturedScene
                     wb[i] = YUp(Vector3.TransformNormal(new Vector3(mb2.X, -mb2.Z, mb2.Y), rot));
                 }
 
+                // --cull-above: the dollhouse slice. A triangle is dropped only when ALL
+                // THREE of its vertices sit above the cut — a wall spanning the cut keeps
+                // standing (its lower verts anchor it) while a roof, vault or upper floor
+                // wholly above it vanishes, which is what lets an interior top-down show
+                // the storey the actors stand on instead of the shell over it. Viewer Y
+                // IS Skyrim Z (YUp = (x, z, −y)), so the test reads wp[].Y directly.
+                // Statics only: terrain, navmesh, NPC actors and the overlay are never
+                // sliced — the subject of the picture must not be cullable by the knife
+                // that exists to reveal it.
+                var tri = b.Indices;
+                if (cullAbove is { } cutZ)
+                {
+                    var keep = new List<int>(tri.Length);
+                    for (int i = 0; i + 2 < tri.Length; i += 3)
+                    {
+                        if (wp[tri[i]].Y > cutZ && wp[tri[i + 1]].Y > cutZ && wp[tri[i + 2]].Y > cutZ)
+                        { cullTrisDropped++; continue; }
+                        keep.Add(tri[i]); keep.Add(tri[i + 1]); keep.Add(tri[i + 2]);
+                    }
+                    if (keep.Count == 0) { cullShapesDropped++; continue; }   // shape wholly above the cut
+                    if (keep.Count < tri.Length) tri = keep.ToArray();
+                }
+
                 var mesh = new GlMesh();
-                mesh.Upload(Interleave(wp, wn, b.TextureCoordinates, wt, wb, b.VertexColors), b.Indices);
+                mesh.Upload(Interleave(wp, wn, b.TextureCoordinates, wt, wb, b.VertexColors), tri);
                 mesh.ShapeName = b.ShapeName;
                 mesh.HasVertexColors = b.VertexColors is { Length: > 0 };
                 mesh.UseAlphaTest = b.HasAlphaTest;
@@ -366,9 +402,9 @@ static class TexturedScene
                         var dir = wp[i] - centroid;
                         sp[i] = dir.LengthSquared() > 1e-6f ? wp[i] + Vector3.Normalize(dir) * rim : wp[i];
                     }
-                    for (int i = 0; i + 2 < b.Indices.Length; i += 3)
+                    for (int i = 0; i + 2 < tri.Length; i += 3)
                     {
-                        var p0 = sp[b.Indices[i]]; var p1 = sp[b.Indices[i + 1]]; var p2 = sp[b.Indices[i + 2]];
+                        var p0 = sp[tri[i]]; var p1 = sp[tri[i + 1]]; var p2 = sp[tri[i + 2]];
                         var ng = Vector3.Cross(p1 - p0, p2 - p0);
                         var outward = Vector3.Dot(ng, (p0 + p1 + p2) / 3f - centroid) > 0f;
                         // Geometric normal pointing INWARD: seen from outside the hull, near
@@ -628,6 +664,21 @@ static class TexturedScene
 
         var red = new Vector4(1f, 0.12f, 0.05f, 1f);
 
+        // ---- placed NPC actors -----------------------------------------------------------
+        // Their meshes were built and WORLD-BAKED by NpcActorBuilder on this same GL context
+        // and are BORROWED into this panel's renderer: they must draw in every pass (the
+        // occlusion prepass included — a navmesh behind an actor is genuinely hidden), but
+        // this renderer's Dispose()/ClearMeshes() DISPOSES what it holds, so every borrowed
+        // mesh is RemoveMesh'd again before this method returns. The owning VMs outlive all
+        // panels and are disposed by Program.cs after the last one.
+        var borrowedNpcMeshes = new List<GlMesh>();
+        foreach (var actor in npcActors)
+            foreach (var am in actor.Meshes)
+            {
+                renderer.AddMesh(am);
+                borrowedNpcMeshes.Add(am);
+            }
+
         // First-person camera: eye/look given in Skyrim coordinates, expressed on the OrbitCamera.
         const float NearPlane = 4f, FarPlane = 131072f;
         var eyeY = YUp(cam.Eye); var lookY = YUp(cam.Look);
@@ -818,6 +869,35 @@ static class TexturedScene
                 var m1 = BuildFill(redTris, new Vector4(0.95f, 0.15f, 0.08f, MathF.Min(0.55f, alpha + 0.2f)), "navmesh-fill-red");
                 m1.IsDecal = true;
                 renderer.AddMesh(m1); meshes.Add(m1);
+            }
+        }
+
+        // ---- NPC pucks: the translucent fill disc ----------------------------------------
+        // A standing figure is a few dozen pixels from a top-down camera; the puck is what
+        // makes "the NPC is HERE" legible at plan scale (Piranha's "puck tracker" request).
+        // The FILL rides the decal channel like the navmesh sheet — surface, depth-tested,
+        // hidden by what covers it — and joins after Pass 1 so the adaptive nav colour never
+        // samples its own marker yellow. The always-visible RIM is overlay geometry, added
+        // with the other layers below.
+        if (npcPucks && npcActors.Count > 0)
+        {
+            const int PuckSegments = 48;
+            foreach (var actor in npcActors)
+            {
+                var c = actor.PositionSkyrim;
+                var discTris = new List<(Vector3 A, Vector3 B, Vector3 C)>(PuckSegments);
+                for (int s = 0; s < PuckSegments; s++)
+                {
+                    float a0 = 2f * MathF.PI * s / PuckSegments, a1 = 2f * MathF.PI * (s + 1) / PuckSegments;
+                    discTris.Add((c,
+                        c + new Vector3(MathF.Cos(a0), MathF.Sin(a0), 0f) * actor.PuckRadius,
+                        c + new Vector3(MathF.Cos(a1), MathF.Sin(a1), 0f) * actor.PuckRadius));
+                }
+                var disc = BuildFill(discTris,
+                    new Vector4(actor.PuckColor.X, actor.PuckColor.Y, actor.PuckColor.Z, 0.38f),
+                    $"npc-puck:{actor.Label}");
+                disc.IsDecal = true;
+                renderer.AddMesh(disc); meshes.Add(disc);
             }
         }
 
@@ -1048,6 +1128,44 @@ static class TexturedScene
             Console.WriteLine($"   nav diff: {diffVerts.Count} vertex sphere(s) — vertices this version has and the other does not");
         }
 
+        // ---- NPC pucks: the always-visible rim -------------------------------------------
+        // A thin yellow ring at the fill disc's edge, depth test OFF like the dashed layers:
+        // an actor occluded by a mezzanine or a wall still announces where it stands. The
+        // rim is the findability half; the translucent fill (a decal, added above) is the
+        // ground-footprint half and stays honestly hidden by whatever covers it.
+        if (npcPucks && npcActors.Count > 0)
+        {
+            const int RimSegments = 64;
+            var rim = new List<float>();
+            foreach (var actor in npcActors)
+            {
+                var c = actor.PositionSkyrim + new Vector3(0, 0, 2.5f);
+                float rIn = actor.PuckRadius - 1.75f, rOut = actor.PuckRadius + 1.75f;
+                // Pre-divide by the overlay shader's x1.5 lift so the rim lands at the
+                // actor's EXACT identity colour — the same one the fill and the caption
+                // line wear. (All palette entries are <= 1, so /1.5 then x1.5 round-trips
+                // without hitting the clamp; the old always-yellow rim relied on the lift
+                // and came out a step brighter than its own fill.)
+                var rimColour = actor.PuckColor / 1.5f;
+                for (int s = 0; s < RimSegments; s++)
+                {
+                    float a0 = 2f * MathF.PI * s / RimSegments, a1 = 2f * MathF.PI * (s + 1) / RimSegments;
+                    var d0 = new Vector3(MathF.Cos(a0), MathF.Sin(a0), 0f);
+                    var d1 = new Vector3(MathF.Cos(a1), MathF.Sin(a1), 0f);
+                    var i0 = YUp(c + d0 * rIn); var o0 = YUp(c + d0 * rOut);
+                    var i1 = YUp(c + d1 * rIn); var o1 = YUp(c + d1 * rOut);
+                    Overlay.Vertex(rim, i0, rimColour, Vector3.Zero);
+                    Overlay.Vertex(rim, o0, rimColour, Vector3.Zero);
+                    Overlay.Vertex(rim, o1, rimColour, Vector3.Zero);
+                    Overlay.Vertex(rim, i0, rimColour, Vector3.Zero);
+                    Overlay.Vertex(rim, o1, rimColour, Vector3.Zero);
+                    Overlay.Vertex(rim, i1, rimColour, Vector3.Zero);
+                }
+            }
+            layers.Add((rim.ToArray(), false, false));
+            Console.WriteLine($"   npc pucks: {npcActors.Count} disc(s) + always-visible rim(s), one identity colour per actor");
+        }
+
         // The overlay pass itself: viewprobe's own flat shader, so an outline is the exact
         // palette colour rather than whatever the scene lighting does to it, and so the hidden
         // layers can drop the depth test.
@@ -1126,7 +1244,7 @@ static class TexturedScene
             };
         }
 
-        float[]? pickDepth = picks.Count > 0 ? new float[size * size] : null;
+        float[]? pickDepth = picks.Count > 0 || npcActors.Count > 0 ? new float[size * size] : null;
         var pixels = Draw(pickDepth);
         if (wireProg != 0) { GL.DeleteProgram(wireProg); GL.DeleteVertexArray(wireVao); GL.DeleteBuffer(wireVbo); }
 
@@ -1161,6 +1279,35 @@ static class TexturedScene
             }
         }
 
+        // Is each actor actually IN the picture? The puck rim pierces everything by
+        // design, so an actor under an upper floor renders as an EMPTY RING — which
+        // reads as a defect unless the console says what happened and names the fix.
+        // Same depth compare (same slack constants) as the navmesh dash classifier,
+        // sampled at the actor's head; the head pixel is the actor's own surface when
+        // visible, so only a genuinely nearer foreign surface trips the warning.
+        if (pickDepth is not null && npcActors.Count > 0)
+        {
+            foreach (var actor in npcActors)
+            {
+                float aScale = actor.PuckRadius / 34f;                       // PuckRadius = 34 x world scale
+                var headY = YUp(actor.PositionSkyrim + new Vector3(0, 0, 110f * aScale));
+                if (ScreenOf(headY) is not { } hp)
+                { Console.WriteLine($"   [npc] {actor.Label}: outside the frame at this camera"); continue; }
+                float sceneD = ViewDist(pickDepth[hp.Y * size + hp.X]);      // ScreenOf is GL bottom-left, like the buffer
+                float mineD = Vector3.Dot(headY - eyeY, viewFwd);
+                // The nav classifier's slack, PLUS the actor's own headroom: the sample
+                // point sits inside the head, so the visible surface at that pixel is the
+                // actor's own hood/hair a dozen units nearer — which must not read as
+                // "hidden". Only a surface more than ~a head farther out than the actor's
+                // own shell can be foreign (a floor, a roof), and that is the finding.
+                if (mineD > sceneD * occlRel + occlAbs + 30f * aScale)
+                    Console.WriteLine($"   [npc] {actor.Label}: HIDDEN behind scene geometry at this camera "
+                                    + $"(nearest surface {sceneD:0} u out, actor {mineD:0} u) — only the puck rim shows; "
+                                    + $"slice the view with --cull-above Z (e.g. {actor.PositionSkyrim.Z + 140f * aScale:0}) "
+                                    + "or move the camera below the occluder");
+            }
+        }
+
         GL.BindFramebuffer(FramebufferTarget.Framebuffer, 0);
         GL.DeleteFramebuffer(fbo); GL.DeleteTexture(colorTex); GL.DeleteRenderbuffer(depthRb);
         if (msFbo != 0) { GL.DeleteFramebuffer(msFbo); GL.DeleteRenderbuffer(msColorRb); GL.DeleteRenderbuffer(msDepthRb); }
@@ -1175,7 +1322,7 @@ static class TexturedScene
         using (var img = Image.LoadPixelData<Rgba32>(pixels, size, size))
         {
             img.Mutate(x => x.Flip(FlipMode.Vertical));
-            if (captionLines.Count > 0)
+            if (captionLines.Count + npcCaptionLines.Count > 0)
             {
                 // Burn the caption into the frame so it travels with the PNG into any viewer.
                 // Everything about the caption is in units of the 1280-wide frame it was
@@ -1188,7 +1335,8 @@ static class TexturedScene
                     foreach (var fam in SystemFonts.Families) { font = fam.CreateFont(15f * capScale, FontStyle.Bold); break; }
                 if (font is not null)
                 {
-                    int lineH = (int)(22f * capScale), barH = (int)(10f * capScale) + lineH * captionLines.Count;
+                    int totalLines = captionLines.Count + npcCaptionLines.Count;
+                    int lineH = (int)(22f * capScale), barH = (int)(10f * capScale) + lineH * totalLines;
                     var f2 = font;
                     img.Mutate(x =>
                     {
@@ -1196,6 +1344,19 @@ static class TexturedScene
                         for (int i = 0; i < captionLines.Count; i++)
                             x.DrawText(captionLines[i], f2, SixLabors.ImageSharp.Color.White,
                                        new SixLabors.ImageSharp.PointF(12f * capScale, 7f * capScale + lineH * i));
+                        // Each actor's caption line wears that actor's identity colour — the
+                        // same one its puck fill and rim wear — so "who is who" is answered by
+                        // the caption itself, not by counting rings.
+                        for (int j = 0; j < npcCaptionLines.Count; j++)
+                        {
+                            var (txt, c) = npcCaptionLines[j];
+                            x.DrawText(txt, f2,
+                                       SixLabors.ImageSharp.Color.FromRgb(
+                                           (byte)Math.Clamp(c.X * 255f, 0f, 255f),
+                                           (byte)Math.Clamp(c.Y * 255f, 0f, 255f),
+                                           (byte)Math.Clamp(c.Z * 255f, 0f, 255f)),
+                                       new SixLabors.ImageSharp.PointF(12f * capScale, 7f * capScale + lineH * (captionLines.Count + j)));
+                        }
                     });
                 }
                 else
@@ -1205,10 +1366,19 @@ static class TexturedScene
             img.SaveAsPng(outPath);
         }
 
+        // Give back the borrowed NPC meshes BEFORE this renderer can dispose them —
+        // ClearMeshes()/Dispose() destroy what they hold, and the actors' VAOs must
+        // survive into the next compare panel. Their owners (the VMs) are disposed
+        // by Program.cs after the last panel.
+        foreach (var bm in borrowedNpcMeshes) renderer.RemoveMesh(bm);
+
         foreach (var m in meshes) m.Dispose();
         GL.DeleteTexture(orange);
         Console.WriteLine($"   textured: {shapes:N0} shapes ({texturedShapes:N0} with a real diffuse), {missingMesh:N0} refs without a resolvable mesh"
                         + $"; {size}x{size}, {(samples >= 2 ? samples + "x msaa" : "no msaa")}");
+        if (cullAbove is { } cz2)
+            Console.WriteLine($"   cull-above z {cz2:0}: {cullTrisDropped:N0} static triangle(s) removed, "
+                            + $"{cullShapesDropped:N0} shape(s) wholly above the cut (terrain/nav/actors/overlay untouched)");
         if (fxStaticShapes > 0)
             Console.WriteLine($"   static effect shapes: {fxStaticShapes:N0} DRAWN on {fxStaticRefCount:N0} ref(s) "
                             + "— --fx-static, frozen at the authored frame, additive, no depth write");
