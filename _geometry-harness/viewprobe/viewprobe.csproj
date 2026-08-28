@@ -9,9 +9,17 @@
     <NoWarn>CA1416</NoWarn>
     <UseWPF>true</UseWPF>
   </PropertyGroup>
+  <PropertyGroup>
+    <CharacterViewerRenderingPath Condition="'$(CharacterViewerRenderingPath)' == ''">..\..\..\SynthEBD\CharacterViewer.Rendering\CharacterViewer.Rendering.csproj</CharacterViewerRenderingPath>
+  </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="..\..\src\housecarl-core\housecarl-core.csproj" />
-    <ProjectReference Include="S:\Dev\SynthEBD\CharacterViewer.Rendering\CharacterViewer.Rendering.csproj" />
+    <!-- CharacterViewer.Rendering lives in a SEPARATE repo. This was an absolute drive path, which
+         built on exactly one machine. Default assumes the two repos are siblings; override with
+         -p:CharacterViewerRenderingPath=... or the environment variable of the same name when they
+         are not. It is also published as a NuGet package, so a consumer who does not want the
+         source checkout can swap this ProjectReference for a PackageReference. -->
+    <ProjectReference Include="$(CharacterViewerRenderingPath)" />
   </ItemGroup>
   <ItemGroup>
     <Compile Include="..\_shared\HarnessTarget.cs" Link="HarnessTarget.cs" />
