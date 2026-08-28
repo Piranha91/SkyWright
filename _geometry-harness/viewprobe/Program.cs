@@ -158,6 +158,25 @@ using var assets = AssetResolver.Build(overwriteDir, modsDir, dataDir, comp.Enab
 var order = Mo2LoadOrder.Build(profileDir, modsDir, dataDir, overwriteDir);
 
 var winRef = new Dictionary<FormKey, PlacedRef>();
+// Conflicts are parsed BEFORE the load walk so implicated doors can be located wherever they
+// actually live — a door reported against a navmesh's cell is often placed in a neighbour cell
+// or the worldspace persistent cell, and "not drawn, silently" hides exactly the thing the
+// overlay exists to show.
+HarnessShared.ConflictFile? conflictFile = null;
+var doorWatchKeys = new HashSet<FormKey>();
+var doorWhere = new Dictionary<FormKey, (FormKey Cell, string? CellEd, PlacedRef Ref)>();
+if (conflictsPath is not null)
+{
+    try { conflictFile = HarnessShared.ConflictIo.Read(conflictsPath); }
+    catch (Exception ex) { Console.Error.WriteLine($"could not read '{conflictsPath}': {ex.Message}"); return 1; }
+    foreach (var c in conflictFile.Conflicts)
+        foreach (var rec in c.Necessary.Concat(c.Alternative ?? Array.Empty<HarnessShared.ConflictRecord>()))
+            if (rec.Role == "door")
+            { try { doorWatchKeys.Add(FormKey.Factory(rec.FormKey)); } catch { } }
+}
+// Persistent worldspace refs (doors above all) live in the worldspace's PERSISTENT cell, not the
+// exterior cell record — collect them separately, merge by position after the target is known.
+var persistentWin = new Dictionary<FormKey, (FormKey Ws, PlacedRef Ref)>();
 var winNav = new Dictionary<FormKey, NavmeshGeometry>();
 FormKey targetWorldspace = FormKey.Null;
 (int X, int Y)? targetGrid = null;
@@ -207,6 +226,19 @@ foreach (var path in order.OrderedPaths)
 
         foreach (var cp in PlacementExtract.FromMod(m))
         {
+            // Worldspace PERSISTENT refs (doors above all). Not detected by the holding cell —
+            // the persistent cell masquerades as grid (0,0) — but by each ref's own Persistent
+            // flag: the game loads these with the worldspace, so membership in a rendered cell
+            // is a question of POSITION, resolved after the target is known.
+            if (cp.Worldspace != FormKey.Null)
+                foreach (var r in cp.Refs)
+                    if (r.Persistent) persistentWin[r.FormKey] = (cp.Worldspace, r);   // later plugin wins
+            if (doorWatchKeys.Count > 0)
+                foreach (var r in cp.Refs)
+                    if (doorWatchKeys.Contains(r.FormKey))
+                        { doorWhere[r.FormKey] = (cp.Cell, cp.CellEditorId, r);     // later plugin wins
+                          if (Environment.GetEnvironmentVariable("VP_DOOR_DEBUG") == "1")
+                              Console.WriteLine($"   [debug] door {r.FormKey} in cp: Cell={cp.Cell} Grid={(cp.Grid is { } gg ? $"{gg.X},{gg.Y}" : "null")} Interior={cp.Interior} Ws={cp.Worldspace} plugin={m.ModKey}"); }
             bool match = cellKey is { } ck ? cp.Cell == ck
                 : string.Equals(cp.CellEditorId, target, StringComparison.OrdinalIgnoreCase)
                   || cp.Cell.ToString().Equals(target, StringComparison.OrdinalIgnoreCase)
@@ -235,6 +267,19 @@ foreach (var path in order.OrderedPaths)
 
 if (cellKey is null) { Console.Error.WriteLine($"cell '{target}' not found in the active load order."); return 1; }
 Console.WriteLine($"cell {cellLabel} {(interior ? "(interior)" : "(exterior)")}  {cellKey}");
+if (!interior && targetGrid is { } tgp)
+{
+    float px0 = tgp.X * 4096f, py0 = tgp.Y * 4096f;
+    int addedPersist = 0;
+    foreach (var (pws, pr) in persistentWin.Values)
+        if (pws == targetWorldspace
+            && pr.Position.X >= px0 && pr.Position.X < px0 + 4096f
+            && pr.Position.Y >= py0 && pr.Position.Y < py0 + 4096f
+            && !winRef.ContainsKey(pr.FormKey))
+        { winRef[pr.FormKey] = pr; addedPersist++; }
+    if (addedPersist > 0)
+        Console.WriteLine($"   +{addedPersist} persistent worldspace ref(s) inside this cell's bounds (doors live here)");
+}
 Console.WriteLine($"winning state: {winRef.Count:N0} refs, {winNav.Count:N0} navmeshes  ({sw.Elapsed.TotalSeconds:0.0}s)");
 
 // ---------------------------------------------------------------------------------------
@@ -294,11 +339,8 @@ if (textured)
         try { MarkRed(FormKey.Factory(keyText), tri); }
         catch { Console.Error.WriteLine($"--red '{spec}' is not FORMKEY[:tri]."); return 1; }
     }
-    if (conflictsPath is not null)
+    if (conflictFile is { } cf)
     {
-        HarnessShared.ConflictFile cf;
-        try { cf = HarnessShared.ConflictIo.Read(conflictsPath); }
-        catch (Exception ex) { Console.Error.WriteLine($"could not read '{conflictsPath}': {ex.Message}"); return 1; }
         foreach (var c in cf.Conflicts)
             foreach (var rec in c.Necessary.Concat(c.Alternative ?? Array.Empty<HarnessShared.ConflictRecord>()))
             {
@@ -310,6 +352,14 @@ if (textured)
         int redHere = redNav.Count(kv => winNav.ContainsKey(kv.Key));
         Console.WriteLine($"   conflicts overlay: {redHere} navmesh record(s) in this cell painted red, "
                         + $"{conflictDoors.Count} door(s) highlighted (from {cf.Conflicts.Count} conflicts in {Path.GetFileName(conflictsPath)})");
+        foreach (var dfk in conflictDoors)
+            if (winRef.TryGetValue(dfk, out var dref))
+                Console.WriteLine($"   door {dfk} at {dref.Position.X:0},{dref.Position.Y:0},{dref.Position.Z:0}  (orange)");
+        foreach (var dfk in doorWatchKeys)
+            if (!winRef.ContainsKey(dfk))
+                Console.WriteLine(doorWhere.TryGetValue(dfk, out var dw)
+                    ? $"   implicated door {dfk} is NOT in this cell: it sits in {dw.CellEd ?? dw.Cell.ToString()} at {dw.Ref.Position.X:0},{dw.Ref.Position.Y:0},{dw.Ref.Position.Z:0}"
+                    : $"   implicated door {dfk}: no placed ref with this FormKey anywhere in the load order");
         if (redHere == 0 && conflictDoors.Count == 0)
             Console.WriteLine($"   (no conflict in that file names a navmesh or door in THIS cell — nothing to paint)");
     }
@@ -519,6 +569,10 @@ if (textured)
             ? ((pre & 0xFE000000u) == 0xFE000000u ? (pre | (fk.ID & 0xFFFu)) : (pre | fk.ID)).ToString("X8")
             : "??" + fk.ID.ToString("X6");
 
+    string? DoorCaption()
+        => conflictDoors.Count == 0 ? null
+         : "ORANGE door " + string.Join("   ", conflictDoors.Select(fk => $"{fk} = FormID {RuntimeId(fk)}"));
+
     string RedCaption(IReadOnlyDictionary<FormKey, NavmeshGeometry> navs)
         => string.Join("   ", redNav.Keys.Select(fk =>
                $"RED {fk} = FormID {RuntimeId(fk)}" +
@@ -550,10 +604,20 @@ if (textured)
         // Three panels, one camera: A's navmesh, B's navmesh, the winning state. The world
         // geometry and terrain are the winning state in all three — only the navmesh layer
         // changes, which is exactly the thing being compared.
+        // Each side panel is the cell's FULL navmesh as if that plugin won: the winning state
+        // with the plugin's own versions substituted in. Records neither plugin touches are then
+        // IDENTICAL in all three panels, so any visible difference is the actual disagreement.
+        IReadOnlyDictionary<FormKey, NavmeshGeometry> AsIfWon(string plg)
+        {
+            var d = new Dictionary<FormKey, NavmeshGeometry>(winNav);
+            if (navByPlugin.TryGetValue(plg, out var own))
+                foreach (var kv in own) d[kv.Key] = kv.Value;
+            return d;
+        }
         var panels = new (string Label, IReadOnlyDictionary<FormKey, NavmeshGeometry> Navs)[]
         {
-            (cmp.A, navByPlugin.TryGetValue(cmp.A, out var da) ? da : new Dictionary<FormKey, NavmeshGeometry>()),
-            (cmp.B, navByPlugin.TryGetValue(cmp.B, out var db) ? db : new Dictionary<FormKey, NavmeshGeometry>()),
+            (cmp.A, AsIfWon(cmp.A)),
+            (cmp.B, AsIfWon(cmp.B)),
             ("winning state", winNav),
         };
         // (panel captions name the navmesh SOURCE; world geometry is the winning state in all three)
@@ -565,12 +629,13 @@ if (textured)
         for (int pi = 0; pi < panels.Length; pi++)
         {
             var (label, navs) = panels[pi];
-            if (navs.Count == 0 && pi < 2)
-                Console.WriteLine($"   panel '{label}': provides NO navmesh in this cell -- panel shows world only");
+            if (pi < 2 && (!navByPlugin.TryGetValue(label, out var ownNv) || ownNv.Count == 0))
+                Console.WriteLine($"   panel '{label}': provides NO navmesh version in this cell -- panel equals the winning state");
             var (g, r) = BuildNavSets(navs);
             string pf = Path.Combine(outDir, $"{safe}-cmp{pi + 1}-{new string(label.Select(ch => char.IsLetterOrDigit(ch) ? ch : '_').ToArray())}.png");
-            var cap = new List<string> { $"[{pi + 1}/3] {label} \u2014 {(pi == 2 ? "merged winning navmesh" : "navmesh as this plugin provides it")} \u2014 {cellLabel}" };
+            var cap = new List<string> { $"[{pi + 1}/3] {(pi == 2 ? "winning state (actual merged navmesh)" : $"cell navmesh if {label} won")} \u2014 {cellLabel}" };
             if (redNav.Count > 0) cap.Add(RedCaption(navs));
+            if (DoorCaption() is { } dc) cap.Add(dc);
             Render(g, r, pf, cap);
             panelFiles.Add(pf);
             Console.WriteLine($"   panel {pi + 1} ({label}): {g.Count:N0} green + {r.Count:N0} red navmesh tris -> {pf}");
@@ -604,6 +669,7 @@ if (textured)
     string fpOut = Path.Combine(outDir, $"{safe}-fp.png");
     var fpCap = new List<string> { $"{cellLabel} \u2014 {(navPlugin ?? "winning state")} \u2014 eye {eyePos.Value.X:0},{eyePos.Value.Y:0},{eyePos.Value.Z:0}" };
     if (redNav.Count > 0) fpCap.Add(RedCaption(navPlugin is not null && navByPlugin.TryGetValue(navPlugin, out var np0) ? np0 : winNav));
+    if (DoorCaption() is { } fdc) fpCap.Add(fdc);
     int drawnShapes = Render(navTris, redTris, fpOut, fpCap);
     Console.WriteLine($"wrote:\n   {fpOut}");
     Console.WriteLine($"   eye {eyePos.Value.X:0},{eyePos.Value.Y:0},{eyePos.Value.Z:0} -> look {lookPos.Value.X:0},{lookPos.Value.Y:0},{lookPos.Value.Z:0}  fov {fov:0}°  ({drawnShapes:N0} shapes)");
