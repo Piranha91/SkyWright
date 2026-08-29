@@ -18,7 +18,12 @@ findings they demonstrate) lives with that instance, not here.
 - **Project:** `_geometry-harness/viewprobe/`. `Program.cs` (CLI, load-order walk, scene/terrain/nav
   assembly, compare orchestration), `TexturedScene.cs` (GL rendering, captions, adaptive colour),
   `InteractiveViewer.cs` (the `--interactive` fly-through: window loop, hover picking and the
-  click-lock, the live navmesh-display and height-clip state, HUD).
+  click-lock, the live navmesh-display and height-clip state, HUD, worklist paging),
+  `BatEmit.cs` (`--emit-bats`: its own compact load-order walk, cell identity and navmesh only, so
+  it is multi-cell for free and never touches the render pipeline). The worklist MODEL is shared —
+  `_shared/Worklist.cs` — because a detector could emit one directly.
+  Program.cs's per-cell work lives in a local function, `RunCellTextured`, so a worklist can call it
+  once per cell; the load order, asset resolver and conflict parsing are resolved above it, once.
 - **Rendering library:** `CharacterViewer.Rendering` (project reference, currently an absolute path
   to a sibling checkout). It supplies `NifMeshBuilder` (NIF → Y-up meshes with texture paths),
   `GlRenderer`/`GlMesh`, `GlTextureManager` (DDS load + white fallback), `OrbitCamera`. viewprobe
@@ -104,6 +109,17 @@ findings they demonstrate) lives with that instance, not here.
   exact knife; `--interactive` also has a live shape-granular band on the clip keys, and it
   prints the `--cull-above Z` line for whatever slice flying found.
 
+- **Worklist** (`--worklist FILE`): a SHOT LIST — cells, and per cell the camera poses worth
+  looking at, each with the sentence that says why. It REPLACES the positional cell argument (a
+  run may open with a flag when a worklist supplies the cells) and it overrides `--eye`/`--yaw`/
+  `--pitch`/`--fov`, because a shot IS the camera. With `--interactive`, `PageUp`/`PageDown` step
+  the shots and `Ctrl+PageUp`/`PageDown` step the cells; without it, every shot renders to its own
+  PNG named `<cell>-c<N>s<M>-<label>-fp.png`. Schema and rationale: *Worklists* below.
+- **Console bat files** (`--emit-bats NAME|DIR`, needs `--worklist`): write the worklist as Skyrim
+  console batch files instead of rendering anything — see *Worklists* below. `--bats-profiles A,B`
+  additionally enables that mod folder in those MO2 profiles and DISABLES it in every other profile
+  of the instance.
+
 ### Asking the render questions
 
 All repeatable, all print to the console.
@@ -138,6 +154,8 @@ all knowledge.
 | `VP_FLY_LOCK=1` | with `VP_FLY_PICK`: lock the HUD onto what it hit, exactly as `LMB` does |
 | `VP_FLY_NAV=off\|filled\|wire\|both` | set the navmesh display mode before the capture — the `N` key's effect, headlessly |
 | `VP_FLY_CLIP=lo,hi` | set the height clip band before the capture; either side may be empty, so `,2048` is a ceiling with no floor |
+| `VP_FLY_SHOT=N` | with a `--worklist`: open on shot N (1-based) of this cell — the `PageUp`/`PageDown` key's effect, headlessly |
+| `VP_FLY_CELL=+1\|-1` | with `VP_FLY_FRAMES` and a multi-cell `--worklist`: after the capture, request the next/previous cell instead of closing — `Ctrl+PageUp`/`PageDown`'s effect. Without it the multi-cell rebuild is the one path in the feature no test can reach, and it is the one that tears a GL context down and builds another |
 | `VP_FLY_HUD=1` | include the HUD bar in the capture. `F12` deliberately excludes it, so this is the only way a test can see the bar — at the cost of the burned caption overlapping its first line |
 
 ---
@@ -233,6 +251,9 @@ gitignored for the same reason: probe transcripts name the plugins of whatever l
 - **Interactive fly-through** (`--interactive`): the same scene in a visible window — WASD +
   mouse flight, hover-to-identify (refs, navmesh, terrain) with a click-to-lock readout, live
   navmesh display mode, a live height clip, pose echo, F12 capture. Its own section below.
+- **Worklists** (`--worklist`): a shot list drives both the fly-through's `PageUp`/`PageDown`
+  paging and, through `--emit-bats`, the in-game console batch files — one set of coordinates, so
+  the render and the tester's standing position cannot disagree. Its own section below.
 - **Terrain:** winning LAND heightmaps for the target cell ± 1 ring, painted with each quadrant's
   winning base landscape texture (LTEX → TXST → diffuse, winner-takes-all), tiled ~256 u/repeat.
   The heightmaps are kept as a queryable field (`terrainHeightAt`, same 128 u quads and diagonal
@@ -312,8 +333,8 @@ and both echoed to the console as a paste-ready flag; `Shift` ×5, `Ctrl` ×0.2 
 rate, movement and clip alike. `N` cycles the navmesh display, `[`/`]` and `;`/`'` move the
 height clip, `\` turns it off (all three below). `P` prints the current pose as a paste-ready
 `--eye X,Y,Z --yaw N --pitch N --fov N` line. `F12` saves a captioned PNG (window resolution,
-standard caption bar + `viewprobe` tEXt chunk with the pose) into `--out`. `H`/`F1` reprints
-the controls with their current values; `Esc` quits. Closing the window prints the final pose,
+standard caption bar + `viewprobe` tEXt chunk with the pose) into `--out`. `PageUp`/`PageDown` step a `--worklist`'s shots and `Ctrl+PageUp`/`PageDown` its cells
+(below). `H`/`F1` reprints the controls with their current values; `Esc` quits. Closing the window prints the final pose,
 so the last view is never lost.
 
 **Navmesh display, live** (`N` cycles `off → filled → wire → both`). Under `--interactive` the
@@ -391,6 +412,99 @@ none of it can change what a static re-render of the same pose produces. Verifie
 render before and after this feature landed is byte-identical, interior (`--nav both
 --cull-above`) and exterior (`--nav both --conflicts`, red navmesh + cell outline + terrain
 layers) alike.
+
+---
+
+## Worklists (`--worklist`, `--emit-bats`)
+
+A worklist is a SHOT LIST: cells, and per cell the camera poses worth looking at, each carrying the
+sentence that says why. One file, two consumers — the fly-through and the in-game console — so the
+picture a render shows and the place a tester ends up standing come from the SAME coordinates and
+cannot drift apart. They did drift, by hand, in the 2026-08-28 field run.
+
+Model and validation: `_shared/Worklist.cs`. Read and checked BEFORE the load walk, because a
+malformed shot list found after a multi-minute walk is a multi-minute walk wasted.
+
+```json
+{
+  "label": "what this list is for",
+  "eyeHeight": 120,
+  "cells": [
+    { "cell": "FalkreathExterior03",
+      "shots": [
+        { "label": "the sentence that says why this shot is worth a look",
+          "eye": [-26671, -84175, -2117],
+          "floorZ": -2237,
+          "yaw": 0, "pitch": 0, "fov": 65,
+          "note": "optional; printed on arrival and in the bat manifest" }
+      ] }
+  ]
+}
+```
+
+- **`eye` is the CAMERA, `floorZ` is the FLOOR.** They are separate fields because the two consumers
+  need different ones — the render wants the eye, `player.setpos` wants the floor, and giving it the
+  eye buries the tester's feet. Source `floorZ` from `--nav-at`, which answers *standable*; a
+  `--pick` answers *some surface is here*, which is not the same question. With no `floorZ` the
+  generator falls back to `eye.z − eyeHeight` and SAYS it assumed rather than measured.
+- **`look: [X,Y,Z]`** may replace `yaw`/`pitch`, resolving the same way `--look` does.
+- **`nav`** and **`cullAbove`** are optional per-shot overrides. `nav` applies exactly (it is a
+  visibility flip). `cullAbove` in the window drives the SHAPE-granular live band, not the
+  triangle-exact knife — the console says so on arrival rather than letting the two quietly differ.
+- **`travel`** on a cell overrides the derived console travel command; normally absent.
+
+### Stepping it
+
+`--worklist` alone renders every shot to its own PNG. One BUILD per shot: shots in the same cell do
+not share a walk, because the render happens inside the build rather than after it. The run says so
+when it matters.
+
+`--worklist --interactive` is the cheap way round: one build per CELL, and `PageUp`/`PageDown` are
+then free camera jumps with everything already resident. `Ctrl+PageUp`/`PageDown` change cells,
+which no camera move can reach — the refs, terrain and navmesh all have to be walked again, so the
+window closes, rebuilds and reopens on that cell's first shot (its LAST shot going backwards, the
+way turning a page back works). The HUD carries `[cell i/N · shot j/M] label` throughout.
+
+### `--emit-bats`: the same list, for the console
+
+`--emit-bats NAME` writes the worklist as Skyrim console batch files into `<instance>/mods/NAME` —
+an MO2 mod folder, which is how the files end up scoped to a PROFILE instead of loose in the game
+directory. A bare name resolves under `mods/`; anything with a directory part is used as a path.
+The tester types `bat bat1`, `bat bat2`, … and the folder carries a `MANIFEST.md` mapping every
+number to its shot.
+
+**Bat files do not survive a load screen** — the rest of the file is discarded when the cell
+changes. That is the whole reason for the numbering: travel is its own file, and every pose after it
+is another, so the second half of a batch is never lost to a loading door.
+
+```
+bat1.txt   cow Tamriel -7,-21          <- travel; derived from the cell's own worldspace + grid
+bat2.txt   tcl / setpos x,y,z / setangle z,x / tcl    <- shot 1
+bat3.txt   ...                                       <- shot 2
+```
+
+Two things it answers from DATA rather than memory, both of which went wrong in the field:
+
+- **The travel command.** `coc <EditorID>` for an interior, `cow <WorldspaceEditorID> <gx>,<gy>` for
+  an exterior, resolved from the cell record. A card once named a cell that does not exist; a
+  worklist naming a cell the load order lacks is refused outright, before anything is written.
+- **Whether the spot is standable.** Five probes — the point and ±64 u in x and y — all required on
+  a drawable triangle at the same floor, because the player capsule is ~35 u in radius and a point
+  technically on navmesh but hard against a wall still embeds you. A failure is REPORTED, in the
+  console and the manifest, and the file is written as authored: silently moving the tester would
+  put the render and the game back out of agreement, which is the one thing this exists to prevent.
+
+`--bats-profiles A,B` enables the mod in those profiles and disables it in every other profile of
+the instance, backing each `modlist.txt` up once to `modlist.txt.pre-viewprobe-bak`. **MO2 rewrites
+`modlist.txt` from memory when it exits or switches profile**, so close MO2 first or press F5
+afterwards, or the edits are silently clobbered.
+
+### What the bat cannot do
+
+`player.setangle z` (which way you face) is reliable. `player.setangle x` (how far up or down you
+look) is written, but the first-person camera often overrides it almost immediately — if the
+vertical aim does not stick, the manifest carries the intended pitch to look by hand. Most
+eye-level shots are pitch 0, so this mostly does not bite.
 
 ---
 

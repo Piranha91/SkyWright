@@ -63,7 +63,10 @@ if (args.Length == 0)
     return 1;
 }
 
-string target = args[0];
+// A run normally opens with the cell to render. --worklist carries its own cells, so when the
+// first argument is a FLAG there simply is no positional target and the parse starts at zero.
+bool positionalTarget = args[0][0] != '-';
+string target = positionalTarget ? args[0] : "";
 string outDir = Path.Combine(AppContext.BaseDirectory, "shots");
 // Frame size, square, and the 3D render resolution as well as the PNG's — there is no
 // downsample step, so this IS the sharpness knob. 2560 because 1280 fell apart under a zoom.
@@ -221,7 +224,20 @@ bool interactiveMode = false;
 // (scroll, and , / .); these set where a session STARTS, so a value that turned out right does
 // not have to be re-dialled every run. Defaults unchanged: 600 u/s and 0.15 deg/px.
 float flySpeed = 600f, lookSens = 0.15f;
-for (int i = 1; i < args.Length; i++)
+// --worklist <FILE>: a SHOT LIST (see _shared/Worklist.cs) — cells, and per cell the camera poses
+// worth looking at, each with the sentence that says why. Under --interactive, PageUp/PageDown step
+// the shots and Ctrl+PageUp/PageDown step the cells; without it, every shot is rendered to its own
+// numbered PNG. The same file feeds --emit-bats, which is the point: the picture and the place the
+// tester ends up standing come from ONE set of coordinates and cannot drift apart.
+string? worklistPath = null;
+// --emit-bats <NAME|DIR>: write the worklist as console batch files instead of rendering anything.
+// A bare name resolves to <instance>\mods\<NAME> — an MO2 mod folder, which is how the files end
+// up scoped to a profile rather than loose in the game directory. A path is used as given.
+string? emitBats = null;
+// --bats-profiles <A,B>: enable that mod in these profiles and DISABLE it in every other profile of
+// the instance. Opt-in, because it edits MO2's own modlist.txt.
+var batsProfiles = new List<string>();
+for (int i = positionalTarget ? 1 : 0; i < args.Length; i++)
 {
     if (args[i] == "--out" && i + 1 < args.Length) outDir = args[++i];
     else if (args[i] == "--size" && i + 1 < args.Length) size = int.Parse(args[++i]);
@@ -281,6 +297,10 @@ for (int i = 1; i < args.Length; i++)
     else if (args[i] == "--interactive") { interactiveMode = true; textured = true; }
     else if (args[i] == "--fly-speed" && i + 1 < args.Length) flySpeed = float.Parse(args[++i]);
     else if (args[i] == "--look-sens" && i + 1 < args.Length) lookSens = float.Parse(args[++i]);
+    else if (args[i] == "--worklist" && i + 1 < args.Length) worklistPath = args[++i];
+    else if (args[i] == "--emit-bats" && i + 1 < args.Length) emitBats = args[++i];
+    else if (args[i] == "--bats-profiles" && i + 1 < args.Length)
+        batsProfiles.AddRange(args[++i].Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries));
     else if (args[i] == "--markers") showMarkers = true;
     else if (args[i] == "--list-meshes") listMeshes = true;
     else if (args[i] is "--instance" or "--game" or "--profile") i++;   // consumed above
@@ -313,6 +333,26 @@ if (flySpeed is < 1f or > 100000f)
 { Console.Error.WriteLine($"--fly-speed {flySpeed} is out of range: 1..100000 u/s."); return 1; }
 if (lookSens is < 0.01f or > 2f)
 { Console.Error.WriteLine($"--look-sens {lookSens} is out of range: 0.01..2 degrees per pixel (default 0.15)."); return 1; }
+if (emitBats is not null && worklistPath is null)
+{ Console.Error.WriteLine("--emit-bats needs --worklist: the bat files ARE the worklist, written for the console instead of the camera."); return 1; }
+if (batsProfiles.Count > 0 && emitBats is null)
+{ Console.Error.WriteLine("--bats-profiles only means anything with --emit-bats: it enables the mod folder that --emit-bats writes."); return 1; }
+if (!positionalTarget && worklistPath is null)
+{ Console.Error.WriteLine("no cell given. Pass a CellEditorID/FormID as the first argument, or --worklist FILE to take the cells from a shot list."); return 1; }
+
+// The worklist is read and VALIDATED before the load walk. A malformed shot list found after a
+// multi-minute walk is a multi-minute walk wasted.
+HarnessShared.WorklistFile? worklist = null;
+if (worklistPath is not null)
+{
+    try { worklist = HarnessShared.WorklistIo.Read(worklistPath); }
+    catch (Exception ex) { Console.Error.WriteLine(ex.Message); return 1; }
+    Console.WriteLine($"worklist '{worklist.Label}': {worklist.Cells.Count} cell(s), "
+                    + $"{worklist.Cells.Sum(c => c.Shots.Count)} shot(s)  [{worklistPath}]");
+}
+// Set when the fly-through's Ctrl+PageUp/PageDown asks for a different cell: the window cannot
+// build one, so it closes and leaves the request here for the run loop to act on.
+(int Cell, int Shot)? pendingSwitch = null;
 
 // --npc spec parsing happens BEFORE the load walk: the walk watches for these
 // FormKeys (as placed ACHRs and as ACHR bases) wherever they live, the same way
@@ -350,9 +390,25 @@ Directory.CreateDirectory(outDir);
 // ---------------------------------------------------------------------------------------
 var sw = Stopwatch.StartNew();
 var comp = Mo2LoadOrder.ReadComposition(profileDir);
+// Ordered BEFORE archive discovery so --emit-bats, which reads records and no assets at all, never
+// pays for BSA indexing it has no use for.
+var order = Mo2LoadOrder.Build(profileDir, modsDir, dataDir, overwriteDir);
+
+// --emit-bats: the whole run is the bat files. It has its own compact walk (BatEmit.cs) covering
+// EVERY cell in the worklist at once, so it exits here rather than falling through to a renderer
+// that can only hold one cell.
+if (emitBats is not null)
+{
+    // A bare mod NAME has no directory part, which is exactly what GetFileName round-tripping
+    // tests — no separator literals needed, and it is right for both slash directions.
+    bool asPath = Path.IsPathRooted(emitBats) || Path.GetFileName(emitBats) != emitBats;
+    string batsDir = asPath ? Path.GetFullPath(emitBats) : Path.Combine(modsDir, emitBats);
+    string batsName = Path.GetFileName(Path.TrimEndingDirectorySeparator(batsDir));
+    return ViewProbe.BatEmit.Run(worklist!, worklistPath!, batsDir, batsName, order.OrderedPaths, Instance, batsProfiles);
+}
+
 var arch = ArchiveDiscovery.Discover(profileDir, modsDir, dataDir, overwriteDir, GamePath);
 using var assets = AssetResolver.Build(overwriteDir, modsDir, dataDir, comp.EnabledMods, arch.Archives);
-var order = Mo2LoadOrder.Build(profileDir, modsDir, dataDir, overwriteDir);
 
 var winRef = new Dictionary<FormKey, PlacedRef>();
 // Conflicts are parsed BEFORE the load walk so implicated doors can be located wherever they
@@ -402,178 +458,8 @@ FormKey? cellKey = null;
 string cellLabel = target;
 bool interior = false;
 
-// ---------------------------------------------------------------------------------------
-// PRE-PASS: resolve the target cell's identity (FormKey, grid, worldspace) before the main
-// walk. The ring test needs the target's GRID, which the single-pass walk only learned when
-// it happened to meet the target cell — too late to have admitted a neighbour that came
-// earlier in the same plugin. Walks the load order with the same first-match semantics the
-// main walk used, and stops at the first hit (the defining master, usually plugin one).
-// ---------------------------------------------------------------------------------------
-bool TargetMatches(CellPlacements cp) =>
-    string.Equals(cp.CellEditorId, target, StringComparison.OrdinalIgnoreCase)
-    || cp.Cell.ToString().Equals(target, StringComparison.OrdinalIgnoreCase)
-    || cp.Cell.ID.ToString("X6").Equals(target.TrimStart('0'), StringComparison.OrdinalIgnoreCase);
-foreach (var path in order.OrderedPaths)
-{
-    ISkyrimModGetter m;
-    try { m = SkyrimMod.CreateFromBinaryOverlay(path, SkyrimRelease.SkyrimSE); } catch { continue; }
-    using (m as IDisposable)
-    {
-        foreach (var cp in PlacementExtract.FromMod(m))
-        {
-            if (!TargetMatches(cp)) continue;
-            cellKey = cp.Cell;
-            cellLabel = cp.CellEditorId ?? cp.Cell.ToString();
-            interior = cp.Interior;
-            targetWorldspace = cp.Worldspace;
-            targetGrid = cp.Grid;
-            break;
-        }
-    }
-    if (cellKey is not null) break;
-}
-if (cellKey is null) { Console.Error.WriteLine($"cell '{target}' not found in the active load order."); return 1; }
-
-foreach (var path in order.OrderedPaths)
-{
-    ISkyrimModGetter m;
-    try { m = SkyrimMod.CreateFromBinaryOverlay(path, SkyrimRelease.SkyrimSE); } catch { continue; }
-    using (m as IDisposable)
-    {
-        foreach (var rec in m.EnumerateMajorRecords())
-        {
-            // Landscape texture chain: LTEX -> TXST -> diffuse path, winner-takes-all in load
-            // order, so terrain quadrants can be drawn with their real winning textures.
-            if (rec is ILandscapeTextureGetter lt)
-            {
-                if (lt.TextureSet.FormKeyNullable is { } ts) ltexToTxst[lt.FormKey] = ts;
-                if (!string.IsNullOrWhiteSpace(lt.EditorID)) ltexEditorId[lt.FormKey] = lt.EditorID!;
-                continue;
-            }
-            if (rec is ITextureSetGetter txst)
-            { if (!string.IsNullOrWhiteSpace(txst.Diffuse?.GivenPath)) txstDiffuse[txst.FormKey] = txst.Diffuse!.GivenPath; continue; }
-            bool collectedModel = false;
-            if (rec is IModeledGetter mo && mo.Model?.File is { } f && !string.IsNullOrWhiteSpace(f.GivenPath))
-            {
-                var smr = (ISkyrimMajorRecordGetter)rec;
-                baseMesh[smr.FormKey] = f.GivenPath;
-                collectedModel = true;
-                // Editor-marker classification: the Is-Marker header flag (0x00800000) ONLY —
-                // that is the engine's own rule for not rendering a base. The old name
-                // heuristics (*marker* EditorID or model path) over-matched real drawn
-                // geometry: Markers\BlackPlane01.nif is the VANILLA gap-sealing black plane
-                // (record flags 0, nine lit BSTriShapes, the same job as Lux's shadow planes)
-                // and dropping it as a marker opened sky-blue holes in every Grand Solitude
-                // floor seam (2026-08-28). The cases the heuristics were added for need no
-                // rule at all: furniture-marker and dummy NIFs contain zero drawable shapes,
-                // and MarkerX/Teleport-style meshes are single effect-shader shapes the
-                // per-shape unshadeable filter already drops.
-                bool marker = (smr.MajorRecordFlagsRaw & 0x00800000) != 0;
-                if (marker) baseIsMarker.Add(smr.FormKey);
-                if (!string.IsNullOrWhiteSpace(smr.EditorID)) baseEditorId[smr.FormKey] = smr.EditorID!;
-            }
-            _ = collectedModel;
-        }
-
-        foreach (var cp in PlacementExtract.FromMod(m))
-        {
-            foreach (var r in cp.Refs)
-            {
-                if (r.InitiallyDisabled) refDisabledFlag.Add(r.FormKey); else refDisabledFlag.Remove(r.FormKey);
-                if (r.EnableParent is { } epk) refEnableParent[r.FormKey] = (epk, r.EnableParentOpposite);
-                else refEnableParent.Remove(r.FormKey);
-            }
-            // Worldspace PERSISTENT refs (doors above all). Not detected by the holding cell —
-            // the persistent cell masquerades as grid (0,0) — but by each ref's own Persistent
-            // flag: the game loads these with the worldspace, so membership in a rendered cell
-            // is a question of POSITION, resolved after the target is known.
-            if (cp.Worldspace != FormKey.Null)
-                foreach (var r in cp.Refs)
-                    if (r.Persistent) persistentWin[r.FormKey] = (cp.Worldspace, r);   // later plugin wins
-            if (npcWatchKeys.Count > 0)
-                foreach (var r in cp.Refs)
-                {
-                    if (r.RecordType != "PlacedNpc") continue;
-                    if (npcWatchKeys.Contains(r.FormKey))
-                        npcRefWhere[r.FormKey] = (cp.Cell, cp.CellEditorId, r);         // later plugin wins
-                    if (r.Base is { } nb && npcWatchKeys.Contains(nb))
-                    {
-                        if (!npcBaseWhere.TryGetValue(nb, out var perRef)) npcBaseWhere[nb] = perRef = new();
-                        perRef[r.FormKey] = (cp.Cell, cp.CellEditorId, r);              // later plugin wins per ref
-                    }
-                }
-            if (doorWatchKeys.Count > 0)
-                foreach (var r in cp.Refs)
-                    if (doorWatchKeys.Contains(r.FormKey))
-                        { doorWhere[r.FormKey] = (cp.Cell, cp.CellEditorId, r);     // later plugin wins
-                          if (Environment.GetEnvironmentVariable("VP_DOOR_DEBUG") == "1")
-                              Console.WriteLine($"   [debug] door {r.FormKey} in cp: Cell={cp.Cell} Grid={(cp.Grid is { } gg ? $"{gg.X},{gg.Y}" : "null")} Interior={cp.Interior} Ws={cp.Worldspace} plugin={m.ModKey}"); }
-            bool isTarget = cp.Cell == cellKey;
-            // ±1-ring neighbours (exteriors): their refs are in frame from any eye-level
-            // camera, so they load like the terrain always has. The worldspace persistent
-            // cell masquerades as grid (0,0) and must not be admitted as a neighbour —
-            // its refs are all Persistent, and only non-persistent refs are taken from
-            // ring cells (persistent refs merge by position, below, ring-wide).
-            bool inRing = !isTarget && ringRefs && !interior && !cp.Interior
-                && cp.Worldspace == targetWorldspace && cp.Worldspace != FormKey.Null
-                && targetGrid is { } tg && cp.Grid is { } cg
-                && Math.Abs(cg.X - tg.X) <= 1 && Math.Abs(cg.Y - tg.Y) <= 1;
-            if (!isTarget && !inRing) continue;
-
-            if (isTarget)
-            {
-                cellLabel = cp.CellEditorId ?? cp.Cell.ToString();
-                foreach (var r in cp.Refs) winRef[r.FormKey] = r;
-                // Navmesh (and with it the conflict overlay) stays TARGET-CELL-ONLY: it is
-                // the annotation layer for the cell under examination, scoped like the cell
-                // outline. The ring contributes world geometry, not annotations.
-                foreach (var nav in cp.Navmeshes)
-                {
-                    winNav[nav.FormKey] = nav;
-                    var pn = m.ModKey.FileName.String;
-                    if (navVersionPlugins.Contains(pn))
-                    {
-                        if (!navByPlugin.TryGetValue(pn, out var d)) navByPlugin[pn] = d = new();
-                        d[nav.FormKey] = nav;
-                    }
-                }
-            }
-            else
-                foreach (var r in cp.Refs)
-                    if (!r.Persistent) winRef[r.FormKey] = r;
-        }
-    }
-}
-
-Console.WriteLine($"cell {cellLabel} {(interior ? "(interior)" : "(exterior)")}  {cellKey}");
-if (!interior && targetGrid is { } tgp)
-{
-    // Persistent refs merge by position over the whole REF-LOADED area: the 3x3 ring when
-    // ring refs are on, the target cell alone otherwise. A narrower test would silently
-    // drop exterior doors standing in a neighbour cell that visibly renders.
-    int ringR = ringRefs ? 1 : 0;
-    float px0 = (tgp.X - ringR) * 4096f, py0 = (tgp.Y - ringR) * 4096f;
-    float pspan = 4096f * (1 + 2 * ringR);
-    int addedPersist = 0;
-    foreach (var (pws, pr) in persistentWin.Values)
-        if (pws == targetWorldspace
-            && pr.Position.X >= px0 && pr.Position.X < px0 + pspan
-            && pr.Position.Y >= py0 && pr.Position.Y < py0 + pspan
-            && !winRef.ContainsKey(pr.FormKey))
-        { winRef[pr.FormKey] = pr; addedPersist++; }
-    if (addedPersist > 0)
-        Console.WriteLine($"   +{addedPersist} persistent worldspace ref(s) inside the rendered {(ringR > 0 ? "3x3 cells'" : "cell's")} bounds (doors live here)");
-}
-Console.WriteLine($"winning state: {winRef.Count:N0} refs, {winNav.Count:N0} navmeshes  ({sw.Elapsed.TotalSeconds:0.0}s)");
-
-// ---------------------------------------------------------------------------------------
-// Runtime enable state. A ref with an XESP enable parent takes the PARENT's state (XOR the
-// opposite-of-parent flag) — its own initially-disabled flag is CK bookkeeping, not the
-// runtime answer. The player ref (ID 0x14) is always enabled at runtime even though the
-// record carries the disabled flag, which is exactly why "parent = player, opposite" is the
-// standard permanently-disabled idiom. Chains are followed with memoization; a cycle is an
-// authoring error and falls back to the ref's own flag.
-// ---------------------------------------------------------------------------------------
+// Runtime enable state, hoisted out of RunCellTextured because the flat diagnostic mode calls it
+// AFTER that function returns. enableMemo is per-cell state and is cleared with the rest of it.
 var enableMemo = new Dictionary<FormKey, bool>();
 bool RefEnabledInner(FormKey fk, HashSet<FormKey>? seen)
 {
@@ -598,252 +484,540 @@ string? DisabledWhy(PlacedRef r) =>
     : refEnableParent.TryGetValue(r.FormKey, out var dp) ? $"disabled via enable parent {dp.Parent}"
     : "initially disabled";
 
-// VP_ENABLE_DUMP=1 — every enable-parent group among this cell's refs, with how the chain
-// resolves. The check that a "disabled via enable parent" verdict rests on the chain the
-// data actually states, not on a wrong evaluation.
-if (Environment.GetEnvironmentVariable("VP_ENABLE_DUMP") == "1")
+// ---------------------------------------------------------------------------------------
+// ONE CELL'S WORK, as a function: resolve the cell's identity, walk the load order for its
+// winning state, build the scene, and either save a PNG or open the fly-through.
+//
+// It is a function so a WORKLIST can call it more than once. Ctrl+PageUp/PageDown in the window
+// asks for another cell, and a different cell is a different SCENE — no camera move can reach it,
+// the refs, terrain and navmesh all have to be walked again. Straight-line code could serve
+// exactly one cell per process.
+//
+// Returns a process exit code, or -1 for "this run is not textured", in which case the flat
+// diagnostic mode after the call runs on the state this call left behind — exactly as it did when
+// this was straight-line code.
+// ---------------------------------------------------------------------------------------
+int RunCellTextured(string cellTarget, int wlCell, int wlShot)
 {
-    Console.WriteLine($"   ---- enable-parent groups among this cell's refs ----");
-    var groups = winRef.Values
-        .Where(r => refEnableParent.ContainsKey(r.FormKey))
-        .GroupBy(r => refEnableParent[r.FormKey])
-        .OrderByDescending(g => g.Count());
-    foreach (var g in groups)
+    // Per-cell state is declared OUTSIDE this function, because the flat mode reads it too — so a
+    // SECOND call has to clear what the first left. A collection missed here would not throw; it
+    // would quietly render cell 2 holding cell 1's references.
+    winRef.Clear(); persistentWin.Clear(); refDisabledFlag.Clear(); refEnableParent.Clear();
+    npcRefWhere.Clear(); npcBaseWhere.Clear(); doorWhere.Clear();
+    winNav.Clear(); navByPlugin.Clear();
+    baseMesh.Clear(); baseIsMarker.Clear(); baseEditorId.Clear();
+    ltexToTxst.Clear(); ltexEditorId.Clear(); txstDiffuse.Clear();
+    enableMemo.Clear();
+    targetWorldspace = FormKey.Null; targetGrid = null;
+    cellKey = null; cellLabel = cellTarget; interior = false;
+    sw.Restart();
+
+    // A worklist shot IS the camera: eye, aim and fov come from the shot and override whatever the
+    // command line asked for, so one file drives both the picture and the bat that stands there.
+    if (worklist is not null)
     {
-        var (parent, opp) = g.Key;
-        bool parentEnabled = RefEnabled(parent);
-        string pflag = parent.ID == 0x14 ? "PlayerRef, engine-enabled"
-                     : refDisabledFlag.Contains(parent) ? "flag-disabled" : "flag-enabled";
-        string pchain = refEnableParent.TryGetValue(parent, out var pp)
-            ? $", parented to {pp.Parent}{(pp.Opposite ? " OPPOSITE" : "")}" : "";
-        Console.WriteLine($"   {g.Count(),5} ref(s)  parent {parent} [{pflag}{pchain} -> {(parentEnabled ? "ENABLED" : "DISABLED")}]"
-                        + $"{(opp ? "  OPPOSITE" : "")}  => children {(parentEnabled ^ opp ? "ENABLED" : "DISABLED")}");
+        var wshot = worklist.Cells[wlCell].Shots[wlShot];
+        eye = new System.Numerics.Vector3(wshot.Eye[0], wshot.Eye[1], wshot.Eye[2]);
+        var (wsYaw, wsPitch) = HarnessShared.WorklistIo.Aim(wshot);
+        yaw = wsYaw; pitch = wsPitch; fov = wshot.Fov;
+        look = null; eyeRef = null; lookRef = null;      // the shot is the whole camera, not a base for one
+        if (wshot.Nav is { } shotNav) navMode = shotNav;
+        if (wshot.CullAbove is { } shotCull) cullAbove = shotCull;
+        textured = true;
+        Console.WriteLine($"\n=== worklist cell {wlCell + 1}/{worklist.Cells.Count} "
+                        + $"shot {wlShot + 1}/{worklist.Cells[wlCell].Shots.Count}: {wshot.Label} ===");
     }
-}
 
-// ---------------------------------------------------------------------------------------
-// First-person textured mode — see TexturedScene.cs. Exits here; the flat diagnostic mode
-// below is unchanged and stays the default.
-// ---------------------------------------------------------------------------------------
-if (textured)
-{
-    FormKey? hiFp = null;
-    if (highlight is not null) { try { hiFp = FormKey.Factory(highlight); } catch { } }
-
-    System.Numerics.Vector3? RefPos(string spec, float lift)
+    // ---------------------------------------------------------------------------------------
+    // PRE-PASS: resolve the target cell's identity (FormKey, grid, worldspace) before the main
+    // walk. The ring test needs the target's GRID, which the single-pass walk only learned when
+    // it happened to meet the target cell — too late to have admitted a neighbour that came
+    // earlier in the same plugin. Walks the load order with the same first-match semantics the
+    // main walk used, and stops at the first hit (the defining master, usually plugin one).
+    // ---------------------------------------------------------------------------------------
+    bool TargetMatches(CellPlacements cp) =>
+        string.Equals(cp.CellEditorId, cellTarget, StringComparison.OrdinalIgnoreCase)
+        || cp.Cell.ToString().Equals(cellTarget, StringComparison.OrdinalIgnoreCase)
+        || cp.Cell.ID.ToString("X6").Equals(cellTarget.TrimStart('0'), StringComparison.OrdinalIgnoreCase);
+    foreach (var path in order.OrderedPaths)
     {
-        try
+        ISkyrimModGetter m;
+        try { m = SkyrimMod.CreateFromBinaryOverlay(path, SkyrimRelease.SkyrimSE); } catch { continue; }
+        using (m as IDisposable)
         {
-            var fk = FormKey.Factory(spec);
-            if (winRef.TryGetValue(fk, out var rr))
-                return new(rr.Position.X, rr.Position.Y, rr.Position.Z + lift);
-        }
-        catch { }
-        Console.Error.WriteLine($"'{spec}' is not a placed ref in this cell's winning state.");
-        return null;
-    }
-
-    var eyePos = eye ?? (eyeRef is not null ? RefPos(eyeRef, eyeHeight) : null);
-    if (eyePos is null)
-    {
-        Console.Error.WriteLine("first-person mode needs --eye X,Y,Z or --eye-ref FORMID (a `getpos` line pastes straight in).");
-        return 1;
-    }
-    System.Numerics.Vector3? lookPos = look ?? (lookRef is not null ? RefPos(lookRef, 96f) : null);
-    if (lookPos is null)
-    {
-        float yawDeg = yaw ?? 0f;                       // game convention: 0 = north (+Y), clockwise
-        float yr = float.DegreesToRadians(yawDeg), pr = float.DegreesToRadians(pitch);
-        var dir = new System.Numerics.Vector3(MathF.Sin(yr) * MathF.Cos(pr), MathF.Cos(yr) * MathF.Cos(pr), -MathF.Sin(pr));
-        lookPos = eyePos.Value + dir * 512f;
-    }
-
-    // Which navmeshes (or single triangles) are the FINDING. null tri-set = the whole record.
-    var redNav = new Dictionary<FormKey, HashSet<int>?>();
-    var conflictDoors = new HashSet<FormKey>();
-    void MarkRed(FormKey fk, int? tri)
-    {
-        if (tri is null) { redNav[fk] = null; return; }
-        if (redNav.TryGetValue(fk, out var cur) && cur is null) return;   // whole-record already
-        if (!redNav.TryGetValue(fk, out cur) || cur is null) redNav[fk] = cur = new HashSet<int>();
-        cur.Add(tri.Value);
-    }
-    foreach (var spec in redSpecs)
-    {
-        var parts = spec.Split(':');
-        int? tri = null;
-        string keyText = spec;
-        if (parts.Length >= 3 && int.TryParse(parts[^1], out var t))
-        { tri = t; keyText = string.Join(':', parts[..^1]); }
-        try { MarkRed(FormKey.Factory(keyText), tri); }
-        catch { Console.Error.WriteLine($"--red '{spec}' is not FORMKEY[:tri]."); return 1; }
-    }
-    if (conflictFile is { } cf)
-    {
-        foreach (var c in cf.Conflicts)
-            foreach (var rec in c.Necessary.Concat(c.Alternative ?? Array.Empty<HarnessShared.ConflictRecord>()))
+            foreach (var cp in PlacementExtract.FromMod(m))
             {
-                FormKey fk;
-                try { fk = FormKey.Factory(rec.FormKey); } catch { continue; }
-                if (rec.Role == "navmesh" && winNav.ContainsKey(fk)) MarkRed(fk, null);
-                else if (rec.Role == "door" && winRef.ContainsKey(fk)) conflictDoors.Add(fk);
+                if (!TargetMatches(cp)) continue;
+                cellKey = cp.Cell;
+                cellLabel = cp.CellEditorId ?? cp.Cell.ToString();
+                interior = cp.Interior;
+                targetWorldspace = cp.Worldspace;
+                targetGrid = cp.Grid;
+                break;
             }
-        int redHere = redNav.Count(kv => winNav.ContainsKey(kv.Key));
-        Console.WriteLine($"   conflicts overlay: {redHere} navmesh record(s) in this cell painted red, "
-                        + $"{conflictDoors.Count} door(s) highlighted (from {cf.Conflicts.Count} conflicts in {Path.GetFileName(conflictsPath)})");
-        foreach (var dfk in conflictDoors)
-            if (winRef.TryGetValue(dfk, out var dref))
-                Console.WriteLine($"   door {dfk} at {dref.Position.X:0},{dref.Position.Y:0},{dref.Position.Z:0}  (orange)");
-        // "Not in the rendered cells" = not in the loaded ref set — the target cell plus its
-        // ±1 ring when ring refs are on. A door in a ring cell renders and highlights like
-        // one in the target cell; this message now fires only for doors beyond all of that.
-        foreach (var dfk in doorWatchKeys)
-            if (!winRef.ContainsKey(dfk))
-                Console.WriteLine(doorWhere.TryGetValue(dfk, out var dw)
-                    ? $"   implicated door {dfk} is NOT in the rendered cell(s): it sits in {dw.CellEd ?? dw.Cell.ToString()} at {dw.Ref.Position.X:0},{dw.Ref.Position.Y:0},{dw.Ref.Position.Z:0}"
-                    : $"   implicated door {dfk}: no placed ref with this FormKey anywhere in the load order");
-        if (redHere == 0 && conflictDoors.Count == 0)
-            Console.WriteLine($"   (no conflict in that file names a navmesh or door in THIS cell — nothing to paint)");
+        }
+        if (cellKey is not null) break;
+    }
+    if (cellKey is null) { Console.Error.WriteLine($"cell '{cellTarget}' not found in the active load order."); return 1; }
+
+    foreach (var path in order.OrderedPaths)
+    {
+        ISkyrimModGetter m;
+        try { m = SkyrimMod.CreateFromBinaryOverlay(path, SkyrimRelease.SkyrimSE); } catch { continue; }
+        using (m as IDisposable)
+        {
+            foreach (var rec in m.EnumerateMajorRecords())
+            {
+                // Landscape texture chain: LTEX -> TXST -> diffuse path, winner-takes-all in load
+                // order, so terrain quadrants can be drawn with their real winning textures.
+                if (rec is ILandscapeTextureGetter lt)
+                {
+                    if (lt.TextureSet.FormKeyNullable is { } ts) ltexToTxst[lt.FormKey] = ts;
+                    if (!string.IsNullOrWhiteSpace(lt.EditorID)) ltexEditorId[lt.FormKey] = lt.EditorID!;
+                    continue;
+                }
+                if (rec is ITextureSetGetter txst)
+                { if (!string.IsNullOrWhiteSpace(txst.Diffuse?.GivenPath)) txstDiffuse[txst.FormKey] = txst.Diffuse!.GivenPath; continue; }
+                bool collectedModel = false;
+                if (rec is IModeledGetter mo && mo.Model?.File is { } f && !string.IsNullOrWhiteSpace(f.GivenPath))
+                {
+                    var smr = (ISkyrimMajorRecordGetter)rec;
+                    baseMesh[smr.FormKey] = f.GivenPath;
+                    collectedModel = true;
+                    // Editor-marker classification: the Is-Marker header flag (0x00800000) ONLY —
+                    // that is the engine's own rule for not rendering a base. The old name
+                    // heuristics (*marker* EditorID or model path) over-matched real drawn
+                    // geometry: Markers\BlackPlane01.nif is the VANILLA gap-sealing black plane
+                    // (record flags 0, nine lit BSTriShapes, the same job as Lux's shadow planes)
+                    // and dropping it as a marker opened sky-blue holes in every Grand Solitude
+                    // floor seam (2026-08-28). The cases the heuristics were added for need no
+                    // rule at all: furniture-marker and dummy NIFs contain zero drawable shapes,
+                    // and MarkerX/Teleport-style meshes are single effect-shader shapes the
+                    // per-shape unshadeable filter already drops.
+                    bool marker = (smr.MajorRecordFlagsRaw & 0x00800000) != 0;
+                    if (marker) baseIsMarker.Add(smr.FormKey);
+                    if (!string.IsNullOrWhiteSpace(smr.EditorID)) baseEditorId[smr.FormKey] = smr.EditorID!;
+                }
+                _ = collectedModel;
+            }
+
+            foreach (var cp in PlacementExtract.FromMod(m))
+            {
+                foreach (var r in cp.Refs)
+                {
+                    if (r.InitiallyDisabled) refDisabledFlag.Add(r.FormKey); else refDisabledFlag.Remove(r.FormKey);
+                    if (r.EnableParent is { } epk) refEnableParent[r.FormKey] = (epk, r.EnableParentOpposite);
+                    else refEnableParent.Remove(r.FormKey);
+                }
+                // Worldspace PERSISTENT refs (doors above all). Not detected by the holding cell —
+                // the persistent cell masquerades as grid (0,0) — but by each ref's own Persistent
+                // flag: the game loads these with the worldspace, so membership in a rendered cell
+                // is a question of POSITION, resolved after the target is known.
+                if (cp.Worldspace != FormKey.Null)
+                    foreach (var r in cp.Refs)
+                        if (r.Persistent) persistentWin[r.FormKey] = (cp.Worldspace, r);   // later plugin wins
+                if (npcWatchKeys.Count > 0)
+                    foreach (var r in cp.Refs)
+                    {
+                        if (r.RecordType != "PlacedNpc") continue;
+                        if (npcWatchKeys.Contains(r.FormKey))
+                            npcRefWhere[r.FormKey] = (cp.Cell, cp.CellEditorId, r);         // later plugin wins
+                        if (r.Base is { } nb && npcWatchKeys.Contains(nb))
+                        {
+                            if (!npcBaseWhere.TryGetValue(nb, out var perRef)) npcBaseWhere[nb] = perRef = new();
+                            perRef[r.FormKey] = (cp.Cell, cp.CellEditorId, r);              // later plugin wins per ref
+                        }
+                    }
+                if (doorWatchKeys.Count > 0)
+                    foreach (var r in cp.Refs)
+                        if (doorWatchKeys.Contains(r.FormKey))
+                            { doorWhere[r.FormKey] = (cp.Cell, cp.CellEditorId, r);     // later plugin wins
+                              if (Environment.GetEnvironmentVariable("VP_DOOR_DEBUG") == "1")
+                                  Console.WriteLine($"   [debug] door {r.FormKey} in cp: Cell={cp.Cell} Grid={(cp.Grid is { } gg ? $"{gg.X},{gg.Y}" : "null")} Interior={cp.Interior} Ws={cp.Worldspace} plugin={m.ModKey}"); }
+                bool isTarget = cp.Cell == cellKey;
+                // ±1-ring neighbours (exteriors): their refs are in frame from any eye-level
+                // camera, so they load like the terrain always has. The worldspace persistent
+                // cell masquerades as grid (0,0) and must not be admitted as a neighbour —
+                // its refs are all Persistent, and only non-persistent refs are taken from
+                // ring cells (persistent refs merge by position, below, ring-wide).
+                bool inRing = !isTarget && ringRefs && !interior && !cp.Interior
+                    && cp.Worldspace == targetWorldspace && cp.Worldspace != FormKey.Null
+                    && targetGrid is { } tg && cp.Grid is { } cg
+                    && Math.Abs(cg.X - tg.X) <= 1 && Math.Abs(cg.Y - tg.Y) <= 1;
+                if (!isTarget && !inRing) continue;
+
+                if (isTarget)
+                {
+                    cellLabel = cp.CellEditorId ?? cp.Cell.ToString();
+                    foreach (var r in cp.Refs) winRef[r.FormKey] = r;
+                    // Navmesh (and with it the conflict overlay) stays TARGET-CELL-ONLY: it is
+                    // the annotation layer for the cell under examination, scoped like the cell
+                    // outline. The ring contributes world geometry, not annotations.
+                    foreach (var nav in cp.Navmeshes)
+                    {
+                        winNav[nav.FormKey] = nav;
+                        var pn = m.ModKey.FileName.String;
+                        if (navVersionPlugins.Contains(pn))
+                        {
+                            if (!navByPlugin.TryGetValue(pn, out var d)) navByPlugin[pn] = d = new();
+                            d[nav.FormKey] = nav;
+                        }
+                    }
+                }
+                else
+                    foreach (var r in cp.Refs)
+                        if (!r.Persistent) winRef[r.FormKey] = r;
+            }
+        }
     }
 
-    var scene = new List<ViewProbe.SceneRef>();
-    int fxSkipped = 0, markerSkipped = 0;
-    int deletedSkipped = 0, disabledFlagSkipped = 0, disabledParentSkipped = 0, enabledByParentDrawn = 0, noModel = 0;
-    var meshCensus = listMeshes ? new Dictionary<string, (int Count, string Class)>(StringComparer.OrdinalIgnoreCase) : null;
-    foreach (var r in winRef.Values)
+    Console.WriteLine($"cell {cellLabel} {(interior ? "(interior)" : "(exterior)")}  {cellKey}");
+    if (!interior && targetGrid is { } tgp)
     {
-        if (r.Deleted) { deletedSkipped++; continue; }
-        if (!RefEnabled(r.FormKey))
+        // Persistent refs merge by position over the whole REF-LOADED area: the 3x3 ring when
+        // ring refs are on, the target cell alone otherwise. A narrower test would silently
+        // drop exterior doors standing in a neighbour cell that visibly renders.
+        int ringR = ringRefs ? 1 : 0;
+        float px0 = (tgp.X - ringR) * 4096f, py0 = (tgp.Y - ringR) * 4096f;
+        float pspan = 4096f * (1 + 2 * ringR);
+        int addedPersist = 0;
+        foreach (var (pws, pr) in persistentWin.Values)
+            if (pws == targetWorldspace
+                && pr.Position.X >= px0 && pr.Position.X < px0 + pspan
+                && pr.Position.Y >= py0 && pr.Position.Y < py0 + pspan
+                && !winRef.ContainsKey(pr.FormKey))
+            { winRef[pr.FormKey] = pr; addedPersist++; }
+        if (addedPersist > 0)
+            Console.WriteLine($"   +{addedPersist} persistent worldspace ref(s) inside the rendered {(ringR > 0 ? "3x3 cells'" : "cell's")} bounds (doors live here)");
+    }
+    Console.WriteLine($"winning state: {winRef.Count:N0} refs, {winNav.Count:N0} navmeshes  ({sw.Elapsed.TotalSeconds:0.0}s)");
+
+    // ---------------------------------------------------------------------------------------
+    // Runtime enable state. A ref with an XESP enable parent takes the PARENT's state (XOR the
+    // opposite-of-parent flag) — its own initially-disabled flag is CK bookkeeping, not the
+    // runtime answer. The player ref (ID 0x14) is always enabled at runtime even though the
+    // record carries the disabled flag, which is exactly why "parent = player, opposite" is the
+    // standard permanently-disabled idiom. Chains are followed with memoization; a cycle is an
+    // authoring error and falls back to the ref's own flag.
+    // ---------------------------------------------------------------------------------------
+    // VP_ENABLE_DUMP=1 — every enable-parent group among this cell's refs, with how the chain
+    // resolves. The check that a "disabled via enable parent" verdict rests on the chain the
+    // data actually states, not on a wrong evaluation.
+    if (Environment.GetEnvironmentVariable("VP_ENABLE_DUMP") == "1")
+    {
+        Console.WriteLine($"   ---- enable-parent groups among this cell's refs ----");
+        var groups = winRef.Values
+            .Where(r => refEnableParent.ContainsKey(r.FormKey))
+            .GroupBy(r => refEnableParent[r.FormKey])
+            .OrderByDescending(g => g.Count());
+        foreach (var g in groups)
         {
-            if (refEnableParent.ContainsKey(r.FormKey)) disabledParentSkipped++; else disabledFlagSkipped++;
-            continue;
+            var (parent, opp) = g.Key;
+            bool parentEnabled = RefEnabled(parent);
+            string pflag = parent.ID == 0x14 ? "PlayerRef, engine-enabled"
+                         : refDisabledFlag.Contains(parent) ? "flag-disabled" : "flag-enabled";
+            string pchain = refEnableParent.TryGetValue(parent, out var pp)
+                ? $", parented to {pp.Parent}{(pp.Opposite ? " OPPOSITE" : "")}" : "";
+            Console.WriteLine($"   {g.Count(),5} ref(s)  parent {parent} [{pflag}{pchain} -> {(parentEnabled ? "ENABLED" : "DISABLED")}]"
+                            + $"{(opp ? "  OPPOSITE" : "")}  => children {(parentEnabled ^ opp ? "ENABLED" : "DISABLED")}");
         }
-        // The defect this counter watches: initially-disabled refs whose enable parent resolves
-        // ENABLED at runtime — the standard way a mod swaps a whole set in. These used to be
-        // silently dropped (a third of the Temple's content).
-        if (r.InitiallyDisabled) enabledByParentDrawn++;
-        if (r.Base is not { } bk || !baseMesh.TryGetValue(bk, out var rel)) { noModel++; continue; }
-        // Effect meshes (beams, mists, glows) are translucent volumes that drown a first-person
-        // shot; the game draws them subtly, this flat-lit pass cannot. Skipped by default,
-        // counted, and --fx puts them back. This is the WHOLE-FILE rule only — a solid mesh that
-        // merely CONTAINS effect shapes stays, and its effect shapes are dropped per-shape in
-        // TexturedScene, which reports them on their own line (and names the meshes under
-        // --list-meshes). So a census entry reading "geometry" means "not an effects\ file", not
-        // "nothing in it is an effect".
-        bool isMarker = baseIsMarker.Contains(bk);
-        bool isFx = rel.Replace('/', '\\').Contains(@"effects\", StringComparison.OrdinalIgnoreCase);
+    }
+
+    // ---------------------------------------------------------------------------------------
+    // First-person textured mode — see TexturedScene.cs. Exits here; the flat diagnostic mode
+    // below is unchanged and stays the default.
+    // ---------------------------------------------------------------------------------------
+    if (textured)
+    {
+        FormKey? hiFp = null;
+        if (highlight is not null) { try { hiFp = FormKey.Factory(highlight); } catch { } }
+
+        System.Numerics.Vector3? RefPos(string spec, float lift)
+        {
+            try
+            {
+                var fk = FormKey.Factory(spec);
+                if (winRef.TryGetValue(fk, out var rr))
+                    return new(rr.Position.X, rr.Position.Y, rr.Position.Z + lift);
+            }
+            catch { }
+            Console.Error.WriteLine($"'{spec}' is not a placed ref in this cell's winning state.");
+            return null;
+        }
+
+        var eyePos = eye ?? (eyeRef is not null ? RefPos(eyeRef, eyeHeight) : null);
+        if (eyePos is null)
+        {
+            Console.Error.WriteLine("first-person mode needs --eye X,Y,Z or --eye-ref FORMID (a `getpos` line pastes straight in).");
+            return 1;
+        }
+        System.Numerics.Vector3? lookPos = look ?? (lookRef is not null ? RefPos(lookRef, 96f) : null);
+        if (lookPos is null)
+        {
+            float yawDeg = yaw ?? 0f;                       // game convention: 0 = north (+Y), clockwise
+            float yr = float.DegreesToRadians(yawDeg), pr = float.DegreesToRadians(pitch);
+            var dir = new System.Numerics.Vector3(MathF.Sin(yr) * MathF.Cos(pr), MathF.Cos(yr) * MathF.Cos(pr), -MathF.Sin(pr));
+            lookPos = eyePos.Value + dir * 512f;
+        }
+
+        // Which navmeshes (or single triangles) are the FINDING. null tri-set = the whole record.
+        var redNav = new Dictionary<FormKey, HashSet<int>?>();
+        var conflictDoors = new HashSet<FormKey>();
+        void MarkRed(FormKey fk, int? tri)
+        {
+            if (tri is null) { redNav[fk] = null; return; }
+            if (redNav.TryGetValue(fk, out var cur) && cur is null) return;   // whole-record already
+            if (!redNav.TryGetValue(fk, out cur) || cur is null) redNav[fk] = cur = new HashSet<int>();
+            cur.Add(tri.Value);
+        }
+        foreach (var spec in redSpecs)
+        {
+            var parts = spec.Split(':');
+            int? tri = null;
+            string keyText = spec;
+            if (parts.Length >= 3 && int.TryParse(parts[^1], out var t))
+            { tri = t; keyText = string.Join(':', parts[..^1]); }
+            try { MarkRed(FormKey.Factory(keyText), tri); }
+            catch { Console.Error.WriteLine($"--red '{spec}' is not FORMKEY[:tri]."); return 1; }
+        }
+        if (conflictFile is { } cf)
+        {
+            foreach (var c in cf.Conflicts)
+                foreach (var rec in c.Necessary.Concat(c.Alternative ?? Array.Empty<HarnessShared.ConflictRecord>()))
+                {
+                    FormKey fk;
+                    try { fk = FormKey.Factory(rec.FormKey); } catch { continue; }
+                    if (rec.Role == "navmesh" && winNav.ContainsKey(fk)) MarkRed(fk, null);
+                    else if (rec.Role == "door" && winRef.ContainsKey(fk)) conflictDoors.Add(fk);
+                }
+            int redHere = redNav.Count(kv => winNav.ContainsKey(kv.Key));
+            Console.WriteLine($"   conflicts overlay: {redHere} navmesh record(s) in this cell painted red, "
+                            + $"{conflictDoors.Count} door(s) highlighted (from {cf.Conflicts.Count} conflicts in {Path.GetFileName(conflictsPath)})");
+            foreach (var dfk in conflictDoors)
+                if (winRef.TryGetValue(dfk, out var dref))
+                    Console.WriteLine($"   door {dfk} at {dref.Position.X:0},{dref.Position.Y:0},{dref.Position.Z:0}  (orange)");
+            // "Not in the rendered cells" = not in the loaded ref set — the target cell plus its
+            // ±1 ring when ring refs are on. A door in a ring cell renders and highlights like
+            // one in the target cell; this message now fires only for doors beyond all of that.
+            foreach (var dfk in doorWatchKeys)
+                if (!winRef.ContainsKey(dfk))
+                    Console.WriteLine(doorWhere.TryGetValue(dfk, out var dw)
+                        ? $"   implicated door {dfk} is NOT in the rendered cell(s): it sits in {dw.CellEd ?? dw.Cell.ToString()} at {dw.Ref.Position.X:0},{dw.Ref.Position.Y:0},{dw.Ref.Position.Z:0}"
+                        : $"   implicated door {dfk}: no placed ref with this FormKey anywhere in the load order");
+            if (redHere == 0 && conflictDoors.Count == 0)
+                Console.WriteLine($"   (no conflict in that file names a navmesh or door in THIS cell — nothing to paint)");
+        }
+
+        var scene = new List<ViewProbe.SceneRef>();
+        int fxSkipped = 0, markerSkipped = 0;
+        int deletedSkipped = 0, disabledFlagSkipped = 0, disabledParentSkipped = 0, enabledByParentDrawn = 0, noModel = 0;
+        var meshCensus = listMeshes ? new Dictionary<string, (int Count, string Class)>(StringComparer.OrdinalIgnoreCase) : null;
+        foreach (var r in winRef.Values)
+        {
+            if (r.Deleted) { deletedSkipped++; continue; }
+            if (!RefEnabled(r.FormKey))
+            {
+                if (refEnableParent.ContainsKey(r.FormKey)) disabledParentSkipped++; else disabledFlagSkipped++;
+                continue;
+            }
+            // The defect this counter watches: initially-disabled refs whose enable parent resolves
+            // ENABLED at runtime — the standard way a mod swaps a whole set in. These used to be
+            // silently dropped (a third of the Temple's content).
+            if (r.InitiallyDisabled) enabledByParentDrawn++;
+            if (r.Base is not { } bk || !baseMesh.TryGetValue(bk, out var rel)) { noModel++; continue; }
+            // Effect meshes (beams, mists, glows) are translucent volumes that drown a first-person
+            // shot; the game draws them subtly, this flat-lit pass cannot. Skipped by default,
+            // counted, and --fx puts them back. This is the WHOLE-FILE rule only — a solid mesh that
+            // merely CONTAINS effect shapes stays, and its effect shapes are dropped per-shape in
+            // TexturedScene, which reports them on their own line (and names the meshes under
+            // --list-meshes). So a census entry reading "geometry" means "not an effects\ file", not
+            // "nothing in it is an effect".
+            bool isMarker = baseIsMarker.Contains(bk);
+            bool isFx = rel.Replace('/', '\\').Contains(@"effects\", StringComparison.OrdinalIgnoreCase);
+            if (meshCensus is not null)
+            {
+                var cls = isMarker ? "MARKER" : isFx ? "FX-file" : "geometry";
+                meshCensus[rel] = (meshCensus.TryGetValue(rel, out var c) ? c.Count + 1 : 1, cls);
+            }
+            if (!keepFx && isFx) { fxSkipped++; continue; }
+            // Editor markers are not world geometry; the game never draws them. --markers keeps them
+            // as a translucent extra layer instead of dropping them.
+            if (isMarker && !showMarkers) { markerSkipped++; continue; }
+            scene.Add(new ViewProbe.SceneRef(rel, r.Position, r.Rotation, r.Scale,
+                                             (hiFp is { } h && r.FormKey == h) || conflictDoors.Contains(r.FormKey), isMarker,
+                                             r.FormKey, bk, baseEditorId.TryGetValue(bk, out var bEd) ? bEd : null));
+        }
+        foreach (var (qx, qy, qr) in refsAt)
+        {
+            var near = winRef.Values
+                .Select(r => (Ref: r, D: MathF.Sqrt((r.Position.X - qx) * (r.Position.X - qx) + (r.Position.Y - qy) * (r.Position.Y - qy))))
+                .Where(x => x.D <= qr)
+                .OrderBy(x => x.D)
+                .ToList();
+            Console.WriteLine($"   ---- refs within {qr:0} u of {qx:0},{qy:0}: {near.Count} ----");
+            foreach (var (r, d) in near)
+            {
+                string why = r.Deleted ? "NOT DRAWN: deleted"
+                           : DisabledWhy(r) is { } dw ? $"NOT DRAWN: {dw}"
+                           : r.Base is not { } bk0 ? "NOT DRAWN: no base"
+                           : !baseMesh.TryGetValue(bk0, out _) ? "NOT DRAWN: base carries no model"
+                           : baseIsMarker.Contains(bk0) && !showMarkers ? "not drawn: editor marker (--markers)"
+                           : baseMesh[bk0].Replace('/', (char)92).Contains("effects" + (char)92, StringComparison.OrdinalIgnoreCase) && !keepFx ? "not drawn: FX (--fx)"
+                           : r.InitiallyDisabled ? "drawn (enable parent resolves ENABLED)"
+                           : "drawn";
+                string bse = r.Base is { } bk1
+                    ? bk1 + (baseEditorId.TryGetValue(bk1, out var be) ? $" {be}" : "")
+                      + (baseMesh.TryGetValue(bk1, out var bm) ? $"  {bm}" : "")
+                    : "(none)";
+                Console.WriteLine($"      {d,6:0} u  {r.FormKey}  at {r.Position.X:0},{r.Position.Y:0},{r.Position.Z:0}"
+                                + $"  scale {r.Scale:0.00}  [{why}]  base {bse}");
+            }
+        }
+
+        // Every ref the scene drops is accounted for HERE, in one block — a silent category is how a
+        // render missing a third of its content once read as fully accounted for.
+        Console.WriteLine($"   refs not drawn: {disabledParentSkipped:N0} disabled via enable parent, "
+                        + $"{disabledFlagSkipped:N0} initially disabled (own flag, no parent), "
+                        + $"{deletedSkipped:N0} deleted, {noModel:N0} with no model-bearing base");
+        if (enabledByParentDrawn > 0)
+            Console.WriteLine($"   {enabledByParentDrawn:N0} initially-disabled ref(s) DRAWN — their enable parent resolves ENABLED at runtime");
+        if (fxSkipped > 0) Console.WriteLine($"   ({fxSkipped} effect-mesh refs skipped; --fx to include them)");
+        if (markerSkipped > 0) Console.WriteLine($"   ({markerSkipped} editor-marker refs skipped; --markers to include them translucently)");
         if (meshCensus is not null)
         {
-            var cls = isMarker ? "MARKER" : isFx ? "FX-file" : "geometry";
-            meshCensus[rel] = (meshCensus.TryGetValue(rel, out var c) ? c.Count + 1 : 1, cls);
+            Console.WriteLine($"   ---- distinct meshes in this cell ({meshCensus.Count}) ----");
+            foreach (var kv in meshCensus.OrderByDescending(k => k.Value.Count))
+                Console.WriteLine($"   {kv.Value.Count,5}  {kv.Value.Class,-8}  {kv.Key}");
         }
-        if (!keepFx && isFx) { fxSkipped++; continue; }
-        // Editor markers are not world geometry; the game never draws them. --markers keeps them
-        // as a translucent extra layer instead of dropping them.
-        if (isMarker && !showMarkers) { markerSkipped++; continue; }
-        scene.Add(new ViewProbe.SceneRef(rel, r.Position, r.Rotation, r.Scale,
-                                         (hiFp is { } h && r.FormKey == h) || conflictDoors.Contains(r.FormKey), isMarker,
-                                         r.FormKey, bk, baseEditorId.TryGetValue(bk, out var bEd) ? bEd : null));
-    }
-    foreach (var (qx, qy, qr) in refsAt)
-    {
-        var near = winRef.Values
-            .Select(r => (Ref: r, D: MathF.Sqrt((r.Position.X - qx) * (r.Position.X - qx) + (r.Position.Y - qy) * (r.Position.Y - qy))))
-            .Where(x => x.D <= qr)
-            .OrderBy(x => x.D)
-            .ToList();
-        Console.WriteLine($"   ---- refs within {qr:0} u of {qx:0},{qy:0}: {near.Count} ----");
-        foreach (var (r, d) in near)
-        {
-            string why = r.Deleted ? "NOT DRAWN: deleted"
-                       : DisabledWhy(r) is { } dw ? $"NOT DRAWN: {dw}"
-                       : r.Base is not { } bk0 ? "NOT DRAWN: no base"
-                       : !baseMesh.TryGetValue(bk0, out _) ? "NOT DRAWN: base carries no model"
-                       : baseIsMarker.Contains(bk0) && !showMarkers ? "not drawn: editor marker (--markers)"
-                       : baseMesh[bk0].Replace('/', (char)92).Contains("effects" + (char)92, StringComparison.OrdinalIgnoreCase) && !keepFx ? "not drawn: FX (--fx)"
-                       : r.InitiallyDisabled ? "drawn (enable parent resolves ENABLED)"
-                       : "drawn";
-            string bse = r.Base is { } bk1
-                ? bk1 + (baseEditorId.TryGetValue(bk1, out var be) ? $" {be}" : "")
-                  + (baseMesh.TryGetValue(bk1, out var bm) ? $"  {bm}" : "")
-                : "(none)";
-            Console.WriteLine($"      {d,6:0} u  {r.FormKey}  at {r.Position.X:0},{r.Position.Y:0},{r.Position.Z:0}"
-                            + $"  scale {r.Scale:0.00}  [{why}]  base {bse}");
-        }
-    }
 
-    // Every ref the scene drops is accounted for HERE, in one block — a silent category is how a
-    // render missing a third of its content once read as fully accounted for.
-    Console.WriteLine($"   refs not drawn: {disabledParentSkipped:N0} disabled via enable parent, "
-                    + $"{disabledFlagSkipped:N0} initially disabled (own flag, no parent), "
-                    + $"{deletedSkipped:N0} deleted, {noModel:N0} with no model-bearing base");
-    if (enabledByParentDrawn > 0)
-        Console.WriteLine($"   {enabledByParentDrawn:N0} initially-disabled ref(s) DRAWN — their enable parent resolves ENABLED at runtime");
-    if (fxSkipped > 0) Console.WriteLine($"   ({fxSkipped} effect-mesh refs skipped; --fx to include them)");
-    if (markerSkipped > 0) Console.WriteLine($"   ({markerSkipped} editor-marker refs skipped; --markers to include them translucently)");
-    if (meshCensus is not null)
-    {
-        Console.WriteLine($"   ---- distinct meshes in this cell ({meshCensus.Count}) ----");
-        foreach (var kv in meshCensus.OrderByDescending(k => k.Value.Count))
-            Console.WriteLine($"   {kv.Value.Count,5}  {kv.Value.Class,-8}  {kv.Key}");
-    }
-
-    // One navmesh SOURCE -> (green context, red finding) triangle sets. The red spec is applied
-    // per source, so a single-triangle red lands on THAT version's triangle — in a compare, the
-    // same record can be red-whole in every panel while its shape changes between them.
-    (List<(System.Numerics.Vector3, System.Numerics.Vector3, System.Numerics.Vector3)> Green,
-     List<(System.Numerics.Vector3, System.Numerics.Vector3, System.Numerics.Vector3)> Red)
-    BuildNavSets(IReadOnlyDictionary<FormKey, NavmeshGeometry> navs)
-    {
-        var green = new List<(System.Numerics.Vector3, System.Numerics.Vector3, System.Numerics.Vector3)>();
-        var red = new List<(System.Numerics.Vector3, System.Numerics.Vector3, System.Numerics.Vector3)>();
-        if (navMode == "off") return (green, red);
-        foreach (var nav in navs.Values)
+        // One navmesh SOURCE -> (green context, red finding) triangle sets. The red spec is applied
+        // per source, so a single-triangle red lands on THAT version's triangle — in a compare, the
+        // same record can be red-whole in every panel while its shape changes between them.
+        (List<(System.Numerics.Vector3, System.Numerics.Vector3, System.Numerics.Vector3)> Green,
+         List<(System.Numerics.Vector3, System.Numerics.Vector3, System.Numerics.Vector3)> Red)
+        BuildNavSets(IReadOnlyDictionary<FormKey, NavmeshGeometry> navs)
         {
-            var reds = redNav.TryGetValue(nav.FormKey, out var rset) ? rset : null;
-            bool wholeRed = redNav.ContainsKey(nav.FormKey) && reds is null;
-            for (int ti = 0; ti < nav.Triangles.Count; ti++)
+            var green = new List<(System.Numerics.Vector3, System.Numerics.Vector3, System.Numerics.Vector3)>();
+            var red = new List<(System.Numerics.Vector3, System.Numerics.Vector3, System.Numerics.Vector3)>();
+            if (navMode == "off") return (green, red);
+            foreach (var nav in navs.Values)
             {
-                var tri = nav.Triangles[ti];
-                if ((tri.Flags & 0x08) != 0) continue;
-                if (tri.A < 0 || tri.B < 0 || tri.C < 0) continue;
-                if (tri.A >= nav.Vertices.Count || tri.B >= nav.Vertices.Count || tri.C >= nav.Vertices.Count) continue;
-                var t3 = (V(nav.Vertices[tri.A]), V(nav.Vertices[tri.B]), V(nav.Vertices[tri.C]));
-                if (wholeRed || (reds is not null && reds.Contains(ti))) red.Add(t3);
-                else green.Add(t3);
+                var reds = redNav.TryGetValue(nav.FormKey, out var rset) ? rset : null;
+                bool wholeRed = redNav.ContainsKey(nav.FormKey) && reds is null;
+                for (int ti = 0; ti < nav.Triangles.Count; ti++)
+                {
+                    var tri = nav.Triangles[ti];
+                    if ((tri.Flags & 0x08) != 0) continue;
+                    if (tri.A < 0 || tri.B < 0 || tri.C < 0) continue;
+                    if (tri.A >= nav.Vertices.Count || tri.B >= nav.Vertices.Count || tri.C >= nav.Vertices.Count) continue;
+                    var t3 = (V(nav.Vertices[tri.A]), V(nav.Vertices[tri.B]), V(nav.Vertices[tri.C]));
+                    if (wholeRed || (reds is not null && reds.Contains(ti))) red.Add(t3);
+                    else green.Add(t3);
+                }
             }
+            return (green, red);
         }
-        return (green, red);
-    }
 
-    if (findLtex is not null)
-    {
-        string? Diffuse(FormKey lk)
+        if (findLtex is not null)
         {
-            if (!ltexToTxst.TryGetValue(lk, out var ts)) return null;
-            if (!txstDiffuse.TryGetValue(ts, out var d)) return null;
-            var pp = d.Replace('/', (char)92);
-            return pp.StartsWith("textures", StringComparison.OrdinalIgnoreCase) ? pp : "textures" + (char)92 + pp;
+            string? Diffuse(FormKey lk)
+            {
+                if (!ltexToTxst.TryGetValue(lk, out var ts)) return null;
+                if (!txstDiffuse.TryGetValue(ts, out var d)) return null;
+                var pp = d.Replace('/', (char)92);
+                return pp.StartsWith("textures", StringComparison.OrdinalIgnoreCase) ? pp : "textures" + (char)92 + pp;
+            }
+            var wanted = ltexEditorId
+                .Where(kv => kv.Value.Contains(findLtex, StringComparison.OrdinalIgnoreCase))
+                .ToDictionary(kv => kv.Key, kv => kv.Value);
+            Console.WriteLine($"   ---- LTEX records matching '{findLtex}': {wanted.Count} ----");
+            foreach (var (fk, ed) in wanted.OrderBy(k => k.Value))
+                Console.WriteLine($"      {fk}  {ed}  ->  {Diffuse(fk) ?? "NO DIFFUSE RESOLVED"}");
+            if (wanted.Count > 0)
+            {
+                // grid -> (painted points across all quadrants, whether any quadrant uses it as BASE)
+                var hits = new Dictionary<(int X, int Y), (int Painted, bool Base, FormKey Cell, string? Ed)>();
+                foreach (var path in order.OrderedPaths)
+                {
+                    ISkyrimModGetter ms;
+                    try { ms = SkyrimMod.CreateFromBinaryOverlay(path, SkyrimRelease.SkyrimSE); } catch { continue; }
+                    using (ms as IDisposable)
+                        foreach (var ws in ms.Worldspaces.Records)
+                        {
+                            if (ws.FormKey != targetWorldspace) continue;
+                            IEnumerable<ICellGetter> All()
+                            {
+                                if (ws.TopCell is { } tc) yield return tc;
+                                foreach (var blk in ws.SubCells)
+                                    foreach (var sub in blk.Items)
+                                        foreach (var c in sub.Items)
+                                            yield return c;
+                            }
+                            foreach (var c in All())
+                            {
+                                if (c.Grid?.Point is not { } gp || c.Landscape is not { } ls) continue;
+                                int painted = 0; bool isBase = false;
+                                try
+                                {
+                                    foreach (var layer in ls.Layers)
+                                    {
+                                        if (layer.Header?.Texture.FormKeyNullable is not { } lk || !wanted.ContainsKey(lk)) continue;
+                                        if (layer is IAlphaLayerGetter al)
+                                            painted += al.AlphaLayerData.Count(pt => pt.Opacity > 0.004f);
+                                        else { isBase = true; painted += 289; }
+                                    }
+                                }
+                                catch { }
+                                // A later plugin's LAND for the same cell REPLACES the earlier one, so
+                                // overwrite rather than accumulate — same winner rule as the terrain walk.
+                                if (painted > 0 || isBase) hits[(gp.X, gp.Y)] = (painted, isBase, c.FormKey, c.EditorID);
+                                else hits.Remove((gp.X, gp.Y));
+                            }
+                        }
+                }
+                Console.WriteLine($"   ---- cells painting it, top 20 of {hits.Count} ----");
+                foreach (var ((gx, gy), (painted, isBase, ck, ced)) in hits.OrderByDescending(k => k.Value.Painted).Take(20))
+                    Console.WriteLine($"      cell ({gx,4},{gy,4})  {painted,5} painted point(s){(isBase ? "  (BASE)" : "      ")}"
+                                    + $"  centre {gx * 4096 + 2048},{gy * 4096 + 2048}"
+                                    + $"  {ck}{(string.IsNullOrWhiteSpace(ced) ? "" : "  " + ced)}");
+            }
+            return 0;
         }
-        var wanted = ltexEditorId
-            .Where(kv => kv.Value.Contains(findLtex, StringComparison.OrdinalIgnoreCase))
-            .ToDictionary(kv => kv.Key, kv => kv.Value);
-        Console.WriteLine($"   ---- LTEX records matching '{findLtex}': {wanted.Count} ----");
-        foreach (var (fk, ed) in wanted.OrderBy(k => k.Value))
-            Console.WriteLine($"      {fk}  {ed}  ->  {Diffuse(fk) ?? "NO DIFFUSE RESOLVED"}");
-        if (wanted.Count > 0)
+
+        // ---- TERRAIN: winning LAND heightmaps for the target cell + its ring-1 neighbours --------
+        // The placed rocks were floating in space without this; exteriors get actual ground now.
+        // texture path ("" = none, off-white snow fallback) -> that patch's triangles.
+        var terrainPatches = new Dictionary<string, List<(System.Numerics.Vector3, System.Numerics.Vector3, System.Numerics.Vector3)>>(StringComparer.OrdinalIgnoreCase);
+        // Painted layers, in draw order: diffuse path + triangles carrying a per-vertex opacity.
+        var terrainLayers = new List<(string Diffuse, List<(System.Numerics.Vector3 A, System.Numerics.Vector3 B, System.Numerics.Vector3 C, float Oa, float Ob, float Oc)> Tris)>();
+        // The same decoded heightmaps, kept as a queryable field: the navmesh overlay asks it
+        // whether a triangle is BELOW the ground that gets drawn, which is what separates "buried"
+        // from "behind a rock" and earns the two different dashed layers.
+        var landHeights = new Dictionary<(int X, int Y), float[,]>();
+        // --interactive: hovering bare ground answers with the quadrant's painted layers. Assigned
+        // inside the terrain block (it captures the walked LAND census); null on interiors.
+        Func<float, float, string?>? terrainDescribeAt = null;
+        if (drawTerrain && !interior && targetGrid is { } tg)
         {
-            // grid -> (painted points across all quadrants, whether any quadrant uses it as BASE)
-            var hits = new Dictionary<(int X, int Y), (int Painted, bool Base, FormKey Cell, string? Ed)>();
+            // grid -> winning heightmap + the base landscape texture per quadrant (LTEX FormKeys,
+            // resolved to diffuse paths after the walk), by load order (later plugin wins).
+            var landWin = new Dictionary<(int X, int Y), (float Offset, sbyte[,] Grad, FormKey?[] QuadLtex)>();
+            // grid -> every layer the WINNING LAND for that cell carries, base and alpha alike.
+            var landLayers = new Dictionary<(int X, int Y), List<(int Quadrant, int Layer, bool Alpha, FormKey? Tex, int Painted, float MaxOpacity, float[]? Opacity)>>();
+            // Per cell, per quadrant: the alpha layer promoted to stand in for a MISSING base layer
+            // (-1 = the quadrant had a real base). A quadrant with no BTXT states no ground at all;
+            // the honest stand-in is the layer that covers most of it, not a blank slab.
+            var landPromoted = new Dictionary<(int X, int Y), int[]>();
             foreach (var path in order.OrderedPaths)
             {
-                ISkyrimModGetter ms;
-                try { ms = SkyrimMod.CreateFromBinaryOverlay(path, SkyrimRelease.SkyrimSE); } catch { continue; }
-                using (ms as IDisposable)
-                    foreach (var ws in ms.Worldspaces.Records)
+                ISkyrimModGetter m2;
+                try { m2 = SkyrimMod.CreateFromBinaryOverlay(path, SkyrimRelease.SkyrimSE); } catch { continue; }
+                using (m2 as IDisposable)
+                {
+                    foreach (var ws in m2.Worldspaces.Records)
                     {
                         if (ws.FormKey != targetWorldspace) continue;
-                        IEnumerable<ICellGetter> All()
+                        IEnumerable<ICellGetter> Cells()
                         {
                             if (ws.TopCell is { } tc) yield return tc;
                             foreach (var blk in ws.SubCells)
@@ -851,368 +1025,271 @@ if (textured)
                                     foreach (var c in sub.Items)
                                         yield return c;
                         }
-                        foreach (var c in All())
+                        foreach (var c in Cells())
                         {
-                            if (c.Grid?.Point is not { } gp || c.Landscape is not { } ls) continue;
-                            int painted = 0; bool isBase = false;
+                            if (c.Grid?.Point is not { } gp) continue;
+                            if (Math.Abs(gp.X - tg.X) > 1 || Math.Abs(gp.Y - tg.Y) > 1) continue;
+                            if (c.Landscape?.VertexHeightMap is not { } vh) continue;
+                            var grad = new sbyte[33, 33];
                             try
                             {
-                                foreach (var layer in ls.Layers)
+                                for (int y = 0; y < 33; y++)
+                                    for (int x = 0; x < 33; x++)
+                                        grad[x, y] = vh.HeightMap[x, y];
+                            }
+                            catch { continue; }
+                            // Base layer per quadrant (a non-alpha layer names the quadrant's ground
+                            // texture; alpha layers blend on top and are out of scope for this pass).
+                            var quad = new FormKey?[4];
+                            var census = new List<(int Quadrant, int Layer, bool Alpha, FormKey? Tex, int Painted, float MaxOpacity, float[]? Opacity)>();
+                            var promoted = new[] { -1, -1, -1, -1 };
+                            try
+                            {
+                                foreach (var layer in c.Landscape.Layers)
                                 {
-                                    if (layer.Header?.Texture.FormKeyNullable is not { } lk || !wanted.ContainsKey(lk)) continue;
+                                    int qi = layer.Header is { } lh ? (int)lh.Quadrant : -1;
+                                    var tex = layer.Header?.Texture.FormKeyNullable;
                                     if (layer is IAlphaLayerGetter al)
-                                        painted += al.AlphaLayerData.Count(pt => pt.Opacity > 0.004f);
-                                    else { isBase = true; painted += 289; }
+                                    {
+                                        // 17x17 opacity points per quadrant, addressed by Position.
+                                        var op = new float[289];
+                                        int painted = 0; float maxOp = 0f;
+                                        foreach (var pt in al.AlphaLayerData)
+                                        {
+                                            if (pt.Position < op.Length) op[pt.Position] = pt.Opacity;
+                                            if (pt.Opacity > 0.004f) { painted++; if (pt.Opacity > maxOp) maxOp = pt.Opacity; }
+                                        }
+                                        census.Add((qi, layer.Header?.LayerNumber ?? -1, true, tex, painted, maxOp, op));
+                                        continue;
+                                    }
+                                    census.Add((qi, layer.Header?.LayerNumber ?? -1, false, tex, 289, 1f, null));
+                                    if (qi is >= 0 and < 4 && quad[qi] is null && tex is { } lf) quad[qi] = lf;
+                                }
+                                // No base layer for a quadrant: stand in the alpha layer that paints the
+                                // most of it, and remember which, so it is not also drawn on top of itself.
+                                // Gated on the same switch as the overlays — --no-terrain-layers means
+                                // "ignore the alpha layers entirely", base stand-ins included, which is
+                                // what makes it a clean revert to the base-only picture.
+                                for (int q = 0; drawTerrainLayers && q < 4; q++)
+                                {
+                                    if (quad[q] is not null) continue;
+                                    var best = census.Where(l => l.Alpha && l.Quadrant == q && l.Tex is not null)
+                                                     .OrderByDescending(l => l.Painted).ToList();
+                                    if (best.Count > 0 && best[0].Tex is { } bt) { quad[q] = bt; promoted[q] = best[0].Layer; }
                                 }
                             }
                             catch { }
-                            // A later plugin's LAND for the same cell REPLACES the earlier one, so
-                            // overwrite rather than accumulate — same winner rule as the terrain walk.
-                            if (painted > 0 || isBase) hits[(gp.X, gp.Y)] = (painted, isBase, c.FormKey, c.EditorID);
-                            else hits.Remove((gp.X, gp.Y));
+                            landWin[(gp.X, gp.Y)] = (vh.Offset, grad, quad);   // later plugin overwrites = wins
+                            landLayers[(gp.X, gp.Y)] = census;
+                            landPromoted[(gp.X, gp.Y)] = promoted;
                         }
                     }
+                }
             }
-            Console.WriteLine($"   ---- cells painting it, top 20 of {hits.Count} ----");
-            foreach (var ((gx, gy), (painted, isBase, ck, ced)) in hits.OrderByDescending(k => k.Value.Painted).Take(20))
-                Console.WriteLine($"      cell ({gx,4},{gy,4})  {painted,5} painted point(s){(isBase ? "  (BASE)" : "      ")}"
-                                + $"  centre {gx * 4096 + 2048},{gy * 4096 + 2048}"
-                                + $"  {ck}{(string.IsNullOrWhiteSpace(ced) ? "" : "  " + ced)}");
-        }
-        return 0;
-    }
 
-    // ---- TERRAIN: winning LAND heightmaps for the target cell + its ring-1 neighbours --------
-    // The placed rocks were floating in space without this; exteriors get actual ground now.
-    // texture path ("" = none, off-white snow fallback) -> that patch's triangles.
-    var terrainPatches = new Dictionary<string, List<(System.Numerics.Vector3, System.Numerics.Vector3, System.Numerics.Vector3)>>(StringComparer.OrdinalIgnoreCase);
-    // Painted layers, in draw order: diffuse path + triangles carrying a per-vertex opacity.
-    var terrainLayers = new List<(string Diffuse, List<(System.Numerics.Vector3 A, System.Numerics.Vector3 B, System.Numerics.Vector3 C, float Oa, float Ob, float Oc)> Tris)>();
-    // The same decoded heightmaps, kept as a queryable field: the navmesh overlay asks it
-    // whether a triangle is BELOW the ground that gets drawn, which is what separates "buried"
-    // from "behind a rock" and earns the two different dashed layers.
-    var landHeights = new Dictionary<(int X, int Y), float[,]>();
-    // --interactive: hovering bare ground answers with the quadrant's painted layers. Assigned
-    // inside the terrain block (it captures the walked LAND census); null on interiors.
-    Func<float, float, string?>? terrainDescribeAt = null;
-    if (drawTerrain && !interior && targetGrid is { } tg)
-    {
-        // grid -> winning heightmap + the base landscape texture per quadrant (LTEX FormKeys,
-        // resolved to diffuse paths after the walk), by load order (later plugin wins).
-        var landWin = new Dictionary<(int X, int Y), (float Offset, sbyte[,] Grad, FormKey?[] QuadLtex)>();
-        // grid -> every layer the WINNING LAND for that cell carries, base and alpha alike.
-        var landLayers = new Dictionary<(int X, int Y), List<(int Quadrant, int Layer, bool Alpha, FormKey? Tex, int Painted, float MaxOpacity, float[]? Opacity)>>();
-        // Per cell, per quadrant: the alpha layer promoted to stand in for a MISSING base layer
-        // (-1 = the quadrant had a real base). A quadrant with no BTXT states no ground at all;
-        // the honest stand-in is the layer that covers most of it, not a blank slab.
-        var landPromoted = new Dictionary<(int X, int Y), int[]>();
-        foreach (var path in order.OrderedPaths)
-        {
-            ISkyrimModGetter m2;
-            try { m2 = SkyrimMod.CreateFromBinaryOverlay(path, SkyrimRelease.SkyrimSE); } catch { continue; }
-            using (m2 as IDisposable)
+            string? QuadDiffuse(FormKey? ltex)
             {
-                foreach (var ws in m2.Worldspaces.Records)
+                if (ltex is not { } lk) return null;
+                if (!ltexToTxst.TryGetValue(lk, out var ts)) return null;
+                if (!txstDiffuse.TryGetValue(ts, out var d)) return null;
+                var p = d.Replace('/', '\\');
+                return p.StartsWith("textures\\", StringComparison.OrdinalIgnoreCase) ? p : "textures\\" + p;
+            }
+
+            int promotedQuads = 0;
+            foreach (var pr in landPromoted.Values) promotedQuads += pr.Count(v => v >= 0);
+            if (promotedQuads > 0)
+                Console.WriteLine($"   terrain: {promotedQuads} quadrant(s) carry no base layer — "
+                                + $"stood in with their most-painted alpha layer");
+
+            foreach (var ((gx, gy), (off, grad, quadLtex)) in landWin)
+            {
+                // VHGT decode: row-start accumulator down the first column, then run along each row;
+                // stored values are gradients in 1/8 world units.
+                var h = new float[33, 33];
+                float rowStart = off;
+                for (int y = 0; y < 33; y++)
                 {
-                    if (ws.FormKey != targetWorldspace) continue;
-                    IEnumerable<ICellGetter> Cells()
+                    rowStart += grad[0, y];
+                    float acc = rowStart;
+                    h[0, y] = acc;
+                    for (int x = 1; x < 33; x++) { acc += grad[x, y]; h[x, y] = acc; }
+                }
+                landHeights[(gx, gy)] = h;
+                System.Numerics.Vector3 P(int x, int y) =>
+                    new(gx * 4096f + x * 128f, gy * 4096f + y * 128f, h[x, y] * 8f);
+                for (int y = 0; y < 32; y++)
+                    for (int x = 0; x < 32; x++)
                     {
-                        if (ws.TopCell is { } tc) yield return tc;
-                        foreach (var blk in ws.SubCells)
-                            foreach (var sub in blk.Items)
-                                foreach (var c in sub.Items)
-                                    yield return c;
+                        // Quadrant enum order: BottomLeft, BottomRight, TopLeft, TopRight.
+                        int qi = (y < 16 ? 0 : 2) + (x < 16 ? 0 : 1);
+                        var tex = QuadDiffuse(quadLtex[qi]);
+                        if (!terrainPatches.TryGetValue(tex ?? "", out var bag))
+                            terrainPatches[tex ?? ""] = bag = new List<(System.Numerics.Vector3, System.Numerics.Vector3, System.Numerics.Vector3)>();
+                        bag.Add((P(x, y), P(x + 1, y), P(x + 1, y + 1)));
+                        bag.Add((P(x, y), P(x + 1, y + 1), P(x, y + 1)));
                     }
-                    foreach (var c in Cells())
-                    {
-                        if (c.Grid?.Point is not { } gp) continue;
-                        if (Math.Abs(gp.X - tg.X) > 1 || Math.Abs(gp.Y - tg.Y) > 1) continue;
-                        if (c.Landscape?.VertexHeightMap is not { } vh) continue;
-                        var grad = new sbyte[33, 33];
-                        try
+
+                // ---- the painted layers, in the record's own order ---------------------------
+                // Each alpha layer is its own sheet over the base: the layer's texture, the layer's
+                // per-vertex opacity in vertex alpha. Triangles nobody painted are dropped, which is
+                // most of them — a road is a thin ribbon across a 16x16 quadrant.
+                if (!drawTerrainLayers || !landLayers.TryGetValue((gx, gy), out var lyrs)) continue;
+                var promotedHere = landPromoted.TryGetValue((gx, gy), out var pq) ? pq : new[] { -1, -1, -1, -1 };
+                foreach (var l in lyrs.Where(l => l.Alpha && l.Opacity is not null && l.Quadrant is >= 0 and < 4)
+                                      .OrderBy(l => l.Layer))
+                {
+                    if (promotedHere[l.Quadrant] == l.Layer) continue;      // it IS the base here
+                    if (QuadDiffuse(l.Tex) is not { } lyrTex) continue;     // no resolvable texture: skip
+                    int qx0 = (l.Quadrant & 1) * 16, qy0 = l.Quadrant >= 2 ? 16 : 0;
+                    var op = l.Opacity!;
+                    float Op(int lx, int ly) { int i = ly * 17 + lx; return i >= 0 && i < op.Length ? op[i] : 0f; }
+                    var tris = new List<(System.Numerics.Vector3 A, System.Numerics.Vector3 B, System.Numerics.Vector3 C, float Oa, float Ob, float Oc)>();
+                    for (int ly = 0; ly < 16; ly++)
+                        for (int lx = 0; lx < 16; lx++)
                         {
-                            for (int y = 0; y < 33; y++)
-                                for (int x = 0; x < 33; x++)
-                                    grad[x, y] = vh.HeightMap[x, y];
+                            float o00 = Op(lx, ly), o10 = Op(lx + 1, ly), o11 = Op(lx + 1, ly + 1), o01 = Op(lx, ly + 1);
+                            if (o00 <= 0.004f && o10 <= 0.004f && o11 <= 0.004f && o01 <= 0.004f) continue;
+                            int x = qx0 + lx, y = qy0 + ly;
+                            tris.Add((P(x, y), P(x + 1, y), P(x + 1, y + 1), o00, o10, o11));
+                            tris.Add((P(x, y), P(x + 1, y + 1), P(x, y + 1), o00, o11, o01));
                         }
-                        catch { continue; }
-                        // Base layer per quadrant (a non-alpha layer names the quadrant's ground
-                        // texture; alpha layers blend on top and are out of scope for this pass).
-                        var quad = new FormKey?[4];
-                        var census = new List<(int Quadrant, int Layer, bool Alpha, FormKey? Tex, int Painted, float MaxOpacity, float[]? Opacity)>();
-                        var promoted = new[] { -1, -1, -1, -1 };
-                        try
+                    if (tris.Count > 0) terrainLayers.Add((lyrTex, tris));
+                }
+            }
+            // VP_ALPHA_DUMP=gx,gy prints every alpha layer of that cell as a 17x17 opacity grid, in
+            // the SAME orientation the geometry builder reads it (lx fastest, ly down). It exists to
+            // settle one question that no amount of looking at a render can: whether Position is
+            // decoded x-fastest or y-fastest. A transposed map still draws a road-shaped ribbon —
+            // it just draws it mirrored — so the test is CONTINUITY at a quadrant seam: TopLeft's
+            // last column must agree with TopRight's first column where a paint crosses between them.
+            if (Environment.GetEnvironmentVariable("VP_ALPHA_DUMP") is { } dumpSpec)
+            {
+                var ds = dumpSpec.Split(',');
+                if (ds.Length == 2 && int.TryParse(ds[0], out int dgx) && int.TryParse(ds[1], out int dgy)
+                    && landLayers.TryGetValue((dgx, dgy), out var dl))
+                {
+                    var qn = new[] { "BottomLeft", "BottomRight", "TopLeft", "TopRight" };
+                    foreach (var l in dl.Where(l => l.Alpha && l.Opacity is not null).OrderBy(l => l.Quadrant).ThenBy(l => l.Layer))
+                    {
+                        Console.WriteLine($"   ---- cell ({dgx},{dgy}) {qn[Math.Clamp(l.Quadrant, 0, 3)]} alpha #{l.Layer} "
+                                        + $"{(l.Tex is { } lk && ltexEditorId.TryGetValue(lk, out var le) ? le : "?")} ----");
+                        for (int ly = 16; ly >= 0; ly--)     // print +Y upward, like a map
                         {
-                            foreach (var layer in c.Landscape.Layers)
+                            var sb = new System.Text.StringBuilder($"   ly{ly,2} ");
+                            for (int lx = 0; lx <= 16; lx++)
                             {
-                                int qi = layer.Header is { } lh ? (int)lh.Quadrant : -1;
-                                var tex = layer.Header?.Texture.FormKeyNullable;
-                                if (layer is IAlphaLayerGetter al)
-                                {
-                                    // 17x17 opacity points per quadrant, addressed by Position.
-                                    var op = new float[289];
-                                    int painted = 0; float maxOp = 0f;
-                                    foreach (var pt in al.AlphaLayerData)
-                                    {
-                                        if (pt.Position < op.Length) op[pt.Position] = pt.Opacity;
-                                        if (pt.Opacity > 0.004f) { painted++; if (pt.Opacity > maxOp) maxOp = pt.Opacity; }
-                                    }
-                                    census.Add((qi, layer.Header?.LayerNumber ?? -1, true, tex, painted, maxOp, op));
-                                    continue;
-                                }
-                                census.Add((qi, layer.Header?.LayerNumber ?? -1, false, tex, 289, 1f, null));
-                                if (qi is >= 0 and < 4 && quad[qi] is null && tex is { } lf) quad[qi] = lf;
+                                float o = l.Opacity![ly * 17 + lx];
+                                sb.Append(o <= 0.004f ? '.' : o >= 0.95f ? '#' : o >= 0.5f ? '+' : o >= 0.2f ? 'o' : ':');
                             }
-                            // No base layer for a quadrant: stand in the alpha layer that paints the
-                            // most of it, and remember which, so it is not also drawn on top of itself.
-                            // Gated on the same switch as the overlays — --no-terrain-layers means
-                            // "ignore the alpha layers entirely", base stand-ins included, which is
-                            // what makes it a clean revert to the base-only picture.
-                            for (int q = 0; drawTerrainLayers && q < 4; q++)
-                            {
-                                if (quad[q] is not null) continue;
-                                var best = census.Where(l => l.Alpha && l.Quadrant == q && l.Tex is not null)
-                                                 .OrderByDescending(l => l.Painted).ToList();
-                                if (best.Count > 0 && best[0].Tex is { } bt) { quad[q] = bt; promoted[q] = best[0].Layer; }
-                            }
+                            Console.WriteLine(sb.ToString());
                         }
-                        catch { }
-                        landWin[(gp.X, gp.Y)] = (vh.Offset, grad, quad);   // later plugin overwrites = wins
-                        landLayers[(gp.X, gp.Y)] = census;
-                        landPromoted[(gp.X, gp.Y)] = promoted;
                     }
                 }
             }
-        }
-
-        string? QuadDiffuse(FormKey? ltex)
-        {
-            if (ltex is not { } lk) return null;
-            if (!ltexToTxst.TryGetValue(lk, out var ts)) return null;
-            if (!txstDiffuse.TryGetValue(ts, out var d)) return null;
-            var p = d.Replace('/', '\\');
-            return p.StartsWith("textures\\", StringComparison.OrdinalIgnoreCase) ? p : "textures\\" + p;
-        }
-
-        int promotedQuads = 0;
-        foreach (var pr in landPromoted.Values) promotedQuads += pr.Count(v => v >= 0);
-        if (promotedQuads > 0)
-            Console.WriteLine($"   terrain: {promotedQuads} quadrant(s) carry no base layer — "
-                            + $"stood in with their most-painted alpha layer");
-
-        foreach (var ((gx, gy), (off, grad, quadLtex)) in landWin)
-        {
-            // VHGT decode: row-start accumulator down the first column, then run along each row;
-            // stored values are gradients in 1/8 world units.
-            var h = new float[33, 33];
-            float rowStart = off;
-            for (int y = 0; y < 33; y++)
+            if (listTerrain)
             {
-                rowStart += grad[0, y];
-                float acc = rowStart;
-                h[0, y] = acc;
-                for (int x = 1; x < 33; x++) { acc += grad[x, y]; h[x, y] = acc; }
-            }
-            landHeights[(gx, gy)] = h;
-            System.Numerics.Vector3 P(int x, int y) =>
-                new(gx * 4096f + x * 128f, gy * 4096f + y * 128f, h[x, y] * 8f);
-            for (int y = 0; y < 32; y++)
-                for (int x = 0; x < 32; x++)
+                Console.WriteLine($"   ---- landscape layers, winning LAND per cell ({landLayers.Count} cell(s)) ----");
+                string TexName(FormKey? fk)
+                    => fk is not { } k ? "(none)"
+                     : (ltexEditorId.TryGetValue(k, out var ed) ? ed : k.ToString())
+                       + " -> " + (QuadDiffuse(k) ?? "NO DIFFUSE RESOLVED");
+                foreach (var (grid, census) in landLayers.OrderBy(k => k.Key.Y).ThenBy(k => k.Key.X))
                 {
-                    // Quadrant enum order: BottomLeft, BottomRight, TopLeft, TopRight.
-                    int qi = (y < 16 ? 0 : 2) + (x < 16 ? 0 : 1);
-                    var tex = QuadDiffuse(quadLtex[qi]);
-                    if (!terrainPatches.TryGetValue(tex ?? "", out var bag))
-                        terrainPatches[tex ?? ""] = bag = new List<(System.Numerics.Vector3, System.Numerics.Vector3, System.Numerics.Vector3)>();
-                    bag.Add((P(x, y), P(x + 1, y), P(x + 1, y + 1)));
-                    bag.Add((P(x, y), P(x + 1, y + 1), P(x, y + 1)));
-                }
-
-            // ---- the painted layers, in the record's own order ---------------------------
-            // Each alpha layer is its own sheet over the base: the layer's texture, the layer's
-            // per-vertex opacity in vertex alpha. Triangles nobody painted are dropped, which is
-            // most of them — a road is a thin ribbon across a 16x16 quadrant.
-            if (!drawTerrainLayers || !landLayers.TryGetValue((gx, gy), out var lyrs)) continue;
-            var promotedHere = landPromoted.TryGetValue((gx, gy), out var pq) ? pq : new[] { -1, -1, -1, -1 };
-            foreach (var l in lyrs.Where(l => l.Alpha && l.Opacity is not null && l.Quadrant is >= 0 and < 4)
-                                  .OrderBy(l => l.Layer))
-            {
-                if (promotedHere[l.Quadrant] == l.Layer) continue;      // it IS the base here
-                if (QuadDiffuse(l.Tex) is not { } lyrTex) continue;     // no resolvable texture: skip
-                int qx0 = (l.Quadrant & 1) * 16, qy0 = l.Quadrant >= 2 ? 16 : 0;
-                var op = l.Opacity!;
-                float Op(int lx, int ly) { int i = ly * 17 + lx; return i >= 0 && i < op.Length ? op[i] : 0f; }
-                var tris = new List<(System.Numerics.Vector3 A, System.Numerics.Vector3 B, System.Numerics.Vector3 C, float Oa, float Ob, float Oc)>();
-                for (int ly = 0; ly < 16; ly++)
-                    for (int lx = 0; lx < 16; lx++)
+                    var names = new[] { "BottomLeft", "BottomRight", "TopLeft", "TopRight" };
+                    Console.WriteLine($"   cell ({grid.X},{grid.Y}){(grid.X == tg.X && grid.Y == tg.Y ? "  <- TARGET" : "")}");
+                    for (int q = 0; q < 4; q++)
                     {
-                        float o00 = Op(lx, ly), o10 = Op(lx + 1, ly), o11 = Op(lx + 1, ly + 1), o01 = Op(lx, ly + 1);
-                        if (o00 <= 0.004f && o10 <= 0.004f && o11 <= 0.004f && o01 <= 0.004f) continue;
-                        int x = qx0 + lx, y = qy0 + ly;
-                        tris.Add((P(x, y), P(x + 1, y), P(x + 1, y + 1), o00, o10, o11));
-                        tris.Add((P(x, y), P(x + 1, y + 1), P(x, y + 1), o00, o11, o01));
-                    }
-                if (tris.Count > 0) terrainLayers.Add((lyrTex, tris));
-            }
-        }
-        // VP_ALPHA_DUMP=gx,gy prints every alpha layer of that cell as a 17x17 opacity grid, in
-        // the SAME orientation the geometry builder reads it (lx fastest, ly down). It exists to
-        // settle one question that no amount of looking at a render can: whether Position is
-        // decoded x-fastest or y-fastest. A transposed map still draws a road-shaped ribbon —
-        // it just draws it mirrored — so the test is CONTINUITY at a quadrant seam: TopLeft's
-        // last column must agree with TopRight's first column where a paint crosses between them.
-        if (Environment.GetEnvironmentVariable("VP_ALPHA_DUMP") is { } dumpSpec)
-        {
-            var ds = dumpSpec.Split(',');
-            if (ds.Length == 2 && int.TryParse(ds[0], out int dgx) && int.TryParse(ds[1], out int dgy)
-                && landLayers.TryGetValue((dgx, dgy), out var dl))
-            {
-                var qn = new[] { "BottomLeft", "BottomRight", "TopLeft", "TopRight" };
-                foreach (var l in dl.Where(l => l.Alpha && l.Opacity is not null).OrderBy(l => l.Quadrant).ThenBy(l => l.Layer))
-                {
-                    Console.WriteLine($"   ---- cell ({dgx},{dgy}) {qn[Math.Clamp(l.Quadrant, 0, 3)]} alpha #{l.Layer} "
-                                    + $"{(l.Tex is { } lk && ltexEditorId.TryGetValue(lk, out var le) ? le : "?")} ----");
-                    for (int ly = 16; ly >= 0; ly--)     // print +Y upward, like a map
-                    {
-                        var sb = new System.Text.StringBuilder($"   ly{ly,2} ");
-                        for (int lx = 0; lx <= 16; lx++)
-                        {
-                            float o = l.Opacity![ly * 17 + lx];
-                            sb.Append(o <= 0.004f ? '.' : o >= 0.95f ? '#' : o >= 0.5f ? '+' : o >= 0.2f ? 'o' : ':');
-                        }
-                        Console.WriteLine(sb.ToString());
+                        var inQ = census.Where(l => l.Quadrant == q).OrderBy(l => l.Alpha).ThenBy(l => l.Layer).ToList();
+                        if (inQ.Count == 0) { Console.WriteLine($"      {names[q],-12} (no layers at all)"); continue; }
+                        foreach (var l in inQ)
+                            Console.WriteLine($"      {names[q],-12} {(l.Alpha ? $"alpha #{l.Layer,-2}" : "BASE      ")}"
+                                            + $" {(l.Alpha ? $"{l.Painted,3}/289 pts, max {l.MaxOpacity:0.00}  " : "                     ")}"
+                                            + TexName(l.Tex));
                     }
                 }
             }
-        }
-        if (listTerrain)
-        {
-            Console.WriteLine($"   ---- landscape layers, winning LAND per cell ({landLayers.Count} cell(s)) ----");
-            string TexName(FormKey? fk)
-                => fk is not { } k ? "(none)"
-                 : (ltexEditorId.TryGetValue(k, out var ed) ? ed : k.ToString())
-                   + " -> " + (QuadDiffuse(k) ?? "NO DIFFUSE RESOLVED");
-            foreach (var (grid, census) in landLayers.OrderBy(k => k.Key.Y).ThenBy(k => k.Key.X))
-            {
-                var names = new[] { "BottomLeft", "BottomRight", "TopLeft", "TopRight" };
-                Console.WriteLine($"   cell ({grid.X},{grid.Y}){(grid.X == tg.X && grid.Y == tg.Y ? "  <- TARGET" : "")}");
-                for (int q = 0; q < 4; q++)
-                {
-                    var inQ = census.Where(l => l.Quadrant == q).OrderBy(l => l.Alpha).ThenBy(l => l.Layer).ToList();
-                    if (inQ.Count == 0) { Console.WriteLine($"      {names[q],-12} (no layers at all)"); continue; }
-                    foreach (var l in inQ)
-                        Console.WriteLine($"      {names[q],-12} {(l.Alpha ? $"alpha #{l.Layer,-2}" : "BASE      ")}"
-                                        + $" {(l.Alpha ? $"{l.Painted,3}/289 pts, max {l.MaxOpacity:0.00}  " : "                     ")}"
-                                        + TexName(l.Tex));
-                }
-            }
-        }
-        int terrTotal = terrainPatches.Values.Sum(v => v.Count);
-        if (terrTotal > 0)
-            Console.WriteLine($"   terrain: {landWin.Count} cell(s) of LAND, {terrTotal:N0} triangles, "
-                            + $"{terrainPatches.Count(kv => kv.Key.Length > 0)} distinct ground texture(s)");
-        else
-            Console.WriteLine($"   terrain: no LAND found for this cell (--no-terrain to silence)");
-        if (terrainLayers.Count > 0)
-            Console.WriteLine($"   terrain paint layers: {terrainLayers.Count} sheet(s), "
-                            + $"{terrainLayers.Sum(l => l.Tris.Count):N0} triangles, "
-                            + $"{terrainLayers.Select(l => l.Diffuse).Distinct(StringComparer.OrdinalIgnoreCase).Count()} distinct texture(s)");
+            int terrTotal = terrainPatches.Values.Sum(v => v.Count);
+            if (terrTotal > 0)
+                Console.WriteLine($"   terrain: {landWin.Count} cell(s) of LAND, {terrTotal:N0} triangles, "
+                                + $"{terrainPatches.Count(kv => kv.Key.Length > 0)} distinct ground texture(s)");
+            else
+                Console.WriteLine($"   terrain: no LAND found for this cell (--no-terrain to silence)");
+            if (terrainLayers.Count > 0)
+                Console.WriteLine($"   terrain paint layers: {terrainLayers.Count} sheet(s), "
+                                + $"{terrainLayers.Sum(l => l.Tris.Count):N0} triangles, "
+                                + $"{terrainLayers.Select(l => l.Diffuse).Distinct(StringComparer.OrdinalIgnoreCase).Count()} distinct texture(s)");
 
-        // A hover on bare ground has a real answer in the LAND census: which cell, which
-        // quadrant, what base texture, and what each alpha layer paints AT THAT POINT (opacity
-        // sampled from its own 17x17 map — the same decode the geometry uses).
-        if (interactiveMode)
-        {
-            var qNames = new[] { "BottomLeft", "BottomRight", "TopLeft", "TopRight" };
-            terrainDescribeAt = (wx, wy) =>
+            // A hover on bare ground has a real answer in the LAND census: which cell, which
+            // quadrant, what base texture, and what each alpha layer paints AT THAT POINT (opacity
+            // sampled from its own 17x17 map — the same decode the geometry uses).
+            if (interactiveMode)
+            {
+                var qNames = new[] { "BottomLeft", "BottomRight", "TopLeft", "TopRight" };
+                terrainDescribeAt = (wx, wy) =>
+                {
+                    int gx = (int)MathF.Floor(wx / 4096f), gy = (int)MathF.Floor(wy / 4096f);
+                    if (!landLayers.TryGetValue((gx, gy), out var lyrs2)) return $"cell ({gx},{gy}) — no LAND";
+                    float lxu = wx - gx * 4096f, lyu = wy - gy * 4096f;
+                    int q = (lyu < 2048f ? 0 : 2) + (lxu < 2048f ? 0 : 1);
+                    int px2 = Math.Clamp((int)MathF.Round((lxu - (q & 1) * 2048f) / 128f), 0, 16);
+                    int py2 = Math.Clamp((int)MathF.Round((lyu - (q >= 2 ? 2048f : 0f)) / 128f), 0, 16);
+                    string LtexName(FormKey? fk) => fk is { } k
+                        ? (ltexEditorId.TryGetValue(k, out var ed) ? ed : k.ToString()) : "(none)";
+                    var baseL = lyrs2.FirstOrDefault(l => !l.Alpha && l.Quadrant == q);
+                    var painted = lyrs2
+                        .Where(l => l.Alpha && l.Quadrant == q && l.Opacity is not null
+                                    && l.Opacity[py2 * 17 + px2] > 0.004f)
+                        .OrderBy(l => l.Layer)
+                        .Select(l => $"{LtexName(l.Tex)} {l.Opacity![py2 * 17 + px2]:0.00}")
+                        .ToList();
+                    return $"cell ({gx},{gy}) {qNames[q]} — base {LtexName(baseL.Tex)}"
+                         + (painted.Count > 0 ? $" — painted: {string.Join(", ", painted)}" : "");
+                };
+            }
+        }
+
+        // Ground height at a world X,Y, on the SAME 128-unit quads and the SAME diagonal split the
+        // terrain mesh is built from — so "below the surface" here means below the surface that was
+        // actually drawn, not below some second opinion about where the ground is. Null outside the
+        // ring of cells that has LAND, which leaves those segments to the depth test instead.
+        Func<float, float, float?>? terrainHeightAt = null;
+        if (landHeights.Count > 0)
+            terrainHeightAt = (wx, wy) =>
             {
                 int gx = (int)MathF.Floor(wx / 4096f), gy = (int)MathF.Floor(wy / 4096f);
-                if (!landLayers.TryGetValue((gx, gy), out var lyrs2)) return $"cell ({gx},{gy}) — no LAND";
-                float lxu = wx - gx * 4096f, lyu = wy - gy * 4096f;
-                int q = (lyu < 2048f ? 0 : 2) + (lxu < 2048f ? 0 : 1);
-                int px2 = Math.Clamp((int)MathF.Round((lxu - (q & 1) * 2048f) / 128f), 0, 16);
-                int py2 = Math.Clamp((int)MathF.Round((lyu - (q >= 2 ? 2048f : 0f)) / 128f), 0, 16);
-                string LtexName(FormKey? fk) => fk is { } k
-                    ? (ltexEditorId.TryGetValue(k, out var ed) ? ed : k.ToString()) : "(none)";
-                var baseL = lyrs2.FirstOrDefault(l => !l.Alpha && l.Quadrant == q);
-                var painted = lyrs2
-                    .Where(l => l.Alpha && l.Quadrant == q && l.Opacity is not null
-                                && l.Opacity[py2 * 17 + px2] > 0.004f)
-                    .OrderBy(l => l.Layer)
-                    .Select(l => $"{LtexName(l.Tex)} {l.Opacity![py2 * 17 + px2]:0.00}")
-                    .ToList();
-                return $"cell ({gx},{gy}) {qNames[q]} — base {LtexName(baseL.Tex)}"
-                     + (painted.Count > 0 ? $" — painted: {string.Join(", ", painted)}" : "");
+                if (!landHeights.TryGetValue((gx, gy), out var h)) return null;
+                float fx = (wx - gx * 4096f) / 128f, fy = (wy - gy * 4096f) / 128f;
+                int ix = Math.Clamp((int)MathF.Floor(fx), 0, 31), iy = Math.Clamp((int)MathF.Floor(fy), 0, 31);
+                float u = fx - ix, v = fy - iy;
+                float h00 = h[ix, iy], h10 = h[ix + 1, iy], h11 = h[ix + 1, iy + 1], h01 = h[ix, iy + 1];
+                // Lower triangle (x,y)-(x+1,y)-(x+1,y+1) when u >= v, upper one otherwise.
+                float z = u >= v ? h00 + (h10 - h00) * u + (h11 - h10) * v
+                                 : h00 + (h11 - h01) * u + (h01 - h00) * v;
+                return z * 8f;
             };
+
+        // What the render DROPS, said out loud: a triangle the picture never shows because it was
+        // filtered is indistinguishable from one that does not exist, unless the counts are printed.
+        {
+            int total = 0, deleted = 0, badIndex = 0;
+            foreach (var nav in winNav.Values)
+                foreach (var tri in nav.Triangles)
+                {
+                    total++;
+                    if ((tri.Flags & 0x08) != 0) { deleted++; continue; }
+                    if (tri.A < 0 || tri.B < 0 || tri.C < 0
+                        || tri.A >= nav.Vertices.Count || tri.B >= nav.Vertices.Count || tri.C >= nav.Vertices.Count)
+                        badIndex++;
+                }
+            Console.WriteLine($"   navmesh triangles: {total:N0} in the winning records, "
+                            + $"{deleted:N0} flagged DELETED (0x08), {badIndex:N0} with out-of-range vertex indices, "
+                            + $"{total - deleted - badIndex:N0} drawable");
         }
-    }
 
-    // Ground height at a world X,Y, on the SAME 128-unit quads and the SAME diagonal split the
-    // terrain mesh is built from — so "below the surface" here means below the surface that was
-    // actually drawn, not below some second opinion about where the ground is. Null outside the
-    // ring of cells that has LAND, which leaves those segments to the depth test instead.
-    Func<float, float, float?>? terrainHeightAt = null;
-    if (landHeights.Count > 0)
-        terrainHeightAt = (wx, wy) =>
+        foreach (var (qx, qy) in navAt)
         {
-            int gx = (int)MathF.Floor(wx / 4096f), gy = (int)MathF.Floor(wy / 4096f);
-            if (!landHeights.TryGetValue((gx, gy), out var h)) return null;
-            float fx = (wx - gx * 4096f) / 128f, fy = (wy - gy * 4096f) / 128f;
-            int ix = Math.Clamp((int)MathF.Floor(fx), 0, 31), iy = Math.Clamp((int)MathF.Floor(fy), 0, 31);
-            float u = fx - ix, v = fy - iy;
-            float h00 = h[ix, iy], h10 = h[ix + 1, iy], h11 = h[ix + 1, iy + 1], h01 = h[ix, iy + 1];
-            // Lower triangle (x,y)-(x+1,y)-(x+1,y+1) when u >= v, upper one otherwise.
-            float z = u >= v ? h00 + (h10 - h00) * u + (h11 - h10) * v
-                             : h00 + (h11 - h01) * u + (h01 - h00) * v;
-            return z * 8f;
-        };
-
-    // What the render DROPS, said out loud: a triangle the picture never shows because it was
-    // filtered is indistinguishable from one that does not exist, unless the counts are printed.
-    {
-        int total = 0, deleted = 0, badIndex = 0;
-        foreach (var nav in winNav.Values)
-            foreach (var tri in nav.Triangles)
-            {
-                total++;
-                if ((tri.Flags & 0x08) != 0) { deleted++; continue; }
-                if (tri.A < 0 || tri.B < 0 || tri.C < 0
-                    || tri.A >= nav.Vertices.Count || tri.B >= nav.Vertices.Count || tri.C >= nav.Vertices.Count)
-                    badIndex++;
-            }
-        Console.WriteLine($"   navmesh triangles: {total:N0} in the winning records, "
-                        + $"{deleted:N0} flagged DELETED (0x08), {badIndex:N0} with out-of-range vertex indices, "
-                        + $"{total - deleted - badIndex:N0} drawable");
-    }
-
-    foreach (var (qx, qy) in navAt)
-    {
-        int hits = 0;
-        foreach (var nav in winNav.Values)
-            for (int ti = 0; ti < nav.Triangles.Count; ti++)
-            {
-                var tri = nav.Triangles[ti];
-                if (tri.A < 0 || tri.B < 0 || tri.C < 0
-                    || tri.A >= nav.Vertices.Count || tri.B >= nav.Vertices.Count || tri.C >= nav.Vertices.Count) continue;
-                var a = V(nav.Vertices[tri.A]); var b = V(nav.Vertices[tri.B]); var c = V(nav.Vertices[tri.C]);
-                // 2D barycentric containment; the navmesh is a surface, so XY is the right test.
-                float d = (b.Y - c.Y) * (a.X - c.X) + (c.X - b.X) * (a.Y - c.Y);
-                if (MathF.Abs(d) < 1e-6f) continue;
-                float u = ((b.Y - c.Y) * (qx - c.X) + (c.X - b.X) * (qy - c.Y)) / d;
-                float v = ((c.Y - a.Y) * (qx - c.X) + (a.X - c.X) * (qy - c.Y)) / d;
-                float w = 1f - u - v;
-                if (u < 0f || v < 0f || w < 0f) continue;
-                float z = u * a.Z + v * b.Z + w * c.Z;
-                string why = (tri.Flags & 0x08) != 0 ? "NOT DRAWN: flagged deleted (0x08)" : "drawn";
-                Console.WriteLine($"   nav-at {qx:0},{qy:0}: {nav.FormKey} tri {ti} covers it, z {z:0}, "
-                                + $"flags 0x{tri.Flags:X} — {why}");
-                hits++;
-            }
-        if (hits == 0)
-        {
-            // Nothing covers it: say how far the nearest triangle is, so "no navmesh here" can be
-            // told apart from "just outside a triangle".
-            float best = float.MaxValue; FormKey bk = FormKey.Null; int bi = -1;
+            int hits = 0;
             foreach (var nav in winNav.Values)
                 for (int ti = 0; ti < nav.Triangles.Count; ti++)
                 {
@@ -1220,447 +1297,534 @@ if (textured)
                     if (tri.A < 0 || tri.B < 0 || tri.C < 0
                         || tri.A >= nav.Vertices.Count || tri.B >= nav.Vertices.Count || tri.C >= nav.Vertices.Count) continue;
                     var a = V(nav.Vertices[tri.A]); var b = V(nav.Vertices[tri.B]); var c = V(nav.Vertices[tri.C]);
-                    var cen = (a + b + c) / 3f;
-                    float dd = MathF.Sqrt((cen.X - qx) * (cen.X - qx) + (cen.Y - qy) * (cen.Y - qy));
-                    if (dd < best) { best = dd; bk = nav.FormKey; bi = ti; }
+                    // 2D barycentric containment; the navmesh is a surface, so XY is the right test.
+                    float d = (b.Y - c.Y) * (a.X - c.X) + (c.X - b.X) * (a.Y - c.Y);
+                    if (MathF.Abs(d) < 1e-6f) continue;
+                    float u = ((b.Y - c.Y) * (qx - c.X) + (c.X - b.X) * (qy - c.Y)) / d;
+                    float v = ((c.Y - a.Y) * (qx - c.X) + (a.X - c.X) * (qy - c.Y)) / d;
+                    float w = 1f - u - v;
+                    if (u < 0f || v < 0f || w < 0f) continue;
+                    float z = u * a.Z + v * b.Z + w * c.Z;
+                    string why = (tri.Flags & 0x08) != 0 ? "NOT DRAWN: flagged deleted (0x08)" : "drawn";
+                    Console.WriteLine($"   nav-at {qx:0},{qy:0}: {nav.FormKey} tri {ti} covers it, z {z:0}, "
+                                    + $"flags 0x{tri.Flags:X} — {why}");
+                    hits++;
                 }
-            Console.WriteLine($"   nav-at {qx:0},{qy:0}: NO winning triangle covers this point"
-                            + (bi >= 0 ? $"; nearest is {bk} tri {bi}, {best:0} u away (centroid)" : "; no navmesh at all in this cell"));
-        }
-    }
-
-    var (navTris, redTris) = BuildNavSets(winNav);
-
-    if (redTris.Count > 0)
-    {
-        var cen = System.Numerics.Vector3.Zero;
-        foreach (var (a, b, c) in redTris) cen += (a + b + c) / 3f;
-        cen /= redTris.Count;
-        Console.WriteLine($"   red navmesh centroid: {cen.X:0},{cen.Y:0},{cen.Z:0}  ({redTris.Count} triangles)");
-        Console.WriteLine($"   suggested view:  --eye {cen.X:0},{cen.Y - 450:0},{cen.Z + 260:0} --look {cen.X:0},{cen.Y:0},{cen.Z:0}");
-    }
-
-    var modFolders = comp.EnabledMods.Select(m => Path.Combine(modsDir, m)).ToList();
-
-    // Runtime FormIDs for captions: the load-order prefix each plugin gets in THIS profile
-    // (ESL-flagged plugins share the FE space). Console-clickable numbers, straight in the image.
-    var fidPrefix = new Dictionary<string, uint>(StringComparer.OrdinalIgnoreCase);
-    {
-        int full = 0, light = 0;
-        foreach (var pp in order.OrderedPaths)
-        {
-            bool esl = pp.EndsWith(".esl", StringComparison.OrdinalIgnoreCase);
-            if (!esl)
+            if (hits == 0)
             {
-                try
-                {
-                    using var fs = System.IO.File.OpenRead(pp);
-                    Span<byte> hdr = stackalloc byte[12];
-                    if (fs.Read(hdr) == 12) esl = (BitConverter.ToUInt32(hdr[8..]) & 0x200) != 0;
-                }
-                catch { }
-            }
-            var name = Path.GetFileName(pp);
-            if (esl) fidPrefix[name] = 0xFE000000u | ((uint)light++ << 12);
-            else fidPrefix[name] = (uint)full++ << 24;
-        }
-    }
-    string RuntimeId(FormKey fk)
-        => fidPrefix.TryGetValue(fk.ModKey.FileName.String, out var pre)
-            ? ((pre & 0xFE000000u) == 0xFE000000u ? (pre | (fk.ID & 0xFFFu)) : (pre | fk.ID)).ToString("X8")
-            : "??" + fk.ID.ToString("X6");
-
-    // A render missing its roof must SAY the roof was cut, or the absence reads as a finding.
-    string CullCaption() => cullAbove is { } cca ? $" — SLICED above z {cca:0}" : "";
-
-    string? DoorCaption()
-        => conflictDoors.Count == 0 ? null
-         : "ORANGE door " + string.Join("   ", conflictDoors.Select(fk => $"{fk} = FormID {RuntimeId(fk)}"));
-
-    string RedCaption(IReadOnlyDictionary<FormKey, NavmeshGeometry> navs)
-        => string.Join("   ", redNav.Keys.Select(fk =>
-               $"RED {fk} = FormID {RuntimeId(fk)}" +
-               (navs.TryGetValue(fk, out var nv) ? $" ({nv.Triangles.Count} tris)" : " (not provided)")));
-
-    // ---- --npc: pin each spec to (NPC base record, world placement) -------------------
-    // The spec FormKey may be the placed ACHR (a console click gives the ref) or the NPC_
-    // base; the load walk watched for both. Explicit @X,Y,Z is the "should be HERE" case
-    // and overrides the ref's own placement; explicit heading is degrees, `getangle z`
-    // convention. No placement anywhere and no @position is an error, not a guess.
-    var npcPlacements = new List<(FormKey NpcKey, ViewProbe.NpcPlacement Placement, string LabelHint)>();
-    foreach (var (key, pos, headingDeg, label, raw) in npcParsed)
-    {
-        FormKey npcKey = key;
-        System.Numerics.Vector3 p = default;
-        Vec3 rot = default;
-        float refScale = 1f;
-        bool placed = false;
-        if (npcRefWhere.TryGetValue(key, out var byRef))
-        {
-            if (byRef.Ref.Base is not { } nb)
-            { Console.Error.WriteLine($"--npc '{raw}': placed ref {key} has no base NPC."); return 1; }
-            npcKey = nb;
-            p = new(byRef.Ref.Position.X, byRef.Ref.Position.Y, byRef.Ref.Position.Z);
-            rot = byRef.Ref.Rotation;
-            refScale = byRef.Ref.Scale;
-            placed = true;
-            if (byRef.Cell != cellKey)
-                Console.WriteLine($"   [npc] ref {key} lives in {(byRef.CellEd ?? byRef.Cell.ToString())}, not the rendered cell");
-        }
-        else if (npcBaseWhere.TryGetValue(key, out var instances) && instances.Count > 0)
-        {
-            var all = instances.Values.ToList();
-            var inCell = all.Where(x => x.Cell == cellKey).ToList();
-            var pick = (inCell.Count > 0 ? inCell : all)[0];
-            if (all.Count > 1)
-                Console.WriteLine($"   [npc] {key} is placed {all.Count} time(s): " + string.Join("; ",
-                    all.Select(x => $"{x.Ref.FormKey} in {(x.CellEd ?? x.Cell.ToString())} at {x.Ref.Position.X:0},{x.Ref.Position.Y:0},{x.Ref.Position.Z:0}"))
-                    + $" — using {(inCell.Count > 0 ? "the one in the rendered cell" : "the first")}");
-            p = new(pick.Ref.Position.X, pick.Ref.Position.Y, pick.Ref.Position.Z);
-            rot = pick.Ref.Rotation;
-            refScale = pick.Ref.Scale;
-            placed = true;
-            if (pick.Cell != cellKey && inCell.Count == 0)
-                Console.WriteLine($"   [npc] {key}'s placement is in {(pick.CellEd ?? pick.Cell.ToString())}, not the rendered cell");
-        }
-        if (pos is { } explicitPos) { p = explicitPos; placed = true; }
-        if (!placed)
-        { Console.Error.WriteLine($"--npc '{raw}': no placed instance of {key} anywhere in the load order — give an explicit @X,Y,Z[,HEADING]."); return 1; }
-        if (headingDeg is { } hd) rot = new Vec3(0f, 0f, float.DegreesToRadians(hd));
-        npcPlacements.Add((npcKey, new ViewProbe.NpcPlacement(p, rot, refScale), label ?? ""));
-    }
-
-    // One GL context for everything: the NPC actors are built on it, the scene is uploaded to
-    // it, and — under --interactive — the fly-through runs on it (a visible, resizable window
-    // with its own MSAA; the offscreen path keeps its hidden square). Born hidden either way;
-    // InteractiveViewer shows it once the scene is resident, so no white window sits there
-    // through a multi-minute load walk.
-    var fpNws = new NativeWindowSettings
-    {
-        ClientSize = interactiveMode ? new OpenTK.Mathematics.Vector2i(1440, 900)
-                                     : new OpenTK.Mathematics.Vector2i(size, size),
-        StartVisible = false,
-        StartFocused = false,
-        WindowBorder = interactiveMode ? WindowBorder.Resizable : WindowBorder.Hidden,
-        APIVersion = new Version(3, 3),
-        Profile = ContextProfile.Core,
-        NumberOfSamples = interactiveMode && msaa >= 2 ? Math.Min(msaa, 8) : 0,
-    };
-    using var fpGw = new GameWindow(GameWindowSettings.Default, fpNws);
-    fpGw.MakeCurrent();
-
-    // ---- --npc: build the actors on this context --------------------------------------
-    // Record side first (a full-order link cache over fresh overlays — the walk above
-    // disposed its own), then the runtime outfit stack, then one VM per NPC through the
-    // character pipeline, world-baked. The VMs (and these overlays) must outlive every
-    // panel: NpcCleanup() runs before each return below.
-    var npcActors = new List<ViewProbe.NpcActorRender>();
-    ViewProbe.NpcActorBuilder.Host? npcHost = null;
-    var npcLcMods = new List<ISkyrimModGetter>();
-    var npcCaptions = new List<(string Text, System.Numerics.Vector3 Color)>();
-    // Per-actor IDENTITY colours, assigned in --npc order and worn by all three
-    // faces of the marker at once — puck fill, rim, and the caption line — so a
-    // multi-actor render answers "who is who" without counting rings. Chosen
-    // bright (they sit on the dark caption bar) and clear of the reserved
-    // semantic colours: conflict RED, door ORANGE, diff-sphere VIOLET. The nav
-    // palette can still land on green/blue/yellow, but a filled ring plus a
-    // matching caption line is not mistakable for a navmesh wire. Cycles past 5.
-    var npcPalette = new (string Name, System.Numerics.Vector3 C)[]
-    {
-        ("yellow", new(1.00f, 0.88f, 0.10f)),
-        ("pink",   new(1.00f, 0.40f, 0.80f)),
-        ("green",  new(0.35f, 0.95f, 0.35f)),
-        ("blue",   new(0.40f, 0.75f, 1.00f)),
-        ("white",  new(1.00f, 1.00f, 1.00f)),
-    };
-    if (npcPlacements.Count > 0)
-    {
-        var swNpc = Stopwatch.StartNew();
-        foreach (var pp2 in order.OrderedPaths)
-        {
-            try { npcLcMods.Add(SkyrimMod.CreateFromBinaryOverlay(pp2, SkyrimRelease.SkyrimSE)); }
-            catch (Exception ex) { Console.Error.WriteLine($"   [npc] link cache: {Path.GetFileName(pp2)} skipped ({ex.Message})"); }
-        }
-        var npcLinkCache = npcLcMods.ToImmutableLinkCache<ISkyrimMod, ISkyrimModGetter>();
-        var npcPluginNames = order.OrderedPaths.Select(pp3 => Path.GetFileName(pp3)!).ToList();
-        var npcResolver = new ViewProbe.NpcRecordResolver(npcLcMods, npcPluginNames, npcLinkCache);
-        var outfitStack = new ViewProbe.NpcOutfitStack(dataDir, modFolders, overwriteDir,
-            npcResolver.IsPluginInstalled, npcResolver.ResolveSkyPatcherIdentifier,
-            npcResolver.ResolveSpidFilterForm, npcResolver.ResolveSpidFormIdentifier, npcLinkCache);
-        Console.WriteLine($"   [npc] runtime outfit configs: {outfitStack.SkyPatcherLineCount} SkyPatcher outfitDefault line(s) "
-                        + $"in {outfitStack.SkyPatcherFileCount} npc ini file(s); {outfitStack.SpidEntryCount} SPID outfit entr(ies) "
-                        + $"in {outfitStack.SpidFileCount} _DISTR file(s)");
-        npcHost = ViewProbe.NpcActorBuilder.CreateHost(assets, dataDir, modFolders, overwriteDir);
-        foreach (var (npcKey, placement, labelHint) in npcPlacements)
-        {
-            var rn = npcResolver.Resolve(npcKey);
-            if (rn is null) continue;
-            string label = string.IsNullOrEmpty(labelHint) ? rn.Name : labelHint;
-            ViewProbe.NpcOutfitResult? outfit = null;
-            List<CharacterViewer.Rendering.MeshOverride>? overrides = null;
-            if (!npcNoOutfit)
-            {
-                outfit = outfitStack.Resolve(rn.Winner, rn.Facts);
-                foreach (var note in outfit.RuntimeNotes) Console.WriteLine($"   [npc] {label}: {note}");
-                foreach (var apx in outfit.Approximations.Distinct()) Console.WriteLine($"   [npc] {label}: approximation: {apx}");
-                Console.WriteLine(outfit.OutfitKey is { } okey
-                    ? $"   [npc] {label}: outfit {okey} via {outfit.SourceDetail}"
-                    : $"   [npc] {label}: no outfit (record has none, no runtime layer assigns one)");
-                overrides = npcResolver.ResolveOutfitOverrides(rn.Winner, outfit.OutfitKey);
-                if (overrides.Count > 0) Console.WriteLine($"   [npc] {label}: {overrides.Count} attire piece(s)");
-            }
-            var (colourName, colour) = npcPalette[npcActors.Count % npcPalette.Length];
-            var actor = ViewProbe.NpcActorBuilder.Build(npcHost, rn, overrides, placement, label, colour);
-            if (actor is null) continue;
-            npcActors.Add(actor);
-            Console.WriteLine($"   [npc] {label}: identity colour {colourName} (puck + caption)");
-            string outfitTag = npcNoOutfit ? "no outfit (--npc-no-outfit)"
-                : outfit?.OutfitKey is null ? "no outfit"
-                : outfit.Source switch
-                {
-                    ViewProbe.NpcOutfitSource.SkyPatcher or ViewProbe.NpcOutfitSource.Spid => outfit.SourceDetail!,
-                    ViewProbe.NpcOutfitSource.InventoryTemplate => "outfit via inventory template",
-                    _ => "outfit: record DefaultOutfit",
-                };
-            npcCaptions.Add(($"NPC {label} {rn.NpcKey} at {placement.Position.X:0},{placement.Position.Y:0},{placement.Position.Z:0}"
-                          + $" heading {float.RadiansToDegrees(placement.Rotation.Z):0}° — {outfitTag}", colour));
-        }
-        Console.WriteLine($"   [npc] {npcActors.Count} actor(s) built  ({swNpc.Elapsed.TotalSeconds:0.0}s)");
-    }
-    float PitchDownDeg()
-    {
-        var d = lookPos.Value - eyePos.Value;
-        float horiz = MathF.Sqrt(d.X * d.X + d.Y * d.Y);
-        return float.RadiansToDegrees(MathF.Atan2(-d.Z, MathF.Max(horiz, 1e-3f)));
-    }
-    bool npcPucksOn = npcActors.Count > 0 && npcPuck switch
-    {
-        "on" => true,
-        "off" => false,
-        // auto: a steep look-down is where a standing figure shrinks to a few
-        // dozen pixels and needs the marker; eye-level shots read fine bare.
-        _ => PitchDownDeg() > 60f,
-    };
-    if (npcActors.Count > 0)
-        Console.WriteLine($"   [npc] pucks: {(npcPucksOn ? "on" : "off")} ({npcPuck}"
-                        + (npcPuck == "auto" ? $", camera {PitchDownDeg():0}° down" : "") + ")");
-    void NpcCleanup()
-    {
-        npcHost?.Disposer();
-        foreach (var m2 in npcLcMods) (m2 as IDisposable)?.Dispose();
-    }
-
-    // The FULL camera pose travels with every render, so any shot can be replicated from the
-    // image alone: burnt into the caption in the game's own conventions (yaw 0 = north/+Y,
-    // clockwise; positive pitch looks down — the exact inverse of the --yaw/--pitch direction
-    // math above), and embedded as a PNG tEXt chunk holding the arguments verbatim. A camera
-    // given as --look round-trips as --yaw/--pitch; both compose the same view.
-    float camYawDeg = (float.RadiansToDegrees(MathF.Atan2(lookPos.Value.X - eyePos.Value.X,
-                                                          lookPos.Value.Y - eyePos.Value.Y)) + 360f) % 360f;
-    float camPitchDeg = PitchDownDeg();
-    string camPose = $"eye {eyePos.Value.X:0.##},{eyePos.Value.Y:0.##},{eyePos.Value.Z:0.##}"
-                   + $" yaw {camYawDeg:0.#}° pitch {camPitchDeg:0.#}° fov {fov:0.#}°";
-    // args = byte-exact replay; pose = the camera those args resolved to THIS run (matters
-    // when the camera came from --eye-ref/--look-ref, whose positions move with the load order).
-    string camMeta = $"args: {replayArgs} | pose: {camPose}"
-                   + $" look {lookPos.Value.X:0.##},{lookPos.Value.Y:0.##},{lookPos.Value.Z:0.##}"
-                   + $" | cell {cellLabel}";
-
-    string safe = new string(cellLabel.Select(c => char.IsLetterOrDigit(c) ? c : '_').ToArray());
-
-    // The target cell's own footprint, for the outline. Exteriors only — an interior has no grid
-    // and no neighbours to be confused with.
-    (float X0, float Y0, float X1, float Y1)? cellBounds = null;
-    if (cellOutline && !interior && targetGrid is { } tgb)
-        cellBounds = (tgb.X * 4096f, tgb.Y * 4096f, tgb.X * 4096f + 4096f, tgb.Y * 4096f + 4096f);
-
-    // Violet: not in the healthy palette (green/cyan/magenta/yellow/blue), not the reserved red,
-    // not the white of the cell outline, not the orange of an implicated door.
-    var diffColor = new System.Numerics.Vector4(0.72f, 0.28f, 1f, 1f);
-    var noDiff = Array.Empty<System.Numerics.Vector3>();
-
-    int Render(IReadOnlyList<(System.Numerics.Vector3, System.Numerics.Vector3, System.Numerics.Vector3)> g,
-               IReadOnlyList<(System.Numerics.Vector3, System.Numerics.Vector3, System.Numerics.Vector3)> r,
-               string outFile, IReadOnlyList<string> captionLines,
-               IReadOnlyList<System.Numerics.Vector3>? diffs = null)
-        => ViewProbe.TexturedScene.RenderToPng(
-               scene, assets, dataDir, modFolders, overwriteDir,
-               (eyePos.Value, lookPos.Value, fov), g, r, terrainPatches, terrainLayers, navMode, navColor,
-               skyColor, terrainHeightAt, dashUnderground, dashUnderStatics, msaa, cullAbove, cellBounds,
-               diffs ?? noDiff, diffColor, picks, captionLines, npcCaptions, npcActors, npcPucksOn, keepFx, fxStatic, listMeshes, size, outFile,
-               camMeta);
-
-    if (compare is { } cmp)
-    {
-        // Three panels, one camera: A's navmesh, B's navmesh, the winning state. The world
-        // geometry and terrain are the winning state in all three — only the navmesh layer
-        // changes, which is exactly the thing being compared.
-        // Each side panel is the cell's FULL navmesh as if that plugin won: the winning state
-        // with the plugin's own versions substituted in. Records neither plugin touches are then
-        // IDENTICAL in all three panels, so any visible difference is the actual disagreement.
-        IReadOnlyDictionary<FormKey, NavmeshGeometry> AsIfWon(string plg)
-        {
-            var d = new Dictionary<FormKey, NavmeshGeometry>(winNav);
-            if (navByPlugin.TryGetValue(plg, out var own))
-                foreach (var kv in own) d[kv.Key] = kv.Value;
-            return d;
-        }
-        var panels = new (string Label, IReadOnlyDictionary<FormKey, NavmeshGeometry> Navs)[]
-        {
-            (cmp.A, AsIfWon(cmp.A)),
-            (cmp.B, AsIfWon(cmp.B)),
-            ("winning state", winNav),
-        };
-        // (panel captions name the navmesh SOURCE; world geometry is the winning state in all three)
-        foreach (var fk in redNav.Keys)
-            Console.WriteLine($"   contested {fk}: " + string.Join("  |  ",
-                panels.Select(p => p.Label + ": " + (p.Navs.TryGetValue(fk, out var nv) ? nv.Triangles.Count + " tris" : "not provided"))));
-
-        // ---- THE DIFF ------------------------------------------------------------------
-        // Which navmesh VERTICES does one plugin's version have that the other's does not? Only
-        // vertices a live (non-deleted, in-range) triangle actually uses count — an orphaned entry
-        // in the vertex list is not something the picture shows. Positions are quantised to 1/8 u
-        // so float noise cannot invent a difference; real navmesh vertices are units apart.
-        static long Q(float v) => (long)MathF.Round(v * 8f);
-        static IEnumerable<(long X, long Y, long Z, System.Numerics.Vector3 P)> LiveVerts(
-            IReadOnlyDictionary<FormKey, NavmeshGeometry> navs)
-        {
-            foreach (var nav in navs.Values)
-                foreach (var tri in nav.Triangles)
-                {
-                    if ((tri.Flags & 0x08) != 0) continue;
-                    foreach (var idx in new[] { tri.A, tri.B, tri.C })
+                // Nothing covers it: say how far the nearest triangle is, so "no navmesh here" can be
+                // told apart from "just outside a triangle".
+                float best = float.MaxValue; FormKey bk = FormKey.Null; int bi = -1;
+                foreach (var nav in winNav.Values)
+                    for (int ti = 0; ti < nav.Triangles.Count; ti++)
                     {
-                        if (idx < 0 || idx >= nav.Vertices.Count) continue;
-                        var p = V(nav.Vertices[idx]);
-                        yield return (Q(p.X), Q(p.Y), Q(p.Z), p);
+                        var tri = nav.Triangles[ti];
+                        if (tri.A < 0 || tri.B < 0 || tri.C < 0
+                            || tri.A >= nav.Vertices.Count || tri.B >= nav.Vertices.Count || tri.C >= nav.Vertices.Count) continue;
+                        var a = V(nav.Vertices[tri.A]); var b = V(nav.Vertices[tri.B]); var c = V(nav.Vertices[tri.C]);
+                        var cen = (a + b + c) / 3f;
+                        float dd = MathF.Sqrt((cen.X - qx) * (cen.X - qx) + (cen.Y - qy) * (cen.Y - qy));
+                        if (dd < best) { best = dd; bk = nav.FormKey; bi = ti; }
                     }
-                }
-        }
-        var keysA = new HashSet<(long, long, long)>(LiveVerts(panels[0].Navs).Select(v => (v.X, v.Y, v.Z)));
-        var keysB = new HashSet<(long, long, long)>(LiveVerts(panels[1].Navs).Select(v => (v.X, v.Y, v.Z)));
-        var changedKeys = new HashSet<(long, long, long)>(keysA);
-        changedKeys.SymmetricExceptWith(keysB);
-        // A panel shows the changed vertices IT has. For the two side panels that is exactly
-        // "mine and not theirs"; for the winning panel it is whichever of the two it inherited.
-        List<System.Numerics.Vector3> DiffFor(IReadOnlyDictionary<FormKey, NavmeshGeometry> navs)
-        {
-            var seen = new HashSet<(long, long, long)>();
-            var outp = new List<System.Numerics.Vector3>();
-            if (!navDiff) return outp;
-            foreach (var (x, y, z, p) in LiveVerts(navs))
-                if (changedKeys.Contains((x, y, z)) && seen.Add((x, y, z))) outp.Add(p);
-            return outp;
-        }
-        if (navDiff)
-            Console.WriteLine($"   nav diff: {changedKeys.Count} vertex position(s) differ between "
-                            + $"{cmp.A} ({keysA.Count} live vertices) and {cmp.B} ({keysB.Count})");
-
-        var panelFiles = new List<string>();
-        for (int pi = 0; pi < panels.Length; pi++)
-        {
-            var (label, navs) = panels[pi];
-            if (pi < 2 && (!navByPlugin.TryGetValue(label, out var ownNv) || ownNv.Count == 0))
-                Console.WriteLine($"   panel '{label}': provides NO navmesh version in this cell -- panel equals the winning state");
-            var (g, r) = BuildNavSets(navs);
-            var diffs = DiffFor(navs);
-            string pf = Path.Combine(outDir, $"{safe}-cmp{pi + 1}-{new string(label.Select(ch => char.IsLetterOrDigit(ch) ? ch : '_').ToArray())}.png");
-            var cap = new List<string> { $"[{pi + 1}/3] {(pi == 2 ? "winning state (actual merged navmesh)" : $"cell navmesh if {label} won")} \u2014 {cellLabel} \u2014 {camPose}{CullCaption()}" };
-            if (redNav.Count > 0) cap.Add(RedCaption(navs));
-            if (DoorCaption() is { } dc) cap.Add(dc);
-            // NPC caption lines ride the separate coloured channel (npcCaptions),
-            // passed straight into the render call below.
-            if (changedKeys.Count > 0 && navDiff)
-                cap.Add($"VIOLET spheres: {diffs.Count} navmesh vertex position(s) this version has and the other does not "
-                      + $"({changedKeys.Count} differ in total)");
-            Render(g, r, pf, cap, diffs);
-            panelFiles.Add(pf);
-            Console.WriteLine($"   panel {pi + 1} ({label}): {g.Count:N0} green + {r.Count:N0} red navmesh tris -> {pf}");
+                Console.WriteLine($"   nav-at {qx:0},{qy:0}: NO winning triangle covers this point"
+                                + (bi >= 0 ? $"; nearest is {bk} tri {bi}, {best:0} u away (centroid)" : "; no navmesh at all in this cell"));
+            }
         }
 
-        // Stitch left->right: A | B | winning.
-        string stitched = Path.Combine(outDir, $"{safe}-compare.png");
-        using (var canvas = new Image<Rgba32>(size * 3 + 8, size))
+        var (navTris, redTris) = BuildNavSets(winNav);
+
+        if (redTris.Count > 0)
         {
-            canvas.Mutate(ctx =>
+            var cen = System.Numerics.Vector3.Zero;
+            foreach (var (a, b, c) in redTris) cen += (a + b + c) / 3f;
+            cen /= redTris.Count;
+            Console.WriteLine($"   red navmesh centroid: {cen.X:0},{cen.Y:0},{cen.Z:0}  ({redTris.Count} triangles)");
+            Console.WriteLine($"   suggested view:  --eye {cen.X:0},{cen.Y - 450:0},{cen.Z + 260:0} --look {cen.X:0},{cen.Y:0},{cen.Z:0}");
+        }
+
+        var modFolders = comp.EnabledMods.Select(m => Path.Combine(modsDir, m)).ToList();
+
+        // Runtime FormIDs for captions: the load-order prefix each plugin gets in THIS profile
+        // (ESL-flagged plugins share the FE space). Console-clickable numbers, straight in the image.
+        var fidPrefix = new Dictionary<string, uint>(StringComparer.OrdinalIgnoreCase);
+        {
+            int full = 0, light = 0;
+            foreach (var pp in order.OrderedPaths)
             {
-                ctx.BackgroundColor(SixLabors.ImageSharp.Color.Black);
-                for (int pi = 0; pi < 3; pi++)
-                    using (var img = Image.Load<Rgba32>(panelFiles[pi]))
-                        ctx.DrawImage(img, new SixLabors.ImageSharp.Point(pi * (size + 4), 0), 1f);
-            });
-            // The stitch carries the same replication chunk as its panels (one camera, three panels).
-            canvas.Metadata.GetPngMetadata().TextData.Add(
-                new SixLabors.ImageSharp.Formats.Png.Chunks.PngTextData("viewprobe", camMeta, string.Empty, string.Empty));
-            canvas.SaveAsPng(stitched);
+                bool esl = pp.EndsWith(".esl", StringComparison.OrdinalIgnoreCase);
+                if (!esl)
+                {
+                    try
+                    {
+                        using var fs = System.IO.File.OpenRead(pp);
+                        Span<byte> hdr = stackalloc byte[12];
+                        if (fs.Read(hdr) == 12) esl = (BitConverter.ToUInt32(hdr[8..]) & 0x200) != 0;
+                    }
+                    catch { }
+                }
+                var name = Path.GetFileName(pp);
+                if (esl) fidPrefix[name] = 0xFE000000u | ((uint)light++ << 12);
+                else fidPrefix[name] = (uint)full++ << 24;
+            }
         }
-        Console.WriteLine($"wrote:\n   {stitched}");
-        Console.WriteLine($"   panels left->right: [1] {cmp.A}   [2] {cmp.B}   [3] winning state (+conflict red)");
+        string RuntimeId(FormKey fk)
+            => fidPrefix.TryGetValue(fk.ModKey.FileName.String, out var pre)
+                ? ((pre & 0xFE000000u) == 0xFE000000u ? (pre | (fk.ID & 0xFFFu)) : (pre | fk.ID)).ToString("X8")
+                : "??" + fk.ID.ToString("X6");
+
+        // A render missing its roof must SAY the roof was cut, or the absence reads as a finding.
+        string CullCaption() => cullAbove is { } cca ? $" — SLICED above z {cca:0}" : "";
+
+        string? DoorCaption()
+            => conflictDoors.Count == 0 ? null
+             : "ORANGE door " + string.Join("   ", conflictDoors.Select(fk => $"{fk} = FormID {RuntimeId(fk)}"));
+
+        string RedCaption(IReadOnlyDictionary<FormKey, NavmeshGeometry> navs)
+            => string.Join("   ", redNav.Keys.Select(fk =>
+                   $"RED {fk} = FormID {RuntimeId(fk)}" +
+                   (navs.TryGetValue(fk, out var nv) ? $" ({nv.Triangles.Count} tris)" : " (not provided)")));
+
+        // ---- --npc: pin each spec to (NPC base record, world placement) -------------------
+        // The spec FormKey may be the placed ACHR (a console click gives the ref) or the NPC_
+        // base; the load walk watched for both. Explicit @X,Y,Z is the "should be HERE" case
+        // and overrides the ref's own placement; explicit heading is degrees, `getangle z`
+        // convention. No placement anywhere and no @position is an error, not a guess.
+        var npcPlacements = new List<(FormKey NpcKey, ViewProbe.NpcPlacement Placement, string LabelHint)>();
+        foreach (var (key, pos, headingDeg, label, raw) in npcParsed)
+        {
+            FormKey npcKey = key;
+            System.Numerics.Vector3 p = default;
+            Vec3 rot = default;
+            float refScale = 1f;
+            bool placed = false;
+            if (npcRefWhere.TryGetValue(key, out var byRef))
+            {
+                if (byRef.Ref.Base is not { } nb)
+                { Console.Error.WriteLine($"--npc '{raw}': placed ref {key} has no base NPC."); return 1; }
+                npcKey = nb;
+                p = new(byRef.Ref.Position.X, byRef.Ref.Position.Y, byRef.Ref.Position.Z);
+                rot = byRef.Ref.Rotation;
+                refScale = byRef.Ref.Scale;
+                placed = true;
+                if (byRef.Cell != cellKey)
+                    Console.WriteLine($"   [npc] ref {key} lives in {(byRef.CellEd ?? byRef.Cell.ToString())}, not the rendered cell");
+            }
+            else if (npcBaseWhere.TryGetValue(key, out var instances) && instances.Count > 0)
+            {
+                var all = instances.Values.ToList();
+                var inCell = all.Where(x => x.Cell == cellKey).ToList();
+                var pick = (inCell.Count > 0 ? inCell : all)[0];
+                if (all.Count > 1)
+                    Console.WriteLine($"   [npc] {key} is placed {all.Count} time(s): " + string.Join("; ",
+                        all.Select(x => $"{x.Ref.FormKey} in {(x.CellEd ?? x.Cell.ToString())} at {x.Ref.Position.X:0},{x.Ref.Position.Y:0},{x.Ref.Position.Z:0}"))
+                        + $" — using {(inCell.Count > 0 ? "the one in the rendered cell" : "the first")}");
+                p = new(pick.Ref.Position.X, pick.Ref.Position.Y, pick.Ref.Position.Z);
+                rot = pick.Ref.Rotation;
+                refScale = pick.Ref.Scale;
+                placed = true;
+                if (pick.Cell != cellKey && inCell.Count == 0)
+                    Console.WriteLine($"   [npc] {key}'s placement is in {(pick.CellEd ?? pick.Cell.ToString())}, not the rendered cell");
+            }
+            if (pos is { } explicitPos) { p = explicitPos; placed = true; }
+            if (!placed)
+            { Console.Error.WriteLine($"--npc '{raw}': no placed instance of {key} anywhere in the load order — give an explicit @X,Y,Z[,HEADING]."); return 1; }
+            if (headingDeg is { } hd) rot = new Vec3(0f, 0f, float.DegreesToRadians(hd));
+            npcPlacements.Add((npcKey, new ViewProbe.NpcPlacement(p, rot, refScale), label ?? ""));
+        }
+
+        // One GL context for everything: the NPC actors are built on it, the scene is uploaded to
+        // it, and — under --interactive — the fly-through runs on it (a visible, resizable window
+        // with its own MSAA; the offscreen path keeps its hidden square). Born hidden either way;
+        // InteractiveViewer shows it once the scene is resident, so no white window sits there
+        // through a multi-minute load walk.
+        var fpNws = new NativeWindowSettings
+        {
+            ClientSize = interactiveMode ? new OpenTK.Mathematics.Vector2i(1440, 900)
+                                         : new OpenTK.Mathematics.Vector2i(size, size),
+            StartVisible = false,
+            StartFocused = false,
+            WindowBorder = interactiveMode ? WindowBorder.Resizable : WindowBorder.Hidden,
+            APIVersion = new Version(3, 3),
+            Profile = ContextProfile.Core,
+            NumberOfSamples = interactiveMode && msaa >= 2 ? Math.Min(msaa, 8) : 0,
+        };
+        using var fpGw = new GameWindow(GameWindowSettings.Default, fpNws);
+        fpGw.MakeCurrent();
+
+        // ---- --npc: build the actors on this context --------------------------------------
+        // Record side first (a full-order link cache over fresh overlays — the walk above
+        // disposed its own), then the runtime outfit stack, then one VM per NPC through the
+        // character pipeline, world-baked. The VMs (and these overlays) must outlive every
+        // panel: NpcCleanup() runs before each return below.
+        var npcActors = new List<ViewProbe.NpcActorRender>();
+        ViewProbe.NpcActorBuilder.Host? npcHost = null;
+        var npcLcMods = new List<ISkyrimModGetter>();
+        var npcCaptions = new List<(string Text, System.Numerics.Vector3 Color)>();
+        // Per-actor IDENTITY colours, assigned in --npc order and worn by all three
+        // faces of the marker at once — puck fill, rim, and the caption line — so a
+        // multi-actor render answers "who is who" without counting rings. Chosen
+        // bright (they sit on the dark caption bar) and clear of the reserved
+        // semantic colours: conflict RED, door ORANGE, diff-sphere VIOLET. The nav
+        // palette can still land on green/blue/yellow, but a filled ring plus a
+        // matching caption line is not mistakable for a navmesh wire. Cycles past 5.
+        var npcPalette = new (string Name, System.Numerics.Vector3 C)[]
+        {
+            ("yellow", new(1.00f, 0.88f, 0.10f)),
+            ("pink",   new(1.00f, 0.40f, 0.80f)),
+            ("green",  new(0.35f, 0.95f, 0.35f)),
+            ("blue",   new(0.40f, 0.75f, 1.00f)),
+            ("white",  new(1.00f, 1.00f, 1.00f)),
+        };
+        if (npcPlacements.Count > 0)
+        {
+            var swNpc = Stopwatch.StartNew();
+            foreach (var pp2 in order.OrderedPaths)
+            {
+                try { npcLcMods.Add(SkyrimMod.CreateFromBinaryOverlay(pp2, SkyrimRelease.SkyrimSE)); }
+                catch (Exception ex) { Console.Error.WriteLine($"   [npc] link cache: {Path.GetFileName(pp2)} skipped ({ex.Message})"); }
+            }
+            var npcLinkCache = npcLcMods.ToImmutableLinkCache<ISkyrimMod, ISkyrimModGetter>();
+            var npcPluginNames = order.OrderedPaths.Select(pp3 => Path.GetFileName(pp3)!).ToList();
+            var npcResolver = new ViewProbe.NpcRecordResolver(npcLcMods, npcPluginNames, npcLinkCache);
+            var outfitStack = new ViewProbe.NpcOutfitStack(dataDir, modFolders, overwriteDir,
+                npcResolver.IsPluginInstalled, npcResolver.ResolveSkyPatcherIdentifier,
+                npcResolver.ResolveSpidFilterForm, npcResolver.ResolveSpidFormIdentifier, npcLinkCache);
+            Console.WriteLine($"   [npc] runtime outfit configs: {outfitStack.SkyPatcherLineCount} SkyPatcher outfitDefault line(s) "
+                            + $"in {outfitStack.SkyPatcherFileCount} npc ini file(s); {outfitStack.SpidEntryCount} SPID outfit entr(ies) "
+                            + $"in {outfitStack.SpidFileCount} _DISTR file(s)");
+            npcHost = ViewProbe.NpcActorBuilder.CreateHost(assets, dataDir, modFolders, overwriteDir);
+            foreach (var (npcKey, placement, labelHint) in npcPlacements)
+            {
+                var rn = npcResolver.Resolve(npcKey);
+                if (rn is null) continue;
+                string label = string.IsNullOrEmpty(labelHint) ? rn.Name : labelHint;
+                ViewProbe.NpcOutfitResult? outfit = null;
+                List<CharacterViewer.Rendering.MeshOverride>? overrides = null;
+                if (!npcNoOutfit)
+                {
+                    outfit = outfitStack.Resolve(rn.Winner, rn.Facts);
+                    foreach (var note in outfit.RuntimeNotes) Console.WriteLine($"   [npc] {label}: {note}");
+                    foreach (var apx in outfit.Approximations.Distinct()) Console.WriteLine($"   [npc] {label}: approximation: {apx}");
+                    Console.WriteLine(outfit.OutfitKey is { } okey
+                        ? $"   [npc] {label}: outfit {okey} via {outfit.SourceDetail}"
+                        : $"   [npc] {label}: no outfit (record has none, no runtime layer assigns one)");
+                    overrides = npcResolver.ResolveOutfitOverrides(rn.Winner, outfit.OutfitKey);
+                    if (overrides.Count > 0) Console.WriteLine($"   [npc] {label}: {overrides.Count} attire piece(s)");
+                }
+                var (colourName, colour) = npcPalette[npcActors.Count % npcPalette.Length];
+                var actor = ViewProbe.NpcActorBuilder.Build(npcHost, rn, overrides, placement, label, colour);
+                if (actor is null) continue;
+                npcActors.Add(actor);
+                Console.WriteLine($"   [npc] {label}: identity colour {colourName} (puck + caption)");
+                string outfitTag = npcNoOutfit ? "no outfit (--npc-no-outfit)"
+                    : outfit?.OutfitKey is null ? "no outfit"
+                    : outfit.Source switch
+                    {
+                        ViewProbe.NpcOutfitSource.SkyPatcher or ViewProbe.NpcOutfitSource.Spid => outfit.SourceDetail!,
+                        ViewProbe.NpcOutfitSource.InventoryTemplate => "outfit via inventory template",
+                        _ => "outfit: record DefaultOutfit",
+                    };
+                npcCaptions.Add(($"NPC {label} {rn.NpcKey} at {placement.Position.X:0},{placement.Position.Y:0},{placement.Position.Z:0}"
+                              + $" heading {float.RadiansToDegrees(placement.Rotation.Z):0}° — {outfitTag}", colour));
+            }
+            Console.WriteLine($"   [npc] {npcActors.Count} actor(s) built  ({swNpc.Elapsed.TotalSeconds:0.0}s)");
+        }
+        float PitchDownDeg()
+        {
+            var d = lookPos.Value - eyePos.Value;
+            float horiz = MathF.Sqrt(d.X * d.X + d.Y * d.Y);
+            return float.RadiansToDegrees(MathF.Atan2(-d.Z, MathF.Max(horiz, 1e-3f)));
+        }
+        bool npcPucksOn = npcActors.Count > 0 && npcPuck switch
+        {
+            "on" => true,
+            "off" => false,
+            // auto: a steep look-down is where a standing figure shrinks to a few
+            // dozen pixels and needs the marker; eye-level shots read fine bare.
+            _ => PitchDownDeg() > 60f,
+        };
+        if (npcActors.Count > 0)
+            Console.WriteLine($"   [npc] pucks: {(npcPucksOn ? "on" : "off")} ({npcPuck}"
+                            + (npcPuck == "auto" ? $", camera {PitchDownDeg():0}° down" : "") + ")");
+        void NpcCleanup()
+        {
+            npcHost?.Disposer();
+            foreach (var m2 in npcLcMods) (m2 as IDisposable)?.Dispose();
+        }
+
+        // The FULL camera pose travels with every render, so any shot can be replicated from the
+        // image alone: burnt into the caption in the game's own conventions (yaw 0 = north/+Y,
+        // clockwise; positive pitch looks down — the exact inverse of the --yaw/--pitch direction
+        // math above), and embedded as a PNG tEXt chunk holding the arguments verbatim. A camera
+        // given as --look round-trips as --yaw/--pitch; both compose the same view.
+        float camYawDeg = (float.RadiansToDegrees(MathF.Atan2(lookPos.Value.X - eyePos.Value.X,
+                                                              lookPos.Value.Y - eyePos.Value.Y)) + 360f) % 360f;
+        float camPitchDeg = PitchDownDeg();
+        string camPose = $"eye {eyePos.Value.X:0.##},{eyePos.Value.Y:0.##},{eyePos.Value.Z:0.##}"
+                       + $" yaw {camYawDeg:0.#}° pitch {camPitchDeg:0.#}° fov {fov:0.#}°";
+        // args = byte-exact replay; pose = the camera those args resolved to THIS run (matters
+        // when the camera came from --eye-ref/--look-ref, whose positions move with the load order).
+        string camMeta = $"args: {replayArgs} | pose: {camPose}"
+                       + $" look {lookPos.Value.X:0.##},{lookPos.Value.Y:0.##},{lookPos.Value.Z:0.##}"
+                       + $" | cell {cellLabel}";
+
+        string safe = new string(cellLabel.Select(c => char.IsLetterOrDigit(c) ? c : '_').ToArray());
+        // A worklist renders several shots of the SAME cell, so the cell name alone would have each
+        // one overwrite the last. The number is the shot's position in the run — the same number the
+        // fly-through's HUD and the bat manifest use — and the label follows it so the file is
+        // findable without the worklist open beside it.
+        if (worklist is not null)
+        {
+            var wsh = worklist.Cells[wlCell].Shots[wlShot];
+            string slug = new string(wsh.Label.Select(c => char.IsLetterOrDigit(c) ? c : '_').ToArray()).Trim('_');
+            if (slug.Length > 48) slug = slug[..48].TrimEnd('_');
+            safe = $"{safe}-c{wlCell + 1}s{wlShot + 1}-{slug}";
+        }
+
+        // The target cell's own footprint, for the outline. Exteriors only — an interior has no grid
+        // and no neighbours to be confused with.
+        (float X0, float Y0, float X1, float Y1)? cellBounds = null;
+        if (cellOutline && !interior && targetGrid is { } tgb)
+            cellBounds = (tgb.X * 4096f, tgb.Y * 4096f, tgb.X * 4096f + 4096f, tgb.Y * 4096f + 4096f);
+
+        // Violet: not in the healthy palette (green/cyan/magenta/yellow/blue), not the reserved red,
+        // not the white of the cell outline, not the orange of an implicated door.
+        var diffColor = new System.Numerics.Vector4(0.72f, 0.28f, 1f, 1f);
+        var noDiff = Array.Empty<System.Numerics.Vector3>();
+
+        int Render(IReadOnlyList<(System.Numerics.Vector3, System.Numerics.Vector3, System.Numerics.Vector3)> g,
+                   IReadOnlyList<(System.Numerics.Vector3, System.Numerics.Vector3, System.Numerics.Vector3)> r,
+                   string outFile, IReadOnlyList<string> captionLines,
+                   IReadOnlyList<System.Numerics.Vector3>? diffs = null)
+            => ViewProbe.TexturedScene.RenderToPng(
+                   scene, assets, dataDir, modFolders, overwriteDir,
+                   (eyePos.Value, lookPos.Value, fov), g, r, terrainPatches, terrainLayers, navMode, navColor,
+                   skyColor, terrainHeightAt, dashUnderground, dashUnderStatics, msaa, cullAbove, cellBounds,
+                   diffs ?? noDiff, diffColor, picks, captionLines, npcCaptions, npcActors, npcPucksOn, keepFx, fxStatic, listMeshes, size, outFile,
+                   camMeta);
+
+        if (compare is { } cmp)
+        {
+            // Three panels, one camera: A's navmesh, B's navmesh, the winning state. The world
+            // geometry and terrain are the winning state in all three — only the navmesh layer
+            // changes, which is exactly the thing being compared.
+            // Each side panel is the cell's FULL navmesh as if that plugin won: the winning state
+            // with the plugin's own versions substituted in. Records neither plugin touches are then
+            // IDENTICAL in all three panels, so any visible difference is the actual disagreement.
+            IReadOnlyDictionary<FormKey, NavmeshGeometry> AsIfWon(string plg)
+            {
+                var d = new Dictionary<FormKey, NavmeshGeometry>(winNav);
+                if (navByPlugin.TryGetValue(plg, out var own))
+                    foreach (var kv in own) d[kv.Key] = kv.Value;
+                return d;
+            }
+            var panels = new (string Label, IReadOnlyDictionary<FormKey, NavmeshGeometry> Navs)[]
+            {
+                (cmp.A, AsIfWon(cmp.A)),
+                (cmp.B, AsIfWon(cmp.B)),
+                ("winning state", winNav),
+            };
+            // (panel captions name the navmesh SOURCE; world geometry is the winning state in all three)
+            foreach (var fk in redNav.Keys)
+                Console.WriteLine($"   contested {fk}: " + string.Join("  |  ",
+                    panels.Select(p => p.Label + ": " + (p.Navs.TryGetValue(fk, out var nv) ? nv.Triangles.Count + " tris" : "not provided"))));
+
+            // ---- THE DIFF ------------------------------------------------------------------
+            // Which navmesh VERTICES does one plugin's version have that the other's does not? Only
+            // vertices a live (non-deleted, in-range) triangle actually uses count — an orphaned entry
+            // in the vertex list is not something the picture shows. Positions are quantised to 1/8 u
+            // so float noise cannot invent a difference; real navmesh vertices are units apart.
+            static long Q(float v) => (long)MathF.Round(v * 8f);
+            static IEnumerable<(long X, long Y, long Z, System.Numerics.Vector3 P)> LiveVerts(
+                IReadOnlyDictionary<FormKey, NavmeshGeometry> navs)
+            {
+                foreach (var nav in navs.Values)
+                    foreach (var tri in nav.Triangles)
+                    {
+                        if ((tri.Flags & 0x08) != 0) continue;
+                        foreach (var idx in new[] { tri.A, tri.B, tri.C })
+                        {
+                            if (idx < 0 || idx >= nav.Vertices.Count) continue;
+                            var p = V(nav.Vertices[idx]);
+                            yield return (Q(p.X), Q(p.Y), Q(p.Z), p);
+                        }
+                    }
+            }
+            var keysA = new HashSet<(long, long, long)>(LiveVerts(panels[0].Navs).Select(v => (v.X, v.Y, v.Z)));
+            var keysB = new HashSet<(long, long, long)>(LiveVerts(panels[1].Navs).Select(v => (v.X, v.Y, v.Z)));
+            var changedKeys = new HashSet<(long, long, long)>(keysA);
+            changedKeys.SymmetricExceptWith(keysB);
+            // A panel shows the changed vertices IT has. For the two side panels that is exactly
+            // "mine and not theirs"; for the winning panel it is whichever of the two it inherited.
+            List<System.Numerics.Vector3> DiffFor(IReadOnlyDictionary<FormKey, NavmeshGeometry> navs)
+            {
+                var seen = new HashSet<(long, long, long)>();
+                var outp = new List<System.Numerics.Vector3>();
+                if (!navDiff) return outp;
+                foreach (var (x, y, z, p) in LiveVerts(navs))
+                    if (changedKeys.Contains((x, y, z)) && seen.Add((x, y, z))) outp.Add(p);
+                return outp;
+            }
+            if (navDiff)
+                Console.WriteLine($"   nav diff: {changedKeys.Count} vertex position(s) differ between "
+                                + $"{cmp.A} ({keysA.Count} live vertices) and {cmp.B} ({keysB.Count})");
+
+            var panelFiles = new List<string>();
+            for (int pi = 0; pi < panels.Length; pi++)
+            {
+                var (label, navs) = panels[pi];
+                if (pi < 2 && (!navByPlugin.TryGetValue(label, out var ownNv) || ownNv.Count == 0))
+                    Console.WriteLine($"   panel '{label}': provides NO navmesh version in this cell -- panel equals the winning state");
+                var (g, r) = BuildNavSets(navs);
+                var diffs = DiffFor(navs);
+                string pf = Path.Combine(outDir, $"{safe}-cmp{pi + 1}-{new string(label.Select(ch => char.IsLetterOrDigit(ch) ? ch : '_').ToArray())}.png");
+                var cap = new List<string> { $"[{pi + 1}/3] {(pi == 2 ? "winning state (actual merged navmesh)" : $"cell navmesh if {label} won")} \u2014 {cellLabel} \u2014 {camPose}{CullCaption()}" };
+                if (redNav.Count > 0) cap.Add(RedCaption(navs));
+                if (DoorCaption() is { } dc) cap.Add(dc);
+                // NPC caption lines ride the separate coloured channel (npcCaptions),
+                // passed straight into the render call below.
+                if (changedKeys.Count > 0 && navDiff)
+                    cap.Add($"VIOLET spheres: {diffs.Count} navmesh vertex position(s) this version has and the other does not "
+                          + $"({changedKeys.Count} differ in total)");
+                Render(g, r, pf, cap, diffs);
+                panelFiles.Add(pf);
+                Console.WriteLine($"   panel {pi + 1} ({label}): {g.Count:N0} green + {r.Count:N0} red navmesh tris -> {pf}");
+            }
+
+            // Stitch left->right: A | B | winning.
+            string stitched = Path.Combine(outDir, $"{safe}-compare.png");
+            using (var canvas = new Image<Rgba32>(size * 3 + 8, size))
+            {
+                canvas.Mutate(ctx =>
+                {
+                    ctx.BackgroundColor(SixLabors.ImageSharp.Color.Black);
+                    for (int pi = 0; pi < 3; pi++)
+                        using (var img = Image.Load<Rgba32>(panelFiles[pi]))
+                            ctx.DrawImage(img, new SixLabors.ImageSharp.Point(pi * (size + 4), 0), 1f);
+                });
+                // The stitch carries the same replication chunk as its panels (one camera, three panels).
+                canvas.Metadata.GetPngMetadata().TextData.Add(
+                    new SixLabors.ImageSharp.Formats.Png.Chunks.PngTextData("viewprobe", camMeta, string.Empty, string.Empty));
+                canvas.SaveAsPng(stitched);
+            }
+            Console.WriteLine($"wrote:\n   {stitched}");
+            Console.WriteLine($"   panels left->right: [1] {cmp.A}   [2] {cmp.B}   [3] winning state (+conflict red)");
+            NpcCleanup();
+            return 0;
+        }
+
+        if (navPlugin is not null)
+        {
+            var navs = navByPlugin.TryGetValue(navPlugin, out var d0) ? d0 : new Dictionary<FormKey, NavmeshGeometry>();
+            Console.WriteLine($"   navmesh source: {navPlugin} ({navs.Count} record version(s) in this cell)");
+            (navTris, redTris) = BuildNavSets(navs);
+        }
+
+        string fpOut = Path.Combine(outDir, $"{safe}-fp.png");
+        var fpCap = new List<string> { $"{cellLabel} \u2014 {(navPlugin ?? "winning state")} \u2014 {camPose}{CullCaption()}" };
+        if (redNav.Count > 0) fpCap.Add(RedCaption(navPlugin is not null && navByPlugin.TryGetValue(navPlugin, out var np0) ? np0 : winNav));
+        if (DoorCaption() is { } fdc) fpCap.Add(fdc);
+
+        if (interactiveMode)
+        {
+            // Same build, different ending: the scene stays resident and the window opens. The
+            // navmesh identity list mirrors exactly what BuildNavSets admits to the overlay
+            // (same source dict, same deleted/out-of-range filters), so a hover can only name
+            // triangles that are actually drawn.
+            var navSrc = navPlugin is not null && navByPlugin.TryGetValue(navPlugin, out var nsrc)
+                ? (IReadOnlyDictionary<FormKey, NavmeshGeometry>)nsrc : winNav;
+            var iopt = new ViewProbe.InteractiveOptions
+            {
+                Window = fpGw,
+                RuntimeId = RuntimeId,
+                TerrainDescribe = terrainDescribeAt,
+                CellLabel = cellLabel,
+                OutDir = outDir,
+                SafeName = safe,
+                RedNav = redNav.Keys.ToHashSet(),
+                FlySpeed = flySpeed,
+                LookSens = lookSens,
+                // PageUp/PageDown step THIS cell's shots for free (everything is resident);
+                // Ctrl+ steps cells, which only the run loop above can serve — and only when
+                // the run actually has a worklist to step through.
+                Worklist = worklist,
+                WorklistCell = wlCell,
+                WorklistShot = wlShot,
+                CanSwitchCell = worklist is not null && worklist.Cells.Count > 1,
+            };
+            if (navMode != "off")
+                foreach (var nav in navSrc.Values)
+                    for (int ti = 0; ti < nav.Triangles.Count; ti++)
+                    {
+                        var tri = nav.Triangles[ti];
+                        if ((tri.Flags & 0x08) != 0) continue;
+                        if (tri.A < 0 || tri.B < 0 || tri.C < 0) continue;
+                        if (tri.A >= nav.Vertices.Count || tri.B >= nav.Vertices.Count || tri.C >= nav.Vertices.Count) continue;
+                        iopt.NavTris.Add((nav.FormKey, ti, V(nav.Vertices[tri.A]), V(nav.Vertices[tri.B]), V(nav.Vertices[tri.C])));
+                    }
+
+            int iShapes = ViewProbe.TexturedScene.RenderToPng(
+                scene, assets, dataDir, modFolders, overwriteDir,
+                (eyePos.Value, lookPos.Value, fov), navTris, redTris, terrainPatches, terrainLayers, navMode, navColor,
+                skyColor, terrainHeightAt, dashUnderground, dashUnderStatics, msaa, cullAbove, cellBounds,
+                noDiff, diffColor, picks, fpCap, npcCaptions, npcActors, npcPucksOn, keepFx, fxStatic, listMeshes, size, fpOut,
+                camMeta, iopt);
+            Console.WriteLine($"   interactive run over ({iShapes:N0} shapes were resident)");
+        pendingSwitch = iopt.CellSwitch;
+            NpcCleanup();
+            return 0;
+        }
+
+        int drawnShapes = Render(navTris, redTris, fpOut, fpCap);
+        Console.WriteLine($"wrote:\n   {fpOut}");
+        Console.WriteLine($"   eye {eyePos.Value.X:0},{eyePos.Value.Y:0},{eyePos.Value.Z:0} -> look {lookPos.Value.X:0},{lookPos.Value.Y:0},{lookPos.Value.Z:0}"
+                        + $"  yaw {camYawDeg:0.#}° pitch {camPitchDeg:0.#}° fov {fov:0}°  ({drawnShapes:N0} shapes)");
         NpcCleanup();
         return 0;
     }
 
-    if (navPlugin is not null)
-    {
-        var navs = navByPlugin.TryGetValue(navPlugin, out var d0) ? d0 : new Dictionary<FormKey, NavmeshGeometry>();
-        Console.WriteLine($"   navmesh source: {navPlugin} ({navs.Count} record version(s) in this cell)");
-        (navTris, redTris) = BuildNavSets(navs);
-    }
+    // Not a textured run: the flat diagnostic mode below is this call's continuation.
+    return -1;
+}
 
-    string fpOut = Path.Combine(outDir, $"{safe}-fp.png");
-    var fpCap = new List<string> { $"{cellLabel} \u2014 {(navPlugin ?? "winning state")} \u2014 {camPose}{CullCaption()}" };
-    if (redNav.Count > 0) fpCap.Add(RedCaption(navPlugin is not null && navByPlugin.TryGetValue(navPlugin, out var np0) ? np0 : winNav));
-    if (DoorCaption() is { } fdc) fpCap.Add(fdc);
-
+// ---------------------------------------------------------------------------------------
+// THE RUN
+// ---------------------------------------------------------------------------------------
+if (worklist is not null)
+{
     if (interactiveMode)
     {
-        // Same build, different ending: the scene stays resident and the window opens. The
-        // navmesh identity list mirrors exactly what BuildNavSets admits to the overlay
-        // (same source dict, same deleted/out-of-range filters), so a hover can only name
-        // triangles that are actually drawn.
-        var navSrc = navPlugin is not null && navByPlugin.TryGetValue(navPlugin, out var nsrc)
-            ? (IReadOnlyDictionary<FormKey, NavmeshGeometry>)nsrc : winNav;
-        var iopt = new ViewProbe.InteractiveOptions
+        // One cell resident at a time. Ctrl+PageUp/PageDown sets CellSwitch and closes the window;
+        // this loop is what "rebuilding the scene" actually means.
+        int wlc = 0, wls = 0;
+        while (true)
         {
-            Window = fpGw,
-            RuntimeId = RuntimeId,
-            TerrainDescribe = terrainDescribeAt,
-            CellLabel = cellLabel,
-            OutDir = outDir,
-            SafeName = safe,
-            RedNav = redNav.Keys.ToHashSet(),
-            FlySpeed = flySpeed,
-            LookSens = lookSens,
-        };
-        if (navMode != "off")
-            foreach (var nav in navSrc.Values)
-                for (int ti = 0; ti < nav.Triangles.Count; ti++)
-                {
-                    var tri = nav.Triangles[ti];
-                    if ((tri.Flags & 0x08) != 0) continue;
-                    if (tri.A < 0 || tri.B < 0 || tri.C < 0) continue;
-                    if (tri.A >= nav.Vertices.Count || tri.B >= nav.Vertices.Count || tri.C >= nav.Vertices.Count) continue;
-                    iopt.NavTris.Add((nav.FormKey, ti, V(nav.Vertices[tri.A]), V(nav.Vertices[tri.B]), V(nav.Vertices[tri.C])));
-                }
-
-        int iShapes = ViewProbe.TexturedScene.RenderToPng(
-            scene, assets, dataDir, modFolders, overwriteDir,
-            (eyePos.Value, lookPos.Value, fov), navTris, redTris, terrainPatches, terrainLayers, navMode, navColor,
-            skyColor, terrainHeightAt, dashUnderground, dashUnderStatics, msaa, cullAbove, cellBounds,
-            noDiff, diffColor, picks, fpCap, npcCaptions, npcActors, npcPucksOn, keepFx, fxStatic, listMeshes, size, fpOut,
-            camMeta, iopt);
-        Console.WriteLine($"   interactive run over ({iShapes:N0} shapes were resident)");
-        NpcCleanup();
-        return 0;
+            pendingSwitch = null;
+            int rc = RunCellTextured(worklist.Cells[wlc].Cell, wlc, wls);
+            if (pendingSwitch is not { } next) return rc < 0 ? 0 : rc;
+            (wlc, wls) = next;
+        }
     }
 
-    int drawnShapes = Render(navTris, redTris, fpOut, fpCap);
-    Console.WriteLine($"wrote:\n   {fpOut}");
-    Console.WriteLine($"   eye {eyePos.Value.X:0},{eyePos.Value.Y:0},{eyePos.Value.Z:0} -> look {lookPos.Value.X:0},{lookPos.Value.Y:0},{lookPos.Value.Z:0}"
-                    + $"  yaw {camYawDeg:0.#}° pitch {camPitchDeg:0.#}° fov {fov:0}°  ({drawnShapes:N0} shapes)");
-    NpcCleanup();
+    // Static: every shot of every cell, each to its own PNG. One BUILD per shot — shots in the
+    // same cell do not share a walk, because the render happens inside the build rather than
+    // after it. Said out loud rather than hidden: on a multi-shot cell this is the dominant cost.
+    int totalShots = worklist.Cells.Sum(c => c.Shots.Count);
+    if (totalShots > worklist.Cells.Count)
+        Console.WriteLine($"worklist: {totalShots} shots over {worklist.Cells.Count} cell(s) — "
+                        + "the load walk runs once PER SHOT in static mode (use --interactive to pay it once per cell).");
+    for (int wlc = 0; wlc < worklist.Cells.Count; wlc++)
+        for (int wls = 0; wls < worklist.Cells[wlc].Shots.Count; wls++)
+        {
+            int rc = RunCellTextured(worklist.Cells[wlc].Cell, wlc, wls);
+            if (rc > 0) return rc;
+        }
     return 0;
 }
+
+int singleRc = RunCellTextured(target, 0, 0);
+if (singleRc >= 0) return singleRc;
+
 
 // ---------------------------------------------------------------------------------------
 // 2. Build world geometry

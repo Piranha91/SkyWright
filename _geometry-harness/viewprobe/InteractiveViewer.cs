@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Numerics;
 using CharacterViewer.Rendering;
+using HarnessShared;
 using Mutagen.Bethesda.Plugins;
 using OpenTK.Graphics.OpenGL4;
 using OpenTK.Windowing.Common;
@@ -109,6 +110,17 @@ sealed class InteractiveOptions
     // ---- flight feel, seeded from the command line ----------------------------------------
     public float FlySpeed = 600f;                          // u/s, before the shift/ctrl multiplier
     public float LookSens = 0.15f;                         // degrees of turn per pixel of mouse
+
+    // ---- worklist: the shot list this window is stepping through ---------------------------
+    // PageUp/PageDown move between the SHOTS of the cell this scene holds — a camera jump, free,
+    // because everything is already resident. Ctrl+PageUp/PageDown move between CELLS, which the
+    // loop cannot do itself: a different cell is a different scene. It asks instead, by setting
+    // CellSwitch and closing the window; the host rebuilds and reopens at that shot.
+    public WorklistFile? Worklist;
+    public int WorklistCell;                               // index into Worklist.Cells that THIS scene is
+    public int WorklistShot;                               // shot to open on
+    public bool CanSwitchCell;                             // false when the host cannot rebuild (says so on the key)
+    public (int Cell, int Shot)? CellSwitch;               // set by Ctrl+PageUp/Down, read by the host after Run returns
 }
 
 static class InteractiveViewer
@@ -241,6 +253,61 @@ static class InteractiveViewer
             if (clipLo is null && clipHi is null) { Console.WriteLine("   clip: off — every static shape drawn"); return; }
             Console.WriteLine($"   clip: {ClipLabel()} of {clippable.Length:N0} static shape(s)"
                             + (clipHi is { } ch2 ? $"  (static equivalent: --cull-above {ch2:0} — triangle-exact, unlike this shape-level band)" : ""));
+        }
+
+        // ---- worklist: PageUp/PageDown step the shots, Ctrl+ steps the cells ---------------
+        // A worklist entry IS a camera pose, so stepping shots inside one cell costs nothing:
+        // everything is resident and only eye/yaw/pitch/fov change. The label travels with it,
+        // because a pose with no sentence attached is a coordinate, not a thing to look at.
+        var wl = opt.Worklist;
+        var shots = wl is not null && opt.WorklistCell < wl.Cells.Count
+                  ? wl.Cells[opt.WorklistCell].Shots : (IReadOnlyList<WorklistShot>)Array.Empty<WorklistShot>();
+        int shotIdx = shots.Count > 0 ? Math.Clamp(opt.WorklistShot, 0, shots.Count - 1) : 0;
+
+        string WorklistHud()
+        {
+            if (wl is null || shots.Count == 0) return "";
+            return $"[cell {opt.WorklistCell + 1}/{wl.Cells.Count} · shot {shotIdx + 1}/{shots.Count}] {shots[shotIdx].Label} — ";
+        }
+
+        void ApplyShot(int i, bool announce)
+        {
+            if (shots.Count == 0) return;
+            shotIdx = Math.Clamp(i, 0, shots.Count - 1);
+            var sh = shots[shotIdx];
+            eye = new Vector3(sh.Eye[0], sh.Eye[1], sh.Eye[2]);
+            (yaw, pitch) = WorklistIo.Aim(sh);
+            fov = sh.Fov;
+            camera.FieldOfView = fov;               // nothing else in the loop touches fov, so a shot's own must be pushed
+            if (sh.Nav is { } nm && hasNav) { navMode = nm; ApplyNav(); }
+            if (sh.CullAbove is { } ca)
+            {
+                // The worklist's cullAbove is the STATIC render's triangle-exact knife. The live
+                // band is shape-granular, so this reproduces the intent, not the pixels — say so
+                // rather than letting the two quietly disagree.
+                clipHi = ca; ApplyClip();
+            }
+            if (!announce) return;
+            Console.WriteLine($"   shot {shotIdx + 1}/{shots.Count}: {sh.Label}");
+            if (sh.Note is { Length: > 0 } nt) Console.WriteLine($"      {nt}");
+            Console.WriteLine($"      {PoseArgs()}");
+            if (sh.CullAbove is { } ca2) Console.WriteLine($"      clip ceiling set to z {ca2:0} (shape-granular; the static render's --cull-above {ca2:0} is triangle-exact)");
+        }
+
+        // Ask the host for another cell. The loop cannot build one, so it closes and reports.
+        void RequestCell(int delta)
+        {
+            if (wl is null) return;
+            int want = opt.WorklistCell + delta;
+            if (want < 0 || want >= wl.Cells.Count)
+            { Console.WriteLine($"   worklist: already at the {(delta < 0 ? "first" : "last")} cell ({wl.Cells.Count} in this list)"); return; }
+            if (!opt.CanSwitchCell)
+            { Console.WriteLine("   worklist: this run holds one cell only — cell switching needs the whole worklist, not a single --worklist cell."); return; }
+            // Backwards lands on the PREVIOUS cell's LAST shot, the way turning a page back does.
+            int shot = delta < 0 ? Math.Max(wl.Cells[want].Shots.Count - 1, 0) : 0;
+            Console.WriteLine($"   worklist: cell {want + 1}/{wl.Cells.Count} '{wl.Cells[want].Cell}' — rebuilding the scene...");
+            opt.CellSwitch = (want, shot);
+            gw.Close();
         }
 
         // ---- hover picking -----------------------------------------------------------------
@@ -496,6 +563,10 @@ static class InteractiveViewer
             Console.WriteLine($"   nav:    N cycles the navmesh display off -> filled -> wire -> both{(hasNav ? $" (now {navMode})" : " — this run has none")}");
             Console.WriteLine($"   clip:   [ and ] move the CEILING, ; and ' move the FLOOR (first touch starts at the camera's z), "
                             + $"\\ = clips off (now {ClipLabel()})");
+            if (wl is not null)
+                Console.WriteLine($"   shots:  PageUp/PageDown step this cell's shots (now {shotIdx + 1}/{Math.Max(shots.Count, 1)}), "
+                                + $"Ctrl+PageUp/PageDown step the worklist's cells (now {opt.WorklistCell + 1}/{wl.Cells.Count})"
+                                + (opt.CanSwitchCell ? "" : " — cell switching is off in this run"));
             Console.WriteLine("   out:    P = print --eye/--yaw/--pitch, F12 = save PNG, H/F1 = this help, Esc = quit");
         }
 
@@ -534,6 +605,33 @@ static class InteractiveViewer
         // capture deliberately excludes — could not be seen in a test at all.
         bool autoLock = Environment.GetEnvironmentVariable("VP_FLY_LOCK") == "1";
         bool hudInShot = Environment.GetEnvironmentVariable("VP_FLY_HUD") == "1";
+
+        // The worklist's opening shot is applied BEFORE the VP_FLY_* overrides, so a test that
+        // pins the nav mode or the clip still wins over whatever that shot asked for. VP_FLY_SHOT
+        // selects a shot headlessly — the PageUp/PageDown key's effect, without a keyboard.
+        if (Environment.GetEnvironmentVariable("VP_FLY_SHOT") is { Length: > 0 } shotSpec)
+        {
+            if (int.TryParse(shotSpec, out var wantShotIdx) && shots.Count > 0)
+                shotIdx = Math.Clamp(wantShotIdx - 1, 0, shots.Count - 1);          // 1-based, like the HUD
+            else Console.WriteLine($"   [auto] VP_FLY_SHOT '{shotSpec}' ignored: not a shot number in this cell");
+        }
+        if (shots.Count > 0) ApplyShot(shotIdx, announce: true);
+
+        // VP_FLY_CELL=+1|-1: after the capture, ask for the next/previous worklist cell instead of
+        // just closing — Ctrl+PageUp/PageDown's effect, headlessly. Without it the multi-cell
+        // rebuild is the one path in this feature no test can reach, which is also the one that
+        // tears down a GL context and builds another.
+        int autoCell = int.TryParse(Environment.GetEnvironmentVariable("VP_FLY_CELL"), out var ac) ? ac : 0;
+        void AutoFinish()
+        {
+            if (autoCell != 0 && wl is not null)
+            {
+                Console.WriteLine($"   [auto] VP_FLY_CELL={autoCell:+0;-0}");
+                RequestCell(autoCell);                    // sets CellSwitch and closes
+                if (opt.CellSwitch is not null) return;   // refused (no such cell): fall through and close
+            }
+            gw.Close();
+        }
         if (Environment.GetEnvironmentVariable("VP_FLY_NAV") is { Length: > 0 } navSpec)
         {
             string want = navSpec.ToLowerInvariant();
@@ -581,7 +679,7 @@ static class InteractiveViewer
             {
                 SyncCamera();
                 if (locked is not null) hudLine1 = LockedHud();
-                hudLine2 = $"{Pose()} — speed {speed:0} u/s"
+                hudLine2 = $"{WorklistHud()}{Pose()} — speed {speed:0} u/s"
                          + (hasNav ? $" — nav {navMode}" : "")
                          + (clipLo is not null || clipHi is not null ? $" — clip {ClipLabel()}" : "")
                          + " — H help";
@@ -662,6 +760,21 @@ static class InteractiveViewer
             if (kb.IsKeyReleased(Keys.LeftBracket) || kb.IsKeyReleased(Keys.RightBracket)
              || kb.IsKeyReleased(Keys.Semicolon) || kb.IsKeyReleased(Keys.Apostrophe)) PrintClip();
 
+            // Worklist paging. Ctrl is the cell modifier, so the two live one keypress apart:
+            // PageDown walks the shots of this cell, Ctrl+PageDown walks to the next cell.
+            if (kb.IsKeyPressed(Keys.PageUp) || kb.IsKeyPressed(Keys.PageDown))
+            {
+                int dir = kb.IsKeyPressed(Keys.PageDown) ? 1 : -1;
+                bool ctrl = kb.IsKeyDown(Keys.LeftControl) || kb.IsKeyDown(Keys.RightControl);
+                if (wl is null) Console.WriteLine("   PageUp/PageDown step a worklist; this run was not given --worklist.");
+                else if (ctrl) RequestCell(dir);
+                else if (shots.Count == 0) Console.WriteLine("   worklist: this cell has no shots.");
+                else if (shotIdx + dir < 0 || shotIdx + dir >= shots.Count)
+                    Console.WriteLine($"   worklist: {(dir < 0 ? "first" : "last")} shot of this cell"
+                                    + (opt.CanSwitchCell ? " — Ctrl+PageUp/PageDown for the previous/next cell" : ""));
+                else ApplyShot(shotIdx + dir, announce: true);
+            }
+
             if (kb.IsKeyPressed(Keys.P))
             {
                 Console.WriteLine($"   pose: {Pose()}");
@@ -719,7 +832,7 @@ static class InteractiveViewer
                 titleClock.Restart();
                 // Defaults stay quiet: sensitivity and the clip only take a slot on the bar once
                 // they are no longer at their entry value, so the common line stays one row.
-                hudLine2 = $"{Pose()} — speed {speed * mult:0} u/s"
+                hudLine2 = $"{WorklistHud()}{Pose()} — speed {speed * mult:0} u/s"
                          + (MathF.Abs(lookSens - DefaultSens) > 1e-4f ? $" — look {lookSens:0.000}" : "")
                          + (hasNav ? $" — nav {navMode}" : "")
                          + (clipLo is not null || clipHi is not null ? $" — clip {ClipLabel()}" : "")
@@ -740,9 +853,9 @@ static class InteractiveViewer
             // instead, so a capture looks like a render and not like a screenshot of a tool.
             // VP_FLY_HUD=1 moves the grab to after the bar, which is the only way a headless
             // test can see the bar at all.
-            if (wantShot && !hudInShot) { wantShot = false; CaptureShot(w, h); if (autoFrames > 0) gw.Close(); }
+            if (wantShot && !hudInShot) { wantShot = false; CaptureShot(w, h); if (autoFrames > 0) AutoFinish(); }
             DrawHud(w, h);
-            if (wantShot && hudInShot) { wantShot = false; CaptureShot(w, h); if (autoFrames > 0) gw.Close(); }
+            if (wantShot && hudInShot) { wantShot = false; CaptureShot(w, h); if (autoFrames > 0) AutoFinish(); }
             gw.SwapBuffers();
 
             // Smoke path: run the pick, then request a capture — which the NEXT frame takes at
