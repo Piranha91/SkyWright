@@ -27,7 +27,10 @@ namespace ViewProbe;
 //                          over houseCARL's AssetResolver/TryReadArchiveEntry) + the profile's
 //                          mod folders via SetAdditionalFolders — MO2-style last-wins.
 //   NifMeshBuilder      <- BuildFromFile per distinct mesh path; it applies the NIF's own node
-//                          chain (GetTransformToGlobal) and emits Y-up geometry.
+//                          chain (GetTransformToGlobal) and emits Y-up geometry. For placed
+//                          objects viewprobe then removes the root node's transform: Skyrim
+//                          starts REFR placement below that root (proved against the game by
+//                          SHouseIntDoor02's -90-degree root and 270-degree REFR heading).
 //   GlTextureManager    <- LoadTexture(relative path) resolves + decodes DDS, caches, falls
 //                          back to a white texture rather than failing a shape.
 //   GlRenderer          <- AddMesh + Render(OrbitCamera). NPC-only features stay off.
@@ -236,14 +239,17 @@ static class TexturedScene
         {
             var rel = r.MeshRelPath.StartsWith("meshes", StringComparison.OrdinalIgnoreCase)
                 ? r.MeshRelPath : Path.Combine("meshes", r.MeshRelPath);
-
             if (!builtCache.TryGetValue(rel, out var built))
             {
                 built = null;
                 var abs = resolver.ResolveAssetPath(rel);
                 if (abs is not null)
                 {
-                    try { built = builder.BuildFromFile(abs); }
+                    try
+                    {
+                        built = builder.BuildFromFile(abs);
+                        StripNifRootTransform(abs, built);
+                    }
                     catch (Exception ex) { logger.LogError($"BuildFromFile('{rel}')", ex); }
                 }
                 builtCache[rel] = built;
@@ -1621,4 +1627,68 @@ void main(){
         }
         return data;
     }
+
+    readonly record struct NifRootTransform(
+        float R00, float R01, float R02,
+        float R10, float R11, float R12,
+        float R20, float R21, float R22,
+        float Tx, float Ty, float Tz, float Scale)
+    {
+        public Vector3 UndoPoint(Vector3 p)
+        {
+            float x = p.X - Tx, y = p.Y - Ty, z = p.Z - Tz;
+            float invScale = MathF.Abs(Scale) > 1e-8f ? 1f / Scale : 1f;
+            return new Vector3(
+                (R00 * x + R10 * y + R20 * z) * invScale,
+                (R01 * x + R11 * y + R21 * z) * invScale,
+                (R02 * x + R12 * y + R22 * z) * invScale);
+        }
+
+        public Vector3 UndoDirection(Vector3 d) => new(
+            R00 * d.X + R10 * d.Y + R20 * d.Z,
+            R01 * d.X + R11 * d.Y + R21 * d.Z,
+            R02 * d.X + R12 * d.Y + R22 * d.Z);
+    }
+
+    // NifMeshBuilder is shared with an NPC portrait renderer, where composing every node through
+    // the root is appropriate. Skyrim's placed-object path starts the model transform below the
+    // root instead. The decisive game check is SHouseIntDoor02: root=-90 degrees, REFR=270 degrees;
+    // composing both makes the door edge-on, while Skyrim draws it flush in its north-facing arch.
+    static void StripNifRootTransform(string nifPath, IReadOnlyList<NifMeshBuilder.BuiltMesh> built)
+    {
+        using var nif = new nifly.NifFile();
+        if (nif.Load(nifPath) != 0) return;
+        var root = nif.GetRootNode();
+        if (root is null) return;
+        var t = root.GetTransformToParent();
+
+        using var ex = new nifly.Vector3(); ex.x = 1f;
+        using var ey = new nifly.Vector3(); ey.y = 1f;
+        using var ez = new nifly.Vector3(); ez.z = 1f;
+        using var c0 = t.rotation.opMult(ex);
+        using var c1 = t.rotation.opMult(ey);
+        using var c2 = t.rotation.opMult(ez);
+        var inv = new NifRootTransform(
+            c0.x, c1.x, c2.x,
+            c0.y, c1.y, c2.y,
+            c0.z, c1.z, c2.z,
+            t.translation.x, t.translation.y, t.translation.z, t.scale);
+
+        static Vector3 ToNif(Vector3 yup) => new(yup.X, -yup.Z, yup.Y);
+        static Vector3 ToYUp(Vector3 nifSpace) => new(nifSpace.X, nifSpace.Z, -nifSpace.Y);
+        static Vector3 UnitOrZero(Vector3 d) => d.LengthSquared() > 1e-12f ? Vector3.Normalize(d) : Vector3.Zero;
+
+        foreach (var b in built)
+        {
+            for (int i = 0; i < b.Positions.Length; i++)
+                b.Positions[i] = ToYUp(inv.UndoPoint(ToNif(b.Positions[i])));
+            for (int i = 0; i < b.Normals.Length; i++)
+                b.Normals[i] = UnitOrZero(ToYUp(inv.UndoDirection(ToNif(b.Normals[i]))));
+            for (int i = 0; i < b.Tangents.Length; i++)
+                b.Tangents[i] = UnitOrZero(ToYUp(inv.UndoDirection(ToNif(b.Tangents[i]))));
+            for (int i = 0; i < b.Bitangents.Length; i++)
+                b.Bitangents[i] = UnitOrZero(ToYUp(inv.UndoDirection(ToNif(b.Bitangents[i]))));
+        }
+    }
+
 }

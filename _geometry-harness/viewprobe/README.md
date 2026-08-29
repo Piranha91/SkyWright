@@ -179,6 +179,12 @@ gitignored for the same reason: probe transcripts name the plugins of whatever l
 - **REFR angles are clockwise-positive** (compass headings; `getangle z`: 0 = north, 90 = east)
   while `Matrix4x4.CreateRotation*` is right-handed counter-clockwise-positive — so the angles must
   be NEGATED before composing, or every rotated ref draws with its heading mirrored about north.
+- **A placed NIF's root transform is not part of its REFR placement.** `NifMeshBuilder` was built
+  for portraits and composes every node through the root. viewprobe removes that final root
+  transform before applying position/rotation/scale. The game-grounded proof is
+  `SHouseIntDoor02`: root rotation −90°, placed heading 270°. Composing both makes the door
+  edge-on; Skyrim draws it flush in the north-facing arch. The same correction restores the
+  Temple's pier and continuous floor while ordinary back-face culling remains enabled.
 - **Persistent refs.** Exterior doors live in the worldspace persistent cell, which **masquerades as
   grid (0,0)** — they cannot be identified by cell record (and that masquerade is why the ring test
   admits only non-persistent refs from neighbour cells). viewprobe collects refs by their own
@@ -186,11 +192,12 @@ gitignored for the same reason: probe transcripts name the plugins of whatever l
   bounds — the 3×3 ring by default, the target cell alone under `--no-ring-refs`.
 - **Markers** are classified from the record's Is-Marker header flag (`0x00800000`) ONLY — the
   engine's own don't-render rule. Name heuristics (*marker* EditorID or model path) are wrong in
-  both directions and were removed 2026-08-28: `Markers\BlackPlane01.nif` is the vanilla
-  gap-sealing black plane (record flags 0, real lit geometry — the same job as the light-blocking
-  shadow planes above) and dropping it as a marker opens sky-coloured holes at floor seams, while
-  the CK-only marker meshes need no name rule at all — they contain zero drawable shapes, or a
-  single effect-shader shape the per-shape unshadeable filter already drops.
+  both directions and were removed 2026-08-28. `Markers\BlackPlane01.nif` is an unflagged,
+  drawable opaque plane (one shape, two triangles), so its path is not evidence that the engine
+  hides it. The earlier claim that these refs are floor-gap sealers was refuted by the in-game
+  Temple shot: the game floor is continuously textured, and removing the erroneous NIF root
+  transforms—not retaining black planes—closes the renderer's bands. Flag-only classification
+  remains right; the old explanation of this particular asset does not.
 - **Runtime enable state.** A ref with an XESP enable parent takes the PARENT's state (XOR the
   opposite-of-parent flag), chains followed, the player ref (ID 0x14) always enabled — the ref's
   own initially-disabled flag is CK bookkeeping, not the runtime answer (parent = player +
@@ -198,7 +205,9 @@ gitignored for the same reason: probe transcripts name the plugins of whatever l
   it disables are dropped even when their own flag is clear. Every ref the scene drops is
   accounted for in ONE console block (disabled via enable parent / own flag / deleted / no
   model-bearing base) — a silent category is how a render missing a third of its content once
-  read as fully accounted for.
+  read as fully accounted for. This is a record-derived runtime estimate. The Temple census
+  (`1,257` parent-disabled refs, none admitted) has not been independently toggled or observed in
+  game, so it is accounting evidence, not an in-game proof that every one stays disabled.
 - **A profile-local `Skyrim.ini` is REQUIRED** in each profile — archive discovery reads its
   `[Archive]` lists. Without it the base-game texture BSAs are invisible and renders silently lose
   all textures.
@@ -741,6 +750,18 @@ cannot find a bug in a term common to every variant.
 
 ## Fixed defects worth remembering
 
+**Placed NIF root transforms were composed twice in effect** (fixed 2026-08-29). The shared
+`NifMeshBuilder` correctly returns geometry with the full NIF node chain applied for its portrait
+renderer, but viewprobe fed that root-composed geometry into REFR placement. Skyrim places world
+objects from the geometry below the root. On the Temple proof case this turned
+`SHouseIntDoor02`'s −90° root plus its 270° REFR heading into an edge-on door, rotated modular
+architecture away from its frame, exposed back faces that normal culling removed, and opened
+floor bands. viewprobe now inverses the root transform before applying the REFR transform. Three
+game captures close the claim: the original wolf-head camera now has the solid left pier,
+continuous floor and framed door; a south-side camera retains the wall's authored front; and the
+junction camera now sees the same closed door head-on as the game. Broad two-sided rendering was
+diagnostic only and is not part of the fix.
+
 **The compare stitch was darkening every panel.** `--compare` writes three panel PNGs and then
 composites them onto a black canvas. ImageSharp honours the source alpha, and the panels' alpha was
 the shader's, not 255 — most of the foreground came back around alpha 50, alpha-blended canopy at 0.
@@ -753,12 +774,12 @@ the game was composited as ordinary alpha blending; invisible on solid geometry,
 
 **The marker name heuristics swallowed real geometry** (fixed 2026-08-28). "Marker" in an EditorID
 or model path classified the base as an editor marker, which silently dropped every
-`Markers\BlackPlane01.nif` ref — the vanilla black plane mods use to seal floor seams and openings
-— so interiors built over a void showed sky-blue bands at every seam, from legal standing
-positions. The initially-disabled diagnosis this suggested was a red herring: enable-parent
-evaluation (added in the same pass) proved the dropped-as-disabled refs were all *genuinely*
-permanently disabled, and the holes were the marker filter's. See *Markers* above for the
-evidence-based rule that replaced the heuristics.
+`Markers\BlackPlane01.nif` ref despite its clear lack of a marker flag and its real drawable geometry.
+Replacing the name rule with the Is-Marker header flag is still correct. The accompanying causal
+story was not: the in-game Temple floor has no black seam bands, and the holes vanished only when
+placed NIF root transforms were corrected. Likewise, enable-parent evaluation showed what the
+records imply but did not prove the state of all dropped refs in the running game. See *Markers*
+and *Runtime enable state* above for the narrower claims that the evidence supports.
 
 **Only the target cell's objects loaded** (fixed 2026-08-28). Neighbouring exterior cells
 contributed terrain and nothing else, so eye-level shots showed near objects, void, then distant
