@@ -512,7 +512,11 @@ static class TexturedScene
                 // copied): post-cull, post-filter — a hover names only what is drawn.
                 if (interactive is not null)
                 {
-                    var ps = new PickShape { Kind = PickKind.Ref, Verts = wp, Tris = tri, Ref = r };
+                    // Mesh comes along for the live height clip: the bounds just computed cover
+                    // the DRAWN triangles only — post-cull, post --cull-above — so the band test
+                    // costs nothing extra and cannot disagree with what is on screen. Viewer Y
+                    // IS Skyrim z (YUp = (x, z, −y)), so Min.Y/Max.Y are the span it needs.
+                    var ps = new PickShape { Kind = PickKind.Ref, Verts = wp, Tris = tri, Ref = r, Mesh = mesh };
                     ps.ComputeBounds();
                     interactive.PickShapes.Add(ps);
                 }
@@ -794,8 +798,14 @@ static class TexturedScene
         }
 
         bool wantNav = (navTris.Count > 0 || redTris.Count > 0) && navMode != "off";
-        bool wireMode = navMode is "wire" or "both";
-        bool fillMode = navMode is "filled" or "both";
+        // --interactive builds BOTH the sheet and the wire whatever --nav asked for, so the N
+        // key switches display modes by flipping visibility instead of rebuilding the scene.
+        // It costs the wire's classification pass on a run that only asked for a sheet; that is
+        // the price of an instant toggle, and it is paid once at startup.
+        bool bothForFly = interactive is not null && wantNav;
+        bool wireMode = bothForFly || navMode is "wire" or "both";
+        bool fillMode = bothForFly || navMode is "filled" or "both";
+        if (interactive is not null) interactive.NavMode = wantNav ? navMode : "off";
         var palette = new (string Name, Vector4 Color)[]
         {
             ("green",   new Vector4(0.05f, 0.85f, 0.30f, 1f)),
@@ -879,18 +889,25 @@ static class TexturedScene
         // annotation, and it is supposed to be hidden by whatever covers it.
         if (wantNav && fillMode)
         {
-            float alpha = navMode == "both" ? 0.16f : 0.35f;
+            // The sheet's alpha is baked into its vertex colours, so it cannot be re-tuned once
+            // uploaded. Under --interactive it is therefore baked at the FILLED value and the
+            // loop scales MaterialAlpha to land on whichever mode's pixels are wanted (the
+            // shader multiplies the two, so "both" is not 0.16 of this sheet but 0.16²/0.35 —
+            // see InteractiveViewer.FillAlpha).
+            float alpha = interactive is not null ? 0.35f : navMode == "both" ? 0.16f : 0.35f;
             if (navTris.Count > 0)
             {
                 var m0 = BuildFill(navTris, new Vector4(healthy.X, healthy.Y, healthy.Z, alpha), "navmesh-fill");
                 m0.IsDecal = true;             // same insertion-ordered channel, added after the ground
                 renderer.AddMesh(m0); meshes.Add(m0);
+                interactive?.NavFill.Add(m0);
             }
             if (redTris.Count > 0)
             {
                 var m1 = BuildFill(redTris, new Vector4(0.95f, 0.15f, 0.08f, MathF.Min(0.55f, alpha + 0.2f)), "navmesh-fill-red");
                 m1.IsDecal = true;
                 renderer.AddMesh(m1); meshes.Add(m1);
+                interactive?.NavFillRed.Add(m1);
             }
         }
 
@@ -1064,26 +1081,29 @@ static class TexturedScene
         // buffer happened to receive last, so a sphere shows its far hemisphere and shades as if
         // lit from behind. Culling the back faces makes the near hemisphere the only candidate.
         // Ribbons are single-sided-by-accident and must NOT be culled.
-        var layers = new List<(float[] Data, bool DepthTested, bool CullBack)>();
+        // Nav tags the layer so the interactive overlay pass can drop the navmesh wire without
+        // touching anything else on it: 0 = not navmesh, 1 = healthy wire, 2 = the finding's
+        // wire. The static path never reads it — its mode was decided before the build.
+        var layers = new List<(float[] Data, bool DepthTested, bool CullBack, int Nav)>();
         // Highlight halos: the SAME hull buffer is drawn twice — solid depth-tested rim here,
         // then again as the translucent Greater-pass ghost (see the draw loop).
         float[]? haloData = haloTris.Count > 0 ? haloTris.ToArray() : null;
-        if (haloData is not null) layers.Add((haloData, true, true));
+        if (haloData is not null) layers.Add((haloData, true, true, 0));
         if (wantNav)
         {
             if (wireMode && navTris.Count > 0)
             {
                 var (s, d) = BuildWire(navTris, healthy, 2.2f);
-                if (s.Count > 0) layers.Add((s.ToArray(), true, false));
-                if (d.Count > 0) layers.Add((d.ToArray(), false, false));
+                if (s.Count > 0) layers.Add((s.ToArray(), true, false, 1));
+                if (d.Count > 0) layers.Add((d.ToArray(), false, false, 1));
             }
             // The finding is ALWAYS outlined, wider than the healthy wire, in every mode that
             // draws navmesh at all.
             if (redTris.Count > 0)
             {
                 var (s, d) = BuildWire(redTris, red, 3.4f);
-                if (s.Count > 0) layers.Add((s.ToArray(), true, false));
-                if (d.Count > 0) layers.Add((d.ToArray(), false, false));
+                if (s.Count > 0) layers.Add((s.ToArray(), true, false, 2));
+                if (d.Count > 0) layers.Add((d.ToArray(), false, false, 2));
             }
             if (runVisible + runUnder + runHidden > 0)
             {
@@ -1127,7 +1147,7 @@ static class TexturedScene
             Edge(cb.X0, cb.Y1, cb.X0, cb.Y0);
             if (outline.Count > 0)
             {
-                layers.Add((outline.ToArray(), false, false));
+                layers.Add((outline.ToArray(), false, false, 0));
                 Console.WriteLine($"   cell outline: white dashes around {cb.X0:0},{cb.Y0:0} .. {cb.X1:0},{cb.Y1:0}");
             }
         }
@@ -1146,7 +1166,7 @@ static class TexturedScene
                 float d = MathF.Max(1f, Vector3.Distance(v, cam.Eye));
                 Overlay.Sphere(spheres, YUp(v + lift), Math.Clamp(d * 0.00275f, 1f, 45f), dc);
             }
-            layers.Add((spheres.ToArray(), false, true));
+            layers.Add((spheres.ToArray(), false, true, 0));
             Console.WriteLine($"   nav diff: {diffVerts.Count} vertex sphere(s) — vertices this version has and the other does not");
         }
 
@@ -1184,7 +1204,7 @@ static class TexturedScene
                     Overlay.Vertex(rim, i1, rimColour, Vector3.Zero);
                 }
             }
-            layers.Add((rim.ToArray(), false, false));
+            layers.Add((rim.ToArray(), false, false, 0));
             Console.WriteLine($"   npc pucks: {npcActors.Count} disc(s) + always-visible rim(s), one identity colour per actor");
         }
 
@@ -1220,8 +1240,13 @@ static class TexturedScene
                 GL.DepthMask(false);
                 int alphaLoc = GL.GetUniformLocation(wireProg, "u_alpha");
                 GL.Uniform1(alphaLoc, 1.0f);
-                foreach (var (data, depthTested, cullBack) in layers)
+                foreach (var (data, depthTested, cullBack, nav) in layers)
                 {
+                    // Live navmesh display mode: the flags are read HERE, every frame, so the N
+                    // key changes the next frame and nothing is rebuilt. Null (static path) means
+                    // draw everything the build decided to make.
+                    if (nav == 1 && interactive is { ShowNavWire: false }) continue;
+                    if (nav == 2 && interactive is { ShowNavRedWire: false }) continue;
                     if (depthTested) { GL.Enable(EnableCap.DepthTest); GL.DepthFunc(DepthFunction.Lequal); }
                     else GL.Disable(EnableCap.DepthTest);
                     if (cullBack) { GL.Enable(EnableCap.CullFace); GL.CullFace(CullFaceMode.Back); }

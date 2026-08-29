@@ -34,6 +34,15 @@ namespace ViewProbe;
 // a hit on the transparent part of a leaf texture still reports the leaf's ref. NPC actors are
 // not pickable (their CPU-side geometry lives in the character pipeline's VMs); they already
 // carry captions and pucks.
+//
+// WHAT THE LOOP CHANGES, AND WHAT IT CANNOT. Three things are live: the navmesh DISPLAY mode
+// (N), a height band that hides whole static shapes (the clip keys), and the flight feel
+// (speed, look sensitivity). All three are visibility or input state — none of them rebuilds
+// geometry, so none can change what a static re-render of the same pose produces. The clip is
+// therefore SHAPE-granular, not triangle-granular: a shape is hidden only when it lies wholly
+// outside the band, so a wall spanning the cut keeps standing whole. --cull-above remains the
+// triangle-exact knife, and it runs at build time; the clip keys print their band as a
+// --cull-above line so a slice found by flying can be cut properly in the deliverable.
 
 enum PickKind { Ref, Navmesh, Terrain }
 
@@ -50,6 +59,11 @@ sealed class PickShape
     public FormKey NavKey;                             // Kind==Navmesh
     public string TerrainTex = "";                     // Kind==Terrain ("" = untextured fallback)
     public Vector3 Min, Max;
+    /// <summary>Kind==Ref: the GlMesh these triangles were uploaded as, so the height clip can
+    /// hide it and the ray can then SKIP it. A pick that names a shape the clip just removed
+    /// would have the HUD contradicting the picture. Null for navmesh and terrain, which the
+    /// clip never touches.</summary>
+    public GlMesh? Mesh;
 
     public void ComputeBounds()
     {
@@ -60,8 +74,9 @@ sealed class PickShape
 }
 
 /// <summary>Everything the fly-through needs that the scene build cannot derive itself:
-/// the window, identity formatters, and the annotation-layer identities. PickShapes is an
-/// OUTPUT of the build — TexturedScene fills it while baking the scene.</summary>
+/// the window, identity formatters, and the annotation-layer identities. PickShapes and
+/// NavFill/NavFillRed are OUTPUTS of the build — TexturedScene fills them while baking the
+/// scene, and the loop drives them live.</summary>
 sealed class InteractiveOptions
 {
     public required GameWindow Window;
@@ -73,6 +88,27 @@ sealed class InteractiveOptions
     public HashSet<FormKey> RedNav = new();                // conflict-red navmeshes, tagged in reports
     public List<(FormKey Key, int Tri, Vector3 A, Vector3 B, Vector3 C)> NavTris = new();  // Skyrim space
     public List<PickShape> PickShapes = new();             // filled by the scene build
+
+    // ---- navmesh display, switched live by N --------------------------------------------
+    // Under --interactive the build makes BOTH the sheet and the wire whatever --nav asked
+    // for (see TexturedScene), so switching between them costs a visibility flip, not a
+    // rebuild. NavMode is the ENTRY mode — what the window opens showing — and stays "off"
+    // when the run carries no navmesh at all, which is what tells N there is nothing to cycle.
+    public string NavMode = "off";                         // off | filled | wire | both
+    public List<GlMesh> NavFill = new();                   // healthy translucent sheet
+    public List<GlMesh> NavFillRed = new();                // the finding's sheet
+    public bool ShowNavWire = true;                        // read per frame by the overlay draw
+    public bool ShowNavRedWire = true;
+
+    // The height clip needs no list of its own: a static's PickShape already carries its mesh
+    // and, in Min.Y/Max.Y, the Skyrim-z span of exactly the triangles that were drawn. Statics
+    // only, like --cull-above — terrain, navmesh, actors and the overlay are never clipped,
+    // because the subject of the picture must not be cullable by the knife that exists to
+    // reveal it.
+
+    // ---- flight feel, seeded from the command line ----------------------------------------
+    public float FlySpeed = 600f;                          // u/s, before the shift/ctrl multiplier
+    public float LookSens = 0.15f;                         // degrees of turn per pixel of mouse
 }
 
 static class InteractiveViewer
@@ -113,7 +149,9 @@ static class InteractiveViewer
         float yaw = (float.RadiansToDegrees(MathF.Atan2(d0.X, d0.Y)) + 360f) % 360f;
         float pitch = float.RadiansToDegrees(MathF.Atan2(-d0.Z, MathF.Max(MathF.Sqrt(d0.X * d0.X + d0.Y * d0.Y), 1e-3f)));
         float fov = cam.FovDeg;
-        float speed = 600f;                     // u/s; scroll adjusts, shift x5, ctrl x0.2
+        float speed = opt.FlySpeed;             // u/s; scroll adjusts, shift x5, ctrl x0.2
+        float lookSens = opt.LookSens;          // degrees per pixel; , and . adjust
+        const float DefaultSens = 0.15f;        // only so the HUD can stay quiet at the default
 
         var camera = new OrbitCamera
         {
@@ -144,8 +182,84 @@ static class InteractiveViewer
         string Pose() => $"eye {eye.X:0.##},{eye.Y:0.##},{eye.Z:0.##} yaw {yaw:0.#}° pitch {pitch:0.#}° fov {fov:0.#}°";
         string PoseArgs() => $"--eye {eye.X:0.##},{eye.Y:0.##},{eye.Z:0.##} --yaw {yaw:0.#} --pitch {pitch:0.#} --fov {fov:0.#}";
 
+        // ---- navmesh display mode (N cycles) ------------------------------------------------
+        // The sheet and the wire are both resident; the mode decides which of them draws. The
+        // sheet's alpha is the fiddly part: the material shader multiplies the baked VERTEX
+        // colour alpha by MaterialAlpha, and the static path bakes the SAME number into both —
+        // so a mode's on-screen alpha is its value SQUARED. The sheet here is baked once, at the
+        // "filled" value, which makes MaterialAlpha = target²/baked the setting that reproduces
+        // another mode's pixels exactly rather than merely approximately.
+        static float FillAlpha(float target, float baked) => target * target / baked;
+        bool hasNav = opt.NavMode != "off";
+        string navMode = opt.NavMode;
+        void ApplyNav()
+        {
+            bool fill = navMode is "filled" or "both";
+            bool wire = navMode is "wire" or "both";
+            float healthy = fill ? FillAlpha(navMode == "both" ? 0.16f : 0.35f, 0.35f) : 0f;
+            float finding = fill ? FillAlpha(navMode == "both" ? 0.36f : 0.55f, 0.55f) : 0f;
+            foreach (var m in opt.NavFill) { m.IsRendering = fill; m.MaterialAlpha = healthy; }
+            foreach (var m in opt.NavFillRed) { m.IsRendering = fill; m.MaterialAlpha = finding; }
+            opt.ShowNavWire = wire;
+            // The finding is outlined in EVERY mode that draws navmesh at all — the static
+            // path's rule, kept here so a mode switch cannot lose the thing being examined.
+            opt.ShowNavRedWire = navMode != "off";
+        }
+        ApplyNav();
+
+        // ---- live height clip ([ ] ceiling, ; ' floor, \ off) -------------------------------
+        // A shape is hidden when its whole z-span sits outside the band. Both ends start
+        // DISABLED and, on first touch, at the camera's own z — "clip off everything above my
+        // head" is then one keypress from wherever the flight has reached, which is the whole
+        // reason the control exists.
+        float? clipLo = null, clipHi = null;
+        int clipHidden = 0;
+        const float ClipRate = 512f;            // u/s while held; the shift/ctrl multiplier applies
+        var clippable = opt.PickShapes.Where(p => p.Mesh is not null).ToArray();
+        void ApplyClip()
+        {
+            float lo = clipLo ?? float.NegativeInfinity, hi = clipHi ?? float.PositiveInfinity;
+            int hidden = 0;
+            foreach (var s in clippable)
+            {
+                bool show = s.Max.Y >= lo && s.Min.Y <= hi;     // viewer Y IS Skyrim z
+                s.Mesh!.IsRendering = show;
+                if (!show) hidden++;
+            }
+            clipHidden = hidden;
+        }
+        string ClipLabel() =>
+            (clipLo, clipHi) switch
+            {
+                (null, null) => "off",
+                ({ } lo, null) => $"z >= {lo:0} ({clipHidden:N0} hidden)",
+                (null, { } hi) => $"z <= {hi:0} ({clipHidden:N0} hidden)",
+                ({ } lo, { } hi) => $"z {lo:0}..{hi:0} ({clipHidden:N0} hidden)",
+            };
+        void PrintClip()
+        {
+            if (clipLo is null && clipHi is null) { Console.WriteLine("   clip: off — every static shape drawn"); return; }
+            Console.WriteLine($"   clip: {ClipLabel()} of {clippable.Length:N0} static shape(s)"
+                            + (clipHi is { } ch2 ? $"  (static equivalent: --cull-above {ch2:0} — triangle-exact, unlike this shape-level band)" : ""));
+        }
+
         // ---- hover picking -----------------------------------------------------------------
         (PickShape Shape, int LocalTri, float T, Vector3 HitY)? hover = null;
+        // The locked pick: what LMB pinned to the HUD, and the line it rendered to at the moment
+        // of the click. Non-null suspends hovering entirely.
+        (PickShape Shape, int LocalTri, float T, Vector3 HitY)? locked = null;
+        string lockedLine = "";
+        // A lock outlives a mode switch, and it should — it says "keep showing me this one". But
+        // the clip or N can then hide the very thing it names, and a readout for something not
+        // on screen has to SAY so rather than quietly keep asserting it.
+        bool Drawn(PickShape s) => s.Mesh is not { IsRendering: false }
+                                && !(s.Kind == PickKind.Navmesh && navMode == "off");
+        string LockedHud() => locked is { } l && !Drawn(l.Shape)
+            ? lockedLine + "   [not drawn now]" : lockedLine;
+        // Set when something OTHER than the mouse changed what is under the cursor, so a hover
+        // answer refreshes even with the mouse held still — hold [ until a ceiling melts away
+        // and the bar must stop naming that ceiling.
+        bool pickDirty = false;
 
         (PickShape Shape, int LocalTri, float T, Vector3 HitY)? PickAt(float mx, float my)
         {
@@ -159,7 +273,15 @@ static class InteractiveViewer
             // soon as the best hit is nearer than the next box.
             var candidates = new List<(PickShape S, float T0)>();
             foreach (var s in opt.PickShapes)
+            {
+                // The ray may only hit what the frame is actually SHOWING. A shape the height
+                // clip removed, or navmesh with the display off, is not under the cursor as far
+                // as the person looking at the window is concerned — naming it would put the HUD
+                // in contradiction with the picture.
+                if (s.Mesh is { IsRendering: false }) continue;
+                if (s.Kind == PickKind.Navmesh && navMode == "off") continue;
                 if (RayAabb(ro, rd, s.Min, s.Max, out var t0)) candidates.Add((s, t0));
+            }
             candidates.Sort((a, b) => a.T0.CompareTo(b.T0));
 
             (PickShape Shape, int LocalTri, float T, Vector3 HitY)? best = null;
@@ -175,12 +297,16 @@ static class InteractiveViewer
             return best;
         }
 
-        string HoverLine((PickShape Shape, int LocalTri, float T, Vector3 HitY)? hit)
+        // fromEye adds the distance to the hit, which is only true for the camera that did the
+        // picking — a LOCKED line outlives that camera, so it reports the hit POINT and drops
+        // the range rather than displaying a number that quietly goes stale as you fly away.
+        string HoverLine((PickShape Shape, int LocalTri, float T, Vector3 HitY)? hit, bool fromEye = true)
         {
             if (hit is not { } hv) return "hover: nothing under the cursor (hold RMB to look, WASD to fly)";
             var ws = new Vector3(hv.HitY.X, -hv.HitY.Z, hv.HitY.Y);   // Y-up back to Skyrim
             var s = hv.Shape;
-            string tail = $" — hit {ws.X:0},{ws.Y:0},{ws.Z:0}, {hv.T:0} u";
+            string tail = fromEye ? $" — hit {ws.X:0},{ws.Y:0},{ws.Z:0}, {hv.T:0} u"
+                                  : $" — at {ws.X:0},{ws.Y:0},{ws.Z:0}";
             switch (s.Kind)
             {
                 case PickKind.Ref:
@@ -231,6 +357,13 @@ static class InteractiveViewer
         // ---- HUD: a caption-style bar at the top of the frame ------------------------------
         // Same visual language as the burned-in PNG caption (dark bar, bold white text), drawn
         // as a textured quad. Rebuilt only when its text or the window width changes.
+        //
+        // SIZE. 30 px — twice the 15 px the PNG caption uses at 1280 wide. The bar is read at a
+        // glance while flying, from further back than a saved image is, and a FormID at 15 px on
+        // a 1440-wide window was not legible. Because the text is now big enough to run off the
+        // edge (a mesh path is long), the bar WRAPS and grows to fit instead of clipping, which
+        // is why its height is computed per rebuild rather than fixed.
+        const float HudFontPx = 30f, HudLineH = 44f, HudPadX = 12f, HudPadY = 9f;
         int hudProg = HudShader();
         int hudVao = GL.GenVertexArray();                      // attribute-less draw still needs a VAO
         int hudTex = GL.GenTexture();
@@ -239,26 +372,61 @@ static class InteractiveViewer
         GL.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMagFilter, (int)TextureMagFilter.Linear);
         Font? hudFont = null;
         foreach (var famName in new[] { "Segoe UI", "Arial", "Verdana" })
-            if (SystemFonts.TryGet(famName, out var fam)) { hudFont = fam.CreateFont(15f, FontStyle.Bold); break; }
+            if (SystemFonts.TryGet(famName, out var fam)) { hudFont = fam.CreateFont(HudFontPx, FontStyle.Bold); break; }
         if (hudFont is null)
-            foreach (var fam in SystemFonts.Families) { hudFont = fam.CreateFont(15f, FontStyle.Bold); break; }
+            foreach (var fam in SystemFonts.Families) { hudFont = fam.CreateFont(HudFontPx, FontStyle.Bold); break; }
         string hudLine1 = "hover: (free the cursor and point at an object; RMB-drag to look)";
         string hudLine2 = "";
         string hudBuilt = "";
-        int hudBuiltW = 0, hudBarH = 10 + 22 * 2;
+        int hudBuiltW = 0, hudBarH = (int)(HudPadY * 2 + HudLineH * 2);
+
+        // Greedy word wrap against the real advance width, with a per-character fallback for a
+        // single token wider than the bar — which is the common case, not a corner one: a mesh
+        // path has no spaces in it.
+        List<string> WrapLine(string text, float maxWidth)
+        {
+            var outLines = new List<string>();
+            if (hudFont is null) return outLines;
+            var to = new TextOptions(hudFont);
+            float Width(string s) => TextMeasurer.MeasureAdvance(s, to).Width;
+            var cur = "";
+            foreach (var word in text.Split(' '))
+            {
+                var probe = cur.Length == 0 ? word : cur + " " + word;
+                if (Width(probe) <= maxWidth) { cur = probe; continue; }
+                if (cur.Length > 0) { outLines.Add(cur); cur = ""; }
+                if (Width(word) <= maxWidth) { cur = word; continue; }
+                foreach (var ch in word)
+                {
+                    if (Width(cur + ch) > maxWidth && cur.Length > 0) { outLines.Add(cur); cur = ""; }
+                    cur += ch;
+                }
+            }
+            if (cur.Length > 0) outLines.Add(cur);
+            return outLines.Count > 0 ? outLines : new List<string> { "" };
+        }
+
         void RebuildHud(int width)
         {
             if (hudFont is null || width <= 0) return;
             string key = hudLine1 + "\n" + hudLine2;
             if (key == hudBuilt && width == hudBuiltW) return;
             hudBuilt = key; hudBuiltW = width;
+            float avail = MathF.Max(32f, width - HudPadX * 2);
+            var wrapped1 = WrapLine(hudLine1, avail);
+            var wrapped2 = WrapLine(hudLine2, avail);
+            hudBarH = (int)(HudPadY * 2 + HudLineH * (wrapped1.Count + wrapped2.Count));
             using var img = new Image<Rgba32>(width, hudBarH);
             var f = hudFont;
             img.Mutate(x =>
             {
                 x.Fill(SixLabors.ImageSharp.Color.FromRgba(8, 10, 14, 200), new SixLabors.ImageSharp.RectangleF(0, 0, width, hudBarH));
-                x.DrawText(hudLine1, f, SixLabors.ImageSharp.Color.White, new SixLabors.ImageSharp.PointF(12f, 7f));
-                x.DrawText(hudLine2, f, SixLabors.ImageSharp.Color.FromRgb(200, 205, 215), new SixLabors.ImageSharp.PointF(12f, 7f + 22f));
+                for (int i = 0; i < wrapped1.Count; i++)
+                    x.DrawText(wrapped1[i], f, SixLabors.ImageSharp.Color.White,
+                               new SixLabors.ImageSharp.PointF(HudPadX, HudPadY + HudLineH * i));
+                for (int j = 0; j < wrapped2.Count; j++)
+                    x.DrawText(wrapped2[j], f, SixLabors.ImageSharp.Color.FromRgb(200, 205, 215),
+                               new SixLabors.ImageSharp.PointF(HudPadX, HudPadY + HudLineH * (wrapped1.Count + j)));
             });
             var px = new byte[width * hudBarH * 4];
             img.CopyPixelDataTo(px);
@@ -320,10 +488,15 @@ static class InteractiveViewer
 
         void PrintHelp()
         {
-            Console.WriteLine("   fly controls: WASD move (W/S along the view), E/Space up, Q/C down, "
-                            + "hold RMB + mouse to look, scroll = speed (shift x5, ctrl x0.2)");
-            Console.WriteLine("   hover = identify under cursor (HUD), LMB click = full detail to console, "
-                            + "P = print --eye/--yaw/--pitch, F12 = save PNG, H/F1 = this help, Esc = quit");
+            Console.WriteLine("   fly:    WASD move (W/S along the view), E/Space up, Q/C down, hold RMB + mouse to look");
+            Console.WriteLine($"   feel:   scroll = fly speed (now {speed:0} u/s), , and . = look sensitivity (now {lookSens:0.000} deg/px); "
+                            + "shift x5, ctrl x0.2 on every rate");
+            Console.WriteLine("   pick:   hover identifies under the cursor (HUD); LMB LOCKS that readout and prints full "
+                            + "detail; LMB again unlocks");
+            Console.WriteLine($"   nav:    N cycles the navmesh display off -> filled -> wire -> both{(hasNav ? $" (now {navMode})" : " — this run has none")}");
+            Console.WriteLine($"   clip:   [ and ] move the CEILING, ; and ' move the FLOOR (first touch starts at the camera's z), "
+                            + $"\\ = clips off (now {ClipLabel()})");
+            Console.WriteLine("   out:    P = print --eye/--yaw/--pitch, F12 = save PNG, H/F1 = this help, Esc = quit");
         }
 
         // ---- window setup and the loop -----------------------------------------------------
@@ -336,7 +509,11 @@ static class InteractiveViewer
         Console.WriteLine($"   interactive: {opt.PickShapes.Count:N0} pickable shape(s) "
                         + $"({opt.PickShapes.Count(p => p.Kind == PickKind.Ref):N0} ref, "
                         + $"{opt.PickShapes.Count(p => p.Kind == PickKind.Navmesh):N0} navmesh, "
-                        + $"{opt.PickShapes.Count(p => p.Kind == PickKind.Terrain):N0} terrain)");
+                        + $"{opt.PickShapes.Count(p => p.Kind == PickKind.Terrain):N0} terrain)"
+                        + $"; {clippable.Length:N0} static shape(s) clippable by height");
+        if (hasNav)
+            Console.WriteLine($"   navmesh display: {navMode} (entry mode) — sheet and wire are BOTH resident, "
+                            + "so N switches between them with no rebuild");
         PrintHelp();
 
         // Headless smoke knobs: VP_FLY_FRAMES=N renders N frames then saves a capture and
@@ -352,9 +529,47 @@ static class InteractiveViewer
         }
         int frameCount = 0;
 
+        // The same headless family, extended to the three things the keys now drive. Without
+        // these the new controls could only be exercised by hand, and the HUD — which the F12
+        // capture deliberately excludes — could not be seen in a test at all.
+        bool autoLock = Environment.GetEnvironmentVariable("VP_FLY_LOCK") == "1";
+        bool hudInShot = Environment.GetEnvironmentVariable("VP_FLY_HUD") == "1";
+        if (Environment.GetEnvironmentVariable("VP_FLY_NAV") is { Length: > 0 } navSpec)
+        {
+            string want = navSpec.ToLowerInvariant();
+            if (want is not ("off" or "filled" or "wire" or "both"))
+                Console.WriteLine($"   [auto] VP_FLY_NAV '{want}' is not off|filled|wire|both — ignored");
+            else if (!hasNav && want != "off")
+                Console.WriteLine($"   [auto] VP_FLY_NAV={want} ignored: this run carries no navmesh");
+            else { navMode = want; ApplyNav(); Console.WriteLine($"   [auto] nav display: {navMode}"); }
+        }
+        if (Environment.GetEnvironmentVariable("VP_FLY_CLIP") is { Length: > 0 } clipSpec)
+        {
+            // "lo,hi"; either side may be empty for "that end off" — VP_FLY_CLIP=",2048" is a
+            // ceiling with no floor, which is the top-floor case.
+            var p = clipSpec.Split(',');
+            if (p.Length != 2) Console.WriteLine($"   [auto] VP_FLY_CLIP '{clipSpec}' is not \"lo,hi\" — ignored");
+            else
+            {
+                clipLo = float.TryParse(p[0], out var lo) ? lo : null;
+                clipHi = float.TryParse(p[1], out var hi) ? hi : null;
+                if (clipLo is { } l && clipHi is { } h && l > h) (clipLo, clipHi) = (h, l);
+                ApplyClip();
+                PrintClip();
+            }
+        }
+
         var titleClock = Stopwatch.StartNew();
         var pickClock = Stopwatch.StartNew();
         OpenTK.Mathematics.Vector2 lastPickPos = new(-1000f, -1000f);
+
+        // VP_FLY_FRAMES is a TEST, and a test must not read the machine's live keyboard and
+        // mouse. It did, and the window takes focus when it opens, so two identical smoke runs
+        // captured DIFFERENT frames — measured 2026-08-28: one drifted 138 u in x and 218 u in
+        // z before frame 30, because whatever was being typed at the desk went into the window.
+        // Under VP_FLY_FRAMES the loop is therefore input-deaf: the camera stays exactly where
+        // the command line put it, and a capture is a function of the arguments alone.
+        bool autoRun = autoFrames > 0;
 
         gw.UpdateFrame += e =>
         {
@@ -362,12 +577,23 @@ static class InteractiveViewer
             var ms = gw.MouseState;
             float dt = (float)e.Time;
 
+            if (autoRun)
+            {
+                SyncCamera();
+                if (locked is not null) hudLine1 = LockedHud();
+                hudLine2 = $"{Pose()} — speed {speed:0} u/s"
+                         + (hasNav ? $" — nav {navMode}" : "")
+                         + (clipLo is not null || clipHi is not null ? $" — clip {ClipLabel()}" : "")
+                         + " — H help";
+                return;
+            }
+
             bool looking = ms.IsButtonDown(MouseButton.Right);
             gw.CursorState = looking ? CursorState.Grabbed : CursorState.Normal;
             if (looking)
             {
-                yaw = (yaw + ms.Delta.X * 0.15f + 360f) % 360f;
-                pitch = Math.Clamp(pitch + ms.Delta.Y * 0.15f, -89f, 89f);
+                yaw = (yaw + ms.Delta.X * lookSens + 360f) % 360f;
+                pitch = Math.Clamp(pitch + ms.Delta.Y * lookSens, -89f, 89f);
             }
 
             float mult = kb.IsKeyDown(Keys.LeftShift) || kb.IsKeyDown(Keys.RightShift) ? 5f
@@ -384,6 +610,57 @@ static class InteractiveViewer
             if (kb.IsKeyDown(Keys.Q) || kb.IsKeyDown(Keys.C)) eye.Z -= step;
             if (MathF.Abs(ms.ScrollDelta.Y) > 0f)
                 speed = Math.Clamp(speed * MathF.Pow(1.25f, ms.ScrollDelta.Y), 20f, 20000f);
+            // Look sensitivity, on the same 1.25x ladder the scroll uses for speed. Printed on
+            // change: the number that finally feels right is worth carrying to --look-sens.
+            if (kb.IsKeyPressed(Keys.Comma) || kb.IsKeyPressed(Keys.Period))
+            {
+                lookSens = Math.Clamp(lookSens * (kb.IsKeyPressed(Keys.Period) ? 1.25f : 1f / 1.25f), 0.01f, 2f);
+                Console.WriteLine($"   look sensitivity: {lookSens:0.000} deg/px  (--look-sens {lookSens:0.###})");
+            }
+
+            // ---- navmesh display ------------------------------------------------------------
+            if (kb.IsKeyPressed(Keys.N))
+            {
+                if (!hasNav)
+                    Console.WriteLine("   nav: this run carries no navmesh (--nav off, or none in the cell) — nothing to cycle");
+                else
+                {
+                    navMode = navMode switch { "off" => "filled", "filled" => "wire", "wire" => "both", _ => "off" };
+                    ApplyNav();
+                    pickDirty = true;
+                    Console.WriteLine($"   nav: {navMode}"
+                                    + (navMode == "off" ? "  (the finding's outline goes with it)" : ""));
+                }
+            }
+
+            // ---- height clip ----------------------------------------------------------------
+            // Held keys, not taps: sweeping a ceiling through a two-storey interior is hundreds
+            // of units, and one tap per 4 u would be unusable. The first frame a key is down
+            // seeds that end at the camera's own z (?? = "not set yet"), so the gesture is
+            // "stand on the floor you want and hold [".
+            bool ceilDown = kb.IsKeyDown(Keys.LeftBracket), ceilUp = kb.IsKeyDown(Keys.RightBracket);
+            bool floorDown = kb.IsKeyDown(Keys.Semicolon), floorUp = kb.IsKeyDown(Keys.Apostrophe);
+            bool clipDirty = false;
+            if (ceilDown ^ ceilUp)
+            {
+                clipHi ??= eye.Z;
+                clipHi = MathF.Max(clipHi.Value + (ceilUp ? 1f : -1f) * ClipRate * mult * dt,
+                                   clipLo ?? float.NegativeInfinity);
+                clipDirty = true;
+            }
+            if (floorDown ^ floorUp)
+            {
+                clipLo ??= eye.Z;
+                clipLo = MathF.Min(clipLo.Value + (floorUp ? 1f : -1f) * ClipRate * mult * dt,
+                                   clipHi ?? float.PositiveInfinity);
+                clipDirty = true;
+            }
+            if (kb.IsKeyPressed(Keys.Backslash)) { clipLo = clipHi = null; clipDirty = true; PrintClip(); }
+            if (clipDirty) { ApplyClip(); pickDirty = true; }
+            // On release, echo the band — the console is where a number gets copied from, and
+            // --cull-above is what the static deliverable needs.
+            if (kb.IsKeyReleased(Keys.LeftBracket) || kb.IsKeyReleased(Keys.RightBracket)
+             || kb.IsKeyReleased(Keys.Semicolon) || kb.IsKeyReleased(Keys.Apostrophe)) PrintClip();
 
             if (kb.IsKeyPressed(Keys.P))
             {
@@ -396,26 +673,57 @@ static class InteractiveViewer
 
             SyncCamera();
 
+            // ---- hover, and the LOCK ---------------------------------------------------------
+            // Locked, the HUD keeps showing ONE object's identity while the camera moves — which
+            // is the point: reading a FormKey off a wall you are also trying to fly around meant
+            // holding the cursor perfectly still. So picking is suspended while locked (the
+            // readout cannot drift, and the raycast cannot cost anything), and the next LMB
+            // anywhere releases it, hit or miss.
             if (!looking)
             {
-                var mp = gw.MousePosition;
-                bool moved = (mp - lastPickPos).LengthSquared > 4f;
-                if (moved && pickClock.ElapsedMilliseconds > 60)
+                if (locked is null)
                 {
-                    pickClock.Restart();
-                    lastPickPos = mp;
-                    hover = PickAt(mp.X, mp.Y);
-                    hudLine1 = HoverLine(hover);
+                    var mp = gw.MousePosition;
+                    bool moved = (mp - lastPickPos).LengthSquared > 4f;
+                    if ((moved || pickDirty) && pickClock.ElapsedMilliseconds > 60)
+                    {
+                        pickClock.Restart();
+                        pickDirty = false;
+                        lastPickPos = mp;
+                        hover = PickAt(mp.X, mp.Y);
+                        hudLine1 = HoverLine(hover);
+                    }
+                    if (ms.IsButtonPressed(MouseButton.Left) && hover is { } hv)
+                    {
+                        locked = hv;
+                        lockedLine = "LOCKED — " + HoverLine(hv, fromEye: false) + "   (LMB anywhere to unlock)";
+                        hudLine1 = LockedHud();
+                        PrintDetail(hv);
+                    }
                 }
-                if (ms.IsButtonPressed(MouseButton.Left) && hover is { } hv) PrintDetail(hv);
+                else if (ms.IsButtonPressed(MouseButton.Left))
+                {
+                    locked = null; hover = null;
+                    lastPickPos = new OpenTK.Mathematics.Vector2(-1000f, -1000f);   // force the next hover to re-pick
+                    hudLine1 = "unlocked — hover to identify";
+                    Console.WriteLine("   unlocked");
+                }
             }
-            else
+            else if (locked is null)
                 hudLine1 = "looking (release RMB to hover-pick)";
 
-            if (titleClock.ElapsedMilliseconds > 150)
+            if (locked is not null) hudLine1 = LockedHud();
+
+            if (hudLine2.Length == 0 || titleClock.ElapsedMilliseconds > 150)
             {
                 titleClock.Restart();
-                hudLine2 = $"{Pose()} — speed {speed * mult:0} u/s — P pose, F12 capture, H help";
+                // Defaults stay quiet: sensitivity and the clip only take a slot on the bar once
+                // they are no longer at their entry value, so the common line stays one row.
+                hudLine2 = $"{Pose()} — speed {speed * mult:0} u/s"
+                         + (MathF.Abs(lookSens - DefaultSens) > 1e-4f ? $" — look {lookSens:0.000}" : "")
+                         + (hasNav ? $" — nav {navMode}" : "")
+                         + (clipLo is not null || clipHi is not null ? $" — clip {ClipLabel()}" : "")
+                         + " — H help";
             }
         };
 
@@ -428,8 +736,13 @@ static class InteractiveViewer
             var view = camera.GetViewMatrix();
             var proj = camera.GetProjectionMatrix((float)w / h);
             overlayDraw?.Invoke(view, proj);
-            if (wantShot) { wantShot = false; CaptureShot(w, h); if (autoFrames > 0) gw.Close(); }
+            // F12 grabs the frame WITHOUT the HUD — the PNG carries the standard burned caption
+            // instead, so a capture looks like a render and not like a screenshot of a tool.
+            // VP_FLY_HUD=1 moves the grab to after the bar, which is the only way a headless
+            // test can see the bar at all.
+            if (wantShot && !hudInShot) { wantShot = false; CaptureShot(w, h); if (autoFrames > 0) gw.Close(); }
             DrawHud(w, h);
+            if (wantShot && hudInShot) { wantShot = false; CaptureShot(w, h); if (autoFrames > 0) gw.Close(); }
             gw.SwapBuffers();
 
             // Smoke path: run the pick, then request a capture — which the NEXT frame takes at
@@ -440,7 +753,19 @@ static class InteractiveViewer
                 {
                     var hit = PickAt(ap.X, ap.Y);
                     Console.WriteLine($"   [auto] pick at {ap.X:0},{ap.Y:0}: {HoverLine(hit)}");
-                    if (hit is { } hv) PrintDetail(hv);
+                    if (hit is { } hv)
+                    {
+                        PrintDetail(hv);
+                        // VP_FLY_LOCK: the same state LMB produces, so the locked HUD line is
+                        // what a VP_FLY_HUD capture shows.
+                        if (autoLock)
+                        {
+                            locked = hv;
+                            lockedLine = "LOCKED — " + HoverLine(hv, fromEye: false) + "   (LMB anywhere to unlock)";
+                            hudLine1 = LockedHud();
+                            Console.WriteLine("   [auto] locked");
+                        }
+                    }
                 }
                 wantShot = true;
             }

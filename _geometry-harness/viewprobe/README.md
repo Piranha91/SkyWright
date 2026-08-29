@@ -17,7 +17,8 @@ findings they demonstrate) lives with that instance, not here.
 
 - **Project:** `_geometry-harness/viewprobe/`. `Program.cs` (CLI, load-order walk, scene/terrain/nav
   assembly, compare orchestration), `TexturedScene.cs` (GL rendering, captions, adaptive colour),
-  `InteractiveViewer.cs` (the `--interactive` fly-through: window loop, hover picking, HUD).
+  `InteractiveViewer.cs` (the `--interactive` fly-through: window loop, hover picking and the
+  click-lock, the live navmesh-display and height-clip state, HUD).
 - **Rendering library:** `CharacterViewer.Rendering` (project reference, currently an absolute path
   to a sibling checkout). It supplies `NifMeshBuilder` (NIF → Y-up meshes with texture paths),
   `GlRenderer`/`GlMesh`, `GlTextureManager` (DDS load + white fallback), `OrbitCamera`. viewprobe
@@ -89,14 +90,19 @@ findings they demonstrate) lives with that instance, not here.
   line, assigned in `--npc` order.
 - **Interactive fly-through:** `--interactive` (implies textured mode; still needs an eye) opens
   the scene in a visible window instead of saving a PNG — WASD + RMB-mouse to fly, hover to
-  identify what is under the cursor. See *Interactive fly-through* below. Not combinable with
-  `--compare`.
+  identify what is under the cursor. `--fly-speed U` (default 600 u/s) and `--look-sens DEG`
+  (default 0.15° per pixel) set where the flight feel STARTS; both are also adjustable in the
+  window, so these exist so a value that turned out right does not have to be re-dialled every
+  run. Both are refused without `--interactive` rather than silently ignored. See *Interactive
+  fly-through* below. Not combinable with `--compare`.
 - **Dollhouse slice:** `--cull-above Z` drops every STATIC triangle whose vertices all sit above
   that Skyrim z, so an interior top-down shows the storey the actors stand on instead of the roof
   and upper floors over it. Walls spanning the cut keep standing (their lower vertices anchor
   them); terrain, navmesh, NPC actors and the overlay are never sliced. The caption says
   `SLICED above z N` — a render missing its roof must declare it, or the absence reads as a
-  finding. Per-render console line counts what was removed.
+  finding. Per-render console line counts what was removed. This is the BUILD-time, triangle-
+  exact knife; `--interactive` also has a live shape-granular band on the clip keys, and it
+  prints the `--cull-above Z` line for whatever slice flying found.
 
 ### Asking the render questions
 
@@ -127,8 +133,12 @@ all knowledge.
 | `VP_ENABLE_DUMP=1` | every enable-parent group among the loaded refs, with the parent's own state, its chain, and how the children resolve — the check that a "disabled via enable parent" verdict rests on what the data actually states |
 | `VP_DOOR_DEBUG=1` | print each conflict-implicated door's holding cell during the load walk |
 | `VP_CV_VERBOSE=1` | unmute the rendering library's logger |
-| `VP_FLY_FRAMES=N` | `--interactive` smoke knob: render N frames, save a capture, close — the window loop is testable without a hand on the mouse |
+| `VP_FLY_FRAMES=N` | `--interactive` smoke knob: render N frames, save a capture, close — the window loop is testable without a hand on the mouse. It also makes the loop INPUT-DEAF: the window takes focus when it opens, so without this two identical smoke runs captured different frames (measured: one drifted 138 u in x before frame 30). With it, a capture is a function of the arguments alone and repeat runs are byte-identical |
 | `VP_FLY_PICK=x,y` | with `VP_FLY_FRAMES`: run one programmatic pick at those client coordinates and print what it hit — the ray path, testable headlessly |
+| `VP_FLY_LOCK=1` | with `VP_FLY_PICK`: lock the HUD onto what it hit, exactly as `LMB` does |
+| `VP_FLY_NAV=off\|filled\|wire\|both` | set the navmesh display mode before the capture — the `N` key's effect, headlessly |
+| `VP_FLY_CLIP=lo,hi` | set the height clip band before the capture; either side may be empty, so `,2048` is a ceiling with no floor |
+| `VP_FLY_HUD=1` | include the HUD bar in the capture. `F12` deliberately excludes it, so this is the only way a test can see the bar — at the cost of the burned caption overlapping its first line |
 
 ---
 
@@ -212,8 +222,8 @@ gitignored for the same reason: probe transcripts name the plugins of whatever l
 
 - Textured first-person rendering from the exact MO2 profile (BSA + loose, MO2 precedence).
 - **Interactive fly-through** (`--interactive`): the same scene in a visible window — WASD +
-  mouse flight, hover-to-identify (refs, navmesh, terrain), pose echo, F12 capture. Its own
-  section below.
+  mouse flight, hover-to-identify (refs, navmesh, terrain) with a click-to-lock readout, live
+  navmesh display mode, a live height clip, pose echo, F12 capture. Its own section below.
 - **Terrain:** winning LAND heightmaps for the target cell ± 1 ring, painted with each quadrant's
   winning base landscape texture (LTEX → TXST → diffuse, winner-takes-all), tiled ~256 u/repeat.
   The heightmaps are kept as a queryable field (`terrainHeightAt`, same 128 u quads and diagonal
@@ -288,14 +298,50 @@ The SCOUTING step — fly to the view, read the identities, then press `P` and g
 
 **Controls.** `WASD` move (`W/S` along the view direction, so pitching down and holding `W`
 descends), `E`/`Space` up, `Q`/`C` down — hold `RMB` and move the mouse to look. Scroll sets
-the base speed; `Shift` ×5, `Ctrl` ×0.2. `P` prints the current pose as a paste-ready
+the base speed and `,`/`.` the look sensitivity, both starting from `--fly-speed`/`--look-sens`
+and both echoed to the console as a paste-ready flag; `Shift` ×5, `Ctrl` ×0.2 applies to every
+rate, movement and clip alike. `N` cycles the navmesh display, `[`/`]` and `;`/`'` move the
+height clip, `\` turns it off (all three below). `P` prints the current pose as a paste-ready
 `--eye X,Y,Z --yaw N --pitch N --fov N` line. `F12` saves a captioned PNG (window resolution,
 standard caption bar + `viewprobe` tEXt chunk with the pose) into `--out`. `H`/`F1` reprints
-the controls; `Esc` quits. Closing the window prints the final pose, so the last view is never
-lost.
+the controls with their current values; `Esc` quits. Closing the window prints the final pose,
+so the last view is never lost.
+
+**Navmesh display, live** (`N` cycles `off → filled → wire → both`). Under `--interactive` the
+build makes BOTH the translucent sheet and the wire whatever `--nav` asked for, so switching is
+a visibility flip, not a rebuild — at the cost of the wire's classification pass on a run that
+only wanted a sheet, paid once at startup. `--nav` still chooses what the window OPENS showing,
+and `--nav off` leaves nothing to cycle (the key says so). The finding's red outline stays on in
+every mode that draws navmesh at all, exactly as in a static render. The sheet's alpha is the
+fiddly part and is reproduced rather than approximated: the material shader multiplies baked
+vertex-colour alpha by `MaterialAlpha` and the static path bakes the same number into both, so a
+mode's on-screen alpha is its value SQUARED — the sheet is baked once at the `filled` value and
+the loop sets `MaterialAlpha = target²/baked`. Measured: the ratio between `both` and `filled`
+is 0.1959 in the window and 0.1958 in a static render of the same scene.
+
+**Height clip, live** (`[`/`]` move the CEILING down/up, `;`/`'` the FLOOR — one row apart on the
+keyboard, top row for the top clip). Each end starts disabled and, on first touch, at the
+CAMERA's own z, so "clip off everything above my head" is one keypress from wherever the flight
+reached — the top-floor case. `\` turns both off. The band sweeps at 512 u/s while held (`Shift`
+×5, `Ctrl` ×0.2) and every release prints it, including the equivalent `--cull-above` line.
+
+It is SHAPE-granular: a static is hidden only when its whole z-span lies outside the band, so a
+wall spanning the cut keeps standing whole. `--cull-above` remains the triangle-exact knife and
+runs at build time; this is the one you fly with, and its printed number is what you then give
+`--cull-above` for the deliverable. Statics only, like `--cull-above` — terrain, navmesh, actors
+and the overlay are never clipped. **The ray respects it**: a shape the clip removed, or navmesh
+with the display off, is not pickable, because a HUD naming what the picture no longer shows
+would be worse than no HUD.
 
 **Hover identification** (the cursor is free whenever RMB is up; a HUD bar at the top shows the
-answer, `LMB` prints the full detail to the console):
+answer). `LMB` on something **LOCKS** the readout to it and prints the full detail to the
+console; the next `LMB` anywhere unlocks, hit or miss. Locked, the identity stays on the bar
+while the camera moves — reading a FormKey off a wall you are also trying to fly around meant
+holding the cursor perfectly still — and hover picking is suspended, so the readout cannot
+drift. A locked line reports the hit POINT and drops the range, which only the camera that did
+the picking could speak for. The bar's text is 30 px (twice the burned caption's 15 px: it is
+read at a glance, from further back than a saved image is) and WRAPS, growing to fit, because a
+mesh path at that size runs off a 1440-wide window:
 
 - a placed ref answers `REFR FormKey = runtime FormID — base EditorID — mesh path`, click adds
   the base FormKey/FormID, placement and scale;
@@ -309,8 +355,9 @@ shortlist, then ray-triangle), NOT a depth-buffer unproject — so unlike `--pic
 alpha-blended geometry, and it knows WHICH shape it hit. It is geometric: a hit on the
 transparent part of a leaf texture still reports the leaf's ref. Navmesh sits a hair above the
 floor it covers, so a floor pixel usually answers navmesh first; nudge the cursor off the mesh
-to name the floor. NPC actors are not pickable (their CPU geometry lives in the character
-pipeline's VMs) — they already carry captions and pucks.
+to name the floor, or press `N` twice to take the sheet off it. NPC actors are not pickable
+(their CPU geometry lives in the character pipeline's VMs) — they already carry captions and
+pucks.
 
 **What stays frozen at the entry camera, and why that is sound.** The overlay's
 camera-dependent work — wire dash sizing, the visible/hidden classification, the adaptive nav
@@ -324,9 +371,17 @@ semantic.
 **Scope.** One free camera, so `--compare` is refused (fly first, then run the compare from a
 pose the flight printed). Everything else composes: `--conflicts`/`--red` paint red exactly as
 in a static render, `--npc` actors stand in the scene, `--cull-above` slices before the window
-opens. The window is resizable; `--msaa` sets its multisampling (the F12 capture resolves it).
-`VP_FLY_FRAMES`/`VP_FLY_PICK` (env table above) exercise the loop and the ray path headlessly —
-that is how the feature is regression-tested.
+opens, and the live clip then works on what it left. The window is resizable; `--msaa` sets its
+multisampling (the F12 capture resolves it). The `VP_FLY_*` family (env table above) exercises
+the loop, the ray, the display mode, the clip and the HUD headlessly — that is how the feature
+is regression-tested, and `VP_FLY_FRAMES` runs are byte-identical between runs.
+
+**What the loop can and cannot change.** Everything live is visibility or input state — the
+navmesh display mode, the height band, the flight feel — so none of it rebuilds geometry and
+none of it can change what a static re-render of the same pose produces. Verified: a static
+render before and after this feature landed is byte-identical, interior (`--nav both
+--cull-above`) and exterior (`--nav both --conflicts`, red navmesh + cell outline + terrain
+layers) alike.
 
 ---
 

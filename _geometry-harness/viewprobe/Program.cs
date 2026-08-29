@@ -59,7 +59,7 @@ string dataDir = Path.Combine(GamePath, "Data");
 if (args.Length > 0 && args[0] == "--smoke") return Smoke();
 if (args.Length == 0)
 {
-    Console.Error.WriteLine("usage: viewprobe <CellEditorID|FormID> [--out DIR] [--size N] [--angles 0,90,180] [--elev 25] [--no-nav] [--ref FORMID] [--interactive]");
+    Console.Error.WriteLine("usage: viewprobe <CellEditorID|FormID> [--out DIR] [--size N] [--angles 0,90,180] [--elev 25] [--no-nav] [--ref FORMID] [--interactive [--fly-speed 600] [--look-sens 0.15]]");
     return 1;
 }
 
@@ -216,6 +216,11 @@ float? cullAbove = null;
 // F12 saves a captioned PNG. The scouting step; the reproducible static render stays the
 // deliverable. Not combinable with --compare (three panels, one window — no).
 bool interactiveMode = false;
+// --fly-speed / --look-sens: the fly-through's feel, which is a matter of taste and of monitor,
+// and used to be a pair of constants in the source. Both are also adjustable in the window
+// (scroll, and , / .); these set where a session STARTS, so a value that turned out right does
+// not have to be re-dialled every run. Defaults unchanged: 600 u/s and 0.15 deg/px.
+float flySpeed = 600f, lookSens = 0.15f;
 for (int i = 1; i < args.Length; i++)
 {
     if (args[i] == "--out" && i + 1 < args.Length) outDir = args[++i];
@@ -274,6 +279,8 @@ for (int i = 1; i < args.Length; i++)
     else if (args[i] == "--npc-puck" && i + 1 < args.Length) npcPuck = args[++i].ToLowerInvariant();
     else if (args[i] == "--cull-above" && i + 1 < args.Length) cullAbove = float.Parse(args[++i]);
     else if (args[i] == "--interactive") { interactiveMode = true; textured = true; }
+    else if (args[i] == "--fly-speed" && i + 1 < args.Length) flySpeed = float.Parse(args[++i]);
+    else if (args[i] == "--look-sens" && i + 1 < args.Length) lookSens = float.Parse(args[++i]);
     else if (args[i] == "--markers") showMarkers = true;
     else if (args[i] == "--list-meshes") listMeshes = true;
     else if (args[i] is "--instance" or "--game" or "--profile") i++;   // consumed above
@@ -299,6 +306,13 @@ if (npcPuck is not ("on" or "off" or "auto"))
 { Console.Error.WriteLine($"--npc-puck '{npcPuck}' is not one of: on, off, auto."); return 1; }
 if (interactiveMode && compare is not null)
 { Console.Error.WriteLine("--interactive and --compare cannot combine: the compare is three fixed panels, the window is one free camera. Fly first, then run the compare from a pose it printed."); return 1; }
+// A flag that silently does nothing is a trap, so say so rather than accepting it.
+if (!interactiveMode && (Array.IndexOf(args, "--fly-speed") >= 0 || Array.IndexOf(args, "--look-sens") >= 0))
+{ Console.Error.WriteLine("--fly-speed and --look-sens only mean anything with --interactive: they set the window's flight feel, and a static render has no flight."); return 1; }
+if (flySpeed is < 1f or > 100000f)
+{ Console.Error.WriteLine($"--fly-speed {flySpeed} is out of range: 1..100000 u/s."); return 1; }
+if (lookSens is < 0.01f or > 2f)
+{ Console.Error.WriteLine($"--look-sens {lookSens} is out of range: 0.01..2 degrees per pixel (default 0.15)."); return 1; }
 
 // --npc spec parsing happens BEFORE the load walk: the walk watches for these
 // FormKeys (as placed ACHRs and as ACHR bases) wherever they live, the same way
@@ -1615,6 +1629,8 @@ if (textured)
             OutDir = outDir,
             SafeName = safe,
             RedNav = redNav.Keys.ToHashSet(),
+            FlySpeed = flySpeed,
+            LookSens = lookSens,
         };
         if (navMode != "off")
             foreach (var nav in navSrc.Values)
