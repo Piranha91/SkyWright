@@ -517,6 +517,82 @@ What that protects against:
   are a good proxy for "is this the interesting cell"; a cell's EditorID is not a reliable guide to
   what is in it.
 
+### Getting there fast: the arithmetic, and what the render tells you for free
+
+The section above stops you shooting blind. This one stops you *iterating*. Most wasted renders
+are not wrong-place errors — they are right-place, wrong-distance errors, and framing is
+arithmetic, not taste.
+
+**One number does most of the work.** The image is square and `--fov` is the full vertical angle,
+so at the default 65°:
+
+```
+half-span = distance x tan(fov/2) = 0.637 x distance      (fov 65)
+```
+
+- **Top-down.** To cover a region of half-width `H` centred on subject height `z`:
+  `eye z = z + H / 0.637`. A 1,500 u half-span wants the camera 2,354 u up. This lands the frame
+  correctly on the first try, every time.
+- **Eye level.** A subject `W` wide fills fraction `f` of the frame at
+  `distance = W / (1.27 x f)`. A ~200 u doorway at a quarter of frame width wants ~630 u of
+  standoff. Measured failure mode: 300 u puts a door edge-to-edge and the navmesh wire goes
+  billboard-thick; 600 u shows the door *in its approach*, which is what a "where do I stand"
+  shot is for.
+
+**Eye height is floor + `--eye-height` (default 120).** `--nav-at` hands you the floor `z`
+directly, so the standing camera is `nav z + 120` with no guessing. Give `player.setpos` the
+floor `z`, not the eye `z` — that trips people every time.
+
+**Batch every question into one invocation.** The load walk dominates the cost; the queries are
+free once it has run. `--nav-at`, `--refs-at` and `--pick` are all repeatable, so ask six to ten
+questions at once — a cross of candidate standing spots, the subject's surroundings, and the
+level structure — instead of paying the walk per question.
+
+**For an unfamiliar interior, render the plan FIRST, then `--pick` off it.** Probing blind
+coordinates in a building you have not seen is guesswork; a sliced top-down (`--cull-above` just
+above the subject's floor) is a floor plan, and `--pick` converts any pixel in it into real world
+coordinates you can then stand at. Plan → pick → eye-level beats guess → render → adjust by a
+wide margin.
+
+**One `--nav-at` reveals the whole vertical structure.** It returns a row per covering triangle,
+so a single probe at one X,Y tells you how many walkable storeys exist and their heights — the
+fastest way to learn a multi-level interior, and the way to find the gap a top-down camera must
+sit in.
+
+#### The render answers back — read it before you look at pixels
+
+Four channels of free feedback, all on stdout or burnt into the image:
+
+- **The caption carries the resolved pose** (`eye X,Y,Z yaw ...° pitch ...° fov ...°`), and every
+  PNG embeds its replay args. A top-down reading `yaw 0° pitch 90°` *is* the confirmation that the
+  frame is north-up — no `--pick` round-trip needed. Any shot re-aims straight from its own image.
+- **An occluded actor prints its own fix**, including a suggested `--cull-above Z` computed from
+  that actor's height. Take the suggestion rather than bisecting cut heights by hand; if it still
+  reports hidden, the occluder straddles the cut (the all-verts-above rule keeps straddling
+  triangles, which is what keeps walls standing).
+- **`outside the frame at this camera`** is a framing failure reported before you open the image.
+  Treat any actor line other than a clean build as a re-shoot.
+- **`--conflicts` prints a suggested camera** from the red centroid — a free starting point, but
+  it has no occlusion check and can land inside a rock. Use it as a seed, not an answer.
+
+#### Two ordering traps that cost a round each
+
+- **The overlay and captions exist only on the textured single-camera path.** With no `--eye` /
+  `--look` the run takes the flat multi-view path instead: no conflict overlay, no red, no
+  caption. If `--conflicts` seems to have done nothing, check that a camera was given.
+- **Pick the target cell for the FINDING, not for the camera.** Ring cells now supply refs, so the
+  camera no longer has to stand in the target cell — but navmesh, the conflict overlay and the
+  cell outline stay target-cell scoped. Aim the target at whatever must be painted; put the camera
+  wherever it reads best.
+
+#### Shell quoting, on paths with spaces
+
+Instance and game paths routinely contain spaces. Do not collect them into one shell variable and
+expand it unquoted — word-splitting silently hands `--instance` a fragment and the run falls back
+to the default instance, producing a plausible-looking render of the *wrong load order*. It is
+only detectable by noticing that flags you passed had no effect. Pass such paths as individually
+quoted arguments.
+
 **Historical note, still open.** Several of those six failures had one root cause: viewprobe drew
 every rotated ref with its heading MIRRORED, because Skyrim REFR angles are clockwise-positive while
 `Matrix4x4.CreateRotation*` is right-handed counter-clockwise-positive. Fixed in viewprobe (commit
