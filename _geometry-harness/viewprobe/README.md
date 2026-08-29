@@ -674,6 +674,26 @@ so a single probe at one X,Y tells you how many walkable storeys exist and their
 fastest way to learn a multi-level interior, and the way to find the gap a top-down camera must
 sit in.
 
+#### Standing positions for a human, not just a camera
+
+A camera can float; a player cannot. When the output of a shot is a `player.setpos` a person will
+paste into a console, two separate failures put them inside a wall — both observed in play:
+
+- **The point was never walkable.** `--pick` returns whatever *surface* a pixel hit. `--nav-at`
+  returns *standable ground*. They are not the same, and a pick onto a floor-looking surface can
+  be metres from any navmesh. **Source standing spots from `--nav-at` only**, and
+  **clearance-test**: probe the point plus ±64 u in x and y and require all five covered at the
+  same z. A player capsule is roughly 35 u in radius, so a point technically on navmesh but hard
+  against a wall still embeds them. One measured failure: a spot taken from a pick had its
+  nearest navmesh triangle 52 u away.
+- **The intermediate states.** Three `player.setpos` calls move one axis at a time, so the player
+  passes through two positions nobody checked, and either can be solid geometry. A destination
+  that clearance-tests clean can still trap them on the way in. **Wrap the sequence in `tcl` …
+  `tcl`** — noclip off at the end drops them onto the floor.
+
+Hand over the floor `z` from `--nav-at`, not the eye `z` the camera used; the eye is
+`floor + --eye-height`.
+
 #### The render answers back — read it before you look at pixels
 
 Four channels of free feedback, all on stdout or burnt into the image:
