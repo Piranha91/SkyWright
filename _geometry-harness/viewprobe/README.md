@@ -16,7 +16,8 @@ findings they demonstrate) lives with that instance, not here.
 ## Code and build
 
 - **Project:** `_geometry-harness/viewprobe/`. `Program.cs` (CLI, load-order walk, scene/terrain/nav
-  assembly, compare orchestration), `TexturedScene.cs` (GL rendering, captions, adaptive colour).
+  assembly, compare orchestration), `TexturedScene.cs` (GL rendering, captions, adaptive colour),
+  `InteractiveViewer.cs` (the `--interactive` fly-through: window loop, hover picking, HUD).
 - **Rendering library:** `CharacterViewer.Rendering` (project reference, currently an absolute path
   to a sibling checkout). It supplies `NifMeshBuilder` (NIF → Y-up meshes with texture paths),
   `GlRenderer`/`GlMesh`, `GlTextureManager` (DDS load + white fallback), `OrbitCamera`. viewprobe
@@ -86,6 +87,10 @@ findings they demonstrate) lives with that instance, not here.
   translucent ground disc + always-visible rim under each actor (auto = on when the camera looks
   down steeper than 60°). Each actor gets an identity colour shared by its puck and its caption
   line, assigned in `--npc` order.
+- **Interactive fly-through:** `--interactive` (implies textured mode; still needs an eye) opens
+  the scene in a visible window instead of saving a PNG — WASD + RMB-mouse to fly, hover to
+  identify what is under the cursor. See *Interactive fly-through* below. Not combinable with
+  `--compare`.
 - **Dollhouse slice:** `--cull-above Z` drops every STATIC triangle whose vertices all sit above
   that Skyrim z, so an interior top-down shows the storey the actors stand on instead of the roof
   and upper floors over it. Walls spanning the cut keep standing (their lower vertices anchor
@@ -122,6 +127,8 @@ all knowledge.
 | `VP_ENABLE_DUMP=1` | every enable-parent group among the loaded refs, with the parent's own state, its chain, and how the children resolve — the check that a "disabled via enable parent" verdict rests on what the data actually states |
 | `VP_DOOR_DEBUG=1` | print each conflict-implicated door's holding cell during the load walk |
 | `VP_CV_VERBOSE=1` | unmute the rendering library's logger |
+| `VP_FLY_FRAMES=N` | `--interactive` smoke knob: render N frames, save a capture, close — the window loop is testable without a hand on the mouse |
+| `VP_FLY_PICK=x,y` | with `VP_FLY_FRAMES`: run one programmatic pick at those client coordinates and print what it hit — the ray path, testable headlessly |
 
 ---
 
@@ -204,6 +211,9 @@ gitignored for the same reason: probe transcripts name the plugins of whatever l
 ## Feature state
 
 - Textured first-person rendering from the exact MO2 profile (BSA + loose, MO2 precedence).
+- **Interactive fly-through** (`--interactive`): the same scene in a visible window — WASD +
+  mouse flight, hover-to-identify (refs, navmesh, terrain), pose echo, F12 capture. Its own
+  section below.
 - **Terrain:** winning LAND heightmaps for the target cell ± 1 ring, painted with each quadrant's
   winning base landscape texture (LTEX → TXST → diffuse, winner-takes-all), tiled ~256 u/repeat.
   The heightmaps are kept as a queryable field (`terrainHeightAt`, same 128 u quads and diagonal
@@ -267,6 +277,56 @@ gitignored for the same reason: probe transcripts name the plugins of whatever l
   is not frontmost (this is what marks a visible door whose rim hides in a recessed jamb); and a
   deep-occlusion boost that fires only when the occluder is in front of the WHOLE hull — a wall — so
   a hidden door pops as a strong silhouette while a visible one keeps its readable texture.
+
+---
+
+## Interactive fly-through (`--interactive`)
+
+The same scene `RenderToPng` builds, kept resident and drawn per frame into a visible window.
+The SCOUTING step — fly to the view, read the identities, then press `P` and give the printed
+`--eye/--yaw/--pitch` to a normal run: the reproducible static render stays the deliverable.
+
+**Controls.** `WASD` move (`W/S` along the view direction, so pitching down and holding `W`
+descends), `E`/`Space` up, `Q`/`C` down — hold `RMB` and move the mouse to look. Scroll sets
+the base speed; `Shift` ×5, `Ctrl` ×0.2. `P` prints the current pose as a paste-ready
+`--eye X,Y,Z --yaw N --pitch N --fov N` line. `F12` saves a captioned PNG (window resolution,
+standard caption bar + `viewprobe` tEXt chunk with the pose) into `--out`. `H`/`F1` reprints
+the controls; `Esc` quits. Closing the window prints the final pose, so the last view is never
+lost.
+
+**Hover identification** (the cursor is free whenever RMB is up; a HUD bar at the top shows the
+answer, `LMB` prints the full detail to the console):
+
+- a placed ref answers `REFR FormKey = runtime FormID — base EditorID — mesh path`, click adds
+  the base FormKey/FormID, placement and scale;
+- navmesh answers `NAVM FormKey = FormID tri N` (tagged `[RED — the finding]` when implicated),
+  and the click detail includes a ready-made `--red "FORMKEY:tri"` spec;
+- bare ground answers the LAND census: cell, quadrant, base layer, and every painted alpha
+  layer's opacity AT THAT POINT (sampled from its own 17×17 map).
+
+Picking is a CPU raycast against the same world-baked triangles the GPU draws (per-shape AABB
+shortlist, then ray-triangle), NOT a depth-buffer unproject — so unlike `--pick` it can name
+alpha-blended geometry, and it knows WHICH shape it hit. It is geometric: a hit on the
+transparent part of a leaf texture still reports the leaf's ref. Navmesh sits a hair above the
+floor it covers, so a floor pixel usually answers navmesh first; nudge the cursor off the mesh
+to name the floor. NPC actors are not pickable (their CPU geometry lives in the character
+pipeline's VMs) — they already carry captions and pucks.
+
+**What stays frozen at the entry camera, and why that is sound.** The overlay's
+camera-dependent work — wire dash sizing, the visible/hidden classification, the adaptive nav
+colour, the cell outline's camera-facing ribbons, diff-sphere radii — is built ONCE, for the
+camera the run started with. The depth-buffer-is-the-arbiter design is what makes that correct
+rather than merely cheap: the solid wire is clipped per pixel per frame by the real depth
+buffer, and the always-visible dashes cover what it clips, so flying somewhere new never makes
+navmesh disappear — at most a dash is sized for where the camera used to be. Cosmetic, not
+semantic.
+
+**Scope.** One free camera, so `--compare` is refused (fly first, then run the compare from a
+pose the flight printed). Everything else composes: `--conflicts`/`--red` paint red exactly as
+in a static render, `--npc` actors stand in the scene, `--cull-above` slices before the window
+opens. The window is resizable; `--msaa` sets its multisampling (the F12 capture resolves it).
+`VP_FLY_FRAMES`/`VP_FLY_PICK` (env table above) exercise the loop and the ray path headlessly —
+that is how the feature is regression-tested.
 
 ---
 

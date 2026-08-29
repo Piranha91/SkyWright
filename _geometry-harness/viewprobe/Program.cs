@@ -59,7 +59,7 @@ string dataDir = Path.Combine(GamePath, "Data");
 if (args.Length > 0 && args[0] == "--smoke") return Smoke();
 if (args.Length == 0)
 {
-    Console.Error.WriteLine("usage: viewprobe <CellEditorID|FormID> [--out DIR] [--size N] [--angles 0,90,180] [--elev 25] [--no-nav] [--ref FORMID]");
+    Console.Error.WriteLine("usage: viewprobe <CellEditorID|FormID> [--out DIR] [--size N] [--angles 0,90,180] [--elev 25] [--no-nav] [--ref FORMID] [--interactive]");
     return 1;
 }
 
@@ -210,6 +210,12 @@ string npcPuck = "auto";
 // upper floors instead of their outsides. Walls spanning the cut keep standing; terrain,
 // navmesh, NPC actors and the overlay are never sliced. The caption names the cut.
 float? cullAbove = null;
+// --interactive (textured mode; implies it): instead of saving a PNG, open the scene in a
+// visible window — WASD + RMB-mouse fly-through, hover to identify refs/navmesh/terrain
+// (FormKey + runtime FormID in a HUD bar), P prints a paste-ready --eye/--yaw/--pitch line,
+// F12 saves a captioned PNG. The scouting step; the reproducible static render stays the
+// deliverable. Not combinable with --compare (three panels, one window — no).
+bool interactiveMode = false;
 for (int i = 1; i < args.Length; i++)
 {
     if (args[i] == "--out" && i + 1 < args.Length) outDir = args[++i];
@@ -267,6 +273,7 @@ for (int i = 1; i < args.Length; i++)
     else if (args[i] == "--npc-no-outfit") npcNoOutfit = true;
     else if (args[i] == "--npc-puck" && i + 1 < args.Length) npcPuck = args[++i].ToLowerInvariant();
     else if (args[i] == "--cull-above" && i + 1 < args.Length) cullAbove = float.Parse(args[++i]);
+    else if (args[i] == "--interactive") { interactiveMode = true; textured = true; }
     else if (args[i] == "--markers") showMarkers = true;
     else if (args[i] == "--list-meshes") listMeshes = true;
     else if (args[i] is "--instance" or "--game" or "--profile") i++;   // consumed above
@@ -290,6 +297,8 @@ if (navMode is not ("off" or "filled" or "wire" or "both"))
 { Console.Error.WriteLine($"--nav '{navMode}' is not one of: off, filled, wire, both."); return 1; }
 if (npcPuck is not ("on" or "off" or "auto"))
 { Console.Error.WriteLine($"--npc-puck '{npcPuck}' is not one of: on, off, auto."); return 1; }
+if (interactiveMode && compare is not null)
+{ Console.Error.WriteLine("--interactive and --compare cannot combine: the compare is three fixed panels, the window is one free camera. Fly first, then run the compare from a pose it printed."); return 1; }
 
 // --npc spec parsing happens BEFORE the load walk: the walk watches for these
 // FormKeys (as placed ACHRs and as ACHR bases) wherever they live, the same way
@@ -719,7 +728,8 @@ if (textured)
         // as a translucent extra layer instead of dropping them.
         if (isMarker && !showMarkers) { markerSkipped++; continue; }
         scene.Add(new ViewProbe.SceneRef(rel, r.Position, r.Rotation, r.Scale,
-                                         (hiFp is { } h && r.FormKey == h) || conflictDoors.Contains(r.FormKey), isMarker));
+                                         (hiFp is { } h && r.FormKey == h) || conflictDoors.Contains(r.FormKey), isMarker,
+                                         r.FormKey, bk, baseEditorId.TryGetValue(bk, out var bEd) ? bEd : null));
     }
     foreach (var (qx, qy, qr) in refsAt)
     {
@@ -868,6 +878,9 @@ if (textured)
     // whether a triangle is BELOW the ground that gets drawn, which is what separates "buried"
     // from "behind a rock" and earns the two different dashed layers.
     var landHeights = new Dictionary<(int X, int Y), float[,]>();
+    // --interactive: hovering bare ground answers with the quadrant's painted layers. Assigned
+    // inside the terrain block (it captures the walked LAND census); null on interiors.
+    Func<float, float, string?>? terrainDescribeAt = null;
     if (drawTerrain && !interior && targetGrid is { } tg)
     {
         // grid -> winning heightmap + the base landscape texture per quadrant (LTEX FormKeys,
@@ -1090,6 +1103,34 @@ if (textured)
             Console.WriteLine($"   terrain paint layers: {terrainLayers.Count} sheet(s), "
                             + $"{terrainLayers.Sum(l => l.Tris.Count):N0} triangles, "
                             + $"{terrainLayers.Select(l => l.Diffuse).Distinct(StringComparer.OrdinalIgnoreCase).Count()} distinct texture(s)");
+
+        // A hover on bare ground has a real answer in the LAND census: which cell, which
+        // quadrant, what base texture, and what each alpha layer paints AT THAT POINT (opacity
+        // sampled from its own 17x17 map — the same decode the geometry uses).
+        if (interactiveMode)
+        {
+            var qNames = new[] { "BottomLeft", "BottomRight", "TopLeft", "TopRight" };
+            terrainDescribeAt = (wx, wy) =>
+            {
+                int gx = (int)MathF.Floor(wx / 4096f), gy = (int)MathF.Floor(wy / 4096f);
+                if (!landLayers.TryGetValue((gx, gy), out var lyrs2)) return $"cell ({gx},{gy}) — no LAND";
+                float lxu = wx - gx * 4096f, lyu = wy - gy * 4096f;
+                int q = (lyu < 2048f ? 0 : 2) + (lxu < 2048f ? 0 : 1);
+                int px2 = Math.Clamp((int)MathF.Round((lxu - (q & 1) * 2048f) / 128f), 0, 16);
+                int py2 = Math.Clamp((int)MathF.Round((lyu - (q >= 2 ? 2048f : 0f)) / 128f), 0, 16);
+                string LtexName(FormKey? fk) => fk is { } k
+                    ? (ltexEditorId.TryGetValue(k, out var ed) ? ed : k.ToString()) : "(none)";
+                var baseL = lyrs2.FirstOrDefault(l => !l.Alpha && l.Quadrant == q);
+                var painted = lyrs2
+                    .Where(l => l.Alpha && l.Quadrant == q && l.Opacity is not null
+                                && l.Opacity[py2 * 17 + px2] > 0.004f)
+                    .OrderBy(l => l.Layer)
+                    .Select(l => $"{LtexName(l.Tex)} {l.Opacity![py2 * 17 + px2]:0.00}")
+                    .ToList();
+                return $"cell ({gx},{gy}) {qNames[q]} — base {LtexName(baseL.Tex)}"
+                     + (painted.Count > 0 ? $" — painted: {string.Join(", ", painted)}" : "");
+            };
+        }
     }
 
     // Ground height at a world X,Y, on the SAME 128-unit quads and the SAME diagonal split the
@@ -1275,14 +1316,21 @@ if (textured)
         npcPlacements.Add((npcKey, new ViewProbe.NpcPlacement(p, rot, refScale), label ?? ""));
     }
 
+    // One GL context for everything: the NPC actors are built on it, the scene is uploaded to
+    // it, and — under --interactive — the fly-through runs on it (a visible, resizable window
+    // with its own MSAA; the offscreen path keeps its hidden square). Born hidden either way;
+    // InteractiveViewer shows it once the scene is resident, so no white window sits there
+    // through a multi-minute load walk.
     var fpNws = new NativeWindowSettings
     {
-        ClientSize = new OpenTK.Mathematics.Vector2i(size, size),
+        ClientSize = interactiveMode ? new OpenTK.Mathematics.Vector2i(1440, 900)
+                                     : new OpenTK.Mathematics.Vector2i(size, size),
         StartVisible = false,
         StartFocused = false,
-        WindowBorder = WindowBorder.Hidden,
+        WindowBorder = interactiveMode ? WindowBorder.Resizable : WindowBorder.Hidden,
         APIVersion = new Version(3, 3),
         Profile = ContextProfile.Core,
+        NumberOfSamples = interactiveMode && msaa >= 2 ? Math.Min(msaa, 8) : 0,
     };
     using var fpGw = new GameWindow(GameWindowSettings.Default, fpNws);
     fpGw.MakeCurrent();
@@ -1549,6 +1597,47 @@ if (textured)
     var fpCap = new List<string> { $"{cellLabel} \u2014 {(navPlugin ?? "winning state")} \u2014 {camPose}{CullCaption()}" };
     if (redNav.Count > 0) fpCap.Add(RedCaption(navPlugin is not null && navByPlugin.TryGetValue(navPlugin, out var np0) ? np0 : winNav));
     if (DoorCaption() is { } fdc) fpCap.Add(fdc);
+
+    if (interactiveMode)
+    {
+        // Same build, different ending: the scene stays resident and the window opens. The
+        // navmesh identity list mirrors exactly what BuildNavSets admits to the overlay
+        // (same source dict, same deleted/out-of-range filters), so a hover can only name
+        // triangles that are actually drawn.
+        var navSrc = navPlugin is not null && navByPlugin.TryGetValue(navPlugin, out var nsrc)
+            ? (IReadOnlyDictionary<FormKey, NavmeshGeometry>)nsrc : winNav;
+        var iopt = new ViewProbe.InteractiveOptions
+        {
+            Window = fpGw,
+            RuntimeId = RuntimeId,
+            TerrainDescribe = terrainDescribeAt,
+            CellLabel = cellLabel,
+            OutDir = outDir,
+            SafeName = safe,
+            RedNav = redNav.Keys.ToHashSet(),
+        };
+        if (navMode != "off")
+            foreach (var nav in navSrc.Values)
+                for (int ti = 0; ti < nav.Triangles.Count; ti++)
+                {
+                    var tri = nav.Triangles[ti];
+                    if ((tri.Flags & 0x08) != 0) continue;
+                    if (tri.A < 0 || tri.B < 0 || tri.C < 0) continue;
+                    if (tri.A >= nav.Vertices.Count || tri.B >= nav.Vertices.Count || tri.C >= nav.Vertices.Count) continue;
+                    iopt.NavTris.Add((nav.FormKey, ti, V(nav.Vertices[tri.A]), V(nav.Vertices[tri.B]), V(nav.Vertices[tri.C])));
+                }
+
+        int iShapes = ViewProbe.TexturedScene.RenderToPng(
+            scene, assets, dataDir, modFolders, overwriteDir,
+            (eyePos.Value, lookPos.Value, fov), navTris, redTris, terrainPatches, terrainLayers, navMode, navColor,
+            skyColor, terrainHeightAt, dashUnderground, dashUnderStatics, msaa, cullAbove, cellBounds,
+            noDiff, diffColor, picks, fpCap, npcCaptions, npcActors, npcPucksOn, keepFx, fxStatic, listMeshes, size, fpOut,
+            camMeta, iopt);
+        Console.WriteLine($"   interactive run over ({iShapes:N0} shapes were resident)");
+        NpcCleanup();
+        return 0;
+    }
+
     int drawnShapes = Render(navTris, redTris, fpOut, fpCap);
     Console.WriteLine($"wrote:\n   {fpOut}");
     Console.WriteLine($"   eye {eyePos.Value.X:0},{eyePos.Value.Y:0},{eyePos.Value.Z:0} -> look {lookPos.Value.X:0},{lookPos.Value.Y:0},{lookPos.Value.Z:0}"

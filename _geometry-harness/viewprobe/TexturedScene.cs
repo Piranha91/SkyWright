@@ -106,15 +106,17 @@ sealed class CvSettings : ICharacterViewerSettings
     public bool CharacterViewerVerboseLog { get; set; } = false;
 }
 
-/// <summary>One placed instance handed over from Program.cs: the mesh to draw and the Skyrim-space
-/// placement to draw it at.</summary>
+/// <summary>One placed instance handed over from Program.cs: the mesh to draw, the Skyrim-space
+/// placement to draw it at, and (for the interactive picker's reports) who it is — the placed
+/// ref's own FormKey, its base, and the base's EditorID.</summary>
 readonly record struct SceneRef(string MeshRelPath, Vec3 Position, Vec3 Rotation, float Scale, bool Highlight,
-                                bool Marker = false);
+                                bool Marker = false, FormKey RefKey = default, FormKey BaseKey = default,
+                                string? BaseEditorId = null);
 
 static class TexturedScene
 {
     // Z-up (Skyrim) -> Y-up (viewer): the exact swap NifMeshBuilder uses.
-    static Vector3 YUp(Vector3 z) => new(z.X, z.Z, -z.Y);
+    internal static Vector3 YUp(Vector3 z) => new(z.X, z.Z, -z.Y);
 
     /// <summary>MO2-style loose-file precedence, the ONE encoding of the
     /// convention: the resolver iterates LAST-to-first, so hand it
@@ -161,7 +163,8 @@ static class TexturedScene
         bool fxStatic,                                     // --fx-static: draw them as a frozen frame
         bool listEffectMeshes,                             // --list-meshes: name the meshes they came from
         int size, string outPath,
-        string? pngTextMeta = null)                        // replication chunk: written as a PNG tEXt entry keyed "viewprobe"
+        string? pngTextMeta = null,                        // replication chunk: written as a PNG tEXt entry keyed "viewprobe"
+        InteractiveOptions? interactive = null)            // non-null: open the fly-through window instead of saving a PNG
     {
         var logger = new ConsoleCvLogger();
         var gate = new CharacterViewerLogGate { Verbose = Environment.GetEnvironmentVariable("VP_CV_VERBOSE") == "1" };
@@ -504,6 +507,15 @@ static class TexturedScene
                 renderer.AddMesh(mesh);
                 meshes.Add(mesh);
                 shapes++;
+
+                // Interactive picking tests the SAME arrays the upload used (shared, not
+                // copied): post-cull, post-filter — a hover names only what is drawn.
+                if (interactive is not null)
+                {
+                    var ps = new PickShape { Kind = PickKind.Ref, Verts = wp, Tris = tri, Ref = r };
+                    ps.ComputeBounds();
+                    interactive.PickShapes.Add(ps);
+                }
             }
             if (refHadFx) fxRefCount++;
             if (refHadFxStatic) fxStaticRefCount++;
@@ -555,6 +567,12 @@ static class TexturedScene
             terra.IsDoubleSided = true;
             renderer.AddMesh(terra);
             meshes.Add(terra);
+            if (interactive is not null)
+            {
+                var ps = new PickShape { Kind = PickKind.Terrain, Verts = tv.ToArray(), Tris = ti.ToArray(), TerrainTex = texPath };
+                ps.ComputeBounds();
+                interactive.PickShapes.Add(ps);
+            }
         }
         // PAINTED LAYERS over the base. Roads, paths and every ground blend in Skyrim live here
         // and nowhere else, so a render without them is a render with no roads in it.
@@ -743,7 +761,10 @@ static class TexturedScene
         }
         int drawFbo = msFbo != 0 ? msFbo : fbo;
 
-        Action? wireOverlay = null;              // viewprobe's own wire pass, installed once built
+        // viewprobe's own wire pass, installed once built. It takes the view/projection to draw
+        // with: the static path hands it the entry camera's fixed matrices; the interactive loop
+        // hands it each frame's.
+        Action<OpenTK.Mathematics.Matrix4, OpenTK.Mathematics.Matrix4>? wireOverlay = null;
 
         byte[] Draw(float[]? depthOut = null)
         {
@@ -752,7 +773,7 @@ static class TexturedScene
             GL.ClearColor(skyColor.X, skyColor.Y, skyColor.Z, 1f);
             GL.Clear(ClearBufferMask.ColorBufferBit | ClearBufferMask.DepthBufferBit);
             renderer.Render(camera, size, size);   // clears again, with renderer.ClearColor = sky
-            wireOverlay?.Invoke();
+            wireOverlay?.Invoke(camera.GetViewMatrix(), camera.GetProjectionMatrix(1f));
             if (msFbo != 0)
             {
                 // Resolve colour AND depth: the occlusion test reads the depth buffer back, so it
@@ -1187,10 +1208,10 @@ static class TexturedScene
             GL.EnableVertexAttribArray(2);
             GL.BindVertexArray(0);
 
-            wireOverlay = () =>
+            wireOverlay = (vmIn, pmIn) =>
             {
                 GL.UseProgram(wireProg);
-                var vm = viewMat; var pm = projMat;
+                var vm = vmIn; var pm = pmIn;
                 GL.UniformMatrix4(GL.GetUniformLocation(wireProg, "u_view"), false, ref vm);
                 GL.UniformMatrix4(GL.GetUniformLocation(wireProg, "u_projection"), false, ref pm);
                 GL.BindVertexArray(wireVao);
@@ -1243,6 +1264,25 @@ static class TexturedScene
                 GL.DepthMask(true);
                 GL.BindVertexArray(0);
             };
+        }
+
+        // ---- INTERACTIVE: hand the resident scene to the fly-through loop -----------------
+        // Everything above — scene, overlay layers, pass-1 colour/classification — is shared
+        // with the static path; only the final draw differs. The offscreen pass-1 target is
+        // finished with (the loop draws to the window's own framebuffer), so it goes first.
+        if (interactive is not null)
+        {
+            GL.BindFramebuffer(FramebufferTarget.Framebuffer, 0);
+            GL.DeleteFramebuffer(fbo); GL.DeleteTexture(colorTex); GL.DeleteRenderbuffer(depthRb);
+            if (msFbo != 0) { GL.DeleteFramebuffer(msFbo); GL.DeleteRenderbuffer(msColorRb); GL.DeleteRenderbuffer(msDepthRb); }
+
+            InteractiveViewer.Run(interactive, renderer, cam, wireOverlay);
+
+            if (wireProg != 0) { GL.DeleteProgram(wireProg); GL.DeleteVertexArray(wireVao); GL.DeleteBuffer(wireVbo); }
+            foreach (var bm in borrowedNpcMeshes) renderer.RemoveMesh(bm);
+            foreach (var m in meshes) m.Dispose();
+            GL.DeleteTexture(orange);
+            return shapes;
         }
 
         float[]? pickDepth = picks.Count > 0 || npcActors.Count > 0 ? new float[size * size] : null;
@@ -1313,65 +1353,7 @@ static class TexturedScene
         GL.DeleteFramebuffer(fbo); GL.DeleteTexture(colorTex); GL.DeleteRenderbuffer(depthRb);
         if (msFbo != 0) { GL.DeleteFramebuffer(msFbo); GL.DeleteRenderbuffer(msColorRb); GL.DeleteRenderbuffer(msDepthRb); }
 
-        // The frame is a screenshot: opaque by definition. The colour buffer's ALPHA, though, is
-        // whatever the material shader happened to write — the ground comes back at alpha ~50 and
-        // alpha-blended canopy at 0 — and ImageSharp honours it, so the compare stitch was
-        // compositing each panel over its black canvas and darkening most of the picture (the
-        // panel PNGs were fine; the stitched file everyone actually looks at was not). Force it.
-        for (int i = 3; i < pixels.Length; i += 4) pixels[i] = 255;
-
-        using (var img = Image.LoadPixelData<Rgba32>(pixels, size, size))
-        {
-            img.Mutate(x => x.Flip(FlipMode.Vertical));
-            if (captionLines.Count + npcCaptionLines.Count > 0)
-            {
-                // Burn the caption into the frame so it travels with the PNG into any viewer.
-                // Everything about the caption is in units of the 1280-wide frame it was
-                // tuned on, so --size 2560 gets text twice as tall and the bar reads the same.
-                float capScale = size / 1280f;
-                Font? font = null;
-                foreach (var famName in new[] { "Segoe UI", "Arial", "Verdana" })
-                    if (SystemFonts.TryGet(famName, out var fam)) { font = fam.CreateFont(15f * capScale, FontStyle.Bold); break; }
-                if (font is null)
-                    foreach (var fam in SystemFonts.Families) { font = fam.CreateFont(15f * capScale, FontStyle.Bold); break; }
-                if (font is not null)
-                {
-                    int totalLines = captionLines.Count + npcCaptionLines.Count;
-                    int lineH = (int)(22f * capScale), barH = (int)(10f * capScale) + lineH * totalLines;
-                    var f2 = font;
-                    img.Mutate(x =>
-                    {
-                        x.Fill(SixLabors.ImageSharp.Color.FromRgba(8, 10, 14, 200), new SixLabors.ImageSharp.RectangleF(0, 0, size, barH));
-                        for (int i = 0; i < captionLines.Count; i++)
-                            x.DrawText(captionLines[i], f2, SixLabors.ImageSharp.Color.White,
-                                       new SixLabors.ImageSharp.PointF(12f * capScale, 7f * capScale + lineH * i));
-                        // Each actor's caption line wears that actor's identity colour — the
-                        // same one its puck fill and rim wear — so "who is who" is answered by
-                        // the caption itself, not by counting rings.
-                        for (int j = 0; j < npcCaptionLines.Count; j++)
-                        {
-                            var (txt, c) = npcCaptionLines[j];
-                            x.DrawText(txt, f2,
-                                       SixLabors.ImageSharp.Color.FromRgb(
-                                           (byte)Math.Clamp(c.X * 255f, 0f, 255f),
-                                           (byte)Math.Clamp(c.Y * 255f, 0f, 255f),
-                                           (byte)Math.Clamp(c.Z * 255f, 0f, 255f)),
-                                       new SixLabors.ImageSharp.PointF(12f * capScale, 7f * capScale + lineH * (captionLines.Count + j)));
-                        }
-                    });
-                }
-                else
-                    Console.WriteLine("   caption: no system font found; image saved without caption");
-            }
-            Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(outPath))!);
-            // Replication chunk: the camera pose (and the arguments that compose it) rides
-            // inside the file as a PNG tEXt entry keyed "viewprobe", so a shot can be re-run
-            // from the image alone even when it is cropped away from its console transcript.
-            if (pngTextMeta is { Length: > 0 })
-                img.Metadata.GetPngMetadata().TextData.Add(
-                    new SixLabors.ImageSharp.Formats.Png.Chunks.PngTextData("viewprobe", pngTextMeta, string.Empty, string.Empty));
-            img.SaveAsPng(outPath);
-        }
+        SaveFrame(pixels, size, size, captionLines, npcCaptionLines, pngTextMeta, outPath);
 
         // Give back the borrowed NPC meshes BEFORE this renderer can dispose them —
         // ClearMeshes()/Dispose() destroy what they hold, and the actors' VAOs must
@@ -1401,6 +1383,72 @@ static class TexturedScene
         if (textures.MissingTexturePaths.Count > 0)
             Console.WriteLine($"   textures the resolver could NOT find (white fallback, counted per rule 6): {textures.MissingTexturePaths.Count:N0}");
         return shapes;
+    }
+
+    /// <summary>Flip, force opaque, burn the caption bar, embed the replication chunk, save.
+    /// Shared by the static path and the interactive F12 capture — one encoding of "what a
+    /// viewprobe PNG is". Caption metrics are in units of the 1280-wide frame they were tuned
+    /// on, scaled by WIDTH (the static path is square, so this is the same scale it always
+    /// used).</summary>
+    internal static void SaveFrame(byte[] pixels, int width, int height,
+        IReadOnlyList<string> captionLines, IReadOnlyList<(string Text, Vector3 Color)> npcCaptionLines,
+        string? pngTextMeta, string outPath)
+    {
+        // The frame is a screenshot: opaque by definition. The colour buffer's ALPHA, though, is
+        // whatever the material shader happened to write — the ground comes back at alpha ~50 and
+        // alpha-blended canopy at 0 — and ImageSharp honours it, so the compare stitch was
+        // compositing each panel over its black canvas and darkening most of the picture (the
+        // panel PNGs were fine; the stitched file everyone actually looks at was not). Force it.
+        for (int i = 3; i < pixels.Length; i += 4) pixels[i] = 255;
+
+        using var img = Image.LoadPixelData<Rgba32>(pixels, width, height);
+        img.Mutate(x => x.Flip(FlipMode.Vertical));
+        if (captionLines.Count + npcCaptionLines.Count > 0)
+        {
+            // Burn the caption into the frame so it travels with the PNG into any viewer.
+            float capScale = width / 1280f;
+            Font? font = null;
+            foreach (var famName in new[] { "Segoe UI", "Arial", "Verdana" })
+                if (SystemFonts.TryGet(famName, out var fam)) { font = fam.CreateFont(15f * capScale, FontStyle.Bold); break; }
+            if (font is null)
+                foreach (var fam in SystemFonts.Families) { font = fam.CreateFont(15f * capScale, FontStyle.Bold); break; }
+            if (font is not null)
+            {
+                int totalLines = captionLines.Count + npcCaptionLines.Count;
+                int lineH = (int)(22f * capScale), barH = (int)(10f * capScale) + lineH * totalLines;
+                var f2 = font;
+                img.Mutate(x =>
+                {
+                    x.Fill(SixLabors.ImageSharp.Color.FromRgba(8, 10, 14, 200), new SixLabors.ImageSharp.RectangleF(0, 0, width, barH));
+                    for (int i = 0; i < captionLines.Count; i++)
+                        x.DrawText(captionLines[i], f2, SixLabors.ImageSharp.Color.White,
+                                   new SixLabors.ImageSharp.PointF(12f * capScale, 7f * capScale + lineH * i));
+                    // Each actor's caption line wears that actor's identity colour — the
+                    // same one its puck fill and rim wear — so "who is who" is answered by
+                    // the caption itself, not by counting rings.
+                    for (int j = 0; j < npcCaptionLines.Count; j++)
+                    {
+                        var (txt, c) = npcCaptionLines[j];
+                        x.DrawText(txt, f2,
+                                   SixLabors.ImageSharp.Color.FromRgb(
+                                       (byte)Math.Clamp(c.X * 255f, 0f, 255f),
+                                       (byte)Math.Clamp(c.Y * 255f, 0f, 255f),
+                                       (byte)Math.Clamp(c.Z * 255f, 0f, 255f)),
+                                   new SixLabors.ImageSharp.PointF(12f * capScale, 7f * capScale + lineH * (captionLines.Count + j)));
+                    }
+                });
+            }
+            else
+                Console.WriteLine("   caption: no system font found; image saved without caption");
+        }
+        Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(outPath))!);
+        // Replication chunk: the camera pose (and the arguments that compose it) rides
+        // inside the file as a PNG tEXt entry keyed "viewprobe", so a shot can be re-run
+        // from the image alone even when it is cropped away from its console transcript.
+        if (pngTextMeta is { Length: > 0 })
+            img.Metadata.GetPngMetadata().TextData.Add(
+                new SixLabors.ImageSharp.Formats.Png.Chunks.PngTextData("viewprobe", pngTextMeta, string.Empty, string.Empty));
+        img.SaveAsPng(outPath);
     }
 
     /// <summary>Overlay geometry that is not a navmesh edge: the dashed cell outline and the
