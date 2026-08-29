@@ -271,6 +271,19 @@ for (int i = 1; i < args.Length; i++)
     else if (args[i] == "--list-meshes") listMeshes = true;
     else if (args[i] is "--instance" or "--game" or "--profile") i++;   // consumed above
 }
+// Replication args: the command line verbatim, minus this machine's paths (instance/profile/
+// game/out). Embedded in every output PNG — a replay from these is BYTE-exact, which the
+// resolved camera pose alone is not: a --look camera replayed as the equivalent --yaw/--pitch
+// composes the same view direction but a sub-pixel-different frame (measured).
+var pathFlags = new HashSet<string>(StringComparer.Ordinal) { "--instance", "--profile", "--game", "--out" };
+var replArgs = new List<string>();
+for (int ai = 0; ai < args.Length; ai++)
+{
+    if (pathFlags.Contains(args[ai])) { ai++; continue; }
+    replArgs.Add(args[ai].Contains(' ') ? $"\"{args[ai]}\"" : args[ai]);
+}
+string replayArgs = string.Join(' ', replArgs);
+
 if (!drawNav) navMode = "off";
 if ((conflictsPath is not null || redSpecs.Count > 0) && !navModeExplicit) navMode = "wire";
 if (navMode is not ("off" or "filled" or "wire" or "both"))
@@ -1375,6 +1388,22 @@ if (textured)
         foreach (var m2 in npcLcMods) (m2 as IDisposable)?.Dispose();
     }
 
+    // The FULL camera pose travels with every render, so any shot can be replicated from the
+    // image alone: burnt into the caption in the game's own conventions (yaw 0 = north/+Y,
+    // clockwise; positive pitch looks down — the exact inverse of the --yaw/--pitch direction
+    // math above), and embedded as a PNG tEXt chunk holding the arguments verbatim. A camera
+    // given as --look round-trips as --yaw/--pitch; both compose the same view.
+    float camYawDeg = (float.RadiansToDegrees(MathF.Atan2(lookPos.Value.X - eyePos.Value.X,
+                                                          lookPos.Value.Y - eyePos.Value.Y)) + 360f) % 360f;
+    float camPitchDeg = PitchDownDeg();
+    string camPose = $"eye {eyePos.Value.X:0.##},{eyePos.Value.Y:0.##},{eyePos.Value.Z:0.##}"
+                   + $" yaw {camYawDeg:0.#}° pitch {camPitchDeg:0.#}° fov {fov:0.#}°";
+    // args = byte-exact replay; pose = the camera those args resolved to THIS run (matters
+    // when the camera came from --eye-ref/--look-ref, whose positions move with the load order).
+    string camMeta = $"args: {replayArgs} | pose: {camPose}"
+                   + $" look {lookPos.Value.X:0.##},{lookPos.Value.Y:0.##},{lookPos.Value.Z:0.##}"
+                   + $" | cell {cellLabel}";
+
     string safe = new string(cellLabel.Select(c => char.IsLetterOrDigit(c) ? c : '_').ToArray());
 
     // The target cell's own footprint, for the outline. Exteriors only — an interior has no grid
@@ -1396,7 +1425,8 @@ if (textured)
                scene, assets, dataDir, modFolders, overwriteDir,
                (eyePos.Value, lookPos.Value, fov), g, r, terrainPatches, terrainLayers, navMode, navColor,
                skyColor, terrainHeightAt, dashUnderground, dashUnderStatics, msaa, cullAbove, cellBounds,
-               diffs ?? noDiff, diffColor, picks, captionLines, npcCaptions, npcActors, npcPucksOn, keepFx, fxStatic, listMeshes, size, outFile);
+               diffs ?? noDiff, diffColor, picks, captionLines, npcCaptions, npcActors, npcPucksOn, keepFx, fxStatic, listMeshes, size, outFile,
+               camMeta);
 
     if (compare is { } cmp)
     {
@@ -1473,7 +1503,7 @@ if (textured)
             var (g, r) = BuildNavSets(navs);
             var diffs = DiffFor(navs);
             string pf = Path.Combine(outDir, $"{safe}-cmp{pi + 1}-{new string(label.Select(ch => char.IsLetterOrDigit(ch) ? ch : '_').ToArray())}.png");
-            var cap = new List<string> { $"[{pi + 1}/3] {(pi == 2 ? "winning state (actual merged navmesh)" : $"cell navmesh if {label} won")} \u2014 {cellLabel}{CullCaption()}" };
+            var cap = new List<string> { $"[{pi + 1}/3] {(pi == 2 ? "winning state (actual merged navmesh)" : $"cell navmesh if {label} won")} \u2014 {cellLabel} \u2014 {camPose}{CullCaption()}" };
             if (redNav.Count > 0) cap.Add(RedCaption(navs));
             if (DoorCaption() is { } dc) cap.Add(dc);
             // NPC caption lines ride the separate coloured channel (npcCaptions),
@@ -1497,6 +1527,9 @@ if (textured)
                     using (var img = Image.Load<Rgba32>(panelFiles[pi]))
                         ctx.DrawImage(img, new SixLabors.ImageSharp.Point(pi * (size + 4), 0), 1f);
             });
+            // The stitch carries the same replication chunk as its panels (one camera, three panels).
+            canvas.Metadata.GetPngMetadata().TextData.Add(
+                new SixLabors.ImageSharp.Formats.Png.Chunks.PngTextData("viewprobe", camMeta, string.Empty, string.Empty));
             canvas.SaveAsPng(stitched);
         }
         Console.WriteLine($"wrote:\n   {stitched}");
@@ -1513,12 +1546,13 @@ if (textured)
     }
 
     string fpOut = Path.Combine(outDir, $"{safe}-fp.png");
-    var fpCap = new List<string> { $"{cellLabel} \u2014 {(navPlugin ?? "winning state")} \u2014 eye {eyePos.Value.X:0},{eyePos.Value.Y:0},{eyePos.Value.Z:0}{CullCaption()}" };
+    var fpCap = new List<string> { $"{cellLabel} \u2014 {(navPlugin ?? "winning state")} \u2014 {camPose}{CullCaption()}" };
     if (redNav.Count > 0) fpCap.Add(RedCaption(navPlugin is not null && navByPlugin.TryGetValue(navPlugin, out var np0) ? np0 : winNav));
     if (DoorCaption() is { } fdc) fpCap.Add(fdc);
     int drawnShapes = Render(navTris, redTris, fpOut, fpCap);
     Console.WriteLine($"wrote:\n   {fpOut}");
-    Console.WriteLine($"   eye {eyePos.Value.X:0},{eyePos.Value.Y:0},{eyePos.Value.Z:0} -> look {lookPos.Value.X:0},{lookPos.Value.Y:0},{lookPos.Value.Z:0}  fov {fov:0}°  ({drawnShapes:N0} shapes)");
+    Console.WriteLine($"   eye {eyePos.Value.X:0},{eyePos.Value.Y:0},{eyePos.Value.Z:0} -> look {lookPos.Value.X:0},{lookPos.Value.Y:0},{lookPos.Value.Z:0}"
+                    + $"  yaw {camYawDeg:0.#}° pitch {camPitchDeg:0.#}° fov {fov:0}°  ({drawnShapes:N0} shapes)");
     NpcCleanup();
     return 0;
 }
@@ -1771,6 +1805,20 @@ string RenderOne(float azDeg, float elDeg, string file)
     using var img = Image.LoadPixelData<Rgba32>(px, size, size);
     img.Mutate(x => x.Flip(SixLabors.ImageSharp.Processing.FlipMode.Vertical));   // GL origin is bottom-left
     string outPath = Path.Combine(outDir, file);
+    // Replication chunk, same key the textured path writes: flat mode's camera is derived
+    // (orbit around the geometry bounds), so the chunk carries BOTH the arguments that
+    // reproduce the shot and the absolute pose they resolved to this run. The pose is also
+    // printed per shot — bounds move when the loaded set does, so the numbers are the record.
+    float flatYaw = (float.RadiansToDegrees(MathF.Atan2(centre.X - eye.X, centre.Y - eye.Y)) + 360f) % 360f;
+    float flatPitch = float.RadiansToDegrees(MathF.Atan2(eye.Z - centre.Z,
+                          MathF.Max(1e-3f, MathF.Sqrt((centre.X - eye.X) * (centre.X - eye.X) + (centre.Y - eye.Y) * (centre.Y - eye.Y)))));
+    string flatMeta = $"args: {replayArgs} | flat az {azDeg:0.#} elev {elDeg:0.#}"
+                    + $" | pose: eye {eye.X:0.##},{eye.Y:0.##},{eye.Z:0.##} look {centre.X:0.##},{centre.Y:0.##},{centre.Z:0.##}"
+                    + $" yaw {flatYaw:0.#} pitch {flatPitch:0.#} fov 50 | cell {cellLabel}";
+    img.Metadata.GetPngMetadata().TextData.Add(
+        new SixLabors.ImageSharp.Formats.Png.Chunks.PngTextData("viewprobe", flatMeta, string.Empty, string.Empty));
+    Console.WriteLine($"   {file}: az {azDeg:0.#}° elev {elDeg:0.#}° — eye {eye.X:0},{eye.Y:0},{eye.Z:0}"
+                    + $" look {centre.X:0},{centre.Y:0},{centre.Z:0} yaw {flatYaw:0.#}° pitch {flatPitch:0.#}° fov 50°");
     img.SaveAsPng(outPath);
     return outPath;
 }

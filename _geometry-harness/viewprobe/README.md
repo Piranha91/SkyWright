@@ -248,6 +248,19 @@ gitignored for the same reason: probe transcripts name the plugins of whatever l
 - **In-image captions:** dark bar, up to 4 lines — panel identity + cell, each red navmesh as
   `FormKey = runtime FormID (N tris)` (ESL-aware for the exact profile rendered), implicated doors
   as `ORANGE door FormKey = FormID`.
+- **Every render carries its camera** (2026-08-28). The caption's first line includes the full
+  pose — `eye X,Y,Z yaw N° pitch N° fov N°`, in the game's conventions (yaw 0 = north/+Y,
+  clockwise; positive pitch looks down), so it pastes back as `--eye`/`--yaw`/`--pitch`/`--fov`.
+  Every output PNG (textured single view, compare panels, the stitch, and flat-mode shots) also
+  embeds a `viewprobe` tEXt chunk: `args:` — the command line verbatim minus the machine-local
+  paths (`--instance/--profile/--game/--out`) — then `pose:` (the resolved eye/yaw/pitch/fov/look)
+  and the cell. Replay from `args:` is BYTE-exact; replay from the rounded pose composes the same
+  view but a sub-pixel-different frame (measured), so `args:` is the regression-grade replay and
+  `pose:` is the human-readable record — which also matters when the camera came from
+  `--eye-ref`/`--look-ref`, whose positions move with the load order. Flat mode prints each
+  shot's derived orbit pose per line (its camera follows the geometry bounds, so the numbers,
+  not the arguments, are the durable record). Read the chunk with any PNG tool, e.g. Python:
+  `Image.open(p).text["viewprobe"]`.
 - **Highlighted refs** keep their own texture and get a three-part orange highlight from one
   centroid-inflated hull (winding normalized geometrically — some door NIFs carry inward normals):
   a solid depth-tested rim where directly visible; a light 0.22-alpha amber wash wherever the hull

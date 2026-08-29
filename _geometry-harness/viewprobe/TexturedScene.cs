@@ -160,7 +160,8 @@ static class TexturedScene
         bool keepFx,                                       // --fx: draw effect-shader shapes too
         bool fxStatic,                                     // --fx-static: draw them as a frozen frame
         bool listEffectMeshes,                             // --list-meshes: name the meshes they came from
-        int size, string outPath)
+        int size, string outPath,
+        string? pngTextMeta = null)                        // replication chunk: written as a PNG tEXt entry keyed "viewprobe"
     {
         var logger = new ConsoleCvLogger();
         var gate = new CharacterViewerLogGate { Verbose = Environment.GetEnvironmentVariable("VP_CV_VERBOSE") == "1" };
@@ -1363,6 +1364,12 @@ static class TexturedScene
                     Console.WriteLine("   caption: no system font found; image saved without caption");
             }
             Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(outPath))!);
+            // Replication chunk: the camera pose (and the arguments that compose it) rides
+            // inside the file as a PNG tEXt entry keyed "viewprobe", so a shot can be re-run
+            // from the image alone even when it is cropped away from its console transcript.
+            if (pngTextMeta is { Length: > 0 })
+                img.Metadata.GetPngMetadata().TextData.Add(
+                    new SixLabors.ImageSharp.Formats.Png.Chunks.PngTextData("viewprobe", pngTextMeta, string.Empty, string.Empty));
             img.SaveAsPng(outPath);
         }
 
