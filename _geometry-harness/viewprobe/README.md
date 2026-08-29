@@ -45,6 +45,15 @@ findings they demonstrate) lives with that instance, not here.
   neighbours, and nothing else in the picture says where the cell under examination stops.
   `--no-cell-outline` drops it — worth doing for eye-level shots, where it cuts across geometry at
   head height and reads as part of a building.
+- **Ring refs** (on by default, exteriors only): placed refs load for the target cell AND its ±1
+  ring, matching the terrain. Before this, neighbours contributed terrain and nothing else, so any
+  eye-level shot read near objects → void → bare ring terrain, with everything between absent
+  (fixed 2026-08-28; a building 700 u away in the next cell simply never loaded). Navmesh and the conflict
+  overlay stay TARGET-CELL-ONLY — they are the annotation layer for the cell under examination,
+  scoped like the cell outline — but implicated DOORS standing in ring cells now render and
+  highlight, and the "implicated door is NOT in the rendered cell(s)" message fires only for doors
+  beyond the whole loaded set. `--no-ring-refs` returns to target-cell-only refs (cheaper — a
+  dense ring can be ~8× the shapes). Interiors have no ring.
 - **Navmesh diff spheres** (`--compare` only, on by default): small shaded VIOLET spheres at the
   navmesh vertex positions one plugin's version has and the other's does not, drawn in every panel
   that contains them, always visible. `--no-nav-diff` drops them.
@@ -110,6 +119,7 @@ all knowledge.
 | `VP_ALPHA_DUMP=gx,gy` | every alpha layer of that cell as a 17×17 ASCII opacity grid |
 | `VP_LAYER_ONLY=<substr>` + `VP_LAYER_SOLID=1` | draw only the painted layers whose diffuse matches, at full opacity — isolates one layer so "is that wash really this texture?" has an answer |
 | `VP_OCCL_SLACK="rel,abs"` | override the behind-geometry depth-compare slack (default `1.002,1.5`) |
+| `VP_ENABLE_DUMP=1` | every enable-parent group among the loaded refs, with the parent's own state, its chain, and how the children resolve — the check that a "disabled via enable parent" verdict rests on what the data actually states |
 | `VP_DOOR_DEBUG=1` | print each conflict-implicated door's holding cell during the load walk |
 | `VP_CV_VERBOSE=1` | unmute the rendering library's logger |
 
@@ -153,11 +163,25 @@ gitignored for the same reason: probe transcripts name the plugins of whatever l
   while `Matrix4x4.CreateRotation*` is right-handed counter-clockwise-positive — so the angles must
   be NEGATED before composing, or every rotated ref draws with its heading mirrored about north.
 - **Persistent refs.** Exterior doors live in the worldspace persistent cell, which **masquerades as
-  grid (0,0)** — they cannot be identified by cell record. viewprobe collects refs by their own
-  `Persistent` flag and merges them into the scene by position against the target cell's bounds.
-  Anything position-based must remember these exist.
-- **Markers** are classified from record evidence (header flag `0x00800000`, `marker` in the
-  EditorID or model path); the game never draws them.
+  grid (0,0)** — they cannot be identified by cell record (and that masquerade is why the ring test
+  admits only non-persistent refs from neighbour cells). viewprobe collects refs by their own
+  `Persistent` flag and merges them into the scene by position against the whole ref-loaded area's
+  bounds — the 3×3 ring by default, the target cell alone under `--no-ring-refs`.
+- **Markers** are classified from the record's Is-Marker header flag (`0x00800000`) ONLY — the
+  engine's own don't-render rule. Name heuristics (*marker* EditorID or model path) are wrong in
+  both directions and were removed 2026-08-28: `Markers\BlackPlane01.nif` is the vanilla
+  gap-sealing black plane (record flags 0, real lit geometry — the same job as the light-blocking
+  shadow planes above) and dropping it as a marker opens sky-coloured holes at floor seams, while
+  the CK-only marker meshes need no name rule at all — they contain zero drawable shapes, or a
+  single effect-shader shape the per-shape unshadeable filter already drops.
+- **Runtime enable state.** A ref with an XESP enable parent takes the PARENT's state (XOR the
+  opposite-of-parent flag), chains followed, the player ref (ID 0x14) always enabled — the ref's
+  own initially-disabled flag is CK bookkeeping, not the runtime answer (parent = player +
+  opposite is the standard permanently-disabled idiom). Refs the runtime enables are drawn; refs
+  it disables are dropped even when their own flag is clear. Every ref the scene drops is
+  accounted for in ONE console block (disabled via enable parent / own flag / deleted / no
+  model-bearing base) — a silent category is how a render missing a third of its content once
+  read as fully accounted for.
 - **A profile-local `Skyrim.ini` is REQUIRED** in each profile — archive discovery reads its
   `[Archive]` lists. Without it the base-game texture BSAs are invisible and renders silently lose
   all textures.
@@ -502,6 +526,23 @@ after readback in both render paths. The check that catches a relapse is check 3
 
 **`DstBlendIndex` was never copied to `GlMesh`** — see *Effect geometry*. Every additive shape in
 the game was composited as ordinary alpha blending; invisible on solid geometry, fatal for a flame.
+
+**The marker name heuristics swallowed real geometry** (fixed 2026-08-28). "Marker" in an EditorID
+or model path classified the base as an editor marker, which silently dropped every
+`Markers\BlackPlane01.nif` ref — the vanilla black plane mods use to seal floor seams and openings
+— so interiors built over a void showed sky-blue bands at every seam, from legal standing
+positions. The initially-disabled diagnosis this suggested was a red herring: enable-parent
+evaluation (added in the same pass) proved the dropped-as-disabled refs were all *genuinely*
+permanently disabled, and the holes were the marker filter's. See *Markers* above for the
+evidence-based rule that replaced the heuristics.
+
+**Only the target cell's objects loaded** (fixed 2026-08-28). Neighbouring exterior cells
+contributed terrain and nothing else, so eye-level shots showed near objects, void, then distant
+ring terrain. The target's grid is now resolved in a pre-pass and the main walk admits the ±1
+ring's refs. See *Ring refs* above for scoping (navmesh/overlay stay target-only) and the
+`--no-ring-refs` opt-out. Re-baseline any byte-exact reference renders after picking this fix up —
+exterior scenes gain geometry, and a camera composed before it may now sit behind a neighbour
+cell's structure.
 
 ---
 

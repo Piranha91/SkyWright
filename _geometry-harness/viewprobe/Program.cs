@@ -174,6 +174,13 @@ string? findLtex = null;
 // The render covers the target cell AND its ring of neighbours; a white dashed line along the
 // target's four edges says which is which. --no-cell-outline drops it.
 bool cellOutline = true;
+// Exterior REFS load for the target cell and its ±1 ring, matching the terrain (defect fix,
+// 2026-08-28: neighbours contributed terrain and nothing else, so any eye-level shot showed
+// near objects, then void, then bare ring terrain — the College arcade 700 u away simply never
+// loaded). Navmesh and the conflict overlay stay TARGET-CELL-ONLY: they are the annotation
+// layer for the cell under examination, same scoping as the cell outline. --no-ring-refs goes
+// back to target-cell-only refs (the old, cheaper behaviour). Interiors have no ring.
+bool ringRefs = true;
 // In --compare, mark the navmesh vertices one plugin's version has and the other's does not with
 // small spheres, in every panel that contains them. --no-nav-diff drops them.
 bool navDiff = true;
@@ -249,6 +256,7 @@ for (int i = 1; i < args.Length; i++)
     else if (args[i] == "--list-terrain") listTerrain = true;
     else if (args[i] == "--find-ltex" && i + 1 < args.Length) findLtex = args[++i];
     else if (args[i] == "--no-cell-outline") cellOutline = false;
+    else if (args[i] == "--no-ring-refs") ringRefs = false;
     else if (args[i] == "--no-nav-diff") navDiff = false;
     else if (args[i] == "--nav-at" && i + 1 < args.Length)
     { var p = args[++i].Split(','); if (p.Length == 2) navAt.Add((float.Parse(p[0]), float.Parse(p[1]))); }
@@ -330,6 +338,12 @@ if (conflictsPath is not null)
 // Persistent worldspace refs (doors above all) live in the worldspace's PERSISTENT cell, not the
 // exterior cell record — collect them separately, merge by position after the target is known.
 var persistentWin = new Dictionary<FormKey, (FormKey Ws, PlacedRef Ref)>();
+// Runtime enable state is GLOBAL: a ref's XESP parent can live in another cell entirely (the
+// standard master-switch idiom), so the winning disabled-flag and enable-parent of EVERY ref in
+// the load order are tracked before any drop decision. Winner-takes-all per ref, so a later
+// override that clears the flag or drops the XESP must erase the entry, not just fail to add it.
+var refDisabledFlag = new HashSet<FormKey>();
+var refEnableParent = new Dictionary<FormKey, (FormKey Parent, bool Opposite)>();
 // --npc placement watch, same shape as the door watch: every PlacedNpc whose own FormKey OR
 // whose Base is a requested NPC, wherever it lives (per-ref "later plugin wins").
 var npcRefWhere = new Dictionary<FormKey, (FormKey Cell, string? CellEd, PlacedRef Ref)>();
@@ -351,6 +365,38 @@ var txstDiffuse = new Dictionary<FormKey, string>();
 FormKey? cellKey = null;
 string cellLabel = target;
 bool interior = false;
+
+// ---------------------------------------------------------------------------------------
+// PRE-PASS: resolve the target cell's identity (FormKey, grid, worldspace) before the main
+// walk. The ring test needs the target's GRID, which the single-pass walk only learned when
+// it happened to meet the target cell — too late to have admitted a neighbour that came
+// earlier in the same plugin. Walks the load order with the same first-match semantics the
+// main walk used, and stops at the first hit (the defining master, usually plugin one).
+// ---------------------------------------------------------------------------------------
+bool TargetMatches(CellPlacements cp) =>
+    string.Equals(cp.CellEditorId, target, StringComparison.OrdinalIgnoreCase)
+    || cp.Cell.ToString().Equals(target, StringComparison.OrdinalIgnoreCase)
+    || cp.Cell.ID.ToString("X6").Equals(target.TrimStart('0'), StringComparison.OrdinalIgnoreCase);
+foreach (var path in order.OrderedPaths)
+{
+    ISkyrimModGetter m;
+    try { m = SkyrimMod.CreateFromBinaryOverlay(path, SkyrimRelease.SkyrimSE); } catch { continue; }
+    using (m as IDisposable)
+    {
+        foreach (var cp in PlacementExtract.FromMod(m))
+        {
+            if (!TargetMatches(cp)) continue;
+            cellKey = cp.Cell;
+            cellLabel = cp.CellEditorId ?? cp.Cell.ToString();
+            interior = cp.Interior;
+            targetWorldspace = cp.Worldspace;
+            targetGrid = cp.Grid;
+            break;
+        }
+    }
+    if (cellKey is not null) break;
+}
+if (cellKey is null) { Console.Error.WriteLine($"cell '{target}' not found in the active load order."); return 1; }
 
 foreach (var path in order.OrderedPaths)
 {
@@ -376,12 +422,17 @@ foreach (var path in order.OrderedPaths)
                 var smr = (ISkyrimMajorRecordGetter)rec;
                 baseMesh[smr.FormKey] = f.GivenPath;
                 collectedModel = true;
-                // Editor-marker classification, from evidence the record itself carries: the
-                // Is-Marker header flag (0x00800000), a marker-named EditorID, or a model named
-                // *marker* / under the markers folder. The game renders none of these.
-                bool marker = (smr.MajorRecordFlagsRaw & 0x00800000) != 0
-                    || (smr.EditorID?.Contains("marker", StringComparison.OrdinalIgnoreCase) ?? false)
-                    || f.GivenPath.Contains("marker", StringComparison.OrdinalIgnoreCase);
+                // Editor-marker classification: the Is-Marker header flag (0x00800000) ONLY —
+                // that is the engine's own rule for not rendering a base. The old name
+                // heuristics (*marker* EditorID or model path) over-matched real drawn
+                // geometry: Markers\BlackPlane01.nif is the VANILLA gap-sealing black plane
+                // (record flags 0, nine lit BSTriShapes, the same job as Lux's shadow planes)
+                // and dropping it as a marker opened sky-blue holes in every Grand Solitude
+                // floor seam (2026-08-28). The cases the heuristics were added for need no
+                // rule at all: furniture-marker and dummy NIFs contain zero drawable shapes,
+                // and MarkerX/Teleport-style meshes are single effect-shader shapes the
+                // per-shape unshadeable filter already drops.
+                bool marker = (smr.MajorRecordFlagsRaw & 0x00800000) != 0;
                 if (marker) baseIsMarker.Add(smr.FormKey);
                 if (!string.IsNullOrWhiteSpace(smr.EditorID)) baseEditorId[smr.FormKey] = smr.EditorID!;
             }
@@ -390,6 +441,12 @@ foreach (var path in order.OrderedPaths)
 
         foreach (var cp in PlacementExtract.FromMod(m))
         {
+            foreach (var r in cp.Refs)
+            {
+                if (r.InitiallyDisabled) refDisabledFlag.Add(r.FormKey); else refDisabledFlag.Remove(r.FormKey);
+                if (r.EnableParent is { } epk) refEnableParent[r.FormKey] = (epk, r.EnableParentOpposite);
+                else refEnableParent.Remove(r.FormKey);
+            }
             // Worldspace PERSISTENT refs (doors above all). Not detected by the holding cell —
             // the persistent cell masquerades as grid (0,0) — but by each ref's own Persistent
             // flag: the game loads these with the worldspace, so membership in a rendered cell
@@ -415,48 +472,118 @@ foreach (var path in order.OrderedPaths)
                         { doorWhere[r.FormKey] = (cp.Cell, cp.CellEditorId, r);     // later plugin wins
                           if (Environment.GetEnvironmentVariable("VP_DOOR_DEBUG") == "1")
                               Console.WriteLine($"   [debug] door {r.FormKey} in cp: Cell={cp.Cell} Grid={(cp.Grid is { } gg ? $"{gg.X},{gg.Y}" : "null")} Interior={cp.Interior} Ws={cp.Worldspace} plugin={m.ModKey}"); }
-            bool match = cellKey is { } ck ? cp.Cell == ck
-                : string.Equals(cp.CellEditorId, target, StringComparison.OrdinalIgnoreCase)
-                  || cp.Cell.ToString().Equals(target, StringComparison.OrdinalIgnoreCase)
-                  || cp.Cell.ID.ToString("X6").Equals(target.TrimStart('0'), StringComparison.OrdinalIgnoreCase);
-            if (!match) continue;
+            bool isTarget = cp.Cell == cellKey;
+            // ±1-ring neighbours (exteriors): their refs are in frame from any eye-level
+            // camera, so they load like the terrain always has. The worldspace persistent
+            // cell masquerades as grid (0,0) and must not be admitted as a neighbour —
+            // its refs are all Persistent, and only non-persistent refs are taken from
+            // ring cells (persistent refs merge by position, below, ring-wide).
+            bool inRing = !isTarget && ringRefs && !interior && !cp.Interior
+                && cp.Worldspace == targetWorldspace && cp.Worldspace != FormKey.Null
+                && targetGrid is { } tg && cp.Grid is { } cg
+                && Math.Abs(cg.X - tg.X) <= 1 && Math.Abs(cg.Y - tg.Y) <= 1;
+            if (!isTarget && !inRing) continue;
 
-            cellKey ??= cp.Cell;
-            cellLabel = cp.CellEditorId ?? cp.Cell.ToString();
-            interior = cp.Interior;
-            targetWorldspace = cp.Worldspace;
-            targetGrid = cp.Grid;
-            foreach (var r in cp.Refs) winRef[r.FormKey] = r;
-            foreach (var nav in cp.Navmeshes)
+            if (isTarget)
             {
-                winNav[nav.FormKey] = nav;
-                var pn = m.ModKey.FileName.String;
-                if (navVersionPlugins.Contains(pn))
+                cellLabel = cp.CellEditorId ?? cp.Cell.ToString();
+                foreach (var r in cp.Refs) winRef[r.FormKey] = r;
+                // Navmesh (and with it the conflict overlay) stays TARGET-CELL-ONLY: it is
+                // the annotation layer for the cell under examination, scoped like the cell
+                // outline. The ring contributes world geometry, not annotations.
+                foreach (var nav in cp.Navmeshes)
                 {
-                    if (!navByPlugin.TryGetValue(pn, out var d)) navByPlugin[pn] = d = new();
-                    d[nav.FormKey] = nav;
+                    winNav[nav.FormKey] = nav;
+                    var pn = m.ModKey.FileName.String;
+                    if (navVersionPlugins.Contains(pn))
+                    {
+                        if (!navByPlugin.TryGetValue(pn, out var d)) navByPlugin[pn] = d = new();
+                        d[nav.FormKey] = nav;
+                    }
                 }
             }
+            else
+                foreach (var r in cp.Refs)
+                    if (!r.Persistent) winRef[r.FormKey] = r;
         }
     }
 }
 
-if (cellKey is null) { Console.Error.WriteLine($"cell '{target}' not found in the active load order."); return 1; }
 Console.WriteLine($"cell {cellLabel} {(interior ? "(interior)" : "(exterior)")}  {cellKey}");
 if (!interior && targetGrid is { } tgp)
 {
-    float px0 = tgp.X * 4096f, py0 = tgp.Y * 4096f;
+    // Persistent refs merge by position over the whole REF-LOADED area: the 3x3 ring when
+    // ring refs are on, the target cell alone otherwise. A narrower test would silently
+    // drop exterior doors standing in a neighbour cell that visibly renders.
+    int ringR = ringRefs ? 1 : 0;
+    float px0 = (tgp.X - ringR) * 4096f, py0 = (tgp.Y - ringR) * 4096f;
+    float pspan = 4096f * (1 + 2 * ringR);
     int addedPersist = 0;
     foreach (var (pws, pr) in persistentWin.Values)
         if (pws == targetWorldspace
-            && pr.Position.X >= px0 && pr.Position.X < px0 + 4096f
-            && pr.Position.Y >= py0 && pr.Position.Y < py0 + 4096f
+            && pr.Position.X >= px0 && pr.Position.X < px0 + pspan
+            && pr.Position.Y >= py0 && pr.Position.Y < py0 + pspan
             && !winRef.ContainsKey(pr.FormKey))
         { winRef[pr.FormKey] = pr; addedPersist++; }
     if (addedPersist > 0)
-        Console.WriteLine($"   +{addedPersist} persistent worldspace ref(s) inside this cell's bounds (doors live here)");
+        Console.WriteLine($"   +{addedPersist} persistent worldspace ref(s) inside the rendered {(ringR > 0 ? "3x3 cells'" : "cell's")} bounds (doors live here)");
 }
 Console.WriteLine($"winning state: {winRef.Count:N0} refs, {winNav.Count:N0} navmeshes  ({sw.Elapsed.TotalSeconds:0.0}s)");
+
+// ---------------------------------------------------------------------------------------
+// Runtime enable state. A ref with an XESP enable parent takes the PARENT's state (XOR the
+// opposite-of-parent flag) — its own initially-disabled flag is CK bookkeeping, not the
+// runtime answer. The player ref (ID 0x14) is always enabled at runtime even though the
+// record carries the disabled flag, which is exactly why "parent = player, opposite" is the
+// standard permanently-disabled idiom. Chains are followed with memoization; a cycle is an
+// authoring error and falls back to the ref's own flag.
+// ---------------------------------------------------------------------------------------
+var enableMemo = new Dictionary<FormKey, bool>();
+bool RefEnabledInner(FormKey fk, HashSet<FormKey>? seen)
+{
+    if (fk.ID == 0x14) return true;                                  // PlayerRef
+    if (enableMemo.TryGetValue(fk, out var known)) return known;
+    bool en;
+    if (refEnableParent.TryGetValue(fk, out var p))
+    {
+        seen ??= new HashSet<FormKey>();
+        en = seen.Add(fk)
+            ? RefEnabledInner(p.Parent, seen) ^ p.Opposite
+            : !refDisabledFlag.Contains(fk);                         // cycle
+    }
+    else en = !refDisabledFlag.Contains(fk);
+    enableMemo[fk] = en;
+    return en;
+}
+bool RefEnabled(FormKey fk) => RefEnabledInner(fk, null);
+// The three dispositions a drop report needs to tell apart.
+string? DisabledWhy(PlacedRef r) =>
+    RefEnabled(r.FormKey) ? null
+    : refEnableParent.TryGetValue(r.FormKey, out var dp) ? $"disabled via enable parent {dp.Parent}"
+    : "initially disabled";
+
+// VP_ENABLE_DUMP=1 — every enable-parent group among this cell's refs, with how the chain
+// resolves. The check that a "disabled via enable parent" verdict rests on the chain the
+// data actually states, not on a wrong evaluation.
+if (Environment.GetEnvironmentVariable("VP_ENABLE_DUMP") == "1")
+{
+    Console.WriteLine($"   ---- enable-parent groups among this cell's refs ----");
+    var groups = winRef.Values
+        .Where(r => refEnableParent.ContainsKey(r.FormKey))
+        .GroupBy(r => refEnableParent[r.FormKey])
+        .OrderByDescending(g => g.Count());
+    foreach (var g in groups)
+    {
+        var (parent, opp) = g.Key;
+        bool parentEnabled = RefEnabled(parent);
+        string pflag = parent.ID == 0x14 ? "PlayerRef, engine-enabled"
+                     : refDisabledFlag.Contains(parent) ? "flag-disabled" : "flag-enabled";
+        string pchain = refEnableParent.TryGetValue(parent, out var pp)
+            ? $", parented to {pp.Parent}{(pp.Opposite ? " OPPOSITE" : "")}" : "";
+        Console.WriteLine($"   {g.Count(),5} ref(s)  parent {parent} [{pflag}{pchain} -> {(parentEnabled ? "ENABLED" : "DISABLED")}]"
+                        + $"{(opp ? "  OPPOSITE" : "")}  => children {(parentEnabled ^ opp ? "ENABLED" : "DISABLED")}");
+    }
+}
 
 // ---------------------------------------------------------------------------------------
 // First-person textured mode — see TexturedScene.cs. Exits here; the flat diagnostic mode
@@ -531,10 +658,13 @@ if (textured)
         foreach (var dfk in conflictDoors)
             if (winRef.TryGetValue(dfk, out var dref))
                 Console.WriteLine($"   door {dfk} at {dref.Position.X:0},{dref.Position.Y:0},{dref.Position.Z:0}  (orange)");
+        // "Not in the rendered cells" = not in the loaded ref set — the target cell plus its
+        // ±1 ring when ring refs are on. A door in a ring cell renders and highlights like
+        // one in the target cell; this message now fires only for doors beyond all of that.
         foreach (var dfk in doorWatchKeys)
             if (!winRef.ContainsKey(dfk))
                 Console.WriteLine(doorWhere.TryGetValue(dfk, out var dw)
-                    ? $"   implicated door {dfk} is NOT in this cell: it sits in {dw.CellEd ?? dw.Cell.ToString()} at {dw.Ref.Position.X:0},{dw.Ref.Position.Y:0},{dw.Ref.Position.Z:0}"
+                    ? $"   implicated door {dfk} is NOT in the rendered cell(s): it sits in {dw.CellEd ?? dw.Cell.ToString()} at {dw.Ref.Position.X:0},{dw.Ref.Position.Y:0},{dw.Ref.Position.Z:0}"
                     : $"   implicated door {dfk}: no placed ref with this FormKey anywhere in the load order");
         if (redHere == 0 && conflictDoors.Count == 0)
             Console.WriteLine($"   (no conflict in that file names a navmesh or door in THIS cell — nothing to paint)");
@@ -542,11 +672,21 @@ if (textured)
 
     var scene = new List<ViewProbe.SceneRef>();
     int fxSkipped = 0, markerSkipped = 0;
+    int deletedSkipped = 0, disabledFlagSkipped = 0, disabledParentSkipped = 0, enabledByParentDrawn = 0, noModel = 0;
     var meshCensus = listMeshes ? new Dictionary<string, (int Count, string Class)>(StringComparer.OrdinalIgnoreCase) : null;
     foreach (var r in winRef.Values)
     {
-        if (r.InitiallyDisabled || r.Deleted) continue;
-        if (r.Base is not { } bk || !baseMesh.TryGetValue(bk, out var rel)) continue;
+        if (r.Deleted) { deletedSkipped++; continue; }
+        if (!RefEnabled(r.FormKey))
+        {
+            if (refEnableParent.ContainsKey(r.FormKey)) disabledParentSkipped++; else disabledFlagSkipped++;
+            continue;
+        }
+        // The defect this counter watches: initially-disabled refs whose enable parent resolves
+        // ENABLED at runtime — the standard way a mod swaps a whole set in. These used to be
+        // silently dropped (a third of the Temple's content).
+        if (r.InitiallyDisabled) enabledByParentDrawn++;
+        if (r.Base is not { } bk || !baseMesh.TryGetValue(bk, out var rel)) { noModel++; continue; }
         // Effect meshes (beams, mists, glows) are translucent volumes that drown a first-person
         // shot; the game draws them subtly, this flat-lit pass cannot. Skipped by default,
         // counted, and --fx puts them back. This is the WHOLE-FILE rule only — a solid mesh that
@@ -579,11 +719,12 @@ if (textured)
         foreach (var (r, d) in near)
         {
             string why = r.Deleted ? "NOT DRAWN: deleted"
-                       : r.InitiallyDisabled ? "NOT DRAWN: initially disabled"
+                       : DisabledWhy(r) is { } dw ? $"NOT DRAWN: {dw}"
                        : r.Base is not { } bk0 ? "NOT DRAWN: no base"
                        : !baseMesh.TryGetValue(bk0, out _) ? "NOT DRAWN: base carries no model"
                        : baseIsMarker.Contains(bk0) && !showMarkers ? "not drawn: editor marker (--markers)"
                        : baseMesh[bk0].Replace('/', (char)92).Contains("effects" + (char)92, StringComparison.OrdinalIgnoreCase) && !keepFx ? "not drawn: FX (--fx)"
+                       : r.InitiallyDisabled ? "drawn (enable parent resolves ENABLED)"
                        : "drawn";
             string bse = r.Base is { } bk1
                 ? bk1 + (baseEditorId.TryGetValue(bk1, out var be) ? $" {be}" : "")
@@ -594,6 +735,13 @@ if (textured)
         }
     }
 
+    // Every ref the scene drops is accounted for HERE, in one block — a silent category is how a
+    // render missing a third of its content once read as fully accounted for.
+    Console.WriteLine($"   refs not drawn: {disabledParentSkipped:N0} disabled via enable parent, "
+                    + $"{disabledFlagSkipped:N0} initially disabled (own flag, no parent), "
+                    + $"{deletedSkipped:N0} deleted, {noModel:N0} with no model-bearing base");
+    if (enabledByParentDrawn > 0)
+        Console.WriteLine($"   {enabledByParentDrawn:N0} initially-disabled ref(s) DRAWN — their enable parent resolves ENABLED at runtime");
     if (fxSkipped > 0) Console.WriteLine($"   ({fxSkipped} effect-mesh refs skipped; --fx to include them)");
     if (markerSkipped > 0) Console.WriteLine($"   ({markerSkipped} editor-marker refs skipped; --markers to include them translucently)");
     if (meshCensus is not null)
@@ -1385,7 +1533,7 @@ var navIdx = new List<int>();
 var lineVerts = new List<float>();
 
 var geoCache = new Dictionary<string, TriangleSoup?>(StringComparer.OrdinalIgnoreCase);
-int drawn = 0, noGeo = 0;
+int drawn = 0, noGeo = 0, flatDisabled = 0;
 long triCount = 0;
 var bounds = Aabb.Empty;
 
@@ -1398,12 +1546,13 @@ void Build(SpatialOverlap.EulerOrder order)
 {
     activeOrder = order;
     verts.Clear(); idx.Clear(); navVerts.Clear(); navIdx.Clear(); lineVerts.Clear();
-    drawn = 0; noGeo = 0; triCount = 0; bounds = Aabb.Empty;
+    drawn = 0; noGeo = 0; flatDisabled = 0; triCount = 0; bounds = Aabb.Empty;
 
     sw.Restart();
     foreach (var r in winRef.Values)
     {
-        if (r.InitiallyDisabled || r.Deleted) continue;
+        if (r.Deleted) continue;
+        if (!RefEnabled(r.FormKey)) { flatDisabled++; continue; }
         if (r.Base is not { } bk || !baseMesh.TryGetValue(bk, out var rel)) { noGeo++; continue; }
 
         if (!geoCache.TryGetValue(rel, out var soup))
@@ -1486,7 +1635,8 @@ void Build(SpatialOverlap.EulerOrder order)
 
 Build(activeOrder);
 
-Console.WriteLine($"geometry: {drawn:N0} refs drawn ({noGeo:N0} without usable mesh), {triCount:N0} triangles, "
+Console.WriteLine($"geometry: {drawn:N0} refs drawn ({noGeo:N0} without usable mesh, "
+                + $"{flatDisabled:N0} disabled at runtime), {triCount:N0} triangles, "
                 + $"{navIdx.Count / 3:N0} navmesh triangles  ({sw.Elapsed.TotalSeconds:0.0}s)");
 if (bounds.IsEmpty) { Console.Error.WriteLine("nothing to draw."); return 1; }
 Console.WriteLine($"bounds  : {bounds}");
