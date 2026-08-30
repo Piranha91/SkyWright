@@ -1823,11 +1823,52 @@ static class TexturedScene
         // Everything above — scene, overlay layers, pass-1 colour/classification — is shared
         // with the static path; only the final draw differs. The offscreen pass-1 target is
         // finished with (the loop draws to the window's own framebuffer), so it goes first.
+        // THE BUILD CENSUS. A local function, and called on BOTH exits, because for most of this
+        // renderer's life it sat after the PNG save and the fly-through returned before reaching
+        // it — so an --interactive run silently printed no shape count, no cull-above tally, no
+        // covering census and no unshadeable-shape line. The counts a person uses to decide
+        // whether a picture can be trusted were missing from exactly the mode where they cannot
+        // read them off a caption (found 2026-08-30, when the covering census went missing from a
+        // fly-through and the absence was briefly mistaken for "no coverings were drawn").
+        void PrintBuildCensus()
+        {
+        Console.WriteLine($"   textured: {shapes:N0} shapes ({texturedShapes:N0} with a real diffuse), {missingMesh:N0} refs without a resolvable mesh"
+                            + $"; {size}x{size}, {(samples >= 2 ? samples + "x msaa" : "no msaa")}");
+            if (cullAbove is { } cz2)
+                Console.WriteLine($"   cull-above z {cz2:0}: {cullTrisDropped:N0} static triangle(s) removed, "
+                                + $"{cullShapesDropped:N0} shape(s) wholly above the cut (terrain/nav/actors/overlay untouched)");
+            if (fxStaticShapes > 0)
+                Console.WriteLine($"   static effect shapes: {fxStaticShapes:N0} DRAWN on {fxStaticRefCount:N0} ref(s) "
+                                + "— --fx-static, frozen at the authored frame, additive, no depth write");
+            if (coveringShapes > 0)
+            {
+                Console.WriteLine($"   projected coverings (MATO): {coveringShapes:N0} shell(s) on {coveringRefs:N0} ref(s) "
+                                + $"of {coveringByMato.Count} material(s) — STAT.Material + MaxAngle, --no-coverings to drop");
+                foreach (var kv in coveringByMato.OrderByDescending(k => k.Value))
+                    Console.WriteLine($"      {kv.Value,5} shell(s)  {kv.Key}");
+            }
+            if (fxShapesSkipped + nmShapesSkipped > 0)
+            {
+                Console.WriteLine($"   unshadeable shapes: {fxShapesSkipped + nmShapesSkipped:N0} skipped on {fxRefCount:N0} ref(s) "
+                                + $"of {fxByMesh.Count:N0} mesh(es) — {fxShapesSkipped:N0} BSEffectShaderProperty, "
+                                + $"{nmShapesSkipped:N0} normal-map-as-diffuse; --fx to draw them");
+                if (listEffectMeshes)
+                    foreach (var kv in fxByMesh.OrderByDescending(k => k.Value))
+                        Console.WriteLine($"      {kv.Value,4} unshadeable shape(s)  {kv.Key}");
+            }
+            if (textures.MissingTexturePaths.Count > 0)
+                Console.WriteLine($"   textures the resolver could NOT find (white fallback, counted per rule 6): {textures.MissingTexturePaths.Count:N0}");
+        }
+
         if (interactive is not null)
         {
             GL.BindFramebuffer(FramebufferTarget.Framebuffer, 0);
             GL.DeleteFramebuffer(fbo); GL.DeleteTexture(colorTex); GL.DeleteRenderbuffer(depthRb);
             if (msFbo != 0) { GL.DeleteFramebuffer(msFbo); GL.DeleteRenderbuffer(msColorRb); GL.DeleteRenderbuffer(msDepthRb); }
+
+            // BEFORE the window opens, not after it closes: the console is what a person reads
+            // while deciding where to fly, and a census printed on exit is a census nobody used.
+            PrintBuildCensus();
 
             InteractiveViewer.Run(interactive, renderer, cam, wireOverlay);
 
@@ -1916,32 +1957,7 @@ static class TexturedScene
 
         foreach (var m in meshes) m.Dispose();
         GL.DeleteTexture(orange);
-        Console.WriteLine($"   textured: {shapes:N0} shapes ({texturedShapes:N0} with a real diffuse), {missingMesh:N0} refs without a resolvable mesh"
-                        + $"; {size}x{size}, {(samples >= 2 ? samples + "x msaa" : "no msaa")}");
-        if (cullAbove is { } cz2)
-            Console.WriteLine($"   cull-above z {cz2:0}: {cullTrisDropped:N0} static triangle(s) removed, "
-                            + $"{cullShapesDropped:N0} shape(s) wholly above the cut (terrain/nav/actors/overlay untouched)");
-        if (fxStaticShapes > 0)
-            Console.WriteLine($"   static effect shapes: {fxStaticShapes:N0} DRAWN on {fxStaticRefCount:N0} ref(s) "
-                            + "— --fx-static, frozen at the authored frame, additive, no depth write");
-        if (coveringShapes > 0)
-        {
-            Console.WriteLine($"   projected coverings (MATO): {coveringShapes:N0} shell(s) on {coveringRefs:N0} ref(s) "
-                            + $"of {coveringByMato.Count} material(s) — STAT.Material + MaxAngle, --no-coverings to drop");
-            foreach (var kv in coveringByMato.OrderByDescending(k => k.Value))
-                Console.WriteLine($"      {kv.Value,5} shell(s)  {kv.Key}");
-        }
-        if (fxShapesSkipped + nmShapesSkipped > 0)
-        {
-            Console.WriteLine($"   unshadeable shapes: {fxShapesSkipped + nmShapesSkipped:N0} skipped on {fxRefCount:N0} ref(s) "
-                            + $"of {fxByMesh.Count:N0} mesh(es) — {fxShapesSkipped:N0} BSEffectShaderProperty, "
-                            + $"{nmShapesSkipped:N0} normal-map-as-diffuse; --fx to draw them");
-            if (listEffectMeshes)
-                foreach (var kv in fxByMesh.OrderByDescending(k => k.Value))
-                    Console.WriteLine($"      {kv.Value,4} unshadeable shape(s)  {kv.Key}");
-        }
-        if (textures.MissingTexturePaths.Count > 0)
-            Console.WriteLine($"   textures the resolver could NOT find (white fallback, counted per rule 6): {textures.MissingTexturePaths.Count:N0}");
+        PrintBuildCensus();
         return shapes;
     }
 

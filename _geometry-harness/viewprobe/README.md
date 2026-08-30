@@ -397,6 +397,13 @@ and the overlay are never clipped. **The ray respects it**: a shape the clip rem
 with the display off, is not pickable, because a HUD naming what the picture no longer shows
 would be worse than no HUD.
 
+**The build census prints for a fly-through too** (fixed 2026-08-30). Shape count, `--cull-above`
+tally, covering census and the unshadeable-shape line used to sit after the PNG save, and
+`--interactive` returned before reaching them — so the numbers a person uses to decide whether a
+picture can be trusted were missing from exactly the mode where they cannot be read off a burned
+caption. They now print BEFORE the window opens, which is when they are useful. The absence was
+briefly mistaken for "no coverings were drawn"; a missing report and a missing feature look alike.
+
 **Read `(N hidden)` for exactly what it is: the LIVE band's count, and nothing else.** It counts
 the shapes this band is holding down right now — it says nothing about a build-time
 `--cull-above`, whose triangles were dropped before the window opened and which no key can bring
