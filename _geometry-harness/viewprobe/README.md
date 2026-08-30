@@ -1,4 +1,4 @@
-# viewprobe — the "see what the tester will see" renderer
+﻿# viewprobe — the "see what the tester will see" renderer
 
 **Class:** LIVING. Must reflect current HEAD — update it in the same commit that changes viewprobe's
 behaviour, per `standards/HOUSECARL_DOC_HYGIENE.md` §1.
@@ -84,6 +84,10 @@ findings they demonstrate) lives with that instance, not here.
   view.
 - **Terrain:** `--no-terrain` (off entirely), `--no-terrain-layers` (base layer only — no painted
   alpha layers and no base stand-ins).
+- **Water and coverings** (both ON by default — their ABSENCE was the bug, not their look):
+  `--no-water` drops the water surfaces, `--no-coverings` drops the MATO projected snow/ash/moss.
+  Both change every exterior render, so both announce themselves on the console. See *Water* and
+  *Projected coverings* under *Known rough edges* — **the water HEIGHT is a known open defect.**
 - **Scene filters:** `--fx` / `--fx-static` (see *Effect geometry*), `--markers` (translucent
   editor markers), `--list-meshes` (per-mesh census with its WHOLE-FILE class, `FX-file` vs
   `geometry`), `--out DIR`, `--size N` (default 2560; square, and the 3D render resolution as well
@@ -153,6 +157,8 @@ all knowledge.
 | Var | Effect |
 |---|---|
 | `VP_SHAPE_DUMP=<substr>` | for every mesh whose path matches, one line per BUILT shape: effect-vs-lighting shader, triangles, blend mode (Bethesda src→dst; `6->0` is additive), material alpha, colour × multiple, depth-write, slot-0 texture. The SHAPE-level companion to `--list-meshes` — that says which files are in the cell, this says why one of their shapes draws the way it does. Printed at build time, before any skip decision, so it shows skipped shapes too |
+| `VP_WATER_DUMP=1` | the raw per-cell water read — HasWater, XCLW at full precision, the WATR link, and whether the height was used or rejected. A plane at the wrong height is INVISIBLE rather than wrong-looking (terrain simply covers it), so this is the line that says whether the height or the drawing is at fault |
+| `VP_WATER_Z=<z>` | force every water surface to one height. The other half of the pair above: if the surface appears here and not at the resolved height, the renderer is fine and the height is wrong |
 | `VP_FXSTATIC_EMIT=<float>` | taste multiplier on `--fx-static` brightness (default 1 = the authored `baseColorScale`). Below ~0.25 the fire stops reading; above ~2 it blows out |
 | `VP_ALPHA_DUMP=gx,gy` | every alpha layer of that cell as a 17×17 ASCII opacity grid |
 | `VP_LAYER_ONLY=<substr>` + `VP_LAYER_SOLID=1` | draw only the painted layers whose diffuse matches, at full opacity — isolates one layer so "is that wash really this texture?" has an answer |
@@ -1169,23 +1175,76 @@ cell's structure.
   a synonym for `wire`.
 - Flat lighting rig (key + fill + ambient); no shadows, no image-based anything. No grass (a runtime
   system, arguably correct to omit).
-- **No water, at all** — not "water renders badly", nothing is drawn. This one actively MISLEADS,
-  because sea reads as sky and the project's own rule is that empty background is a defect signal:
-  the Winterhold shot shows open blue where the game shows the Sea of Ghosts. What it would take is
-  small and known: an exterior cell's height is `CELL.WaterHeight` when set and the worldspace's
-  `LandDefaults.DefaultWaterHeight` when it holds the `3.4028235E+38` sentinel (Tamriel: **−14000**,
-  and Winterhold's own cell is on the sentinel), with `CELL.Water`/`WRLD.Water` → WATR for the
-  colour. One translucent quad over the loaded 3×3 footprint at that z would do it.
-- **No MATO projected snow** — this is what the missing white blanket on Winterhold actually is, and
-  it is NOT an effect shader, so `--fx`/`--fx-static` will never produce it. A STAT carries
-  `Material` → a MaterialObject plus a `MaxAngle`, and the engine projects that material onto every
-  face whose normal is within MaxAngle of the projection vector. The College's arches resolve to
-  `SnowMaterialWinterhold` (`108A84:Skyrim.esm`, itself overridden by the load order) with
-  `MaxAngle 80`, `HasSnow true`, `Flags SinglePass`, `SinglePassColor 255,255,255,0`,
-  `ProjectionVector 0,0,−1`, `FalloffBias 0.7 / FalloffScale 0.4`. The single-pass case is
-  approximable without new shader work — the builder already has world normals per vertex, so a
-  white vertex-colour blend gated on normal z past `cos(MaxAngle)` reproduces the dominant fact.
-  Weather particles, fog and ENB tint are separate and genuinely runtime.
+- **Water surface height is WRONG — open defect, 2026-08-30.** The surface DRAWS (below), but it is
+  systematically placed too LOW: Winterhold's College cell renders no sea although the game clearly
+  shows one, and Riverwood's river comes out as a sliver instead of a river. Do not trust a water
+  height this build reports. Two live hypotheses, neither confirmed:
+  1. **The per-cell harvest clobbers a real height with a later override's absent one.** `CELL.WaterHeight`
+     is harvested per grid point across the whole load-order walk, last-writer-wins. An override CELL
+     that does not carry XCLW reads back null → treated as "unset" → falls through to the worldspace
+     default. So ANY plugin touching a cell for an unrelated reason can wipe a real water height. The
+     Winterhold ring came back 9-for-9 "inherited from the worldspace default", which for a coastal
+     cell is exactly what this failure would look like.
+  2. **The `4.2949532E+09` reading is a mis-decode, not a sentinel.** Two Winterhold cells return that
+     for XCLW; it is `2^32 − 14096`, i.e. a small negative that has been through an unsigned
+     reinterpretation somewhere. `RealHeight` currently rejects it and falls back — but if the true
+     value is near −14096 that fallback is coincidentally similar and hides the real problem.
+  `VP_WATER_DUMP=1` prints the raw per-cell read (HasWater, XCLW, WATR link, used-vs-rejected), and
+  `VP_WATER_Z=<z>` forces every surface to one height — that pair is what separates "drawn at the
+  wrong height" from "not drawn", which look identical because a too-low plane is simply underground.
+- **Coverings and water are drawn but NOT clipped by the interactive height band — open defect.**
+  The live clip keys walk `PickShapes`, and a covering shell is deliberately not a pick shape (you
+  should not be able to hover-name a snow layer). So clipping a roof away leaves its snow shell
+  hanging in the air. Fix is to hang the shell off its base's `PickShape` and toggle both.
+
+### Water (`--no-water` to drop)
+
+One grid per loaded cell that has water, at that cell's own surface height, depth-tested and never
+depth-writing. A GRID, not a quad: the shallow→deep colour is a function of the real distance down
+to the LAND underneath, so a shoreline needs vertices along it to shade against.
+
+Height follows the engine's precedence — `CELL.WaterHeight` when the cell states one, the
+worldspace's `LandDefaults.DefaultWaterHeight` when it holds the `3.4028235E+38` sentinel (Tamriel:
+−14000, confirmed identical in vanilla `Skyrim.esm` and in the load-order winner). **See the open
+defect above before believing a rendered height.**
+
+The noise layer is bound as a **wave NORMAL map**, and that is a schema fact rather than a guess
+about the art: WATR carries no diffuse texture field at all — only `NoiseLayerOne/Two/ThreeTexture`
+and `FlowNormalsNoiseTexture` — so colour has to come from the record's own `ShallowColor`/
+`DeepColor` and the noise layers are normals. Binding one as a diffuse would repaint the sea in
+normal-map lilac, the exact defect class this renderer already carries a filter for.
+
+Not modelled, and not to be read into the picture: no reflection or refraction buffer, no flow, no
+sun sparkle. The sky term is a flat `WaterReflectivity` mix, not a Fresnel — deliberately, because
+vertex colours are baked once and a view-dependent term would freeze at the entry camera in the
+fly-through and be quietly wrong there.
+
+### Projected coverings — MATO (`--no-coverings` to drop)
+
+The snow on Winterhold, the ash on Solstheim, the moss on Markarth. **Not an effect shader**, which
+is why no amount of `--fx` ever produced it — the renderer simply did not read the record.
+
+The wiring is narrow, and knowing that bounds the feature: a MATO reaches the world through ONE
+field on ONE record type, `STAT.Material`, with `STAT.MaxAngle` beside it. That is verified by
+construction against the whole modeled record library — Static is the only type carrying a
+`FormLink<IMaterialObjectGetter>` — so coverings land on statics and nothing else, and a bare patch
+on a non-STAT is correct rather than a gap.
+
+Each covered shape gets a second shell sharing its triangles, per SHAPE not per ref, because
+coverage is a function of each face's normal — one mesh can have a snowed roof and bare undersides
+and that difference IS the effect. Coverage is `d = dot(faceNormal, −ProjectionVector)`, hard-gated
+by the STAT's `MaxAngle`, then ramped. **The bias/scale ramp is FITTED, not engine-exact**, and the
+shape was read off the data's own spread rather than guessed: vanilla snow is bias 0.40, and the
+deliberately-thinner variants climb monotonically (Windhelm's `Light` 0.92, `EvenLess` 0.94,
+`Minimal` 0.98), so a higher bias means LESS coverage — bias is a threshold on `d`, scale the ramp
+width. A single-pass material states its colour in `SinglePassColor`; a multi-pass one leaves it to
+the diffuse of its own model NIF's first shape, which is where the snow grain comes from.
+
+Shells are decals (drawn after the sorted blend set, never writing depth) and lifted 2 u along the
+normal, because `IsDecal` keeps geometry out of the depth buffer but does not offset it and exactly
+coplanar shells stipple at any real camera range. A shape where nothing catches the projection emits
+no shell at all, which is what keeps the pass from doubling the scene: at Winterhold, 2,598 shells
+over 5,954 shapes.
 - Trees: full-model NIFs render; SpeedTree-style billboard LOD is absent (fine up close).
 - The compare stitches panels side by side at full size (wide file); no layout options.
 - NPC actors stand in the NIF bind pose — no animation, no furniture use. SPID `FinalOutfit` vs

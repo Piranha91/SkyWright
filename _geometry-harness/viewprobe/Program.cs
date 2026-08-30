@@ -1,4 +1,4 @@
-using System.Diagnostics;
+﻿using System.Diagnostics;
 using System.Numerics;
 using HousecarlCore;
 using Mutagen.Bethesda;                 // ToImmutableLinkCache over the --npc overlays
@@ -215,6 +215,14 @@ string? findLtex = null;
 // The render covers the target cell AND its ring of neighbours; a white dashed line along the
 // target's four edges says which is which. --no-cell-outline drops it.
 bool cellOutline = true;
+// WATER and PROJECTED COVERINGS are ON by default, and that default is the point: their absence
+// was actively misleading rather than merely incomplete. Sea with nothing drawn at the water
+// height reads as sky, and this project's standing rule is that empty background is a defect
+// signal; a snowless Winterhold reads as a texture failure. Both change what EVERY exterior
+// render looks like, so both have an escape hatch for reproducing an older picture, and both
+// announce themselves on the console when they draw anything.
+bool drawWater = true;
+bool drawCoverings = true;
 // Exterior REFS load for the target cell and its ±1 ring, matching the terrain (defect fix,
 // 2026-08-28: neighbours contributed terrain and nothing else, so any eye-level shot showed
 // near objects, then void, then bare ring terrain — the College arcade 700 u away simply never
@@ -327,6 +335,8 @@ for (int i = argStart; i < args.Length; i++)
     else if (args[i] == "--compare" && i + 1 < args.Length)
     { var p = args[++i].Split(','); if (p.Length == 2) compare = (p[0].Trim(), p[1].Trim()); }
     else if (args[i] == "--no-terrain") drawTerrain = false;
+    else if (args[i] == "--no-water") drawWater = false;
+    else if (args[i] == "--no-coverings") drawCoverings = false;
     else if (args[i] == "--no-terrain-layers") drawTerrainLayers = false;
     else if (args[i] == "--sky" && i + 1 < args.Length)
     {
@@ -609,6 +619,43 @@ var baseEditorId = new Dictionary<FormKey, string>();
 var ltexToTxst = new Dictionary<FormKey, FormKey>();
 var ltexEditorId = new Dictionary<FormKey, string>();
 var txstDiffuse = new Dictionary<FormKey, string>();
+
+// ---- projected coverings (MATO) and water, both winner-takes-all over the load-order walk ----
+// Values are COPIED out of the record getters, never referenced: every mod overlay is opened in a
+// `using` and disposed at the end of its iteration, so a retained getter is a use-after-free that
+// happens to work until it doesn't.
+var baseMato = new Dictionary<FormKey, (FormKey Mato, float MaxAngle)>();
+var matoRec = new Dictionary<FormKey, (string Ed, System.Numerics.Vector3 Projection, float Bias, float Scale,
+                                       float UvScale, System.Numerics.Vector3 Color, bool SinglePass, string? Model)>();
+var watrRec = new Dictionary<FormKey, (string Ed, string? Noise, float NoiseUv,
+                                       System.Numerics.Vector3 Shallow, System.Numerics.Vector3 Deep,
+                                       float Reflectivity, byte Opacity)>();
+// Per-cell water, keyed by grid point, plus the worldspace fallbacks the cells defer to.
+var cellWater = new Dictionary<(int X, int Y), (bool Has, float Height, FormKey? Water)>();
+FormKey? wsWater = null;
+float wsDefaultWaterHeight = float.MaxValue;
+
+static System.Numerics.Vector3 Rgb(System.Drawing.Color c) =>
+    new(c.R / 255f, c.G / 255f, c.B / 255f);
+// CELL.WaterHeight / WRLD.DefaultWaterHeight hold float.MaxValue (3.4028235E+38) to mean "not set,
+// use the level above". Winterhold's own cell is on that sentinel, which is why a naive read of
+// the cell alone would put the sea at 3e38 and draw nothing anywhere near the world.
+// Range, not just the sentinel. Skyrim's world z lives inside roughly ±60,000, and the field is
+// used as a "not set" marker by more than one value: 3.4028235E+38 is the documented one, but
+// Winterhold's sea cells came back with ~4.29e9 (2^32 − 14000 — a −14000 that has been through an
+// unsigned reinterpretation somewhere upstream). Testing only for the documented sentinel let that
+// second one through as a real height. Anything outside the world is not a water level.
+static bool RealHeight(float h) => !float.IsNaN(h) && MathF.Abs(h) < 100_000f;
+// A record's texture path is authored, not canonical: WATR ships "Data\Textures\Water\..." with
+// a Data\ prefix the resolver does not want, while TXST ships bare "water\...". Strip the one and
+// add the other, so either form resolves.
+static string NormalizeTexPath(string p0)
+{
+    var p1 = p0.Replace('/', '\\').TrimStart('\\');
+    if (p1.StartsWith("data\\", StringComparison.OrdinalIgnoreCase)) p1 = p1[5..];
+    return p1.StartsWith("textures\\", StringComparison.OrdinalIgnoreCase) ? p1 : "textures\\" + p1;
+}
+
 FormKey? cellKey = null;
 string cellLabel = target;
 bool interior = false;
@@ -662,6 +709,8 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot)
     winNav.Clear(); navByPlugin.Clear();
     baseMesh.Clear(); baseIsMarker.Clear(); baseEditorId.Clear();
     ltexToTxst.Clear(); ltexEditorId.Clear(); txstDiffuse.Clear();
+    baseMato.Clear(); matoRec.Clear(); watrRec.Clear(); cellWater.Clear();
+    wsWater = null; wsDefaultWaterHeight = float.MaxValue;
     enableMemo.Clear();
     targetWorldspace = FormKey.Null; targetGrid = null;
     cellKey = null; cellLabel = cellTarget; interior = false;
@@ -746,6 +795,31 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot)
                 }
                 if (rec is ITextureSetGetter txst)
                 { if (!string.IsNullOrWhiteSpace(txst.Diffuse?.GivenPath)) txstDiffuse[txst.FormKey] = txst.Diffuse!.GivenPath; continue; }
+                // WATR — the water body's own colours and wave-noise layers. Values are COPIED
+                // out, never held: the overlay is disposed at the end of this using block, and a
+                // retained getter would read freed memory.
+                if (rec is IWaterGetter wtr)
+                {
+                    watrRec[wtr.FormKey] = (wtr.EditorID ?? wtr.FormKey.ToString(),
+                                            wtr.NoiseLayerOneTexture?.GivenPath,
+                                            wtr.NoiseLayerOneUvScale,
+                                            Rgb(wtr.ShallowColor), Rgb(wtr.DeepColor),
+                                            wtr.WaterReflectivity, wtr.Opacity);
+                    continue;
+                }
+                // MATO — the projected covering itself (snow, ash, moss). Reached only through
+                // STAT.Material, harvested just below.
+                if (rec is IMaterialObjectGetter mato)
+                {
+                    var pvec = mato.ProjectionVector;
+                    matoRec[mato.FormKey] = (mato.EditorID ?? mato.FormKey.ToString(),
+                                             new System.Numerics.Vector3(pvec.X, pvec.Y, pvec.Z),
+                                             mato.FalloffBias, mato.FalloffScale, mato.MaterialUvScale,
+                                             Rgb(mato.SinglePassColor),
+                                             mato.Flags.HasFlag(MaterialObject.Flag.SinglePass),
+                                             mato.Model?.File.GivenPath);
+                    // NOT continue: MATO is modeled, and the block below wants its model path too.
+                }
                 bool collectedModel = false;
                 if (rec is IModeledGetter mo && mo.Model?.File is { } f && !string.IsNullOrWhiteSpace(f.GivenPath))
                 {
@@ -765,6 +839,17 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot)
                     bool marker = (smr.MajorRecordFlagsRaw & 0x00800000) != 0;
                     if (marker) baseIsMarker.Add(smr.FormKey);
                     if (!string.IsNullOrWhiteSpace(smr.EditorID)) baseEditorId[smr.FormKey] = smr.EditorID!;
+                }
+                // STAT.Material -> MATO, with STAT.MaxAngle beside it. This is the ONLY path a
+                // covering reaches the world by (Static is the only modeled record type carrying
+                // a FormLink<IMaterialObjectGetter>), so this one line is the whole wiring.
+                // Winner-takes-all like everything else here — and an override that CLEARS the
+                // link has to win too, hence the explicit Remove rather than a bare assignment.
+                if (rec is IStaticGetter stat)
+                {
+                    if (stat.Material.FormKeyNullable is { } mk && !mk.IsNull)
+                        baseMato[stat.FormKey] = (mk, stat.MaxAngle);
+                    else baseMato.Remove(stat.FormKey);
                 }
                 _ = collectedModel;
             }
@@ -1165,7 +1250,10 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot)
         // --interactive: hovering bare ground answers with the quadrant's painted layers. Assigned
         // inside the terrain block (it captures the walked LAND census); null on interiors.
         Func<float, float, string?>? terrainDescribeAt = null;
-        if (drawTerrain && !interior && targetGrid is { } tg)
+        // Water rides this same cell walk (it is where CELL.WaterHeight is read), so the walk has
+        // to run whenever EITHER is wanted — otherwise --no-terrain silently takes the sea with it,
+        // which is a coupling nobody would guess from the flag's name.
+        if ((drawTerrain || drawWater) && !interior && targetGrid is { } tg)
         {
             // grid -> winning heightmap + the base landscape texture per quadrant (LTEX FormKeys,
             // resolved to diffuse paths after the walk), by load order (later plugin wins).
@@ -1185,6 +1273,10 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot)
                     foreach (var ws in m2.Worldspaces.Records)
                     {
                         if (ws.FormKey != targetWorldspace) continue;
+                        // The worldspace's own water, and the height its cells fall back to. Read
+                        // per plugin in load order, so the last one to state either of them wins.
+                        if (ws.Water.FormKeyNullable is { } wsw && !wsw.IsNull) wsWater = wsw;
+                        if (ws.LandDefaults?.DefaultWaterHeight is { } dwh && RealHeight(dwh)) wsDefaultWaterHeight = dwh;
                         IEnumerable<ICellGetter> Cells()
                         {
                             if (ws.TopCell is { } tc) yield return tc;
@@ -1197,6 +1289,12 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot)
                         {
                             if (c.Grid?.Point is not { } gp) continue;
                             if (Math.Abs(gp.X - tg.X) > 1 || Math.Abs(gp.Y - tg.Y) > 1) continue;
+                            // Water is harvested BEFORE the LAND gate below: a cell can be all
+                            // sea with no heightmap at all, and that is exactly the cell whose
+                            // water matters most.
+                            cellWater[(gp.X, gp.Y)] = (c.Flags.HasFlag(Cell.Flag.HasWater),
+                                                       c.WaterHeight ?? float.MaxValue,
+                                                       c.Water.FormKeyNullable is { } cw && !cw.IsNull ? cw : null);
                             if (c.Landscape?.VertexHeightMap is not { } vh) continue;
                             var grad = new sbyte[33, 33];
                             try
@@ -1286,6 +1384,9 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot)
                 landHeights[(gx, gy)] = h;
                 System.Numerics.Vector3 P(int x, int y) =>
                     new(gx * 4096f + x * 128f, gy * 4096f + y * 128f, h[x, y] * 8f);
+                // landHeights is kept either way — water's depth shading reads it through
+                // terrainHeightAt — but the drawable triangles are terrain's own output.
+                if (!drawTerrain) continue;
                 for (int y = 0; y < 32; y++)
                     for (int x = 0; x < 32; x++)
                     {
@@ -1900,6 +2001,98 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot)
         if (cellOutline && !interior && targetGrid is { } tgb)
             cellBounds = (tgb.X * 4096f, tgb.Y * 4096f, tgb.X * 4096f + 4096f, tgb.Y * 4096f + 4096f);
 
+        // ---- WATER: one surface per loaded cell that has any -----------------------------------
+        // Exteriors only. An interior's water is a placed basin with no grid footprint to span, so
+        // there is nothing honest to draw a plane across; say so rather than inventing a rectangle.
+        var waterPlanes = new List<ViewProbe.WaterPlane>();
+        if (drawWater && !interior && targetGrid is { } wg)
+        {
+            var wref = wsWater;
+            for (int dx = -1; dx <= 1; dx++)
+                for (int dy = -1; dy <= 1; dy++)
+                {
+                    var key = (wg.X + dx, wg.Y + dy);
+                    if (!cellWater.TryGetValue(key, out var cw) || !cw.Has) continue;
+                    // The engine's own precedence: the cell's height when it states one, the
+                    // worldspace default when it holds the sentinel.
+                    float z = RealHeight(cw.Height) ? cw.Height : wsDefaultWaterHeight;
+                    // VP_WATER_Z=<z> — force every surface to one height. A water plane at the
+                    // real height is often correctly INVISIBLE (the sea floor around Winterhold
+                    // sits above Tamriel's −14000, so the sea is genuinely underground there),
+                    // and "invisible" and "not drawn" look identical. This separates them.
+                    if (float.TryParse(Environment.GetEnvironmentVariable("VP_WATER_Z"), out var forcedZ)) z = forcedZ;
+                    if (!RealHeight(z)) continue;                 // neither level states a height
+                    var wk = cw.Water ?? wref;
+                    var w = wk is { } k && watrRec.TryGetValue(k, out var wr)
+                          ? wr
+                          : ("(no WATR record)", (string?)null, 1024f,
+                             new System.Numerics.Vector3(0.14f, 0.25f, 0.25f),
+                             new System.Numerics.Vector3(0.03f, 0.13f, 0.13f), 0.4f, (byte)128);
+                    string? noise = w.Item2 is { Length: > 0 } np ? NormalizeTexPath(np) : null;
+                    waterPlanes.Add(new ViewProbe.WaterPlane(
+                        z, key.Item1 * 4096f, key.Item2 * 4096f, key.Item1 * 4096f + 4096f, key.Item2 * 4096f + 4096f,
+                        noise, w.Item3, w.Item4, w.Item5, w.Item6,
+                        // WATR.Opacity is a 0..100 percentage in the CK, not a 0..255 byte.
+                        Math.Clamp(w.Item7 / 100f, 0f, 1f), w.Item1));
+                }
+            if (waterPlanes.Count == 0 && cellWater.Values.Any(v => v.Has))
+                Console.WriteLine("   water: cell(s) flagged HasWater but no usable surface height "
+                                + "in either the cell or the worldspace — nothing drawn");
+            // Where each surface height CAME FROM, per cell. Worth a line of its own: a plane at
+            // the wrong height is invisible rather than wrong-looking (the terrain simply covers
+            // it), so a silent "9 surfaces drawn" can mean nine surfaces nobody will ever see.
+            if (waterPlanes.Count > 0)
+                foreach (var g in waterPlanes.GroupBy(w => w.Z).OrderBy(g => g.Key))
+                {
+                    int own = 0;
+                    foreach (var w in g)
+                    {
+                        var k = ((int)MathF.Floor(w.X0 / 4096f), (int)MathF.Floor(w.Y0 / 4096f));
+                        if (cellWater.TryGetValue(k, out var cwx) && RealHeight(cwx.Height)) own++;
+                    }
+                    Console.WriteLine($"      water z {g.Key:0}: {g.Count()} cell(s) — {own} from the cell's own "
+                                    + $"XCLW, {g.Count() - own} inherited from the worldspace default");
+                }
+            // VP_WATER_DUMP=1 — the raw per-cell read, including the values RealHeight rejects.
+            // A water plane at the wrong height is invisible, not wrong-looking, so when the sea
+            // is missing this is the line that says whether the height or the drawing is at fault.
+            if (Environment.GetEnvironmentVariable("VP_WATER_DUMP") == "1")
+                for (int dx = -1; dx <= 1; dx++)
+                    for (int dy = -1; dy <= 1; dy++)
+                    {
+                        var k = (wg.X + dx, wg.Y + dy);
+                        if (!cellWater.TryGetValue(k, out var cwd))
+                        { Console.WriteLine($"      cell ({k.Item1},{k.Item2}): no CELL record found in the walk"); continue; }
+                        Console.WriteLine($"      cell ({k.Item1},{k.Item2}): HasWater={cwd.Has}  "
+                                        + $"XCLW={cwd.Height:R} ({(RealHeight(cwd.Height) ? "used" : "rejected -> worldspace default")})  "
+                                        + $"WATR={(cwd.Water?.ToString() ?? "(inherit)")}");
+                    }
+        }
+
+        // ---- PROJECTED COVERINGS: STAT.Material -> MATO, for the bases actually in this scene ---
+        var coverings = new Dictionary<FormKey, ViewProbe.Covering>();
+        if (drawCoverings)
+        {
+            int coveringNoMato = 0;
+            foreach (var bk in scene.Select(s => s.BaseKey).Distinct())
+            {
+                if (!baseMato.TryGetValue(bk, out var link)) continue;
+                if (!matoRec.TryGetValue(link.Mato, out var mt)) { coveringNoMato++; continue; }
+                // A SinglePass material states its colour outright; a multi-pass one leaves the
+                // colour to its projected texture, so the tint has to be white or it would double.
+                // A black SinglePassColor means "unset" in practice (every genuine single-pass
+                // snow/ash record carries a real colour), so treat it as the texture case.
+                bool tinted = mt.SinglePass && (mt.Color.X + mt.Color.Y + mt.Color.Z) > 0.01f;
+                coverings[bk] = new ViewProbe.Covering(
+                    mt.Projection, link.MaxAngle, mt.Bias, mt.Scale, mt.UvScale,
+                    tinted ? new System.Numerics.Vector4(mt.Color.X, mt.Color.Y, mt.Color.Z, 1f)
+                           : System.Numerics.Vector4.One,
+                    mt.Model, mt.Ed);
+            }
+            if (coveringNoMato > 0)
+                Console.WriteLine($"   coverings: {coveringNoMato} base(s) name a MaterialObject no active plugin defines");
+        }
+
         // Violet: not in the healthy palette (green/cyan/magenta/yellow/blue), not the reserved red,
         // not the white of the cell outline, not the orange of an implicated door.
         var diffColor = new System.Numerics.Vector4(0.72f, 0.28f, 1f, 1f);
@@ -1914,7 +2107,7 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot)
                    (eyePos.Value, lookPos.Value, fov), g, r, terrainPatches, terrainLayers, navMode, navColor,
                    skyColor, terrainHeightAt, dashUnderground, dashUnderStatics, msaa, cullAbove, cellBounds,
                    diffs ?? noDiff, diffColor, picks, captionLines, colourCaptions, npcActors, npcPucksOn, routeRender,
-                   keepFx, fxStatic, listMeshes, size, outFile,
+                   keepFx, fxStatic, listMeshes, waterPlanes, coverings, size, outFile,
                    camMeta);
 
         if (compare is { } cmp)
@@ -2089,7 +2282,8 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot)
                 scene, assets, dataDir, modFolders, overwriteDir,
                 (eyePos.Value, lookPos.Value, fov), navTris, redTris, terrainPatches, terrainLayers, navMode, navColor,
                 skyColor, terrainHeightAt, dashUnderground, dashUnderStatics, msaa, cullAbove, cellBounds,
-                noDiff, diffColor, picks, fpCap, colourCaptions, npcActors, npcPucksOn, routeRender, keepFx, fxStatic, listMeshes, size, fpOut,
+                noDiff, diffColor, picks, fpCap, colourCaptions, npcActors, npcPucksOn, routeRender, keepFx, fxStatic, listMeshes,
+                waterPlanes, coverings, size, fpOut,
                 camMeta, iopt);
             Console.WriteLine($"   interactive run over ({iShapes:N0} shapes were resident)");
         pendingSwitch = iopt.CellSwitch;

@@ -116,10 +116,73 @@ readonly record struct SceneRef(string MeshRelPath, Vec3 Position, Vec3 Rotation
                                 bool Marker = false, FormKey RefKey = default, FormKey BaseKey = default,
                                 string? BaseEditorId = null);
 
+/// <summary>A PROJECTED COVERING — the engine's MATO (MaterialObject) layer, which is what puts the
+/// snow on Winterhold, the ash on Solstheim and the moss on Markarth. It is NOT an effect shader,
+/// so no amount of <c>--fx</c> ever produced it; the renderer simply did not read the record.
+///
+/// The wiring is narrow and worth stating exactly, because it bounds the feature: a MATO reaches
+/// the world through ONE field on ONE record type — <c>STAT.Material</c>, with <c>STAT.MaxAngle</c>
+/// beside it (verified by construction against the whole modeled record library: Static is the only
+/// type carrying a <c>FormLink&lt;IMaterialObjectGetter&gt;</c>). So coverings land on statics and
+/// nothing else — no clutter, no furniture, no actors — and a bare patch on a non-STAT is correct,
+/// not a gap.
+///
+/// COVERAGE MODEL. <see cref="ProjectionVector"/> is the direction the material travels (snow falls,
+/// so vanilla snow is <c>0,0,-1</c>); a face catches it in proportion to how squarely it faces back
+/// into it, <c>d = dot(faceNormal, -projection)</c>. <see cref="MaxAngleDeg"/> is the hard outer
+/// gate from the STAT. The BIAS/SCALE ramp is FITTED, not engine-exact — the shape was read off the
+/// data's own spread rather than guessed: vanilla snow is bias 0.40, and the deliberately-thinner
+/// variants climb monotonically (Windhelm's "Light" 0.92, "EvenLess" 0.94, "Minimal" 0.98), so a
+/// HIGHER bias means LESS coverage and bias is a threshold on d with scale as the ramp width.
+/// Say so in the docs rather than implying the curve is the engine's.</summary>
+readonly record struct Covering(Vector3 ProjectionVector,     // Skyrim space, direction of travel
+                                float MaxAngleDeg,            // STAT.MaxAngle — the hard gate
+                                float FalloffBias, float FalloffScale,
+                                float UvScale,                // MATO.MaterialUvScale, world u per tile
+                                Vector4 Color,                // SinglePassColor, or white when a texture carries it
+                                string? ModelPath,            // the MATO's own model NIF; its slot-0 diffuse IS the covering texture
+                                string Label);                // MATO EditorID, for the census
+
+/// <summary>WATER over one loaded cell. Drawn because its ABSENCE was the bug: with nothing at the
+/// water height, sea reads as sky, and this project's standing rule is that empty background is a
+/// defect signal — the Winterhold shot showed open blue where the game shows the Sea of Ghosts.
+///
+/// Height resolution follows the engine: <c>CELL.WaterHeight</c> when the cell sets one, and the
+/// worldspace's <c>LandDefaults.DefaultWaterHeight</c> when it holds the <c>3.4028235E+38</c>
+/// sentinel (which Winterhold's own cell does — Tamriel's default is −14000). Colour is the WATR
+/// record's, blended shallow→deep by the real depth to the LAND surface underneath, so a shoreline
+/// reads as a shoreline from above.
+///
+/// The NOISE TEXTURE IS BOUND AS A NORMAL MAP, and that is a schema fact rather than a guess about
+/// the art: WATR carries no diffuse texture field at all — only <c>NoiseLayerOne/Two/ThreeTexture</c>
+/// and <c>FlowNormalsNoiseTexture</c> — so the colour has to come from the record's own colours and
+/// the noise layers are wave normals. Binding one as a diffuse would repaint the sea in normal-map
+/// lilac, which is a bug this renderer has already been bitten by once.
+///
+/// What is NOT modelled, and should not be read into the picture: no reflection or refraction
+/// buffer, no flow, no specular sun sparkle. The sky term is a flat <c>WaterReflectivity</c> mix,
+/// not a Fresnel.</summary>
+readonly record struct WaterPlane(float Z,                                        // Skyrim z of the surface
+                                  float X0, float Y0, float X1, float Y1,         // cell footprint
+                                  string? NoiseTexture, float NoiseUvScale,
+                                  Vector3 ShallowColor, Vector3 DeepColor,        // 0..1
+                                  float Reflectivity, float Opacity,              // 0..1
+                                  string Label);
+
 static class TexturedScene
 {
     // Z-up (Skyrim) -> Y-up (viewer): the exact swap NifMeshBuilder uses.
     internal static Vector3 YUp(Vector3 z) => new(z.X, z.Z, -z.Y);
+
+    /// <summary>Normalize, or Vector3.Zero for a degenerate input — so a bad normal cannot become
+    /// NaN and poison a whole vertex buffer.</summary>
+    internal static Vector3 Unit(Vector3 d) => d.LengthSquared() > 1e-12f ? Vector3.Normalize(d) : Vector3.Zero;
+
+    /// <summary>How far a projected covering shell sits off its base surface, in Skyrim units.
+    /// IsDecal keeps it out of the depth buffer but does not offset it, and exactly-coplanar
+    /// geometry stipples at any real camera range. ~3 cm: invisible, and far above the depth
+    /// buffer's resolution at these distances.</summary>
+    const float CoveringLift = 2f;
 
     /// <summary>A walking route drawn over the scene: straight segments between waypoints, with
     /// arrowheads riding them that say which way to go. Everything here lies FLAT ON THE GROUND —
@@ -191,6 +254,8 @@ static class TexturedScene
         bool keepFx,                                       // --fx: draw effect-shader shapes too
         bool fxStatic,                                     // --fx-static: draw them as a frozen frame
         bool listEffectMeshes,                             // --list-meshes: name the meshes they came from
+        IReadOnlyList<WaterPlane> waterPlanes,             // one per loaded cell that has water; empty = --no-water or none
+        IReadOnlyDictionary<FormKey, Covering> coveringsByBase,  // STAT base -> its MATO layer; empty = --no-coverings
         int size, string outPath,
         string? pngTextMeta = null,                        // replication chunk: written as a PNG tEXt entry keyed "viewprobe"
         InteractiveOptions? interactive = null)            // non-null: open the fly-through window instead of saving a PNG
@@ -230,6 +295,34 @@ static class TexturedScene
         GL.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMagFilter, (int)TextureMagFilter.Nearest);
 
         var builtCache = new Dictionary<string, List<NifMeshBuilder.BuiltMesh>?>(StringComparer.OrdinalIgnoreCase);
+
+        // A MATO names a MODEL, not a texture, so the covering's diffuse is whatever that model's
+        // first drawable shape carries in slot 0 (vanilla snow: landscape/snowmatshader.nif). Built
+        // through the same builder and cached per path — there are a handful of distinct materials
+        // in any scene, against thousands of refs.
+        var matoTexCache = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        int MatoTexture(string? modelPath)
+        {
+            if (modelPath is not { Length: > 0 }) return textures.WhiteTexture;
+            if (matoTexCache.TryGetValue(modelPath, out var cached)) return cached;
+            int handle = textures.WhiteTexture;
+            var mrel = modelPath.StartsWith("meshes", StringComparison.OrdinalIgnoreCase)
+                     ? modelPath : Path.Combine("meshes", modelPath);
+            try
+            {
+                var mabs = resolver.ResolveAssetPath(mrel);
+                if (mabs is not null)
+                    foreach (var mb in builder.BuildFromFile(mabs))
+                        if (mb.TexturePaths.TryGetValue(0, out var t0) && t0 is { Length: > 0 })
+                        {
+                            int h = textures.LoadTexture(t0);
+                            if (h != textures.WhiteTexture) { handle = h; break; }
+                        }
+            }
+            catch (Exception ex) { logger.LogError($"MATO model '{mrel}'", ex); }
+            matoTexCache[modelPath] = handle;
+            return handle;
+        }
         int shapes = 0, missingMesh = 0, texturedShapes = 0;
         // Effect-shader shapes dropped this render: the total shape-draws, and how many such
         // shapes each distinct mesh carries (a per-file property, so it is SET, not accumulated,
@@ -237,6 +330,9 @@ static class TexturedScene
         int fxShapesSkipped = 0, nmShapesSkipped = 0, fxRefCount = 0;
         int fxStaticShapes = 0, fxStaticRefCount = 0;
         int cullTrisDropped = 0, cullShapesDropped = 0;
+        int coveringShapes = 0, coveringRefs = 0;
+        var coveringByMato = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        int waterMeshes = 0; long waterTris = 0;
         // env VP_FXSTATIC_EMIT — brightness of the --fx-static stand-in. The real number is
         // BSEffectShaderProperty.baseColorScale, which the builder does not read; until it does,
         // this is the knob that stands in for it.
@@ -309,7 +405,10 @@ static class TexturedScene
             var rot = SpatialOverlap.RefrRotation(r.Rotation);
             var pos = new Vector3(r.Position.X, r.Position.Y, r.Position.Z);
 
-            bool refHadFx = false, refHadFxStatic = false;
+            bool refHadFx = false, refHadFxStatic = false, refHadCovering = false;
+            // The covering (if any) is a property of the ref's BASE, looked up once per ref.
+            Covering? cover = coveringsByBase.Count > 0 && coveringsByBase.TryGetValue(r.BaseKey, out var cvv)
+                            ? cvv : null;
             foreach (var b in built)
             {
                 int n = b.Positions.Length;
@@ -552,9 +651,76 @@ static class TexturedScene
                     ps.ComputeBounds();
                     interactive.PickShapes.Add(ps);
                 }
+
+                // ---- PROJECTED COVERING (MATO) ------------------------------------------------
+                // A second shell over the shape just drawn, sharing its triangles: same verts,
+                // per-vertex coverage in the ALPHA channel, UVs planar-projected along the
+                // material's own projection vector. Emitted per SHAPE rather than per ref because
+                // coverage is a function of each face's normal — one mesh can have a snowed roof
+                // and bare undersides, and that difference IS the effect.
+                if (cover is { } cv)
+                {
+                    var cu = new Vector2[n];
+                    var cc = new Vector4[n];
+                    var cp = new Vector3[n];
+                    // Axes for the planar projection: -projection is "up" for this material, and
+                    // any two perpendiculars do, since the material is noise with no authored
+                    // orientation. Guard the degenerate cross by picking a seed axis that cannot
+                    // be parallel to up.
+                    var up = Unit(-cv.ProjectionVector);
+                    if (up == Vector3.Zero) up = Vector3.UnitZ;
+                    var seed = MathF.Abs(up.Z) < 0.9f ? Vector3.UnitZ : Vector3.UnitX;
+                    var t1 = Unit(Vector3.Cross(up, seed));
+                    if (t1 == Vector3.Zero) t1 = Vector3.UnitX;
+                    var t2 = Vector3.Cross(up, t1);
+                    float cosMax = MathF.Cos(float.DegreesToRadians(Math.Clamp(cv.MaxAngleDeg, 0f, 180f)));
+                    float uvScale = cv.UvScale > 1e-3f ? cv.UvScale : 256f;
+                    float maxAlpha = 0f;
+                    for (int i = 0; i < n; i++)
+                    {
+                        // Back to Skyrim space: viewer Y-up is (x, z, -y) of Skyrim, so the
+                        // inverse is (X, -Z, Y). Coverage and the projection are both Skyrim-space
+                        // questions, and doing them in viewer space is how axes get silently swapped.
+                        var sp = new Vector3(wp[i].X, -wp[i].Z, wp[i].Y);
+                        var sn = Unit(new Vector3(wn[i].X, -wn[i].Z, wn[i].Y));
+                        float d = Vector3.Dot(sn, up);
+                        float a = d < cosMax ? 0f
+                                : Math.Clamp((d - cv.FalloffBias) / MathF.Max(cv.FalloffScale, 1e-3f), 0f, 1f);
+                        maxAlpha = MathF.Max(maxAlpha, a);
+                        cc[i] = new Vector4(cv.Color.X, cv.Color.Y, cv.Color.Z, a);
+                        cu[i] = new Vector2(Vector3.Dot(sp, t1) / uvScale, Vector3.Dot(sp, t2) / uvScale);
+                        // Lift along the normal so the shell cannot z-fight its own base. IsDecal
+                        // stops it writing depth but does NOT offset it, and coplanar geometry at
+                        // this camera range stipples badly. 2 u is ~3 cm of Skyrim and invisible.
+                        cp[i] = wp[i] + wn[i] * CoveringLift;
+                    }
+                    // Nothing catches the projection on this shape (a wall, an underside): emit
+                    // nothing at all rather than a fully-transparent mesh. This is the common case
+                    // and it is what keeps the covering pass from doubling the scene.
+                    if (maxAlpha > 0.004f)
+                    {
+                        var covMesh = new GlMesh();
+                        covMesh.Upload(Interleave(cp, wn, cu, wt, wb, cc), tri);
+                        covMesh.ShapeName = $"covering:{cv.Label}";
+                        covMesh.HasVertexColors = true;      // the shader's baseColor.a *= vertexColor.a
+                        covMesh.HasAlphaBlend = true;
+                        covMesh.SrcBlendIndex = 6;           // SRC_ALPHA
+                        covMesh.DstBlendIndex = 7;           // INV_SRC_ALPHA — plain "over"
+                        covMesh.DepthWrite = false;
+                        covMesh.IsDecal = true;              // drawn after the sorted blend set, never writes depth
+                        covMesh.IsDoubleSided = mesh.IsDoubleSided;
+                        covMesh.DiffuseTexture = MatoTexture(cv.ModelPath);
+                        renderer.AddMesh(covMesh);
+                        meshes.Add(covMesh);
+                        coveringShapes++;
+                        refHadCovering = true;
+                        coveringByMato[cv.Label] = coveringByMato.TryGetValue(cv.Label, out var cn) ? cn + 1 : 1;
+                    }
+                }
             }
             if (refHadFx) fxRefCount++;
             if (refHadFxStatic) fxStaticRefCount++;
+            if (refHadCovering) coveringRefs++;
         }
 
         // TERRAIN — winning LAND heightmap, drawn with each quadrant's winning base landscape
@@ -669,6 +835,90 @@ static class TexturedScene
 
         if (terrainTexturedPatches + terrainFallbackPatches > 0)
             Console.WriteLine($"   terrain paint: {terrainTexturedPatches} textured patch(es), {terrainFallbackPatches} untextured (snow fallback)");
+
+        // ---- WATER --------------------------------------------------------------------------
+        // One grid per loaded cell that has water, at that cell's own surface height. A GRID and
+        // not a quad for one reason that earns its cost: the shallow-to-deep colour is a function
+        // of the real distance down to the LAND underneath, so a shoreline needs vertices along it
+        // to shade against. A single quad would paint the whole sea one flat colour and lose the
+        // one cue that makes water read as water from above.
+        //
+        // Depth-tested, never depth-writing: terrain and statics standing above the surface hide
+        // it for free, exactly as they should, so there is no need to clip the grid to the coast.
+        foreach (var wpl in waterPlanes)
+        {
+            const int WaterGrid = 48;                 // 4096/48 ~ 85 u per quad — fine enough for a shoreline
+            const float ShallowBand = 700f;           // depth over which shallow fades to deep
+            int texHandle = wpl.NoiseTexture is { Length: > 0 } wtx ? textures.LoadTexture(wtx) : 0;
+            bool hasNoise = texHandle != 0 && texHandle != textures.WhiteTexture;
+
+            int side = WaterGrid + 1;
+            var pv = new Vector3[side * side]; var nv = new Vector3[side * side];
+            var uvv = new Vector2[side * side]; var cvv2 = new Vector4[side * side];
+            var tgt = new Vector3[side * side]; var btg = new Vector3[side * side];
+            var idxs = new List<int>(WaterGrid * WaterGrid * 6);
+            float uvScale = wpl.NoiseUvScale > 1e-3f ? wpl.NoiseUvScale : 1024f;
+            for (int gy = 0; gy < side; gy++)
+                for (int gx = 0; gx < side; gx++)
+                {
+                    int i = gy * side + gx;
+                    float x = wpl.X0 + (wpl.X1 - wpl.X0) * gx / WaterGrid;
+                    float y = wpl.Y0 + (wpl.Y1 - wpl.Y0) * gy / WaterGrid;
+                    // Depth to the ground below. No LAND here (off the heightmap) reads as deep
+                    // ocean rather than as shallow — the conservative direction for a coastline.
+                    float depth = terrainHeightAt?.Invoke(x, y) is { } gz ? wpl.Z - gz : ShallowBand;
+                    float t = Math.Clamp(depth / ShallowBand, 0f, 1f);
+                    var body = Vector3.Lerp(wpl.ShallowColor, wpl.DeepColor, t);
+                    // The sky term stands in for a reflection buffer this renderer does not have.
+                    // Flat, not Fresnel: vertex colours are baked once, and a view-dependent term
+                    // would be frozen at the entry camera in the fly-through and quietly wrong.
+                    var rgb = Vector3.Lerp(body, skyColor, Math.Clamp(wpl.Reflectivity, 0f, 1f));
+                    pv[i] = YUp(new Vector3(x, y, wpl.Z));
+                    nv[i] = YUp(Vector3.UnitZ);
+                    tgt[i] = YUp(Vector3.UnitX);
+                    btg[i] = YUp(Vector3.UnitY);
+                    uvv[i] = new Vector2(x / uvScale, y / uvScale);
+                    cvv2[i] = new Vector4(rgb.X, rgb.Y, rgb.Z, Math.Clamp(wpl.Opacity, 0f, 1f));
+                }
+            for (int gy = 0; gy < WaterGrid; gy++)
+                for (int gx = 0; gx < WaterGrid; gx++)
+                {
+                    // Wind so the geometric normal comes out +Y (up) in viewer space, agreeing
+                    // with the vertex normals. Viewer Z is -y, so advancing gy walks -Z and the
+                    // "obvious" order faces the surface at the sea floor instead of the sky.
+                    int a = gy * side + gx, b2 = a + 1, c2 = a + side, d2 = c2 + 1;
+                    idxs.Add(a); idxs.Add(b2); idxs.Add(c2);
+                    idxs.Add(b2); idxs.Add(d2); idxs.Add(c2);
+                }
+            var water = new GlMesh();
+            water.Upload(Interleave(pv, nv, uvv, tgt, btg, cvv2), idxs.ToArray());
+            water.ShapeName = $"water:{wpl.Label}";
+            water.DiffuseTexture = textures.WhiteTexture;   // WATR has NO diffuse field; colour is the record's
+            if (hasNoise)
+            {
+                // The noise layer is a WAVE NORMAL MAP, bound as one. Binding it as a diffuse
+                // would paint the sea normal-map lilac — the exact defect class this renderer
+                // already carries a filter for.
+                water.NormalTexture = texHandle;
+                water.HasNormalMap = true;
+            }
+            water.HasVertexColors = true;
+            water.HasAlphaBlend = true;
+            water.SrcBlendIndex = 6; water.DstBlendIndex = 7;
+            water.DepthWrite = false;
+            water.IsDoubleSided = true;                     // readable from under the surface too
+            water.MaterialGlossiness = 80f;
+            water.MaterialSpecularStrength = 0.5f;
+            renderer.AddMesh(water);
+            meshes.Add(water);
+            waterMeshes++; waterTris += idxs.Count / 3;
+        }
+        if (waterMeshes > 0)
+            Console.WriteLine($"   water: {waterMeshes} cell surface(s), {waterTris:N0} triangles — "
+                            + $"{waterPlanes[0].Label} at z {waterPlanes[0].Z:0}"
+                            + (waterPlanes.Any(w => w.NoiseTexture is { Length: > 0 })
+                                ? ", noise layer bound as a wave normal map" : ", no noise texture resolved")
+                            + " (no reflection/refraction/flow — see README)");
 
         // ── THE NAVMESH OVERLAY — the probe's whole point ──────────────────────────────
         // Looks: filled = the translucent sheet; wire = every triangle outlined; both.
@@ -1633,6 +1883,13 @@ static class TexturedScene
         if (fxStaticShapes > 0)
             Console.WriteLine($"   static effect shapes: {fxStaticShapes:N0} DRAWN on {fxStaticRefCount:N0} ref(s) "
                             + "— --fx-static, frozen at the authored frame, additive, no depth write");
+        if (coveringShapes > 0)
+        {
+            Console.WriteLine($"   projected coverings (MATO): {coveringShapes:N0} shell(s) on {coveringRefs:N0} ref(s) "
+                            + $"of {coveringByMato.Count} material(s) — STAT.Material + MaxAngle, --no-coverings to drop");
+            foreach (var kv in coveringByMato.OrderByDescending(k => k.Value))
+                Console.WriteLine($"      {kv.Value,5} shell(s)  {kv.Key}");
+        }
         if (fxShapesSkipped + nmShapesSkipped > 0)
         {
             Console.WriteLine($"   unshadeable shapes: {fxShapesSkipped + nmShapesSkipped:N0} skipped on {fxRefCount:N0} ref(s) "
