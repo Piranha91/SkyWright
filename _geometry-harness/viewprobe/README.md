@@ -204,11 +204,22 @@ gitignored for the same reason: probe transcripts name the plugins of whatever l
 ## Conventions that bite
 
 - **Coordinates.** The library is Y-up; viewer = `(x, z, −y)` of Skyrim's Z-up. All placement math
-  happens in Skyrim space (same Euler composition as the detectors, `SpatialOverlap.Euler` XYZ) and
-  is swapped once at the end. Camera input is Skyrim-space.
-- **REFR angles are clockwise-positive** (compass headings; `getangle z`: 0 = north, 90 = east)
-  while `Matrix4x4.CreateRotation*` is right-handed counter-clockwise-positive — so the angles must
-  be NEGATED before composing, or every rotated ref draws with its heading mirrored about north.
+  happens in Skyrim space and is swapped once at the end. Camera input is Skyrim-space.
+- **REFR rotation is `SpatialOverlap.RefrRotation`, and it is DERIVED, not calibrated.** Skyrim
+  builds a reference's matrix with `NiMatrix3::SetEulerAnglesXYZ` (CommonLibVR
+  `src/RE/N/NiMatrix3.cpp`), whose written-out entries are exactly `(Rz·Ry·Rx)ᵀ = Rx(−x)·Ry(−y)·Rz(−z)`.
+  Two separate things come out of that transpose and BOTH are needed:
+  **(1)** the angles are NEGATED — REFR angles are clockwise-positive compass headings (`getangle z`:
+  0 = north, 90 = east) against a counter-clockwise-positive right-handed basis;
+  **(2)** the axes compose **Z FIRST**, then Y, then X (`EulerOrder.Zyx` under
+  `Vector3.Transform`'s row-vector convention, which reverses the written order).
+  Part 2 hid for two days behind part 1, and the reason is worth internalising: **for a ref rotated
+  about a SINGLE axis every composition order agrees**, and single-axis is nearly every static in
+  the game. A convention calibrated on yaw-only geometry passes and stays wrong for everything
+  tilted. Numerically: single-axis old-vs-new is bit-identical (max element delta `0.00e+00` over
+  2,000 random angles per axis); two or three non-zero angles disagree by a median of 75–122° of
+  rotation. If you touch this, test on a ref with all three angles non-zero or you are testing
+  nothing.
 - **A placed NIF's root transform is not part of its REFR placement.** `NifMeshBuilder` was built
   for portraits and composes every node through the root. viewprobe removes that final root
   transform before applying position/rotation/scale. The game-grounded proof is
@@ -379,6 +390,14 @@ runs at build time; this is the one you fly with, and its printed number is what
 and the overlay are never clipped. **The ray respects it**: a shape the clip removed, or navmesh
 with the display off, is not pickable, because a HUD naming what the picture no longer shows
 would be worse than no HUD.
+
+**Read `(N hidden)` for exactly what it is: the LIVE band's count, and nothing else.** It counts
+the shapes this band is holding down right now — it says nothing about a build-time
+`--cull-above`, whose triangles were dropped before the window opened and which no key can bring
+back. A run carrying one now declares it on the bar as `SLICED at build: --cull-above N
+(permanent)` (added 2026-08-30), because without that the bar could read `clip: off` over a scene
+missing its roofs, and missing roofs read as a finding. `(0 hidden)` means "this band is currently
+removing nothing" — never "nothing has been removed".
 
 **Hover identification** (the cursor is free whenever RMB is up; a HUD bar at the top shows the
 answer). `LMB` on something **LOCKS** the readout to it and prints the full detail to the
@@ -1046,18 +1065,45 @@ to the default instance, producing a plausible-looking render of the *wrong load
 only detectable by noticing that flags you passed had no effect. Pass such paths as individually
 quoted arguments.
 
-**Historical note, still open.** Several of those six failures had one root cause: viewprobe drew
-every rotated ref with its heading MIRRORED, because Skyrim REFR angles are clockwise-positive while
-`Matrix4x4.CreateRotation*` is right-handed counter-clockwise-positive. Fixed in viewprobe (commit
-`99e60ea`) — but `SpatialOverlap.ToWorld`, `blockprobe` and `navprobe` still carry the wrong-handed
-composition, and recalibrating them is an OPEN item. The six-order `--euler` test missed it entirely
-because all six orders shared the wrong sign; it was caught by annotating a render (an X pattern
-between walkway and navmesh, and a mirrored elevation bulge). A test that varies one parameter
+**Historical note, and what finally closed it.** Several of those six failures had one root cause:
+viewprobe drew every rotated ref with its heading MIRRORED, because Skyrim REFR angles are
+clockwise-positive while `Matrix4x4.CreateRotation*` is right-handed counter-clockwise-positive.
+The SIGN was fixed in viewprobe first (commit `99e60ea`), caught by annotating a render — an X
+pattern between walkway and navmesh, and a mirrored elevation bulge. The six-order `--euler` test
+missed it entirely because all six orders shared the wrong sign; a test that varies one parameter
 cannot find a bug in a term common to every variant.
+
+The sign was only half of it. The composition ORDER was still reversed, and that half survived the
+first fix because the Falkreath walkway it was calibrated on is yaw-only — the case where order
+provably cannot matter. It took a scene with genuinely tilted refs to expose (2026-08-30, the
+College of Winterhold domes), and it was then settled by DERIVATION from CommonLibVR's own
+`NiMatrix3::SetEulerAnglesXYZ` rather than by another calibration. See *Conventions that bite* and
+*Fixed defects worth remembering*. `SpatialOverlap.ToWorld`, `blockprobe` and `navprobe` still carry
+the old composition — now a KNOWN-wrong one with a one-line fix (`EulerZyx` → `RefrRotation`),
+deliberately not taken because the detectors' false-positive floor is calibrated against the current
+boxes and flipping it wants its own re-baseline. Still OPEN, but no longer unknown.
 
 ---
 
 ## Fixed defects worth remembering
+
+**Euler composition order was reversed, so every TILTED ref was flung off its placement**
+(fixed 2026-08-30). Reported as four separate symptoms at the College of Winterhold — a large tower
+with a hole in it, turret roofs missing, a gatehouse roof missing, and arch pieces free-floating in
+the sky near the turrets. All four were one bug: refs with more than one non-zero rotation angle
+were composed X-first instead of Z-first, rotating them by a median 75–122° away from where the
+engine puts them. The roofs were never missing; they were lying somewhere else.
+
+Diagnosis worth copying. The claim was settled on DATA before a line changed and before a
+re-render: the twelve `XJKCoWArchSlimShort` refs of one dome are a ring, so the correct convention
+must make them radially symmetric. Under the engine's composition all twelve lean 45° from vertical
+at a CONSTANT +29.6° off inward-radial — one 12-gon segment, the arches spanning corner to corner.
+Under the old one the same twelve scatter over −177°..+145°. That is a decisive test that costs one
+query and no render, and it names the answer instead of just rejecting a guess.
+Verification: same camera, both builds — **5,954 shapes in each**, so the fix moved geometry and
+neither added nor dropped any; 33% of pixels changed; the tower ring closed, the stray slabs left
+the sky, and the turret domes match the in-game screenshot. Regression bound is algebraic, not
+hopeful: single-axis refs are bit-identical (`0.00e+00`), so nothing that was right could move.
 
 **Placed NIF root transforms were composed twice in effect** (fixed 2026-08-29). The shared
 `NifMeshBuilder` correctly returns geometry with the full NIF node chain applied for its portrait
@@ -1121,8 +1167,25 @@ cell's structure.
 - `--nav both` drops the fill to alpha 0.16, which is present in the data but invisible in the
   picture: measured against `--nav wire` it differs on ~31% of pixels by at most 6/255. Effectively
   a synonym for `wire`.
-- Flat lighting rig (key + fill + ambient); no shadows, no image-based anything. Water planes don't
-  render as water. No grass (a runtime system, arguably correct to omit).
+- Flat lighting rig (key + fill + ambient); no shadows, no image-based anything. No grass (a runtime
+  system, arguably correct to omit).
+- **No water, at all** — not "water renders badly", nothing is drawn. This one actively MISLEADS,
+  because sea reads as sky and the project's own rule is that empty background is a defect signal:
+  the Winterhold shot shows open blue where the game shows the Sea of Ghosts. What it would take is
+  small and known: an exterior cell's height is `CELL.WaterHeight` when set and the worldspace's
+  `LandDefaults.DefaultWaterHeight` when it holds the `3.4028235E+38` sentinel (Tamriel: **−14000**,
+  and Winterhold's own cell is on the sentinel), with `CELL.Water`/`WRLD.Water` → WATR for the
+  colour. One translucent quad over the loaded 3×3 footprint at that z would do it.
+- **No MATO projected snow** — this is what the missing white blanket on Winterhold actually is, and
+  it is NOT an effect shader, so `--fx`/`--fx-static` will never produce it. A STAT carries
+  `Material` → a MaterialObject plus a `MaxAngle`, and the engine projects that material onto every
+  face whose normal is within MaxAngle of the projection vector. The College's arches resolve to
+  `SnowMaterialWinterhold` (`108A84:Skyrim.esm`, itself overridden by the load order) with
+  `MaxAngle 80`, `HasSnow true`, `Flags SinglePass`, `SinglePassColor 255,255,255,0`,
+  `ProjectionVector 0,0,−1`, `FalloffBias 0.7 / FalloffScale 0.4`. The single-pass case is
+  approximable without new shader work — the builder already has world normals per vertex, so a
+  white vertex-colour blend gated on normal z past `cos(MaxAngle)` reproduces the dominant fact.
+  Weather particles, fog and ENB tint are separate and genuinely runtime.
 - Trees: full-model NIFs render; SpeedTree-style billboard LOD is absent (fine up close).
 - The compare stitches panels side by side at full size (wide file); no layout options.
 - NPC actors stand in the NIF bind pose — no animation, no furniture use. SPID `FinalOutfit` vs

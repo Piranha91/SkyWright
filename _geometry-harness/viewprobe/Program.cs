@@ -2069,6 +2069,10 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot)
                 WorklistCell = wlCell,
                 WorklistShot = wlShot,
                 CanSwitchCell = worklist is not null && worklist.Cells.Count > 1,
+                // Announce the build-time knife in the HUD. The live clip keys cannot undo it, so
+                // without this the bar can read "clip: off" over a scene whose roofs were removed
+                // before the window existed.
+                BuildCullAbove = cullAbove,
             };
             if (navMode != "off")
                 foreach (var nav in navSrc.Values)

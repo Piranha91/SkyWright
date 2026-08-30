@@ -1,4 +1,4 @@
-using System.Diagnostics;
+﻿using System.Diagnostics;
 using System.Numerics;
 using CharacterViewer.Rendering;
 using HarnessShared;
@@ -89,6 +89,13 @@ sealed class InteractiveOptions
     public HashSet<FormKey> RedNav = new();                // conflict-red navmeshes, tagged in reports
     public List<(FormKey Key, int Tri, Vector3 A, Vector3 B, Vector3 C)> NavTris = new();  // Skyrim space
     public List<PickShape> PickShapes = new();             // filled by the scene build
+
+    // The BUILD-time --cull-above, if the run carried one. Purely so the loop can SAY so: those
+    // triangles were dropped before the window opened and no key can bring them back, while the
+    // live clip's "(N hidden)" describes only the shapes the band is holding down right now. With
+    // nothing announcing the knife, a scene missing a third of its roofs reads as a finding —
+    // which is the exact reading a real missing-geometry bug got in this project (2026-08-30).
+    public float? BuildCullAbove;
 
     // ---- navmesh display, switched live by N --------------------------------------------
     // Under --interactive the build makes BOTH the sheet and the wire whatever --nav asked
@@ -716,6 +723,7 @@ static class InteractiveViewer
                          + (hasNav ? $" — nav {navMode}" : "")
                          + RouteHud()
                          + (clipLo is not null || clipHi is not null ? $" — clip {ClipLabel()}" : "")
+                         + (opt.BuildCullAbove is { } bca ? $" — SLICED at build: --cull-above {bca:0} (permanent)" : "")
                          + " — H help";
                 return;
             }
@@ -886,6 +894,7 @@ static class InteractiveViewer
                          + (hasNav ? $" — nav {navMode}" : "")
                          + RouteHud()
                          + (clipLo is not null || clipHi is not null ? $" — clip {ClipLabel()}" : "")
+                         + (opt.BuildCullAbove is { } bca ? $" — SLICED at build: --cull-above {bca:0} (permanent)" : "")
                          + " — H help";
             }
         };

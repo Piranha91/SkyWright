@@ -178,15 +178,12 @@ static class NpcActorBuilder
 
     /// <summary>Rewrites each mesh's VBO in place: character-local viewer space →
     /// Skyrim placement → back to viewer space. The EXACT static-ref convention
-    /// from TexturedScene (Skyrim REFR angles are clockwise-positive compass
-    /// headings, so they are NEGATED before composing with the right-handed
-    /// SpatialOverlap.Euler). Layout is GlMesh's 18-float interleave:
+    /// from TexturedScene, which is SpatialOverlap.RefrRotation for both.
+    /// Layout is GlMesh's 18-float interleave:
     /// pos(0-2) normal(3-5) uv(6-7) colour(8-11) tangent(12-14) bitangent(15-17).</summary>
     static void BakeWorldPlacement(IReadOnlyList<GlMesh> meshes, NpcPlacement placement, float scale)
     {
-        var rot = SpatialOverlap.Euler(
-            new Vec3(-placement.Rotation.X, -placement.Rotation.Y, -placement.Rotation.Z),
-            SpatialOverlap.EulerOrder.Xyz);
+        var rot = SpatialOverlap.RefrRotation(placement.Rotation);
         var pos = placement.Position;
 
         const int Stride = 18;

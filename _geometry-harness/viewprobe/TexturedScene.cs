@@ -300,13 +300,13 @@ static class TexturedScene
                       + $"  tex0={(b.TexturePaths.TryGetValue(0, out var t0) && t0.Length > 0 ? t0 : "(none)")}");
             }
 
-            // Skyrim-space placement. Skyrim's REFR angles are CLOCKWISE-positive (compass
-            // headings; getangle z: 0=north, 90=east) while Matrix4x4.CreateRotation* is
-            // right-handed counterclockwise-positive — so the angles must be NEGATED before
-            // composing, or every rotated ref draws with its heading mirrored about north
-            // (found 2026-08-28: the Falkreath walkway crossed its own navmesh in an X).
-            var rot = SpatialOverlap.Euler(new Vec3(-r.Rotation.X, -r.Rotation.Y, -r.Rotation.Z),
-                                           SpatialOverlap.EulerOrder.Xyz);
+            // Skyrim-space placement — see SpatialOverlap.RefrRotation, which derives the whole
+            // convention from the engine's own NiMatrix3::SetEulerAnglesXYZ. Two parts, found a
+            // day apart because a yaw-only scene can only ever show the first: the angles are
+            // NEGATED (2026-08-28, the Falkreath walkway crossing its own navmesh in an X), and
+            // the axes compose Z FIRST (2026-08-30, the College dome arches flung off their ring
+            // — invisible until a ref with all three angles non-zero came along).
+            var rot = SpatialOverlap.RefrRotation(r.Rotation);
             var pos = new Vector3(r.Position.X, r.Position.Y, r.Position.Z);
 
             bool refHadFx = false, refHadFxStatic = false;
