@@ -158,6 +158,7 @@ all knowledge.
 |---|---|
 | `VP_SHAPE_DUMP=<substr>` | for every mesh whose path matches, one line per BUILT shape: effect-vs-lighting shader, triangles, blend mode (Bethesda src→dst; `6->0` is additive), material alpha, colour × multiple, depth-write, slot-0 texture. The SHAPE-level companion to `--list-meshes` — that says which files are in the cell, this says why one of their shapes draws the way it does. Printed at build time, before any skip decision, so it shows skipped shapes too |
 | `VP_WATER_DUMP=1` | the raw per-cell water read — HasWater, XCLW at full precision, the WATR link, and whether the height was used or rejected. A plane at the wrong height is INVISIBLE rather than wrong-looking (terrain simply covers it), so this is the line that says whether the height or the drawing is at fault |
+| `VP_WATER_SHALLOW_ALPHA=<0..1>` | alpha at ZERO water depth. Default 1 = opaque everywhere, which is what the engine draws. Lower it for a see-through shore margin on a floor plan; below ~0.8 the sea starts reading as tinted glass |
 | `VP_WATER_Z=<z>` | force every water surface to one height. The other half of the pair above: if the surface appears here and not at the resolved height, the renderer is fine and the height is wrong |
 | `VP_FXSTATIC_EMIT=<float>` | taste multiplier on `--fx-static` brightness (default 1 = the authored `baseColorScale`). Below ~0.25 the fire stops reading; above ~2 it blows out |
 | `VP_ALPHA_DUMP=gx,gy` | every alpha layer of that cell as a 17×17 ASCII opacity grid |
@@ -1187,9 +1188,6 @@ cell's structure.
   water), so a top-down camera gets almost no sky and sees the record's `DeepColor` — near-black
   teal. The game looks brighter there because it reflects a lit sky and adds sun sparkle. Do not
   "fix" this by raising the sky mix: that is exactly what made the first version a grey-green film.
-- Terrain quadrant boundaries show as hard rectangles THROUGH translucent water. Pre-existing
-  (verified with `--no-water`: the same rectangles are there), and it is the painted-layer/
-  untextured-quadrant rough edge listed above, just made more visible by something drawn over it.
 
 ### Water (`--no-water` to drop)
 
@@ -1219,14 +1217,43 @@ and `FlowNormalsNoiseTexture` — so colour has to come from the record's own `S
 `DeepColor` and the noise layers are normals. Binding one as a diffuse would repaint the sea in
 normal-map lilac, the exact defect class this renderer already carries a filter for.
 
+**The surface is OPAQUE, because that is what the engine draws.** Settled against the game's own
+water shader (Community Shaders, `package/Shaders/Water.hlsl`) rather than reasoned about, after
+guesswork got this wrong twice. Three facts from that source, each killing a plausible assumption:
+
+- `psout.Lighting = float4(finalColor, isSpecular);` — **the alpha channel carries a specular flag,
+  not opacity.** Skyrim's water is an opaque draw. It does not alpha-blend.
+- What looks like transparency happens INSIDE the shader:
+  `lerp(refractionColor, finalColorPreFog, refractionMul)` against a refraction sample. Framebuffer
+  blending is the wrong instrument; it is used here only because this renderer has no refraction
+  buffer, and a blend IS that same lerp with the framebuffer standing in for the sample.
+- `VarAmounts` is documented in its own cbuffer as *"alpha in z"*, and that value is a **floor, not
+  a level**: `distanceMul = saturate(lerp(VarAmounts.z, 1, -(distanceFactor - 1)))` starts at the
+  record's alpha and rises to **1 — fully opaque**. So `WATR.Opacity` is the most transparent water
+  ever gets, not how transparent it is. Reading it as a flat 50% alpha made an ocean out of
+  tinted air.
+
+Depth information is not lost to opacity — it rides the COLOUR ramp, which is the shader's own
+`lerp(ShallowColor, DeepColor, distanceMul)`. What IS lost is seeing the bed through a ford, and
+that is a refraction effect this renderer cannot do honestly.
+`VP_WATER_SHALLOW_ALPHA=<0..1>` puts a see-through shore margin back for a plan that wants one.
+
+Honest divergence, stated rather than buried: in the engine the driving factor is camera distance
+and fog, not depth to the bottom. Depth is used here because this renders floor plans and site
+pictures, where "shallow reads lighter than deep" is the readable, camera-independent behaviour,
+and because a camera-distance ramp would bake into vertex colours and freeze at the entry camera.
+
+Opaque water joins the OPAQUE pass and writes depth. Not tidiness — it fixed a layering bug the
+opaque default exposed: terrain paint layers ride the DECAL channel, and decals draw AFTER the
+distance-sorted blend set, so while water was blended the roads and ground blends composited
+straight over the river as quadrant-shaped rectangles of differing tint. (Consequence worth knowing:
+`--pick` over water now reports the water surface, where a blended one used to report the bed.)
+
 Colour is `lerp(ShallowColor, DeepColor)` by real depth, plus a sky term reflected off WATR's own
-`ReflectionColor` and weighted by **Schlick Fresnel with `WaterFresnel` as F0**. Alpha is
-depth-driven: the record's `Opacity` is the SHALLOW end, rising to opaque at the bottom of the
-shallow band — fitted, not engine-exact, because WATR states one opacity and the engine's depth
-response lives in its shader. Both replaced a flat `lerp(body, sky, WaterReflectivity)` + flat alpha
-that mixed 40% pale sky into every vertex regardless of angle: the water drew correctly and simply
-did not READ as water, which is a failure mode worth naming because it looks exactly like "no water
-was drawn". Camera-dependent and therefore baked at the ENTRY camera, like the rest of this
+`ReflectionColor` and weighted by **Schlick Fresnel with `WaterFresnel` as F0**. That replaced a flat
+`lerp(body, sky, WaterReflectivity)` which mixed 40% pale sky into every vertex regardless of angle:
+the water drew correctly and simply did not READ as water — a failure mode worth naming, because it
+looks exactly like "no water was drawn". Camera-dependent and therefore baked at the ENTRY camera, like the rest of this
 renderer's view-dependent overlay work — exact for a static render, frozen in the fly-through.
 
 Not modelled: no reflection or refraction buffer, no flow, no sun sparkle.

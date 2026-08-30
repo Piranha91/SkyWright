@@ -857,7 +857,14 @@ static class TexturedScene
         foreach (var wpl in waterPlanes)
         {
             const int WaterGrid = 48;                 // 4096/48 ~ 85 u per quad — fine enough for a shoreline
-            const float ShallowBand = 700f;           // depth over which shallow fades to deep
+            // Depth over which shallow fades to deep AND over which the surface closes up to
+            // opaque. ~2.7 m of Skyrim: wading depth. Was 700 (≈10 m), which kept almost every
+            // real body of water permanently in the "shallow" half of both ramps and is why the
+            // sea read as tinted glass.
+            const float ShallowBand = 192f;
+            // The alpha at zero depth. 1 = opaque everywhere, matching the engine's opaque draw.
+            float shoreAlpha = float.TryParse(Environment.GetEnvironmentVariable("VP_WATER_SHALLOW_ALPHA"),
+                                              out var sa) ? Math.Clamp(sa, 0f, 1f) : 1f;
             int texHandle = wpl.NoiseTexture is { Length: > 0 } wtx ? textures.LoadTexture(wtx) : 0;
             bool hasNoise = texHandle != 0 && texHandle != textures.WhiteTexture;
 
@@ -904,14 +911,38 @@ static class TexturedScene
                     tgt[i] = YUp(Vector3.UnitX);
                     btg[i] = YUp(Vector3.UnitY);
                     uvv[i] = new Vector2(x / uvScale, y / uvScale);
-                    // DEPTH-DRIVEN ALPHA. Skyrim's water is see-through in the shallows and opaque
-                    // over deep water; a flat WATR.Opacity everywhere makes a ford look like a
-                    // sheet of glass and an ocean look like tinted air. Fitted, not engine-exact
-                    // (WATR states one opacity and the engine's depth response is in the shader):
-                    // the record's opacity is the SHALLOW end, rising to fully opaque at the
-                    // bottom of the shallow band.
-                    float op0 = Math.Clamp(wpl.Opacity, 0f, 1f);
-                    cvv2[i] = new Vector4(rgb.X, rgb.Y, rgb.Z, op0 + (1f - op0) * t);
+                    // ALPHA. Grounded in the game's own water shader (Community Shaders'
+                    // `package/Shaders/Water.hlsl`), which settles a question guesswork got wrong
+                    // twice here: **Skyrim does not alpha-blend its water at all.** The pixel
+                    // shader writes `psout.Lighting = float4(finalColor, isSpecular)` — the alpha
+                    // channel carries a specular FLAG, not opacity — so the surface is an OPAQUE
+                    // draw, and everything that looks like transparency is done inside the shader
+                    // as `lerp(refractionColor, finalColorPreFog, refractionMul)` against a
+                    // refraction sample. Framebuffer blending is the wrong instrument; it is only
+                    // used here because this renderer has no refraction buffer to lerp against,
+                    // and a blend IS that same lerp with the framebuffer standing in for it.
+                    //
+                    // The shape of the ramp is the shader's too. `VarAmounts` is documented in its
+                    // own cbuffer as "alpha in z", and that value is a FLOOR rather than a level:
+                    //     distanceMul = saturate(lerp(VarAmounts.z, 1, -(distanceFactor - 1)))
+                    // i.e. it starts at the record's alpha and rises to 1 — fully opaque, no
+                    // refraction — as the driving factor closes. So WATR.Opacity is the MOST
+                    // transparent the water ever gets, not how transparent it is. Using it as a
+                    // flat 50% everywhere (the previous version) made an ocean out of tinted air.
+                    //
+                    // Honest divergence, stated rather than buried: in the engine that driving
+                    // factor is camera distance and fog, not depth to the bottom. Depth is used
+                    // here instead because this is a renderer for floor plans and site pictures,
+                    // where "you can see the riverbed through a ford but not through a fjord" is
+                    // the readable, camera-independent behaviour, and because a camera-distance
+                    // ramp would bake into vertex colours and freeze at the entry camera.
+                    // So: OPAQUE by default, which is what the engine draws. The shallow/deep
+                    // information is not lost by that — it rides the COLOUR ramp above, which is
+                    // the shader's own `lerp(ShallowColor, DeepColor, distanceMul)`. What is lost
+                    // is seeing the bed through a ford, and that is a refraction effect this
+                    // renderer cannot do honestly. VP_WATER_SHALLOW_ALPHA=<0..1> puts a
+                    // see-through shore margin back for anyone who wants it for a floor plan.
+                    cvv2[i] = new Vector4(rgb.X, rgb.Y, rgb.Z, shoreAlpha + (1f - shoreAlpha) * t);
                 }
             for (int gy = 0; gy < WaterGrid; gy++)
                 for (int gx = 0; gx < WaterGrid; gx++)
@@ -936,9 +967,17 @@ static class TexturedScene
                 water.HasNormalMap = true;
             }
             water.HasVertexColors = true;
-            water.HasAlphaBlend = true;
+            // OPAQUE water joins the opaque pass and writes depth; only a see-through shore margin
+            // needs blending. This is not just tidiness — it fixes a layering bug that the opaque
+            // default exposed. Terrain paint layers ride the DECAL channel, and decals are drawn
+            // AFTER the distance-sorted blend set, so while water was blended the roads and
+            // ground blends composited straight over the top of it: quadrant-shaped rectangles of
+            // differing tint sitting on the river. As opaque geometry the water is simply in the
+            // depth buffer before they draw, and they are correctly hidden beneath it.
+            bool opaqueWater = shoreAlpha >= 0.999f;
+            water.HasAlphaBlend = !opaqueWater;
             water.SrcBlendIndex = 6; water.DstBlendIndex = 7;
-            water.DepthWrite = false;
+            water.DepthWrite = opaqueWater;
             water.IsDoubleSided = true;                     // readable from under the surface too
             water.MaterialGlossiness = 80f;
             water.MaterialSpecularStrength = 0.5f;
