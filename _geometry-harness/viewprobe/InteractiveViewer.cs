@@ -66,6 +66,13 @@ sealed class PickShape
     /// clip never touches.</summary>
     public GlMesh? Mesh;
 
+    /// <summary>Kind==Ref: the projected-covering shell riding on this shape, if it has one. The
+    /// clip has to hide it WITH its base — a covering is not a pick shape of its own (hovering
+    /// should name the roof, not the snow on it), so without this link clipping a roof away left
+    /// its snow hanging in the air. Not part of the bounds or the ray: it is the same triangles
+    /// lifted 2 u, so it can only ever answer what the base already answers.</summary>
+    public GlMesh? CoverMesh;
+
     public void ComputeBounds()
     {
         var mn = new Vector3(float.MaxValue); var mx = new Vector3(float.MinValue);
@@ -258,6 +265,7 @@ static class InteractiveViewer
             {
                 bool show = s.Max.Y >= lo && s.Min.Y <= hi;     // viewer Y IS Skyrim z
                 s.Mesh!.IsRendering = show;
+                if (s.CoverMesh is { } cm) cm.IsRendering = show;   // the snow goes with the roof
                 if (!show) hidden++;
             }
             clipHidden = hidden;

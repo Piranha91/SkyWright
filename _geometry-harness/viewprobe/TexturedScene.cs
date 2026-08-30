@@ -166,7 +166,9 @@ readonly record struct WaterPlane(float Z,                                      
                                   float X0, float Y0, float X1, float Y1,         // cell footprint
                                   string? NoiseTexture, float NoiseUvScale,
                                   Vector3 ShallowColor, Vector3 DeepColor,        // 0..1
+                                  Vector3 ReflectionColor,                        // 0..1, WATR's own
                                   float Reflectivity, float Opacity,              // 0..1
+                                  float Fresnel,                                  // WATR.WaterFresnel, used as Schlick F0
                                   string Label);
 
 static class TexturedScene
@@ -333,6 +335,7 @@ static class TexturedScene
         int coveringShapes = 0, coveringRefs = 0;
         var coveringByMato = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
         int waterMeshes = 0; long waterTris = 0;
+        long waterSubmerged = 0, waterSamples = 0;
         // env VP_FXSTATIC_EMIT — brightness of the --fx-static stand-in. The real number is
         // BSEffectShaderProperty.baseColorScale, which the builder does not read; until it does,
         // this is the knob that stands in for it.
@@ -452,6 +455,7 @@ static class TexturedScene
                                                && s0.EndsWith("_n.dds", StringComparison.OrdinalIgnoreCase)));
                     continue;
                 }
+                PickShape? basePick = null;          // set when interactive; the covering links to it
                 var wp = new Vector3[n];
                 var wn = new Vector3[n];
                 var wt = new Vector3[n];
@@ -650,6 +654,7 @@ static class TexturedScene
                     var ps = new PickShape { Kind = PickKind.Ref, Verts = wp, Tris = tri, Ref = r, Mesh = mesh };
                     ps.ComputeBounds();
                     interactive.PickShapes.Add(ps);
+                    basePick = ps;                       // the covering below hangs itself off this
                 }
 
                 // ---- PROJECTED COVERING (MATO) ------------------------------------------------
@@ -712,6 +717,10 @@ static class TexturedScene
                         covMesh.DiffuseTexture = MatoTexture(cv.ModelPath);
                         renderer.AddMesh(covMesh);
                         meshes.Add(covMesh);
+                        // The live height clip walks PickShapes and a shell is deliberately not
+                        // one of them; without this link, clipping a roof away left its snow
+                        // hanging in the air.
+                        if (basePick is not null) basePick.CoverMesh = covMesh;
                         coveringShapes++;
                         refHadCovering = true;
                         coveringByMato[cv.Label] = coveringByMato.TryGetValue(cv.Label, out var cn) ? cn + 1 : 1;
@@ -853,6 +862,7 @@ static class TexturedScene
             bool hasNoise = texHandle != 0 && texHandle != textures.WhiteTexture;
 
             int side = WaterGrid + 1;
+            int submerged = 0;                        // grid points whose LAND sits BELOW the surface
             var pv = new Vector3[side * side]; var nv = new Vector3[side * side];
             var uvv = new Vector2[side * side]; var cvv2 = new Vector4[side * side];
             var tgt = new Vector3[side * side]; var btg = new Vector3[side * side];
@@ -866,19 +876,42 @@ static class TexturedScene
                     float y = wpl.Y0 + (wpl.Y1 - wpl.Y0) * gy / WaterGrid;
                     // Depth to the ground below. No LAND here (off the heightmap) reads as deep
                     // ocean rather than as shallow — the conservative direction for a coastline.
-                    float depth = terrainHeightAt?.Invoke(x, y) is { } gz ? wpl.Z - gz : ShallowBand;
+                    float? groundZ = terrainHeightAt?.Invoke(x, y);
+                    float depth = groundZ is { } gz ? wpl.Z - gz : ShallowBand;
+                    if (depth > 0f) submerged++;
                     float t = Math.Clamp(depth / ShallowBand, 0f, 1f);
                     var body = Vector3.Lerp(wpl.ShallowColor, wpl.DeepColor, t);
-                    // The sky term stands in for a reflection buffer this renderer does not have.
-                    // Flat, not Fresnel: vertex colours are baked once, and a view-dependent term
-                    // would be frozen at the entry camera in the fly-through and quietly wrong.
-                    var rgb = Vector3.Lerp(body, skyColor, Math.Clamp(wpl.Reflectivity, 0f, 1f));
+
+                    // SKY REFLECTION, Fresnel-weighted by the record's own WaterFresnel as F0
+                    // (Schlick). This replaced a flat `lerp(body, sky, WaterReflectivity)` that
+                    // mixed 40% pale sky into every vertex regardless of angle and turned the
+                    // Riverwood ford into a grey-green film over sand — the water was drawing
+                    // correctly and simply did not READ as water. Top-down, Schlick with an F0 of
+                    // 0.07 returns almost nothing, so the surface shows its own dark teal, which
+                    // is what water looks like from above; at grazing angles it goes bright.
+                    // Camera-dependent and therefore baked at the ENTRY camera, like the rest of
+                    // this renderer's view-dependent overlay work — exact for a static render,
+                    // frozen in the fly-through.
+                    var toEye = Unit(new Vector3(cam.Eye.X - x, cam.Eye.Y - y, cam.Eye.Z - wpl.Z));
+                    float cosI = MathF.Max(toEye.Z, 0f);              // surface normal is +Z
+                    float f0 = Math.Clamp(wpl.Fresnel, 0f, 1f);
+                    float fres = f0 + (1f - f0) * MathF.Pow(1f - cosI, 5f);
+                    var reflected = skyColor * wpl.ReflectionColor;   // sky, tinted by WATR's own reflection colour
+                    var rgb = Vector3.Lerp(body, reflected, Math.Clamp(fres * wpl.Reflectivity * 4f, 0f, 1f));
+
                     pv[i] = YUp(new Vector3(x, y, wpl.Z));
                     nv[i] = YUp(Vector3.UnitZ);
                     tgt[i] = YUp(Vector3.UnitX);
                     btg[i] = YUp(Vector3.UnitY);
                     uvv[i] = new Vector2(x / uvScale, y / uvScale);
-                    cvv2[i] = new Vector4(rgb.X, rgb.Y, rgb.Z, Math.Clamp(wpl.Opacity, 0f, 1f));
+                    // DEPTH-DRIVEN ALPHA. Skyrim's water is see-through in the shallows and opaque
+                    // over deep water; a flat WATR.Opacity everywhere makes a ford look like a
+                    // sheet of glass and an ocean look like tinted air. Fitted, not engine-exact
+                    // (WATR states one opacity and the engine's depth response is in the shader):
+                    // the record's opacity is the SHALLOW end, rising to fully opaque at the
+                    // bottom of the shallow band.
+                    float op0 = Math.Clamp(wpl.Opacity, 0f, 1f);
+                    cvv2[i] = new Vector4(rgb.X, rgb.Y, rgb.Z, op0 + (1f - op0) * t);
                 }
             for (int gy = 0; gy < WaterGrid; gy++)
                 for (int gx = 0; gx < WaterGrid; gx++)
@@ -912,6 +945,7 @@ static class TexturedScene
             renderer.AddMesh(water);
             meshes.Add(water);
             waterMeshes++; waterTris += idxs.Count / 3;
+            waterSubmerged += submerged; waterSamples += side * side;
         }
         if (waterMeshes > 0)
             Console.WriteLine($"   water: {waterMeshes} cell surface(s), {waterTris:N0} triangles — "
@@ -919,6 +953,13 @@ static class TexturedScene
                             + (waterPlanes.Any(w => w.NoiseTexture is { Length: > 0 })
                                 ? ", noise layer bound as a wave normal map" : ", no noise texture resolved")
                             + " (no reflection/refraction/flow — see README)");
+        // HOW MUCH of the water footprint is actually below the surface. The number that tells a
+        // wrong HEIGHT from an honest absence: a sea whose floor is mostly above the surface is a
+        // height bug, while a low percentage over a mountain cell is just a mountain. Without it,
+        // "9 cell surface(s) drawn" reads as success whether or not one pixel of water is visible.
+        if (waterSamples > 0)
+            Console.WriteLine($"      {100.0 * waterSubmerged / waterSamples:0.0}% of the water footprint has LAND "
+                            + $"BELOW the surface (the rest is dry ground, and correctly hides it)");
 
         // ── THE NAVMESH OVERLAY — the probe's whole point ──────────────────────────────
         // Looks: filled = the translucent sheet; wire = every triangle outlined; both.

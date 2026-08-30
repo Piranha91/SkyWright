@@ -1175,27 +1175,14 @@ cell's structure.
   a synonym for `wire`.
 - Flat lighting rig (key + fill + ambient); no shadows, no image-based anything. No grass (a runtime
   system, arguably correct to omit).
-- **Water surface height is WRONG — open defect, 2026-08-30.** The surface DRAWS (below), but it is
-  systematically placed too LOW: Winterhold's College cell renders no sea although the game clearly
-  shows one, and Riverwood's river comes out as a sliver instead of a river. Do not trust a water
-  height this build reports. Two live hypotheses, neither confirmed:
-  1. **The per-cell harvest clobbers a real height with a later override's absent one.** `CELL.WaterHeight`
-     is harvested per grid point across the whole load-order walk, last-writer-wins. An override CELL
-     that does not carry XCLW reads back null → treated as "unset" → falls through to the worldspace
-     default. So ANY plugin touching a cell for an unrelated reason can wipe a real water height. The
-     Winterhold ring came back 9-for-9 "inherited from the worldspace default", which for a coastal
-     cell is exactly what this failure would look like.
-  2. **The `4.2949532E+09` reading is a mis-decode, not a sentinel.** Two Winterhold cells return that
-     for XCLW; it is `2^32 − 14096`, i.e. a small negative that has been through an unsigned
-     reinterpretation somewhere. `RealHeight` currently rejects it and falls back — but if the true
-     value is near −14096 that fallback is coincidentally similar and hides the real problem.
-  `VP_WATER_DUMP=1` prints the raw per-cell read (HasWater, XCLW, WATR link, used-vs-rejected), and
-  `VP_WATER_Z=<z>` forces every surface to one height — that pair is what separates "drawn at the
-  wrong height" from "not drawn", which look identical because a too-low plane is simply underground.
-- **Coverings and water are drawn but NOT clipped by the interactive height band — open defect.**
-  The live clip keys walk `PickShapes`, and a covering shell is deliberately not a pick shape (you
-  should not be able to hover-name a snow layer). So clipping a roof away leaves its snow shell
-  hanging in the air. Fix is to hang the shell off its base's `PickShape` and toggle both.
+- **Water reads DARK from directly overhead, and that is the honest answer, not a bug.** With no
+  reflection buffer the sky term is Fresnel-weighted off WATR's own `WaterFresnel` (0.07 for vanilla
+  water), so a top-down camera gets almost no sky and sees the record's `DeepColor` — near-black
+  teal. The game looks brighter there because it reflects a lit sky and adds sun sparkle. Do not
+  "fix" this by raising the sky mix: that is exactly what made the first version a grey-green film.
+- Terrain quadrant boundaries show as hard rectangles THROUGH translucent water. Pre-existing
+  (verified with `--no-water`: the same rectangles are there), and it is the painted-layer/
+  untextured-quadrant rough edge listed above, just made more visible by something drawn over it.
 
 ### Water (`--no-water` to drop)
 
@@ -1205,8 +1192,19 @@ to the LAND underneath, so a shoreline needs vertices along it to shade against.
 
 Height follows the engine's precedence — `CELL.WaterHeight` when the cell states one, the
 worldspace's `LandDefaults.DefaultWaterHeight` when it holds the `3.4028235E+38` sentinel (Tamriel:
-−14000, confirmed identical in vanilla `Skyrim.esm` and in the load-order winner). **See the open
-defect above before believing a rendered height.**
+−14000, confirmed identical in vanilla `Skyrim.esm` and in the load-order winner).
+
+**A missing sea is almost never a wrong height, and there is now a number that proves which it is.**
+The console reports what percentage of the water footprint has LAND *below* the surface. A water
+plane at the wrong height is INVISIBLE rather than wrong-looking — terrain simply covers it — so
+"9 surfaces drawn" is not evidence that one pixel of water is visible. Winterhold reports **18.8%**
+submerged and Riverwood **12.6%**: both are real seas/rivers, and when they first looked absent the
+cause was appearance, not placement. That was worth a full round trip to establish (2026-08-30):
+the height resolution was blamed first, the College cell's XCLW was walked down all 14 plugins that
+touch it — every one, vanilla included, reads the same sentinel — and the LAND decode was
+cross-checked against navmesh (LAND 618 vs nav 626 at the same point, 8 u apart, as it should be).
+Both were right; the water was simply too faint to see. `VP_WATER_DUMP=1` and `VP_WATER_Z=<z>` are
+the two knobs for redoing that separation quickly.
 
 The noise layer is bound as a **wave NORMAL map**, and that is a schema fact rather than a guess
 about the art: WATR carries no diffuse texture field at all — only `NoiseLayerOne/Two/ThreeTexture`
@@ -1214,10 +1212,17 @@ and `FlowNormalsNoiseTexture` — so colour has to come from the record's own `S
 `DeepColor` and the noise layers are normals. Binding one as a diffuse would repaint the sea in
 normal-map lilac, the exact defect class this renderer already carries a filter for.
 
-Not modelled, and not to be read into the picture: no reflection or refraction buffer, no flow, no
-sun sparkle. The sky term is a flat `WaterReflectivity` mix, not a Fresnel — deliberately, because
-vertex colours are baked once and a view-dependent term would freeze at the entry camera in the
-fly-through and be quietly wrong there.
+Colour is `lerp(ShallowColor, DeepColor)` by real depth, plus a sky term reflected off WATR's own
+`ReflectionColor` and weighted by **Schlick Fresnel with `WaterFresnel` as F0**. Alpha is
+depth-driven: the record's `Opacity` is the SHALLOW end, rising to opaque at the bottom of the
+shallow band — fitted, not engine-exact, because WATR states one opacity and the engine's depth
+response lives in its shader. Both replaced a flat `lerp(body, sky, WaterReflectivity)` + flat alpha
+that mixed 40% pale sky into every vertex regardless of angle: the water drew correctly and simply
+did not READ as water, which is a failure mode worth naming because it looks exactly like "no water
+was drawn". Camera-dependent and therefore baked at the ENTRY camera, like the rest of this
+renderer's view-dependent overlay work — exact for a static render, frozen in the fly-through.
+
+Not modelled: no reflection or refraction buffer, no flow, no sun sparkle.
 
 ### Projected coverings — MATO (`--no-coverings` to drop)
 
@@ -1239,6 +1244,10 @@ deliberately-thinner variants climb monotonically (Windhelm's `Light` 0.92, `Eve
 `Minimal` 0.98), so a higher bias means LESS coverage — bias is a threshold on `d`, scale the ramp
 width. A single-pass material states its colour in `SinglePassColor`; a multi-pass one leaves it to
 the diffuse of its own model NIF's first shape, which is where the snow grain comes from.
+
+A shell is NOT a pick shape of its own — hovering should name the roof, not the snow on it — so it
+hangs off its base's `PickShape` as `CoverMesh` and the live height clip toggles both together.
+Without that link, clipping a roof away left its snow hanging in the air.
 
 Shells are decals (drawn after the sorted blend set, never writing depth) and lifted 2 u along the
 normal, because `IsDecal` keeps geometry out of the depth buffer but does not offset it and exactly
