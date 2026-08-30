@@ -211,6 +211,23 @@ static class TexturedScene
         bool Discs,
         float? ArrowEvery);
 
+    /// <summary>--grid: a labelled world-coordinate grid ruled across the ground plane of a
+    /// top-down, so a position is READ off the picture instead of derived from the caption pose.
+    /// That derivation is arithmetic done by eye against a screenshot, and it is where silent
+    /// errors come from — a route planned from a mis-scaled pixel measurement looks exactly like
+    /// one planned from a correct one.</summary>
+    /// <param name="Spacing">World units between lines, or null for auto — the renderer then picks
+    /// a 1-2-5 round number putting roughly 9 lines across the frame, which is what makes the
+    /// labels readable rather than a hatch.</param>
+    /// <param name="Z">The Skyrim height the grid is ruled AT. It matters: the grid is a plane in
+    /// the world, so a plane at the wrong storey projects to the wrong pixels and the numbers read
+    /// off it are wrong by exactly the parallax the flag exists to remove.</param>
+    /// <param name="Color">Reserved, and excluded from the nav wire's auto-pick the same way the
+    /// route's colour is — a grid sharing the navmesh's hue makes the whole overlay unreadable.</param>
+    /// <param name="ZWhy">Where <paramref name="Z"/> came from, for the console line. An assumed
+    /// height has to say it is assumed.</param>
+    internal sealed record GridRender(float? Spacing, float Z, Vector4 Color, string ZWhy);
+
     /// <summary>MO2-style loose-file precedence, the ONE encoding of the
     /// convention: the resolver iterates LAST-to-first, so hand it
     /// lowest-priority-first with overwrite at the very end (it outranks every
@@ -253,6 +270,7 @@ static class TexturedScene
         IReadOnlyList<NpcActorRender> npcActors,           // placed characters — meshes BORROWED (see below), never disposed here
         bool npcPucks,                                     // per-actor-coloured ground disc + always-visible rim under each actor
         RouteRender? route,                                // the path to walk: segments + arrowheads on the ground; null = none
+        GridRender? grid,                                  // labelled world-coordinate grid on the ground plane; null = none
         bool keepFx,                                       // --fx: draw effect-shader shapes too
         bool fxStatic,                                     // --fx-static: draw them as a frozen frame
         bool listEffectMeshes,                             // --list-meshes: name the meshes they came from
@@ -1197,6 +1215,194 @@ static class TexturedScene
                     Math.Clamp((int)((ny * 0.5f + 0.5f) * size), 0, size - 1));
         }
 
+        // ── THE WORLD-COORDINATE GRID ────────────────────────────────────────────────
+        // Ruled across ONE PLANE — the storey the shot is about — because that is the only thing
+        // a grid can honestly be: two points at different heights under the same pixel have
+        // different X,Y, and a grid that pretended otherwise would be a ruler with no scale.
+        //
+        // It is built here, beside the camera matrices, because both halves need them: the LINES
+        // are world geometry (they ride the overlay pass like everything else), and the LABELS are
+        // screen positions found by projecting each line and clipping it to the frame. Nothing is
+        // measured off the finished picture.
+        var gridRibbon = new List<float>();
+        var gridLabels = new List<(string Text, int X, int Y)>();
+        float gridSpacing = 0f;
+        var gridColour3 = grid is null ? Vector3.Zero : new Vector3(grid.Color.X, grid.Color.Y, grid.Color.Z);
+        if (grid is not null)
+        {
+            var invVpG = viewProj.Inverted();
+            // Where the ray through an NDC point meets the grid's plane, in Skyrim coordinates.
+            // Null when the ray runs parallel to the plane or meets it behind the camera — i.e.
+            // when the horizon is in shot, which is exactly the case a ground grid cannot serve.
+            Vector3? PlaneHit(float nx, float ny)
+            {
+                var c0 = GlVec4.TransformRow(new GlVec4(nx, ny, -1f, 1f), invVpG);
+                var c1 = GlVec4.TransformRow(new GlVec4(nx, ny, 1f, 1f), invVpG);
+                if (MathF.Abs(c0.W) < 1e-9f || MathF.Abs(c1.W) < 1e-9f) return null;
+                var a = new Vector3(c0.X / c0.W, c0.Y / c0.W, c0.Z / c0.W);
+                var b = new Vector3(c1.X / c1.W, c1.Y / c1.W, c1.Z / c1.W);
+                var pa = new Vector3(a.X, -a.Z, a.Y);            // Y-up back to Skyrim's Z-up
+                var pb = new Vector3(b.X, -b.Z, b.Y);
+                float dz = pb.Z - pa.Z;
+                if (MathF.Abs(dz) < 1e-6f) return null;
+                float t = (grid.Z - pa.Z) / dz;
+                if (t < 0f || t > 1f) return null;
+                return pa + (pb - pa) * t;
+            }
+            // Pitch measured off the camera's OWN forward vector, not off the arguments that
+            // composed it, so a pose reached by --yaw/--pitch and one reached by --look are judged
+            // the same way. 90 deg is straight down.
+            float pitchDown = float.RadiansToDegrees(MathF.Asin(Math.Clamp(-viewFwd.Y, -1f, 1f)));
+            const float SteepEnough = 60f;
+            var hits = new[] { PlaneHit(-1f, -1f), PlaneHit(1f, -1f), PlaneHit(-1f, 1f), PlaneHit(1f, 1f) };
+            if (pitchDown < SteepEnough)
+                // Declined, not drawn badly. At eye level the lines converge on the horizon, the
+                // near cells swallow the frame and the far ones stack into a smear — a picture
+                // that looks like a scale and is not one. The console says so; the image does not
+                // pretend a grid was asked for.
+                Console.WriteLine($"   grid: DECLINED — the camera looks down {pitchDown:0.#}°, and a ground grid only reads "
+                                + $"on a steep top-down ({SteepEnough:0}° or more). Nothing was drawn.");
+            else if (hits.Any(h => h is null))
+                Console.WriteLine($"   grid: DECLINED — the plane at z {grid.Z:0} leaves the frame (the horizon is in shot), "
+                                + "so part of the picture has no grid position at all. Nothing was drawn.");
+            else
+            {
+                var pts4 = hits.Select(h => h!.Value).ToArray();
+                float minX = pts4.Min(p => p.X), maxX = pts4.Max(p => p.X);
+                float minY = pts4.Min(p => p.Y), maxY = pts4.Max(p => p.Y);
+                float span = MathF.Max(maxX - minX, maxY - minY);
+                // AUTO: a 1-2-5 round number, chosen so about nine lines cross the frame. Round
+                // because the labels are read by a person — 250 and 500 are numbers anyone can
+                // interpolate between by eye, 273 is not — and nine because past a dozen the
+                // labels start colliding and the grid becomes hatching.
+                if (grid.Spacing is { } fixedN) gridSpacing = fixedN;
+                else
+                {
+                    const float TargetLines = 9f;
+                    float want = MathF.Max(span / TargetLines, 1e-3f);
+                    float bestErr = float.MaxValue;
+                    // 1-2-2.5-5 rather than plain 1-2-5. Without the 2.5 the ladder has a gap
+                    // between 200 and 500 wide enough that a 2,500 u frame — an ordinary interior
+                    // top-down — lands on 13 lines or 5 and never near the 9 that was asked for.
+                    for (int e = -2; e <= 6; e++)
+                        foreach (float m in new[] { 1f, 2f, 2.5f, 5f })
+                        {
+                            float v = m * MathF.Pow(10f, e);
+                            float err = MathF.Abs(MathF.Log(v) - MathF.Log(want));
+                            if (err < bestErr) { bestErr = err; gridSpacing = v; }
+                        }
+                }
+                int nx0 = (int)MathF.Ceiling(minX / gridSpacing), nx1 = (int)MathF.Floor(maxX / gridSpacing);
+                int ny0 = (int)MathF.Ceiling(minY / gridSpacing), ny1 = (int)MathF.Floor(maxY / gridSpacing);
+                long lineCount = (long)Math.Max(0, nx1 - nx0 + 1) + Math.Max(0, ny1 - ny0 + 1);
+                const int MaxLines = 400;
+                if (lineCount > MaxLines)
+                {
+                    // Refusing to draw 4,000 lines is not timidity: past this the grid is a fill,
+                    // it hides the render underneath it, and the labels are unreadable anyway.
+                    Console.WriteLine($"   grid: DECLINED — spacing {gridSpacing:0.##} u would rule {lineCount:N0} lines across "
+                                    + $"a {span:0} u frame, which is a hatch, not a scale. Widen the spacing or pass --grid auto.");
+                    gridSpacing = 0f;
+                }
+                else if (lineCount == 0)
+                {
+                    Console.WriteLine($"   grid: DECLINED — spacing {gridSpacing:0.##} u puts no line inside a {span:0} u frame.");
+                    gridSpacing = 0f;
+                }
+                else
+                {
+                    // NDC for a Skyrim point, un-clamped and with the off-frame case kept — the
+                    // label hunt below needs to know WHERE a line leaves the frame, which the
+                    // clamping ScreenOf above deliberately throws away.
+                    (float X, float Y)? Ndc(Vector3 sky)
+                    {
+                        var y = YUp(sky);
+                        var c = GlVec4.TransformRow(new GlVec4(y.X, y.Y, y.Z, 1f), viewProj);
+                        return c.W <= 0.01f ? null : (c.X / c.W, c.Y / c.W);
+                    }
+                    // A grid line is thinner than the route's and thinner than the nav wire's, on
+                    // purpose: it is the paper the picture is drawn on, not a thing in the picture.
+                    static float GridHalfWidth(float d) => Math.Clamp(d * 0.00085f, 0.35f, 14f);
+                    // Subdivided rather than drawn as one quad so the ribbon's width tracks
+                    // distance along its own length, the way every other overlay ribbon does.
+                    const int Steps = 24;
+
+                    void RuleLine(Vector3 a, Vector3 b, string label)
+                    {
+                        var poly = new Vector3[Steps + 1];
+                        for (int i = 0; i <= Steps; i++) poly[i] = Vector3.Lerp(a, b, (float)i / Steps);
+                        Overlay.SolidPolyline(gridRibbon, poly, gridColour3 / 1.5f, GridHalfWidth, cam.Eye);
+
+                        // The label goes where the line MEETS THE FRAME EDGE, found by clipping the
+                        // projected segment to the NDC square (Liang-Barsky). Reading the crossing
+                        // off the projection is the whole point: it is right for a rotated camera,
+                        // where "constant X" does not run down the screen.
+                        if (Ndc(a) is not { } p || Ndc(b) is not { } q) return;
+                        float dx = q.X - p.X, dy = q.Y - p.Y;
+                        float t0 = 0f, t1 = 1f;
+                        bool Clip(float pp, float qq)
+                        {
+                            if (MathF.Abs(pp) < 1e-9f) return qq >= 0f;
+                            float r = qq / pp;
+                            if (pp < 0f) { if (r > t1) return false; if (r > t0) t0 = r; }
+                            else { if (r < t0) return false; if (r < t1) t1 = r; }
+                            return true;
+                        }
+                        if (!Clip(-dx, p.X + 1f) || !Clip(dx, 1f - p.X)
+                         || !Clip(-dy, p.Y + 1f) || !Clip(dy, 1f - p.Y)) return;
+                        (int X, int Y) Pix(float t)
+                        {
+                            float nx = p.X + dx * t, ny = p.Y + dy * t;
+                            int ix = (int)MathF.Round((nx * 0.5f + 0.5f) * size);
+                            int iy = (int)MathF.Round((ny * 0.5f + 0.5f) * size);
+                            return (Math.Clamp(ix, 0, size - 1), Math.Clamp(size - 1 - iy, 0, size - 1));  // GL bottom-left -> image top-left
+                        }
+                        var e0 = Pix(t0); var e1 = Pix(t1);
+                        // Vertical on screen -> label along the TOP edge; horizontal -> along the
+                        // LEFT edge. Whichever end is nearer that edge carries it.
+                        bool vertical = Math.Abs(e1.Y - e0.Y) >= Math.Abs(e1.X - e0.X);
+                        var at = vertical ? (e0.Y <= e1.Y ? e0 : e1) : (e0.X <= e1.X ? e0 : e1);
+                        // Clamped to the band the burn-in can actually use BEFORE the overlap test,
+                        // or two labels that only collide after clamping both survive the test and
+                        // then print on top of each other.
+                        int lx = Math.Clamp(at.X + 4, 2, Math.Max(2, size - 40));
+                        int ly = Math.Clamp(at.Y + 3, 2, Math.Max(2, size - 30));
+                        // A line entering at a CORNER lands its label in the other family's row, and
+                        // two numbers printed on top of each other are worse than one number: the
+                        // reader cannot tell which axis either belongs to. First placed wins; the
+                        // dropped line still has its neighbours a spacing away to interpolate from.
+                        float boxW = label.Length * 12f * (size / 1280f) * 0.62f + 6f;
+                        float boxH = 14f * (size / 1280f) + 3f;
+                        foreach (var (_, ox, oy) in gridLabels)
+                            if (MathF.Abs(lx - ox) < boxW && MathF.Abs(ly - oy) < boxH) return;
+                        gridLabels.Add((label, lx, ly));
+                    }
+
+                    // The grid's own legend, burned in the picture with the numbers it explains
+                    // rather than in the caption bar: spacing and PLANE together, because a
+                    // coordinate read off a grid ruled at the wrong storey is wrong, and the only
+                    // defence is saying which storey it was ruled at. Placed BEFORE the lines so a
+                    // line label that would land on it is the one dropped — the legend is the key
+                    // to every other number in the picture and outranks any single one of them.
+                    gridLabels.Add(($"grid {gridSpacing:0.##} u  ·  ruled at z {grid.Z:0} ({grid.ZWhy})", 6, size - 24));
+                    for (int i = nx0; i <= nx1; i++)
+                    {
+                        float x = i * gridSpacing;
+                        RuleLine(new Vector3(x, minY, grid.Z), new Vector3(x, maxY, grid.Z), $"X {x:0.##}");
+                    }
+                    for (int i = ny0; i <= ny1; i++)
+                    {
+                        float y = i * gridSpacing;
+                        RuleLine(new Vector3(minX, y, grid.Z), new Vector3(maxX, y, grid.Z), $"Y {y:0.##}");
+                    }
+                    Console.WriteLine($"   grid: {nx1 - nx0 + 1} X line(s) and {ny1 - ny0 + 1} Y line(s) every {gridSpacing:0.##} u"
+                                    + (grid.Spacing is null ? " (auto)" : "")
+                                    + $", ruled on the plane z {grid.Z:0} ({grid.ZWhy}); frame covers "
+                                    + $"{minX:0},{minY:0} .. {maxX:0},{maxY:0} ({span:0} u across)");
+                }
+            }
+        }
+
         Vector4 healthy = palette[0].Color;
         bool autoColour = wantNav && navColor == "auto";
         if (!autoColour)
@@ -1235,10 +1441,15 @@ static class TexturedScene
                     // overlay unreadable rather than one layer of it. Near matches are struck out
                     // outright and the rest are scored away from it — unless that would leave the
                     // sampler nothing to choose, in which case contrast with the ground still wins.
+                    // The GRID is reserved on exactly the same terms and for exactly the same
+                    // reason: it is ruled across the whole frame, so a grid that lands on the
+                    // navmesh's hue is worse than a route that does.
                     var routeC = route is null ? (Vector3?)null : new Vector3(route.Color.X, route.Color.Y, route.Color.Z);
+                    var gridC = gridSpacing > 0f ? gridColour3 : (Vector3?)null;
+                    var reserved = new[] { routeC, gridC }.Where(c => c is not null).Select(c => c!.Value).ToArray();
                     const float RouteHueGuard = 0.35f;
-                    var usable = routeC is { } rc0
-                               ? palette.Where(pe => (new Vector3(pe.Color.X, pe.Color.Y, pe.Color.Z) - rc0).Length() >= RouteHueGuard).ToArray()
+                    var usable = reserved.Length > 0
+                               ? palette.Where(pe => reserved.All(rv => (new Vector3(pe.Color.X, pe.Color.Y, pe.Color.Z) - rv).Length() >= RouteHueGuard)).ToArray()
                                : palette;
                     bool struckOut = usable.Length < palette.Length;
                     if (usable.Length == 0) { usable = palette; struckOut = false; }
@@ -1247,14 +1458,14 @@ static class TexturedScene
                     {
                         var c3 = new Vector3(colr.X, colr.Y, colr.Z);
                         // Contrast with what is under the mesh, plus distance from the reserved red
-                        // and (when one is drawn) from the route.
-                        float score = (c3 - mean).Length() + 0.5f * (c3 - new Vector3(red.X, red.Y, red.Z)).Length()
-                                    + (routeC is { } rc1 ? 0.5f * (c3 - rc1).Length() : 0f);
+                        // and from every other reserved colour drawn in this frame.
+                        float score = (c3 - mean).Length() + 0.5f * (c3 - new Vector3(red.X, red.Y, red.Z)).Length();
+                        foreach (var rv in reserved) score += 0.5f * (c3 - rv).Length();
                         if (score > best) { best = score; chosen = name; healthy = colr; }
                     }
                     Console.WriteLine($"   nav colour: auto -> {chosen} (sampled {hits} points under the mesh, "
                                     + $"background {(int)(mean.X * 255)},{(int)(mean.Y * 255)},{(int)(mean.Z * 255)})"
-                                    + (struckOut ? $"; {palette.Length - usable.Length} entr(ies) struck out as too close to the route colour" : ""));
+                                    + (struckOut ? $"; {palette.Length - usable.Length} entr(ies) struck out as too close to the reserved route/grid colour(s)" : ""));
                 }
                 else
                     Console.WriteLine("   nav colour: auto -> green (mesh not on screen; nothing to sample)");
@@ -1471,6 +1682,11 @@ static class TexturedScene
         // then again as the translucent Greater-pass ghost (see the draw loop).
         float[]? haloData = haloTris.Count > 0 ? haloTris.ToArray() : null;
         if (haloData is not null) layers.Add((haloData, true, true, 0, 1f));
+        // The grid goes on FIRST, so every later layer paints over it: it is the ruling under the
+        // picture, and a scale that hid the navmesh or the route it exists to measure would have
+        // the priority exactly backwards. Depth test OFF — a reference line you can only see on
+        // open floor is not a reference; it has to cross the pillars too.
+        if (gridSpacing > 0f && gridRibbon.Count > 0) layers.Add((gridRibbon.ToArray(), false, false, 0, 0.85f));
         if (wantNav)
         {
             if (wireMode && navTris.Count > 0)
@@ -1986,7 +2202,8 @@ static class TexturedScene
         GL.DeleteFramebuffer(fbo); GL.DeleteTexture(colorTex); GL.DeleteRenderbuffer(depthRb);
         if (msFbo != 0) { GL.DeleteFramebuffer(msFbo); GL.DeleteRenderbuffer(msColorRb); GL.DeleteRenderbuffer(msDepthRb); }
 
-        SaveFrame(pixels, size, size, captionLines, colourCaptionLines, pngTextMeta, outPath);
+        SaveFrame(pixels, size, size, captionLines, colourCaptionLines, pngTextMeta, outPath,
+                  gridSpacing > 0f ? gridLabels : null, gridColour3);
 
         // Give back the borrowed NPC meshes BEFORE this renderer can dispose them —
         // ClearMeshes()/Dispose() destroy what they hold, and the actors' VAOs must
@@ -2005,9 +2222,13 @@ static class TexturedScene
     /// viewprobe PNG is". Caption metrics are in units of the 1280-wide frame they were tuned
     /// on, scaled by WIDTH (the static path is square, so this is the same scale it always
     /// used).</summary>
+    /// <param name="pinnedLabels">Text burned at GIVEN IMAGE PIXELS (top-left origin) rather than in
+    /// the caption bar — the grid's coordinate labels, which only mean anything beside the line they
+    /// name. Null for a frame that has none.</param>
     internal static void SaveFrame(byte[] pixels, int width, int height,
         IReadOnlyList<string> captionLines, IReadOnlyList<(string Text, Vector3 Color)> colourCaptionLines,
-        string? pngTextMeta, string outPath)
+        string? pngTextMeta, string outPath,
+        IReadOnlyList<(string Text, int X, int Y)>? pinnedLabels = null, Vector3 pinnedColor = default)
     {
         // The frame is a screenshot: opaque by definition. The colour buffer's ALPHA, though, is
         // whatever the material shader happened to write — the ground comes back at alpha ~50 and
@@ -2018,19 +2239,24 @@ static class TexturedScene
 
         using var img = Image.LoadPixelData<Rgba32>(pixels, width, height);
         img.Mutate(x => x.Flip(FlipMode.Vertical));
+        // Burn the caption into the frame so it travels with the PNG into any viewer. The font and
+        // the bar's height are resolved ONCE, out here, because the pinned labels below have to
+        // stay clear of the bar — a coordinate label hidden under the caption is a label that is
+        // not there.
+        float capScale = width / 1280f;
+        Font? font = null;
+        foreach (var famName in new[] { "Segoe UI", "Arial", "Verdana" })
+            if (SystemFonts.TryGet(famName, out var fam)) { font = fam.CreateFont(15f * capScale, FontStyle.Bold); break; }
+        if (font is null)
+            foreach (var fam in SystemFonts.Families) { font = fam.CreateFont(15f * capScale, FontStyle.Bold); break; }
+        int capLineH = (int)(22f * capScale);
+        int capBarH = captionLines.Count + colourCaptionLines.Count > 0
+                    ? (int)(10f * capScale) + capLineH * (captionLines.Count + colourCaptionLines.Count) : 0;
         if (captionLines.Count + colourCaptionLines.Count > 0)
         {
-            // Burn the caption into the frame so it travels with the PNG into any viewer.
-            float capScale = width / 1280f;
-            Font? font = null;
-            foreach (var famName in new[] { "Segoe UI", "Arial", "Verdana" })
-                if (SystemFonts.TryGet(famName, out var fam)) { font = fam.CreateFont(15f * capScale, FontStyle.Bold); break; }
-            if (font is null)
-                foreach (var fam in SystemFonts.Families) { font = fam.CreateFont(15f * capScale, FontStyle.Bold); break; }
             if (font is not null)
             {
-                int totalLines = captionLines.Count + colourCaptionLines.Count;
-                int lineH = (int)(22f * capScale), barH = (int)(10f * capScale) + lineH * totalLines;
+                int lineH = capLineH, barH = capBarH;
                 var f2 = font;
                 img.Mutate(x =>
                 {
@@ -2057,6 +2283,36 @@ static class TexturedScene
             else
                 Console.WriteLine("   caption: no system font found; image saved without caption");
         }
+
+        // ---- pinned labels: the grid's coordinates, written where its lines meet the frame -----
+        // Smaller than the caption and drawn TWICE — a near-black copy one pixel down-right, then
+        // the coloured one — because these land on whatever the render happens to put under them
+        // (pale stone, dark shadow, a lit floor), and a caption bar is not an option for text that
+        // has to sit beside the line it names. The shadow is what makes one glyph set legible on
+        // every background instead of on most of them.
+        if (pinnedLabels is { Count: > 0 } && font is not null)
+        {
+            var lf = font.Family.CreateFont(12f * capScale, FontStyle.Bold);
+            var ink = SixLabors.ImageSharp.Color.FromRgb(
+                (byte)Math.Clamp(pinnedColor.X * 255f, 0f, 255f),
+                (byte)Math.Clamp(pinnedColor.Y * 255f, 0f, 255f),
+                (byte)Math.Clamp(pinnedColor.Z * 255f, 0f, 255f));
+            var shadow = SixLabors.ImageSharp.Color.FromRgba(0, 0, 0, 200);
+            img.Mutate(x =>
+            {
+                foreach (var (text, lx, ly) in pinnedLabels)
+                {
+                    // Advance width is ESTIMATED, and only ever to keep a label inside the frame —
+                    // a label clipped in half is unreadable, a label two pixels off centre is not.
+                    float est = text.Length * 12f * capScale * 0.62f;
+                    float px = Math.Clamp(lx, 2f, MathF.Max(2f, width - est - 2f));
+                    float py = Math.Clamp(ly, capBarH + 2f, MathF.Max(capBarH + 2f, height - 14f * capScale));
+                    x.DrawText(text, lf, shadow, new SixLabors.ImageSharp.PointF(px + 1f, py + 1f));
+                    x.DrawText(text, lf, ink, new SixLabors.ImageSharp.PointF(px, py));
+                }
+            });
+        }
+
         Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(outPath))!);
         // Replication chunk: the camera pose (and the arguments that compose it) rides
         // inside the file as a PNG tEXt entry keyed "viewprobe", so a shot can be re-run
@@ -2077,6 +2333,36 @@ static class TexturedScene
             dst.Add(p.X); dst.Add(p.Y); dst.Add(p.Z);
             dst.Add(colour.X); dst.Add(colour.Y); dst.Add(colour.Z);
             dst.Add(normal.X); dst.Add(normal.Y); dst.Add(normal.Z);
+        }
+
+        /// <summary>An unbroken ribbon along a Skyrim-space polyline, camera-facing like the dashed
+        /// one, with its half-width taken from a caller-supplied law of DISTANCE — so one line keeps
+        /// a constant width on screen along its whole length instead of tapering into the distance.
+        /// Solid rather than dashed because this draws the grid, and a dashed ruler reads as a
+        /// finding: every other dashed thing in this overlay means "hidden, but here".</summary>
+        public static void SolidPolyline(List<float> dst, IReadOnlyList<Vector3> pts, Vector3 colour,
+                                         Func<float, float> halfWidthAt, Vector3 eye)
+        {
+            for (int i = 0; i + 1 < pts.Count; i++)
+            {
+                var p = pts[i]; var q = pts[i + 1];
+                var seg = q - p;
+                float len = seg.Length();
+                if (len < 1e-4f) continue;
+                var dir = seg / len;
+                var mid = (p + q) * 0.5f;
+                var toEye = Vector3.Normalize(eye - mid);
+                var side0 = Vector3.Cross(toEye, dir);
+                if (side0.LengthSquared() < 1e-8f) side0 = Vector3.UnitZ;
+                var side = YUp(Vector3.Normalize(side0) * halfWidthAt(MathF.Max(1f, Vector3.Distance(mid, eye))));
+                var pa = YUp(p); var pb = YUp(q);
+                Vertex(dst, pa - side, colour, Vector3.Zero);
+                Vertex(dst, pa + side, colour, Vector3.Zero);
+                Vertex(dst, pb + side, colour, Vector3.Zero);
+                Vertex(dst, pa - side, colour, Vector3.Zero);
+                Vertex(dst, pb + side, colour, Vector3.Zero);
+                Vertex(dst, pb - side, colour, Vector3.Zero);
+            }
         }
 
         /// <summary>A dashed ribbon along a Skyrim-space polyline, turned to face the camera so it

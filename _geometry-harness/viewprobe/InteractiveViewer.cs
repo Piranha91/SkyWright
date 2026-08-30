@@ -104,6 +104,12 @@ sealed class InteractiveOptions
     // which is the exact reading a real missing-geometry bug got in this project (2026-08-30).
     public float? BuildCullAbove;
 
+    // The BUILD-time --nav-z band, for the same reason and with the same force: the triangles of
+    // every other storey were never uploaded, so N cycles the modes over one floor's worth of
+    // navmesh and no key widens it. Unannounced, a hover that finds nothing over the gallery
+    // upstairs reads as missing navmesh instead of as a filter doing its job.
+    public (float Z, float Tol)? BuildNavZ;
+
     // ---- navmesh display, switched live by N --------------------------------------------
     // Under --interactive the build makes BOTH the sheet and the wire whatever --nav asked
     // for (see TexturedScene), so switching between them costs a visibility flip, not a
@@ -732,6 +738,7 @@ static class InteractiveViewer
                          + RouteHud()
                          + (clipLo is not null || clipHi is not null ? $" — clip {ClipLabel()}" : "")
                          + (opt.BuildCullAbove is { } bca ? $" — SLICED at build: --cull-above {bca:0} (permanent)" : "")
+                         + (opt.BuildNavZ is { } bnz ? $" — NAVMESH z {bnz.Z:0} ±{bnz.Tol:0} only (permanent)" : "")
                          + " — H help";
                 return;
             }
@@ -903,6 +910,7 @@ static class InteractiveViewer
                          + RouteHud()
                          + (clipLo is not null || clipHi is not null ? $" — clip {ClipLabel()}" : "")
                          + (opt.BuildCullAbove is { } bca ? $" — SLICED at build: --cull-above {bca:0} (permanent)" : "")
+                         + (opt.BuildNavZ is { } bnz ? $" — NAVMESH z {bnz.Z:0} ±{bnz.Tol:0} only (permanent)" : "")
                          + " — H help";
             }
         };

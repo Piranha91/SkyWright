@@ -259,6 +259,24 @@ string npcPuck = "auto";
 // upper floors instead of their outsides. Walls spanning the cut keep standing; terrain,
 // navmesh, NPC actors and the overlay are never sliced. The caption names the cut.
 float? cullAbove = null;
+// --nav-z Z[,TOL] | auto[,TOL]: draw the navmesh of ONE STOREY. This is the other half of the
+// knife above, and it exists because --cull-above only ever held one: a five-storey interior
+// sliced at the ground floor shows THAT storey's architecture under a navmesh sheet that is the
+// UNION of all five, and the question a top-down is taken to answer — "where can I walk at z
+// 1424" — cannot be read off it at all. Filtering the overlay to one height turns the same shot
+// into a walkable floor plan.
+//
+// A triangle is ON the storey when its own z RANGE meets the band [Z-TOL, Z+TOL]. Range rather
+// than centroid because the bottom steps of a staircase belong to the floor they rise from, and
+// a centroid test drops any step taller than the tolerance; a triangle that genuinely spans two
+// storeys is drawn on both, which is what it is. TOL defaults to 64 u — half the ~128 u that
+// separates a floor from the one above it in most kits, so two storeys can never both qualify.
+//
+// `auto` takes Z from --route-z, or the shot's measured floorZ, in that order: on a route shot
+// the storey of interest is the route's own, always. The filter applies to the filled sheet, the
+// wire and the dashed hidden layers alike, and the caption names it — a navmesh missing from a
+// picture must SAY it was filtered, or the absence reads as a finding.
+float? navZ = null; float navZTol = 64f; bool navZAuto = false;
 // --interactive (textured mode; implies it): instead of saving a PNG, open the scene in a
 // visible window — WASD + RMB-mouse fly-through, hover to identify refs/navmesh/terrain
 // (FormKey + runtime FormID in a HUD bar), P prints a paste-ready --eye/--yaw/--pitch line,
@@ -281,11 +299,40 @@ float flySpeed = 600f, lookSens = 0.15f;
 //   --route-arrows auto|end|N  arrowhead spacing: auto (constant size and spacing ON SCREEN, the
 //                              default), one per segment at its far end, or every N world units.
 //   --no-route-discs           drop the translucent fill disc drawn at each waypoint.
+//   --route-solve              treat the waypoints as ENDPOINTS and PATHFIND between them over the
+//                              navmesh's own connectivity graph, instead of demanding that the
+//                              straight line between each pair be walkable. Opt-in, because the
+//                              straight default is the one that catches a path drawn through a wall
+//                              — but authoring a route under it means solving the navigation problem
+//                              by hand, one probe at a time, which is what this removes. Two things
+//                              come out of it that a straight leg cannot give: a path that follows
+//                              the ground an actor would actually take, and its LENGTH against the
+//                              straight-line distance — "1,800 u apart" and "1,800 u to walk" are
+//                              different claims. An unreachable pair is REFUSED, loudly: that is a
+//                              finding about the mesh, not an error to paper over with a straight
+//                              line. See NavGraph.cs for where the edges come from.
 //   --route-z Z                the floor height the route runs on, used to pick the right STOREY
 //                              when several cover a waypoint. Absent, it is the shot's measured
 //                              floorZ, or eye minus --eye-height — and that last one is an
 //                              assumption a top-down camera makes badly, since its eye is a
 //                              thousand units above the ground the route is on.
+// --grid N|auto (textured mode): rule a LABELLED world-coordinate grid across the storey the shot
+// is about, with the coordinate written where each line meets the frame edge. It exists to delete
+// a step, not to decorate: without it, turning something seen in a top-down into an X,Y means
+// arithmetic done by eye against a screenshot and the caption's pose, and that arithmetic is where
+// silent errors come from — a route planned off a mis-scaled pixel measurement looks exactly like
+// one planned off a correct one. It also makes a plan far easier to HAND to someone, which matters
+// when the output is "here is the path to walk".
+//   auto        picks a 1-2-5 round spacing putting roughly 9 lines across the frame
+//   --grid-color NAME|R,G,B   the grid's colour; RESERVED, like the route's — the nav wire's
+//                             auto-pick is told to avoid it, or a grid ruled across the whole
+//                             frame can come out the same hue as the mesh under it.
+// Only meaningful on a steep top-down: at eye level the lines converge on the horizon and the
+// renderer DECLINES with a note rather than drawing something that looks like a scale and is not.
+// The plane is the storey's — --nav-z, then --route-z, then the shot's floorZ, then the aim point.
+float? gridSpacing = null; bool gridOn = false;
+string gridColorName = "grey";
+var gridColor = new System.Numerics.Vector4(0.82f, 0.80f, 0.74f, 1f);
 var routeXY = new List<(float X, float Y)>();
 string routeColorName = "cyan";
 var routeColor = new System.Numerics.Vector4(0.05f, 0.85f, 0.95f, 1f);
@@ -293,6 +340,7 @@ float? routeZ = null;
 float? routeArrowEvery = null;                // null = distance-scaled; 0 = one per segment, at the end
 string routeArrowsSpec = "auto";
 bool routeDiscs = true;
+bool routeSolve = false;
 // --worklist <FILE>: a SHOT LIST (see _shared/Worklist.cs) — cells, and per cell the camera poses
 // worth looking at, each with the sentence that says why. Under --interactive, PageUp/PageDown step
 // the shots and Ctrl+PageUp/PageDown step the cells; without it, every shot is rendered to its own
@@ -392,7 +440,49 @@ for (int i = argStart; i < args.Length; i++)
     else if (args[i] == "--route-z" && i + 1 < args.Length) routeZ = float.Parse(args[++i]);
     else if (args[i] == "--route-arrows" && i + 1 < args.Length) routeArrowsSpec = args[++i].ToLowerInvariant();
     else if (args[i] == "--no-route-discs") routeDiscs = false;
+    else if (args[i] == "--route-solve") { routeSolve = true; textured = true; }
+    else if (args[i] == "--grid" && i + 1 < args.Length)
+    {
+        var spec = args[++i];
+        gridOn = true;
+        if (spec.Equals("auto", StringComparison.OrdinalIgnoreCase)) gridSpacing = null;
+        else if (float.TryParse(spec, out var gs) && gs > 0f) gridSpacing = gs;
+        else { Console.Error.WriteLine($"--grid '{spec}' is not 'auto' or a positive number of world units."); return 1; }
+        textured = true;
+    }
+    else if (args[i] == "--grid-color" && i + 1 < args.Length)
+    {
+        var spec = args[++i];
+        var p = spec.Split(',');
+        if (p.Length == 3)
+        {
+            var v = new System.Numerics.Vector3(float.Parse(p[0]), float.Parse(p[1]), float.Parse(p[2]));
+            if (v.X > 1f || v.Y > 1f || v.Z > 1f) v /= 255f;      // 0-255 or 0-1, like --sky
+            gridColor = new System.Numerics.Vector4(v, 1f);
+            gridColorName = $"{v.X:0.##},{v.Y:0.##},{v.Z:0.##}";
+        }
+        else { gridColorName = spec.ToLowerInvariant(); gridColor = default; }   // resolved against the table below
+    }
     else if (args[i] == "--cull-above" && i + 1 < args.Length) cullAbove = float.Parse(args[++i]);
+    else if (args[i] == "--nav-z" && i + 1 < args.Length)
+    {
+        // Refused, not shrugged off, for the --route reason: a filter that mis-parses its band
+        // draws a DIFFERENT storey and looks exactly as convincing as the right one.
+        var spec = args[++i];
+        var p = spec.Split(',');
+        if (p.Length is < 1 or > 2)
+        { Console.Error.WriteLine($"--nav-z '{spec}' is not Z[,TOL] or auto[,TOL]."); return 1; }
+        if (p[0].Equals("auto", StringComparison.OrdinalIgnoreCase)) navZAuto = true;
+        else if (float.TryParse(p[0], out var nz)) navZ = nz;
+        else { Console.Error.WriteLine($"--nav-z '{spec}': '{p[0]}' is neither a z nor 'auto'."); return 1; }
+        if (p.Length == 2)
+        {
+            if (!float.TryParse(p[1], out var ntol) || ntol <= 0f)
+            { Console.Error.WriteLine($"--nav-z '{spec}': tolerance '{p[1]}' must be a positive number of units."); return 1; }
+            navZTol = ntol;
+        }
+        textured = true;
+    }
     else if (args[i] == "--interactive") { interactiveMode = true; textured = true; }
     else if (args[i] == "--fly-speed" && i + 1 < args.Length) flySpeed = float.Parse(args[++i]);
     else if (args[i] == "--look-sens" && i + 1 < args.Length) lookSens = float.Parse(args[++i]);
@@ -429,6 +519,9 @@ if (navMode is not ("off" or "filled" or "wire" or "both"))
 { Console.Error.WriteLine($"--nav '{navMode}' is not one of: off, filled, wire, both."); return 1; }
 if (npcPuck is not ("on" or "off" or "auto"))
 { Console.Error.WriteLine($"--npc-puck '{npcPuck}' is not one of: on, off, auto."); return 1; }
+// A storey filter over an overlay that is not drawn is a flag doing nothing, same trap as below.
+if ((navZ is not null || navZAuto) && navMode == "off")
+{ Console.Error.WriteLine("--nav-z only means anything with a navmesh overlay: --nav is off, so there is nothing to filter to a storey."); return 1; }
 if (interactiveMode && compare is not null)
 { Console.Error.WriteLine("--interactive and --compare cannot combine: the compare is three fixed panels, the window is one free camera. Fly first, then run the compare from a pose it printed."); return 1; }
 // A flag that silently does nothing is a trap, so say so rather than accepting it.
@@ -460,6 +553,39 @@ if (routeColor == default)
     }
     routeColor = new System.Numerics.Vector4(rcv, 1f);
 }
+// The grid's named colours. Default is a warm off-white GREY, which is deliberate: a grid is the
+// paper the picture is drawn on, not a thing in it, and the five saturated palette entries all mean
+// something already. Whatever is chosen becomes reserved — the nav wire's auto-pick avoids it.
+if (gridColor == default)
+{
+    var gridNames = new Dictionary<string, System.Numerics.Vector3>(StringComparer.OrdinalIgnoreCase)
+    {
+        ["grey"] = new(0.82f, 0.80f, 0.74f),
+        ["gray"] = new(0.82f, 0.80f, 0.74f),
+        ["cyan"] = new(0.05f, 0.85f, 0.95f),
+        ["magenta"] = new(0.90f, 0.20f, 0.95f),
+        ["yellow"] = new(1.00f, 0.88f, 0.10f),
+        ["green"] = new(0.05f, 0.85f, 0.30f),
+        ["blue"] = new(0.25f, 0.45f, 1.00f),
+        ["pink"] = new(1.00f, 0.40f, 0.80f),
+    };
+    if (!gridNames.TryGetValue(gridColorName, out var gcv))
+    {
+        Console.Error.WriteLine($"--grid-color '{gridColorName}' is not one of: {string.Join(", ", gridNames.Keys)} — or an R,G,B triple (0-255 or 0-1). "
+                              + "Red, orange, violet and white are reserved for conflicts, doors, nav diffs and the cell outline.");
+        return 1;
+    }
+    gridColor = new System.Numerics.Vector4(gcv, 1f);
+}
+// A flag that silently does nothing is a trap — the same rule --fly-speed and --route-color are held to.
+if (!gridOn && Array.IndexOf(args, "--grid-color") >= 0)
+{ Console.Error.WriteLine("--grid-color only means anything with a grid: pass --grid N or --grid auto."); return 1; }
+// The window already answers "what world coordinate is this" continuously, by hovering: the HUD
+// prints it. What it cannot carry is the grid's LABELS, which are screen positions computed for one
+// fixed pose and wrong the instant the camera moves — so this is a static-render flag, and says so
+// rather than opening a window with an unlabelled hatch in it.
+if (gridOn && interactiveMode)
+{ Console.Error.WriteLine("--grid is a static-render flag: its labels are computed for ONE camera pose and would be wrong as soon as you fly. In the window, hover instead — the HUD names the world coordinate under the cursor. Fly first, then render the grid from a pose the window printed."); return 1; }
 if (routeArrowsSpec == "auto") routeArrowEvery = null;
 else if (routeArrowsSpec == "end") routeArrowEvery = 0f;
 else if (float.TryParse(routeArrowsSpec, out var rae) && rae > 0f) routeArrowEvery = rae;
@@ -467,11 +593,16 @@ else
 { Console.Error.WriteLine($"--route-arrows '{routeArrowsSpec}' is not auto, end, or a positive number of world units."); return 1; }
 if (routeXY.Count == 1)
 { Console.Error.WriteLine("--route needs at least two waypoints: one point is a position, not a path."); return 1; }
-// A flag that silently does nothing is a trap — the same rule --fly-speed is held to.
+// A flag that silently does nothing is a trap — the same rule --fly-speed is held to. --route-z is
+// the exception in the family: it is no longer the route's alone. --nav-z auto and --grid both take
+// their storey from it, so with either of those asking it IS doing something, and refusing it there
+// would make "state the floor once, use it for the filter, the grid and the path" impossible.
+bool routeZServesSomethingElse = gridOn || navZAuto;
 if (routeXY.Count == 0 && worklistPaths.Count == 0
     && (Array.IndexOf(args, "--route-color") >= 0 || Array.IndexOf(args, "--route-arrows") >= 0
-        || Array.IndexOf(args, "--route-z") >= 0 || Array.IndexOf(args, "--no-route-discs") >= 0))
-{ Console.Error.WriteLine("--route-color / --route-z / --route-arrows / --no-route-discs only mean anything with a route: pass --route X,Y (repeatable) or a worklist whose shots carry one."); return 1; }
+        || (Array.IndexOf(args, "--route-z") >= 0 && !routeZServesSomethingElse)
+        || Array.IndexOf(args, "--no-route-discs") >= 0 || Array.IndexOf(args, "--route-solve") >= 0))
+{ Console.Error.WriteLine("--route-color / --route-z / --route-arrows / --no-route-discs / --route-solve only mean anything with a route: pass --route X,Y (repeatable) or a worklist whose shots carry one. (--route-z alone is accepted with --grid or --nav-z auto, which take the storey from it.)"); return 1; }
 if (emitBats is not null && worklistPaths.Count == 0)
 { Console.Error.WriteLine("--emit-bats needs --worklist: the bat files ARE the worklist, written for the console instead of the camera."); return 1; }
 if (emitBats is not null && worklistPaths.Count > 1)
@@ -744,6 +875,22 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot)
         textured = true;
         Console.WriteLine($"\n=== worklist cell {wlCell + 1}/{worklist.Cells.Count} "
                         + $"shot {wlShot + 1}/{worklist.Cells[wlCell].Shots.Count}: {wshot.Label} ===");
+    }
+
+    // --nav-z's band, resolved for THIS shot — `auto` reads the shot's own floor, so it cannot be
+    // settled on the command line. Refused rather than defaulted when auto has nothing to read:
+    // a storey filter that quietly picked z 0 would draw an empty overlay over a full building.
+    float? navZAt = navZ;
+    if (navZAuto)
+    {
+        navZAt = routeZ ?? shotFloorZ;
+        if (navZAt is null)
+        {
+            Console.Error.WriteLine("--nav-z auto has no storey to take: pass --route-z Z, give the worklist shot a floorZ, "
+                                  + "or state the height outright with --nav-z Z. The camera's own eye is NOT used — a top-down "
+                                  + "sits a thousand units above the floor it is looking at.");
+            return 1;
+        }
     }
 
     // ---------------------------------------------------------------------------------------
@@ -1145,6 +1292,21 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot)
                 Console.WriteLine($"   {kv.Value.Count,5}  {kv.Value.Class,-8}  {kv.Key}");
         }
 
+        // --nav-z's storey test, in ONE place: the sheet, the wire, the dashed hidden layers and
+        // the fly-through's hover list all ask this and cannot disagree about which triangles the
+        // picture contains. True for every triangle when the flag was not given.
+        //
+        // The triangle's own z RANGE against the band, not its centroid: a staircase's bottom step
+        // belongs to the floor it rises from, and a centroid test drops it as soon as the step is
+        // taller than the tolerance. A triangle spanning two storeys is kept on both — it does.
+        bool NavZKeeps(NavmeshGeometry nav, NavTri tri)
+        {
+            if (navZAt is not { } z0) return true;
+            float az = nav.Vertices[tri.A].Z, bz = nav.Vertices[tri.B].Z, cz = nav.Vertices[tri.C].Z;
+            return MathF.Max(az, MathF.Max(bz, cz)) >= z0 - navZTol
+                && MathF.Min(az, MathF.Min(bz, cz)) <= z0 + navZTol;
+        }
+
         // One navmesh SOURCE -> (green context, red finding) triangle sets. The red spec is applied
         // per source, so a single-triangle red lands on THAT version's triangle — in a compare, the
         // same record can be red-whole in every panel while its shape changes between them.
@@ -1165,6 +1327,7 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot)
                     if ((tri.Flags & 0x08) != 0) continue;
                     if (tri.A < 0 || tri.B < 0 || tri.C < 0) continue;
                     if (tri.A >= nav.Vertices.Count || tri.B >= nav.Vertices.Count || tri.C >= nav.Vertices.Count) continue;
+                    if (!NavZKeeps(nav, tri)) continue;
                     var t3 = (V(nav.Vertices[tri.A]), V(nav.Vertices[tri.B]), V(nav.Vertices[tri.C]));
                     if (wholeRed || (reds is not null && reds.Contains(ti))) red.Add(t3);
                     else green.Add(t3);
@@ -1558,6 +1721,55 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot)
                             + $"{total - deleted - badIndex:N0} drawable");
         }
 
+        // ---- --nav-z: what the storey filter kept, and what storeys there were to keep ---------
+        //
+        // The census is the flag's own POSITIVE CONTROL, and it is not optional. A band with no
+        // triangles in it renders exactly like a band that works — an interior with no cyan on it —
+        // and this project has twice mistaken one for the other. So the run says how many triangles
+        // survived AND lists every height band the cell actually has, which turns "nothing showed
+        // up" into "you asked for 1424, the floors here are at 1712 and 2000" without a second run.
+        // An empty band is REFUSED outright: a picture that shows no navmesh where the author asked
+        // for one storey's is a wrong answer, not a thin one.
+        if (navZAt is { } navZBand)
+        {
+            var centroids = new List<float>();
+            int navZKept = 0;
+            foreach (var nav in winNav.Values)
+                foreach (var tri in nav.Triangles)
+                {
+                    if ((tri.Flags & 0x08) != 0) continue;
+                    if (tri.A < 0 || tri.B < 0 || tri.C < 0
+                        || tri.A >= nav.Vertices.Count || tri.B >= nav.Vertices.Count || tri.C >= nav.Vertices.Count) continue;
+                    centroids.Add((nav.Vertices[tri.A].Z + nav.Vertices[tri.B].Z + nav.Vertices[tri.C].Z) / 3f);
+                    if (NavZKeeps(nav, tri)) navZKept++;
+                }
+            // Storeys are found rather than assumed: sort the centroids and cut wherever consecutive
+            // heights are further apart than the band's own tolerance. A ramp shows up as one wide
+            // band, which is honest — it IS one continuous run of ground.
+            centroids.Sort();
+            var bands = new List<(float Lo, float Hi, int N)>();
+            foreach (var z in centroids)
+            {
+                if (bands.Count > 0 && z - bands[^1].Hi <= navZTol)
+                { var b = bands[^1]; bands[^1] = (b.Lo, z, b.N + 1); }
+                else bands.Add((z, z, 1));
+            }
+            string bandList = bands.Count == 0 ? "(no drawable navmesh in this cell)"
+                : string.Join(", ", bands.Select(b => (b.Hi - b.Lo < 1f ? $"z {b.Lo:0}" : $"z {b.Lo:0}..{b.Hi:0}") + $" ({b.N:N0})"));
+            Console.WriteLine($"   nav-z {navZBand:0} ±{navZTol:0}"
+                            + (navZAuto ? $" (auto, from {(routeZ is not null ? "--route-z" : "the shot's floorZ")})" : "")
+                            + $": {navZKept:N0} of {centroids.Count:N0} drawable triangle(s) kept, {centroids.Count - navZKept:N0} on other storeys");
+            Console.WriteLine($"   nav-z storeys in this cell (by triangle centroid): {bandList}");
+            if (navZKept == 0)
+            {
+                Console.Error.WriteLine($"   --nav-z REFUSED: no navmesh triangle lies within {navZTol:0} u of z {navZBand:0}, "
+                                      + "so the render would show a building with no walkable ground in it — which is a wrong "
+                                      + "answer, not a thin one. Pick one of the storeys listed above, or widen the tolerance "
+                                      + "with --nav-z Z,TOL.");
+                return 1;
+            }
+        }
+
         foreach (var (qx, qy) in navAt)
         {
             int hits = 0;
@@ -1683,6 +1895,166 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot)
             var legs = new List<IReadOnlyList<System.Numerics.Vector3>>();
             var strayed = new List<string>();
             int sampleCount = 0, offSamples = 0;
+
+            // ---- --route-solve: the legs are FOUND, not asserted -----------------------------
+            //
+            // The straight-leg walk below stays the default and stays unchanged. This is the opt-in:
+            // the waypoints become endpoints, and each pair is joined by an actual walk over the
+            // navmesh's own connectivity graph — pathfound, then pulled taut, then sampled onto the
+            // mesh and CHECKED by the same rule as a straight leg. The check is not a formality: the
+            // funnel is exact for a channel, so a solved leg that fails it means the graph and the
+            // geometry disagree, and that is worth refusing over.
+            if (routeSolve)
+            {
+                var (gnodes, grpt) = ViewProbe.NavGraph.Build(winNav);
+                Console.WriteLine($"   route-solve: graph over the winning navmesh — {grpt.Triangles:N0} triangle(s), "
+                                + $"{grpt.IntraLinks:N0} intra-mesh + {grpt.CrossLinks:N0} cross-mesh edge link(s), "
+                                + $"{grpt.DanglingLinks:N0} dangling, {grpt.Components:N0} connected component(s); "
+                                + $"{grpt.ExternalLinks:N0} cross-mesh link(s) lead OUT of the loaded cell (a boundary, not a defect) "
+                                + $"and {grpt.DoorTriangles:N0} door triangle(s) are recorded and NOT traversed "
+                                + "(the far side of a door is another cell, which this run never loaded)");
+                // A component count is a fact nobody can act on; an island's SIZE and WHERE it is
+                // are a coordinate to probe. Printed whenever the mesh is in more than one piece,
+                // because that is the thing that makes a pair unreachable.
+                if (grpt.Components > 1)
+                    Console.WriteLine($"   route-solve: the mesh is in {grpt.Components} piece(s) — mainland {grpt.ComponentSizes[0].Size:N0} tri, "
+                                    + "island(s) " + string.Join("; ", grpt.ComponentSizes.Skip(1)
+                                        .Select(c => $"{c.Size:N0} tri around {c.Where.X:0},{c.Where.Y:0},{c.Where.Z:0}")));
+                // The build's own positive control. A graph with no edges finds no path between ANY
+                // pair, and "not connected" is exactly what that looks like from the outside — so it
+                // is caught here, where it can be named, instead of being reported as a finding
+                // about the building.
+                if (grpt.IntraLinks + grpt.CrossLinks == 0)
+                {
+                    Console.Error.WriteLine("   route-solve REFUSED: the navmesh graph came out with ZERO edges, so nothing is "
+                                          + "reachable from anything and every answer it gave would be 'no path'. That is a defect "
+                                          + "in the graph, not a finding about this cell"
+                                          + (grpt.LinkTablesPresent ? "." : " — none of these records carry an edge-link table at all."));
+                    return 1;
+                }
+                var unreachable = new List<string>();
+                for (int li = 0; li + 1 < pts.Count; li++)
+                {
+                    var a = pts[li]; var b = pts[li + 1];
+                    float straight = MathF.Sqrt((b.X - a.X) * (b.X - a.X) + (b.Y - a.Y) * (b.Y - a.Y));
+                    var s0 = ViewProbe.NavGraph.TriangleAt(gnodes, a.X, a.Y, a.Z);
+                    var g0 = ViewProbe.NavGraph.TriangleAt(gnodes, b.X, b.Y, b.Z);
+                    if (s0 is not { } sTri || g0 is not { } gTri)
+                    { unreachable.Add($"leg {li + 1} (wpt {li + 1} -> {li + 2}): an endpoint is not on any drawable triangle"); legs.Add(new[] { a, b }); continue; }
+                    var channel = ViewProbe.NavGraph.FindChannel(gnodes, sTri.Tri, gTri.Tri);
+                    if (channel is null)
+                    { unreachable.Add($"leg {li + 1} (wpt {li + 1} -> {li + 2}, {straight:0} u apart in plan): NO walkable path over the navmesh"); legs.Add(new[] { a, b }); continue; }
+                    var corners = ViewProbe.NavGraph.Funnel(gnodes, channel,
+                        new System.Numerics.Vector2(a.X, a.Y), new System.Numerics.Vector2(b.X, b.Y));
+
+                    // Sampled the same 32 u as a straight leg, but with the storey reference CHAINED
+                    // from sample to sample rather than interpolated between the endpoints. A solved
+                    // leg is allowed to climb — that is half the point of solving it — and a chord
+                    // between its ends is a poor guide to which floor its middle is on.
+                    // ---- the corner inset -------------------------------------------------
+                    //
+                    // A taut path HUGS THE WALL — that is what taut means — so its interior corners
+                    // land exactly ON the mesh boundary, and a segment between two of them runs
+                    // ALONG it. At that precision "is this point on navmesh" is decided by float
+                    // rounding: the first leg tried here grazed the boundary by 0.13 u and the
+                    // off-mesh check, correctly by its own rule, called the path off the mesh. A
+                    // knife-edge that reports a FINDING about the navmesh is worse than no check.
+                    //
+                    // So each interior corner is nudged a few units off the boundary, along the
+                    // bisector of the two path directions leaving it. For a path bending around a
+                    // single peg the bisector points into the free wedge and that is the whole
+                    // story — but a funnel corner is not always a peg. Consecutive corners often
+                    // lie along ONE boundary edge (that is precisely the grazing case), and there
+                    // the bisector is near-perpendicular to the path and points AT the wall. So
+                    // BOTH directions are offered and the MESH decides which is free, rather than
+                    // a sign argument deciding it: measured here, the bisector was the wrong way
+                    // at both corners of the leg that grazed, and reasoning it out got the side
+                    // wrong twice before the probe settled it.
+                    //
+                    // VERIFIED, never assumed. A moved corner is kept only if it is itself on
+                    // walkable ground at this leg's storey — which is what stops an inset from
+                    // pushing a path through a thin wall in a doorway, the one way it could do
+                    // harm; if neither side is walkable the original corner stands and the 32 u
+                    // check downstream still gets to complain. The endpoints are never moved:
+                    // those are the author's waypoints, and they belong where they were put.
+                    const float CornerInset = 6f;
+                    {
+                        float insetRef = a.Z;
+                        for (int ci = 1; ci + 1 < corners.Count; ci++)
+                        {
+                            var cv = corners[ci];
+                            if (ViewProbe.BatEmit.NearestCoverZ(winNav, cv.X, cv.Y, insetRef) is { } cz
+                                && MathF.Abs(cz - insetRef) <= ViewProbe.BatEmit.SameFloorZ) insetRef = cz;
+                            var d0 = corners[ci - 1] - cv; var d1 = corners[ci + 1] - cv;
+                            if (d0.LengthSquared() < 1e-6f || d1.LengthSquared() < 1e-6f) continue;
+                            var bis = System.Numerics.Vector2.Normalize(d0) + System.Numerics.Vector2.Normalize(d1);
+                            if (bis.LengthSquared() < 1e-6f) continue;      // collinear: no corner to stand off from
+                            var step = System.Numerics.Vector2.Normalize(bis) * CornerInset;
+                            foreach (var cand in new[] { cv + step, cv - step })
+                                if (ViewProbe.BatEmit.NearestCoverZ(winNav, cand.X, cand.Y, insetRef) is { } mz
+                                    && MathF.Abs(mz - insetRef) <= ViewProbe.BatEmit.SameFloorZ)
+                                { corners[ci] = cand; break; }
+                        }
+                    }
+                    if (Environment.GetEnvironmentVariable("VP_SOLVE_DEBUG") == "1")
+                        Console.WriteLine("      [dbg] corners: " + string.Join("  ", corners.Select(cc => $"{cc.X:0.###},{cc.Y:0.###}")));
+                    var leg = new List<System.Numerics.Vector3>();
+                    float refZ2 = a.Z;
+                    int legOff = 0; float firstOffAt = 0f, walked = 0f;
+                    var firstOffXY = System.Numerics.Vector2.Zero;
+                    for (int ci = 0; ci + 1 < corners.Count; ci++)
+                    {
+                        var c0 = corners[ci]; var c1 = corners[ci + 1];
+                        float segLen = System.Numerics.Vector2.Distance(c0, c1);
+                        int steps = Math.Clamp((int)MathF.Ceiling(segLen / SampleEvery), 1, 512);
+                        for (int si = ci == 0 ? 0 : 1; si <= steps; si++)
+                        {
+                            float f = (float)si / steps;
+                            float x = c0.X + (c1.X - c0.X) * f, y = c0.Y + (c1.Y - c0.Y) * f;
+                            float? gz = ViewProbe.BatEmit.NearestCoverZ(winNav, x, y, refZ2);
+                            bool onFloor = gz is { } gg && MathF.Abs(gg - refZ2) <= ViewProbe.BatEmit.SameFloorZ;
+                            if (!onFloor) { if (legOff == 0) { firstOffAt = walked; firstOffXY = new System.Numerics.Vector2(x, y); } legOff++; }
+                            else refZ2 = gz!.Value;
+                            var p = new System.Numerics.Vector3(x, y, onFloor ? gz!.Value : refZ2);
+                            if (leg.Count > 0) walked += System.Numerics.Vector3.Distance(leg[^1], p);
+                            leg.Add(p);
+                        }
+                    }
+                    if (leg.Count < 2) leg = new List<System.Numerics.Vector3> { a, b };
+                    sampleCount += leg.Count; offSamples += legOff;
+                    if (legOff > 0)
+                        strayed.Add($"leg {li + 1} (wpt {li + 1} -> {li + 2}, SOLVED): {legOff} of {leg.Count} samples are off "
+                                  + $"walkable ground, first at {firstOffAt:0} u along it, at {firstOffXY.X:0},{firstOffXY.Y:0} "
+                                  + $"(probe it: --nav-at {firstOffXY.X:0},{firstOffXY.Y:0}) — the graph and the geometry disagree here");
+                    // The measurement, not just the picture: how far an actor would actually have to
+                    // walk, against how far apart the two ends are. A detector reporting a 1,800 u
+                    // straight-line split is making a weaker claim than this number does.
+                    // The z SPAN is printed because a solved leg resolves its height by chaining
+                    // sample to sample, and a chain is exactly the thing that can walk off onto the
+                    // storey above without any single step looking wrong. A leg that says
+                    // "z 1424..1424" cannot have drifted; one that says "1424..1712" climbed, and
+                    // the reader gets to decide whether it was meant to.
+                    float lz0 = leg.Min(q => q.Z), lz1 = leg.Max(q => q.Z);
+                    Console.WriteLine($"      leg {li + 1}: {channel.Count} triangle(s) crossed, {corners.Count} corner(s) after the funnel"
+                                    + $" — {walked:0} u to walk vs {straight:0} u straight line"
+                                    + (straight > 1f ? $"  (x{walked / straight:0.00})" : "")
+                                    + $", z {lz0:0}..{lz1:0}");
+                    legs.Add(leg);
+                }
+                if (unreachable.Count > 0)
+                {
+                    // Refused loudly, and NOT quietly downgraded to a straight line. An unreachable
+                    // pair is the interesting answer: it says these two places are not joined by
+                    // walkable ground, which is the whole question a reachability finding turns on.
+                    Console.Error.WriteLine($"   route REFUSED: --route-solve found no walkable path for {unreachable.Count} of "
+                                          + $"{pts.Count - 1} leg(s). The navmesh has {grpt.Components:N0} connected component(s) in this cell"
+                                          + (grpt.DoorTriangles > 0 ? $" and {grpt.DoorTriangles} door triangle(s) leading out of it — a route through a door is not something one cell's navmesh can answer" : "")
+                                          + ". An unreachable pair is a FINDING, not something to paper over with a straight line.");
+                    foreach (var m in unreachable) Console.Error.WriteLine($"      {m}");
+                    return 1;
+                }
+            }
+            else
             for (int li = 0; li + 1 < pts.Count; li++)
             {
                 var a = pts[li]; var b = pts[li + 1];
@@ -1712,7 +2084,7 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot)
                               + $"are off walkable ground, first at {firstOffAt:0} u along it");
                 legs.Add(leg);
             }
-            Console.WriteLine($"   route: {legs.Count} leg(s) sampled every {SampleEvery:0} u onto the winning navmesh "
+            Console.WriteLine($"   route: {legs.Count} {(routeSolve ? "SOLVED leg(s)" : "leg(s)")} sampled every {SampleEvery:0} u onto the winning navmesh "
                             + $"— {sampleCount:N0} point(s), {sampleCount - offSamples:N0} on walkable ground");
             // Same rule as an off-mesh waypoint, and for the same reason: a line drawn across
             // ground the game will not let anyone walk looks exactly as authoritative as one that
@@ -1720,8 +2092,12 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot)
             if (strayed.Count > 0)
             {
                 Console.Error.WriteLine($"   route REFUSED: {strayed.Count} leg(s) leave walkable navmesh BETWEEN their waypoints."
-                                      + " The waypoints are fine; the straight line between them is not — add a waypoint where the"
-                                      + " walkable ground actually turns, or move one.");
+                                      + (routeSolve
+                                         ? " These legs were SOLVED over the navmesh graph, so this is not an authoring mistake: the"
+                                         + " funnel is exact for a triangle channel, and a solved path leaving the mesh means the graph's"
+                                         + " links and the triangles' shapes disagree. Treat it as a finding about the navmesh."
+                                         : " The waypoints are fine; the straight line between them is not — add a waypoint where the"
+                                         + " walkable ground actually turns, move one, or pass --route-solve to have the path found for you."));
                 foreach (var m in strayed) Console.Error.WriteLine($"      {m}");
                 return 1;
             }
@@ -1770,7 +2146,10 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot)
                 : "??" + fk.ID.ToString("X6");
 
         // A render missing its roof must SAY the roof was cut, or the absence reads as a finding.
-        string CullCaption() => cullAbove is { } cca ? $" — SLICED above z {cca:0}" : "";
+        // Same rule for the storey filter: navmesh absent from four fifths of a temple floor plan
+        // is a finding if the picture does not say it was filtered to one storey.
+        string CullCaption() => (cullAbove is { } cca ? $" — SLICED above z {cca:0}" : "")
+                              + (navZAt is { } nzc ? $" — NAVMESH z {nzc:0} ±{navZTol:0} ONLY" : "");
 
         string? DoorCaption()
             => conflictDoors.Count == 0 ? null
@@ -2101,6 +2480,23 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot)
         var diffColor = new System.Numerics.Vector4(0.72f, 0.28f, 1f, 1f);
         var noDiff = Array.Empty<System.Numerics.Vector3>();
 
+        // ---- --grid: which PLANE the ruler is laid on ------------------------------------
+        // Not a detail. A grid is a plane in the world, so one ruled at the wrong storey projects
+        // to the wrong pixels and every coordinate read off it is wrong by exactly the parallax
+        // the flag exists to remove. The chain is the storey the shot is ABOUT: the navmesh filter
+        // first (if the overlay was cut to one floor, that floor is the subject), then the route's
+        // floor, then the shot's measured one, and only then the aim point — which is a guess, and
+        // is labelled as one in the picture as well as on the console.
+        ViewProbe.TexturedScene.GridRender? gridRender = null;
+        if (gridOn)
+        {
+            var (gz, gwhy) = navZAt is { } gnz ? (gnz, "--nav-z")
+                           : routeZ is { } grz ? (grz, "--route-z")
+                           : shotFloorZ is { } gfz ? (gfz, "the shot's floorZ")
+                           : (lookPos.Value.Z, "ASSUMED: the aim point");
+            gridRender = new ViewProbe.TexturedScene.GridRender(gridSpacing, gz, gridColor, gwhy);
+        }
+
         int Render(IReadOnlyList<(System.Numerics.Vector3, System.Numerics.Vector3, System.Numerics.Vector3)> g,
                    IReadOnlyList<(System.Numerics.Vector3, System.Numerics.Vector3, System.Numerics.Vector3)> r,
                    string outFile, IReadOnlyList<string> captionLines,
@@ -2110,7 +2506,7 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot)
                    (eyePos.Value, lookPos.Value, fov), g, r, terrainPatches, terrainLayers, navMode, navColor,
                    skyColor, terrainHeightAt, dashUnderground, dashUnderStatics, msaa, cullAbove, cellBounds,
                    diffs ?? noDiff, diffColor, picks, captionLines, colourCaptions, npcActors, npcPucksOn, routeRender,
-                   keepFx, fxStatic, listMeshes, waterPlanes, coverings, size, outFile,
+                   gridRender, keepFx, fxStatic, listMeshes, waterPlanes, coverings, size, outFile,
                    camMeta);
 
         if (compare is { } cmp)
@@ -2269,6 +2665,7 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot)
                 // without this the bar can read "clip: off" over a scene whose roofs were removed
                 // before the window existed.
                 BuildCullAbove = cullAbove,
+                BuildNavZ = navZAt is { } bnz ? (bnz, navZTol) : null,
             };
             if (navMode != "off")
                 foreach (var nav in navSrc.Values)
@@ -2278,6 +2675,7 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot)
                         if ((tri.Flags & 0x08) != 0) continue;
                         if (tri.A < 0 || tri.B < 0 || tri.C < 0) continue;
                         if (tri.A >= nav.Vertices.Count || tri.B >= nav.Vertices.Count || tri.C >= nav.Vertices.Count) continue;
+                        if (!NavZKeeps(nav, tri)) continue;
                         iopt.NavTris.Add((nav.FormKey, ti, V(nav.Vertices[tri.A]), V(nav.Vertices[tri.B]), V(nav.Vertices[tri.C])));
                     }
 
@@ -2285,7 +2683,7 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot)
                 scene, assets, dataDir, modFolders, overwriteDir,
                 (eyePos.Value, lookPos.Value, fov), navTris, redTris, terrainPatches, terrainLayers, navMode, navColor,
                 skyColor, terrainHeightAt, dashUnderground, dashUnderStatics, msaa, cullAbove, cellBounds,
-                noDiff, diffColor, picks, fpCap, colourCaptions, npcActors, npcPucksOn, routeRender, keepFx, fxStatic, listMeshes,
+                noDiff, diffColor, picks, fpCap, colourCaptions, npcActors, npcPucksOn, routeRender, gridRender, keepFx, fxStatic, listMeshes,
                 waterPlanes, coverings, size, fpOut,
                 camMeta, iopt);
             Console.WriteLine($"   interactive run over ({iShapes:N0} shapes were resident)");

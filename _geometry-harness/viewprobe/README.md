@@ -50,6 +50,20 @@ findings they demonstrate) lives with that instance, not here.
   Textured mode requires an eye — with none given, the flat diagnostic mode runs instead.
 - **Navmesh:** `--nav off|filled|wire|both` (defaults to `wire` when `--conflicts`/`--red` is
   given), `--nav-color auto|green|cyan|magenta|yellow|blue` (default auto).
+- **One storey's navmesh:** `--nav-z Z[,TOL]` (or `auto[,TOL]`, taking Z from `--route-z` or the
+  worklist shot's `floorZ`) draws only the navmesh triangles whose own z RANGE meets the band
+  `Z ± TOL` (default 64). Paired with `--cull-above` this turns a multi-storey interior top-down
+  into a **walkable floor plan of one storey**, which is what route planning needs and what a
+  sliced shot alone cannot produce — `--cull-above` slices statics only, so without this the cyan
+  sheet is the union of every floor stacked on top of itself. Applies to the sheet, the wire, the
+  dashed hidden layers and the fly-through's hover list alike. Prints what it kept AND lists every
+  height band the cell has, so an empty band names the storeys that are not empty; an empty band
+  is REFUSED. Caption says `NAVMESH z N ±T ONLY`. Full section: *One storey at a time* below.
+- **World-coordinate grid:** `--grid N|auto` rules a labelled grid across the storey's ground
+  plane, coordinate written where each line meets the frame edge, plus a legend naming the
+  spacing and the plane. `--grid-color NAME|R,G,B` (default a warm grey) is RESERVED — the nav
+  wire's auto-pick avoids it. Static renders only, and DECLINED with a note at eye level. Full
+  section: *The grid* below.
 - **Cell outline** (on by default, exteriors only): a WHITE DASHED line along the target cell's four
   edges, riding the terrain, always visible. The render covers the target cell AND its ring of
   neighbours, and nothing else in the picture says where the cell under examination stops.
@@ -122,8 +136,10 @@ findings they demonstrate) lives with that instance, not here.
   storey), `--route-color NAME|R,G,B` overrides the reserved colour, `--route-arrows auto|end|N`
   sets the arrowhead spacing, `--no-route-discs` drops the fill disc at each waypoint. A worklist
   shot's own `route` is the same thing and overrides these. **An off-mesh waypoint is a hard
-  error**, and so is a leg that leaves walkable ground BETWEEN its waypoints. Its own section:
-  *Walking routes* below.
+  error**, and so is a leg that leaves walkable ground BETWEEN its waypoints. `--route-solve`
+  opts out of the straight-leg requirement: the waypoints become ENDPOINTS and each pair is joined
+  by an actual walk over the navmesh's connectivity graph, refusing loudly when there is no path.
+  Its own section: *Walking routes* below.
 - **Worklist** (`--worklist FILE`): a SHOT LIST — cells, and per cell the camera poses worth
   looking at, each with the sentence that says why. It REPLACES the positional cell argument (a
   run may open with a flag when a worklist supplies the cells) and it overrides `--eye`/`--yaw`/
@@ -164,6 +180,7 @@ all knowledge.
 | `VP_ALPHA_DUMP=gx,gy` | every alpha layer of that cell as a 17×17 ASCII opacity grid |
 | `VP_LAYER_ONLY=<substr>` + `VP_LAYER_SOLID=1` | draw only the painted layers whose diffuse matches, at full opacity — isolates one layer so "is that wash really this texture?" has an answer |
 | `VP_OCCL_SLACK="rel,abs"` | override the behind-geometry depth-compare slack (default `1.002,1.5`) |
+| `VP_SOLVE_DEBUG=1` | with `--route-solve`: print each solved leg's funnel corners, after the inset. What you need when a solved leg is refused for straying — the corner list says whether the path took a shape you did not expect, and the refusal already names the coordinate to `--nav-at` |
 | `VP_ENABLE_DUMP=1` | every enable-parent group among the loaded refs, with the parent's own state, its chain, and how the children resolve — the check that a "disabled via enable parent" verdict rests on what the data actually states |
 | `VP_DOOR_DEBUG=1` | print each conflict-implicated door's holding cell during the load walk |
 | `VP_CV_VERBOSE=1` | unmute the rendering library's logger |
@@ -284,7 +301,15 @@ gitignored for the same reason: probe transcripts name the plugins of whatever l
 - **Walking routes** (`--route`): waypoints in plan view become arrows on the ground, at heights
   the winning navmesh supplies, with every waypoint clearance-checked and every leg between them
   sampled onto the mesh. Pairs with a follower harness — that puts an actor behind you, this says
-  where to walk them. Its own section below.
+  where to walk them. `--route-solve` finds the path instead of demanding it, over a connectivity
+  graph read from `NAVM`'s own edge-link and door tables, and reports the walked length against the
+  straight line. Its own section below.
+- **One storey's navmesh** (`--nav-z`) **and a labelled world grid** (`--grid`): `--cull-above`
+  slices statics only, so a multi-storey interior top-down carried a navmesh sheet that was the
+  union of every floor — unreadable exactly where route planning needs it. Filtering the overlay
+  to one storey makes the same shot a walkable floor plan; the grid puts coordinates on it so
+  positions are read off the picture rather than derived from the caption pose. Their own section
+  below.
 - **Worklists** (`--worklist`): a shot list drives both the fly-through's `PageUp`/`PageDown`
   paging and, through `--emit-bats`, the in-game console batch files — one set of coordinates, so
   the render and the tester's standing position cannot disagree. Its own section below.
@@ -315,8 +340,9 @@ gitignored for the same reason: probe transcripts name the plugins of whatever l
   prepass). Dash length tracks camera distance, so a dash is the same size on screen near or far.
 - **Adaptive nav colour** (`--nav-color auto`): renders the world once without the overlay, samples
   the pixels under the navmesh triangle centroids, picks the palette colour farthest from
-  background + reserved red. It projects through `OrbitCamera`'s own matrices — the same ones the
-  rasteriser used — so it cannot drift.
+  background + reserved red, and from the route's and grid's colours when either is drawn (entries
+  too close to a reserved colour are struck out outright). It projects through `OrbitCamera`'s own
+  matrices — the same ones the rasteriser used — so it cannot drift.
 - **Sky:** the frame clears to a pale sky blue. Note this is `renderer.ClearColor`, NOT the
   `GL.ClearColor` in `Draw()` — `GlRenderer.Render()` clears the frame again with its own, so
   setting only the GL one does nothing.
@@ -605,6 +631,91 @@ eye-level shots are pitch 0, so this mostly does not bite.
 
 ---
 
+## One storey at a time (`--nav-z`), and the grid (`--grid`)
+
+These two exist because planning a route in a multi-storey interior used to cost half a dozen
+render/probe round-trips and still end in a `route REFUSED`. Together with `--route-solve` they
+make it a one-render job.
+
+### `--nav-z Z[,TOL]` — the other half of the knife
+
+`--cull-above` slices **statics only** — terrain, navmesh, actors and the overlay are never sliced.
+So a sliced top-down of a five-storey interior shows one storey's architecture under a navmesh
+sheet that is the **union of all five**, and *"where can I walk at z 1424"* cannot be read off the
+picture at all. `--nav-z` filters the overlay to one storey, and the pair becomes a true walkable
+floor plan.
+
+```
+--cull-above 1600 --nav-z 1424        # architecture of the ground floor, navmesh of the ground floor
+--cull-above 1600 --nav-z auto        # ...taking the storey from --route-z or the shot's floorZ
+--nav-z 1424,32                       # a tighter band
+```
+
+**Range, not centroid.** A triangle is on the storey when its own z RANGE meets `Z ± TOL`. A
+staircase's bottom step belongs to the floor it rises from, and a centroid test drops it the moment
+a step is taller than the tolerance; a triangle that genuinely spans two storeys is drawn on both,
+which is what it is. `TOL` defaults to **64** — half the ~128 u between floors in most kits, so two
+storeys can never both qualify.
+
+**It carries its own positive control**, and this is not optional: a band with no triangles renders
+exactly like a band that works (an interior with no cyan on it), and this project has twice
+mistaken one for the other. So every run says how many triangles survived AND lists every height
+band the cell actually has:
+
+```
+nav-z 1424 ±64: 199 of 576 drawable triangle(s) kept, 377 on other storeys
+nav-z storeys in this cell (by triangle centroid): z -30000 (1), z 1424..1426 (197), z 1495 (1),
+  z 1566 (1), z 1662..1840 (158), z 1904..2001 (164), z 2070 (1), z 2166..2192 (2), z 2288..2290 (51)
+```
+
+That turns *"nothing showed up"* into *"you asked for 1424, the floors here are at 1712 and 2000"*
+without a second run — and it is how you discover a cell's storeys in the first place: pass any Z
+and read the list. **An empty band is refused outright**: a picture showing no navmesh where the
+author asked for one storey's is a wrong answer, not a thin one.
+
+The caption says `NAVMESH z N ±T ONLY`, for the same reason `--cull-above` says `SLICED above z N`:
+navmesh missing from four fifths of a floor plan is a finding unless the picture says it was
+filtered. The fly-through inherits the filter (the other storeys' triangles are never uploaded, so
+`N` cycles the modes over one floor and no key widens it) and its HUD says so.
+
+### `--grid N|auto` — coordinates read off the picture, not derived from it
+
+Without a grid, turning something seen in a top-down into an X,Y means arithmetic done by eye
+against a screenshot and the caption's pose. That arithmetic works and it is where silent errors
+come from — a route planned off a mis-scaled pixel measurement looks exactly like one planned off a
+correct one. The grid deletes the step, and it makes a plan far easier to *hand to someone*, which
+matters when the output is "here is the path to walk".
+
+```
+--grid auto        # a 1-2-2.5-5 round spacing, ~9 lines across the frame
+--grid 250         # exactly this
+--grid-color pink  # reserved against the nav wire's auto-pick, like the route's
+```
+
+- **The plane matters.** A grid is a plane in the world, so one ruled at the wrong storey projects
+  to the wrong pixels and every coordinate read off it is wrong by exactly the parallax the flag
+  exists to remove. The chain is the storey the shot is about: `--nav-z`, then `--route-z`, then
+  the shot's `floorZ`, then the aim point — and the legend burned bottom-left names which was used,
+  labelling the last as `ASSUMED`.
+- **Labels ride the frame edge**, found by projecting each line and clipping it to the frame, so
+  they are right for a rotated camera where "constant X" does not run down the screen. Two labels
+  that would collide are not overprinted — the later one is dropped, and its neighbours a spacing
+  away are enough to interpolate from.
+- **Declined, never drawn badly.** At eye level the lines converge on the horizon and the near
+  cells swallow the frame: below 60° of downward pitch, or with the horizon in shot, the run prints
+  why and draws nothing. A spacing that would rule more than 400 lines is declined the same way —
+  that is a hatch, not a scale.
+- **Static renders only.** Its labels are screen positions computed for ONE pose and would be wrong
+  the instant the camera moved, so `--grid` with `--interactive` is refused, pointing at the hover
+  HUD, which answers the same question continuously.
+
+**Verifying it, which is worth doing once after any change here:** render the same camera with and
+without `--grid`, diff the two PNGs to find the drawn line pixels, then `--pick` those pixels and
+compare what comes back against the labels. Measured on a 2,532 u frame: every line sat within
+~2 u of the coordinate its label claimed, which is well under one pixel.
+
+---
+
 ## Walking routes (`--route`)
 
 Waypoints in plan view, drawn as **straight segments with an arrowhead pointing from one waypoint
@@ -733,6 +844,89 @@ the question a drawn route stops you answering), the HUD carries `route N wpt (l
 **No `route.txt` bat.** A batch file that `setpos`-es to waypoint 1 is tempting and deliberately
 absent: a follower harness plus this render is enough, and a waypoint-stepping bat should wait
 until something actually needs one.
+
+### `--route-solve` — waypoints as endpoints, and the walk found for you
+
+The straight-leg rule above is the right default and is unchanged. What it is not is a good way to
+*author* a route: placing waypoints so that every straight segment between them stays on the mesh
+means solving the navigation problem by hand, one `--nav-at` probe at a time. `--route-solve` makes
+the waypoints ENDPOINTS and finds the path.
+
+```
+--route <from X,Y> --route <to X,Y> --route-solve --route-z 1424
+```
+
+**Where the edges come from.** The record, not the shapes. Two triangles that share an edge on
+paper are neighbours only if the navmesh says so — the game reads `NAVM`'s own link fields and
+nothing else, so a graph built from shared vertices would answer a question about geometry while
+claiming to answer one about walking. Three sources, all the record's (`NavGraph.cs`):
+
+| Source | Field | Meaning |
+|---|---|---|
+| intra-mesh | `NavmeshTriangle.EdgeLink_0_1/_1_2/_2_0` | a triangle index in the SAME mesh, when the matching flag bit (`0x01`/`0x02`/`0x04`) is CLEAR; `-1` = mesh boundary |
+| cross-mesh | the same fields with that bit SET | an index into `NAVM.Data.EdgeLinks`, which names another navmesh and a triangle in it |
+| doors | `NAVM.Data.DoorTriangles` | the triangle in front of a placed door — how two navmeshes in DIFFERENT CELLS connect |
+
+Doors are **recorded and deliberately not traversed**: the probe loads one cell, so the far side of
+a door is not in the graph, and a solver that stepped through one would be inventing ground it has
+never seen. They are counted in the refusal instead, so *"no path"* and *"no path without leaving
+this cell"* are told apart. (`housecarl-core`'s `NavmeshGeometry`/`NavTri` carry all three now —
+the extractor used to drop them, which produced a structure that looked complete and could not be
+walked.)
+
+**What it does per leg.** A* over the triangle graph (cost and heuristic are PLAN distance between
+centroids, so the heuristic never overestimates), then the Simple Stupid Funnel Algorithm over the
+channel's portal edges to pull the path taut, then the same 32 u sampling and the same off-mesh
+check a straight leg gets. Without the funnel a solved route is a chain of centroids: it zigzags,
+it draws badly, and it OVER-REPORTS the walk — which matters, because the length is half the point.
+
+**The corner inset (6 u).** A taut path hugs the wall — that is what taut means — so its interior
+corners land exactly ON the mesh boundary and the segment between two of them runs ALONG it. At
+that precision "is this on navmesh" is decided by float rounding: a leg measured here grazed the
+boundary by **0.13 u** and the off-mesh check, correctly by its own rule, called the path off the
+mesh. A knife-edge that reports a FINDING about the navmesh is worse than no check. So each
+interior corner is nudged 6 u off the boundary along the bisector of its two path directions —
+**both** directions offered, with the MESH deciding which is free, because a funnel corner is not
+always a peg to bend around: consecutive corners often lie along one boundary edge, and there the
+bisector points at the wall (measured; reasoning it out got the side wrong twice). The nudge is
+kept only if the moved corner is itself on walkable ground at that leg's storey, which is what
+stops it pushing a path through a thin wall in a doorway. Endpoints are never moved — those are
+the author's waypoints.
+
+**The numbers it prints.** Per leg: triangles crossed, corners after the funnel, **u to walk vs u
+straight line and the ratio**, and the leg's z span. The ratio is the point — *"1,800 u apart"* and
+*"1,800 u to walk"* are different claims, and a leg that comes out ×1.00 is the solver returning
+the straight line because the straight line was already walkable. The z span is there because a
+solved leg resolves height by chaining sample to sample, and a chain is exactly the thing that can
+drift onto the storey above without any single step looking wrong.
+
+**Refusals, all loud.**
+
+- *No path between a pair* → refused, with the cell's connected-component count and door-triangle
+  count. An unreachable pair is a FINDING, not something to paper over with a straight line.
+- *The graph came out with zero edges* → refused before any leg is attempted. A graph with no
+  edges finds no path between ANY pair, and from the outside that is indistinguishable from a
+  building whose rooms are genuinely separate. This is the build's own positive control.
+- *A solved leg strays off the mesh anyway* → refused, naming the coordinate to `--nav-at`. The
+  funnel is exact for a channel, so this means the record's links and the triangles' shapes
+  disagree — worth refusing over.
+
+When the mesh is in more than one piece the run says so and **locates the islands** (`island(s) 1
+tri around 1103,-243,-30000`): a component count is a fact nobody can act on, an island's size and
+position is a coordinate to probe.
+
+**One branch is not exercised here, and the run says which.** viewprobe loads ONE cell, and in
+practice cross-mesh `EdgeLinks` join navmeshes in DIFFERENT cells — three multi-navmesh cells
+measured (Solitude Temple 2, Castle Dour 2, FalkreathExterior03 8) all report **0 traversable
+cross-mesh links**, with every navmesh its own connected component. So the line that WIRES a
+cross-mesh edge has no positive control at this scope; its consumer is the whole-load-order
+reachability detector.
+
+What is proven is everything up to that line, and it is reported separately for exactly that
+reason: `N cross-mesh link(s) lead OUT of the loaded cell` (38 in FalkreathExterior03) means the
+flag-bit switch fired, the `EdgeLinks` table was indexed, and each target navmesh was resolved and
+found to be outside the loaded set. Without that counter a run that read the table perfectly and a
+run that never read it both print `0 cross-mesh`, and a zero with no control is not evidence.
 
 ---
 
