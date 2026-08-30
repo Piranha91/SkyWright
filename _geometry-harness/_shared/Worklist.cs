@@ -1,4 +1,6 @@
 using System.IO;
+using System;
+using System.Linq;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 
@@ -99,10 +101,42 @@ public static class WorklistIo
     /// <summary>Read and VALIDATE. A worklist that parses but is nonsense wastes a load walk, so it fails here instead.</summary>
     public static WorklistFile Read(string path)
     {
-        var f = JsonSerializer.Deserialize<WorklistFile>(File.ReadAllText(path), Opts)
-                ?? throw new InvalidDataException($"empty or unreadable worklist: {path}");
+        var text = File.ReadAllText(path);
+        WorklistFile? f;
+        try { f = JsonSerializer.Deserialize<WorklistFile>(text, Opts); }
+        catch (JsonException ex) { throw new InvalidDataException($"worklist '{path}': not valid JSON — {ex.Message}"); }
+        if (f is null) throw new InvalidDataException($"empty or unreadable worklist: {path}");
+        // A .json handed to a probe is not necessarily a worklist — the harness emits conflict files
+        // too, and since a worklist DROPPED ON THE EXE is picked out by nothing more than its
+        // extension, the wrong file is the likeliest mistake anyone makes here. "no cells" is a
+        // baffling thing to be told about a file that is visibly full of data, so name what arrived.
+        if (f.Cells is null || f.Cells.Count == 0)
+            if (Describe(text) is { } what)
+                throw new InvalidDataException($"'{path}' is not a worklist — it looks like {what}.");
         Validate(f, path);
         return f;
+    }
+
+    /// <summary>Name a recognised NON-worklist shape, or null when there is nothing useful to say.</summary>
+    static string? Describe(string text)
+    {
+        try
+        {
+            using var doc = JsonDocument.Parse(text,
+                new JsonDocumentOptions { CommentHandling = JsonCommentHandling.Skip, AllowTrailingCommas = true });
+            var root = doc.RootElement;
+            if (root.ValueKind != JsonValueKind.Object)
+                return $"a JSON {root.ValueKind.ToString().ToLowerInvariant()}, where a worklist is an object with a \"cells\" array";
+            // Case-insensitively, for the same reason Read is: these files are hand-authored as
+            // often as they are generated, and the generators do not agree on casing either —
+            // ConflictIo writes PascalCase, the worklists in the wild are camelCase.
+            bool Has(string name) => root.EnumerateObject()
+                .Any(p => string.Equals(p.Name, name, StringComparison.OrdinalIgnoreCase));
+            if (Has("conflicts"))
+                return "a detector CONFLICT file — pass it as --conflicts to paint those findings red on a cell, rather than as a shot list";
+            return "JSON with no \"cells\" array";
+        }
+        catch { return null; }   // unparseable: Validate's own message is the honest one
     }
 
     public static void Validate(WorklistFile f, string path)
@@ -142,6 +176,36 @@ public static class WorklistIo
                 }
             }
         }
+    }
+
+    /// <summary>
+    /// Concatenate several worklists into ONE run, in the order given — what a multi-file drop on
+    /// the exe means. EyeHeight has to AGREE across them: it is the file-wide fallback that places
+    /// every shot carrying no measured floorZ, so quietly adopting the first file's value would
+    /// move the other file's cameras off the ground they were authored against. One file in, that
+    /// same file back out, untouched.
+    /// </summary>
+    public static WorklistFile Merge(IReadOnlyList<(string Path, WorklistFile File)> loaded)
+    {
+        if (loaded.Count == 0) throw new InvalidDataException("no worklists to merge.");
+        if (loaded.Count == 1) return loaded[0].File;
+
+        var first = loaded[0];
+        foreach (var (p, wl) in loaded.Skip(1))
+            if (wl.EyeHeight != first.File.EyeHeight)
+                throw new InvalidDataException(
+                    $"cannot merge worklists with different eyeHeight: '{Path.GetFileName(first.Path)}' says "
+                  + $"{first.File.EyeHeight}, '{Path.GetFileName(p)}' says {wl.EyeHeight}. That number places every "
+                  + "camera without a measured floorZ, so one of the two sets of shots would come out wrong. "
+                  + "Open them one at a time.");
+
+        return new WorklistFile(
+            Label: string.Join(" + ", loaded.Select(l => l.File.Label)),
+            Cells: loaded.SelectMany(l => l.File.Cells).ToList(),
+            Probe: first.File.Probe,
+            Instance: first.File.Instance,
+            GeneratedUtc: first.File.GeneratedUtc,
+            EyeHeight: first.File.EyeHeight);
     }
 
     /// <summary>

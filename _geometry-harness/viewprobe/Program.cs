@@ -15,6 +15,7 @@ using SixLabors.ImageSharp.Processing;
 // into scope; alias the ones this file means so the collisions cannot silently pick the wrong type.
 using Path = System.IO.Path;
 using Directory = System.IO.Directory;
+using File = System.IO.File;
 using Image = SixLabors.ImageSharp.Image;
 
 // viewprobe — render a cell's WINNING geometry with its WINNING navmesh laid over it.
@@ -39,7 +40,20 @@ using Image = SixLabors.ImageSharp.Image;
 // the render at a different MO2 layout, which is how a field-test shot shows the exact state the
 // tester will see rather than the state of whatever list happens to be configured. Require() runs
 // AFTER the flags, so passing --instance never trips it.
+// LAUNCHED FROM EXPLORER — a double-click, or a worklist DROPPED ON THE ICON. Registered FIRST,
+// ahead of the Require() calls just below, because an unconfigured harness exits from inside those:
+// a window that closes on the one message explaining how to configure it has taught nobody
+// anything. The console dies with the process on a GUI launch, so every exit path pauses.
+bool guiLaunch = GuiLaunch();
+if (guiLaunch)
+    AppDomain.CurrentDomain.ProcessExit += (_, _) =>
+    {
+        Console.WriteLine("\n[press any key to close]");
+        try { Console.ReadKey(true); } catch { }     // no keyboard to read: close rather than hang
+    };
+
 string Instance = HarnessTarget.Instance;
+
 string GamePath = HarnessTarget.Game;
 string profileName = HarnessTarget.Profile;
 for (int i = 0; i < args.Length; i++)
@@ -60,13 +74,37 @@ if (args.Length > 0 && args[0] == "--smoke") return Smoke();
 if (args.Length == 0)
 {
     Console.Error.WriteLine("usage: viewprobe <CellEditorID|FormID> [--out DIR] [--size N] [--angles 0,90,180] [--elev 25] [--no-nav] [--ref FORMID] [--interactive [--fly-speed 600] [--look-sens 0.15]]");
+    Console.Error.WriteLine("       viewprobe <worklist.json> [more.json ...]   — or DROP worklists onto this exe to fly through them.");
     return 1;
 }
 
+// DROPPED FILES. Explorer hands a drag-and-drop to the exe as bare positional paths with no flag
+// anywhere in sight, so a worklist dropped on the icon lands exactly where a CellEditorID is
+// expected — and used to die with "cell 'C:\...\tour.json' not found in the active load order".
+// A leading positional that is an EXISTING .json FILE is therefore read as a worklist. The test
+// cannot misfire: no CellEditorID and no FormID is ever a path to a file on disk. Several may be
+// dropped at once, since Explorer passes the whole selection, and their cells concatenate in the
+// order given — see WorklistIo.Merge for the one thing that has to agree between them.
+var worklistPaths = new List<string>();
+int argStart = 0;
+while (argStart < args.Length && IsWorklistFile(args[argStart])) worklistPaths.Add(args[argStart++]);
+
 // A run normally opens with the cell to render. --worklist carries its own cells, so when the
 // first argument is a FLAG there simply is no positional target and the parse starts at zero.
-bool positionalTarget = args[0][0] != '-';
+bool positionalTarget = worklistPaths.Count == 0 && args[0].Length > 0 && args[0][0] != '-';
 string target = positionalTarget ? args[0] : "";
+if (positionalTarget) argStart = 1;
+// Dropping the FOLDER rather than the files in it is the other easy slip, and it used to cost a
+// full load-order walk before reporting a missing cell whose name was a directory path. Not swept
+// automatically: the .json files sitting next to a worklist are as likely to be conflict emits,
+// and one of those would fail the whole run.
+if (positionalTarget && Directory.Exists(target))
+{
+    var inside = Directory.GetFiles(target, "*.json");
+    Console.Error.WriteLine($"'{target}' is a folder, not a cell or a worklist. Drop the .json files themselves"
+                          + (inside.Length > 0 ? $" — it holds {inside.Length} of them." : " — it holds none."));
+    return 1;
+}
 string outDir = Path.Combine(AppContext.BaseDirectory, "shots");
 // Frame size, square, and the 3D render resolution as well as the PNG's — there is no
 // downsample step, so this IS the sharpness knob. 2560 because 1280 fell apart under a zoom.
@@ -251,8 +289,9 @@ bool routeDiscs = true;
 // worth looking at, each with the sentence that says why. Under --interactive, PageUp/PageDown step
 // the shots and Ctrl+PageUp/PageDown step the cells; without it, every shot is rendered to its own
 // numbered PNG. The same file feeds --emit-bats, which is the point: the picture and the place the
-// tester ends up standing come from ONE set of coordinates and cannot drift apart.
-string? worklistPath = null;
+// tester ends up standing come from ONE set of coordinates and cannot drift apart. REPEATABLE, and
+// the flag may be left off entirely: a .json path given positionally — which is what dropping the
+// file on the exe produces — is read the same way, and several concatenate into one run.
 // --emit-bats <NAME|DIR>: write the worklist as console batch files instead of rendering anything.
 // A bare name resolves to <instance>\mods\<NAME> — an MO2 mod folder, which is how the files end
 // up scoped to a profile rather than loose in the game directory. A path is used as given.
@@ -260,7 +299,7 @@ string? emitBats = null;
 // --bats-profiles <A,B>: enable that mod in these profiles and DISABLE it in every other profile of
 // the instance. Opt-in, because it edits MO2's own modlist.txt.
 var batsProfiles = new List<string>();
-for (int i = positionalTarget ? 1 : 0; i < args.Length; i++)
+for (int i = argStart; i < args.Length; i++)
 {
     if (args[i] == "--out" && i + 1 < args.Length) outDir = args[++i];
     else if (args[i] == "--size" && i + 1 < args.Length) size = int.Parse(args[++i]);
@@ -347,13 +386,19 @@ for (int i = positionalTarget ? 1 : 0; i < args.Length; i++)
     else if (args[i] == "--interactive") { interactiveMode = true; textured = true; }
     else if (args[i] == "--fly-speed" && i + 1 < args.Length) flySpeed = float.Parse(args[++i]);
     else if (args[i] == "--look-sens" && i + 1 < args.Length) lookSens = float.Parse(args[++i]);
-    else if (args[i] == "--worklist" && i + 1 < args.Length) worklistPath = args[++i];
+    else if (args[i] == "--worklist" && i + 1 < args.Length) worklistPaths.Add(args[++i]);
     else if (args[i] == "--emit-bats" && i + 1 < args.Length) emitBats = args[++i];
     else if (args[i] == "--bats-profiles" && i + 1 < args.Length)
         batsProfiles.AddRange(args[++i].Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries));
     else if (args[i] == "--markers") showMarkers = true;
     else if (args[i] == "--list-meshes") listMeshes = true;
     else if (args[i] is "--instance" or "--game" or "--profile") i++;   // consumed above
+    // A worklist path is a worklist WHEREVER it lands, not only in the leading run that a drop
+    // produces: `viewprobe --interactive tour.json` is the obvious thing to type once dropping one
+    // works. This loop has no unknown-argument arm, so without this the file would go on the floor
+    // and the run would die with "no cell given" while the user was looking straight at the cell
+    // they gave. Flag VALUES never reach here — every branch above consumes its own with args[++i].
+    else if (IsWorklistFile(args[i])) worklistPaths.Add(args[i]);
 }
 // Replication args: the command line verbatim, minus this machine's paths (instance/profile/
 // game/out). Embedded in every output PNG — a replay from these is BYTE-exact, which the
@@ -413,26 +458,52 @@ else
 if (routeXY.Count == 1)
 { Console.Error.WriteLine("--route needs at least two waypoints: one point is a position, not a path."); return 1; }
 // A flag that silently does nothing is a trap — the same rule --fly-speed is held to.
-if (routeXY.Count == 0 && worklistPath is null
+if (routeXY.Count == 0 && worklistPaths.Count == 0
     && (Array.IndexOf(args, "--route-color") >= 0 || Array.IndexOf(args, "--route-arrows") >= 0
         || Array.IndexOf(args, "--route-z") >= 0 || Array.IndexOf(args, "--no-route-discs") >= 0))
 { Console.Error.WriteLine("--route-color / --route-z / --route-arrows / --no-route-discs only mean anything with a route: pass --route X,Y (repeatable) or a worklist whose shots carry one."); return 1; }
-if (emitBats is not null && worklistPath is null)
+if (emitBats is not null && worklistPaths.Count == 0)
 { Console.Error.WriteLine("--emit-bats needs --worklist: the bat files ARE the worklist, written for the console instead of the camera."); return 1; }
+if (emitBats is not null && worklistPaths.Count > 1)
+{ Console.Error.WriteLine("--emit-bats takes ONE worklist: the bat mod's MANIFEST.md names the file it was generated from, and a merge of several has no such file. Emit them one at a time."); return 1; }
 if (batsProfiles.Count > 0 && emitBats is null)
 { Console.Error.WriteLine("--bats-profiles only means anything with --emit-bats: it enables the mod folder that --emit-bats writes."); return 1; }
-if (!positionalTarget && worklistPath is null)
+if (!positionalTarget && worklistPaths.Count == 0)
 { Console.Error.WriteLine("no cell given. Pass a CellEditorID/FormID as the first argument, or --worklist FILE to take the cells from a shot list."); return 1; }
 
 // The worklist is read and VALIDATED before the load walk. A malformed shot list found after a
 // multi-minute walk is a multi-minute walk wasted.
 HarnessShared.WorklistFile? worklist = null;
-if (worklistPath is not null)
+if (worklistPaths.Count > 0)
 {
-    try { worklist = HarnessShared.WorklistIo.Read(worklistPath); }
+    var loaded = new List<(string Path, HarnessShared.WorklistFile File)>();
+    foreach (var wp in worklistPaths)
+    {
+        try { loaded.Add((wp, HarnessShared.WorklistIo.Read(wp))); }
+        catch (Exception ex) { Console.Error.WriteLine(ex.Message); return 1; }
+    }
+    try { worklist = HarnessShared.WorklistIo.Merge(loaded); }
     catch (Exception ex) { Console.Error.WriteLine(ex.Message); return 1; }
+
+    string src = loaded.Count == 1
+        ? worklistPaths[0]
+        : $"{loaded.Count} files: {string.Join(", ", loaded.Select(l => Path.GetFileName(l.Path)))}";
     Console.WriteLine($"worklist '{worklist.Label}': {worklist.Cells.Count} cell(s), "
-                    + $"{worklist.Cells.Sum(c => c.Shots.Count)} shot(s)  [{worklistPath}]");
+                    + $"{worklist.Cells.Sum(c => c.Shots.Count)} shot(s)  [{src}]");
+}
+
+// A DROP IS A HUMAN AT A MOUSE. Static mode writes numbered PNGs into a folder they would then have
+// to go and find, and pays the load walk once per SHOT; the fly-through pays it once per CELL and
+// puts the scene on a screen, which is what "open this" means when the gesture was dragging a file
+// onto an icon. Only the GUI launch is touched — a shell run, with or without --interactive, keeps
+// the behaviour it has always had.
+if (guiLaunch && worklist is not null && !interactiveMode)
+{
+    interactiveMode = true;
+    textured = true;
+    Console.WriteLine("launched from Explorer — opening the fly-through: PageUp/PageDown steps the shots, "
+                    + "Ctrl+PageUp/PageDown steps the cells.");
+    Console.WriteLine("(run it from a shell without --interactive to render every shot to a PNG instead.)");
 }
 // Set when the fly-through's Ctrl+PageUp/PageDown asks for a different cell: the window cannot
 // build one, so it closes and leaves the request here for the run loop to act on.
@@ -488,7 +559,7 @@ if (emitBats is not null)
     bool asPath = Path.IsPathRooted(emitBats) || Path.GetFileName(emitBats) != emitBats;
     string batsDir = asPath ? Path.GetFullPath(emitBats) : Path.Combine(modsDir, emitBats);
     string batsName = Path.GetFileName(Path.TrimEndingDirectorySeparator(batsDir));
-    return ViewProbe.BatEmit.Run(worklist!, worklistPath!, batsDir, batsName, order.OrderedPaths, Instance, batsProfiles);
+    return ViewProbe.BatEmit.Run(worklist!, worklistPaths[0], batsDir, batsName, order.OrderedPaths, Instance, batsProfiles);
 }
 
 var arch = ArchiveDiscovery.Discover(profileDir, modsDir, dataDir, overwriteDir, GamePath);
@@ -2439,6 +2510,33 @@ void main(){
         if (ok == 0) throw new InvalidOperationException($"{what} shader: {GL.GetShaderInfoLog(s)}");
     }
 }
+
+// A dropped worklist, told apart from a cell name: an existing FILE on disk, named .json. Checked
+// as a file rather than by extension alone so `viewprobe SomeCell.json` — a path that is not there,
+// or a cell genuinely spelled that way — still reports the cell error it always did.
+static bool IsWorklistFile(string a) =>
+    a.Length > 0 && a[0] != '-'
+    && a.EndsWith(".json", StringComparison.OrdinalIgnoreCase)
+    && File.Exists(a);
+
+// A GUI launch owns its console ALONE — a shell run has the shell on it too — and has real streams,
+// since a redirected one means something is capturing the output rather than a person reading it.
+// Measured 2026-08-29 on this machine: Explorer gives 1 and no redirection; Git Bash gives 3 and
+// redirects; cmd gives 4 and redirects. Both halves are needed: mintty redirects without adding a
+// process, and a `>out.txt` from a real console adds one without redirecting the input.
+static bool GuiLaunch()
+{
+    try
+    {
+        if (Console.IsOutputRedirected || Console.IsInputRedirected) return false;
+        var pids = new uint[4];
+        return GetConsoleProcessList(pids, (uint)pids.Length) == 1;
+    }
+    catch { return false; }                     // no console at all is not a GUI launch either
+}
+
+[System.Runtime.InteropServices.DllImport("kernel32.dll", SetLastError = true)]
+static extern uint GetConsoleProcessList(uint[] processList, uint count);
 
 static int Smoke()
 {

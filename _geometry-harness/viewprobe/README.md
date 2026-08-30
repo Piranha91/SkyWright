@@ -29,6 +29,9 @@ findings they demonstrate) lives with that instance, not here.
   `GlRenderer`/`GlMesh`, `GlTextureManager` (DDS load + white fallback), `OrbitCamera`. viewprobe
   wires adapters over houseCARL's `AssetResolver` rather than reinventing them.
 - **Build:** `dotnet build -c Release`; run with `dotnet run -c Release --no-build -- <args>`.
+  The built exe is `bin/Release/net9.0-windows10.0.19041.0/viewprobe.exe`, and it is
+  self-sufficient there — worklists can be dropped straight onto it (see *Worklists*), and it finds
+  its instance/profile the same way every other run does.
   Never edit sources while a background `dotnet run` is compiling — that has produced corrupted
   concurrent builds.
 - **Verification helper:** `tools/imgcheck.py` — `crop` / `panel` / `diff` / `hist`. Every visual
@@ -36,7 +39,7 @@ findings they demonstrate) lives with that instance, not here.
 
 ---
 
-## CLI reference (first positional arg = CellEditorID or FormID)
+## CLI reference (first positional arg = CellEditorID, FormID, or a worklist `.json`)
 
 - **Instance/profile:** `--instance DIR --profile NAME --game DIR`. **Nothing is compiled in** —
   see *Where it points* below. A run with none of it configured exits with guidance rather than
@@ -474,11 +477,48 @@ malformed shot list found after a multi-minute walk is a multi-minute walk waste
   `nav`/`cullAbove` it does NOT leak into the next shot.
 - **`travel`** on a cell overrides the derived console travel command; normally absent.
 
+### Dropping one on the exe
+
+`viewprobe.exe` takes worklists as bare positional arguments, so **dragging one or more `.json`
+files onto the exe in Explorer opens them** — no shortcut, no flags, no shell. `viewprobe tour.json`
+on the command line is the same thing, and `--worklist` still works and is now repeatable.
+
+A leading positional is read as a worklist when it is an existing FILE on disk named `.json`. That
+test cannot misfire, because no CellEditorID and no FormID is ever a path to a file — so
+`viewprobe FalkreathExterior03` is untouched. A `.json` after a flag is picked up too, since
+`viewprobe --interactive tour.json` is the obvious thing to type once the positional form works.
+
+- **Several at once** concatenate, in the order Explorer passes them, into one run — cells appended,
+  labels joined. The one thing that must AGREE is `eyeHeight`: it places every camera that carries
+  no measured `floorZ`, so adopting the first file's value would move the other file's shots off
+  the ground they were authored against. Mismatched, it refuses and names both files.
+- **A drop opens the FLY-THROUGH**, not a batch render. Static mode writes numbered PNGs into a
+  folder you would then have to go and find, and pays the load walk once per SHOT; the fly-through
+  pays it once per CELL and puts the scene on screen, which is what dragging a file onto an icon
+  means. Only the GUI launch is affected — every shell run keeps the behaviour it always had.
+- **The console window stays open** on a GUI launch, on every exit path including the config-missing
+  one, which exits from inside `HarnessTarget.Require` before the arguments are even parsed. The
+  pause is registered first thing for exactly that reason: a window that closes on the one message
+  explaining how to configure the harness has taught nobody anything.
+- **The wrong `.json`** is the likeliest mistake here, since the only thing distinguishing a
+  worklist is its extension. A file with no `cells` is named for what it actually is — a detector
+  conflict emit says so, and points at `--conflicts`. A dropped FOLDER is refused up front, with a
+  count of the `.json` files in it, rather than after a multi-minute load walk; folders are not
+  swept, because the files beside a worklist are as likely to be conflict emits and one of those
+  would fail the whole run.
+
+**How a GUI launch is told apart from a shell:** the process owns its console ALONE, and neither
+stream is redirected. Measured on 2026-08-29 — Explorer gives 1 console process and no redirection;
+Git Bash gives 3 and redirects; `cmd` gives 4 and redirects. Both halves are load-bearing: mintty
+redirects without adding a process, and `> out.txt` from a real console adds a process without
+redirecting stdin. The pause runs from an `AppDomain.ProcessExit` handler, which was verified to
+fire through `Environment.Exit` and to have no shutdown time limit on .NET 9.
+
 ### Stepping it
 
-`--worklist` alone renders every shot to its own PNG. One BUILD per shot: shots in the same cell do
-not share a walk, because the render happens inside the build rather than after it. The run says so
-when it matters.
+`--worklist` alone renders every shot to its own PNG — unless the run was a DROP, see above.
+One BUILD per shot: shots in the same cell do not share a walk, because the render happens
+inside the build rather than after it. The run says so when it matters.
 
 `--worklist --interactive` is the cheap way round: one build per CELL, and `PageUp`/`PageDown` are
 then free camera jumps with everything already resident. `Ctrl+PageUp`/`PageDown` change cells,
@@ -493,6 +533,9 @@ an MO2 mod folder, which is how the files end up scoped to a PROFILE instead of 
 directory. A bare name resolves under `mods/`; anything with a directory part is used as a path.
 The tester types `bat bat1`, `bat bat2`, … and the folder carries a `MANIFEST.md` mapping every
 number to its shot.
+
+This is the one consumer that takes exactly ONE worklist: the `MANIFEST.md` names the file it was
+generated from, and a merge of several dropped lists has no such file. Emit them one at a time.
 
 **Bat files do not survive a load screen** — the rest of the file is discarded when the cell
 changes. That is the whole reason for the numbering: travel is its own file, and every pose after it
