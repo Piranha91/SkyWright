@@ -224,6 +224,29 @@ bool interactiveMode = false;
 // (scroll, and , / .); these set where a session STARTS, so a value that turned out right does
 // not have to be re-dialled every run. Defaults unchanged: 600 u/s and 0.15 deg/px.
 float flySpeed = 600f, lookSens = 0.15f;
+// --route X,Y (repeatable): the path to WALK from this camera, drawn as straight segments with
+// arrowheads pointing waypoint to waypoint. X and Y ONLY — z comes from the winning navmesh, and
+// each waypoint's clearance is checked with the same five-probe test --emit-bats uses. OFF-MESH IS
+// A HARD ERROR: a path over unwalkable ground is worse than no path, because it looks
+// authoritative. A worklist shot's own "route" is the same thing, and overrides this.
+//   --route-color NAME|R,G,B   the route's colour; cyan by default, and RESERVED — the nav wire's
+//                              auto-pick is told to avoid it, or the two come out the same hue over
+//                              some patch of ground and the whole overlay stops being readable.
+//   --route-arrows auto|end|N  arrowhead spacing: auto (constant size and spacing ON SCREEN, the
+//                              default), one per segment at its far end, or every N world units.
+//   --no-route-discs           drop the translucent fill disc drawn at each waypoint.
+//   --route-z Z                the floor height the route runs on, used to pick the right STOREY
+//                              when several cover a waypoint. Absent, it is the shot's measured
+//                              floorZ, or eye minus --eye-height — and that last one is an
+//                              assumption a top-down camera makes badly, since its eye is a
+//                              thousand units above the ground the route is on.
+var routeXY = new List<(float X, float Y)>();
+string routeColorName = "cyan";
+var routeColor = new System.Numerics.Vector4(0.05f, 0.85f, 0.95f, 1f);
+float? routeZ = null;
+float? routeArrowEvery = null;                // null = distance-scaled; 0 = one per segment, at the end
+string routeArrowsSpec = "auto";
+bool routeDiscs = true;
 // --worklist <FILE>: a SHOT LIST (see _shared/Worklist.cs) — cells, and per cell the camera poses
 // worth looking at, each with the sentence that says why. Under --interactive, PageUp/PageDown step
 // the shots and Ctrl+PageUp/PageDown step the cells; without it, every shot is rendered to its own
@@ -293,6 +316,33 @@ for (int i = positionalTarget ? 1 : 0; i < args.Length; i++)
     else if (args[i] == "--npc" && i + 1 < args.Length) { npcSpecs.Add(args[++i]); textured = true; }
     else if (args[i] == "--npc-no-outfit") npcNoOutfit = true;
     else if (args[i] == "--npc-puck" && i + 1 < args.Length) npcPuck = args[++i].ToLowerInvariant();
+    else if (args[i] == "--route" && i + 1 < args.Length)
+    {
+        // Refused, not skipped. --nav-at can drop a malformed probe and lose one answer; a route
+        // that quietly drops a waypoint draws a DIFFERENT PATH and says nothing about it.
+        var spec = args[++i];
+        var p = spec.Split(',');
+        if (p.Length != 2 || !float.TryParse(p[0], out var rwx) || !float.TryParse(p[1], out var rwy))
+        { Console.Error.WriteLine($"--route '{spec}' is not X,Y. Waypoints carry no z — it is resolved from the winning navmesh."); return 1; }
+        routeXY.Add((rwx, rwy));
+        textured = true;
+    }
+    else if (args[i] == "--route-color" && i + 1 < args.Length)
+    {
+        var spec = args[++i];
+        var p = spec.Split(',');
+        if (p.Length == 3)
+        {
+            var v = new System.Numerics.Vector3(float.Parse(p[0]), float.Parse(p[1]), float.Parse(p[2]));
+            if (v.X > 1f || v.Y > 1f || v.Z > 1f) v /= 255f;      // 0-255 or 0-1, like --sky
+            routeColor = new System.Numerics.Vector4(v, 1f);
+            routeColorName = $"{v.X:0.##},{v.Y:0.##},{v.Z:0.##}";
+        }
+        else { routeColorName = spec.ToLowerInvariant(); routeColor = default; }   // resolved against the table below
+    }
+    else if (args[i] == "--route-z" && i + 1 < args.Length) routeZ = float.Parse(args[++i]);
+    else if (args[i] == "--route-arrows" && i + 1 < args.Length) routeArrowsSpec = args[++i].ToLowerInvariant();
+    else if (args[i] == "--no-route-discs") routeDiscs = false;
     else if (args[i] == "--cull-above" && i + 1 < args.Length) cullAbove = float.Parse(args[++i]);
     else if (args[i] == "--interactive") { interactiveMode = true; textured = true; }
     else if (args[i] == "--fly-speed" && i + 1 < args.Length) flySpeed = float.Parse(args[++i]);
@@ -333,6 +383,40 @@ if (flySpeed is < 1f or > 100000f)
 { Console.Error.WriteLine($"--fly-speed {flySpeed} is out of range: 1..100000 u/s."); return 1; }
 if (lookSens is < 0.01f or > 2f)
 { Console.Error.WriteLine($"--look-sens {lookSens} is out of range: 0.01..2 degrees per pixel (default 0.15)."); return 1; }
+// The route's named colours. Deliberately NOT the nav palette by another name: red is a conflict,
+// orange is a door, violet is a nav diff and white is the cell outline, so those are the four this
+// will not hand out. Whatever is chosen becomes reserved — the nav wire's auto-pick avoids it.
+if (routeColor == default)
+{
+    var routeNames = new Dictionary<string, System.Numerics.Vector3>(StringComparer.OrdinalIgnoreCase)
+    {
+        ["cyan"] = new(0.05f, 0.85f, 0.95f),
+        ["magenta"] = new(0.90f, 0.20f, 0.95f),
+        ["yellow"] = new(1.00f, 0.88f, 0.10f),
+        ["green"] = new(0.05f, 0.85f, 0.30f),
+        ["blue"] = new(0.25f, 0.45f, 1.00f),
+        ["pink"] = new(1.00f, 0.40f, 0.80f),
+    };
+    if (!routeNames.TryGetValue(routeColorName, out var rcv))
+    {
+        Console.Error.WriteLine($"--route-color '{routeColorName}' is not one of: {string.Join(", ", routeNames.Keys)} — or an R,G,B triple (0-255 or 0-1). "
+                              + "Red, orange, violet and white are reserved for conflicts, doors, nav diffs and the cell outline.");
+        return 1;
+    }
+    routeColor = new System.Numerics.Vector4(rcv, 1f);
+}
+if (routeArrowsSpec == "auto") routeArrowEvery = null;
+else if (routeArrowsSpec == "end") routeArrowEvery = 0f;
+else if (float.TryParse(routeArrowsSpec, out var rae) && rae > 0f) routeArrowEvery = rae;
+else
+{ Console.Error.WriteLine($"--route-arrows '{routeArrowsSpec}' is not auto, end, or a positive number of world units."); return 1; }
+if (routeXY.Count == 1)
+{ Console.Error.WriteLine("--route needs at least two waypoints: one point is a position, not a path."); return 1; }
+// A flag that silently does nothing is a trap — the same rule --fly-speed is held to.
+if (routeXY.Count == 0 && worklistPath is null
+    && (Array.IndexOf(args, "--route-color") >= 0 || Array.IndexOf(args, "--route-arrows") >= 0
+        || Array.IndexOf(args, "--route-z") >= 0 || Array.IndexOf(args, "--no-route-discs") >= 0))
+{ Console.Error.WriteLine("--route-color / --route-z / --route-arrows / --no-route-discs only mean anything with a route: pass --route X,Y (repeatable) or a worklist whose shots carry one."); return 1; }
 if (emitBats is not null && worklistPath is null)
 { Console.Error.WriteLine("--emit-bats needs --worklist: the bat files ARE the worklist, written for the console instead of the camera."); return 1; }
 if (batsProfiles.Count > 0 && emitBats is null)
@@ -512,6 +596,13 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot)
     cellKey = null; cellLabel = cellTarget; interior = false;
     sw.Restart();
 
+    // The shot's route, or the command line's. A LOCAL, not one of the mutated globals above:
+    // navMode and cullAbove are set from the shot and never cleared, so shot 1's override leaks
+    // into shot 2 — a route that leaked would draw the wrong path over the right cell, silently.
+    IReadOnlyList<(float X, float Y)> shotRoute = routeXY;
+    string routeLabel = "";
+    float? shotFloorZ = null;
+
     // A worklist shot IS the camera: eye, aim and fov come from the shot and override whatever the
     // command line asked for, so one file drives both the picture and the bat that stands there.
     if (worklist is not null)
@@ -523,6 +614,12 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot)
         look = null; eyeRef = null; lookRef = null;      // the shot is the whole camera, not a base for one
         if (wshot.Nav is { } shotNav) navMode = shotNav;
         if (wshot.CullAbove is { } shotCull) cullAbove = shotCull;
+        if (wshot.Route is { Count: > 1 })
+        {
+            shotRoute = wshot.Route.Select(w => (w[0], w[1])).ToList();
+            routeLabel = wshot.Label;
+        }
+        shotFloorZ = wshot.FloorZ;      // the MEASURED floor, when the author had one
         textured = true;
         Console.WriteLine($"\n=== worklist cell {wlCell + 1}/{worklist.Cells.Count} "
                         + $"shot {wlShot + 1}/{worklist.Cells[wlCell].Shots.Count}: {wshot.Label} ===");
@@ -1331,6 +1428,132 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot)
             }
         }
 
+        // ---- the route: resolve every waypoint's z from the winning navmesh, then check it ----
+        //
+        // Z comes from the MESH, not from the file and not from a pick, for two reasons. A route
+        // has to sit on WALKABLE ground rather than on whatever surface happened to be under the
+        // point; and letting the mesh supply the height makes the arrows follow a sloping walkway
+        // for free, with the author supplying nothing but a plan-view X,Y.
+        //
+        // The reference height CHAINS: waypoint 1 is resolved against the shot's own floor, and
+        // each one after it against the height the PREVIOUS waypoint resolved to. A single fixed
+        // reference would pick the wrong storey the moment a route climbed a staircase; chaining
+        // walks up with it, since consecutive waypoints are far closer in z than the 192 u that
+        // separates one floor from the next.
+        ViewProbe.TexturedScene.RouteRender? routeRender = null;
+        if (shotRoute.Count > 1)
+        {
+            var pts = new List<System.Numerics.Vector3>(shotRoute.Count);
+            var offMesh = new List<string>();
+            var tight = new List<string>();
+            // --route-z beats the shot's measured floor beats eye-minus-eye-height. The last of
+            // those is only sound for a camera STANDING on the route's own floor: from a top-down
+            // a thousand units up it is nonsense, and it decides which storey waypoint 1 lands on.
+            float refZ = routeZ ?? shotFloorZ ?? (eyePos.Value.Z - eyeHeight);
+            string refWhy = routeZ is not null ? "stated: --route-z"
+                          : shotFloorZ is not null ? "measured, from the shot's floorZ"
+                          : $"ASSUMED: eye minus {eyeHeight:0} — pass --route-z if this camera is not standing on the route's floor";
+            Console.WriteLine($"   route: {shotRoute.Count} waypoint(s)"
+                            + (routeLabel.Length > 0 ? $" — {routeLabel}" : "")
+                            + $"; floor reference z {refZ:0} ({refWhy})");
+            for (int wi = 0; wi < shotRoute.Count; wi++)
+            {
+                var (wx, wy) = shotRoute[wi];
+                float? z = ViewProbe.BatEmit.NearestCoverZ(winNav, wx, wy, refZ);
+                // A multi-storey spot is where a route silently lands on the wrong floor, so the
+                // OTHER candidates are printed rather than discarded. --nav-at says the same thing;
+                // this says it about the height that was actually taken.
+                var alts = ViewProbe.BatEmit.CoverHeights(winNav, wx, wy).Where(h => z is null || MathF.Abs(h - z.Value) > 1f).ToList();
+                // The SAME five-probe test --emit-bats runs, not a second copy of it: the spot a
+                // bat file calls standable and the spot the arrows walk over cannot disagree.
+                var clear = ViewProbe.BatEmit.Clearance(winNav, wx, wy, z ?? refZ);
+                string state = clear.Covered == 0 ? "OFF-MESH" : clear.Covered < 5 ? $"TIGHT {clear.Covered}/5" : "covered 5/5";
+                Console.WriteLine($"      wpt {wi + 1}: {wx:0},{wy:0}"
+                                + (z is { } zz ? $" -> z {zz:0}" : " -> NO z (nothing covers it)")
+                                + $"  {state} — {clear.Why}"
+                                + (alts.Count > 0 ? $"  [also covered at z {string.Join(", ", alts.Select(h => h.ToString("0")))} — nearest to the reference won]" : ""));
+                if (clear.Covered == 0 || z is null) offMesh.Add($"wpt {wi + 1} ({wx:0},{wy:0}): {clear.Why}");
+                else if (clear.Covered < 5) tight.Add($"wpt {wi + 1} ({wx:0},{wy:0}): {clear.Why}");
+                pts.Add(new System.Numerics.Vector3(wx, wy, z ?? refZ));
+                if (z is { } nz) refZ = nz;                       // the chain
+            }
+            // OFF-MESH IS FATAL, and this is the one place that differs from --emit-bats, which
+            // writes a tight position as authored and warns. A route drawn through unwalkable
+            // ground is worse than no route at all: it is a picture that tells a tester to walk
+            // somewhere the game will not let them, and it looks authoritative while doing it.
+            if (offMesh.Count > 0)
+            {
+                Console.Error.WriteLine($"   route REFUSED: {offMesh.Count} of {shotRoute.Count} waypoint(s) are not on walkable navmesh."
+                                      + " A path over unwalkable ground looks authoritative and is not — fix the waypoints, or use --nav-at to find ground that is.");
+                foreach (var m in offMesh) Console.Error.WriteLine($"      {m}");
+                return 1;
+            }
+            if (tight.Count > 0)
+            {
+                Console.WriteLine($"   route: {tight.Count} TIGHT waypoint(s) — on navmesh, but the capsule may clip a wall there:");
+                foreach (var m in tight) Console.WriteLine($"      {m}");
+            }
+
+            // ---- the legs: every segment sampled onto the ground, and CHECKED along its length --
+            //
+            // Checking the waypoints alone was defensible while a route carried one every couple of
+            // hundred units. It is not once waypoints mark only direction changes and sight-line
+            // breaks, because then a two-waypoint leg can be 700 u of ground nobody looked at, and
+            // "off-mesh is a hard error" would be guarding the two ends of a line that crosses a
+            // chasm in the middle.
+            //
+            // The same walk supplies the drawn geometry. A leg is straight IN PLAN and takes its z
+            // from the mesh at every sample, so it rides an arch or a staircase instead of cutting
+            // the chord — which on this project's own test walkway passes ~50 u under the surface.
+            const float SampleEvery = 32f;
+            var legs = new List<IReadOnlyList<System.Numerics.Vector3>>();
+            var strayed = new List<string>();
+            int sampleCount = 0, offSamples = 0;
+            for (int li = 0; li + 1 < pts.Count; li++)
+            {
+                var a = pts[li]; var b = pts[li + 1];
+                float planLen = MathF.Sqrt((b.X - a.X) * (b.X - a.X) + (b.Y - a.Y) * (b.Y - a.Y));
+                int steps = Math.Clamp((int)MathF.Ceiling(planLen / SampleEvery), 1, 512);
+                var leg = new List<System.Numerics.Vector3>(steps + 1);
+                int legOff = 0; float firstOffAt = 0f;
+                for (int si = 0; si <= steps; si++)
+                {
+                    float f = (float)si / steps;
+                    float x = a.X + (b.X - a.X) * f, y = a.Y + (b.Y - a.Y) * f;
+                    // The chord is the REFERENCE, not the answer: it says which storey to look on,
+                    // and the mesh says how high the ground actually is there.
+                    float chordZ = a.Z + (b.Z - a.Z) * f;
+                    float? gz = ViewProbe.BatEmit.NearestCoverZ(winNav, x, y, chordZ);
+                    bool onFloor = gz is { } g && MathF.Abs(g - chordZ) <= ViewProbe.BatEmit.SameFloorZ;
+                    if (!onFloor)
+                    {
+                        if (legOff == 0) firstOffAt = planLen * f;
+                        legOff++;
+                    }
+                    leg.Add(new System.Numerics.Vector3(x, y, onFloor ? gz!.Value : chordZ));
+                }
+                sampleCount += leg.Count; offSamples += legOff;
+                if (legOff > 0)
+                    strayed.Add($"leg {li + 1} (wpt {li + 1} -> {li + 2}, {planLen:0} u): {legOff} of {steps + 1} samples "
+                              + $"are off walkable ground, first at {firstOffAt:0} u along it");
+                legs.Add(leg);
+            }
+            Console.WriteLine($"   route: {legs.Count} leg(s) sampled every {SampleEvery:0} u onto the winning navmesh "
+                            + $"— {sampleCount:N0} point(s), {sampleCount - offSamples:N0} on walkable ground");
+            // Same rule as an off-mesh waypoint, and for the same reason: a line drawn across
+            // ground the game will not let anyone walk looks exactly as authoritative as one that
+            // is right. The waypoints being fine is not the claim the picture makes.
+            if (strayed.Count > 0)
+            {
+                Console.Error.WriteLine($"   route REFUSED: {strayed.Count} leg(s) leave walkable navmesh BETWEEN their waypoints."
+                                      + " The waypoints are fine; the straight line between them is not — add a waypoint where the"
+                                      + " walkable ground actually turns, or move one.");
+                foreach (var m in strayed) Console.Error.WriteLine($"      {m}");
+                return 1;
+            }
+            routeRender = new ViewProbe.TexturedScene.RouteRender(legs, pts, routeColor, routeDiscs, routeArrowEvery);
+        }
+
         var (navTris, redTris) = BuildNavSets(winNav);
 
         if (redTris.Count > 0)
@@ -1459,7 +1682,10 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot)
         var npcActors = new List<ViewProbe.NpcActorRender>();
         ViewProbe.NpcActorBuilder.Host? npcHost = null;
         var npcLcMods = new List<ISkyrimModGetter>();
-        var npcCaptions = new List<(string Text, System.Numerics.Vector3 Color)>();
+        // Coloured caption lines: each actor's identity colour, and the route's. Drawn under the
+        // white lines, each in the colour of the thing it names, so a picture with several marked
+        // things says which is which without anyone counting rings.
+        var colourCaptions = new List<(string Text, System.Numerics.Vector3 Color)>();
         // Per-actor IDENTITY colours, assigned in --npc order and worn by all three
         // faces of the marker at once — puck fill, rim, and the caption line — so a
         // multi-actor render answers "who is who" without counting rings. Chosen
@@ -1524,11 +1750,27 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot)
                         ViewProbe.NpcOutfitSource.InventoryTemplate => "outfit via inventory template",
                         _ => "outfit: record DefaultOutfit",
                     };
-                npcCaptions.Add(($"NPC {label} {rn.NpcKey} at {placement.Position.X:0},{placement.Position.Y:0},{placement.Position.Z:0}"
+                colourCaptions.Add(($"NPC {label} {rn.NpcKey} at {placement.Position.X:0},{placement.Position.Y:0},{placement.Position.Z:0}"
                               + $" heading {float.RadiansToDegrees(placement.Rotation.Z):0}° — {outfitTag}", colour));
             }
             Console.WriteLine($"   [npc] {npcActors.Count} actor(s) built  ({swNpc.Elapsed.TotalSeconds:0.0}s)");
         }
+        // The route's caption, in the route's colour — the same rule the actors' lines follow. It
+        // names the path and states the span it was validated over, so the picture carries its own
+        // provenance: a reader can tell a drawn route from a decorative one by the numbers on it.
+        if (routeRender is { Waypoints.Count: > 1 })
+        {
+            // Distance WALKED, summed along the ground-following legs — a chord between waypoints
+            // would under-report every slope and staircase on the path.
+            float walk = 0f;
+            foreach (var leg in routeRender.Legs)
+                for (int wi = 0; wi + 1 < leg.Count; wi++) walk += System.Numerics.Vector3.Distance(leg[wi], leg[wi + 1]);
+            colourCaptions.Add(($"ROUTE {routeRender.Waypoints.Count} waypoints, {walk:0} u"
+                             + (routeLabel.Length > 0 ? $" — {routeLabel}" : "")
+                             + $" — z from the winning navmesh, every waypoint clearance-checked and every leg sampled onto it",
+                              new System.Numerics.Vector3(routeColor.X, routeColor.Y, routeColor.Z)));
+        }
+
         float PitchDownDeg()
         {
             var d = lookPos.Value - eyePos.Value;
@@ -1600,7 +1842,8 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot)
                    scene, assets, dataDir, modFolders, overwriteDir,
                    (eyePos.Value, lookPos.Value, fov), g, r, terrainPatches, terrainLayers, navMode, navColor,
                    skyColor, terrainHeightAt, dashUnderground, dashUnderStatics, msaa, cullAbove, cellBounds,
-                   diffs ?? noDiff, diffColor, picks, captionLines, npcCaptions, npcActors, npcPucksOn, keepFx, fxStatic, listMeshes, size, outFile,
+                   diffs ?? noDiff, diffColor, picks, captionLines, colourCaptions, npcActors, npcPucksOn, routeRender,
+                   keepFx, fxStatic, listMeshes, size, outFile,
                    camMeta);
 
         if (compare is { } cmp)
@@ -1681,7 +1924,7 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot)
                 var cap = new List<string> { $"[{pi + 1}/3] {(pi == 2 ? "winning state (actual merged navmesh)" : $"cell navmesh if {label} won")} \u2014 {cellLabel} \u2014 {camPose}{CullCaption()}" };
                 if (redNav.Count > 0) cap.Add(RedCaption(navs));
                 if (DoorCaption() is { } dc) cap.Add(dc);
-                // NPC caption lines ride the separate coloured channel (npcCaptions),
+                // NPC caption lines ride the separate coloured channel (colourCaptions),
                 // passed straight into the render call below.
                 if (changedKeys.Count > 0 && navDiff)
                     cap.Add($"VIOLET spheres: {diffs.Count} navmesh vertex position(s) this version has and the other does not "
@@ -1747,6 +1990,10 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot)
                 // PageUp/PageDown step THIS cell's shots for free (everything is resident);
                 // Ctrl+ steps cells, which only the run loop above can serve — and only when
                 // the run actually has a worklist to step through.
+                // The route rides into the window as overlay geometry (nothing extra to build) —
+                // these are only what R and the HUD need to talk about it.
+                RouteCount = routeRender?.Waypoints.Count ?? 0,
+                RouteLabel = routeLabel,
                 Worklist = worklist,
                 WorklistCell = wlCell,
                 WorklistShot = wlShot,
@@ -1767,7 +2014,7 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot)
                 scene, assets, dataDir, modFolders, overwriteDir,
                 (eyePos.Value, lookPos.Value, fov), navTris, redTris, terrainPatches, terrainLayers, navMode, navColor,
                 skyColor, terrainHeightAt, dashUnderground, dashUnderStatics, msaa, cullAbove, cellBounds,
-                noDiff, diffColor, picks, fpCap, npcCaptions, npcActors, npcPucksOn, keepFx, fxStatic, listMeshes, size, fpOut,
+                noDiff, diffColor, picks, fpCap, colourCaptions, npcActors, npcPucksOn, routeRender, keepFx, fxStatic, listMeshes, size, fpOut,
                 camMeta, iopt);
             Console.WriteLine($"   interactive run over ({iShapes:N0} shapes were resident)");
         pendingSwitch = iopt.CellSwitch;

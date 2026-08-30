@@ -101,6 +101,14 @@ sealed class InteractiveOptions
     public bool ShowNavWire = true;                        // read per frame by the overlay draw
     public bool ShowNavRedWire = true;
 
+    // ---- the route, switched live by R ---------------------------------------------------
+    // Route geometry is overlay geometry, so the fly-through gets it for nothing — which is what
+    // makes this a LIVE PREVIEW of the path rather than a picture of one. R hides it, because the
+    // one thing a person wants to check about a drawn route is what is underneath it.
+    public int RouteCount;                                 // waypoints; 0 = this run carries no route
+    public string RouteLabel = "";                         // the sentence that says which path this is
+    public bool ShowRoute = true;                          // read per frame by the overlay draw
+
     // The height clip needs no list of its own: a static's PickShape already carries its mesh
     // and, in Min.Y/Max.Y, the Skyrim-z span of exactly the triangles that were drawn. Statics
     // only, like --cull-above — terrain, navmesh, actors and the overlay are never clipped,
@@ -193,6 +201,13 @@ static class InteractiveViewer
 
         string Pose() => $"eye {eye.X:0.##},{eye.Y:0.##},{eye.Z:0.##} yaw {yaw:0.#}° pitch {pitch:0.#}° fov {fov:0.#}°";
         string PoseArgs() => $"--eye {eye.X:0.##},{eye.Y:0.##},{eye.Z:0.##} --yaw {yaw:0.#} --pitch {pitch:0.#} --fov {fov:0.#}";
+
+        // The route's slot on the status bar. Silent when the run carries no route, and it names
+        // the path — a count of waypoints with no sentence attached says nothing about which
+        // walk is on screen when a worklist holds several.
+        string RouteHud() => opt.RouteCount == 0 ? ""
+            : $" — route {opt.RouteCount} wpt{(opt.ShowRoute ? "" : ", HIDDEN")}"
+            + (opt.RouteLabel.Length > 0 ? $" ({opt.RouteLabel})" : "");
 
         // ---- navmesh display mode (N cycles) ------------------------------------------------
         // The sheet and the wire are both resident; the mode decides which of them draws. The
@@ -563,6 +578,9 @@ static class InteractiveViewer
             Console.WriteLine($"   nav:    N cycles the navmesh display off -> filled -> wire -> both{(hasNav ? $" (now {navMode})" : " — this run has none")}");
             Console.WriteLine($"   clip:   [ and ] move the CEILING, ; and ' move the FLOOR (first touch starts at the camera's z), "
                             + $"\\ = clips off (now {ClipLabel()})");
+            Console.WriteLine($"   route:  R shows/hides the walking route"
+                            + (opt.RouteCount > 0 ? $" ({opt.RouteCount} waypoint(s), now {(opt.ShowRoute ? "shown" : "hidden")})"
+                                                  : " — this run has none"));
             if (wl is not null)
                 Console.WriteLine($"   shots:  PageUp/PageDown step this cell's shots (now {shotIdx + 1}/{Math.Max(shots.Count, 1)}), "
                                 + $"Ctrl+PageUp/PageDown step the worklist's cells (now {opt.WorklistCell + 1}/{wl.Cells.Count})"
@@ -585,6 +603,9 @@ static class InteractiveViewer
         if (hasNav)
             Console.WriteLine($"   navmesh display: {navMode} (entry mode) — sheet and wire are BOTH resident, "
                             + "so N switches between them with no rebuild");
+        if (opt.RouteCount > 0)
+            Console.WriteLine($"   route: {opt.RouteCount} waypoint(s) drawn as overlay geometry"
+                            + (opt.RouteLabel.Length > 0 ? $" — {opt.RouteLabel}" : "") + "; R hides it");
         PrintHelp();
 
         // Headless smoke knobs: VP_FLY_FRAMES=N renders N frames then saves a capture and
@@ -641,6 +662,18 @@ static class InteractiveViewer
                 Console.WriteLine($"   [auto] VP_FLY_NAV={want} ignored: this run carries no navmesh");
             else { navMode = want; ApplyNav(); Console.WriteLine($"   [auto] nav display: {navMode}"); }
         }
+        // VP_FLY_ROUTE=on|off: the R key's effect, headlessly. Every other live control has one of
+        // these, for the reason this file already states — without it the toggle could only be
+        // exercised by hand, and a control no test can reach is a control nothing checks.
+        if (Environment.GetEnvironmentVariable("VP_FLY_ROUTE") is { Length: > 0 } routeSpec)
+        {
+            string want = routeSpec.ToLowerInvariant();
+            if (want is not ("on" or "off"))
+                Console.WriteLine($"   [auto] VP_FLY_ROUTE '{want}' is not on|off — ignored");
+            else if (opt.RouteCount == 0)
+                Console.WriteLine($"   [auto] VP_FLY_ROUTE={want} ignored: this run carries no route");
+            else { opt.ShowRoute = want == "on"; Console.WriteLine($"   [auto] VP_FLY_ROUTE={want}"); }
+        }
         if (Environment.GetEnvironmentVariable("VP_FLY_CLIP") is { Length: > 0 } clipSpec)
         {
             // "lo,hi"; either side may be empty for "that end off" — VP_FLY_CLIP=",2048" is a
@@ -681,6 +714,7 @@ static class InteractiveViewer
                 if (locked is not null) hudLine1 = LockedHud();
                 hudLine2 = $"{WorklistHud()}{Pose()} — speed {speed:0} u/s"
                          + (hasNav ? $" — nav {navMode}" : "")
+                         + RouteHud()
                          + (clipLo is not null || clipHi is not null ? $" — clip {ClipLabel()}" : "")
                          + " — H help";
                 return;
@@ -728,6 +762,21 @@ static class InteractiveViewer
                     pickDirty = true;
                     Console.WriteLine($"   nav: {navMode}"
                                     + (navMode == "off" ? "  (the finding's outline goes with it)" : ""));
+                }
+            }
+
+            // ---- the route ------------------------------------------------------------------
+            // The same shape as N: a run with nothing to toggle says so rather than appearing to
+            // work. What is UNDER the path is the question a drawn path stops you answering.
+            if (kb.IsKeyPressed(Keys.R))
+            {
+                if (opt.RouteCount == 0)
+                    Console.WriteLine("   route: this run carries no route (--route X,Y, or a worklist shot's route) — nothing to toggle");
+                else
+                {
+                    opt.ShowRoute = !opt.ShowRoute;
+                    Console.WriteLine($"   route: {(opt.ShowRoute ? "shown" : "hidden")}  ({opt.RouteCount} waypoint(s)"
+                                    + (opt.RouteLabel.Length > 0 ? $" — {opt.RouteLabel}" : "") + ")");
                 }
             }
 
@@ -835,6 +884,7 @@ static class InteractiveViewer
                 hudLine2 = $"{WorklistHud()}{Pose()} — speed {speed * mult:0} u/s"
                          + (MathF.Abs(lookSens - DefaultSens) > 1e-4f ? $" — look {lookSens:0.000}" : "")
                          + (hasNav ? $" — nav {navMode}" : "")
+                         + RouteHud()
                          + (clipLo is not null || clipHi is not null ? $" — clip {ClipLabel()}" : "")
                          + " — H help";
             }

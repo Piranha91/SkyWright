@@ -121,6 +121,31 @@ static class TexturedScene
     // Z-up (Skyrim) -> Y-up (viewer): the exact swap NifMeshBuilder uses.
     internal static Vector3 YUp(Vector3 z) => new(z.X, z.Z, -z.Y);
 
+    /// <summary>A walking route drawn over the scene: straight segments between waypoints, with
+    /// arrowheads riding them that say which way to go. Everything here lies FLAT ON THE GROUND —
+    /// the line is painted on the floor, not billboarded at the camera — because the route follows
+    /// the navmesh's own height and has to read as part of the ground the tester walks on.</summary>
+    /// <param name="Legs">
+    /// One entry per AUTHORED segment (waypoint i to waypoint i+1), each already densified by the
+    /// caller into a polyline that FOLLOWS THE GROUND: straight in plan, riding the navmesh in z.
+    /// Straight in 3D would be wrong — a chord from the foot of an arched walkway to its crest
+    /// passes ~50 u UNDER the walkway, and with waypoints placed only where the direction changes
+    /// there is nothing to hide that. The renderer never guesses a height; every z here was
+    /// resolved from the mesh.
+    /// </param>
+    /// <param name="Waypoints">The AUTHORED vertices only — what the discs mark. A leg's interior
+    /// points are ground samples and are not waypoints; marking them would put a disc every 32 u.</param>
+    /// <param name="Color">Reserved, and excluded from the nav wire's auto-pick — see the pick below.</param>
+    /// <param name="Discs">Draw a translucent fill disc at each waypoint.</param>
+    /// <param name="ArrowEvery">Units between arrowheads: null = distance-scaled so the spacing is
+    /// constant ON SCREEN, 0 = exactly one at the end of each leg, otherwise this many units.</param>
+    internal sealed record RouteRender(
+        IReadOnlyList<IReadOnlyList<Vector3>> Legs,
+        IReadOnlyList<Vector3> Waypoints,
+        Vector4 Color,
+        bool Discs,
+        float? ArrowEvery);
+
     /// <summary>MO2-style loose-file precedence, the ONE encoding of the
     /// convention: the resolver iterates LAST-to-first, so hand it
     /// lowest-priority-first with overwrite at the very end (it outranks every
@@ -159,9 +184,10 @@ static class TexturedScene
         Vector4 diffColor,                                 // colour for those vertices' spheres
         IReadOnlyList<(int X, int Y)> picks,                // image pixels to report world coords for
         IReadOnlyList<string> captionLines,                // burned into the image, top-left (white)
-        IReadOnlyList<(string Text, Vector3 Color)> npcCaptionLines, // per-actor caption lines, drawn AFTER the white ones in each actor's identity colour
+        IReadOnlyList<(string Text, Vector3 Color)> colourCaptionLines, // coloured caption lines (actors, route), drawn AFTER the white ones
         IReadOnlyList<NpcActorRender> npcActors,           // placed characters — meshes BORROWED (see below), never disposed here
         bool npcPucks,                                     // per-actor-coloured ground disc + always-visible rim under each actor
+        RouteRender? route,                                // the path to walk: segments + arrowheads on the ground; null = none
         bool keepFx,                                       // --fx: draw effect-shader shapes too
         bool fxStatic,                                     // --fx-static: draw them as a frozen frame
         bool listEffectMeshes,                             // --list-meshes: name the meshes they came from
@@ -873,16 +899,32 @@ static class TexturedScene
                 if (hits > 0)
                 {
                     var mean = new Vector3(sr / hits, sg / hits, sb / hits);
-                    float best = float.MinValue; string chosen = "green";
-                    foreach (var (name, colr) in palette)
+                    // The route's colour is RESERVED, and the reservation has to reach the scorer or
+                    // it is not one: a route drawn in cyan over a mesh the sampler also decided was
+                    // best in cyan is the failure this exists to prevent, and it makes the WHOLE
+                    // overlay unreadable rather than one layer of it. Near matches are struck out
+                    // outright and the rest are scored away from it — unless that would leave the
+                    // sampler nothing to choose, in which case contrast with the ground still wins.
+                    var routeC = route is null ? (Vector3?)null : new Vector3(route.Color.X, route.Color.Y, route.Color.Z);
+                    const float RouteHueGuard = 0.35f;
+                    var usable = routeC is { } rc0
+                               ? palette.Where(pe => (new Vector3(pe.Color.X, pe.Color.Y, pe.Color.Z) - rc0).Length() >= RouteHueGuard).ToArray()
+                               : palette;
+                    bool struckOut = usable.Length < palette.Length;
+                    if (usable.Length == 0) { usable = palette; struckOut = false; }
+                    float best = float.MinValue; string chosen = usable[0].Name;
+                    foreach (var (name, colr) in usable)
                     {
                         var c3 = new Vector3(colr.X, colr.Y, colr.Z);
-                        // Contrast with what is under the mesh, plus distance from the reserved red.
-                        float score = (c3 - mean).Length() + 0.5f * (c3 - new Vector3(red.X, red.Y, red.Z)).Length();
+                        // Contrast with what is under the mesh, plus distance from the reserved red
+                        // and (when one is drawn) from the route.
+                        float score = (c3 - mean).Length() + 0.5f * (c3 - new Vector3(red.X, red.Y, red.Z)).Length()
+                                    + (routeC is { } rc1 ? 0.5f * (c3 - rc1).Length() : 0f);
                         if (score > best) { best = score; chosen = name; healthy = colr; }
                     }
                     Console.WriteLine($"   nav colour: auto -> {chosen} (sampled {hits} points under the mesh, "
-                                    + $"background {(int)(mean.X * 255)},{(int)(mean.Y * 255)},{(int)(mean.Z * 255)})");
+                                    + $"background {(int)(mean.X * 255)},{(int)(mean.Y * 255)},{(int)(mean.Z * 255)})"
+                                    + (struckOut ? $"; {palette.Length - usable.Length} entr(ies) struck out as too close to the route colour" : ""));
                 }
                 else
                     Console.WriteLine("   nav colour: auto -> green (mesh not on screen; nothing to sample)");
@@ -1089,27 +1131,31 @@ static class TexturedScene
         // Ribbons are single-sided-by-accident and must NOT be culled.
         // Nav tags the layer so the interactive overlay pass can drop the navmesh wire without
         // touching anything else on it: 0 = not navmesh, 1 = healthy wire, 2 = the finding's
-        // wire. The static path never reads it — its mode was decided before the build.
-        var layers = new List<(float[] Data, bool DepthTested, bool CullBack, int Nav)>();
+        // wire, 3 = the route (R toggles it, same idea, its own key). The static path never
+        // reads it — its mode was decided before the build.
+        // Alpha is 1 for every classic layer and the draw loop's behaviour at 1 is exactly what it
+        // was before the field existed (blend off, u_alpha 1). Only the route's waypoint discs ask
+        // for less: a translucent fill marks a spot without hiding the ground it marks.
+        var layers = new List<(float[] Data, bool DepthTested, bool CullBack, int Nav, float Alpha)>();
         // Highlight halos: the SAME hull buffer is drawn twice — solid depth-tested rim here,
         // then again as the translucent Greater-pass ghost (see the draw loop).
         float[]? haloData = haloTris.Count > 0 ? haloTris.ToArray() : null;
-        if (haloData is not null) layers.Add((haloData, true, true, 0));
+        if (haloData is not null) layers.Add((haloData, true, true, 0, 1f));
         if (wantNav)
         {
             if (wireMode && navTris.Count > 0)
             {
                 var (s, d) = BuildWire(navTris, healthy, 2.2f);
-                if (s.Count > 0) layers.Add((s.ToArray(), true, false, 1));
-                if (d.Count > 0) layers.Add((d.ToArray(), false, false, 1));
+                if (s.Count > 0) layers.Add((s.ToArray(), true, false, 1, 1f));
+                if (d.Count > 0) layers.Add((d.ToArray(), false, false, 1, 1f));
             }
             // The finding is ALWAYS outlined, wider than the healthy wire, in every mode that
             // draws navmesh at all.
             if (redTris.Count > 0)
             {
                 var (s, d) = BuildWire(redTris, red, 3.4f);
-                if (s.Count > 0) layers.Add((s.ToArray(), true, false, 2));
-                if (d.Count > 0) layers.Add((d.ToArray(), false, false, 2));
+                if (s.Count > 0) layers.Add((s.ToArray(), true, false, 2, 1f));
+                if (d.Count > 0) layers.Add((d.ToArray(), false, false, 2, 1f));
             }
             if (runVisible + runUnder + runHidden > 0)
             {
@@ -1153,7 +1199,7 @@ static class TexturedScene
             Edge(cb.X0, cb.Y1, cb.X0, cb.Y0);
             if (outline.Count > 0)
             {
-                layers.Add((outline.ToArray(), false, false, 0));
+                layers.Add((outline.ToArray(), false, false, 0, 1f));
                 Console.WriteLine($"   cell outline: white dashes around {cb.X0:0},{cb.Y0:0} .. {cb.X1:0},{cb.Y1:0}");
             }
         }
@@ -1172,7 +1218,7 @@ static class TexturedScene
                 float d = MathF.Max(1f, Vector3.Distance(v, cam.Eye));
                 Overlay.Sphere(spheres, YUp(v + lift), Math.Clamp(d * 0.00275f, 1f, 45f), dc);
             }
-            layers.Add((spheres.ToArray(), false, true, 0));
+            layers.Add((spheres.ToArray(), false, true, 0, 1f));
             Console.WriteLine($"   nav diff: {diffVerts.Count} vertex sphere(s) — vertices this version has and the other does not");
         }
 
@@ -1210,8 +1256,183 @@ static class TexturedScene
                     Overlay.Vertex(rim, i1, rimColour, Vector3.Zero);
                 }
             }
-            layers.Add((rim.ToArray(), false, false, 0));
+            layers.Add((rim.ToArray(), false, false, 0, 1f));
             Console.WriteLine($"   npc pucks: {npcActors.Count} disc(s) + always-visible rim(s), one identity colour per actor");
+        }
+
+        // ---- the route: where to WALK ----------------------------------------------------
+        // Straight segments waypoint to waypoint, arrowheads riding them that say which way. All
+        // of it lies FLAT ON THE GROUND, at the height the winning navmesh gave — painted on the
+        // floor rather than billboarded at the camera, because the thing being shown is a path
+        // over ground, and a path that floats free of the ground is a decoration.
+        //
+        // A leg is STRAIGHT IN PLAN and follows the ground in z: the caller hands over each
+        // authored segment already densified into a ground-riding polyline. Straight in 3D was
+        // the obvious thing and is wrong — a chord from the foot of an arched walkway to its
+        // crest runs ~50 u UNDER the walkway, and once waypoints sit only where the direction
+        // changes there is no longer a waypoint every 250 u hiding it.
+        //
+        // The segments go through EmitEdge, so they inherit the nav wire's whole treatment for
+        // free: a solid depth-tested copy plus an always-visible dashed one. That is what keeps
+        // the route readable where it passes behind a wall, and it is why this needed no new
+        // machinery. Arrowheads are always-visible flat triangles — a direction you can only see
+        // on open ground is not a direction anyone can follow.
+        if (route is { Legs.Count: > 0 })
+        {
+            // Above the nav sheet's own 2 u lift: the route is the thing being followed, and it
+            // must not z-fight with the surface it is drawn over.
+            var routeLift = new Vector3(0, 0, 4f);
+            // Pre-divided by the overlay shader's x1.5 flat lift, exactly as the NPC rim is, so
+            // the drawn path lands on the EXACT colour its caption line is written in.
+            var rc = new Vector3(route.Color.X, route.Color.Y, route.Color.Z) / 1.5f;
+            var rSolid = new List<float>(); var rDash = new List<float>();
+            var rFlat = new List<float>();          // arrowheads: always visible, opaque
+            var rDisc = new List<float>();          // waypoint fills: always visible, translucent
+            int v0 = runVisible, u0 = runUnder, h0 = runHidden;
+            int heads = 0, pathPoints = 0;
+
+            // ONE width law for the whole route, and the arrowhead is sized FROM IT rather than
+            // from a formula of its own. d x 0.0020 is a line ~5 px wide at any distance; the
+            // clamps exist only to stop a ribbon degenerating at the extremes, and BOTH of them
+            // cost a round when they were set carelessly. Two independent clamps, one for the line
+            // and one for the head, let the head come out barely wider than the line it rode, so
+            // the arrows read as nicks in a band; and a generous LOW clamp stops being a floor and
+            // becomes the width of every near segment, so a route at the camera's feet drew as a
+            // band wider than its own arrows. Retune the law, never one of its two consumers.
+            static float HalfWidthAt(float d) => Math.Clamp(d * 0.0020f, 0.5f, 36f);
+            // Everything about the arrow is its own knob, in half-widths, because every time one of
+            // these was expressed in terms of another the other one moved when it should not have.
+            // Twice now: the head was once sized by its own distance clamp and came out as wide as
+            // the line it rode; and the half-span was once a fraction that dragged the width along
+            // whenever the length changed. Half-span and notch are still fractions OF THE LENGTH —
+            // that is what holds the head's shape as it scales — so changing the length means
+            // changing them to compensate if the width is meant to stay put. It was, twice.
+            const float HeadLengthInWidths = 34f;   // half the 68 it was; 0.20 and 0.41 below keep
+            const float HeadHalfSpan = 0.20f;       // the head's WIDTH and notch depth unchanged
+            const float HeadNotch = 0.41f;          // (34 x 0.20 == 68 x 0.10, and likewise the notch)
+            // Spacing is in half-widths TOO, not in head lengths. Derived from the head it would
+            // halve when the head halved, holding the head-to-gap ratio exactly where it was and
+            // leaving a shortened arrowhead just as cluttered as the long one.
+            const float ArrowEveryInWidths = 92f;
+
+            // One arrowhead: a barbed pair of triangles in the ground plane, sized from ITS OWN
+            // distance to the camera — the same trick the dashes use — so every head along the
+            // path reads the same size on screen instead of shrinking into the distance. The
+            // direction is the LOCAL one, so a head on a ramp lies in the ramp.
+            void Arrow(Vector3 at, Vector3 dir)
+            {
+                // The perpendicular has to lie IN THE GROUND PLANE for a flat arrow. A vertical
+                // step has no such perpendicular; +X stands in rather than emitting nothing.
+                var side = Vector3.Cross(Vector3.UnitZ, dir);
+                side = side.LengthSquared() > 1e-8f ? Vector3.Normalize(side) : Vector3.UnitX;
+                float d = MathF.Max(1f, Vector3.Distance(at, cam.Eye));
+                float head = HalfWidthAt(d) * HeadLengthInWidths;
+                var tip = at + dir * (head * 0.5f);
+                var back = at - dir * (head * 0.5f);
+                // The rear notch is what separates an arrow from a wedge. It is kept SHALLOW —
+                // barbs reaching far behind it read as a dart — and its depth is a fraction of the
+                // length like everything else, so it holds its shape as the head grows.
+                var notch = at - dir * (head * HeadNotch);
+                var bl = back + side * (head * HeadHalfSpan);
+                var br = back - side * (head * HeadHalfSpan);
+                void V(Vector3 v) => Overlay.Vertex(rFlat, YUp(v), rc, Vector3.Zero);
+                V(tip); V(bl); V(notch);
+                V(tip); V(notch); V(br);
+                heads++;
+            }
+
+            foreach (var raw in route.Legs)
+            {
+                if (raw.Count < 2) continue;
+                var leg = new Vector3[raw.Count];
+                for (int i = 0; i < raw.Count; i++) leg[i] = raw[i] + routeLift;
+                pathPoints += leg.Length;
+
+                // Arc length along the ground-following polyline. Arrowheads are placed by DISTANCE
+                // WALKED, not by plan distance, so they stay evenly spaced up a slope.
+                var cum = new float[leg.Length];
+                for (int i = 1; i < leg.Length; i++) cum[i] = cum[i - 1] + Vector3.Distance(leg[i - 1], leg[i]);
+                float total = cum[^1];
+                if (total < 1e-3f) continue;
+
+                for (int i = 0; i + 1 < leg.Length; i++)
+                {
+                    float segMid = MathF.Max(1f, Vector3.Distance((leg[i] + leg[i + 1]) * 0.5f, cam.Eye));
+                    EmitEdge(leg[i], leg[i + 1], Vector3.UnitZ, rc, HalfWidthAt(segMid), rSolid, rDash);
+                }
+
+                // Position and local direction at a given distance along the leg.
+                (Vector3 P, Vector3 D) At(float t)
+                {
+                    t = Math.Clamp(t, 0f, total);
+                    int i = 0;
+                    while (i + 2 < leg.Length && cum[i + 1] < t) i++;
+                    var d = leg[i + 1] - leg[i];
+                    float span = cum[i + 1] - cum[i];
+                    float f = span > 1e-5f ? (t - cum[i]) / span : 0f;
+                    var dir = d.LengthSquared() > 1e-10f ? Vector3.Normalize(d) : Vector3.UnitY;
+                    return (leg[i] + d * f, dir);
+                }
+
+                // Arrowheads are laid out from the END of the leg BACKWARDS, so one always lands
+                // pointing into the waypoint it leads to. That is the message — "this way to the
+                // next one" — and it has to survive whatever the spacing arithmetic does to the
+                // rest of the run. Spacing is set once per leg, from the leg's own midpoint
+                // distance, so the walk terminates predictably; each head is then sized from where
+                // it actually sits.
+                float legMid = MathF.Max(1f, Vector3.Distance(At(total * 0.5f).P, cam.Eye));
+                float widthMid = HalfWidthAt(legMid);
+                float headMid = widthMid * HeadLengthInWidths;
+                // Heads may never overlap however the two knobs are set: the floor is the one
+                // place spacing is allowed to know the head's length.
+                float every = route.ArrowEvery ?? MathF.Max(widthMid * ArrowEveryInWidths, headMid * 1.05f);
+                float first = total - headMid * 0.55f;
+                if (first <= headMid * 0.5f)
+                { var (ap, ad) = At(total * 0.5f); Arrow(ap, ad); }       // too short to sit at the end without crowding the start
+                else if (every <= 0f)
+                { var (ap, ad) = At(first); Arrow(ap, ad); }              // --route-arrows end: exactly one, at the far end
+                else
+                {
+                    every = MathF.Max(every, 8f);                         // a spacing under this is a runaway, not a request
+                    int cap = 0;
+                    for (float t = first; t > headMid * 0.5f && cap < 512; t -= every, cap++)
+                    { var (ap, ad) = At(t); Arrow(ap, ad); }
+                }
+            }
+
+            // A translucent fill at each AUTHORED waypoint — no rim. The disc says "this is a
+            // vertex of the path" without drawing a second hard-edged shape into a picture that
+            // already has the line, the arrows and a navmesh wire in it; translucent, so it marks
+            // the ground rather than covering it.
+            if (route.Discs)
+            {
+                const int DiscSegments = 48;
+                const float DiscRadius = 48f;       // 0.75 x the 64 u the clearance probes reach
+                foreach (var w in route.Waypoints)
+                {
+                    var c = w + routeLift;
+                    for (int sg = 0; sg < DiscSegments; sg++)
+                    {
+                        float a0 = 2f * MathF.PI * sg / DiscSegments, a1 = 2f * MathF.PI * (sg + 1) / DiscSegments;
+                        var e0 = new Vector3(MathF.Cos(a0), MathF.Sin(a0), 0f);
+                        var e1 = new Vector3(MathF.Cos(a1), MathF.Sin(a1), 0f);
+                        Overlay.Vertex(rDisc, YUp(c), rc, Vector3.Zero);
+                        Overlay.Vertex(rDisc, YUp(c + e0 * DiscRadius), rc, Vector3.Zero);
+                        Overlay.Vertex(rDisc, YUp(c + e1 * DiscRadius), rc, Vector3.Zero);
+                    }
+                }
+            }
+
+            // Discs first, so the line and its arrows draw ON the marker rather than under it.
+            if (rDisc.Count > 0) layers.Add((rDisc.ToArray(), false, false, 3, 0.35f));
+            if (rSolid.Count > 0) layers.Add((rSolid.ToArray(), true, false, 3, 1f));
+            if (rDash.Count > 0) layers.Add((rDash.ToArray(), false, false, 3, 1f));
+            if (rFlat.Count > 0) layers.Add((rFlat.ToArray(), false, false, 3, 1f));
+            Console.WriteLine($"   route: {route.Waypoints.Count} waypoint(s), {route.Legs.Count} leg(s) drawn as "
+                            + $"{pathPoints:N0} ground-following point(s), {heads} arrowhead(s)"
+                            + (route.Discs ? $", {route.Waypoints.Count} translucent disc(s) at r{48}" : "")
+                            + $"; runs {runVisible - v0:N0} visible, {runUnder - u0:N0} subterranean, "
+                            + $"{runHidden - h0:N0} behind geometry (dashed copies cover the last two)");
         }
 
         // The overlay pass itself: viewprobe's own flat shader, so an outline is the exact
@@ -1246,13 +1467,23 @@ static class TexturedScene
                 GL.DepthMask(false);
                 int alphaLoc = GL.GetUniformLocation(wireProg, "u_alpha");
                 GL.Uniform1(alphaLoc, 1.0f);
-                foreach (var (data, depthTested, cullBack, nav) in layers)
+                foreach (var (data, depthTested, cullBack, nav, layerAlpha) in layers)
                 {
                     // Live navmesh display mode: the flags are read HERE, every frame, so the N
                     // key changes the next frame and nothing is rebuilt. Null (static path) means
                     // draw everything the build decided to make.
                     if (nav == 1 && interactive is { ShowNavWire: false }) continue;
                     if (nav == 2 && interactive is { ShowNavRedWire: false }) continue;
+                    if (nav == 3 && interactive is { ShowRoute: false }) continue;
+                    // At alpha 1 this is what the loop always did; below it, ordinary source-alpha
+                    // blending, which is the whole mechanism behind a translucent overlay layer.
+                    if (layerAlpha < 1f)
+                    {
+                        GL.Enable(EnableCap.Blend);
+                        GL.BlendFunc(BlendingFactor.SrcAlpha, BlendingFactor.OneMinusSrcAlpha);
+                        GL.Uniform1(alphaLoc, layerAlpha);
+                    }
+                    else { GL.Disable(EnableCap.Blend); GL.Uniform1(alphaLoc, 1.0f); }
                     if (depthTested) { GL.Enable(EnableCap.DepthTest); GL.DepthFunc(DepthFunction.Lequal); }
                     else GL.Disable(EnableCap.DepthTest);
                     if (cullBack) { GL.Enable(EnableCap.CullFace); GL.CullFace(CullFaceMode.Back); }
@@ -1384,7 +1615,7 @@ static class TexturedScene
         GL.DeleteFramebuffer(fbo); GL.DeleteTexture(colorTex); GL.DeleteRenderbuffer(depthRb);
         if (msFbo != 0) { GL.DeleteFramebuffer(msFbo); GL.DeleteRenderbuffer(msColorRb); GL.DeleteRenderbuffer(msDepthRb); }
 
-        SaveFrame(pixels, size, size, captionLines, npcCaptionLines, pngTextMeta, outPath);
+        SaveFrame(pixels, size, size, captionLines, colourCaptionLines, pngTextMeta, outPath);
 
         // Give back the borrowed NPC meshes BEFORE this renderer can dispose them —
         // ClearMeshes()/Dispose() destroy what they hold, and the actors' VAOs must
@@ -1422,7 +1653,7 @@ static class TexturedScene
     /// on, scaled by WIDTH (the static path is square, so this is the same scale it always
     /// used).</summary>
     internal static void SaveFrame(byte[] pixels, int width, int height,
-        IReadOnlyList<string> captionLines, IReadOnlyList<(string Text, Vector3 Color)> npcCaptionLines,
+        IReadOnlyList<string> captionLines, IReadOnlyList<(string Text, Vector3 Color)> colourCaptionLines,
         string? pngTextMeta, string outPath)
     {
         // The frame is a screenshot: opaque by definition. The colour buffer's ALPHA, though, is
@@ -1434,7 +1665,7 @@ static class TexturedScene
 
         using var img = Image.LoadPixelData<Rgba32>(pixels, width, height);
         img.Mutate(x => x.Flip(FlipMode.Vertical));
-        if (captionLines.Count + npcCaptionLines.Count > 0)
+        if (captionLines.Count + colourCaptionLines.Count > 0)
         {
             // Burn the caption into the frame so it travels with the PNG into any viewer.
             float capScale = width / 1280f;
@@ -1445,7 +1676,7 @@ static class TexturedScene
                 foreach (var fam in SystemFonts.Families) { font = fam.CreateFont(15f * capScale, FontStyle.Bold); break; }
             if (font is not null)
             {
-                int totalLines = captionLines.Count + npcCaptionLines.Count;
+                int totalLines = captionLines.Count + colourCaptionLines.Count;
                 int lineH = (int)(22f * capScale), barH = (int)(10f * capScale) + lineH * totalLines;
                 var f2 = font;
                 img.Mutate(x =>
@@ -1456,10 +1687,11 @@ static class TexturedScene
                                    new SixLabors.ImageSharp.PointF(12f * capScale, 7f * capScale + lineH * i));
                     // Each actor's caption line wears that actor's identity colour — the
                     // same one its puck fill and rim wear — so "who is who" is answered by
-                    // the caption itself, not by counting rings.
-                    for (int j = 0; j < npcCaptionLines.Count; j++)
+                    // the caption itself, not by counting rings. The route's line rides the same
+                    // channel in the route colour, for the same reason.
+                    for (int j = 0; j < colourCaptionLines.Count; j++)
                     {
-                        var (txt, c) = npcCaptionLines[j];
+                        var (txt, c) = colourCaptionLines[j];
                         x.DrawText(txt, f2,
                                    SixLabors.ImageSharp.Color.FromRgb(
                                        (byte)Math.Clamp(c.X * 255f, 0f, 255f),

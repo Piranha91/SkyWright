@@ -109,6 +109,14 @@ findings they demonstrate) lives with that instance, not here.
   exact knife; `--interactive` also has a live shape-granular band on the clip keys, and it
   prints the `--cull-above Z` line for whatever slice flying found.
 
+- **Walking route** (`--route X,Y`, repeatable): the path to WALK from this camera, drawn as
+  straight segments with arrowheads pointing waypoint to waypoint. **X and Y only** — z is
+  resolved from the winning navmesh. `--route-z Z` states the floor the route runs on (which
+  storey), `--route-color NAME|R,G,B` overrides the reserved colour, `--route-arrows auto|end|N`
+  sets the arrowhead spacing, `--no-route-discs` drops the fill disc at each waypoint. A worklist
+  shot's own `route` is the same thing and overrides these. **An off-mesh waypoint is a hard
+  error**, and so is a leg that leaves walkable ground BETWEEN its waypoints. Its own section:
+  *Walking routes* below.
 - **Worklist** (`--worklist FILE`): a SHOT LIST — cells, and per cell the camera poses worth
   looking at, each with the sentence that says why. It REPLACES the positional cell argument (a
   run may open with a flag when a worklist supplies the cells) and it overrides `--eye`/`--yaw`/
@@ -153,6 +161,7 @@ all knowledge.
 | `VP_FLY_PICK=x,y` | with `VP_FLY_FRAMES`: run one programmatic pick at those client coordinates and print what it hit — the ray path, testable headlessly |
 | `VP_FLY_LOCK=1` | with `VP_FLY_PICK`: lock the HUD onto what it hit, exactly as `LMB` does |
 | `VP_FLY_NAV=off\|filled\|wire\|both` | set the navmesh display mode before the capture — the `N` key's effect, headlessly |
+| `VP_FLY_ROUTE=on\|off` | show or hide the walking route before the capture — the `R` key's effect, headlessly |
 | `VP_FLY_CLIP=lo,hi` | set the height clip band before the capture; either side may be empty, so `,2048` is a ceiling with no floor |
 | `VP_FLY_SHOT=N` | with a `--worklist`: open on shot N (1-based) of this cell — the `PageUp`/`PageDown` key's effect, headlessly |
 | `VP_FLY_CELL=+1\|-1` | with `VP_FLY_FRAMES` and a multi-cell `--worklist`: after the capture, request the next/previous cell instead of closing — `Ctrl+PageUp`/`PageDown`'s effect. Without it the multi-cell rebuild is the one path in the feature no test can reach, and it is the one that tears a GL context down and builds another |
@@ -251,6 +260,10 @@ gitignored for the same reason: probe transcripts name the plugins of whatever l
 - **Interactive fly-through** (`--interactive`): the same scene in a visible window — WASD +
   mouse flight, hover-to-identify (refs, navmesh, terrain) with a click-to-lock readout, live
   navmesh display mode, a live height clip, pose echo, F12 capture. Its own section below.
+- **Walking routes** (`--route`): waypoints in plan view become arrows on the ground, at heights
+  the winning navmesh supplies, with every waypoint clearance-checked and every leg between them
+  sampled onto the mesh. Pairs with a follower harness — that puts an actor behind you, this says
+  where to walk them. Its own section below.
 - **Worklists** (`--worklist`): a shot list drives both the fly-through's `PageUp`/`PageDown`
   paging and, through `--emit-bats`, the in-game console batch files — one set of coordinates, so
   the render and the tester's standing position cannot disagree. Its own section below.
@@ -330,8 +343,9 @@ The SCOUTING step — fly to the view, read the identities, then press `P` and g
 descends), `E`/`Space` up, `Q`/`C` down — hold `RMB` and move the mouse to look. Scroll sets
 the base speed and `,`/`.` the look sensitivity, both starting from `--fly-speed`/`--look-sens`
 and both echoed to the console as a paste-ready flag; `Shift` ×5, `Ctrl` ×0.2 applies to every
-rate, movement and clip alike. `N` cycles the navmesh display, `[`/`]` and `;`/`'` move the
-height clip, `\` turns it off (all three below). `P` prints the current pose as a paste-ready
+rate, movement and clip alike. `N` cycles the navmesh display, `R` shows/hides the
+walking route, `[`/`]` and `;`/`'` move the
+height clip, `\` turns it off (all four below). `P` prints the current pose as a paste-ready
 `--eye X,Y,Z --yaw N --pitch N --fov N` line. `F12` saves a captioned PNG (window resolution,
 standard caption bar + `viewprobe` tEXt chunk with the pose) into `--out`. `PageUp`/`PageDown` step a `--worklist`'s shots and `Ctrl+PageUp`/`PageDown` its cells
 (below). `H`/`F1` reprints the controls with their current values; `Esc` quits. Closing the window prints the final pose,
@@ -436,6 +450,7 @@ malformed shot list found after a multi-minute walk is a multi-minute walk waste
           "eye": [-26671, -84175, -2117],
           "floorZ": -2237,
           "yaw": 0, "pitch": 0, "fov": 65,
+          "route": [[-26671, -84175], [-26520, -84900], [-26372, -85500]],
           "note": "optional; printed on arrival and in the bat manifest" }
       ] }
   ]
@@ -451,6 +466,12 @@ malformed shot list found after a multi-minute walk is a multi-minute walk waste
 - **`nav`** and **`cullAbove`** are optional per-shot overrides. `nav` applies exactly (it is a
   visibility flip). `cullAbove` in the window drives the SHAPE-granular live band, not the
   triangle-exact knife — the console says so on arrival rather than letting the two quietly differ.
+- **`route`** is the path to WALK from this shot — waypoints as `[X, Y]` pairs, at least two, **no
+  z**: it is resolved from the winning navmesh against this shot's own `floorZ`, every waypoint is
+  clearance-checked and every leg sampled onto the mesh before anything is drawn. Place a waypoint
+  only at a direction change over ~10–15° or a sight-line break — see *Walking routes* for why, and
+  for what the legs do in between. A shot's `route` overrides a command-line `--route`, and unlike
+  `nav`/`cullAbove` it does NOT leak into the next shot.
 - **`travel`** on a cell overrides the derived console travel command; normally absent.
 
 ### Stepping it
@@ -505,6 +526,137 @@ afterwards, or the edits are silently clobbered.
 look) is written, but the first-person camera often overrides it almost immediately — if the
 vertical aim does not stick, the manifest carries the intended pitch to look by hand. Most
 eye-level shots are pitch 0, so this mostly does not bite.
+
+---
+
+## Walking routes (`--route`)
+
+Waypoints in plan view, drawn as **straight segments with an arrowhead pointing from one waypoint
+to the next** — painted flat on the ground at the height the navmesh gives, so the path conforms
+to a sloping walkway or a staircase without the author measuring anything.
+
+```
+--route 116750,109100 --route 117400,110200 --route 119000,112700
+```
+
+or, as a worklist shot's own field (`_shared/Worklist.cs`):
+
+```json
+{ "label": "...", "eye": [...], "floorZ": -6912,
+  "route": [[116750,109100], [117400,110200], [119000,112700]] }
+```
+
+**How many waypoints.** A waypoint is a *vertex*, not a breadcrumb. Place one only where one of
+two things is true:
+
+1. **The direction changes** by more than ~10–15° from the previous leg. Below that the path is
+   straight enough that a waypoint adds a disc and tells the reader nothing.
+2. **A sight line breaks** — the next waypoint would be over a horizon, round a corner, or behind
+   an obstacle from this one. The crest of an arched walkway is the standard case: from the foot
+   of the arch the far side is simply not visible, so the crest earns a vertex even though the
+   walkway runs dead straight through it.
+
+Rule 2 is checkable rather than felt: an eye at `floor + 120` at the start against the crest's
+own surface height says whether the far leg is visible at all. On this project's own test
+walkway the eye clears the crest by **8 u**, so everything past it is over the horizon — one
+interior waypoint, no others, on a path that had seven.
+
+Sparse waypoints are why the **legs** are validated and ground-sampled rather than drawn as
+chords: with a vertex every 250 u a chord is harmless, and with a vertex only where the direction
+turns it is a straight line through 700 u of ground nobody looked at.
+
+**X and Y only. Z comes from the winning navmesh**, through the same lookup `--nav-at` answers
+with. Two reasons, and the first is the load-bearing one: a route must sit on *walkable ground*,
+not on whatever surface a pick happens to return. The second is free convenience — letting the
+mesh supply z makes the arrows follow the floor across a slope, a ramp or a flight of stairs.
+
+**Which storey.** Several floors can cover one X,Y, so the resolver needs a reference height and
+takes the first of: `--route-z Z`, the shot's measured `floorZ`, then eye minus `--eye-height`.
+That last one is an assumption and is labelled as one in the console — it is only sound for a
+camera *standing on the route's own floor*, so **a top-down camera should pass `--route-z`**, or
+it will pick the storey nearest its own eye-level-minus-120, which is meaningless from 1,600 u up.
+After waypoint 1 the reference **chains**: each waypoint resolves against the height the previous
+one landed on, so a route that climbs stairs walks up with them. Every waypoint whose X,Y is
+covered by more than one storey prints the heights it passed over, so a wrong pick is visible in
+the transcript instead of silent.
+
+**Every waypoint is clearance-checked** — the same five-probe test `--emit-bats` runs (the point
+plus ±64 u in x and y, all required to land on a drawable triangle on the same floor), calling the
+same code, so a spot a bat file calls standable and a spot the arrows walk over cannot disagree.
+Per waypoint the console reports `covered 5/5`, `TIGHT n/5`, or `OFF-MESH`.
+
+**Every leg is sampled too**, every 32 u along its length, and each sample must find walkable
+ground on the same floor. Checking only the endpoints was defensible while waypoints were dense;
+it is not once they mark direction changes alone, because then two valid waypoints can be joined
+by a line that steps off a walkway into thin air — a case where *both* endpoints report
+`5/5` and the path between them is a fall. The sampling is not a second pass: it is the same walk
+that produces the drawn geometry.
+
+**OFF-MESH IS A HARD ERROR — for a waypoint AND for a leg.** The run refuses, writes no image, and
+exits non-zero. This is the one place the route deliberately differs from `--emit-bats`, which
+writes a tight position as authored and warns: a path drawn through unwalkable ground is *worse
+than no path*, because it tells a tester to walk somewhere the game will not let them and looks
+authoritative while doing it. `TIGHT` is reported and drawn — on navmesh, but with the capsule
+possibly clipping a wall.
+
+**Drawing.** A leg is **straight in plan and follows the ground in z** — it is drawn as the
+polyline the sampler produced, not as a chord between its waypoints. Straight in 3D is the obvious
+thing and is wrong: a chord from the foot of an arched walkway to its crest runs ~50 u *under* the
+walkway, and with waypoints only at direction changes there is nothing left to hide that.
+
+Otherwise no new machinery: the segments go through the navmesh wire's own `EmitEdge`, so they
+arrive with its whole treatment — a solid depth-tested copy plus an always-visible dashed one.
+That is what keeps a route readable where it passes behind a wall or a railing post, and dashes
+appearing mid-path are the picture saying *"something is in front of this"*, not a defect. The
+arrowheads and the waypoint rings are always-visible flat triangles; a direction you can only see
+on open ground is not a direction anyone can follow. Everything is lifted 4 u, above the nav
+sheet's own 2 u, so the route never z-fights the surface it is drawn over.
+
+- **One width law.** The line's half-width is `distance × 0.0020`, clamped, which is ~5 px at any
+  distance; the arrowhead is sized **from that** (34 half-widths long, 0.20 of that in half-span)
+  rather than from a formula of its own. Two independent distance clamps is how the first version
+  went wrong: close to the camera the line hit its floor and the head hit a different one, the head
+  came out barely wider than the line it rode, and the arrows read as nicks in a fat band. If you
+  retune either, retune the law, not one of its two consumers.
+- **Length, half-span and spacing are separate knobs on purpose**, because each time one was
+  expressed in terms of another it dragged that other one along. Scaling the head 4× in *both*
+  dimensions produces heads wider than the walkway they sit on — a different picture, not a bigger
+  one — so half-span is compensated whenever the length changes. And the default arrow *spacing* is
+  in half-widths rather than head lengths: derived from the head it would halve whenever the head
+  halved, pinning the head-to-gap ratio and leaving a shortened arrowhead exactly as cluttered as a
+  long one. Spacing knows the head's length in one place only, as a floor that stops heads
+  overlapping.
+- **The low clamp must stay small.** Set generously it stops being a floor and becomes the width
+  of every near segment — a route at the camera's feet then draws as a band wider than the arrows
+  on it.
+- **Arrowheads are laid out from the END of each segment backwards**, so one always lands pointing
+  into the waypoint it leads to. That is the message the picture carries; it must survive whatever
+  the spacing arithmetic does to the rest of the run. `--route-arrows end` keeps only that one;
+  `--route-arrows N` spaces them every N world units; the default spaces them so the *rhythm* is
+  constant on screen. A segment too short to hold a head at its end gets one at its midpoint.
+- **Waypoint discs** are a translucent fill at 48 u radius (0.75 of the clearance probes' reach)
+  with **no rim**. A picture that already carries a line, its arrows and a navmesh wire does not
+  need a fourth hard-edged shape; a translucent fill marks the spot without covering the ground it
+  marks. It rides the overlay pass's per-layer alpha and draws *before* the line, so the arrows sit
+  on the marker. `--no-route-discs` drops them.
+
+**Colour is reserved, and the reservation reaches the scorer.** The route is cyan by default, and
+when a route is drawn the nav wire's `auto` pick both strikes out palette entries too close to it
+and scores the rest away from it (it says so in the `nav colour:` line). Skipping that second half
+is exactly how the route comes out the same hue as the navmesh over some patch of ground and the
+whole overlay stops being readable. `--route-color` takes `cyan|magenta|yellow|green|blue|pink` or
+an `R,G,B` triple; red, orange, violet and white are refused — they belong to conflicts, doors,
+nav diffs and the cell outline. The caption line is written in the route's own colour, and the
+drawn path is pre-divided by the overlay shader's ×1.5 flat lift so the two match exactly.
+
+**The fly-through gets it for free**, because it is overlay geometry — which is what makes this a
+live preview of a path rather than a picture of one. `R` hides it (what is *under* the route is
+the question a drawn route stops you answering), the HUD carries `route N wpt (label)`, and
+`VP_FLY_ROUTE=on|off` is the same switch headlessly.
+
+**No `route.txt` bat.** A batch file that `setpos`-es to waypoint 1 is tempting and deliberately
+absent: a follower harness plus this render is enough, and a waypoint-stepping bat should wait
+until something actually needs one.
 
 ---
 

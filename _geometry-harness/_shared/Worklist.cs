@@ -33,6 +33,13 @@ namespace HarnessShared;
 /// </param>
 /// <param name="Nav">Per-shot navmesh display override (off|filled|wire|both); absent inherits the run's --nav.</param>
 /// <param name="CullAbove">Per-shot dollhouse slice override; absent inherits the run's --cull-above.</param>
+/// <param name="Route">
+/// The path to WALK from this camera, as waypoints in order: <c>[[X, Y], [X, Y], ...]</c>, at least
+/// two. X and Y ONLY — z is resolved from the winning navmesh, waypoint by waypoint, because a route
+/// must sit on walkable ground rather than on whatever surface a pick happens to return, and because
+/// letting the mesh supply z makes the arrows follow a sloping walkway for free. viewprobe draws it
+/// as straight segments with arrowheads; --route X,Y is the same thing from the command line.
+/// </param>
 public sealed record WorklistShot(
     string Label,
     IReadOnlyList<float> Eye,
@@ -43,7 +50,8 @@ public sealed record WorklistShot(
     float? FloorZ = null,
     string? Note = null,
     string? Nav = null,
-    float? CullAbove = null);
+    float? CullAbove = null,
+    IReadOnlyList<IReadOnlyList<float>>? Route = null);
 
 /// <summary>The shots that share one loaded cell — i.e. one load screen's worth of work.</summary>
 /// <param name="Cell">CellEditorID or FormID, the same string viewprobe takes as its first argument.</param>
@@ -122,6 +130,16 @@ public static class WorklistIo
                 if (s.Pitch is < -89f or > 89f) Bad($"{sw}: pitch {s.Pitch} is out of range (-89..89).");
                 if (s.Nav is not null && s.Nav is not ("off" or "filled" or "wire" or "both"))
                     Bad($"{sw}: nav '{s.Nav}' is not off|filled|wire|both.");
+                if (s.Route is not null)
+                {
+                    // One waypoint is a position, not a path — and a three-number waypoint is an
+                    // author supplying a z the navmesh is supposed to supply. Both fail HERE, before
+                    // a load walk is spent on them.
+                    if (s.Route.Count < 2) Bad($"{sw}: route has {s.Route.Count} waypoint(s) — a path needs at least 2.");
+                    for (int ri = 0; ri < s.Route.Count; ri++)
+                        if (s.Route[ri] is null || s.Route[ri].Count != 2)
+                            Bad($"{sw}: route waypoint[{ri}] must be [X, Y] — z comes from the winning navmesh, not from the file.");
+                }
             }
         }
     }

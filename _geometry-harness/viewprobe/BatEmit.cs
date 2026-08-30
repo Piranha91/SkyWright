@@ -40,8 +40,10 @@ static class BatEmit
     const float ClearanceRadius = 64f;
 
     /// <summary>How far above or below the shot's own floor a covering triangle may sit and still be
-    /// taken as the floor that shot meant. Beyond this it is another storey.</summary>
-    const float SameFloorZ = 192f;
+    /// taken as the floor that shot meant. Beyond this it is another storey. Internal because
+    /// --route's segment sampler asks the same question of every point ALONG a leg that the
+    /// clearance test asks of its endpoints.</summary>
+    internal const float SameFloorZ = 192f;
 
     internal static int Run(
         WorklistFile wl,
@@ -201,10 +203,16 @@ static class BatEmit
     /// <see cref="ClearanceRadius"/> in x and y — all required to be covered by a drawable triangle
     /// on the same floor. Returns the sentence the manifest prints either way, because "we checked
     /// and it is fine" is worth as much to the reader as the warning is.
+    ///
+    /// Internal, not private: --route validates its waypoints with THIS test rather than a second
+    /// copy of it, so a spot the bat file calls standable and a spot the arrows walk over cannot
+    /// disagree. <paramref name="Covered"/> is how the two callers differ — --emit-bats writes a
+    /// tight position as authored and warns, a route treats 0/5 as a hard error.
     /// </summary>
-    static (bool Ok, string Why) Clearance(Dictionary<FormKey, NavmeshGeometry> navs, float x, float y, float floorZ)
+    internal static (bool Ok, int Covered, string Why) Clearance(
+        IReadOnlyDictionary<FormKey, NavmeshGeometry> navs, float x, float y, float floorZ)
     {
-        if (navs.Count == 0) return (false, "NO NAVMESH in this cell - clearance unverifiable");
+        if (navs.Count == 0) return (false, 0, "NO NAVMESH in this cell - clearance unverifiable");
 
         var probes = new[]
         {
@@ -225,14 +233,16 @@ static class BatEmit
             worstDz = MathF.Max(worstDz, MathF.Abs(z - floorZ));
         }
 
-        if (covered == 0) return (false, "NOT STANDABLE: no walkable triangle covers this point at this height");
-        if (covered < 5) return (false, $"TIGHT: only {covered}/5 clearance probes are on navmesh - the capsule may clip a wall");
-        return (true, $"standable: 5/5 clearance probes on navmesh (floor within {worstDz:0} u)");
+        if (covered == 0) return (false, 0, "NOT STANDABLE: no walkable triangle covers this point at this height");
+        if (covered < 5) return (false, covered, $"TIGHT: only {covered}/5 clearance probes are on navmesh - the capsule may clip a wall");
+        return (true, 5, $"standable: 5/5 clearance probes on navmesh (floor within {worstDz:0} u)");
     }
 
     /// <summary>Z of the drawable triangle covering (x,y) whose height is nearest <paramref name="nearZ"/>;
-    /// null when nothing covers it. The same 2D barycentric containment --nav-at reports with.</summary>
-    static float? NearestCoverZ(Dictionary<FormKey, NavmeshGeometry> navs, float x, float y, float nearZ)
+    /// null when nothing covers it. The same 2D barycentric containment --nav-at reports with.
+    /// Internal because --route resolves every waypoint's z through it — the mesh supplies the
+    /// height, so the arrows conform to a sloping floor without the author measuring anything.</summary>
+    internal static float? NearestCoverZ(IReadOnlyDictionary<FormKey, NavmeshGeometry> navs, float x, float y, float nearZ)
     {
         float? best = null;
         foreach (var nv in navs.Values)
@@ -255,6 +265,37 @@ static class BatEmit
                 if (best is null || MathF.Abs(z - nearZ) < MathF.Abs(best.Value - nearZ)) best = z;
             }
         return best;
+    }
+
+    /// <summary>Every drawable storey covering (x,y), lowest first. <see cref="NearestCoverZ"/>
+    /// picks one of these and says nothing about the rest; --route prints the rest, because a
+    /// waypoint quietly landing on the wrong floor of a two-storey spot looks exactly like a
+    /// waypoint landing on the right one.</summary>
+    internal static List<float> CoverHeights(IReadOnlyDictionary<FormKey, NavmeshGeometry> navs, float x, float y)
+    {
+        var hits = new List<float>();
+        foreach (var nv in navs.Values)
+            foreach (var tri in nv.Triangles)
+            {
+                if ((tri.Flags & 0x08) != 0) continue;
+                if (tri.A < 0 || tri.B < 0 || tri.C < 0
+                    || tri.A >= nv.Vertices.Count || tri.B >= nv.Vertices.Count || tri.C >= nv.Vertices.Count) continue;
+                var a = V(nv.Vertices[tri.A]); var b = V(nv.Vertices[tri.B]); var c = V(nv.Vertices[tri.C]);
+                float d = (b.Y - c.Y) * (a.X - c.X) + (c.X - b.X) * (a.Y - c.Y);
+                if (MathF.Abs(d) < 1e-6f) continue;
+                float u = ((b.Y - c.Y) * (x - c.X) + (c.X - b.X) * (y - c.Y)) / d;
+                float v = ((c.Y - a.Y) * (x - c.X) + (a.X - c.X) * (y - c.Y)) / d;
+                float w = 1f - u - v;
+                if (u < 0f || v < 0f || w < 0f) continue;
+                hits.Add(u * a.Z + v * b.Z + w * c.Z);
+            }
+        hits.Sort();
+        // Adjacent triangles of ONE surface both cover a point on their shared edge and would be
+        // reported as two storeys. Collapse anything within a step height of its neighbour.
+        var storeys = new List<float>();
+        foreach (var h in hits)
+            if (storeys.Count == 0 || h - storeys[^1] > 24f) storeys.Add(h);
+        return storeys;
     }
 
     static string Manifest(WorklistFile wl, string worklistPath, string modName,
