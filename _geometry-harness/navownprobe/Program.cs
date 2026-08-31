@@ -57,6 +57,7 @@ string modsDir = Path.Combine(Instance, "mods");
 string overwriteDir = Path.Combine(Instance, "overwrite");
 string dataDir = Path.Combine(GamePath, "Data");
 
+bool reportDoorIdx = false;   // DOOR-IDX is retired; --door-idx brings it back
 int listN = 25;
 string? onlyPlugin = null;
 string? emitPath = null;
@@ -69,6 +70,7 @@ for (int i = 0; i < args.Length; i++)
     else if (args[i] == "--emit" && i + 1 < args.Length) emitPath = args[++i];
     else if (args[i] == "--enable" && i + 1 < args.Length) enablePlugins.Add(args[++i]);
     else if (args[i] == "--disable" && i + 1 < args.Length) disablePlugins.Add(args[++i]);
+    else if (args[i] == "--door-idx") reportDoorIdx = true;
 }
 
 var sw = Stopwatch.StartNew();
@@ -364,6 +366,7 @@ var dangling = new List<string>();
 // cannot name a second party (a link into a navmesh that is simply absent names no culprit).
 var dangleStruct = new List<(string Kind, FormKey Rec, string RecRole, FormKey Other, string OtherRole, int PluginA, int PluginB, string Summary)>();
 int doorTriChecked = 0, doorLinkChecked = 0, edgeChecked = 0;
+int doorIdxSuppressed = 0;
 int NavOwner(FormKey nav) => navProviders.TryGetValue(nav, out var pr) && pr.Count > 0 ? pr[^1] : -1;
 
 foreach (var (nav, tris) in navDoorTris)
@@ -398,9 +401,27 @@ foreach (var (door, link) in doorNavLink)
     }
     else if (link.Tri >= count)
     {
-        dangling.Add($"   DOOR-IDX   door {door} in {Cell(navCell.GetValueOrDefault(link.Nav))} points at triangle {link.Tri} of {count}");
-        dangleStruct.Add(("DOOR-IDX", door, "door", link.Nav, "navmesh", link.Plugin, NavOwner(link.Nav),
-                          $"door {door} in {Cell(navCell.GetValueOrDefault(link.Nav))} points at triangle {link.Tri} of {count}"));
+        // RETIRED as a finding — field-tested and not player-visible. A door is described by THREE
+        // independent structures, and this check reads only the first:
+        //   1. the door reference's own navigation door link   (what this check validates)
+        //   2. the navmesh's own list of the doors beside it
+        //   3. the coarse routing index's linked-door list
+        // Plus a runtime closed-door array this harness does not model at all. Structures 2 and 3
+        // are what the engine walks, and they can be perfectly healthy while 1 dangles — the
+        // observed failure is not an index that drifted by a few, but a link naming an unrelated
+        // navmesh far away whose winning version carries no door entries at all. Traversal through
+        // doors with this defect was confirmed working in BOTH directions in game, against a
+        // control door carrying the identical defect. Independently: the large majority of these
+        // links in a normal load order are Bethesda's own, and the most thorough bug-fix project
+        // in the ecosystem edits hundreds of navmesh records while leaving every one of them
+        // alone. Do not re-derive this; a re-scoped successor must show 2 and 3 failing too.
+        doorIdxSuppressed++;
+        if (reportDoorIdx)
+        {
+            dangling.Add($"   DOOR-IDX   door {door} in {Cell(navCell.GetValueOrDefault(link.Nav))} points at triangle {link.Tri} of {count}");
+            dangleStruct.Add(("DOOR-IDX", door, "door", link.Nav, "navmesh", link.Plugin, NavOwner(link.Nav),
+                              $"door {door} in {Cell(navCell.GetValueOrDefault(link.Nav))} points at triangle {link.Tri} of {count}"));
+        }
     }
 }
 
@@ -441,6 +462,14 @@ Console.WriteLine($"   checked: {doorTriChecked:N0} navmesh door triangles, {doo
 Console.WriteLine($"   (doors whose winning override removed the link or permanently disabled them are out of scope;");
 Console.WriteLine($"    {permanentlyDisabledDoors:N0} permanently-disabled door overrides seen — counted per rule 6)");
 Console.WriteLine($"   findings: {dangling.Count:N0}");
+if (doorIdxSuppressed > 0 || reportDoorIdx)
+{
+    Console.WriteLine($"   DOOR-IDX is RETIRED — {doorIdxSuppressed:N0} link(s)"
+                    + $" {(reportDoorIdx ? "RE-ENABLED by --door-idx and INCLUDED above" : "found and NOT counted above")}."
+                    + $" Field-tested as not player-visible: it reads only the"
+                    + $" door ref's own link, while the navmesh's door list and the coarse routing index — which"
+                    + $" are what the engine walks — stay healthy. See the comment at the check.");
+}
 foreach (var g in dangling.GroupBy(d => d.Trim().Split(' ')[0]).OrderByDescending(g => g.Count()))
     Console.WriteLine($"      {g.Count(),6}  {g.Key}");
 foreach (var d in dangling.Take(listN)) Console.WriteLine(d);
