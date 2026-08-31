@@ -192,7 +192,11 @@ all knowledge.
 | `VP_FLY_CLIP=lo,hi` | set the height clip band before the capture; either side may be empty, so `,2048` is a ceiling with no floor |
 | `VP_FLY_SHOT=N` | with a `--worklist`: open on shot N (1-based) of this cell — the `PageUp`/`PageDown` key's effect, headlessly |
 | `VP_FLY_CELL=+1\|-1` | with `VP_FLY_FRAMES` and a multi-cell `--worklist`: after the capture, request the next/previous cell instead of closing — `Ctrl+PageUp`/`PageDown`'s effect. Without it the multi-cell rebuild is the one path in the feature no test can reach, and it is the one that tears a GL context down and builds another |
-| `VP_FLY_HUD=1` | include the HUD bar in the capture. `F12` deliberately excludes it, so this is the only way a test can see the bar — at the cost of the burned caption overlapping its first line |
+| `VP_FLY_HUD=1` | include the OVERLAYS — control bar, caption, help card — in the capture. `F12` deliberately excludes them, so this is the only way a test can see them, at the cost of the burned caption overlapping the bar's first row |
+| `VP_FLY_HELP=1` | raise the in-window help card before the capture — the `H` key's effect, headlessly. Only visible with `VP_FLY_HUD=1`, since the card is an overlay |
+| `VP_FLY_BAR=expanded\|collapsed` | collapse the control bar to its one-row strip before the capture — the chevron's effect, headlessly |
+| `VP_FLY_POSE=1` | put the camera numbers on the caption before the capture — the bar's `pose` toggle, headlessly |
+| `VP_FLY_GLOW=on\|off` | the hover highlight, headlessly. With `VP_FLY_PICK` the picked shape is the one lit, and `VP_FLY_HUD=1` keeps the lift in the capture (a hand-pressed `F12` never does) |
 
 ---
 
@@ -395,8 +399,95 @@ walking route, `[`/`]` and `;`/`'` move the
 height clip, `\` turns it off (all four below). `P` prints the current pose as a paste-ready
 `--eye X,Y,Z --yaw N --pitch N --fov N` line. `F12` saves a captioned PNG (window resolution,
 standard caption bar + `viewprobe` tEXt chunk with the pose) into `--out`. `PageUp`/`PageDown` step a `--worklist`'s shots and `Ctrl+PageUp`/`PageDown` its cells
-(below). `H`/`F1` reprints the controls with their current values; `Esc` quits. Closing the window prints the final pose,
-so the last view is never lost.
+(below). `Ctrl+C` copies the selection. `H`/`F1` raises the help card; `Esc` closes the card, or
+quits when it is already closed. Closing the window prints the final pose, so the last view is
+never lost.
+
+**Every one of those, except `WASD` movement itself, is also a widget on the control bar at the
+top of the window** (added 2026-08-30), labelled with its key. See below.
+
+**The control bar** (added 2026-08-30) — a panel across the top of the window carrying every
+live control as a widget, each labelled with the key that also reaches it. Before it, the keys had
+no on-screen presence at all: the HUD reported the RESULT of pressing one (`nav both`,
+`clip z 128..2048`) but never that the control existed or which key reached it, so the feature set
+was discoverable only by reading the source.
+
+- **Toggles and modes.** The navmesh display is four buttons (`off`/`filled`/`wire`/`both`) with
+  the current one lit — all four visible, rather than one keypress into a cycle you have to
+  remember. The route is a lit/unlit toggle.
+- **Numbers are typeable AND draggable.** Fly speed, look sensitivity and the two clip ends each
+  get a slider and a number box driving ONE value: click the box and type (`Tab` moves to the next
+  box, `Enter` commits, `Esc` cancels the edit), or drag the slider. A slider alone cannot hit
+  "ceiling 2048"; a box alone cannot sweep a ceiling down through a roof and watch it melt. Speed
+  and sensitivity are on log tracks — 20..20000 u/s linear would put the whole usable indoor range
+  in the first two pixels. The clip tracks span the SCENE's own static z-extent, padded, so their
+  ends are somewhere a roof actually is. The wheel works on whatever widget it is resting on
+  (clip ends step 64 u and seed from the camera's z on first touch, exactly as `[`/`]`/`;`/`'` do);
+  anywhere else it is the fly speed it has always been.
+- **Steppers** for a `--worklist`'s cell and shot, with the shot's own label beside them.
+- **Actions**: print pose, save PNG, help, quit, and two display toggles — `pose` (the camera
+  numbers on the caption, default OFF) and `glow` (the hover highlight, default ON) — plus a
+  chevron that collapses the bar to a one-row strip when the picture matters more than the
+  controls.
+- **The selection row** (added 2026-08-31). `LMB` on something puts its **FormKey**, **runtime
+  FormID** and **Data-relative mesh path** on the bar as three fields; **clicking a field copies
+  that value**, and `Ctrl+C` copies all three as one tab-separated row with no header, so repeated
+  copies into a sheet accumulate a table. What a pick is FOR is the identity, and what anyone does
+  with an identity is paste it — reading it off a caption and retyping it is where the digit gets
+  dropped. Long values shorten on screen and copy WHOLE, and they shorten in the direction that
+  keeps the part that identifies them: a mesh path loses its head (`...\whiterun\WRIntBanner.nif`
+  — cut at a folder boundary, not mid-word), a FormKey loses its tail, because the hex id is at
+  the front and the plugin name padding it can run to forty characters. Navmesh offers a FormKey,
+  a FormID and its triangle index; bare terrain has no record identity and says so. The row takes
+  itself off the bar when nothing is selected.
+  - `Ctrl+C` costs `C` its Ctrl case as a descend key — `Ctrl` is also the slow modifier, so the
+    two gestures collided. `Q` still descends with `Ctrl` held, at the same slow rate.
+- **The bar and the keys are one piece of state, not two.** Every widget is a pair of delegates
+  onto the loop's own variables rather than a copy of them, so pressing the key moves the widget
+  and dragging the widget does exactly what the key would have done. There is no second
+  implementation to keep in step.
+- **What the run cannot do is drawn GREYED, not hidden** — a run with no navmesh still shows the
+  display control, carrying the sentence the key already printed. A control that vanishes and a
+  scene that is missing something look alike from the outside, and only one of them is a finding.
+- **A cursor over the bar is not over the scene.** Picking is FROZEN while it is up there rather
+  than reset, so reaching for a widget does not wipe the identity you were reading, and a click
+  meant for a button cannot also lock whatever the panel is drawn over.
+- **The hover highlight** (added 2026-08-31, `glow`, default on) lifts whatever is under the
+  cursor so it is obvious what a click would select. It rides the material shader's own EMISSIVE
+  term, which the renderer already feeds per mesh, so it costs five field writes and **not one
+  extra draw call**. The shader's term is `finalColor += emissiveColor * emissiveMultiple *
+  baseColor` — it brightens a surface in proportion to its OWN albedo rather than washing it flat,
+  which is what lets a dark stone and a pale banner both read as picked without either becoming a
+  silhouette. The mesh's real emissive settings are saved and handed back when the cursor leaves,
+  including on the way out of the window. A projected covering lights with its base, the way the
+  clip already hides them together. Refs only: navmesh and terrain carry no `GlMesh`, and they
+  already answer on the caption. Measured on a two-arm capture: 10.1% of pixels change, and where
+  they do the mean goes (62.8, 66.0, 61.3) → (71.5, 85.7, 94.2) — brighter, and blue-shifted.
+- **It is not in a capture.** `F12` grabs the frame before any overlay AND with the hover
+  highlight taken off, so a capture still looks like a render and not like a screenshot of a tool.
+  `VP_FLY_HUD=1` is the only way to see either, and it deliberately keeps both.
+- **Cost.** Layout runs every update frame (a rect that does not exist cannot be clicked) and the
+  panel re-rasterises only when something visible changes. Measured on this machine, 1440-wide bar,
+  18 widgets: layout 0.005 ms/frame, rebuild 2.1 ms. Text is the whole of that rebuild — 40
+  `DrawText` calls cost 6.4 ms against 0.03 ms for the allocation, background, sixty box fills and
+  the pixel copy together — so each string is rasterised once and thereafter blitted, which is what
+  keeps a slider drag or a held clip key smooth.
+
+**What the caption still carries, and why it is nearly empty.** The nav mode, the route, the clip
+band, the fly speed, the look sensitivity and the worklist position are all WIDGETS now, so
+repeating them under the bar was two readouts of one fact. What is left has no other home: the
+camera pose (behind the `pose` toggle, default off — `P` prints it and `F12` burns it in, so
+holding a row of the picture open for it permanently was clutter), and the two BUILD-time knives,
+`--cull-above` and `--nav-z`, which no key can undo and which a scene missing its roofs would
+otherwise read as a finding. With nothing hovered and the pose off, the caption is gone entirely
+rather than sitting there as an empty band.
+
+**`H` raised nothing in the window until 2026-08-30, and the report was fair.** The key worked; it
+printed the controls to the CONSOLE, which is not the window the person flying is looking at. It
+now raises a help card over the picture AND still prints, because the console is where a value gets
+copied from. The two come from one list, so they cannot drift apart. `Esc` closes the card before
+it quits anything — reflexively pressing `Esc` while reading the line that says `Esc` quits should
+not cost you the pose you flew to.
 
 **Navmesh display, live** (`N` cycles `off → filled → wire → both`). Under `--interactive` the
 build makes BOTH the translucent sheet and the wire whatever `--nav` asked for, so switching is
@@ -439,18 +530,21 @@ back. A run carrying one now declares it on the bar as `SLICED at build: --cull-
 missing its roofs, and missing roofs read as a finding. `(0 hidden)` means "this band is currently
 removing nothing" — never "nothing has been removed".
 
-**Hover identification** (the cursor is free whenever RMB is up; a HUD bar at the top shows the
-answer). `LMB` on something **LOCKS** the readout to it and prints the full detail to the
-console; the next `LMB` anywhere unlocks, hit or miss. Locked, the identity stays on the bar
-while the camera moves — reading a FormKey off a wall you are also trying to fly around meant
-holding the cursor perfectly still — and hover picking is suspended, so the readout cannot
-drift. A locked line reports the hit POINT and drops the range, which only the camera that did
-the picking could speak for. The bar's text is 30 px (twice the burned caption's 15 px: it is
-read at a glance, from further back than a saved image is) and WRAPS, growing to fit, because a
-mesh path at that size runs off a 1440-wide window:
+**Hover identification** (the cursor is free whenever RMB is up; a caption line under the control
+bar shows the answer, and the shape under the cursor lights up). `LMB` **SELECTS** it: the full
+detail prints to the console and the identity moves to the control bar's selection row as three
+click-to-copy fields, where it stays while the camera moves. The next `LMB` anywhere, or the row's
+`clear`, releases it. While something is selected, hover picking is suspended, so the readout
+cannot drift.
 
-- a placed ref answers `REFR FormKey = runtime FormID — base EditorID — mesh path`, click adds
-  the base FormKey/FormID, placement and scale;
+The caption is 15 px, the burned PNG caption's own size. It had been doubled to 30 px so a FormID
+would stay legible while flying; the size came back down on 2026-08-31 because a FormID is no
+longer read off it — it is a field you click. The caption still WRAPS and grows to fit, because a
+mesh path is long, and it takes NO space at all when it has nothing to say. What it reports:
+
+- a placed ref answers `REFR FormKey = runtime FormID — base EditorID — mesh path`; selecting it
+  adds the base FormKey/FormID, placement and scale to the console, and puts the three copyable
+  values on the bar;
 - navmesh answers `NAVM FormKey = FormID tri N` (tagged `[RED — the finding]` when implicated),
   and the click detail includes a ready-made `--red "FORMKEY:tri"` spec;
 - bare ground answers the LAND census: cell, quadrant, base layer, and every painted alpha
@@ -479,15 +573,20 @@ pose the flight printed). Everything else composes: `--conflicts`/`--red` paint 
 in a static render, `--npc` actors stand in the scene, `--cull-above` slices before the window
 opens, and the live clip then works on what it left. The window is resizable; `--msaa` sets its
 multisampling (the F12 capture resolves it). The `VP_FLY_*` family (env table above) exercises
-the loop, the ray, the display mode, the clip and the HUD headlessly — that is how the feature
-is regression-tested, and `VP_FLY_FRAMES` runs are byte-identical between runs.
+the loop, the ray, the display mode, the clip, the control bar and the help card headlessly — that
+is how the feature is regression-tested, and `VP_FLY_FRAMES` runs are byte-identical between runs
+(re-measured 2026-08-30 with the bar drawn: same md5 across repeat runs, and the bar contributes no
+non-determinism because its only camera-independent input, the cursor, is parked off-panel under
+`VP_FLY_FRAMES` along with everything else the loop refuses to read).
 
 **What the loop can and cannot change.** Everything live is visibility or input state — the
 navmesh display mode, the height band, the flight feel — so none of it rebuilds geometry and
 none of it can change what a static re-render of the same pose produces. Verified: a static
 render before and after this feature landed is byte-identical, interior (`--nav both
 --cull-above`) and exterior (`--nav both --conflicts`, red navmesh + cell outline + terrain
-layers) alike.
+layers) alike. Re-verified when the control bar landed (2026-08-30): same cell, same camera,
+pre-change and post-change binaries, `cmp`-identical PNGs — the bar is an overlay on a window that
+the static path never opens.
 
 ---
 

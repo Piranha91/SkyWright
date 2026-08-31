@@ -191,7 +191,6 @@ static class InteractiveViewer
         float fov = cam.FovDeg;
         float speed = opt.FlySpeed;             // u/s; scroll adjusts, shift x5, ctrl x0.2
         float lookSens = opt.LookSens;          // degrees per pixel; , and . adjust
-        const float DefaultSens = 0.15f;        // only so the HUD can stay quiet at the default
 
         var camera = new OrbitCamera
         {
@@ -221,13 +220,6 @@ static class InteractiveViewer
 
         string Pose() => $"eye {eye.X:0.##},{eye.Y:0.##},{eye.Z:0.##} yaw {yaw:0.#}° pitch {pitch:0.#}° fov {fov:0.#}°";
         string PoseArgs() => $"--eye {eye.X:0.##},{eye.Y:0.##},{eye.Z:0.##} --yaw {yaw:0.#} --pitch {pitch:0.#} --fov {fov:0.#}";
-
-        // The route's slot on the status bar. Silent when the run carries no route, and it names
-        // the path — a count of waypoints with no sentence attached says nothing about which
-        // walk is on screen when a worklist holds several.
-        string RouteHud() => opt.RouteCount == 0 ? ""
-            : $" — route {opt.RouteCount} wpt{(opt.ShowRoute ? "" : ", HIDDEN")}"
-            + (opt.RouteLabel.Length > 0 ? $" ({opt.RouteLabel})" : "");
 
         // ---- navmesh display mode (N cycles) ------------------------------------------------
         // The sheet and the wire are both resident; the mode decides which of them draws. The
@@ -300,12 +292,6 @@ static class InteractiveViewer
                   ? wl.Cells[opt.WorklistCell].Shots : (IReadOnlyList<WorklistShot>)Array.Empty<WorklistShot>();
         int shotIdx = shots.Count > 0 ? Math.Clamp(opt.WorklistShot, 0, shots.Count - 1) : 0;
 
-        string WorklistHud()
-        {
-            if (wl is null || shots.Count == 0) return "";
-            return $"[cell {opt.WorklistCell + 1}/{wl.Cells.Count} · shot {shotIdx + 1}/{shots.Count}] {shots[shotIdx].Label} — ";
-        }
-
         void ApplyShot(int i, bool announce)
         {
             if (shots.Count == 0) return;
@@ -348,21 +334,23 @@ static class InteractiveViewer
 
         // ---- hover picking -----------------------------------------------------------------
         (PickShape Shape, int LocalTri, float T, Vector3 HitY)? hover = null;
-        // The locked pick: what LMB pinned to the HUD, and the line it rendered to at the moment
-        // of the click. Non-null suspends hovering entirely.
+        // The locked pick: what LMB pinned. Non-null suspends hovering entirely. Since 2026-08-31
+        // it is reported on the CONTROL BAR as three click-to-copy fields rather than as a
+        // sentence on the caption — the caption is for the thing under the cursor right now.
         (PickShape Shape, int LocalTri, float T, Vector3 HitY)? locked = null;
-        string lockedLine = "";
         // A lock outlives a mode switch, and it should — it says "keep showing me this one". But
         // the clip or N can then hide the very thing it names, and a readout for something not
         // on screen has to SAY so rather than quietly keep asserting it.
         bool Drawn(PickShape s) => s.Mesh is not { IsRendering: false }
                                 && !(s.Kind == PickKind.Navmesh && navMode == "off");
-        string LockedHud() => locked is { } l && !Drawn(l.Shape)
-            ? lockedLine + "   [not drawn now]" : lockedLine;
         // Set when something OTHER than the mouse changed what is under the cursor, so a hover
         // answer refreshes even with the mouse held still — hold [ until a ceiling melts away
         // and the bar must stop naming that ceiling.
         bool pickDirty = false;
+        // Where the last pick was taken from. Reset to nowhere to force the next frame to re-pick
+        // — what "unlock" has to do, whether the key, the bar's clear button or a mode change
+        // asks for it.
+        OpenTK.Mathematics.Vector2 lastPickPos = new(-1000f, -1000f);
 
         (PickShape Shape, int LocalTri, float T, Vector3 HitY)? PickAt(float mx, float my)
         {
@@ -405,7 +393,7 @@ static class InteractiveViewer
         // the range rather than displaying a number that quietly goes stale as you fly away.
         string HoverLine((PickShape Shape, int LocalTri, float T, Vector3 HitY)? hit, bool fromEye = true)
         {
-            if (hit is not { } hv) return "hover: nothing under the cursor (hold RMB to look, WASD to fly)";
+            if (hit is not { } hv) return "";                 // nothing under the cursor: say nothing
             var ws = new Vector3(hv.HitY.X, -hv.HitY.Z, hv.HitY.Y);   // Y-up back to Skyrim
             var s = hv.Shape;
             string tail = fromEye ? $" — hit {ws.X:0},{ws.Y:0},{ws.Z:0}, {hv.T:0} u"
@@ -457,18 +445,124 @@ static class InteractiveViewer
             }
         }
 
+        // ---- the selection, as three copyable values ---------------------------------------
+        // What a pick is FOR is the identity, and what anyone does with an identity is paste it
+        // into a query. Reading it off a caption and retyping it is where the digit gets dropped,
+        // so the three parts are separate click-to-copy fields on the control bar rather than one
+        // sentence: the FormKey, the runtime FormID, and the Data-relative mesh path.
+        //
+        // Each returns "" when it does not apply, and a field with nothing to say takes itself off
+        // the bar — navmesh has an identity but no mesh, terrain has neither.
+
+        // The path the RESOLVER uses, which is the one worth pasting: TexturedScene prepends
+        // "meshes" when a record's Model.File omits it, so this must too or the copied path names
+        // a file that is not there.
+        static string DataRelMesh(string rel)
+            => rel.Length == 0 || rel.StartsWith("meshes", StringComparison.OrdinalIgnoreCase)
+             ? rel : Path.Combine("meshes", rel);
+
+        string SelFormKey() => locked is not { } l ? "" : l.Shape.Kind switch
+        {
+            PickKind.Ref => l.Shape.Ref.RefKey.ToString(),
+            PickKind.Navmesh => l.Shape.NavKey.ToString(),
+            _ => "",
+        };
+        string SelFormId() => locked is not { } l ? "" : l.Shape.Kind switch
+        {
+            PickKind.Ref => opt.RuntimeId(l.Shape.Ref.RefKey),
+            PickKind.Navmesh => opt.RuntimeId(l.Shape.NavKey),
+            _ => "",
+        };
+        string SelPath() => locked is { } l && l.Shape.Kind == PickKind.Ref
+                          ? DataRelMesh(l.Shape.Ref.MeshRelPath) : "";
+        // What the selection IS, for the row's leading word — so a locked navmesh triangle or a
+        // patch of ground is named rather than showing two blank fields.
+        string SelWhat() => locked is not { } l ? "" : l.Shape.Kind switch
+        {
+            PickKind.Ref => "REFR",
+            PickKind.Navmesh => $"NAVM tri {l.Shape.NavTriIds![l.LocalTri]}"
+                              + (opt.RedNav.Contains(l.Shape.NavKey) ? " [RED]" : ""),
+            _ => "terrain — no record identity to copy",
+        };
+
+        void Copy(string what, string value)
+        {
+            if (value.Length == 0) return;
+            // Never silently: a copy that did not happen looks exactly like one that did until
+            // the paste comes back empty.
+            try { gw.ClipboardString = value; Console.WriteLine($"   copied {what}: {value}"); }
+            catch (Exception ex) { Console.WriteLine($"   could not reach the clipboard ({ex.GetType().Name}) — {what} is {value}"); }
+        }
+
+        void CopySelectionRow()
+        {
+            if (locked is null) { Console.WriteLine("   Ctrl+C copies the SELECTION; nothing is selected (LMB an object first)."); return; }
+            // One tab-separated ROW, no header — so repeated Ctrl+C into a sheet accumulates a
+            // table rather than a header between every line.
+            Copy("selection (TSV: FormKey, FormID, mesh)",
+                 string.Join("	", new[] { SelFormKey(), SelFormId(), SelPath() }));
+        }
+
+        // ---- hover highlight ----------------------------------------------------------------
+        // The hovered ref is lifted by the material shader's own EMISSIVE term, which the renderer
+        // already feeds per mesh — so the highlight costs five field writes and not one extra draw
+        // call. The shader's term is `finalColor += emissiveColor * emissiveMultiple * baseColor`,
+        // i.e. it brightens a surface IN PROPORTION TO ITS OWN ALBEDO rather than washing it flat,
+        // which is what lets a dark stone and a pale banner both read as picked without either
+        // turning into a silhouette.
+        //
+        // Refs only: navmesh and terrain PickShapes carry no GlMesh (the clip does not touch them
+        // either), and they already answer on the caption.
+        var glowSaved = new List<(GlMesh Mesh, bool Emissive, bool GlowMap, bool Enabled, Vector3 Colour, float Multiple)>();
+        PickShape? glowShape = null;
+
+        void SetGlow(PickShape? s)
+        {
+            if (ReferenceEquals(s, glowShape)) return;
+            foreach (var g in glowSaved)
+            {
+                g.Mesh.HasEmissive = g.Emissive; g.Mesh.HasGlowMap = g.GlowMap;
+                g.Mesh.EmissiveEnabled = g.Enabled; g.Mesh.EmissiveColor = g.Colour;
+                g.Mesh.EmissiveMultiple = g.Multiple;
+            }
+            glowSaved.Clear();
+            glowShape = s;
+            if (s is null) return;
+            // The covering goes with its base, the way the clip already treats them: highlighting
+            // a roof but not the snow on it would light half an object.
+            foreach (var m in new[] { s.Mesh, s.CoverMesh })
+            {
+                if (m is null) continue;
+                glowSaved.Add((m, m.HasEmissive, m.HasGlowMap, m.EmissiveEnabled, m.EmissiveColor, m.EmissiveMultiple));
+                m.HasEmissive = true;
+                m.HasGlowMap = false;          // a glow map would mask the lift to the texture's own emissive pattern
+                m.EmissiveEnabled = true;
+                m.EmissiveColor = new Vector3(0.26f, 0.58f, 1.00f);
+                m.EmissiveMultiple = 0.85f;
+            }
+        }
+
         // ---- HUD: a caption-style bar at the top of the frame ------------------------------
         // Same visual language as the burned-in PNG caption (dark bar, bold white text), drawn
         // as a textured quad. Rebuilt only when its text or the window width changes.
         //
-        // SIZE. 30 px — twice the 15 px the PNG caption uses at 1280 wide. The bar is read at a
-        // glance while flying, from further back than a saved image is, and a FormID at 15 px on
-        // a 1440-wide window was not legible. Because the text is now big enough to run off the
-        // edge (a mesh path is long), the bar WRAPS and grows to fit instead of clipping, which
-        // is why its height is computed per rebuild rather than fixed.
-        const float HudFontPx = 30f, HudLineH = 44f, HudPadX = 12f, HudPadY = 9f;
-        int hudProg = HudShader();
-        int hudVao = GL.GenVertexArray();                      // attribute-less draw still needs a VAO
+        // SIZE. 15 px, the burned PNG caption's own size, restored 2026-08-31. It had been
+        // doubled to 30 px so a FormID would stay legible while flying — but a FormID is no
+        // longer read off this bar: it is a click-to-copy field on the control bar, which is
+        // both the reason the size can come back down and the reason it should. The wrap stays
+        // (a mesh path is long) so the height is still computed per rebuild rather than fixed.
+        const float HudFontPx = 15f, HudLineH = 22f, HudPadX = 12f, HudPadY = 5f;
+        // One quad program for all three overlays — the control bar, this caption, and the help
+        // card. They differ only in where they sit and which texture they carry.
+        var quad = new OverlayQuad();
+        var bar = new ControlBar { Report = s => Console.WriteLine("   " + s) };
+        var help = new HelpCard();
+        bool showHelp = false;                                 // H, and the bar's help button
+        // The pose is off by default (2026-08-31). It is a scouting readout, not a flying one:
+        // P prints it, F12 burns it into the capture, and the window title carries the cell — so
+        // holding a row of the picture open for it all the time was clutter.
+        bool showPose = false;
+        bool glowOn = true;                                    // hover highlight, the bar's toggle
         int hudTex = GL.GenTexture();
         GL.BindTexture(TextureTarget.Texture2D, hudTex);
         GL.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMinFilter, (int)TextureMinFilter.Linear);
@@ -478,7 +572,21 @@ static class InteractiveViewer
             if (SystemFonts.TryGet(famName, out var fam)) { hudFont = fam.CreateFont(HudFontPx, FontStyle.Bold); break; }
         if (hudFont is null)
             foreach (var fam in SystemFonts.Families) { hudFont = fam.CreateFont(HudFontPx, FontStyle.Bold); break; }
-        string hudLine1 = "hover: (free the cursor and point at an object; RMB-drag to look)";
+        // Line 2 carries only what nothing else does. The nav mode, the route, the clip band, the
+        // speed, the sensitivity and the worklist position are all WIDGETS now, so repeating them
+        // here was two readouts of one fact. What is left has no other home: the pose (behind its
+        // toggle) and the two BUILD-time knives, which no key can undo and which a scene missing
+        // its roofs would otherwise read as a finding.
+        string StatusLine()
+        {
+            var parts = new List<string>();
+            if (showPose) parts.Add(Pose());
+            if (opt.BuildCullAbove is { } bca) parts.Add($"SLICED at build: --cull-above {bca:0} (permanent)");
+            if (opt.BuildNavZ is { } bnz) parts.Add($"NAVMESH z {bnz.Z:0} ±{bnz.Tol:0} only (permanent)");
+            return string.Join(" — ", parts);
+        }
+
+        string hudLine1 = "";
         string hudLine2 = "";
         string hudBuilt = "";
         int hudBuiltW = 0, hudBarH = (int)(HudPadY * 2 + HudLineH * 2);
@@ -516,9 +624,11 @@ static class InteractiveViewer
             if (key == hudBuilt && width == hudBuiltW) return;
             hudBuilt = key; hudBuiltW = width;
             float avail = MathF.Max(32f, width - HudPadX * 2);
-            var wrapped1 = WrapLine(hudLine1, avail);
-            var wrapped2 = WrapLine(hudLine2, avail);
-            hudBarH = (int)(HudPadY * 2 + HudLineH * (wrapped1.Count + wrapped2.Count));
+            var wrapped1 = hudLine1.Length > 0 ? WrapLine(hudLine1, avail) : new List<string>();
+            var wrapped2 = hudLine2.Length > 0 ? WrapLine(hudLine2, avail) : new List<string>();
+            hudBarH = wrapped1.Count + wrapped2.Count == 0
+                    ? 0 : (int)(HudPadY * 2 + HudLineH * (wrapped1.Count + wrapped2.Count));
+            if (hudBarH == 0) return;                  // nothing to say: no band at all
             using var img = new Image<Rgba32>(width, hudBarH);
             var f = hudFont;
             img.Mutate(x =>
@@ -537,25 +647,24 @@ static class InteractiveViewer
             GL.TexImage2D(TextureTarget.Texture2D, 0, PixelInternalFormat.Rgba8, width, hudBarH, 0,
                           PixelFormat.Rgba, PixelType.UnsignedByte, px);
         }
-        void DrawHud(int fbW, int fbH)
+        // Every overlay, in one pass: the control bar at the top, the caption directly under it,
+        // and the help card centred over the picture. The caption is no longer pinned to y=0 —
+        // it hangs off the bar's measured height, so a bar that wrapped onto an extra row on a
+        // narrow window pushes the caption down instead of drawing underneath it.
+        void DrawOverlays(int fbW, int fbH)
         {
-            if (hudFont is null || fbW <= 0 || fbH <= 0) return;
+            if (fbW <= 0 || fbH <= 0) return;
+            bar.Sync(fbW);
             RebuildHud(fbW);
-            GL.Disable(EnableCap.DepthTest);
-            GL.Disable(EnableCap.CullFace);
-            GL.Enable(EnableCap.Blend);
-            GL.BlendFunc(BlendingFactor.SrcAlpha, BlendingFactor.OneMinusSrcAlpha);
-            GL.UseProgram(hudProg);
-            GL.Uniform1(GL.GetUniformLocation(hudProg, "u_bottom"), 1f - 2f * hudBarH / fbH);
-            GL.ActiveTexture(TextureUnit.Texture0);
-            GL.BindTexture(TextureTarget.Texture2D, hudTex);
-            GL.Uniform1(GL.GetUniformLocation(hudProg, "u_tex"), 0);
-            GL.BindVertexArray(hudVao);
-            GL.DrawArrays(PrimitiveType.TriangleStrip, 0, 4);
-            GL.BindVertexArray(0);
-            GL.Disable(EnableCap.Blend);
-            GL.Enable(EnableCap.DepthTest);
-            GL.Enable(EnableCap.CullFace);
+            if (showHelp) help.Sync(HelpLines(), fbW, fbH);
+            quad.Begin();
+            quad.DrawPixels(bar.Texture, 0, 0, bar.Width, bar.Height, fbW, fbH);
+            if (hudFont is not null) quad.DrawPixels(hudTex, 0, bar.Height, fbW, hudBarH, fbW, fbH);
+            if (showHelp)
+                quad.DrawPixels(help.Texture, (fbW - help.Width) / 2f,
+                                MathF.Max(bar.Height + hudBarH + 16f, (fbH - help.Height) / 2f),
+                                help.Width, help.Height, fbW, fbH);
+            quad.End();
         }
 
         // ---- screenshot: the frame as rendered, minus the HUD, plus the standard caption ----
@@ -589,25 +698,255 @@ static class InteractiveViewer
             Console.WriteLine($"   replay: {PoseArgs()}");
         }
 
+        // The help, once, as data — so the console copy and the in-window card cannot drift apart.
+        // They used to be one console print, which is exactly why H "did nothing": the key fired,
+        // the answer just landed in a window nobody flying is looking at.
+        List<(string Head, string Body)> HelpLines()
+        {
+            var h = new List<(string, string)>
+            {
+                ("fly", "WASD move (W/S along the view direction), E/Space up, Q/C down, hold RMB and move the mouse to look. Shift x5, Ctrl x0.2 on every rate, movement and clip alike."),
+                ("bar", "every control below is also a widget on the top bar. Click a number box and type (Tab moves on, Enter commits, Esc cancels), or drag its slider. The bar and the keys drive the same state, so either moves both."),
+                ("feel", $"scroll = fly speed (now {speed:0} u/s); , and . = look sensitivity (now {lookSens:0.000} deg/px). Both echo a paste-ready flag to the console."),
+                ("pick", "hover identifies whatever is under the cursor on the caption line; LMB LOCKS that readout and prints the full detail; LMB again unlocks. The cursor is free whenever RMB is up."),
+                ("nav", $"N cycles the navmesh display off -> filled -> wire -> both{(hasNav ? $" (now {navMode})" : " — this run carries none")}."),
+                ("clip", $"[ and ] move the CEILING, ; and ' move the FLOOR (each starts at the camera's z on first touch), \\ turns both off (now {ClipLabel()})."),
+                ("route", "R shows/hides the walking route" + (opt.RouteCount > 0
+                    ? $" ({opt.RouteCount} waypoint(s), now {(opt.ShowRoute ? "shown" : "hidden")})."
+                    : " — this run carries none.")),
+            };
+            if (wl is not null)
+                h.Add(("shots", $"PageUp/PageDown step this cell's shots (now {shotIdx + 1}/{Math.Max(shots.Count, 1)}); "
+                              + $"Ctrl+PageUp/PageDown step the worklist's cells (now {opt.WorklistCell + 1}/{wl.Cells.Count})"
+                              + (opt.CanSwitchCell ? "." : " — cell switching is off in this run.")));
+            h.Add(("out", $"P prints --eye/--yaw/--pitch, F12 saves a captioned PNG (no overlays and no highlight in it), H or F1 shows this card, Esc closes the card or quits. The bar's 'pose' button keeps the camera numbers on screen (now {(showPose ? "on" : "off")}); 'glow' turns the hover highlight off (now {(glowOn ? "on" : "off")})."));
+            return h;
+        }
+
         void PrintHelp()
         {
-            Console.WriteLine("   fly:    WASD move (W/S along the view), E/Space up, Q/C down, hold RMB + mouse to look");
-            Console.WriteLine($"   feel:   scroll = fly speed (now {speed:0} u/s), , and . = look sensitivity (now {lookSens:0.000} deg/px); "
-                            + "shift x5, ctrl x0.2 on every rate");
-            Console.WriteLine("   pick:   hover identifies under the cursor (HUD); LMB LOCKS that readout and prints full "
-                            + "detail; LMB again unlocks");
-            Console.WriteLine($"   nav:    N cycles the navmesh display off -> filled -> wire -> both{(hasNav ? $" (now {navMode})" : " — this run has none")}");
-            Console.WriteLine($"   clip:   [ and ] move the CEILING, ; and ' move the FLOOR (first touch starts at the camera's z), "
-                            + $"\\ = clips off (now {ClipLabel()})");
-            Console.WriteLine($"   route:  R shows/hides the walking route"
-                            + (opt.RouteCount > 0 ? $" ({opt.RouteCount} waypoint(s), now {(opt.ShowRoute ? "shown" : "hidden")})"
-                                                  : " — this run has none"));
-            if (wl is not null)
-                Console.WriteLine($"   shots:  PageUp/PageDown step this cell's shots (now {shotIdx + 1}/{Math.Max(shots.Count, 1)}), "
-                                + $"Ctrl+PageUp/PageDown step the worklist's cells (now {opt.WorklistCell + 1}/{wl.Cells.Count})"
-                                + (opt.CanSwitchCell ? "" : " — cell switching is off in this run"));
-            Console.WriteLine("   out:    P = print --eye/--yaw/--pitch, F12 = save PNG, H/F1 = this help, Esc = quit");
+            foreach (var (head, body) in HelpLines()) Console.WriteLine($"   {head,-7} {body}");
         }
+
+        // ---- the control bar: the same controls, drawn --------------------------------------
+        // Each widget is a pair of delegates onto the loop's own state, never a copy of it — so a
+        // keypress moves the widget and a drag does exactly what the key would have done. There
+        // is no second implementation to keep in step, which is the only version of this that
+        // stays honest.
+        //
+        // Anything the run cannot do — no navmesh, no route, one cell — is drawn GREYED, carrying
+        // the sentence the key already printed, rather than hidden. A control that vanishes and a
+        // scene that is missing something look alike from the outside, and only one of them is a
+        // finding.
+        void SetNav(string mode)
+        {
+            navMode = mode; ApplyNav(); pickDirty = true;
+            Console.WriteLine($"   nav: {navMode}" + (navMode == "off" ? "  (the finding's outline goes with it)" : ""));
+        }
+        void SetRoute(bool on)
+        {
+            opt.ShowRoute = on;
+            Console.WriteLine($"   route: {(on ? "shown" : "hidden")}  ({opt.RouteCount} waypoint(s)"
+                            + (opt.RouteLabel.Length > 0 ? $" — {opt.RouteLabel}" : "") + ")");
+        }
+        // The two ends stay ordered however they are set — the keys already refused to push one
+        // past the other, and a typed 4000 into the floor box must not quietly invert the band.
+        void SetCeiling(float? z)
+        {
+            clipHi = z is null ? null : MathF.Max(z.Value, clipLo ?? float.NegativeInfinity);
+            ApplyClip(); pickDirty = true;
+        }
+        void SetFloor(float? z)
+        {
+            clipLo = z is null ? null : MathF.Min(z.Value, clipHi ?? float.PositiveInfinity);
+            ApplyClip(); pickDirty = true;
+        }
+        // One implementation for PageUp/PageDown and for the bar's stepper, boundary message
+        // included, so clicking the arrow at the last shot says what pressing the key says.
+        void StepShot(int dir)
+        {
+            if (wl is null) { Console.WriteLine("   PageUp/PageDown step a worklist; this run was not given --worklist."); return; }
+            if (shots.Count == 0) { Console.WriteLine("   worklist: this cell has no shots."); return; }
+            if (shotIdx + dir < 0 || shotIdx + dir >= shots.Count)
+            {
+                Console.WriteLine($"   worklist: {(dir < 0 ? "first" : "last")} shot of this cell"
+                                + (opt.CanSwitchCell ? " — Ctrl+PageUp/PageDown for the previous/next cell" : ""));
+                return;
+            }
+            ApplyShot(shotIdx + dir, announce: true);
+        }
+        void ToggleHelp()
+        {
+            showHelp = !showHelp;
+            if (showHelp) PrintHelp();          // the console copy stays: that is where a value gets copied FROM
+        }
+
+        // The clip tracks span the SCENE's own static z-extent, padded — a slider is only worth
+        // dragging if its ends are somewhere a roof actually is. A run with nothing clippable
+        // still gets a usable range instead of a zero-width one.
+        float clipZLo = -4096f, clipZHi = 4096f;
+        if (clippable.Length > 0)
+        {
+            clipZLo = clippable.Min(s => s.Min.Y);
+            clipZHi = clippable.Max(s => s.Max.Y);
+            float zPad = MathF.Max((clipZHi - clipZLo) * 0.05f, 64f);
+            clipZLo -= zPad; clipZHi += zPad;
+        }
+
+        bar.Add(new UiButton
+        {
+            Pinned = true,
+            Text = () => bar.Collapsed ? "▼ controls" : "▲ controls",
+            OnClick = () => bar.Collapsed = !bar.Collapsed,
+        });
+        bar.Add(new UiLabel
+        {
+            Pinned = true, Bright = true,
+            Hidden = () => !bar.Collapsed,        // the window title already says it; expanded, the row wants the width
+            Text = () => opt.CellLabel,
+        });
+        bar.Add(new UiSegment
+        {
+            Label = "navmesh (N)",
+            Options = new[] { "off", "filled", "wire", "both" },
+            Get = () => navMode,
+            Set = SetNav,
+            DisabledWhy = () => hasNav ? ""
+                : "nav: this run carries no navmesh (--nav off, or none in the cell) — nothing to switch",
+        });
+        bar.Add(new UiButton
+        {
+            Text = () => opt.RouteCount == 0 ? "route (R)" : opt.ShowRoute ? "route shown (R)" : "route hidden (R)",
+            IsOn = () => opt.RouteCount > 0 && opt.ShowRoute,
+            OnClick = () => SetRoute(!opt.ShowRoute),
+            DisabledWhy = () => opt.RouteCount > 0 ? ""
+                : "route: this run carries no route (--route X,Y, or a worklist shot's route) — nothing to toggle",
+        });
+        // Which walk this is. A waypoint count with no sentence attached says nothing about which
+        // path is on screen when a worklist holds several, so the label travels with the count.
+        bar.Add(new UiLabel
+        {
+            Hidden = () => opt.RouteCount == 0,
+            Text = () => $"{opt.RouteCount} wpt" + (opt.RouteLabel.Length > 0 ? $" - {opt.RouteLabel}" : ""),
+        });
+
+        bar.Row(new UiNumber
+        {
+            Label = "fly speed", Unit = "u/s", Min = 20f, Max = 20000f, Log = true, Format = "0",
+            Get = () => speed,
+            Set = v => speed = Math.Clamp(v ?? speed, 20f, 20000f),
+            Echo = _ => $"fly speed: {speed:0} u/s  (--fly-speed {speed:0})",
+        });
+        bar.Add(new UiNumber
+        {
+            Label = "look (, .)", Unit = "°/px", Min = 0.01f, Max = 2f, Log = true, Format = "0.###",
+            Get = () => lookSens,
+            Set = v => lookSens = Math.Clamp(v ?? lookSens, 0.01f, 2f),
+            Echo = _ => $"look sensitivity: {lookSens:0.000} deg/px  (--look-sens {lookSens:0.###})",
+        });
+
+        bar.Row(new UiNumber
+        {
+            Label = "clip ceiling ([ ])", Unit = "z", Min = clipZLo, Max = clipZHi, Format = "0", Nullable = true,
+            ScrollStep = 64f, Seed = () => eye.Z,
+            Get = () => clipHi, Set = SetCeiling, Echo = _ => { PrintClip(); return ""; },
+        });
+        bar.Add(new UiButton { Text = () => "at eye", OnClick = () => { SetCeiling(eye.Z); PrintClip(); } });
+        bar.Add(new UiButton { Text = () => "clear", OnClick = () => { SetCeiling(null); PrintClip(); } });
+
+        bar.Add(new UiNumber
+        {
+            Label = "clip floor (; ')", Unit = "z", Min = clipZLo, Max = clipZHi, Format = "0", Nullable = true,
+            ScrollStep = 64f, Seed = () => eye.Z,
+            Get = () => clipLo, Set = SetFloor, Echo = _ => { PrintClip(); return ""; },
+        });
+        bar.Add(new UiButton { Text = () => "at eye", OnClick = () => { SetFloor(eye.Z); PrintClip(); } });
+        bar.Add(new UiButton { Text = () => "clear", OnClick = () => { SetFloor(null); PrintClip(); } });
+        bar.Add(new UiButton
+        {
+            Text = () => "both off (\\)",
+            OnClick = () => { clipLo = clipHi = null; ApplyClip(); pickDirty = true; PrintClip(); },
+        });
+        // The one thing about the clip that the two number boxes do NOT say. It used to ride on
+        // the caption next to a repeat of the band; here it sits with the controls that caused it.
+        bar.Add(new UiLabel
+        {
+            Hidden = () => clipLo is null && clipHi is null,
+            Text = () => $"{clipHidden:N0} of {clippable.Length:N0} hidden",
+        });
+
+        if (wl is not null)
+        {
+            bar.Row(new UiStepper
+            {
+                Text = () => $"cell {opt.WorklistCell + 1}/{wl.Cells.Count} (Ctrl+PgUp/PgDn)",
+                Step = RequestCell,
+                DisabledWhy = () => opt.CanSwitchCell ? ""
+                    : "worklist: this run holds one cell only — cell switching needs the whole worklist, not a single --worklist cell.",
+            });
+            bar.Add(new UiStepper
+            {
+                Text = () => shots.Count > 0 ? $"shot {shotIdx + 1}/{shots.Count} (PgUp/PgDn)" : "shots",
+                Step = StepShot,
+                DisabledWhy = () => shots.Count > 0 ? "" : "worklist: this cell has no shots.",
+            });
+            bar.Add(new UiLabel { Text = () => shots.Count > 0 ? shots[shotIdx].Label : "" });
+        }
+
+        bar.Add(new UiButton
+        {
+            Text = () => "print pose (P)",
+            OnClick = () => { Console.WriteLine($"   pose: {Pose()}"); Console.WriteLine($"   args: {PoseArgs()}"); },
+        });
+        bar.Add(new UiButton { Text = () => "save PNG (F12)", OnClick = () => wantShot = true });
+        bar.Add(new UiButton
+        {
+            Text = () => "pose", IsOn = () => showPose,
+            OnClick = () => { showPose = !showPose; if (showPose) Console.WriteLine($"   pose: {Pose()}"); },
+        });
+        bar.Add(new UiButton
+        {
+            Text = () => "glow", IsOn = () => glowOn,
+            OnClick = () => { glowOn = !glowOn; if (!glowOn) SetGlow(null); },
+        });
+        bar.Add(new UiButton { Text = () => "help (H)", IsOn = () => showHelp, OnClick = ToggleHelp });
+        bar.Add(new UiButton { Text = () => "quit (Esc)", OnClick = gw.Close });
+
+        // ---- the selection row: three values, each of which copies itself ------------------
+        // The whole row takes itself off the bar when nothing is selected — it is a readout, and a
+        // readout with nothing to report should not hold a row of the picture open.
+        Func<bool> noSel = () => locked is null;
+        bar.Row(new UiLabel
+        {
+            Hidden = noSel, Bright = true,
+            Text = () => "selected: " + SelWhat() + (locked is { } l && !Drawn(l.Shape) ? "  [not drawn now]" : ""),
+        });
+        bar.Add(new UiCopyField
+        {
+            Hidden = () => noSel() || SelFormKey().Length == 0,
+            Label = "FormKey", Value = SelFormKey, Copy = v => Copy("FormKey", v), KeepHead = true, MaxW = 380f,
+        });
+        bar.Add(new UiCopyField
+        {
+            Hidden = () => noSel() || SelFormId().Length == 0,
+            Label = "FormID", Value = SelFormId, Copy = v => Copy("FormID", v),
+        });
+        bar.Add(new UiCopyField
+        {
+            Hidden = () => noSel() || SelPath().Length == 0,
+            Label = "mesh", Value = SelPath, Copy = v => Copy("mesh path", v), MaxW = 480f,
+        });
+        bar.Add(new UiButton
+        {
+            Hidden = noSel, Text = () => "clear",
+            OnClick = () =>
+            {
+                locked = null; hover = null; SetGlow(null);
+                lastPickPos = new OpenTK.Mathematics.Vector2(-1000f, -1000f);
+                hudLine1 = "";
+                Console.WriteLine("   unlocked");
+            },
+        });
 
         // ---- window setup and the loop -----------------------------------------------------
         gw.Title = $"viewprobe — {opt.CellLabel}";
@@ -695,6 +1034,25 @@ static class InteractiveViewer
                 Console.WriteLine($"   [auto] VP_FLY_ROUTE={want} ignored: this run carries no route");
             else { opt.ShowRoute = want == "on"; Console.WriteLine($"   [auto] VP_FLY_ROUTE={want}"); }
         }
+        // The two pieces of state the control bar added, each with the headless knob every other
+        // live control in this loop already has — a control no test can reach is a control nothing
+        // checks. Both are only VISIBLE in a VP_FLY_HUD=1 capture, which is the point: they are
+        // the overlay, and F12 excludes the overlay.
+        if (Environment.GetEnvironmentVariable("VP_FLY_HELP") == "1") { showHelp = true; PrintHelp(); }
+        if (Environment.GetEnvironmentVariable("VP_FLY_POSE") == "1") { showPose = true; }
+        if (Environment.GetEnvironmentVariable("VP_FLY_GLOW") is { Length: > 0 } glowSpec)
+        {
+            string want = glowSpec.ToLowerInvariant();
+            if (want is not ("on" or "off")) Console.WriteLine($"   [auto] VP_FLY_GLOW '{want}' is not on|off — ignored");
+            else { glowOn = want == "on"; Console.WriteLine($"   [auto] hover highlight: {want}"); }
+        }
+        if (Environment.GetEnvironmentVariable("VP_FLY_BAR") is { Length: > 0 } barSpec)
+        {
+            string want = barSpec.ToLowerInvariant();
+            if (want is not ("expanded" or "collapsed"))
+                Console.WriteLine($"   [auto] VP_FLY_BAR '{want}' is not expanded|collapsed — ignored");
+            else { bar.Collapsed = want == "collapsed"; Console.WriteLine($"   [auto] control bar: {want}"); }
+        }
         if (Environment.GetEnvironmentVariable("VP_FLY_CLIP") is { Length: > 0 } clipSpec)
         {
             // "lo,hi"; either side may be empty for "that end off" — VP_FLY_CLIP=",2048" is a
@@ -713,7 +1071,6 @@ static class InteractiveViewer
 
         var titleClock = Stopwatch.StartNew();
         var pickClock = Stopwatch.StartNew();
-        OpenTK.Mathematics.Vector2 lastPickPos = new(-1000f, -1000f);
 
         // VP_FLY_FRAMES is a TEST, and a test must not read the machine's live keyboard and
         // mouse. It did, and the window takes focus when it opens, so two identical smoke runs
@@ -722,6 +1079,11 @@ static class InteractiveViewer
         // Under VP_FLY_FRAMES the loop is therefore input-deaf: the camera stays exactly where
         // the command line put it, and a capture is a function of the arguments alone.
         bool autoRun = autoFrames > 0;
+
+        // Text for a focused number box. Reading the window's own TextInput is what makes the
+        // keypad, a shifted hyphen and a non-US layout all deliver the character the person
+        // actually pressed; Type() ignores everything when no box has focus.
+        gw.TextInput += ev => bar.Type(ev.AsString);
 
         gw.UpdateFrame += e =>
         {
@@ -732,14 +1094,7 @@ static class InteractiveViewer
             if (autoRun)
             {
                 SyncCamera();
-                if (locked is not null) hudLine1 = LockedHud();
-                hudLine2 = $"{WorklistHud()}{Pose()} — speed {speed:0} u/s"
-                         + (hasNav ? $" — nav {navMode}" : "")
-                         + RouteHud()
-                         + (clipLo is not null || clipHi is not null ? $" — clip {ClipLabel()}" : "")
-                         + (opt.BuildCullAbove is { } bca ? $" — SLICED at build: --cull-above {bca:0} (permanent)" : "")
-                         + (opt.BuildNavZ is { } bnz ? $" — NAVMESH z {bnz.Z:0} ±{bnz.Tol:0} only (permanent)" : "")
-                         + " — H help";
+                hudLine2 = StatusLine();
                 return;
             }
 
@@ -751,30 +1106,80 @@ static class InteractiveViewer
                 pitch = Math.Clamp(pitch + ms.Delta.Y * lookSens, -89f, 89f);
             }
 
-            float mult = kb.IsKeyDown(Keys.LeftShift) || kb.IsKeyDown(Keys.RightShift) ? 5f
-                       : kb.IsKeyDown(Keys.LeftControl) || kb.IsKeyDown(Keys.RightControl) ? 0.2f : 1f;
+            // ---- the control bar gets the mouse first ---------------------------------------
+            // Laid out here as well as in the draw, because a rect that does not exist yet cannot
+            // be clicked: without this the bar would be dead for its first frame. Layout is also
+            // what a hit test reads, so the two must not be a frame apart.
+            //
+            // The bar is measured in FRAMEBUFFER pixels and the cursor arrives in CLIENT ones.
+            // They are the same number on this platform today, but scaling by the ratio costs one
+            // multiply and means a DPI-scaled window clicks where it looks.
+            int barFbW = Math.Max(gw.FramebufferSize.X, 1);
+            bar.Layout(barFbW);
+            float uiScale = barFbW / (float)Math.Max(gw.ClientSize.X, 1);
+            var mpc = gw.MousePosition;
+            // While looking, the cursor is grabbed and its position runs away; parking the bar's
+            // idea of it off-screen stops a highlight lighting up under a cursor that is not there.
+            bar.Mouse = looking ? (-1e6f, -1e6f) : (mpc.X * uiScale, mpc.Y * uiScale);
+            // A slider grab ends when the button is no longer down — NOT on the released EDGE.
+            // The edge can be missed (RMB taken over mid-drag and the cursor grabbed away, the
+            // window losing focus with the button held), and a grab that outlives its drag leaves
+            // the bar holding the mouse forever, with picking dead and no way back.
+            bool uiHasMouse = !looking && (bar.Contains(bar.Mouse.X, bar.Mouse.Y) || bar.Dragging);
+            if (looking || !ms.IsButtonDown(MouseButton.Left)) bar.Release();
+            else if (bar.Dragging) { uiHasMouse = true; bar.Drag(bar.Mouse.X, bar.Mouse.Y); }
+            if (!looking && ms.IsButtonPressed(MouseButton.Left))
+                uiHasMouse |= bar.Press(bar.Mouse.X, bar.Mouse.Y);
+
+            // A focused number box owns the keyboard. Every flight and hotkey read below goes
+            // through these three, so typing 12 into the ceiling box cannot also fly the camera
+            // forward or cycle the navmesh — one gate instead of a condition per key, which is
+            // the version that stays right when a key is added later.
+            bool typing = bar.IsEditing;
+            bool KDown(Keys k) => !typing && kb.IsKeyDown(k);
+            bool KHit(Keys k) => !typing && kb.IsKeyPressed(k);
+            bool KUp(Keys k) => !typing && kb.IsKeyReleased(k);
+            if (typing)
+            {
+                if (kb.IsKeyPressed(Keys.Backspace)) bar.Backspace();
+                if (kb.IsKeyPressed(Keys.Enter) || kb.IsKeyPressed(Keys.KeyPadEnter)) bar.CommitEdit();
+                if (kb.IsKeyPressed(Keys.Tab)) bar.FocusNext();
+                if (kb.IsKeyPressed(Keys.Escape)) bar.CancelEdit();
+            }
+
+            float mult = KDown(Keys.LeftShift) || KDown(Keys.RightShift) ? 5f
+                       : KDown(Keys.LeftControl) || KDown(Keys.RightControl) ? 0.2f : 1f;
             float step = speed * mult * dt;
             var fwd = Forward();
             float yr = float.DegreesToRadians(yaw);
             var right = new Vector3(MathF.Cos(yr), -MathF.Sin(yr), 0f);
-            if (kb.IsKeyDown(Keys.W)) eye += fwd * step;
-            if (kb.IsKeyDown(Keys.S)) eye -= fwd * step;
-            if (kb.IsKeyDown(Keys.A)) eye -= right * step;
-            if (kb.IsKeyDown(Keys.D)) eye += right * step;
-            if (kb.IsKeyDown(Keys.E) || kb.IsKeyDown(Keys.Space)) eye.Z += step;
-            if (kb.IsKeyDown(Keys.Q) || kb.IsKeyDown(Keys.C)) eye.Z -= step;
-            if (MathF.Abs(ms.ScrollDelta.Y) > 0f)
+            if (KDown(Keys.W)) eye += fwd * step;
+            if (KDown(Keys.S)) eye -= fwd * step;
+            if (KDown(Keys.A)) eye -= right * step;
+            if (KDown(Keys.D)) eye += right * step;
+            bool ctrlHeld = KDown(Keys.LeftControl) || KDown(Keys.RightControl);
+            if (KDown(Keys.E) || KDown(Keys.Space)) eye.Z += step;
+            // Ctrl+C is the copy gesture, and Ctrl is also the slow modifier — so C gives up its
+            // Ctrl case rather than sinking the camera every time a value is copied. Q still
+            // descends with Ctrl held, at the same slow rate, so nothing is actually lost.
+            if (KDown(Keys.Q) || (KDown(Keys.C) && !ctrlHeld)) eye.Z -= step;
+            if (ctrlHeld && KHit(Keys.C)) CopySelectionRow();
+            // The wheel belongs to whatever it is resting on. Over the bar that is the widget
+            // under it (or nothing, if the panel is bare there); anywhere else it is the fly
+            // speed it has always been.
+            bool uiTookWheel = !looking && bar.Scroll(bar.Mouse.X, bar.Mouse.Y, ms.ScrollDelta.Y);
+            if (!uiTookWheel && MathF.Abs(ms.ScrollDelta.Y) > 0f)
                 speed = Math.Clamp(speed * MathF.Pow(1.25f, ms.ScrollDelta.Y), 20f, 20000f);
             // Look sensitivity, on the same 1.25x ladder the scroll uses for speed. Printed on
             // change: the number that finally feels right is worth carrying to --look-sens.
-            if (kb.IsKeyPressed(Keys.Comma) || kb.IsKeyPressed(Keys.Period))
+            if (KHit(Keys.Comma) || KHit(Keys.Period))
             {
-                lookSens = Math.Clamp(lookSens * (kb.IsKeyPressed(Keys.Period) ? 1.25f : 1f / 1.25f), 0.01f, 2f);
+                lookSens = Math.Clamp(lookSens * (KHit(Keys.Period) ? 1.25f : 1f / 1.25f), 0.01f, 2f);
                 Console.WriteLine($"   look sensitivity: {lookSens:0.000} deg/px  (--look-sens {lookSens:0.###})");
             }
 
             // ---- navmesh display ------------------------------------------------------------
-            if (kb.IsKeyPressed(Keys.N))
+            if (KHit(Keys.N))
             {
                 if (!hasNav)
                     Console.WriteLine("   nav: this run carries no navmesh (--nav off, or none in the cell) — nothing to cycle");
@@ -791,7 +1196,7 @@ static class InteractiveViewer
             // ---- the route ------------------------------------------------------------------
             // The same shape as N: a run with nothing to toggle says so rather than appearing to
             // work. What is UNDER the path is the question a drawn path stops you answering.
-            if (kb.IsKeyPressed(Keys.R))
+            if (KHit(Keys.R))
             {
                 if (opt.RouteCount == 0)
                     Console.WriteLine("   route: this run carries no route (--route X,Y, or a worklist shot's route) — nothing to toggle");
@@ -808,8 +1213,8 @@ static class InteractiveViewer
             // of units, and one tap per 4 u would be unusable. The first frame a key is down
             // seeds that end at the camera's own z (?? = "not set yet"), so the gesture is
             // "stand on the floor you want and hold [".
-            bool ceilDown = kb.IsKeyDown(Keys.LeftBracket), ceilUp = kb.IsKeyDown(Keys.RightBracket);
-            bool floorDown = kb.IsKeyDown(Keys.Semicolon), floorUp = kb.IsKeyDown(Keys.Apostrophe);
+            bool ceilDown = KDown(Keys.LeftBracket), ceilUp = KDown(Keys.RightBracket);
+            bool floorDown = KDown(Keys.Semicolon), floorUp = KDown(Keys.Apostrophe);
             bool clipDirty = false;
             if (ceilDown ^ ceilUp)
             {
@@ -825,36 +1230,37 @@ static class InteractiveViewer
                                    clipHi ?? float.PositiveInfinity);
                 clipDirty = true;
             }
-            if (kb.IsKeyPressed(Keys.Backslash)) { clipLo = clipHi = null; clipDirty = true; PrintClip(); }
+            if (KHit(Keys.Backslash)) { clipLo = clipHi = null; clipDirty = true; PrintClip(); }
             if (clipDirty) { ApplyClip(); pickDirty = true; }
             // On release, echo the band — the console is where a number gets copied from, and
             // --cull-above is what the static deliverable needs.
-            if (kb.IsKeyReleased(Keys.LeftBracket) || kb.IsKeyReleased(Keys.RightBracket)
-             || kb.IsKeyReleased(Keys.Semicolon) || kb.IsKeyReleased(Keys.Apostrophe)) PrintClip();
+            if (KUp(Keys.LeftBracket) || KUp(Keys.RightBracket)
+             || KUp(Keys.Semicolon) || KUp(Keys.Apostrophe)) PrintClip();
 
             // Worklist paging. Ctrl is the cell modifier, so the two live one keypress apart:
             // PageDown walks the shots of this cell, Ctrl+PageDown walks to the next cell.
-            if (kb.IsKeyPressed(Keys.PageUp) || kb.IsKeyPressed(Keys.PageDown))
+            if (KHit(Keys.PageUp) || KHit(Keys.PageDown))
             {
-                int dir = kb.IsKeyPressed(Keys.PageDown) ? 1 : -1;
-                bool ctrl = kb.IsKeyDown(Keys.LeftControl) || kb.IsKeyDown(Keys.RightControl);
+                int dir = KHit(Keys.PageDown) ? 1 : -1;
+                bool ctrl = ctrlHeld;
                 if (wl is null) Console.WriteLine("   PageUp/PageDown step a worklist; this run was not given --worklist.");
                 else if (ctrl) RequestCell(dir);
-                else if (shots.Count == 0) Console.WriteLine("   worklist: this cell has no shots.");
-                else if (shotIdx + dir < 0 || shotIdx + dir >= shots.Count)
-                    Console.WriteLine($"   worklist: {(dir < 0 ? "first" : "last")} shot of this cell"
-                                    + (opt.CanSwitchCell ? " — Ctrl+PageUp/PageDown for the previous/next cell" : ""));
-                else ApplyShot(shotIdx + dir, announce: true);
+                else StepShot(dir);
             }
 
-            if (kb.IsKeyPressed(Keys.P))
+            if (KHit(Keys.P))
             {
                 Console.WriteLine($"   pose: {Pose()}");
                 Console.WriteLine($"   args: {PoseArgs()}");
             }
-            if (kb.IsKeyPressed(Keys.F12)) wantShot = true;
-            if (kb.IsKeyPressed(Keys.H) || kb.IsKeyPressed(Keys.F1)) PrintHelp();
-            if (kb.IsKeyPressed(Keys.Escape)) gw.Close();
+            if (KHit(Keys.F12)) wantShot = true;
+            // H used to print to the console and nothing else, which from inside the window was
+            // indistinguishable from a dead key. It now raises the card AND prints, because the
+            // console is still where a number gets copied from.
+            if (KHit(Keys.H) || KHit(Keys.F1)) ToggleHelp();
+            // Esc dismisses the card first. Quitting a flight by reflex, while reading the help
+            // that told you Esc quits, loses the pose you flew to.
+            if (KHit(Keys.Escape)) { if (showHelp) showHelp = false; else gw.Close(); }
 
             SyncCamera();
 
@@ -864,7 +1270,11 @@ static class InteractiveViewer
             // holding the cursor perfectly still. So picking is suspended while locked (the
             // readout cannot drift, and the raycast cannot cost anything), and the next LMB
             // anywhere releases it, hit or miss.
-            if (!looking)
+            // A cursor over the bar is not over the scene. Picking is left FROZEN rather than
+            // reset while it is up there: the last answer stays on the caption, so reaching for a
+            // widget does not wipe the identity you were reading. Locking is suspended too — a
+            // click meant for a button must not also pin whatever the panel is drawn over.
+            if (!looking && !uiHasMouse)
             {
                 if (locked is null)
                 {
@@ -881,8 +1291,7 @@ static class InteractiveViewer
                     if (ms.IsButtonPressed(MouseButton.Left) && hover is { } hv)
                     {
                         locked = hv;
-                        lockedLine = "LOCKED — " + HoverLine(hv, fromEye: false) + "   (LMB anywhere to unlock)";
-                        hudLine1 = LockedHud();
+                        hudLine1 = "";                 // the selection row on the bar is the readout now
                         PrintDetail(hv);
                     }
                 }
@@ -890,28 +1299,20 @@ static class InteractiveViewer
                 {
                     locked = null; hover = null;
                     lastPickPos = new OpenTK.Mathematics.Vector2(-1000f, -1000f);   // force the next hover to re-pick
-                    hudLine1 = "unlocked — hover to identify";
+                    hudLine1 = "";
                     Console.WriteLine("   unlocked");
                 }
             }
-            else if (locked is null)
-                hudLine1 = "looking (release RMB to hover-pick)";
 
-            if (locked is not null) hudLine1 = LockedHud();
+            // The hover highlight follows the CURSOR, not the lock: it answers "what would I get
+            // if I clicked here". While locked, hovering is suspended and so is the glow, which is
+            // right — the locked object is named on the bar and does not need lighting up.
+            SetGlow(glowOn && locked is null && !looking && !uiHasMouse ? hover?.Shape : null);
 
             if (hudLine2.Length == 0 || titleClock.ElapsedMilliseconds > 150)
             {
                 titleClock.Restart();
-                // Defaults stay quiet: sensitivity and the clip only take a slot on the bar once
-                // they are no longer at their entry value, so the common line stays one row.
-                hudLine2 = $"{WorklistHud()}{Pose()} — speed {speed * mult:0} u/s"
-                         + (MathF.Abs(lookSens - DefaultSens) > 1e-4f ? $" — look {lookSens:0.000}" : "")
-                         + (hasNav ? $" — nav {navMode}" : "")
-                         + RouteHud()
-                         + (clipLo is not null || clipHi is not null ? $" — clip {ClipLabel()}" : "")
-                         + (opt.BuildCullAbove is { } bca ? $" — SLICED at build: --cull-above {bca:0} (permanent)" : "")
-                         + (opt.BuildNavZ is { } bnz ? $" — NAVMESH z {bnz.Z:0} ±{bnz.Tol:0} only (permanent)" : "")
-                         + " — H help";
+                hudLine2 = StatusLine();
             }
         };
 
@@ -920,16 +1321,22 @@ static class InteractiveViewer
             int w = gw.FramebufferSize.X, h = gw.FramebufferSize.Y;
             if (w <= 0 || h <= 0) return;                        // minimized
             GL.BindFramebuffer(FramebufferTarget.Framebuffer, 0);
+            // The hover highlight is a cursor artefact, not the scene. It comes off BEFORE the
+            // render the capture reads, so an F12 frame is the same pixels a static run of the
+            // same pose would produce; the next hover puts it straight back. VP_FLY_HUD=1 keeps
+            // it, on the same reasoning that keeps the bar: that capture is a picture OF the
+            // tool's chrome, and the highlight is chrome.
+            if (wantShot && !hudInShot) SetGlow(null);
             renderer.Render(camera, w, h);
             var view = camera.GetViewMatrix();
             var proj = camera.GetProjectionMatrix((float)w / h);
             overlayDraw?.Invoke(view, proj);
-            // F12 grabs the frame WITHOUT the HUD — the PNG carries the standard burned caption
-            // instead, so a capture looks like a render and not like a screenshot of a tool.
-            // VP_FLY_HUD=1 moves the grab to after the bar, which is the only way a headless
-            // test can see the bar at all.
+            // F12 grabs the frame WITHOUT any overlay — no control bar, no caption, no help
+            // card. The PNG carries the standard burned caption instead, so a capture looks like
+            // a render and not like a screenshot of a tool. VP_FLY_HUD=1 moves the grab to after
+            // the overlays, which is the only way a headless test can see them at all.
             if (wantShot && !hudInShot) { wantShot = false; CaptureShot(w, h); if (autoFrames > 0) AutoFinish(); }
-            DrawHud(w, h);
+            DrawOverlays(w, h);
             if (wantShot && hudInShot) { wantShot = false; CaptureShot(w, h); if (autoFrames > 0) AutoFinish(); }
             gw.SwapBuffers();
 
@@ -941,6 +1348,7 @@ static class InteractiveViewer
                 {
                     var hit = PickAt(ap.X, ap.Y);
                     Console.WriteLine($"   [auto] pick at {ap.X:0},{ap.Y:0}: {HoverLine(hit)}");
+                    if (glowOn) SetGlow(hit?.Shape);
                     if (hit is { } hv)
                     {
                         PrintDetail(hv);
@@ -949,8 +1357,7 @@ static class InteractiveViewer
                         if (autoLock)
                         {
                             locked = hv;
-                            lockedLine = "LOCKED — " + HoverLine(hv, fromEye: false) + "   (LMB anywhere to unlock)";
-                            hudLine1 = LockedHud();
+                            hudLine1 = "";
                             Console.WriteLine("   [auto] locked");
                         }
                     }
@@ -961,9 +1368,11 @@ static class InteractiveViewer
 
         gw.Run();
 
-        GL.DeleteProgram(hudProg);
-        GL.DeleteVertexArray(hudVao);
+        SetGlow(null);                      // hand every mesh back its own emissive material
         GL.DeleteTexture(hudTex);
+        bar.Dispose();
+        help.Dispose();
+        quad.Dispose();
         Console.WriteLine($"   interactive session ended at {Pose()}");
         Console.WriteLine($"   replay: {PoseArgs()}");
     }
@@ -1011,37 +1420,5 @@ static class InteractiveViewer
         if (v < 0f || u + v > 1f) return false;
         t = Vector3.Dot(e2, q) * inv;
         return t > NearPlane;                   // nothing nearer than the near plane is a hit
-    }
-
-    static int HudShader()
-    {
-        const string vs = @"#version 330 core
-out vec2 uv;
-uniform float u_bottom;   // NDC y of the bar's bottom edge
-void main(){
-    float x = (gl_VertexID & 1) == 1 ? 1.0 : -1.0;
-    bool top = gl_VertexID >= 2;
-    float y = top ? 1.0 : u_bottom;
-    uv = vec2((x + 1.0) * 0.5, top ? 0.0 : 1.0);
-    gl_Position = vec4(x, y, 0.0, 1.0);
-}";
-        const string fs = @"#version 330 core
-in vec2 uv;
-uniform sampler2D u_tex;
-out vec4 frag;
-void main(){ frag = texture(u_tex, uv); }";
-        int v = GL.CreateShader(ShaderType.VertexShader); GL.ShaderSource(v, vs); GL.CompileShader(v); Check(v, "vertex");
-        int f = GL.CreateShader(ShaderType.FragmentShader); GL.ShaderSource(f, fs); GL.CompileShader(f); Check(f, "fragment");
-        int p = GL.CreateProgram(); GL.AttachShader(p, v); GL.AttachShader(p, f); GL.LinkProgram(p);
-        GL.GetProgram(p, GetProgramParameterName.LinkStatus, out int ok);
-        if (ok == 0) throw new InvalidOperationException("hud shader link failed: " + GL.GetProgramInfoLog(p));
-        GL.DeleteShader(v); GL.DeleteShader(f);
-        return p;
-
-        static void Check(int s, string what)
-        {
-            GL.GetShader(s, ShaderParameter.CompileStatus, out int ok);
-            if (ok == 0) throw new InvalidOperationException($"hud {what} shader: {GL.GetShaderInfoLog(s)}");
-        }
     }
 }
