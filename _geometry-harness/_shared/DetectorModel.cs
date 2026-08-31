@@ -113,6 +113,95 @@ public static class DetectorModel
         return (MathF.Min(ox, MathF.Min(oy, oz)), MathF.Min(1f, ox * oy * oz / smaller));
     }
 
+    /// <summary>One package's positional facts, as CHECK 2's reach filter needs them — every
+    /// location slot the package carries, aggregated, each already resolved against the winning
+    /// load order by the caller (the anchor's position is a load-order question, not a rule).</summary>
+    /// <param name="Positional">the package carries a location slot at all.</param>
+    /// <param name="AllSlotsAtPlacement">every location slot anchors to the actor's own placement
+    /// — its editor location, itself, or where the package started.</param>
+    /// <param name="AnyUnresolved">a slot anchors to something this order cannot place: the
+    /// player, another actor, a quest alias, a run-time "nearest object of type X" search, or a
+    /// reference in a different cell.</param>
+    /// <param name="WorstAnchorDistance">the distance to the furthest slot anchor that sits
+    /// OUTSIDE its own radius — the package is then telling the actor to stand somewhere its
+    /// placement is not. Null when no slot does.</param>
+    /// <param name="Reach">how far from the placement this package can put the actor: the slot
+    /// radius when the anchor is the placement, anchor distance plus radius when it is not.</param>
+    public readonly record struct PackageAnchor(
+        bool Positional, bool AllSlotsAtPlacement, bool AnyUnresolved, float? WorstAnchorDistance,
+        uint Reach, bool Scheduled, int ScheduleMinutes)
+    {
+        /// <summary>Minutes per day this package is SCHEDULED to run. An unscheduled package
+        /// scores zero — not because it never runs, but because it has no window of its own: it is
+        /// the fallback that fills whatever the scheduled ones leave, which is a quantity this
+        /// struct cannot know without evaluating the whole list's conditions.</summary>
+        public int Coverage => Scheduled ? Math.Clamp(ScheduleMinutes, 0, 1440) : 0;
+    }
+
+    /// <summary>Whether an actor's PLACEMENT is a usable predictor of where it will be found, and
+    /// within what radius — the filter the 2026-08-30 field test sent back.
+    ///
+    /// <para>That test proved CHECK 2's class real and its metric unreliable in one run: authored
+    /// placement distance tracked runtime distance almost exactly for two priests (137u authored →
+    /// 116-134u measured) and meant nothing for a third, who stood 1,632u from her placement in
+    /// BOTH arms of the A/B. The records say why, and say it in units. Skyrim runs an actor's
+    /// packages in list order, first satisfied wins, and a package positions the actor at its
+    /// location slot's anchor plus a radius. Freir's highest-priority package anchors her to a
+    /// greeting marker <b>1,617u from her placement</b> — 15u from what the game was measured
+    /// doing. Rorlund's and Silana's anchor to their editor location, which IS the placement.</para>
+    ///
+    /// <para>The rule: take the actor's <b>highest-priority package that positions it</b>, and
+    /// judge every location slot it carries. If they all anchor to the placement, the placement
+    /// predicts position within their radius. If one anchors to a reference no further away than
+    /// its own radius, same answer with a wider reach. If one stands the actor OUTSIDE its own
+    /// radius, or anchors to something this order cannot place, the placement predicts nothing and
+    /// every pair involving this actor is unassessable — counted with its measured distance, never
+    /// quietly cleared.</para>
+    ///
+    /// <para>What this deliberately does NOT do: evaluate package conditions, model which package
+    /// is running at a given hour, or read target slots (what the package acts on) as opposed to
+    /// location slots (where it sends the actor). A conditional top-priority package is taken at
+    /// face value. Hence the verdict is "the placement is a usable predictor", never "the actor is
+    /// at its placement" — and <paramref name="byCoverage"/> re-asks the question with "governing"
+    /// read as the package covering the most of the day instead, because which reading you take is
+    /// a judgement the records do not settle and the count should not hide.</para></summary>
+    public static (ReachVerdict Verdict, uint Radius, string Why) ClassifyReach(
+        IReadOnlyList<PackageAnchor?> packages, bool templated, bool byCoverage = false)
+    {
+        if (templated) return (ReachVerdict.Templated, 0, "packages inherited from a template");
+        if (packages.Count == 0) return (ReachVerdict.NoPackages, 0, "no packages");
+        if (packages.Any(x => x is null))
+            return (ReachVerdict.PackageMissing, 0, "a package record is not in the load order");
+
+        int governing = -1;
+        for (int i = 0; i < packages.Count; i++)
+        {
+            if (!packages[i]!.Value.Positional) continue;
+            if (governing < 0) { governing = i; if (!byCoverage) break; continue; }
+            // ties keep the earlier package: equal claims are settled by priority, as the engine does
+            if (packages[i]!.Value.Coverage > packages[governing]!.Value.Coverage) governing = i;
+        }
+        if (governing < 0) return (ReachVerdict.NoAnchor, 0, "no package positions this actor");
+
+        var g = packages[governing]!.Value;
+        if (g.WorstAnchorDistance is { } away)
+            return (ReachVerdict.AnchorAwayFromPlacement, 0,
+                    $"package {governing} stands this actor {away:N0}u from its placement");
+        if (g.AllSlotsAtPlacement)
+            return (ReachVerdict.PlacementBound, g.Reach, $"package {governing} anchors to the placement, reach {g.Reach}u");
+        if (g.AnyUnresolved)
+            return (ReachVerdict.UnresolvedAnchor, 0, $"package {governing} anchors to something this order cannot place");
+        return (ReachVerdict.PlacementBound, g.Reach, $"package {governing} anchors within reach {g.Reach}u of the placement");
+    }
+
+    /// <summary>The pair decision the reach filter replaces raw distance with. Two actors who each
+    /// stay within a radius of their placement can only meet if those bubbles overlap, so the
+    /// predictive quantity is the gap between the bubbles, not between the placements. Reproduces
+    /// the field measurement both ways: 137u apart with 512+512 of reach — they meet, and the
+    /// scene fires; 1,800u apart with the same reach — they cannot, and it does not.</summary>
+    public static bool BubblesDisjoint(float distance, uint reachA, uint reachB)
+        => distance > (float)reachA + reachB;
+
     /// <summary>The record-level verify verdict. CONFIRMED means every necessary record is
     /// overridden — which is COVERAGE, not repair: content and load-order position are not judged
     /// here, and the differential run exists precisely because a CONFIRMED patch can net to zero.</summary>
@@ -125,4 +214,8 @@ public static class DetectorModel
 }
 
 public enum ClobberPopulation { BethesdaFloor, UssepDiscarded, ModOnMod }
+
+/// <summary>Whether an actor's PLACEMENT predicts where it will be found. Everything that is not
+/// PlacementBound is unassessable and counted by reason, never quietly cleared (rule 6).</summary>
+public enum ReachVerdict { PlacementBound, AnchorAwayFromPlacement, UnresolvedAnchor, NoAnchor, Templated, NoPackages, PackageMissing }
 public enum DanglePopulation { BethesdaFloor, ModBrokeTarget, ModWroteIndex, ModsBothEnds }

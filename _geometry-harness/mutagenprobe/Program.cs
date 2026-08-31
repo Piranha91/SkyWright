@@ -161,3 +161,68 @@ Console.WriteLine("### ISkyrimModGetter : Cells / Worldspaces");
         foreach (var pr in gt.GetProperties()) Console.WriteLine($"        P {Pretty(pr.PropertyType),-46} {pr.Name}");
     }
 }
+
+
+// =========================================================================================
+// PACKAGE / AI-TARGET SURFACE — grounding for driftprobe's SPLIT overlap filter (2026-08-31).
+// The claim being checked: a Sandbox package's target is a location with a TYPE
+// ("near editor location") and a RADIUS, and that radius is the actor's reach.
+// Nothing below is assumed; if a name here prints NOT FOUND, the filter cannot be written
+// against it.
+// =========================================================================================
+Console.WriteLine("\n\n=== PACKAGE surface ===");
+foreach (var n in new[] {
+    "IPackageGetter", "IPackageDataGetter", "IPackageDataTargetGetter", "IPackageDataLocationGetter",
+    "IAPackageTargetGetter", "IPackageTargetAliasGetter", "IALocationTargetGetter",
+    "ILocationCellGetter", "ILocationFallbackGetter", "ILocationKeywordGetter",
+    "ILocationObjectIdGetter", "ILocationObjectTypeGetter", "ILocationTargetGetter",
+    "IPackageTargetReferenceGetter", "IPackageTargetObjectIDGetter", "IPackageTargetObjectTypeGetter",
+    "ILocationTargetRadiusGetter", "LocationTargetRadius",
+    "IPackagePlaceGetter", "IPackageScheduleGetter",
+    "INpcGetter", "IQuestGetter", "IQuestAliasGetter",
+})
+    Dump(n);
+
+// Generality checks — the arms actually modelled, not the ones remembered.
+foreach (var iface in new[] { "IAPackageTargetGetter", "IAPackageDataGetter", "IALocationTargetGetter" })
+{
+    Console.WriteLine($"### Types assignable to {iface}");
+    var it = asms[0].GetTypes().FirstOrDefault(x => x.Name == iface);
+    if (it == null) { Console.WriteLine("    -- NOT FOUND"); continue; }
+    foreach (var t in asms[0].GetTypes().Where(t => it.IsAssignableFrom(t) && t != it).OrderBy(t => t.Name))
+        Console.WriteLine($"    {(t.IsInterface ? "I" : "C")} {t.Name}");
+    Console.WriteLine();
+}
+
+Console.WriteLine();
+foreach (var e in new[] { "LocationTargetType", "PackageType", "PackageTargetType", "ObjectType" })
+    DumpEnum(e);
+foreach (var nested in new[] { "Package", "LocationTargetRadius", "PackageTarget", "Npc",
+                               "LocationTargetEditorLocation", "LocationTargetObjectID",
+                               "LocationTargetObjectType", "LocationTargetReference",
+                               "LocationTargetAlias", "LocationTargetNear",
+                               "LocationCell", "LocationFallback", "LocationKeyword",
+                               "LocationObjectId", "LocationObjectType", "LocationTarget" })
+{
+    var t = asms[0].GetTypes().FirstOrDefault(x => x.Name == nested && !x.IsInterface);
+    if (t == null) { Console.WriteLine($"### {nested} -- NOT FOUND (nested enums)"); continue; }
+    foreach (var e in t.GetNestedTypes().Where(x => x.IsEnum))
+    {
+        Console.WriteLine($"### enum {nested}.{e.Name} : {Enum.GetUnderlyingType(e).Name}");
+        foreach (var v in Enum.GetValues(e))
+            Console.WriteLine($"    0x{Convert.ToInt64(v):X8}  {v}");
+        Console.WriteLine();
+    }
+}
+
+Console.WriteLine("\n=== NpcConfiguration nested enums ===");
+foreach (var nested in new[] { "NpcConfiguration" })
+{
+    var t = asms[0].GetTypes().FirstOrDefault(x => x.Name == nested && !x.IsInterface);
+    if (t == null) { Console.WriteLine($"### {nested} -- NOT FOUND"); continue; }
+    foreach (var e in t.GetNestedTypes().Where(x => x.IsEnum))
+    {
+        Console.WriteLine($"### enum {nested}.{e.Name}");
+        foreach (var v in Enum.GetValues(e)) Console.WriteLine($"    0x{Convert.ToInt64(v):X8}  {v}");
+    }
+}

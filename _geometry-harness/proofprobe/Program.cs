@@ -338,6 +338,78 @@ Console.WriteLine("\nPROOF — the detector cores (_shared/DetectorModel.cs)\n")
     Check("core: different cells at authoring -> not a pair",
           !DetectorModel.CameApart(false, float.PositiveInfinity, false, float.PositiveInfinity, 600), "never together");
 
+    // ClassifyReach — the filter the 2026-08-31 field test sent back, and the numbers it has to
+    // reproduce. The three actors it was derived from are named in each case, because the whole
+    // rule exists to tell them apart: two priests whose placements predicted their runtime
+    // positions to within ~15u, and a third who stood 1,632u from hers in both arms of the A/B.
+    DetectorModel.PackageAnchor AtPlacement(uint reach, bool sched = false, int mins = 0)
+        => new(true, true, false, null, reach, sched, mins);
+    DetectorModel.PackageAnchor AtRef(uint reach, bool sched = false, int mins = 0)
+        => new(true, false, false, null, reach, sched, mins);
+    DetectorModel.PackageAnchor Away(float d, bool sched = false, int mins = 0)
+        => new(true, false, false, d, 0, sched, mins);
+    DetectorModel.PackageAnchor Unplaceable(bool sched = false, int mins = 0)
+        => new(true, false, true, null, 0, sched, mins);
+    var inert = new DetectorModel.PackageAnchor(false, false, false, null, 0, false, 0);
+
+    var rorlund = DetectorModel.ClassifyReach(new DetectorModel.PackageAnchor?[]
+        { AtPlacement(512), Unplaceable(true, 180), AtRef(916, true, 1080) }, false);
+    Check("reach: every slot on the placement -> BOUND (Rorlund)",
+          rorlund.Verdict == ReachVerdict.PlacementBound && rorlund.Radius == 512, "reach 512u");
+    Check("reach: the HIGHEST-PRIORITY positional package governs",
+          DetectorModel.ClassifyReach(new DetectorModel.PackageAnchor?[] { AtPlacement(512), Away(1600) }, false)
+              .Verdict == ReachVerdict.PlacementBound, "a lower-priority package that would move it does not decide");
+    Check("reach: a package with no location slot is not the governing one",
+          DetectorModel.ClassifyReach(new DetectorModel.PackageAnchor?[] { inert, AtPlacement(512) }, false)
+              .Verdict == ReachVerdict.PlacementBound, "skipped, not treated as an anchor");
+    var nearby = DetectorModel.ClassifyReach(new DetectorModel.PackageAnchor?[] { AtRef(916) }, false);
+    Check("reach: anchor inside its own radius -> BOUND, reach widened",
+          nearby.Verdict == ReachVerdict.PlacementBound && nearby.Radius == 916, "404u away, r=512 -> 916u");
+    Check("reach: anchor OUTSIDE its own radius -> unassessable (Freir)",
+          DetectorModel.ClassifyReach(new DetectorModel.PackageAnchor?[] { Away(1617) }, false)
+              .Verdict == ReachVerdict.AnchorAwayFromPlacement, "stands her 1,617u from her placement");
+    Check("reach: an anchor this order cannot place -> unassessable",
+          DetectorModel.ClassifyReach(new DetectorModel.PackageAnchor?[] { Unplaceable() }, false)
+              .Verdict == ReachVerdict.UnresolvedAnchor, "the player, an alias, another cell");
+    Check("reach: nothing positions the actor -> unassessable",
+          DetectorModel.ClassifyReach(new DetectorModel.PackageAnchor?[] { inert }, false)
+              .Verdict == ReachVerdict.NoAnchor, "no location slot anywhere");
+    Check("reach: a templated actor is unassessable",
+          DetectorModel.ClassifyReach(new DetectorModel.PackageAnchor?[] { AtPlacement(512) }, true)
+              .Verdict == ReachVerdict.Templated, "its packages are its template's");
+    Check("reach: no packages -> unassessable",
+          DetectorModel.ClassifyReach(Array.Empty<DetectorModel.PackageAnchor?>(), false)
+              .Verdict == ReachVerdict.NoPackages, "nothing to read");
+    Check("reach: a package record missing from the order -> unassessable",
+          DetectorModel.ClassifyReach(new DetectorModel.PackageAnchor?[] { null }, false)
+              .Verdict == ReachVerdict.PackageMissing, "never 'assume it does not move her'");
+
+    // The second reading of "governing". It is not a refinement, it is a different answer, and the
+    // probe reports how often the two disagree instead of picking one silently.
+    var silanaByPriority = new DetectorModel.PackageAnchor?[] { AtPlacement(512), Away(1449, true, 1080) };
+    Check("reach: most-of-the-day reading takes the longest SCHEDULED package (Silana)",
+          DetectorModel.ClassifyReach(silanaByPriority, false).Verdict == ReachVerdict.PlacementBound
+       && DetectorModel.ClassifyReach(silanaByPriority, false, byCoverage: true).Verdict == ReachVerdict.AnchorAwayFromPlacement,
+          "bound by priority, 1,449u away by coverage");
+    var covPick = DetectorModel.ClassifyReach(new DetectorModel.PackageAnchor?[]
+        { AtPlacement(512), AtRef(900, true, 600) }, false, byCoverage: true);
+    Check("reach: an unscheduled fallback does not outrank a scheduled package by coverage",
+          covPick.Verdict == ReachVerdict.PlacementBound && covPick.Radius == 900, "no window of its own scores 0");
+    var covTie = DetectorModel.ClassifyReach(new DetectorModel.PackageAnchor?[]
+        { AtRef(100, true, 600), AtRef(900, true, 600) }, false, byCoverage: true);
+    Check("reach: equal coverage keeps the earlier package",
+          covTie.Radius == 100, "ties are settled by priority, as the engine does");
+
+    // BubblesDisjoint — the pair decision, against the two arms that were measured in game.
+    Check("reach: 137u apart with 512+512 of reach -> they can meet",
+          !DetectorModel.BubblesDisjoint(137, 512, 512), "vanilla: the scene fires");
+    Check("reach: 1,800u apart with 512+512 of reach -> they cannot",
+          DetectorModel.BubblesDisjoint(1800, 512, 512), "patched: the scene does not fire");
+    Check("reach: bubbles that exactly touch can still meet",
+          !DetectorModel.BubblesDisjoint(1024, 512, 512), "boundary is not a split");
+    Check("reach: two things that never move are split by any gap",
+          DetectorModel.BubblesDisjoint(640, 0, 0), "a marker and a bed have no reach");
+
     // BoxOverlap — milestone 5's broad-phase decision.
     var u = new System.Numerics.Vector3(0, 0, 0); var one = new System.Numerics.Vector3(1, 1, 1);
     Check("core: disjoint boxes -> no overlap",

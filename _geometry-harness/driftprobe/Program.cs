@@ -38,7 +38,12 @@ using Mutagen.Bethesda.Skyrim;
 // masters provide, so the authoring view is the last position contributed by the quest's plugin or
 // one of its masters. A winning position from anywhere else is one the quest never saw.
 //
-// usage: driftprobe [--near N] [--list N] [--generic]
+// usage: driftprobe [--near N] [--list N] [--generic] [--emit FILE]
+//                   [--actor EDITORID] [--no-reach]
+//
+//   --actor    print one actor's packages, each anchor resolved against the winning order, and
+//              what the reach filter makes of them. The way to check any CHECK 2 verdict.
+//   --no-reach report CHECK 2 as it was before the reach filter: raw placement distance.
 
 // Defaults are the live VR instance; --instance / --game / --profile point every path at
 // another MO2 layout — the SE conflict-testing lab's pre-flight runs exist so a finding is
@@ -68,6 +73,8 @@ string dataDir = Path.Combine(GamePath, "Data");
 
 float near = 600f;      // "together": within this in the authoring view. ~a large room.
 int listN = 25;
+string? actorDump = null;   // --actor <EditorID substring>: print an actor's packages and stop.
+bool reachFilter = true;    // --no-reach: report the pairs as they were reported before 2026-08-31.
 bool generic = false;
 string? emitPath = null;
 for (int i = 0; i < args.Length; i++)
@@ -76,6 +83,8 @@ for (int i = 0; i < args.Length; i++)
     else if (args[i] == "--list" && i + 1 < args.Length) listN = int.Parse(args[++i]);
     else if (args[i] == "--generic") generic = true;
     else if (args[i] == "--emit" && i + 1 < args.Length) emitPath = args[++i];
+    else if (args[i] == "--actor" && i + 1 < args.Length) actorDump = args[++i];
+    else if (args[i] == "--no-reach") reachFilter = false;
 }
 
 var sw = Stopwatch.StartNew();
@@ -100,6 +109,16 @@ var masterIdx = new HashSet<int>[paths.Count];
 var quests = new Dictionary<FormKey, QuestInfo>();
 var scenes = new Dictionary<FormKey, (FormKey Quest, int[] Actors)>();
 var packageTargets = new Dictionary<FormKey, int[]>();          // package -> alias ids it targets
+
+// WHERE AN ACTOR LIVES (2026-08-31). CHECK 2 measures the distance between two AUTHORED
+// placements, and the field test showed that only predicts runtime position for actors whose
+// packages keep them at their editor location — which IS the placement. Freir sits 1,632u from
+// hers seconds after cell load, in both arms of the A/B, so every pair involving her is noise.
+// These two indexes carry the records needed to tell one case from the other; the rule that reads
+// them is DetectorModel.ClassifyReach, owned by proofprobe cases.
+var packFacts = new Dictionary<FormKey, PackFacts>();
+var npcPackages = new Dictionary<FormKey, FormKey[]>();        // Npc -> its packages, PRIORITY order
+var npcTemplated = new HashSet<FormKey>();                     // inherits packages from a template
 
 long placements = 0, questRecords = 0;
 // Rule 6, applied to the plumbing (2026-08-27): unreadable plugins are counted and named, never
@@ -162,8 +181,18 @@ for (int p = 0; p < paths.Count; p++)
                           .Select(d => d.Target).OfType<IPackageTargetAliasGetter>()
                           .Select(x => x.Alias).Distinct().ToArray();
                 if (t.Length > 0) packageTargets[pk.FormKey] = t;
+                packFacts[pk.FormKey] = PackFacts.From(pk);      // winner wins: later plugins overwrite
             }
-            else if (rec is INpcGetter npc) baseName[npc.FormKey] = ("Npc", npc.EditorID);
+            else if (rec is INpcGetter npc)
+            {
+                baseName[npc.FormKey] = ("Npc", npc.EditorID);
+                npcPackages[npc.FormKey] = npc.Packages.Select(x => x.FormKey).ToArray();
+                // A templated actor's package list is its TEMPLATE's, and this probe does not walk
+                // the template chain — such an actor is unassessable, counted rather than guessed.
+                if (!npc.Template.IsNull && npc.Configuration.TemplateFlags.HasFlag(NpcConfiguration.TemplateFlag.AIPackages))
+                    npcTemplated.Add(npc.FormKey);
+                else npcTemplated.Remove(npc.FormKey);
+            }
             else if (rec is IModeledGetter && rec is ISkyrimMajorRecordGetter sm)
                 baseName[sm.FormKey] = (rec.GetType().Name.Replace("BinaryOverlay", ""), sm.EditorID);
         }
@@ -180,6 +209,107 @@ Console.WriteLine($"   plugins that could not be read (contribute nothing, count
 // declared master itself depends on — the author had the whole chain installed. The rule lives in
 // _shared/DetectorModel.cs and is owned by proofprobe cases.
 var masterClosure = DetectorModel.MasterClosure(masterIdx);
+
+// WHERE A PACKAGE PUTS AN ACTOR, resolved against the winning order. Everything here is
+// I/O — looking anchors up and measuring to them; the DECISION on what the numbers mean is
+// DetectorModel.ClassifyReach, which proofprobe owns.
+DetectorModel.PackageAnchor? AnchorOf(FormKey packageKey, Snap at)
+{
+    if (!packFacts.TryGetValue(packageKey, out var f)) return null;
+    if (f.Locations.Count == 0)
+        return new DetectorModel.PackageAnchor(false, false, false, null, 0, f.Scheduled, f.ScheduleMinutes);
+
+    bool allAtPlacement = true, anyUnresolved = false;
+    float? worst = null;
+    uint reach = 0;
+    foreach (var (arm, radius, link) in f.Locations)
+    {
+        if (arm == PackFacts.EditorArm || arm == PackFacts.SelfArm) { reach = Math.Max(reach, radius); continue; }
+        allAtPlacement = false;
+        // Only a placed reference has a position this order can read. A cell, a keyword, an
+        // object type, an alias and the player all resolve at run time or not at all.
+        if (arm != PackFacts.RefArm || link.IsNull || Winning(link) is not { } w || w.Cell != at.Cell)
+        { anyUnresolved = true; continue; }
+        // HORIZONTAL distance. A package radius bounds where an actor wanders on the floor; the
+        // anchor for a temple's sandbox sits 328u above the priests' heads, and counting that gap
+        // put Rorlund 8u outside a radius he is 404u inside of.
+        float d = DistXY(w.Pos, at.Pos);
+        if (d > radius) worst = MathF.Max(worst ?? 0f, d);
+        else reach = Math.Max(reach, (uint)MathF.Ceiling(d + radius));
+    }
+    return new DetectorModel.PackageAnchor(true, allAtPlacement, anyUnresolved, worst, reach,
+                                           f.Scheduled, f.ScheduleMinutes);
+}
+
+// An alias resolves to a placed reference; only an ACTOR carries packages. Anything else — a
+// marker, a container, a door — stays exactly where it was placed, so its placement predicts its
+// position perfectly and its reach is zero.
+(ReachVerdict Verdict, uint Radius, string Why) ReachOf(FormKey refKey, Snap at, bool byCoverage = false)
+{
+    var baseKey = refBase.GetValueOrDefault(refKey);
+    if (!npcPackages.TryGetValue(baseKey, out var pkgs))
+        return (ReachVerdict.PlacementBound, 0, "not an actor: it stays where it is placed");
+    return DetectorModel.ClassifyReach(pkgs.Select(k => AnchorOf(k, at)).ToArray(),
+                                       npcTemplated.Contains(baseKey), byCoverage);
+}
+
+// --actor: the records behind one actor's reach, printed as they were read. This exists because
+// the filter below is a claim about package data, and a claim about package data should be
+// checkable against the package data without reading this file.
+if (actorDump is not null)
+{
+    var hits = baseName.Where(kv => kv.Value.Type == "Npc"
+                                 && (kv.Value.Edid?.Contains(actorDump, StringComparison.OrdinalIgnoreCase) ?? false))
+                       .OrderBy(kv => kv.Value.Edid).ToList();
+    Console.WriteLine($"==== --actor '{actorDump}': {hits.Count} NPC(s) ====");
+    Console.WriteLine();
+    // Where an anchor actually sits in the WINNING order — the fact that decides whether a
+    // reference-anchored actor is bound to the same spot the placement is.
+    string AnchorLabel(FormKey k)
+    {
+        if (Winning(k) is not { } w) return $"{k}(no placement)";
+        return $"{k}@{CellOf(w.Cell)}({w.Pos.X:0},{w.Pos.Y:0},{w.Pos.Z:0})";
+    }
+
+    foreach (var (key, nm) in hits)
+    {
+        var pkgs = npcPackages.GetValueOrDefault(key, Array.Empty<FormKey>());
+        var placements2 = npcPlaced.GetValueOrDefault(key, new List<FormKey>());
+        foreach (var pr in placements2)
+            if (Winning(pr) is { } wp)
+                Console.WriteLine($"   placement {pr} @ {CellOf(wp.Cell)} ({wp.Pos.X:0},{wp.Pos.Y:0},{wp.Pos.Z:0})"
+                                + $"  [winner {pluginKey[wp.Plugin].FileName}]");
+        Console.WriteLine($"{nm.Edid}  {key}   packages: {pkgs.Length}"
+                        + (npcTemplated.Contains(key) ? "   TEMPLATED (inherits packages)" : "")
+                        + $"   placements: {placements2.Count}");
+        for (int i = 0; i < pkgs.Length; i++)
+        {
+            if (!packFacts.TryGetValue(pkgs[i], out var f))
+            { Console.WriteLine($"   [{i}] {pkgs[i]}  (package record not in the order)"); continue; }
+            string tmpl = packFacts.TryGetValue(f.Template, out var tf) ? (tf.Edid ?? f.Template.ToString())
+                        : f.Template.IsNull ? "(none)" : f.Template.ToString();
+            string sched = f.Scheduled ? $"{f.ScheduleHour:00}:00 for {f.ScheduleMinutes / 60.0:0.#}h" : "any time";
+            string locs = f.Locations.Count == 0 ? "(no location slot)"
+                        : string.Join(", ", f.Locations.Select(l => $"{l.Arm} r={l.Radius}"
+                              + (l.Link.IsNull ? "" : $"->{AnchorLabel(l.Link)}")));
+            Console.WriteLine($"   [{i}] {f.Edid,-38} tmpl={tmpl,-22} {sched,-16} cond={f.Conditions}  {locs}");
+        }
+        foreach (var pr in placements2)
+        {
+            if (Winning(pr) is not { } at) continue;
+            var byPriority = DetectorModel.ClassifyReach(pkgs.Select(k => AnchorOf(k, at)).ToArray(), npcTemplated.Contains(key));
+            var byCoverage = DetectorModel.ClassifyReach(pkgs.Select(k => AnchorOf(k, at)).ToArray(), npcTemplated.Contains(key), byCoverage: true);
+            Console.WriteLine($"   => {byPriority.Verdict}"
+                            + (byPriority.Verdict == ReachVerdict.PlacementBound ? $", reach {byPriority.Radius}u" : "")
+                            + $"   ({byPriority.Why})");
+            Console.WriteLine($"      read as most-of-the-day instead: {byCoverage.Verdict}"
+                            + (byCoverage.Verdict == ReachVerdict.PlacementBound ? $", reach {byCoverage.Radius}u" : "")
+                            + $"   ({byCoverage.Why})");
+        }
+        Console.WriteLine();
+    }
+    return 0;
+}
 
 // ---------------------------------------------------------------------------------------
 // Resolution helpers
@@ -331,6 +461,14 @@ foreach (var b in broken.Take(listN)) Console.WriteLine(b);
 // (The counters accumulate only meaningfully on the first FindSplits call — the sensitivity sweep
 // below re-runs the check at other thresholds after they are printed.)
 long skipNonPositional = 0, skipMultiPlacement = 0, skipNoAuthoringView = 0, skipNoWinning = 0;
+// The reach filter's own unjudgeable count, by reason — the pairs CHECK 2 used to report on a
+// metric the field test disqualified. Counted, named, never quietly dropped.
+var reachDropped = new Dictionary<string, int>();
+long reachOverlap = 0;
+// "Governing" has two honest readings and the records do not settle which is right: the
+// HIGHEST-PRIORITY package that positions the actor, or the one SCHEDULED for most of the day.
+// They disagree, so the disagreement is counted rather than buried under whichever was picked.
+long reachReadingDisagrees = 0;
 
 // CHECK 2 as a function of the "together" threshold, so the sweep below can re-ask the question
 // at other settings over the same indexed data. The review showed the shortlist is threshold-
@@ -370,6 +508,27 @@ foreach (var q in quests.Values)
             // max(nearU, 3× the authored distance). A pair that moved TOGETHER is fine.
             if (!DetectorModel.CameApart(togetherThen, was, !apartNow, isNow, nearU)) continue;
 
+            // THE REACH FILTER (2026-08-31). CameApart is a statement about two AUTHORED
+            // placements; the field test showed that only predicts runtime distance when each
+            // actor's own packages keep it at its placement. Ask that first, and where the answer
+            // is yes, ask the question the placements can then answer: are the two reachable
+            // areas disjoint? Anything else is not a weaker finding, it is not a finding.
+            if (reachFilter)
+            {
+                var reach1 = ReachOf(r1, n1);
+                var reach2 = ReachOf(r2, n2);
+                bool boundByPriority = reach1.Verdict == ReachVerdict.PlacementBound
+                                    && reach2.Verdict == ReachVerdict.PlacementBound;
+                var cov1 = ReachOf(r1, n1, byCoverage: true);
+                var cov2 = ReachOf(r2, n2, byCoverage: true);
+                bool boundByCoverage = cov1.Verdict == ReachVerdict.PlacementBound
+                                    && cov2.Verdict == ReachVerdict.PlacementBound;
+                if (boundByPriority != boundByCoverage) reachReadingDisagrees++;
+                if (reach1.Verdict != ReachVerdict.PlacementBound) { Bump(reachDropped, reach1.Verdict.ToString()); continue; }
+                if (reach2.Verdict != ReachVerdict.PlacementBound) { Bump(reachDropped, reach2.Verdict.ToString()); continue; }
+                if (!DetectorModel.BubblesDisjoint(isNow, reach1.Radius, reach2.Radius)) { reachOverlap++; continue; }
+            }
+
             bool objTarget = q.Objectives.Any(o => o.TargetAliasIds.Contains(a1.Id) || o.TargetAliasIds.Contains(a2.Id));
             bool stated = statedPairs.TryGetValue(q.Key, out var sp) && sp.Contains(Pair(a1.Id, a2.Id));
             int moverPlugin = n1.Plugin != t1.Plugin ? n1.Plugin : n2.Plugin;
@@ -402,6 +561,18 @@ Console.WriteLine($"   non-positional arm (runtime-resolved, location, flags-onl
 Console.WriteLine($"   UniqueActor with several placements (no single answer)              : {skipMultiPlacement:N0}");
 Console.WriteLine($"   no authoring-view position (quest plugin + closure contributed none): {skipNoAuthoringView:N0}");
 Console.WriteLine($"   no winning placement at all                                         : {skipNoWinning:N0}");
+if (reachFilter)
+{
+    Console.WriteLine($"   ---- pairs the REACH filter removed (2026-08-31; --no-reach to see them) ----");
+    Console.WriteLine($"   the placement does not predict where the actor stands:");
+    foreach (var kv in reachDropped.OrderByDescending(k => k.Value))
+        Console.WriteLine($"      {kv.Key,-28} : {kv.Value:N0}");
+    if (reachDropped.Count == 0) Console.WriteLine("      (none)");
+    Console.WriteLine($"   both actors bound, but their reachable areas still OVERLAP             : {reachOverlap:N0}");
+    Console.WriteLine($"   pairs where the two readings of \"governing\" DISAGREE                    : {reachReadingDisagrees:N0}"
+                    + "   <- highest-priority vs most-of-the-day; --actor <name> shows both");
+}
+else Console.WriteLine("   ---- REACH filter OFF (--no-reach): pairs below are raw placement distance ----");
 Console.WriteLine($"   pairs split                        : {split.Count:N0}");
 Console.WriteLine($"   ...the quest STATES belong together: {split.Count(s => s.Stated):N0}   <- a scene or a package says so");
 Console.WriteLine($"   ...of those, NO patch reconciles   : {split.Count(s => s.Stated && !s.Patched):N0}   <- the shortlist");
@@ -530,6 +701,12 @@ Console.WriteLine($"\nelapsed {sw.Elapsed.TotalSeconds:0.0}s");
 return 0;
 
 static void Bump(Dictionary<string, int> d, string k) => d[k] = d.GetValueOrDefault(k) + 1;
+static float DistXY(Vec3 a, Vec3 b)
+{
+    float dx = a.X - b.X, dy = a.Y - b.Y;
+    return MathF.Sqrt(dx * dx + dy * dy);
+}
+
 static float Dist(Vec3 a, Vec3 b)
 {
     float dx = a.X - b.X, dy = a.Y - b.Y, dz = a.Z - b.Z;
@@ -553,6 +730,56 @@ record Split(string Quest, string QuestPlugin, string? Alias1, string? Alias2, s
              // that actually changed, not both ends of the pair.
              IReadOnlyList<FormKey> MovedRefs, IReadOnlyList<FormKey> AllRefs,
              FormKey QuestKey, IReadOnlyList<string> MoverList);
+
+/// <summary>One package's POSITIONAL facts, flattened off the overlay (which is disposed with its
+/// plugin). A package positions an actor through its location slots — a bag keyed by slot id whose
+/// LocationTargetRadius carries a target arm and a radius. The arm is the discriminator this whole
+/// filter turns on: LocationFallback with Type NearEditorLocation means "wherever this actor was
+/// PLACED, plus radius"; every other arm means somewhere else entirely (a named reference, a cell,
+/// a keyword, an object type — including the player, who moves).</summary>
+sealed record PackFacts(string? Edid, FormKey Template, int ScheduleHour, int ScheduleMinutes,
+                        int Conditions, IReadOnlyList<(string Arm, uint Radius, FormKey Link)> Locations)
+{
+    public bool Scheduled => ScheduleHour >= 0;
+    public IEnumerable<uint> EditorRadii => Locations.Where(l => l.Arm == EditorArm).Select(l => l.Radius);
+    public bool AnchorsElsewhere => Locations.Any(l => l.Arm != EditorArm && l.Arm != SelfArm);
+    public const string EditorArm = "editor-location";
+    public const string SelfArm = "where-it-stands";
+    public const string RefArm = "reference";
+
+    public static PackFacts From(IPackageGetter pk)
+    {
+        var locs = new List<(string, uint, FormKey)>();
+        foreach (var d in pk.Data.Values.OfType<IPackageDataLocationGetter>())
+        {
+            if (d.Location is not { } ltr || ltr.Target is not { } tgt) continue;
+            locs.Add((tgt switch
+            {
+                // NearSelf and NearPackageStart do not RELOCATE an actor — they keep it where it
+                // already is — so for "does the placement predict position" they read the same as
+                // the editor location. Every other fallback type names something else entirely.
+                ILocationFallbackGetter f => f.Type switch
+                {
+                    LocationTargetRadius.LocationType.NearEditorLocation => EditorArm,
+                    LocationTargetRadius.LocationType.NearSelf => SelfArm,
+                    LocationTargetRadius.LocationType.NearPackageStart => SelfArm,
+                    _ => "fallback:" + f.Type,
+                },
+                ILocationTargetGetter => RefArm,
+                ILocationCellGetter => "cell",
+                ILocationKeywordGetter => "keyword",
+                ILocationObjectIdGetter => "object-id",
+                ILocationObjectTypeGetter => "object-type",
+                _ => "arm:" + tgt.GetType().Name.Replace("BinaryOverlay", ""),
+            }, ltr.Radius, tgt is ILocationTargetGetter lt ? lt.Link.FormKey
+                         : tgt is ILocationCellGetter lc ? lc.Link.FormKey
+                         : tgt is ILocationKeywordGetter lk ? lk.Link.FormKey
+                         : tgt is ILocationObjectIdGetter lo ? lo.Link.FormKey : FormKey.Null));
+        }
+        return new PackFacts(pk.EditorID, pk.PackageTemplate.FormKey, pk.ScheduleHour,
+                             pk.ScheduleDurationInMinutes, pk.Conditions.Count, locs);
+    }
+}
 
 sealed record AliasInfo(int Id, string? Name, string Arm, FormKey? Forced, FormKey? UniqueNpc, FormKey[] Packages);
 sealed record ObjectiveInfo(string? Text, int[] TargetAliasIds);
