@@ -202,6 +202,75 @@ public static class DetectorModel
     public static bool BubblesDisjoint(float distance, uint reachA, uint reachB)
         => distance > (float)reachA + reachB;
 
+    /// <summary>What else the moving plugin touches — the records-only facts intent classification
+    /// runs on (roadmap 3.5.3). The caller resolves them against the load order; the RULE that
+    /// reads them is <see cref="ClassifyIntent"/>. Not SPLIT-specific: any finding with a moving
+    /// plugin, an affected quest, and affected cells can fill this in (3.5.5 will want the same
+    /// join).</summary>
+    /// <param name="TouchesPairNarrative">the moving plugin defines or overrides the AFFECTED
+    /// quest's own narrative records — the QUST itself, a SCEN of that quest, or a DIAL owned by
+    /// it. This is the NARROW reading, chosen deliberately: "any narrative record at all" would
+    /// classify a large mod as aware of this scene on the strength of an unrelated quest edit.</param>
+    /// <param name="NarrativeRecords">DIAL/INFO/SCEN/QUST records anywhere in the plugin —
+    /// context for the report (zero is the strongest "purely mechanical" evidence), never the
+    /// deciding fact.</param>
+    /// <param name="PlacementEdits">placed references (REFR/ACHR) the plugin contributes,
+    /// anywhere — its mechanical work.</param>
+    /// <param name="EditsInAffectedCells">of those, how many are in the cells the pair occupied
+    /// or occupies now.</param>
+    /// <param name="MovedRefs">the finding's own moved references.</param>
+    /// <param name="AffectedInterior">the cell the pair was authored in is an interior.</param>
+    /// <param name="OtherWorkExteriorOnly">the plugin HAS placement edits outside the affected
+    /// cells, and every one of them is in an exterior cell. False when there is no other work —
+    /// a plugin that only edits the affected interior has no exterior scope to mismatch.</param>
+    public readonly record struct IntentFacts(
+        bool TouchesPairNarrative, int NarrativeRecords, int PlacementEdits,
+        int EditsInAffectedCells, int MovedRefs, bool AffectedInterior, bool OtherWorkExteriorOnly);
+
+    /// <summary>WHY a finding happened, not just that it did — the rule table from
+    /// RECOMMENDATIONS-2026-08-30 ("Explaining WHY, not just THAT"), frozen. Classify a finding by
+    /// what else the moving plugin touches: the pair's own quest/scene/dialogue reads as deliberate
+    /// (informational, low priority); placements only reads as probably an oversight (a finding);
+    /// placements only where the plugin moved INTERIOR actors yet does all its other placement
+    /// work in EXTERIORS is an oversight plus a scope mismatch (highest confidence).
+    ///
+    /// <para>WildEditCandidate is a separate axis, never a verdict (Piranha, 2026-09-01): when the
+    /// plugin touches nothing in the pair's cells beyond the reference(s) it displaced — a lone
+    /// displaced ref with no accompanying re-layout is the classic accidental-drag signature — the
+    /// flag raises the QUESTION of a wild (unintended) edit. Records alone are never strong enough
+    /// to assert one: the caller must corroborate (position sanity, the author's stated scope)
+    /// before saying "wild edit" out loud, and reports it as a candidate until then. A plugin that
+    /// also rewrites the pair's narrative did not drag the actor by accident, so Deliberate never
+    /// carries the flag.</para>
+    ///
+    /// <para>The description (meta.ini nexusDescription) deliberately does NOT enter this
+    /// function: the records decide, the description corroborates — an author's page text is a
+    /// marketing claim, not a specification, and must never outvote the records. Its availability
+    /// is a separate axis: <see cref="CorroborationOf"/>.</para></summary>
+    public static (IntentVerdict Verdict, bool WildEditCandidate, string Why) ClassifyIntent(IntentFacts f)
+    {
+        if (f.TouchesPairNarrative)
+            return (IntentVerdict.Deliberate, false,
+                    "the moving plugin also rewrites this pair's own quest/scene/dialogue — the author saw the scene");
+        // Candidate only where the plugin's whole presence in the pair's cells IS the displacement.
+        bool lone = f.EditsInAffectedCells > 0 && f.EditsInAffectedCells <= f.MovedRefs;
+        if (f.AffectedInterior && f.OtherWorkExteriorOnly)
+            return (IntentVerdict.OversightScopeMismatch, lone,
+                    "moved interior actors while every other placement edit is exterior — outside the work's own scope");
+        return (IntentVerdict.Oversight, lone, f.NarrativeRecords > 0
+            ? "narrative work elsewhere does not cover this pair's quest (narrow reading — an unrelated quest edit is not awareness)"
+            : "placements only — nothing in the plugin accounts for the scene the move breaks");
+    }
+
+    /// <summary>Whether the author's stated purpose is even readable for a mover — the source-2
+    /// axis, kept apart from the verdict so a missing description can be COUNTED (rule 6) and
+    /// never read as evidence of anything: unjudgeable is not "no intent". Roughly one installed
+    /// mod in four has no cached description, so this is a population, not an edge case.</summary>
+    public static IntentCorroboration CorroborationOf(bool metaIniFound, string? description)
+        => !metaIniFound ? IntentCorroboration.NoMetaIni
+         : description is null ? IntentCorroboration.NoDescription
+         : IntentCorroboration.DescriptionOnFile;
+
     /// <summary>The record-level verify verdict. CONFIRMED means every necessary record is
     /// overridden — which is COVERAGE, not repair: content and load-order position are not judged
     /// here, and the differential run exists precisely because a CONFIRMED patch can net to zero.</summary>
@@ -219,3 +288,13 @@ public enum ClobberPopulation { BethesdaFloor, UssepDiscarded, ModOnMod }
 /// PlacementBound is unassessable and counted by reason, never quietly cleared (rule 6).</summary>
 public enum ReachVerdict { PlacementBound, AnchorAwayFromPlacement, UnresolvedAnchor, NoAnchor, Templated, NoPackages, PackageMissing }
 public enum DanglePopulation { BethesdaFloor, ModBrokeTarget, ModWroteIndex, ModsBothEnds }
+
+/// <summary>WHY the moving plugin separated the pair. Deliberate is informational (low priority);
+/// both Oversight rows are findings, the scope-mismatch row at highest confidence. A possible wild
+/// (accidental) edit rides on <see cref="DetectorModel.ClassifyIntent"/>'s candidate flag, never
+/// on a verdict of its own — records alone cannot assert one.</summary>
+public enum IntentVerdict { Deliberate, Oversight, OversightScopeMismatch }
+
+/// <summary>Whether the author's stated purpose (meta.ini nexusDescription) is available to
+/// corroborate a verdict. The two unavailable arms are counted, never treated as evidence.</summary>
+public enum IntentCorroboration { DescriptionOnFile, NoDescription, NoMetaIni }

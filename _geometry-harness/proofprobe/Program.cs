@@ -410,6 +410,59 @@ Console.WriteLine("\nPROOF — the detector cores (_shared/DetectorModel.cs)\n")
     Check("reach: two things that never move are split by any gap",
           DetectorModel.BubblesDisjoint(640, 0, 0), "a marker and a bed have no reach");
 
+    // ClassifyIntent — WHY a finding happened (roadmap 3.5.3). The rule table from
+    // RECOMMENDATIONS-2026-08-30, one case per row, built by construction: the live population is
+    // 3 findings and one of them is the worked example the rule was derived from, so the live runs
+    // are a sanity check on top of these, never the validation.
+    DetectorModel.IntentFacts Facts(bool narr = false, int narrCount = 0, int placed = 16,
+                                    int inCell = 4, int moved = 1, bool interior = true, bool extOnly = false)
+        => new(narr, narrCount, placed, inCell, moved, interior, extOnly);
+
+    Check("intent: touches the pair's own narrative -> DELIBERATE (informational)",
+          DetectorModel.ClassifyIntent(Facts(narr: true, narrCount: 6)).Verdict == IntentVerdict.Deliberate,
+          "the author rewrote the scene around the move");
+    Check("intent: placements only -> OVERSIGHT (a finding)",
+          DetectorModel.ClassifyIntent(Facts()).Verdict == IntentVerdict.Oversight,
+          "nothing accounts for the scene the move breaks");
+    var pilgrimShape = DetectorModel.ClassifyIntent(Facts(extOnly: true));
+    Check("intent: interior actors moved, all other work exterior -> SCOPE MISMATCH (highest confidence)",
+          pilgrimShape.Verdict == IntentVerdict.OversightScopeMismatch && !pilgrimShape.WildEditCandidate,
+          "the worked example's shape: 4 edits in the temple, 12 in an exterior");
+    Check("intent: an exterior pair cannot scope-mismatch",
+          DetectorModel.ClassifyIntent(Facts(interior: false, extOnly: true)).Verdict == IntentVerdict.Oversight,
+          "the mismatch row is interior-actors-moved specifically");
+    // The NARROW reading of "touches the pair's quest", frozen as chosen: narrative work on OTHER
+    // quests is not awareness of this one — the looser reading would classify any large mod as
+    // "aware" on the strength of an unrelated quest edit.
+    Check("intent: narrative work on OTHER quests is still OVERSIGHT (narrow reading)",
+          DetectorModel.ClassifyIntent(Facts(narrCount: 40)).Verdict == IntentVerdict.Oversight,
+          "an unrelated quest edit is not awareness of this scene");
+    // The wild-edit axis (Piranha, 2026-09-01): a lone displaced ref with no accompanying
+    // re-layout raises the QUESTION of an accidental edit — a candidate flag, never a verdict,
+    // and never asserted from records alone.
+    var loneMove = DetectorModel.ClassifyIntent(Facts(inCell: 1));
+    Check("intent: lone displaced ref, nothing else in the cell -> wild-edit CANDIDATE, verdict unchanged",
+          loneMove.Verdict == IntentVerdict.Oversight && loneMove.WildEditCandidate,
+          "a flag that asks for corroboration, not a verdict");
+    Check("intent: a re-layout (more cell edits than moved refs) is NOT a wild-edit candidate",
+          !DetectorModel.ClassifyIntent(Facts()).WildEditCandidate,
+          "4 edits in the cell, 1 moved ref — the room was reworked on purpose");
+    Check("intent: DELIBERATE never carries the wild-edit flag",
+          !DetectorModel.ClassifyIntent(Facts(narr: true, inCell: 1)).WildEditCandidate,
+          "an author rewriting the scene did not drag the actor by accident");
+    // The missing-description path: corroboration is a SEPARATE axis the verdict never reads —
+    // ClassifyIntent takes no description at all, by signature — and unavailable is COUNTED
+    // (rule 6), never treated as evidence.
+    Check("intent: no meta.ini -> corroboration NoMetaIni (counted, not evidence)",
+          DetectorModel.CorroborationOf(false, null) == IntentCorroboration.NoMetaIni,
+          "a vanilla/base plugin has no MO2 mod folder");
+    Check("intent: meta.ini without nexusDescription -> NoDescription (unjudgeable, ~1 in 4 mods)",
+          DetectorModel.CorroborationOf(true, null) == IntentCorroboration.NoDescription,
+          "missing is unjudgeable, never 'no intent'");
+    Check("intent: description on file -> corroboration available",
+          DetectorModel.CorroborationOf(true, "[b]placement fixes[/b]") == IntentCorroboration.DescriptionOnFile,
+          "the records decide; the description corroborates");
+
     // BoxOverlap — milestone 5's broad-phase decision.
     var u = new System.Numerics.Vector3(0, 0, 0); var one = new System.Numerics.Vector3(1, 1, 1);
     Check("core: disjoint boxes -> no overlap",

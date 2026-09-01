@@ -120,6 +120,16 @@ var packFacts = new Dictionary<FormKey, PackFacts>();
 var npcPackages = new Dictionary<FormKey, FormKey[]>();        // Npc -> its packages, PRIORITY order
 var npcTemplated = new HashSet<FormKey>();                     // inherits packages from a template
 
+// WHY a split happened (3.5.3). Classifying intent needs "what ELSE does the moving plugin
+// touch": its narrative records and whose quest they belong to, its placement edits per cell, and
+// a per-type census for the report. Collected for every plugin in the same pass — the movers are
+// only known after CHECK 2 runs. The RULE that reads these is DetectorModel.ClassifyIntent,
+// owned by proofprobe cases; everything here is I/O.
+var narrativeQuests = new Dictionary<int, HashSet<FormKey>>(); // plugin -> quests its QUST/SCEN/DIAL records belong to
+var narrativeCount = new int[paths.Count];                     // DIAL/INFO/SCEN/QUST records in the plugin
+var recordCensus = new Dictionary<int, Dictionary<string, int>>();
+var cellEdits = new Dictionary<int, Dictionary<FormKey, int>>(); // plugin -> cell -> placement edits
+
 long placements = 0, questRecords = 0;
 // Rule 6, applied to the plumbing (2026-08-27): unreadable plugins are counted and named, never
 // silently skipped.
@@ -149,6 +159,8 @@ for (int p = 0; p < paths.Count; p++)
             foreach (var r in cp.Refs)
             {
                 placements++;
+                if (!cellEdits.TryGetValue(p, out var ce)) cellEdits[p] = ce = new Dictionary<FormKey, int>();
+                ce[cp.Cell] = ce.GetValueOrDefault(cp.Cell) + 1;
                 var snap = new Snap(p, r.Position, cp.Cell, r.InitiallyDisabled, r.Deleted);
                 if (!history.TryGetValue(r.FormKey, out var h)) history[r.FormKey] = h = new List<Snap>(1);
                 // Record only a plugin that actually CHANGED something. An override that leaves the
@@ -167,12 +179,34 @@ for (int p = 0; p < paths.Count; p++)
             }
         }
 
+        void Narrative(FormKey? quest)
+        {
+            narrativeCount[p]++;
+            if (quest is { } qk && !qk.IsNull)
+            {
+                if (!narrativeQuests.TryGetValue(p, out var nq)) narrativeQuests[p] = nq = new HashSet<FormKey>();
+                nq.Add(qk);
+            }
+        }
         foreach (var rec in mod.EnumerateMajorRecords())
         {
-            if (rec is IQuestGetter q) { quests[q.FormKey] = QuestInfo.From(q, p); questRecords++; }
+            // The census counts every record the plugin carries, by Mutagen type name — the "all
+            // 19 records: 13 REFR, 3 ACHR, 2 CELL, 1 WRLD" evidence line, read instead of recited.
+            var census = recordCensus.TryGetValue(p, out var cd) ? cd : recordCensus[p] = new Dictionary<string, int>();
+            Bump(census, rec.GetType().Name.Replace("BinaryOverlay", ""));
+
+            if (rec is IQuestGetter q) { quests[q.FormKey] = QuestInfo.From(q, p); questRecords++; Narrative(q.FormKey); }
             else if (rec is ISceneGetter sc)
+            {
                 scenes[sc.FormKey] = (sc.Quest.FormKeyNullable ?? FormKey.Null,
                                       sc.Actors.Select(a => (int)a.ID).Distinct().ToArray());
+                Narrative(sc.Quest.FormKeyNullable);
+            }
+            // A topic points UP at its quest; INFO lines carry no quest of their own, but the
+            // plugin holding them must also carry their parent DIAL, so the quest attribution
+            // rides on the topic and the INFO still counts as narrative work.
+            else if (rec is IDialogTopicGetter dt) Narrative(dt.Quest.FormKeyNullable);
+            else if (rec is IDialogResponsesGetter) Narrative(null);
             else if (rec is IPackageGetter pk)
             {
                 // A package's data bag is keyed by slot; the arms that matter are the TARGET ones,
@@ -539,6 +573,13 @@ foreach (var q in quests.Values)
             var moverList = new[] { n1, n2 }
                 .Where(s => s.Plugin != t1.Plugin && s.Plugin != t2.Plugin)
                 .Select(s => pluginKey[s.Plugin].FileName.String).Distinct().ToArray();
+            var moverIdxList = new[] { n1, n2 }
+                .Where(s => s.Plugin != t1.Plugin && s.Plugin != t2.Plugin)
+                .Select(s => s.Plugin).Distinct().ToArray();
+            // The cells intent classification judges the mover's work against: where the pair was
+            // authored (FIRST — its interior flag is the scope-mismatch input) plus wherever the
+            // pair stands now.
+            var affectedCells = new[] { t1.Cell, n1.Cell, n2.Cell }.Distinct().ToArray();
             split.Add(new Split(q.Label, pluginKey[q.Plugin].FileName, a1.Name, a2.Name,
                                 NameOf(r1), NameOf(r2), CellOf(t1.Cell), CellOf(n1.Cell), CellOf(n2.Cell),
                                 was, isNow, apartNow, movers, objTarget, stated, patched,
@@ -546,7 +587,7 @@ foreach (var q in quests.Values)
                                             .Select(o => o.Text).FirstOrDefault(t => !string.IsNullOrWhiteSpace(t)),
                                 new[] { (Key: r1, Moved: n1.Plugin != t1.Plugin), (Key: r2, Moved: n2.Plugin != t2.Plugin) }
                                     .Where(x => x.Moved).Select(x => x.Key).ToArray(),
-                                new[] { r1, r2 }, q.Key, moverList));
+                                new[] { r1, r2 }, q.Key, moverList, moverIdxList, affectedCells));
         }
 }
 return split;
@@ -605,6 +646,89 @@ if (split.Count > 0)
     Console.WriteLine($"\n   ---- by the quest's plugin ----");
     foreach (var g in split.GroupBy(s => s.QuestPlugin).OrderByDescending(g => g.Count()).Take(listN))
         Console.WriteLine($"   {g.Count(),5}  {g.Key}");
+}
+
+// ---------------------------------------------------------------------------------------
+// INTENT — why did the moving plugin separate each STATED pair? (roadmap 3.5.3)
+// ---------------------------------------------------------------------------------------
+// Detection without explanation moves the work rather than doing it: the user is left to find out
+// whether the move was deliberate. The rule table from RECOMMENDATIONS-2026-08-30 is frozen as
+// DetectorModel.ClassifyIntent (proofprobe): classify by what ELSE the moving plugin touches. The
+// RECORDS decide; the author's cached page description (meta.ini nexusDescription — source 2) is
+// corroboration a human reads, quoted in excerpt, and never outvotes them. A missing description
+// is counted (rule 6), never read as evidence. A wild (accidental) edit is a CANDIDATE flag that
+// asks for corroboration — never asserted from records alone.
+{
+    var stated = split.Where(s => s.Stated).ToList();
+    Console.WriteLine();
+    Console.WriteLine($"==== INTENT: why the moving plugin separated each STATED pair ({stated.Count}) ====");
+    var corroboration = new Dictionary<string, int>();
+    foreach (var s in stated)
+    {
+        Console.WriteLine();
+        Console.WriteLine($"   {s.Quest}  [{s.QuestPlugin}]  '{s.Alias1}' + '{s.Alias2}'{(s.Patched ? "   (patched)" : "")}");
+        if (s.MoverIdxList.Count == 0)
+        { Console.WriteLine("      no mover to classify (the winning positions come from the pair's own masters)"); continue; }
+        foreach (var m in s.MoverIdxList)
+        {
+            var cells = cellEdits.GetValueOrDefault(m);
+            var affected = s.AffectedCells.ToHashSet();
+            int inAffected = affected.Sum(c => cells?.GetValueOrDefault(c) ?? 0);
+            int placedTotal = cells?.Values.Sum() ?? 0;
+            var otherCells = cells is null ? new List<FormKey>() : cells.Keys.Where(c => !affected.Contains(c)).ToList();
+            bool otherExtOnly = otherCells.Count > 0
+                             && otherCells.All(c => cellName.TryGetValue(c, out var oc) && !oc.Interior);
+            bool interior = cellName.TryGetValue(s.AffectedCells[0], out var thenCell) && thenCell.Interior;
+            var facts = new DetectorModel.IntentFacts(
+                narrativeQuests.GetValueOrDefault(m)?.Contains(s.QuestKey) ?? false,
+                narrativeCount[m], placedTotal, inAffected, s.MovedRefs.Count, interior, otherExtOnly);
+            var (verdict, wildCandidate, why) = DetectorModel.ClassifyIntent(facts);
+
+            var census = recordCensus.GetValueOrDefault(m);
+            string censusLine = census is null ? "(no records read)"
+                : $"{census.Values.Sum():N0} records: "
+                + string.Join(", ", census.OrderByDescending(kv => kv.Value).Take(6).Select(kv => $"{kv.Value} {kv.Key}"))
+                + (census.Count > 6 ? ", …" : "");
+            Console.WriteLine($"      mover {pluginKey[m].FileName}");
+            Console.WriteLine($"      -> {verdict}   ({why})");
+            Console.WriteLine($"         evidence [records]: {censusLine}");
+            Console.WriteLine($"         evidence [records]: narrative (DIAL/INFO/SCEN/QUST): {narrativeCount[m]}; "
+                            + $"placement edits: {placedTotal} total, {inAffected} in the pair's cell(s); "
+                            + $"other cells: {otherCells.Count}{(otherCells.Count > 0 ? (otherExtOnly ? ", all exterior" : ", some interior") : "")}");
+            if (wildCandidate)
+                Console.WriteLine("         possible WILD EDIT — the plugin touches nothing in the pair's cell(s) beyond the moved\n"
+                                + "         ref(s). Candidate only: corroborate (position sanity, stated scope) before asserting.");
+
+            // Source 2 — the author's own statement of purpose, cached offline by MO2 beside the
+            // plugin's winning file. Only the finding's movers are ever read (a description is
+            // median ~4.5 KB and one mod in four has none). Both sides go through GetFullPath:
+            // GetDirectoryName normalizes separators, and a harness config written with forward
+            // slashes made every mover read as "no MO2 mod folder" until the roots matched.
+            var moverDir = Path.GetDirectoryName(Path.GetFullPath(paths[m]));
+            string? metaPath = moverDir is not null
+                && moverDir.StartsWith(Path.GetFullPath(modsDir), StringComparison.OrdinalIgnoreCase)
+                ? Path.Combine(moverDir, "meta.ini") : null;
+            bool metaFound = metaPath is not null && File.Exists(metaPath);
+            var desc = metaFound ? Mo2ModMeta.ReadDescription(metaPath!) : null;
+            var corr = DetectorModel.CorroborationOf(metaFound, desc);
+            Bump(corroboration, corr.ToString());
+            Console.WriteLine(corr switch
+            {
+                IntentCorroboration.DescriptionOnFile =>
+                    $"         evidence [meta.ini]: nexusDescription on file ({desc!.Length:N0} chars): \"{Excerpt(desc, 160)}\"",
+                IntentCorroboration.NoDescription =>
+                    "         evidence [meta.ini]: no nexusDescription — corroboration unavailable (counted; not evidence of anything)",
+                _ => "         evidence [meta.ini]: no MO2 mod folder (vanilla/base or overwrite) — corroboration unavailable (counted)",
+            });
+        }
+    }
+    if (stated.Count > 0)
+    {
+        Console.WriteLine();
+        Console.WriteLine("   ---- corroboration availability (rule 6: unjudgeable is counted, never 'no intent') ----");
+        foreach (var kv in corroboration.OrderByDescending(k => k.Value))
+            Console.WriteLine($"   {kv.Key,-20} : {kv.Value}");
+    }
 }
 
 // ---------------------------------------------------------------------------------------
@@ -701,6 +825,16 @@ Console.WriteLine($"\nelapsed {sw.Elapsed.TotalSeconds:0.0}s");
 return 0;
 
 static void Bump(Dictionary<string, int> d, string k) => d[k] = d.GetValueOrDefault(k) + 1;
+
+// For QUOTING a description in a report line: strip BBCode/HTML markup and literal \n escapes,
+// collapse whitespace, cut at max. Display only — the classification never parses the text.
+static string Excerpt(string s, int max)
+{
+    s = System.Text.RegularExpressions.Regex.Replace(s, @"\[/?[a-zA-Z][^\]]*\]|<[^>]+>", " ");
+    s = s.Replace("\\r", " ").Replace("\\n", " ").Replace("\\t", " ");
+    s = System.Text.RegularExpressions.Regex.Replace(s, @"\s+", " ").Trim();
+    return s.Length <= max ? s : s[..max] + "…";
+}
 static float DistXY(Vec3 a, Vec3 b)
 {
     float dx = a.X - b.X, dy = a.Y - b.Y;
@@ -729,7 +863,10 @@ record Split(string Quest, string QuestPlugin, string? Alias1, string? Alias2, s
              // against. MovedRefs is the SHORT list — a repair only has to reconcile the placement
              // that actually changed, not both ends of the pair.
              IReadOnlyList<FormKey> MovedRefs, IReadOnlyList<FormKey> AllRefs,
-             FormKey QuestKey, IReadOnlyList<string> MoverList);
+             FormKey QuestKey, IReadOnlyList<string> MoverList,
+             // For the intent join (3.5.3): the movers as plugin INDICES, and the cells the pair
+             // occupied/occupies — authoring cell FIRST (its interior flag feeds scope mismatch).
+             IReadOnlyList<int> MoverIdxList, IReadOnlyList<FormKey> AffectedCells);
 
 /// <summary>One package's POSITIONAL facts, flattened off the overlay (which is disposed with its
 /// plugin). A package positions an actor through its location slots — a bag keyed by slot id whose
