@@ -1364,6 +1364,94 @@ Four channels of free feedback, all on stdout or burnt into the image:
   cell outline stay target-cell scoped. Aim the target at whatever must be painted; put the camera
   wherever it reads best.
 
+#### Letting the tool pick the camera (`tools/shotplan.py`)
+
+Everything above is a method a person applies. `tools/shotplan.py` is that method as a script: give
+it a cell and one or more subject positions and it returns a camera, in both this tool's
+conventions and a game-side one, **or refuses and says why**. It adds no verb here — it drives
+`--pick`, `--nav-at` and `--refs-at`, and the only new thing is the arithmetic between them.
+
+The trick that makes it affordable is the **clearance map**. Testing candidate cameras one at a
+time costs a cell load each. Instead it puts the probe camera AT a subject, opens the field of view
+and picks a fan of rays around the horizon; every pick returns the world coordinates of the first
+geometry along that ray, so ONE render yields the clearance in every direction around that subject
+— and therefore every camera position that can see it. Occlusion is symmetric: subject → point
+clear means point → subject clear. One map per subject, intersected, is the set of cameras that see
+everybody. Measured on a Solitude interior: four sector renders per subject at `--size 320
+--msaa 0`, ~22 s each, and 720 candidate poses scored afterwards for free.
+
+Three passes, each paying only for what it needs:
+
+1. **clearance maps** — `--map-yaws` renders per subject (default four at `--fov-map 100`, which
+   tile 360° with margin). Pixels are solved FROM the desired bearings rather than laid out as a
+   uniform grid, so the angular step is exactly `--bearing-step` everywhere including the frame
+   edges.
+2. **scoring** — sightline and framing are pure arithmetic over pass 1, so the whole polar grid of
+   candidates is judged without another render. Framing is the exact rectilinear test, `|x/z|` and
+   `|y/z|` against `tan(fov/2)`; the `0.637 × distance` rule above is that same test at fov 65.
+3. **placement** — one render carrying `--nav-at` for the survivors. Batched here rather than with
+   pass 1 because the full grid is ~1,400 probes and that many flags overruns a Windows command
+   line; anything dropped by `--nav-probe-max` is named, never silently cut.
+
+Then an aimed probe render per subject from the chosen camera (`--eye P --look S`, picking the image
+centre) shoots the exact ray the game camera will use, where the map is an interpolation between
+sampled bearings. `--no-verify` skips it; do not, on a camera you have not seen.
+
+**The navmesh test is deliberately not "must be on navmesh".** Navmesh is cut out around furniture,
+and a measured good vantage stood on a bed footprint with its nearest triangle 80 u away. What IS a
+refusal is navmesh present only at a storey far from the camera's own floor: a point whose only
+walkable level sits 288 u above it is under another floor, not in the room. `--storey-tol` and
+`--offmesh-tol` set the two bands.
+
+```bash
+# plan
+python tools/shotplan.py plan SomeInteriorCell \
+  --subject 1765.3,1897.5,1424=first --subject 1768.9,1697.2,1424=second \
+  --worklist shots.json -- --instance "..." --profile "..."
+
+# judge a camera you already have -- the positive control. A planner that never refuses
+# anything is not validated, so point it at one you know is bad before trusting one it chose.
+python tools/shotplan.py check SomeInteriorCell --eye 1770,1380,1560 --show-refs \
+  --subject 1765.3,1897.5,1424=first -- --instance "..." --profile "..."
+
+# a worklist IS a shot list, so it is also a camera script for a running game
+python tools/shotplan.py devbench shots.json
+```
+
+**Plan against the frame you are going to take, not against this one.** `--fov` is the VERTICAL
+angle and `--aspect` (default `1:1`, this renderer's square frame) widens the horizontal limit.
+A game camera is neither square nor at your chosen FOV -- its field of view is the player's own
+`.ini` setting. Pixel-matching two features between a viewprobe render and the game frame of the
+SAME camera on 2026-09-01 put the game frame at roughly 75-80 deg horizontal and ~49 deg vertical
+against the plan's 65 deg square: materially narrower vertically, and a shot the planner called
+comfortable fitted with almost nothing to spare. Re-running the framing test at `--fov 49
+--aspect 16:9` refused it outright. This is a silent cropping hazard -- the numbers stay right
+while a subject's head leaves the picture.
+
+**Read the target frame; do not assume it.** `frame --instance ... --profile ...` resolves
+which ini files an MO2 profile actually hands the game -- its own `settings.ini`
+`LocalSettings` decides between the profile's copies and the ones under Documents -- reads
+`iSize W`/`iSize H` and `fDefaultWorldFOV`, and prints the `--fov`/`--aspect` to plan with.
+`--from-profile` on `plan` or `check` applies them directly, reusing the instance and profile
+already given as target flags; `--explain` adds the derivation and the recipe for measuring
+the angle instead of deriving it. Any key defined in more than one file is reported with its
+winner, because a value set twice is exactly where a single answer would be confidently wrong.
+
+**Two heights, not one.** `--aim-height` is where the camera POINTS (composition); `--sight-height`
+is where the sightline probes AIM, and it defaults to head height on purpose. A ray fired at the
+middle of a SEATED actor hits the chair it is sitting in and reports the chair as an obstruction --
+measured 2026-08-31, and reproduced here at 244 u against a 274 u subject the moment the two were
+coupled. Compose low if the shot wants it; probe at head height regardless.
+
+**Feed it RUNTIME positions when a game is available.** An actor is placed at its governing AI
+package's anchor on cell load, not at its placement record — one measured NPC stood 1,617 u from
+hers. The tool takes coordinates and never FormIDs precisely so it can be fed either.
+
+**What it cannot see is what `--pick` cannot see:** the transparent pass. Alpha-blended geometry
+draws with depth writes off, so a camera can be sited behind a curtain and reported clear. The
+consequence is a bad picture rather than a wrong verdict — which is what looking at the frame is
+for.
+
 #### Shell quoting, on paths with spaces
 
 Instance and game paths routinely contain spaces. Do not collect them into one shell variable and

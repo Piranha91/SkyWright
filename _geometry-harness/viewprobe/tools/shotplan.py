@@ -1,0 +1,1243 @@
+#!/usr/bin/env python3
+"""shotplan -- choose a camera from the records, instead of guessing one.
+
+A camera guessed from coordinates is wrong more often than it is right, and it
+fails SILENTLY: every number a test logs can be correct while the frame shows a
+wall, the wrong room, or the outside of the building. That has happened. This
+tool answers "where do I put the camera to see these subjects" from viewprobe's
+own geometry, and REFUSES a camera it cannot justify, saying why.
+
+It adds no verb to viewprobe. Everything here drives flags viewprobe already
+has -- `--pick`, `--nav-at`, `--refs-at` -- and the only new thing is the
+arithmetic between them.
+
+    THE IDEA
+    --------
+    Testing candidate cameras one at a time costs one cell load each. Instead,
+    put the probe camera AT a subject, at eye height, open the field of view,
+    and `--pick` a fan of rays around the horizon. Every pick returns the world
+    coordinates of the first geometry along that ray, so ONE render yields the
+    clearance in every direction around that subject -- and therefore every
+    camera position that can see it. Occlusion is symmetric: subject -> point
+    clear means point -> subject clear.
+
+    Do that per subject, intersect the maps, and what survives is the set of
+    cameras that can see EVERY subject. Then the framing arithmetic
+    (half-span = 0.637 x distance at fov 65) picks the standoff, `--nav-at`
+    checks the point is on the storey you meant rather than under the floor
+    above it, and an aimed probe render per subject confirms the choice against
+    the real depth buffer rather than against the map's interpolation.
+
+    WHY VIEWPROBE IS THE RIGHT AUTHORITY FOR THIS
+    ---------------------------------------------
+    viewprobe's depth probe was measured (2026-08-31) to DISAGREE with the
+    engine's `HasLOS`, because `HasLOS` asks a different question -- it is about
+    an actor's awareness, not about what a rasteriser draws. A screenshot is a
+    rasterisation. For "will the camera see it", viewprobe's depth buffer and
+    the game camera are answering the SAME question against the SAME render
+    geometry. This is the use viewprobe is actually correct for; do not read
+    these results as a line-of-sight claim about the engine.
+
+    WHAT IT CANNOT SEE
+    ------------------
+    `--pick` unprojects the DEPTH buffer, and alpha-blended geometry draws with
+    depth writes off. A curtain, a banner or a waterfall on the ray does not
+    register, so a camera can be sited behind one and called clear. The failure
+    is a bad picture, not a wrong verdict -- read the frame.
+
+    Placements are records. Actors are NOT where their placement records say:
+    an actor is put at its governing AI package's anchor on cell load. Feed
+    subject positions from the RUNNING game (DevBench `inspect kind=refs`)
+    whenever the game is available; this tool takes coordinates, never FormIDs,
+    precisely so it can be fed either.
+
+    THE CONVENTION SEAM
+    -------------------
+    viewprobe yaw is DEGREES, 0 = north (+Y), clockwise. DevBench
+    `camera action=drive` wants the same angle in RADIANS, and its
+    `action=get` reports yaw NEGATED. Getting this wrong produces a plausible
+    frame of the wrong thing with no error. Every pose this tool prints carries
+    both forms, and `shotplan.py devbench` converts a worklist without a human
+    doing the multiplication.
+
+Subcommands
+    plan      pick a camera for a set of subjects, and emit it
+    check     judge a camera someone already has -- the positive control
+    devbench  read a viewprobe worklist and print DevBench `camera drive` args
+
+Run `shotplan.py <subcommand> --help` for the flags.
+"""
+from __future__ import annotations
+
+import argparse
+import json
+import math
+import os
+import re
+import shlex
+import subprocess
+import sys
+import time
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+VIEWPROBE_DIR = os.path.dirname(HERE)
+
+# viewprobe's own conventions, restated here because every formula below depends on them:
+#   yaw  degrees, 0 = north (+Y), increasing CLOCKWISE   (Program.cs: atan2(dx, dy))
+#   pitch degrees, POSITIVE looks DOWN
+#   image square, --fov is the FULL vertical angle, so horizontal fov == vertical fov
+# The pick unprojection was verified against real picks on 2026-09-01: for pixel (ix, iy) in a
+# size x size frame, ndc x = (ix+0.5)/size*2-1 and ndc y = ((size-1-iy)+0.5)/size*2-1, and the
+# ray's angle off the axis is atan(ndc * tan(fov/2)) in each axis. Two edge picks and two
+# off-horizon picks reproduced their measured world hits to under 0.3 degrees.
+
+
+# --------------------------------------------------------------------------------------
+# geometry
+# --------------------------------------------------------------------------------------
+
+def bearing_deg(dx: float, dy: float) -> float:
+    """Skyrim/viewprobe yaw for a direction: 0 = +Y (north), clockwise."""
+    return math.degrees(math.atan2(dx, dy)) % 360.0
+
+
+def bearing_vec(deg: float) -> tuple[float, float]:
+    r = math.radians(deg)
+    return math.sin(r), math.cos(r)
+
+
+def ang_diff(a: float, b: float) -> float:
+    """Signed smallest difference a - b, in (-180, 180]."""
+    return (a - b + 180.0) % 360.0 - 180.0
+
+
+def camera_basis(yaw_deg: float, pitch_deg: float):
+    """(forward, right, up) unit vectors in Skyrim world axes (Z up).
+
+    Checked against the two poses the README documents: yaw 0 pitch 0 looks along +Y with
+    +X to the right and +Z up; pitch 90 looks along -Z with north-up, which is what makes a
+    top-down render read north-up.
+    """
+    y, p = math.radians(yaw_deg), math.radians(pitch_deg)
+    f = (math.sin(y) * math.cos(p), math.cos(y) * math.cos(p), -math.sin(p))
+    r = (math.cos(y), -math.sin(y), 0.0)
+    u = (r[1] * f[2] - r[2] * f[1], r[2] * f[0] - r[0] * f[2], r[0] * f[1] - r[1] * f[0])
+    return f, r, u
+
+
+def pixel_for_angles(h_off_deg: float, v_off_deg: float, fov_deg: float, size: int):
+    """The image pixel whose ray leaves the camera at these offsets from the axis.
+
+    The inverse of the unprojection above, so a fan of rays can be sampled at UNIFORM
+    ANGLES rather than at uniform pixels -- which is what a clearance map wants, and what a
+    uniform pixel grid does not give (pixels crowd towards the axis in angle).
+    Returns None when the angle falls outside the frustum.
+    """
+    t = math.tan(math.radians(fov_deg) / 2.0)
+    nx = math.tan(math.radians(h_off_deg)) / t
+    ny = math.tan(math.radians(v_off_deg)) / t
+    if abs(nx) >= 1.0 or abs(ny) >= 1.0:
+        return None
+    ix = int(round((nx + 1.0) / 2.0 * size - 0.5))
+    gy = int(round((ny + 1.0) / 2.0 * size - 0.5))
+    iy = size - 1 - gy
+    if not (0 <= ix < size and 0 <= iy < size):
+        return None
+    return ix, iy
+
+
+# --------------------------------------------------------------------------------------
+# running viewprobe, and reading what it says
+# --------------------------------------------------------------------------------------
+
+PICK_HIT = re.compile(
+    r"^\s*pick (-?\d+),(-?\d+): (-?[\d.]+),(-?[\d.]+),(-?[\d.]+)\s+cell \([^)]*\)\s+([\d.]+) u from the eye")
+PICK_BG = re.compile(r"^\s*pick (-?\d+),(-?\d+): (background|degenerate|outside)")
+# Deliberately ASCII-only. viewprobe writes an em dash in these lines and the encoding of the
+# pipe is not guaranteed on Windows; a regex that requires the dash fails to match and the
+# caller reads "no nav-at answer" instead of "the parser broke". Match up to the dash and no
+# further, and read the drawn/deleted state out of the remainder by substring.
+NAV_HIT = re.compile(
+    r"^\s*nav-at (-?\d+),(-?\d+): (.+?) tri (\d+) covers it, z (-?[\d.]+), flags 0x([0-9A-Fa-f]+)(.*)$")
+NAV_MISS = re.compile(
+    r"^\s*nav-at (-?\d+),(-?\d+): NO winning triangle covers this point"
+    r"(?:; nearest is (.+?) tri (\d+), ([\d.]+) u away)?")
+
+
+class Probe:
+    """One viewprobe invocation, with its answers parsed out of stdout.
+
+    The load walk dominates the cost and the queries are free once it has run, so the callers
+    below batch every question they can into one of these rather than paying the walk per
+    question. That is not an optimisation, it is the difference between a planner worth using
+    and one nobody will wait for.
+    """
+
+    def __init__(self, cmd, cwd=None, echo=True):
+        self.cmd, self.cwd, self.echo = cmd, cwd, echo
+        self.stdout = ""
+        self.seconds = 0.0
+        self.rc = None
+
+    def run(self):
+        t0 = time.time()
+        if self.echo:
+            print("    $ " + " ".join(shlex.quote(c) for c in self.cmd[-14:]), file=sys.stderr)
+        p = subprocess.run(self.cmd, cwd=self.cwd, capture_output=True, text=True,
+                           encoding="utf-8", errors="replace")
+        self.stdout, self.rc, self.seconds = (p.stdout or "") + (p.stderr or ""), p.returncode, time.time() - t0
+        if self.rc != 0:
+            tail = "\n".join(self.stdout.strip().splitlines()[-12:])
+            raise SystemExit(f"viewprobe exited {self.rc} after {self.seconds:.0f}s.\n{tail}")
+        if self.echo:
+            print(f"      ({self.seconds:.0f}s)", file=sys.stderr)
+        return self
+
+    def picks(self):
+        """{(ix, iy): (x, y, z, dist) | None}. None means the ray found nothing to hit."""
+        out = {}
+        for line in self.stdout.splitlines():
+            m = PICK_HIT.match(line)
+            if m:
+                out[(int(m[1]), int(m[2]))] = (float(m[3]), float(m[4]), float(m[5]), float(m[6]))
+                continue
+            m = PICK_BG.match(line)
+            if m:
+                out[(int(m[1]), int(m[2]))] = None
+        return out
+
+    def nav(self):
+        """{(x, y): {'levels': [z, ...], 'nearest': u | None}} -- one entry per queried point.
+
+        A point can return SEVERAL levels: `--nav-at` reports every storey, which is exactly
+        what tells "the camera is in the room" apart from "the camera is under the floor above
+        the room". Queries are sent as integers so the printed key matches the query key.
+        """
+        out = {}
+        for line in self.stdout.splitlines():
+            m = NAV_HIT.match(line)
+            if m:
+                e = out.setdefault((int(m[1]), int(m[2])), {"levels": [], "nearest": None})
+                e["levels"].append(float(m[5]))
+                continue
+            m = NAV_MISS.match(line)
+            if m:
+                e = out.setdefault((int(m[1]), int(m[2])), {"levels": [], "nearest": None})
+                e["nearest"] = float(m[5]) if m[5] else None
+        return out
+
+    def refs(self):
+        """The `--refs-at` block, header and rows, for a human to read in a refusal.
+
+        "What am I standing inside" is the question a refused camera raises, and this is the
+        only flag that answers it by name. The rows are indented under a "---- refs within"
+        header, so the block is read by position rather than by matching each row.
+        """
+        out, inside = [], False
+        for ln in self.stdout.splitlines():
+            if "---- refs within" in ln:
+                inside = True
+                out.append(ln.strip())
+                continue
+            if inside:
+                if ln.startswith("      ") and " u  " in ln:
+                    out.append(ln.strip())
+                else:
+                    inside = False
+        return out
+
+
+def vp_command(vp: str | None) -> list[str]:
+    if vp:
+        return shlex.split(vp)
+    return ["dotnet", "run", "--project", VIEWPROBE_DIR, "-c", "Release", "--no-launch-profile", "--"]
+
+
+class Runner:
+    """Holds the viewprobe command, the cell and the pass-through target flags.
+
+    The cell MUST be args[0] literally -- viewprobe reads a leading positional as the cell (or a
+    worklist), and a target flag placed before it silently takes its place. That trap cost a
+    round on 2026-08-31 and is the reason this class exists rather than string concatenation at
+    each call site.
+    """
+
+    def __init__(self, cell, vp=None, passthrough=(), out=None, size=320, echo=True):
+        self.base, self.cell = vp_command(vp), cell
+        self.passthrough, self.out, self.size, self.echo = list(passthrough), out, size, echo
+        self.renders, self.seconds = 0, 0.0
+
+    def probe(self, *args):
+        cmd = self.base + [self.cell, "--size", str(self.size), "--msaa", "0", "--nav", "off"]
+        cmd += [str(a) for a in args]
+        if self.out:
+            cmd += ["--out", self.out]
+        cmd += self.passthrough
+        p = Probe(cmd, echo=self.echo).run()
+        self.renders += 1
+        self.seconds += p.seconds
+        return p
+
+
+# --------------------------------------------------------------------------------------
+# the clearance map
+# --------------------------------------------------------------------------------------
+
+class Clearance:
+    """bearing (deg) -> how far you can travel from this point before hitting geometry.
+
+    Stored per bearing bin as the MINIMUM horizontal distance over the sampled elevations, so a
+    low beam or a chair back bounds the direction rather than being averaged away. A bin whose
+    rays all found nothing is stored as None -- UNKNOWN, not infinite. In an interior a ray that
+    hits nothing has left the shell through a hole the renderer does not close, and treating
+    that as open space is precisely how a camera ends up outside the building.
+    """
+
+    def __init__(self, origin, step):
+        self.origin, self.step = origin, step
+        self.bins: dict[int, float | None] = {}
+        self.hits: dict[int, tuple] = {}
+
+    def key(self, deg):
+        return int(round((deg % 360.0) / self.step)) % int(round(360.0 / self.step))
+
+    def add(self, deg, dist, hit):
+        k = self.key(deg)
+        if dist is None:
+            self.bins.setdefault(k, None)
+            return
+        cur = self.bins.get(k, "missing")
+        if cur == "missing" or cur is None or dist < cur:
+            self.bins[k] = dist
+            self.hits[k] = hit
+
+    def at(self, deg):
+        """(clearance, why) at a bearing. clearance None means REFUSE, with why saying which."""
+        k = self.key(deg)
+        if k not in self.bins:
+            return None, "no ray was sampled along this bearing"
+        v = self.bins[k]
+        if v is None:
+            return None, "every probe ray along this bearing left the cell without hitting geometry"
+        return v, None
+
+    def sampled(self):
+        return sum(1 for v in self.bins.values() if v is not None)
+
+
+def build_clearance(run: Runner, origin, floor_z, args) -> Clearance:
+    """One clearance map, from `--map-yaws` renders taken AT the origin.
+
+    Each render covers a sector; each bearing in that sector gets one pick per elevation. The
+    pixels are solved from the angles rather than laid out as a uniform grid, so the angular
+    step is exactly what was asked for at every bearing including the frame edges.
+    """
+    cl = Clearance(origin, args.bearing_step)
+    eye = (origin[0], origin[1], floor_z + args.eye_height)
+    n_bear = int(round(360.0 / args.bearing_step))
+    bearings = [i * args.bearing_step for i in range(n_bear)]
+    elevs = [float(e) for e in args.elevations.split(",")]
+    half = args.fov_map / 2.0 - args.edge_margin
+
+    for yaw in args.map_yaws:
+        want = [b for b in bearings if abs(ang_diff(b, yaw)) <= half]
+        px, meta = [], {}
+        for b in want:
+            for e in elevs:
+                p = pixel_for_angles(ang_diff(b, yaw), e, args.fov_map, run.size)
+                if p is None:
+                    continue
+                px.append(p)
+                meta[p] = (b, e)
+        if not px:
+            continue
+        flags = ["--eye", f"{eye[0]:.1f},{eye[1]:.1f},{eye[2]:.1f}",
+                 "--yaw", f"{yaw:g}", "--pitch", "0", "--fov", f"{args.fov_map:g}"]
+        for ix, iy in px:
+            flags += ["--pick", f"{ix},{iy}"]
+        got = run.probe(*flags).picks()
+        for pix, (b, e) in meta.items():
+            hit = got.get(pix)
+            if hit is None:
+                cl.add(b, None, None)
+            else:
+                d2 = math.hypot(hit[0] - eye[0], hit[1] - eye[1])
+                cl.add(b, d2, hit)
+    return cl
+
+
+
+# --------------------------------------------------------------------------------------
+# the frame the GAME will actually render
+# --------------------------------------------------------------------------------------
+#
+# Estimating the target frame from eyeballed pixels is the same mistake as guessing a camera.
+# The game states its resolution and its field of view in the ini files an MO2 profile hands it,
+# so read them.
+#
+# The mapping from the setting to a frustum is the part that is NOT in the ini. Skyrim's
+# fDefaultWorldFOV is the HORIZONTAL angle at a 4:3 base and the engine widens horizontally
+# ("Hor+") for anything wider, so the VERTICAL angle is fixed by the setting alone:
+#
+#     tan(fov_v / 2) = tan(fov_setting / 2) / (4/3)
+#
+# That model is CALIBRATED, not assumed. Registering two game frames (different pitches) against
+# viewprobe renders of the same camera measured the vertical angle at 50.5 deg on a 3840x2160
+# frame with no fDefaultWorldFOV in any ini; the model with the engine default 65 predicts
+# 51.08 deg -- a residual of 0.57 deg. So it is good to well under a degree, which is ~3 u at a
+# 350 u standoff -- fine for
+# deciding a standoff, and worth replacing with a measurement if a shot is tight. `--fov`
+# overrides it, and `frame --explain` prints the method for re-measuring.
+
+FOV_BASE_ASPECT = 4.0 / 3.0
+FOV_ENGINE_DEFAULT = 65.0
+
+INI_LOAD_ORDER = ["skyrim.ini", "skyrimcustom.ini", "skyrimprefs.ini"]
+MY_GAMES_CANDIDATES = ["Skyrim Special Edition", "Skyrim Special Edition GOG",
+                       "Skyrim VR", "Skyrim"]
+
+
+def _ci_path(directory, name):
+    """A case-insensitive file lookup. MO2 writes lower-case ini names on disk while every
+    document spells them Skyrim.ini; on a case-sensitive filesystem the obvious spelling misses."""
+    if not os.path.isdir(directory):
+        return None
+    want = name.lower()
+    for f in os.listdir(directory):
+        if f.lower() == want:
+            return os.path.join(directory, f)
+    return None
+
+
+def parse_ini(path):
+    """{section_lower: {key_lower: (raw_key, value)}}. Keys contain spaces ("iSize W"), so the
+    split is on the first '=' only."""
+    out, sec = {}, ""
+    with open(path, encoding="utf-8", errors="replace") as f:
+        for line in f:
+            line = line.strip()
+            if not line or line[0] in ";#":
+                continue
+            if line[0] == "[" and line.endswith("]"):
+                sec = line[1:-1].strip().lower()
+                continue
+            if "=" not in line:
+                continue
+            k, _, v = line.partition("=")
+            out.setdefault(sec, {})[k.strip().lower()] = (k.strip(), v.strip())
+    return out
+
+
+def resolve_inis(instance, profile, game=None, my_games=None):
+    """Which ini files this MO2 profile actually hands the game, in load order.
+
+    MO2's per-profile `settings.ini` decides: `LocalSettings=true` means the profile's own copies
+    are used, false means the ones under Documents / My Games. Getting this backwards reads a file
+    the game never sees, which is worse than not reading one at all -- so the answer names every
+    file it used and says WHY.
+    """
+    prof_dir = None
+    pdir = os.path.join(instance, "profiles")
+    if os.path.isdir(pdir):
+        for d in os.listdir(pdir):
+            if d.lower() == profile.lower():
+                prof_dir = os.path.join(pdir, d)
+                break
+    if prof_dir is None:
+        raise SystemExit(f"no profile directory: looked for {pdir}{os.sep}{profile}")
+
+    note = []
+    settings = _ci_path(prof_dir, "settings.ini")
+    local = None
+    if settings:
+        s = parse_ini(settings)
+        raw = (s.get("general") or {}).get("localsettings")
+        if raw:
+            local = raw[1].strip().lower() in ("true", "1", "yes")
+    if local is None:
+        note.append("this profile's settings.ini does not state LocalSettings; assuming GLOBAL "
+                    "inis, which is a guess -- check it")
+        local = False
+
+    if local:
+        base, why = prof_dir, "LocalSettings=true, so the profile's own inis are what the game reads"
+    else:
+        if my_games is None:
+            docs = os.path.join(os.path.expanduser("~"), "Documents", "My Games")
+            hint = [c for c in MY_GAMES_CANDIDATES
+                    if game and c.lower().replace(" ", "") in os.path.basename(
+                        os.path.normpath(game)).lower().replace(" ", "")]
+            for c in hint + MY_GAMES_CANDIDATES:
+                if os.path.isdir(os.path.join(docs, c)):
+                    my_games = os.path.join(docs, c)
+                    break
+        if my_games is None:
+            raise SystemExit("LocalSettings is off and no Documents/My Games/<game> folder was "
+                             "found; pass --my-games")
+        base, why = my_games, "LocalSettings=false, so the game reads the Documents copies"
+
+    files = [q for q in (_ci_path(base, n) for n in INI_LOAD_ORDER) if q]
+    if not files:
+        raise SystemExit(f"no ini files found in {base}")
+    return files, why, note
+
+
+def ini_lookup(files, section, key):
+    """Every file that defines this key, in load order, with the winner last.
+
+    Reporting all of them rather than only the winner is the point: a value set in two files is
+    exactly the case where a single answer would be confidently wrong.
+    """
+    hits = []
+    for f in files:
+        d = parse_ini(f).get(section.lower(), {})
+        if key.lower() in d:
+            hits.append((f, d[key.lower()][1]))
+    return hits
+
+
+def game_frame(instance, profile, game=None, my_games=None):
+    """Resolution, aspect and vertical field of view, read from the game's own configuration."""
+    files, why, note = resolve_inis(instance, profile, game, my_games)
+    w = ini_lookup(files, "Display", "iSize W")
+    h = ini_lookup(files, "Display", "iSize H")
+    fov = ini_lookup(files, "Display", "fDefaultWorldFOV")
+    if not w or not h:
+        raise SystemExit("no 'iSize W'/'iSize H' in any of:\n  " + "\n  ".join(files)
+                         + "\nThe resolution is not guessable -- it decides the frame shape.")
+    W, H = int(float(w[-1][1])), int(float(h[-1][1]))
+    if fov:
+        setting, src = float(fov[-1][1]), os.path.basename(fov[-1][0])
+    else:
+        setting, src = FOV_ENGINE_DEFAULT, "ENGINE DEFAULT (no fDefaultWorldFOV in any ini)"
+    vert = 2.0 * math.degrees(math.atan(math.tan(math.radians(setting / 2.0)) / FOV_BASE_ASPECT))
+    return {"files": files, "why": why, "note": note, "width": W, "height": H,
+            "aspect": W / H, "fov_setting": setting, "fov_source": src,
+            "fov_vertical": vert,
+            "fov_horizontal": 2.0 * math.degrees(math.atan(
+                math.tan(math.radians(vert / 2.0)) * W / H)),
+            "w_hits": w, "h_hits": h, "fov_hits": fov}
+
+
+def print_frame(fr):
+    print("--- the frame the game will render ---")
+    print("  inis, in load order (" + fr["why"] + "):")
+    for f in fr["files"]:
+        print(f"    {f}")
+    for n in fr["note"]:
+        print(f"  !! {n}")
+    for label, hits in (("iSize W/H", fr["w_hits"] + fr["h_hits"]), ("fDefaultWorldFOV", fr["fov_hits"])):
+        if len(hits) > 2 if label == "iSize W/H" else len(hits) > 1:
+            print(f"  !! {label} is set in more than one file; the LAST wins:")
+            for f, v in hits:
+                print(f"       {os.path.basename(f)} = {v}")
+    print(f"  resolution   {fr['width']} x {fr['height']}   aspect {fr['aspect']:.4f}")
+    print(f"  fov setting  {fr['fov_setting']:g}  ({fr['fov_source']})")
+    print(f"  -> vertical  {fr['fov_vertical']:.2f} deg    horizontal {fr['fov_horizontal']:.2f} deg")
+    print(f"  plan with:   --fov {fr['fov_vertical']:.2f} --aspect {fr['width']}:{fr['height']}")
+
+
+# --------------------------------------------------------------------------------------
+# candidates and their verdicts
+# --------------------------------------------------------------------------------------
+
+class Subject:
+    def __init__(self, spec, default_z):
+        body, _, label = spec.partition("=")
+        parts = [float(v) for v in body.split(",")]
+        if len(parts) == 2:
+            parts.append(default_z)
+        if len(parts) != 3:
+            raise SystemExit(f"--subject wants X,Y[,Z][=label]; got {spec!r}")
+        self.x, self.y, self.z = parts
+        self.label = label or f"{self.x:.0f},{self.y:.0f}"
+        self.cl: Clearance | None = None
+
+    def pos(self):
+        return (self.x, self.y, self.z)
+
+
+def nav_verdict(entry, floor_z, args):
+    """Is a camera at this XY standing in the room, or under the floor above it?
+
+    Three outcomes, and the middle one is the one that matters. A camera point is often NOT on
+    navmesh -- navmesh is cut out around furniture, and the known-good vantage of 2026-08-31
+    stands on a bed footprint with its nearest triangle 80 u away. So "no navmesh here" cannot
+    be a refusal on its own. What IS a refusal is navmesh present only at a storey far from the
+    camera's own floor: that says the point belongs to a different level of the building.
+    """
+    if entry is None:
+        return "unknown", "no --nav-at answer for this point"
+    near = [z for z in entry["levels"] if abs(z - floor_z) <= args.storey_tol]
+    if near:
+        return "on-storey", f"walkable at z {near[0]:.0f} ({near[0]-floor_z:+.0f} from the floor)"
+    if entry["levels"]:
+        zs = ", ".join(f"{z:.0f}" for z in sorted(entry["levels"]))
+        return "wrong-storey", (f"the only walkable storey(s) here are z {zs}, "
+                                f"none within {args.storey_tol:.0f} u of the floor z {floor_z:.0f} "
+                                f"-- this point is on another level, not in the room")
+    n = entry["nearest"]
+    if n is not None and n <= args.offmesh_tol:
+        return "off-mesh-near", (f"no navmesh covers it, nearest triangle {n:.0f} u away "
+                                 f"-- a furniture footprint inside the room")
+    return "no-floor", (f"no navmesh covers it and the nearest triangle is "
+                        f"{'unknown' if n is None else f'{n:.0f} u'} away "
+                        f"(tolerance {args.offmesh_tol:.0f} u)")
+
+
+def frame_check(eye, yaw, pitch, fov, subjects, args):
+    """Is every subject inside the frame, and how much of it do they fill?
+
+    Exact rectilinear test -- |x/z| and |y/z| against tan(fov/2) -- on each subject modelled as
+    a vertical segment from its feet to `--subject-height`, widened by `--subject-width`. The
+    0.637 x distance rule of thumb is this same arithmetic at fov 65; the tangents are used here
+    because a planner should not carry a constant that is only true at one field of view.
+
+    `fov` is the VERTICAL angle and `--aspect` widens the horizontal limit. The default is
+    square because viewprobe's frame is square -- but a game camera is not, and a shot planned
+    against a square frame can lose a subject's head off the top of a 16:9 one. Plan against the
+    frame you are actually going to take.
+    """
+    f, r, u = camera_basis(yaw, pitch)
+    t = math.tan(math.radians(fov) / 2.0)
+    th = t * getattr(args, "aspect", 1.0)
+    worst_h = worst_v = 0.0
+    for s in subjects:
+        for dz in (0.0, args.subject_height):
+            for wx, wy in ((0, 0), (args.subject_width, 0), (-args.subject_width, 0),
+                           (0, args.subject_width), (0, -args.subject_width)):
+                d = (s.x + wx - eye[0], s.y + wy - eye[1], s.z + dz - eye[2])
+                zf = d[0] * f[0] + d[1] * f[1] + d[2] * f[2]
+                if zf <= 1.0:
+                    return False, 9.9, f"{s.label} is behind the camera", 0.5
+                xr = (d[0] * r[0] + d[1] * r[1] + d[2] * r[2]) / (zf * th)
+                yu = (d[0] * u[0] + d[1] * u[1] + d[2] * u[2]) / (zf * t)
+                worst_h, worst_v = max(worst_h, abs(xr)), max(worst_v, abs(yu))
+    fill = max(worst_h, worst_v)
+    # Where the subjects sit vertically, 0 = top edge, 1 = bottom edge. Containment says they
+    # are in the picture; this says whether they are in the MIDDLE of it.
+    ctr = []
+    for s in subjects:
+        d = (s.x - eye[0], s.y - eye[1], s.z + args.subject_height / 2.0 - eye[2])
+        zf = d[0] * f[0] + d[1] * f[1] + d[2] * f[2]
+        yu = (d[0] * u[0] + d[1] * u[1] + d[2] * u[2]) / (zf * t)
+        ctr.append(0.5 - yu / 2.0)
+    v_centre = sum(ctr) / len(ctr)
+    if fill > 1.0 - args.frame_pad:
+        return False, fill, (f"a subject sits at {fill:.2f} of the half-frame, past the "
+                             f"{1-args.frame_pad:.2f} limit -- widen --fov or back the camera off"), v_centre
+    return True, fill, None, v_centre
+
+
+def evaluate(eye, subjects, floor_z, nav_entry, args, aim, skip_nav=False):
+    """Every reason this camera could be wrong, collected rather than short-circuited.
+
+    A planner that stops at the first failure teaches nothing when it refuses. The caller prints
+    the whole list, which is what makes a refusal actionable.
+    """
+    yaw = bearing_deg(aim[0] - eye[0], aim[1] - eye[1])
+    dxy = math.hypot(aim[0] - eye[0], aim[1] - eye[1])
+    pitch = math.degrees(math.atan2(eye[2] - aim[2], dxy)) if dxy > 1 else 0.0
+    v = {"eye": eye, "yaw": yaw, "pitch": pitch, "fail": [], "note": [], "sight": {}}
+
+    for s in subjects:
+        d = math.hypot(eye[0] - s.x, eye[1] - s.y)
+        b = bearing_deg(eye[0] - s.x, eye[1] - s.y)
+        if s.cl is None:
+            v["note"].append(f"{s.label}: no clearance map (visibility unproven from the map)")
+            continue
+        c, why = s.cl.at(b)
+        v["sight"][s.label] = {"bearing": b, "need": d, "clear": c}
+        if c is None:
+            v["fail"].append(f"{s.label}: {why} (bearing {b:.0f} deg)")
+        elif c <= d + args.sight_margin:
+            v["fail"].append(f"{s.label}: geometry at {c:.0f} u blocks the {d:.0f} u sightline "
+                             f"on bearing {b:.0f} deg (needs {args.sight_margin:.0f} u of margin)")
+        else:
+            v["note"].append(f"{s.label}: clear -- first geometry {c:.0f} u along a {d:.0f} u ray")
+
+    ok, fill, why, v_centre = frame_check(eye, yaw, pitch, args.fov, subjects, args)
+    v["fill"], v["v_centre"] = fill, v_centre
+    if not ok:
+        v["fail"].append(f"framing: {why}")
+
+    kind, msg = ("skipped", "not probed yet") if skip_nav else \
+        nav_verdict(nav_entry, floor_z, args)
+    v["nav"] = kind
+    if kind in ("wrong-storey", "no-floor"):
+        v["fail"].append(f"placement: {msg}")
+    else:
+        v["note"].append(f"placement: {msg}")
+
+    margins = [x["clear"] - x["need"] for x in v["sight"].values() if x["clear"] is not None]
+    v["wall_margin"] = min(margins) if margins else None
+    v["ok"] = not v["fail"]
+    v["score"] = (0.0 if not v["ok"] else
+                  100.0
+                  - 70.0 * abs(fill - args.fill)
+                  - 25.0 * (1.0 - min(1.0, (v["wall_margin"] or 0) / args.comfort))
+                  + (8.0 if kind == "on-storey" else 0.0))
+    return v
+
+
+# --------------------------------------------------------------------------------------
+# reporting
+# --------------------------------------------------------------------------------------
+
+def report_refusals(scored):
+    """Why the refused poses were refused, most common first.
+
+    A planner that refuses everything and says nothing is indistinguishable from one that is
+    broken, so the reasons are always printed -- including on the success path's counts.
+    """
+    why = {}
+    for v in scored:
+        for f in v["fail"]:
+            k = f.split(":", 1)[1].strip()[:70] if ":" in f else f[:70]
+            why[k] = why.get(k, 0) + 1
+    if not why:
+        return
+    print("  refused for:")
+    for k, n in sorted(why.items(), key=lambda kv: -kv[1])[:8]:
+        print(f"    {n:5d}  {k}")
+
+
+def pose_block(v, fov, label=""):
+    e, yaw, pitch = v["eye"], v["yaw"], v["pitch"]
+    return "\n".join([
+        f"  {label}eye        {e[0]:.1f}, {e[1]:.1f}, {e[2]:.1f}",
+        f"  viewprobe  --eye {e[0]:.1f},{e[1]:.1f},{e[2]:.1f} --yaw {yaw:.1f} "
+        f"--pitch {pitch:.1f} --fov {fov:.2f}",
+        f"  DevBench   camera action=drive "
+        f"{{\"x\": {e[0]:.1f}, \"y\": {e[1]:.1f}, \"z\": {e[2]:.1f}, "
+        f"\"yaw\": {math.radians(yaw):.4f}, \"pitch\": {math.radians(pitch):.4f}}}",
+        f"             (yaw {yaw:.1f} deg -> {math.radians(yaw):.4f} rad. DevBench wants RADIANS;"
+        f" degrees are wrapped mod 2pi with no error. Its `get` does NOT round-trip `drive`"
+        f" -- verify by what the frame shows, never by the readback)",
+    ])
+
+
+def print_verdict(v, fov, target=None, indent="  "):
+    for f in v["fail"]:
+        print(f"{indent}REFUSED  {f}")
+    for n in v["note"]:
+        print(f"{indent}ok       {n}")
+    print(f"{indent}framing  subjects reach {v['fill']:.2f} of the half-frame at vertical fov {fov:.2f}"
+          + (f" (target {target:.2f})" if target is not None else ""))
+    vc = v.get("v_centre")
+    if vc is not None:
+        print(f"{indent}         their midpoint sits {vc:.2f} down the frame"
+              + ("" if abs(vc - 0.5) < 0.08
+                 else " -- OFF-CENTRE. --aim-height is the knob: aim at the MIDDLE of the "
+                      "subject, which for a SEATED actor is far below a standing head"))
+
+
+# --------------------------------------------------------------------------------------
+# subcommands
+# --------------------------------------------------------------------------------------
+
+def cmd_plan(args):
+    apply_profile_frame(args)
+    subjects = [Subject(s, args.floor_z if args.floor_z is not None else 0.0) for s in args.subject]
+    floor_z = args.floor_z if args.floor_z is not None else min(s.z for s in subjects)
+    cx = sum(s.x for s in subjects) / len(subjects)
+    cy = sum(s.y for s in subjects) / len(subjects)
+    aim = (cx, cy, floor_z + args.aim_height)
+    if args.aim:
+        aim = tuple(float(v) for v in args.aim.split(","))
+
+    run = Runner(args.cell, args.vp, args.passthrough, args.out, args.size, not args.quiet)
+
+    print(f"cell {args.cell}   floor z {floor_z:.0f}   probe eye z {floor_z + args.eye_height:.0f}")
+    for s in subjects:
+        print(f"  subject {s.label:<18} {s.x:.1f}, {s.y:.1f}, {s.z:.1f}")
+    print(f"  aim point          {aim[0]:.1f}, {aim[1]:.1f}, {aim[2]:.1f}")
+
+    # Pass 1 -- the clearance maps. One render per subject per sector; every pick in a render is
+    # free once its load walk has run, which is the whole reason this beats testing candidate
+    # cameras one at a time.
+    print(f"\n--- pass 1: clearance maps ({len(subjects)} subject(s) "
+          f"x {len(args.map_yaws)} render(s)) ---")
+    n_bear = int(round(360.0 / args.bearing_step))
+    for s in subjects:
+        s.cl = build_clearance(run, s.pos(), floor_z, args)
+        vals = sorted(v for v in s.cl.bins.values() if v)
+        print(f"  {s.label:<18} {s.cl.sampled()}/{n_bear} bearings bounded"
+              + (f", clearance {vals[0]:.0f}-{vals[-1]:.0f} u, median {vals[len(vals)//2]:.0f} u"
+                 if vals else " -- NOTHING was bounded, so nothing can be planned"))
+
+    # Pass 2 -- score every candidate on sightline and framing alone. Both are pure arithmetic
+    # over pass 1, so the whole polar grid is judged without another render.
+    stands = [args.standoff_min + i * args.standoff_step
+              for i in range(int((args.standoff_max - args.standoff_min) / args.standoff_step) + 1)]
+    cands = []
+    for i in range(n_bear):
+        b = i * args.bearing_step
+        ux, uy = bearing_vec(b)
+        for st in stands:
+            cands.append((b, st, (round(cx + ux * st), round(cy + uy * st))))
+    print(f"\n--- pass 2: {len(cands)} candidate poses "
+          f"({n_bear} bearings x {len(stands)} standoffs), scored without navmesh ---")
+    stage1 = []
+    for b, st, xy in cands:
+        eye = (float(xy[0]), float(xy[1]), floor_z + args.eye_height)
+        v = evaluate(eye, subjects, floor_z, None, args, aim, skip_nav=True)
+        v["_bearing"], v["_standoff"], v["_xy"] = b, st, xy
+        stage1.append(v)
+    live = [v for v in stage1 if v["ok"]]
+    print(f"  {len(live)} survive sightline + framing; {len(stage1) - len(live)} refused")
+    report_refusals(stage1)
+    if not live:
+        raise SystemExit("\nNo camera survives sightline and framing. Widen --fov, raise "
+                         "--standoff-max, or check the subjects are where you think they are.")
+
+    # Pass 3 -- one invocation carrying `--nav-at` for the survivors. Batched here rather than
+    # with pass 1 because the full polar grid would be ~1,400 probes, and that many flags
+    # overruns a Windows command line. A cap that silently dropped candidates would read as
+    # "these were considered and rejected", so anything dropped is named.
+    live.sort(key=lambda v: -v["score"])
+    seen, pts = set(), []
+    for v in live:
+        if v["_xy"] not in seen:
+            seen.add(v["_xy"])
+            pts.append(v["_xy"])
+    dropped = max(0, len(pts) - args.nav_probe_max)
+    pts = pts[:args.nav_probe_max]
+    print(f"\n--- pass 3: nav-probing {len(pts)} surviving point(s) in ONE render ---"
+          + (f"\n  !! {dropped} point(s) DROPPED by --nav-probe-max={args.nav_probe_max}; "
+             f"those poses are NOT judged and NOT offered" if dropped else ""))
+    flags = ["--eye", f"{cx:.1f},{cy:.1f},{floor_z + args.eye_height:.1f}", "--yaw", "0"]
+    for x, y in pts:
+        flags += ["--nav-at", f"{x},{y}"]
+    nav = run.probe(*flags).nav()
+    kept = set(pts)
+    scored = []
+    for v in live:
+        if v["_xy"] not in kept:
+            continue
+        v2 = evaluate(v["eye"], subjects, floor_z, nav.get(v["_xy"]), args, aim)
+        v2["_bearing"], v2["_standoff"], v2["_xy"] = v["_bearing"], v["_standoff"], v["_xy"]
+        scored.append(v2)
+    ok = [v for v in scored if v["ok"]]
+    ok.sort(key=lambda v: -v["score"])
+    print(f"  {len(ok)} of {len(scored)} survive the placement test; "
+          f"{len(scored) - len(ok)} refused")
+    report_refusals(scored)
+    if not ok:
+        raise SystemExit("\nEvery sightline-clear camera sits off the storey. Raise "
+                         "--offmesh-tol / --storey-tol only if you can say why.")
+
+    print(f"\n--- top {min(args.top, len(ok))} ---")
+    for v in ok[:args.top]:
+        print(f"  score {v['score']:5.1f}  bearing {v['_bearing']:5.1f} deg  standoff {v['_standoff']:4.0f} u  "
+              f"fill {v['fill']:.2f}  wall margin {v['wall_margin']:.0f} u  nav {v['nav']}")
+
+    best = ok[0]
+    print(f"\n=== chosen ===")
+    print(pose_block(best, args.fov))
+    print()
+    print_verdict(best, args.fov, args.fill)
+
+    if not args.no_verify:
+        print("\n--- verification: an aimed probe render per subject, from the chosen camera ---")
+        print("  (the map is interpolated between sampled bearings and is probed FROM the subject;")
+        print("   this shoots the actual ray the camera will use, and is the claim that counts)")
+        bad = []
+        for s in subjects:
+            head = (s.x, s.y, s.z + args.sight_height)
+            d = math.dist(best["eye"], head)
+            c = run.size // 2
+            p = run.probe("--eye", "{:.1f},{:.1f},{:.1f}".format(*best["eye"]),
+                          "--look", "{:.1f},{:.1f},{:.1f}".format(*head),
+                          "--fov", f"{args.fov:g}", "--pick", f"{c},{c}")
+            hit = p.picks().get((c, c))
+            if hit is None:
+                print(f"  {s.label:<18} centre ray hit NOTHING at {d:.0f} u -- "
+                      f"no depth-writing geometry on the ray. Treat as UNPROVEN, not clear.")
+                bad.append(s.label)
+            elif hit[3] >= d - args.sight_margin:
+                print(f"  {s.label:<18} CLEAR -- first geometry {hit[3]:.0f} u along a {d:.0f} u ray")
+            else:
+                print(f"  {s.label:<18} BLOCKED -- geometry at {hit[3]:.0f} u, "
+                      f"short of the {d:.0f} u subject")
+                bad.append(s.label)
+        if bad:
+            print(f"\n  !! the map and the aimed probe DISAGREE for: {', '.join(bad)}")
+            print("     the aimed probe wins. Re-run with a finer --bearing-step, or take the "
+                  "next candidate.")
+        else:
+            print("  all subjects confirmed from the chosen camera.")
+
+    if args.worklist:
+        wl = {
+            "label": args.label or f"shotplan -- {args.cell}",
+            "eyeHeight": args.eye_height,
+            "cells": [{"cell": args.cell, "shots": [
+                {"label": (args.label or "planned camera") + f" -- {', '.join(s.label for s in subjects)}",
+                 "eye": [round(best["eye"][0], 1), round(best["eye"][1], 1), round(best["eye"][2], 1)],
+                 "floorZ": round(floor_z, 1),
+                 "yaw": round(best["yaw"], 1), "pitch": round(best["pitch"], 1), "fov": args.fov,
+                 "note": (f"planned by shotplan: bearing {best['_bearing']:.0f} deg, standoff "
+                          f"{best['_standoff']:.0f} u, subjects fill {best['fill']:.2f} of the "
+                          f"half-frame, nearest obstruction behind the camera "
+                          f"{best['wall_margin']:.0f} u further out")}
+            ]}],
+        }
+        with open(args.worklist, "w", encoding="utf-8") as f:
+            json.dump(wl, f, indent=2)
+        print(f"\nworklist -> {args.worklist}")
+        print("  render it:  viewprobe --worklist " + args.worklist)
+        print("  drive it :  shotplan.py devbench " + args.worklist)
+
+    if args.dump:
+        with open(args.dump, "w", encoding="utf-8") as f:
+            json.dump([{"bearing": v["_bearing"], "standoff": v["_standoff"], "xy": v["_xy"],
+                        "ok": v["ok"], "nav": v["nav"], "fill": round(v["fill"], 3),
+                        "score": round(v["score"], 1), "fail": v["fail"]}
+                       for v in (scored if args.dump_survivors else stage1)], f, indent=1)
+        print(f"dump     -> {args.dump} "
+              f"({'nav-probed survivors' if args.dump_survivors else 'all candidates'})")
+
+    if args.json:
+        with open(args.json, "w", encoding="utf-8") as f:
+            json.dump({"cell": args.cell, "floorZ": floor_z, "aim": aim,
+                       "subjects": [{"label": s.label, "pos": s.pos()} for s in subjects],
+                       "chosen": {k: v for k, v in best.items() if k != "_target"},
+                       "top": [{k: v for k, v in x.items() if k != "_target"} for x in ok[:args.top]],
+                       "renders": run.renders, "seconds": round(run.seconds, 1)}, f, indent=2,
+                      default=str)
+        print(f"json     -> {args.json}")
+
+    print(f"\n{run.renders} viewprobe renders, {run.seconds:.0f}s of load walks.")
+
+
+def cmd_check(args):
+    """Judge a camera someone already has. This is the positive control.
+
+    A planner that never refuses anything is not validated. Point this at a camera known to be
+    bad and it must say so, for a reason you can check by hand.
+    """
+    apply_profile_frame(args)
+    subjects = [Subject(s, args.floor_z if args.floor_z is not None else 0.0) for s in args.subject]
+    floor_z = args.floor_z if args.floor_z is not None else min(s.z for s in subjects)
+    eye = tuple(float(v) for v in args.eye.split(","))
+    aim = (sum(s.x for s in subjects) / len(subjects),
+           sum(s.y for s in subjects) / len(subjects), floor_z + args.aim_height)
+    if args.aim:
+        aim = tuple(float(v) for v in args.aim.split(","))
+
+    run = Runner(args.cell, args.vp, args.passthrough, args.out, args.size, not args.quiet)
+    print(f"cell {args.cell}   camera {eye[0]:.1f},{eye[1]:.1f},{eye[2]:.1f}   floor z {floor_z:.0f}")
+
+    c = run.size // 2
+    verdicts, first = {}, True
+    for s in subjects:
+        head = (s.x, s.y, s.z + args.sight_height)
+        d = math.dist(eye, head)
+        extra = ["--nav-at", f"{round(eye[0])},{round(eye[1])}",
+                 "--refs-at", f"{eye[0]:.0f},{eye[1]:.0f},{args.refs_radius:g}"] if first else []
+        p = run.probe("--eye", "{:.1f},{:.1f},{:.1f}".format(*eye),
+                      "--look", "{:.1f},{:.1f},{:.1f}".format(*head),
+                      "--fov", f"{args.fov:g}", "--pick", f"{c},{c}", *extra)
+        if first:
+            nav = p.nav().get((round(eye[0]), round(eye[1])))
+            refs = p.refs()[:14]
+            first = False
+        hit = p.picks().get((c, c))
+        verdicts[s.label] = (hit, d)
+
+    print("\n--- sightlines (the aimed ray the camera will actually use) ---")
+    fails = []
+    for label, (hit, d) in verdicts.items():
+        if hit is None:
+            print(f"  {label:<18} centre ray hit NOTHING at {d:.0f} u -- UNPROVEN "
+                  f"(no depth-writing geometry; an alpha-blended surface would read this way too)")
+            fails.append(f"{label}: unproven")
+        elif hit[3] >= d - args.sight_margin:
+            print(f"  {label:<18} CLEAR -- first geometry {hit[3]:.0f} u along a {d:.0f} u ray")
+        else:
+            print(f"  {label:<18} BLOCKED -- geometry at {hit[3]:.0f} u, short of the {d:.0f} u subject "
+                  f"(at {hit[0]:.0f},{hit[1]:.0f},{hit[2]:.0f})")
+            fails.append(f"{label}: blocked at {hit[3]:.0f} u")
+
+    kind, msg = nav_verdict(nav, floor_z, args)
+    print(f"\n--- placement ---\n  {kind}: {msg}")
+    if kind in ("wrong-storey", "no-floor"):
+        fails.append(f"placement: {kind}")
+
+    yaw = bearing_deg(aim[0] - eye[0], aim[1] - eye[1])
+    dxy = math.hypot(aim[0] - eye[0], aim[1] - eye[1])
+    pitch = math.degrees(math.atan2(eye[2] - aim[2], dxy)) if dxy > 1 else 0.0
+    ok, fill, why, v_centre = frame_check(eye, yaw, pitch, args.fov, subjects, args)
+    print(f"\n--- framing (aimed at {aim[0]:.0f},{aim[1]:.0f},{aim[2]:.0f}) ---")
+    print(f"  subjects reach {fill:.2f} of the half-frame at vertical fov {args.fov:.2f}"
+          + ("" if ok else f"  -- {why}"))
+    print(f"  their midpoint sits {v_centre:.2f} down the frame "
+          f"({'centred' if abs(v_centre - 0.5) < 0.08 else 'OFF-CENTRE; raise or lower --aim-height'})")
+    if not ok:
+        fails.append("framing")
+
+    if args.show_refs and refs:
+        print("\n--- what is around the camera ---")
+        for ln in refs:
+            print("  " + ln.strip())
+
+    print("\n=== verdict ===")
+    if fails:
+        print("  REFUSED -- " + "; ".join(fails))
+    else:
+        print("  ACCEPTED")
+        print(pose_block({"eye": eye, "yaw": yaw, "pitch": pitch}, args.fov))
+    print(f"\n{run.renders} viewprobe renders, {run.seconds:.0f}s.")
+    return 1 if fails else 0
+
+
+def cmd_frame(args):
+    """What frame will the game actually render? Read it, do not estimate it."""
+    fr = game_frame(args.instance, args.profile, args.game, args.my_games)
+    print_frame(fr)
+    if args.explain:
+        print()
+        print("How the vertical angle is derived, and how to check it:")
+        print("  The ini gives a SETTING, not a frustum. fDefaultWorldFOV is the horizontal")
+        print("  angle at a 4:3 base and the engine widens horizontally for anything wider, so")
+        print("      tan(fov_v/2) = tan(setting/2) / (4/3)")
+        print("  To MEASURE it instead of deriving it: take a game frame, render the same camera")
+        print("  pose in viewprobe at a deliberately wide --fov, and find the central crop of the")
+        print("  render that matches the game frame's central square. Cropping a rectilinear")
+        print("  image about its axis is exactly equivalent to a narrower fov, so a crop keeping")
+        print("  fraction f of the half-width means tan(fov_v/2) = f * tan(fov_render/2).")
+        print("  Match on gradient magnitude, not pixels -- the lighting differs enormously.")
+        print("  Two frames at different pitches are independent measurements of one number.")
+    if args.json:
+        with open(args.json, "w", encoding="utf-8") as f:
+            json.dump({k: v for k, v in fr.items() if k not in ("w_hits", "h_hits", "fov_hits")},
+                      f, indent=2)
+        print(f"\njson -> {args.json}")
+    return 0
+
+
+def cmd_devbench(args):
+    """A worklist is already a shot list. This makes it a DevBench camera script.
+
+    One file, three consumers now -- the fly-through, the console bat, and the game camera -- so
+    the render, the tester's feet and the screenshot all come from the same coordinates and
+    cannot drift apart.
+    """
+    with open(args.worklist, encoding="utf-8") as f:
+        wl = json.load(f)
+    if "cells" not in wl:
+        raise SystemExit(f"{args.worklist} has no 'cells' -- that is not a worklist. "
+                         "A conflict emit and a worklist share an extension and nothing else.")
+    n = 0
+    out = []
+    for cell in wl["cells"]:
+        for shot in cell.get("shots", []):
+            n += 1
+            if args.shot and n != args.shot:
+                continue
+            eye = shot["eye"]
+            yaw = shot.get("yaw")
+            pitch = shot.get("pitch", 0) or 0
+            if yaw is None and "look" in shot:
+                lk = shot["look"]
+                yaw = bearing_deg(lk[0] - eye[0], lk[1] - eye[1])
+                dxy = math.hypot(lk[0] - eye[0], lk[1] - eye[1])
+                pitch = math.degrees(math.atan2(eye[2] - lk[2], dxy)) if dxy > 1 else 0.0
+            if yaw is None:
+                raise SystemExit(f"shot {n} has neither yaw nor look")
+            drive = {"action": "drive", "x": round(eye[0], 1), "y": round(eye[1], 1),
+                     "z": round(eye[2], 1),
+                     "yaw": round(math.radians(yaw), 4), "pitch": round(math.radians(pitch), 4)}
+            out.append({"n": n, "cell": cell["cell"], "label": shot.get("label", ""),
+                        "floorZ": shot.get("floorZ"), "yawDeg": round(yaw, 1),
+                        "pitchDeg": round(pitch, 1), "drive": drive})
+    if args.json:
+        print(json.dumps(out, indent=2))
+        return 0
+    for s in out:
+        print(f"# shot {s['n']} -- {s['cell']}: {s['label']}")
+        print(f"#   yaw {s['yawDeg']} deg -> {s['drive']['yaw']} rad, "
+              f"pitch {s['pitchDeg']} deg -> {s['drive']['pitch']} rad  (DevBench wants RADIANS)")
+        if s["floorZ"] is not None:
+            print(f"#   the PLAYER goes to the floor: player.setpos z {s['floorZ']} "
+                  f"-- move the player to the subject first or the interior renders unlit")
+        print(json.dumps(s["drive"]))
+        print(f"curl -s -X POST http://127.0.0.1:{args.port}/api/tool/camera "
+              f"-H 'content-type: application/json' -d '"
+              + json.dumps({"action": "freecam", "on": True}) + "'")
+        print(f"curl -s -X POST http://127.0.0.1:{args.port}/api/tool/camera "
+              f"-H 'content-type: application/json' -d '" + json.dumps(s["drive"]) + "'")
+        print()
+    print(f"# {len(out)} shot(s). freecam is fire-and-forget -- poll camera action=get until")
+    print("# freeCam is true before driving, and never verify a pose by the readback: it is NEGATED.")
+    return 0
+
+
+# --------------------------------------------------------------------------------------
+
+def apply_profile_frame(args):
+    """--from-profile: take --fov and --aspect from the game's own ini instead of a guess."""
+    if not getattr(args, "from_profile", False):
+        return
+    inst = args.instance or _passthrough_value(args, "--instance")
+    prof = args.profile or _passthrough_value(args, "--profile")
+    gm = args.game or _passthrough_value(args, "--game")
+    if not inst or not prof:
+        raise SystemExit("--from-profile needs the instance and profile: give --instance/--profile, "
+                         "or pass them through after -- as viewprobe already takes them")
+    fr = game_frame(inst, prof, gm, args.my_games)
+    print_frame(fr)
+    args.fov, args.aspect = fr["fov_vertical"], fr["aspect"]
+    print()
+
+
+def _passthrough_value(args, flag):
+    pt = getattr(args, "passthrough", []) or []
+    for i, a in enumerate(pt):
+        if a == flag and i + 1 < len(pt):
+            return pt[i + 1]
+    return None
+
+
+def add_common(p, need_subjects=True):
+    p.add_argument("cell", help="CellEditorID or FormID -- passed to viewprobe as args[0]")
+    p.add_argument("--subject", action="append", default=[], required=need_subjects,
+                   metavar="X,Y[,Z][=label]",
+                   help="a thing that must be in frame, at its FEET. Repeatable. Feed RUNTIME "
+                        "positions (DevBench inspect kind=refs) when the game is up -- an actor "
+                        "is placed at its AI package anchor, not at its placement record")
+    p.add_argument("--floor-z", type=float, default=None,
+                   help="the storey the subjects stand on (default: the lowest subject z)")
+    p.add_argument("--eye-height", type=float, default=120.0,
+                   help="camera height above the floor (default 120, viewprobe's own default)")
+    p.add_argument("--aim-height", type=float, default=100.0,
+                   help="height above a subject's feet that the camera aims at (default 100, a "
+                        "standing head). Aim at the MIDDLE of what should be centred -- a seated "
+                        "actor centred wants roughly half this, or it frames low")
+    p.add_argument("--sight-height", type=float, default=100.0,
+                   help="height above a subject's feet that the SIGHTLINE probes aim at "
+                        "(default 100). Keep this at head height even when --aim-height is "
+                        "lower: a ray fired at a seated actor's middle hits the chair, and "
+                        "reports the chair as an obstruction")
+    p.add_argument("--aim", default=None, metavar="X,Y,Z", help="aim here instead of the centroid")
+    p.add_argument("--fov", type=float, default=65.0,
+                   help="the DELIVERABLE camera's VERTICAL fov (default 65, viewprobe's own)")
+    p.add_argument("--aspect", default="1:1",
+                   help="frame aspect W:H (default 1:1, viewprobe's square frame). Set it to the "
+                        "frame you will actually take -- a 16:9 game frame is WIDER horizontally "
+                        "and, at the same --fov, is not the same crop")
+    p.add_argument("--subject-height", type=float, default=128.0,
+                   help="how tall a subject is, for the framing test (default 128)")
+    p.add_argument("--subject-width", type=float, default=40.0,
+                   help="half-width of a subject, for the framing test (default 40)")
+    p.add_argument("--frame-pad", type=float, default=0.12,
+                   help="fraction of the half-frame kept clear at the edges (default 0.12)")
+    p.add_argument("--sight-margin", type=float, default=24.0,
+                   help="how much further than the subject the first geometry must be (default 24)")
+    p.add_argument("--storey-tol", type=float, default=96.0,
+                   help="how far a walkable level may sit from the floor and still be it (default 96)")
+    p.add_argument("--offmesh-tol", type=float, default=160.0,
+                   help="how far off navmesh a camera point may sit and still count as inside "
+                        "the room (default 160 -- navmesh is cut around furniture)")
+    p.add_argument("--size", type=int, default=320, help="probe render size (default 320)")
+    p.add_argument("--out", default=None, help="where probe PNGs go")
+    p.add_argument("--vp", default=None,
+                   help="the viewprobe command (default: dotnet run against this checkout). "
+                        "Anything that takes viewprobe's args, e.g. a wrapper script")
+    p.add_argument("--quiet", action="store_true", help="do not echo each invocation")
+    p.add_argument("--from-profile", action="store_true",
+                   help="read --fov and --aspect from the MO2 profile's own ini instead of "
+                        "guessing the frame shape. Needs --instance/--profile (or the same flags "
+                        "passed through after --)")
+    p.add_argument("--instance", default=None, help="MO2 instance dir, for --from-profile")
+    p.add_argument("--profile", default=None, help="MO2 profile name, for --from-profile")
+    p.add_argument("--game", default=None, help="game dir, for --from-profile")
+    p.add_argument("--my-games", default=None,
+                   help="Documents\\My Games\\<game> dir, when LocalSettings is off")
+    # NOTE: the pass-through list is split off by hand in main() before argparse ever sees it.
+    # A `nargs="*"` positional beside a required one is ambiguous, and argparse resolves the
+    # ambiguity by refusing the whole command line.
+
+
+def main(argv=None):
+    ap = argparse.ArgumentParser(
+        prog="shotplan.py", description=__doc__,
+        formatter_class=argparse.RawDescriptionHelpFormatter)
+    sub = ap.add_subparsers(dest="cmd", required=True)
+
+    p = sub.add_parser("plan", help="choose a camera for a set of subjects")
+    add_common(p)
+    p.add_argument("--fov-map", type=float, default=100.0,
+                   help="fov of the CLEARANCE probe renders (default 100; four of them tile 360 deg)")
+    p.add_argument("--map-yaws", default="0,90,180,270",
+                   help="the probe yaws that tile the circle (default 0,90,180,270)")
+    p.add_argument("--edge-margin", type=float, default=2.0,
+                   help="degrees of each probe frustum left unsampled at the edges (default 2)")
+    p.add_argument("--bearing-step", type=float, default=5.0,
+                   help="angular resolution of the clearance map, degrees (default 5)")
+    p.add_argument("--elevations", default="-4,0,4",
+                   help="elevations sampled per bearing, degrees (default -4,0,4)")
+    p.add_argument("--standoff-min", type=float, default=250.0)
+    p.add_argument("--standoff-max", type=float, default=1200.0)
+    p.add_argument("--standoff-step", type=float, default=50.0)
+    p.add_argument("--fill", type=float, default=0.55,
+                   help="how much of the half-frame the subjects should reach (default 0.55)")
+    p.add_argument("--comfort", type=float, default=200.0,
+                   help="clearance beyond the camera that scores full marks (default 200)")
+    p.add_argument("--nav-probe-max", type=int, default=400,
+                   help="cap on batched --nav-at probes; anything dropped is REPORTED")
+    p.add_argument("--top", type=int, default=5)
+    p.add_argument("--dump-survivors", action="store_true",
+                   help="with --dump, dump only the nav-probed survivors instead of everything")
+    p.add_argument("--no-verify", action="store_true",
+                   help="skip the aimed per-subject confirmation renders")
+    p.add_argument("--worklist", default=None, help="write the chosen shot as a viewprobe worklist")
+    p.add_argument("--json", default=None, help="write the full result as JSON")
+    p.add_argument("--dump", default=None,
+                   help="write EVERY candidate and its verdict as JSON -- what you need to ask "
+                        "why a particular position was or was not offered")
+    p.add_argument("--label", default=None, help="worklist label")
+    p.set_defaults(func=cmd_plan)
+
+    p = sub.add_parser("check", help="judge a camera you already have (the positive control)")
+    add_common(p)
+    p.add_argument("--eye", required=True, metavar="X,Y,Z", help="the camera to judge")
+    p.add_argument("--refs-radius", type=float, default=96.0)
+    p.add_argument("--show-refs", action="store_true", help="print what is around the camera")
+    p.set_defaults(func=cmd_check)
+
+    p = sub.add_parser("frame", help="read the game's own resolution and fov from its ini")
+    p.add_argument("--instance", required=True, help="MO2 instance dir")
+    p.add_argument("--profile", required=True, help="MO2 profile name")
+    p.add_argument("--game", default=None)
+    p.add_argument("--my-games", default=None,
+                   help="Documents\\My Games\\<game> dir, when LocalSettings is off")
+    p.add_argument("--explain", action="store_true", help="print how the angle is derived and measured")
+    p.add_argument("--json", default=None)
+    p.set_defaults(func=cmd_frame)
+
+    p = sub.add_parser("devbench", help="turn a worklist into DevBench camera args")
+    p.add_argument("worklist")
+    p.add_argument("--shot", type=int, default=None, help="just this shot (1-based)")
+    p.add_argument("--port", type=int, default=8920)
+    p.add_argument("--json", action="store_true")
+    p.set_defaults(func=cmd_devbench)
+
+    argv = list(sys.argv[1:] if argv is None else argv)
+    passthrough = []
+    if "--" in argv:
+        i = argv.index("--")
+        argv, passthrough = argv[:i], argv[i + 1:]
+    args = ap.parse_args(argv)
+    args.passthrough = passthrough
+    if isinstance(getattr(args, "aspect", None), str):
+        a = args.aspect.replace("x", ":").split(":")
+        args.aspect = float(a[0]) / float(a[1]) if len(a) == 2 else float(a[0])
+    if hasattr(args, "map_yaws"):
+        args.map_yaws = [float(v) for v in args.map_yaws.split(",")]
+    return args.func(args) or 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
