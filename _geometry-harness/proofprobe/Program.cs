@@ -486,6 +486,117 @@ Console.WriteLine("\nPROOF — the detector cores (_shared/DetectorModel.cs)\n")
        && DetectorModel.Verdict(true, 0, 3, 2) == "ALTERNATIVE"
        && DetectorModel.Verdict(false, 0, 3, 0) == "UNREADABLE",
           "all five arms");
+
+    // CoverageLoss — 3.5.5's candidate selector. The rule exists because E5's 26-target null
+    // proved nothing: every target sat on ground where the two arms were geometrically identical.
+    // Candidates must be chosen where the winning geometry actually changes, by MORE than the
+    // oracle's ~120u resolution — and each case here is a mesh pair whose right answer is known
+    // by construction. Clearance 120 / spacing 64, the values the driver runs at.
+    {
+        List<(int A, int B, int C, int Flags)> Quad(List<System.Numerics.Vector3> verts,
+            float x0, float y0, float x1, float y1, int flags = 0,
+            List<(int A, int B, int C, int Flags)>? into = null)
+        {
+            int b = verts.Count;
+            verts.Add(new(x0, y0, 0)); verts.Add(new(x1, y0, 0));
+            verts.Add(new(x1, y1, 0)); verts.Add(new(x0, y1, 0));
+            var tris = into ?? new List<(int, int, int, int)>();
+            tris.Add((b, b + 1, b + 2, flags));
+            tris.Add((b, b + 2, b + 3, flags));
+            return tris;
+        }
+        const float CL = 120f, SP = 64f;
+
+        // Identical meshes: no candidate in either direction.
+        var idV = new List<System.Numerics.Vector3>();
+        var idT = Quad(idV, 0, 0, 256, 256);
+        Check("cover: identical meshes -> no candidates",
+              DetectorModel.CoverageLoss(idV, idT, idV, idT, CL, SP).Count == 0, "the E5 shape, by construction");
+
+        // A removed island: the loser has a far pad the winner does not. Candidates appear on the
+        // island, in the victim direction only.
+        var withIslandV = new List<System.Numerics.Vector3>();
+        var withIslandT = Quad(withIslandV, 0, 0, 256, 256);
+        Quad(withIslandV, 1000, 0, 1256, 256, 0, withIslandT);
+        var baseOnlyV = new List<System.Numerics.Vector3>();
+        var baseOnlyT = Quad(baseOnlyV, 0, 0, 256, 256);
+        var lost = DetectorModel.CoverageLoss(withIslandV, withIslandT, baseOnlyV, baseOnlyT, CL, SP);
+        Check("cover: island removed -> victim-direction candidates on the island",
+              lost.Count > 0 && lost.All(s => s.Point.X > 900), $"{lost.Count} samples, all on the island");
+        Check("cover: island removed -> candidate clearance is the real gap",
+              lost.Max(s => s.Clearance) > 700, $"max clearance {(lost.Count > 0 ? lost.Max(s => s.Clearance) : 0):0}u (island is ~744u out)");
+        Check("cover: the mirror direction is empty (nothing the winner has that the loser lacks)",
+              DetectorModel.CoverageLoss(baseOnlyV, baseOnlyT, withIslandV, withIslandT, CL, SP).Count == 0,
+              "a subset loses nothing");
+
+        // Moved-but-overlapping: a 64u shift never opens 120u of clearance.
+        var shiftedV = new List<System.Numerics.Vector3>();
+        var shiftedT = Quad(shiftedV, 64, 64, 320, 320);
+        Check("cover: geometry moved 64u -> no candidate at 120u clearance",
+              DetectorModel.CoverageLoss(baseOnlyV, baseOnlyT, shiftedV, shiftedT, CL, SP).Count == 0
+           && DetectorModel.CoverageLoss(shiftedV, shiftedT, baseOnlyV, baseOnlyT, CL, SP).Count == 0,
+              "moved geometry that still overlaps is not a coverage difference");
+
+        // Deleted-flag triangles are not coverage — a winner whose island survives only as
+        // deleted triangles has still removed the ground.
+        var delIslandV = new List<System.Numerics.Vector3>();
+        var delIslandT = Quad(delIslandV, 0, 0, 256, 256);
+        Quad(delIslandV, 1000, 0, 1256, 256, DetectorModel.NavTriDeleted, delIslandT);
+        Check("cover: a Deleted-flag island is NOT coverage on the against side",
+              DetectorModel.CoverageLoss(withIslandV, withIslandT, delIslandV, delIslandT, CL, SP).Count > 0,
+              "flag 0x08 removes ground even when the triangles remain");
+        Check("cover: a Deleted-flag island is never SAMPLED on the from side",
+              DetectorModel.CoverageLoss(delIslandV, delIslandT, baseOnlyV, baseOnlyT, CL, SP).Count == 0,
+              "no probe point on ground the record itself deletes");
+
+        // Water: never a probe point, but it IS reachable ground to the oracle (an actor swims).
+        var waterIslandV = new List<System.Numerics.Vector3>();
+        var waterIslandT = Quad(waterIslandV, 0, 0, 256, 256);
+        Quad(waterIslandV, 1000, 0, 1256, 256, DetectorModel.NavTriWater, waterIslandT);
+        Check("cover: a Water island is never sampled as a probe point",
+              DetectorModel.CoverageLoss(waterIslandV, waterIslandT, baseOnlyV, baseOnlyT, CL, SP).Count == 0,
+              "flag 0x200 is not standable");
+        Check("cover: a Water island still COUNTS as coverage on the against side",
+              DetectorModel.CoverageLoss(withIslandV, withIslandT, waterIslandV, waterIslandT, CL, SP).Count == 0,
+              "a target beside water reads as reachable — NEG-void's lesson");
+
+        // Subdivision: one huge triangle whose centroid the winner still covers, but whose far
+        // corner it does not. A centroid-only sampler returns the vacuous answer.
+        var hugeV = new List<System.Numerics.Vector3> { new(0, 0, 0), new(2048, 0, 0), new(0, 2048, 0) };
+        var hugeT = new List<(int, int, int, int)> { (0, 1, 2, 0) };
+        var centroidPatchV = new List<System.Numerics.Vector3>();
+        var centroidPatchT = Quad(centroidPatchV, 555, 555, 811, 811);
+        var corner = DetectorModel.CoverageLoss(hugeV, hugeT, centroidPatchV, centroidPatchT, CL, SP);
+        Check("cover: subdivision finds a lost corner the centroid would miss",
+              corner.Count > 0 && corner.Any(s => s.Point.X > 1500 || s.Point.Y > 1500),
+              $"{corner.Count} samples beyond a patch that covers the centroid");
+
+        // An emptied winner: everything is lost, clearance unbounded.
+        var emptyT = new List<(int, int, int, int)>();
+        var allLost = DetectorModel.CoverageLoss(baseOnlyV, baseOnlyT, baseOnlyV, emptyT, CL, SP);
+        Check("cover: an against side with no coverage -> every sample a candidate, clearance infinite",
+              allLost.Count > 0 && allLost.All(s => float.IsPositiveInfinity(s.Clearance)),
+              "the EMPTIED shape");
+
+        // DistanceToCoverage — the measure itself, pinned at the three Voronoi regions, plus the
+        // degenerate arms (zero-area and out-of-range triangles are lines/garbage, not ground).
+        Check("cover: distance above the face is the height",
+              MathF.Abs(DetectorModel.DistanceToCoverage(new(128, 128, 100), idV, idT) - 100f) < 0.01f,
+              "face region");
+        Check("cover: distance beyond an edge is to the edge",
+              MathF.Abs(DetectorModel.DistanceToCoverage(new(300, 128, 0), idV, idT) - 44f) < 0.01f,
+              "edge region, 300 - 256");
+        Check("cover: distance beyond a corner is to the corner",
+              MathF.Abs(DetectorModel.DistanceToCoverage(new(356, 356, 0), idV, idT) - MathF.Sqrt(2f) * 100f) < 0.01f,
+              "vertex region");
+        var degenV = new List<System.Numerics.Vector3> { new(0, 0, 0), new(100, 0, 0), new(200, 0, 0) };
+        Check("cover: a zero-area triangle is not coverage",
+              float.IsPositiveInfinity(DetectorModel.DistanceToCoverage(new(50, 10, 0), degenV,
+                  new List<(int, int, int, int)> { (0, 1, 2, 0) })), "collinear vertices are a line, not ground");
+        Check("cover: out-of-range indices are skipped, not crashed on",
+              float.IsPositiveInfinity(DetectorModel.DistanceToCoverage(new(50, 10, 0), degenV,
+                  new List<(int, int, int, int)> { (0, 1, 99, 0) })), "garbage contributes nothing");
+    }
 }
 
 // ---------------------------------------------------------------------------------------

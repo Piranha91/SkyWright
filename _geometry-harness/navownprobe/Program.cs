@@ -29,7 +29,8 @@ using Mutagen.Bethesda.Skyrim;
 //              cell's navmesh afterwards. Nobody can have accounted for those objects, because the
 //              last word on the navmesh was spoken before they existed.
 //
-// usage: navownprobe [--list N] [--plugin Name.esp]
+// usage: navownprobe [--list N] [--plugin Name.esp] [--emit out.json] [--enable X.esp]
+//                    [--disable X.esp] [--door-idx] [--reach-candidates] [--reach-json out.json]
 
 // Defaults are the live VR instance; --instance / --game / --profile point every path at
 // another MO2 layout — the SE conflict-testing lab's pre-flight runs exist so a finding is
@@ -58,6 +59,9 @@ string overwriteDir = Path.Combine(Instance, "overwrite");
 string dataDir = Path.Combine(GamePath, "Data");
 
 bool reportDoorIdx = false;   // DOOR-IDX is retired; --door-idx brings it back
+bool reachCandidates = false;
+string? reachJsonPath = null;
+int reachTopN = 20;           // survivors exported per record per direction in --reach-json
 int listN = 25;
 string? onlyPlugin = null;
 string? emitPath = null;
@@ -71,6 +75,9 @@ for (int i = 0; i < args.Length; i++)
     else if (args[i] == "--enable" && i + 1 < args.Length) enablePlugins.Add(args[++i]);
     else if (args[i] == "--disable" && i + 1 < args.Length) disablePlugins.Add(args[++i]);
     else if (args[i] == "--door-idx") reportDoorIdx = true;
+    else if (args[i] == "--reach-candidates") reachCandidates = true;
+    else if (args[i] == "--reach-json" && i + 1 < args.Length) { reachCandidates = true; reachJsonPath = args[++i]; }
+    else if (args[i] == "--reach-top" && i + 1 < args.Length) reachTopN = int.Parse(args[++i]);
 }
 
 var sw = Stopwatch.StartNew();
@@ -122,6 +129,9 @@ var navDeleted = new Dictionary<(FormKey, int), bool>();
 var cellNavPlugins = new Dictionary<FormKey, SortedSet<int>>();           // cell -> plugins supplying navmesh
 var cellNewRefs = new Dictionary<(FormKey Cell, int Plugin), List<FormKey>>();   // base records a plugin INTRODUCES
 var cellName = new Dictionary<FormKey, (string? Edid, bool Interior)>();
+// A cell's spatial identity, for the reach pass: an exterior candidate near a cell border can be
+// rescued by the NEIGHBOUR cell's mesh, so "nearby coverage" must span the ±1 grid ring.
+var cellSpace = new Dictionary<FormKey, (FormKey Wrld, int X, int Y, bool Interior)>();
 var baseType = new Dictionary<FormKey, string>();
 var baseMesh = new Dictionary<FormKey, string>();
 var baseObnd = new Dictionary<FormKey, Vec3>();     // labelled fallback only
@@ -216,6 +226,7 @@ for (int p = 0; p < paths.Count; p++)
         foreach (var cp in PlacementExtract.FromMod(mod))
         {
             cellName[cp.Cell] = (cp.CellEditorId, cp.Interior);
+            cellSpace[cp.Cell] = (cp.Worldspace, cp.Grid?.X ?? int.MinValue, cp.Grid?.Y ?? int.MinValue, cp.Interior);
 
             foreach (var nav in cp.Navmeshes)
             {
@@ -324,6 +335,208 @@ foreach (var g in clobber.Where(c => c.Material)
     Console.WriteLine($"   {g.Count(),5} navmesh  {g.Key.Loser}");
     Console.WriteLine($"            reverted by  {g.Key.Winner}    e.g. {ex.Nav} in {Cell(navCell.GetValueOrDefault(ex.Nav))}"
                     + $"  ({ex.LoserT} tris -> {ex.WinnerT})");
+}
+
+// ---------------------------------------------------------------------------------------
+// REACH CANDIDATES — 3.5.5's selector: ground where the two arms PREDICT different answers.
+// ---------------------------------------------------------------------------------------
+// The reachability differential ("reachable under the loser's navmesh, not under the winner's")
+// is confirmed in game by an oracle costing ~10-30 s per target with a ~120 u resolution — a
+// confirmer, never a scanner. This pass finds the only ground worth confirming: points on one
+// version's standable surface farther than the resolution from EVERYTHING the other arm offers
+// (the other version of this record, plus every other winning navmesh in the same cell — the
+// arms differ in one record, so the rest of the cell rescues candidates on shared ground). The
+// rule is DetectorModel.CoverageLoss / DistanceToCoverage, owned by proofprobe. E5's lesson,
+// encoded: 26 targets on ground where the arms were geometrically identical proved nothing.
+if (reachCandidates)
+{
+    const float ReachClearance = 120f;   // the oracle's measured resolution: closer reads reachable
+    const float ReachSpacing = 64f;      // sampling bound — a loss beyond clearance+spacing cannot be missed
+    const float WellClear = 240f;        // 2x resolution: what a probe-worthy candidate must exceed
+
+    var pool = clobber.Where(c => c.Material).ToList();
+    Console.WriteLine($"\n==== REACH CANDIDATES: ground where the two arms predict different answers (3.5.5) ====");
+    Console.WriteLine($"   pool: {pool.Count:N0} material clobbers ({clobber.Count:N0} raw; the non-material rest CANNOT differ and are excluded)");
+    Console.WriteLine($"   clearance {ReachClearance:0}u (oracle resolution), spacing {ReachSpacing:0}u, probe-worthy at >{WellClear:0}u");
+
+    // Everything the winner arm offers near a candidate: the winner's version of the record,
+    // every OTHER winning navmesh in the record's cell, and — for exteriors — every winning
+    // navmesh in the ±1 grid ring, because a candidate near a cell border can be rescued by the
+    // neighbour cell's mesh. (The ring earned its place: the first exterior candidate spot-checked
+    // with --nav-at had a neighbour-record triangle 109 u away that the same-cell view missed.)
+    var cellNavs = new Dictionary<FormKey, List<FormKey>>();
+    foreach (var (nav, cell) in navCell)
+    {
+        if (!cellNavs.TryGetValue(cell, out var l)) cellNavs[cell] = l = new List<FormKey>();
+        l.Add(nav);
+    }
+    var gridCells = new Dictionary<(FormKey Wrld, int X, int Y), List<FormKey>>();
+    foreach (var (cell, sp) in cellSpace)
+    {
+        if (sp.Interior || sp.X == int.MinValue) continue;
+        if (!gridCells.TryGetValue((sp.Wrld, sp.X, sp.Y), out var l)) gridCells[(sp.Wrld, sp.X, sp.Y)] = l = new List<FormKey>();
+        l.Add(cell);
+    }
+    List<FormKey> NearbyNavs(FormKey ofNav)
+    {
+        var cell = navCell[ofNav];
+        var cells = new List<FormKey> { cell };
+        if (cellSpace.TryGetValue(cell, out var sp) && !sp.Interior && sp.X != int.MinValue)
+            for (int dx = -1; dx <= 1; dx++)
+                for (int dy = -1; dy <= 1; dy++)
+                    if ((dx != 0 || dy != 0) && gridCells.TryGetValue((sp.Wrld, sp.X + dx, sp.Y + dy), out var nb))
+                        cells.AddRange(nb);
+        return cells.Where(cellNavs.ContainsKey)
+                    .SelectMany(cl => cellNavs[cl])
+                    .Where(n => n != ofNav)
+                    .Distinct().ToList();
+    }
+
+    var plan = new Dictionary<int, HashSet<FormKey>>();
+    void Want(int plugin, FormKey nav)
+    {
+        if (plugin < 0) return;
+        if (!plan.TryGetValue(plugin, out var s)) plan[plugin] = s = new HashSet<FormKey>();
+        s.Add(nav);
+    }
+    foreach (var c in pool)
+    {
+        Want(c.Loser, c.Nav);
+        Want(c.Winner, c.Nav);
+        foreach (var other in NearbyNavs(c.Nav)) Want(NavOwner(other), other);
+    }
+
+    // Second pass: re-open only the plugins the plan names and keep only the wanted geometry.
+    // The main pass deliberately retains counts+hash, not shapes — full geometry for every
+    // (record, plugin) pair would be most of the load order in memory.
+    var geom = new Dictionary<(FormKey Nav, int Plugin), NavmeshGeometry>();
+    int unreadableGeom = 0;
+    foreach (var (pi, wantedNavs) in plan)
+    {
+        ISkyrimModGetter mod;
+        try { mod = SkyrimMod.CreateFromBinaryOverlay(paths[pi], SkyrimRelease.SkyrimSE); }
+        catch { unreadableGeom += wantedNavs.Count; continue; }
+        using (mod as IDisposable)
+            foreach (var cp in PlacementExtract.FromMod(mod))
+                foreach (var nav in cp.Navmeshes)
+                    if (wantedNavs.Contains(nav.FormKey)) geom[(nav.FormKey, pi)] = nav;
+    }
+    Console.WriteLine($"   geometry: {geom.Count:N0} (record, plugin) pairs from {plan.Count:N0} plugins"
+                    + (unreadableGeom > 0 ? $"; {unreadableGeom:N0} wanted extractions unreadable (counted per rule 6)" : ""));
+
+    (List<System.Numerics.Vector3> V, List<(int A, int B, int C, int Flags)> T) Mesh(NavmeshGeometry g)
+        => (g.Vertices.Select(v => new System.Numerics.Vector3(v.X, v.Y, v.Z)).ToList(),
+            g.Triangles.Select(t => ((int)t.A, (int)t.B, (int)t.C, t.Flags)).ToList());
+
+    int geomMissing = 0, recordsVictim = 0, recordsVictimWellClear = 0, recordsMirrorOnly = 0;
+    int movedSubset = 0, movedSubsetWithLoss = 0;
+    var perClass = new Dictionary<string, (int Records, int WithLoss)>();
+    var jsonOut = new List<Dictionary<string, object?>>();
+    foreach (var c in pool)
+    {
+        var cls = ClobberClass(c);
+        var tally = perClass.GetValueOrDefault(cls);
+        bool moved = navSize.GetValueOrDefault((c.Nav, c.Loser)).V == navSize.GetValueOrDefault((c.Nav, c.Winner)).V
+                  && c.LoserT == c.WinnerT;
+        if (moved) movedSubset++;
+        if (!geom.TryGetValue((c.Nav, c.Loser), out var lg) || !geom.TryGetValue((c.Nav, c.Winner), out var wg))
+        {
+            geomMissing++;
+            perClass[cls] = (tally.Records + 1, tally.WithLoss);
+            continue;
+        }
+        var L = Mesh(lg);
+        var W = Mesh(wg);
+        var victim = DetectorModel.CoverageLoss(L.V, L.T, W.V, W.T, ReachClearance, ReachSpacing);
+        var mirror = DetectorModel.CoverageLoss(W.V, W.T, L.V, L.T, ReachClearance, ReachSpacing);
+
+        var others = NearbyNavs(c.Nav)
+            .Select(n => (Nav: n, Plugin: NavOwner(n)))
+            .Where(x => geom.ContainsKey((x.Nav, x.Plugin)))
+            .Select(x => Mesh(geom[(x.Nav, x.Plugin)]))
+            .ToList();
+        // A survivor's Clearance is re-stated as the EFFECTIVE clearance: the distance to the
+        // nearest coverage the other arm offers anywhere nearby, not just to the winner's version
+        // of this record — that is the number a probe target's "well clear of resolution" is
+        // judged on.
+        List<DetectorModel.CoverageSample> Surviving(List<DetectorModel.CoverageSample> raw)
+            => raw.Select(s =>
+                  {
+                      float eff = s.Clearance;
+                      foreach (var o in others)
+                      {
+                          if (eff <= ReachClearance) break;
+                          eff = MathF.Min(eff, DetectorModel.DistanceToCoverage(s.Point, o.V, o.T));
+                      }
+                      return s with { Clearance = eff };
+                  })
+                  .Where(s => s.Clearance > ReachClearance)
+                  .OrderByDescending(s => s.Clearance).ToList();
+        var victimS = Surviving(victim);
+        var mirrorS = Surviving(mirror);
+
+        bool hasVictim = victimS.Count > 0;
+        if (hasVictim) recordsVictim++;
+        if (victimS.Any(s => s.Clearance > WellClear)) recordsVictimWellClear++;
+        if (!hasVictim && mirrorS.Count > 0) recordsMirrorOnly++;
+        if (moved && hasVictim) movedSubsetWithLoss++;
+        perClass[cls] = (tally.Records + 1, tally.WithLoss + (hasVictim ? 1 : 0));
+
+        if (hasVictim || mirrorS.Count > 0)
+        {
+            var best = hasVictim ? victimS[0] : mirrorS[0];
+            Console.WriteLine($"   {(hasVictim ? "VICTIM-ONLY GROUND" : "winner-only ground"),-19} {c.Nav} in {Cell(navCell.GetValueOrDefault(c.Nav))}");
+            Console.WriteLine($"      loser {pluginKey[c.Loser].FileName} ({c.LoserT} tris) vs winner {pluginKey[c.Winner].FileName} ({c.WinnerT} tris)   [{cls[..1]}]"
+                            + (moved ? "   [same counts, moved geometry]" : ""));
+            Console.WriteLine($"      victim-arm-only points {victimS.Count:N0}/{victim.Count:N0} raw"
+                            + $", winner-arm-only {mirrorS.Count:N0}/{mirror.Count:N0} raw"
+                            + $"; best clearance {(float.IsPositiveInfinity(best.Clearance) ? "inf" : $"{best.Clearance:0}u")}"
+                            + $" at ({best.Point.X:0}, {best.Point.Y:0}, {best.Point.Z:0})");
+        }
+        if (reachJsonPath is not null)
+            jsonOut.Add(new Dictionary<string, object?>
+            {
+                ["nav"] = c.Nav.ToString(),
+                ["cell"] = Cell(navCell.GetValueOrDefault(c.Nav)),
+                ["loser"] = pluginKey[c.Loser].FileName.String,
+                ["winner"] = pluginKey[c.Winner].FileName.String,
+                ["class"] = cls,
+                ["loserTris"] = c.LoserT,
+                ["winnerTris"] = c.WinnerT,
+                ["sameCountsMovedGeometry"] = moved,
+                ["victimOnly"] = victimS.Take(reachTopN).Select(s => new { x = s.Point.X, y = s.Point.Y, z = s.Point.Z, clearance = s.Clearance }).ToList(),
+                ["victimOnlyTotal"] = victimS.Count,
+                ["winnerOnly"] = mirrorS.Take(reachTopN).Select(s => new { x = s.Point.X, y = s.Point.Y, z = s.Point.Z, clearance = s.Clearance }).ToList(),
+                ["winnerOnlyTotal"] = mirrorS.Count,
+            });
+    }
+
+    Console.WriteLine($"\n   ---- the gate (3.5.5): does any material clobber carry an actual coverage difference? ----");
+    Console.WriteLine($"   records with victim-arm-only ground beyond {ReachClearance:0}u : {recordsVictim:N0}"
+                    + $"   (of those, beyond the probe-worthy {WellClear:0}u: {recordsVictimWellClear:N0})");
+    Console.WriteLine($"   records with winner-arm-only ground (the mirror)  : {recordsMirrorOnly:N0} (mirror only)");
+    Console.WriteLine($"   identical-counts-but-moved-geometry subset        : {movedSubset:N0} records, {movedSubsetWithLoss:N0} with victim-only ground");
+    Console.WriteLine($"   pairs skipped for unreadable/missing geometry     : {geomMissing:N0} (counted, not cleared)");
+    Console.WriteLine($"   ---- by population (rule 12) ----");
+    foreach (var (k, t) in perClass.OrderBy(kv => kv.Key))
+        Console.WriteLine($"   {t.WithLoss,4} of {t.Records,4}  {k}");
+    Console.WriteLine($"   (connectivity is NOT judged here — a point covered in both arms but cut off in one is");
+    Console.WriteLine($"    invisible to this pass; and every candidate still needs the --nav-at confirmation and");
+    Console.WriteLine($"    the in-game oracle's own controls before it becomes a finding)");
+
+    if (reachJsonPath is not null)
+    {
+        File.WriteAllText(reachJsonPath, System.Text.Json.JsonSerializer.Serialize(new
+        {
+            probe = "navownprobe --reach-candidates",
+            instance = Instance,
+            clearance = ReachClearance,
+            spacing = ReachSpacing,
+            generated = DateTime.UtcNow.ToString("yyyy-MM-dd HH:mm:ssZ"),
+            records = jsonOut,
+        }, new System.Text.Json.JsonSerializerOptions { WriteIndented = true }));
+        Console.WriteLine($"   candidate worklist -> {reachJsonPath}");
+    }
 }
 
 // ---------------------------------------------------------------------------------------

@@ -202,6 +202,137 @@ public static class DetectorModel
     public static bool BubblesDisjoint(float distance, uint reachA, uint reachB)
         => distance > (float)reachA + reachB;
 
+    /// <summary>Navmesh triangle flag bits the coverage rule reads. Deleted triangles are not
+    /// ground on either side. Water is ground the oracle can REACH (an actor swims) but never a
+    /// place to stand a probe target on — so it counts as coverage and is never sampled.</summary>
+    public const int NavTriDeleted = 0x08;
+    public const int NavTriWater = 0x200;
+
+    /// <summary>One candidate probe point from <see cref="CoverageLoss"/>: a point on the FROM
+    /// mesh's standable surface whose nearest point of AGAINST-side coverage is
+    /// <see cref="Clearance"/> away. Triangle and Flags name the FROM triangle it was sampled
+    /// from. Clearance is PositiveInfinity when the AGAINST mesh has no coverage at all.</summary>
+    public readonly record struct CoverageSample(Vector3 Point, int Triangle, int Flags, float Clearance);
+
+    /// <summary>The 3.5.5 candidate selector — ground where the two arms of a navmesh clobber
+    /// PREDICT different reachability answers (roadmap 3.5.5; the rule the E5 null showed was
+    /// missing: 26 probe targets on ground where the arms were geometrically identical proved
+    /// nothing, so candidates must be chosen where the winning geometry actually changes).
+    ///
+    /// <para>The rule: sample the FROM mesh's standable surface — every triangle that is neither
+    /// Deleted nor Water, midpoint-subdivided until no edge exceeds <paramref name="spacing"/>,
+    /// one sample per leaf centroid — and keep each sample whose minimum 3-D distance to the
+    /// AGAINST mesh's coverage exceeds <paramref name="clearance"/>. Run twice with the meshes
+    /// swapped for the two directions; FROM = the loser's version and AGAINST = the winner's is
+    /// the direction that can strand something.</para>
+    ///
+    /// <para>Miss bound, stated rather than implied: every point of the FROM surface lies within
+    /// <paramref name="spacing"/> of some sample, so a lost region whose true clearance exceeds
+    /// clearance + spacing cannot be missed; one inside that band may be. Set clearance to the
+    /// oracle's measured resolution (~120 u — a target closer than that to walkable ground reads
+    /// as reachable regardless, the NEG-void result).</para>
+    ///
+    /// <para>What this deliberately does NOT judge: connectivity (a point covered in both arms
+    /// but cut off in one is invisible here — coverage presence only), and coverage supplied by
+    /// OTHER records — the caller must re-check survivors against every other winning mesh in
+    /// the cell with <see cref="DistanceToCoverage"/>, because the arms differ in one record and
+    /// the rest of the cell can rescue a point the winner dropped.</para></summary>
+    public static List<CoverageSample> CoverageLoss(
+        IReadOnlyList<Vector3> verts, IReadOnlyList<(int A, int B, int C, int Flags)> tris,
+        IReadOnlyList<Vector3> againstVerts, IReadOnlyList<(int A, int B, int C, int Flags)> againstTris,
+        float clearance, float spacing)
+    {
+        var found = new List<CoverageSample>();
+        var samples = new List<Vector3>();
+        for (int i = 0; i < tris.Count; i++)
+        {
+            var t = tris[i];
+            if ((t.Flags & NavTriWater) != 0) continue;               // reachable, but not standable
+            if (!CoverageTriangle(t, verts, out var a, out var b, out var c)) continue;
+            samples.Clear();
+            Subdivide(a, b, c, spacing, 0, samples);
+            foreach (var s in samples)
+            {
+                float d = DistanceToCoverage(s, againstVerts, againstTris);
+                if (d > clearance) found.Add(new CoverageSample(s, i, t.Flags, d));
+            }
+        }
+        return found;
+    }
+
+    /// <summary>Minimum 3-D distance from a point to a mesh's coverage — its non-deleted,
+    /// non-degenerate triangles (water included: it is reachable ground to the oracle).
+    /// PositiveInfinity when the mesh has no coverage at all.</summary>
+    public static float DistanceToCoverage(Vector3 p, IReadOnlyList<Vector3> verts,
+        IReadOnlyList<(int A, int B, int C, int Flags)> tris)
+    {
+        float best = float.PositiveInfinity;
+        foreach (var t in tris)
+        {
+            if (!CoverageTriangle(t, verts, out var a, out var b, out var c)) continue;
+            var q = ClosestOnTriangle(p, a, b, c);
+            float d = (p - q).Length();
+            if (d < best) best = d;
+        }
+        return best;
+    }
+
+    // A triangle counts as coverage only when it is not Deleted, its indices resolve, and it has
+    // actual area — a zero-area triangle is a line, not ground, and would divide by zero below.
+    static bool CoverageTriangle((int A, int B, int C, int Flags) t, IReadOnlyList<Vector3> verts,
+        out Vector3 a, out Vector3 b, out Vector3 c)
+    {
+        a = b = c = default;
+        if ((t.Flags & NavTriDeleted) != 0) return false;
+        if (t.A < 0 || t.B < 0 || t.C < 0 || t.A >= verts.Count || t.B >= verts.Count || t.C >= verts.Count)
+            return false;
+        a = verts[t.A]; b = verts[t.B]; c = verts[t.C];
+        return Vector3.Cross(b - a, c - a).LengthSquared() > 1e-6f;
+    }
+
+    // Closest point on a triangle to p — the standard Voronoi-region walk (vertex, edge, face).
+    static Vector3 ClosestOnTriangle(Vector3 p, Vector3 a, Vector3 b, Vector3 c)
+    {
+        Vector3 ab = b - a, ac = c - a, ap = p - a;
+        float d1 = Vector3.Dot(ab, ap), d2 = Vector3.Dot(ac, ap);
+        if (d1 <= 0 && d2 <= 0) return a;
+        Vector3 bp = p - b;
+        float d3 = Vector3.Dot(ab, bp), d4 = Vector3.Dot(ac, bp);
+        if (d3 >= 0 && d4 <= d3) return b;
+        float vc = d1 * d4 - d3 * d2;
+        if (vc <= 0 && d1 >= 0 && d3 <= 0) return a + ab * (d1 / (d1 - d3));
+        Vector3 cp = p - c;
+        float d5 = Vector3.Dot(ab, cp), d6 = Vector3.Dot(ac, cp);
+        if (d6 >= 0 && d5 <= d6) return c;
+        float vb = d5 * d2 - d1 * d6;
+        if (vb <= 0 && d2 >= 0 && d6 <= 0) return a + ac * (d2 / (d2 - d6));
+        float va = d3 * d6 - d5 * d4;
+        if (va <= 0 && d4 - d3 >= 0 && d5 - d6 >= 0)
+            return b + (c - b) * ((d4 - d3) / ((d4 - d3) + (d5 - d6)));
+        float denom = 1f / (va + vb + vc);
+        return a + ab * (vb * denom) + ac * (vc * denom);
+    }
+
+    // Leaf centroids of a midpoint subdivision. A leaf's longest edge is at most `spacing`, and
+    // the farthest point of a triangle from its centroid is a vertex, at most 2/3 of a median
+    // (< 0.58 × the longest edge) away — which is what buys CoverageLoss its stated miss bound.
+    // The depth cap only guards against absurd input; 2^8 × 64 u out-spans any cell.
+    static void Subdivide(Vector3 a, Vector3 b, Vector3 c, float spacing, int depth, List<Vector3> outPts)
+    {
+        float longest = MathF.Sqrt(MathF.Max((a - b).LengthSquared(),
+                            MathF.Max((b - c).LengthSquared(), (c - a).LengthSquared())));
+        if (longest > spacing && depth < 8)
+        {
+            Vector3 ab = (a + b) * 0.5f, bc = (b + c) * 0.5f, ca = (c + a) * 0.5f;
+            Subdivide(a, ab, ca, spacing, depth + 1, outPts);
+            Subdivide(ab, b, bc, spacing, depth + 1, outPts);
+            Subdivide(ca, bc, c, spacing, depth + 1, outPts);
+            Subdivide(ab, bc, ca, spacing, depth + 1, outPts);
+            return;
+        }
+        outPts.Add((a + b + c) / 3f);
+    }
+
     /// <summary>What else the moving plugin touches — the records-only facts intent classification
     /// runs on (roadmap 3.5.3). The caller resolves them against the load order; the RULE that
     /// reads them is <see cref="ClassifyIntent"/>. Not SPLIT-specific: any finding with a moving
