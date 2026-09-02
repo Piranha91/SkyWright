@@ -10,7 +10,9 @@ using Mutagen.Bethesda.Skyrim;
 // objects and the navmesh together, so every hit is by definition a false positive.
 // That rate is the noise floor, and no threshold is worth using until it is near zero.
 //
-// usage: navprobe [maxCells]
+// usage: navprobe [maxCells] [--dump dir]
+//   --dump writes the flagged reference keys per narrow rule, one file each — a diagnostic for comparing two
+//   runs ref by ref (which verdicts moved under a transform change), not part of the report.
 
 string Instance = HarnessTarget.Require(HarnessTarget.Instance, "MO2 instance directory", "instance");
 string GamePath = HarnessTarget.Require(HarnessTarget.Game, "game directory", "game");
@@ -21,6 +23,8 @@ string dataDir = Path.Combine(GamePath, "Data");
 string vanilla = Path.Combine(dataDir, "Skyrim.esm");
 
 int maxCells = args.Length > 0 && int.TryParse(args[0], out var mc) ? mc : int.MaxValue;
+string? dumpDir = null;
+for (int i = 0; i < args.Length; i++) if (args[i] == "--dump" && i + 1 < args.Length) dumpDir = args[++i];
 
 var sw = Stopwatch.StartNew();
 var comp = Mo2LoadOrder.ReadComposition(profileDir);
@@ -65,7 +69,7 @@ Geo Geometry(string rel)
 static MeshColumnIndex? BuildColumns(TriangleSoup soup, Vec3 pos, Vec3 rot, float scale)
 {
     if (soup.TriangleCount == 0) return null;
-    var m = SpatialOverlap.EulerZyx(rot);
+    var m = SpatialOverlap.RefrRotation(rot);
     var t = new System.Numerics.Vector3(pos.X, pos.Y, pos.Z);
     var w = new System.Numerics.Vector3[soup.Vertices.Length];
     for (int i = 0; i < w.Length; i++)
@@ -290,6 +294,20 @@ for (int s = 0; s < settings.Length; s++)
     foreach (var grp in bag.GroupBy(w => w.Mesh, StringComparer.OrdinalIgnoreCase)
                            .OrderByDescending(grp => grp.Count()).Take(12))
         Console.WriteLine($"   {grp.Count(),7:N0}  {grp.First().Type,-14} {grp.Key}");
+}
+
+if (dumpDir is not null)
+{
+    Directory.CreateDirectory(dumpDir);
+    for (int s = 0; s < settings.Length; s++)
+    {
+        if (worstOf[s] is not { } bag) continue;
+        var safe = new string(settings[s].Name.Select(ch => char.IsLetterOrDigit(ch) ? ch : '_').ToArray());
+        using var dw = new StreamWriter(Path.Combine(dumpDir, $"{s:00}-{safe}.tsv"));
+        dw.WriteLine("key\tcell\ttype\tmesh\ttris");
+        foreach (var w in bag) dw.WriteLine($"{w.Fk}\t{w.Cell}\t{w.Type}\t{w.Mesh}\t{w.Tris}");
+    }
+    Console.WriteLine($"\ndumped flagged refs per narrow rule -> {dumpDir}");
 }
 
 record Setting(string Name, int Kind, float Height, float BoxInset, bool CollisionOnly,

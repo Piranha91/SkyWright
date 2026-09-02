@@ -294,5 +294,51 @@ Console.WriteLine("   navmesh triangle: (0,0,0) (200,0,0) (0,200,0)   actor heig
     Check("InsetTriangle refuses an inset past the inradius", !over, "inset 100 > inradius 58.6");
 }
 
+// ---- 13. THE WORLD TRANSFORM — the engine's Euler composition, pinned -------------------
+// SpatialOverlap.ToWorld places a model box with RefrRotation: Rx(-x)*Ry(-y)*Rz(-z), derived from the
+// engine's NiMatrix3::SetEulerAnglesXYZ and confirmed in game on tilted architecture. It is the TRANSPOSE
+// of the Rz*Ry*Rx composition the detectors carried until the re-baseline — a different SIGN on every
+// angle and a different ORDER. Expected boxes are hand-computed (numpy, column-vector rotations), not
+// read back from the code. Four cases, each proving one thing:
+//   A  a CENTRED box under a single yaw agrees under both compositions — order cannot matter with one
+//      axis, and mirroring a centred box gives the same AABB. Must stay green under either composition.
+//   B  a centred box under two axes: same AABB under any single axis, different under the transpose —
+//      proves the ORDER.
+//   C  an OFF-CENTRE box under a plain yaw lands on the opposite side of the ref under the wrong sign —
+//      proves the SIGN, on the case nearly every static in the game is (yaw-only).
+//   D  three axes, off-centre, scale 2 — the general case.
+{
+    static bool Near(Aabb got, float x0, float y0, float z0, float x1, float y1, float z1, float tol = 0.02f) =>
+        !got.IsEmpty
+        && MathF.Abs(got.Min.X - x0) < tol && MathF.Abs(got.Min.Y - y0) < tol && MathF.Abs(got.Min.Z - z0) < tol
+        && MathF.Abs(got.Max.X - x1) < tol && MathF.Abs(got.Max.Y - y1) < tol && MathF.Abs(got.Max.Z - z1) < tol;
+    static string Show(Aabb b) => b.IsEmpty ? "<empty>" : $"({b.Min.X:0.00},{b.Min.Y:0.00},{b.Min.Z:0.00})..({b.Max.X:0.00},{b.Max.Y:0.00},{b.Max.Z:0.00})";
+    const float Deg = MathF.PI / 180f;
+    var centred = new Aabb(new Vec3(-100, -20, -50), new Vec3(100, 20, 50), false);
+    var offCentre = new Aabb(new Vec3(0, -20, 0), new Vec3(200, 20, 100), false);
+
+    var a = SpatialOverlap.ToWorld(centred, new Vec3(1000, 2000, 300), new Vec3(0, 0, 30 * Deg), 1f);
+    Check("ToWorld A: centred box, yaw 30 -> hand-computed box", Near(a, 903.3975f, 1932.6795f, 250f, 1096.6025f, 2067.3205f, 350f), Show(a));
+    // ...and the OLD composition gives the same box here, which is why a yaw-only calibration could never see the bug.
+    var aOld = Aabb.Empty;
+    var mOld = SpatialOverlap.EulerZyx(new Vec3(0, 0, 30 * Deg));
+    for (int i = 0; i < 8; i++)
+        aOld = aOld.Add(Vector3.Transform(new Vector3((i & 1) == 0 ? -100 : 100, (i & 2) == 0 ? -20 : 20, (i & 4) == 0 ? -50 : 50), mOld) + new Vector3(1000, 2000, 300));
+    Check("ToWorld A: ...and Rz*Ry*Rx un-negated agrees on it (centred + one axis hides sign AND order)",
+          Near(aOld, 903.3975f, 1932.6795f, 250f, 1096.6025f, 2067.3205f, 350f), Show(aOld));
+
+    var b = SpatialOverlap.ToWorld(centred, new Vec3(1000, 2000, 300), new Vec3(40 * Deg, 0, 30 * Deg), 1f);
+    Check("ToWorld B: centred box, x 40 + yaw 30 -> the ORDER (transpose gives 889.67..1110.33 in X)",
+          Near(b, 903.3975f, 1916.2901f, 218.425f, 1096.6025f, 2083.7099f, 381.575f), Show(b));
+
+    var c = SpatialOverlap.ToWorld(offCentre, new Vec3(0, 0, 0), new Vec3(0, 0, 90 * Deg), 1f);
+    Check("ToWorld C: off-centre box, yaw 90 -> the SIGN (heading 90 = clockwise; +X model axis lands on -Y)",
+          Near(c, -20f, -200f, 0f, 20f, 0f, 100f), Show(c));
+
+    var d = SpatialOverlap.ToWorld(offCentre, new Vec3(500, -300, 40), new Vec3(20 * Deg, -35 * Deg, 110 * Deg), 2f);
+    Check("ToWorld D: three axes, off-centre, scale 2 -> hand-computed box",
+          Near(d, 357.1434f, -646.6001f, 24.4199f, 645.5053f, -223.7372f, 411.8254f), Show(d));
+}
+
 Console.WriteLine($"\n==== {pass} passed, {fail} failed ====");
 return fail == 0 ? 0 : 1;

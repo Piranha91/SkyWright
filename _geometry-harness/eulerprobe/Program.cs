@@ -7,9 +7,16 @@ using Mutagen.Bethesda.Skyrim;
 // EULER ORDER — settling a question the charter has carried as "evidence, not proof" since day one.
 //
 // Skyrim stores a placed reference's rotation as three angles and the record does not say which
-// order the engine composes them in. `SpatialOverlap.ToWorld` picks Rz·Ry·Rx (X applied first) on
-// documentation, and the only support for it so far is that the vanilla false-positive floor came
-// out low. That is an argument about ONE order; it never compared the other five.
+// order the engine composes them in. `SpatialOverlap.ToWorld` picked Rz·Ry·Rx (X applied first) on
+// documentation, and the only support for it at the time was that the vanilla false-positive floor
+// came out low. That is an argument about ONE order; it never compared the other five.
+//
+// SETTLED SINCE (2026-09-01): the engine composes Rx(-x)·Ry(-y)·Rz(-z) — `SpatialOverlap.RefrRotation`,
+// derived from CommonLibVR and confirmed in game — and `ToWorld` now uses it. That matrix is the
+// TRANSPOSE of the old one: the angles are negated as well as re-ordered, and this sweep never varied
+// the sign (it is common to all six arms), which is why the six orders tied here and the question was
+// settled by derivation and a render instead. The sweep is kept as a tool; its "XYZ" arm is the OLD
+// composition, and none of its six arms is the engine's.
 //
 // The measurement. Vanilla navmesh was authored against vanilla geometry, so under the correct
 // composition the navmesh should sit ON surfaces and rarely INSIDE them. Under a wrong one, every
@@ -268,9 +275,10 @@ for (int o = 0; o < orders.Length; o++)
     Console.WriteLine($"   {orders[o].ToString().ToUpperInvariant(),-36} {tested[o],9:N0} {flagged[o],9:N0} {rate,8:0.00}% {buried[o],14:N0} {vrate,9:0.00}%{mark}");
 }
 
-Console.WriteLine($"\n   XYZ is what SpatialOverlap.ToWorld composes today (Rz·Ry·Rx, X applied first).");
-Console.WriteLine($"   A clear win for it turns the charter's 'evidence, not proof' into a measurement;");
-Console.WriteLine($"   a tie means this population is too small or too symmetric to decide, and says so.");
+Console.WriteLine($"\n   XYZ is the composition SpatialOverlap.ToWorld used until 2026-09-01 (Rz*Ry*Rx, X applied first).");
+Console.WriteLine("   ToWorld now composes RefrRotation = Rx(-x)*Ry(-y)*Rz(-z), the engine's matrix — its transpose,");
+Console.WriteLine("   which NONE of these six un-negated arms is: the sign is common to all of them, so this sweep");
+Console.WriteLine("   could never have found it. A tie here says the containment metric is blind to orientation.");
 
 Console.WriteLine();
 Console.WriteLine("   ---- how far an object's BASE sits from the floor under it (orientation-sensitive) ----");

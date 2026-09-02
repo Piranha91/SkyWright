@@ -31,7 +31,7 @@ using Mutagen.Bethesda.Skyrim;
 //   - This is a BROAD phase: world AABBs of rotated boxes are conservative, so a "deep" hit is a
 //     candidate for eyes or a narrow phase, never a verdict. NOT verified in game.
 //
-// usage: overlapprobe [--list N] [--depth U] [--frac F] [--emit path]
+// usage: overlapprobe [--list N] [--depth U] [--frac F] [--emit path] [--dump path]
 
 // Defaults are the live VR instance; --instance / --game / --profile point every path at
 // another MO2 layout — the SE conflict-testing lab's pre-flight runs exist so a finding is
@@ -68,6 +68,10 @@ float minFrac = 0.25f;     // ...and bury at least this share of the smaller box
 // A wall piece is 128–512u; the biggest genuine architecture runs ~1–2k. Parameter, not constant.
 float maxDim = 1024f;
 string? emitPath = null;
+// --dump: one line per candidate (key, responsible plugin, base type, mesh, geometry source, rotation, scale,
+// world box). A diagnostic for comparing two runs ref by ref — which boxes moved under a transform change,
+// and what meshes they were — not part of the report.
+string? dumpPath = null;
 for (int i = 0; i < args.Length; i++)
 {
     if (args[i] == "--list" && i + 1 < args.Length) listN = int.Parse(args[++i]);
@@ -75,6 +79,7 @@ for (int i = 0; i < args.Length; i++)
     else if (args[i] == "--frac" && i + 1 < args.Length) minFrac = float.Parse(args[++i]);
     else if (args[i] == "--maxdim" && i + 1 < args.Length) maxDim = float.Parse(args[++i]);
     else if (args[i] == "--emit" && i + 1 < args.Length) emitPath = args[++i];
+    else if (args[i] == "--dump" && i + 1 < args.Length) dumpPath = args[++i];
 }
 
 var sw = Stopwatch.StartNew();
@@ -228,6 +233,18 @@ foreach (var (fk, s) in state)
     if (MathF.Max(world.Max.X - world.Min.X, MathF.Max(world.Max.Y - world.Min.Y, world.Max.Z - world.Min.Z)) > maxDim)
     { skippedVolume++; continue; }
     candidates.Add(new Cand(fk, s, bk, world, src));
+}
+
+if (dumpPath is not null)
+{
+    Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(dumpPath))!);
+    using var dw = new StreamWriter(dumpPath);
+    dw.WriteLine("key\tresp\ttype\tmesh\tsrc\trotX\trotY\trotZ\tscale\tminX\tminY\tminZ\tmaxX\tmaxY\tmaxZ");
+    foreach (var c in candidates)
+        dw.WriteLine($"{c.Key}\t{pluginKey[c.S.Resp].FileName.String}\t{baseType.GetValueOrDefault(c.Base)}\t{baseMesh.GetValueOrDefault(c.Base)}\t{c.Src}"
+                   + $"\t{c.S.Rot.X:R}\t{c.S.Rot.Y:R}\t{c.S.Rot.Z:R}\t{c.S.Scale:R}"
+                   + $"\t{c.World.Min.X:R}\t{c.World.Min.Y:R}\t{c.World.Min.Z:R}\t{c.World.Max.X:R}\t{c.World.Max.Y:R}\t{c.World.Max.Z:R}");
+    Console.WriteLine($"\ndumped {candidates.Count:N0} candidates -> {dumpPath}");
 }
 
 Console.WriteLine($"\ncandidates: {candidates.Count:N0} refs whose responsible plugin is not the base game");

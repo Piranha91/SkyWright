@@ -1473,10 +1473,13 @@ first fix because the Falkreath walkway it was calibrated on is yaw-only — the
 provably cannot matter. It took a scene with genuinely tilted refs to expose (2026-08-30, the
 College of Winterhold domes), and it was then settled by DERIVATION from CommonLibVR's own
 `NiMatrix3::SetEulerAnglesXYZ` rather than by another calibration. See *Conventions that bite* and
-*Fixed defects worth remembering*. `SpatialOverlap.ToWorld`, `blockprobe` and `navprobe` still carry
-the old composition — now a KNOWN-wrong one with a one-line fix (`EulerZyx` → `RefrRotation`),
-deliberately not taken because the detectors' false-positive floor is calibrated against the current
-boxes and flipping it wants its own re-baseline. Still OPEN, but no longer unknown.
+*Fixed defects worth remembering*. `SpatialOverlap.ToWorld`, `blockprobe` and `navprobe` carried the
+old composition until 2026-09-01, when the one-line fix (`EulerZyx` → `RefrRotation`) was taken with its
+re-baseline: crossprobe pins the transform with four hand-computed boxes (a centred box under a single yaw
+agrees under both compositions — the case that hid the bug — an off-centre box under a plain yaw proves
+the sign, a two-axis box proves the order), and the detectors' floors were re-measured the same day. The
+old matrix was the TRANSPOSE of the engine's, so the flip moved 61 % of the detectors' candidate boxes,
+yaw-only refs included, and cut the vanilla navmesh floor five-fold. CLOSED.
 
 ---
 

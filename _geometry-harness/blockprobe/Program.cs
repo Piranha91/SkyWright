@@ -289,7 +289,7 @@ static string Short(string s, int n) => s.Length <= n ? s : "..." + s[^(n - 3)..
 static MeshColumnIndex? BuildColumns(TriangleSoup soup, Vec3 pos, Vec3 rot, float scale)
 {
     if (soup.TriangleCount == 0) return null;
-    var m = SpatialOverlap.EulerZyx(rot);
+    var m = SpatialOverlap.RefrRotation(rot);
     var t = new Vector3(pos.X, pos.Y, pos.Z);
     var w = new Vector3[soup.Vertices.Length];
     for (int i = 0; i < w.Length; i++) w[i] = Vector3.Transform(soup.Vertices[i] * scale, m) + t;
