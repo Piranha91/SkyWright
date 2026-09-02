@@ -1,3 +1,4 @@
+using HarnessShared;
 using System.Diagnostics;
 using HousecarlCore;
 using Mutagen.Bethesda.Plugins;
@@ -10,9 +11,14 @@ using Mutagen.Bethesda.Skyrim;
 // objects and the navmesh together, so every hit is by definition a false positive.
 // That rate is the noise floor, and no threshold is worth using until it is near zero.
 //
-// usage: navprobe [maxCells] [--dump dir]
+// usage: navprobe [maxCells] [--dump dir] [--geometry collision|render]
 //   --dump writes the flagged reference keys per narrow rule, one file each — a diagnostic for comparing two
 //   runs ref by ref (which verdicts moved under a transform change), not part of the report.
+//   --geometry which triangle soup the narrow rules run on (default collision, since 2026-09-02 — roadmap 4.7 Part A):
+//       collision  the decoded Havok solid, restricted to the layers an actor meets (_shared/CollisionLayers.cs).
+//                  A mesh with no actor-solid body is NOT TESTED — it blocks nothing — and counted; a mesh whose
+//                  decode is incomplete falls back to its render soup, labelled and counted.
+//       render     the render soup, as every run before 2026-09-02 (a pine judged by its canopy).
 
 string Instance = HarnessTarget.Require(HarnessTarget.Instance, "MO2 instance directory", "instance");
 string GamePath = HarnessTarget.Require(HarnessTarget.Game, "game directory", "game");
@@ -24,7 +30,14 @@ string vanilla = Path.Combine(dataDir, "Skyrim.esm");
 
 int maxCells = args.Length > 0 && int.TryParse(args[0], out var mc) ? mc : int.MaxValue;
 string? dumpDir = null;
-for (int i = 0; i < args.Length; i++) if (args[i] == "--dump" && i + 1 < args.Length) dumpDir = args[++i];
+string geometrySource = "collision";
+for (int i = 0; i < args.Length; i++)
+{
+    if (args[i] == "--dump" && i + 1 < args.Length) dumpDir = args[++i];
+    else if (args[i] == "--geometry" && i + 1 < args.Length) geometrySource = args[++i];
+}
+if (geometrySource is not ("collision" or "render")) { Console.Error.WriteLine("--geometry must be collision or render"); return 1; }
+Console.WriteLine($"geometry source: {geometrySource}" + (geometrySource == "collision" ? $"  (actor-solid layers: {string.Join(", ", CollisionLayers.ActorSolid)})" : ""));
 
 var sw = Stopwatch.StartNew();
 var comp = Mo2LoadOrder.ReadComposition(profileDir);
@@ -36,10 +49,31 @@ Console.WriteLine($"assets: {arch.Archives.Count} BSAs indexed in {sw.ElapsedMil
 sw.Restart();
 using var mod = SkyrimMod.CreateFromBinaryOverlay(vanilla, SkyrimRelease.SkyrimSE);
 var baseMesh = new Dictionary<FormKey, (string Mesh, string Type)>();
+var npcFacts = new Dictionary<FormKey, ActorBand.NpcFacts>();
+var raceFacts = new Dictionary<FormKey, ActorBand.RaceFacts>();
 foreach (var rec in mod.EnumerateMajorRecords())
+{
     if (rec is IModeledGetter m && m.Model?.File is { } f && !string.IsNullOrWhiteSpace(f.GivenPath))
         baseMesh[rec.FormKey] = (f.GivenPath, rec.GetType().Name.Replace("BinaryOverlay", ""));
+    ActorBand.CollectRecord(rec, npcFacts, raceFacts);
+}
 Console.WriteLine($"vanilla base records with a mesh: {baseMesh.Count:N0}  ({sw.Elapsed.TotalSeconds:0.0}s)");
+// The actor band's top is DERIVED per cell (the tallest placed actor, else the tallest playable race) since
+// 2026-09-02; the settings' Height column is what the BROAD rules still use and what every earlier run used.
+var (fallbackTop, fallbackSrc) = ActorBand.TallestPlayable(raceFacts);
+Console.WriteLine($"actor band: bottom {ActorBand.StepHeight:0} u (step height, assumed); top per cell from placed actors, else {fallbackSrc}");
+int cellsWithActors = 0; float bandMin = float.MaxValue, bandMax = 0f;
+var bandHist = new SortedDictionary<int, int>();   // band top rounded to 4 u -> cells
+
+// The route rule (Part B) on the vanilla floor: every reference whose solid entered an actor column (the CROSS
+// clr32 rule) is measured with vs without on the clearance ladder; verdicts tallied by class and record type.
+var Ladder = new[] { 0f, 32f, 64f, 96f, 128f };
+const float RouteMargin = 256f, RouteStep = 16f;
+var routeByClass = new Dictionary<string, int[]>(StringComparer.OrdinalIgnoreCase);   // class -> [Blocked, Narrowed64, Narrowed128, Clipped, None, Unjudgeable, measured]
+var routeByType = new Dictionary<string, int[]>();
+var routeBlocked = new List<(string Cell, string Mesh, string Type, FormKey Fk, string Why)>();
+long routeMeasured = 0, routeDoors = 0;
+int[] RouteRow(Dictionary<string, int[]> d, string k) { if (!d.TryGetValue(k, out var row)) d[k] = row = new int[7]; return row; }
 
 // ---- lazy, cached geometry per mesh path (AABB + model-space triangle soup) ----
 var geoCache = new Dictionary<string, Geo>(StringComparer.OrdinalIgnoreCase);
@@ -52,16 +86,39 @@ Geo Geometry(string rel)
     if (geoCache.TryGetValue(rel, out var hit)) return hit;
     var full = rel.StartsWith("meshes", StringComparison.OrdinalIgnoreCase) ? rel : Path.Combine("meshes", rel);
     var res = assets.ResolveForPlacement(full);
-    if (res.Sources.Count == 0) { measureFail++; return geoCache[rel] = new Geo(Aabb.Empty, false, false, null); }
+    if (res.Sources.Count == 0) { measureFail++; return geoCache[rel] = new Geo(Aabb.Empty, false, false, null, "unresolved"); }
     var (bytes, _) = AssetResolver.ReadPlacementSource(res.Sources[0]);
-    if (bytes is null) { measureFail++; return geoCache[rel] = new Geo(Aabb.Empty, false, false, null); }
+    if (bytes is null) { measureFail++; return geoCache[rel] = new Geo(Aabb.Empty, false, false, null, "unresolved"); }
     var o = NifGeometry.Measure(bytes, includeTriangles: true);
-    if (o.Model is null) { measureFail++; return geoCache[rel] = new Geo(Aabb.Empty, false, false, null); }
+    if (o.Model is null) { measureFail++; return geoCache[rel] = new Geo(Aabb.Empty, false, false, null, "unreadable"); }
     measured++;
-    var soup = o.Model.Soup;
-    if (soup is not null && soup.TriangleCount > MaxTrisCached) soup = null;
-    if (soup is not null) cachedTris += soup.TriangleCount;
-    return geoCache[rel] = new Geo(o.Model.Bounds, o.Model.HasCollision, true, soup);
+    var m = o.Model;
+    var render = m.Soup;
+    if (render is not null && render.TriangleCount > MaxTrisCached) render = null;
+
+    if (geometrySource == "render")
+    {
+        if (render is not null) cachedTris += render.TriangleCount;
+        return geoCache[rel] = new Geo(m.Bounds, m.HasCollision, true, render, "render");
+    }
+
+    // Collision: the solid an actor meets. Three outcomes, each counted by the caller —
+    //   none      no body on an actor-solid layer: the object blocks nothing and is not tested;
+    //   collision the complete solid soup on those layers, with ITS box for the broad phase;
+    //   fallback  the decode was incomplete (an unread shape in a solid body): the render soup stands in, labelled.
+    bool anySolid = m.CollisionBodies is not null && m.CollisionBodies.Any(b => b.Solid && CollisionLayers.IsActorSolid(b.Layer));
+    if (!m.HasCollision || !anySolid)
+        return geoCache[rel] = new Geo(Aabb.Empty, m.HasCollision, true, null, "none");
+    var solid = m.CollisionSoupFor(b => b.Solid && CollisionLayers.IsActorSolid(b.Layer));
+    if (m.CollisionComplete && solid is { TriangleCount: > 0 })
+    {
+        var box = Aabb.Empty;
+        foreach (var v in solid.Vertices) box = box.Add(v);
+        cachedTris += solid.TriangleCount;
+        return geoCache[rel] = new Geo(box, true, true, solid, "collision");
+    }
+    if (render is not null) cachedTris += render.TriangleCount;
+    return geoCache[rel] = new Geo(m.Bounds, m.HasCollision, true, render, "fallback");
 }
 
 // world-space column index per (mesh, transform), memoised within a cell — many refs repeat the same
@@ -130,7 +187,10 @@ long[] ClassRow(int s, string t) { if (!byClass[s].TryGetValue(t, out var row)) 
 var SepChars = new[] { (char)47, (char)92 };
 string MeshClass(string mesh) { int i = mesh.IndexOfAny(SepChars); return i <= 0 ? "(root)" : mesh[..i]; }
 long[] TypeRow(int s, string t) { if (!byType[s].TryGetValue(t, out var row)) byType[s][t] = row = new long[2]; return row; }
-long cells = 0, totalRefs = 0, skippedNoGeo = 0, skippedDisabled = 0, navTris = 0, malformedTotal = 0;
+long cells = 0, totalRefs = 0, skippedNoGeo = 0, skippedDisabled = 0, skippedNoSolid = 0, navTris = 0, malformedTotal = 0;
+// Which soup each tested ref ran on, per exterior class and interior: [collision, fallback, none(skipped)].
+var bySource = new Dictionary<string, long[]>(StringComparer.OrdinalIgnoreCase);
+long[] SourceRow(string cls) { if (!bySource.TryGetValue(cls, out var row)) bySource[cls] = row = new long[3]; return row; }
 // Keep a per-mesh breakdown for the rules whose residue is worth reading, not just the last one.
 var worstOf = new List<(string Cell, string Mesh, string Type, int Tris, FormKey Fk)>?[settings.Length];
 for (int s = 0; s < settings.Length; s++)
@@ -149,6 +209,12 @@ foreach (var cp in PlacementExtract.FromMod(mod))
     navTris += index.TriangleCount;
     if (index.TriangleCount == 0) continue;
 
+    var band = ActorBand.ForCell(cp.Refs, npcFacts, raceFacts, fallbackTop, fallbackSrc);
+    float bandTop = band.Top;
+    if (band.Actors > 0) cellsWithActors++;
+    bandMin = MathF.Min(bandMin, bandTop); bandMax = MathF.Max(bandMax, bandTop);
+    { int key = (int)MathF.Round(bandTop / 4f) * 4; bandHist.TryGetValue(key, out var bn); bandHist[key] = bn + 1; }
+
     foreach (var r in cp.Refs)
     {
         totalRefs++;
@@ -156,12 +222,16 @@ foreach (var cp in PlacementExtract.FromMod(mod))
         if (r.Base is not { } bk || !baseMesh.TryGetValue(bk, out var bm)) { skippedNoGeo++; continue; }
 
         var g = Geometry(bm.Mesh);
+        string srcClass = cp.Interior ? "(interior)" : MeshClass(bm.Mesh);
+        if (g.Ok && g.Source == "none") { skippedNoSolid++; SourceRow(srcClass)[2]++; continue; }
         if (!g.Ok || g.Box.IsEmpty) { skippedNoGeo++; continue; }
+        SourceRow(srcClass)[g.Source == "collision" ? 0 : 1]++;
 
         var world = SpatialOverlap.ToWorld(g.Box, r.Position, r.Rotation, r.Scale);
 
         MeshColumnIndex? columns = null;
         bool columnsTried = false;
+        bool crossHit = false;
 
         for (int s = 0; s < settings.Length; s++)
         {
@@ -171,7 +241,7 @@ foreach (var cp in PlacementExtract.FromMod(mod))
 
             var q = SpatialOverlap.InsetHorizontal(world, st.BoxInset);
             if (q.IsEmpty) continue;
-            q = SpatialOverlap.GrowDown(q, st.Height);
+            q = SpatialOverlap.GrowDown(q, st.Kind == 0 ? st.Height : bandTop);
 
             refsTested[s]++;
             TypeRow(s, bm.Type)[0]++;
@@ -208,7 +278,7 @@ foreach (var cp in PlacementExtract.FromMod(mod))
                         new System.Numerics.Vector3(va.X, va.Y, va.Z),
                         new System.Numerics.Vector3(vb.X, vb.Y, vb.Z),
                         new System.Numerics.Vector3(vc.X, vc.Y, vc.Z),
-                        st.Clearance, st.Height, st.TriInset, st.MaxUpFacing, 0.5f, stopAfter: 1);
+                        st.Clearance, bandTop, st.TriInset, st.MaxUpFacing, 0.5f, stopAfter: 1);
                     if (x < 0) { unjudgeable[s]++; continue; }   // inset consumed it: NOT the same as clear
                     if (x == 0) continue;
                     if (st.Kind == 2) { nTris++; continue; }
@@ -218,7 +288,7 @@ foreach (var cp in PlacementExtract.FromMod(mod))
                         new System.Numerics.Vector3(va.X, va.Y, va.Z),
                         new System.Numerics.Vector3(vb.X, vb.Y, vb.Z),
                         new System.Numerics.Vector3(vc.X, vc.Y, vc.Z),
-                        st.Clearance, st.Height, st.TriInset, st.Step);
+                        st.Clearance, bandTop, st.TriInset, st.Step);
                     if (!sev.Judged) unjudgeable[s]++;
                     else if (sev.Severed && sev.SupportedFraction < st.MaxSupport) nTris++;
                 }
@@ -232,7 +302,23 @@ foreach (var cp in PlacementExtract.FromMod(mod))
                 if (interiorBucket == 0) ClassRow(s, MeshClass(bm.Mesh))[1]++;
                 if (worstOf[s] is { } bag && bag.Count < 400000)
                     bag.Add((cp.CellEditorId ?? cp.Cell.ToString(), bm.Mesh, bm.Type, nTris, r.FormKey));
+                if (st.Name.StartsWith("CROSS   clr32")) crossHit = true;
             }
+        }
+
+        // ---- the route rule, for every reference whose solid entered an actor column (Doors set aside: passable by design) ----
+        if (crossHit && columns is not null && bm.Type == "Door") routeDoors++;
+        else if (crossHit && columns is not null)
+        {
+            routeMeasured++;
+            var facts = RouteConnectivity.Measure(index, columns, world, RouteMargin, RouteStep, ActorBand.StepHeight, bandTop, Ladder);
+            var v64 = DetectorModel.RouteBlockage(facts.Judged, facts.Touched, facts.MaxIntactRung, facts.MaxIntactRungWithout, Ladder, 64f);
+            var v128 = DetectorModel.RouteBlockage(facts.Judged, facts.Touched, facts.MaxIntactRung, facts.MaxIntactRungWithout, Ladder, 128f);
+            int col = v64.Verdict switch { RouteVerdict.Blocked => 0, RouteVerdict.Narrowed => 1, RouteVerdict.Clipped => v128.Verdict == RouteVerdict.Narrowed ? 2 : 3, RouteVerdict.None => 4, _ => 5 };
+            var rowC = RouteRow(routeByClass, cp.Interior ? "(interior)" : MeshClass(bm.Mesh)); rowC[col]++; rowC[6]++;
+            var rowT = RouteRow(routeByType, bm.Type); rowT[col]++; rowT[6]++;
+            if (v64.Verdict == RouteVerdict.Blocked && routeBlocked.Count < 20000)
+                routeBlocked.Add((cp.CellEditorId ?? cp.Cell.ToString(), bm.Mesh, bm.Type, r.FormKey, v64.Why));
         }
     }
 
@@ -246,6 +332,16 @@ Console.WriteLine($"navmesh triangles indexed : {navTris:N0}   (malformed vertex
 Console.WriteLine($"placed refs seen          : {totalRefs:N0}");
 Console.WriteLine($"  skipped, initially disabled/deleted : {skippedDisabled:N0}");
 Console.WriteLine($"  skipped, no usable geometry         : {skippedNoGeo:N0}");
+Console.WriteLine($"  skipped, no actor-solid collision   : {skippedNoSolid:N0}   (collision mode only: the object blocks nothing)");
+Console.WriteLine($"actor band                : cells with placed actors {cellsWithActors:N0}; top {(bandMin == float.MaxValue ? 0 : bandMin):0}..{bandMax:0} u; fallback {fallbackSrc}");
+Console.WriteLine($"   band top histogram (4 u bins, cells): {string.Join(", ", bandHist.Select(kv => $"{kv.Key}:{kv.Value:N0}"))}");
+Console.WriteLine($"geometry source           : {geometrySource}");
+if (geometrySource == "collision")
+{
+    Console.WriteLine($"   {"class",-16} {"on collision",14} {"render fallback",16} {"not solid, skipped",20}");
+    foreach (var kv in bySource.OrderByDescending(kv => kv.Value[0] + kv.Value[1] + kv.Value[2]))
+        Console.WriteLine($"   {kv.Key,-16} {kv.Value[0],14:N0} {kv.Value[1],16:N0} {kv.Value[2],20:N0}");
+}
 Console.WriteLine($"distinct meshes measured  : {measured:N0}   (unreadable: {measureFail:N0})   cached triangles: {cachedTris:N0}");
 Console.WriteLine($"elapsed                   : {sw.Elapsed.TotalSeconds:0.0}s\n");
 
@@ -296,9 +392,30 @@ for (int s = 0; s < settings.Length; s++)
         Console.WriteLine($"   {grp.Count(),7:N0}  {grp.First().Type,-14} {grp.Key}");
 }
 
+Console.WriteLine();
+Console.WriteLine($"   ---- the ROUTE rule (Part B) on the vanilla floor: refs whose solid entered an actor column (CROSS clr32), with vs without ----");
+Console.WriteLine($"   ladder {string.Join("/", Ladder.Select(l => l.ToString("0")))} u, margin {RouteMargin:0}, step {RouteStep:0}; measured {routeMeasured:N0}; doors set aside as passable by design {routeDoors:N0}");
+Console.WriteLine($"   {"class",-16} {"measured",9} {"BLOCKED",9} {"rate",8} {"NARROW<64",10} {"NARROW<128",11} {"CLIPPED",9} {"none",7} {"unjudged",9}");
+foreach (var kv in routeByClass.OrderByDescending(kv => kv.Value[6]))
+    Console.WriteLine($"   {kv.Key,-16} {kv.Value[6],9:N0} {kv.Value[0],9:N0} {(kv.Value[6] == 0 ? 0 : 100.0 * kv.Value[0] / kv.Value[6]),7:0.00}% {kv.Value[1],10:N0} {kv.Value[2],11:N0} {kv.Value[3],9:N0} {kv.Value[4],7:N0} {kv.Value[5],9:N0}");
+Console.WriteLine($"   {"record type",-16} {"measured",9} {"BLOCKED",9} {"rate",8} {"NARROW<64",10} {"NARROW<128",11} {"CLIPPED",9} {"none",7} {"unjudged",9}");
+foreach (var kv in routeByType.OrderByDescending(kv => kv.Value[6]).Take(10))
+    Console.WriteLine($"   {kv.Key,-16} {kv.Value[6],9:N0} {kv.Value[0],9:N0} {(kv.Value[6] == 0 ? 0 : 100.0 * kv.Value[0] / kv.Value[6]),7:0.00}% {kv.Value[1],10:N0} {kv.Value[2],11:N0} {kv.Value[3],9:N0} {kv.Value[4],7:N0} {kv.Value[5],9:N0}");
+if (routeBlocked.Count > 0)
+{
+    Console.WriteLine($"\n   ---- BLOCKED on vanilla: top meshes (the same-defect control candidates) ----");
+    foreach (var grp in routeBlocked.GroupBy(b => b.Mesh, StringComparer.OrdinalIgnoreCase).OrderByDescending(g => g.Count()).Take(15))
+        Console.WriteLine($"   {grp.Count(),6:N0}  {grp.First().Type,-14} {grp.Key}");
+}
+
 if (dumpDir is not null)
 {
     Directory.CreateDirectory(dumpDir);
+    using (var bw = new StreamWriter(Path.Combine(dumpDir, "route-blocked.tsv")))
+    {
+        bw.WriteLine("key\tcell\ttype\tmesh\twhy");
+        foreach (var b in routeBlocked) bw.WriteLine($"{b.Fk}\t{b.Cell}\t{b.Type}\t{b.Mesh}\t{b.Why}");
+    }
     for (int s = 0; s < settings.Length; s++)
     {
         if (worstOf[s] is not { } bag) continue;
@@ -310,7 +427,9 @@ if (dumpDir is not null)
     Console.WriteLine($"\ndumped flagged refs per narrow rule -> {dumpDir}");
 }
 
+return 0;
+
 record Setting(string Name, int Kind, float Height, float BoxInset, bool CollisionOnly,
                int MinInside, float Clearance, float TriInset, float MaxUpFacing, float Step, float MaxSupport);
 
-record Geo(Aabb Box, bool HasCollision, bool Ok, TriangleSoup? Soup);
+record Geo(Aabb Box, bool HasCollision, bool Ok, TriangleSoup? Soup, string Source);

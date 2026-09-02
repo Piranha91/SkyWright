@@ -340,5 +340,101 @@ Console.WriteLine("   navmesh triangle: (0,0,0) (200,0,0) (0,200,0)   actor heig
           Near(d, 357.1434f, -646.6001f, 24.4199f, 645.5053f, -223.7372f, 411.8254f), Show(d));
 }
 
+// ---- 15. TRIANGLE-vs-BOX on NON-CUBIC boxes -------------------------------------------------------------
+// Found 2026-09-02 when the route raster's thin column query returned no ground: the nine edge-cross axis
+// tests paired each edge component with the WRONG box half-extent, which is exact only when the box is a cube.
+// A tall thin column over a flat floor and a wide flat slab pierced by a vertical triangle are the two shapes
+// that expose it; the cases here are the ones that were RED before the fix.
+{
+    // A 1 x 1 x 712 column standing on a flat floor triangle: must intersect.
+    var column = new Aabb(new Vec3(-0.5f, 63.5f, -256), new Vec3(0.5f, 64.5f, 456), false);
+    bool col = SpatialOverlap.TriangleIntersectsBox(new Vector3(-600, 0, 0), new Vector3(600, 0, 0), new Vector3(600, 128, 0), column);
+    Check("SAT box: thin tall column over a flat floor -> intersects", col, "was RED: edge-cross radius used the wrong half-extents");
+
+    // A wide flat slab pierced by a vertical triangle 10 u off its centre: must intersect.
+    var slab = new Aabb(new Vec3(-400, -400, -0.5f), new Vec3(400, 400, 0.5f), false);
+    bool pierced = SpatialOverlap.TriangleIntersectsBox(new Vector3(0, 10, -20), new Vector3(0, 10, 20), new Vector3(30, 10, 0), slab);
+    Check("SAT box: wide flat slab pierced by a vertical triangle -> intersects", pierced, "");
+
+    // The severance column (32 x 32 x 96) against a wall face whose TOP edge sits 20 u above the column centre:
+    // the face crosses the column and must intersect. The bug rejected it on the top edge's axis.
+    var cell = new Aabb(new Vec3(0, 0, 32), new Vec3(32, 32, 128), false);
+    bool wallTop = SpatialOverlap.TriangleIntersectsBox(new Vector3(-100, 16, 0), new Vector3(100, 16, 0), new Vector3(100, 16, 100), cell);
+    Check("SAT box: actor column vs a wall face topping out inside it -> intersects", wallTop, "");
+
+    // ...and a triangle genuinely beside the column stays separated.
+    bool beside = SpatialOverlap.TriangleIntersectsBox(new Vector3(40, -100, 0), new Vector3(40, 100, 0), new Vector3(40, 100, 300), cell);
+    Check("SAT box: wall face 8 u past the column -> separated", !beside, "");
+}
+
+// ---- 14. THE ROUTE — with vs without, on a synthetic corridor (roadmap 4.7 Part B) --------------------
+// A navmesh strip 128 u wide (Y 3..131 — deliberately OFF the 16 u raster grid, the way real ground is; a strip
+// at Y 0..128 puts cell centres exactly on its edges and the raster reads those as ground) and 1,200 u long, two
+// triangles. Obstacles are hand-built boxes; the answers are known by construction. Ladder 0/32/64/96/128,
+// margin 256, step 16, band 32..128. The raster's resolution is half a cell — 8 u — on every edge.
+{
+    var strip = new NavmeshGeometry(Mutagen.Bethesda.Plugins.FormKey.Null,
+        new[] { new Vec3(-600, 3, 0), new Vec3(600, 3, 0), new Vec3(600, 131, 0), new Vec3(-600, 131, 0) },
+        new[] { new NavTri(0, 1, 2, 0), new NavTri(0, 2, 3, 0) },
+        new Vec3(-600, 3, 0), new Vec3(600, 131, 0));
+    var navs = NavmeshIndex.Build(new[] { strip }, out _);
+    var ladder = new[] { 0f, 32f, 64f, 96f, 128f };
+    static Aabb BoxOf(Vector3 lo, Vector3 hi) => new(new Vec3(lo.X, lo.Y, lo.Z), new Vec3(hi.X, hi.Y, hi.Z), false);
+    RouteFacts Route(Vector3 lo, Vector3 hi) =>
+        RouteConnectivity.Measure(navs, Index(Box(lo, hi)), BoxOf(lo, hi), margin: 256f, step: 16f, clearance: 32f, height: 128f, ladder);
+    static string Show(RouteFacts f) => $"judged={f.Judged} touched={f.Touched} intact={f.MaxIntactRung} without={f.MaxIntactRungWithout} groups={f.BoundaryGroups} {f.Why}";
+
+    // The corridor itself, no obstacle on it: a shelf beside the strip, off the navmesh.
+    var beside = Route(new Vector3(-20, 200, 0), new Vector3(20, 260, 100));
+    Check("route: object beside the corridor -> touched 0", beside.Judged && beside.Touched == 0, Show(beside));
+    Check("route: ...and the corridor passes 96 u without it, not 128", beside.MaxIntactRungWithout == 3, Show(beside));
+
+    // The canonical failure: a wall across the whole corridor.
+    var wall = Route(new Vector3(0, -20, 0), new Vector3(16, 148, 200));
+    Check("route: wall across the corridor -> split at rung 0 (BLOCKED)", wall.Judged && wall.Touched > 0 && wall.MaxIntactRung < 0, Show(wall));
+    Check("route: ...while the corridor was one piece without it", !wall.SplitAtWithout[0] && wall.BoundaryGroups == 1, Show(wall));
+
+    // A wall leaving a 61 u gap (Y 3..64): a route survives at 32 u clearance and fails at 64.
+    var gap = Route(new Vector3(0, 64, 0), new Vector3(16, 148, 200));
+    Check("route: wall with a 61 u gap -> intact at 32, split at 64", gap.Judged && gap.Touched > 0 && gap.MaxIntactRung == 1, Show(gap));
+
+    // Clutter in a corner: ~88 u of corridor left — intact at 64, not at 96.
+    var shelf = Route(new Vector3(0, 0, 0), new Vector3(40, 40, 200));
+    Check("route: shelf in the corner -> intact at 64, split at 96", shelf.Judged && shelf.Touched > 0 && shelf.MaxIntactRung == 2, Show(shelf));
+
+    // A wall flush along the corridor's edge (its face 3 u short of the ground) bounds it, it does not block it.
+    var flush = Route(new Vector3(-100, -40, 0), new Vector3(100, 0, 200));
+    Check("route: wall flush along the edge -> touched 0", flush.Judged && flush.Touched == 0, Show(flush));
+
+    // A bridge deck over the corridor, above the band.
+    var bridge = Route(new Vector3(-100, -20, 160), new Vector3(100, 148, 200));
+    Check("route: bridge 160 u overhead -> touched 0", bridge.Judged && bridge.Touched == 0, Show(bridge));
+
+    // Nothing to walk on: an object far from any navmesh is UNJUDGED, not clear.
+    var far = Route(new Vector3(5000, 5000, 0), new Vector3(5016, 5128, 200));
+    Check("route: no ground in the window -> unjudged", !far.Judged, Show(far));
+
+    // A city wall whose collision reaches 800 u BELOW the street (Whiterun's do): the street is still the storey
+    // that gets judged, and the wall still blocks it.
+    var deep = Route(new Vector3(0, -20, -800), new Vector3(16, 148, 200));
+    Check("route: wall with an 800 u foundation -> judged on the street, BLOCKED", deep.Judged && deep.MaxIntactRung < 0 && deep.Storeys == 1, Show(deep) + $" storeys={deep.Storeys} z={deep.StoreyZ:0}");
+
+    // Two storeys: a second strip 300 u above the first. A wall across only the UPPER one is out of the street's
+    // reach (a floor 300 u below cannot put an actor into it), so one storey is measured and it is the upper, blocked.
+    var upper = new NavmeshGeometry(Mutagen.Bethesda.Plugins.FormKey.Null,
+        new[] { new Vec3(-600, 3, 300), new Vec3(600, 3, 300), new Vec3(600, 131, 300), new Vec3(-600, 131, 300) },
+        new[] { new NavTri(0, 1, 2, 0), new NavTri(0, 2, 3, 0) },
+        new Vec3(-600, 3, 300), new Vec3(600, 131, 300));
+    var two = NavmeshIndex.Build(new[] { strip, upper }, out _);
+    var upperWallLo = new Vector3(0, -20, 300); var upperWallHi = new Vector3(16, 148, 500);
+    var twoFacts = RouteConnectivity.Measure(two, Index(Box(upperWallLo, upperWallHi)), BoxOf(upperWallLo, upperWallHi), 256f, 16f, 32f, 128f, ladder);
+    Check("route: two storeys, wall across the upper only -> the upper is the storey judged, BLOCKED", twoFacts.Judged && twoFacts.Storeys == 1 && twoFacts.MaxIntactRung < 0 && twoFacts.StoreyZ > 200, Show(twoFacts) + $" storeys={twoFacts.Storeys} z={twoFacts.StoreyZ:0}");
+
+    // ...and a wall rising from the street through both storeys is measured on both and blocks both.
+    var tallLo = new Vector3(0, -20, 0); var tallHi = new Vector3(16, 148, 500);
+    var tallFacts = RouteConnectivity.Measure(two, Index(Box(tallLo, tallHi)), BoxOf(tallLo, tallHi), 256f, 16f, 32f, 128f, ladder);
+    Check("route: two storeys, wall through both -> 2 storeys measured, BLOCKED", tallFacts.Judged && tallFacts.Storeys == 2 && tallFacts.MaxIntactRung < 0, Show(tallFacts) + $" storeys={tallFacts.Storeys} z={tallFacts.StoreyZ:0}");
+}
+
 Console.WriteLine($"\n==== {pass} passed, {fail} failed ====");
 return fail == 0 ? 0 : 1;

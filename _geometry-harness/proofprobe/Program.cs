@@ -1386,6 +1386,42 @@ Console.WriteLine("\nPROOF — the synthetic load order (_shared/SyntheticOrder.
     try { Directory.Delete(root, true); } catch { }
 }
 
+// ---------------------------------------------------------------------------------------
+// The route-blockage rule (roadmap 4.7 Part B, frozen 2026-09-02) — DetectorModel.RouteBlockage.
+// The facts come from RouteConnectivity (proven on synthetic corridors in crossprobe); this pins
+// what the rule makes of them. Ladder 0/32/64/96/128; rung indices as the measurement reports them.
+// ---------------------------------------------------------------------------------------
+Console.WriteLine("\nPROOF — the route-blockage rule (DetectorModel.RouteBlockage)");
+{
+    var ladder = new[] { 0f, 32f, 64f, 96f, 128f };
+    var r = DetectorModel.RouteBlockage(judged: false, touched: 5, maxIntactRung: 2, maxIntactRungWithout: 3, ladder, threshold: 64f);
+    Check("route: unmeasured window -> Unjudgeable, never clear", r.Verdict == RouteVerdict.Unjudgeable, r.Why);
+
+    r = DetectorModel.RouteBlockage(true, touched: 0, maxIntactRung: 4, maxIntactRungWithout: 4, ladder, 64f);
+    Check("route: no overlap with walkable ground -> None", r.Verdict == RouteVerdict.None, r.Why);
+
+    r = DetectorModel.RouteBlockage(true, touched: 40, maxIntactRung: -1, maxIntactRungWithout: 3, ladder, 64f);
+    Check("route: split at zero clearance -> Blocked", r.Verdict == RouteVerdict.Blocked, r.Why);
+
+    // The 64 u gap: intact at 32, split at 64. Below a 64 u threshold and below the corridor's own 96 -> Narrowed.
+    r = DetectorModel.RouteBlockage(true, touched: 12, maxIntactRung: 1, maxIntactRungWithout: 3, ladder, 64f);
+    Check("route: 32 u left of a 96 u corridor, threshold 64 -> Narrowed", r.Verdict == RouteVerdict.Narrowed, r.Why);
+
+    // The same gap against a 32 u threshold clears it.
+    r = DetectorModel.RouteBlockage(true, touched: 12, maxIntactRung: 1, maxIntactRungWithout: 3, ladder, 32f);
+    Check("route: ...threshold 32 -> Clipped", r.Verdict == RouteVerdict.Clipped, r.Why);
+
+    // The with-vs-without arm: a corridor that was ALREADY only 32 u wide is not narrowed by the object.
+    r = DetectorModel.RouteBlockage(true, touched: 12, maxIntactRung: 1, maxIntactRungWithout: 1, ladder, 64f);
+    Check("route: corridor already 32 u without the object -> Clipped, not Narrowed", r.Verdict == RouteVerdict.Clipped, r.Why);
+
+    // The shelf in the corner: 64 u left, threshold 64 -> Clipped; threshold 96 -> Narrowed.
+    r = DetectorModel.RouteBlockage(true, touched: 6, maxIntactRung: 2, maxIntactRungWithout: 3, ladder, 64f);
+    Check("route: 64 u left at threshold 64 -> Clipped", r.Verdict == RouteVerdict.Clipped, r.Why);
+    r = DetectorModel.RouteBlockage(true, touched: 6, maxIntactRung: 2, maxIntactRungWithout: 3, ladder, 96f);
+    Check("route: 64 u left at threshold 96 -> Narrowed", r.Verdict == RouteVerdict.Narrowed, r.Why);
+}
+
 Console.WriteLine();
 Console.WriteLine($"==== {pass} passed, {fail} failed ====");
 if (fail > 0) Console.WriteLine("   failed: " + string.Join(", ", failures));

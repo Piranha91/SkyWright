@@ -727,6 +727,35 @@ public static class DetectorModel
          : smallerBoxMaxDimension >= 64f ? OverlapScale.Furniture
          : OverlapScale.Clutter;
 
+    /// <summary>The route-blockage rule (roadmap 4.7 Part B, frozen 2026-09-02 from the handoff of 2026-09-05).
+    /// Replaces milestone 4's "any severed navmesh triangle" with a route-level decision over the facts
+    /// <c>RouteConnectivity.Measure</c> returns for one object in a window of walkable ground:
+    /// <list type="bullet">
+    /// <item><b>Blocked</b> — the object disconnects ground that was connected without it, even at zero clearance
+    /// (<paramref name="maxIntactRung"/> &lt; 0). The canonical failure: a wall across the route, the NPC pressing into it.</item>
+    /// <item><b>Narrowed</b> — a route survives, but the widest ladder rung it survives at is below
+    /// <paramref name="threshold"/> AND below what the corridor allowed without the object. The second condition is the
+    /// with-vs-without arm: a corridor that was already that narrow is not the object's doing.</item>
+    /// <item><b>Clipped</b> — the object stands in an actor column over walkable ground (<paramref name="touched"/> &gt; 0)
+    /// but every route survives at the threshold. Piranha's clipping class: reported, ranked, kept apart from Blocked.</item>
+    /// <item><b>None</b> — the object never enters an actor column over walkable ground in the window.</item>
+    /// <item><b>Unjudgeable</b> — the window could not be measured; never read as clear.</item>
+    /// </list>
+    /// The threshold is Part C's number — the minimum clear gap an NPC needs, measured in game — and is a PARAMETER
+    /// here; the rungs are the ladder the measurement ran (rung 0 is clearance 0).</summary>
+    public static (RouteVerdict Verdict, string Why) RouteBlockage(bool judged, int touched, int maxIntactRung,
+                                                                    int maxIntactRungWithout, float[] ladder, float threshold)
+    {
+        if (!judged) return (RouteVerdict.Unjudgeable, "the window could not be measured");
+        if (touched <= 0) return (RouteVerdict.None, "the object never enters an actor column over walkable ground");
+        if (maxIntactRung < 0) return (RouteVerdict.Blocked, "disconnects ground that was connected without it, at zero clearance");
+        float with = ladder[Math.Min(maxIntactRung, ladder.Length - 1)];
+        float without = maxIntactRungWithout < 0 ? 0f : ladder[Math.Min(maxIntactRungWithout, ladder.Length - 1)];
+        if (with < threshold && with < without)
+            return (RouteVerdict.Narrowed, $"a route survives but only {with:0} u clear past the object, {without:0} u without it, threshold {threshold:0} u");
+        return (RouteVerdict.Clipped, $"overlaps walkable ground ({touched} cells) but every route survives at {MathF.Min(with, without):0} u clearance");
+    }
+
     /// <summary>The record-level verify verdict. CONFIRMED means every necessary record is
     /// overridden — which is COVERAGE, not repair: content and load-order position are not judged
     /// here, and the differential run exists precisely because a CONFIRMED patch can net to zero.</summary>
@@ -739,6 +768,10 @@ public static class DetectorModel
 }
 
 public enum ClobberPopulation { BethesdaFloor, UssepDiscarded, ModOnMod }
+
+/// <summary>The route-blockage classes (roadmap 4.7 Part B). Two severities by design: Blocked is the very-high
+/// class (no viable pathing left); Narrowed and Clipped are the clipping classes, never merged with it.</summary>
+public enum RouteVerdict { None, Clipped, Narrowed, Blocked, Unjudgeable }
 
 /// <summary>Whether an actor's PLACEMENT predicts where it will be found. Everything that is not
 /// PlacementBound is unassessable and counted by reason, never quietly cleared (rule 6).</summary>

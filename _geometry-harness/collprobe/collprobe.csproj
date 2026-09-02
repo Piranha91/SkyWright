@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net9.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <LangVersion>latest</LangVersion>
+    <AssemblyName>collprobe</AssemblyName>
+    <NoWarn>CA1416</NoWarn>
+    <ServerGarbageCollection>true</ServerGarbageCollection>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="..\_shared\HarnessTarget.cs" Link="HarnessTarget.cs" />
+    <ProjectReference Include="..\..\src\housecarl-core\housecarl-core.csproj" />
+  </ItemGroup>
+</Project>
