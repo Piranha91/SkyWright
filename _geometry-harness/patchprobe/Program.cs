@@ -138,7 +138,10 @@ foreach (var root in roots)
     }
 }
 
-var targetInst = instances.FirstOrDefault(i => string.Equals(i.Dir, target, StringComparison.OrdinalIgnoreCase));
+// Compare as normalised full paths: the configured target may carry forward slashes or a trailing separator
+// (harness.local.json is hand-written), the discovered directory never does.
+static string Norm(string d) => Path.TrimEndingDirectorySeparator(Path.GetFullPath(d));
+var targetInst = instances.FirstOrDefault(i => string.Equals(Norm(i.Dir), Norm(target), StringComparison.OrdinalIgnoreCase));
 Console.WriteLine($"MO2 instances found: {instances.Count}");
 foreach (var inst in instances)
     Console.WriteLine($"   {(inst == targetInst ? "TARGET " : "       ")}{inst.Name,-28} profile '{inst.Profile}'  {inst.Active.Count,5} active plugins");

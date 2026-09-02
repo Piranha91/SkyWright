@@ -13,8 +13,11 @@
 # usage:  .\differential-sweep.ps1 [-OutDir _runs\sweep] "TGC Winterhold - OCW Patch.esp" "Another patch.esp"
 #         (candidates are plain trailing arguments — one per plugin — so `powershell -File` works;
 #          a comma-joined -Candidates list does NOT survive -File argument binding)
+#         -Probe names the detector to sweep with (default navownprobe); any probe that takes
+#         --enable and --emit and writes a ConflictFile works — overlapprobe for the overlap class.
 param(
     [string]$OutDir = "$PSScriptRoot\_runs\sweep",
+    [string]$Probe = 'navownprobe',
     [Parameter(ValueFromRemainingArguments = $true)][string[]]$Candidates
 )
 if (-not $Candidates -or $Candidates.Count -eq 0) {
@@ -24,11 +27,11 @@ if (-not $Candidates -or $Candidates.Count -eq 0) {
 
 $ErrorActionPreference = 'Stop'
 New-Item -ItemType Directory -Force -Path $OutDir | Out-Null
-$navown = Join-Path $PSScriptRoot 'navownprobe'
+$navown = Join-Path $PSScriptRoot $Probe
 $diff = Join-Path $PSScriptRoot 'conflictdiff'
 $base = Join-Path $OutDir 'base.json'
 
-Write-Host "== base detection (no intervention)"
+Write-Host "== base detection with $Probe (no intervention)"
 Push-Location $navown
 try { dotnet run -c Release -- --emit $base | Select-Object -Last 3 } finally { Pop-Location }
 
