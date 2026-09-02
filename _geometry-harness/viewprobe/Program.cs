@@ -515,6 +515,9 @@ string replayArgs = string.Join(' ', replArgs);
 
 if (!drawNav) navMode = "off";
 if ((conflictsPath is not null || redSpecs.Count > 0) && !navModeExplicit) navMode = "wire";
+// What the command line settled on, kept so every worklist shot starts from it rather than from
+// the previous shot's overrides.
+string cliNavMode = navMode; float? cliCullAbove = cullAbove;
 if (navMode is not ("off" or "filled" or "wire" or "both"))
 { Console.Error.WriteLine($"--nav '{navMode}' is not one of: off, filled, wire, both."); return 1; }
 if (npcPuck is not ("on" or "off" or "auto"))
@@ -534,17 +537,17 @@ if (lookSens is < 0.01f or > 2f)
 // The route's named colours. Deliberately NOT the nav palette by another name: red is a conflict,
 // orange is a door, violet is a nav diff and white is the cell outline, so those are the four this
 // will not hand out. Whatever is chosen becomes reserved — the nav wire's auto-pick avoids it.
+var routeNames = new Dictionary<string, System.Numerics.Vector3>(StringComparer.OrdinalIgnoreCase)
+{
+    ["cyan"] = new(0.05f, 0.85f, 0.95f),
+    ["magenta"] = new(0.90f, 0.20f, 0.95f),
+    ["yellow"] = new(1.00f, 0.88f, 0.10f),
+    ["green"] = new(0.05f, 0.85f, 0.30f),
+    ["blue"] = new(0.25f, 0.45f, 1.00f),
+    ["pink"] = new(1.00f, 0.40f, 0.80f),
+};
 if (routeColor == default)
 {
-    var routeNames = new Dictionary<string, System.Numerics.Vector3>(StringComparer.OrdinalIgnoreCase)
-    {
-        ["cyan"] = new(0.05f, 0.85f, 0.95f),
-        ["magenta"] = new(0.90f, 0.20f, 0.95f),
-        ["yellow"] = new(1.00f, 0.88f, 0.10f),
-        ["green"] = new(0.05f, 0.85f, 0.30f),
-        ["blue"] = new(0.25f, 0.45f, 1.00f),
-        ["pink"] = new(1.00f, 0.40f, 0.80f),
-    };
     if (!routeNames.TryGetValue(routeColorName, out var rcv))
     {
         Console.Error.WriteLine($"--route-color '{routeColorName}' is not one of: {string.Join(", ", routeNames.Keys)} — or an R,G,B triple (0-255 or 0-1). "
@@ -552,6 +555,23 @@ if (routeColor == default)
         return 1;
     }
     routeColor = new System.Numerics.Vector4(rcv, 1f);
+}
+// A worklist route's own colour, by the same rule as --route-color; absent inherits it.
+bool TryRouteColour(string? spec, out System.Numerics.Vector4 colour, out string error)
+{
+    colour = routeColor; error = "";
+    if (string.IsNullOrWhiteSpace(spec)) return true;
+    var parts = spec.Split(',');
+    if (parts.Length == 3 && float.TryParse(parts[0], out var cr) && float.TryParse(parts[1], out var cg) && float.TryParse(parts[2], out var cb))
+    {
+        var v = new System.Numerics.Vector3(cr, cg, cb);
+        if (v.X > 1f || v.Y > 1f || v.Z > 1f) v /= 255f;
+        colour = new System.Numerics.Vector4(v, 1f);
+        return true;
+    }
+    if (routeNames.TryGetValue(spec.Trim(), out var named)) { colour = new System.Numerics.Vector4(named, 1f); return true; }
+    error = $"colour '{spec}' is not one of: {string.Join(", ", routeNames.Keys)} — or an R,G,B triple (0-255 or 0-1).";
+    return false;
 }
 // The grid's named colours. Default is a warm off-white GREY, which is deliberate: a grid is the
 // paper the picture is drawn on, not a thing in it, and the five saturated palette entries all mean
@@ -678,7 +698,6 @@ foreach (var rawSpec in npcSpecs)
     try { npcParsed.Add((FormKey.Factory(s.Trim()), npos, nheading, label, rawSpec)); }
     catch { Console.Error.WriteLine($"--npc '{rawSpec}': '{s}' is not a FormKey (XXXXXX:Plugin.esp)."); return 1; }
 }
-var npcWatchKeys = new HashSet<FormKey>(npcParsed.Select(sp => sp.Key));
 Directory.CreateDirectory(outDir);
 
 // ---------------------------------------------------------------------------------------
@@ -848,12 +867,15 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot)
     cellKey = null; cellLabel = cellTarget; interior = false;
     sw.Restart();
 
-    // The shot's route, or the command line's. A LOCAL, not one of the mutated globals above:
-    // navMode and cullAbove are set from the shot and never cleared, so shot 1's override leaks
-    // into shot 2 — a route that leaked would draw the wrong path over the right cell, silently.
+    // The shot's route, or the command line's. A LOCAL, like the shot spec below. navMode and
+    // cullAbove used to be set from the shot and never cleared, so shot 1's override leaked into
+    // shot 2 — an eye-level shot after a sliced top-down lost its ceiling and the beam it existed
+    // to show (2026-09-02); both are now reset to the command line's values at the top of every
+    // worklist shot, below.
     IReadOnlyList<(float X, float Y)> shotRoute = routeXY;
     string routeLabel = "";
     float? shotFloorZ = null;
+    HarnessShared.WorklistShot? shotSpec = null;   // the shot's own props, routes and NPCs, each applied where it belongs below
 
     // A worklist shot IS the camera: eye, aim and fov come from the shot and override whatever the
     // command line asked for, so one file drives both the picture and the bat that stands there.
@@ -864,6 +886,7 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot)
         var (wsYaw, wsPitch) = HarnessShared.WorklistIo.Aim(wshot);
         yaw = wsYaw; pitch = wsPitch; fov = wshot.Fov;
         look = null; eyeRef = null; lookRef = null;      // the shot is the whole camera, not a base for one
+        navMode = cliNavMode; cullAbove = cliCullAbove;     // the run's values first, then this shot's overrides
         if (wshot.Nav is { } shotNav) navMode = shotNav;
         if (wshot.CullAbove is { } shotCull) cullAbove = shotCull;
         if (wshot.Route is { Count: > 1 })
@@ -872,10 +895,26 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot)
             routeLabel = wshot.Label;
         }
         shotFloorZ = wshot.FloorZ;      // the MEASURED floor, when the author had one
+        shotSpec = wshot;
         textured = true;
         Console.WriteLine($"\n=== worklist cell {wlCell + 1}/{worklist.Cells.Count} "
                         + $"shot {wlShot + 1}/{worklist.Cells[wlCell].Shots.Count}: {wshot.Label} ===");
     }
+
+    // The shot's own NPCs, on top of the command line's: the same shape --npc parses to, and watched by
+    // the same walk — THIS shot's, which has not started yet. Shot-local, so shot 1's actors do not
+    // stand in shot 2's cell.
+    var shotNpcParsed = new List<(FormKey Key, System.Numerics.Vector3? Pos, float? HeadingDeg, string? Label, string Raw)>(npcParsed);
+    if (shotSpec?.Npcs is { Count: > 0 } wlNpcs)
+        foreach (var wn in wlNpcs)
+        {
+            FormKey nk;
+            try { nk = FormKey.Factory(wn.Form.Trim()); }
+            catch { Console.Error.WriteLine($"worklist npc '{wn.Form}': not a FormKey (XXXXXX:Plugin.esp)."); return 1; }
+            System.Numerics.Vector3? np = wn.Pos is { Count: 3 } wp ? new System.Numerics.Vector3(wp[0], wp[1], wp[2]) : null;
+            shotNpcParsed.Add((nk, np, wn.Heading, wn.Label, $"worklist npc {wn.Form}"));
+        }
+    var shotNpcWatch = new HashSet<FormKey>(shotNpcParsed.Select(sp => sp.Key));
 
     // --nav-z's band, resolved for THIS shot — `auto` reads the shot's own floor, so it cannot be
     // settled on the command line. Refused rather than defaulted when auto has nothing to read:
@@ -1018,13 +1057,13 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot)
                 if (cp.Worldspace != FormKey.Null)
                     foreach (var r in cp.Refs)
                         if (r.Persistent) persistentWin[r.FormKey] = (cp.Worldspace, r);   // later plugin wins
-                if (npcWatchKeys.Count > 0)
+                if (shotNpcWatch.Count > 0)
                     foreach (var r in cp.Refs)
                     {
                         if (r.RecordType != "PlacedNpc") continue;
-                        if (npcWatchKeys.Contains(r.FormKey))
+                        if (shotNpcWatch.Contains(r.FormKey))
                             npcRefWhere[r.FormKey] = (cp.Cell, cp.CellEditorId, r);         // later plugin wins
-                        if (r.Base is { } nb && npcWatchKeys.Contains(nb))
+                        if (r.Base is { } nb && shotNpcWatch.Contains(nb))
                         {
                             if (!npcBaseWhere.TryGetValue(nb, out var perRef)) npcBaseWhere[nb] = perRef = new();
                             perRef[r.FormKey] = (cp.Cell, cp.CellEditorId, r);              // later plugin wins per ref
@@ -1093,6 +1132,36 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot)
             Console.WriteLine($"   +{addedPersist} persistent worldspace ref(s) inside the rendered {(ringR > 0 ? "3x3 cells'" : "cell's")} bounds (doors live here)");
     }
     Console.WriteLine($"winning state: {winRef.Count:N0} refs, {winNav.Count:N0} navmeshes  ({sw.Elapsed.TotalSeconds:0.0}s)");
+
+    // The shot's synthetic props: what a runtime PlaceAtMe stood in the cell during a test, put back
+    // into the winning state as invented refs so the picture shows the obstacle the numbers were
+    // measured against. Invented and said so — a high ID in the base's own plugin, never written; the
+    // base itself is real and must carry a model, or there is nothing to draw and the shot is refused.
+    if (shotSpec?.Props is { Count: > 0 } wlProps)
+    {
+        int pi = 0;
+        foreach (var wp in wlProps)
+        {
+            FormKey bk;
+            try { bk = FormKey.Factory(wp.Form.Trim()); }
+            catch { Console.Error.WriteLine($"worklist prop '{wp.Form}': not a FormKey (XXXXXX:Plugin.esp)."); return 1; }
+            if (!baseMesh.TryGetValue(bk, out var pmesh))
+            {
+                Console.Error.WriteLine($"worklist prop '{wp.Form}'{(wp.Label is null ? "" : $" ({wp.Label})")}: no record with a model by that key in the load order"
+                                      + " — a prop names a BASE (STAT, MSTT, …), not a placed ref.");
+                return 1;
+            }
+            FormKey fk;
+            do { fk = new FormKey(bk.ModKey, (uint)(0xFFF000 + pi++)); } while (winRef.ContainsKey(fk));
+            winRef[fk] = new PlacedRef(fk, "PlacedObject", wp.Label, new Vec3(wp.Pos[0], wp.Pos[1], wp.Pos[2]),
+                                       new Vec3(0f, 0f, float.DegreesToRadians(wp.Yaw)), wp.Scale, bk,
+                                       Persistent: false, InitiallyDisabled: false, Deleted: false);
+            Console.WriteLine($"   +prop {fk}{(wp.Label is null ? "" : $" \"{wp.Label}\"")} = {bk}"
+                            + (baseEditorId.TryGetValue(bk, out var pEd) ? $" {pEd}" : "") + $"  {pmesh}"
+                            + $"  at {wp.Pos[0]:0},{wp.Pos[1]:0},{wp.Pos[2]:0} yaw {wp.Yaw:0}° scale {wp.Scale:0.##}"
+                            + "  (synthetic: from the worklist shot, in no plugin)");
+        }
+    }
 
     // ---------------------------------------------------------------------------------------
     // Runtime enable state. A ref with an XESP enable parent takes the PARENT's state (XOR the
@@ -1826,10 +1895,14 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot)
         // reference would pick the wrong storey the moment a route climbed a staircase; chaining
         // walks up with it, since consecutive waypoints are far closer in z than the 192 u that
         // separates one floor from the next.
-        ViewProbe.TexturedScene.RouteRender? routeRender = null;
-        if (shotRoute.Count > 1)
+        var routeRenders = new List<ViewProbe.TexturedScene.RouteRender>();
+        // (render, label, measured?, off-mesh samples, caption override) — the caption is written later, in colour.
+        var routeCaptions = new List<(ViewProbe.TexturedScene.RouteRender R, string Label, bool Measured, int OffMesh, string? Caption)>();
+        // ONE PLANNED ROUTE, as a function: the same gate for --route, a shot's `route`, and each planned
+        // entry of its `routes[]` — resolved onto the winning navmesh, clearance-checked, refused off-mesh.
+        int PlanRoute(IReadOnlyList<(float X, float Y)> xy, string label, System.Numerics.Vector4 colour, bool discs, float? arrowEvery, string? caption)
         {
-            var pts = new List<System.Numerics.Vector3>(shotRoute.Count);
+            var pts = new List<System.Numerics.Vector3>(xy.Count);
             var offMesh = new List<string>();
             var tight = new List<string>();
             // --route-z beats the shot's measured floor beats eye-minus-eye-height. The last of
@@ -1839,12 +1912,12 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot)
             string refWhy = routeZ is not null ? "stated: --route-z"
                           : shotFloorZ is not null ? "measured, from the shot's floorZ"
                           : $"ASSUMED: eye minus {eyeHeight:0} — pass --route-z if this camera is not standing on the route's floor";
-            Console.WriteLine($"   route: {shotRoute.Count} waypoint(s)"
-                            + (routeLabel.Length > 0 ? $" — {routeLabel}" : "")
+            Console.WriteLine($"   route: {xy.Count} waypoint(s)"
+                            + (label.Length > 0 ? $" — {label}" : "")
                             + $"; floor reference z {refZ:0} ({refWhy})");
-            for (int wi = 0; wi < shotRoute.Count; wi++)
+            for (int wi = 0; wi < xy.Count; wi++)
             {
-                var (wx, wy) = shotRoute[wi];
+                var (wx, wy) = xy[wi];
                 float? z = ViewProbe.BatEmit.NearestCoverZ(winNav, wx, wy, refZ);
                 // A multi-storey spot is where a route silently lands on the wrong floor, so the
                 // OTHER candidates are printed rather than discarded. --nav-at says the same thing;
@@ -1869,7 +1942,7 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot)
             // somewhere the game will not let them, and it looks authoritative while doing it.
             if (offMesh.Count > 0)
             {
-                Console.Error.WriteLine($"   route REFUSED: {offMesh.Count} of {shotRoute.Count} waypoint(s) are not on walkable navmesh."
+                Console.Error.WriteLine($"   route REFUSED: {offMesh.Count} of {xy.Count} waypoint(s) are not on walkable navmesh."
                                       + " A path over unwalkable ground looks authoritative and is not — fix the waypoints, or use --nav-at to find ground that is.");
                 foreach (var m in offMesh) Console.Error.WriteLine($"      {m}");
                 return 1;
@@ -2101,7 +2174,47 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot)
                 foreach (var m in strayed) Console.Error.WriteLine($"      {m}");
                 return 1;
             }
-            routeRender = new ViewProbe.TexturedScene.RouteRender(legs, pts, routeColor, routeDiscs, routeArrowEvery);
+            var planned = new ViewProbe.TexturedScene.RouteRender(legs, pts, colour, discs, arrowEvery);
+            routeRenders.Add(planned); routeCaptions.Add((planned, label, false, 0, caption));
+            return 0;
+        }
+        if (shotRoute.Count > 1 && PlanRoute(shotRoute, routeLabel, routeColor, routeDiscs, routeArrowEvery, null) != 0) return 1;
+
+        // ---- the shot's own routes[]: planned ones through the gate above, measured ones drawn as sampled --
+        if (shotSpec?.Routes is { Count: > 0 } wlRoutes)
+        {
+            for (int ri = 0; ri < wlRoutes.Count; ri++)
+            {
+                var wr = wlRoutes[ri];
+                string rlabel = wr.Label ?? $"route {ri + 1}";
+                if (!TryRouteColour(wr.Color, out var rcol, out var rcErr)) { Console.Error.WriteLine($"worklist route '{rlabel}': {rcErr}"); return 1; }
+                float? rArrows = routeArrowEvery;
+                if (wr.Arrows is { } asp)
+                    rArrows = asp == "auto" ? null : asp == "end" ? 0f : float.Parse(asp);   // validated on read
+                bool measured = wr.Points[0].Count == 3;
+                if (!measured)
+                {
+                    if (PlanRoute(wr.Points.Select(pt => (pt[0], pt[1])).ToList(), rlabel, rcol, wr.Discs ?? routeDiscs, rArrows, wr.Caption) != 0) return 1;
+                    continue;
+                }
+                // MEASURED: the engine's own samples. z is the engine's, the line runs exactly through the
+                // points, and the navmesh is consulted only to REPORT — a sample it does not cover is a
+                // finding about the walk, never a reason to refuse the picture. Straight in 3D between
+                // samples: the samples are the measurement's own resolution, and a mesh-following leg
+                // between them would be the renderer editing the evidence.
+                var mpts = wr.Points.Select(pt => new System.Numerics.Vector3(pt[0], pt[1], pt[2])).ToList();
+                int off = 0;
+                foreach (var mp in mpts)
+                    if (!ViewProbe.BatEmit.CoverHeights(winNav, mp.X, mp.Y).Any(h => MathF.Abs(h - mp.Z) <= 96f)) off++;
+                float mwalk = 0f;
+                for (int mi = 0; mi + 1 < mpts.Count; mi++) mwalk += System.Numerics.Vector3.Distance(mpts[mi], mpts[mi + 1]);
+                var measuredRender = new ViewProbe.TexturedScene.RouteRender(
+                    new IReadOnlyList<System.Numerics.Vector3>[] { mpts }, mpts, rcol, wr.Discs ?? false, rArrows);
+                routeRenders.Add(measuredRender); routeCaptions.Add((measuredRender, rlabel, true, off, wr.Caption));
+                Console.WriteLine($"   path (measured) {rlabel}: {mpts.Count} sample(s), {mwalk:0} u, z as sampled"
+                                + (off > 0 ? $"; {off} sample(s) over no navmesh within 96 u — reported, not refused"
+                                           : "; every sample over navmesh within 96 u"));
+            }
         }
 
         var (navTris, redTris) = BuildNavSets(winNav);
@@ -2166,7 +2279,7 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot)
         // and overrides the ref's own placement; explicit heading is degrees, `getangle z`
         // convention. No placement anywhere and no @position is an error, not a guess.
         var npcPlacements = new List<(FormKey NpcKey, ViewProbe.NpcPlacement Placement, string LabelHint)>();
-        foreach (var (key, pos, headingDeg, label, raw) in npcParsed)
+        foreach (var (key, pos, headingDeg, label, raw) in shotNpcParsed)
         {
             FormKey npcKey = key;
             System.Numerics.Vector3 p = default;
@@ -2311,17 +2424,23 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot)
         // The route's caption, in the route's colour — the same rule the actors' lines follow. It
         // names the path and states the span it was validated over, so the picture carries its own
         // provenance: a reader can tell a drawn route from a decorative one by the numbers on it.
-        if (routeRender is { Waypoints.Count: > 1 })
+        foreach (var (rr, rlab, measured, off, capOverride) in routeCaptions)
         {
+            if (capOverride is "") continue;                     // the author asked for no line
             // Distance WALKED, summed along the ground-following legs — a chord between waypoints
             // would under-report every slope and staircase on the path.
             float walk = 0f;
-            foreach (var leg in routeRender.Legs)
+            foreach (var leg in rr.Legs)
                 for (int wi = 0; wi + 1 < leg.Count; wi++) walk += System.Numerics.Vector3.Distance(leg[wi], leg[wi + 1]);
-            colourCaptions.Add(($"ROUTE {routeRender.Waypoints.Count} waypoints, {walk:0} u"
-                             + (routeLabel.Length > 0 ? $" — {routeLabel}" : "")
-                             + $" — z from the winning navmesh, every waypoint clearance-checked and every leg sampled onto it",
-                              new System.Numerics.Vector3(routeColor.X, routeColor.Y, routeColor.Z)));
+            var rc3 = new System.Numerics.Vector3(rr.Color.X, rr.Color.Y, rr.Color.Z);
+            if (capOverride is { } capText) { colourCaptions.Add((capText, rc3)); continue; }
+            colourCaptions.Add((measured
+                ? $"PATH {rlab} — {rr.Waypoints.Count} samples, {walk:0} u — measured: z as the engine reported it"
+                  + (off > 0 ? $", {off} sample(s) over no navmesh" : "")
+                : $"ROUTE {rr.Waypoints.Count} waypoints, {walk:0} u"
+                  + (rlab.Length > 0 ? $" — {rlab}" : "")
+                  + " — z from the winning navmesh, every waypoint clearance-checked and every leg sampled onto it",
+                rc3));
         }
 
         float PitchDownDeg()
@@ -2505,7 +2624,7 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot)
                    scene, assets, dataDir, modFolders, overwriteDir,
                    (eyePos.Value, lookPos.Value, fov), g, r, terrainPatches, terrainLayers, navMode, navColor,
                    skyColor, terrainHeightAt, dashUnderground, dashUnderStatics, msaa, cullAbove, cellBounds,
-                   diffs ?? noDiff, diffColor, picks, captionLines, colourCaptions, npcActors, npcPucksOn, routeRender,
+                   diffs ?? noDiff, diffColor, picks, captionLines, colourCaptions, npcActors, npcPucksOn, routeRenders,
                    gridRender, keepFx, fxStatic, listMeshes, waterPlanes, coverings, size, outFile,
                    camMeta);
 
@@ -2655,7 +2774,7 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot)
                 // the run actually has a worklist to step through.
                 // The route rides into the window as overlay geometry (nothing extra to build) —
                 // these are only what R and the HUD need to talk about it.
-                RouteCount = routeRender?.Waypoints.Count ?? 0,
+                RouteCount = routeRenders.Sum(rt => rt.Waypoints.Count),
                 RouteLabel = routeLabel,
                 Worklist = worklist,
                 WorklistCell = wlCell,
@@ -2683,7 +2802,7 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot)
                 scene, assets, dataDir, modFolders, overwriteDir,
                 (eyePos.Value, lookPos.Value, fov), navTris, redTris, terrainPatches, terrainLayers, navMode, navColor,
                 skyColor, terrainHeightAt, dashUnderground, dashUnderStatics, msaa, cullAbove, cellBounds,
-                noDiff, diffColor, picks, fpCap, colourCaptions, npcActors, npcPucksOn, routeRender, gridRender, keepFx, fxStatic, listMeshes,
+                noDiff, diffColor, picks, fpCap, colourCaptions, npcActors, npcPucksOn, routeRenders, gridRender, keepFx, fxStatic, listMeshes,
                 waterPlanes, coverings, size, fpOut,
                 camMeta, iopt);
             Console.WriteLine($"   interactive run over ({iShapes:N0} shapes were resident)");

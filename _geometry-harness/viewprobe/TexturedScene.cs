@@ -269,7 +269,7 @@ static class TexturedScene
         IReadOnlyList<(string Text, Vector3 Color)> colourCaptionLines, // coloured caption lines (actors, route), drawn AFTER the white ones
         IReadOnlyList<NpcActorRender> npcActors,           // placed characters — meshes BORROWED (see below), never disposed here
         bool npcPucks,                                     // per-actor-coloured ground disc + always-visible rim under each actor
-        RouteRender? route,                                // the path to walk: segments + arrowheads on the ground; null = none
+        IReadOnlyList<RouteRender> routes,                 // the paths drawn on the ground, each in its own colour: segments + arrowheads; empty = none
         GridRender? grid,                                  // labelled world-coordinate grid on the ground plane; null = none
         bool keepFx,                                       // --fx: draw effect-shader shapes too
         bool fxStatic,                                     // --fx-static: draw them as a frozen frame
@@ -1444,9 +1444,11 @@ static class TexturedScene
                     // The GRID is reserved on exactly the same terms and for exactly the same
                     // reason: it is ruled across the whole frame, so a grid that lands on the
                     // navmesh's hue is worse than a route that does.
-                    var routeC = route is null ? (Vector3?)null : new Vector3(route.Color.X, route.Color.Y, route.Color.Z);
+                    // EVERY route's colour is reserved, not just the first: a shot carrying a dozen
+                    // measured paths in three colours has three hues the mesh may not take.
                     var gridC = gridSpacing > 0f ? gridColour3 : (Vector3?)null;
-                    var reserved = new[] { routeC, gridC }.Where(c => c is not null).Select(c => c!.Value).ToArray();
+                    var reserved = routes.Select(rt => (Vector3?)new Vector3(rt.Color.X, rt.Color.Y, rt.Color.Z)).Append(gridC)
+                                         .Where(c => c is not null).Select(c => c!.Value).Distinct().ToArray();
                     const float RouteHueGuard = 0.35f;
                     var usable = reserved.Length > 0
                                ? palette.Where(pe => reserved.All(rv => (new Vector3(pe.Color.X, pe.Color.Y, pe.Color.Z) - rv).Length() >= RouteHueGuard)).ToArray()
@@ -1823,8 +1825,9 @@ static class TexturedScene
         // the route readable where it passes behind a wall, and it is why this needed no new
         // machinery. Arrowheads are always-visible flat triangles — a direction you can only see
         // on open ground is not a direction anyone can follow.
-        if (route is { Legs.Count: > 0 })
+        foreach (var route in routes)
         {
+            if (route.Legs.Count == 0) continue;
             // Above the nav sheet's own 2 u lift: the route is the thing being followed, and it
             // must not z-fight with the surface it is drawn over.
             var routeLift = new Vector3(0, 0, 4f);

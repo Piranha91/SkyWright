@@ -17,6 +17,59 @@ namespace HarnessShared;
 // Conventions are the game's throughout, so a `getpos`/`getangle` pair pastes straight in:
 // +Y is north, yaw 0 = north and increases clockwise, POSITIVE PITCH LOOKS DOWN.
 
+/// <summary>
+/// A synthetic placed object for THIS shot: a base record stood where the file says, at the yaw and
+/// scale the file says. It is what a runtime PlaceAtMe + SetPosition/SetAngle/SetScale produced during
+/// a test, put back into the records-side scene so the picture the measurement was taken against and
+/// the measurement itself share one frame. The ref is invented for the render (a high ID in the base's
+/// own plugin) and is never written anywhere.
+/// </summary>
+/// <param name="Form">FormKey of the BASE record (STAT, MSTT, …), "XXXXXX:Plugin.esp". It must carry a model.</param>
+/// <param name="Pos">World position [X, Y, Z] — the engine's own numbers, so z is NOT taken from the navmesh.</param>
+/// <param name="Yaw">Heading in degrees, `getangle z` convention (0 = north, clockwise).</param>
+/// <param name="Scale">Uniform ref scale; 1 is the record default. Collision scales with it in the engine.</param>
+public sealed record WorklistProp(
+    string Form,
+    IReadOnlyList<float> Pos,
+    float Yaw = 0f,
+    float Scale = 1f,
+    string? Label = null);
+
+/// <summary>
+/// One of several paths drawn over one shot, each in its own colour. Two kinds, told apart by the width
+/// of a point, and the difference is the whole point of having two:
+/// <list type="bullet">
+/// <item><c>[X, Y]</c> — a PLANNED route: z from the winning navmesh, every waypoint clearance-checked,
+/// every leg sampled onto the mesh, refused off-mesh — exactly the rule <see cref="WorklistShot.Route"/> follows.</item>
+/// <item><c>[X, Y, Z]</c> — a MEASURED path: positions the engine reported (an actor's own trajectory),
+/// drawn through exactly those points. Never resolved against the mesh and never refused, because the
+/// mesh is what the measurement is being compared with and cannot be allowed to edit it. Samples the
+/// mesh does not cover are counted and said, not hidden.</item>
+/// </list>
+/// A route must be all one kind.
+/// </summary>
+/// <param name="Color">A --route-color name (cyan, magenta, yellow, green, blue, pink) or an R,G,B triple; absent inherits --route-color.</param>
+/// <param name="Discs">Translucent disc at each point; absent means the run's --no-route-discs setting for a planned route and OFF for a measured one.</param>
+/// <param name="Arrows">auto | end | units-between-arrowheads, as --route-arrows; absent inherits the run's.</param>
+/// <param name="Caption">The caption line for this route, in its colour. Absent: an automatic line (label, count, length, provenance). Empty string: no line — for a shot carrying many paths whose meaning one summary line already states.</param>
+public sealed record WorklistRoute(
+    IReadOnlyList<IReadOnlyList<float>> Points,
+    string? Color = null,
+    string? Label = null,
+    bool? Discs = null,
+    string? Arrows = null,
+    string? Caption = null);
+
+/// <summary>An NPC stood in THIS shot — the worklist form of <c>--npc FORMKEY[@X,Y,Z[,HEADING]][=label]</c>, same rules.</summary>
+/// <param name="Form">The placed ACHR or the NPC_ base, "XXXXXX:Plugin.esp".</param>
+/// <param name="Pos">Optional [X, Y, Z]; absent uses the ref's own winning placement, which must exist.</param>
+/// <param name="Heading">Optional degrees, `getangle z` convention.</param>
+public sealed record WorklistNpc(
+    string Form,
+    IReadOnlyList<float>? Pos = null,
+    float? Heading = null,
+    string? Label = null);
+
 /// <summary>One camera pose, plus what it is for.</summary>
 /// <param name="Label">
 /// Shown in the fly-through HUD and in the bat manifest — the sentence that says why this shot is
@@ -42,6 +95,9 @@ namespace HarnessShared;
 /// letting the mesh supply z makes the arrows follow a sloping walkway for free. viewprobe draws it
 /// as straight segments with arrowheads; --route X,Y is the same thing from the command line.
 /// </param>
+/// <param name="Props">Synthetic placed objects drawn in this shot only — see <see cref="WorklistProp"/>.</param>
+/// <param name="Routes">Further paths, planned or measured, each in its own colour — see <see cref="WorklistRoute"/>. Drawn alongside <paramref name="Route"/>, which stays the one-route shorthand.</param>
+/// <param name="Npcs">Actors stood in this shot only, on top of the command line's --npc — see <see cref="WorklistNpc"/>.</param>
 public sealed record WorklistShot(
     string Label,
     IReadOnlyList<float> Eye,
@@ -53,7 +109,10 @@ public sealed record WorklistShot(
     string? Note = null,
     string? Nav = null,
     float? CullAbove = null,
-    IReadOnlyList<IReadOnlyList<float>>? Route = null);
+    IReadOnlyList<IReadOnlyList<float>>? Route = null,
+    IReadOnlyList<WorklistProp>? Props = null,
+    IReadOnlyList<WorklistRoute>? Routes = null,
+    IReadOnlyList<WorklistNpc>? Npcs = null);
 
 /// <summary>The shots that share one loaded cell — i.e. one load screen's worth of work.</summary>
 /// <param name="Cell">CellEditorID or FormID, the same string viewprobe takes as its first argument.</param>
@@ -174,6 +233,38 @@ public static class WorklistIo
                         if (s.Route[ri] is null || s.Route[ri].Count != 2)
                             Bad($"{sw}: route waypoint[{ri}] must be [X, Y] — z comes from the winning navmesh, not from the file.");
                 }
+                if (s.Props is not null)
+                    for (int pi = 0; pi < s.Props.Count; pi++)
+                    {
+                        var pr = s.Props[pi];
+                        if (pr is null || string.IsNullOrWhiteSpace(pr.Form)) Bad($"{sw}: prop[{pi}] has no form — the BASE record's FormKey.");
+                        if (pr!.Pos is null || pr.Pos.Count != 3) Bad($"{sw}: prop[{pi}] '{pr.Form}': pos must be [X, Y, Z] — the engine's own numbers, z included.");
+                        if (pr.Scale is <= 0f or > 100f) Bad($"{sw}: prop[{pi}] '{pr.Form}': scale {pr.Scale} is out of range (0..100).");
+                    }
+                if (s.Routes is not null)
+                    for (int qi = 0; qi < s.Routes.Count; qi++)
+                    {
+                        var rt = s.Routes[qi];
+                        string rl = rt?.Label ?? $"route {qi + 1}";
+                        if (rt is null || rt.Points is null || rt.Points.Count < 2)
+                            Bad($"{sw}: routes[{qi}] '{rl}' has {rt?.Points?.Count ?? 0} point(s) — a path needs at least 2.");
+                        // One width per route: a 2-wide point is a plan the mesh completes, a 3-wide one is a
+                        // measurement the mesh must not touch, and a route cannot be half of each.
+                        int width = rt!.Points[0]?.Count ?? 0;
+                        if (width is not (2 or 3)) Bad($"{sw}: routes[{qi}] '{rl}' point[0] must be [X, Y] (planned) or [X, Y, Z] (measured).");
+                        for (int pi = 0; pi < rt.Points.Count; pi++)
+                            if (rt.Points[pi] is null || rt.Points[pi].Count != width)
+                                Bad($"{sw}: routes[{qi}] '{rl}' point[{pi}] has {rt.Points[pi]?.Count ?? 0} number(s); point[0] has {width}, and a route is all planned or all measured.");
+                        if (rt.Arrows is not null && rt.Arrows is not ("auto" or "end") && !(float.TryParse(rt.Arrows, out var au) && au > 0f))
+                            Bad($"{sw}: routes[{qi}] '{rl}': arrows '{rt.Arrows}' is not auto|end|<units>.");
+                    }
+                if (s.Npcs is not null)
+                    for (int ni = 0; ni < s.Npcs.Count; ni++)
+                    {
+                        var np = s.Npcs[ni];
+                        if (np is null || string.IsNullOrWhiteSpace(np.Form)) Bad($"{sw}: npcs[{ni}] has no form.");
+                        if (np!.Pos is not null && np.Pos.Count != 3) Bad($"{sw}: npcs[{ni}] '{np.Form}': pos must be [X, Y, Z].");
+                    }
             }
         }
     }

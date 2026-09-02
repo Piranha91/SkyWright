@@ -631,9 +631,46 @@ malformed shot list found after a multi-minute walk is a multi-minute walk waste
   z**: it is resolved from the winning navmesh against this shot's own `floorZ`, every waypoint is
   clearance-checked and every leg sampled onto the mesh before anything is drawn. Place a waypoint
   only at a direction change over ~10–15° or a sight-line break — see *Walking routes* for why, and
-  for what the legs do in between. A shot's `route` overrides a command-line `--route`, and unlike
-  `nav`/`cullAbove` it does NOT leak into the next shot.
+  for what the legs do in between. A shot's `route` overrides a command-line `--route`. No per-shot override leaks into the
+  next shot: `nav` and `cullAbove` are reset to the command line's values at the top of every shot
+  (since 2026-09-02 — before that they leaked, and an eye-level shot after a sliced top-down lost
+  its ceiling).
 - **`travel`** on a cell overrides the derived console travel command; normally absent.
+- **`props`**, **`routes`**, **`npcs`** (added 2026-09-02) put a measured scene back into the picture —
+  what a runtime test stood in the cell, where the actor actually walked, and the actor itself:
+
+  ```json
+  { "label": "block 64 u across, passage 0 u — STALLED",
+    "eye": [-1000, -5462, 687], "yaw": 0, "pitch": 89, "floorZ": 47, "cullAbove": 190,
+    "route":  [[-1320, -5450], [-680, -5450]],
+    "props":  [{ "form": "0B11CE:Skyrim.esm", "pos": [-1000, -5502, 47], "yaw": 90, "scale": 1, "label": "the block" }],
+    "routes": [{ "points": [[-1320, -5450, 40.1], [-1264, -5458, 33.2], [-1054, -5498, 34.9]],
+                 "color": "magenta", "label": "attempt 1, stalled", "caption": "" }],
+    "npcs":   [{ "form": "000007:Skyrim.esm", "pos": [-1320, -5450, 39], "heading": 90, "label": "walker at spawn" }] }
+  ```
+
+  - **`props[]`** — synthetic placed objects, one per entry: a BASE record's FormKey (STAT, MSTT, …
+    — it must carry a model, or the shot is refused), `pos` `[X, Y, Z]` as the engine reported it
+    (z is NOT taken from the navmesh), `yaw` in degrees (`getangle z` convention), `scale`. The ref
+    is invented for the render (a high ID in the base's own plugin, printed as `+prop …
+    (synthetic …)`) and exists nowhere else. Shot-local: shot 2 does not inherit shot 1's props.
+  - **`routes[]`** — further paths, each in its own colour, drawn alongside `route`. **The width of
+    a point decides the kind**, and a route is all one kind: `[X, Y]` points are a PLANNED route,
+    resolved onto the navmesh and refused off-mesh exactly as `route` is; `[X, Y, Z]` points are a
+    MEASURED path — positions the engine reported — drawn through exactly those points, never
+    resolved against the mesh and never refused, because the mesh is what the measurement is being
+    compared with and cannot be allowed to edit it. Samples the mesh does not cover (no navmesh
+    within 96 u of the sample's z) are counted in the console and the caption, not hidden. Per
+    route: `color` (a `--route-color` name or R,G,B; absent inherits `--route-color`), `label`,
+    `discs` (absent: the run's setting for a planned route, off for a measured one), `arrows`
+    (`auto` | `end` | units, as `--route-arrows`), and `caption` — absent draws the automatic
+    coloured line (`ROUTE …` / `PATH …`), a string draws that instead, and `""` draws none, for a
+    shot carrying twenty paths whose meaning one summary line already states. Every route's colour
+    is reserved from the nav wire's auto-pick.
+  - **`npcs[]`** — the worklist form of `--npc`, same rules: `form` is the placed ACHR or the NPC_
+    base, `pos` `[X, Y, Z]` overrides the ref's own placement (and is required when the base is
+    placed nowhere — the player base `000007:Skyrim.esm` is the standing case), `heading` in
+    degrees, `label` for the caption. Added to the command line's `--npc` set for this shot only.
 
 ### Dropping one on the exe
 
@@ -1028,6 +1065,25 @@ found to be outside the loaded set. Without that counter a run that read the tab
 run that never read it both print `0 cross-mesh`, and a zero with no control is not evidence.
 
 ---
+
+## Measured paths: an actor's own trajectory, drawn as sampled (`routes[]` with `[X, Y, Z]`)
+
+A route is a claim about where someone COULD walk, and the navmesh is the authority on it — hence
+the clearance checks and the refusals above. A measured path is the opposite kind of statement:
+where an actor DID walk, sampled from the running engine, and for that the navmesh is not the
+authority but the thing under test. So a worklist shot's `routes[]` entry whose points carry a z is
+drawn through exactly those points — straight in 3D between samples, because the samples are the
+measurement's own resolution and a mesh-following leg between them would be the renderer editing the
+evidence — and is never refused. The console and the caption say how many samples sit over no
+navmesh within 96 u; that number is a finding about the walk, not a defect in the picture.
+
+The standing use is the 2026-09-02 obstacle matrix (Part C of the navmesh-blockage work): one shot
+per arm with the obstacle as a `props[]` entry at the engine's own position, yaw and scale, the
+walker's trajectory as a measured path coloured by outcome, the straight corridor line the walker was
+asked to follow as the shot's planned `route`, and the walker itself as an `npcs[]` entry at its spawn
+— so the picture shows the navmesh, the obstacle, the path and the actor's size in one frame. Where
+the picture is a top-down, `cullAbove` has to sit above the actor's head (`floorZ` + ~150 for a
+scale-1 human) or the console reports the actor `HIDDEN behind scene geometry` and only its puck shows.
 
 ## Placed NPC actors (`--npc`)
 
@@ -1543,6 +1599,12 @@ exterior scenes gain geometry, and a camera composed before it may now sit behin
 cell's structure.
 
 ---
+
+- **A worklist shot's `nav` / `cullAbove` leaked into the next shot** (fixed 2026-09-02). Both were
+  set from the shot into the run-wide variables and never cleared, so an eye-level shot that stated
+  neither inherited the previous top-down's dollhouse slice: no ceiling, and the overhead beam the
+  shot existed to show reduced to a plank against sky. Every worklist shot now starts from the
+  command line's values and applies its own overrides on top.
 
 ## Known rough edges (candidate work)
 
