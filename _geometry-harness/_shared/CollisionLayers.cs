@@ -17,11 +17,16 @@ using System.Collections.Generic;
 //  invisible wall-top boxes on TRANSPARENT). It is NOT read from the
 //  engine's collision matrix, which lives in the executable and not in any
 //  file this harness can open, and the Creation Kit wiki page that
-//  describes it was unreachable when this was written. Two layers are the
-//  ones most worth an in-game arm (Part C of the 4.7 handoff): TRANSPARENT
-//  (assumed solid — the wall-top boxes read as "camera passes, actors do
-//  not") and CLUTTER (assumed solid — a barrel stops an actor even though
-//  physics can shove it). Change the set here, re-run, and say so in the note.
+//  describes it was unreachable when this was written. Two layers were
+//  tested in game the same day (Part C of the 4.7 handoff): a fence whose
+//  only body is on TRANSPARENT stopped a commanded walker dead — solid,
+//  as assumed; an urn whose only body is on CLUTTER and which is a
+//  MoveableStatic was shoved aside — so for a MOVEABLE object the layer
+//  is not what decides, the record type is. CLUTTER stays in the solid
+//  set because a CLUTTER body on a Static cannot move (untested); a caller
+//  that wants "what an actor cannot push through" should also drop
+//  MoveableStatic bodies, and say so. Change the set here, re-run, and say
+//  so in the note.
 // ======================================================================
 
 internal static class CollisionLayers
