@@ -25,8 +25,13 @@ namespace HarnessShared;
 /// is the partition two references must share before a distance between them means anything (the cell
 /// for an interior, the worldspace for an exterior — a persistent exterior ref lives in the worldspace's
 /// persistent cell whatever its coordinates). Not part of <see cref="SameAs"/>: a ref's space follows its
-/// cell, so the changed-only rule is unaffected.</summary>
-public readonly record struct Snap(int Plugin, Vec3 Pos, FormKey Cell, bool Disabled, bool Deleted, FormKey Worldspace)
+/// cell, so the changed-only rule is unaffected. <paramref name="Rot"/> and <paramref name="Scale"/> ride along
+/// for consumers that need the whole transform (the overlap pass rebuilds a world box at a previous snap); they
+/// are NOT part of <see cref="SameAs"/>, so a rotation- or scale-only override is not a step in the story — the
+/// same rule driftprobe has always run on, unchanged. The overlap pass counts those silent re-placements and
+/// reports them as a limit.</summary>
+public readonly record struct Snap(int Plugin, Vec3 Pos, FormKey Cell, bool Disabled, bool Deleted, FormKey Worldspace,
+                                   Vec3 Rot = default, float Scale = 1f)
 {
     public bool Interior => Worldspace.IsNull;
     public FormKey Space => Worldspace.IsNull ? Cell : Worldspace;

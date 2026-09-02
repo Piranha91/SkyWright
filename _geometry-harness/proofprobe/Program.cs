@@ -1062,6 +1062,229 @@ Console.WriteLine("\nPROOF — placement dependency (_shared/DetectorModel.cs + 
 }
 
 // ---------------------------------------------------------------------------------------
+// Overlap provenance — the differential framing of milestone 5 (roadmap 4.1). The rule
+// (DetectorModel.OverlapProvenance, ClassifyOverlapPopulation, ClassifyOverlapScale) at fact level,
+// then a synthetic five-plugin order written with Mutagen and read back through OverlapIndex — the
+// same ingest, candidate build, pair sweep and arm construction the live probe uses, with OBND boxes
+// standing in for meshes (the proof has no NIFs; the fallback is labelled 'o' either way).
+// ---------------------------------------------------------------------------------------
+Console.WriteLine("\nPROOF — overlap provenance (_shared/DetectorModel.cs + _shared/OverlapIndex.cs)\n");
+{
+    static DetectorModel.OverlapFacts OF(bool hadPrev = true, bool present = true, bool without = false, bool seen = false)
+        => new(hadPrev, present, without, seen);
+
+    var ib = DetectorModel.OverlapProvenance(OF(hadPrev: false, present: false));
+    Check("ovl: new ref into a box set outside the closure -> INTRODUCED + BLIND",
+          ib.Origin == OverlapOrigin.Introduced && ib.Sight == OverlapSight.Blind && ib.Why.Contains("introduced"), ib.Why);
+    var isn = DetectorModel.OverlapProvenance(OF(hadPrev: false, present: false, seen: true));
+    Check("ovl: new ref into a box the masters set -> INTRODUCED + SEEN",
+          isn.Origin == OverlapOrigin.Introduced && isn.Sight == OverlapSight.Seen, isn.Why);
+    var mv = DetectorModel.OverlapProvenance(OF(hadPrev: true, present: true, without: false));
+    Check("ovl: existing ref moved into the box (stood clear before) -> INTRODUCED, says 'moved'",
+          mv.Origin == OverlapOrigin.Introduced && mv.Why.Contains("moved"), mv.Why);
+    var en = DetectorModel.OverlapProvenance(OF(hadPrev: true, present: false));
+    Check("ovl: previous snap disabled / other space -> INTRODUCED, says 'enabled or relocated'",
+          en.Origin == OverlapOrigin.Introduced && en.Why.Contains("enabled or relocated"), en.Why);
+    var ihb = DetectorModel.OverlapProvenance(OF(without: true));
+    var ihs = DetectorModel.OverlapProvenance(OF(without: true, seen: true));
+    Check("ovl: overlap already there without the later plugin -> INHERITED, Blind or Seen by the closure alone",
+          ihb.Origin == OverlapOrigin.Inherited && ihb.Sight == OverlapSight.Blind
+       && ihs.Origin == OverlapOrigin.Inherited && ihs.Sight == OverlapSight.Seen, ihb.Why);
+    Check("ovl: sight is decided by the closure fact alone, whatever the origin",
+          DetectorModel.OverlapProvenance(OF(hadPrev: false, present: false, seen: true)).Sight == OverlapSight.Seen
+       && DetectorModel.OverlapProvenance(OF(without: true, seen: false)).Sight == OverlapSight.Blind
+       && DetectorModel.OverlapProvenance(OF(without: false, seen: false)).Sight == OverlapSight.Blind, "four quadrants");
+
+    Check("ovl: population — both Bethesda -> BETHESDA FLOOR; USSEP on either side -> USSEP INVOLVED; else MOD-ON-MOD",
+          DetectorModel.ClassifyOverlapPopulation(true, true, false, false) == OverlapPopulation.BethesdaFloor
+       && DetectorModel.ClassifyOverlapPopulation(false, true, false, true) == OverlapPopulation.UssepInvolved
+       && DetectorModel.ClassifyOverlapPopulation(true, false, true, false) == OverlapPopulation.UssepInvolved
+       && DetectorModel.ClassifyOverlapPopulation(true, false, false, false) == OverlapPopulation.ModOnMod
+       && DetectorModel.ClassifyOverlapPopulation(false, false, false, false) == OverlapPopulation.ModOnMod, "rule 12");
+    Check("ovl: scale — 256u and up architecture, 64u to 256u furniture, under 64u clutter",
+          DetectorModel.ClassifyOverlapScale(256f) == OverlapScale.Architecture
+       && DetectorModel.ClassifyOverlapScale(255.9f) == OverlapScale.Furniture
+       && DetectorModel.ClassifyOverlapScale(64f) == OverlapScale.Furniture
+       && DetectorModel.ClassifyOverlapScale(63.9f) == OverlapScale.Clutter, "boundaries inclusive at the top");
+
+    // ---- The synthetic order: five plugins written with Mutagen, read back through OverlapIndex. ----
+    // Load order M, X, B, A, Y. X, B, A and Y each master M only — so nothing X, B or Y did is in A's
+    // closure, and nothing A did is in Y's. Every base is one 64u crate (OBND ±32, z 0..64).
+    var root = Path.Combine(Path.GetTempPath(), "proofprobe-ovl-" + Environment.ProcessId);
+    Directory.CreateDirectory(root);
+    var release = SkyrimRelease.SkyrimSE;
+    var mKey = new ModKey("OvlMaster", ModType.Master);
+    var xKey = new ModKey("OvlX", ModType.Plugin);
+    var bKey = new ModKey("OvlB", ModType.Plugin);
+    var aKey = new ModKey("OvlA", ModType.Plugin);
+    var yKey = new ModKey("OvlY", ModType.Plugin);
+    FormKey M(uint id) => new(mKey, id);
+    var crateK = M(0x801); var markerK = M(0x802); var cell1K = M(0x810); var cell2K = M(0x811);
+    FormKey R(int n) => M((uint)(0x900 + n));
+
+    static void FileInterior(SkyrimMod mod, Cell cell)
+    {
+        uint id = cell.FormKey.ID;
+        int blockN = (int)(id % 10), subN = (int)((id / 10) % 10);
+        var records = mod.Cells.Records;
+        var block = records.FirstOrDefault(b => b.BlockNumber == blockN);
+        if (block is null) { block = new CellBlock { BlockNumber = blockN, GroupType = GroupTypeEnum.InteriorCellBlock }; records.Add(block); }
+        var sub = block.SubBlocks.FirstOrDefault(s => s.BlockNumber == subN);
+        if (sub is null) { sub = new CellSubBlock { BlockNumber = subN, GroupType = GroupTypeEnum.InteriorCellSubBlock }; block.SubBlocks.Add(sub); }
+        sub.Cells.Add(cell);
+    }
+    static PlacedObject Ref(FormKey key, FormKey baseKey, float x, float y = 0, float z = 0, string? edid = null, bool disabled = false, float rotZ = 0)
+    {
+        var r = new PlacedObject(key, SkyrimRelease.SkyrimSE) { EditorID = edid, Placement = new Placement { Position = new P3Float(x, y, z), Rotation = new P3Float(0, 0, rotZ) } };
+        r.Base.SetTo(baseKey);
+        if (disabled) r.SkyrimMajorRecordFlags |= SkyrimMajorRecord.SkyrimMajorRecordFlag.InitiallyDisabled;
+        return r;
+    }
+    static Cell Interior(FormKey key, string? edid = null) => new(key, SkyrimRelease.SkyrimSE) { EditorID = edid, Flags = Cell.Flag.IsInteriorCell };
+    string Write(SkyrimMod mod, params ISkyrimModGetter[] masters)
+    {
+        var path = Path.Combine(root, mod.ModKey.FileName.String);
+        mod.BeginWrite.ToPath(path).WithLoadOrder(masters).Write();
+        return path;
+    }
+
+    // THE MASTER: the crate, an editor marker, two interiors, and the placements each case starts from.
+    var master = new SkyrimMod(mKey, release);
+    master.Statics.Add(new Static(crateK, release) { EditorID = "OvlCrate", ObjectBounds = new ObjectBounds { First = new P3Int16(-32, -32, 0), Second = new P3Int16(32, 32, 64) } });
+    master.Statics.Add(new Static(markerK, release) { EditorID = "XMarkerHeading", ObjectBounds = new ObjectBounds { First = new P3Int16(-32, -32, 0), Second = new P3Int16(32, 32, 64) } });
+    var m1 = Interior(cell1K, "OvlCell1"); var m2 = Interior(cell2K, "OvlCell2");
+    m1.Temporary.Add(Ref(R(1), crateK, 0, edid: "a1"));                       // X will move it to 100; A places b1 into it
+    m1.Temporary.Add(Ref(R(2), crateK, 1000, edid: "a2"));                    // A places b2 into it (M is in A's closure)
+    m1.Temporary.Add(Ref(R(3), crateK, 2000, edid: "a3"));                    // a3/b3 overlap in M; A nudges b3 (still overlapping)
+    m1.Temporary.Add(Ref(R(4), crateK, 2010, edid: "b3"));
+    m1.Temporary.Add(Ref(R(6), crateK, 3000, edid: "a6"));                    // a6/b6 overlap in M; X moves a6 5u; A nudges b6 (still overlapping)
+    m1.Temporary.Add(Ref(R(7), crateK, 3010, edid: "b6"));
+    m1.Temporary.Add(Ref(R(8), crateK, 4000, edid: "a7"));                    // a7/b7 overlap in M; A moves b7 OUT — the fix
+    m1.Temporary.Add(Ref(R(9), crateK, 4010, edid: "b7"));
+    m1.Temporary.Add(Ref(R(10), crateK, 5000, edid: "a8"));                   // B places b8 at 5500; A moves a8 INTO it
+    m1.Temporary.Add(Ref(R(11), crateK, 9000, edid: "a11", disabled: true));  // X places b11 on it; A ENABLES a11
+    m2.Temporary.Add(Ref(R(12), crateK, 0, edid: "a12"));                     // in cell 2; X places b12 in cell 1; A RELOCATES a12 onto it
+    m1.Temporary.Add(Ref(R(13), crateK, 11000, edid: "a13"));                 // A overrides with a rotation only — a silent re-placement
+    FileInterior(master, m1); FileInterior(master, m2);
+    var mPath = Write(master);
+    using var mOv = SkyrimMod.CreateFromBinaryOverlay(mPath, release);
+
+    // X (masters M): moves a1 and a6, places b11 and b12.
+    var x = new SkyrimMod(xKey, release);
+    var x1 = Interior(cell1K);
+    x1.Temporary.Add(Ref(R(1), crateK, 100, edid: "a1"));
+    x1.Temporary.Add(Ref(R(6), crateK, 3005, edid: "a6"));
+    x1.Temporary.Add(Ref(new FormKey(xKey, 0x900), crateK, 9000, edid: "b11"));
+    x1.Temporary.Add(Ref(new FormKey(xKey, 0x901), crateK, 10000, edid: "b12"));
+    FileInterior(x, x1);
+    var xPath = Write(x, mOv);
+
+    // B (masters M): places b8 — B loads BEFORE A and is outside A's closure.
+    var b = new SkyrimMod(bKey, release);
+    var b1 = Interior(cell1K);
+    b1.Temporary.Add(Ref(new FormKey(bKey, 0x900), crateK, 5500, edid: "b8"));
+    FileInterior(b, b1);
+    var bPath = Write(b, mOv);
+
+    // A (masters M): the later plugin in every case but the last.
+    var a = new SkyrimMod(aKey, release);
+    var a1 = Interior(cell1K);
+    a1.Temporary.Add(Ref(new FormKey(aKey, 0x900), crateK, 100, edid: "b1"));         // new ref into a1@X       -> Introduced + Blind
+    a1.Temporary.Add(Ref(new FormKey(aKey, 0x901), crateK, 1000, edid: "b2"));        // new ref into a2@M       -> Introduced + Seen
+    a1.Temporary.Add(Ref(R(4), crateK, 2015, edid: "b3"));                            // nudge, still in a3@M    -> Inherited + Seen
+    a1.Temporary.Add(Ref(R(7), crateK, 3020, edid: "b6"));                            // nudge, still in a6@X    -> Inherited + Blind
+    a1.Temporary.Add(Ref(R(9), crateK, 4500, edid: "b7"));                            // moved OUT of a7         -> no hit
+    a1.Temporary.Add(Ref(R(10), crateK, 5500, edid: "a8"));                           // moved INTO b8@B         -> Introduced + Blind, says 'moved'
+    a1.Temporary.Add(Ref(new FormKey(aKey, 0x902), crateK, 7000, edid: "b10"));       // Y will place a10 into it -> Introduced + Blind with L = Y
+    a1.Temporary.Add(Ref(new FormKey(aKey, 0x903), crateK, 8000, edid: "c1"));        // A's own two crates overlapping -> the floor
+    a1.Temporary.Add(Ref(new FormKey(aKey, 0x904), crateK, 8010, edid: "c2"));
+    a1.Temporary.Add(Ref(R(11), crateK, 9000, edid: "a11"));                          // ENABLED onto b11@X      -> Introduced + Blind, 'enabled or relocated'
+    a1.Temporary.Add(Ref(R(12), crateK, 10000, edid: "a12"));                         // RELOCATED onto b12@X    -> Introduced + Blind, 'enabled or relocated'
+    a1.Temporary.Add(Ref(R(13), crateK, 11000, edid: "a13", rotZ: 1.0f));             // rotation only           -> silent, not responsible
+    a1.Temporary.Add(Ref(new FormKey(aKey, 0x905), markerK, 2000, edid: "mk1"));      // an editor marker into a3 -> set aside, never a candidate
+    FileInterior(a, a1);
+    var aPath = Write(a, mOv);
+
+    // Y (masters M, loads after A, outside its closure): places a10 into A's b10.
+    var y = new SkyrimMod(yKey, release);
+    var y1 = Interior(cell1K);
+    y1.Temporary.Add(Ref(new FormKey(yKey, 0x900), crateK, 7000, edid: "a10"));
+    FileInterior(y, y1);
+    var yPath = Write(y, mOv);
+
+    // Read the order back the way overlapprobe does.
+    var paths = new[] { mPath, xPath, bPath, aPath, yPath };
+    var idx = new OverlapIndex();
+    var keys = new ModKey[paths.Length];
+    var masterIdx = new HashSet<int>[paths.Length];
+    for (int p = 0; p < paths.Length; p++)
+    {
+        using var mod = SkyrimMod.CreateFromBinaryOverlay(paths[p], release);
+        keys[p] = mod.ModKey;
+        var names = mod.ModHeader.MasterReferences.Select(q => q.Master).ToHashSet();
+        masterIdx[p] = Enumerable.Range(0, p).Where(q => names.Contains(keys[q])).ToHashSet();
+        idx.Ingest(p, mod);
+    }
+    var closure = DetectorModel.MasterClosure(masterIdx);
+    const int Mi = 0, Xi = 1, Bi = 2, Ai = 3, Yi = 4;
+    Check("ovl-synth: the written order has the declared masters it was built to have (everyone masters M only)",
+          masterIdx[Xi].SetEquals(new[] { Mi }) && masterIdx[Bi].SetEquals(new[] { Mi }) && masterIdx[Ai].SetEquals(new[] { Mi }) && masterIdx[Yi].SetEquals(new[] { Mi }),
+          $"X<-[{string.Join(",", masterIdx[Xi])}] B<-[{string.Join(",", masterIdx[Bi])}] A<-[{string.Join(",", masterIdx[Ai])}] Y<-[{string.Join(",", masterIdx[Yi])}]");
+
+    (Aabb, char) BoxOf(FormKey k) { var bx = idx.ObndBox(k); return bx.IsEmpty ? (Aabb.Empty, '-') : (bx, 'o'); }
+    var obstructing = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "Static" };
+    var cands = idx.Candidates(BoxOf, obstructing, _ => false, 1024f, out var skips);
+    Check("ovl-synth: the editor marker is set aside, counted, and nothing else is",
+          skips.MarkerMesh == 1 && skips.NoGeometry == 0 && skips.NonObstructingType == 0 && skips.Disabled == 0,
+          $"markers {skips.MarkerMesh}, no geometry {skips.NoGeometry}, disabled {skips.Disabled} (a11 was enabled by A)");
+    Check("ovl-synth: one silent re-placement — A's rotation-only override of a13",
+          idx.SilentRePlacements == 1 && idx.History.Winning(R(13))!.Value.Plugin == Mi, $"silent {idx.SilentRePlacements}, a13 responsible = plugin {idx.History.Winning(R(13))!.Value.Plugin}");
+    var sweep = OverlapIndex.Pairs(cands, closure, 16f, 0.25f);
+    var rows = sweep.CrossDeep.Select(h => idx.Judge(h, closure, BoxOf, 16f, 0.25f)).ToList();
+    OverlapRow? Row(FormKey p, FormKey q) => rows.FirstOrDefault(r => (r.Hit.A.Key == p && r.Hit.B.Key == q) || (r.Hit.A.Key == q && r.Hit.B.Key == p));
+    string W(OverlapRow? r) => r is null ? "(no row)" : $"{r.Origin} + {r.Sight}, later = plugin {r.Later}: {r.Why}";
+    FormKey Xk(uint id) => new(xKey, id); FormKey Bk(uint id) => new(bKey, id); FormKey Ak(uint id) => new(aKey, id); FormKey Yk(uint id) => new(yKey, id);
+
+    var r1 = Row(R(1), Ak(0x900));
+    Check("ovl-synth: A places b1 into a1 that X moved (X outside A's closure) -> INTRODUCED + BLIND, L = A",
+          r1 is { Origin: OverlapOrigin.Introduced, Sight: OverlapSight.Blind, Later: Ai } && !r1.Facts.LaterHadPreviousPlacement, W(r1));
+    var r2 = Row(R(2), Ak(0x901));
+    Check("ovl-synth: A places b2 into a2 where M left it (M in A's closure) -> INTRODUCED + SEEN", r2 is { Origin: OverlapOrigin.Introduced, Sight: OverlapSight.Seen, Later: Ai }, W(r2));
+    var r3 = Row(R(3), R(4));
+    Check("ovl-synth: M placed a3/b3 overlapping, A nudges b3 -> INHERITED + SEEN (the intersection pre-dates A)",
+          r3 is { Origin: OverlapOrigin.Inherited, Sight: OverlapSight.Seen, Later: Ai } && r3.Facts.WithoutLaterOverlaps && r3.WithoutDepth > 16f, W(r3));
+    var r6 = Row(R(6), R(7));
+    Check("ovl-synth: M placed a6/b6 overlapping, X moved a6, A nudges b6 -> INHERITED + BLIND", r6 is { Origin: OverlapOrigin.Inherited, Sight: OverlapSight.Blind, Later: Ai }, W(r6));
+    Check("ovl-synth: A moves b7 OUT of an inherited overlap -> no hit at all (the differential rewards a fix)",
+          Row(R(8), R(9)) is null && !sweep.CrossDeep.Any(h => h.A.Key == R(9) || h.B.Key == R(9)), "b7 appears in no cross hit");
+    var r8 = Row(R(10), Bk(0x900));
+    Check("ovl-synth: A moves a8 INTO B's b8 (B outside A's closure) -> INTRODUCED + BLIND with L = A, says 'moved'",
+          r8 is { Origin: OverlapOrigin.Introduced, Sight: OverlapSight.Blind, Later: Ai } && r8.Why.Contains("moved") && r8.LaterRef.Key == R(10) && r8.WithoutDepth == 0f, W(r8));
+    var r10 = Row(Ak(0x902), Yk(0x900));
+    Check("ovl-synth: Y (loads after A, outside its closure) places a10 into A's b10 -> INTRODUCED + BLIND with L = Y, Y's ref is the later ref",
+          r10 is { Origin: OverlapOrigin.Introduced, Sight: OverlapSight.Blind, Later: Yi } && r10.LaterRef.Key == Yk(0x900), W(r10));
+    var r11 = Row(R(11), Xk(0x900));
+    Check("ovl-synth: A ENABLES a11 under X's b11 -> INTRODUCED + BLIND, 'enabled or relocated' (the disabled snap is not a placement)",
+          r11 is { Origin: OverlapOrigin.Introduced, Sight: OverlapSight.Blind, Later: Ai } && r11.Facts.LaterHadPreviousPlacement && !r11.Facts.PreviousPlacementPresent && r11.Why.Contains("enabled or relocated"), W(r11));
+    var r12 = Row(R(12), Xk(0x901));
+    Check("ovl-synth: A RELOCATES a12 from cell 2 onto X's b12 in cell 1 -> INTRODUCED + BLIND, 'enabled or relocated' (another space is no box)",
+          r12 is { Origin: OverlapOrigin.Introduced, Sight: OverlapSight.Blind, Later: Ai } && !r12.Facts.PreviousPlacementPresent && r12.LaterPrevious!.Value.Cell == cell2K, W(r12));
+    Check("ovl-synth: A's own two crates are the FLOOR — a same-responsible deep pair, never judged",
+          sweep.SameDeep == 1 && !rows.Any(r => r.Hit.A.Key == Ak(0x903) || r.Hit.B.Key == Ak(0x903)), $"same-responsible deep {sweep.SameDeep}");
+    Check("ovl-synth: the marker A dropped into a3 is in no hit (set aside before the sweep)",
+          !sweep.CrossDeep.Any(h => h.A.Key == Ak(0x905) || h.B.Key == Ak(0x905)) && sweep.SameDeep == 1, "mk1 absent");
+    Check("ovl-synth: plumbing — SEEN rows equal the declared-dependency deep count, and every Blind row is undeclared",
+          rows.Count(r => r.Sight == OverlapSight.Seen) == sweep.CrossDeclaredDeep && rows.Where(r => r.Sight == OverlapSight.Blind).All(r => !r.Hit.Declared),
+          $"seen {rows.Count(r => r.Sight == OverlapSight.Seen)}, declared deep {sweep.CrossDeclaredDeep}");
+    Check("ovl-synth: the whole population — 8 cross-responsible deep hits, no more",
+          rows.Count == 8, $"rows {rows.Count}: " + string.Join(" | ", rows.Select(r => $"{idx.BaseInfo.GetValueOrDefault(r.LaterRef.Base).Edid}? {r.LaterRef.Key}/{r.OtherRef.Key} {r.Origin}+{r.Sight}")));
+    Check("ovl-synth: the ranker reads the buried crate as furniture-scale (64u), and depth × fraction orders the nudge below the full burial",
+          r1!.Scale == OverlapScale.Furniture && r1.Rank > r3!.Rank, $"r1 rank {r1.Rank:0} ({r1.Scale}), r3 rank {r3.Rank:0}");
+
+    try { Directory.Delete(root, true); } catch { }
+}
+
+// ---------------------------------------------------------------------------------------
 // The synthetic load order — the thing everything else will now be validated against.
 // ---------------------------------------------------------------------------------------
 Console.WriteLine("\nPROOF — the synthetic load order (_shared/SyntheticOrder.cs)\n");

@@ -654,6 +654,79 @@ public static class DetectorModel
          : moverIsVanilla ? DependencyPopulation.VanillaMoverUnderModEdge
          : DependencyPopulation.ModMover;
 
+    /// <summary>One cross-plugin deep overlap as the overlap pass hands it to the rule (milestone 5, roadmap 4.1 — the
+    /// differential framing). Two placed references from different responsible plugins have world boxes that overlap
+    /// deeply NOW. L is the LATER of the two responsible plugins — the one that could have seen the other's work. The
+    /// caller (OverlapIndex.Judge) has rebuilt the arm WITHOUT L's contribution: L's reference at its previous snap in
+    /// the placement history, or absent if L introduced it; everything here is a fact, and the DECISION is
+    /// <see cref="OverlapProvenance"/>.</summary>
+    /// <param name="LaterHadPreviousPlacement">L's reference has a snap before L's — L moved or re-placed an existing
+    /// reference rather than introducing one.</param>
+    /// <param name="PreviousPlacementPresent">…and that previous snap is a placed, enabled, undeleted reference in the
+    /// same space as the other reference, so a box could be rebuilt for it. False when L enabled it, relocated it
+    /// from another cell or worldspace, or introduced it.</param>
+    /// <param name="WithoutLaterOverlaps">the rebuilt previous box overlaps the other reference's WINNING box at the
+    /// same depth-and-fraction threshold as the hit itself.</param>
+    /// <param name="OtherWinnerInLaterClosure">the plugin that set the other reference's winning placement is L or is
+    /// in L's transitive master closure — the position was in L's editor.</param>
+    public readonly record struct OverlapFacts(bool LaterHadPreviousPlacement, bool PreviousPlacementPresent,
+                                               bool WithoutLaterOverlaps, bool OtherWinnerInLaterClosure);
+
+    /// <summary>The overlap-provenance rule, records-only (frozen 2026-09-01 from the handoff of 2026-09-04). A deep
+    /// overlap is an absolute fact; this rule asks the with-vs-without question and the who-saw-what question that
+    /// the clobber, needs-witness and placement-dependency detectors earned their findings by asking.
+    ///
+    /// <para><b>Origin.</b> If the overlap is already there in the arm without L — L's reference at its previous
+    /// placement already intersects the other's winning box — L <b>Inherited</b> it: L forwarded or nudged into an
+    /// intersection an earlier plugin (or the same author) created, and this pass attributes it to nobody. Otherwise L
+    /// <b>Introduced</b> it: by placing a new reference, by moving one in, or by enabling or relocating one into
+    /// the other's box. The differential rewards a fix — a plugin that moves a reference OUT of an inherited overlap
+    /// produces no hit at all, so it never reaches this rule.</para>
+    ///
+    /// <para><b>Sight.</b> If the other reference's winning placement was set by L or by a plugin in L's master
+    /// closure, L placed into known context: <b>Seen</b> — an author's own choice, reported as "knowingly overlapping",
+    /// never a finding of L's. If it was set by a plugin outside L's closure, it could not have been in L's editor:
+    /// <b>Blind</b>. Seen is exactly the declared-dependency relation read from the later side, so the population this
+    /// runs over is every cross-responsible deep hit, declared or not, and a driver can check its plumbing by
+    /// counting: Seen must equal the declared-dependency deep count.</para>
+    ///
+    /// <para>The class is <b>Introduced + Blind</b>. Introduced + Seen is the coordination row; Inherited rows are the
+    /// authored floor's shape. Geometry ranks within the class (<see cref="ClassifyOverlapScale"/>, depth × fraction);
+    /// it never thresholds it into a verdict. Deliberately NOT judged: rotation- or scale-only re-placements (the
+    /// history does not record them), an intersection created two movers back, and anything about collision or
+    /// contact — this is a conservative rotated-AABB broad phase, and nothing here is verified in game.</para></summary>
+    public static (OverlapOrigin Origin, OverlapSight Sight, string Why) OverlapProvenance(OverlapFacts f)
+    {
+        var sight = f.OtherWinnerInLaterClosure ? OverlapSight.Seen : OverlapSight.Blind;
+        string saw = f.OtherWinnerInLaterClosure
+            ? "the other reference's winning placement was set by the later plugin's own masters — it was in its editor"
+            : "the other reference's winning placement was set outside the later plugin's master closure — it could not have been in its editor";
+        if (f.WithoutLaterOverlaps)
+            return (OverlapOrigin.Inherited, sight, $"the later plugin's reference already overlapped at its previous placement — the intersection pre-dates it; {saw}");
+        string how = !f.LaterHadPreviousPlacement ? "introduced its reference into the other's box"
+                   : !f.PreviousPlacementPresent ? "enabled or relocated its reference into the other's box"
+                   : "moved its reference into the other's box (it stood clear at its previous placement)";
+        return (OverlapOrigin.Introduced, sight, $"the later plugin {how}; {saw}");
+    }
+
+    /// <summary>Rule 12 applied to an overlap: which population does a (responsible A, responsible B) pair belong to?
+    /// Both Bethesda (Dawnguard × HearthFires, a DLC into a base-game cell) is the floor's shape — the same shape as the
+    /// clobber floor. USSEP on either side is its own row: it moves vanilla objects deliberately and everything loads
+    /// after it. Everything else is mod-on-mod, the class.</summary>
+    public static OverlapPopulation ClassifyOverlapPopulation(bool aIsVanilla, bool bIsVanilla, bool aIsUssep, bool bIsUssep)
+        => aIsVanilla && bIsVanilla ? OverlapPopulation.BethesdaFloor
+         : aIsUssep || bIsUssep ? OverlapPopulation.UssepInvolved
+         : OverlapPopulation.ModOnMod;
+
+    /// <summary>The ranker's scale class, from the largest dimension of the SMALLER box in the hit — the thing that is
+    /// buried. A wall through a house is a different finding from two bottles sharing a shelf, and the reader should
+    /// see which is which without a threshold deciding for them: 256 u and up is architecture (a wall piece is
+    /// 128–512 u), 64 u to 256 u is furniture-scale, under 64 u is clutter. Reported, never used as a verdict.</summary>
+    public static OverlapScale ClassifyOverlapScale(float smallerBoxMaxDimension)
+        => smallerBoxMaxDimension >= 256f ? OverlapScale.Architecture
+         : smallerBoxMaxDimension >= 64f ? OverlapScale.Furniture
+         : OverlapScale.Clutter;
+
     /// <summary>The record-level verify verdict. CONFIRMED means every necessary record is
     /// overridden — which is COVERAGE, not repair: content and load-order position are not judged
     /// here, and the differential run exists precisely because a CONFIRMED patch can net to zero.</summary>
@@ -720,3 +793,17 @@ public enum DependentClass { Physical, Actor, Control, Other }
 
 /// <summary>The rule-12 split for a dependency edge, by (mover, edge author).</summary>
 public enum DependencyPopulation { BethesdaFloor, UssepMover, VanillaMoverUnderModEdge, ModMover }
+
+/// <summary>Who created a deep overlap, per <see cref="DetectorModel.OverlapProvenance"/>: the later plugin
+/// (Introduced) or somebody before it (Inherited — attributed to nobody by this pass).</summary>
+public enum OverlapOrigin { Introduced, Inherited }
+
+/// <summary>Whether the later plugin could have seen the other reference where it stands: Seen when its winning
+/// placement came from the later plugin's own master closure, Blind otherwise. The class is Introduced + Blind.</summary>
+public enum OverlapSight { Blind, Seen }
+
+/// <summary>The rule-12 split for an overlap, by (responsible A, responsible B).</summary>
+public enum OverlapPopulation { BethesdaFloor, UssepInvolved, ModOnMod }
+
+/// <summary>The ranker's scale class, from the buried box's largest dimension. Reported beside the rank, never a verdict.</summary>
+public enum OverlapScale { Architecture, Furniture, Clutter }

@@ -1,45 +1,56 @@
 using System.Diagnostics;
-using System.Numerics;
+using System.Text.Json;
 using HarnessShared;
 using HousecarlCore;
 using Mutagen.Bethesda.Plugins;
 using Mutagen.Bethesda.Skyrim;
 
-// MILESTONE 5 — CROSS-PLUGIN OBJECT OVERLAP. The geometry charter's own motivating example: two
-// mods drop a wall and a tree into the same cubic metre, SSEEdit reports "no conflict", and the
-// player finds out by walking into it.
+// MILESTONE 5 — CROSS-PLUGIN OBJECT OVERLAP, differential. The geometry charter's own motivating
+// example: two mods drop a wall and a tree into the same cubic metre, SSEEdit reports "no conflict",
+// and the player finds out by walking into it.
 //
 // Why this survives the ruling-out that killed milestone 4: the absolute question ("does this
 // object overlap something?") drowns in the authored norm — clutter interpenetrates constantly.
 // The CROSS-PLUGIN question does not have that excuse: an object placed by mod A intersecting an
-// object placed by mod B, where NEITHER declares a dependency on the other, is a coincidence of
-// two authors who never saw each other's work. The floor still exists (two mods CAN legitimately
-// meet — a city overhaul and a lantern mod decorating the same street) and is MEASURED here, not
-// assumed: the same-source overlap rate is the "authored deliberately" baseline every cross-plugin
-// number is read against, split by interior/exterior.
+// object placed by mod B, where neither declares a dependency on the other, is a coincidence of two
+// authors who never saw each other's work. The floor still exists (two mods CAN legitimately meet —
+// a city overhaul and a lantern mod decorating the same street) and is MEASURED here, not assumed:
+// the same-source overlap rate is the "authored deliberately" baseline every cross-plugin number is
+// read against, split by interior/exterior.
 //
-// What "responsible" means: the plugin that last SET a reference's placement — the introducer,
-// or the latest override that actually moved it. An override that forwards a position unchanged
-// takes no responsibility for where it stands.
+// The first cut (2026-08-27) stopped at the absolute count. A deep overlap says two boxes intersect
+// NOW; it does not say who created the intersection or whether the later plugin could have seen the
+// other object. This cut asks both, the way the clobber, needs-witness and placement-dependency
+// detectors earned their findings: for every cross-responsible deep hit, with L the LATER of the two
+// responsible plugins, rebuild the arm WITHOUT L's contribution (L's reference at its previous snap
+// in the placement history, or absent) — no overlap there means L INTRODUCED it, overlap already
+// there means L INHERITED it. And was the other reference's winning placement set by L's own masters
+// (SEEN — an author's choice) or outside its closure (BLIND — it could not have been in the editor)?
+// The class is Introduced + Blind. Geometry RANKS within it (depth × fraction, scale class); it does
+// not decide. Rule: DetectorModel.OverlapProvenance, proofprobe-owned; arm construction:
+// _shared/OverlapIndex.cs, over PlacementHistory — the same history driftprobe and depprobe run on.
+//
+// "Responsible" = the plugin that last CHANGED a placement (position, cell, or enable/delete flag) —
+// PlacementHistory's changed-only rule. An override that forwards a position unchanged takes no
+// responsibility; one that changes only rotation or scale is not a step either, and is COUNTED.
 //
 // Boundary (the standing rules, applied):
 //   - Geometry is the measured NIF, resolved through the VFS; OBND only as a labelled fallback;
-//     no geometry = not judged, counted (rule 6).
-//   - Declared dependency is the transitive closure (DetectorModel.MasterClosure).
+//     no geometry = not judged, counted (rule 6). Editor markers are not obstructions and are set aside.
+//   - Declared dependency is the transitive closure (DetectorModel.MasterClosure); Seen IS that
+//     relation read from the later side, and the run checks the two counts agree.
 //   - The broad phase decides with DetectorModel.BoxOverlap (proofprobe-owned); exact contact is
 //     no overlap, because flush placement is how modular architecture is authored.
 //   - This is a BROAD phase: world AABBs of rotated boxes are conservative, so a "deep" hit is a
-//     candidate for eyes or a narrow phase, never a verdict. NOT verified in game.
+//     candidate for eyes or a narrow phase, never a verdict. Render geometry stands in for collision.
+//     NOT verified in game.
 //
-// usage: overlapprobe [--list N] [--depth U] [--frac F] [--emit path] [--dump path]
+// usage: overlapprobe [--list N] [--depth U] [--frac F] [--maxdim U] [--emit path] [--dump path] [--json path]
+//                     [--enable X.esp]* [--disable X.esp]* [--instance DIR] [--game DIR] [--profile NAME]
 
-// Defaults are the live VR instance; --instance / --game / --profile point every path at
-// another MO2 layout — the SE conflict-testing lab's pre-flight runs exist so a finding is
-// confirmed to reproduce in a minimal test order BEFORE anyone launches the game on it.
-// Nothing is compiled in — see _shared/HarnessTarget.cs. Flags win over the environment and
-// over harness.local.json; Require() runs AFTER them, so a run that passes --instance never
-// trips it, and a run that configures nothing fails with guidance instead of walking a
-// directory that isn't there.
+// Defaults are the configured instance; --instance / --game / --profile point every path at another
+// MO2 layout. Nothing is compiled in — see _shared/HarnessTarget.cs. Flags win over the environment
+// and over harness.local.json; Require() runs AFTER them.
 string Instance = HarnessTarget.Instance;
 string GamePath = HarnessTarget.Game;
 string profileName = HarnessTarget.Profile;
@@ -62,16 +73,19 @@ string dataDir = Path.Combine(GamePath, "Data");
 int listN = 25;
 float minDepth = 16f;      // a hit must need at least this much separation on some axis
 float minFrac = 0.25f;     // ...and bury at least this share of the smaller box
-// An "object" whose box spans more than this on every... on ANY axis is a VOLUME — mountain fog,
-// a LOD slab, a skydome, a city-wide clutter shell. Volumes overlap everything by design and are
-// not obstructions; the first calibration run was dominated by them (worst hits at 11,000+u).
-// A wall piece is 128–512u; the biggest genuine architecture runs ~1–2k. Parameter, not constant.
+// An "object" whose box spans more than this on ANY axis is a VOLUME — mountain fog, a LOD slab, a
+// skydome, a city-wide clutter shell. Volumes overlap everything by design and are not obstructions;
+// the first calibration run was dominated by them (worst hits at 11,000+u). A wall piece is 128–512u;
+// the biggest genuine architecture runs ~1–2k. Parameter, not constant.
 float maxDim = 1024f;
 string? emitPath = null;
 // --dump: one line per candidate (key, responsible plugin, base type, mesh, geometry source, rotation, scale,
 // world box). A diagnostic for comparing two runs ref by ref — which boxes moved under a transform change,
-// and what meshes they were — not part of the report.
+// and what meshes they were — not part of the report. --json: every judged row, for spot-checks.
 string? dumpPath = null;
+string? jsonPath = null;
+var enablePlugins = new List<string>();
+var disablePlugins = new List<string>();
 for (int i = 0; i < args.Length; i++)
 {
     if (args[i] == "--list" && i + 1 < args.Length) listN = int.Parse(args[++i]);
@@ -80,11 +94,21 @@ for (int i = 0; i < args.Length; i++)
     else if (args[i] == "--maxdim" && i + 1 < args.Length) maxDim = float.Parse(args[++i]);
     else if (args[i] == "--emit" && i + 1 < args.Length) emitPath = args[++i];
     else if (args[i] == "--dump" && i + 1 < args.Length) dumpPath = args[++i];
+    else if (args[i] == "--json" && i + 1 < args.Length) jsonPath = args[++i];
+    else if (args[i] == "--enable" && i + 1 < args.Length) enablePlugins.Add(args[++i]);
+    else if (args[i] == "--disable" && i + 1 < args.Length) disablePlugins.Add(args[++i]);
 }
 
 var sw = Stopwatch.StartNew();
-var order = Mo2LoadOrder.Build(profileDir, modsDir, dataDir, overwriteDir);
-var paths = order.OrderedPaths.ToList();
+IReadOnlyList<string> paths;
+if (enablePlugins.Count > 0 || disablePlugins.Count > 0)
+{
+    var syn = SyntheticOrder.Build(profileDir, modsDir, dataDir, overwriteDir, enablePlugins, disablePlugins);
+    foreach (var w in syn.Warnings) Console.WriteLine($"   ! {w}");
+    foreach (var a in syn.Applied) Console.WriteLine($"   synthetic: {a}");
+    paths = syn.OrderedPaths;
+}
+else paths = Mo2LoadOrder.Build(profileDir, modsDir, dataDir, overwriteDir).OrderedPaths;
 var comp = Mo2LoadOrder.ReadComposition(profileDir);
 var arch = ArchiveDiscovery.Discover(profileDir, modsDir, dataDir, overwriteDir, GamePath);
 using var assets = AssetResolver.Build(overwriteDir, modsDir, dataDir, comp.EnabledMods, arch.Archives);
@@ -92,30 +116,22 @@ Console.WriteLine($"load order: {paths.Count} plugins\n");
 
 var Vanilla = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
 { "Skyrim.esm", "Update.esm", "Dawnguard.esm", "HearthFires.esm", "Dragonborn.esm", "SkyrimVR.esm", "_ResourcePack.esl" };
+const string Ussep = "Unofficial Skyrim Special Edition Patch.esp";
 var Obstructing = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
 { "Static", "MoveableStatic", "Tree", "Furniture", "Door", "Container", "Activator", "Flora" };
 
 // ---------------------------------------------------------------------------------------
-// Pass 1 — winning placements with a RESPONSIBLE plugin each, plus base-record geometry keys.
+// Pass 1 — every plugin once, into the shared index: placements into the history, base geometry keys.
 // ---------------------------------------------------------------------------------------
+var idx = new OverlapIndex();
 var pluginKey = new ModKey[paths.Count];
 var masterIdx = new HashSet<int>[paths.Count];
-var baseType = new Dictionary<FormKey, string>();
-var baseMesh = new Dictionary<FormKey, string>();
-var baseObnd = new Dictionary<FormKey, Vec3>();
-var cellName = new Dictionary<FormKey, (string? Edid, bool Interior)>();
-
-// FormKey -> winning state. Resp = plugin that last CHANGED the placement.
-var state = new Dictionary<FormKey, RefState>();
 var unreadablePlugins = new List<string>();
-long refsSeen = 0;
-
 for (int p = 0; p < paths.Count; p++)
 {
     ISkyrimModGetter mod;
     try { mod = SkyrimMod.CreateFromBinaryOverlay(paths[p], SkyrimRelease.SkyrimSE); }
     catch { unreadablePlugins.Add(Path.GetFileName(paths[p])); pluginKey[p] = ModKey.Null; masterIdx[p] = new HashSet<int>(); continue; }
-
     using (mod as IDisposable)
     {
         pluginKey[p] = mod.ModKey;
@@ -127,47 +143,24 @@ for (int p = 0; p < paths.Count; p++)
         }
         catch { }
         masterIdx[p] = mset;
-
-        foreach (var rec in mod.EnumerateMajorRecords())
-        {
-            if (rec is IModeledGetter mo && rec is ISkyrimMajorRecordGetter sm)
-            {
-                baseType[sm.FormKey] = rec.GetType().Name.Replace("BinaryOverlay", "");
-                if (mo.Model?.File is { } mf && !string.IsNullOrWhiteSpace(mf.GivenPath)) baseMesh[sm.FormKey] = mf.GivenPath;
-                if (rec is IObjectBoundedGetter ob && ob.ObjectBounds is { } bnd)
-                    baseObnd[sm.FormKey] = new Vec3(MathF.Abs(bnd.Second.X - bnd.First.X),
-                                                    MathF.Abs(bnd.Second.Y - bnd.First.Y),
-                                                    MathF.Abs(bnd.Second.Z - bnd.First.Z));
-            }
-        }
-
-        foreach (var cp in PlacementExtract.FromMod(mod))
-        {
-            cellName[cp.Cell] = (cp.CellEditorId, cp.Interior);
-            foreach (var r in cp.Refs)
-            {
-                refsSeen++;
-                bool moved;
-                if (state.TryGetValue(r.FormKey, out var prev))
-                    moved = prev.Cell != cp.Cell
-                         || MathF.Abs(prev.Pos.X - r.Position.X) > 0.01f
-                         || MathF.Abs(prev.Pos.Y - r.Position.Y) > 0.01f
-                         || MathF.Abs(prev.Pos.Z - r.Position.Z) > 0.01f
-                         || MathF.Abs(prev.Scale - r.Scale) > 0.001f;
-                else moved = true;                                    // first sight: the introducer is responsible
-                state[r.FormKey] = new RefState(
-                    r.Position, r.Rotation, r.Scale, cp.Cell, cp.Interior, cp.Worldspace,
-                    r.Base, moved ? p : prev.Resp, r.Deleted, r.InitiallyDisabled);
-            }
-        }
+        idx.Ingest(p, mod);
     }
     if ((p + 1) % 150 == 0) Console.WriteLine($"   ... {p + 1}/{paths.Count} plugins, {sw.Elapsed.TotalSeconds:0}s");
 }
-
 var closure = DetectorModel.MasterClosure(masterIdx);
-Console.WriteLine($"\nindexed {state.Count:N0} winning refs ({refsSeen:N0} placements)  ({sw.Elapsed.TotalSeconds:0.0}s)");
+Console.WriteLine($"\nindexed {idx.History.Count:N0} winning refs ({idx.Placements:N0} placements)  ({sw.Elapsed.TotalSeconds:0.0}s)");
 Console.WriteLine($"   plugins that could not be read (contribute nothing, counted per rule 6): {unreadablePlugins.Count:N0}"
                 + (unreadablePlugins.Count > 0 ? "  — " + string.Join(", ", unreadablePlugins) : ""));
+Console.WriteLine($"   overrides that changed only rotation or scale (not a step in the history; the plugin is not responsible): {idx.SilentRePlacements:N0}");
+
+string PluginName(int p) => pluginKey[p].FileName.String;
+bool IsVanilla(int p) => Vanilla.Contains(PluginName(p));
+bool IsUssep(int p) => string.Equals(PluginName(p), Ussep, StringComparison.OrdinalIgnoreCase);
+bool IsBaseGame(int p) => PluginName(p) is "Skyrim.esm" or "Update.esm";
+string CellOf(FormKey c) => idx.CellName.TryGetValue(c, out var v) ? (v.Edid ?? c.ToString()) + (v.Interior ? " (int)" : " (ext)") : c.ToString();
+string TypeOf(FormKey baseKey) => idx.BaseInfo.TryGetValue(baseKey, out var bi) ? bi.Type : "?";
+string MeshOf(FormKey baseKey) => idx.BaseMesh.TryGetValue(baseKey, out var m) ? m : "";
+static string Short(string s, int n) => s.Length <= n ? s : "..." + s[^(n - 3)..];
 
 // ---------------------------------------------------------------------------------------
 // Pass 2 — measured geometry per base record (mesh through the VFS; OBND labelled fallback).
@@ -180,7 +173,7 @@ var meshBoxByPath = new Dictionary<string, Aabb?>(StringComparer.OrdinalIgnoreCa
 {
     if (boxCache.TryGetValue(baseKey, out var hit)) return hit;
     (Aabb, char) result = (Aabb.Empty, '-');
-    if (baseMesh.TryGetValue(baseKey, out var rel))
+    if (idx.BaseMesh.TryGetValue(baseKey, out var rel))
     {
         var full = rel.StartsWith("meshes", StringComparison.OrdinalIgnoreCase) ? rel : Path.Combine("meshes", rel);
         if (!meshBoxByPath.TryGetValue(full, out var mb))
@@ -197,12 +190,10 @@ var meshBoxByPath = new Dictionary<string, Aabb?>(StringComparer.OrdinalIgnoreCa
         }
         if (mb is { } box) { result = (box, 'm'); measured++; }
     }
-    if (result.Item2 == '-' && baseObnd.TryGetValue(baseKey, out var ob) && (ob.X > 0 || ob.Y > 0 || ob.Z > 0))
+    if (result.Item2 == '-')
     {
-        // OBND stores extents; centre it on the origin as the model box. Labelled, never blended.
-        var half = new Vec3(ob.X / 2, ob.Y / 2, ob.Z / 2);
-        result = (new Aabb(new Vec3(-half.X, -half.Y, -half.Z), half, false), 'o');
-        fellBack++;
+        var ob = idx.ObndBox(baseKey);
+        if (!ob.IsEmpty) { result = (ob, 'o'); fellBack++; }
     }
     if (result.Item2 == '-') noGeometry++;
     boxCache[baseKey] = result;
@@ -215,25 +206,8 @@ var meshBoxByPath = new Dictionary<string, Aabb?>(StringComparer.OrdinalIgnoreCa
 // A candidate is a winning, enabled, obstructing-typed ref whose responsible plugin is not the
 // base game — vanilla-vs-mod pairs are excluded by the closure anyway (every mod masters
 // Skyrim.esm), so hashing vanilla-responsible refs would only manufacture same-source pairs
-// nobody asked about. DLC/CC-responsible refs stay in: DLC-on-DLC is the measured class-A floor.
-var candidates = new List<Cand>();
-long skippedDeleted = 0, skippedDisabled = 0, skippedType = 0, skippedNoGeom = 0, skippedVanillaResp = 0, skippedVolume = 0;
-
-foreach (var (fk, s) in state)
-{
-    if (s.Deleted) { skippedDeleted++; continue; }
-    if (s.Disabled) { skippedDisabled++; continue; }
-    if (Vanilla.Contains(pluginKey[s.Resp].FileName.String)
-        && pluginKey[s.Resp].FileName.String is "Skyrim.esm" or "Update.esm") { skippedVanillaResp++; continue; }
-    if (s.Base is not { } bk || !baseType.TryGetValue(bk, out var bt) || !Obstructing.Contains(bt)) { skippedType++; continue; }
-    var (box, src) = BoxOf(bk);
-    if (src == '-') { skippedNoGeom++; continue; }
-    var world = SpatialOverlap.ToWorld(box, s.Pos, s.Rot, s.Scale);
-    if (world.IsEmpty) { skippedNoGeom++; continue; }
-    if (MathF.Max(world.Max.X - world.Min.X, MathF.Max(world.Max.Y - world.Min.Y, world.Max.Z - world.Min.Z)) > maxDim)
-    { skippedVolume++; continue; }
-    candidates.Add(new Cand(fk, s, bk, world, src));
-}
+// nobody asked about. DLC/CC-responsible refs stay in: DLC-on-DLC is the measured Bethesda floor.
+var candidates = idx.Candidates(BoxOf, Obstructing, IsBaseGame, maxDim, out var skips);
 
 if (dumpPath is not null)
 {
@@ -241,90 +215,20 @@ if (dumpPath is not null)
     using var dw = new StreamWriter(dumpPath);
     dw.WriteLine("key\tresp\ttype\tmesh\tsrc\trotX\trotY\trotZ\tscale\tminX\tminY\tminZ\tmaxX\tmaxY\tmaxZ");
     foreach (var c in candidates)
-        dw.WriteLine($"{c.Key}\t{pluginKey[c.S.Resp].FileName.String}\t{baseType.GetValueOrDefault(c.Base)}\t{baseMesh.GetValueOrDefault(c.Base)}\t{c.Src}"
-                   + $"\t{c.S.Rot.X:R}\t{c.S.Rot.Y:R}\t{c.S.Rot.Z:R}\t{c.S.Scale:R}"
+        dw.WriteLine($"{c.Key}\t{PluginName(c.Win.Plugin)}\t{TypeOf(c.Base)}\t{MeshOf(c.Base)}\t{c.Src}"
+                   + $"\t{c.Win.Rot.X:R}\t{c.Win.Rot.Y:R}\t{c.Win.Rot.Z:R}\t{c.Win.Scale:R}"
                    + $"\t{c.World.Min.X:R}\t{c.World.Min.Y:R}\t{c.World.Min.Z:R}\t{c.World.Max.X:R}\t{c.World.Max.Y:R}\t{c.World.Max.Z:R}");
     Console.WriteLine($"\ndumped {candidates.Count:N0} candidates -> {dumpPath}");
 }
 
 Console.WriteLine($"\ncandidates: {candidates.Count:N0} refs whose responsible plugin is not the base game");
 Console.WriteLine($"   geometry: {measured:N0} base records measured from the mesh, {fellBack:N0} from OBND (labelled fallback), {noGeometry:N0} with neither");
-Console.WriteLine($"   skipped (counted, per rule 6): {skippedDeleted:N0} deleted, {skippedDisabled:N0} initially-disabled, "
-                + $"{skippedType:N0} non-obstructing type, {skippedNoGeom:N0} no geometry, {skippedVanillaResp:N0} base-game-responsible,");
-Console.WriteLine($"                                  {skippedVolume:N0} volume-scale (a box axis > {maxDim:0}u — fog, LOD, skydomes; not obstructions)");
+Console.WriteLine($"   skipped (counted, per rule 6): {skips.Deleted:N0} deleted, {skips.Disabled:N0} initially-disabled, "
+                + $"{skips.NonObstructingType:N0} non-obstructing type, {skips.NoGeometry:N0} no geometry, {skips.ExcludedResponsible:N0} base-game-responsible,");
+Console.WriteLine($"                                  {skips.Volume:N0} volume-scale (a box axis > {maxDim:0}u — fog, LOD, skydomes; not obstructions), "
+                + $"{skips.MarkerMesh:N0} editor markers (no rendered mesh, cannot obstruct)");
 
-// Spatial hash: 256u tiles inside a space partition (interior cell | worldspace).
-const float Tile = 256f;
-var grid = new Dictionary<(FormKey Space, int X, int Y), List<int>>();
-for (int i = 0; i < candidates.Count; i++)
-{
-    var c = candidates[i];
-    var space = c.S.Interior ? c.S.Cell : c.S.Worldspace;
-    int x0 = (int)MathF.Floor(c.World.Min.X / Tile), x1 = (int)MathF.Floor(c.World.Max.X / Tile);
-    int y0 = (int)MathF.Floor(c.World.Min.Y / Tile), y1 = (int)MathF.Floor(c.World.Max.Y / Tile);
-    for (int x = x0; x <= x1; x++)
-        for (int y = y0; y <= y1; y++)
-        {
-            if (!grid.TryGetValue((space, x, y), out var l)) grid[(space, x, y)] = l = new List<int>();
-            l.Add(i);
-        }
-}
-
-long pairsChecked = 0;
-var seenPair = new HashSet<(FormKey, FormKey)>();
-// Same-source hits are the FLOOR: how often one author's own objects interpenetrate on purpose.
-long sameChecked = 0, sameHit = 0, crossDeclaredChecked = 0, crossDeclaredHit = 0, crossChecked = 0;
-var crossHits = new List<Hit>();
-var floorByDomain = new Dictionary<string, (long Hit, long Checked)>();
-
-foreach (var bucket in grid.Values)
-{
-    if (bucket.Count < 2) continue;
-    for (int a = 0; a < bucket.Count; a++)
-        for (int b = a + 1; b < bucket.Count; b++)
-        {
-            var ca = candidates[bucket[a]];
-            var cb = candidates[bucket[b]];
-            // A total order over FormKeys (ID, then ModKey name) so the same pair seen from two
-            // tiles dedupes regardless of which side came first.
-            bool aFirst = ca.Key.ID != cb.Key.ID
-                ? ca.Key.ID < cb.Key.ID
-                : string.CompareOrdinal(ca.Key.ModKey.FileName.String, cb.Key.ModKey.FileName.String) <= 0;
-            var key = aFirst ? (ca.Key, cb.Key) : (cb.Key, ca.Key);
-            if (!seenPair.Add(key)) continue;
-            pairsChecked++;
-
-            var ov = DetectorModel.BoxOverlap(
-                new Vector3(ca.World.Min.X, ca.World.Min.Y, ca.World.Min.Z),
-                new Vector3(ca.World.Max.X, ca.World.Max.Y, ca.World.Max.Z),
-                new Vector3(cb.World.Min.X, cb.World.Min.Y, cb.World.Min.Z),
-                new Vector3(cb.World.Max.X, cb.World.Max.Y, cb.World.Max.Z));
-            bool deep = ov is { } o && o.MinDepth >= minDepth && o.VolumeFraction >= minFrac;
-
-            if (ca.S.Resp == cb.S.Resp)
-            {
-                sameChecked++;
-                var dom = ca.S.Interior ? "interior" : "exterior";
-                var cur = floorByDomain.GetValueOrDefault(dom);
-                floorByDomain[dom] = (cur.Hit + (deep ? 1 : 0), cur.Checked + 1);
-                if (deep) sameHit++;
-                continue;
-            }
-            // Cross-plugin — but a declared dependency (either direction, transitive) means one
-            // author SAW the other's placement; that is coordination, not coincidence.
-            if (closure[ca.S.Resp].Contains(cb.S.Resp) || closure[cb.S.Resp].Contains(ca.S.Resp))
-            {
-                crossDeclaredChecked++;
-                if (deep) crossDeclaredHit++;
-                continue;
-            }
-            crossChecked++;
-            if (deep) crossHits.Add(new Hit(ca, cb, ov!.Value.MinDepth, ov.Value.VolumeFraction));
-        }
-}
-
-string PluginName(int p) => pluginKey[p].FileName.String;
-string CellOf(FormKey c) => cellName.TryGetValue(c, out var v) ? (v.Edid ?? c.ToString()) + (v.Interior ? " (int)" : " (ext)") : c.ToString();
+var sweep = OverlapIndex.Pairs(candidates, closure, minDepth, minFrac);
 
 // A published, ACTIVE patch mastering both sides is the community saying "these two are known to
 // meet" — the pair is a LABELLED conflict, and its residual overlaps are what the patch did not
@@ -340,90 +244,152 @@ bool Reconciled(int a, int b)
     return patchMemo[k] = found;
 }
 
-Console.WriteLine($"\npairs checked: {pairsChecked:N0}   (threshold: depth >= {minDepth:0}u AND fraction >= {minFrac:0.00})");
+Console.WriteLine($"\npairs checked: {sweep.PairsChecked:N0}   (threshold: depth >= {minDepth:0}u AND fraction >= {minFrac:0.00})");
 Console.WriteLine($"\n==== THE FLOOR — same author, deliberate: how often one plugin's own objects interpenetrate ====");
-Console.WriteLine($"   same-responsible pairs   : {sameChecked,10:N0} checked, {sameHit,7:N0} deep  ({Rate(sameHit, sameChecked),6:0.00}%)");
-foreach (var (dom, v) in floorByDomain.OrderBy(k => k.Key))
-    Console.WriteLine($"      {dom,-8}              : {v.Checked,10:N0} checked, {v.Hit,7:N0} deep  ({Rate(v.Hit, v.Checked),6:0.00}%)");
-Console.WriteLine($"   declared-dependency pairs: {crossDeclaredChecked,10:N0} checked, {crossDeclaredHit,7:N0} deep  ({Rate(crossDeclaredHit, crossDeclaredChecked),6:0.00}%)   <- coordination, also floor-ish");
-Console.WriteLine($"\n==== CROSS-PLUGIN, NO DECLARED DEPENDENCY — the milestone 5 question ====");
-Console.WriteLine($"   pairs checked: {crossChecked:N0}, deep overlaps: {crossHits.Count:N0}  ({Rate(crossHits.Count, crossChecked),6:0.00}%)");
+Console.WriteLine($"   same-responsible pairs   : {sweep.SameChecked,10:N0} checked, {sweep.SameDeep,7:N0} deep  ({Rate(sweep.SameDeep, sweep.SameChecked),6:0.00}%)");
+foreach (var (dom, v) in sweep.SameByDomain.OrderBy(k => k.Key))
+    Console.WriteLine($"      {dom,-8}              : {v.Checked,10:N0} checked, {v.Deep,7:N0} deep  ({Rate(v.Deep, v.Checked),6:0.00}%)");
+Console.WriteLine($"   declared-dependency pairs: {sweep.CrossDeclaredChecked,10:N0} checked, {sweep.CrossDeclaredDeep,7:N0} deep  ({Rate(sweep.CrossDeclaredDeep, sweep.CrossDeclaredChecked),6:0.00}%)   <- coordination; reads SEEN below");
 
-string HitClass(Hit h) =>
-    Vanilla.Contains(PluginName(h.A.S.Resp)) && Vanilla.Contains(PluginName(h.B.S.Resp))
-        ? "A. Bethesda-on-Bethesda (floor)" : "C. cross-plugin";
-foreach (var g in crossHits.GroupBy(HitClass).OrderBy(g => g.Key))
-    Console.WriteLine($"   {g.Count(),6:N0}  {g.Key}");
+var undeclared = sweep.CrossDeep.Where(h => !h.Declared).ToList();
+Console.WriteLine($"\n==== CROSS-PLUGIN, NO DECLARED DEPENDENCY — the milestone 5 question, absolute ====");
+Console.WriteLine($"   pairs checked: {sweep.CrossUndeclaredChecked:N0}, deep overlaps: {undeclared.Count:N0}  ({Rate(undeclared.Count, sweep.CrossUndeclaredChecked),6:0.00}%)");
+OverlapPopulation PopOf(OverlapHit h) => DetectorModel.ClassifyOverlapPopulation(
+    IsVanilla(h.A.Win.Plugin), IsVanilla(h.B.Win.Plugin), IsUssep(h.A.Win.Plugin), IsUssep(h.B.Win.Plugin));
+Console.WriteLine($"   {undeclared.Count(h => PopOf(h) == OverlapPopulation.BethesdaFloor),6:N0}  A. Bethesda-on-Bethesda (floor)");
+Console.WriteLine($"   {undeclared.Count(h => PopOf(h) != OverlapPopulation.BethesdaFloor),6:N0}  C. cross-plugin  (of which USSEP-involved {undeclared.Count(h => PopOf(h) == OverlapPopulation.UssepInvolved):N0})");
 
-Console.WriteLine($"\n   ---- by mod pair (deep overlaps, class C) ----");
-var byPair = crossHits.Where(h => HitClass(h).StartsWith("C"))
-    .GroupBy(h =>
-    {
-        var (x, y) = (PluginName(h.A.S.Resp), PluginName(h.B.S.Resp));
-        return string.CompareOrdinal(x, y) <= 0 ? (x, y) : (y, x);
-    })
-    .OrderByDescending(g => g.Count()).ToList();
+// ---------------------------------------------------------------------------------------
+// Pass 4 — the differential: every cross-responsible deep hit judged for provenance.
+// ---------------------------------------------------------------------------------------
+var rows = sweep.CrossDeep.Select(h => idx.Judge(h, closure, BoxOf, minDepth, minFrac)).ToList();
+int seenRows = rows.Count(r => r.Sight == OverlapSight.Seen);
+Console.WriteLine($"\n==== PROVENANCE — with vs without the later plugin, and who saw what ({rows.Count:N0} cross-responsible deep hits) ====");
+Console.WriteLine(seenRows == sweep.CrossDeclaredDeep
+    ? $"   plumbing: SEEN rows = {seenRows:N0} = declared-dependency deep hits  OK — Seen is the closure relation read from the later side"
+    : $"   plumbing: SEEN rows = {seenRows:N0} but declared-dependency deep hits = {sweep.CrossDeclaredDeep:N0}  *** MISMATCH — the two tests should agree ***");
+
+string Verdict(OverlapRow r) => $"{r.Origin} + {r.Sight}";
+var pops = new[] { OverlapPopulation.BethesdaFloor, OverlapPopulation.UssepInvolved, OverlapPopulation.ModOnMod };
+Console.WriteLine($"\n   {"verdict",-22} {"Bethesda floor",16} {"USSEP involved",16} {"mod-on-mod",16} {"all",10}   (hits / distinct refs)");
+foreach (var (o, s) in new[] { (OverlapOrigin.Introduced, OverlapSight.Blind), (OverlapOrigin.Introduced, OverlapSight.Seen),
+                                (OverlapOrigin.Inherited, OverlapSight.Blind), (OverlapOrigin.Inherited, OverlapSight.Seen) })
+{
+    var vr = rows.Where(r => r.Origin == o && r.Sight == s).ToList();
+    string Cell(IEnumerable<OverlapRow> g) { var l = g.ToList(); return $"{l.Count:N0} / {l.SelectMany(r => new[] { r.Hit.A.Key, r.Hit.B.Key }).Distinct().Count():N0}"; }
+    Console.WriteLine($"   {o + " + " + s,-22} {Cell(vr.Where(r => PopOf(r.Hit) == pops[0])),16} {Cell(vr.Where(r => PopOf(r.Hit) == pops[1])),16} {Cell(vr.Where(r => PopOf(r.Hit) == pops[2])),16} {Cell(vr),10}");
+}
+var introduced = rows.Where(r => r.Origin == OverlapOrigin.Introduced).ToList();
+Console.WriteLine($"\n   Introduced {introduced.Count:N0} of {rows.Count:N0} ({Rate(introduced.Count, rows.Count):0.0}%); Blind share of Introduced {Rate(introduced.Count(r => r.Sight == OverlapSight.Blind), introduced.Count):0.0}%");
+Console.WriteLine($"   how the later plugin introduced it: {introduced.Count(r => !r.Facts.LaterHadPreviousPlacement):N0} new refs, "
+                + $"{introduced.Count(r => r.Facts.LaterHadPreviousPlacement && r.Facts.PreviousPlacementPresent):N0} moved in, "
+                + $"{introduced.Count(r => r.Facts.LaterHadPreviousPlacement && !r.Facts.PreviousPlacementPresent):N0} enabled or relocated in");
+
+// THE CLASS: Introduced + Blind. Seen is the declared relation, so this is all class-C by construction.
+var cls = rows.Where(r => r.Origin == OverlapOrigin.Introduced && r.Sight == OverlapSight.Blind && PopOf(r.Hit) != OverlapPopulation.BethesdaFloor).ToList();
+var floorRows = rows.Where(r => PopOf(r.Hit) == OverlapPopulation.BethesdaFloor).ToList();
+
+(string, string) PairKey(OverlapRow r)
+{
+    var (x, y) = (PluginName(r.Later), PluginName(r.Earlier));
+    return string.CompareOrdinal(x, y) <= 0 ? (x, y) : (y, x);
+}
+int DistinctRefs(IEnumerable<OverlapRow> g) => g.SelectMany(r => new[] { r.Hit.A.Key, r.Hit.B.Key }).Distinct().Count();
+string Describe(OverlapRow r) =>
+    $"{TypeOf(r.LaterRef.Base)} from {PluginName(r.Later)} buried {r.Hit.Frac:0.00} deep ({r.Hit.Depth:0}u) in {TypeOf(r.OtherRef.Base)} from {PluginName(r.Earlier)}"
+  + $" in {CellOf(r.LaterRef.Win.Cell)}  [{r.LaterRef.Src}{r.OtherRef.Src}]  {r.LaterRef.Key} / {r.OtherRef.Key}";
+
+Console.WriteLine($"\n==== THE CLASS — INTRODUCED + BLIND, mod-on-mod and USSEP-involved: {cls.Count:N0} hits over {DistinctRefs(cls):N0} distinct refs ====");
+Console.WriteLine($"   by scale of the buried box: " + string.Join(", ",
+    new[] { OverlapScale.Architecture, OverlapScale.Furniture, OverlapScale.Clutter }.Select(sc => $"{sc} {cls.Count(r => r.Scale == sc):N0}")));
+Console.WriteLine($"\n   ---- by responsible-plugin pair (Introduced + Blind) ----");
+var byPair = cls.GroupBy(PairKey).OrderByDescending(g => g.Count()).ToList();
 foreach (var g in byPair.Take(listN))
 {
-    var worst = g.OrderByDescending(h => h.Frac).ThenByDescending(h => h.Depth).First();
-    // Distinct refs on each side: 1 giant ref overlapping 500 things is one problem, not 500.
-    int refsA = g.SelectMany(h => new[] { h.A.Key, h.B.Key }).Distinct().Count();
-    bool rec = Reconciled(worst.A.S.Resp, worst.B.S.Resp);
-    Console.WriteLine($"   {g.Count(),5:N0} hits over {refsA,5:N0} distinct refs  "
+    var worst = g.OrderByDescending(r => r.Rank).First();
+    bool rec = Reconciled(worst.Later, worst.Earlier);
+    Console.WriteLine($"   {g.Count(),5:N0} hits over {DistinctRefs(g),5:N0} distinct refs  "
                     + $"{(rec ? "[patched, residual]" : "[NO RECONCILER]    "),-19} {g.Key.Item1}  x  {g.Key.Item2}");
-    Console.WriteLine($"          worst: {baseType.GetValueOrDefault(worst.A.Base)} vs {baseType.GetValueOrDefault(worst.B.Base)}"
-                    + $" in {CellOf(worst.A.S.Cell)}  depth {worst.Depth:0}u  frac {worst.Frac:0.00}"
-                    + $"  [{worst.A.Src}{worst.B.Src}]  {worst.A.Key} / {worst.B.Key}");
+    Console.WriteLine($"          worst: {Describe(worst)}");
 }
-
-Console.WriteLine($"\n   ---- the shortlist: pairs with deep overlaps and NO plugin in this order reconciling them ----");
-foreach (var g in byPair.Where(g => { var h0 = g.First(); return !Reconciled(h0.A.S.Resp, h0.B.S.Resp); }).Take(listN))
-{
-    int refsA = g.SelectMany(h => new[] { h.A.Key, h.B.Key }).Distinct().Count();
-    Console.WriteLine($"   {g.Count(),5:N0} hits over {refsA,5:N0} distinct refs   {g.Key.Item1}  x  {g.Key.Item2}");
-}
+Console.WriteLine($"\n   ---- the shortlist: Introduced + Blind pairs with NO plugin in this order reconciling them ----");
+foreach (var g in byPair.Where(g => { var r0 = g.First(); return !Reconciled(r0.Later, r0.Earlier); }).Take(listN))
+    Console.WriteLine($"   {g.Count(),5:N0} hits over {DistinctRefs(g),5:N0} distinct refs   {g.Key.Item1}  x  {g.Key.Item2}");
 Console.WriteLine($"   (a pair WITH a reconciler is a labelled conflict whose residue the patch did not cover —");
 Console.WriteLine($"    second-priority, and the count says how much residue)");
 
-// Sensitivity, always-on: the same counts at half and double both knobs.
-Console.WriteLine($"\n==== SENSITIVITY (class C deep-overlap count at other thresholds) ====");
+Console.WriteLine($"\n   ---- the ranker: top {listN} Introduced + Blind by depth × fraction (geometry ranks, it does not decide) ----");
+Console.WriteLine($"   {"rank",7} {"scale",-12} {"depth",6} {"frac",5}  {"later ref (buried or burying) / other ref"}");
+foreach (var r in cls.OrderByDescending(r => r.Rank).ThenByDescending(r => r.SmallerMaxDim).Take(listN))
+    Console.WriteLine($"   {r.Rank,7:0} {r.Scale,-12} {r.Hit.Depth,6:0} {r.Hit.Frac,5:0.00}  {TypeOf(r.LaterRef.Base)} {Short(MeshOf(r.LaterRef.Base), 40)} ({PluginName(r.Later)})"
+                    + $"  x  {TypeOf(r.OtherRef.Base)} {Short(MeshOf(r.OtherRef.Base), 40)} ({PluginName(r.Earlier)})  in {CellOf(r.LaterRef.Win.Cell)}  {r.LaterRef.Key} / {r.OtherRef.Key}");
+Console.WriteLine($"\n   ---- the ranker, architecture-scale only (a wall through a house is a different finding from two bottles) ----");
+foreach (var r in cls.Where(r => r.Scale == OverlapScale.Architecture).OrderByDescending(r => r.Rank).Take(listN))
+    Console.WriteLine($"   {r.Rank,7:0} {r.Hit.Depth,6:0} {r.Hit.Frac,5:0.00}  {Describe(r)}");
+
+var knowing = rows.Where(r => r.Origin == OverlapOrigin.Introduced && r.Sight == OverlapSight.Seen).ToList();
+Console.WriteLine($"\n==== KNOWINGLY OVERLAPPING — Introduced + Seen: the author placed into context its own masters set ({knowing.Count:N0} hits) ====");
+foreach (var g in knowing.GroupBy(PairKey).OrderByDescending(g => g.Count()).Take(Math.Min(listN, 12)))
+    Console.WriteLine($"   {g.Count(),5:N0} hits over {DistinctRefs(g),5:N0} distinct refs   {g.Key.Item1}  x  {g.Key.Item2}");
+
+var inherited = rows.Where(r => r.Origin == OverlapOrigin.Inherited).ToList();
+Console.WriteLine($"\n==== INHERITED — the intersection pre-dates the later plugin; attributed to nobody here ({inherited.Count:N0} hits; Blind {inherited.Count(r => r.Sight == OverlapSight.Blind):N0}, Seen {inherited.Count(r => r.Sight == OverlapSight.Seen):N0}) ====");
+foreach (var g in inherited.GroupBy(PairKey).OrderByDescending(g => g.Count()).Take(Math.Min(listN, 12)))
+    Console.WriteLine($"   {g.Count(),5:N0} hits over {DistinctRefs(g),5:N0} distinct refs   {g.Key.Item1}  x  {g.Key.Item2}");
+
+Console.WriteLine($"\n==== THE BETHESDA FLOOR — every Bethesda-on-Bethesda cross-responsible deep hit, with its provenance (control candidates) ====");
+foreach (var r in floorRows.OrderByDescending(r => r.Rank))
+    Console.WriteLine($"   {Verdict(r),-22} {r.Scale,-12} {Describe(r)}");
+
+// Sensitivity, always-on: the class count at half and double both knobs.
+Console.WriteLine($"\n==== SENSITIVITY (Introduced + Blind count at other thresholds) ====");
 foreach (var (d, f) in new[] { (minDepth / 2, minFrac / 2), (minDepth, minFrac), (minDepth * 2, MathF.Min(1f, minFrac * 2)) })
 {
-    int n = 0;
-    foreach (var h in crossHits) if (h.Depth >= d && h.Frac >= f && HitClass(h).StartsWith("C")) n++;
-    // crossHits only holds hits at the BASE threshold, so the halved row needs its own pass — say so.
+    int n = cls.Count(r => r.Hit.Depth >= d && r.Hit.Frac >= f);
     Console.WriteLine(d < minDepth
         ? $"   depth>={d,3:0}u frac>={f:0.00}  ->  (not computable from this run's hit set — re-run with --depth {d:0} --frac {f:0.00})"
         : $"   depth>={d,3:0}u frac>={f:0.00}  ->  {n:N0}");
 }
 
-// --emit: the LATER plugin's ref is the necessary fix target (it placed into existing context);
+// --emit: the CLASS only — Introduced + Blind, Bethesda floor withheld (the way navownprobe withholds
+// its floor). The LATER plugin's ref is the necessary fix target (it placed into existing context);
 // moving the other side is the legitimate alternative.
 if (emitPath is not null)
 {
     var conflicts = new List<Conflict>();
-    foreach (var h in crossHits.Where(h => HitClass(h).StartsWith("C")))
-    {
-        var (later, earlier) = h.A.S.Resp >= h.B.S.Resp ? (h.A, h.B) : (h.B, h.A);
+    foreach (var r in cls)
         conflicts.Add(new Conflict(
-            "OVERLAP", PluginName(earlier.S.Resp), PluginName(later.S.Resp),
-            $"{baseType.GetValueOrDefault(later.Base)} from {PluginName(later.S.Resp)} buried {h.Frac:0.00} deep ({h.Depth:0}u) in "
-          + $"{baseType.GetValueOrDefault(earlier.Base)} from {PluginName(earlier.S.Resp)} in {CellOf(later.S.Cell)}",
-            new List<ConflictRecord> { new(later.Key.ToString(), "placed-ref", CellOf(later.S.Cell)) },
-            new List<ConflictRecord> { new(earlier.Key.ToString(), "placed-ref", null) }));
-    }
+            "OVERLAP", PluginName(r.Earlier), PluginName(r.Later), Describe(r),
+            new List<ConflictRecord> { new(r.LaterRef.Key.ToString(), "placed-ref", CellOf(r.LaterRef.Win.Cell)) },
+            new List<ConflictRecord> { new(r.OtherRef.Key.ToString(), "placed-ref", null) }));
     ConflictIo.Write(emitPath, new ConflictFile("overlapprobe", Instance,
         DateTime.UtcNow.ToString("yyyy-MM-dd HH:mm:ssZ"), conflicts));
-    Console.WriteLine($"\nemitted {conflicts.Count:N0} conflicts -> {emitPath}");
+    Console.WriteLine($"\nemitted {conflicts.Count:N0} Introduced + Blind conflicts -> {emitPath}");
+}
+
+if (jsonPath is not null)
+{
+    var dir = Path.GetDirectoryName(Path.GetFullPath(jsonPath));
+    if (!string.IsNullOrEmpty(dir)) Directory.CreateDirectory(dir);
+    var dump = rows.Select(r => new
+    {
+        Later = r.LaterRef.Key.ToString(), LaterPlugin = PluginName(r.Later), LaterType = TypeOf(r.LaterRef.Base), LaterMesh = MeshOf(r.LaterRef.Base), LaterSrc = r.LaterRef.Src.ToString(),
+        Other = r.OtherRef.Key.ToString(), OtherPlugin = PluginName(r.Earlier), OtherType = TypeOf(r.OtherRef.Base), OtherMesh = MeshOf(r.OtherRef.Base), OtherSrc = r.OtherRef.Src.ToString(),
+        Cell = CellOf(r.LaterRef.Win.Cell), Origin = r.Origin.ToString(), Sight = r.Sight.ToString(), Population = PopOf(r.Hit).ToString(),
+        Declared = r.Hit.Declared, Depth = r.Hit.Depth, Frac = r.Hit.Frac, Rank = r.Rank, Scale = r.Scale.ToString(), SmallerMaxDim = r.SmallerMaxDim,
+        WithoutDepth = r.WithoutDepth, WithoutFrac = r.WithoutFrac,
+        LaterPrevious = r.LaterPrevious is { } lp ? new { Plugin = PluginName(lp.Plugin), lp.Pos.X, lp.Pos.Y, lp.Pos.Z, Cell = lp.Cell.ToString(), lp.Disabled, lp.Deleted } : null,
+        OtherAsSeenByLater = r.OtherAsSeenByLater is { } os ? new { Plugin = PluginName(os.Plugin), os.Pos.X, os.Pos.Y, os.Pos.Z } : null,
+        Reconciled = Reconciled(r.Later, r.Earlier), r.Why,
+    });
+    File.WriteAllText(jsonPath, JsonSerializer.Serialize(dump, new JsonSerializerOptions { WriteIndented = false, NumberHandling = System.Text.Json.Serialization.JsonNumberHandling.AllowNamedFloatingPointLiterals }));
+    Console.WriteLine($"wrote {rows.Count:N0} judged rows -> {jsonPath}");
 }
 
 Console.WriteLine($"\nNOT verified in game; a broad-phase AABB hit is a candidate for eyes or a narrow phase, never a verdict.");
+Console.WriteLine($"Limits: render geometry stands in for collision; rotation- and scale-only re-placements are not steps in the history ({idx.SilentRePlacements:N0} counted above);");
+Console.WriteLine($"        the arm without the later plugin steps back ONE placement — an intersection created two movers back reads Inherited and is attributed to nobody.");
 Console.WriteLine($"elapsed {sw.Elapsed.TotalSeconds:0.0}s");
 return 0;
 
 static float Rate(long hit, long total) => total == 0 ? 0 : 100f * hit / total;
-
-readonly record struct RefState(Vec3 Pos, Vec3 Rot, float Scale, FormKey Cell, bool Interior,
-                                FormKey Worldspace, FormKey? Base, int Resp, bool Deleted, bool Disabled);
-readonly record struct Cand(FormKey Key, RefState S, FormKey Base, Aabb World, char Src);
-readonly record struct Hit(Cand A, Cand B, float Depth, float Frac);
