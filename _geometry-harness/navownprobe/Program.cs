@@ -577,6 +577,7 @@ if (reachCandidates)
                     unjudgeable = wit.Rows.Where(r => r.Verdict == WitnessVerdict.Unjudgeable)
                                           .GroupBy(r => r.Reason.ToString()).ToDictionary(g => g.Key, g => g.Count()),
                     elevatedAnchors = wit.Rows.Count(r => r.ElevatedStrand),
+                    w2BlindBand = wit.BlindBand(ReachClearance).Count(),
                 },
                 ["nav"] = c.Nav.ToString(),
                 ["cell"] = Cell(navCell.GetValueOrDefault(c.Nav)),
@@ -638,11 +639,22 @@ if (reachCandidates)
                                .OrderByDescending(g => g.Count()))
             Console.WriteLine($"   {g.Count(),6}  {g.Key.Reason}{(g.Key.Arm.Length > 0 ? $" ({g.Key.Arm} arm)" : "")}");
         Console.WriteLine($"   elevated anchors (3-D Uncovered, horizontal reading would strand): {rows.Count(x => x.Row.ElevatedStrand):N0}");
+        // The blind band the rule states for placements: below clearance nothing is measured for a
+        // W2, so a placed actor the winner arm leaves that far off its mesh reads Covered. Counted,
+        // never a verdict, and split by distance because the 3-D measure includes standing height.
+        var blind = witnessByRecord.SelectMany(w => w.Report.BlindBand(ReachClearance)).ToList();
+        int Blind(float lo, float hi) => blind.Count(r => r.DW > lo && r.DW <= hi);
+        Console.WriteLine($"   W2 blind band (placements the winner arm leaves within (0, {ReachClearance:0}u] of its mesh, read Covered —"
+                        + $" below {ReachClearance:0}u nothing is measured for a placement): {blind.Count:N0} of {Rows(WitnessKind.PlacedActor, WitnessVerdict.Covered):N0} Covered W2 rows");
+        Console.WriteLine($"     by 3-D distance to the winner's mesh, which includes the actor's standing height over its own triangle:"
+                        + $" <={ReachClearance / 4:0}u {Blind(0, ReachClearance / 4):N0}, ({ReachClearance / 4:0}, {ReachClearance / 2:0}]u {Blind(ReachClearance / 4, ReachClearance / 2):N0},"
+                        + $" ({ReachClearance / 2:0}, {ReachClearance:0}]u {Blind(ReachClearance / 2, ReachClearance):N0}   (a count, not a verdict)");
         Console.WriteLine($"   ---- by population (rule 12): records judged -> with a witness on their ground -> on the LOST ground -> Stranded -> Stranded+Oversight ----");
         foreach (var g in witnessByRecord.GroupBy(w => w.Class).OrderBy(g => g.Key))
             Console.WriteLine($"   {g.Count(),4} -> {g.Count(w => w.Report.AnyWitness),4} -> {g.Count(w => w.Report.AnyOnLostGround),4} -> {g.Count(w => w.Report.Stranded.Any()),4}"
                             + $" -> {g.Count(w => w.Report.Stranded.Any(r => r.Authorship == WitnessAuthorship.Oversight)),4}  {g.Key}");
-        Console.WriteLine($"   (a Stranded+Oversight row is the records-side needs-witness — the in-game confirmer's candidate;");
+        Console.WriteLine($"   (a Stranded+Oversight row is the records-side needs-witness — what the game showed for one (2026-09-01): a placed");
+        Console.WriteLine($"    actor ABANDONS victim-only ground, sandboxing on the winner's mesh from the first read, never at its placement;");
         Console.WriteLine($"    Stranded+Deliberate says the winner's side placed or kept the witness knowingly; connectivity,");
         Console.WriteLine($"    which package runs when, and whether the actor ever loads are still not judged)");
         witnessSummary = new
@@ -665,6 +677,17 @@ if (reachCandidates)
             unjudgeableByReason = rows.Where(x => x.Row.Verdict == WitnessVerdict.Unjudgeable)
                                       .GroupBy(x => x.Row.Reason.ToString()).ToDictionary(g => g.Key, g => g.Count()),
             elevatedAnchors = rows.Count(x => x.Row.ElevatedStrand),
+            w2BlindBand = new
+            {
+                count = blind.Count,
+                coveredW2 = Rows(WitnessKind.PlacedActor, WitnessVerdict.Covered),
+                byDistance = new Dictionary<string, int>
+                {
+                    [$"0-{ReachClearance / 4:0}u"] = Blind(0, ReachClearance / 4),
+                    [$"{ReachClearance / 4:0}-{ReachClearance / 2:0}u"] = Blind(ReachClearance / 4, ReachClearance / 2),
+                    [$"{ReachClearance / 2:0}-{ReachClearance:0}u"] = Blind(ReachClearance / 2, ReachClearance),
+                },
+            },
         };
     }
 

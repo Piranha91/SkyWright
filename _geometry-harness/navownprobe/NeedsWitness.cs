@@ -50,6 +50,13 @@ sealed record WitnessReport(List<WitnessRow> Rows, int ActorsInCell, int ActorsO
     public int Count(WitnessKind k, WitnessVerdict v) => Rows.Count(r => r.Kind == k && r.Verdict == v);
     public IEnumerable<WitnessRow> Stranded => Rows.Where(r => r.Verdict == WitnessVerdict.Stranded);
     public bool AnyWitness => Rows.Any(r => r.Kind != WitnessKind.TargetedRef);
+    /// <summary>The blind band the rule states for placements (W2): a placed actor the winner arm
+    /// leaves within (0, clearance] of its mesh reads Covered, and nothing below clearance is
+    /// measured for a placement. A count beside the verdicts, never a verdict — and an upper bound:
+    /// the 3-D distance includes the actor's standing height above its own triangle, so nearly
+    /// every Covered placement is in it, which is why the driver splits it by distance.</summary>
+    public IEnumerable<WitnessRow> BlindBand(float clearance)
+        => Rows.Where(r => r.Kind == WitnessKind.PlacedActor && r.Verdict == WitnessVerdict.Covered && r.DW > 0f && r.DW <= clearance);
 }
 
 static class NeedsWitnessJoin

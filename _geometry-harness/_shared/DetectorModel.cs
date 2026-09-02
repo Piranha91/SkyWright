@@ -425,17 +425,31 @@ public static class DetectorModel
     /// <summary>What turns "coverage lost" into "something is broken", records-only. The 3.5.5
     /// in-game result showed coverage loss alone is not a finding — Bethesda ships the same shape,
     /// and a winner deleting ground under its new architecture is doing its job. A finding needs
-    /// a witness that still NEEDS the lost ground.
+    /// a witness that still NEEDS the lost ground. What "broken" is, measured in game: a placed
+    /// actor ABANDONS victim-only ground — its own AI puts it on the winner's mesh, far from where
+    /// the author set it down, by the first read — and an actor spawned into an island with no
+    /// route out freezes there. Not "cannot function": a package-free actor set down on the lost
+    /// ground stays put, and an on-mesh actor can still be walked onto it.
     ///
     /// <para>The rule, per witness point with radius r: <b>Stranded</b> iff the point had ground
     /// in the victim arm (<c>DV ≤ clearance</c> — the point itself, not the disc) and the disc has
     /// none in the winner arm (<c>DW − r &gt; clearance</c>). The <c>− r</c> is deliberate: a wide
-    /// sandbox radius that still overlaps winner coverage can put the actor on usable ground. A
-    /// margin inside (clearance, 2×clearance] is within the oracle's own resolution and is
-    /// reported as <b>Unjudgeable</b> (counted, never cleared), not called. The <b>Mirror</b> —
-    /// winner-only ground with a witness — is the symmetric case, reported as the mirror and never
-    /// as a finding. Ground both arms cover is <b>Covered</b>; ground neither covers (the vanilla
-    /// cave shape) is <b>Uncovered</b> — nothing either way.</para>
+    /// sandbox radius that still overlaps winner coverage can put the actor on usable ground. The
+    /// <b>Mirror</b> — winner-only ground with a witness — is the symmetric case, reported as the
+    /// mirror and never as a finding. Ground both arms cover is <b>Covered</b>; ground neither
+    /// covers (the vanilla cave shape) is <b>Uncovered</b> — nothing either way.</para>
+    ///
+    /// <para>The resolution band. A margin inside (clearance, 2×clearance] is within the oracle's
+    /// own resolution and is reported as <b>Unjudgeable</b> (counted, never cleared), not called —
+    /// for a package anchor or a targeted ref (W1/W3). That resolution was measured on a WALK
+    /// TARGET (an actor sent to a point that far off-mesh still gets there), and those witnesses
+    /// are walk targets. A placed actor (W2) is not: in game (2026-09-01) a placed actor inside
+    /// the band was displaced exactly like one well beyond it — on the winner's mesh from the
+    /// first read, never at its placement — so for a placement the band collapses and Stranded
+    /// holds from <c>clearance</c> up, with no upper test. The floor at <c>clearance</c> is NOT
+    /// measured for placements either: it is the only figure below the in-game reading the
+    /// project has, and a placed actor between 0 and <c>clearance</c> off the winner's mesh reads
+    /// Covered. The driver counts those rows as a stated blind band.</para>
     ///
     /// <para>Authorship rides on a separate axis, from the intent work: a witness the winner's side
     /// authored or overrode was moved or kept on purpose (<b>Deliberate</b> — HearthFires placing
@@ -469,11 +483,15 @@ public static class DetectorModel
         string nums = $"victim {Fmt(f.DV)}, winner {Fmt(f.DW)}" + (f.Radius > 0 ? $" − r {f.Radius:0} = {Fmt(marginW)}" : "");
         if (f.DV <= clearance && marginW > clearance)
         {
-            if (marginW <= 2f * clearance)
+            // The band is the walk-target resolution; a placed actor is not a walk target (see the
+            // summary) — for W2 it collapses, and a W2 inside it says so in its Why.
+            if (f.Kind != WitnessKind.PlacedActor && marginW <= 2f * clearance)
                 return (WitnessVerdict.Unjudgeable, WitnessBlocker.WithinResolutionBand, authorship,
-                        $"{nums}: lost, but inside 2× the {clearance:0}u resolution — reported, not called");
+                        $"{nums}: lost, but inside 2× the {clearance:0}u walk-target resolution — reported, not called");
+            bool inFormerBand = f.Kind == WitnessKind.PlacedActor && marginW <= 2f * clearance;
             return (WitnessVerdict.Stranded, WitnessBlocker.None, authorship,
-                    $"{nums}: ground under the witness before the winner, none after ({authorship})");
+                    $"{nums}: ground under the witness before the winner, none after ({authorship})"
+                    + (inFormerBand ? $" — inside 2× the {clearance:0}u walk-target band, and a placed actor at this distance was displaced in game (2026-09-01 confirmer)" : ""));
         }
         if (f.DW <= clearance && marginV > clearance)
             return (WitnessVerdict.Mirror, WitnessBlocker.None, authorship, $"{nums}: winner-only ground under a witness — the mirror, not a finding");

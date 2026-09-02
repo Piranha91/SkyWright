@@ -659,17 +659,42 @@ Console.WriteLine("\nPROOF — the detector cores (_shared/DetectorModel.cs)\n")
            && DetectorModel.NeedsWitness(At(offVictim, r: 300), CL).Verdict == WitnessVerdict.Uncovered,
               "200u off the island with r=300: Uncovered, never Stranded");
 
-        // The resolution band: a W2 actor whose lost margin is inside (120, 240] is reported, not called.
-        var band = DetectorModel.NeedsWitness(new(WitnessKind.PlacedActor, 0, 0, 200, WitnessBlocker.None, false), CL);
-        Check("witness: W2 actor in the (120, 240] band -> UNJUDGEABLE, counted by reason",
+        // The resolution band, (120, 240]: the oracle's walk-target resolution. A package anchor
+        // (W1) and a targeted ref (W3) ARE walk targets — a lost margin inside the band is reported,
+        // not called.
+        DetectorModel.WitnessFacts Lost(WitnessKind kind, float dW, float r = 0) => new(kind, r, 0, dW, WitnessBlocker.None, false);
+        var band = DetectorModel.NeedsWitness(Lost(WitnessKind.PackageAnchor, 200), CL);
+        Check("witness: W1 anchor in the (120, 240] band -> UNJUDGEABLE, counted by reason",
               band.Verdict == WitnessVerdict.Unjudgeable && band.Reason == WitnessBlocker.WithinResolutionBand, band.Why);
-        Check("witness: exactly 2× resolution is still the band; one unit past it is a call",
-              DetectorModel.NeedsWitness(new(WitnessKind.PlacedActor, 0, 0, 240, WitnessBlocker.None, false), CL).Reason == WitnessBlocker.WithinResolutionBand
-           && DetectorModel.NeedsWitness(new(WitnessKind.PlacedActor, 0, 0, 241, WitnessBlocker.None, false), CL).Verdict == WitnessVerdict.Stranded,
+        Check("witness: W1 anchor at 1.2× clearance -> still the band",
+              DetectorModel.NeedsWitness(Lost(WitnessKind.PackageAnchor, 1.2f * CL), CL).Reason == WitnessBlocker.WithinResolutionBand, "144: band");
+        Check("witness: W3 targeted ref at 1.2× clearance -> still the band",
+              DetectorModel.NeedsWitness(Lost(WitnessKind.TargetedRef, 1.2f * CL), CL).Reason == WitnessBlocker.WithinResolutionBand, "144: band");
+        Check("witness: exactly 2× resolution is still the band for a walk target; one unit past it is a call",
+              DetectorModel.NeedsWitness(Lost(WitnessKind.PackageAnchor, 240), CL).Reason == WitnessBlocker.WithinResolutionBand
+           && DetectorModel.NeedsWitness(Lost(WitnessKind.PackageAnchor, 241), CL).Verdict == WitnessVerdict.Stranded,
               "240 -> band, 241 -> Stranded");
         Check("witness: the band applies to the disc margin, not the raw distance",
-              DetectorModel.NeedsWitness(new(WitnessKind.PackageAnchor, 100, 0, 300, WitnessBlocker.None, false), CL).Reason == WitnessBlocker.WithinResolutionBand,
+              DetectorModel.NeedsWitness(Lost(WitnessKind.PackageAnchor, 300, r: 100), CL).Reason == WitnessBlocker.WithinResolutionBand,
               "300 − 100 = 200: band");
+
+        // The band fold (2026-09-01 confirmer): a placed actor (W2) is NOT a walk target — one set
+        // down inside the band was displaced in game exactly like one well beyond it. For W2 the
+        // band collapses: Stranded from clearance up, no upper test; the floor stays inclusive and
+        // is the stated blind band; the victim direction only — the mirror is untouched.
+        var folded = DetectorModel.NeedsWitness(Lost(WitnessKind.PlacedActor, 1.2f * CL), CL);
+        Check("witness: W2 actor at 1.2× clearance -> STRANDED (the band fold), and its why names the in-game displacement",
+              folded.Verdict == WitnessVerdict.Stranded && folded.Reason == WitnessBlocker.None && folded.Why.Contains("displaced in game"), folded.Why);
+        Check("witness: W2 actor at exactly clearance -> Covered (the floor is inclusive; below it a placement is the blind band)",
+              DetectorModel.NeedsWitness(Lost(WitnessKind.PlacedActor, CL), CL).Verdict == WitnessVerdict.Covered, "120: Covered, not Stranded");
+        Check("witness: W2 actor at exactly 2× clearance -> STRANDED (no upper test for a placement)",
+              DetectorModel.NeedsWitness(Lost(WitnessKind.PlacedActor, 2f * CL), CL).Verdict == WitnessVerdict.Stranded, "240: Stranded");
+        var clear = DetectorModel.NeedsWitness(Lost(WitnessKind.PlacedActor, 3f * CL), CL);
+        Check("witness: W2 actor at 3× clearance -> STRANDED as before, why without the band-fold clause",
+              clear.Verdict == WitnessVerdict.Stranded && !clear.Why.Contains("displaced in game"), clear.Why);
+        var foldMirror = DetectorModel.NeedsWitness(new(WitnessKind.PlacedActor, 0, 1.2f * CL, 0, WitnessBlocker.None, false), CL);
+        Check("witness: W2 mirror at 1.2× clearance -> MIRROR, unchanged (the fold touches the victim direction only)",
+              foldMirror.Verdict == WitnessVerdict.Mirror, foldMirror.Why);
 
         // Unjudgeable by I/O reason — each counted, none cleared, and every one outranks the numbers.
         foreach (var (blocker, label) in new[] {
