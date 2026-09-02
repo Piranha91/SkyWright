@@ -31,6 +31,12 @@ using Mutagen.Bethesda.Skyrim;
 //
 // usage: navownprobe [--list N] [--plugin Name.esp] [--emit out.json] [--enable X.esp]
 //                    [--disable X.esp] [--door-idx] [--reach-candidates] [--reach-json out.json]
+//                    [--reach-top N] [--reach-witness]
+//
+//   --reach-witness  the needs-witness join (NeedsWitness.cs): for every record with victim-only
+//                    ground, find what the records say still needs it — package anchors, placed
+//                    actors, targeted markers — and judge each against both arms. Implies
+//                    --reach-candidates; extends --reach-json with a witnesses[] array per record.
 
 // Defaults are the live VR instance; --instance / --game / --profile point every path at
 // another MO2 layout — the SE conflict-testing lab's pre-flight runs exist so a finding is
@@ -60,6 +66,7 @@ string dataDir = Path.Combine(GamePath, "Data");
 
 bool reportDoorIdx = false;   // DOOR-IDX is retired; --door-idx brings it back
 bool reachCandidates = false;
+bool reachWitness = false;
 string? reachJsonPath = null;
 int reachTopN = 20;           // survivors exported per record per direction in --reach-json
 int listN = 25;
@@ -78,6 +85,7 @@ for (int i = 0; i < args.Length; i++)
     else if (args[i] == "--reach-candidates") reachCandidates = true;
     else if (args[i] == "--reach-json" && i + 1 < args.Length) { reachCandidates = true; reachJsonPath = args[++i]; }
     else if (args[i] == "--reach-top" && i + 1 < args.Length) reachTopN = int.Parse(args[++i]);
+    else if (args[i] == "--reach-witness") { reachCandidates = true; reachWitness = true; }
 }
 
 var sw = Stopwatch.StartNew();
@@ -377,20 +385,23 @@ if (reachCandidates)
         if (!gridCells.TryGetValue((sp.Wrld, sp.X, sp.Y), out var l)) gridCells[(sp.Wrld, sp.X, sp.Y)] = l = new List<FormKey>();
         l.Add(cell);
     }
-    List<FormKey> NearbyNavs(FormKey ofNav)
+    // The record's cell first, then (exteriors) its ±1 grid ring — the same neighbourhood for
+    // coverage and, in the witness join, for the actors and anchors that can stand on it.
+    List<FormKey> NearbyCells(FormKey cell)
     {
-        var cell = navCell[ofNav];
         var cells = new List<FormKey> { cell };
         if (cellSpace.TryGetValue(cell, out var sp) && !sp.Interior && sp.X != int.MinValue)
             for (int dx = -1; dx <= 1; dx++)
                 for (int dy = -1; dy <= 1; dy++)
                     if ((dx != 0 || dy != 0) && gridCells.TryGetValue((sp.Wrld, sp.X + dx, sp.Y + dy), out var nb))
                         cells.AddRange(nb);
-        return cells.Where(cellNavs.ContainsKey)
+        return cells;
+    }
+    List<FormKey> NearbyNavs(FormKey ofNav)
+        => NearbyCells(navCell[ofNav]).Where(cellNavs.ContainsKey)
                     .SelectMany(cl => cellNavs[cl])
                     .Where(n => n != ofNav)
                     .Distinct().ToList();
-    }
 
     var plan = new Dictionary<int, HashSet<FormKey>>();
     void Want(int plugin, FormKey nav)
@@ -428,10 +439,26 @@ if (reachCandidates)
         => (g.Vertices.Select(v => new System.Numerics.Vector3(v.X, v.Y, v.Z)).ToList(),
             g.Triangles.Select(t => ((int)t.A, (int)t.B, (int)t.C, t.Flags)).ToList());
 
+    // The needs-witness census: one more pass over every plugin, reading packages and NPC records
+    // from anywhere and placed references only in the pool's cells (+ring). Runs before the loop
+    // so the coverage sets are computed once and the join rides them.
+    NeedsWitnessJoin.Census? census = null;
+    if (reachWitness)
+    {
+        var wantedCells = pool.SelectMany(c => NearbyCells(navCell[c.Nav])).ToHashSet();
+        census = NeedsWitnessJoin.Build(paths, wantedCells);
+        Console.WriteLine($"   witness census: {census.RefsSeen:N0} placed refs in {wantedCells.Count:N0} cells (pool + ring), "
+                        + $"{census.Packs.Count:N0} packages, {census.NpcPackages.Count:N0} NPC records, {census.NpcPlacedAnywhere.Count:N0} placed somewhere"
+                        + (census.UnreadablePlugins > 0 ? $"; {census.UnreadablePlugins} plugins unreadable (counted per rule 6)" : "")
+                        + $"  ({sw.Elapsed.TotalSeconds:0.0}s)");
+    }
+
     int geomMissing = 0, recordsVictim = 0, recordsVictimWellClear = 0, recordsMirrorOnly = 0;
     int movedSubset = 0, movedSubsetWithLoss = 0;
     var perClass = new Dictionary<string, (int Records, int WithLoss)>();
     var jsonOut = new List<Dictionary<string, object?>>();
+    // Witness tallies, per record and per row, for the summary and the population split.
+    var witnessByRecord = new List<(FormKey Nav, string Class, WitnessReport Report)>();
     foreach (var c in pool)
     {
         var cls = ClobberClass(c);
@@ -493,9 +520,64 @@ if (reachCandidates)
                             + $"; best clearance {(float.IsPositiveInfinity(best.Clearance) ? "inf" : $"{best.Clearance:0}u")}"
                             + $" at ({best.Point.X:0}, {best.Point.Y:0}, {best.Point.Z:0})");
         }
+
+        // The needs-witness join for this record: everything the records say still needs the
+        // ground, measured against the same L / W / others sets, judged by DetectorModel.NeedsWitness.
+        WitnessReport? wit = null;
+        if (census is not null && (hasVictim || mirrorS.Count > 0))
+        {
+            var cellKey = navCell[c.Nav];
+            wit = NeedsWitnessJoin.Judge(census, cellKey, NearbyCells(cellKey), c.Winner, masterClosure,
+                                         L, W, others, ReachClearance, bk => baseType.GetValueOrDefault(bk));
+            witnessByRecord.Add((c.Nav, cls, wit));
+            int w1 = wit.Rows.Count(r => r.Kind == WitnessKind.PackageAnchor);
+            int w2 = wit.Rows.Count(r => r.Kind == WitnessKind.PlacedActor);
+            int w3 = wit.Rows.Count(r => r.Kind == WitnessKind.TargetedRef);
+            Console.WriteLine($"      witnesses on this record's ground: W1 {w1}, W2 {w2}, W3 {w3}"
+                            + $"   (actors in cell {wit.ActorsInCell}, on this ground {wit.ActorsOnGround}; anchors in other cells {wit.AnchorsElsewhere})"
+                            + $"   stranded {wit.Rows.Count(r => r.Verdict == WitnessVerdict.Stranded)}"
+                            + $", mirror {wit.Rows.Count(r => r.Verdict == WitnessVerdict.Mirror)}"
+                            + $", covered {wit.Rows.Count(r => r.Verdict == WitnessVerdict.Covered)}"
+                            + $", uncovered {wit.Rows.Count(r => r.Verdict == WitnessVerdict.Uncovered)}"
+                            + $", unjudgeable {wit.Rows.Count(r => r.Verdict == WitnessVerdict.Unjudgeable)}");
+            foreach (var r in wit.Rows.Where(r => r.Verdict is WitnessVerdict.Stranded or WitnessVerdict.Mirror
+                                               || r.Reason == WitnessBlocker.WithinResolutionBand || r.ElevatedStrand))
+                Console.WriteLine($"         {r.Verdict,-11} {r.Kind,-13} {r.Form} {r.Edid ?? ""}"
+                                + (r.Actor is not null ? $"  actor {r.Actor}" : "")
+                                + (r.Package is not null ? $"  pkg {r.Package}[{r.Slot}]" : "")
+                                + $"  {r.Arm}"
+                                + (r.Point is { } pt ? $" @({pt.X:0},{pt.Y:0},{pt.Z:0})" : "")
+                                + (r.Radius > 0 ? $" r={r.Radius:0}" : "")
+                                + $"  [{r.Source}] {r.Authorship}{(r.Governing ? " governing" : "")}{(r.ElevatedStrand ? " ELEVATED-ANCHOR(horizontal reading strands)" : "")}"
+                                + $" — {r.Why}");
+        }
         if (reachJsonPath is not null)
             jsonOut.Add(new Dictionary<string, object?>
             {
+                ["witnesses"] = wit?.Rows.Select(r => new
+                {
+                    kind = r.Kind.ToString(), form = r.Form.ToString(), edid = r.Edid, actor = r.Actor, package = r.Package,
+                    slot = r.Slot, arm = r.Arm, x = r.Point?.X, y = r.Point?.Y, z = r.Point?.Z, radius = r.Radius,
+                    dV = Num(r.DV), dW = Num(r.DW), hV = Num(r.HV), hW = Num(r.HW),
+                    verdict = r.Verdict.ToString(), reason = r.Reason.ToString(), authorship = r.Authorship.ToString(),
+                    why = r.Why, governing = r.Governing, state = r.State, source = r.Source, elevatedStrand = r.ElevatedStrand,
+                }).ToList(),
+                ["witnessCounts"] = wit is null ? null : new
+                {
+                    actorsInCell = wit.ActorsInCell, actorsOnGround = wit.ActorsOnGround, anchorsElsewhere = wit.AnchorsElsewhere,
+                    onLostGround = wit.AnyOnLostGround,
+                    w1 = wit.Rows.Count(r => r.Kind == WitnessKind.PackageAnchor),
+                    w2 = wit.Rows.Count(r => r.Kind == WitnessKind.PlacedActor),
+                    w3 = wit.Rows.Count(r => r.Kind == WitnessKind.TargetedRef),
+                    stranded = wit.Rows.Count(r => r.Verdict == WitnessVerdict.Stranded),
+                    strandedOversight = wit.Rows.Count(r => r.Verdict == WitnessVerdict.Stranded && r.Authorship == WitnessAuthorship.Oversight),
+                    mirror = wit.Rows.Count(r => r.Verdict == WitnessVerdict.Mirror),
+                    covered = wit.Rows.Count(r => r.Verdict == WitnessVerdict.Covered),
+                    uncovered = wit.Rows.Count(r => r.Verdict == WitnessVerdict.Uncovered),
+                    unjudgeable = wit.Rows.Where(r => r.Verdict == WitnessVerdict.Unjudgeable)
+                                          .GroupBy(r => r.Reason.ToString()).ToDictionary(g => g.Key, g => g.Count()),
+                    elevatedAnchors = wit.Rows.Count(r => r.ElevatedStrand),
+                },
                 ["nav"] = c.Nav.ToString(),
                 ["cell"] = Cell(navCell.GetValueOrDefault(c.Nav)),
                 ["loser"] = pluginKey[c.Loser].FileName.String,
@@ -524,20 +606,86 @@ if (reachCandidates)
     Console.WriteLine($"    invisible to this pass; and every candidate still needs the --nav-at confirmation and");
     Console.WriteLine($"    the in-game oracle's own controls before it becomes a finding)");
 
+    // ---- the needs-witness summary: what still needs the lost ground, and who knew ----
+    object? witnessSummary = null;
+    if (census is not null)
+    {
+        var rows = witnessByRecord.SelectMany(w => w.Report.Rows.Select(r => (w.Nav, w.Class, Row: r))).ToList();
+        int Rows(WitnessKind k, WitnessVerdict v) => rows.Count(x => x.Row.Kind == k && x.Row.Verdict == v);
+        var strandedRecords = witnessByRecord.Where(w => w.Report.Stranded.Any()).ToList();
+        var strandedOversightRecords = witnessByRecord.Where(w => w.Report.Stranded.Any(r => r.Authorship == WitnessAuthorship.Oversight)).ToList();
+        Console.WriteLine($"\n   ---- the needs-witness join (3.5.5's tail): what the records say still needs the lost ground ----");
+        Console.WriteLine($"   records judged {witnessByRecord.Count:N0}; carrying any W1/W2 witness on their own ground: "
+                        + $"{witnessByRecord.Count(w => w.Report.AnyWitness):N0}"
+                        + $"; with a witness on the LOST ground (Stranded or in-band): {witnessByRecord.Count(w => w.Report.AnyOnLostGround):N0}"
+                        + $"   (W3 apart: {witnessByRecord.Count(w => w.Report.Rows.Any(r => r.Kind == WitnessKind.TargetedRef)):N0} records)");
+        Console.WriteLine($"   package anchors placed in OTHER cells (another record's witness, not counted here): "
+                        + $"{witnessByRecord.Sum(w => w.Report.AnchorsElsewhere):N0}");
+        Console.WriteLine($"   {"witness rows",-14} {"stranded",9} {"mirror",7} {"covered",8} {"uncovered",10} {"unjudgeable",12}");
+        foreach (var k in new[] { WitnessKind.PackageAnchor, WitnessKind.PlacedActor, WitnessKind.TargetedRef })
+            Console.WriteLine($"   {(k == WitnessKind.PackageAnchor ? "W1 anchors" : k == WitnessKind.PlacedActor ? "W2 actors" : "W3 targeted"),-14}"
+                            + $" {Rows(k, WitnessVerdict.Stranded),9:N0} {Rows(k, WitnessVerdict.Mirror),7:N0} {Rows(k, WitnessVerdict.Covered),8:N0}"
+                            + $" {Rows(k, WitnessVerdict.Uncovered),10:N0} {Rows(k, WitnessVerdict.Unjudgeable),12:N0}");
+        Console.WriteLine($"   records with a STRANDED witness : {strandedRecords.Count:N0}"
+                        + $"   of which Oversight (the finding-shaped rows): {strandedOversightRecords.Count:N0}"
+                        + $"   Deliberate-only: {strandedRecords.Count - strandedOversightRecords.Count:N0}");
+        Console.WriteLine($"   stranded rows by authorship     : Oversight {rows.Count(x => x.Row.Verdict == WitnessVerdict.Stranded && x.Row.Authorship == WitnessAuthorship.Oversight):N0}"
+                        + $", Deliberate {rows.Count(x => x.Row.Verdict == WitnessVerdict.Stranded && x.Row.Authorship == WitnessAuthorship.Deliberate):N0}"
+                        + $"   (W1 governing-package rows among them: {rows.Count(x => x.Row.Verdict == WitnessVerdict.Stranded && x.Row.Governing):N0})");
+        Console.WriteLine($"   unjudgeable, by reason (counted, never cleared):");
+        foreach (var g in rows.Where(x => x.Row.Verdict == WitnessVerdict.Unjudgeable)
+                               .GroupBy(x => (x.Row.Reason, Arm: x.Row.Reason == WitnessBlocker.UnreadableAnchor ? x.Row.Arm : ""))
+                               .OrderByDescending(g => g.Count()))
+            Console.WriteLine($"   {g.Count(),6}  {g.Key.Reason}{(g.Key.Arm.Length > 0 ? $" ({g.Key.Arm} arm)" : "")}");
+        Console.WriteLine($"   elevated anchors (3-D Uncovered, horizontal reading would strand): {rows.Count(x => x.Row.ElevatedStrand):N0}");
+        Console.WriteLine($"   ---- by population (rule 12): records judged -> with a witness on their ground -> on the LOST ground -> Stranded -> Stranded+Oversight ----");
+        foreach (var g in witnessByRecord.GroupBy(w => w.Class).OrderBy(g => g.Key))
+            Console.WriteLine($"   {g.Count(),4} -> {g.Count(w => w.Report.AnyWitness),4} -> {g.Count(w => w.Report.AnyOnLostGround),4} -> {g.Count(w => w.Report.Stranded.Any()),4}"
+                            + $" -> {g.Count(w => w.Report.Stranded.Any(r => r.Authorship == WitnessAuthorship.Oversight)),4}  {g.Key}");
+        Console.WriteLine($"   (a Stranded+Oversight row is the records-side needs-witness — the in-game confirmer's candidate;");
+        Console.WriteLine($"    Stranded+Deliberate says the winner's side placed or kept the witness knowingly; connectivity,");
+        Console.WriteLine($"    which package runs when, and whether the actor ever loads are still not judged)");
+        witnessSummary = new
+        {
+            recordsJudged = witnessByRecord.Count,
+            recordsWithWitness = witnessByRecord.Count(w => w.Report.AnyWitness),
+            recordsWithWitnessOnLostGround = witnessByRecord.Count(w => w.Report.AnyOnLostGround),
+            anchorsInOtherCells = witnessByRecord.Sum(w => w.Report.AnchorsElsewhere),
+            recordsStranded = strandedRecords.Count,
+            recordsStrandedOversight = strandedOversightRecords.Count,
+            byClass = witnessByRecord.GroupBy(w => w.Class).ToDictionary(g => g.Key, g => new
+            {
+                records = g.Count(), withWitness = g.Count(w => w.Report.AnyWitness),
+                withWitnessOnLostGround = g.Count(w => w.Report.AnyOnLostGround),
+                stranded = g.Count(w => w.Report.Stranded.Any()),
+                strandedOversight = g.Count(w => w.Report.Stranded.Any(r => r.Authorship == WitnessAuthorship.Oversight)),
+            }),
+            rowsByKindAndVerdict = rows.GroupBy(x => x.Row.Kind.ToString()).ToDictionary(g => g.Key,
+                g => g.GroupBy(x => x.Row.Verdict.ToString()).ToDictionary(h => h.Key, h => h.Count())),
+            unjudgeableByReason = rows.Where(x => x.Row.Verdict == WitnessVerdict.Unjudgeable)
+                                      .GroupBy(x => x.Row.Reason.ToString()).ToDictionary(g => g.Key, g => g.Count()),
+            elevatedAnchors = rows.Count(x => x.Row.ElevatedStrand),
+        };
+    }
+
     if (reachJsonPath is not null)
     {
         File.WriteAllText(reachJsonPath, System.Text.Json.JsonSerializer.Serialize(new
         {
-            probe = "navownprobe --reach-candidates",
+            probe = census is null ? "navownprobe --reach-candidates" : "navownprobe --reach-witness",
             instance = Instance,
             clearance = ReachClearance,
             spacing = ReachSpacing,
             generated = DateTime.UtcNow.ToString("yyyy-MM-dd HH:mm:ssZ"),
+            witnessSummary,
             records = jsonOut,
         }, new System.Text.Json.JsonSerializerOptions { WriteIndented = true }));
         Console.WriteLine($"   candidate worklist -> {reachJsonPath}");
     }
 }
+
+// JSON cannot carry NaN or infinity; null means "no number" and the string means unbounded.
+static object? Num(float f) => float.IsNaN(f) ? null : float.IsPositiveInfinity(f) ? "inf" : f;
 
 // ---------------------------------------------------------------------------------------
 // DELETED / EMPTIED — the hard break.

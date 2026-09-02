@@ -402,6 +402,111 @@ public static class DetectorModel
          : description is null ? IntentCorroboration.NoDescription
          : IntentCorroboration.DescriptionOnFile;
 
+    /// <summary>One needs-witness, as the reachability join hands it to the rule (3.5.5's named
+    /// tail). A witness is a records-side fact that an actor is meant to be on a specific point:
+    /// a package location slot (W1, with its radius), a placed actor (W2), or a marker/furniture
+    /// a package targets (W3). The caller has already found the witness, resolved its anchor, and
+    /// measured it — everything here is a fact, and the DECISION is <see cref="NeedsWitness"/>.</summary>
+    /// <param name="Radius">the slot's radius (0 for W2/W3): the package sends the actor somewhere
+    /// within it, so the disc, not the point, is what must have ground.</param>
+    /// <param name="DV">3-D distance from the witness point to the VICTIM arm's effective coverage
+    /// (the loser's version of the record plus every other winning mesh nearby). NaN when the
+    /// geometry could not be extracted.</param>
+    /// <param name="DW">the same against the WINNER arm's effective coverage.</param>
+    /// <param name="Blocker">an I/O reason the witness cannot be judged at all — an anchor arm this
+    /// order cannot place, a templated or leveled actor whose packages are unreadable, a package
+    /// record missing from the order. None when the numbers are meaningful.</param>
+    /// <param name="WinnerSideTouched">the witness's own winning record (the ACHR, or the anchor
+    /// REFR) is authored or overridden by the winner plugin or by a plugin that masters the winner
+    /// — the winner's side demonstrably knew about it.</param>
+    public readonly record struct WitnessFacts(
+        WitnessKind Kind, float Radius, float DV, float DW, WitnessBlocker Blocker, bool WinnerSideTouched);
+
+    /// <summary>What turns "coverage lost" into "something is broken", records-only. The 3.5.5
+    /// in-game result showed coverage loss alone is not a finding — Bethesda ships the same shape,
+    /// and a winner deleting ground under its new architecture is doing its job. A finding needs
+    /// a witness that still NEEDS the lost ground.
+    ///
+    /// <para>The rule, per witness point with radius r: <b>Stranded</b> iff the point had ground
+    /// in the victim arm (<c>DV ≤ clearance</c> — the point itself, not the disc) and the disc has
+    /// none in the winner arm (<c>DW − r &gt; clearance</c>). The <c>− r</c> is deliberate: a wide
+    /// sandbox radius that still overlaps winner coverage can put the actor on usable ground. A
+    /// margin inside (clearance, 2×clearance] is within the oracle's own resolution and is
+    /// reported as <b>Unjudgeable</b> (counted, never cleared), not called. The <b>Mirror</b> —
+    /// winner-only ground with a witness — is the symmetric case, reported as the mirror and never
+    /// as a finding. Ground both arms cover is <b>Covered</b>; ground neither covers (the vanilla
+    /// cave shape) is <b>Uncovered</b> — nothing either way.</para>
+    ///
+    /// <para>Authorship rides on a separate axis, from the intent work: a witness the winner's side
+    /// authored or overrode was moved or kept on purpose (<b>Deliberate</b> — HearthFires placing
+    /// its own homestead actors on its own mesh); one untouched by that side (vanilla, USSEP, the
+    /// victim's own placement) is an <b>Oversight</b> — a city overhaul reverting USSEP's navmesh
+    /// under a vanilla guard's patrol marker. "The winner's side" is the winner and anything
+    /// downstream of it (a plugin that masters the winner saw its mesh); a plugin UPSTREAM of the
+    /// winner did not, which is why Skyrim.esm placing the guard reads as untouched even though
+    /// every mod masters Skyrim.esm.</para>
+    ///
+    /// <para>Deliberately NOT judged: connectivity (the point may be covered and still an island),
+    /// which package is running at a given hour, and whether the actor is ever actually loaded.</para></summary>
+    public static (WitnessVerdict Verdict, WitnessBlocker Reason, WitnessAuthorship Authorship, string Why)
+        NeedsWitness(WitnessFacts f, float clearance)
+    {
+        var authorship = f.WinnerSideTouched ? WitnessAuthorship.Deliberate : WitnessAuthorship.Oversight;
+        if (f.Blocker != WitnessBlocker.None)
+            return (WitnessVerdict.Unjudgeable, f.Blocker, authorship, f.Blocker switch
+            {
+                WitnessBlocker.UnreadableAnchor => "the anchor arm has no position this order can read",
+                WitnessBlocker.Templated => "the actor inherits its packages from a template",
+                WitnessBlocker.LeveledBase => "the actor is placed from a leveled base — its packages resolve at run time",
+                WitnessBlocker.PackageMissing => "a package record is not in the load order",
+                _ => "unjudgeable",
+            });
+        if (float.IsNaN(f.DV) || float.IsNaN(f.DW))
+            return (WitnessVerdict.Unjudgeable, WitnessBlocker.GeometryMissing, authorship, "the cell's geometry failed to extract");
+
+        float marginW = f.DW - f.Radius;     // how far the disc still is from winner-arm coverage
+        float marginV = f.DV - f.Radius;
+        string nums = $"victim {Fmt(f.DV)}, winner {Fmt(f.DW)}" + (f.Radius > 0 ? $" − r {f.Radius:0} = {Fmt(marginW)}" : "");
+        if (f.DV <= clearance && marginW > clearance)
+        {
+            if (marginW <= 2f * clearance)
+                return (WitnessVerdict.Unjudgeable, WitnessBlocker.WithinResolutionBand, authorship,
+                        $"{nums}: lost, but inside 2× the {clearance:0}u resolution — reported, not called");
+            return (WitnessVerdict.Stranded, WitnessBlocker.None, authorship,
+                    $"{nums}: ground under the witness before the winner, none after ({authorship})");
+        }
+        if (f.DW <= clearance && marginV > clearance)
+            return (WitnessVerdict.Mirror, WitnessBlocker.None, authorship, $"{nums}: winner-only ground under a witness — the mirror, not a finding");
+        if (marginV <= clearance && marginW <= clearance)
+            return (WitnessVerdict.Covered, WitnessBlocker.None, authorship, $"{nums}: both arms offer ground");
+        return (WitnessVerdict.Uncovered, WitnessBlocker.None, authorship, $"{nums}: neither arm offers ground — not this record's doing");
+
+        static string Fmt(float d) => float.IsPositiveInfinity(d) ? "inf" : $"{d:0}u";
+    }
+
+    /// <summary>The HORIZONTAL distance from a point to a mesh's coverage — the mesh's triangles
+    /// projected onto the ground plane. Not the frozen measure (<see cref="NeedsWitness"/> takes
+    /// the 3-D <see cref="DistanceToCoverage"/>), but the reading the join reports beside it: a
+    /// package anchor can sit hundreds of units ABOVE the floor its actor sandboxes on (the temple
+    /// marker 328 u over the priests' heads), and a 3-D measure reads such an anchor as ground
+    /// neither arm covers. A witness the 3-D rule calls Uncovered and the horizontal reading
+    /// would strand is counted as an elevated anchor, never silently cleared.</summary>
+    public static float DistanceToCoverageXY(Vector3 p, IReadOnlyList<Vector3> verts,
+        IReadOnlyList<(int A, int B, int C, int Flags)> tris)
+    {
+        var q = new Vector3(p.X, p.Y, 0);
+        float best = float.PositiveInfinity;
+        foreach (var t in tris)
+        {
+            if (!CoverageTriangle(t, verts, out var a, out var b, out var c)) continue;
+            Vector3 fa = new(a.X, a.Y, 0), fb = new(b.X, b.Y, 0), fc = new(c.X, c.Y, 0);
+            if (Vector3.Cross(fb - fa, fc - fa).LengthSquared() <= 1e-6f) continue;   // vertical in XY: a line, not floor
+            float d = (q - ClosestOnTriangle(q, fa, fb, fc)).Length();
+            if (d < best) best = d;
+        }
+        return best;
+    }
+
     /// <summary>The record-level verify verdict. CONFIRMED means every necessary record is
     /// overridden — which is COVERAGE, not repair: content and load-order position are not judged
     /// here, and the differential run exists precisely because a CONFIRMED patch can net to zero.</summary>
@@ -429,3 +534,20 @@ public enum IntentVerdict { Deliberate, Oversight, OversightScopeMismatch }
 /// <summary>Whether the author's stated purpose (meta.ini nexusDescription) is available to
 /// corroborate a verdict. The two unavailable arms are counted, never treated as evidence.</summary>
 public enum IntentCorroboration { DescriptionOnFile, NoDescription, NoMetaIni }
+
+/// <summary>The three witness sources, strongest first. Counted separately — W3 is partial and
+/// mostly W1 by another route, so it is never merged into W1.</summary>
+public enum WitnessKind { PackageAnchor, PlacedActor, TargetedRef }
+
+/// <summary>What <see cref="DetectorModel.NeedsWitness"/> makes of one witness. Stranded is the
+/// finding-shaped verdict; Mirror is its symmetric non-finding; Covered and Uncovered are nothing;
+/// Unjudgeable is counted by its <see cref="WitnessBlocker"/> and never cleared.</summary>
+public enum WitnessVerdict { Stranded, Mirror, Covered, Uncovered, Unjudgeable }
+
+/// <summary>Why a witness could not be called. The first four are I/O facts the driver supplies;
+/// the last two the rule finds in the numbers.</summary>
+public enum WitnessBlocker { None, UnreadableAnchor, Templated, LeveledBase, PackageMissing, GeometryMissing, WithinResolutionBand }
+
+/// <summary>Did the winner's side know about the witness? Deliberate is informational; Oversight
+/// on a Stranded witness is the finding.</summary>
+public enum WitnessAuthorship { Deliberate, Oversight }

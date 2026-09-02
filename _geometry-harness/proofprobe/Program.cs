@@ -597,6 +597,127 @@ Console.WriteLine("\nPROOF — the detector cores (_shared/DetectorModel.cs)\n")
               float.IsPositiveInfinity(DetectorModel.DistanceToCoverage(new(50, 10, 0), degenV,
                   new List<(int, int, int, int)> { (0, 1, 99, 0) })), "garbage contributes nothing");
     }
+
+    // NeedsWitness — 3.5.5's named tail. Coverage loss alone is not a finding (Bethesda ships
+    // the shape; a winner deleting ground under new architecture is doing its job); a finding
+    // needs a records-side witness that still needs the lost ground. Each case is a witness whose
+    // right answer is known by construction, measured against the SAME meshes the selector cases
+    // use above, so the numbers the rule sees are real point-to-mesh distances, not typed in.
+    {
+        List<(int A, int B, int C, int Flags)> Quad(List<System.Numerics.Vector3> verts,
+            float x0, float y0, float x1, float y1, int flags = 0,
+            List<(int A, int B, int C, int Flags)>? into = null)
+        {
+            int b = verts.Count;
+            verts.Add(new(x0, y0, 0)); verts.Add(new(x1, y0, 0));
+            verts.Add(new(x1, y1, 0)); verts.Add(new(x0, y1, 0));
+            var tris = into ?? new List<(int, int, int, int)>();
+            tris.Add((b, b + 1, b + 2, flags));
+            tris.Add((b, b + 2, b + 3, flags));
+            return tris;
+        }
+        const float CL = 120f;
+        // The victim's mesh: a base quad plus an island 744 u east of it. The winner's: the base
+        // quad alone — the island is the ground the winner lost.
+        var victimV = new List<System.Numerics.Vector3>();
+        var victimT = Quad(victimV, 0, 0, 256, 256);
+        Quad(victimV, 1000, 0, 1256, 256, 0, victimT);
+        var winnerV = new List<System.Numerics.Vector3>();
+        var winnerT = Quad(winnerV, 0, 0, 256, 256);
+        float DV(System.Numerics.Vector3 p) => DetectorModel.DistanceToCoverage(p, victimV, victimT);
+        float DW(System.Numerics.Vector3 p) => DetectorModel.DistanceToCoverage(p, winnerV, winnerT);
+        DetectorModel.WitnessFacts At(System.Numerics.Vector3 p, float r = 0, bool touched = false,
+                                      WitnessBlocker blocker = WitnessBlocker.None,
+                                      WitnessKind kind = WitnessKind.PackageAnchor)
+            => new(kind, r, DV(p), DW(p), blocker, touched);
+        var onIsland = new System.Numerics.Vector3(1128, 128, 0);
+        var onBase = new System.Numerics.Vector3(128, 128, 0);
+        var nowhere = new System.Numerics.Vector3(5000, 5000, 0);
+
+        // The island's centre is 872 u from the base quad's nearest edge (744 u edge to edge,
+        // plus 128 u into the island) — measured through the same function the driver uses.
+        var stranded = DetectorModel.NeedsWitness(At(onIsland), CL);
+        Check("witness: anchor on the removed island -> STRANDED, victim 0u, winner 872u",
+              stranded.Verdict == WitnessVerdict.Stranded && DV(onIsland) < 0.01f && MathF.Abs(DW(onIsland) - 872f) < 0.01f,
+              stranded.Why);
+        Check("witness: the same anchor with a radius reaching surviving coverage is NOT stranded (the − r)",
+              DetectorModel.NeedsWitness(At(onIsland, r: 800), CL).Verdict == WitnessVerdict.Covered,
+              "872 − 800 = 72u ≤ 120: the sandbox disc overlaps winner ground");
+        Check("witness: a radius that still leaves the disc beyond clearance stays STRANDED",
+              DetectorModel.NeedsWitness(At(onIsland, r: 400), CL).Verdict == WitnessVerdict.Stranded,
+              "872 − 400 = 472u > 240");
+        Check("witness: anchor on ground both arms cover -> nothing (Covered)",
+              DetectorModel.NeedsWitness(At(onBase), CL).Verdict == WitnessVerdict.Covered, "the base quad is in both arms");
+        Check("witness: anchor on ground neither arm covers -> nothing (Uncovered) — the vanilla-cave shape",
+              DetectorModel.NeedsWitness(At(nowhere), CL).Verdict == WitnessVerdict.Uncovered,
+              "dV > clearance too: not this record's doing");
+        // The victim condition is the POINT, not the disc: an anchor hanging off victim coverage
+        // by more than clearance had no ground under it before either, whatever its radius.
+        var offVictim = new System.Numerics.Vector3(1128, 456, 0);   // 200u north of the island's edge
+        Check("witness: dV is judged at the point — a radius does not manufacture victim ground",
+              MathF.Abs(DV(offVictim) - 200f) < 0.01f
+           && DetectorModel.NeedsWitness(At(offVictim, r: 300), CL).Verdict == WitnessVerdict.Uncovered,
+              "200u off the island with r=300: Uncovered, never Stranded");
+
+        // The resolution band: a W2 actor whose lost margin is inside (120, 240] is reported, not called.
+        var band = DetectorModel.NeedsWitness(new(WitnessKind.PlacedActor, 0, 0, 200, WitnessBlocker.None, false), CL);
+        Check("witness: W2 actor in the (120, 240] band -> UNJUDGEABLE, counted by reason",
+              band.Verdict == WitnessVerdict.Unjudgeable && band.Reason == WitnessBlocker.WithinResolutionBand, band.Why);
+        Check("witness: exactly 2× resolution is still the band; one unit past it is a call",
+              DetectorModel.NeedsWitness(new(WitnessKind.PlacedActor, 0, 0, 240, WitnessBlocker.None, false), CL).Reason == WitnessBlocker.WithinResolutionBand
+           && DetectorModel.NeedsWitness(new(WitnessKind.PlacedActor, 0, 0, 241, WitnessBlocker.None, false), CL).Verdict == WitnessVerdict.Stranded,
+              "240 -> band, 241 -> Stranded");
+        Check("witness: the band applies to the disc margin, not the raw distance",
+              DetectorModel.NeedsWitness(new(WitnessKind.PackageAnchor, 100, 0, 300, WitnessBlocker.None, false), CL).Reason == WitnessBlocker.WithinResolutionBand,
+              "300 − 100 = 200: band");
+
+        // Unjudgeable by I/O reason — each counted, none cleared, and every one outranks the numbers.
+        foreach (var (blocker, label) in new[] {
+            (WitnessBlocker.UnreadableAnchor, "alias/cell/keyword/object-type/player arm"),
+            (WitnessBlocker.Templated, "templated NPC"),
+            (WitnessBlocker.LeveledBase, "leveled-base actor"),
+            (WitnessBlocker.PackageMissing, "package record missing") })
+        {
+            var blocked = DetectorModel.NeedsWitness(At(onIsland, blocker: blocker), CL);
+            Check($"witness: {label} -> UNJUDGEABLE even on stranded numbers",
+                  blocked.Verdict == WitnessVerdict.Unjudgeable && blocked.Reason == blocker, blocked.Why);
+        }
+        var noGeom = DetectorModel.NeedsWitness(new(WitnessKind.PlacedActor, 0, float.NaN, float.NaN, WitnessBlocker.None, false), CL);
+        Check("witness: geometry that failed to extract -> UNJUDGEABLE (GeometryMissing)",
+              noGeom.Verdict == WitnessVerdict.Unjudgeable && noGeom.Reason == WitnessBlocker.GeometryMissing, noGeom.Why);
+        Check("witness: an emptied winner arm strands with infinite margin",
+              DetectorModel.NeedsWitness(new(WitnessKind.PlacedActor, 0, 0, float.PositiveInfinity, WitnessBlocker.None, false), CL).Verdict == WitnessVerdict.Stranded,
+              "inf − r is still inf");
+
+        // The authorship split: identical geometry, the only difference is who touched the witness.
+        Check("witness: identical geometry, witness overridden by the winner's side -> DELIBERATE",
+              DetectorModel.NeedsWitness(At(onIsland, touched: true), CL) is { Verdict: WitnessVerdict.Stranded, Authorship: WitnessAuthorship.Deliberate },
+              "HearthFires placing its own homestead actors");
+        Check("witness: identical geometry, witness untouched by the winner's side -> OVERSIGHT",
+              DetectorModel.NeedsWitness(At(onIsland, touched: false), CL) is { Verdict: WitnessVerdict.Stranded, Authorship: WitnessAuthorship.Oversight },
+              "a city overhaul reverting USSEP's mesh under a vanilla guard's marker");
+
+        // The mirror direction: winner-only ground with a witness exists, reports as the mirror,
+        // and is never a finding. Same meshes, arms swapped.
+        var mirror = DetectorModel.NeedsWitness(new(WitnessKind.PlacedActor, 0, DW(onIsland), DV(onIsland), WitnessBlocker.None, false), CL);
+        Check("witness: winner-only ground under a witness -> MIRROR, never Stranded",
+              mirror.Verdict == WitnessVerdict.Mirror, mirror.Why);
+
+        // The horizontal reading beside the frozen 3-D one: the temple shape — an anchor 328 u
+        // above the floor reads 328 in 3-D and 0 horizontally; beyond an edge both agree.
+        var elevated = new System.Numerics.Vector3(128, 128, 328);
+        Check("witness: horizontal distance ignores an anchor's height above the floor (the 328u marker)",
+              MathF.Abs(DetectorModel.DistanceToCoverage(elevated, winnerV, winnerT) - 328f) < 0.01f
+           && DetectorModel.DistanceToCoverageXY(elevated, winnerV, winnerT) < 0.01f,
+              "3-D 328u, horizontal 0u");
+        Check("witness: horizontal distance beyond an edge is the edge distance",
+              MathF.Abs(DetectorModel.DistanceToCoverageXY(new(300, 128, 500), winnerV, winnerT) - 44f) < 0.01f,
+              "300 − 256, height irrelevant");
+        var wallV = new List<System.Numerics.Vector3> { new(0, 0, 0), new(256, 0, 0), new(256, 0, 256) };
+        Check("witness: a vertical triangle is not floor to the horizontal reading",
+              float.IsPositiveInfinity(DetectorModel.DistanceToCoverageXY(new(128, 10, 0), wallV,
+                  new List<(int, int, int, int)> { (0, 1, 2, 0) })), "zero XY area");
+    }
 }
 
 // ---------------------------------------------------------------------------------------

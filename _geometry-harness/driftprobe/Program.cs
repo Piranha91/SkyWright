@@ -868,55 +868,9 @@ record Split(string Quest, string QuestPlugin, string? Alias1, string? Alias2, s
              // occupied/occupies — authoring cell FIRST (its interior flag feeds scope mismatch).
              IReadOnlyList<int> MoverIdxList, IReadOnlyList<FormKey> AffectedCells);
 
-/// <summary>One package's POSITIONAL facts, flattened off the overlay (which is disposed with its
-/// plugin). A package positions an actor through its location slots — a bag keyed by slot id whose
-/// LocationTargetRadius carries a target arm and a radius. The arm is the discriminator this whole
-/// filter turns on: LocationFallback with Type NearEditorLocation means "wherever this actor was
-/// PLACED, plus radius"; every other arm means somewhere else entirely (a named reference, a cell,
-/// a keyword, an object type — including the player, who moves).</summary>
-sealed record PackFacts(string? Edid, FormKey Template, int ScheduleHour, int ScheduleMinutes,
-                        int Conditions, IReadOnlyList<(string Arm, uint Radius, FormKey Link)> Locations)
-{
-    public bool Scheduled => ScheduleHour >= 0;
-    public IEnumerable<uint> EditorRadii => Locations.Where(l => l.Arm == EditorArm).Select(l => l.Radius);
-    public bool AnchorsElsewhere => Locations.Any(l => l.Arm != EditorArm && l.Arm != SelfArm);
-    public const string EditorArm = "editor-location";
-    public const string SelfArm = "where-it-stands";
-    public const string RefArm = "reference";
-
-    public static PackFacts From(IPackageGetter pk)
-    {
-        var locs = new List<(string, uint, FormKey)>();
-        foreach (var d in pk.Data.Values.OfType<IPackageDataLocationGetter>())
-        {
-            if (d.Location is not { } ltr || ltr.Target is not { } tgt) continue;
-            locs.Add((tgt switch
-            {
-                // NearSelf and NearPackageStart do not RELOCATE an actor — they keep it where it
-                // already is — so for "does the placement predict position" they read the same as
-                // the editor location. Every other fallback type names something else entirely.
-                ILocationFallbackGetter f => f.Type switch
-                {
-                    LocationTargetRadius.LocationType.NearEditorLocation => EditorArm,
-                    LocationTargetRadius.LocationType.NearSelf => SelfArm,
-                    LocationTargetRadius.LocationType.NearPackageStart => SelfArm,
-                    _ => "fallback:" + f.Type,
-                },
-                ILocationTargetGetter => RefArm,
-                ILocationCellGetter => "cell",
-                ILocationKeywordGetter => "keyword",
-                ILocationObjectIdGetter => "object-id",
-                ILocationObjectTypeGetter => "object-type",
-                _ => "arm:" + tgt.GetType().Name.Replace("BinaryOverlay", ""),
-            }, ltr.Radius, tgt is ILocationTargetGetter lt ? lt.Link.FormKey
-                         : tgt is ILocationCellGetter lc ? lc.Link.FormKey
-                         : tgt is ILocationKeywordGetter lk ? lk.Link.FormKey
-                         : tgt is ILocationObjectIdGetter lo ? lo.Link.FormKey : FormKey.Null));
-        }
-        return new PackFacts(pk.EditorID, pk.PackageTemplate.FormKey, pk.ScheduleHour,
-                             pk.ScheduleDurationInMinutes, pk.Conditions.Count, locs);
-    }
-}
+// PackFacts — the package location-slot extraction — moved to _shared/PackFacts.cs (2026-09-02),
+// shared with navownprobe's needs-witness join. AnchorOf above stays here: it is bound to this
+// probe's placement history and aggregates per package, which the join does not want.
 
 sealed record AliasInfo(int Id, string? Name, string Arm, FormKey? Forced, FormKey? UniqueNpc, FormKey[] Packages);
 sealed record ObjectiveInfo(string? Text, int[] TargetAliasIds);
