@@ -97,8 +97,10 @@ Console.WriteLine($"load order: {paths.Count} plugins ({sw.ElapsedMilliseconds} 
 // ---------------------------------------------------------------------------------------
 // Cell travels WITH the position. Two interiors have independent coordinate origins, so a
 // distance between them is a meaningless number — the first run of this reported 125,000-unit
-// "moves" that were simply a relocation into another cell.
-var history = new Dictionary<FormKey, List<Snap>>();
+// "moves" that were simply a relocation into another cell. The history itself — snaps, the
+// changed-only rule, the authoring view — lives in _shared/PlacementHistory.cs since 2026-09-01,
+// shared with depprobe's placement-dependency pass.
+var history = new PlacementHistory();
 var refBase = new Dictionary<FormKey, FormKey>();
 var npcPlaced = new Dictionary<FormKey, List<FormKey>>();   // Npc base -> its placed references
 var baseName = new Dictionary<FormKey, (string Type, string? Edid)>();
@@ -161,11 +163,9 @@ for (int p = 0; p < paths.Count; p++)
                 placements++;
                 if (!cellEdits.TryGetValue(p, out var ce)) cellEdits[p] = ce = new Dictionary<FormKey, int>();
                 ce[cp.Cell] = ce.GetValueOrDefault(cp.Cell) + 1;
-                var snap = new Snap(p, r.Position, cp.Cell, r.InitiallyDisabled, r.Deleted);
-                if (!history.TryGetValue(r.FormKey, out var h)) history[r.FormKey] = h = new List<Snap>(1);
                 // Record only a plugin that actually CHANGED something. An override that leaves the
                 // placement alone is not a step in the story and would swamp the history.
-                if (h.Count == 0 || !h[^1].SameAs(snap)) h.Add(snap);
+                history.Record(r.FormKey, new Snap(p, r.Position, cp.Cell, r.InitiallyDisabled, r.Deleted, cp.Worldspace));
 
                 if (r.Base is { } bk)
                 {
@@ -348,14 +348,8 @@ if (actorDump is not null)
 // ---------------------------------------------------------------------------------------
 // Resolution helpers
 // ---------------------------------------------------------------------------------------
-Snap? AsSeenBy(FormKey refKey, int byPlugin)
-{
-    if (!history.TryGetValue(refKey, out var h)) return null;
-    for (int i = h.Count - 1; i >= 0; i--)
-        if (h[i].Plugin == byPlugin || masterClosure[byPlugin].Contains(h[i].Plugin)) return h[i];
-    return null;
-}
-Snap? Winning(FormKey refKey) => history.TryGetValue(refKey, out var h) && h.Count > 0 ? h[^1] : null;
+Snap? AsSeenBy(FormKey refKey, int byPlugin) => history.AsSeenBy(refKey, byPlugin, masterClosure);
+Snap? Winning(FormKey refKey) => history.Winning(refKey);
 
 // An alias points at a thing that HAS a position only for some arms. UniqueActor names an NPC
 // record, not a placement, so it is resolved through the placed-reference index — and only when
@@ -768,14 +762,17 @@ if (generic)
     // overrides a Skyrim.esm reference necessarily masters Skyrim.esm.
     long changed = 0, relocated = 0, movedFar = 0;
     var moverPairs = new Dictionary<string, int>();
-    foreach (var (_, h) in history)
+    foreach (var (_, h) in history.Refs)
     {
         if (h.Count < 2) continue;
         changed++;
         var first = h[0]; var last = h[^1];
-        if (first.Cell != last.Cell) relocated++;
-        else if (Dist(first.Pos, last.Pos) <= 16f) continue;
-        else movedFar++;
+        switch (PlacementHistory.Classify(first, last))
+        {
+            case Movement.Relocated: relocated++; break;
+            case Movement.MovedFar: movedFar++; break;
+            default: continue;
+        }
         if (last.Plugin != first.Plugin)
             Bump(moverPairs, $"{pluginKey[first.Plugin].FileName}  -> moved by ->  {pluginKey[last.Plugin].FileName}");
     }
@@ -845,14 +842,6 @@ static float Dist(Vec3 a, Vec3 b)
 {
     float dx = a.X - b.X, dy = a.Y - b.Y, dz = a.Z - b.Z;
     return MathF.Sqrt(dx * dx + dy * dy + dz * dz);
-}
-
-readonly record struct Snap(int Plugin, Vec3 Pos, FormKey Cell, bool Disabled, bool Deleted)
-{
-    public bool SameAs(Snap o) => Cell == o.Cell && Disabled == o.Disabled && Deleted == o.Deleted
-                               && MathF.Abs(Pos.X - o.Pos.X) < 0.01f
-                               && MathF.Abs(Pos.Y - o.Pos.Y) < 0.01f
-                               && MathF.Abs(Pos.Z - o.Pos.Z) < 0.01f;
 }
 
 record Split(string Quest, string QuestPlugin, string? Alias1, string? Alias2, string Name1, string Name2,
