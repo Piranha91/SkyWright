@@ -525,6 +525,135 @@ public static class DetectorModel
         return best;
     }
 
+    /// <summary>One declared host edge as the placement-dependency join hands it to the rule (roadmap 4.5/4.6,
+    /// the records layer). A dependent reference D names a host R through an enable parent (XESP), a linked
+    /// reference (XLKR) or an activate parent (XAPR). The edge has an AUTHOR — the last plugin to set it — and
+    /// positions have two views: the author's (the last position the author or one of its masters contributed,
+    /// per PlacementHistory) and the winner's. The caller (DependencyIndex.Judge) has resolved both; everything
+    /// here is a fact, and the DECISION is <see cref="PlacementDependency"/>.</summary>
+    /// <param name="HostIsPlayer">the host is the player reference (ID 0x14) — an enable parent of the player
+    /// with the opposite flag is the standard "permanently disabled" idiom, and the player has no placement.</param>
+    /// <param name="HostResolved">the host has a placement, or a deletion, somewhere in this order.</param>
+    /// <param name="HostDeleted">the winning record of the host carries the Deleted flag.</param>
+    /// <param name="HostDisabled">the host is initially disabled in the author's view or the winner's.</param>
+    /// <param name="SameSpaceAtAuthoring">host and dependent shared a SPACE in the author's view — the cell for
+    /// an interior, the worldspace for an exterior. The cell alone is the wrong test outdoors: a persistent
+    /// exterior reference lives in the worldspace's persistent cell whatever its coordinates, so a persistent
+    /// host and a temporary dependent standing side by side would read as different cells.</param>
+    /// <param name="HostChangedSpace">the host's winning space differs from the author's view (it changed
+    /// interior cell, or worldspace). A move between exterior grid cells is a distance, not a space change.</param>
+    /// <param name="HostMoved">distance from the host's authoring-view position to its winning one; NaN when
+    /// either view is missing.</param>
+    /// <param name="DependentDeleted">the winning record of the dependent carries the Deleted flag.</param>
+    /// <param name="DependentRePlaced">the dependent's winning placement differs from the author's view.</param>
+    /// <param name="DependentRePlacedByMoverSide">…and it was set by the host's mover or a plugin downstream of it.</param>
+    /// <param name="Host">what the host is: something to rest on or hang from, a marker, or something else.</param>
+    public readonly record struct DependencyFacts(
+        HostEdgeKind Kind, bool HostIsPlayer, bool HostResolved, bool HostDeleted, bool HostDisabled,
+        bool SameSpaceAtAuthoring, bool HostChangedSpace, float HostMoved,
+        bool DependentDeleted, bool DependentRePlaced, bool DependentRePlacedByMoverSide, HostClass Host);
+
+    /// <summary>The placement-dependency rule, records-only (frozen 2026-09-01 from the handoff of 2026-09-03).
+    /// Piranha's two classes — apples left in the air when the table moves (stranded support), a sconce left
+    /// on the old wall line when the wall moves (orphaned attachment) — are contact facts no record declares, so
+    /// most of both is geometry. This rule covers the minority of refs that DECLARE a host, and it is
+    /// differential: nothing here says anything floats, only that a declared arrangement changed under one
+    /// side without the other side following.
+    ///
+    /// <para>Per edge, in order: a host that is the player, or that this order cannot place, or has deleted, or
+    /// whose authoring view is missing, is <b>Unjudgeable</b> by that reason. A host that stayed within <paramref name="threshold"/>
+    /// of its authoring-view position in the same space leaves the edge <b>Intact</b>. A moved host that is
+    /// initially disabled, or that was in a different space from its dependent when the edge was authored, is
+    /// a toggle relationship, not a physical one — <b>Unjudgeable</b>, counted. A deleted dependent leaves
+    /// nothing behind (<b>DependentRemoved</b>). A dependent re-placed by the mover or a plugin downstream of
+    /// it is <b>MovedTogether</b> WHATEVER the new offset — a deliberate re-arrangement is not a defect; one
+    /// re-placed by an unrelated third plugin is <b>Unjudgeable</b>, nobody's fault this pass can name.
+    /// Otherwise the dependent stayed where the author put it while its host moved: <b>LeftBehind</b>. The
+    /// host class rides on the facts for the caller to split by — a marker or toggle host is an enable
+    /// relationship and is never counted with 4.5/4.6.</para>
+    ///
+    /// <para>Deliberately NOT judged: whether anything rests on anything (no mesh is read), rotation-only
+    /// moves (PlacementHistory records position and cell), and which of two moves of the same host mattered.</para></summary>
+    public static (DependencyVerdict Verdict, DependencyBlocker Reason, string Why) PlacementDependency(DependencyFacts f, float threshold)
+    {
+        if (f.HostIsPlayer)
+            return (DependencyVerdict.Unjudgeable, DependencyBlocker.HostIsPlayer, "the host is the player reference — the permanently-disabled idiom, not a placement");
+        if (!f.HostResolved)
+            return (DependencyVerdict.Unjudgeable, DependencyBlocker.HostUnresolved, "the host reference has no placement anywhere in this order");
+        if (f.HostDeleted)
+            return (DependencyVerdict.Unjudgeable, DependencyBlocker.HostDeleted, "the host is deleted — no winning position to compare against");
+        if (float.IsNaN(f.HostMoved))
+            return (DependencyVerdict.Unjudgeable, DependencyBlocker.NoAuthoringView, "the edge's author and its masters contributed no position for the host or the dependent");
+        bool moved = f.HostChangedSpace || f.HostMoved > threshold;
+        string move = f.HostChangedSpace ? "the host left its cell or worldspace" : $"the host moved {f.HostMoved:0}u";
+        if (!moved)
+            return (DependencyVerdict.Intact, DependencyBlocker.None, $"the host is where the edge's author left it ({f.HostMoved:0}u ≤ {threshold:0}u)");
+        if (f.HostDisabled)
+            return (DependencyVerdict.Unjudgeable, DependencyBlocker.HostDisabled, $"{move}, but it is initially disabled — a toggle arrangement, not judged");
+        if (!f.SameSpaceAtAuthoring)
+            return (DependencyVerdict.Unjudgeable, DependencyBlocker.CrossCell, $"{move}, but host and dependent were in different cells or worldspaces when the edge was authored — a toggle, not a support");
+        if (f.DependentDeleted)
+            return (DependencyVerdict.DependentRemoved, DependencyBlocker.None, $"{move}; the dependent is deleted — nothing left behind");
+        if (f.DependentRePlaced && f.DependentRePlacedByMoverSide)
+            return (DependencyVerdict.MovedTogether, DependencyBlocker.None, $"{move} and the mover's side re-placed the dependent — a deliberate re-arrangement, whatever the new offset");
+        if (f.DependentRePlaced)
+            return (DependencyVerdict.Unjudgeable, DependencyBlocker.DependentMovedByThirdParty, $"{move} and a plugin unrelated to the mover re-placed the dependent — nobody's fault this pass can name");
+        return (DependencyVerdict.LeftBehind, DependencyBlocker.None, $"{move}; the dependent stayed where the edge's author put it ({f.Kind} edge, {f.Host} host)");
+    }
+
+    /// <summary>What a host IS, for the split the rule's caller makes. Something to rest on or mount on — a
+    /// static, a movable static, furniture, a container, a door — is Physical. Anything whose base editor id
+    /// says "marker" (XMarker, XMarkerHeading, enable markers, map markers) is a Marker whatever its record
+    /// type: an enable relationship to a marker is a toggle, never a support. Everything else — activators used
+    /// as switches, lights, trees, actors, an unresolved base — is Other, reported apart.</summary>
+    public static HostClass ClassifyHost(string? baseType, string? baseEditorId)
+    {
+        if (baseEditorId is not null && baseEditorId.Contains("marker", StringComparison.OrdinalIgnoreCase)) return HostClass.Marker;
+        return baseType switch
+        {
+            "Static" or "MoveableStatic" or "Furniture" or "Container" or "Door" => HostClass.Physical,
+            _ => HostClass.Other,
+        };
+    }
+
+    /// <summary>What a DEPENDENT is — the split the first live run showed the host class alone cannot make. Every
+    /// physical-host LeftBehind row on the first order had an actor or a trigger as the dependent: an NPC linked
+    /// to the throne it sits on, prisoners linked to a jail door, a quest trigger linked to a fire pillar. An actor
+    /// walks to its linked furniture wherever it now stands, and a trigger volume marks a spot; neither rests on
+    /// or hangs from anything. The two classes are about a PHYSICAL dependent on a physical host — clutter on a
+    /// table, a fixture on a wall — so that is the row the caller counts. Actors are the placed-NPC arm or an NPC
+    /// / leveled-NPC base; Control is anything whose base is a marker, a trigger, an idle marker or an FX object
+    /// by editor id; Physical is a static, furniture, container, door, light, activator, tree, flora or any
+    /// item type; Other is the rest, an unresolved base included.</summary>
+    public static DependentClass ClassifyDependent(string? recordType, string? baseType, string? baseEditorId)
+    {
+        if (recordType == "PlacedNpc" || baseType is "Npc" or "LeveledNpc") return DependentClass.Actor;
+        if (baseType == "IdleMarker") return DependentClass.Control;
+        if (baseEditorId is not null && (baseEditorId.Contains("marker", StringComparison.OrdinalIgnoreCase)
+                                      || baseEditorId.Contains("trigger", StringComparison.OrdinalIgnoreCase)
+                                      || baseEditorId.StartsWith("FX", StringComparison.Ordinal)))
+            return DependentClass.Control;
+        return baseType switch
+        {
+            "Static" or "MoveableStatic" or "Furniture" or "Container" or "Door" or "Light" or "Activator"
+                or "Tree" or "Flora" or "Ingestible" or "Ingredient" or "MiscItem" or "Book" or "Weapon" or "Armor"
+                or "Ammunition" or "SoulGem" or "Key" or "Scroll" or "LeveledItem" => DependentClass.Physical,
+            _ => DependentClass.Other,
+        };
+    }
+
+    /// <summary>Rule 12 applied to a dependency edge: which population does a (mover, edge author) pair belong
+    /// to? Bethesda moving a Bethesda host under a Bethesda edge is the floor. USSEP as the mover is its own
+    /// row. A vanilla plugin moving a host under a MOD's edge is the case the authoring-view assumption is
+    /// weakest on — the mod's author almost certainly ran Update.esm and the DLCs whether or not the plugin
+    /// declares them — so it is kept apart rather than folded into either the floor or the class. Everything
+    /// else is a mod moving a host: the class, split by the author's side in the report.</summary>
+    public static DependencyPopulation ClassifyDependencyPopulation(bool moverIsVanilla, bool authorIsVanilla, bool moverIsUssep)
+        => moverIsVanilla && authorIsVanilla ? DependencyPopulation.BethesdaFloor
+         : moverIsUssep ? DependencyPopulation.UssepMover
+         : moverIsVanilla ? DependencyPopulation.VanillaMoverUnderModEdge
+         : DependencyPopulation.ModMover;
+
     /// <summary>The record-level verify verdict. CONFIRMED means every necessary record is
     /// overridden — which is COVERAGE, not repair: content and load-order position are not judged
     /// here, and the differential run exists precisely because a CONFIRMED patch can net to zero.</summary>
@@ -569,3 +698,25 @@ public enum WitnessBlocker { None, UnreadableAnchor, Templated, LeveledBase, Pac
 /// <summary>Did the winner's side know about the witness? Deliberate is informational; Oversight
 /// on a Stranded witness is the finding.</summary>
 public enum WitnessAuthorship { Deliberate, Oversight }
+
+/// <summary>The three ways a placed reference declares a host: XESP, XLKR, XAPR.</summary>
+public enum HostEdgeKind { EnableParent, LinkedRef, ActivateParent }
+
+/// <summary>What a host is, per <see cref="DetectorModel.ClassifyHost"/>. Only Physical hosts count for the
+/// stranded-support / orphaned-attachment classes; Marker and Other are reported apart.</summary>
+public enum HostClass { Physical, Marker, Other }
+
+/// <summary>What <see cref="DetectorModel.PlacementDependency"/> makes of one edge. LeftBehind is the
+/// candidate-shaped verdict (no geometry has been checked); MovedTogether, Intact and DependentRemoved are
+/// nothing; Unjudgeable is counted by its <see cref="DependencyBlocker"/>, never cleared.</summary>
+public enum DependencyVerdict { Intact, MovedTogether, LeftBehind, DependentRemoved, Unjudgeable }
+
+/// <summary>Why an edge could not be called.</summary>
+public enum DependencyBlocker { None, HostIsPlayer, HostUnresolved, HostDeleted, NoAuthoringView, HostDisabled, CrossCell, DependentMovedByThirdParty }
+
+/// <summary>What a dependent is, per <see cref="DetectorModel.ClassifyDependent"/>. A LeftBehind row counts for
+/// 4.5/4.6 only when the dependent is Physical AND the host is <see cref="HostClass.Physical"/>.</summary>
+public enum DependentClass { Physical, Actor, Control, Other }
+
+/// <summary>The rule-12 split for a dependency edge, by (mover, edge author).</summary>
+public enum DependencyPopulation { BethesdaFloor, UssepMover, VanillaMoverUnderModEdge, ModMover }

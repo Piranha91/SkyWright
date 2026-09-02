@@ -1,0 +1,436 @@
+using System.Diagnostics;
+using System.Text.Json;
+using HarnessShared;
+using HousecarlCore;
+using Mutagen.Bethesda.Plugins;
+using Mutagen.Bethesda.Skyrim;
+
+// PLACEMENT DEPENDENCY — the records-layer pass for stranded support and orphaned attachment
+// (roadmap 4.5 / 4.6, the cheap half).
+//
+// The two classes, in Piranha's words: mod A puts apples on a table, mod B moves the table, nothing
+// moves the apples; mod A hangs a sconce on a wall, mod B moves the wall, the sconce is neither
+// moved nor deleted. Both are one failure — an object left behind when the thing it depends on
+// moved — and "rests on" is a contact fact no record declares, so most of it is geometry. But a
+// minority of references DO declare a host: an enable parent (XESP), a linked reference (XLKR), an
+// activate parent (XAPR). Those edges are authored statements that "this belongs with that", and
+// when the host moves and the dependent does not, this pass can say so without reading a mesh.
+//
+// What it measures before it lists anything: how small the declared slice is. The fraction of refs
+// in mover-touched cells that carry ANY host edge is the ceiling on what a records-only pass can
+// see, and it is the number that sizes the geometry half. The first live run added a second cut:
+// the host class alone is not enough, because the physical-host rows were all actors and triggers
+// linked to furniture, doors and FX — AI and control relationships, not support. A row is
+// SUPPORT-SHAPED only when the host is physical AND the dependent is physical, and that is the
+// count the two classes are about. The spot-checks added a third cut: the AUTHORED OFFSET between
+// host and dependent. An object resting on another is within its footprint; the one support-shaped
+// row on the first order was a bench linked to a chopping block several hundred units away — a work-station link.
+// So every support-shaped count is also split by offset, and CONTACT-PLAUSIBLE means within 128u.
+//
+// The rule is DetectorModel.PlacementDependency (proofprobe-owned, with a synthetic order written
+// with Mutagen behind it); the facts come from DependencyIndex over PlacementHistory — the same
+// history driftprobe's scenario check runs on, moved to _shared for this. Everything here is I/O
+// and tallies. Standing rules applied: differential only (a LeftBehind row means the declared
+// arrangement changed, never that anything floats); the floor measured and split by population
+// before any count is read (rules 2 and 12); unjudgeable counted, never cleared (rule 6); the
+// movement census must reproduce driftprobe --generic before anything else is believed (rule 8).
+//
+// NOT verified in game, and no geometry has been checked. A LeftBehind row is a candidate.
+//
+// usage: depprobe [--list N] [--threshold U] [--json FILE] [--enable X.esp]* [--disable X.esp]*
+//                 [--instance DIR] [--game DIR] [--profile NAME]
+
+// Nothing is compiled in — see _shared/HarnessTarget.cs. Flags win over the environment and over
+// harness.local.json; Require() runs AFTER them.
+string Instance = HarnessTarget.Instance;
+string GamePath = HarnessTarget.Game;
+string profileName = HarnessTarget.Profile;
+{
+    for (int i = 0; i < args.Length; i++)
+    {
+        if (args[i] == "--instance" && i + 1 < args.Length) Instance = args[i + 1];
+        else if (args[i] == "--game" && i + 1 < args.Length) GamePath = args[i + 1];
+        else if (args[i] == "--profile" && i + 1 < args.Length) profileName = args[i + 1];
+    }
+}
+Instance = HarnessTarget.Require(Instance, "MO2 instance directory", "instance", "--instance");
+GamePath = HarnessTarget.Require(GamePath, "game directory", "game", "--game");
+profileName = HarnessTarget.Require(profileName, "MO2 profile name", "profile", "--profile");
+string profileDir = Path.Combine(Instance, "profiles", profileName);
+string modsDir = Path.Combine(Instance, "mods");
+string overwriteDir = Path.Combine(Instance, "overwrite");
+string dataDir = Path.Combine(GamePath, "Data");
+
+int listN = 25;
+float threshold = PlacementHistory.MoveThreshold;
+string? jsonPath = null;
+var enablePlugins = new List<string>();
+var disablePlugins = new List<string>();
+for (int i = 0; i < args.Length; i++)
+{
+    if (args[i] == "--list" && i + 1 < args.Length) listN = int.Parse(args[++i]);
+    else if (args[i] == "--threshold" && i + 1 < args.Length) threshold = float.Parse(args[++i]);
+    else if (args[i] == "--json" && i + 1 < args.Length) jsonPath = args[++i];
+    else if (args[i] == "--enable" && i + 1 < args.Length) enablePlugins.Add(args[++i]);
+    else if (args[i] == "--disable" && i + 1 < args.Length) disablePlugins.Add(args[++i]);
+}
+
+var sw = Stopwatch.StartNew();
+IReadOnlyList<string> paths;
+if (enablePlugins.Count > 0 || disablePlugins.Count > 0)
+{
+    var syn = SyntheticOrder.Build(profileDir, modsDir, dataDir, overwriteDir, enablePlugins, disablePlugins);
+    foreach (var w in syn.Warnings) Console.WriteLine($"   ! {w}");
+    foreach (var a in syn.Applied) Console.WriteLine($"   synthetic: {a}");
+    paths = syn.OrderedPaths;
+}
+else paths = Mo2LoadOrder.Build(profileDir, modsDir, dataDir, overwriteDir).OrderedPaths;
+Console.WriteLine($"load order: {paths.Count} plugins ({sw.ElapsedMilliseconds} ms)   threshold {threshold:0}u\n");
+
+// ---------------------------------------------------------------------------------------
+// Pass 1 — every plugin once, into the shared index.
+// ---------------------------------------------------------------------------------------
+var idx = new DependencyIndex();
+var pluginKey = new ModKey[paths.Count];
+var masterIdx = new HashSet<int>[paths.Count];
+var unreadable = new List<string>();
+for (int p = 0; p < paths.Count; p++)
+{
+    ISkyrimModGetter mod;
+    try { mod = SkyrimMod.CreateFromBinaryOverlay(paths[p], SkyrimRelease.SkyrimSE); }
+    catch { unreadable.Add(Path.GetFileName(paths[p])); pluginKey[p] = ModKey.Null; masterIdx[p] = new HashSet<int>(); continue; }
+    using (mod as IDisposable)
+    {
+        pluginKey[p] = mod.ModKey;
+        var mset = new HashSet<int>();
+        try
+        {
+            var names = mod.ModHeader.MasterReferences.Select(m => m.Master).ToHashSet();
+            for (int q = 0; q < p; q++) if (names.Contains(pluginKey[q])) mset.Add(q);
+        }
+        catch { }
+        masterIdx[p] = mset;
+        idx.Ingest(p, mod);
+    }
+    if ((p + 1) % 150 == 0) Console.WriteLine($"   ... {p + 1}/{paths.Count} plugins, {idx.Placements:N0} placements, {sw.Elapsed.TotalSeconds:0}s");
+}
+var closure = DetectorModel.MasterClosure(masterIdx);
+Console.WriteLine($"\nindexed {idx.Placements:N0} placements over {idx.History.Count:N0} refs; {idx.EdgeCount:N0} declared host edges; "
+                + $"{idx.DeletedBy.Count:N0} refs deleted somewhere  ({sw.Elapsed.TotalSeconds:0.0}s)");
+Console.WriteLine($"   plugins that could not be read (contribute nothing, counted per rule 6): {unreadable.Count:N0}"
+                + (unreadable.Count > 0 ? "  — " + string.Join(", ", unreadable) : ""));
+
+var Vanilla = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+{ "Skyrim.esm", "Update.esm", "Dawnguard.esm", "HearthFires.esm", "Dragonborn.esm", "SkyrimVR.esm", "_ResourcePack.esl" };
+const string Ussep = "Unofficial Skyrim Special Edition Patch.esp";
+string PluginName(int p) => p < 0 ? "(none)" : pluginKey[p].FileName.String;
+bool IsVanilla(int p) => p >= 0 && Vanilla.Contains(PluginName(p));
+bool IsUssep(int p) => p >= 0 && string.Equals(PluginName(p), Ussep, StringComparison.OrdinalIgnoreCase);
+string ClassOf(int p) => IsVanilla(p) ? "Bethesda" : IsUssep(p) ? "USSEP" : "mod";
+string CellOf(FormKey c) => idx.CellName.TryGetValue(c, out var v) ? (v.Edid ?? c.ToString()) + (v.Interior ? " (int)" : " (ext)") : c.ToString();
+string RefLabel(FormKey k)
+{
+    var ri = idx.RefInfo.TryGetValue(k, out var r) ? r : ("?", null);
+    var bi = idx.RefBase.TryGetValue(k, out var b) && idx.BaseInfo.TryGetValue(b, out var x) ? x : ("?", null);
+    return $"{k}{(ri.Item2 is null ? "" : " " + ri.Item2)} [{bi.Item1}{(bi.Item2 is null ? "" : " " + bi.Item2)}]";
+}
+
+// ---------------------------------------------------------------------------------------
+// 1. The movement census — driftprobe --generic's numbers, reproduced (rule 8: the plumbing first).
+// ---------------------------------------------------------------------------------------
+long changed = 0, relocated = 0, movedFar = 0;
+var movedRefs = new HashSet<FormKey>();
+var movedCells = new HashSet<FormKey>();
+var moverPlugins = new HashSet<int>();
+var moverPairs = new Dictionary<string, int>();
+foreach (var (key, h) in idx.History.Refs)
+{
+    if (h.Count < 2) continue;
+    changed++;
+    var first = h[0]; var last = h[^1];
+    switch (PlacementHistory.Classify(first, last, threshold))
+    {
+        case Movement.Relocated: relocated++; break;
+        case Movement.MovedFar: movedFar++; break;
+        default: continue;
+    }
+    movedRefs.Add(key);
+    movedCells.Add(first.Cell); movedCells.Add(last.Cell);
+    if (last.Plugin != first.Plugin)
+    {
+        moverPlugins.Add(last.Plugin);
+        var k = $"{PluginName(first.Plugin)}  -> moved by ->  {PluginName(last.Plugin)}";
+        moverPairs[k] = moverPairs.GetValueOrDefault(k) + 1;
+    }
+}
+var moverEditedCells = new HashSet<FormKey>();
+foreach (var (_, h) in idx.History.Refs)
+    foreach (var s in h) if (moverPlugins.Contains(s.Plugin)) moverEditedCells.Add(s.Cell);
+
+Console.WriteLine();
+Console.WriteLine("==== 1. MOVEMENT CENSUS (must equal driftprobe --generic on the same order) ====");
+Console.WriteLine($"   refs whose placement any plugin altered : {changed:N0} of {idx.History.Count:N0}");
+Console.WriteLine($"   ...relocated to another cell            : {relocated:N0}");
+Console.WriteLine($"   ...moved more than {threshold:0}u within its cell  : {movedFar:N0}");
+Console.WriteLine($"   moved refs (both)                       : {movedRefs.Count:N0}   in {movedCells.Count:N0} cells (source + destination)");
+Console.WriteLine($"   plugins that moved something            : {moverPlugins.Count:N0}   touching {moverEditedCells.Count:N0} cells with any placement edit");
+foreach (var g in moverPairs.OrderByDescending(g => g.Value).Take(Math.Min(listN, 12)))
+    Console.WriteLine($"   {g.Value,6}  {g.Key}");
+
+// ---------------------------------------------------------------------------------------
+// 2. The declared slice — how much of the world a records-only pass can even ask about.
+// ---------------------------------------------------------------------------------------
+var edgesByDep = idx.Edges.GroupBy(e => e.Dependent).ToDictionary(g => g.Key, g => g.ToList());
+var sliceJson = new Dictionary<string, object>();
+void Slice(string label, string key, Func<Snap, bool> inSlice)
+{
+    long refs = 0, withEdge = 0;
+    var edgesByKind = new Dictionary<string, long>();
+    var refsByKind = new Dictionary<string, long>();
+    foreach (var (k, h) in idx.History.Refs)
+    {
+        var win = h[^1];
+        if (!inSlice(win)) continue;
+        refs++;
+        if (!edgesByDep.TryGetValue(k, out var es)) continue;
+        withEdge++;
+        foreach (var e in es) edgesByKind[e.Kind.ToString()] = edgesByKind.GetValueOrDefault(e.Kind.ToString()) + 1;
+        foreach (var kind in es.Select(e => e.Kind.ToString()).Distinct()) refsByKind[kind] = refsByKind.GetValueOrDefault(kind) + 1;
+    }
+    Console.WriteLine($"   {label,-44} refs {refs,10:N0}   with any host edge {withEdge,8:N0}  ({Rate(withEdge, refs),6:0.00}%)");
+    foreach (var kind in new[] { "EnableParent", "LinkedRef", "ActivateParent" })
+        Console.WriteLine($"      {kind,-14} refs {refsByKind.GetValueOrDefault(kind),8:N0} ({Rate(refsByKind.GetValueOrDefault(kind), refs),5:0.00}%)   edges {edgesByKind.GetValueOrDefault(kind),8:N0}");
+    sliceJson[key] = new { refs, withEdge, pct = Rate(withEdge, refs), refsByKind, edgesByKind };
+}
+Console.WriteLine();
+Console.WriteLine("==== 2. THE DECLARED SLICE — refs that carry any host edge (XESP / XLKR / XAPR) ====");
+Slice("whole order (context)", "all", _ => true);
+Slice("cells holding a moved ref", "movedCells", s => movedCells.Contains(s.Cell));
+Slice("cells any mover plugin edited at all", "moverEditedCells", s => moverEditedCells.Contains(s.Cell));
+
+// ---------------------------------------------------------------------------------------
+// 3. Every edge judged.
+// ---------------------------------------------------------------------------------------
+var rows = new List<Judged>(idx.EdgeCount);
+foreach (var e in idx.Edges)
+{
+    var r = idx.Judge(e, closure);
+    var (verdict, reason, why) = DetectorModel.PlacementDependency(r.Facts, threshold);
+    var pop = DetectorModel.ClassifyDependencyPopulation(IsVanilla(r.Mover), IsVanilla(e.Author), IsUssep(r.Mover));
+    rows.Add(new Judged(r, verdict, reason, why, pop));
+}
+static bool HostMovedRow(Judged j) => j.Verdict is DependencyVerdict.LeftBehind or DependencyVerdict.MovedTogether or DependencyVerdict.DependentRemoved
+    || j.Reason is DependencyBlocker.HostDisabled or DependencyBlocker.CrossCell or DependencyBlocker.DependentMovedByThirdParty;
+static bool SupportShaped(Judged j) => j.Verdict == DependencyVerdict.LeftBehind && j.Row.Facts.Host == HostClass.Physical && j.Row.Dependent == DependentClass.Physical;
+const float ContactOffset = 128f;
+static bool ContactPlausible(Judged j) => SupportShaped(j) && j.Row.AuthoredOffset <= ContactOffset;
+static string OffsetBand(float d) => float.IsNaN(d) ? "n/a" : d <= 64 ? "<=64u" : d <= 128 ? "<=128u" : d <= 256 ? "<=256u" : d <= 1024 ? "<=1024u" : ">1024u";
+
+Console.WriteLine();
+Console.WriteLine("==== 3. EVERY EDGE JUDGED ====");
+Console.WriteLine($"   host class of all edges:  " + string.Join("   ", new[] { HostClass.Physical, HostClass.Marker, HostClass.Other }
+    .Select(c => $"{c} {rows.Count(j => j.Row.Facts.Host == c):N0}")));
+foreach (var kind in Enum.GetValues<HostEdgeKind>())
+    Console.WriteLine($"      {kind,-14} " + string.Join("   ", new[] { HostClass.Physical, HostClass.Marker, HostClass.Other }
+        .Select(c => $"{c} {rows.Count(j => j.Row.Edge.Kind == kind && j.Row.Facts.Host == c),7:N0}")));
+Console.WriteLine($"   dependent class of all edges: " + string.Join("   ", Enum.GetValues<DependentClass>()
+    .Select(c => $"{c} {rows.Count(j => j.Row.Dependent == c):N0}")));
+var suppEdges = rows.Where(j => j.Row.Facts.Host == HostClass.Physical && j.Row.Dependent == DependentClass.Physical).ToList();
+Console.WriteLine($"   physical host AND physical dependent (the support-shaped edges): {suppEdges.Count:N0}");
+Console.WriteLine($"      by authored host-dependent offset: " + string.Join("   ", new[] { "<=64u", "<=128u", "<=256u", "<=1024u", ">1024u", "n/a" }
+    .Select(b => $"{b} {suppEdges.Count(j => OffsetBand(j.Row.AuthoredOffset) == b):N0}")));
+Console.WriteLine($"      contact-plausible (offset <= {ContactOffset:0}u): {suppEdges.Count(j => j.Row.AuthoredOffset <= ContactOffset):N0}   <- the declared slice the two classes are actually about");
+Console.WriteLine($"   verdicts:");
+foreach (var v in Enum.GetValues<DependencyVerdict>())
+    Console.WriteLine($"      {v,-18} {rows.Count(j => j.Verdict == v),9:N0}");
+Console.WriteLine($"   unjudgeable by reason (counted, never cleared):");
+foreach (var b in Enum.GetValues<DependencyBlocker>().Where(b => b != DependencyBlocker.None))
+    Console.WriteLine($"      {b,-28} {rows.Count(j => j.Reason == b),9:N0}");
+// The disabled-host rows: the handoff counts them; here is what they would read if judged.
+int disabledWouldBe = rows.Where(j => j.Reason == DependencyBlocker.HostDisabled)
+    .Count(j => DetectorModel.PlacementDependency(j.Row.Facts with { HostDisabled = false }, threshold).Verdict == DependencyVerdict.LeftBehind);
+Console.WriteLine($"      (of the HostDisabled rows, {disabledWouldBe:N0} would read LeftBehind if a disabled host were judged like an enabled one)");
+
+var moved = rows.Where(HostMovedRow).ToList();
+var movedHosts = moved.Select(j => j.Row.Edge.Host).Distinct().ToList();
+Console.WriteLine();
+Console.WriteLine($"   moved hosts (by the rule's authoring-view test) with at least one dependent: {movedHosts.Count:N0}");
+foreach (var c in Enum.GetValues<HostClass>())
+    Console.WriteLine($"      {c,-9} {moved.Where(j => j.Row.Facts.Host == c).Select(j => j.Row.Edge.Host).Distinct().Count(),7:N0}");
+int censusHostsWithDeps = idx.Edges.Select(e => e.Host).Distinct().Count(movedRefs.Contains);
+Console.WriteLine($"   moved refs (census, first -> winner) that are a host to any edge: {censusHostsWithDeps:N0} of {movedRefs.Count:N0}");
+Console.WriteLine($"   dependents of moved hosts, by verdict:");
+foreach (var g in moved.GroupBy(j => j.Verdict == DependencyVerdict.Unjudgeable ? $"Unjudgeable/{j.Reason}" : j.Verdict.ToString()).OrderByDescending(g => g.Count()))
+    Console.WriteLine($"      {g.Key,-40} {g.Count(),7:N0}");
+Console.WriteLine($"   LeftBehind rows by (host class, dependent class):");
+foreach (var g in rows.Where(j => j.Verdict == DependencyVerdict.LeftBehind).GroupBy(j => (j.Row.Facts.Host, j.Row.Dependent)).OrderByDescending(g => g.Count()))
+    Console.WriteLine($"      host {g.Key.Host,-9} dependent {g.Key.Dependent,-9} {g.Count(),7:N0}");
+Console.WriteLine($"   SUPPORT-SHAPED LeftBehind rows (physical host, physical dependent): {rows.Count(SupportShaped):N0}"
+                + $"   of which contact-plausible (authored offset <= {ContactOffset:0}u): {rows.Count(ContactPlausible):N0}");
+Console.WriteLine($"   LeftBehind rows whose dependent the mover's side OVERRODE without moving it (seen, left — reported, not credited): "
+                + $"{rows.Count(j => j.Verdict == DependencyVerdict.LeftBehind && j.Row.DependentTouchedByMoverSide):N0}");
+
+// ---------------------------------------------------------------------------------------
+// 4. The population split (rule 12): (mover class, edge-author class), over the moved-host rows.
+// ---------------------------------------------------------------------------------------
+Console.WriteLine();
+Console.WriteLine("==== 4. POPULATION SPLIT of the moved-host rows — (mover, edge author) ====");
+Console.WriteLine($"   {"population",-36} {"LeftBehind",10} {"  phys",6} {"  mark",6} {" other",6} {"support",8} {"contact",8} {"MovedTogether",14} {"Removed",8} {"Unjudg.",8} {"LB rate",8}");
+foreach (var pop in Enum.GetValues<DependencyPopulation>())
+{
+    var rs = moved.Where(j => j.Population == pop).ToList();
+    int lb = rs.Count(j => j.Verdict == DependencyVerdict.LeftBehind);
+    int mt = rs.Count(j => j.Verdict == DependencyVerdict.MovedTogether);
+    Console.WriteLine($"   {pop,-36} {lb,10:N0} {rs.Count(j => j.Verdict == DependencyVerdict.LeftBehind && j.Row.Facts.Host == HostClass.Physical),6:N0}"
+                    + $" {rs.Count(j => j.Verdict == DependencyVerdict.LeftBehind && j.Row.Facts.Host == HostClass.Marker),6:N0}"
+                    + $" {rs.Count(j => j.Verdict == DependencyVerdict.LeftBehind && j.Row.Facts.Host == HostClass.Other),6:N0}"
+                    + $" {rs.Count(SupportShaped),8:N0} {rs.Count(ContactPlausible),8:N0}"
+                    + $" {mt,14:N0} {rs.Count(j => j.Verdict == DependencyVerdict.DependentRemoved),8:N0} {rs.Count(j => j.Verdict == DependencyVerdict.Unjudgeable),8:N0}"
+                    + $" {Rate(lb, lb + mt),7:0.0}%");
+}
+Console.WriteLine($"   (LB rate = LeftBehind / (LeftBehind + MovedTogether); support = LeftBehind with a physical host AND a physical dependent;");
+Console.WriteLine($"    contact = support with an authored host-dependent offset <= {ContactOffset:0}u; the floor is the first row's)");
+Console.WriteLine();
+Console.WriteLine($"   LeftBehind rows by mover class x author class:");
+foreach (var g in rows.Where(j => j.Verdict == DependencyVerdict.LeftBehind)
+                      .GroupBy(j => (Mover: ClassOf(j.Row.Mover), Author: ClassOf(j.Row.Edge.Author))).OrderByDescending(g => g.Count()))
+    Console.WriteLine($"      {g.Key.Mover,-9} moved, {g.Key.Author,-9} authored the edge : {g.Count(),7:N0}   "
+                    + $"(physical {g.Count(j => j.Row.Facts.Host == HostClass.Physical):N0}, marker {g.Count(j => j.Row.Facts.Host == HostClass.Marker):N0}, other {g.Count(j => j.Row.Facts.Host == HostClass.Other):N0})");
+
+// ---------------------------------------------------------------------------------------
+// 5. The floor's own physical-host rows — the same-defect control is chosen from these.
+// ---------------------------------------------------------------------------------------
+void PrintRow(Judged j)
+{
+    var r = j.Row;
+    string dist = r.Facts.HostChangedSpace ? "relocated" : $"{r.Facts.HostMoved,7:0}u";
+    Console.WriteLine($"      {j.Row.Edge.Kind,-14} host {j.Row.Facts.Host,-8} dep {j.Row.Dependent,-8} {dist,9}  host {RefLabel(r.Edge.Host)}");
+    Console.WriteLine($"         dependent {RefLabel(r.Edge.Dependent)}  in {CellOf(r.DepThen?.Cell ?? r.DepNow?.Cell ?? FormKey.Null)}"
+                    + $"  authored offset {(float.IsNaN(r.AuthoredOffset) ? "n/a" : $"{r.AuthoredOffset:0}u")}"
+                    + (r.DependentTouchedByMoverSide ? "  [mover's side overrode the dependent without moving it]" : ""));
+    Console.WriteLine($"         edge by {PluginName(r.Edge.Author)}; host moved by {PluginName(r.Mover)}"
+                    + (r.HostThen is { } ht && r.HostNow is { } hn ? $"; host {ht.Pos} -> {hn.Pos}" : ""));
+}
+Console.WriteLine();
+Console.WriteLine("==== 5. THE FLOOR — Bethesda-on-Bethesda LeftBehind rows with a PHYSICAL host (control candidates) ====");
+var floorPhys = rows.Where(j => j.Verdict == DependencyVerdict.LeftBehind && j.Population == DependencyPopulation.BethesdaFloor && j.Row.Facts.Host == HostClass.Physical)
+                    .OrderByDescending(j => j.Row.Facts.HostChangedSpace).ThenByDescending(j => j.Row.Facts.HostMoved).ToList();
+Console.WriteLine($"   {floorPhys.Count:N0} rows");
+foreach (var j in floorPhys.Take(listN)) PrintRow(j);
+
+// ---------------------------------------------------------------------------------------
+// 6. Mod movers — the class. By mod pair, then the physical-host rows one by one.
+// ---------------------------------------------------------------------------------------
+Console.WriteLine();
+Console.WriteLine("==== 6. MOD MOVERS — LeftBehind rows by (mover, edge author) pair; CANDIDATES, no geometry checked ====");
+var modLb = rows.Where(j => j.Verdict == DependencyVerdict.LeftBehind && j.Population == DependencyPopulation.ModMover).ToList();
+var byPair = modLb.GroupBy(j => (Mover: PluginName(j.Row.Mover), Author: PluginName(j.Row.Edge.Author)))
+                  .OrderByDescending(g => g.Count(j => j.Row.Facts.Host == HostClass.Physical)).ThenByDescending(g => g.Count()).ToList();
+Console.WriteLine($"   {modLb.Count:N0} rows over {byPair.Count:N0} pairs   (physical {modLb.Count(j => j.Row.Facts.Host == HostClass.Physical):N0}, "
+                + $"marker {modLb.Count(j => j.Row.Facts.Host == HostClass.Marker):N0}, other {modLb.Count(j => j.Row.Facts.Host == HostClass.Other):N0})");
+foreach (var g in byPair.Take(listN))
+    Console.WriteLine($"   {g.Count(),5:N0}  phys {g.Count(j => j.Row.Facts.Host == HostClass.Physical),4:N0}  mark {g.Count(j => j.Row.Facts.Host == HostClass.Marker),4:N0}  other {g.Count(j => j.Row.Facts.Host == HostClass.Other),4:N0}   "
+                    + $"{g.Key.Mover}  moved a host under an edge by  {g.Key.Author}"
+                    + $"   [{string.Join(", ", g.GroupBy(j => j.Row.Edge.Kind).Select(k => $"{k.Count()} {k.Key}"))}]");
+Console.WriteLine();
+Console.WriteLine($"   ---- SUPPORT-SHAPED rows (physical host AND physical dependent — the 4.5 / 4.6 candidates), largest host move first ----");
+var support = modLb.Where(SupportShaped).OrderByDescending(j => j.Row.Facts.HostChangedSpace).ThenByDescending(j => j.Row.Facts.HostMoved).ToList();
+Console.WriteLine($"   {support.Count:N0} rows");
+foreach (var j in support.Take(listN)) PrintRow(j);
+Console.WriteLine();
+Console.WriteLine($"   ---- the other physical-host rows (actor / control / other dependents — AI and trigger links, not support) ----");
+foreach (var j in modLb.Where(j => j.Row.Facts.Host == HostClass.Physical && !SupportShaped(j))
+                       .OrderByDescending(j => j.Row.Facts.HostChangedSpace).ThenByDescending(j => j.Row.Facts.HostMoved).Take(listN))
+    PrintRow(j);
+
+var ussepLb = rows.Where(j => j.Verdict == DependencyVerdict.LeftBehind && j.Population == DependencyPopulation.UssepMover).ToList();
+Console.WriteLine();
+Console.WriteLine($"==== 7. USSEP AS MOVER — {ussepLb.Count:N0} LeftBehind rows (physical host {ussepLb.Count(j => j.Row.Facts.Host == HostClass.Physical):N0}, support-shaped {ussepLb.Count(SupportShaped):N0}); support-shaped first, then physical-host ====");
+foreach (var j in ussepLb.Where(j => j.Row.Facts.Host == HostClass.Physical).OrderByDescending(SupportShaped).ThenByDescending(j => j.Row.Facts.HostMoved).Take(Math.Min(listN, 12)))
+    PrintRow(j);
+var floorAll = rows.Where(j => j.Verdict == DependencyVerdict.LeftBehind && j.Population == DependencyPopulation.BethesdaFloor).ToList();
+Console.WriteLine();
+Console.WriteLine($"==== 7b. THE FLOOR, every row — {floorAll.Count:N0} Bethesda-on-Bethesda LeftBehind rows (support-shaped {floorAll.Count(SupportShaped):N0}) ====");
+foreach (var j in floorAll.OrderByDescending(SupportShaped).ThenByDescending(j => j.Row.Facts.HostMoved).Take(listN)) PrintRow(j);
+var vanUnderMod = rows.Where(j => j.Verdict == DependencyVerdict.LeftBehind && j.Population == DependencyPopulation.VanillaMoverUnderModEdge).ToList();
+Console.WriteLine();
+Console.WriteLine($"==== 8. VANILLA MOVER UNDER A MOD'S EDGE — {vanUnderMod.Count:N0} rows (the authoring-view assumption is weakest here; kept apart) ====");
+foreach (var g in vanUnderMod.GroupBy(j => (PluginName(j.Row.Mover), PluginName(j.Row.Edge.Author))).OrderByDescending(g => g.Count()).Take(Math.Min(listN, 10)))
+    Console.WriteLine($"   {g.Count(),5:N0}  {g.Key.Item1}  moved a host under an edge by  {g.Key.Item2}");
+
+// ---------------------------------------------------------------------------------------
+// --json: the summary and every LeftBehind row, for the spot-checks and the before/after diffs.
+// ---------------------------------------------------------------------------------------
+if (jsonPath is not null)
+{
+    object RowJson(Judged j)
+    {
+        var r = j.Row;
+        var ri = idx.RefInfo.TryGetValue(r.Edge.Dependent, out var d) ? d : ("?", null);
+        var hb = idx.RefBase.TryGetValue(r.Edge.Host, out var b) && idx.BaseInfo.TryGetValue(b, out var x) ? x : ("?", null);
+        var dbse = idx.RefBase.TryGetValue(r.Edge.Dependent, out var db) && idx.BaseInfo.TryGetValue(db, out var y) ? y : ("?", null);
+        return new
+        {
+            dependent = r.Edge.Dependent.ToString(), depType = ri.Item1, depEdid = ri.Item2, depBaseType = dbse.Item1, depBaseEdid = dbse.Item2,
+            host = r.Edge.Host.ToString(), hostBaseType = hb.Item1, hostBaseEdid = hb.Item2, hostClass = r.Facts.Host.ToString(),
+            depClass = r.Dependent.ToString(), supportShaped = SupportShaped(j), contactPlausible = ContactPlausible(j),
+            authoredOffset = float.IsNaN(r.AuthoredOffset) ? (float?)null : r.AuthoredOffset, dependentTouchedByMoverSide = r.DependentTouchedByMoverSide,
+            kind = r.Edge.Kind.ToString(),
+            cell = r.DepThen is { } dt ? CellOf(dt.Cell) : null, cellKey = r.DepThen?.Cell.ToString(),
+            hostMoved = float.IsNaN(r.Facts.HostMoved) ? (float?)null : r.Facts.HostMoved, hostChangedSpace = r.Facts.HostChangedSpace,
+            hostThen = r.HostThen?.Pos.ToString(), hostNow = r.HostNow?.Pos.ToString(), dependentPos = r.DepNow?.Pos.ToString(),
+            author = PluginName(r.Edge.Author), mover = PluginName(r.Mover), population = j.Population.ToString(),
+            verdict = j.Verdict.ToString(), reason = j.Reason.ToString(), why = j.Why,
+        };
+    }
+    var summary = new
+    {
+        generated = DateTime.UtcNow.ToString("yyyy-MM-dd HH:mm:ssZ"), instance = Instance, profile = profileName, threshold,
+        plugins = paths.Count, unreadable, placements = idx.Placements, refs = idx.History.Count, edges = idx.EdgeCount, deletedRefs = idx.DeletedBy.Count,
+        census = new { changed, relocated, movedFar, movedRefs = movedRefs.Count, movedCells = movedCells.Count, moverPlugins = moverPlugins.Count, moverEditedCells = moverEditedCells.Count },
+        slice = sliceJson,
+        hostClassByKind = Enum.GetValues<HostEdgeKind>().ToDictionary(k => k.ToString(), k => Enum.GetValues<HostClass>().ToDictionary(c => c.ToString(), c => rows.Count(j => j.Row.Edge.Kind == k && j.Row.Facts.Host == c))),
+        verdicts = Enum.GetValues<DependencyVerdict>().ToDictionary(v => v.ToString(), v => rows.Count(j => j.Verdict == v)),
+        unjudgeable = Enum.GetValues<DependencyBlocker>().Where(b => b != DependencyBlocker.None).ToDictionary(b => b.ToString(), b => rows.Count(j => j.Reason == b)),
+        disabledWouldBeLeftBehind = disabledWouldBe,
+        dependentClassAll = Enum.GetValues<DependentClass>().ToDictionary(c => c.ToString(), c => rows.Count(j => j.Row.Dependent == c)),
+        supportShapedEdges = rows.Count(j => j.Row.Facts.Host == HostClass.Physical && j.Row.Dependent == DependentClass.Physical),
+        supportShapedLeftBehind = rows.Count(SupportShaped),
+        contactPlausibleLeftBehind = rows.Count(ContactPlausible),
+        contactOffset = ContactOffset,
+        supportShapedEdgesByOffset = new[] { "<=64u", "<=128u", "<=256u", "<=1024u", ">1024u", "n/a" }.ToDictionary(b => b, b => suppEdges.Count(j => OffsetBand(j.Row.AuthoredOffset) == b)),
+        leftBehindSeenByMoverSide = rows.Count(j => j.Verdict == DependencyVerdict.LeftBehind && j.Row.DependentTouchedByMoverSide),
+        leftBehindByHostAndDependent = rows.Where(j => j.Verdict == DependencyVerdict.LeftBehind)
+            .GroupBy(j => $"{j.Row.Facts.Host} host / {j.Row.Dependent} dependent").ToDictionary(g => g.Key, g => g.Count()),
+        movedHosts = movedHosts.Count, censusHostsWithDeps,
+        populations = Enum.GetValues<DependencyPopulation>().ToDictionary(p => p.ToString(), p => new
+        {
+            leftBehind = moved.Count(j => j.Population == p && j.Verdict == DependencyVerdict.LeftBehind),
+            leftBehindPhysical = moved.Count(j => j.Population == p && j.Verdict == DependencyVerdict.LeftBehind && j.Row.Facts.Host == HostClass.Physical),
+            leftBehindMarker = moved.Count(j => j.Population == p && j.Verdict == DependencyVerdict.LeftBehind && j.Row.Facts.Host == HostClass.Marker),
+            leftBehindOther = moved.Count(j => j.Population == p && j.Verdict == DependencyVerdict.LeftBehind && j.Row.Facts.Host == HostClass.Other),
+            supportShaped = moved.Count(j => j.Population == p && SupportShaped(j)),
+            contactPlausible = moved.Count(j => j.Population == p && ContactPlausible(j)),
+            movedTogether = moved.Count(j => j.Population == p && j.Verdict == DependencyVerdict.MovedTogether),
+            removed = moved.Count(j => j.Population == p && j.Verdict == DependencyVerdict.DependentRemoved),
+            unjudgeable = moved.Count(j => j.Population == p && j.Verdict == DependencyVerdict.Unjudgeable),
+        }),
+        leftBehindByClassPair = rows.Where(j => j.Verdict == DependencyVerdict.LeftBehind)
+            .GroupBy(j => $"{ClassOf(j.Row.Mover)} moved / {ClassOf(j.Row.Edge.Author)} authored").ToDictionary(g => g.Key, g => g.Count()),
+        modPairs = byPair.Select(g => new { mover = g.Key.Mover, author = g.Key.Author, rows = g.Count(),
+                                            physical = g.Count(j => j.Row.Facts.Host == HostClass.Physical), marker = g.Count(j => j.Row.Facts.Host == HostClass.Marker), other = g.Count(j => j.Row.Facts.Host == HostClass.Other) }),
+        rows = rows.Where(j => j.Verdict == DependencyVerdict.LeftBehind).Select(RowJson),
+    };
+    File.WriteAllText(jsonPath, JsonSerializer.Serialize(summary, new JsonSerializerOptions { WriteIndented = true }));
+    Console.WriteLine($"\nwrote {jsonPath}");
+}
+
+Console.WriteLine();
+Console.WriteLine("NOT verified in game, and no geometry has been checked: a LeftBehind row says the declared arrangement changed");
+Console.WriteLine("under the mover without the dependent following — a candidate for eyes, never that anything floats.");
+Console.WriteLine($"elapsed {sw.Elapsed.TotalSeconds:0.0}s");
+return 0;
+
+static float Rate(long hit, long total) => total == 0 ? 0 : 100f * hit / total;
+
+sealed record Judged(DependencyRow Row, DependencyVerdict Verdict, DependencyBlocker Reason, string Why, DependencyPopulation Population);

@@ -1,5 +1,10 @@
 using System.Xml.Linq;
 using HarnessShared;
+using HousecarlCore;
+using Mutagen.Bethesda;
+using Mutagen.Bethesda.Plugins;
+using Mutagen.Bethesda.Skyrim;
+using Noggog;
 
 // SYNTHETIC PROOF for the load-order-integrity probes.
 //
@@ -743,6 +748,317 @@ Console.WriteLine("\nPROOF — the detector cores (_shared/DetectorModel.cs)\n")
               float.IsPositiveInfinity(DetectorModel.DistanceToCoverageXY(new(128, 10, 0), wallV,
                   new List<(int, int, int, int)> { (0, 1, 2, 0) })), "zero XY area");
     }
+}
+
+// ---------------------------------------------------------------------------------------
+// Placement dependency — the records-layer pass for stranded support / orphaned attachment
+// (roadmap 4.5/4.6). The rule is pure and gets fact-level cases; then a SYNTHETIC ORDER written
+// with Mutagen — a master placing hosts and dependents with XESP/XLKR/XAPR edges, and three
+// plugins moving, re-placing, deleting and forwarding them — is read back through the SAME
+// extraction the real probe uses (PlacementExtract -> DependencyIndex -> the rule), so a break in
+// the plumbing (an edge kind not extracted, an author mis-assigned, a deletion missed) fails by
+// name here rather than as a number quietly moving on the live order.
+// ---------------------------------------------------------------------------------------
+Console.WriteLine("\nPROOF — placement dependency (_shared/DetectorModel.cs + _shared/DependencyIndex.cs)\n");
+{
+    const float T = 16f;
+    DetectorModel.DependencyFacts F(HostEdgeKind kind = HostEdgeKind.EnableParent, bool resolved = true, bool hostDeleted = false,
+        bool hostDisabled = false, bool sameCell = true, bool cellChanged = false, float moved = 200f,
+        bool depDeleted = false, bool rePlaced = false, bool byMover = false, HostClass host = HostClass.Physical, bool player = false)
+        => new(kind, player, resolved, hostDeleted, hostDisabled, sameCell, cellChanged, moved, depDeleted, rePlaced, byMover, host);
+    var lb = DetectorModel.PlacementDependency(F(), T);
+    Check("dep: host moved 200u, dependent untouched -> LEFT BEHIND",
+          lb.Verdict == DependencyVerdict.LeftBehind && lb.Reason == DependencyBlocker.None, lb.Why);
+    Check("dep: host moved 10u -> INTACT (under the 16u threshold)",
+          DetectorModel.PlacementDependency(F(moved: 10), T).Verdict == DependencyVerdict.Intact, "jitter, not a move");
+    Check("dep: host moved exactly 16u -> INTACT; 17u -> LEFT BEHIND (the threshold is inclusive, as driftprobe's)",
+          DetectorModel.PlacementDependency(F(moved: 16), T).Verdict == DependencyVerdict.Intact
+       && DetectorModel.PlacementDependency(F(moved: 17), T).Verdict == DependencyVerdict.LeftBehind, "16 -> Intact, 17 -> LeftBehind");
+    Check("dep: host left its cell or worldspace at 0u -> LEFT BEHIND (a relocation counts whatever the distance)",
+          DetectorModel.PlacementDependency(F(moved: 0, cellChanged: true), T).Verdict == DependencyVerdict.LeftBehind, "space change");
+    Check("dep: dependent re-placed by the mover's side -> MOVED TOGETHER, whatever the offset",
+          DetectorModel.PlacementDependency(F(rePlaced: true, byMover: true), T).Verdict == DependencyVerdict.MovedTogether, "a deliberate re-arrangement");
+    var third = DetectorModel.PlacementDependency(F(rePlaced: true, byMover: false), T);
+    Check("dep: dependent re-placed by an unrelated third plugin -> UNJUDGEABLE (nobody's fault to name)",
+          third.Verdict == DependencyVerdict.Unjudgeable && third.Reason == DependencyBlocker.DependentMovedByThirdParty, third.Why);
+    Check("dep: dependent deleted -> DEPENDENT REMOVED (nothing left behind)",
+          DetectorModel.PlacementDependency(F(depDeleted: true), T).Verdict == DependencyVerdict.DependentRemoved, "deleted");
+    var ply = DetectorModel.PlacementDependency(F(player: true), T);
+    Check("dep: host is the player reference -> UNJUDGEABLE (HostIsPlayer), outranking every other fact",
+          ply.Verdict == DependencyVerdict.Unjudgeable && ply.Reason == DependencyBlocker.HostIsPlayer
+       && DetectorModel.PlacementDependency(F(player: true, resolved: false), T).Reason == DependencyBlocker.HostIsPlayer, ply.Why);
+    var unres = DetectorModel.PlacementDependency(F(resolved: false), T);
+    Check("dep: host unresolved -> UNJUDGEABLE even on moved numbers",
+          unres.Verdict == DependencyVerdict.Unjudgeable && unres.Reason == DependencyBlocker.HostUnresolved, unres.Why);
+    var del = DetectorModel.PlacementDependency(F(hostDeleted: true), T);
+    Check("dep: host deleted -> UNJUDGEABLE (HostDeleted), counted apart",
+          del.Verdict == DependencyVerdict.Unjudgeable && del.Reason == DependencyBlocker.HostDeleted, del.Why);
+    var nav = DetectorModel.PlacementDependency(F(moved: float.NaN), T);
+    Check("dep: no authoring view -> UNJUDGEABLE (NoAuthoringView)",
+          nav.Verdict == DependencyVerdict.Unjudgeable && nav.Reason == DependencyBlocker.NoAuthoringView, nav.Why);
+    var dis = DetectorModel.PlacementDependency(F(hostDisabled: true), T);
+    Check("dep: initially-disabled host that moved -> UNJUDGEABLE (a toggle); one that did not move -> INTACT",
+          dis.Verdict == DependencyVerdict.Unjudgeable && dis.Reason == DependencyBlocker.HostDisabled
+       && DetectorModel.PlacementDependency(F(hostDisabled: true, moved: 5), T).Verdict == DependencyVerdict.Intact, dis.Why);
+    var cross = DetectorModel.PlacementDependency(F(sameCell: false), T);
+    Check("dep: host and dependent in different spaces at authoring, host moved -> UNJUDGEABLE (CrossCell)",
+          cross.Verdict == DependencyVerdict.Unjudgeable && cross.Reason == DependencyBlocker.CrossCell, cross.Why);
+    Check("dep: unresolved outranks deleted outranks the numbers (blocker order)",
+          DetectorModel.PlacementDependency(F(resolved: false, hostDeleted: true), T).Reason == DependencyBlocker.HostUnresolved
+       && DetectorModel.PlacementDependency(F(hostDeleted: true, moved: float.NaN), T).Reason == DependencyBlocker.HostDeleted, "first blocker wins");
+    var mk = DetectorModel.PlacementDependency(F(host: HostClass.Marker), T);
+    Check("dep: a marker host is still LEFT BEHIND by the rule — the split is the caller's, and the why names the class",
+          mk.Verdict == DependencyVerdict.LeftBehind && mk.Why.Contains("Marker host"), mk.Why);
+    Check("dep: XLKR and XAPR edges take the same rule",
+          DetectorModel.PlacementDependency(F(kind: HostEdgeKind.LinkedRef), T).Verdict == DependencyVerdict.LeftBehind
+       && DetectorModel.PlacementDependency(F(kind: HostEdgeKind.ActivateParent), T).Verdict == DependencyVerdict.LeftBehind, "all three kinds");
+
+    // Host class — the split that keeps toggles out of 4.5/4.6.
+    Check("dep: Static / MoveableStatic / Furniture / Container / Door -> PHYSICAL",
+          new[] { "Static", "MoveableStatic", "Furniture", "Container", "Door" }.All(t => DetectorModel.ClassifyHost(t, "Table01") == HostClass.Physical), "the things to rest on or hang from");
+    Check("dep: a Static named XMarker / XMarkerHeading -> MARKER (the editor id decides, not the record type)",
+          DetectorModel.ClassifyHost("Static", "XMarker") == HostClass.Marker
+       && DetectorModel.ClassifyHost("Static", "XMarkerHeading") == HostClass.Marker
+       && DetectorModel.ClassifyHost("Activator", "DefaultEnableMarker") == HostClass.Marker, "marker by name");
+    Check("dep: Activator / Light / Npc / unresolved base -> OTHER",
+          DetectorModel.ClassifyHost("Activator", "Lever01") == HostClass.Other
+       && DetectorModel.ClassifyHost("Light", "Candle01") == HostClass.Other
+       && DetectorModel.ClassifyHost("Npc", "Guard") == HostClass.Other
+       && DetectorModel.ClassifyHost(null, null) == HostClass.Other, "reported apart");
+
+    // Dependent class — the split the first live run forced: every physical-host LeftBehind row had an actor
+    // or a trigger as the dependent, and neither rests on anything.
+    Check("dep: a placed NPC, or an Npc / LeveledNpc base -> ACTOR",
+          DetectorModel.ClassifyDependent("PlacedNpc", "Npc", "ElisifTheFair") == DependentClass.Actor
+       && DetectorModel.ClassifyDependent("PlacedObject", "LeveledNpc", "LvlBandit") == DependentClass.Actor, "walks to its link wherever it is");
+    Check("dep: a trigger / marker / FX / idle-marker base -> CONTROL",
+          DetectorModel.ClassifyDependent("PlacedObject", "Activator", "MGR02FocalPointTrigger") == DependentClass.Control
+       && DetectorModel.ClassifyDependent("PlacedObject", "Static", "XMarkerHeading") == DependentClass.Control
+       && DetectorModel.ClassifyDependent("PlacedObject", "MoveableStatic", "FXMistLow01Adjust") == DependentClass.Control
+       && DetectorModel.ClassifyDependent("PlacedObject", "IdleMarker", "PatrolIdleMarker") == DependentClass.Control, "marks a spot, rests on nothing");
+    Check("dep: clutter, furniture, lights, fixtures, activators by name -> PHYSICAL",
+          DetectorModel.ClassifyDependent("PlacedObject", "Ingestible", "FoodApple") == DependentClass.Physical
+       && DetectorModel.ClassifyDependent("PlacedObject", "Light", "CandleHornTable01") == DependentClass.Physical
+       && DetectorModel.ClassifyDependent("PlacedObject", "Static", "WallSconce01") == DependentClass.Physical
+       && DetectorModel.ClassifyDependent("PlacedObject", "Activator", "Lever01") == DependentClass.Physical
+       && DetectorModel.ClassifyDependent("PlacedObject", "MiscItem", "Basket01") == DependentClass.Physical, "the apples and the sconce");
+    Check("dep: an unresolved base -> OTHER",
+          DetectorModel.ClassifyDependent("PlacedObject", null, null) == DependentClass.Other, "counted apart");
+
+    // Population — rule 12 for (mover, author).
+    Check("dep: vanilla mover, vanilla author -> FLOOR",
+          DetectorModel.ClassifyDependencyPopulation(true, true, false) == DependencyPopulation.BethesdaFloor, "class A");
+    Check("dep: USSEP mover -> its own row",
+          DetectorModel.ClassifyDependencyPopulation(false, true, true) == DependencyPopulation.UssepMover, "USSEP moving a vanilla host");
+    Check("dep: vanilla mover under a MOD's edge -> kept apart (the authoring-view assumption is weakest here)",
+          DetectorModel.ClassifyDependencyPopulation(true, false, false) == DependencyPopulation.VanillaMoverUnderModEdge, "Update.esm under a mod's XESP");
+    Check("dep: mod mover, any author -> MOD MOVER (the class)",
+          DetectorModel.ClassifyDependencyPopulation(false, true, false) == DependencyPopulation.ModMover
+       && DetectorModel.ClassifyDependencyPopulation(false, false, false) == DependencyPopulation.ModMover, "author split in the report");
+
+    // ---- The synthetic order: four plugins written with Mutagen, read back through the real extraction. ----
+    var root = Path.Combine(Path.GetTempPath(), "proofprobe-dep-" + Environment.ProcessId);
+    Directory.CreateDirectory(root);
+    var release = SkyrimRelease.SkyrimSE;
+    var mKey = new ModKey("DepMaster", ModType.Master);
+    var aKey = new ModKey("DepA", ModType.Plugin);
+    var bKey = new ModKey("DepB", ModType.Plugin);
+    var cKey = new ModKey("DepC", ModType.Plugin);
+    FormKey M(uint id) => new(mKey, id);
+    var tableK = M(0x801); var markerK = M(0x802); var cell1K = M(0x810); var cell2K = M(0x811);
+    FormKey H(int n) => M((uint)(0x900 + n));     // hosts
+    FormKey D(int n) => M((uint)(0xA00 + n));     // dependents
+    var aStaticK = new FormKey(aKey, 0x801);       // a record only A defines — what makes B master A
+
+    static void FileInterior(SkyrimMod mod, Cell cell)
+    {
+        uint id = cell.FormKey.ID;
+        int blockN = (int)(id % 10), subN = (int)((id / 10) % 10);
+        var records = mod.Cells.Records;
+        var block = records.FirstOrDefault(b => b.BlockNumber == blockN);
+        if (block is null) { block = new CellBlock { BlockNumber = blockN, GroupType = GroupTypeEnum.InteriorCellBlock }; records.Add(block); }
+        var sub = block.SubBlocks.FirstOrDefault(s => s.BlockNumber == subN);
+        if (sub is null) { sub = new CellSubBlock { BlockNumber = subN, GroupType = GroupTypeEnum.InteriorCellSubBlock }; block.SubBlocks.Add(sub); }
+        sub.Cells.Add(cell);
+    }
+    static PlacedObject Ref(FormKey key, FormKey baseKey, float x, float y = 0, float z = 0, string? edid = null, bool disabled = false)
+    {
+        var r = new PlacedObject(key, SkyrimRelease.SkyrimSE) { EditorID = edid, Placement = new Placement { Position = new P3Float(x, y, z), Rotation = new P3Float(0, 0, 0) } };
+        r.Base.SetTo(baseKey);
+        if (disabled) r.SkyrimMajorRecordFlags |= SkyrimMajorRecord.SkyrimMajorRecordFlag.InitiallyDisabled;
+        return r;
+    }
+    static PlacedObject Xesp(PlacedObject r, FormKey host) { r.EnableParent = new EnableParent(); r.EnableParent.Reference.SetTo(host); return r; }
+    static PlacedObject Xlkr(PlacedObject r, FormKey host) { var l = new LinkedReferences(); l.Reference.SetTo(host); r.LinkedReferences.Add(l); return r; }
+    static PlacedObject Xapr(PlacedObject r, FormKey host) { r.ActivateParents = new ActivateParents(); var ap = new ActivateParent { Delay = 0 }; ap.Reference.SetTo(host); r.ActivateParents.Parents.Add(ap); return r; }
+
+    string Write(SkyrimMod mod, params ISkyrimModGetter[] masters)
+    {
+        var path = Path.Combine(root, mod.ModKey.FileName.String);
+        mod.BeginWrite.ToPath(path).WithLoadOrder(masters).Write();
+        return path;
+    }
+
+    // The MASTER: two interior cells, a table static, a marker static, and the host/dependent pairs.
+    // Host n sits at x = 1000·n; its dependent sits 10u beside it (40u up — an apple on a table).
+    var master = new SkyrimMod(mKey, release);
+    master.Statics.Add(new Static(tableK, release) { EditorID = "DepTable" });
+    master.Statics.Add(new Static(markerK, release) { EditorID = "XMarkerHeading" });
+    var cell1 = new Cell(cell1K, release) { EditorID = "DepCell1", Flags = Cell.Flag.IsInteriorCell };
+    var cell2 = new Cell(cell2K, release) { EditorID = "DepCell2", Flags = Cell.Flag.IsInteriorCell };
+    foreach (int n in new[] { 1, 2, 3, 4, 6, 7, 8, 9, 10, 11, 14, 15, 16, 17, 18 })
+        cell1.Temporary.Add(Ref(H(n), tableK, 1000f * n, edid: $"Host{n}", disabled: n == 12));
+    cell1.Temporary.Add(Ref(H(12), tableK, 12000f, edid: "Host12", disabled: true));
+    cell1.Temporary.Add(Ref(H(5), markerK, 5000f, edid: "Host5Marker"));
+    foreach (int n in new[] { 1, 2, 3, 4, 5, 9, 10, 11, 12, 14, 16, 17, 18 })
+        cell1.Temporary.Add(Xesp(Ref(D(n), tableK, 1000f * n + 10, 0, 40, $"Dep{n}"), H(n)));
+    cell2.Temporary.Add(Xesp(Ref(D(6), tableK, 6010, 0, 40, "Dep6"), H(6)));            // cross-cell edge
+    cell1.Temporary.Add(Xlkr(Ref(D(7), tableK, 7010, 0, 40, "Dep7"), H(7)));            // XLKR
+    cell1.Temporary.Add(Xapr(Ref(D(8), tableK, 8010, 0, 40, "Dep8"), H(8)));            // XAPR
+    cell1.Temporary.Add(Xesp(Ref(D(13), tableK, 13010, 0, 40, "Dep13"), M(0xFFF)));     // host that exists nowhere
+    cell1.Temporary.Add(Ref(D(15), tableK, 15010, 0, 40, "Dep15"));                     // no edge until A adds one
+    cell1.Temporary.Add(Xlkr(Xesp(Ref(D(19), tableK, 1020, 0, 40, "Dep19"), H(1)), H(2))); // two edges, two hosts
+    cell1.Temporary.Add(Xesp(Ref(D(20), tableK, 1030, 0, 40, "Dep20"), H(1)));          // A will drop this edge
+    cell1.Temporary.Add(Xesp(Ref(D(21), tableK, 1040, 0, 40, "Dep21"), M(0x14)));        // enable parent = the player (the permanently-disabled idiom)
+    FileInterior(master, cell1); FileInterior(master, cell2);
+    var wKey = M(0x830); var topK = M(0x831); var gridK = M(0x832);
+    static Worldspace World(FormKey wKey, FormKey topK, FormKey gridK, PlacedObject? persistent, PlacedObject? temporary)
+    {
+        var ws = new Worldspace(wKey, SkyrimRelease.SkyrimSE) { EditorID = "DepWorld" };
+        ws.TopCell = new Cell(topK, SkyrimRelease.SkyrimSE) { Flags = default };
+        if (persistent is not null) ws.TopCell.Persistent.Add(persistent);
+        if (temporary is not null)
+        {
+            var gc = new Cell(gridK, SkyrimRelease.SkyrimSE) { Flags = default, Grid = new CellGrid { Point = new P2Int(0, 0) } };
+            gc.Temporary.Add(temporary);
+            var blk = new WorldspaceBlock { BlockNumberX = 0, BlockNumberY = 0, GroupType = GroupTypeEnum.ExteriorCellBlock };
+            var sub = new WorldspaceSubBlock { BlockNumberX = 0, BlockNumberY = 0, GroupType = GroupTypeEnum.ExteriorCellSubBlock };
+            sub.Items.Add(gc); blk.Items.Add(sub); ws.SubCells.Add(blk);
+        }
+        return ws;
+    }
+    master.Worldspaces.Add(World(wKey, topK, gridK,
+        Ref(H(22), tableK, 500, 500, 0, "Host22"),                               // persistent: lives in the worldspace's persistent cell
+        Xesp(Ref(D(22), tableK, 510, 500, 40, "Dep22"), H(22))));                // temporary: lives in grid cell (0,0)
+    var mPath = Write(master);
+
+    // PLUGIN A (masters DepMaster): the mover.
+    using var mOv = SkyrimMod.CreateFromBinaryOverlay(mPath, release);
+    var a = new SkyrimMod(aKey, release);
+    a.Statics.Add(new Static(aStaticK, release) { EditorID = "DepAStatic" });
+    var a1 = new Cell(cell1K, release) { Flags = Cell.Flag.IsInteriorCell };
+    var a2 = new Cell(cell2K, release) { Flags = Cell.Flag.IsInteriorCell };
+    foreach (int n in new[] { 1, 3, 4, 5, 6, 7, 8, 10, 11, 12, 14, 15 })                 // moved 200u
+        a1.Temporary.Add(Ref(H(n), n == 5 ? markerK : tableK, 1000f * n + 200, edid: n == 5 ? "Host5Marker" : $"Host{n}", disabled: n == 12));
+    a1.Temporary.Add(Ref(H(2), tableK, 2010, edid: "Host2"));                          // moved 10u
+    a1.Temporary.Add(Ref(H(17), tableK, 17016, edid: "Host17"));                       // exactly the threshold
+    a1.Temporary.Add(Ref(H(18), tableK, 18017, edid: "Host18"));                       // one past it
+    a2.Temporary.Add(Ref(H(16), tableK, 16000, edid: "Host16"));                       // relocated to cell 2, same coordinates
+    a1.Temporary.Add(Xesp(Ref(D(3), tableK, 3210, 0, 40, "Dep3"), H(3)));               // A moves the dependent too
+    a1.Temporary.Add(new PlacedObject(H(9), release) { IsDeleted = true });             // host deleted, placement stripped
+    a1.Temporary.Add(new PlacedObject(D(11), release) { IsDeleted = true });            // dependent deleted
+    a1.Temporary.Add(Xesp(Ref(D(14), tableK, 14010, 0, 40, "Dep14"), H(14)));           // forwarded unchanged: the edge's author stays the master
+    a1.Temporary.Add(Xesp(Ref(D(15), tableK, 15010, 0, 40, "Dep15"), H(15)));           // A SETS this edge — its own view of H15 is the moved one
+    a1.Temporary.Add(Ref(D(20), tableK, 1030, 0, 40, "Dep20"));                         // edge dropped
+    FileInterior(a, a1); FileInterior(a, a2);
+    a.Worldspaces.Add(World(wKey, topK, gridK, Ref(H(22), tableK, 700, 500, 0, "Host22"), null));   // A moves the persistent host 200u
+    var aPath = Write(a, mOv);
+
+    // PLUGIN B (masters DepMaster AND DepA): re-places Dep4 after A moved Host4 — the patch shape.
+    using var aOv = SkyrimMod.CreateFromBinaryOverlay(aPath, release);
+    var b = new SkyrimMod(bKey, release);
+    var b1 = new Cell(cell1K, release) { Flags = Cell.Flag.IsInteriorCell };
+    b1.Temporary.Add(Xesp(Ref(D(4), tableK, 4210, 0, 40, "Dep4"), H(4)));
+    b1.Temporary.Add(Ref(new FormKey(bKey, 0x801), aStaticK, 99000, edid: "DepBRef"));   // references A -> masters A
+    FileInterior(b, b1);
+    var bPath = Write(b, mOv, aOv);
+
+    // PLUGIN C (masters DepMaster only): re-places Dep10 without ever seeing A — the third party.
+    var c = new SkyrimMod(cKey, release);
+    var c1 = new Cell(cell1K, release) { Flags = Cell.Flag.IsInteriorCell };
+    c1.Temporary.Add(Xesp(Ref(D(10), tableK, 10050, 0, 40, "Dep10"), H(10)));
+    FileInterior(c, c1);
+    var cPath = Write(c, mOv);
+
+    // Read the order back the way depprobe does.
+    var paths = new[] { mPath, aPath, bPath, cPath };
+    var idx = new DependencyIndex();
+    var keys = new ModKey[paths.Length];
+    var masterIdx = new HashSet<int>[paths.Length];
+    for (int p = 0; p < paths.Length; p++)
+    {
+        using var mod = SkyrimMod.CreateFromBinaryOverlay(paths[p], release);
+        keys[p] = mod.ModKey;
+        var names = mod.ModHeader.MasterReferences.Select(x => x.Master).ToHashSet();
+        masterIdx[p] = Enumerable.Range(0, p).Where(q => names.Contains(keys[q])).ToHashSet();
+        idx.Ingest(p, mod);
+    }
+    var closure = DetectorModel.MasterClosure(masterIdx);
+    Check("dep-synth: the written order has the declared masters it was built to have",
+          masterIdx[1].SetEquals(new[] { 0 }) && masterIdx[2].SetEquals(new[] { 0, 1 }) && masterIdx[3].SetEquals(new[] { 0 }),
+          $"A<-[{string.Join(",", masterIdx[1])}] B<-[{string.Join(",", masterIdx[2])}] C<-[{string.Join(",", masterIdx[3])}]");
+    var rows = idx.Edges.Select(e => idx.Judge(e, closure))
+                  .ToDictionary(r => (r.Edge.Dependent, r.Edge.Kind), r => (Row: r, V: DetectorModel.PlacementDependency(r.Facts, T)));
+    (DependencyVerdict Verdict, DependencyBlocker Reason, string Why) V(int n, HostEdgeKind k = HostEdgeKind.EnableParent)
+        => rows.TryGetValue((D(n), k), out var x) ? x.V : (DependencyVerdict.Intact, DependencyBlocker.None, "(edge not extracted)");
+    string W(int n, HostEdgeKind k = HostEdgeKind.EnableParent) => V(n, k).Why;
+
+    Check("dep-synth: all three edge kinds are extracted (XESP, XLKR, XAPR), and the dropped edge is gone",
+          rows.ContainsKey((D(1), HostEdgeKind.EnableParent)) && rows.ContainsKey((D(7), HostEdgeKind.LinkedRef))
+       && rows.ContainsKey((D(8), HostEdgeKind.ActivateParent)) && !rows.ContainsKey((D(20), HostEdgeKind.EnableParent)),
+          $"{idx.EdgeCount} edges");
+    Check("dep-synth: A moves Host1 200u, Dep1 untouched -> LEFT BEHIND, physical host",
+          V(1).Verdict == DependencyVerdict.LeftBehind && rows[(D(1), HostEdgeKind.EnableParent)].Row.Facts.Host == HostClass.Physical, W(1));
+    Check("dep-synth: A moves Host2 10u -> INTACT", V(2).Verdict == DependencyVerdict.Intact, W(2));
+    Check("dep-synth: A moves Host3 and Dep3 -> MOVED TOGETHER", V(3).Verdict == DependencyVerdict.MovedTogether, W(3));
+    Check("dep-synth: A moves Host4, B (masters A) re-places Dep4 -> MOVED TOGETHER (the patch shape)",
+          V(4).Verdict == DependencyVerdict.MovedTogether, W(4));
+    Check("dep-synth: A moves the marker host -> LEFT BEHIND with Host = MARKER (the toggle row)",
+          V(5).Verdict == DependencyVerdict.LeftBehind && rows[(D(5), HostEdgeKind.EnableParent)].Row.Facts.Host == HostClass.Marker, W(5));
+    Check("dep-synth: dependent in the other cell -> UNJUDGEABLE (CrossCell)",
+          V(6).Reason == DependencyBlocker.CrossCell, W(6));
+    Check("dep-synth: XLKR edge, host moved -> LEFT BEHIND", V(7, HostEdgeKind.LinkedRef).Verdict == DependencyVerdict.LeftBehind, W(7, HostEdgeKind.LinkedRef));
+    Check("dep-synth: XAPR edge, host moved -> LEFT BEHIND", V(8, HostEdgeKind.ActivateParent).Verdict == DependencyVerdict.LeftBehind, W(8, HostEdgeKind.ActivateParent));
+    Check("dep-synth: A deletes Host9 (placement stripped) -> UNJUDGEABLE (HostDeleted), caught off the record walk",
+          V(9).Reason == DependencyBlocker.HostDeleted && idx.DeletedBy.ContainsKey(H(9)), W(9));
+    Check("dep-synth: A moves Host10, C (does not master A) re-places Dep10 -> UNJUDGEABLE (third party)",
+          V(10).Reason == DependencyBlocker.DependentMovedByThirdParty, W(10));
+    Check("dep-synth: A moves Host11 and deletes Dep11 -> DEPENDENT REMOVED",
+          V(11).Verdict == DependencyVerdict.DependentRemoved, W(11));
+    Check("dep-synth: initially-disabled Host12 moved -> UNJUDGEABLE (HostDisabled)",
+          V(12).Reason == DependencyBlocker.HostDisabled, W(12));
+    Check("dep-synth: edge to a host no plugin places -> UNJUDGEABLE (HostUnresolved)",
+          V(13).Reason == DependencyBlocker.HostUnresolved, W(13));
+    Check("dep-synth: enable parent = the player reference -> UNJUDGEABLE (HostIsPlayer), matched on the raw id",
+          V(21).Reason == DependencyBlocker.HostIsPlayer, W(21));
+    Check("dep-synth: a table-based dependent on a table host is PHYSICAL on both sides — the support-shaped row",
+          rows[(D(1), HostEdgeKind.EnableParent)].Row.Dependent == DependentClass.Physical
+       && rows[(D(1), HostEdgeKind.EnableParent)].Row.Facts.Host == HostClass.Physical, "Dep1 on Host1");
+    Check("dep-synth: A forwards Dep14's edge unchanged -> the master stays the author, Host14's move is LEFT BEHIND",
+          rows[(D(14), HostEdgeKind.EnableParent)].Row.Edge.Author == 0 && V(14).Verdict == DependencyVerdict.LeftBehind, W(14));
+    Check("dep-synth: A SETS Dep15's edge itself -> A is the author, and its own view of Host15 is the moved one: INTACT",
+          rows[(D(15), HostEdgeKind.EnableParent)].Row.Edge.Author == 1 && V(15).Verdict == DependencyVerdict.Intact, W(15));
+    Check("dep-synth: Host16 relocated to the other cell at the same coordinates -> LEFT BEHIND (space change)",
+          V(16).Verdict == DependencyVerdict.LeftBehind && rows[(D(16), HostEdgeKind.EnableParent)].Row.Facts.HostChangedSpace, W(16));
+    Check("dep-synth: EXTERIOR — persistent host in the worldspace's persistent cell, dependent in a grid cell: same SPACE, host moved -> LEFT BEHIND, not CrossCell",
+          V(22).Verdict == DependencyVerdict.LeftBehind && rows[(D(22), HostEdgeKind.EnableParent)].Row.Facts.SameSpaceAtAuthoring
+       && rows[(D(22), HostEdgeKind.EnableParent)].Row.HostThen!.Value.Cell != rows[(D(22), HostEdgeKind.EnableParent)].Row.DepThen!.Value.Cell, W(22));
+    Check("dep-synth: A forwarded Dep14's record unchanged -> the row says the mover's side OVERRODE it (seen, left); Dep1's does not",
+          rows[(D(14), HostEdgeKind.EnableParent)].Row.DependentTouchedByMoverSide && !rows[(D(1), HostEdgeKind.EnableParent)].Row.DependentTouchedByMoverSide,
+          "reported beside the verdict, never folded into it");
+    Check("dep-synth: the authored host-dependent offset is measured in the author's view (Dep1: 10u across, 40u up)",
+          MathF.Abs(rows[(D(1), HostEdgeKind.EnableParent)].Row.AuthoredOffset - MathF.Sqrt(10f * 10f + 40f * 40f)) < 0.01f
+       && float.IsNaN(rows[(D(6), HostEdgeKind.EnableParent)].Row.AuthoredOffset),
+          $"{rows[(D(1), HostEdgeKind.EnableParent)].Row.AuthoredOffset:0.00}u; cross-space is NaN");
+    Check("dep-synth: Host17 moved exactly 16u -> INTACT; Host18 moved 17u -> LEFT BEHIND",
+          V(17).Verdict == DependencyVerdict.Intact && V(18).Verdict == DependencyVerdict.LeftBehind, $"{W(17)} | {W(18)}");
+    Check("dep-synth: a dependent with two edges gets two rows, judged apart",
+          V(19, HostEdgeKind.EnableParent).Verdict == DependencyVerdict.LeftBehind && V(19, HostEdgeKind.LinkedRef).Verdict == DependencyVerdict.Intact,
+          "XESP->Host1 left behind, XLKR->Host2 intact");
+    Check("dep-synth: the mover is A for every moved host, and the placement count is the written one",
+          rows.Values.Where(x => x.V.Verdict == DependencyVerdict.LeftBehind).All(x => x.Row.Mover == 1) && idx.History.Count == 41,   // 18 hosts + 22 dependents + B's own ref
+          $"{idx.History.Count} refs in the history");
+    try { Directory.Delete(root, true); } catch { }
 }
 
 // ---------------------------------------------------------------------------------------
