@@ -237,6 +237,15 @@ bool navDiff = true;
 // render draws it and why not. "Is there an object here that isn't being rendered?" is a
 // question the picture cannot answer, because the answer is a thing you cannot see.
 var refsAt = new List<(float X, float Y, float R)>();
+// --inside-at X,Y,Z names every physical winning reference whose OBND box, placed by the ref's
+// own transform (SpatialOverlap.ToWorld — the engine's composition), ENCLOSES a world point.
+// "Is this camera standing inside a bookcase" is a question the navmesh test cannot answer
+// (navmesh runs up to furniture, and the placement test allows a camera off-mesh) and the depth
+// probe answers WRONG: a knee-height probe looks out through the open back of the case and
+// reports clear — two low cameras in a row sat inside one (2026-09-03). Every enclosing box is
+// printed with its dimensions; what a room-scale box means is the caller's decision, so no cap
+// is applied here.
+var insideAt = new List<(float X, float Y, float Z)>();
 // --euler renders the SAME cell under all six Euler compositions. The numeric tests could not
 // separate them (0.62%-0.69%, then 1.84%-2.08%), which is itself a finding — but a wrong order
 // scatters kit pieces by hundreds of units, and that is trivially visible even when it is
@@ -409,6 +418,8 @@ for (int i = argStart; i < args.Length; i++)
     { var p = args[++i].Split(','); if (p.Length == 2) navAt.Add((float.Parse(p[0]), float.Parse(p[1]))); }
     else if (args[i] == "--refs-at" && i + 1 < args.Length)
     { var p = args[++i].Split(','); if (p.Length >= 2) refsAt.Add((float.Parse(p[0]), float.Parse(p[1]), p.Length > 2 ? float.Parse(p[2]) : 256f)); }
+    else if (args[i] == "--inside-at" && i + 1 < args.Length)
+    { var p = args[++i].Split(','); if (p.Length == 3) insideAt.Add((float.Parse(p[0]), float.Parse(p[1]), float.Parse(p[2]))); }
     else if (args[i] == "--nav-color" && i + 1 < args.Length) navColor = args[++i].ToLowerInvariant();
     else if (args[i] == "--npc" && i + 1 < args.Length) { npcSpecs.Add(args[++i]); textured = true; }
     else if (args[i] == "--npc-no-outfit") npcNoOutfit = true;
@@ -766,6 +777,14 @@ var navByPlugin = new Dictionary<string, Dictionary<FormKey, NavmeshGeometry>>(S
 var baseMesh = new Dictionary<FormKey, string>();
 var baseIsMarker = new HashSet<FormKey>();
 var baseEditorId = new Dictionary<FormKey, string>();
+// Base record TYPE and OBND, for --refs-at (WHAT is near a spot: a Door, a Container) and
+// --inside-at (whose box a point is in). Modeled bases only — the set baseMesh covers —
+// winner-takes-all in load order like everything here.
+var baseType = new Dictionary<FormKey, string>();
+var baseObnd = new Dictionary<FormKey, (Vec3 Min, Vec3 Max)>();
+// Model-space render soups for the --inside-at ray test, by mesh path (the flat build keeps its
+// own cache further down; this one is filled only for the few refs whose box encloses a query).
+var insideGeo = new Dictionary<string, TriangleSoup?>(StringComparer.OrdinalIgnoreCase);
 var ltexToTxst = new Dictionary<FormKey, FormKey>();
 var ltexEditorId = new Dictionary<FormKey, string>();
 var txstDiffuse = new Dictionary<FormKey, string>();
@@ -836,6 +855,82 @@ string? DisabledWhy(PlacedRef r) =>
     RefEnabled(r.FormKey) ? null
     : refEnableParent.TryGetValue(r.FormKey, out var dp) ? $"disabled via enable parent {dp.Parent}"
     : "initially disabled";
+// The base types a camera can be INSIDE (--inside-at): the placement-contact rule's physical
+// hosts plus the solid dependents, minus items and lights — a light's OBND is its radius, and
+// a camera is "inside" every light in the room. A literal set rather than DetectorModel's
+// classifiers: viewprobe compiles without them, and "can a camera be in this" is a narrower
+// question than "can this hold something". Control objects (markers, triggers, FX) are the
+// same exclusions the rule makes.
+var insidePhysical = new HashSet<string> { "Static", "MoveableStatic", "Furniture", "Container", "Door", "Activator", "Tree", "Flora" };
+bool IsControlEditorId(string ed) =>
+    ed.Contains("marker", StringComparison.OrdinalIgnoreCase) || ed.Contains("trigger", StringComparison.OrdinalIgnoreCase)
+    || ed.StartsWith("FX", StringComparison.Ordinal);
+// An OBND box cannot tell a bookcase from a room: a tower-kit wall piece's box (966x966x384 u,
+// measured 2026-09-03) encloses every camera in the room it walls, exactly as a bookcase's box
+// encloses a camera on its shelf. So the box only NOMINATES; the ref's own render mesh decides.
+// Six world-axis rays from the point against that mesh: a shelf above and below and a back panel
+// behind all hit within arm's reach, a room's walls do not. The distances are printed per axis
+// and the caller applies its reach and count; a mesh that cannot be read is said, and the box
+// stands alone as the weaker answer.
+TriangleSoup? InsideSoupFor(string rel)
+{
+    if (insideGeo.TryGetValue(rel, out var cached)) return cached;
+    TriangleSoup? soup = null;
+    var full = rel.StartsWith("meshes", StringComparison.OrdinalIgnoreCase) ? rel : Path.Combine("meshes", rel);
+    var res = assets.ResolveForPlacement(full);
+    if (res.Sources.Count > 0)
+    {
+        var (bytes, _) = AssetResolver.ReadPlacementSource(res.Sources[0]);
+        if (bytes is not null)
+        {
+            var o = NifGeometry.Measure(bytes, includeTriangles: true);
+            if (o.Model?.Soup is { TriangleCount: > 0 and <= 300_000 } s) soup = s;
+        }
+    }
+    insideGeo[rel] = soup;
+    return soup;
+}
+// Nearest hit along a ray against a world-space soup (Möller–Trumbore, both faces), or null
+// when nothing is hit within `limit`.
+static float? NearestHit(Vector3 o, Vector3 d, Vector3[] v, int[] idx, float limit)
+{
+    float? best = null;
+    for (int i = 0; i + 2 < idx.Length; i += 3)
+    {
+        var a = v[idx[i]];
+        var e1 = v[idx[i + 1]] - a;
+        var e2 = v[idx[i + 2]] - a;
+        var p = Vector3.Cross(d, e2);
+        float det = Vector3.Dot(e1, p);
+        if (MathF.Abs(det) < 1e-6f) continue;
+        float inv = 1f / det;
+        var s = o - a;
+        float u = Vector3.Dot(s, p) * inv;
+        if (u < 0f || u > 1f) continue;
+        var q = Vector3.Cross(s, e1);
+        float w = Vector3.Dot(d, q) * inv;
+        if (w < 0f || u + w > 1f) continue;
+        float t = Vector3.Dot(e2, q) * inv;
+        if (t > 1e-3f && t <= limit && (best is null || t < best)) best = t;
+    }
+    return best;
+}
+string InsideRays(PlacedRef r, string mesh, float qx, float qy, float qz)
+{
+    if (InsideSoupFor(mesh) is not { } soup) return "rays n/a (mesh not loaded)";
+    var m = SpatialOverlap.RefrRotation(r.Rotation);
+    var t = new Vector3(r.Position.X, r.Position.Y, r.Position.Z);
+    var wv = new Vector3[soup.Vertices.Length];
+    for (int i = 0; i < wv.Length; i++) wv[i] = Vector3.Transform(soup.Vertices[i] * r.Scale, m) + t;
+    var o = new Vector3(qx, qy, qz);
+    var dirs = new (string Name, Vector3 D)[]
+    {
+        ("+x", Vector3.UnitX), ("-x", -Vector3.UnitX), ("+y", Vector3.UnitY), ("-y", -Vector3.UnitY),
+        ("up", Vector3.UnitZ), ("down", -Vector3.UnitZ),
+    };
+    return "rays " + string.Join(" ", dirs.Select(dd =>
+        dd.Name + " " + (NearestHit(o, dd.D, wv, soup.Indices, 4096f) is { } h ? h.ToString("0") : "-")));
+}
 
 // ---------------------------------------------------------------------------------------
 // ONE CELL'S WORK, as a function: resolve the cell's identity, walk the load order for its
@@ -1027,6 +1122,14 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot)
                     bool marker = (smr.MajorRecordFlagsRaw & 0x00800000) != 0;
                     if (marker) baseIsMarker.Add(smr.FormKey);
                     if (!string.IsNullOrWhiteSpace(smr.EditorID)) baseEditorId[smr.FormKey] = smr.EditorID!;
+                    baseType[smr.FormKey] = rec.GetType().Name.Replace("BinaryOverlay", "");
+                    // OBND as the record states it — its own offset kept, not centred on the
+                    // origin — so the world box lands where the engine's bounds do.
+                    if (rec is IObjectBoundedGetter ob && ob.ObjectBounds is { } bnd)
+                        baseObnd[smr.FormKey] = (
+                            new Vec3(Math.Min(bnd.First.X, bnd.Second.X), Math.Min(bnd.First.Y, bnd.Second.Y), Math.Min(bnd.First.Z, bnd.Second.Z)),
+                            new Vec3(Math.Max(bnd.First.X, bnd.Second.X), Math.Max(bnd.First.Y, bnd.Second.Y), Math.Max(bnd.First.Z, bnd.Second.Z)));
+                    else baseObnd.Remove(smr.FormKey);
                 }
                 // STAT.Material -> MATO, with STAT.MaxAngle beside it. This is the ONLY path a
                 // covering reaches the world by (Static is the only modeled record type carrying
@@ -1336,12 +1439,51 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot)
                            : baseMesh[bk0].Replace('/', (char)92).Contains("effects" + (char)92, StringComparison.OrdinalIgnoreCase) && !keepFx ? "not drawn: FX (--fx)"
                            : r.InitiallyDisabled ? "drawn (enable parent resolves ENABLED)"
                            : "drawn";
+                // base TYPE first, then FormKey, then EditorID or '-': a parser can take the row
+                // by position, and "Door" is the word a caller closing doors is looking for.
                 string bse = r.Base is { } bk1
-                    ? bk1 + (baseEditorId.TryGetValue(bk1, out var be) ? $" {be}" : "")
+                    ? (baseType.TryGetValue(bk1, out var bt) ? bt : "?") + " " + bk1
+                      + " " + (baseEditorId.TryGetValue(bk1, out var be) ? be : "-")
                       + (baseMesh.TryGetValue(bk1, out var bm) ? $"  {bm}" : "")
                     : "(none)";
                 Console.WriteLine($"      {d,6:0} u  {r.FormKey}  at {r.Position.X:0},{r.Position.Y:0},{r.Position.Z:0}"
                                 + $"  scale {r.Scale:0.00}  [{why}]  base {bse}");
+            }
+        }
+        foreach (var (qx, qy, qz) in insideAt)
+        {
+            var hits = new List<(PlacedRef Ref, string Type, string? Edid, Aabb Box)>();
+            foreach (var r in winRef.Values)
+            {
+                if (r.Deleted || DisabledWhy(r) is not null || r.Base is not { } bk) continue;
+                if (!baseType.TryGetValue(bk, out var bt) || !insidePhysical.Contains(bt)) continue;
+                if (baseIsMarker.Contains(bk)) continue;
+                if (baseEditorId.TryGetValue(bk, out var ed) && IsControlEditorId(ed)) continue;
+                if (baseMesh.TryGetValue(bk, out var bm)
+                    && (Path.GetFileName(bm).StartsWith("MarkerX", StringComparison.OrdinalIgnoreCase)
+                        || bm.Replace('/', '\\').Contains(@"effects\", StringComparison.OrdinalIgnoreCase))) continue;   // an FX volume encloses without obstructing
+                if (!baseObnd.TryGetValue(bk, out var ob)) continue;
+                var model = new Aabb(ob.Min, ob.Max, false);
+                if (model.Size.X <= 0 && model.Size.Y <= 0 && model.Size.Z <= 0) continue;
+                var box = SpatialOverlap.ToWorld(model, r.Position, r.Rotation, r.Scale);
+                if (box.IsEmpty) continue;
+                if (qx < box.Min.X || qx > box.Max.X || qy < box.Min.Y || qy > box.Max.Y || qz < box.Min.Z || qz > box.Max.Z) continue;
+                hits.Add((r, bt, ed, box));
+            }
+            if (hits.Count == 0)
+            {
+                Console.WriteLine($"   inside-at {qx:0},{qy:0},{qz:0}: no physical ref's box encloses it");
+                continue;
+            }
+            Console.WriteLine($"   inside-at {qx:0},{qy:0},{qz:0}: {hits.Count} ref(s) whose box encloses it (smallest first)");
+            foreach (var (r, t, ed, box) in hits.OrderBy(h => MathF.Max(h.Box.Size.X, MathF.Max(h.Box.Size.Y, h.Box.Size.Z))))
+            {
+                var s = box.Size;
+                string mesh = baseMesh.TryGetValue(r.Base!.Value, out var bm2) ? bm2 : "";
+                string rays = mesh.Length > 0 ? InsideRays(r, mesh, qx, qy, qz) : "rays n/a (no mesh)";
+                Console.WriteLine($"      {r.FormKey}  {t}  {ed ?? "-"}  dims {s.X:0}x{s.Y:0}x{s.Z:0} u"
+                                + $"  at {r.Position.X:0},{r.Position.Y:0},{r.Position.Z:0}  scale {r.Scale:0.00}"
+                                + $"  {rays}" + (mesh.Length > 0 ? $"  mesh {mesh}" : ""));
             }
         }
 

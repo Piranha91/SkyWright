@@ -98,6 +98,19 @@ public sealed record WorklistNpc(
 /// <param name="Props">Synthetic placed objects drawn in this shot only — see <see cref="WorklistProp"/>.</param>
 /// <param name="Routes">Further paths, planned or measured, each in its own colour — see <see cref="WorklistRoute"/>. Drawn alongside <paramref name="Route"/>, which stays the one-route shorthand.</param>
 /// <param name="Npcs">Actors stood in this shot only, on top of the command line's --npc — see <see cref="WorklistNpc"/>.</param>
+/// <param name="Feet">
+/// Where the PLAYER stands for this shot: [X, Y, Z] at the FLOOR — the point the planner's placement
+/// test passed, which shotplan.py writes for every shot it emits. A runner takes its spot from here
+/// rather than typing a coordinate at the storey's height: a multi-storey interior's floor can be a
+/// ring round a void, and a typed spot dropped a player 765 u onto the storey below (2026-09-03).
+/// Absent means "the eye's X,Y at FloorZ"; present says so explicitly. The render ignores it.
+/// </param>
+/// <param name="Doors">
+/// FormKeys ("XXXXXX:Plugin.esp") of the Door refs near this shot's subjects, for a runner to close
+/// (ObjectReference.SetOpen false) before driving the camera. The records say a door is closed; the
+/// game can leave its leaf standing open across the only clear bearing (2026-09-03). Written by
+/// shotplan.py from --refs-at. The render ignores it.
+/// </param>
 public sealed record WorklistShot(
     string Label,
     IReadOnlyList<float> Eye,
@@ -112,7 +125,9 @@ public sealed record WorklistShot(
     IReadOnlyList<IReadOnlyList<float>>? Route = null,
     IReadOnlyList<WorklistProp>? Props = null,
     IReadOnlyList<WorklistRoute>? Routes = null,
-    IReadOnlyList<WorklistNpc>? Npcs = null);
+    IReadOnlyList<WorklistNpc>? Npcs = null,
+    IReadOnlyList<float>? Feet = null,
+    IReadOnlyList<string>? Doors = null);
 
 /// <summary>The shots that share one loaded cell — i.e. one load screen's worth of work.</summary>
 /// <param name="Cell">CellEditorID or FormID, the same string viewprobe takes as its first argument.</param>
@@ -265,6 +280,11 @@ public static class WorklistIo
                         if (np is null || string.IsNullOrWhiteSpace(np.Form)) Bad($"{sw}: npcs[{ni}] has no form.");
                         if (np!.Pos is not null && np.Pos.Count != 3) Bad($"{sw}: npcs[{ni}] '{np.Form}': pos must be [X, Y, Z].");
                     }
+                if (s.Feet is not null && s.Feet.Count != 3) Bad($"{sw}: feet must be [X, Y, Z] at the floor.");
+                if (s.Doors is not null)
+                    for (int di = 0; di < s.Doors.Count; di++)
+                        if (string.IsNullOrWhiteSpace(s.Doors[di]) || !s.Doors[di].Contains(':'))
+                            Bad($"{sw}: doors[{di}] must be a FormKey \"XXXXXX:Plugin.esp\".");
             }
         }
     }

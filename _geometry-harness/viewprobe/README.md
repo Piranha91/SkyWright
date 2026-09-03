@@ -159,7 +159,8 @@ All repeatable, all print to the console.
 |---|---|
 | `--pick X,Y` | what is at this IMAGE pixel — unprojects the finished frame's depth to Skyrim coordinates, the cell, the distance, and the LAND surface height there |
 | `--nav-at X,Y` | is there navmesh at this world X,Y — every winning triangle whose 2D footprint covers it, INCLUDING ones the render filters out and why; or the distance to the nearest triangle if none do. Reports every level, so a multi-storey interior returns one row per floor |
-| `--refs-at X,Y[,R]` | every winning reference within R (default 256) of a world X,Y, each with its base, mesh, and whether the render draws it (and if not, why not) |
+| `--refs-at X,Y[,R]` | every winning reference within R (default 256) of a world X,Y, each with its base's TYPE (`Door`, `Container`, `Static`…), FormKey, EditorID and mesh, and whether the render draws it (and if not, why not). The type is the field a caller closing doors before a shot looks for |
+| `--inside-at X,Y,Z` | which physical winning refs' OBND boxes ENCLOSE a world point, each with its box dimensions and six world-axis ray distances against the ref's OWN mesh (nearest hit ±x, ±y, up, down; `-` beyond 4096 u). The box only nominates — a tower-kit wall piece's box (966×966×384 u) encloses every camera in the room it walls — and the rays decide: a bookcase reads hits on three or more axes within arm's reach, a room piece's rays run to its walls. Physical types only (statics, furniture, containers, doors, activators, trees, flora); markers, control objects and effect volumes are skipped. Added 2026-09-03 for the shot planner's inside test |
 | `--list-terrain` | per cell quadrant: the base layer and every alpha layer, with LTEX EditorID, resolved diffuse, and how many of its 289 opacity points are painted |
 | `--find-ltex SUBSTR` | the LTEX records matching a name, then a walk of the WHOLE worldspace reporting which cells paint them and how heavily. Picking a demonstration cell from memory is guessing; this makes it a lookup |
 
@@ -610,8 +611,10 @@ malformed shot list found after a multi-minute walk is a multi-minute walk waste
         { "label": "the sentence that says why this shot is worth a look",
           "eye": [-26671, -84175, -2117],
           "floorZ": -2237,
+          "feet": [-26671, -84175, -2237],
           "yaw": 0, "pitch": 0, "fov": 65,
           "route": [[-26671, -84175], [-26520, -84900], [-26372, -85500]],
+          "doors": ["06149D:Some Plugin.esp"],
           "note": "optional; printed on arrival and in the bat manifest" }
       ] }
   ]
@@ -623,6 +626,16 @@ malformed shot list found after a multi-minute walk is a multi-minute walk waste
   eye buries the tester's feet. Source `floorZ` from `--nav-at`, which answers *standable*; a
   `--pick` answers *some surface is here*, which is not the same question. With no `floorZ` the
   generator falls back to `eye.z − eyeHeight` and SAYS it assumed rather than measured.
+- **`feet`** (added 2026-09-03) is where the PLAYER stands for the shot — `[X, Y, Z]` at the floor,
+  the point the planner's placement test passed. `shotplan.py plan` writes it on every shot; a
+  runner takes its spot from here rather than typing a coordinate at the storey's height (a
+  multi-storey interior's floor can be a ring round a void, and a typed spot dropped a player 765 u
+  onto the storey below). Absent means "the eye's X,Y at `floorZ`". The render ignores it.
+- **`doors`** (added 2026-09-03) lists the FormKeys of the drawn Door refs near the shot's subjects,
+  for a runner to close (`ObjectReference.SetOpen(false)`) before driving the camera: the records
+  say a door is closed, and the game can leave its leaf standing open across the only clear
+  bearing. `shotplan.py plan` fills it from `--refs-at` within `--door-radius`. The render ignores
+  it.
 - **`look: [X,Y,Z]`** may replace `yaw`/`pitch`, resolving the same way `--look` does.
 - **`nav`** and **`cullAbove`** are optional per-shot overrides. `nav` applies exactly (it is a
   visibility flip). `cullAbove` in the window drives the SHAPE-granular live band, not the
@@ -1501,7 +1514,29 @@ coupled. Compose low if the shot wants it; probe at head height regardless.
 
 **Feed it RUNTIME positions when a game is available.** An actor is placed at its governing AI
 package's anchor on cell load, not at its placement record — one measured NPC stood 1,617 u from
-hers. The tool takes coordinates and never FormIDs precisely so it can be fed either.
+hers. `--subject-from-game FORMID[=label]` reads a subject's position off the running game
+(DevBench `inspect kind=refs`; a runtime `0x........` id or a FormKey resolved through the game's
+own load index) and REFUSES, naming where the port comes from, when no game answers. A movable
+item whose host was taken away has dropped by the time the cell is loaded (2026-09-03, a chitin's
+frame found a barrel), so the rule is: **plan a movable subject from the game, after the load
+read.** `--subject` still takes coordinates from anywhere else.
+
+**Three things the GAME decides at runtime, and what the planner does about each** (all three put
+a wrong thing in a planned frame on 2026-09-03). A **door leaf standing open** across the clear
+bearing — the records say closed: every drawn Door ref within `--door-radius` (300 u, the radius
+that fixed the frame) of a subject goes into the worklist shot as `doors`, printed under the
+chosen pose, for the runner to close before the shot. A **camera inside furniture** — navmesh
+runs up to a bookcase, the placement test allows a camera off-mesh, and the depth probe from a
+knee-height eye looks out through the case's open back: pass 3 now carries `--inside-at` for
+every survivor, and an eye whose nominating ref has geometry within `--inside-reach` (96 u) on
+`--inside-rays` (3) of the six axes is refused as ENCLOSED, by name; `check` prints the same
+verdict for a camera you already have. The nominating box alone cannot refuse (a kit wall piece's
+box encloses the room it walls), so a ref whose mesh cannot be read falls back to the box with
+`--inside-cap` and says so. The **moved subject** is the paragraph above. And one thing the planner
+could always have known: **plan against the ARM's profile.** Both bookcase cameras of 2026-09-03
+were planned on the patch-ON profile for patch-OFF frames; the bookcase the camera sat in is one
+the patch disables, so the ON records did not contain it and no test on them could have refused
+the eye. Against the OFF profile the same eyes read ENCLOSED on 5 and 4 of 6 axes within 14 u.
 
 **What it cannot see is what `--pick` cannot see:** the transparent pass. Alpha-blended geometry
 draws with depth writes off, so a camera can be sited behind a curtain and reported clear. The

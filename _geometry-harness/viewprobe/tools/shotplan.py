@@ -46,10 +46,23 @@ arithmetic between them.
     is a bad picture, not a wrong verdict -- read the frame.
 
     Placements are records. Actors are NOT where their placement records say:
-    an actor is put at its governing AI package's anchor on cell load. Feed
-    subject positions from the RUNNING game (DevBench `inspect kind=refs`)
-    whenever the game is available; this tool takes coordinates, never FormIDs,
-    precisely so it can be fed either.
+    an actor is put at its governing AI package's anchor on cell load, and a
+    MOVABLE item whose host was taken away has dropped by the time the cell is
+    loaded. Feed subject positions from the RUNNING game whenever it is up:
+    `--subject-from-game FORMID[=label]` reads them off DevBench (`inspect
+    kind=refs`) and refuses, naming the port, when no game answers; `--subject`
+    takes coordinates from anywhere else.
+
+    Three more things the GAME decides at runtime, each of which put a wrong
+    thing in a planned frame on 2026-09-03, and what this tool now does about
+    each: a DOOR LEAF standing open across the clear bearing (the records say
+    closed) -- every drawn Door ref within `--door-radius` of a subject goes
+    into the worklist shot as `doors`, for the runner to close before the
+    shot; a camera INSIDE FURNITURE (navmesh runs up to a bookcase, the
+    placement test allows a camera off-mesh, and the depth probe looks out
+    through the case's open back) -- `--inside-at` asks whose box the eye is
+    in, and the placement pass refuses an eye inside any physical ref's box up
+    to `--inside-cap`; and the moved subject above.
 
     THE CONVENTION SEAM
     -------------------
@@ -78,6 +91,8 @@ import shlex
 import subprocess
 import sys
 import time
+import urllib.error
+import urllib.request
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 VIEWPROBE_DIR = os.path.dirname(HERE)
@@ -162,6 +177,18 @@ NAV_HIT = re.compile(
 NAV_MISS = re.compile(
     r"^\s*nav-at (-?\d+),(-?\d+): NO winning triangle covers this point"
     r"(?:; nearest is (.+?) tri (\d+), ([\d.]+) u away)?")
+# `--refs-at` block header and rows. A FormKey's plugin name can carry spaces ("JK's College of
+# Winterhold.esp"), so it is matched up to its .esp/.esm/.esl rather than as one token; the base
+# TYPE is the first field after `base`, which is the word the door test looks for.
+REFS_HEAD = re.compile(r"^\s*---- refs within (\d+) u of (-?\d+),(-?\d+): (\d+) ----")
+REFS_ROW = re.compile(
+    r"^\s*(\d+) u\s+(\S{6}:.+?\.es[pml])\s+at (-?\d+),(-?\d+),(-?\d+)\s+scale ([\d.]+)\s+\[(.*?)\]"
+    r"\s+base (\S+) (\S{6}:.+?\.es[pml]) (\S+)")
+# `--inside-at` header (both forms) and rows.
+INSIDE_HEAD = re.compile(r"^\s*inside-at (-?\d+),(-?\d+),(-?\d+): (\d+ ref|no physical)")
+INSIDE_ROW = re.compile(r"^\s*(\S{6}:.+?\.es[pml])\s{2}(\S+)\s{2}(\S+)\s{2}dims (-?\d+)x(-?\d+)x(-?\d+) u")
+INSIDE_RAYS = re.compile(r"\srays ((?:(?:[+-][xy]|up|down) (?:\d+|-)\s*){6})")
+RAY_AXES = ("+x", "-x", "+y", "-y", "up", "down")
 
 
 class Probe:
@@ -245,6 +272,190 @@ class Probe:
                 else:
                     inside = False
         return out
+
+    def refs_near(self):
+        """{(x, y, r): [row, ...]} for every `--refs-at` block, each row parsed: dist, formkey,
+        pos, scale, why (viewprobe's drawn / not-drawn verdict), type, base, edid. Queries are
+        sent as integers so the printed key matches the query key."""
+        out, cur = {}, None
+        for ln in self.stdout.splitlines():
+            m = REFS_HEAD.match(ln)
+            if m:
+                cur = out.setdefault((int(m[2]), int(m[3]), int(m[1])), [])
+                continue
+            if cur is None:
+                continue
+            m = REFS_ROW.match(ln)
+            if m:
+                cur.append({"dist": float(m[1]), "formkey": m[2],
+                            "pos": (float(m[3]), float(m[4]), float(m[5])), "scale": float(m[6]),
+                            "why": m[7], "type": m[8], "base": m[9], "edid": m[10]})
+            elif ln.strip() and not ln.startswith("      "):
+                cur = None
+        return out
+
+    def inside(self):
+        """{(x, y, z): [enclosing ref, ...]} for every `--inside-at` query; an empty list means
+        no physical ref's box encloses the point. Each entry: formkey, type, edid, dims (the
+        world box's extents), maxdim. A query with no answer at all is ABSENT, not empty."""
+        out, cur = {}, None
+        for ln in self.stdout.splitlines():
+            m = INSIDE_HEAD.match(ln)
+            if m:
+                cur = out.setdefault((int(m[1]), int(m[2]), int(m[3])), [])
+                continue
+            if cur is None:
+                continue
+            m = INSIDE_ROW.match(ln)
+            if m:
+                dims = (float(m[4]), float(m[5]), float(m[6]))
+                rays = None
+                mr = INSIDE_RAYS.search(ln)
+                if mr:
+                    toks = mr[1].split()
+                    rays = {toks[i]: (None if toks[i + 1] == "-" else float(toks[i + 1]))
+                            for i in range(0, len(toks) - 1, 2)}
+                cur.append({"formkey": m[1], "type": m[2], "edid": None if m[3] == "-" else m[3],
+                            "dims": dims, "maxdim": max(dims), "rays": rays})
+            elif ln.strip() and not ln.startswith("      "):
+                cur = None
+        return out
+
+
+def doors_near(subjects, near, args):
+    """Door refs within --door-radius (3-D) of any subject, out of the `--refs-at` blocks: the
+    FormKeys the worklist carries and a runner closes before the shot. Drawn doors only -- a
+    disabled leaf is not standing anywhere. Measured 2026-09-03: the OFF candlestick's only clear
+    bearings looked through a doorway whose leaf the game left open; closing every door within
+    300 u of the subject with SetOpen(false) before the shot fixed the frame."""
+    out, seen = [], set()
+    for s in subjects:
+        for r in near.get((round(s.x), round(s.y), int(args.door_radius)), []):
+            if r["type"] != "Door" or not r["why"].startswith("drawn"):
+                continue
+            d = math.dist(r["pos"], (s.x, s.y, s.z))
+            if d > args.door_radius or r["formkey"] in seen:
+                continue
+            seen.add(r["formkey"])
+            out.append({"formkey": r["formkey"], "edid": r["edid"], "pos": r["pos"],
+                        "subject": s.label, "dist": round(d)})
+    return out
+
+
+def print_doors(doors, args):
+    print(f"\n--- doors within {args.door_radius:.0f} u of the subjects ({len(doors)}) ---")
+    for d in doors:
+        print(f"  {d['formkey']}  {d['edid'] or '-'}  at {d['pos'][0]:.0f},{d['pos'][1]:.0f},"
+              f"{d['pos'][2]:.0f}  {d['dist']} u from {d['subject']}")
+    if doors:
+        print("  the records say closed; the game may leave a leaf standing open across the bearing."
+              " The worklist carries these as `doors` -- close them before the shot"
+              " (dbharness.close_doors), then drive the camera.")
+    else:
+        print("  none -- no drawn Door ref that close to a subject")
+
+
+# --------------------------------------------------------------------------------------
+# subjects read off the running game
+# --------------------------------------------------------------------------------------
+
+def devbench_base(args):
+    """http://127.0.0.1:PORT for DevBench: --port, then DEVBENCH_PORT, then the port in the file
+    DEVBENCH_RUNTIME_JSON names (the game writes it), then 8920."""
+    port = getattr(args, "port", None) or os.environ.get("DEVBENCH_PORT")
+    if not port:
+        rj = os.environ.get("DEVBENCH_RUNTIME_JSON")
+        if rj and os.path.exists(rj):
+            try:
+                port = json.load(open(rj)).get("port")
+            except (OSError, ValueError):
+                port = None
+    return f"http://127.0.0.1:{port or 8920}"
+
+
+def devbench_post(base, tool, body, timeout=20):
+    req = urllib.request.Request(f"{base}/api/tool/{tool}", data=json.dumps(body).encode(),
+                                 headers={"content-type": "application/json"})
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as r:
+            return json.load(r)
+    except urllib.error.HTTPError as e:
+        return {"_httpError": e.code, "_body": e.read().decode(errors="replace")[:300]}
+
+
+def subjects_from_game(args):
+    """`--subject-from-game FORMID[=label]` -> "X,Y,Z=label" specs read off the RUNNING game.
+
+    A movable subject is planned from the game after the load read, never from its record: the
+    item has dropped by the time the cell is loaded (2026-09-03, a chitin's frame found a barrel).
+    FORMID is a runtime id (0x........) or a FormKey (XXXXXX:Plugin.esp) resolved through the
+    game's own load index. With no game answering this REFUSES and says where the port comes
+    from -- a plan quietly made from the record would be the failure this flag exists to stop.
+    """
+    specs = getattr(args, "subject_from_game", None) or []
+    if not specs:
+        return []
+    base = devbench_base(args)
+    try:
+        with urllib.request.urlopen(f"{base}/api/health", timeout=5) as r:
+            health = json.load(r)
+    except (OSError, ValueError) as e:
+        raise SystemExit(
+            f"--subject-from-game: no DevBench answers at {base} ({e}). Set DEVBENCH_PORT, or "
+            "DEVBENCH_RUNTIME_JSON to <game>/Data/SKSE/Plugins/devbench/runtime.json (the game "
+            "writes its port there), or pass --port. A movable subject is planned from the RUNNING "
+            "game, after the load read -- its record says where it was authored, not where it lies.")
+    index = None
+    out = []
+    print(f"--- subjects from the running game ({base}, {health.get('exe')}) ---")
+    for spec in specs:
+        body, _, label = spec.partition("=")
+        fid = body.strip()
+        if ":" in fid:
+            if index is None:
+                m = devbench_post(base, "inspect", {"kind": "mods"})
+                index = ([e if isinstance(e, dict) else {"name": e, "index": i}
+                          for i, e in enumerate(m.get("plugins") or [])],
+                         [e if isinstance(e, dict) else {"name": e, "index": i}
+                          for i, e in enumerate(m.get("lightPlugins") or [])])
+                if not index[0] and not index[1]:
+                    raise SystemExit("--subject-from-game: inspect kind=mods lists no plugins -- "
+                                     "nothing is loaded (it answers nothing at the main menu)")
+            lid, plugin = fid.split(":", 1)
+            n = int(lid, 16)
+            hit = None
+            for e in index[0]:
+                if e.get("name", "").lower() == plugin.lower():
+                    hit = (e.get("index", 0) << 24) | (n & 0xFFFFFF)
+            if hit is None:
+                for e in index[1]:
+                    if e.get("name", "").lower() == plugin.lower():
+                        hit = 0xFE000000 | (e.get("index", 0) << 12) | (n & 0xFFF)
+            if hit is None:
+                raise SystemExit(f"--subject-from-game {spec}: plugin {plugin!r} is not in the "
+                                 "running load order")
+            fid = f"0x{hit:08X}"
+        r = devbench_post(base, "inspect", {"kind": "refs", "formId": fid})
+        refs = r.get("refs") or []
+        p = refs[0].get("position") if refs else None
+        if not p:
+            raise SystemExit(f"--subject-from-game {spec}: the game has no reference {fid} "
+                             f"(inspect kind=refs returned {json.dumps(r)[:200]}) -- is a game "
+                             "loaded, and is the cell it lives in loaded?")
+        name = label or fid
+        print(f"  {name:<18} {p[0]:.1f}, {p[1]:.1f}, {p[2]:.1f}   ({fid}"
+              + (f" from {body.strip()}" if ":" in body else "") + ", the game's current position)")
+        out.append(f"{p[0]},{p[1]},{p[2]}={name}")
+    return out
+
+
+def collect_subjects(args):
+    """--subject specs plus the ones read off the game; at least one is required."""
+    specs = list(args.subject) + subjects_from_game(args)
+    if not specs:
+        raise SystemExit("no subjects: give --subject X,Y[,Z][=label] and/or "
+                         "--subject-from-game FORMID[=label]")
+    return [Subject(s, args.floor_z if args.floor_z is not None else 0.0) for s in specs]
 
 
 def vp_command(vp: str | None) -> list[str]:
@@ -629,7 +840,47 @@ def frame_check(eye, yaw, pitch, fov, subjects, args):
     return True, fill, None, v_centre
 
 
-def evaluate(eye, subjects, floor_z, nav_entry, args, aim, skip_nav=False):
+def inside_verdict(entry, args):
+    """(kind, fails, notes) for an eye against the refs whose OBND boxes enclose it.
+
+    The box only NOMINATES. A tower-kit wall piece's box (966x966x384 u) encloses every camera in
+    the room it walls, exactly as a bookcase's box encloses a camera on its shelf (both measured
+    2026-09-03), so a box alone cannot refuse. viewprobe fires six world-axis rays from the eye
+    against the nominated ref's OWN mesh: a shelf above and below and a back panel behind all hit
+    within arm's reach, a room's walls do not. Geometry within --inside-reach on at least
+    --inside-rays of the six axes is ENCLOSED -- a refusal naming the ref. A ref whose mesh could
+    not be read falls back to the box with --inside-cap, and says so: a weaker answer, stated.
+    """
+    if entry is None:
+        return "unknown", [], ["inside: no --inside-at answer for this point"]
+    fails, notes = [], []
+
+    def fmt(rays):
+        return " ".join(f"{k} {'-' if rays.get(k) is None else f'{rays[k]:.0f}'}" for k in RAY_AXES)
+
+    for h in entry:
+        name = h["edid"] or h["formkey"]
+        dims = f"{h['dims'][0]:.0f}x{h['dims'][1]:.0f}x{h['dims'][2]:.0f} u"
+        rays = h.get("rays")
+        if rays is not None:
+            close = [k for k in RAY_AXES if rays.get(k) is not None and rays[k] <= args.inside_reach]
+            if len(close) >= args.inside_rays:
+                fails.append(f"inside: eye ENCLOSED by `{name}` ({h['type']}): its geometry within "
+                             f"{args.inside_reach:.0f} u on {len(close)} of 6 axes ({fmt(rays)})")
+            else:
+                notes.append(f"inside: within `{name}`'s box ({dims}) but open -- {fmt(rays)}")
+        elif h["maxdim"] <= args.inside_cap:
+            fails.append(f"inside: eye inside `{name}`'s box ({h['type']}, {dims}) and its mesh "
+                         "could not be read to test further -- the box stands")
+        else:
+            notes.append(f"inside: within room-scale box `{name}` ({h['maxdim']:.0f} u), mesh not "
+                         f"read -- over --inside-cap {args.inside_cap:.0f}, taken as a shell")
+    if not entry:
+        notes.append("inside: no physical ref's box encloses the eye")
+    return ("inside" if fails else "clear"), fails, notes
+
+
+def evaluate(eye, subjects, floor_z, nav_entry, args, aim, skip_nav=False, inside_entry=None):
     """Every reason this camera could be wrong, collected rather than short-circuited.
 
     A planner that stops at the first failure teaches nothing when it refuses. The caller prints
@@ -668,6 +919,12 @@ def evaluate(eye, subjects, floor_z, nav_entry, args, aim, skip_nav=False):
         v["fail"].append(f"placement: {msg}")
     else:
         v["note"].append(f"placement: {msg}")
+    if skip_nav:
+        v["inside"] = "skipped"
+    else:
+        v["inside"], ifails, inotes = inside_verdict(inside_entry, args)
+        v["fail"] += ifails
+        v["note"] += inotes
 
     margins = [x["clear"] - x["need"] for x in v["sight"].values() if x["clear"] is not None]
     v["wall_margin"] = min(margins) if margins else None
@@ -738,7 +995,7 @@ def print_verdict(v, fov, target=None, indent="  "):
 
 def cmd_plan(args):
     apply_profile_frame(args)
-    subjects = [Subject(s, args.floor_z if args.floor_z is not None else 0.0) for s in args.subject]
+    subjects = collect_subjects(args)
     floor_z = args.floor_z if args.floor_z is not None else min(s.z for s in subjects)
     cx = sum(s.x for s in subjects) / len(subjects)
     cy = sum(s.y for s in subjects) / len(subjects)
@@ -791,10 +1048,11 @@ def cmd_plan(args):
         raise SystemExit("\nNo camera survives sightline and framing. Widen --fov, raise "
                          "--standoff-max, or check the subjects are where you think they are.")
 
-    # Pass 3 -- one invocation carrying `--nav-at` for the survivors. Batched here rather than
-    # with pass 1 because the full polar grid would be ~1,400 probes, and that many flags
-    # overruns a Windows command line. A cap that silently dropped candidates would read as
-    # "these were considered and rejected", so anything dropped is named.
+    # Pass 3 -- one invocation carrying `--nav-at` AND `--inside-at` for the survivors, and
+    # `--refs-at` around each subject for the doors. Batched here rather than with pass 1
+    # because the full polar grid would be ~1,400 probes, and that many flags overruns a
+    # Windows command line. A cap that silently dropped candidates would read as "these were
+    # considered and rejected", so anything dropped is named.
     live.sort(key=lambda v: -v["score"])
     seen, pts = set(), []
     for v in live:
@@ -803,40 +1061,50 @@ def cmd_plan(args):
             pts.append(v["_xy"])
     dropped = max(0, len(pts) - args.nav_probe_max)
     pts = pts[:args.nav_probe_max]
-    print(f"\n--- pass 3: nav-probing {len(pts)} surviving point(s) in ONE render ---"
+    eye_z = round(floor_z + args.eye_height)
+    print(f"\n--- pass 3: nav- and inside-probing {len(pts)} surviving point(s) in ONE render ---"
           + (f"\n  !! {dropped} point(s) DROPPED by --nav-probe-max={args.nav_probe_max}; "
              f"those poses are NOT judged and NOT offered" if dropped else ""))
     flags = ["--eye", f"{cx:.1f},{cy:.1f},{floor_z + args.eye_height:.1f}", "--yaw", "0"]
     for x, y in pts:
-        flags += ["--nav-at", f"{x},{y}"]
-    nav = run.probe(*flags).nav()
+        flags += ["--nav-at", f"{x},{y}", "--inside-at", f"{x},{y},{eye_z}"]
+    for s in subjects:
+        flags += ["--refs-at", f"{round(s.x)},{round(s.y)},{int(args.door_radius)}"]
+    p3 = run.probe(*flags)
+    nav, inside, near = p3.nav(), p3.inside(), p3.refs_near()
+    doors = doors_near(subjects, near, args)
     kept = set(pts)
     scored = []
     for v in live:
         if v["_xy"] not in kept:
             continue
-        v2 = evaluate(v["eye"], subjects, floor_z, nav.get(v["_xy"]), args, aim)
+        v2 = evaluate(v["eye"], subjects, floor_z, nav.get(v["_xy"]), args, aim,
+                      inside_entry=inside.get((v["_xy"][0], v["_xy"][1], eye_z)))
         v2["_bearing"], v2["_standoff"], v2["_xy"] = v["_bearing"], v["_standoff"], v["_xy"]
         scored.append(v2)
     ok = [v for v in scored if v["ok"]]
     ok.sort(key=lambda v: -v["score"])
+    n_inside = sum(1 for v in scored if v.get("inside") == "inside")
     print(f"  {len(ok)} of {len(scored)} survive the placement test; "
-          f"{len(scored) - len(ok)} refused")
+          f"{len(scored) - len(ok)} refused ({n_inside} for an eye inside a physical ref's box)")
     report_refusals(scored)
     if not ok:
-        raise SystemExit("\nEvery sightline-clear camera sits off the storey. Raise "
-                         "--offmesh-tol / --storey-tol only if you can say why.")
+        raise SystemExit("\nEvery sightline-clear camera sits off the storey or inside a ref. Raise "
+                         "--offmesh-tol / --storey-tol / --inside-cap only if you can say why.")
 
     print(f"\n--- top {min(args.top, len(ok))} ---")
     for v in ok[:args.top]:
         print(f"  score {v['score']:5.1f}  bearing {v['_bearing']:5.1f} deg  standoff {v['_standoff']:4.0f} u  "
-              f"fill {v['fill']:.2f}  wall margin {v['wall_margin']:.0f} u  nav {v['nav']}")
+              f"fill {v['fill']:.2f}  wall margin {v['wall_margin']:.0f} u  nav {v['nav']}  inside {v['inside']}")
 
     best = ok[0]
     print(f"\n=== chosen ===")
     print(pose_block(best, args.fov))
     print()
     print_verdict(best, args.fov, args.fill)
+    print(f"  feet       {best['eye'][0]:.1f}, {best['eye'][1]:.1f}, {floor_z:.1f}"
+          "   (the player's spot: the eye's X,Y at the floor, placement-tested)")
+    print_doors(doors, args)
 
     if not args.no_verify:
         print("\n--- verification: an aimed probe render per subject, from the chosen camera ---")
@@ -869,19 +1137,23 @@ def cmd_plan(args):
             print("  all subjects confirmed from the chosen camera.")
 
     if args.worklist:
+        shot = {"label": (args.label or "planned camera") + f" -- {', '.join(s.label for s in subjects)}",
+                "eye": [round(best["eye"][0], 1), round(best["eye"][1], 1), round(best["eye"][2], 1)],
+                "floorZ": round(floor_z, 1),
+                # the PLAYER's spot: the point the placement test just passed, at the floor --
+                # a runner takes it from here, never from a coordinate typed at the storey's height
+                "feet": [round(best["eye"][0], 1), round(best["eye"][1], 1), round(floor_z, 1)],
+                "yaw": round(best["yaw"], 1), "pitch": round(best["pitch"], 1), "fov": args.fov,
+                "note": (f"planned by shotplan: bearing {best['_bearing']:.0f} deg, standoff "
+                         f"{best['_standoff']:.0f} u, subjects fill {best['fill']:.2f} of the "
+                         f"half-frame, nearest obstruction behind the camera "
+                         f"{best['wall_margin']:.0f} u further out")}
+        if doors:
+            shot["doors"] = [d["formkey"] for d in doors]
         wl = {
             "label": args.label or f"shotplan -- {args.cell}",
             "eyeHeight": args.eye_height,
-            "cells": [{"cell": args.cell, "shots": [
-                {"label": (args.label or "planned camera") + f" -- {', '.join(s.label for s in subjects)}",
-                 "eye": [round(best["eye"][0], 1), round(best["eye"][1], 1), round(best["eye"][2], 1)],
-                 "floorZ": round(floor_z, 1),
-                 "yaw": round(best["yaw"], 1), "pitch": round(best["pitch"], 1), "fov": args.fov,
-                 "note": (f"planned by shotplan: bearing {best['_bearing']:.0f} deg, standoff "
-                          f"{best['_standoff']:.0f} u, subjects fill {best['fill']:.2f} of the "
-                          f"half-frame, nearest obstruction behind the camera "
-                          f"{best['wall_margin']:.0f} u further out")}
-            ]}],
+            "cells": [{"cell": args.cell, "shots": [shot]}],
         }
         with open(args.worklist, "w", encoding="utf-8") as f:
             json.dump(wl, f, indent=2)
@@ -902,6 +1174,7 @@ def cmd_plan(args):
         with open(args.json, "w", encoding="utf-8") as f:
             json.dump({"cell": args.cell, "floorZ": floor_z, "aim": aim,
                        "subjects": [{"label": s.label, "pos": s.pos()} for s in subjects],
+                       "feet": [best["eye"][0], best["eye"][1], floor_z], "doors": doors,
                        "chosen": {k: v for k, v in best.items() if k != "_target"},
                        "top": [{k: v for k, v in x.items() if k != "_target"} for x in ok[:args.top]],
                        "renders": run.renders, "seconds": round(run.seconds, 1)}, f, indent=2,
@@ -918,7 +1191,7 @@ def cmd_check(args):
     bad and it must say so, for a reason you can check by hand.
     """
     apply_profile_frame(args)
-    subjects = [Subject(s, args.floor_z if args.floor_z is not None else 0.0) for s in args.subject]
+    subjects = collect_subjects(args)
     floor_z = args.floor_z if args.floor_z is not None else min(s.z for s in subjects)
     eye = tuple(float(v) for v in args.eye.split(","))
     aim = (sum(s.x for s in subjects) / len(subjects),
@@ -931,16 +1204,24 @@ def cmd_check(args):
 
     c = run.size // 2
     verdicts, first = {}, True
+    eye_i = (round(eye[0]), round(eye[1]), round(eye[2]))
     for s in subjects:
         head = (s.x, s.y, s.z + args.sight_height)
         d = math.dist(eye, head)
-        extra = ["--nav-at", f"{round(eye[0])},{round(eye[1])}",
-                 "--refs-at", f"{eye[0]:.0f},{eye[1]:.0f},{args.refs_radius:g}"] if first else []
+        extra = []
+        if first:
+            extra = ["--nav-at", f"{eye_i[0]},{eye_i[1]}",
+                     "--inside-at", f"{eye_i[0]},{eye_i[1]},{eye_i[2]}",
+                     "--refs-at", f"{eye[0]:.0f},{eye[1]:.0f},{args.refs_radius:g}"]
+            for s2 in subjects:
+                extra += ["--refs-at", f"{round(s2.x)},{round(s2.y)},{int(args.door_radius)}"]
         p = run.probe("--eye", "{:.1f},{:.1f},{:.1f}".format(*eye),
                       "--look", "{:.1f},{:.1f},{:.1f}".format(*head),
                       "--fov", f"{args.fov:g}", "--pick", f"{c},{c}", *extra)
         if first:
             nav = p.nav().get((round(eye[0]), round(eye[1])))
+            inside = p.inside().get(eye_i)
+            doors = doors_near(subjects, p.refs_near(), args)
             refs = p.refs()[:14]
             first = False
         hit = p.picks().get((c, c))
@@ -964,6 +1245,15 @@ def cmd_check(args):
     print(f"\n--- placement ---\n  {kind}: {msg}")
     if kind in ("wrong-storey", "no-floor"):
         fails.append(f"placement: {kind}")
+    ikind, ifails, inotes = inside_verdict(inside, args)
+    print(f"\n--- inside (whose OBND box encloses the eye; --inside-cap {args.inside_cap:.0f} u) ---")
+    for f in ifails:
+        print(f"  REFUSED  {f}")
+    for n in inotes:
+        print(f"  ok       {n}")
+    if ifails:
+        fails.append("inside: " + "; ".join(f.split(": ", 1)[1] for f in ifails))
+    print_doors(doors, args)
 
     yaw = bearing_deg(aim[0] - eye[0], aim[1] - eye[1])
     dxy = math.hypot(aim[0] - eye[0], aim[1] - eye[1])
@@ -1050,7 +1340,8 @@ def cmd_devbench(args):
                      "z": round(eye[2], 1),
                      "yaw": round(math.radians(yaw), 4), "pitch": round(math.radians(pitch), 4)}
             out.append({"n": n, "cell": cell["cell"], "label": shot.get("label", ""),
-                        "floorZ": shot.get("floorZ"), "yawDeg": round(yaw, 1),
+                        "floorZ": shot.get("floorZ"), "feet": shot.get("feet"),
+                        "doors": shot.get("doors") or [], "yawDeg": round(yaw, 1),
                         "pitchDeg": round(pitch, 1), "drive": drive})
     if args.json:
         print(json.dumps(out, indent=2))
@@ -1059,9 +1350,15 @@ def cmd_devbench(args):
         print(f"# shot {s['n']} -- {s['cell']}: {s['label']}")
         print(f"#   yaw {s['yawDeg']} deg -> {s['drive']['yaw']} rad, "
               f"pitch {s['pitchDeg']} deg -> {s['drive']['pitch']} rad  (DevBench wants RADIANS)")
-        if s["floorZ"] is not None:
+        if s["feet"] is not None:
+            print(f"#   the PLAYER stands at feet {s['feet']} -- the placement-tested spot at the "
+                  f"floor; dbharness.move_within_cell(*feet) first, or the interior renders unlit")
+        elif s["floorZ"] is not None:
             print(f"#   the PLAYER goes to the floor: player.setpos z {s['floorZ']} "
                   f"-- move the player to the subject first or the interior renders unlit")
+        if s["doors"]:
+            print(f"#   close these doors FIRST (the records say closed; the game may not): "
+                  f"{s['doors']} -- dbharness.close_doors(doors) resolves the FormKeys and asserts")
         print(json.dumps(s["drive"]))
         print(f"curl -s -X POST http://127.0.0.1:{args.port}/api/tool/camera "
               f"-H 'content-type: application/json' -d '"
@@ -1102,11 +1399,36 @@ def _passthrough_value(args, flag):
 
 def add_common(p, need_subjects=True):
     p.add_argument("cell", help="CellEditorID or FormID -- passed to viewprobe as args[0]")
-    p.add_argument("--subject", action="append", default=[], required=need_subjects,
+    p.add_argument("--subject", action="append", default=[],
                    metavar="X,Y[,Z][=label]",
                    help="a thing that must be in frame, at its FEET. Repeatable. Feed RUNTIME "
                         "positions (DevBench inspect kind=refs) when the game is up -- an actor "
                         "is placed at its AI package anchor, not at its placement record")
+    p.add_argument("--subject-from-game", action="append", default=[],
+                   metavar="FORMID[=label]",
+                   help="a subject whose position is read off the RUNNING game (DevBench inspect "
+                        "kind=refs): a runtime 0x........ id or a FormKey XXXXXX:Plugin.esp. "
+                        "Repeatable. REFUSES when no game answers -- a movable item has dropped by "
+                        "the time the cell is loaded, so it is planned from the game, never from "
+                        "its record")
+    p.add_argument("--port", type=int, default=None,
+                   help="DevBench port for --subject-from-game (default: DEVBENCH_PORT, then the "
+                        "port in the file DEVBENCH_RUNTIME_JSON names, then 8920)")
+    p.add_argument("--door-radius", type=float, default=300.0,
+                   help="every drawn Door ref within this 3-D distance of a subject goes into the "
+                        "worklist shot as `doors` for the runner to close first (default 300, the "
+                        "radius that fixed the open-leaf frame on 2026-09-03)")
+    p.add_argument("--inside-reach", type=float, default=96.0,
+                   help="an eye whose nominating ref (the one whose OBND box encloses it) has "
+                        "geometry within this distance on --inside-rays of the six world axes is "
+                        "ENCLOSED and refused (default 96: a shelf above, a shelf below, a back "
+                        "panel; a room's walls are further)")
+    p.add_argument("--inside-rays", type=int, default=3,
+                   help="how many of the six axis rays must hit within --inside-reach (default 3)")
+    p.add_argument("--inside-cap", type=float, default=1024.0,
+                   help="FALLBACK when a nominating ref's mesh cannot be read: its box refuses the "
+                        "eye when its largest side is at most this, and is taken as a room shell "
+                        "above it (default 1024)")
     p.add_argument("--floor-z", type=float, default=None,
                    help="the storey the subjects stand on (default: the lowest subject z)")
     p.add_argument("--eye-height", type=float, default=120.0,
@@ -1185,8 +1507,10 @@ def main(argv=None):
                    help="how much of the half-frame the subjects should reach (default 0.55)")
     p.add_argument("--comfort", type=float, default=200.0,
                    help="clearance beyond the camera that scores full marks (default 200)")
-    p.add_argument("--nav-probe-max", type=int, default=400,
-                   help="cap on batched --nav-at probes; anything dropped is REPORTED")
+    p.add_argument("--nav-probe-max", type=int, default=250,
+                   help="cap on batched --nav-at/--inside-at probe points (two flags per point "
+                        "since the inside test; 250 keeps the command line under Windows's "
+                        "limit); anything dropped is REPORTED")
     p.add_argument("--top", type=int, default=5)
     p.add_argument("--dump-survivors", action="store_true",
                    help="with --dump, dump only the nav-probed survivors instead of everything")
