@@ -1287,6 +1287,309 @@ Console.WriteLine("\nPROOF — overlap provenance (_shared/DetectorModel.cs + _s
 // ---------------------------------------------------------------------------------------
 // The synthetic load order — the thing everything else will now be validated against.
 // ---------------------------------------------------------------------------------------
+// ---------------------------------------------------------------------------------------
+// Placement contact — the geometry half of 4.5 / 4.6 (charter milestone 8 over milestone 6's primitive).
+// The rule (DetectorModel.PlacementContact, ClassifyMotion) at fact level, then a synthetic four-plugin
+// order written with Mutagen and read back through ContactIndex over OverlapIndex — the same ingest,
+// host census, two hashes, arm construction and contact primitive the live probe uses, with OBND boxes
+// turned into twelve-triangle box soups standing in for meshes (labelled 'o' either way).
+// ---------------------------------------------------------------------------------------
+Console.WriteLine("\nPROOF — placement contact (_shared/DetectorModel.cs + _shared/ContactIndex.cs)\n");
+{
+    static DetectorModel.ContactFacts CF(bool depGeom = true, bool hostGeom = true, bool authMeasured = true,
+        float aDist = 0f, float aPen = 0f, float aUp = 1f,
+        bool deleted = false, bool disabled = false, bool moverSide = false,
+        bool winMeasured = true, float wDist = 128f, float wPen = 0f, bool wHost = false, DependentMotion motion = DependentMotion.Fixed)
+        => new(depGeom, hostGeom, authMeasured, aDist, aPen, aUp, deleted, disabled, moverSide, winMeasured, wDist, wPen, wHost, motion);
+    static string W((ContactRelation Relation, ContactVerdict Verdict, ContactBlocker Reason, string Why) r) => $"{r.Relation} / {r.Verdict} / {r.Reason}: {r.Why}";
+
+    var s1 = DetectorModel.PlacementContact(CF());
+    Check("contact: rested on the host, nothing under it now -> SUPPORTED / STRANDED", s1 is { Relation: ContactRelation.Supported, Verdict: ContactVerdict.Stranded }, W(s1));
+    var at1 = DetectorModel.PlacementContact(CF(aUp: 0f));
+    Check("contact: mounted against the host (normal horizontal), nothing near it now -> ATTACHED / ORPHANED", at1 is { Relation: ContactRelation.Attached, Verdict: ContactVerdict.Orphaned }, W(at1));
+    var h1 = DetectorModel.PlacementContact(CF(aUp: -1f));
+    Check("contact: hung from the host (normal down) -> HUNG / ORPHANED", h1 is { Relation: ContactRelation.Hung, Verdict: ContactVerdict.Orphaned }, W(h1));
+    var sl = DetectorModel.PlacementContact(CF(aUp: 0.7f));
+    Check("contact: contact on a 45° slope -> no relationship (between the bands)", sl is { Relation: ContactRelation.None, Verdict: ContactVerdict.NoRelation }, W(sl));
+    var fl = DetectorModel.PlacementContact(CF(aDist: 10f));
+    Check("contact: 10 u apart as authored -> no relationship", fl is { Verdict: ContactVerdict.NoRelation } && fl.Why.Contains("not in contact"), W(fl));
+    var sk = DetectorModel.PlacementContact(CF(aPen: 10f));
+    Check("contact: already sunk 10 u as authored -> no relationship (the absolute floor's business)", sk is { Verdict: ContactVerdict.NoRelation } && sk.Why.Contains("already sunk"), W(sk));
+    var e4 = DetectorModel.PlacementContact(CF(aDist: 4f, aPen: 4f));
+    var e41 = DetectorModel.PlacementContact(CF(aDist: 4.1f));
+    Check("contact: ε is inclusive — 4 u apart / 4 u sunk still rests; 4.1 u apart does not", e4.Verdict == ContactVerdict.Stranded && e41.Verdict == ContactVerdict.NoRelation, $"{e4.Verdict} / {e41.Verdict}");
+    var nn = DetectorModel.PlacementContact(CF(aUp: float.NaN));
+    Check("contact: in contact but no readable normal -> no relationship, says so", nn.Verdict == ContactVerdict.NoRelation && nn.Why.Contains("normal"), W(nn));
+
+    var su = DetectorModel.PlacementContact(CF(wDist: 0f, wPen: 10f));
+    Check("contact: rested, and 10 u inside something under the winner -> SUNK", su.Verdict == ContactVerdict.Sunk, W(su));
+    var rs = DetectorModel.PlacementContact(CF(wDist: 2f));
+    Check("contact: rested, and touching another reference under the winner -> RE-SUPPORTED, names 'another physical reference'", rs.Verdict == ContactVerdict.ReSupported && rs.Why.Contains("another physical reference"), W(rs));
+    var rh = DetectorModel.PlacementContact(CF(wDist: 0f, wHost: true));
+    Check("contact: rested, still touching the host at its new place -> RE-SUPPORTED, names the host", rh.Verdict == ContactVerdict.ReSupported && rh.Why.Contains("host at its new place"), W(rh));
+    var sh = DetectorModel.PlacementContact(CF(wDist: 0f, wPen: 20f, wHost: true));
+    Check("contact: rested, the host moved up into it -> SUNK, names the host", sh.Verdict == ContactVerdict.Sunk && sh.Why.Contains("host at its new place"), W(sh));
+    var de = DetectorModel.PlacementContact(CF(deleted: true, wDist: 0f, wPen: 20f));
+    var di = DetectorModel.PlacementContact(CF(disabled: true));
+    Check("contact: dependent deleted or disabled under the winner -> REMOVED, whatever the winner geometry says", de.Verdict == ContactVerdict.Removed && di.Verdict == ContactVerdict.Removed, $"{de.Verdict} / {di.Verdict}");
+    var mt = DetectorModel.PlacementContact(CF(moverSide: true, wDist: 128f));
+    Check("contact: re-placed by the mover's side -> MOVED TOGETHER, even though it touches nothing now", mt.Verdict == ContactVerdict.MovedTogether, W(mt));
+    var mv = DetectorModel.PlacementContact(CF(motion: DependentMotion.Movable));
+    Check("contact: a MOVABLE dependent reads the same verdict, and the why says physics will drop it", mv.Verdict == ContactVerdict.Stranded && mv.Why.Contains("MOVABLE"), W(mv));
+    var ng = DetectorModel.PlacementContact(CF(depGeom: false, hostGeom: false));
+    var nh = DetectorModel.PlacementContact(CF(hostGeom: false));
+    var na = DetectorModel.PlacementContact(CF(authMeasured: false));
+    var nw = DetectorModel.PlacementContact(CF(winMeasured: false));
+    Check("contact: no geometry / no authoring arm / no winner arm -> UNJUDGEABLE by reason, dependent outranking host",
+          ng is { Verdict: ContactVerdict.Unjudgeable, Reason: ContactBlocker.NoDependentGeometry } && nh.Reason == ContactBlocker.NoHostGeometry
+       && na.Reason == ContactBlocker.AuthoringArmMissing && nw is { Verdict: ContactVerdict.Unjudgeable, Reason: ContactBlocker.WinnerArmMissing, Relation: ContactRelation.Supported },
+          $"{ng.Reason} / {nh.Reason} / {na.Reason} / {nw.Reason}");
+    var lo = DetectorModel.PlacementContact(CF(aDist: 3f, aUp: 0.9f), epsilon: 2f);
+    var lo2 = DetectorModel.PlacementContact(CF(aDist: 3f, aUp: 0.9f), epsilon: 2f, supportCos: 0.95f);
+    Check("contact: ε and the angle bands are parameters — 3 u apart fails ε = 2; up 0.9 fails a 0.95 support band", lo.Verdict == ContactVerdict.NoRelation && lo2.Verdict == ContactVerdict.NoRelation, $"{lo.Verdict} / {lo2.Verdict}");
+
+    Check("motion: item types are MOVABLE by record type; statics, furniture, containers, doors, activators, trees, flora, lights FIXED",
+          new[] { "MiscItem", "Ingredient", "Ingestible", "Book", "Weapon", "Armor", "Ammunition", "SoulGem", "Key", "Scroll", "LeveledItem" }.All(t => DetectorModel.ClassifyMotion(t, null) == DependentMotion.Movable)
+       && new[] { "Static", "Furniture", "Container", "Door", "Activator", "Tree", "Flora", "Light" }.All(t => DetectorModel.ClassifyMotion(t, null) == DependentMotion.Fixed), "");
+    Check("motion: a MoveableStatic defers to its bodies — DYNAMIC movable, FIXED / KEYFRAMED fixed, CLUTTER layer with no motion read movable, no bodies unknown",
+          DetectorModel.ClassifyMotion("MoveableStatic", new[] { ("SKYL_STATIC", "MO_SYS_DYNAMIC") }) == DependentMotion.Movable
+       && DetectorModel.ClassifyMotion("MoveableStatic", new[] { ("SKYL_CLUTTER", "MO_SYS_FIXED") }) == DependentMotion.Fixed
+       && DetectorModel.ClassifyMotion("MoveableStatic", new[] { ("SKYL_STATIC", "MO_SYS_KEYFRAMED") }) == DependentMotion.Fixed
+       && DetectorModel.ClassifyMotion("MoveableStatic", new[] { ("SKYL_CLUTTER", "") }) == DependentMotion.Movable
+       && DetectorModel.ClassifyMotion("MoveableStatic", new[] { ("SKYL_STATIC", "") }) == DependentMotion.Fixed
+       && DetectorModel.ClassifyMotion("MoveableStatic", Array.Empty<(string, string)>()) == DependentMotion.Unknown
+       && DetectorModel.ClassifyMotion("MoveableStatic", null) == DependentMotion.Unknown
+       && DetectorModel.ClassifyMotion(null, null) == DependentMotion.Unknown, "");
+
+    // ---- The synthetic order: four plugins written with Mutagen, read back through ContactIndex. ----
+    // Boxes: OverlapIndex.ObndBox centres the OBND extents on the origin, so a table with OBND z 0..64 is ±32 about
+    // its placement and its top is at z + 32. Every placement below is written in that frame.
+    var root = Path.Combine(Path.GetTempPath(), "proofprobe-ct-" + Environment.ProcessId);
+    Directory.CreateDirectory(root);
+    var release = SkyrimRelease.SkyrimSE;
+    var mKey = new ModKey("CtMaster", ModType.Master);
+    var aKey = new ModKey("CtA", ModType.Plugin);
+    var bKey = new ModKey("CtB", ModType.Plugin);
+    var cKey = new ModKey("CtC", ModType.Plugin);
+    FormKey M(uint id) => new(mKey, id);
+    var tableK = M(0x801); var tallK = M(0x802); var bowlK = M(0x803); var appleK = M(0x804); var wallK = M(0x805); var sconceK = M(0x806);
+    var floorK = M(0x807); var markerK = M(0x808); var fxK = M(0x809); var cell1K = M(0x810); var cell2K = M(0x811);
+    FormKey H(int n) => M((uint)(0x900 + n));     // hosts
+    FormKey D(int n) => M((uint)(0xA00 + n));     // dependents
+    var aStaticK = new FormKey(aKey, 0x801);
+    const float TableTop = 32f, TallTop = 42f, BowlHalf = 5f, AppleHalf = 8f, WallHalfY = 10f, SconceHalfY = 6f;
+
+    static void FileInterior(SkyrimMod mod, Cell cell)
+    {
+        uint id = cell.FormKey.ID;
+        int blockN = (int)(id % 10), subN = (int)((id / 10) % 10);
+        var records = mod.Cells.Records;
+        var block = records.FirstOrDefault(b => b.BlockNumber == blockN);
+        if (block is null) { block = new CellBlock { BlockNumber = blockN, GroupType = GroupTypeEnum.InteriorCellBlock }; records.Add(block); }
+        var sub = block.SubBlocks.FirstOrDefault(s => s.BlockNumber == subN);
+        if (sub is null) { sub = new CellSubBlock { BlockNumber = subN, GroupType = GroupTypeEnum.InteriorCellSubBlock }; block.SubBlocks.Add(sub); }
+        sub.Cells.Add(cell);
+    }
+    static PlacedObject Ref(FormKey key, FormKey baseKey, float x, float y = 0, float z = 0, string? edid = null, bool disabled = false)
+    {
+        var r = new PlacedObject(key, SkyrimRelease.SkyrimSE) { EditorID = edid, Placement = new Placement { Position = new P3Float(x, y, z), Rotation = new P3Float(0, 0, 0) } };
+        r.Base.SetTo(baseKey);
+        if (disabled) r.SkyrimMajorRecordFlags |= SkyrimMajorRecord.SkyrimMajorRecordFlag.InitiallyDisabled;
+        return r;
+    }
+    static Cell Interior(FormKey key, string? edid = null) => new(key, SkyrimRelease.SkyrimSE) { EditorID = edid, Flags = Cell.Flag.IsInteriorCell };
+    static Static Stat(FormKey k, string edid, int x, int y, int z) => new(k, SkyrimRelease.SkyrimSE)
+        { EditorID = edid, Model = new Model { File = $"meshes\\ct\\{edid}.nif" }, ObjectBounds = new ObjectBounds { First = new P3Int16((short)-x, (short)-y, 0), Second = new P3Int16((short)x, (short)y, (short)z) } };
+    string Write(SkyrimMod mod, params ISkyrimModGetter[] masters)
+    {
+        var path = Path.Combine(root, mod.ModKey.FileName.String);
+        mod.BeginWrite.ToPath(path).WithLoadOrder(masters).Write();
+        return path;
+    }
+
+    // THE MASTER: the bases, two interiors, a worldspace, and the arrangement each case starts from. Host n at x = 1000 n.
+    var master = new SkyrimMod(mKey, release);
+    master.Statics.Add(Stat(tableK, "CtTable", 100, 100, 64));                 // furniture-scale host, 200 x 200 x 64
+    master.Statics.Add(Stat(tallK, "CtTableTall", 100, 100, 84));              // the same table, 20 u taller (a base swap)
+    master.Statics.Add(Stat(bowlK, "CtBowl", 12, 12, 10));                     // a fixed clutter dependent
+    master.MiscItems.Add(new MiscItem(appleK, release) { EditorID = "CtApple", Model = new Model { File = "meshes\\ct\\CtApple.nif" }, ObjectBounds = new ObjectBounds { First = new P3Int16(-8, -8, 0), Second = new P3Int16(8, 8, 16) } });
+    master.Statics.Add(Stat(wallK, "CtWall", 200, 10, 300));                   // architecture-scale host, its faces at y = ±10
+    master.Statics.Add(Stat(sconceK, "CtSconce", 8, 6, 16));                   // a fixed fixture, 12 u deep
+    master.Statics.Add(Stat(floorK, "CtFloor", 500, 500, 20));                 // architecture-scale, 1000 across
+    master.Statics.Add(Stat(markerK, "XMarkerHeading", 100, 100, 64));         // a marker the size of a table
+    master.Statics.Add(Stat(fxK, "FXSmokeCt", 12, 12, 10));                    // FX by editor id, bowl-sized
+    var poleK = M(0x80A);
+    master.Statics.Add(Stat(poleK, "CtPole", 4, 4, 8));                         // an 8 u post — nothing rests on it
+    var m1 = Interior(cell1K, "CtCell1"); var m2 = Interior(cell2K, "CtCell2");
+    foreach (int n in new[] { 1, 2, 3, 4, 5, 6, 8, 9, 10, 11, 12, 13, 14, 15, 16, 18, 20, 22 })
+        m1.Temporary.Add(Ref(H(n), tableK, 1000f * n, edid: $"Table{n}"));
+    m1.Temporary.Add(Ref(H(7), wallK, 7000, 0, 150, "Wall7"));
+    m1.Temporary.Add(Ref(H(17), markerK, 17000, edid: "Marker17"));
+    m1.Temporary.Add(Ref(H(21), floorK, 21000, 0, -20, "Floor21"));
+    foreach (int n in new[] { 1, 3, 4, 5, 6, 10, 11, 12, 13, 14, 15, 16, 17 })
+        m1.Temporary.Add(Ref(D(n), bowlK, 1000f * n, 0, TableTop + BowlHalf, $"Bowl{n}"));           // resting on its table
+    m1.Temporary.Add(Ref(D(2), appleK, 2000, 0, TableTop + AppleHalf, "Apple2"));                   // a movable one
+    m1.Temporary.Add(Ref(D(18), appleK, 18000, 0, TableTop + AppleHalf, "Apple18"));
+    m1.Temporary.Add(Ref(D(7), sconceK, 7000, WallHalfY + SconceHalfY, 150, "Sconce7"));            // against the wall's +Y face
+    m1.Temporary.Add(Ref(D(8), bowlK, 8000, 0, TableTop + BowlHalf + 5, "Bowl8"));                  // 5 u above its table: inside the box band, outside ε
+    m1.Temporary.Add(Ref(D(9), bowlK, 9000, 0, TableTop + BowlHalf - 10, "Bowl9"));                 // sunk 10 u into its table
+    m1.Temporary.Add(Ref(D(20), fxK, 20000, 0, TableTop + BowlHalf, "FX20"));                       // FX on a table — not a dependent
+    m1.Temporary.Add(Ref(D(21), wallK, 21000, 0, 150, "Wall21"));                                   // a wall on the floor — too big to be a dependent
+    m1.Temporary.Add(Ref(H(27), tableK, 27000, edid: "Table27"));                                   // A will remove it
+    m1.Temporary.Add(Ref(D(27), bowlK, 27000, 0, TableTop + BowlHalf, "Bowl27"));
+    m1.Temporary.Add(Ref(H(28), poleK, 27000, 0, 0, "Ref28"));                                   // X will turn it into a table by base swap, never moving it
+    FileInterior(master, m1); FileInterior(master, m2);
+    var wKey = M(0x830); var topK = M(0x831); var gridK = M(0x832);
+    static Worldspace World(FormKey wKey, FormKey topK, FormKey gridK, PlacedObject? persistent, PlacedObject? temporary)
+    {
+        var ws = new Worldspace(wKey, SkyrimRelease.SkyrimSE) { EditorID = "CtWorld" };
+        ws.TopCell = new Cell(topK, SkyrimRelease.SkyrimSE) { Flags = default };
+        if (persistent is not null) ws.TopCell.Persistent.Add(persistent);
+        if (temporary is not null)
+        {
+            var gc = new Cell(gridK, SkyrimRelease.SkyrimSE) { Flags = default, Grid = new CellGrid { Point = new P2Int(0, 0) } };
+            gc.Temporary.Add(temporary);
+            var blk = new WorldspaceBlock { BlockNumberX = 0, BlockNumberY = 0, GroupType = GroupTypeEnum.ExteriorCellBlock };
+            var sub = new WorldspaceSubBlock { BlockNumberX = 0, BlockNumberY = 0, GroupType = GroupTypeEnum.ExteriorCellSubBlock };
+            sub.Items.Add(gc); blk.Items.Add(sub); ws.SubCells.Add(blk);
+        }
+        return ws;
+    }
+    master.Worldspaces.Add(World(wKey, topK, gridK, Ref(H(23), tableK, 500, 500, 0, "Table23"), Ref(D(23), bowlK, 500, 500, TableTop + BowlHalf, "Bowl23")));
+    var mPath = Write(master);
+    using var mOv = SkyrimMod.CreateFromBinaryOverlay(mPath, release);
+
+    // PLUGIN X (masters M, loads before A): swaps Ref28's base to a table — the base changes, the placement does not
+    // (an OCW-shaped override: a vanilla shell reference turned into the mod's own floor, position untouched).
+    var xKey = new ModKey("CtX", ModType.Plugin);
+    var xm = new SkyrimMod(xKey, release);
+    var xc1 = Interior(cell1K);
+    xc1.Temporary.Add(Ref(H(28), tableK, 27000, 0, 0, "Ref28"));
+    FileInterior(xm, xc1);
+    var xPath = Write(xm, mOv);
+
+    // PLUGIN A (masters M): the mover.
+    var a = new SkyrimMod(aKey, release);
+    a.Statics.Add(new Static(aStaticK, release) { EditorID = "CtAStatic" });
+    var a1 = Interior(cell1K); var a2 = Interior(cell2K);
+    foreach (int n in new[] { 1, 2, 3, 4, 5, 6, 8, 9, 14, 15, 22 })
+        a1.Temporary.Add(Ref(H(n), tableK, 1000f * n + 200, edid: $"Table{n}"));                    // moved 200 u along X
+    a1.Temporary.Add(Ref(D(3), bowlK, 3200, 0, TableTop + BowlHalf, "Bowl3"));                      // A moves Bowl3 with Table3
+    a1.Temporary.Add(Ref(new FormKey(aKey, 0x900), tableK, 5000, edid: "NewTable5"));               // A's own table under Bowl5
+    a1.Temporary.Add(new PlacedObject(D(6), release) { IsDeleted = true });                         // Bowl6 deleted (placement stripped)
+    a1.Temporary.Add(Ref(H(7), wallK, 7000, 200, 150, "Wall7"));                                    // the wall moved 200 u along Y
+    a1.Temporary.Add(Ref(H(10), tableK, 10000, 0, 20, "Table10"));                                  // moved UP 20 u — into the bowl
+    a1.Temporary.Add(Ref(H(11), tableK, 11020, edid: "Table11"));                                   // moved 20 u along X — the bowl is still on it
+    a1.Temporary.Add(Ref(H(12), tableK, 12000, edid: "Table12", disabled: true));                   // disabled
+    a1.Temporary.Add(Ref(H(27), tableK, 27000, edid: "Table27", disabled: true));                   // removed — Ref28 (a table since X) should re-support Bowl27
+    a2.Temporary.Add(Ref(H(13), tableK, 13000, edid: "Table13"));                                   // relocated to cell 2
+    a1.Temporary.Add(Ref(D(15), bowlK, 15000, 0, TableTop + BowlHalf, "Bowl15"));                   // forwarded UNCHANGED — touched, not moved
+    a1.Temporary.Add(Ref(H(16), tableK, 16010, edid: "Table16"));                                   // moved 10 u — under the threshold
+    a1.Temporary.Add(Ref(H(17), markerK, 17200, edid: "Marker17"));                                 // a marker moved — not a host
+    a1.Temporary.Add(Ref(H(18), tallK, 18200, edid: "Table18"));                                    // moved AND base swapped to the taller table
+    a1.Temporary.Add(Ref(H(20), tableK, 20200, edid: "Table20"));
+    a1.Temporary.Add(Ref(H(21), floorK, 21200, 0, -20, "Floor21"));
+    a1.Temporary.Add(Ref(new FormKey(aKey, 0x901), bowlK, 22200, 0, TableTop + BowlHalf, "Bowl22"));  // A introduces a bowl on the table it moved
+    FileInterior(a, a1); FileInterior(a, a2);
+    a.Worldspaces.Add(World(wKey, topK, gridK, Ref(H(23), tableK, 700, 500, 0, "Table23"), null));  // the persistent host moved 200 u
+    var aPath = Write(a, mOv);
+    using var aOv = SkyrimMod.CreateFromBinaryOverlay(aPath, release);
+
+    // PLUGIN B (masters M and A): re-places Bowl4 onto Table4's new position — the patch shape.
+    var b = new SkyrimMod(bKey, release);
+    var b1 = Interior(cell1K);
+    b1.Temporary.Add(Ref(D(4), bowlK, 4200, 0, TableTop + BowlHalf, "Bowl4"));
+    b1.Temporary.Add(Ref(new FormKey(bKey, 0x801), aStaticK, 99000, edid: "CtBRef"));                // references A -> masters A
+    FileInterior(b, b1);
+    var bPath = Write(b, mOv, aOv);
+
+    // PLUGIN C (masters M only, loads after A): nudges Bowl14 by 1 u on the table's OLD position — the third party.
+    var c = new SkyrimMod(cKey, release);
+    var c1 = Interior(cell1K);
+    c1.Temporary.Add(Ref(D(14), bowlK, 14001, 0, TableTop + BowlHalf, "Bowl14"));
+    FileInterior(c, c1);
+    var cPath = Write(c, mOv);
+
+    // Read the order back the way contactprobe does.
+    var paths = new[] { mPath, xPath, aPath, bPath, cPath };
+    ContactIndex? cidx = null;
+    cidx = new ContactIndex(k => cidx!.Index.ObndBox(k) is { IsEmpty: false } bx
+        ? new RefGeometry(bx, ContactIndex.BoxSoup(bx), ContactIndex.BoxSoup(bx), 'o', 'o', HostUsable: true, Array.Empty<(string, string)>(), false) : null);
+    var keys = new ModKey[paths.Length];
+    var masterIdx = new HashSet<int>[paths.Length];
+    for (int p = 0; p < paths.Length; p++)
+    {
+        using var mod = SkyrimMod.CreateFromBinaryOverlay(paths[p], release);
+        keys[p] = mod.ModKey;
+        var names = mod.ModHeader.MasterReferences.Select(q => q.Master).ToHashSet();
+        masterIdx[p] = Enumerable.Range(0, p).Where(q => names.Contains(keys[q])).ToHashSet();
+        cidx.Index.Ingest(p, mod);
+    }
+    var closure = DetectorModel.MasterClosure(masterIdx);
+    const int Mi = 0, Xi = 1, Ai = 2, Bi = 3, Ci = 4;
+    Check("ct-synth: the written order has the declared masters it was built to have",
+          masterIdx[Xi].SetEquals(new[] { Mi }) && masterIdx[Ai].SetEquals(new[] { Mi }) && masterIdx[Bi].SetEquals(new[] { Mi, Ai }) && masterIdx[Ci].SetEquals(new[] { Mi }),
+          $"X<-[{string.Join(",", masterIdx[Xi])}] A<-[{string.Join(",", masterIdx[Ai])}] B<-[{string.Join(",", masterIdx[Bi])}] C<-[{string.Join(",", masterIdx[Ci])}]");
+
+    var skips = new ContactSkips();
+    var hosts = cidx.MovedHosts(skips, closure);
+    MovedHost? Host(int n) => hosts.FirstOrDefault(h => h.Key == H(n));
+    Check("ct-synth: the host census — every moved, relocated or removed table and the wall; not the 10 u nudge, not the marker, not the bowls A moved (too small to host)",
+          hosts.Count == 21 && skips.HostTooSmall == 3 && Host(16) is null && Host(17) is null && Host(12) is { Change: HostChange.Removed } && Host(13) is { Change: HostChange.Relocated }
+       && Host(1) is { Change: HostChange.Moved, Mover: Ai } && Host(23) is not null,
+          $"{hosts.Count} hosts: " + string.Join(" ", hosts.OrderBy(h => h.Key.ID).Select(h => $"{h.Key.ID - 0x900}:{h.Change}")));
+    Check("ct-synth: a base swap is read at the right snap — Table18's previous base is the short table, its winning base the tall one",
+          Host(18) is { } h18 && h18.PrevBase == tableK && h18.WinBase == tallK, Host(18) is { } x ? $"{x.PrevBase} -> {x.WinBase}" : "(no host)");
+
+    var depHash = cidx.DependentSnaps(skips);
+    var winHash = cidx.PhysicalWinners();
+    var rows = hosts.SelectMany(h => cidx.Judge(h, depHash, winHash, closure, skips, keepNoRelation: true)).ToList();
+    ContactRow? Row(int n) => rows.FirstOrDefault(r => r.Host.Key == H(n) && r.Dependent == D(n));
+    string R(int n) => Row(n) is { } r ? $"{r.Relation} / {r.Verdict} / {r.Reason} [{r.Motion}, seen {r.Seen}, after {r.AuthorAfterMover}, touched {r.DepTouchedByMoverSide}]: {r.Why}" : "(no row)";
+
+    Check("ct-synth: Table1 moved 200 u, Bowl1 left -> SUPPORTED / STRANDED, fixed, seen (M is in A's closure)",
+          Row(1) is { Relation: ContactRelation.Supported, Verdict: ContactVerdict.Stranded, Motion: DependentMotion.Fixed, Seen: true, AuthorAfterMover: false }, R(1));
+    Check("ct-synth: Table2 moved, Apple2 (a MiscItem) left -> STRANDED, MOVABLE", Row(2) is { Verdict: ContactVerdict.Stranded, Motion: DependentMotion.Movable }, R(2));
+    Check("ct-synth: A moved Table3 and Bowl3 together -> MOVED TOGETHER", Row(3) is { Relation: ContactRelation.Supported, Verdict: ContactVerdict.MovedTogether }, R(3));
+    Check("ct-synth: A moved Table4, B (masters A) re-placed Bowl4 -> MOVED TOGETHER (the patch shape)", Row(4) is { Verdict: ContactVerdict.MovedTogether }, R(4));
+    Check("ct-synth: A moved Table5 and put its own table under Bowl5 -> RE-SUPPORTED by another reference",
+          Row(5) is { Verdict: ContactVerdict.ReSupported } r5 && r5.Winner!.Against == new FormKey(aKey, 0x900) && !r5.Facts.WinnerContactIsHost, R(5));
+    Check("ct-synth: A moved Table6 and deleted Bowl6 (placement stripped) -> REMOVED, caught off the record walk", Row(6) is { Verdict: ContactVerdict.Removed }, R(6));
+    Check("ct-synth: Wall7 moved 200 u, Sconce7 on its face left -> ATTACHED / ORPHANED", Row(7) is { Relation: ContactRelation.Attached, Verdict: ContactVerdict.Orphaned }, R(7));
+    Check("ct-synth: Bowl8 was 5 u above Table8 as authored -> no relationship at ε = 4, and the near miss still carries a measured winner arm",
+          Row(8) is { Verdict: ContactVerdict.NoRelation } r8 && r8.Why.Contains("not in contact") && r8.Facts.WinnerMeasured
+       && DetectorModel.PlacementContact(r8.Facts, epsilon: 8f).Verdict == ContactVerdict.Stranded, R(8));
+    Check("ct-synth: Bowl9 was sunk 10 u into Table9 as authored -> no relationship (already sunk)", Row(9) is { Verdict: ContactVerdict.NoRelation } r9 && r9.Why.Contains("already sunk"), R(9));
+    Check("ct-synth: Table10 moved UP 20 u into Bowl10 -> SUNK, into the host", Row(10) is { Verdict: ContactVerdict.Sunk } r10 && r10.Facts.WinnerContactIsHost && r10.Facts.WinnerPenetration > 15f, R(10));
+    Check("ct-synth: Table11 moved 20 u along X, Bowl11 still on it -> RE-SUPPORTED by the host itself", Row(11) is { Verdict: ContactVerdict.ReSupported } r11 && r11.Facts.WinnerContactIsHost, R(11));
+    Check("ct-synth: Table12 DISABLED under Bowl12 -> host Removed, bowl STRANDED", Row(12) is { Verdict: ContactVerdict.Stranded, Host.Change: HostChange.Removed }, R(12));
+    Check("ct-synth: Table13 RELOCATED to cell 2 under Bowl13 -> host Relocated, bowl STRANDED", Row(13) is { Verdict: ContactVerdict.Stranded, Host.Change: HostChange.Relocated }, R(13));
+    Check("ct-synth: C (after A, outside its closure) nudged Bowl14 on the old table line -> STRANDED, author C after the mover, blind",
+          Row(14) is { Verdict: ContactVerdict.Stranded, DepAuthor: Ci, AuthorAfterMover: true, Seen: false }, R(14));
+    Check("ct-synth: A forwarded Bowl15 unchanged and moved Table15 -> STRANDED, and the row says the mover's side touched it",
+          Row(15) is { Verdict: ContactVerdict.Stranded, DepTouchedByMoverSide: true } && Row(1) is { DepTouchedByMoverSide: false }, R(15));
+    Check("ct-synth: Table18 moved and base-swapped to the tall table -> the authoring arm uses the SHORT table: STRANDED, not 'already sunk'",
+          Row(18) is { Relation: ContactRelation.Supported, Verdict: ContactVerdict.Stranded }, R(18));
+    Check("ct-synth: FX on Table20 and the wall on Floor21 are not dependents; Bowl22 introduced by the mover is skipped; no rows for 16 or 17",
+          Row(20) is null && Row(21) is null && !rows.Any(r => r.Dependent == new FormKey(aKey, 0x901)) && skips.DepIntroducedByMover >= 1 && Row(16) is null && Row(17) is null,
+          $"introduced-by-mover {skips.DepIntroducedByMover}");
+    Check("ct-synth: EXTERIOR — persistent Table23 in the worldspace's persistent cell, Bowl23 in a grid cell: same SPACE, host moved -> STRANDED",
+          Row(23) is { Verdict: ContactVerdict.Stranded }, R(23));
+    Check("ct-synth: every row's geometry is the labelled OBND box on both sides",
+          rows.All(r => r.Authoring is null || (r.Authoring.DepSrc == 'o' && r.Authoring.HostSrc == 'o')), "");
+    Check("ct-synth: Table27 removed by A; Ref28, a pole X turned into a table WITHOUT moving it, is under Bowl27 -> RE-SUPPORTED by Ref28 (the winner's base, not the placement-setter's)",
+          Row(27) is { Verdict: ContactVerdict.ReSupported } r27 && r27.Winner!.Against == H(28), R(27));
+    Check("ct-synth: the whole population — 19 rows (Ref28's table coincides with Table27 and is a near-miss row of its own), and the verdict tally is the one the order was built to give",
+          rows.Count == 19
+       && rows.Count(r => r.Verdict == ContactVerdict.Stranded) == 8 && rows.Count(r => r.Verdict == ContactVerdict.Orphaned) == 1
+       && rows.Count(r => r.Verdict == ContactVerdict.MovedTogether) == 2 && rows.Count(r => r.Verdict == ContactVerdict.ReSupported) == 3
+       && rows.Count(r => r.Verdict == ContactVerdict.Sunk) == 1 && rows.Count(r => r.Verdict == ContactVerdict.Removed) == 1
+       && rows.Count(r => r.Verdict == ContactVerdict.NoRelation) == 3,
+          $"rows {rows.Count}: " + string.Join(" | ", rows.OrderBy(r => r.Dependent.ID).Select(r => $"{r.Dependent.ID - 0xA00}:{r.Verdict}")));
+
+    try { Directory.Delete(root, true); } catch { }
+}
+
 Console.WriteLine("\nPROOF — the synthetic load order (_shared/SyntheticOrder.cs)\n");
 {
     var root = Path.Combine(Path.GetTempPath(), "proofprobe-" + Environment.ProcessId);

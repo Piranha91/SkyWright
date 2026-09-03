@@ -727,6 +727,139 @@ public static class DetectorModel
          : smallerBoxMaxDimension >= 64f ? OverlapScale.Furniture
          : OverlapScale.Clutter;
 
+    /// <summary>One (dependent, moved host) pair as the contact pass hands it to the rule (roadmap 4.5 / 4.6, the
+    /// geometry half; charter milestone 8 over milestone 6's primitive). The caller (ContactIndex) has measured the
+    /// pair in two arms with <c>SpatialOverlap.Contact</c>: the AUTHORING arm — the order without the host's mover, the
+    /// host at its previous placement, the dependent where the last plugin outside the mover's side left it — and the
+    /// WINNER arm, where the dependent is tested against the host AND every other physical reference near it. Every
+    /// field is a fact; the decision is <see cref="PlacementContact"/>.</summary>
+    /// <param name="AuthoringDistance">least surface distance between the two in the authoring arm (0 on touch or crossing).</param>
+    /// <param name="AuthoringPenetration">deepest a dependent vertex sits inside the host in the authoring arm (0 when none does).</param>
+    /// <param name="AuthoringNormalUp">cosine between the host's contact normal and +Z in the authoring arm: 1 under, 0 beside,
+    /// −1 above; NaN when no normal could be read.</param>
+    /// <param name="DependentRePlacedByMoverSide">the dependent's winning placement was set by the host's mover or a plugin
+    /// downstream of it (a deliberate re-arrangement, whatever the geometry says).</param>
+    /// <param name="WinnerDistance">the best contact the dependent has under the winner against ANY physical reference within
+    /// reach — least distance; <paramref name="WinnerPenetration"/> the deepest penetration into any of them.</param>
+    /// <param name="WinnerContactIsHost">…and that best contact is with the moved host itself (it moved a little and the
+    /// dependent is still on it).</param>
+    /// <param name="Motion">what physics would do with the dependent at cell load — rides on the facts for the caller's split;
+    /// the verdict never reads it.</param>
+    public readonly record struct ContactFacts(
+        bool DependentGeometry, bool HostGeometry, bool AuthoringMeasured,
+        float AuthoringDistance, float AuthoringPenetration, float AuthoringNormalUp,
+        bool DependentDeleted, bool DependentDisabled, bool DependentRePlacedByMoverSide,
+        bool WinnerMeasured, float WinnerDistance, float WinnerPenetration, bool WinnerContactIsHost,
+        DependentMotion Motion);
+
+    /// <summary>The placement-contact rule (frozen 2026-09-02 from the handoff of 2026-09-07). Piranha's two classes —
+    /// apples left in the air when the table moves (stranded support), a sconce left on the old wall line when the
+    /// wall moves (orphaned attachment) — are contact facts no record declares (the records pass measured that: zero
+    /// rows), so this rule reads them from the surfaces, differentially.
+    ///
+    /// <para><b>The relationship</b>, from the authoring arm. Touching — surfaces within <paramref name="epsilon"/> and
+    /// no vertex deeper than <paramref name="epsilon"/> inside — with the host's normal within ~30° of +Z
+    /// (<paramref name="supportCos"/>) is <b>Supported</b>; within ~30° of horizontal (|up| ≤ <paramref name="attachCos"/>)
+    /// is <b>Attached</b>; within ~30° of −Z is <b>Hung</b>. A gap wider than ε is no relationship. A penetration deeper
+    /// than ε as AUTHORED is no relationship either — the thing was already sunk when it shipped, which is the absolute
+    /// floor's business, not a differential finding. Contact on a slope between the bands is reported as none.</para>
+    ///
+    /// <para><b>The outcome</b>, from the winner arm, in order: a dependent that is deleted or initially disabled under
+    /// the winner is <b>Removed</b> — the fix, never a finding. One the mover's side re-placed is <b>MovedTogether</b>,
+    /// whatever its new contact. One that now sits deeper than ε inside anything is <b>Sunk</b>. One that touches
+    /// anything within ε — the host at its new place, or something else the room was rebuilt with — is
+    /// <b>ReSupported</b> (counted, not a finding). Otherwise it touches nothing: <b>Stranded</b> for a supported
+    /// dependent, <b>Orphaned</b> for an attached or hung one.</para>
+    ///
+    /// <para>Deliberately NOT judged: whether physics will drop a movable dependent onto the floor (4.7 Part C says it
+    /// does; the motion class rides on the facts and the caller splits by it); rotation- and scale-only moves of the
+    /// host (the history does not record them); terrain (LAND is not a reference, so an exterior dependent may be on
+    /// the ground and read Stranded — the caller splits interior from exterior); anything in game.</para></summary>
+    public static (ContactRelation Relation, ContactVerdict Verdict, ContactBlocker Reason, string Why)
+        PlacementContact(ContactFacts f, float epsilon = 4f, float supportCos = 0.866f, float attachCos = 0.5f)
+    {
+        if (!f.DependentGeometry)
+            return (ContactRelation.None, ContactVerdict.Unjudgeable, ContactBlocker.NoDependentGeometry, "the dependent has no geometry to test (no mesh, or nothing solid in it)");
+        if (!f.HostGeometry)
+            return (ContactRelation.None, ContactVerdict.Unjudgeable, ContactBlocker.NoHostGeometry, "the host has no geometry to test (no mesh, or nothing solid in it)");
+        if (!f.AuthoringMeasured)
+            return (ContactRelation.None, ContactVerdict.Unjudgeable, ContactBlocker.AuthoringArmMissing, "the arm without the mover could not be built");
+
+        if (f.AuthoringDistance > epsilon)
+            return (ContactRelation.None, ContactVerdict.NoRelation, ContactBlocker.None, $"not in contact as authored — {f.AuthoringDistance:0.#}u apart (ε {epsilon:0.#}u)");
+        if (f.AuthoringPenetration > epsilon)
+            return (ContactRelation.None, ContactVerdict.NoRelation, ContactBlocker.None, $"already sunk {f.AuthoringPenetration:0.#}u into the host as authored — the absolute floor's business, not a differential finding");
+        if (float.IsNaN(f.AuthoringNormalUp))
+            return (ContactRelation.None, ContactVerdict.NoRelation, ContactBlocker.None, "in contact as authored, but the host presents no readable normal there");
+
+        var relation = f.AuthoringNormalUp >= supportCos ? ContactRelation.Supported
+                     : f.AuthoringNormalUp <= -supportCos ? ContactRelation.Hung
+                     : MathF.Abs(f.AuthoringNormalUp) <= attachCos ? ContactRelation.Attached
+                     : ContactRelation.None;
+        if (relation == ContactRelation.None)
+            return (relation, ContactVerdict.NoRelation, ContactBlocker.None, $"in contact as authored on a slope (up-cosine {f.AuthoringNormalUp:0.00}) — neither resting on nor mounted against");
+
+        string rel = relation switch
+        {
+            ContactRelation.Supported => $"rested on the host as authored ({f.AuthoringDistance:0.#}u gap, {f.AuthoringPenetration:0.#}u sunk)",
+            ContactRelation.Attached => $"was mounted against the host as authored ({f.AuthoringDistance:0.#}u gap)",
+            _ => $"hung from the host as authored ({f.AuthoringDistance:0.#}u gap)",
+        };
+        string motion = f.Motion == DependentMotion.Movable ? "; MOVABLE — physics drops or shoves it at cell load" : "";
+
+        if (f.DependentDeleted)
+            return (relation, ContactVerdict.Removed, ContactBlocker.None, $"{rel}; the dependent is deleted under the winner — the fix, not a finding");
+        if (f.DependentDisabled)
+            return (relation, ContactVerdict.Removed, ContactBlocker.None, $"{rel}; the dependent is initially disabled under the winner — the fix, not a finding");
+        if (f.DependentRePlacedByMoverSide)
+            return (relation, ContactVerdict.MovedTogether, ContactBlocker.None, $"{rel}; the mover's side re-placed the dependent — a deliberate re-arrangement, whatever the new contact");
+        if (!f.WinnerMeasured)
+            return (relation, ContactVerdict.Unjudgeable, ContactBlocker.WinnerArmMissing, $"{rel}; the winner arm could not be measured");
+
+        if (f.WinnerPenetration > epsilon)
+            return (relation, ContactVerdict.Sunk, ContactBlocker.None, $"{rel}; under the winner it sits {f.WinnerPenetration:0.#}u inside {(f.WinnerContactIsHost ? "the host at its new place" : "something else")}{motion}");
+        if (f.WinnerDistance <= epsilon)
+            return (relation, ContactVerdict.ReSupported, ContactBlocker.None, $"{rel}; under the winner it still touches {(f.WinnerContactIsHost ? "the host at its new place" : "another physical reference")} ({f.WinnerDistance:0.#}u) — the room was rebuilt around it");
+        var verdict = relation == ContactRelation.Supported ? ContactVerdict.Stranded : ContactVerdict.Orphaned;
+        return (relation, verdict, ContactBlocker.None, $"{rel}; under the winner it touches nothing within {epsilon:0.#}u (nearest {f.WinnerDistance:0.#}u){motion}");
+    }
+
+    /// <summary>What physics does with a dependent at cell load — the split 4.7 Part C made necessary: a movable
+    /// CLUTTER urn was shoved aside, so a movable dependent left in the air FALLS rather than floats, and its
+    /// player-visible defect is "apples on the floor", self-healing in the common case. Item records (MISC, INGR, ALCH,
+    /// BOOK, WEAP, ARMO, AMMO, SLGM, KEYM, SCRL, and a leveled item, which resolves to one) are movable by record type
+    /// — the engine gives them a dynamic body whatever the NIF says. A Static, Furniture, Container, Door, Activator,
+    /// Tree, Flora or Light is fixed by record type — the engine never lets physics move them. A MoveableStatic is the
+    /// one type that defers to its NIF: movable when any solid body's motion system is a dynamic one
+    /// (MO_SYS_DYNAMIC and the inertia/stabilized/thin-box variants), and — when the motion system could not be read —
+    /// when a solid body sits on a layer the game reserves for things that move (CLUTTER, PROPS, DEBRIS, WEAPON);
+    /// fixed when its bodies say FIXED, KEYFRAMED or INVALID on a static layer. Unknown when nothing is known about the
+    /// base or its bodies. The record-type half is an ASSUMPTION about the engine, stated here once.</summary>
+    public static DependentMotion ClassifyMotion(string? baseType, IEnumerable<(string Layer, string MotionSystem)>? solidBodies)
+    {
+        switch (baseType)
+        {
+            case "MiscItem" or "Ingredient" or "Ingestible" or "Book" or "Weapon" or "Armor" or "Ammunition"
+                or "SoulGem" or "Key" or "Scroll" or "LeveledItem":
+                return DependentMotion.Movable;
+            case "Static" or "Furniture" or "Container" or "Door" or "Activator" or "Tree" or "Flora" or "Light":
+                return DependentMotion.Fixed;
+            case "MoveableStatic":
+                if (solidBodies is null) return DependentMotion.Unknown;
+                bool any = false, movable = false;
+                foreach (var (layer, motion) in solidBodies)
+                {
+                    any = true;
+                    if (motion is "MO_SYS_DYNAMIC" or "MO_SYS_SPHERE_INERTIA" or "MO_SYS_SPHERE_STABILIZED"
+                               or "MO_SYS_BOX_INERTIA" or "MO_SYS_BOX_STABILIZED" or "MO_SYS_THIN_BOX") movable = true;
+                    else if (string.IsNullOrEmpty(motion) && layer is "SKYL_CLUTTER" or "SKYL_PROPS" or "SKYL_DEBRIS_LARGE" or "SKYL_DEBRIS_SMALL" or "SKYL_WEAPON") movable = true;
+                }
+                return !any ? DependentMotion.Unknown : movable ? DependentMotion.Movable : DependentMotion.Fixed;
+            default:
+                return DependentMotion.Unknown;
+        }
+    }
+
     /// <summary>The route-CUT rule (roadmap 4.7's closing step, frozen 2026-09-02 from the handoff of 2026-09-06) — the
     /// rule Part C returned, over the facts <c>RouteConnectivity.Measure</c> now adds to the raster (<c>RouteFacts.Line</c>).
     /// Supersedes <see cref="RouteBlockage"/>, which asked whether ANY detour survives inside the window; Part C (56
@@ -886,3 +1019,19 @@ public enum OverlapPopulation { BethesdaFloor, UssepInvolved, ModOnMod }
 
 /// <summary>The ranker's scale class, from the buried box's largest dimension. Reported beside the rank, never a verdict.</summary>
 public enum OverlapScale { Architecture, Furniture, Clutter }
+
+/// <summary>How a dependent met its host as authored: resting on it (the host's face under it points up), mounted
+/// against it (the face points sideways), or hanging from it (the face points down). None: not in contact, or on a slope.</summary>
+public enum ContactRelation { None, Supported, Attached, Hung }
+
+/// <summary>What became of the arrangement under the winner. NoRelation: there was nothing to lose. Stranded / Orphaned:
+/// the two classes — nothing under or against the dependent now. Sunk: something is, and the dependent is inside it.
+/// ReSupported: something else holds it (counted, not a finding). MovedTogether: the mover's side re-placed it.
+/// Removed: deleted or disabled under the winner — the fix. Unjudgeable: counted by reason, never cleared.</summary>
+public enum ContactVerdict { NoRelation, Stranded, Orphaned, Sunk, ReSupported, MovedTogether, Removed, Unjudgeable }
+
+public enum ContactBlocker { None, NoDependentGeometry, NoHostGeometry, AuthoringArmMissing, WinnerArmMissing }
+
+/// <summary>What physics does with a dependent at cell load. Fixed floats where it was left; Movable falls or is shoved
+/// (4.7 Part C). Unknown: nothing known about the base or its bodies.</summary>
+public enum DependentMotion { Fixed, Movable, Unknown }

@@ -91,12 +91,33 @@ public sealed class OverlapIndex
     /// history does not record them (driftprobe's rule), so they are not a step and do not make the plugin responsible.
     /// Counted so the limit is a number in the output, not a sentence.</summary>
     public long SilentRePlacements { get; private set; }
+    /// <summary>ref -> every plugin carrying a record of it, in load order, whether or not the placement changed. What
+    /// "the mover's side overrode it without moving it" is read from (the contact pass; DependencyIndex keeps the same).</summary>
+    public Dictionary<FormKey, List<int>> Touchers { get; } = new();
+    /// <summary>ref -> the plugins that CHANGED its base record, with the base each set, in load order — the first entry
+    /// is the defining plugin's. A previous snap's box is rebuilt with the base the reference had THEN, so an override
+    /// that swapped the mesh as it moved is not rebuilt with the wrong mesh (4.1's stated limit, closed for the
+    /// contact pass). Not part of the history's changed-only rule: a base swap without a move is still not a step.</summary>
+    public Dictionary<FormKey, List<(int Plugin, FormKey Base)>> BaseChanges { get; } = new();
+    /// <summary>ref -> the latest plugin whose record of it carries the Deleted flag. A deleted reference usually loses
+    /// its placement subrecord and is invisible to PlacementExtract, so deletions are read off the major-record walk
+    /// (DependencyIndex's rule) — else a deleted dependent would read as still where it was.</summary>
+    public Dictionary<FormKey, int> DeletedBy { get; } = new();
+
+    /// <summary>Is the reference deleted at or before the winning placement — by the winning snap's own flag, or by a
+    /// deleting override at or after the last placement change?</summary>
+    public bool IsDeletedNow(FormKey key)
+    {
+        var w = History.Winning(key);
+        return (w?.Deleted ?? false) || (DeletedBy.TryGetValue(key, out var d) && d >= (w?.Plugin ?? -1));
+    }
 
     /// <summary>Read one plugin, in load order: placements into the history, base-record names, meshes and OBND.</summary>
     public void Ingest(int plugin, ISkyrimModGetter mod)
     {
         foreach (var rec in mod.EnumerateMajorRecords())
         {
+            if (rec is IPlacedGetter pg) { if (pg.IsDeleted) DeletedBy[pg.FormKey] = plugin; continue; }
             if (rec is IModeledGetter mo && rec is ISkyrimMajorRecordGetter sm)
             {
                 BaseInfo[sm.FormKey] = (rec.GetType().Name.Replace("BinaryOverlay", ""), sm.EditorID);
@@ -124,7 +145,17 @@ public sealed class OverlapIndex
              || MathF.Abs(prev.Rot.Z - snap.Rot.Z) > 1e-4f || MathF.Abs(prev.Scale - snap.Scale) > 1e-3f))
             SilentRePlacements++;
         History.Record(r.FormKey, snap);
-        if (r.Base is { } b) RefBase[r.FormKey] = b;
+        if (!Touchers.TryGetValue(r.FormKey, out var touchers)) Touchers[r.FormKey] = touchers = new List<int>(1);
+        if (touchers.Count == 0 || touchers[^1] != plugin) touchers.Add(plugin);
+        if (r.Base is { } b)
+        {
+            if (!RefBase.TryGetValue(r.FormKey, out var prevBase) || prevBase != b)
+            {
+                if (!BaseChanges.TryGetValue(r.FormKey, out var changes)) BaseChanges[r.FormKey] = changes = new List<(int, FormKey)>(1);
+                changes.Add((plugin, b));
+            }
+            RefBase[r.FormKey] = b;
+        }
     }
 
     /// <summary>The OBND fallback box for a base record: the record's extents centred on the origin as the model box.
