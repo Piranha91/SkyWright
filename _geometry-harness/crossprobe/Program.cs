@@ -587,5 +587,182 @@ Console.WriteLine("   navmesh triangle: (0,0,0) (200,0,0) (0,200,0)   actor heig
     Check("cut: bridge above the band -> line not asked", over.Touched == 0 && over.Line is { Status: LineStatus.NotAsked }, ShowLine(over));
 }
 
+// ---- 18. THE CONTACT PRIMITIVE — soup against soup (milestone 6; the test roadmap 4.5 / 4.6 run on) -----------------
+// SpatialOverlap.Contact: a dependent soup against a host soup, both in world space — the least surface distance
+// (0 on touch or crossing), the deepest a dependent vertex sits inside the host, and the host's normal at the
+// contact. Every expected value is known by construction; nothing here reads a NIF.
+{
+    static TriangleSoup Soup((List<Vector3> V, List<int> I) m) => new(m.V.ToArray(), m.I.ToArray());
+    static string Show(SoupContact c) => $"dist={c.Distance:0.###} facing={c.FacingDistance:0.###} pen={c.Penetration:0.###} enc={c.EnclosedDepth:0.###}{(c.HostClosed ? "(closed)" : "(open)")} up={c.NormalUp:0.###} n=({c.Normal.X:0.##},{c.Normal.Y:0.##},{c.Normal.Z:0.##}) pairs={c.ContactPairs} through={c.PenetratingVertices} inside={c.EnclosedVertices}";
+    var table = Soup(Box(new Vector3(-100, -100, 0), new Vector3(100, 100, 64)));      // a 200 x 200 x 64 host, top at z = 64
+
+    // A. resting on the top: distance 0, no penetration, the host's normal is +Z.
+    var apple = Soup(Box(new Vector3(-16, -16, 64), new Vector3(16, 16, 96)));
+    var rA = SpatialOverlap.Contact(apple, table, 128f);
+    Check("contact A: box resting on a box top -> distance 0, penetration 0, normal +Z", rA.Distance == 0f && rA.Penetration < 0.01f && rA.NormalUp > 0.999f && rA.ContactPairs > 0, Show(rA));
+
+    // B. flush against the +X side: distance 0, the host's normal is horizontal (+X).
+    var sconce = Soup(Box(new Vector3(100, -16, 20), new Vector3(132, 16, 52)));
+    var rB = SpatialOverlap.Contact(sconce, table, 128f);
+    Check("contact B: box against a box side -> distance 0, normal horizontal (+X)", rB.Distance == 0f && rB.Penetration < 0.01f && MathF.Abs(rB.NormalUp) < 0.01f && rB.Normal.X > 0f, Show(rB));
+
+    // C. a 5 u gap: distance 5, no contact pair, and the normal still says what it floats above.
+    var above = Soup(Box(new Vector3(-16, -16, 69), new Vector3(16, 16, 101)));
+    var rC = SpatialOverlap.Contact(above, table, 128f);
+    Check("contact C: box 5 u above the top -> distance 5, no pairs, normal +Z (floating above a floor-like face)", MathF.Abs(rC.Distance - 5f) < 0.01f && rC.ContactPairs == 0 && rC.Penetration == 0f && rC.NormalUp > 0.999f, Show(rC));
+
+    // D. sunk 10 u into the slab: surfaces cross (distance 0), the bottom vertices are 10 u inside, normal +Z.
+    var sunk = Soup(Box(new Vector3(-16, -16, 54), new Vector3(16, 16, 86)));
+    var rD = SpatialOverlap.Contact(sunk, table, 128f);
+    Check("contact D: box sunk 10 u into a slab -> distance 0, penetration 10 along the contact normal, normal +Z", rD.Distance == 0f && MathF.Abs(rD.Penetration - 10f) < 0.01f && rD.NormalUp > 0.999f && rD.PenetratingVertices == 4, Show(rD));
+
+    // E. a scaled dependent through TransformSoup: a 16 u model box at scale 2 is 32 u, placed so its bottom is the top.
+    var model = Soup(Box(new Vector3(-8, -8, -8), new Vector3(8, 8, 8)));
+    var scaled = SpatialOverlap.TransformSoup(model, new Vec3(0, 0, 80), new Vec3(0, 0, 0), 2f);
+    var sb = SpatialOverlap.SoupBounds(scaled);
+    var rE = SpatialOverlap.Contact(scaled, table, 128f);
+    Check("contact E: scaled dependent (x2) lands with its bottom on the top -> 32 u box, distance 0", MathF.Abs(sb.Min.Z - 64f) < 0.01f && MathF.Abs(sb.Max.X - 16f) < 0.01f && rE.Distance == 0f && rE.Penetration < 0.01f && rE.NormalUp > 0.999f, $"bounds {sb}; {Show(rE)}");
+
+    // F. a host rotated about two axes, the dependent rotated with it: the two still touch, and the host's normal is
+    //    the tilted top — up-cosine cos 40°, a horizontal component of sin 40°. Exercises the transform on both soups.
+    const float Deg = MathF.PI / 180f;
+    var hostModel = Soup(Box(new Vector3(-100, -100, 0), new Vector3(100, 100, 64)));
+    var depModel = Soup(Box(new Vector3(-16, -16, 64), new Vector3(16, 16, 96)));
+    var rot = new Vec3(40 * Deg, 0, 30 * Deg); var at = new Vec3(1000, 2000, 300);
+    var hostW = SpatialOverlap.TransformSoup(hostModel, at, rot, 1f);
+    var depW = SpatialOverlap.TransformSoup(depModel, at, rot, 1f);
+    var rF = SpatialOverlap.Contact(depW, hostW, 128f);
+    float nxy = MathF.Sqrt(rF.Normal.X * rF.Normal.X + rF.Normal.Y * rF.Normal.Y) / rF.Normal.Length();
+    Check("contact F: host and dependent rotated about two axes (x 40, z 30) -> still touching; normal up-cosine cos 40, horizontal sin 40",
+          rF.Distance < 0.01f && rF.Penetration < 0.05f && MathF.Abs(rF.NormalUp - MathF.Cos(40 * Deg)) < 0.01f && MathF.Abs(nxy - MathF.Sin(40 * Deg)) < 0.01f, Show(rF));
+
+    // G. two triangles through each other like an X: no vertex or edge of either touches the other, yet they cross.
+    var tri1 = new TriangleSoup(new[] { new Vector3(-50, 0, -50), new Vector3(50, 0, -50), new Vector3(0, 0, 50) }, new[] { 0, 1, 2 });
+    var tri2 = new TriangleSoup(new[] { new Vector3(0, -50, -50), new Vector3(0, 50, -50), new Vector3(0, 0, 50) }, new[] { 0, 1, 2 });
+    var rG = SpatialOverlap.Contact(tri1, tri2, 128f);
+    Check("contact G: two triangles crossing like an X -> distance 0 (the segment-through-triangle path)", rG.Distance == 0f, Show(rG));
+
+    // H. two coplanar triangles overlapping as a star — no vertex of either inside the other: the edge-edge path.
+    var up = new TriangleSoup(new[] { new Vector3(0, 40, 0), new Vector3(-35, -20, 0), new Vector3(35, -20, 0) }, new[] { 0, 1, 2 });
+    var down = new TriangleSoup(new[] { new Vector3(0, -40, 0), new Vector3(35, 20, 0), new Vector3(-35, 20, 0) }, new[] { 0, 1, 2 });
+    var rH = SpatialOverlap.Contact(up, down, 128f);
+    Check("contact H: coplanar star of David -> distance 0 (edges cross, no vertex inside)", rH.Distance == 0f, Show(rH));
+
+    // I. fully buried: an 8 u box in the middle of the slab. The surfaces are 28 u apart, yet every vertex is inside —
+    //    penetration is read from the vertices, never from the surface distance, and it is the nearest way out.
+    var buried = Soup(Box(new Vector3(-4, -4, 28), new Vector3(4, 4, 36)));
+    var rI = SpatialOverlap.Contact(buried, table, 128f);
+    Check("contact I: box buried in the middle of the slab -> surfaces 28 u apart, no contact so no contact penetration; the ENCLOSED reading says 28 with 8 vertices inside, and the host is closed so it counts",
+          MathF.Abs(rI.Distance - 28f) < 0.01f && rI.Penetration == 0f && rI.ContactPairs == 0 && MathF.Abs(rI.EnclosedDepth - 28f) < 0.01f && rI.EnclosedVertices == 8 && rI.HostClosed && MathF.Abs(rI.EffectivePenetration - 28f) < 0.01f, Show(rI));
+
+    // J. under the slab, flush with its underside: distance 0, the host's normal points DOWN — a ceiling.
+    var hung = Soup(Box(new Vector3(-16, -16, -32), new Vector3(16, 16, 0)));
+    var rJ = SpatialOverlap.Contact(hung, table, 128f);
+    Check("contact J: box flush under the slab -> distance 0, normal −Z (hung from a ceiling)", rJ.Distance == 0f && rJ.Penetration < 0.01f && rJ.NormalUp < -0.999f, Show(rJ));
+
+    // K. nothing within reach: the distance reads as the cap, and there is no normal to read.
+    var far = Soup(Box(new Vector3(-16, -16, 500), new Vector3(16, 16, 532)));
+    var rK = SpatialOverlap.Contact(far, table, 128f);
+    Check("contact K: box 436 u above -> distance = the 128 u cap, no pairs, no normal", rK.Distance == 128f && rK.ContactPairs == 0 && rK.PenetratingVertices == 0 && float.IsNaN(rK.NormalUp), Show(rK));
+
+    // L. the inside test at a convex edge: a point just outside the slab's corner is behind one face and in front of
+    //    the other -> outside; a point just inside reads inside by the nearer way out.
+    var grid = TriangleGrid.Build(table);
+    var outside = grid.InsideDepth(new Vector3(101, 101, 32), 128f);
+    var insideCorner = grid.InsideDepth(new Vector3(99, 98, 32), 128f);
+    var onSurface = grid.InsideDepth(new Vector3(0, 0, 64), 128f);
+    Check("contact L: a point outside a convex corner reads OUTSIDE; one 1 u inside reads inside by 1; one on the surface reads 0",
+          outside.Depth == 0f && MathF.Abs(insideCorner.Depth - 1f) < 0.01f && onSurface.Depth == 0f, $"outside {outside.Depth:0.##}, inside {insideCorner.Depth:0.##}, on {onSurface.Depth:0.##}");
+
+    // O. under an OPEN floor — a single quad, the shape most kit-piece collision takes. The box sits 8 u below the
+    //    quad without touching it: distance 8, no contact, no contact penetration. The enclosed reading says "8 u
+    //    behind the face" — which is why it is not the rule's number for an open host, and the host reads open.
+    var quad = new TriangleSoup(new[] { new Vector3(-200, -200, 64), new Vector3(200, -200, 64), new Vector3(200, 200, 64), new Vector3(-200, 200, 64) }, new[] { 0, 1, 2, 0, 2, 3 });
+    var underQuad = Soup(Box(new Vector3(-16, -16, 24), new Vector3(16, 16, 56)));
+    var rO = SpatialOverlap.Contact(underQuad, quad, 128f);
+    Check("contact O: box 8 u under an open floor quad -> distance 8, no contact penetration; the enclosed reading (40 — its bottom vertices behind the face) is flagged by an OPEN host and not effective",
+          MathF.Abs(rO.Distance - 8f) < 0.01f && rO.ContactPairs == 0 && rO.Penetration == 0f && MathF.Abs(rO.EnclosedDepth - 40f) < 0.01f && !rO.HostClosed && rO.EffectivePenetration == 0f, Show(rO));
+
+    // P. under a CLOSED slab, outside it: distance 28 to the underside, nothing inside, nothing through.
+    var underSlab = Soup(Box(new Vector3(-16, -16, -60), new Vector3(16, 16, -28)));
+    var rP = SpatialOverlap.Contact(underSlab, table, 128f);
+    Check("contact P: box 28 u under a closed slab -> distance 28, no penetration of either kind", MathF.Abs(rP.Distance - 28f) < 0.01f && rP.Penetration == 0f && rP.EnclosedDepth == 0f && rP.HostClosed, Show(rP));
+
+    // Q. a bench sunk 3 u into the table top and overhanging its edge — its bottom crosses the table's SIDE face too.
+    //    The normal is read from the faces within the band weighted by parallelism, so the bottom-on-top contact
+    //    outvotes the crossed side: up-cosine over 0.99, and the penetration is 3 along it, not the 40 u the
+    //    overhanging corner sits behind the side face's plane. (Sunk deeper than the band, no parallel face is in the
+    //    band and the normal comes from crossings alone — that regime is Sunk by penetration whatever the normal says.)
+    var bench = Soup(Box(new Vector3(60, -16, 61), new Vector3(140, 16, 93)));
+    var rQ = SpatialOverlap.Contact(bench, table, 128f);
+    Check("contact Q: bench sunk 3 u and overhanging the edge -> normal +Z (the parallel contact outvotes the crossed side), penetration 3, not the overhang's 40",
+          rQ.Distance == 0f && MathF.Abs(rQ.Penetration - 3f) < 0.1f && rQ.NormalUp > 0.99f, Show(rQ));
+
+    // R. what winding does and does not touch: a host wound INWARD gives the same distance (winding-free), but the
+    //    contact normal follows the host's faces and flips with them, and the penetration is read along it — which is
+    //    why the decoder now turns every convex primitive outward by construction, and why a host on the render
+    //    fallback never hosts.
+    var inv = new TriangleSoup(table.Vertices, table.Indices.Chunk(3).SelectMany(t => new[] { t[0], t[2], t[1] }).ToArray());
+    var rDi = SpatialOverlap.Contact(sunk, inv, 128f);
+    Check("contact R: the same sunk box against the slab wound inward -> distance unchanged; the normal flips (up −1) and the readings that follow it read the part ABOVE the surface as inside (22)",
+          rDi.Distance == 0f && rDi.NormalUp < -0.999f && MathF.Abs(rDi.Penetration - 22f) < 0.01f && MathF.Abs(rDi.EnclosedDepth - 22f) < 0.01f, Show(rDi));
+
+    // S. two objects side by side on a floor, 5 u apart: their bottoms are coplanar and within a band of each other,
+    //    but nothing FACES — the closest pair between the bottoms lies in their shared plane, not along a normal. The raw
+    //    distance is 5 (the sides), the facing distance is 5 too (the sides face each other), and the normal is the
+    //    neighbour's side, never its downward bottom; at a 1 u gap the bottoms are within 4 u of each other's edges and
+    //    still do not vote.
+    var neighbour = Soup(Box(new Vector3(21, -16, 0), new Vector3(53, 16, 30)));
+    var bucket = Soup(Box(new Vector3(-16, -16, 0), new Vector3(16, 16, 40)));
+    var rS = SpatialOverlap.Contact(bucket, neighbour, 128f, contactBand: 8f);
+    var neighbour1 = Soup(Box(new Vector3(17, -16, 0), new Vector3(49, 16, 30)));
+    var rS1 = SpatialOverlap.Contact(bucket, neighbour1, 128f, contactBand: 4f);
+    Check("contact S: a box 5 u beside another on the same floor -> facing distance 5 through the sides, normal horizontal (the coplanar bottoms never vote)",
+          MathF.Abs(rS.FacingDistance - 5f) < 0.01f && MathF.Abs(rS.NormalUp) < 0.01f && rS.Normal.X < 0f && rS.Penetration == 0f, Show(rS));
+    Check("contact S: ...and at a 1 u gap, inside the band, the same: horizontal, no penetration", MathF.Abs(rS1.FacingDistance - 1f) < 0.01f && MathF.Abs(rS1.NormalUp) < 0.01f && rS1.Penetration == 0f, Show(rS1));
+
+    // T. under a one-sided board, close to it: a bottle standing beneath a shelf board whose collision is a top face
+    //    only. Its top is 3 u behind the face without crossing it — that is "under", not "through": no contact pair, no
+    //    penetration, and the enclosed reading (behind the face by up to the bottle's height) is not effective on an
+    //    open host. The same box 3 u ABOVE the face is a contact.
+    var underBoard = Soup(Box(new Vector3(-16, -16, 29), new Vector3(16, 16, 61)));
+    var rT = SpatialOverlap.Contact(underBoard, quad, 128f, contactBand: 8f);
+    var onBoard = Soup(Box(new Vector3(-16, -16, 67), new Vector3(16, 16, 99)));
+    var rT2 = SpatialOverlap.Contact(onBoard, quad, 128f, contactBand: 8f);
+    Check("contact T: box 3 u under a one-sided board -> no contact pair, no effective penetration; 3 u above it -> a contact at 3 u",
+          rT.ContactPairs == 0 && rT.EffectivePenetration == 0f && float.IsPositiveInfinity(rT.FacingDistance) == false && rT.FacingDistance >= 128f
+       && rT2.ContactPairs > 0 && MathF.Abs(rT2.FacingDistance - 3f) < 0.01f && rT2.NormalUp > 0.999f, $"{Show(rT)} | {Show(rT2)}");
+
+    // U. closure is read after welding: the same closed slab built with every face's four corners duplicated (24
+    //    vertices, the way a hard-edged export or a compressed-mesh chunk stores them) still reads closed.
+    var dupV = new List<Vector3>(); var dupI = new List<int>();
+    for (int t = 0; t < table.TriangleCount; t++)
+        for (int k = 0; k < 3; k++) { dupI.Add(dupV.Count); dupV.Add(table.Vertices[table.Indices[t * 3 + k]]); }
+    var welded = TriangleGrid.Build(new TriangleSoup(dupV.ToArray(), dupI.ToArray()));
+    var unwelded = TriangleGrid.Build(new TriangleSoup(new[] { new Vector3(0, 0, 0), new Vector3(10, 0, 0), new Vector3(0, 10, 0) }, new[] { 0, 1, 2 }));
+    Check("contact U: a closed slab with every vertex duplicated per triangle reads CLOSED after welding; a lone triangle reads open", welded.IsClosed && !unwelded.IsClosed, $"welded {welded.IsClosed}, lone {unwelded.IsClosed}");
+
+    // V. a book resting on a bedroll, the bedroll as the dependent: the book's bottom touches the bedroll's top, and
+    //    nothing crosses. The bedroll is not "through" the book by its own thickness — the book's top face, which the
+    //    bedroll's facets sit behind, is not a contact — so the reading is a touch from below (normal −Z), no penetration.
+    var bedroll = Soup(Box(new Vector3(-50, -20, 0), new Vector3(50, 20, 12)));
+    var book = Soup(Box(new Vector3(-10, -7, 12), new Vector3(10, 7, 16)));
+    var rV = SpatialOverlap.Contact(bedroll, book, 128f, contactBand: 8f);
+    Check("contact V: a book resting on a bedroll, read with the bedroll as the dependent -> a touch from below, normal −Z, no penetration",
+          rV.FacingDistance == 0f && rV.NormalUp < -0.99f && rV.EffectivePenetration == 0f && rV.Penetration == 0f, Show(rV));
+
+    // M. the box lower bound the broad phase uses.
+    var bx1 = new Aabb(new Vec3(0, 0, 0), new Vec3(10, 10, 10), false);
+    var bx2 = new Aabb(new Vec3(15, 13, 0), new Vec3(20, 20, 10), false);
+    var bx3 = new Aabb(new Vec3(10, 0, 0), new Vec3(20, 10, 10), false);
+    Check("contact M: BoxDistance is the corner gap (sqrt 34) and 0 for boxes that touch", MathF.Abs(SpatialOverlap.BoxDistance(bx1, bx2) - MathF.Sqrt(34f)) < 0.001f && SpatialOverlap.BoxDistance(bx1, bx3) == 0f,
+          $"{SpatialOverlap.BoxDistance(bx1, bx2):0.###} / {SpatialOverlap.BoxDistance(bx1, bx3)}");
+
+    // N. the same host indexed once and asked twice gives the same answers (the many-dependents path).
+    var rA2 = SpatialOverlap.Contact(apple, grid, 128f);
+    var rC2 = SpatialOverlap.Contact(above, grid, 128f);
+    Check("contact N: a pre-built host grid answers the same as the one-shot call", rA2.Distance == rA.Distance && rA2.NormalUp == rA.NormalUp && rC2.Distance == rC.Distance, $"{Show(rA2)} | {Show(rC2)}");
+}
+
 Console.WriteLine($"\n==== {pass} passed, {fail} failed ====");
 return fail == 0 ? 0 : 1;
