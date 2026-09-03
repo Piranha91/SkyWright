@@ -995,7 +995,7 @@ the waypoints ENDPOINTS and finds the path.
 **Where the edges come from.** The record, not the shapes. Two triangles that share an edge on
 paper are neighbours only if the navmesh says so — the game reads `NAVM`'s own link fields and
 nothing else, so a graph built from shared vertices would answer a question about geometry while
-claiming to answer one about walking. Three sources, all the record's (`NavGraph.cs`):
+claiming to answer one about walking. Three sources, all the record's (`src/housecarl-core/NavGraph.cs` — moved from viewprobe 2026-09-02 so the route-cut detector and the renderer share one pathfinder):
 
 | Source | Field | Meaning |
 |---|---|---|

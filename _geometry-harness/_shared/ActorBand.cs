@@ -36,6 +36,17 @@ internal static class ActorBand
     /// <summary>Step height — the band's bottom. Assumed, as before; stated here so the assumption has one home.</summary>
     public const float StepHeight = 32f;
 
+    /// <summary>What the character controller actually ducks under, as a fraction of the nominal head height the
+    /// records give. MEASURED 2026-09-02 (roadmap 4.7 Part C, the overhead ladder): a scale-1 Nord — 128 × 1.03 =
+    /// 132 u nominal — stopped at a beam whose underside was 100 u above the floor and walked under one at 120 u,
+    /// so its controller's top lies in (100, 120) u: a factor in (0.76, 0.91). 0.85 is the middle of that interval
+    /// (112 u for the Nord). One walker, one race, one arm per rung; a taller or shorter race was not measured, and
+    /// the factor is applied to every derived top on the assumption the controller scales with the model.</summary>
+    public const float ControllerFactor = 0.85f;
+
+    /// <summary>The band top the route-cut rule uses: the derived nominal top scaled to the controller's.</summary>
+    public static float ControllerTop(float nominalTop) => nominalTop * ControllerFactor;
+
     public sealed record NpcFacts(FormKey Race, bool Female, float Height, bool Templated);
     public sealed record RaceFacts(float Male, float Female, bool Playable, string? EditorId);
 

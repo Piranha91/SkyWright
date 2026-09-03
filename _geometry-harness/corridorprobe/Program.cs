@@ -1,25 +1,39 @@
 using System.Numerics;
 using System.Text;
+using System.Text.Json;
+using HarnessShared;
 using HousecarlCore;
 using Mutagen.Bethesda.Plugins;
 using Mutagen.Bethesda.Skyrim;
 
-// corridorprobe — choose and measure navmesh CORRIDORS from the records, for roadmap 4.7 Part C.
+// corridorprobe — choose and measure navmesh CORRIDORS from the records, for roadmap 4.7 Part C; and read the in-game
+// arms back through the route-cut rule (4.7's closing step).
 //
 // The in-game matrix needs navmesh strips of known widths. This reads a cell's winning navmesh straight out of the
 // plugin and (a) draws it as a coverage map so a corridor can be picked by eye, (b) measures the walkable width across
-// a chosen point and heading, plus the clearance ladder the route rule would report for the corridor on its own.
+// a chosen point and heading, plus the clearance ladder the route rule would report for the corridor on its own, and
+// (c) reads a list of in-game arms — a base record stood at the engine's own pose, the outcome the walker produced,
+// the line it was commanded along — through the route-cut rule and prints the confusion matrix: the acceptance set.
 //
 // usage: corridorprobe map <CellEditorID> [--step 32] [--plugin Skyrim.esm]
 //        corridorprobe width <CellEditorID> --at X,Y,Z --heading DEG [--span 600] [--plugin Skyrim.esm]
+//        corridorprobe arms <arms.json> [--band controller|nominal] [--plugin Skyrim.esm]
+//        corridorprobe find <mesh substring>
 //   map    an ASCII coverage map of the cell's navmesh at --step units per character (rows = Y descending)
 //   width  the walkable width across the corridor at the point, perpendicular to the heading (yaw, degrees, 0 = +Y,
 //          clockwise), sampled every 4 u; and the width every 64 u along the heading for --span each way
+//   arms   arms.json: { "cell": "<CellEditorID>", "bandTop": <the walker's nominal head height, u>,
+//                       "arms": [ { "tag", "base": "XXXXXX:Plugin.esp", "pos": [x,y,z], "yaw": <deg>, "scale": <s>,
+//                                   "outcome": "CROSSED|DETOURED|STALLED", "line": [[x0,y0],[x1,y1]] }, … ] }
+//          Each arm is measured twice: on the rule's own line (the raster's ends, pathfound) and on the commanded line
+//          the walker was given, so a disagreement between the two is separable from a wrong threshold. Meshes come
+//          through the instance's VFS (HarnessTarget instance/profile/game); the navmesh from --plugin, as the other modes.
+//   --band controller (default) scales the band top by ActorBand.ControllerFactor; nominal uses bandTop as given.
 
 string GamePath = HarnessTarget.Require(HarnessTarget.Game, "game directory", "game");
 string dataDir = Path.Combine(GamePath, "Data");
 
-if (args.Length < 2) { Console.Error.WriteLine("usage: corridorprobe map|width <CellEditorID> [...]  |  corridorprobe find <mesh substring>"); return 1; }
+if (args.Length < 2) { Console.Error.WriteLine("usage: corridorprobe map|width <CellEditorID> [...]  |  corridorprobe arms <arms.json>  |  corridorprobe find <mesh substring>"); return 1; }
 string mode = args[0], cellId = args[1];
 
 if (mode == "find")
@@ -31,14 +45,23 @@ if (mode == "find")
             Console.WriteLine($"   {rec.FormKey}  {rec.GetType().Name.Replace("BinaryOverlay", ""),-16} {rec.EditorID,-32} {f.GivenPath}");
     return 0;
 }
-float step = 32f, span = 600f, heading = 0f; Vec3? at = null; string plugin = "Skyrim.esm";
+float step = 32f, span = 600f, heading = 0f; Vec3? at = null; string plugin = "Skyrim.esm"; bool controllerBand = true; string? ascii = null;
 for (int i = 2; i < args.Length; i++)
 {
     if (args[i] == "--step" && i + 1 < args.Length) step = float.Parse(args[++i]);
+    else if (args[i] == "--ascii" && i + 1 < args.Length) ascii = args[++i];   // arms: draw the raster of every arm whose tag contains this
     else if (args[i] == "--span" && i + 1 < args.Length) span = float.Parse(args[++i]);
     else if (args[i] == "--heading" && i + 1 < args.Length) heading = float.Parse(args[++i]);
     else if (args[i] == "--plugin" && i + 1 < args.Length) plugin = args[++i];
+    else if (args[i] == "--band" && i + 1 < args.Length) controllerBand = args[++i] != "nominal";
     else if (args[i] == "--at" && i + 1 < args.Length) { var p = args[++i].Split(','); at = new Vec3(float.Parse(p[0]), float.Parse(p[1]), float.Parse(p[2])); }
+}
+
+JsonElement armsDoc = default;
+if (mode == "arms")
+{
+    armsDoc = JsonDocument.Parse(File.ReadAllText(cellId)).RootElement;
+    cellId = armsDoc.GetProperty("cell").GetString() ?? throw new InvalidDataException("arms.json needs \"cell\"");
 }
 
 using var mod = SkyrimMod.CreateFromBinaryOverlay(Path.Combine(dataDir, plugin), SkyrimRelease.SkyrimSE);
@@ -139,5 +162,141 @@ if (mode == "width")
     return 0;
 }
 
-Console.Error.WriteLine("mode must be map or width");
+if (mode == "arms")
+{
+    // ---- the VFS, for the obstacles' meshes ----
+    string Instance = HarnessTarget.Require(HarnessTarget.Instance, "MO2 instance directory", "instance");
+    string profileDir = Path.Combine(Instance, "profiles", HarnessTarget.Require(HarnessTarget.Profile, "MO2 profile name", "profile"));
+    string modsDir = Path.Combine(Instance, "mods"), overwriteDir = Path.Combine(Instance, "overwrite");
+    var comp = Mo2LoadOrder.ReadComposition(profileDir);
+    var arch = ArchiveDiscovery.Discover(profileDir, modsDir, dataDir, overwriteDir, GamePath);
+    using var assets = AssetResolver.Build(overwriteDir, modsDir, dataDir, comp.EnabledMods, arch.Archives);
+    var order = Mo2LoadOrder.Build(profileDir, modsDir, dataDir, overwriteDir);
+
+    // ---- the arms, and the base records they place ----
+    var arms = new List<Arm>();
+    foreach (var a in armsDoc.GetProperty("arms").EnumerateArray())
+    {
+        var pos = a.GetProperty("pos").EnumerateArray().Select(e => e.GetSingle()).ToArray();
+        var line = a.TryGetProperty("line", out var ln) && ln.ValueKind == JsonValueKind.Array
+            ? ln.EnumerateArray().Select(p => { var q = p.EnumerateArray().Select(e => e.GetSingle()).ToArray(); return new Vector2(q[0], q[1]); }).ToArray()
+            : null;
+        arms.Add(new Arm(a.GetProperty("tag").GetString() ?? "?", FormKey.Factory(a.GetProperty("base").GetString()!),
+                         new Vec3(pos[0], pos[1], pos[2]), a.GetProperty("yaw").GetSingle(), a.TryGetProperty("scale", out var sc) ? sc.GetSingle() : 1f,
+                         a.GetProperty("outcome").GetString() ?? "?", line));
+    }
+    var baseMesh = new Dictionary<FormKey, (string Mesh, string Type)>();
+    foreach (var modKey in arms.Select(a => a.Base.ModKey).Distinct())
+    {
+        string? path = order.OrderedPaths.FirstOrDefault(p => string.Equals(Path.GetFileName(p), modKey.FileName, StringComparison.OrdinalIgnoreCase))
+                       ?? (File.Exists(Path.Combine(dataDir, modKey.FileName)) ? Path.Combine(dataDir, modKey.FileName) : null);
+        if (path is null) { Console.Error.WriteLine($"{modKey.FileName} is neither in the load order nor in Data"); return 1; }
+        var wanted = arms.Where(a => a.Base.ModKey == modKey).Select(a => a.Base).ToHashSet();
+        using var bm = SkyrimMod.CreateFromBinaryOverlay(path, SkyrimRelease.SkyrimSE);
+        foreach (var rec in bm.EnumerateMajorRecords())
+            if (wanted.Contains(rec.FormKey) && rec is IModeledGetter mg && mg.Model?.File is { } f && !string.IsNullOrWhiteSpace(f.GivenPath))
+                baseMesh[rec.FormKey] = (f.GivenPath, rec.GetType().Name.Replace("BinaryOverlay", ""));
+    }
+
+    // ---- the geometry: the actor-solid collision soup, as blockprobe reads it ----
+    var geoCache = new Dictionary<string, (Aabb Box, TriangleSoup? Soup, string Source)>(StringComparer.OrdinalIgnoreCase);
+    (Aabb Box, TriangleSoup? Soup, string Source) Geometry(string rel)
+    {
+        if (geoCache.TryGetValue(rel, out var hit)) return hit;
+        var full = rel.StartsWith("meshes", StringComparison.OrdinalIgnoreCase) ? rel : Path.Combine("meshes", rel);
+        var res = assets.ResolveForPlacement(full);
+        if (res.Sources.Count == 0) return geoCache[rel] = (Aabb.Empty, null, "unresolved");
+        var (bytes, _) = AssetResolver.ReadPlacementSource(res.Sources[0]);
+        if (bytes is null) return geoCache[rel] = (Aabb.Empty, null, "unresolved");
+        var o = NifGeometry.Measure(bytes, includeTriangles: true);
+        if (o.Model is null) return geoCache[rel] = (Aabb.Empty, null, "unreadable");
+        var m = o.Model;
+        bool anySolid = m.CollisionBodies is not null && m.CollisionBodies.Any(b => b.Solid && CollisionLayers.IsActorSolid(b.Layer));
+        if (!m.HasCollision || !anySolid) return geoCache[rel] = (Aabb.Empty, null, "none");
+        var solid = m.CollisionSoupFor(b => b.Solid && CollisionLayers.IsActorSolid(b.Layer));
+        if (m.CollisionComplete && solid is { TriangleCount: > 0 })
+        {
+            var bx = Aabb.Empty;
+            foreach (var v in solid.Vertices) bx = bx.Add(v);
+            return geoCache[rel] = (bx, solid, "collision");
+        }
+        return geoCache[rel] = (m.Bounds, m.Soup, "fallback");
+    }
+
+    // ---- the band and the graph ----
+    float nominalTop = armsDoc.TryGetProperty("bandTop", out var bt) ? bt.GetSingle() : ActorBand.ScaleOneHeight;
+    float top = controllerBand ? ActorBand.ControllerTop(nominalTop) : nominalTop;
+    var ladder = new[] { 0f, 32f, 64f, 96f, 128f };
+    var (gnodes, grpt) = NavGraph.Build(navs);
+    Console.WriteLine($"graph: {grpt.Triangles:N0} triangles, {grpt.IntraLinks:N0} intra + {grpt.CrossLinks:N0} cross links, {grpt.DanglingLinks} dangling, {grpt.ExternalLinks} external, {grpt.Components} component(s)");
+    Console.WriteLine($"band: {ActorBand.StepHeight:0}..{top:0} u ({(controllerBand ? $"controller: nominal {nominalTop:0} × {ActorBand.ControllerFactor}" : "nominal")}); capsule 22 u; window ±256 u, step 16\n");
+
+    var rows = new List<(Arm A, string Type, RouteCutVerdict? Rule, RouteFacts? FR, RouteCutVerdict? Cmd, RouteFacts? FC, string Note)>();
+    foreach (var a in arms)
+    {
+        if (!baseMesh.TryGetValue(a.Base, out var bm)) { rows.Add((a, "?", null, null, null, null, "base record has no model")); continue; }
+        if (bm.Type == "MoveableStatic") { rows.Add((a, bm.Type, null, null, null, null, "MoveableStatic: set aside (pushed aside, Part C)")); continue; }
+        if (bm.Type == "Door") { rows.Add((a, bm.Type, null, null, null, null, "Door: set aside (passable by design)")); continue; }
+        var g = Geometry(bm.Mesh);
+        if (g.Soup is null || g.Box.IsEmpty) { rows.Add((a, bm.Type, null, null, null, null, $"no actor-solid geometry ({g.Source})")); continue; }
+        var rot = new Vec3(0, 0, a.YawDeg * MathF.PI / 180f);
+        var world = SpatialOverlap.ToWorld(g.Box, a.Pos, rot, a.Scale);
+        var m = SpatialOverlap.RefrRotation(rot);
+        var t = new Vector3(a.Pos.X, a.Pos.Y, a.Pos.Z);
+        var w = new Vector3[g.Soup.Vertices.Length];
+        for (int i = 0; i < w.Length; i++) w[i] = Vector3.Transform(g.Soup.Vertices[i] * a.Scale, m) + t;
+        var columns = MeshColumnIndex.Build(w, g.Soup.Indices);
+
+        bool draw = ascii is not null && a.Tag.Contains(ascii, StringComparison.OrdinalIgnoreCase);
+        var fr = RouteConnectivity.Measure(navs, columns, world, 256f, 16f, ActorBand.StepHeight, top, ladder, graph: gnodes, keepRaster: draw);
+        var vr = Verdict(fr);
+        if (draw && fr.Raster is { } ras)
+        {
+            Console.WriteLine($"\n   ---- raster: {a.Tag} — {vr}; {fr.Line?.Status} {fr.Line?.Why} ----");
+            Console.Write(ras.Ascii());
+        }
+        RouteFacts? fc = null; RouteCutVerdict? vc = null;
+        if (a.Line is { Length: >= 2 })
+        {
+            fc = RouteConnectivity.Measure(navs, columns, world, 256f, 16f, ActorBand.StepHeight, top, ladder, graph: gnodes, lineOverride: a.Line);
+            vc = Verdict(fc);
+        }
+        rows.Add((a, bm.Type, vr, fr, vc, fc, g.Source));
+    }
+
+    static RouteCutVerdict Verdict(RouteFacts f) =>
+        DetectorModel.RouteCut(f.Judged, f.Touched, f.Line?.Found ?? false, f.Line?.Why ?? "", f.Line?.Cut ?? false, f.Line?.Passage ?? float.NaN).Verdict;
+    static string Facts(RouteFacts? f) => f is null ? "-" : f.Line is { } l
+        ? $"touched {f.Touched,3} {l.Status,-10} cut={(l.Cut ? "Y" : "n")} passage {(float.IsNaN(l.Passage) ? "  -" : l.Passage >= l.PassageCap ? $"≥{l.PassageCap:0}" : $"{l.Passage,3:0}")} (L {(float.IsNaN(l.PassageLeft) ? "-" : l.PassageLeft.ToString("0")),3} / R {(float.IsNaN(l.PassageRight) ? "-" : l.PassageRight.ToString("0")),3})" + (l.Status == LineStatus.JunctionLine ? $" [{l.Ends} ends, {l.PairsCut}/{l.Pairs} pairs cut]" : l.Found ? "" : $" [{l.Ends} ends: {l.Why}]")
+        : $"judged={f.Judged} {f.Why}";
+
+    Console.WriteLine($"   {"arm",-34} {"outcome",-9} {"RULE LINE",-14} {"facts",-58} {"CMD LINE",-14} facts");
+    foreach (var r in rows)
+        Console.WriteLine($"   {r.A.Tag,-34} {r.A.Outcome,-9} {(r.Rule?.ToString() ?? "aside"),-14} {Facts(r.FR),-58} {(r.Cmd?.ToString() ?? "-"),-14} {Facts(r.FC)}   {r.Note}");
+
+    var outcomes = new[] { "CROSSED", "DETOURED", "STALLED" };
+    void Matrix(string title, Func<(Arm A, string Type, RouteCutVerdict? Rule, RouteFacts? FR, RouteCutVerdict? Cmd, RouteFacts? FC, string Note), RouteCutVerdict?> pick)
+    {
+        Console.WriteLine($"\n   ---- confusion matrix: {title} ----");
+        Console.WriteLine($"   {"verdict",-14} {"CROSSED",8} {"DETOURED",9} {"STALLED",8}   {"stall rate",10}");
+        foreach (var v in new[] { RouteCutVerdict.Blocked, RouteCutVerdict.LikelyBlocked, RouteCutVerdict.Clipped, RouteCutVerdict.None, RouteCutVerdict.NoLine, RouteCutVerdict.Unjudgeable })
+        {
+            var n = outcomes.Select(o => rows.Count(r => pick(r) == v && r.A.Outcome == o)).ToArray();
+            int tot = n.Sum();
+            if (tot == 0) continue;
+            Console.WriteLine($"   {v,-14} {n[0],8} {n[1],9} {n[2],8}   {(100.0 * n[2] / tot),9:0}%");
+        }
+        int aside = rows.Count(r => pick(r) is null);
+        if (aside > 0) Console.WriteLine($"   {"(set aside)",-14} {outcomes.Select(o => rows.Count(r => pick(r) is null && r.A.Outcome == o)).Select(n => n.ToString().PadLeft(8)).Aggregate((x, y) => x + " " + y)}");
+    }
+    Matrix("the rule's own line (raster ends, pathfound)", r => r.Rule);
+    if (rows.Any(r => r.Cmd is not null)) Matrix("the commanded line (what the walker was given)", r => r.Cmd);
+    int disagree = rows.Count(r => r.Rule is not null && r.Cmd is not null && r.Rule != r.Cmd);
+    Console.WriteLine($"\n   arms where the two lines disagree on the verdict: {disagree}");
+    return 0;
+}
+
+Console.Error.WriteLine("mode must be map, width, arms or find");
 return 1;
+
+record Arm(string Tag, FormKey Base, Vec3 Pos, float YawDeg, float Scale, string Outcome, Vector2[]? Line);

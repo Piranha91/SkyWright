@@ -727,7 +727,47 @@ public static class DetectorModel
          : smallerBoxMaxDimension >= 64f ? OverlapScale.Furniture
          : OverlapScale.Clutter;
 
+    /// <summary>The route-CUT rule (roadmap 4.7's closing step, frozen 2026-09-02 from the handoff of 2026-09-06) — the
+    /// rule Part C returned, over the facts <c>RouteConnectivity.Measure</c> now adds to the raster (<c>RouteFacts.Line</c>).
+    /// Supersedes <see cref="RouteBlockage"/>, which asked whether ANY detour survives inside the window; Part C (56
+    /// arms, two corridors) showed the engine does not look for that detour: a commanded walker stalls against a
+    /// full-width obstacle 5 of 5, walks straight through whenever its own path line is clear by its ~22 u capsule
+    /// 10 of 10, and with its line cut and a passage open beside the obstacle gets through 12 of 22 — 3 of 11 when the
+    /// widest passage is 44 u or under, 7 of 11 at 64 u, 5 of 11 at 76–160 u. The pass rate does not rise with the
+    /// passage: the avoidance shifts to one side by a bounded amount, sometimes not at all, never to the far side.
+    /// <list type="bullet">
+    /// <item><b>Blocked</b> — the object cuts the corridor's natural path line at capsule width inside the actor band,
+    /// and the widest passage beside it is under <paramref name="blockedBelow"/> (48 u: measured 0 of 5 at full width
+    /// and 3 of 11 at 44 u and under). The very-high class.</item>
+    /// <item><b>LikelyBlocked</b> — the line is cut and a passage of <paramref name="blockedBelow"/> or more is open
+    /// beside it: the coin (12 of 22 from 64 u up). 48–64 u was not measured; that band is assigned HERE, to the
+    /// lower-severity class, on purpose — a claim of certainty where nothing was measured would cost precision.</item>
+    /// <item><b>Clipped</b> — the object stands on walkable ground in the band (<paramref name="touched"/> &gt; 0) but
+    /// does not cut the line: the walker passes it 10 of 10. Piranha's clipping class, kept apart from Blocked.</item>
+    /// <item><b>NoLine</b> — on walkable ground, but the window has no path line to test (open ground, a dead end, a
+    /// junction, an island, or the record's links disagree with the raster). Counted by reason; never read as clear —
+    /// Part C measured corridors only, and this rule says nothing about anything else.</item>
+    /// <item><b>None</b> — the object never enters an actor column over walkable ground in the window.</item>
+    /// <item><b>Unjudgeable</b> — the window could not be measured; never read as clear.</item>
+    /// </list>
+    /// No NARROWED: Part C found no clear-gap threshold to set one at. Doors and MoveableStatics are set aside by the
+    /// caller before measuring (passable by design; pushed aside — Part C's urn).</summary>
+    public static (RouteCutVerdict Verdict, string Why) RouteCut(bool judged, int touched, bool lineFound, string lineWhy,
+                                                                  bool cut, float passage, float blockedBelow = 48f)
+    {
+        if (!judged) return (RouteCutVerdict.Unjudgeable, "the window could not be measured");
+        if (touched <= 0) return (RouteCutVerdict.None, "the object never enters an actor column over walkable ground");
+        if (!lineFound) return (RouteCutVerdict.NoLine, $"on walkable ground ({touched} cells), but the window has no path line to test: {lineWhy}");
+        if (!cut) return (RouteCutVerdict.Clipped, $"stands on walkable ground ({touched} cells) beside the corridor's path line, not across it");
+        if (passage < blockedBelow)
+            return (RouteCutVerdict.Blocked, $"cuts the path line at capsule width with {passage:0} u open beside it (under {blockedBelow:0} u)");
+        return (RouteCutVerdict.LikelyBlocked, $"cuts the path line at capsule width with {passage:0} u open beside it — the engine takes such a passage about half the time");
+    }
+
     /// <summary>The route-blockage rule (roadmap 4.7 Part B, frozen 2026-09-02 from the handoff of 2026-09-05).
+    /// <b>SUPERSEDED the same day by <see cref="RouteCut"/></b> — kept callable so the re-pricing beside Part B's numbers
+    /// is like for like in one pass, and so its cases keep pinning the ladder the raster still reports; the drivers no
+    /// longer rank on it, and it can go once the comparison is no longer wanted.
     /// Replaces milestone 4's "any severed navmesh triangle" with a route-level decision over the facts
     /// <c>RouteConnectivity.Measure</c> returns for one object in a window of walkable ground:
     /// <list type="bullet">
@@ -769,8 +809,14 @@ public static class DetectorModel
 
 public enum ClobberPopulation { BethesdaFloor, UssepDiscarded, ModOnMod }
 
-/// <summary>The route-blockage classes (roadmap 4.7 Part B). Two severities by design: Blocked is the very-high
-/// class (no viable pathing left); Narrowed and Clipped are the clipping classes, never merged with it.</summary>
+/// <summary>The route-cut classes (roadmap 4.7, the rule Part C returned). Blocked is the very-high class;
+/// LikelyBlocked is the coin (cut line, passage open — the engine gets past about half the time); Clipped is the
+/// clipping class, never merged with either; NoLine is counted by reason and never cleared.</summary>
+public enum RouteCutVerdict { None, Clipped, LikelyBlocked, Blocked, NoLine, Unjudgeable }
+
+/// <summary>The route-blockage classes (roadmap 4.7 Part B — superseded by <see cref="RouteCutVerdict"/>; kept for the
+/// like-for-like comparison). Two severities by design: Blocked is the very-high class (no viable pathing left);
+/// Narrowed and Clipped are the clipping classes, never merged with it.</summary>
 public enum RouteVerdict { None, Clipped, Narrowed, Blocked, Unjudgeable }
 
 /// <summary>Whether an actor's PLACEMENT predicts where it will be found. Everything that is not

@@ -31,10 +31,12 @@ string vanilla = Path.Combine(dataDir, "Skyrim.esm");
 int maxCells = args.Length > 0 && int.TryParse(args[0], out var mc) ? mc : int.MaxValue;
 string? dumpDir = null;
 string geometrySource = "collision";
+bool controllerBand = true;   // --band controller|nominal: the route rules' band top (the surface rules keep the nominal, as every run before)
 for (int i = 0; i < args.Length; i++)
 {
     if (args[i] == "--dump" && i + 1 < args.Length) dumpDir = args[++i];
     else if (args[i] == "--geometry" && i + 1 < args.Length) geometrySource = args[++i];
+    else if (args[i] == "--band" && i + 1 < args.Length) controllerBand = args[++i] != "nominal";
 }
 if (geometrySource is not ("collision" or "render")) { Console.Error.WriteLine("--geometry must be collision or render"); return 1; }
 Console.WriteLine($"geometry source: {geometrySource}" + (geometrySource == "collision" ? $"  (actor-solid layers: {string.Join(", ", CollisionLayers.ActorSolid)})" : ""));
@@ -72,8 +74,18 @@ const float RouteMargin = 256f, RouteStep = 16f;
 var routeByClass = new Dictionary<string, int[]>(StringComparer.OrdinalIgnoreCase);   // class -> [Blocked, Narrowed64, Narrowed128, Clipped, None, Unjudgeable, measured]
 var routeByType = new Dictionary<string, int[]>();
 var routeBlocked = new List<(string Cell, string Mesh, string Type, FormKey Fk, string Why)>();
-long routeMeasured = 0, routeDoors = 0;
+long routeMeasured = 0, routeDoors = 0, routeMovable = 0;
 int[] RouteRow(Dictionary<string, int[]> d, string k) { if (!d.TryGetValue(k, out var row)) d[k] = row = new int[7]; return row; }
+
+// The route-CUT rule (4.7's closing step) on the same references: [Blocked, LikelyBlocked, Clipped, NoLine, None,
+// Unjudgeable, measured] by class and record type, the NoLine reasons, the top meshes of the two finding classes, and
+// the old-rule × new-rule cross-tab. Band top: derived × the controller factor unless --band nominal.
+var cutByClass = new Dictionary<string, int[]>(StringComparer.OrdinalIgnoreCase);
+var cutByType = new Dictionary<string, int[]>();
+var cutNoLine = new Dictionary<LineStatus, int>();
+var cutCross = new Dictionary<(RouteVerdict Old, RouteCutVerdict New), int>();
+var cutBlocked = new List<(string Cell, string Mesh, string Type, FormKey Fk, string Why)>();
+var cutLikely = new List<(string Cell, string Mesh, string Type, FormKey Fk, string Why)>();
 
 // ---- lazy, cached geometry per mesh path (AABB + model-space triangle soup) ----
 var geoCache = new Dictionary<string, Geo>(StringComparer.OrdinalIgnoreCase);
@@ -211,6 +223,8 @@ foreach (var cp in PlacementExtract.FromMod(mod))
 
     var band = ActorBand.ForCell(cp.Refs, npcFacts, raceFacts, fallbackTop, fallbackSrc);
     float bandTop = band.Top;
+    float routeTop = controllerBand ? ActorBand.ControllerTop(bandTop) : bandTop;
+    Dictionary<NavGraph.TriRef, NavGraph.Node>? gnodes = null;   // the cell's walkable graph, built once when a route needs it
     if (band.Actors > 0) cellsWithActors++;
     bandMin = MathF.Min(bandMin, bandTop); bandMax = MathF.Max(bandMax, bandTop);
     { int key = (int)MathF.Round(bandTop / 4f) * 4; bandHist.TryGetValue(key, out var bn); bandHist[key] = bn + 1; }
@@ -307,18 +321,34 @@ foreach (var cp in PlacementExtract.FromMod(mod))
         }
 
         // ---- the route rule, for every reference whose solid entered an actor column (Doors set aside: passable by design) ----
+        // A MoveableStatic is pushed aside, not a blocker (Part C's urn) — set aside like a Door, counted.
         if (crossHit && columns is not null && bm.Type == "Door") routeDoors++;
+        else if (crossHit && columns is not null && bm.Type == "MoveableStatic") routeMovable++;
         else if (crossHit && columns is not null)
         {
             routeMeasured++;
-            var facts = RouteConnectivity.Measure(index, columns, world, RouteMargin, RouteStep, ActorBand.StepHeight, bandTop, Ladder);
+            gnodes ??= NavGraph.Build(index).Nodes;
+            var facts = RouteConnectivity.Measure(index, columns, world, RouteMargin, RouteStep, ActorBand.StepHeight, routeTop, Ladder, graph: gnodes);
             var v64 = DetectorModel.RouteBlockage(facts.Judged, facts.Touched, facts.MaxIntactRung, facts.MaxIntactRungWithout, Ladder, 64f);
             var v128 = DetectorModel.RouteBlockage(facts.Judged, facts.Touched, facts.MaxIntactRung, facts.MaxIntactRungWithout, Ladder, 128f);
             int col = v64.Verdict switch { RouteVerdict.Blocked => 0, RouteVerdict.Narrowed => 1, RouteVerdict.Clipped => v128.Verdict == RouteVerdict.Narrowed ? 2 : 3, RouteVerdict.None => 4, _ => 5 };
-            var rowC = RouteRow(routeByClass, cp.Interior ? "(interior)" : MeshClass(bm.Mesh)); rowC[col]++; rowC[6]++;
+            string cls = cp.Interior ? "(interior)" : MeshClass(bm.Mesh);
+            var rowC = RouteRow(routeByClass, cls); rowC[col]++; rowC[6]++;
             var rowT = RouteRow(routeByType, bm.Type); rowT[col]++; rowT[6]++;
             if (v64.Verdict == RouteVerdict.Blocked && routeBlocked.Count < 20000)
                 routeBlocked.Add((cp.CellEditorId ?? cp.Cell.ToString(), bm.Mesh, bm.Type, r.FormKey, v64.Why));
+
+            var line = facts.Line;
+            var vc = DetectorModel.RouteCut(facts.Judged, facts.Touched, line?.Found ?? false, line?.Why ?? "", line?.Cut ?? false, line?.Passage ?? float.NaN);
+            int ccol = vc.Verdict switch { RouteCutVerdict.Blocked => 0, RouteCutVerdict.LikelyBlocked => 1, RouteCutVerdict.Clipped => 2, RouteCutVerdict.NoLine => 3, RouteCutVerdict.None => 4, _ => 5 };
+            var cC = RouteRow(cutByClass, cls); cC[ccol]++; cC[6]++;
+            var cT = RouteRow(cutByType, bm.Type); cT[ccol]++; cT[6]++;
+            cutCross.TryGetValue((v64.Verdict, vc.Verdict), out var xt); cutCross[(v64.Verdict, vc.Verdict)] = xt + 1;
+            if (vc.Verdict == RouteCutVerdict.NoLine && line is not null) { cutNoLine.TryGetValue(line.Status, out var nl); cutNoLine[line.Status] = nl + 1; }
+            if (vc.Verdict == RouteCutVerdict.Blocked && cutBlocked.Count < 20000)
+                cutBlocked.Add((cp.CellEditorId ?? cp.Cell.ToString(), bm.Mesh, bm.Type, r.FormKey, vc.Why));
+            else if (vc.Verdict == RouteCutVerdict.LikelyBlocked && cutLikely.Count < 40000)
+                cutLikely.Add((cp.CellEditorId ?? cp.Cell.ToString(), bm.Mesh, bm.Type, r.FormKey, vc.Why));
         }
     }
 
@@ -408,6 +438,38 @@ if (routeBlocked.Count > 0)
         Console.WriteLine($"   {grp.Count(),6:N0}  {grp.First().Type,-14} {grp.Key}");
 }
 
+Console.WriteLine();
+Console.WriteLine($"   ---- the ROUTE-CUT rule (4.7's closing step) on the vanilla floor: the corridor's path line, cut at capsule 22 u ----");
+Console.WriteLine($"   band top {(controllerBand ? $"derived × {ActorBand.ControllerFactor} (the controller's, Part C)" : "derived, nominal")}; passage boundary 48 u; measured {routeMeasured:N0}; doors set aside {routeDoors:N0}; MoveableStatics set aside (pushed aside) {routeMovable:N0}");
+Console.WriteLine($"   NoLine by reason: {string.Join(", ", cutNoLine.OrderByDescending(kv => kv.Value).Select(kv => $"{kv.Key} {kv.Value:N0}"))}");
+Console.WriteLine($"   {"class",-16} {"measured",9} {"BLOCKED",9} {"rate",8} {"LIKELY",9} {"rate",8} {"CLIPPED",9} {"NoLine",9} {"none",7} {"unjudged",9}");
+foreach (var kv in cutByClass.OrderByDescending(kv => kv.Value[6]))
+    Console.WriteLine($"   {kv.Key,-16} {kv.Value[6],9:N0} {kv.Value[0],9:N0} {(kv.Value[6] == 0 ? 0 : 100.0 * kv.Value[0] / kv.Value[6]),7:0.00}% {kv.Value[1],9:N0} {(kv.Value[6] == 0 ? 0 : 100.0 * kv.Value[1] / kv.Value[6]),7:0.00}% {kv.Value[2],9:N0} {kv.Value[3],9:N0} {kv.Value[4],7:N0} {kv.Value[5],9:N0}");
+Console.WriteLine($"   {"record type",-16} {"measured",9} {"BLOCKED",9} {"rate",8} {"LIKELY",9} {"rate",8} {"CLIPPED",9} {"NoLine",9} {"none",7} {"unjudged",9}");
+foreach (var kv in cutByType.OrderByDescending(kv => kv.Value[6]).Take(10))
+    Console.WriteLine($"   {kv.Key,-16} {kv.Value[6],9:N0} {kv.Value[0],9:N0} {(kv.Value[6] == 0 ? 0 : 100.0 * kv.Value[0] / kv.Value[6]),7:0.00}% {kv.Value[1],9:N0} {(kv.Value[6] == 0 ? 0 : 100.0 * kv.Value[1] / kv.Value[6]),7:0.00}% {kv.Value[2],9:N0} {kv.Value[3],9:N0} {kv.Value[4],7:N0} {kv.Value[5],9:N0}");
+Console.WriteLine($"\n   ---- old rule (64 u) × route-cut rule, the same references ----");
+Console.WriteLine($"   {"old \\ new",-12} {"Blocked",9} {"Likely",9} {"Clipped",9} {"NoLine",9} {"None",9} {"Unjudg.",9}");
+foreach (var o in new[] { RouteVerdict.Blocked, RouteVerdict.Narrowed, RouteVerdict.Clipped, RouteVerdict.None, RouteVerdict.Unjudgeable })
+{
+    var cols = new[] { RouteCutVerdict.Blocked, RouteCutVerdict.LikelyBlocked, RouteCutVerdict.Clipped, RouteCutVerdict.NoLine, RouteCutVerdict.None, RouteCutVerdict.Unjudgeable }
+               .Select(n => cutCross.TryGetValue((o, n), out var c) ? c : 0).ToArray();
+    if (cols.Sum() == 0) continue;
+    Console.WriteLine($"   {o,-12} {cols[0],9:N0} {cols[1],9:N0} {cols[2],9:N0} {cols[3],9:N0} {cols[4],9:N0} {cols[5],9:N0}");
+}
+if (cutBlocked.Count > 0)
+{
+    Console.WriteLine($"\n   ---- route-cut BLOCKED on vanilla: top meshes ----");
+    foreach (var grp in cutBlocked.GroupBy(b => b.Mesh, StringComparer.OrdinalIgnoreCase).OrderByDescending(g => g.Count()).Take(15))
+        Console.WriteLine($"   {grp.Count(),6:N0}  {grp.First().Type,-14} {grp.Key}");
+}
+if (cutLikely.Count > 0)
+{
+    Console.WriteLine($"\n   ---- route-cut LIKELY-BLOCKED on vanilla: top meshes ----");
+    foreach (var grp in cutLikely.GroupBy(b => b.Mesh, StringComparer.OrdinalIgnoreCase).OrderByDescending(g => g.Count()).Take(15))
+        Console.WriteLine($"   {grp.Count(),6:N0}  {grp.First().Type,-14} {grp.Key}");
+}
+
 if (dumpDir is not null)
 {
     Directory.CreateDirectory(dumpDir);
@@ -415,6 +477,16 @@ if (dumpDir is not null)
     {
         bw.WriteLine("key\tcell\ttype\tmesh\twhy");
         foreach (var b in routeBlocked) bw.WriteLine($"{b.Fk}\t{b.Cell}\t{b.Type}\t{b.Mesh}\t{b.Why}");
+    }
+    using (var cw = new StreamWriter(Path.Combine(dumpDir, "route-cut-blocked.tsv")))
+    {
+        cw.WriteLine("key\tcell\ttype\tmesh\twhy");
+        foreach (var b in cutBlocked) cw.WriteLine($"{b.Fk}\t{b.Cell}\t{b.Type}\t{b.Mesh}\t{b.Why}");
+    }
+    using (var lw = new StreamWriter(Path.Combine(dumpDir, "route-cut-likely.tsv")))
+    {
+        lw.WriteLine("key\tcell\ttype\tmesh\twhy");
+        foreach (var b in cutLikely) lw.WriteLine($"{b.Fk}\t{b.Cell}\t{b.Type}\t{b.Mesh}\t{b.Why}");
     }
     for (int s = 0; s < settings.Length; s++)
     {

@@ -310,7 +310,7 @@ float flySpeed = 600f, lookSens = 0.15f;
 //                              straight-line distance — "1,800 u apart" and "1,800 u to walk" are
 //                              different claims. An unreachable pair is REFUSED, loudly: that is a
 //                              finding about the mesh, not an error to paper over with a straight
-//                              line. See NavGraph.cs for where the edges come from.
+//                              line. See housecarl-core/NavGraph.cs for where the edges come from.
 //   --route-z Z                the floor height the route runs on, used to pick the right STOREY
 //                              when several cover a waypoint. Absent, it is the shot's measured
 //                              floorZ, or eye minus --eye-height — and that last one is an
@@ -1979,7 +1979,7 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot)
             // geometry disagree, and that is worth refusing over.
             if (routeSolve)
             {
-                var (gnodes, grpt) = ViewProbe.NavGraph.Build(winNav);
+                var (gnodes, grpt) = NavGraph.Build(winNav);
                 Console.WriteLine($"   route-solve: graph over the winning navmesh — {grpt.Triangles:N0} triangle(s), "
                                 + $"{grpt.IntraLinks:N0} intra-mesh + {grpt.CrossLinks:N0} cross-mesh edge link(s), "
                                 + $"{grpt.DanglingLinks:N0} dangling, {grpt.Components:N0} connected component(s); "
@@ -2010,14 +2010,14 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot)
                 {
                     var a = pts[li]; var b = pts[li + 1];
                     float straight = MathF.Sqrt((b.X - a.X) * (b.X - a.X) + (b.Y - a.Y) * (b.Y - a.Y));
-                    var s0 = ViewProbe.NavGraph.TriangleAt(gnodes, a.X, a.Y, a.Z);
-                    var g0 = ViewProbe.NavGraph.TriangleAt(gnodes, b.X, b.Y, b.Z);
+                    var s0 = NavGraph.TriangleAt(gnodes, a.X, a.Y, a.Z);
+                    var g0 = NavGraph.TriangleAt(gnodes, b.X, b.Y, b.Z);
                     if (s0 is not { } sTri || g0 is not { } gTri)
                     { unreachable.Add($"leg {li + 1} (wpt {li + 1} -> {li + 2}): an endpoint is not on any drawable triangle"); legs.Add(new[] { a, b }); continue; }
-                    var channel = ViewProbe.NavGraph.FindChannel(gnodes, sTri.Tri, gTri.Tri);
+                    var channel = NavGraph.FindChannel(gnodes, sTri.Tri, gTri.Tri);
                     if (channel is null)
                     { unreachable.Add($"leg {li + 1} (wpt {li + 1} -> {li + 2}, {straight:0} u apart in plan): NO walkable path over the navmesh"); legs.Add(new[] { a, b }); continue; }
-                    var corners = ViewProbe.NavGraph.Funnel(gnodes, channel,
+                    var corners = NavGraph.Funnel(gnodes, channel,
                         new System.Numerics.Vector2(a.X, a.Y), new System.Numerics.Vector2(b.X, b.Y));
 
                     // Sampled the same 32 u as a straight leg, but with the storey reference CHAINED

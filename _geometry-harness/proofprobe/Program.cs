@@ -1422,6 +1422,55 @@ Console.WriteLine("\nPROOF — the route-blockage rule (DetectorModel.RouteBlock
     Check("route: 64 u left at threshold 96 -> Narrowed", r.Verdict == RouteVerdict.Narrowed, r.Why);
 }
 
+// ---------------------------------------------------------------------------------------
+// The route-CUT rule (roadmap 4.7's closing step, frozen 2026-09-02) — DetectorModel.RouteCut, the rule Part C
+// returned. The facts (line found, cut, passage) come from RouteConnectivity's sweep, proven on synthetic corridors
+// in crossprobe; this pins what the rule makes of them. Thresholds: BLOCKED under 48 u of passage (measured: full
+// width 0 of 5, ≤ 44 u 3 of 11), LIKELY-BLOCKED from 48 up (measured from 64: 12 of 22); 48–64 unmeasured and
+// assigned to the lower-severity class on purpose.
+// ---------------------------------------------------------------------------------------
+Console.WriteLine("\nPROOF — the route-cut rule (DetectorModel.RouteCut)");
+{
+    var c = DetectorModel.RouteCut(judged: false, touched: 5, lineFound: true, lineWhy: "", cut: true, passage: 0f);
+    Check("cut: unmeasured window -> Unjudgeable, never clear", c.Verdict == RouteCutVerdict.Unjudgeable, c.Why);
+
+    c = DetectorModel.RouteCut(true, touched: 0, lineFound: false, lineWhy: "not asked", cut: false, passage: float.NaN);
+    Check("cut: no overlap with walkable ground -> None", c.Verdict == RouteCutVerdict.None, c.Why);
+
+    c = DetectorModel.RouteCut(true, touched: 12, lineFound: false, lineWhy: "3 ends: a junction", cut: false, passage: float.NaN);
+    Check("cut: on ground, no line -> NoLine (counted, never cleared)", c.Verdict == RouteCutVerdict.NoLine && c.Why.Contains("junction"), c.Why);
+
+    c = DetectorModel.RouteCut(true, touched: 12, lineFound: true, lineWhy: "", cut: false, passage: float.NaN);
+    Check("cut: on ground beside the line -> Clipped", c.Verdict == RouteCutVerdict.Clipped, c.Why);
+
+    c = DetectorModel.RouteCut(true, touched: 40, lineFound: true, lineWhy: "", cut: true, passage: 0f);
+    Check("cut: full width, nothing beside -> Blocked", c.Verdict == RouteCutVerdict.Blocked, c.Why);
+
+    c = DetectorModel.RouteCut(true, touched: 16, lineFound: true, lineWhy: "", cut: true, passage: 32f);
+    Check("cut: line cut, 32 u beside -> Blocked (Part C: 3 of 11 got through at ≤ 44)", c.Verdict == RouteCutVerdict.Blocked, c.Why);
+
+    c = DetectorModel.RouteCut(true, touched: 16, lineFound: true, lineWhy: "", cut: true, passage: 47.9f);
+    Check("cut: 47.9 u beside -> Blocked (the boundary is exclusive)", c.Verdict == RouteCutVerdict.Blocked, c.Why);
+
+    c = DetectorModel.RouteCut(true, touched: 16, lineFound: true, lineWhy: "", cut: true, passage: 48f);
+    Check("cut: 48 u beside -> LikelyBlocked (the unmeasured band goes to the lower class)", c.Verdict == RouteCutVerdict.LikelyBlocked, c.Why);
+
+    c = DetectorModel.RouteCut(true, touched: 16, lineFound: true, lineWhy: "", cut: true, passage: 64f);
+    Check("cut: 64 u beside -> LikelyBlocked (Part C: 7 of 11 got through)", c.Verdict == RouteCutVerdict.LikelyBlocked, c.Why);
+
+    c = DetectorModel.RouteCut(true, touched: 16, lineFound: true, lineWhy: "", cut: true, passage: 288f);
+    Check("cut: 288 u beside (the scan's cap) -> still LikelyBlocked, never Clipped", c.Verdict == RouteCutVerdict.LikelyBlocked, c.Why);
+
+    // The threshold is a parameter: the same 32 u passage against a 24 u boundary is the coin.
+    c = DetectorModel.RouteCut(true, touched: 16, lineFound: true, lineWhy: "", cut: true, passage: 32f, blockedBelow: 24f);
+    Check("cut: 32 u beside against a 24 u boundary -> LikelyBlocked", c.Verdict == RouteCutVerdict.LikelyBlocked, c.Why);
+
+    // Precedence: a cut line on ground with no line found cannot happen, but the rule's order says NoLine wins over
+    // cut — a line that was not found was not swept.
+    c = DetectorModel.RouteCut(true, touched: 16, lineFound: false, lineWhy: "dead end", cut: true, passage: 0f);
+    Check("cut: no line outranks a stray cut flag -> NoLine", c.Verdict == RouteCutVerdict.NoLine, c.Why);
+}
+
 Console.WriteLine();
 Console.WriteLine($"==== {pass} passed, {fail} failed ====");
 if (fail > 0) Console.WriteLine("   failed: " + string.Join(", ", failures));

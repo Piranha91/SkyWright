@@ -436,5 +436,156 @@ Console.WriteLine("   navmesh triangle: (0,0,0) (200,0,0) (0,200,0)   actor heig
     Check("route: two storeys, wall through both -> 2 storeys measured, BLOCKED", tallFacts.Judged && tallFacts.Storeys == 2 && tallFacts.MaxIntactRung < 0, Show(tallFacts) + $" storeys={tallFacts.Storeys} z={tallFacts.StoreyZ:0}");
 }
 
+// ---- 16. THE CAPSULE SWEEP PRIMITIVE — a disc in a height slab against the solid ------------------------------
+// The route-cut rule's cut test is MeshColumnIndex.IntersectsDiscInSlab: exact, so the margin Part C measured ("the
+// line clears the block by 1 u; straight through") is a margin the primitive can see.
+{
+    var block = Index(Box(new Vector3(0, 0, 0), new Vector3(64, 64, 84)));     // NightingaleBlock01's shape
+    Check("disc: face 1 u outside the disc -> no contact", !block.IntersectsDiscInSlab(-23, 32, 22f, 32, 112), "disc centre 23 u from the face, radius 22");
+    Check("disc: face 1 u inside the disc -> contact", block.IntersectsDiscInSlab(-21, 32, 22f, 32, 112), "disc centre 21 u from the face, radius 22");
+    Check("disc: centre inside the block -> contact", block.IntersectsDiscInSlab(32, 32, 22f, 32, 112), "");
+    Check("disc: corner 1 u inside the disc, diagonally -> contact", block.IntersectsDiscInSlab(-14.85f, -14.85f, 22f, 32, 112), "the corner is 21 u away along the diagonal");
+    Check("disc: corner 1 u outside the disc, diagonally -> no contact", !block.IntersectsDiscInSlab(-16.27f, -16.27f, 22f, 32, 112), "the corner is 23 u away along the diagonal");
+
+    var beam = Index(Box(new Vector3(-20, -100, 100), new Vector3(2, 300, 122)));   // a beam whose underside is at 100
+    Check("disc: beam bottom 100 in a band to 112 -> contact", beam.IntersectsDiscInSlab(0, 50, 22f, 32, 112), "");
+    Check("disc: the same beam in a band to 99 -> no contact", !beam.IntersectsDiscInSlab(0, 50, 22f, 32, 99), "");
+    var high = Index(Box(new Vector3(-20, -100, 140), new Vector3(2, 300, 162)));
+    Check("disc: beam bottom 140 in a band to 112 -> no contact", !high.IntersectsDiscInSlab(0, 50, 22f, 32, 112), "");
+
+    // A wall seen edge-on — its face projects to a segment with no plan area — still counts by distance.
+    var thin = Index((new List<Vector3> { new(10, -100, 0), new(10, 100, 0), new(10, 100, 200) }, new List<int> { 0, 1, 2 }));
+    Check("disc: a single vertical face 10 u away -> contact", thin.IntersectsDiscInSlab(0, 0, 22f, 32, 112), "");
+    Check("disc: ...and 30 u away -> no contact", !thin.IntersectsDiscInSlab(-20, 0, 22f, 32, 112), "");
+}
+
+// ---- 17. THE ROUTE-CUT LINE — the corridor's path line, the sweep, the passage (roadmap 4.7, the rule Part C returned)
+// The same synthetic strip, now with its two triangles LINKED as a navmesh record would link them (the graph reads the
+// record's edge links, never shared vertices), so NavGraph can walk it. Band 32..112: the Part C walker's nominal 132 u
+// × the measured 0.85. Capsule 22 u. The raster's ends are the boundary runs' middles (the midpoint of the two middle
+// cells of an even run), so on this strip (8 cells across, centres at Y 11, 27, …, 123) the line runs at Y 67 — the
+// strip's true middle. A run with an odd count would put the end on a cell centre, up to 8 u off: the raster's
+// resolution, stated rather than hidden.
+{
+    static NavmeshGeometry Strip(uint id, float x0, float x1, float y0, float y1, float z) =>
+        new(new Mutagen.Bethesda.Plugins.FormKey(Mutagen.Bethesda.Plugins.ModKey.FromNameAndExtension("synthetic.esp"), id),
+            new[] { new Vec3(x0, y0, z), new Vec3(x1, y0, z), new Vec3(x1, y1, z), new Vec3(x0, y1, z) },
+            new[] { new NavTri(0, 1, 2, 0, -1, -1, 1), new NavTri(0, 2, 3, 0, 0, -1, -1) },
+            new Vec3(x0, y0, z), new Vec3(x1, y1, z), Array.Empty<NavEdgeLink>(), Array.Empty<NavDoorTriangle>());
+    static Aabb BoxOf(Vector3 lo, Vector3 hi) => new(new Vec3(lo.X, lo.Y, lo.Z), new Vec3(hi.X, hi.Y, hi.Z), false);
+    var ladder = new[] { 0f, 32f, 64f, 96f, 128f };
+    var corridor = NavmeshIndex.Build(new[] { Strip(1, -600, 600, 3, 131, 0) }, out _);
+    RouteFacts Cut(NavmeshIndex navs, Vector3 lo, Vector3 hi, float top = 112f, Vector2[]? line = null) =>
+        RouteConnectivity.Measure(navs, Index(Box(lo, hi)), BoxOf(lo, hi), 256f, 16f, 32f, top, ladder, lineOverride: line);
+    static string ShowLine(RouteFacts f) => f.Line is { } l
+        ? $"touched={f.Touched} {l.Status} ends={l.Ends} pairs={l.PairsCut}/{l.Pairs} pts={l.Points.Length} cut={l.Cut} passage={l.Passage:0} (L {l.PassageLeft:0} / R {l.PassageRight:0}) {l.Why}"
+        : $"judged={f.Judged} {f.Why}";
+
+    // A block ON the line: 64 u across, centred, 32 u left each side. Part C: the centred 64 block stalled 2 of 2.
+    var on = Cut(corridor, new Vector3(0, 35, 0), new Vector3(64, 99, 84));
+    Check("cut: block on the line -> a line with two ends, straight", on.Line is { Status: LineStatus.Line, Ends: 2, Points.Length: 2 }, ShowLine(on));
+    Check("cut: ...the line runs down the corridor's middle, Y 67", on.Line is { } l0 && MathF.Abs(l0.Points[0].Y - 67f) < 0.5f && MathF.Abs(l0.Points[1].Y - 67f) < 0.5f
+          && MathF.Min(l0.Points[0].X, l0.Points[1].X) < -200 && MathF.Max(l0.Points[0].X, l0.Points[1].X) > 300,
+          ShowLine(on) + (on.Line is { Points.Length: 2 } lp ? $" ({lp.Points[0].X:0},{lp.Points[0].Y:0})->({lp.Points[1].X:0},{lp.Points[1].Y:0})" : ""));
+    Check("cut: ...is CUT, with 32 u open beside it", on.Line is { Cut: true } l1 && MathF.Abs(l1.Passage - 32f) < 0.5f, ShowLine(on));
+    Check("cut: ...and both sides read 32", on.Line is { } l2 && MathF.Abs(l2.PassageLeft - 32f) < 0.5f && MathF.Abs(l2.PassageRight - 32f) < 0.5f, ShowLine(on));
+
+    // A block BESIDE the line: from the left edge to Y 40; the line at 67 clears it by 5 u past the capsule (45).
+    var beside = Cut(corridor, new Vector3(0, 3, 0), new Vector3(64, 40, 84));
+    Check("cut: block beside the line -> on ground, line found, NOT cut", beside.Touched > 0 && beside.Line is { Status: LineStatus.Line, Cut: false }, ShowLine(beside));
+
+    // The same block to Y 44: the capsule (reaching 45) misses it by 1 u; to Y 46 it reaches it by 1 u.
+    var miss = Cut(corridor, new Vector3(0, 3, 0), new Vector3(64, 44, 84));
+    Check("cut: block 1 u short of the capsule -> not cut", miss.Line is { Cut: false }, ShowLine(miss));
+    var graze = Cut(corridor, new Vector3(0, 3, 0), new Vector3(64, 46, 84));
+    Check("cut: block reaching 1 u into the capsule -> cut", graze.Line is { Cut: true }, ShowLine(graze));
+
+    // The full-width wall: cut with nothing beside it.
+    var wall = Cut(corridor, new Vector3(0, -20, 0), new Vector3(16, 148, 200));
+    Check("cut: full-width wall -> cut, passage 0", wall.Line is { Cut: true, Passage: 0f }, ShowLine(wall));
+
+    // A block from the left edge to Y 60: cut (the capsule reaches 53), and 64 u open on the right — the coin.
+    var coin = Cut(corridor, new Vector3(0, 3, 0), new Vector3(64, 60, 84));
+    Check("cut: block leaving 64 u on the right -> cut, passage 64 on the right, 0 on the left", coin.Line is { Cut: true } l3 && MathF.Abs(l3.Passage - 64f) < 0.5f && l3.PassageRight < 1f && MathF.Abs(l3.PassageLeft - 64f) < 0.5f || coin.Line is { Cut: true } l4 && MathF.Abs(l4.Passage - 64f) < 0.5f && l4.PassageLeft < 1f && MathF.Abs(l4.PassageRight - 64f) < 0.5f, ShowLine(coin));
+
+    // The overhead ladder, as Part C ran it: a beam across the corridor with its underside at 100, 120, 140 u.
+    var beam100 = Cut(corridor, new Vector3(0, -20, 100), new Vector3(22, 148, 122));
+    Check("cut: beam at 100 u, band to 112 -> cut, passage 0 (Part C: stalled)", beam100.Touched > 0 && beam100.Line is { Cut: true, Passage: 0f }, ShowLine(beam100));
+    var beam120 = Cut(corridor, new Vector3(0, -20, 120), new Vector3(22, 148, 142));
+    Check("cut: beam at 120 u, band to 112 -> touches nothing (Part C: passed under)", beam120.Judged && beam120.Touched == 0, ShowLine(beam120));
+    var beam140 = Cut(corridor, new Vector3(0, -20, 140), new Vector3(22, 148, 162));
+    Check("cut: beam at 140 u, band to 112 -> touches nothing (Part C: no reaction)", beam140.Judged && beam140.Touched == 0, ShowLine(beam140));
+    // ...and the one arm the band factor decides: at the NOMINAL 132 u the 120 beam is a cut. Stated, not claimed right.
+    var beam120n = Cut(corridor, new Vector3(0, -20, 120), new Vector3(22, 148, 142), top: 132f);
+    Check("cut: beam at 120 u at the nominal 132 u band -> cut (the band factor's one deciding arm)", beam120n.Line is { Cut: true }, ShowLine(beam120n));
+
+    // A caller-supplied line: the corridor's true middle (Y 67) instead of the raster's.
+    var supplied = Cut(corridor, new Vector3(0, 3, 0), new Vector3(64, 40, 84), line: new[] { new Vector2(-300, 67), new Vector2(300, 67) });
+    Check("cut: supplied line at Y 67 past a block to Y 40 -> Supplied, not cut (clears by 5)", supplied.Line is { Status: LineStatus.Supplied, Cut: false }, ShowLine(supplied));
+    var supplied2 = Cut(corridor, new Vector3(0, 3, 0), new Vector3(64, 46, 84), line: new[] { new Vector2(-300, 67), new Vector2(300, 67) });
+    Check("cut: supplied line at Y 67 past a block to Y 46 -> cut (reaches by 1)", supplied2.Line is { Status: LineStatus.Supplied, Cut: true }, ShowLine(supplied2));
+
+    // NO LINE, said so. A dead end: the strip stops inside the window.
+    var deadEnd = NavmeshIndex.Build(new[] { Strip(2, -600, 100, 3, 131, 0) }, out _);
+    var de = Cut(deadEnd, new Vector3(0, 35, 0), new Vector3(64, 99, 84));
+    Check("cut: corridor ends inside the window -> DeadEnd, no line", de.Touched > 0 && de.Line is { Status: LineStatus.DeadEnd, Found: false }, ShowLine(de));
+
+    // A junction: a second strip crossing the first. Four ends; the two strips are separate records with no links
+    // between them, so of the six pairs only W–E and N–S connect. A block at the crossing cuts both lines: the worst
+    // is reported, and the status says a junction was generalised. (The Ratway station Part C measured is a T within
+    // the window's reach — 27 of its 34 arms had no line until junctions were measured pairwise.)
+    var junction = NavmeshIndex.Build(new[] { Strip(3, -600, 600, 3, 131, 0), Strip(4, 3, 131, -600, 600, 0) }, out _);
+    var jn = Cut(junction, new Vector3(35, 35, 0), new Vector3(99, 99, 84));
+    // The passage beside a block AT a crossing is the 32 u lane along the arm (two cells, each next to the block or the
+    // edge); the cross-section THROUGH the crossing reads 45 on each side (the free cell there has ground diagonally
+    // into the other arm), which is why the per-side figure is a diagnostic and the bottleneck is the number.
+    Check("cut: block at a crossing -> JunctionLine, 4 ends, 2 pairs connected, both cut, passage 32 (the side lanes read 45)",
+          jn.Touched > 0 && jn.Line is { Status: LineStatus.JunctionLine, Ends: 4, Pairs: 2, PairsCut: 2, Cut: true } lj && MathF.Abs(lj.Passage - 32f) < 0.5f && MathF.Abs(lj.PassageLeft - 45.25f) < 0.5f, ShowLine(jn));
+    // ...and a block on the EAST arm only: the W–E line is cut, the N–S line is not; the worst (cut) is reported.
+    var jnEast = Cut(junction, new Vector3(200, 35, 0), new Vector3(264, 99, 84));
+    Check("cut: block on one arm of a crossing -> JunctionLine, 1 of 2 pairs cut, reported cut",
+          jnEast.Line is { Status: LineStatus.JunctionLine, Pairs: 2, PairsCut: 1, Cut: true }, ShowLine(jnEast));
+    // ...and a block beside the east arm's line: no pair is cut -> Clipped-shaped facts.
+    var jnBeside = Cut(junction, new Vector3(200, 3, 0), new Vector3(264, 40, 84));
+    Check("cut: block beside one arm of a crossing -> JunctionLine, 0 pairs cut", jnBeside.Touched > 0 && jnBeside.Line is { Status: LineStatus.JunctionLine, PairsCut: 0, Cut: false }, ShowLine(jnBeside));
+
+    // Open ground: navmesh all round the window.
+    var field = NavmeshIndex.Build(new[] { Strip(5, -1000, 1000, -1000, 1000, 0) }, out _);
+    var og = Cut(field, new Vector3(0, 0, 0), new Vector3(64, 64, 84));
+    Check("cut: a block in an open field -> OpenGround, no line", og.Touched > 0 && og.Line is { Status: LineStatus.OpenGround }, ShowLine(og));
+
+    // The record's links are the graph: the same corridor with its two triangles UNLINKED has a raster that connects
+    // the ends and a record that does not — NoPath, never a line drawn through geometry the game does not walk.
+    var unlinked = NavmeshIndex.Build(new[] { new NavmeshGeometry(new Mutagen.Bethesda.Plugins.FormKey(Mutagen.Bethesda.Plugins.ModKey.FromNameAndExtension("synthetic.esp"), 6),
+        new[] { new Vec3(-600, 3, 0), new Vec3(600, 3, 0), new Vec3(600, 131, 0), new Vec3(-600, 131, 0) },
+        new[] { new NavTri(0, 1, 2, 0), new NavTri(0, 2, 3, 0) }, new Vec3(-600, 3, 0), new Vec3(600, 131, 0)) }, out _);
+    var np = Cut(unlinked, new Vector3(0, 35, 0), new Vector3(64, 99, 84));
+    Check("cut: the same corridor with unlinked triangles -> NoPath, no line", np.Touched > 0 && np.Line is { Status: LineStatus.NoPath }, ShowLine(np));
+
+    // The passage counts only ground that gets PAST the object. A wall across the corridor with a dead-end room beside
+    // it — reached through a neck on the near side, 200 u wide, no other way out — reads a 128 u "lane" on the cross
+    // section through the room, and that lane leads nowhere: with the object in place the two ends are on different
+    // free components, so the passage is 0. (A city gate piece read a wide lane beside it before this.)
+    var pocket = NavmeshIndex.Build(new[] { Strip(7, -600, 600, 3, 131, 0), Strip(8, -100, 0, 131, 195, 0), Strip(9, -100, 100, 195, 400, 0) }, out _);
+    var pk = Cut(pocket, new Vector3(0, -20, 0), new Vector3(16, 195, 200));
+    Check("cut: wall across the corridor with a dead-end room beside it -> cut, passage 0 (the room leads nowhere)",
+          pk.Line is { Cut: true, Passage: 0f }, ShowLine(pk));
+    // ...and the same room with a second neck on the FAR side is a way round — and the passage is the way round's
+    // BOTTLENECK, the 64 u necks, not the 200 u room the cross-section through the wall sees (a city gate piece read
+    // the open ground beside it as its passage while the way past it was a squeeze elsewhere in the window).
+    var bypass = NavmeshIndex.Build(new[] { Strip(10, -600, 600, 3, 131, 0), Strip(11, -100, 0, 131, 195, 0), Strip(12, -100, 100, 195, 400, 0), Strip(13, 36, 100, 131, 195, 0) }, out _);
+    var bp = Cut(bypass, new Vector3(0, -20, 0), new Vector3(16, 195, 200));
+    Check("cut: ...the same room with a neck on the far side too -> cut, passage 64 (the necks, the bottleneck of the way round)",
+          bp.Line is { Cut: true } lbp && MathF.Abs(lbp.Passage - 64f) < 0.5f, ShowLine(bp));
+    // ...and with the far neck squeezed to 32 u across (X 36..68) the same way round is a 32 u passage: BLOCKED-range.
+    var squeeze = NavmeshIndex.Build(new[] { Strip(14, -600, 600, 3, 131, 0), Strip(15, -100, 0, 131, 195, 0), Strip(16, -100, 100, 195, 400, 0), Strip(17, 36, 68, 131, 195, 0) }, out _);
+    var sq = Cut(squeeze, new Vector3(0, -20, 0), new Vector3(16, 195, 200));
+    Check("cut: ...the far neck squeezed to 32 u -> passage 32", sq.Line is { Cut: true } lsq && MathF.Abs(lsq.Passage - 32f) < 0.5f, ShowLine(sq));
+
+    // An object touching nothing asks for no line.
+    var over = Cut(corridor, new Vector3(-100, -20, 160), new Vector3(100, 148, 200));
+    Check("cut: bridge above the band -> line not asked", over.Touched == 0 && over.Line is { Status: LineStatus.NotAsked }, ShowLine(over));
+}
+
 Console.WriteLine($"\n==== {pass} passed, {fail} failed ====");
 return fail == 0 ? 0 : 1;

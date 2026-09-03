@@ -33,11 +33,13 @@ string target = args[0];
 var exclude = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 int listN = 25;
 string geometrySource = "collision";
+bool controllerBand = true;   // --band controller|nominal: the route rules' band top (the surface rules keep the nominal, as every run before)
 for (int i = 1; i < args.Length; i++)
 {
     if (args[i] == "--exclude" && i + 1 < args.Length) exclude.Add(args[++i]);
     else if (args[i] == "--list" && i + 1 < args.Length) listN = int.Parse(args[++i]);
     else if (args[i] == "--geometry" && i + 1 < args.Length) geometrySource = args[++i];
+    else if (args[i] == "--band" && i + 1 < args.Length) controllerBand = args[++i] != "nominal";
 }
 if (geometrySource is not ("collision" or "render")) { Console.Error.WriteLine("--geometry must be collision or render"); return 1; }
 
@@ -156,8 +158,17 @@ const float RouteMargin = 256f, RouteStep = 16f;
 var routeTally64 = new Dictionary<RouteVerdict, int>();
 var routeTally128 = new Dictionary<RouteVerdict, int>();
 var routeHits = new List<(RouteVerdict V64, RouteVerdict V128, string Cell, string Mesh, FormKey Fk, string Why, int Touched, int Intact, int IntactWithout)>();
-long routeMeasured = 0, routeDoors = 0;
+long routeMeasured = 0, routeDoors = 0, routeMovable = 0;
 void Tally(Dictionary<RouteVerdict, int> d, RouteVerdict v) { d.TryGetValue(v, out var n); d[v] = n + 1; }
+
+// The route-CUT rule (4.7's closing step): the same raster, asked whether the object cuts the corridor's path line at
+// capsule width, and how wide the passage beside it is. Tallied beside the old rule, and cross-tabbed against it, so
+// the re-pricing is like for like in one pass. Band top: the derived top × the controller factor (or the nominal).
+var cutTally = new Dictionary<RouteCutVerdict, int>();
+var crossTab = new Dictionary<(RouteVerdict Old, RouteCutVerdict New), int>();
+var noLineWhy = new Dictionary<LineStatus, int>();
+var cutHits = new List<(RouteCutVerdict V, RouteVerdict Old, string Cell, string Mesh, FormKey Fk, string Why, int Touched, RouteLine? Line)>();
+void TallyCut(RouteCutVerdict v) { cutTally.TryGetValue(v, out var n); cutTally[v] = n + 1; }
 
 var navByCell = winNav.Values.GroupBy(v => v.Cell)
                              .ToDictionary(g => g.Key, g => g.ToList());
@@ -185,9 +196,11 @@ foreach (var (cellKey, tcell) in targetCells)
     var band = ActorBand.ForCell(winRefsByCell.TryGetValue(cellKey, out var cellRefs) ? cellRefs : Array.Empty<PlacedRef>(),
                                  npcFacts, raceFacts, fallbackTop, fallbackSrc);
     ActorHeight = band.Top;
+    float routeTop = controllerBand ? ActorBand.ControllerTop(band.Top) : band.Top;
     if (band.Actors > 0) cellsWithActors++;
     if (band.Actors > 0 && band.Templated == band.Actors) cellsTemplatedOnly++;
     bandMin = MathF.Min(bandMin, band.Top); bandMax = MathF.Max(bandMax, band.Top);
+    Dictionary<NavGraph.TriRef, NavGraph.Node>? gnodes = null;   // the cell's walkable graph, built once when a route needs it
 
     foreach (var tref in tcell.Refs)
     {
@@ -265,13 +278,16 @@ foreach (var (cellKey, tcell) in targetCells)
         // ---- the route rule, for every reference whose solid entered an actor column ----
         // A Door base record is passable by design — the navmesh runs through the doorway and actors open it — so
         // it is counted apart, never judged Blocked.
+        // A MoveableStatic is pushed aside, not a blocker (Part C's urn) — set aside the same way, counted.
         if (nCross > 0 && columns is not null)
         {
             if (bm.Type == "Door") { routeDoors++; }
+            else if (bm.Type == "MoveableStatic") { routeMovable++; }
             else
             {
                 routeMeasured++;
-                var facts = RouteConnectivity.Measure(index, columns, world, RouteMargin, RouteStep, Clearance, ActorHeight, Ladder);
+                gnodes ??= NavGraph.Build(index).Nodes;
+                var facts = RouteConnectivity.Measure(index, columns, world, RouteMargin, RouteStep, Clearance, routeTop, Ladder, graph: gnodes);
                 var v64 = DetectorModel.RouteBlockage(facts.Judged, facts.Touched, facts.MaxIntactRung, facts.MaxIntactRungWithout, Ladder, 64f);
                 var v128 = DetectorModel.RouteBlockage(facts.Judged, facts.Touched, facts.MaxIntactRung, facts.MaxIntactRungWithout, Ladder, 128f);
                 Tally(routeTally64, v64.Verdict); Tally(routeTally128, v128.Verdict);
@@ -279,6 +295,15 @@ foreach (var (cellKey, tcell) in targetCells)
                     routeHits.Add((v64.Verdict, v128.Verdict, tcell.CellEditorId ?? cellKey.ToString(), bm.Mesh, r.FormKey,
                                    facts.Judged ? v128.Why + $" [storeys {facts.Storeys}, z {facts.StoreyZ:0}]" : facts.Why,
                                    facts.Touched, facts.MaxIntactRung, facts.MaxIntactRungWithout));
+
+                var line = facts.Line;
+                var vc = DetectorModel.RouteCut(facts.Judged, facts.Touched, line?.Found ?? false, line?.Why ?? "", line?.Cut ?? false, line?.Passage ?? float.NaN);
+                TallyCut(vc.Verdict);
+                crossTab.TryGetValue((v64.Verdict, vc.Verdict), out var xt); crossTab[(v64.Verdict, vc.Verdict)] = xt + 1;
+                if (vc.Verdict == RouteCutVerdict.NoLine && line is not null) { noLineWhy.TryGetValue(line.Status, out var nl); noLineWhy[line.Status] = nl + 1; }
+                if (vc.Verdict is RouteCutVerdict.Blocked or RouteCutVerdict.LikelyBlocked or RouteCutVerdict.NoLine or RouteCutVerdict.Unjudgeable)
+                    cutHits.Add((vc.Verdict, v64.Verdict, tcell.CellEditorId ?? cellKey.ToString(), bm.Mesh, r.FormKey,
+                                 (facts.Judged ? vc.Why + $" [storeys {facts.Storeys}, z {facts.StoreyZ:0}]" : facts.Why), facts.Touched, line));
             }
         }
 
@@ -345,6 +370,29 @@ if (routeHits.Count > 0)
     Console.WriteLine($"\n   ---- Blocked / Narrowed / Unjudgeable references ----");
     foreach (var h in routeHits.OrderBy(h => h.V64 == RouteVerdict.Blocked ? 0 : h.V64 == RouteVerdict.Narrowed ? 1 : 2).ThenBy(h => h.Cell).Take(listN * 2))
         Console.WriteLine($"   {h.V64,-11} {h.V128,-11} touched {h.Touched,4} intact {h.Intact,2}/{h.IntactWithout,2}  {h.Cell,-26} {Short(h.Mesh, 46),-46} {h.Fk}   {h.Why}");
+}
+
+Console.WriteLine($"\n   ---- the ROUTE-CUT rule (4.7's closing step): the corridor's path line, cut at capsule 22 u inside the band 32..top ----");
+Console.WriteLine($"   band top: {(controllerBand ? $"derived × {ActorBand.ControllerFactor} (the controller's, Part C)" : "derived, nominal")}; passage boundary 48 u");
+Console.WriteLine($"   references measured: {routeMeasured:N0}   doors set aside: {routeDoors:N0}   MoveableStatics set aside (pushed aside, Part C): {routeMovable:N0}");
+Console.WriteLine($"   {"verdict",-14} {"refs",8}");
+foreach (var v in new[] { RouteCutVerdict.Blocked, RouteCutVerdict.LikelyBlocked, RouteCutVerdict.Clipped, RouteCutVerdict.NoLine, RouteCutVerdict.None, RouteCutVerdict.Unjudgeable })
+    Console.WriteLine($"   {v,-14} {(cutTally.TryGetValue(v, out var a) ? a : 0),8:N0}" + (v == RouteCutVerdict.NoLine && noLineWhy.Count > 0 ? "   (" + string.Join(", ", noLineWhy.OrderByDescending(kv => kv.Value).Select(kv => $"{kv.Key} {kv.Value}")) + ")" : ""));
+Console.WriteLine($"\n   ---- old rule (64 u) × route-cut rule, the same references ----");
+Console.WriteLine($"   {"old \\ new",-12} {"Blocked",9} {"Likely",9} {"Clipped",9} {"NoLine",9} {"None",9} {"Unjudg.",9}");
+foreach (var o in new[] { RouteVerdict.Blocked, RouteVerdict.Narrowed, RouteVerdict.Clipped, RouteVerdict.None, RouteVerdict.Unjudgeable })
+{
+    var cols = new[] { RouteCutVerdict.Blocked, RouteCutVerdict.LikelyBlocked, RouteCutVerdict.Clipped, RouteCutVerdict.NoLine, RouteCutVerdict.None, RouteCutVerdict.Unjudgeable }
+               .Select(n => crossTab.TryGetValue((o, n), out var c) ? c : 0).ToArray();
+    if (cols.Sum() == 0) continue;
+    Console.WriteLine($"   {o,-12} {cols[0],9:N0} {cols[1],9:N0} {cols[2],9:N0} {cols[3],9:N0} {cols[4],9:N0} {cols[5],9:N0}");
+}
+if (cutHits.Count > 0)
+{
+    Console.WriteLine($"\n   ---- Blocked / LikelyBlocked / NoLine / Unjudgeable references (route-cut) ----");
+    static string Pass(RouteLine? l) => l is null || float.IsNaN(l.Passage) ? "   -" : l.Passage >= l.PassageCap ? $"≥{l.PassageCap:0}" : $"{l.Passage,4:0}";
+    foreach (var h in cutHits.OrderBy(h => h.V == RouteCutVerdict.Blocked ? 0 : h.V == RouteCutVerdict.LikelyBlocked ? 1 : h.V == RouteCutVerdict.NoLine ? 2 : 3).ThenBy(h => h.Cell).Take(listN * 3))
+        Console.WriteLine($"   {h.V,-14} was {h.Old,-9} touched {h.Touched,4} passage {Pass(h.Line)} (L {(h.Line is null || float.IsNaN(h.Line.PassageLeft) ? "-" : h.Line.PassageLeft.ToString("0")),3} / R {(h.Line is null || float.IsNaN(h.Line.PassageRight) ? "-" : h.Line.PassageRight.ToString("0")),3})  {h.Cell,-26} {Short(h.Mesh, 44),-44} {h.Fk}   {h.Why}");
 }
 
 if (severHits.Count > 0)
