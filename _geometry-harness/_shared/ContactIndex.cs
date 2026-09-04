@@ -673,8 +673,11 @@ public sealed class ContactIndex
             // re-judgement at a larger ε has the facts it needs (the report's sensitivity table).
             bool nearMiss = r0.Verdict == ContactVerdict.NoRelation && auth is { } ac
                          && ac.Contact.FacingDistance <= NearBand && ac.Contact.EffectivePenetration <= NearBand && !float.IsNaN(ac.Contact.NormalUp);
+            // A re-placed dependent (MovedTogether) keeps its verdict whatever the winner arm says, but the winner arm is
+            // measured for it anyway (2026-09-03): the differential's physical predicate — does it still touch nothing? —
+            // needs the number, and a sham that nudges a dependent 1 u onto the mover's side IS a MovedTogether row.
             bool settledWithoutWinner = (r0.Verdict == ContactVerdict.NoRelation && !nearMiss)
-                                     || r0.Verdict is ContactVerdict.Removed or ContactVerdict.MovedTogether
+                                     || r0.Verdict == ContactVerdict.Removed
                                      || (r0.Verdict == ContactVerdict.Unjudgeable && r0.Reason != ContactBlocker.WinnerArmMissing);
             if (settledWithoutWinner)
             {

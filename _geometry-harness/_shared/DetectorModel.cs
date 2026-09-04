@@ -974,7 +974,88 @@ public static class DetectorModel
          : necessaryHit > 0 ? "PARTIAL"
          : alternativeHit > 0 ? "ALTERNATIVE"
          : "UNRELATED";
+
+    // ---- the differential credit rule (2026-09-03; handoff 2026-09-12, board Q9) ----------------------------
+
+    /// <summary>What a row's presence or absence across the two arms of a differential is WORTH. Every class the chain
+    /// diffs has a physical half and a provenance half; a sham patch that masters both plugins and re-states the
+    /// winner's record flips only the provenance half, and on the lab (2026-09-03) three detectors let four such
+    /// cells read DIFFERENTIAL-VERIFIED because the diff credited absence. Credit is therefore given only when the
+    /// PHYSICAL predicate — the class's own physical half, read under each arm (<see cref="PhysicalState"/>) — went
+    /// Holds -> Gone. A row that left the class with its predicate still holding, or that never carried a physical
+    /// defect (base predicate Gone), or that ENTERED the class with a predicate reading Gone, changed class
+    /// membership without a physical flip: RECLASSIFIED. A row that entered with the predicate holding is CREATED
+    /// (stated limit: the base arm measures no predicate for rows outside its class, so a defect that pre-dated the
+    /// change and merely became attributed to it reads Created too). Any predicate the outcome depends on that is
+    /// Unmeasured — or null, an emit older than the field — is UNMEASURED: counted apart, credited neither way.
+    /// A row in both arms is UNCHANGED whatever its predicates did (a flip is reported beside, never credited).</summary>
+    public static CreditOutcome Credit(bool inBase, PhysicalState? basePhysical, bool inChanged, PhysicalState? changedPhysical)
+    {
+        if (inBase && inChanged) return CreditOutcome.Unchanged;
+        if (inBase)
+        {
+            if (basePhysical is null or PhysicalState.Unmeasured) return CreditOutcome.Unmeasured;
+            if (basePhysical == PhysicalState.Gone) return CreditOutcome.Reclassified;        // nothing physical to repair
+            if (changedPhysical is null or PhysicalState.Unmeasured) return CreditOutcome.Unmeasured;
+            return changedPhysical == PhysicalState.Gone ? CreditOutcome.Repaired : CreditOutcome.Reclassified;
+        }
+        if (inChanged)
+        {
+            if (changedPhysical is null or PhysicalState.Unmeasured) return CreditOutcome.Unmeasured;
+            return changedPhysical == PhysicalState.Holds ? CreditOutcome.Created : CreditOutcome.Reclassified;
+        }
+        return CreditOutcome.Absent;
+    }
+
+    /// <summary>The verdict line, from the credited counts. Coverage refusals (<see cref="CoverageRefusals"/>) outrank
+    /// everything: a change that made rows unreadable is not judged. Then repaired against created decides VERIFIED /
+    /// NEUTRAL / HARMFUL as before — but only physical repairs and physical creations count. With neither, a run that
+    /// only moved rows between classes is RECLASSIFIED (every sham must read INERT or this), one that only moved
+    /// unmeasured rows is UNMEASURED, and one that touched nothing is INERT.</summary>
+    public static string DifferentialVerdict(int repaired, int created, int reclassified, int unmeasured, int coverageRefusals)
+    {
+        if (coverageRefusals > 0) return "DIFFERENTIAL-UNJUDGED";
+        if (repaired > 0 || created > 0)
+            return repaired > created ? "DIFFERENTIAL-VERIFIED" : repaired == created ? "DIFFERENTIAL-NEUTRAL" : "DIFFERENTIAL-HARMFUL";
+        if (reclassified > 0) return "DIFFERENTIAL-RECLASSIFIED";
+        if (unmeasured > 0) return "DIFFERENTIAL-UNMEASURED";
+        return "DIFFERENTIAL-INERT";
+    }
+
+    /// <summary>Which populations the changed arm judged WORSE than the base arm: for every population name present in
+    /// both, the unjudgeable fraction (unjudgeable / (judged + unjudgeable)) rose by more than <paramref name="tolerance"/>
+    /// (a fraction, 0.01 = one percentage point). A population with nothing in it on either side has fraction 0. Returns
+    /// one line per refusal, naming the population and both fractions; empty when nothing rose.</summary>
+    public static List<string> CoverageRefusals(
+        IEnumerable<(string Population, long Judged, long Unjudgeable)> baseCoverage,
+        IEnumerable<(string Population, long Judged, long Unjudgeable)> changedCoverage,
+        double tolerance)
+    {
+        static double Frac(long judged, long unjudgeable) => judged + unjudgeable == 0 ? 0 : (double)unjudgeable / (judged + unjudgeable);
+        var basis = new Dictionary<string, (long J, long U)>(StringComparer.OrdinalIgnoreCase);
+        foreach (var (pop, j, u) in baseCoverage) basis[pop] = (j, u);
+        var refusals = new List<string>();
+        foreach (var (pop, j, u) in changedCoverage)
+        {
+            if (!basis.TryGetValue(pop, out var b)) continue;
+            double before = Frac(b.J, b.U), after = Frac(j, u);
+            if (after - before > tolerance)
+                refusals.Add($"{pop}: unjudgeable {before:P2} -> {after:P2} ({b.U:N0} of {b.J + b.U:N0} -> {u:N0} of {j + u:N0}) — rose by more than {tolerance:P2}");
+        }
+        return refusals;
+    }
 }
+
+/// <summary>The class's PHYSICAL half under one arm: it holds, it is gone, or the arm could not measure it. What the
+/// predicate IS per detector: a clobber — victim-only ground remains (CoverageLoss samples beyond the reach clearance);
+/// a dangling link — the index still exceeds the winning count (exact); an overlap — the two winning boxes still meet at
+/// the run's threshold; a contact row — the dependent still touches nothing within ε. Never a stricter or looser test
+/// than the class itself.</summary>
+public enum PhysicalState { Holds, Gone, Unmeasured }
+
+/// <summary>What a row's movement between two emits is credited as (<see cref="DetectorModel.Credit"/>).</summary>
+public enum CreditOutcome { Unchanged, Repaired, Reclassified, Created, Unmeasured, Absent }
+
 
 public enum ClobberPopulation { BethesdaFloor, UssepDiscarded, ModOnMod }
 

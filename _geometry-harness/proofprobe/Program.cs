@@ -1507,12 +1507,12 @@ Console.WriteLine("\nPROOF — placement contact (_shared/DetectorModel.cs + _sh
     const float CaseHalf = 100f;
     FormKey S(int n) => M((uint)(0xB00 + n));     // switches (enable parents)
     var m1 = Interior(cell1K, "CtCell1"); var m2 = Interior(cell2K, "CtCell2");
-    foreach (int n in new[] { 1, 2, 3, 4, 5, 6, 8, 9, 10, 11, 12, 13, 14, 15, 16, 18, 20, 22, 31, 32, 33, 34, 35, 40, 41, 60 })
+    foreach (int n in new[] { 1, 2, 3, 4, 5, 6, 8, 9, 10, 11, 12, 13, 14, 15, 16, 18, 20, 22, 31, 32, 33, 34, 35, 40, 41, 60, 70 })
         m1.Temporary.Add(Ref(H(n), tableK, 1000f * n, edid: $"Table{n}"));
     m1.Temporary.Add(Ref(H(7), wallK, 7000, 0, 150, "Wall7"));
     m1.Temporary.Add(Ref(H(17), markerK, 17000, edid: "Marker17"));
     m1.Temporary.Add(Ref(H(21), floorK, 21000, 0, -20, "Floor21"));
-    foreach (int n in new[] { 1, 3, 4, 5, 6, 10, 11, 12, 13, 14, 15, 16, 17, 30, 32, 60 })
+    foreach (int n in new[] { 1, 3, 4, 5, 6, 10, 11, 12, 13, 14, 15, 16, 17, 30, 32, 60, 70 })
         m1.Temporary.Add(Ref(D(n), bowlK, 1000f * n, 0, TableTop + BowlHalf, $"Bowl{n}"));           // resting on its table
     // R1: Table30 follows Switch30 (enabled in M; A will disable the switch, never touching the table). Table36 follows
     // Switch36, disabled from birth — a host that never exists at runtime. Bowl31 follows Switch31 (A disables it).
@@ -1579,7 +1579,7 @@ Console.WriteLine("\nPROOF — placement contact (_shared/DetectorModel.cs + _sh
     var a = new SkyrimMod(aKey, release);
     a.Statics.Add(new Static(aStaticK, release) { EditorID = "CtAStatic" });
     var a1 = Interior(cell1K); var a2 = Interior(cell2K);
-    foreach (int n in new[] { 1, 2, 3, 4, 5, 6, 8, 9, 14, 15, 22, 31, 32, 33, 34, 35, 36, 37, 40, 41, 60 })
+    foreach (int n in new[] { 1, 2, 3, 4, 5, 6, 8, 9, 14, 15, 22, 31, 32, 33, 34, 35, 36, 37, 40, 41, 60, 70 })
         a1.Temporary.Add(Ref(H(n), tableK, 1000f * n + 200, edid: $"Table{n}"));                    // moved 200 u along X
     a1.Temporary.Add(Ref(S(30), switchK, 30000, 500, 0, "Switch30", disabled: true));               // Table30 leaves through its parent
     a1.Temporary.Add(Ref(S(31), switchK, 31000, 500, 0, "Switch31", disabled: true));               // Bowl31 leaves through its parent
@@ -1622,8 +1622,18 @@ Console.WriteLine("\nPROOF — placement contact (_shared/DetectorModel.cs + _sh
     FileInterior(c, c1);
     var cPath = Write(c, mOv);
 
+    // PLUGIN D (masters M AND A, loads last): nudges Bowl70 by 1 u on Table70's OLD line — the SHAM shape (handoff
+    // 2026-09-12): on the mover's side, so the rule reads MovedTogether, while the bowl still floats where the table was.
+    var dKey = new ModKey("CtD", ModType.Plugin);
+    var dmod = new SkyrimMod(dKey, release);
+    var d1 = Interior(cell1K);
+    d1.Temporary.Add(Ref(D(70), bowlK, 70001, 0, TableTop + BowlHalf, "Bowl70"));
+    d1.Temporary.Add(Ref(new FormKey(dKey, 0x801), aStaticK, 99100, edid: "CtDRef"));                // references A -> masters A
+    FileInterior(dmod, d1);
+    var dPath = Write(dmod, mOv, aOv);
+
     // Read the order back the way contactprobe does.
-    var paths = new[] { mPath, xPath, aPath, bPath, cPath };
+    var paths = new[] { mPath, xPath, aPath, bPath, cPath, dPath };
     ContactIndex? cidx = null;
     static TriangleSoup Inverted(TriangleSoup s) => new(s.Vertices, s.Indices.Chunk(3).SelectMany(t => new[] { t[0], t[2], t[1] }).ToArray());
     cidx = new ContactIndex(k => cidx!.Index.ObndBox(k) is { IsEmpty: false } bx
@@ -1639,16 +1649,16 @@ Console.WriteLine("\nPROOF — placement contact (_shared/DetectorModel.cs + _sh
         cidx.Index.Ingest(p, mod);
     }
     var closure = DetectorModel.MasterClosure(masterIdx);
-    const int Mi = 0, Xi = 1, Ai = 2, Bi = 3, Ci = 4;
+    const int Mi = 0, Xi = 1, Ai = 2, Bi = 3, Ci = 4, Di = 5;
     Check("ct-synth: the written order has the declared masters it was built to have",
-          masterIdx[Xi].SetEquals(new[] { Mi }) && masterIdx[Ai].SetEquals(new[] { Mi }) && masterIdx[Bi].SetEquals(new[] { Mi, Ai }) && masterIdx[Ci].SetEquals(new[] { Mi }),
-          $"X<-[{string.Join(",", masterIdx[Xi])}] A<-[{string.Join(",", masterIdx[Ai])}] B<-[{string.Join(",", masterIdx[Bi])}] C<-[{string.Join(",", masterIdx[Ci])}]");
+          masterIdx[Xi].SetEquals(new[] { Mi }) && masterIdx[Ai].SetEquals(new[] { Mi }) && masterIdx[Bi].SetEquals(new[] { Mi, Ai }) && masterIdx[Ci].SetEquals(new[] { Mi }) && masterIdx[Di].SetEquals(new[] { Mi, Ai }),
+          $"X<-[{string.Join(",", masterIdx[Xi])}] A<-[{string.Join(",", masterIdx[Ai])}] B<-[{string.Join(",", masterIdx[Bi])}] C<-[{string.Join(",", masterIdx[Ci])}] D<-[{string.Join(",", masterIdx[Di])}]");
 
     var skips = new ContactSkips();
     var hosts = cidx.MovedHosts(skips, closure);
     MovedHost? Host(int n) => hosts.FirstOrDefault(h => h.Key == H(n));
-    Check("ct-synth: the host census — every moved, relocated or removed table and the wall; not the 10 u nudge, not the four bowls that moved or left (too small to host — Bowl31 leaves through its parent); Marker17 IS a host (the name says marker, the flag does not — R2); Table36 never exists at runtime (R1, counted)",
-          hosts.Count == 32 && skips.HostTooSmall == 4 && Host(16) is null && Host(17) is { Change: HostChange.Moved } && Host(12) is { Change: HostChange.Removed } && Host(13) is { Change: HostChange.Relocated }
+    Check("ct-synth: the host census — every moved, relocated or removed table and the wall; not the 10 u nudge, not the four bowls that moved or left (too small to host — Bowl31 leaves through its parent); Marker17 IS a host (the name says marker, the flag does not — R2); Table36 never exists at runtime (R1, counted); Table70 (the sham shape) is a host",
+          hosts.Count == 33 && skips.HostTooSmall == 4 && Host(16) is null && Host(17) is { Change: HostChange.Moved } && Host(12) is { Change: HostChange.Removed } && Host(13) is { Change: HostChange.Relocated }
        && Host(1) is { Change: HostChange.Moved, Mover: Ai } && Host(23) is not null && Host(36) is null && skips.HostRuntimeDisabled == 1 && Host(61) is null,
           $"{hosts.Count} hosts (runtime-disabled {skips.HostRuntimeDisabled}, too small {skips.HostTooSmall}): " + string.Join(" ", hosts.OrderBy(h => h.Key.ID).Select(h => $"{h.Key.ID - 0x900}:{h.Change}")));
     Check("ct-synth: a base swap is read at the right snap — Table18's previous base is the short table, its winning base the tall one",
@@ -1721,15 +1731,65 @@ Console.WriteLine("\nPROOF — placement contact (_shared/DetectorModel.cs + _sh
           Row(40) is { Verdict: ContactVerdict.Unjudgeable, Reason: ContactBlocker.DepthExceedsObject } r40 && r40.Facts.WinnerPenetration > 30f && MathF.Abs(r40.Facts.WinnerAgainstExtent - 30f) < 0.5f
        && Row(41) is { Verdict: ContactVerdict.Sunk } r41 && r41.Facts.WinnerPenetration > 4f && r41.Facts.WinnerAgainstExtent >= 299f,
           $"40: {R(40)} [pen {Row(40)?.Facts.WinnerPenetration:0.#} extent {Row(40)?.Facts.WinnerAgainstExtent:0.#}] | 41: {R(41)} [pen {Row(41)?.Facts.WinnerPenetration:0.#} extent {Row(41)?.Facts.WinnerAgainstExtent:0.#}]");
-    Check("ct-synth: the whole population — 28 rows (the 19 of 2026-09-02, Bowl17 admitted by R2, and eight from the folds' cases), and the verdict tally is the one the order was built to give",
-          rows.Count == 28
+    // The sham shape (handoff 2026-09-12): a plugin on the mover's side that re-places the dependent by 1 u passes the rule's
+    // provenance test and reads MovedTogether — the class definition is not weakened for it; the CREDIT rule downstream is
+    // what refuses it, and it needs the winner arm measured for MovedTogether rows, which is what this pins.
+    Check("ct-synth SHAM: D (masters M and A) nudged Bowl70 1 u on Table70's OLD line -> MOVED TOGETHER by the rule, and the winner arm is measured anyway: the bowl still touches nothing (the differential's predicate holds); Bowl3 and Bowl4, re-placed onto their tables, measure as touching",
+          Row(70) is { Verdict: ContactVerdict.MovedTogether, DepAuthor: Mi } r70 && r70.Facts.WinnerMeasured && r70.Facts.WinnerDistance > cidx.Epsilon && r70.Facts.WinnerPenetration <= cidx.Epsilon
+       && Row(3) is { Verdict: ContactVerdict.MovedTogether } r3 && r3.Facts.WinnerMeasured && r3.Facts.WinnerDistance <= cidx.Epsilon
+       && Row(4) is { Verdict: ContactVerdict.MovedTogether } r4 && r4.Facts.WinnerMeasured && r4.Facts.WinnerDistance <= cidx.Epsilon,
+          $"70: {R(70)} [winner measured {Row(70)?.Facts.WinnerMeasured}, nearest {Row(70)?.Facts.WinnerDistance:0.#}u] | 3: measured {Row(3)?.Facts.WinnerMeasured}, nearest {Row(3)?.Facts.WinnerDistance:0.#}u | 4: measured {Row(4)?.Facts.WinnerMeasured}, nearest {Row(4)?.Facts.WinnerDistance:0.#}u");
+    Check("ct-synth: the whole population — 29 rows (the 19 of 2026-09-02, Bowl17 admitted by R2, eight from the folds' cases, and the sham-shaped Bowl70), and the verdict tally is the one the order was built to give",
+          rows.Count == 29
        && rows.Count(r => r.Verdict == ContactVerdict.Stranded) == 13 && rows.Count(r => r.Verdict == ContactVerdict.Orphaned) == 1
-       && rows.Count(r => r.Verdict == ContactVerdict.MovedTogether) == 2 && rows.Count(r => r.Verdict == ContactVerdict.ReSupported) == 4
+       && rows.Count(r => r.Verdict == ContactVerdict.MovedTogether) == 3 && rows.Count(r => r.Verdict == ContactVerdict.ReSupported) == 4
        && rows.Count(r => r.Verdict == ContactVerdict.Sunk) == 2 && rows.Count(r => r.Verdict == ContactVerdict.Removed) == 1
        && rows.Count(r => r.Verdict == ContactVerdict.NoRelation) == 3 && rows.Count(r => r.Verdict == ContactVerdict.Unjudgeable) == 2,
           $"rows {rows.Count}: " + string.Join(" | ", rows.OrderBy(r => r.Dependent.ID).Select(r => $"{r.Dependent.ID - 0xA00}:{r.Verdict}")));
 
     try { Directory.Delete(root, true); } catch { }
+}
+
+// ---------------------------------------------------------------------------------------
+// The differential credit rule (handoff 2026-09-12, board Q9). A sham patch that masters both plugins of a pair and
+// re-states the winner's record leaves every class on provenance alone; the diff used to credit that as repair (four of
+// nine lab cells, 2026-09-03). Credit is given only for a physical predicate that went Holds -> Gone.
+// ---------------------------------------------------------------------------------------
+Console.WriteLine("\nPROOF — the differential credit rule (_shared/DetectorModel.cs: Credit / DifferentialVerdict / CoverageRefusals)\n");
+{
+    const PhysicalState H = PhysicalState.Holds, G = PhysicalState.Gone, U = PhysicalState.Unmeasured;
+    static CreditOutcome Cr(bool inB, PhysicalState? b, bool inC, PhysicalState? c) => DetectorModel.Credit(inB, b, inC, c);
+    static string DV(int rep, int cre, int rec, int unm, int refused) => DetectorModel.DifferentialVerdict(rep, cre, rec, unm, refused);
+    Check("credit: in both arms -> UNCHANGED, whatever the predicates did (a flip is reported beside, never credited)",
+          Cr(true, H, true, G) == CreditOutcome.Unchanged && Cr(true, G, true, H) == CreditOutcome.Unchanged && Cr(true, U, true, U) == CreditOutcome.Unchanged, "");
+    Check("credit: left the class, predicate Holds -> Gone -> REPAIRED", Cr(true, H, false, G) == CreditOutcome.Repaired, "");
+    Check("credit: left the class with the predicate still holding -> RECLASSIFIED (the sham: nothing physical changed)", Cr(true, H, false, H) == CreditOutcome.Reclassified, "");
+    Check("credit: left the class with no physical defect to begin with -> RECLASSIFIED, whatever the changed arm says",
+          Cr(true, G, false, G) == CreditOutcome.Reclassified && Cr(true, G, false, H) == CreditOutcome.Reclassified && Cr(true, G, false, U) == CreditOutcome.Reclassified && Cr(true, G, false, null) == CreditOutcome.Reclassified, "");
+    Check("credit: left the class on a predicate the credit rests on that is unmeasured or absent -> UNMEASURED, counted apart",
+          Cr(true, H, false, U) == CreditOutcome.Unmeasured && Cr(true, H, false, null) == CreditOutcome.Unmeasured && Cr(true, U, false, G) == CreditOutcome.Unmeasured && Cr(true, null, false, G) == CreditOutcome.Unmeasured, "");
+    Check("credit: entered the class with the predicate holding -> CREATED", Cr(false, null, true, H) == CreditOutcome.Created, "");
+    Check("credit: entered the class reading Gone -> RECLASSIFIED (a class row with nothing physical behind it)", Cr(false, null, true, G) == CreditOutcome.Reclassified, "");
+    Check("credit: entered the class unmeasured -> UNMEASURED", Cr(false, null, true, U) == CreditOutcome.Unmeasured && Cr(false, null, true, null) == CreditOutcome.Unmeasured, "");
+    Check("credit: in neither arm -> ABSENT", Cr(false, null, false, null) == CreditOutcome.Absent, "");
+    var sham = Enumerable.Range(0, 7).Select(_ => Cr(true, H, false, H)).ToList();
+    Check("verdict: the sham cell — 7 rows gone with their predicates still holding -> 0 repaired, 7 reclassified -> DIFFERENTIAL-RECLASSIFIED, never VERIFIED",
+          sham.Count(o => o == CreditOutcome.Repaired) == 0 && sham.Count(o => o == CreditOutcome.Reclassified) == 7
+       && DV(sham.Count(o => o == CreditOutcome.Repaired), 0, sham.Count(o => o == CreditOutcome.Reclassified), 0, 0) == "DIFFERENTIAL-RECLASSIFIED", "");
+    Check("verdict: repaired > created -> VERIFIED; equal -> NEUTRAL; fewer -> HARMFUL; reclassified rides along without deciding",
+          DV(5, 1, 10, 0, 0) == "DIFFERENTIAL-VERIFIED" && DV(3, 3, 0, 0, 0) == "DIFFERENTIAL-NEUTRAL" && DV(1, 4, 0, 0, 0) == "DIFFERENTIAL-HARMFUL"
+       && DV(0, 1, 0, 0, 0) == "DIFFERENTIAL-HARMFUL" && DV(1, 0, 0, 0, 0) == "DIFFERENTIAL-VERIFIED", "");
+    Check("verdict: nothing credited either way -> INERT; only unmeasured rows moved -> UNMEASURED", DV(0, 0, 0, 0, 0) == "DIFFERENTIAL-INERT" && DV(0, 0, 0, 3, 0) == "DIFFERENTIAL-UNMEASURED", "");
+    Check("verdict: a coverage refusal outranks every count", DV(100, 0, 0, 0, 1) == "DIFFERENTIAL-UNJUDGED", "");
+    var refusals = DetectorModel.CoverageRefusals(new[] { ("rows", 10L, 0L) }, new[] { ("rows", 0L, 10L) }, 0.01);
+    Check("coverage: 10 judged / 0 unjudgeable -> 0 judged / 10 unjudgeable is REFUSED, and the verdict is UNJUDGED, never VERIFIED",
+          refusals.Count == 1 && DV(0, 0, 0, 0, refusals.Count) == "DIFFERENTIAL-UNJUDGED", string.Join("; ", refusals));
+    Check("coverage: the same shares -> nothing refused; a rise within tolerance -> nothing (9.09 % -> 9.91 %); just over -> refused (-> 11.50 %); a population only one side has -> ignored",
+          DetectorModel.CoverageRefusals(new[] { ("rows", 100L, 10L) }, new[] { ("rows", 100L, 10L) }, 0.01).Count == 0
+       && DetectorModel.CoverageRefusals(new[] { ("rows", 1000L, 100L) }, new[] { ("rows", 1000L, 110L) }, 0.01).Count == 0
+       && DetectorModel.CoverageRefusals(new[] { ("rows", 1000L, 100L) }, new[] { ("rows", 1000L, 130L) }, 0.01).Count == 1
+       && DetectorModel.CoverageRefusals(new[] { ("rows", 100L, 0L) }, new[] { ("other", 0L, 100L) }, 0.01).Count == 0, "");
+    Check("coverage: a share that FELL is never a refusal", DetectorModel.CoverageRefusals(new[] { ("rows", 100L, 50L) }, new[] { ("rows", 100L, 0L) }, 0.01).Count == 0, "");
 }
 
 Console.WriteLine("\nPROOF — the synthetic load order (_shared/SyntheticOrder.cs)\n");

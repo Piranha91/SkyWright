@@ -29,10 +29,12 @@ using Mutagen.Bethesda.Skyrim;
 //              cell's navmesh afterwards. Nobody can have accounted for those objects, because the
 //              last word on the navmesh was spoken before they existed.
 //
-// usage: navownprobe [--list N] [--plugin Name.esp] [--emit out.json] [--enable X.esp]
+// usage: navownprobe [--list N] [--plugin Name.esp] [--emit out.json] [--base emit.json] [--enable X.esp]
 //                    [--disable X.esp] [--door-idx] [--reach-candidates] [--reach-json out.json]
 //                    [--reach-top N] [--reach-witness]
 //
+//   --base emit.json re-measure every record of that emit's rows under THIS order and carry the results in
+//                    the emit as Predicates — the changed arm of a differential (conflictdiff reads both).
 //   --reach-witness  the needs-witness join (NeedsWitness.cs): for every record with victim-only
 //                    ground, find what the records say still needs it — package anchors, placed
 //                    actors, targeted markers — and judge each against both arms. Implies
@@ -72,6 +74,7 @@ int reachTopN = 20;           // survivors exported per record per direction in 
 int listN = 25;
 string? onlyPlugin = null;
 string? emitPath = null;
+string? basePath = null;
 var enablePlugins = new List<string>();
 var disablePlugins = new List<string>();
 for (int i = 0; i < args.Length; i++)
@@ -79,6 +82,7 @@ for (int i = 0; i < args.Length; i++)
     if (args[i] == "--list" && i + 1 < args.Length) listN = int.Parse(args[++i]);
     else if (args[i] == "--plugin" && i + 1 < args.Length) onlyPlugin = args[++i];
     else if (args[i] == "--emit" && i + 1 < args.Length) emitPath = args[++i];
+    else if (args[i] == "--base" && i + 1 < args.Length) basePath = args[++i];
     else if (args[i] == "--enable" && i + 1 < args.Length) enablePlugins.Add(args[++i]);
     else if (args[i] == "--disable" && i + 1 < args.Length) disablePlugins.Add(args[++i]);
     else if (args[i] == "--door-idx") reportDoorIdx = true;
@@ -345,6 +349,96 @@ foreach (var g in clobber.Where(c => c.Material)
                     + $"  ({ex.LoserT} tris -> {ex.WinnerT})");
 }
 
+// The reach pass's constants, shared with the clobber predicate below.
+const float ReachClearance = 120f;   // the oracle's measured resolution: closer reads reachable
+const float ReachSpacing = 64f;      // sampling bound — a loss beyond clearance+spacing cannot be missed
+const float WellClear = 240f;        // 2x resolution: what a probe-worthy candidate must exceed
+
+// Full geometry for exactly the (record, plugin) pairs a pass names: the main pass keeps counts and hashes only, because
+// every version of every navmesh would be most of the load order in memory. Re-opens only the plugins the plan names.
+(Dictionary<(FormKey Nav, int Plugin), NavmeshGeometry> Geom, int Unreadable) LoadNavGeometry(Dictionary<int, HashSet<FormKey>> plan)
+{
+    var geom = new Dictionary<(FormKey Nav, int Plugin), NavmeshGeometry>();
+    int unreadable = 0;
+    foreach (var (pi, wantedNavs) in plan)
+    {
+        ISkyrimModGetter mod;
+        try { mod = SkyrimMod.CreateFromBinaryOverlay(paths[pi], SkyrimRelease.SkyrimSE); }
+        catch { unreadable += wantedNavs.Count; continue; }
+        using (mod as IDisposable)
+            foreach (var cp in PlacementExtract.FromMod(mod))
+                foreach (var nav in cp.Navmeshes)
+                    if (wantedNavs.Contains(nav.FormKey)) geom[(nav.FormKey, pi)] = nav;
+    }
+    return (geom, unreadable);
+}
+static void PlanInto(Dictionary<int, HashSet<FormKey>> plan, int plugin, FormKey nav)
+{
+    if (plugin < 0) return;
+    if (!plan.TryGetValue(plugin, out var s)) plan[plugin] = s = new HashSet<FormKey>();
+    s.Add(nav);
+}
+static (List<System.Numerics.Vector3> V, List<(int A, int B, int C, int Flags)> T) Mesh(NavmeshGeometry g)
+    => (g.Vertices.Select(v => new System.Numerics.Vector3(v.X, v.Y, v.Z)).ToList(),
+        g.Triangles.Select(t => ((int)t.A, (int)t.B, (int)t.C, t.Flags)).ToList());
+
+// THE PHYSICAL PREDICATE of a CLOBBERED row (2026-09-03; handoff 2026-09-12): victim-only ground remains — some point of
+// the loser's mesh lies farther than the reach clearance from the winner's, whoever the winner is under the arm being
+// read. This is the class's physical half on its own: "the winner declares no dependency on the loser" is the provenance
+// half, and a sham patch that masters both and forwards the winner's navmesh unchanged flips only that. Not used: the
+// content-hash Material test (symmetric — a true merge also differs from the loser), the neighbour-navmesh rescue and the
+// witness join (the reach pass's refinements). A row whose loser is within clearance everywhere reads Gone in its own
+// base arm: a declared-dependency clobber with no loss this instrument can see. The credit rule counts that apart.
+(PhysicalState State, string Detail) ClobberPredicate(FormKey nav, int loser, int winner, Dictionary<(FormKey Nav, int Plugin), NavmeshGeometry> geom)
+{
+    if (loser == winner) return (PhysicalState.Gone, "the loser's own version is the winning one");
+    if (!geom.TryGetValue((nav, loser), out var lg) || !geom.TryGetValue((nav, winner), out var wg))
+        return (PhysicalState.Unmeasured, "a version's geometry could not be read");
+    var L = Mesh(lg); var W = Mesh(wg);
+    var victim = DetectorModel.CoverageLoss(L.V, L.T, W.V, W.T, ReachClearance, ReachSpacing);
+    return victim.Count > 0
+        ? (PhysicalState.Holds, $"victim-only ground: {victim.Count} sample(s) of the loser's mesh farther than {ReachClearance:0}u from the winner's ({pluginKey[winner].FileName})")
+        : (PhysicalState.Gone, $"no point of the loser's mesh is farther than {ReachClearance:0}u from the winner's ({pluginKey[winner].FileName})");
+}
+
+// The physical predicate of a dangling-link row: the same exact check the finding came from, re-asked of the winning
+// state under this arm. Exact, no geometry: the index still exceeds the winning count (or still points into a navmesh the
+// winning state lacks), or it does not.
+(PhysicalState State, string Detail) DanglePredicate(string kind, FormKey rec, FormKey other)
+{
+    switch (kind)
+    {
+        case "DOOR-TRI":
+            if (!navTriCount.TryGetValue(rec, out var dtCount)) return (PhysicalState.Gone, "the navmesh is not in the winning state");
+            return navDoorTris.TryGetValue(rec, out var dtris) && dtris.Any(t => t.Door == other && t.Tri >= dtCount)
+                ? (PhysicalState.Holds, $"the door triangle index still exceeds the winning count ({dtCount})")
+                : (PhysicalState.Gone, "the door triangle entry is gone or within the winning count");
+        case "DOOR-GONE":
+            return navDoorTris.TryGetValue(rec, out var dgTris) && dgTris.Any(t => t.Door == other) && refGone.Contains(other)
+                ? (PhysicalState.Holds, "the navmesh still links a door deleted in the winning state")
+                : (PhysicalState.Gone, "the door entry is gone, or the door exists again");
+        case "DOOR-NAV":
+            return doorNavLink.TryGetValue(rec, out var dn) && dn.Nav == other && !navTriCount.ContainsKey(other)
+                ? (PhysicalState.Holds, "the door still links a navmesh the winning state lacks")
+                : (PhysicalState.Gone, "the door's link was removed or re-pointed, or the navmesh is provided now");
+        case "DOOR-IDX":
+            return doorNavLink.TryGetValue(rec, out var di) && di.Nav == other && navTriCount.TryGetValue(other, out var diCount) && di.Tri >= diCount
+                ? (PhysicalState.Holds, $"the door's triangle index still exceeds the winning count ({diCount})")
+                : (PhysicalState.Gone, "the door's link is within the winning count, removed or re-pointed");
+        case "EDGE-NAV":
+            return navEdgeLinks.TryGetValue(rec, out var en) && en.Any(x => x.Mesh == other) && !navTriCount.ContainsKey(other)
+                ? (PhysicalState.Holds, "the edge link still points into a navmesh the winning state lacks")
+                : (PhysicalState.Gone, "the edge link is gone, or the target navmesh is provided now");
+        case "EDGE-IDX":
+            return navEdgeLinks.TryGetValue(rec, out var ei) && navTriCount.TryGetValue(other, out var eiCount) && ei.Any(x => x.Mesh == other && x.Tri >= eiCount)
+                ? (PhysicalState.Holds, $"the edge link's triangle index still exceeds the target's winning count ({eiCount})")
+                : (PhysicalState.Gone, "the edge link is within the target's winning count, or gone");
+        default:
+            return (PhysicalState.Unmeasured, $"no physical predicate is defined for kind {kind}");
+    }
+}
+var coverageExtra = new List<CoverageLine>();
+
 // ---------------------------------------------------------------------------------------
 // REACH CANDIDATES — 3.5.5's selector: ground where the two arms PREDICT different answers.
 // ---------------------------------------------------------------------------------------
@@ -358,10 +452,6 @@ foreach (var g in clobber.Where(c => c.Material)
 // encoded: 26 targets on ground where the arms were geometrically identical proved nothing.
 if (reachCandidates)
 {
-    const float ReachClearance = 120f;   // the oracle's measured resolution: closer reads reachable
-    const float ReachSpacing = 64f;      // sampling bound — a loss beyond clearance+spacing cannot be missed
-    const float WellClear = 240f;        // 2x resolution: what a probe-worthy candidate must exceed
-
     var pool = clobber.Where(c => c.Material).ToList();
     Console.WriteLine($"\n==== REACH CANDIDATES: ground where the two arms predict different answers (3.5.5) ====");
     Console.WriteLine($"   pool: {pool.Count:N0} material clobbers ({clobber.Count:N0} raw; the non-material rest CANNOT differ and are excluded)");
@@ -420,24 +510,9 @@ if (reachCandidates)
     // Second pass: re-open only the plugins the plan names and keep only the wanted geometry.
     // The main pass deliberately retains counts+hash, not shapes — full geometry for every
     // (record, plugin) pair would be most of the load order in memory.
-    var geom = new Dictionary<(FormKey Nav, int Plugin), NavmeshGeometry>();
-    int unreadableGeom = 0;
-    foreach (var (pi, wantedNavs) in plan)
-    {
-        ISkyrimModGetter mod;
-        try { mod = SkyrimMod.CreateFromBinaryOverlay(paths[pi], SkyrimRelease.SkyrimSE); }
-        catch { unreadableGeom += wantedNavs.Count; continue; }
-        using (mod as IDisposable)
-            foreach (var cp in PlacementExtract.FromMod(mod))
-                foreach (var nav in cp.Navmeshes)
-                    if (wantedNavs.Contains(nav.FormKey)) geom[(nav.FormKey, pi)] = nav;
-    }
+    var (geom, unreadableGeom) = LoadNavGeometry(plan);
     Console.WriteLine($"   geometry: {geom.Count:N0} (record, plugin) pairs from {plan.Count:N0} plugins"
                     + (unreadableGeom > 0 ? $"; {unreadableGeom:N0} wanted extractions unreadable (counted per rule 6)" : ""));
-
-    (List<System.Numerics.Vector3> V, List<(int A, int B, int C, int Flags)> T) Mesh(NavmeshGeometry g)
-        => (g.Vertices.Select(v => new System.Numerics.Vector3(v.X, v.Y, v.Z)).ToList(),
-            g.Triangles.Select(t => ((int)t.A, (int)t.B, (int)t.C, t.Flags)).ToList());
 
     // The needs-witness census: one more pass over every plugin, reading packages and NPC records
     // from anywhere and placed references only in the pool's cells (+ring). Runs before the loop
@@ -600,6 +675,8 @@ if (reachCandidates)
     Console.WriteLine($"   records with winner-arm-only ground (the mirror)  : {recordsMirrorOnly:N0} (mirror only)");
     Console.WriteLine($"   identical-counts-but-moved-geometry subset        : {movedSubset:N0} records, {movedSubsetWithLoss:N0} with victim-only ground");
     Console.WriteLine($"   pairs skipped for unreadable/missing geometry     : {geomMissing:N0} (counted, not cleared)");
+    coverageExtra.Add(new CoverageLine("material clobbers (reach pass)", pool.Count - geomMissing, new Dictionary<string, long> { ["GeometryMissing"] = geomMissing },
+                                       null, $"{recordsVictim:N0} with victim-only ground beyond {ReachClearance:0}u"));
     Console.WriteLine($"   ---- by population (rule 12) ----");
     foreach (var (k, t) in perClass.OrderBy(kv => kv.Key))
         Console.WriteLine($"   {t.WithLoss,4} of {t.Records,4}  {k}");
@@ -639,6 +716,9 @@ if (reachCandidates)
                                .OrderByDescending(g => g.Count()))
             Console.WriteLine($"   {g.Count(),6}  {g.Key.Reason}{(g.Key.Arm.Length > 0 ? $" ({g.Key.Arm} arm)" : "")}");
         Console.WriteLine($"   elevated anchors (3-D Uncovered, horizontal reading would strand): {rows.Count(x => x.Row.ElevatedStrand):N0}");
+        coverageExtra.Add(new CoverageLine("witness rows (needs-witness join)", rows.Count(x => x.Row.Verdict != WitnessVerdict.Unjudgeable),
+                                           rows.Where(x => x.Row.Verdict == WitnessVerdict.Unjudgeable).GroupBy(x => x.Row.Reason.ToString()).ToDictionary(g => g.Key, g => (long)g.Count()),
+                                           null, $"W2 blind band {witnessByRecord.SelectMany(w => w.Report.BlindBand(ReachClearance)).Count():N0} (counted, never a verdict)"));
         // The blind band the rule states for placements: below clearance nothing is measured for a
         // W2, so a placed actor the winner arm leaves that far off its mesh reads Covered. Counted,
         // never a verdict, and split by distance because the 3-D measure includes standing height.
@@ -969,9 +1049,18 @@ foreach (var u in uncut.OrderByDescending(u => u.Refs).Take(listN))
 // Only the two EXACT checks are emitted. UNCUT is deliberately excluded: it is baseline-limited
 // (official Bethesda content trips it 5,100 times) and is ranking, not a finding, so feeding it to
 // a verifier would dress a ranking up as a defect.
+// Every record carries its PHYSICAL predicate under this arm (ClobberPredicate / DanglePredicate above); with --base,
+// every record of the named emit is re-measured under this arm too, so conflictdiff can credit a vanished row as
+// repaired only when the predicate went away (2026-09-03).
 if (emitPath is not null)
 {
     var conflicts = new List<Conflict>();
+
+    // The clobber predicate needs each finding's two versions in memory — the reach pass's plan, for the findings only.
+    var clobberPlan = new Dictionary<int, HashSet<FormKey>>();
+    foreach (var c in clobberFindings) { PlanInto(clobberPlan, c.Loser, c.Nav); PlanInto(clobberPlan, c.Winner, c.Nav); }
+    var (clobberGeom, clobberUnreadable) = LoadNavGeometry(clobberPlan);
+    var predicateTally = new Dictionary<PhysicalState, int>();
 
     // Floor stays out of the handoff. Feeding class-A records (Bethesda on both ends) to the
     // verifier dressed 28 dangles and 3 clobber records up as defects for a whole session —
@@ -983,8 +1072,13 @@ if (emitPath is not null)
         conflicts.Add(new Conflict(
             "CLOBBERED", loser, winner,
             $"{g.Count()} navmesh record(s) re-cut by {loser} and then re-cut again by {winner}, which declares no dependency on it",
-            g.Select(c => new ConflictRecord(c.Nav.ToString(), "navmesh",
-                          $"{Cell(navCell.GetValueOrDefault(c.Nav))}  {c.LoserT} tris -> {c.WinnerT}")).ToList()));
+            g.Select(c =>
+            {
+                var (st, why) = ClobberPredicate(c.Nav, c.Loser, c.Winner, clobberGeom);
+                predicateTally[st] = predicateTally.GetValueOrDefault(st) + 1;
+                return new ConflictRecord(c.Nav.ToString(), "navmesh",
+                              $"{Cell(navCell.GetValueOrDefault(c.Nav))}  {c.LoserT} tris -> {c.WinnerT}", st, why);
+            }).ToList()));
     }
 
     int floorDangles = dangleStruct.Count(d => !ModTouched(d.Rec, d.RecRole) && !ModTouched(d.Other, d.OtherRole));
@@ -992,7 +1086,8 @@ if (emitPath is not null)
     {
         // A fix has to override the record carrying the bad index. The other end is context: a
         // patch that only re-states the target navmesh has not repaired the pointer into it.
-        var necessary = new List<ConflictRecord> { new(d.Rec.ToString(), d.RecRole, Cell(navCell.GetValueOrDefault(d.Rec))) };
+        var (st, why) = DanglePredicate(d.Kind, d.Rec, d.Other);
+        var necessary = new List<ConflictRecord> { new(d.Rec.ToString(), d.RecRole, Cell(navCell.GetValueOrDefault(d.Rec)), st, why) };
         // For an unpaired finding this chain IS the deliverable: it names every plugin that already
         // touches the broken record, which is where a fix would have to go.
         var chain = Overriders(d.Rec, d.RecRole);
@@ -1004,10 +1099,73 @@ if (emitPath is not null)
             d.Summary + $"   [record provided by: {chain}]", necessary, other));
     }
 
+    // --base: every record of the base emit, re-measured under THIS arm. The loser of a clobber row is the base row's;
+    // the winner is whoever wins the record here. A dangling link is re-asked of this arm's winning state.
+    List<Predicate>? predicates = null;
+    int baseUnreadable = 0;
+    if (basePath is not null)
+    {
+        var baseFile = ConflictIo.Read(basePath);
+        predicates = new List<Predicate>();
+        var basePlan = new Dictionary<int, HashSet<FormKey>>();
+        var pending = new List<(Conflict C, ConflictRecord R, FormKey Nav, int Loser, int Winner)>();
+        foreach (var c in baseFile.Conflicts)
+        {
+            if (c.Kind == "CLOBBERED")
+            {
+                int loser = Array.FindIndex(pluginKey, k => string.Equals(k.FileName.String, c.A, StringComparison.OrdinalIgnoreCase));
+                foreach (var r in c.Necessary)
+                {
+                    var nav = FormKey.Factory(r.FormKey);
+                    var provs = navProviders.GetValueOrDefault(nav);
+                    int winner = provs is { Count: > 0 } ? provs[^1] : -1;
+                    if (loser < 0) predicates.Add(new Predicate(c.Kind, c.A, c.B, r.FormKey, null, PhysicalState.Unmeasured, "the loser plugin is not loaded in this order"));
+                    else if (winner < 0) predicates.Add(new Predicate(c.Kind, c.A, c.B, r.FormKey, null, PhysicalState.Unmeasured, "no plugin in this order provides the record"));
+                    else if (!provs!.Contains(loser)) predicates.Add(new Predicate(c.Kind, c.A, c.B, r.FormKey, null, PhysicalState.Unmeasured, "the loser does not provide this record in this order"));
+                    else { PlanInto(basePlan, loser, nav); PlanInto(basePlan, winner, nav); pending.Add((c, r, nav, loser, winner)); }
+                }
+            }
+            else
+            {
+                string? other = c.Alternative is { Count: > 0 } alt ? alt[0].FormKey : null;
+                foreach (var r in c.Necessary)
+                {
+                    if (other is null) { predicates.Add(new Predicate(c.Kind, c.A, c.B, r.FormKey, null, PhysicalState.Unmeasured, "the base row names no second record to re-ask the link of")); continue; }
+                    var (st, why) = DanglePredicate(c.Kind, FormKey.Factory(r.FormKey), FormKey.Factory(other));
+                    predicates.Add(new Predicate(c.Kind, c.A, c.B, r.FormKey, other, st, why));
+                }
+            }
+        }
+        var (baseGeom, unreadableBase) = LoadNavGeometry(basePlan);
+        baseUnreadable = unreadableBase;
+        foreach (var (c, r, nav, loser, winner) in pending)
+        {
+            var (st, why) = ClobberPredicate(nav, loser, winner, baseGeom);
+            predicates.Add(new Predicate(c.Kind, c.A, c.B, r.FormKey, null, st, why));
+        }
+        Console.WriteLine($"\n   --base {Path.GetFileName(basePath)}: {predicates.Count:N0} base-row predicate(s) re-measured under this order — "
+                        + string.Join(", ", predicates.GroupBy(p => p.Physical).OrderBy(g => g.Key).Select(g => $"{g.Key} {g.Count():N0}"))
+                        + (baseUnreadable > 0 ? $"; {baseUnreadable} wanted extraction(s) unreadable" : ""));
+    }
+
+    var coverage = new List<CoverageLine>
+    {
+        new("plugins", paths.Count - unreadablePlugins.Count, new Dictionary<string, long> { ["UnreadablePlugin"] = unreadablePlugins.Count }),
+        new("navmesh records (clobber test)", navProviders.Count, new Dictionary<string, long>(), null,
+            $"{clobber.Count:N0} clobbered, {clobber.Count(c => c.Material):N0} material, {clobberFindings.Count:N0} findings (class A withheld)"),
+        new("clobber predicates (findings)", predicateTally.GetValueOrDefault(PhysicalState.Holds) + predicateTally.GetValueOrDefault(PhysicalState.Gone),
+            new Dictionary<string, long> { ["GeometryUnreadable"] = predicateTally.GetValueOrDefault(PhysicalState.Unmeasured) }, null,
+            $"Holds {predicateTally.GetValueOrDefault(PhysicalState.Holds):N0}, Gone {predicateTally.GetValueOrDefault(PhysicalState.Gone):N0} (a Gone row: a declared-dependency clobber with no coverage loss beyond {ReachClearance:0}u)"),
+        new("dangling-link checks", doorTriChecked + doorLinkChecked + edgeChecked, new Dictionary<string, long>(),
+            new Dictionary<string, long> { ["PermanentlyDisabledDoor"] = permanentlyDisabledDoors, ["DoorIdxRetired"] = doorIdxSuppressed, ["FloorDangles"] = floorDangles }),
+    };
+    coverage.AddRange(coverageExtra);
+
     ConflictIo.Write(emitPath, new ConflictFile("navownprobe", Instance,
-        DateTime.UtcNow.ToString("yyyy-MM-dd HH:mm:ssZ"), conflicts));
+        DateTime.UtcNow.ToString("yyyy-MM-dd HH:mm:ssZ"), conflicts, coverage, predicates, basePath));
     Console.WriteLine($"\nemitted {conflicts.Count:N0} conflicts ({conflicts.Count(c => c.B.Length == 0)} with no second party to name;"
-                    + $" {floorDangles} class-A dangles and the class-A clobbers withheld as floor) -> {emitPath}");
+                    + $" {floorDangles} class-A dangles and the class-A clobbers withheld as floor;"
+                    + $" clobber predicates Holds {predicateTally.GetValueOrDefault(PhysicalState.Holds)} / Gone {predicateTally.GetValueOrDefault(PhysicalState.Gone)} / Unmeasured {predicateTally.GetValueOrDefault(PhysicalState.Unmeasured)}) -> {emitPath}");
 }
 
 Console.WriteLine($"\nelapsed {sw.Elapsed.TotalSeconds:0.0}s");

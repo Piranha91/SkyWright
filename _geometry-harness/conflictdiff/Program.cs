@@ -8,72 +8,165 @@ using HarnessShared;
 // diff, and this tool is the diff:
 //
 //     navownprobe --emit base.json
-//     navownprobe --enable "Candidate.esp" --emit with-candidate.json
+//     navownprobe --enable "Candidate.esp" --base base.json --emit with-candidate.json
 //     conflictdiff base.json with-candidate.json
 //
-// The verdict line is DIFFERENTIAL-VERIFIED / DIFFERENTIAL-NEUTRAL / DIFFERENTIAL-HARMFUL, decided
-// by net records repaired minus created. `differential-sweep.ps1` drives the whole loop over the
-// candidates --verify names.
+// WHAT COUNTS AS REPAIR (2026-09-03; handoff 2026-09-12). A row leaving the conflict set is not a repair by
+// itself: every class has a physical half and a provenance half, and a sham patch that masters both plugins
+// and re-states the winner's record flips only the provenance half — the geometry is untouched, the row is
+// gone, and the first version of this tool called that DIFFERENTIAL-VERIFIED (reproduced on the lab in four
+// of nine sham cells across the three detectors). So a row is REPAIRED only when its physical predicate — the
+// class's own physical half, carried on every emitted record as `Physical` and, for rows that vanished,
+// re-measured under the changed arm by the probe's `--base` and carried as `Predicates` — went Holds -> Gone.
+// A row that changed class membership without that flip is RECLASSIFIED; a row that entered with the
+// predicate holding is CREATED; anything resting on an unmeasured predicate is UNMEASURED, counted apart.
+// The rule is DetectorModel.Credit; the verdict DetectorModel.DifferentialVerdict; both proofprobe-owned.
 //
-// usage: conflictdiff <base.json> <changed.json>
+// A ROW'S IDENTITY is the records its predicate is about — (navmesh, loser) for a clobber, the two ends of a
+// dangling link, the two refs of an overlap, (dependent, host) for a contact row — never the plugin pair.
+// The pair is attribution: a patch that re-provides a dangling navmesh moves the row to a new pair without
+// touching the defect, and keyed on the pair that read as one repaired plus one created.
+//
+// COVERAGE (Part B). Each emit carries what its probe judged and could not, per population. Both blocks are
+// printed, and when the changed arm's unjudgeable share rose by more than --tolerance on any population the
+// verdict is DIFFERENTIAL-UNJUDGED: a change that made rows unreadable is not repairing them.
+//
+// The verdict line is DIFFERENTIAL-VERIFIED / -NEUTRAL / -HARMFUL by repaired against created, or
+// DIFFERENTIAL-RECLASSIFIED / -UNMEASURED / -INERT when neither moved, or -UNJUDGED. `differential-sweep.ps1`
+// drives the whole loop over the candidates --verify names.
+//
+// usage: conflictdiff <base.json> <changed.json> [--tolerance PCT]   (PCT in percentage points; default 1)
 
-if (args.Length != 2) { Console.Error.WriteLine("usage: conflictdiff <base.json> <changed.json>"); return 2; }
+string? basePath = null, changedPath = null;
+double tolerance = 0.01;
+for (int i = 0; i < args.Length; i++)
+{
+    if (args[i] == "--tolerance" && i + 1 < args.Length) tolerance = double.Parse(args[++i], System.Globalization.CultureInfo.InvariantCulture) / 100.0;
+    else if (basePath is null) basePath = args[i];
+    else if (changedPath is null) changedPath = args[i];
+    else { Console.Error.WriteLine("usage: conflictdiff <base.json> <changed.json> [--tolerance PCT]"); return 2; }
+}
+if (basePath is null || changedPath is null) { Console.Error.WriteLine("usage: conflictdiff <base.json> <changed.json> [--tolerance PCT]"); return 2; }
 
 ConflictFile baseFile, changedFile;
-try { baseFile = ConflictIo.Read(args[0]); changedFile = ConflictIo.Read(args[1]); }
+try { baseFile = ConflictIo.Read(basePath); changedFile = ConflictIo.Read(changedPath); }
 catch (Exception ex) { Console.Error.WriteLine(ex.Message); return 2; }
 
-static Dictionary<(string Kind, string A, string B), HashSet<string>> Index(ConflictFile f)
+static List<Row> Rows(ConflictFile f)
 {
-    var d = new Dictionary<(string, string, string), HashSet<string>>();
+    var rows = new List<Row>();
     foreach (var c in f.Conflicts)
     {
-        var k = (c.Kind, c.A, c.B);
-        if (!d.TryGetValue(k, out var set)) d[k] = set = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        foreach (var r in c.Necessary) set.Add(r.FormKey);
+        string? other = c.Alternative is { Count: > 0 } alt ? alt[0].FormKey : null;
+        foreach (var r in c.Necessary)
+            rows.Add(new Row(ConflictIo.RowIdentity(c.Kind, r.FormKey, other, c.A), c.Kind, c.A, c.B, r.FormKey, other, r.Physical, r.PhysicalDetail));
     }
-    return d;
+    return rows;
 }
 
-var before = Index(baseFile);
-var after = Index(changedFile);
+var before = Rows(baseFile).GroupBy(r => r.Id).ToDictionary(g => g.Key, g => g.First());
+var after = Rows(changedFile).GroupBy(r => r.Id).ToDictionary(g => g.Key, g => g.First());
+var predicates = (changedFile.Predicates ?? Array.Empty<Predicate>())
+    .GroupBy(p => ConflictIo.RowIdentity(p.Kind, p.FormKey, p.Other, p.A)).ToDictionary(g => g.Key, g => g.First());
 
-int repaired = 0, created = 0, groupsGone = 0, groupsNew = 0;
-
-Console.WriteLine($"base    : {args[0]}  ({baseFile.Conflicts.Count:N0} conflicts, {before.Count:N0} groups)");
-Console.WriteLine($"changed : {args[1]}  ({changedFile.Conflicts.Count:N0} conflicts, {after.Count:N0} groups)");
+int basePredicated = before.Values.Count(r => r.Physical is not null);
+Console.WriteLine($"base    : {basePath}  ({baseFile.Conflicts.Count:N0} conflicts, {before.Count:N0} rows; predicates on {basePredicated:N0})");
+Console.WriteLine($"changed : {changedPath}  ({changedFile.Conflicts.Count:N0} conflicts, {after.Count:N0} rows; base-row predicates carried: {predicates.Count:N0}"
+                + (changedFile.BaseEmit is { } be ? $", measured against {Path.GetFileName(be)}" : "") + ")");
+if (basePredicated == 0) Console.WriteLine("   ! the base emit carries no physical predicates (written before 2026-09-03?) — every vanished row reads UNMEASURED; re-emit with the current probe");
+if (predicates.Count == 0 && before.Keys.Any(k => !after.ContainsKey(k)))
+    Console.WriteLine("   ! the changed emit carries no base-row predicates — was the probe run with --base <base.json>? Vanished rows read UNMEASURED");
 Console.WriteLine();
 
-foreach (var (k, recs) in before.OrderBy(kv => kv.Key.Kind).ThenBy(kv => kv.Key.A))
+// Credit every row of the union.
+var outcome = new Dictionary<string, CreditOutcome>();
+foreach (var id in before.Keys.Union(after.Keys))
 {
-    var now = after.GetValueOrDefault(k);
-    var gone = now is null ? recs : recs.Where(r => !now.Contains(r)).ToHashSet();
-    if (gone.Count == 0) continue;
-    repaired += gone.Count;
-    if (now is null || now.Count == 0) groupsGone++;
-    Console.WriteLine($"   {(now is null ? "GONE  " : "SHRANK"),-7} {k.Kind,-10} {k.A}  x  {k.B}   -{gone.Count} record(s)");
+    bool inB = before.TryGetValue(id, out var b), inA = after.TryGetValue(id, out var a);
+    PhysicalState? changedPhys = inA ? a!.Physical : predicates.TryGetValue(id, out var p) ? p.Physical : null;
+    outcome[id] = DetectorModel.Credit(inB, inB ? b!.Physical : null, inA, changedPhys);
 }
-foreach (var (k, recs) in after.OrderBy(kv => kv.Key.Kind).ThenBy(kv => kv.Key.A))
+int N(CreditOutcome o) => outcome.Values.Count(v => v == o);
+
+// The group view (attribution), as before, each line with its credit breakdown.
+static string Breakdown(IEnumerable<CreditOutcome> os)
 {
-    var was = before.GetValueOrDefault(k);
-    var fresh = was is null ? recs : recs.Where(r => !was.Contains(r)).ToHashSet();
+    var l = os.ToList();
+    var parts = new List<string>();
+    foreach (var o in new[] { CreditOutcome.Repaired, CreditOutcome.Reclassified, CreditOutcome.Created, CreditOutcome.Unmeasured })
+    { int n = l.Count(x => x == o); if (n > 0) parts.Add($"{o.ToString().ToLowerInvariant()} {n}"); }
+    return string.Join(", ", parts);
+}
+var groupsBefore = before.Values.GroupBy(r => (r.Kind, r.A, r.B)).ToDictionary(g => g.Key, g => g.Select(r => r.Id).ToHashSet());
+var groupsAfter = after.Values.GroupBy(r => (r.Kind, r.A, r.B)).ToDictionary(g => g.Key, g => g.Select(r => r.Id).ToHashSet());
+foreach (var (k, ids) in groupsBefore.OrderBy(kv => kv.Key.Kind).ThenBy(kv => kv.Key.A))
+{
+    var now = groupsAfter.GetValueOrDefault(k);
+    var gone = ids.Where(id => !after.ContainsKey(id)).ToList();
+    var moved = ids.Where(id => after.ContainsKey(id) && (now is null || !now.Contains(id))).ToList();
+    if (gone.Count == 0 && moved.Count == 0) continue;
+    if (gone.Count > 0)
+        Console.WriteLine($"   {(now is null || now.Count == 0 ? "GONE  " : "SHRANK"),-7} {k.Kind,-10} {k.A}  x  {k.B}   -{gone.Count} record(s): {Breakdown(gone.Select(id => outcome[id]))}");
+    if (moved.Count > 0)
+        Console.WriteLine($"   {"RE-ATTR",-7} {k.Kind,-10} {k.A}  x  {k.B}   {moved.Count} record(s) persist under another plugin pair ({string.Join("; ", moved.Select(id => $"{after[id].A} x {after[id].B}").Distinct())}) — unchanged");
+}
+foreach (var (k, ids) in groupsAfter.OrderBy(kv => kv.Key.Kind).ThenBy(kv => kv.Key.A))
+{
+    var was = groupsBefore.GetValueOrDefault(k);
+    var fresh = ids.Where(id => !before.ContainsKey(id)).ToList();
     if (fresh.Count == 0) continue;
-    created += fresh.Count;
-    if (was is null || was.Count == 0) groupsNew++;
-    Console.WriteLine($"   {(was is null ? "NEW   " : "GREW  "),-7} {k.Kind,-10} {k.A}  x  {k.B}   +{fresh.Count} record(s)");
+    Console.WriteLine($"   {(was is null || was.Count == 0 ? "NEW   " : "GREW  "),-7} {k.Kind,-10} {k.A}  x  {k.B}   +{fresh.Count} record(s): {Breakdown(fresh.Select(id => outcome[id]))}");
 }
 
-if (repaired == 0 && created == 0) Console.WriteLine("   IDENTICAL — the change touched nothing the detector sees.");
+// The predicate flips on rows in both arms — reported, never credited.
+var both = outcome.Where(kv => kv.Value == CreditOutcome.Unchanged).Select(kv => kv.Key).ToList();
+int flipGone = both.Count(id => before[id].Physical == PhysicalState.Holds && after[id].Physical == PhysicalState.Gone);
+int flipHolds = both.Count(id => before[id].Physical == PhysicalState.Gone && after[id].Physical == PhysicalState.Holds);
+
+// Why the reclassified rows were reclassified.
+var recl = outcome.Where(kv => kv.Value == CreditOutcome.Reclassified).Select(kv => kv.Key).ToList();
+int leftHolding = recl.Count(id => before.ContainsKey(id) && before[id].Physical == PhysicalState.Holds);
+int leftNone = recl.Count(id => before.ContainsKey(id) && before[id].Physical == PhysicalState.Gone);
+int enteredNone = recl.Count(id => !before.ContainsKey(id));
+
+if (outcome.Values.All(v => v == CreditOutcome.Unchanged)) Console.WriteLine("   IDENTICAL — the change touched nothing the detector sees.");
 
 Console.WriteLine();
-Console.WriteLine($"   repaired: {repaired:N0} record(s), {groupsGone:N0} group(s) fully gone");
-Console.WriteLine($"   created : {created:N0} record(s), {groupsNew:N0} new group(s)");
-string verdict = repaired == 0 && created == 0 ? "DIFFERENTIAL-INERT"
-               : repaired > created ? "DIFFERENTIAL-VERIFIED"
-               : repaired == created ? "DIFFERENTIAL-NEUTRAL"
-               : "DIFFERENTIAL-HARMFUL";
-Console.WriteLine($"   verdict : {verdict}  (net {repaired - created:+#;-#;0} record(s))");
+Console.WriteLine($"   repaired     : {N(CreditOutcome.Repaired):N0} record(s)   (the physical predicate went Holds -> Gone)");
+Console.WriteLine($"   reclassified : {N(CreditOutcome.Reclassified):N0} record(s)   (left the class still holding {leftHolding:N0}; left with no physical defect to begin with {leftNone:N0}; entered reading Gone {enteredNone:N0})");
+Console.WriteLine($"   created      : {N(CreditOutcome.Created):N0} record(s)   (entered the class with the predicate holding)");
+Console.WriteLine($"   unmeasured   : {N(CreditOutcome.Unmeasured):N0} record(s)   (a predicate the credit rests on could not be measured — counted apart)");
+Console.WriteLine($"   unchanged    : {N(CreditOutcome.Unchanged):N0} record(s)   (predicate flips beside: Holds -> Gone {flipGone:N0}, Gone -> Holds {flipHolds:N0})");
+
+// Coverage — both blocks, then the refusal test.
+static IEnumerable<(string, long, long)> Cov(ConflictFile f) => (f.Coverage ?? Array.Empty<CoverageLine>()).Select(c => (c.Population, c.Judged, c.UnjudgeableTotal));
+static void PrintCoverage(string label, ConflictFile f)
+{
+    if (f.Coverage is not { Count: > 0 } cov) { Console.WriteLine($"   coverage ({label}): none carried"); return; }
+    Console.WriteLine($"   coverage ({label}):");
+    foreach (var c in cov)
+    {
+        string unj = c.Unjudgeable is { Count: > 0 } u ? string.Join(", ", u.Where(kv => kv.Value > 0).Select(kv => $"{kv.Key} {kv.Value:N0}")) : "";
+        string aside = c.SetAside is { Count: > 0 } s ? string.Join(", ", s.Where(kv => kv.Value > 0).Select(kv => $"{kv.Key} {kv.Value:N0}")) : "";
+        Console.WriteLine($"      {c.Population,-32} judged {c.Judged,10:N0}   unjudgeable {c.UnjudgeableTotal,8:N0} ({c.UnjudgeableFraction:P2}){(unj.Length > 0 ? $"  [{unj}]" : "")}{(aside.Length > 0 ? $"   set aside: {aside}" : "")}{(c.Note is { } n ? $"   {n}" : "")}");
+    }
+}
 Console.WriteLine();
-Console.WriteLine("   A verdict here outranks --verify's CONFIRMED: coverage says a patch touches the broken");
-Console.WriteLine("   records; only the differential says what actually happens to the conflict set.");
+PrintCoverage("base", baseFile);
+PrintCoverage("changed", changedFile);
+var refusals = DetectorModel.CoverageRefusals(Cov(baseFile), Cov(changedFile), tolerance);
+foreach (var r in refusals) Console.WriteLine($"   ! REFUSED: {r}");
+if (baseFile.Coverage is null || changedFile.Coverage is null) Console.WriteLine("   ! one or both emits carry no coverage block — the unjudgeable-share test could not run");
+
+string verdict = DetectorModel.DifferentialVerdict(N(CreditOutcome.Repaired), N(CreditOutcome.Created), N(CreditOutcome.Reclassified), N(CreditOutcome.Unmeasured), refusals.Count);
+Console.WriteLine();
+Console.WriteLine($"   verdict : {verdict}  (repaired {N(CreditOutcome.Repaired):N0} - created {N(CreditOutcome.Created):N0} = net {N(CreditOutcome.Repaired) - N(CreditOutcome.Created):+#;-#;0}; reclassified {N(CreditOutcome.Reclassified):N0}, unmeasured {N(CreditOutcome.Unmeasured):N0})");
+Console.WriteLine();
+Console.WriteLine("   A verdict here outranks --verify's CONFIRMED: coverage says a patch touches the broken records;");
+Console.WriteLine("   only the differential says what happens to the conflict set — and only a row whose physical predicate");
+Console.WriteLine("   went away is credited as repaired. A row that changed hands with the defect intact is reclassified.");
 return 0;
+
+// One row per necessary record: its identity (what the predicate is about), its attribution (the plugin pair) and
+// its predicate under the emitting arm.
+sealed record Row(string Id, string Kind, string A, string B, string FormKey, string? Other, PhysicalState? Physical, string? Detail);

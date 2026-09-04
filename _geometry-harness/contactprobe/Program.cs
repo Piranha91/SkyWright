@@ -43,10 +43,12 @@ using Mutagen.Bethesda.Skyrim;
 //   --overlap-json FILE    overlapprobe's judged rows through the narrow phase: no contact / touch / penetrate
 //                          — the milestone 6 ranker upgrade for 4.1
 //
-// usage: contactprobe [--list N] [--eps U] [--reach U] [--json FILE] [--emit FILE] [--all-rows] [--interior-only]
+// usage: contactprobe [--list N] [--eps U] [--reach U] [--json FILE] [--emit FILE] [--base EMIT] [--all-rows] [--interior-only]
 //                     [--absolute] [--labelled-mover X.esp] [--overlap-json FILE]
 //                     [--only A.esm,B.esm,...] [--vanilla-assets]
 //                     [--enable X.esp]* [--disable X.esp]* [--instance DIR] [--game DIR] [--profile NAME]
+//   --base EMIT     re-measure every record of that emit's rows under THIS order and carry the results in the emit as
+//                   Predicates — the changed arm of a differential (conflictdiff reads both). See ConflictReport.cs.
 //   --only          keep only the named plugins of the profile's order (the vanilla masters, or vanilla + USSEP)
 //   --vanilla-assets resolve meshes from the game's own archives only — no mod folder, no replacer — so a
 //                   labelled set authored against vanilla meshes is tested against vanilla meshes
@@ -75,7 +77,7 @@ string dataDir = Path.Combine(GamePath, "Data");
 int listN = 25;
 float eps = 4f;            // touching: surfaces within ε and no vertex deeper than ε inside. A chosen number, stated.
 float reach = 128f;        // how far from a moved host a dependent is looked for (the records pass's contact-plausible radius).
-string? jsonPath = null, emitPath = null, overlapJson = null, labelledMover = null, geomReport = null;
+string? jsonPath = null, emitPath = null, basePath = null, overlapJson = null, labelledMover = null, geomReport = null;
 bool allRows = false, absolute = false, vanillaAssets = false, interiorOnly = false;
 HashSet<string>? only = null;
 var enablePlugins = new List<string>();
@@ -87,6 +89,7 @@ for (int i = 0; i < args.Length; i++)
     else if (args[i] == "--reach" && i + 1 < args.Length) reach = float.Parse(args[++i]);
     else if (args[i] == "--json" && i + 1 < args.Length) jsonPath = args[++i];
     else if (args[i] == "--emit" && i + 1 < args.Length) emitPath = args[++i];
+    else if (args[i] == "--base" && i + 1 < args.Length) basePath = args[++i];
     else if (args[i] == "--overlap-json" && i + 1 < args.Length) overlapJson = args[++i];
     else if (args[i] == "--labelled-mover" && i + 1 < args.Length) labelledMover = args[++i];
     else if (args[i] == "--geom-report" && i + 1 < args.Length) geomReport = args[++i];
@@ -699,17 +702,87 @@ foreach (var e in new[] { eps / 2, eps, eps * 2 })
     Console.WriteLine($"   ε {e,4:0.#}u  relationships {nRel,8:N0}   class {nCls,7:N0}   Sunk {nSunk,6:N0}   ReSupported {nRe,7:N0}{(e > eps ? "   (rows first in contact beyond the near band are not here — a re-run with --eps would find them)" : "")}");
 }
 
+// THE PHYSICAL PREDICATE of a CONTACT row (2026-09-03; handoff 2026-09-12): the dependent still touches nothing within ε
+// under the arm being read — the class's own winner-arm test with the provenance half ("the mover's side did not re-place
+// it") taken off. A sham on the mover's side that nudges the dependent 1 u reads MovedTogether and leaves the class; the
+// dependent still floats. A dependent deleted or disabled at runtime under the arm is Gone (nothing floats); one whose
+// geometry or enable chain cannot be read is Unmeasured.
+(PhysicalState State, string Detail) ContactPhysical(bool measured, float dist, float pen, string against)
+{
+    if (!measured) return (PhysicalState.Unmeasured, "the winner arm was not measured");
+    if (pen > eps) return (PhysicalState.Gone, $"sunk {pen:0.#}u into {against}");
+    if (dist <= eps) return (PhysicalState.Gone, $"touches {against} at {dist:0.#}u");
+    return (PhysicalState.Holds, $"touches nothing within {eps:0.#}u (nearest {dist:0.#}u)");
+}
+(PhysicalState State, string Detail) ContactPredicate(FormKey dep)
+{
+    var snaps = idx.History.Of(dep);
+    if (snaps is null || snaps.Count == 0) return (PhysicalState.Unmeasured, "the dependent is not placed in this order");
+    var win = snaps[^1];
+    if (win.Deleted || idx.IsDeletedNow(dep)) return (PhysicalState.Gone, "the dependent is deleted under this order — nothing floats");
+    var en = cidx!.WinnerEnable(dep);
+    if (!en.Resolved) return (PhysicalState.Unmeasured, "the dependent's enable chain cannot be followed in this order");
+    if (!en.Enabled) return (PhysicalState.Gone, "the dependent is disabled at runtime under this order — nothing floats");
+    var b = cidx.WinnerBase(dep);
+    if (cidx.GeomOf(b) is not { CanDepend: true }) return (PhysicalState.Unmeasured, "the dependent has no solid to test under this order");
+    var box = cidx.WorldBox(b, win);
+    if (box.IsEmpty) return (PhysicalState.Unmeasured, "the dependent has no geometry under this order");
+    var c = cidx.BestContact(dep, snaps.Count - 1, b, win, box, winHash, cidx.WinnerPlacement, (k, _) => cidx.WinnerBase(k), out _);
+    if (c is null) return (PhysicalState.Holds, $"touches nothing within {cidx.BoxBand:0.#}u of its box");
+    return ContactPhysical(true, c.Contact.FacingDistance, c.Contact.EffectivePenetration, BaseLabel(cidx.WinnerBase(c.Against)));
+}
+
 // --emit: the class only — Fixed Stranded + Orphaned with a mod or USSEP mover, the Bethesda floor withheld. The
-// dependent is the necessary record (a patch re-places or deletes it); moving the host back is the alternative.
+// dependent is the necessary record (a patch re-places or deletes it); moving the host back is the alternative. Every
+// record carries its physical predicate under this arm (Holds by construction for a class row); with --base, every record
+// of the named emit is re-measured under this arm too (2026-09-03).
 if (emitPath is not null)
 {
     var conflicts = new List<Conflict>();
     foreach (var r in rel.Where(r => Fixed(r) && IsClass(r) && Pop(r) != DependencyPopulation.BethesdaFloor))
+    {
+        var (st, why) = ContactPhysical(r.Facts.WinnerMeasured, r.Facts.WinnerDistance, r.Facts.WinnerPenetration, r.Winner is { } w ? BaseLabel(cidx!.WinnerBase(w.Against)) : "(nothing)");
         conflicts.Add(new Conflict("CONTACT", PluginName(r.DepAuthor), PluginName(r.Host.Mover),
             $"{r.Verdict}: {BaseLabel(r.DepBase)} {r.Relation} on {BaseLabel(r.Host.PrevBase)} which {PluginName(r.Host.Mover)} {r.Host.Change}; nearest thing now {r.Facts.WinnerDistance:0.#}u  {r.Dependent} / {r.Host.Key} in {CellOf(r.DepAuthoring.Cell)}",
-            new List<ConflictRecord> { new(r.Dependent.ToString(), "placed-ref", CellOf(r.DepAuthoring.Cell)) },
+            new List<ConflictRecord> { new(r.Dependent.ToString(), "placed-ref", CellOf(r.DepAuthoring.Cell), st, why) },
             new List<ConflictRecord> { new(r.Host.Key.ToString(), "placed-ref", null) }));
-    ConflictIo.Write(emitPath, new ConflictFile("contactprobe", Instance, DateTime.UtcNow.ToString("yyyy-MM-dd HH:mm:ssZ"), conflicts));
+    }
+    List<Predicate>? predicates = null;
+    if (basePath is not null)
+    {
+        var baseFile = ConflictIo.Read(basePath);
+        predicates = new List<Predicate>();
+        foreach (var c in baseFile.Conflicts)
+        {
+            string? other = c.Alternative is { Count: > 0 } alt ? alt[0].FormKey : null;
+            foreach (var rec in c.Necessary)
+            {
+                if (c.Kind != "CONTACT") { predicates.Add(new Predicate(c.Kind, c.A, c.B, rec.FormKey, other, PhysicalState.Unmeasured, "not a contact row")); continue; }
+                var (st, why) = ContactPredicate(FormKey.Factory(rec.FormKey));
+                predicates.Add(new Predicate(c.Kind, c.A, c.B, rec.FormKey, other, st, why));
+            }
+        }
+        Console.WriteLine($"\n   --base {Path.GetFileName(basePath)}: {predicates.Count:N0} base-row predicate(s) re-measured under this order — "
+                        + string.Join(", ", predicates.GroupBy(p => p.Physical).OrderBy(g => g.Key).Select(g => $"{g.Key} {g.Count():N0}")));
+    }
+    var coverage = new List<CoverageLine>
+    {
+        new("plugins", paths.Count - unreadable.Count, new Dictionary<string, long> { ["UnreadablePlugin"] = unreadable.Count }),
+        // A host without solid collision is SET ASIDE by definition — the engine rests nothing on it either (the plumbing line
+        // above says the same) — not unjudgeable: the coverage rule's first real case (2026-09-03, the lab's JK's–OCW patch, which
+        // moves ~490 more collision-less hosts than the order without it) refused its verdict on this line until it was classed so.
+        // A host whose mesh could not be read at all stays unjudgeable.
+        new("moved hosts", hosts.Count,
+            new Dictionary<string, long> { ["NoGeometry"] = skips.HostNoGeometry, ["EnableChainUnresolved"] = skips.HostEnableUnresolved },
+            new Dictionary<string, long> { ["NoSolidCollision"] = skips.HostNoCollision, ["VolumeScale"] = skips.HostVolume, ["TooSmallToHost"] = skips.HostTooSmall, ["RuntimeDisabledInArm"] = skips.HostRuntimeDisabled }),
+        new("dependent snaps hashed", depHash.Count, new Dictionary<string, long> { ["NoGeometry"] = skips.DepNoGeometry }, new Dictionary<string, long> { ["OverDependentSize"] = skips.DepVolume }),
+        new("winner-arm physical refs", winHash.Count, new Dictionary<string, long> { ["EnableChainUnresolved"] = skips.WinnerEnableUnresolved }, new Dictionary<string, long> { ["RuntimeDisabled"] = skips.WinnerRuntimeDisabled }),
+        new("dependent-host pairs", rows.Count - unj.Count,
+            unj.GroupBy(r => r.Reason.ToString()).ToDictionary(g => g.Key, g => (long)g.Count()).Concat(new[] { new KeyValuePair<string, long>("DepEnableChainUnresolved", skips.DepEnableUnresolved) }).ToDictionary(kv => kv.Key, kv => kv.Value),
+            new Dictionary<string, long> { ["BoxesApart"] = skips.BoxesApart, ["DepIntroducedByMover"] = skips.DepIntroducedByMover, ["DepOtherSpace"] = skips.DepOtherSpace, ["DepAbsentInArm"] = skips.DepAbsentInArm },
+            $"relationships {rel.Count:N0}, class {classRows.Count:N0}"),
+    };
+    ConflictIo.Write(emitPath, new ConflictFile("contactprobe", Instance, DateTime.UtcNow.ToString("yyyy-MM-dd HH:mm:ssZ"), conflicts, coverage, predicates, basePath));
     Console.WriteLine($"\nemitted {conflicts.Count:N0} Fixed Stranded + Orphaned conflicts -> {emitPath}");
 }
 

@@ -45,7 +45,7 @@ using Mutagen.Bethesda.Skyrim;
 //     candidate for eyes or a narrow phase, never a verdict. Render geometry stands in for collision.
 //     NOT verified in game.
 //
-// usage: overlapprobe [--list N] [--depth U] [--frac F] [--maxdim U] [--emit path] [--dump path] [--json path]
+// usage: overlapprobe [--list N] [--depth U] [--frac F] [--maxdim U] [--emit path] [--base emit.json] [--dump path] [--json path]
 //                     [--enable X.esp]* [--disable X.esp]* [--instance DIR] [--game DIR] [--profile NAME]
 
 // Defaults are the configured instance; --instance / --game / --profile point every path at another
@@ -79,6 +79,9 @@ float minFrac = 0.25f;     // ...and bury at least this share of the smaller box
 // the biggest genuine architecture runs ~1–2k. Parameter, not constant.
 float maxDim = 1024f;
 string? emitPath = null;
+// --base: the emit this run will be diffed against — every record of it is re-measured under THIS order and carried in
+// the emit as Predicates (the changed arm of a differential; conflictdiff reads both). See ConflictReport.cs.
+string? basePath = null;
 // --dump: one line per candidate (key, responsible plugin, base type, mesh, geometry source, rotation, scale,
 // world box). A diagnostic for comparing two runs ref by ref — which boxes moved under a transform change,
 // and what meshes they were — not part of the report. --json: every judged row, for spot-checks.
@@ -93,6 +96,7 @@ for (int i = 0; i < args.Length; i++)
     else if (args[i] == "--frac" && i + 1 < args.Length) minFrac = float.Parse(args[++i]);
     else if (args[i] == "--maxdim" && i + 1 < args.Length) maxDim = float.Parse(args[++i]);
     else if (args[i] == "--emit" && i + 1 < args.Length) emitPath = args[++i];
+    else if (args[i] == "--base" && i + 1 < args.Length) basePath = args[++i];
     else if (args[i] == "--dump" && i + 1 < args.Length) dumpPath = args[++i];
     else if (args[i] == "--json" && i + 1 < args.Length) jsonPath = args[++i];
     else if (args[i] == "--enable" && i + 1 < args.Length) enablePlugins.Add(args[++i]);
@@ -198,6 +202,31 @@ var meshBoxByPath = new Dictionary<string, Aabb?>(StringComparer.OrdinalIgnoreCa
     if (result.Item2 == '-') noGeometry++;
     boxCache[baseKey] = result;
     return result;
+}
+
+// THE PHYSICAL PREDICATE of an OVERLAP row (2026-09-03; handoff 2026-09-12): the two refs' winning world boxes still meet
+// at the run's threshold under the arm being read — the class's own broad-phase test with the provenance half
+// (Introduced + Blind) taken off. A sham that masters both plugins and nudges the later ref 1 u becomes responsible for
+// it, reads Inherited + Seen and leaves the class; the boxes have not moved. Not used: the narrow-phase contact
+// (contactprobe --overlap-json, 4.1's ranker refinement — 56 % of class hits read "no contact" on it, so it would call
+// base rows Gone for reasons unrelated to the change; that reading belongs in the ranker). A ref deleted or initially
+// disabled under the arm is Gone (one side of the intersection is gone); one without geometry is Unmeasured.
+(PhysicalState State, string Detail) OverlapPredicate(FormKey laterKey, FormKey otherKey)
+{
+    var sl = idx.History.Winning(laterKey); var so = idx.History.Winning(otherKey);
+    if (sl is null || so is null) return (PhysicalState.Unmeasured, "a ref is not placed in this order");
+    if (sl.Value.Deleted || idx.IsDeletedNow(laterKey) || so.Value.Deleted || idx.IsDeletedNow(otherKey)) return (PhysicalState.Gone, "a ref is deleted under this order");
+    if (sl.Value.Disabled || so.Value.Disabled) return (PhysicalState.Gone, "a ref is initially disabled under this order");
+    if (sl.Value.Space != so.Value.Space) return (PhysicalState.Gone, "the refs are no longer in the same space");
+    if (!idx.RefBase.TryGetValue(laterKey, out var bl) || !idx.RefBase.TryGetValue(otherKey, out var bo)) return (PhysicalState.Unmeasured, "a ref has no base record");
+    var (boxL, srcL) = BoxOf(bl); var (boxO, srcO) = BoxOf(bo);
+    if (srcL == '-' || srcO == '-' || boxL.IsEmpty || boxO.IsEmpty) return (PhysicalState.Unmeasured, "a ref has no geometry");
+    var wl = SpatialOverlap.ToWorld(boxL, sl.Value.Pos, sl.Value.Rot, sl.Value.Scale);
+    var wo = SpatialOverlap.ToWorld(boxO, so.Value.Pos, so.Value.Rot, so.Value.Scale);
+    var ov = OverlapIndex.Overlap(wl, wo);
+    if (ov is { } o && o.MinDepth >= minDepth && o.VolumeFraction >= minFrac)
+        return (PhysicalState.Holds, $"the winning boxes overlap {o.MinDepth:0}u deep, {o.VolumeFraction:0.00} of the smaller [{srcL}{srcO}]");
+    return (PhysicalState.Gone, ov is { } o2 ? $"the winning boxes overlap only {o2.MinDepth:0}u / {o2.VolumeFraction:0.00}, under the threshold" : "the winning boxes no longer intersect");
 }
 
 // ---------------------------------------------------------------------------------------
@@ -353,17 +382,51 @@ foreach (var (d, f) in new[] { (minDepth / 2, minFrac / 2), (minDepth, minFrac),
 
 // --emit: the CLASS only — Introduced + Blind, Bethesda floor withheld (the way navownprobe withholds
 // its floor). The LATER plugin's ref is the necessary fix target (it placed into existing context);
-// moving the other side is the legitimate alternative.
+// moving the other side is the legitimate alternative. Every record carries its physical predicate under this
+// arm (OverlapPredicate, Holds by construction for a class row); with --base, every record of the named emit is
+// re-measured under this arm too (2026-09-03).
 if (emitPath is not null)
 {
     var conflicts = new List<Conflict>();
     foreach (var r in cls)
+    {
+        var (st, why) = OverlapPredicate(r.LaterRef.Key, r.OtherRef.Key);
         conflicts.Add(new Conflict(
             "OVERLAP", PluginName(r.Earlier), PluginName(r.Later), Describe(r),
-            new List<ConflictRecord> { new(r.LaterRef.Key.ToString(), "placed-ref", CellOf(r.LaterRef.Win.Cell)) },
+            new List<ConflictRecord> { new(r.LaterRef.Key.ToString(), "placed-ref", CellOf(r.LaterRef.Win.Cell), st, why) },
             new List<ConflictRecord> { new(r.OtherRef.Key.ToString(), "placed-ref", null) }));
+    }
+    List<Predicate>? predicates = null;
+    if (basePath is not null)
+    {
+        var baseFile = ConflictIo.Read(basePath);
+        predicates = new List<Predicate>();
+        foreach (var c in baseFile.Conflicts)
+        {
+            string? other = c.Alternative is { Count: > 0 } alt ? alt[0].FormKey : null;
+            foreach (var rec in c.Necessary)
+            {
+                if (c.Kind != "OVERLAP" || other is null) { predicates.Add(new Predicate(c.Kind, c.A, c.B, rec.FormKey, other, PhysicalState.Unmeasured, "not an overlap row with two refs")); continue; }
+                var (st, why) = OverlapPredicate(FormKey.Factory(rec.FormKey), FormKey.Factory(other));
+                predicates.Add(new Predicate(c.Kind, c.A, c.B, rec.FormKey, other, st, why));
+            }
+        }
+        Console.WriteLine($"\n   --base {Path.GetFileName(basePath)}: {predicates.Count:N0} base-row predicate(s) re-measured under this order — "
+                        + string.Join(", ", predicates.GroupBy(p => p.Physical).OrderBy(g => g.Key).Select(g => $"{g.Key} {g.Count():N0}")));
+    }
+    int notRebuilt = rows.Count(r => r.Facts.PreviousPlacementPresent && float.IsNaN(r.WithoutDepth));
+    var coverage = new List<CoverageLine>
+    {
+        new("plugins", paths.Count - unreadablePlugins.Count, new Dictionary<string, long> { ["UnreadablePlugin"] = unreadablePlugins.Count }),
+        new("base records (geometry)", measured + fellBack, new Dictionary<string, long> { ["NoGeometry"] = noGeometry }, null, $"OBND fallback (labelled) {fellBack:N0} of the judged"),
+        new("candidate refs", candidates.Count, new Dictionary<string, long> { ["NoGeometry"] = skips.NoGeometry },
+            new Dictionary<string, long> { ["Deleted"] = skips.Deleted, ["InitiallyDisabled"] = skips.Disabled, ["NonObstructingType"] = skips.NonObstructingType,
+                                           ["BaseGameResponsible"] = skips.ExcludedResponsible, ["VolumeScale"] = skips.Volume, ["EditorMarker"] = skips.MarkerMesh }),
+        new("cross-responsible deep hits", rows.Count, new Dictionary<string, long>(), null,
+            $"class {cls.Count:N0}; {notRebuilt:N0} rows whose previous-snap box could not be rebuilt read Introduced by default (a stated limit)"),
+    };
     ConflictIo.Write(emitPath, new ConflictFile("overlapprobe", Instance,
-        DateTime.UtcNow.ToString("yyyy-MM-dd HH:mm:ssZ"), conflicts));
+        DateTime.UtcNow.ToString("yyyy-MM-dd HH:mm:ssZ"), conflicts, coverage, predicates, basePath));
     Console.WriteLine($"\nemitted {conflicts.Count:N0} Introduced + Blind conflicts -> {emitPath}");
 }
 

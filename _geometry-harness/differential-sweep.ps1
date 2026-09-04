@@ -3,10 +3,16 @@
 # For each candidate plugin (installed here, inactive — the DIFFERENTIAL CANDIDATES list that
 # `patchprobe --verify` prints), this: enables it synthetically, re-detects, and diffs the emitted
 # conflict set against a base emit. ~50 s per candidate; the output per candidate ends in one of
-#   DIFFERENTIAL-VERIFIED   repairs more than it creates
-#   DIFFERENTIAL-NEUTRAL    repairs exactly as much as it creates (the TGC case)
-#   DIFFERENTIAL-HARMFUL    creates more than it repairs
-#   DIFFERENTIAL-INERT      touches nothing the detector sees
+#   DIFFERENTIAL-VERIFIED      physically repairs more than it creates
+#   DIFFERENTIAL-NEUTRAL       repairs exactly as much as it creates
+#   DIFFERENTIAL-HARMFUL       creates more than it repairs
+#   DIFFERENTIAL-RECLASSIFIED  rows changed class without their physical predicate flipping (a sham reads this)
+#   DIFFERENTIAL-UNMEASURED    only rows whose predicate could not be measured moved
+#   DIFFERENTIAL-UNJUDGED      the changed arm's unjudgeable share rose — not judged
+#   DIFFERENTIAL-INERT         touches nothing the detector sees
+# Repair is credited only when a row's PHYSICAL predicate went Holds -> Gone (2026-09-03): the changed run is
+# given the base emit (--base) so the probe re-measures every base row under the changed arm; conflictdiff
+# reads both. A row that merely changed hands is RECLASSIFIED, never repaired.
 # A synthetic enable whose master set is not loadable is REFUSED by SyntheticOrder and shows up
 # here as INERT with a REFUSED warning in the navownprobe output — read the log, not just the verdict.
 #
@@ -41,7 +47,7 @@ foreach ($cand in $Candidates) {
     $log = Join-Path $OutDir "with-$safe.txt"
     Write-Host "== enabling '$cand'"
     Push-Location $navown
-    try { dotnet run -c Release -- --enable $cand --emit $emit *> $log } finally { Pop-Location }
+    try { dotnet run -c Release -- --enable $cand --base $base --emit $emit *> $log } finally { Pop-Location }
     Select-String -Path $log -Pattern 'REFUSED|MISSING MASTER' | ForEach-Object { Write-Host "   $_" }
     Push-Location $diff
     try { dotnet run -c Release -- $base $emit } finally { Pop-Location }
