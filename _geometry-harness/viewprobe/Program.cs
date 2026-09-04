@@ -2513,6 +2513,7 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot)
                 Console.WriteLine("   occlusion planes: none in this cell" + (interior || !ringRefs ? "" : " or its ring"));
         }
 
+
         // ---- --npc: pin each spec to (NPC base record, world placement) -------------------
         // The spec FormKey may be the placed ACHR (a console click gives the ref) or the NPC_
         // base; the load walk watched for both. Explicit @X,Y,Z is the "should be HERE" case
@@ -2856,6 +2857,159 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot)
             gridRender = new ViewProbe.TexturedScene.GridRender(gridSpacing, gz, gridColor, gwhy);
         }
 
+        // ---- --planes-report: one entry per plane — identity, provenance, what it culls from the
+        // shot's eye, and the nearest solid collision behind it. A LISTING, never a verdict: the
+        // audit that turns "culls nothing" and "nothing within reach behind it" into a class with a
+        // floor and a control is the handoff after this one, and it needs the game's rule first.
+        //
+        // "Behind" is the far side from the eye: rays from a 5x5 lattice across the mid-quad (from
+        // the far face, for a Box), along the plane's normal away from the eye, against the SOLID
+        // collision (the layers an actor meets, the same cut the route detectors make) of every
+        // physical ref whose placed OBND box the swept reach touches. The nearest hit over the
+        // lattice is the answer; "none within N u" is an answer too, and the interesting one.
+        Action<ViewProbe.OcclusionState>? planeReportSink = null;
+        if (planesReport && planes.Count > 0)
+        {
+            var collGeo = new Dictionary<string, TriangleSoup?>(StringComparer.OrdinalIgnoreCase);
+            TriangleSoup? CollisionSoupFor(string rel)
+            {
+                if (collGeo.TryGetValue(rel, out var cached)) return cached;
+                TriangleSoup? soup = null;
+                var full = rel.StartsWith("meshes", StringComparison.OrdinalIgnoreCase) ? rel : Path.Combine("meshes", rel);
+                var res = assets.ResolveForPlacement(full);
+                if (res.Sources.Count > 0)
+                {
+                    var (bytes, _) = AssetResolver.ReadPlacementSource(res.Sources[0]);
+                    if (bytes is not null)
+                    {
+                        var o = NifGeometry.Measure(bytes, includeTriangles: true);
+                        var s = o.Model?.CollisionSoupFor(b => b.Solid && CollisionLayers.IsActorSolid(b.Layer));
+                        if (s is { TriangleCount: > 0 and <= 300_000 }) soup = s;
+                    }
+                }
+                collGeo[rel] = soup;
+                return soup;
+            }
+            planeReportSink = os =>
+            {
+                var eyeS = eyePos.Value;
+                var rows = new List<object>();
+                Console.WriteLine($"   ---- occlusion planes report: {planes.Count} plane(s) in {cellLabel}{(interior || !ringRefs ? "" : " + ring")}, "
+                                + $"from eye {eyeS.X:0},{eyeS.Y:0},{eyeS.Z:0}; collision reach {planesReach:0} u behind each ----");
+                int noCollisionCandidates = 0, noneWithinReach = 0, touching = 0, cullNothing = 0, cullsVisible = 0;
+                foreach (var p in planes)
+                {
+                    string rot = $"{float.RadiansToDegrees(p.Rotation.X):0.#},{float.RadiansToDegrees(p.Rotation.Y):0.#},{float.RadiansToDegrees(p.Rotation.Z):0.#}°";
+                    Console.WriteLine($"   PLANE {p.Key} = FormID {p.RuntimeId}  {p.KindLabel} {p.ExtentLabel}"
+                                    + (p.Kind == ViewProbe.PlaneKind.PortalBox ? $" ({p.Bounds.Y:0.#} thick)" : "")
+                                    + $"  at {p.Position.X:0},{p.Position.Y:0},{p.Position.Z:0}  rot {rot}"
+                                    + (p.Scale != 1f ? $"  scale {p.Scale:0.##}" : "")
+                                    + $"  — {p.ProvenanceDetail}  — chain: {p.ChainLabel}");
+                    // What it culls from the shot's eye.
+                    var culled = os.CulledByPlane.TryGetValue(p, out var cl) ? cl : new List<ViewProbe.RefOcclusion>();
+                    int straddling = os.StraddlingByPlane.TryGetValue(p, out var st) ? st : 0;
+                    var largest = culled.OrderByDescending(r => r.Volume).Take(3).ToList();
+                    string Largest(ViewProbe.RefOcclusion r)
+                        => $"{r.Ref.RefKey} {(r.Ref.BaseEditorId is { Length: > 0 } e ? e : Path.GetFileName(r.Ref.MeshRelPath))} ({r.Size.X:0}x{r.Size.Y:0}x{r.Size.Z:0} u)";
+                    if (culled.Count == 0) cullNothing++;
+                    int visible = culled.Count(r => r.Visible);
+                    if (visible > 0) cullsVisible++;
+                    var visibleLargest = culled.Where(r => r.Visible).OrderByDescending(r => r.Volume).Take(3).ToList();
+                    Console.WriteLine(culled.Count == 0
+                        ? $"      culls nothing from this eye" + (straddling > 0 ? $" ({straddling} straddling its shadow)" : "")
+                        : $"      culls {culled.Count} ref(s) from this eye ({straddling} straddling)"
+                          + (visible > 0 ? $" — {visible} of them VISIBLE from here (nothing in front of their box): {string.Join("; ", visibleLargest.Select(Largest))}"
+                                         : " — none of them visible from here")
+                          + $"; largest: {string.Join("; ", largest.Select(Largest))}");
+                    // The nearest solid collision behind it, on the far side from the eye.
+                    var n = p.Normal;
+                    float sideF = MathF.Sign(Vector3.Dot(eyeS - p.Centre, n));
+                    if (sideF == 0f) sideF = 1f;
+                    var far = -sideF * n;
+                    float push = p.Kind == ViewProbe.PlaneKind.Box ? p.Bounds.Y * 0.5f * p.Scale : 0f;
+                    var starts = ViewProbe.PlaneGeometry.GridPoints(p).Select(q => q + far * push).ToArray();
+                    var sweep = Aabb.Empty;
+                    foreach (var s0 in starts) { sweep = sweep.Add(s0); sweep = sweep.Add(s0 + far * planesReach); }
+                    float best = float.PositiveInfinity; PlacedRef? bestRef = null; int candidates = 0, withCollision = 0;
+                    foreach (var r in winRef.Values)
+                    {
+                        if (r.Deleted || DisabledWhy(r) is not null || r.Base is not { } bk) continue;
+                        if (!baseType.TryGetValue(bk, out var bt) || !insidePhysical.Contains(bt)) continue;
+                        if (baseIsMarker.Contains(bk)) continue;
+                        if (baseEditorId.TryGetValue(bk, out var ed) && IsControlEditorId(ed)) continue;
+                        if (!baseMesh.TryGetValue(bk, out var bm) || !baseObnd.TryGetValue(bk, out var ob)) continue;
+                        if (bm.Replace('/', '\\').Contains(@"effects\", StringComparison.OrdinalIgnoreCase)) continue;
+                        var box = SpatialOverlap.ToWorld(new Aabb(ob.Min, ob.Max, false), r.Position, r.Rotation, r.Scale);
+                        if (box.IsEmpty || SpatialOverlap.BoxDistance(box, sweep) > 0f) continue;
+                        candidates++;
+                        if (CollisionSoupFor(bm) is not { } soup) continue;
+                        withCollision++;
+                        var world = SpatialOverlap.TransformSoup(soup, r.Position, r.Rotation, r.Scale);
+                        foreach (var s0 in starts)
+                            if (NearestHit(s0, far, world.Vertices, world.Indices, MathF.Min(planesReach, best)) is { } h && h < best)
+                            { best = h; bestRef = r; }
+                    }
+                    string behind;
+                    if (bestRef is { } br)
+                    {
+                        string bEd = br.Base is { } bb2 && baseEditorId.TryGetValue(bb2, out var be2) ? be2 : "-";
+                        if (best <= 4f) touching++;
+                        behind = $"nearest solid collision behind it: {br.FormKey} {bEd} at {best:0.#} u{(best <= 4f ? " (touching)" : "")}"
+                               + $"  [{candidates} candidate(s), {withCollision} with collision]";
+                    }
+                    else if (candidates == 0 || withCollision == 0)
+                    {
+                        noCollisionCandidates++;
+                        behind = candidates == 0 ? $"nothing physical within {planesReach:0} u behind it — no candidate box even reaches the swept volume"
+                                                 : $"none of the {candidates} candidate(s) behind it carries solid collision";
+                    }
+                    else
+                    {
+                        noneWithinReach++;
+                        behind = $"no solid collision within {planesReach:0} u behind it ({candidates} candidate(s), {withCollision} with collision, none hit)";
+                    }
+                    Console.WriteLine($"      {behind}");
+                    rows.Add(new
+                    {
+                        formKey = p.Key.ToString(), formId = p.RuntimeId, kind = p.KindLabel,
+                        bounds = new[] { p.Bounds.X, p.Bounds.Y, p.Bounds.Z },
+                        position = new[] { p.Position.X, p.Position.Y, p.Position.Z },
+                        rotationDeg = new[] { float.RadiansToDegrees(p.Rotation.X), float.RadiansToDegrees(p.Rotation.Y), float.RadiansToDegrees(p.Rotation.Z) },
+                        scale = p.Scale, provenance = p.ProvenanceLabel, definedBy = p.DefinedBy, changedBy = p.ChangedBy, chain = p.Chain,
+                        cullCount = culled.Count, straddling, visibleCulled = visible,
+                        largestCulled = largest.Select(r => new { formKey = r.Ref.RefKey.ToString(), editorId = r.Ref.BaseEditorId, size = new[] { r.Size.X, r.Size.Y, r.Size.Z }, visible = r.Visible }).ToList(),
+                        visibleLargest = visibleLargest.Select(r => new { formKey = r.Ref.RefKey.ToString(), editorId = r.Ref.BaseEditorId, size = new[] { r.Size.X, r.Size.Y, r.Size.Z } }).ToList(),
+                        behind = bestRef is { } br2
+                            ? new { distance = best, formKey = br2.FormKey.ToString(), editorId = br2.Base is { } bb3 && baseEditorId.TryGetValue(bb3, out var be3) ? be3 : null, candidates, withCollision }
+                            : null,
+                        reach = planesReach,
+                    });
+                }
+                Console.WriteLine($"   ---- report summary: {cullNothing} of {planes.Count} plane(s) cull nothing from this eye; "
+                                + $"{cullsVisible} cull something VISIBLE from it ({os.VisibleCulledCount} ref(s) in all); "
+                                + $"{touching} touching solid collision behind, {noneWithinReach} with none within {planesReach:0} u, "
+                                + $"{noCollisionCandidates} with no collision-bearing candidate behind at all ----");
+                // The dropped planes belong in the listing too — a plane a mod disabled is a fact the audit wants.
+                var dropped = winRef.Values.Where(r => r.Base is { } b && b == planeMarkerKey && (r.Deleted || DisabledWhy(r) is not null))
+                                           .OrderBy(r => r.FormKey.ToString(), StringComparer.Ordinal).ToList();
+                foreach (var r in dropped)
+                {
+                    var h = planeHist.TryGetValue(r.FormKey, out var ph2) ? ph2 : null;
+                    Console.WriteLine($"   not drawn: {r.FormKey} = FormID {RuntimeId(r.FormKey)}  {(r.Deleted ? "deleted" : DisabledWhy(r))}"
+                                    + (h is not null ? $"  — defined by {h.DefinedBy}{(h.ChangedBy is { } cb ? $", last changed by {cb}" : "")}  — chain: {string.Join(" -> ", h.Chain)}" : ""));
+                }
+                string jsonPath = Path.Combine(outDir, $"{safe}-planes.json");
+                var doc = new
+                {
+                    cell = cellLabel, eye = new[] { eyeS.X, eyeS.Y, eyeS.Z }, reach = planesReach,
+                    contestedBy = cellContestedBy, planes = rows,
+                    notDrawn = dropped.Select(r => new { formKey = r.FormKey.ToString(), formId = RuntimeId(r.FormKey), why = r.Deleted ? "deleted" : DisabledWhy(r) }).ToList(),
+                };
+                File.WriteAllText(jsonPath, System.Text.Json.JsonSerializer.Serialize(doc, new System.Text.Json.JsonSerializerOptions { WriteIndented = true }));
+                Console.WriteLine($"   wrote {jsonPath}");
+            };
+        }
+
         int Render(IReadOnlyList<(System.Numerics.Vector3, System.Numerics.Vector3, System.Numerics.Vector3)> g,
                    IReadOnlyList<(System.Numerics.Vector3, System.Numerics.Vector3, System.Numerics.Vector3)> r,
                    string outFile, IReadOnlyList<string> captionLines,
@@ -2866,7 +3020,7 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot)
                    skyColor, terrainHeightAt, dashUnderground, dashUnderStatics, msaa, cullAbove, cellBounds,
                    diffs ?? noDiff, diffColor, picks, captionLines, colourCaptions, npcActors, npcPucksOn, routeRenders,
                    gridRender, keepFx, fxStatic, listMeshes, waterPlanes, coverings, planes, showPlanes, occlusionMode,
-                   size, outFile, camMeta);
+                   size, outFile, camMeta, planeReport: planeReportSink);
 
         if (compare is { } cmp)
         {
@@ -3051,7 +3205,7 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot)
                 skyColor, terrainHeightAt, dashUnderground, dashUnderStatics, msaa, cullAbove, cellBounds,
                 noDiff, diffColor, picks, fpCap, colourCaptions, npcActors, npcPucksOn, routeRenders, gridRender, keepFx, fxStatic, listMeshes,
                 waterPlanes, coverings, planes, showPlanes, occlusionMode, size, fpOut,
-                camMeta, iopt);
+                camMeta, iopt, planeReportSink);
             Console.WriteLine($"   interactive run over ({iShapes:N0} shapes were resident)");
         pendingSwitch = iopt.CellSwitch;
             NpcCleanup();

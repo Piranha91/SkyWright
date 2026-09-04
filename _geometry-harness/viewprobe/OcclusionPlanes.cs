@@ -232,6 +232,23 @@ static class PlaneGeometry
         return (p.Corners, tris.ToArray());
     }
 
+    /// <summary>An n×n lattice of points across the mid-quad, inset a little from its edges — where the report's
+    /// collision rays start. Skyrim space.</summary>
+    public static Vector3[] GridPoints(PlaneRender p, int n = 5)
+    {
+        var q = p.Quad;
+        var pts = new Vector3[n * n];
+        for (int i = 0; i < n; i++)
+            for (int j = 0; j < n; j++)
+            {
+                float u = 0.05f + 0.9f * i / (n - 1), v = 0.05f + 0.9f * j / (n - 1);
+                var bottom = Vector3.Lerp(q[0], q[1], u);
+                var top = Vector3.Lerp(q[3], q[2], u);
+                pts[i * n + j] = Vector3.Lerp(bottom, top, v);
+            }
+        return pts;
+    }
+
     /// <summary>Nearest hit of a Skyrim-space ray against a plane's pick triangles (both faces), or null.</summary>
     public static float? RayHit(PlaneRender p, Vector3 o, Vector3 d, float limit)
     {
@@ -412,6 +429,9 @@ sealed class RefOcclusion
     public readonly List<PickShape> Shapes = new();
     public bool Culled;
     public PlaneRender? CulledBy;
+    /// <summary>Report only: the ref's box is in the frame and nothing in the plain scene stands in front of it
+    /// at its centre pixel — a cull the player would SEE. The shape the audit is after.</summary>
+    public bool Visible;
     public Vector3 Size => Max - Min;
     public float Volume => MathF.Max(Size.X, 1f) * MathF.Max(Size.Y, 1f) * MathF.Max(Size.Z, 1f);
 
@@ -436,8 +456,22 @@ sealed class OcclusionState
     /// <summary>Per plane, the refs that reach into its shadow without being contained — the straddlers, kept.</summary>
     public readonly Dictionary<PlaneRender, int> StraddlingByPlane = new();
     public int CulledCount;
+    /// <summary>Report only: culled refs the eye would see — set by <see cref="MarkVisible"/>.</summary>
+    public int VisibleCulledCount;
     public Vector3 LastEye;
     public string LastMode = "off";
+
+    /// <summary>Flag the culled refs a caller's test says are visible from the eye (in frame, nothing nearer at their
+    /// centre pixel in the plain scene). The test needs the depth buffer, which only the renderer holds.</summary>
+    public void MarkVisible(Func<RefOcclusion, bool> isVisible)
+    {
+        VisibleCulledCount = 0;
+        foreach (var r in Refs)
+        {
+            r.Visible = r.Culled && isVisible(r);
+            if (r.Visible) VisibleCulledCount++;
+        }
+    }
     readonly Dictionary<GlMesh, (bool Emissive, bool GlowMap, bool Enabled, Vector3 Colour, float Multiple)> _tintSaved = new();
     bool _applied;
 
@@ -451,18 +485,36 @@ sealed class OcclusionState
         if (_applied && !force && mode == LastMode && (LastEye - eye).LengthSquared() < 1e-4f) return false;
         _applied = true; LastEye = eye; LastMode = mode;
 
+        Evaluate(eye, mode != "off", honourCanary: true);
+
+        foreach (var r in Refs)
+        {
+            bool hide = mode == "on" && r.Culled;
+            bool tint = mode == "diff" && r.Culled;
+            foreach (var m in r.Meshes) SetTint(m, tint);
+            if (ownsVisibility) foreach (var m in r.Meshes) m.IsRendering = !hide;
+            foreach (var s in r.Shapes) s.Culled = hide;
+        }
+        return true;
+    }
+
+    /// <summary>The answer alone — which refs each plane culls from <paramref name="eye"/>, which straddle — with
+    /// nothing pushed onto a mesh. The report reads this; the preview reads it and then pushes.</summary>
+    /// <param name="honourCanary">The preview's positive control, VP_OCCL_TINT_ALL=1: every ref counts as culled, so
+    /// a `diff` frame must come out washed red and an `on` frame empty. A well-placed plane's cull changes no pixel
+    /// (its shadow lies inside the shadow of the wall it stands in), which is indistinguishable from a preview that
+    /// failed — this is what tells the two apart. The report never honours it.</param>
+    public void Evaluate(Vector3 eye, bool active = true, bool honourCanary = false)
+    {
         foreach (var r in Refs) { r.Culled = false; r.CulledBy = null; }
         CulledByPlane.Clear(); StraddlingByPlane.Clear(); CulledCount = 0;
-        // VP_OCCL_TINT_ALL=1 — the preview's positive control: every ref counts as culled, so a
-        // `diff` frame must come out washed red and an `on` frame empty. A well-placed plane's cull
-        // changes no pixel (its shadow lies inside the shadow of the wall it stands in), which is
-        // indistinguishable from a preview that failed — this is what tells the two apart.
-        if (mode != "off" && Environment.GetEnvironmentVariable("VP_OCCL_TINT_ALL") == "1")
+        if (!active) return;
+        if (honourCanary && Environment.GetEnvironmentVariable("VP_OCCL_TINT_ALL") == "1")
         {
             foreach (var r in Refs) r.Culled = true;
             CulledCount = Refs.Count;
         }
-        else if (mode != "off")
+        else
             foreach (var p in Planes)
             {
                 var vols = OcclusionCull.Volumes(p, eye);
@@ -486,16 +538,6 @@ sealed class OcclusionState
                 if (list is not null) CulledByPlane[p] = list;
                 if (straddle > 0) StraddlingByPlane[p] = straddle;
             }
-
-        foreach (var r in Refs)
-        {
-            bool hide = mode == "on" && r.Culled;
-            bool tint = mode == "diff" && r.Culled;
-            foreach (var m in r.Meshes) SetTint(m, tint);
-            if (ownsVisibility) foreach (var m in r.Meshes) m.IsRendering = !hide;
-            foreach (var s in r.Shapes) s.Culled = hide;
-        }
-        return true;
     }
 
     /// <summary>The `diff` wash: the material shader's own emissive term, exactly the hover highlight's

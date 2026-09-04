@@ -116,7 +116,10 @@ findings they demonstrate) lives with that instance, not here.
   (verified on an interior and an exterior). `--occlusion off|on|diff` previews what the planes
   CULL from this eye: `on` leaves out every ref that lies wholly behind a plane, `diff` draws
   everything and tints those refs red so the change is visible in one frame; the caption names
-  the count and the console names the planes doing the culling.
+  the count and the console names the planes doing the culling. `--planes-report` lists every
+  plane — identity, provenance, what it culls from this eye and whether any of that is visible,
+  the nearest solid collision behind it within `--planes-reach N` u (default 256) — to the console
+  and as `<cell>-planes.json`.
 - **Placed NPC actors:** `--npc FORMKEY[@X,Y,Z[,HEADING]][=label]` (repeatable; implies textured
   mode) renders the NPC's actual character model — FaceGen head, skinned body, and the outfit the
   RUNTIME will dress it in — at its winning placement or an explicit position (see *Placed NPC
@@ -1362,6 +1365,41 @@ empty (measured: 80 % of pixels change in each, the rest being sky).
 
 **Cost.** Dozens of planes against thousands of boxes, five dot products per plane per box: a few
 million operations, re-run only when the eye moves.
+
+### The listing: `--planes-report` (and `--planes-reach N`, default 256)
+
+One entry per plane in the target cell (+ ring), in FormKey order, to the console and as
+`<out>/<cell>-planes.json`: identity (FormKey, runtime FormID), kind and extent, position,
+rotation, provenance with the whole override chain; **what it culls from the shot's eye** — the
+count, how many straddle its shadow, the three largest by box volume, and how many of the culled
+refs are VISIBLE from that eye; and **the nearest solid collision behind it**. Planes the scene
+drops (disabled by a mod, deleted) are listed after, with who did it. The summary line counts the
+planes that cull nothing, the planes that cull something visible, and the planes with nothing
+behind them.
+
+- **Visible** means: the ref's box is in the frame and the plain scene's depth at the ref's centre
+  pixel is no nearer than the near face of its box — nothing stands in front of it. Measured from
+  one extra draw of the untouched scene (static path only). A plane culling a visible ref from a
+  standing eye is the "culls what the player can see" shape; it is what Part D's cameras are chosen
+  by.
+- **Behind** means the far side from the eye: rays from a 5×5 lattice across the mid-quad (from the
+  far face, for a Box), along the plane's normal away from the eye, against the SOLID collision —
+  the layers an actor meets, `CollisionLayers.ActorSolid`, the same cut the route detectors make —
+  of every physical ref whose placed OBND box the swept reach touches. The nearest hit over the
+  lattice is the answer; `touching` is within 4 u; `none within N u` is the "left standing for
+  architecture that is no longer there" shape; and "no candidate box even reaches the swept volume"
+  is the same shape one step stronger. A candidate whose mesh carries no solid collision is counted
+  and said, never silently treated as empty space.
+- **A listing, never a verdict.** Whether "culls nothing" or "nothing behind it" is a defect depends
+  on the game's cull rule, which is what Part D of the occlusion handoff measures, and on a floor
+  and a control this file does not have. The audit that turns these rows into a class is the
+  handoff after; this is its raw material.
+
+First runs, 2026-09-04: a city overhaul's own interior planes included two standing 600 u below
+the floor of a room the mod had rebuilt higher up — they cull nothing and have nothing within
+reach behind them, the "left standing" shape, from the mod's own hand; a town overhaul's exterior
+planes were all `Box` kind, thirteen vanilla planes it moved and one it added, with solid
+collision 8–97 u behind twelve of them.
 
 ---
 

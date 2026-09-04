@@ -281,7 +281,8 @@ static class TexturedScene
         string occlusionMode,                              // --occlusion off | on | diff: preview what the planes cull
         int size, string outPath,
         string? pngTextMeta = null,                        // replication chunk: written as a PNG tEXt entry keyed "viewprobe"
-        InteractiveOptions? interactive = null)            // non-null: open the fly-through window instead of saving a PNG
+        InteractiveOptions? interactive = null,            // non-null: open the fly-through window instead of saving a PNG
+        Action<OcclusionState>? planeReport = null)        // --planes-report: handed the planes' cull answer for the entry eye
     {
         var logger = new ConsoleCvLogger();
         var gate = new CharacterViewerLogGate { Verbose = Environment.GetEnvironmentVariable("VP_CV_VERBOSE") == "1" };
@@ -1425,6 +1426,36 @@ static class TexturedScene
         // names the count: a render with objects missing must say why, or the gap reads as a
         // finding about the mod rather than about its planes.
         var capLines = captionLines.ToList();
+        // The report reads the answer for the entry eye and nothing is pushed — the preview below
+        // recomputes for itself, canary and all, so the two cannot contaminate each other.
+        if (planeReport is not null && planes.Count > 0)
+        {
+            occl.Evaluate(cam.Eye);
+            // Which culled refs the eye would SEE: the plain scene's depth at the ref's centre pixel
+            // is no nearer than the near face of its box, i.e. nothing stands in front of it. One
+            // extra draw of the untouched scene, static path only (the window has no still frame).
+            // This is the audit's own shape — a plane culling what the player can see — measured
+            // rather than inferred from counts.
+            if (interactive is null)
+            {
+                var plainDepth = new float[size * size];
+                Draw(plainDepth);
+                occl.MarkVisible(r =>
+                {
+                    var c = (r.Min + r.Max) * 0.5f;
+                    if (ScreenOf(YUp(c)) is not { } sp) return false;
+                    float near = float.MaxValue;
+                    for (int i = 0; i < 8; i++)
+                    {
+                        var k = new Vector3((i & 1) == 0 ? r.Min.X : r.Max.X, (i & 2) == 0 ? r.Min.Y : r.Max.Y, (i & 4) == 0 ? r.Min.Z : r.Max.Z);
+                        near = MathF.Min(near, Vector3.Dot(YUp(k) - eyeY, viewFwd));
+                    }
+                    float scene = ViewDist(plainDepth[sp.Y * size + sp.X]);
+                    return scene >= near * 0.998f - 1.5f;
+                });
+            }
+            planeReport(occl);
+        }
         if (occlusionMode != "off")
         {
             if (planes.Count == 0)
