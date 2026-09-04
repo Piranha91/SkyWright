@@ -227,6 +227,9 @@ static class TexturedScene
     /// <param name="ZWhy">Where <paramref name="Z"/> came from, for the console line. An assumed
     /// height has to say it is assumed.</param>
     internal sealed record GridRender(float? Spacing, float Z, Vector4 Color, string ZWhy);
+    /// <summary>A ribbon the caller draws on the ground in its own colour — the landscape-seam overlay (--seams, 2026-09-04)
+    /// and anything after it. Skyrim-space points; <paramref name="Width"/> scales the ribbon's distance law (1 = the grid's width ×1.4).</summary>
+    internal readonly record struct OverlayLine(IReadOnlyList<Vector3> Pts, Vector3 Colour, float Width);
 
     /// <summary>MO2-style loose-file precedence, the ONE encoding of the
     /// convention: the resolver iterates LAST-to-first, so hand it
@@ -271,6 +274,7 @@ static class TexturedScene
         bool npcPucks,                                     // per-actor-coloured ground disc + always-visible rim under each actor
         IReadOnlyList<RouteRender> routes,                 // the paths drawn on the ground, each in its own colour: segments + arrowheads; empty = none
         GridRender? grid,                                  // labelled world-coordinate grid on the ground plane; null = none
+        IReadOnlyList<OverlayLine> overlayLines,           // --seams and any other caller-drawn ribbon on the ground; empty = none
         bool keepFx,                                       // --fx: draw effect-shader shapes too
         bool fxStatic,                                     // --fx-static: draw them as a frozen frame
         bool listEffectMeshes,                             // --list-meshes: name the meshes they came from
@@ -1774,6 +1778,18 @@ static class TexturedScene
         // the priority exactly backwards. Depth test OFF — a reference line you can only see on
         // open floor is not a reference; it has to cross the pillars too.
         if (gridSpacing > 0f && gridRibbon.Count > 0) layers.Add((gridRibbon.ToArray(), false, false, 0, 0.85f));
+        // Caller-drawn ribbons (the seam overlay): depth-tested, so a seam behind a hill stays behind it — the
+        // caller lifts each ribbon a few units above the ground it marks, which is what keeps it on top of the terrain.
+        if (overlayLines.Count > 0)
+        {
+            var ribbon = new List<float>();
+            foreach (var ol in overlayLines)
+            {
+                float w = ol.Width;
+                Overlay.SolidPolyline(ribbon, ol.Pts, ol.Colour, d => Math.Clamp(d * 0.0012f * w, 0.5f * w, 20f * w), cam.Eye);
+            }
+            if (ribbon.Count > 0) layers.Add((ribbon.ToArray(), true, false, 0, 1f));
+        }
         if (wantNav)
         {
             if (wireMode && navTris.Count > 0)

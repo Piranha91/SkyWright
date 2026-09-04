@@ -316,6 +316,9 @@ gitignored for the same reason: probe transcripts name the plugins of whatever l
 ## Feature state
 
 - Textured first-person rendering from the exact MO2 profile (BSA + loose, MO2 precedence).
+- **Landscape seams and the water arms (2026-09-04)** — `--seams` ribbons every shared cell edge whose
+  LAND vertices disagree, coloured by the step; `--water-arm truth|winner` draws the cell water from
+  the masters' tuple or the winner's and prints both arms per ring cell. Own section below.
 - **Interactive fly-through** (`--interactive`): the same scene in a visible window — WASD +
   mouse flight, hover-to-identify (refs, navmesh, terrain) with a click-to-lock readout, live
   navmesh display mode, a live height clip, pose echo, F12 capture. Its own section below.
@@ -1441,6 +1444,35 @@ collision 8–97 u behind twelve of them.
 
 ---
 
+## Landscape seams and the water arms (`--seams`, `--water-arm`)
+
+Added 2026-09-04 as the render side of two detectors (roadmap 4.9): `seamprobe` measures where two
+adjacent cells' LAND records disagree about the vertices they share, and `waterprobe` measures where a
+winning CELL override carries a different water tuple from the one the game's own masters set. Both
+draw here so a row can be looked at from a planned camera. They report; the probes judge.
+
+**`--seams [EPS]`** — the engine draws each cell's LAND on its own from its 33×33 heightmap, and vertex
+32 of one cell is vertex 0 of the next. Where the two records disagree by more than EPS (default 8 u,
+one heightmap unit — the smallest non-zero step the format can express) the render draws a ribbon along
+that run of the edge, lifted 6 u over the higher side: yellow under 32 u (a lip), orange under 128 u
+(a knee-high step), red beyond (a wall). The console lists every mismatched edge in the ring with its
+worst step and how many of the 33 vertices are over EPS. The decode is `HousecarlCore.LandHeight` —
+the same function the detector reads, moved out of this file on the same day so the two cannot hold
+different opinions about where the ground is. Winners only: whose seam it is (Introduced / Inherited,
+Blind / Seen) is `seamprobe`'s answer.
+
+**`--water-arm winner|truth`** — the cell-water surfaces are drawn from the winner's tuple (the default,
+what the render always did) or from the TRUTH's: the last statement by a Bethesda master or the
+Unofficial Patch, by filename. The console prints every ring cell under both arms — the WATR, the
+resolved height, and the share of the cell's LAND vertices under that surface (the number that says
+whether a surface is drawn under the ground) — and flags the cells where the arms differ. A water
+mod's deliberate retype shows as a difference here; `waterprobe` tells it apart from a port's revert.
+
+```
+viewprobe KatariahExterior01 --eye -51200,101000,-9500 --look -51200,108544,-13800 --seams --water-arm truth --no-nav
+viewprobe SolitudeExterior01 --eye -67584,103000,-1500 --look -67584,106496,-5500 --seams --no-nav
+```
+
 ## The depth buffer is the arbiter
 
 **The defect.** An edge classified `visible` was drawn SOLID and depth-tested, so a wrong
@@ -1876,7 +1908,19 @@ to the LAND underneath, so a shoreline needs vertices along it to shade against.
 
 Height follows the engine's precedence — `CELL.WaterHeight` when the cell states one, the
 worldspace's `LandDefaults.DefaultWaterHeight` when it holds the `3.4028235E+38` sentinel (Tamriel:
-−14000, confirmed identical in vanilla `Skyrim.esm` and in the load-order winner).
+−14000, confirmed identical in vanilla `Skyrim.esm` and in the load-order winner). Since 2026-09-04
+`--water-arm truth` draws the surfaces from the masters' tuple instead of the winner's, and the console
+prints both arms per cell with the share of LAND under each — see *Landscape seams and the water arms*.
+
+**The sentinels, as the game reads them (measured 2026-09-04, `DetectorModel.SurfaceHeight`).** The
+"anything outside the world is a sentinel, use the default" rule this section carried since 2026-08-27
+was half right. In game the value behaves like a saturating float→int32 conversion: `3.4028235E+38`
+and Winterhold's `4.2949532E+09` both mean the worldspace default (a swimmer in a 4.29e9 cell sits at
+the default's depth), while `−2.1474836E+09` and Blackreach's `−3.4028235E+38` mean **no surface at
+all** — the player stands on the floor of such a cell, and `Cell.GetActualWaterLevel` reads int-min.
+The render now draws no plane for the negative sentinels (Blackreach's cells were drawn at the
+worldspace default before; they are not water) and the default for the positive ones. `VP_WATER_Z`
+still forces a plane anywhere.
 
 **A missing sea is almost never a wrong height, and there is now a number that proves which it is.**
 The console reports what percentage of the water footprint has LAND *below* the surface. A water

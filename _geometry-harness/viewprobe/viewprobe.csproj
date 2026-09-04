@@ -27,6 +27,7 @@
     <Compile Include="..\_shared\DetectorModel.cs" Link="DetectorModel.cs" />
     <Compile Include="..\_shared\Worklist.cs" Link="Worklist.cs" />
     <Compile Include="..\_shared\CollisionLayers.cs" Link="CollisionLayers.cs" />
+    <Compile Include="..\_shared\CellBoundaryIndex.cs" Link="CellBoundaryIndex.cs" />
     <PackageReference Include="SixLabors.ImageSharp" Version="3.1.11" />
     <PackageReference Include="SixLabors.ImageSharp.Drawing" Version="2.1.6" />
   </ItemGroup>

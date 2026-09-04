@@ -232,6 +232,12 @@ bool cellOutline = true;
 // render looks like, so both have an escape hatch for reproducing an older picture, and both
 // announce themselves on the console when they draw anything.
 bool drawWater = true;
+// --seams [EPS]: draw every ring-cell edge whose shared LAND vertices disagree by more than EPS u (default 8, one
+// heightmap unit) as a ribbon coloured by the step; --water-arm truth|winner: which arm's cell-water tuple the
+// surfaces are drawn from (roadmap 4.9, 2026-09-04). Both are the render-side of waterprobe / seamprobe.
+bool drawSeams = false;
+float seamEps = 8f;
+string waterArm = "winner";
 bool drawCoverings = true;
 // Exterior REFS load for the target cell and its ±1 ring, matching the terrain (defect fix,
 // 2026-08-28: neighbours contributed terrain and nothing else, so any eye-level shot showed
@@ -513,6 +519,8 @@ for (int i = argStart; i < args.Length; i++)
         batsProfiles.AddRange(args[++i].Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries));
     else if (args[i] == "--markers") showMarkers = true;
     else if (args[i] == "--list-meshes") listMeshes = true;
+    else if (args[i] == "--seams") { drawSeams = true; textured = true; if (i + 1 < args.Length && float.TryParse(args[i + 1], System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var se)) { seamEps = se; i++; } }
+    else if (args[i] == "--water-arm" && i + 1 < args.Length) { waterArm = args[++i].ToLowerInvariant(); textured = true; }
     else if (args[i] == "--planes") { showPlanes = true; textured = true; }
     else if (args[i] == "--occlusion" && i + 1 < args.Length) { occlusionMode = args[++i].ToLowerInvariant(); textured = true; }
     else if (args[i] == "--planes-report") { planesReport = true; textured = true; }
@@ -632,6 +640,8 @@ if (gridColor == default)
 // A flag that silently does nothing is a trap — the same rule --fly-speed and --route-color are held to.
 if (!gridOn && Array.IndexOf(args, "--grid-color") >= 0)
 { Console.Error.WriteLine("--grid-color only means anything with a grid: pass --grid N or --grid auto."); return 1; }
+if (waterArm is not ("winner" or "truth"))
+{ Console.Error.WriteLine($"--water-arm {waterArm}: the arms are 'winner' (the load order's tuple, the default) and 'truth' (the last Bethesda/USSEP statement)."); return 1; }
 // The window already answers "what world coordinate is this" continuously, by hovering: the HUD
 // prints it. What it cannot carry is the grid's LABELS, which are screen positions computed for one
 // fixed pose and wrong the instant the camera moves — so this is a static-render flag, and says so
@@ -832,6 +842,12 @@ var watrRec = new Dictionary<FormKey, (string Ed, string? Noise, float NoiseUv,
 var cellWater = new Dictionary<(int X, int Y), (bool Has, float Height, FormKey? Water)>();
 FormKey? wsWater = null;
 float wsDefaultWaterHeight = float.MaxValue;
+// The TRUTH arm of the same three (--water-arm truth): the last Bethesda-or-USSEP statement, by filename
+// (HarnessShared.PluginKinds) — waterprobe's truth rule without its water-mod clause, which needs the whole
+// order's WATR records and is not worth a second walk here; the console says so when the arms differ.
+var cellWaterTruth = new Dictionary<(int X, int Y), (bool Has, float Height, FormKey? Water)>();
+FormKey? wsWaterTruth = null;
+float wsDefaultWaterHeightTruth = float.MaxValue;
 
 static System.Numerics.Vector3 Rgb(System.Drawing.Color c) =>
     new(c.R / 255f, c.G / 255f, c.B / 255f);
@@ -1673,6 +1689,7 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot)
                 try { m2 = SkyrimMod.CreateFromBinaryOverlay(path, SkyrimRelease.SkyrimSE); } catch { continue; }
                 using (m2 as IDisposable)
                 {
+                    bool truthPlugin = HarnessShared.PluginKinds.ByName(Path.GetFileName(path)) is HarnessShared.PluginKind.Bethesda or HarnessShared.PluginKind.Ussep;
                     foreach (var ws in m2.Worldspaces.Records)
                     {
                         if (ws.FormKey != targetWorldspace) continue;
@@ -1680,6 +1697,11 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot)
                         // per plugin in load order, so the last one to state either of them wins.
                         if (ws.Water.FormKeyNullable is { } wsw && !wsw.IsNull) wsWater = wsw;
                         if (ws.LandDefaults?.DefaultWaterHeight is { } dwh && RealHeight(dwh)) wsDefaultWaterHeight = dwh;
+                        if (truthPlugin)
+                        {
+                            if (ws.Water.FormKeyNullable is { } wswt && !wswt.IsNull) wsWaterTruth = wswt;
+                            if (ws.LandDefaults?.DefaultWaterHeight is { } dwht && RealHeight(dwht)) wsDefaultWaterHeightTruth = dwht;
+                        }
                         IEnumerable<ICellGetter> Cells()
                         {
                             if (ws.TopCell is { } tc) yield return tc;
@@ -1698,6 +1720,7 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot)
                             cellWater[(gp.X, gp.Y)] = (c.Flags.HasFlag(Cell.Flag.HasWater),
                                                        c.WaterHeight ?? float.MaxValue,
                                                        c.Water.FormKeyNullable is { } cw && !cw.IsNull ? cw : null);
+                            if (truthPlugin) cellWaterTruth[(gp.X, gp.Y)] = cellWater[(gp.X, gp.Y)];
                             if (c.Landscape?.VertexHeightMap is not { } vh) continue;
                             var grad = new sbyte[33, 33];
                             try
@@ -1773,20 +1796,12 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot)
 
             foreach (var ((gx, gy), (off, grad, quadLtex)) in landWin)
             {
-                // VHGT decode: row-start accumulator down the first column, then run along each row;
-                // stored values are gradients in 1/8 world units.
-                var h = new float[33, 33];
-                float rowStart = off;
-                for (int y = 0; y < 33; y++)
-                {
-                    rowStart += grad[0, y];
-                    float acc = rowStart;
-                    h[0, y] = acc;
-                    for (int x = 1; x < 33; x++) { acc += grad[x, y]; h[x, y] = acc; }
-                }
+                // VHGT decode — HousecarlCore.LandHeight (moved there 2026-09-04 so the landscape-seam detector and
+                // this renderer read one function): world units, [x, y].
+                var h = HousecarlCore.LandHeight.Decode(off, grad);
                 landHeights[(gx, gy)] = h;
                 System.Numerics.Vector3 P(int x, int y) =>
-                    new(gx * 4096f + x * 128f, gy * 4096f + y * 128f, h[x, y] * 8f);
+                    new(gx * 4096f + x * 128f, gy * 4096f + y * 128f, h[x, y]);
                 // landHeights is kept either way — water's depth shading reads it through
                 // terrainHeightAt — but the drawable triangles are terrain's own output.
                 if (!drawTerrain) continue;
@@ -1938,7 +1953,7 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot)
                 // Lower triangle (x,y)-(x+1,y)-(x+1,y+1) when u >= v, upper one otherwise.
                 float z = u >= v ? h00 + (h10 - h00) * u + (h11 - h10) * v
                                  : h00 + (h11 - h01) * u + (h01 - h00) * v;
-                return z * 8f;
+                return z;
             };
 
         // What the render DROPS, said out loud: a triangle the picture never shows because it was
@@ -2742,21 +2757,76 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot)
         if (cellOutline && !interior && targetGrid is { } tgb)
             cellBounds = (tgb.X * 4096f, tgb.Y * 4096f, tgb.X * 4096f + 4096f, tgb.Y * 4096f + 4096f);
 
+        // ---- SEAMS (--seams): every ring-cell edge whose shared LAND vertices disagree ------------
+        // The engine draws each cell's LAND on its own; a shared-edge vertex the two records disagree about is a
+        // step or a gap. Same decode and the same comparison as seamprobe (DetectorModel.EdgeMismatch); this is the
+        // picture of it: a ribbon along each mismatched run, lifted 6 u over the higher side, yellow under 32 u,
+        // orange under 128 u, red beyond. Winners only — provenance (Introduced / Inherited) is the probe's.
+        var overlayLines = new List<ViewProbe.TexturedScene.OverlayLine>();
+        if (drawSeams && !interior && landHeights.Count > 0)
+        {
+            int edges = 0, runs = 0; float worst = 0f;
+            foreach (var ((gx, gy), hA) in landHeights.OrderBy(k => k.Key.Y).ThenBy(k => k.Key.X))
+            {
+                foreach (var (dx, dy) in new[] { (1, 0), (0, 1) })
+                {
+                    if (!landHeights.TryGetValue((gx + dx, gy + dy), out var hB)) continue;
+                    var ea = HousecarlCore.LandHeight.Edge(hA, dx == 1 ? HousecarlCore.CellEdge.East : HousecarlCore.CellEdge.North);
+                    var eb = HousecarlCore.LandHeight.Edge(hB, dx == 1 ? HousecarlCore.CellEdge.West : HousecarlCore.CellEdge.South);
+                    var (mx, over) = HarnessShared.DetectorModel.EdgeMismatch(ea, eb, seamEps);
+                    if (over == 0) continue;
+                    edges++; worst = MathF.Max(worst, mx);
+                    // Runs of consecutive vertices over eps, each its own ribbon coloured by its own worst step.
+                    int i = 0;
+                    while (i < 33)
+                    {
+                        if (MathF.Abs(ea[i] - eb[i]) <= seamEps) { i++; continue; }
+                        int j = i; float runMax = 0f;
+                        while (j < 33 && MathF.Abs(ea[j] - eb[j]) > seamEps) { runMax = MathF.Max(runMax, MathF.Abs(ea[j] - eb[j])); j++; }
+                        var pts = new List<System.Numerics.Vector3>();
+                        for (int k = Math.Max(0, i - 1); k <= Math.Min(32, j); k++)
+                        {
+                            float z = MathF.Max(ea[k], eb[k]) + 6f;
+                            pts.Add(dx == 1 ? new System.Numerics.Vector3((gx + 1) * 4096f, gy * 4096f + k * 128f, z)
+                                            : new System.Numerics.Vector3(gx * 4096f + k * 128f, (gy + 1) * 4096f, z));
+                        }
+                        var colour = runMax < 32f ? new System.Numerics.Vector3(1f, 0.9f, 0.2f)
+                                   : runMax < 128f ? new System.Numerics.Vector3(1f, 0.55f, 0.1f) : new System.Numerics.Vector3(1f, 0.15f, 0.1f);
+                        overlayLines.Add(new ViewProbe.TexturedScene.OverlayLine(pts, colour, runMax < 32f ? 1.4f : runMax < 128f ? 2f : 2.8f));
+                        runs++;
+                        i = j;
+                    }
+                    Console.WriteLine($"   seam: ({gx},{gy}) {(dx == 1 ? "E" : "N")} ({gx + dx},{gy + dy}): max Δ {mx:0} u over {over} of 33 vertices");
+                }
+            }
+            Console.WriteLine(edges == 0
+                ? $"   seams: none — every shared edge in the ring agrees within {seamEps:0.#} u"
+                : $"   seams: {edges} mismatched edge(s) in the ring at eps {seamEps:0.#} u, {runs} run(s) drawn, worst {worst:0} u (yellow < 32, orange < 128, red beyond)");
+        }
+
         // ---- WATER: one surface per loaded cell that has any -----------------------------------
         // Exteriors only. An interior's water is a placed basin with no grid footprint to span, so
         // there is nothing honest to draw a plane across; say so rather than inventing a rectangle.
         var waterPlanes = new List<ViewProbe.WaterPlane>();
         if (drawWater && !interior && targetGrid is { } wg)
         {
-            var wref = wsWater;
+            // --water-arm: the winner's tuples (the default) or the truth's — the last Bethesda/USSEP statement.
+            var armWater = waterArm == "truth" ? cellWaterTruth : cellWater;
+            var wref = waterArm == "truth" ? wsWaterTruth : wsWater;
+            float wsDefault = waterArm == "truth" ? wsDefaultWaterHeightTruth : wsDefaultWaterHeight;
             for (int dx = -1; dx <= 1; dx++)
                 for (int dy = -1; dy <= 1; dy++)
                 {
                     var key = (wg.X + dx, wg.Y + dy);
-                    if (!cellWater.TryGetValue(key, out var cw) || !cw.Has) continue;
+                    if (!armWater.TryGetValue(key, out var cw) || !cw.Has) continue;
                     // The engine's own precedence: the cell's height when it states one, the
                     // worldspace default when it holds the sentinel.
-                    float z = RealHeight(cw.Height) ? cw.Height : wsDefaultWaterHeight;
+                    // The engine's reading of the sentinels, measured in game 2026-09-04 (DetectorModel.SurfaceHeight):
+                    // +3.4028235E+38 and the wrapped 4.29e9 both defer to the worldspace default (Winterhold's swimmer sits
+                    // at the default's depth); the negative sentinels (−2.1e9, −3.4e38) place no surface at all.
+                    float? zr = HarnessShared.DetectorModel.SurfaceHeight(cw.Height, RealHeight(wsDefault) ? wsDefault : null);
+                    if (zr is null && !float.TryParse(Environment.GetEnvironmentVariable("VP_WATER_Z"), out _)) continue;
+                    float z = zr ?? float.NaN;
                     // VP_WATER_Z=<z> — force every surface to one height. A water plane at the
                     // real height is often correctly INVISIBLE (the sea floor around Winterhold
                     // sits above Tamriel's −14000, so the sea is genuinely underground there),
@@ -2777,7 +2847,32 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot)
                         // WATR.Opacity is a 0..100 percentage in the CK, not a 0..255 byte.
                         Math.Clamp(w.Item8 / 100f, 0f, 1f), w.Item9, w.Item1));
                 }
-            if (waterPlanes.Count == 0 && cellWater.Values.Any(v => v.Has))
+            // The two arms side by side, per ring cell, with the share of the cell's LAND vertices under each surface —
+            // waterprobe's visible-share number, so a surface that is drawn but under the ground is called out here.
+            {
+                bool differ = false;
+                var lines = new List<string>();
+                for (int dy = -1; dy <= 1; dy++)
+                    for (int dx = -1; dx <= 1; dx++)
+                    {
+                        var k = (wg.X + dx, wg.Y + dy);
+                        cellWater.TryGetValue(k, out var win); cellWaterTruth.TryGetValue(k, out var tru);
+                        string Arm((bool Has, float Height, FormKey? Water) t, FormKey? wsw2, float wsd)
+                        {
+                            if (!t.Has) return "no water";
+                            float zz = HarnessShared.DetectorModel.SurfaceHeight(t.Height, RealHeight(wsd) ? wsd : null) ?? float.NaN;
+                            var wk2 = t.Water ?? wsw2;
+                            string vis = landHeights.TryGetValue(k, out var hh) && RealHeight(zz) ? $" vis {HarnessShared.CellBoundaryIndex.VisibleShare(hh, zz):P0}" : "";
+                            return $"{(wk2 is { } wk3 && watrRec.TryGetValue(wk3, out var wr2) ? wr2.Item1 : wk2?.ToString() ?? "(no WATR)")} z {(RealHeight(zz) ? zz.ToString("0") : "no surface")}{vis}";
+                        }
+                        string a = Arm(win, wsWater, wsDefaultWaterHeight), b = Arm(tru, wsWaterTruth, wsDefaultWaterHeightTruth);
+                        if (a != b) differ = true;
+                        lines.Add($"      cell ({k.Item1},{k.Item2}): winner {a} | truth {b}{(a != b ? "   <- differs" : "")}");
+                    }
+                Console.WriteLine($"   water arm: {waterArm}" + (differ ? " — the winner and truth arms differ on at least one ring cell (a water mod's retype counts as a difference here; waterprobe tells them apart):" : " — the winner and truth arms agree on every ring cell"));
+                if (differ || waterArm == "truth") foreach (var l in lines) Console.WriteLine(l);
+            }
+            if (waterPlanes.Count == 0 && armWater.Values.Any(v => v.Has))
                 Console.WriteLine("   water: cell(s) flagged HasWater but no usable surface height "
                                 + "in either the cell or the worldspace — nothing drawn");
             // Where each surface height CAME FROM, per cell. Worth a line of its own: a plane at
@@ -3019,7 +3114,7 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot)
                    (eyePos.Value, lookPos.Value, fov), g, r, terrainPatches, terrainLayers, navMode, navColor,
                    skyColor, terrainHeightAt, dashUnderground, dashUnderStatics, msaa, cullAbove, cellBounds,
                    diffs ?? noDiff, diffColor, picks, captionLines, colourCaptions, npcActors, npcPucksOn, routeRenders,
-                   gridRender, keepFx, fxStatic, listMeshes, waterPlanes, coverings, planes, showPlanes, occlusionMode,
+                   gridRender, overlayLines, keepFx, fxStatic, listMeshes, waterPlanes, coverings, planes, showPlanes, occlusionMode,
                    size, outFile, camMeta, planeReport: planeReportSink);
 
         if (compare is { } cmp)
@@ -3203,7 +3298,7 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot)
                 scene, assets, dataDir, modFolders, overwriteDir,
                 (eyePos.Value, lookPos.Value, fov), navTris, redTris, terrainPatches, terrainLayers, navMode, navColor,
                 skyColor, terrainHeightAt, dashUnderground, dashUnderStatics, msaa, cullAbove, cellBounds,
-                noDiff, diffColor, picks, fpCap, colourCaptions, npcActors, npcPucksOn, routeRenders, gridRender, keepFx, fxStatic, listMeshes,
+                noDiff, diffColor, picks, fpCap, colourCaptions, npcActors, npcPucksOn, routeRenders, gridRender, overlayLines, keepFx, fxStatic, listMeshes,
                 waterPlanes, coverings, planes, showPlanes, occlusionMode, size, fpOut,
                 camMeta, iopt, planeReportSink);
             Console.WriteLine($"   interactive run over ({iShapes:N0} shapes were resident)");
