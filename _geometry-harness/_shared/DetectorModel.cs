@@ -1044,7 +1044,270 @@ public static class DetectorModel
         }
         return refusals;
     }
+
+    // -----------------------------------------------------------------------------------
+    // CELL WATER (roadmap 4.9, Part A — 2026-09-04). Special Edition's Update.esm gave exterior cells a
+    // water tuple Oldrim never had (the WATR link, the flow velocity, the noise and env-map paths);
+    // a later override that wins a CELL for some unrelated reason carries whatever water it was saved
+    // with. Per cell: the TRUTH (the last Bethesda-or-USSEP contributor's tuple), the FIRST tuple (the
+    // earliest contributor's — the pre-Update state on a vanilla cell), an optional second truth from a
+    // WATER MOD (a plugin the caller found retyping WATR records or setting its own WATR on many cells),
+    // and the WINNER. The verdict names how the winner differs from the truth. The seam rule and the
+    // missing-water rule read the resolved surface (cell height, else the worldspace default), which the
+    // caller computes with the engine's precedence (viewprobe's RealHeight rule, restated in HeightKind).
+    // -----------------------------------------------------------------------------------
+
+    /// <summary>The engine's "not set" marker is more than one value (viewprobe, 2026-08-27): the documented
+    /// 3.4028235E+38, an unsigned reinterpretation near 4.29e9, a negative one near −2.15e9. Anything outside
+    /// Skyrim's ±60,000 u world is a sentinel, never a height; the name only tells the reader which.</summary>
+    public static WaterHeightKind HeightKind(float? h)
+    {
+        if (h is not { } v) return WaterHeightKind.Unset;
+        if (float.IsNaN(v) || float.IsInfinity(v)) return WaterHeightKind.OtherSentinel;
+        if (MathF.Abs(v) < 100_000f) return WaterHeightKind.Real;
+        if (v == float.MaxValue) return WaterHeightKind.Unset;
+        if (v > 4.0e9f && v < 4.3e9f) return WaterHeightKind.UnsignedWrapped;
+        if (v < -2.0e9f && v > -2.2e9f) return WaterHeightKind.NegativeWrapped;
+        return WaterHeightKind.OtherSentinel;
+    }
+
+    /// <summary>A cell's water fields as one comparable value. <paramref name="Water"/> is the WATR FormKey as a string
+    /// (null = no link); velocity as two vectors (null = the XWCU subrecord absent); paths null when absent.</summary>
+    public readonly record struct WaterTuple(bool HasWater, bool NoLodWater, string? Water, float? Height,
+                                             Vector3? VelocityAngle, Vector3? VelocityOffset, string? Noise, string? EnvMap)
+    {
+        public static readonly WaterTuple None = new(false, false, null, null, null, null, null, null);
+    }
+
+    /// <summary>The fields on which two tuples differ, by name, in a fixed order. Empty = equal. Heights compare by
+    /// kind (two sentinels are equal; two reals within 0.01 u); vectors within 0.01; paths ordinal-ignore-case with
+    /// null and empty equal.</summary>
+    public static List<string> WaterDiff(WaterTuple a, WaterTuple b)
+    {
+        var d = new List<string>();
+        if (a.HasWater != b.HasWater) d.Add("HasWater");
+        if (a.NoLodWater != b.NoLodWater) d.Add("NoLodWater");
+        if (!string.Equals(a.Water ?? "", b.Water ?? "", StringComparison.OrdinalIgnoreCase)) d.Add("Water");
+        if (!HeightsEqual(a.Height, b.Height)) d.Add("Height");
+        if (!VecEqual(a.VelocityAngle, b.VelocityAngle) || !VecEqual(a.VelocityOffset, b.VelocityOffset)) d.Add("Velocity");
+        if (!string.Equals(a.Noise ?? "", b.Noise ?? "", StringComparison.OrdinalIgnoreCase)) d.Add("Noise");
+        if (!string.Equals(a.EnvMap ?? "", b.EnvMap ?? "", StringComparison.OrdinalIgnoreCase)) d.Add("EnvMap");
+        return d;
+    }
+
+    /// <summary>The height as the ENGINE reads it, measured in game 2026-09-04 (Part C, the sentinel stations): the value
+    /// behaves like a SATURATING float→int32 conversion — +3.4028235E+38 and 4.2949532E+09 both land on int-max, which is
+    /// "use the worldspace default" (a swimmer in Winterhold's 4.29e9 cell sits at the same depth as in the Unset cell
+    /// beside it); −2.1474836E+09 (int-min exactly) and −3.4028235E+38 land on int-min, which is NO surface (the player
+    /// stood on the floor of Lux's warehouse cell in vanilla, and `Cell.GetActualWaterLevel` read −2,147,483,648 there).
+    /// Null = no surface.</summary>
+    public static float? SurfaceHeight(float? h, float? worldDefault) => HeightKind(h) switch
+    {
+        WaterHeightKind.Real => h,
+        WaterHeightKind.Unset => HeightKind(worldDefault) == WaterHeightKind.Real ? worldDefault : null,
+        WaterHeightKind.UnsignedWrapped => HeightKind(worldDefault) == WaterHeightKind.Real ? worldDefault : null,
+        _ => null,
+    };
+
+    /// <summary>Does the height put a surface somewhere (the engine's reading)? Unset counts — it defers to the default.</summary>
+    public static bool HasSurface(float? h) => HeightKind(h) is WaterHeightKind.Real or WaterHeightKind.Unset or WaterHeightKind.UnsignedWrapped;
+
+    public static bool HeightsEqual(float? a, float? b)
+    {
+        var ka = HeightKind(a); var kb = HeightKind(b);
+        // Two statements are equal when the engine would place the same surface: two reals within 0.01 u, two "use
+        // the default" (Unset or the wrapped 4.29e9 — both saturate to int-max), or two "no surface" (the negatives).
+        bool da = ka is WaterHeightKind.Unset or WaterHeightKind.UnsignedWrapped, db = kb is WaterHeightKind.Unset or WaterHeightKind.UnsignedWrapped;
+        if (da || db) return da && db;
+        if (!HasSurface(a) || !HasSurface(b)) return !HasSurface(a) && !HasSurface(b);
+        return MathF.Abs(a!.Value - b!.Value) <= 0.01f;
+    }
+
+    static bool VecEqual(Vector3? a, Vector3? b)
+    {
+        if (a is null && b is null) return true;
+        if (a is null || b is null) return false;
+        return (a.Value - b.Value).Length() <= 0.01f;
+    }
+
+    /// <summary>What the caller knows about one cell before the verdict. <paramref name="Truth"/> is the last
+    /// Bethesda-or-USSEP tuple (or the definer's, when no such plugin ever stated the cell — <paramref name="AuthorTruth"/>);
+    /// <paramref name="First"/> the earliest contributor's; <paramref name="WaterModTruth"/> the last water-mod
+    /// contributor's, when one exists; <paramref name="Winner"/> the load-order winner's.</summary>
+    public readonly record struct WaterFacts(WaterTuple Truth, WaterTuple First, WaterTuple? WaterModTruth, WaterTuple Winner,
+                                             PluginKind WinnerKind, bool AuthorTruth, bool DuplicateGridPoint);
+
+    /// <summary>The verdict, winner against truth, first clause that applies.</summary>
+    public static (WaterVerdict Verdict, WaterBlocker Reason, string Why) ClassifyWater(WaterFacts f)
+    {
+        if (f.DuplicateGridPoint)
+            return (WaterVerdict.Unjudgeable, WaterBlocker.DuplicateCell, "more than one CELL record at this grid point — which the engine reads is not known from the records");
+        if (f.WinnerKind == PluginKind.Generated)
+            return (WaterVerdict.Unjudgeable, WaterBlocker.GeneratedWinner, "the winner is a generated plugin; its tuple is whatever its tool was run against");
+        var dt = WaterDiff(f.Winner, f.Truth);
+        if (dt.Count == 0) return (WaterVerdict.Forwarded, WaterBlocker.None, f.AuthorTruth ? "equals the definer's tuple" : "equals the truth tuple");
+        // No water in either arm: the other fields are dormant (the CK re-saves an interior's height as 0 where the
+        // sentinel stood, a link nobody reads), and calling that Dropped would name a surface that never existed.
+        if (!f.Truth.HasWater && !f.Winner.HasWater)
+            return (WaterVerdict.Inert, WaterBlocker.None, $"no water in either arm; the dormant fields differ in {string.Join(", ", dt)}");
+        if (f.WaterModTruth is { } wm && WaterDiff(f.Winner, wm).Count == 0)
+            return (WaterVerdict.Forwarded, WaterBlocker.None, "equals the water mod's tuple (the second truth)");
+        if (WaterDiff(f.Winner, f.First).Count == 0)
+            return (WaterVerdict.Reverted, WaterBlocker.None, $"equals the earliest contributor's tuple; differs from the truth in {string.Join(", ", dt)}");
+        bool hasCleared = f.Truth.HasWater && !f.Winner.HasWater;
+        bool linkNulled = f.Truth.Water is { Length: > 0 } && f.Winner.Water is null or { Length: 0 };
+        // The surface removed: a height the engine places a surface at (real, the default, or a wrapped literal)
+        // replaced by one it does not (int-min). Measured 2026-09-04; the earlier "kind flip" clause called a stated
+        // height for the default a drop, and the reverse — neither removes a surface.
+        bool surfaceGone = HasSurface(f.Truth.Height) && !HasSurface(f.Winner.Height);
+        if (hasCleared || linkNulled || surfaceGone)
+        {
+            var parts = new List<string>();
+            if (hasCleared) parts.Add("HasWater cleared");
+            if (linkNulled) parts.Add("the WATR link nulled");
+            if (surfaceGone) parts.Add($"the surface removed ({HeightKind(f.Truth.Height)} {f.Truth.Height:0.#} replaced by {HeightKind(f.Winner.Height)}, which the engine reads as no surface)");
+            return (WaterVerdict.Dropped, WaterBlocker.None, string.Join("; ", parts));
+        }
+        if (dt.Contains("Water") && f.Truth.Water is { Length: > 0 } && f.Winner.Water is { Length: > 0 })
+            return (WaterVerdict.Retyped, WaterBlocker.None, $"a different WATR ({f.Winner.Water} for {f.Truth.Water})"
+                                                             + (dt.Count > 1 ? $"; also {string.Join(", ", dt.Where(x => x != "Water"))}" : ""));
+        if (!HasSurface(f.Truth.Height) && HasSurface(f.Winner.Height))
+            return (WaterVerdict.Altered, WaterBlocker.None, $"a surface where the truth had none ({HeightKind(f.Truth.Height)} replaced by {HeightKind(f.Winner.Height)} {f.Winner.Height:0.#})"
+                                                             + (dt.Count > 1 ? $"; also {string.Join(", ", dt.Where(x => x != "Height"))}" : ""));
+        return (WaterVerdict.Altered, WaterBlocker.None, $"differs from the truth in {string.Join(", ", dt)}");
+    }
+
+    /// <summary>Rule 12's split by who wins the record.</summary>
+    public static WaterPopulation ClassifyWaterPopulation(PluginKind winner) => winner switch
+    {
+        PluginKind.Bethesda => WaterPopulation.BethesdaFloor,
+        PluginKind.Ussep => WaterPopulation.Ussep,
+        PluginKind.WaterMod => WaterPopulation.WaterMod,
+        _ => WaterPopulation.Other,
+    };
+
+    /// <summary>One side of a cell pair, RESOLVED through its worldspace: <paramref name="Has"/> the HasWater flag;
+    /// <paramref name="Water"/> the cell's WATR else the worldspace's (null = neither); <paramref name="Z"/> the cell's real
+    /// height else the worldspace default when real (null = no surface height anywhere).</summary>
+    public readonly record struct ResolvedWater(bool Has, string? Water, float? Z);
+
+    /// <summary>A pair of edge-adjacent cells under one arm is JOINED when both have water, the same resolved WATR and
+    /// heights within <paramref name="eps"/>. A pair with no surface height on a watered side cannot be judged joined.</summary>
+    public static bool WaterJoined(ResolvedWater a, ResolvedWater b, float eps)
+        => a.Has && b.Has && a.Z is { } za && b.Z is { } zb && MathF.Abs(za - zb) <= eps
+           && string.Equals(a.Water ?? "", b.Water ?? "", StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>The seam rule over a pair, truth arm against winner arm.</summary>
+    public static (WaterSeamVerdict Verdict, string Why) WaterSeam(ResolvedWater aTruth, ResolvedWater bTruth,
+                                                                   ResolvedWater aWin, ResolvedWater bWin,
+                                                                   WaterVerdict aVerdict, WaterVerdict bVerdict, float eps)
+    {
+        if (!aWin.Has && !bWin.Has && !aTruth.Has && !bTruth.Has) return (WaterSeamVerdict.None, "neither side has water in either arm");
+        bool tj = WaterJoined(aTruth, bTruth, eps), wj = WaterJoined(aWin, bWin, eps);
+        if (tj && wj) return (WaterSeamVerdict.None, "joined in both arms");
+        if (!tj && !wj)
+        {
+            // Bethesda ships this pair apart. Whether the winner's disagreement is the same one is stated.
+            return (WaterSeamVerdict.Inherited, $"apart in both arms (truth {Describe(aTruth)} | {Describe(bTruth)}; winner {Describe(aWin)} | {Describe(bWin)})");
+        }
+        if (!tj && wj) return (WaterSeamVerdict.Joined, $"apart under the truth ({Describe(aTruth)} | {Describe(bTruth)}), joined under the winner ({Describe(aWin)})");
+        // truth joined, winner not
+        string attr = aVerdict != WaterVerdict.Forwarded && bVerdict != WaterVerdict.Forwarded ? "both sides"
+                    : aVerdict != WaterVerdict.Forwarded ? "side A"
+                    : bVerdict != WaterVerdict.Forwarded ? "side B" : "the worldspace record (both cells forward)";
+        return (WaterSeamVerdict.Seam, $"joined under the truth ({Describe(aTruth)}), apart under the winner ({Describe(aWin)} | {Describe(bWin)}) — attributed to {attr}");
+
+        static string Describe(ResolvedWater r) => !r.Has ? "no water" : $"{r.Water ?? "(no WATR)"} z {(r.Z is { } z ? z.ToString("0.#") : "?")}";
+    }
+
+    /// <summary>The missing-water candidate rule. <paramref name="truthVisible"/> / <paramref name="winnerVisible"/> are the
+    /// share of the cell's LAND vertices that lie BELOW the resolved surface under each arm (null = no LAND to measure
+    /// against). A surface under the ground everywhere is invisible, which is what a player calls "no water".</summary>
+    public static (bool Candidate, PhysicalState Physical, string Why) MissingWater(WaterVerdict verdict, bool truthHas, float? truthVisible,
+                                                                                    bool winnerHas, float? winnerVisible, float minShare)
+    {
+        if (verdict == WaterVerdict.Forwarded) return (false, PhysicalState.Gone, "the winner forwards the truth");
+        if (verdict == WaterVerdict.Unjudgeable) return (false, PhysicalState.Unmeasured, "unjudgeable cell");
+        if (!truthHas) return (false, PhysicalState.Gone, "the truth has no water here — nothing to lose");
+        if (truthVisible is { } tv && tv < minShare)
+            return (false, PhysicalState.Gone, $"the truth's own surface is under the ground ({tv:P0} of the cell below it) — the same-defect control, never a candidate");
+        if (!winnerHas) return (true, PhysicalState.Holds, "the winner has no water at all where the truth's surface showed");
+        if (truthVisible is null) return (false, PhysicalState.Unmeasured, "no LAND to measure the surface against");
+        if (winnerVisible is null) return (false, PhysicalState.Unmeasured, "no LAND under the winner to measure the surface against");
+        if (winnerVisible.Value < minShare)
+            return (true, PhysicalState.Holds, $"the winner's surface stands above the LAND over {winnerVisible:P0} of the cell (truth {truthVisible:P0}; the floor is {minShare:P0})");
+        return (false, PhysicalState.Gone, $"the winner's surface still shows over {winnerVisible:P0} of the cell (truth {truthVisible:P0})");
+    }
+
+    // -----------------------------------------------------------------------------------
+    // LANDSCAPE SEAMS (roadmap 4.9, Part B — 2026-09-04). The engine draws each cell's LAND on its own;
+    // two adjacent cells whose shared-edge vertices disagree show a step or a gap. Heights come from
+    // HousecarlCore.LandHeight; this is the rule over the three deltas the index measures.
+    // -----------------------------------------------------------------------------------
+
+    /// <summary>Max |Δ| and the count over <paramref name="eps"/> between two 33-vertex edges.</summary>
+    public static (float MaxDelta, int OverEps) EdgeMismatch(IReadOnlyList<float> a, IReadOnlyList<float> b, float eps)
+    {
+        if (a.Count != b.Count) throw new ArgumentException("edges of different length");
+        float max = 0f; int over = 0;
+        for (int i = 0; i < a.Count; i++)
+        {
+            float d = MathF.Abs(a[i] - b[i]);
+            if (d > max) max = d;
+            if (d > eps) over++;
+        }
+        return (max, over);
+    }
+
+    /// <summary>The three deltas of a pair under the LATER winner's view. <paramref name="WinDelta"/>: the two winners.
+    /// <paramref name="ViewDelta"/>: later's own cell against the other side as later saw it (the last snap by later or a
+    /// plugin in its master closure). <paramref name="PrevDelta"/>: the two sides as later's masters left them, before
+    /// later's own edit — null when later defined the cell or its masters never stated the other. <paramref name="OtherSeen"/>:
+    /// the other side's winner is later or in later's closure (then ViewDelta == WinDelta by construction).</summary>
+    public readonly record struct LandSeamFacts(float WinDelta, float ViewDelta, float? PrevDelta, bool OtherSeen, bool Judged = true);
+
+    public static (LandSeamVerdict Verdict, SeamOrigin? Origin, SeamSight? Sight, string Why) LandSeam(LandSeamFacts f, float eps)
+    {
+        if (!f.Judged) return (LandSeamVerdict.Unjudgeable, null, null, "a side's heightmap could not be decoded");
+        if (f.WinDelta <= eps) return (LandSeamVerdict.None, null, null, $"the winners agree within {eps:0.#} u (Δ {f.WinDelta:0.#})");
+        if (f.ViewDelta <= eps)
+            return (LandSeamVerdict.Seam, SeamOrigin.Introduced, SeamSight.Blind,
+                    $"each side matches what it saw (Δ {f.ViewDelta:0.#} under the later plugin's view); together they differ by {f.WinDelta:0.#} u"
+                    + (f.OtherSeen ? " — yet the other side's winner is in its closure (a view/winner disagreement the caller should count)" : ""));
+        if (f.PrevDelta is { } pd && pd > eps)
+            return (LandSeamVerdict.Seam, SeamOrigin.Inherited, SeamSight.Seen,
+                    $"the seam pre-dates the later plugin's edit (Δ {pd:0.#} before it, {f.ViewDelta:0.#} under its view, {f.WinDelta:0.#} now)");
+        return (LandSeamVerdict.Seam, SeamOrigin.Introduced, SeamSight.Seen,
+                $"the later plugin broke a matching edge it could see (Δ {(f.PrevDelta is { } p ? p.ToString("0.#") + " before it" : "n/a: its masters state no LAND on its side, so the LAND is new here")}, {f.ViewDelta:0.#} under its view, {f.WinDelta:0.#} now)");
+    }
+
+    /// <summary>Rule 12's split for a pair: who the later winner is.</summary>
+    public static WaterPopulation ClassifyLandSeamPopulation(PluginKind later) => ClassifyWaterPopulation(later);
 }
+
+/// <summary>Who a plugin is, for the truth rule. Bethesda and USSEP are filenames; Generated is the fixed filenames
+/// <c>tool-output-awareness</c> lists; WaterMod is a rule over the plugin's records (see CellBoundaryIndex); Other is
+/// everything else.</summary>
+public enum PluginKind { Bethesda, Ussep, Generated, WaterMod, Other }
+
+/// <summary>How a CELL.WaterHeight value reads (viewprobe's RealHeight rule with the sentinels named).</summary>
+public enum WaterHeightKind { Real, Unset, UnsignedWrapped, NegativeWrapped, OtherSentinel }
+
+/// <summary>Winner against truth, per cell. Inert: neither arm has water, so the differing fields are dormant. Altered: a
+/// difference outside the named clauses (a real height moved, a velocity or path changed, water added where the truth
+/// had none).</summary>
+public enum WaterVerdict { Forwarded, Inert, Reverted, Dropped, Retyped, Altered, Unjudgeable }
+public enum WaterBlocker { None, DuplicateCell, GeneratedWinner, UnreadablePlugin }
+public enum WaterPopulation { BethesdaFloor, Ussep, WaterMod, Other }
+
+/// <summary>Per edge-adjacent pair. Seam: joined under the truth, apart under the winner. Inherited: apart in both
+/// (Bethesda ships it). Joined: apart under the truth, joined under the winner (a fixer's shape).</summary>
+public enum WaterSeamVerdict { None, Seam, Inherited, Joined }
+
+public enum LandSeamVerdict { None, Seam, Unjudgeable }
+public enum SeamOrigin { Introduced, Inherited }
+/// <summary>Blind: under the later plugin's own view the edge matched — the seam exists only in the combination.</summary>
+public enum SeamSight { Seen, Blind }
 
 /// <summary>The class's PHYSICAL half under one arm: it holds, it is gone, or the arm could not measure it. What the
 /// predicate IS per detector: a clobber — victim-only ground remains (CoverageLoss samples beyond the reach clearance);

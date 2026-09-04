@@ -1,8 +1,10 @@
+using System.Numerics;
 using System.Xml.Linq;
 using HarnessShared;
 using HousecarlCore;
 using Mutagen.Bethesda;
 using Mutagen.Bethesda.Plugins;
+using Mutagen.Bethesda.Plugins.Records;
 using Mutagen.Bethesda.Skyrim;
 using Noggog;
 
@@ -1974,6 +1976,517 @@ Console.WriteLine("\nPROOF — the route-cut rule (DetectorModel.RouteCut)");
     // cut — a line that was not found was not swept.
     c = DetectorModel.RouteCut(true, touched: 16, lineFound: false, lineWhy: "dead end", cut: true, passage: 0f);
     Check("cut: no line outranks a stray cut flag -> NoLine", c.Verdict == RouteCutVerdict.NoLine, c.Why);
+}
+
+
+// ---------------------------------------------------------------------------------------
+// CELL-BOUNDARY WATER (roadmap 4.9 Part A, frozen 2026-09-04) — DetectorModel.HeightKind / WaterDiff /
+// ClassifyWater / WaterSeam / MissingWater, then a synthetic order through CellBoundaryIndex.JudgeWater.
+// The plugins are NAMED for the truth rule (Skyrim.esm, Update.esm, the USSEP filename), because the
+// rule is by filename; they live in a temp directory and are not a game.
+// ---------------------------------------------------------------------------------------
+Console.WriteLine("\nPROOF — cell water: height kinds, the tuple diff, the verdict (DetectorModel.ClassifyWater)");
+{
+    Check("water: null height -> Unset", DetectorModel.HeightKind(null) == WaterHeightKind.Unset, "");
+    Check("water: 3.4028235E+38 -> Unset", DetectorModel.HeightKind(float.MaxValue) == WaterHeightKind.Unset, "");
+    Check("water: 4.2949532E+09 -> UnsignedWrapped", DetectorModel.HeightKind(4.2949532E+09f) == WaterHeightKind.UnsignedWrapped, "Winterhold's sea cells");
+    Check("water: -2.1474836E+09 -> NegativeWrapped", DetectorModel.HeightKind(-2.1474836E+09f) == WaterHeightKind.NegativeWrapped, "Whiterun (0,0)");
+    Check("water: -3.4028235E+38 -> OtherSentinel", DetectorModel.HeightKind(float.MinValue) == WaterHeightKind.OtherSentinel, "Blackreach");
+    Check("water: -14000 -> Real", DetectorModel.HeightKind(-14000f) == WaterHeightKind.Real, "");
+    Check("water: 99,999 -> Real; 100,000 -> OtherSentinel (the world's edge)", DetectorModel.HeightKind(99_999f) == WaterHeightKind.Real && DetectorModel.HeightKind(100_000f) == WaterHeightKind.OtherSentinel, "");
+    // The engine's reading, measured 2026-09-04 (Part C): one 'use the default' value, the rest literals after an int32 conversion.
+    Check("water: the surface — Unset defers to the worldspace default", DetectorModel.SurfaceHeight(float.MaxValue, -14000f) == -14000f && DetectorModel.SurfaceHeight(null, -14000f) == -14000f, "");
+    Check("water: the surface — Unset with no real default is no surface", DetectorModel.SurfaceHeight(float.MaxValue, null) is null, "");
+    Check("water: the surface — 4.2949532E+09 saturates to the default (Winterhold's swimmer at the default's depth)", DetectorModel.SurfaceHeight(4.2949532E+09f, -14000f) == -14000f, $"{DetectorModel.SurfaceHeight(4.2949532E+09f, -14000f)}");
+    Check("water: the surface — -2.1474836E+09 and -3.4028235E+38 place no surface (int-min in the engine)", DetectorModel.SurfaceHeight(-2.1474836E+09f, 100f) is null && DetectorModel.SurfaceHeight(float.MinValue, 100f) is null, "Lux's warehouse cell: the player stood on the floor in vanilla");
+    Check("water: the surface — a real height is itself", DetectorModel.SurfaceHeight(-988f, -14000f) == -988f, "");
+    Check("water: Unset and the wrapped 4.29e9 are equal statements (both the default); the default and a real are not", DetectorModel.HeightsEqual(float.MaxValue, null) && DetectorModel.HeightsEqual(float.MaxValue, 4.2949532E+09f) && !DetectorModel.HeightsEqual(4.2949532E+09f, -14000f), "");
+    Check("water: two no-surface sentinels are equal to each other", DetectorModel.HeightsEqual(-2.1474836E+09f, float.MinValue), "");
+    Check("water: a no-surface sentinel and a real height are not", !DetectorModel.HeightsEqual(float.MinValue, 0f) && !DetectorModel.HeightsEqual(float.MaxValue, -14000f), "");
+    Check("water: reals within 0.01 u are equal; 0.02 apart are not", DetectorModel.HeightsEqual(-14000f, -14000.005f) && !DetectorModel.HeightsEqual(-14000f, -14000.02f), "");
+
+    var upd = new DetectorModel.WaterTuple(true, false, "001232:Update.esm", null, new Vector3(1, 0, 0), new Vector3(0, 0, 0), "noise.dds", null);
+    var pre = new DetectorModel.WaterTuple(true, false, null, null, null, null, null, null);
+    Check("water: identical tuples diff on nothing", DetectorModel.WaterDiff(upd, upd).Count == 0, "");
+    var d = DetectorModel.WaterDiff(upd, pre);
+    Check("water: the SE additions diff on Water, Velocity, Noise", d.SequenceEqual(new[] { "Water", "Velocity", "Noise" }), string.Join(",", d));
+    Check("water: an empty path equals a null path", DetectorModel.WaterDiff(upd, upd with { EnvMap = "" }).Count == 0, "");
+    Check("water: a velocity 0.005 off is equal; 0.02 off is not", DetectorModel.WaterDiff(upd, upd with { VelocityAngle = new Vector3(1.005f, 0, 0) }).Count == 0
+                                                                 && DetectorModel.WaterDiff(upd, upd with { VelocityAngle = new Vector3(1.02f, 0, 0) }).Count == 1, "");
+
+    DetectorModel.WaterFacts F(DetectorModel.WaterTuple winner, PluginKind kind = PluginKind.Other, DetectorModel.WaterTuple? wm = null, bool dup = false, bool author = false)
+        => new(upd, pre, wm, winner, kind, author, dup);
+    var r = DetectorModel.ClassifyWater(F(upd));
+    Check("water: winner equals the truth -> Forwarded", r.Verdict == WaterVerdict.Forwarded, r.Why);
+    r = DetectorModel.ClassifyWater(F(pre));
+    Check("water: winner equals the earliest tuple -> Reverted (the Oldrim-port signature)", r.Verdict == WaterVerdict.Reverted && r.Why.Contains("Water"), r.Why);
+    r = DetectorModel.ClassifyWater(F(upd with { HasWater = false }));
+    Check("water: HasWater cleared -> Dropped", r.Verdict == WaterVerdict.Dropped && r.Why.Contains("HasWater"), r.Why);
+    r = DetectorModel.ClassifyWater(F(upd with { Water = null }));
+    Check("water: the WATR link nulled -> Dropped", r.Verdict == WaterVerdict.Dropped && r.Why.Contains("link"), r.Why);
+    r = DetectorModel.ClassifyWater(F(upd with { Height = -14000f }));
+    Check("water: the default -> a stated real height -> Altered (a surface either way; measured 2026-09-04)", r.Verdict == WaterVerdict.Altered && r.Why.Contains("Height"), r.Why);
+    var real = upd with { Height = -14000f };
+    r = DetectorModel.ClassifyWater(new DetectorModel.WaterFacts(real, pre, null, real with { Height = float.MaxValue }, PluginKind.Other, false, false));
+    Check("water: a real height -> the default -> Altered, not Dropped", r.Verdict == WaterVerdict.Altered, r.Why);
+    r = DetectorModel.ClassifyWater(new DetectorModel.WaterFacts(real, pre, null, real with { Height = -2.1474836E+09f }, PluginKind.Other, false, false));
+    Check("water: a real height -> int-min -> Dropped (the surface removed)", r.Verdict == WaterVerdict.Dropped && r.Why.Contains("removed"), r.Why);
+    r = DetectorModel.ClassifyWater(F(upd with { Height = -2.1474836E+09f }));
+    Check("water: the default -> int-min -> Dropped (the default's surface removed)", r.Verdict == WaterVerdict.Dropped, r.Why);
+    var none = upd with { Height = float.MinValue };
+    r = DetectorModel.ClassifyWater(new DetectorModel.WaterFacts(none, pre, null, none with { Height = 0f }, PluginKind.Other, false, false));
+    Check("water: no surface -> a real height -> Altered (Lux's warehouse cell: a surface where the truth had none)", r.Verdict == WaterVerdict.Altered && r.Why.Contains("none"), r.Why);
+    r = DetectorModel.ClassifyWater(F(upd with { Water = "000018:Skyrim.esm" }));
+    Check("water: a different WATR -> Retyped", r.Verdict == WaterVerdict.Retyped, r.Why);
+    r = DetectorModel.ClassifyWater(F(upd with { Water = "000018:Skyrim.esm" }, PluginKind.WaterMod));
+    Check("water: Retyped by a water mod is still Retyped (the population says deliberate)", r.Verdict == WaterVerdict.Retyped, r.Why);
+    var wmT = upd with { Water = "000801:WaterMod.esp" };
+    r = DetectorModel.ClassifyWater(F(wmT, PluginKind.Other, wmT));
+    Check("water: winner equals the water mod's tuple -> Forwarded (the second truth)", r.Verdict == WaterVerdict.Forwarded && r.Why.Contains("water mod"), r.Why);
+    r = DetectorModel.ClassifyWater(new DetectorModel.WaterFacts(real, pre, null, real with { Height = -13000f }, PluginKind.Other, false, false));
+    Check("water: a real height moved to another real height -> Altered, never Dropped", r.Verdict == WaterVerdict.Altered && r.Why.Contains("Height"), r.Why);
+    r = DetectorModel.ClassifyWater(F(upd with { VelocityAngle = new Vector3(0, 1, 0) }));
+    Check("water: a velocity change alone -> Altered", r.Verdict == WaterVerdict.Altered, r.Why);
+    r = DetectorModel.ClassifyWater(new DetectorModel.WaterFacts(pre with { HasWater = false }, pre with { HasWater = false }, null, pre, PluginKind.Other, false, false));
+    Check("water: HasWater added where the truth had none -> Altered", r.Verdict == WaterVerdict.Altered, r.Why);
+    var dry = pre with { HasWater = false, Height = -2.1474836E+09f };
+    r = DetectorModel.ClassifyWater(new DetectorModel.WaterFacts(dry, dry, null, dry with { Height = 0f }, PluginKind.Other, false, false));
+    Check("water: no water in either arm, the dormant height re-saved -> Inert, never Dropped (Lux's interiors)", r.Verdict == WaterVerdict.Inert && r.Why.Contains("Height"), r.Why);
+    r = DetectorModel.ClassifyWater(new DetectorModel.WaterFacts(dry, dry, null, dry with { Water = "000018:Skyrim.esm" }, PluginKind.Other, false, false));
+    Check("water: no water in either arm, a dormant WATR link added -> Inert", r.Verdict == WaterVerdict.Inert, r.Why);
+    var m0 = DetectorModel.MissingWater(WaterVerdict.Inert, false, null, false, null, 0.05f);
+    Check("missing: Inert is never a candidate", !m0.Candidate, m0.Why);
+    r = DetectorModel.ClassifyWater(F(pre, PluginKind.Generated));
+    Check("water: a generated winner -> Unjudgeable(GeneratedWinner), even reverted", r.Verdict == WaterVerdict.Unjudgeable && r.Reason == WaterBlocker.GeneratedWinner, r.Why);
+    r = DetectorModel.ClassifyWater(F(upd, dup: true));
+    Check("water: a duplicate grid point -> Unjudgeable(DuplicateCell), even forwarded", r.Verdict == WaterVerdict.Unjudgeable && r.Reason == WaterBlocker.DuplicateCell, r.Why);
+    r = DetectorModel.ClassifyWater(F(upd, author: true));
+    Check("water: an author-truth cell forwarded says so", r.Verdict == WaterVerdict.Forwarded && r.Why.Contains("definer"), r.Why);
+    Check("water: populations — Bethesda floor / USSEP / water mod / other",
+          DetectorModel.ClassifyWaterPopulation(PluginKind.Bethesda) == WaterPopulation.BethesdaFloor && DetectorModel.ClassifyWaterPopulation(PluginKind.Ussep) == WaterPopulation.Ussep
+          && DetectorModel.ClassifyWaterPopulation(PluginKind.WaterMod) == WaterPopulation.WaterMod && DetectorModel.ClassifyWaterPopulation(PluginKind.Generated) == WaterPopulation.Other, "");
+}
+
+Console.WriteLine("\nPROOF — cell water: the seam and the missing-water rules (DetectorModel.WaterSeam / MissingWater)");
+{
+    var flow = new DetectorModel.ResolvedWater(true, "001232:Update.esm", -14000f);
+    var deflt = new DetectorModel.ResolvedWater(true, "000018:Skyrim.esm", -14000f);
+    var none = new DetectorModel.ResolvedWater(false, null, null);
+    var high = flow with { Z = -13000f };
+    Check("seam: joined = same water, heights within eps, both have water", DetectorModel.WaterJoined(flow, flow, 0.5f) && !DetectorModel.WaterJoined(flow, deflt, 0.5f) && !DetectorModel.WaterJoined(flow, high, 0.5f) && !DetectorModel.WaterJoined(flow, none, 0.5f), "");
+    Check("seam: a side without a surface height is never joined", !DetectorModel.WaterJoined(flow, flow with { Z = null }, 0.5f), "");
+    var s = DetectorModel.WaterSeam(flow, flow, flow, flow, WaterVerdict.Forwarded, WaterVerdict.Forwarded, 0.5f);
+    Check("seam: joined in both arms -> None", s.Verdict == WaterSeamVerdict.None, s.Why);
+    s = DetectorModel.WaterSeam(none, none, none, none, WaterVerdict.Forwarded, WaterVerdict.Forwarded, 0.5f);
+    Check("seam: no water anywhere -> None", s.Verdict == WaterSeamVerdict.None, s.Why);
+    s = DetectorModel.WaterSeam(flow, flow, flow, deflt, WaterVerdict.Forwarded, WaterVerdict.Reverted, 0.5f);
+    Check("seam: truth joined, winner retyped on B -> Seam attributed to side B", s.Verdict == WaterSeamVerdict.Seam && s.Why.Contains("side B"), s.Why);
+    s = DetectorModel.WaterSeam(flow, flow, none, flow, WaterVerdict.Dropped, WaterVerdict.Forwarded, 0.5f);
+    Check("seam: truth joined, winner dropped on A -> Seam attributed to side A", s.Verdict == WaterSeamVerdict.Seam && s.Why.Contains("side A"), s.Why);
+    s = DetectorModel.WaterSeam(flow, flow, deflt, none, WaterVerdict.Reverted, WaterVerdict.Dropped, 0.5f);
+    Check("seam: both sides changed -> attributed to both", s.Verdict == WaterSeamVerdict.Seam && s.Why.Contains("both sides"), s.Why);
+    s = DetectorModel.WaterSeam(flow, flow, flow, high, WaterVerdict.Forwarded, WaterVerdict.Forwarded, 0.5f);
+    Check("seam: both forward yet the heights differ -> attributed to the worldspace record", s.Verdict == WaterSeamVerdict.Seam && s.Why.Contains("worldspace"), s.Why);
+    s = DetectorModel.WaterSeam(flow, high, flow, high, WaterVerdict.Forwarded, WaterVerdict.Forwarded, 0.5f);
+    Check("seam: apart in both arms -> Inherited (Bethesda ships it)", s.Verdict == WaterSeamVerdict.Inherited, s.Why);
+    s = DetectorModel.WaterSeam(flow, high, flow, flow, WaterVerdict.Forwarded, WaterVerdict.Altered, 0.5f);
+    Check("seam: apart under the truth, joined under the winner -> Joined (a fixer's shape)", s.Verdict == WaterSeamVerdict.Joined, s.Why);
+    s = DetectorModel.WaterSeam(flow, flow with { Z = -14000.4f }, flow, flow with { Z = -14000.6f }, WaterVerdict.Forwarded, WaterVerdict.Altered, 0.5f);
+    Check("seam: eps is inclusive on the truth side and exclusive past it", s.Verdict == WaterSeamVerdict.Seam, s.Why);
+
+    var m = DetectorModel.MissingWater(WaterVerdict.Forwarded, true, 1f, true, 1f, 0.05f);
+    Check("missing: Forwarded is never a candidate (predicate Gone)", !m.Candidate && m.Physical == PhysicalState.Gone, m.Why);
+    m = DetectorModel.MissingWater(WaterVerdict.Unjudgeable, true, 1f, true, 1f, 0.05f);
+    Check("missing: Unjudgeable -> not a candidate, Unmeasured", !m.Candidate && m.Physical == PhysicalState.Unmeasured, m.Why);
+    m = DetectorModel.MissingWater(WaterVerdict.Altered, false, null, false, null, 0.05f);
+    Check("missing: the truth has no water -> nothing to lose", !m.Candidate && m.Physical == PhysicalState.Gone, m.Why);
+    m = DetectorModel.MissingWater(WaterVerdict.Dropped, true, 0.02f, false, null, 0.05f);
+    Check("missing: the truth's own surface is under the ground -> the control, never a candidate", !m.Candidate && m.Why.Contains("control"), m.Why);
+    m = DetectorModel.MissingWater(WaterVerdict.Dropped, true, 0.6f, false, null, 0.05f);
+    Check("missing: HasWater cleared where the truth showed water -> candidate, Holds", m.Candidate && m.Physical == PhysicalState.Holds, m.Why);
+    m = DetectorModel.MissingWater(WaterVerdict.Dropped, true, null, false, null, 0.05f);
+    Check("missing: no LAND and no water at all -> still a candidate on the Dropped clause", m.Candidate && m.Physical == PhysicalState.Holds, m.Why);
+    m = DetectorModel.MissingWater(WaterVerdict.Reverted, true, null, true, null, 0.05f);
+    Check("missing: no LAND to measure against -> Unmeasured", !m.Candidate && m.Physical == PhysicalState.Unmeasured, m.Why);
+    m = DetectorModel.MissingWater(WaterVerdict.Altered, true, 0.51f, true, 0.0f, 0.05f);
+    Check("missing: the winner's surface under the ground everywhere -> candidate", m.Candidate && m.Physical == PhysicalState.Holds && m.Why.Contains("0%"), m.Why);
+    m = DetectorModel.MissingWater(WaterVerdict.Altered, true, 0.51f, true, 0.05f, 0.05f);
+    Check("missing: exactly the floor is not under it", !m.Candidate && m.Physical == PhysicalState.Gone, m.Why);
+    m = DetectorModel.MissingWater(WaterVerdict.Reverted, true, 0.9f, true, 0.9f, 0.05f);
+    Check("missing: Reverted with the surface still showing -> not a candidate (a seam, not missing water)", !m.Candidate && m.Physical == PhysicalState.Gone, m.Why);
+}
+
+Console.WriteLine("\nPROOF — cell water: a synthetic order through CellBoundaryIndex.JudgeWater (Mutagen-written, kinds by filename)");
+{
+    var root = Path.Combine(Path.GetTempPath(), "proofprobe-water-" + Environment.ProcessId);
+    Directory.CreateDirectory(root);
+    var release = SkyrimRelease.SkyrimSE;
+    var skyK = new ModKey("Skyrim", ModType.Master);
+    var updK = new ModKey("Update", ModType.Master);
+    var usK = ModKey.FromNameAndExtension(PluginKinds.Ussep);
+    var wmK = new ModKey("WaterMod", ModType.Plugin);
+    var portK = new ModKey("Port", ModType.Plugin);
+    var laterK = new ModKey("Later", ModType.Plugin);
+    var genK = new ModKey("DynDOLOD", ModType.Plugin);
+    var modxK = new ModKey("ModX", ModType.Plugin);
+    FormKey S(uint id) => new(skyK, id);
+    var worldK = S(0x800); var topK = S(0x801);
+    var defWater = S(0x810); var riverWater = S(0x811);
+    var flowBlend = new FormKey(updK, 0x801);
+    var wmWater = new FormKey(wmK, 0x801);
+    FormKey C(int x) => S((uint)(0x900 + x));          // grid cell (x, 0)
+    FormKey L(int x) => S((uint)(0xA00 + x));          // its LAND
+    var c01 = S(0x920); var l01 = S(0xA20);            // grid cell (0, 1)
+    var c30b = S(0x930); var l30b = S(0xA30);          // the duplicate at (3, 0)
+    var c50 = new FormKey(modxK, 0x801); var l50 = new FormKey(modxK, 0x802);   // a mod-defined cell at (5, 0)
+
+    // A flat LAND at world height h: offset h/8, gradients all zero.
+    static Landscape Flat(FormKey key, float h, FormKey? baseTex = null)
+    {
+        var land = new Landscape(key, SkyrimRelease.SkyrimSE) { VertexHeightMap = new LandscapeVertexHeightMap { Offset = h / 8f, HeightMap = new Array2d<sbyte>(new sbyte[33, 33]) } };
+        if (baseTex is { } bt)
+            foreach (var q in new[] { Quadrant.BottomLeft, Quadrant.BottomRight, Quadrant.TopLeft, Quadrant.TopRight })
+            { var bl = new BaseLayer { Header = new LayerHeader { Quadrant = q, LayerNumber = 0 } }; bl.Header.Texture.SetTo(bt); land.Layers.Add(bl); }
+        return land;
+    }
+    static Cell Grid(FormKey key, int x, int y, bool hasWater, FormKey? water, float? height, Landscape? land, string? edid = null, Vector3? vel = null, string? noise = null)
+    {
+        var c = new Cell(key, SkyrimRelease.SkyrimSE) { EditorID = edid, Flags = hasWater ? Cell.Flag.HasWater : default, Grid = new CellGrid { Point = new P2Int(x, y) }, WaterHeight = height, Landscape = land };
+        if (water is { } w) c.Water.SetTo(w);
+        if (vel is { } v) c.WaterVelocity = new CellWaterVelocity { Angle = new P3Float(v.X, v.Y, v.Z), Offset = new P3Float(0, 0, 0) };
+        if (noise is not null) c.WaterNoiseTexture = noise;
+        return c;
+    }
+    static Worldspace WorldWith(FormKey wKey, FormKey topK, FormKey? water, float? defaultHeight, params Cell[] cells)
+    {
+        var ws = new Worldspace(wKey, SkyrimRelease.SkyrimSE) { EditorID = "WaterWorld" };
+        if (water is { } w) ws.Water.SetTo(w);
+        if (defaultHeight is { } dh) ws.LandDefaults = new WorldspaceLandDefaults { DefaultLandHeight = 0, DefaultWaterHeight = dh };
+        ws.TopCell = new Cell(topK, SkyrimRelease.SkyrimSE) { Flags = default, Grid = new CellGrid { Point = new P2Int(0, 0) } };   // the persistent cell, stamped (0,0) like the CK does
+        var blk = new WorldspaceBlock { BlockNumberX = 0, BlockNumberY = 0, GroupType = GroupTypeEnum.ExteriorCellBlock };
+        var sub = new WorldspaceSubBlock { BlockNumberX = 0, BlockNumberY = 0, GroupType = GroupTypeEnum.ExteriorCellSubBlock };
+        foreach (var c in cells) sub.Items.Add(c);
+        blk.Items.Add(sub); ws.SubCells.Add(blk);
+        return ws;
+    }
+    string Write(SkyrimMod mod, params ISkyrimModGetter[] masters)
+    {
+        var path = Path.Combine(root, mod.ModKey.FileName.String);
+        mod.BeginWrite.ToPath(path).WithLoadOrder(masters).Write();
+        return path;
+    }
+
+    // Skyrim.esm — the pre-Update state: HasWater, no WATR link, the sentinel; the sea floor at -15000 (visible), C11 dry land.
+    var sky = new SkyrimMod(skyK, release);
+    sky.Waters.Add(new Water(defWater, release) { EditorID = "DefaultWater" });
+    sky.Waters.Add(new Water(riverWater, release) { EditorID = "RiverWater" });
+    sky.Worldspaces.Add(WorldWith(worldK, topK, defWater, -14000f,
+        Grid(C(0), 0, 0, true, null, float.MaxValue, Flat(L(0), -15000f, defWater), "C00"),
+        Grid(C(1), 1, 0, true, null, float.MaxValue, Flat(L(1), -15000f), "C10"),
+        Grid(C(2), 2, 0, true, null, -14000f, Flat(L(2), -15000f), "C20"),
+        Grid(C(3), 3, 0, true, null, float.MaxValue, Flat(L(3), -15000f), "C30"),
+        Grid(c30b, 3, 0, true, null, float.MaxValue, Flat(l30b, -15000f), "C30b"),
+        Grid(C(4), 4, 0, true, null, float.MaxValue, Flat(L(4), 0f), "C40"),                 // the control: land above the sea everywhere
+        Grid(C(6), 6, 0, true, null, float.MaxValue, Flat(L(6), -15000f), "C60"),
+        Grid(C(7), 7, 0, true, null, float.MaxValue, Flat(L(7), -15000f), "C70"),
+        Grid(c01, 0, 1, true, null, float.MaxValue, Flat(l01, -15000f), "C01"),
+        Grid(S(0x921), 1, 1, false, null, null, Flat(S(0xA21), 0f), "C11")));
+    var skyPath = Write(sky);
+    using var skyOv = SkyrimMod.CreateFromBinaryOverlay(skyPath, release);
+
+    // Update.esm — the SE water: a flow-blend WATR, velocity, noise, on every sea cell but C30/C30b (the wrinkle stays vanilla).
+    var upd = new SkyrimMod(updK, release);
+    upd.Waters.Add(new Water(flowBlend, release) { EditorID = "DefaultWaterFlowBlend" });
+    var vel = new Vector3(1, 0, 0);
+    upd.Worldspaces.Add(WorldWith(worldK, topK, defWater, -14000f,
+        Grid(C(0), 0, 0, true, flowBlend, float.MaxValue, null, "C00", vel, "n.dds"),
+        Grid(C(1), 1, 0, true, flowBlend, float.MaxValue, null, "C10", vel, "n.dds"),
+        Grid(C(2), 2, 0, true, flowBlend, -14000f, null, "C20", vel, "n.dds"),
+        Grid(C(4), 4, 0, true, flowBlend, float.MaxValue, null, "C40", vel, "n.dds"),
+        Grid(C(6), 6, 0, true, flowBlend, float.MaxValue, null, "C60", vel, "n.dds"),
+        Grid(C(7), 7, 0, true, flowBlend, float.MaxValue, null, "C70", vel, "n.dds"),
+        Grid(c01, 0, 1, true, flowBlend, float.MaxValue, null, "C01", vel, "n.dds")));
+    var updPath = Write(upd, skyOv);
+    using var updOv = SkyrimMod.CreateFromBinaryOverlay(updPath, release);
+
+    // USSEP — forwards C00 exactly (no snap; the truth is still Update's tuple).
+    var us = new SkyrimMod(usK, release);
+    us.Worldspaces.Add(WorldWith(worldK, topK, defWater, -14000f, Grid(C(0), 0, 0, true, flowBlend, float.MaxValue, null, "C00", vel, "n.dds")));
+    var usPath = Write(us, skyOv, updOv);
+    using var usOv = SkyrimMod.CreateFromBinaryOverlay(usPath, release);
+
+    // WaterMod.esp — overrides a vanilla WATR (the rule's first clause) and retypes C01 to a WATR of its own.
+    var wm = new SkyrimMod(wmK, release);
+    wm.Waters.Add(new Water(defWater, release) { EditorID = "DefaultWater" });
+    wm.Waters.Add(new Water(wmWater, release) { EditorID = "WaterModWater" });
+    wm.Worldspaces.Add(WorldWith(worldK, topK, defWater, -14000f, Grid(c01, 0, 1, true, wmWater, float.MaxValue, null, "C01", vel, "n.dds")));
+    var wmPath = Write(wm, skyOv, updOv);
+    using var wmOv = SkyrimMod.CreateFromBinaryOverlay(wmPath, release);
+
+    // Port.esp — an Oldrim port: C10 back to Skyrim.esm's tuple; C20 HasWater cleared; C60 the link nulled; C70 a real height where the sentinel was.
+    var port = new SkyrimMod(portK, release);
+    port.Worldspaces.Add(WorldWith(worldK, topK, defWater, -14000f,
+        Grid(C(1), 1, 0, true, null, float.MaxValue, null, "C10"),
+        Grid(C(2), 2, 0, false, flowBlend, -14000f, null, "C20", vel, "n.dds"),
+        Grid(C(6), 6, 0, true, null, float.MaxValue, null, "C60", vel, "n.dds"),
+        Grid(C(7), 7, 0, true, flowBlend, -14000f, null, "C70", vel, "n.dds")));
+    var portPath = Write(port, skyOv, updOv);
+    using var portOv = SkyrimMod.CreateFromBinaryOverlay(portPath, release);
+
+    // Later.esp (masters WaterMod) — forwards the water mod's C01 exactly.
+    var later = new SkyrimMod(laterK, release);
+    later.Worldspaces.Add(WorldWith(worldK, topK, defWater, -14000f, Grid(c01, 0, 1, true, wmWater, float.MaxValue, null, "C01", vel, "n.dds")));
+    var laterPath = Write(later, skyOv, updOv, wmOv);
+
+    // DynDOLOD.esp — a generated plugin winning C40 (forwarded, but unjudgeable by kind).
+    var gen = new SkyrimMod(genK, release);
+    gen.Worldspaces.Add(WorldWith(worldK, topK, defWater, -14000f, Grid(C(4), 4, 0, true, flowBlend, float.MaxValue, null, "C40", vel, "n.dds")));
+    var genPath = Write(gen, skyOv, updOv);
+
+    // ModX.esp — defines its own cell at (5,0) with river water; Later2 (below) retypes it.
+    var modx = new SkyrimMod(modxK, release);
+    modx.Worldspaces.Add(WorldWith(worldK, topK, defWater, -14000f, Grid(c50, 5, 0, true, riverWater, float.MaxValue, Flat(l50, -15000f), "C50")));
+    var modxPath = Write(modx, skyOv);
+    using var modxOv = SkyrimMod.CreateFromBinaryOverlay(modxPath, release);
+    var later2 = new SkyrimMod(new ModKey("Later2", ModType.Plugin), release);
+    later2.Worldspaces.Add(WorldWith(worldK, topK, defWater, -14000f, Grid(c50, 5, 0, true, defWater, float.MaxValue, null, "C50")));
+    var later2Path = Write(later2, skyOv, modxOv);
+
+    var order = new[] { skyPath, updPath, usPath, wmPath, portPath, laterPath, genPath, modxPath, later2Path };
+    var idx = new CellBoundaryIndex();
+    for (int p = 0; p < order.Length; p++)
+    {
+        var mod = SkyrimMod.CreateFromBinaryOverlay(order[p], release);
+        using (mod as IDisposable) idx.Ingest(p, mod, land: true);
+    }
+    PluginKind Kind(int p) => idx.KindOf(p, ownWatrCells: 10);
+    {
+        // The resolve rule as measured 2026-09-04: an exterior cell deferring to the worldspace default keeps the sea with
+        // HasWater cleared; a cell with its own real height honours the flag (not measured; the rule's reading).
+        var wsd = new WorldWaterSnap(0, "000018:Skyrim.esm", null, -14000f, -14000f, false);
+        var cleared = new DetectorModel.WaterTuple(false, false, null, float.MaxValue, null, null, null, null);
+        var rr = CellBoundaryIndex.Resolve(cleared, wsd, exterior: true);
+        Check("water/resolve: exterior, HasWater cleared, height deferring to the default -> the sea stays (measured: the swimmer swam)", rr.Has && rr.Z == -14000f, $"{rr}");
+        rr = CellBoundaryIndex.Resolve(cleared with { Height = 4.2949532E+09f }, wsd, exterior: true);
+        Check("water/resolve: the same with the wrapped 4.29e9 (also the default) -> the sea stays", rr.Has && rr.Z == -14000f, $"{rr}");
+        rr = CellBoundaryIndex.Resolve(cleared with { Height = -14000f }, wsd, exterior: true);
+        Check("water/resolve: HasWater cleared with the cell's OWN real height -> no water (the flag honoured; not measured)", !rr.Has, $"{rr}");
+        rr = CellBoundaryIndex.Resolve(cleared, wsd, exterior: false);
+        Check("water/resolve: an interior never inherits the worldspace sea", !rr.Has, $"{rr}");
+        rr = CellBoundaryIndex.Resolve(cleared with { Height = float.MinValue }, wsd, exterior: true);
+        Check("water/resolve: HasWater cleared and a no-surface sentinel -> no water", !rr.Has && rr.Z is null, $"{rr}");
+    }
+    Check("water/index: kinds by filename — Skyrim/Update Bethesda, the USSEP name, DynDOLOD generated",
+          Kind(0) == PluginKind.Bethesda && Kind(1) == PluginKind.Bethesda && Kind(2) == PluginKind.Ussep && Kind(6) == PluginKind.Generated, $"{Kind(0)} {Kind(1)} {Kind(2)} {Kind(6)}");
+    Check("water/index: the water-mod rule — one foreign WATR override makes WaterMod; Port and Later are Other",
+          Kind(3) == PluginKind.WaterMod && Kind(4) == PluginKind.Other && Kind(5) == PluginKind.Other, $"{Kind(3)} {idx.WaterModFacts(3)} {Kind(4)} {Kind(5)}");
+    Check("water/index: the persistent cell is gridless; (3,0) is the only duplicate grid point",
+          idx.DuplicateGridPoints().Count() == 1 && idx.DuplicateGridPoints().First().Grid.X == 3, string.Join(", ", idx.DuplicateGridPoints().Select(d => $"({d.Grid.X},{d.Grid.Y})")));
+    Check("water/index: C00 has one changed-only snap after Skyrim.esm (Update's; USSEP's forward is not a step)",
+          idx.Cells[C(0)].Water.Count == 2 && idx.Cells[C(0)].Winner == 2, $"snaps {idx.Cells[C(0)].Water.Count}, winner {idx.Cells[C(0)].Winner}");
+
+    CellBoundaryIndex.CellWaterJudgement J(FormKey k) => idx.JudgeWater(idx.Cells[k], Kind, 0.05f)!;
+    var j = J(C(0));
+    Check("water/synthetic: C00 — USSEP forwards Update's tuple -> Forwarded, truth Update, population USSEP",
+          j.Verdict == WaterVerdict.Forwarded && j.TruthPlugin == 1 && j.WinnerKind == PluginKind.Ussep && !j.AuthorTruth, $"{j.Verdict} truth {j.TruthPlugin} {j.WinnerKind}");
+    Check("water/synthetic: C00 resolves to the flow-blend WATR at the worldspace default -14000, 100% visible over a -15000 floor",
+          j.RWin.Water == flowBlend.ToString() && j.RWin.Z == -14000f && j.VisWin == 1f, $"{j.RWin} vis {j.VisWin}");
+    j = J(C(1));
+    Check("water/synthetic: C10 — Port re-states Skyrim.esm's tuple -> Reverted", j.Verdict == WaterVerdict.Reverted, j.Why);
+    Check("water/synthetic: C10 under the winner resolves to the worldspace's DefaultWater at -14000 (still visible, so not missing)",
+          j.RWin.Water == defWater.ToString() && j.RWin.Z == -14000f && !j.Missing && j.Physical == PhysicalState.Gone, $"{j.RWin} missing {j.Missing} {j.MissingWhy}");
+    j = J(C(2));
+    Check("water/synthetic: C20 — HasWater cleared -> Dropped, a missing-water candidate (truth visible 100%)", j.Verdict == WaterVerdict.Dropped && j.Missing && j.Physical == PhysicalState.Holds && j.VisTruth == 1f, $"{j.Verdict} {j.MissingWhy}");
+    j = J(C(6));
+    Check("water/synthetic: C60 — the WATR link nulled -> Dropped, not missing (the default water still shows)", j.Verdict == WaterVerdict.Dropped && j.Why.Contains("link") && !j.Missing, $"{j.Verdict} {j.Why} / {j.MissingWhy}");
+    j = J(C(7));
+    Check("water/synthetic: C70 — a real height where the default stood -> Altered (both place a surface; measured 2026-09-04)", j.Verdict == WaterVerdict.Altered && j.Why.Contains("Height"), j.Why);
+    j = J(c01);
+    Check("water/synthetic: C01 — Later forwards the water mod's retype -> Forwarded on the second truth, the water mod's tuple carried",
+          j.Verdict == WaterVerdict.Forwarded && j.WaterMod is { } && j.Why.Contains("water mod"), $"{j.Verdict} {j.Why}");
+    j = J(C(3));
+    Check("water/synthetic: C30 — the duplicate grid point -> Unjudgeable(DuplicateCell)", j.Verdict == WaterVerdict.Unjudgeable && j.Blocker == WaterBlocker.DuplicateCell, j.Why);
+    j = J(C(4));
+    Check("water/synthetic: C40 — DynDOLOD wins -> Unjudgeable(GeneratedWinner)", j.Verdict == WaterVerdict.Unjudgeable && j.Blocker == WaterBlocker.GeneratedWinner, j.Why);
+    Check("water/synthetic: C40's truth surface is under the ground everywhere (the control shape, visible 0%)", j.VisTruth == 0f, $"vis {j.VisTruth}");
+    j = J(c50);
+    Check("water/synthetic: C50 — a mod-defined cell retyped by a later plugin -> Retyped with author truth", j.Verdict == WaterVerdict.Retyped && j.AuthorTruth && j.TruthPlugin == 7, $"{j.Verdict} author {j.AuthorTruth} truth {j.TruthPlugin}");
+    j = J(S(0x921));
+    Check("water/synthetic: C11 — no flag, no height, land above the default -> Forwarded; the default sea resolves under the ground (the control), not a candidate", j.Verdict == WaterVerdict.Forwarded && !j.Missing && j.RTruth.Has && j.VisTruth == 0f, $"{j.MissingWhy} has={j.RTruth.Has} vis={j.VisTruth}");
+
+    // Seams over the synthetic row: C00|C10 (forwarded | reverted) and C10|C20 (reverted | dropped).
+    var a = J(C(0)); var b = J(C(1)); var c2 = J(C(2));
+    var sm = DetectorModel.WaterSeam(a.RTruth, b.RTruth, a.RWin, b.RWin, a.Verdict, b.Verdict, 0.5f);
+    Check("water/synthetic: C00|C10 — joined under the truth, apart under the winner (a different WATR) -> Seam on side B", sm.Verdict == WaterSeamVerdict.Seam && sm.Why.Contains("side B"), sm.Why);
+    sm = DetectorModel.WaterSeam(b.RTruth, c2.RTruth, b.RWin, c2.RWin, b.Verdict, c2.Verdict, 0.5f);
+    Check("water/synthetic: C10|C20 — both changed -> Seam on both sides", sm.Verdict == WaterSeamVerdict.Seam && sm.Why.Contains("both"), sm.Why);
+    try { Directory.Delete(root, true); } catch { }
+}
+
+// ---------------------------------------------------------------------------------------
+// LANDSCAPE SEAMS (roadmap 4.9 Part B, frozen 2026-09-04) — HousecarlCore.LandHeight (the decode the renderer and the
+// detector share), DetectorModel.EdgeMismatch / LandSeam, then a synthetic order through CellBoundaryIndex.MeasurePair.
+// ---------------------------------------------------------------------------------------
+Console.WriteLine("\nPROOF — landscape seams: the VHGT decode (LandHeight), the edge rule (DetectorModel.LandSeam)");
+{
+    var g = new sbyte[33, 33];
+    var h = LandHeight.Decode(10f, g);
+    Check("land: zero gradients -> every vertex at offset × 8", h[0, 0] == 80f && h[32, 32] == 80f && h[16, 7] == 80f, $"{h[0, 0]} {h[32, 32]}");
+    g[0, 1] = 2; g[1, 0] = 3; g[2, 0] = -1;
+    h = LandHeight.Decode(10f, g);
+    Check("land: column 0 accumulates down the rows: row 1 starts at (10+2)×8", h[0, 1] == 96f && h[5, 1] == 96f, $"{h[0, 1]} {h[5, 1]}");
+    Check("land: each row accumulates along x from its own start: (10+3)×8 then (10+3-1)×8", h[1, 0] == 104f && h[2, 0] == 96f && h[32, 0] == 96f, $"{h[1, 0]} {h[2, 0]} {h[32, 0]}");
+    Check("land: the row-1 step does not leak back into row 0", h[0, 0] == 80f, $"{h[0, 0]}");
+    var east = LandHeight.Edge(h, CellEdge.East); var west = LandHeight.Edge(h, CellEdge.West);
+    var north = LandHeight.Edge(h, CellEdge.North); var south = LandHeight.Edge(h, CellEdge.South);
+    Check("land: edges — east is x=32 down y, west x=0, north y=32 along x, south y=0",
+          east[0] == h[32, 0] && east[1] == h[32, 1] && west[1] == h[0, 1] && north[3] == h[3, 32] && south[1] == h[1, 0] && south[2] == h[2, 0], "");
+    var (mx, over) = DetectorModel.EdgeMismatch(new float[] { 0, 0, 8, 40 }, new float[] { 0, 8, 0, 0 }, 8f);
+    Check("land: mismatch = max |Δ| and the count strictly over eps", mx == 40f && over == 1, $"max {mx} over {over}");
+
+    var r = DetectorModel.LandSeam(new DetectorModel.LandSeamFacts(8f, 8f, 0f, true), 8f);
+    Check("land: Δ at eps is not a seam", r.Verdict == LandSeamVerdict.None, r.Why);
+    r = DetectorModel.LandSeam(new DetectorModel.LandSeamFacts(16f, 0f, null, false), 8f);
+    Check("land: winners differ, the later side matched what it saw -> Introduced, Blind", r.Verdict == LandSeamVerdict.Seam && r.Origin == SeamOrigin.Introduced && r.Sight == SeamSight.Blind, r.Why);
+    r = DetectorModel.LandSeam(new DetectorModel.LandSeamFacts(16f, 16f, 0f, true), 8f);
+    Check("land: the later plugin broke an edge that matched before it -> Introduced, Seen", r.Verdict == LandSeamVerdict.Seam && r.Origin == SeamOrigin.Introduced && r.Sight == SeamSight.Seen, r.Why);
+    r = DetectorModel.LandSeam(new DetectorModel.LandSeamFacts(16f, 16f, null, true), 8f);
+    Check("land: no LAND before the later plugin on its side -> Introduced, Seen (the LAND is new here)", r.Verdict == LandSeamVerdict.Seam && r.Origin == SeamOrigin.Introduced && r.Sight == SeamSight.Seen && r.Why.Contains("new"), r.Why);
+    r = DetectorModel.LandSeam(new DetectorModel.LandSeamFacts(16f, 16f, 24f, true), 8f);
+    Check("land: the seam pre-dates the later plugin's edit -> Inherited", r.Verdict == LandSeamVerdict.Seam && r.Origin == SeamOrigin.Inherited && r.Sight == SeamSight.Seen, r.Why);
+    r = DetectorModel.LandSeam(new DetectorModel.LandSeamFacts(16f, 16f, 8f, true), 8f);
+    Check("land: a pre-existing Δ at eps counts as matching -> Introduced", r.Origin == SeamOrigin.Introduced, r.Why);
+    r = DetectorModel.LandSeam(new DetectorModel.LandSeamFacts(16f, 0f, 0f, false, Judged: false), 8f);
+    Check("land: an undecodable side -> Unjudgeable, never None", r.Verdict == LandSeamVerdict.Unjudgeable, r.Why);
+    r = DetectorModel.LandSeam(new DetectorModel.LandSeamFacts(16f, 0f, 0f, true), 8f);
+    Check("land: Blind with the other side in the closure is a counted disagreement, still Blind", r.Sight == SeamSight.Blind && r.Why.Contains("disagreement"), r.Why);
+}
+
+Console.WriteLine("\nPROOF — landscape seams: a synthetic order through CellBoundaryIndex.MeasurePair (Mutagen-written)");
+{
+    var root = Path.Combine(Path.GetTempPath(), "proofprobe-seam-" + Environment.ProcessId);
+    Directory.CreateDirectory(root);
+    var release = SkyrimRelease.SkyrimSE;
+    var skyK = new ModKey("Skyrim", ModType.Master);
+    var aK = new ModKey("SeamA", ModType.Plugin);
+    var bK = new ModKey("SeamB", ModType.Plugin);
+    var cK = new ModKey("SeamC", ModType.Plugin);
+    FormKey S(uint id) => new(skyK, id);
+    var worldK = S(0x800); var topK = S(0x801);
+    var texA = S(0x810); var texB = S(0x811);
+    // cells (x, y) for x in 0..2, y in 0..1
+    FormKey C(int x, int y) => S((uint)(0x900 + y * 16 + x));
+    FormKey L(int x, int y) => S((uint)(0xA00 + y * 16 + x));
+
+    static Landscape Land(FormKey key, float h, FormKey tex, Action<sbyte[,]>? shape = null)
+    {
+        var g = new sbyte[33, 33];
+        shape?.Invoke(g);
+        var land = new Landscape(key, SkyrimRelease.SkyrimSE) { VertexHeightMap = new LandscapeVertexHeightMap { Offset = h / 8f, HeightMap = new Array2d<sbyte>(g) } };
+        foreach (var q in new[] { Quadrant.BottomLeft, Quadrant.BottomRight, Quadrant.TopLeft, Quadrant.TopRight })
+        { var bl = new BaseLayer { Header = new LayerHeader { Quadrant = q, LayerNumber = 0 } }; bl.Header.Texture.SetTo(tex); land.Layers.Add(bl); }
+        return land;
+    }
+    static Cell Grid(FormKey key, int x, int y, Landscape land, string edid)
+        => new(key, SkyrimRelease.SkyrimSE) { EditorID = edid, Flags = default, Grid = new CellGrid { Point = new P2Int(x, y) }, Landscape = land };
+    static Worldspace WorldWith(FormKey wKey, FormKey topK, params Cell[] cells)
+    {
+        var ws = new Worldspace(wKey, SkyrimRelease.SkyrimSE) { EditorID = "SeamWorld" };
+        ws.TopCell = new Cell(topK, SkyrimRelease.SkyrimSE) { Flags = default };
+        var blk = new WorldspaceBlock { BlockNumberX = 0, BlockNumberY = 0, GroupType = GroupTypeEnum.ExteriorCellBlock };
+        var sub = new WorldspaceSubBlock { BlockNumberX = 0, BlockNumberY = 0, GroupType = GroupTypeEnum.ExteriorCellSubBlock };
+        foreach (var c in cells) sub.Items.Add(c);
+        blk.Items.Add(sub); ws.SubCells.Add(blk);
+        return ws;
+    }
+    string Write(SkyrimMod mod, params ISkyrimModGetter[] masters)
+    {
+        var path = Path.Combine(root, mod.ModKey.FileName.String);
+        mod.BeginWrite.ToPath(path).WithLoadOrder(masters).Write();
+        return path;
+    }
+    // Raise the INTERIOR of the east edge (x = 32, rows 1..31) by `units` heightmap units: a gradient at x=32 on those
+    // rows. The corner vertices are left alone on purpose — a corner is shared by four cells, so a fixture that moved
+    // one would put a step on two edges at once and the cases below could not name whose seam is whose.
+    static Action<sbyte[,]> EastEdge(sbyte units) => g => { for (int y = 1; y < 32; y++) g[32, y] = units; };
+    // Raise the interior of the west edge: rows 1..31 start `units` higher (column 0 accumulates down the rows: +units
+    // at row 1, back at row 32), and each of those rows steps back down at x = 1.
+    static Action<sbyte[,]> WestEdge(sbyte units) => g => { g[0, 1] = units; g[0, 32] = (sbyte)-units; for (int y = 1; y < 32; y++) g[1, y] = (sbyte)-units; };
+
+    // Skyrim.esm: a 3×2 block of flat cells at 0, matching edges everywhere, except a vanilla seam between (2,0) and (2,1)
+    // (the north edge of (2,0) 16 u up — Bethesda ships one).
+    var sky = new SkyrimMod(skyK, release);
+    sky.Worldspaces.Add(WorldWith(worldK, topK,
+        Grid(C(0, 0), 0, 0, Land(L(0, 0), 0, texA), "S00"), Grid(C(1, 0), 1, 0, Land(L(1, 0), 0, texA), "S10"),
+        Grid(C(2, 0), 2, 0, Land(L(2, 0), 0, texA, g => { g[1, 32] = 2; g[32, 32] = -2; }), "S20"),   // row 32, x = 1..31, 16 u up: a vanilla seam, corners untouched
+        Grid(C(0, 1), 0, 1, Land(L(0, 1), 0, texA), "S01"), Grid(C(1, 1), 1, 1, Land(L(1, 1), 0, texB), "S11"),
+        Grid(C(2, 1), 2, 1, Land(L(2, 1), 0, texA), "S21")));
+    var skyPath = Write(sky);
+    using var skyOv = SkyrimMod.CreateFromBinaryOverlay(skyPath, release);
+
+    // SeamA (masters Skyrim): re-shapes (0,0) AND (1,0) consistently — the shared edge at +2 units (16 u) on both sides;
+    // and (0,1)'s east edge alone (+4 units, 32 u) against a (1,1) it left alone — its own seam, Seen.
+    var a = new SkyrimMod(aK, release);
+    a.Worldspaces.Add(WorldWith(worldK, topK,
+        Grid(C(0, 0), 0, 0, Land(L(0, 0), 0, texA, EastEdge(2)), "S00"),
+        Grid(C(1, 0), 1, 0, Land(L(1, 0), 0, texA, WestEdge(2)), "S10"),
+        Grid(C(0, 1), 0, 1, Land(L(0, 1), 0, texA, EastEdge(4)), "S01")));
+    var aPath = Write(a, skyOv);
+    using var aOv = SkyrimMod.CreateFromBinaryOverlay(aPath, release);
+
+    // SeamB (masters Skyrim only — blind to A): re-shapes (1,0) from the VANILLA base: west edge back to 0, its own interior
+    // texture changed to texB. Loads after A. Under B's view (1,0)'s west edge matches vanilla (0,0) (Δ 0); together: 16 u.
+    var b = new SkyrimMod(bK, release);
+    b.Worldspaces.Add(WorldWith(worldK, topK, Grid(C(1, 0), 1, 0, Land(L(1, 0), 0, texB), "S10")));
+    var bPath = Write(b, skyOv);
+
+    // SeamC (masters Skyrim and A): re-cuts (1,1)'s west edge to +4 units to meet A's (0,1) — the patch shape (joins the seam);
+    // and re-states (2,1) with the vanilla seam against (2,0) untouched — Inherited.
+    var c = new SkyrimMod(cK, release);
+    c.Worldspaces.Add(WorldWith(worldK, topK,
+        Grid(C(1, 1), 1, 1, Land(L(1, 1), 0, texB, WestEdge(4)), "S11"),
+        Grid(C(2, 1), 2, 1, Land(L(2, 1), 0, texB), "S21")));
+    var cPath = Write(c, skyOv, aOv);
+
+    var order = new[] { skyPath, aPath, bPath, cPath };
+    var idx = new CellBoundaryIndex();
+    var masters = new HashSet<int>[] { new(), new() { 0 }, new() { 0 }, new() { 0, 1 } };
+    for (int p = 0; p < order.Length; p++)
+    {
+        var mod = SkyrimMod.CreateFromBinaryOverlay(order[p], release);
+        using (mod as IDisposable) idx.Ingest(p, mod, land: true);
+    }
+    var closure = DetectorModel.MasterClosure(masters);
+    Check("land/index: the west-edge shape decodes as intended (S10 under A: x=0 at 16 u, x=1 back at 0)",
+          idx.Cells[C(1, 0)].Land[1].Heights[0, 5] == 16f && idx.Cells[C(1, 0)].Land[1].Heights[1, 5] == 0f && idx.Cells[C(1, 0)].Land[1].Heights[32, 5] == 0f,
+          $"{idx.Cells[C(1, 0)].Land[1].Heights[0, 5]} {idx.Cells[C(1, 0)].Land[1].Heights[1, 5]}");
+    Check("land/index: S10 has three statements (vanilla, A, B) and S00 two", idx.Cells[C(1, 0)].Land.Count == 3 && idx.Cells[C(0, 0)].Land.Count == 2, $"{idx.Cells[C(1, 0)].Land.Count} {idx.Cells[C(0, 0)].Land.Count}");
+
+    var m = CellBoundaryIndex.MeasurePair(idx.Cells[C(0, 0)], idx.Cells[C(1, 0)], CellEdge.East, closure, 8f)!;
+    Check("land/synthetic: S00|S10 — A cut both sides to match, B re-cut S10 from vanilla blind to A -> Introduced, Blind, 16 u",
+          m.Verdict == LandSeamVerdict.Seam && m.Origin == SeamOrigin.Introduced && m.Sight == SeamSight.Blind && m.MaxDelta == 16f && m.Later == 2 && !m.OtherSeen,
+          $"{m.Verdict} {m.Origin}/{m.Sight} Δ {m.MaxDelta} later {m.Later} view {m.ViewDelta} prev {m.PrevDelta}");
+    Check("land/synthetic: S00|S10 — the texture seam is reported apart (A texA | B texB)", m.TextureSeam && m.TexWhy.Contains(texA.ToString()) && m.TexWhy.Contains(texB.ToString()), m.TexWhy);
+    m = CellBoundaryIndex.MeasurePair(idx.Cells[C(0, 1)], idx.Cells[C(1, 1)], CellEdge.East, closure, 8f)!;
+    Check("land/synthetic: S01|S11 — C (masters A) re-cut S11's west edge to meet A's 32 u -> None (the patch joined it)",
+          m.Verdict == LandSeamVerdict.None && m.MaxDelta == 0f && m.Later == 3, $"{m.Verdict} Δ {m.MaxDelta} later {m.Later}");
+    // The same pair WITHOUT C: A's own seam against the vanilla neighbour it could see.
+    var idx2 = new CellBoundaryIndex();
+    for (int p = 0; p < 3; p++) { var mod = SkyrimMod.CreateFromBinaryOverlay(order[p], release); using (mod as IDisposable) idx2.Ingest(p, mod, land: true); }
+    m = CellBoundaryIndex.MeasurePair(idx2.Cells[C(0, 1)], idx2.Cells[C(1, 1)], CellEdge.East, closure, 8f)!;
+    Check("land/synthetic: S01|S11 without C — A raised its east edge 32 u against a vanilla S11 it could see -> Introduced, Seen",
+          m.Verdict == LandSeamVerdict.Seam && m.Origin == SeamOrigin.Introduced && m.Sight == SeamSight.Seen && m.MaxDelta == 32f && m.OtherSeen && m.PrevDelta == 0f,
+          $"{m.Verdict} {m.Origin}/{m.Sight} Δ {m.MaxDelta} prev {m.PrevDelta} view {m.ViewDelta}");
+    m = CellBoundaryIndex.MeasurePair(idx.Cells[C(2, 0)], idx.Cells[C(2, 1)], CellEdge.North, closure, 8f)!;
+    Check("land/synthetic: S20|S21 — C re-stated S21 over a vanilla 16 u seam it did not touch -> Inherited, 31 vertices over eps",
+          m.Verdict == LandSeamVerdict.Seam && m.Origin == SeamOrigin.Inherited && m.MaxDelta == 16f && m.PrevDelta == 16f && m.OverEps == 31, $"{m.Verdict} {m.Origin} Δ {m.MaxDelta} prev {m.PrevDelta} over {m.OverEps}");
+    m = CellBoundaryIndex.MeasurePair(idx.Cells[C(1, 0)], idx.Cells[C(2, 0)], CellEdge.East, closure, 8f)!;
+    Check("land/synthetic: S10|S20 — B's re-cut leaves the untouched east edge matching vanilla S20 -> None", m.Verdict == LandSeamVerdict.None, $"{m.Verdict} Δ {m.MaxDelta}");
+    m = CellBoundaryIndex.MeasurePair(idx.Cells[C(1, 0)], idx.Cells[C(1, 1)], CellEdge.North, closure, 8f)!;
+    Check("land/synthetic: S10|S11 — heights match, base textures texB | texB -> no texture seam either", m.Verdict == LandSeamVerdict.None && !m.TextureSeam, m.TexWhy);
+    var vanillaPair = CellBoundaryIndex.MeasurePair(idx.Cells[C(0, 0)], idx.Cells[C(0, 1)], CellEdge.North, closure, 8f)!;
+    Check("land/synthetic: S00|S01 — A cut the east edges only; the shared north edge still matches -> None", vanillaPair.Verdict == LandSeamVerdict.None, $"Δ {vanillaPair.MaxDelta}");
+    try { Directory.Delete(root, true); } catch { }
 }
 
 Console.WriteLine();
