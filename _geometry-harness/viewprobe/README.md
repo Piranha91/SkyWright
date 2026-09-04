@@ -1282,7 +1282,7 @@ where, and (below) previews what they cull. It reports; it never judges.
 marker filter drops it, so planes are invisible in viewprobe and in game alike). The geometry is
 the ref's `Primitive` (XPRM): `Type` **PortalBox** with `Bounds` (width, 2, height) — a two-unit
 slab standing in the ref's local X–Z plane, normal along local Y — or **Box** with a real Y
-extent, whose culling semantics are a question for the game and are counted apart. `Bounds` are
+extent, which the game culls with too (measured below) and which is counted apart. `Bounds` are
 FULL extents about the ref's position: every unaltered vanilla plane that also carries the CK-era
 `OcclusionPlane` subrecord stores exactly `Bounds.X/2` and `Bounds.Z/2` there as Width and Height
 (measured over the rows that carry both; a few Dragonborn and Dawnguard rows disagree because
@@ -1324,7 +1324,8 @@ names the planes the ray goes on to cross. The layer is resident in every fly-th
 not, so `L` is a visibility flip like `N`.
 
 **Not modelled, said plainly:** nothing here is a verdict. Whether a plane is well placed is the
-audit's question, and the audit needs the game's own cull rule first (below).
+audit's question, and the audit needs the game's own cull rule (measured below) plus a floor and a
+control this instrument does not have.
 
 ### The preview: `--occlusion off|on|diff`
 
@@ -1335,10 +1336,10 @@ answer is re-evaluated as the eye moves; the bar carries the same three as a seg
 names the count, the console names the planes doing the culling (top twelve, with how many
 straddlers each kept), and a `Box`-kind plane's culls are counted apart.
 
-**The rule, as modelled** — the handoff's working assumption, stated so the game can be asked
-whether it is true (the README will carry the rule as measured once Part D has run):
+**The rule, as modelled** — stated so the game could be asked whether it is true; what it
+answered follows:
 
-1. The eye is on either side of the plane — two-sided, until the game says otherwise.
+1. The eye is on either side of the plane — two-sided.
 2. The plane's SHADOW from the eye is the convex volume behind the plane's own surface bounded by
    the four planes through the eye and the quad's four edges.
 3. A ref whose world AABB — of exactly the triangles the scene uploaded for it, post-cull — lies
@@ -1347,6 +1348,44 @@ whether it is true (the README will carry the rule as measured once Part D has r
 4. A `Box` plane is tested face by face: each eye-facing face casts its own shadow.
 5. Never culled: terrain, water, the navmesh overlay, routes, grid, NPC actors, props, the planes
    themselves — they are the map, not the engine's scene.
+6. A plane whose surface lies within 12 u of the eye casts no shadow (the near exemption, measured
+   below; per face for a Box).
+
+**The rule, as measured** (2026-09-04; one station: a PortalBox a city overhaul placed in the void
+under an interior it rebuilt 1,000 u higher, with a lighting mod's chandelier and slab 820 u behind
+it and the vanilla shell pieces the overhaul had disabled in place as further probes, each toggled
+by its runtime FormID from DevBench; sixteen free-camera passes, and every reading below is paired
+with a plane-off control at the same camera):
+
+- **Two-sided.** From the east the plane hid the chandelier behind it; from the west it hid a shell
+  piece behind it; disabling the plane showed each, re-enabling hid it again. Rules 1 and 2 hold.
+- **The rectangle is the record's full extent.** From 142 u east, a ray crossing inside the
+  rectangle culled the chandelier; with the eye lowered so that every ray to it crossed 30–50 u
+  below the rectangle's bottom edge, the chandelier stayed drawn. A reading of `Bounds` as
+  half-extents (a rectangle twice the size) is refuted. Rule 2's edges hold.
+- **The whole box must be beyond.** A wall whose box reached 199 u beyond the plane and 59 u short
+  of it, seen along a ray crossing 188 u inside the rectangle, was drawn with the plane on, off, and
+  on again. Rule 3's straddle clause holds.
+- **The near exemption.** From 12 u in front of the plane, ray inside the rectangle, the chandelier
+  was drawn; from 42 u it was culled, and from 92, 142, 242 and 500 u. Rule 6 was added for this,
+  at the measured lower bound.
+- **A `Box` plane culls.** A storage room's contents behind one were gone from a camera outside it
+  and appeared the moment the Box was disabled. Rule 4's per-face shape is not measured beyond that.
+- **Runtime disable and enable take effect** within a frame; no cell reload.
+- **Not in the model:** the candle-flame effect refs on the culled chandelier stayed drawn while its
+  mesh was gone — effects are not culled with the mesh they sit on. And the console's `ToggleOcclusion`
+  (`tocc`, "toggle occlusion query for geometry") does not touch plane culling; the build exposes no
+  plane toggle, and `AddOcclusionPlane` was not tried — the per-ref disable is the route.
+- **A limit on the measurement, said plainly:** the game evaluated the planes only while the free
+  camera held a state that alternated between launches of the driving script and never flipped
+  within one — when it was off, nothing culled, plane on or off, and a freecam off/on with 20 s
+  between re-armed it every time it was tried. The likeliest reading is the camera's room membership
+  (a teleported free camera keeps the room it was last in), so a player standing in a room is
+  presumed to see the planes live; that is not measured. Interior fog hid an unlit mesh beyond about
+  1,400 u from every camera, so every reading farther than that was discarded, plane on or off.
+- **What a probe may be:** a ref the cell already has. A `MoveTo` on a movable static moved its
+  record and not its 3D; a static placed at runtime never rendered in the void. Twelve of the
+  sixteen passes were spent learning that.
 
 **Why the picture is the point.** A plane that now culls space the player can see into — the mod
 moved architecture out from behind it — shows as a hole in `on` and a red wash in `diff` where the
@@ -1380,8 +1419,8 @@ behind them.
 - **Visible** means: the ref's box is in the frame and the plain scene's depth at the ref's centre
   pixel is no nearer than the near face of its box — nothing stands in front of it. Measured from
   one extra draw of the untouched scene (static path only). A plane culling a visible ref from a
-  standing eye is the "culls what the player can see" shape; it is what Part D's cameras are chosen
-  by.
+  standing eye is the "culls what the player can see" shape; it is what the in-game cameras were
+  chosen by.
 - **Behind** means the far side from the eye: rays from a 5×5 lattice across the mid-quad (from the
   far face, for a Box), along the plane's normal away from the eye, against the SOLID collision —
   the layers an actor meets, `CollisionLayers.ActorSolid`, the same cut the route detectors make —
@@ -1391,8 +1430,7 @@ behind them.
   is the same shape one step stronger. A candidate whose mesh carries no solid collision is counted
   and said, never silently treated as empty space.
 - **A listing, never a verdict.** Whether "culls nothing" or "nothing behind it" is a defect depends
-  on the game's cull rule, which is what Part D of the occlusion handoff measures, and on a floor
-  and a control this file does not have. The audit that turns these rows into a class is the
+  on the game's cull rule — measured above — and on a floor and a control this file does not have. The audit that turns these rows into a class is the
   handoff after; this is its raw material.
 
 First runs, 2026-09-04: a city overhaul's own interior planes included two standing 600 u below

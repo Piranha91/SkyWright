@@ -376,9 +376,16 @@ sealed class CullVolume
 
 static class OcclusionCull
 {
+    /// <summary>The eye-to-surface distance under which a plane casts no shadow. Measured 2026-09-04: the game
+    /// left a ref drawn from an eye 12 u in front of a PortalBox whose rectangle the ray crossed, and culled it from
+    /// 42 u — the exemption lies somewhere in between, and this is the bound the game was seen at, so the model
+    /// never culls where the game was seen not to. Applies per face for a Box.</summary>
+    public const float NearExemptUnits = 12f;
+
     /// <summary>The shadow volumes one plane casts from <paramref name="eye"/>: one for a PortalBox (its mid-quad,
-    /// either side — two-sided until the game says otherwise), one per eye-facing face for a Box. Empty when the
-    /// eye lies in the plane or on an edge's line, where a shadow has no shape.</summary>
+    /// either side — two-sided, as the game measured 2026-09-04), one per eye-facing face for a Box. Empty when the
+    /// eye lies within <see cref="NearExemptUnits"/> of the surface, or on an edge's line, where a shadow has no
+    /// shape.</summary>
     public static List<CullVolume> Volumes(PlaneRender p, Vector3 eye)
     {
         var vols = new List<CullVolume>();
@@ -402,7 +409,7 @@ static class OcclusionCull
     {
         var centre = (quad[0] + quad[1] + quad[2] + quad[3]) * 0.25f;
         float d = Vector3.Dot(eye - centre, n);
-        if (MathF.Abs(d) < 1e-3f) return null;
+        if (MathF.Abs(d) < NearExemptUnits) return null;                  // the near exemption, measured
         float side = MathF.Sign(d);
         var v = new CullVolume();
         v.Add(-side * n, centre);                                        // the far half-space
