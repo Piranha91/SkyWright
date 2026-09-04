@@ -322,7 +322,7 @@ gitignored for the same reason: probe transcripts name the plugins of whatever l
   winning base landscape texture (LTEX → TXST → diffuse, winner-takes-all), tiled ~256 u/repeat.
   The heightmaps are kept as a queryable field (`terrainHeightAt`, same 128 u quads and diagonal
   split the mesh is built from) so the overlay can ask what is buried.
-- **Painted layers (roads).** A Skyrim road is not a placed mesh — it is a landscape texture
+- **Painted layers (roads) — rendered since 2026-08-27, on by default** (`--no-terrain-layers` turns them off). A Skyrim road is not a placed mesh — it is a landscape texture
   (`LDirtPath01` and friends) painted onto the terrain as a LAND alpha layer with a 17×17
   per-quadrant opacity map, so base-layer-only rendering drops every road, path and ground blend.
   Each alpha layer is its own textured sheet over the base, opacity carried in vertex alpha,
