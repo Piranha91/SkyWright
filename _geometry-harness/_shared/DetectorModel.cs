@@ -602,13 +602,19 @@ public static class DetectorModel
     }
 
     /// <summary>What a host IS, for the split the rule's caller makes. Something to rest on or mount on — a
-    /// static, a movable static, furniture, a container, a door — is Physical. Anything whose base editor id
-    /// says "marker" (XMarker, XMarkerHeading, enable markers, map markers) is a Marker whatever its record
-    /// type: an enable relationship to a marker is a toggle, never a support. Everything else — activators used
-    /// as switches, lights, trees, actors, an unresolved base — is Other, reported apart.</summary>
-    public static HostClass ClassifyHost(string? baseType, string? baseEditorId)
+    /// static, a movable static, furniture, a container, a door — is Physical. A Marker is a base the engine renders
+    /// nothing for, whatever its record type: an enable relationship to a marker is a toggle, never a support.
+    /// <b>The marker rule is the record's Is-Marker header flag (0x00800000)</b> — the engine's own rule for drawing
+    /// no base — when the caller has read it (<paramref name="markerFlag"/> non-null: the contact index since the
+    /// 2026-09-03 fold, after the in-game arm found JK's sit-marker chairs — Furniture, an ordinary mesh name, the flag
+    /// set — read as Sunk clutter). A caller that reads no flags (the records pass) passes null and gets the older
+    /// editor-id heuristic — "marker" anywhere in the name (XMarker, XMarkerHeading, enable markers, map markers) —
+    /// which the contact pass now reports against the flag as a disagreement count, never uses. Everything else —
+    /// activators used as switches, lights, trees, actors, an unresolved base — is Other, reported apart.</summary>
+    public static HostClass ClassifyHost(string? baseType, string? baseEditorId, bool? markerFlag = null)
     {
-        if (baseEditorId is not null && baseEditorId.Contains("marker", StringComparison.OrdinalIgnoreCase)) return HostClass.Marker;
+        bool marker = markerFlag ?? (baseEditorId is not null && baseEditorId.Contains("marker", StringComparison.OrdinalIgnoreCase));
+        if (marker) return HostClass.Marker;
         return baseType switch
         {
             "Static" or "MoveableStatic" or "Furniture" or "Container" or "Door" => HostClass.Physical,
@@ -622,15 +628,17 @@ public static class DetectorModel
     /// walks to its linked furniture wherever it now stands, and a trigger volume marks a spot; neither rests on
     /// or hangs from anything. The two classes are about a PHYSICAL dependent on a physical host — clutter on a
     /// table, a fixture on a wall — so that is the row the caller counts. Actors are the placed-NPC arm or an NPC
-    /// / leveled-NPC base; Control is anything whose base is a marker, a trigger, an idle marker or an FX object
-    /// by editor id; Physical is a static, furniture, container, door, light, activator, tree, flora or any
-    /// item type; Other is the rest, an unresolved base included.</summary>
-    public static DependentClass ClassifyDependent(string? recordType, string? baseType, string? baseEditorId)
+    /// / leveled-NPC base; Control is anything whose base is a marker (the Is-Marker header flag when the caller read
+    /// it — <paramref name="markerFlag"/> — else "marker" in the editor id, the same split <see cref="ClassifyHost"/>
+    /// makes), a trigger, an idle marker or an FX object by editor id; Physical is a static, furniture, container,
+    /// door, light, activator, tree, flora or any item type; Other is the rest, an unresolved base included.</summary>
+    public static DependentClass ClassifyDependent(string? recordType, string? baseType, string? baseEditorId, bool? markerFlag = null)
     {
         if (recordType == "PlacedNpc" || baseType is "Npc" or "LeveledNpc") return DependentClass.Actor;
         if (baseType == "IdleMarker") return DependentClass.Control;
-        if (baseEditorId is not null && (baseEditorId.Contains("marker", StringComparison.OrdinalIgnoreCase)
-                                      || baseEditorId.Contains("trigger", StringComparison.OrdinalIgnoreCase)
+        bool marker = markerFlag ?? (baseEditorId is not null && baseEditorId.Contains("marker", StringComparison.OrdinalIgnoreCase));
+        if (marker) return DependentClass.Control;
+        if (baseEditorId is not null && (baseEditorId.Contains("trigger", StringComparison.OrdinalIgnoreCase)
                                       || baseEditorId.StartsWith("FX", StringComparison.Ordinal)))
             return DependentClass.Control;
         return baseType switch
@@ -737,12 +745,19 @@ public static class DetectorModel
     /// <param name="AuthoringPenetration">deepest a dependent vertex sits inside the host in the authoring arm (0 when none does).</param>
     /// <param name="AuthoringNormalUp">cosine between the host's contact normal and +Z in the authoring arm: 1 under, 0 beside,
     /// −1 above; NaN when no normal could be read.</param>
+    /// <param name="DependentDisabled">the dependent is disabled AT RUNTIME under the winner — its own initially-disabled
+    /// flag when it has no enable parent, else the parent chain's state (<c>EnableState.Resolve</c>; the R1 fold,
+    /// 2026-09-03). <paramref name="DependentDisabledViaParent"/> says which: a flag is the −30000 idiom (the fix); a
+    /// parent means the thing is simply absent. <paramref name="DependentEnableUnresolved"/>: the chain could not be
+    /// followed in this order (a cycle, or a parent nobody places).</param>
     /// <param name="DependentRePlacedByMoverSide">the dependent's winning placement was set by the host's mover or a plugin
     /// downstream of it (a deliberate re-arrangement, whatever the geometry says).</param>
     /// <param name="WinnerDistance">the best contact the dependent has under the winner against ANY physical reference within
     /// reach — least distance; <paramref name="WinnerPenetration"/> the deepest penetration into any of them.</param>
     /// <param name="WinnerContactIsHost">…and that best contact is with the moved host itself (it moved a little and the
     /// dependent is still on it).</param>
+    /// <param name="WinnerAgainstExtent">how wide the thing the winner penetration was measured against is, along the contact
+    /// normal (the R4 fold, 2026-09-03); NaN when nothing was measured or the normal could not be read.</param>
     /// <param name="Motion">what physics would do with the dependent at cell load — rides on the facts for the caller's split;
     /// the verdict never reads it.</param>
     public readonly record struct ContactFacts(
@@ -750,7 +765,8 @@ public static class DetectorModel
         float AuthoringDistance, float AuthoringPenetration, float AuthoringNormalUp,
         bool DependentDeleted, bool DependentDisabled, bool DependentRePlacedByMoverSide,
         bool WinnerMeasured, float WinnerDistance, float WinnerPenetration, bool WinnerContactIsHost,
-        DependentMotion Motion);
+        DependentMotion Motion,
+        bool DependentDisabledViaParent = false, bool DependentEnableUnresolved = false, float WinnerAgainstExtent = float.NaN);
 
     /// <summary>The placement-contact rule (frozen 2026-09-02 from the handoff of 2026-09-07). Piranha's two classes —
     /// apples left in the air when the table moves (stranded support), a sconce left on the old wall line when the
@@ -764,17 +780,29 @@ public static class DetectorModel
     /// than ε as AUTHORED is no relationship either — the thing was already sunk when it shipped, which is the absolute
     /// floor's business, not a differential finding. Contact on a slope between the bands is reported as none.</para>
     ///
-    /// <para><b>The outcome</b>, from the winner arm, in order: a dependent that is deleted or initially disabled under
-    /// the winner is <b>Removed</b> — the fix, never a finding. One the mover's side re-placed is <b>MovedTogether</b>,
-    /// whatever its new contact. One that now sits deeper than ε inside anything is <b>Sunk</b>. One that touches
-    /// anything within ε — the host at its new place, or something else the room was rebuilt with — is
-    /// <b>ReSupported</b> (counted, not a finding). Otherwise it touches nothing: <b>Stranded</b> for a supported
-    /// dependent, <b>Orphaned</b> for an attached or hung one.</para>
+    /// <para><b>The outcome</b>, from the winner arm, in order: a dependent that is deleted, or disabled under the winner
+    /// by its own flag, is <b>Removed</b> — the fix, never a finding. One whose enable chain cannot be followed is
+    /// <b>Unjudgeable / EnableChainUnresolved</b>; one disabled at runtime THROUGH its parent is <b>Unjudgeable /
+    /// RuntimeDisabled</b> — absent, not a defect (the R1 fold: the game showed the rule five rows whose dependent, host or
+    /// against-ref never existed at runtime). One the mover's side re-placed is <b>MovedTogether</b>, whatever its new
+    /// contact. One that now sits deeper than ε inside anything is <b>Sunk</b> — unless the depth exceeds the width of the
+    /// thing it is measured against along the contact normal, which no interior point of a closed object can do: that is
+    /// <b>Unjudgeable / DepthExceedsObject</b>, a refused reading (the R4 fold: a bookcase "105 u inside" a 30 u jar). One
+    /// that touches anything within ε — the host at its new place, or something else the room was rebuilt with, a whole
+    /// tower shell included (the R3 fold: the volume cap gates moved hosts, not re-supporters) — is <b>ReSupported</b>
+    /// (counted, not a finding). Otherwise it touches nothing: <b>Stranded</b> for a supported dependent, <b>Orphaned</b>
+    /// for an attached or hung one.</para>
+    ///
+    /// <para><b>What the class claims</b> (in game, 2026-09-03, the lab's JK's–OCW pair): a Fixed Stranded row is an
+    /// object hanging in the air where its host was — it <b>floats in air</b>, three of three runtime-real rows (a strongbox
+    /// and a lit candlestick on bare walls, a magnifier 60 u over the floor), and the patch put all three back. What a
+    /// Fixed Orphaned row looks like in game is still unseen: both lab instances were the R3 false positive.</para>
     ///
     /// <para>Deliberately NOT judged: whether physics will drop a movable dependent onto the floor (4.7 Part C says it
     /// does; the motion class rides on the facts and the caller splits by it); rotation- and scale-only moves of the
     /// host (the history does not record them); terrain (LAND is not a reference, so an exterior dependent may be on
-    /// the ground and read Stranded — the caller splits interior from exterior); anything in game.</para></summary>
+    /// the ground and read Stranded — the caller splits interior from exterior); whether Sunk is visible (the in-game arm
+    /// said the four readings it saw were not, each for a reason the folds above now gate; Sunk stays beside the class).</para></summary>
     public static (ContactRelation Relation, ContactVerdict Verdict, ContactBlocker Reason, string Why)
         PlacementContact(ContactFacts f, float epsilon = 4f, float supportCos = 0.866f, float attachCos = 0.5f)
     {
@@ -809,6 +837,10 @@ public static class DetectorModel
 
         if (f.DependentDeleted)
             return (relation, ContactVerdict.Removed, ContactBlocker.None, $"{rel}; the dependent is deleted under the winner — the fix, not a finding");
+        if (f.DependentEnableUnresolved)
+            return (relation, ContactVerdict.Unjudgeable, ContactBlocker.EnableChainUnresolved, $"{rel}; the dependent's enable-parent chain cannot be followed in this order (a cycle, or a parent nobody places) — its runtime state is unknown");
+        if (f.DependentDisabled && f.DependentDisabledViaParent)
+            return (relation, ContactVerdict.Unjudgeable, ContactBlocker.RuntimeDisabled, $"{rel}; the dependent is disabled at runtime through its enable parent under the winner — absent, not a defect");
         if (f.DependentDisabled)
             return (relation, ContactVerdict.Removed, ContactBlocker.None, $"{rel}; the dependent is initially disabled under the winner — the fix, not a finding");
         if (f.DependentRePlacedByMoverSide)
@@ -817,7 +849,11 @@ public static class DetectorModel
             return (relation, ContactVerdict.Unjudgeable, ContactBlocker.WinnerArmMissing, $"{rel}; the winner arm could not be measured");
 
         if (f.WinnerPenetration > epsilon)
+        {
+            if (!float.IsNaN(f.WinnerAgainstExtent) && f.WinnerPenetration > f.WinnerAgainstExtent)
+                return (relation, ContactVerdict.Unjudgeable, ContactBlocker.DepthExceedsObject, $"{rel}; under the winner it reads {f.WinnerPenetration:0.#}u inside {(f.WinnerContactIsHost ? "the host at its new place" : "something else")} that is only {f.WinnerAgainstExtent:0.#}u across along the contact normal — no interior point of a closed object is that far from its surface; the reading is refused, not Sunk{motion}");
             return (relation, ContactVerdict.Sunk, ContactBlocker.None, $"{rel}; under the winner it sits {f.WinnerPenetration:0.#}u inside {(f.WinnerContactIsHost ? "the host at its new place" : "something else")}{motion}");
+        }
         if (f.WinnerDistance <= epsilon)
             return (relation, ContactVerdict.ReSupported, ContactBlocker.None, $"{rel}; under the winner it still touches {(f.WinnerContactIsHost ? "the host at its new place" : "another physical reference")} ({f.WinnerDistance:0.#}u) — the room was rebuilt around it");
         var verdict = relation == ContactRelation.Supported ? ContactVerdict.Stranded : ContactVerdict.Orphaned;
@@ -1030,7 +1066,10 @@ public enum ContactRelation { None, Supported, Attached, Hung }
 /// Removed: deleted or disabled under the winner — the fix. Unjudgeable: counted by reason, never cleared.</summary>
 public enum ContactVerdict { NoRelation, Stranded, Orphaned, Sunk, ReSupported, MovedTogether, Removed, Unjudgeable }
 
-public enum ContactBlocker { None, NoDependentGeometry, NoHostGeometry, AuthoringArmMissing, WinnerArmMissing }
+/// <summary>Why a contact pair could not be called. The last three are the 2026-09-03 folds: a dependent absent at
+/// runtime through its enable parent (R1), a chain the order cannot follow (R1), and a penetration deeper than the
+/// against-object is wide (R4) — each counted, never cleared, never a finding.</summary>
+public enum ContactBlocker { None, NoDependentGeometry, NoHostGeometry, AuthoringArmMissing, WinnerArmMissing, RuntimeDisabled, EnableChainUnresolved, DepthExceedsObject }
 
 /// <summary>What physics does with a dependent at cell load. Fixed floats where it was left; Movable falls or is shoved
 /// (4.7 Part C). Unknown: nothing known about the base or its bodies.</summary>

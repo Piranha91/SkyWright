@@ -18,9 +18,23 @@ namespace HarnessShared;
 // Mutagen, OBND boxes turned into box soups), so the proof exercises the same extraction, the same arm
 // construction and the same primitive the live run uses.
 //
+// The game boundary talked back on 2026-09-03 (the in-game arm on the lab's JK's–OCW pair) and four
+// folds followed, each measured against that arm's verdicts:
+//   R1  a reference EXISTS in an arm when its runtime enable state resolves enabled there — its own
+//       initially-disabled flag when it has no XESP parent, the parent chain's state otherwise
+//       (EnableState.Resolve, shared with viewprobe), resolved PER ARM: the winner's flags and parents,
+//       or those of the arm without a mover. Hosts, dependents and the winner-arm population all read
+//       it; a host can leave the world through a parent a later plugin disabled (the second Removed).
+//   R2  a base is a marker — neither host, dependent, re-supporter nor Sunk target — by the record's
+//       Is-Marker header flag, the engine's own rule; the editor-id and mesh-name heuristics are counted
+//       against it (AuditMarkers) and no longer used.
+//   R3  the volume cap gates what can be a MOVED host; anything with solid collision can re-support.
+//   R4  the winner arm reports how wide the thing a penetration was measured against is, along the
+//       contact normal, so the rule can refuse a depth no interior point could have.
+//
 // Standing rules applied: measured geometry first, OBND as a LABELLED fallback, no geometry = not judged,
 // counted (rule 6); the geometry CHOICE (collision or render) labelled on every row; the floor measured
-// before any count is read; nothing verified in game.
+// before any count is read; nothing verified in game beyond the four folds' acceptance set.
 
 /// <summary>One base record's geometry as the contact pass uses it. <paramref name="HostSoup"/> is the surface a thing
 /// rests on or against — the solid collision bodies on the layers an actor (and a dropped item) meets; <paramref name="DepSoup"/>
@@ -41,16 +55,29 @@ public sealed record RefGeometry(Aabb Box, TriangleSoup HostSoup, TriangleSoup D
 }
 
 /// <summary>Why a host's placement changed under its last plugin: moved within its space, relocated to another, or
-/// removed (disabled or deleted after having been placed).</summary>
+/// removed (disabled or deleted after having been placed — by its own record, or through an enable parent a later
+/// plugin disabled).</summary>
 public enum HostChange { Moved, Relocated, Removed }
 
 /// <summary>A host whose last placement step is a move or a removal. <paramref name="Previous"/> is the snap before the
-/// mover's — the host's placement in the order without the mover; <paramref name="PrevBase"/> the base record it had
-/// then (an override that swapped the mesh at the same time as moving is rebuilt with the right mesh).</summary>
-public sealed record MovedHost(FormKey Key, Snap Previous, Snap Winner, HostChange Change, int Mover, FormKey PrevBase, FormKey WinBase);
+/// mover's — the host's placement in the order without the mover (<paramref name="PrevIndex"/> its index in the
+/// history); <paramref name="PrevBase"/> the base record it had then (an override that swapped the mesh at the same
+/// time as moving is rebuilt with the right mesh). <paramref name="RemovedViaParent"/>: the host left the world through
+/// its enable-parent chain, and the mover is the plugin whose step on that chain disabled it (R1).</summary>
+public sealed record MovedHost(FormKey Key, Snap Previous, int PrevIndex, Snap Winner, HostChange Change, int Mover, FormKey PrevBase, FormKey WinBase,
+                               bool RemovedViaParent = false);
 
-/// <summary>One arm's contact: the primitive's result, what it was against, and the geometry sources on both sides.</summary>
-public sealed record ArmContact(SoupContact Contact, FormKey Against, char DepSrc, char HostSrc);
+/// <summary>One arm's contact: the primitive's result, what it was against, and the geometry sources on both sides.
+/// <paramref name="AgainstExtent"/>: how wide the against-ref's surface is along the contact normal (its largest box
+/// dimension when the normal cannot be read) — the bound a penetration has to respect (R4); NaN when unknown.
+/// <paramref name="AgainstMaxDim"/>: the against-ref's largest world-box dimension, so a re-supporter over the old
+/// volume cap can be counted (R3). <paramref name="RawDistance"/> / <paramref name="RawAgainst"/>: the least RAW surface
+/// distance (winding- and facing-free) to anything in the population, and to what — reported so a row the facing rule
+/// calls "touches nothing" can say how far the nearest surface really is (the symbols a unit behind a wall's collision
+/// face, 2026-09-03); the verdict never reads it.</summary>
+public sealed record ArmContact(SoupContact Contact, FormKey Against, char DepSrc, char HostSrc,
+                                float AgainstExtent = float.NaN, float AgainstMaxDim = float.NaN,
+                                float RawDistance = float.NaN, FormKey RawAgainst = default);
 
 /// <summary>One (dependent, moved host) pair, judged. <paramref name="DepAuthor"/> is the plugin that set the dependent's
 /// placement in the arm without the mover; <paramref name="Seen"/> says that plugin is in the mover's master closure
@@ -63,10 +90,13 @@ public sealed record ContactRow(MovedHost Host, FormKey Dependent, Snap DepAutho
                                 ArmContact? Authoring, ArmContact? Winner,
                                 DetectorModel.ContactFacts Facts, ContactRelation Relation, ContactVerdict Verdict, ContactBlocker Reason, string Why);
 
-/// <summary>What the pairing set aside, counted per rule 6.</summary>
+/// <summary>What the pairing set aside, counted per rule 6. The runtime-state counters are R1's: a host or dependent
+/// that does not exist in the arm under test (disabled at runtime through its own flag or its parent chain), or whose
+/// chain the order cannot follow; and the winner-arm population's exclusions on the same grounds.</summary>
 public sealed class ContactSkips
 {
     public long HostNoGeometry, HostNoCollision, HostVolume, HostTooSmall, DepNoGeometry, DepVolume, DepIntroducedByMover, DepAbsentInArm, DepOtherSpace, BoxesApart;
+    public long HostRuntimeDisabled, HostEnableUnresolved, DepEnableUnresolved, WinnerRuntimeDisabled, WinnerEnableUnresolved;
 }
 
 /// <summary>A tile hash of world boxes inside a space partition (interior cell | worldspace) — the OverlapIndex pair
@@ -120,10 +150,14 @@ public sealed class ContactIndex
     readonly Dictionary<FormKey, RefGeometry?> _geomCache = new();
     readonly Dictionary<(FormKey Key, int Snap), TriangleGrid?> _hostGrids = new();
     readonly Dictionary<(FormKey Key, int Snap), TriangleSoup?> _depSoups = new();
+    readonly Dictionary<FormKey, EnableResolution> _winnerEnable = new();
+    readonly Dictionary<int, Dictionary<FormKey, EnableResolution>> _armEnable = new();
 
     /// <summary>The reach a host looks for dependents within; the size bands — a host is furniture-scale or larger
     /// (<see cref="MinHostDim"/>, 64 u) up to the volume cap, a dependent is furniture-scale or smaller (under
-    /// <see cref="MaxDependentDim"/>, 256 u). Parameters, stated; a table is 100–200 u across, a bowl 24 u.</summary>
+    /// <see cref="MaxDependentDim"/>, 256 u). Parameters, stated; a table is 100–200 u across, a bowl 24 u.
+    /// <see cref="MaxHostDim"/> gates MOVED hosts only (a whole shell is not a thing that moves out from under a bowl);
+    /// the winner-arm population takes any solid collision whatever its size (R3).</summary>
     public float Reach { get; init; } = 128f;
     public float MinHostDim { get; init; } = 64f;
     public float MaxHostDim { get; init; } = 4096f;
@@ -154,29 +188,49 @@ public sealed class ContactIndex
 
     (string Type, string? Edid) BaseInfoOf(FormKey baseKey) => Index.BaseInfo.TryGetValue(baseKey, out var bi) ? bi : ("?", null);
 
-    /// <summary>Something that can hold or carry something: a Physical host class by ClassifyHost, not a marker, not a
-    /// control object by editor id (an FX cobweb or mist volume is a Static too, and holds nothing).</summary>
+    /// <summary>The engine's own marker rule: the record's Is-Marker header flag (R2). Nothing with it is drawn, so
+    /// nothing with it holds, rests, re-supports or swallows anything.</summary>
+    public bool IsMarker(FormKey baseKey) => Index.BaseIsMarker.Contains(baseKey);
+
+    /// <summary>Something that can hold or carry something: a Physical host class by ClassifyHost under the flag rule,
+    /// not a control object by editor id (an FX cobweb or mist volume is a Static too, and holds nothing).</summary>
     public bool IsHostType(FormKey baseKey)
     {
         var (t, e) = BaseInfoOf(baseKey);
-        return DetectorModel.ClassifyHost(t, e) == HostClass.Physical && !IsMarkerMesh(baseKey)
-            && DetectorModel.ClassifyDependent("PlacedObject", t, e) != DependentClass.Control;
+        bool m = IsMarker(baseKey);
+        return DetectorModel.ClassifyHost(t, e, m) == HostClass.Physical
+            && DetectorModel.ClassifyDependent("PlacedObject", t, e, m) != DependentClass.Control;
     }
 
     /// <summary>Something that can rest on or hang from something: a Physical dependent class by ClassifyDependent
-    /// (statics, furniture, containers, doors, lights, activators, trees, flora, every item type), not a marker, not FX.</summary>
+    /// under the flag rule (statics, furniture, containers, doors, lights, activators, trees, flora, every item type),
+    /// not a marker, not FX.</summary>
     public bool IsDependentType(FormKey baseKey)
     {
         var (t, e) = BaseInfoOf(baseKey);
-        return DetectorModel.ClassifyDependent("PlacedObject", t, e) == DependentClass.Physical
-            && DetectorModel.ClassifyHost(t, e) != HostClass.Marker && !IsMarkerMesh(baseKey);
+        bool m = IsMarker(baseKey);
+        return DetectorModel.ClassifyDependent("PlacedObject", t, e, m) == DependentClass.Physical
+            && DetectorModel.ClassifyHost(t, e, m) != HostClass.Marker;
     }
 
     /// <summary>Any physical thing a dependent could be re-supported by under the winner: hosts and dependents both.</summary>
     public bool IsPhysicalType(FormKey baseKey) => IsHostType(baseKey) || IsDependentType(baseKey);
 
-    bool IsMarkerMesh(FormKey baseKey) =>
-        Index.BaseMesh.TryGetValue(baseKey, out var mesh) && Path.GetFileName(mesh).StartsWith("MarkerX", StringComparison.OrdinalIgnoreCase);
+    /// <summary>The old marker heuristics, read against the flag and reported: "marker" in the editor id, or a mesh
+    /// named MarkerX*. Neither is a gate any more; a base on either list is where the two rules disagree.</summary>
+    public (List<FormKey> FlagOnly, List<FormKey> NameOnly) AuditMarkers()
+    {
+        var flagOnly = new List<FormKey>(); var nameOnly = new List<FormKey>();
+        foreach (var (key, (_, edid)) in Index.BaseInfo)
+        {
+            bool byName = (edid is not null && edid.Contains("marker", StringComparison.OrdinalIgnoreCase))
+                       || (Index.BaseMesh.TryGetValue(key, out var mesh) && Path.GetFileName(mesh).StartsWith("MarkerX", StringComparison.OrdinalIgnoreCase));
+            bool byFlag = IsMarker(key);
+            if (byFlag && !byName) flagOnly.Add(key);
+            else if (byName && !byFlag) nameOnly.Add(key);
+        }
+        return (flagOnly, nameOnly);
+    }
 
     public DependentMotion MotionOf(FormKey baseKey)
     {
@@ -189,6 +243,87 @@ public sealed class ContactIndex
         DetectorModel.ClassifyOverlapScale(MathF.Max(world.Max.X - world.Min.X, MathF.Max(world.Max.Y - world.Min.Y, world.Max.Z - world.Min.Z)));
 
     static float MaxDim(Aabb b) => MathF.Max(b.Max.X - b.Min.X, MathF.Max(b.Max.Y - b.Min.Y, b.Max.Z - b.Min.Z));
+
+    // ---- runtime enable state, per arm (R1) ------------------------------------------------------
+
+    /// <summary>The XESP a reference carries at plugin <paramref name="plugin"/>'s load position: the last change at or
+    /// before it (none when it never had one).</summary>
+    (FormKey? Parent, bool Opposite) EnableParentAt(FormKey key, int plugin)
+    {
+        if (Index.EnableChanges.TryGetValue(key, out var changes))
+            for (int i = changes.Count - 1; i >= 0; i--)
+                if (changes[i].Plugin <= plugin) return (changes[i].Parent, changes[i].Opposite);
+        return (null, false);
+    }
+
+    /// <summary>The XESP in the arm WITHOUT <paramref name="mover"/>'s side: the last change by a plugin that is neither
+    /// the mover nor downstream of it.</summary>
+    (FormKey? Parent, bool Opposite) ArmEnableParent(FormKey key, int mover, IReadOnlyList<HashSet<int>> closure)
+    {
+        if (Index.EnableChanges.TryGetValue(key, out var changes))
+            for (int i = changes.Count - 1; i >= 0; i--)
+            {
+                int p = changes[i].Plugin;
+                if (p == mover || closure[p].Contains(mover)) continue;
+                return (changes[i].Parent, changes[i].Opposite);
+            }
+        return (null, false);
+    }
+
+    /// <summary>A reference's runtime enable state under the winner: its winning flag and winning XESP, the chain
+    /// followed through everything else's winning state. A reference the order does not place, or has deleted, is
+    /// unknown to the chain (reported unresolved).</summary>
+    public EnableResolution WinnerEnable(FormKey key) => EnableState.Resolve(key, k =>
+    {
+        var s = Index.History.Winning(k);
+        if (s is null || s.Value.Deleted || Index.IsDeletedNow(k)) return null;
+        var (p, o) = EnableParentAt(k, int.MaxValue);
+        return new EnableFacts(s.Value.Disabled, p, o);
+    }, _winnerEnable);
+
+    /// <summary>A reference's runtime enable state in the arm WITHOUT <paramref name="mover"/>'s side: each chain
+    /// reference's flag at its authoring snap and its XESP as last set outside the mover's side. Memoised per mover.</summary>
+    public EnableResolution ArmEnable(FormKey key, int mover, IReadOnlyList<HashSet<int>> closure)
+    {
+        if (!_armEnable.TryGetValue(mover, out var memo)) _armEnable[mover] = memo = new Dictionary<FormKey, EnableResolution>();
+        return EnableState.Resolve(key, k =>
+        {
+            var snaps = Index.History.Of(k);
+            if (snaps is null) return null;
+            int i = AuthoringSnapIndex(snaps, mover, closure);
+            if (i < 0 || snaps[i].Deleted) return null;
+            var (p, o) = ArmEnableParent(k, mover, closure);
+            return new EnableFacts(snaps[i].Disabled, p, o);
+        }, memo);
+    }
+
+    /// <summary>The plugin whose step on a reference's enable chain last changed its runtime state under the winner —
+    /// the mover of a host that left the world through its parent: the latest plugin among every chain element's XESP
+    /// changes (past the definer's own) and the root's disabled-flag steps. −1 when the chain has no step after the
+    /// definers (the thing was born disabled and nobody changed that).</summary>
+    public int ChainMover(FormKey key)
+    {
+        int best = -1;
+        var seen = new HashSet<FormKey>();
+        var k = key;
+        while (k.ID != EnableState.PlayerRefId && seen.Add(k))
+        {
+            var snaps = Index.History.Of(k);
+            int definer = snaps is { Count: > 0 } ? snaps[0].Plugin : -1;
+            if (Index.EnableChanges.TryGetValue(k, out var ch))
+                foreach (var c in ch) if (c.Plugin != definer) best = Math.Max(best, c.Plugin);
+            var (p, _) = EnableParentAt(k, int.MaxValue);
+            if (p is null)
+            {
+                if (snaps is not null)
+                    for (int i = snaps.Count - 1; i >= 1; i--)
+                        if (snaps[i].Disabled != snaps[i - 1].Disabled) { best = Math.Max(best, snaps[i].Plugin); break; }
+                break;
+            }
+            k = p.Value;
+        }
+        return best;
+    }
 
     // ---- placement at a snap --------------------------------------------------------------------
 
@@ -255,8 +390,11 @@ public sealed class ContactIndex
     // ---- the moved hosts -------------------------------------------------------------------------
 
     /// <summary>Every host-typed reference whose LAST placement step is a move (within its space, over the threshold),
-    /// a relocation (another space), or a removal (enabled and placed before, disabled or deleted now). The mover is the
-    /// last snap's plugin — or, for a deletion that stripped the placement (no snap), the deleting plugin.
+    /// a relocation (another space), or a removal — enabled at runtime and placed before, deleted or disabled at
+    /// runtime now. The mover is the last snap's plugin; for a deletion that stripped the placement (no snap), the
+    /// deleting plugin; for a host disabled through its enable-parent chain (R1), the plugin whose step on that chain
+    /// disabled it, when that step is later than any placement step. A host must exist at runtime in the arm without
+    /// its mover — a host that never existed there is counted, not listed.
     /// A host is furniture-scale or larger by its box at the previous snap; smaller things (a bowl moved with its
     /// table) are dependents, not hosts, and are counted aside. <paramref name="excludeMover"/> sets movers aside
     /// (the base game, when the floor is not wanted).</summary>
@@ -265,44 +403,66 @@ public sealed class ContactIndex
         var list = new List<MovedHost>();
         foreach (var (key, snaps) in Index.History.Refs)
         {
-            Snap prev, win; HostChange change; int mover;
+            Snap prev, win; HostChange change; int mover; int prevIndex; bool viaParent = false; bool found = false;
+            prev = default; win = default; change = default; mover = -1; prevIndex = -1;
             // A deletion that stripped the placement leaves the history one snap short: the winning snap is the
             // last PLACED one, and the deleting plugin is the mover of a Removed host.
             if (snaps.Count >= 1 && Index.DeletedBy.TryGetValue(key, out var delBy) && delBy > snaps[^1].Plugin && !snaps[^1].Deleted)
             {
-                prev = snaps[^1];
-                if (excludeMover?.Invoke(delBy) == true || prev.Disabled) continue;
-                win = prev with { Plugin = delBy, Deleted = true }; change = HostChange.Removed; mover = delBy;
+                prev = snaps[^1]; prevIndex = snaps.Count - 1;
+                win = prev with { Plugin = delBy, Deleted = true }; change = HostChange.Removed; mover = delBy; found = true;
             }
-            else
+            else if (snaps.Count >= 2)
             {
-                if (snaps.Count < 2) continue;
-                win = snaps[^1]; prev = snaps[^2]; mover = win.Plugin;
-                if (excludeMover?.Invoke(mover) == true) continue;
-                if (prev.Disabled || prev.Deleted) continue;                    // it was not there before either
-                if (win.Deleted || win.Disabled || Index.IsDeletedNow(key)) change = HostChange.Removed;
+                win = snaps[^1]; prev = snaps[^2]; prevIndex = snaps.Count - 2; mover = win.Plugin; found = true;
+                if (prev.Deleted) found = false;                                          // it was not there before either
+                else if (win.Deleted || Index.IsDeletedNow(key) || !WinnerEnable(key).Enabled) change = HostChange.Removed;
                 else if (win.Space != prev.Space) change = HostChange.Relocated;
                 else if (PlacementHistory.Dist(prev.Pos, win.Pos) > MoveThreshold) change = HostChange.Moved;
-                else continue;
+                else found = false;
             }
+            // The second way a host leaves (R1): disabled at runtime through its parent chain by a plugin whose step
+            // is later than any placement step of the host's own.
+            if (snaps.Count >= 1 && !snaps[^1].Deleted && !Index.IsDeletedNow(key))
+            {
+                var we = WinnerEnable(key);
+                if (we.Resolved && !we.Enabled && we.ViaParent)
+                {
+                    int x = ChainMover(key);
+                    if (x >= 0 && (!found || x > mover))
+                    {
+                        int ai = AuthoringSnapIndex(snaps, x, closure);
+                        if (ai >= 0 && !snaps[ai].Deleted)
+                        {
+                            prev = snaps[ai]; prevIndex = ai; win = snaps[^1]; change = HostChange.Removed; mover = x; viaParent = true; found = true;
+                        }
+                    }
+                }
+            }
+            if (!found) continue;
+            if (excludeMover?.Invoke(mover) == true) continue;
             var prevBase = ArmBase(key, mover, closure);
             var winBase = WinnerBase(key);
             if (prevBase.IsNull || !IsHostType(prevBase)) continue;
+            var armEn = ArmEnable(key, mover, closure);
+            if (!armEn.Resolved) { skips.HostEnableUnresolved++; continue; }
+            if (!armEn.Enabled) { skips.HostRuntimeDisabled++; continue; }          // it did not exist before either
             var box = WorldBox(prevBase, prev);
             if (box.IsEmpty) { skips.HostNoGeometry++; continue; }
             if (GeomOf(prevBase) is not { CanHost: true }) { skips.HostNoCollision++; continue; }
             float dim = MaxDim(box);
             if (dim > MaxHostDim) { skips.HostVolume++; continue; }
             if (dim < MinHostDim) { skips.HostTooSmall++; continue; }
-            list.Add(new MovedHost(key, prev, win, change, mover, prevBase, winBase));
+            list.Add(new MovedHost(key, prev, prevIndex, win, change, mover, prevBase, winBase, viaParent));
         }
         return list;
     }
 
     // ---- the two hashes ----------------------------------------------------------------------------
 
-    /// <summary>Every dependent-typed reference at every enabled, undeleted snap, hashed by that snap's world box — the
-    /// authoring arm's population (which snap applies is decided per host, by its mover).</summary>
+    /// <summary>Every dependent-typed reference at every undeleted snap, hashed by that snap's world box — the authoring
+    /// arm's population (which snap applies, and whether the reference EXISTS at runtime in that arm, is decided per
+    /// host by its mover in <see cref="Judge"/>; a flag-disabled snap is hashed too, because its parent may enable it).</summary>
     public BoxHash<(FormKey Key, int Snap)> DependentSnaps(ContactSkips skips)
     {
         var h = new BoxHash<(FormKey, int)>();
@@ -311,7 +471,7 @@ public sealed class ContactIndex
             for (int i = 0; i < snaps.Count; i++)
             {
                 var s = snaps[i];
-                if (s.Disabled || s.Deleted) continue;
+                if (s.Deleted) continue;
                 var b = BaseAt(key, s.Plugin);
                 if (!IsDependentType(b)) continue;
                 var box = WorldBox(b, s);
@@ -323,38 +483,45 @@ public sealed class ContactIndex
         return h;
     }
 
-    /// <summary>Every physical reference (host- or dependent-typed, any scale up to the volume cap) that CAN HOLD
-    /// something — solid collision — at its winning placement, enabled and undeleted: the winner arm's population.</summary>
-    public BoxHash<FormKey> PhysicalWinners(Func<Snap, bool>? inScope = null)
+    /// <summary>Every physical reference (host- or dependent-typed, ANY size — R3) that CAN HOLD something — solid
+    /// collision — at its winning placement, undeleted and enabled at runtime under the winner: the winner arm's
+    /// population. A reference whose enable chain cannot be followed is left out and counted.</summary>
+    public BoxHash<FormKey> PhysicalWinners(Func<Snap, bool>? inScope = null, ContactSkips? skips = null)
     {
         var h = new BoxHash<FormKey>();
         foreach (var (key, snaps) in Index.History.Refs)
         {
             var s = snaps[^1];
-            if (s.Disabled || s.Deleted || Index.IsDeletedNow(key)) continue;
+            if (s.Deleted || Index.IsDeletedNow(key)) continue;
             if (inScope is not null && !inScope(s)) continue;
             var b = WinnerBase(key);
             if (!IsPhysicalType(b) || GeomOf(b) is not { CanHost: true }) continue;
+            var en = WinnerEnable(key);
+            if (!en.Resolved) { if (skips is not null) skips.WinnerEnableUnresolved++; continue; }
+            if (!en.Enabled) { if (skips is not null) skips.WinnerRuntimeDisabled++; continue; }
             var box = WorldBox(b, s);
-            if (box.IsEmpty || MaxDim(box) > MaxHostDim) continue;
+            if (box.IsEmpty) continue;
             h.Add(s.Space, box, key);
         }
         return h;
     }
 
-    /// <summary>The winner arm's placement of a reference: its winning snap when enabled and undeleted, else null.</summary>
+    /// <summary>The winner arm's placement of a reference: its winning snap when undeleted and enabled at runtime, else null.</summary>
     public (Snap Snap, int SnapIndex)? WinnerPlacement(FormKey key)
     {
         var snaps = Index.History.Of(key);
         if (snaps is null || snaps.Count == 0) return null;
         var w = snaps[^1];
-        if (w.Disabled || w.Deleted || Index.IsDeletedNow(key)) return null;
+        if (w.Deleted || Index.IsDeletedNow(key)) return null;
+        var en = WinnerEnable(key);
+        if (en.Resolved && !en.Enabled) return null;
         return (w, snaps.Count - 1);
     }
 
     /// <summary>Every physical reference at its placement in the arm WITHOUT a given mover side — the last snap not by
-    /// the mover or a plugin downstream of it. For a labelled-mover check (USSEP before vs after).</summary>
-    public BoxHash<FormKey> PhysicalWithout(int mover, IReadOnlyList<HashSet<int>> closure, Func<Snap, bool>? inScope, out Dictionary<FormKey, int> snapIndex)
+    /// the mover or a plugin downstream of it, enabled at runtime there. For a labelled-mover check (USSEP before vs after).</summary>
+    public BoxHash<FormKey> PhysicalWithout(int mover, IReadOnlyList<HashSet<int>> closure, Func<Snap, bool>? inScope, out Dictionary<FormKey, int> snapIndex,
+                                            ContactSkips? skips = null)
     {
         var h = new BoxHash<FormKey>();
         snapIndex = new Dictionary<FormKey, int>();
@@ -363,12 +530,15 @@ public sealed class ContactIndex
             int i = AuthoringSnapIndex(snaps, mover, closure);
             if (i < 0) continue;
             var s = snaps[i];
-            if (s.Disabled || s.Deleted) continue;
+            if (s.Deleted) continue;
             if (inScope is not null && !inScope(s)) continue;
             var b = ArmBase(key, mover, closure);
             if (b.IsNull || !IsPhysicalType(b) || GeomOf(b) is not { CanHost: true }) continue;
+            var en = ArmEnable(key, mover, closure);
+            if (!en.Resolved) { if (skips is not null) skips.WinnerEnableUnresolved++; continue; }
+            if (!en.Enabled) { if (skips is not null) skips.WinnerRuntimeDisabled++; continue; }
             var box = WorldBox(b, s);
-            if (box.IsEmpty || MaxDim(box) > MaxHostDim) continue;
+            if (box.IsEmpty) continue;
             h.Add(s.Space, box, key);
             snapIndex[key] = i;
         }
@@ -393,7 +563,8 @@ public sealed class ContactIndex
     /// <summary>The dependent's best contact against everything in <paramref name="hash"/> (itself excluded) whose box
     /// is within the box band: the deepest penetration if any penetrates, else the least distance. Null when nothing is
     /// within the band, or the dependent has no soup. <paramref name="placementOf"/> gives each neighbour's snap in this
-    /// arm; <paramref name="baseOf"/> its base then.</summary>
+    /// arm; <paramref name="baseOf"/> its base then. The against-ref of the best contact is the one the reported depth
+    /// was measured against, and the arm carries how wide that ref is along the contact normal (R4).</summary>
     public ArmContact? BestContact(FormKey depKey, int depSnapIndex, FormKey depBase, Snap depSnap, Aabb depBox,
                                    BoxHash<FormKey> hash, Func<FormKey, (Snap Snap, int SnapIndex)?> placementOf, Func<FormKey, int, FormKey> baseOf,
                                    out int neighboursTested)
@@ -403,7 +574,8 @@ public sealed class ContactIndex
         if (soup is null) return null;
         var depGeom = GeomOf(depBase)!;
         ArmContact? best = null;
-        foreach (var (nKey, _, _) in hash.Near(depSnap.Space, depBox, BoxBand))
+        float bestRaw = float.PositiveInfinity; FormKey rawAgainst = default;
+        foreach (var (nKey, nBox, _) in hash.Near(depSnap.Space, depBox, BoxBand))
         {
             if (nKey == depKey) continue;
             if (placementOf(nKey) is not { } np) continue;
@@ -412,11 +584,13 @@ public sealed class ContactIndex
             if (grid is null) continue;
             neighboursTested++;
             var c = SpatialOverlap.Contact(soup, grid, Reach, NearBand);
+            if (c.Distance < bestRaw) { bestRaw = c.Distance; rawAgainst = nKey; }
+            if (best is not null && !Better(c, best.Contact)) continue;
             var hg = GeomOf(nBase)!;
-            var arm = new ArmContact(c, nKey, depGeom.DepSrc, hg.HostSrc);
-            if (best is null || Better(c, best.Contact)) best = arm;
+            float extent = c.Normal.LengthSquared() > 1e-12f ? grid.ExtentAlong(Vector3.Normalize(c.Normal)) : MaxDim(nBox);
+            best = new ArmContact(c, nKey, depGeom.DepSrc, hg.HostSrc, extent, MaxDim(nBox));
         }
-        return best;
+        return best is null ? null : best with { RawDistance = bestRaw, RawAgainst = rawAgainst };
     }
 
     static bool Better(SoupContact a, SoupContact b)
@@ -435,14 +609,16 @@ public sealed class ContactIndex
         var grid = HostGrid(hostKey, hostSnapIndex, hostBase, hostSnap, anySurface);
         if (soup is null || grid is null) return null;
         var c = SpatialOverlap.Contact(soup, grid, Reach, NearBand);
-        return new ArmContact(c, hostKey, GeomOf(depBase)!.DepSrc, GeomOf(hostBase)!.HostSrc);
+        float extent = c.Normal.LengthSquared() > 1e-12f ? grid.ExtentAlong(Vector3.Normalize(c.Normal)) : float.NaN;
+        return new ArmContact(c, hostKey, GeomOf(depBase)!.DepSrc, GeomOf(hostBase)!.HostSrc, extent, RawDistance: c.Distance, RawAgainst: hostKey);
     }
 
     // ---- judge one host ------------------------------------------------------------------------------
 
     /// <summary>Every dependent within reach of <paramref name="host"/> in the authoring arm, judged. The authoring arm
     /// is the order without the host's mover: the host at its previous snap, each dependent at its last snap not on the
-    /// mover's side. The winner arm tests the dependent against everything physical near it under the winner.</summary>
+    /// mover's side — and existing at runtime there (R1). The winner arm tests the dependent against everything physical
+    /// near it under the winner.</summary>
     public List<ContactRow> Judge(MovedHost host, BoxHash<(FormKey Key, int Snap)> depSnaps, BoxHash<FormKey> winners,
                                   IReadOnlyList<HashSet<int>> closure, ContactSkips skips, bool keepNoRelation = false)
     {
@@ -450,7 +626,7 @@ public sealed class ContactIndex
         var hostBox = WorldBox(host.PrevBase, host.Previous);
         if (hostBox.IsEmpty) return rows;                                        // MovedHosts already counted it
         var hostScale = ScaleOf(hostBox);
-        int hostPrevIndex = Index.History.Of(host.Key)!.Count - 2;
+        int hostPrevIndex = host.PrevIndex;
 
         foreach (var ((depKey, si), depBox, _) in depSnaps.Near(host.Previous.Space, hostBox, Reach))
         {
@@ -461,6 +637,9 @@ public sealed class ContactIndex
             if (ai != si) continue;                                              // this snap is not the authoring arm's
             var depAuth = snaps[ai];
             if (depAuth.Space != host.Previous.Space) { skips.DepOtherSpace++; continue; }
+            var depArmEn = ArmEnable(depKey, host.Mover, closure);
+            if (!depArmEn.Resolved) { skips.DepEnableUnresolved++; continue; }
+            if (!depArmEn.Enabled) { skips.DepAbsentInArm++; continue; }         // never there to rest on anything
             var depBase = ArmBase(depKey, host.Mover, closure);
             if (depBase.IsNull) { skips.DepIntroducedByMover++; continue; }
             var depArmBox = WorldBox(depBase, depAuth);
@@ -470,6 +649,7 @@ public sealed class ContactIndex
 
             var depWin = snaps[^1];
             bool depDeletedNow = Index.IsDeletedNow(depKey);
+            var depWinEn = WinnerEnable(depKey);
             bool moverSide = depWin.Plugin == host.Mover || closure[depWin.Plugin].Contains(host.Mover);
             bool rePlacedByMoverSide = ai != snaps.Count - 1 && moverSide;
             bool seen = closure[host.Mover].Contains(depAuth.Plugin) || depAuth.Plugin == host.Mover;
@@ -486,7 +666,8 @@ public sealed class ContactIndex
             // The authoring facts first — a pair with no relationship never needs the winner arm measured.
             var f0 = new DetectorModel.ContactFacts(depHasGeom, hostHasGeom, auth is not null,
                 auth?.Contact.FacingDistance ?? float.NaN, auth?.Contact.EffectivePenetration ?? float.NaN, auth?.Contact.NormalUp ?? float.NaN,
-                depWin.Deleted || depDeletedNow, depWin.Disabled, rePlacedByMoverSide, false, float.NaN, float.NaN, false, motion);
+                depWin.Deleted || depDeletedNow, !depWinEn.Enabled, rePlacedByMoverSide, false, float.NaN, float.NaN, false, motion,
+                DependentDisabledViaParent: depWinEn.ViaParent, DependentEnableUnresolved: !depWinEn.Resolved);
             var r0 = DetectorModel.PlacementContact(f0, Epsilon, SupportCos, AttachCos);
             // A near miss — no relationship at ε, but within the near band — still gets its winner arm measured, so a
             // re-judgement at a larger ε has the facts it needs (the report's sensitivity table).
@@ -515,6 +696,7 @@ public sealed class ContactIndex
                 WinnerDistance = win?.Contact.FacingDistance ?? Reach,
                 WinnerPenetration = win?.Contact.EffectivePenetration ?? 0f,
                 WinnerContactIsHost = win is not null && win.Against == host.Key,
+                WinnerAgainstExtent = win?.AgainstExtent ?? float.NaN,
             };
             var r = DetectorModel.PlacementContact(f, Epsilon, SupportCos, AttachCos);
             if (r.Verdict == ContactVerdict.NoRelation && !keepNoRelation && !nearMiss) continue;

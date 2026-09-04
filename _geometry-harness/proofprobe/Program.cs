@@ -1299,8 +1299,9 @@ Console.WriteLine("\nPROOF — placement contact (_shared/DetectorModel.cs + _sh
     static DetectorModel.ContactFacts CF(bool depGeom = true, bool hostGeom = true, bool authMeasured = true,
         float aDist = 0f, float aPen = 0f, float aUp = 1f,
         bool deleted = false, bool disabled = false, bool moverSide = false,
-        bool winMeasured = true, float wDist = 128f, float wPen = 0f, bool wHost = false, DependentMotion motion = DependentMotion.Fixed)
-        => new(depGeom, hostGeom, authMeasured, aDist, aPen, aUp, deleted, disabled, moverSide, winMeasured, wDist, wPen, wHost, motion);
+        bool winMeasured = true, float wDist = 128f, float wPen = 0f, bool wHost = false, DependentMotion motion = DependentMotion.Fixed,
+        bool viaParent = false, bool unresolved = false, float wExtent = float.NaN)
+        => new(depGeom, hostGeom, authMeasured, aDist, aPen, aUp, deleted, disabled, moverSide, winMeasured, wDist, wPen, wHost, motion, viaParent, unresolved, wExtent);
     static string W((ContactRelation Relation, ContactVerdict Verdict, ContactBlocker Reason, string Why) r) => $"{r.Relation} / {r.Verdict} / {r.Reason}: {r.Why}";
 
     var s1 = DetectorModel.PlacementContact(CF());
@@ -1348,6 +1349,66 @@ Console.WriteLine("\nPROOF — placement contact (_shared/DetectorModel.cs + _sh
     var lo2 = DetectorModel.PlacementContact(CF(aDist: 3f, aUp: 0.9f), epsilon: 2f, supportCos: 0.95f);
     Check("contact: ε and the angle bands are parameters — 3 u apart fails ε = 2; up 0.9 fails a 0.95 support band", lo.Verdict == ContactVerdict.NoRelation && lo2.Verdict == ContactVerdict.NoRelation, $"{lo.Verdict} / {lo2.Verdict}");
 
+    // The 2026-09-03 folds at fact level (R1, R4). R2 and R3 are index rules, proven on the synthetic order below.
+    var rd = DetectorModel.PlacementContact(CF(disabled: true, viaParent: true, wDist: 0f, wPen: 20f));
+    Check("contact R1: dependent disabled at runtime THROUGH its enable parent under the winner -> UNJUDGEABLE / RuntimeDisabled, whatever the winner geometry says (absent, not a defect)",
+          rd is { Verdict: ContactVerdict.Unjudgeable, Reason: ContactBlocker.RuntimeDisabled, Relation: ContactRelation.Supported } && rd.Why.Contains("absent"), W(rd));
+    var rf = DetectorModel.PlacementContact(CF(disabled: true, viaParent: false));
+    Check("contact R1: disabled by its OWN flag (no parent) stays REMOVED — the −30000 idiom is the fix", rf.Verdict == ContactVerdict.Removed && rf.Reason == ContactBlocker.None, W(rf));
+    var ru = DetectorModel.PlacementContact(CF(unresolved: true));
+    var ru2 = DetectorModel.PlacementContact(CF(disabled: true, viaParent: true, unresolved: true));
+    Check("contact R1: an enable chain the order cannot follow -> UNJUDGEABLE / EnableChainUnresolved, and it outranks the runtime-disabled reading it could not make",
+          ru is { Verdict: ContactVerdict.Unjudgeable, Reason: ContactBlocker.EnableChainUnresolved } && ru2.Reason == ContactBlocker.EnableChainUnresolved, $"{W(ru)} | {W(ru2)}");
+    var rpe = DetectorModel.PlacementContact(CF(deleted: true, unresolved: true, disabled: true, viaParent: true));
+    Check("contact R1: a deleted dependent is REMOVED before any enable reading is consulted", rpe.Verdict == ContactVerdict.Removed, W(rpe));
+    var rj = DetectorModel.PlacementContact(CF(wDist: 0f, wPen: 100f, wExtent: 30f));
+    var rw = DetectorModel.PlacementContact(CF(wDist: 0f, wPen: 100f, wExtent: 300f));
+    var rn = DetectorModel.PlacementContact(CF(wDist: 0f, wPen: 100f));
+    Check("contact R4: 100 u inside a thing 30 u across along the contact normal -> UNJUDGEABLE / DepthExceedsObject, the depth kept in the facts; the same 100 u into a 300 u wall -> SUNK; no extent read -> SUNK as before",
+          rj is { Verdict: ContactVerdict.Unjudgeable, Reason: ContactBlocker.DepthExceedsObject } && rj.Why.Contains("refused") && rw.Verdict == ContactVerdict.Sunk && rn.Verdict == ContactVerdict.Sunk,
+          $"{W(rj)} | {rw.Verdict} | {rn.Verdict}");
+    var rj2 = DetectorModel.PlacementContact(CF(wDist: 0f, wPen: 3f, wExtent: 2f));
+    var rj3 = DetectorModel.PlacementContact(CF(wDist: 0f, wPen: 30f, wExtent: 30f));
+    Check("contact R4: the extent test applies only past ε (3 u into a 2 u sliver is still touching at ε = 4), and a depth EQUAL to the extent is not refused",
+          rj2.Verdict == ContactVerdict.ReSupported && rj3.Verdict == ContactVerdict.Sunk, $"{rj2.Verdict} / {rj3.Verdict}");
+
+    Check("classify R2: the Is-Marker flag is the rule when the caller read it — a Furniture with the flag and an ordinary name is a Marker host / Control dependent; a Static named XMarkerHeading WITHOUT the flag is Physical; a caller passing no flag keeps the name heuristic",
+          DetectorModel.ClassifyHost("Furniture", "XJKCoWCommonChair01F", markerFlag: true) == HostClass.Marker
+       && DetectorModel.ClassifyDependent("PlacedObject", "Furniture", "XJKCoWCommonChair01F", markerFlag: true) == DependentClass.Control
+       && DetectorModel.ClassifyHost("Static", "XMarkerHeading", markerFlag: false) == HostClass.Physical
+       && DetectorModel.ClassifyDependent("PlacedObject", "Static", "XMarkerHeading", markerFlag: false) == DependentClass.Physical
+       && DetectorModel.ClassifyHost("Static", "XMarkerHeading") == HostClass.Marker
+       && DetectorModel.ClassifyDependent("PlacedObject", "Activator", "MGR02FocalPointTrigger", markerFlag: false) == DependentClass.Control, "flag over name; trigger/FX names untouched");
+
+    // The shared enable-state resolver (housecarl-core, moved out of viewprobe 2026-09-03): the chain rule at fact level.
+    {
+        var pk = new ModKey("Ct", ModType.Plugin);
+        FormKey K(uint id) => new(pk, id);
+        var facts = new Dictionary<FormKey, EnableFacts>
+        {
+            [K(1)] = new(false, null, false),                 // plain, enabled
+            [K(2)] = new(true, null, false),                  // plain, disabled
+            [K(3)] = new(true, K(1), false),                  // own flag disabled, parent enabled -> ENABLED (the flag is bookkeeping)
+            [K(4)] = new(false, K(2), false),                 // own flag enabled, parent disabled -> DISABLED
+            [K(5)] = new(false, K(2), true),                  // opposite of a disabled parent -> ENABLED
+            [K(6)] = new(false, K(4), false),                 // a chain: 6 -> 4 -> 2 -> DISABLED
+            [K(7)] = new(false, K(8), false), [K(8)] = new(false, K(7), false),   // a cycle
+            [K(9)] = new(false, K(99), false),                // a parent nobody places
+            [K(10)] = new(false, new FormKey(pk, 0x14), true), // parent = the player, opposite: permanently disabled
+            [K(11)] = new(true, new FormKey(pk, 0x14), false), // parent = the player: always enabled despite the flag
+        };
+        EnableFacts? F(FormKey k) => facts.TryGetValue(k, out var f) ? f : null;
+        var memo = new Dictionary<FormKey, EnableResolution>();
+        EnableResolution E(uint id) => EnableState.Resolve(K(id), F, memo);
+        Check("enable: no parent -> the flag; a parent -> the parent's state XOR opposite, the own flag ignored",
+              E(1).Enabled && !E(2).Enabled && E(3) is { Enabled: true, ViaParent: true, Resolved: true } && E(4) is { Enabled: false, ViaParent: true } && E(5).Enabled && !E(6).Enabled,
+              $"1 {E(1).Enabled} 2 {E(2).Enabled} 3 {E(3).Enabled} 4 {E(4).Enabled} 5 {E(5).Enabled} 6 {E(6).Enabled}");
+        Check("enable: the player is always enabled — parent=player+opposite is permanently disabled, parent=player overrides a disabled flag",
+              !E(10).Enabled && E(11).Enabled && E(10).Resolved, $"10 {E(10).Enabled} 11 {E(11).Enabled}");
+        Check("enable: a cycle falls back to the own flag and reads UNRESOLVED; a parent nobody places reads enabled and UNRESOLVED",
+              E(7) is { Enabled: true, Resolved: false } && E(9) is { Enabled: true, Resolved: false } && E(1).Resolved, $"7 {E(7)} 9 {E(9)}");
+    }
+
     Check("motion: item types are MOVABLE by record type; statics, furniture, containers, doors, activators, trees, flora, lights FIXED",
           new[] { "MiscItem", "Ingredient", "Ingestible", "Book", "Weapon", "Armor", "Ammunition", "SoulGem", "Key", "Scroll", "LeveledItem" }.All(t => DetectorModel.ClassifyMotion(t, null) == DependentMotion.Movable)
        && new[] { "Static", "Furniture", "Container", "Door", "Activator", "Tree", "Flora", "Light" }.All(t => DetectorModel.ClassifyMotion(t, null) == DependentMotion.Fixed), "");
@@ -1390,16 +1451,26 @@ Console.WriteLine("\nPROOF — placement contact (_shared/DetectorModel.cs + _sh
         if (sub is null) { sub = new CellSubBlock { BlockNumber = subN, GroupType = GroupTypeEnum.InteriorCellSubBlock }; block.SubBlocks.Add(sub); }
         sub.Cells.Add(cell);
     }
-    static PlacedObject Ref(FormKey key, FormKey baseKey, float x, float y = 0, float z = 0, string? edid = null, bool disabled = false)
+    static PlacedObject Ref(FormKey key, FormKey baseKey, float x, float y = 0, float z = 0, string? edid = null, bool disabled = false,
+                            FormKey? parent = null, bool opposite = false)
     {
         var r = new PlacedObject(key, SkyrimRelease.SkyrimSE) { EditorID = edid, Placement = new Placement { Position = new P3Float(x, y, z), Rotation = new P3Float(0, 0, 0) } };
         r.Base.SetTo(baseKey);
         if (disabled) r.SkyrimMajorRecordFlags |= SkyrimMajorRecord.SkyrimMajorRecordFlag.InitiallyDisabled;
+        if (parent is { } pk)
+        {
+            r.EnableParent = new EnableParent { Flags = opposite ? EnableParent.Flag.SetEnableStateToOppositeOfParent : 0 };
+            r.EnableParent.Reference.SetTo(pk);
+        }
         return r;
     }
     static Cell Interior(FormKey key, string? edid = null) => new(key, SkyrimRelease.SkyrimSE) { EditorID = edid, Flags = Cell.Flag.IsInteriorCell };
-    static Static Stat(FormKey k, string edid, int x, int y, int z) => new(k, SkyrimRelease.SkyrimSE)
-        { EditorID = edid, Model = new Model { File = $"meshes\\ct\\{edid}.nif" }, ObjectBounds = new ObjectBounds { First = new P3Int16((short)-x, (short)-y, 0), Second = new P3Int16((short)x, (short)y, (short)z) } };
+    static Static Stat(FormKey k, string edid, int x, int y, int z, bool marker = false, string? mesh = null) => new(k, SkyrimRelease.SkyrimSE)
+        { EditorID = edid, Model = new Model { File = mesh ?? $"meshes\\ct\\{edid}.nif" }, ObjectBounds = new ObjectBounds { First = new P3Int16((short)-x, (short)-y, 0), Second = new P3Int16((short)x, (short)y, (short)z) },
+          MajorRecordFlagsRaw = marker ? (int)EnableState.IsMarkerFlag : 0 };
+    static Furniture Furn(FormKey k, string edid, int x, int y, int z, bool marker, string mesh) => new(k, SkyrimRelease.SkyrimSE)
+        { EditorID = edid, Model = new Model { File = mesh }, ObjectBounds = new ObjectBounds { First = new P3Int16((short)-x, (short)-y, 0), Second = new P3Int16((short)x, (short)y, (short)z) },
+          MajorRecordFlagsRaw = marker ? (int)EnableState.IsMarkerFlag : 0 };
     string Write(SkyrimMod mod, params ISkyrimModGetter[] masters)
     {
         var path = Path.Combine(root, mod.ModKey.FileName.String);
@@ -1420,14 +1491,50 @@ Console.WriteLine("\nPROOF — placement contact (_shared/DetectorModel.cs + _sh
     master.Statics.Add(Stat(fxK, "FXSmokeCt", 12, 12, 10));                    // FX by editor id, bowl-sized
     var poleK = M(0x80A);
     master.Statics.Add(Stat(poleK, "CtPole", 4, 4, 8));                         // an 8 u post — nothing rests on it
+    // The 2026-09-03 folds' bases. A switch is an enable marker: the Is-Marker flag, a mesh, a tiny box. The sit-chair is
+    // JK's shape — Furniture, an ordinary chair mesh, the flag set. The stand is the reverse — "Marker" in its name, no
+    // flag. The shell is a whole-tower piece over the moved-host cap. The jar is a 30 u box the proof's geometry
+    // resolver turns INSIDE OUT (the inverted-sliver artefact R4 refuses); the block is a 300 u solid a case can be
+    // honestly inside of.
+    var switchK = M(0x80B); var sitK = M(0x80C); var standK = M(0x80D); var shellK = M(0x80E); var jarK = M(0x80F); var caseK = M(0x812); var blockK = M(0x813);
+    master.Statics.Add(Stat(switchK, "CtSwitch", 2, 2, 4, marker: true));
+    master.Furniture.Add(Furn(sitK, "CtSitChair", 15, 15, 40, marker: true, mesh: "meshes\\ct\\CommonChair01.nif"));
+    master.Statics.Add(Stat(standK, "CtBowlMarkerStand", 12, 12, 10));
+    master.Statics.Add(Stat(shellK, "CtShell", 2600, 2600, 64));
+    master.Statics.Add(Stat(jarK, "CtJarInverted", 15, 15, 30));
+    master.Statics.Add(Stat(caseK, "CtCase", 30, 30, 200));
+    master.Statics.Add(Stat(blockK, "CtBlock", 150, 150, 300));
+    const float CaseHalf = 100f;
+    FormKey S(int n) => M((uint)(0xB00 + n));     // switches (enable parents)
     var m1 = Interior(cell1K, "CtCell1"); var m2 = Interior(cell2K, "CtCell2");
-    foreach (int n in new[] { 1, 2, 3, 4, 5, 6, 8, 9, 10, 11, 12, 13, 14, 15, 16, 18, 20, 22 })
+    foreach (int n in new[] { 1, 2, 3, 4, 5, 6, 8, 9, 10, 11, 12, 13, 14, 15, 16, 18, 20, 22, 31, 32, 33, 34, 35, 40, 41, 60 })
         m1.Temporary.Add(Ref(H(n), tableK, 1000f * n, edid: $"Table{n}"));
     m1.Temporary.Add(Ref(H(7), wallK, 7000, 0, 150, "Wall7"));
     m1.Temporary.Add(Ref(H(17), markerK, 17000, edid: "Marker17"));
     m1.Temporary.Add(Ref(H(21), floorK, 21000, 0, -20, "Floor21"));
-    foreach (int n in new[] { 1, 3, 4, 5, 6, 10, 11, 12, 13, 14, 15, 16, 17 })
+    foreach (int n in new[] { 1, 3, 4, 5, 6, 10, 11, 12, 13, 14, 15, 16, 17, 30, 32, 60 })
         m1.Temporary.Add(Ref(D(n), bowlK, 1000f * n, 0, TableTop + BowlHalf, $"Bowl{n}"));           // resting on its table
+    // R1: Table30 follows Switch30 (enabled in M; A will disable the switch, never touching the table). Table36 follows
+    // Switch36, disabled from birth — a host that never exists at runtime. Bowl31 follows Switch31 (A disables it).
+    // Bowl33 is the OPPOSITE of Switch33 (disabled from birth -> the bowl is enabled); Bowl34 the opposite of Switch34
+    // (enabled -> the bowl never exists).
+    foreach (int n in new[] { 30, 31, 33, 34 }) m1.Temporary.Add(Ref(S(n), switchK, 1000f * n, 500, 0, $"Switch{n}", disabled: n == 33));
+    m1.Temporary.Add(Ref(S(36), switchK, 36000, 500, 0, "Switch36", disabled: true));
+    m1.Temporary.Add(Ref(H(30), tableK, 30000, edid: "Table30", parent: S(30)));
+    m1.Temporary.Add(Ref(H(36), tableK, 36000, edid: "Table36", parent: S(36)));
+    m1.Temporary.Add(Ref(D(31), bowlK, 31000, 0, TableTop + BowlHalf, "Bowl31", parent: S(31)));
+    m1.Temporary.Add(Ref(D(33), bowlK, 33000, 0, TableTop + BowlHalf, "Bowl33", parent: S(33), opposite: true));
+    m1.Temporary.Add(Ref(D(34), bowlK, 34000, 0, TableTop + BowlHalf, "Bowl34", parent: S(34), opposite: true));
+    m1.Temporary.Add(Ref(D(36), bowlK, 36000, 0, TableTop + BowlHalf, "Bowl36"));
+    // R2: a flagged sit-chair on Table35 (excluded on the flag); the name-only stand on Table37 (admitted).
+    m1.Temporary.Add(Ref(D(35), sitK, 35000, 0, TableTop + 20f, "Sit35"));
+    m1.Temporary.Add(Ref(H(37), tableK, 37000, edid: "Table37"));
+    m1.Temporary.Add(Ref(D(37), standK, 37000, 0, TableTop + BowlHalf, "Stand37"));
+    // R3: Bowl60 rests on Table60 AND on the top of a 5,200 u shell at the same height — the shell is over the cap.
+    m1.Temporary.Add(Ref(H(61), shellK, 60000, 0, 0, "Shell60"));
+    // R4: two bookcase-sized cases on tables A will move; A puts an inside-out jar beside Case40 and a block around Case41.
+    m1.Temporary.Add(Ref(D(40), caseK, 40000, 0, TableTop + CaseHalf, "Case40"));
+    m1.Temporary.Add(Ref(D(41), caseK, 41000, 0, TableTop + CaseHalf, "Case41"));
     m1.Temporary.Add(Ref(D(2), appleK, 2000, 0, TableTop + AppleHalf, "Apple2"));                   // a movable one
     m1.Temporary.Add(Ref(D(18), appleK, 18000, 0, TableTop + AppleHalf, "Apple18"));
     m1.Temporary.Add(Ref(D(7), sconceK, 7000, WallHalfY + SconceHalfY, 150, "Sconce7"));            // against the wall's +Y face
@@ -1472,8 +1579,13 @@ Console.WriteLine("\nPROOF — placement contact (_shared/DetectorModel.cs + _sh
     var a = new SkyrimMod(aKey, release);
     a.Statics.Add(new Static(aStaticK, release) { EditorID = "CtAStatic" });
     var a1 = Interior(cell1K); var a2 = Interior(cell2K);
-    foreach (int n in new[] { 1, 2, 3, 4, 5, 6, 8, 9, 14, 15, 22 })
+    foreach (int n in new[] { 1, 2, 3, 4, 5, 6, 8, 9, 14, 15, 22, 31, 32, 33, 34, 35, 36, 37, 40, 41, 60 })
         a1.Temporary.Add(Ref(H(n), tableK, 1000f * n + 200, edid: $"Table{n}"));                    // moved 200 u along X
+    a1.Temporary.Add(Ref(S(30), switchK, 30000, 500, 0, "Switch30", disabled: true));               // Table30 leaves through its parent
+    a1.Temporary.Add(Ref(S(31), switchK, 31000, 500, 0, "Switch31", disabled: true));               // Bowl31 leaves through its parent
+    a1.Temporary.Add(Ref(new FormKey(aKey, 0x902), tableK, 32000, edid: "NewTable32", parent: S(31)));  // A's table under Bowl32 — parented to the switch A disabled
+    a1.Temporary.Add(Ref(new FormKey(aKey, 0x903), jarK, 40050, 0, TableTop + CaseHalf, "Jar40"));       // 5 u beside Case40, inside out
+    a1.Temporary.Add(Ref(new FormKey(aKey, 0x904), blockK, 41000, 0, TableTop + CaseHalf - 150f, "Block41"));  // around Case41
     a1.Temporary.Add(Ref(D(3), bowlK, 3200, 0, TableTop + BowlHalf, "Bowl3"));                      // A moves Bowl3 with Table3
     a1.Temporary.Add(Ref(new FormKey(aKey, 0x900), tableK, 5000, edid: "NewTable5"));               // A's own table under Bowl5
     a1.Temporary.Add(new PlacedObject(D(6), release) { IsDeleted = true });                         // Bowl6 deleted (placement stripped)
@@ -1513,8 +1625,9 @@ Console.WriteLine("\nPROOF — placement contact (_shared/DetectorModel.cs + _sh
     // Read the order back the way contactprobe does.
     var paths = new[] { mPath, xPath, aPath, bPath, cPath };
     ContactIndex? cidx = null;
+    static TriangleSoup Inverted(TriangleSoup s) => new(s.Vertices, s.Indices.Chunk(3).SelectMany(t => new[] { t[0], t[2], t[1] }).ToArray());
     cidx = new ContactIndex(k => cidx!.Index.ObndBox(k) is { IsEmpty: false } bx
-        ? new RefGeometry(bx, ContactIndex.BoxSoup(bx), ContactIndex.BoxSoup(bx), 'o', 'o', HostUsable: true, Array.Empty<(string, string)>(), false) : null);
+        ? new RefGeometry(bx, k == jarK ? Inverted(ContactIndex.BoxSoup(bx)) : ContactIndex.BoxSoup(bx), ContactIndex.BoxSoup(bx), 'o', 'o', HostUsable: true, Array.Empty<(string, string)>(), false) : null);
     var keys = new ModKey[paths.Length];
     var masterIdx = new HashSet<int>[paths.Length];
     for (int p = 0; p < paths.Length; p++)
@@ -1534,15 +1647,22 @@ Console.WriteLine("\nPROOF — placement contact (_shared/DetectorModel.cs + _sh
     var skips = new ContactSkips();
     var hosts = cidx.MovedHosts(skips, closure);
     MovedHost? Host(int n) => hosts.FirstOrDefault(h => h.Key == H(n));
-    Check("ct-synth: the host census — every moved, relocated or removed table and the wall; not the 10 u nudge, not the marker, not the bowls A moved (too small to host)",
-          hosts.Count == 21 && skips.HostTooSmall == 3 && Host(16) is null && Host(17) is null && Host(12) is { Change: HostChange.Removed } && Host(13) is { Change: HostChange.Relocated }
-       && Host(1) is { Change: HostChange.Moved, Mover: Ai } && Host(23) is not null,
-          $"{hosts.Count} hosts: " + string.Join(" ", hosts.OrderBy(h => h.Key.ID).Select(h => $"{h.Key.ID - 0x900}:{h.Change}")));
+    Check("ct-synth: the host census — every moved, relocated or removed table and the wall; not the 10 u nudge, not the four bowls that moved or left (too small to host — Bowl31 leaves through its parent); Marker17 IS a host (the name says marker, the flag does not — R2); Table36 never exists at runtime (R1, counted)",
+          hosts.Count == 32 && skips.HostTooSmall == 4 && Host(16) is null && Host(17) is { Change: HostChange.Moved } && Host(12) is { Change: HostChange.Removed } && Host(13) is { Change: HostChange.Relocated }
+       && Host(1) is { Change: HostChange.Moved, Mover: Ai } && Host(23) is not null && Host(36) is null && skips.HostRuntimeDisabled == 1 && Host(61) is null,
+          $"{hosts.Count} hosts (runtime-disabled {skips.HostRuntimeDisabled}, too small {skips.HostTooSmall}): " + string.Join(" ", hosts.OrderBy(h => h.Key.ID).Select(h => $"{h.Key.ID - 0x900}:{h.Change}")));
     Check("ct-synth: a base swap is read at the right snap — Table18's previous base is the short table, its winning base the tall one",
           Host(18) is { } h18 && h18.PrevBase == tableK && h18.WinBase == tallK, Host(18) is { } x ? $"{x.PrevBase} -> {x.WinBase}" : "(no host)");
+    Check("ct-synth R1: Table30, never re-placed, leaves the world when A disables its enable parent -> REMOVED via the parent, mover A, previous snap the master's",
+          Host(30) is { Change: HostChange.Removed, RemovedViaParent: true, Mover: Ai, PrevIndex: 0 } && Host(12) is { RemovedViaParent: false },
+          Host(30) is { } h30 ? $"{h30.Change} viaParent {h30.RemovedViaParent} mover {h30.Mover} prevIndex {h30.PrevIndex}" : "(no host)");
+    var (flagOnly, nameOnly) = cidx.AuditMarkers();
+    Check("ct-synth R2: the marker audit — the switch and the sit-chair are flagged under ordinary names; XMarkerHeading and the stand are named markers without the flag",
+          flagOnly.Contains(switchK) && flagOnly.Contains(sitK) && nameOnly.Contains(markerK) && nameOnly.Contains(standK) && !flagOnly.Contains(tableK) && !nameOnly.Contains(tableK),
+          $"flag-only {flagOnly.Count}, name-only {nameOnly.Count}");
 
     var depHash = cidx.DependentSnaps(skips);
-    var winHash = cidx.PhysicalWinners();
+    var winHash = cidx.PhysicalWinners(null, skips);
     var rows = hosts.SelectMany(h => cidx.Judge(h, depHash, winHash, closure, skips, keepNoRelation: true)).ToList();
     ContactRow? Row(int n) => rows.FirstOrDefault(r => r.Host.Key == H(n) && r.Dependent == D(n));
     string R(int n) => Row(n) is { } r ? $"{r.Relation} / {r.Verdict} / {r.Reason} [{r.Motion}, seen {r.Seen}, after {r.AuthorAfterMover}, touched {r.DepTouchedByMoverSide}]: {r.Why}" : "(no row)";
@@ -1570,21 +1690,43 @@ Console.WriteLine("\nPROOF — placement contact (_shared/DetectorModel.cs + _sh
           Row(15) is { Verdict: ContactVerdict.Stranded, DepTouchedByMoverSide: true } && Row(1) is { DepTouchedByMoverSide: false }, R(15));
     Check("ct-synth: Table18 moved and base-swapped to the tall table -> the authoring arm uses the SHORT table: STRANDED, not 'already sunk'",
           Row(18) is { Relation: ContactRelation.Supported, Verdict: ContactVerdict.Stranded }, R(18));
-    Check("ct-synth: FX on Table20 and the wall on Floor21 are not dependents; Bowl22 introduced by the mover is skipped; no rows for 16 or 17",
-          Row(20) is null && Row(21) is null && !rows.Any(r => r.Dependent == new FormKey(aKey, 0x901)) && skips.DepIntroducedByMover >= 1 && Row(16) is null && Row(17) is null,
-          $"introduced-by-mover {skips.DepIntroducedByMover}");
+    Check("ct-synth: FX on Table20 and the wall on Floor21 are not dependents; Bowl22 introduced by the mover is skipped; no row for 16; Bowl17 on the name-only marker host IS a row now (R2)",
+          Row(20) is null && Row(21) is null && !rows.Any(r => r.Dependent == new FormKey(aKey, 0x901)) && skips.DepIntroducedByMover >= 1 && Row(16) is null && Row(17) is { Verdict: ContactVerdict.Stranded },
+          $"introduced-by-mover {skips.DepIntroducedByMover}; 17: {R(17)}");
     Check("ct-synth: EXTERIOR — persistent Table23 in the worldspace's persistent cell, Bowl23 in a grid cell: same SPACE, host moved -> STRANDED",
           Row(23) is { Verdict: ContactVerdict.Stranded }, R(23));
     Check("ct-synth: every row's geometry is the labelled OBND box on both sides",
           rows.All(r => r.Authoring is null || (r.Authoring.DepSrc == 'o' && r.Authoring.HostSrc == 'o')), "");
     Check("ct-synth: Table27 removed by A; Ref28, a pole X turned into a table WITHOUT moving it, is under Bowl27 -> RE-SUPPORTED by Ref28 (the winner's base, not the placement-setter's)",
           Row(27) is { Verdict: ContactVerdict.ReSupported } r27 && r27.Winner!.Against == H(28), R(27));
-    Check("ct-synth: the whole population — 19 rows (Ref28's table coincides with Table27 and is a near-miss row of its own), and the verdict tally is the one the order was built to give",
-          rows.Count == 19
-       && rows.Count(r => r.Verdict == ContactVerdict.Stranded) == 8 && rows.Count(r => r.Verdict == ContactVerdict.Orphaned) == 1
-       && rows.Count(r => r.Verdict == ContactVerdict.MovedTogether) == 2 && rows.Count(r => r.Verdict == ContactVerdict.ReSupported) == 3
-       && rows.Count(r => r.Verdict == ContactVerdict.Sunk) == 1 && rows.Count(r => r.Verdict == ContactVerdict.Removed) == 1
-       && rows.Count(r => r.Verdict == ContactVerdict.NoRelation) == 3,
+
+    // The 2026-09-03 folds on the synthetic order.
+    Check("ct-synth R1: Table30 removed through its parent -> Bowl30 STRANDED (the host is not in the winner population)", Row(30) is { Verdict: ContactVerdict.Stranded }, R(30));
+    Check("ct-synth R1: Table31 moved, Bowl31 disabled at runtime through the switch A disabled -> UNJUDGEABLE / RuntimeDisabled",
+          Row(31) is { Verdict: ContactVerdict.Unjudgeable, Reason: ContactBlocker.RuntimeDisabled, Relation: ContactRelation.Supported }, R(31));
+    Check("ct-synth R1: A's NewTable32 under Bowl32 follows the disabled switch -> not a re-supporter; Bowl32 STRANDED (compare Bowl5, re-supported by an enabled one)",
+          Row(32) is { Verdict: ContactVerdict.Stranded } && Row(5) is { Verdict: ContactVerdict.ReSupported }, R(32));
+    Check("ct-synth R1: the opposite-of-parent flag inverts the chain — Bowl33 (opposite of a disabled switch) exists and reads STRANDED; Bowl34 (opposite of an enabled one) never exists in either arm: no row, counted",
+          Row(33) is { Verdict: ContactVerdict.Stranded } && Row(34) is null && skips.DepAbsentInArm >= 1, $"33: {R(33)} | 34: {R(34)} | absent-in-arm {skips.DepAbsentInArm}");
+    Check("ct-synth R1: Table36 followed a switch disabled from birth -> no host, no row for Bowl36", Host(36) is null && Row(36) is null, R(36));
+    Check("ct-synth R2: the flagged sit-chair on Table35 is not a dependent (no row); the name-only stand on Table37 is one -> STRANDED",
+          Row(35) is null && Row(37) is { Verdict: ContactVerdict.Stranded }, $"35: {R(35)} | 37: {R(37)}");
+    Check("ct-synth R3: Table60 moved from under Bowl60, which also rests on a 5,200 u shell -> RE-SUPPORTED by the shell (over the moved-host cap), and the row says how big it is",
+          Row(60) is { Verdict: ContactVerdict.ReSupported } r60 && r60.Winner!.Against == H(61) && r60.Winner.AgainstMaxDim > cidx.MaxHostDim && !r60.Facts.WinnerContactIsHost, R(60));
+    Check("ct-synth: the winner contact carries the least RAW surface distance in the population and to what — 0 u to the shell under Bowl60, 5 u to the jar beside Case40 (reported, never judged)",
+          Row(60) is { Winner: { } w60 } && w60.RawDistance < 0.01f && w60.RawAgainst == H(61)
+       && Row(40) is { Winner: { } w40 } && MathF.Abs(w40.RawDistance - 5f) < 0.01f && w40.RawAgainst == new FormKey(aKey, 0x903),
+          $"60: raw {Row(60)?.Winner?.RawDistance:0.##} to {Row(60)?.Winner?.RawAgainst} | 40: raw {Row(40)?.Winner?.RawDistance:0.##} to {Row(40)?.Winner?.RawAgainst}");
+    Check("ct-synth R4: Case40 beside an inside-out 30 u jar reads far 'inside' it -> UNJUDGEABLE / DepthExceedsObject, the depth kept and the extent ~30 u; Case41 inside a 300 u block -> SUNK",
+          Row(40) is { Verdict: ContactVerdict.Unjudgeable, Reason: ContactBlocker.DepthExceedsObject } r40 && r40.Facts.WinnerPenetration > 30f && MathF.Abs(r40.Facts.WinnerAgainstExtent - 30f) < 0.5f
+       && Row(41) is { Verdict: ContactVerdict.Sunk } r41 && r41.Facts.WinnerPenetration > 4f && r41.Facts.WinnerAgainstExtent >= 299f,
+          $"40: {R(40)} [pen {Row(40)?.Facts.WinnerPenetration:0.#} extent {Row(40)?.Facts.WinnerAgainstExtent:0.#}] | 41: {R(41)} [pen {Row(41)?.Facts.WinnerPenetration:0.#} extent {Row(41)?.Facts.WinnerAgainstExtent:0.#}]");
+    Check("ct-synth: the whole population — 28 rows (the 19 of 2026-09-02, Bowl17 admitted by R2, and eight from the folds' cases), and the verdict tally is the one the order was built to give",
+          rows.Count == 28
+       && rows.Count(r => r.Verdict == ContactVerdict.Stranded) == 13 && rows.Count(r => r.Verdict == ContactVerdict.Orphaned) == 1
+       && rows.Count(r => r.Verdict == ContactVerdict.MovedTogether) == 2 && rows.Count(r => r.Verdict == ContactVerdict.ReSupported) == 4
+       && rows.Count(r => r.Verdict == ContactVerdict.Sunk) == 2 && rows.Count(r => r.Verdict == ContactVerdict.Removed) == 1
+       && rows.Count(r => r.Verdict == ContactVerdict.NoRelation) == 3 && rows.Count(r => r.Verdict == ContactVerdict.Unjudgeable) == 2,
           $"rows {rows.Count}: " + string.Join(" | ", rows.OrderBy(r => r.Dependent.ID).Select(r => $"{r.Dependent.ID - 0xA00}:{r.Verdict}")));
 
     try { Directory.Delete(root, true); } catch { }

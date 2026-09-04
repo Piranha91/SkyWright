@@ -356,10 +356,13 @@ if (labelledMover is not null)
     int m = Array.FindIndex(pluginKey, k => string.Equals(k.FileName.String, labelledMover, StringComparison.OrdinalIgnoreCase));
     if (m < 0) { Console.Error.WriteLine($"--labelled-mover '{labelledMover}' is not in this order"); return 2; }
     Func<Snap, bool>? scope = interiorOnly ? s => s.Interior : null;
-    var before = cidx.PhysicalWithout(m, closure, scope, out var beforeIdx);
-    var after = cidx.PhysicalWinners(scope);
+    var lskips = new ContactSkips();
+    var before = cidx.PhysicalWithout(m, closure, scope, out var beforeIdx, lskips);
+    long beforeDisabled = lskips.WinnerRuntimeDisabled, beforeUnresolved = lskips.WinnerEnableUnresolved;
+    lskips.WinnerRuntimeDisabled = 0; lskips.WinnerEnableUnresolved = 0;
+    var after = cidx.PhysicalWinners(scope, lskips);
     Console.WriteLine($"\n==== THE LABELLED SET — every ref {labelledMover} moved: contact BEFORE it vs AFTER it (ε {eps:0.#}u{(interiorOnly ? ", interiors only" : "")}) ====");
-    Console.WriteLine($"   arms: {before.Count:N0} physical refs placed without the mover, {after.Count:N0} under the winner");
+    Console.WriteLine($"   arms: {before.Count:N0} physical refs placed without the mover, {after.Count:N0} under the winner (any size — R3); left out as disabled at runtime (R1): {beforeDisabled:N0} / {lskips.WinnerRuntimeDisabled:N0}, chain unresolved {beforeUnresolved:N0} / {lskips.WinnerEnableUnresolved:N0}");
     string Class(ArmContact? a) => a is null ? "floating" : a.Contact.EffectivePenetration > eps ? "sunk" : a.Contact.FacingDistance <= eps ? "touching" : "floating";
     var conf = new Dictionary<(string Motion, string Before, string After), int>();
     var confSmall = new Dictionary<(string Before, string After), int>();
@@ -556,14 +559,25 @@ var hosts = cidx.MovedHosts(skips, closure);
 Console.WriteLine($"\n==== 1. PLUMBING ====");
 Console.WriteLine($"   hosts (physical, furniture-scale or larger, whose last placement step is a move, a relocation or a removal): {hosts.Count:N0}");
 foreach (var ch in Enum.GetValues<HostChange>())
-    Console.WriteLine($"      {ch,-10} {hosts.Count(h => h.Change == ch),8:N0}   by mover class: " + string.Join(", ", new[] { "Bethesda", "USSEP", "mod" }.Select(c => $"{c} {hosts.Count(h => h.Change == ch && ClassOf(h.Mover) == c):N0}")));
+    Console.WriteLine($"      {ch,-10} {hosts.Count(h => h.Change == ch),8:N0}   by mover class: " + string.Join(", ", new[] { "Bethesda", "USSEP", "mod" }.Select(c => $"{c} {hosts.Count(h => h.Change == ch && ClassOf(h.Mover) == c):N0}"))
+                    + (ch == HostChange.Removed ? $"   (of which through an enable parent a later plugin disabled — R1: {hosts.Count(h => h.RemovedViaParent):N0})" : ""));
 Console.WriteLine($"      set aside (rule 6): {skips.HostNoGeometry:N0} without geometry, {skips.HostNoCollision:N0} without solid collision (nothing rests on them in the engine either), {skips.HostVolume:N0} volume-scale, {skips.HostTooSmall:N0} under {cidx.MinHostDim:0}u (clutter that moved — a dependent, not a host)");
+Console.WriteLine($"      runtime state (R1): {skips.HostRuntimeDisabled:N0} hosts disabled at runtime in the arm without their mover (never there to hold anything), {skips.HostEnableUnresolved:N0} whose enable chain the order cannot follow");
 Console.WriteLine($"   top movers: " + string.Join(", ", hosts.GroupBy(h => h.Mover).OrderByDescending(g => g.Count()).Take(10).Select(g => $"{PluginName(g.Key)} {g.Count():N0}")));
+{
+    var (flagOnly, nameOnly) = cidx.AuditMarkers();
+    Console.WriteLine($"   marker rule (R2): {idx.BaseIsMarker.Count:N0} bases carry the Is-Marker flag; the old name heuristics disagree on {flagOnly.Count:N0} flagged bases with ordinary names"
+                    + $" and {nameOnly.Count:N0} named 'marker' (or MarkerX*.nif) without the flag — reported, not used");
+    Console.WriteLine($"      flag only, by type: " + string.Join(", ", flagOnly.GroupBy(k => TypeOf(k)).OrderByDescending(g => g.Count()).Take(8).Select(g => $"{g.Key} {g.Count():N0}"))
+                    + $"; e.g. " + string.Join("; ", flagOnly.Take(6).Select(k => $"{BaseLabel(k)} {k}")));
+    Console.WriteLine($"      name only, by type: " + string.Join(", ", nameOnly.GroupBy(k => TypeOf(k)).OrderByDescending(g => g.Count()).Take(8).Select(g => $"{g.Key} {g.Count():N0}"))
+                    + $"; e.g. " + string.Join("; ", nameOnly.Take(6).Select(k => $"{BaseLabel(k)} {k}")));
+}
 var depHash = cidx.DependentSnaps(skips);
 Func<Snap, bool>? winScope = null;
-var winHash = cidx.PhysicalWinners(winScope);
-Console.WriteLine($"   dependents hashed: {depHash.Count:N0} enabled snaps of clutter- and furniture-scale physical refs ({skips.DepNoGeometry:N0} winning refs without geometry, {skips.DepVolume:N0} over {cidx.MaxDependentDim:0}u set aside)");
-Console.WriteLine($"   winner arm: {winHash.Count:N0} physical refs placed, enabled and undeleted under the winner  ({sw.Elapsed.TotalSeconds:0.0}s)");
+var winHash = cidx.PhysicalWinners(winScope, skips);
+Console.WriteLine($"   dependents hashed: {depHash.Count:N0} undeleted snaps of clutter- and furniture-scale physical refs — the arm decides which exist at runtime ({skips.DepNoGeometry:N0} winning refs without geometry, {skips.DepVolume:N0} over {cidx.MaxDependentDim:0}u set aside)");
+Console.WriteLine($"   winner arm: {winHash.Count:N0} physical refs placed, undeleted and enabled at runtime under the winner, any size (R3); left out: {skips.WinnerRuntimeDisabled:N0} disabled at runtime (R1), {skips.WinnerEnableUnresolved:N0} with an unresolved chain  ({sw.Elapsed.TotalSeconds:0.0}s)");
 
 var rows = new List<ContactRow>();
 int done = 0;
@@ -573,7 +587,8 @@ foreach (var h in hosts.OrderBy(h => h.Previous.Space.ToString()).ThenBy(h => h.
     if (++done % 2000 == 0) Console.WriteLine($"   ... {done:N0}/{hosts.Count:N0} hosts, {rows.Count:N0} rows, {sw.Elapsed.TotalSeconds:0}s");
 }
 Console.WriteLine($"   pairs within the box band: {rows.Count + skips.BoxesApart:N0} tested; set aside: {skips.BoxesApart:N0} boxes further apart than {cidx.BoxBand:0}u, "
-                + $"{skips.DepIntroducedByMover:N0} dependents the mover introduced, {skips.DepOtherSpace:N0} in another space  ({sw.Elapsed.TotalSeconds:0.0}s)");
+                + $"{skips.DepIntroducedByMover:N0} dependents the mover introduced, {skips.DepOtherSpace:N0} in another space, "
+                + $"{skips.DepAbsentInArm:N0} dependents disabled at runtime in the arm without the mover (R1), {skips.DepEnableUnresolved:N0} with an unresolved chain  ({sw.Elapsed.TotalSeconds:0.0}s)");
 Console.WriteLine($"   {GeometryLine()}");
 var mstt = idx.BaseInfo.Where(kv => kv.Value.Type == "MoveableStatic").Select(kv => cidx.GeomOf(kv.Key)).Where(g => g is not null).ToList();
 var motions = mstt.SelectMany(g => g!.SolidBodies.Select(b => b.MotionSystem == "" ? "(unread)" : b.MotionSystem)).GroupBy(x => x).OrderByDescending(g => g.Count()).ToList();
@@ -605,6 +620,12 @@ foreach (var v in new[] { ContactVerdict.Stranded, ContactVerdict.Orphaned, Cont
 }
 Console.WriteLine($"   ReSupported by what: host at its new place {rel.Count(r => r.Verdict == ContactVerdict.ReSupported && r.Facts.WinnerContactIsHost):N0}, another reference {rel.Count(r => r.Verdict == ContactVerdict.ReSupported && !r.Facts.WinnerContactIsHost):N0}; "
                 + $"Sunk into: the host {rel.Count(r => r.Verdict == ContactVerdict.Sunk && r.Facts.WinnerContactIsHost):N0}, something else {rel.Count(r => r.Verdict == ContactVerdict.Sunk && !r.Facts.WinnerContactIsHost):N0}");
+bool OverCap(ContactRow r) => r.Winner is { } w && w.AgainstMaxDim > cidx.MaxHostDim;
+Console.WriteLine($"   the folds, over the relationship rows: R1 Unjudgeable / RuntimeDisabled {rel.Count(r => r.Reason == ContactBlocker.RuntimeDisabled):N0} (Fixed mod-mover {rel.Count(r => r.Reason == ContactBlocker.RuntimeDisabled && Fixed(r) && Pop(r) == DependencyPopulation.ModMover):N0}), "
+                + $"EnableChainUnresolved {rel.Count(r => r.Reason == ContactBlocker.EnableChainUnresolved):N0}; "
+                + $"R3 ReSupported by an against-ref over the {cidx.MaxHostDim:0}u moved-host cap {rel.Count(r => r.Verdict == ContactVerdict.ReSupported && OverCap(r)):N0} (Fixed mod-mover {rel.Count(r => r.Verdict == ContactVerdict.ReSupported && OverCap(r) && Fixed(r) && Pop(r) == DependencyPopulation.ModMover):N0}), "
+                + $"Sunk into one {rel.Count(r => r.Verdict == ContactVerdict.Sunk && OverCap(r)):N0}; "
+                + $"R4 Unjudgeable / DepthExceedsObject {rel.Count(r => r.Reason == ContactBlocker.DepthExceedsObject):N0} (Fixed mod-mover {rel.Count(r => r.Reason == ContactBlocker.DepthExceedsObject && Fixed(r) && Pop(r) == DependencyPopulation.ModMover):N0})");
 Console.WriteLine($"   by host change: " + string.Join("; ", Enum.GetValues<HostChange>().Select(ch => $"{ch}: class {rel.Count(r => r.Host.Change == ch && IsClass(r)):N0} of {rel.Count(r => r.Host.Change == ch):N0}")));
 
 Console.WriteLine($"\n==== 4. POPULATION SPLIT (rule 12) — (mover class, dependent's author class) over the relationship rows ====");
@@ -639,7 +660,8 @@ Console.WriteLine($"\n==== 6. USSEP AS MOVER — {ussep.Count:N0} relationship r
 foreach (var r in ussep.Where(r => Fixed(r) && (IsClass(r) || r.Verdict == ContactVerdict.Sunk)).OrderByDescending(Interior).ThenByDescending(RankOf).Take(Math.Min(listN, 12))) PrintRow(r);
 
 Console.WriteLine($"\n==== 7. THE CLASS — mod mover, FIXED dependents, Stranded + Orphaned: {classRows.Count:N0} rows ({classRows.Count(Interior):N0} interior) over {classRows.Select(r => r.Dependent).Distinct().Count():N0} distinct dependents; Sunk beside: {rel.Count(r => Fixed(r) && r.Verdict == ContactVerdict.Sunk && Pop(r) == DependencyPopulation.ModMover):N0} ====");
-Console.WriteLine($"   ---- by (mover, dependent's author) pair; CANDIDATES, not verified in game ----");
+Console.WriteLine($"   what a Fixed Stranded row IS, in game (2026-09-03, 3 of 3 runtime-real rows): an object hanging in the air where its host was — it FLOATS IN AIR; what a Fixed Orphaned row looks like in game is unseen");
+Console.WriteLine($"   ---- by (mover, dependent's author) pair; CANDIDATES, each row's runtime existence resolved from the records (R1), not watched in game ----");
 var pairs = rel.Where(r => Fixed(r) && Pop(r) == DependencyPopulation.ModMover).GroupBy(r => (Mover: PluginName(r.Host.Mover), Author: PluginName(r.DepAuthor)))
                .OrderByDescending(g => g.Count(IsClass)).ThenByDescending(g => g.Count()).ToList();
 Console.WriteLine($"   {"Stranded",8} {"Orphaned",8} {"Sunk",6} {"ReSupp",7} {"MovedTog",8} {"distinct deps",13}  {"int/ext of class",16}  mover  moved a host under a dependent placed by  author");
@@ -706,14 +728,19 @@ if (jsonPath is not null)
         AuthoringDistance = r.Facts.AuthoringDistance, AuthoringPenetration = r.Facts.AuthoringPenetration, AuthoringNormalUp = r.Facts.AuthoringNormalUp, AuthoringSrc = Src(r.Authoring),
         WinnerMeasured = r.Facts.WinnerMeasured, WinnerDistance = r.Facts.WinnerDistance, WinnerPenetration = r.Facts.WinnerPenetration, WinnerContactIsHost = r.Facts.WinnerContactIsHost,
         WinnerAgainst = r.Winner?.Against.ToString(), WinnerSrc = Src(r.Winner),
+        WinnerAgainstExtent = r.Facts.WinnerAgainstExtent, WinnerAgainstMaxDim = r.Winner?.AgainstMaxDim,
+        DependentDisabled = r.Facts.DependentDisabled, DependentDisabledViaParent = r.Facts.DependentDisabledViaParent, HostRemovedViaParent = r.Host.RemovedViaParent,
+        AuthoringRawDistance = r.Authoring?.Contact.Distance, WinnerRawDistance = r.Winner?.RawDistance, WinnerRawAgainst = r.Winner is { } wr && !wr.RawAgainst.IsNull ? wr.RawAgainst.ToString() : null,
     });
     File.WriteAllText(jsonPath, JsonSerializer.Serialize(dump, new JsonSerializerOptions { WriteIndented = false, NumberHandling = System.Text.Json.Serialization.JsonNumberHandling.AllowNamedFloatingPointLiterals }));
     Console.WriteLine($"wrote {jsonPath}");
 }
 
-Console.WriteLine($"\nNOT verified in game. A Stranded / Orphaned row says the dependent touched its host in the order without the mover and touches nothing within ε now;");
+Console.WriteLine($"\nA Stranded / Orphaned row says the dependent touched its host in the order without the mover and touches nothing within ε now, both of them existing at runtime in their arm;");
+Console.WriteLine($"a Fixed Stranded row FLOATS IN AIR (in game 2026-09-03, 3 of 3 runtime-real rows); a Fixed Orphaned row's appearance in game is unseen. These rows are not watched in game.");
 Console.WriteLine($"Limits: ε {eps:0.#}u and the 30° bands are chosen numbers; rotation- and scale-only host moves are invisible ({idx.SilentRePlacements:N0} such overrides);");
-Console.WriteLine($"        terrain is not a reference (exterior rows are split out); the arm without the mover steps back ONE placement; a render-soup row ('r') is labelled, a box row ('o') is a box.");
+Console.WriteLine($"        terrain is not a reference (exterior rows are split out); the arm without the mover steps back ONE placement; a render-soup row ('r') is labelled, a box row ('o') is a box;");
+Console.WriteLine($"        runtime existence is the enable chain as the records state it (R1) — a script that enables or disables a reference is invisible here; a marker is the Is-Marker flag (R2).");
 WriteGeomReport();
 Console.WriteLine($"elapsed {sw.Elapsed.TotalSeconds:0.0}s");
 return 0;

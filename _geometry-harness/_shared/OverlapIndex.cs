@@ -103,6 +103,17 @@ public sealed class OverlapIndex
     /// its placement subrecord and is invisible to PlacementExtract, so deletions are read off the major-record walk
     /// (DependencyIndex's rule) — else a deleted dependent would read as still where it was.</summary>
     public Dictionary<FormKey, int> DeletedBy { get; } = new();
+    /// <summary>Bases carrying the Is-Marker header flag (0x00800000) under the winner — the engine renders no mesh for
+    /// them, whatever the record type or the mesh name says (JK's sit-marker chairs: Furniture, CommonChair01.nif, the
+    /// flag set). Winner-takes-all like the mesh path; an override that clears the flag removes the entry. The marker
+    /// rule for the contact pass since the 2026-09-03 fold (R2).</summary>
+    public HashSet<FormKey> BaseIsMarker { get; } = new();
+    /// <summary>ref -> the plugins that CHANGED its XESP enable parent (or the opposite-of-parent flag), with what each
+    /// set, in load order; a ref born without a parent and never given one has no entry, and an override that drops
+    /// the parent records a null. The runtime enable state of an arm is resolved from the last entry not on the
+    /// mover's side (R1, 2026-09-03), the way <see cref="BaseChanges"/> gives a previous snap the base it had then.
+    /// Not part of the history's changed-only rule: an XESP change without a move is not a placement step.</summary>
+    public Dictionary<FormKey, List<(int Plugin, FormKey? Parent, bool Opposite)>> EnableChanges { get; } = new();
 
     /// <summary>Is the reference deleted at or before the winning placement — by the winning snap's own flag, or by a
     /// deleting override at or after the last placement change?</summary>
@@ -122,6 +133,7 @@ public sealed class OverlapIndex
             {
                 BaseInfo[sm.FormKey] = (rec.GetType().Name.Replace("BinaryOverlay", ""), sm.EditorID);
                 if (mo.Model?.File is { } mf && !string.IsNullOrWhiteSpace(mf.GivenPath)) BaseMesh[sm.FormKey] = mf.GivenPath;
+                if ((sm.MajorRecordFlagsRaw & EnableState.IsMarkerFlag) != 0) BaseIsMarker.Add(sm.FormKey); else BaseIsMarker.Remove(sm.FormKey);
                 if (rec is IObjectBoundedGetter ob && ob.ObjectBounds is { } bnd)
                     BaseObnd[sm.FormKey] = new Vec3(MathF.Abs(bnd.Second.X - bnd.First.X),
                                                     MathF.Abs(bnd.Second.Y - bnd.First.Y),
@@ -147,6 +159,16 @@ public sealed class OverlapIndex
         History.Record(r.FormKey, snap);
         if (!Touchers.TryGetValue(r.FormKey, out var touchers)) Touchers[r.FormKey] = touchers = new List<int>(1);
         if (touchers.Count == 0 || touchers[^1] != plugin) touchers.Add(plugin);
+        {
+            // The XESP as this plugin states it; an entry only when it differs from the last one recorded (none = no parent).
+            var had = EnableChanges.TryGetValue(r.FormKey, out var ec) && ec.Count > 0 ? ec[^1] : (Plugin: -1, Parent: (FormKey?)null, Opposite: false);
+            bool same = had.Parent == r.EnableParent && had.Opposite == r.EnableParentOpposite;
+            if (!same)
+            {
+                if (ec is null) EnableChanges[r.FormKey] = ec = new List<(int, FormKey?, bool)>(1);
+                ec.Add((plugin, r.EnableParent, r.EnableParentOpposite));
+            }
+        }
         if (r.Base is { } b)
         {
             if (!RefBase.TryGetValue(r.FormKey, out var prevBase) || prevBase != b)
