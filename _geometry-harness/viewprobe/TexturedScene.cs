@@ -276,6 +276,8 @@ static class TexturedScene
         bool listEffectMeshes,                             // --list-meshes: name the meshes they came from
         IReadOnlyList<WaterPlane> waterPlanes,             // one per loaded cell that has water; empty = --no-water or none
         IReadOnlyDictionary<FormKey, Covering> coveringsByBase,  // STAT base -> its MATO layer; empty = --no-coverings
+        IReadOnlyList<PlaneRender> planes,                 // every occlusion plane in the cell (+ ring); see OcclusionPlanes.cs
+        bool showPlanes,                                   // --planes: draw the planes layer
         int size, string outPath,
         string? pngTextMeta = null,                        // replication chunk: written as a PNG tEXt entry keyed "viewprobe"
         InteractiveOptions? interactive = null)            // non-null: open the fly-through window instead of saving a PNG
@@ -1447,7 +1449,10 @@ static class TexturedScene
                     // EVERY route's colour is reserved, not just the first: a shot carrying a dozen
                     // measured paths in three colours has three hues the mesh may not take.
                     var gridC = gridSpacing > 0f ? gridColour3 : (Vector3?)null;
-                    var reserved = routes.Select(rt => (Vector3?)new Vector3(rt.Color.X, rt.Color.Y, rt.Color.Z)).Append(gridC)
+                    // The planes layer's provenance colours are reserved on the same terms, but
+                    // only the ones actually drawn — a run with no moved plane has no teal in it.
+                    var planeCs = showPlanes ? planes.Select(p => (Vector3?)p.Colour) : Array.Empty<Vector3?>();
+                    var reserved = routes.Select(rt => (Vector3?)new Vector3(rt.Color.X, rt.Color.Y, rt.Color.Z)).Append(gridC).Concat(planeCs)
                                          .Where(c => c is not null).Select(c => c!.Value).Distinct().ToArray();
                     const float RouteHueGuard = 0.35f;
                     var usable = reserved.Length > 0
@@ -1984,6 +1989,42 @@ static class TexturedScene
                             + $"{runHidden - h0:N0} behind geometry (dashed copies cover the last two)");
         }
 
+        // ---- the occlusion planes: the engine's culling volumes, drawn as what they are ----------
+        // A PortalBox is its mid-quad (the slab is two units thick; drawing the slab would draw a
+        // line), a Box is its six faces, fainter. Fill translucent and depth-tested, so a plane
+        // inside a wall shows only where the wall does not cover it; the outline gets the nav wire's
+        // treatment — a solid depth-tested copy and an always-visible dashed one — so a plane behind
+        // a wall is drawn dashed where hidden and never lost. Layer tag 4: the fly-through's L key
+        // hides the whole family at draw time, exactly as N hides the wire. Every plane in the list
+        // is a candidate for the occlusion preview whether or not the layer is drawn; the pick
+        // shapes below follow the layer, since a hover must not name what the picture does not show.
+        if (planes.Count > 0)
+        {
+            // Built for the fly-through whether or not the layer opens shown — L is a visibility
+            // flip, not a rebuild, exactly as N is for the wire. The static path builds it only
+            // when asked, so a default render carries no plane geometry at all.
+            if (showPlanes || interactive is not null)
+            {
+                var (quadFill, boxFill, pSolid, pDash) = PlaneOverlay.Build(planes, cam.Eye);
+                if (quadFill.Count > 0) layers.Add((quadFill.ToArray(), true, false, 4, PlaneOverlay.QuadAlpha));
+                if (boxFill.Count > 0) layers.Add((boxFill.ToArray(), true, false, 4, PlaneOverlay.BoxAlpha));
+                if (pSolid.Count > 0) layers.Add((pSolid.ToArray(), true, false, 4, 1f));
+                if (pDash.Count > 0) layers.Add((pDash.ToArray(), false, false, 4, 1f));
+                int nPortal = planes.Count(p => p.Kind == PlaneKind.PortalBox);
+                Console.WriteLine($"   planes layer: {planes.Count} {(showPlanes ? "drawn" : "resident, hidden until L")} — {nPortal} PortalBox as translucent mid-quads, "
+                                + $"{planes.Count - nPortal} Box as fainter boxes; outline solid where visible, dashed where hidden; "
+                                + "colour = provenance (grey vanilla, gold inherited, magenta added, teal moved)");
+            }
+            if (interactive is not null)
+                foreach (var p in planes)
+                {
+                    var (pv, pt) = PlaneGeometry.PickTriangles(p);
+                    var ps = new PickShape { Kind = PickKind.Plane, Plane = p, Verts = pv.Select(YUp).ToArray(), Tris = pt };
+                    ps.ComputeBounds();
+                    interactive.PickShapes.Add(ps);
+                }
+        }
+
         // The overlay pass itself: viewprobe's own flat shader, so an outline is the exact
         // palette colour rather than whatever the scene lighting does to it, and so the hidden
         // layers can drop the depth test.
@@ -2024,6 +2065,7 @@ static class TexturedScene
                     if (nav == 1 && interactive is { ShowNavWire: false }) continue;
                     if (nav == 2 && interactive is { ShowNavRedWire: false }) continue;
                     if (nav == 3 && interactive is { ShowRoute: false }) continue;
+                    if (nav == 4 && interactive is { ShowPlanes: false }) continue;
                     // At alpha 1 this is what the loop always did; below it, ordinary source-alpha
                     // blending, which is the whole mechanism behind a translucent overlay layer.
                     if (layerAlpha < 1f)
@@ -2155,10 +2197,28 @@ static class TexturedScene
                 { Console.WriteLine($"   pick {ix},{iy}: outside a {size}x{size} frame"); continue; }
                 int gy = size - 1 - iy;
                 float d = pickDepth[gy * size + ix];
-                if (d >= 0.999999f)
-                { Console.WriteLine($"   pick {ix},{iy}: background — no geometry under this pixel"); continue; }
                 float nx = (ix + 0.5f) / size * 2f - 1f;
                 float ny = (gy + 0.5f) / size * 2f - 1f;
+                // The planes are blended with depth writes off, so the depth buffer never holds
+                // one: the pixel's ray is tested against the drawn planes on the CPU first, and a
+                // plane it crosses is reported BEFORE what the depth buffer says is behind it.
+                if (showPlanes && planes.Count > 0)
+                {
+                    var f4 = GlVec4.TransformRow(new GlVec4(nx, ny, 1f, 1f), invVp);
+                    if (MathF.Abs(f4.W) > 1e-9f)
+                    {
+                        var fy = new Vector3(f4.X / f4.W, f4.Y / f4.W, f4.Z / f4.W);
+                        var farS = new Vector3(fy.X, -fy.Z, fy.Y);
+                        var dir = Unit(farS - cam.Eye);
+                        var hits = planes.Select(p => (P: p, T: PlaneGeometry.RayHit(p, cam.Eye, dir, FarPlane)))
+                                         .Where(h => h.T is not null).OrderBy(h => h.T).ToList();
+                        foreach (var (p, t) in hits)
+                            Console.WriteLine($"   pick {ix},{iy}: PLANE {p.Key} = FormID {p.RuntimeId} — {p.KindLabel} {p.ExtentLabel}, "
+                                            + $"{p.ProvenanceDetail} — crossed {t!.Value:0} u from the eye; behind it:");
+                    }
+                }
+                if (d >= 0.999999f)
+                { Console.WriteLine($"   pick {ix},{iy}: background — no geometry under this pixel"); continue; }
                 var w4 = GlVec4.TransformRow(new GlVec4(nx, ny, d * 2f - 1f, 1f), invVp);
                 if (MathF.Abs(w4.W) < 1e-9f) { Console.WriteLine($"   pick {ix},{iy}: degenerate"); continue; }
                 var wy = new Vector3(w4.X / w4.W, w4.Y / w4.W, w4.Z / w4.W);
@@ -2329,7 +2389,7 @@ static class TexturedScene
     /// <summary>Overlay geometry that is not a navmesh edge: the dashed cell outline and the
     /// diff spheres. Vertices are 9 floats — position, colour, normal — where a ZERO normal means
     /// "flat, exactly this colour" and a real one means "shade me".</summary>
-    static class Overlay
+    internal static class Overlay
     {
         public static void Vertex(List<float> dst, Vector3 p, Vector3 colour, Vector3 normal)
         {

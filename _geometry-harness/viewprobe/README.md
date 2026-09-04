@@ -107,6 +107,13 @@ findings they demonstrate) lives with that instance, not here.
   `geometry`), `--out DIR`, `--size N` (default 2560; square, and the 3D render resolution as well
   as the PNG's — there is no downsample step, so `--size` IS the sharpness knob, with `--msaa` for
   the edges).
+- **Occlusion planes** (added 2026-09-04; its own section below): `--planes` draws every occlusion
+  plane in the cell (+ ring) as a translucent quad with an outline — solid where visible, dashed
+  where hidden — coloured by who put it there (grey vanilla, gold inherited, magenta added, teal
+  moved); the caption carries the legend and the console the counts, drawn or not. `--pick` on a
+  pixel a drawn plane covers reports the plane first, then what the depth buffer says is behind it.
+  Off by default, and a render without it is byte-identical to one made before the layer existed
+  (verified on an interior and an exterior).
 - **Placed NPC actors:** `--npc FORMKEY[@X,Y,Z[,HEADING]][=label]` (repeatable; implies textured
   mode) renders the NPC's actual character model — FaceGen head, skinned body, and the outfit the
   RUNTIME will dress it in — at its winning placement or an explicit position (see *Placed NPC
@@ -198,6 +205,7 @@ all knowledge.
 | `VP_FLY_BAR=expanded\|collapsed` | collapse the control bar to its one-row strip before the capture — the chevron's effect, headlessly |
 | `VP_FLY_POSE=1` | put the camera numbers on the caption before the capture — the bar's `pose` toggle, headlessly |
 | `VP_FLY_GLOW=on\|off` | the hover highlight, headlessly. With `VP_FLY_PICK` the picked shape is the one lit, and `VP_FLY_HUD=1` keeps the lift in the capture (a hand-pressed `F12` never does) |
+| `VP_FLY_PLANES=on\|off` | show or hide the occlusion-planes layer before the capture — the `L` key's effect, headlessly. The layer is resident in every fly-through whether or not `--planes` was given, so this works without it |
 
 ---
 
@@ -318,6 +326,10 @@ gitignored for the same reason: probe transcripts name the plugins of whatever l
 - **Worklists** (`--worklist`): a shot list drives both the fly-through's `PageUp`/`PageDown`
   paging and, through `--emit-bats`, the in-game console batch files — one set of coordinates, so
   the render and the tester's standing position cannot disagree. Its own section below.
+- **Occlusion planes** (`--planes`, added 2026-09-04): the engine's culling volumes — PlaneMarker
+  refs with a PortalBox or Box primitive, which the marker filter drops and the game never draws —
+  as a layer of their own, coloured by provenance, hover-identifiable in the window, counted on the
+  console whether drawn or not. Its own section below.
 - **Terrain:** winning LAND heightmaps for the target cell ± 1 ring, painted with each quadrant's
   winning base landscape texture (LTEX → TXST → diffuse, winner-takes-all), tiled ~256 u/repeat.
   The heightmaps are kept as a queryable field (`terrainHeightAt`, same 128 u quads and diagonal
@@ -396,7 +408,9 @@ descends), `E`/`Space` up, `Q`/`C` down — hold `RMB` and move the mouse to loo
 the base speed and `,`/`.` the look sensitivity, both starting from `--fly-speed`/`--look-sens`
 and both echoed to the console as a paste-ready flag; `Shift` ×5, `Ctrl` ×0.2 applies to every
 rate, movement and clip alike. `N` cycles the navmesh display, `R` shows/hides the
-walking route, `[`/`]` and `;`/`'` move the
+walking route, `L` shows/hides the occlusion planes (hover one for its identity and what stands
+behind it; hover a wall and the caption names the planes the ray goes on to cross, since their
+dashed outlines are in the picture), `[`/`]` and `;`/`'` move the
 height clip, `\` turns it off (all four below). `P` prints the current pose as a paste-ready
 `--eye X,Y,Z --yaw N --pitch N --fov N` line. `F12` saves a captioned PNG (window resolution,
 standard caption bar + `viewprobe` tEXt chunk with the pose) into `--out`. `PageUp`/`PageDown` step a `--worklist`'s shots and `Ctrl+PageUp`/`PageDown` its cells
@@ -637,6 +651,9 @@ malformed shot list found after a multi-minute walk is a multi-minute walk waste
   bearing. `shotplan.py plan` fills it from `--refs-at` within `--door-radius`. The render ignores
   it.
 - **`look: [X,Y,Z]`** may replace `yaw`/`pitch`, resolving the same way `--look` does.
+- **`planes`** (true/false) is an optional per-shot override of `--planes` (added 2026-09-04), reset
+  to the command line's value at the top of every shot like `nav` and `cullAbove`. A shot list can
+  therefore turn the planes layer on for the shots that are about planes and leave the rest clean.
 - **`nav`** and **`cullAbove`** are optional per-shot overrides. `nav` applies exactly (it is a
   visibility flip). `cullAbove` in the window drives the SHAPE-granular live band, not the
   triangle-exact knife — the console says so on arrival rather than letting the two quietly differ.
@@ -1240,6 +1257,64 @@ and less saturated than the game's. There is no billboarding — `NiBillboardNod
 authored angles rather than facing the camera (viewprobe *could* compute this; it knows the camera
 before it builds the scene). And **particle systems can never be drawn**: a `NiParticleSystem` at
 rest has zero live particles, so there is no first frame — no sparks, no smoke plume, no glow point.
+
+---
+
+## Occlusion planes (`--planes`)
+
+Added 2026-09-04 for the occlusion-plane audit (roadmap 4.4): a location mod that rearranges
+architecture invalidates the occlusion planes cut for the old arrangement, and nothing in the
+suite looked at planes at all. This is the instrument — it draws them and says who put each one
+where. It reports; it never judges.
+
+**What a plane is, in the records.** A placed object (REFR) whose base is `PlaneMarker`
+(`000017:Skyrim.esm`, a STAT carrying the Is-Marker flag — the engine never draws it, and the
+marker filter drops it, so planes are invisible in viewprobe and in game alike). The geometry is
+the ref's `Primitive` (XPRM): `Type` **PortalBox** with `Bounds` (width, 2, height) — a two-unit
+slab standing in the ref's local X–Z plane, normal along local Y — or **Box** with a real Y
+extent, whose culling semantics are a question for the game and are counted apart. `Bounds` are
+FULL extents about the ref's position: every unaltered vanilla plane that also carries the CK-era
+`OcclusionPlane` subrecord stores exactly `Bounds.X/2` and `Bounds.Z/2` there as Width and Height
+(measured over the rows that carry both; a few Dragonborn and Dawnguard rows disagree because
+that subrecord went stale when the plane was resized — which is why it is never read here).
+Placement is the REFR convention, `SpatialOverlap.RefrRotation`. A plane whose enable parent
+resolves disabled at runtime is dropped and counted, like any ref.
+
+**Verified by hand, the Euler way** (2026-09-04): a camera stood 1,200 u in front of a mod's
+693×216 u plane, yaw 254°; `--pick` at the frame centre crossed that plane at 1,201 u, and eight
+picks just inside and just outside its predicted left, right, top and bottom edges answered
+inside/outside exactly as the record's extent predicts — position, rotation and the full-extent
+reading of `Bounds` all hold.
+
+**Provenance is the colour.** Every plugin's version of every PlaneMarker ref is recorded in load
+order during the walk and compared with the version before it (position, rotation, bounds, kind,
+scale, the disabled flag — the changed-only rule `PlacementHistory` uses):
+
+| class | colour | meaning |
+|---|---|---|
+| vanilla | grey | defined by a base master (`Skyrim`/`Update`/`Dawnguard`/`HearthFires`/`Dragonborn.esm`), never changed, in a cell no other plugin places refs in |
+| inherited | gold | the same, unchanged, in a cell some other plugin contests — the "left standing for architecture that is no longer there" candidate |
+| added | magenta | defined by a plugin that is not a base master (Creation Club and the unofficial patch count as mods here — the audit asks what a MOD did) |
+| moved | teal | an override changed it; the console and the hover say who |
+
+The console prints the counts by kind and by class, who added and who moved, which plugins
+contest the cell, and what was dropped and why — every run, drawn or not, because a plane the
+scene holds and says nothing about is exactly the silent category this renderer refuses to have.
+The caption carries the legend when the layer is drawn.
+
+**How it is drawn.** A PortalBox is its mid-quad (drawing the slab would draw a line); a Box is its
+six faces, fainter. The fill is translucent and depth-tested, so a plane inside a wall shows only
+where the wall does not cover it; the outline gets the nav wire's treatment — a solid depth-tested
+copy and an always-visible dashed one — so a plane behind a wall is drawn dashed where hidden and
+never lost. Most planes ARE inside walls, so most of the layer reads dashed; that is the picture
+being honest. Each drawn colour is reserved from the nav wire's auto-pick on the route's terms.
+In the window (`L`, and the bar's toggle), hovering a plane names it — FormKey, runtime FormID,
+kind, extent, provenance and the override chain — and the surface behind it; hovering a wall
+names the planes the ray goes on to cross. The layer is resident in every fly-through, shown or
+not, so `L` is a visibility flip like `N`.
+
+**Not modelled, said plainly:** nothing here is a verdict. Whether a plane is well placed is the
+audit's question, and the audit needs the game's own cull rule first.
 
 ---
 

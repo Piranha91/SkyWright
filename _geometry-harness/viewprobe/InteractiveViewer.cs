@@ -45,7 +45,7 @@ namespace ViewProbe;
 // triangle-exact knife, and it runs at build time; the clip keys print their band as a
 // --cull-above line so a slice found by flying can be cut properly in the deliverable.
 
-enum PickKind { Ref, Navmesh, Terrain }
+enum PickKind { Ref, Navmesh, Terrain, Plane }
 
 /// <summary>One hover/click-able shape: world-baked Y-up triangles plus the identity to report.
 /// Verts/Tris are the exact arrays the GlMesh upload used (shared, not copied), so picking
@@ -59,6 +59,7 @@ sealed class PickShape
     public SceneRef Ref;                               // Kind==Ref
     public FormKey NavKey;                             // Kind==Navmesh
     public string TerrainTex = "";                     // Kind==Terrain ("" = untextured fallback)
+    public PlaneRender? Plane;                         // Kind==Plane
     public Vector3 Min, Max;
     /// <summary>Kind==Ref: the GlMesh these triangles were uploaded as, so the height clip can
     /// hide it and the ray can then SKIP it. A pick that names a shape the clip just removed
@@ -79,6 +80,18 @@ sealed class PickShape
         foreach (var i in Tris) { mn = Vector3.Min(mn, Verts[i]); mx = Vector3.Max(mx, Verts[i]); }
         Min = mn; Max = mx;
     }
+}
+
+/// <summary>One answer from the picking ray: the shape, the triangle, the distance and the point. For a plane
+/// hit, <see cref="Behind"/> is the nearest NON-plane surface on the same ray — a picked plane reports the
+/// plane, then what it stands in front of, because the second half is what a plane is for.</summary>
+sealed record PickHit(PickShape Shape, int LocalTri, float T, Vector3 HitY)
+{
+    public PickHit? Behind { get; init; }
+    /// <summary>Every drawn plane the ray crosses BEYOND this hit, nearest first. A plane behind a wall is
+    /// still in the picture — its outline is dashed there — so a hover on the wall names the planes the
+    /// ray goes on to cross, rather than pretending the dashes are not under the cursor.</summary>
+    public IReadOnlyList<PickHit>? PlanesBeyond { get; init; }
 }
 
 /// <summary>Everything the fly-through needs that the scene build cannot derive itself:
@@ -128,6 +141,13 @@ sealed class InteractiveOptions
     public int RouteCount;                                 // waypoints; 0 = this run carries no route
     public string RouteLabel = "";                         // the sentence that says which path this is
     public bool ShowRoute = true;                          // read per frame by the overlay draw
+
+    // ---- the occlusion planes, switched live by L --------------------------------------------
+    // The layer is overlay geometry tagged 4, so showing it is a draw-time flag like the wire's;
+    // the pick shapes follow the flag, so a hover cannot name a plane the picture does not show.
+    public int PlaneCount;                                 // planes resident; 0 = none in this cell
+    public bool ShowPlanes;                                // entry state from --planes or the shot
+    public string PlaneLegend = "";                        // the caption's colour key, on the status line while shown
 
     // The height clip needs no list of its own: a static's PickShape already carries its mesh
     // and, in Min.Y/Max.Y, the Skyrim-z span of exactly the triangles that were drawn. Statics
@@ -333,16 +353,17 @@ static class InteractiveViewer
         }
 
         // ---- hover picking -----------------------------------------------------------------
-        (PickShape Shape, int LocalTri, float T, Vector3 HitY)? hover = null;
+        PickHit? hover = null;
         // The locked pick: what LMB pinned. Non-null suspends hovering entirely. Since 2026-08-31
         // it is reported on the CONTROL BAR as three click-to-copy fields rather than as a
         // sentence on the caption — the caption is for the thing under the cursor right now.
-        (PickShape Shape, int LocalTri, float T, Vector3 HitY)? locked = null;
+        PickHit? locked = null;
         // A lock outlives a mode switch, and it should — it says "keep showing me this one". But
         // the clip or N can then hide the very thing it names, and a readout for something not
         // on screen has to SAY so rather than quietly keep asserting it.
         bool Drawn(PickShape s) => s.Mesh is not { IsRendering: false }
-                                && !(s.Kind == PickKind.Navmesh && navMode == "off");
+                                && !(s.Kind == PickKind.Navmesh && navMode == "off")
+                                && !(s.Kind == PickKind.Plane && !opt.ShowPlanes);
         // Set when something OTHER than the mouse changed what is under the cursor, so a hover
         // answer refreshes even with the mouse held still — hold [ until a ceiling melts away
         // and the bar must stop naming that ceiling.
@@ -352,7 +373,7 @@ static class InteractiveViewer
         // asks for it.
         OpenTK.Mathematics.Vector2 lastPickPos = new(-1000f, -1000f);
 
-        (PickShape Shape, int LocalTri, float T, Vector3 HitY)? PickAt(float mx, float my)
+        PickHit? PickAt(float mx, float my)
         {
             int w = gw.ClientSize.X, h = gw.ClientSize.Y;
             if (w <= 0 || h <= 0) return null;
@@ -371,56 +392,95 @@ static class InteractiveViewer
                 // in contradiction with the picture.
                 if (s.Mesh is { IsRendering: false }) continue;
                 if (s.Kind == PickKind.Navmesh && navMode == "off") continue;
+                if (s.Kind == PickKind.Plane && !opt.ShowPlanes) continue;
                 if (RayAabb(ro, rd, s.Min, s.Max, out var t0)) candidates.Add((s, t0));
             }
             candidates.Sort((a, b) => a.T0.CompareTo(b.T0));
 
-            (PickShape Shape, int LocalTri, float T, Vector3 HitY)? best = null;
+            // Three answers, not one: the nearest hit, the nearest hit that is NOT a plane, and every
+            // drawn plane the ray crosses. A plane is translucent by nature — what it stands in front
+            // of is half of its identity — so a plane hit carries the surface behind it; and a plane
+            // BEHIND the nearest surface is still in the picture (its outline is dashed there), so a
+            // hit on a wall carries the planes the ray goes on to cross. Planes are few, so the walk
+            // tests all of them; the solid walk still stops at the first box past the best hit.
+            PickHit? best = null, solid = null;
+            List<PickHit>? planeHits = null;
             foreach (var (s, t0) in candidates)
             {
-                if (best is { } b0 && t0 > b0.T) break;
+                bool isPlane = s.Kind == PickKind.Plane;
+                if (!isPlane && solid is { } s0 && t0 > s0.T) continue;
                 var v = s.Verts; var tr = s.Tris;
                 for (int i = 0; i + 2 < tr.Length; i += 3)
-                    if (RayTri(ro, rd, v[tr[i]], v[tr[i + 1]], v[tr[i + 2]], out var t)
-                        && (best is not { } bb || t < bb.T))
-                        best = (s, i / 3, t, ro + rd * t);
+                    if (RayTri(ro, rd, v[tr[i]], v[tr[i + 1]], v[tr[i + 2]], out var t))
+                    {
+                        var hit = new PickHit(s, i / 3, t, ro + rd * t);
+                        if (best is not { } bb || t < bb.T) best = hit;
+                        if (isPlane) (planeHits ??= new()).Add(hit);
+                        else if (solid is not { } ss || t < ss.T) solid = hit;
+                    }
             }
-            return best;
+            if (best is null) return null;
+            planeHits?.Sort((a, b) => a.T.CompareTo(b.T));
+            if (best.Shape.Kind == PickKind.Plane)
+                return best with { Behind = solid, PlanesBeyond = planeHits?.Where(p => p.T > best.T + 0.5f).ToList() };
+            var beyond = planeHits?.Where(p => p.T > best.T).ToList();
+            return beyond is { Count: > 0 } ? best with { PlanesBeyond = beyond } : best;
         }
 
         // fromEye adds the distance to the hit, which is only true for the camera that did the
         // picking — a LOCKED line outlives that camera, so it reports the hit POINT and drops
         // the range rather than displaying a number that quietly goes stale as you fly away.
-        string HoverLine((PickShape Shape, int LocalTri, float T, Vector3 HitY)? hit, bool fromEye = true)
+        string HoverLine(PickHit? hit, bool fromEye = true)
         {
             if (hit is not { } hv) return "";                 // nothing under the cursor: say nothing
             var ws = new Vector3(hv.HitY.X, -hv.HitY.Z, hv.HitY.Y);   // Y-up back to Skyrim
             var s = hv.Shape;
             string tail = fromEye ? $" — hit {ws.X:0},{ws.Y:0},{ws.Z:0}, {hv.T:0} u"
                                   : $" — at {ws.X:0},{ws.Y:0},{ws.Z:0}";
+            // The planes the ray crosses past this hit: dashed in the picture, so named here. One
+            // clause per plane, nearest first — identity and distance, nothing more.
+            string beyond = hv.PlanesBeyond is { Count: > 0 } pb
+                ? "  |  " + (s.Kind == PickKind.Plane ? "then " : "planes behind this: ")
+                  + string.Join("; ", pb.Select(q => $"PLANE {q.Shape.Plane!.Key} {q.Shape.Plane.KindLabel} {q.Shape.Plane.ProvenanceLabel}"
+                                                   + (fromEye ? $" at {q.T:0} u" : "")))
+                : "";
             switch (s.Kind)
             {
                 case PickKind.Ref:
                     var r = s.Ref;
                     string ed = r.BaseEditorId is { Length: > 0 } e ? e : "(no EditorID)";
-                    return $"REFR {r.RefKey} = FormID {opt.RuntimeId(r.RefKey)} — {ed} — {r.MeshRelPath}{tail}";
+                    return $"REFR {r.RefKey} = FormID {opt.RuntimeId(r.RefKey)} — {ed} — {r.MeshRelPath}{tail}{beyond}";
                 case PickKind.Navmesh:
                     int ti = s.NavTriIds![hv.LocalTri];
                     string red = opt.RedNav.Contains(s.NavKey) ? " [RED — the finding]" : "";
-                    return $"NAVM {s.NavKey} = FormID {opt.RuntimeId(s.NavKey)} tri {ti}{red}{tail}";
+                    return $"NAVM {s.NavKey} = FormID {opt.RuntimeId(s.NavKey)} tri {ti}{red}{tail}{beyond}";
+                case PickKind.Plane:
+                    var p = s.Plane!;
+                    string behind = hv.Behind is { } bh ? $"  |  behind it: {HoverLine(bh with { PlanesBeyond = null }, fromEye)}" : "  |  nothing drawn behind it";
+                    return $"PLANE {p.Key} = FormID {p.RuntimeId} — {p.KindLabel} {p.ExtentLabel} — {p.ProvenanceDetail}{tail}{behind}{beyond}";
                 default:
                     string desc = opt.TerrainDescribe?.Invoke(ws.X, ws.Y)
                                ?? (s.TerrainTex.Length > 0 ? s.TerrainTex : "(untextured fallback)");
-                    return $"terrain — {desc}{tail}";
+                    return $"terrain — {desc}{tail}{beyond}";
             }
         }
 
-        void PrintDetail((PickShape Shape, int LocalTri, float T, Vector3 HitY) hv)
+        void PrintDetail(PickHit hv)
         {
             var ws = new Vector3(hv.HitY.X, -hv.HitY.Z, hv.HitY.Y);
             var s = hv.Shape;
             switch (s.Kind)
             {
+                case PickKind.Plane:
+                    var p = s.Plane!;
+                    Console.WriteLine($"   picked PLANE {p.Key} = FormID {p.RuntimeId}  {p.KindLabel} {p.ExtentLabel}  — {p.ProvenanceDetail}");
+                    Console.WriteLine($"      at {p.Position.X:0},{p.Position.Y:0},{p.Position.Z:0}  rotation "
+                                    + $"{float.RadiansToDegrees(p.Rotation.X):0.#},{float.RadiansToDegrees(p.Rotation.Y):0.#},{float.RadiansToDegrees(p.Rotation.Z):0.#}°"
+                                    + $"  bounds {p.Bounds.X:0}x{p.Bounds.Y:0}x{p.Bounds.Z:0}  scale {p.Scale:0.00}  chain {p.ChainLabel}");
+                    Console.WriteLine($"      hit at {ws.X:0},{ws.Y:0},{ws.Z:0}, {hv.T:0} u from the eye");
+                    if (hv.Behind is { } bh) { Console.WriteLine("      behind it:"); PrintDetail(bh with { PlanesBeyond = null }); }
+                    else Console.WriteLine("      nothing drawn behind it on this ray");
+                    break;
                 case PickKind.Ref:
                     var r = s.Ref;
                     Console.WriteLine($"   picked REFR {r.RefKey} = FormID {opt.RuntimeId(r.RefKey)}"
@@ -443,6 +503,12 @@ static class InteractiveViewer
                                        ?? (s.TerrainTex.Length > 0 ? s.TerrainTex : "(untextured fallback)")));
                     break;
             }
+            if (hv.PlanesBeyond is { Count: > 0 } pb)
+                foreach (var q in pb)
+                {
+                    var qp = q.Shape.Plane!;
+                    Console.WriteLine($"      plane on this ray, {q.T:0} u out: PLANE {qp.Key} = FormID {qp.RuntimeId}  {qp.KindLabel} {qp.ExtentLabel}  — {qp.ProvenanceDetail}");
+                }
         }
 
         // ---- the selection, as three copyable values ---------------------------------------
@@ -465,12 +531,14 @@ static class InteractiveViewer
         {
             PickKind.Ref => l.Shape.Ref.RefKey.ToString(),
             PickKind.Navmesh => l.Shape.NavKey.ToString(),
+            PickKind.Plane => l.Shape.Plane!.Key.ToString(),
             _ => "",
         };
         string SelFormId() => locked is not { } l ? "" : l.Shape.Kind switch
         {
             PickKind.Ref => opt.RuntimeId(l.Shape.Ref.RefKey),
             PickKind.Navmesh => opt.RuntimeId(l.Shape.NavKey),
+            PickKind.Plane => l.Shape.Plane!.RuntimeId,
             _ => "",
         };
         string SelPath() => locked is { } l && l.Shape.Kind == PickKind.Ref
@@ -482,6 +550,7 @@ static class InteractiveViewer
             PickKind.Ref => "REFR",
             PickKind.Navmesh => $"NAVM tri {l.Shape.NavTriIds![l.LocalTri]}"
                               + (opt.RedNav.Contains(l.Shape.NavKey) ? " [RED]" : ""),
+            PickKind.Plane => $"PLANE {l.Shape.Plane!.KindLabel} {l.Shape.Plane!.ProvenanceLabel}",
             _ => "terrain — no record identity to copy",
         };
 
@@ -583,6 +652,7 @@ static class InteractiveViewer
             if (showPose) parts.Add(Pose());
             if (opt.BuildCullAbove is { } bca) parts.Add($"SLICED at build: --cull-above {bca:0} (permanent)");
             if (opt.BuildNavZ is { } bnz) parts.Add($"NAVMESH z {bnz.Z:0} ±{bnz.Tol:0} only (permanent)");
+            if (opt.ShowPlanes && opt.PlaneLegend.Length > 0) parts.Add(opt.PlaneLegend);
             return string.Join(" — ", parts);
         }
 
@@ -714,6 +784,9 @@ static class InteractiveViewer
                 ("route", "R shows/hides the walking route" + (opt.RouteCount > 0
                     ? $" ({opt.RouteCount} waypoint(s), now {(opt.ShowRoute ? "shown" : "hidden")})."
                     : " — this run carries none.")),
+                ("planes", "L shows/hides the occlusion planes" + (opt.PlaneCount > 0
+                    ? $" ({opt.PlaneCount} in this cell, now {(opt.ShowPlanes ? "shown" : "hidden")}) — grey vanilla, gold inherited, magenta added, teal moved; hover one for its identity and what stands behind it."
+                    : " — this cell carries none.")),
             };
             if (wl is not null)
                 h.Add(("shots", $"PageUp/PageDown step this cell's shots (now {shotIdx + 1}/{Math.Max(shots.Count, 1)}); "
@@ -748,6 +821,14 @@ static class InteractiveViewer
             opt.ShowRoute = on;
             Console.WriteLine($"   route: {(on ? "shown" : "hidden")}  ({opt.RouteCount} waypoint(s)"
                             + (opt.RouteLabel.Length > 0 ? $" — {opt.RouteLabel}" : "") + ")");
+        }
+        // The planes layer, the same shape as the route: a run with nothing to show says so.
+        void SetPlanes(bool on)
+        {
+            if (opt.PlaneCount == 0)
+            { Console.WriteLine("   planes: this cell carries no occlusion planes — nothing to show"); return; }
+            opt.ShowPlanes = on; pickDirty = true;
+            Console.WriteLine($"   planes: {(on ? "shown" : "hidden")}  ({opt.PlaneCount} plane(s))");
         }
         // The two ends stay ordered however they are set — the keys already refused to push one
         // past the other, and a typed 4000 into the floor box must not quietly invert the band.
@@ -828,6 +909,14 @@ static class InteractiveViewer
         {
             Hidden = () => opt.RouteCount == 0,
             Text = () => $"{opt.RouteCount} wpt" + (opt.RouteLabel.Length > 0 ? $" - {opt.RouteLabel}" : ""),
+        });
+        bar.Add(new UiButton
+        {
+            Text = () => opt.PlaneCount == 0 ? "planes (L)" : opt.ShowPlanes ? "planes shown (L)" : "planes hidden (L)",
+            IsOn = () => opt.PlaneCount > 0 && opt.ShowPlanes,
+            OnClick = () => SetPlanes(!opt.ShowPlanes),
+            DisabledWhy = () => opt.PlaneCount > 0 ? ""
+                : "planes: this cell carries no occlusion planes — nothing to toggle",
         });
 
         bar.Row(new UiNumber
@@ -966,6 +1055,8 @@ static class InteractiveViewer
         if (opt.RouteCount > 0)
             Console.WriteLine($"   route: {opt.RouteCount} waypoint(s) drawn as overlay geometry"
                             + (opt.RouteLabel.Length > 0 ? $" — {opt.RouteLabel}" : "") + "; R hides it");
+        if (opt.PlaneCount > 0)
+            Console.WriteLine($"   planes: {opt.PlaneCount} occlusion plane(s) resident, layer {(opt.ShowPlanes ? "shown" : "hidden")}; L toggles it");
         PrintHelp();
 
         // Headless smoke knobs: VP_FLY_FRAMES=N renders N frames then saves a capture and
@@ -1033,6 +1124,16 @@ static class InteractiveViewer
             else if (opt.RouteCount == 0)
                 Console.WriteLine($"   [auto] VP_FLY_ROUTE={want} ignored: this run carries no route");
             else { opt.ShowRoute = want == "on"; Console.WriteLine($"   [auto] VP_FLY_ROUTE={want}"); }
+        }
+        // VP_FLY_PLANES=on|off: the L key's effect, headlessly.
+        if (Environment.GetEnvironmentVariable("VP_FLY_PLANES") is { Length: > 0 } planesSpec)
+        {
+            string want = planesSpec.ToLowerInvariant();
+            if (want is not ("on" or "off"))
+                Console.WriteLine($"   [auto] VP_FLY_PLANES '{want}' is not on|off — ignored");
+            else if (opt.PlaneCount == 0)
+                Console.WriteLine($"   [auto] VP_FLY_PLANES={want} ignored: this cell carries no occlusion planes");
+            else { opt.ShowPlanes = want == "on"; Console.WriteLine($"   [auto] VP_FLY_PLANES={want}"); }
         }
         // The two pieces of state the control bar added, each with the headless knob every other
         // live control in this loop already has — a control no test can reach is a control nothing
@@ -1207,6 +1308,9 @@ static class InteractiveViewer
                                     + (opt.RouteLabel.Length > 0 ? $" — {opt.RouteLabel}" : "") + ")");
                 }
             }
+
+            // ---- the occlusion planes ---------------------------------------------------------
+            if (KHit(Keys.L)) SetPlanes(!opt.ShowPlanes);
 
             // ---- height clip ----------------------------------------------------------------
             // Held keys, not taps: sweeping a ceiling through a two-storey interior is hundreds

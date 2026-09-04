@@ -154,6 +154,10 @@ string navMode = "filled";
 // is inspectable rather than guessed.
 bool showMarkers = false;
 bool listMeshes = false;
+// OCCLUSION PLANES (see OcclusionPlanes.cs). --planes draws every plane in the cell (+ ring) as a
+// translucent quad with an outline, coloured by who put it there. Off by default, and the default
+// render is byte-identical to what it was before the layer existed.
+bool showPlanes = false;
 // TROUBLESHOOTING OVERLAY. --conflicts <emit.json> reads a detector's emitted ConflictFile and
 // paints the implicated navmeshes RED in this cell — whole records for CLOBBERED, the named
 // navmesh ends for dangling links — and auto-highlights implicated doors orange. --red
@@ -503,6 +507,7 @@ for (int i = argStart; i < args.Length; i++)
         batsProfiles.AddRange(args[++i].Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries));
     else if (args[i] == "--markers") showMarkers = true;
     else if (args[i] == "--list-meshes") listMeshes = true;
+    else if (args[i] == "--planes") { showPlanes = true; textured = true; }
     else if (args[i] is "--instance" or "--game" or "--profile") i++;   // consumed above
     // A worklist path is a worklist WHEREVER it lands, not only in the leading run that a drop
     // produces: `viewprobe --interactive tour.json` is the obvious thing to type once dropping one
@@ -529,6 +534,7 @@ if ((conflictsPath is not null || redSpecs.Count > 0) && !navModeExplicit) navMo
 // What the command line settled on, kept so every worklist shot starts from it rather than from
 // the previous shot's overrides.
 string cliNavMode = navMode; float? cliCullAbove = cullAbove;
+bool cliShowPlanes = showPlanes;
 if (navMode is not ("off" or "filled" or "wire" or "both"))
 { Console.Error.WriteLine($"--nav '{navMode}' is not one of: off, filled, wire, both."); return 1; }
 if (npcPuck is not ("on" or "off" or "auto"))
@@ -762,6 +768,13 @@ var persistentWin = new Dictionary<FormKey, (FormKey Ws, PlacedRef Ref)>();
 // override that clears the flag or drops the XESP must erase the entry, not just fail to add it.
 var refDisabledFlag = new HashSet<FormKey>();
 var refEnableParent = new Dictionary<FormKey, (FormKey Parent, bool Opposite)>();
+// Occlusion-plane provenance: every plugin's version of every PlaneMarker ref, in load order (a few
+// thousand entries at most, so the whole order is recorded rather than only the target's cells —
+// a persistent plane merges into the scene by position, after the walk has decided its cell). The
+// plugins that contribute refs to the TARGET cell and are not a base master make it "contested".
+var planeMarkerKey = new FormKey(ModKey.FromNameAndExtension("Skyrim.esm"), 0x17);
+var planeHist = new Dictionary<FormKey, ViewProbe.PlaneHistory>();
+var cellContestedBy = new List<string>();
 // --npc placement watch, same shape as the door watch: every PlacedNpc whose own FormKey OR
 // whose Base is a requested NPC, wherever it lives (per-ref "later plugin wins").
 var npcRefWhere = new Dictionary<FormKey, (FormKey Cell, string? CellEd, PlacedRef Ref)>();
@@ -943,6 +956,7 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot)
     // SECOND call has to clear what the first left. A collection missed here would not throw; it
     // would quietly render cell 2 holding cell 1's references.
     winRef.Clear(); persistentWin.Clear(); refDisabledFlag.Clear(); refEnableParent.Clear();
+    planeHist.Clear(); cellContestedBy.Clear();
     npcRefWhere.Clear(); npcBaseWhere.Clear(); doorWhere.Clear();
     winNav.Clear(); navByPlugin.Clear();
     baseMesh.Clear(); baseIsMarker.Clear(); baseEditorId.Clear();
@@ -974,8 +988,10 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot)
         yaw = wsYaw; pitch = wsPitch; fov = wshot.Fov;
         look = null; eyeRef = null; lookRef = null;      // the shot is the whole camera, not a base for one
         navMode = cliNavMode; cullAbove = cliCullAbove;     // the run's values first, then this shot's overrides
+        showPlanes = cliShowPlanes;
         if (wshot.Nav is { } shotNav) navMode = shotNav;
         if (wshot.CullAbove is { } shotCull) cullAbove = shotCull;
+        if (wshot.Planes is { } shotPlanes) showPlanes = shotPlanes;
         if (wshot.Route is { Count: > 1 })
         {
             shotRoute = wshot.Route.Select(w => (w[0], w[1])).ToList();
@@ -1137,6 +1153,7 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot)
                 _ = collectedModel;
             }
 
+            string plgName = m.ModKey.FileName.String;
             foreach (var cp in PlacementExtract.FromMod(m))
             {
                 foreach (var r in cp.Refs)
@@ -1144,6 +1161,7 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot)
                     if (r.InitiallyDisabled) refDisabledFlag.Add(r.FormKey); else refDisabledFlag.Remove(r.FormKey);
                     if (r.EnableParent is { } epk) refEnableParent[r.FormKey] = (epk, r.EnableParentOpposite);
                     else refEnableParent.Remove(r.FormKey);
+                    if (r.Base is { } pbk && pbk == planeMarkerKey) ViewProbe.PlaneHistory.Record(planeHist, r, plgName);
                 }
                 // Worldspace PERSISTENT refs (doors above all). Not detected by the holding cell —
                 // the persistent cell masquerades as grid (0,0) — but by each ref's own Persistent
@@ -1185,6 +1203,7 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot)
                 if (isTarget)
                 {
                     cellLabel = cp.CellEditorId ?? cp.Cell.ToString();
+                    if (!ViewProbe.PlaneHistory.IsBethesda(plgName) && !cellContestedBy.Contains(plgName)) cellContestedBy.Add(plgName);
                     foreach (var r in cp.Refs) winRef[r.FormKey] = r;
                     // Navmesh (and with it the conflict overlay) stays TARGET-CELL-ONLY: it is
                     // the annotation layer for the cell under examination, scoped like the cell
@@ -2407,6 +2426,77 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot)
                    $"RED {fk} = FormID {RuntimeId(fk)}" +
                    (navs.TryGetValue(fk, out var nv) ? $" ({nv.Triangles.Count} tris)" : " (not provided)")));
 
+        // ---- occlusion planes: every PlaneMarker ref the winning state places in the cell (+ ring) --
+        // Built whether or not the layer is drawn: the occlusion preview and the report read the same
+        // list, and the count line prints either way — a plane the scene holds and says nothing about
+        // is the silent category this renderer refuses to have. Sorted by FormKey so the order, the
+        // colours and the PNG are the same for the same inputs.
+        var planes = new List<ViewProbe.PlaneRender>();
+        string planeLegend = "";
+        {
+            int plDisabledParent = 0, plDisabledFlag = 0, plDeleted = 0, plNoPrim = 0;
+            var noPrimKinds = new Dictionary<string, int>();
+            foreach (var r in winRef.Values.Where(r => r.Base is { } b && b == planeMarkerKey)
+                                           .OrderBy(r => r.FormKey.ToString(), StringComparer.Ordinal))
+            {
+                if (r.Deleted) { plDeleted++; continue; }
+                if (!RefEnabled(r.FormKey))
+                { if (refEnableParent.ContainsKey(r.FormKey)) plDisabledParent++; else plDisabledFlag++; continue; }
+                ViewProbe.PlaneKind? kind = r.Primitive?.Type switch
+                {
+                    "PortalBox" => ViewProbe.PlaneKind.PortalBox,
+                    "Box" => ViewProbe.PlaneKind.Box,
+                    _ => null,
+                };
+                if (kind is null || r.Primitive is not { } prim)
+                {
+                    plNoPrim++;
+                    string k = r.Primitive?.Type ?? "(no XPRM)";
+                    noPrimKinds[k] = noPrimKinds.TryGetValue(k, out var nk) ? nk + 1 : 1;
+                    continue;
+                }
+                // Every real ref has a history from the walk; only a synthetic prop would not, and a
+                // prop cannot be a plane. Classified against THIS cell's contested state.
+                var h = planeHist.TryGetValue(r.FormKey, out var ph) ? ph : null;
+                string definedBy = h?.DefinedBy ?? r.FormKey.ModKey.FileName.String;
+                var prov = h?.Classify(cellContestedBy.Count > 0) ?? ViewProbe.PlaneProvenance.Added;
+                planes.Add(new ViewProbe.PlaneRender(r.FormKey, kind.Value,
+                    new System.Numerics.Vector3(prim.Bounds.X, prim.Bounds.Y, prim.Bounds.Z),
+                    new System.Numerics.Vector3(r.Position.X, r.Position.Y, r.Position.Z),
+                    r.Rotation, r.Scale, prov, definedBy, h?.ChangedBy,
+                    h?.Chain ?? new List<string> { definedBy }, RuntimeId(r.FormKey)));
+            }
+            int nPortal = planes.Count(p => p.Kind == ViewProbe.PlaneKind.PortalBox), nBox = planes.Count - nPortal;
+            int Prov(ViewProbe.PlaneProvenance pv) => planes.Count(p => p.Provenance == pv);
+            int nVan = Prov(ViewProbe.PlaneProvenance.Vanilla), nInh = Prov(ViewProbe.PlaneProvenance.Inherited);
+            int nAdd = Prov(ViewProbe.PlaneProvenance.Added), nMov = Prov(ViewProbe.PlaneProvenance.Moved);
+            string By(ViewProbe.PlaneProvenance pv, Func<ViewProbe.PlaneRender, string?> who)
+                => string.Join(", ", planes.Where(p => p.Provenance == pv).GroupBy(p => who(p) ?? "?")
+                                           .OrderByDescending(g => g.Count()).Select(g => $"{g.Key} {g.Count()}"));
+            int plDropped = plDisabledParent + plDisabledFlag + plDeleted + plNoPrim;
+            if (planes.Count + plDropped > 0)
+            {
+                Console.WriteLine($"   occlusion planes: {planes.Count} in the cell{(interior || !ringRefs ? "" : " + ring")}"
+                                + $" — {nPortal} PortalBox, {nBox} Box; {nVan} vanilla, {nInh} inherited, {nAdd} added, {nMov} moved");
+                if (nAdd > 0) Console.WriteLine($"      added by: {By(ViewProbe.PlaneProvenance.Added, p => p.DefinedBy)}");
+                if (nMov > 0) Console.WriteLine($"      moved by: {By(ViewProbe.PlaneProvenance.Moved, p => p.ChangedBy)}");
+                Console.WriteLine(cellContestedBy.Count > 0
+                    ? $"      cell contested by: {string.Join(", ", cellContestedBy)}"
+                    : "      cell contested by: nobody — no plugin beyond the base masters places refs in it, so unchanged vanilla planes read as vanilla, not inherited");
+                if (plDropped > 0)
+                    Console.WriteLine($"      not drawn: {plDisabledParent} disabled via enable parent, {plDisabledFlag} initially disabled (own flag), "
+                                    + $"{plDeleted} deleted, {plNoPrim} without a Box/PortalBox primitive"
+                                    + (noPrimKinds.Count > 0 ? $" ({string.Join(", ", noPrimKinds.Select(kv => $"{kv.Key} {kv.Value}"))})" : ""));
+                if (!showPlanes)
+                    Console.WriteLine("      (--planes draws them)");
+                planeLegend = $"PLANES {planes.Count}: grey vanilla {nVan} · gold inherited {nInh} · magenta added {nAdd} · teal moved {nMov}"
+                            + (nBox > 0 ? $" — {nBox} Box kind drawn fainter as its box" : "")
+                            + " — outline dashed where hidden";
+            }
+            else if (showPlanes)
+                Console.WriteLine("   occlusion planes: none in this cell" + (interior || !ringRefs ? "" : " or its ring"));
+        }
+
         // ---- --npc: pin each spec to (NPC base record, world placement) -------------------
         // The spec FormKey may be the placed ACHR (a console click gives the ref) or the NPC_
         // base; the load walk watched for both. Explicit @X,Y,Z is the "should be HERE" case
@@ -2759,8 +2849,8 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot)
                    (eyePos.Value, lookPos.Value, fov), g, r, terrainPatches, terrainLayers, navMode, navColor,
                    skyColor, terrainHeightAt, dashUnderground, dashUnderStatics, msaa, cullAbove, cellBounds,
                    diffs ?? noDiff, diffColor, picks, captionLines, colourCaptions, npcActors, npcPucksOn, routeRenders,
-                   gridRender, keepFx, fxStatic, listMeshes, waterPlanes, coverings, size, outFile,
-                   camMeta);
+                   gridRender, keepFx, fxStatic, listMeshes, waterPlanes, coverings, planes, showPlanes,
+                   size, outFile, camMeta);
 
         if (compare is { } cmp)
         {
@@ -2840,6 +2930,7 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot)
                 var cap = new List<string> { $"[{pi + 1}/3] {(pi == 2 ? "winning state (actual merged navmesh)" : $"cell navmesh if {label} won")} \u2014 {cellLabel} \u2014 {camPose}{CullCaption()}" };
                 if (redNav.Count > 0) cap.Add(RedCaption(navs));
                 if (DoorCaption() is { } dc) cap.Add(dc);
+                if (showPlanes && planeLegend.Length > 0) cap.Add(planeLegend);
                 // NPC caption lines ride the separate coloured channel (colourCaptions),
                 // passed straight into the render call below.
                 if (changedKeys.Count > 0 && navDiff)
@@ -2883,6 +2974,7 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot)
         var fpCap = new List<string> { $"{cellLabel} \u2014 {(navPlugin ?? "winning state")} \u2014 {camPose}{CullCaption()}" };
         if (redNav.Count > 0) fpCap.Add(RedCaption(navPlugin is not null && navByPlugin.TryGetValue(navPlugin, out var np0) ? np0 : winNav));
         if (DoorCaption() is { } fdc) fpCap.Add(fdc);
+        if (showPlanes && planeLegend.Length > 0) fpCap.Add(planeLegend);
 
         if (interactiveMode)
         {
@@ -2919,6 +3011,11 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot)
                 // before the window existed.
                 BuildCullAbove = cullAbove,
                 BuildNavZ = navZAt is { } bnz ? (bnz, navZTol) : null,
+                // The planes layer, live: L in the window, seeded from the command line (or the
+                // shot) the way the nav mode is.
+                PlaneCount = planes.Count,
+                ShowPlanes = showPlanes,
+                PlaneLegend = planeLegend,
             };
             if (navMode != "off")
                 foreach (var nav in navSrc.Values)
@@ -2937,7 +3034,7 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot)
                 (eyePos.Value, lookPos.Value, fov), navTris, redTris, terrainPatches, terrainLayers, navMode, navColor,
                 skyColor, terrainHeightAt, dashUnderground, dashUnderStatics, msaa, cullAbove, cellBounds,
                 noDiff, diffColor, picks, fpCap, colourCaptions, npcActors, npcPucksOn, routeRenders, gridRender, keepFx, fxStatic, listMeshes,
-                waterPlanes, coverings, size, fpOut,
+                waterPlanes, coverings, planes, showPlanes, size, fpOut,
                 camMeta, iopt);
             Console.WriteLine($"   interactive run over ({iShapes:N0} shapes were resident)");
         pendingSwitch = iopt.CellSwitch;

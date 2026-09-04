@@ -111,6 +111,7 @@ public sealed record WorklistNpc(
 /// game can leave its leaf standing open across the only clear bearing (2026-09-03). Written by
 /// shotplan.py from --refs-at. The render ignores it.
 /// </param>
+/// <param name="Planes">Per-shot occlusion-plane layer override (viewprobe's --planes); absent inherits the run's.</param>
 public sealed record WorklistShot(
     string Label,
     IReadOnlyList<float> Eye,
@@ -127,7 +128,8 @@ public sealed record WorklistShot(
     IReadOnlyList<WorklistRoute>? Routes = null,
     IReadOnlyList<WorklistNpc>? Npcs = null,
     IReadOnlyList<float>? Feet = null,
-    IReadOnlyList<string>? Doors = null);
+    IReadOnlyList<string>? Doors = null,
+    bool? Planes = null);
 
 /// <summary>The shots that share one loaded cell — i.e. one load screen's worth of work.</summary>
 /// <param name="Cell">CellEditorID or FormID, the same string viewprobe takes as its first argument.</param>
