@@ -762,6 +762,40 @@ Console.WriteLine("   navmesh triangle: (0,0,0) (200,0,0) (0,200,0)   actor heig
     var rA2 = SpatialOverlap.Contact(apple, grid, 128f);
     var rC2 = SpatialOverlap.Contact(above, grid, 128f);
     Check("contact N: a pre-built host grid answers the same as the one-shot call", rA2.Distance == rA.Distance && rA2.NormalUp == rA.NormalUp && rC2.Distance == rC.Distance, $"{Show(rA2)} | {Show(rC2)}");
+
+    // W. how wide a surface is along a direction (the bound the placement-contact rule's R4 fold reads, 2026-09-03):
+    //    the slab is 64 along +Z, 200 along +X, and 200·√2 along the XY diagonal.
+    float eZ = grid.ExtentAlong(Vector3.UnitZ), eX = grid.ExtentAlong(Vector3.UnitX), eD = grid.ExtentAlong(Vector3.Normalize(new Vector3(1, 1, 0)));
+    Check("contact W: ExtentAlong — the slab is 64 along Z, 200 along X, 200 x sqrt 2 along the XY diagonal", MathF.Abs(eZ - 64f) < 0.01f && MathF.Abs(eX - 200f) < 0.01f && MathF.Abs(eD - 200f * MathF.Sqrt(2f)) < 0.01f, $"z {eZ:0.##} x {eX:0.##} diag {eD:0.##}");
+
+    // X. the reading R4 refuses, built by construction: a 30 u box with ONE face wound inward (the inverted-sliver
+    //    residue the hull audit left — 75 of 1,367 vanilla hulls) still reads closed, and a 60 u box standing 3 u off
+    //    that face has its far vertices "behind" their nearest jar face — an enclosed depth of 63 u inside a thing
+    //    30 u across along the contact normal. No interior point of a closed object is further from its surface than
+    //    half its width, so the rule reads the extent and refuses; the same shape against an honest 300 u block reads
+    //    a depth well inside the block's extent. (A box wound inward on EVERY face does not reproduce it: a vertex
+    //    whose nearest point is a corner ties three faces, and the tie breaks "behind every face".)
+    var jarSoup = Soup(Box(new Vector3(-15, -15, 0), new Vector3(15, 15, 30)));
+    var jarIdx = (int[])jarSoup.Indices.Clone();
+    for (int t = 0; t < jarIdx.Length; t += 3)
+    {
+        var n = Vector3.Cross(jarSoup.Vertices[jarIdx[t + 1]] - jarSoup.Vertices[jarIdx[t]], jarSoup.Vertices[jarIdx[t + 2]] - jarSoup.Vertices[jarIdx[t]]);
+        if (n.X > 0f) (jarIdx[t + 1], jarIdx[t + 2]) = (jarIdx[t + 2], jarIdx[t + 1]);   // the +X face only
+    }
+    var jarInv = new TriangleSoup(jarSoup.Vertices, jarIdx);
+    var caseBeside = Soup(Box(new Vector3(18, -10, 5), new Vector3(78, 10, 25)));
+    var jarGrid = TriangleGrid.Build(jarInv);
+    var rX = SpatialOverlap.Contact(caseBeside, jarGrid, 128f);
+    float jarExtent = jarGrid.ExtentAlong(Vector3.Normalize(rX.Normal));
+    var block = Soup(Box(new Vector3(-150, -150, -50), new Vector3(150, 150, 250)));
+    var caseInside = Soup(Box(new Vector3(-30, -30, 0), new Vector3(30, 30, 200)));
+    var blockGrid = TriangleGrid.Build(block);
+    var rX2 = SpatialOverlap.Contact(caseInside, blockGrid, 128f);
+    float blockExtent = blockGrid.ExtentAlong(Vector3.Normalize(rX2.Normal));
+    Check("contact X: a box 3 u off the one inverted face of a 30 u jar -> closed host, enclosed depth 63 u, extent along the normal 30 (the reading R4 refuses); a case inside a 300 u block -> depth 50, extent 300 (honest Sunk)",
+          rX.HostClosed && MathF.Abs(rX.EffectivePenetration - 63f) < 0.5f && MathF.Abs(jarExtent - 30f) < 0.01f && rX.EffectivePenetration > jarExtent
+       && rX2.HostClosed && MathF.Abs(rX2.EffectivePenetration - 50f) < 0.5f && MathF.Abs(blockExtent - 300f) < 0.01f && rX2.EffectivePenetration < blockExtent,
+          $"jar: {Show(rX)} extent {jarExtent:0.##} | block: {Show(rX2)} extent {blockExtent:0.##}");
 }
 
 Console.WriteLine($"\n==== {pass} passed, {fail} failed ====");

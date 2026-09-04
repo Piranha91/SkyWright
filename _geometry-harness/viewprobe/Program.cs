@@ -832,24 +832,16 @@ bool interior = false;
 
 // Runtime enable state, hoisted out of RunCellTextured because the flat diagnostic mode calls it
 // AFTER that function returns. enableMemo is per-cell state and is cleared with the rest of it.
-var enableMemo = new Dictionary<FormKey, bool>();
-bool RefEnabledInner(FormKey fk, HashSet<FormKey>? seen)
-{
-    if (fk.ID == 0x14) return true;                                  // PlayerRef
-    if (enableMemo.TryGetValue(fk, out var known)) return known;
-    bool en;
-    if (refEnableParent.TryGetValue(fk, out var p))
-    {
-        seen ??= new HashSet<FormKey>();
-        en = seen.Add(fk)
-            ? RefEnabledInner(p.Parent, seen) ^ p.Opposite
-            : !refDisabledFlag.Contains(fk);                         // cycle
-    }
-    else en = !refDisabledFlag.Contains(fk);
-    enableMemo[fk] = en;
-    return en;
-}
-bool RefEnabled(FormKey fk) => RefEnabledInner(fk, null);
+// The chain rule itself is EnableState.Resolve in housecarl-core (shared with the placement-contact
+// index since 2026-09-03); the facts here are the winner-takes-all flag and XESP maps above, given
+// for EVERY key — a ref with no entry is flag-enabled and parentless — so the answers are the ones
+// this file's own resolver gave before the move.
+var enableMemo = new Dictionary<FormKey, EnableResolution>();
+EnableFacts? EnableFactsOf(FormKey fk) =>
+    new EnableFacts(refDisabledFlag.Contains(fk),
+                    refEnableParent.TryGetValue(fk, out var p) ? p.Parent : null,
+                    refEnableParent.TryGetValue(fk, out var q) && q.Opposite);
+bool RefEnabled(FormKey fk) => EnableState.Resolve(fk, EnableFactsOf, enableMemo).Enabled;
 // The three dispositions a drop report needs to tell apart.
 string? DisabledWhy(PlacedRef r) =>
     RefEnabled(r.FormKey) ? null
