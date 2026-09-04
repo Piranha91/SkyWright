@@ -113,7 +113,10 @@ findings they demonstrate) lives with that instance, not here.
   moved); the caption carries the legend and the console the counts, drawn or not. `--pick` on a
   pixel a drawn plane covers reports the plane first, then what the depth buffer says is behind it.
   Off by default, and a render without it is byte-identical to one made before the layer existed
-  (verified on an interior and an exterior).
+  (verified on an interior and an exterior). `--occlusion off|on|diff` previews what the planes
+  CULL from this eye: `on` leaves out every ref that lies wholly behind a plane, `diff` draws
+  everything and tints those refs red so the change is visible in one frame; the caption names
+  the count and the console names the planes doing the culling.
 - **Placed NPC actors:** `--npc FORMKEY[@X,Y,Z[,HEADING]][=label]` (repeatable; implies textured
   mode) renders the NPC's actual character model — FaceGen head, skinned body, and the outfit the
   RUNTIME will dress it in — at its winning placement or an explicit position (see *Placed NPC
@@ -206,6 +209,8 @@ all knowledge.
 | `VP_FLY_POSE=1` | put the camera numbers on the caption before the capture — the bar's `pose` toggle, headlessly |
 | `VP_FLY_GLOW=on\|off` | the hover highlight, headlessly. With `VP_FLY_PICK` the picked shape is the one lit, and `VP_FLY_HUD=1` keeps the lift in the capture (a hand-pressed `F12` never does) |
 | `VP_FLY_PLANES=on\|off` | show or hide the occlusion-planes layer before the capture — the `L` key's effect, headlessly. The layer is resident in every fly-through whether or not `--planes` was given, so this works without it |
+| `VP_FLY_OCCLUSION=off\|on\|diff` | set the occlusion preview before the capture — the `O` key's effect, headlessly |
+| `VP_OCCL_TINT_ALL=1` | the occlusion preview's POSITIVE CONTROL: every drawn ref counts as culled, so `--occlusion diff` must come out washed red and `on` must come out empty. A well-placed plane's cull changes no pixel (its shadow lies inside the shadow of the wall it stands in), which looks exactly like a preview that failed; this is what tells them apart |
 
 ---
 
@@ -410,7 +415,8 @@ and both echoed to the console as a paste-ready flag; `Shift` ×5, `Ctrl` ×0.2 
 rate, movement and clip alike. `N` cycles the navmesh display, `R` shows/hides the
 walking route, `L` shows/hides the occlusion planes (hover one for its identity and what stands
 behind it; hover a wall and the caption names the planes the ray goes on to cross, since their
-dashed outlines are in the picture), `[`/`]` and `;`/`'` move the
+dashed outlines are in the picture), `O` cycles the occlusion preview `off → on → diff`
+(re-evaluated as you fly), `[`/`]` and `;`/`'` move the
 height clip, `\` turns it off (all four below). `P` prints the current pose as a paste-ready
 `--eye X,Y,Z --yaw N --pitch N --fov N` line. `F12` saves a captioned PNG (window resolution,
 standard caption bar + `viewprobe` tEXt chunk with the pose) into `--out`. `PageUp`/`PageDown` step a `--worklist`'s shots and `Ctrl+PageUp`/`PageDown` its cells
@@ -651,9 +657,10 @@ malformed shot list found after a multi-minute walk is a multi-minute walk waste
   bearing. `shotplan.py plan` fills it from `--refs-at` within `--door-radius`. The render ignores
   it.
 - **`look: [X,Y,Z]`** may replace `yaw`/`pitch`, resolving the same way `--look` does.
-- **`planes`** (true/false) is an optional per-shot override of `--planes` (added 2026-09-04), reset
-  to the command line's value at the top of every shot like `nav` and `cullAbove`. A shot list can
-  therefore turn the planes layer on for the shots that are about planes and leave the rest clean.
+- **`planes`** (true/false) and **`occlusion`** (`off|on|diff`) are optional per-shot overrides of
+  `--planes` and `--occlusion` (added 2026-09-04), reset to the command line's values at the top
+  of every shot like `nav` and `cullAbove`. A shot list can therefore turn the planes layer on for
+  the shots that are about planes and leave the rest clean.
 - **`nav`** and **`cullAbove`** are optional per-shot overrides. `nav` applies exactly (it is a
   visibility flip). `cullAbove` in the window drives the SHAPE-granular live band, not the
   triangle-exact knife — the console says so on arrival rather than letting the two quietly differ.
@@ -1264,8 +1271,8 @@ rest has zero live particles, so there is no first frame — no sparks, no smoke
 
 Added 2026-09-04 for the occlusion-plane audit (roadmap 4.4): a location mod that rearranges
 architecture invalidates the occlusion planes cut for the old arrangement, and nothing in the
-suite looked at planes at all. This is the instrument — it draws them and says who put each one
-where. It reports; it never judges.
+suite looked at planes at all. This is the instrument — it draws them, says who put each one
+where, and (below) previews what they cull. It reports; it never judges.
 
 **What a plane is, in the records.** A placed object (REFR) whose base is `PlaneMarker`
 (`000017:Skyrim.esm`, a STAT carrying the Is-Marker flag — the engine never draws it, and the
@@ -1314,7 +1321,47 @@ names the planes the ray goes on to cross. The layer is resident in every fly-th
 not, so `L` is a visibility flip like `N`.
 
 **Not modelled, said plainly:** nothing here is a verdict. Whether a plane is well placed is the
-audit's question, and the audit needs the game's own cull rule first.
+audit's question, and the audit needs the game's own cull rule first (below).
+
+### The preview: `--occlusion off|on|diff`
+
+What the planes would cull from THIS eye, drawn: `on` leaves the culled refs out (the picture
+the engine would draw if the rule below is the engine's), `diff` draws everything and tints the
+culled refs red, so the change is visible in one frame. In the window `O` cycles the three and the
+answer is re-evaluated as the eye moves; the bar carries the same three as a segment. The caption
+names the count, the console names the planes doing the culling (top twelve, with how many
+straddlers each kept), and a `Box`-kind plane's culls are counted apart.
+
+**The rule, as modelled** — the handoff's working assumption, stated so the game can be asked
+whether it is true (the README will carry the rule as measured once Part D has run):
+
+1. The eye is on either side of the plane — two-sided, until the game says otherwise.
+2. The plane's SHADOW from the eye is the convex volume behind the plane's own surface bounded by
+   the four planes through the eye and the quad's four edges.
+3. A ref whose world AABB — of exactly the triangles the scene uploaded for it, post-cull — lies
+   entirely inside the shadow is culled. A ref that reaches into the shadow without being inside
+   it STRADDLES and is kept (counted per plane).
+4. A `Box` plane is tested face by face: each eye-facing face casts its own shadow.
+5. Never culled: terrain, water, the navmesh overlay, routes, grid, NPC actors, props, the planes
+   themselves — they are the map, not the engine's scene.
+
+**Why the picture is the point.** A plane that now culls space the player can see into — the mod
+moved architecture out from behind it — shows as a hole in `on` and a red wash in `diff` where the
+player would see the world pop out; a plane left standing for architecture that is no longer there
+culls nothing, which is a listing's job to name. The preview is applied BEFORE the depth prepass
+and the adaptive nav colour, so every pass sees the same scene.
+
+**Expect no change from a street-level eye, and check that it is honest.** A well-placed plane's
+shadow lies inside the shadow of the wall it stands in, so from any eye the wall hides, the plane's
+cull changes no pixel — on the two Solitude stations rendered 2026-09-04 the `on` and `diff` frames
+were pixel-identical to the plain render below the caption, with hundreds of refs culled and
+hundreds of them inside the frame. That is indistinguishable from a preview that failed, so the
+console says how many culled refs have their centre in the frame, and `VP_OCCL_TINT_ALL=1` is
+the positive control: every ref counts as culled, `diff` comes out washed red and `on` comes out
+empty (measured: 80 % of pixels change in each, the rest being sky).
+
+**Cost.** Dozens of planes against thousands of boxes, five dot products per plane per box: a few
+million operations, re-run only when the eye moves.
 
 ---
 

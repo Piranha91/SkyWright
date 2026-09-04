@@ -1,4 +1,5 @@
 using System.Numerics;
+using CharacterViewer.Rendering;
 using HousecarlCore;
 using Mutagen.Bethesda.Plugins;
 
@@ -85,6 +86,9 @@ static class PlanePalette
     public static readonly Vector3 Inherited = new(1.00f, 0.78f, 0.15f);
     public static readonly Vector3 Added = new(0.90f, 0.25f, 0.95f);
     public static readonly Vector3 Moved = new(0.10f, 0.80f, 0.75f);
+    /// <summary>The tint a culled ref wears in the `diff` occlusion preview: a red wash, distinct from the
+    /// finding's red outline by being a surface tint rather than a line.</summary>
+    public static readonly Vector3 CulledTint = new(1.00f, 0.15f, 0.10f);
 
     public static Vector3 Of(PlaneProvenance p) => p switch
     {
@@ -301,5 +305,229 @@ static class PlaneOverlay
         TexturedScene.Overlay.SolidPolyline(solid, pts, col, HalfWidthAt, eye);
         float d = MathF.Max(1f, Vector3.Distance((pts[0] + pts[^1]) * 0.5f, eye));
         TexturedScene.Overlay.DashedPolyline(dash, pts, col, HalfWidthAt(d), eye);
+    }
+}
+
+// ---- THE OCCLUSION PREVIEW: what the planes would cull from one eye -------------------------
+//
+// THE RULE, AS THE PREVIEW MODELS IT (the working assumption the handoff states, to be grounded in
+// game — the README carries the rule as measured once it has been): an object whose bounds lie
+// ENTIRELY behind a plane as seen from the eye is not rendered; planes are two-sided; an object
+// that straddles the plane's shadow is kept. "Behind a plane as seen from the eye" is a convex
+// volume — the shadow the quad casts away from the eye: the half-space on the far side of the
+// quad's own plane, cut by the four planes through the eye and the quad's four edges. A box is
+// culled iff all eight of its corners lie inside that volume, which for a convex volume is iff the
+// box does. A Box-kind plane is tested face by face, each eye-facing face casting its own shadow,
+// and its culls are counted apart because its semantics are the game's question, not this file's.
+//
+// WHAT IS NEVER CULLED: terrain, water, the navmesh overlay, routes, NPC actors and props — they
+// are the map, not the engine's scene. Only placed refs the scene draws are candidates, and each
+// is judged by the world AABB of exactly the triangles the scene uploaded for it.
+
+/// <summary>A convex region as a set of half-spaces: a point is inside when dot(N, p) + D >= 0 for every one.</summary>
+sealed class CullVolume
+{
+    readonly List<(Vector3 N, float D)> _halves = new();
+
+    public void Add(Vector3 unitNormal, Vector3 pointOnPlane)
+        => _halves.Add((unitNormal, -Vector3.Dot(unitNormal, pointOnPlane)));
+
+    /// <summary>Is the axis-aligned box wholly inside? For each half-space the corner LEAST along its normal
+    /// must still pass — the negative vertex — and a convex region contains a box iff it contains every corner.</summary>
+    public bool ContainsBox(Vector3 min, Vector3 max)
+    {
+        foreach (var (n, d) in _halves)
+        {
+            var v = new Vector3(n.X >= 0f ? min.X : max.X, n.Y >= 0f ? min.Y : max.Y, n.Z >= 0f ? min.Z : max.Z);
+            if (Vector3.Dot(n, v) + d < 0f) return false;
+        }
+        return true;
+    }
+
+    /// <summary>Does the box reach into the region at all? The positive vertex of every half-space passes. A box
+    /// that reaches in without being contained STRADDLES the plane's shadow.</summary>
+    public bool TouchesBox(Vector3 min, Vector3 max)
+    {
+        foreach (var (n, d) in _halves)
+        {
+            var v = new Vector3(n.X >= 0f ? max.X : min.X, n.Y >= 0f ? max.Y : min.Y, n.Z >= 0f ? max.Z : min.Z);
+            if (Vector3.Dot(n, v) + d < 0f) return false;
+        }
+        return true;
+    }
+}
+
+static class OcclusionCull
+{
+    /// <summary>The shadow volumes one plane casts from <paramref name="eye"/>: one for a PortalBox (its mid-quad,
+    /// either side — two-sided until the game says otherwise), one per eye-facing face for a Box. Empty when the
+    /// eye lies in the plane or on an edge's line, where a shadow has no shape.</summary>
+    public static List<CullVolume> Volumes(PlaneRender p, Vector3 eye)
+    {
+        var vols = new List<CullVolume>();
+        if (p.Kind == PlaneKind.PortalBox)
+        {
+            if (Volume(p.Quad, p.Normal, eye) is { } v) vols.Add(v);
+            return vols;
+        }
+        var c = p.Corners;
+        foreach (var (ring, ln) in PlaneGeometry.BoxFaces)
+        {
+            var n = PlaneGeometry.Axis(p, ln);
+            var q = new[] { c[ring[0]], c[ring[1]], c[ring[2]], c[ring[3]] };
+            if (Vector3.Dot(eye - q[0], n) <= 0f) continue;              // the face looks away from the eye
+            if (Volume(q, n, eye) is { } v) vols.Add(v);
+        }
+        return vols;
+    }
+
+    static CullVolume? Volume(Vector3[] quad, Vector3 n, Vector3 eye)
+    {
+        var centre = (quad[0] + quad[1] + quad[2] + quad[3]) * 0.25f;
+        float d = Vector3.Dot(eye - centre, n);
+        if (MathF.Abs(d) < 1e-3f) return null;
+        float side = MathF.Sign(d);
+        var v = new CullVolume();
+        v.Add(-side * n, centre);                                        // the far half-space
+        for (int i = 0; i < 4; i++)
+        {
+            var a = quad[i]; var b = quad[(i + 1) % 4];
+            var m = Vector3.Cross(a - eye, b - eye);
+            if (m.LengthSquared() < 1e-9f) return null;
+            m = Vector3.Normalize(m);
+            if (Vector3.Dot(m, centre - eye) < 0f) m = -m;               // inward: the quad's centre is inside
+            v.Add(m, eye);
+        }
+        return v;
+    }
+}
+
+/// <summary>One drawn ref as the preview sees it: the world AABB (Skyrim space) of the triangles the scene
+/// uploaded for it, the meshes those triangles became, and the fly-through's pick shapes for them.</summary>
+sealed class RefOcclusion
+{
+    public SceneRef Ref;
+    public Vector3 Min = new(float.MaxValue), Max = new(float.MinValue);
+    public readonly List<GlMesh> Meshes = new();
+    public readonly List<PickShape> Shapes = new();
+    public bool Culled;
+    public PlaneRender? CulledBy;
+    public Vector3 Size => Max - Min;
+    public float Volume => MathF.Max(Size.X, 1f) * MathF.Max(Size.Y, 1f) * MathF.Max(Size.Z, 1f);
+
+    /// <summary>Grow the bounds by a Y-up viewer-space vertex (the upload's own space, un-swapped here).</summary>
+    public void Grow(Vector3 yUp)
+    {
+        var s = new Vector3(yUp.X, -yUp.Z, yUp.Y);
+        Min = Vector3.Min(Min, s); Max = Vector3.Max(Max, s);
+    }
+}
+
+/// <summary>The preview's state: every candidate ref, every plane, and the last answer. <see cref="Apply"/>
+/// re-evaluates for an eye and a mode and pushes the result onto the meshes — hidden in `on`, tinted in
+/// `diff` — and onto the pick shapes' <see cref="PickShape.Culled"/> flag, which the fly-through's clip
+/// folds into visibility so the two knives cannot disagree about a shape.</summary>
+sealed class OcclusionState
+{
+    public readonly List<RefOcclusion> Refs = new();
+    public readonly IReadOnlyList<PlaneRender> Planes;
+    /// <summary>Per plane, the refs it culls from the last eye (a ref culled by several planes is listed under each).</summary>
+    public readonly Dictionary<PlaneRender, List<RefOcclusion>> CulledByPlane = new();
+    /// <summary>Per plane, the refs that reach into its shadow without being contained — the straddlers, kept.</summary>
+    public readonly Dictionary<PlaneRender, int> StraddlingByPlane = new();
+    public int CulledCount;
+    public Vector3 LastEye;
+    public string LastMode = "off";
+    readonly Dictionary<GlMesh, (bool Emissive, bool GlowMap, bool Enabled, Vector3 Colour, float Multiple)> _tintSaved = new();
+    bool _applied;
+
+    public OcclusionState(IReadOnlyList<PlaneRender> planes) => Planes = planes;
+
+    /// <summary>Re-evaluate for <paramref name="eye"/> and <paramref name="mode"/>. Returns true when anything was
+    /// recomputed (the eye moved, the mode changed, or <paramref name="force"/>). <paramref name="ownsVisibility"/>:
+    /// the static path, which has no clip to fold into — the meshes' IsRendering is written here.</summary>
+    public bool Apply(Vector3 eye, string mode, bool ownsVisibility, bool force = false)
+    {
+        if (_applied && !force && mode == LastMode && (LastEye - eye).LengthSquared() < 1e-4f) return false;
+        _applied = true; LastEye = eye; LastMode = mode;
+
+        foreach (var r in Refs) { r.Culled = false; r.CulledBy = null; }
+        CulledByPlane.Clear(); StraddlingByPlane.Clear(); CulledCount = 0;
+        // VP_OCCL_TINT_ALL=1 — the preview's positive control: every ref counts as culled, so a
+        // `diff` frame must come out washed red and an `on` frame empty. A well-placed plane's cull
+        // changes no pixel (its shadow lies inside the shadow of the wall it stands in), which is
+        // indistinguishable from a preview that failed — this is what tells the two apart.
+        if (mode != "off" && Environment.GetEnvironmentVariable("VP_OCCL_TINT_ALL") == "1")
+        {
+            foreach (var r in Refs) r.Culled = true;
+            CulledCount = Refs.Count;
+        }
+        else if (mode != "off")
+            foreach (var p in Planes)
+            {
+                var vols = OcclusionCull.Volumes(p, eye);
+                if (vols.Count == 0) continue;
+                List<RefOcclusion>? list = null; int straddle = 0;
+                foreach (var r in Refs)
+                {
+                    bool inside = false, touches = false;
+                    foreach (var v in vols)
+                    {
+                        if (v.ContainsBox(r.Min, r.Max)) { inside = true; break; }
+                        if (!touches && v.TouchesBox(r.Min, r.Max)) touches = true;
+                    }
+                    if (inside)
+                    {
+                        (list ??= new()).Add(r);
+                        if (!r.Culled) { r.Culled = true; r.CulledBy = p; CulledCount++; }
+                    }
+                    else if (touches) straddle++;
+                }
+                if (list is not null) CulledByPlane[p] = list;
+                if (straddle > 0) StraddlingByPlane[p] = straddle;
+            }
+
+        foreach (var r in Refs)
+        {
+            bool hide = mode == "on" && r.Culled;
+            bool tint = mode == "diff" && r.Culled;
+            foreach (var m in r.Meshes) SetTint(m, tint);
+            if (ownsVisibility) foreach (var m in r.Meshes) m.IsRendering = !hide;
+            foreach (var s in r.Shapes) s.Culled = hide;
+        }
+        return true;
+    }
+
+    /// <summary>The `diff` wash: the material shader's own emissive term, exactly the hover highlight's
+    /// mechanism — it brightens a surface in proportion to its own albedo, so a dark stone and a pale banner both
+    /// read as tinted without either becoming a flat repaint. Saved once per mesh and handed back when the
+    /// wash comes off.</summary>
+    void SetTint(GlMesh m, bool on)
+    {
+        if (on)
+        {
+            if (!_tintSaved.ContainsKey(m))
+                _tintSaved[m] = (m.HasEmissive, m.HasGlowMap, m.EmissiveEnabled, m.EmissiveColor, m.EmissiveMultiple);
+            m.HasEmissive = true; m.HasGlowMap = false; m.EmissiveEnabled = true;
+            m.EmissiveColor = PlanePalette.CulledTint; m.EmissiveMultiple = 0.9f;
+        }
+        else if (_tintSaved.Remove(m, out var g))
+        {
+            m.HasEmissive = g.Emissive; m.HasGlowMap = g.GlowMap; m.EmissiveEnabled = g.Enabled;
+            m.EmissiveColor = g.Colour; m.EmissiveMultiple = g.Multiple;
+        }
+    }
+
+    /// <summary>The console's summary of the last answer.</summary>
+    public string Summary(string mode)
+    {
+        if (mode == "off") return "occlusion preview: off";
+        int planesCulling = CulledByPlane.Count;
+        int boxCulls = CulledByPlane.Where(kv => kv.Key.Kind == PlaneKind.Box).Sum(kv => kv.Value.Count);
+        int straddlers = StraddlingByPlane.Values.Sum();
+        return $"occlusion preview ({mode}): {CulledCount:N0} of {Refs.Count:N0} drawn ref(s) lie wholly behind a plane from this eye"
+             + $" — {(mode == "on" ? "not drawn" : "tinted red")}; {planesCulling} of {Planes.Count} plane(s) cull anything"
+             + (boxCulls > 0 ? $" ({boxCulls:N0} cull(s) by Box-kind planes, counted apart)" : "")
+             + $"; {straddlers:N0} straddler(s) kept (reach into a shadow without being inside it)";
     }
 }

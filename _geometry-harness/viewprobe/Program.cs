@@ -155,9 +155,15 @@ string navMode = "filled";
 bool showMarkers = false;
 bool listMeshes = false;
 // OCCLUSION PLANES (see OcclusionPlanes.cs). --planes draws every plane in the cell (+ ring) as a
-// translucent quad with an outline, coloured by who put it there. Off by default, and the default
-// render is byte-identical to what it was before the layer existed.
+// translucent quad with an outline, coloured by who put it there; --occlusion off|on|diff previews
+// the culling: `on` leaves out the refs the planes would cull from this eye, `diff` draws everything
+// and tints the culled refs red so the change is visible in one frame; --planes-report lists each
+// plane with what it culls and the nearest solid collision behind it within --planes-reach u. All
+// off by default, and the default render is byte-identical to what it was before they existed.
 bool showPlanes = false;
+string occlusionMode = "off";
+bool planesReport = false;
+float planesReach = 256f;
 // TROUBLESHOOTING OVERLAY. --conflicts <emit.json> reads a detector's emitted ConflictFile and
 // paints the implicated navmeshes RED in this cell — whole records for CLOBBERED, the named
 // navmesh ends for dangling links — and auto-highlights implicated doors orange. --red
@@ -508,6 +514,9 @@ for (int i = argStart; i < args.Length; i++)
     else if (args[i] == "--markers") showMarkers = true;
     else if (args[i] == "--list-meshes") listMeshes = true;
     else if (args[i] == "--planes") { showPlanes = true; textured = true; }
+    else if (args[i] == "--occlusion" && i + 1 < args.Length) { occlusionMode = args[++i].ToLowerInvariant(); textured = true; }
+    else if (args[i] == "--planes-report") { planesReport = true; textured = true; }
+    else if (args[i] == "--planes-reach" && i + 1 < args.Length) planesReach = float.Parse(args[++i]);
     else if (args[i] is "--instance" or "--game" or "--profile") i++;   // consumed above
     // A worklist path is a worklist WHEREVER it lands, not only in the leading run that a drop
     // produces: `viewprobe --interactive tour.json` is the obvious thing to type once dropping one
@@ -534,9 +543,15 @@ if ((conflictsPath is not null || redSpecs.Count > 0) && !navModeExplicit) navMo
 // What the command line settled on, kept so every worklist shot starts from it rather than from
 // the previous shot's overrides.
 string cliNavMode = navMode; float? cliCullAbove = cullAbove;
-bool cliShowPlanes = showPlanes;
+bool cliShowPlanes = showPlanes; string cliOcclusion = occlusionMode;
 if (navMode is not ("off" or "filled" or "wire" or "both"))
 { Console.Error.WriteLine($"--nav '{navMode}' is not one of: off, filled, wire, both."); return 1; }
+if (occlusionMode is not ("off" or "on" or "diff"))
+{ Console.Error.WriteLine($"--occlusion '{occlusionMode}' is not one of: off, on, diff."); return 1; }
+if (!planesReport && Array.IndexOf(args, "--planes-reach") >= 0)
+{ Console.Error.WriteLine("--planes-reach only means anything with --planes-report: it is how far behind each plane the report looks for solid collision."); return 1; }
+if (planesReach <= 0f)
+{ Console.Error.WriteLine($"--planes-reach {planesReach} must be a positive number of units."); return 1; }
 if (npcPuck is not ("on" or "off" or "auto"))
 { Console.Error.WriteLine($"--npc-puck '{npcPuck}' is not one of: on, off, auto."); return 1; }
 // A storey filter over an overlay that is not drawn is a flag doing nothing, same trap as below.
@@ -988,10 +1003,11 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot)
         yaw = wsYaw; pitch = wsPitch; fov = wshot.Fov;
         look = null; eyeRef = null; lookRef = null;      // the shot is the whole camera, not a base for one
         navMode = cliNavMode; cullAbove = cliCullAbove;     // the run's values first, then this shot's overrides
-        showPlanes = cliShowPlanes;
+        showPlanes = cliShowPlanes; occlusionMode = cliOcclusion;
         if (wshot.Nav is { } shotNav) navMode = shotNav;
         if (wshot.CullAbove is { } shotCull) cullAbove = shotCull;
         if (wshot.Planes is { } shotPlanes) showPlanes = shotPlanes;
+        if (wshot.Occlusion is { } shotOccl) occlusionMode = shotOccl;
         if (wshot.Route is { Count: > 1 })
         {
             shotRoute = wshot.Route.Select(w => (w[0], w[1])).ToList();
@@ -2487,13 +2503,13 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot)
                     Console.WriteLine($"      not drawn: {plDisabledParent} disabled via enable parent, {plDisabledFlag} initially disabled (own flag), "
                                     + $"{plDeleted} deleted, {plNoPrim} without a Box/PortalBox primitive"
                                     + (noPrimKinds.Count > 0 ? $" ({string.Join(", ", noPrimKinds.Select(kv => $"{kv.Key} {kv.Value}"))})" : ""));
-                if (!showPlanes)
-                    Console.WriteLine("      (--planes draws them)");
+                if (!showPlanes && occlusionMode == "off" && !planesReport)
+                    Console.WriteLine("      (--planes draws them; --occlusion on|diff previews their culling; --planes-report lists them)");
                 planeLegend = $"PLANES {planes.Count}: grey vanilla {nVan} · gold inherited {nInh} · magenta added {nAdd} · teal moved {nMov}"
                             + (nBox > 0 ? $" — {nBox} Box kind drawn fainter as its box" : "")
                             + " — outline dashed where hidden";
             }
-            else if (showPlanes)
+            else if (showPlanes || occlusionMode != "off" || planesReport)
                 Console.WriteLine("   occlusion planes: none in this cell" + (interior || !ringRefs ? "" : " or its ring"));
         }
 
@@ -2849,7 +2865,7 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot)
                    (eyePos.Value, lookPos.Value, fov), g, r, terrainPatches, terrainLayers, navMode, navColor,
                    skyColor, terrainHeightAt, dashUnderground, dashUnderStatics, msaa, cullAbove, cellBounds,
                    diffs ?? noDiff, diffColor, picks, captionLines, colourCaptions, npcActors, npcPucksOn, routeRenders,
-                   gridRender, keepFx, fxStatic, listMeshes, waterPlanes, coverings, planes, showPlanes,
+                   gridRender, keepFx, fxStatic, listMeshes, waterPlanes, coverings, planes, showPlanes, occlusionMode,
                    size, outFile, camMeta);
 
         if (compare is { } cmp)
@@ -3011,8 +3027,8 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot)
                 // before the window existed.
                 BuildCullAbove = cullAbove,
                 BuildNavZ = navZAt is { } bnz ? (bnz, navZTol) : null,
-                // The planes layer, live: L in the window, seeded from the command line (or the
-                // shot) the way the nav mode is.
+                // The planes layer and the occlusion preview, live: L and O in the window, seeded
+                // from the command line (or the shot) the way the nav mode is.
                 PlaneCount = planes.Count,
                 ShowPlanes = showPlanes,
                 PlaneLegend = planeLegend,
@@ -3034,7 +3050,7 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot)
                 (eyePos.Value, lookPos.Value, fov), navTris, redTris, terrainPatches, terrainLayers, navMode, navColor,
                 skyColor, terrainHeightAt, dashUnderground, dashUnderStatics, msaa, cullAbove, cellBounds,
                 noDiff, diffColor, picks, fpCap, colourCaptions, npcActors, npcPucksOn, routeRenders, gridRender, keepFx, fxStatic, listMeshes,
-                waterPlanes, coverings, planes, showPlanes, size, fpOut,
+                waterPlanes, coverings, planes, showPlanes, occlusionMode, size, fpOut,
                 camMeta, iopt);
             Console.WriteLine($"   interactive run over ({iShapes:N0} shapes were resident)");
         pendingSwitch = iopt.CellSwitch;

@@ -278,6 +278,7 @@ static class TexturedScene
         IReadOnlyDictionary<FormKey, Covering> coveringsByBase,  // STAT base -> its MATO layer; empty = --no-coverings
         IReadOnlyList<PlaneRender> planes,                 // every occlusion plane in the cell (+ ring); see OcclusionPlanes.cs
         bool showPlanes,                                   // --planes: draw the planes layer
+        string occlusionMode,                              // --occlusion off | on | diff: preview what the planes cull
         int size, string outPath,
         string? pngTextMeta = null,                        // replication chunk: written as a PNG tEXt entry keyed "viewprobe"
         InteractiveOptions? interactive = null)            // non-null: open the fly-through window instead of saving a PNG
@@ -380,8 +381,15 @@ static class TexturedScene
         var haloNear = new List<float>();
         var haloOrange = new Vector3(255f / 255f, 90f / 255f, 26f / 255f);
 
+        // The occlusion preview's candidates: every drawn ref's world bounds (of exactly the
+        // triangles uploaded, post-cull) and the meshes they became. Gathered whether or not the
+        // preview is on — it is a few numbers per ref — and applied only when it is, so a default
+        // render is untouched.
+        var occl = new OcclusionState(planes);
+
         foreach (var r in refs)
         {
+            var ro = new RefOcclusion { Ref = r };
             var rel = r.MeshRelPath.StartsWith("meshes", StringComparison.OrdinalIgnoreCase)
                 ? r.MeshRelPath : Path.Combine("meshes", r.MeshRelPath);
             if (!builtCache.TryGetValue(rel, out var built))
@@ -662,6 +670,8 @@ static class TexturedScene
                 renderer.AddMesh(mesh);
                 meshes.Add(mesh);
                 shapes++;
+                ro.Meshes.Add(mesh);
+                foreach (var vi in tri) ro.Grow(wp[vi]);
 
                 // Interactive picking tests the SAME arrays the upload used (shared, not
                 // copied): post-cull, post-filter — a hover names only what is drawn.
@@ -674,6 +684,7 @@ static class TexturedScene
                     var ps = new PickShape { Kind = PickKind.Ref, Verts = wp, Tris = tri, Ref = r, Mesh = mesh };
                     ps.ComputeBounds();
                     interactive.PickShapes.Add(ps);
+                    ro.Shapes.Add(ps);
                     basePick = ps;                       // the covering below hangs itself off this
                 }
 
@@ -737,6 +748,7 @@ static class TexturedScene
                         covMesh.DiffuseTexture = MatoTexture(cv.ModelPath);
                         renderer.AddMesh(covMesh);
                         meshes.Add(covMesh);
+                        ro.Meshes.Add(covMesh);              // the snow is culled with its roof
                         // The live height clip walks PickShapes and a shell is deliberately not
                         // one of them; without this link, clipping a roof away left its snow
                         // hanging in the air.
@@ -747,6 +759,7 @@ static class TexturedScene
                     }
                 }
             }
+            if (ro.Meshes.Count > 0) occl.Refs.Add(ro);
             if (refHadFx) fxRefCount++;
             if (refHadFxStatic) fxStaticRefCount++;
             if (refHadCovering) coveringRefs++;
@@ -1403,6 +1416,42 @@ static class TexturedScene
                                     + $"{minX:0},{minY:0} .. {maxX:0},{maxY:0} ({span:0} u across)");
                 }
             }
+        }
+
+        // ---- the occlusion preview, applied BEFORE anything is drawn ----------------------------
+        // Pass 1's depth prepass, the adaptive colour sample and the picture must all see the same
+        // scene, so a culled ref comes off (or is tinted) here, once, for the entry eye. The
+        // fly-through takes the state instead and re-applies it as the eye moves. The caption
+        // names the count: a render with objects missing must say why, or the gap reads as a
+        // finding about the mod rather than about its planes.
+        var capLines = captionLines.ToList();
+        if (occlusionMode != "off")
+        {
+            if (planes.Count == 0)
+                Console.WriteLine("   occlusion preview: no occlusion planes in this cell — nothing to cull");
+            else if (interactive is null)
+            {
+                occl.Apply(cam.Eye, occlusionMode, ownsVisibility: true);
+                Console.WriteLine("   " + occl.Summary(occlusionMode));
+                // How many of the culled refs are even in the frame: a preview that changes no
+                // pixel is the honest outcome for well-placed planes (what they cull is behind a
+                // wall anyway), and this line is what separates that from a preview that failed.
+                int inFrame = occl.Refs.Count(r => r.Culled && ScreenOf(YUp((r.Min + r.Max) * 0.5f)) is not null);
+                Console.WriteLine($"      {inFrame:N0} of the culled ref(s) have their centre inside this frame"
+                                + (inFrame == 0 ? " — the preview changes no pixel of this picture" : ""));
+                foreach (var kv in occl.CulledByPlane.OrderByDescending(kv => kv.Value.Count).Take(12))
+                    Console.WriteLine($"      {kv.Value.Count,5} culled by PLANE {kv.Key.Key} {kv.Key.KindLabel} {kv.Key.ExtentLabel} ({kv.Key.ProvenanceLabel})"
+                                    + (occl.StraddlingByPlane.TryGetValue(kv.Key, out var st) ? $", {st} straddling" : ""));
+                if (occl.CulledByPlane.Count > 12) Console.WriteLine($"      ... and {occl.CulledByPlane.Count - 12} more plane(s) culling something");
+                capLines.Add($"OCCLUSION {occlusionMode}: {occl.CulledCount:N0} ref(s) wholly behind a plane from this eye — "
+                           + (occlusionMode == "on" ? "NOT DRAWN" : "tinted RED")
+                           + $" ({occl.CulledByPlane.Count} of {planes.Count} planes cull anything; straddlers kept)");
+            }
+        }
+        if (interactive is not null)
+        {
+            interactive.Occlusion = occl;
+            interactive.OcclusionMode = planes.Count > 0 ? occlusionMode : "off";
         }
 
         Vector4 healthy = palette[0].Color;
@@ -2265,7 +2314,7 @@ static class TexturedScene
         GL.DeleteFramebuffer(fbo); GL.DeleteTexture(colorTex); GL.DeleteRenderbuffer(depthRb);
         if (msFbo != 0) { GL.DeleteFramebuffer(msFbo); GL.DeleteRenderbuffer(msColorRb); GL.DeleteRenderbuffer(msDepthRb); }
 
-        SaveFrame(pixels, size, size, captionLines, colourCaptionLines, pngTextMeta, outPath,
+        SaveFrame(pixels, size, size, capLines, colourCaptionLines, pngTextMeta, outPath,
                   gridSpacing > 0f ? gridLabels : null, gridColour3);
 
         // Give back the borrowed NPC meshes BEFORE this renderer can dispose them —

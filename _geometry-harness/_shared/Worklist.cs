@@ -112,6 +112,7 @@ public sealed record WorklistNpc(
 /// shotplan.py from --refs-at. The render ignores it.
 /// </param>
 /// <param name="Planes">Per-shot occlusion-plane layer override (viewprobe's --planes); absent inherits the run's.</param>
+/// <param name="Occlusion">Per-shot occlusion preview override (off|on|diff, viewprobe's --occlusion); absent inherits the run's.</param>
 public sealed record WorklistShot(
     string Label,
     IReadOnlyList<float> Eye,
@@ -129,7 +130,8 @@ public sealed record WorklistShot(
     IReadOnlyList<WorklistNpc>? Npcs = null,
     IReadOnlyList<float>? Feet = null,
     IReadOnlyList<string>? Doors = null,
-    bool? Planes = null);
+    bool? Planes = null,
+    string? Occlusion = null);
 
 /// <summary>The shots that share one loaded cell — i.e. one load screen's worth of work.</summary>
 /// <param name="Cell">CellEditorID or FormID, the same string viewprobe takes as its first argument.</param>
@@ -240,6 +242,8 @@ public static class WorklistIo
                 if (s.Pitch is < -89f or > 89f) Bad($"{sw}: pitch {s.Pitch} is out of range (-89..89).");
                 if (s.Nav is not null && s.Nav is not ("off" or "filled" or "wire" or "both"))
                     Bad($"{sw}: nav '{s.Nav}' is not off|filled|wire|both.");
+                if (s.Occlusion is not null && s.Occlusion is not ("off" or "on" or "diff"))
+                    Bad($"{sw}: occlusion '{s.Occlusion}' is not off|on|diff.");
                 if (s.Route is not null)
                 {
                     // One waypoint is a position, not a path — and a three-number waypoint is an

@@ -60,6 +60,9 @@ sealed class PickShape
     public FormKey NavKey;                             // Kind==Navmesh
     public string TerrainTex = "";                     // Kind==Terrain ("" = untextured fallback)
     public PlaneRender? Plane;                         // Kind==Plane
+    /// <summary>Kind==Ref: the occlusion preview (`on`) says a plane hides this ref from the current eye. Folded
+    /// into visibility by the clip, so the two knives write one flag and cannot disagree.</summary>
+    public bool Culled;
     public Vector3 Min, Max;
     /// <summary>Kind==Ref: the GlMesh these triangles were uploaded as, so the height clip can
     /// hide it and the ray can then SKIP it. A pick that names a shape the clip just removed
@@ -148,6 +151,12 @@ sealed class InteractiveOptions
     public int PlaneCount;                                 // planes resident; 0 = none in this cell
     public bool ShowPlanes;                                // entry state from --planes or the shot
     public string PlaneLegend = "";                        // the caption's colour key, on the status line while shown
+
+    // ---- the occlusion preview, cycled live by O ---------------------------------------------
+    // Built by the scene (every drawn ref's bounds and meshes) and re-evaluated by the loop whenever
+    // the eye moves: `on` hides what the planes cull from here, `diff` tints it red.
+    public OcclusionState? Occlusion;                      // filled by the scene build
+    public string OcclusionMode = "off";                   // entry mode from --occlusion or the shot
 
     // The height clip needs no list of its own: a static's PickShape already carries its mesh
     // and, in Min.Y/Max.Y, the Skyrim-z span of exactly the triangles that were drawn. Statics
@@ -266,6 +275,13 @@ static class InteractiveViewer
         }
         ApplyNav();
 
+        // Set when something OTHER than the mouse changed what is under the cursor, so a hover
+        // answer refreshes even with the mouse held still — hold [ until a ceiling melts away
+        // and the bar must stop naming that ceiling. Declared here, ahead of every local function
+        // that raises it (the clip, the shots, the occlusion preview), because a local function
+        // cannot capture a variable declared below it.
+        bool pickDirty = false;
+
         // ---- live height clip ([ ] ceiling, ; ' floor, \ off) -------------------------------
         // A shape is hidden when its whole z-span sits outside the band. Both ends start
         // DISABLED and, on first touch, at the camera's own z — "clip off everything above my
@@ -281,13 +297,38 @@ static class InteractiveViewer
             int hidden = 0;
             foreach (var s in clippable)
             {
-                bool show = s.Max.Y >= lo && s.Min.Y <= hi;     // viewer Y IS Skyrim z
+                // The band AND the occlusion preview decide together: a shape a plane hides in `on`
+                // is written through the same flag the clip writes, so neither knife can undo the other.
+                bool show = s.Max.Y >= lo && s.Min.Y <= hi && !s.Culled;     // viewer Y IS Skyrim z
                 s.Mesh!.IsRendering = show;
                 if (s.CoverMesh is { } cm) cm.IsRendering = show;   // the snow goes with the roof
-                if (!show) hidden++;
+                if (!show && !(s.Max.Y >= lo && s.Min.Y <= hi)) hidden++;
             }
             clipHidden = hidden;
         }
+
+        // ---- the occlusion preview (O cycles off -> on -> diff) -------------------------------
+        // Re-evaluated whenever the eye moves — dozens of planes against thousands of boxes, a few
+        // million dot products at most — and pushed through ApplyClip so visibility stays one flag.
+        // The hover glow is taken off on every change so it cannot save a tinted material as the
+        // mesh's own and hand it back later.
+        string occlMode = opt.OcclusionMode;
+        bool hasOccl = opt.Occlusion is { Planes.Count: > 0 };
+        void ApplyOcclusion(bool force = false)
+        {
+            if (!hasOccl || opt.Occlusion is not { } os) return;
+            if (!os.Apply(eye, occlMode, ownsVisibility: false, force)) return;
+            ApplyClip(); SetGlow(null); pickDirty = true;
+        }
+        void SetOcclusion(string mode)
+        {
+            if (!hasOccl) { Console.WriteLine("   occlusion: this cell carries no occlusion planes — nothing to preview"); return; }
+            occlMode = mode;
+            ApplyOcclusion(force: true);
+            Console.WriteLine("   " + opt.Occlusion!.Summary(occlMode));
+        }
+        string OcclusionLabel() => !hasOccl || occlMode == "off" || opt.Occlusion is not { } os2 ? ""
+            : $"OCCLUSION {occlMode}: {os2.CulledCount:N0} ref(s) wholly behind a plane from here — {(occlMode == "on" ? "not drawn" : "tinted red")}";
         string ClipLabel() =>
             (clipLo, clipHi) switch
             {
@@ -329,6 +370,8 @@ static class InteractiveViewer
                 // rather than letting the two quietly disagree.
                 clipHi = ca; ApplyClip();
             }
+            if (sh.Planes is { } sp && opt.PlaneCount > 0) { opt.ShowPlanes = sp; pickDirty = true; }
+            if (sh.Occlusion is { } so && hasOccl) { occlMode = so; ApplyOcclusion(force: true); }
             if (!announce) return;
             Console.WriteLine($"   shot {shotIdx + 1}/{shots.Count}: {sh.Label}");
             if (sh.Note is { Length: > 0 } nt) Console.WriteLine($"      {nt}");
@@ -364,10 +407,6 @@ static class InteractiveViewer
         bool Drawn(PickShape s) => s.Mesh is not { IsRendering: false }
                                 && !(s.Kind == PickKind.Navmesh && navMode == "off")
                                 && !(s.Kind == PickKind.Plane && !opt.ShowPlanes);
-        // Set when something OTHER than the mouse changed what is under the cursor, so a hover
-        // answer refreshes even with the mouse held still — hold [ until a ceiling melts away
-        // and the bar must stop naming that ceiling.
-        bool pickDirty = false;
         // Where the last pick was taken from. Reset to nowhere to force the next frame to re-pick
         // — what "unlock" has to do, whether the key, the bar's clear button or a mode change
         // asks for it.
@@ -653,6 +692,7 @@ static class InteractiveViewer
             if (opt.BuildCullAbove is { } bca) parts.Add($"SLICED at build: --cull-above {bca:0} (permanent)");
             if (opt.BuildNavZ is { } bnz) parts.Add($"NAVMESH z {bnz.Z:0} ±{bnz.Tol:0} only (permanent)");
             if (opt.ShowPlanes && opt.PlaneLegend.Length > 0) parts.Add(opt.PlaneLegend);
+            if (OcclusionLabel() is { Length: > 0 } ol) parts.Add(ol);
             return string.Join(" — ", parts);
         }
 
@@ -787,6 +827,9 @@ static class InteractiveViewer
                 ("planes", "L shows/hides the occlusion planes" + (opt.PlaneCount > 0
                     ? $" ({opt.PlaneCount} in this cell, now {(opt.ShowPlanes ? "shown" : "hidden")}) — grey vanilla, gold inherited, magenta added, teal moved; hover one for its identity and what stands behind it."
                     : " — this cell carries none.")),
+                ("occlusion", "O cycles the occlusion preview off -> on -> diff" + (hasOccl
+                    ? $" (now {occlMode}): on leaves out every ref the planes would cull from the camera, diff draws everything and tints those refs red. Re-evaluated as you fly."
+                    : " — this cell carries no planes to preview.")),
             };
             if (wl is not null)
                 h.Add(("shots", $"PageUp/PageDown step this cell's shots (now {shotIdx + 1}/{Math.Max(shots.Count, 1)}); "
@@ -917,6 +960,14 @@ static class InteractiveViewer
             OnClick = () => SetPlanes(!opt.ShowPlanes),
             DisabledWhy = () => opt.PlaneCount > 0 ? ""
                 : "planes: this cell carries no occlusion planes — nothing to toggle",
+        });
+        bar.Add(new UiSegment
+        {
+            Label = "occlusion (O)",
+            Options = new[] { "off", "on", "diff" },
+            Get = () => occlMode,
+            Set = SetOcclusion,
+            DisabledWhy = () => hasOccl ? "" : "occlusion: this cell carries no occlusion planes — nothing to preview",
         });
 
         bar.Row(new UiNumber
@@ -1056,7 +1107,8 @@ static class InteractiveViewer
             Console.WriteLine($"   route: {opt.RouteCount} waypoint(s) drawn as overlay geometry"
                             + (opt.RouteLabel.Length > 0 ? $" — {opt.RouteLabel}" : "") + "; R hides it");
         if (opt.PlaneCount > 0)
-            Console.WriteLine($"   planes: {opt.PlaneCount} occlusion plane(s) resident, layer {(opt.ShowPlanes ? "shown" : "hidden")}; L toggles it");
+            Console.WriteLine($"   planes: {opt.PlaneCount} occlusion plane(s) resident, layer {(opt.ShowPlanes ? "shown" : "hidden")}; L toggles it; "
+                            + $"O cycles the occlusion preview (entry: {occlMode})");
         PrintHelp();
 
         // Headless smoke knobs: VP_FLY_FRAMES=N renders N frames then saves a capture and
@@ -1135,6 +1187,20 @@ static class InteractiveViewer
                 Console.WriteLine($"   [auto] VP_FLY_PLANES={want} ignored: this cell carries no occlusion planes");
             else { opt.ShowPlanes = want == "on"; Console.WriteLine($"   [auto] VP_FLY_PLANES={want}"); }
         }
+        // VP_FLY_OCCLUSION=off|on|diff: the O key's effect, headlessly.
+        if (Environment.GetEnvironmentVariable("VP_FLY_OCCLUSION") is { Length: > 0 } occlSpec)
+        {
+            string want = occlSpec.ToLowerInvariant();
+            if (want is not ("off" or "on" or "diff"))
+                Console.WriteLine($"   [auto] VP_FLY_OCCLUSION '{want}' is not off|on|diff — ignored");
+            else if (!hasOccl)
+                Console.WriteLine($"   [auto] VP_FLY_OCCLUSION={want} ignored: this cell carries no occlusion planes");
+            else { occlMode = want; Console.WriteLine($"   [auto] VP_FLY_OCCLUSION={want}"); }
+        }
+        // The preview's first evaluation, at the entry eye — before the first frame, so a headless
+        // capture and a hand-flown window open on the same picture.
+        ApplyOcclusion(force: true);
+        if (hasOccl && occlMode != "off") Console.WriteLine("   " + opt.Occlusion!.Summary(occlMode));
         // The two pieces of state the control bar added, each with the headless knob every other
         // live control in this loop already has — a control no test can reach is a control nothing
         // checks. Both are only VISIBLE in a VP_FLY_HUD=1 capture, which is the point: they are
@@ -1195,6 +1261,7 @@ static class InteractiveViewer
             if (autoRun)
             {
                 SyncCamera();
+                ApplyOcclusion();
                 hudLine2 = StatusLine();
                 return;
             }
@@ -1309,8 +1376,9 @@ static class InteractiveViewer
                 }
             }
 
-            // ---- the occlusion planes ---------------------------------------------------------
+            // ---- the occlusion planes, and their preview -------------------------------------
             if (KHit(Keys.L)) SetPlanes(!opt.ShowPlanes);
+            if (KHit(Keys.O)) SetOcclusion(occlMode switch { "off" => "on", "on" => "diff", _ => "off" });
 
             // ---- height clip ----------------------------------------------------------------
             // Held keys, not taps: sweeping a ceiling through a two-storey interior is hundreds
@@ -1367,6 +1435,7 @@ static class InteractiveViewer
             if (KHit(Keys.Escape)) { if (showHelp) showHelp = false; else gw.Close(); }
 
             SyncCamera();
+            ApplyOcclusion();                      // a no-op until the eye has moved
 
             // ---- hover, and the LOCK ---------------------------------------------------------
             // Locked, the HUD keeps showing ONE object's identity while the camera moves — which
