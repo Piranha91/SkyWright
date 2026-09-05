@@ -34,23 +34,42 @@ internal static class FloorFeed
     /// no usable solid (no model, no actor-solid body, unreadable).</summary>
     public delegate (Aabb Box, TriangleSoup Soup)? GeometryOf(PlacedRef r);
 
-    /// <summary>Build a cell's field from the refs that can be a floor under it and the terrain those refs stand on.</summary>
+    /// <summary>Build a cell's field from the refs that can be a floor under it and the terrain those refs stand on.
+    /// <paramref name="enabled"/>: the caller's runtime enable resolution (a state arm's, or the load-time chain through
+    /// <see cref="EnableState"/>); null keeps the record's own initially-disabled flag, the population every default run
+    /// judges. Q25 (2026-09-05): without it a room variant switched off at load — Obscure's council dais, enable-parented
+    /// to an initially-disabled marker — stood as the floor 48 u over a whole room's navmesh and moved verdicts; the
+    /// obstacles of the same run had already gone through the resolver, the floors had not.</summary>
     public static FloorField Build(IEnumerable<PlacedRef> refs, GeometryOf geometry,
                                    IEnumerable<((int X, int Y) Grid, float[,] Heights)>? land,
                                    float fallbackOffset = DetectorModel.FallbackOffset,
-                                   float maxDepth = NavmeshFloor.DefaultMaxDepth, float upReach = NavmeshFloor.DefaultUpReach)
+                                   float maxDepth = NavmeshFloor.DefaultMaxDepth, float upReach = NavmeshFloor.DefaultUpReach,
+                                   Func<FormKey, bool>? enabled = null)
     {
         var f = new FloorField(maxDepth, upReach, fallbackOffset);
         if (land is not null) foreach (var (g, h) in land) f.AddLand(g, h);
         foreach (var r in refs)
         {
-            if (r.Deleted || r.InitiallyDisabled || r.Base is null) continue;
+            if (r.Deleted || r.Base is null) continue;
+            if (enabled is null ? r.InitiallyDisabled : !enabled(r.FormKey)) { f.SkippedDisabled++; continue; }
             if (geometry(r) is not { } g || g.Box.IsEmpty || g.Soup.TriangleCount == 0) continue;
             var world = SpatialOverlap.ToWorld(g.Box, r.Position, r.Rotation, r.Scale);
             var soup = g.Soup; var pos = r.Position; var rot = r.Rotation; float scale = r.Scale;
             f.Add(r.FormKey, world, () => Columns(soup, pos, rot, scale));
         }
         return f;
+    }
+
+    /// <summary>The load-time enable resolution (R1) over one set of placed refs: a ref's own flag, or its XESP parent's
+    /// state XOR the opposite flag, chains followed (<see cref="EnableState.Resolve"/>); a parent outside the set resolves
+    /// as enabled. What a probe without a state arm passes as <c>enabled</c> when it wants the game's load-time floor.</summary>
+    public static Func<FormKey, bool> LoadTimeEnabled(IEnumerable<PlacedRef> refs)
+    {
+        var by = new Dictionary<FormKey, PlacedRef>();
+        foreach (var r in refs) by[r.FormKey] = r;
+        var memo = new Dictionary<FormKey, EnableResolution>();
+        EnableFacts? Facts(FormKey k) => by.TryGetValue(k, out var r) ? new EnableFacts(r.InitiallyDisabled, r.EnableParent, r.EnableParentOpposite) : null;
+        return k => EnableState.Resolve(k, Facts, memo).Enabled;
     }
 
     /// <summary>A soup placed into the world by a reference's transform, as a column index (navprobe's BuildColumns).</summary>

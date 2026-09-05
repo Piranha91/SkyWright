@@ -2146,6 +2146,30 @@ Console.WriteLine("\nPROOF — the band on the physical floor (FloorField; Route
     Check("field: under the crate its top (30 u above the navmesh, within the step reach) is the floor: δ −30", fr.Found && MathF.Abs(fr.Offset + 30f) < 1e-3f, $"{fr}");
     fr = field.Read(120f, 60f, 0f, out _, exclude: crateId);
     Check("field: the same point with the crate excluded -> the slab under it (+10): the floor a walker meets the crate from", fr.Found && MathF.Abs(fr.Offset - 10f) < 1e-3f, $"{fr}");
+    // Q25: a floor candidate switched off at load — a slab enable-parented to an initially-disabled marker — is no floor
+    // when the caller resolves the chain, and is one when it reads the flag alone (the record's own flag is clear).
+    {
+        var marker = new PlacedRef(FormKey.Factory("000010:Test.esp"), "PlacedObject", "SetDressEP", new Vec3(0, 0, 0), new Vec3(0, 0, 0), 1f,
+                                   FormKey.Factory("00003B:Skyrim.esm"), true, InitiallyDisabled: true, Deleted: false);
+        var dais = new PlacedRef(FormKey.Factory("000011:Test.esp"), "PlacedObject", "Dais", new Vec3(0, 0, 0), new Vec3(0, 0, 0), 1f,
+                                 FormKey.Factory("000100:Test.esp"), false, InitiallyDisabled: false, Deleted: false, EnableParent: marker.FormKey);
+        var slab = new PlacedRef(FormKey.Factory("000012:Test.esp"), "PlacedObject", "Slab", new Vec3(0, 0, 0), new Vec3(0, 0, 0), 1f,
+                                 FormKey.Factory("000101:Test.esp"), false, InitiallyDisabled: false, Deleted: false);
+        (Aabb Box, TriangleSoup Soup)? Geo(PlacedRef r)
+        {
+            if (r.FormKey == dais.FormKey) { var b = BoxOf(new Vector3(-300, -300, 40), new Vector3(300, 300, 48)); return (b, ContactIndex.BoxSoup(b)); }
+            if (r.FormKey == slab.FormKey) { var b = BoxOf(new Vector3(-700, -700, -20), new Vector3(700, 700, 0)); return (b, ContactIndex.BoxSoup(b)); }
+            return null;
+        }
+        var refs = new[] { marker, dais, slab };
+        var flagField = FloorFeed.Build(refs, Geo, null, 0f);
+        var r1Field = FloorFeed.Build(refs, Geo, null, 0f, enabled: FloorFeed.LoadTimeEnabled(refs));
+        var fa = flagField.Read(0f, 0f, 0f); var fb = r1Field.Read(0f, 0f, 0f);
+        Check("floor feed: by the flag alone the switched-off dais is the floor (48 above a navmesh at 0)", flagField.Candidates == 2 && fa.Found && MathF.Abs(fa.Offset + 48f) < 1e-3f, $"cands {flagField.Candidates} {fa}");
+        Check("floor feed: through the load-time chain the dais is gone and the slab under it is the floor (δ 0); the skips counted (the marker itself and the dais through it)", r1Field.Candidates == 1 && r1Field.SkippedDisabled == 2 && fb.Found && MathF.Abs(fb.Offset) < 1e-3f, $"cands {r1Field.Candidates} skipped {r1Field.SkippedDisabled} {fb}");
+        var en = FloorFeed.LoadTimeEnabled(refs);
+        Check("floor feed: the resolver — the marker off, the dais off through it, the slab on, a ref it does not hold on", !en(marker.FormKey) && !en(dais.FormKey) && en(slab.FormKey) && en(FormKey.Factory("000999:Test.esp")), "");
+    }
     var landField = new FloorField(fallbackOffset: 10.4f);
     var flatLand = new float[LandHeight.Side, LandHeight.Side];
     for (int x = 0; x < LandHeight.Side; x++) for (int y = 0; y < LandHeight.Side; y++) flatLand[x, y] = -4f;

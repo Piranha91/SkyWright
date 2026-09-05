@@ -237,7 +237,9 @@ var winRefsByCell = winRef.Values.GroupBy(r => winRefCell[r.FormKey]).ToDictiona
     return g.Ok && g.Soup is not null && !g.Box.IsEmpty ? (g.Box, g.Soup) : null;
 }
 // The floor the band stands on in a cell (Q24): the winning refs of an interior; for an exterior the 3×3 neighbourhood
-// filed above, else its own refs. Every field built is kept for the summary tally.
+// filed above, else its own refs. Every field built is kept for the summary tally. Under --state the floors go through the
+// same enable resolution as the obstacles (Q25: a room variant switched off at load had been the floor over a whole room);
+// the default run's floors are the flag population, as its obstacles are.
 var floorFields = new List<(string Cell, FloorField Field)>();
 FloorField FloorFor(FormKey cellKey, List<PlacedRef>? own)
 {
@@ -245,9 +247,9 @@ FloorField FloorFor(FormKey cellKey, List<PlacedRef>? own)
     if (cellMeta.TryGetValue(cellKey, out var meta) && !meta.Interior && meta.Grid is { } g && floorRefsByWorld.TryGetValue(meta.Worldspace, out var frw))
     {
         var (nbRefs, nbLand) = FloorFeed.Neighbourhood(g, frw, floorLandByWorld[meta.Worldspace]);
-        var nf = FloorFeed.Build(nbRefs, FloorGeometry, nbLand); floorFields.Add((cellName, nf)); return nf;
+        var nf = FloorFeed.Build(nbRefs, FloorGeometry, nbLand, enabled: enabledOf); floorFields.Add((cellName, nf)); return nf;
     }
-    var of = FloorFeed.Build(own ?? new List<PlacedRef>(), FloorGeometry, null); floorFields.Add((cellName, of)); return of;
+    var of = FloorFeed.Build(own ?? new List<PlacedRef>(), FloorGeometry, null, enabled: enabledOf); floorFields.Add((cellName, of)); return of;
 }
 int cellsWithActors = 0, cellsTemplatedOnly = 0; float bandMin = float.MaxValue, bandMax = 0f;
 

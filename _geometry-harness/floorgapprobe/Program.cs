@@ -21,7 +21,7 @@ using Mutagen.Bethesda.Skyrim;
 //        floorgapprobe cell <CellEditorID|FormKey> [--tris tris.tsv]
 //        floorgapprobe line <CellEditorID> --at X,Y,Z --heading DEG [--span 384] [--every 16]
 //        floorgapprobe points <CellEditorID> <file>     (lines of "x y z": a walker's positions; prints z − floor per point)
-//   common: [--plugin Skyrim.esm] [--instance DIR] [--game DIR] [--profile NAME] [--depth 128] [--reach 48] [--split 192] [--own]
+//   common: [--plugin Skyrim.esm] [--winning] [--flags] [--instance DIR] [--game DIR] [--profile NAME] [--depth 128] [--reach 48] [--split 192] [--own]
 //   sweep     every cell of the plugin with navmesh and refs (navprobe's population): δ per triangle (the centroid; four
 //             interior points on a triangle longer than --split), per cell (median, spread, storeys), the histograms by
 //             interior / exterior / floor source / worldspace, the no-floor share by reason, the widest within-storey
@@ -37,6 +37,15 @@ using Mutagen.Bethesda.Skyrim;
 //             height: a surface the walker steps onto is where its feet rest). NavmeshFloor's defaults.
 //   --own     an exterior cell's floor from its OWN refs and its own LAND only, no neighbourhood — what a caller that
 //             cannot reach the neighbourhood would build; the difference against the default is that caller's loss.
+//   --winning the cell as the PROFILE's load order resolves it (Q25, 2026-09-05): every plugin walked in order, a later
+//             plugin's ref or navmesh of the same FormKey replacing an earlier one — blockprobe's walk — so the navmesh
+//             AND the floor candidates are the winning state, the floor the route rule stands on. Without it the one
+//             --plugin supplies both (that plugin's own navmesh against its own refs). cell / line / points only.
+//   --flags   floor candidates by the record's initially-disabled flag alone (the route rule's default population). The
+//             default here resolves the load-time enable CHAIN (R1): a switch child whose marker is disabled at load is not
+//             a floor — Q25: a room variant switched off at load had read as the floor 48 u over a whole room.
+//   Every line / points row names the floor's SUPPLIER — the placed object whose surface the reading came from, with its
+//   base's model — because a floor laid over the winning navmesh is only actionable once the object laying it is named.
 //   Refs are the plugin's placements (persistent ones included, bucketed by position); an exterior cell's navmesh is
 //   read against the 3×3 neighbourhood's refs, because a floor mesh placed in the next cell reaches under this one.
 //   Initially-disabled and deleted refs are not floors. No Base Object Swapper layer (FloorFeed's header says why).
@@ -45,7 +54,7 @@ string Instance = HarnessTarget.Instance, GamePath = HarnessTarget.Game, profile
 string plugin = "Skyrim.esm";
 float depth = NavmeshFloor.DefaultMaxDepth, reach = NavmeshFloor.DefaultUpReach, split = NavmeshFloor.DefaultSplitAbove;
 string? tsvPath = null, trisPath = null, verdictsDir = null;
-bool ownOnly = false;
+bool ownOnly = false, winning = false, flagsOnly = false;
 int maxCells = int.MaxValue;
 Vec3? at = null; float heading = 0f, span = 384f, every = 16f;
 var positional = new List<string>();
@@ -66,6 +75,8 @@ for (int i = 0; i < args.Length; i++)
         case "--tris": trisPath = Next(); break;
         case "--verdicts": verdictsDir = Next(); break;
         case "--own": ownOnly = true; break;
+        case "--winning": winning = true; break;
+        case "--flags": flagsOnly = true; break;
         case "--heading": heading = float.Parse(Next(), CultureInfo.InvariantCulture); break;
         case "--span": span = float.Parse(Next(), CultureInfo.InvariantCulture); break;
         case "--every": every = float.Parse(Next(), CultureInfo.InvariantCulture); break;
@@ -86,7 +97,7 @@ string modsDir = Path.Combine(Instance, "mods"), overwriteDir = Path.Combine(Ins
 if (mode == "sweep" && positional.Count > 1 && int.TryParse(positional[1], out var mc)) maxCells = mc;
 
 var sw = Stopwatch.StartNew();
-Console.WriteLine($"floorgapprobe {mode}: plugin {plugin}; instance {Instance} / {profileName};{(ownOnly ? " OWN-CELL refs and land only;" : "")} floor rule: highest up-facing actor-solid surface within {depth:0} u below .. {reach:0} u above the navmesh; triangles longer than {split:0} u read at four points");
+Console.WriteLine($"floorgapprobe {mode}: {(winning ? "the WINNING state of the profile's load order" : $"plugin {plugin}")}; instance {Instance} / {profileName};{(ownOnly ? " OWN-CELL refs and land only;" : "")} floor rule: highest up-facing actor-solid surface within {depth:0} u below .. {reach:0} u above the navmesh; triangles longer than {split:0} u read at four points");
 Console.WriteLine($"   actor-solid layers: {string.Join(", ", CollisionLayers.ActorSolid)}");
 
 // ---- the VFS, for the meshes ----
@@ -97,34 +108,76 @@ Console.WriteLine($"assets: {arch.Archives.Count} BSAs indexed ({sw.ElapsedMilli
 
 // ---- the plugin: base records with a mesh, worldspace names, every cell with its landscape ----
 // --plugin: the game's Data folder first, else the profile's load order (a mod's plugin lives in its mod folder).
-string pluginPath = Path.Combine(dataDir, plugin);
-if (!File.Exists(pluginPath))
+var walk = new List<string>();
+if (winning)
 {
+    if (mode == "sweep") { Console.Error.WriteLine("--winning is for cell, line and points (one cell resolved through the load order), not sweep"); return 2; }
     var order = Mo2LoadOrder.Build(profileDir, modsDir, dataDir, overwriteDir);
-    pluginPath = order.OrderedPaths.FirstOrDefault(pp => string.Equals(Path.GetFileName(pp), plugin, StringComparison.OrdinalIgnoreCase)) ?? "";
-    if (pluginPath.Length == 0) { Console.Error.WriteLine($"{plugin} is neither in {dataDir} nor in the profile's load order"); return 2; }
+    walk.AddRange(order.OrderedPaths);
 }
-using var mod = SkyrimMod.CreateFromBinaryOverlay(pluginPath, SkyrimRelease.SkyrimSE);
+else
+{
+    string pluginPath = Path.Combine(dataDir, plugin);
+    if (!File.Exists(pluginPath))
+    {
+        var order = Mo2LoadOrder.Build(profileDir, modsDir, dataDir, overwriteDir);
+        pluginPath = order.OrderedPaths.FirstOrDefault(pp => string.Equals(Path.GetFileName(pp), plugin, StringComparison.OrdinalIgnoreCase)) ?? "";
+        if (pluginPath.Length == 0) { Console.Error.WriteLine($"{plugin} is neither in {dataDir} nor in the profile's load order"); return 2; }
+    }
+    walk.Add(pluginPath);
+}
 var baseMesh = new Dictionary<FormKey, (string Mesh, string Type)>();
-foreach (var rec in mod.EnumerateMajorRecords())
-    if (rec is IModeledGetter m && m.Model?.File is { } f && !string.IsNullOrWhiteSpace(f.GivenPath))
-        baseMesh[rec.FormKey] = (f.GivenPath, rec.GetType().Name.Replace("BinaryOverlay", ""));
-Console.WriteLine($"base records with a mesh: {baseMesh.Count:N0} ({sw.Elapsed.TotalSeconds:0.0} s)");
-
 var worldName = new Dictionary<FormKey, string>();
-foreach (var wrld in mod.Worldspaces.Records) worldName[wrld.FormKey] = wrld.EditorID ?? wrld.FormKey.ToString();
 var refsByWorld = new Dictionary<FormKey, Dictionary<(int, int), Dictionary<FormKey, PlacedRef>>>();
 var landByWorld = new Dictionary<FormKey, Dictionary<(int, int), float[,]>>();
 var cells = new List<CellPlacements>();
-foreach (var cp in PlacementExtract.FromMod(mod))
+// --winning: only the named cell is merged (refs and navmeshes by FormKey, a later plugin replacing an earlier one; the
+// meta from the first plugin that carries the cell, the LAND from the last that has one); the exterior neighbourhood is
+// filed from every plugin as the single-plugin path files it from one. A navmesh a later plugin DELETES outright is not
+// removed here (blockprobe's walk has the same simplification).
+string? wantCell = winning && positional.Count > 1 ? positional[1] : null;
+FormKey? wantKey = null;
+if (wantCell is not null) { try { wantKey = FormKey.Factory(wantCell); } catch { } }
+CellPlacements? mergedMeta = null; float[,]? mergedLand = null;
+var mergedRefs = new Dictionary<FormKey, PlacedRef>(); var mergedNavs = new Dictionary<FormKey, NavmeshGeometry>();
+var pluginsWithCell = new List<string>();
+foreach (var path in walk)
 {
-    if (!cp.Interior)
+    ISkyrimModGetter mod;
+    try { mod = SkyrimMod.CreateFromBinaryOverlay(path, SkyrimRelease.SkyrimSE); }
+    catch (Exception ex) { if (!winning) throw; Console.Error.WriteLine($"   skipped {Path.GetFileName(path)}: {ex.Message}"); continue; }
+    using (mod as IDisposable)
     {
-        if (!refsByWorld.TryGetValue(cp.Worldspace, out var rg)) { refsByWorld[cp.Worldspace] = rg = new(); landByWorld[cp.Worldspace] = new(); }
-        FloorFeed.FileByGrid(cp, rg, landByWorld[cp.Worldspace]);
+        foreach (var rec in mod.EnumerateMajorRecords())
+            if (rec is IModeledGetter m && m.Model?.File is { } f && !string.IsNullOrWhiteSpace(f.GivenPath))
+                baseMesh[rec.FormKey] = (f.GivenPath, rec.GetType().Name.Replace("BinaryOverlay", ""));
+        foreach (var wrld in mod.Worldspaces.Records) worldName[wrld.FormKey] = wrld.EditorID ?? wrld.FormKey.ToString();
+        foreach (var cp in PlacementExtract.FromMod(mod))
+        {
+            if (!cp.Interior)
+            {
+                if (!refsByWorld.TryGetValue(cp.Worldspace, out var rg)) { refsByWorld[cp.Worldspace] = rg = new(); landByWorld[cp.Worldspace] = new(); }
+                FloorFeed.FileByGrid(cp, rg, landByWorld[cp.Worldspace]);
+            }
+            if (!winning) { cells.Add(cp); continue; }
+            bool isWanted = (wantKey is { } wk && cp.Cell == wk) || (wantCell is not null && string.Equals(cp.CellEditorId, wantCell, StringComparison.OrdinalIgnoreCase));
+            if (!isWanted) continue;
+            wantKey ??= cp.Cell;
+            mergedMeta ??= cp;
+            if (cp.Land is not null) mergedLand = cp.Land;
+            foreach (var r in cp.Refs) mergedRefs[r.FormKey] = r;
+            foreach (var nv in cp.Navmeshes) mergedNavs[nv.FormKey] = nv;
+            pluginsWithCell.Add(Path.GetFileName(path));
+        }
     }
-    cells.Add(cp);
 }
+if (winning)
+{
+    if (mergedMeta is null) { Console.Error.WriteLine($"cell '{wantCell}' is in no plugin of the load order"); return 2; }
+    cells.Add(mergedMeta with { Refs = mergedRefs.Values.ToList(), Navmeshes = mergedNavs.Values.ToList(), Land = mergedLand });
+    Console.WriteLine($"winning state of {mergedMeta.CellEditorId ?? mergedMeta.Cell.ToString()}: {pluginsWithCell.Count} plugin(s) touch it ({string.Join(", ", pluginsWithCell)}); {mergedRefs.Count:N0} refs, {mergedNavs.Count:N0} navmeshes after the walk of {walk.Count} plugins");
+}
+Console.WriteLine($"base records with a mesh: {baseMesh.Count:N0} ({sw.Elapsed.TotalSeconds:0.0} s)");
 Console.WriteLine($"cells: {cells.Count:N0} with content ({cells.Count(c => c.Interior):N0} interior, {refsByWorld.Count} worldspaces; {landByWorld.Values.Sum(w => w.Count):N0} LAND records) ({sw.Elapsed.TotalSeconds:0.0} s)");
 
 // ---- geometry per mesh path: the actor-solid collision soup, as navprobe reads it ----
@@ -165,12 +218,16 @@ Geo Geometry(string rel)
 
 // ---- a cell's floor field: own refs and land (an interior, or --own), else the 3×3 neighbourhood by position ----
 // No fallback offset here: this probe reports "no floor" as such, never a stand-in.
+// The refs go through the load-time enable chain (R1: a switch child whose marker is initially disabled is not there when
+// the cell loads — Q25: Obscure's council dais read as the floor 48 u over the Arch-Mage quarters' navmesh until this);
+// --flags reads the record flag alone, the population the route rule's default run judges.
 FloorField Field(CellPlacements cp)
 {
     if (cp.Interior || ownOnly || cp.Grid is not { } g || !refsByWorld.TryGetValue(cp.Worldspace, out var rg))
-        return FloorFeed.Build(cp.Refs, FloorGeometry, cp.Land is { } own && cp.Grid is { } og ? new[] { (og, own) } : null, 0f, depth, reach);
+        return FloorFeed.Build(cp.Refs, FloorGeometry, cp.Land is { } own && cp.Grid is { } og ? new[] { (og, own) } : null, 0f, depth, reach,
+                               flagsOnly ? null : FloorFeed.LoadTimeEnabled(cp.Refs));
     var (nbRefs, nbLand) = FloorFeed.Neighbourhood(g, rg, landByWorld[cp.Worldspace]);
-    return FloorFeed.Build(nbRefs, FloorGeometry, nbLand, 0f, depth, reach);
+    return FloorFeed.Build(nbRefs, FloorGeometry, nbLand, 0f, depth, reach, flagsOnly ? null : FloorFeed.LoadTimeEnabled(nbRefs));
 }
 
 // Ground under (x,y) in a cell's navmesh: every non-deleted triangle covering the point (corridorprobe's GroundAt).
@@ -206,7 +263,17 @@ if (mode is "line" or "points")
     var extent = Aabb.Empty;
     foreach (var nv in e.Navmeshes) foreach (var v in nv.Vertices) extent = extent.Add(new Vector3(v.X, v.Y, v.Z));
     var field = Field(e);
-    Console.WriteLine($"{Name(e)} ({World(e)}): {e.Navmeshes.Count} navmesh(es), {navs.TriangleCount:N0} triangles ({malformed} malformed); {field.Candidates:N0} floor candidates ({e.Refs.Count:N0} refs in the cell{(e.Interior ? "" : ", 3×3 neighbourhood by position")}); terrain {(e.Interior ? "none (interior)" : $"{field.LandCells} LAND records")}");
+    Console.WriteLine($"{Name(e)} ({World(e)}): {e.Navmeshes.Count} navmesh(es), {navs.TriangleCount:N0} triangles ({malformed} malformed); {field.Candidates:N0} floor candidates ({e.Refs.Count:N0} refs in the cell{(e.Interior ? "" : ", 3×3 neighbourhood by position")}; {field.SkippedDisabled:N0} disabled at load by their enable chain, {(flagsOnly ? "flag only" : "R1")}); terrain {(e.Interior ? "none (interior)" : $"{field.LandCells} LAND records")}");
+    var refBase = new Dictionary<FormKey, FormKey?>();
+    foreach (var r in e.Refs) refBase[r.FormKey] = r.Base;
+    // the placed object whose surface a reading's floor came from, and its base's model file
+    string Supplier(float x, float y, float floorZ)
+    {
+        var k = field.Supplier(x, y, floorZ);
+        if (k is null) return "";
+        string model = refBase.TryGetValue(k.Value, out var b) && b is { } bk && baseMesh.TryGetValue(bk, out var bm) ? Path.GetFileName(bm.Mesh) : "?";
+        return $"{k.Value} {model}";
+    }
 
     float NearestStorey(List<float> zs, float z0) => zs.Count == 0 ? float.NaN : zs.OrderBy(z => MathF.Abs(z - z0)).First();
 
@@ -223,7 +290,7 @@ if (mode is "line" or "points")
         float rad = heading * MathF.PI / 180f;
         var dir = new Vector2(MathF.Sin(rad), MathF.Cos(rad));
         Console.WriteLine($"along heading {heading:0} through ({at.Value.X:0}, {at.Value.Y:0}, {z0:0}), every {every:0} u for {span:0} u each way; δ = navmesh − floor (+ = the navmesh floats above the floor)");
-        Console.WriteLine($"   {"s",6} {"x",8} {"y",8} {"navZ",7} {"floorZ",7} {"δ",6}  {"source",-10} {"note"}");
+        Console.WriteLine($"   {"s",6} {"x",8} {"y",8} {"navZ",7} {"floorZ",7} {"δ",6}  {"source",-10} {"note"}  supplier");
         float zPrev = z0;
         for (float s = -span; s <= span + 1e-3f; s += every)
         {
@@ -232,7 +299,7 @@ if (mode is "line" or "points")
             if (float.IsNaN(navZ)) { Console.WriteLine($"   {s,6:+0;-0} {x,8:0} {y,8:0} {"-",7}  (no navmesh)"); continue; }
             zPrev = navZ;
             var r = field.Read(x, y, navZ, out float saddle);
-            Console.WriteLine($"   {s,6:+0;-0} {x,8:0} {y,8:0} {navZ,7:0.0} {(r.Found ? r.FloorZ.ToString("0.0") : "-"),7} {(r.Found ? r.Offset.ToString("+0.0;-0.0") : "-"),6}  {(r.Found ? r.Source.ToString() : r.Reason.ToString()),-10} {(r.Embedded ? "embedded " : "")}{r.Surfaces} surface(s){(saddle > 0.5f ? $", land ±{saddle:0.0}" : "")}");
+            Console.WriteLine($"   {s,6:+0;-0} {x,8:0} {y,8:0} {navZ,7:0.0} {(r.Found ? r.FloorZ.ToString("0.0") : "-"),7} {(r.Found ? r.Offset.ToString("+0.0;-0.0") : "-"),6}  {(r.Found ? r.Source.ToString() : r.Reason.ToString()),-10} {(r.Embedded ? "embedded " : "")}{r.Surfaces} surface(s){(saddle > 0.5f ? $", land ±{saddle:0.0}" : "")}{(r.Found && r.Source == FloorSource.Mesh ? "  " + Supplier(x, y, r.FloorZ) : "")}");
         }
         return 0;
     }
@@ -240,7 +307,7 @@ if (mode is "line" or "points")
     // points: a walker's recorded positions (feet), each read against the navmesh storey nearest its own z.
     if (positional.Count < 3) { Console.Error.WriteLine("points needs a file of x y z lines"); return 2; }
     var diffs = new List<float>(); var offs = new List<float>(); int noNav = 0, noFloorPts = 0, n = 0;
-    Console.WriteLine($"   {"x",8} {"y",8} {"feet",7} {"navZ",7} {"floorZ",7} {"δ",6} {"feet−floor",10}  source");
+    Console.WriteLine($"   {"x",8} {"y",8} {"feet",7} {"navZ",7} {"floorZ",7} {"δ",6} {"feet−floor",10}  source  supplier");
     foreach (var raw in File.ReadLines(positional[2]))
     {
         var parts = raw.Split(new[] { ' ', '\t', ',' }, StringSplitOptions.RemoveEmptyEntries);
@@ -252,7 +319,7 @@ if (mode is "line" or "points")
         var r = field.Read(x, y, navZ);
         if (!r.Found) { noFloorPts++; Console.WriteLine($"   {x,8:0} {y,8:0} {z,7:0.0} {navZ,7:0.0} {"-",7} {"-",6} {"-",10}  {r.Reason}"); continue; }
         diffs.Add(z - r.FloorZ); offs.Add(r.Offset);
-        Console.WriteLine($"   {x,8:0} {y,8:0} {z,7:0.0} {navZ,7:0.0} {r.FloorZ,7:0.0} {r.Offset,6:+0.0;-0.0} {z - r.FloorZ,10:+0.0;-0.0}  {r.Source}{(r.Embedded ? " embedded" : "")}");
+        Console.WriteLine($"   {x,8:0} {y,8:0} {z,7:0.0} {navZ,7:0.0} {r.FloorZ,7:0.0} {r.Offset,6:+0.0;-0.0} {z - r.FloorZ,10:+0.0;-0.0}  {r.Source}{(r.Embedded ? " embedded" : "")}{(r.Source == FloorSource.Mesh ? "  " + Supplier(x, y, r.FloorZ) : "")}");
     }
     Console.WriteLine($"\n   {n} points: {diffs.Count} read, {noNav} with no navmesh storey within {depth:0} u of the feet, {noFloorPts} with no floor");
     if (diffs.Count > 0)
