@@ -55,6 +55,15 @@ public sealed class DependencyIndex
     /// changed (PlacementHistory records changes only). What "the mover's side overrode it" is read from.</summary>
     public Dictionary<FormKey, List<int>> Touchers { get; } = new();
     public long Placements { get; private set; }
+    /// <summary>ref -> the cell and worldspace of its winning placement — what the Base Object Swapper reader's
+    /// filters read (BosHook).</summary>
+    public Dictionary<FormKey, (FormKey Cell, FormKey Worldspace)> RefCell { get; } = new();
+    /// <summary>The Base Object Swapper form index, filled during <see cref="Ingest"/> when set before the walk.</summary>
+    public BosFormIndex? Bos { get; set; }
+    /// <summary>ref -> its RECORD base, kept when BosHook replaced <see cref="RefBase"/>. Empty when BOS was not applied.</summary>
+    public Dictionary<FormKey, FormKey> RecordBase { get; } = new();
+    public Dictionary<FormKey, BaseObjectSwaps.BosResolution> BosSwaps { get; } = new();
+    public int BosPlugin { get; set; } = -1;
 
     readonly Dictionary<(FormKey Dep, HostEdgeKind Kind, FormKey Host), int> _author = new();
     readonly Dictionary<FormKey, List<(HostEdgeKind Kind, FormKey Host)>> _current = new();
@@ -71,10 +80,12 @@ public sealed class DependencyIndex
         foreach (var cp in PlacementExtract.FromMod(mod))
         {
             CellName[cp.Cell] = (cp.CellEditorId, cp.Interior);
+            Bos?.NoteCell(cp.Cell, cp.Worldspace);
             foreach (var r in cp.Refs) Record(plugin, cp.Cell, cp.Worldspace, r);
         }
         foreach (var rec in mod.EnumerateMajorRecords())
         {
+            Bos?.Note(rec);
             if (rec is IPlacedGetter pg)
             {
                 if (pg.IsDeleted) DeletedBy[pg.FormKey] = plugin;
@@ -91,6 +102,8 @@ public sealed class DependencyIndex
     public void Record(int plugin, FormKey cell, FormKey worldspace, PlacedRef r)
     {
         Placements++;
+        RefCell[r.FormKey] = (cell, worldspace);
+        Bos?.NotePlaced(r.FormKey, r.Persistent);
         History.Record(r.FormKey, new Snap(plugin, r.Position, cell, r.InitiallyDisabled, r.Deleted, worldspace));
         if (!Touchers.TryGetValue(r.FormKey, out var touchers)) Touchers[r.FormKey] = touchers = new List<int>(1);
         if (touchers.Count == 0 || touchers[^1] != plugin) touchers.Add(plugin);

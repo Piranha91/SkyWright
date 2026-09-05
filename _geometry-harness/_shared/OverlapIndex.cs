@@ -114,6 +114,23 @@ public sealed class OverlapIndex
     /// mover's side (R1, 2026-09-03), the way <see cref="BaseChanges"/> gives a previous snap the base it had then.
     /// Not part of the history's changed-only rule: an XESP change without a move is not a placement step.</summary>
     public Dictionary<FormKey, List<(int Plugin, FormKey? Parent, bool Opposite)>> EnableChanges { get; } = new();
+    /// <summary>ref -> the cell and worldspace of its winning placement (Null worldspace for an interior). What the
+    /// Base Object Swapper reader's filters read (BosHook).</summary>
+    public Dictionary<FormKey, (FormKey Cell, FormKey Worldspace)> RefCell { get; } = new();
+    /// <summary>ref -> its placed arm ("PlacedObject", "PlacedNpc", …), winner wins. BOS swaps three arms and no actor.</summary>
+    public Dictionary<FormKey, string> RefArm { get; } = new();
+    /// <summary>ref -> its own XEZN under the winner; absent when none.</summary>
+    public Dictionary<FormKey, FormKey> RefEncounterZone { get; } = new();
+    /// <summary>The Base Object Swapper form index, filled during <see cref="Ingest"/> when a caller sets it before
+    /// the walk (one pass over the order serves both). Null: no BOS.</summary>
+    public BosFormIndex? Bos { get; set; }
+    /// <summary>ref -> its RECORD base, kept when BosHook replaced <see cref="RefBase"/> with the effective one. Empty
+    /// when BOS was not applied.</summary>
+    public Dictionary<FormKey, FormKey> RecordBase { get; } = new();
+    /// <summary>ref -> what BOS does to it, for every reference it swaps, moves or may swap (BosHook).</summary>
+    public Dictionary<FormKey, BaseObjectSwaps.BosResolution> BosSwaps { get; } = new();
+    /// <summary>The pseudo-plugin index BosHook recorded its steps under; -1 when BOS was not applied.</summary>
+    public int BosPlugin { get; set; } = -1;
 
     /// <summary>Is the reference deleted at or before the winning placement — by the winning snap's own flag, or by a
     /// deleting override at or after the last placement change?</summary>
@@ -128,6 +145,7 @@ public sealed class OverlapIndex
     {
         foreach (var rec in mod.EnumerateMajorRecords())
         {
+            Bos?.Note(rec);
             if (rec is IPlacedGetter pg) { if (pg.IsDeleted) DeletedBy[pg.FormKey] = plugin; continue; }
             if (rec is IModeledGetter mo && rec is ISkyrimMajorRecordGetter sm)
             {
@@ -143,6 +161,7 @@ public sealed class OverlapIndex
         foreach (var cp in PlacementExtract.FromMod(mod))
         {
             CellName[cp.Cell] = (cp.CellEditorId, cp.Interior);
+            Bos?.NoteCell(cp.Cell, cp.Worldspace);
             foreach (var r in cp.Refs) Record(plugin, cp.Cell, cp.Worldspace, r);
         }
     }
@@ -151,6 +170,10 @@ public sealed class OverlapIndex
     public void Record(int plugin, FormKey cell, FormKey worldspace, PlacedRef r)
     {
         Placements++;
+        RefCell[r.FormKey] = (cell, worldspace);
+        RefArm[r.FormKey] = r.RecordType;
+        Bos?.NotePlaced(r.FormKey, r.Persistent);
+        if (r.EncounterZone is { } ez) RefEncounterZone[r.FormKey] = ez; else RefEncounterZone.Remove(r.FormKey);
         var snap = new Snap(plugin, r.Position, cell, r.InitiallyDisabled, r.Deleted, worldspace, r.Rotation, r.Scale);
         if (History.Winning(r.FormKey) is { } prev && prev.SameAs(snap)
             && (MathF.Abs(prev.Rot.X - snap.Rot.X) > 1e-4f || MathF.Abs(prev.Rot.Y - snap.Rot.Y) > 1e-4f
