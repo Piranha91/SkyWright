@@ -2489,6 +2489,8 @@ Console.WriteLine("\nPROOF — landscape seams: a synthetic order through CellBo
     try { Directory.Delete(root, true); } catch { }
 }
 
+BosProof.Run(Check);
+
 Console.WriteLine();
 Console.WriteLine($"==== {pass} passed, {fail} failed ====");
 if (fail > 0) Console.WriteLine("   failed: " + string.Join(", ", failures));
