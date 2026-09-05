@@ -104,7 +104,9 @@ public sealed class DependencyIndex
         Placements++;
         RefCell[r.FormKey] = (cell, worldspace);
         Bos?.NotePlaced(r.FormKey, r.Persistent);
-        History.Record(r.FormKey, new Snap(plugin, r.Position, cell, r.InitiallyDisabled, r.Deleted, worldspace));
+        // Rotation and scale ride along (not part of SameAs, so no step changes) — the BOS hook's rotation/scale-only
+        // tally then compares an override against the record's values rather than against zero and one (2026-09-04).
+        History.Record(r.FormKey, new Snap(plugin, r.Position, cell, r.InitiallyDisabled, r.Deleted, worldspace, r.Rotation, r.Scale));
         if (!Touchers.TryGetValue(r.FormKey, out var touchers)) Touchers[r.FormKey] = touchers = new List<int>(1);
         if (touchers.Count == 0 || touchers[^1] != plugin) touchers.Add(plugin);
         if (r.Base is { } b) RefBase[r.FormKey] = b;
