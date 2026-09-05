@@ -111,10 +111,17 @@ sealed class CvSettings : ICharacterViewerSettings
 
 /// <summary>One placed instance handed over from Program.cs: the mesh to draw, the Skyrim-space
 /// placement to draw it at, and (for the interactive picker's reports) who it is — the placed
-/// ref's own FormKey, its base, and the base's EditorID.</summary>
+/// ref's own FormKey, its base, and the base's EditorID. Under the Base Object Swapper layer
+/// <paramref name="BaseKey"/> and the placement are the EFFECTIVE ones (what the game loads);
+/// <paramref name="BosRecordBase"/> keeps the record's base for a swapped ref and
+/// <paramref name="BosLabel"/> the one-line account for the hover and the picker.</summary>
 readonly record struct SceneRef(string MeshRelPath, Vec3 Position, Vec3 Rotation, float Scale, bool Highlight,
                                 bool Marker = false, FormKey RefKey = default, FormKey BaseKey = default,
-                                string? BaseEditorId = null);
+                                string? BaseEditorId = null, FormKey? BosRecordBase = null, string? BosLabel = null,
+                                bool BosRandom = false)
+{
+    public bool BosSwapped => BosRecordBase is not null;
+}
 
 /// <summary>A PROJECTED COVERING — the engine's MATO (MaterialObject) layer, which is what puts the
 /// snow on Winterhold, the ash on Solstheim and the moss on Markarth. It is NOT an effect shader,
@@ -286,7 +293,8 @@ static class TexturedScene
         int size, string outPath,
         string? pngTextMeta = null,                        // replication chunk: written as a PNG tEXt entry keyed "viewprobe"
         InteractiveOptions? interactive = null,            // non-null: open the fly-through window instead of saving a PNG
-        Action<OcclusionState>? planeReport = null)        // --planes-report: handed the planes' cull answer for the entry eye
+        Action<OcclusionState>? planeReport = null,        // --planes-report: handed the planes' cull answer for the entry eye
+        string bosMode = "on")                             // --bos off | on | diff: the Base Object Swapper layer's paint (BosView.cs)
     {
         var logger = new ConsoleCvLogger();
         var gate = new CharacterViewerLogGate { Verbose = Environment.GetEnvironmentVariable("VP_CV_VERBOSE") == "1" };
@@ -391,6 +399,8 @@ static class TexturedScene
         // preview is on — it is a few numbers per ref — and applied only when it is, so a default
         // render is untouched.
         var occl = new OcclusionState(planes);
+        // The Base Object Swapper layer's paint: the swapped refs' meshes, tinted in `diff` (BosView.cs).
+        var bosView = new BosViewState(bosMode);
 
         foreach (var r in refs)
         {
@@ -765,6 +775,7 @@ static class TexturedScene
                 }
             }
             if (ro.Meshes.Count > 0) occl.Refs.Add(ro);
+            if (ro.Meshes.Count > 0 && r.BosSwapped) bosView.Swapped.Add(ro);
             if (refHadFx) fxRefCount++;
             if (refHadFxStatic) fxStaticRefCount++;
             if (refHadCovering) coveringRefs++;
@@ -1483,10 +1494,17 @@ static class TexturedScene
                            + $" ({occl.CulledByPlane.Count} of {planes.Count} planes cull anything; straddlers kept)");
             }
         }
+        // The BOS paint, before anything is drawn (the static frame) — the window re-applies it on B.
+        if (bosView.BuiltMode != "off" && bosView.SwappedCount > 0)
+        {
+            bosView.Apply(bosMode);
+            Console.WriteLine("   " + bosView.Summary());
+        }
         if (interactive is not null)
         {
             interactive.Occlusion = occl;
             interactive.OcclusionMode = planes.Count > 0 ? occlusionMode : "off";
+            interactive.Bos = bosView;
         }
 
         Vector4 healthy = palette[0].Color;

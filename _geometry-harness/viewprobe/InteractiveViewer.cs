@@ -157,6 +157,7 @@ sealed class InteractiveOptions
     // the eye moves: `on` hides what the planes cull from here, `diff` tints it red.
     public OcclusionState? Occlusion;                      // filled by the scene build
     public string OcclusionMode = "off";                   // entry mode from --occlusion or the shot
+    public BosViewState? Bos;                              // the Base Object Swapper layer, filled by the scene build
 
     // The height clip needs no list of its own: a static's PickShape already carries its mesh
     // and, in Min.Y/Max.Y, the Skyrim-z span of exactly the triangles that were drawn. Statics
@@ -313,6 +314,7 @@ static class InteractiveViewer
         // The hover glow is taken off on every change so it cannot save a tinted material as the
         // mesh's own and hand it back later.
         string occlMode = opt.OcclusionMode;
+        string bosMode = opt.Bos?.Mode ?? "off";               // the BOS layer's paint (BosView.cs); B toggles on <-> diff
         bool hasOccl = opt.Occlusion is { Planes.Count: > 0 };
         void ApplyOcclusion(bool force = false)
         {
@@ -488,7 +490,7 @@ static class InteractiveViewer
                 case PickKind.Ref:
                     var r = s.Ref;
                     string ed = r.BaseEditorId is { Length: > 0 } e ? e : "(no EditorID)";
-                    return $"REFR {r.RefKey} = FormID {opt.RuntimeId(r.RefKey)} — {ed} — {r.MeshRelPath}{tail}{beyond}";
+                    return $"REFR {r.RefKey} = FormID {opt.RuntimeId(r.RefKey)} — {ed} — {r.MeshRelPath}{(r.BosLabel is { } bl ? "  |  " + bl : "")}{tail}{beyond}";
                 case PickKind.Navmesh:
                     int ti = s.NavTriIds![hv.LocalTri];
                     string red = opt.RedNav.Contains(s.NavKey) ? " [RED — the finding]" : "";
@@ -526,6 +528,7 @@ static class InteractiveViewer
                                     + $"{(r.Highlight ? "  [highlighted]" : "")}{(r.Marker ? "  [editor marker]" : "")}");
                     Console.WriteLine($"      base {r.BaseKey} = FormID {opt.RuntimeId(r.BaseKey)}"
                                     + $"  {r.BaseEditorId ?? "(no EditorID)"}");
+                    if (r.BosLabel is { } bl2) Console.WriteLine($"      {bl2}");
                     Console.WriteLine($"      mesh {r.MeshRelPath}");
                     Console.WriteLine($"      placed at {r.Position.X:0},{r.Position.Y:0},{r.Position.Z:0} scale {r.Scale:0.00}"
                                     + $"  — hit at {ws.X:0},{ws.Y:0},{ws.Z:0}, {hv.T:0} u from the eye");
@@ -693,6 +696,7 @@ static class InteractiveViewer
             if (opt.BuildNavZ is { } bnz) parts.Add($"NAVMESH z {bnz.Z:0} ±{bnz.Tol:0} only (permanent)");
             if (opt.ShowPlanes && opt.PlaneLegend.Length > 0) parts.Add(opt.PlaneLegend);
             if (OcclusionLabel() is { Length: > 0 } ol) parts.Add(ol);
+            if (opt.Bos is { BuiltMode: not "off", SwappedCount: > 0 } bv) parts.Add(bv.Summary());
             return string.Join(" — ", parts);
         }
 
@@ -830,6 +834,9 @@ static class InteractiveViewer
                 ("occlusion", "O cycles the occlusion preview off -> on -> diff" + (hasOccl
                     ? $" (now {occlMode}): on leaves out every ref the planes would cull from the camera, diff draws everything and tints those refs red. Re-evaluated as you fly."
                     : " — this cell carries no planes to preview.")),
+                ("bos", "B toggles the Base Object Swapper layer's paint on <-> diff" + (opt.Bos is { BuiltMode: not "off" } bh
+                    ? $" ({bh.SwappedCount} drawn ref(s) carry the base the game swaps in; now {bosMode}): diff tints them teal; hover one for record base -> effective base and the ini line."
+                    : " — this scene was built with --bos off (record bases).")),
             };
             if (wl is not null)
                 h.Add(("shots", $"PageUp/PageDown step this cell's shots (now {shotIdx + 1}/{Math.Max(shots.Count, 1)}); "
@@ -872,6 +879,17 @@ static class InteractiveViewer
             { Console.WriteLine("   planes: this cell carries no occlusion planes — nothing to show"); return; }
             opt.ShowPlanes = on; pickDirty = true;
             Console.WriteLine($"   planes: {(on ? "shown" : "hidden")}  ({opt.PlaneCount} plane(s))");
+        }
+        // The Base Object Swapper layer's paint: on <-> diff live (one scene, two paints); a scene built with
+        // --bos off cannot show swaps and says so rather than pretending to. (bosMode is declared with occlMode.)
+        void SetBos(string mode)
+        {
+            if (opt.Bos is null || opt.Bos.BuiltMode == "off")
+            { Console.WriteLine("   bos: this scene was built without the Base Object Swapper layer — rerun with --bos on or --bos diff"); return; }
+            if (opt.Bos.SwappedCount == 0) { Console.WriteLine("   bos: no drawn ref in this cell carries a swapped base — nothing to paint"); return; }
+            if (!opt.Bos.Apply(mode)) return;
+            bosMode = mode;
+            Console.WriteLine("   " + opt.Bos.Summary());
         }
         // The two ends stay ordered however they are set — the keys already refused to push one
         // past the other, and a typed 4000 into the floor box must not quietly invert the band.
@@ -968,6 +986,16 @@ static class InteractiveViewer
             Get = () => occlMode,
             Set = SetOcclusion,
             DisabledWhy = () => hasOccl ? "" : "occlusion: this cell carries no occlusion planes — nothing to preview",
+        });
+        bar.Add(new UiSegment
+        {
+            Label = "bos (B)",
+            Options = new[] { "on", "diff" },
+            Get = () => bosMode,
+            Set = SetBos,
+            DisabledWhy = () => opt.Bos is null || opt.Bos.BuiltMode == "off"
+                ? "bos: this scene was built without the Base Object Swapper layer (--bos on|diff) — nothing to paint"
+                : opt.Bos.SwappedCount == 0 ? "bos: no drawn ref in this cell carries a swapped base — nothing to paint" : "",
         });
 
         bar.Row(new UiNumber
@@ -1109,6 +1137,7 @@ static class InteractiveViewer
         if (opt.PlaneCount > 0)
             Console.WriteLine($"   planes: {opt.PlaneCount} occlusion plane(s) resident, layer {(opt.ShowPlanes ? "shown" : "hidden")}; L toggles it; "
                             + $"O cycles the occlusion preview (entry: {occlMode})");
+            Console.WriteLine($"   bos: {(opt.Bos is { BuiltMode: not "off" } bv ? $"{bv.SwappedCount} drawn ref(s) with a swapped base; B toggles the paint on <-> diff (entry: {bosMode})" : "built without the layer (--bos on|diff)")}");
         PrintHelp();
 
         // Headless smoke knobs: VP_FLY_FRAMES=N renders N frames then saves a capture and
@@ -1379,6 +1408,7 @@ static class InteractiveViewer
             // ---- the occlusion planes, and their preview -------------------------------------
             if (KHit(Keys.L)) SetPlanes(!opt.ShowPlanes);
             if (KHit(Keys.O)) SetOcclusion(occlMode switch { "off" => "on", "on" => "diff", _ => "off" });
+            if (KHit(Keys.B)) SetBos(bosMode == "diff" ? "on" : "diff");
 
             // ---- height clip ----------------------------------------------------------------
             // Held keys, not taps: sweeping a ceiling through a two-storey interior is hundreds

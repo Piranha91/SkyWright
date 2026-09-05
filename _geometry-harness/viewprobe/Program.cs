@@ -161,6 +161,10 @@ bool listMeshes = false;
 // plane with what it culls and the nearest solid collision behind it within --planes-reach u. All
 // off by default, and the default render is byte-identical to what it was before they existed.
 bool showPlanes = false;
+// --bos off | on | diff — the Base Object Swapper layer (housecarl-core/BaseObjectSwaps.cs): on (the default) draws
+// every ref with the base and transform the game loads after *_SWAP.ini; diff the same, swapped refs tinted teal
+// and named in the hover; off the record bases, as every render did before 2026-09-04.
+string bosMode = "on";
 string occlusionMode = "off";
 bool planesReport = false;
 float planesReach = 256f;
@@ -525,6 +529,12 @@ for (int i = argStart; i < args.Length; i++)
     else if (args[i] == "--occlusion" && i + 1 < args.Length) { occlusionMode = args[++i].ToLowerInvariant(); textured = true; }
     else if (args[i] == "--planes-report") { planesReport = true; textured = true; }
     else if (args[i] == "--planes-reach" && i + 1 < args.Length) planesReach = float.Parse(args[++i]);
+    else if (args[i] == "--bos" && i + 1 < args.Length)
+    {
+        bosMode = args[++i].ToLowerInvariant();
+        if (bosMode is not ("off" or "on" or "diff")) { Console.Error.WriteLine("--bos takes off | on | diff"); return 1; }
+        if (bosMode == "diff") textured = true;
+    }
     else if (args[i] is "--instance" or "--game" or "--profile") i++;   // consumed above
     // A worklist path is a worklist WHEREVER it lands, not only in the leading run that a drop
     // produces: `viewprobe --interactive tour.json` is the obvious thing to type once dropping one
@@ -813,6 +823,13 @@ if (navPlugin is not null) navVersionPlugins.Add(navPlugin);
 if (compare is { } cmp0) { navVersionPlugins.Add(cmp0.A); navVersionPlugins.Add(cmp0.B); }
 var navByPlugin = new Dictionary<string, Dictionary<FormKey, NavmeshGeometry>>(StringComparer.OrdinalIgnoreCase);
 var baseMesh = new Dictionary<FormKey, string>();
+// The Base Object Swapper reader's inputs, filled once during the load-order walk below (the same pass that
+// collects meshes): the form index the ini ids resolve against, each plugin's light flag for the runtime FormID
+// table, and each winning ref's cell for the filters. The layer itself is loaded after the first walk.
+var bosIdx = bosMode != "off" ? new BosFormIndex() : null;
+var bosLight = new List<(ModKey Key, bool Light)>();
+var refCellOf = new Dictionary<FormKey, FormKey>();
+BosLayer? bosLayer = null;
 var baseIsMarker = new HashSet<FormKey>();
 var baseEditorId = new Dictionary<FormKey, string>();
 // Base record TYPE and OBND, for --refs-at (WHAT is near a spot: a Door, a Container) and
@@ -1099,14 +1116,18 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot)
     }
     if (cellKey is null) { Console.Error.WriteLine($"cell '{cellTarget}' not found in the active load order."); return 1; }
 
+    // The BOS form index fills on the FIRST walk only (a worklist re-walks per cell; the index does not change).
+    bool bosFill = bosIdx is not null && bosIdx.RecordsSeen == 0;
     foreach (var path in order.OrderedPaths)
     {
         ISkyrimModGetter m;
-        try { m = SkyrimMod.CreateFromBinaryOverlay(path, SkyrimRelease.SkyrimSE); } catch { continue; }
+        try { m = SkyrimMod.CreateFromBinaryOverlay(path, SkyrimRelease.SkyrimSE); } catch { if (bosFill) bosLight.Add((ModKey.Null, false)); continue; }
         using (m as IDisposable)
         {
+            if (bosFill) bosLight.Add((m.ModKey, m.IsSmallMaster || m.ModKey.Type == ModType.Light));
             foreach (var rec in m.EnumerateMajorRecords())
             {
+                if (bosFill) bosIdx!.Note(rec);
                 // Landscape texture chain: LTEX -> TXST -> diffuse path, winner-takes-all in load
                 // order, so terrain quadrants can be drawn with their real winning textures.
                 if (rec is ILandscapeTextureGetter lt)
@@ -1188,8 +1209,10 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot)
             string plgName = m.ModKey.FileName.String;
             foreach (var cp in PlacementExtract.FromMod(m))
             {
+                if (bosFill) bosIdx!.NoteCell(cp.Cell, cp.Worldspace);
                 foreach (var r in cp.Refs)
                 {
+                    if (bosFill) bosIdx!.NotePlaced(r.FormKey, r.Persistent);
                     if (r.InitiallyDisabled) refDisabledFlag.Add(r.FormKey); else refDisabledFlag.Remove(r.FormKey);
                     if (r.EnableParent is { } epk) refEnableParent[r.FormKey] = (epk, r.EnableParentOpposite);
                     else refEnableParent.Remove(r.FormKey);
@@ -1201,7 +1224,7 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot)
                 // is a question of POSITION, resolved after the target is known.
                 if (cp.Worldspace != FormKey.Null)
                     foreach (var r in cp.Refs)
-                        if (r.Persistent) persistentWin[r.FormKey] = (cp.Worldspace, r);   // later plugin wins
+                        if (r.Persistent) { persistentWin[r.FormKey] = (cp.Worldspace, r); refCellOf[r.FormKey] = cp.Cell; }   // later plugin wins
                 if (shotNpcWatch.Count > 0)
                     foreach (var r in cp.Refs)
                     {
@@ -1236,7 +1259,7 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot)
                 {
                     cellLabel = cp.CellEditorId ?? cp.Cell.ToString();
                     if (!ViewProbe.PlaneHistory.IsBethesda(plgName) && !cellContestedBy.Contains(plgName)) cellContestedBy.Add(plgName);
-                    foreach (var r in cp.Refs) winRef[r.FormKey] = r;
+                    foreach (var r in cp.Refs) { winRef[r.FormKey] = r; refCellOf[r.FormKey] = cp.Cell; }
                     // Navmesh (and with it the conflict overlay) stays TARGET-CELL-ONLY: it is
                     // the annotation layer for the cell under examination, scoped like the cell
                     // outline. The ring contributes world geometry, not annotations.
@@ -1253,9 +1276,17 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot)
                 }
                 else
                     foreach (var r in cp.Refs)
-                        if (!r.Persistent) winRef[r.FormKey] = r;
+                        if (!r.Persistent) { winRef[r.FormKey] = r; refCellOf[r.FormKey] = cp.Cell; }
             }
         }
+    }
+    if (bosIdx is not null && bosLayer is null)
+    {
+        if (bosFill) bosIdx.SetLoadOrder(bosLight);
+        var bosInis = BosDiscovery.Discover(assets.LooseRoots);
+        bosLayer = BaseObjectSwaps.Load(bosInis, bosIdx);
+        Console.WriteLine($"   BOS {bosMode}: {bosInis.Count} *_SWAP.ini read from the VFS ({bosLayer.LinesRead:N0} lines, {bosLayer.LinesFailed:N0} the game refuses, "
+                        + $"{bosLayer.Anomalies.Count:N0} anomalies — bosprobe lists them); every drawn ref takes the base and transform the game loads");
     }
 
     Console.WriteLine($"cell {cellLabel} {(interior ? "(interior)" : "(exterior)")}  {cellKey}");
@@ -1428,6 +1459,22 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot)
         var scene = new List<ViewProbe.SceneRef>();
         int fxSkipped = 0, markerSkipped = 0;
         int deletedSkipped = 0, disabledFlagSkipped = 0, disabledParentSkipped = 0, enabledByParentDrawn = 0, noModel = 0;
+        int bosSwapped = 0, bosRandomCount = 0, bosTransformed = 0, bosDisabled = 0;
+        var bosByIni = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        // The hover's one-line account of what BOS did to a ref: record base -> effective base, the ini line, the
+        // random flag, and which properties an override set.
+        string BosLabelOf(BaseObjectSwaps.BosResolution res, FormKey rb)
+        {
+            string Ed(FormKey k) => baseEditorId.TryGetValue(k, out var e) ? e : k.ToString();
+            var sb = new System.Text.StringBuilder("BOS ");
+            sb.Append(res.Swapped ? $"{Ed(rb)} -> {Ed(res.EffectiveBase)} {res.EffectiveBase}" : $"{Ed(rb)} kept");
+            if (res.SwapFrom is { } sf) sb.Append($" ({sf.Where.Ini}:{sf.Where.Line})");
+            if (res.Random) sb.Append($" [random: {res.Alternatives.Count} alternatives, the first drawn{(res.PerSession ? ", re-rolled per session" : "")}]");
+            if (res.Properties is { IsValid: true } p)
+                sb.Append($" [{(p.Position is not null ? "pos " : "")}{(p.Rotation is not null ? "rot " : "")}{(p.Scale is not null ? "scale " : "")}{(p.FlagsSet != 0 || p.FlagsUnset != 0 ? "flags " : "")}"
+                        + $"from {res.PropertiesFrom?.Ini}:{res.PropertiesFrom?.Line}{(res.PropertiesRandom ? ", a range — minimum drawn" : "")}]");
+            return sb.ToString();
+        }
         var meshCensus = listMeshes ? new Dictionary<string, (int Count, string Class)>(StringComparer.OrdinalIgnoreCase) : null;
         foreach (var r in winRef.Values)
         {
@@ -1441,7 +1488,31 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot)
             // ENABLED at runtime — the standard way a mod swaps a whole set in. These used to be
             // silently dropped (a third of the Temple's content).
             if (r.InitiallyDisabled) enabledByParentDrawn++;
-            if (r.Base is not { } bk || !baseMesh.TryGetValue(bk, out var rel)) { noModel++; continue; }
+            if (r.Base is not { } bk0) { noModel++; continue; }
+            // The Base Object Swapper layer: the base the game LOADS for this ref, at the transform its overrides
+            // give it. A ref the layer flags initially-disabled at init is not drawn, and counted.
+            var bk = bk0; var rPos = r.Position; var rRot = r.Rotation; var rScale = r.Scale;
+            FormKey? bosRecordBase = null; string? bosLabel = null; bool bosRandom = false;
+            if (bosLayer is not null && refCellOf.TryGetValue(r.FormKey, out var rCell))
+            {
+                var res = BaseObjectSwaps.Resolve(bosLayer, bosIdx!, r.FormKey, r.RecordType, bk0, rCell, r.EncounterZone);
+                if (res.Swapped || res.Random || res.Properties is { IsValid: true })
+                {
+                    var (p2, rot2, sc2, dis2) = res.Apply(rPos, rRot, rScale, r.InitiallyDisabled);
+                    if (dis2 && !r.InitiallyDisabled) { bosDisabled++; continue; }
+                    rPos = p2; rRot = rot2; rScale = sc2;
+                    if (res.Swapped)
+                    {
+                        bk = res.EffectiveBase; bosRecordBase = bk0; bosSwapped++;
+                        if (res.SwapFrom is { } sf) bosByIni[sf.Where.Ini] = bosByIni.GetValueOrDefault(sf.Where.Ini) + 1;
+                    }
+                    if (res.Random) bosRandomCount++;
+                    if (res.Properties is { IsValid: true }) bosTransformed++;
+                    bosRandom = res.Random;
+                    bosLabel = BosLabelOf(res, bk0);
+                }
+            }
+            if (!baseMesh.TryGetValue(bk, out var rel)) { noModel++; continue; }
             // Effect meshes (beams, mists, glows) are translucent volumes that drown a first-person
             // shot; the game draws them subtly, this flat-lit pass cannot. Skipped by default,
             // counted, and --fx puts them back. This is the WHOLE-FILE rule only — a solid mesh that
@@ -1460,9 +1531,10 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot)
             // Editor markers are not world geometry; the game never draws them. --markers keeps them
             // as a translucent extra layer instead of dropping them.
             if (isMarker && !showMarkers) { markerSkipped++; continue; }
-            scene.Add(new ViewProbe.SceneRef(rel, r.Position, r.Rotation, r.Scale,
+            scene.Add(new ViewProbe.SceneRef(rel, rPos, rRot, rScale,
                                              (hiFp is { } h && r.FormKey == h) || conflictDoors.Contains(r.FormKey), isMarker,
-                                             r.FormKey, bk, baseEditorId.TryGetValue(bk, out var bEd) ? bEd : null));
+                                             r.FormKey, bk, baseEditorId.TryGetValue(bk, out var bEd) ? bEd : null,
+                                             bosRecordBase, bosLabel, bosRandom));
         }
         foreach (var (qx, qy, qr) in refsAt)
         {
@@ -1537,6 +1609,13 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot)
                         + $"{deletedSkipped:N0} deleted, {noModel:N0} with no model-bearing base");
         if (enabledByParentDrawn > 0)
             Console.WriteLine($"   {enabledByParentDrawn:N0} initially-disabled ref(s) DRAWN — their enable parent resolves ENABLED at runtime");
+        if (bosLayer is not null)
+        {
+            Console.WriteLine($"   BOS {bosMode}: {bosSwapped:N0} drawn ref(s) carry a swapped base ({bosRandomCount:N0} random — the first alternative is drawn), "
+                            + $"{bosTransformed:N0} with a property override, {bosDisabled:N0} disabled by a flags(0x800) override (not drawn)");
+            foreach (var kv in bosByIni.OrderByDescending(k => k.Value).Take(10)) Console.WriteLine($"      {kv.Value,6:N0}  swaps from {kv.Key}");
+        }
+        else Console.WriteLine("   BOS off: record bases (--bos on|diff for the bases the game loads)");
         if (fxSkipped > 0) Console.WriteLine($"   ({fxSkipped} effect-mesh refs skipped; --fx to include them)");
         if (markerSkipped > 0) Console.WriteLine($"   ({markerSkipped} editor-marker refs skipped; --markers to include them translucently)");
         if (meshCensus is not null)
@@ -3115,7 +3194,7 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot)
                    skyColor, terrainHeightAt, dashUnderground, dashUnderStatics, msaa, cullAbove, cellBounds,
                    diffs ?? noDiff, diffColor, picks, captionLines, colourCaptions, npcActors, npcPucksOn, routeRenders,
                    gridRender, overlayLines, keepFx, fxStatic, listMeshes, waterPlanes, coverings, planes, showPlanes, occlusionMode,
-                   size, outFile, camMeta, planeReport: planeReportSink);
+                   size, outFile, camMeta, planeReport: planeReportSink, bosMode: bosMode);
 
         if (compare is { } cmp)
         {
@@ -3196,6 +3275,7 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot)
                 if (redNav.Count > 0) cap.Add(RedCaption(navs));
                 if (DoorCaption() is { } dc) cap.Add(dc);
                 if (showPlanes && planeLegend.Length > 0) cap.Add(planeLegend);
+                if (bosLayer is not null && bosSwapped > 0) cap.Add($"BOS {bosMode}: {bosSwapped} swapped ref(s), {bosRandomCount} random{(bosMode == "diff" ? " - tinted TEAL" : "")}");
                 // NPC caption lines ride the separate coloured channel (colourCaptions),
                 // passed straight into the render call below.
                 if (changedKeys.Count > 0 && navDiff)
@@ -3240,6 +3320,7 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot)
         if (redNav.Count > 0) fpCap.Add(RedCaption(navPlugin is not null && navByPlugin.TryGetValue(navPlugin, out var np0) ? np0 : winNav));
         if (DoorCaption() is { } fdc) fpCap.Add(fdc);
         if (showPlanes && planeLegend.Length > 0) fpCap.Add(planeLegend);
+        if (bosLayer is not null && bosSwapped > 0) fpCap.Add($"BOS {bosMode}: {bosSwapped} swapped ref(s), {bosRandomCount} random{(bosMode == "diff" ? " - tinted TEAL" : "")}");
 
         if (interactiveMode)
         {
@@ -3300,7 +3381,7 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot)
                 skyColor, terrainHeightAt, dashUnderground, dashUnderStatics, msaa, cullAbove, cellBounds,
                 noDiff, diffColor, picks, fpCap, colourCaptions, npcActors, npcPucksOn, routeRenders, gridRender, overlayLines, keepFx, fxStatic, listMeshes,
                 waterPlanes, coverings, planes, showPlanes, occlusionMode, size, fpOut,
-                camMeta, iopt, planeReportSink);
+                camMeta, iopt, planeReportSink, bosMode);
             Console.WriteLine($"   interactive run over ({iShapes:N0} shapes were resident)");
         pendingSwitch = iopt.CellSwitch;
             NpcCleanup();

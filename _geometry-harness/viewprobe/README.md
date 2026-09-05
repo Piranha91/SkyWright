@@ -143,6 +143,14 @@ findings they demonstrate) lives with that instance, not here.
   exact knife; `--interactive` also has a live shape-granular band on the clip keys, and it
   prints the `--cull-above Z` line for whatever slice flying found.
 
+- **Base Object Swapper layer:** `--bos off|on|diff` (default `on`). The game's Base Object
+  Swapper (`*_SWAP.ini`) replaces a reference's base object at load and can move, rotate, scale or
+  flag it; `on` draws every ref with the base and transform the game loads (the record base is
+  what the plugins say, not what the player sees), `diff` does the same and tints the swapped refs
+  TEAL, `off` draws the record bases as every render did before 2026-09-04. A random line (several
+  targets, or a chance under 100) draws its FIRST alternative and says so; hover a swapped ref for
+  record base → effective base and the ini line. In the window `B` toggles `on` ↔ `diff`. Its own
+  section: *The Base Object Swapper layer* below.
 - **Walking route** (`--route X,Y`, repeatable): the path to WALK from this camera, drawn as
   straight segments with arrowheads pointing waypoint to waypoint. **X and Y only** — z is
   resolved from the winning navmesh. `--route-z Z` states the floor the route runs on (which
@@ -1471,6 +1479,77 @@ mod's deliberate retype shows as a difference here; `waterprobe` tells it apart 
 ```
 viewprobe KatariahExterior01 --eye -51200,101000,-9500 --look -51200,108544,-13800 --seams --water-arm truth --no-nav
 viewprobe SolitudeExterior01 --eye -67584,103000,-1500 --look -67584,106496,-5500 --seams --no-nav
+```
+
+## The Base Object Swapper layer (`--bos off|on|diff`)
+
+Added 2026-09-04 (roadmap 4.10). Base Object Swapper (powerofthree's SKSE plugin, Nexus 60805) reads
+`*_SWAP.ini` files and, as each reference initialises, replaces its base object with another and
+optionally overrides its position, rotation, scale and record flags. Furniture replacers, animated
+tents, "no more statics" addons, city-wall re-placements and destructible clutter are all BOS-driven,
+so a render of the record bases shows a room the player never sees. The reader lives in
+`housecarl-core/BaseObjectSwaps.cs` (one function for this renderer and every geometry detector —
+`_shared/BosHook.cs` applies it to the shared indexes, `bosprobe` runs it on its own), and its rules
+are transcribed from the plugin's source, not its mod page; the by-construction proof is
+`proofprobe` (`bos/*` cases) and the parse-level proof is the game's own `po3_BaseObjectSwapper.log`,
+which the reader reproduces line for line (`bosprobe --compare-log`).
+
+**What the game does, as the source says it** (the reader mirrors each point; the findings note has
+the argument for every one):
+
+- **Discovery:** every file directly in `Data\` — NOT in subfolders — whose extension is exactly
+  `.ini` and whose name contains `_SWAP`, both case-sensitive, read in ordinal order. Under MO2 the
+  Data root is the VFS: overwrite, then the enabled mods by priority, then the game's Data; the first
+  provider of a filename wins and the rest are shadowed. `X_swap.ini`, `X_SWAP.INI` and
+  `sub\X_SWAP.ini` are never read; the run says so when it sees one.
+- **Reading:** CSimpleIni's rules — `;`/`#` comments, `[…]` headers to the first `]` (an unterminated
+  one is skipped), keys split at a first `=`, duplicate section names merged, duplicate keys in a
+  section collapsed to the first, ONE leading byte-order mark skipped (a second is text). Keys before
+  the first header form a section named `[]`, read as a References table.
+- **Sections:** `[Forms]` swaps by base, `[References]` by reference, `[Transforms]`/`[Properties]`
+  overrides without a swap, `[Forms|f1,f2,…]` swaps gated by filters — a location (the ref's or an
+  ancestor of it), a region, a keyword (on the location OR on the base), a cell, a worldspace (own or
+  parent); `-f` excludes. Any other `[X|…]` is filtered overrides; any other plain `[X]` is a
+  References table.
+- **Order:** References (by ref) → filtered Forms → plain Forms; filtered sections in REVERSE
+  ordinal order of `IniName|conditions` (a `std::map`, not file order); within a table the LAST line
+  first; the first line whose chance passes and whose drawn target names a record wins. Properties:
+  the winning swap line's own, else References → filtered → plain transforms by the ORIGINAL base.
+- **Randomness:** `chance(p)` (`S` per ref across sessions — the default; `L` per location and base;
+  `R` re-rolled per session unless a seed is given), `a|x,y,z` one member per ref, `a,b|x,y,z` one
+  member per original assigned at load. The reader never rolls: it returns the SET with
+  probabilities; the renderer draws the FIRST (BOS's own order — a set's lowest runtime FormID) and
+  flags it in the hover, the caption and the console. A swap to a leveled item is a set of its
+  entries (an even split, labelled an approximation) unless the ref or its cell carries an encounter
+  zone, which cancels it.
+- **Transforms:** `posR`/`posA`, `rotR`/`rotA` (degrees), `scale(a/b)` multiplicative and `scaleA`
+  absolute in the engine's percent domain (100 = 1.0), `flags`/`flagsC`; a `min/max` component is a
+  range drawn at runtime — the renderer takes the minimum and says so. `flags(0x800)` at init makes
+  the ref initially disabled; the renderer drops it and counts it.
+- **Scope:** the hooks are on the TESObjectREFR, Hazard and ArrowProjectile vtables — a placed
+  ACTOR is never swapped. Three quirks of the plugin the reader keeps on purpose: a `flags(…)` token
+  whose hex digits contain a `C` is read as a CLEAR (`contains("C")`), `PosR` with a capital P is
+  ignored (`contains("pos")`), and `0xID~Plugin` is accepted whenever the plugin is loaded, whether
+  or not the record exists.
+
+**What the picture shows.** `on`: the effective base's mesh at the effective transform, nothing
+marked. `diff`: the same scene, swapped refs tinted teal (the occlusion preview's emissive-wash
+mechanism with its own saved state; a mesh both previews touch takes the last one applied). `off`:
+the record bases. The console prints the ini count read from the VFS, the swapped/random/override
+tallies for the drawn refs and the swaps per ini; the caption carries `BOS on|diff: N swapped ref(s),
+M random`. The hover names `BOS <record> -> <effective> (<ini>:<line>) [random: k alternatives, the
+first drawn] [pos rot scale flags from <ini>:<line>]`. In the window `B` toggles the paint
+`on` ↔ `diff`; a scene built `off` says so rather than pretending to toggle (off is a different scene).
+
+**Verified** (2026-09-04): an inn on a furniture-replacer order — 18 chairs and beds swapped, all
+random lines — rendered `off` and `diff` from the same eye; 4.7 % of the frame differs and the
+difference is the chairs (the swapped mesh, teal in `diff`); a first camera that framed a wall differed
+in the caption only, which is what a render with the swaps out of frame must do.
+
+```
+viewprobe SomeInnCell --eye 330,-1180,170 --look 140,-960,50 --bos diff
+viewprobe SomeInnCell --eye 330,-1180,170 --look 140,-960,50 --bos off     # the record bases, for the diff
+bosprobe --cell SomeInnCell                                                  # every ref's answer, with the alternatives
 ```
 
 ## The depth buffer is the arbiter
