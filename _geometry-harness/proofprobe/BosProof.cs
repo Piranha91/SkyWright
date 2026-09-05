@@ -1,3 +1,4 @@
+using System.Numerics;
 using HarnessShared;
 using HousecarlCore;
 using Mutagen.Bethesda;
@@ -24,8 +25,28 @@ static class BosProof
 
         var root = Path.Combine(Path.GetTempPath(), "proofprobe-bos-" + Environment.ProcessId);
         Directory.CreateDirectory(root);
-        try { RunInner(Check, root); }
+        try { RunInner(Check, root); RunHooks(Check, root); }
         finally { try { Directory.Delete(root, true); } catch { } }
+    }
+
+    static void FileInterior(SkyrimMod mod, Cell cell)
+    {
+        uint id = cell.FormKey.ID;
+        int blockN = (int)(id % 10), subN = (int)((id / 10) % 10);
+        var records = mod.Cells.Records;
+        var block = records.FirstOrDefault(b => b.BlockNumber == blockN);
+        if (block is null) { block = new CellBlock { BlockNumber = blockN, GroupType = GroupTypeEnum.InteriorCellBlock }; records.Add(block); }
+        var sub = block.SubBlocks.FirstOrDefault(s => s.BlockNumber == subN);
+        if (sub is null) { sub = new CellSubBlock { BlockNumber = subN, GroupType = GroupTypeEnum.InteriorCellSubBlock }; block.SubBlocks.Add(sub); }
+        sub.Cells.Add(cell);
+    }
+
+    static PlacedObject Ref(FormKey key, FormKey baseKey, float x, float y = 0, float z = 0, float scale = 1f, string? edid = null)
+    {
+        var r = new PlacedObject(key, SkyrimRelease.SkyrimSE) { EditorID = edid, Placement = new Placement { Position = new P3Float(x, y, z), Rotation = new P3Float(0, 0, 0) } };
+        r.Base.SetTo(baseKey);
+        if (scale != 1f) r.Scale = scale;
+        return r;
     }
 
     static void RunInner(Action<string, bool, string> Check, string root)
@@ -41,25 +62,6 @@ static class BosProof
         var ezK = M(0x840); var npcK = M(0x850);
         FormKey R(int n) => M((uint)(0xA00 + n));
         var sl1 = new FormKey(lKey, 0x801);
-
-        static void FileInterior(SkyrimMod mod, Cell cell)
-        {
-            uint id = cell.FormKey.ID;
-            int blockN = (int)(id % 10), subN = (int)((id / 10) % 10);
-            var records = mod.Cells.Records;
-            var block = records.FirstOrDefault(b => b.BlockNumber == blockN);
-            if (block is null) { block = new CellBlock { BlockNumber = blockN, GroupType = GroupTypeEnum.InteriorCellBlock }; records.Add(block); }
-            var sub = block.SubBlocks.FirstOrDefault(s => s.BlockNumber == subN);
-            if (sub is null) { sub = new CellSubBlock { BlockNumber = subN, GroupType = GroupTypeEnum.InteriorCellSubBlock }; block.SubBlocks.Add(sub); }
-            sub.Cells.Add(cell);
-        }
-        static PlacedObject Ref(FormKey key, FormKey baseKey, float x, float y = 0, float z = 0, float scale = 1f, string? edid = null)
-        {
-            var r = new PlacedObject(key, SkyrimRelease.SkyrimSE) { EditorID = edid, Placement = new Placement { Position = new P3Float(x, y, z), Rotation = new P3Float(0, 0, 0) } };
-            r.Base.SetTo(baseKey);
-            if (scale != 1f) r.Scale = scale;
-            return r;
-        }
 
         // ---- the master: seven statics, a leveled item, a keyword, three locations, three cells, the refs ----
         var master = new SkyrimMod(mKey, release);
@@ -323,5 +325,149 @@ static class BosProof
         Check("bos/hook: the tally — 11 refs swapped (R1 R2 R3 R5 R6 R9 R10 R11 R15 R16 R18), 1 actor set aside, randoms and leveled counted",
               rep.Swapped == 11 && rep.NotSwappable == 1 && rep.Random == 5 && rep.Leveled == 3 && rep.TransformSteps == 3 && rep.FlagChanges == 2,
               $"swapped {rep.Swapped} notSwappable {rep.NotSwappable} random {rep.Random} leveled {rep.Leveled} steps {rep.TransformSteps} flags {rep.FlagChanges}");
+    }
+
+    // ---- the hooks for the probes that walk the order THEMSELVES (2026-09-04, roadmap 4.10's tail): a BosFeed fed in the
+    //      walk, Effective per reference for the route rule (blockprobe, navprobe, corridorprobe), Apply(history, …) for
+    //      driftprobe's own placement history. One resolve step behind both paths, so a sabotage of it reddens every case
+    //      here at once. The corridor is crossprobe's synthetic strip; the obstacles are boxes keyed by base, so a swap to a
+    //      wider base, a transform onto the line and a flags(0x800) removal each flip the route-cut verdict by construction. ----
+    static void RunHooks(Action<string, bool, string> Check, string root)
+    {
+        var release = SkyrimRelease.SkyrimSE;
+        var hKey = new ModKey("BosHooks", ModType.Master);
+        FormKey H(uint id) => new(hKey, id);
+        var postA = H(0x901); var wall = H(0x902); var marker = H(0x903); var post = H(0x904);
+        var cellR = H(0x910); var cellD = H(0x911);
+        FormKey R(int n) => H((uint)(0xB00 + n));
+
+        var master = new SkyrimMod(hKey, release);
+        master.Statics.Add(new Static(postA, release) { EditorID = "HPostA", Model = new Model { File = "meshes\\bos\\post.nif" } });
+        master.Statics.Add(new Static(post, release) { EditorID = "HPost", Model = new Model { File = "meshes\\bos\\post.nif" } });
+        master.Statics.Add(new Static(wall, release) { EditorID = "HWall", Model = new Model { File = "meshes\\bos\\wall.nif" } });
+        master.Statics.Add(new Static(marker, release) { EditorID = "HMarker", Model = new Model { File = "meshes\\bos\\marker.nif" } });
+        var cr = new Cell(cellR, release) { EditorID = "BosRouteCell", Flags = Cell.Flag.IsInteriorCell };
+        var cd = new Cell(cellD, release) { EditorID = "BosDriftCell", Flags = Cell.Flag.IsInteriorCell };
+        // The corridor is a 128 u strip along X (Y 3..131; the path line runs at Y 67); every obstacle stands on it.
+        cr.Temporary.Add(Ref(R(1), postA, 0, 20));       // [Forms] HPostA|HWall: a post beside the line becomes a wall across it
+        cr.Temporary.Add(Ref(R(2), post, 300, 20));      // [Transforms] by ref posR(0,47,0): the post is carried onto the line
+        cr.Temporary.Add(Ref(R(3), wall, -300, 67));     // [Transforms] by ref flags(0x800): a wall across the line, disabled at init
+        cr.Temporary.Add(Ref(R(4), post, -100, 20));     // untouched: the control, beside the line in both arms
+        cd.Temporary.Add(Ref(R(5), marker, 0, 0));       // [Transforms] by ref rotR(0,0,90): no step
+        cd.Temporary.Add(Ref(R(6), marker, 100, 0));     // [Transforms] by ref posA(2000,0,0): the pair splits
+        FileInterior(master, cr); FileInterior(master, cd);
+        var hPath = Path.Combine(root, hKey.FileName.String);
+        master.BeginWrite.ToPath(hPath).WithNoLoadOrder().Write();
+
+        var hRoot = Path.Combine(root, "hooks"); Directory.CreateDirectory(hRoot);
+        File.WriteAllText(Path.Combine(hRoot, "Hooks_SWAP.ini"), string.Join("\n", new[]
+        {
+            "[Forms]",
+            "HPostA|HWall",
+            "[Transforms]",
+            "0x00000B02~BosHooks.esm|posR(0,47,0)",
+            "0x00000B03~BosHooks.esm|flags(0x800)",
+            "0x00000B05~BosHooks.esm|rotR(0,0,90)",
+            "0x00000B06~BosHooks.esm|posA(2000,0,0)",
+            "",
+        }));
+
+        // ---- the walk, as the four probes make it: the feed, a placement history, the base and arm maps ----
+        var feed = new BosFeed(true);
+        var history = new PlacementHistory();
+        var refBase = new Dictionary<FormKey, FormKey>(); var refArm = new Dictionary<FormKey, string>(); var refEz = new Dictionary<FormKey, FormKey>();
+        var winRef = new Dictionary<FormKey, PlacedRef>(); var refCell = new Dictionary<FormKey, FormKey>();
+        using (var mod = SkyrimMod.CreateFromBinaryOverlay(hPath, release))
+        {
+            feed.Plugin(mod);
+            foreach (var rec in mod.EnumerateMajorRecords()) feed.Record(rec);
+            foreach (var cp in PlacementExtract.FromMod(mod))
+            {
+                feed.Cell(cp);
+                foreach (var r in cp.Refs)
+                {
+                    winRef[r.FormKey] = r; refCell[r.FormKey] = cp.Cell;
+                    history.Record(r.FormKey, new Snap(0, r.Position, cp.Cell, r.InitiallyDisabled, r.Deleted, cp.Worldspace));
+                    if (r.Base is { } b) refBase[r.FormKey] = b;
+                    refArm[r.FormKey] = r.RecordType;
+                    if (r.EncounterZone is { } ez) refEz[r.FormKey] = ez;
+                }
+            }
+        }
+        var layer = feed.Load(new[] { ("hooks", hRoot) });
+        Check("bos/feed: the walk fed the index and Load read the hooks ini — 5 lines, none refused, the ref ids resolved",
+              layer.LinesRead == 5 && layer.LinesFailed == 0 && layer.SwapForms.ContainsKey(postA) && feed.Index!.Resolve("0x00000B02~BosHooks.esm").Key == R(2),
+              $"read {layer.LinesRead} failed {layer.LinesFailed}");
+
+        // ---- the route rule on the effective geometry: crossprobe's synthetic corridor, obstacles as boxes by base ----
+        var corridor = NavmeshIndex.Build(new[] { new NavmeshGeometry(new FormKey(ModKey.FromNameAndExtension("synthetic.esp"), 1),
+            new[] { new Vec3(-600, 3, 0), new Vec3(600, 3, 0), new Vec3(600, 131, 0), new Vec3(-600, 131, 0) },
+            new[] { new NavTri(0, 1, 2, 0, -1, -1, 1), new NavTri(0, 2, 3, 0, 0, -1, -1) },
+            new Vec3(-600, 3, 0), new Vec3(600, 131, 0), Array.Empty<NavEdgeLink>(), Array.Empty<NavDoorTriangle>()) }, out _);
+        var ladder = new[] { 0f, 32f, 64f, 96f, 128f };
+        // Model-space boxes about the reference: a 20 u post, or a 64 x 160 u wall; both 100 u tall.
+        (Vector3 Lo, Vector3 Hi) Shape(FormKey b) => b == wall ? (new Vector3(-32, -80, 0), new Vector3(32, 80, 100)) : (new Vector3(-10, -10, 0), new Vector3(10, 10, 100));
+        RouteCutVerdict Judge(BosEffective e)
+        {
+            var (lo, hi) = Shape(e.Base);
+            var box = new Aabb(new Vec3(lo.X, lo.Y, lo.Z), new Vec3(hi.X, hi.Y, hi.Z), false);
+            var world = SpatialOverlap.ToWorld(box, e.Position, e.Rotation, e.Scale);
+            var v = new[] { new Vector3(lo.X, lo.Y, lo.Z), new Vector3(hi.X, lo.Y, lo.Z), new Vector3(hi.X, hi.Y, lo.Z), new Vector3(lo.X, hi.Y, lo.Z),
+                            new Vector3(lo.X, lo.Y, hi.Z), new Vector3(hi.X, lo.Y, hi.Z), new Vector3(hi.X, hi.Y, hi.Z), new Vector3(lo.X, hi.Y, hi.Z) };
+            var idx = new[] { 0, 2, 1, 0, 3, 2, 4, 5, 6, 4, 6, 7, 0, 1, 5, 0, 5, 4, 2, 3, 7, 2, 7, 6, 1, 2, 6, 1, 6, 5, 3, 0, 4, 3, 4, 7 };
+            var m = SpatialOverlap.RefrRotation(e.Rotation);
+            var t = new Vector3(e.Position.X, e.Position.Y, e.Position.Z);
+            var w = new Vector3[v.Length];
+            for (int i = 0; i < w.Length; i++) w[i] = Vector3.Transform(v[i] * e.Scale, m) + t;
+            var facts = RouteConnectivity.Measure(corridor, MeshColumnIndex.Build(w, idx), world, 256f, 16f, 32f, 112f, ladder);
+            return DetectorModel.RouteCut(facts.Judged, facts.Touched, facts.Line?.Found ?? false, facts.Line?.Why ?? "", facts.Line?.Cut ?? false, facts.Line?.Passage ?? float.NaN).Verdict;
+        }
+
+        var off = new BosFeed(false); var offRep = new BosApplyReport(); var rep = new BosApplyReport();
+        BosEffective Off(int n) => off.Effective(winRef[R(n)], refCell[R(n)], offRep);
+        BosEffective On(int n) => feed.Effective(winRef[R(n)], refCell[R(n)], rep);
+        var e1off = Off(1); var e1on = On(1);
+        Check("bos/route: --bos off returns the record's own base and pose, no resolution, nothing tallied",
+              e1off.Base == postA && e1off.Resolution is null && e1off.Position == winRef[R(1)].Position && offRep.Considered == 0, $"{e1off.Base} at {e1off.Position}");
+        Check("bos/route: a [Forms] swap to a wider base — the record's post beside the line is CLIPPED, the effective wall across it is BLOCKED",
+              e1on.Base == wall && e1on.Swapped && Judge(e1off) == RouteCutVerdict.Clipped && Judge(e1on) == RouteCutVerdict.Blocked,
+              $"off {Judge(e1off)} ({e1off.Base}) -> on {Judge(e1on)} ({e1on.Base})");
+        var e2off = Off(2); var e2on = On(2);
+        Check("bos/route: a posR override carries the post onto the path line — CLIPPED at the record's pose, LIKELY-BLOCKED at the effective one (y 20 -> 67)",
+              e2on.Position.Y == 67f && !e2on.Swapped && Judge(e2off) == RouteCutVerdict.Clipped && Judge(e2on) == RouteCutVerdict.LikelyBlocked,
+              $"off {Judge(e2off)} at y {e2off.Position.Y} -> on {Judge(e2on)} at y {e2on.Position.Y}");
+        var e3off = Off(3); var e3on = On(3);
+        Check("bos/route: a flags(0x800) override reads back initially-disabled — the wall across the line is BLOCKED under off and not an obstacle under on",
+              !winRef[R(3)].InitiallyDisabled && e3on.InitiallyDisabled && Judge(e3off) == RouteCutVerdict.Blocked && rep.Disabled == 1,
+              $"off {Judge(e3off)}; on disabled={e3on.InitiallyDisabled}");
+        var e4on = On(4);
+        Check("bos/route: an untouched reference reads the same under both arms — CLIPPED, no resolution kept",
+              e4on.Resolution is null && !e4on.Touched && Judge(e4on) == RouteCutVerdict.Clipped && Judge(Off(4)) == RouteCutVerdict.Clipped, $"{Judge(e4on)}");
+        Check("bos/route: the direct tally — 4 considered, 1 swapped, 2 property overrides, 2 steps (a move, a flag), 1 flag change, 1 disabled; the summary says 'applied'",
+              rep.Direct && rep.Considered == 4 && rep.Swapped == 1 && rep.WithProperties == 2 && rep.TransformSteps == 2 && rep.FlagChanges == 1 && rep.Disabled == 1 && rep.Summary().First().Contains("applied"),
+              $"considered {rep.Considered} swapped {rep.Swapped} props {rep.WithProperties} steps {rep.TransformSteps} flags {rep.FlagChanges} disabled {rep.Disabled}");
+
+        // ---- driftprobe's path: the layer applied to the probe's own history, the pseudo-plugin after the one real plugin ----
+        var recordBase = new Dictionary<FormKey, FormKey>(); var swaps = new Dictionary<FormKey, BaseObjectSwaps.BosResolution>();
+        const int bosPlugin = 1;
+        var hrep = BosHook.Apply(history, refBase, refArm, refEz, feed.Index!, layer, bosPlugin, recordBase, swaps);
+        var closure = DetectorModel.MasterClosure(new[] { new HashSet<int>(), BosHook.PseudoMasters(1) });
+        var h6 = history.Of(R(6))!; var seen6 = history.AsSeenBy(R(6), 0, closure); var now6 = history.Winning(R(6));
+        Check("bos/drift: a [Transforms] posA on an anchor is a step under the pseudo-plugin — the master's authoring view keeps x 100, the winner reads x 2000",
+              h6.Count == 2 && h6[^1].Plugin == bosPlugin && seen6 is { } s6 && s6.Pos.X == 100f && now6 is { } n6 && n6.Pos.X == 2000f && n6.Plugin == bosPlugin,
+              $"{h6.Count} snaps; seen x {seen6?.Pos.X} now x {now6?.Pos.X} by {now6?.Plugin}");
+        var r5 = history.Winning(R(5))!.Value;
+        Check("bos/drift: the pair stood 100 u apart and stands 2,000 u apart — CameApart at near 600, BOS the mover, and no real plugin can have patched it",
+              DetectorModel.CameApart(true, 100f, true, PlacementHistory.Dist(r5.Pos, now6!.Value.Pos), 600f) && r5.Plugin == 0 && !closure[0].Contains(bosPlugin) && closure[bosPlugin].Contains(0),
+              $"now {PlacementHistory.Dist(r5.Pos, now6!.Value.Pos):0} u apart");
+        Check("bos/drift: a rotR-only line is no step (the history's standing rule) and is counted silent",
+              history.Of(R(5))!.Count == 1 && hrep.SilentTransforms == 1 && swaps.ContainsKey(R(5)), $"{history.Of(R(5))!.Count} snaps, silent {hrep.SilentTransforms}");
+        Check("bos/drift: the base map — R1's refBase is the wall and recordBase keeps the post; the tally reads 1 swapped, 4 overrides, 3 steps, 1 flag change",
+              refBase[R(1)] == wall && recordBase[R(1)] == postA && hrep.Swapped == 1 && hrep.WithProperties == 4 && hrep.TransformSteps == 3 && hrep.FlagChanges == 1 && !hrep.Direct,
+              $"swapped {hrep.Swapped} props {hrep.WithProperties} steps {hrep.TransformSteps} flags {hrep.FlagChanges} silent {hrep.SilentTransforms}");
+        var w2 = history.Winning(R(2))!.Value;
+        Check("bos/hooks: the direct path (Effective) and the history path (Apply) give one answer for one override — R2 at y 67 on both, by the pseudo-plugin",
+              e2on.Position.Y == 67f && w2.Pos.Y == 67f && w2.Plugin == bosPlugin && BosHook.Describe(swaps[R(1)]).Contains("Hooks_SWAP.ini:2"),
+              $"direct y {e2on.Position.Y}, history y {w2.Pos.Y} by {w2.Plugin}; {BosHook.Describe(swaps[R(1)])}");
     }
 }
