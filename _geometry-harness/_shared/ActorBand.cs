@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using HarnessShared;
 using HousecarlCore;
 using Mutagen.Bethesda.Plugins;
 using Mutagen.Bethesda.Plugins.Records;
@@ -18,31 +19,44 @@ using Mutagen.Bethesda.Skyrim;
 //  scales of the NPCs placed there, or the load order's tallest playable
 //  race when the cell holds none — and PRINT what was derived.
 //
-//  The bottom is STILL the assumed 32 u every run since milestone 4c has used,
-//  and it is now known to be LOW: measured 2026-09-05 (the INI audit's beam
-//  ladder, a scale-1 Nord clone, one corridor), the walker crossed 22, 33 and
-//  44 u obstacles at fSmoothingStepHeight 10 and 25 alike and stopped at 55 and
-//  66 — its step lies in (44, 55] u, and lowering the setting does not lower it
-//  (raising it to 100 let it climb the 55). A 44 u object is not an obstacle to
-//  that walker; the band reads it as a cut. Raising StepHeight to 44 is the
-//  proposed correction, not applied here: the band's bottom re-prices every
-//  severance floor and route verdict, which is Piranha's decision
-//  (Research/INI-PARAMETER-AUDIT-2026-09-05.md §4).
+//  The bottom was the assumed 32 u from milestone 4c to 2026-09-05 and is now
+//  MEASURED (Q23 Part A: five fresh games, ~230 arms, the Ratway corridor):
+//  a package-free humanoid clone walking at its own pace got up a 48 u beam
+//  in every repeat at SetScale 0.7 / 0.78 / 1.0 / 1.3 and as the child race
+//  (race Height 0.8); 52 u in every repeat as an adult (half the time stalling
+//  on top of it), two of three as the child race, one of three at 0.7; 55 u
+//  only at scale 1.3 (3 of 4) or running (4 of 4 at 240 u/s); 60 u only
+//  running (1 of 4). The step barely follows the actor's size — proportional
+//  scaling would have put the 0.7 body near 35 u and the 1.3 body near 70 — so
+//  the bottom is a CONSTANT for humanoids: 48 u, the highest rung every walking
+//  humanoid cleared every time, with a band (48, 60] above it where pace and
+//  size decide, which the route-cut verdict names. The shortest-actor
+//  derivation the handoff proposed is moot within one rung. Creatures are
+//  another class (a goat is stopped by a 22 u beam; a dog would not path the
+//  corridor at all) and are catalogued, not folded. Every height is ABOVE THE
+//  NAVMESH, which is what the route rule measures against; at that station
+//  the navmesh floats 10 u above the physical floor, so the walker's physical
+//  step is ~62 u and the transfer to a cell with another offset is the open
+//  item. Research/ACTOR-BAND-BOTTOM-2026-09-05.md.
 //
-//  Height arithmetic follows viewprobe's NpcResolve (race height for the
-//  NPC's sex × the NPC's own Height × the placement's scale), on a 128 u
-//  scale-1 figure. Templated NPCs are read from their own record, not their
-//  template — counted, so a cell whose only actors are leveled spawns is
-//  known to fall back.
+//  Height arithmetic follows viewprobe's NpcResolve for the race height (for
+//  the NPC's sex) × the NPC's own Height, on a 128 u scale-1 figure — and NOT
+//  the placement's scale any more (2026-09-05, in ForCell). Templated NPCs are
+//  read from their own record, not their template — counted, so a cell whose
+//  only actors are leveled spawns is known to fall back.
 // ======================================================================
 
 internal static class ActorBand
 {
     /// <summary>Head height of a scale-1 humanoid above the ground — the constant the band top used to be.</summary>
     public const float ScaleOneHeight = 128f;
-    /// <summary>Step height — the band's bottom. Assumed, as before; stated here so the assumption has one home.
-    /// Measured low on 2026-09-05: the walker steps 44 u and not 55 (header). Left at 32 pending the re-pricing decision.</summary>
-    public const float StepHeight = 32f;
+    /// <summary>Step height — the band's bottom, above the navmesh. MEASURED 2026-09-05 (header): 48 u. The constant's
+    /// home is <see cref="DetectorModel.StepHeight"/> (DetectorModel is compiled into every probe; this file is not);
+    /// this forwards so the band's callers keep one name.</summary>
+    public const float StepHeight = DetectorModel.StepHeight;
+
+    /// <summary>The top of the step band (48, 60] the route-cut verdict names — <see cref="DetectorModel.StepBandTop"/>.</summary>
+    public const float StepBandTop = DetectorModel.StepBandTop;
 
     /// <summary>What the character controller actually ducks under, as a fraction of the nominal head height the
     /// records give. MEASURED 2026-09-02 (roadmap 4.7 Part C, the overhead ladder): a scale-1 Nord — 128 × 1.03 =
@@ -109,8 +123,20 @@ internal static class ActorBand
             actors++;
             if (n.Templated) templated++;
             float raceH = races.TryGetValue(n.Race, out var rc) ? (n.Female ? rc.Female : rc.Male) : 1f;
-            float top = ScaleOneHeight * raceH * n.Height * (r.Scale > 0 ? r.Scale : 1f);
-            if (top > best) { best = top; who = $"{(races.TryGetValue(n.Race, out var rr) ? rr.EditorId : n.Race.ToString())} x{raceH * n.Height * r.Scale:0.###}"; }
+            // The placement's scale is NOT a factor (measured 2026-09-05, five games): a clone at SetScale 0.7 was stopped
+            // by the same overhead beams as the adult and one at 1.3 walked under one the adult's top clears, before and
+            // after its 3D was rebuilt at the scaled size — the character controller follows the RACE's Height (a race
+            // with Height 0.8 was stopped by an underside at 85 u and walked under 100, where the 1.03 race is stopped by
+            // 100 and walks under 120) and ignores the reference scale. The NPC record's own Height is untested (every
+            // walker carried 1.0) and stays in as the race's kind of factor. A scaled placement is a bigger picture with
+            // the same 22 u radius and the same top; the source string says when one was not counted.
+            float top = ScaleOneHeight * raceH * n.Height;
+            if (top > best)
+            {
+                best = top;
+                who = $"{(races.TryGetValue(n.Race, out var rr) ? rr.EditorId : n.Race.ToString())} x{raceH * n.Height:0.###}"
+                    + (MathF.Abs(r.Scale - 1f) > 0.01f ? $" (placement scale {r.Scale:0.##} not counted)" : "");
+            }
         }
         if (actors == 0 || best <= 0f) return (fallbackTop, actors, templated, $"no actors in cell: {fallbackSource}");
         return (best, actors, templated, $"tallest placed actor {who} = {best:0} u");

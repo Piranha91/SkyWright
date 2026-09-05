@@ -1976,6 +1976,48 @@ Console.WriteLine("\nPROOF — the route-cut rule (DetectorModel.RouteCut)");
     // cut — a line that was not found was not swept.
     c = DetectorModel.RouteCut(true, touched: 16, lineFound: false, lineWhy: "dead end", cut: true, passage: 0f);
     Check("cut: no line outranks a stray cut flag -> NoLine", c.Verdict == RouteCutVerdict.NoLine, c.Why);
+
+    // Q23 (2026-09-05): the band's bottom is measured, and the verdict names the step band above it — the "which actor"
+    // clause: inside (48, 60] a walking humanoid gets over the object by size and pace; the CLASS does not move on it.
+    c = DetectorModel.RouteCut(true, touched: 16, lineFound: true, lineWhy: "", cut: true, passage: 32f, cutRise: 52f);
+    Check("cut: a 52 u rise at the cut -> still Blocked, and the why names the step band", c.Verdict == RouteCutVerdict.Blocked && c.Why.Contains("step band"), c.Why);
+    c = DetectorModel.RouteCut(true, touched: 16, lineFound: true, lineWhy: "", cut: true, passage: 64f, cutRise: 60f);
+    Check("cut: a 60 u rise (the band's top, inclusive) -> LikelyBlocked with the band clause", c.Verdict == RouteCutVerdict.LikelyBlocked && c.Why.Contains("step band"), c.Why);
+    c = DetectorModel.RouteCut(true, touched: 16, lineFound: true, lineWhy: "", cut: true, passage: 64f, cutRise: 70f);
+    Check("cut: a 70 u rise -> no band clause (above the band: no walker measured got over)", !c.Why.Contains("step band"), c.Why);
+    c = DetectorModel.RouteCut(true, touched: 16, lineFound: true, lineWhy: "", cut: true, passage: 32f, cutRise: 48f);
+    Check("cut: a rise AT the bottom (48) -> no band clause (every walker cleared it; the band is exclusive at the bottom)", !c.Why.Contains("step band"), c.Why);
+    c = DetectorModel.RouteCut(true, touched: 16, lineFound: true, lineWhy: "", cut: true, passage: 32f);
+    Check("cut: no rise known -> no band clause", !c.Why.Contains("step band"), c.Why);
+}
+
+// ---------------------------------------------------------------------------------------
+// THE ACTOR BAND (Q23, measured 2026-09-05 — Research/ACTOR-BAND-BOTTOM-2026-09-05.md): the bottom is the measured
+// constant, and the top's derivation counts the race's Height but NOT the placement's scale, because the character
+// controller was measured to follow the one and ignore the other (a 0.7 and a 1.3 clone had the adult's top before and
+// after a 3D rebuild; a race with Height 0.8 had a lower one).
+// ---------------------------------------------------------------------------------------
+Console.WriteLine("\nPROOF — the actor band (ActorBand: the measured bottom, the top's derivation)");
+{
+    Check("band: the bottom is the measured 48 u and the step band's top 60 u (2026-09-05), not the assumed 32",
+          ActorBand.StepHeight == 48f && ActorBand.StepBandTop == 60f, $"{ActorBand.StepHeight} / {ActorBand.StepBandTop}");
+    var nord = FormKey.Factory("013746:Skyrim.esm"); var child = FormKey.Factory("02C65B:Skyrim.esm");
+    var npcA = FormKey.Factory("000001:Test.esp"); var npcC = FormKey.Factory("000002:Test.esp");
+    var races = new Dictionary<FormKey, ActorBand.RaceFacts> { [nord] = new(1.03f, 1.03f, true, "NordRace"), [child] = new(0.8f, 0.8f, false, "NordRaceChild") };
+    var npcs = new Dictionary<FormKey, ActorBand.NpcFacts> { [npcA] = new(nord, false, 1f, false), [npcC] = new(child, true, 1f, false) };
+    PlacedRef Placed(FormKey b, float scale) => new(FormKey.Factory(b == npcA ? "000010:Test.esp" : "000011:Test.esp"), "PlacedNpc", null,
+                                                    new Vec3(0f, 0f, 0f), new Vec3(0f, 0f, 0f), scale, b, false, false, false);
+    var one = ActorBand.ForCell(new[] { Placed(npcA, 1f) }, npcs, races, 138f, "fallback");
+    Check("band: a scale-1 Nord -> top 128 x 1.03 = 132 u", MathF.Abs(one.Top - 131.84f) < 0.1f, one.Source);
+    var scaled = ActorBand.ForCell(new[] { Placed(npcA, 1.5f) }, npcs, races, 138f, "fallback");
+    Check("band: the same Nord at placement scale 1.5 -> the SAME top, and the source says the scale was not counted",
+          MathF.Abs(scaled.Top - one.Top) < 0.1f && scaled.Source.Contains("not counted"), scaled.Source);
+    var kid = ActorBand.ForCell(new[] { Placed(npcC, 1f) }, npcs, races, 138f, "fallback");
+    Check("band: a child-race actor -> top 128 x 0.8 = 102 u (the race's Height counts)", MathF.Abs(kid.Top - 102.4f) < 0.1f, kid.Source);
+    var both = ActorBand.ForCell(new[] { Placed(npcC, 1f), Placed(npcA, 0.7f) }, npcs, races, 138f, "fallback");
+    Check("band: a child and a 0.7-scaled Nord in one cell -> the Nord's unscaled 132 u wins", MathF.Abs(both.Top - 131.84f) < 0.1f, both.Source);
+    var none = ActorBand.ForCell(Array.Empty<PlacedRef>(), npcs, races, 138f, "tallest playable race");
+    Check("band: no actors -> the fallback, named", MathF.Abs(none.Top - 138f) < 0.1f && none.Source.Contains("no actors"), none.Source);
 }
 
 

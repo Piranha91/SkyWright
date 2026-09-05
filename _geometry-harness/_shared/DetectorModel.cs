@@ -922,16 +922,41 @@ public static class DetectorModel
     /// No NARROWED: Part C found no clear-gap threshold to set one at. Doors and MoveableStatics are set aside by the
     /// caller before measuring (passable by design; pushed aside — Part C's urn).</summary>
     public static (RouteCutVerdict Verdict, string Why) RouteCut(bool judged, int touched, bool lineFound, string lineWhy,
-                                                                  bool cut, float passage, float blockedBelow = 48f)
+                                                                  bool cut, float passage, float blockedBelow = 48f, float cutRise = float.NaN)
     {
         if (!judged) return (RouteCutVerdict.Unjudgeable, "the window could not be measured");
         if (touched <= 0) return (RouteCutVerdict.None, "the object never enters an actor column over walkable ground");
         if (!lineFound) return (RouteCutVerdict.NoLine, $"on walkable ground ({touched} cells), but the window has no path line to test: {lineWhy}");
         if (!cut) return (RouteCutVerdict.Clipped, $"stands on walkable ground ({touched} cells) beside the corridor's path line, not across it");
+        string band = StepBandClause(cutRise);
         if (passage < blockedBelow)
-            return (RouteCutVerdict.Blocked, $"cuts the path line at capsule width with {passage:0} u open beside it (under {blockedBelow:0} u)");
-        return (RouteCutVerdict.LikelyBlocked, $"cuts the path line at capsule width with {passage:0} u open beside it — the engine takes such a passage about half the time");
+            return (RouteCutVerdict.Blocked, $"cuts the path line at capsule width with {passage:0} u open beside it (under {blockedBelow:0} u){band}");
+        return (RouteCutVerdict.LikelyBlocked, $"cuts the path line at capsule width with {passage:0} u open beside it — the engine takes such a passage about half the time{band}");
     }
+
+    /// <summary>The actor band's bottom — the step height, above the navmesh. MEASURED 2026-09-05 (Q23 Part A, five
+    /// fresh games, ~230 arms; Research/ACTOR-BAND-BOTTOM-2026-09-05.md): 48 u is the highest beam every walking
+    /// humanoid from SetScale 0.7 to 1.3 and the child race got up in every repeat, so an object whose top is at or under
+    /// it is never an obstacle to a humanoid. Was 32 u (assumed) from milestone 4c until 2026-09-05. This is the constant's
+    /// one home (DetectorModel is compiled into every probe; ActorBand forwards to it).</summary>
+    public const float StepHeight = 48f;
+
+    /// <summary>The top of the step band. Above <see cref="StepHeight"/> and up to here, whether a walking humanoid gets
+    /// over the object depends on its size and pace (52 u: an adult every time, the child race 2 of 3, a 0.7 body 1 of
+    /// 3; 55 u: an adult 2 of 8, scale 1.3 3 of 4, running 4 of 4; 60 u: only running, 1 of 4); above it no walker
+    /// measured got over. The route-cut verdict names the band when the cut object's rise falls inside it; the class
+    /// does not change on it (a class change is a design decision the measurement hands to Piranha).</summary>
+    public const float StepBandTop = 60f;
+
+    /// <summary>The step-band clause of a route-cut why (Q23, 2026-09-05): named when the cut object's rise above the
+    /// navmesh at the cut lies inside (<see cref="StepHeight"/>, <see cref="StepBandTop"/>] — a
+    /// walking humanoid gets over such an object depending on its size and pace (52 u: an adult every time, the child
+    /// race 2 of 3; 55 u: an adult 2 of 8, scale 1.3 3 of 4, running 4 of 4; 60 u: only running, 1 of 4). The class is
+    /// unchanged: naming the band is the "which actor" clause the handoff asked for; moving the class on it is a design
+    /// decision the measurement hands to Piranha. Empty when no rise is known or the rise is outside the band.</summary>
+    public static string StepBandClause(float cutRise) =>
+        float.IsNaN(cutRise) || cutRise <= StepHeight || cutRise > StepBandTop ? "" :
+        $"; the object rises {cutRise:0} u above the navmesh at the cut — inside the step band ({StepHeight:0}, {StepBandTop:0}] u a walking humanoid gets over by size and pace (52 u: an adult every time, a child 2 of 3; 55 u: an adult 2 of 8, a running one 4 of 4)";
 
     /// <summary>The route-blockage rule (roadmap 4.7 Part B, frozen 2026-09-02 from the handoff of 2026-09-05).
     /// <b>SUPERSEDED the same day by <see cref="RouteCut"/></b> — kept callable so the re-pricing beside Part B's numbers

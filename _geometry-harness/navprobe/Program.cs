@@ -104,7 +104,7 @@ var bosRep = new BosApplyReport();
 // The actor band's top is DERIVED per cell (the tallest placed actor, else the tallest playable race) since
 // 2026-09-02; the settings' Height column is what the BROAD rules still use and what every earlier run used.
 var (fallbackTop, fallbackSrc) = ActorBand.TallestPlayable(raceFacts);
-Console.WriteLine($"actor band: bottom {ActorBand.StepHeight:0} u (step height, assumed); top per cell from placed actors, else {fallbackSrc}");
+Console.WriteLine($"actor band: bottom {ActorBand.StepHeight:0} u (step height, measured 2026-09-05; the step band to {ActorBand.StepBandTop:0} u is named in the verdict); top per cell from placed actors (race Height x NPC Height; placement scale not counted since 2026-09-05), else {fallbackSrc}");
 int cellsWithActors = 0; float bandMin = float.MaxValue, bandMax = 0f;
 var bandHist = new SortedDictionary<int, int>();   // band top rounded to 4 u -> cells
 
@@ -390,7 +390,7 @@ foreach (var cp in PlacementExtract.FromMod(mod))
                 routeBlocked.Add((cp.CellEditorId ?? cp.Cell.ToString(), bm.Mesh, bm.Type, r.FormKey, v64.Why));
 
             var line = facts.Line;
-            var vc = DetectorModel.RouteCut(facts.Judged, facts.Touched, line?.Found ?? false, line?.Why ?? "", line?.Cut ?? false, line?.Passage ?? float.NaN);
+            var vc = DetectorModel.RouteCut(facts.Judged, facts.Touched, line?.Found ?? false, line?.Why ?? "", line?.Cut ?? false, line?.Passage ?? float.NaN, cutRise: line?.CutRise ?? float.NaN);
             int ccol = vc.Verdict switch { RouteCutVerdict.Blocked => 0, RouteCutVerdict.LikelyBlocked => 1, RouteCutVerdict.Clipped => 2, RouteCutVerdict.NoLine => 3, RouteCutVerdict.None => 4, _ => 5 };
             var cC = RouteRow(cutByClass, cls); cC[ccol]++; cC[6]++;
             var cT = RouteRow(cutByType, bm.Type); cT[ccol]++; cT[6]++;

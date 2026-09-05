@@ -302,7 +302,7 @@ if (routeOn)
         if (ni.Graph is null) { ni.Graph = NavGraph.Build(ni.Index).Nodes; navIndex[w.Cell] = ni; }
         var facts = RouteConnectivity.Measure(ni.Index, columns, world, 256f, 16f, ActorBand.StepHeight, ni.Top, Ladder, graph: ni.Graph);
         var line = facts.Line;
-        var vc = DetectorModel.RouteCut(facts.Judged, facts.Touched, line?.Found ?? false, line?.Why ?? "", line?.Cut ?? false, line?.Passage ?? float.NaN);
+        var vc = DetectorModel.RouteCut(facts.Judged, facts.Touched, line?.Found ?? false, line?.Why ?? "", line?.Cut ?? false, line?.Passage ?? float.NaN, cutRise: line?.CutRise ?? float.NaN);
         routeMeasured++;
         why = vc.Why;
         return vc.Verdict;

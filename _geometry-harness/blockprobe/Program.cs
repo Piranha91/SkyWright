@@ -210,7 +210,7 @@ float ActorHeight = ActorBand.ScaleOneHeight;
 const float Clearance = ActorBand.StepHeight;
 const float TriInset = 12f;       // navprobe's edge-graze forgiveness
 var (fallbackTop, fallbackSrc) = ActorBand.TallestPlayable(raceFacts);
-Console.WriteLine($"actor band: bottom {Clearance:0} u (step height, assumed); top per cell from placed actors, else {fallbackSrc}");
+Console.WriteLine($"actor band: bottom {Clearance:0} u (step height, measured 2026-09-05; the step band to {ActorBand.StepBandTop:0} u is named in the verdict); top per cell from placed actors (race Height x NPC Height; placement scale not counted since 2026-09-05), else {fallbackSrc}");
 var winRefsByCell = winRef.Values.GroupBy(r => winRefCell[r.FormKey]).ToDictionary(g => g.Key, g => g.ToList());
 int cellsWithActors = 0, cellsTemplatedOnly = 0; float bandMin = float.MaxValue, bandMax = 0f;
 
@@ -365,7 +365,7 @@ foreach (var (cellKey, tcell) in targetCells)
                                    facts.Touched, facts.MaxIntactRung, facts.MaxIntactRungWithout));
 
                 var line = facts.Line;
-                var vc = DetectorModel.RouteCut(facts.Judged, facts.Touched, line?.Found ?? false, line?.Why ?? "", line?.Cut ?? false, line?.Passage ?? float.NaN);
+                var vc = DetectorModel.RouteCut(facts.Judged, facts.Touched, line?.Found ?? false, line?.Why ?? "", line?.Cut ?? false, line?.Passage ?? float.NaN, cutRise: line?.CutRise ?? float.NaN);
                 TallyCut(vc.Verdict);
                 if (eff.Touched) { cutTallyBos.TryGetValue(vc.Verdict, out var bt); cutTallyBos[vc.Verdict] = bt + 1; }
                 crossTab.TryGetValue((v64.Verdict, vc.Verdict), out var xt); crossTab[(v64.Verdict, vc.Verdict)] = xt + 1;
@@ -429,7 +429,7 @@ if (stateArm is not null && stateIdx is not null)
             gnodes ??= NavGraph.Build(index).Nodes;
             var facts = RouteConnectivity.Measure(index, columns, world, RouteMargin, RouteStep, Clearance, routeTop, Ladder, graph: gnodes);
             var line = facts.Line;
-            var vc = DetectorModel.RouteCut(facts.Judged, facts.Touched, line?.Found ?? false, line?.Why ?? "", line?.Cut ?? false, line?.Passage ?? float.NaN);
+            var vc = DetectorModel.RouteCut(facts.Judged, facts.Touched, line?.Found ?? false, line?.Why ?? "", line?.Cut ?? false, line?.Passage ?? float.NaN, cutRise: line?.CutRise ?? float.NaN);
             navcutMeasured++;
             navcutTally.TryGetValue(vc.Verdict, out var nt); navcutTally[vc.Verdict] = nt + 1;
             string plugin = stateIdx.History.Of(nk) is { Count: > 0 } h ? Path.GetFileName(paths[h[0].Plugin]) : "?";
