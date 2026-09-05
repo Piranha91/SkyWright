@@ -47,6 +47,11 @@ using Mutagen.Bethesda.Skyrim;
 //
 // usage: overlapprobe [--list N] [--depth U] [--frac F] [--maxdim U] [--emit path] [--base emit.json] [--dump path] [--json path]
 //                     [--bos on|off] [--enable X.esp]* [--disable X.esp]* [--instance DIR] [--game DIR] [--profile NAME]
+//   --state SPEC    the world-state arm (roadmap 4.11): <switch>[,<switch>…] by editor id or FormKey, stage:<quest>:<n>
+//                   (with --switch-map, switchprobe's --json), or baseline — every ref's existence is then its runtime
+//                   enable state (EnableState, the R1 rule) with those switches flipped, instead of the winning snap's own
+//                   flag. Without --state the population is the flag, as every run before 2026-09-04 (the state rows
+//                   themselves are stateprobe's business; this arm is for judging one whole state).
 //   --bos on|off    apply the Base Object Swapper layer (*_SWAP.ini) so every ref is judged by the base the game loads
 //                   (default on; _shared/BosHook.cs); off = the record bases
 
@@ -73,6 +78,10 @@ string overwriteDir = Path.Combine(Instance, "overwrite");
 string dataDir = Path.Combine(GamePath, "Data");
 
 int listN = 25;
+string? stateSpec = null, switchMapPath = null;
+// --state: the runtime enable state per reference under the arm (null = the winning flag, the default population).
+Func<FormKey, bool>? enabledOf = null;
+StateArm? stateArm = null;
 float minDepth = 16f;      // a hit must need at least this much separation on some axis
 float minFrac = 0.25f;     // ...and bury at least this share of the smaller box
 // An "object" whose box spans more than this on ANY axis is a VOLUME — mountain fog, a LOD slab, a
@@ -105,6 +114,8 @@ for (int i = 0; i < args.Length; i++)
     else if (args[i] == "--enable" && i + 1 < args.Length) enablePlugins.Add(args[++i]);
     else if (args[i] == "--disable" && i + 1 < args.Length) disablePlugins.Add(args[++i]);
     else if (args[i] == "--bos" && i + 1 < args.Length) bosOn = BosHook.ParseFlag(args[++i]) ?? throw new ArgumentException("--bos takes on|off");
+    else if (args[i] == "--state" && i + 1 < args.Length) stateSpec = args[++i];
+    else if (args[i] == "--switch-map" && i + 1 < args.Length) switchMapPath = args[++i];
 }
 
 var sw = Stopwatch.StartNew();
@@ -236,7 +247,7 @@ var meshBoxByPath = new Dictionary<string, Aabb?>(StringComparer.OrdinalIgnoreCa
     var sl = idx.History.Winning(laterKey); var so = idx.History.Winning(otherKey);
     if (sl is null || so is null) return (PhysicalState.Unmeasured, "a ref is not placed in this order");
     if (sl.Value.Deleted || idx.IsDeletedNow(laterKey) || so.Value.Deleted || idx.IsDeletedNow(otherKey)) return (PhysicalState.Gone, "a ref is deleted under this order");
-    if (sl.Value.Disabled || so.Value.Disabled) return (PhysicalState.Gone, "a ref is initially disabled under this order");
+    if (enabledOf is null ? (sl.Value.Disabled || so.Value.Disabled) : (!enabledOf(laterKey) || !enabledOf(otherKey))) return (PhysicalState.Gone, enabledOf is null ? "a ref is initially disabled under this order" : "a ref is disabled at runtime under this state");
     if (sl.Value.Space != so.Value.Space) return (PhysicalState.Gone, "the refs are no longer in the same space");
     if (!idx.RefBase.TryGetValue(laterKey, out var bl) || !idx.RefBase.TryGetValue(otherKey, out var bo)) return (PhysicalState.Unmeasured, "a ref has no base record");
     var (boxL, srcL) = BoxOf(bl); var (boxO, srcO) = BoxOf(bo);
@@ -256,7 +267,21 @@ var meshBoxByPath = new Dictionary<string, Aabb?>(StringComparer.OrdinalIgnoreCa
 // base game — vanilla-vs-mod pairs are excluded by the closure anyway (every mod masters
 // Skyrim.esm), so hashing vanilla-responsible refs would only manufacture same-source pairs
 // nobody asked about. DLC/CC-responsible refs stay in: DLC-on-DLC is the measured Bethesda floor.
-var candidates = idx.Candidates(BoxOf, Obstructing, IsBaseGame, maxDim, out var skips);
+// --state: the world-state arm. The census is read from the same index; a named switch the order does not carry is refused.
+if (stateSpec is not null)
+{
+    var sx = SwitchIndex.Build(idx);
+    sx.NameSwitches(idx.RefEditorId);
+    try { stateArm = StateArm.Parse(stateSpec, sx, switchMapPath is null ? null : SwitchMap.Read(switchMapPath)); }
+    catch (ArgumentException ex) { Console.Error.WriteLine(ex.Message); return 2; }
+    var stateFacts = stateArm.Wrap(sx.WinnerFacts, sx.Baseline);
+    var stateMemo = new Dictionary<FormKey, EnableResolution>();
+    enabledOf = k => EnableState.Resolve(k, stateFacts, stateMemo).Enabled;
+    var changes = stateArm.Changes(sx).ToList();
+    Console.WriteLine($"\nstate {stateArm.Name}: {sx.Switches.Count:N0} switches in the order; {stateArm.Flips.Count} flipped — {changes.Count(c => c.After):N0} refs arrive, {changes.Count(c => !c.After):N0} depart; "
+                    + "every candidate's existence is its runtime enable state under the flip (R1), not the winning flag");
+}
+var candidates = idx.Candidates(BoxOf, Obstructing, IsBaseGame, maxDim, out var skips, enabledOf);
 
 if (dumpPath is not null)
 {

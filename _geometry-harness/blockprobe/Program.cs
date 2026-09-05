@@ -17,6 +17,13 @@ using Mutagen.Bethesda.Skyrim;
 // If those two rates come out the same, the detector is not measuring what it claims to.
 //
 // usage: blockprobe <TargetPlugin.esp> [--exclude Other.esp ...] [--list N] [--geometry collision|render] [--bos on|off]
+//                   [--state SPEC] [--switch-map FILE]
+//   --state    the world-state arm (roadmap 4.11): <switch>[,<switch>…], stage:<quest>:<n> (with --switch-map) or baseline.
+//              Two things change: a target reference exists when its runtime enable state (EnableState over the whole
+//              order's parent chains, the R1 rule) is enabled under the flip, not when its own flag is clear; and every
+//              NAVCUT BOX standing in the target's cells and enabled in the state — any plugin's — is measured as an
+//              obstacle (its XPRM box at its transform), tallied and listed apart with {NAVCUT}. Without --state the run
+//              is the flag-only one every run before 2026-09-04 was, byte for byte.
 //   --geometry as navprobe's: collision (default since 2026-09-02) runs the rules on the decoded Havok solid restricted
 //              to actor-solid layers, skipping objects with no such body and falling back to render (labelled) when a
 //              decode is incomplete; render reproduces every run before that date.
@@ -40,8 +47,11 @@ int listN = 25;
 string geometrySource = "collision";
 bool controllerBand = true;   // --band controller|nominal: the route rules' band top (the surface rules keep the nominal, as every run before)
 bool bosOn = true;
+string? stateSpec = null, switchMapPath = null;
 for (int i = 1; i < args.Length; i++)
 {
+    if (args[i] == "--state" && i + 1 < args.Length) { stateSpec = args[++i]; continue; }
+    if (args[i] == "--switch-map" && i + 1 < args.Length) { switchMapPath = args[++i]; continue; }
     if (args[i] == "--exclude" && i + 1 < args.Length) exclude.Add(args[++i]);
     else if (args[i] == "--list" && i + 1 < args.Length) listN = int.Parse(args[++i]);
     else if (args[i] == "--geometry" && i + 1 < args.Length) geometrySource = args[++i];
@@ -125,6 +135,40 @@ if (bosOn) bos.Load(assets.LooseRoots);
 Console.WriteLine("   " + bos.LayerLine() + "\n");
 var bosRep = new BosApplyReport();
 var cutTallyBos = new Dictionary<RouteCutVerdict, int>();   // the route-cut verdicts of the refs BOS swapped or moved, reported apart
+
+// --state: the whole order into the shared index (the parent chains cross cells — a marker in the persistent cell governs
+// refs in the grid cells), the census, the arm, and the navcut boxes of the target's cells.
+Func<FormKey, bool>? enabledOf = null;
+StateArm? stateArm = null;
+var navcutsByCell = new Dictionary<FormKey, List<FormKey>>();
+OverlapIndex? stateIdx = null;
+if (stateSpec is not null)
+{
+    sw.Restart();
+    stateIdx = new OverlapIndex();
+    for (int p = 0; p < paths.Count; p++)
+    {
+        ISkyrimModGetter m;
+        try { m = SkyrimMod.CreateFromBinaryOverlay(paths[p], SkyrimRelease.SkyrimSE); } catch { continue; }
+        using (m as IDisposable) stateIdx.Ingest(p, m);
+    }
+    var sx = SwitchIndex.Build(stateIdx);
+    sx.NameSwitches(stateIdx.RefEditorId);
+    try { stateArm = StateArm.Parse(stateSpec, sx, switchMapPath is null ? null : SwitchMap.Read(switchMapPath)); }
+    catch (ArgumentException ex) { Console.Error.WriteLine(ex.Message); return 2; }
+    var stateFacts = stateArm.Wrap(sx.WinnerFacts, sx.Baseline);
+    var stateMemo = new Dictionary<FormKey, EnableResolution>();
+    enabledOf = k => EnableState.Resolve(k, stateFacts, stateMemo).Enabled;
+    foreach (var nk in sx.Navcuts)
+        if (stateIdx.History.Winning(nk) is { } w && targetCells.ContainsKey(w.Cell) && stateIdx.RefPrimitive.ContainsKey(nk))
+        { if (!navcutsByCell.TryGetValue(w.Cell, out var l)) navcutsByCell[w.Cell] = l = new List<FormKey>(); l.Add(nk); }
+    var changes = stateArm.Changes(sx).ToList();
+    Console.WriteLine($"state {stateArm.Name}: {sx.Switches.Count:N0} switches in the order; {stateArm.Flips.Count} flipped — {changes.Count(c => c.After):N0} refs arrive, {changes.Count(c => !c.After):N0} depart; "
+                    + $"a target ref exists by its runtime enable state (R1); {navcutsByCell.Values.Sum(l => l.Count):N0} navcut boxes stand in the target's cells ({navcutsByCell.Values.Sum(l => l.Count(k => enabledOf(k))):N0} enabled in this state)  ({sw.Elapsed.TotalSeconds:0.0}s)\n");
+}
+var navcutTally = new Dictionary<RouteCutVerdict, int>();
+var navcutHits = new List<(RouteCutVerdict V, string Cell, FormKey Fk, string Why, int Touched, RouteLine? Line, string Plugin)>();
+long navcutMeasured = 0, navcutSkippedDisabled = 0, navcutNoCross = 0;
 
 // ---------- 3. geometry cache ----------
 var geoCache = new Dictionary<string, Geo>(StringComparer.OrdinalIgnoreCase);
@@ -232,7 +276,7 @@ foreach (var (cellKey, tcell) in targetCells)
         // The Base Object Swapper layer: the base and transform the game LOADS for this reference (the record's own under
         // --bos off). An override that disables it at init is skipped the way the record's own flag is, and counted.
         var eff = bos.Effective(r, cellKey, bosRep);
-        if (eff.InitiallyDisabled) { skipped++; continue; }
+        if (enabledOf is null ? eff.InitiallyDisabled : !enabledOf(r.FormKey)) { skipped++; continue; }
         if (r.Base is null || !baseMesh.TryGetValue(eff.Base, out var bm)) { noGeo++; continue; }
 
         var g = Geometry(bm.Mesh);
@@ -352,6 +396,47 @@ foreach (var (cellKey, tcell) in targetCells)
     }
 }
 
+// --state: the navcut boxes of the target's cells, enabled in the state, through the route-cut rule — the cut a quest
+// stage brings to the target's navmesh. Measured after the target's own refs so the tallies stay apart.
+if (stateArm is not null && stateIdx is not null)
+    foreach (var (cellKey, navcuts) in navcutsByCell)
+    {
+        if (!navByCell.TryGetValue(cellKey, out var navs) || navs.Count == 0) continue;
+        var index = NavmeshIndex.Build(navs.Select(n => n.Nav).ToList(), out _);
+        if (index.TriangleCount == 0) continue;
+        var band = ActorBand.ForCell(winRefsByCell.TryGetValue(cellKey, out var cellRefs2) ? cellRefs2 : Array.Empty<PlacedRef>(), npcFacts, raceFacts, fallbackTop, fallbackSrc);
+        float routeTop = controllerBand ? ActorBand.ControllerTop(band.Top) : band.Top;
+        Dictionary<NavGraph.TriRef, NavGraph.Node>? gnodes = null;
+        foreach (var nk in navcuts)
+        {
+            if (!enabledOf!(nk)) { navcutSkippedDisabled++; continue; }
+            var w = stateIdx.History.Winning(nk)!.Value;
+            var prim = stateIdx.RefPrimitive[nk];
+            var model = NavcutGeometry.ModelBox(prim);
+            if (model.IsEmpty) continue;
+            var soup = NavcutGeometry.Soup(prim);
+            var world = SpatialOverlap.ToWorld(model, w.Pos, w.Rot, w.Scale);
+            var columns = MeshColumnIndex.Build(NavcutGeometry.WorldVertices(soup, w.Pos, w.Rot, w.Scale), soup.Indices);
+            bool crosses = false;
+            foreach (var t in index.Query(SpatialOverlap.GrowDown(world, routeTop)))
+            {
+                if ((t.Flags & 0x08) != 0) continue;
+                var nav = index.NavAt(t.NavIndex); var tri = nav.Triangles[t.TriangleIndex];
+                var pa = nav.Vertices[tri.A]; var pb = nav.Vertices[tri.B]; var pc = nav.Vertices[tri.C];
+                if (columns.CountSurfaceCrossings(new Vector3(pa.X, pa.Y, pa.Z), new Vector3(pb.X, pb.Y, pb.Z), new Vector3(pc.X, pc.Y, pc.Z), Clearance, routeTop, TriInset, 1f, 0.5f, stopAfter: 1) > 0) { crosses = true; break; }
+            }
+            if (!crosses) { navcutNoCross++; continue; }
+            gnodes ??= NavGraph.Build(index).Nodes;
+            var facts = RouteConnectivity.Measure(index, columns, world, RouteMargin, RouteStep, Clearance, routeTop, Ladder, graph: gnodes);
+            var line = facts.Line;
+            var vc = DetectorModel.RouteCut(facts.Judged, facts.Touched, line?.Found ?? false, line?.Why ?? "", line?.Cut ?? false, line?.Passage ?? float.NaN);
+            navcutMeasured++;
+            navcutTally.TryGetValue(vc.Verdict, out var nt); navcutTally[vc.Verdict] = nt + 1;
+            string plugin = stateIdx.History.Of(nk) is { Count: > 0 } h ? Path.GetFileName(paths[h[0].Plugin]) : "?";
+            navcutHits.Add((vc.Verdict, targetCells[cellKey].CellEditorId ?? cellKey.ToString(), nk, facts.Judged ? vc.Why : facts.Why, facts.Touched, line, plugin));
+        }
+    }
+
 Console.WriteLine($"==== {target} — navmesh blockage ====");
 Console.WriteLine($"references tested : {tested:N0}   (no usable geometry {noGeo:N0}, skipped {skipped:N0}, no actor-solid collision {noSolid:N0})");
 Console.WriteLine($"geometry source   : {geometrySource}" + (geometrySource == "collision" ? $"   on collision {onCollision:N0}, render fallback {onFallback:N0}" : ""));
@@ -406,6 +491,14 @@ Console.WriteLine($"   references measured: {routeMeasured:N0}   doors set aside
 Console.WriteLine($"   {"verdict",-14} {"refs",8}");
 foreach (var v in new[] { RouteCutVerdict.Blocked, RouteCutVerdict.LikelyBlocked, RouteCutVerdict.Clipped, RouteCutVerdict.NoLine, RouteCutVerdict.None, RouteCutVerdict.Unjudgeable })
     Console.WriteLine($"   {v,-14} {(cutTally.TryGetValue(v, out var a) ? a : 0),8:N0}" + (v == RouteCutVerdict.NoLine && noLineWhy.Count > 0 ? "   (" + string.Join(", ", noLineWhy.OrderByDescending(kv => kv.Value).Select(kv => $"{kv.Key} {kv.Value}")) + ")" : ""));
+if (stateArm is not null)
+{
+    Console.WriteLine($"   state {stateArm.Name}: navcut boxes in the target's cells — {navcutMeasured:N0} measured, {navcutSkippedDisabled:N0} disabled in this state, {navcutNoCross:N0} over no walkable ground: "
+                    + string.Join(", ", new[] { RouteCutVerdict.Blocked, RouteCutVerdict.LikelyBlocked, RouteCutVerdict.Clipped, RouteCutVerdict.NoLine, RouteCutVerdict.None, RouteCutVerdict.Unjudgeable }
+                                        .Select(v => $"{v} {(navcutTally.TryGetValue(v, out var b) ? b : 0):N0}")) + "   (the cut a flip brings to the target's navmesh; listed with {NAVCUT})");
+    foreach (var h in navcutHits.Where(h => h.V is RouteCutVerdict.Blocked or RouteCutVerdict.LikelyBlocked or RouteCutVerdict.NoLine).OrderBy(h => h.V == RouteCutVerdict.Blocked ? 0 : h.V == RouteCutVerdict.LikelyBlocked ? 1 : 2).Take(listN))
+        Console.WriteLine($"      {h.V,-14} touched {h.Touched,4}  {h.Cell,-26} {h.Fk} {{NAVCUT by {h.Plugin}}}   {h.Why}");
+}
 if (bosOn)
     Console.WriteLine($"   of which BOS swapped or moved: {cutTallyBos.Values.Sum():N0} measured — "
                     + string.Join(", ", new[] { RouteCutVerdict.Blocked, RouteCutVerdict.LikelyBlocked, RouteCutVerdict.Clipped, RouteCutVerdict.NoLine, RouteCutVerdict.None, RouteCutVerdict.Unjudgeable }

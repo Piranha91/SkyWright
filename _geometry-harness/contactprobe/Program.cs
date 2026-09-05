@@ -47,6 +47,9 @@ using Mutagen.Bethesda.Skyrim;
 //                     [--absolute] [--labelled-mover X.esp] [--overlap-json FILE]
 //                     [--only A.esm,B.esm,...] [--vanilla-assets] [--bos on|off]
 //                     [--enable X.esp]* [--disable X.esp]* [--instance DIR] [--game DIR] [--profile NAME]
+//   --state SPEC    the world-state arm (roadmap 4.11): <switch>[,<switch>…], stage:<quest>:<n> (with --switch-map), or
+//                   baseline — the runtime enable state every arm reads (R1) has those switches flipped, in the winner arm
+//                   and in the arm without the mover alike. Without it, the load-time state, as every run before 2026-09-04.
 //   --bos on|off    apply the Base Object Swapper layer (*_SWAP.ini) so every ref is judged by the base the game loads
 //                   (default on; _shared/BosHook.cs); off = the record bases
 //   --base EMIT     re-measure every record of that emit's rows under THIS order and carry the results in the emit as
@@ -77,6 +80,7 @@ string overwriteDir = Path.Combine(Instance, "overwrite");
 string dataDir = Path.Combine(GamePath, "Data");
 
 int listN = 25;
+string? stateSpec = null, switchMapPath = null;
 float eps = 4f;            // touching: surfaces within ε and no vertex deeper than ε inside. A chosen number, stated.
 float reach = 128f;        // how far from a moved host a dependent is looked for (the records pass's contact-plausible radius).
 string? jsonPath = null, emitPath = null, basePath = null, overlapJson = null, labelledMover = null, geomReport = null;
@@ -104,6 +108,8 @@ for (int i = 0; i < args.Length; i++)
     else if (args[i] == "--enable" && i + 1 < args.Length) enablePlugins.Add(args[++i]);
     else if (args[i] == "--disable" && i + 1 < args.Length) disablePlugins.Add(args[++i]);
     else if (args[i] == "--bos" && i + 1 < args.Length) bosOn = BosHook.ParseFlag(args[++i]) ?? throw new ArgumentException("--bos takes on|off");
+    else if (args[i] == "--state" && i + 1 < args.Length) stateSpec = args[++i];
+    else if (args[i] == "--switch-map" && i + 1 < args.Length) switchMapPath = args[++i];
 }
 
 var sw = Stopwatch.StartNew();
@@ -277,6 +283,16 @@ if (bosOn)
     foreach (var l in bosRep.Summary()) Console.WriteLine("   " + l);
 }
 else Console.WriteLine("   BOS: off — record bases (--bos on to apply the *_SWAP.ini layer)");
+if (stateSpec is not null)
+{
+    var sx = SwitchIndex.Build(idx);
+    sx.NameSwitches(idx.RefEditorId);
+    try { cidx.State = StateArm.Parse(stateSpec, sx, switchMapPath is null ? null : SwitchMap.Read(switchMapPath)); }
+    catch (ArgumentException ex) { Console.Error.WriteLine(ex.Message); return 2; }
+    var changes = cidx.State.Changes(sx).ToList();
+    Console.WriteLine($"   state {cidx.State.Name}: {sx.Switches.Count:N0} switches in the order; {cidx.State.Flips.Count} flipped — {changes.Count(c => c.After):N0} refs arrive, {changes.Count(c => !c.After):N0} depart; "
+                    + "every arm's runtime enable state (R1) carries the flip");
+}
 
 string PluginName(int p) => p < 0 ? "(none)" : p == bosPlugin ? BosApplyReport.PseudoPluginName : pluginKey[p].FileName.String;
 bool IsVanilla(int p) => p >= 0 && Vanilla.Contains(PluginName(p));

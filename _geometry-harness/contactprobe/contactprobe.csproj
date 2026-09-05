@@ -23,5 +23,7 @@
     <Compile Include="..\_shared\OverlapIndex.cs" Link="OverlapIndex.cs" />
     <Compile Include="..\_shared\ContactIndex.cs" Link="ContactIndex.cs" />
     <Compile Include="..\_shared\CollisionLayers.cs" Link="CollisionLayers.cs" />
+    <Compile Include="..\_shared\WorldState.cs" Link="WorldState.cs" />
+    <Compile Include="..\_shared\StateArm.cs" Link="StateArm.cs" />
   </ItemGroup>
 </Project>
