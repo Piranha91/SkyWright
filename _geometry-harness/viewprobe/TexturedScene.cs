@@ -1122,7 +1122,11 @@ static class TexturedScene
             }
 
         // First-person camera: eye/look given in Skyrim coordinates, expressed on the OrbitCamera.
-        const float NearPlane = 4f, FarPlane = 131072f;
+        // Near plane 15 u = the game's `fNearDistance:Display` (read off the running engine 2026-09-05: the
+        // compiled-in default, no profile ini sets it; first person uses `fNear1stPersonDistance` 5). It was 4 u
+        // before, which drew geometry the game clips in a close-up. That the free camera uses the third-person
+        // value is assumed, not measured.
+        const float NearPlane = 15f, FarPlane = 131072f;
         var eyeY = YUp(cam.Eye); var lookY = YUp(cam.Look);
         var camOff = eyeY - lookY;
         float camDist = MathF.Max(camOff.Length(), 1f);

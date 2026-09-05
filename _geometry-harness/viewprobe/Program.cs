@@ -122,7 +122,8 @@ System.Numerics.Vector3? eye = null, look = null;
 string? eyeRef = null, lookRef = null;
 float eyeHeight = 120f;                       // standing eye level; the player is 128u tall
 float? yaw = null; float pitch = 0f;
-float fov = 65f;                              // Skyrim SE's default world FOV
+float fov = 65f;                              // viewprobe's own default (the VERTICAL angle of its square frame); the game's
+                                              // `fDefaultWorldFOV` read 80 on SkyrimSE 1.7.104 (2026-09-05) - shotplan.py maps one to the other
 // EFFECT GEOMETRY is filtered in TWO places, because it comes in two shapes:
 //   • whole-file — a ref whose model path is under `effects\` (beams, mists, glows). Dropped
 //     here, at the ref, before the scene is even assembled.

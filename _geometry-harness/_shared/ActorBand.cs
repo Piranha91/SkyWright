@@ -18,9 +18,16 @@ using Mutagen.Bethesda.Skyrim;
 //  scales of the NPCs placed there, or the load order's tallest playable
 //  race when the cell holds none — and PRINT what was derived.
 //
-//  The bottom stays an assumption: 32 u, the engine's step height as every
-//  run since milestone 4c has used it. Part C's overhead ladder measures the
-//  top of the band in game; nothing here measures the step.
+//  The bottom is STILL the assumed 32 u every run since milestone 4c has used,
+//  and it is now known to be LOW: measured 2026-09-05 (the INI audit's beam
+//  ladder, a scale-1 Nord clone, one corridor), the walker crossed 22, 33 and
+//  44 u obstacles at fSmoothingStepHeight 10 and 25 alike and stopped at 55 and
+//  66 — its step lies in (44, 55] u, and lowering the setting does not lower it
+//  (raising it to 100 let it climb the 55). A 44 u object is not an obstacle to
+//  that walker; the band reads it as a cut. Raising StepHeight to 44 is the
+//  proposed correction, not applied here: the band's bottom re-prices every
+//  severance floor and route verdict, which is Piranha's decision
+//  (Research/INI-PARAMETER-AUDIT-2026-09-05.md §4).
 //
 //  Height arithmetic follows viewprobe's NpcResolve (race height for the
 //  NPC's sex × the NPC's own Height × the placement's scale), on a 128 u
@@ -33,7 +40,8 @@ internal static class ActorBand
 {
     /// <summary>Head height of a scale-1 humanoid above the ground — the constant the band top used to be.</summary>
     public const float ScaleOneHeight = 128f;
-    /// <summary>Step height — the band's bottom. Assumed, as before; stated here so the assumption has one home.</summary>
+    /// <summary>Step height — the band's bottom. Assumed, as before; stated here so the assumption has one home.
+    /// Measured low on 2026-09-05: the walker steps 44 u and not 55 (header). Left at 32 pending the re-pricing decision.</summary>
     public const float StepHeight = 32f;
 
     /// <summary>What the character controller actually ducks under, as a fraction of the nominal head height the

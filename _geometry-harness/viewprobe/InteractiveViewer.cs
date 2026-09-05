@@ -187,8 +187,8 @@ sealed class InteractiveOptions
 
 static class InteractiveViewer
 {
-    // The textured path's frustum, exactly.
-    const float NearPlane = 4f, FarPlane = 131072f;
+    // The textured path's frustum, exactly (near 15 u = the game's fNearDistance; see TexturedScene).
+    const float NearPlane = 15f, FarPlane = 131072f;
 
     internal static void Run(
         InteractiveOptions opt,

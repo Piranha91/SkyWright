@@ -47,6 +47,9 @@ findings they demonstrate) lives with that instance, not here.
 - **Camera** (Skyrim coordinates; a `getpos`/`getangle` console line pastes straight in):
   `--eye X,Y,Z` | `--eye-ref FORMID` (+`--eye-height`, default 120), `--look X,Y,Z` |
   `--look-ref FORMID` | `--yaw DEG` (0 = north/+Y, clockwise) + `--pitch`, `--fov` (default 65).
+  The frustum's near plane is 15 u, the game's `fNearDistance` as read off the running engine
+  (2026-09-05; it was 4 u before, which drew what the game clips in a close-up); the far plane is
+  131,072 u. Neither is a flag: nothing in a profile ini sets the game's, and matching it is the point.
   Textured mode requires an eye — with none given, the flat diagnostic mode runs instead.
 - **Navmesh:** `--nav off|filled|wire|both` (defaults to `wire` when `--conflicts`/`--red` is
   given), `--nav-color auto|green|cyan|magenta|yellow|blue` (default auto).
