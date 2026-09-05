@@ -45,8 +45,10 @@ using Mutagen.Bethesda.Skyrim;
 //
 // usage: contactprobe [--list N] [--eps U] [--reach U] [--json FILE] [--emit FILE] [--base EMIT] [--all-rows] [--interior-only]
 //                     [--absolute] [--labelled-mover X.esp] [--overlap-json FILE]
-//                     [--only A.esm,B.esm,...] [--vanilla-assets]
+//                     [--only A.esm,B.esm,...] [--vanilla-assets] [--bos on|off]
 //                     [--enable X.esp]* [--disable X.esp]* [--instance DIR] [--game DIR] [--profile NAME]
+//   --bos on|off    apply the Base Object Swapper layer (*_SWAP.ini) so every ref is judged by the base the game loads
+//                   (default on; _shared/BosHook.cs); off = the record bases
 //   --base EMIT     re-measure every record of that emit's rows under THIS order and carry the results in the emit as
 //                   Predicates — the changed arm of a differential (conflictdiff reads both). See ConflictReport.cs.
 //   --only          keep only the named plugins of the profile's order (the vanilla masters, or vanilla + USSEP)
@@ -80,6 +82,7 @@ float reach = 128f;        // how far from a moved host a dependent is looked fo
 string? jsonPath = null, emitPath = null, basePath = null, overlapJson = null, labelledMover = null, geomReport = null;
 bool allRows = false, absolute = false, vanillaAssets = false, interiorOnly = false;
 HashSet<string>? only = null;
+bool bosOn = true;
 var enablePlugins = new List<string>();
 var disablePlugins = new List<string>();
 for (int i = 0; i < args.Length; i++)
@@ -100,6 +103,7 @@ for (int i = 0; i < args.Length; i++)
     else if (args[i] == "--interior-only") interiorOnly = true;
     else if (args[i] == "--enable" && i + 1 < args.Length) enablePlugins.Add(args[++i]);
     else if (args[i] == "--disable" && i + 1 < args.Length) disablePlugins.Add(args[++i]);
+    else if (args[i] == "--bos" && i + 1 < args.Length) bosOn = BosHook.ParseFlag(args[++i]) ?? throw new ArgumentException("--bos takes on|off");
 }
 
 var sw = Stopwatch.StartNew();
@@ -226,21 +230,27 @@ RefGeometry? GeomOf(FormKey baseKey)
 }
 cidx = new ContactIndex(GeomOf) { Epsilon = eps, Reach = reach, NearBand = 2f * eps, BoxBand = 2f * eps + 2f };
 var idx = cidx.Index;
+// --bos on (default): the Base Object Swapper reader replaces each reference's record base with the base the
+// game loads, and a moving override becomes a placement step under a pseudo-plugin after the last real one
+// (_shared/BosHook.cs). --bos off: the record bases, as before 2026-09-04.
+idx.Bos = bosOn ? new BosFormIndex() : null;
 
 // ---------------------------------------------------------------------------------------
 // Pass 1 — every plugin once, into the shared index.
 // ---------------------------------------------------------------------------------------
 var pluginKey = new ModKey[paths.Count];
-var masterIdx = new HashSet<int>[paths.Count];
+var masterIdx = new HashSet<int>[paths.Count + (bosOn ? 1 : 0)];
+var lightness = new List<(ModKey, bool)>();
 var unreadable = new List<string>();
 for (int p = 0; p < paths.Count; p++)
 {
     ISkyrimModGetter mod;
     try { mod = SkyrimMod.CreateFromBinaryOverlay(paths[p], SkyrimRelease.SkyrimSE); }
-    catch { unreadable.Add(Path.GetFileName(paths[p])); pluginKey[p] = ModKey.Null; masterIdx[p] = new HashSet<int>(); continue; }
+    catch { unreadable.Add(Path.GetFileName(paths[p])); pluginKey[p] = ModKey.Null; masterIdx[p] = new HashSet<int>(); lightness.Add((ModKey.Null, false)); continue; }
     using (mod as IDisposable)
     {
         pluginKey[p] = mod.ModKey;
+        lightness.Add((mod.ModKey, BosHook.IsLight(mod)));
         var mset = new HashSet<int>();
         try
         {
@@ -253,11 +263,22 @@ for (int p = 0; p < paths.Count; p++)
     }
     if ((p + 1) % 150 == 0) Console.WriteLine($"   ... {p + 1}/{paths.Count} plugins, {sw.Elapsed.TotalSeconds:0}s");
 }
+int bosPlugin = bosOn ? paths.Count : -1;
+if (bosOn) masterIdx[bosPlugin] = BosHook.PseudoMasters(paths.Count);
 var closure = DetectorModel.MasterClosure(masterIdx);
 Console.WriteLine($"indexed {idx.History.Count:N0} refs ({idx.Placements:N0} placements; {idx.SilentRePlacements:N0} rotation/scale-only overrides not recorded; {idx.DeletedBy.Count:N0} refs deleted somewhere)  ({sw.Elapsed.TotalSeconds:0.0}s)");
 Console.WriteLine($"   plugins that could not be read (contribute nothing, counted per rule 6): {unreadable.Count:N0}" + (unreadable.Count > 0 ? "  — " + string.Join(", ", unreadable) : ""));
+if (bosOn)
+{
+    idx.Bos!.SetLoadOrder(lightness);
+    var bosLayer = BosHook.Load(assets.LooseRoots, idx.Bos);
+    var bosRep = BosHook.Apply(idx, bosLayer, bosPlugin);
+    Console.WriteLine($"   BOS: {bosLayer.Inis.Count} *_SWAP.ini read ({bosLayer.LinesRead:N0} lines, {bosLayer.LinesFailed:N0} the game would refuse, {bosLayer.Anomalies.Count:N0} anomalies — bosprobe lists them)");
+    foreach (var l in bosRep.Summary()) Console.WriteLine("   " + l);
+}
+else Console.WriteLine("   BOS: off — record bases (--bos on to apply the *_SWAP.ini layer)");
 
-string PluginName(int p) => p < 0 ? "(none)" : pluginKey[p].FileName.String;
+string PluginName(int p) => p < 0 ? "(none)" : p == bosPlugin ? BosApplyReport.PseudoPluginName : pluginKey[p].FileName.String;
 bool IsVanilla(int p) => p >= 0 && Vanilla.Contains(PluginName(p));
 bool IsUssep(int p) => p >= 0 && string.Equals(PluginName(p), Ussep, StringComparison.OrdinalIgnoreCase);
 string ClassOf(int p) => IsVanilla(p) ? "Bethesda" : IsUssep(p) ? "USSEP" : "mod";

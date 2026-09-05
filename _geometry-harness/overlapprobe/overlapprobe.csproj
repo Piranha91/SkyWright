@@ -18,6 +18,8 @@
     <Compile Include="..\_shared\DetectorModel.cs" Link="DetectorModel.cs" />
     <Compile Include="..\_shared\SyntheticOrder.cs" Link="SyntheticOrder.cs" />
     <Compile Include="..\_shared\PlacementHistory.cs" Link="PlacementHistory.cs" />
+    <Compile Include="..\_shared\DependencyIndex.cs" Link="DependencyIndex.cs" />
+    <Compile Include="..\_shared\BosHook.cs" Link="BosHook.cs" />
     <Compile Include="..\_shared\OverlapIndex.cs" Link="OverlapIndex.cs" />
   </ItemGroup>
 </Project>

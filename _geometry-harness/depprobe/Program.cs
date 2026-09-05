@@ -37,8 +37,10 @@ using Mutagen.Bethesda.Skyrim;
 //
 // NOT verified in game, and no geometry has been checked. A LeftBehind row is a candidate.
 //
-// usage: depprobe [--list N] [--threshold U] [--json FILE] [--enable X.esp]* [--disable X.esp]*
+// usage: depprobe [--list N] [--threshold U] [--json FILE] [--bos on|off] [--enable X.esp]* [--disable X.esp]*
 //                 [--instance DIR] [--game DIR] [--profile NAME]
+//   --bos on|off    apply the Base Object Swapper layer (*_SWAP.ini) so every ref is judged by the base the game loads
+//                   (default on; _shared/BosHook.cs); off = the record bases
 
 // Nothing is compiled in — see _shared/HarnessTarget.cs. Flags win over the environment and over
 // harness.local.json; Require() runs AFTER them.
@@ -64,6 +66,7 @@ string dataDir = Path.Combine(GamePath, "Data");
 int listN = 25;
 float threshold = PlacementHistory.MoveThreshold;
 string? jsonPath = null;
+bool bosOn = true;
 var enablePlugins = new List<string>();
 var disablePlugins = new List<string>();
 for (int i = 0; i < args.Length; i++)
@@ -73,6 +76,7 @@ for (int i = 0; i < args.Length; i++)
     else if (args[i] == "--json" && i + 1 < args.Length) jsonPath = args[++i];
     else if (args[i] == "--enable" && i + 1 < args.Length) enablePlugins.Add(args[++i]);
     else if (args[i] == "--disable" && i + 1 < args.Length) disablePlugins.Add(args[++i]);
+    else if (args[i] == "--bos" && i + 1 < args.Length) bosOn = BosHook.ParseFlag(args[++i]) ?? throw new ArgumentException("--bos takes on|off");
 }
 
 var sw = Stopwatch.StartNew();
@@ -90,18 +94,23 @@ Console.WriteLine($"load order: {paths.Count} plugins ({sw.ElapsedMilliseconds} 
 // ---------------------------------------------------------------------------------------
 // Pass 1 — every plugin once, into the shared index.
 // ---------------------------------------------------------------------------------------
-var idx = new DependencyIndex();
+// --bos on (default): the Base Object Swapper reader replaces each reference's record base with the base the
+// game loads, and a moving override becomes a placement step under a pseudo-plugin after the last real one
+// (_shared/BosHook.cs). --bos off: the record bases, as before 2026-09-04.
+var idx = new DependencyIndex { Bos = bosOn ? new BosFormIndex() : null };
 var pluginKey = new ModKey[paths.Count];
-var masterIdx = new HashSet<int>[paths.Count];
+var masterIdx = new HashSet<int>[paths.Count + (bosOn ? 1 : 0)];
+var lightness = new List<(ModKey, bool)>();
 var unreadable = new List<string>();
 for (int p = 0; p < paths.Count; p++)
 {
     ISkyrimModGetter mod;
     try { mod = SkyrimMod.CreateFromBinaryOverlay(paths[p], SkyrimRelease.SkyrimSE); }
-    catch { unreadable.Add(Path.GetFileName(paths[p])); pluginKey[p] = ModKey.Null; masterIdx[p] = new HashSet<int>(); continue; }
+    catch { unreadable.Add(Path.GetFileName(paths[p])); pluginKey[p] = ModKey.Null; masterIdx[p] = new HashSet<int>(); lightness.Add((ModKey.Null, false)); continue; }
     using (mod as IDisposable)
     {
         pluginKey[p] = mod.ModKey;
+        lightness.Add((mod.ModKey, BosHook.IsLight(mod)));
         var mset = new HashSet<int>();
         try
         {
@@ -114,7 +123,18 @@ for (int p = 0; p < paths.Count; p++)
     }
     if ((p + 1) % 150 == 0) Console.WriteLine($"   ... {p + 1}/{paths.Count} plugins, {idx.Placements:N0} placements, {sw.Elapsed.TotalSeconds:0}s");
 }
+int bosPlugin = bosOn ? paths.Count : -1;
+if (bosOn) masterIdx[bosPlugin] = BosHook.PseudoMasters(paths.Count);
 var closure = DetectorModel.MasterClosure(masterIdx);
+if (bosOn)
+{
+    idx.Bos!.SetLoadOrder(lightness);
+    var bosLayer = BosHook.Load(BosHook.LooseRoots(overwriteDir, modsDir, dataDir, Mo2LoadOrder.ReadComposition(profileDir).EnabledMods), idx.Bos);
+    var bosRep = BosHook.Apply(idx, bosLayer, bosPlugin);
+    Console.WriteLine($"\n   BOS: {bosLayer.Inis.Count} *_SWAP.ini read ({bosLayer.LinesRead:N0} lines, {bosLayer.LinesFailed:N0} the game would refuse, {bosLayer.Anomalies.Count:N0} anomalies — bosprobe lists them)");
+    foreach (var l in bosRep.Summary()) Console.WriteLine("   " + l);
+}
+else Console.WriteLine("\n   BOS: off — record bases (--bos on to apply the *_SWAP.ini layer)");
 Console.WriteLine($"\nindexed {idx.Placements:N0} placements over {idx.History.Count:N0} refs; {idx.EdgeCount:N0} declared host edges; "
                 + $"{idx.DeletedBy.Count:N0} refs deleted somewhere  ({sw.Elapsed.TotalSeconds:0.0}s)");
 Console.WriteLine($"   plugins that could not be read (contribute nothing, counted per rule 6): {unreadable.Count:N0}"
@@ -123,7 +143,7 @@ Console.WriteLine($"   plugins that could not be read (contribute nothing, count
 var Vanilla = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
 { "Skyrim.esm", "Update.esm", "Dawnguard.esm", "HearthFires.esm", "Dragonborn.esm", "SkyrimVR.esm", "_ResourcePack.esl" };
 const string Ussep = "Unofficial Skyrim Special Edition Patch.esp";
-string PluginName(int p) => p < 0 ? "(none)" : pluginKey[p].FileName.String;
+string PluginName(int p) => p < 0 ? "(none)" : p == bosPlugin ? BosApplyReport.PseudoPluginName : pluginKey[p].FileName.String;
 bool IsVanilla(int p) => p >= 0 && Vanilla.Contains(PluginName(p));
 bool IsUssep(int p) => p >= 0 && string.Equals(PluginName(p), Ussep, StringComparison.OrdinalIgnoreCase);
 string ClassOf(int p) => IsVanilla(p) ? "Bethesda" : IsUssep(p) ? "USSEP" : "mod";
