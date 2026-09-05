@@ -131,6 +131,20 @@ public sealed class OverlapIndex
     public Dictionary<FormKey, BaseObjectSwaps.BosResolution> BosSwaps { get; } = new();
     /// <summary>The pseudo-plugin index BosHook recorded its steps under; -1 when BOS was not applied.</summary>
     public int BosPlugin { get; set; } = -1;
+    /// <summary>Collision layers (COLL) by their INDEX — the number a placed reference's XTRI carries — under the winner:
+    /// the record, its editor id, and whether it is flagged NavmeshObstacle. L_NAVCUT is index 49 in the base game
+    /// (measured 2026-09-04). What the world-state census reads a navcut box by (WorldState.cs).</summary>
+    public Dictionary<uint, (FormKey Key, string? Edid, bool NavmeshObstacle)> CollisionLayersByIndex { get; } = new();
+    /// <summary>ref -> its XTRI collision-layer index under the winner; absent when none.</summary>
+    public Dictionary<FormKey, uint> RefCollisionLayer { get; } = new();
+    /// <summary>The worldspace persistent cells (the top cell of each worldspace, no grid) — a marker placed persistent
+    /// sits here whatever its coordinates, so a per-cell census labels it rather than reading it as a crowded cell.</summary>
+    public HashSet<FormKey> PersistentCells { get; } = new();
+    /// <summary>ref -> its XPRM primitive under the winner; absent when none. A navcut's obstacle is this box.</summary>
+    public Dictionary<FormKey, PlacedPrimitiveInfo> RefPrimitive { get; } = new();
+    /// <summary>ref -> its editor id, the last non-empty one in load order (an override that omits it keeps the earlier
+    /// name). What the world-state census names a switch by.</summary>
+    public Dictionary<FormKey, string> RefEditorId { get; } = new();
 
     /// <summary>Is the reference deleted at or before the winning placement — by the winning snap's own flag, or by a
     /// deleting override at or after the last placement change?</summary>
@@ -147,6 +161,11 @@ public sealed class OverlapIndex
         {
             Bos?.Note(rec);
             if (rec is IPlacedGetter pg) { if (pg.IsDeleted) DeletedBy[pg.FormKey] = plugin; continue; }
+            if (rec is ICollisionLayerGetter coll)
+            {
+                CollisionLayersByIndex[coll.Index] = (coll.FormKey, coll.EditorID, coll.Flags.HasFlag(CollisionLayer.Flag.NavmeshObstacle));
+                continue;
+            }
             if (rec is IModeledGetter mo && rec is ISkyrimMajorRecordGetter sm)
             {
                 BaseInfo[sm.FormKey] = (rec.GetType().Name.Replace("BinaryOverlay", ""), sm.EditorID);
@@ -161,6 +180,7 @@ public sealed class OverlapIndex
         foreach (var cp in PlacementExtract.FromMod(mod))
         {
             CellName[cp.Cell] = (cp.CellEditorId, cp.Interior);
+            if (!cp.Interior && cp.Grid is null && !cp.Worldspace.IsNull) PersistentCells.Add(cp.Cell);
             Bos?.NoteCell(cp.Cell, cp.Worldspace);
             foreach (var r in cp.Refs) Record(plugin, cp.Cell, cp.Worldspace, r);
         }
@@ -174,6 +194,9 @@ public sealed class OverlapIndex
         RefArm[r.FormKey] = r.RecordType;
         Bos?.NotePlaced(r.FormKey, r.Persistent);
         if (r.EncounterZone is { } ez) RefEncounterZone[r.FormKey] = ez; else RefEncounterZone.Remove(r.FormKey);
+        if (r.CollisionLayerIndex is { } cl) RefCollisionLayer[r.FormKey] = cl; else RefCollisionLayer.Remove(r.FormKey);
+        if (!string.IsNullOrWhiteSpace(r.EditorId)) RefEditorId[r.FormKey] = r.EditorId!;
+        if (r.Primitive is { } pr) RefPrimitive[r.FormKey] = pr; else RefPrimitive.Remove(r.FormKey);
         var snap = new Snap(plugin, r.Position, cell, r.InitiallyDisabled, r.Deleted, worldspace, r.Rotation, r.Scale);
         if (History.Winning(r.FormKey) is { } prev && prev.SameAs(snap)
             && (MathF.Abs(prev.Rot.X - snap.Rot.X) > 1e-4f || MathF.Abs(prev.Rot.Y - snap.Rot.Y) > 1e-4f
@@ -217,8 +240,12 @@ public sealed class OverlapIndex
     /// is not an editor marker (the engine renders no marker mesh, so a marker cannot obstruct anything), and whose
     /// world box is no larger than <paramref name="maxDim"/> on any axis (volumes — fog, LOD, skydomes — overlap
     /// everything by design).</summary>
+    /// <param name="enabledOf">the runtime enable state per reference — a world-state arm (EnableState under
+    /// StateArm.Wrap, roadmap 4.11). Null reads the winning snap's own flag, the population every run before 2026-09-04
+    /// judged, byte for byte.</param>
     public List<OverlapCandidate> Candidates(Func<FormKey, (Aabb Box, char Src)> boxOf, ISet<string> obstructing,
-                                             Func<int, bool> excludeResponsible, float maxDim, out CandidateSkips skips)
+                                             Func<int, bool> excludeResponsible, float maxDim, out CandidateSkips skips,
+                                             Func<FormKey, bool>? enabledOf = null)
     {
         skips = new CandidateSkips();
         var list = new List<OverlapCandidate>();
@@ -226,7 +253,7 @@ public sealed class OverlapIndex
         {
             var s = snaps[^1];
             if (s.Deleted) { skips.Deleted++; continue; }
-            if (s.Disabled) { skips.Disabled++; continue; }
+            if (enabledOf is null ? s.Disabled : !enabledOf(key)) { skips.Disabled++; continue; }
             if (excludeResponsible(s.Plugin)) { skips.ExcludedResponsible++; continue; }
             if (!RefBase.TryGetValue(key, out var bk) || !BaseInfo.TryGetValue(bk, out var bi) || !obstructing.Contains(bi.Type))
             { skips.NonObstructingType++; continue; }
