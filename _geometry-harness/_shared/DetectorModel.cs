@@ -1134,6 +1134,36 @@ public static class DetectorModel
     /// Bethesda-or-USSEP tuple (or the definer's, when no such plugin ever stated the cell — <paramref name="AuthorTruth"/>);
     /// <paramref name="First"/> the earliest contributor's; <paramref name="WaterModTruth"/> the last water-mod
     /// contributor's, when one exists; <paramref name="Winner"/> the load-order winner's.</summary>
+    // ---- world state (roadmap 4.11): a row's standing across a switch flip ------------------------------------
+
+    /// <summary>The state-differential decision (frozen 2026-09-04, handoff 2026-09-20 Part C). A detector row is
+    /// judged in the BASELINE (the load-time state, EnableState over the winner) and in a STATE (the same order with
+    /// one switch, or one quest stage's set of switches, flipped — WorldState.StateArm). A row present in the state
+    /// and absent in the baseline is <b>StateConditional</b>: the conflict exists only after the flip, attributed to
+    /// the switch. A row present in the baseline and gone in the state is <b>StateResolved</b>: reported, never a
+    /// finding — the flip removes it. Present in both is Unchanged (the ordinary detector's row, not this class's);
+    /// absent in both is Absent (nothing to say). The credit rule reads the same two arms: a patch that re-parents a
+    /// reference onto the right marker reads as repaired only when the row is gone in THAT state.</summary>
+    public static (StateVerdict Verdict, string Why) StateDifferential(bool inBaseline, bool inState) => (inBaseline, inState) switch
+    {
+        (false, true) => (StateVerdict.StateConditional, "present once the switch is flipped, absent at load time"),
+        (true, false) => (StateVerdict.StateResolved, "present at load time, gone once the switch is flipped"),
+        (true, true) => (StateVerdict.Unchanged, "present in both states — the ordinary detector's row"),
+        _ => (StateVerdict.Absent, "present in neither state"),
+    };
+
+    /// <summary>The rule-12 split for a state row, by the SET MEMBER's placer (the reference the flip brought in or took
+    /// out) and the OTHER side's placer: Bethesda-on-Bethesda is the floor (a vanilla set against vanilla geometry — the
+    /// sieges are full of it); a mod's reference against a vanilla switch's set; a mod's own set member (whether the mod
+    /// hung it on its own switch or on a vanilla one — the switch owner rides beside the row) against vanilla geometry;
+    /// mod against mod. USSEP on either side is its own row, as the overlap split keeps it.</summary>
+    public static StatePopulation ClassifyStatePopulation(bool memberIsVanilla, bool otherIsVanilla, bool memberIsUssep, bool otherIsUssep)
+        => memberIsVanilla && otherIsVanilla ? StatePopulation.BethesdaFloor
+         : memberIsUssep || otherIsUssep ? StatePopulation.UssepInvolved
+         : memberIsVanilla ? StatePopulation.ModRefUnderVanillaSet
+         : otherIsVanilla ? StatePopulation.ModSetOverVanilla
+         : StatePopulation.ModOnMod;
+
     public readonly record struct WaterFacts(WaterTuple Truth, WaterTuple First, WaterTuple? WaterModTruth, WaterTuple Winner,
                                              PluginKind WinnerKind, bool AuthorTruth, bool DuplicateGridPoint);
 
@@ -1315,6 +1345,13 @@ public enum SeamSight { Seen, Blind }
 /// the run's threshold; a contact row — the dependent still touches nothing within ε. Never a stricter or looser test
 /// than the class itself.</summary>
 public enum PhysicalState { Holds, Gone, Unmeasured }
+
+/// <summary>A row's standing across a switch flip (<see cref="DetectorModel.StateDifferential"/>). StateConditional is
+/// the class; StateResolved is reported, not a finding.</summary>
+public enum StateVerdict { StateConditional, StateResolved, Unchanged, Absent }
+
+/// <summary>The rule-12 split for a state row (<see cref="DetectorModel.ClassifyStatePopulation"/>).</summary>
+public enum StatePopulation { BethesdaFloor, UssepInvolved, ModRefUnderVanillaSet, ModSetOverVanilla, ModOnMod }
 
 /// <summary>What a row's movement between two emits is credited as (<see cref="DetectorModel.Credit"/>).</summary>
 public enum CreditOutcome { Unchanged, Repaired, Reclassified, Created, Unmeasured, Absent }

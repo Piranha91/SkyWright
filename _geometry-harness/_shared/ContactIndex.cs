@@ -152,6 +152,15 @@ public sealed class ContactIndex
     readonly Dictionary<(FormKey Key, int Snap), TriangleSoup?> _depSoups = new();
     readonly Dictionary<FormKey, EnableResolution> _winnerEnable = new();
     readonly Dictionary<int, Dictionary<FormKey, EnableResolution>> _armEnable = new();
+    readonly Dictionary<FormKey, EnableResolution> _winnerBaseline = new();
+    StateArm? _state;
+    /// <summary>The world-state arm (roadmap 4.11): a set of switches flipped from their baseline. Set BEFORE any enable
+    /// state is read — the memos are cleared when it changes. Null is the load-time state, every run before 2026-09-04.</summary>
+    public StateArm? State
+    {
+        get => _state;
+        set { _state = value; _winnerEnable.Clear(); _armEnable.Clear(); _winnerBaseline.Clear(); }
+    }
 
     /// <summary>The reach a host looks for dependents within; the size bands — a host is furniture-scale or larger
     /// (<see cref="MinHostDim"/>, 64 u) up to the volume cap, a dependent is furniture-scale or smaller (under
@@ -273,20 +282,27 @@ public sealed class ContactIndex
     /// <summary>A reference's runtime enable state under the winner: its winning flag and winning XESP, the chain
     /// followed through everything else's winning state. A reference the order does not place, or has deleted, is
     /// unknown to the chain (reported unresolved).</summary>
-    public EnableResolution WinnerEnable(FormKey key) => EnableState.Resolve(key, k =>
+    public EnableResolution WinnerEnable(FormKey key) => EnableState.Resolve(key, WinnerStateFacts, _winnerEnable);
+
+    EnableFacts? WinnerRawFacts(FormKey k)
     {
         var s = Index.History.Winning(k);
         if (s is null || s.Value.Deleted || Index.IsDeletedNow(k)) return null;
         var (p, o) = EnableParentAt(k, int.MaxValue);
         return new EnableFacts(s.Value.Disabled, p, o);
-    }, _winnerEnable);
+    }
+
+    /// <summary>The winner's facts under the state arm: a flipped switch reads as the opposite of its load-time state
+    /// (resolved from the RAW facts, memoised apart), everything else as the records say.</summary>
+    EnableFacts? WinnerStateFacts(FormKey k)
+        => _state is null ? WinnerRawFacts(k) : _state.Wrap(WinnerRawFacts, b => EnableState.Resolve(b, WinnerRawFacts, _winnerBaseline))(k);
 
     /// <summary>A reference's runtime enable state in the arm WITHOUT <paramref name="mover"/>'s side: each chain
     /// reference's flag at its authoring snap and its XESP as last set outside the mover's side. Memoised per mover.</summary>
     public EnableResolution ArmEnable(FormKey key, int mover, IReadOnlyList<HashSet<int>> closure)
     {
         if (!_armEnable.TryGetValue(mover, out var memo)) _armEnable[mover] = memo = new Dictionary<FormKey, EnableResolution>();
-        return EnableState.Resolve(key, k =>
+        EnableFacts? raw(FormKey k)
         {
             var snaps = Index.History.Of(k);
             if (snaps is null) return null;
@@ -294,7 +310,11 @@ public sealed class ContactIndex
             if (i < 0 || snaps[i].Deleted) return null;
             var (p, o) = ArmEnableParent(k, mover, closure);
             return new EnableFacts(snaps[i].Disabled, p, o);
-        }, memo);
+        }
+        // Under a state arm the flip applies in this arm too — a switch's baseline here is its state in the arm without
+        // the mover, resolved from the raw facts.
+        var facts = _state is null ? raw : _state.Wrap(raw, b => EnableState.Resolve(b, raw, new Dictionary<FormKey, EnableResolution>()));
+        return EnableState.Resolve(key, facts, memo);
     }
 
     /// <summary>The plugin whose step on a reference's enable chain last changed its runtime state under the winner —
