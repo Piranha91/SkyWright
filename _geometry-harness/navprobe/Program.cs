@@ -70,6 +70,22 @@ foreach (var rec in mod.EnumerateMajorRecords())
 }
 Console.WriteLine($"vanilla base records with a mesh: {baseMesh.Count:N0}  ({sw.Elapsed.TotalSeconds:0.0}s)");
 
+// The physical floor under each cell's navmesh (Q24, 2026-09-05 — _shared/FloorFeed.cs): an exterior floor reaches across
+// cell borders, so the plugin's exterior refs and LAND are filed by grid per worldspace first (one pass over the cells;
+// the sweep below streams them again). The floor candidates are the record's own placements — the swap layer is not
+// applied to floors; the obstacles keep their BOS-resolved bases.
+sw.Restart();
+var floorRefsByWorld = new Dictionary<FormKey, Dictionary<(int, int), Dictionary<FormKey, PlacedRef>>>();
+var floorLandByWorld = new Dictionary<FormKey, Dictionary<(int, int), float[,]>>();
+foreach (var cp in PlacementExtract.FromMod(mod))
+{
+    if (cp.Interior) continue;
+    if (!floorRefsByWorld.TryGetValue(cp.Worldspace, out var frg)) { floorRefsByWorld[cp.Worldspace] = frg = new(); floorLandByWorld[cp.Worldspace] = new(); }
+    FloorFeed.FileByGrid(cp, frg, floorLandByWorld[cp.Worldspace]);
+}
+Console.WriteLine($"floor candidates filed by grid: {floorRefsByWorld.Values.Sum(w => w.Values.Sum(d => d.Count)):N0} exterior refs, {floorLandByWorld.Values.Sum(w => w.Count):N0} LAND records in {floorRefsByWorld.Count} worldspaces  ({sw.Elapsed.TotalSeconds:0.0}s)");
+var floorTally = new FloorFeed.Tally();
+
 // --bos on (default): the swap layer's index wants the WHOLE order — the runtime-id table, every EditorID, the cells'
 // locations and keywords — and a swapped base may be defined anywhere in it, so the order is walked once for the index
 // (_shared/BosHook.cs, BosFeed) and for the winning model of every modeled record. The population swept below is still
@@ -104,7 +120,7 @@ var bosRep = new BosApplyReport();
 // The actor band's top is DERIVED per cell (the tallest placed actor, else the tallest playable race) since
 // 2026-09-02; the settings' Height column is what the BROAD rules still use and what every earlier run used.
 var (fallbackTop, fallbackSrc) = ActorBand.TallestPlayable(raceFacts);
-Console.WriteLine($"actor band: bottom {ActorBand.StepHeight:0} u (step height, measured 2026-09-05; the step band to {ActorBand.StepBandTop:0} u is named in the verdict); top per cell from placed actors (race Height x NPC Height; placement scale not counted since 2026-09-05), else {fallbackSrc}");
+Console.WriteLine(FloorFeed.BandLine(controllerBand) + $"; top fallback {fallbackSrc}");
 int cellsWithActors = 0; float bandMin = float.MaxValue, bandMax = 0f;
 var bandHist = new SortedDictionary<int, int>();   // band top rounded to 4 u -> cells
 
@@ -176,6 +192,15 @@ Geo Geometry(string rel)
     }
     if (render is not null) cachedTris += render.TriangleCount;
     return geoCache[rel] = new Geo(m.Bounds, m.HasCollision, true, render, "fallback");
+}
+
+// A floor candidate's solid: the same soup the obstacles are read from (the collision soup on the actor-solid layers, the
+// render soup where the decode is incomplete), by the record's own base.
+(Aabb Box, TriangleSoup Soup)? FloorGeometry(PlacedRef r)
+{
+    if (r.Base is not { } b || !baseMesh.TryGetValue(b, out var bm)) return null;
+    var g = Geometry(bm.Mesh);
+    return g.Ok && g.Soup is not null && !g.Box.IsEmpty ? (g.Box, g.Soup) : null;
 }
 
 // world-space column index per (mesh, transform), memoised within a cell — many refs repeat the same
@@ -268,7 +293,16 @@ foreach (var cp in PlacementExtract.FromMod(mod))
 
     var band = ActorBand.ForCell(cp.Refs, npcFacts, raceFacts, fallbackTop, fallbackSrc);
     float bandTop = band.Top;
-    float routeTop = controllerBand ? ActorBand.ControllerTop(bandTop) : bandTop;
+    float physicalTop = controllerBand ? ActorBand.PhysicalControllerTop(bandTop) : bandTop;
+    // The floor the band stands on in this cell: its own refs for an interior, the 3×3 neighbourhood by position for an
+    // exterior, and the terrain (Q24).
+    FloorField floor;
+    if (!cp.Interior && cp.Grid is { } floorGrid && floorRefsByWorld.TryGetValue(cp.Worldspace, out var frw))
+    {
+        var (nbRefs, nbLand) = FloorFeed.Neighbourhood(floorGrid, frw, floorLandByWorld[cp.Worldspace]);
+        floor = FloorFeed.Build(nbRefs, FloorGeometry, nbLand);
+    }
+    else floor = FloorFeed.Build(cp.Refs, FloorGeometry, null);
     Dictionary<NavGraph.TriRef, NavGraph.Node>? gnodes = null;   // the cell's walkable graph, built once when a route needs it
     if (band.Actors > 0) cellsWithActors++;
     bandMin = MathF.Min(bandMin, bandTop); bandMax = MathF.Max(bandMax, bandTop);
@@ -379,7 +413,7 @@ foreach (var cp in PlacementExtract.FromMod(mod))
         {
             routeMeasured++;
             gnodes ??= NavGraph.Build(index).Nodes;
-            var facts = RouteConnectivity.Measure(index, columns, world, RouteMargin, RouteStep, ActorBand.StepHeight, routeTop, Ladder, graph: gnodes);
+            var facts = RouteConnectivity.Measure(index, columns, world, RouteMargin, RouteStep, ActorBand.PhysicalStep, physicalTop, Ladder, graph: gnodes, floorAt: floor.FloorAt);
             var v64 = DetectorModel.RouteBlockage(facts.Judged, facts.Touched, facts.MaxIntactRung, facts.MaxIntactRungWithout, Ladder, 64f);
             var v128 = DetectorModel.RouteBlockage(facts.Judged, facts.Touched, facts.MaxIntactRung, facts.MaxIntactRungWithout, Ladder, 128f);
             int col = v64.Verdict switch { RouteVerdict.Blocked => 0, RouteVerdict.Narrowed => 1, RouteVerdict.Clipped => v128.Verdict == RouteVerdict.Narrowed ? 2 : 3, RouteVerdict.None => 4, _ => 5 };
@@ -408,6 +442,7 @@ foreach (var cp in PlacementExtract.FromMod(mod))
         }
     }
 
+    floorTally.Add(floor);
     if (cells % 1000 == 0)
         Console.WriteLine($"   ... {cells:N0} cells, {totalRefs:N0} refs, {measured:N0} meshes measured, {sw.Elapsed.TotalSeconds:0}s");
 }
@@ -430,6 +465,7 @@ if (geometrySource == "collision")
 }
 Console.WriteLine($"distinct meshes measured  : {measured:N0}   (unreadable: {measureFail:N0})   cached triangles: {cachedTris:N0}");
 Console.WriteLine($"elapsed                   : {sw.Elapsed.TotalSeconds:0.0}s");
+Console.WriteLine("   " + floorTally.Line());
 if (bosOn) foreach (var l in bosRep.Summary()) Console.WriteLine("   " + l);
 Console.WriteLine();
 
@@ -498,7 +534,7 @@ if (routeBlocked.Count > 0)
 
 Console.WriteLine();
 Console.WriteLine($"   ---- the ROUTE-CUT rule (4.7's closing step) on the vanilla floor: the corridor's path line, cut at capsule 22 u ----");
-Console.WriteLine($"   band top {(controllerBand ? $"derived × {ActorBand.ControllerFactor} (the controller's, Part C)" : "derived, nominal")}; passage boundary 48 u; measured {routeMeasured:N0}; doors set aside {routeDoors:N0}; MoveableStatics set aside (pushed aside) {routeMovable:N0}");
+Console.WriteLine($"   band above the feet on the physical floor (Q24): bottom {ActorBand.PhysicalStep:0.#} u, top {(controllerBand ? $"derived × {ActorBand.ControllerFactor} + {ActorBand.StationOffset:0.#} (the controller's, Part C)" : "derived, nominal")}; passage boundary 48 u; measured {routeMeasured:N0}; doors set aside {routeDoors:N0}; MoveableStatics set aside (pushed aside) {routeMovable:N0}");
 Console.WriteLine($"   NoLine by reason: {string.Join(", ", cutNoLine.OrderByDescending(kv => kv.Value).Select(kv => $"{kv.Key} {kv.Value:N0}"))}");
 Console.WriteLine($"   {"class",-16} {"measured",9} {"BLOCKED",9} {"rate",8} {"LIKELY",9} {"rate",8} {"CLIPPED",9} {"NoLine",9} {"none",7} {"unjudged",9}");
 foreach (var kv in cutByClass.OrderByDescending(kv => kv.Value[6]))

@@ -1978,15 +1978,22 @@ Console.WriteLine("\nPROOF — the route-cut rule (DetectorModel.RouteCut)");
     Check("cut: no line outranks a stray cut flag -> NoLine", c.Verdict == RouteCutVerdict.NoLine, c.Why);
 
     // Q23 (2026-09-05): the band's bottom is measured, and the verdict names the step band above it — the "which actor"
-    // clause: inside (48, 60] a walking humanoid gets over the object by size and pace; the CLASS does not move on it.
-    c = DetectorModel.RouteCut(true, touched: 16, lineFound: true, lineWhy: "", cut: true, passage: 32f, cutRise: 52f);
-    Check("cut: a 52 u rise at the cut -> still Blocked, and the why names the step band", c.Verdict == RouteCutVerdict.Blocked && c.Why.Contains("step band"), c.Why);
-    c = DetectorModel.RouteCut(true, touched: 16, lineFound: true, lineWhy: "", cut: true, passage: 64f, cutRise: 60f);
-    Check("cut: a 60 u rise (the band's top, inclusive) -> LikelyBlocked with the band clause", c.Verdict == RouteCutVerdict.LikelyBlocked && c.Why.Contains("step band"), c.Why);
-    c = DetectorModel.RouteCut(true, touched: 16, lineFound: true, lineWhy: "", cut: true, passage: 64f, cutRise: 70f);
-    Check("cut: a 70 u rise -> no band clause (above the band: no walker measured got over)", !c.Why.Contains("step band"), c.Why);
-    c = DetectorModel.RouteCut(true, touched: 16, lineFound: true, lineWhy: "", cut: true, passage: 32f, cutRise: 48f);
-    Check("cut: a rise AT the bottom (48) -> no band clause (every walker cleared it; the band is exclusive at the bottom)", !c.Why.Contains("step band"), c.Why);
+    // clause: inside the step band a walking humanoid gets over the object by size and pace; the CLASS does not move on it.
+    // The rise is above the FEET since Q24 (the physical floor): the band is (58.4, 70.4], the measured (48, 60] above the
+    // navmesh plus the station's 10.4 u offset.
+    Check("band: the physical step is the measured 48 u + the station's 10.4 u offset = 58.4, the band's top 70.4",
+          MathF.Abs(DetectorModel.PhysicalStep - 58.4f) < 1e-4f && MathF.Abs(DetectorModel.PhysicalStepBandTop - 70.4f) < 1e-4f && DetectorModel.FallbackOffset == DetectorModel.StationOffset,
+          $"{DetectorModel.PhysicalStep} / {DetectorModel.PhysicalStepBandTop}");
+    c = DetectorModel.RouteCut(true, touched: 16, lineFound: true, lineWhy: "", cut: true, passage: 32f, cutRise: 62.4f);
+    Check("cut: a 62 u rise above the feet (52 above the station's navmesh) -> still Blocked, and the why names the step band", c.Verdict == RouteCutVerdict.Blocked && c.Why.Contains("step band"), c.Why);
+    c = DetectorModel.RouteCut(true, touched: 16, lineFound: true, lineWhy: "", cut: true, passage: 64f, cutRise: 70.4f);
+    Check("cut: a 70.4 u rise (the band's top, inclusive) -> LikelyBlocked with the band clause", c.Verdict == RouteCutVerdict.LikelyBlocked && c.Why.Contains("step band"), c.Why);
+    c = DetectorModel.RouteCut(true, touched: 16, lineFound: true, lineWhy: "", cut: true, passage: 64f, cutRise: 80f);
+    Check("cut: an 80 u rise -> no band clause (above the band: no walker measured got over)", !c.Why.Contains("step band"), c.Why);
+    c = DetectorModel.RouteCut(true, touched: 16, lineFound: true, lineWhy: "", cut: true, passage: 32f, cutRise: 58.4f);
+    Check("cut: a rise AT the bottom (58.4) -> no band clause (every walker cleared it; the band is exclusive at the bottom)", !c.Why.Contains("step band"), c.Why);
+    Check("cut: the navmesh-relative clause still reads at the station's numbers when asked (52 inside (48, 60])",
+          DetectorModel.StepBandClause(52f, DetectorModel.StepHeight, DetectorModel.StepBandTop).Contains("step band") && DetectorModel.StepBandClause(52f).Length == 0, "");
     c = DetectorModel.RouteCut(true, touched: 16, lineFound: true, lineWhy: "", cut: true, passage: 32f);
     Check("cut: no rise known -> no band clause", !c.Why.Contains("step band"), c.Why);
 }
@@ -2020,6 +2027,173 @@ Console.WriteLine("\nPROOF — the actor band (ActorBand: the measured bottom, t
     Check("band: no actors -> the fallback, named", MathF.Abs(none.Top - 138f) < 0.1f && none.Source.Contains("no actors"), none.Source);
 }
 
+
+// ---------------------------------------------------------------------------------------
+// THE NAVMESH-TO-FLOOR OFFSET (Q24, 2026-09-05 — HousecarlCore.NavmeshFloor): the floor under a navmesh point is the
+// HIGHEST up-facing actor-solid surface within the depth bound below and the step reach above; the terrain competes
+// on the same rule; nothing within reach is "no floor" with its reason; the navmesh inside a solid is a diagnostic,
+// not a refusal. Calibrated on the Ratway corridor against 718 recorded walker positions (feet − floor within 2 u
+// for 88 %) before these cases were written; they pin the arithmetic, not the calibration.
+// ---------------------------------------------------------------------------------------
+Console.WriteLine("\nPROOF — the navmesh-to-floor offset (NavmeshFloor: the floor rule, the samples, the terrain, the reductions)");
+{
+    static List<(float Z, bool Up)> S(params (float Z, bool Up)[] s) => new(s);
+    var r = NavmeshFloor.Read(47f, S((37f, true)), null);
+    Check("floor: an up-facing surface 10 u below -> found on the mesh, δ +10", r.Found && r.Source == FloorSource.Mesh && MathF.Abs(r.Offset - 10f) < 1e-3f && !r.Embedded, $"{r.Source} δ {r.Offset}");
+    r = NavmeshFloor.Read(47f, S((17f, true), (37f, true), (-60f, true)), null);
+    Check("floor: several up-facing surfaces below -> the HIGHEST is the floor (+10, not +30)", r.Found && MathF.Abs(r.Offset - 10f) < 1e-3f, $"δ {r.Offset}");
+    r = NavmeshFloor.Read(47f, S((67f, true), (37f, true)), null);
+    Check("floor: an up-facing surface 20 u ABOVE, within the 48 u reach -> it is the floor (a crate the walker steps onto), δ −20",
+          r.Found && MathF.Abs(r.Offset + 20f) < 1e-3f, $"δ {r.Offset}");
+    r = NavmeshFloor.Read(47f, S((107f, true), (37f, true)), null);
+    Check("floor: an up-facing surface 60 u above is past the reach -> the one below is the floor (+10)", r.Found && MathF.Abs(r.Offset - 10f) < 1e-3f, $"δ {r.Offset}");
+    r = NavmeshFloor.Read(47f, S((107f, true)), null);
+    Check("floor: only a surface past the reach -> no floor, OnlyHigher", !r.Found && r.Reason == NoFloorReason.OnlyHigher && r.Surfaces == 1, $"{r.Reason}");
+    r = NavmeshFloor.Read(47f, S((-153f, true)), null);
+    Check("floor: only a surface 200 u below (past the 128 u depth) -> no floor, OnlyDeeper", !r.Found && r.Reason == NoFloorReason.OnlyDeeper, $"{r.Reason}");
+    r = NavmeshFloor.Read(47f, S((37f, false)), null);
+    Check("floor: only a DOWN-facing surface within reach -> no floor, OnlyDownFacing", !r.Found && r.Reason == NoFloorReason.OnlyDownFacing, $"{r.Reason}");
+    r = NavmeshFloor.Read(47f, S(), null);
+    Check("floor: nothing in the column -> NoSurface, 0 surfaces", !r.Found && r.Reason == NoFloorReason.NoSurface && r.Surfaces == 0, $"{r.Reason} {r.Surfaces}");
+    r = NavmeshFloor.Read(47f, S((32f, true)), 42f);
+    Check("floor: terrain 5 u below beats a mesh 15 u below -> Land, δ +5", r.Found && r.Source == FloorSource.Land && MathF.Abs(r.Offset - 5f) < 1e-3f, $"{r.Source} δ {r.Offset}");
+    r = NavmeshFloor.Read(47f, S((32f, true)), 27f);
+    Check("floor: a mesh 15 u below beats terrain 20 u below -> Mesh, δ +15 (a street over its ground)", r.Found && r.Source == FloorSource.Mesh && MathF.Abs(r.Offset - 15f) < 1e-3f, $"{r.Source} δ {r.Offset}");
+    r = NavmeshFloor.Read(47f, S(), -200f);
+    Check("floor: only terrain past the depth -> OnlyDeeper, and the terrain counted as a surface", !r.Found && r.Reason == NoFloorReason.OnlyDeeper && r.Surfaces == 1, $"{r.Reason} {r.Surfaces}");
+    r = NavmeshFloor.Read(47f, S((44f, false), (27f, true)), null);
+    Check("floor: a down-facing face 3 u below the navmesh over an up-facing floor 20 u below -> found (+20) and EMBEDDED (the navmesh is inside a solid)",
+          r.Found && MathF.Abs(r.Offset - 20f) < 1e-3f && r.Embedded, $"δ {r.Offset} embedded {r.Embedded}");
+    r = NavmeshFloor.Read(47f, S((37f, false), (37f, true)), null);
+    Check("floor: a down-facing underside coincident with the up-facing floor it stands on -> found, NOT embedded (the tie goes to up)", r.Found && !r.Embedded, $"embedded {r.Embedded}");
+    r = NavmeshFloor.Read(47f, S((37f, true)), null, maxDepth: 8f);
+    Check("floor: the depth bound is a parameter — 10 u below is past an 8 u bound", !r.Found && r.Reason == NoFloorReason.OnlyDeeper, $"{r.Reason}");
+    r = NavmeshFloor.Read(47f, S((67f, true), (37f, true)), null, upReach: 16f);
+    Check("floor: the reach is a parameter — 20 u above is past a 16 u reach, so the floor below wins (+10)", r.Found && MathF.Abs(r.Offset - 10f) < 1e-3f, $"δ {r.Offset}");
+
+    // samples: the centroid alone on a small triangle, four interior points on a long one
+    Span<Vector3> pts = stackalloc Vector3[4];
+    int n = NavmeshFloor.SamplePoints(new Vec3(0, 0, 10), new Vec3(100, 0, 10), new Vec3(0, 100, 10), 192f, pts);
+    Check("samples: a 100 u triangle -> one point, the centroid, at the navmesh height", n == 1 && MathF.Abs(pts[0].X - 100f / 3f) < 1e-3f && MathF.Abs(pts[0].Y - 100f / 3f) < 1e-3f && pts[0].Z == 10f, $"{n} {pts[0]}");
+    n = NavmeshFloor.SamplePoints(new Vec3(0, 0, 0), new Vec3(400, 0, 0), new Vec3(0, 400, 40), 192f, pts);
+    bool inside = true;
+    for (int k = 0; k < n; k++) inside &= pts[k].X > 0 && pts[k].Y > 0 && pts[k].X + pts[k].Y < 400;
+    Check("samples: a 400 u triangle -> four points, every one strictly inside it (never on an edge a wall may stand on)", n == 4 && inside, $"{n} inside {inside}");
+    Check("samples: the extra points interpolate the navmesh height (the (½,¼,¼) point on a tilted triangle)", n == 4 && MathF.Abs(pts[3].Z - 20f) < 1e-3f, $"{pts[3]}");
+
+    // terrain: bilinear over the heightmap, with the triangulation error bound stated at the point
+    var flat = new float[LandHeight.Side, LandHeight.Side];
+    for (int x = 0; x < LandHeight.Side; x++) for (int y = 0; y < LandHeight.Side; y++) flat[x, y] = 100f;
+    var h = NavmeshFloor.LandHeightAt(flat, 2, -3, 2 * 4096f + 1000f, -3 * 4096f + 777f, out float saddle);
+    Check("terrain: a flat heightmap reads its height anywhere in the cell, error bound 0", h == 100f && saddle == 0f, $"{h} ±{saddle}");
+    Check("terrain: a point outside the cell reads null", NavmeshFloor.LandHeightAt(flat, 2, -3, 2 * 4096f - 1f, -3 * 4096f, out _) is null, "");
+    var sad = new float[LandHeight.Side, LandHeight.Side];
+    sad[1, 1] = 40f;   // one raised vertex: the first quad is a saddle (0, 0, 0, 40)
+    h = NavmeshFloor.LandHeightAt(sad, 0, 0, 64f, 64f, out saddle);
+    Check("terrain: the middle of a (0,0,0,40) quad reads the bilinear 10 with a ±10 bound (a quarter of the saddle: either diagonal)", MathF.Abs(h!.Value - 10f) < 1e-3f && MathF.Abs(saddle - 10f) < 1e-3f, $"{h} ±{saddle}");
+    h = NavmeshFloor.LandHeightAt(sad, 0, 0, 128f, 128f, out saddle);
+    Check("terrain: a vertex reads exactly, bound 0", h == 40f && saddle == 0f, $"{h} ±{saddle}");
+
+    // reductions
+    var reads = new FloorReading[]
+    {
+        new(47f, 37f, FloorSource.Mesh, NoFloorReason.Found, false, 1), new(47f, 35f, FloorSource.Mesh, NoFloorReason.Found, false, 1),
+        new(47f, 17f, FloorSource.Land, NoFloorReason.Found, true, 2), new(47f, float.NaN, FloorSource.None, NoFloorReason.OnlyDeeper, false, 1),
+    };
+    var red = NavmeshFloor.Reduce(reads);
+    Check("reduce: 3 of 4 samples floored -> found, the median offset (12), the land and embedded flags carried", red.Found && MathF.Abs(red.Offset - 12f) < 1e-3f && red.AnyLand && red.AnyEmbedded && red.FoundSamples == 3 && red.Samples == 4, $"{red}");
+    red = NavmeshFloor.Reduce(new FloorReading[] { reads[0], reads[3], reads[3], new(47f, float.NaN, FloorSource.None, NoFloorReason.NoSurface, false, 0) });
+    Check("reduce: 1 of 4 floored -> not found, the commonest reason (OnlyDeeper)", !red.Found && red.Reason == NoFloorReason.OnlyDeeper && float.IsNaN(red.Offset), $"{red.Reason}");
+    red = NavmeshFloor.Reduce(new FloorReading[] { reads[0], reads[3] });
+    Check("reduce: 1 of 2 floored -> found (at least half)", red.Found && MathF.Abs(red.Offset - 10f) < 1e-3f, $"{red.Offset}");
+    Check("reduce: no samples -> not found", !NavmeshFloor.Reduce(Array.Empty<FloorReading>()).Found, "");
+    Check("quantile: [1..5] -> median 3, p10 1.4; empty -> NaN", NavmeshFloor.Quantile(new List<float> { 5, 1, 4, 2, 3 }, 0.5f) == 3f && MathF.Abs(NavmeshFloor.Quantile(new List<float> { 5, 1, 4, 2, 3 }, 0.1f) - 1.4f) < 1e-4f && float.IsNaN(NavmeshFloor.Quantile(new List<float>(), 0.5f)), "");
+    var (st, sc) = NavmeshFloor.Storeys(new float[] { 300f, 0f, 5f, 305f, 10f });
+    Check("storeys: heights 0/5/10 and 300/305 -> two storeys, labelled in input order", sc == 2 && st[0] == 1 && st[1] == 0 && st[2] == 0 && st[3] == 1 && st[4] == 0, string.Join(",", st));
+    (st, sc) = NavmeshFloor.Storeys(new float[] { 0f, 100f, 200f, 300f });
+    Check("storeys: a ramp of 100 u steps is ONE storey (every gap within the 128 u tolerance)", sc == 1, $"{sc}");
+    Check("storeys: no heights -> 0 storeys", NavmeshFloor.Storeys(Array.Empty<float>()).Count == 0, "");
+}
+
+// ---------------------------------------------------------------------------------------
+// THE BAND ON THE PHYSICAL FLOOR (Q24, 2026-09-05): a FloorField answers the floor under a navmesh point from placed solids
+// and terrain, falls back to the navmesh minus the station's offset where nothing is within reach, and
+// RouteConnectivity.Measure stands the band, the capsule slab and the cut rise on it when given floorAt. The arithmetic the
+// handoff asked to pin: a cell at δ 0, at δ 10, at δ 20, and no floor → the fallback. The strip is crossprobe's corridor
+// (128 u wide, navmesh at z 0), the obstacles are hand-built boxes, the answers are known by construction.
+// ---------------------------------------------------------------------------------------
+Console.WriteLine("\nPROOF — the band on the physical floor (FloorField; RouteConnectivity.Measure with floorAt)");
+{
+    static MeshColumnIndex BoxColumns(Vector3 lo, Vector3 hi)
+    {
+        var (v, i) = HavokCollision.BoxSoup((hi - lo) / 2f);
+        var c = (lo + hi) / 2f;
+        return MeshColumnIndex.Build(v.Select(p => p + c).ToArray(), i.ToArray());
+    }
+    static Aabb BoxOf(Vector3 lo, Vector3 hi) => new(new Vec3(lo.X, lo.Y, lo.Z), new Vec3(hi.X, hi.Y, hi.Z), false);
+    var slabId = FormKey.Factory("000001:Test.esp"); var crateId = FormKey.Factory("000002:Test.esp");
+
+    // the field: a floor slab whose top is 10 u under a navmesh at z 0 (the station's shape), and a 40 u crate standing on it
+    var field = new FloorField(fallbackOffset: 10.4f);
+    field.Add(slabId, BoxOf(new Vector3(-700, -50, -30), new Vector3(700, 200, -10)), () => BoxColumns(new Vector3(-700, -50, -30), new Vector3(700, 200, -10)));
+    field.Add(crateId, BoxOf(new Vector3(100, 40, -10), new Vector3(140, 80, 30)), () => BoxColumns(new Vector3(100, 40, -10), new Vector3(140, 80, 30)));
+    var fr = field.Read(0f, 60f, 0f);
+    Check("field: the slab's top 10 u under the navmesh -> the floor at −10, δ +10, on a mesh", fr.Found && fr.Source == FloorSource.Mesh && MathF.Abs(fr.FloorZ + 10f) < 1e-3f && MathF.Abs(fr.Offset - 10f) < 1e-3f, $"{fr}");
+    Check("field: FloorAt returns that floor", MathF.Abs(field.FloorAt(0f, 60f, 0f) + 10f) < 1e-3f, "");
+    float far = field.FloorAt(5000f, 5000f, 0f);
+    Check("field: a point off every candidate -> the fallback, the navmesh − 10.4, counted", MathF.Abs(far + 10.4f) < 1e-3f && field.Fallbacks == 1, $"{far} fallbacks {field.Fallbacks}");
+    fr = field.Read(120f, 60f, 0f);
+    Check("field: under the crate its top (30 u above the navmesh, within the step reach) is the floor: δ −30", fr.Found && MathF.Abs(fr.Offset + 30f) < 1e-3f, $"{fr}");
+    fr = field.Read(120f, 60f, 0f, out _, exclude: crateId);
+    Check("field: the same point with the crate excluded -> the slab under it (+10): the floor a walker meets the crate from", fr.Found && MathF.Abs(fr.Offset - 10f) < 1e-3f, $"{fr}");
+    var landField = new FloorField(fallbackOffset: 10.4f);
+    var flatLand = new float[LandHeight.Side, LandHeight.Side];
+    for (int x = 0; x < LandHeight.Side; x++) for (int y = 0; y < LandHeight.Side; y++) flatLand[x, y] = -4f;
+    landField.AddLand((0, 0), flatLand);
+    landField.Add(slabId, BoxOf(new Vector3(0, 0, -30), new Vector3(700, 200, -10)), () => BoxColumns(new Vector3(0, 0, -30), new Vector3(700, 200, -10)));
+    Check("field: terrain 4 u under the navmesh beats a slab 10 u under -> Land, δ +4", landField.Read(100f, 100f, 0f) is { Found: true, Source: FloorSource.Land } lr && MathF.Abs(lr.Offset - 4f) < 1e-3f, $"{landField.Read(100f, 100f, 0f)}");
+    Check("field: the terrain counts as a floor found, not a fallback", landField.Fallbacks == 0 && landField.LandFloors >= 1, $"{landField.Fallbacks} {landField.LandFloors}");
+
+    // the route rule on the corridor with a floor: a beam across it whose top is 55 u above the navmesh
+    // the strip's two triangles LINKED as a record links them (crossprobe's route-cut strip): the line pathfinder reads
+    // the record's edge links, never shared vertices
+    var strip = new NavmeshGeometry(new FormKey(ModKey.FromNameAndExtension("synthetic.esp"), 7),
+        new[] { new Vec3(-600, 3, 0), new Vec3(600, 3, 0), new Vec3(600, 131, 0), new Vec3(-600, 131, 0) },
+        new[] { new NavTri(0, 1, 2, 0, -1, -1, 1), new NavTri(0, 2, 3, 0, 0, -1, -1) }, new Vec3(-600, 3, 0), new Vec3(600, 131, 0),
+        Array.Empty<NavEdgeLink>(), Array.Empty<NavDoorTriangle>());
+    var navs = NavmeshIndex.Build(new[] { strip }, out _);
+    var ladder = new[] { 0f, 32f, 64f, 96f, 128f };
+    float top = ActorBand.PhysicalControllerTop(131.84f);
+    RouteFacts Route(Vector3 lo, Vector3 hi, Func<float, float, float, float>? floorAt) =>
+        RouteConnectivity.Measure(navs, BoxColumns(lo, hi), BoxOf(lo, hi), 256f, 16f, ActorBand.PhysicalStep, top, ladder, floorAt: floorAt);
+    static RouteCutVerdict Verdict(RouteFacts f) =>
+        DetectorModel.RouteCut(f.Judged, f.Touched, f.Line?.Found ?? false, f.Line?.Why ?? "", f.Line?.Cut ?? false, f.Line?.Passage ?? float.NaN, cutRise: f.Line?.CutRise ?? float.NaN).Verdict;
+    static string Why(RouteFacts f) =>
+        DetectorModel.RouteCut(f.Judged, f.Touched, f.Line?.Found ?? false, f.Line?.Why ?? "", f.Line?.Cut ?? false, f.Line?.Passage ?? float.NaN, cutRise: f.Line?.CutRise ?? float.NaN).Why;
+    var beamLo = new Vector3(0, -20, 0); var beamHi = new Vector3(16, 148, 55);
+    Check("band: the physical band above the feet is 58.4 .. 122.5 u for the 1.03 Nord (the measured 48..112 above the navmesh + 10.4)",
+          MathF.Abs(ActorBand.PhysicalStep - 58.4f) < 1e-3f && MathF.Abs(top - (131.84f * 0.85f + 10.4f)) < 1e-2f, $"{ActorBand.PhysicalStep} .. {top}");
+    var d0 = Route(beamLo, beamHi, (x, y, z) => z);
+    Check("floor δ 0: a 55 u beam is under the 58.4 u physical step -> never in the band, None", Verdict(d0) == RouteCutVerdict.None && d0.Touched == 0, $"{Verdict(d0)} touched {d0.Touched}");
+    var d10 = Route(beamLo, beamHi, (x, y, z) => z - 10f);
+    Check("floor δ 10 (the station): the same beam is 65 u above the feet -> Blocked (full width) with the step band clause", Verdict(d10) == RouteCutVerdict.Blocked && Why(d10).Contains("step band") && MathF.Abs(d10.Line!.CutRise - 65f) < 1e-2f, $"{Verdict(d10)} rise {d10.Line?.CutRise} {Why(d10)}");
+    var d20 = Route(beamLo, beamHi, (x, y, z) => z - 20f);
+    Check("floor δ 20: 75 u above the feet -> Blocked, above the step band, no clause", Verdict(d20) == RouteCutVerdict.Blocked && !Why(d20).Contains("step band") && MathF.Abs(d20.Line!.CutRise - 75f) < 1e-2f, $"{Verdict(d20)} rise {d20.Line?.CutRise}");
+    var empty = new FloorField(fallbackOffset: DetectorModel.FallbackOffset);
+    var dFb = Route(beamLo, beamHi, empty.FloorAt);
+    Check("no floor within reach: the field falls back to the navmesh − 10.4 -> 65.4 u above the feet, Blocked with the clause, every raster read counted as a fallback",
+          Verdict(dFb) == RouteCutVerdict.Blocked && Why(dFb).Contains("step band") && empty.Fallbacks > 0 && empty.Fallbacks == empty.Reads, $"{Verdict(dFb)} rise {dFb.Line?.CutRise} fallbacks {empty.Fallbacks}/{empty.Reads}");
+    var dNull = Route(beamLo, beamHi, null);
+    Check("no floorAt at all: the navmesh is the floor (as every run before) -> the 55 u beam is under the band, None", Verdict(dNull) == RouteCutVerdict.None, $"{Verdict(dNull)}");
+    var overLo = new Vector3(-100, -20, 115); var overHi = new Vector3(100, 148, 135);
+    var o0 = Route(overLo, overHi, (x, y, z) => z);
+    Check("floor δ 0: an underside 115 u above the feet is under the 122.5 u top -> in the band (touched)", o0.Touched > 0, $"touched {o0.Touched}");
+    var o10 = Route(overLo, overHi, (x, y, z) => z - 10f);
+    Check("floor δ 10: the same underside is 125 u above the feet -> over the top, None", o10.Touched == 0 && Verdict(o10) == RouteCutVerdict.None, $"touched {o10.Touched}");
+    // the physical floor under a real field: the slab field above (δ 10 everywhere on the strip) reproduces the δ 10 arm
+    var dField = Route(beamLo, beamHi, field.FloorAt);
+    Check("a FloorField with the slab under the whole strip reproduces the δ 10 arm (Blocked with the clause, rise 65)", Verdict(dField) == RouteCutVerdict.Blocked && MathF.Abs(dField.Line!.CutRise - 65f) < 1e-2f, $"{Verdict(dField)} rise {dField.Line?.CutRise}");
+}
 
 // ---------------------------------------------------------------------------------------
 // CELL-BOUNDARY WATER (roadmap 4.9 Part A, frozen 2026-09-04) — DetectorModel.HeightKind / WaterDiff /

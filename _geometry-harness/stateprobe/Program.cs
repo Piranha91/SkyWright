@@ -192,6 +192,7 @@ var wantedCells = new HashSet<FormKey>();
 foreach (var a in arms) foreach (var c in a.Changes(sx)) if (idx.History.Winning(c.Key) is { } w) wantedCells.Add(w.Cell);
 Console.WriteLine($"cells touched by the states' changes: {wantedCells.Count:N0}");
 RouteAsk? oracle = null;
+Func<string>? routeFloorLine = null;
 long routeMeasured = 0, routeNoNav = 0, routeNoGeo = 0, routeSetAside = 0, routeNoCross = 0;
 if (routeOn)
 {
@@ -200,6 +201,25 @@ if (routeOn)
     var cellRefs = new Dictionary<FormKey, List<PlacedRef>>();
     var npcFacts = new Dictionary<FormKey, ActorBand.NpcFacts>();
     var raceFacts = new Dictionary<FormKey, ActorBand.RaceFacts>();
+    // The floor under a wanted exterior cell reaches across its borders (Q24, 2026-09-05 — _shared/FloorFeed.cs): the 3×3
+    // neighbourhood's refs and LAND are filed by worldspace and grid during the walk. A wanted cell's grid is learned from
+    // the first plugin that defines it (Skyrim.esm for all but a mod's own cells), read ahead of the walk below so the
+    // first plugin's own neighbours are filed too.
+    var cellGridOf = new Dictionary<FormKey, (FormKey Wrld, int X, int Y)>();
+    var floorGrids = new HashSet<(FormKey Wrld, int X, int Y)>();
+    var floorRefsByWorld = new Dictionary<FormKey, Dictionary<(int, int), Dictionary<FormKey, PlacedRef>>>();
+    var floorLandByWorld = new Dictionary<FormKey, Dictionary<(int, int), float[,]>>();
+    void LearnGrid(CellPlacements cp)
+    {
+        if (cp.Interior || cp.Grid is not { } g || !wantedCells.Contains(cp.Cell) || cellGridOf.ContainsKey(cp.Cell)) return;
+        cellGridOf[cp.Cell] = (cp.Worldspace, g.X, g.Y);
+        for (int dx = -1; dx <= 1; dx++) for (int dy = -1; dy <= 1; dy++) floorGrids.Add((cp.Worldspace, g.X + dx, g.Y + dy));
+    }
+    if (paths.Count > 0 && !pluginKey[0].IsNull)
+    {
+        try { using var m0 = SkyrimMod.CreateFromBinaryOverlay(paths[0], SkyrimRelease.SkyrimSE); foreach (var cp in PlacementExtract.FromMod(m0)) LearnGrid(cp); }
+        catch { }
+    }
     for (int p = 0; p < paths.Count; p++)
     {
         if (pluginKey[p].IsNull) continue;
@@ -210,6 +230,12 @@ if (routeOn)
             foreach (var rec in m.EnumerateMajorRecords()) ActorBand.CollectRecord(rec, npcFacts, raceFacts);
             foreach (var cp in PlacementExtract.FromMod(m))
             {
+                LearnGrid(cp);
+                if (!cp.Interior && cp.Grid is { } fg && floorGrids.Contains((cp.Worldspace, fg.X, fg.Y)))
+                {
+                    if (!floorRefsByWorld.TryGetValue(cp.Worldspace, out var frg)) { floorRefsByWorld[cp.Worldspace] = frg = new(); floorLandByWorld[cp.Worldspace] = new(); }
+                    FloorFeed.FileByGrid(cp, frg, floorLandByWorld[cp.Worldspace]);
+                }
                 if (!wantedCells.Contains(cp.Cell)) continue;
                 if (cp.Navmeshes.Count > 0)
                 {
@@ -227,8 +253,18 @@ if (routeOn)
         }
     }
     var (fallbackTop, fallbackSrc) = ActorBand.TallestPlayable(raceFacts);
-    Console.WriteLine($"route oracle: winning navmesh read for {winNav.Count:N0} of {wantedCells.Count:N0} cells; actor band fallback {fallbackSrc}  ({sw.Elapsed.TotalSeconds:0.0}s)");
-    var navIndex = new Dictionary<FormKey, (NavmeshIndex Index, float Top, Dictionary<NavGraph.TriRef, NavGraph.Node>? Graph)>();
+    Console.WriteLine($"route oracle: winning navmesh read for {winNav.Count:N0} of {wantedCells.Count:N0} cells; actor band fallback {fallbackSrc}; the band stands on the physical floor (Q24: {floorRefsByWorld.Values.Sum(w => w.Values.Sum(d => d.Count)):N0} exterior floor refs filed for {cellGridOf.Count:N0} exterior cells' neighbourhoods)  ({sw.Elapsed.TotalSeconds:0.0}s)");
+    var navIndex = new Dictionary<FormKey, (NavmeshIndex Index, float Top, Dictionary<NavGraph.TriRef, NavGraph.Node>? Graph, FloorField Floor)>();
+    var floorTally = new FloorFeed.Tally();
+    routeFloorLine = () =>
+    {
+        var t = new FloorFeed.Tally(); foreach (var f in navIndex.Values) t.Add(f.Floor);
+        var sb = new System.Text.StringBuilder(t.Line());
+        sb.Append("\n   the floor each cell's band stood on (δ = navmesh − floor over the raster reads; a strongly negative median is a floor laid ABOVE the winning navmesh):");
+        foreach (var kv in navIndex.Where(kv => kv.Value.Floor.Reads > 0).OrderBy(kv => kv.Value.Floor.OffsetQuantile(0.5f)).Take(40))
+            sb.Append("\n      " + FloorFeed.Tally.CellLine(kv.Key.ToString(), kv.Value.Floor));
+        return sb.ToString();
+    };
     var soupCache = new Dictionary<string, (Aabb Box, TriangleSoup? Soup, string Source)>(StringComparer.OrdinalIgnoreCase);
     (Aabb Box, TriangleSoup? Soup, string Source) Obstacle(string rel)
     {
@@ -263,7 +299,21 @@ if (routeOn)
         {
             var index = NavmeshIndex.Build(navs.Values.ToList(), out _);
             var band = ActorBand.ForCell(cellRefs.TryGetValue(w.Cell, out var crefs) ? crefs : Array.Empty<PlacedRef>(), npcFacts, raceFacts, fallbackTop, fallbackSrc);
-            navIndex[w.Cell] = ni = (index, ActorBand.ControllerTop(band.Top), null);
+            // The floor the band stands on (Q24): the 3×3 neighbourhood of an exterior, else the cell's own refs.
+            (Aabb Box, TriangleSoup Soup)? FloorGeometry(PlacedRef r)
+            {
+                if (r.Base is not { } b || !idx.BaseMesh.TryGetValue(b, out var rel)) return null;
+                var g = Obstacle(rel);
+                return g.Soup is not null && !g.Box.IsEmpty ? (g.Box, g.Soup) : null;
+            }
+            FloorField floor;
+            if (cellGridOf.TryGetValue(w.Cell, out var cg) && floorRefsByWorld.TryGetValue(cg.Wrld, out var frw))
+            {
+                var (nbRefs, nbLand) = FloorFeed.Neighbourhood((cg.X, cg.Y), frw, floorLandByWorld[cg.Wrld]);
+                floor = FloorFeed.Build(nbRefs, FloorGeometry, nbLand);
+            }
+            else floor = FloorFeed.Build(crefs ?? new List<PlacedRef>(), FloorGeometry, null);
+            navIndex[w.Cell] = ni = (index, ActorBand.PhysicalControllerTop(band.Top), null, floor);
         }
         if (ni.Index.TriangleCount == 0) { why = "the cell's navmesh is empty"; routeNoNav++; return null; }
         TriangleSoup soup; Aabb model;
@@ -300,7 +350,7 @@ if (routeOn)
         }
         if (!crosses) { why = "never enters an actor column over walkable ground"; routeNoCross++; return RouteCutVerdict.None; }
         if (ni.Graph is null) { ni.Graph = NavGraph.Build(ni.Index).Nodes; navIndex[w.Cell] = ni; }
-        var facts = RouteConnectivity.Measure(ni.Index, columns, world, 256f, 16f, ActorBand.StepHeight, ni.Top, Ladder, graph: ni.Graph);
+        var facts = RouteConnectivity.Measure(ni.Index, columns, world, 256f, 16f, ActorBand.PhysicalStep, ni.Top, Ladder, graph: ni.Graph, floorAt: ni.Floor.FloorAt);
         var line = facts.Line;
         var vc = DetectorModel.RouteCut(facts.Judged, facts.Touched, line?.Found ?? false, line?.Why ?? "", line?.Cut ?? false, line?.Passage ?? float.NaN, cutRise: line?.CutRise ?? float.NaN);
         routeMeasured++;
@@ -342,6 +392,7 @@ var cellStates = perState.Sum(p => arms.First(a => a == p.Arm).Changes(sx).Selec
 Console.WriteLine($"\n==== COST ====");
 Console.WriteLine($"   {arms.Count:N0} states over {tally.Changes:N0} changed references ({tally.Arrivals:N0} arrivals, {tally.Departures:N0} departures) in {totalS:0.0}s — {(arms.Count == 0 ? 0 : 1000 * totalS / arms.Count):0} ms per state; "
                 + $"{cellStates:N0} cell-states, {(cellStates == 0 ? 0 : 1000 * totalS / cellStates):0} ms per cell-state; the route half measured {routeMeasured:N0} obstacles");
+if (routeFloorLine is not null) Console.WriteLine("   " + routeFloorLine());
 Console.WriteLine($"   set aside (rule 6): {tally.NoBox:N0} changed refs without a box (no geometry, a marker, or a navcut without a primitive); route: {routeNoNav:N0} in a cell without navmesh, {routeNoGeo:N0} without actor-solid geometry, {routeSetAside:N0} doors / movables, {routeNoCross:N0} never entering an actor column, {tally.RouteUnjudged:N0} unjudged");
 
 var cls = rows.Where(r => r.Verdict == StateVerdict.StateConditional && !r.SameSet && !r.SameAuthor).ToList();

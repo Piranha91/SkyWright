@@ -948,15 +948,42 @@ public static class DetectorModel
     /// does not change on it (a class change is a design decision the measurement hands to Piranha).</summary>
     public const float StepBandTop = 60f;
 
-    /// <summary>The step-band clause of a route-cut why (Q23, 2026-09-05): named when the cut object's rise above the
-    /// navmesh at the cut lies inside (<see cref="StepHeight"/>, <see cref="StepBandTop"/>] — a
-    /// walking humanoid gets over such an object depending on its size and pace (52 u: an adult every time, the child
-    /// race 2 of 3; 55 u: an adult 2 of 8, scale 1.3 3 of 4, running 4 of 4; 60 u: only running, 1 of 4). The class is
-    /// unchanged: naming the band is the "which actor" clause the handoff asked for; moving the class on it is a design
-    /// decision the measurement hands to Piranha. Empty when no rise is known or the rise is outside the band.</summary>
-    public static string StepBandClause(float cutRise) =>
-        float.IsNaN(cutRise) || cutRise <= StepHeight || cutRise > StepBandTop ? "" :
-        $"; the object rises {cutRise:0} u above the navmesh at the cut — inside the step band ({StepHeight:0}, {StepBandTop:0}] u a walking humanoid gets over by size and pace (52 u: an adult every time, a child 2 of 3; 55 u: an adult 2 of 8, a running one 4 of 4)";
+    /// <summary>The measuring station's navmesh-to-floor offset. Every rung of the band was measured on the Ratway corridor,
+    /// where the navmesh reads 47 u and the walker's feet 36.6 (Q23), so every navmesh-relative constant above is stated at
+    /// this offset. MEASURED 2026-09-05 (Q24, Research/NAVMESH-FLOOR-OFFSET-2026-09-05.md): the records put the collision
+    /// floor 10.0 u under the navmesh at the station and within 2 u of the feet along 718 recorded walker positions; over
+    /// the vanilla cells the offset is centred near ZERO (interior median +1.1 u, cell medians within ±4 u of 0 for three
+    /// quarters of interior cells and nine tenths of exterior ones) and varies WITHIN a cell by −9..+12 u around its own
+    /// median — the station's 10 u is the high side of the distribution, and no per-cell number carries the texture. So
+    /// the route rule reads the physical floor under each raster cell (FloorField) and measures the band above the
+    /// FEET with the constants below.</summary>
+    public const float StationOffset = 10.4f;
+
+    /// <summary>The step above the walker's FEET: the highest rung every walking humanoid cleared every time (48 u above
+    /// the navmesh) at the station's offset — 58.4 u. What the route rule's band bottom is measured from once it stands
+    /// on the physical floor. An adult cleared 62.4 u every time.</summary>
+    public const float PhysicalStep = StepHeight + StationOffset;
+
+    /// <summary>The step band's top above the feet (60 u above the navmesh at the station): 70.4 u.</summary>
+    public const float PhysicalStepBandTop = StepBandTop + StationOffset;
+
+    /// <summary>What a floor field assumes under a raster cell with no floor within reach: the navmesh minus the
+    /// station's offset, so an unread floor reproduces the band exactly as it was measured. Every such read is counted
+    /// and the probes print the count.</summary>
+    public const float FallbackOffset = StationOffset;
+
+    /// <summary>The step-band clause of a route-cut why (Q23, 2026-09-05; above the feet since Q24 the same day): named when
+    /// the cut object's rise above the floor at the cut lies inside (<paramref name="bottom"/>, <paramref name="top"/>] — the
+    /// physical band (<see cref="PhysicalStep"/>, <see cref="PhysicalStepBandTop"/>] by default, because the route rule's
+    /// rise is measured from the physical floor under the cut; a caller with a navmesh-relative rise at the station passes
+    /// <see cref="StepHeight"/> and <see cref="StepBandTop"/>. A walking humanoid gets over such an object depending on its
+    /// size and pace (4 u into the band: an adult every time, the child race 2 of 3; 7 u in: an adult 2 of 8, scale 1.3
+    /// 3 of 4, running 4 of 4; at the top: only running, 1 of 4). The class is unchanged: naming the band is the "which
+    /// actor" clause the handoff asked for; moving the class on it is a design decision the measurement hands to Piranha.
+    /// Empty when no rise is known or the rise is outside the band.</summary>
+    public static string StepBandClause(float cutRise, float bottom = PhysicalStep, float top = PhysicalStepBandTop) =>
+        float.IsNaN(cutRise) || cutRise <= bottom || cutRise > top ? "" :
+        $"; the object rises {cutRise:0} u above the floor at the cut — inside the step band ({bottom:0}, {top:0}] u a walking humanoid gets over by size and pace ({bottom + 4f:0} u: an adult every time, a child 2 of 3; {bottom + 7f:0} u: an adult 2 of 8, a running one 4 of 4)";
 
     /// <summary>The route-blockage rule (roadmap 4.7 Part B, frozen 2026-09-02 from the handoff of 2026-09-05).
     /// <b>SUPERSEDED the same day by <see cref="RouteCut"/></b> — kept callable so the re-pricing beside Part B's numbers

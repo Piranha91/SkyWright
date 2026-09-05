@@ -17,6 +17,7 @@
     <Compile Include="..\_shared\OverlapIndex.cs" Link="OverlapIndex.cs" />
     <Compile Include="..\_shared\DependencyIndex.cs" Link="DependencyIndex.cs" />
     <Compile Include="..\_shared\BosHook.cs" Link="BosHook.cs" />
+    <Compile Include="..\_shared\FloorFeed.cs" Link="FloorFeed.cs" />
     <ProjectReference Include="..\..\src\housecarl-core\housecarl-core.csproj" />
   </ItemGroup>
 </Project>

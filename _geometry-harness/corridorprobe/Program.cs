@@ -28,7 +28,11 @@ using Mutagen.Bethesda.Skyrim;
 //          Each arm is measured twice: on the rule's own line (the raster's ends, pathfound) and on the commanded line
 //          the walker was given, so a disagreement between the two is separable from a wrong threshold. Meshes come
 //          through the instance's VFS (HarnessTarget instance/profile/game); the navmesh from --plugin, as the other modes.
-//   --band controller (default) scales the band top by ActorBand.ControllerFactor; nominal uses bandTop as given.
+//   --band controller (default) scales the band top by ActorBand.ControllerFactor and adds the station's offset — the
+//          controller's top above the FEET; nominal uses bandTop as given (a head height is above the feet by definition).
+//          Since Q24 (2026-09-05) the band stands on the PHYSICAL floor under each raster cell (_shared/FloorFeed.cs): the
+//          cell's refs (the 3×3 neighbourhood by position for an exterior) and its LAND from --plugin, the same actor-solid
+//          soup the obstacles use; where no floor is within reach the navmesh − 10.4 u stands in, counted.
 //   --bos  arms only. on (default, since 2026-09-04): each arm's base is resolved through the Base Object Swapper layer
 //          (*_SWAP.ini, from the profile's VFS; _shared/BosHook.cs) for the cell it stood in — the obstacle the ENGINE
 //          loaded for that base record — and the row says so. The pose stays as the arms file gives it (the engine's own,
@@ -257,13 +261,34 @@ if (mode == "arms")
         return geoCache[rel] = (m.Bounds, m.Soup, "fallback");
     }
 
+    // ---- the floor (Q24): the cell's own refs and LAND, or the 3×3 neighbourhood of an exterior, from --plugin ----
+    var floorMesh = new Dictionary<FormKey, string>();
+    foreach (var rec in mod.EnumerateMajorRecords())
+        if (rec is IModeledGetter fmg && fmg.Model?.File is { } ff && !string.IsNullOrWhiteSpace(ff.GivenPath)) floorMesh[rec.FormKey] = ff.GivenPath;
+    (Aabb Box, TriangleSoup Soup)? FloorGeometry(PlacedRef r)
+    {
+        if (r.Base is not { } b || !floorMesh.TryGetValue(b, out var rel)) return null;
+        var g = Geometry(rel);
+        return g.Soup is not null && !g.Box.IsEmpty ? (g.Box, g.Soup) : null;
+    }
+    FloorField floor;
+    if (!cell.Interior && cell.Grid is { } fg)
+    {
+        var frg = new Dictionary<(int, int), Dictionary<FormKey, PlacedRef>>(); var flg = new Dictionary<(int, int), float[,]>();
+        foreach (var cp in PlacementExtract.FromMod(mod)) if (!cp.Interior && cp.Worldspace == cell.Worldspace) FloorFeed.FileByGrid(cp, frg, flg);
+        var (nbRefs, nbLand) = FloorFeed.Neighbourhood(fg, frg, flg);
+        floor = FloorFeed.Build(nbRefs, FloorGeometry, nbLand);
+    }
+    else floor = FloorFeed.Build(cell.Refs, FloorGeometry, null);
+
     // ---- the band and the graph ----
     float nominalTop = armsDoc.TryGetProperty("bandTop", out var bt) ? bt.GetSingle() : ActorBand.ScaleOneHeight;
-    float top = controllerBand ? ActorBand.ControllerTop(nominalTop) : nominalTop;
+    float top = controllerBand ? ActorBand.PhysicalControllerTop(nominalTop) : nominalTop;
     var ladder = new[] { 0f, 32f, 64f, 96f, 128f };
     var (gnodes, grpt) = NavGraph.Build(navs);
     Console.WriteLine($"graph: {grpt.Triangles:N0} triangles, {grpt.IntraLinks:N0} intra + {grpt.CrossLinks:N0} cross links, {grpt.DanglingLinks} dangling, {grpt.ExternalLinks} external, {grpt.Components} component(s)");
-    Console.WriteLine($"band: {ActorBand.StepHeight:0}..{top:0} u ({(controllerBand ? $"controller: nominal {nominalTop:0} × {ActorBand.ControllerFactor}" : "nominal")}; bottom measured 2026-09-05, step band to {ActorBand.StepBandTop:0} u named in the verdict); capsule 22 u; window ±256 u, step 16\n");
+    Console.WriteLine($"band: {ActorBand.PhysicalStep:0.#}..{top:0.#} u above the FEET ({(controllerBand ? $"controller: nominal {nominalTop:0} × {ActorBand.ControllerFactor} + {ActorBand.StationOffset:0.#}" : "nominal")}; bottom measured 2026-09-05 + the station's {ActorBand.StationOffset:0.#} u offset (Q24), step band to {ActorBand.PhysicalStepBandTop:0.#} u named in the verdict); capsule 22 u; window ±256 u, step 16");
+    Console.WriteLine($"floor: physical, {floor.Candidates:N0} candidates, {floor.LandCells} land cell(s) (Q24)\n");
 
     var rows = new List<(Arm A, string Type, RouteCutVerdict? Rule, RouteFacts? FR, RouteCutVerdict? Cmd, RouteFacts? FC, string Note)>();
     foreach (var a in arms)
@@ -297,7 +322,7 @@ if (mode == "arms")
         var columns = MeshColumnIndex.Build(w, g.Soup.Indices);
 
         bool draw = ascii is not null && a.Tag.Contains(ascii, StringComparison.OrdinalIgnoreCase);
-        var fr = RouteConnectivity.Measure(navs, columns, world, 256f, 16f, ActorBand.StepHeight, top, ladder, graph: gnodes, keepRaster: draw);
+        var fr = RouteConnectivity.Measure(navs, columns, world, 256f, 16f, ActorBand.PhysicalStep, top, ladder, graph: gnodes, keepRaster: draw, floorAt: floor.FloorAt);
         var vr = Verdict(fr);
         if (draw && fr.Raster is { } ras)
         {
@@ -307,7 +332,7 @@ if (mode == "arms")
         RouteFacts? fc = null; RouteCutVerdict? vc = null;
         if (a.Line is { Length: >= 2 })
         {
-            fc = RouteConnectivity.Measure(navs, columns, world, 256f, 16f, ActorBand.StepHeight, top, ladder, graph: gnodes, lineOverride: a.Line);
+            fc = RouteConnectivity.Measure(navs, columns, world, 256f, 16f, ActorBand.PhysicalStep, top, ladder, graph: gnodes, lineOverride: a.Line, floorAt: floor.FloorAt);
             vc = Verdict(fc);
         }
         rows.Add((a, bm.Type, vr, fr, vc, fc, g.Source + bosNote));
@@ -342,6 +367,7 @@ if (mode == "arms")
     if (rows.Any(r => r.Cmd is not null)) Matrix("the commanded line (what the walker was given)", r => r.Cmd);
     int disagree = rows.Count(r => r.Rule is not null && r.Cmd is not null && r.Rule != r.Cmd);
     Console.WriteLine($"\n   arms where the two lines disagree on the verdict: {disagree}");
+    { var ft = new FloorFeed.Tally(); ft.Add(floor); Console.WriteLine("   " + ft.Line()); }
     if (bosOn) Console.WriteLine($"   BOS: {bosSwapped} arm(s) resolve to a swapped base ({bosRandom} random — the first alternative taken); poses as the arms file gives them");
     return 0;
 }

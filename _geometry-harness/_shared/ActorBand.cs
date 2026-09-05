@@ -33,11 +33,21 @@ using Mutagen.Bethesda.Skyrim;
 //  size decide, which the route-cut verdict names. The shortest-actor
 //  derivation the handoff proposed is moot within one rung. Creatures are
 //  another class (a goat is stopped by a 22 u beam; a dog would not path the
-//  corridor at all) and are catalogued, not folded. Every height is ABOVE THE
-//  NAVMESH, which is what the route rule measures against; at that station
-//  the navmesh floats 10 u above the physical floor, so the walker's physical
-//  step is ~62 u and the transfer to a cell with another offset is the open
-//  item. Research/ACTOR-BAND-BOTTOM-2026-09-05.md.
+//  corridor at all) and are catalogued, not folded. Every height there is
+//  ABOVE THE NAVMESH; at that station the navmesh floats 10 u above the
+//  physical floor. Research/ACTOR-BAND-BOTTOM-2026-09-05.md.
+//
+//  Q24 (the same day, Research/NAVMESH-FLOOR-OFFSET-2026-09-05.md) measured
+//  that offset over every vanilla cell from the collision floor: centred near
+//  zero, not ten, and a within-cell texture (−9..+12 u around a cell's own
+//  median) rather than a per-cell number. So the band now stands on the
+//  PHYSICAL floor under each raster cell (RouteConnectivity.Measure's floorAt,
+//  a FloorField per cell) and its ends are stated above the walker's FEET:
+//  the measured rungs plus the station's offset (PhysicalStep 58.4 u, the
+//  step band to 70.4 u, PhysicalControllerTop = the controller top + 10.4).
+//  At the station that is byte for byte the band as measured; elsewhere it is
+//  the band the walker meets. The navmesh-relative constants stay as the
+//  record of what was measured and as the fallback where no floor is read.
 //
 //  Height arithmetic follows viewprobe's NpcResolve for the race height (for
 //  the NPC's sex) × the NPC's own Height, on a 128 u scale-1 figure — and NOT
@@ -66,8 +76,23 @@ internal static class ActorBand
     /// the factor is applied to every derived top on the assumption the controller scales with the model.</summary>
     public const float ControllerFactor = 0.85f;
 
-    /// <summary>The band top the route-cut rule uses: the derived nominal top scaled to the controller's.</summary>
+    /// <summary>The controller's top ABOVE THE NAVMESH at the measuring station: the derived nominal top scaled to the
+    /// controller's. What the route rule's band top was until Q24; still the record of the measurement.</summary>
     public static float ControllerTop(float nominalTop) => nominalTop * ControllerFactor;
+
+    /// <summary>The measuring station's navmesh-to-floor offset (<see cref="DetectorModel.StationOffset"/>, 10.4 u) and the
+    /// band's ends above the walker's FEET (Q24, 2026-09-05): the measured rungs plus that offset.</summary>
+    public const float StationOffset = DetectorModel.StationOffset;
+    public const float PhysicalStep = DetectorModel.PhysicalStep;
+    public const float PhysicalStepBandTop = DetectorModel.PhysicalStepBandTop;
+
+    /// <summary>The controller's top above the FEET: the navmesh-relative controller top plus the station's offset —
+    /// 122.5 u for the 1.03 Nord, inside the (110.4, 130.4) u the overhead ladder measured above its feet (stopped by an
+    /// underside 100 u above the navmesh, under one at 120); 97.4 u for the child race, inside its (95.4, 110.4). Additive
+    /// rather than a refitted factor: the same measured interval, restated from the floor the walker stands on (a
+    /// multiplied 0.92 would put the child's top below its measured interval). The route rule's band top once it reads
+    /// the physical floor (RouteConnectivity.Measure with floorAt).</summary>
+    public static float PhysicalControllerTop(float nominalTop) => ControllerTop(nominalTop) + StationOffset;
 
     public sealed record NpcFacts(FormKey Race, bool Female, float Height, bool Templated);
     public sealed record RaceFacts(float Male, float Female, bool Playable, string? EditorId);

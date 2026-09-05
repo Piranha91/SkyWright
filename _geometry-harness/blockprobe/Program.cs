@@ -86,8 +86,19 @@ Console.WriteLine($"target touches {targetCells.Count:N0} cells: "
                 + $"{targetNewRefs:N0} refs it INTRODUCES, {targetOverrides:N0} it overrides, "
                 + $"{targetCells.Values.Sum(c => c.Navmeshes.Count):N0} navmeshes it supplies");
 
+// The floor under the target's exterior cells reaches across their borders (Q24, 2026-09-05 — _shared/FloorFeed.cs): the
+// 3×3 neighbourhood's refs and LAND, by worldspace and grid, are filed during the winning-state walk below. Nothing else
+// about the neighbours is loaded; the diff-based charter stands.
+var floorGrids = new HashSet<(FormKey Wrld, int X, int Y)>();
+foreach (var tc in targetCells.Values)
+    if (!tc.Interior && tc.Grid is { } tg)
+        for (int dx = -1; dx <= 1; dx++) for (int dy = -1; dy <= 1; dy++) floorGrids.Add((tc.Worldspace, tg.X + dx, tg.Y + dy));
+var floorRefsByWorld = new Dictionary<FormKey, Dictionary<(int, int), Dictionary<FormKey, PlacedRef>>>();
+var floorLandByWorld = new Dictionary<FormKey, Dictionary<(int, int), float[,]>>();
+var floorTally = new FloorFeed.Tally();
+
 // ---------- 2. resolve the WINNING state for exactly those cells ----------
-// Diff-based, per the charter: only the cells the target touches are ever loaded.
+// Diff-based, per the charter: only the cells the target touches are ever loaded (plus the floor neighbourhood above).
 sw.Restart();
 var winRef = new Dictionary<FormKey, PlacedRef>();                       // ref FormKey -> winning placement
 var winRefCell = new Dictionary<FormKey, FormKey>();                     // ref FormKey -> winning cell
@@ -120,6 +131,11 @@ foreach (var p in paths)
         foreach (var cp in PlacementExtract.FromMod(m))
         {
             bos.Cell(cp);
+            if (!cp.Interior && cp.Grid is { } fg && floorGrids.Contains((cp.Worldspace, fg.X, fg.Y)))
+            {
+                if (!floorRefsByWorld.TryGetValue(cp.Worldspace, out var frg)) { floorRefsByWorld[cp.Worldspace] = frg = new(); floorLandByWorld[cp.Worldspace] = new(); }
+                FloorFeed.FileByGrid(cp, frg, floorLandByWorld[cp.Worldspace]);
+            }
             if (!targetCells.ContainsKey(cp.Cell)) continue;
             cellMeta[cp.Cell] = cp;
             foreach (var r in cp.Refs) { winRef[r.FormKey] = r; winRefCell[r.FormKey] = cp.Cell; }
@@ -210,8 +226,29 @@ float ActorHeight = ActorBand.ScaleOneHeight;
 const float Clearance = ActorBand.StepHeight;
 const float TriInset = 12f;       // navprobe's edge-graze forgiveness
 var (fallbackTop, fallbackSrc) = ActorBand.TallestPlayable(raceFacts);
-Console.WriteLine($"actor band: bottom {Clearance:0} u (step height, measured 2026-09-05; the step band to {ActorBand.StepBandTop:0} u is named in the verdict); top per cell from placed actors (race Height x NPC Height; placement scale not counted since 2026-09-05), else {fallbackSrc}");
+Console.WriteLine(FloorFeed.BandLine(controllerBand) + $"; top fallback {fallbackSrc}; the surface rules keep the navmesh-relative band {Clearance:0}..top");
 var winRefsByCell = winRef.Values.GroupBy(r => winRefCell[r.FormKey]).ToDictionary(g => g.Key, g => g.ToList());
+
+// A floor candidate's solid, by the record's own base (the swap layer is not applied to floors — FloorFeed's header).
+(Aabb Box, TriangleSoup Soup)? FloorGeometry(PlacedRef r)
+{
+    if (r.Base is not { } b || !baseMesh.TryGetValue(b, out var bm)) return null;
+    var g = Geometry(bm.Mesh);
+    return g.Ok && g.Soup is not null && !g.Box.IsEmpty ? (g.Box, g.Soup) : null;
+}
+// The floor the band stands on in a cell (Q24): the winning refs of an interior; for an exterior the 3×3 neighbourhood
+// filed above, else its own refs. Every field built is kept for the summary tally.
+var floorFields = new List<(string Cell, FloorField Field)>();
+FloorField FloorFor(FormKey cellKey, List<PlacedRef>? own)
+{
+    string cellName = cellMeta.TryGetValue(cellKey, out var cm) ? (cm.CellEditorId ?? cellKey.ToString()) : cellKey.ToString();
+    if (cellMeta.TryGetValue(cellKey, out var meta) && !meta.Interior && meta.Grid is { } g && floorRefsByWorld.TryGetValue(meta.Worldspace, out var frw))
+    {
+        var (nbRefs, nbLand) = FloorFeed.Neighbourhood(g, frw, floorLandByWorld[meta.Worldspace]);
+        var nf = FloorFeed.Build(nbRefs, FloorGeometry, nbLand); floorFields.Add((cellName, nf)); return nf;
+    }
+    var of = FloorFeed.Build(own ?? new List<PlacedRef>(), FloorGeometry, null); floorFields.Add((cellName, of)); return of;
+}
 int cellsWithActors = 0, cellsTemplatedOnly = 0; float bandMin = float.MaxValue, bandMax = 0f;
 
 // The route rule (Part B): every reference whose solid crosses an actor column is measured in a window of
@@ -260,7 +297,8 @@ foreach (var (cellKey, tcell) in targetCells)
     var band = ActorBand.ForCell(winRefsByCell.TryGetValue(cellKey, out var cellRefs) ? cellRefs : Array.Empty<PlacedRef>(),
                                  npcFacts, raceFacts, fallbackTop, fallbackSrc);
     ActorHeight = band.Top;
-    float routeTop = controllerBand ? ActorBand.ControllerTop(band.Top) : band.Top;
+    float physicalTop = controllerBand ? ActorBand.PhysicalControllerTop(band.Top) : band.Top;
+    var floor = FloorFor(cellKey, cellRefs);
     if (band.Actors > 0) cellsWithActors++;
     if (band.Actors > 0 && band.Templated == band.Actors) cellsTemplatedOnly++;
     bandMin = MathF.Min(bandMin, band.Top); bandMax = MathF.Max(bandMax, band.Top);
@@ -355,7 +393,7 @@ foreach (var (cellKey, tcell) in targetCells)
             {
                 routeMeasured++;
                 gnodes ??= NavGraph.Build(index).Nodes;
-                var facts = RouteConnectivity.Measure(index, columns, world, RouteMargin, RouteStep, Clearance, routeTop, Ladder, graph: gnodes);
+                var facts = RouteConnectivity.Measure(index, columns, world, RouteMargin, RouteStep, ActorBand.PhysicalStep, physicalTop, Ladder, graph: gnodes, floorAt: floor.FloorAt);
                 var v64 = DetectorModel.RouteBlockage(facts.Judged, facts.Touched, facts.MaxIntactRung, facts.MaxIntactRungWithout, Ladder, 64f);
                 var v128 = DetectorModel.RouteBlockage(facts.Judged, facts.Touched, facts.MaxIntactRung, facts.MaxIntactRungWithout, Ladder, 128f);
                 Tally(routeTally64, v64.Verdict); Tally(routeTally128, v128.Verdict);
@@ -405,7 +443,8 @@ if (stateArm is not null && stateIdx is not null)
         var index = NavmeshIndex.Build(navs.Select(n => n.Nav).ToList(), out _);
         if (index.TriangleCount == 0) continue;
         var band = ActorBand.ForCell(winRefsByCell.TryGetValue(cellKey, out var cellRefs2) ? cellRefs2 : Array.Empty<PlacedRef>(), npcFacts, raceFacts, fallbackTop, fallbackSrc);
-        float routeTop = controllerBand ? ActorBand.ControllerTop(band.Top) : band.Top;
+        float routeTop = controllerBand ? ActorBand.PhysicalControllerTop(band.Top) : band.Top;
+        var floor = FloorFor(cellKey, cellRefs2);
         Dictionary<NavGraph.TriRef, NavGraph.Node>? gnodes = null;
         foreach (var nk in navcuts)
         {
@@ -427,7 +466,7 @@ if (stateArm is not null && stateIdx is not null)
             }
             if (!crosses) { navcutNoCross++; continue; }
             gnodes ??= NavGraph.Build(index).Nodes;
-            var facts = RouteConnectivity.Measure(index, columns, world, RouteMargin, RouteStep, Clearance, routeTop, Ladder, graph: gnodes);
+            var facts = RouteConnectivity.Measure(index, columns, world, RouteMargin, RouteStep, ActorBand.PhysicalStep, routeTop, Ladder, graph: gnodes, floorAt: floor.FloorAt);
             var line = facts.Line;
             var vc = DetectorModel.RouteCut(facts.Judged, facts.Touched, line?.Found ?? false, line?.Why ?? "", line?.Cut ?? false, line?.Passage ?? float.NaN, cutRise: line?.CutRise ?? float.NaN);
             navcutMeasured++;
@@ -472,6 +511,11 @@ Console.WriteLine($"   navmesh triangles that could not be judged (inset consume
 
 Console.WriteLine($"\n   ---- actor band, derived per cell ----");
 Console.WriteLine($"   cells with placed actors {cellsWithActors:N0} (templated-only {cellsTemplatedOnly:N0}); band top {(bandMin == float.MaxValue ? 0 : bandMin):0}..{bandMax:0} u; fallback {fallbackSrc}");
+foreach (var (_, ff) in floorFields) floorTally.Add(ff);
+Console.WriteLine("   " + floorTally.Line());
+Console.WriteLine("   the floor each cell's band stood on (δ = navmesh − floor over the raster reads; a strongly negative median is a floor laid ABOVE the winning navmesh):");
+foreach (var (cell, ff) in floorFields.Where(x => x.Field.Reads > 0).OrderBy(x => x.Field.OffsetQuantile(0.5f)).Take(40))
+    Console.WriteLine("      " + FloorFeed.Tally.CellLine(cell, ff));
 
 Console.WriteLine($"\n   ---- the ROUTE rule (Part B): with vs without, ladder {string.Join("/", Ladder.Select(l => l.ToString("0")))} u, margin {RouteMargin:0}, step {RouteStep:0} ----");
 Console.WriteLine($"   references measured (solid entered an actor column): {routeMeasured:N0}   doors set aside as passable by design: {routeDoors:N0}");
@@ -486,7 +530,7 @@ if (routeHits.Count > 0)
 }
 
 Console.WriteLine($"\n   ---- the ROUTE-CUT rule (4.7's closing step): the corridor's path line, cut at capsule 22 u inside the band 32..top ----");
-Console.WriteLine($"   band top: {(controllerBand ? $"derived × {ActorBand.ControllerFactor} (the controller's, Part C)" : "derived, nominal")}; passage boundary 48 u");
+Console.WriteLine($"   band above the feet on the physical floor (Q24): bottom {ActorBand.PhysicalStep:0.#} u, top {(controllerBand ? $"derived × {ActorBand.ControllerFactor} + {ActorBand.StationOffset:0.#} (the controller's, Part C)" : "derived, nominal")}; passage boundary 48 u");
 Console.WriteLine($"   references measured: {routeMeasured:N0}   doors set aside: {routeDoors:N0}   MoveableStatics set aside (pushed aside, Part C): {routeMovable:N0}");
 Console.WriteLine($"   {"verdict",-14} {"refs",8}");
 foreach (var v in new[] { RouteCutVerdict.Blocked, RouteCutVerdict.LikelyBlocked, RouteCutVerdict.Clipped, RouteCutVerdict.NoLine, RouteCutVerdict.None, RouteCutVerdict.Unjudgeable })

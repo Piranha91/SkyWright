@@ -1,0 +1,520 @@
+using System.Diagnostics;
+using System.Globalization;
+using System.Numerics;
+using HousecarlCore;
+using Mutagen.Bethesda.Plugins;
+using Mutagen.Bethesda.Skyrim;
+
+// floorgapprobe — the navmesh-to-floor offset δ (roadmap 4.7's band, Q24).
+//
+// Every vertical number in the route work is stated above the NAVMESH; the walker steps and ducks against its FEET,
+// which rest on the physical floor beneath it. At the one station where both were measured (the Ratway corridor,
+// 2026-09-05) the navmesh floats 10 u above the floor, 5 u at 64 u west and 17 u at 64 u east. This measures the
+// offset from the records — for every navmesh triangle the route rule can stand on, the vertical distance from the
+// navmesh surface down (or up) to the floor a walker's feet rest on: the highest up-facing actor-solid collision
+// surface within reach (HousecarlCore.NavmeshFloor, asked through a FloorField built by _shared/FloorFeed.cs — the
+// same field the route rule stands on), read from the same collision soup the route rules run on (CollisionLayers: the
+// layers an actor meets; a mesh whose decode is incomplete falls back to its render soup) and, in an exterior, the
+// cell's LAND heightmap. Positive δ = the navmesh above the floor.
+//
+// usage: floorgapprobe sweep [maxCells] [--tsv cells.tsv] [--tris tris.tsv] [--verdicts DIR]
+//        floorgapprobe cell <CellEditorID|FormKey> [--tris tris.tsv]
+//        floorgapprobe line <CellEditorID> --at X,Y,Z --heading DEG [--span 384] [--every 16]
+//        floorgapprobe points <CellEditorID> <file>     (lines of "x y z": a walker's positions; prints z − floor per point)
+//   common: [--plugin Skyrim.esm] [--instance DIR] [--game DIR] [--profile NAME] [--depth 128] [--reach 48] [--split 192] [--own]
+//   sweep     every cell of the plugin with navmesh and refs (navprobe's population): δ per triangle (the centroid; four
+//             interior points on a triangle longer than --split), per cell (median, spread, storeys), the histograms by
+//             interior / exterior / floor source / worldspace, the no-floor share by reason, the widest within-storey
+//             spreads. --verdicts reads navprobe's route-cut-blocked.tsv / route-cut-likely.tsv from a --dump directory
+//             and reports the δ under each object those verdicts stand on (the samples in its plan footprint + capsule,
+//             the object itself not a floor candidate).
+//   cell      one cell, per storey, with the per-triangle listing to a TSV.
+//   line      the calibration read: δ along a heading through a point (yaw, degrees, 0 = +Y, clockwise), every --every u
+//             for --span u each way — the same line corridorprobe width walks.
+//   points    the calibration against a walker: for each recorded position (feet), the navmesh and floor under it and
+//             feet − floor; a floor that is the physical one reads that difference near zero.
+//   --depth   how far below the navmesh a floor may lie (deeper is a drop: no floor); --reach how far above (the step
+//             height: a surface the walker steps onto is where its feet rest). NavmeshFloor's defaults.
+//   --own     an exterior cell's floor from its OWN refs and its own LAND only, no neighbourhood — what a caller that
+//             cannot reach the neighbourhood would build; the difference against the default is that caller's loss.
+//   Refs are the plugin's placements (persistent ones included, bucketed by position); an exterior cell's navmesh is
+//   read against the 3×3 neighbourhood's refs, because a floor mesh placed in the next cell reaches under this one.
+//   Initially-disabled and deleted refs are not floors. No Base Object Swapper layer (FloorFeed's header says why).
+
+string Instance = HarnessTarget.Instance, GamePath = HarnessTarget.Game, profileName = HarnessTarget.Profile;
+string plugin = "Skyrim.esm";
+float depth = NavmeshFloor.DefaultMaxDepth, reach = NavmeshFloor.DefaultUpReach, split = NavmeshFloor.DefaultSplitAbove;
+string? tsvPath = null, trisPath = null, verdictsDir = null;
+bool ownOnly = false;
+int maxCells = int.MaxValue;
+Vec3? at = null; float heading = 0f, span = 384f, every = 16f;
+var positional = new List<string>();
+for (int i = 0; i < args.Length; i++)
+{
+    string a = args[i];
+    string Next() => i + 1 < args.Length ? args[++i] : throw new ArgumentException($"{a} needs a value");
+    switch (a)
+    {
+        case "--instance": Instance = Next(); break;
+        case "--game": GamePath = Next(); break;
+        case "--profile": profileName = Next(); break;
+        case "--plugin": plugin = Next(); break;
+        case "--depth": depth = float.Parse(Next(), CultureInfo.InvariantCulture); break;
+        case "--reach": reach = float.Parse(Next(), CultureInfo.InvariantCulture); break;
+        case "--split": split = float.Parse(Next(), CultureInfo.InvariantCulture); break;
+        case "--tsv": tsvPath = Next(); break;
+        case "--tris": trisPath = Next(); break;
+        case "--verdicts": verdictsDir = Next(); break;
+        case "--own": ownOnly = true; break;
+        case "--heading": heading = float.Parse(Next(), CultureInfo.InvariantCulture); break;
+        case "--span": span = float.Parse(Next(), CultureInfo.InvariantCulture); break;
+        case "--every": every = float.Parse(Next(), CultureInfo.InvariantCulture); break;
+        case "--at": { var p = Next().Split(','); at = new Vec3(F(p[0]), F(p[1]), p.Length > 2 ? F(p[2]) : -99999f); break; }
+        default:
+            if (a.StartsWith("--")) { Console.Error.WriteLine($"unknown flag {a}"); return 2; }
+            positional.Add(a); break;
+    }
+}
+static float F(string s) => float.Parse(s, CultureInfo.InvariantCulture);
+if (positional.Count == 0) { Console.Error.WriteLine("usage: floorgapprobe sweep [maxCells] | cell <Cell> | line <Cell> --at X,Y,Z --heading DEG | points <Cell> <file>"); return 2; }
+string mode = positional[0];
+Instance = HarnessTarget.Require(Instance, "MO2 instance directory", "instance", "--instance");
+GamePath = HarnessTarget.Require(GamePath, "game directory", "game", "--game");
+profileName = HarnessTarget.Require(profileName, "MO2 profile name", "profile", "--profile");
+string profileDir = Path.Combine(Instance, "profiles", profileName);
+string modsDir = Path.Combine(Instance, "mods"), overwriteDir = Path.Combine(Instance, "overwrite"), dataDir = Path.Combine(GamePath, "Data");
+if (mode == "sweep" && positional.Count > 1 && int.TryParse(positional[1], out var mc)) maxCells = mc;
+
+var sw = Stopwatch.StartNew();
+Console.WriteLine($"floorgapprobe {mode}: plugin {plugin}; instance {Instance} / {profileName};{(ownOnly ? " OWN-CELL refs and land only;" : "")} floor rule: highest up-facing actor-solid surface within {depth:0} u below .. {reach:0} u above the navmesh; triangles longer than {split:0} u read at four points");
+Console.WriteLine($"   actor-solid layers: {string.Join(", ", CollisionLayers.ActorSolid)}");
+
+// ---- the VFS, for the meshes ----
+var comp = Mo2LoadOrder.ReadComposition(profileDir);
+var arch = ArchiveDiscovery.Discover(profileDir, modsDir, dataDir, overwriteDir, GamePath);
+using var assets = AssetResolver.Build(overwriteDir, modsDir, dataDir, comp.EnabledMods, arch.Archives);
+Console.WriteLine($"assets: {arch.Archives.Count} BSAs indexed ({sw.ElapsedMilliseconds} ms)");
+
+// ---- the plugin: base records with a mesh, worldspace names, every cell with its landscape ----
+// --plugin: the game's Data folder first, else the profile's load order (a mod's plugin lives in its mod folder).
+string pluginPath = Path.Combine(dataDir, plugin);
+if (!File.Exists(pluginPath))
+{
+    var order = Mo2LoadOrder.Build(profileDir, modsDir, dataDir, overwriteDir);
+    pluginPath = order.OrderedPaths.FirstOrDefault(pp => string.Equals(Path.GetFileName(pp), plugin, StringComparison.OrdinalIgnoreCase)) ?? "";
+    if (pluginPath.Length == 0) { Console.Error.WriteLine($"{plugin} is neither in {dataDir} nor in the profile's load order"); return 2; }
+}
+using var mod = SkyrimMod.CreateFromBinaryOverlay(pluginPath, SkyrimRelease.SkyrimSE);
+var baseMesh = new Dictionary<FormKey, (string Mesh, string Type)>();
+foreach (var rec in mod.EnumerateMajorRecords())
+    if (rec is IModeledGetter m && m.Model?.File is { } f && !string.IsNullOrWhiteSpace(f.GivenPath))
+        baseMesh[rec.FormKey] = (f.GivenPath, rec.GetType().Name.Replace("BinaryOverlay", ""));
+Console.WriteLine($"base records with a mesh: {baseMesh.Count:N0} ({sw.Elapsed.TotalSeconds:0.0} s)");
+
+var worldName = new Dictionary<FormKey, string>();
+foreach (var wrld in mod.Worldspaces.Records) worldName[wrld.FormKey] = wrld.EditorID ?? wrld.FormKey.ToString();
+var refsByWorld = new Dictionary<FormKey, Dictionary<(int, int), Dictionary<FormKey, PlacedRef>>>();
+var landByWorld = new Dictionary<FormKey, Dictionary<(int, int), float[,]>>();
+var cells = new List<CellPlacements>();
+foreach (var cp in PlacementExtract.FromMod(mod))
+{
+    if (!cp.Interior)
+    {
+        if (!refsByWorld.TryGetValue(cp.Worldspace, out var rg)) { refsByWorld[cp.Worldspace] = rg = new(); landByWorld[cp.Worldspace] = new(); }
+        FloorFeed.FileByGrid(cp, rg, landByWorld[cp.Worldspace]);
+    }
+    cells.Add(cp);
+}
+Console.WriteLine($"cells: {cells.Count:N0} with content ({cells.Count(c => c.Interior):N0} interior, {refsByWorld.Count} worldspaces; {landByWorld.Values.Sum(w => w.Count):N0} LAND records) ({sw.Elapsed.TotalSeconds:0.0} s)");
+
+// ---- geometry per mesh path: the actor-solid collision soup, as navprobe reads it ----
+var geoCache = new Dictionary<string, Geo>(StringComparer.OrdinalIgnoreCase);
+int measured = 0, measureFail = 0;
+long fallbackRefs = 0, solidRefs = 0;
+Geo Geometry(string rel)
+{
+    if (geoCache.TryGetValue(rel, out var hit)) return hit;
+    var full = rel.StartsWith("meshes", StringComparison.OrdinalIgnoreCase) ? rel : Path.Combine("meshes", rel);
+    var res = assets.ResolveForPlacement(full);
+    if (res.Sources.Count == 0) { measureFail++; return geoCache[rel] = new Geo(Aabb.Empty, null, "unresolved"); }
+    var (bytes, _) = AssetResolver.ReadPlacementSource(res.Sources[0]);
+    if (bytes is null) { measureFail++; return geoCache[rel] = new Geo(Aabb.Empty, null, "unresolved"); }
+    var o = NifGeometry.Measure(bytes, includeTriangles: true);
+    if (o.Model is null) { measureFail++; return geoCache[rel] = new Geo(Aabb.Empty, null, "unreadable"); }
+    measured++;
+    var m = o.Model;
+    bool anySolid = m.CollisionBodies is not null && m.CollisionBodies.Any(b => b.Solid && CollisionLayers.IsActorSolid(b.Layer));
+    if (!m.HasCollision || !anySolid) return geoCache[rel] = new Geo(Aabb.Empty, null, "none");
+    var solid = m.CollisionSoupFor(b => b.Solid && CollisionLayers.IsActorSolid(b.Layer));
+    if (m.CollisionComplete && solid is { TriangleCount: > 0 })
+    {
+        var box = Aabb.Empty;
+        foreach (var v in solid.Vertices) box = box.Add(v);
+        return geoCache[rel] = new Geo(box, solid, "collision");
+    }
+    return geoCache[rel] = new Geo(m.Bounds, m.Soup, "fallback");
+}
+(Aabb Box, TriangleSoup Soup)? FloorGeometry(PlacedRef r)
+{
+    if (r.Base is not { } b || !baseMesh.TryGetValue(b, out var bm)) return null;
+    var g = Geometry(bm.Mesh);
+    if (g.Soup is null || g.Box.IsEmpty) return null;
+    if (g.Source == "fallback") fallbackRefs++; else solidRefs++;
+    return (g.Box, g.Soup);
+}
+
+// ---- a cell's floor field: own refs and land (an interior, or --own), else the 3×3 neighbourhood by position ----
+// No fallback offset here: this probe reports "no floor" as such, never a stand-in.
+FloorField Field(CellPlacements cp)
+{
+    if (cp.Interior || ownOnly || cp.Grid is not { } g || !refsByWorld.TryGetValue(cp.Worldspace, out var rg))
+        return FloorFeed.Build(cp.Refs, FloorGeometry, cp.Land is { } own && cp.Grid is { } og ? new[] { (og, own) } : null, 0f, depth, reach);
+    var (nbRefs, nbLand) = FloorFeed.Neighbourhood(g, rg, landByWorld[cp.Worldspace]);
+    return FloorFeed.Build(nbRefs, FloorGeometry, nbLand, 0f, depth, reach);
+}
+
+// Ground under (x,y) in a cell's navmesh: every non-deleted triangle covering the point (corridorprobe's GroundAt).
+List<float> GroundAt(NavmeshIndex navs, Aabb extent, float x, float y)
+{
+    var zs = new List<float>();
+    var probe = new Aabb(new Vec3(x - 0.5f, y - 0.5f, extent.Min.Z - 512), new Vec3(x + 0.5f, y + 0.5f, extent.Max.Z + 512), false);
+    foreach (var hit in navs.Query(probe))
+    {
+        if ((hit.Flags & 0x08) != 0) continue;
+        var nav = navs.NavAt(hit.NavIndex); var tri = nav.Triangles[hit.TriangleIndex];
+        if (RouteConnectivity.HeightAt(nav.Vertices[tri.A], nav.Vertices[tri.B], nav.Vertices[tri.C], x, y) is { } z) zs.Add(z);
+    }
+    return zs;
+}
+
+CellPlacements? FindCell(string id)
+{
+    FormKey? fk = null;
+    try { fk = FormKey.Factory(id); } catch { }
+    return cells.FirstOrDefault(c => (fk is { } k && c.Cell == k) || string.Equals(c.CellEditorId, id, StringComparison.OrdinalIgnoreCase));
+}
+string Name(CellPlacements e) => e.CellEditorId ?? e.Cell.ToString();
+string World(CellPlacements e) => e.Interior ? "(interior)" : worldName.TryGetValue(e.Worldspace, out var n) ? n : e.Worldspace.ToString();
+
+// ================================================================================================ line / points ====
+if (mode is "line" or "points")
+{
+    if (positional.Count < 2) { Console.Error.WriteLine($"{mode} needs a cell"); return 2; }
+    var e = FindCell(positional[1]);
+    if (e is null) { Console.Error.WriteLine($"cell '{positional[1]}' not found in {plugin}"); return 2; }
+    var navs = NavmeshIndex.Build(e.Navmeshes, out int malformed);
+    var extent = Aabb.Empty;
+    foreach (var nv in e.Navmeshes) foreach (var v in nv.Vertices) extent = extent.Add(new Vector3(v.X, v.Y, v.Z));
+    var field = Field(e);
+    Console.WriteLine($"{Name(e)} ({World(e)}): {e.Navmeshes.Count} navmesh(es), {navs.TriangleCount:N0} triangles ({malformed} malformed); {field.Candidates:N0} floor candidates ({e.Refs.Count:N0} refs in the cell{(e.Interior ? "" : ", 3×3 neighbourhood by position")}); terrain {(e.Interior ? "none (interior)" : $"{field.LandCells} LAND records")}");
+
+    float NearestStorey(List<float> zs, float z0) => zs.Count == 0 ? float.NaN : zs.OrderBy(z => MathF.Abs(z - z0)).First();
+
+    if (mode == "line")
+    {
+        if (at is null) { Console.Error.WriteLine("line needs --at X,Y,Z"); return 2; }
+        float z0 = at.Value.Z;
+        if (z0 <= -99999f)
+        {
+            var zs = GroundAt(navs, extent, at.Value.X, at.Value.Y);
+            if (zs.Count == 0) { Console.Error.WriteLine("no navmesh under the point"); return 2; }
+            z0 = zs.Min();
+        }
+        float rad = heading * MathF.PI / 180f;
+        var dir = new Vector2(MathF.Sin(rad), MathF.Cos(rad));
+        Console.WriteLine($"along heading {heading:0} through ({at.Value.X:0}, {at.Value.Y:0}, {z0:0}), every {every:0} u for {span:0} u each way; δ = navmesh − floor (+ = the navmesh floats above the floor)");
+        Console.WriteLine($"   {"s",6} {"x",8} {"y",8} {"navZ",7} {"floorZ",7} {"δ",6}  {"source",-10} {"note"}");
+        float zPrev = z0;
+        for (float s = -span; s <= span + 1e-3f; s += every)
+        {
+            float x = at.Value.X + dir.X * s, y = at.Value.Y + dir.Y * s;
+            float navZ = NearestStorey(GroundAt(navs, extent, x, y), zPrev);
+            if (float.IsNaN(navZ)) { Console.WriteLine($"   {s,6:+0;-0} {x,8:0} {y,8:0} {"-",7}  (no navmesh)"); continue; }
+            zPrev = navZ;
+            var r = field.Read(x, y, navZ, out float saddle);
+            Console.WriteLine($"   {s,6:+0;-0} {x,8:0} {y,8:0} {navZ,7:0.0} {(r.Found ? r.FloorZ.ToString("0.0") : "-"),7} {(r.Found ? r.Offset.ToString("+0.0;-0.0") : "-"),6}  {(r.Found ? r.Source.ToString() : r.Reason.ToString()),-10} {(r.Embedded ? "embedded " : "")}{r.Surfaces} surface(s){(saddle > 0.5f ? $", land ±{saddle:0.0}" : "")}");
+        }
+        return 0;
+    }
+
+    // points: a walker's recorded positions (feet), each read against the navmesh storey nearest its own z.
+    if (positional.Count < 3) { Console.Error.WriteLine("points needs a file of x y z lines"); return 2; }
+    var diffs = new List<float>(); var offs = new List<float>(); int noNav = 0, noFloorPts = 0, n = 0;
+    Console.WriteLine($"   {"x",8} {"y",8} {"feet",7} {"navZ",7} {"floorZ",7} {"δ",6} {"feet−floor",10}  source");
+    foreach (var raw in File.ReadLines(positional[2]))
+    {
+        var parts = raw.Split(new[] { ' ', '\t', ',' }, StringSplitOptions.RemoveEmptyEntries);
+        if (parts.Length < 3 || !float.TryParse(parts[0], NumberStyles.Float, CultureInfo.InvariantCulture, out float x)) continue;
+        float y = F(parts[1]), z = F(parts[2]);
+        n++;
+        float navZ = NearestStorey(GroundAt(navs, extent, x, y), z);
+        if (float.IsNaN(navZ) || MathF.Abs(navZ - z) > depth) { noNav++; continue; }
+        var r = field.Read(x, y, navZ);
+        if (!r.Found) { noFloorPts++; Console.WriteLine($"   {x,8:0} {y,8:0} {z,7:0.0} {navZ,7:0.0} {"-",7} {"-",6} {"-",10}  {r.Reason}"); continue; }
+        diffs.Add(z - r.FloorZ); offs.Add(r.Offset);
+        Console.WriteLine($"   {x,8:0} {y,8:0} {z,7:0.0} {navZ,7:0.0} {r.FloorZ,7:0.0} {r.Offset,6:+0.0;-0.0} {z - r.FloorZ,10:+0.0;-0.0}  {r.Source}{(r.Embedded ? " embedded" : "")}");
+    }
+    Console.WriteLine($"\n   {n} points: {diffs.Count} read, {noNav} with no navmesh storey within {depth:0} u of the feet, {noFloorPts} with no floor");
+    if (diffs.Count > 0)
+    {
+        Console.WriteLine($"   feet − floor: median {NavmeshFloor.Quantile(diffs, 0.5f):+0.0;-0.0}, p10 {NavmeshFloor.Quantile(diffs, 0.1f):+0.0;-0.0}, p90 {NavmeshFloor.Quantile(diffs, 0.9f):+0.0;-0.0}, within ±2 u: {100.0 * diffs.Count(d => MathF.Abs(d) <= 2f) / diffs.Count:0}%");
+        Console.WriteLine($"   δ (navmesh − floor) at those points: median {NavmeshFloor.Quantile(offs, 0.5f):+0.0;-0.0}, p10 {NavmeshFloor.Quantile(offs, 0.1f):+0.0;-0.0}, p90 {NavmeshFloor.Quantile(offs, 0.9f):+0.0;-0.0}");
+    }
+    return 0;
+}
+
+// ================================================================================================ sweep / cell ====
+var verdicts = new Dictionary<FormKey, (string Verdict, string Mesh)>();
+if (verdictsDir is not null)
+{
+    foreach (var (file, v) in new[] { ("route-cut-blocked.tsv", "BLOCKED"), ("route-cut-likely.tsv", "LIKELY") })
+    {
+        var p = Path.Combine(verdictsDir, file);
+        if (!File.Exists(p)) { Console.Error.WriteLine($"--verdicts: {p} not found"); return 2; }
+        foreach (var line in File.ReadLines(p).Skip(1))
+        {
+            var cols = line.Split('\t');
+            if (cols.Length < 4) continue;
+            try { verdicts[FormKey.Factory(cols[0])] = (v, cols[3]); } catch { }
+        }
+    }
+    Console.WriteLine($"verdicts: {verdicts.Count(kv => kv.Value.Verdict == "BLOCKED"):N0} BLOCKED, {verdicts.Count(kv => kv.Value.Verdict == "LIKELY"):N0} LIKELY refs from {verdictsDir}");
+}
+
+List<CellPlacements> toSweep;
+if (mode == "cell")
+{
+    if (positional.Count < 2) { Console.Error.WriteLine("cell needs a cell"); return 2; }
+    var e = FindCell(positional[1]);
+    if (e is null) { Console.Error.WriteLine($"cell '{positional[1]}' not found in {plugin}"); return 2; }
+    toSweep = new List<CellPlacements> { e };
+}
+else if (mode == "sweep") toSweep = cells.Where(c => c.Navmeshes.Count > 0 && c.Refs.Count > 0).Take(maxCells).ToList();
+else { Console.Error.WriteLine("mode must be sweep, cell, line or points"); return 2; }
+
+using var trisOut = trisPath is null ? null : new StreamWriter(trisPath);
+trisOut?.WriteLine("cell\tworldspace\tnavmesh\ttri\tcx\tcy\tnavZ\tfloorZ\tdelta\tsource\treason\tembedded\tsamples\tfound\twater");
+using var cellsOut = tsvPath is null ? null : new StreamWriter(tsvPath);
+cellsOut?.WriteLine("cell\tworldspace\tinterior\tgrid\ttris\tfound\tmesh\tland\tnoSurface\tonlyDeeper\tonlyHigher\tonlyDownFacing\twaterNoFloor\tembedded\tmedian\tp10\tp90\tstoreys\tmaxStoreySpread\tlandSaddleP90");
+
+// ---- accumulators ----
+var hist = new Dictionary<string, List<float>>();   // group -> per-triangle δ
+List<float> Group(string g) { if (!hist.TryGetValue(g, out var l)) hist[g] = l = new List<float>(); return l; }
+var cellMedians = new Dictionary<string, List<float>>();
+var cellRows = new List<CellRow>();
+long trisTotal = 0, trisDeleted = 0, samplesTotal = 0, trisFound = 0, trisMesh = 0, trisLand = 0, trisEmbedded = 0, trisWaterNoFloor = 0;
+var noFloor = new long[5];
+var saddles = new List<float>();
+var verdictRows = new List<(FormKey Key, string Cell, string Verdict, string Mesh, int N, float Local, float CellMedian)>();
+int verdictNoSample = 0;
+Span<Vector3> pts = stackalloc Vector3[4];
+Span<FloorReading> reads = stackalloc FloorReading[4];
+int swept = 0;
+
+foreach (var e in toSweep)
+{
+    swept++;
+    var field = Field(e);
+    var cellOffs = new List<float>(); var cellNavZ = new List<float>();
+    var samples = new List<(float X, float Y, float NavZ)>();
+    int cFound = 0, cMesh = 0, cLand = 0, cEmb = 0, cWater = 0, cTris = 0; var cNo = new int[5];
+    foreach (var nav in e.Navmeshes)
+    {
+        for (int t = 0; t < nav.Triangles.Count; t++)
+        {
+            var tri = nav.Triangles[t];
+            if (tri.A < 0 || tri.B < 0 || tri.C < 0 || tri.A >= nav.Vertices.Count || tri.B >= nav.Vertices.Count || tri.C >= nav.Vertices.Count) continue;
+            if ((tri.Flags & 0x08) != 0) { trisDeleted++; continue; }
+            bool water = (tri.Flags & 0x200) != 0;
+            trisTotal++; cTris++;
+            int n = NavmeshFloor.SamplePoints(nav.Vertices[tri.A], nav.Vertices[tri.B], nav.Vertices[tri.C], split, pts);
+            for (int k = 0; k < n; k++)
+            {
+                reads[k] = field.Read(pts[k].X, pts[k].Y, pts[k].Z, out float saddle);
+                if (reads[k].Found && reads[k].Source == FloorSource.Land) saddles.Add(saddle);
+                samples.Add((pts[k].X, pts[k].Y, pts[k].Z));
+            }
+            samplesTotal += n;
+            var red = NavmeshFloor.Reduce(reads[..n]);
+            cellNavZ.Add(pts[0].Z);
+            if (red.Found)
+            {
+                trisFound++; cFound++;
+                if (red.AnyLand) { trisLand++; cLand++; } else { trisMesh++; cMesh++; }
+                if (red.AnyEmbedded) { trisEmbedded++; cEmb++; }
+                cellOffs.Add(red.Offset);
+                string g = e.Interior ? "interior" : red.AnyLand ? "exterior (land floor)" : "exterior (mesh floor)";
+                Group(g).Add(red.Offset);
+                Group("all").Add(red.Offset);
+                if (!e.Interior) Group("world:" + World(e)).Add(red.Offset);
+            }
+            else
+            {
+                noFloor[(int)red.Reason]++; cNo[(int)red.Reason]++;
+                cellOffs.Add(float.NaN);
+                if (water) { trisWaterNoFloor++; cWater++; }
+            }
+            trisOut?.WriteLine(string.Join('\t', Name(e), World(e), nav.FormKey, t, pts[0].X.ToString("0.0", CultureInfo.InvariantCulture), pts[0].Y.ToString("0.0", CultureInfo.InvariantCulture),
+                pts[0].Z.ToString("0.0", CultureInfo.InvariantCulture), red.Found ? (pts[0].Z - red.Offset).ToString("0.0", CultureInfo.InvariantCulture) : "",
+                red.Found ? red.Offset.ToString("0.0", CultureInfo.InvariantCulture) : "", red.Found ? (red.AnyLand ? "land" : "mesh") : "", red.Reason, red.AnyEmbedded ? 1 : 0, red.Samples, red.FoundSamples, water ? 1 : 0));
+        }
+    }
+
+    // storeys: the triangle centroids' navmesh heights clustered the route rule's way; the spread within each
+    var (storeyOf, storeys) = NavmeshFloor.Storeys(cellNavZ);
+    float maxSpread = float.NaN;
+    for (int s = 0; s < storeys; s++)
+    {
+        var so = new List<float>();
+        for (int k = 0; k < cellOffs.Count; k++) if (storeyOf[k] == s && !float.IsNaN(cellOffs[k])) so.Add(cellOffs[k]);
+        if (so.Count < 20) continue;
+        float spread = NavmeshFloor.Quantile(so, 0.9f) - NavmeshFloor.Quantile(so, 0.1f);
+        if (float.IsNaN(maxSpread) || spread > maxSpread) maxSpread = spread;
+    }
+    var found = cellOffs.Where(o => !float.IsNaN(o)).ToList();
+    float med = NavmeshFloor.Quantile(found, 0.5f), p10 = NavmeshFloor.Quantile(found, 0.1f), p90 = NavmeshFloor.Quantile(found, 0.9f);
+    var row = new CellRow(Name(e), World(e), e.Interior, e.Grid, cTris, cFound, cMesh, cLand, cNo, cWater, cEmb, med, p10, p90, storeys, maxSpread);
+    cellRows.Add(row);
+    if (found.Count >= 20)
+    {
+        if (!cellMedians.TryGetValue(e.Interior ? "interior" : "exterior", out var cm)) cellMedians[e.Interior ? "interior" : "exterior"] = cm = new List<float>();
+        cm.Add(med);
+    }
+    cellsOut?.WriteLine(string.Join('\t', row.Cell, row.World, row.Interior ? 1 : 0, row.Grid is { } gg ? $"{gg.X},{gg.Y}" : "", row.Tris, row.Found, row.Mesh, row.Land,
+        cNo[1], cNo[2], cNo[3], cNo[4], cWater, cEmb, Fmt(med), Fmt(p10), Fmt(p90), storeys, Fmt(maxSpread), ""));
+
+    // The δ under the objects a route-cut verdict stands on: the floor the walker stands on when it MEETS the object — the
+    // samples in the object's plan footprint grown by the capsule, within its vertical reach, read with the object itself
+    // out of the candidates (with it in, a steppable object's own top reads as the floor and δ comes out as minus its height).
+    if (verdicts.Count > 0)
+        foreach (var r in e.Refs)
+        {
+            if (!verdicts.TryGetValue(r.FormKey, out var v) || r.Base is null || !baseMesh.TryGetValue(r.Base.Value, out var bm)) continue;
+            var geo = Geometry(bm.Mesh);
+            if (geo.Box.IsEmpty) { verdictNoSample++; continue; }
+            var world = SpatialOverlap.ToWorld(geo.Box, r.Position, r.Rotation, r.Scale);
+            var local = new List<float>();
+            foreach (var s in samples)
+                if (s.X >= world.Min.X - 22f && s.X <= world.Max.X + 22f && s.Y >= world.Min.Y - 22f && s.Y <= world.Max.Y + 22f
+                    && s.NavZ >= world.Min.Z - 130f && s.NavZ <= world.Max.Z + 1f)
+                {
+                    var fr = field.Read(s.X, s.Y, s.NavZ, out _, exclude: r.FormKey);
+                    if (fr.Found) local.Add(fr.Offset);
+                }
+            if (local.Count == 0) { verdictNoSample++; continue; }
+            verdictRows.Add((r.FormKey, Name(e), v.Verdict, bm.Mesh, local.Count, NavmeshFloor.Quantile(local, 0.5f), med));
+        }
+
+    if (mode == "cell")
+    {
+        Console.WriteLine($"\n{Name(e)} ({World(e)}): {cTris:N0} triangles, {cFound:N0} with a floor ({cMesh:N0} mesh, {cLand:N0} land), no floor {cTris - cFound:N0} (no surface {cNo[1]}, only deeper {cNo[2]}, only higher {cNo[3]}, only down-facing {cNo[4]}; {cWater} water-flagged), embedded {cEmb}");
+        Console.WriteLine($"   δ over the cell: median {Fmt(med)}, p10 {Fmt(p10)}, p90 {Fmt(p90)}; {storeys} storey(s), widest within-storey p10–p90 spread {Fmt(maxSpread)} u");
+        for (int s = 0; s < storeys; s++)
+        {
+            var so = new List<float>(); var sz = new List<float>(); int sn = 0;
+            for (int k = 0; k < cellOffs.Count; k++) if (storeyOf[k] == s) { sn++; sz.Add(cellNavZ[k]); if (!float.IsNaN(cellOffs[k])) so.Add(cellOffs[k]); }
+            Console.WriteLine($"   storey {s}: navmesh z {sz.Min():0}..{sz.Max():0}, {sn} triangles, {so.Count} floored: median {Fmt(NavmeshFloor.Quantile(so, 0.5f))}, p10 {Fmt(NavmeshFloor.Quantile(so, 0.1f))}, p90 {Fmt(NavmeshFloor.Quantile(so, 0.9f))}");
+        }
+    }
+    if (mode == "sweep" && swept % 500 == 0)
+        Console.WriteLine($"   ... {swept:N0} cells, {trisTotal:N0} triangles, {measured:N0} meshes measured, {sw.Elapsed.TotalSeconds:0} s");
+}
+
+static string Fmt(float v) => float.IsNaN(v) ? "-" : v.ToString("+0.0;-0.0", CultureInfo.InvariantCulture);
+
+if (mode == "cell") { Console.WriteLine($"\nelapsed {sw.Elapsed.TotalSeconds:0.0} s"); return 0; }
+
+// ================================================================================================ the report ====
+Console.WriteLine($"\n==== NAVMESH-TO-FLOOR OFFSET δ (navmesh − floor; + = the navmesh floats above the floor) ====");
+Console.WriteLine($"cells swept              : {swept:N0} ({cellRows.Count(r => r.Interior):N0} interior, {cellRows.Count(r => !r.Interior):N0} exterior)");
+Console.WriteLine($"navmesh triangles        : {trisTotal:N0} read ({trisDeleted:N0} deleted skipped); {samplesTotal:N0} sample points");
+Console.WriteLine($"floor found              : {trisFound:N0} ({100.0 * trisFound / Math.Max(1, trisTotal):0.0}%) — on a mesh {trisMesh:N0}, on the terrain {trisLand:N0}; navmesh embedded in a solid at {trisEmbedded:N0}");
+Console.WriteLine($"no floor within reach    : {trisTotal - trisFound:N0} ({100.0 * (trisTotal - trisFound) / Math.Max(1, trisTotal):0.0}%) — no surface {noFloor[1]:N0}, only deeper than {depth:0} u {noFloor[2]:N0}, only higher than {reach:0} u {noFloor[3]:N0}, only down-facing {noFloor[4]:N0}; of these water-flagged {trisWaterNoFloor:N0}");
+Console.WriteLine($"floor candidates         : {solidRefs:N0} ref placements on the collision soup, {fallbackRefs:N0} on the render fallback; {measured:N0} meshes measured ({measureFail:N0} unreadable)");
+if (saddles.Count > 0) Console.WriteLine($"terrain model            : bilinear over the 33×33 heightmap; the triangulation error bound at the land-floored samples: median {NavmeshFloor.Quantile(saddles, 0.5f):0.0} u, p90 {NavmeshFloor.Quantile(saddles, 0.9f):0.0} u, max {saddles.Max():0.0} u");
+Console.WriteLine($"elapsed                  : {sw.Elapsed.TotalSeconds:0.0} s");
+
+Console.WriteLine($"\n   ---- δ over triangles, by population (u) ----");
+Console.WriteLine($"   {"group",-24} {"n",9} {"p5",6} {"p10",6} {"p25",6} {"median",7} {"p75",6} {"p90",6} {"p95",6}  {"±4 of median",12} {"±4 of 10",9} {"< -8",6}");
+foreach (var g in new[] { "interior", "exterior (mesh floor)", "exterior (land floor)", "all" })
+{
+    if (!hist.TryGetValue(g, out var l) || l.Count == 0) continue;
+    float m = NavmeshFloor.Quantile(l, 0.5f);
+    Console.WriteLine($"   {g,-24} {l.Count,9:N0} {NavmeshFloor.Quantile(l, 0.05f),6:0.0} {NavmeshFloor.Quantile(l, 0.1f),6:0.0} {NavmeshFloor.Quantile(l, 0.25f),6:0.0} {m,7:0.0} {NavmeshFloor.Quantile(l, 0.75f),6:0.0} {NavmeshFloor.Quantile(l, 0.9f),6:0.0} {NavmeshFloor.Quantile(l, 0.95f),6:0.0}  {100.0 * l.Count(v => MathF.Abs(v - m) <= 4f) / l.Count,11:0.0}% {100.0 * l.Count(v => MathF.Abs(v - 10f) <= 4f) / l.Count,8:0.0}% {100.0 * l.Count(v => v < -8f) / l.Count,5:0.0}%");
+}
+
+Console.WriteLine($"\n   ---- histogram of triangle δ (2 u bins; % of the group) ----");
+var groups = new[] { "interior", "exterior (mesh floor)", "exterior (land floor)" }.Where(hist.ContainsKey).ToArray();
+Console.WriteLine($"   {"bin",-12} " + string.Join(" ", groups.Select(g => $"{g,22}")));
+int[] Bins(List<float> l) { var b = new int[47]; foreach (var v in l) { int k = (int)MathF.Floor((v + 24f) / 2f) + 1; b[Math.Clamp(k, 0, 46)]++; } return b; }
+var binsOf = groups.ToDictionary(g => g, g => Bins(hist[g]));
+for (int k = 0; k < 47; k++)
+{
+    string label = k == 0 ? "< -24" : k == 46 ? ">= 66" : $"{-24 + (k - 1) * 2,4} .. {-24 + k * 2,3}";
+    if (groups.All(g => binsOf[g][k] == 0)) continue;
+    Console.WriteLine($"   {label,-12} " + string.Join(" ", groups.Select(g => $"{100.0 * binsOf[g][k] / hist[g].Count,21:0.00}%")));
+}
+
+Console.WriteLine($"\n   ---- exterior δ by worldspace (top 14 by triangles) ----");
+Console.WriteLine($"   {"worldspace",-28} {"n",9} {"p10",6} {"median",7} {"p90",6}");
+foreach (var kv in hist.Where(kv => kv.Key.StartsWith("world:")).OrderByDescending(kv => kv.Value.Count).Take(14))
+    Console.WriteLine($"   {kv.Key[6..],-28} {kv.Value.Count,9:N0} {NavmeshFloor.Quantile(kv.Value, 0.1f),6:0.0} {NavmeshFloor.Quantile(kv.Value, 0.5f),7:0.0} {NavmeshFloor.Quantile(kv.Value, 0.9f),6:0.0}");
+
+Console.WriteLine($"\n   ---- cell medians (cells with 20+ floored triangles) ----");
+foreach (var kv in cellMedians)
+{
+    var l = kv.Value; float m = NavmeshFloor.Quantile(l, 0.5f);
+    Console.WriteLine($"   {kv.Key,-10} {l.Count,6:N0} cells: median of medians {m:0.0}, p10 {NavmeshFloor.Quantile(l, 0.1f):0.0}, p90 {NavmeshFloor.Quantile(l, 0.9f):0.0}; cells within ±4 u of it {100.0 * l.Count(v => MathF.Abs(v - m) <= 4f) / l.Count:0.0}%, within ±4 of 10 {100.0 * l.Count(v => MathF.Abs(v - 10f) <= 4f) / l.Count:0.0}%");
+}
+var spreads = cellRows.Where(r => !float.IsNaN(r.MaxSpread)).Select(r => r.MaxSpread).ToList();
+if (spreads.Count > 0)
+    Console.WriteLine($"   within-storey p10–p90 spread over {spreads.Count:N0} cells: median {NavmeshFloor.Quantile(spreads, 0.5f):0.0} u, p90 {NavmeshFloor.Quantile(spreads, 0.9f):0.0} u; cells whose widest storey spreads over 8 u: {100.0 * spreads.Count(s => s > 8f) / spreads.Count:0.0}%, over 16 u: {100.0 * spreads.Count(s => s > 16f) / spreads.Count:0.0}%");
+
+Console.WriteLine($"\n   ---- the widest within-storey spreads (p90 − p10 of δ inside one storey; cells with 50+ floored triangles) ----");
+Console.WriteLine($"   {"cell",-30} {"worldspace",-20} {"tris",6} {"floored",7} {"storeys",7} {"median",7} {"p10",6} {"p90",6} {"spread",7}");
+foreach (var r in cellRows.Where(r => r.Found >= 50 && !float.IsNaN(r.MaxSpread)).OrderByDescending(r => r.MaxSpread).Take(20))
+    Console.WriteLine($"   {r.Cell,-30} {r.World,-20} {r.Tris,6:N0} {r.Found,7:N0} {r.Storeys,7} {r.Median,7:0.0} {r.P10,6:0.0} {r.P90,6:0.0} {r.MaxSpread,7:0.0}");
+Console.WriteLine($"\n   ---- the highest and lowest cell medians (50+ floored triangles) ----");
+foreach (var r in cellRows.Where(r => r.Found >= 50).OrderByDescending(r => r.Median).Take(8).Concat(cellRows.Where(r => r.Found >= 50).OrderBy(r => r.Median).Take(8)))
+    Console.WriteLine($"   {r.Cell,-30} {r.World,-20} {r.Tris,6:N0} {r.Found,7:N0} {r.Storeys,7} {r.Median,7:0.0} {r.P10,6:0.0} {r.P90,6:0.0}");
+Console.WriteLine($"\n   ---- the cells with the most triangles lacking a floor (share; 50+ triangles) ----");
+foreach (var r in cellRows.Where(r => r.Tris >= 50).OrderByDescending(r => (double)(r.Tris - r.Found) / r.Tris).Take(12))
+    Console.WriteLine($"   {r.Cell,-30} {r.World,-20} {r.Tris,6:N0} no floor {r.Tris - r.Found,6:N0} ({100.0 * (r.Tris - r.Found) / r.Tris,5:0.0}%): no surface {r.No[1]}, deeper {r.No[2]}, higher {r.No[3]}, down-facing {r.No[4]}; water-flagged {r.WaterNoFloor}");
+
+if (verdicts.Count > 0)
+{
+    Console.WriteLine($"\n   ---- δ under the objects the route-cut verdicts stand on (median of the floored samples in the object's footprint + 22 u, the object itself not a floor candidate) ----");
+    Console.WriteLine($"   {"verdict",-8} {"objects",8} {"no sample",9} {"p10",6} {"median",7} {"p90",6}  {"|δ−10| > 8",10} {"|δ−10| > 4",10}");
+    foreach (var v in new[] { "BLOCKED", "LIKELY" })
+    {
+        var rows = verdictRows.Where(r => r.Verdict == v).ToList();
+        int listed = verdicts.Count(kv => kv.Value.Verdict == v);
+        if (rows.Count == 0) { Console.WriteLine($"   {v,-8} {0,8} ({listed:N0} listed, none in the swept cells)"); continue; }
+        var l = rows.Select(r => r.Local).ToList();
+        Console.WriteLine($"   {v,-8} {rows.Count,8:N0} {listed - rows.Count,9:N0} {NavmeshFloor.Quantile(l, 0.1f),6:0.0} {NavmeshFloor.Quantile(l, 0.5f),7:0.0} {NavmeshFloor.Quantile(l, 0.9f),6:0.0}  {100.0 * l.Count(x => MathF.Abs(x - 10f) > 8f) / l.Count,9:0.0}% {100.0 * l.Count(x => MathF.Abs(x - 10f) > 4f) / l.Count,9:0.0}%");
+    }
+    var vb = Bins(verdictRows.Where(r => r.Verdict == "BLOCKED").Select(r => r.Local).ToList());
+    var vl = Bins(verdictRows.Where(r => r.Verdict == "LIKELY").Select(r => r.Local).ToList());
+    Console.WriteLine($"   {"bin",-12} {"BLOCKED",9} {"LIKELY",9}");
+    for (int k = 0; k < 47; k++)
+    {
+        if (vb[k] == 0 && vl[k] == 0) continue;
+        string label = k == 0 ? "< -24" : k == 46 ? ">= 66" : $"{-24 + (k - 1) * 2,4} .. {-24 + k * 2,3}";
+        Console.WriteLine($"   {label,-12} {vb[k],9:N0} {vl[k],9:N0}");
+    }
+    if (tsvPath is not null)
+    {
+        var vp = Path.Combine(Path.GetDirectoryName(Path.GetFullPath(tsvPath)) ?? ".", "verdict-offsets.tsv");
+        using var vw = new StreamWriter(vp);
+        vw.WriteLine("key\tcell\tverdict\tmesh\tsamples\tlocalDelta\tcellMedian");
+        foreach (var r in verdictRows) vw.WriteLine($"{r.Key}\t{r.Cell}\t{r.Verdict}\t{r.Mesh}\t{r.N}\t{Fmt(r.Local)}\t{Fmt(r.CellMedian)}");
+        Console.WriteLine($"   per-object rows -> {vp}");
+    }
+}
+if (tsvPath is not null) Console.WriteLine($"\nper-cell rows -> {tsvPath}");
+if (trisPath is not null) Console.WriteLine($"per-triangle rows -> {trisPath}");
+return 0;
+
+record Geo(Aabb Box, TriangleSoup? Soup, string Source);
+record CellRow(string Cell, string World, bool Interior, (int X, int Y)? Grid, int Tris, int Found, int Mesh, int Land, int[] No, int WaterNoFloor, int Embedded,
+               float Median, float P10, float P90, int Storeys, float MaxSpread);
