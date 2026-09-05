@@ -165,6 +165,13 @@ bool showPlanes = false;
 // every ref with the base and transform the game loads after *_SWAP.ini; diff the same, swapped refs tinted teal
 // and named in the hover; off the record bases, as every render did before 2026-09-04.
 string bosMode = "on";
+// --state SPEC — the world state (roadmap 4.11, _shared/WorldState.cs): <switch>[,<switch>…] by editor id or FormKey,
+// stage:<quest>:<n> with --switch-map (switchprobe's --json), or baseline. Every ref's existence becomes its runtime
+// enable state with those switches flipped. --state-view on (default) draws the state; diff also draws what the flip
+// took out, arrivals tinted GREEN and departures RED (StateView.cs). Without --state the picture is the load-time state,
+// as every render before 2026-09-04.
+string? stateSpec = null, switchMapPath = null;
+string stateView = "on";
 string occlusionMode = "off";
 bool planesReport = false;
 float planesReach = 256f;
@@ -535,6 +542,14 @@ for (int i = argStart; i < args.Length; i++)
         if (bosMode is not ("off" or "on" or "diff")) { Console.Error.WriteLine("--bos takes off | on | diff"); return 1; }
         if (bosMode == "diff") textured = true;
     }
+    else if (args[i] == "--state" && i + 1 < args.Length) { stateSpec = args[++i]; textured = true; }
+    else if (args[i] == "--state-view" && i + 1 < args.Length)
+    {
+        stateView = args[++i].ToLowerInvariant();
+        if (stateView is not ("on" or "diff")) { Console.Error.WriteLine("--state-view takes on | diff"); return 1; }
+        textured = true;
+    }
+    else if (args[i] == "--switch-map" && i + 1 < args.Length) switchMapPath = args[++i];
     else if (args[i] is "--instance" or "--game" or "--profile") i++;   // consumed above
     // A worklist path is a worklist WHEREVER it lands, not only in the leading run that a drop
     // produces: `viewprobe --interactive tour.json` is the obvious thing to type once dropping one
@@ -803,6 +818,8 @@ var persistentWin = new Dictionary<FormKey, (FormKey Ws, PlacedRef Ref)>();
 // override that clears the flag or drops the XESP must erase the entry, not just fail to add it.
 var refDisabledFlag = new HashSet<FormKey>();
 var refEnableParent = new Dictionary<FormKey, (FormKey Parent, bool Opposite)>();
+// --state: every ref's editor id (the switches are named by it), kept only when a state is asked for.
+var refEditorIdAll = new Dictionary<FormKey, string>();
 // Occlusion-plane provenance: every plugin's version of every PlaneMarker ref, in load order (a few
 // thousand entries at most, so the whole order is recorded rather than only the target's cells —
 // a persistent plane merges into the scene by position, after the walk has decided its cell). The
@@ -902,7 +919,13 @@ EnableFacts? EnableFactsOf(FormKey fk) =>
     new EnableFacts(refDisabledFlag.Contains(fk),
                     refEnableParent.TryGetValue(fk, out var p) ? p.Parent : null,
                     refEnableParent.TryGetValue(fk, out var q) && q.Opposite);
-bool RefEnabled(FormKey fk) => EnableState.Resolve(fk, EnableFactsOf, enableMemo).Enabled;
+// --state: the facts the scene resolves through — the records' own until a state arm wraps them after the walk
+// (a flipped switch reads as the opposite of its load-time state, its children follow through the chain rule).
+Func<FormKey, EnableFacts?> activeFacts = EnableFactsOf;
+var stateBaselineMemo = new Dictionary<FormKey, EnableResolution>();
+HarnessShared.StateArm? stateArm = null;
+bool RefEnabled(FormKey fk) => EnableState.Resolve(fk, activeFacts, enableMemo).Enabled;
+bool RefEnabledBaseline(FormKey fk) => EnableState.Resolve(fk, EnableFactsOf, stateBaselineMemo).Enabled;
 // The three dispositions a drop report needs to tell apart.
 string? DisabledWhy(PlacedRef r) =>
     RefEnabled(r.FormKey) ? null
@@ -1003,7 +1026,8 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot)
     // Per-cell state is declared OUTSIDE this function, because the flat mode reads it too — so a
     // SECOND call has to clear what the first left. A collection missed here would not throw; it
     // would quietly render cell 2 holding cell 1's references.
-    winRef.Clear(); persistentWin.Clear(); refDisabledFlag.Clear(); refEnableParent.Clear();
+    winRef.Clear(); persistentWin.Clear(); refDisabledFlag.Clear(); refEnableParent.Clear(); refEditorIdAll.Clear();
+    stateArm = null; activeFacts = EnableFactsOf; stateBaselineMemo.Clear();
     planeHist.Clear(); cellContestedBy.Clear();
     npcRefWhere.Clear(); npcBaseWhere.Clear(); doorWhere.Clear();
     winNav.Clear(); navByPlugin.Clear();
@@ -1214,6 +1238,7 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot)
                 {
                     if (bosFill) bosIdx!.NotePlaced(r.FormKey, r.Persistent);
                     if (r.InitiallyDisabled) refDisabledFlag.Add(r.FormKey); else refDisabledFlag.Remove(r.FormKey);
+                    if (stateSpec is not null && !string.IsNullOrWhiteSpace(r.EditorId)) refEditorIdAll[r.FormKey] = r.EditorId!;
                     if (r.EnableParent is { } epk) refEnableParent[r.FormKey] = (epk, r.EnableParentOpposite);
                     else refEnableParent.Remove(r.FormKey);
                     if (r.Base is { } pbk && pbk == planeMarkerKey) ViewProbe.PlaneHistory.Record(planeHist, r, plgName);
@@ -1287,6 +1312,57 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot)
         bosLayer = BaseObjectSwaps.Load(bosInis, bosIdx);
         Console.WriteLine($"   BOS {bosMode}: {bosInis.Count} *_SWAP.ini read from the VFS ({bosLayer.LinesRead:N0} lines, {bosLayer.LinesFailed:N0} the game refuses, "
                         + $"{bosLayer.Anomalies.Count:N0} anomalies — bosprobe lists them); every drawn ref takes the base and transform the game loads");
+    }
+
+    // --state: the arm over the whole order's chains (a marker in the persistent cell governs refs in the grid cells). A
+    // switch is any winning XESP parent that is a placed reference; a token that names none is refused, never ignored.
+    if (stateSpec is not null)
+    {
+        var parents = new HashSet<FormKey>(refEnableParent.Values.Select(v => v.Parent));
+        var byEdid = new Dictionary<string, FormKey>(StringComparer.OrdinalIgnoreCase);
+        foreach (var (k, e) in refEditorIdAll) if (parents.Contains(k)) byEdid.TryAdd(e, k);
+        FormKey? Tok(string t)
+        {
+            if (byEdid.TryGetValue(t, out var k)) return k;
+            try { var fk = FormKey.Factory(t); return parents.Contains(fk) ? fk : null; } catch { return null; }
+        }
+        var flips = new List<FormKey>();
+        if (!stateSpec.Equals("baseline", StringComparison.OrdinalIgnoreCase))
+        {
+            IEnumerable<string> tokens;
+            if (stateSpec.StartsWith("stage:", StringComparison.OrdinalIgnoreCase))
+            {
+                if (switchMapPath is null) { Console.Error.WriteLine($"--state {stateSpec} needs --switch-map <switchprobe --json file>"); return 1; }
+                tokens = HarnessShared.SwitchMap.Read(switchMapPath).StageFlips(stateSpec[6..]) ?? Array.Empty<string>();
+                if (!tokens.Any()) { Console.Error.WriteLine($"--state {stateSpec}: the switch map names no such quest stage"); return 1; }
+            }
+            else tokens = stateSpec.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+            foreach (var t in tokens)
+            {
+                if (Tok(t) is not { } k) { Console.Error.WriteLine($"--state: '{t}' is not a switch in this order (no winning reference names it as an enable parent)"); return 1; }
+                if (!flips.Contains(k)) flips.Add(k);
+            }
+        }
+        stateArm = new HarnessShared.StateArm(stateSpec, flips);
+        activeFacts = stateArm.Wrap(EnableFactsOf, RefEnabledBaselineResolution);
+        enableMemo.Clear();
+        int arrive = 0, depart = 0;
+        foreach (var k in winRef.Keys) { bool was = RefEnabledBaseline(k), now = RefEnabled(k); if (now && !was) arrive++; else if (!now && was) depart++; }
+        Console.WriteLine($"   STATE {stateArm.Name} ({stateView}): {flips.Count} switch(es) flipped — in the loaded cells {arrive:N0} ref(s) arrive, {depart:N0} depart; every drawn ref's existence is its runtime enable state under the flip");
+    }
+    EnableResolution RefEnabledBaselineResolution(FormKey fk) => EnableState.Resolve(fk, EnableFactsOf, stateBaselineMemo);
+    string StateRootLabel(FormKey fk)
+    {
+        if (stateArm is null) return "";
+        var seen = new HashSet<FormKey>();
+        var k = fk;
+        while (seen.Add(k))
+        {
+            if (stateArm.Flips.Contains(k)) return refEditorIdAll.TryGetValue(k, out var e) ? e : k.ToString();
+            if (!refEnableParent.TryGetValue(k, out var p)) break;
+            k = p.Parent;
+        }
+        return "(the flip)";
     }
 
     Console.WriteLine($"cell {cellLabel} {(interior ? "(interior)" : "(exterior)")}  {cellKey}");
@@ -1476,14 +1552,27 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot)
             return sb.ToString();
         }
         var meshCensus = listMeshes ? new Dictionary<string, (int Count, string Class)>(StringComparer.OrdinalIgnoreCase) : null;
+        int stateArrived = 0, stateDeparted = 0;
         foreach (var r in winRef.Values)
         {
             if (r.Deleted) { deletedSkipped++; continue; }
-            if (!RefEnabled(r.FormKey))
+            // --state: what the flip changed for this ref — arrives (+1), departs (−1), nothing (0). A departed ref is
+            // drawn only in the diff view, tinted, so the eye sees what left.
+            int stateChange = 0;
+            bool enabledNow = RefEnabled(r.FormKey);
+            if (stateArm is not null)
+            {
+                bool was = RefEnabledBaseline(r.FormKey);
+                stateChange = enabledNow && !was ? 1 : !enabledNow && was ? -1 : 0;
+            }
+            if (!enabledNow && !(stateChange == -1 && stateView == "diff"))
             {
                 if (refEnableParent.ContainsKey(r.FormKey)) disabledParentSkipped++; else disabledFlagSkipped++;
+                if (stateChange == -1) stateDeparted++;
                 continue;
             }
+            if (stateChange == 1) stateArrived++; else if (stateChange == -1) stateDeparted++;
+            string? stateLabel = stateChange == 0 ? null : $"STATE {stateArm!.Name}: {(stateChange > 0 ? "arrives" : "departs")} with the flip of {StateRootLabel(r.FormKey)}";
             // The defect this counter watches: initially-disabled refs whose enable parent resolves
             // ENABLED at runtime — the standard way a mod swaps a whole set in. These used to be
             // silently dropped (a third of the Temple's content).
@@ -1534,7 +1623,7 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot)
             scene.Add(new ViewProbe.SceneRef(rel, rPos, rRot, rScale,
                                              (hiFp is { } h && r.FormKey == h) || conflictDoors.Contains(r.FormKey), isMarker,
                                              r.FormKey, bk, baseEditorId.TryGetValue(bk, out var bEd) ? bEd : null,
-                                             bosRecordBase, bosLabel, bosRandom));
+                                             bosRecordBase, bosLabel, bosRandom, stateChange, stateLabel));
         }
         foreach (var (qx, qy, qr) in refsAt)
         {
@@ -1609,6 +1698,9 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot)
                         + $"{deletedSkipped:N0} deleted, {noModel:N0} with no model-bearing base");
         if (enabledByParentDrawn > 0)
             Console.WriteLine($"   {enabledByParentDrawn:N0} initially-disabled ref(s) DRAWN — their enable parent resolves ENABLED at runtime");
+        if (stateArm is not null)
+            Console.WriteLine($"   STATE {stateArm.Name} {stateView}: {stateArrived:N0} ref(s) in this cell arrive with the flip (drawn{(stateView == "diff" ? ", tinted GREEN" : "")}), "
+                            + $"{stateDeparted:N0} depart ({(stateView == "diff" ? "drawn tinted RED" : "not drawn")})");
         if (bosLayer is not null)
         {
             Console.WriteLine($"   BOS {bosMode}: {bosSwapped:N0} drawn ref(s) carry a swapped base ({bosRandomCount:N0} random — the first alternative is drawn), "
@@ -3194,7 +3286,7 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot)
                    skyColor, terrainHeightAt, dashUnderground, dashUnderStatics, msaa, cullAbove, cellBounds,
                    diffs ?? noDiff, diffColor, picks, captionLines, colourCaptions, npcActors, npcPucksOn, routeRenders,
                    gridRender, overlayLines, keepFx, fxStatic, listMeshes, waterPlanes, coverings, planes, showPlanes, occlusionMode,
-                   size, outFile, camMeta, planeReport: planeReportSink, bosMode: bosMode);
+                   size, outFile, camMeta, planeReport: planeReportSink, bosMode: bosMode, stateMode: stateView, stateName: stateArm?.Name ?? "");
 
         if (compare is { } cmp)
         {
@@ -3276,6 +3368,7 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot)
                 if (DoorCaption() is { } dc) cap.Add(dc);
                 if (showPlanes && planeLegend.Length > 0) cap.Add(planeLegend);
                 if (bosLayer is not null && bosSwapped > 0) cap.Add($"BOS {bosMode}: {bosSwapped} swapped ref(s), {bosRandomCount} random{(bosMode == "diff" ? " - tinted TEAL" : "")}");
+                if (stateArm is not null) cap.Add($"STATE {stateArm.Name} {stateView}: {stateArrived} arrive, {stateDeparted} depart{(stateView == "diff" ? " - GREEN in, RED out" : "")}");
                 // NPC caption lines ride the separate coloured channel (colourCaptions),
                 // passed straight into the render call below.
                 if (changedKeys.Count > 0 && navDiff)
@@ -3321,6 +3414,7 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot)
         if (DoorCaption() is { } fdc) fpCap.Add(fdc);
         if (showPlanes && planeLegend.Length > 0) fpCap.Add(planeLegend);
         if (bosLayer is not null && bosSwapped > 0) fpCap.Add($"BOS {bosMode}: {bosSwapped} swapped ref(s), {bosRandomCount} random{(bosMode == "diff" ? " - tinted TEAL" : "")}");
+        if (stateArm is not null) fpCap.Add($"STATE {stateArm.Name} {stateView}: {stateArrived} arrive, {stateDeparted} depart{(stateView == "diff" ? " - GREEN in, RED out" : "")}");
 
         if (interactiveMode)
         {
@@ -3381,7 +3475,7 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot)
                 skyColor, terrainHeightAt, dashUnderground, dashUnderStatics, msaa, cullAbove, cellBounds,
                 noDiff, diffColor, picks, fpCap, colourCaptions, npcActors, npcPucksOn, routeRenders, gridRender, overlayLines, keepFx, fxStatic, listMeshes,
                 waterPlanes, coverings, planes, showPlanes, occlusionMode, size, fpOut,
-                camMeta, iopt, planeReportSink, bosMode);
+                camMeta, iopt, planeReportSink, bosMode, stateView, stateArm?.Name ?? "");
             Console.WriteLine($"   interactive run over ({iShapes:N0} shapes were resident)");
         pendingSwitch = iopt.CellSwitch;
             NpcCleanup();

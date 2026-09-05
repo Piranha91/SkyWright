@@ -151,6 +151,13 @@ findings they demonstrate) lives with that instance, not here.
   targets, or a chance under 100) draws its FIRST alternative and says so; hover a swapped ref for
   record base → effective base and the ini line. In the window `B` toggles `on` ↔ `diff`. Its own
   section: *The Base Object Swapper layer* below.
+- **World state:** `--state <switch>[,<switch>…]` (an enable marker by editor id or FormKey),
+  `--state stage:<quest>:<n>` (with `--switch-map <switchprobe --json>`), or `--state baseline`.
+  Every ref's existence becomes its runtime enable state with those switches flipped — what a quest
+  stage, a scene or a trigger does when it enables the marker later — instead of the load-time
+  state. `--state-view on` (default) draws the state; `diff` also draws what the flip took out,
+  arrivals tinted GREEN and departures RED. In the window `T` toggles `on` ↔ `diff`. Its own
+  section: *The world state* below.
 - **Walking route** (`--route X,Y`, repeatable): the path to WALK from this camera, drawn as
   straight segments with arrowheads pointing waypoint to waypoint. **X and Y only** — z is
   resolved from the winning navmesh. `--route-z Z` states the floor the route runs on (which
@@ -324,6 +331,8 @@ gitignored for the same reason: probe transcripts name the plugins of whatever l
 ## Feature state
 
 - Textured first-person rendering from the exact MO2 profile (BSA + loose, MO2 precedence).
+- **World state (2026-09-04)** — `--state <switch>` flips an enable marker and draws the world the
+  flip produces; `--state-view diff` tints what arrived green and what departed red. Own section below.
 - **Landscape seams and the water arms (2026-09-04)** — `--seams` ribbons every shared cell edge whose
   LAND vertices disagree, coloured by the step; `--water-arm truth|winner` draws the cell water from
   the masters' tuple or the winner's and prints both arms per ring cell. Own section below.
@@ -1550,6 +1559,60 @@ in the caption only, which is what a render with the swaps out of frame must do.
 viewprobe SomeInnCell --eye 330,-1180,170 --look 140,-960,50 --bos diff
 viewprobe SomeInnCell --eye 330,-1180,170 --look 140,-960,50 --bos off     # the record bases, for the diff
 bosprobe --cell SomeInnCell                                                  # every ref's answer, with the alternatives
+```
+
+## The world state (`--state`, `--state-view on|diff`)
+
+Added 2026-09-04 (roadmap 4.11). The renderer's "does this thing exist" has been the load-time
+state since 2026-08-28: a ref's own initially-disabled flag when it has no XESP enable parent, the
+parent chain's state otherwise (`EnableState`, shared with the placement-contact index). Nothing
+modelled a later flip — a quest stage, a scene or a trigger volume calling `Enable()` / `Disable()`
+on a marker whose children then swap in one instant: the on-set (same state as the parent) arrives
+as the off-set (opposite flag) leaves. `--state` draws that world.
+
+- **A switch** is any placed reference that is the winning XESP parent of another (the player, ID
+  `0x14`, is never one: parent = player + opposite is the permanently-disabled idiom). Its census —
+  every switch, its on-set and off-set with chains followed by parity, the navcut boxes in each
+  set, the plugin that placed the marker and the plugins that attached each child, the vanilla floor
+  per cell and region, and the trigger map (which quest stage, scene or event flips it, read from
+  the script bindings and the decompiled scripts) — is `switchprobe`; the class across a flip
+  (StateConditional / StateResolved rows over overlap, contact and the route rule) is `stateprobe`;
+  the same arm is `--state` on overlapprobe, contactprobe and blockprobe. All of it reads
+  `_shared/WorldState.cs` (`SwitchIndex`, `StateArm`); this renderer takes the arm alone
+  (`_shared/StateArm.cs`) and resolves it over its own whole-order XESP maps.
+- **A flip** sets the switch's own runtime state to the opposite of its load-time state and cuts its
+  own parent link (`Enable()`/`Disable()` on the marker itself); every descendant follows through the
+  unchanged chain rule. A joint flip (`stage:<quest>:<n>`) applies every switch that quest stage's
+  fragment touches, read from switchprobe's JSON. Nothing else changes: no placement, no base, no
+  navmesh. A token that names no switch in the order is refused, never ignored — a state that
+  silently flipped nothing would read as the baseline.
+- **What the picture shows.** `on`: the state — refs enabled under the flip are drawn, the rest
+  are not; the console's "refs not drawn" line counts the departed with the disabled. `diff`: the
+  state AND the refs the flip took out, arrivals tinted GREEN and departures RED (the occlusion
+  preview's emissive-wash mechanism with its own saved state, applied after the BOS paint — a mesh
+  both touch takes the last applied). The console prints `STATE <name> <view>: N ref(s) in this
+  cell arrive with the flip, M depart`; the caption carries the same; the hover names
+  `STATE <name>: arrives|departs with the flip of <switch>` — the switch at the top of the ref's
+  chain among those flipped. In the window `T` toggles `on` ↔ `diff` when the scene was built
+  `diff` (the departed refs are resident, hidden in `on` through the same visibility flag the
+  height clip and the occlusion preview write); a scene built `on` holds no departed ref and says
+  so rather than pretending to toggle.
+- **What it does not do.** The bar does not cycle the CELL's switches — a scene is built for one
+  state; another state is another run (or a worklist of runs). The trigger map is not consulted
+  here: an Unknown-trigger switch flips like any other, and whether the state is reachable is the
+  map's business (switchprobe prints Triggered / Bound-but-unread / Unknown per switch).
+
+**Verified** (2026-09-04, the lab's College of Winterhold overhaul, a furnished room whose marker
+is enabled at load): rendered baseline, `on` and `diff` from one eye — `on` shows the room stripped
+(the 46 furnishings gone, the bare frame the off-set brings in present), `diff` shows the
+furnishings tinted red where they stood and the bare frame green; 1.8 % of the frame differs between
+baseline and `on`, 2.5 % between baseline and `diff`, and the difference is the furniture.
+
+```
+viewprobe SomeHallCell --eye 1150,350,-120 --look 652,-94,-384 --state SomeRoomMarker --state-view diff
+viewprobe SomeHallCell --eye 1150,350,-120 --look 652,-94,-384 --state SomeRoomMarker              # the state alone
+viewprobe SomeHallCell --eye ... --state stage:SomeQuest:200 --switch-map switches.json             # a quest stage's joint flip
+switchprobe --cell SomeHallCell                                                                     # which switches stand here, and what flips them
 ```
 
 ## The depth buffer is the arbiter

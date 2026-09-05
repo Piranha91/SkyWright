@@ -63,6 +63,9 @@ sealed class PickShape
     /// <summary>Kind==Ref: the occlusion preview (`on`) says a plane hides this ref from the current eye. Folded
     /// into visibility by the clip, so the two knives write one flag and cannot disagree.</summary>
     public bool Culled;
+    /// <summary>Kind==Ref: the world-state view (`on`) hides this departed ref. Folded into visibility by the clip like
+    /// <see cref="Culled"/>, for the same reason.</summary>
+    public bool StateHidden;
     public Vector3 Min, Max;
     /// <summary>Kind==Ref: the GlMesh these triangles were uploaded as, so the height clip can
     /// hide it and the ray can then SKIP it. A pick that names a shape the clip just removed
@@ -158,6 +161,7 @@ sealed class InteractiveOptions
     public OcclusionState? Occlusion;                      // filled by the scene build
     public string OcclusionMode = "off";                   // entry mode from --occlusion or the shot
     public BosViewState? Bos;                              // the Base Object Swapper layer, filled by the scene build
+    public StateViewState? State;                          // the world state's paint (--state), filled by the scene build
 
     // The height clip needs no list of its own: a static's PickShape already carries its mesh
     // and, in Min.Y/Max.Y, the Skyrim-z span of exactly the triangles that were drawn. Statics
@@ -300,7 +304,7 @@ static class InteractiveViewer
             {
                 // The band AND the occlusion preview decide together: a shape a plane hides in `on`
                 // is written through the same flag the clip writes, so neither knife can undo the other.
-                bool show = s.Max.Y >= lo && s.Min.Y <= hi && !s.Culled;     // viewer Y IS Skyrim z
+                bool show = s.Max.Y >= lo && s.Min.Y <= hi && !s.Culled && !s.StateHidden;     // viewer Y IS Skyrim z
                 s.Mesh!.IsRendering = show;
                 if (s.CoverMesh is { } cm) cm.IsRendering = show;   // the snow goes with the roof
                 if (!show && !(s.Max.Y >= lo && s.Min.Y <= hi)) hidden++;
@@ -315,6 +319,7 @@ static class InteractiveViewer
         // mesh's own and hand it back later.
         string occlMode = opt.OcclusionMode;
         string bosMode = opt.Bos?.Mode ?? "off";               // the BOS layer's paint (BosView.cs); B toggles on <-> diff
+        string stateMode = opt.State?.Mode ?? "on";            // the world state's paint (StateView.cs); T toggles on <-> diff
         bool hasOccl = opt.Occlusion is { Planes.Count: > 0 };
         void ApplyOcclusion(bool force = false)
         {
@@ -490,7 +495,7 @@ static class InteractiveViewer
                 case PickKind.Ref:
                     var r = s.Ref;
                     string ed = r.BaseEditorId is { Length: > 0 } e ? e : "(no EditorID)";
-                    return $"REFR {r.RefKey} = FormID {opt.RuntimeId(r.RefKey)} — {ed} — {r.MeshRelPath}{(r.BosLabel is { } bl ? "  |  " + bl : "")}{tail}{beyond}";
+                    return $"REFR {r.RefKey} = FormID {opt.RuntimeId(r.RefKey)} — {ed} — {r.MeshRelPath}{(r.BosLabel is { } bl ? "  |  " + bl : "")}{(r.StateLabel is { } stl ? "  |  " + stl : "")}{tail}{beyond}";
                 case PickKind.Navmesh:
                     int ti = s.NavTriIds![hv.LocalTri];
                     string red = opt.RedNav.Contains(s.NavKey) ? " [RED — the finding]" : "";
@@ -529,6 +534,7 @@ static class InteractiveViewer
                     Console.WriteLine($"      base {r.BaseKey} = FormID {opt.RuntimeId(r.BaseKey)}"
                                     + $"  {r.BaseEditorId ?? "(no EditorID)"}");
                     if (r.BosLabel is { } bl2) Console.WriteLine($"      {bl2}");
+                    if (r.StateLabel is { } stl2) Console.WriteLine($"      {stl2}");
                     Console.WriteLine($"      mesh {r.MeshRelPath}");
                     Console.WriteLine($"      placed at {r.Position.X:0},{r.Position.Y:0},{r.Position.Z:0} scale {r.Scale:0.00}"
                                     + $"  — hit at {ws.X:0},{ws.Y:0},{ws.Z:0}, {hv.T:0} u from the eye");
@@ -697,6 +703,7 @@ static class InteractiveViewer
             if (opt.ShowPlanes && opt.PlaneLegend.Length > 0) parts.Add(opt.PlaneLegend);
             if (OcclusionLabel() is { Length: > 0 } ol) parts.Add(ol);
             if (opt.Bos is { BuiltMode: not "off", SwappedCount: > 0 } bv) parts.Add(bv.Summary());
+            if (opt.State is { Count: > 0 } sv) parts.Add(sv.Summary());
             return string.Join(" — ", parts);
         }
 
@@ -837,6 +844,9 @@ static class InteractiveViewer
                 ("bos", "B toggles the Base Object Swapper layer's paint on <-> diff" + (opt.Bos is { BuiltMode: not "off" } bh
                     ? $" ({bh.SwappedCount} drawn ref(s) carry the base the game swaps in; now {bosMode}): diff tints them teal; hover one for record base -> effective base and the ini line."
                     : " — this scene was built with --bos off (record bases).")),
+                ("state", "T toggles the world state's paint on <-> diff" + (opt.State is { } sh
+                    ? $" (STATE {sh.StateName}: {sh.Arrived.Count} drawn ref(s) arrive, {sh.Departed.Count} depart; now {stateMode}): diff tints arrivals green and draws departures red; hover one for the switch it follows."
+                    : " — this scene was built without --state.")),
             };
             if (wl is not null)
                 h.Add(("shots", $"PageUp/PageDown step this cell's shots (now {shotIdx + 1}/{Math.Max(shots.Count, 1)}); "
@@ -890,6 +900,18 @@ static class InteractiveViewer
             if (!opt.Bos.Apply(mode)) return;
             bosMode = mode;
             Console.WriteLine("   " + opt.Bos.Summary());
+        }
+        // The world state's paint: on <-> diff live when the scene was built diff (the departed refs are resident);
+        // a scene built on holds no departed ref and says so.
+        void SetState(string mode)
+        {
+            if (opt.State is null) { Console.WriteLine("   state: this scene was built without a world state — rerun with --state <switch>"); return; }
+            if (opt.State.Count == 0) { Console.WriteLine("   state: no drawn ref in this cell changes with the flip — nothing to paint"); return; }
+            if (mode == "diff" && opt.State.BuiltMode == "on") { Console.WriteLine("   state: this scene was built with --state-view on — the departed refs are not resident; rerun with --state-view diff"); return; }
+            if (!opt.State.Apply(mode)) return;
+            stateMode = mode;
+            ApplyClip(); SetGlow(null); pickDirty = true;
+            Console.WriteLine("   " + opt.State.Summary());
         }
         // The two ends stay ordered however they are set — the keys already refused to push one
         // past the other, and a typed 4000 into the floor box must not quietly invert the band.
@@ -996,6 +1018,16 @@ static class InteractiveViewer
             DisabledWhy = () => opt.Bos is null || opt.Bos.BuiltMode == "off"
                 ? "bos: this scene was built without the Base Object Swapper layer (--bos on|diff) — nothing to paint"
                 : opt.Bos.SwappedCount == 0 ? "bos: no drawn ref in this cell carries a swapped base — nothing to paint" : "",
+        });
+        bar.Add(new UiSegment
+        {
+            Label = "state (T)",
+            Options = new[] { "on", "diff" },
+            Get = () => stateMode,
+            Set = SetState,
+            DisabledWhy = () => opt.State is null ? "state: this scene was built without a world state (--state <switch>) — nothing to paint"
+                : opt.State.Count == 0 ? "state: no drawn ref in this cell changes with the flip — nothing to paint"
+                : opt.State.BuiltMode == "on" ? "state: built with --state-view on — the departed refs are not resident (rerun with --state-view diff to toggle)" : "",
         });
 
         bar.Row(new UiNumber
@@ -1138,6 +1170,7 @@ static class InteractiveViewer
             Console.WriteLine($"   planes: {opt.PlaneCount} occlusion plane(s) resident, layer {(opt.ShowPlanes ? "shown" : "hidden")}; L toggles it; "
                             + $"O cycles the occlusion preview (entry: {occlMode})");
             Console.WriteLine($"   bos: {(opt.Bos is { BuiltMode: not "off" } bv ? $"{bv.SwappedCount} drawn ref(s) with a swapped base; B toggles the paint on <-> diff (entry: {bosMode})" : "built without the layer (--bos on|diff)")}");
+            Console.WriteLine($"   state: {(opt.State is { } sv ? $"STATE {sv.StateName} — {sv.Arrived.Count} arrive, {sv.Departed.Count} depart; T toggles the paint on <-> diff (entry: {stateMode})" : "built without --state")}");
         PrintHelp();
 
         // Headless smoke knobs: VP_FLY_FRAMES=N renders N frames then saves a capture and
@@ -1409,6 +1442,7 @@ static class InteractiveViewer
             if (KHit(Keys.L)) SetPlanes(!opt.ShowPlanes);
             if (KHit(Keys.O)) SetOcclusion(occlMode switch { "off" => "on", "on" => "diff", _ => "off" });
             if (KHit(Keys.B)) SetBos(bosMode == "diff" ? "on" : "diff");
+            if (KHit(Keys.T)) SetState(stateMode == "diff" ? "on" : "diff");
 
             // ---- height clip ----------------------------------------------------------------
             // Held keys, not taps: sweeping a ceiling through a two-storey interior is hundreds

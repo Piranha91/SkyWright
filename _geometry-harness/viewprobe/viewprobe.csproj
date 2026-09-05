@@ -30,5 +30,6 @@
     <Compile Include="..\_shared\CellBoundaryIndex.cs" Link="CellBoundaryIndex.cs" />
     <PackageReference Include="SixLabors.ImageSharp" Version="3.1.11" />
     <PackageReference Include="SixLabors.ImageSharp.Drawing" Version="2.1.6" />
+    <Compile Include="..\_shared\StateArm.cs" Link="StateArm.cs" />
   </ItemGroup>
 </Project>

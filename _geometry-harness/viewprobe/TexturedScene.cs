@@ -118,9 +118,12 @@ sealed class CvSettings : ICharacterViewerSettings
 readonly record struct SceneRef(string MeshRelPath, Vec3 Position, Vec3 Rotation, float Scale, bool Highlight,
                                 bool Marker = false, FormKey RefKey = default, FormKey BaseKey = default,
                                 string? BaseEditorId = null, FormKey? BosRecordBase = null, string? BosLabel = null,
-                                bool BosRandom = false)
+                                bool BosRandom = false, int StateChange = 0, string? StateLabel = null)
 {
     public bool BosSwapped => BosRecordBase is not null;
+    /// <summary>--state: +1 the flip brings this ref in, −1 it takes it out (drawn only in the diff view), 0 unchanged.</summary>
+    public bool StateArrives => StateChange > 0;
+    public bool StateDeparts => StateChange < 0;
 }
 
 /// <summary>A PROJECTED COVERING — the engine's MATO (MaterialObject) layer, which is what puts the
@@ -294,7 +297,9 @@ static class TexturedScene
         string? pngTextMeta = null,                        // replication chunk: written as a PNG tEXt entry keyed "viewprobe"
         InteractiveOptions? interactive = null,            // non-null: open the fly-through window instead of saving a PNG
         Action<OcclusionState>? planeReport = null,        // --planes-report: handed the planes' cull answer for the entry eye
-        string bosMode = "on")                             // --bos off | on | diff: the Base Object Swapper layer's paint (BosView.cs)
+        string bosMode = "on",                             // --bos off | on | diff: the Base Object Swapper layer's paint (BosView.cs)
+        string stateMode = "on",                           // --state-view on | diff: the world state's paint (StateView.cs)
+        string stateName = "")                             // --state: the state's name for the caption and the window
     {
         var logger = new ConsoleCvLogger();
         var gate = new CharacterViewerLogGate { Verbose = Environment.GetEnvironmentVariable("VP_CV_VERBOSE") == "1" };
@@ -401,6 +406,8 @@ static class TexturedScene
         var occl = new OcclusionState(planes);
         // The Base Object Swapper layer's paint: the swapped refs' meshes, tinted in `diff` (BosView.cs).
         var bosView = new BosViewState(bosMode);
+        // The world state's paint: the refs the flip brought in and took out (StateView.cs).
+        var stateView = new StateViewState(stateMode, stateName);
 
         foreach (var r in refs)
         {
@@ -776,6 +783,7 @@ static class TexturedScene
             }
             if (ro.Meshes.Count > 0) occl.Refs.Add(ro);
             if (ro.Meshes.Count > 0 && r.BosSwapped) bosView.Swapped.Add(ro);
+            if (ro.Meshes.Count > 0 && r.StateChange != 0) (r.StateArrives ? stateView.Arrived : stateView.Departed).Add(ro);
             if (refHadFx) fxRefCount++;
             if (refHadFxStatic) fxStaticRefCount++;
             if (refHadCovering) coveringRefs++;
@@ -1500,11 +1508,18 @@ static class TexturedScene
             bosView.Apply(bosMode);
             Console.WriteLine("   " + bosView.Summary());
         }
+        // The state paint, after BOS (a mesh both touch takes the last applied) — the window re-applies it on T.
+        if (stateName.Length > 0 && stateView.Count > 0)
+        {
+            stateView.Apply(stateMode);
+            Console.WriteLine("   " + stateView.Summary());
+        }
         if (interactive is not null)
         {
             interactive.Occlusion = occl;
             interactive.OcclusionMode = planes.Count > 0 ? occlusionMode : "off";
             interactive.Bos = bosView;
+            interactive.State = stateName.Length > 0 ? stateView : null;
         }
 
         Vector4 healthy = palette[0].Color;
