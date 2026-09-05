@@ -2490,6 +2490,7 @@ Console.WriteLine("\nPROOF — landscape seams: a synthetic order through CellBo
 }
 
 BosProof.Run(Check);
+StateProof.Run(Check);
 
 Console.WriteLine();
 Console.WriteLine($"==== {pass} passed, {fail} failed ====");
