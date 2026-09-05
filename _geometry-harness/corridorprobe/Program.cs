@@ -17,7 +17,7 @@ using Mutagen.Bethesda.Skyrim;
 //
 // usage: corridorprobe map <CellEditorID> [--step 32] [--plugin Skyrim.esm]
 //        corridorprobe width <CellEditorID> --at X,Y,Z --heading DEG [--span 600] [--plugin Skyrim.esm]
-//        corridorprobe arms <arms.json> [--band controller|nominal] [--plugin Skyrim.esm]
+//        corridorprobe arms <arms.json> [--band controller|nominal] [--plugin Skyrim.esm] [--bos on|off]
 //        corridorprobe find <mesh substring>
 //   map    an ASCII coverage map of the cell's navmesh at --step units per character (rows = Y descending)
 //   width  the walkable width across the corridor at the point, perpendicular to the heading (yaw, degrees, 0 = +Y,
@@ -29,6 +29,10 @@ using Mutagen.Bethesda.Skyrim;
 //          the walker was given, so a disagreement between the two is separable from a wrong threshold. Meshes come
 //          through the instance's VFS (HarnessTarget instance/profile/game); the navmesh from --plugin, as the other modes.
 //   --band controller (default) scales the band top by ActorBand.ControllerFactor; nominal uses bandTop as given.
+//   --bos  arms only. on (default, since 2026-09-04): each arm's base is resolved through the Base Object Swapper layer
+//          (*_SWAP.ini, from the profile's VFS; _shared/BosHook.cs) for the cell it stood in — the obstacle the ENGINE
+//          loaded for that base record — and the row says so. The pose stays as the arms file gives it (the engine's own,
+//          read back after any override applied), so a transform line is named, never re-applied. off: the record base.
 
 string GamePath = HarnessTarget.Require(HarnessTarget.Game, "game directory", "game");
 string dataDir = Path.Combine(GamePath, "Data");
@@ -46,9 +50,11 @@ if (mode == "find")
     return 0;
 }
 float step = 32f, span = 600f, heading = 0f; Vec3? at = null; string plugin = "Skyrim.esm"; bool controllerBand = true; string? ascii = null;
+bool bosOn = true;
 for (int i = 2; i < args.Length; i++)
 {
     if (args[i] == "--step" && i + 1 < args.Length) step = float.Parse(args[++i]);
+    else if (args[i] == "--bos" && i + 1 < args.Length) bosOn = BosHook.ParseFlag(args[++i]) ?? throw new ArgumentException("--bos takes on|off");
     else if (args[i] == "--ascii" && i + 1 < args.Length) ascii = args[++i];   // arms: draw the raster of every arm whose tag contains this
     else if (args[i] == "--span" && i + 1 < args.Length) span = float.Parse(args[++i]);
     else if (args[i] == "--heading" && i + 1 < args.Length) heading = float.Parse(args[++i]);
@@ -186,17 +192,45 @@ if (mode == "arms")
                          a.GetProperty("outcome").GetString() ?? "?", line));
     }
     var baseMesh = new Dictionary<FormKey, (string Mesh, string Type)>();
-    foreach (var modKey in arms.Select(a => a.Base.ModKey).Distinct())
+    // --bos on (default): the Base Object Swapper layer's index wants the whole order (the runtime-id table, every EditorID,
+    // the cells' locations and keywords) and a swap target may be defined anywhere in it, so the order is walked once and
+    // every modeled record's WINNING model kept; an arm's base is then the base the game loads for that record in this cell
+    // (_shared/BosHook.cs, BosFeed). --bos off: the arm's own plugin's record, as every run before 2026-09-04.
+    var bos = new BosFeed(bosOn);
+    if (bosOn)
     {
-        string? path = order.OrderedPaths.FirstOrDefault(p => string.Equals(Path.GetFileName(p), modKey.FileName, StringComparison.OrdinalIgnoreCase))
-                       ?? (File.Exists(Path.Combine(dataDir, modKey.FileName)) ? Path.Combine(dataDir, modKey.FileName) : null);
-        if (path is null) { Console.Error.WriteLine($"{modKey.FileName} is neither in the load order nor in Data"); return 1; }
-        var wanted = arms.Where(a => a.Base.ModKey == modKey).Select(a => a.Base).ToHashSet();
-        using var bm = SkyrimMod.CreateFromBinaryOverlay(path, SkyrimRelease.SkyrimSE);
-        foreach (var rec in bm.EnumerateMajorRecords())
-            if (wanted.Contains(rec.FormKey) && rec is IModeledGetter mg && mg.Model?.File is { } f && !string.IsNullOrWhiteSpace(f.GivenPath))
-                baseMesh[rec.FormKey] = (f.GivenPath, rec.GetType().Name.Replace("BinaryOverlay", ""));
+        foreach (var p in order.OrderedPaths)
+        {
+            ISkyrimModGetter om;
+            try { om = SkyrimMod.CreateFromBinaryOverlay(p, SkyrimRelease.SkyrimSE); } catch { bos.Plugin(null); continue; }
+            using (om as IDisposable)
+            {
+                bos.Plugin(om);
+                foreach (var rec in om.EnumerateMajorRecords())
+                {
+                    bos.Record(rec);
+                    if (rec is IModeledGetter mg && mg.Model?.File is { } f && !string.IsNullOrWhiteSpace(f.GivenPath))
+                        baseMesh[rec.FormKey] = (f.GivenPath, rec.GetType().Name.Replace("BinaryOverlay", ""));
+                }
+                foreach (var cp in PlacementExtract.FromMod(om)) bos.Cell(cp);
+            }
+        }
+        bos.Load(assets.LooseRoots);
     }
+    else
+        foreach (var modKey in arms.Select(a => a.Base.ModKey).Distinct())
+        {
+            string? path = order.OrderedPaths.FirstOrDefault(p => string.Equals(Path.GetFileName(p), modKey.FileName, StringComparison.OrdinalIgnoreCase))
+                           ?? (File.Exists(Path.Combine(dataDir, modKey.FileName)) ? Path.Combine(dataDir, modKey.FileName) : null);
+            if (path is null) { Console.Error.WriteLine($"{modKey.FileName} is neither in the load order nor in Data"); return 1; }
+            var wanted = arms.Where(a => a.Base.ModKey == modKey).Select(a => a.Base).ToHashSet();
+            using var bm = SkyrimMod.CreateFromBinaryOverlay(path, SkyrimRelease.SkyrimSE);
+            foreach (var rec in bm.EnumerateMajorRecords())
+                if (wanted.Contains(rec.FormKey) && rec is IModeledGetter mg && mg.Model?.File is { } f && !string.IsNullOrWhiteSpace(f.GivenPath))
+                    baseMesh[rec.FormKey] = (f.GivenPath, rec.GetType().Name.Replace("BinaryOverlay", ""));
+        }
+    Console.WriteLine("   " + bos.LayerLine());
+    int bosSwapped = 0, bosRandom = 0;
 
     // ---- the geometry: the actor-solid collision soup, as blockprobe reads it ----
     var geoCache = new Dictionary<string, (Aabb Box, TriangleSoup? Soup, string Source)>(StringComparer.OrdinalIgnoreCase);
@@ -234,11 +268,26 @@ if (mode == "arms")
     var rows = new List<(Arm A, string Type, RouteCutVerdict? Rule, RouteFacts? FR, RouteCutVerdict? Cmd, RouteFacts? FC, string Note)>();
     foreach (var a in arms)
     {
-        if (!baseMesh.TryGetValue(a.Base, out var bm)) { rows.Add((a, "?", null, null, null, null, "base record has no model")); continue; }
-        if (bm.Type == "MoveableStatic") { rows.Add((a, bm.Type, null, null, null, null, "MoveableStatic: set aside (pushed aside, Part C)")); continue; }
-        if (bm.Type == "Door") { rows.Add((a, bm.Type, null, null, null, null, "Door: set aside (passable by design)")); continue; }
+        // The arm's base under the layer: the obstacle the engine loaded for this base record in this cell. The pose is the
+        // one the arms file gives — the engine's own, read back after any override had applied — so a transform line is
+        // NAMED and not applied again (the double step bosprobe's listing once had). A spawned reference has no persistent
+        // FormKey, so no [References] line can name it: the id passed is Null and only [Forms] lines can match.
+        var armBase = a.Base; string bosNote = "";
+        if (bos.Layer is not null)
+        {
+            var res = BaseObjectSwaps.Resolve(bos.Layer, bos.Index!, FormKey.Null, "PlacedObject", a.Base, cell.Cell, null);
+            if (res.Swapped || res.Random || res.Properties is { IsValid: true })
+            {
+                bosNote = "  {" + BosHook.Describe(res) + (res.Properties is { HasTransform: true } ? "; pose as the engine reported it, not re-applied" : "") + "}";
+                if (res.Swapped) { armBase = res.EffectiveBase; bosSwapped++; }
+                if (res.Random) bosRandom++;
+            }
+        }
+        if (!baseMesh.TryGetValue(armBase, out var bm)) { rows.Add((a, "?", null, null, null, null, "base record has no model" + bosNote)); continue; }
+        if (bm.Type == "MoveableStatic") { rows.Add((a, bm.Type, null, null, null, null, "MoveableStatic: set aside (pushed aside, Part C)" + bosNote)); continue; }
+        if (bm.Type == "Door") { rows.Add((a, bm.Type, null, null, null, null, "Door: set aside (passable by design)" + bosNote)); continue; }
         var g = Geometry(bm.Mesh);
-        if (g.Soup is null || g.Box.IsEmpty) { rows.Add((a, bm.Type, null, null, null, null, $"no actor-solid geometry ({g.Source})")); continue; }
+        if (g.Soup is null || g.Box.IsEmpty) { rows.Add((a, bm.Type, null, null, null, null, $"no actor-solid geometry ({g.Source})" + bosNote)); continue; }
         var rot = new Vec3(0, 0, a.YawDeg * MathF.PI / 180f);
         var world = SpatialOverlap.ToWorld(g.Box, a.Pos, rot, a.Scale);
         var m = SpatialOverlap.RefrRotation(rot);
@@ -261,7 +310,7 @@ if (mode == "arms")
             fc = RouteConnectivity.Measure(navs, columns, world, 256f, 16f, ActorBand.StepHeight, top, ladder, graph: gnodes, lineOverride: a.Line);
             vc = Verdict(fc);
         }
-        rows.Add((a, bm.Type, vr, fr, vc, fc, g.Source));
+        rows.Add((a, bm.Type, vr, fr, vc, fc, g.Source + bosNote));
     }
 
     static RouteCutVerdict Verdict(RouteFacts f) =>
@@ -293,6 +342,7 @@ if (mode == "arms")
     if (rows.Any(r => r.Cmd is not null)) Matrix("the commanded line (what the walker was given)", r => r.Cmd);
     int disagree = rows.Count(r => r.Rule is not null && r.Cmd is not null && r.Rule != r.Cmd);
     Console.WriteLine($"\n   arms where the two lines disagree on the verdict: {disagree}");
+    if (bosOn) Console.WriteLine($"   BOS: {bosSwapped} arm(s) resolve to a swapped base ({bosRandom} random — the first alternative taken); poses as the arms file gives them");
     return 0;
 }
 

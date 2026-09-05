@@ -16,10 +16,15 @@ using Mutagen.Bethesda.Skyrim;
 //   cells where it did NOT                          -> expect blockage to concentrate here
 // If those two rates come out the same, the detector is not measuring what it claims to.
 //
-// usage: blockprobe <TargetPlugin.esp> [--exclude Other.esp ...] [--list N] [--geometry collision|render]
+// usage: blockprobe <TargetPlugin.esp> [--exclude Other.esp ...] [--list N] [--geometry collision|render] [--bos on|off]
 //   --geometry as navprobe's: collision (default since 2026-09-02) runs the rules on the decoded Havok solid restricted
 //              to actor-solid layers, skipping objects with no such body and falling back to render (labelled) when a
 //              decode is incomplete; render reproduces every run before that date.
+//   --bos      on (default, since 2026-09-04): every reference is judged by the base the game LOADS for it — the Base
+//              Object Swapper layer (*_SWAP.ini, read from the profile's VFS; _shared/BosHook.cs) — at the transform its
+//              overrides give it, and a reference an override disables at init is not an obstacle. A random line yields a
+//              set: the first alternative is taken and counted. off: the record bases and placements, as every run before.
+//              No rule changes either way; the hook changes the input, and the summary says how much it moved.
 
 string Instance = HarnessTarget.Require(HarnessTarget.Instance, "MO2 instance directory", "instance");
 string GamePath = HarnessTarget.Require(HarnessTarget.Game, "game directory", "game");
@@ -34,12 +39,14 @@ var exclude = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 int listN = 25;
 string geometrySource = "collision";
 bool controllerBand = true;   // --band controller|nominal: the route rules' band top (the surface rules keep the nominal, as every run before)
+bool bosOn = true;
 for (int i = 1; i < args.Length; i++)
 {
     if (args[i] == "--exclude" && i + 1 < args.Length) exclude.Add(args[++i]);
     else if (args[i] == "--list" && i + 1 < args.Length) listN = int.Parse(args[++i]);
     else if (args[i] == "--geometry" && i + 1 < args.Length) geometrySource = args[++i];
     else if (args[i] == "--band" && i + 1 < args.Length) controllerBand = args[++i] != "nominal";
+    else if (args[i] == "--bos" && i + 1 < args.Length) bosOn = BosHook.ParseFlag(args[++i]) ?? throw new ArgumentException("--bos takes on|off");
 }
 if (geometrySource is not ("collision" or "render")) { Console.Error.WriteLine("--geometry must be collision or render"); return 1; }
 
@@ -79,16 +86,22 @@ var baseMesh = new Dictionary<FormKey, (string Mesh, string Type)>();
 var cellMeta = new Dictionary<FormKey, CellPlacements>();
 var npcFacts = new Dictionary<FormKey, ActorBand.NpcFacts>();
 var raceFacts = new Dictionary<FormKey, ActorBand.RaceFacts>();
+// The Base Object Swapper layer's index fills during this SAME walk (one pass): every plugin's slot in the runtime-id
+// table, every record the filters and ids read, every cell and reference (_shared/BosHook.cs, BosFeed). Off, every call
+// is a no-op.
+var bos = new BosFeed(bosOn);
 
 foreach (var p in paths)
 {
     ISkyrimModGetter m;
-    try { m = SkyrimMod.CreateFromBinaryOverlay(p, SkyrimRelease.SkyrimSE); } catch { continue; }
+    try { m = SkyrimMod.CreateFromBinaryOverlay(p, SkyrimRelease.SkyrimSE); } catch { bos.Plugin(null); continue; }
     using (m as IDisposable)
     {
+        bos.Plugin(m);
         string name = Path.GetFileName(p);
         foreach (var rec in m.EnumerateMajorRecords())
         {
+            bos.Record(rec);
             if (rec is IModeledGetter mo && mo.Model?.File is { } f && !string.IsNullOrWhiteSpace(f.GivenPath))
                 baseMesh[rec.FormKey] = (f.GivenPath, rec.GetType().Name.Replace("BinaryOverlay", ""));
             ActorBand.CollectRecord(rec, npcFacts, raceFacts);
@@ -96,6 +109,7 @@ foreach (var p in paths)
 
         foreach (var cp in PlacementExtract.FromMod(m))
         {
+            bos.Cell(cp);
             if (!targetCells.ContainsKey(cp.Cell)) continue;
             cellMeta[cp.Cell] = cp;
             foreach (var r in cp.Refs) { winRef[r.FormKey] = r; winRefCell[r.FormKey] = cp.Cell; }
@@ -104,7 +118,13 @@ foreach (var p in paths)
     }
 }
 Console.WriteLine($"winning state for those cells: {winRef.Count:N0} refs, {winNav.Count:N0} navmeshes, "
-                + $"{baseMesh.Count:N0} base records  ({sw.Elapsed.TotalSeconds:0.0}s)\n");
+                + $"{baseMesh.Count:N0} base records  ({sw.Elapsed.TotalSeconds:0.0}s)");
+// --bos on (default): the layer over the inis the game would read from this profile's VFS, resolved per reference below.
+// --bos off: the record bases and placements, as every run before 2026-09-04.
+if (bosOn) bos.Load(assets.LooseRoots);
+Console.WriteLine("   " + bos.LayerLine() + "\n");
+var bosRep = new BosApplyReport();
+var cutTallyBos = new Dictionary<RouteCutVerdict, int>();   // the route-cut verdicts of the refs BOS swapped or moved, reported apart
 
 // ---------- 3. geometry cache ----------
 var geoCache = new Dictionary<string, Geo>(StringComparer.OrdinalIgnoreCase);
@@ -208,15 +228,19 @@ foreach (var (cellKey, tcell) in targetCells)
         // the target's own copy is not what the game uses.
         if (!winRef.TryGetValue(tref.FormKey, out var r)) { skipped++; continue; }
         if (winRefCell.TryGetValue(tref.FormKey, out var wc) && wc != cellKey) { skipped++; continue; }
-        if (r.InitiallyDisabled || r.Deleted) { skipped++; continue; }
-        if (r.Base is not { } bk || !baseMesh.TryGetValue(bk, out var bm)) { noGeo++; continue; }
+        if (r.Deleted) { skipped++; continue; }
+        // The Base Object Swapper layer: the base and transform the game LOADS for this reference (the record's own under
+        // --bos off). An override that disables it at init is skipped the way the record's own flag is, and counted.
+        var eff = bos.Effective(r, cellKey, bosRep);
+        if (eff.InitiallyDisabled) { skipped++; continue; }
+        if (r.Base is null || !baseMesh.TryGetValue(eff.Base, out var bm)) { noGeo++; continue; }
 
         var g = Geometry(bm.Mesh);
         if (g.Ok && g.Source == "none") { noSolid++; continue; }
         if (!g.Ok || g.Box.IsEmpty || g.Soup is null || !g.HasCollision) { noGeo++; continue; }
         if (g.Source == "collision") onCollision++; else onFallback++;
 
-        var world = SpatialOverlap.ToWorld(g.Box, r.Position, r.Rotation, r.Scale);
+        var world = SpatialOverlap.ToWorld(g.Box, eff.Position, eff.Rotation, eff.Scale);
         var q = SpatialOverlap.GrowDown(world, ActorHeight);
 
         tested++;
@@ -228,7 +252,7 @@ foreach (var (cellKey, tcell) in targetCells)
         {
             if ((t.Flags & 0x08) != 0) continue;               // Deleted triangle
             broadTris++;
-            if (!built) { columns = BuildColumns(g.Soup, r.Position, r.Rotation, r.Scale); built = true; }
+            if (!built) { columns = BuildColumns(g.Soup, eff.Position, eff.Rotation, eff.Scale); built = true; }
             if (columns is null) continue;
 
             var nav = index.NavAt(t.NavIndex);
@@ -299,11 +323,13 @@ foreach (var (cellKey, tcell) in targetCells)
                 var line = facts.Line;
                 var vc = DetectorModel.RouteCut(facts.Judged, facts.Touched, line?.Found ?? false, line?.Why ?? "", line?.Cut ?? false, line?.Passage ?? float.NaN);
                 TallyCut(vc.Verdict);
+                if (eff.Touched) { cutTallyBos.TryGetValue(vc.Verdict, out var bt); cutTallyBos[vc.Verdict] = bt + 1; }
                 crossTab.TryGetValue((v64.Verdict, vc.Verdict), out var xt); crossTab[(v64.Verdict, vc.Verdict)] = xt + 1;
                 if (vc.Verdict == RouteCutVerdict.NoLine && line is not null) { noLineWhy.TryGetValue(line.Status, out var nl); noLineWhy[line.Status] = nl + 1; }
                 if (vc.Verdict is RouteCutVerdict.Blocked or RouteCutVerdict.LikelyBlocked or RouteCutVerdict.NoLine or RouteCutVerdict.Unjudgeable)
                     cutHits.Add((vc.Verdict, v64.Verdict, tcell.CellEditorId ?? cellKey.ToString(), bm.Mesh, r.FormKey,
-                                 (facts.Judged ? vc.Why + $" [storeys {facts.Storeys}, z {facts.StoreyZ:0}]" : facts.Why), facts.Touched, line));
+                                 (facts.Judged ? vc.Why + $" [storeys {facts.Storeys}, z {facts.StoreyZ:0}]" : facts.Why)
+                                 + (eff.Resolution is { } bres ? " {" + BosHook.Describe(bres) + "}" : ""), facts.Touched, line));
             }
         }
 
@@ -330,7 +356,9 @@ Console.WriteLine($"==== {target} — navmesh blockage ====");
 Console.WriteLine($"references tested : {tested:N0}   (no usable geometry {noGeo:N0}, skipped {skipped:N0}, no actor-solid collision {noSolid:N0})");
 Console.WriteLine($"geometry source   : {geometrySource}" + (geometrySource == "collision" ? $"   on collision {onCollision:N0}, render fallback {onFallback:N0}" : ""));
 Console.WriteLine($"distinct meshes   : {measured:N0}");
-Console.WriteLine($"elapsed           : {sw.Elapsed.TotalSeconds:0.0}s\n");
+Console.WriteLine($"elapsed           : {sw.Elapsed.TotalSeconds:0.0}s");
+if (bosOn) foreach (var l in bosRep.Summary()) Console.WriteLine("   " + l);
+Console.WriteLine();
 
 double Rate(long b, long t) => t == 0 ? 0 : 100.0 * b / t;
 Console.WriteLine($"   {"population",-46} {"tested",9} {"blocked",9} {"rate",8}");
@@ -378,6 +406,11 @@ Console.WriteLine($"   references measured: {routeMeasured:N0}   doors set aside
 Console.WriteLine($"   {"verdict",-14} {"refs",8}");
 foreach (var v in new[] { RouteCutVerdict.Blocked, RouteCutVerdict.LikelyBlocked, RouteCutVerdict.Clipped, RouteCutVerdict.NoLine, RouteCutVerdict.None, RouteCutVerdict.Unjudgeable })
     Console.WriteLine($"   {v,-14} {(cutTally.TryGetValue(v, out var a) ? a : 0),8:N0}" + (v == RouteCutVerdict.NoLine && noLineWhy.Count > 0 ? "   (" + string.Join(", ", noLineWhy.OrderByDescending(kv => kv.Value).Select(kv => $"{kv.Key} {kv.Value}")) + ")" : ""));
+if (bosOn)
+    Console.WriteLine($"   of which BOS swapped or moved: {cutTallyBos.Values.Sum():N0} measured — "
+                    + string.Join(", ", new[] { RouteCutVerdict.Blocked, RouteCutVerdict.LikelyBlocked, RouteCutVerdict.Clipped, RouteCutVerdict.NoLine, RouteCutVerdict.None, RouteCutVerdict.Unjudgeable }
+                                        .Select(v => $"{v} {(cutTallyBos.TryGetValue(v, out var b) ? b : 0):N0}"))
+                    + "   (the swap layer's own contribution; listed rows carry {BOS …})");
 Console.WriteLine($"\n   ---- old rule (64 u) × route-cut rule, the same references ----");
 Console.WriteLine($"   {"old \\ new",-12} {"Blocked",9} {"Likely",9} {"Clipped",9} {"NoLine",9} {"None",9} {"Unjudg.",9}");
 foreach (var o in new[] { RouteVerdict.Blocked, RouteVerdict.Narrowed, RouteVerdict.Clipped, RouteVerdict.None, RouteVerdict.Unjudgeable })

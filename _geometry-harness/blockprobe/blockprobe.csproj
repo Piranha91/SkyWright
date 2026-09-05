@@ -14,6 +14,10 @@
     <Compile Include="..\_shared\CollisionLayers.cs" Link="CollisionLayers.cs" />
     <Compile Include="..\_shared\ActorBand.cs" Link="ActorBand.cs" />
     <Compile Include="..\_shared\DetectorModel.cs" Link="DetectorModel.cs" />
+    <Compile Include="..\_shared\PlacementHistory.cs" Link="PlacementHistory.cs" />
+    <Compile Include="..\_shared\OverlapIndex.cs" Link="OverlapIndex.cs" />
+    <Compile Include="..\_shared\DependencyIndex.cs" Link="DependencyIndex.cs" />
+    <Compile Include="..\_shared\BosHook.cs" Link="BosHook.cs" />
     <ProjectReference Include="..\..\src\housecarl-core\housecarl-core.csproj" />
   </ItemGroup>
 </Project>

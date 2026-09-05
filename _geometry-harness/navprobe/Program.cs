@@ -11,7 +11,7 @@ using Mutagen.Bethesda.Skyrim;
 // objects and the navmesh together, so every hit is by definition a false positive.
 // That rate is the noise floor, and no threshold is worth using until it is near zero.
 //
-// usage: navprobe [maxCells] [--dump dir] [--geometry collision|render]
+// usage: navprobe [maxCells] [--dump dir] [--geometry collision|render] [--bos on|off]
 //   --dump writes the flagged reference keys per narrow rule, one file each — a diagnostic for comparing two
 //   runs ref by ref (which verdicts moved under a transform change), not part of the report.
 //   --geometry which triangle soup the narrow rules run on (default collision, since 2026-09-02 — roadmap 4.7 Part A):
@@ -19,6 +19,13 @@ using Mutagen.Bethesda.Skyrim;
 //                  A mesh with no actor-solid body is NOT TESTED — it blocks nothing — and counted; a mesh whose
 //                  decode is incomplete falls back to its render soup, labelled and counted.
 //       render     the render soup, as every run before 2026-09-02 (a pine judged by its canopy).
+//   --bos      on (default, since 2026-09-04): the Base Object Swapper layer (*_SWAP.ini, from the profile's VFS;
+//              _shared/BosHook.cs) applied to Skyrim.esm's placements — each reference judged by the base the game
+//              LOADS for it, at the transform its overrides give it; one an override disables at init is not tested.
+//              The whole order is walked once for the layer's index and for the winning model of a swapped base.
+//              READ THE FLOOR WITH CARE under on: a row whose object the layer swapped or moved is no longer
+//              "Bethesda authored the object and the navmesh together" — it is a finding against the swap layer, and
+//              the route-cut section reports those rows apart. off: the pure vanilla floor, as every run before.
 
 string Instance = HarnessTarget.Require(HarnessTarget.Instance, "MO2 instance directory", "instance");
 string GamePath = HarnessTarget.Require(HarnessTarget.Game, "game directory", "game");
@@ -32,11 +39,13 @@ int maxCells = args.Length > 0 && int.TryParse(args[0], out var mc) ? mc : int.M
 string? dumpDir = null;
 string geometrySource = "collision";
 bool controllerBand = true;   // --band controller|nominal: the route rules' band top (the surface rules keep the nominal, as every run before)
+bool bosOn = true;
 for (int i = 0; i < args.Length; i++)
 {
     if (args[i] == "--dump" && i + 1 < args.Length) dumpDir = args[++i];
     else if (args[i] == "--geometry" && i + 1 < args.Length) geometrySource = args[++i];
     else if (args[i] == "--band" && i + 1 < args.Length) controllerBand = args[++i] != "nominal";
+    else if (args[i] == "--bos" && i + 1 < args.Length) bosOn = BosHook.ParseFlag(args[++i]) ?? throw new ArgumentException("--bos takes on|off");
 }
 if (geometrySource is not ("collision" or "render")) { Console.Error.WriteLine("--geometry must be collision or render"); return 1; }
 Console.WriteLine($"geometry source: {geometrySource}" + (geometrySource == "collision" ? $"  (actor-solid layers: {string.Join(", ", CollisionLayers.ActorSolid)})" : ""));
@@ -60,6 +69,38 @@ foreach (var rec in mod.EnumerateMajorRecords())
     ActorBand.CollectRecord(rec, npcFacts, raceFacts);
 }
 Console.WriteLine($"vanilla base records with a mesh: {baseMesh.Count:N0}  ({sw.Elapsed.TotalSeconds:0.0}s)");
+
+// --bos on (default): the swap layer's index wants the WHOLE order — the runtime-id table, every EditorID, the cells'
+// locations and keywords — and a swapped base may be defined anywhere in it, so the order is walked once for the index
+// (_shared/BosHook.cs, BosFeed) and for the winning model of every modeled record. The population swept below is still
+// Skyrim.esm's own placements: what changes is which object stands on each of them, and where. --bos off: nothing here runs.
+var bos = new BosFeed(bosOn);
+var orderBaseMesh = new Dictionary<FormKey, (string Mesh, string Type)>();   // the ORDER's winning model per base — read for a swapped base only
+if (bosOn)
+{
+    sw.Restart();
+    var order = Mo2LoadOrder.Build(profileDir, modsDir, dataDir, overwriteDir);
+    foreach (var p in order.OrderedPaths)
+    {
+        ISkyrimModGetter om;
+        try { om = SkyrimMod.CreateFromBinaryOverlay(p, SkyrimRelease.SkyrimSE); } catch { bos.Plugin(null); continue; }
+        using (om as IDisposable)
+        {
+            bos.Plugin(om);
+            foreach (var rec in om.EnumerateMajorRecords())
+            {
+                bos.Record(rec);
+                if (rec is IModeledGetter mo && mo.Model?.File is { } mf && !string.IsNullOrWhiteSpace(mf.GivenPath))
+                    orderBaseMesh[rec.FormKey] = (mf.GivenPath, rec.GetType().Name.Replace("BinaryOverlay", ""));
+            }
+            foreach (var cp in PlacementExtract.FromMod(om)) bos.Cell(cp);
+        }
+    }
+    bos.Load(assets.LooseRoots);
+    Console.WriteLine($"swap layer: {order.OrderedPaths.Count} plugins walked for its index, {orderBaseMesh.Count:N0} winning models  ({sw.Elapsed.TotalSeconds:0.0}s)");
+}
+Console.WriteLine("   " + bos.LayerLine());
+var bosRep = new BosApplyReport();
 // The actor band's top is DERIVED per cell (the tallest placed actor, else the tallest playable race) since
 // 2026-09-02; the settings' Height column is what the BROAD rules still use and what every earlier run used.
 var (fallbackTop, fallbackSrc) = ActorBand.TallestPlayable(raceFacts);
@@ -86,6 +127,10 @@ var cutNoLine = new Dictionary<LineStatus, int>();
 var cutCross = new Dictionary<(RouteVerdict Old, RouteCutVerdict New), int>();
 var cutBlocked = new List<(string Cell, string Mesh, string Type, FormKey Fk, string Why)>();
 var cutLikely = new List<(string Cell, string Mesh, string Type, FormKey Fk, string Why)>();
+// The rows the BOS layer swapped or moved, tallied apart: under --bos on these are not floor noise but the swap layer's own
+// contribution — the object on that placement is no longer the one Bethesda navmeshed around.
+var cutBos = new int[7];
+var cutBosRows = new List<(string Cell, string Mesh, string Type, FormKey Fk, RouteCutVerdict V, string Why)>();
 
 // ---- lazy, cached geometry per mesh path (AABB + model-space triangle soup) ----
 var geoCache = new Dictionary<string, Geo>(StringComparer.OrdinalIgnoreCase);
@@ -232,8 +277,14 @@ foreach (var cp in PlacementExtract.FromMod(mod))
     foreach (var r in cp.Refs)
     {
         totalRefs++;
-        if (r.InitiallyDisabled || r.Deleted) { skippedDisabled++; continue; }
-        if (r.Base is not { } bk || !baseMesh.TryGetValue(bk, out var bm)) { skippedNoGeo++; continue; }
+        if (r.Deleted) { skippedDisabled++; continue; }
+        // The Base Object Swapper layer: the base and transform the game LOADS for this placement (the record's own under
+        // --bos off). An override that disables it at init is skipped the way the record's own flag is. A swapped base is
+        // looked up in the ORDER's winning models (it may be defined anywhere); an unswapped one in Skyrim.esm's, the
+        // floor's standing population.
+        var eff = bos.Effective(r, cp.Cell, bosRep);
+        if (eff.InitiallyDisabled) { skippedDisabled++; continue; }
+        if (r.Base is null || !(eff.Swapped ? orderBaseMesh : baseMesh).TryGetValue(eff.Base, out var bm)) { skippedNoGeo++; continue; }
 
         var g = Geometry(bm.Mesh);
         string srcClass = cp.Interior ? "(interior)" : MeshClass(bm.Mesh);
@@ -241,7 +292,7 @@ foreach (var cp in PlacementExtract.FromMod(mod))
         if (!g.Ok || g.Box.IsEmpty) { skippedNoGeo++; continue; }
         SourceRow(srcClass)[g.Source == "collision" ? 0 : 1]++;
 
-        var world = SpatialOverlap.ToWorld(g.Box, r.Position, r.Rotation, r.Scale);
+        var world = SpatialOverlap.ToWorld(g.Box, eff.Position, eff.Rotation, eff.Scale);
 
         MeshColumnIndex? columns = null;
         bool columnsTried = false;
@@ -271,7 +322,7 @@ foreach (var cp in PlacementExtract.FromMod(mod))
 
                 // NARROW PHASE. The broad box only says the navmesh triangle is somewhere in this
                 // object's volume; the narrow phase decides whether that means blocked.
-                if (!columnsTried) { columns = BuildColumns(g.Soup!, r.Position, r.Rotation, r.Scale); columnsTried = true; }
+                if (!columnsTried) { columns = BuildColumns(g.Soup!, eff.Position, eff.Rotation, eff.Scale); columnsTried = true; }
                 if (columns is null) { nTris++; continue; }
 
                 var nav = index.NavAt(t.NavIndex);
@@ -343,6 +394,11 @@ foreach (var cp in PlacementExtract.FromMod(mod))
             int ccol = vc.Verdict switch { RouteCutVerdict.Blocked => 0, RouteCutVerdict.LikelyBlocked => 1, RouteCutVerdict.Clipped => 2, RouteCutVerdict.NoLine => 3, RouteCutVerdict.None => 4, _ => 5 };
             var cC = RouteRow(cutByClass, cls); cC[ccol]++; cC[6]++;
             var cT = RouteRow(cutByType, bm.Type); cT[ccol]++; cT[6]++;
+            if (eff.Touched)
+            {
+                cutBos[ccol]++; cutBos[6]++;
+                if (cutBosRows.Count < 4000) cutBosRows.Add((cp.CellEditorId ?? cp.Cell.ToString(), bm.Mesh, bm.Type, r.FormKey, vc.Verdict, vc.Why + " {" + BosHook.Describe(eff.Resolution!) + "}"));
+            }
             cutCross.TryGetValue((v64.Verdict, vc.Verdict), out var xt); cutCross[(v64.Verdict, vc.Verdict)] = xt + 1;
             if (vc.Verdict == RouteCutVerdict.NoLine && line is not null) { cutNoLine.TryGetValue(line.Status, out var nl); cutNoLine[line.Status] = nl + 1; }
             if (vc.Verdict == RouteCutVerdict.Blocked && cutBlocked.Count < 20000)
@@ -373,7 +429,9 @@ if (geometrySource == "collision")
         Console.WriteLine($"   {kv.Key,-16} {kv.Value[0],14:N0} {kv.Value[1],16:N0} {kv.Value[2],20:N0}");
 }
 Console.WriteLine($"distinct meshes measured  : {measured:N0}   (unreadable: {measureFail:N0})   cached triangles: {cachedTris:N0}");
-Console.WriteLine($"elapsed                   : {sw.Elapsed.TotalSeconds:0.0}s\n");
+Console.WriteLine($"elapsed                   : {sw.Elapsed.TotalSeconds:0.0}s");
+if (bosOn) foreach (var l in bosRep.Summary()) Console.WriteLine("   " + l);
+Console.WriteLine();
 
 Console.WriteLine($"   {"setting",-38} {"refs tested",12} {"flagged",10} {"rate",9} {"unjudgeable tri",16}");
 for (int s = 0; s < settings.Length; s++)
@@ -448,6 +506,13 @@ foreach (var kv in cutByClass.OrderByDescending(kv => kv.Value[6]))
 Console.WriteLine($"   {"record type",-16} {"measured",9} {"BLOCKED",9} {"rate",8} {"LIKELY",9} {"rate",8} {"CLIPPED",9} {"NoLine",9} {"none",7} {"unjudged",9}");
 foreach (var kv in cutByType.OrderByDescending(kv => kv.Value[6]).Take(10))
     Console.WriteLine($"   {kv.Key,-16} {kv.Value[6],9:N0} {kv.Value[0],9:N0} {(kv.Value[6] == 0 ? 0 : 100.0 * kv.Value[0] / kv.Value[6]),7:0.00}% {kv.Value[1],9:N0} {(kv.Value[6] == 0 ? 0 : 100.0 * kv.Value[1] / kv.Value[6]),7:0.00}% {kv.Value[2],9:N0} {kv.Value[3],9:N0} {kv.Value[4],7:N0} {kv.Value[5],9:N0}");
+if (bosOn)
+{
+    Console.WriteLine($"\n   ---- of which the BOS layer swapped or moved the object: NOT floor noise — the swap layer's own rows ----");
+    Console.WriteLine($"   {"(BOS-touched)",-16} {cutBos[6],9:N0} {cutBos[0],9:N0} {(cutBos[6] == 0 ? 0 : 100.0 * cutBos[0] / cutBos[6]),7:0.00}% {cutBos[1],9:N0} {(cutBos[6] == 0 ? 0 : 100.0 * cutBos[1] / cutBos[6]),7:0.00}% {cutBos[2],9:N0} {cutBos[3],9:N0} {cutBos[4],7:N0} {cutBos[5],9:N0}");
+    foreach (var b in cutBosRows.Where(b => b.V is RouteCutVerdict.Blocked or RouteCutVerdict.LikelyBlocked).OrderBy(b => b.V == RouteCutVerdict.Blocked ? 0 : 1).ThenBy(b => b.Cell).Take(30))
+        Console.WriteLine($"   {b.V,-14} {b.Cell,-26} {b.Type,-12} {b.Mesh}  {b.Fk}   {b.Why}");
+}
 Console.WriteLine($"\n   ---- old rule (64 u) × route-cut rule, the same references ----");
 Console.WriteLine($"   {"old \\ new",-12} {"Blocked",9} {"Likely",9} {"Clipped",9} {"NoLine",9} {"None",9} {"Unjudg.",9}");
 foreach (var o in new[] { RouteVerdict.Blocked, RouteVerdict.Narrowed, RouteVerdict.Clipped, RouteVerdict.None, RouteVerdict.Unjudgeable })

@@ -39,11 +39,18 @@ using Mutagen.Bethesda.Skyrim;
 // one of its masters. A winning position from anywhere else is one the quest never saw.
 //
 // usage: driftprobe [--near N] [--list N] [--generic] [--emit FILE]
-//                   [--actor EDITORID] [--no-reach]
+//                   [--actor EDITORID] [--no-reach] [--bos on|off]
 //
 //   --actor    print one actor's packages, each anchor resolved against the winning order, and
 //              what the reach filter makes of them. The way to check any CHECK 2 verdict.
 //   --no-reach report CHECK 2 as it was before the reach filter: raw placement distance.
+//   --bos      on (default, since 2026-09-04): the Base Object Swapper layer (*_SWAP.ini, from the
+//              profile's VFS; _shared/BosHook.cs) applied to this probe's own placement history as a
+//              PSEUDO-PLUGIN after the last real one — an override that moves an alias anchor is a
+//              placement step with BOS as the mover, so CHECK 2 measures the anchor where the game
+//              puts it; a swapped base replaces the record's for anything typed by base. Actors are
+//              never swapped (the reader's scope rule). off: the record bases and placements, as
+//              every run before. No rule changes either way.
 
 // Defaults are the live VR instance; --instance / --game / --profile point every path at
 // another MO2 layout — the SE conflict-testing lab's pre-flight runs exist so a finding is
@@ -77,9 +84,11 @@ string? actorDump = null;   // --actor <EditorID substring>: print an actor's pa
 bool reachFilter = true;    // --no-reach: report the pairs as they were reported before 2026-08-31.
 bool generic = false;
 string? emitPath = null;
+bool bosOn = true;
 for (int i = 0; i < args.Length; i++)
 {
     if (args[i] == "--near" && i + 1 < args.Length) near = float.Parse(args[++i]);
+    else if (args[i] == "--bos" && i + 1 < args.Length) bosOn = BosHook.ParseFlag(args[++i]) ?? throw new ArgumentException("--bos takes on|off");
     else if (args[i] == "--list" && i + 1 < args.Length) listN = int.Parse(args[++i]);
     else if (args[i] == "--generic") generic = true;
     else if (args[i] == "--emit" && i + 1 < args.Length) emitPath = args[++i];
@@ -107,7 +116,15 @@ var baseName = new Dictionary<FormKey, (string Type, string? Edid)>();
 var cellName = new Dictionary<FormKey, (string? Edid, bool Interior)>();
 
 var pluginKey = new ModKey[paths.Count];
-var masterIdx = new HashSet<int>[paths.Count];
+// --bos on (default): the Base Object Swapper layer is a PSEUDO-PLUGIN after the last real one, every real plugin its
+// master (BOS applies on top of the winner) — index paths.Count in the closure and the mover tables, named
+// BosApplyReport.PseudoPluginName wherever a plugin is named. Its index fills during the walk below (BosFeed).
+int bosPlugin = bosOn ? paths.Count : -1;
+var masterIdx = new HashSet<int>[paths.Count + (bosOn ? 1 : 0)];
+var bos = new BosFeed(bosOn);
+var refArm = new Dictionary<FormKey, string>();          // ref -> its placed arm (BOS never swaps an actor)
+var refEz = new Dictionary<FormKey, FormKey>();          // ref -> its own XEZN, where it has one (the leveled-swap rule)
+string PluginName(int p) => p == bosPlugin ? BosApplyReport.PseudoPluginName : pluginKey[p].FileName.String;
 var quests = new Dictionary<FormKey, QuestInfo>();
 var scenes = new Dictionary<FormKey, (FormKey Quest, int[] Actors)>();
 var packageTargets = new Dictionary<FormKey, int[]>();          // package -> alias ids it targets
@@ -128,7 +145,7 @@ var npcTemplated = new HashSet<FormKey>();                     // inherits packa
 // only known after CHECK 2 runs. The RULE that reads these is DetectorModel.ClassifyIntent,
 // owned by proofprobe cases; everything here is I/O.
 var narrativeQuests = new Dictionary<int, HashSet<FormKey>>(); // plugin -> quests its QUST/SCEN/DIAL records belong to
-var narrativeCount = new int[paths.Count];                     // DIAL/INFO/SCEN/QUST records in the plugin
+var narrativeCount = new int[paths.Count + (bosOn ? 1 : 0)];   // DIAL/INFO/SCEN/QUST records in the plugin (the pseudo-plugin's slot stays 0)
 var recordCensus = new Dictionary<int, Dictionary<string, int>>();
 var cellEdits = new Dictionary<int, Dictionary<FormKey, int>>(); // plugin -> cell -> placement edits
 
@@ -141,11 +158,12 @@ for (int p = 0; p < paths.Count; p++)
 {
     ISkyrimModGetter mod;
     try { mod = SkyrimMod.CreateFromBinaryOverlay(paths[p], SkyrimRelease.SkyrimSE); }
-    catch { unreadablePlugins.Add(Path.GetFileName(paths[p])); pluginKey[p] = ModKey.Null; masterIdx[p] = new HashSet<int>(); continue; }
+    catch { unreadablePlugins.Add(Path.GetFileName(paths[p])); pluginKey[p] = ModKey.Null; masterIdx[p] = new HashSet<int>(); bos.Plugin(null); continue; }
 
     using (mod as IDisposable)
     {
         pluginKey[p] = mod.ModKey;
+        bos.Plugin(mod);
         var mset = new HashSet<int>();
         try
         {
@@ -158,14 +176,20 @@ for (int p = 0; p < paths.Count; p++)
         foreach (var cp in PlacementExtract.FromMod(mod))
         {
             cellName[cp.Cell] = (cp.CellEditorId, cp.Interior);
+            bos.Cell(cp, withRefs: false);
             foreach (var r in cp.Refs)
             {
                 placements++;
+                bos.Placed(r);
+                refArm[r.FormKey] = r.RecordType;
+                if (r.EncounterZone is { } rez) refEz[r.FormKey] = rez; else refEz.Remove(r.FormKey);
                 if (!cellEdits.TryGetValue(p, out var ce)) cellEdits[p] = ce = new Dictionary<FormKey, int>();
                 ce[cp.Cell] = ce.GetValueOrDefault(cp.Cell) + 1;
                 // Record only a plugin that actually CHANGED something. An override that leaves the
-                // placement alone is not a step in the story and would swamp the history.
-                history.Record(r.FormKey, new Snap(p, r.Position, cp.Cell, r.InitiallyDisabled, r.Deleted, cp.Worldspace));
+                // placement alone is not a step in the story and would swamp the history. Rotation and scale ride
+                // along (not part of SameAs — a rotation-only override is still no step) so the BOS hook's
+                // "rotation/scale-only" tally compares an override against the record's values, not against zero.
+                history.Record(r.FormKey, new Snap(p, r.Position, cp.Cell, r.InitiallyDisabled, r.Deleted, cp.Worldspace, r.Rotation, r.Scale));
 
                 if (r.Base is { } bk)
                 {
@@ -190,6 +214,7 @@ for (int p = 0; p < paths.Count; p++)
         }
         foreach (var rec in mod.EnumerateMajorRecords())
         {
+            bos.Record(rec);
             // The census counts every record the plugin carries, by Mutagen type name — the "all
             // 19 records: 13 REFR, 3 ACHR, 2 CELL, 1 WRLD" evidence line, read instead of recited.
             var census = recordCensus.TryGetValue(p, out var cd) ? cd : recordCensus[p] = new Dictionary<string, int>();
@@ -237,7 +262,25 @@ for (int p = 0; p < paths.Count; p++)
 Console.WriteLine($"\nindexed {placements:N0} placements over {history.Count:N0} refs; "
                 + $"{quests.Count:N0} winning quests of {questRecords:N0} records  ({sw.Elapsed.TotalSeconds:0.0}s)");
 Console.WriteLine($"   plugins that could not be read (contribute nothing, counted per rule 6): {unreadablePlugins.Count:N0}"
-                + (unreadablePlugins.Count > 0 ? "  — " + string.Join(", ", unreadablePlugins) : "") + "\n");
+                + (unreadablePlugins.Count > 0 ? "  — " + string.Join(", ", unreadablePlugins) : ""));
+
+// The Base Object Swapper layer applied to THIS probe's history (_shared/BosHook.cs, the history overload): the effective
+// base replaces refBase (recordBase keeps the record's) and an override that moves a reference is a placement step under
+// the pseudo-plugin — otherwise CHECK 2 measures an anchor the game moved as if it stood still. Actors are never swapped
+// (the reader's scope rule), so only object anchors — markers, doors, levers, furniture — can gain a step. --bos off: the
+// record bases and placements, as every run before 2026-09-04. No rule changes; the summary says how much the input moved.
+var recordBase = new Dictionary<FormKey, FormKey>();
+var bosSwaps = new Dictionary<FormKey, BaseObjectSwaps.BosResolution>();
+if (bosOn)
+{
+    masterIdx[bosPlugin] = BosHook.PseudoMasters(paths.Count);
+    var bosLayer = bos.Load(BosHook.LooseRoots(overwriteDir, modsDir, dataDir, Mo2LoadOrder.ReadComposition(profileDir).EnabledMods));
+    var bosRep = BosHook.Apply(history, refBase, refArm, refEz, bos.Index!, bosLayer, bosPlugin, recordBase, bosSwaps);
+    Console.WriteLine("   " + bos.LayerLine());
+    foreach (var l in bosRep.Summary()) Console.WriteLine("   " + l);
+}
+else Console.WriteLine("   " + bos.LayerLine());
+Console.WriteLine();
 
 // TRANSITIVE master closure (2026-08-27). "What the quest's author saw" must include everything a
 // declared master itself depends on — the author had the whole chain installed. The rule lives in
@@ -312,7 +355,7 @@ if (actorDump is not null)
         foreach (var pr in placements2)
             if (Winning(pr) is { } wp)
                 Console.WriteLine($"   placement {pr} @ {CellOf(wp.Cell)} ({wp.Pos.X:0},{wp.Pos.Y:0},{wp.Pos.Z:0})"
-                                + $"  [winner {pluginKey[wp.Plugin].FileName}]");
+                                + $"  [winner {PluginName(wp.Plugin)}]");
         Console.WriteLine($"{nm.Edid}  {key}   packages: {pkgs.Length}"
                         + (npcTemplated.Contains(key) ? "   TEMPLATED (inherits packages)" : "")
                         + $"   placements: {placements2.Count}");
@@ -371,7 +414,15 @@ string NameOf(FormKey refKey)
 {
     var bk = refBase.GetValueOrDefault(refKey);
     var bn = baseName.GetValueOrDefault(bk);
-    return $"{bn.Type ?? "?"} {bn.Edid ?? bk.ToString()}";
+    var name = $"{bn.Type ?? "?"} {bn.Edid ?? bk.ToString()}";
+    // A swapped base: the effective one is named, the record's kept beside it — the same row the swap layer's driver prints.
+    if (recordBase.TryGetValue(refKey, out var rb))
+    {
+        var rn = baseName.GetValueOrDefault(rb);
+        var res = bosSwaps.GetValueOrDefault(refKey);
+        name += $" (BOS: record {rn.Type ?? "?"} {rn.Edid ?? rb.ToString()}{(res is { Random: true } ? $"; random, the first of {res.Alternatives.Count} alternatives" : "")})";
+    }
+    return name;
 }
 
 // ---------------------------------------------------------------------------------------
@@ -396,6 +447,16 @@ Console.WriteLine($"   {"alias arm",-28} {"aliases",9} {"objective targets",18}"
 foreach (var k in armCount.OrderByDescending(k => k.Value))
     Console.WriteLine($"   {k.Key,-28} {k.Value,9:N0} {objArm.GetValueOrDefault(k.Key),18:N0}");
 Console.WriteLine($"   {"TOTAL",-28} {aliasTotal,9:N0} {objTargets,18:N0}");
+if (bosOn)
+{
+    // How much of the swap layer lands on what CHECK 2 measures: the references some alias is anchored to.
+    var anchored = new HashSet<FormKey>();
+    foreach (var q in quests.Values) foreach (var a in q.Aliases) if (AliasRef(a) is { } rk) anchored.Add(rk);
+    int stepped = anchored.Count(k => history.Winning(k) is { } w && w.Plugin == bosPlugin);
+    int swapped = anchored.Count(recordBase.ContainsKey);
+    Console.WriteLine($"\n   BOS on the alias anchors: {anchored.Count:N0} references some alias is anchored to (ForcedReference, or a UniqueActor's one placement); "
+                    + $"{stepped:N0} have a *_SWAP.ini override as their winning placement, {swapped:N0} carry a swapped base");
+}
 
 // ---------------------------------------------------------------------------------------
 // STATED RELATIONSHIPS — turning "these two were near each other" into "the quest says these
@@ -448,8 +509,10 @@ Console.WriteLine($"   -> {statedTotal:N0} alias pairs the data says belong toge
 bool PatchExists(int questPlugin, int moverPlugin)
 {
     if (questPlugin == moverPlugin) return true;
+    // The BOS pseudo-plugin masters every plugin and patches nothing — it is never the reconciling third party, and a
+    // move it made is one no plugin can have reconciled (a *_SWAP.ini is outside the records).
     for (int p = 0; p < masterIdx.Length; p++)
-        if (p != questPlugin && p != moverPlugin
+        if (p != questPlugin && p != moverPlugin && p != bosPlugin
             && masterIdx[p].Contains(questPlugin) && masterIdx[p].Contains(moverPlugin)) return true;
     return false;
 }
@@ -467,9 +530,9 @@ foreach (var q in quests.Values)
         var w = Winning(rk);
         bool objTarget = q.Objectives.Any(o => o.TargetAliasIds.Contains(a.Id));
         if (w is null)
-            broken.Add($"   MISSING   {q.Label} [{pluginKey[q.Plugin].FileName}] alias '{a.Name}' -> {rk} (no placement anywhere){(objTarget ? "   OBJECTIVE" : "")}");
+            broken.Add($"   MISSING   {q.Label} [{PluginName(q.Plugin)}] alias '{a.Name}' -> {rk} (no placement anywhere){(objTarget ? "   OBJECTIVE" : "")}");
         else if (w.Value.Deleted)
-            broken.Add($"   DELETED   {q.Label} [{pluginKey[q.Plugin].FileName}] alias '{a.Name}' -> {NameOf(rk)} deleted by {pluginKey[w.Value.Plugin].FileName}{(objTarget ? "   OBJECTIVE" : "")}");
+            broken.Add($"   DELETED   {q.Label} [{PluginName(q.Plugin)}] alias '{a.Name}' -> {NameOf(rk)} deleted by {PluginName(w.Value.Plugin)}{(objTarget ? "   OBJECTIVE" : "")}");
     }
 
 Console.WriteLine($"\n==== CHECK 1: alias anchored to a reference that is gone ====");
@@ -563,10 +626,10 @@ foreach (var q in quests.Values)
             bool patched = PatchExists(q.Plugin, moverPlugin);
             string movers = string.Join("+", new[] { n1, n2 }
                 .Where(s => s.Plugin != t1.Plugin && s.Plugin != t2.Plugin)
-                .Select(s => pluginKey[s.Plugin].FileName).Distinct());
+                .Select(s => PluginName(s.Plugin)).Distinct());
             var moverList = new[] { n1, n2 }
                 .Where(s => s.Plugin != t1.Plugin && s.Plugin != t2.Plugin)
-                .Select(s => pluginKey[s.Plugin].FileName.String).Distinct().ToArray();
+                .Select(s => PluginName(s.Plugin)).Distinct().ToArray();
             var moverIdxList = new[] { n1, n2 }
                 .Where(s => s.Plugin != t1.Plugin && s.Plugin != t2.Plugin)
                 .Select(s => s.Plugin).Distinct().ToArray();
@@ -574,7 +637,7 @@ foreach (var q in quests.Values)
             // authored (FIRST — its interior flag is the scope-mismatch input) plus wherever the
             // pair stands now.
             var affectedCells = new[] { t1.Cell, n1.Cell, n2.Cell }.Distinct().ToArray();
-            split.Add(new Split(q.Label, pluginKey[q.Plugin].FileName, a1.Name, a2.Name,
+            split.Add(new Split(q.Label, PluginName(q.Plugin), a1.Name, a2.Name,
                                 NameOf(r1), NameOf(r2), CellOf(t1.Cell), CellOf(n1.Cell), CellOf(n2.Cell),
                                 was, isNow, apartNow, movers, objTarget, stated, patched,
                                 q.Objectives.Where(o => o.TargetAliasIds.Contains(a1.Id) || o.TargetAliasIds.Contains(a2.Id))
@@ -665,6 +728,17 @@ if (split.Count > 0)
         { Console.WriteLine("      no mover to classify (the winning positions come from the pair's own masters)"); continue; }
         foreach (var m in s.MoverIdxList)
         {
+            if (m == bosPlugin)
+            {
+                // The mover is the swap layer: an ini line, not a plugin with records to classify. The line is named; the
+                // intent is the ini author's, and the corroboration tally counts the row apart.
+                Console.WriteLine($"      mover {BosApplyReport.PseudoPluginName}");
+                Console.WriteLine("      -> (not classified: a *_SWAP.ini transform moved the anchor — the line below is the whole of the evidence)");
+                foreach (var mk in s.MovedRefs)
+                    if (bosSwaps.TryGetValue(mk, out var bres)) Console.WriteLine($"         evidence [ini]: {mk}  {BosHook.Describe(bres)}");
+                Bump(corroboration, "SwapLayer");
+                continue;
+            }
             var cells = cellEdits.GetValueOrDefault(m);
             var affected = s.AffectedCells.ToHashSet();
             int inAffected = affected.Sum(c => cells?.GetValueOrDefault(c) ?? 0);
@@ -683,7 +757,7 @@ if (split.Count > 0)
                 : $"{census.Values.Sum():N0} records: "
                 + string.Join(", ", census.OrderByDescending(kv => kv.Value).Take(6).Select(kv => $"{kv.Value} {kv.Key}"))
                 + (census.Count > 6 ? ", …" : "");
-            Console.WriteLine($"      mover {pluginKey[m].FileName}");
+            Console.WriteLine($"      mover {PluginName(m)}");
             Console.WriteLine($"      -> {verdict}   ({why})");
             Console.WriteLine($"         evidence [records]: {censusLine}");
             Console.WriteLine($"         evidence [records]: narrative (DIAL/INFO/SCEN/QUST): {narrativeCount[m]}; "
@@ -774,7 +848,7 @@ if (generic)
             default: continue;
         }
         if (last.Plugin != first.Plugin)
-            Bump(moverPairs, $"{pluginKey[first.Plugin].FileName}  -> moved by ->  {pluginKey[last.Plugin].FileName}");
+            Bump(moverPairs, $"{PluginName(first.Plugin)}  -> moved by ->  {PluginName(last.Plugin)}");
     }
     Console.WriteLine();
     Console.WriteLine($"==== GENERIC placement drift (scale context for the checks above) ====");
