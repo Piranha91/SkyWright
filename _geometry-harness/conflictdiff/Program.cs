@@ -35,18 +35,31 @@ using HarnessShared;
 // DIFFERENTIAL-RECLASSIFIED / -UNMEASURED / -INERT when neither moved, or -UNJUDGED. `differential-sweep.ps1`
 // drives the whole loop over the candidates --verify names.
 //
-// usage: conflictdiff <base.json> <changed.json> [--tolerance PCT]   (PCT in percentage points; default 1)
+// POPULATION AND STATE (Q27, 2026-09-06). Credit is a statement about two runs of the same detector over the same
+// world. Two emits made on different POPULATIONS (the load-time enable chain against the record's own flag) or in
+// different world STATES answer different questions, and a row that vanishes between them tells you the question
+// changed, not that a patch repaired anything. So the two identities are compared before anything is credited:
+// - different, and named: the run is REFUSED unless --compare-states says the comparison is deliberate, in which case
+//   it is labelled on every line of the output rather than silently blessed;
+// - unknown on either side (an emit written before Q27 carries neither): also refused, for the same reason. An old
+//   emit is not certified equal to a new one; re-emit with the current probe.
+//
+// usage: conflictdiff <base.json> <changed.json> [--tolerance PCT] [--compare-states]   (PCT in points; default 1)
+//   --compare-states  the two emits are DELIBERATELY of different populations or world states. The diff runs and every
+//                     line says so; the verdict is not an ordinary repair verdict.
 
 string? basePath = null, changedPath = null;
 double tolerance = 0.01;
+bool compareStates = false;
 for (int i = 0; i < args.Length; i++)
 {
     if (args[i] == "--tolerance" && i + 1 < args.Length) tolerance = double.Parse(args[++i], System.Globalization.CultureInfo.InvariantCulture) / 100.0;
+    else if (args[i] == "--compare-states") compareStates = true;
     else if (basePath is null) basePath = args[i];
     else if (changedPath is null) changedPath = args[i];
-    else { Console.Error.WriteLine("usage: conflictdiff <base.json> <changed.json> [--tolerance PCT]"); return 2; }
+    else { Console.Error.WriteLine("usage: conflictdiff <base.json> <changed.json> [--tolerance PCT] [--compare-states]"); return 2; }
 }
-if (basePath is null || changedPath is null) { Console.Error.WriteLine("usage: conflictdiff <base.json> <changed.json> [--tolerance PCT]"); return 2; }
+if (basePath is null || changedPath is null) { Console.Error.WriteLine("usage: conflictdiff <base.json> <changed.json> [--tolerance PCT] [--compare-states]"); return 2; }
 
 ConflictFile baseFile, changedFile;
 try { baseFile = ConflictIo.Read(basePath); changedFile = ConflictIo.Read(changedPath); }
@@ -73,6 +86,29 @@ int basePredicated = before.Values.Count(r => r.Physical is not null);
 Console.WriteLine($"base    : {basePath}  ({baseFile.Conflicts.Count:N0} conflicts, {before.Count:N0} rows; predicates on {basePredicated:N0})");
 Console.WriteLine($"changed : {changedPath}  ({changedFile.Conflicts.Count:N0} conflicts, {after.Count:N0} rows; base-row predicates carried: {predicates.Count:N0}"
                 + (changedFile.BaseEmit is { } be ? $", measured against {Path.GetFileName(be)}" : "") + ")");
+// The population/state gate (Q27), before anything is credited.
+bool identityKnown = baseFile.Population is not null && changedFile.Population is not null
+                  && baseFile.State is not null && changedFile.State is not null;
+bool identitySame = identityKnown
+                 && string.Equals(baseFile.Population, changedFile.Population, StringComparison.Ordinal)
+                 && string.Equals(baseFile.State, changedFile.State, StringComparison.Ordinal);
+Console.WriteLine($"population: base {baseFile.PopulationIdentity} | changed {changedFile.PopulationIdentity}");
+if (!identityKnown)
+{
+    Console.WriteLine("   ! one or both emits do not say which population or world state produced them (written before 2026-09-06).");
+    Console.WriteLine("     An unlabelled emit is UNKNOWN, not \"the same\": a row that vanished between two different populations");
+    Console.WriteLine("     is not evidence of a repair. Re-emit both with the current probe, or pass --compare-states to say the");
+    Console.WriteLine("     comparison is deliberate and read the result as a population diff rather than a repair verdict.");
+    if (!compareStates) return 3;
+}
+else if (!identitySame)
+{
+    Console.WriteLine("   ! the two emits were made on different populations or in different world states — they answer different");
+    Console.WriteLine("     questions, and the difference between them is that change, not a repair.");
+    if (!compareStates) return 3;
+}
+if (compareStates && !identitySame) Console.WriteLine("   (--compare-states: running anyway; every number below is a POPULATION/STATE difference, not repair credit)");
+Console.WriteLine();
 if (basePredicated == 0) Console.WriteLine("   ! the base emit carries no physical predicates (written before 2026-09-03?) — every vanished row reads UNMEASURED; re-emit with the current probe");
 if (predicates.Count == 0 && before.Keys.Any(k => !after.ContainsKey(k)))
     Console.WriteLine("   ! the changed emit carries no base-row predicates — was the probe run with --base <base.json>? Vanished rows read UNMEASURED");
@@ -160,7 +196,7 @@ if (baseFile.Coverage is null || changedFile.Coverage is null) Console.WriteLine
 
 string verdict = DetectorModel.DifferentialVerdict(N(CreditOutcome.Repaired), N(CreditOutcome.Created), N(CreditOutcome.Reclassified), N(CreditOutcome.Unmeasured), refusals.Count);
 Console.WriteLine();
-Console.WriteLine($"   verdict : {verdict}  (repaired {N(CreditOutcome.Repaired):N0} - created {N(CreditOutcome.Created):N0} = net {N(CreditOutcome.Repaired) - N(CreditOutcome.Created):+#;-#;0}; reclassified {N(CreditOutcome.Reclassified):N0}, unmeasured {N(CreditOutcome.Unmeasured):N0})");
+Console.WriteLine($"   verdict : {verdict}{(identitySame ? "" : "   [POPULATION/STATE DIFFERENCE — not repair credit]")}  (repaired {N(CreditOutcome.Repaired):N0} - created {N(CreditOutcome.Created):N0} = net {N(CreditOutcome.Repaired) - N(CreditOutcome.Created):+#;-#;0}; reclassified {N(CreditOutcome.Reclassified):N0}, unmeasured {N(CreditOutcome.Unmeasured):N0})");
 Console.WriteLine();
 Console.WriteLine("   A verdict here outranks --verify's CONFIRMED: coverage says a patch touches the broken records;");
 Console.WriteLine("   only the differential says what happens to the conflict set — and only a row whose physical predicate");

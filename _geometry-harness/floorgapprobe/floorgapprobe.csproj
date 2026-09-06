@@ -16,5 +16,6 @@
     <Compile Include="..\_shared\DetectorModel.cs" Link="DetectorModel.cs" />
     <Compile Include="..\_shared\FloorFeed.cs" Link="FloorFeed.cs" />
     <ProjectReference Include="..\..\src\housecarl-core\housecarl-core.csproj" />
+    <Compile Include="..\_shared\EnablePopulation.cs" Link="EnablePopulation.cs" />
   </ItemGroup>
 </Project>

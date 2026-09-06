@@ -258,7 +258,7 @@ static class StateProof
         // ---- the class ----
         var ev = new StateEvaluator(cidx, sx)
         {
-            Route = (FormKey k, bool navcut, out string why) =>
+            Route = (StateArm _, FormKey k, bool navcut, out string why) =>
             {
                 why = navcut ? "stand-in: a navcut box cuts the line" : "stand-in: beside the line";
                 if (k == R(9)) return RouteCutVerdict.LikelyBlocked;

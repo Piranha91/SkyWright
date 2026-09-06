@@ -47,6 +47,10 @@ using Mutagen.Bethesda.Skyrim;
 //                     [--absolute] [--labelled-mover X.esp] [--overlap-json FILE]
 //                     [--only A.esm,B.esm,...] [--vanilla-assets] [--bos on|off]
 //                     [--enable X.esp]* [--disable X.esp]* [--instance DIR] [--game DIR] [--profile NAME]
+//   POPULATION      the LOAD-TIME state, and it always has been (R1, 2026-09-03): a reference exists in an arm when its
+//                   XESP parent chain resolves enabled there, resolved PER ARM — the winner's, and the arm without a
+//                   mover's. Q27 changed nothing here except that the emit now says so. --flags is refused: there is no
+//                   flag-only contact population to reproduce.
 //   --state SPEC    the world-state arm (roadmap 4.11): <switch>[,<switch>…], stage:<quest>:<n> (with --switch-map), or
 //                   baseline — the runtime enable state every arm reads (R1) has those switches flipped, in the winner arm
 //                   and in the arm without the mover alike. Without it, the load-time state, as every run before 2026-09-04.
@@ -109,6 +113,14 @@ for (int i = 0; i < args.Length; i++)
     else if (args[i] == "--disable" && i + 1 < args.Length) disablePlugins.Add(args[++i]);
     else if (args[i] == "--bos" && i + 1 < args.Length) bosOn = BosHook.ParseFlag(args[++i]) ?? throw new ArgumentException("--bos takes on|off");
     else if (args[i] == "--state" && i + 1 < args.Length) stateSpec = args[++i];
+    // --flags is refused rather than added (Q27): contactprobe has resolved the enable chain since R1 (2026-09-03), so
+    // there is no flag-only population of it to reproduce, and one would be a mode known to be wrong about the game.
+    else if (args[i] == "--flags")
+    {
+        try { PopulationCli.Resolve("contactprobe", true, null, flagsSupported: false); }
+        catch (ArgumentException ex) { Console.Error.WriteLine(ex.Message); }
+        return 2;
+    }
     else if (args[i] == "--switch-map" && i + 1 < args.Length) switchMapPath = args[++i];
 }
 
@@ -804,6 +816,13 @@ if (emitPath is not null)
     }
     var coverage = new List<CoverageLine>
     {
+        // The population this run judged, and the chains it could not read to the end — the contact pass has resolved
+        // the chain since R1, but until Q27 nothing said so in the emit, and conflictdiff could not see the unresolved
+        // share move. Counted off the winner memo, so no answer changes and the console output is what it always was.
+        new("enable chains (winner arm)", cidx.Arms.WinnerQueried - cidx.Arms.WinnerUnresolved,
+            cidx.Arms.WinnerUnresolved > 0 ? new Dictionary<string, long> { ["EnableChainUnresolved"] = cidx.Arms.WinnerUnresolved } : new Dictionary<string, long>(),
+            new Dictionary<string, long> { ["NotPresentAtLoad"] = cidx.Arms.WinnerAbsent },
+            $"population load-time / state {cidx.State?.Name ?? EnablePopulation.BaselineStateName}"),
         new("plugins", paths.Count - unreadable.Count, new Dictionary<string, long> { ["UnreadablePlugin"] = unreadable.Count }),
         // A host without solid collision is SET ASIDE by definition — the engine rests nothing on it either (the plumbing line
         // above says the same) — not unjudgeable: the coverage rule's first real case (2026-09-03, the lab's JK's–OCW patch, which
@@ -819,7 +838,8 @@ if (emitPath is not null)
             new Dictionary<string, long> { ["BoxesApart"] = skips.BoxesApart, ["DepIntroducedByMover"] = skips.DepIntroducedByMover, ["DepOtherSpace"] = skips.DepOtherSpace, ["DepAbsentInArm"] = skips.DepAbsentInArm },
             $"relationships {rel.Count:N0}, class {classRows.Count:N0}"),
     };
-    ConflictIo.Write(emitPath, new ConflictFile("contactprobe", Instance, DateTime.UtcNow.ToString("yyyy-MM-dd HH:mm:ssZ"), conflicts, coverage, predicates, basePath));
+    ConflictIo.Write(emitPath, new ConflictFile("contactprobe", Instance, DateTime.UtcNow.ToString("yyyy-MM-dd HH:mm:ssZ"), conflicts, coverage, predicates, basePath,
+                                                "load-time", cidx.State?.Name ?? EnablePopulation.BaselineStateName));
     Console.WriteLine($"\nemitted {conflicts.Count:N0} Fixed Stranded + Orphaned conflicts -> {emitPath}");
 }
 

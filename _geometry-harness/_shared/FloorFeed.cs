@@ -22,7 +22,10 @@ using Mutagen.Bethesda.Plugins;
 //  Provenance (Q24, 2026-09-05): read from a cell's own refs alone, the floor
 //  under 3.7 % of exterior triangles is lost and another 4 % falls to the
 //  terrain under a neighbour's street mesh — so a caller that can reach the
-//  neighbourhood should. Initially-disabled and deleted refs are not floors.
+//  neighbourhood should. Deleted refs are never floors, and a ref that is not
+//  there when the cell loads is not one either — WHICH refs those are is the
+//  caller's population (_shared/EnablePopulation.cs): the load-time enable
+//  chain by default since Q27, the record's own flag under --flags.
 //  The Base Object Swapper layer is not applied to floor candidates: the
 //  floor is the authored floor against the authored navmesh, and a swap
 //  changes obstacles far more often than floors (stated, not hidden).
@@ -35,11 +38,12 @@ internal static class FloorFeed
     public delegate (Aabb Box, TriangleSoup Soup)? GeometryOf(PlacedRef r);
 
     /// <summary>Build a cell's field from the refs that can be a floor under it and the terrain those refs stand on.
-    /// <paramref name="enabled"/>: the caller's runtime enable resolution (a state arm's, or the load-time chain through
-    /// <see cref="EnableState"/>); null keeps the record's own initially-disabled flag, the population every default run
-    /// judges. Q25 (2026-09-05): without it a room variant switched off at load — Obscure's council dais, enable-parented
-    /// to an initially-disabled marker — stood as the floor 48 u over a whole room's navmesh and moved verdicts; the
-    /// obstacles of the same run had already gone through the resolver, the floors had not.</summary>
+    /// <paramref name="enabled"/>: the caller's runtime enable resolution — <c>EnablePopulation.Predicate</c>, which is
+    /// the load-time chain (<see cref="EnableState"/>) by default and a state arm's under <c>--state</c>. NULL is the
+    /// flag population: the record's own initially-disabled flag, what every run before Q27 judged and what <c>--flags</c>
+    /// still asks for. Q25 (2026-09-05): on the flag alone a room variant switched off at load — Obscure's council dais,
+    /// enable-parented to an initially-disabled marker — stood as the floor 48 u over a whole room's navmesh and moved
+    /// verdicts, while the obstacles of the same run had already gone through the resolver.</summary>
     public static FloorField Build(IEnumerable<PlacedRef> refs, GeometryOf geometry,
                                    IEnumerable<((int X, int Y) Grid, float[,] Heights)>? land,
                                    float fallbackOffset = DetectorModel.FallbackOffset,
@@ -58,18 +62,6 @@ internal static class FloorFeed
             f.Add(r.FormKey, world, () => Columns(soup, pos, rot, scale));
         }
         return f;
-    }
-
-    /// <summary>The load-time enable resolution (R1) over one set of placed refs: a ref's own flag, or its XESP parent's
-    /// state XOR the opposite flag, chains followed (<see cref="EnableState.Resolve"/>); a parent outside the set resolves
-    /// as enabled. What a probe without a state arm passes as <c>enabled</c> when it wants the game's load-time floor.</summary>
-    public static Func<FormKey, bool> LoadTimeEnabled(IEnumerable<PlacedRef> refs)
-    {
-        var by = new Dictionary<FormKey, PlacedRef>();
-        foreach (var r in refs) by[r.FormKey] = r;
-        var memo = new Dictionary<FormKey, EnableResolution>();
-        EnableFacts? Facts(FormKey k) => by.TryGetValue(k, out var r) ? new EnableFacts(r.InitiallyDisabled, r.EnableParent, r.EnableParentOpposite) : null;
-        return k => EnableState.Resolve(k, Facts, memo).Enabled;
     }
 
     /// <summary>A soup placed into the world by a reference's transform, as a column index (navprobe's BuildColumns).</summary>
@@ -97,8 +89,12 @@ internal static class FloorFeed
         {
             var key = GridOf(r.Position);
             if (!refsByGrid.TryGetValue(key, out var d)) refsByGrid[key] = d = new Dictionary<FormKey, PlacedRef>();
-            // A later plugin that deletes or disables the ref takes it out of the floor; one that moves it re-files it.
-            if (r.Deleted || r.InitiallyDisabled || r.Base is null) { d.Remove(r.FormKey); continue; }
+            // A later plugin that deletes the ref, or leaves it without a base, takes it out of the floor; one that moves
+            // it re-files it. The ENABLE STATE is NOT decided here (Q27): a ref whose own flag is set may still be there
+            // through an enable parent, and dropping it during ingest put it beyond the resolver's reach for good — the
+            // filtering happens once, in Build, against the run's population. The winning record is what stays in the map,
+            // so the flag population reads the same answer here as it always did.
+            if (r.Deleted || r.Base is null) { d.Remove(r.FormKey); continue; }
             d[r.FormKey] = r;
         }
     }

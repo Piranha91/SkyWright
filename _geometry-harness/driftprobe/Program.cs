@@ -888,7 +888,10 @@ if (emitPath is not null)
     }
 
     ConflictIo.Write(emitPath, new ConflictFile("driftprobe", Instance,
-        DateTime.UtcNow.ToString("yyyy-MM-dd HH:mm:ssZ"), conflicts));
+        DateTime.UtcNow.ToString("yyyy-MM-dd HH:mm:ssZ"), conflicts,
+        // driftprobe's population is placement history and package reach: no enable filter is applied and none belongs
+        // here (an actor dormant at load is still an actor the order places). Labelled so a reader is never left to guess.
+        Population: "n/a (placement history; no enable-state filter)", State: "n/a"));
     Console.WriteLine($"\nemitted {conflicts.Count:N0} conflicts ({conflicts.Count(c => c.B.Length == 0)} with no second party to name) -> {emitPath}");
 }
 

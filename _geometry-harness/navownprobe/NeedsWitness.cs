@@ -81,9 +81,17 @@ static class NeedsWitnessJoin
         public readonly Dictionary<FormKey, List<(FormKey Npc, FormKey Pack, int Slot, uint Radius)>> AnchoredHere = new();
         public int UnreadablePlugins;
         public int RefsSeen;
+        /// <summary>The enable facts of every placement in the order — a witness's enable parent is usually in another
+        /// cell, so the chain can only be resolved once the whole order has been walked (Q27).</summary>
+        public readonly EnableFactsIndex EnableFacts = new();
+        /// <summary>Witnesses whose enable chain says they are not in the world when the cell loads.</summary>
+        public int RefsAbsentAtLoad;
+        /// <summary>Witnesses whose chain could not be read to the end — the answer is EnableState's fallback, not a
+        /// measurement, and a row resting on one says so.</summary>
+        public int RefsChainUnresolved;
     }
 
-    public static Census Build(IReadOnlyList<string> paths, HashSet<FormKey> wantedCells)
+    public static Census Build(IReadOnlyList<string> paths, HashSet<FormKey> wantedCells, bool flagsOnly = false)
     {
         var c = new Census();
         for (int p = 0; p < paths.Count; p++)
@@ -98,14 +106,16 @@ static class NeedsWitnessJoin
                     bool wanted = wantedCells.Contains(cp.Cell);
                     foreach (var r in cp.Refs)
                     {
+                        c.EnableFacts.Note(r);
                         bool isNpc = r.RecordType.Contains("PlacedNpc", StringComparison.Ordinal);
                         if (isNpc && !r.Deleted && r.Base is { } bk) c.NpcPlacedAnywhere.Add(bk);
                         c.RefCellAnywhere[r.FormKey] = cp.Cell;
                         if (!wanted) continue;
                         c.RefsSeen++;
-                        // The runtime state, read the way the door check reads it: the enable-parent
-                        // idiom decides, and a ref with a parent is not "disabled" just because its
-                        // own flag says so (PlacementExtract's own warning).
+                        // A PROVISIONAL state: the chain cannot be resolved until every plugin has been read (an override
+                        // three plugins later can enable or disable the parent), so the winning record's own shape is
+                        // recorded here and Resolve() below settles it. Before Q27 this string WAS the answer, and
+                        // "enable-parent" counted as live whatever the parent's own state was.
                         string state = r.Deleted ? "deleted"
                             : r.EnableParent is { } ep && ep.ID == 0x14 && r.EnableParentOpposite ? "permanently disabled"
                             : r.EnableParent is not null ? "enable-parent"
@@ -161,6 +171,23 @@ static class NeedsWitnessJoin
                 }
             }
         }
+        // THE POPULATION (Q27): now that every plugin has spoken, resolve each wanted reference's chain and replace the
+        // provisional state with what the game will do at load. A witness that is not in the world cannot abandon any
+        // ground, and one whose chain could not be read is counted rather than assumed present.
+        var pop = flagsOnly ? EnablePopulation.Flags(c.EnableFacts) : EnablePopulation.LoadTime(c.EnableFacts);
+        if (!flagsOnly)
+            foreach (var key in c.Refs.Keys.ToList())
+            {
+                var wr = c.Refs[key];
+                if (wr.State == "deleted") continue;
+                var res = pop.Resolution(key);
+                if (!res.Resolved) c.RefsChainUnresolved++;
+                if (!res.Enabled) c.RefsAbsentAtLoad++;
+                string state = !res.Enabled ? (res.Resolved ? "absent at load" : "absent at load (chain unresolved)")
+                             : res.Resolved ? (res.ViaParent ? "enabled via parent" : "enabled")
+                             : "enabled (chain unresolved)";
+                c.Refs[key] = wr with { State = state };
+            }
         return c;
     }
 
@@ -213,7 +240,10 @@ static class NeedsWitnessJoin
                                   v.Verdict, v.Reason, v.Authorship, v.Why, governing, rec.State, Source(rec.Cell), elevated);
         }
 
-        static bool Live(WitnessRef r) => r.State is "enabled" or "enable-parent";
+        // A live witness is one the chain says is in the world at load. "enable-parent" is the pre-Q27 vocabulary and is
+        // kept only for a --flags run, where no chain was resolved; an unresolved chain counts as live and is reported
+        // apart, because refusing it would hide the witness rather than qualify it.
+        static bool Live(WitnessRef r) => r.State is "enabled" or "enabled via parent" or "enabled (chain unresolved)" or "enable-parent";
         var refsHere = cells.Where(c.RefsByCell.ContainsKey).SelectMany(k => c.RefsByCell[k]).Select(k => c.Refs[k]).ToList();
         var actors = refsHere.Where(r => r.Type.Contains("PlacedNpc", StringComparison.Ordinal) && Live(r)).ToList();
         int actorsInCell = actors.Count(a => a.Cell == cell);

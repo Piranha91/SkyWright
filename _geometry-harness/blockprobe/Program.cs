@@ -17,13 +17,26 @@ using Mutagen.Bethesda.Skyrim;
 // If those two rates come out the same, the detector is not measuring what it claims to.
 //
 // usage: blockprobe <TargetPlugin.esp> [--exclude Other.esp ...] [--list N] [--geometry collision|render] [--bos on|off]
-//                   [--state SPEC] [--switch-map FILE]
-//   --state    the world-state arm (roadmap 4.11): <switch>[,<switch>…], stage:<quest>:<n> (with --switch-map) or baseline.
-//              Two things change: a target reference exists when its runtime enable state (EnableState over the whole
-//              order's parent chains, the R1 rule) is enabled under the flip, not when its own flag is clear; and every
-//              NAVCUT BOX standing in the target's cells and enabled in the state — any plugin's — is measured as an
-//              obstacle (its XPRM box at its transform), tallied and listed apart with {NAVCUT}. Without --state the run
-//              is the flag-only one every run before 2026-09-04 was, byte for byte.
+//                   [--state SPEC] [--switch-map FILE] [--flags]
+//   POPULATION (Q27, 2026-09-06). By DEFAULT every physical read of this run — the target's obstacles, the floor under
+//              the band, the actor band itself, and the navcut boxes standing in the target's cells — judges the
+//              LOAD-TIME state: a reference is there when EnableState resolves its XESP parent chain enabled, not when
+//              its own initially-disabled flag happens to be clear (that flag is CK bookkeeping the engine ignores
+//              wherever a reference has a parent). Q25: on the flag alone a room variant switched off at load stood as
+//              the floor 48 u over a whole room's navmesh and moved verdicts.
+//   --state    another world state (roadmap 4.11): <switch>[,<switch>…], stage:<quest>:<n> (with --switch-map) or
+//              baseline. `--state baseline` is the default population, named explicitly; a switch flip resolves the
+//              chain with those switches inverted. Every population above moves together.
+//   --flags    the flag-only population: each record's own initially-disabled flag, no chain — what every run before
+//              2026-09-06 judged, kept so those numbers can be reproduced. Not with --state.
+//   NAVCUTS    a placed reference whose XTRI collision layer is a COLL record flagged NavmeshObstacle cuts the navmesh
+//              wherever it stands. Since Q27 the boxes standing in the target's cells are measured in EVERY run, on the
+//              run's own population (before then, only under --state), tallied apart and listed with {NAVCUT}.
+//              These rows are UNCONFIRMED CANDIDATES and the output says so. The only in-game reading of a navcut is
+//              Q20's Part D, where a SET's boxes were switched on and made a room unreachable; a box that is already on
+//              at load has never been watched, and the rule still measures each box alone where Part D showed a set
+//              cutting more together than any one of them does. Whether such a row is a problem is a question for a
+//              review of the findings, not for the measurement.
 //   --geometry as navprobe's: collision (default since 2026-09-02) runs the rules on the decoded Havok solid restricted
 //              to actor-solid layers, skipping objects with no such body and falling back to render (labelled) when a
 //              decode is incomplete; render reproduces every run before that date.
@@ -48,10 +61,12 @@ string geometrySource = "collision";
 bool controllerBand = true;   // --band controller|nominal: the route rules' band top (the surface rules keep the nominal, as every run before)
 bool bosOn = true;
 string? stateSpec = null, switchMapPath = null;
+bool flagsOnly = false;
 for (int i = 1; i < args.Length; i++)
 {
     if (args[i] == "--state" && i + 1 < args.Length) { stateSpec = args[++i]; continue; }
     if (args[i] == "--switch-map" && i + 1 < args.Length) { switchMapPath = args[++i]; continue; }
+    if (args[i] == "--flags") { flagsOnly = true; continue; }
     if (args[i] == "--exclude" && i + 1 < args.Length) exclude.Add(args[++i]);
     else if (args[i] == "--list" && i + 1 < args.Length) listN = int.Parse(args[++i]);
     else if (args[i] == "--geometry" && i + 1 < args.Length) geometrySource = args[++i];
@@ -59,6 +74,9 @@ for (int i = 1; i < args.Length; i++)
     else if (args[i] == "--bos" && i + 1 < args.Length) bosOn = BosHook.ParseFlag(args[++i]) ?? throw new ArgumentException("--bos takes on|off");
 }
 if (geometrySource is not ("collision" or "render")) { Console.Error.WriteLine("--geometry must be collision or render"); return 1; }
+PopulationMode popMode;
+try { popMode = PopulationCli.Resolve("blockprobe", flagsOnly, stateSpec); }
+catch (ArgumentException ex) { Console.Error.WriteLine(ex.Message); return 2; }
 
 var sw = Stopwatch.StartNew();
 var comp = Mo2LoadOrder.ReadComposition(profileDir);
@@ -102,6 +120,10 @@ var floorTally = new FloorFeed.Tally();
 sw.Restart();
 var winRef = new Dictionary<FormKey, PlacedRef>();                       // ref FormKey -> winning placement
 var winRefCell = new Dictionary<FormKey, FormKey>();                     // ref FormKey -> winning cell
+// The LAST cell any plugin placed a tracked reference in. `winRefCell` remembers the last TARGET cell it was in, so a
+// later plugin that relocates it out of the target's cells leaves that stale; the navcut pass reads this instead, and a
+// box moved elsewhere is not measured against a navmesh it no longer stands on (the whole-order reading --state had).
+var lastCellOf = new Dictionary<FormKey, FormKey>();
 var winNav = new Dictionary<FormKey, (NavmeshGeometry Nav, string Plugin, FormKey Cell)>();
 var baseMesh = new Dictionary<FormKey, (string Mesh, string Type)>();
 var cellMeta = new Dictionary<FormKey, CellPlacements>();
@@ -111,6 +133,16 @@ var raceFacts = new Dictionary<FormKey, ActorBand.RaceFacts>();
 // table, every record the filters and ids read, every cell and reference (_shared/BosHook.cs, BosFeed). Off, every call
 // is a no-op.
 var bos = new BosFeed(bosOn);
+// The run's POPULATION (Q27): the enable facts of EVERY placement in the order, gathered in this one walk — a parent
+// chain crosses cells (a marker in a worldspace's persistent cell governs refs in the grid cells), so the facts have to
+// come from the whole order even though only the target's cells are ever judged. Deletions are read off the record walk
+// as well as the placements: a deleted reference usually strips its placement subrecord, and a deleted parent that read
+// as a live one would silently keep its children off.
+var enableFacts = new EnableFactsIndex();
+// The COLL table by INDEX, and which layers are flagged NavmeshObstacle — what a navcut box is read by (XTRI carries the
+// layer's Index, not a FormID).
+var collByIndex = new Dictionary<uint, (string? Edid, bool NavmeshObstacle)>();
+var definedBy = new Dictionary<FormKey, string>();     // ref -> the first plugin that placed it, for the {NAVCUT by …} line
 
 foreach (var p in paths)
 {
@@ -123,6 +155,9 @@ foreach (var p in paths)
         foreach (var rec in m.EnumerateMajorRecords())
         {
             bos.Record(rec);
+            if (rec is IPlacedGetter pg) { if (pg.IsDeleted) enableFacts.NoteDeleted(pg.FormKey); continue; }
+            if (rec is ICollisionLayerGetter coll)
+            { collByIndex[coll.Index] = (coll.EditorID, coll.Flags.HasFlag(CollisionLayer.Flag.NavmeshObstacle)); continue; }
             if (rec is IModeledGetter mo && mo.Model?.File is { } f && !string.IsNullOrWhiteSpace(f.GivenPath))
                 baseMesh[rec.FormKey] = (f.GivenPath, rec.GetType().Name.Replace("BinaryOverlay", ""));
             ActorBand.CollectRecord(rec, npcFacts, raceFacts);
@@ -131,14 +166,17 @@ foreach (var p in paths)
         foreach (var cp in PlacementExtract.FromMod(m))
         {
             bos.Cell(cp);
+            foreach (var r in cp.Refs) enableFacts.Note(r);
             if (!cp.Interior && cp.Grid is { } fg && floorGrids.Contains((cp.Worldspace, fg.X, fg.Y)))
             {
                 if (!floorRefsByWorld.TryGetValue(cp.Worldspace, out var frg)) { floorRefsByWorld[cp.Worldspace] = frg = new(); floorLandByWorld[cp.Worldspace] = new(); }
                 FloorFeed.FileByGrid(cp, frg, floorLandByWorld[cp.Worldspace]);
             }
-            if (!targetCells.ContainsKey(cp.Cell)) continue;
+            bool targetCell = targetCells.ContainsKey(cp.Cell);
+            foreach (var r in cp.Refs) if (targetCell || lastCellOf.ContainsKey(r.FormKey)) lastCellOf[r.FormKey] = cp.Cell;
+            if (!targetCell) continue;
             cellMeta[cp.Cell] = cp;
-            foreach (var r in cp.Refs) { winRef[r.FormKey] = r; winRefCell[r.FormKey] = cp.Cell; }
+            foreach (var r in cp.Refs) { winRef[r.FormKey] = r; winRefCell[r.FormKey] = cp.Cell; definedBy.TryAdd(r.FormKey, name); }
             foreach (var nav in cp.Navmeshes) winNav[nav.FormKey] = (nav, name, cp.Cell);
         }
     }
@@ -152,16 +190,16 @@ Console.WriteLine("   " + bos.LayerLine() + "\n");
 var bosRep = new BosApplyReport();
 var cutTallyBos = new Dictionary<RouteCutVerdict, int>();   // the route-cut verdicts of the refs BOS swapped or moved, reported apart
 
-// --state: the whole order into the shared index (the parent chains cross cells — a marker in the persistent cell governs
-// refs in the grid cells), the census, the arm, and the navcut boxes of the target's cells.
-Func<FormKey, bool>? enabledOf = null;
+// ---------- 2b. THE POPULATION (Q27) ----------
+// The default is the load-time state over the facts the walk above gathered — no second ingest, no OverlapIndex.
+// --state needs the switch CENSUS (an editor id or a quest stage has to be looked up, and a flip has to know a switch's
+// sets), and that does need the shared index, so it keeps its own ingest.
 StateArm? stateArm = null;
-var navcutsByCell = new Dictionary<FormKey, List<FormKey>>();
-OverlapIndex? stateIdx = null;
+EnablePopulation pop;
 if (stateSpec is not null)
 {
     sw.Restart();
-    stateIdx = new OverlapIndex();
+    var stateIdx = new OverlapIndex();
     for (int p = 0; p < paths.Count; p++)
     {
         ISkyrimModGetter m;
@@ -172,16 +210,35 @@ if (stateSpec is not null)
     sx.NameSwitches(stateIdx.RefEditorId);
     try { stateArm = StateArm.Parse(stateSpec, sx, switchMapPath is null ? null : SwitchMap.Read(switchMapPath)); }
     catch (ArgumentException ex) { Console.Error.WriteLine(ex.Message); return 2; }
-    var stateFacts = stateArm.Wrap(sx.WinnerFacts, sx.Baseline);
-    var stateMemo = new Dictionary<FormKey, EnableResolution>();
-    enabledOf = k => EnableState.Resolve(k, stateFacts, stateMemo).Enabled;
-    foreach (var nk in sx.Navcuts)
-        if (stateIdx.History.Winning(nk) is { } w && targetCells.ContainsKey(w.Cell) && stateIdx.RefPrimitive.ContainsKey(nk))
-        { if (!navcutsByCell.TryGetValue(w.Cell, out var l)) navcutsByCell[w.Cell] = l = new List<FormKey>(); l.Add(nk); }
+    pop = EnablePopulation.Of(stateArm.Wrap(sx.WinnerFacts, sx.Baseline), stateArm.Name);
     var changes = stateArm.Changes(sx).ToList();
-    Console.WriteLine($"state {stateArm.Name}: {sx.Switches.Count:N0} switches in the order; {stateArm.Flips.Count} flipped — {changes.Count(c => c.After):N0} refs arrive, {changes.Count(c => !c.After):N0} depart; "
-                    + $"a target ref exists by its runtime enable state (R1); {navcutsByCell.Values.Sum(l => l.Count):N0} navcut boxes stand in the target's cells ({navcutsByCell.Values.Sum(l => l.Count(k => enabledOf(k))):N0} enabled in this state)  ({sw.Elapsed.TotalSeconds:0.0}s)\n");
+    Console.WriteLine($"state {stateArm.Name}: {sx.Switches.Count:N0} switches in the order; {stateArm.Flips.Count} flipped — "
+                    + $"{changes.Count(c => c.After):N0} refs arrive, {changes.Count(c => !c.After):N0} depart  ({sw.Elapsed.TotalSeconds:0.0}s)");
 }
+else pop = popMode == PopulationMode.Flags ? EnablePopulation.Flags(enableFacts) : EnablePopulation.LoadTime(enableFacts);
+// NULL in flags mode on purpose: every consumer then runs the initially-disabled branch it always ran, so the legacy
+// numbers come out of the legacy code rather than a re-implementation of it.
+Func<FormKey, bool>? enabledOf = pop.Predicate;
+
+// The NAVCUT boxes standing in the target's cells — any plugin's — measured on the run's own population since Q27
+// (before then, only under --state). A navcut is a placed reference whose XTRI names a COLL record flagged
+// NavmeshObstacle; its obstacle is its XPRM box at its transform.
+var navcutsByCell = new Dictionary<FormKey, List<FormKey>>();
+long navcutRelocated = 0;
+foreach (var (fk, r) in winRef)
+{
+    if (r.Deleted || r.Primitive is null) continue;
+    if (r.CollisionLayerIndex is not { } cl || !collByIndex.TryGetValue(cl, out var layer) || !layer.NavmeshObstacle) continue;
+    var cell = winRefCell[fk];
+    if (lastCellOf.TryGetValue(fk, out var lastCell) && lastCell != cell) { navcutRelocated++; continue; }
+    if (!navcutsByCell.TryGetValue(cell, out var nl)) navcutsByCell[cell] = nl = new List<FormKey>();
+    nl.Add(fk);
+}
+bool NavcutPresent(FormKey k) => enabledOf is null ? !winRef[k].InitiallyDisabled : enabledOf(k);
+Console.WriteLine($"   {navcutsByCell.Values.Sum(l => l.Count):N0} navcut boxes stand in the target's cells "
+                + $"({navcutsByCell.Values.Sum(l => l.Count(NavcutPresent)):N0} present in this population; listed with {{NAVCUT}}"
+                + (navcutRelocated > 0 ? $"; {navcutRelocated:N0} set aside — a later plugin moved them out of those cells" : "") + ")");
+
 var navcutTally = new Dictionary<RouteCutVerdict, int>();
 var navcutHits = new List<(RouteCutVerdict V, string Cell, FormKey Fk, string Why, int Touched, RouteLine? Line, string Plugin)>();
 long navcutMeasured = 0, navcutSkippedDisabled = 0, navcutNoCross = 0;
@@ -228,6 +285,7 @@ const float TriInset = 12f;       // navprobe's edge-graze forgiveness
 ActorBand.ResolveControllers(raceFacts, assets);
 var (fallbackTop, fallbackSrc) = ActorBand.TallestPlayable(raceFacts);
 Console.WriteLine(FloorFeed.BandLine(controllerBand) + $"; top fallback {fallbackSrc}; the surface rules keep the navmesh-relative band {Clearance:0}..top");
+Console.WriteLine($"   population: {(pop.Mode == PopulationMode.Flags ? "FLAGS (the record's own initially-disabled flag; the pre-Q27 default)" : $"LOAD-TIME state '{pop.StateName}' (the XESP enable chain) — obstacles, floors, the band and the navcuts all judged on it")}");
 var winRefsByCell = winRef.Values.GroupBy(r => winRefCell[r.FormKey]).ToDictionary(g => g.Key, g => g.ToList());
 
 // A floor candidate's solid, by the record's own base (the swap layer is not applied to floors — FloorFeed's header).
@@ -238,19 +296,26 @@ var winRefsByCell = winRef.Values.GroupBy(r => winRefCell[r.FormKey]).ToDictiona
     return g.Ok && g.Soup is not null && !g.Box.IsEmpty ? (g.Box, g.Soup) : null;
 }
 // The floor the band stands on in a cell (Q24): the winning refs of an interior; for an exterior the 3×3 neighbourhood
-// filed above, else its own refs. Every field built is kept for the summary tally. Under --state the floors go through the
-// same enable resolution as the obstacles (Q25: a room variant switched off at load had been the floor over a whole room);
-// the default run's floors are the flag population, as its obstacles are.
+// filed above, else its own refs. Every field built is kept for the summary tally. The floors go through the SAME
+// population as the obstacles and the band — since Q27 that is the load-time enable chain in an ordinary run, not only
+// under --state (Q25: a room variant switched off at load had been the floor over a whole room).
+// One field per cell, kept: the navcut pass asks for the same cells the reference pass did, and building a second field
+// for them would double every raster read in the summary tally and print the cell twice in the per-cell table.
 var floorFields = new List<(string Cell, FloorField Field)>();
+var floorByCell = new Dictionary<FormKey, FloorField>();
 FloorField FloorFor(FormKey cellKey, List<PlacedRef>? own)
 {
+    if (floorByCell.TryGetValue(cellKey, out var cached)) return cached;
     string cellName = cellMeta.TryGetValue(cellKey, out var cm) ? (cm.CellEditorId ?? cellKey.ToString()) : cellKey.ToString();
+    FloorField built;
     if (cellMeta.TryGetValue(cellKey, out var meta) && !meta.Interior && meta.Grid is { } g && floorRefsByWorld.TryGetValue(meta.Worldspace, out var frw))
     {
         var (nbRefs, nbLand) = FloorFeed.Neighbourhood(g, frw, floorLandByWorld[meta.Worldspace]);
-        var nf = FloorFeed.Build(nbRefs, FloorGeometry, nbLand, enabled: enabledOf); floorFields.Add((cellName, nf)); return nf;
+        built = FloorFeed.Build(nbRefs, FloorGeometry, nbLand, enabled: enabledOf);
     }
-    var of = FloorFeed.Build(own ?? new List<PlacedRef>(), FloorGeometry, null, enabled: enabledOf); floorFields.Add((cellName, of)); return of;
+    else built = FloorFeed.Build(own ?? new List<PlacedRef>(), FloorGeometry, null, enabled: enabledOf);
+    floorFields.Add((cellName, built));
+    return floorByCell[cellKey] = built;
 }
 int cellsWithActors = 0, cellsTemplatedOnly = 0; float bandMin = float.MaxValue, bandMax = 0f;
 
@@ -298,7 +363,7 @@ foreach (var (cellKey, tcell) in targetCells)
     if (index.TriangleCount == 0) continue;
 
     var band = ActorBand.ForCell(winRefsByCell.TryGetValue(cellKey, out var cellRefs) ? cellRefs : Array.Empty<PlacedRef>(),
-                                 npcFacts, raceFacts, fallbackTop, fallbackSrc);
+                                 npcFacts, raceFacts, fallbackTop, fallbackSrc, enabledOf);
     if (!float.IsFinite(band.Top)) { Console.WriteLine($"UNJUDGEABLE actor band in {cellKey}: {band.Source}"); continue; }
     ActorHeight = band.Top;
     float physicalTop = controllerBand ? ActorBand.PhysicalControllerTop(band.Top) : band.Top;
@@ -318,7 +383,10 @@ foreach (var (cellKey, tcell) in targetCells)
         // The Base Object Swapper layer: the base and transform the game LOADS for this reference (the record's own under
         // --bos off). An override that disables it at init is skipped the way the record's own flag is, and counted.
         var eff = bos.Effective(r, cellKey, bosRep);
-        if (enabledOf is null ? eff.InitiallyDisabled : !enabledOf(r.FormKey)) { skipped++; continue; }
+        // The run's population AND the swap layer's own disable on top of it. Before Q27 the --state path replaced the
+        // BOS check rather than adding to it, so a reference an override disables at init counted as an obstacle in a
+        // state arm; --flags keeps the old single test, which is what the old default did.
+        if (enabledOf is null ? eff.InitiallyDisabled : (!enabledOf(r.FormKey) || eff.InitiallyDisabled)) { skipped++; continue; }
         if (r.Base is null || !baseMesh.TryGetValue(eff.Base, out var bm)) { noGeo++; continue; }
 
         var g = Geometry(bm.Mesh);
@@ -438,24 +506,25 @@ foreach (var (cellKey, tcell) in targetCells)
     }
 }
 
-// --state: the navcut boxes of the target's cells, enabled in the state, through the route-cut rule — the cut a quest
-// stage brings to the target's navmesh. Measured after the target's own refs so the tallies stay apart.
-if (stateArm is not null && stateIdx is not null)
+// The navcut boxes standing in the target's cells, present in this run's population, through the route-cut rule — the
+// cut a quest stage (or a marker already on at load) brings to the target's navmesh. Measured after the target's own
+// refs so the tallies stay apart. Since Q27 this runs in every mode, on that mode's population.
     foreach (var (cellKey, navcuts) in navcutsByCell)
     {
         if (!navByCell.TryGetValue(cellKey, out var navs) || navs.Count == 0) continue;
         var index = NavmeshIndex.Build(navs.Select(n => n.Nav).ToList(), out _);
         if (index.TriangleCount == 0) continue;
-        var band = ActorBand.ForCell(winRefsByCell.TryGetValue(cellKey, out var cellRefs2) ? cellRefs2 : Array.Empty<PlacedRef>(), npcFacts, raceFacts, fallbackTop, fallbackSrc);
+        var band = ActorBand.ForCell(winRefsByCell.TryGetValue(cellKey, out var cellRefs2) ? cellRefs2 : Array.Empty<PlacedRef>(), npcFacts, raceFacts, fallbackTop, fallbackSrc, enabledOf);
         if (!float.IsFinite(band.Top)) { Console.WriteLine($"UNJUDGEABLE actor band in {cellKey}: {band.Source}"); continue; }
         float routeTop = controllerBand ? ActorBand.PhysicalControllerTop(band.Top) : band.Top;
         var floor = FloorFor(cellKey, cellRefs2);
         Dictionary<NavGraph.TriRef, NavGraph.Node>? gnodes = null;
         foreach (var nk in navcuts)
         {
-            if (!enabledOf!(nk)) { navcutSkippedDisabled++; continue; }
-            var w = stateIdx.History.Winning(nk)!.Value;
-            var prim = stateIdx.RefPrimitive[nk];
+            if (!NavcutPresent(nk)) { navcutSkippedDisabled++; continue; }
+            var wr = winRef[nk];
+            var w = (Pos: wr.Position, Rot: wr.Rotation, Scale: wr.Scale);
+            var prim = wr.Primitive!.Value;
             var model = NavcutGeometry.ModelBox(prim);
             if (model.IsEmpty) continue;
             var soup = NavcutGeometry.Soup(prim);
@@ -476,12 +545,13 @@ if (stateArm is not null && stateIdx is not null)
             var vc = DetectorModel.RouteCut(facts.Judged, facts.Touched, line?.Found ?? false, line?.Why ?? "", line?.Cut ?? false, line?.Passage ?? float.NaN, cutRise: line?.CutRise ?? float.NaN, cutFloat: line?.CutFloat ?? float.NaN, cutOnStairs: line?.CutOnStairs ?? false);
             navcutMeasured++;
             navcutTally.TryGetValue(vc.Verdict, out var nt); navcutTally[vc.Verdict] = nt + 1;
-            string plugin = stateIdx.History.Of(nk) is { Count: > 0 } h ? Path.GetFileName(paths[h[0].Plugin]) : "?";
+            string plugin = definedBy.TryGetValue(nk, out var dp) ? dp : "?";
             navcutHits.Add((vc.Verdict, targetCells[cellKey].CellEditorId ?? cellKey.ToString(), nk, facts.Judged ? vc.Why : facts.Why, facts.Touched, line, plugin));
         }
     }
 
 Console.WriteLine($"==== {target} — navmesh blockage ====");
+Console.WriteLine($"population        : {pop.Describe()}");
 Console.WriteLine($"references tested : {tested:N0}   (no usable geometry {noGeo:N0}, skipped {skipped:N0}, no actor-solid collision {noSolid:N0})");
 Console.WriteLine($"geometry source   : {geometrySource}" + (geometrySource == "collision" ? $"   on collision {onCollision:N0}, render fallback {onFallback:N0}" : ""));
 Console.WriteLine($"distinct meshes   : {measured:N0}");
@@ -540,11 +610,13 @@ Console.WriteLine($"   references measured: {routeMeasured:N0}   doors set aside
 Console.WriteLine($"   {"verdict",-14} {"refs",8}");
 foreach (var v in new[] { RouteCutVerdict.Blocked, RouteCutVerdict.LikelyBlocked, RouteCutVerdict.Clipped, RouteCutVerdict.NoLine, RouteCutVerdict.None, RouteCutVerdict.Unjudgeable })
     Console.WriteLine($"   {v,-14} {(cutTally.TryGetValue(v, out var a) ? a : 0),8:N0}" + (v == RouteCutVerdict.NoLine && noLineWhy.Count > 0 ? "   (" + string.Join(", ", noLineWhy.OrderByDescending(kv => kv.Value).Select(kv => $"{kv.Key} {kv.Value}")) + ")" : ""));
-if (stateArm is not null)
 {
-    Console.WriteLine($"   state {stateArm.Name}: navcut boxes in the target's cells — {navcutMeasured:N0} measured, {navcutSkippedDisabled:N0} disabled in this state, {navcutNoCross:N0} over no walkable ground: "
+    Console.WriteLine($"   navcut boxes in the target's cells (population '{pop.StateName}') — {navcutMeasured:N0} measured, {navcutSkippedDisabled:N0} not present in it, {navcutNoCross:N0} over no walkable ground: "
                     + string.Join(", ", new[] { RouteCutVerdict.Blocked, RouteCutVerdict.LikelyBlocked, RouteCutVerdict.Clipped, RouteCutVerdict.NoLine, RouteCutVerdict.None, RouteCutVerdict.Unjudgeable }
-                                        .Select(v => $"{v} {(navcutTally.TryGetValue(v, out var b) ? b : 0):N0}")) + "   (the cut a flip brings to the target's navmesh; listed with {NAVCUT})");
+                                        .Select(v => $"{v} {(navcutTally.TryGetValue(v, out var b) ? b : 0):N0}")) + "   (the cut a navmesh-obstacle box makes in the target's navmesh; listed with {NAVCUT})");
+    Console.WriteLine("      UNCONFIRMED CANDIDATES: a navcut box is authored to cut the navmesh, and no load-time navcut has been watched in game "
+                    + "(Q20 Part D watched a SET switched on). The rule also reads each box alone, where that set cut more together than any one box did. "
+                    + "Read these rows as candidates for review, never as findings.");
     foreach (var h in navcutHits.Where(h => h.V is RouteCutVerdict.Blocked or RouteCutVerdict.LikelyBlocked or RouteCutVerdict.NoLine).OrderBy(h => h.V == RouteCutVerdict.Blocked ? 0 : h.V == RouteCutVerdict.LikelyBlocked ? 1 : 2).Take(listN))
         Console.WriteLine($"      {h.V,-14} touched {h.Touched,4}  {h.Cell,-26} {h.Fk} {{NAVCUT by {h.Plugin}}}   {h.Why}");
 }

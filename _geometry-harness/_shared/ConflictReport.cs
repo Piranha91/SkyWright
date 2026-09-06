@@ -78,10 +78,26 @@ public sealed record CoverageLine(string Population, long Judged,
 /// <param name="Coverage">What the probe judged and could not, per population (Part B of the 2026-09-12 handoff).</param>
 /// <param name="Predicates">Present when the probe ran with <c>--base</c>: that emit's records under this arm.</param>
 /// <param name="BaseEmit">The path <c>--base</c> named, for the record.</param>
+/// <param name="Population">WHICH REFERENCES the run judged (Q27, 2026-09-06): <c>load-time</c> — the XESP enable chain,
+/// the default — or <c>flags</c> — each record's own initially-disabled flag, what <c>--flags</c> asks for and what every
+/// run before Q27 judged. Null in an emit written before then, and a reader must treat that as UNKNOWN: an old emit is
+/// not certified equal to a new one, and crediting a repair across two different populations credits the population
+/// change.</param>
+/// <param name="State">WHICH WORLD STATE the run judged: <c>baseline</c> (the load-time state), a <c>--state</c> arm's
+/// name, or null for a flag-population run (a flag population is not a world state) and for any emit written before Q27.
+/// Two emits of different states can be compared deliberately; they cannot be credited as a repair by accident.</param>
 public sealed record ConflictFile(string Probe, string Instance, string GeneratedUtc, IReadOnlyList<Conflict> Conflicts,
                                   IReadOnlyList<CoverageLine>? Coverage = null,
                                   IReadOnlyList<Predicate>? Predicates = null,
-                                  string? BaseEmit = null);
+                                  string? BaseEmit = null,
+                                  string? Population = null,
+                                  string? State = null)
+{
+    /// <summary>How this emit's population and state read for a human, and for the diff's refusal message. "unknown"
+    /// is a real answer: an emit written before Q27 says nothing about either, and pretending otherwise is the silent
+    /// certification the credit rule exists to stop.</summary>
+    public string PopulationIdentity => $"{Population ?? "unknown"} / state {State ?? "unknown"}";
+}
 
 public static class ConflictIo
 {

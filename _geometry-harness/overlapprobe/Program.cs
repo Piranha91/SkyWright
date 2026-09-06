@@ -47,11 +47,19 @@ using Mutagen.Bethesda.Skyrim;
 //
 // usage: overlapprobe [--list N] [--depth U] [--frac F] [--maxdim U] [--emit path] [--base emit.json] [--dump path] [--json path]
 //                     [--bos on|off] [--enable X.esp]* [--disable X.esp]* [--instance DIR] [--game DIR] [--profile NAME]
-//   --state SPEC    the world-state arm (roadmap 4.11): <switch>[,<switch>…] by editor id or FormKey, stage:<quest>:<n>
-//                   (with --switch-map, switchprobe's --json), or baseline — every ref's existence is then its runtime
-//                   enable state (EnableState, the R1 rule) with those switches flipped, instead of the winning snap's own
-//                   flag. Without --state the population is the flag, as every run before 2026-09-04 (the state rows
-//                   themselves are stateprobe's business; this arm is for judging one whole state).
+//   POPULATION      (Q27, 2026-09-06) a candidate exists when its runtime enable state resolves ENABLED at load — the
+//                   XESP parent chain through EnableState (the R1 rule) — not when the winning snap's own
+//                   initially-disabled flag happens to be clear. The counterfactual arm the provenance rule rests on
+//                   ("was the intersection there before the later plugin?") resolves its OWN chain too: each element's
+//                   flag at its authoring snap and its XESP as last set outside that plugin's side. Before Q27 the
+//                   winning arm read the flag and the counterfactual read the previous snap's flag, so neither saw a
+//                   switch and Introduced-vs-Inherited could turn on the wrong one.
+//   --state SPEC    another world state (roadmap 4.11): <switch>[,<switch>…] by editor id or FormKey, stage:<quest>:<n>
+//                   (with --switch-map, switchprobe's --json), or baseline — baseline IS the default, named explicitly;
+//                   a flip resolves the same chain with those switches inverted (the state ROWS are stateprobe's
+//                   business; this arm is for judging one whole state).
+//   --flags         the flag-only population, what every run before 2026-09-06 judged. Kept so those numbers can be
+//                   reproduced. Not with --state.
 //   --bos on|off    apply the Base Object Swapper layer (*_SWAP.ini) so every ref is judged by the base the game loads
 //                   (default on; _shared/BosHook.cs); off = the record bases
 
@@ -99,6 +107,7 @@ string? basePath = null;
 string? dumpPath = null;
 string? jsonPath = null;
 bool bosOn = true;
+bool flagsOnly = false;
 var enablePlugins = new List<string>();
 var disablePlugins = new List<string>();
 for (int i = 0; i < args.Length; i++)
@@ -116,7 +125,11 @@ for (int i = 0; i < args.Length; i++)
     else if (args[i] == "--bos" && i + 1 < args.Length) bosOn = BosHook.ParseFlag(args[++i]) ?? throw new ArgumentException("--bos takes on|off");
     else if (args[i] == "--state" && i + 1 < args.Length) stateSpec = args[++i];
     else if (args[i] == "--switch-map" && i + 1 < args.Length) switchMapPath = args[++i];
+    else if (args[i] == "--flags") flagsOnly = true;
 }
+PopulationMode popMode;
+try { popMode = PopulationCli.Resolve("overlapprobe", flagsOnly, stateSpec); }
+catch (ArgumentException ex) { Console.Error.WriteLine(ex.Message); return 2; }
 
 var sw = Stopwatch.StartNew();
 IReadOnlyList<string> paths;
@@ -267,21 +280,27 @@ var meshBoxByPath = new Dictionary<string, Aabb?>(StringComparer.OrdinalIgnoreCa
 // base game — vanilla-vs-mod pairs are excluded by the closure anyway (every mod masters
 // Skyrim.esm), so hashing vanilla-responsible refs would only manufacture same-source pairs
 // nobody asked about. DLC/CC-responsible refs stay in: DLC-on-DLC is the measured Bethesda floor.
-// --state: the world-state arm. The census is read from the same index; a named switch the order does not carry is refused.
+// THE POPULATION (Q27). The default is the load-time state — the same facts the census would give, read through the
+// shared arms so the default run and an explicit `--state baseline` are the same run by construction. --state needs the
+// census as well, because a switch has to be looked up by name and its sets known.
+var arms = new EnableArms(idx);
+EnablePopulation pop;
 if (stateSpec is not null)
 {
     var sx = SwitchIndex.Build(idx);
     sx.NameSwitches(idx.RefEditorId);
     try { stateArm = StateArm.Parse(stateSpec, sx, switchMapPath is null ? null : SwitchMap.Read(switchMapPath)); }
     catch (ArgumentException ex) { Console.Error.WriteLine(ex.Message); return 2; }
-    var stateFacts = stateArm.Wrap(sx.WinnerFacts, sx.Baseline);
-    var stateMemo = new Dictionary<FormKey, EnableResolution>();
-    enabledOf = k => EnableState.Resolve(k, stateFacts, stateMemo).Enabled;
+    arms.State = stateArm.IsBaseline ? null : stateArm;
+    pop = EnablePopulation.Of(arms.WinnerStateFacts, stateArm.Name);
     var changes = stateArm.Changes(sx).ToList();
-    Console.WriteLine($"\nstate {stateArm.Name}: {sx.Switches.Count:N0} switches in the order; {stateArm.Flips.Count} flipped — {changes.Count(c => c.After):N0} refs arrive, {changes.Count(c => !c.After):N0} depart; "
-                    + "every candidate's existence is its runtime enable state under the flip (R1), not the winning flag");
+    Console.WriteLine($"\nstate {stateArm.Name}: {sx.Switches.Count:N0} switches in the order; {stateArm.Flips.Count} flipped — {changes.Count(c => c.After):N0} refs arrive, {changes.Count(c => !c.After):N0} depart");
 }
+else pop = popMode == PopulationMode.Flags ? EnablePopulation.Flags() : EnablePopulation.Of(arms.WinnerRawFacts, EnablePopulation.BaselineStateName);
+// Null in flags mode: Candidates then reads the winning snap's own flag, exactly as it always did.
+enabledOf = pop.Predicate;
 var candidates = idx.Candidates(BoxOf, Obstructing, IsBaseGame, maxDim, out var skips, enabledOf);
+Console.WriteLine("\n" + pop.Describe());
 
 if (dumpPath is not null)
 {
@@ -297,7 +316,7 @@ if (dumpPath is not null)
 
 Console.WriteLine($"\ncandidates: {candidates.Count:N0} refs whose responsible plugin is not the base game");
 Console.WriteLine($"   geometry: {measured:N0} base records measured from the mesh, {fellBack:N0} from OBND (labelled fallback), {noGeometry:N0} with neither");
-Console.WriteLine($"   skipped (counted, per rule 6): {skips.Deleted:N0} deleted, {skips.Disabled:N0} initially-disabled, "
+Console.WriteLine($"   skipped (counted, per rule 6): {skips.Deleted:N0} deleted, {skips.Disabled:N0} not present at load, "
                 + $"{skips.NonObstructingType:N0} non-obstructing type, {skips.NoGeometry:N0} no geometry, {skips.ExcludedResponsible:N0} base-game-responsible,");
 Console.WriteLine($"                                  {skips.Volume:N0} volume-scale (a box axis > {maxDim:0}u — fog, LOD, skydomes; not obstructions), "
                 + $"{skips.MarkerMesh:N0} editor markers (no rendered mesh, cannot obstruct)");
@@ -336,7 +355,9 @@ Console.WriteLine($"   {undeclared.Count(h => PopOf(h) != OverlapPopulation.Beth
 // ---------------------------------------------------------------------------------------
 // Pass 4 — the differential: every cross-responsible deep hit judged for provenance.
 // ---------------------------------------------------------------------------------------
-var rows = sweep.CrossDeep.Select(h => idx.Judge(h, closure, BoxOf, minDepth, minFrac)).ToList();
+// The counterfactual arm resolves its own enable chain (Q27) — in flags mode it stays on the previous snap's own flag,
+// which is what every run before then did.
+var rows = sweep.CrossDeep.Select(h => idx.Judge(h, closure, BoxOf, minDepth, minFrac, popMode == PopulationMode.Flags ? null : arms)).ToList();
 int seenRows = rows.Count(r => r.Sight == OverlapSight.Seen);
 Console.WriteLine($"\n==== PROVENANCE — with vs without the later plugin, and who saw what ({rows.Count:N0} cross-responsible deep hits) ====");
 Console.WriteLine(seenRows == sweep.CrossDeclaredDeep
@@ -464,14 +485,20 @@ if (emitPath is not null)
     {
         new("plugins", paths.Count - unreadablePlugins.Count, new Dictionary<string, long> { ["UnreadablePlugin"] = unreadablePlugins.Count }),
         new("base records (geometry)", measured + fellBack, new Dictionary<string, long> { ["NoGeometry"] = noGeometry }, null, $"OBND fallback (labelled) {fellBack:N0} of the judged"),
-        new("candidate refs", candidates.Count, new Dictionary<string, long> { ["NoGeometry"] = skips.NoGeometry },
-            new Dictionary<string, long> { ["Deleted"] = skips.Deleted, ["InitiallyDisabled"] = skips.Disabled, ["NonObstructingType"] = skips.NonObstructingType,
-                                           ["BaseGameResponsible"] = skips.ExcludedResponsible, ["VolumeScale"] = skips.Volume, ["EditorMarker"] = skips.MarkerMesh }),
+        // The unresolved enable chains join NoGeometry as unjudgeable: a candidate whose chain could not be read to the
+        // end is in the population on EnableState's stated fallback, not on a measurement, and conflictdiff's coverage
+        // test must be able to see that share rise (Q27).
+        new("candidate refs", candidates.Count,
+            new Dictionary<string, long>(pop.Unjudgeable) { ["NoGeometry"] = skips.NoGeometry },
+            new Dictionary<string, long> { ["Deleted"] = skips.Deleted, ["NotPresentAtLoad"] = skips.Disabled, ["NonObstructingType"] = skips.NonObstructingType,
+                                           ["BaseGameResponsible"] = skips.ExcludedResponsible, ["VolumeScale"] = skips.Volume, ["EditorMarker"] = skips.MarkerMesh },
+            $"population {pop.Identity} / state {pop.StateName}"),
         new("cross-responsible deep hits", rows.Count, new Dictionary<string, long>(), null,
             $"class {cls.Count:N0}; {notRebuilt:N0} rows whose previous-snap box could not be rebuilt read Introduced by default (a stated limit)"),
     };
     ConflictIo.Write(emitPath, new ConflictFile("overlapprobe", Instance,
-        DateTime.UtcNow.ToString("yyyy-MM-dd HH:mm:ssZ"), conflicts, coverage, predicates, basePath));
+        DateTime.UtcNow.ToString("yyyy-MM-dd HH:mm:ssZ"), conflicts, coverage, predicates, basePath,
+        pop.Identity, pop.StateName));
     Console.WriteLine($"\nemitted {conflicts.Count:N0} Introduced + Blind conflicts -> {emitPath}");
 }
 

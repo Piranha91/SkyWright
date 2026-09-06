@@ -2201,12 +2201,15 @@ Console.WriteLine("\nPROOF — the band on the physical floor (FloorField; Route
             return null;
         }
         var refs = new[] { marker, dais, slab };
+        var facts = new EnableFactsIndex();
+        foreach (var rr in refs) facts.Note(rr);
         var flagField = FloorFeed.Build(refs, Geo, null, 0f);
-        var r1Field = FloorFeed.Build(refs, Geo, null, 0f, enabled: FloorFeed.LoadTimeEnabled(refs));
+        var r1Field = FloorFeed.Build(refs, Geo, null, 0f, enabled: EnablePopulation.LoadTime(facts).Predicate);
         var fa = flagField.Read(0f, 0f, 0f); var fb = r1Field.Read(0f, 0f, 0f);
         Check("floor feed: by the flag alone the switched-off dais is the floor (48 above a navmesh at 0)", flagField.Candidates == 2 && fa.Found && MathF.Abs(fa.Offset + 48f) < 1e-3f, $"cands {flagField.Candidates} {fa}");
         Check("floor feed: through the load-time chain the dais is gone and the slab under it is the floor (δ 0); the skips counted (the marker itself and the dais through it)", r1Field.Candidates == 1 && r1Field.SkippedDisabled == 2 && fb.Found && MathF.Abs(fb.Offset) < 1e-3f, $"cands {r1Field.Candidates} skipped {r1Field.SkippedDisabled} {fb}");
-        var en = FloorFeed.LoadTimeEnabled(refs);
+        var pop = EnablePopulation.LoadTime(facts);
+        var en = pop.Predicate!;
         Check("floor feed: the resolver — the marker off, the dais off through it, the slab on, a ref it does not hold on", !en(marker.FormKey) && !en(dais.FormKey) && en(slab.FormKey) && en(FormKey.Factory("000999:Test.esp")), "");
     }
     var landField = new FloorField(fallbackOffset: 10.4f);
@@ -2798,6 +2801,7 @@ BosProof.Run(Check);
 StateProof.Run(Check);
 NifChainProof.Run(Check);
 MaterialScaleProof.Run(Check);
+PopulationProof.Run(Check);
 
 Console.WriteLine();
 Console.WriteLine($"==== {pass} passed, {fail} failed ====");

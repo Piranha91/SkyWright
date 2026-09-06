@@ -361,7 +361,9 @@ if (emitPath is not null)
         new("edge-adjacent pairs", seams.Count + 0, new Dictionary<string, long>(), null,
             $"seam {seamRows.Count:N0}; inherited {seams.Count(s => s.Verdict == WaterSeamVerdict.Inherited):N0}; joined {seams.Count(s => s.Verdict == WaterSeamVerdict.Joined):N0} (pairs with no disagreement in either arm are not listed)"),
     };
-    ConflictIo.Write(emitPath, new ConflictFile("waterprobe", Instance, DateTime.UtcNow.ToString("yyyy-MM-dd HH:mm:ssZ"), conflicts, coverage, predicates, basePath));
+    // CELL water records carry no placed references, so no enable population applies; said rather than left null.
+    ConflictIo.Write(emitPath, new ConflictFile("waterprobe", Instance, DateTime.UtcNow.ToString("yyyy-MM-dd HH:mm:ssZ"), conflicts, coverage, predicates, basePath,
+                                                "n/a (CELL water records; no placed-reference population)", "n/a"));
     Console.WriteLine($"\nemitted {conflicts.Count:N0} rows ({missing.Count:N0} WATER-MISSING, {seamRows.Count:N0} WATER-SEAM) -> {emitPath}");
 }
 

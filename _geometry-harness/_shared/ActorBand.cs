@@ -123,16 +123,21 @@ internal static class ActorBand
         return (ScaleOneHeight * bestH, $"tallest playable race {best.EditorId ?? "?"} x{bestH:0.###} = {ScaleOneHeight * bestH:0} u");
     }
 
-    /// <summary>The band top for one cell: the tallest placed actor's head height, else the fallback.</summary>
+    /// <summary>The band top for one cell: the tallest placed actor's head height, else the fallback.
+    /// <paramref name="enabled"/>: the run's population (<c>EnablePopulation.Predicate</c>) — the load-time enable chain
+    /// by default since Q27, a state arm's under <c>--state</c>. NULL is the flag population, what every run before then
+    /// judged. It matters: an actor placed as a switch child is in the room only in the states its marker is on for, and
+    /// before Q27 the band was on the flag even inside a state arm.</summary>
     public static (float Top, int Actors, int Templated, string Source) ForCell(
         IEnumerable<PlacedRef> refs, Dictionary<FormKey, NpcFacts> npcs, Dictionary<FormKey, RaceFacts> races,
-        float fallbackTop, string fallbackSource)
+        float fallbackTop, string fallbackSource, Func<FormKey, bool>? enabled = null)
     {
         float best = 0f; int actors = 0, templated = 0; string who = "";
         foreach (var r in refs)
         {
             if (r.RecordType != "PlacedNpc" || r.Base is not { } bk || !npcs.TryGetValue(bk, out var n)) continue;
-            if (r.InitiallyDisabled || r.Deleted) continue;
+            if (r.Deleted) continue;
+            if (enabled is null ? r.InitiallyDisabled : !enabled(r.FormKey)) continue;
             actors++;
             if (n.Templated) templated++;
             if (!races.TryGetValue(n.Race, out var rc))

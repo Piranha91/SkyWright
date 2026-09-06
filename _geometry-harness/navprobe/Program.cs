@@ -11,7 +11,17 @@ using Mutagen.Bethesda.Skyrim;
 // objects and the navmesh together, so every hit is by definition a false positive.
 // That rate is the noise floor, and no threshold is worth using until it is near zero.
 //
-// usage: navprobe [maxCells] [--dump dir] [--geometry collision|render] [--bos on|off]
+// usage: navprobe [maxCells] [--dump dir] [--geometry collision|render] [--bos on|off] [--flags]
+//   POPULATION (Q27, 2026-09-06): the floor this run measures is VANILLA — Skyrim.esm's own placements against
+//              Skyrim.esm's own navmesh — and it stays that. What changed is WHICH of those placements count as
+//              present: the load-time enable state, resolved over Skyrim.esm's own placements alone (EnableState, R1),
+//              rather than each record's initially-disabled flag. Bethesda's own switches (915 of them over 27,849
+//              members) put a lot of the world behind a marker that is off when the cell loads, and a reference that is
+//              not there cannot obstruct anything. The source population is unchanged, so this is still the vanilla
+//              floor and not an active-order one.
+//   --flags    the flag-only population, what every run before 2026-09-06 measured. Kept so those floors can be
+//              reproduced. --state is NOT taken here: a named world state needs the switch census over the whole order,
+//              and a calibration must not quietly become an active-order run.
 //   --dump writes the flagged reference keys per narrow rule, one file each — a diagnostic for comparing two
 //   runs ref by ref (which verdicts moved under a transform change), not part of the report.
 //   --geometry which triangle soup the narrow rules run on (default collision, since 2026-09-02 — roadmap 4.7 Part A):
@@ -40,14 +50,21 @@ string? dumpDir = null;
 string geometrySource = "collision";
 bool controllerBand = true;   // --band controller|nominal: the route rules' band top (the surface rules keep the nominal, as every run before)
 bool bosOn = true;
+bool flagsOnly = false;
+string? stateSpec = null;
 for (int i = 0; i < args.Length; i++)
 {
     if (args[i] == "--dump" && i + 1 < args.Length) dumpDir = args[++i];
     else if (args[i] == "--geometry" && i + 1 < args.Length) geometrySource = args[++i];
     else if (args[i] == "--band" && i + 1 < args.Length) controllerBand = args[++i] != "nominal";
     else if (args[i] == "--bos" && i + 1 < args.Length) bosOn = BosHook.ParseFlag(args[++i]) ?? throw new ArgumentException("--bos takes on|off");
+    else if (args[i] == "--flags") flagsOnly = true;
+    else if (args[i] == "--state" && i + 1 < args.Length) stateSpec = args[++i];
 }
 if (geometrySource is not ("collision" or "render")) { Console.Error.WriteLine("--geometry must be collision or render"); return 1; }
+PopulationMode popMode;
+try { popMode = PopulationCli.Resolve("navprobe", flagsOnly, stateSpec, stateSupported: false); }
+catch (ArgumentException ex) { Console.Error.WriteLine(ex.Message); return 2; }
 Console.WriteLine($"geometry source: {geometrySource}" + (geometrySource == "collision" ? $"  (actor-solid layers: {string.Join(", ", CollisionLayers.ActorSolid)})" : ""));
 
 var sw = Stopwatch.StartNew();
@@ -77,12 +94,20 @@ Console.WriteLine($"vanilla base records with a mesh: {baseMesh.Count:N0}  ({sw.
 sw.Restart();
 var floorRefsByWorld = new Dictionary<FormKey, Dictionary<(int, int), Dictionary<FormKey, PlacedRef>>>();
 var floorLandByWorld = new Dictionary<FormKey, Dictionary<(int, int), float[,]>>();
+// The population (Q27): the enable facts of Skyrim.esm's OWN placements — the same source the sweep judges, so the
+// vanilla floor stays vanilla. A parent chain crosses cells (Tamriel's persistent cell holds 888 vanilla switches), so
+// the facts are collected over every cell before any of them is read.
+var enableFacts = new EnableFactsIndex();
+foreach (var rec in mod.EnumerateMajorRecords()) if (rec is IPlacedGetter dpg && dpg.IsDeleted) enableFacts.NoteDeleted(dpg.FormKey);
 foreach (var cp in PlacementExtract.FromMod(mod))
 {
+    foreach (var r in cp.Refs) enableFacts.Note(r);
     if (cp.Interior) continue;
     if (!floorRefsByWorld.TryGetValue(cp.Worldspace, out var frg)) { floorRefsByWorld[cp.Worldspace] = frg = new(); floorLandByWorld[cp.Worldspace] = new(); }
     FloorFeed.FileByGrid(cp, frg, floorLandByWorld[cp.Worldspace]);
 }
+var pop = popMode == PopulationMode.Flags ? EnablePopulation.Flags(enableFacts) : EnablePopulation.LoadTime(enableFacts);
+Func<FormKey, bool>? enabledOf = pop.Predicate;
 Console.WriteLine($"floor candidates filed by grid: {floorRefsByWorld.Values.Sum(w => w.Values.Sum(d => d.Count)):N0} exterior refs, {floorLandByWorld.Values.Sum(w => w.Count):N0} LAND records in {floorRefsByWorld.Count} worldspaces  ({sw.Elapsed.TotalSeconds:0.0}s)");
 var floorTally = new FloorFeed.Tally();
 
@@ -292,7 +317,7 @@ foreach (var cp in PlacementExtract.FromMod(mod))
     navTris += index.TriangleCount;
     if (index.TriangleCount == 0) continue;
 
-    var band = ActorBand.ForCell(cp.Refs, npcFacts, raceFacts, fallbackTop, fallbackSrc);
+    var band = ActorBand.ForCell(cp.Refs, npcFacts, raceFacts, fallbackTop, fallbackSrc, enabledOf);
     if (!float.IsFinite(band.Top)) { Console.WriteLine($"UNJUDGEABLE actor band in {cp.Cell}: {band.Source}"); continue; }
     float bandTop = band.Top;
     float physicalTop = controllerBand ? ActorBand.PhysicalControllerTop(bandTop) : bandTop;
@@ -302,9 +327,9 @@ foreach (var cp in PlacementExtract.FromMod(mod))
     if (!cp.Interior && cp.Grid is { } floorGrid && floorRefsByWorld.TryGetValue(cp.Worldspace, out var frw))
     {
         var (nbRefs, nbLand) = FloorFeed.Neighbourhood(floorGrid, frw, floorLandByWorld[cp.Worldspace]);
-        floor = FloorFeed.Build(nbRefs, FloorGeometry, nbLand);
+        floor = FloorFeed.Build(nbRefs, FloorGeometry, nbLand, enabled: enabledOf);
     }
-    else floor = FloorFeed.Build(cp.Refs, FloorGeometry, null);
+    else floor = FloorFeed.Build(cp.Refs, FloorGeometry, null, enabled: enabledOf);
     Dictionary<NavGraph.TriRef, NavGraph.Node>? gnodes = null;   // the cell's walkable graph, built once when a route needs it
     if (band.Actors > 0) cellsWithActors++;
     bandMin = MathF.Min(bandMin, bandTop); bandMax = MathF.Max(bandMax, bandTop);
@@ -319,7 +344,8 @@ foreach (var cp in PlacementExtract.FromMod(mod))
         // looked up in the ORDER's winning models (it may be defined anywhere); an unswapped one in Skyrim.esm's, the
         // floor's standing population.
         var eff = bos.Effective(r, cp.Cell, bosRep);
-        if (eff.InitiallyDisabled) { skippedDisabled++; continue; }
+        // The run's population, and the swap layer's own disable on top of it (a BOS override that disables at init).
+        if (enabledOf is null ? eff.InitiallyDisabled : (!enabledOf(r.FormKey) || eff.InitiallyDisabled)) { skippedDisabled++; continue; }
         if (r.Base is null || !(eff.Swapped ? orderBaseMesh : baseMesh).TryGetValue(eff.Base, out var bm)) { skippedNoGeo++; continue; }
 
         var g = Geometry(bm.Mesh);
@@ -453,7 +479,8 @@ Console.WriteLine($"\n==== VANILLA FALSE-POSITIVE FLOOR ====");
 Console.WriteLine($"cells with navmesh + refs : {cells:N0}");
 Console.WriteLine($"navmesh triangles indexed : {navTris:N0}   (malformed vertex index: {malformedTotal:N0})");
 Console.WriteLine($"placed refs seen          : {totalRefs:N0}");
-Console.WriteLine($"  skipped, initially disabled/deleted : {skippedDisabled:N0}");
+Console.WriteLine($"  skipped, not present at load/deleted: {skippedDisabled:N0}");
+Console.WriteLine($"  {pop.Describe()}");
 Console.WriteLine($"  skipped, no usable geometry         : {skippedNoGeo:N0}");
 Console.WriteLine($"  skipped, no actor-solid collision   : {skippedNoSolid:N0}   (collision mode only: the object blocks nothing)");
 Console.WriteLine($"actor band                : cells with placed actors {cellsWithActors:N0}; top {(bandMin == float.MaxValue ? 0 : bandMin):0}..{bandMax:0} u; fallback {fallbackSrc}");

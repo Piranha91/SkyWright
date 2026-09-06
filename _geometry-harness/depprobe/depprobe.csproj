@@ -11,6 +11,9 @@
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="..\..\src\housecarl-core\housecarl-core.csproj" />
+    <Compile Include="..\_shared\EnablePopulation.cs" Link="EnablePopulation.cs" />
+    <Compile Include="..\_shared\StateArm.cs" Link="StateArm.cs" />
+    <Compile Include="..\_shared\EnableArms.cs" Link="EnableArms.cs" />
   </ItemGroup>
   <ItemGroup>
     <Compile Include="..\_shared\HarnessTarget.cs" Link="HarnessTarget.cs" />

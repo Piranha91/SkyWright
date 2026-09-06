@@ -10,6 +10,9 @@
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="..\..\src\housecarl-core\housecarl-core.csproj" />
+    <Compile Include="..\_shared\EnablePopulation.cs" Link="EnablePopulation.cs" />
+    <Compile Include="..\_shared\EnableArms.cs" Link="EnableArms.cs" />
+    <Compile Include="..\_shared\ConflictReport.cs" Link="ConflictReport.cs" />
   </ItemGroup>
   <ItemGroup>
     <Compile Include="..\_shared\FomodModel.cs" Link="FomodModel.cs" />

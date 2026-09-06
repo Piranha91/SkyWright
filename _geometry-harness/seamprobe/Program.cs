@@ -278,7 +278,9 @@ if (emitPath is not null)
         new("edge-adjacent pairs", pairs.Count(p => p.Verdict != LandSeamVerdict.Unjudgeable), new Dictionary<string, long> { ["Undecodable"] = pairs.Count(p => p.Verdict == LandSeamVerdict.Unjudgeable) },
             new Dictionary<string, long> { ["BethesdaFloor"] = pairs.Count(p => p.BothBethesda) }, $"class {cls.Count:N0} at eps {eps:0.#}"),
     };
-    ConflictIo.Write(emitPath, new ConflictFile("seamprobe", Instance, DateTime.UtcNow.ToString("yyyy-MM-dd HH:mm:ssZ"), conflicts, coverage, predicates, basePath));
+    // LAND heightmaps carry no placed references, so no enable population applies; said rather than left null.
+    ConflictIo.Write(emitPath, new ConflictFile("seamprobe", Instance, DateTime.UtcNow.ToString("yyyy-MM-dd HH:mm:ssZ"), conflicts, coverage, predicates, basePath,
+                                                "n/a (LAND heightmaps; no placed-reference population)", "n/a"));
     Console.WriteLine($"\nemitted {conflicts.Count:N0} LAND-SEAM rows -> {emitPath}");
 }
 

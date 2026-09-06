@@ -61,9 +61,12 @@ public sealed class StateTally
     public double ElapsedMs;
 }
 
-/// <summary>The probe's route measurement for one reference — the route-cut verdict of its obstacle (its actor-solid
-/// collision, or its navcut box) against its cell's winning navmesh — or null when it cannot be measured, with why.</summary>
-public delegate RouteCutVerdict? RouteAsk(FormKey key, bool navcut, out string why);
+/// <summary>The probe's route measurement for one reference IN ONE STATE — the route-cut verdict of its obstacle (its
+/// actor-solid collision, or its navcut box) against its cell's winning navmesh — or null when it cannot be measured,
+/// with why. The arm is a parameter (Q27, 2026-09-06) because the floor the band stands on and the band's own top
+/// belong to the state being judged: a flip can bring in a floor piece or a taller actor, and measuring an arriving
+/// obstacle against the baseline's floor mixes two worlds.</summary>
+public delegate RouteCutVerdict? RouteAsk(StateArm arm, FormKey key, bool navcut, out string why);
 
 public sealed class StateEvaluator
 {
@@ -83,7 +86,7 @@ public sealed class StateEvaluator
     [Flags] enum Role { None = 0, Obstructing = 1, Dependent = 2, Physical = 4, Host = 8, Navcut = 16 }
     readonly BoxHash<FormKey> _boxes = new();
     readonly Dictionary<FormKey, (Aabb Box, Role Role, FormKey Base)> _facts = new();
-    readonly Dictionary<FormKey, (RouteCutVerdict? V, string Why)> _routeMemo = new();
+    readonly Dictionary<(string Arm, FormKey Key), (RouteCutVerdict? V, string Why)> _routeMemo = new();
     public int Boxed => _facts.Count;
     public int BoxedNoGeometry, BoxedMarkers, BoxedFxVolumes;
 
@@ -197,7 +200,9 @@ public sealed class StateEvaluator
             if (Route is not null && ((f.Role & Role.Navcut) != 0 || (f.Role & Role.Physical) != 0))
             {
                 bool navcut = (f.Role & Role.Navcut) != 0;
-                if (!_routeMemo.TryGetValue(key, out var rm)) { var v0 = Route(key, navcut, out var w0); _routeMemo[key] = rm = (v0, w0); }
+                // Memoised per (state, reference): the same reference measured in two different states can differ, because
+                // each state has its own floor and band (Q27). Before then the memo was keyed on the reference alone.
+                if (!_routeMemo.TryGetValue((arm.Name, key), out var rm)) { var v0 = Route(arm, key, navcut, out var w0); _routeMemo[(arm.Name, key)] = rm = (v0, w0); }
                 tally.RouteAsked++;
                 if (rm.V is null || rm.V == RouteCutVerdict.Unjudgeable) tally.RouteUnjudged++;
                 else if (rm.V == RouteCutVerdict.NoLine) tally.RouteNoLine++;

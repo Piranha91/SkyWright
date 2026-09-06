@@ -317,6 +317,11 @@ gitignored for the same reason: probe transcripts name the plugins of whatever l
   read as fully accounted for. This is a record-derived runtime estimate. The Temple census
   (`1,257` parent-disabled refs, none admitted) has not been independently toggled or observed in
   game, so it is accounting evidence, not an in-game proof that every one stays disabled.
+  **The rest of the suite now agrees with the renderer (Q27, 2026-09-06).** Until then viewprobe and
+  the placement-contact pass resolved this chain while the obstacle, floor, actor-band and overlap
+  populations read the record's own flag; the default population of every physical read is now the
+  load-time chain, the old flag-only population is `--flags` on the probes that used to default to it,
+  and `viewprobe --flags` is REFUSED — a flag-only scene would draw a room the game never shows.
 - **A profile-local `Skyrim.ini` is REQUIRED** in each profile — archive discovery reads its
   `[Archive]` lists. Without it the base-game texture BSAs are invisible and renders silently lose
   all textures.

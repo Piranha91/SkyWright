@@ -31,7 +31,16 @@ using Mutagen.Bethesda.Skyrim;
 //
 // usage: navownprobe [--list N] [--plugin Name.esp] [--emit out.json] [--base emit.json] [--enable X.esp]
 //                    [--disable X.esp] [--door-idx] [--reach-candidates] [--reach-json out.json]
-//                    [--reach-top N] [--reach-witness]
+//                    [--reach-top N] [--reach-witness] [--flags]
+//
+//   POPULATION (Q27, 2026-09-06): the two PHYSICAL populations here — the obstructing references UNCUT counts, and the
+//                    placed actors and package anchors the needs-witness join calls witnesses — are the LOAD-TIME state:
+//                    a reference counts when EnableState resolves its XESP parent chain enabled, not when its own
+//                    initially-disabled flag happens to be clear. Before Q27 UNCUT read the flag, and a witness with ANY
+//                    enable parent counted as live whatever that parent's own state was. The navmesh ownership half —
+//                    who supplied what, and whose edit was discarded — is a RECORD census and is not filtered: a plugin's
+//                    navmesh work is its work whether or not the room is switched on today.
+//   --flags          the flag-only population, what every run before 2026-09-06 judged.
 //
 //   --base emit.json re-measure every record of that emit's rows under THIS order and carry the results in
 //                    the emit as Predicates — the changed arm of a differential (conflictdiff reads both).
@@ -71,6 +80,7 @@ bool reachCandidates = false;
 bool reachWitness = false;
 string? reachJsonPath = null;
 int reachTopN = 20;           // survivors exported per record per direction in --reach-json
+bool flagsOnly = false; string? stateSpec = null;
 int listN = 25;
 string? onlyPlugin = null;
 string? emitPath = null;
@@ -79,6 +89,8 @@ var enablePlugins = new List<string>();
 var disablePlugins = new List<string>();
 for (int i = 0; i < args.Length; i++)
 {
+    if (args[i] == "--flags") { flagsOnly = true; continue; }
+    if (args[i] == "--state" && i + 1 < args.Length) { stateSpec = args[++i]; continue; }
     if (args[i] == "--list" && i + 1 < args.Length) listN = int.Parse(args[++i]);
     else if (args[i] == "--plugin" && i + 1 < args.Length) onlyPlugin = args[++i];
     else if (args[i] == "--emit" && i + 1 < args.Length) emitPath = args[++i];
@@ -91,6 +103,9 @@ for (int i = 0; i < args.Length; i++)
     else if (args[i] == "--reach-top" && i + 1 < args.Length) reachTopN = int.Parse(args[++i]);
     else if (args[i] == "--reach-witness") { reachCandidates = true; reachWitness = true; }
 }
+PopulationMode popMode;
+try { popMode = PopulationCli.Resolve("navownprobe", flagsOnly, stateSpec, stateSupported: false); }
+catch (ArgumentException ex) { Console.Error.WriteLine(ex.Message); return 2; }
 
 var sw = Stopwatch.StartNew();
 var comp = Mo2LoadOrder.ReadComposition(profileDir);
@@ -140,6 +155,12 @@ var navSize = new Dictionary<(FormKey, int), (int V, int T, int H)>();
 var navDeleted = new Dictionary<(FormKey, int), bool>();
 var cellNavPlugins = new Dictionary<FormKey, SortedSet<int>>();           // cell -> plugins supplying navmesh
 var cellNewRefs = new Dictionary<(FormKey Cell, int Plugin), List<FormKey>>();   // base records a plugin INTRODUCES
+// The enable facts of every placement in the order, and the UNCUT candidates BEFORE any enable filter — the winning
+// enable state of a reference is not known until every plugin has been read, so the filter is applied after the walk
+// rather than during it (Q27). Before then the walk filtered on the record's own flag as it went, which could not see a
+// parent an override enabled or disabled later.
+var enableFacts = new EnableFactsIndex();
+var uncutCandidates = new List<(FormKey Cell, int Plugin, FormKey Ref, FormKey Base)>();
 var cellName = new Dictionary<FormKey, (string? Edid, bool Interior)>();
 // A cell's spatial identity, for the reach pass: an exterior candidate near a cell border can be
 // rescued by the NEIGHBOUR cell's mesh, so "nearby coverage" must span the ±1 grid ring.
@@ -253,19 +274,33 @@ for (int p = 0; p < paths.Count; p++)
 
             foreach (var r in cp.Refs)
             {
-                if (r.InitiallyDisabled || r.Deleted) continue;
+                enableFacts.Note(r);
+                if (r.Deleted) continue;
                 if (r.FormKey.ModKey != mod.ModKey) continue;                  // an override is not an introduction
                 if (r.Base is not { } bk) continue;
-                if (!baseType.TryGetValue(bk, out var bt) || !Obstructing.Contains(bt)) continue;
-                if (!cellNewRefs.TryGetValue((cp.Cell, p), out var bag)) cellNewRefs[(cp.Cell, p)] = bag = new List<FormKey>();
-                bag.Add(bk);
+                uncutCandidates.Add((cp.Cell, p, r.FormKey, bk));
             }
         }
     }
     if ((p + 1) % 150 == 0) Console.WriteLine($"   ... {p + 1}/{paths.Count} plugins, {sw.Elapsed.TotalSeconds:0}s");
 }
 
+// The UNCUT population, once every plugin has spoken: an obstructing base, and the reference present at load under the
+// run's population (Q27). The base type could not be tested during the walk either — a later plugin can define the base.
+var pop = flagsOnly ? EnablePopulation.Flags(enableFacts) : EnablePopulation.LoadTime(enableFacts);
+long uncutSkippedAbsent = 0, uncutSkippedType = 0;
+foreach (var (cell, plugin, refKey, baseKey) in uncutCandidates)
+{
+    if (!baseType.TryGetValue(baseKey, out var bt) || !Obstructing.Contains(bt)) { uncutSkippedType++; continue; }
+    if (!pop.Enabled(refKey)) { uncutSkippedAbsent++; continue; }
+    if (!cellNewRefs.TryGetValue((cell, plugin), out var bag)) cellNewRefs[(cell, plugin)] = bag = new List<FormKey>();
+    bag.Add(baseKey);
+}
+
 Console.WriteLine($"\nindexed {navProviders.Count:N0} navmesh records across {cellNavPlugins.Count:N0} cells  ({sw.Elapsed.TotalSeconds:0.0}s)");
+Console.WriteLine($"   {pop.Describe()}");
+Console.WriteLine($"   UNCUT candidates: {uncutCandidates.Count:N0} introduced references — {uncutSkippedType:N0} of a non-obstructing type, "
+                + $"{uncutSkippedAbsent:N0} not present at load, {cellNewRefs.Values.Sum(b => b.Count):N0} counted");
 Console.WriteLine($"   plugins that could not be read (contribute nothing, counted per rule 6): {unreadablePlugins.Count:N0}"
                 + (unreadablePlugins.Count > 0 ? "  — " + string.Join(", ", unreadablePlugins) : ""));
 
@@ -521,11 +556,16 @@ if (reachCandidates)
     if (reachWitness)
     {
         var wantedCells = pool.SelectMany(c => NearbyCells(navCell[c.Nav])).ToHashSet();
-        census = NeedsWitnessJoin.Build(paths, wantedCells);
+        census = NeedsWitnessJoin.Build(paths, wantedCells, popMode == PopulationMode.Flags);
         Console.WriteLine($"   witness census: {census.RefsSeen:N0} placed refs in {wantedCells.Count:N0} cells (pool + ring), "
                         + $"{census.Packs.Count:N0} packages, {census.NpcPackages.Count:N0} NPC records, {census.NpcPlacedAnywhere.Count:N0} placed somewhere"
                         + (census.UnreadablePlugins > 0 ? $"; {census.UnreadablePlugins} plugins unreadable (counted per rule 6)" : "")
                         + $"  ({sw.Elapsed.TotalSeconds:0.0}s)");
+        Console.WriteLine(popMode == PopulationMode.Flags
+            ? "   population: FLAGS — a witness is judged by its own initially-disabled flag and no chain is resolved, so a "
+              + "witness whose marker is off at load still counts (the pre-Q27 reading, kept for reproducing an old number)"
+            : $"   of those, {census.RefsAbsentAtLoad:N0} are not in the world when the cell loads (their enable chain says so) "
+              + $"and {census.RefsChainUnresolved:N0} rest on a chain that could not be read to the end — a witness there is counted, not trusted");
     }
 
     int geomMissing = 0, recordsVictim = 0, recordsVictimWellClear = 0, recordsMirrorOnly = 0;
@@ -1158,11 +1198,18 @@ if (emitPath is not null)
             $"Holds {predicateTally.GetValueOrDefault(PhysicalState.Holds):N0}, Gone {predicateTally.GetValueOrDefault(PhysicalState.Gone):N0} (a Gone row: a declared-dependency clobber with no coverage loss beyond {ReachClearance:0}u)"),
         new("dangling-link checks", doorTriChecked + doorLinkChecked + edgeChecked, new Dictionary<string, long>(),
             new Dictionary<string, long> { ["PermanentlyDisabledDoor"] = permanentlyDisabledDoors, ["DoorIdxRetired"] = doorIdxSuppressed, ["FloorDangles"] = floorDangles }),
+        // The physical population this run judged, with the chains it could not read to the end counted as
+        // unjudgeable — conflictdiff's coverage test must be able to see that share rise (Q27).
+        new("obstructing refs (UNCUT population)", cellNewRefs.Values.Sum(b => b.Count),
+            new Dictionary<string, long>(pop.Unjudgeable),
+            new Dictionary<string, long> { ["NotPresentAtLoad"] = uncutSkippedAbsent, ["NonObstructingType"] = uncutSkippedType },
+            $"population {pop.Identity} / state {pop.StateName}"),
     };
     coverage.AddRange(coverageExtra);
 
     ConflictIo.Write(emitPath, new ConflictFile("navownprobe", Instance,
-        DateTime.UtcNow.ToString("yyyy-MM-dd HH:mm:ssZ"), conflicts, coverage, predicates, basePath));
+        DateTime.UtcNow.ToString("yyyy-MM-dd HH:mm:ssZ"), conflicts, coverage, predicates, basePath,
+        pop.Identity, pop.StateName));
     Console.WriteLine($"\nemitted {conflicts.Count:N0} conflicts ({conflicts.Count(c => c.B.Length == 0)} with no second party to name;"
                     + $" {floorDangles} class-A dangles and the class-A clobbers withheld as floor;"
                     + $" clobber predicates Holds {predicateTally.GetValueOrDefault(PhysicalState.Holds)} / Gone {predicateTally.GetValueOrDefault(PhysicalState.Gone)} / Unmeasured {predicateTally.GetValueOrDefault(PhysicalState.Unmeasured)}) -> {emitPath}");

@@ -240,9 +240,10 @@ public sealed class OverlapIndex
     /// is not an editor marker (the engine renders no marker mesh, so a marker cannot obstruct anything), and whose
     /// world box is no larger than <paramref name="maxDim"/> on any axis (volumes — fog, LOD, skydomes — overlap
     /// everything by design).</summary>
-    /// <param name="enabledOf">the runtime enable state per reference — a world-state arm (EnableState under
-    /// StateArm.Wrap, roadmap 4.11). Null reads the winning snap's own flag, the population every run before 2026-09-04
-    /// judged, byte for byte.</param>
+    /// <param name="enabledOf">the run's population — <c>EnablePopulation.Predicate</c>: the load-time enable chain
+    /// by default since Q27 (2026-09-06), a world-state arm's under <c>--state</c> (EnableState under StateArm.Wrap,
+    /// roadmap 4.11). NULL reads the winning snap's own flag, the population every run before Q27 judged, byte for
+    /// byte — what <c>--flags</c> asks for.</param>
     public List<OverlapCandidate> Candidates(Func<FormKey, (Aabb Box, char Src)> boxOf, ISet<string> obstructing,
                                              Func<int, bool> excludeResponsible, float maxDim, out CandidateSkips skips,
                                              Func<FormKey, bool>? enabledOf = null)
@@ -339,18 +340,28 @@ public sealed class OverlapIndex
 
     /// <summary>Assemble the rule's facts for one cross-responsible hit and decide it. The LATER of the two responsible
     /// plugins is L (plugin indices are load-order positions). The arm without L is L's reference at its previous
-    /// snap: absent if L introduced it; not rebuildable if that snap was disabled, deleted, or in another space; else
-    /// its box under the same base record's geometry, tested against the other reference's WINNING box at the run's
-    /// threshold. The base record is the winner's — an override that also swapped the base is a stated limit.</summary>
+    /// snap: absent if L introduced it; not rebuildable if that snap was deleted, not there in the arm without L, or in
+    /// another space; else its box under the same base record's geometry, tested against the other reference's WINNING
+    /// box at the run's threshold. The base record is the winner's — an override that also swapped the base is a stated
+    /// limit.
+    ///
+    /// <para><paramref name="arms"/> (Q27, 2026-09-06): the arm's own enable chain. Without it the counterfactual reads
+    /// the previous snap's initially-disabled FLAG while the winning population goes through the chain — a winning-state
+    /// answer standing in for a historical one, and it decides Introduced against Inherited, which is the class. With it,
+    /// "present in the arm without L" is <see cref="EnableArms.Without"/>: each chain element's flag at its authoring
+    /// snap and its XESP as last set outside L's side. The POSITION in that arm is still <c>snaps[^2]</c>, 4.1's stated
+    /// simplification — where L placed the reference more than once the two halves come from different snaps, and that
+    /// limit is 4.1's, not something this pairing introduces.</para></summary>
     public OverlapRow Judge(OverlapHit hit, IReadOnlyList<HashSet<int>> closure, Func<FormKey, (Aabb Box, char Src)> boxOf,
-                            float minDepth, float minFrac)
+                            float minDepth, float minFrac, EnableArms? arms = null)
     {
         var (later, other) = hit.A.Win.Plugin > hit.B.Win.Plugin ? (hit.A, hit.B) : (hit.B, hit.A);
         int L = later.Win.Plugin;
         var snaps = History.Of(later.Key)!;
         Snap? prev = snaps.Count >= 2 ? snaps[^2] : null;
         bool hadPrev = prev is not null;
-        bool prevPresent = prev is { Deleted: false, Disabled: false } p && p.Space == other.Win.Space;
+        bool prevPresent = prev is { Deleted: false } p && p.Space == other.Win.Space
+                        && (arms is null ? !p.Disabled : arms.Without(later.Key, L, closure).Enabled);
         float wDepth = float.NaN, wFrac = float.NaN;
         bool withoutDeep = false;
         if (prevPresent)

@@ -544,6 +544,14 @@ for (int i = argStart; i < args.Length; i++)
         if (bosMode == "diff") textured = true;
     }
     else if (args[i] == "--state" && i + 1 < args.Length) { stateSpec = args[++i]; textured = true; }
+    // --flags is refused rather than added (Q27): the renderer has drawn the load-time enable chain since 2026-08-28,
+    // and a flag-only scene would draw a room the game never shows.
+    else if (args[i] == "--flags")
+    {
+        try { HarnessShared.PopulationCli.Resolve("viewprobe", true, null, flagsSupported: false); }
+        catch (ArgumentException ex) { Console.Error.WriteLine(ex.Message); }
+        return 2;
+    }
     else if (args[i] == "--state-view" && i + 1 < args.Length)
     {
         stateView = args[++i].ToLowerInvariant();

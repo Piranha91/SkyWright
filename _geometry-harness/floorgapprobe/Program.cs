@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Globalization;
 using System.Numerics;
+using HarnessShared;
 using HousecarlCore;
 using Mutagen.Bethesda.Plugins;
 using Mutagen.Bethesda.Skyrim;
@@ -41,9 +42,14 @@ using Mutagen.Bethesda.Skyrim;
 //             plugin's ref or navmesh of the same FormKey replacing an earlier one — blockprobe's walk — so the navmesh
 //             AND the floor candidates are the winning state, the floor the route rule stands on. Without it the one
 //             --plugin supplies both (that plugin's own navmesh against its own refs). cell / line / points only.
-//   --flags   floor candidates by the record's initially-disabled flag alone (the route rule's default population). The
-//             default here resolves the load-time enable CHAIN (R1): a switch child whose marker is disabled at load is not
-//             a floor — Q25: a room variant switched off at load had read as the floor 48 u over a whole room.
+//   --flags   floor candidates by the record's initially-disabled flag alone — the population every run before
+//             2026-09-06 judged, kept so those numbers can be reproduced. The default resolves the load-time enable
+//             CHAIN (R1): a switch child whose marker is disabled at load is not a floor — Q25: a room variant switched
+//             off at load had read as the floor 48 u over a whole room. Since Q27 the chain's facts come from every
+//             plugin walked, not just the refs of the cell being read, so a marker in the worldspace's PERSISTENT cell
+//             (or in any other cell) governs its children correctly instead of resolving unread.
+//   --state   not taken: floorgapprobe reads one source (a --plugin, or the winning order under --winning) and carries no
+//             switch census to flip. Its default IS the load-time state of that source.
 //   Every line / points row names the floor's SUPPLIER — the placed object whose surface the reading came from, with its
 //   base's model — because a floor laid over the winning navmesh is only actionable once the object laying it is named.
 //   Refs are the plugin's placements (persistent ones included, bucketed by position); an exterior cell's navmesh is
@@ -81,6 +87,11 @@ for (int i = 0; i < args.Length; i++)
         case "--span": span = float.Parse(Next(), CultureInfo.InvariantCulture); break;
         case "--every": every = float.Parse(Next(), CultureInfo.InvariantCulture); break;
         case "--at": { var p = Next().Split(','); at = new Vec3(F(p[0]), F(p[1]), p.Length > 2 ? F(p[2]) : -99999f); break; }
+        // --state is refused rather than ignored: this probe reads one source and has no census to flip.
+        case "--state":
+            try { PopulationCli.Resolve("floorgapprobe", false, Next(), stateSupported: false); }
+            catch (ArgumentException ex) { Console.Error.WriteLine(ex.Message); }
+            return 2;
         default:
             if (a.StartsWith("--")) { Console.Error.WriteLine($"unknown flag {a}"); return 2; }
             positional.Add(a); break;
@@ -127,6 +138,10 @@ else
     walk.Add(pluginPath);
 }
 var baseMesh = new Dictionary<FormKey, (string Mesh, string Type)>();
+// The enable facts of every placement the walk sees (Q27): a floor candidate's enable parent is often in another cell —
+// a worldspace's persistent cell holds the markers — and resolving the chain over one cell's own refs answered "enabled,
+// unresolved" for those. Gathered here, used by the population below.
+var enableFacts = new EnableFactsIndex();
 var worldName = new Dictionary<FormKey, string>();
 var refsByWorld = new Dictionary<FormKey, Dictionary<(int, int), Dictionary<FormKey, PlacedRef>>>();
 var landByWorld = new Dictionary<FormKey, Dictionary<(int, int), float[,]>>();
@@ -149,11 +164,15 @@ foreach (var path in walk)
     using (mod as IDisposable)
     {
         foreach (var rec in mod.EnumerateMajorRecords())
+        {
+            if (rec is IPlacedGetter pg) { if (pg.IsDeleted) enableFacts.NoteDeleted(pg.FormKey); continue; }
             if (rec is IModeledGetter m && m.Model?.File is { } f && !string.IsNullOrWhiteSpace(f.GivenPath))
                 baseMesh[rec.FormKey] = (f.GivenPath, rec.GetType().Name.Replace("BinaryOverlay", ""));
+        }
         foreach (var wrld in mod.Worldspaces.Records) worldName[wrld.FormKey] = wrld.EditorID ?? wrld.FormKey.ToString();
         foreach (var cp in PlacementExtract.FromMod(mod))
         {
+            foreach (var r in cp.Refs) enableFacts.Note(r);
             if (!cp.Interior)
             {
                 if (!refsByWorld.TryGetValue(cp.Worldspace, out var rg)) { refsByWorld[cp.Worldspace] = rg = new(); landByWorld[cp.Worldspace] = new(); }
@@ -177,6 +196,9 @@ if (winning)
     cells.Add(mergedMeta with { Refs = mergedRefs.Values.ToList(), Navmeshes = mergedNavs.Values.ToList(), Land = mergedLand });
     Console.WriteLine($"winning state of {mergedMeta.CellEditorId ?? mergedMeta.Cell.ToString()}: {pluginsWithCell.Count} plugin(s) touch it ({string.Join(", ", pluginsWithCell)}); {mergedRefs.Count:N0} refs, {mergedNavs.Count:N0} navmeshes after the walk of {walk.Count} plugins");
 }
+// The run's population (Q27, _shared/EnablePopulation.cs): the load-time enable chain over every placement walked, or
+// the record's own flag under --flags.
+var pop = flagsOnly ? EnablePopulation.Flags(enableFacts) : EnablePopulation.LoadTime(enableFacts);
 Console.WriteLine($"base records with a mesh: {baseMesh.Count:N0} ({sw.Elapsed.TotalSeconds:0.0} s)");
 Console.WriteLine($"cells: {cells.Count:N0} with content ({cells.Count(c => c.Interior):N0} interior, {refsByWorld.Count} worldspaces; {landByWorld.Values.Sum(w => w.Count):N0} LAND records) ({sw.Elapsed.TotalSeconds:0.0} s)");
 
@@ -225,9 +247,9 @@ FloorField Field(CellPlacements cp)
 {
     if (cp.Interior || ownOnly || cp.Grid is not { } g || !refsByWorld.TryGetValue(cp.Worldspace, out var rg))
         return FloorFeed.Build(cp.Refs, FloorGeometry, cp.Land is { } own && cp.Grid is { } og ? new[] { (og, own) } : null, 0f, depth, reach,
-                               flagsOnly ? null : FloorFeed.LoadTimeEnabled(cp.Refs));
+                               pop.Predicate);
     var (nbRefs, nbLand) = FloorFeed.Neighbourhood(g, rg, landByWorld[cp.Worldspace]);
-    return FloorFeed.Build(nbRefs, FloorGeometry, nbLand, 0f, depth, reach, flagsOnly ? null : FloorFeed.LoadTimeEnabled(nbRefs));
+    return FloorFeed.Build(nbRefs, FloorGeometry, nbLand, 0f, depth, reach, pop.Predicate);
 }
 
 // Ground under (x,y) in a cell's navmesh: every non-deleted triangle covering the point (corridorprobe's GroundAt).
@@ -580,6 +602,8 @@ if (verdicts.Count > 0)
 }
 if (tsvPath is not null) Console.WriteLine($"\nper-cell rows -> {tsvPath}");
 if (trisPath is not null) Console.WriteLine($"per-triangle rows -> {trisPath}");
+// Last, so the counters describe the whole run rather than nothing.
+Console.WriteLine("\n" + pop.Describe());
 return 0;
 
 record Geo(Aabb Box, TriangleSoup? Soup, string Source);

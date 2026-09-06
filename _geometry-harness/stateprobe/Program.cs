@@ -24,7 +24,11 @@ using Mutagen.Bethesda.Skyrim;
 //   --cell CELL      every switch with a set member in the cell (editor id prefix or FormKey) — the per-contested-cell mode
 //   --switch-map     switchprobe --json output: the joint flips
 //   --route on|off   the route half (default on): the cell's winning navmesh and actor band are read for every cell a
-//                    changed reference stands in; off skips it (counted, never invented)
+//                    changed reference stands in; off skips it (counted, never invented). Since Q27 (2026-09-06) the
+//                    floor the band stands on and the band's top belong to the STATE being judged, not to the baseline:
+//                    a flip can bring in a floor piece or a taller actor, and measuring an arriving obstacle against the
+//                    baseline's floor mixes two worlds. Fields are keyed on (cell, state) and the baseline's field is
+//                    reused where the flip changes nothing in that cell, so the cost is a lookup, not a rebuild.
 //   --emit FILE      the class as a ConflictFile (kind STATE-OVERLAP / STATE-CONTACT / STATE-ROUTE @ state), the Bethesda floor withheld
 
 string Instance = HarnessTarget.Instance;
@@ -255,15 +259,17 @@ if (routeOn)
     ActorBand.ResolveControllers(raceFacts, assets);
     var (fallbackTop, fallbackSrc) = ActorBand.TallestPlayable(raceFacts);
     Console.WriteLine($"route oracle: winning navmesh read for {winNav.Count:N0} of {wantedCells.Count:N0} cells; actor band fallback {fallbackSrc}; the band stands on the physical floor (Q24: {floorRefsByWorld.Values.Sum(w => w.Values.Sum(d => d.Count)):N0} exterior floor refs filed for {cellGridOf.Count:N0} exterior cells' neighbourhoods)  ({sw.Elapsed.TotalSeconds:0.0}s)");
-    var navIndex = new Dictionary<FormKey, (NavmeshIndex Index, float Top, Dictionary<NavGraph.TriRef, NavGraph.Node>? Graph, FloorField Floor)>();
-    var floorTally = new FloorFeed.Tally();
+    // The navmesh and its walkable graph do not depend on the state; the floor and the band do (see FieldFor).
+    var navIndex = new Dictionary<FormKey, (NavmeshIndex Index, Dictionary<NavGraph.TriRef, NavGraph.Node>? Graph)>();
+    // One field per (cell, state) — see FieldFor below. Null when the cell's band is unjudgeable in that state.
+    var fieldByCellState = new Dictionary<(FormKey Cell, string State), (float Top, FloorField Floor)?>();
     routeFloorLine = () =>
     {
-        var t = new FloorFeed.Tally(); foreach (var f in navIndex.Values) t.Add(f.Floor);
+        var t = new FloorFeed.Tally(); foreach (var f in fieldByCellState.Values) if (f is { } ff) t.Add(ff.Floor);
         var sb = new System.Text.StringBuilder(t.Line());
-        sb.Append("\n   the floor each cell's band stood on (δ = navmesh − floor over the raster reads; a strongly negative median is a floor laid ABOVE the winning navmesh):");
-        foreach (var kv in navIndex.Where(kv => kv.Value.Floor.Reads > 0).OrderBy(kv => kv.Value.Floor.OffsetQuantile(0.5f)).Take(40))
-            sb.Append("\n      " + FloorFeed.Tally.CellLine(kv.Key.ToString(), kv.Value.Floor));
+        sb.Append($"\n   {fieldByCellState.Count:N0} (cell, state) fields built; the floor each stood on (δ = navmesh − floor over the raster reads; a strongly negative median is a floor laid ABOVE the winning navmesh):");
+        foreach (var kv in fieldByCellState.Where(kv => kv.Value is { } v && v.Floor.Reads > 0).OrderBy(kv => kv.Value!.Value.Floor.OffsetQuantile(0.5f)).Take(40))
+            sb.Append("\n      " + FloorFeed.Tally.CellLine($"{kv.Key.Cell} @ {kv.Key.State}", kv.Value!.Value.Floor));
         return sb.ToString();
     };
     var soupCache = new Dictionary<string, (Aabb Box, TriangleSoup? Soup, string Source)>(StringComparer.OrdinalIgnoreCase);
@@ -290,33 +296,60 @@ if (routeOn)
         return soupCache[rel] = (m.Bounds, m.Soup is { TriangleCount: > 0 and <= 200_000 } ? m.Soup : null, "fallback");
     }
     var Ladder = new[] { 0f, 32f, 64f, 96f, 128f };
-    oracle = (FormKey key, bool navcut, out string why) =>
+    // The floor the band stands on and the band's top belong to the STATE being judged (Q27): a flip can bring in a floor
+    // piece or a taller actor, so a cell's field is keyed on (cell, state). The navmesh and its graph do not depend on the
+    // state and stay keyed on the cell alone. Rebuilding for every state would be waste — a state's population differs
+    // from the baseline's only on the references the flip changes — so the baseline field is reused unless the arm moves
+    // one of the cell's own floor candidates or placed actors, which is a memoised lookup rather than a rebuild.
+    (Aabb Box, TriangleSoup Soup)? FloorGeometry(PlacedRef r)
+    {
+        if (r.Base is not { } b || !idx.BaseMesh.TryGetValue(b, out var rel)) return null;
+        var g = Obstacle(rel);
+        return g.Soup is not null && !g.Box.IsEmpty ? (g.Box, g.Soup) : null;
+    }
+    var baselinePop = EnablePopulation.Of(cidx!.Arms.WinnerRawFacts, EnablePopulation.BaselineStateName);
+    var armPops = new Dictionary<string, EnablePopulation>();
+    EnablePopulation PopOfArm(StateArm arm)
+    {
+        if (arm.IsBaseline) return baselinePop;
+        if (armPops.TryGetValue(arm.Name, out var hit)) return hit;
+        var a = new EnableArms(idx) { State = arm };
+        return armPops[arm.Name] = EnablePopulation.Of(a.WinnerStateFacts, arm.Name);
+    }
+    (float Top, FloorField Floor)? FieldFor(FormKey cell, StateArm arm, out string why)
+    {
+        why = "";
+        var pop = PopOfArm(arm);
+        var crefs = cellRefs.TryGetValue(cell, out var cr) ? cr : new List<PlacedRef>();
+        // Does this state differ from the baseline anywhere in the cell's own references? If not, its field IS the
+        // baseline's, and the key collapses.
+        string key = arm.IsBaseline ? EnablePopulation.BaselineStateName : arm.Name;
+        if (!arm.IsBaseline && !crefs.Any(r => pop.Enabled(r.FormKey) != baselinePop.Enabled(r.FormKey)))
+            key = EnablePopulation.BaselineStateName;
+        var usePop = key == EnablePopulation.BaselineStateName ? baselinePop : pop;
+        if (fieldByCellState.TryGetValue((cell, key), out var got)) return got;
+        var band = ActorBand.ForCell(crefs, npcFacts, raceFacts, fallbackTop, fallbackSrc, usePop.Predicate);
+        if (!float.IsFinite(band.Top)) { why = $"UNJUDGEABLE actor band: {band.Source}"; fieldByCellState[(cell, key)] = null; return null; }
+        FloorField floor;
+        if (cellGridOf.TryGetValue(cell, out var cg) && floorRefsByWorld.TryGetValue(cg.Wrld, out var frw))
+        {
+            var (nbRefs, nbLand) = FloorFeed.Neighbourhood((cg.X, cg.Y), frw, floorLandByWorld[cg.Wrld]);
+            floor = FloorFeed.Build(nbRefs, FloorGeometry, nbLand, enabled: usePop.Predicate);
+        }
+        else floor = FloorFeed.Build(crefs, FloorGeometry, null, enabled: usePop.Predicate);
+        var made = (ActorBand.PhysicalControllerTop(band.Top), floor);
+        fieldByCellState[(cell, key)] = made;
+        return made;
+    }
+    oracle = (StateArm arm, FormKey key, bool navcut, out string why) =>
     {
         why = "";
         var win = idx.History.Winning(key);
         if (win is not { } w) { why = "no winning placement"; return null; }
         if (!winNav.TryGetValue(w.Cell, out var navs) || navs.Count == 0) { why = "the cell has no navmesh"; routeNoNav++; return null; }
         if (!navIndex.TryGetValue(w.Cell, out var ni))
-        {
-            var index = NavmeshIndex.Build(navs.Values.ToList(), out _);
-            var band = ActorBand.ForCell(cellRefs.TryGetValue(w.Cell, out var crefs) ? crefs : Array.Empty<PlacedRef>(), npcFacts, raceFacts, fallbackTop, fallbackSrc);
-            if (!float.IsFinite(band.Top)) { why = $"UNJUDGEABLE actor band: {band.Source}"; return null; }
-            // The floor the band stands on (Q24): the 3×3 neighbourhood of an exterior, else the cell's own refs.
-            (Aabb Box, TriangleSoup Soup)? FloorGeometry(PlacedRef r)
-            {
-                if (r.Base is not { } b || !idx.BaseMesh.TryGetValue(b, out var rel)) return null;
-                var g = Obstacle(rel);
-                return g.Soup is not null && !g.Box.IsEmpty ? (g.Box, g.Soup) : null;
-            }
-            FloorField floor;
-            if (cellGridOf.TryGetValue(w.Cell, out var cg) && floorRefsByWorld.TryGetValue(cg.Wrld, out var frw))
-            {
-                var (nbRefs, nbLand) = FloorFeed.Neighbourhood((cg.X, cg.Y), frw, floorLandByWorld[cg.Wrld]);
-                floor = FloorFeed.Build(nbRefs, FloorGeometry, nbLand);
-            }
-            else floor = FloorFeed.Build(crefs ?? new List<PlacedRef>(), FloorGeometry, null);
-            navIndex[w.Cell] = ni = (index, ActorBand.PhysicalControllerTop(band.Top), null, floor);
-        }
+            navIndex[w.Cell] = ni = (NavmeshIndex.Build(navs.Values.ToList(), out _), null);
+        if (FieldFor(w.Cell, arm, out var fieldWhy) is not { } field) { why = fieldWhy; return null; }
         if (ni.Index.TriangleCount == 0) { why = "the cell's navmesh is empty"; routeNoNav++; return null; }
         TriangleSoup soup; Aabb model;
         if (navcut)
@@ -340,19 +373,19 @@ if (routeOn)
         var verts = NavcutGeometry.WorldVertices(soup, w.Pos, w.Rot, w.Scale);
         var columns = MeshColumnIndex.Build(verts, soup.Indices, triangleMaterials: soup.TriangleMaterials);
         // The cheap test first, as blockprobe does: does the solid enter an actor column over any walkable triangle?
-        var q = SpatialOverlap.GrowDown(world, ni.Top);
+        var q = SpatialOverlap.GrowDown(world, field.Top);
         bool crosses = false;
         foreach (var t in ni.Index.Query(q))
         {
             if ((t.Flags & 0x08) != 0) continue;
             var nav = ni.Index.NavAt(t.NavIndex); var tri = nav.Triangles[t.TriangleIndex];
             var pa = nav.Vertices[tri.A]; var pb = nav.Vertices[tri.B]; var pc = nav.Vertices[tri.C];
-            int x = columns.CountSurfaceCrossings(new Vector3(pa.X, pa.Y, pa.Z), new Vector3(pb.X, pb.Y, pb.Z), new Vector3(pc.X, pc.Y, pc.Z), ActorBand.StepHeight, ni.Top, 12f, 1f, 0.5f, stopAfter: 1);
+            int x = columns.CountSurfaceCrossings(new Vector3(pa.X, pa.Y, pa.Z), new Vector3(pb.X, pb.Y, pb.Z), new Vector3(pc.X, pc.Y, pc.Z), ActorBand.StepHeight, field.Top, 12f, 1f, 0.5f, stopAfter: 1);
             if (x > 0) { crosses = true; break; }
         }
         if (!crosses) { why = "never enters an actor column over walkable ground"; routeNoCross++; return RouteCutVerdict.None; }
         if (ni.Graph is null) { ni.Graph = NavGraph.Build(ni.Index).Nodes; navIndex[w.Cell] = ni; }
-        var facts = RouteConnectivity.Measure(ni.Index, columns, world, 256f, 16f, ActorBand.PhysicalStep, ni.Top, Ladder, graph: ni.Graph, floorAt: ni.Floor.FloorAt, isStairsMaterial: DetectorModel.IsStairsMaterial);
+        var facts = RouteConnectivity.Measure(ni.Index, columns, world, 256f, 16f, ActorBand.PhysicalStep, field.Top, Ladder, graph: ni.Graph, floorAt: field.Floor.FloorAt, isStairsMaterial: DetectorModel.IsStairsMaterial);
         var line = facts.Line;
         var vc = DetectorModel.RouteCut(facts.Judged, facts.Touched, line?.Found ?? false, line?.Why ?? "", line?.Cut ?? false, line?.Passage ?? float.NaN, cutRise: line?.CutRise ?? float.NaN, cutFloat: line?.CutFloat ?? float.NaN, cutOnStairs: line?.CutOnStairs ?? false);
         routeMeasured++;
@@ -496,7 +529,10 @@ if (emitPath is not null)
         new("route obstacles", routeMeasured, new Dictionary<string, long> { ["NoNavmesh"] = routeNoNav, ["NoGeometry"] = routeNoGeo, ["Unjudged"] = tally.RouteUnjudged }, new Dictionary<string, long> { ["DoorOrMovable"] = routeSetAside, ["NeverEntersColumn"] = routeNoCross }),
         new("contact pairs", tally.HostsLeaving + tally.HostsArriving + tally.DepsArriving, new Dictionary<string, long> { ["Unmeasured"] = tally.ContactUnmeasured }, new Dictionary<string, long> { ["ReSupported"] = tally.ReSupported, ["TouchingOnArrival"] = tally.TouchingOnArrival, ["FloatingOnArrival"] = tally.FloatingOnArrival }),
     };
-    ConflictIo.Write(emitPath, new ConflictFile("stateprobe", Instance, DateTime.UtcNow.ToString("yyyy-MM-dd HH:mm:ssZ"), conflicts, coverage));
+    // Every row of this emit is a DIFFERENTIAL between the baseline and one flipped state, so the emit's own state is
+    // the baseline it differs from; the state each row belongs to is in the row's own kind (STATE-<kind>@<state>@<trigger>).
+    ConflictIo.Write(emitPath, new ConflictFile("stateprobe", Instance, DateTime.UtcNow.ToString("yyyy-MM-dd HH:mm:ssZ"), conflicts, coverage,
+                                                Population: "load-time", State: EnablePopulation.BaselineStateName));
     Console.WriteLine($"emitted {conflicts.Count:N0} StateConditional conflicts -> {emitPath}");
 }
 

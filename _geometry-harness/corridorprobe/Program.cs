@@ -42,6 +42,13 @@ using Mutagen.Bethesda.Skyrim;
 //          Since Q24 (2026-09-05) the band stands on the PHYSICAL floor under each raster cell (_shared/FloorFeed.cs): the
 //          cell's refs (the 3×3 neighbourhood by position for an exterior) and its LAND from --plugin, the same actor-solid
 //          soup the obstacles use; where no floor is within reach the navmesh − 10.4 u stands in, counted.
+//   POPULATION (Q27, 2026-09-06): the floor and the cell's own references are read in the LOAD-TIME state — a reference
+//          is there when EnableState resolves its XESP parent chain enabled over --plugin's own placements, not when its
+//          own initially-disabled flag happens to be clear. The SOURCE is unchanged (still one plugin), so a vanilla
+//          calibration stays a vanilla calibration. `arms` places its own experimental objects at the poses the arms file
+//          records — those are commanded placements and no population applies to them.
+//   --flags the flag-only population, what every run before 2026-09-06 measured. --state is NOT taken: a named world
+//          state needs the switch census over the whole order.
 //   --bos  arms only. on (default, since 2026-09-04): each arm's base is resolved through the Base Object Swapper layer
 //          (*_SWAP.ini, from the profile's VFS; _shared/BosHook.cs) for the cell it stood in — the obstacle the ENGINE
 //          loaded for that base record — and the row says so. The pose stays as the arms file gives it (the engine's own,
@@ -64,9 +71,12 @@ if (mode == "find")
 }
 float step = 32f, span = 600f, heading = 0f; Vec3? at = null; string plugin = "Skyrim.esm"; bool controllerBand = true; string? ascii = null;
 bool bosOn = true;
+bool flagsOnly = false; string? stateSpec = null;
 var refKeys = new List<FormKey>(); float? bandTopArg = null;
 for (int i = 2; i < args.Length; i++)
 {
+    if (args[i] == "--flags") { flagsOnly = true; continue; }
+    if (args[i] == "--state" && i + 1 < args.Length) { stateSpec = args[++i]; continue; }
     if (args[i] == "--step" && i + 1 < args.Length) step = float.Parse(args[++i]);
     else if (args[i] == "--ref" && i + 1 < args.Length) refKeys.Add(FormKey.Factory(args[++i]));
     else if (args[i] == "--band-top" && i + 1 < args.Length) bandTopArg = float.Parse(args[++i]);
@@ -85,6 +95,10 @@ if (mode == "arms")
     armsDoc = JsonDocument.Parse(File.ReadAllText(cellId)).RootElement;
     cellId = armsDoc.GetProperty("cell").GetString() ?? throw new InvalidDataException("arms.json needs \"cell\"");
 }
+
+PopulationMode popMode;
+try { popMode = PopulationCli.Resolve("corridorprobe", flagsOnly, stateSpec, stateSupported: false); }
+catch (ArgumentException ex) { Console.Error.WriteLine(ex.Message); return 2; }
 
 using var mod = SkyrimMod.CreateFromBinaryOverlay(Path.Combine(dataDir, plugin), SkyrimRelease.SkyrimSE);
 CellPlacements? cell = null;
@@ -284,15 +298,24 @@ if (mode == "arms" || mode == "cut")
         var g = Geometry(rel);
         return g.Soup is not null && !g.Box.IsEmpty ? (g.Box, g.Soup) : null;
     }
+    // The population (Q27): the enable facts of --plugin's own placements — the chain crosses cells (a worldspace's
+    // persistent cell holds the markers), so they are gathered over every cell before the field is built.
+    var enableFacts = new EnableFactsIndex();
+    foreach (var rec in mod.EnumerateMajorRecords()) if (rec is IPlacedGetter dpg && dpg.IsDeleted) enableFacts.NoteDeleted(dpg.FormKey);
+    var frg = new Dictionary<(int, int), Dictionary<FormKey, PlacedRef>>(); var flg = new Dictionary<(int, int), float[,]>();
+    foreach (var cp in PlacementExtract.FromMod(mod))
+    {
+        foreach (var r in cp.Refs) enableFacts.Note(r);
+        if (!cp.Interior && cp.Worldspace == cell.Worldspace) FloorFeed.FileByGrid(cp, frg, flg);
+    }
+    var pop = popMode == PopulationMode.Flags ? EnablePopulation.Flags(enableFacts) : EnablePopulation.LoadTime(enableFacts);
     FloorField floor;
     if (!cell.Interior && cell.Grid is { } fg)
     {
-        var frg = new Dictionary<(int, int), Dictionary<FormKey, PlacedRef>>(); var flg = new Dictionary<(int, int), float[,]>();
-        foreach (var cp in PlacementExtract.FromMod(mod)) if (!cp.Interior && cp.Worldspace == cell.Worldspace) FloorFeed.FileByGrid(cp, frg, flg);
         var (nbRefs, nbLand) = FloorFeed.Neighbourhood(fg, frg, flg);
-        floor = FloorFeed.Build(nbRefs, FloorGeometry, nbLand);
+        floor = FloorFeed.Build(nbRefs, FloorGeometry, nbLand, enabled: pop.Predicate);
     }
-    else floor = FloorFeed.Build(cell.Refs, FloorGeometry, null);
+    else floor = FloorFeed.Build(cell.Refs, FloorGeometry, null, enabled: pop.Predicate);
 
     // ---- the band and the graph ----
     float nominalTop = mode == "arms" && armsDoc.TryGetProperty("bandTop", out var bt) ? bt.GetSingle() : (bandTopArg ?? ActorBand.ScaleOneHeight);
@@ -301,7 +324,8 @@ if (mode == "arms" || mode == "cut")
     var (gnodes, grpt) = NavGraph.Build(navs);
     Console.WriteLine($"graph: {grpt.Triangles:N0} triangles, {grpt.IntraLinks:N0} intra + {grpt.CrossLinks:N0} cross links, {grpt.DanglingLinks} dangling, {grpt.ExternalLinks} external, {grpt.Components} component(s)");
     Console.WriteLine($"band: {ActorBand.PhysicalStep:0.#}..{top:0.#} u above the FEET ({(controllerBand ? $"controller: nominal {nominalTop:0} × {ActorBand.ControllerFactor} + {ActorBand.StationOffset:0.#}" : "nominal")}; bottom measured 2026-09-05 + the station's {ActorBand.StationOffset:0.#} u offset (Q24), step band to {ActorBand.PhysicalStepBandTop:0.#} u and a float of {ActorBand.FloatWall:0} u or more named in the verdict (Q26)); capsule 22 u; window ±256 u, step 16");
-    Console.WriteLine($"floor: physical, {floor.Candidates:N0} candidates, {floor.LandCells} land cell(s) (Q24)\n");
+    Console.WriteLine($"floor: physical, {floor.Candidates:N0} candidates, {floor.LandCells} land cell(s) (Q24); {floor.SkippedDisabled:N0} refs not present in the population");
+    Console.WriteLine(pop.Describe() + "\n");
 
     if (mode == "cut")
     {

@@ -20,6 +20,7 @@
          are not. It is also published as a NuGet package, so a consumer who does not want the
          source checkout can swap this ProjectReference for a PackageReference. -->
     <ProjectReference Include="$(CharacterViewerRenderingPath)" />
+    <Compile Include="..\_shared\EnablePopulation.cs" Link="EnablePopulation.cs" />
   </ItemGroup>
   <ItemGroup>
     <Compile Include="..\_shared\HarnessTarget.cs" Link="HarnessTarget.cs" />

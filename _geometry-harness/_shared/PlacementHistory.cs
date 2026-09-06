@@ -91,4 +91,19 @@ public sealed class PlacementHistory
         float dx = a.X - b.X, dy = a.Y - b.Y, dz = a.Z - b.Z;
         return MathF.Sqrt(dx * dx + dy * dy + dz * dz);
     }
+
+    /// <summary>The index of a reference's snap in the order without <paramref name="mover"/>'s side: the last one whose
+    /// plugin is neither the mover nor downstream of it. −1 when every snap is the mover's side (it introduced the ref).
+    /// Moved here from ContactIndex in Q27 so the enable arms (_shared/EnableArms.cs) can ask it without dragging the
+    /// whole contact pass in; <c>ContactIndex.AuthoringSnapIndex</c> forwards to it and is unchanged for its callers.</summary>
+    public static int AuthoringSnapIndex(IReadOnlyList<Snap> snaps, int mover, IReadOnlyList<HashSet<int>> closure)
+    {
+        for (int i = snaps.Count - 1; i >= 0; i--)
+        {
+            int p = snaps[i].Plugin;
+            if (p == mover || closure[p].Contains(mover)) continue;
+            return i;
+        }
+        return -1;
+    }
 }
