@@ -1,4 +1,5 @@
 using HousecarlCore;
+using HousecarlCore.Progress;
 
 // FLOOR MEASUREMENT for the dangling-reference split (roadmap 2.5).
 //
@@ -13,6 +14,8 @@ using HousecarlCore;
 //                        one, if the bare count is higher) — either way, misassigned
 //
 // usage: floorprobe
+
+using var __run = RunLog.BeginProcess("floorprobe", args);
 
 string Instance = HarnessTarget.Require(HarnessTarget.Instance, "MO2 instance directory", "instance");
 string GamePath = HarnessTarget.Require(HarnessTarget.Game, "game directory", "game");

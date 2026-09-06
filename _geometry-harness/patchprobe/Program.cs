@@ -2,6 +2,7 @@ using System.Diagnostics;
 using HarnessShared;
 using Mutagen.Bethesda.Plugins;
 using Mutagen.Bethesda.Skyrim;
+using HousecarlCore.Progress;
 
 // PATCH AVAILABILITY — "is there a patch for this anywhere on this machine?"
 //
@@ -34,6 +35,8 @@ using Mutagen.Bethesda.Skyrim;
 
 // Nothing is compiled in — see ../_shared/HarnessTarget.cs. --roots overrides the sweep list;
 // Require runs after the flag loop so passing it never trips the check.
+using var __run = RunLog.BeginProcess("patchprobe", args);
+
 var roots = HarnessTarget.SearchRoots.ToList();
 string downloadPool = HarnessTarget.DownloadPool;
 string target = HarnessTarget.Instance;
@@ -158,9 +161,12 @@ var byPair = new Dictionary<(string, string), List<Found>>();
 var byMaster = new Dictionary<string, List<Found>>(StringComparer.OrdinalIgnoreCase);
 var seenPlugin = new Dictionary<string, List<Found>>(StringComparer.OrdinalIgnoreCase);
 int scanned = 0, unreadable = 0;
+__run.Feature("instances", instances.Count, "instances").Stage("index", "indexing every instance's plugins", instances.Count, "instances");
+
 
 foreach (var inst in instances)
 {
+    __run.Advance();
     foreach (var modDir in Directory.EnumerateDirectories(inst.Mods))
     {
         foreach (var pl in Directory.EnumerateFiles(modDir).Where(IsPlugin))

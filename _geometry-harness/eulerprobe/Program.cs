@@ -3,6 +3,7 @@ using System.Numerics;
 using HousecarlCore;
 using Mutagen.Bethesda.Plugins;
 using Mutagen.Bethesda.Skyrim;
+using HousecarlCore.Progress;
 
 // EULER ORDER — settling a question the charter has carried as "evidence, not proof" since day one.
 //
@@ -29,6 +30,8 @@ using Mutagen.Bethesda.Skyrim;
 // non-zero components measures only the population where the orders actually disagree.
 //
 // usage: eulerprobe [maxCells]
+
+using var __run = RunLog.BeginProcess("eulerprobe", args);
 
 string Instance = HarnessTarget.Require(HarnessTarget.Instance, "MO2 instance directory", "instance");
 string GamePath = HarnessTarget.Require(HarnessTarget.Game, "game directory", "game");

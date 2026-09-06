@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using Mutagen.Bethesda.Plugins;
 using Mutagen.Bethesda.Skyrim;
+using HousecarlCore.Progress;
 
 // DOWNLOADS NEVER INSTALLED — the patches you already own and have never unpacked.
 //
@@ -25,6 +26,8 @@ using Mutagen.Bethesda.Skyrim;
 
 // Nothing is compiled in — see ../_shared/HarnessTarget.cs. Search roots are a drive layout,
 // the most machine-specific thing a probe can carry.
+using var __run = RunLog.BeginProcess("poolprobe", args);
+
 var roots = HarnessTarget.RequireRoots(HarnessTarget.SearchRoots.ToList());
 string Pool = HarnessTarget.Require(HarnessTarget.DownloadPool, "download pool directory", "downloadPool");
 string Instance = HarnessTarget.Require(HarnessTarget.Instance, "MO2 instance directory", "instance");
@@ -105,8 +108,11 @@ Console.WriteLine($"   {active.Count:N0} active plugins, {here.Count:N0} plugin 
 // ---------------------------------------------------------------------------------------
 var everInstalled = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 int instances = 0;
+__run.Feature("roots", roots.Count, "roots").Stage("walk", "walking the download roots", roots.Count, "roots");
+
 foreach (var root in roots)
 {
+    __run.Advance();
     if (!Directory.Exists(root)) continue;
     // A recursive enumeration throws partway through on the first unreadable directory and loses
     // everything found so far, so the walk is manual with a per-directory catch.

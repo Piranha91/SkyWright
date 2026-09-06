@@ -3,6 +3,7 @@ using HarnessShared;
 using HousecarlCore;
 using Mutagen.Bethesda.Plugins;
 using Mutagen.Bethesda.Skyrim;
+using HousecarlCore.Progress;
 
 // SCENARIO CONSISTENCY — does a quest still describe the world it is standing in?
 //
@@ -59,6 +60,8 @@ using Mutagen.Bethesda.Skyrim;
 // over harness.local.json; Require() runs AFTER them, so a run that passes --instance never
 // trips it, and a run that configures nothing fails with guidance instead of walking a
 // directory that isn't there.
+using var __run = RunLog.BeginProcess("driftprobe", args);
+
 string Instance = HarnessTarget.Instance;
 string GamePath = HarnessTarget.Game;
 string profileName = HarnessTarget.Profile;
@@ -153,9 +156,12 @@ long placements = 0, questRecords = 0;
 // Rule 6, applied to the plumbing (2026-08-27): unreadable plugins are counted and named, never
 // silently skipped.
 var unreadablePlugins = new List<string>();
+__run.Feature("plugins", paths.Count, "plugins").Stage("scan", "reading plugins", paths.Count, "plugins");
+
 
 for (int p = 0; p < paths.Count; p++)
 {
+    __run.Advance();
     ISkyrimModGetter mod;
     try { mod = SkyrimMod.CreateFromBinaryOverlay(paths[p], SkyrimRelease.SkyrimSE); }
     catch { unreadablePlugins.Add(Path.GetFileName(paths[p])); pluginKey[p] = ModKey.Null; masterIdx[p] = new HashSet<int>(); bos.Plugin(null); continue; }

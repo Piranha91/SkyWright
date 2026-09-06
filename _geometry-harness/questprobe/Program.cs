@@ -1,4 +1,5 @@
 using System.Reflection;
+using HousecarlCore.Progress;
 
 // Reflection probe over Mutagen.Bethesda.Skyrim 0.54.4 — the EXACT version houseCARL pins.
 //
@@ -12,6 +13,8 @@ using System.Reflection;
 // established here first rather than assumed.
 //
 // Phase 1 = discovery (what types even exist), phase 2 = full member dump of the ones that matter.
+
+using var __run = RunLog.BeginProcess("questprobe", args);
 
 var asms = new[]
 {

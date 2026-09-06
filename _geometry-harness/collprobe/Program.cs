@@ -3,6 +3,7 @@ using System.Numerics;
 using HousecarlCore;
 using Mutagen.Bethesda.Plugins;
 using Mutagen.Bethesda.Skyrim;
+using HousecarlCore.Progress;
 
 // collprobe — roadmap 4.7 Part A: PRICE the Havok collision decoder over the vanilla mesh set, and MEASURE the
 // Havok→Skyrim unit scale against the render geometry of the same meshes instead of trusting the reputed 69.99.
@@ -18,6 +19,8 @@ using Mutagen.Bethesda.Skyrim;
 // usage: collprobe [--limit N] [--dump file.tsv] [--mesh <relative path> ...]
 //   --mesh   print one mesh's decode in detail (bodies, layers, shapes, counters, extents); repeatable, no sweep
 //   --dump   per-mesh TSV of the sweep (path, record type, render extents, collision extents, family, layers, unread)
+
+using var __run = RunLog.BeginProcess("collprobe", args);
 
 string Instance = HarnessTarget.Require(HarnessTarget.Instance, "MO2 instance directory", "instance");
 string GamePath = HarnessTarget.Require(HarnessTarget.Game, "game directory", "game");

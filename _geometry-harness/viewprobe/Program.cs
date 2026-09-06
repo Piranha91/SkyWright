@@ -1,6 +1,8 @@
-﻿using System.Diagnostics;
+using System.Diagnostics;
 using System.Numerics;
 using HousecarlCore;
+using HousecarlCore.Progress;
+
 using Mutagen.Bethesda;                 // ToImmutableLinkCache over the --npc overlays
 using Mutagen.Bethesda.Plugins;
 using Mutagen.Bethesda.Plugins.Cache;
@@ -44,6 +46,8 @@ using Image = SixLabors.ImageSharp.Image;
 // ahead of the Require() calls just below, because an unconfigured harness exits from inside those:
 // a window that closes on the one message explaining how to configure it has taught nobody
 // anything. The console dies with the process on a GUI launch, so every exit path pauses.
+using var __run = RunLog.BeginProcess("viewprobe", args);
+
 bool guiLaunch = GuiLaunch();
 if (guiLaunch)
     AppDomain.CurrentDomain.ProcessExit += (_, _) =>
@@ -1128,8 +1132,11 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot)
         string.Equals(cp.CellEditorId, cellTarget, StringComparison.OrdinalIgnoreCase)
         || cp.Cell.ToString().Equals(cellTarget, StringComparison.OrdinalIgnoreCase)
         || cp.Cell.ID.ToString("X6").Equals(cellTarget.TrimStart('0'), StringComparison.OrdinalIgnoreCase);
+    __run.Feature("plugins", order.OrderedPaths.Count, "plugins").Stage("find-cell", "walking the order for the target cell", order.OrderedPaths.Count, "plugins");
+
     foreach (var path in order.OrderedPaths)
     {
+        __run.Advance();
         ISkyrimModGetter m;
         try { m = SkyrimMod.CreateFromBinaryOverlay(path, SkyrimRelease.SkyrimSE); } catch { continue; }
         using (m as IDisposable)

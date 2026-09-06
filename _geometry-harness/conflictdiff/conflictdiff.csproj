@@ -11,4 +11,16 @@
     <Compile Include="..\_shared\ConflictReport.cs" Link="ConflictReport.cs" />
     <Compile Include="..\_shared\DetectorModel.cs" Link="DetectorModel.cs" />
   </ItemGroup>
+  <ItemGroup>
+    <!-- Q31 run contract (roadmap 4.16): this probe does not reference housecarl-core, so it LINKS the
+         contract's source instead of dragging Mutagen in for a timer. Progress/ is BCL-only on purpose so
+         this stays a link and not a second implementation; AtomicFile rides along because the store's
+         snapshot swap uses it. Probes that DO reference core get the same types from the assembly. -->
+    <Compile Include="..\..\src\housecarl-core\Progress\RunContract.cs" Link="Progress\RunContract.cs" />
+    <Compile Include="..\..\src\housecarl-core\Progress\RunPaths.cs" Link="Progress\RunPaths.cs" />
+    <Compile Include="..\..\src\housecarl-core\Progress\RunStore.cs" Link="Progress\RunStore.cs" />
+    <Compile Include="..\..\src\housecarl-core\Progress\RunLog.cs" Link="Progress\RunLog.cs" />
+    <Compile Include="..\..\src\housecarl-core\Progress\Estimator.cs" Link="Progress\Estimator.cs" />
+    <Compile Include="..\..\src\housecarl-core\AtomicFile.cs" Link="AtomicFile.cs" />
+  </ItemGroup>
 </Project>

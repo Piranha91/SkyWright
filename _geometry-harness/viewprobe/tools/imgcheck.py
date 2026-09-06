@@ -21,9 +21,53 @@ and MSAA both on, where the driver's per-sample blending of coplanar sheets
 varies by ~1/255 on a handful of pixels between runs. Render the compare with
 --msaa 0 for a byte-exact regression check rather than reaching for --tol.
 """
+import os
 import sys
 from collections import Counter
 from PIL import Image, ImageChops
+
+
+# ---------------------------------------------------------------- run log --
+# The progress/timing contract (standards/HOUSECARL_RUN_EVENTS.md, roadmap 4.16). Loaded by path
+# rather than imported, because a probe's tools directory is not on the repo's import path; if the adapter is missing
+# the whole thing degrades to a no-op and this script behaves exactly as it did before.
+def _runlog():
+    import importlib.util
+    here = os.path.dirname(os.path.abspath(__file__))
+    cand = os.path.abspath(os.path.join(here, "..", "..", "..", "scripts", "runlog.py"))
+    if not os.path.isfile(cand):
+        return None
+    try:
+        spec = importlib.util.spec_from_file_location("housecarl_runlog", cand)
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        return mod
+    except Exception:
+        return None
+
+
+_RUNLOG = _runlog()
+
+
+class _NullRun:
+    def __getattr__(self, _name):
+        return lambda *a, **k: self
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *a):
+        return False
+
+
+def _run(op, **kw):
+    if _RUNLOG is None:
+        return _NullRun()
+    try:
+        return _RUNLOG.Run(op, **kw)
+    except Exception:
+        return _NullRun()
+
 
 
 def crop(a):
@@ -111,4 +155,10 @@ if __name__ == "__main__":
     if len(sys.argv) < 2 or sys.argv[1] not in cmds:
         print(__doc__)
         sys.exit(2)
-    sys.exit(cmds[sys.argv[1]](sys.argv[2:]) or 0)
+    with _run("imgcheck", mode=sys.argv[1]) as _r:
+        _code = cmds[sys.argv[1]](sys.argv[2:]) or 0
+        if _code:
+            _r.refuse(f"exit code {_code}", exit_code=_code)
+        else:
+            _r.tally(ok=1)
+    sys.exit(_code)

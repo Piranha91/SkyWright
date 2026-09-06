@@ -4,6 +4,7 @@ using HarnessShared;
 using HousecarlCore;
 using Mutagen.Bethesda.Plugins;
 using Mutagen.Bethesda.Skyrim;
+using HousecarlCore.Progress;
 
 // CELL WATER — missing water and water seams at cell boundaries (roadmap 4.9, Part A; 2026-09-04).
 //
@@ -34,6 +35,8 @@ using Mutagen.Bethesda.Skyrim;
 // usage: waterprobe [--list N] [--near X,Y] [--worldspace EDID] [--eps U] [--min-visible F] [--water-mod-cells N]
 //                   [--cell EDID|X,Y] [--json FILE] [--emit FILE] [--base EMIT] [--no-land]
 //                   [--enable X.esp]* [--disable X.esp]* [--instance DIR] [--game DIR] [--profile NAME]
+
+using var __run = RunLog.BeginProcess("waterprobe", args);
 
 string Instance = HarnessTarget.Instance;
 string GamePath = HarnessTarget.Game;
@@ -99,8 +102,11 @@ Console.WriteLine($"load order: {paths.Count} plugins ({sw.ElapsedMilliseconds} 
 // ---------------------------------------------------------------------------------------
 var idx = new CellBoundaryIndex();
 var unreadable = new List<string>();
+__run.Feature("plugins", paths.Count, "plugins").Stage("scan", "reading plugins", paths.Count, "plugins");
+
 for (int p = 0; p < paths.Count; p++)
 {
+    __run.Advance();
     ISkyrimModGetter mod;
     try { mod = SkyrimMod.CreateFromBinaryOverlay(paths[p], SkyrimRelease.SkyrimSE); }
     catch { unreadable.Add(Path.GetFileName(paths[p])); continue; }

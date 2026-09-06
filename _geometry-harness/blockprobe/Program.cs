@@ -4,6 +4,7 @@ using System.Numerics;
 using HousecarlCore;
 using Mutagen.Bethesda.Plugins;
 using Mutagen.Bethesda.Skyrim;
+using HousecarlCore.Progress;
 
 // Milestone 4, second half: the KNOWN-POSITIVE test.
 //
@@ -45,6 +46,8 @@ using Mutagen.Bethesda.Skyrim;
 //              overrides give it, and a reference an override disables at init is not an obstacle. A random line yields a
 //              set: the first alternative is taken and counted. off: the record bases and placements, as every run before.
 //              No rule changes either way; the hook changes the input, and the summary says how much it moved.
+
+using var __run = RunLog.BeginProcess("blockprobe", args);
 
 string Instance = HarnessTarget.Require(HarnessTarget.Instance, "MO2 instance directory", "instance");
 string GamePath = HarnessTarget.Require(HarnessTarget.Game, "game directory", "game");
@@ -143,9 +146,12 @@ var enableFacts = new EnableFactsIndex();
 // layer's Index, not a FormID).
 var collByIndex = new Dictionary<uint, (string? Edid, bool NavmeshObstacle)>();
 var definedBy = new Dictionary<FormKey, string>();     // ref -> the first plugin that placed it, for the {NAVCUT by …} line
+__run.Feature("plugins", paths.Count, "plugins").Stage("scan", "reading plugins", paths.Count, "plugins");
+
 
 foreach (var p in paths)
 {
+    __run.Advance();
     ISkyrimModGetter m;
     try { m = SkyrimMod.CreateFromBinaryOverlay(p, SkyrimRelease.SkyrimSE); } catch { bos.Plugin(null); continue; }
     using (m as IDisposable)

@@ -3,6 +3,7 @@ using System.Diagnostics;
 using HousecarlCore;
 using Mutagen.Bethesda.Plugins;
 using Mutagen.Bethesda.Skyrim;
+using HousecarlCore.Progress;
 
 // Milestone 4 CALIBRATION.
 //
@@ -36,6 +37,8 @@ using Mutagen.Bethesda.Skyrim;
 //              READ THE FLOOR WITH CARE under on: a row whose object the layer swapped or moved is no longer
 //              "Bethesda authored the object and the navmesh together" — it is a finding against the swap layer, and
 //              the route-cut section reports those rows apart. off: the pure vanilla floor, as every run before.
+
+using var __run = RunLog.BeginProcess("navprobe", args);
 
 string Instance = HarnessTarget.Require(HarnessTarget.Instance, "MO2 instance directory", "instance");
 string GamePath = HarnessTarget.Require(HarnessTarget.Game, "game directory", "game");
@@ -121,8 +124,11 @@ if (bosOn)
 {
     sw.Restart();
     var order = Mo2LoadOrder.Build(profileDir, modsDir, dataDir, overwriteDir);
+    __run.Feature("plugins", order.OrderedPaths.Count, "plugins").Stage("swap-layer", "walking the order for the swap index", order.OrderedPaths.Count, "plugins");
+
     foreach (var p in order.OrderedPaths)
     {
+        __run.Advance();
         ISkyrimModGetter om;
         try { om = SkyrimMod.CreateFromBinaryOverlay(p, SkyrimRelease.SkyrimSE); } catch { bos.Plugin(null); continue; }
         using (om as IDisposable)

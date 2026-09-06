@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
+using HousecarlCore.Progress;
 
 // Reflection probe over Nifly 1.1.0 — the version houseCARL pins.
 //   niflyprobe             round 2: the TRANSFORM surface (a shape's own T/R/S is local to its parent;
@@ -9,6 +10,8 @@ using System.Reflection;
 //   niflyprobe collision   round 3: the HAVOK SHAPE surface — every bhk shape the collision decoder must read
 //                          (bhkCompressedMeshShapeData chunks, the simple convex shapes, the transform wrappers,
 //                          the rigid body's own transform), grounded before a line of decoder is written.
+
+using var __run = RunLog.BeginProcess("niflyprobe", args);
 
 var asm = typeof(NiflySharp.NifFile).Assembly;
 Type Find(string n) => asm.GetTypes().FirstOrDefault(t => t.Name == n);

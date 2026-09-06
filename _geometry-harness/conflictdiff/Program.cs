@@ -1,4 +1,5 @@
 using HarnessShared;
+using HousecarlCore.Progress;
 
 // CONFLICT-SET DIFF — the second half of the differential chain (roadmap 2.4).
 //
@@ -47,6 +48,8 @@ using HarnessShared;
 // usage: conflictdiff <base.json> <changed.json> [--tolerance PCT] [--compare-states]   (PCT in points; default 1)
 //   --compare-states  the two emits are DELIBERATELY of different populations or world states. The diff runs and every
 //                     line says so; the verdict is not an ordinary repair verdict.
+
+using var __run = RunLog.BeginProcess("conflictdiff", args);
 
 string? basePath = null, changedPath = null;
 double tolerance = 0.01;

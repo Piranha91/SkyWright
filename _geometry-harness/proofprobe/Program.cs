@@ -7,6 +7,7 @@ using Mutagen.Bethesda.Plugins;
 using Mutagen.Bethesda.Plugins.Records;
 using Mutagen.Bethesda.Skyrim;
 using Noggog;
+using HousecarlCore.Progress;
 
 // SYNTHETIC PROOF for the load-order-integrity probes.
 //
@@ -26,6 +27,8 @@ using Noggog;
 // validated against, so its own precedence and refusal rules had better be nailed down first.
 //
 // usage: proofprobe
+
+using var __run = RunLog.BeginProcess("proofprobe", args);
 
 int pass = 0, fail = 0;
 var failures = new List<string>();

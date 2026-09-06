@@ -8,6 +8,7 @@ using Mutagen.Bethesda.Pex;
 using Mutagen.Bethesda.Plugins;
 using Mutagen.Bethesda.Plugins.Records;
 using Mutagen.Bethesda.Skyrim;
+using HousecarlCore.Progress;
 
 // SWITCHPROBE — the world-state switch census and the trigger map (roadmap 4.11, handoff 2026-09-20 Parts A and B).
 //
@@ -39,6 +40,8 @@ using Mutagen.Bethesda.Skyrim;
 //   --switch     one switch in full: its sets, member by member, and its triggers
 //   --json       the census and the trigger map (switches[], jointFlips[]) — what --switch-map on the other probes reads
 //   --show-script NAME   print the decompiled source of one script from the VFS (to read what a bound script does)
+
+using var __run = RunLog.BeginProcess("switchprobe", args);
 
 string Instance = HarnessTarget.Instance;
 string GamePath = HarnessTarget.Game;
@@ -93,8 +96,11 @@ var idx = new OverlapIndex();
 var pluginKey = new ModKey[paths.Count];
 var masterIdx = new HashSet<int>[paths.Count];
 var unreadable = new List<string>();
+__run.Feature("plugins", paths.Count, "plugins").Stage("scan", "reading plugins", paths.Count, "plugins");
+
 for (int p = 0; p < paths.Count; p++)
 {
+    __run.Advance();
     ISkyrimModGetter mod;
     try { mod = SkyrimMod.CreateFromBinaryOverlay(paths[p], SkyrimRelease.SkyrimSE); }
     catch { unreadable.Add(Path.GetFileName(paths[p])); pluginKey[p] = ModKey.Null; masterIdx[p] = new HashSet<int>(); continue; }

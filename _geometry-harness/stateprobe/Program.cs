@@ -5,6 +5,7 @@ using HarnessShared;
 using HousecarlCore;
 using Mutagen.Bethesda.Plugins;
 using Mutagen.Bethesda.Skyrim;
+using HousecarlCore.Progress;
 
 // STATEPROBE — the state-conditional class (roadmap 4.11, handoff 2026-09-20 Part C.2): every switch (or the states
 // named) flipped, and the geometry detectors run across the flip on the switch's own sets — overlap, contact, the
@@ -30,6 +31,8 @@ using Mutagen.Bethesda.Skyrim;
 //                    baseline's floor mixes two worlds. Fields are keyed on (cell, state) and the baseline's field is
 //                    reused where the flip changes nothing in that cell, so the cost is a lookup, not a rebuild.
 //   --emit FILE      the class as a ConflictFile (kind STATE-OVERLAP / STATE-CONTACT / STATE-ROUTE @ state), the Bethesda floor withheld
+
+using var __run = RunLog.BeginProcess("stateprobe", args);
 
 string Instance = HarnessTarget.Instance;
 string GamePath = HarnessTarget.Game;
@@ -140,8 +143,11 @@ var idx = cidx.Index;
 // ---------------------------------------------------------------------------------------
 var pluginKey = new ModKey[paths.Count];
 var unreadable = new List<string>();
+__run.Feature("plugins", paths.Count, "plugins").Stage("scan", "reading plugins", paths.Count, "plugins");
+
 for (int p = 0; p < paths.Count; p++)
 {
+    __run.Advance();
     ISkyrimModGetter mod;
     try { mod = SkyrimMod.CreateFromBinaryOverlay(paths[p], SkyrimRelease.SkyrimSE); }
     catch { unreadable.Add(Path.GetFileName(paths[p])); pluginKey[p] = ModKey.Null; continue; }

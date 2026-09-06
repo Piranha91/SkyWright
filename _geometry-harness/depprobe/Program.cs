@@ -4,6 +4,7 @@ using HarnessShared;
 using HousecarlCore;
 using Mutagen.Bethesda.Plugins;
 using Mutagen.Bethesda.Skyrim;
+using HousecarlCore.Progress;
 
 // PLACEMENT DEPENDENCY — the records-layer pass for stranded support and orphaned attachment
 // (roadmap 4.5 / 4.6, the cheap half).
@@ -44,6 +45,8 @@ using Mutagen.Bethesda.Skyrim;
 
 // Nothing is compiled in — see _shared/HarnessTarget.cs. Flags win over the environment and over
 // harness.local.json; Require() runs AFTER them.
+using var __run = RunLog.BeginProcess("depprobe", args);
+
 string Instance = HarnessTarget.Instance;
 string GamePath = HarnessTarget.Game;
 string profileName = HarnessTarget.Profile;
@@ -102,8 +105,11 @@ var pluginKey = new ModKey[paths.Count];
 var masterIdx = new HashSet<int>[paths.Count + (bosOn ? 1 : 0)];
 var lightness = new List<(ModKey, bool)>();
 var unreadable = new List<string>();
+__run.Feature("plugins", paths.Count, "plugins").Stage("scan", "reading plugins", paths.Count, "plugins");
+
 for (int p = 0; p < paths.Count; p++)
 {
+    __run.Advance();
     ISkyrimModGetter mod;
     try { mod = SkyrimMod.CreateFromBinaryOverlay(paths[p], SkyrimRelease.SkyrimSE); }
     catch { unreadable.Add(Path.GetFileName(paths[p])); pluginKey[p] = ModKey.Null; masterIdx[p] = new HashSet<int>(); lightness.Add((ModKey.Null, false)); continue; }

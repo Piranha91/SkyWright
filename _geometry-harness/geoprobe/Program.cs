@@ -3,6 +3,7 @@ using System.Text.Json;
 using HousecarlCore;
 using Mutagen.Bethesda.Plugins;
 using Mutagen.Bethesda.Skyrim;
+using HousecarlCore.Progress;
 
 // Milestone 2+3 proof: resolve every Model.File through the REAL MO2 VFS, measure the winning
 // NIF's geometry, and diff it against the plugin's OBND.
@@ -11,6 +12,8 @@ using Mutagen.Bethesda.Skyrim;
 // standalone mesh replacer swaps the .nif without touching the plugin. If that is right, the
 // disagreement should concentrate in records whose winning mesh comes from a replacer mod
 // rather than from Skyrim's own BSAs.
+
+using var __run = RunLog.BeginProcess("geoprobe", args);
 
 string Instance = HarnessTarget.Require(HarnessTarget.Instance, "MO2 instance directory", "instance");
 string GamePath = HarnessTarget.Require(HarnessTarget.Game, "game directory", "game");

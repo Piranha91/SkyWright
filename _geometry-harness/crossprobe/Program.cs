@@ -1,5 +1,6 @@
 using System.Numerics;
 using HousecarlCore;
+using HousecarlCore.Progress;
 
 // Milestone 4c — SYNTHETIC PROOF for the surface-crossing narrow phase.
 //
@@ -9,6 +10,8 @@ using HousecarlCore;
 // It exists because the corpus sweeps cannot tell "the primitive is right and Skyrim is
 // noisy" from "the primitive is wrong". A wall must fire, a floor must not, and if those two
 // are not nailed down first every percentage that follows is unreadable.
+
+using var __run = RunLog.BeginProcess("crossprobe", args);
 
 int pass = 0, fail = 0;
 

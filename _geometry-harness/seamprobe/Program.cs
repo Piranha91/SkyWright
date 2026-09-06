@@ -4,6 +4,7 @@ using HarnessShared;
 using HousecarlCore;
 using Mutagen.Bethesda.Plugins;
 using Mutagen.Bethesda.Skyrim;
+using HousecarlCore.Progress;
 
 // LANDSCAPE SEAMS — mismatched heights and textures where two cells meet (roadmap 4.9, Part B; 2026-09-04).
 //
@@ -36,6 +37,8 @@ using Mutagen.Bethesda.Skyrim;
 //
 // usage: seamprobe [--list N] [--eps U] [--near X,Y] [--worldspace EDID] [--labelled X.esp] [--json FILE] [--emit FILE] [--base EMIT]
 //                  [--enable X.esp]* [--disable X.esp]* [--instance DIR] [--game DIR] [--profile NAME]
+
+using var __run = RunLog.BeginProcess("seamprobe", args);
 
 string Instance = HarnessTarget.Instance;
 string GamePath = HarnessTarget.Game;
@@ -97,8 +100,11 @@ var idx = new CellBoundaryIndex();
 var pluginKey = new ModKey[paths.Count];
 var masterIdx = new HashSet<int>[paths.Count];
 var unreadable = new List<string>();
+__run.Feature("plugins", paths.Count, "plugins").Stage("scan", "reading plugins", paths.Count, "plugins");
+
 for (int p = 0; p < paths.Count; p++)
 {
+    __run.Advance();
     ISkyrimModGetter mod;
     try { mod = SkyrimMod.CreateFromBinaryOverlay(paths[p], SkyrimRelease.SkyrimSE); }
     catch { unreadable.Add(Path.GetFileName(paths[p])); pluginKey[p] = ModKey.Null; masterIdx[p] = new HashSet<int>(); continue; }

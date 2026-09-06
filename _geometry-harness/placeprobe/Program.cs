@@ -2,9 +2,12 @@ using System.Diagnostics;
 using HousecarlCore;
 using Mutagen.Bethesda.Plugins;
 using Mutagen.Bethesda.Skyrim;
+using HousecarlCore.Progress;
 
 // Milestone-1 proof harness: run PlacementExtract over a REAL plugin and report what came out.
 // usage: placeprobe <plugin.esp|esm> [--refs <FormID:Plugin>] [--cell <EditorID>]
+
+using var __run = RunLog.BeginProcess("placeprobe", args);
 
 if (args.Length == 0) { Console.Error.WriteLine("usage: placeprobe <plugin> [--ref 0xFORMID] [--cell EDID]"); return 1; }
 var path = args[0];

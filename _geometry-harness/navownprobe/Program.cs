@@ -3,6 +3,7 @@ using HarnessShared;
 using HousecarlCore;
 using Mutagen.Bethesda.Plugins;
 using Mutagen.Bethesda.Skyrim;
+using HousecarlCore.Progress;
 
 // NAVMESH OWNERSHIP — who actually supplies the navmesh the game will use, and whose work got
 // thrown away getting there.
@@ -56,6 +57,8 @@ using Mutagen.Bethesda.Skyrim;
 // over harness.local.json; Require() runs AFTER them, so a run that passes --instance never
 // trips it, and a run that configures nothing fails with guidance instead of walking a
 // directory that isn't there.
+using var __run = RunLog.BeginProcess("navownprobe", args);
+
 string Instance = HarnessTarget.Instance;
 string GamePath = HarnessTarget.Game;
 string profileName = HarnessTarget.Profile;
@@ -185,9 +188,12 @@ var refGone = new HashSet<FormKey>();
 // a bare catch{continue} and no output saying so.
 var unreadablePlugins = new List<string>();
 long permanentlyDisabledDoors = 0;
+__run.Feature("plugins", paths.Count, "plugins").Stage("scan", "reading plugins", paths.Count, "plugins");
+
 
 for (int p = 0; p < paths.Count; p++)
 {
+    __run.Advance();
     ISkyrimModGetter mod;
     try { mod = SkyrimMod.CreateFromBinaryOverlay(paths[p], SkyrimRelease.SkyrimSE); }
     catch { unreadablePlugins.Add(Path.GetFileName(paths[p])); pluginKey[p] = ModKey.Null; masterIdx[p] = new HashSet<int>(); continue; }

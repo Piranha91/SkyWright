@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.Text;
 using System.Xml.Linq;
 using HarnessShared;
+using HousecarlCore.Progress;
 
 // FOMOD OPTIONS NEVER SELECTED — what the installer offered you and you did not take.
 //
@@ -41,6 +42,8 @@ using HarnessShared;
 // 7z and ZIP all work through the same call.
 //
 // usage: fomodprobe [--list N] [--mod Name] [--jobs N]
+
+using var __run = RunLog.BeginProcess("fomodprobe", args);
 
 string Instance = HarnessTarget.Require(HarnessTarget.Instance, "MO2 instance directory", "instance");
 string Profile = HarnessTarget.Require(HarnessTarget.Profile, "MO2 profile name", "profile");

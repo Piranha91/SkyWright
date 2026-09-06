@@ -94,6 +94,49 @@ import time
 import urllib.error
 import urllib.request
 
+
+# ---------------------------------------------------------------- run log --
+# The progress/timing contract (standards/HOUSECARL_RUN_EVENTS.md, roadmap 4.16). Loaded by path
+# rather than imported, because a probe's tools directory is not on the repo's import path; if the
+# adapter is missing the whole thing degrades to a no-op and this script behaves as it did before.
+def _runlog():
+    import importlib.util
+    here = os.path.dirname(os.path.abspath(__file__))
+    cand = os.path.abspath(os.path.join(here, "..", "..", "..", "scripts", "runlog.py"))
+    if not os.path.isfile(cand):
+        return None
+    try:
+        spec = importlib.util.spec_from_file_location("housecarl_runlog", cand)
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        return mod
+    except Exception:
+        return None
+
+
+_RUNLOG = _runlog()
+
+
+class _NullRun:
+    def __getattr__(self, _name):
+        return lambda *a, **k: self
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *a):
+        return False
+
+
+def _run(op, **kw):
+    if _RUNLOG is None:
+        return _NullRun()
+    try:
+        return _RUNLOG.Run(op, **kw)
+    except Exception:
+        return _NullRun()
+
+
 HERE = os.path.dirname(os.path.abspath(__file__))
 VIEWPROBE_DIR = os.path.dirname(HERE)
 
@@ -1564,4 +1607,13 @@ def main(argv=None):
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    # The mode is what makes two shotplan runs comparable: `plan` shells out to viewprobe
+    # repeatedly and `frame` does arithmetic, and averaging the two would describe neither.
+    _mode = sys.argv[1] if len(sys.argv) > 1 and not sys.argv[1].startswith("-") else None
+    with _run("shotplan", mode=_mode) as _r:
+        _code = main()
+        if _code:
+            _r.refuse(f"exit code {_code}", exit_code=_code)
+        else:
+            _r.tally(ok=1)
+    sys.exit(_code)

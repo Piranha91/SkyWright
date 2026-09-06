@@ -5,6 +5,7 @@ using HarnessShared;
 using HousecarlCore;
 using Mutagen.Bethesda.Plugins;
 using Mutagen.Bethesda.Skyrim;
+using HousecarlCore.Progress;
 
 // floorgapprobe — the navmesh-to-floor offset δ (roadmap 4.7's band, Q24).
 //
@@ -55,6 +56,8 @@ using Mutagen.Bethesda.Skyrim;
 //   Refs are the plugin's placements (persistent ones included, bucketed by position); an exterior cell's navmesh is
 //   read against the 3×3 neighbourhood's refs, because a floor mesh placed in the next cell reaches under this one.
 //   Initially-disabled and deleted refs are not floors. No Base Object Swapper layer (FloorFeed's header says why).
+
+using var __run = RunLog.BeginProcess("floorgapprobe", args);
 
 string Instance = HarnessTarget.Instance, GamePath = HarnessTarget.Game, profileName = HarnessTarget.Profile;
 string plugin = "Skyrim.esm";
@@ -399,9 +402,12 @@ int verdictNoSample = 0;
 Span<Vector3> pts = stackalloc Vector3[4];
 Span<FloorReading> reads = stackalloc FloorReading[4];
 int swept = 0;
+__run.Feature("cells", toSweep.Count, "cells").Stage("sweep", "sweeping cells", toSweep.Count, "cells");
+
 
 foreach (var e in toSweep)
 {
+    __run.Advance();
     swept++;
     var field = Field(e);
     var cellOffs = new List<float>(); var cellNavZ = new List<float>();

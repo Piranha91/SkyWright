@@ -6,6 +6,7 @@ using HarnessShared;
 using HousecarlCore;
 using Mutagen.Bethesda.Plugins;
 using Mutagen.Bethesda.Skyrim;
+using HousecarlCore.Progress;
 
 // BOSPROBE — the Base Object Swapper reader, run over a load order and read back against the game.
 //
@@ -28,6 +29,8 @@ using Mutagen.Bethesda.Skyrim;
 //                 [--no-apply]           stop after the parse-level account
 //
 // Nothing is compiled in — see _shared/HarnessTarget.cs.
+
+using var __run = RunLog.BeginProcess("bosprobe", args);
 
 string Instance = HarnessTarget.Instance;
 string GamePath = HarnessTarget.Game;

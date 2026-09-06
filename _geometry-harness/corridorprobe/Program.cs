@@ -5,6 +5,7 @@ using HarnessShared;
 using HousecarlCore;
 using Mutagen.Bethesda.Plugins;
 using Mutagen.Bethesda.Skyrim;
+using HousecarlCore.Progress;
 
 // corridorprobe — choose and measure navmesh CORRIDORS from the records, for roadmap 4.7 Part C; and read the in-game
 // arms back through the route-cut rule (4.7's closing step).
@@ -53,6 +54,8 @@ using Mutagen.Bethesda.Skyrim;
 //          (*_SWAP.ini, from the profile's VFS; _shared/BosHook.cs) for the cell it stood in — the obstacle the ENGINE
 //          loaded for that base record — and the row says so. The pose stays as the arms file gives it (the engine's own,
 //          read back after any override applied), so a transform line is named, never re-applied. off: the record base.
+
+using var __run = RunLog.BeginProcess("corridorprobe", args);
 
 string GamePath = HarnessTarget.Require(HarnessTarget.Game, "game directory", "game");
 string dataDir = Path.Combine(GamePath, "Data");

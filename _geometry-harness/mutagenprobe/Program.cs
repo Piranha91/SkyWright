@@ -2,9 +2,12 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
+using HousecarlCore.Progress;
 
 // Reflection probe over Mutagen.Bethesda.Skyrim 0.54.4 — the EXACT version houseCARL pins.
 // Purpose: ground the placement + navmesh API before any code is written against it.
+
+using var __run = RunLog.BeginProcess("mutagenprobe", args);
 
 var asms = new[] {
     typeof(Mutagen.Bethesda.Skyrim.PlacedObject).Assembly,          // Mutagen.Bethesda.Skyrim
