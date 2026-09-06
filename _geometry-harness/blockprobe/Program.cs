@@ -225,6 +225,7 @@ Geo Geometry(string rel)
 float ActorHeight = ActorBand.ScaleOneHeight;
 const float Clearance = ActorBand.StepHeight;
 const float TriInset = 12f;       // navprobe's edge-graze forgiveness
+ActorBand.ResolveControllers(raceFacts, assets);
 var (fallbackTop, fallbackSrc) = ActorBand.TallestPlayable(raceFacts);
 Console.WriteLine(FloorFeed.BandLine(controllerBand) + $"; top fallback {fallbackSrc}; the surface rules keep the navmesh-relative band {Clearance:0}..top");
 var winRefsByCell = winRef.Values.GroupBy(r => winRefCell[r.FormKey]).ToDictionary(g => g.Key, g => g.ToList());
@@ -298,6 +299,7 @@ foreach (var (cellKey, tcell) in targetCells)
 
     var band = ActorBand.ForCell(winRefsByCell.TryGetValue(cellKey, out var cellRefs) ? cellRefs : Array.Empty<PlacedRef>(),
                                  npcFacts, raceFacts, fallbackTop, fallbackSrc);
+    if (!float.IsFinite(band.Top)) { Console.WriteLine($"UNJUDGEABLE actor band in {cellKey}: {band.Source}"); continue; }
     ActorHeight = band.Top;
     float physicalTop = controllerBand ? ActorBand.PhysicalControllerTop(band.Top) : band.Top;
     var floor = FloorFor(cellKey, cellRefs);
@@ -395,7 +397,7 @@ foreach (var (cellKey, tcell) in targetCells)
             {
                 routeMeasured++;
                 gnodes ??= NavGraph.Build(index).Nodes;
-                var facts = RouteConnectivity.Measure(index, columns, world, RouteMargin, RouteStep, ActorBand.PhysicalStep, physicalTop, Ladder, graph: gnodes, floorAt: floor.FloorAt);
+                var facts = RouteConnectivity.Measure(index, columns, world, RouteMargin, RouteStep, ActorBand.PhysicalStep, physicalTop, Ladder, graph: gnodes, floorAt: floor.FloorAt, isStairsMaterial: DetectorModel.IsStairsMaterial);
                 var v64 = DetectorModel.RouteBlockage(facts.Judged, facts.Touched, facts.MaxIntactRung, facts.MaxIntactRungWithout, Ladder, 64f);
                 var v128 = DetectorModel.RouteBlockage(facts.Judged, facts.Touched, facts.MaxIntactRung, facts.MaxIntactRungWithout, Ladder, 128f);
                 Tally(routeTally64, v64.Verdict); Tally(routeTally128, v128.Verdict);
@@ -405,7 +407,7 @@ foreach (var (cellKey, tcell) in targetCells)
                                    facts.Touched, facts.MaxIntactRung, facts.MaxIntactRungWithout));
 
                 var line = facts.Line;
-                var vc = DetectorModel.RouteCut(facts.Judged, facts.Touched, line?.Found ?? false, line?.Why ?? "", line?.Cut ?? false, line?.Passage ?? float.NaN, cutRise: line?.CutRise ?? float.NaN, cutFloat: line?.CutFloat ?? float.NaN);
+                var vc = DetectorModel.RouteCut(facts.Judged, facts.Touched, line?.Found ?? false, line?.Why ?? "", line?.Cut ?? false, line?.Passage ?? float.NaN, cutRise: line?.CutRise ?? float.NaN, cutFloat: line?.CutFloat ?? float.NaN, cutOnStairs: line?.CutOnStairs ?? false);
                 TallyCut(vc.Verdict);
                 if (eff.Touched) { cutTallyBos.TryGetValue(vc.Verdict, out var bt); cutTallyBos[vc.Verdict] = bt + 1; }
                 crossTab.TryGetValue((v64.Verdict, vc.Verdict), out var xt); crossTab[(v64.Verdict, vc.Verdict)] = xt + 1;
@@ -445,6 +447,7 @@ if (stateArm is not null && stateIdx is not null)
         var index = NavmeshIndex.Build(navs.Select(n => n.Nav).ToList(), out _);
         if (index.TriangleCount == 0) continue;
         var band = ActorBand.ForCell(winRefsByCell.TryGetValue(cellKey, out var cellRefs2) ? cellRefs2 : Array.Empty<PlacedRef>(), npcFacts, raceFacts, fallbackTop, fallbackSrc);
+        if (!float.IsFinite(band.Top)) { Console.WriteLine($"UNJUDGEABLE actor band in {cellKey}: {band.Source}"); continue; }
         float routeTop = controllerBand ? ActorBand.PhysicalControllerTop(band.Top) : band.Top;
         var floor = FloorFor(cellKey, cellRefs2);
         Dictionary<NavGraph.TriRef, NavGraph.Node>? gnodes = null;
@@ -457,7 +460,7 @@ if (stateArm is not null && stateIdx is not null)
             if (model.IsEmpty) continue;
             var soup = NavcutGeometry.Soup(prim);
             var world = SpatialOverlap.ToWorld(model, w.Pos, w.Rot, w.Scale);
-            var columns = MeshColumnIndex.Build(NavcutGeometry.WorldVertices(soup, w.Pos, w.Rot, w.Scale), soup.Indices);
+            var columns = MeshColumnIndex.Build(NavcutGeometry.WorldVertices(soup, w.Pos, w.Rot, w.Scale), soup.Indices, triangleMaterials: soup.TriangleMaterials);
             bool crosses = false;
             foreach (var t in index.Query(SpatialOverlap.GrowDown(world, routeTop)))
             {
@@ -468,9 +471,9 @@ if (stateArm is not null && stateIdx is not null)
             }
             if (!crosses) { navcutNoCross++; continue; }
             gnodes ??= NavGraph.Build(index).Nodes;
-            var facts = RouteConnectivity.Measure(index, columns, world, RouteMargin, RouteStep, ActorBand.PhysicalStep, routeTop, Ladder, graph: gnodes, floorAt: floor.FloorAt);
+            var facts = RouteConnectivity.Measure(index, columns, world, RouteMargin, RouteStep, ActorBand.PhysicalStep, routeTop, Ladder, graph: gnodes, floorAt: floor.FloorAt, isStairsMaterial: DetectorModel.IsStairsMaterial);
             var line = facts.Line;
-            var vc = DetectorModel.RouteCut(facts.Judged, facts.Touched, line?.Found ?? false, line?.Why ?? "", line?.Cut ?? false, line?.Passage ?? float.NaN, cutRise: line?.CutRise ?? float.NaN, cutFloat: line?.CutFloat ?? float.NaN);
+            var vc = DetectorModel.RouteCut(facts.Judged, facts.Touched, line?.Found ?? false, line?.Why ?? "", line?.Cut ?? false, line?.Passage ?? float.NaN, cutRise: line?.CutRise ?? float.NaN, cutFloat: line?.CutFloat ?? float.NaN, cutOnStairs: line?.CutOnStairs ?? false);
             navcutMeasured++;
             navcutTally.TryGetValue(vc.Verdict, out var nt); navcutTally[vc.Verdict] = nt + 1;
             string plugin = stateIdx.History.Of(nk) is { Count: > 0 } h ? Path.GetFileName(paths[h[0].Plugin]) : "?";
@@ -600,7 +603,7 @@ static MeshColumnIndex? BuildColumns(TriangleSoup soup, Vec3 pos, Vec3 rot, floa
     var t = new Vector3(pos.X, pos.Y, pos.Z);
     var w = new Vector3[soup.Vertices.Length];
     for (int i = 0; i < w.Length; i++) w[i] = Vector3.Transform(soup.Vertices[i] * scale, m) + t;
-    return MeshColumnIndex.Build(w, soup.Indices);
+    return MeshColumnIndex.Build(w, soup.Indices, triangleMaterials: soup.TriangleMaterials);
 }
 
 record Geo(Aabb Box, bool HasCollision, bool Ok, TriangleSoup? Soup, string Source);

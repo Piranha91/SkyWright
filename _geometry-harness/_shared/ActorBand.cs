@@ -7,58 +7,11 @@ using Mutagen.Bethesda.Plugins;
 using Mutagen.Bethesda.Plugins.Records;
 using Mutagen.Bethesda.Skyrim;
 
-// ======================================================================
-//  ActorBand — the actor column's top and bottom, DERIVED, not assumed.
-//
-//  The surface-crossing and severance tests judge only the band from
-//  `clearance` (step height) to `height` (head height) above each navmesh
-//  triangle, so an archway or a bridge over the navmesh is never a cut.
-//  Until 2026-09-02 the top was a constant, 128 u — a scale-1 humanoid —
-//  for everyone. Piranha's refinement (roadmap 4.7, Part B): derive it from
-//  the tallest humanoid that can stand in the cell — the race heights and
-//  scales of the NPCs placed there, or the load order's tallest playable
-//  race when the cell holds none — and PRINT what was derived.
-//
-//  The bottom was the assumed 32 u from milestone 4c to 2026-09-05 and is now
-//  MEASURED (Q23 Part A: five fresh games, ~230 arms, the Ratway corridor):
-//  a package-free humanoid clone walking at its own pace got up a 48 u beam
-//  in every repeat at SetScale 0.7 / 0.78 / 1.0 / 1.3 and as the child race
-//  (race Height 0.8); 52 u in every repeat as an adult (half the time stalling
-//  on top of it), two of three as the child race, one of three at 0.7; 55 u
-//  only at scale 1.3 (3 of 4) or running (4 of 4 at 240 u/s); 60 u only
-//  running (1 of 4). The step barely follows the actor's size — proportional
-//  scaling would have put the 0.7 body near 35 u and the 1.3 body near 70 — so
-//  the bottom is a CONSTANT for humanoids: 48 u, the highest rung every walking
-//  humanoid cleared every time, with a band (48, 60] above it where pace and
-//  size decide, which the route-cut verdict names. The shortest-actor
-//  derivation the handoff proposed is moot within one rung. Creatures are
-//  another class (a goat is stopped by a 22 u beam; a dog would not path the
-//  corridor at all) and are catalogued, not folded. Every height there is
-//  ABOVE THE NAVMESH; at that station the navmesh floats 10 u above the
-//  physical floor. Research/ACTOR-BAND-BOTTOM-2026-09-05.md.
-//
-//  Q24 (the same day, Research/NAVMESH-FLOOR-OFFSET-2026-09-05.md) measured
-//  that offset over every vanilla cell from the collision floor: centred near
-//  zero, not ten, and a within-cell texture (−9..+12 u around a cell's own
-//  median) rather than a per-cell number. So the band now stands on the
-//  PHYSICAL floor under each raster cell (RouteConnectivity.Measure's floorAt,
-//  a FloorField per cell) and its ends are stated above the walker's FEET:
-//  the measured rungs plus the station's offset (PhysicalStep 58.4 u,
-//  PhysicalControllerTop = the controller top + 10.4). Q25 (two more
-//  stations, 2026-09-05) put the step band's top at 76 u above the feet —
-//  stated on its own, not as the Ratway's 60 plus the offset — and found
-//  that an object whose underside floats FloatWall (20 u) or more above the
-//  feet is a wall whatever its top; Q26 folded both.
-//  At the station that is byte for byte the band as measured; elsewhere it is
-//  the band the walker meets. The navmesh-relative constants stay as the
-//  record of what was measured and as the fallback where no floor is read.
-//
-//  Height arithmetic follows viewprobe's NpcResolve for the race height (for
-//  the NPC's sex) × the NPC's own Height, on a 128 u scale-1 figure — and NOT
-//  the placement's scale any more (2026-09-05, in ForCell). Templated NPCs are
-//  read from their own record, not their template — counted, so a cell whose
-//  only actors are leveled spawns is known to fall back.
-// ======================================================================
+// The top is derived from placed actors' race height and NPC height. Reference scale contributes only for a
+// generated controller, which the engine builds at placement scale on cell load. Custom skeleton phantoms ignore it.
+// ResolveControllers reads the winning skeleton, per sex; no race-name allowlist. An unclassified scaled actor makes
+// the cell unjudgeable. Template inheritance and the absolute controller dimensions remain outside this derivation.
+// The bottom and radius remain the measured humanoid model; this fold changes the scale term, not creature locomotion.
 
 internal static class ActorBand
 {
@@ -103,7 +56,34 @@ internal static class ActorBand
     public static float PhysicalControllerTop(float nominalTop) => ControllerTop(nominalTop) + StationOffset;
 
     public sealed record NpcFacts(FormKey Race, bool Female, float Height, bool Templated);
-    public sealed record RaceFacts(float Male, float Female, bool Playable, string? EditorId);
+    public sealed record RaceFacts(float Male, float Female, bool Playable, string? EditorId,
+        string? MaleSkeleton = null, string? FemaleSkeleton = null,
+        ControllerShapeFact? MaleController = null, ControllerShapeFact? FemaleController = null);
+
+    /// <summary>Resolve the census from the winning skeleton assets, per sex, after collecting the winning races.
+    /// Cache by path within this order only; an overridden skeleton can change a race's controller without a RACE edit.</summary>
+    public static void ResolveControllers(Dictionary<FormKey, RaceFacts> races, AssetResolver assets)
+    {
+        var cache = new Dictionary<string, ControllerShapeFact>(StringComparer.OrdinalIgnoreCase);
+        ControllerShapeFact Read(string? path)
+        {
+            if (string.IsNullOrWhiteSpace(path)) return new(null, "race has no skeleton path");
+            path = path.Replace('\\', '/');
+            if (!path.StartsWith("meshes/", StringComparison.OrdinalIgnoreCase)) path = "meshes/" + path;
+            if (cache.TryGetValue(path, out var hit)) return hit;
+            var resolved = assets.ResolveForPlacement(path);
+            ControllerShapeFact fact;
+            if (resolved.Sources.Count == 0) fact = new(null, $"skeleton not resolved: {path}");
+            else
+            {
+                var (bytes, error) = AssetResolver.ReadPlacementSource(resolved.Sources[0]);
+                fact = bytes is null ? new(null, $"skeleton unreadable: {path}: {error}") : SkeletonController.Inspect(bytes);
+            }
+            return cache[path] = fact;
+        }
+        foreach (var (key, race) in races.ToArray())
+            races[key] = race with { MaleController = Read(race.MaleSkeleton), FemaleController = Read(race.FemaleSkeleton) };
+    }
 
     /// <summary>Read every NPC and race a mod carries. Call in load order so a later plugin's override wins.</summary>
     public static void Collect(ISkyrimModGetter mod, Dictionary<FormKey, NpcFacts> npcs, Dictionary<FormKey, RaceFacts> races)
@@ -125,7 +105,7 @@ internal static class ActorBand
         {
             float m = race.Height.Male, f = race.Height.Female;
             races[race.FormKey] = new RaceFacts(float.IsFinite(m) && m > 0 ? m : 1f, float.IsFinite(f) && f > 0 ? f : 1f,
-                                                race.Flags.HasFlag(Race.Flag.Playable), race.EditorID);
+                                                race.Flags.HasFlag(Race.Flag.Playable), race.EditorID, race.SkeletalModel?.Male?.File.GivenPath, race.SkeletalModel?.Female?.File.GivenPath);
         }
     }
 
@@ -155,20 +135,26 @@ internal static class ActorBand
             if (r.InitiallyDisabled || r.Deleted) continue;
             actors++;
             if (n.Templated) templated++;
-            float raceH = races.TryGetValue(n.Race, out var rc) ? (n.Female ? rc.Female : rc.Male) : 1f;
-            // The placement's scale is NOT a factor (measured 2026-09-05, five games): a clone at SetScale 0.7 was stopped
-            // by the same overhead beams as the adult and one at 1.3 walked under one the adult's top clears, before and
-            // after its 3D was rebuilt at the scaled size — the character controller follows the RACE's Height (a race
-            // with Height 0.8 was stopped by an underside at 85 u and walked under 100, where the 1.03 race is stopped by
-            // 100 and walks under 120) and ignores the reference scale. The NPC record's own Height is untested (every
-            // walker carried 1.0) and stays in as the race's kind of factor. A scaled placement is a bigger picture with
-            // the same 22 u radius and the same top; the source string says when one was not counted.
-            float top = ScaleOneHeight * raceH * n.Height;
+            if (!races.TryGetValue(n.Race, out var rc))
+                return (float.NaN, actors, templated, $"actor {r.FormKey}: race {n.Race} unresolved; band unjudgeable");
+            float raceH = n.Female ? rc.Female : rc.Male;
+            var controller = n.Female ? rc.FemaleController : rc.MaleController;
+            bool scaled = MathF.Abs(r.Scale - 1f) > 1e-6f;
+            if (!float.IsFinite(r.Scale) || r.Scale <= 0f)
+                return (float.NaN, actors, templated, $"actor {r.FormKey}: invalid placement scale {r.Scale}; band unjudgeable");
+            if (scaled && controller?.ControllerCustom is null)
+                return (float.NaN, actors, templated, $"actor {r.FormKey}, race {rc.EditorId ?? n.Race.ToString()}: controller unclassified ({controller?.Why ?? "census not resolved"}), placement scale {r.Scale:0.###}; band unjudgeable");
+            float placementScale = controller?.ControllerCustom == false ? r.Scale : 1f;
+            float top = ScaleOneHeight * raceH * n.Height * placementScale;
             if (top > best)
             {
                 best = top;
-                who = $"{(races.TryGetValue(n.Race, out var rr) ? rr.EditorId : n.Race.ToString())} x{raceH * n.Height:0.###}"
-                    + (MathF.Abs(r.Scale - 1f) > 0.01f ? $" (placement scale {r.Scale:0.##} not counted)" : "");
+                who = $"{r.FormKey}, race {rc.EditorId ?? n.Race.ToString()} x{raceH * n.Height:0.###}"
+                    + (controller?.ControllerCustom == false
+                        ? $" (generated controller; placement scale {r.Scale:0.###} counted at 3D build)"
+                        : controller?.ControllerCustom == true
+                            ? $" (custom controller; placement scale {r.Scale:0.###} not counted)"
+                            : $" (controller unclassified: {controller?.Why ?? "census not resolved"}; unit placement scale has no effect)");
             }
         }
         if (actors == 0 || best <= 0f) return (fallbackTop, actors, templated, $"no actors in cell: {fallbackSource}");

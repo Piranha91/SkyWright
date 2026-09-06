@@ -252,6 +252,7 @@ if (routeOn)
             }
         }
     }
+    ActorBand.ResolveControllers(raceFacts, assets);
     var (fallbackTop, fallbackSrc) = ActorBand.TallestPlayable(raceFacts);
     Console.WriteLine($"route oracle: winning navmesh read for {winNav.Count:N0} of {wantedCells.Count:N0} cells; actor band fallback {fallbackSrc}; the band stands on the physical floor (Q24: {floorRefsByWorld.Values.Sum(w => w.Values.Sum(d => d.Count)):N0} exterior floor refs filed for {cellGridOf.Count:N0} exterior cells' neighbourhoods)  ({sw.Elapsed.TotalSeconds:0.0}s)");
     var navIndex = new Dictionary<FormKey, (NavmeshIndex Index, float Top, Dictionary<NavGraph.TriRef, NavGraph.Node>? Graph, FloorField Floor)>();
@@ -299,6 +300,7 @@ if (routeOn)
         {
             var index = NavmeshIndex.Build(navs.Values.ToList(), out _);
             var band = ActorBand.ForCell(cellRefs.TryGetValue(w.Cell, out var crefs) ? crefs : Array.Empty<PlacedRef>(), npcFacts, raceFacts, fallbackTop, fallbackSrc);
+            if (!float.IsFinite(band.Top)) { why = $"UNJUDGEABLE actor band: {band.Source}"; return null; }
             // The floor the band stands on (Q24): the 3×3 neighbourhood of an exterior, else the cell's own refs.
             (Aabb Box, TriangleSoup Soup)? FloorGeometry(PlacedRef r)
             {
@@ -336,7 +338,7 @@ if (routeOn)
         }
         var world = SpatialOverlap.ToWorld(model, w.Pos, w.Rot, w.Scale);
         var verts = NavcutGeometry.WorldVertices(soup, w.Pos, w.Rot, w.Scale);
-        var columns = MeshColumnIndex.Build(verts, soup.Indices);
+        var columns = MeshColumnIndex.Build(verts, soup.Indices, triangleMaterials: soup.TriangleMaterials);
         // The cheap test first, as blockprobe does: does the solid enter an actor column over any walkable triangle?
         var q = SpatialOverlap.GrowDown(world, ni.Top);
         bool crosses = false;
@@ -350,9 +352,9 @@ if (routeOn)
         }
         if (!crosses) { why = "never enters an actor column over walkable ground"; routeNoCross++; return RouteCutVerdict.None; }
         if (ni.Graph is null) { ni.Graph = NavGraph.Build(ni.Index).Nodes; navIndex[w.Cell] = ni; }
-        var facts = RouteConnectivity.Measure(ni.Index, columns, world, 256f, 16f, ActorBand.PhysicalStep, ni.Top, Ladder, graph: ni.Graph, floorAt: ni.Floor.FloorAt);
+        var facts = RouteConnectivity.Measure(ni.Index, columns, world, 256f, 16f, ActorBand.PhysicalStep, ni.Top, Ladder, graph: ni.Graph, floorAt: ni.Floor.FloorAt, isStairsMaterial: DetectorModel.IsStairsMaterial);
         var line = facts.Line;
-        var vc = DetectorModel.RouteCut(facts.Judged, facts.Touched, line?.Found ?? false, line?.Why ?? "", line?.Cut ?? false, line?.Passage ?? float.NaN, cutRise: line?.CutRise ?? float.NaN, cutFloat: line?.CutFloat ?? float.NaN);
+        var vc = DetectorModel.RouteCut(facts.Judged, facts.Touched, line?.Found ?? false, line?.Why ?? "", line?.Cut ?? false, line?.Passage ?? float.NaN, cutRise: line?.CutRise ?? float.NaN, cutFloat: line?.CutFloat ?? float.NaN, cutOnStairs: line?.CutOnStairs ?? false);
         routeMeasured++;
         why = vc.Why;
         return vc.Verdict;

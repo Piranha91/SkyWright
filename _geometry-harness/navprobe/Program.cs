@@ -119,6 +119,7 @@ Console.WriteLine("   " + bos.LayerLine());
 var bosRep = new BosApplyReport();
 // The actor band's top is DERIVED per cell (the tallest placed actor, else the tallest playable race) since
 // 2026-09-02; the settings' Height column is what the BROAD rules still use and what every earlier run used.
+ActorBand.ResolveControllers(raceFacts, assets);
 var (fallbackTop, fallbackSrc) = ActorBand.TallestPlayable(raceFacts);
 Console.WriteLine(FloorFeed.BandLine(controllerBand) + $"; top fallback {fallbackSrc}");
 int cellsWithActors = 0; float bandMin = float.MaxValue, bandMax = 0f;
@@ -213,7 +214,7 @@ static MeshColumnIndex? BuildColumns(TriangleSoup soup, Vec3 pos, Vec3 rot, floa
     var w = new System.Numerics.Vector3[soup.Vertices.Length];
     for (int i = 0; i < w.Length; i++)
         w[i] = System.Numerics.Vector3.Transform(soup.Vertices[i] * scale, m) + t;
-    return MeshColumnIndex.Build(w, soup.Indices);
+    return MeshColumnIndex.Build(w, soup.Indices, triangleMaterials: soup.TriangleMaterials);
 }
 
 // ---- sweep vanilla cells ----
@@ -292,6 +293,7 @@ foreach (var cp in PlacementExtract.FromMod(mod))
     if (index.TriangleCount == 0) continue;
 
     var band = ActorBand.ForCell(cp.Refs, npcFacts, raceFacts, fallbackTop, fallbackSrc);
+    if (!float.IsFinite(band.Top)) { Console.WriteLine($"UNJUDGEABLE actor band in {cp.Cell}: {band.Source}"); continue; }
     float bandTop = band.Top;
     float physicalTop = controllerBand ? ActorBand.PhysicalControllerTop(bandTop) : bandTop;
     // The floor the band stands on in this cell: its own refs for an interior, the 3×3 neighbourhood by position for an
@@ -413,7 +415,7 @@ foreach (var cp in PlacementExtract.FromMod(mod))
         {
             routeMeasured++;
             gnodes ??= NavGraph.Build(index).Nodes;
-            var facts = RouteConnectivity.Measure(index, columns, world, RouteMargin, RouteStep, ActorBand.PhysicalStep, physicalTop, Ladder, graph: gnodes, floorAt: floor.FloorAt);
+            var facts = RouteConnectivity.Measure(index, columns, world, RouteMargin, RouteStep, ActorBand.PhysicalStep, physicalTop, Ladder, graph: gnodes, floorAt: floor.FloorAt, isStairsMaterial: DetectorModel.IsStairsMaterial);
             var v64 = DetectorModel.RouteBlockage(facts.Judged, facts.Touched, facts.MaxIntactRung, facts.MaxIntactRungWithout, Ladder, 64f);
             var v128 = DetectorModel.RouteBlockage(facts.Judged, facts.Touched, facts.MaxIntactRung, facts.MaxIntactRungWithout, Ladder, 128f);
             int col = v64.Verdict switch { RouteVerdict.Blocked => 0, RouteVerdict.Narrowed => 1, RouteVerdict.Clipped => v128.Verdict == RouteVerdict.Narrowed ? 2 : 3, RouteVerdict.None => 4, _ => 5 };
@@ -424,7 +426,7 @@ foreach (var cp in PlacementExtract.FromMod(mod))
                 routeBlocked.Add((cp.CellEditorId ?? cp.Cell.ToString(), bm.Mesh, bm.Type, r.FormKey, v64.Why));
 
             var line = facts.Line;
-            var vc = DetectorModel.RouteCut(facts.Judged, facts.Touched, line?.Found ?? false, line?.Why ?? "", line?.Cut ?? false, line?.Passage ?? float.NaN, cutRise: line?.CutRise ?? float.NaN, cutFloat: line?.CutFloat ?? float.NaN);
+            var vc = DetectorModel.RouteCut(facts.Judged, facts.Touched, line?.Found ?? false, line?.Why ?? "", line?.Cut ?? false, line?.Passage ?? float.NaN, cutRise: line?.CutRise ?? float.NaN, cutFloat: line?.CutFloat ?? float.NaN, cutOnStairs: line?.CutOnStairs ?? false);
             int ccol = vc.Verdict switch { RouteCutVerdict.Blocked => 0, RouteCutVerdict.LikelyBlocked => 1, RouteCutVerdict.Clipped => 2, RouteCutVerdict.NoLine => 3, RouteCutVerdict.None => 4, _ => 5 };
             var cC = RouteRow(cutByClass, cls); cC[ccol]++; cC[6]++;
             var cT = RouteRow(cutByType, bm.Type); cT[ccol]++; cT[6]++;

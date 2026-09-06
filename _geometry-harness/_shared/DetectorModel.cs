@@ -930,13 +930,17 @@ public static class DetectorModel
     /// and pace, and the why names it with the measured rates.</para></summary>
     public static (RouteCutVerdict Verdict, string Why) RouteCut(bool judged, int touched, bool lineFound, string lineWhy,
                                                                   bool cut, float passage, float blockedBelow = 48f, float cutRise = float.NaN,
-                                                                  float cutFloat = float.NaN)
+                                                                  float cutFloat = float.NaN, bool cutOnStairs = false)
     {
         if (!judged) return (RouteCutVerdict.Unjudgeable, "the window could not be measured");
         if (touched <= 0) return (RouteCutVerdict.None, "the object never enters an actor column over walkable ground");
         if (!lineFound) return (RouteCutVerdict.NoLine, $"on walkable ground ({touched} cells), but the window has no path line to test: {lineWhy}");
         if (!cut) return (RouteCutVerdict.Clipped, $"stands on walkable ground ({touched} cells) beside the corridor's path line, not across it");
-        string band = cutFloat >= FloatWall ? FloatWallClause(cutFloat) : StepBandClause(cutRise);
+        if (cutOnStairs && cutRise < PhysicalStepBandTop && float.IsFinite(cutRise) && float.IsFinite(cutFloat) && cutFloat < FloatWall)
+            return (RouteCutVerdict.None, $"stairs-material contact rises {cutRise:0.###} u above the feet, below {PhysicalStepBandTop:0} u: a step");
+        string band = cutFloat >= FloatWall ? FloatWallClause(cutFloat)
+            + (cutOnStairs ? "; the float rule is unchanged on stairs materials (unproven in game)" : "")
+            : cutOnStairs ? "" : StepBandClause(cutRise);
         if (passage < blockedBelow)
             return (RouteCutVerdict.Blocked, $"cuts the path line at capsule width with {passage:0} u open beside it (under {blockedBelow:0} u){band}");
         return (RouteCutVerdict.LikelyBlocked, $"cuts the path line at capsule width with {passage:0} u open beside it — the engine takes such a passage about half the time{band}");
@@ -948,6 +952,11 @@ public static class DetectorModel
     /// it is never an obstacle to a humanoid. Was 32 u (assumed) from milestone 4c until 2026-09-05. This is the constant's
     /// one home (DetectorModel is compiled into every probe; ActorBand forwards to it).</summary>
     public const float StepHeight = 48f;
+
+    /// <summary>nif.xml material names, supplied to the geometry sweep as data. The measured convex stairs effect is
+    /// provisionally applied to compressed chunks and the other named stairs materials; those transfers are unproven.</summary>
+    public static bool IsStairsMaterial(string? material) =>
+        material?.StartsWith("SKY_HAV_MAT_STAIRS_", StringComparison.Ordinal) == true;
 
     /// <summary>The top of the step band ABOVE THE NAVMESH at the Ratway station — the record of Q23's measurement. Above
     /// <see cref="StepHeight"/> and up to here, whether a walking humanoid gets over the object depends on its size and

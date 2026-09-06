@@ -334,12 +334,13 @@ if (mode == "arms" || mode == "cut")
             var t = new Vector3(pos.X, pos.Y, pos.Z);
             var w = new Vector3[g.Soup.Vertices.Length];
             for (int i = 0; i < w.Length; i++) w[i] = Vector3.Transform(g.Soup.Vertices[i] * sc, m) + t;
-            var columns = MeshColumnIndex.Build(w, g.Soup.Indices);
-            var fr = RouteConnectivity.Measure(navs, columns, world, 256f, 16f, ActorBand.PhysicalStep, top, ladder, graph: gnodes, keepRaster: true, floorAt: floor.FloorAt);
-            var vc = DetectorModel.RouteCut(fr.Judged, fr.Touched, fr.Line?.Found ?? false, fr.Line?.Why ?? "", fr.Line?.Cut ?? false, fr.Line?.Passage ?? float.NaN, cutRise: fr.Line?.CutRise ?? float.NaN, cutFloat: fr.Line?.CutFloat ?? float.NaN);
+            var columns = MeshColumnIndex.Build(w, g.Soup.Indices, triangleMaterials: g.Soup.TriangleMaterials);
+            var fr = RouteConnectivity.Measure(navs, columns, world, 256f, 16f, ActorBand.PhysicalStep, top, ladder, graph: gnodes, keepRaster: true, floorAt: floor.FloorAt, isStairsMaterial: DetectorModel.IsStairsMaterial);
+            var vc = DetectorModel.RouteCut(fr.Judged, fr.Touched, fr.Line?.Found ?? false, fr.Line?.Why ?? "", fr.Line?.Cut ?? false, fr.Line?.Passage ?? float.NaN, cutRise: fr.Line?.CutRise ?? float.NaN, cutFloat: fr.Line?.CutFloat ?? float.NaN, cutOnStairs: fr.Line?.CutOnStairs ?? false);
             Console.WriteLine($"   verdict {vc.Verdict}: {vc.Why}");
             Console.WriteLine($"   facts: {Facts(fr)}; judged={fr.Judged} storeys {fr.Storeys} (storey z {fr.StoreyZ:0.#}); band {fr.BandBottom:0.#}..{fr.BandTop:0.#} u above the floor; raster step {fr.Step:0}");
-            Console.WriteLine($"   READER (NifGeometry, root transform applied): mesh-space solid box ({g.Box.Min.X:0}, {g.Box.Min.Y:0}, {g.Box.Min.Z:0})..({g.Box.Max.X:0}, {g.Box.Max.Y:0}, {g.Box.Max.Z:0})");
+            Console.WriteLine($"   collision materials: {string.Join(", ", (g.Soup.TriangleMaterials ?? new string?[] { null }).Select(x => x ?? "unknown").Distinct().OrderBy(x => x))}; cut on stairs: {fr.Line?.CutOnStairs ?? false}");
+            Console.WriteLine($"   READER (NifGeometry, root transform omitted): mesh-space solid box ({g.Box.Min.X:0}, {g.Box.Min.Y:0}, {g.Box.Min.Z:0})..({g.Box.Max.X:0}, {g.Box.Max.Y:0}, {g.Box.Max.Z:0})");
             Console.WriteLine($"      world box x {world.Min.X:0}..{world.Max.X:0}  y {world.Min.Y:0}..{world.Max.Y:0}  z {world.Min.Z:0}..{world.Max.Z:0};  plan corners {Corners(g.Box, m, t, sc)}");
             Aabb? ckWorld = null;
             if (bm.Ck is { } ck)
@@ -485,10 +486,10 @@ if (mode == "arms" || mode == "cut")
         var t = new Vector3(a.Pos.X, a.Pos.Y, a.Pos.Z);
         var w = new Vector3[g.Soup.Vertices.Length];
         for (int i = 0; i < w.Length; i++) w[i] = Vector3.Transform(g.Soup.Vertices[i] * a.Scale, m) + t;
-        var columns = MeshColumnIndex.Build(w, g.Soup.Indices);
+        var columns = MeshColumnIndex.Build(w, g.Soup.Indices, triangleMaterials: g.Soup.TriangleMaterials);
 
         bool draw = ascii is not null && a.Tag.Contains(ascii, StringComparison.OrdinalIgnoreCase);
-        var fr = RouteConnectivity.Measure(navs, columns, world, 256f, 16f, ActorBand.PhysicalStep, top, ladder, graph: gnodes, keepRaster: draw, floorAt: floor.FloorAt);
+        var fr = RouteConnectivity.Measure(navs, columns, world, 256f, 16f, ActorBand.PhysicalStep, top, ladder, graph: gnodes, keepRaster: draw, floorAt: floor.FloorAt, isStairsMaterial: DetectorModel.IsStairsMaterial);
         var vr = Verdict(fr);
         if (draw && fr.Raster is { } ras)
         {
@@ -498,14 +499,14 @@ if (mode == "arms" || mode == "cut")
         RouteFacts? fc = null; RouteCutVerdict? vc = null;
         if (a.Line is { Length: >= 2 })
         {
-            fc = RouteConnectivity.Measure(navs, columns, world, 256f, 16f, ActorBand.PhysicalStep, top, ladder, graph: gnodes, lineOverride: a.Line, floorAt: floor.FloorAt);
+            fc = RouteConnectivity.Measure(navs, columns, world, 256f, 16f, ActorBand.PhysicalStep, top, ladder, graph: gnodes, lineOverride: a.Line, floorAt: floor.FloorAt, isStairsMaterial: DetectorModel.IsStairsMaterial);
             vc = Verdict(fc);
         }
         rows.Add((a, bm.Type, vr, fr, vc, fc, g.Source + bosNote));
     }
 
     static RouteCutVerdict Verdict(RouteFacts f) =>
-        DetectorModel.RouteCut(f.Judged, f.Touched, f.Line?.Found ?? false, f.Line?.Why ?? "", f.Line?.Cut ?? false, f.Line?.Passage ?? float.NaN, cutRise: f.Line?.CutRise ?? float.NaN, cutFloat: f.Line?.CutFloat ?? float.NaN).Verdict;
+        DetectorModel.RouteCut(f.Judged, f.Touched, f.Line?.Found ?? false, f.Line?.Why ?? "", f.Line?.Cut ?? false, f.Line?.Passage ?? float.NaN, cutRise: f.Line?.CutRise ?? float.NaN, cutFloat: f.Line?.CutFloat ?? float.NaN, cutOnStairs: f.Line?.CutOnStairs ?? false).Verdict;
     static string Facts(RouteFacts? f) => f is null ? "-" : f.Line is { } l
         ? $"touched {f.Touched,3} {l.Status,-10} cut={(l.Cut ? "Y" : "n")} passage {(float.IsNaN(l.Passage) ? "  -" : l.Passage >= l.PassageCap ? $"≥{l.PassageCap:0}" : $"{l.Passage,3:0}")} (L {(float.IsNaN(l.PassageLeft) ? "-" : l.PassageLeft.ToString("0")),3} / R {(float.IsNaN(l.PassageRight) ? "-" : l.PassageRight.ToString("0")),3})" + (l.Status == LineStatus.JunctionLine ? $" [{l.Ends} ends, {l.PairsCut}/{l.Pairs} pairs cut]" : l.Found ? "" : $" [{l.Ends} ends: {l.Why}]")
         : $"judged={f.Judged} {f.Why}";

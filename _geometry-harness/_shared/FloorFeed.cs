@@ -141,6 +141,6 @@ internal static class FloorFeed
     /// <summary>The band line a probe prints once it stands on the physical floor.</summary>
     public static string BandLine(bool controllerBand) =>
         $"actor band above the FEET (Q24, 2026-09-05): bottom {ActorBand.PhysicalStep:0.#} u (the measured 48 u above the navmesh + the station's {ActorBand.StationOffset:0.#} u offset; the step band to {ActorBand.PhysicalStepBandTop:0.#} u is named in the verdict); " +
-        $"top per cell from placed actors (race Height x NPC Height; placement scale not counted){(controllerBand ? $" × {ActorBand.ControllerFactor} + {ActorBand.StationOffset:0.#} (the controller's, Part C)" : ", nominal")}; " +
+        $"top per cell from placed actors (race Height x NPC Height; placement scale counts for generated controllers, custom skeleton controllers ignore it){(controllerBand ? $" × {ActorBand.ControllerFactor} + {ActorBand.StationOffset:0.#} (the controller's, Part C)" : ", nominal")}; " +
         $"measured from the highest up-facing actor-solid surface (or the terrain) within {NavmeshFloor.DefaultMaxDepth:0} u below / {NavmeshFloor.DefaultUpReach:0} u above the navmesh under each raster cell";
 }

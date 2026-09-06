@@ -2038,7 +2038,7 @@ Console.WriteLine("\nPROOF — the actor band (ActorBand: the measured bottom, t
           ActorBand.StepHeight == 48f && ActorBand.StepBandTop == 60f, $"{ActorBand.StepHeight} / {ActorBand.StepBandTop}");
     var nord = FormKey.Factory("013746:Skyrim.esm"); var child = FormKey.Factory("02C65B:Skyrim.esm");
     var npcA = FormKey.Factory("000001:Test.esp"); var npcC = FormKey.Factory("000002:Test.esp");
-    var races = new Dictionary<FormKey, ActorBand.RaceFacts> { [nord] = new(1.03f, 1.03f, true, "NordRace"), [child] = new(0.8f, 0.8f, false, "NordRaceChild") };
+    var races = new Dictionary<FormKey, ActorBand.RaceFacts> { [nord] = new(1.03f, 1.03f, true, "NordRace", MaleController: new(true, "custom"), FemaleController: new(true, "custom")), [child] = new(0.8f, 0.8f, false, "NordRaceChild", MaleController: new(true, "custom"), FemaleController: new(true, "custom")) };
     var npcs = new Dictionary<FormKey, ActorBand.NpcFacts> { [npcA] = new(nord, false, 1f, false), [npcC] = new(child, true, 1f, false) };
     PlacedRef Placed(FormKey b, float scale) => new(FormKey.Factory(b == npcA ? "000010:Test.esp" : "000011:Test.esp"), "PlacedNpc", null,
                                                     new Vec3(0f, 0f, 0f), new Vec3(0f, 0f, 0f), scale, b, false, false, false);
@@ -2797,6 +2797,7 @@ Console.WriteLine("\nPROOF — landscape seams: a synthetic order through CellBo
 BosProof.Run(Check);
 StateProof.Run(Check);
 NifChainProof.Run(Check);
+MaterialScaleProof.Run(Check);
 
 Console.WriteLine();
 Console.WriteLine($"==== {pass} passed, {fail} failed ====");
