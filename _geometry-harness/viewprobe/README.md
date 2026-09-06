@@ -288,7 +288,12 @@ gitignored for the same reason: probe transcripts name the plugins of whatever l
   transform before applying position/rotation/scale. The game-grounded proof is
   `SHouseIntDoor02`: root rotation −90°, placed heading 270°. Composing both makes the door
   edge-on; Skyrim draws it flush in the north-facing arch. The same correction restores the
-  Temple's pier and continuous floor while ordinary back-face culling remains enabled.
+  Temple's pier and continuous floor while ordinary back-face culling remains enabled. The
+  collision reader the detectors use (housecarl-core `NifGeometry.WorldTransform`, a separate
+  pipeline from this builder) got the same rule only on 2026-09-05 (Q28: a walker crossed the line
+  its root-turned copy of a Solitude wall cut across a corridor, 9 of 9, three cells), and its
+  node-rotation sense was found transposed and fixed the same day against the Creation Kit's
+  bounds of 10,834 meshes. viewprobe's own builder was not changed by either.
 - **Persistent refs.** Exterior doors live in the worldspace persistent cell, which **masquerades as
   grid (0,0)** — they cannot be identified by cell record (and that masquerade is why the ring test
   admits only non-persistent refs from neighbour cells). viewprobe collects refs by their own

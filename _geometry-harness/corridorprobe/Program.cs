@@ -18,8 +18,17 @@ using Mutagen.Bethesda.Skyrim;
 // usage: corridorprobe map <CellEditorID> [--step 32] [--plugin Skyrim.esm]
 //        corridorprobe width <CellEditorID> --at X,Y,Z --heading DEG [--span 600] [--plugin Skyrim.esm]
 //        corridorprobe arms <arms.json> [--band controller|nominal] [--plugin Skyrim.esm] [--bos on|off]
+//        corridorprobe cut <CellEditorID> --ref XXXXXX:Plugin.esm [--ref …] [--band controller|nominal] [--band-top U] [--plugin Skyrim.esm]
 //        corridorprobe find <mesh substring>
 //   map    an ASCII coverage map of the cell's navmesh at --step units per character (rows = Y descending)
+//   cut    one placed reference through the route-cut rule, SHOWN rather than tallied: the verdict and its reason, the
+//          rule's own path line (its points in plan, where along it the object cuts, the rise and the float there), the
+//          navmesh and the physical floor every 32 u along that line, the reader's world footprint (the collision soup as
+//          NifGeometry reads the mesh, under the record's pose), the Creation Kit's baked ObjectBounds under the SAME
+//          pose, and the storey raster with both footprints drawn — so an in-game arm can be planned on the line the
+//          rule tested and the two footprints compared against where the walker actually stops (Q28, 2026-09-05: the
+//          reader applied a NIF's root-node transform and the CK's bounds do not carry it). The record's own base and
+//          pose, no swap layer; --band-top gives the nominal head height (default ActorBand.ScaleOneHeight).
 //   width  the walkable width across the corridor at the point, perpendicular to the heading (yaw, degrees, 0 = +Y,
 //          clockwise), sampled every 4 u; and the width every 64 u along the heading for --span each way
 //   arms   arms.json: { "cell": "<CellEditorID>", "bandTop": <the walker's nominal head height, u>,
@@ -41,7 +50,7 @@ using Mutagen.Bethesda.Skyrim;
 string GamePath = HarnessTarget.Require(HarnessTarget.Game, "game directory", "game");
 string dataDir = Path.Combine(GamePath, "Data");
 
-if (args.Length < 2) { Console.Error.WriteLine("usage: corridorprobe map|width <CellEditorID> [...]  |  corridorprobe arms <arms.json>  |  corridorprobe find <mesh substring>"); return 1; }
+if (args.Length < 2) { Console.Error.WriteLine("usage: corridorprobe map|width|cut <CellEditorID> [...]  |  corridorprobe arms <arms.json>  |  corridorprobe find <mesh substring>"); return 1; }
 string mode = args[0], cellId = args[1];
 
 if (mode == "find")
@@ -55,9 +64,12 @@ if (mode == "find")
 }
 float step = 32f, span = 600f, heading = 0f; Vec3? at = null; string plugin = "Skyrim.esm"; bool controllerBand = true; string? ascii = null;
 bool bosOn = true;
+var refKeys = new List<FormKey>(); float? bandTopArg = null;
 for (int i = 2; i < args.Length; i++)
 {
     if (args[i] == "--step" && i + 1 < args.Length) step = float.Parse(args[++i]);
+    else if (args[i] == "--ref" && i + 1 < args.Length) refKeys.Add(FormKey.Factory(args[++i]));
+    else if (args[i] == "--band-top" && i + 1 < args.Length) bandTopArg = float.Parse(args[++i]);
     else if (args[i] == "--bos" && i + 1 < args.Length) bosOn = BosHook.ParseFlag(args[++i]) ?? throw new ArgumentException("--bos takes on|off");
     else if (args[i] == "--ascii" && i + 1 < args.Length) ascii = args[++i];   // arms: draw the raster of every arm whose tag contains this
     else if (args[i] == "--span" && i + 1 < args.Length) span = float.Parse(args[++i]);
@@ -172,7 +184,7 @@ if (mode == "width")
     return 0;
 }
 
-if (mode == "arms")
+if (mode == "arms" || mode == "cut")
 {
     // ---- the VFS, for the obstacles' meshes ----
     string Instance = HarnessTarget.Require(HarnessTarget.Instance, "MO2 instance directory", "instance");
@@ -183,9 +195,9 @@ if (mode == "arms")
     using var assets = AssetResolver.Build(overwriteDir, modsDir, dataDir, comp.EnabledMods, arch.Archives);
     var order = Mo2LoadOrder.Build(profileDir, modsDir, dataDir, overwriteDir);
 
-    // ---- the arms, and the base records they place ----
+    // ---- the arms, and the base records they place (cut: none — the record's own base and pose, below) ----
     var arms = new List<Arm>();
-    foreach (var a in armsDoc.GetProperty("arms").EnumerateArray())
+    if (mode == "arms") foreach (var a in armsDoc.GetProperty("arms").EnumerateArray())
     {
         var pos = a.GetProperty("pos").EnumerateArray().Select(e => e.GetSingle()).ToArray();
         var line = a.TryGetProperty("line", out var ln) && ln.ValueKind == JsonValueKind.Array
@@ -201,7 +213,8 @@ if (mode == "arms")
     // every modeled record's WINNING model kept; an arm's base is then the base the game loads for that record in this cell
     // (_shared/BosHook.cs, BosFeed). --bos off: the arm's own plugin's record, as every run before 2026-09-04.
     var bos = new BosFeed(bosOn);
-    if (bosOn)
+    if (mode == "cut") { }   // the placed record's own base: no swap layer, so the row is the reader's reading of the record alone
+    else if (bosOn)
     {
         foreach (var p in order.OrderedPaths)
         {
@@ -233,7 +246,7 @@ if (mode == "arms")
                 if (wanted.Contains(rec.FormKey) && rec is IModeledGetter mg && mg.Model?.File is { } f && !string.IsNullOrWhiteSpace(f.GivenPath))
                     baseMesh[rec.FormKey] = (f.GivenPath, rec.GetType().Name.Replace("BinaryOverlay", ""));
         }
-    Console.WriteLine("   " + bos.LayerLine());
+    if (mode == "arms") Console.WriteLine("   " + bos.LayerLine());
     int bosSwapped = 0, bosRandom = 0;
 
     // ---- the geometry: the actor-solid collision soup, as blockprobe reads it ----
@@ -282,13 +295,166 @@ if (mode == "arms")
     else floor = FloorFeed.Build(cell.Refs, FloorGeometry, null);
 
     // ---- the band and the graph ----
-    float nominalTop = armsDoc.TryGetProperty("bandTop", out var bt) ? bt.GetSingle() : ActorBand.ScaleOneHeight;
+    float nominalTop = mode == "arms" && armsDoc.TryGetProperty("bandTop", out var bt) ? bt.GetSingle() : (bandTopArg ?? ActorBand.ScaleOneHeight);
     float top = controllerBand ? ActorBand.PhysicalControllerTop(nominalTop) : nominalTop;
     var ladder = new[] { 0f, 32f, 64f, 96f, 128f };
     var (gnodes, grpt) = NavGraph.Build(navs);
     Console.WriteLine($"graph: {grpt.Triangles:N0} triangles, {grpt.IntraLinks:N0} intra + {grpt.CrossLinks:N0} cross links, {grpt.DanglingLinks} dangling, {grpt.ExternalLinks} external, {grpt.Components} component(s)");
     Console.WriteLine($"band: {ActorBand.PhysicalStep:0.#}..{top:0.#} u above the FEET ({(controllerBand ? $"controller: nominal {nominalTop:0} × {ActorBand.ControllerFactor} + {ActorBand.StationOffset:0.#}" : "nominal")}; bottom measured 2026-09-05 + the station's {ActorBand.StationOffset:0.#} u offset (Q24), step band to {ActorBand.PhysicalStepBandTop:0.#} u and a float of {ActorBand.FloatWall:0} u or more named in the verdict (Q26)); capsule 22 u; window ±256 u, step 16");
     Console.WriteLine($"floor: physical, {floor.Candidates:N0} candidates, {floor.LandCells} land cell(s) (Q24)\n");
+
+    if (mode == "cut")
+    {
+        if (refKeys.Count == 0) { Console.Error.WriteLine("cut needs --ref XXXXXX:Plugin.esm (repeatable)"); return 1; }
+        // The --plugin mod's base records: the mesh, the record type and the Creation Kit's baked ObjectBounds — the engine's
+        // own reading of the mesh's extent, which carries no root-node turn (Q28).
+        var plugBase = new Dictionary<FormKey, (string Mesh, string Type, (Vec3 Min, Vec3 Max)? Ck)>();
+        foreach (var rec in mod.EnumerateMajorRecords())
+            if (rec is IModeledGetter pmg && pmg.Model?.File is { } pf && !string.IsNullOrWhiteSpace(pf.GivenPath))
+            {
+                (Vec3, Vec3)? ck = rec is IObjectBoundedGetter ob && ob.ObjectBounds is { } b
+                    ? (new Vec3(b.First.X, b.First.Y, b.First.Z), new Vec3(b.Second.X, b.Second.Y, b.Second.Z)) : null;
+                plugBase[rec.FormKey] = (pf.GivenPath, rec.GetType().Name.Replace("BinaryOverlay", ""), ck);
+            }
+        Console.WriteLine("legend: '.' outside, '#' ground, 'X' ground the READER's object stands in, 'r' perimeter run, 'E' end, '=' the line, '%' the line over the reader's object;");
+        Console.WriteLine("        'C' ('c' on a run) a cell whose centre lies inside the CREATION KIT's ObjectBounds under the same pose, where the reader has nothing");
+        foreach (var key in refKeys)
+        {
+            var r = cell.Refs.FirstOrDefault(x => x.FormKey == key);
+            if (r is null) { Console.WriteLine($"\n==== {key}: not a placed reference of {cellId} in {plugin}"); continue; }
+            if (r.Base is not { } bk || !plugBase.TryGetValue(bk, out var bm)) { Console.WriteLine($"\n==== {key}: base record has no model in {plugin}"); continue; }
+            var g = Geometry(bm.Mesh);
+            float sc = r.Scale == 0f ? 1f : r.Scale;
+            var pos = r.Position; var rot = r.Rotation;
+            Console.WriteLine($"\n==== {key}  {bm.Type} {bm.Mesh}  base {bk}{(r.Deleted ? "  DELETED" : "")}");
+            Console.WriteLine($"   pose: position ({pos.X:0.##}, {pos.Y:0.##}, {pos.Z:0.##})  rotation {DegOf(rot)} deg  scale {sc:0.###}  soup: {g.Source}");
+            if (g.Soup is null || g.Box.IsEmpty) { Console.WriteLine("   no actor-solid geometry: nothing to measure"); continue; }
+            var world = SpatialOverlap.ToWorld(g.Box, pos, rot, sc);
+            var m = SpatialOverlap.RefrRotation(rot);
+            var t = new Vector3(pos.X, pos.Y, pos.Z);
+            var w = new Vector3[g.Soup.Vertices.Length];
+            for (int i = 0; i < w.Length; i++) w[i] = Vector3.Transform(g.Soup.Vertices[i] * sc, m) + t;
+            var columns = MeshColumnIndex.Build(w, g.Soup.Indices);
+            var fr = RouteConnectivity.Measure(navs, columns, world, 256f, 16f, ActorBand.PhysicalStep, top, ladder, graph: gnodes, keepRaster: true, floorAt: floor.FloorAt);
+            var vc = DetectorModel.RouteCut(fr.Judged, fr.Touched, fr.Line?.Found ?? false, fr.Line?.Why ?? "", fr.Line?.Cut ?? false, fr.Line?.Passage ?? float.NaN, cutRise: fr.Line?.CutRise ?? float.NaN, cutFloat: fr.Line?.CutFloat ?? float.NaN);
+            Console.WriteLine($"   verdict {vc.Verdict}: {vc.Why}");
+            Console.WriteLine($"   facts: {Facts(fr)}; judged={fr.Judged} storeys {fr.Storeys} (storey z {fr.StoreyZ:0.#}); band {fr.BandBottom:0.#}..{fr.BandTop:0.#} u above the floor; raster step {fr.Step:0}");
+            Console.WriteLine($"   READER (NifGeometry, root transform applied): mesh-space solid box ({g.Box.Min.X:0}, {g.Box.Min.Y:0}, {g.Box.Min.Z:0})..({g.Box.Max.X:0}, {g.Box.Max.Y:0}, {g.Box.Max.Z:0})");
+            Console.WriteLine($"      world box x {world.Min.X:0}..{world.Max.X:0}  y {world.Min.Y:0}..{world.Max.Y:0}  z {world.Min.Z:0}..{world.Max.Z:0};  plan corners {Corners(g.Box, m, t, sc)}");
+            Aabb? ckWorld = null;
+            if (bm.Ck is { } ck)
+            {
+                var ckBox = new Aabb(ck.Min, ck.Max, false);
+                ckWorld = SpatialOverlap.ToWorld(ckBox, pos, rot, sc);
+                Console.WriteLine($"   CREATION KIT ObjectBounds: record ({ck.Min.X:0}, {ck.Min.Y:0}, {ck.Min.Z:0})..({ck.Max.X:0}, {ck.Max.Y:0}, {ck.Max.Z:0})");
+                Console.WriteLine($"      world box x {ckWorld.Value.Min.X:0}..{ckWorld.Value.Max.X:0}  y {ckWorld.Value.Min.Y:0}..{ckWorld.Value.Max.Y:0}  z {ckWorld.Value.Min.Z:0}..{ckWorld.Value.Max.Z:0};  plan corners {Corners(ckBox, m, t, sc)}");
+            }
+            else Console.WriteLine("   CREATION KIT ObjectBounds: none on the base record");
+            var l = fr.Line;
+            if (l is not null && l.Points.Length >= 2)
+            {
+                Console.WriteLine($"   path line ({l.Status}, {l.Points.Length} points, {l.Length:0} u, capsule {l.CapsuleRadius:0} u): {string.Join(" -> ", l.Points.Select(p => $"({p.X:0}, {p.Y:0})"))}");
+                if (l.Cut)
+                {
+                    var (mx, my) = Along(l.Points, (l.CutFrom + l.CutTo) / 2f);
+                    Console.WriteLine($"   cut from {l.CutFrom:0} to {l.CutTo:0} u along the line (midpoint ({mx:0}, {my:0})); rise {l.CutRise:0.#} u, float {l.CutFloat:0.#} u above the floor; passage {(float.IsNaN(l.Passage) ? "-" : l.Passage.ToString("0"))} (L {(float.IsNaN(l.PassageLeft) ? "-" : l.PassageLeft.ToString("0"))} / R {(float.IsNaN(l.PassageRight) ? "-" : l.PassageRight.ToString("0"))})");
+                }
+                else Console.WriteLine("   the line is not cut");
+                Console.WriteLine("   along the line every 32 u:  s  (x, y)  navmesh z on the storey  physical floor z  [reader solid at the sample: cell state]");
+                for (float s = 0; s <= l.Length + 0.5f; s += 32f)
+                {
+                    var (x, y) = Along(l.Points, MathF.Min(s, l.Length));
+                    var zs = GroundAt(x, y).Where(z => MathF.Abs(z - fr.StoreyZ) <= 160f).OrderBy(z => MathF.Abs(z - fr.StoreyZ)).ToList();
+                    string nz = zs.Count > 0 ? zs[0].ToString("0.#") : "-";
+                    string fz = zs.Count > 0 ? floor.FloorAt(x, y, zs[0]).ToString("0.#") : "-";
+                    string st = "-";
+                    if (fr.Raster is { } rr)
+                    {
+                        int ci = (int)MathF.Floor((x - rr.MinX) / rr.Step), cj = (int)MathF.Floor((y - rr.MinY) / rr.Step);
+                        if (ci >= 0 && cj >= 0 && ci < rr.Nx && cj < rr.Ny) st = rr.State[cj * rr.Nx + ci] switch { 0 => "outside", 1 => "ground", _ => "OBJECT" };
+                    }
+                    Console.WriteLine($"      {s,5:0}  ({x,8:0}, {y,8:0})  nav {nz,8}  floor {fz,8}  {st}");
+                }
+            }
+            else Console.WriteLine($"   no path line: {l?.Status} {l?.Why}");
+            if (fr.Raster is { } ras)
+            {
+                Console.WriteLine($"   raster ({ras.Nx} x {ras.Ny} cells of {ras.Step:0} u):");
+                Console.Write(DrawCut(ras, bm.Ck, m, t, sc, fr.StoreyZ));
+            }
+        }
+        return 0;
+
+        static string DegOf(Vec3 r) => $"({r.X * 180f / MathF.PI:0.#}, {r.Y * 180f / MathF.PI:0.#}, {r.Z * 180f / MathF.PI:0.#})";
+        static string Corners(Aabb b, Matrix4x4 m, Vector3 t, float sc)
+        {
+            var pts = new[] { new Vector3(b.Min.X, b.Min.Y, b.Min.Z), new Vector3(b.Max.X, b.Min.Y, b.Min.Z), new Vector3(b.Max.X, b.Max.Y, b.Min.Z), new Vector3(b.Min.X, b.Max.Y, b.Min.Z) };
+            return string.Join(" ", pts.Select(p => { var q = Vector3.Transform(p * sc, m) + t; return $"({q.X:0}, {q.Y:0})"; }));
+        }
+        static (float X, float Y) Along(Vector2[] pts, float s)
+        {
+            float acc = 0;
+            for (int i = 0; i + 1 < pts.Length; i++)
+            {
+                float len = (pts[i + 1] - pts[i]).Length();
+                if (len < 1e-3f) continue;
+                if (acc + len >= s) { var p = pts[i] + (pts[i + 1] - pts[i]) * ((s - acc) / len); return (p.X, p.Y); }
+                acc += len;
+            }
+            return (pts[^1].X, pts[^1].Y);
+        }
+        // RouteRaster.Ascii() with the Creation Kit's footprint overlaid: a cell centre taken back into mesh space through the
+        // inverse pose (the transpose of the rotation, scale divided out) and tested against the record's bounds in plan.
+        static string DrawCut(RouteRaster ras, (Vec3 Min, Vec3 Max)? ck, Matrix4x4 m, Vector3 t, float sc, float storeyZ)
+        {
+            var g = new char[ras.Nx * ras.Ny];
+            for (int k = 0; k < g.Length; k++) g[k] = ras.State[k] == 0 ? '.' : ras.State[k] == 1 ? '#' : 'X';
+            foreach (var run in ras.Runs) foreach (var k in run) g[k] = 'r';
+            if (ck is { } c)
+            {
+                var inv = Matrix4x4.Transpose(m);
+                // The bounds grown by half a cell (in mesh units), so a slab thinner than the raster step — a 9 u wall
+                // whose edge falls exactly on a row centre — is drawn in at least one row instead of between two.
+                float grow = 0.5f * ras.Step / sc;
+                for (int j = 0; j < ras.Ny; j++)
+                    for (int i = 0; i < ras.Nx; i++)
+                    {
+                        var p = new Vector3(ras.MinX + (i + 0.5f) * ras.Step, ras.MinY + (j + 0.5f) * ras.Step, storeyZ);
+                        var q = Vector3.Transform(p - t, inv) / sc;
+                        if (q.X < c.Min.X - grow || q.X > c.Max.X + grow || q.Y < c.Min.Y - grow || q.Y > c.Max.Y + grow) continue;
+                        int k = j * ras.Nx + i;
+                        if (g[k] == '.' || g[k] == '#') g[k] = 'C'; else if (g[k] == 'r') g[k] = 'c';
+                    }
+            }
+            for (int s = 0; s + 1 < ras.Line.Length; s++)
+            {
+                var p = ras.Line[s]; var q = ras.Line[s + 1]; var d = q - p; float len = d.Length();
+                if (len < 1e-3f) continue;
+                for (float u = 0; u <= len; u += ras.Step * 0.5f)
+                {
+                    var pt = p + d * (u / len);
+                    int i = (int)MathF.Floor((pt.X - ras.MinX) / ras.Step), j = (int)MathF.Floor((pt.Y - ras.MinY) / ras.Step);
+                    if (i < 0 || j < 0 || i >= ras.Nx || j >= ras.Ny) continue;
+                    int k = j * ras.Nx + i;
+                    g[k] = ras.State[k] == 2 ? '%' : '=';
+                }
+            }
+            foreach (var e in ras.Ends)
+            {
+                int i = (int)MathF.Floor((e.X - ras.MinX) / ras.Step), j = (int)MathF.Floor((e.Y - ras.MinY) / ras.Step);
+                if (i >= 0 && j >= 0 && i < ras.Nx && j < ras.Ny) g[j * ras.Nx + i] = 'E';
+            }
+            var sb = new StringBuilder();
+            for (int j = ras.Ny - 1; j >= 0; j--)
+            {
+                sb.Append($"{ras.MinY + (j + 0.5f) * ras.Step,8:0} ");
+                for (int i = 0; i < ras.Nx; i++) sb.Append(g[j * ras.Nx + i]);
+                sb.Append('\n');
+            }
+            sb.Append($"         x from {ras.MinX + 0.5f * ras.Step:0} to {ras.MinX + (ras.Nx - 0.5f) * ras.Step:0}, {ras.Step:0} u per cell\n");
+            return sb.ToString();
+        }
+    }
 
     var rows = new List<(Arm A, string Type, RouteCutVerdict? Rule, RouteFacts? FR, RouteCutVerdict? Cmd, RouteFacts? FC, string Note)>();
     foreach (var a in arms)

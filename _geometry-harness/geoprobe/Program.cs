@@ -20,6 +20,10 @@ string overwriteDir = Path.Combine(Instance, "overwrite");
 string dataDir = Path.Combine(GamePath, "Data");
 
 int limit = args.Length > 0 && int.TryParse(args[0], out var n) ? n : int.MaxValue;
+// --dump <file.tsv>: one row per measured mesh — the record's OBND, the reader's RENDER and COLLISION bounds in model
+// space, the source — so a comparison can be grouped outside (Q28's ckbounds: by where the mesh's node chain turns).
+string? dumpPath = null;
+for (int ai = 0; ai + 1 < args.Length; ai++) if (args[ai] == "--dump") dumpPath = args[ai + 1];
 
 var sw = Stopwatch.StartNew();
 var order = Mo2LoadOrder.Build(profileDir, modsDir, dataDir, overwriteDir);
@@ -108,12 +112,23 @@ foreach (var (rel, info) in byModel.OrderBy(k => k.Key, StringComparer.OrdinalIg
 
     rows.Add(new Row(rel, info.RecType, info.Fk, info.Min, info.Max,
                      g.Bounds, g.TotalVertices, g.TotalTriangles,
-                     src.ProviderName, src.Kind == AssetKind.Bsa, res.Sources.Count, vanillaSrc));
+                     src.ProviderName, src.Kind == AssetKind.Bsa, res.Sources.Count, vanillaSrc, g.CollisionBounds));
 }
 Console.WriteLine($"\nmeasured {measured:N0} meshes in {sw.Elapsed.TotalSeconds:0.0}s "
                 + $"| unresolved {unresolved:N0} | parse/read failures {parseFail:N0} | empty geometry {emptyGeo:N0}");
 Console.WriteLine($"   no Havok collision: {noCollision:N0}   collision only partly decodable: {collisionUnread:N0}");
 foreach (var (k, v) in errs.OrderByDescending(x => x.Value).Take(6)) Console.WriteLine($"   {v,6:N0}  {k}");
+
+if (dumpPath is not null)
+{
+    using var dw = new StreamWriter(dumpPath);
+    dw.WriteLine("mesh\trec\tform\tprovider\tvanilla\tobnd_min\tobnd_max\trender_min\trender_max\tcoll_min\tcoll_max\tverts\ttris");
+    static string V(Vec3 v) => $"{v.X:0.##},{v.Y:0.##},{v.Z:0.##}";
+    foreach (var r in rows)
+        dw.WriteLine($"{r.Mesh}\t{Clean(r.RecType)}\t{r.Fk}\t{r.Provider}\t{(r.Vanilla ? 1 : 0)}\t{V(r.ObndMin)}\t{V(r.ObndMax)}\t{V(r.Measured.Min)}\t{V(r.Measured.Max)}\t"
+                     + $"{(r.Coll.IsEmpty ? "" : V(r.Coll.Min))}\t{(r.Coll.IsEmpty ? "" : V(r.Coll.Max))}\t{r.Verts}\t{r.Tris}");
+    Console.WriteLine($"   dumped {rows.Count:N0} rows to {dumpPath}");
+}
 
 // ---- OBND vs measured ----
 // OBND is a box in MODEL space, as is our measured AABB, so they are directly comparable.
@@ -257,4 +272,4 @@ static string Short(string? s) => s is null ? "?" : (s.Length > 90 ? s[..90] : s
 static string Trim(string s, int n) => s.Length <= n ? s : "..." + s[^(n - 3)..];
 
 record Row(string Mesh, string RecType, FormKey Fk, Vec3 ObndMin, Vec3 ObndMax,
-           Aabb Measured, int Verts, int Tris, string Provider, bool FromBsa, int ProviderCount, bool Vanilla);
+           Aabb Measured, int Verts, int Tris, string Provider, bool FromBsa, int ProviderCount, bool Vanilla, Aabb Coll);
