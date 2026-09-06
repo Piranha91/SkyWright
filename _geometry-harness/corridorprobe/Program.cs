@@ -287,7 +287,7 @@ if (mode == "arms")
     var ladder = new[] { 0f, 32f, 64f, 96f, 128f };
     var (gnodes, grpt) = NavGraph.Build(navs);
     Console.WriteLine($"graph: {grpt.Triangles:N0} triangles, {grpt.IntraLinks:N0} intra + {grpt.CrossLinks:N0} cross links, {grpt.DanglingLinks} dangling, {grpt.ExternalLinks} external, {grpt.Components} component(s)");
-    Console.WriteLine($"band: {ActorBand.PhysicalStep:0.#}..{top:0.#} u above the FEET ({(controllerBand ? $"controller: nominal {nominalTop:0} × {ActorBand.ControllerFactor} + {ActorBand.StationOffset:0.#}" : "nominal")}; bottom measured 2026-09-05 + the station's {ActorBand.StationOffset:0.#} u offset (Q24), step band to {ActorBand.PhysicalStepBandTop:0.#} u named in the verdict); capsule 22 u; window ±256 u, step 16");
+    Console.WriteLine($"band: {ActorBand.PhysicalStep:0.#}..{top:0.#} u above the FEET ({(controllerBand ? $"controller: nominal {nominalTop:0} × {ActorBand.ControllerFactor} + {ActorBand.StationOffset:0.#}" : "nominal")}; bottom measured 2026-09-05 + the station's {ActorBand.StationOffset:0.#} u offset (Q24), step band to {ActorBand.PhysicalStepBandTop:0.#} u and a float of {ActorBand.FloatWall:0} u or more named in the verdict (Q26)); capsule 22 u; window ±256 u, step 16");
     Console.WriteLine($"floor: physical, {floor.Candidates:N0} candidates, {floor.LandCells} land cell(s) (Q24)\n");
 
     var rows = new List<(Arm A, string Type, RouteCutVerdict? Rule, RouteFacts? FR, RouteCutVerdict? Cmd, RouteFacts? FC, string Note)>();
@@ -339,7 +339,7 @@ if (mode == "arms")
     }
 
     static RouteCutVerdict Verdict(RouteFacts f) =>
-        DetectorModel.RouteCut(f.Judged, f.Touched, f.Line?.Found ?? false, f.Line?.Why ?? "", f.Line?.Cut ?? false, f.Line?.Passage ?? float.NaN, cutRise: f.Line?.CutRise ?? float.NaN).Verdict;
+        DetectorModel.RouteCut(f.Judged, f.Touched, f.Line?.Found ?? false, f.Line?.Why ?? "", f.Line?.Cut ?? false, f.Line?.Passage ?? float.NaN, cutRise: f.Line?.CutRise ?? float.NaN, cutFloat: f.Line?.CutFloat ?? float.NaN).Verdict;
     static string Facts(RouteFacts? f) => f is null ? "-" : f.Line is { } l
         ? $"touched {f.Touched,3} {l.Status,-10} cut={(l.Cut ? "Y" : "n")} passage {(float.IsNaN(l.Passage) ? "  -" : l.Passage >= l.PassageCap ? $"≥{l.PassageCap:0}" : $"{l.Passage,3:0}")} (L {(float.IsNaN(l.PassageLeft) ? "-" : l.PassageLeft.ToString("0")),3} / R {(float.IsNaN(l.PassageRight) ? "-" : l.PassageRight.ToString("0")),3})" + (l.Status == LineStatus.JunctionLine ? $" [{l.Ends} ends, {l.PairsCut}/{l.Pairs} pairs cut]" : l.Found ? "" : $" [{l.Ends} ends: {l.Why}]")
         : $"judged={f.Judged} {f.Why}";

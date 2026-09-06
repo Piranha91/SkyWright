@@ -424,7 +424,7 @@ foreach (var cp in PlacementExtract.FromMod(mod))
                 routeBlocked.Add((cp.CellEditorId ?? cp.Cell.ToString(), bm.Mesh, bm.Type, r.FormKey, v64.Why));
 
             var line = facts.Line;
-            var vc = DetectorModel.RouteCut(facts.Judged, facts.Touched, line?.Found ?? false, line?.Why ?? "", line?.Cut ?? false, line?.Passage ?? float.NaN, cutRise: line?.CutRise ?? float.NaN);
+            var vc = DetectorModel.RouteCut(facts.Judged, facts.Touched, line?.Found ?? false, line?.Why ?? "", line?.Cut ?? false, line?.Passage ?? float.NaN, cutRise: line?.CutRise ?? float.NaN, cutFloat: line?.CutFloat ?? float.NaN);
             int ccol = vc.Verdict switch { RouteCutVerdict.Blocked => 0, RouteCutVerdict.LikelyBlocked => 1, RouteCutVerdict.Clipped => 2, RouteCutVerdict.NoLine => 3, RouteCutVerdict.None => 4, _ => 5 };
             var cC = RouteRow(cutByClass, cls); cC[ccol]++; cC[6]++;
             var cT = RouteRow(cutByType, bm.Type); cT[ccol]++; cT[6]++;
@@ -534,7 +534,7 @@ if (routeBlocked.Count > 0)
 
 Console.WriteLine();
 Console.WriteLine($"   ---- the ROUTE-CUT rule (4.7's closing step) on the vanilla floor: the corridor's path line, cut at capsule 22 u ----");
-Console.WriteLine($"   band above the feet on the physical floor (Q24): bottom {ActorBand.PhysicalStep:0.#} u, top {(controllerBand ? $"derived × {ActorBand.ControllerFactor} + {ActorBand.StationOffset:0.#} (the controller's, Part C)" : "derived, nominal")}; passage boundary 48 u; measured {routeMeasured:N0}; doors set aside {routeDoors:N0}; MoveableStatics set aside (pushed aside) {routeMovable:N0}");
+Console.WriteLine($"   band above the feet on the physical floor (Q24): bottom {ActorBand.PhysicalStep:0.#} u, top {(controllerBand ? $"derived × {ActorBand.ControllerFactor} + {ActorBand.StationOffset:0.#} (the controller's, Part C)" : "derived, nominal")}; passage boundary 48 u; step band to {ActorBand.PhysicalStepBandTop:0.#} u and a float of {ActorBand.FloatWall:0} u or more named in the verdict (Q26); measured {routeMeasured:N0}; doors set aside {routeDoors:N0}; MoveableStatics set aside (pushed aside) {routeMovable:N0}");
 Console.WriteLine($"   NoLine by reason: {string.Join(", ", cutNoLine.OrderByDescending(kv => kv.Value).Select(kv => $"{kv.Key} {kv.Value:N0}"))}");
 Console.WriteLine($"   {"class",-16} {"measured",9} {"BLOCKED",9} {"rate",8} {"LIKELY",9} {"rate",8} {"CLIPPED",9} {"NoLine",9} {"none",7} {"unjudged",9}");
 foreach (var kv in cutByClass.OrderByDescending(kv => kv.Value[6]))

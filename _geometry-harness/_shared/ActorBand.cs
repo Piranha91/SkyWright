@@ -43,8 +43,12 @@ using Mutagen.Bethesda.Skyrim;
 //  median) rather than a per-cell number. So the band now stands on the
 //  PHYSICAL floor under each raster cell (RouteConnectivity.Measure's floorAt,
 //  a FloorField per cell) and its ends are stated above the walker's FEET:
-//  the measured rungs plus the station's offset (PhysicalStep 58.4 u, the
-//  step band to 70.4 u, PhysicalControllerTop = the controller top + 10.4).
+//  the measured rungs plus the station's offset (PhysicalStep 58.4 u,
+//  PhysicalControllerTop = the controller top + 10.4). Q25 (two more
+//  stations, 2026-09-05) put the step band's top at 76 u above the feet —
+//  stated on its own, not as the Ratway's 60 plus the offset — and found
+//  that an object whose underside floats FloatWall (20 u) or more above the
+//  feet is a wall whatever its top; Q26 folded both.
 //  At the station that is byte for byte the band as measured; elsewhere it is
 //  the band the walker meets. The navmesh-relative constants stay as the
 //  record of what was measured and as the fallback where no floor is read.
@@ -85,6 +89,10 @@ internal static class ActorBand
     public const float StationOffset = DetectorModel.StationOffset;
     public const float PhysicalStep = DetectorModel.PhysicalStep;
     public const float PhysicalStepBandTop = DetectorModel.PhysicalStepBandTop;
+
+    /// <summary>The floor-bottom term (Q26): an object whose lowest material within the capsule's footprint stands this far or
+    /// more above the floor along the cut is a wall whatever its rise — <see cref="DetectorModel.FloatWall"/>.</summary>
+    public const float FloatWall = DetectorModel.FloatWall;
 
     /// <summary>The controller's top above the FEET: the navmesh-relative controller top plus the station's offset —
     /// 122.5 u for the 1.03 Nord, inside the (110.4, 130.4) u the overhead ladder measured above its feet (stopped by an

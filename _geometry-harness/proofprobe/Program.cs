@@ -1981,13 +1981,13 @@ Console.WriteLine("\nPROOF — the route-cut rule (DetectorModel.RouteCut)");
     // clause: inside the step band a walking humanoid gets over the object by size and pace; the CLASS does not move on it.
     // The rise is above the FEET since Q24 (the physical floor): the band is (58.4, 70.4], the measured (48, 60] above the
     // navmesh plus the station's 10.4 u offset.
-    Check("band: the physical step is the measured 48 u + the station's 10.4 u offset = 58.4, the band's top 70.4",
-          MathF.Abs(DetectorModel.PhysicalStep - 58.4f) < 1e-4f && MathF.Abs(DetectorModel.PhysicalStepBandTop - 70.4f) < 1e-4f && DetectorModel.FallbackOffset == DetectorModel.StationOffset,
+    Check("band: the physical step is the measured 48 u + the station's 10.4 u offset = 58.4, the band's top 76 (Q25's sure refusal, exclusive; Q26)",
+          MathF.Abs(DetectorModel.PhysicalStep - 58.4f) < 1e-4f && MathF.Abs(DetectorModel.PhysicalStepBandTop - 76f) < 1e-4f && DetectorModel.FallbackOffset == DetectorModel.StationOffset,
           $"{DetectorModel.PhysicalStep} / {DetectorModel.PhysicalStepBandTop}");
     c = DetectorModel.RouteCut(true, touched: 16, lineFound: true, lineWhy: "", cut: true, passage: 32f, cutRise: 62.4f);
     Check("cut: a 62 u rise above the feet (52 above the station's navmesh) -> still Blocked, and the why names the step band", c.Verdict == RouteCutVerdict.Blocked && c.Why.Contains("step band"), c.Why);
     c = DetectorModel.RouteCut(true, touched: 16, lineFound: true, lineWhy: "", cut: true, passage: 64f, cutRise: 70.4f);
-    Check("cut: a 70.4 u rise (the band's top, inclusive) -> LikelyBlocked with the band clause", c.Verdict == RouteCutVerdict.LikelyBlocked && c.Why.Contains("step band"), c.Why);
+    Check("cut: a 70.4 u rise (Q24's top; inside the coin since Q25) -> LikelyBlocked with the band clause", c.Verdict == RouteCutVerdict.LikelyBlocked && c.Why.Contains("step band"), c.Why);
     c = DetectorModel.RouteCut(true, touched: 16, lineFound: true, lineWhy: "", cut: true, passage: 64f, cutRise: 80f);
     Check("cut: an 80 u rise -> no band clause (above the band: no walker measured got over)", !c.Why.Contains("step band"), c.Why);
     c = DetectorModel.RouteCut(true, touched: 16, lineFound: true, lineWhy: "", cut: true, passage: 32f, cutRise: 58.4f);
@@ -1996,6 +1996,34 @@ Console.WriteLine("\nPROOF — the route-cut rule (DetectorModel.RouteCut)");
           DetectorModel.StepBandClause(52f, DetectorModel.StepHeight, DetectorModel.StepBandTop).Contains("step band") && DetectorModel.StepBandClause(52f).Length == 0, "");
     c = DetectorModel.RouteCut(true, touched: 16, lineFound: true, lineWhy: "", cut: true, passage: 32f);
     Check("cut: no rise known -> no band clause", !c.Why.Contains("step band"), c.Why);
+
+    // Q26 (2026-09-05, from Q25's measurement at two more stations): the band's top is 76 u above the feet (exclusive: the
+    // sure refusal), the clause carries the measured rates, and the floor-bottom term names a floating object a wall at any
+    // rise. Neither moves the class.
+    c = DetectorModel.RouteCut(true, touched: 16, lineFound: true, lineWhy: "", cut: true, passage: 64f, cutRise: 70f);
+    Check("cut: a 70 u rise -> the band clause (Q25: temple 2 of 3, prison 6 of 6)", c.Why.Contains("step band"), c.Why);
+    c = DetectorModel.RouteCut(true, touched: 16, lineFound: true, lineWhy: "", cut: true, passage: 64f, cutRise: 74f);
+    Check("cut: a 74 u rise -> the band clause (Q25: 1 of 3, the highest rung climbed)", c.Why.Contains("step band"), c.Why);
+    c = DetectorModel.RouteCut(true, touched: 16, lineFound: true, lineWhy: "", cut: true, passage: 64f, cutRise: 76f);
+    Check("cut: a 76 u rise -> no band clause (Q25: refused 0 of 6; the top is exclusive)", !c.Why.Contains("step band"), c.Why);
+    c = DetectorModel.RouteCut(true, touched: 16, lineFound: true, lineWhy: "", cut: true, passage: 64f, cutRise: 65f);
+    Check("cut: the band clause carries the measured rates (up to 64 every time, 65–74 a third to two thirds, 76 refused)", c.Why.Contains("up to 64 u every time") && c.Why.Contains("76 u refused"), c.Why);
+    Check("float: the floor-bottom term is 20 u, inside the measured (16, 22] (stepped to 14, a coin at 16, refused from 22)",
+          DetectorModel.FloatWall == 20f && DetectorModel.FloatWall > 16f && DetectorModel.FloatWall <= 22f && ActorBand.FloatWall == DetectorModel.FloatWall, $"{DetectorModel.FloatWall}");
+    c = DetectorModel.RouteCut(true, touched: 16, lineFound: true, lineWhy: "", cut: true, passage: 32f, cutRise: 62f, cutFloat: 22f);
+    Check("float: a 62 u rise floating 22 u -> Blocked, the why names the float and not the band (the band does not apply to a floating object)", c.Verdict == RouteCutVerdict.Blocked && c.Why.Contains("floats 22 u") && !c.Why.Contains("step band"), c.Why);
+    c = DetectorModel.RouteCut(true, touched: 16, lineFound: true, lineWhy: "", cut: true, passage: 32f, cutRise: 62f, cutFloat: 8f);
+    Check("float: the same rise floating 8 u -> grounded for the controller (stepped 7 of 7): the band clause, no float clause", c.Why.Contains("step band") && !c.Why.Contains("floats"), c.Why);
+    c = DetectorModel.RouteCut(true, touched: 16, lineFound: true, lineWhy: "", cut: true, passage: 32f, cutRise: 62f, cutFloat: 16f);
+    Check("float: floating 16 u (the measured coin, 5 of 8) falls under the 20 u term -> the band clause", c.Why.Contains("step band") && !c.Why.Contains("floats"), c.Why);
+    c = DetectorModel.RouteCut(true, touched: 16, lineFound: true, lineWhy: "", cut: true, passage: 32f, cutRise: 62f, cutFloat: 20f);
+    Check("float: floating exactly 20 u -> the term is inclusive at its constant", c.Why.Contains("floats 20 u") && !c.Why.Contains("step band"), c.Why);
+    c = DetectorModel.RouteCut(true, touched: 16, lineFound: true, lineWhy: "", cut: true, passage: 64f, cutRise: 200f, cutFloat: 30f);
+    Check("float: a wall at any rise, and the class stays by passage -> LikelyBlocked at 64 u beside, the float named", c.Verdict == RouteCutVerdict.LikelyBlocked && c.Why.Contains("floats 30 u"), c.Why);
+    c = DetectorModel.RouteCut(true, touched: 16, lineFound: true, lineWhy: "", cut: true, passage: 32f, cutFloat: 22f);
+    Check("float: no rise known but a float of 22 -> still named", c.Why.Contains("floats 22 u"), c.Why);
+    c = DetectorModel.RouteCut(true, touched: 12, lineFound: true, lineWhy: "", cut: false, passage: float.NaN, cutFloat: 40f);
+    Check("float: an object beside the line is Clipped whatever it floats (the term qualifies a cut only)", c.Verdict == RouteCutVerdict.Clipped && !c.Why.Contains("floats"), c.Why);
 }
 
 // ---------------------------------------------------------------------------------------
@@ -2131,6 +2159,17 @@ Console.WriteLine("\nPROOF — the band on the physical floor (FloorField; Route
         return MeshColumnIndex.Build(v.Select(p => p + c).ToArray(), i.ToArray());
     }
     static Aabb BoxOf(Vector3 lo, Vector3 hi) => new(new Vec3(lo.X, lo.Y, lo.Z), new Vec3(hi.X, hi.Y, hi.Z), false);
+    static MeshColumnIndex BoxesColumns(params (Vector3 Lo, Vector3 Hi)[] boxes)
+    {
+        var verts = new List<Vector3>(); var idx = new List<int>();
+        foreach (var (lo, hi) in boxes)
+        {
+            var (v, i) = HavokCollision.BoxSoup((hi - lo) / 2f);
+            var c = (lo + hi) / 2f; int b = verts.Count;
+            verts.AddRange(v.Select(p => p + c)); idx.AddRange(i.Select(k => k + b));
+        }
+        return MeshColumnIndex.Build(verts.ToArray(), idx.ToArray());
+    }
     var slabId = FormKey.Factory("000001:Test.esp"); var crateId = FormKey.Factory("000002:Test.esp");
 
     // the field: a floor slab whose top is 10 u under a navmesh at z 0 (the station's shape), and a 40 u crate standing on it
@@ -2190,10 +2229,12 @@ Console.WriteLine("\nPROOF — the band on the physical floor (FloorField; Route
     float top = ActorBand.PhysicalControllerTop(131.84f);
     RouteFacts Route(Vector3 lo, Vector3 hi, Func<float, float, float, float>? floorAt) =>
         RouteConnectivity.Measure(navs, BoxColumns(lo, hi), BoxOf(lo, hi), 256f, 16f, ActorBand.PhysicalStep, top, ladder, floorAt: floorAt);
+    RouteFacts RouteCols(MeshColumnIndex cols, Aabb box, Func<float, float, float, float>? floorAt) =>
+        RouteConnectivity.Measure(navs, cols, box, 256f, 16f, ActorBand.PhysicalStep, top, ladder, floorAt: floorAt);
     static RouteCutVerdict Verdict(RouteFacts f) =>
-        DetectorModel.RouteCut(f.Judged, f.Touched, f.Line?.Found ?? false, f.Line?.Why ?? "", f.Line?.Cut ?? false, f.Line?.Passage ?? float.NaN, cutRise: f.Line?.CutRise ?? float.NaN).Verdict;
+        DetectorModel.RouteCut(f.Judged, f.Touched, f.Line?.Found ?? false, f.Line?.Why ?? "", f.Line?.Cut ?? false, f.Line?.Passage ?? float.NaN, cutRise: f.Line?.CutRise ?? float.NaN, cutFloat: f.Line?.CutFloat ?? float.NaN).Verdict;
     static string Why(RouteFacts f) =>
-        DetectorModel.RouteCut(f.Judged, f.Touched, f.Line?.Found ?? false, f.Line?.Why ?? "", f.Line?.Cut ?? false, f.Line?.Passage ?? float.NaN, cutRise: f.Line?.CutRise ?? float.NaN).Why;
+        DetectorModel.RouteCut(f.Judged, f.Touched, f.Line?.Found ?? false, f.Line?.Why ?? "", f.Line?.Cut ?? false, f.Line?.Passage ?? float.NaN, cutRise: f.Line?.CutRise ?? float.NaN, cutFloat: f.Line?.CutFloat ?? float.NaN).Why;
     var beamLo = new Vector3(0, -20, 0); var beamHi = new Vector3(16, 148, 55);
     Check("band: the physical band above the feet is 58.4 .. 122.5 u for the 1.03 Nord (the measured 48..112 above the navmesh + 10.4)",
           MathF.Abs(ActorBand.PhysicalStep - 58.4f) < 1e-3f && MathF.Abs(top - (131.84f * 0.85f + 10.4f)) < 1e-2f, $"{ActorBand.PhysicalStep} .. {top}");
@@ -2201,8 +2242,11 @@ Console.WriteLine("\nPROOF — the band on the physical floor (FloorField; Route
     Check("floor δ 0: a 55 u beam is under the 58.4 u physical step -> never in the band, None", Verdict(d0) == RouteCutVerdict.None && d0.Touched == 0, $"{Verdict(d0)} touched {d0.Touched}");
     var d10 = Route(beamLo, beamHi, (x, y, z) => z - 10f);
     Check("floor δ 10 (the station): the same beam is 65 u above the feet -> Blocked (full width) with the step band clause", Verdict(d10) == RouteCutVerdict.Blocked && Why(d10).Contains("step band") && MathF.Abs(d10.Line!.CutRise - 65f) < 1e-2f, $"{Verdict(d10)} rise {d10.Line?.CutRise} {Why(d10)}");
+    Check("floor δ 10: that beam's underside on the navmesh floats 10 u above the feet (the Ratway's beams, climbed 12 of 12) -> under the floor-bottom term, the band clause stands", MathF.Abs(d10.Line!.CutFloat - 10f) < 1e-2f && !Why(d10).Contains("floats"), $"float {d10.Line?.CutFloat}");
     var d20 = Route(beamLo, beamHi, (x, y, z) => z - 20f);
-    Check("floor δ 20: 75 u above the feet -> Blocked, above the step band, no clause", Verdict(d20) == RouteCutVerdict.Blocked && !Why(d20).Contains("step band") && MathF.Abs(d20.Line!.CutRise - 75f) < 1e-2f, $"{Verdict(d20)} rise {d20.Line?.CutRise}");
+    Check("floor δ 20: the same beam on the navmesh floats 20 u above the feet (the prison's shape, Q25) -> a wall by the floor-bottom term; the band clause not named though its 75 u rise is inside the band", Verdict(d20) == RouteCutVerdict.Blocked && Why(d20).Contains("floats 20 u") && !Why(d20).Contains("inside the step band") && MathF.Abs(d20.Line!.CutRise - 75f) < 1e-2f && MathF.Abs(d20.Line!.CutFloat - 20f) < 1e-2f, $"{Verdict(d20)} rise {d20.Line?.CutRise} float {d20.Line?.CutFloat} {Why(d20)}");
+    var d20g = Route(new Vector3(0, -20, -20), new Vector3(16, 148, 55), (x, y, z) => z - 20f);
+    Check("floor δ 20: 75 u above the feet on a beam standing on the floor -> Blocked, inside the band since its top moved to 76 (Q25: 74 was climbed 1 of 3), the clause named", Verdict(d20g) == RouteCutVerdict.Blocked && Why(d20g).Contains("inside the step band") && MathF.Abs(d20g.Line!.CutRise - 75f) < 1e-2f && MathF.Abs(d20g.Line!.CutFloat) < 1e-2f, $"{Verdict(d20g)} rise {d20g.Line?.CutRise} float {d20g.Line?.CutFloat}");
     var empty = new FloorField(fallbackOffset: DetectorModel.FallbackOffset);
     var dFb = Route(beamLo, beamHi, empty.FloorAt);
     Check("no floor within reach: the field falls back to the navmesh − 10.4 -> 65.4 u above the feet, Blocked with the clause, every raster read counted as a fallback",
@@ -2212,11 +2256,32 @@ Console.WriteLine("\nPROOF — the band on the physical floor (FloorField; Route
     var overLo = new Vector3(-100, -20, 115); var overHi = new Vector3(100, 148, 135);
     var o0 = Route(overLo, overHi, (x, y, z) => z);
     Check("floor δ 0: an underside 115 u above the feet is under the 122.5 u top -> in the band (touched)", o0.Touched > 0, $"touched {o0.Touched}");
+    Check("floor δ 0: that underside cuts the line floating 115 u -> a wall by the floor-bottom term (Q25: undersides 110–111 u stopped the walker 8 of 8), no band clause", Verdict(o0) == RouteCutVerdict.Blocked && Why(o0).Contains("floats 115 u") && !Why(o0).Contains("step band") && MathF.Abs(o0.Line!.CutFloat - 115f) < 1e-2f, $"{Verdict(o0)} float {o0.Line?.CutFloat} {Why(o0)}");
     var o10 = Route(overLo, overHi, (x, y, z) => z - 10f);
     Check("floor δ 10: the same underside is 125 u above the feet -> over the top, None", o10.Touched == 0 && Verdict(o10) == RouteCutVerdict.None, $"touched {o10.Touched}");
     // the physical floor under a real field: the slab field above (δ 10 everywhere on the strip) reproduces the δ 10 arm
     var dField = Route(beamLo, beamHi, field.FloorAt);
     Check("a FloorField with the slab under the whole strip reproduces the δ 10 arm (Blocked with the clause, rise 65)", Verdict(dField) == RouteCutVerdict.Blocked && MathF.Abs(dField.Line!.CutRise - 65f) < 1e-2f, $"{Verdict(dField)} rise {dField.Line?.CutRise}");
+
+    // Q26 — the floor-bottom term on the strip (Q25 §4): the beam's top is 62 u above the feet in every arm, a rung the adult
+    // clears every time on the floor; only the underside moves. The floor is the navmesh (δ 0), so every height is above the feet.
+    var onFloor = Route(new Vector3(0, -20, -4), new Vector3(16, 148, 62), (x, y, z) => z);
+    Check("float: a 62 u beam buried 4 u in the floor -> float 0 (material in the floor is the floor's), Blocked with the band clause", Verdict(onFloor) == RouteCutVerdict.Blocked && MathF.Abs(onFloor.Line!.CutFloat) < 1e-2f && Why(onFloor).Contains("step band") && !Why(onFloor).Contains("floats"), $"{Verdict(onFloor)} float {onFloor.Line?.CutFloat} {Why(onFloor)}");
+    var lift8 = Route(new Vector3(0, -20, 8), new Vector3(16, 148, 62), (x, y, z) => z);
+    Check("float: the same top with the underside 8 u up -> float 8 (stepped 7 of 7), the band clause as before", Verdict(lift8) == RouteCutVerdict.Blocked && MathF.Abs(lift8.Line!.CutFloat - 8f) < 1e-2f && Why(lift8).Contains("step band") && !Why(lift8).Contains("floats"), $"float {lift8.Line?.CutFloat} {Why(lift8)}");
+    var lift16 = Route(new Vector3(0, -20, 16), new Vector3(16, 148, 62), (x, y, z) => z);
+    Check("float: the underside 16 u up -> the measured coin (5 of 8), under the 20 u term: the float read at 16, the band clause", MathF.Abs(lift16.Line!.CutFloat - 16f) < 1e-2f && Why(lift16).Contains("step band") && !Why(lift16).Contains("floats"), $"float {lift16.Line?.CutFloat} {Why(lift16)}");
+    var lift22 = Route(new Vector3(0, -20, 22), new Vector3(16, 148, 62), (x, y, z) => z);
+    Check("float: the underside 22 u up, the top still 62 -> a wall: Blocked, the why names the float, the band clause gone", Verdict(lift22) == RouteCutVerdict.Blocked && MathF.Abs(lift22.Line!.CutFloat - 22f) < 1e-2f && Why(lift22).Contains("floats 22 u") && !Why(lift22).Contains("step band"), $"{Verdict(lift22)} float {lift22.Line?.CutFloat} {Why(lift22)}");
+    var whole = Route(new Vector3(0, -20, 26.4f), new Vector3(16, 148, 62.4f), (x, y, z) => z);
+    Check("float: a 36 u beam lifted whole to 26.4 (Piranha's fixed-size control, 0 of 3) -> a wall by the float alone; its 62 u top is a rung the walker clears on the floor", Verdict(whole) == RouteCutVerdict.Blocked && MathF.Abs(whole.Line!.CutFloat - 26.4f) < 1e-2f && Why(whole).Contains("floats 26 u") && MathF.Abs(whole.Line!.CutRise - 62.4f) < 1e-2f, $"float {whole.Line?.CutFloat} rise {whole.Line?.CutRise}");
+    // the aggregate is the worst along the cut, as the rise is: a rail 40 u up with a post beside it that the capsule reaches
+    // only along part of the sweep — the walker meets the rail's underside where the post is out of reach
+    var railPost = RouteCols(BoxesColumns((new Vector3(0, -20, 40), new Vector3(16, 148, 62)), (new Vector3(24, 60, -4), new Vector3(40, 76, 62))),
+                             BoxOf(new Vector3(0, -20, -4), new Vector3(40, 148, 62)), (x, y, z) => z);
+    Check("float: a rail 40 u up with a post the capsule reaches only along part of the cut -> the worst float along the cut (40), a wall", Verdict(railPost) == RouteCutVerdict.Blocked && MathF.Abs(railPost.Line!.CutFloat - 40f) < 1e-2f && Why(railPost).Contains("floats 40 u"), $"{Verdict(railPost)} float {railPost.Line?.CutFloat} {Why(railPost)}");
+    var noFloat = Route(beamLo, beamHi, null);
+    Check("float: with no cut there is no float (NaN), never a clause", float.IsNaN(noFloat.Line?.CutFloat ?? float.NaN) && !Why(noFloat).Contains("floats"), $"{noFloat.Line?.CutFloat}");
 }
 
 // ---------------------------------------------------------------------------------------
