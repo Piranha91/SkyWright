@@ -227,7 +227,9 @@ public static class BosHook
         foreach (var key in keys)
         {
             var win = idx.History.Winning(key);
-            if (win is not { } w || w.Deleted) continue;
+            // A runtime layer is not a record: it can neither delete a reference nor restore one, so a record-deleted
+            // reference is left exactly as the records leave it (Q34).
+            if (win is not { } w || w.Deleted || idx.Deletions.AtWinner(key)) continue;
             rep.Considered++;
             if (!idx.RefArm.TryGetValue(key, out var arm) || !BaseObjectSwaps.Swappable(arm)) { rep.NotSwappable++; continue; }
             if (!idx.RefBase.TryGetValue(key, out var recordBase)) { rep.NoBase++; continue; }
@@ -268,7 +270,9 @@ public static class BosHook
         foreach (var key in keys)
         {
             var win = idx.History.Winning(key);
-            if (win is not { } w || w.Deleted) continue;
+            // A runtime layer is not a record: it can neither delete a reference nor restore one, so a record-deleted
+            // reference is left exactly as the records leave it (Q34).
+            if (win is not { } w || w.Deleted || idx.Deletions.AtWinner(key)) continue;
             rep.Considered++;
             if (!idx.RefInfo.TryGetValue(key, out var info) || !BaseObjectSwaps.Swappable(info.Type)) { rep.NotSwappable++; continue; }
             if (!idx.RefBase.TryGetValue(key, out var recordBase)) { rep.NoBase++; continue; }
@@ -297,14 +301,15 @@ public static class BosHook
     public static BosApplyReport Apply(PlacementHistory history, IDictionary<FormKey, FormKey> refBase,
                                        IReadOnlyDictionary<FormKey, string> refArm, IReadOnlyDictionary<FormKey, FormKey> refEncounterZone,
                                        BosFormIndex bos, BosLayer layer, int bosPlugin,
-                                       IDictionary<FormKey, FormKey> recordBase, IDictionary<FormKey, BaseObjectSwaps.BosResolution> swaps)
+                                       IDictionary<FormKey, FormKey> recordBase, IDictionary<FormKey, BaseObjectSwaps.BosResolution> swaps,
+                                       Func<FormKey, bool>? deletedNow = null)
     {
         var rep = new BosApplyReport();
         var keys = history.Refs.Select(kv => kv.Key).ToList();
         foreach (var key in keys)
         {
             var win = history.Winning(key);
-            if (win is not { } w || w.Deleted) continue;
+            if (win is not { } w || w.Deleted || (deletedNow?.Invoke(key) ?? false)) continue;
             rep.Considered++;
             if (!refArm.TryGetValue(key, out var arm) || !BaseObjectSwaps.Swappable(arm)) { rep.NotSwappable++; continue; }
             if (!refBase.TryGetValue(key, out var rb)) { rep.NoBase++; continue; }

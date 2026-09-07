@@ -99,10 +99,14 @@ public sealed class OverlapIndex
     /// that swapped the mesh as it moved is not rebuilt with the wrong mesh (4.1's stated limit, closed for the
     /// contact pass). Not part of the history's changed-only rule: a base swap without a move is still not a step.</summary>
     public Dictionary<FormKey, List<(int Plugin, FormKey Base)>> BaseChanges { get; } = new();
-    /// <summary>ref -> the latest plugin whose record of it carries the Deleted flag. A deleted reference usually loses
-    /// its placement subrecord and is invisible to PlacementExtract, so deletions are read off the major-record walk
-    /// (DependencyIndex's rule) — else a deleted dependent would read as still where it was.</summary>
-    public Dictionary<FormKey, int> DeletedBy { get; } = new();
+    /// <summary>Deletion, per view (Q34, _shared/DeletionHistory.cs). A deleted reference usually loses its placement
+    /// subrecord and is invisible to PlacementExtract, so deletions are read off the major-record walk — else a deleted
+    /// dependent would read as still where it was. The view selects the record and only then is its Deleted flag read:
+    /// the last deletion and the last placement STEP are different plugins whenever a deletion stripped the placement or
+    /// a later record restored the reference where it already stood.</summary>
+    public DeletionHistory Deletions { get; }
+
+    public OverlapIndex() => Deletions = new DeletionHistory(Touchers);
     /// <summary>Bases carrying the Is-Marker header flag (0x00800000) under the winner — the engine renders no mesh for
     /// them, whatever the record type or the mesh name says (JK's sit-marker chairs: Furniture, CommonChair01.nif, the
     /// flag set). Winner-takes-all like the mesh path; an override that clears the flag removes the entry. The marker
@@ -146,13 +150,15 @@ public sealed class OverlapIndex
     /// name). What the world-state census names a switch by.</summary>
     public Dictionary<FormKey, string> RefEditorId { get; } = new();
 
-    /// <summary>Is the reference deleted at or before the winning placement — by the winning snap's own flag, or by a
-    /// deleting override at or after the last placement change?</summary>
-    public bool IsDeletedNow(FormKey key)
-    {
-        var w = History.Winning(key);
-        return (w?.Deleted ?? false) || (DeletedBy.TryGetValue(key, out var d) && d >= (w?.Plugin ?? -1));
-    }
+    /// <summary>Is the WINNING record of the reference a deletion? The last record in the evaluated order decides —
+    /// not the last plugin that ever deleted it, and not the last plugin to change its placement (Q34).</summary>
+    public bool IsDeletedNow(FormKey key) => Deletions.AtWinner(key);
+
+    /// <summary>…and the same question in the arm WITHOUT <paramref name="mover"/>'s side: the last record by a plugin
+    /// that is neither the mover nor downstream of it. What the counterfactual arms ask, so an arm that excludes a
+    /// RESTORING plugin sees the deletion that stands without it.</summary>
+    public bool IsDeletedWithout(FormKey key, int mover, IReadOnlyList<HashSet<int>> closure)
+        => Deletions.Without(key, mover, closure);
 
     /// <summary>Read one plugin, in load order: placements into the history, base-record names, meshes and OBND.</summary>
     public void Ingest(int plugin, ISkyrimModGetter mod)
@@ -160,7 +166,9 @@ public sealed class OverlapIndex
         foreach (var rec in mod.EnumerateMajorRecords())
         {
             Bos?.Note(rec);
-            if (rec is IPlacedGetter pg) { if (pg.IsDeleted) DeletedBy[pg.FormKey] = plugin; continue; }
+            // Every placed record states whether it is deleted, whether or not it kept its placement — that is what
+            // makes a later restoration expressible at all (Q34).
+            if (rec is IPlacedGetter pg) { Deletions.Note(plugin, pg.FormKey, pg.IsDeleted, pg.Placement is not null); continue; }
             if (rec is ICollisionLayerGetter coll)
             {
                 CollisionLayersByIndex[coll.Index] = (coll.FormKey, coll.EditorID, coll.Flags.HasFlag(CollisionLayer.Flag.NavmeshObstacle));
@@ -197,6 +205,7 @@ public sealed class OverlapIndex
         if (r.CollisionLayerIndex is { } cl) RefCollisionLayer[r.FormKey] = cl; else RefCollisionLayer.Remove(r.FormKey);
         if (!string.IsNullOrWhiteSpace(r.EditorId)) RefEditorId[r.FormKey] = r.EditorId!;
         if (r.Primitive is { } pr) RefPrimitive[r.FormKey] = pr; else RefPrimitive.Remove(r.FormKey);
+        Deletions.Note(plugin, r.FormKey, r.Deleted, hasPlacement: true);
         var snap = new Snap(plugin, r.Position, cell, r.InitiallyDisabled, r.Deleted, worldspace, r.Rotation, r.Scale);
         if (History.Winning(r.FormKey) is { } prev && prev.SameAs(snap)
             && (MathF.Abs(prev.Rot.X - snap.Rot.X) > 1e-4f || MathF.Abs(prev.Rot.Y - snap.Rot.Y) > 1e-4f
@@ -253,7 +262,9 @@ public sealed class OverlapIndex
         foreach (var (key, snaps) in History.Refs)
         {
             var s = snaps[^1];
-            if (s.Deleted) { skips.Deleted++; continue; }
+            // The winning RECORD decides, not the last placement step's own flag: a deletion that stripped the
+            // placement leaves no step at all, so a reference removed that way used to stay a candidate (Q34).
+            if (s.Deleted || IsDeletedNow(key)) { skips.Deleted++; continue; }
             if (enabledOf is null ? s.Disabled : !enabledOf(key)) { skips.Disabled++; continue; }
             if (excludeResponsible(s.Plugin)) { skips.ExcludedResponsible++; continue; }
             if (!RefBase.TryGetValue(key, out var bk) || !BaseInfo.TryGetValue(bk, out var bi) || !obstructing.Contains(bi.Type))
@@ -361,6 +372,7 @@ public sealed class OverlapIndex
         Snap? prev = snaps.Count >= 2 ? snaps[^2] : null;
         bool hadPrev = prev is not null;
         bool prevPresent = prev is { Deleted: false } p && p.Space == other.Win.Space
+                        && !IsDeletedWithout(later.Key, L, closure)
                         && (arms is null ? !p.Disabled : arms.Without(later.Key, L, closure).Enabled);
         float wDepth = float.NaN, wFrac = float.NaN;
         bool withoutDeep = false;

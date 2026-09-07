@@ -290,7 +290,7 @@ for (int p = 0; p < paths.Count; p++)
 int bosPlugin = bosOn ? paths.Count : -1;
 if (bosOn) masterIdx[bosPlugin] = BosHook.PseudoMasters(paths.Count);
 var closure = DetectorModel.MasterClosure(masterIdx);
-Console.WriteLine($"indexed {idx.History.Count:N0} refs ({idx.Placements:N0} placements; {idx.SilentRePlacements:N0} rotation/scale-only overrides not recorded; {idx.DeletedBy.Count:N0} refs deleted somewhere)  ({sw.Elapsed.TotalSeconds:0.0}s)");
+Console.WriteLine($"indexed {idx.History.Count:N0} refs ({idx.Placements:N0} placements; {idx.SilentRePlacements:N0} rotation/scale-only overrides not recorded; {idx.Deletions.EverCount:N0} refs deleted somewhere)  ({sw.Elapsed.TotalSeconds:0.0}s)");
 Console.WriteLine($"   plugins that could not be read (contribute nothing, counted per rule 6): {unreadable.Count:N0}" + (unreadable.Count > 0 ? "  — " + string.Join(", ", unreadable) : ""));
 if (bosOn)
 {

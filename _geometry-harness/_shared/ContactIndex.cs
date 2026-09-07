@@ -375,7 +375,11 @@ public sealed class ContactIndex
             prev = default; win = default; change = default; mover = -1; prevIndex = -1;
             // A deletion that stripped the placement leaves the history one snap short: the winning snap is the
             // last PLACED one, and the deleting plugin is the mover of a Removed host.
-            if (snaps.Count >= 1 && Index.DeletedBy.TryGetValue(key, out var delBy) && delBy > snaps[^1].Plugin && !snaps[^1].Deleted)
+            // Q34: the removal is read from the record that WINS, not from the last plugin that ever deleted the
+            // reference. A deletion later undone by a restoring record is no removal at all, and the deleting plugin
+            // is the mover only while its deletion still stands.
+            int delBy = Index.Deletions.WinningDeleter(key);
+            if (snaps.Count >= 1 && delBy >= 0 && delBy > snaps[^1].Plugin && !snaps[^1].Deleted)
             {
                 prev = snaps[^1]; prevIndex = snaps.Count - 1;
                 win = prev with { Plugin = delBy, Deleted = true }; change = HostChange.Removed; mover = delBy; found = true;

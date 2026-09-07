@@ -18,6 +18,7 @@
     <Compile Include="..\_shared\SyntheticOrder.cs" Link="SyntheticOrder.cs" />
     <Compile Include="..\_shared\DetectorModel.cs" Link="DetectorModel.cs" />
     <Compile Include="..\_shared\PlacementHistory.cs" Link="PlacementHistory.cs" />
+    <Compile Include="..\_shared\DeletionHistory.cs" Link="DeletionHistory.cs" />
     <Compile Include="..\_shared\OverlapIndex.cs" Link="OverlapIndex.cs" />
     <Compile Include="..\_shared\ContactIndex.cs" Link="ContactIndex.cs" />
     <Compile Include="..\_shared\BosHook.cs" Link="BosHook.cs" />

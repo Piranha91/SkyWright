@@ -534,7 +534,12 @@ public static class DetectorModel
     /// <param name="HostIsPlayer">the host is the player reference (ID 0x14) — an enable parent of the player
     /// with the opposite flag is the standard "permanently disabled" idiom, and the player has no placement.</param>
     /// <param name="HostResolved">the host has a placement, or a deletion, somewhere in this order.</param>
-    /// <param name="HostDeleted">the winning record of the host carries the Deleted flag.</param>
+    /// <param name="HostDeleted">the host's record is a DELETION in one of the two compared views — the winning order,
+    /// or the edge author's own (Q34, 2026-09-06). The view selects the record first and its Deleted flag is read
+    /// second; the flag is NOT taken from the last plugin that ever deleted the reference, which is a different plugin
+    /// whenever a deletion stripped the placement subrecord or a later record restored the reference where it already
+    /// stood. Deleted at the winner leaves no position to compare against; deleted in the author's view leaves that
+    /// author's "where did it stand" a reading it could never have made. <c>DependencyRow</c> keeps the two apart.</param>
     /// <param name="HostAbsent">the host's EFFECTIVE enable state — its XESP chain resolved, not its own checkbox —
     /// leaves it absent when the cell loads, in the edge author's view or in the winning order (Q32, 2026-09-06). A
     /// reference with an enable parent takes the parent's state XOR the opposite-of-parent flag and the engine ignores
@@ -551,7 +556,10 @@ public static class DetectorModel
     /// interior cell, or worldspace). A move between exterior grid cells is a distance, not a space change.</param>
     /// <param name="HostMoved">distance from the host's authoring-view position to its winning one; NaN when
     /// either view is missing.</param>
-    /// <param name="DependentDeleted">the winning record of the dependent carries the Deleted flag.</param>
+    /// <param name="DependentDeleted">the WINNING record of the dependent is a deletion. The winner alone, deliberately:
+    /// "nothing left behind" is a claim about the order that ships, so a dependent some earlier plugin deleted and a
+    /// later one restored is judged by the ordinary placement and author rules (Q34). Its author-view reading rides on
+    /// <c>DependencyRow.DependentDeletedThen</c> for the report.</param>
     /// <param name="DependentRePlaced">the dependent's winning placement differs from the author's view.</param>
     /// <param name="DependentRePlacedByMoverSide">…and it was set by the host's mover or a plugin downstream of it.</param>
     /// <param name="Host">what the host is: something to rest on or hang from, a marker, or something else.</param>
@@ -567,8 +575,9 @@ public static class DetectorModel
     /// differential: nothing here says anything floats, only that a declared arrangement changed under one
     /// side without the other side following.
     ///
-    /// <para>Per edge, in order: a host that is the player, or that this order cannot place, or has deleted, or
-    /// whose authoring view is missing, is <b>Unjudgeable</b> by that reason. Then the enable chain: a host whose
+    /// <para>Per edge, in order: a host that is the player, or that this order cannot place, or that the winning order
+    /// or the edge author's own view has deleted, or whose authoring view is missing, is <b>Unjudgeable</b> by that
+    /// reason. Then the enable chain: a host whose
     /// EFFECTIVE state cannot be resolved in one of the two compared views is <b>Unjudgeable</b> too, and that gate
     /// comes BEFORE the movement test on purpose — an <b>Intact</b> verdict is a clean answer, and a clean answer may
     /// not rest on the resolver's fallback (Q32). A host that stayed within <paramref name="threshold"/>
@@ -591,7 +600,7 @@ public static class DetectorModel
         if (!f.HostResolved)
             return (DependencyVerdict.Unjudgeable, DependencyBlocker.HostUnresolved, "the host reference has no placement anywhere in this order");
         if (f.HostDeleted)
-            return (DependencyVerdict.Unjudgeable, DependencyBlocker.HostDeleted, "the host is deleted — no winning position to compare against");
+            return (DependencyVerdict.Unjudgeable, DependencyBlocker.HostDeleted, "the host's record is a deletion in the winning order or in the edge author's own view — no pair of positions to compare");
         if (float.IsNaN(f.HostMoved))
             return (DependencyVerdict.Unjudgeable, DependencyBlocker.NoAuthoringView, "the edge's author and its masters contributed no position for the host or the dependent");
         if (f.HostStateUnresolved)
@@ -1534,7 +1543,9 @@ public enum DependencyVerdict { Intact, MovedTogether, LeftBehind, DependentRemo
 
 /// <summary>Why an edge could not be called — why <see cref="DetectorModel.PlacementDependency"/> withheld a
 /// verdict. <c>HostUnresolved</c> is about the
-/// host's PLACEMENT (no plugin places it at all); <c>HostStateUnresolved</c> is about its ENABLE CHAIN in one of the two
+/// host's PLACEMENT (no plugin places it at all); <c>HostDeleted</c> is about the RECORD the compared views select
+/// (Q34) — a missing record, a deleted record and an unresolved chain are three different answers;
+/// <c>HostStateUnresolved</c> is about its ENABLE CHAIN in one of the two
 /// compared views — the two stay separate on purpose. <c>HostDisabled</c> keeps its name for the tallies and JSON keys
 /// that have always carried it, and since Q32 (2026-09-06) means the effective state leaves the host absent when the cell
 /// loads, not that its own initially-disabled checkbox is ticked.</summary>

@@ -900,7 +900,7 @@ Console.WriteLine("\nPROOF — placement dependency (_shared/DetectorModel.cs + 
     // Q33's arms get a base each, so every line targets exactly one host. A base record is what an ini's EditorID
     // can resolve at load: a TEMPORARY reference is not in memory when BOS reads the inis, so naming one by its own
     // EditorID matches nothing (the reader models the game here, and this fixture must respect it).
-    var bosClearK = M(0x804); var bosClearParentK = M(0x805); var bosSetOppK = M(0x806);
+    var bosClearK = M(0x804); var bosClearParentK = M(0x805); var bosSetOppK = M(0x806); var bosDeletedK = M(0x807);
     FormKey H(int n) => M((uint)(0x900 + n));     // hosts
     FormKey D(int n) => M((uint)(0xA00 + n));     // dependents
     FormKey P(int n) => M((uint)(0xB00 + n));     // Q32: the ENABLE PARENTS of hosts — what the host's own state hangs on
@@ -953,6 +953,7 @@ Console.WriteLine("\nPROOF — placement dependency (_shared/DetectorModel.cs + 
     master.Statics.Add(new Static(bosClearK, release) { EditorID = "BosClearNoParent" });
     master.Statics.Add(new Static(bosClearParentK, release) { EditorID = "BosClearUnderParent" });
     master.Statics.Add(new Static(bosSetOppK, release) { EditorID = "BosSetOppParent" });
+    master.Statics.Add(new Static(bosDeletedK, release) { EditorID = "BosDeletedHost" });
     var cell1 = new Cell(cell1K, release) { EditorID = "DepCell1", Flags = Cell.Flag.IsInteriorCell };
     var cell2 = new Cell(cell2K, release) { EditorID = "DepCell2", Flags = Cell.Flag.IsInteriorCell };
     foreach (int n in new[] { 1, 2, 3, 4, 6, 7, 8, 9, 10, 11, 14, 15, 16, 17, 18 })
@@ -1040,6 +1041,26 @@ Console.WriteLine("\nPROOF — placement dependency (_shared/DetectorModel.cs + 
     cell1.Temporary.Add(Opposite(Xesp(Ref(H(64), bosSetOppK, 64000, edid: "Host64"), P(64))));
     cell1.Temporary.Add(Xesp(Ref(D(64), tableK, 64010, 0, 40, "Dep64"), H(64)));
 
+    // ---- Q34: deletion followed by a later restoration. Every one of these hosts is deleted by a plugin whose
+    // record carries no placement subrecord, so the deletion is invisible to the placement history; the restoring
+    // plugin then repeats a position already in it, so it leaves no step either. The deciding record is therefore
+    // neither the last placement step nor the last deletion, and each row below names the view that selects it.
+    foreach (int n in new[] { 70, 71, 72, 73, 74, 75, 76, 77, 78 })
+    {
+        cell1.Temporary.Add(Ref(H(n), tableK, 1000f * n, edid: $"Host{n}"));
+        cell1.Temporary.Add(Xesp(Ref(D(n), tableK, 1000f * n + 10, 0, 40, $"Dep{n}"), H(n)));
+    }
+    cell1.Temporary.Add(Ref(P(83), tableK, 83500, edid: "P83"));                        // B deletes it, C restores it
+    cell1.Temporary.Add(Xesp(Ref(H(83), tableK, 83000, edid: "Host83"), P(83)));        // Host83 hangs on the restored parent
+    cell1.Temporary.Add(Xesp(Ref(D(83), tableK, 83010, 0, 40, "Dep83"), H(83)));
+    cell1.Temporary.Add(Ref(H(80), tableK, 80000, edid: "Host80"));                     // A deletes it, B restores it
+    cell1.Temporary.Add(Ref(D(80), tableK, 80010, 0, 40, "Dep80"));                     // A authors this edge (sees the deletion)
+    cell1.Temporary.Add(Ref(D(81), tableK, 80020, 0, 40, "Dep81"));                     // B authors this one (sees the restoration)
+    cell1.Temporary.Add(Ref(H(84), bosDeletedK, 84000, edid: "Host84", disabled: true)); // A deletes it; a BOS flagsC line targets its base
+    cell1.Temporary.Add(Xesp(Ref(D(84), tableK, 84010, 0, 40, "Dep84"), H(84)));
+    cell1.Temporary.Add(Ref(H(82), tableK, 82000, edid: "Host82"));                     // A deletes it, B FORWARDS the deletion
+    cell1.Temporary.Add(Ref(D(82), tableK, 82010, 0, 40, "Dep82"));                     // B authors this edge
+
     FileInterior(master, cell1); FileInterior(master, cell2);
     var wKey = M(0x830); var topK = M(0x831); var gridK = M(0x832);
     static Worldspace World(FormKey wKey, FormKey topK, FormKey gridK, PlacedObject? persistent, PlacedObject? temporary)
@@ -1098,6 +1119,17 @@ Console.WriteLine("\nPROOF — placement dependency (_shared/DetectorModel.cs + 
     a1.Temporary.Add(Xesp(Ref(H(55), tableK, 55200, edid: "Host55"), P(55)));           // statement identical: no log entry of its own
     a1.Temporary.Add(Ref(H(60), bosTableK, 60200, edid: "Host60"));
     a1.Temporary.Add(Xesp(Ref(H(61), bosTableK, 61200, edid: "Host61"), P(61)));
+
+    // ---- Q34: A is the mover for the deletion/restoration hosts, and the deleter for the ones B restores.
+    foreach (int n in new[] { 71, 72, 73, 74, 75, 76, 78, 83 })                          // moved 300u
+        a1.Temporary.Add(n == 83 ? Xesp(Ref(H(n), tableK, 1000f * n + 300, edid: $"Host{n}"), P(83))
+                                 : Ref(H(n), tableK, 1000f * n + 300, edid: $"Host{n}"));
+    a1.Temporary.Add(new PlacedObject(H(70), release) { IsDeleted = true });             // never moved; B restores it where it stood
+    a1.Temporary.Add(new PlacedObject(H(77), release) { IsDeleted = true });             // B restores it, C deletes it again
+    a1.Temporary.Add(new PlacedObject(H(80), release) { IsDeleted = true });             // B restores it; A's own view keeps the deletion
+    a1.Temporary.Add(Xesp(Ref(D(80), tableK, 80010, 0, 40, "Dep80"), H(80)));            // A authors the edge it can only see deleted
+    a1.Temporary.Add(new PlacedObject(H(84), release) { IsDeleted = true });             // deleted for good; the BOS line must not revive it
+    a1.Temporary.Add(new PlacedObject(H(82), release) { IsDeleted = true });             // B forwards this deletion unchanged
     FileInterior(a, a1); FileInterior(a, a2);
     a.Worldspaces.Add(World(wKey, topK, gridK, Ref(H(22), tableK, 700, 500, 0, "Host22"), null));   // A moves the persistent host 200u
     var aPath = Write(a, mOv);
@@ -1114,6 +1146,25 @@ Console.WriteLine("\nPROOF — placement dependency (_shared/DetectorModel.cs + 
     b1.Temporary.Add(Ref(P(44), tableK, 44500, edid: "P44"));                            // the parent A deleted, restored
     b1.Temporary.Add(Xesp(Ref(D(51), tableK, 50020, 0, 40, "Dep50b"), H(50)));           // B authors a second edge onto Host50
     b1.Temporary.Add(Xesp(Ref(D(55), tableK, 55010, 0, 40, "Dep55"), H(55)));           // author B; its view of Host55 lands on A's forwarded record
+
+    // ---- Q34: B restores what A deleted, and deletes what C restores. Every restoration below repeats a position
+    // already in the placement history, so none of them is a step — which is the whole point.
+    b1.Temporary.Add(Ref(H(70), tableK, 70000, edid: "Host70"));                        // restored exactly where the master put it
+    b1.Temporary.Add(Ref(H(77), tableK, 77000, edid: "Host77"));                        // restored; C deletes it again
+    b1.Temporary.Add(Ref(H(80), tableK, 80000, edid: "Host80"));                        // restored; A's view still sees its own deletion
+    b1.Temporary.Add(Xesp(Ref(D(81), tableK, 80020, 0, 40, "Dep81"), H(80)));           // author B — the view that sees the restoration
+    b1.Temporary.Add(new PlacedObject(H(82), release) { IsDeleted = true });            // FORWARDS A's deletion unchanged: no statement of its own
+    b1.Temporary.Add(Xesp(Ref(D(82), tableK, 82010, 0, 40, "Dep82"), H(82)));           // author B; its view lands on its own forward
+    b1.Temporary.Add(new PlacedObject(H(71), release) { IsDeleted = true });            // C restores it at A's position
+    b1.Temporary.Add(new PlacedObject(H(72), release) { IsDeleted = true });            // control: nobody restores it
+    b1.Temporary.Add(new PlacedObject(H(76), release) { IsDeleted = true });            // C restores it 200u further on
+    b1.Temporary.Add(new PlacedObject(D(74), release) { IsDeleted = true });            // C restores the DEPENDENT unchanged
+    b1.Temporary.Add(new PlacedObject(D(75), release) { IsDeleted = true });            // control: nobody restores it
+    b1.Temporary.Add(new PlacedObject(P(83), release) { IsDeleted = true });            // the enable parent; C restores it
+    var h73del = Ref(H(73), tableK, 73300, edid: "Host73");                             // control: deleted WITH its placement retained
+    h73del.IsDeleted = true;
+    b1.Temporary.Add(h73del);
+    b1.Temporary.Add(Ref(H(78), tableK, 78300, edid: "Host78"));                        // forwarded unchanged: no step, no deletion
     FileInterior(b, b1);
     var bPath = Write(b, mOv, aOv);
 
@@ -1127,6 +1178,16 @@ Console.WriteLine("\nPROOF — placement dependency (_shared/DetectorModel.cs + 
     c1.Temporary.Add(Xesp(Ref(D(44), tableK, 44010, 0, 40, "Dep44"), H(44)));
     c1.Temporary.Add(Xesp(Ref(H(50), tableK, 50500, edid: "Host50"), P(50)));
     c1.Temporary.Add(Xesp(Ref(H(55), tableK, 55600, edid: "Host55"), P(55)));
+
+    // ---- Q34: C restores what B deleted (and deletes one thing back again). C masters the master ONLY, so none of
+    // this is visible to an author-view read that stops at A.
+    c1.Temporary.Add(Ref(H(71), tableK, 71300, edid: "Host71"));                        // restored at A's position: no step
+    c1.Temporary.Add(Ref(H(76), tableK, 76500, edid: "Host76"));                        // restored 200u on: a genuine step, C is the mover
+    c1.Temporary.Add(Xesp(Ref(D(74), tableK, 74010, 0, 40, "Dep74"), H(74)));           // the dependent restored where the master put it
+    c1.Temporary.Add(Ref(P(83), tableK, 83500, edid: "P83"));                           // the enable parent restored
+    c1.Temporary.Add(new PlacedObject(H(77), release) { IsDeleted = true });            // deleted again after B restored it
+    c1.Temporary.Add(Ref(H(82), tableK, 82000, edid: "Host82"));                        // restored at the winner; B still sees the deletion
+    c1.Temporary.Add(Ref(H(78), tableK, 78300, edid: "Host78"));                        // a second identical forward
     FileInterior(c, c1);
     var cPath = Write(c, mOv);
 
@@ -1170,7 +1231,7 @@ Console.WriteLine("\nPROOF — placement dependency (_shared/DetectorModel.cs + 
     Check("dep-synth: XLKR edge, host moved -> LEFT BEHIND", V(7, HostEdgeKind.LinkedRef).Verdict == DependencyVerdict.LeftBehind, W(7, HostEdgeKind.LinkedRef));
     Check("dep-synth: XAPR edge, host moved -> LEFT BEHIND", V(8, HostEdgeKind.ActivateParent).Verdict == DependencyVerdict.LeftBehind, W(8, HostEdgeKind.ActivateParent));
     Check("dep-synth: A deletes Host9 (placement stripped) -> UNJUDGEABLE (HostDeleted), caught off the record walk",
-          V(9).Reason == DependencyBlocker.HostDeleted && idx.DeletedBy.ContainsKey(H(9)), W(9));
+          V(9).Reason == DependencyBlocker.HostDeleted && idx.Deletions.Ever(H(9)), W(9));
     Check("dep-synth: A moves Host10, C (does not master A) re-places Dep10 -> UNJUDGEABLE (third party)",
           V(10).Reason == DependencyBlocker.DependentMovedByThirdParty, W(10));
     Check("dep-synth: A moves Host11 and deletes Dep11 -> DEPENDENT REMOVED",
@@ -1205,8 +1266,9 @@ Console.WriteLine("\nPROOF — placement dependency (_shared/DetectorModel.cs + 
     Check("dep-synth: a dependent with two edges gets two rows, judged apart",
           V(19, HostEdgeKind.EnableParent).Verdict == DependencyVerdict.LeftBehind && V(19, HostEdgeKind.LinkedRef).Verdict == DependencyVerdict.Intact,
           "XESP->Host1 left behind, XLKR->Host2 intact");
-    Check("dep-synth: A is the mover for every LeftBehind row except the one host C moves (Host50, seen only by B)",
-          rows.Values.Where(x => x.V.Verdict == DependencyVerdict.LeftBehind).All(x => x.Row.Mover == 1 || (x.Row.Edge.Host == H(50) && x.Row.Mover == 3)),
+    Check("dep-synth: A is the mover for every LeftBehind row except the two hosts C moves (Host50, seen only by B; Host76, restored elsewhere)",
+          rows.Values.Where(x => x.V.Verdict == DependencyVerdict.LeftBehind)
+              .All(x => x.Row.Mover == 1 || ((x.Row.Edge.Host == H(50) || x.Row.Edge.Host == H(76)) && x.Row.Mover == 3)),
           string.Join(", ", rows.Values.Where(x => x.V.Verdict == DependencyVerdict.LeftBehind && x.Row.Mover != 1).Select(x => $"{x.Row.Edge.Dependent} mover {x.Row.Mover}")));
 
     // -------------------------------------------------------------------------------------------
@@ -1300,14 +1362,80 @@ Console.WriteLine("\nPROOF — placement dependency (_shared/DetectorModel.cs + 
 
     // The enable history's own shape: presence without placement data, and a value read at a plugin index.
     Check("dep-q32: the deleted parents are kept as records WITHOUT placement data, which is how a view can still see them",
-          idx.Enable.RecordOnly >= 2 && idx.Enable.Latest(P(43)).Deleted && !idx.Enable.Latest(P(44)).Deleted
-       && idx.Enable.StatementAt(P(44), 1).Deleted,
-          $"{idx.Enable.RecordOnly} record-only refs; P44 deleted at A: {idx.Enable.StatementAt(P(44), 1).Deleted}, restored at the winner: {!idx.Enable.Latest(P(44)).Deleted}");
+          idx.Enable.RecordOnly >= 2 && idx.Deletions.AtWinner(P(43)) && !idx.Deletions.AtWinner(P(44))
+       && idx.Deletions.At(P(44), 1),
+          $"{idx.Enable.RecordOnly} record-only refs; P44 deleted at A: {idx.Deletions.At(P(44), 1)}, restored at the winner: {!idx.Deletions.AtWinner(P(44))}");
     Check("dep-q32: a reference nobody disables, parents or deletes carries no statement at all — the log is the exception, not the census",
           idx.Enable.Tracked < idx.History.Count && idx.Enable.Latest(H(1)).Plugin == -1 && idx.Enable.Latest(H(1)).Parent is null,
           $"{idx.Enable.Tracked:N0} of {idx.History.Count:N0} refs carry a statement");
     Check("dep-synth: the placement count is the written one — nothing is silently dropped by the extraction",
-          idx.History.Count == 103, $"{idx.History.Count} refs in the history");  // 41 (2026-09-03) + Q32's 54 + Q33's 8
+          idx.History.Count == 131, $"{idx.History.Count} refs in the history");  // 41 (2026-09-03) + Q32's 54 + Q33's 8 + Q34's 28
+    // -------------------------------------------------------------------------------------------
+    // Q34 — a deletion followed by a later restoration. Three identities that the old bookkeeping conflated:
+    // the last plugin to CHANGE a placement, the last plugin to DELETE, and the record the view actually selects.
+    // Every expectation below was written from the fixture into
+    // _claude/runs/2026-09-06-deleted-reference-restoration/manifests/EXPECTED-CASES.md before the code ran.
+    // -------------------------------------------------------------------------------------------
+    Check("dep-q34: deleted with its placement stripped, then RESTORED where it stood -> not deleted, and the row is judged (INTACT)",
+          V(70).Verdict == DependencyVerdict.Intact && V(70).Reason != DependencyBlocker.HostDeleted
+       && idx.History.Of(H(70))!.Count == 1,
+          $"{W(70)} | {idx.History.Of(H(70))!.Count} placement step(s): the restoration is not one");
+    Check("dep-q34: MOVED, then deleted, then restored at the mover's position -> LEFT BEHIND, and the mover is still the plugin that moved it",
+          V(71).Verdict == DependencyVerdict.LeftBehind && R32(71).Mover == 1 && R32(71).Facts.HostMoved > 299f
+       && idx.History.Of(H(71))!.Count == 2,
+          $"{W(71)} | mover {R32(71).Mover}, {idx.History.Of(H(71))!.Count} steps");
+    Check("dep-q34: CONTROL — moved, then deleted with the placement stripped and never restored -> HOST DELETED",
+          V(72).Reason == DependencyBlocker.HostDeleted, W(72));
+    Check("dep-q34: CONTROL — deleted with its placement RETAINED -> HOST DELETED, by the same selection",
+          V(73).Reason == DependencyBlocker.HostDeleted, W(73));
+    Check("dep-q34: the DEPENDENT deleted then restored unchanged while its host moves -> not DependentRemoved; the ordinary rules decide (LEFT BEHIND)",
+          V(74).Verdict == DependencyVerdict.LeftBehind && !R32(74).Facts.DependentDeleted && !R32(74).Facts.DependentRePlaced,
+          W(74));
+    Check("dep-q34: CONTROL — the dependent deleted and never restored -> DEPENDENT REMOVED",
+          V(75).Verdict == DependencyVerdict.DependentRemoved && R32(75).Facts.DependentDeleted, W(75));
+    Check("dep-q34: restored at a DIFFERENT position -> the deletion is cleared AND the genuine movement and its author stay visible",
+          V(76).Verdict == DependencyVerdict.LeftBehind && R32(76).Mover == 3 && R32(76).Facts.HostMoved > 499f
+       && idx.History.Of(H(76))!.Count == 3,
+          $"{W(76)} | mover {R32(76).Mover}, moved {R32(76).Facts.HostMoved:0}u");
+    Check("dep-q34: delete -> restore -> delete again -> the LAST eligible statement decides: HOST DELETED",
+          V(77).Reason == DependencyBlocker.HostDeleted, W(77));
+    Check("dep-q34: two identical restoring forwards create NO movement — the census is untouched by the fix",
+          V(78).Verdict == DependencyVerdict.LeftBehind && R32(78).Mover == 1 && idx.History.Of(H(78))!.Count == 2,
+          $"{W(78)} | {idx.History.Of(H(78))!.Count} steps, mover {R32(78).Mover}");
+    Check("dep-q34: TWO AUTHORS, ONE HOST — A can only see its own deletion (withheld); B sees the restoration (judged). One host, two answers",
+          V(80).Reason == DependencyBlocker.HostDeleted && R32(80).Edge.Author == 1
+       && V(81).Verdict == DependencyVerdict.Intact && R32(81).Edge.Author == 2,
+          $"A: {W(80)} | B: {W(81)}");
+    // C restores Host82 at the winner, so this case needs BOTH halves of the selection: B's view lands on B's own
+    // forwarded deletion (whose value comes from A), while the winner is the restoration. A winner-only read judges it.
+    Check("dep-q34: an eligible UNCHANGED FORWARD of a deletion still reads deleted in its own view, while the winner is the restoration",
+          V(82).Reason == DependencyBlocker.HostDeleted && R32(82).Edge.Author == 2
+       && R32(82).HostDeletedThen && !R32(82).HostDeletedNow
+       && idx.Deletions.LastEligible(H(82), 2, closure) == 2 && idx.Deletions.ProviderAt(H(82), 2) == 1,
+          $"{W(82)} | B's view lands on plugin {idx.Deletions.LastEligible(H(82), 2, closure)}, the statement comes from plugin {idx.Deletions.ProviderAt(H(82), 2)}");
+    Check("dep-q34: a host deleted for good is HOST DELETED whatever a runtime layer says about it (BOS off arm)",
+          V(84).Reason == DependencyBlocker.HostDeleted, W(84));
+    Check("dep-q34: a host whose ENABLE PARENT was deleted and then restored resolves through the restored parent -> LEFT BEHIND",
+          V(83).Verdict == DependencyVerdict.LeftBehind && R32(83).HostStateNow.Resolved && R32(83).HostStateNow.Enabled
+       && R32(83).HostStateThen.Resolved && R32(83).HostStateThen.Enabled,
+          W(83));
+    // The same host asked from two authors, in both query orders, on a fresh index — the deletion views must not leak.
+    {
+        var fresh34 = new DependencyIndex();
+        for (int p = 0; p < paths.Length; p++)
+        {
+            using var mod = SkyrimMod.CreateFromBinaryOverlay(paths[p], release);
+            fresh34.Ingest(p, mod);
+        }
+        var eB34 = idx.Edges.First(e => e.Dependent == D(81) && e.Kind == HostEdgeKind.EnableParent);
+        var eA34 = idx.Edges.First(e => e.Dependent == D(80) && e.Kind == HostEdgeKind.EnableParent);
+        var revB = DetectorModel.PlacementDependency(fresh34.Judge(eB34, closure).Facts, T);   // B's view FIRST this time
+        var revA = DetectorModel.PlacementDependency(fresh34.Judge(eA34, closure).Facts, T);
+        Check("dep-q34: reversing the query order gives each author the same deletion answer — no leakage between views",
+              revA.Reason == DependencyBlocker.HostDeleted && revB.Verdict == DependencyVerdict.Intact
+           && revB.Reason != DependencyBlocker.HostDeleted,
+              $"A {revA.Reason}, B {revB.Verdict}");
+    }
     Check("dep-q32: BOS OFF — the two BOS-arm hosts are plainly present and their rows are judged",
           V(60).Verdict == DependencyVerdict.LeftBehind && V(61).Verdict == DependencyVerdict.LeftBehind
        && idx.Enable.BosReflaggedUnderParent.Count == 0, $"{W(60)} | {W(61)}");
@@ -1317,7 +1445,7 @@ Console.WriteLine("\nPROOF — placement dependency (_shared/DetectorModel.cs + 
         var bosRoot = Path.Combine(root, "bosmod");
         Directory.CreateDirectory(bosRoot);
         File.WriteAllText(Path.Combine(bosRoot, "Dep_SWAP.ini"),
-            "[Transforms]\nBosDepTable|flags(0x800)\nBosClearNoParent|flagsC(0x800)\n"
+            "[Transforms]\nBosDepTable|flags(0x800)\nBosClearNoParent|flagsC(0x800)\nBosDeletedHost|flagsC(0x800)\n"
           + "BosClearUnderParent|flagsC(0x800)\nBosSetOppParent|flags(0x800)\n");
         var bidx = new DependencyIndex { Bos = new BosFormIndex() };
         var blight = new List<(ModKey, bool)>();
@@ -1340,6 +1468,10 @@ Console.WriteLine("\nPROOF — placement dependency (_shared/DetectorModel.cs + 
                         .ToDictionary(r => (r.Edge.Dependent, r.Edge.Kind), r => (Row: r, V: DetectorModel.PlacementDependency(r.Facts, T)));
         (DependencyRow Row, (DependencyVerdict Verdict, DependencyBlocker Reason, string Why) V) B32(int n) => brows[(D(n), HostEdgeKind.EnableParent)];
 
+        Check("dep-q34/bos: a runtime flag override cannot revive a RECORD-deleted reference — the layer never considers it, and the row stays HOST DELETED",
+              B32(84).V.Reason == DependencyBlocker.HostDeleted && bidx.Deletions.AtWinner(H(84))
+           && !bidx.BosSwaps.ContainsKey(H(84)),
+              $"{B32(84).V.Why} | BOS resolved it: {bidx.BosSwaps.ContainsKey(H(84))}");
         Check("dep-q32/bos: the layer re-flagged the five arm hosts and swapped nothing",
               rep.FlagChanges == 5 && rep.Swapped == 0, $"{rep.FlagChanges} flag changes, {rep.Swapped} swaps; the layer read {layer.LinesRead} lines, {layer.LinesFailed} refused, {layer.Anomalies.Count} anomalies");
         Check("dep-q32/bos: a BOS re-flag of a host with NO parent is a winner-view fact — absent now, present in the author's view, so the row is withheld",
@@ -1490,6 +1622,9 @@ Console.WriteLine("\nPROOF — overlap provenance (_shared/DetectorModel.cs + _s
     m1.Temporary.Add(Ref(R(11), crateK, 9000, edid: "a11", disabled: true));  // X places b11 on it; A ENABLES a11
     m2.Temporary.Add(Ref(R(12), crateK, 0, edid: "a12"));                     // in cell 2; X places b12 in cell 1; A RELOCATES a12 onto it
     m1.Temporary.Add(Ref(R(13), crateK, 11000, edid: "a13"));                 // A overrides with a rotation only — a silent re-placement
+    // Q34: deletion and restoration, both far from every other crate so they join no pair and change no hit.
+    m1.Temporary.Add(Ref(R(20), crateK, 20000, edid: "d1"));                   // X deletes it (stripped), A restores it where it stood
+    m1.Temporary.Add(Ref(R(21), crateK, 21000, edid: "d2"));                   // X deletes it, nobody restores — the control
     FileInterior(master, m1); FileInterior(master, m2);
     var mPath = Write(master);
     using var mOv = SkyrimMod.CreateFromBinaryOverlay(mPath, release);
@@ -1501,6 +1636,8 @@ Console.WriteLine("\nPROOF — overlap provenance (_shared/DetectorModel.cs + _s
     x1.Temporary.Add(Ref(R(6), crateK, 3005, edid: "a6"));
     x1.Temporary.Add(Ref(new FormKey(xKey, 0x900), crateK, 9000, edid: "b11"));
     x1.Temporary.Add(Ref(new FormKey(xKey, 0x901), crateK, 10000, edid: "b12"));
+    x1.Temporary.Add(new PlacedObject(R(20), release) { IsDeleted = true });          // Q34: deleted, placement stripped; A restores it
+    x1.Temporary.Add(new PlacedObject(R(21), release) { IsDeleted = true });          // Q34: deleted, never restored — the control
     FileInterior(x, x1);
     var xPath = Write(x, mOv);
 
@@ -1527,6 +1664,7 @@ Console.WriteLine("\nPROOF — overlap provenance (_shared/DetectorModel.cs + _s
     a1.Temporary.Add(Ref(R(12), crateK, 10000, edid: "a12"));                         // RELOCATED onto b12@X    -> Introduced + Blind, 'enabled or relocated'
     a1.Temporary.Add(Ref(R(13), crateK, 11000, edid: "a13", rotZ: 1.0f));             // rotation only           -> silent, not responsible
     a1.Temporary.Add(Ref(new FormKey(aKey, 0x905), markerK, 2000, edid: "mk1"));      // an editor marker into a3 -> set aside, never a candidate
+    a1.Temporary.Add(Ref(R(20), crateK, 20000, edid: "d1"));                          // Q34: restored exactly where M put it — no placement step
     FileInterior(a, a1);
     var aPath = Write(a, mOv);
 
@@ -1562,6 +1700,35 @@ Console.WriteLine("\nPROOF — overlap provenance (_shared/DetectorModel.cs + _s
     Check("ovl-synth: the editor marker is set aside, counted, and nothing else is",
           skips.MarkerMesh == 1 && skips.NoGeometry == 0 && skips.NonObstructingType == 0 && skips.Disabled == 0,
           $"markers {skips.MarkerMesh}, no geometry {skips.NoGeometry}, disabled {skips.Disabled} (a11 was enabled by A)");
+    // ---- Q34: the candidate population must read deletion from the record the winner selects, not from the last
+    // placement step's own flag. Both crates are alone in space, so neither adds a pair or changes a hit.
+    Check("ovl-q34: a crate deleted with its placement stripped and then RESTORED where it stood is still a candidate",
+          cands.Any(c => c.Key == R(20)), $"{cands.Count} candidates; d1 present: {cands.Any(c => c.Key == R(20))}");
+    Check("ovl-q34: CONTROL — a crate deleted with its placement stripped and never restored is NOT a candidate, and is counted as deleted",
+          !cands.Any(c => c.Key == R(21)) && skips.Deleted == 1,
+          $"d2 present: {cands.Any(c => c.Key == R(21))}; skips.Deleted {skips.Deleted}");
+    {
+        // A world-state arm chooses which references are ON. It cannot choose whether a record exists: the candidate
+        // build reads the winning record's deletion BEFORE it asks the arm's population predicate at all.
+        var armOn = idx.Candidates(BoxOf, obstructing, _ => false, 1024f, out var armSkips, _ => true);
+        Check("ovl-q34: no world-state arm can revive a record-deleted reference — the deletion is read before the arm's population predicate",
+              !armOn.Any(c => c.Key == R(21)) && armOn.Any(c => c.Key == R(20)) && armSkips.Deleted == 1,
+              $"everything-on arm: {armOn.Count} candidates, deleted skipped {armSkips.Deleted}, d2 present {armOn.Any(c => c.Key == R(21))}");
+    }
+    {
+        // The historical arms read the same selection. Without the RESTORER the last eligible record is X's deletion;
+        // without the DELETER it is the master's placement.
+        var q34arms = new EnableArms(idx);
+        var withoutRestorer = q34arms.Without(R(20), Ai, closure);
+        var withoutDeleter = q34arms.Without(R(20), Xi, closure);
+        // "Absent" in the enable layer is UNRESOLVED, not disabled: EnableState answers a reference it cannot read
+        // with its stated fallback (enabled, unresolved), and every consumer gates on the deletion beside the chain.
+        Check("ovl-q34: the arm WITHOUT the restorer cannot read the crate — its deletion stands there; the arm WITHOUT the deleter has it present",
+              !withoutRestorer.Resolved && idx.IsDeletedWithout(R(20), Ai, closure)
+           && withoutDeleter.Resolved && withoutDeleter.Enabled && !idx.IsDeletedWithout(R(20), Xi, closure),
+              $"without A (restorer): resolved {withoutRestorer.Resolved}, deleted in that arm {idx.IsDeletedWithout(R(20), Ai, closure)}; "
+            + $"without X (deleter): resolved {withoutDeleter.Resolved}, enabled {withoutDeleter.Enabled}");
+    }
     Check("ovl-synth: one silent re-placement — A's rotation-only override of a13",
           idx.SilentRePlacements == 1 && idx.History.Winning(R(13))!.Value.Plugin == Mi, $"silent {idx.SilentRePlacements}, a13 responsible = plugin {idx.History.Winning(R(13))!.Value.Plugin}");
     var sweep = OverlapIndex.Pairs(cands, closure, 16f, 0.25f);
@@ -1870,6 +2037,10 @@ Console.WriteLine("\nPROOF — placement contact (_shared/DetectorModel.cs + _sh
     m1.Temporary.Add(Ref(H(27), tableK, 27000, edid: "Table27"));                                   // A will remove it
     m1.Temporary.Add(Ref(D(27), bowlK, 27000, 0, TableTop + BowlHalf, "Bowl27"));
     m1.Temporary.Add(Ref(H(28), poleK, 27000, 0, 0, "Ref28"));                                   // X will turn it into a table by base swap, never moving it
+    // Q34: a moved table deleted with its placement stripped, one restored afterwards and one not. Both stand alone,
+    // so neither carries a dependent and neither adds a contact row.
+    m1.Temporary.Add(Ref(H(90), tableK, 90000, 0, 0, "Table90"));                                // A moves it, B deletes it, C restores it
+    m1.Temporary.Add(Ref(H(91), tableK, 91000, 0, 0, "Table91"));                                // A moves it, B deletes it, nobody restores
     FileInterior(master, m1); FileInterior(master, m2);
     var wKey = M(0x830); var topK = M(0x831); var gridK = M(0x832);
     static Worldspace World(FormKey wKey, FormKey topK, FormKey gridK, PlacedObject? persistent, PlacedObject? temporary)
@@ -1904,7 +2075,7 @@ Console.WriteLine("\nPROOF — placement contact (_shared/DetectorModel.cs + _sh
     var a = new SkyrimMod(aKey, release);
     a.Statics.Add(new Static(aStaticK, release) { EditorID = "CtAStatic" });
     var a1 = Interior(cell1K); var a2 = Interior(cell2K);
-    foreach (int n in new[] { 1, 2, 3, 4, 5, 6, 8, 9, 14, 15, 22, 31, 32, 33, 34, 35, 36, 37, 40, 41, 60, 70 })
+    foreach (int n in new[] { 1, 2, 3, 4, 5, 6, 8, 9, 14, 15, 22, 31, 32, 33, 34, 35, 36, 37, 40, 41, 60, 70, 90, 91 })
         a1.Temporary.Add(Ref(H(n), tableK, 1000f * n + 200, edid: $"Table{n}"));                    // moved 200 u along X
     a1.Temporary.Add(Ref(S(30), switchK, 30000, 500, 0, "Switch30", disabled: true));               // Table30 leaves through its parent
     a1.Temporary.Add(Ref(S(31), switchK, 31000, 500, 0, "Switch31", disabled: true));               // Bowl31 leaves through its parent
@@ -1937,6 +2108,8 @@ Console.WriteLine("\nPROOF — placement contact (_shared/DetectorModel.cs + _sh
     var b1 = Interior(cell1K);
     b1.Temporary.Add(Ref(D(4), bowlK, 4200, 0, TableTop + BowlHalf, "Bowl4"));
     b1.Temporary.Add(Ref(new FormKey(bKey, 0x801), aStaticK, 99000, edid: "CtBRef"));                // references A -> masters A
+    b1.Temporary.Add(new PlacedObject(H(90), release) { IsDeleted = true });                         // Q34: C restores it
+    b1.Temporary.Add(new PlacedObject(H(91), release) { IsDeleted = true });                         // Q34: nobody restores it
     FileInterior(b, b1);
     var bPath = Write(b, mOv, aOv);
 
@@ -1944,6 +2117,7 @@ Console.WriteLine("\nPROOF — placement contact (_shared/DetectorModel.cs + _sh
     var c = new SkyrimMod(cKey, release);
     var c1 = Interior(cell1K);
     c1.Temporary.Add(Ref(D(14), bowlK, 14001, 0, TableTop + BowlHalf, "Bowl14"));
+    c1.Temporary.Add(Ref(H(90), tableK, 90200, 0, 0, "Table90"));                                    // Q34: restored at A's position — no step
     FileInterior(c, c1);
     var cPath = Write(c, mOv);
 
@@ -1983,7 +2157,7 @@ Console.WriteLine("\nPROOF — placement contact (_shared/DetectorModel.cs + _sh
     var hosts = cidx.MovedHosts(skips, closure);
     MovedHost? Host(int n) => hosts.FirstOrDefault(h => h.Key == H(n));
     Check("ct-synth: the host census — every moved, relocated or removed table and the wall; not the 10 u nudge, not the four bowls that moved or left (too small to host — Bowl31 leaves through its parent); Marker17 IS a host (the name says marker, the flag does not — R2); Table36 never exists at runtime (R1, counted); Table70 (the sham shape) is a host",
-          hosts.Count == 33 && skips.HostTooSmall == 4 && Host(16) is null && Host(17) is { Change: HostChange.Moved } && Host(12) is { Change: HostChange.Removed } && Host(13) is { Change: HostChange.Relocated }
+          hosts.Count == 35 && skips.HostTooSmall == 4 && Host(16) is null && Host(17) is { Change: HostChange.Moved } && Host(12) is { Change: HostChange.Removed } && Host(13) is { Change: HostChange.Relocated }
        && Host(1) is { Change: HostChange.Moved, Mover: Ai } && Host(23) is not null && Host(36) is null && skips.HostRuntimeDisabled == 1 && Host(61) is null,
           $"{hosts.Count} hosts (runtime-disabled {skips.HostRuntimeDisabled}, too small {skips.HostTooSmall}): " + string.Join(" ", hosts.OrderBy(h => h.Key.ID).Select(h => $"{h.Key.ID - 0x900}:{h.Change}")));
     Check("ct-synth: a base swap is read at the right snap — Table18's previous base is the short table, its winning base the tall one",
@@ -1991,6 +2165,10 @@ Console.WriteLine("\nPROOF — placement contact (_shared/DetectorModel.cs + _sh
     Check("ct-synth R1: Table30, never re-placed, leaves the world when A disables its enable parent -> REMOVED via the parent, mover A, previous snap the master's",
           Host(30) is { Change: HostChange.Removed, RemovedViaParent: true, Mover: Ai, PrevIndex: 0 } && Host(12) is { RemovedViaParent: false },
           Host(30) is { } h30 ? $"{h30.Change} viaParent {h30.RemovedViaParent} mover {h30.Mover} prevIndex {h30.PrevIndex}" : "(no host)");
+    Check("ct-q34: a moved table deleted with its placement stripped and then RESTORED is a MOVED host, not a phantom removal — and the mover is still the plugin that moved it",
+          Host(90) is { Change: HostChange.Moved, Mover: Ai }, Host(90) is { } h90 ? $"{h90.Change}, mover {h90.Mover}" : "(no host)");
+    Check("ct-q34: CONTROL — the same shape with no restoration is REMOVED, and the deleting plugin is the mover",
+          Host(91) is { Change: HostChange.Removed, Mover: Bi }, Host(91) is { } h91 ? $"{h91.Change}, mover {h91.Mover}" : "(no host)");
     var (flagOnly, nameOnly) = cidx.AuditMarkers();
     Check("ct-synth R2: the marker audit — the switch and the sit-chair are flagged under ordinary names; XMarkerHeading and the stand are named markers without the flag",
           flagOnly.Contains(switchK) && flagOnly.Contains(sitK) && nameOnly.Contains(markerK) && nameOnly.Contains(standK) && !flagOnly.Contains(tableK) && !nameOnly.Contains(tableK),

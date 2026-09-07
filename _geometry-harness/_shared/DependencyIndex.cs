@@ -29,10 +29,11 @@ namespace HarnessShared;
 public readonly record struct HostEdge(FormKey Dependent, HostEdgeKind Kind, FormKey Host, int Author);
 
 /// <summary>One plugin's statement of the enable-relevant facts of one placed reference: its own
-/// initially-disabled flag, its XESP enable parent with the opposite-of-parent flag, and whether the
-/// record carries the Deleted flag. A plugin that carries a record of a reference states all four,
-/// whether or not it changed any of them.</summary>
-public readonly record struct EnableStatement(int Plugin, bool Disabled, FormKey? Parent, bool Opposite, bool Deleted);
+/// initially-disabled flag and its XESP enable parent with the opposite-of-parent flag. A plugin that
+/// carries a record of a reference states all three, whether or not it changed any of them. Deletion is
+/// NOT here: it is one question with the same three views, so it lives once in <see cref="DeletionHistory"/>
+/// and every consumer asks that (Q34, 2026-09-06).</summary>
+public readonly record struct EnableStatement(int Plugin, bool Disabled, FormKey? Parent, bool Opposite);
 
 /// <summary>THE DECLARED ENABLE HISTORY — enough of every reference's enable facts, in load order, to answer
 /// "was this thing there when the cell loaded" in an ARBITRARY view of the order, not just the winning one.
@@ -64,9 +65,7 @@ public readonly record struct EnableStatement(int Plugin, bool Disabled, FormKey
 /// rather than trusts.</para></summary>
 public sealed class DeclaredEnableHistory
 {
-    readonly IReadOnlyDictionary<FormKey, List<int>> _placed;
     readonly Dictionary<FormKey, List<EnableStatement>> _log = new();
-    readonly Dictionary<FormKey, List<int>> _recordOnly = new();
     readonly Dictionary<FormKey, EnableResolution> _winnerMemo = new();
     readonly Dictionary<int, Dictionary<FormKey, EnableResolution>> _viewMemo = new();
     readonly Dictionary<int, Func<FormKey, EnableFacts?>> _viewFacts = new();
@@ -74,7 +73,13 @@ public sealed class DeclaredEnableHistory
 
     /// <param name="placedTouchers">the owning index's ref -> contributing plugins map (every plugin whose record
     /// of the reference carried placement data), used as the presence half of a view.</param>
-    public DeclaredEnableHistory(IReadOnlyDictionary<FormKey, List<int>> placedTouchers) => _placed = placedTouchers;
+    public DeclaredEnableHistory(IReadOnlyDictionary<FormKey, List<int>> placedTouchers)
+        => Deletions = new DeletionHistory(placedTouchers);
+
+    /// <summary>Deletion, per view — the presence half of this history and the one implementation every consumer of
+    /// "is this reference deleted" asks (Q34, 2026-09-06). Record presence and eligibility live there because the two
+    /// questions select the same record; only the enable VALUES are kept here.</summary>
+    public DeletionHistory Deletions { get; }
 
     /// <summary>References whose winning statement a Base Object Swapper property override re-flags WHILE the
     /// reference also carries an XESP parent. Q32 left these UNRESOLVED because the interaction was unmeasured;
@@ -89,7 +94,7 @@ public sealed class DeclaredEnableHistory
     /// <summary>How many references carry a value entry at all — the change log's size, not the order's.</summary>
     public int Tracked => _log.Count;
     /// <summary>Records with no placement subrecord that were noted for presence (deletions, almost always).</summary>
-    public int RecordOnly => _recordOnly.Count;
+    public int RecordOnly => Deletions.RecordOnly;
 
     /// <summary>Winner-view references the chain could not be read to the end for: a parent nothing places, a
     /// parent deleted at the winner, a cycle, or a BOS re-flag under a parent. Derived from the memo, so counting
@@ -114,17 +119,21 @@ public sealed class DeclaredEnableHistory
     /// <c>PlacementExtract</c> drops it, so the toucher list will not have it.</summary>
     public void Note(int plugin, FormKey key, bool disabled, FormKey? parent, bool opposite, bool deleted, bool hasPlacement)
     {
-        if (!hasPlacement)
-        {
-            if (!_recordOnly.TryGetValue(key, out var seen)) _recordOnly[key] = seen = new List<int>(1);
-            if (seen.Count == 0 || seen[^1] != plugin) seen.Add(plugin);
-        }
+        if (Deletions.Note(plugin, key, deleted, hasPlacement)) Invalidate();
         var last = Latest(key);
-        if (last.Disabled == disabled && last.Parent == parent && last.Opposite == opposite && last.Deleted == deleted) return;
+        if (last.Disabled == disabled && last.Parent == parent && last.Opposite == opposite) return;
         if (!_log.TryGetValue(key, out var entries)) _log[key] = entries = new List<EnableStatement>(1);
-        if (entries.Count > 0 && entries[^1].Plugin == plugin) entries[^1] = new EnableStatement(plugin, disabled, parent, opposite, deleted);
-        else entries.Add(new EnableStatement(plugin, disabled, parent, opposite, deleted));
+        if (entries.Count > 0 && entries[^1].Plugin == plugin) entries[^1] = new EnableStatement(plugin, disabled, parent, opposite);
+        else entries.Add(new EnableStatement(plugin, disabled, parent, opposite));
         Invalidate();
+    }
+
+    /// <summary>Note a plugin's record of a reference for its DELETION facts alone — the major-record walk's reading,
+    /// which covers every placed record whether or not it carries a placement subrecord. Memos are invalidated when the
+    /// statement changes, so a value computed during ingestion can never survive into a judgement.</summary>
+    public void NoteDeletion(int plugin, FormKey key, bool deleted, bool hasPlacement)
+    {
+        if (Deletions.Note(plugin, key, deleted, hasPlacement)) Invalidate();
     }
 
     /// <summary>Note the Base Object Swapper layer's effect on a reference's own initially-disabled flag, under the
@@ -135,7 +144,8 @@ public sealed class DeclaredEnableHistory
         var last = Latest(key);
         if (last.Disabled == disabled) return;                       // the override left the flag alone
         if (last.Parent is not null) BosReflaggedUnderParent.Add(key);
-        Note(bosPlugin, key, disabled, last.Parent, last.Opposite, last.Deleted, hasPlacement: true);
+        // The runtime layer states nothing about DELETION: it is not a record. Whatever the records say stands.
+        Note(bosPlugin, key, disabled, last.Parent, last.Opposite, Deletions.AtWinner(key), hasPlacement: true);
     }
 
     /// <summary>Drop every resolved answer. Called whenever a statement is added, so a value computed during
@@ -149,7 +159,7 @@ public sealed class DeclaredEnableHistory
     /// <summary>The last statement anyone made about a reference — the plain default when nobody ever changed it
     /// from one, which is most of the order.</summary>
     public EnableStatement Latest(FormKey key)
-        => _log.TryGetValue(key, out var e) && e.Count > 0 ? e[^1] : new EnableStatement(-1, false, null, false, false);
+        => _log.TryGetValue(key, out var e) && e.Count > 0 ? e[^1] : new EnableStatement(-1, false, null, false);
 
     /// <summary>The statement in force at plugin index <paramref name="at"/>: the last entry at or before it.</summary>
     public EnableStatement StatementAt(FormKey key, int at)
@@ -157,25 +167,16 @@ public sealed class DeclaredEnableHistory
         if (_log.TryGetValue(key, out var e))
             for (int i = e.Count - 1; i >= 0; i--)
                 if (e[i].Plugin <= at) return e[i];
-        return new EnableStatement(-1, false, null, false, false);
+        return new EnableStatement(-1, false, null, false);
     }
 
     /// <summary>Does any plugin place or carry a record of this reference at all?</summary>
-    public bool KnownAnywhere(FormKey key) => _placed.ContainsKey(key) || _recordOnly.ContainsKey(key) || _log.ContainsKey(key);
+    public bool KnownAnywhere(FormKey key) => Deletions.KnownAnywhere(key) || _log.ContainsKey(key);
 
     /// <summary>The highest plugin index <paramref name="viewer"/> can see a record of the reference at — itself or a
     /// plugin in its transitive master closure. −1 when the view never sees the reference placed or overridden.</summary>
     public int LastEligible(FormKey key, int viewer, IReadOnlyList<HashSet<int>> closure)
-    {
-        int best = -1;
-        if (_placed.TryGetValue(key, out var t))
-            for (int i = t.Count - 1; i >= 0; i--)
-                if (t[i] == viewer || closure[viewer].Contains(t[i])) { best = t[i]; break; }
-        if (_recordOnly.TryGetValue(key, out var r))
-            for (int i = r.Count - 1; i >= 0; i--)
-                if (r[i] == viewer || closure[viewer].Contains(r[i])) { if (r[i] > best) best = r[i]; break; }
-        return best;
-    }
+        => Deletions.LastEligible(key, viewer, closure);
 
     /// <summary>The winning facts of one reference for <see cref="EnableState"/>: null when nothing places it or when
     /// the winning statement deletes it. A BOS re-flag under an enable parent is NOT withheld — the statement carries
@@ -184,18 +185,20 @@ public sealed class DeclaredEnableHistory
     public EnableFacts? WinnerFacts(FormKey key)
     {
         if (!KnownAnywhere(key)) return null;
+        if (Deletions.AtWinner(key)) return null;
         var s = Latest(key);
-        return s.Deleted ? null : new EnableFacts(s.Disabled, s.Parent, s.Opposite);
+        return new EnableFacts(s.Disabled, s.Parent, s.Opposite);
     }
 
     /// <summary>The facts of one reference as <paramref name="viewer"/> could see them: null when the view never
     /// sees it, or when the version it sees is a deletion.</summary>
     public EnableFacts? ViewFacts(FormKey key, int viewer, IReadOnlyList<HashSet<int>> closure)
     {
-        int at = LastEligible(key, viewer, closure);
+        int at = Deletions.LastEligible(key, viewer, closure);
         if (at < 0) return null;
+        if (Deletions.At(key, at)) return null;
         var s = StatementAt(key, at);
-        return s.Deleted ? null : new EnableFacts(s.Disabled, s.Parent, s.Opposite);
+        return new EnableFacts(s.Disabled, s.Parent, s.Opposite);
     }
 
     /// <summary>The reference's runtime enable state in the winning order, chain and all.</summary>
@@ -225,11 +228,22 @@ public sealed class DeclaredEnableHistory
 /// <param name="HostStateThen">the host's runtime enable state as the edge's author could see it (Q32) — the
 /// chain resolved over the versions that author or its transitive masters provide.</param>
 /// <param name="HostStateNow">the same in the winning order, the Base Object Swapper layer included.</param>
+/// <param name="HostDeletedThen">the host's record is a deletion in the edge author's own view (Q34).</param>
+/// <param name="HostDeletedNow">…and in the winning order. The two are reported apart so a row can say WHICH view saw
+/// the deletion; <see cref="DetectorModel.DependencyFacts.HostDeleted"/> is their disjunction.</param>
+/// <param name="DependentDeletedThen">the dependent's record is a deletion in the edge author's view. Reported only —
+/// the DependentRemoved verdict is the winner's reading, because "nothing left behind" is a claim about the shipped order.</param>
+/// <param name="HostRecordProviderThen">the plugin whose record supplied the host's deletion state in the author's view,
+/// −1 when no statement did (the plain default). Not necessarily the last plugin the view can see: a plugin that forwards
+/// a statement unchanged logs nothing of its own, and the value then comes from an earlier one.</param>
+/// <param name="HostRecordProviderNow">the same for the winning order.</param>
 public sealed record DependencyRow(HostEdge Edge, DetectorModel.DependencyFacts Facts,
                                    Snap? HostThen, Snap? HostNow, Snap? DepThen, Snap? DepNow,
                                    int Mover, FormKey? HostBase, DependentClass Dependent,
                                    float AuthoredOffset, bool DependentTouchedByMoverSide,
-                                   EnableResolution HostStateThen, EnableResolution HostStateNow);
+                                   EnableResolution HostStateThen, EnableResolution HostStateNow,
+                                   bool HostDeletedThen, bool HostDeletedNow, bool DependentDeletedThen,
+                                   int HostRecordProviderThen, int HostRecordProviderNow);
 
 public sealed class DependencyIndex
 {
@@ -241,10 +255,11 @@ public sealed class DependencyIndex
     /// <summary>base record -> its Mutagen type name and editor id, winner wins. Modeled records plus NPCs.</summary>
     public Dictionary<FormKey, (string Type, string? Edid)> BaseInfo { get; } = new();
     public Dictionary<FormKey, (string? Edid, bool Interior)> CellName { get; } = new();
-    /// <summary>ref -> the latest plugin whose record of it carries the Deleted flag. A deleted reference usually
-    /// loses its placement subrecord, which makes it invisible to PlacementExtract — so deletions are read off the
-    /// major-record walk instead, or a deleted host would read as "still where it was".</summary>
-    public Dictionary<FormKey, int> DeletedBy { get; } = new();
+    /// <summary>Deletion, per view (Q34). A deleted reference usually loses its placement subrecord, which makes it
+    /// invisible to PlacementExtract — so deletions are read off the major-record walk instead, or a deleted host would
+    /// read as "still where it was". Forwards to <see cref="DeclaredEnableHistory.Deletions"/>, which is the one
+    /// implementation: the view selects the record, and only then is its Deleted flag read.</summary>
+    public DeletionHistory Deletions => Enable.Deletions;
     /// <summary>ref -> every plugin carrying a record of it, in load order, whether or not the placement
     /// changed (PlacementHistory records changes only). What "the mover's side overrode it" is read from.</summary>
     public Dictionary<FormKey, List<int>> Touchers { get; } = new();
@@ -288,11 +303,12 @@ public sealed class DependencyIndex
             Bos?.Note(rec);
             if (rec is IPlacedGetter pg)
             {
-                if (pg.IsDeleted) DeletedBy[pg.FormKey] = plugin;
-                // A record with no placement subrecord — a deletion, normally — never reaches Record, so its enable
-                // statement is taken here instead. Q32 needs it: a deleted parent must go absent from the views it
-                // is deleted in and come back in the ones it is not, and a latest-only deletion map cannot say that.
+                // Every placed record states whether it is deleted, whether or not it kept its placement — that is
+                // what makes a later restoration expressible at all (Q34). A record with no placement subrecord never
+                // reaches Record, so its enable statement is taken here too. Q32 needs it: a deleted parent must go
+                // absent from the views it is deleted in and come back in the ones it is not.
                 if (pg.Placement is null) NoteEnable(plugin, pg, hasPlacement: false);
+                else Enable.NoteDeletion(plugin, pg.FormKey, pg.IsDeleted, hasPlacement: true);
                 continue;
             }
             if (rec is INpcGetter npc) BaseInfo[npc.FormKey] = ("Npc", npc.EditorID);
@@ -355,9 +371,16 @@ public sealed class DependencyIndex
         var host = e.Host;
         var dep = e.Dependent;
         var hostNow = History.Winning(host);
-        bool hostResolved = hostNow is not null || DeletedBy.ContainsKey(host);
-        bool hostDeleted = (hostNow?.Deleted ?? false)
-                        || (DeletedBy.TryGetValue(host, out var hd) && hd >= (hostNow?.Plugin ?? -1));
+        bool hostResolved = hostNow is not null || Deletions.Ever(host);
+        // Q34: the VIEW selects the record, then its Deleted flag is read — never the last deletion compared against
+        // the last placement STEP, which is a different plugin whenever a deletion stripped the placement or a
+        // restoration repeated a position already in the history. Both compared configurations are asked, the way
+        // Q32 asks both for the enable chain: a host deleted in the edge author's own view leaves that author's
+        // "where did it stand" a stale reading it could never have seen, and a host deleted at the winner has no
+        // position to compare against at all.
+        bool hostDeletedNow = Deletions.AtWinner(host);
+        bool hostDeletedThen = Deletions.InView(host, e.Author, closure);
+        bool hostDeleted = hostDeletedNow || hostDeletedThen;
         var hostThen = History.AsSeenBy(host, e.Author, closure);
         var depThen = History.AsSeenBy(dep, e.Author, closure);
         var depNow = History.Winning(dep);
@@ -379,8 +402,11 @@ public sealed class DependencyIndex
         var stateNow = Enable.Winner(host);
         bool hostAbsent = views && (!stateThen.Enabled || !stateNow.Enabled);
         bool hostStateUnresolved = views && (!stateThen.Resolved || !stateNow.Resolved);
-        bool depDeleted = (depNow?.Deleted ?? false)
-                       || (DeletedBy.TryGetValue(dep, out var dd) && dd >= (depNow?.Plugin ?? -1));
+        // The dependent's gate is the WINNER's record alone: "nothing left behind" is a claim about the order that
+        // ships, so a dependent the author's view saw deleted but a later plugin restored is judged by the ordinary
+        // placement and author rules. Its author-view reading is reported beside the row, not folded into it.
+        bool depDeleted = Deletions.AtWinner(dep);
+        bool depDeletedThen = Deletions.InView(dep, e.Author, closure);
         int mover = hostNow?.Plugin ?? -1;
         bool depRePlaced = views && !depNow!.Value.SameAs(depThen!.Value);
         bool byMoverSide = views && (depNow!.Value.Plugin == mover || closure[depNow.Value.Plugin].Contains(mover));
@@ -401,6 +427,8 @@ public sealed class DependencyIndex
         var facts = new DetectorModel.DependencyFacts(e.Kind, hostIsPlayer, hostResolved, hostDeleted, hostAbsent, hostStateUnresolved,
             sameSpaceThen, hostChangedSpace, hostMoved, depDeleted, depRePlaced, byMoverSide, hostClass);
         return new DependencyRow(e, facts, hostThen, hostNow, depThen, depNow, mover, hostBase, depClass, authoredOffset, depTouched,
-                                 stateThen, stateNow);
+                                 stateThen, stateNow, hostDeletedThen, hostDeletedNow, depDeletedThen,
+                                 Deletions.ProviderAt(host, Deletions.LastEligible(host, e.Author, closure)),
+                                 Deletions.ProviderAt(host, int.MaxValue));
     }
 }

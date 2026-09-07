@@ -121,7 +121,7 @@ for (int p = 0; p < paths.Count; p++)
 }
 var closure = DetectorModel.MasterClosure(masterIdx);
 Console.WriteLine($"indexed {idx.Placements:N0} placements over {idx.History.Count:N0} refs; {idx.EnableChanges.Count:N0} refs with an XESP statement; "
-                + $"{idx.DeletedBy.Count:N0} deleted somewhere  ({sw.Elapsed.TotalSeconds:0.0}s)");
+                + $"{idx.Deletions.EverCount:N0} deleted somewhere  ({sw.Elapsed.TotalSeconds:0.0}s)");
 Console.WriteLine($"   plugins that could not be read (contribute nothing, counted per rule 6): {unreadable.Count:N0}"
                 + (unreadable.Count > 0 ? "  — " + string.Join(", ", unreadable) : ""));
 

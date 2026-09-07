@@ -148,7 +148,7 @@ if (bosOn)
 }
 else Console.WriteLine("\n   BOS: off — record bases (--bos on to apply the *_SWAP.ini layer)");
 Console.WriteLine($"\nindexed {idx.Placements:N0} placements over {idx.History.Count:N0} refs; {idx.EdgeCount:N0} declared host edges; "
-                + $"{idx.DeletedBy.Count:N0} refs deleted somewhere  ({sw.Elapsed.TotalSeconds:0.0}s)");
+                + $"{idx.Deletions.EverCount:N0} refs deleted somewhere  ({sw.Elapsed.TotalSeconds:0.0}s)");
 Console.WriteLine($"   plugins that could not be read (contribute nothing, counted per rule 6): {unreadable.Count:N0}"
                 + (unreadable.Count > 0 ? "  — " + string.Join(", ", unreadable) : ""));
 
@@ -314,11 +314,32 @@ Console.WriteLine($"   enable-history size: {idx.Enable.Tracked:N0} refs carry a
 Console.WriteLine($"   BOS re-flagged a reference that ALSO has an enable parent: {idx.Enable.BosReflaggedUnderParent.Count:N0}"
                 + " (measured in game, Q33: the parent decides and the override changes neither the flag nor the");
 Console.WriteLine( "   object's presence — these resolve through the chain like any other reference, and are counted here only as the population)");
-// A restoration the latest-only deletion map cannot see: the host reads deleted for the HostDeleted guard while its
-// last statement does not carry the flag. Surfaced, NOT folded — repairing the deletion guard is outside Q32.
-int deletedThenRestored = rows.Count(j => j.Reason == DependencyBlocker.HostDeleted && !idx.Enable.Latest(j.Row.Edge.Host).Deleted);
-Console.WriteLine($"   HostDeleted rows whose LAST record does not carry the Deleted flag (a restoration the latest-only");
-Console.WriteLine($"   deletion map cannot express): {deletedThenRestored:N0}  — reported, not folded; the deleted-host guard is unchanged here");
+// Q34 (2026-09-06): the deletion guard reads the record the VIEW selects, so "deleted somewhere in this order" and
+// "deleted in this view" are now different numbers and both are printed. Q32's warning counted the disagreement between
+// the old latest-only map and the winning record; it is replaced here by the population that disagreement was about —
+// references a later record restored — with its denominators, the views that saw the deletion, and the identities.
+var restored = idx.Deletions.RestoredAtWinner().ToList();
+var restoredSet = restored.ToHashSet();
+int restoredHosts = rows.Select(j => j.Row.Edge.Host).Distinct().Count(restoredSet.Contains);
+int restoredDeps = rows.Select(j => j.Row.Edge.Dependent).Distinct().Count(restoredSet.Contains);
+int hostDeletedNow = rows.Count(j => j.Row.HostDeletedNow);
+int hostDeletedThenOnly = rows.Count(j => j.Row.HostDeletedThen && !j.Row.HostDeletedNow);
+int depDeletedThenOnly = rows.Count(j => j.Row.DependentDeletedThen && !j.Row.Facts.DependentDeleted);
+Console.WriteLine($"   refs deleted somewhere in the order: {idx.Deletions.EverCount:N0}; of those, RESTORED by a later record");
+Console.WriteLine($"   (not deleted at the winner): {restored.Count:N0} — {restoredHosts:N0} appear as a host and {restoredDeps:N0} as a dependent");
+Console.WriteLine($"   across {rows.Count:N0} edges. A restoration that repeats an existing position is no placement step, so");
+Console.WriteLine($"   these are exactly the references the pre-Q34 guard called deleted for good.");
+Console.WriteLine($"   HostDeleted rows by the view that saw it: {hostDeletedNow:N0} deleted in the WINNING order,");
+Console.WriteLine($"   {hostDeletedThenOnly:N0} deleted only in the EDGE AUTHOR's view (its own record, or one of its masters');");
+Console.WriteLine($"   dependents deleted in the author's view but restored at the winner (judged normally, reported here):");
+Console.WriteLine($"   {depDeletedThenOnly:N0}");
+if (restored.Count > 0)
+{
+    Console.WriteLine($"   the restored references (up to 20), with the deletion history each view selects from:");
+    foreach (var k in restored.OrderBy(k => k.ID).Take(20))
+        Console.WriteLine($"      {k}  {RefLabel(k)}  statements: "
+            + string.Join(" -> ", idx.Deletions.Of(k)!.Select(e => $"{PluginName(e.Plugin)}{(e.Deleted ? " deletes" : " restores")}")));
+}
 
 var moved = rows.Where(HostMovedRow).ToList();
 var movedHosts = moved.Select(j => j.Row.Edge.Host).Distinct().ToList();
@@ -468,7 +489,8 @@ if (jsonPath is not null)
     var summary = new
     {
         generated = DateTime.UtcNow.ToString("yyyy-MM-dd HH:mm:ssZ"), instance = Instance, profile = profileName, threshold,
-        plugins = paths.Count, unreadable, placements = idx.Placements, refs = idx.History.Count, edges = idx.EdgeCount, deletedRefs = idx.DeletedBy.Count,
+        plugins = paths.Count, unreadable, placements = idx.Placements, refs = idx.History.Count, edges = idx.EdgeCount, deletedRefs = idx.Deletions.EverCount,
+        restoredRefs = restored.Count, restoredAsHost = restoredHosts, restoredAsDependent = restoredDeps,
         census = new { changed, relocated, movedFar, movedRefs = movedRefs.Count, movedCells = movedCells.Count, moverPlugins = moverPlugins.Count, moverEditedCells = moverEditedCells.Count },
         slice = sliceJson,
         hostClassByKind = Enum.GetValues<HostEdgeKind>().ToDictionary(k => k.ToString(), k => Enum.GetValues<HostClass>().ToDictionary(c => c.ToString(), c => rows.Count(j => j.Row.Edge.Kind == k && j.Row.Facts.Host == c))),
@@ -491,7 +513,14 @@ if (jsonPath is not null)
             viewUnresolved = idx.Enable.ViewUnresolved, viewAbsent = idx.Enable.ViewAbsent,
             refsWithNonDefaultStatement = idx.Enable.Tracked, recordsWithoutPlacementData = idx.Enable.RecordOnly,
             bosReflaggedUnderParent = idx.Enable.BosReflaggedUnderParent.Count,
-            hostDeletedRowsWhoseLastRecordIsNotDeleted = deletedThenRestored,
+            hostDeletedRowsByView = new { winner = hostDeletedNow, authorViewOnly = hostDeletedThenOnly },
+            dependentDeletedInAuthorViewButRestoredAtWinner = depDeletedThenOnly,
+            restoredReferences = restored.OrderBy(k => k.ID).Select(k => new
+            {
+                formKey = k.ToString(), name = RefLabel(k),
+                asHost = rows.Any(j => j.Row.Edge.Host == k), asDependent = rows.Any(j => j.Row.Edge.Dependent == k),
+                statements = idx.Deletions.Of(k)!.Select(e => new { plugin = PluginName(e.Plugin), e.Deleted }).ToList(),
+            }).ToList(),
         },
         dependentClassAll = Enum.GetValues<DependentClass>().ToDictionary(c => c.ToString(), c => rows.Count(j => j.Row.Dependent == c)),
         supportShapedEdges = rows.Count(j => j.Row.Facts.Host == HostClass.Physical && j.Row.Dependent == DependentClass.Physical),

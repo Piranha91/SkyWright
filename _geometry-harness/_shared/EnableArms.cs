@@ -117,7 +117,9 @@ public sealed class EnableArms
             var snaps = _index.History.Of(k);
             if (snaps is null) return null;
             int i = PlacementHistory.AuthoringSnapIndex(snaps, mover, closure);
-            if (i < 0 || snaps[i].Deleted) return null;
+            // The arm's own deletion reading, not the snap's flag alone (Q34): the record that stands in this arm may
+            // be a deletion with no placement at all, or a restoration that repeated a position already in the history.
+            if (i < 0 || snaps[i].Deleted || _index.IsDeletedWithout(k, mover, closure)) return null;
             var (p, o) = ArmEnableParent(k, mover, closure);
             return new EnableFacts(snaps[i].Disabled, p, o);
         }
