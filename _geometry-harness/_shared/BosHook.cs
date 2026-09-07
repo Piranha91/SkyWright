@@ -171,6 +171,28 @@ public sealed class BosFeed
         }
         return new BosEffective(bk, pos, rot, scale, disabled, res);
     }
+
+    /// <summary>The reference's OWN initially-disabled flag as the layer leaves it, for every reference whose flag the
+    /// layer actually CHANGES — Q33's input to the enable chain (<c>EnableFactsIndex.ApplyBosOwnFlags</c>, or a facts
+    /// wrapper where the caller's facts come from elsewhere). A reference the layer does not reach, or whose override
+    /// leaves the flag alone, is absent from the map rather than restated, so applying it is a no-op where BOS is off.
+    ///
+    /// <para>This exists because the override is an own-flag fact, not a presence verdict. Measured in game
+    /// 2026-09-06: under an XESP parent the engine ignores it exactly as it ignores the record's own flag, and with no
+    /// parent it decides in both directions. Routing it through <see cref="EnableState"/> gets both from one rule;
+    /// filtering on it after the chain gets the first wrong and cannot express the second.</para></summary>
+    public Dictionary<FormKey, bool> OwnFlagOverrides(IEnumerable<(PlacedRef Ref, FormKey Cell)> placed)
+    {
+        var map = new Dictionary<FormKey, bool>();
+        if (Layer is null || Index is null) return map;
+        var sink = new BosApplyReport();          // its own report: the caller's tallies are its business, not ours
+        foreach (var (r, cell) in placed)
+        {
+            var eff = Effective(r, cell, sink);
+            if (eff.InitiallyDisabled != r.InitiallyDisabled) map[r.FormKey] = eff.InitiallyDisabled;
+        }
+        return map;
+    }
 }
 
 public static class BosHook
@@ -232,8 +254,11 @@ public static class BosHook
     /// belongs, and out of every authoring view, where the pseudo-plugin is not in anyone's master closure. A property
     /// override is a runtime effect on the reference's OWN flag and never sets an XESP parent, so where the reference
     /// already has one the engine's own rule (the parent decides, the flag is bookkeeping) says the re-flag changes
-    /// nothing — but that has not been measured with BOS in the picture, so those references are marked unresolved and
-    /// counted rather than answered (DeclaredEnableHistory.BosReflaggedUnderParent).</summary>
+    /// nothing. Q33 measured exactly that in game (2026-09-06): three OFF/ON pairs, both flag directions and both XESP
+    /// parities, the override demonstrably applied to every parented reference (it moved them) and neither its reported
+    /// flag nor its presence departed from the chain. So the statement is written with its parent attached and the
+    /// chain rule does the rest; the population is still counted
+    /// (DeclaredEnableHistory.BosReflaggedUnderParent) but nothing is withheld.</summary>
     public static BosApplyReport Apply(DependencyIndex idx, BosLayer layer, int bosPlugin)
     {
         var rep = new BosApplyReport();

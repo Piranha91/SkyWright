@@ -259,8 +259,21 @@ public sealed partial class StateArm
     /// <summary>Every reference whose runtime state the flip changes — the flipped switches and their descendants —
     /// with the state on each side. Read from the census, so a cycle or an unplaced link is already counted there.</summary>
     public IEnumerable<(FormKey Key, bool Before, bool After, SwitchInfo Root, SetMember? Member)> Changes(SwitchIndex sw)
+        => Changes(sw, sw.WinnerFacts, sw.Baseline);
+
+    /// <summary>The same, over facts the caller has already adjusted — blockprobe's BOS own-flag overlay
+    /// (<c>EnableFactsIndex.WithBosOwnFlags</c>). <paramref name="sw"/> is still the census, for the switch roots and
+    /// their descendants; only the STATE comes from the caller's facts.
+    ///
+    /// <para>This overload exists because a run that judges one world must not describe another. blockprobe builds its
+    /// population from the overlaid census, so if the arrive/depart sentence were still read off the raw one, a switch
+    /// whose own flag BOS clears could be reported as arriving while the population the run actually judged has it
+    /// departing. BOTH sides move together: <paramref name="baseline"/> is resolved over the same facts, so "before"
+    /// and "after" are two states of one world.</para></summary>
+    public IEnumerable<(FormKey Key, bool Before, bool After, SwitchInfo Root, SetMember? Member)> Changes(
+        SwitchIndex sw, Func<FormKey, EnableFacts?> censusFacts, Func<FormKey, EnableResolution> baseline)
     {
-        var facts = Wrap(sw.WinnerFacts, sw.Baseline);
+        var facts = Wrap(censusFacts, baseline);
         var memo = new Dictionary<FormKey, EnableResolution>();
         var seen = new HashSet<FormKey>();
         foreach (var f in Flips)
@@ -268,13 +281,13 @@ public sealed partial class StateArm
             if (!sw.Switches.TryGetValue(f, out var root)) continue;
             if (seen.Add(f))
             {
-                bool before = sw.Baseline(f).Enabled, after = EnableState.Resolve(f, facts, memo).Enabled;
+                bool before = baseline(f).Enabled, after = EnableState.Resolve(f, facts, memo).Enabled;
                 if (before != after) yield return (f, before, after, root, null);
             }
             foreach (var m in root.Descendants)
             {
                 if (!seen.Add(m.Key)) continue;
-                bool before = sw.Baseline(m.Key).Enabled, after = EnableState.Resolve(m.Key, facts, memo).Enabled;
+                bool before = baseline(m.Key).Enabled, after = EnableState.Resolve(m.Key, facts, memo).Enabled;
                 if (before != after) yield return (m.Key, before, after, root, m);
             }
         }

@@ -109,8 +109,6 @@ foreach (var cp in PlacementExtract.FromMod(mod))
     if (!floorRefsByWorld.TryGetValue(cp.Worldspace, out var frg)) { floorRefsByWorld[cp.Worldspace] = frg = new(); floorLandByWorld[cp.Worldspace] = new(); }
     FloorFeed.FileByGrid(cp, frg, floorLandByWorld[cp.Worldspace]);
 }
-var pop = popMode == PopulationMode.Flags ? EnablePopulation.Flags(enableFacts) : EnablePopulation.LoadTime(enableFacts);
-Func<FormKey, bool>? enabledOf = pop.Predicate;
 Console.WriteLine($"floor candidates filed by grid: {floorRefsByWorld.Values.Sum(w => w.Values.Sum(d => d.Count)):N0} exterior refs, {floorLandByWorld.Values.Sum(w => w.Count):N0} LAND records in {floorRefsByWorld.Count} worldspaces  ({sw.Elapsed.TotalSeconds:0.0}s)");
 var floorTally = new FloorFeed.Tally();
 
@@ -147,6 +145,24 @@ if (bosOn)
     Console.WriteLine($"swap layer: {order.OrderedPaths.Count} plugins walked for its index, {orderBaseMesh.Count:N0} winning models  ({sw.Elapsed.TotalSeconds:0.0}s)");
 }
 Console.WriteLine("   " + bos.LayerLine());
+// Q33 (measured in game 2026-09-06): a flags/flagsC override replaces the reference's OWN initially-disabled flag and
+// nothing else — the enable chain still decides presence. It therefore belongs in the facts, before the population is
+// built, not as a filter after the chain: under an XESP parent the engine ignores it, and with no parent a clear
+// brings the reference in, which no post-chain filter can do. The population is Skyrim.esm's own placements, so the
+// overrides are collected over the same source.
+if (bosOn)
+{
+    var pairs = new List<(PlacedRef Ref, FormKey Cell)>();
+    foreach (var cp in PlacementExtract.FromMod(mod)) foreach (var r in cp.Refs) pairs.Add((r, cp.Cell));
+    var bosOwnFlags = bos.OwnFlagOverrides(pairs);
+    int applied = enableFacts.ApplyBosOwnFlags(bosOwnFlags);
+    if (bosOwnFlags.Count > 0)
+        Console.WriteLine($"   BOS own-flag overrides: {bosOwnFlags.Count:N0} reference(s) re-flagged, {applied:N0} applied to the enable facts");
+}
+// Built AFTER the swap layer on purpose: the population must be able to see the layer's own-flag overrides, and a
+// resolution taken before them could not be un-taken (the memo is not invalidated).
+var pop = popMode == PopulationMode.Flags ? EnablePopulation.Flags(enableFacts) : EnablePopulation.LoadTime(enableFacts);
+Func<FormKey, bool>? enabledOf = pop.Predicate;
 var bosRep = new BosApplyReport();
 // The actor band's top is DERIVED per cell (the tallest placed actor, else the tallest playable race) since
 // 2026-09-02; the settings' Height column is what the BROAD rules still use and what every earlier run used.
@@ -351,7 +367,10 @@ foreach (var cp in PlacementExtract.FromMod(mod))
         // floor's standing population.
         var eff = bos.Effective(r, cp.Cell, bosRep);
         // The run's population, and the swap layer's own disable on top of it (a BOS override that disables at init).
-        if (enabledOf is null ? eff.InitiallyDisabled : (!enabledOf(r.FormKey) || eff.InitiallyDisabled)) { skippedDisabled++; continue; }
+        // The population already carries the layer's own-flag overrides (Q33), so this is one test, not two: an
+        // override under an enable parent is ignored by the chain as the engine ignores it, and a clear with no
+        // parent brings the reference in. --flags has no chain, and there the BOS-effective own flag IS the answer.
+        if (enabledOf is null ? eff.InitiallyDisabled : !enabledOf(r.FormKey)) { skippedDisabled++; continue; }
         if (r.Base is null || !(eff.Swapped ? orderBaseMesh : baseMesh).TryGetValue(eff.Base, out var bm)) { skippedNoGeo++; continue; }
 
         var g = Geometry(bm.Mesh);

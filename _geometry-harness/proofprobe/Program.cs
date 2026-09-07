@@ -897,6 +897,10 @@ Console.WriteLine("\nPROOF — placement dependency (_shared/DetectorModel.cs + 
     FormKey M(uint id) => new(mKey, id);
     var tableK = M(0x801); var markerK = M(0x802); var cell1K = M(0x810); var cell2K = M(0x811);
     var bosTableK = M(0x803);                     // a base only the BOS-arm hosts use, so one [Transforms] line hits them alone
+    // Q33's arms get a base each, so every line targets exactly one host. A base record is what an ini's EditorID
+    // can resolve at load: a TEMPORARY reference is not in memory when BOS reads the inis, so naming one by its own
+    // EditorID matches nothing (the reader models the game here, and this fixture must respect it).
+    var bosClearK = M(0x804); var bosClearParentK = M(0x805); var bosSetOppK = M(0x806);
     FormKey H(int n) => M((uint)(0x900 + n));     // hosts
     FormKey D(int n) => M((uint)(0xA00 + n));     // dependents
     FormKey P(int n) => M((uint)(0xB00 + n));     // Q32: the ENABLE PARENTS of hosts — what the host's own state hangs on
@@ -922,6 +926,8 @@ Console.WriteLine("\nPROOF — placement dependency (_shared/DetectorModel.cs + 
         return r;
     }
     static PlacedObject Xesp(PlacedObject r, FormKey host) { r.EnableParent = new EnableParent(); r.EnableParent.Reference.SetTo(host); return r; }
+    /// <summary>The opposite-of-parent parity on a reference that already carries an XESP.</summary>
+    static PlacedObject Opposite(PlacedObject r) { r.EnableParent!.Flags |= EnableParent.Flag.SetEnableStateToOppositeOfParent; return r; }
     static PlacedObject XespOpp(PlacedObject r, FormKey host)
     {
         r.EnableParent = new EnableParent { Flags = EnableParent.Flag.SetEnableStateToOppositeOfParent };
@@ -944,6 +950,9 @@ Console.WriteLine("\nPROOF — placement dependency (_shared/DetectorModel.cs + 
     master.Statics.Add(new Static(tableK, release) { EditorID = "DepTable" });
     master.Statics.Add(new Static(markerK, release) { EditorID = "XMarkerHeading" });
     master.Statics.Add(new Static(bosTableK, release) { EditorID = "BosDepTable" });
+    master.Statics.Add(new Static(bosClearK, release) { EditorID = "BosClearNoParent" });
+    master.Statics.Add(new Static(bosClearParentK, release) { EditorID = "BosClearUnderParent" });
+    master.Statics.Add(new Static(bosSetOppK, release) { EditorID = "BosSetOppParent" });
     var cell1 = new Cell(cell1K, release) { EditorID = "DepCell1", Flags = Cell.Flag.IsInteriorCell };
     var cell2 = new Cell(cell2K, release) { EditorID = "DepCell2", Flags = Cell.Flag.IsInteriorCell };
     foreach (int n in new[] { 1, 2, 3, 4, 6, 7, 8, 9, 10, 11, 14, 15, 16, 17, 18 })
@@ -1017,6 +1026,19 @@ Console.WriteLine("\nPROOF — placement dependency (_shared/DetectorModel.cs + 
     cell1.Temporary.Add(Ref(P(61), tableK, 61500, edid: "P61"));
     cell1.Temporary.Add(Xesp(Ref(H(61), bosTableK, 61000, edid: "Host61"), P(61)));                  // BOS arm: BOS re-flags a ref that HAS a parent
     cell1.Temporary.Add(Xesp(Ref(D(61), tableK, 61010, 0, 40, "Dep61"), H(61)));
+    // Q33's three arms, each targeted BY REFERENCE so no sibling shares the line (the ini below).
+    // 62: no parent, record-disabled, BOS CLEARS the flag — the direction a post-chain filter cannot express at all.
+    cell1.Temporary.Add(Ref(H(62), bosClearK, 62000, edid: "Host62", disabled: true));
+    cell1.Temporary.Add(Xesp(Ref(D(62), tableK, 62010, 0, 40, "Dep62"), H(62)));
+    // 63: a DISABLED parent, ordinary parity, BOS clears the child's own flag — the parent still decides.
+    cell1.Temporary.Add(Ref(P(63), tableK, 63500, edid: "P63", disabled: true));
+    cell1.Temporary.Add(Xesp(Ref(H(63), bosClearParentK, 63000, edid: "Host63", disabled: true), P(63)));
+    cell1.Temporary.Add(Xesp(Ref(D(63), tableK, 63010, 0, 40, "Dep63"), H(63)));
+    // 64: a DISABLED parent with OPPOSITE parity (so the child is present), BOS sets the child's own flag —
+    // the parent still decides, at the other parity.
+    cell1.Temporary.Add(Ref(P(64), tableK, 64500, edid: "P64", disabled: true));
+    cell1.Temporary.Add(Opposite(Xesp(Ref(H(64), bosSetOppK, 64000, edid: "Host64"), P(64))));
+    cell1.Temporary.Add(Xesp(Ref(D(64), tableK, 64010, 0, 40, "Dep64"), H(64)));
 
     FileInterior(master, cell1); FileInterior(master, cell2);
     var wKey = M(0x830); var topK = M(0x831); var gridK = M(0x832);
@@ -1285,7 +1307,7 @@ Console.WriteLine("\nPROOF — placement dependency (_shared/DetectorModel.cs + 
           idx.Enable.Tracked < idx.History.Count && idx.Enable.Latest(H(1)).Plugin == -1 && idx.Enable.Latest(H(1)).Parent is null,
           $"{idx.Enable.Tracked:N0} of {idx.History.Count:N0} refs carry a statement");
     Check("dep-synth: the placement count is the written one — nothing is silently dropped by the extraction",
-          idx.History.Count == 95, $"{idx.History.Count} refs in the history");   // 41 as written in 2026-09-03 + Q32's 54
+          idx.History.Count == 103, $"{idx.History.Count} refs in the history");  // 41 (2026-09-03) + Q32's 54 + Q33's 8
     Check("dep-q32: BOS OFF — the two BOS-arm hosts are plainly present and their rows are judged",
           V(60).Verdict == DependencyVerdict.LeftBehind && V(61).Verdict == DependencyVerdict.LeftBehind
        && idx.Enable.BosReflaggedUnderParent.Count == 0, $"{W(60)} | {W(61)}");
@@ -1294,7 +1316,9 @@ Console.WriteLine("\nPROOF — placement dependency (_shared/DetectorModel.cs + 
     {
         var bosRoot = Path.Combine(root, "bosmod");
         Directory.CreateDirectory(bosRoot);
-        File.WriteAllText(Path.Combine(bosRoot, "Dep_SWAP.ini"), "[Transforms]\nBosDepTable|flags(0x800)\n");
+        File.WriteAllText(Path.Combine(bosRoot, "Dep_SWAP.ini"),
+            "[Transforms]\nBosDepTable|flags(0x800)\nBosClearNoParent|flagsC(0x800)\n"
+          + "BosClearUnderParent|flagsC(0x800)\nBosSetOppParent|flags(0x800)\n");
         var bidx = new DependencyIndex { Bos = new BosFormIndex() };
         var blight = new List<(ModKey, bool)>();
         var bmaster = new HashSet<int>[paths.Length + 1];
@@ -1316,8 +1340,8 @@ Console.WriteLine("\nPROOF — placement dependency (_shared/DetectorModel.cs + 
                         .ToDictionary(r => (r.Edge.Dependent, r.Edge.Kind), r => (Row: r, V: DetectorModel.PlacementDependency(r.Facts, T)));
         (DependencyRow Row, (DependencyVerdict Verdict, DependencyBlocker Reason, string Why) V) B32(int n) => brows[(D(n), HostEdgeKind.EnableParent)];
 
-        Check("dep-q32/bos: the layer re-flagged both BosDepTable hosts and nothing else",
-              rep.FlagChanges == 2 && rep.Swapped == 0, $"{rep.FlagChanges} flag changes, {rep.Swapped} swaps");
+        Check("dep-q32/bos: the layer re-flagged the five arm hosts and swapped nothing",
+              rep.FlagChanges == 5 && rep.Swapped == 0, $"{rep.FlagChanges} flag changes, {rep.Swapped} swaps; the layer read {layer.LinesRead} lines, {layer.LinesFailed} refused, {layer.Anomalies.Count} anomalies");
         Check("dep-q32/bos: a BOS re-flag of a host with NO parent is a winner-view fact — absent now, present in the author's view, so the row is withheld",
               B32(60).V.Reason == DependencyBlocker.HostDisabled
            && B32(60).Row.HostStateThen.Enabled && !B32(60).Row.HostStateNow.Enabled && B32(60).Row.HostStateNow.Resolved,
@@ -1326,10 +1350,33 @@ Console.WriteLine("\nPROOF — placement dependency (_shared/DetectorModel.cs + 
               !bclosure[0].Contains(bosPlugin) && !bclosure[1].Contains(bosPlugin) && !bclosure[2].Contains(bosPlugin) && !bclosure[3].Contains(bosPlugin)
            && bidx.Enable.StatementAt(H(60), 3).Plugin < bosPlugin,
               "BOS applies on top of the winner and is nobody's master");
-        Check("dep-q32/bos: a BOS re-flag of a host that ALSO has an enable parent is UNMEASURED — unresolved and counted, never guessed",
-              B32(61).V.Reason == DependencyBlocker.HostStateUnresolved && !B32(61).Row.HostStateNow.Resolved
-           && bidx.Enable.BosReflaggedUnderParent.Contains(H(61)) && bidx.Enable.BosReflaggedUnderParent.Count == 1,
-              B32(61).V.Why);
+        // Q33, measured in game 2026-09-06 (SkyrimSE 1.7.104 + BOS 3.5.0; three OFF/ON pairs; the override
+        // demonstrably reached every parented reference because a posR on the same line moved it): the ENABLE PARENT
+        // decides, and the override changes neither the reported flag nor the object's presence. The four cases below
+        // are the game's four parented/unparented × set/clear cells.
+        Check("dep-q32/bos: a BOS SET on a host with an ENABLED parent changes nothing — the parent decides, and the row reads exactly as it does with BOS off",
+              B32(61).Row.HostStateNow is { Enabled: true, Resolved: true, ViaParent: true }
+           && B32(61).V.Reason == V(61).Reason && B32(61).V.Verdict == V(61).Verdict,
+              $"{B32(61).V.Why} | now enabled {B32(61).Row.HostStateNow.Enabled} viaParent {B32(61).Row.HostStateNow.ViaParent}");
+        Check("dep-q32/bos: a BOS CLEAR on a host with a DISABLED parent leaves it absent — the parent decides in that direction too",
+              B32(63).Row.HostStateNow is { Enabled: false, Resolved: true, ViaParent: true }
+           && B32(63).V.Reason == V(63).Reason && B32(63).V.Verdict == V(63).Verdict,
+              $"{B32(63).V.Why} | now enabled {B32(63).Row.HostStateNow.Enabled} viaParent {B32(63).Row.HostStateNow.ViaParent} "
+            + $"| BOS off {V(63).Verdict}/{V(63).Reason} vs on {B32(63).V.Verdict}/{B32(63).V.Reason}");
+        Check("dep-q32/bos: a BOS SET under a DISABLED parent with OPPOSITE parity leaves it present — the other parity of the same rule",
+              B32(64).Row.HostStateNow is { Enabled: true, Resolved: true, ViaParent: true },
+              $"{B32(64).V.Why} | now enabled {B32(64).Row.HostStateNow.Enabled} viaParent {B32(64).Row.HostStateNow.ViaParent}");
+        Check("dep-q32/bos: a BOS CLEAR on a host with NO parent brings it BACK — the direction a filter applied after the chain cannot express",
+              B32(62).Row.HostStateNow is { Enabled: true, Resolved: true, ViaParent: false }
+           && !bidx.Enable.Latest(H(62)).Disabled,
+              $"{B32(62).V.Why} | now enabled {B32(62).Row.HostStateNow.Enabled}");
+        Check("dep-q32/bos: none of the three parented re-flags is withheld any more, and the population is still counted",
+              bidx.Enable.BosReflaggedUnderParent.Count == 3
+           && new[] { 61, 63, 64 }.All(n => bidx.Enable.BosReflaggedUnderParent.Contains(H(n)))
+           && new[] { 61, 63, 64 }.All(n => B32(n).Row.HostStateNow.Resolved)
+           && new[] { 61, 63, 64 }.All(n => B32(n).V.Reason != DependencyBlocker.HostStateUnresolved),
+              $"{bidx.Enable.BosReflaggedUnderParent.Count} in the population; "
+            + string.Join(", ", new[] { 61, 63, 64 }.Select(n => $"H{n} {B32(n).V.Reason}")));
         Check("dep-q32/bos: a separate order builds separate facts — every row untouched by the layer reads as it did without it",
               new[] { 30, 31, 32, 33, 36, 39, 43, 44, 45, 46, 47, 50, 51, 52, 53, 54 }
                   .All(n => B32(n).V.Reason == V(n).Reason && B32(n).V.Verdict == V(n).Verdict),

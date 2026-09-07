@@ -284,6 +284,86 @@ static class PopulationProof
         Check("population/unresolved: the facts index counts the parents nothing places apart (one here: the missing parent; a cycle's parents ARE placed)",
               facts.UnplacedParents == 1, $"{facts.UnplacedParents}");
 
+        // ---- Q33: the Base Object Swapper own-flag overlay, over the SAME facts -----------------------------------------
+        // Measured in game 2026-09-06 (SkyrimSE 1.7.104 + BOS 3.5.0): a flags(0x800)/flagsC(0x800) override replaces the
+        // reference's OWN initially-disabled flag and nothing else. Routing it through the facts is what makes the engine's
+        // precedence come out of ONE rule — so these four cells are the same four the game showed, at the layer every
+        // geometry probe shares. Applied to a second facts index so the checks above keep reading the untouched one.
+        {
+            FormKey Q(uint id) => M(0xC00 + id);
+            PlacedRef Q_(uint id, bool disabled, FormKey? parent = null, bool opposite = false) =>
+                new(Q(id), "PlacedObject", $"Q33_{id}", new Vec3(0, 0, 0), new Vec3(0, 0, 0), 1f,
+                    Q(0), Persistent: false, InitiallyDisabled: disabled, Deleted: false,
+                    EnableParent: parent, EnableParentOpposite: opposite);
+
+            var bosFacts = new EnableFactsIndex();
+            var arms = new[]
+            {
+                Q_(10, disabled: false),                                   // set control:   no parent, present
+                Q_(11, disabled: true),                                    // clear control: no parent, absent
+                Q_(1,  disabled: false),                                   // an ENABLED parent
+                Q_(2,  disabled: true),                                    // a DISABLED parent
+                Q_(12, disabled: false, parent: Q(1)),                     // A: enabled parent, ordinary parity
+                Q_(13, disabled: true,  parent: Q(2)),                     // B: disabled parent, ordinary parity
+                Q_(14, disabled: false, parent: Q(2), opposite: true),     // A-opposite: present through a disabled parent
+                Q_(15, disabled: true,  parent: Q(1), opposite: true),     // B-opposite: absent through an enabled parent
+                Q_(16, disabled: false, parent: Q(11)),                    // a child of the clear control, for the state-arm order below
+            };
+            foreach (var r in arms) bosFacts.Note(r);
+            var before = EnablePopulation.LoadTime(bosFacts);
+            var was = arms.ToDictionary(r => r.FormKey, r => before.Enabled(r.FormKey));
+            Check("population/bos: the baseline is the record's own answer — the two controls, both parities, as the records say",
+                  was[Q(10)] && !was[Q(11)] && was[Q(12)] && !was[Q(13)] && was[Q(14)] && !was[Q(15)],
+                  string.Join(" ", arms.Select(r => $"{r.EditorId}={was[r.FormKey]}")));
+
+            // The ini's six lines, as the game read them: set on 10/12/14, clear on 11/13/15.
+            var overrides = new Dictionary<FormKey, bool>
+            {
+                [Q(10)] = true, [Q(12)] = true, [Q(14)] = true,
+                [Q(11)] = false, [Q(13)] = false, [Q(15)] = false,
+            };
+            int applied = bosFacts.ApplyBosOwnFlags(overrides);
+            var after = EnablePopulation.LoadTime(bosFacts);
+            Check("population/bos: the overlay flips exactly the six own flags it names, is idempotent, and invents nothing for a reference nothing places",
+                  applied == 6 && bosFacts.ApplyBosOwnFlags(overrides) == 0
+               && bosFacts.ApplyBosOwnFlags(new Dictionary<FormKey, bool> { [M(0xCFF)] = true }) == 0,
+                  $"{applied} applied");
+            Check("population/bos: with NO parent the override decides, in BOTH directions — the clear brings a record-disabled reference back, which a filter applied after the chain cannot do",
+                  !after.Enabled(Q(10)) && after.Enabled(Q(11)),
+                  $"set control {after.Enabled(Q(10))}, clear control {after.Enabled(Q(11))}");
+
+            // The overlay laid over a caller's FACTS FUNCTION (blockprobe's --state census, which no BosHook.Apply has
+            // touched), and the ORDER it composes in. BOTH arms are pinned, because only the pair shows the order
+            // matters: Q33_11 is record-disabled with a BOS CLEAR, so its own flag differs between the two
+            // compositions and a state arm that flips it lands on opposite answers. Under the arm is the engine's
+            // reading — BOS writes the LOAD-TIME own flag, and an arm flips FROM the load-time state.
+            var rawIdx = new EnableFactsIndex();
+            foreach (var r in arms) rawIdx.Note(r);
+            var flipArm = new StateArm("q33flip", new[] { Q(11) });
+            var underFacts = EnableFactsIndex.WithBosOwnFlags(rawIdx.Facts, overrides);
+            var underMemo = new Dictionary<FormKey, EnableResolution>();
+            var under = EnablePopulation.Of(flipArm.Wrap(underFacts, k => EnableState.Resolve(k, underFacts, underMemo)), flipArm.Name);
+            var overMemo = new Dictionary<FormKey, EnableResolution>();
+            var over = EnablePopulation.Of(
+                EnableFactsIndex.WithBosOwnFlags(flipArm.Wrap(rawIdx.Facts, k => EnableState.Resolve(k, rawIdx.Facts, overMemo)), overrides),
+                flipArm.Name);
+            Check("population/bos: over a caller's FACTS the overlay composes UNDER a state arm — BOS clears the switch's own flag, so flipping it turns the switch OFF and its child with it",
+                  !under.Enabled(Q(11)) && !under.Enabled(Q(16)),
+                  $"switch {under.Enabled(Q(11))}, child {under.Enabled(Q(16))}");
+            Check("population/bos: composed OVER the arm instead, the overlay would overwrite the flip and leave the switch ON — the wrong answer that order exists to stop",
+                  over.Enabled(Q(11)) && over.Enabled(Q(16)),
+                  $"switch {over.Enabled(Q(11))}, child {over.Enabled(Q(16))}");
+            var noop = EnableFactsIndex.WithBosOwnFlags(rawIdx.Facts, new Dictionary<FormKey, bool>());
+            Check("population/bos: a BOS-off run composes to a no-op — an empty override map leaves every one of the caller's own facts as it was",
+                  arms.All(r => noop(r.FormKey)?.InitiallyDisabled == rawIdx.Facts(r.FormKey)?.InitiallyDisabled)
+               && noop(M(0xCFF)) is null,
+                  "empty map changes nothing");
+            Check("population/bos: under an enable parent the override changes nothing, at BOTH parities and in BOTH directions — measured in game, Q33 (2026-09-06)",
+                  after.Enabled(Q(12)) && !after.Enabled(Q(13)) && after.Enabled(Q(14)) && !after.Enabled(Q(15))
+               && new[] { 12u, 13u, 14u, 15u }.All(n => after.Resolution(Q(n)).ViaParent && after.Resolution(Q(n)).Resolved),
+                  string.Join(" ", new[] { 12u, 13u, 14u, 15u }.Select(n => $"Q33_{n}={after.Enabled(Q(n))}")));
+        }
+
         // ---- the floor, over a cell whose parent lives in another cell -------------------------------------------------
         (Aabb Box, TriangleSoup Soup)? Geo(PlacedRef r)
         {

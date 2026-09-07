@@ -77,9 +77,13 @@ public sealed class DeclaredEnableHistory
     public DeclaredEnableHistory(IReadOnlyDictionary<FormKey, List<int>> placedTouchers) => _placed = placedTouchers;
 
     /// <summary>References whose winning statement a Base Object Swapper property override re-flags WHILE the
-    /// reference also carries an XESP parent. The engine ignores a parented reference's own flag, and whether a
-    /// runtime flag override is ignored the same way has not been measured — so these resolve UNRESOLVED and are
-    /// counted here rather than answered. Empty whenever BOS is off or no such reference exists.</summary>
+    /// reference also carries an XESP parent. Q32 left these UNRESOLVED because the interaction was unmeasured;
+    /// Q33 measured it in game (2026-09-06, SkyrimSE 1.7.104 + BOS 3.5.0, three OFF/ON pairs, both flag directions
+    /// and both XESP parities): the parent decides, and the override changes neither the reported flag nor the
+    /// object's presence. So the statement is recorded with its parent attached and <see cref="EnableState"/> ignores
+    /// the flag exactly as it ignores the record's own — no gate needed. The set is kept as the POPULATION of that
+    /// case, so a run can still say how many references it applies to; it no longer withholds an answer.
+    /// Empty whenever BOS is off or no such reference exists.</summary>
     public HashSet<FormKey> BosReflaggedUnderParent { get; } = new();
 
     /// <summary>How many references carry a value entry at all — the change log's size, not the order's.</summary>
@@ -173,12 +177,13 @@ public sealed class DeclaredEnableHistory
         return best;
     }
 
-    /// <summary>The winning facts of one reference for <see cref="EnableState"/>: null when nothing places it, when
-    /// the winning statement deletes it, or when the BOS/parent interaction above makes the answer unmeasured.</summary>
+    /// <summary>The winning facts of one reference for <see cref="EnableState"/>: null when nothing places it or when
+    /// the winning statement deletes it. A BOS re-flag under an enable parent is NOT withheld — the statement carries
+    /// the parent, so the chain rule ignores the flag by itself (Q33, measured; see
+    /// <see cref="BosReflaggedUnderParent"/>).</summary>
     public EnableFacts? WinnerFacts(FormKey key)
     {
         if (!KnownAnywhere(key)) return null;
-        if (BosReflaggedUnderParent.Contains(key)) return null;
         var s = Latest(key);
         return s.Deleted ? null : new EnableFacts(s.Disabled, s.Parent, s.Opposite);
     }

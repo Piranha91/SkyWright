@@ -193,6 +193,16 @@ Console.WriteLine($"winning state for those cells: {winRef.Count:N0} refs, {winN
 // --bos off: the record bases and placements, as every run before 2026-09-04.
 if (bosOn) bos.Load(assets.LooseRoots);
 Console.WriteLine("   " + bos.LayerLine() + "\n");
+// Q33 (measured in game 2026-09-06): a flags(0x800)/flagsC(0x800) override replaces the reference's OWN
+// initially-disabled flag; the enable chain then decides. Feeding it into the facts BEFORE the population is built is
+// what gets the engine's precedence from one rule — under an XESP parent the override is bookkeeping the chain
+// ignores, with no parent it decides in both directions. Filtering on it after the chain (what this probe did before)
+// dropped a reference the parent keeps, and could never let a clear bring one back.
+var bosOwnFlags = bos.OwnFlagOverrides(winRef.Select(kv => (kv.Value, winRefCell[kv.Key])));
+int bosReflagged = enableFacts.ApplyBosOwnFlags(bosOwnFlags);
+if (bosOwnFlags.Count > 0)
+    Console.WriteLine($"   BOS own-flag overrides: {bosOwnFlags.Count:N0} reference(s) re-flagged, "
+                    + $"{bosReflagged:N0} applied to the enable facts (the rest name a reference this walk does not place)\n");
 var bosRep = new BosApplyReport();
 var cutTallyBos = new Dictionary<RouteCutVerdict, int>();   // the route-cut verdicts of the refs BOS swapped or moved, reported apart
 
@@ -216,8 +226,20 @@ if (stateSpec is not null)
     sx.NameSwitches(stateIdx.RefEditorId);
     try { stateArm = StateArm.Parse(stateSpec, sx, switchMapPath is null ? null : SwitchMap.Read(switchMapPath)); }
     catch (ArgumentException ex) { Console.Error.WriteLine(ex.Message); return 2; }
-    pop = EnablePopulation.Of(stateArm.Wrap(sx.WinnerFacts, sx.Baseline), stateArm.Name);
-    var changes = stateArm.Changes(sx).ToList();
+    // The census's facts are not the walk's, so the Q33 own-flag overlay has to be applied to them here too —
+    // otherwise a --state run would judge BOS's re-flags by the pre-Q33 rule while the default run judged them by
+    // the measured one. It goes UNDER the arm rather than over it, because BOS's write is a load-time OWN-FLAG fact
+    // and the arm flips FROM the load-time state: laid over the wrap instead, it would overwrite a flipped switch's
+    // own flag with the load-time one and silently undo that flip, and the flip's baseline would still be read off
+    // the un-overlaid census.
+    var censusFacts = EnableFactsIndex.WithBosOwnFlags(sx.WinnerFacts, bosOwnFlags);
+    var censusBosMemo = new Dictionary<FormKey, EnableResolution>();
+    EnableResolution CensusBaseline(FormKey k) => EnableState.Resolve(k, censusFacts, censusBosMemo);
+    var armFacts = stateArm.Wrap(censusFacts, CensusBaseline);
+    pop = EnablePopulation.Of(armFacts, stateArm.Name);
+    // The sentence below and the population above must describe ONE world: Changes over the same overlaid facts, or a
+    // switch whose own flag BOS clears reads as arriving here while the run's own population has it departing.
+    var changes = stateArm.Changes(sx, censusFacts, CensusBaseline).ToList();
     Console.WriteLine($"state {stateArm.Name}: {sx.Switches.Count:N0} switches in the order; {stateArm.Flips.Count} flipped — "
                     + $"{changes.Count(c => c.After):N0} refs arrive, {changes.Count(c => !c.After):N0} depart  ({sw.Elapsed.TotalSeconds:0.0}s)");
 }
@@ -387,12 +409,13 @@ foreach (var (cellKey, tcell) in targetCells)
         if (winRefCell.TryGetValue(tref.FormKey, out var wc) && wc != cellKey) { skipped++; continue; }
         if (r.Deleted) { skipped++; continue; }
         // The Base Object Swapper layer: the base and transform the game LOADS for this reference (the record's own under
-        // --bos off). An override that disables it at init is skipped the way the record's own flag is, and counted.
+        // --bos off).
         var eff = bos.Effective(r, cellKey, bosRep);
-        // The run's population AND the swap layer's own disable on top of it. Before Q27 the --state path replaced the
-        // BOS check rather than adding to it, so a reference an override disables at init counted as an obstacle in a
-        // state arm; --flags keeps the old single test, which is what the old default did.
-        if (enabledOf is null ? eff.InitiallyDisabled : (!enabledOf(r.FormKey) || eff.InitiallyDisabled)) { skipped++; continue; }
+        // The run's population decides presence, and it already carries the layer's own-flag overrides
+        // (ApplyBosOwnFlags above) — so an override under an enable parent is ignored by the chain, exactly as the
+        // engine ignores it, and a clear with no parent brings the reference in. In --flags mode there is no chain and
+        // the BOS-effective own flag IS the population, which is the same single test the old default ran.
+        if (enabledOf is null ? eff.InitiallyDisabled : !enabledOf(r.FormKey)) { skipped++; continue; }
         if (r.Base is null || !baseMesh.TryGetValue(eff.Base, out var bm)) { noGeo++; continue; }
 
         var g = Geometry(bm.Mesh);

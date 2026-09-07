@@ -1329,6 +1329,33 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot)
         Console.WriteLine($"   BOS {bosMode}: {bosInis.Count} *_SWAP.ini read from the VFS ({bosLayer.LinesRead:N0} lines, {bosLayer.LinesFailed:N0} the game refuses, "
                         + $"{bosLayer.Anomalies.Count:N0} anomalies — bosprobe lists them); every drawn ref takes the base and transform the game loads");
     }
+    // The overlay runs on EVERY call, not only the one that loads the layer: bosLayer is loaded once per PROCESS
+    // (the guard above), while refDisabledFlag is cleared and rebuilt from the records at the top of every call — so
+    // folding it inside the load block left a worklist's second shot resolving its chain on the records' own flags
+    // alone, with the counter below still reporting the re-flags the chain never saw.
+    if (bosIdx is not null && bosLayer is not null)
+    {
+        // Q33 (measured in game 2026-09-06): a flags(0x800)/flagsC(0x800) override replaces the reference's OWN
+        // initially-disabled flag — the enable chain still decides presence. So it goes into the flag map the chain
+        // reads, BEFORE anything resolves, rather than being applied as a filter after it. Two things that fixes: a
+        // reference whose enable parent is ON stays drawn even where an override sets the flag (the engine keeps it),
+        // and a clear on a parentless record-disabled reference now DRAWS it, which the post-chain filter could never
+        // do — it had already dropped the reference before BOS was consulted.
+        int bosOwnFlagChanges = 0;
+        foreach (var (fk, r) in winRef)
+        {
+            if (!refCellOf.TryGetValue(fk, out var rc)) continue;
+            var res0 = BaseObjectSwaps.Resolve(bosLayer, bosIdx, fk, r.RecordType, r.Base ?? default, rc, r.EncounterZone);
+            if (res0.Properties is not { IsValid: true }) continue;
+            var (_, _, _, dis0) = res0.Apply(r.Position, r.Rotation, r.Scale, r.InitiallyDisabled);
+            if (dis0 == r.InitiallyDisabled) continue;
+            if (dis0) refDisabledFlag.Add(fk); else refDisabledFlag.Remove(fk);
+            bosOwnFlagChanges++;
+        }
+        if (bosOwnFlagChanges > 0)
+            Console.WriteLine($"   BOS own-flag overrides: {bosOwnFlagChanges:N0} reference(s) re-flagged into the enable chain "
+                            + "(a reference with an enable parent keeps the parent's answer — measured, Q33)");
+    }
 
     // --state: the arm over the whole order's chains (a marker in the persistent cell governs refs in the grid cells). A
     // switch is any winning XESP parent that is a placed reference; a token that names none is refused, never ignored.
@@ -1551,7 +1578,7 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot)
         var scene = new List<ViewProbe.SceneRef>();
         int fxSkipped = 0, markerSkipped = 0;
         int deletedSkipped = 0, disabledFlagSkipped = 0, disabledParentSkipped = 0, enabledByParentDrawn = 0, noModel = 0;
-        int bosSwapped = 0, bosRandomCount = 0, bosTransformed = 0, bosDisabled = 0;
+        int bosSwapped = 0, bosRandomCount = 0, bosTransformed = 0, bosReflagged = 0;
         var bosByIni = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
         // The hover's one-line account of what BOS did to a ref: record base -> effective base, the ini line, the
         // random flag, and which properties an override set.
@@ -1604,7 +1631,11 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot)
                 if (res.Swapped || res.Random || res.Properties is { IsValid: true })
                 {
                     var (p2, rot2, sc2, dis2) = res.Apply(rPos, rRot, rScale, r.InitiallyDisabled);
-                    if (dis2 && !r.InitiallyDisabled) { bosDisabled++; continue; }
+                    // The own-flag half of the override was folded into refDisabledFlag before any chain was
+                    // resolved (Q33), so presence has already been decided above by the same rule the engine uses.
+                    // Filtering on dis2 here as well would re-apply it AFTER the chain, which is what dropped a
+                    // reference the enable parent keeps.
+                    if (dis2 != r.InitiallyDisabled) bosReflagged++;
                     rPos = p2; rRot = rot2; rScale = sc2;
                     if (res.Swapped)
                     {
@@ -1720,7 +1751,7 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot)
         if (bosLayer is not null)
         {
             Console.WriteLine($"   BOS {bosMode}: {bosSwapped:N0} drawn ref(s) carry a swapped base ({bosRandomCount:N0} random — the first alternative is drawn), "
-                            + $"{bosTransformed:N0} with a property override, {bosDisabled:N0} disabled by a flags(0x800) override (not drawn)");
+                            + $"{bosTransformed:N0} with a property override, {bosReflagged:N0} whose own initially-disabled flag an override changes (folded into the enable chain before it resolved, so a reference with an enable parent keeps the parent's answer — Q33)");
             foreach (var kv in bosByIni.OrderByDescending(k => k.Value).Take(10)) Console.WriteLine($"      {kv.Value,6:N0}  swaps from {kv.Key}");
         }
         else Console.WriteLine("   BOS off: record bases (--bos on|diff for the bases the game loads)");

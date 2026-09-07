@@ -87,6 +87,48 @@ public sealed class EnableFactsIndex
         else _xesp.Remove(r.FormKey);
     }
 
+    /// <summary>Apply the Base Object Swapper layer's effect on each reference's OWN initially-disabled flag, before
+    /// any chain is resolved. Measured in game 2026-09-06 (Q33, SkyrimSE 1.7.104 + BOS 3.5.0): a <c>flags(0x800)</c> /
+    /// <c>flagsC(0x800)</c> override replaces the reference's own flag and nothing else — it does not decide presence
+    /// on its own. Feeding it in HERE is what makes the engine's precedence fall out of <see cref="EnableState"/>
+    /// instead of being restated: under an XESP parent the own flag (the record's or BOS's) is bookkeeping the engine
+    /// ignores, and with no parent the override decides in BOTH directions — a clear brings a record-disabled
+    /// reference back into the scene, which a filter applied after the chain can never do.
+    ///
+    /// <para>Call after the walk and after the layer is loaded, before anything resolves. A reference the walk never
+    /// placed, or one deleted, is left alone rather than invented. Returns how many references actually changed.</para></summary>
+    public int ApplyBosOwnFlags(IReadOnlyDictionary<FormKey, bool> overrides)
+    {
+        int n = 0;
+        foreach (var (key, disabled) in overrides)
+        {
+            if (!_flags.TryGetValue(key, out var f) || (f & DeletedFlag) != 0) continue;
+            byte want = disabled ? (byte)(f | DisabledFlag) : (byte)(f & ~DisabledFlag);
+            if (want == f) continue;
+            _flags[key] = want;
+            n++;
+        }
+        return n;
+    }
+
+    /// <summary>The same own-flag overlay laid over a caller's FACTS FUNCTION instead of over this index — for a
+    /// consumer whose population comes from somewhere else (blockprobe's <c>--state</c> census,
+    /// <c>SwitchIndex.WinnerFacts</c>, which no <c>BosHook.Apply</c> has touched). Returns the function unchanged when
+    /// the layer changes nothing, so a BOS-off run composes to a no-op.
+    ///
+    /// <para>Compose it UNDER a <see cref="StateArm.Wrap"/>, never over it. BOS's write is a LOAD-TIME own-flag fact,
+    /// so it belongs in the facts an arm flips FROM: laid over the wrap it overwrites a flipped switch's own flag with
+    /// the load-time one and silently undoes that flip, and the flip's baseline is still read off the un-overlaid
+    /// census. proofprobe pins both directions.</para></summary>
+    public static Func<FormKey, EnableFacts?> WithBosOwnFlags(Func<FormKey, EnableFacts?> facts,
+                                                              IReadOnlyDictionary<FormKey, bool> overrides)
+    {
+        if (overrides.Count == 0) return facts;
+        return k => facts(k) is { } f
+            ? (overrides.TryGetValue(k, out var d) && d != f.InitiallyDisabled ? f with { InitiallyDisabled = d } : f)
+            : null;
+    }
+
     /// <summary>Record a deletion read off the major-record walk. A deleted reference usually loses its placement
     /// subrecord and never reaches <see cref="Note"/>, so a caller that walks records (as blockprobe and overlapprobe
     /// do) should call this for every <c>IPlacedGetter</c> it sees deleted — else a deleted parent reads as a live one.</summary>

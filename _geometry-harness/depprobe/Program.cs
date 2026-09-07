@@ -312,7 +312,8 @@ Console.WriteLine($"      winner view          {idx.Enable.WinnerQueried,9:N0}  
 Console.WriteLine($"      authoring views      {idx.Enable.ViewQueried,9:N0}   unresolved {idx.Enable.ViewUnresolved,8:N0}   absent at load {idx.Enable.ViewAbsent,8:N0}   over {idx.Enable.ViewsBuilt:N0} distinct authors");
 Console.WriteLine($"   enable-history size: {idx.Enable.Tracked:N0} refs carry a non-default statement; {idx.Enable.RecordOnly:N0} records had no placement data (deletions)");
 Console.WriteLine($"   BOS re-flagged a reference that ALSO has an enable parent: {idx.Enable.BosReflaggedUnderParent.Count:N0}"
-                + " (interaction unmeasured — those resolve UNRESOLVED rather than guessed)");
+                + " (measured in game, Q33: the parent decides and the override changes neither the flag nor the");
+Console.WriteLine( "   object's presence — these resolve through the chain like any other reference, and are counted here only as the population)");
 // A restoration the latest-only deletion map cannot see: the host reads deleted for the HostDeleted guard while its
 // last statement does not carry the flag. Surfaced, NOT folded — repairing the deletion guard is outside Q32.
 int deletedThenRestored = rows.Count(j => j.Reason == DependencyBlocker.HostDeleted && !idx.Enable.Latest(j.Row.Edge.Host).Deleted);
