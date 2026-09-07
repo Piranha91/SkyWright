@@ -535,7 +535,14 @@ public static class DetectorModel
     /// with the opposite flag is the standard "permanently disabled" idiom, and the player has no placement.</param>
     /// <param name="HostResolved">the host has a placement, or a deletion, somewhere in this order.</param>
     /// <param name="HostDeleted">the winning record of the host carries the Deleted flag.</param>
-    /// <param name="HostDisabled">the host is initially disabled in the author's view or the winner's.</param>
+    /// <param name="HostAbsent">the host's EFFECTIVE enable state — its XESP chain resolved, not its own checkbox —
+    /// leaves it absent when the cell loads, in the edge author's view or in the winning order (Q32, 2026-09-06). A
+    /// reference with an enable parent takes the parent's state XOR the opposite-of-parent flag and the engine ignores
+    /// its own initially-disabled flag, so the checkbox this used to read both withheld hosts a parent switches ON and
+    /// admitted hosts a parent switches OFF.</param>
+    /// <param name="HostStateUnresolved">…and the chain could NOT be read to the end in one of those two views: a
+    /// parent the view does not place, a parent deleted in it, a cycle, or an interaction with no measurement behind
+    /// it. The resolver answers with a stated fallback there, so the row is withheld rather than judged on one.</param>
     /// <param name="SameSpaceAtAuthoring">host and dependent shared a SPACE in the author's view — the cell for
     /// an interior, the worldspace for an exterior. The cell alone is the wrong test outdoors: a persistent
     /// exterior reference lives in the worldspace's persistent cell whatever its coordinates, so a persistent
@@ -549,7 +556,7 @@ public static class DetectorModel
     /// <param name="DependentRePlacedByMoverSide">…and it was set by the host's mover or a plugin downstream of it.</param>
     /// <param name="Host">what the host is: something to rest on or hang from, a marker, or something else.</param>
     public readonly record struct DependencyFacts(
-        HostEdgeKind Kind, bool HostIsPlayer, bool HostResolved, bool HostDeleted, bool HostDisabled,
+        HostEdgeKind Kind, bool HostIsPlayer, bool HostResolved, bool HostDeleted, bool HostAbsent, bool HostStateUnresolved,
         bool SameSpaceAtAuthoring, bool HostChangedSpace, float HostMoved,
         bool DependentDeleted, bool DependentRePlaced, bool DependentRePlacedByMoverSide, HostClass Host);
 
@@ -561,10 +568,13 @@ public static class DetectorModel
     /// side without the other side following.
     ///
     /// <para>Per edge, in order: a host that is the player, or that this order cannot place, or has deleted, or
-    /// whose authoring view is missing, is <b>Unjudgeable</b> by that reason. A host that stayed within <paramref name="threshold"/>
-    /// of its authoring-view position in the same space leaves the edge <b>Intact</b>. A moved host that is
-    /// initially disabled, or that was in a different space from its dependent when the edge was authored, is
-    /// a toggle relationship, not a physical one — <b>Unjudgeable</b>, counted. A deleted dependent leaves
+    /// whose authoring view is missing, is <b>Unjudgeable</b> by that reason. Then the enable chain: a host whose
+    /// EFFECTIVE state cannot be resolved in one of the two compared views is <b>Unjudgeable</b> too, and that gate
+    /// comes BEFORE the movement test on purpose — an <b>Intact</b> verdict is a clean answer, and a clean answer may
+    /// not rest on the resolver's fallback (Q32). A host that stayed within <paramref name="threshold"/>
+    /// of its authoring-view position in the same space leaves the edge <b>Intact</b>. A moved host that the chain
+    /// leaves absent when the cell loads, or that was in a different space from its dependent when the edge was
+    /// authored, is a toggle relationship, not a physical one — <b>Unjudgeable</b>, counted. A deleted dependent leaves
     /// nothing behind (<b>DependentRemoved</b>). A dependent re-placed by the mover or a plugin downstream of
     /// it is <b>MovedTogether</b> WHATEVER the new offset — a deliberate re-arrangement is not a defect; one
     /// re-placed by an unrelated third plugin is <b>Unjudgeable</b>, nobody's fault this pass can name.
@@ -584,12 +594,15 @@ public static class DetectorModel
             return (DependencyVerdict.Unjudgeable, DependencyBlocker.HostDeleted, "the host is deleted — no winning position to compare against");
         if (float.IsNaN(f.HostMoved))
             return (DependencyVerdict.Unjudgeable, DependencyBlocker.NoAuthoringView, "the edge's author and its masters contributed no position for the host or the dependent");
+        if (f.HostStateUnresolved)
+            return (DependencyVerdict.Unjudgeable, DependencyBlocker.HostStateUnresolved,
+                    "the host's enable-parent chain does not resolve in the edge author's view or in the winning order — a parent the view does not place, a parent deleted in it, or a cycle; the answer there is a fallback, not a reading");
         bool moved = f.HostChangedSpace || f.HostMoved > threshold;
         string move = f.HostChangedSpace ? "the host left its cell or worldspace" : $"the host moved {f.HostMoved:0}u";
         if (!moved)
             return (DependencyVerdict.Intact, DependencyBlocker.None, $"the host is where the edge's author left it ({f.HostMoved:0}u ≤ {threshold:0}u)");
-        if (f.HostDisabled)
-            return (DependencyVerdict.Unjudgeable, DependencyBlocker.HostDisabled, $"{move}, but it is initially disabled — a toggle arrangement, not judged");
+        if (f.HostAbsent)
+            return (DependencyVerdict.Unjudgeable, DependencyBlocker.HostDisabled, $"{move}, but its enable chain leaves it absent when the cell loads — in the edge author's view or in the winning order — a toggle arrangement, not judged");
         if (!f.SameSpaceAtAuthoring)
             return (DependencyVerdict.Unjudgeable, DependencyBlocker.CrossCell, $"{move}, but host and dependent were in different cells or worldspaces when the edge was authored — a toggle, not a support");
         if (f.DependentDeleted)
@@ -1519,8 +1532,13 @@ public enum HostClass { Physical, Marker, Other }
 /// nothing; Unjudgeable is counted by its <see cref="DependencyBlocker"/>, never cleared.</summary>
 public enum DependencyVerdict { Intact, MovedTogether, LeftBehind, DependentRemoved, Unjudgeable }
 
-/// <summary>Why an edge could not be called.</summary>
-public enum DependencyBlocker { None, HostIsPlayer, HostUnresolved, HostDeleted, NoAuthoringView, HostDisabled, CrossCell, DependentMovedByThirdParty }
+/// <summary>Why an edge could not be called — why <see cref="DetectorModel.PlacementDependency"/> withheld a
+/// verdict. <c>HostUnresolved</c> is about the
+/// host's PLACEMENT (no plugin places it at all); <c>HostStateUnresolved</c> is about its ENABLE CHAIN in one of the two
+/// compared views — the two stay separate on purpose. <c>HostDisabled</c> keeps its name for the tallies and JSON keys
+/// that have always carried it, and since Q32 (2026-09-06) means the effective state leaves the host absent when the cell
+/// loads, not that its own initially-disabled checkbox is ticked.</summary>
+public enum DependencyBlocker { None, HostIsPlayer, HostUnresolved, HostDeleted, NoAuthoringView, HostDisabled, CrossCell, DependentMovedByThirdParty, HostStateUnresolved }
 
 /// <summary>What a dependent is, per <see cref="DetectorModel.ClassifyDependent"/>. A LeftBehind row counts for
 /// 4.5/4.6 only when the dependent is Physical AND the host is <see cref="HostClass.Physical"/>.</summary>

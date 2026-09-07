@@ -768,9 +768,10 @@ Console.WriteLine("\nPROOF — placement dependency (_shared/DetectorModel.cs + 
 {
     const float T = 16f;
     DetectorModel.DependencyFacts F(HostEdgeKind kind = HostEdgeKind.EnableParent, bool resolved = true, bool hostDeleted = false,
-        bool hostDisabled = false, bool sameCell = true, bool cellChanged = false, float moved = 200f,
-        bool depDeleted = false, bool rePlaced = false, bool byMover = false, HostClass host = HostClass.Physical, bool player = false)
-        => new(kind, player, resolved, hostDeleted, hostDisabled, sameCell, cellChanged, moved, depDeleted, rePlaced, byMover, host);
+        bool hostAbsent = false, bool sameCell = true, bool cellChanged = false, float moved = 200f,
+        bool depDeleted = false, bool rePlaced = false, bool byMover = false, HostClass host = HostClass.Physical, bool player = false,
+        bool stateUnresolved = false)
+        => new(kind, player, resolved, hostDeleted, hostAbsent, stateUnresolved, sameCell, cellChanged, moved, depDeleted, rePlaced, byMover, host);
     var lb = DetectorModel.PlacementDependency(F(), T);
     Check("dep: host moved 200u, dependent untouched -> LEFT BEHIND",
           lb.Verdict == DependencyVerdict.LeftBehind && lb.Reason == DependencyBlocker.None, lb.Why);
@@ -801,10 +802,34 @@ Console.WriteLine("\nPROOF — placement dependency (_shared/DetectorModel.cs + 
     var nav = DetectorModel.PlacementDependency(F(moved: float.NaN), T);
     Check("dep: no authoring view -> UNJUDGEABLE (NoAuthoringView)",
           nav.Verdict == DependencyVerdict.Unjudgeable && nav.Reason == DependencyBlocker.NoAuthoringView, nav.Why);
-    var dis = DetectorModel.PlacementDependency(F(hostDisabled: true), T);
-    Check("dep: initially-disabled host that moved -> UNJUDGEABLE (a toggle); one that did not move -> INTACT",
+    var dis = DetectorModel.PlacementDependency(F(hostAbsent: true), T);
+    Check("dep: host ABSENT at load (the chain, not the checkbox) and moved -> UNJUDGEABLE (a toggle); one that did not move -> INTACT",
           dis.Verdict == DependencyVerdict.Unjudgeable && dis.Reason == DependencyBlocker.HostDisabled
-       && DetectorModel.PlacementDependency(F(hostDisabled: true, moved: 5), T).Verdict == DependencyVerdict.Intact, dis.Why);
+       && DetectorModel.PlacementDependency(F(hostAbsent: true, moved: 5), T).Verdict == DependencyVerdict.Intact, dis.Why);
+    Check("dep: the absent-host reason names the EFFECTIVE state and both compared views, not the checkbox (Q32)",
+          dis.Why.Contains("enable chain") && dis.Why.Contains("author") && dis.Why.Contains("winning order")
+       && !dis.Why.Contains("initially disabled"), dis.Why);
+    // Q32 — the chain that could not be read. It is a blocker of its own, and it fires BEFORE the movement test:
+    // Intact is a clean answer and a clean answer may not rest on EnableState's fallback.
+    var st = DetectorModel.PlacementDependency(F(stateUnresolved: true), T);
+    Check("dep: host enable chain UNRESOLVED -> UNJUDGEABLE (HostStateUnresolved), never LeftBehind on a fallback",
+          st.Verdict == DependencyVerdict.Unjudgeable && st.Reason == DependencyBlocker.HostStateUnresolved, st.Why);
+    Check("dep: an unresolved chain withholds an UNMOVED host too — no INTACT on a fallback",
+          DetectorModel.PlacementDependency(F(stateUnresolved: true, moved: 5), T).Reason == DependencyBlocker.HostStateUnresolved
+       && DetectorModel.PlacementDependency(F(stateUnresolved: true, moved: 0, cellChanged: false), T).Verdict == DependencyVerdict.Unjudgeable,
+          "the state gate precedes the movement test");
+    Check("dep: an unresolved chain outranks absence, and the early guards outrank it (precedence, both directions)",
+          DetectorModel.PlacementDependency(F(stateUnresolved: true, hostAbsent: true), T).Reason == DependencyBlocker.HostStateUnresolved
+       && DetectorModel.PlacementDependency(F(stateUnresolved: true, player: true), T).Reason == DependencyBlocker.HostIsPlayer
+       && DetectorModel.PlacementDependency(F(stateUnresolved: true, resolved: false), T).Reason == DependencyBlocker.HostUnresolved
+       && DetectorModel.PlacementDependency(F(stateUnresolved: true, hostDeleted: true), T).Reason == DependencyBlocker.HostDeleted
+       && DetectorModel.PlacementDependency(F(stateUnresolved: true, moved: float.NaN), T).Reason == DependencyBlocker.NoAuthoringView,
+          "player / no placement / deleted / no authoring view first, then the chain, then absence");
+    Check("dep: an unresolved chain never reaches a judgement of ANY kind — not LeftBehind, MovedTogether or DependentRemoved",
+          DetectorModel.PlacementDependency(F(stateUnresolved: true, depDeleted: true), T).Reason == DependencyBlocker.HostStateUnresolved
+       && DetectorModel.PlacementDependency(F(stateUnresolved: true, rePlaced: true, byMover: true), T).Reason == DependencyBlocker.HostStateUnresolved
+       && DetectorModel.PlacementDependency(F(stateUnresolved: true, cellChanged: true), T).Verdict == DependencyVerdict.Unjudgeable,
+          "withheld before every later gate");
     var cross = DetectorModel.PlacementDependency(F(sameCell: false), T);
     Check("dep: host and dependent in different spaces at authoring, host moved -> UNJUDGEABLE (CrossCell)",
           cross.Verdict == DependencyVerdict.Unjudgeable && cross.Reason == DependencyBlocker.CrossCell, cross.Why);
@@ -871,8 +896,11 @@ Console.WriteLine("\nPROOF — placement dependency (_shared/DetectorModel.cs + 
     var cKey = new ModKey("DepC", ModType.Plugin);
     FormKey M(uint id) => new(mKey, id);
     var tableK = M(0x801); var markerK = M(0x802); var cell1K = M(0x810); var cell2K = M(0x811);
+    var bosTableK = M(0x803);                     // a base only the BOS-arm hosts use, so one [Transforms] line hits them alone
     FormKey H(int n) => M((uint)(0x900 + n));     // hosts
     FormKey D(int n) => M((uint)(0xA00 + n));     // dependents
+    FormKey P(int n) => M((uint)(0xB00 + n));     // Q32: the ENABLE PARENTS of hosts — what the host's own state hangs on
+    FormKey Nowhere() => M(0xFFE);                // a parent no plugin places
     var aStaticK = new FormKey(aKey, 0x801);       // a record only A defines — what makes B master A
 
     static void FileInterior(SkyrimMod mod, Cell cell)
@@ -894,6 +922,12 @@ Console.WriteLine("\nPROOF — placement dependency (_shared/DetectorModel.cs + 
         return r;
     }
     static PlacedObject Xesp(PlacedObject r, FormKey host) { r.EnableParent = new EnableParent(); r.EnableParent.Reference.SetTo(host); return r; }
+    static PlacedObject XespOpp(PlacedObject r, FormKey host)
+    {
+        r.EnableParent = new EnableParent { Flags = EnableParent.Flag.SetEnableStateToOppositeOfParent };
+        r.EnableParent.Reference.SetTo(host);
+        return r;
+    }
     static PlacedObject Xlkr(PlacedObject r, FormKey host) { var l = new LinkedReferences(); l.Reference.SetTo(host); r.LinkedReferences.Add(l); return r; }
     static PlacedObject Xapr(PlacedObject r, FormKey host) { r.ActivateParents = new ActivateParents(); var ap = new ActivateParent { Delay = 0 }; ap.Reference.SetTo(host); r.ActivateParents.Parents.Add(ap); return r; }
 
@@ -909,6 +943,7 @@ Console.WriteLine("\nPROOF — placement dependency (_shared/DetectorModel.cs + 
     var master = new SkyrimMod(mKey, release);
     master.Statics.Add(new Static(tableK, release) { EditorID = "DepTable" });
     master.Statics.Add(new Static(markerK, release) { EditorID = "XMarkerHeading" });
+    master.Statics.Add(new Static(bosTableK, release) { EditorID = "BosDepTable" });
     var cell1 = new Cell(cell1K, release) { EditorID = "DepCell1", Flags = Cell.Flag.IsInteriorCell };
     var cell2 = new Cell(cell2K, release) { EditorID = "DepCell2", Flags = Cell.Flag.IsInteriorCell };
     foreach (int n in new[] { 1, 2, 3, 4, 6, 7, 8, 9, 10, 11, 14, 15, 16, 17, 18 })
@@ -925,6 +960,64 @@ Console.WriteLine("\nPROOF — placement dependency (_shared/DetectorModel.cs + 
     cell1.Temporary.Add(Xlkr(Xesp(Ref(D(19), tableK, 1020, 0, 40, "Dep19"), H(1)), H(2))); // two edges, two hosts
     cell1.Temporary.Add(Xesp(Ref(D(20), tableK, 1030, 0, 40, "Dep20"), H(1)));          // A will drop this edge
     cell1.Temporary.Add(Xesp(Ref(D(21), tableK, 1040, 0, 40, "Dep21"), M(0x14)));        // enable parent = the player (the permanently-disabled idiom)
+
+    // ---- Q32: hosts whose EFFECTIVE state is not their own checkbox. Host n hangs on parent P(n); the dependent
+    // D(n) hangs on the host. Every one of these is a host A moves, so the row reaches the state gate.
+    cell1.Temporary.Add(Ref(P(30), tableK, 30500, edid: "P30"));                                     // enabled
+    cell1.Temporary.Add(Xesp(Ref(H(30), tableK, 30000, edid: "Host30", disabled: true), P(30)));     // checkbox SET, parent enables it
+    cell1.Temporary.Add(Xesp(Ref(D(30), tableK, 30010, 0, 40, "Dep30"), H(30)));
+    cell1.Temporary.Add(Ref(P(31), tableK, 31500, edid: "P31", disabled: true));                     // disabled
+    cell1.Temporary.Add(Xesp(Ref(H(31), tableK, 31000, edid: "Host31"), P(31)));                     // checkbox CLEAR, parent disables it
+    cell1.Temporary.Add(Xesp(Ref(D(31), tableK, 31010, 0, 40, "Dep31"), H(31)));
+    cell1.Temporary.Add(Ref(P(32), tableK, 32500, edid: "P32"));
+    cell1.Temporary.Add(XespOpp(Ref(H(32), tableK, 32000, edid: "Host32"), P(32)));                  // opposite of an ENABLED parent
+    cell1.Temporary.Add(Xesp(Ref(D(32), tableK, 32010, 0, 40, "Dep32"), H(32)));
+    cell1.Temporary.Add(XespOpp(Ref(H(33), tableK, 33000, edid: "Host33"), M(0x14)));                // opposite of the player: the permanent-off idiom, one hop up
+    cell1.Temporary.Add(Xesp(Ref(D(33), tableK, 33010, 0, 40, "Dep33"), H(33)));
+    cell1.Temporary.Add(Ref(P(36), tableK, 36400, edid: "P36a"));
+    cell1.Temporary.Add(Ref(P(37), tableK, 36600, edid: "P36b", disabled: true));                    // B re-parents Host36 onto this one
+    cell1.Temporary.Add(Xesp(Ref(H(36), tableK, 36000, edid: "Host36"), P(36)));
+    cell1.Temporary.Add(Xesp(Ref(D(36), tableK, 36010, 0, 40, "Dep36"), H(36)));
+    cell1.Temporary.Add(Ref(P(39), tableK, 39500, edid: "P39", disabled: true));                     // A (invisible to C) will enable it
+    cell1.Temporary.Add(Xesp(Ref(H(39), tableK, 39000, edid: "Host39"), P(39)));
+    cell1.Temporary.Add(Ref(D(39), tableK, 39010, 0, 40, "Dep39"));                                  // C sets this edge
+    cell1.Temporary.Add(Ref(P(43), tableK, 43500, edid: "P43"));                                     // A deletes it, nobody restores
+    cell1.Temporary.Add(Xesp(Ref(H(43), tableK, 43000, edid: "Host43"), P(43)));
+    cell1.Temporary.Add(Xesp(Ref(D(43), tableK, 43010, 0, 40, "Dep43"), H(43)));
+    cell1.Temporary.Add(Ref(P(44), tableK, 44500, edid: "P44"));                                     // A deletes it, B restores it
+    cell1.Temporary.Add(Xesp(Ref(H(44), tableK, 44000, edid: "Host44"), P(44)));
+    cell1.Temporary.Add(Ref(D(44), tableK, 44010, 0, 40, "Dep44"));                                  // C sets this edge
+    cell1.Temporary.Add(Xesp(Ref(P(45), tableK, 45500, edid: "P45"), H(45)));                        // a two-ref cycle
+    cell1.Temporary.Add(Xesp(Ref(H(45), tableK, 45000, edid: "Host45"), P(45)));
+    cell1.Temporary.Add(Xesp(Ref(D(45), tableK, 45010, 0, 40, "Dep45"), H(45)));
+    cell1.Temporary.Add(Xesp(Ref(H(46), tableK, 46000, edid: "Host46"), Nowhere()));                 // parent nothing places
+    cell1.Temporary.Add(Xesp(Ref(D(46), tableK, 46010, 0, 40, "Dep46"), H(46)));
+    cell1.Temporary.Add(Ref(P(48), tableK, 47700, edid: "P47b", disabled: true));                    // two hops: H47 -> P47a -> P47b(off)
+    cell1.Temporary.Add(Xesp(Ref(P(47), tableK, 47500, edid: "P47a"), P(48)));
+    cell1.Temporary.Add(Xesp(Ref(H(47), tableK, 47000, edid: "Host47"), P(47)));
+    cell1.Temporary.Add(Xesp(Ref(D(47), tableK, 47010, 0, 40, "Dep47"), H(47)));
+    cell1.Temporary.Add(Ref(P(50), tableK, 50500, edid: "P50", disabled: true));                     // A enables it; C cannot see that
+    cell1.Temporary.Add(Xesp(Ref(H(50), tableK, 50000, edid: "Host50"), P(50)));
+    cell1.Temporary.Add(Xesp(Ref(D(50), tableK, 50010, 0, 40, "Dep50a"), H(50)));                    // author: the master
+    cell1.Temporary.Add(Ref(D(51), tableK, 50020, 0, 40, "Dep50b"));                                 // author: B, same host
+    cell1.Temporary.Add(Ref(P(52), tableK, 51500, edid: "P51", disabled: true));
+    cell1.Temporary.Add(Xesp(Ref(H(52), tableK, 51000, edid: "Host51"), P(52)));                     // A drops this parent
+    cell1.Temporary.Add(Xesp(Ref(D(52), tableK, 51010, 0, 40, "Dep51"), H(52)));
+    cell1.Temporary.Add(Ref(P(53), tableK, 52500, edid: "P52", disabled: true));
+    cell1.Temporary.Add(Xlkr(Ref(H(53), tableK, 52000, edid: "Host52"), P(53)));                     // an XLKR to a disabled ref is NOT an enable link
+    cell1.Temporary.Add(Xesp(Ref(D(53), tableK, 52010, 0, 40, "Dep52"), H(53)));
+    cell2.Temporary.Add(Ref(P(54), tableK, 53500, edid: "P53", disabled: true));                     // the parent lives in the OTHER cell
+    cell1.Temporary.Add(Xesp(Ref(H(54), tableK, 53000, edid: "Host53"), P(54)));
+    cell1.Temporary.Add(Xesp(Ref(D(54), tableK, 53010, 0, 40, "Dep53"), H(54)));
+    cell1.Temporary.Add(Ref(P(55), tableK, 55700, edid: "P55", disabled: true));
+    cell1.Temporary.Add(Xesp(Ref(H(55), tableK, 55000, edid: "Host55"), P(55)));                     // A FORWARDS this statement unchanged
+    cell1.Temporary.Add(Ref(D(55), tableK, 55010, 0, 40, "Dep55"));                                  // B sets this edge; its view lands on A
+    cell1.Temporary.Add(Ref(H(60), bosTableK, 60000, edid: "Host60"));                               // BOS arm: no parent, BOS re-flags it
+    cell1.Temporary.Add(Xesp(Ref(D(60), tableK, 60010, 0, 40, "Dep60"), H(60)));
+    cell1.Temporary.Add(Ref(P(61), tableK, 61500, edid: "P61"));
+    cell1.Temporary.Add(Xesp(Ref(H(61), bosTableK, 61000, edid: "Host61"), P(61)));                  // BOS arm: BOS re-flags a ref that HAS a parent
+    cell1.Temporary.Add(Xesp(Ref(D(61), tableK, 61010, 0, 40, "Dep61"), H(61)));
+
     FileInterior(master, cell1); FileInterior(master, cell2);
     var wKey = M(0x830); var topK = M(0x831); var gridK = M(0x832);
     static Worldspace World(FormKey wKey, FormKey topK, FormKey gridK, PlacedObject? persistent, PlacedObject? temporary)
@@ -965,6 +1058,24 @@ Console.WriteLine("\nPROOF — placement dependency (_shared/DetectorModel.cs + 
     a1.Temporary.Add(Xesp(Ref(D(14), tableK, 14010, 0, 40, "Dep14"), H(14)));           // forwarded unchanged: the edge's author stays the master
     a1.Temporary.Add(Xesp(Ref(D(15), tableK, 15010, 0, 40, "Dep15"), H(15)));           // A SETS this edge — its own view of H15 is the moved one
     a1.Temporary.Add(Ref(D(20), tableK, 1030, 0, 40, "Dep20"));                         // edge dropped
+
+    // ---- Q32: A is the mover for the enable-state hosts too, forwarding each host's own XESP unchanged unless
+    // the fixture is about changing it. Two parent edits ride along, both WITHOUT moving the parent.
+    foreach (int n in new[] { 30, 31, 36, 39, 43, 44, 45, 47, 50 })                     // each host sits at x = 1000n
+        a1.Temporary.Add(Xesp(Ref(H(n), tableK, 1000f * n + 200, edid: $"Host{n}", disabled: n == 30), P(n)));
+    a1.Temporary.Add(Xesp(Ref(H(46), tableK, 46200, edid: "Host46"), Nowhere()));
+    a1.Temporary.Add(XespOpp(Ref(H(32), tableK, 32200, edid: "Host32"), P(32)));
+    a1.Temporary.Add(XespOpp(Ref(H(33), tableK, 33200, edid: "Host33"), M(0x14)));
+    a1.Temporary.Add(Ref(P(39), tableK, 39500, edid: "P39"));                           // flag flip, same position — C never sees it
+    a1.Temporary.Add(Ref(P(50), tableK, 50500, edid: "P50"));                           // flag flip, same position — C never sees it
+    a1.Temporary.Add(new PlacedObject(P(43), release) { IsDeleted = true });            // parent deleted, placement stripped, never restored
+    a1.Temporary.Add(new PlacedObject(P(44), release) { IsDeleted = true });            // parent deleted; B restores it
+    a1.Temporary.Add(Ref(H(52), tableK, 51200, edid: "Host51"));                        // the host's XESP parent REMOVED
+    a1.Temporary.Add(Xlkr(Ref(H(53), tableK, 52200, edid: "Host52"), P(53)));           // XLKR forwarded, still not an enable link
+    a1.Temporary.Add(Xesp(Ref(H(54), tableK, 53200, edid: "Host53"), P(54)));
+    a1.Temporary.Add(Xesp(Ref(H(55), tableK, 55200, edid: "Host55"), P(55)));           // statement identical: no log entry of its own
+    a1.Temporary.Add(Ref(H(60), bosTableK, 60200, edid: "Host60"));
+    a1.Temporary.Add(Xesp(Ref(H(61), bosTableK, 61200, edid: "Host61"), P(61)));
     FileInterior(a, a1); FileInterior(a, a2);
     a.Worldspaces.Add(World(wKey, topK, gridK, Ref(H(22), tableK, 700, 500, 0, "Host22"), null));   // A moves the persistent host 200u
     var aPath = Write(a, mOv);
@@ -975,6 +1086,12 @@ Console.WriteLine("\nPROOF — placement dependency (_shared/DetectorModel.cs + 
     var b1 = new Cell(cell1K, release) { Flags = Cell.Flag.IsInteriorCell };
     b1.Temporary.Add(Xesp(Ref(D(4), tableK, 4210, 0, 40, "Dep4"), H(4)));
     b1.Temporary.Add(Ref(new FormKey(bKey, 0x801), aStaticK, 99000, edid: "DepBRef"));   // references A -> masters A
+    // Q32: a PARENT-ONLY override — same position, a different enable parent. It is no step in the placement
+    // history at all, so the movement census and the mover must be exactly what they were without it.
+    b1.Temporary.Add(Xesp(Ref(H(36), tableK, 36200, edid: "Host36"), P(37)));
+    b1.Temporary.Add(Ref(P(44), tableK, 44500, edid: "P44"));                            // the parent A deleted, restored
+    b1.Temporary.Add(Xesp(Ref(D(51), tableK, 50020, 0, 40, "Dep50b"), H(50)));           // B authors a second edge onto Host50
+    b1.Temporary.Add(Xesp(Ref(D(55), tableK, 55010, 0, 40, "Dep55"), H(55)));           // author B; its view of Host55 lands on A's forwarded record
     FileInterior(b, b1);
     var bPath = Write(b, mOv, aOv);
 
@@ -982,6 +1099,12 @@ Console.WriteLine("\nPROOF — placement dependency (_shared/DetectorModel.cs + 
     var c = new SkyrimMod(cKey, release);
     var c1 = new Cell(cell1K, release) { Flags = Cell.Flag.IsInteriorCell };
     c1.Temporary.Add(Xesp(Ref(D(10), tableK, 10050, 0, 40, "Dep10"), H(10)));
+    // Q32: C masters the master ONLY, so A's parent edits and A's deletions are outside its view. It authors two
+    // edges whose answer depends on that, and moves Host50 so B's row (which CAN see A) has a verdict of its own.
+    c1.Temporary.Add(Xesp(Ref(D(39), tableK, 39010, 0, 40, "Dep39"), H(39)));
+    c1.Temporary.Add(Xesp(Ref(D(44), tableK, 44010, 0, 40, "Dep44"), H(44)));
+    c1.Temporary.Add(Xesp(Ref(H(50), tableK, 50500, edid: "Host50"), P(50)));
+    c1.Temporary.Add(Xesp(Ref(H(55), tableK, 55600, edid: "Host55"), P(55)));
     FileInterior(c, c1);
     var cPath = Write(c, mOv);
 
@@ -1060,9 +1183,159 @@ Console.WriteLine("\nPROOF — placement dependency (_shared/DetectorModel.cs + 
     Check("dep-synth: a dependent with two edges gets two rows, judged apart",
           V(19, HostEdgeKind.EnableParent).Verdict == DependencyVerdict.LeftBehind && V(19, HostEdgeKind.LinkedRef).Verdict == DependencyVerdict.Intact,
           "XESP->Host1 left behind, XLKR->Host2 intact");
-    Check("dep-synth: the mover is A for every moved host, and the placement count is the written one",
-          rows.Values.Where(x => x.V.Verdict == DependencyVerdict.LeftBehind).All(x => x.Row.Mover == 1) && idx.History.Count == 41,   // 18 hosts + 22 dependents + B's own ref
-          $"{idx.History.Count} refs in the history");
+    Check("dep-synth: A is the mover for every LeftBehind row except the one host C moves (Host50, seen only by B)",
+          rows.Values.Where(x => x.V.Verdict == DependencyVerdict.LeftBehind).All(x => x.Row.Mover == 1 || (x.Row.Edge.Host == H(50) && x.Row.Mover == 3)),
+          string.Join(", ", rows.Values.Where(x => x.V.Verdict == DependencyVerdict.LeftBehind && x.Row.Mover != 1).Select(x => $"{x.Row.Edge.Dependent} mover {x.Row.Mover}")));
+
+    // -------------------------------------------------------------------------------------------
+    // Q32 — the host's EFFECTIVE enable state, resolved per compared view. Every expectation below was
+    // written from the fixture above before the code ran; each names the view the answer comes from.
+    // -------------------------------------------------------------------------------------------
+    DependencyRow R32(int n, HostEdgeKind k = HostEdgeKind.EnableParent) => rows[(D(n), k)].Row;
+
+    Check("dep-q32: checkbox SET, parent ENABLES it -> the host is present and the row is JUDGED (the old flag read withheld it)",
+          V(30).Verdict == DependencyVerdict.LeftBehind && R32(30).HostStateThen.Enabled && R32(30).HostStateNow.Enabled
+       && R32(30).HostStateThen.ViaParent && R32(30).HostNow!.Value.Disabled,
+          $"{W(30)} | own flag {R32(30).HostNow!.Value.Disabled}, chain {R32(30).HostStateNow.Enabled}");
+    Check("dep-q32: checkbox CLEAR, parent DISABLES it -> the host is absent and the row is WITHHELD (the old flag read judged it)",
+          V(31).Reason == DependencyBlocker.HostDisabled && !R32(31).HostStateNow.Enabled && !R32(31).HostNow!.Value.Disabled
+       && R32(31).HostStateNow.ViaParent && R32(31).HostStateNow.Resolved,
+          $"{W(31)} | own flag {R32(31).HostNow!.Value.Disabled}, chain {R32(31).HostStateNow.Enabled}");
+    Check("dep-q32: OPPOSITE of an enabled parent is absent; opposite of the PLAYER is the permanent-off idiom one hop up",
+          V(32).Reason == DependencyBlocker.HostDisabled && V(33).Reason == DependencyBlocker.HostDisabled
+       && !R32(33).Facts.HostIsPlayer && R32(33).HostStateNow.ViaParent && R32(33).HostStateNow.Resolved,
+          $"{W(32)} | {W(33)}");
+    Check("dep-q32: a PARENT-ONLY override (same position, new parent) changes the state and is no placement step at all",
+          V(36).Reason == DependencyBlocker.HostDisabled && idx.History.Of(H(36))!.Count == 2
+       && idx.History.Of(H(36))![^1].Plugin == 1 && R32(36).Mover == 1 && R32(36).Edge.Author == 0
+       && R32(36).HostStateThen.Enabled && !R32(36).HostStateNow.Enabled,
+          $"{idx.History.Of(H(36))!.Count} snaps, last by {idx.History.Of(H(36))![^1].Plugin}; {W(36)}");
+    Check("dep-q32: THEN sees only its own view's parent — C cannot see A enabling P39, so the row is withheld by the AUTHOR's view",
+          V(39).Reason == DependencyBlocker.HostDisabled && R32(39).Edge.Author == 3
+       && !R32(39).HostStateThen.Enabled && R32(39).HostStateNow.Enabled,
+          $"{W(39)} | then {R32(39).HostStateThen.Enabled} now {R32(39).HostStateNow.Enabled}");
+    Check("dep-q32: a parent DELETED with its placement stripped and never restored -> the winner's chain is UNRESOLVED, not 'enabled'",
+          V(43).Reason == DependencyBlocker.HostStateUnresolved && R32(43).HostStateThen.Resolved && !R32(43).HostStateNow.Resolved,
+          W(43));
+    Check("dep-q32: a parent A deletes and B RESTORES -> present in C's view (the deletion is outside it) and present at the winner: LEFT BEHIND",
+          V(44).Verdict == DependencyVerdict.LeftBehind && R32(44).Edge.Author == 3
+       && R32(44).HostStateThen.Enabled && R32(44).HostStateThen.Resolved
+       && R32(44).HostStateNow.Enabled && R32(44).HostStateNow.Resolved,
+          W(44));
+    Check("dep-q32: a two-reference CYCLE resolves nothing — both rows on it are withheld, neither reads enabled",
+          V(45).Reason == DependencyBlocker.HostStateUnresolved && !R32(45).HostStateNow.Resolved
+       && rows[(P(45), HostEdgeKind.EnableParent)].V.Reason == DependencyBlocker.HostStateUnresolved,
+          W(45));
+    Check("dep-q32: a parent no plugin places -> UNRESOLVED in both views, never a clean answer",
+          V(46).Reason == DependencyBlocker.HostStateUnresolved && !R32(46).HostStateThen.Resolved && !R32(46).HostStateNow.Resolved,
+          W(46));
+    Check("dep-q32: the chain is followed MULTI-HOP — Host47 -> P47a -> P47b(off) leaves the host absent two hops up",
+          V(47).Reason == DependencyBlocker.HostDisabled && !R32(47).HostStateNow.Enabled && R32(47).HostStateNow.Resolved
+       && R32(47).HostStateNow.ViaParent, W(47));
+    Check("dep-q32: TWO AUTHORS, ONE HOST — the master's view of P50 is off (withheld), B's view of it is A's (judged); one host, two answers",
+          V(50).Reason == DependencyBlocker.HostDisabled && R32(50).Edge.Author == 0 && !R32(50).HostStateThen.Enabled
+       && V(51).Verdict == DependencyVerdict.LeftBehind && R32(51).Edge.Author == 2 && R32(51).HostStateThen.Enabled,
+          $"master: {W(50)} | B: {W(51)}");
+    Check("dep-q32: the host's parent REMOVED by the mover -> absent in the author's view, present at the winner: withheld",
+          V(52).Reason == DependencyBlocker.HostDisabled && !R32(52).HostStateThen.Enabled && R32(52).HostStateThen.ViaParent
+       && R32(52).HostStateNow.Enabled && !R32(52).HostStateNow.ViaParent, W(52));
+    // The sparse-view read: B's view of Host55 lands on A, which FORWARDED the master's statement unchanged and so
+    // logged nothing of its own. The value must still be the master's — a reader that only accepts a statement the
+    // eligible plugin itself made would see "no parent", call the host present, and judge a row that is a toggle.
+    Check("dep-q32: a FORWARDED statement survives a sparse view — the value comes from an earlier entry than the eligible plugin",
+          V(55).Reason == DependencyBlocker.HostDisabled && R32(55).Edge.Author == 2 && R32(55).Mover == 3
+       && !R32(55).HostStateThen.Enabled && R32(55).HostStateThen.ViaParent && R32(55).HostStateThen.Resolved
+       && idx.Enable.LastEligible(H(55), 2, closure) == 1 && idx.Enable.StatementAt(H(55), 1).Plugin == 0,
+          $"{W(55)} | B's view lands on plugin {idx.Enable.LastEligible(H(55), 2, closure)}, the value comes from plugin {idx.Enable.StatementAt(H(55), 1).Plugin}");
+    Check("dep-q32: an XLKR link to a disabled reference is NOT an enable parent — only XESP decides the state",
+          V(53).Verdict == DependencyVerdict.LeftBehind && R32(53).HostStateNow.Enabled && !R32(53).HostStateNow.ViaParent, W(53));
+    Check("dep-q32: a parent in ANOTHER CELL still governs — the chain is not cell-scoped",
+          V(54).Reason == DependencyBlocker.HostDisabled && !R32(54).HostStateNow.Enabled && R32(54).HostStateNow.ViaParent, W(54));
+    Check("dep-q32: the census is untouched — every host the state gate withholds still has its movement facts",
+          R32(31).Facts.HostMoved > 199f && R32(52).Facts.HostMoved > 199f && R32(43).Facts.HostMoved > 199f
+       && !R32(31).Facts.HostChangedSpace,
+          $"Host31 {R32(31).Facts.HostMoved:0}u, Host51 {R32(52).Facts.HostMoved:0}u, Host43 {R32(43).Facts.HostMoved:0}u");
+
+    // No memo leakage: the SAME host asked from two authors, in both query orders, on the same index.
+    {
+        var fresh = new DependencyIndex();
+        for (int p = 0; p < paths.Length; p++)
+        {
+            using var mod = SkyrimMod.CreateFromBinaryOverlay(paths[p], release);
+            fresh.Ingest(p, mod);
+        }
+        var eA = idx.Edges.First(e => e.Dependent == D(50) && e.Kind == HostEdgeKind.EnableParent);
+        var eB = idx.Edges.First(e => e.Dependent == D(51) && e.Kind == HostEdgeKind.EnableParent);
+        var reverseB = fresh.Judge(eB, closure);          // B's view FIRST this time
+        var reverseA = fresh.Judge(eA, closure);
+        Check("dep-q32: no memo leakage between authors — reversing the query order on a fresh index gives each the same answer",
+              reverseA.HostStateThen.Enabled == R32(50).HostStateThen.Enabled
+           && reverseB.HostStateThen.Enabled == R32(51).HostStateThen.Enabled
+           && !reverseA.HostStateThen.Enabled && reverseB.HostStateThen.Enabled
+           && reverseA.HostStateNow.Enabled == reverseB.HostStateNow.Enabled,
+              $"master {reverseA.HostStateThen.Enabled}, B {reverseB.HostStateThen.Enabled} (winner {reverseA.HostStateNow.Enabled} for both)");
+    }
+
+    // The enable history's own shape: presence without placement data, and a value read at a plugin index.
+    Check("dep-q32: the deleted parents are kept as records WITHOUT placement data, which is how a view can still see them",
+          idx.Enable.RecordOnly >= 2 && idx.Enable.Latest(P(43)).Deleted && !idx.Enable.Latest(P(44)).Deleted
+       && idx.Enable.StatementAt(P(44), 1).Deleted,
+          $"{idx.Enable.RecordOnly} record-only refs; P44 deleted at A: {idx.Enable.StatementAt(P(44), 1).Deleted}, restored at the winner: {!idx.Enable.Latest(P(44)).Deleted}");
+    Check("dep-q32: a reference nobody disables, parents or deletes carries no statement at all — the log is the exception, not the census",
+          idx.Enable.Tracked < idx.History.Count && idx.Enable.Latest(H(1)).Plugin == -1 && idx.Enable.Latest(H(1)).Parent is null,
+          $"{idx.Enable.Tracked:N0} of {idx.History.Count:N0} refs carry a statement");
+    Check("dep-synth: the placement count is the written one — nothing is silently dropped by the extraction",
+          idx.History.Count == 95, $"{idx.History.Count} refs in the history");   // 41 as written in 2026-09-03 + Q32's 54
+    Check("dep-q32: BOS OFF — the two BOS-arm hosts are plainly present and their rows are judged",
+          V(60).Verdict == DependencyVerdict.LeftBehind && V(61).Verdict == DependencyVerdict.LeftBehind
+       && idx.Enable.BosReflaggedUnderParent.Count == 0, $"{W(60)} | {W(61)}");
+
+    // ---- The same order with the Base Object Swapper layer applied: a runtime re-flag of the host's own flag. ----
+    {
+        var bosRoot = Path.Combine(root, "bosmod");
+        Directory.CreateDirectory(bosRoot);
+        File.WriteAllText(Path.Combine(bosRoot, "Dep_SWAP.ini"), "[Transforms]\nBosDepTable|flags(0x800)\n");
+        var bidx = new DependencyIndex { Bos = new BosFormIndex() };
+        var blight = new List<(ModKey, bool)>();
+        var bmaster = new HashSet<int>[paths.Length + 1];
+        for (int p = 0; p < paths.Length; p++)
+        {
+            using var mod = SkyrimMod.CreateFromBinaryOverlay(paths[p], release);
+            blight.Add((mod.ModKey, BosHook.IsLight(mod)));
+            var names = mod.ModHeader.MasterReferences.Select(x => x.Master).ToHashSet();
+            bmaster[p] = Enumerable.Range(0, p).Where(q => names.Contains(keys[q])).ToHashSet();
+            bidx.Ingest(p, mod);
+        }
+        int bosPlugin = paths.Length;
+        bmaster[bosPlugin] = BosHook.PseudoMasters(paths.Length);
+        var bclosure = DetectorModel.MasterClosure(bmaster);
+        bidx.Bos!.SetLoadOrder(blight);
+        var layer = BosHook.Load(new[] { ("bosmod", bosRoot) }, bidx.Bos);
+        var rep = BosHook.Apply(bidx, layer, bosPlugin);
+        var brows = bidx.Edges.Select(e => bidx.Judge(e, bclosure))
+                        .ToDictionary(r => (r.Edge.Dependent, r.Edge.Kind), r => (Row: r, V: DetectorModel.PlacementDependency(r.Facts, T)));
+        (DependencyRow Row, (DependencyVerdict Verdict, DependencyBlocker Reason, string Why) V) B32(int n) => brows[(D(n), HostEdgeKind.EnableParent)];
+
+        Check("dep-q32/bos: the layer re-flagged both BosDepTable hosts and nothing else",
+              rep.FlagChanges == 2 && rep.Swapped == 0, $"{rep.FlagChanges} flag changes, {rep.Swapped} swaps");
+        Check("dep-q32/bos: a BOS re-flag of a host with NO parent is a winner-view fact — absent now, present in the author's view, so the row is withheld",
+              B32(60).V.Reason == DependencyBlocker.HostDisabled
+           && B32(60).Row.HostStateThen.Enabled && !B32(60).Row.HostStateNow.Enabled && B32(60).Row.HostStateNow.Resolved,
+              $"{B32(60).V.Why} | then {B32(60).Row.HostStateThen.Enabled} now {B32(60).Row.HostStateNow.Enabled}");
+        Check("dep-q32/bos: the pseudo-plugin does NOT leak into an authoring view — no author's closure contains it",
+              !bclosure[0].Contains(bosPlugin) && !bclosure[1].Contains(bosPlugin) && !bclosure[2].Contains(bosPlugin) && !bclosure[3].Contains(bosPlugin)
+           && bidx.Enable.StatementAt(H(60), 3).Plugin < bosPlugin,
+              "BOS applies on top of the winner and is nobody's master");
+        Check("dep-q32/bos: a BOS re-flag of a host that ALSO has an enable parent is UNMEASURED — unresolved and counted, never guessed",
+              B32(61).V.Reason == DependencyBlocker.HostStateUnresolved && !B32(61).Row.HostStateNow.Resolved
+           && bidx.Enable.BosReflaggedUnderParent.Contains(H(61)) && bidx.Enable.BosReflaggedUnderParent.Count == 1,
+              B32(61).V.Why);
+        Check("dep-q32/bos: a separate order builds separate facts — every row untouched by the layer reads as it did without it",
+              new[] { 30, 31, 32, 33, 36, 39, 43, 44, 45, 46, 47, 50, 51, 52, 53, 54 }
+                  .All(n => B32(n).V.Reason == V(n).Reason && B32(n).V.Verdict == V(n).Verdict),
+              string.Join(", ", new[] { 30, 31, 32, 33, 36, 39, 43, 44, 45, 46, 47, 50, 51, 52, 53, 54 }
+                  .Where(n => B32(n).V.Reason != V(n).Reason).Select(n => $"Dep{n} {V(n).Reason}->{B32(n).V.Reason}")));
+    }
     try { Directory.Delete(root, true); } catch { }
 }
 

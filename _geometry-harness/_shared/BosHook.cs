@@ -226,7 +226,14 @@ public static class BosHook
         return rep;
     }
 
-    /// <summary>Apply the layer to the dependency index (the records pass): the same base substitution and history step.</summary>
+    /// <summary>Apply the layer to the dependency index (the records pass): the same base substitution and history step,
+    /// plus — since Q32 (2026-09-06) — the layer's effect on a reference's own initially-disabled flag written into the
+    /// declared enable history under the same pseudo-plugin. That keeps the runtime re-flag in the WINNER view, where it
+    /// belongs, and out of every authoring view, where the pseudo-plugin is not in anyone's master closure. A property
+    /// override is a runtime effect on the reference's OWN flag and never sets an XESP parent, so where the reference
+    /// already has one the engine's own rule (the parent decides, the flag is bookkeeping) says the re-flag changes
+    /// nothing — but that has not been measured with BOS in the picture, so those references are marked unresolved and
+    /// counted rather than answered (DeclaredEnableHistory.BosReflaggedUnderParent).</summary>
     public static BosApplyReport Apply(DependencyIndex idx, BosLayer layer, int bosPlugin)
     {
         var rep = new BosApplyReport();
@@ -243,6 +250,11 @@ public static class BosHook
             if (!idx.RefCell.TryGetValue(key, out _)) { rep.NoCell++; continue; }
             var res = Step(idx.History, key, w, info.Type, recordBase, null, idx.Bos, layer, bosPlugin, rep);
             if (res is null) continue;
+            if (res.Properties is { IsValid: true })
+            {
+                var (_, _, _, disabled) = res.Apply(w.Pos, w.Rot, w.Scale, w.Disabled);
+                idx.Enable.NoteBos(bosPlugin, key, disabled);
+            }
             idx.BosSwaps[key] = res;
             if (res.Swapped)
             {

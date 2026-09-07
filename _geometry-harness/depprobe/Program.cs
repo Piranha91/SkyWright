@@ -36,6 +36,12 @@ using HousecarlCore.Progress;
 // before any count is read (rules 2 and 12); unjudgeable counted, never cleared (rule 6); the
 // movement census must reproduce driftprobe --generic before anything else is believed (rule 8).
 //
+// Since Q32 (2026-09-06) the host's presence is its EFFECTIVE enable state, resolved through its XESP
+// chain SEPARATELY in each of the two configurations the rule compares — the edge author's view and the
+// winning order — instead of its own initially-disabled checkbox, which the engine ignores wherever a
+// reference has a parent. A chain that cannot be read to the end in either view withholds the row under
+// its own reason rather than being judged on the resolver's fallback. Section 3b reports the coverage.
+//
 // NOT verified in game, and no geometry has been checked. A LeftBehind row is a candidate.
 //
 // usage: depprobe [--list N] [--threshold U] [--json FILE] [--bos on|off] [--enable X.esp]* [--disable X.esp]*
@@ -245,8 +251,12 @@ foreach (var e in idx.Edges)
     var pop = DetectorModel.ClassifyDependencyPopulation(IsVanilla(r.Mover), IsVanilla(e.Author), IsUssep(r.Mover));
     rows.Add(new Judged(r, verdict, reason, why, pop));
 }
-static bool HostMovedRow(Judged j) => j.Verdict is DependencyVerdict.LeftBehind or DependencyVerdict.MovedTogether or DependencyVerdict.DependentRemoved
-    || j.Reason is DependencyBlocker.HostDisabled or DependencyBlocker.CrossCell or DependencyBlocker.DependentMovedByThirdParty;
+// "This row is ABOUT a host that moved" — the population split's membership. The chain-unresolved rows are the
+// one blocker that can fire before the movement test (the Intact rule may not rest on a fallback), so they join
+// only when the facts say the host actually moved; that keeps the split's denominators meaning what they did.
+bool HostMovedRow(Judged j) => j.Verdict is DependencyVerdict.LeftBehind or DependencyVerdict.MovedTogether or DependencyVerdict.DependentRemoved
+    || j.Reason is DependencyBlocker.HostDisabled or DependencyBlocker.CrossCell or DependencyBlocker.DependentMovedByThirdParty
+    || (j.Reason == DependencyBlocker.HostStateUnresolved && (j.Row.Facts.HostChangedSpace || j.Row.Facts.HostMoved > threshold));
 static bool SupportShaped(Judged j) => j.Verdict == DependencyVerdict.LeftBehind && j.Row.Facts.Host == HostClass.Physical && j.Row.Dependent == DependentClass.Physical;
 const float ContactOffset = 128f;
 static bool ContactPlausible(Judged j) => SupportShaped(j) && j.Row.AuthoredOffset <= ContactOffset;
@@ -272,10 +282,42 @@ foreach (var v in Enum.GetValues<DependencyVerdict>())
 Console.WriteLine($"   unjudgeable by reason (counted, never cleared):");
 foreach (var b in Enum.GetValues<DependencyBlocker>().Where(b => b != DependencyBlocker.None))
     Console.WriteLine($"      {b,-28} {rows.Count(j => j.Reason == b),9:N0}");
-// The disabled-host rows: the handoff counts them; here is what they would read if judged.
+// The absent-host rows: the handoff counts them; here is what they would read if judged. Hypothetical, and it clears
+// nothing — a chain-unresolved row is NOT in this count, because lifting the absence gate does not make an unread
+// chain read (the unresolved gate fires first, and these rows never reached it).
 int disabledWouldBe = rows.Where(j => j.Reason == DependencyBlocker.HostDisabled)
-    .Count(j => DetectorModel.PlacementDependency(j.Row.Facts with { HostDisabled = false }, threshold).Verdict == DependencyVerdict.LeftBehind);
-Console.WriteLine($"      (of the HostDisabled rows, {disabledWouldBe:N0} would read LeftBehind if a disabled host were judged like an enabled one)");
+    .Count(j => DetectorModel.PlacementDependency(j.Row.Facts with { HostAbsent = false }, threshold).Verdict == DependencyVerdict.LeftBehind);
+Console.WriteLine($"      (of the HostDisabled rows — the host absent at load in one of the two views — {disabledWouldBe:N0} would read LeftBehind if an absent host were judged like a present one)");
+
+// ---------------------------------------------------------------------------------------
+// 3b. Enable-state coverage (Q32) — the host's effective state per compared view, and what could not be read.
+// ---------------------------------------------------------------------------------------
+int edgesUnresolvedState = rows.Count(j => j.Row.Facts.HostStateUnresolved);
+int edgesAbsent = rows.Count(j => j.Row.Facts.HostAbsent);
+int edgesViaParentThen = rows.Count(j => j.Row.HostStateThen.ViaParent);
+int edgesViaParentNow = rows.Count(j => j.Row.HostStateNow.ViaParent);
+int edgesFlagDisagrees = rows.Count(j => j.Row.HostNow is { } hn && j.Row.HostStateNow.ViaParent && hn.Disabled == j.Row.HostStateNow.Enabled);
+var unresolvedHosts = rows.Where(j => j.Row.Facts.HostStateUnresolved).Select(j => j.Row.Edge.Host).Distinct().Count();
+Console.WriteLine();
+Console.WriteLine("==== 3b. HOST ENABLE STATE — resolved per compared view, not read off the host's own checkbox ====");
+Console.WriteLine($"   policy: effective XESP chain state; \"then\" = the edge author's view (its own and its transitive masters' versions),");
+Console.WriteLine($"           \"now\" = the winning order{(bosOn ? " including the BOS layer's flag overrides" : " (BOS off)")}. A parent's state XOR the opposite flag; the player is always enabled.");
+Console.WriteLine($"   edges judged                                  : {rows.Count:N0}");
+Console.WriteLine($"   ...whose host takes its state FROM A PARENT   : then {edgesViaParentThen:N0}   now {edgesViaParentNow:N0}   <- the host's own checkbox has no authority over these; the line below is where it also gave the wrong answer");
+Console.WriteLine($"   ...where the winner's chain state DISAGREES with the host's own checkbox: {edgesFlagDisagrees:N0}");
+Console.WriteLine($"   ...host absent at load in one of the two views : {edgesAbsent:N0}");
+Console.WriteLine($"   ...host chain UNRESOLVED in one of them        : {edgesUnresolvedState:N0}   over {unresolvedHosts:N0} distinct hosts (withheld, never judged)");
+Console.WriteLine($"   references the chain was asked about (chain elements included, the denominator for the two below):");
+Console.WriteLine($"      winner view          {idx.Enable.WinnerQueried,9:N0}   unresolved {idx.Enable.WinnerUnresolved,8:N0}   absent at load {idx.Enable.WinnerAbsent,8:N0}");
+Console.WriteLine($"      authoring views      {idx.Enable.ViewQueried,9:N0}   unresolved {idx.Enable.ViewUnresolved,8:N0}   absent at load {idx.Enable.ViewAbsent,8:N0}   over {idx.Enable.ViewsBuilt:N0} distinct authors");
+Console.WriteLine($"   enable-history size: {idx.Enable.Tracked:N0} refs carry a non-default statement; {idx.Enable.RecordOnly:N0} records had no placement data (deletions)");
+Console.WriteLine($"   BOS re-flagged a reference that ALSO has an enable parent: {idx.Enable.BosReflaggedUnderParent.Count:N0}"
+                + " (interaction unmeasured — those resolve UNRESOLVED rather than guessed)");
+// A restoration the latest-only deletion map cannot see: the host reads deleted for the HostDeleted guard while its
+// last statement does not carry the flag. Surfaced, NOT folded — repairing the deletion guard is outside Q32.
+int deletedThenRestored = rows.Count(j => j.Reason == DependencyBlocker.HostDeleted && !idx.Enable.Latest(j.Row.Edge.Host).Deleted);
+Console.WriteLine($"   HostDeleted rows whose LAST record does not carry the Deleted flag (a restoration the latest-only");
+Console.WriteLine($"   deletion map cannot express): {deletedThenRestored:N0}  — reported, not folded; the deleted-host guard is unchanged here");
 
 var moved = rows.Where(HostMovedRow).ToList();
 var movedHosts = moved.Select(j => j.Row.Edge.Host).Distinct().ToList();
@@ -407,6 +449,19 @@ if (jsonPath is not null)
             hostThen = r.HostThen?.Pos.ToString(), hostNow = r.HostNow?.Pos.ToString(), dependentPos = r.DepNow?.Pos.ToString(),
             author = PluginName(r.Edge.Author), mover = PluginName(r.Mover), population = j.Population.ToString(),
             verdict = j.Verdict.ToString(), reason = j.Reason.ToString(), why = j.Why,
+            // Q32: the host's effective enable state per compared view, and the chain evidence behind it. Additive —
+            // every field above keeps its meaning.
+            hostState = new
+            {
+                thenEnabled = r.HostStateThen.Enabled, thenViaParent = r.HostStateThen.ViaParent, thenResolved = r.HostStateThen.Resolved,
+                nowEnabled = r.HostStateNow.Enabled, nowViaParent = r.HostStateNow.ViaParent, nowResolved = r.HostStateNow.Resolved,
+                absent = r.Facts.HostAbsent, unresolved = r.Facts.HostStateUnresolved,
+                hostOwnFlagNow = r.HostNow?.Disabled, hostOwnFlagThen = r.HostThen?.Disabled,
+                enableParentNow = idx.Enable.Latest(r.Edge.Host).Parent?.ToString(),
+                enableParentOppositeNow = idx.Enable.Latest(r.Edge.Host).Opposite,
+                enableParentThen = idx.Enable.StatementAt(r.Edge.Host, idx.Enable.LastEligible(r.Edge.Host, r.Edge.Author, closure)).Parent?.ToString(),
+                bosReflaggedUnderParent = idx.Enable.BosReflaggedUnderParent.Contains(r.Edge.Host),
+            },
         };
     }
     var summary = new
@@ -419,6 +474,24 @@ if (jsonPath is not null)
         verdicts = Enum.GetValues<DependencyVerdict>().ToDictionary(v => v.ToString(), v => rows.Count(j => j.Verdict == v)),
         unjudgeable = Enum.GetValues<DependencyBlocker>().Where(b => b != DependencyBlocker.None).ToDictionary(b => b.ToString(), b => rows.Count(j => j.Reason == b)),
         disabledWouldBeLeftBehind = disabledWouldBe,
+        // Q32 — the host enable-state policy, its per-view coverage and what could not be read. Counts of EDGES and
+        // counts of REFERENCES are kept apart on purpose: an edge is a row, a reference may carry many rows and the
+        // chain-element counts include hops no row asked about directly.
+        hostEnableState = new
+        {
+            policy = "effective XESP chain state per compared view; then = the edge author's own and its transitive masters' versions, now = the winning order"
+                   + (bosOn ? " with the BOS layer's flag overrides applied" : " (BOS off)"),
+            edgesJudged = rows.Count,
+            edgesHostViaParentThen = edgesViaParentThen, edgesHostViaParentNow = edgesViaParentNow,
+            edgesWinnerChainDisagreesWithOwnFlag = edgesFlagDisagrees,
+            edgesHostAbsent = edgesAbsent, edgesHostStateUnresolved = edgesUnresolvedState, unresolvedHosts,
+            winnerQueried = idx.Enable.WinnerQueried, winnerUnresolved = idx.Enable.WinnerUnresolved, winnerAbsent = idx.Enable.WinnerAbsent,
+            viewsBuilt = idx.Enable.ViewsBuilt, viewQueried = idx.Enable.ViewQueried,
+            viewUnresolved = idx.Enable.ViewUnresolved, viewAbsent = idx.Enable.ViewAbsent,
+            refsWithNonDefaultStatement = idx.Enable.Tracked, recordsWithoutPlacementData = idx.Enable.RecordOnly,
+            bosReflaggedUnderParent = idx.Enable.BosReflaggedUnderParent.Count,
+            hostDeletedRowsWhoseLastRecordIsNotDeleted = deletedThenRestored,
+        },
         dependentClassAll = Enum.GetValues<DependentClass>().ToDictionary(c => c.ToString(), c => rows.Count(j => j.Row.Dependent == c)),
         supportShapedEdges = rows.Count(j => j.Row.Facts.Host == HostClass.Physical && j.Row.Dependent == DependentClass.Physical),
         supportShapedLeftBehind = rows.Count(SupportShaped),
@@ -446,6 +519,9 @@ if (jsonPath is not null)
         modPairs = byPair.Select(g => new { mover = g.Key.Mover, author = g.Key.Author, rows = g.Count(),
                                             physical = g.Count(j => j.Row.Facts.Host == HostClass.Physical), marker = g.Count(j => j.Row.Facts.Host == HostClass.Marker), other = g.Count(j => j.Row.Facts.Host == HostClass.Other) }),
         rows = rows.Where(j => j.Verdict == DependencyVerdict.LeftBehind).Select(RowJson),
+        // Q32 — the withheld rows, in their own collection. Putting the state evidence only on the LeftBehind rows
+        // would hide every row the state gate withholds, which is exactly the population this change creates.
+        withheldRows = rows.Where(j => j.Reason is DependencyBlocker.HostDisabled or DependencyBlocker.HostStateUnresolved).Select(RowJson),
     };
     File.WriteAllText(jsonPath, JsonSerializer.Serialize(summary, new JsonSerializerOptions { WriteIndented = true }));
     Console.WriteLine($"\nwrote {jsonPath}");
