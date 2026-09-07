@@ -42,6 +42,14 @@ using HousecarlCore.Progress;
 // reference has a parent. A chain that cannot be read to the end in either view withholds the row under
 // its own reason rather than being judged on the resolver's fallback. Section 3b reports the coverage.
 //
+// Since Q35 (2026-09-07) a row is also withheld when the DEPENDENT's record is a deletion in the edge author's own
+// view while the winning order still has it. An edge is only extracted from a record that carried a placement, so the
+// author is always a toucher and the RECORD view selects its own record — which means the position that view offers is
+// either that deleted record's own leftover data or, when the author merely repeated an earlier plugin's deleted
+// placement and so left no snap, an older LIVE position its record contradicts. Judging against it fed the same-space
+// test, the authored offset and the re-placement comparison, so LeftBehind, MovedTogether and the third-party read
+// could all rest on it. Section 3b reports the population, the rows and the record each view chose.
+//
 // NOT verified in game, and no geometry has been checked. A LeftBehind row is a candidate.
 //
 // usage: depprobe [--list N] [--threshold U] [--json FILE] [--bos on|off] [--enable X.esp]* [--disable X.esp]*
@@ -251,12 +259,14 @@ foreach (var e in idx.Edges)
     var pop = DetectorModel.ClassifyDependencyPopulation(IsVanilla(r.Mover), IsVanilla(e.Author), IsUssep(r.Mover));
     rows.Add(new Judged(r, verdict, reason, why, pop));
 }
-// "This row is ABOUT a host that moved" — the population split's membership. The chain-unresolved rows are the
-// one blocker that can fire before the movement test (the Intact rule may not rest on a fallback), so they join
-// only when the facts say the host actually moved; that keeps the split's denominators meaning what they did.
+// "This row is ABOUT a host that moved" — the population split's membership. Two blockers can fire BEFORE the
+// movement test — the chain-unresolved one (Q32) and the dependent's invalid baseline (Q35), because neither a clean
+// verdict nor a withheld one may rest on a value that is not a reading — so those rows join only when the facts say
+// the host actually moved; that keeps the split's denominators meaning what they did.
+bool FactsSayMoved(Judged j) => j.Row.Facts.HostChangedSpace || j.Row.Facts.HostMoved > threshold;
 bool HostMovedRow(Judged j) => j.Verdict is DependencyVerdict.LeftBehind or DependencyVerdict.MovedTogether or DependencyVerdict.DependentRemoved
     || j.Reason is DependencyBlocker.HostDisabled or DependencyBlocker.CrossCell or DependencyBlocker.DependentMovedByThirdParty
-    || (j.Reason == DependencyBlocker.HostStateUnresolved && (j.Row.Facts.HostChangedSpace || j.Row.Facts.HostMoved > threshold));
+    || (j.Reason is DependencyBlocker.HostStateUnresolved or DependencyBlocker.DependentDeletedInAuthorView && FactsSayMoved(j));
 static bool SupportShaped(Judged j) => j.Verdict == DependencyVerdict.LeftBehind && j.Row.Facts.Host == HostClass.Physical && j.Row.Dependent == DependentClass.Physical;
 const float ContactOffset = 128f;
 static bool ContactPlausible(Judged j) => SupportShaped(j) && j.Row.AuthoredOffset <= ContactOffset;
@@ -325,14 +335,28 @@ int restoredDeps = rows.Select(j => j.Row.Edge.Dependent).Distinct().Count(resto
 int hostDeletedNow = rows.Count(j => j.Row.HostDeletedNow);
 int hostDeletedThenOnly = rows.Count(j => j.Row.HostDeletedThen && !j.Row.HostDeletedNow);
 int depDeletedThenOnly = rows.Count(j => j.Row.DependentDeletedThen && !j.Row.Facts.DependentDeleted);
+// ...of which the ones the new gate actually withheld: a row whose host was already deleted, or was the player, or
+// had no placement anywhere, is stopped by an earlier blocker and never reaches it. The two counts are kept apart so
+// neither is read as the other.
+int depBaselineWithheld = rows.Count(j => j.Reason == DependencyBlocker.DependentDeletedInAuthorView);
 Console.WriteLine($"   refs deleted somewhere in the order: {idx.Deletions.EverCount:N0}; of those, RESTORED by a later record");
 Console.WriteLine($"   (not deleted at the winner): {restored.Count:N0} — {restoredHosts:N0} appear as a host and {restoredDeps:N0} as a dependent");
 Console.WriteLine($"   across {rows.Count:N0} edges. A restoration that repeats an existing position is no placement step, so");
 Console.WriteLine($"   these are exactly the references the pre-Q34 guard called deleted for good.");
 Console.WriteLine($"   HostDeleted rows by the view that saw it: {hostDeletedNow:N0} deleted in the WINNING order,");
 Console.WriteLine($"   {hostDeletedThenOnly:N0} deleted only in the EDGE AUTHOR's view (its own record, or one of its masters');");
-Console.WriteLine($"   dependents deleted in the author's view but restored at the winner (judged normally, reported here):");
-Console.WriteLine($"   {depDeletedThenOnly:N0}");
+Console.WriteLine($"   dependents deleted in the EDGE AUTHOR's view but restored at the winner: {depDeletedThenOnly:N0}");
+Console.WriteLine($"   (Q35: that view holds no placement to compare against — a record it deletes keeps whatever position data it");
+Console.WriteLine($"   carried, and the engine reads none of it — so those rows are WITHHELD under DependentDeletedInAuthorView");
+Console.WriteLine($"   rather than judged. {depBaselineWithheld:N0} of them reached that gate; the rest were already withheld by an earlier one.)");
+if (depBaselineWithheld > 0)
+{
+    Console.WriteLine($"   the withheld rows (up to 20), with the record each view selected:");
+    foreach (var j in rows.Where(j => j.Reason == DependencyBlocker.DependentDeletedInAuthorView).Take(20))
+        Console.WriteLine($"      {RefLabel(j.Row.Edge.Dependent)} --{j.Row.Edge.Kind}--> {RefLabel(j.Row.Edge.Host)}"
+            + $"  edge by {PluginName(j.Row.Edge.Author)}; the author's view selected {PluginName(j.Row.DependentRecordProviderThen)}'s record"
+            + $"; statements: {(idx.Deletions.Of(j.Row.Edge.Dependent) is { } dst ? string.Join(" -> ", dst.Select(e => $"{PluginName(e.Plugin)}{(e.Deleted ? " deletes" : " restores")}")) : "(none)")}");
+}
 if (restored.Count > 0)
 {
     Console.WriteLine($"   the restored references (up to 20), with the deletion history each view selects from:");
@@ -484,6 +508,17 @@ if (jsonPath is not null)
                 enableParentThen = idx.Enable.StatementAt(r.Edge.Host, idx.Enable.LastEligible(r.Edge.Host, r.Edge.Author, closure)).Parent?.ToString(),
                 bosReflaggedUnderParent = idx.Enable.BosReflaggedUnderParent.Contains(r.Edge.Host),
             },
+            // Q35: the dependent's record per compared view, and the history the selection reads. Present on every
+            // row (null statements for the references nobody ever deleted, which is nearly all of them) so a row
+            // withheld for having no baseline carries its own evidence rather than a summary count standing for it.
+            dependentDeletion = new
+            {
+                deletedInAuthorView = r.DependentDeletedThen, deletedAtWinner = r.Facts.DependentDeleted,
+                authorViewSelectedPlugin = PluginName(idx.Deletions.LastEligible(r.Edge.Dependent, r.Edge.Author, closure)),
+                recordProviderThen = PluginName(r.DependentRecordProviderThen),
+                recordProviderNow = PluginName(idx.Deletions.ProviderAt(r.Edge.Dependent, int.MaxValue)),
+                statements = idx.Deletions.Of(r.Edge.Dependent)?.Select(e => new { plugin = PluginName(e.Plugin), e.Deleted }).ToList(),
+            },
         };
     }
     var summary = new
@@ -515,6 +550,9 @@ if (jsonPath is not null)
             bosReflaggedUnderParent = idx.Enable.BosReflaggedUnderParent.Count,
             hostDeletedRowsByView = new { winner = hostDeletedNow, authorViewOnly = hostDeletedThenOnly },
             dependentDeletedInAuthorViewButRestoredAtWinner = depDeletedThenOnly,
+            // Q35: ...of which the rows the new gate actually withheld. Never larger than the line above; smaller
+            // whenever an earlier blocker (a deleted or unplaceable host, the player) stopped the row first.
+            dependentBaselineWithheldRows = depBaselineWithheld,
             restoredReferences = restored.OrderBy(k => k.ID).Select(k => new
             {
                 formKey = k.ToString(), name = RefLabel(k),
@@ -551,7 +589,8 @@ if (jsonPath is not null)
         rows = rows.Where(j => j.Verdict == DependencyVerdict.LeftBehind).Select(RowJson),
         // Q32 — the withheld rows, in their own collection. Putting the state evidence only on the LeftBehind rows
         // would hide every row the state gate withholds, which is exactly the population this change creates.
-        withheldRows = rows.Where(j => j.Reason is DependencyBlocker.HostDisabled or DependencyBlocker.HostStateUnresolved).Select(RowJson),
+        withheldRows = rows.Where(j => j.Reason is DependencyBlocker.HostDisabled or DependencyBlocker.HostStateUnresolved
+                                                 or DependencyBlocker.DependentDeletedInAuthorView).Select(RowJson),
     };
     File.WriteAllText(jsonPath, JsonSerializer.Serialize(summary, new JsonSerializerOptions { WriteIndented = true }));
     Console.WriteLine($"\nwrote {jsonPath}");

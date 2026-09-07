@@ -770,8 +770,8 @@ Console.WriteLine("\nPROOF — placement dependency (_shared/DetectorModel.cs + 
     DetectorModel.DependencyFacts F(HostEdgeKind kind = HostEdgeKind.EnableParent, bool resolved = true, bool hostDeleted = false,
         bool hostAbsent = false, bool sameCell = true, bool cellChanged = false, float moved = 200f,
         bool depDeleted = false, bool rePlaced = false, bool byMover = false, HostClass host = HostClass.Physical, bool player = false,
-        bool stateUnresolved = false)
-        => new(kind, player, resolved, hostDeleted, hostAbsent, stateUnresolved, sameCell, cellChanged, moved, depDeleted, rePlaced, byMover, host);
+        bool stateUnresolved = false, bool depDeletedThen = false)
+        => new(kind, player, resolved, hostDeleted, hostAbsent, stateUnresolved, sameCell, cellChanged, moved, depDeleted, depDeletedThen, rePlaced, byMover, host);
     var lb = DetectorModel.PlacementDependency(F(), T);
     Check("dep: host moved 200u, dependent untouched -> LEFT BEHIND",
           lb.Verdict == DependencyVerdict.LeftBehind && lb.Reason == DependencyBlocker.None, lb.Why);
@@ -836,6 +836,39 @@ Console.WriteLine("\nPROOF — placement dependency (_shared/DetectorModel.cs + 
     Check("dep: unresolved outranks deleted outranks the numbers (blocker order)",
           DetectorModel.PlacementDependency(F(resolved: false, hostDeleted: true), T).Reason == DependencyBlocker.HostUnresolved
        && DetectorModel.PlacementDependency(F(hostDeleted: true, moved: float.NaN), T).Reason == DependencyBlocker.HostDeleted, "first blocker wins");
+    // Q35 — the dependent's own record-selection gate. Its ORDER is the whole point: it sits immediately after the
+    // host's deletion gate and ahead of every gate that reads a position, because no verdict — clean or withheld —
+    // may rest on a value that is not a reading. It does NOT fire when the winner deletes the dependent too.
+    var dbase = DetectorModel.PlacementDependency(F(depDeletedThen: true), T);
+    Check("dep: the dependent's record deleted in the AUTHOR's view, alive at the winner -> UNJUDGEABLE (DependentDeletedInAuthorView)",
+          dbase.Verdict == DependencyVerdict.Unjudgeable && dbase.Reason == DependencyBlocker.DependentDeletedInAuthorView, dbase.Why);
+    Check("dep: ...and it precedes the movement test, so a host that did NOT move is withheld rather than called Intact",
+          DetectorModel.PlacementDependency(F(depDeletedThen: true, moved: 5), T).Reason == DependencyBlocker.DependentDeletedInAuthorView
+       && DetectorModel.PlacementDependency(F(moved: 5), T).Verdict == DependencyVerdict.Intact,
+          "Q32's reason, applied to the dependent's baseline");
+    Check("dep: ...deleted in the author's view AND at the winner -> DEPENDENT REMOVED, the winner-only removal rule intact",
+          DetectorModel.PlacementDependency(F(depDeletedThen: true, depDeleted: true), T).Verdict == DependencyVerdict.DependentRemoved
+       && DetectorModel.PlacementDependency(F(depDeletedThen: true, depDeleted: true), T).Reason == DependencyBlocker.None,
+          "nothing left behind is a claim about the shipped order and needs no baseline");
+    Check("dep: ...the two gates above it still win — the player and an unplaceable host are read first",
+          DetectorModel.PlacementDependency(F(depDeletedThen: true, player: true), T).Reason == DependencyBlocker.HostIsPlayer
+       && DetectorModel.PlacementDependency(F(depDeletedThen: true, resolved: false), T).Reason == DependencyBlocker.HostUnresolved
+       && DetectorModel.PlacementDependency(F(depDeletedThen: true, hostDeleted: true), T).Reason == DependencyBlocker.HostDeleted,
+          "the host's own gates keep every row they had");
+    Check("dep: ...and it BEATS every gate that would read a position off the invalid baseline",
+          DetectorModel.PlacementDependency(F(depDeletedThen: true, moved: float.NaN), T).Reason == DependencyBlocker.DependentDeletedInAuthorView
+       && DetectorModel.PlacementDependency(F(depDeletedThen: true, stateUnresolved: true), T).Reason == DependencyBlocker.DependentDeletedInAuthorView
+       && DetectorModel.PlacementDependency(F(depDeletedThen: true, hostAbsent: true), T).Reason == DependencyBlocker.DependentDeletedInAuthorView
+       && DetectorModel.PlacementDependency(F(depDeletedThen: true, sameCell: false), T).Reason == DependencyBlocker.DependentDeletedInAuthorView
+       && DetectorModel.PlacementDependency(F(depDeletedThen: true, rePlaced: true, byMover: true), T).Verdict == DependencyVerdict.Unjudgeable
+       && DetectorModel.PlacementDependency(F(depDeletedThen: true, rePlaced: true, byMover: false), T).Reason == DependencyBlocker.DependentDeletedInAuthorView,
+          "NoAuthoringView, HostStateUnresolved, HostDisabled, CrossCell, MovedTogether and the third-party read all rest on it");
+    Check("dep: the gate is inert without the fact — every existing verdict is unchanged when the author's view is live",
+          DetectorModel.PlacementDependency(F(), T).Verdict == DependencyVerdict.LeftBehind
+       && DetectorModel.PlacementDependency(F(depDeleted: true), T).Verdict == DependencyVerdict.DependentRemoved
+       && DetectorModel.PlacementDependency(F(rePlaced: true, byMover: true), T).Verdict == DependencyVerdict.MovedTogether
+       && DetectorModel.PlacementDependency(F(sameCell: false), T).Reason == DependencyBlocker.CrossCell,
+          "the fact is false everywhere it used to be absent");
     var mk = DetectorModel.PlacementDependency(F(host: HostClass.Marker), T);
     Check("dep: a marker host is still LEFT BEHIND by the rule — the split is the caller's, and the why names the class",
           mk.Verdict == DependencyVerdict.LeftBehind && mk.Why.Contains("Marker host"), mk.Why);
@@ -894,6 +927,7 @@ Console.WriteLine("\nPROOF — placement dependency (_shared/DetectorModel.cs + 
     var aKey = new ModKey("DepA", ModType.Plugin);
     var bKey = new ModKey("DepB", ModType.Plugin);
     var cKey = new ModKey("DepC", ModType.Plugin);
+    var dKey = new ModKey("DepD", ModType.Plugin);   // Q35 round 2: a restorer that loads AFTER the edge author
     FormKey M(uint id) => new(mKey, id);
     var tableK = M(0x801); var markerK = M(0x802); var cell1K = M(0x810); var cell2K = M(0x811);
     var bosTableK = M(0x803);                     // a base only the BOS-arm hosts use, so one [Transforms] line hits them alone
@@ -933,6 +967,40 @@ Console.WriteLine("\nPROOF — placement dependency (_shared/DetectorModel.cs + 
         r.EnableParent = new EnableParent { Flags = EnableParent.Flag.SetEnableStateToOppositeOfParent };
         r.EnableParent.Reference.SetTo(host);
         return r;
+    }
+    // Q35: the Deleted flag over INTACT subrecords cannot be written through Mutagen — measured 2026-09-07, its
+    // writer emits a deleted record as a bare header (dataSize 0, no DATA and no XESP), whatever the object holds.
+    // Real tools do produce the shape (xEdit sets the flag in place and leaves the data), and it is the ONLY shape
+    // that can put a deletion in an EDGE AUTHOR's own view: an edge is extracted only from a record that carried a
+    // placement, so the author always contributes one, and its view therefore selects its own record. So the fixture
+    // writes those records normally and flips the header bit afterwards.
+    /// <summary>Set the Deleted header flag on chosen records of an already-written plugin WITHOUT stripping their
+    /// subrecords, and return how many records were marked. A record header is 24 bytes — signature, dataSize, flags,
+    /// FormID, … — so the flags dword sits at offset 8; a GRUP's size includes its own header. Every record here is
+    /// defined in the master and overridden in the patched plugin, so its file FormID is its FormKey's raw id.</summary>
+    static int MarkDeletedInPlace(string path, params FormKey[] keys)
+    {
+        var buf = File.ReadAllBytes(path);
+        var ids = keys.Select(k => k.ID).ToHashSet();
+        int marked = 0;
+        void Walk(int off, int end)
+        {
+            while (off + 24 <= end)
+            {
+                int size = (int)BitConverter.ToUInt32(buf, off + 4);
+                if (buf[off] == (byte)'G' && buf[off + 1] == (byte)'R' && buf[off + 2] == (byte)'U' && buf[off + 3] == (byte)'P')
+                { Walk(off + 24, off + size); off += size; continue; }
+                if (ids.Contains(BitConverter.ToUInt32(buf, off + 12)) && size > 0)
+                {
+                    BitConverter.GetBytes(BitConverter.ToUInt32(buf, off + 8) | 0x20u).CopyTo(buf, off + 8);
+                    marked++;
+                }
+                off += 24 + size;
+            }
+        }
+        Walk(0, buf.Length);
+        File.WriteAllBytes(path, buf);
+        return marked;
     }
     static PlacedObject Xlkr(PlacedObject r, FormKey host) { var l = new LinkedReferences(); l.Reference.SetTo(host); r.LinkedReferences.Add(l); return r; }
     static PlacedObject Xapr(PlacedObject r, FormKey host) { r.ActivateParents = new ActivateParents(); var ap = new ActivateParent { Delay = 0 }; ap.Reference.SetTo(host); r.ActivateParents.Parents.Add(ap); return r; }
@@ -1061,6 +1129,34 @@ Console.WriteLine("\nPROOF — placement dependency (_shared/DetectorModel.cs + 
     cell1.Temporary.Add(Ref(H(82), tableK, 82000, edid: "Host82"));                     // A deletes it, B FORWARDS the deletion
     cell1.Temporary.Add(Ref(D(82), tableK, 82010, 0, 40, "Dep82"));                     // B authors this edge
 
+    // ---- Q35: a dependent whose EDGE AUTHOR's own view selects a deletion. An edge exists only because some
+    // plugin's record of the dependent CARRIED it, and PlacementExtract drops a record with no placement subrecord —
+    // so the author always contributes a placement record of the dependent, and its view therefore selects its own
+    // record. The one shape that puts a deletion there is a record that sets the Deleted flag and KEEPS its placement
+    // and its XESP. The dependents below are placed plainly by the master and deleted by the plugin that authors the
+    // edge; the host is then moved by a plugin that author cannot see (H94 is the exception, moved by the author
+    // itself, so its row reaches the movement test clean and Intact is what the gate has to beat).
+    foreach (int n in new[] { 90, 91, 92, 93, 96, 97 })
+        cell1.Temporary.Add(Ref(H(n), tableK, 1000f * n, edid: $"Host{n}"));
+    foreach (int n in new[] { 90, 91, 92, 96 })
+        cell1.Temporary.Add(Ref(D(n), tableK, 1000f * n + 10, 0, 40, $"Dep{n}"));       // A adds both the edge and the deletion
+    cell2.Temporary.Add(Ref(D(93), tableK, 93010, 0, 40, "Dep93"));                     // cross-space arm: the dependent lives in cell 2
+    cell1.Temporary.Add(Ref(H(94), tableK, 94000, edid: "Host94"));
+    cell1.Temporary.Add(Ref(D(94), tableK, 94010, 0, 40, "Dep94"));                     // A authors this one and deletes it
+    cell1.Temporary.Add(Ref(D(95), tableK, 94020, 0, 40, "Dep95"));                     // C authors this one, on a live record
+    cell1.Temporary.Add(Xesp(Ref(D(97), tableK, 97010, 0, 40, "Dep97"), H(97)));        // control: never deleted anywhere
+    // Q35 round 2. The author does NOT always contribute a snap: PlacementHistory drops one that repeats the
+    // previous, and Snap.SameAs does not consider the edge set — so an author that repeats an earlier plugin's
+    // DELETED placement while adding the edge leaves no snap, and AsSeenBy falls back to an older LIVE position
+    // its own record contradicts. H98/D98 build exactly that; the other two put the gate against the two blockers
+    // that were first thought unreachable through ingestion.
+    cell1.Temporary.Add(Ref(H(98), tableK, 98000, edid: "Host98"));
+    cell1.Temporary.Add(Ref(D(98), tableK, 98010, 0, 40, "Dep98"));                     // A deletes it, C repeats that and adds the edge
+    cell1.Temporary.Add(new PlacedObject(H(99), release) { EditorID = "Host99" });      // a record with NO placement; C places it first
+    cell1.Temporary.Add(Ref(D(99), tableK, 99010, 0, 40, "Dep99"));
+    cell1.Temporary.Add(Xesp(Ref(H(100), tableK, 100000, edid: "Host100"), Nowhere())); // enable parent nothing places: chain unresolved
+    cell1.Temporary.Add(Ref(D(100), tableK, 100010, 0, 40, "Dep100"));
+
     FileInterior(master, cell1); FileInterior(master, cell2);
     var wKey = M(0x830); var topK = M(0x831); var gridK = M(0x832);
     static Worldspace World(FormKey wKey, FormKey topK, FormKey gridK, PlacedObject? persistent, PlacedObject? temporary)
@@ -1130,9 +1226,27 @@ Console.WriteLine("\nPROOF — placement dependency (_shared/DetectorModel.cs + 
     a1.Temporary.Add(Xesp(Ref(D(80), tableK, 80010, 0, 40, "Dep80"), H(80)));            // A authors the edge it can only see deleted
     a1.Temporary.Add(new PlacedObject(H(84), release) { IsDeleted = true });             // deleted for good; the BOS line must not revive it
     a1.Temporary.Add(new PlacedObject(H(82), release) { IsDeleted = true });             // B forwards this deletion unchanged
+
+    // ---- Q35: A authors six edges on records it deletes in the same breath — the Deleted flag with the placement
+    // and the XESP retained, which is what makes its own view select a deletion.
+    foreach (int n in new[] { 90, 91, 92, 96 })
+        a1.Temporary.Add(Xesp(Ref(D(n), tableK, 1000f * n + 10, 0, 40, $"Dep{n}"), H(n)));
+    a2.Temporary.Add(Xesp(Ref(D(93), tableK, 93010, 0, 40, "Dep93"), H(93)));            // the dependent is in cell 2, its host in cell 1
+    a1.Temporary.Add(Ref(H(94), tableK, 94300, edid: "Host94"));                         // A moves this host ITSELF: its own view sees no move
+    a1.Temporary.Add(Xesp(Ref(D(94), tableK, 94010, 0, 40, "Dep94"), H(94)));
+    a1.Temporary.Add(Ref(H(97), tableK, 97300, edid: "Host97"));                         // control: the ordinary mover, nothing deleted
+    // Q35 round 2: A is the PRIOR deleter for Dep98 (C repeats this record verbatim, so C leaves no snap), and the
+    // edge author for the two precedence arms. All four are flagged deleted in place after the write.
+    a1.Temporary.Add(Ref(D(98), tableK, 98010, 0, 40, "Dep98"));                         // deleted-with-data at the master's position
+    a1.Temporary.Add(Ref(H(98), tableK, 98300, edid: "Host98"));                         // and A moves the host, invisibly to C
+    a1.Temporary.Add(Xesp(Ref(D(99), tableK, 99010, 0, 40, "Dep99"), H(99)));            // A authors this edge on a record it deletes
+    a1.Temporary.Add(Xesp(Ref(D(100), tableK, 100010, 0, 40, "Dep100"), H(100)));        // ...and this one
     FileInterior(a, a1); FileInterior(a, a2);
     a.Worldspaces.Add(World(wKey, topK, gridK, Ref(H(22), tableK, 700, 500, 0, "Host22"), null));   // A moves the persistent host 200u
     var aPath = Write(a, mOv);
+    // Q35: A's six dependents are written live and then flagged deleted IN PLACE, so each keeps its DATA and its
+    // XESP. That is what makes A the edge author AND makes A's own view select a deletion.
+    int q35Marked = MarkDeletedInPlace(aPath, D(90), D(91), D(92), D(93), D(94), D(96), D(98), D(99), D(100));
 
     // PLUGIN B (masters DepMaster AND DepA): re-places Dep4 after A moved Host4 — the patch shape.
     using var aOv = SkyrimMod.CreateFromBinaryOverlay(aPath, release);
@@ -1161,12 +1275,23 @@ Console.WriteLine("\nPROOF — placement dependency (_shared/DetectorModel.cs + 
     b1.Temporary.Add(new PlacedObject(D(74), release) { IsDeleted = true });            // C restores the DEPENDENT unchanged
     b1.Temporary.Add(new PlacedObject(D(75), release) { IsDeleted = true });            // control: nobody restores it
     b1.Temporary.Add(new PlacedObject(P(83), release) { IsDeleted = true });            // the enable parent; C restores it
-    var h73del = Ref(H(73), tableK, 73300, edid: "Host73");                             // control: deleted WITH its placement retained
-    h73del.IsDeleted = true;
-    b1.Temporary.Add(h73del);
+    b1.Temporary.Add(Ref(H(73), tableK, 73300, edid: "Host73"));                        // control: deleted WITH its placement RETAINED —
+                                                                                        // flagged in place after the write, because setting
+                                                                                        // IsDeleted here makes the writer strip the very
+                                                                                        // thing this case exists to cover (Q35 round 2)
     b1.Temporary.Add(Ref(H(78), tableK, 78300, edid: "Host78"));                        // forwarded unchanged: no step, no deletion
+
+    // ---- Q35: B moves the hosts whose edge author (A) cannot see the move, and for one arm restores the dependent
+    // itself — the mover's own side, which is the arm that reads MovedTogether off the invalid baseline.
+    foreach (int n in new[] { 90, 91, 92, 93, 96 })
+        b1.Temporary.Add(Ref(H(n), tableK, 1000f * n + 300, edid: $"Host{n}"));
+    b1.Temporary.Add(Xesp(Ref(D(92), tableK, 92010, 0, 40, "Dep92"), H(92)));           // B is the mover AND the restorer
+    b1.Temporary.Add(Xesp(Ref(H(100), tableK, 100300, edid: "Host100"), Nowhere()));     // Q35 round 2: moves it, parent FORWARDED so
+                                                                                        // the chain is unresolved in BOTH views
     FileInterior(b, b1);
     var bPath = Write(b, mOv, aOv);
+    // Q34's "deleted with its placement RETAINED" control, repaired 2026-09-07: written live, then flagged.
+    int q34Marked = MarkDeletedInPlace(bPath, H(73));
 
     // PLUGIN C (masters DepMaster only): re-places Dep10 without ever seeing A — the third party.
     var c = new SkyrimMod(cKey, release);
@@ -1188,11 +1313,39 @@ Console.WriteLine("\nPROOF — placement dependency (_shared/DetectorModel.cs + 
     c1.Temporary.Add(new PlacedObject(H(77), release) { IsDeleted = true });            // deleted again after B restored it
     c1.Temporary.Add(Ref(H(82), tableK, 82000, edid: "Host82"));                        // restored at the winner; B still sees the deletion
     c1.Temporary.Add(Ref(H(78), tableK, 78300, edid: "Host78"));                        // a second identical forward
-    FileInterior(c, c1);
+
+    // ---- Q35: C restores three of the dependents A deleted — a plugin outside the mover's side, so the old reading
+    // is DependentMovedByThirdParty rather than MovedTogether — and authors one edge of its own on a LIVE record.
+    var c2 = new Cell(cell2K, release) { Flags = Cell.Flag.IsInteriorCell };
+    c1.Temporary.Add(Xesp(Ref(D(90), tableK, 90010, 0, 40, "Dep90"), H(90)));           // restored where it stood
+    c1.Temporary.Add(Xesp(Ref(D(91), tableK, 91210, 0, 40, "Dep91"), H(91)));           // restored 200u on
+    c2.Temporary.Add(Xesp(Ref(D(93), tableK, 93010, 0, 40, "Dep93"), H(93)));           // restored in cell 2
+    c1.Temporary.Add(Xesp(Ref(D(94), tableK, 94010, 0, 40, "Dep94"), H(94)));           // restored where it stood
+    c1.Temporary.Add(Xesp(Ref(D(95), tableK, 94020, 0, 40, "Dep95"), H(94)));           // C AUTHORS this edge: its own view is live
+    // Q35 round 2. C masters the MASTER only, so A's records are outside its view.
+    //   Dep98: C repeats A's deleted placement EXACTLY and adds the edge. Its own snap is dropped as a repeat, so its
+    //          placement view falls back to the master's LIVE snap while its record view selects its own deletion.
+    //   Host99: C is the first plugin to PLACE it, so A's view of the host has no position at all (NoAuthoringView).
+    //   Dep99/Dep100: C restores what A deleted, leaving A's rows in the population.
+    c1.Temporary.Add(Xesp(Ref(D(98), tableK, 98010, 0, 40, "Dep98"), H(98)));           // repeats A's record and ADDS the edge
+    c1.Temporary.Add(Ref(H(99), tableK, 99000, edid: "Host99"));                        // first placement of a record-only reference
+    c1.Temporary.Add(Xesp(Ref(D(99), tableK, 99010, 0, 40, "Dep99"), H(99)));           // restored, edge forwarded
+    c1.Temporary.Add(Xesp(Ref(D(100), tableK, 100010, 0, 40, "Dep100"), H(100)));       // restored, edge forwarded
+    FileInterior(c, c1); FileInterior(c, c2);
     var cPath = Write(c, mOv);
+    int q35cMarked = MarkDeletedInPlace(cPath, D(98));                                  // C's own record is a deletion too
+
+    // PLUGIN D (masters DepMaster only): loads after the edge author and restores Dep98 where the master had it.
+    // Without a fifth plugin the counterexample cannot be built at all — the author must not master the prior
+    // deleter, which forces it to C, and the restoration has to come after the author.
+    var d = new SkyrimMod(dKey, release);
+    var d1 = new Cell(cell1K, release) { Flags = Cell.Flag.IsInteriorCell };
+    d1.Temporary.Add(Xesp(Ref(D(98), tableK, 98010, 0, 40, "Dep98"), H(98)));           // live again, at the master's position
+    FileInterior(d, d1);
+    var dPath = Write(d, mOv);
 
     // Read the order back the way depprobe does.
-    var paths = new[] { mPath, aPath, bPath, cPath };
+    var paths = new[] { mPath, aPath, bPath, cPath, dPath };
     var idx = new DependencyIndex();
     var keys = new ModKey[paths.Length];
     var masterIdx = new HashSet<int>[paths.Length];
@@ -1206,8 +1359,9 @@ Console.WriteLine("\nPROOF — placement dependency (_shared/DetectorModel.cs + 
     }
     var closure = DetectorModel.MasterClosure(masterIdx);
     Check("dep-synth: the written order has the declared masters it was built to have",
-          masterIdx[1].SetEquals(new[] { 0 }) && masterIdx[2].SetEquals(new[] { 0, 1 }) && masterIdx[3].SetEquals(new[] { 0 }),
-          $"A<-[{string.Join(",", masterIdx[1])}] B<-[{string.Join(",", masterIdx[2])}] C<-[{string.Join(",", masterIdx[3])}]");
+          masterIdx[1].SetEquals(new[] { 0 }) && masterIdx[2].SetEquals(new[] { 0, 1 }) && masterIdx[3].SetEquals(new[] { 0 })
+       && masterIdx[4].SetEquals(new[] { 0 }),
+          $"A<-[{string.Join(",", masterIdx[1])}] B<-[{string.Join(",", masterIdx[2])}] C<-[{string.Join(",", masterIdx[3])}] D<-[{string.Join(",", masterIdx[4])}]");
     var rows = idx.Edges.Select(e => idx.Judge(e, closure))
                   .ToDictionary(r => (r.Edge.Dependent, r.Edge.Kind), r => (Row: r, V: DetectorModel.PlacementDependency(r.Facts, T)));
     (DependencyVerdict Verdict, DependencyBlocker Reason, string Why) V(int n, HostEdgeKind k = HostEdgeKind.EnableParent)
@@ -1369,7 +1523,7 @@ Console.WriteLine("\nPROOF — placement dependency (_shared/DetectorModel.cs + 
           idx.Enable.Tracked < idx.History.Count && idx.Enable.Latest(H(1)).Plugin == -1 && idx.Enable.Latest(H(1)).Parent is null,
           $"{idx.Enable.Tracked:N0} of {idx.History.Count:N0} refs carry a statement");
     Check("dep-synth: the placement count is the written one — nothing is silently dropped by the extraction",
-          idx.History.Count == 131, $"{idx.History.Count} refs in the history");  // 41 (2026-09-03) + Q32's 54 + Q33's 8 + Q34's 28
+          idx.History.Count == 152, $"{idx.History.Count} refs in the history");  // 41 (2026-09-03) + Q32's 54 + Q33's 8 + Q34's 28 + Q35's 21
     // -------------------------------------------------------------------------------------------
     // Q34 — a deletion followed by a later restoration. Three identities that the old bookkeeping conflated:
     // the last plugin to CHANGE a placement, the last plugin to DELETE, and the record the view actually selects.
@@ -1436,6 +1590,116 @@ Console.WriteLine("\nPROOF — placement dependency (_shared/DetectorModel.cs + 
            && revB.Reason != DependencyBlocker.HostDeleted,
               $"A {revA.Reason}, B {revB.Verdict}");
     }
+    // -------------------------------------------------------------------------------------------
+    // Q35 — a dependent with NO VALID PLACEMENT BASELINE in its edge author's view. Every expectation below was
+    // written from the fixture into
+    // _claude/runs/2026-09-07-authoring-baseline-dependent-deletion/manifests/EXPECTED-CASES.md before the code ran,
+    // together with the measured verdicts the OLD rule gave each arm, which are named in the checks.
+    // -------------------------------------------------------------------------------------------
+    Check("dep-q35: the fixture built the shape at all — records carry the Deleted flag over INTACT placement data",
+          q35Marked == 9 && q35cMarked == 1 && q34Marked == 1
+       && idx.Touchers[D(90)].Contains(1) && idx.History.Of(D(90))!.Any(sn => sn.Plugin == 1 && sn.Deleted)
+       && idx.Touchers[D(98)].Contains(3),
+          $"{q35Marked} in A, {q35cMarked} in C, {q34Marked} in B; A contributes Dep90's snap and it is a deletion");
+    // Q34's control, repaired: it is named "deleted with its placement RETAINED" and must actually retain one, with a
+    // stripped deletion beside it so the two shapes stay distinguishable.
+    Check("dep-q34: the retained-placement deletion really retains its placement, and the stripped control really strips it",
+          idx.Touchers[H(73)].Contains(2) && idx.History.Of(H(73))!.Any(sn => sn.Plugin == 2 && sn.Deleted)
+       && !idx.Touchers[H(72)].Contains(2) && !idx.History.Of(H(72))!.Any(sn => sn.Plugin == 2)
+       && V(73).Reason == DependencyBlocker.HostDeleted && V(72).Reason == DependencyBlocker.HostDeleted,
+          $"H73 snaps {string.Join(", ", idx.History.Of(H(73))!.Select(sn => $"p{sn.Plugin}{(sn.Deleted ? " del" : "")}"))}"
+        + $"; H72 snaps {string.Join(", ", idx.History.Of(H(72))!.Select(sn => $"p{sn.Plugin}{(sn.Deleted ? " del" : "")}"))}");
+    // The RECORD view always selects the author's own record — Record appends the author to Touchers whether or not
+    // PlacementHistory keeps its snap, so this holds for EVERY row in the population, the round-2 arms included.
+    Check("dep-q35: the RECORD view always selects the author's own record, snap kept or dropped",
+          idx.Deletions.LastEligible(D(90), 1, closure) == 1 && idx.Deletions.ProviderAt(D(90), 1) == 1
+       && idx.Deletions.LastEligible(D(98), 3, closure) == 3
+       && R32(90).Edge.Author == 1 && R32(98).Edge.Author == 3,
+          $"Dep90 author {R32(90).Edge.Author} lands on {idx.Deletions.LastEligible(D(90), 1, closure)}; "
+        + $"Dep98 author {R32(98).Edge.Author} lands on {idx.Deletions.LastEligible(D(98), 3, closure)}");
+    // The PLACEMENT view does NOT. It is usually the author's own deleted snap...
+    Check("dep-q35: the placement view is USUALLY the author's own deleted snap",
+          R32(90).DepThen!.Value.Plugin == 1 && R32(90).DepThen!.Value.Deleted,
+          $"depThen by plugin {R32(90).DepThen!.Value.Plugin} deleted {R32(90).DepThen!.Value.Deleted}");
+    Check("dep-q35: restored where it stood by an UNRELATED plugin, host moved -> WITHHELD (was Unjudgeable/DependentMovedByThirdParty)",
+          V(90).Reason == DependencyBlocker.DependentDeletedInAuthorView && R32(90).DependentDeletedThen
+       && !R32(90).Facts.DependentDeleted && R32(90).Facts.HostMoved > 299f, W(90));
+    Check("dep-q35: restored at a DIFFERENT position -> WITHHELD, and the movement history and the restorer stay visible and unchanged",
+          V(91).Reason == DependencyBlocker.DependentDeletedInAuthorView && idx.History.Of(D(91))!.Count == 3
+       && idx.History.Of(D(91))![^1].Plugin == 3 && MathF.Abs(idx.History.Of(D(91))![^1].Pos.X - 91210f) < 0.01f,
+          $"{W(91)} | {idx.History.Of(D(91))!.Count} steps, last by plugin {idx.History.Of(D(91))![^1].Plugin}");
+    Check("dep-q35: restored by the MOVER'S OWN SIDE -> WITHHELD, not MovedTogether — the re-placement was compared against nothing",
+          V(92).Reason == DependencyBlocker.DependentDeletedInAuthorView
+       && R32(92).Facts.DependentRePlaced && R32(92).Facts.DependentRePlacedByMoverSide, W(92));
+    Check("dep-q35: host and dependent in DIFFERENT SPACES in that snap -> WITHHELD, not CrossCell — the ordering proof",
+          V(93).Reason == DependencyBlocker.DependentDeletedInAuthorView && !R32(93).Facts.SameSpaceAtAuthoring, W(93));
+    Check("dep-q35: the gate precedes the movement test — the author is its own mover, so the old rule called this INTACT",
+          V(94).Reason == DependencyBlocker.DependentDeletedInAuthorView && R32(94).Edge.Author == 1
+       && R32(94).Mover == 1 && R32(94).Facts.HostMoved < 0.01f, W(94));
+    Check("dep-q35: TWO AUTHORS, ONE HOST — A's view deletes the dependent (withheld); C's view is live (judged LEFT BEHIND)",
+          V(94).Reason == DependencyBlocker.DependentDeletedInAuthorView && R32(94).Edge.Author == 1
+       && V(95).Verdict == DependencyVerdict.LeftBehind && R32(95).Edge.Author == 3 && !R32(95).DependentDeletedThen,
+          $"A: {W(94)} | C: {W(95)}");
+    Check("dep-q35: deleted in the author's view AND STILL DELETED at the winner -> DEPENDENT REMOVED, unchanged",
+          V(96).Verdict == DependencyVerdict.DependentRemoved && R32(96).DependentDeletedThen && R32(96).Facts.DependentDeleted, W(96));
+    Check("dep-q35: CONTROL — a dependent nobody ever deleted, host moved -> LEFT BEHIND with its offset still measured",
+          V(97).Verdict == DependencyVerdict.LeftBehind && !R32(97).DependentDeletedThen
+       && MathF.Abs(R32(97).AuthoredOffset - MathF.Sqrt(10f * 10f + 40f * 40f)) < 0.01f,
+          $"{W(97)} | offset {R32(97).AuthoredOffset:0.00}u");
+    Check("dep-q35: a withheld row reports NO authored offset — a number there would imply a reading of a deleted record",
+          new[] { 90, 91, 92, 93, 94, 98, 99, 100 }.All(n => float.IsNaN(R32(n).AuthoredOffset))
+       && !float.IsNaN(R32(96).AuthoredOffset) && !float.IsNaN(R32(97).AuthoredOffset),
+          $"withheld: {string.Join(", ", new[] { 90, 91, 92, 93, 94, 98, 99, 100 }.Select(n => $"Dep{n} {R32(n).AuthoredOffset}"))}; "
+        + $"DependentRemoved keeps its {R32(96).AuthoredOffset:0.00}u");
+    Check("dep-q35: the withheld row carries its evidence — which plugin's record the author's view selected, and the statements",
+          R32(90).DependentRecordProviderThen == 1 && R32(97).DependentRecordProviderThen == -1
+       && idx.Deletions.Of(D(90)) is { Count: 2 } q35st && q35st[0] == (1, true) && q35st[1] == (3, false),
+          $"Dep90 provider {R32(90).DependentRecordProviderThen}, statements "
+        + (idx.Deletions.Of(D(90)) is { } q35log ? string.Join(" -> ", q35log.Select(e => $"p{e.Plugin}{(e.Deleted ? " deletes" : " restores")}")) : "(none)"));
+    // ...but NOT always, and the difference is the sharpest form of the defect. PlacementHistory drops a snap that
+    // repeats the previous one, and Snap.SameAs does not consider the edge set, so an author that repeats an earlier
+    // plugin's deleted placement while ADDING the edge leaves no snap and AsSeenBy falls back to an older LIVE
+    // position. This is the case an earlier round wrongly ruled out, and the one the old rule called LeftBehind.
+    Check("dep-q35: ...but an author that REPEATS an earlier deleted placement leaves no snap, and the view falls back to a LIVE one",
+          R32(98).Edge.Author == 3 && R32(98).DepThen!.Value.Plugin == 0 && !R32(98).DepThen!.Value.Deleted
+       && !idx.History.Of(D(98))!.Any(sn => sn.Plugin == 3) && R32(98).DependentDeletedThen,
+          $"author 3, depThen by plugin {R32(98).DepThen!.Value.Plugin} deleted {R32(98).DepThen!.Value.Deleted}; "
+        + $"snaps {string.Join(", ", idx.History.Of(D(98))!.Select(sn => $"p{sn.Plugin}{(sn.Deleted ? " del" : "")}"))}");
+    Check("dep-q35: that row's re-placement test compares EQUAL, so the old rule read LEFT BEHIND — withheld now",
+          V(98).Reason == DependencyBlocker.DependentDeletedInAuthorView && !R32(98).Facts.DependentRePlaced
+       && R32(98).Facts.HostMoved > 299f && !R32(98).Facts.DependentDeleted, W(98));
+    Check("dep-q35: where the author's own snap SURVIVES, the re-placement test compares unequal — the two shapes are distinct",
+          new[] { 90, 91, 92, 93, 94 }.All(n => R32(n).Facts.DependentRePlaced),
+          "the author's own snap carries the Deleted flag and the winner's does not, so SameAs cannot hold on those arms");
+    Check("dep-q35: the gate BEATS HostStateUnresolved through ingestion — a host whose enable parent nothing places",
+          V(100).Reason == DependencyBlocker.DependentDeletedInAuthorView && R32(100).Facts.HostStateUnresolved
+       && !R32(100).HostStateNow.Resolved && !R32(100).HostStateThen.Resolved,
+          $"{W(100)} | chain resolved: then {R32(100).HostStateThen.Resolved} now {R32(100).HostStateNow.Resolved}");
+    Check("dep-q35: the gate BEATS NoAuthoringView through ingestion — a host the author's view never sees placed",
+          V(99).Reason == DependencyBlocker.DependentDeletedInAuthorView && float.IsNaN(R32(99).Facts.HostMoved)
+       && R32(99).HostThen is null && R32(99).Facts.HostResolved, W(99));
+    Check("dep-q35: the gate fires on exactly the eight arms it is for, and on no other row in the whole order",
+          rows.Values.Count(x => x.V.Reason == DependencyBlocker.DependentDeletedInAuthorView) == 8
+       && new[] { 90, 91, 92, 93, 94, 98, 99, 100 }.All(n => V(n).Reason == DependencyBlocker.DependentDeletedInAuthorView),
+          $"{rows.Values.Count(x => x.V.Reason == DependencyBlocker.DependentDeletedInAuthorView)} rows withheld");
+    // The same host asked from two authors, in both query orders, on a fresh index — the baseline views must not leak.
+    {
+        var fresh35 = new DependencyIndex();
+        for (int p = 0; p < paths.Length; p++)
+        {
+            using var mod = SkyrimMod.CreateFromBinaryOverlay(paths[p], release);
+            fresh35.Ingest(p, mod);
+        }
+        var e95 = idx.Edges.First(x => x.Dependent == D(95) && x.Kind == HostEdgeKind.EnableParent);
+        var e94 = idx.Edges.First(x => x.Dependent == D(94) && x.Kind == HostEdgeKind.EnableParent);
+        var rev95 = DetectorModel.PlacementDependency(fresh35.Judge(e95, closure).Facts, T);   // C's view FIRST this time
+        var rev94 = DetectorModel.PlacementDependency(fresh35.Judge(e94, closure).Facts, T);
+        Check("dep-q35: reversing the query order gives each author the same answer — no leakage between baselines",
+              rev94.Reason == DependencyBlocker.DependentDeletedInAuthorView && rev95.Verdict == DependencyVerdict.LeftBehind
+           && rev95.Reason == DependencyBlocker.None,
+              $"A {rev94.Reason}, C {rev95.Verdict}");
+    }
+
     Check("dep-q32: BOS OFF — the two BOS-arm hosts are plainly present and their rows are judged",
           V(60).Verdict == DependencyVerdict.LeftBehind && V(61).Verdict == DependencyVerdict.LeftBehind
        && idx.Enable.BosReflaggedUnderParent.Count == 0, $"{W(60)} | {W(61)}");

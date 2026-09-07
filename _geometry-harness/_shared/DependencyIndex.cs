@@ -231,19 +231,24 @@ public sealed class DeclaredEnableHistory
 /// <param name="HostDeletedThen">the host's record is a deletion in the edge author's own view (Q34).</param>
 /// <param name="HostDeletedNow">…and in the winning order. The two are reported apart so a row can say WHICH view saw
 /// the deletion; <see cref="DetectorModel.DependencyFacts.HostDeleted"/> is their disjunction.</param>
-/// <param name="DependentDeletedThen">the dependent's record is a deletion in the edge author's view. Reported only —
-/// the DependentRemoved verdict is the winner's reading, because "nothing left behind" is a claim about the shipped order.</param>
+/// <param name="DependentDeletedThen">the dependent's record is a deletion in the edge author's view. Since Q35 this is
+/// also the fact behind <see cref="DependencyBlocker.DependentDeletedInAuthorView"/>: the author's view then holds no
+/// placement to compare against, so the row is withheld. The DependentRemoved verdict is still the WINNER's reading
+/// alone, because "nothing left behind" is a claim about the shipped order and needs no baseline.</param>
 /// <param name="HostRecordProviderThen">the plugin whose record supplied the host's deletion state in the author's view,
 /// −1 when no statement did (the plain default). Not necessarily the last plugin the view can see: a plugin that forwards
 /// a statement unchanged logs nothing of its own, and the value then comes from an earlier one.</param>
 /// <param name="HostRecordProviderNow">the same for the winning order.</param>
+/// <param name="DependentRecordProviderThen">the plugin whose record supplied the DEPENDENT's deletion state in the edge
+/// author's view, −1 when no statement did — the evidence a row withheld under
+/// <see cref="DependencyBlocker.DependentDeletedInAuthorView"/> carries, the same shape as the host's (Q35).</param>
 public sealed record DependencyRow(HostEdge Edge, DetectorModel.DependencyFacts Facts,
                                    Snap? HostThen, Snap? HostNow, Snap? DepThen, Snap? DepNow,
                                    int Mover, FormKey? HostBase, DependentClass Dependent,
                                    float AuthoredOffset, bool DependentTouchedByMoverSide,
                                    EnableResolution HostStateThen, EnableResolution HostStateNow,
                                    bool HostDeletedThen, bool HostDeletedNow, bool DependentDeletedThen,
-                                   int HostRecordProviderThen, int HostRecordProviderNow);
+                                   int HostRecordProviderThen, int HostRecordProviderNow, int DependentRecordProviderThen);
 
 public sealed class DependencyIndex
 {
@@ -384,6 +389,21 @@ public sealed class DependencyIndex
         var hostThen = History.AsSeenBy(host, e.Author, closure);
         var depThen = History.AsSeenBy(dep, e.Author, closure);
         var depNow = History.Winning(dep);
+        // The dependent's gate is the WINNER's record alone: "nothing left behind" is a claim about the order that
+        // ships, so a dependent the author's view saw deleted but a later plugin restored is not DependentRemoved.
+        // Q35: but that view then holds no PLACEMENT baseline either. An edge is only extracted from a record that
+        // carried one, so the author is always in Touchers and the RECORD view always selects its own record — which
+        // makes depDeletedThen true exactly when the author deleted the reference while keeping its placement data
+        // and the edge. The PLACEMENT view is not so tidy, and the difference matters: usually depThen is that same
+        // deleted record's leftover position, but History.Record drops a snap that repeats the previous one and
+        // Snap.SameAs ignores the edge set, so an author that repeats an EARLIER plugin's deleted placement while
+        // adding the edge leaves no snap and AsSeenBy falls back to an older LIVE position its own record
+        // contradicts. In that shape depNow can equal depThen and the old rule read LeftBehind. Either way the
+        // authored offset below is NOT measured off it and the rule withholds the row (DetectorModel decides; the
+        // deleting record's provider rides on the row as the evidence).
+        bool depDeleted = Deletions.AtWinner(dep);
+        bool depDeletedThen = Deletions.InView(dep, e.Author, closure);
+        bool depBaselineInvalid = depDeletedThen && !depDeleted;
 
         bool views = hostThen is not null && hostNow is not null && depThen is not null && depNow is not null;
         float hostMoved = views ? PlacementHistory.Dist(hostThen!.Value.Pos, hostNow!.Value.Pos) : float.NaN;
@@ -392,7 +412,7 @@ public sealed class DependencyIndex
         // persistent host beside a temporary dependent "different cells".
         bool sameSpaceThen = views && hostThen!.Value.Space == depThen!.Value.Space;
         bool hostChangedSpace = views && hostNow!.Value.Space != hostThen!.Value.Space;
-        float authoredOffset = views && sameSpaceThen ? PlacementHistory.Dist(hostThen!.Value.Pos, depThen!.Value.Pos) : float.NaN;
+        float authoredOffset = views && sameSpaceThen && !depBaselineInvalid ? PlacementHistory.Dist(hostThen!.Value.Pos, depThen!.Value.Pos) : float.NaN;
         // Q32: whether the host is THERE when the cell loads, resolved through its XESP chain in EACH compared
         // configuration — the edge author's view and the winning order — rather than read off its own checkbox,
         // which the engine ignores wherever a reference has a parent. Absent in either view withholds the row the
@@ -402,11 +422,6 @@ public sealed class DependencyIndex
         var stateNow = Enable.Winner(host);
         bool hostAbsent = views && (!stateThen.Enabled || !stateNow.Enabled);
         bool hostStateUnresolved = views && (!stateThen.Resolved || !stateNow.Resolved);
-        // The dependent's gate is the WINNER's record alone: "nothing left behind" is a claim about the order that
-        // ships, so a dependent the author's view saw deleted but a later plugin restored is judged by the ordinary
-        // placement and author rules. Its author-view reading is reported beside the row, not folded into it.
-        bool depDeleted = Deletions.AtWinner(dep);
-        bool depDeletedThen = Deletions.InView(dep, e.Author, closure);
         int mover = hostNow?.Plugin ?? -1;
         bool depRePlaced = views && !depNow!.Value.SameAs(depThen!.Value);
         bool byMoverSide = views && (depNow!.Value.Plugin == mover || closure[depNow.Value.Plugin].Contains(mover));
@@ -425,10 +440,11 @@ public sealed class DependencyIndex
         bool hostIsPlayer = host.ID == 0x14;
 
         var facts = new DetectorModel.DependencyFacts(e.Kind, hostIsPlayer, hostResolved, hostDeleted, hostAbsent, hostStateUnresolved,
-            sameSpaceThen, hostChangedSpace, hostMoved, depDeleted, depRePlaced, byMoverSide, hostClass);
+            sameSpaceThen, hostChangedSpace, hostMoved, depDeleted, depDeletedThen, depRePlaced, byMoverSide, hostClass);
         return new DependencyRow(e, facts, hostThen, hostNow, depThen, depNow, mover, hostBase, depClass, authoredOffset, depTouched,
                                  stateThen, stateNow, hostDeletedThen, hostDeletedNow, depDeletedThen,
                                  Deletions.ProviderAt(host, Deletions.LastEligible(host, e.Author, closure)),
-                                 Deletions.ProviderAt(host, int.MaxValue));
+                                 Deletions.ProviderAt(host, int.MaxValue),
+                                 Deletions.ProviderAt(dep, Deletions.LastEligible(dep, e.Author, closure)));
     }
 }

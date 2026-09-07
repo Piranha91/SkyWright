@@ -560,13 +560,26 @@ public static class DetectorModel
     /// "nothing left behind" is a claim about the order that ships, so a dependent some earlier plugin deleted and a
     /// later one restored is judged by the ordinary placement and author rules (Q34). Its author-view reading rides on
     /// <c>DependencyRow.DependentDeletedThen</c> for the report.</param>
+    /// <param name="DependentDeletedInAuthorView">the dependent's record is a DELETION in the edge author's own view
+    /// (Q35, 2026-09-07). An edge is extracted only from a record that CARRIED a placement, so the author is always in
+    /// the toucher list and the RECORD view always selects its own record — which makes this true exactly when the
+    /// author deleted the reference while keeping its placement data and the edge (a shape real tools write and
+    /// Mutagen's own writer normalises away). The author's view then holds no placement to compare against, in either
+    /// of two ways. Usually the snap it selects is that same deleted record's leftover position, which the engine never
+    /// reads. But <see cref="PlacementHistory"/> drops a snap that repeats the previous one and
+    /// <see cref="Snap.SameAs"/> does not consider the edge set, so an author that repeats an EARLIER plugin's deleted
+    /// placement while adding the edge leaves no snap at all, and the view falls back to an older LIVE position its own
+    /// record contradicts. Either way the same-space test, the authored offset and the re-placement comparison rest on
+    /// a placement that view does not have — and in the second shape the re-placement comparison can come back EQUAL,
+    /// so the old rule returned LeftBehind. The row is withheld — UNLESS the winning order deletes the dependent too,
+    /// where "nothing left behind" is a claim about the shipped order that needs no baseline at all.</param>
     /// <param name="DependentRePlaced">the dependent's winning placement differs from the author's view.</param>
     /// <param name="DependentRePlacedByMoverSide">…and it was set by the host's mover or a plugin downstream of it.</param>
     /// <param name="Host">what the host is: something to rest on or hang from, a marker, or something else.</param>
     public readonly record struct DependencyFacts(
         HostEdgeKind Kind, bool HostIsPlayer, bool HostResolved, bool HostDeleted, bool HostAbsent, bool HostStateUnresolved,
         bool SameSpaceAtAuthoring, bool HostChangedSpace, float HostMoved,
-        bool DependentDeleted, bool DependentRePlaced, bool DependentRePlacedByMoverSide, HostClass Host);
+        bool DependentDeleted, bool DependentDeletedInAuthorView, bool DependentRePlaced, bool DependentRePlacedByMoverSide, HostClass Host);
 
     /// <summary>The placement-dependency rule, records-only (frozen 2026-09-01 from the handoff of 2026-09-03).
     /// Piranha's two classes — apples left in the air when the table moves (stranded support), a sconce left
@@ -576,8 +589,9 @@ public static class DetectorModel
     /// side without the other side following.
     ///
     /// <para>Per edge, in order: a host that is the player, or that this order cannot place, or that the winning order
-    /// or the edge author's own view has deleted, or whose authoring view is missing, is <b>Unjudgeable</b> by that
-    /// reason. Then the enable chain: a host whose
+    /// or the edge author's own view has deleted, or a DEPENDENT the author's own view has deleted while the winner
+    /// still has it (Q35 — that view holds no placement to compare against), or whose authoring view is missing, is
+    /// <b>Unjudgeable</b> by that reason. Then the enable chain: a host whose
     /// EFFECTIVE state cannot be resolved in one of the two compared views is <b>Unjudgeable</b> too, and that gate
     /// comes BEFORE the movement test on purpose — an <b>Intact</b> verdict is a clean answer, and a clean answer may
     /// not rest on the resolver's fallback (Q32). A host that stayed within <paramref name="threshold"/>
@@ -601,6 +615,14 @@ public static class DetectorModel
             return (DependencyVerdict.Unjudgeable, DependencyBlocker.HostUnresolved, "the host reference has no placement anywhere in this order");
         if (f.HostDeleted)
             return (DependencyVerdict.Unjudgeable, DependencyBlocker.HostDeleted, "the host's record is a deletion in the winning order or in the edge author's own view — no pair of positions to compare");
+        // Q35: the dependent's side of the same question the line above asks about the host — and it sits here, ahead
+        // of every gate that would read a position, for the same reason Q32's state gate sits ahead of Intact: no
+        // verdict, clean or withheld, may rest on a value that is not a reading. An Unjudgeable/CrossCell decided by a
+        // space read off a deleted record is not a clean withholding either. It does NOT fire when the winner deletes
+        // the dependent too: "nothing left behind" needs no baseline, so DependentRemoved below is untouched.
+        if (f.DependentDeletedInAuthorView && !f.DependentDeleted)
+            return (DependencyVerdict.Unjudgeable, DependencyBlocker.DependentDeletedInAuthorView,
+                    "the dependent's record is a deletion in the edge author's own view while the winning order still has it — that view has no placement to compare against");
         if (float.IsNaN(f.HostMoved))
             return (DependencyVerdict.Unjudgeable, DependencyBlocker.NoAuthoringView, "the edge's author and its masters contributed no position for the host or the dependent");
         if (f.HostStateUnresolved)
@@ -1546,10 +1568,14 @@ public enum DependencyVerdict { Intact, MovedTogether, LeftBehind, DependentRemo
 /// host's PLACEMENT (no plugin places it at all); <c>HostDeleted</c> is about the RECORD the compared views select
 /// (Q34) — a missing record, a deleted record and an unresolved chain are three different answers;
 /// <c>HostStateUnresolved</c> is about its ENABLE CHAIN in one of the two
-/// compared views — the two stay separate on purpose. <c>HostDisabled</c> keeps its name for the tallies and JSON keys
+/// compared views — the two stay separate on purpose. <c>DependentDeletedInAuthorView</c> (Q35) is the same record
+/// question on the DEPENDENT's side: its record is a deletion in the author's own view while the winning order still
+/// has it, so that view holds no placement to compare against — kept apart from <c>NoAuthoringView</c> (no record
+/// contributed a position at all) and from <c>DependentMovedByThirdParty</c> (a real re-placement) precisely because
+/// a missing baseline, an absent one and a moved one are three different answers. <c>HostDisabled</c> keeps its name for the tallies and JSON keys
 /// that have always carried it, and since Q32 (2026-09-06) means the effective state leaves the host absent when the cell
 /// loads, not that its own initially-disabled checkbox is ticked.</summary>
-public enum DependencyBlocker { None, HostIsPlayer, HostUnresolved, HostDeleted, NoAuthoringView, HostDisabled, CrossCell, DependentMovedByThirdParty, HostStateUnresolved }
+public enum DependencyBlocker { None, HostIsPlayer, HostUnresolved, HostDeleted, DependentDeletedInAuthorView, NoAuthoringView, HostDisabled, CrossCell, DependentMovedByThirdParty, HostStateUnresolved }
 
 /// <summary>What a dependent is, per <see cref="DetectorModel.ClassifyDependent"/>. A LeftBehind row counts for
 /// 4.5/4.6 only when the dependent is Physical AND the host is <see cref="HostClass.Physical"/>.</summary>
