@@ -117,12 +117,10 @@ findings they demonstrate) lives with that instance, not here.
   pixel a drawn plane covers reports the plane first, then what the depth buffer says is behind it.
   Off by default, and a render without it is byte-identical to one made before the layer existed
   (verified on an interior and an exterior). `--occlusion off|on|diff` previews what the planes
-  CULL from this eye: `on` leaves out every ref that lies wholly behind a plane, `diff` draws
-  everything and tints those refs red so the change is visible in one frame; the caption names
-  the count and the console names the planes doing the culling. `--planes-report` lists every
-  plane — identity, provenance, what it culls from this eye and whether any of that is visible,
-  the nearest solid collision behind it within `--planes-reach N` u (default 256) — to the console
-  and as `<cell>-planes.json`.
+  predict under an explicit `--occlusion-rule FILE`: `on` removes predicted-culled shapes and
+  `diff` tints them. `--planes-report` writes per-view research JSON with source bounds,
+  same-shape raster visibility and explicit coverage; no rule means unassessed. The nearby
+  collision listing is supporting evidence. See the research limitations below.
 - **Placed NPC actors:** `--npc FORMKEY[@X,Y,Z[,HEADING]][=label]` (repeatable; implies textured
   mode) renders the NPC's actual character model — FaceGen head, skinned body, and the outfit the
   RUNTIME will dress it in — at its winning placement or an explicit position (see *Placed NPC
@@ -1360,117 +1358,59 @@ not, so `L` is a visibility flip like `N`.
 audit's question, and the audit needs the game's own cull rule (measured below) plus a floor and a
 control this instrument does not have.
 
-### The preview: `--occlusion off|on|diff`
+### Research preview and report
 
-What the planes would cull from THIS eye, drawn: `on` leaves the culled refs out (the picture
-the engine would draw if the rule below is the engine's), `diff` draws everything and tints the
-culled refs red, so the change is visible in one frame. In the window `O` cycles the three and the
-answer is re-evaluated as the eye moves; the bar carries the same three as a segment. The caption
-names the count, the console names the planes doing the culling (top twelve, with how many
-straddlers each kept), and a `Box`-kind plane's culls are counted apart.
+The preview is a **research implementation, pending acceptance**. `--occlusion-rule FILE` supplies an
+explicit JSON rule with `identity`, `minimumEyeDistance`, `maximumAbsNormalZ`, `frozen` and
+nonempty `evidence` references. The numeric limits must be finite and in range. They describe
+the supplied evidence scope; the file's `frozen` label is not independent validation. With no
+rule, engine culling is unassessed. Box face behaviour is currently unassessed. The plane layer
+itself remains available without a rule.
 
-**The rule, as modelled** — stated so the game could be asked whether it is true; what it
-answered follows:
+The geometry primitive tests each source NIF shape's stored sphere against the finite
+PortalBox shadow's surface and four side half-spaces. It applies below-root NIF node transforms
+and the reference placement, retaining the original source block, raw bound, applied chain,
+asset hash and resulting world sphere. It does not replace the sphere with an uploaded-vertex
+box. Invalid bounds, ambiguous shape identities, unsupported poses and removed geometry retain
+explicit reasons. Root-transform handling follows the existing placed-geometry convention.
 
-1. The eye is on either side of the plane — two-sided.
-2. The plane's SHADOW from the eye is the convex volume behind the plane's own surface bounded by
-   the four planes through the eye and the quad's four edges.
-3. A ref whose world AABB — of exactly the triangles the scene uploaded for it, post-cull — lies
-   entirely inside the shadow is culled. A ref that reaches into the shadow without being inside
-   it STRADDLES and is kept (counted per plane).
-4. A `Box` plane is tested face by face: each eye-facing face casts its own shadow.
-5. Never culled: terrain, water, the navmesh overlay, routes, grid, NPC actors, props, the planes
-   themselves — they are the map, not the engine's scene.
-6. A plane whose surface lies within 12 u of the eye casts no shadow (the near exemption, measured
-   below; per face for a Box).
+`--occlusion on` removes the meshes belonging to predicted-culled shapes; `diff` tints those
+meshes. Other shapes on that reference remain drawn. Interactive `O` reevaluates the prediction
+at the current eye, but does not supply a captured visibility measurement. The preview-only
+`VP_OCCL_TINT_ALL` canary never participates in report judgments.
 
-**The rule, as measured** (2026-09-04; one station: a PortalBox a city overhaul placed in the void
-under an interior it rebuilt 1,000 u higher, with a lighting mod's chandelier and slab 820 u behind
-it and the vanilla shell pieces the overhaul had disabled in place as further probes, each toggled
-by its runtime FormID from DevBench; sixteen free-camera passes, and every reading below is paired
-with a plane-off control at the same camera):
+`--planes-report` writes one `<render-stem>-planes.json` per rendered view and refuses to replace
+existing reports or their evidence directory. Every candidate shape is retained in JSON; console
+shortlists are not the candidate population. Each shape keeps every predicting plane, while
+affected references are counted uniquely. The report is still research, not a completed defect
+classifier or a compatibility attribution.
 
-- **Two-sided.** From the east the plane hid the chandelier behind it; from the west it hid a shell
-  piece behind it; disabling the plane showed each, re-enabling hid it again. Rules 1 and 2 hold.
-- **The rectangle is the record's full extent.** From 142 u east, a ray crossing inside the
-  rectangle culled the chandelier; with the eye lowered so that every ray to it crossed 30–50 u
-  below the rectangle's bottom edge, the chandelier stayed drawn. A reading of `Bounds` as
-  half-extents (a rectangle twice the size) is refuted. Rule 2's edges hold.
-- **The whole box must be beyond.** A wall whose box reached 199 u beyond the plane and 59 u short
-  of it, seen along a ray crossing 188 u inside the rectangle, was drawn with the plane on, off, and
-  on again. Rule 3's straddle clause holds.
-- **The near exemption.** From 12 u in front of the plane, ray inside the rectangle, the chandelier
-  was drawn; from 42 u it was culled, and from 92, 142, 242 and 500 u. Rule 6 was added for this,
-  at the measured lower bound.
-- **A `Box` plane culls.** A storage room's contents behind one were gone from a camera outside it
-  and appeared the moment the Box was disabled. Rule 4's per-face shape is not measured beyond that.
-- **Runtime disable and enable take effect** within a frame; no cell reload.
-- **Not in the model:** the candle-flame effect refs on the culled chandelier stayed drawn while its
-  mesh was gone — effects are not culled with the mesh they sit on. And the console's `ToggleOcclusion`
-  (`tocc`, "toggle occlusion query for geometry") does not touch plane culling; the build exposes no
-  plane toggle, and `AddOcclusionPlane` was not tried — the per-ref disable is the route.
-- **A limit on the measurement, said plainly:** the game evaluated the planes only while the free
-  camera held a state that alternated between launches of the driving script and never flipped
-  within one — when it was off, nothing culled, plane on or off, and a freecam off/on with 20 s
-  between re-armed it every time it was tried. The likeliest reading is the camera's room membership
-  (a teleported free camera keeps the room it was last in), so a player standing in a room is
-  presumed to see the planes live; that is not measured. Interior fog hid an unlit mesh beyond about
-  1,400 u from every camera, so every reading farther than that was discarded, plane on or off.
-- **What a probe may be:** a ref the cell already has. A `MoveTo` on a movable static moved its
-  record and not its 3D; a static placed at runtime never rendered in the void. Twelve of the
-  sixteen passes were spent learning that.
+Visibility uses that **same shape's** isolated rasterized depth against the unculled scene from
+the same camera and state. Both passes use the same single-sample layout and exact depth
+comparison. Green mask samples are visible and red samples hidden; counts describe that finite
+raster only. A culled rear shape entirely hidden by a drawn front shape is healthy. A hidden
+centre cannot suppress visible edge samples. The scene depth and per-shape masks are saved.
+The finite per-view draw budget is explicit; exhaustion remains unassessed. Off-mode colour
+uses its original rendering path after mesh visibility is restored.
 
-**Why the picture is the point.** A plane that now culls space the player can see into — the mod
-moved architecture out from behind it — shows as a hole in `on` and a red wash in `diff` where the
-player would see the world pop out; a plane left standing for architecture that is no longer there
-culls nothing, which is a listing's job to name. The preview is applied BEFORE the depth prepass
-and the adaptive nav colour, so every pass sees the same scene.
+Coverage names missing/unsupported geometry, alpha/effect materials, clipping, unsupported
+poses, unpinned random state, interactive views and camera/rule limits. Missing texture fallbacks
+are currently printed by the renderer; texture/material asset bytes are not yet fingerprinted
+in report input identity. These limitations preclude a claim of complete game appearance.
+The report records camera, state, source bounds, record/mesh/assembly hashes and evidence paths.
+Worklist `state` overrides reset for each shot. `control`, `viewpointKind` and `viewpointEvidence`
+label constructed controls and the declared viewpoint evidence; a declaration does not certify
+player reachability. A sampled view cannot certify a whole cell or mod clear.
 
-**Expect no change from a street-level eye, and check that it is honest.** A well-placed plane's
-shadow lies inside the shadow of the wall it stands in, so from any eye the wall hides, the plane's
-cull changes no pixel — on the two Solitude stations rendered 2026-09-04 the `on` and `diff` frames
-were pixel-identical to the plain render below the caption, with hundreds of refs culled and
-hundreds of them inside the frame. That is indistinguishable from a preview that failed, so the
-console says how many culled refs have their centre in the frame, and `VP_OCCL_TINT_ALL=1` is
-the positive control: every ref counts as culled, `diff` comes out washed red and `on` comes out
-empty (measured: 80 % of pixels change in each, the rest being sky).
+The nearby-collision listing remains supporting evidence: a 5x5 ray sample with the existing
+record-OBND broad phase and `--planes-reach` distance. No hit establishes neither absence of
+architecture nor a visible defect. Provenance identifies record authorship, never blame or
+repair credit. No automatic repair is authored.
 
-**Cost.** Dozens of planes against thousands of boxes, five dot products per plane per box: a few
-million operations, re-run only when the eye moves.
-
-### The listing: `--planes-report` (and `--planes-reach N`, default 256)
-
-One entry per plane in the target cell (+ ring), in FormKey order, to the console and as
-`<out>/<cell>-planes.json`: identity (FormKey, runtime FormID), kind and extent, position,
-rotation, provenance with the whole override chain; **what it culls from the shot's eye** — the
-count, how many straddle its shadow, the three largest by box volume, and how many of the culled
-refs are VISIBLE from that eye; and **the nearest solid collision behind it**. Planes the scene
-drops (disabled by a mod, deleted) are listed after, with who did it. The summary line counts the
-planes that cull nothing, the planes that cull something visible, and the planes with nothing
-behind them.
-
-- **Visible** means: the ref's box is in the frame and the plain scene's depth at the ref's centre
-  pixel is no nearer than the near face of its box — nothing stands in front of it. Measured from
-  one extra draw of the untouched scene (static path only). A plane culling a visible ref from a
-  standing eye is the "culls what the player can see" shape; it is what the in-game cameras were
-  chosen by.
-- **Behind** means the far side from the eye: rays from a 5×5 lattice across the mid-quad (from the
-  far face, for a Box), along the plane's normal away from the eye, against the SOLID collision —
-  the layers an actor meets, `CollisionLayers.ActorSolid`, the same cut the route detectors make —
-  of every physical ref whose placed OBND box the swept reach touches. The nearest hit over the
-  lattice is the answer; `touching` is within 4 u; `none within N u` is the "left standing for
-  architecture that is no longer there" shape; and "no candidate box even reaches the swept volume"
-  is the same shape one step stronger. A candidate whose mesh carries no solid collision is counted
-  and said, never silently treated as empty space.
-- **A listing, never a verdict.** Whether "culls nothing" or "nothing behind it" is a defect depends
-  on the game's cull rule — measured above — and on a floor and a control this file does not have. The audit that turns these rows into a class is the
-  handoff after; this is its raw material.
-
-First runs, 2026-09-04: a city overhaul's own interior planes included two standing 600 u below
-the floor of a room the mod had rebuilt higher up — they cull nothing and have nothing within
-reach behind them, the "left standing" shape, from the mod's own hand; a town overhaul's exterior
-planes were all `Box` kind, thirteen vanilla planes it moved and one it added, with solid
-collision 8–97 u behind twelve of them.
+The discarded whole-reference box predicate, sharp near-eye threshold and centre-pixel
+visibility decision are not operational guidance. Historical investigation belongs in the
+project's research corpus. The current bounded engine model, calibration and release acceptance
+remain pending; passing geometry or renderer fixtures alone does not establish them.
 
 ---
 

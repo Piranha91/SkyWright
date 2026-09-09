@@ -131,7 +131,11 @@ public sealed record WorklistShot(
     IReadOnlyList<float>? Feet = null,
     IReadOnlyList<string>? Doors = null,
     bool? Planes = null,
-    string? Occlusion = null);
+    string? Occlusion = null,
+    string? State = null,
+    string? ViewpointKind = null,
+    string? ViewpointEvidence = null,
+    bool Control = false);
 
 /// <summary>The shots that share one loaded cell — i.e. one load screen's worth of work.</summary>
 /// <param name="Cell">CellEditorID or FormID, the same string viewprobe takes as its first argument.</param>

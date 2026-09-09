@@ -118,7 +118,8 @@ sealed class CvSettings : ICharacterViewerSettings
 readonly record struct SceneRef(string MeshRelPath, Vec3 Position, Vec3 Rotation, float Scale, bool Highlight,
                                 bool Marker = false, FormKey RefKey = default, FormKey BaseKey = default,
                                 string? BaseEditorId = null, FormKey? BosRecordBase = null, string? BosLabel = null,
-                                bool BosRandom = false, int StateChange = 0, string? StateLabel = null)
+                                bool BosRandom = false, int StateChange = 0, string? StateLabel = null,
+                                bool Constructed = false)
 {
     public bool BosSwapped => BosRecordBase is not null;
     /// <summary>--state: +1 the flip brings this ref in, −1 it takes it out (drawn only in the diff view), 0 unchanged.</summary>
@@ -404,6 +405,8 @@ static class TexturedScene
         // preview is on — it is a few numbers per ref — and applied only when it is, so a default
         // render is untouched.
         var occl = new OcclusionState(planes);
+        bool needOcclusion = planeReport is not null || (planes.Count > 0 && (occlusionMode != "off" || interactive is not null));
+        var boundsCache = new Dictionary<string, (NifGeometryModel? Model, string Hash, string? Issue)>(StringComparer.OrdinalIgnoreCase);
         // The Base Object Swapper layer's paint: the swapped refs' meshes, tinted in `diff` (BosView.cs).
         var bosView = new BosViewState(bosMode);
         // The world state's paint: the refs the flip brought in and took out (StateView.cs).
@@ -412,8 +415,27 @@ static class TexturedScene
         foreach (var r in refs)
         {
             var ro = new RefOcclusion { Ref = r };
+            occl.Refs.Add(ro); // Missing and unsupported assets stay in the audit population.
             var rel = r.MeshRelPath.StartsWith("meshes", StringComparison.OrdinalIgnoreCase)
                 ? r.MeshRelPath : Path.Combine("meshes", r.MeshRelPath);
+            if (!boundsCache.TryGetValue(rel, out var source))
+            {
+                var boundPath = resolver.ResolveAssetPath(rel);
+                source = (null, "", "model asset missing");
+                if (needOcclusion && boundPath is not null)
+                {
+                    try
+                    {
+                        var bytes = File.ReadAllBytes(boundPath);
+                        var measured = NifGeometry.Measure(bytes);
+                        source = (measured.Model, Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(bytes)),
+                                  measured.Model is null ? "NIF geometry unreadable" : null);
+                    }
+                    catch (Exception ex) { source = (null, "", $"asset read failed: {ex.GetType().Name}: {ex.Message}"); }
+                }
+                boundsCache[rel] = source;
+            }
+            ro.Issue = source.Issue;
             if (!builtCache.TryGetValue(rel, out var built))
             {
                 built = null;
@@ -429,7 +451,7 @@ static class TexturedScene
                 }
                 builtCache[rel] = built;
             }
-            if (built is null || built.Count == 0) { missingMesh++; continue; }
+            if (built is null || built.Count == 0) { missingMesh++; ro.Issue ??= "renderer produced no geometry"; continue; }
 
             if (shapeDump is { Length: > 0 }
                 && rel.Contains(shapeDump, StringComparison.OrdinalIgnoreCase)
@@ -464,8 +486,21 @@ static class TexturedScene
                             ? cvv : null;
             foreach (var b in built)
             {
+                var matches = source.Model?.Shapes.Where(s => s.Name == b.ShapeName).ToArray();
+                var original = matches is { Length: 1 } && built.Count(s => s.ShapeName == b.ShapeName) == 1 ? matches[0] : null;
+                var part = new ShapeOcclusion { Name = b.ShapeName, AssetHash = source.Hash,
+                    Block = original?.BlockIndex ?? -1, Stored = original?.StoredBound,
+                    World = original?.StoredBound is { } sb ? SphereBound.Place(sb, r.Rotation, r.Scale, r.Position) : null,
+                    Issue = original is null ? "renderer shape cannot be uniquely joined to a NIF block"
+                        : original.BoundIssue ?? original.PoseIssue };
+                ro.Parts.Add(part);
+                if (r.Marker) part.Issue ??= "editor marker is not gameplay render geometry";
+                if (original is not null && (original.VertexCount != b.Positions.Length || original.TriangleCount != b.Indices.Length / 3))
+                    part.Issue ??= "renderer and source geometry counts disagree";
+                if (b.HasEffectShader || b.HasAlphaBlend || b.HasAlphaTest || !b.ZBufferWrite || b.MaterialAlpha < .999f)
+                    part.Issue ??= "transparent, alpha-tested, effect or non-depth-writing material unsupported";
                 int n = b.Positions.Length;
-                if (n == 0 || b.Indices.Length == 0) continue;
+                if (n == 0 || b.Indices.Length == 0) { part.Issue ??= "empty rendered geometry"; continue; }
 
                 // UNSHADEABLE SHAPES — two kinds, both meaning "this renderer provably cannot
                 // draw this shape's material, so drawing it is worse than omitting it". Per
@@ -496,6 +531,7 @@ static class TexturedScene
                 bool drawStatic = fxStatic && b.HasEffectShader && !normalAsDiffuse;
                 if (!keepFx && !drawStatic && (b.HasEffectShader || normalAsDiffuse))
                 {
+                    part.Issue ??= "unrenderable material omitted";
                     if (b.HasEffectShader) fxShapesSkipped++; else nmShapesSkipped++;
                     refHadFx = true;
                     fxByMesh[rel] = fxByMesh.TryGetValue(rel, out var already)
@@ -542,6 +578,7 @@ static class TexturedScene
                         { cullTrisDropped++; continue; }
                         keep.Add(tri[i]); keep.Add(tri[i + 1]); keep.Add(tri[i + 2]);
                     }
+                    if (keep.Count != tri.Length) part.Issue ??= "geometry clipped; stored bound retained, audit unassessed";
                     if (keep.Count == 0) { cullShapesDropped++; continue; }   // shape wholly above the cut
                     if (keep.Count < tri.Length) tri = keep.ToArray();
                 }
@@ -693,6 +730,7 @@ static class TexturedScene
                 meshes.Add(mesh);
                 shapes++;
                 ro.Meshes.Add(mesh);
+                part.Meshes.Add(mesh);
                 foreach (var vi in tri) ro.Grow(wp[vi]);
 
                 // Interactive picking tests the SAME arrays the upload used (shared, not
@@ -707,6 +745,7 @@ static class TexturedScene
                     ps.ComputeBounds();
                     interactive.PickShapes.Add(ps);
                     ro.Shapes.Add(ps);
+                    part.Picks.Add(ps);
                     basePick = ps;                       // the covering below hangs itself off this
                 }
 
@@ -771,6 +810,7 @@ static class TexturedScene
                         renderer.AddMesh(covMesh);
                         meshes.Add(covMesh);
                         ro.Meshes.Add(covMesh);              // the snow is culled with its roof
+                        part.Meshes.Add(covMesh);
                         // The live height clip walks PickShapes and a shell is deliberately not
                         // one of them; without this link, clipping a roof away left its snow
                         // hanging in the air.
@@ -781,7 +821,10 @@ static class TexturedScene
                     }
                 }
             }
-            if (ro.Meshes.Count > 0) occl.Refs.Add(ro);
+            if (source.Model is { } model)
+                foreach (var unread in model.Shapes.Where(s => !ro.Parts.Any(p => p.Block == s.BlockIndex)))
+                    ro.Parts.Add(new ShapeOcclusion { Name = unread.Name, Block = unread.BlockIndex,
+                        Stored = unread.StoredBound, AssetHash = source.Hash, Issue = "source shape absent or ambiguous in renderer" });
             if (ro.Meshes.Count > 0 && r.BosSwapped) bosView.Swapped.Add(ro);
             if (ro.Meshes.Count > 0 && r.StateChange != 0) (r.StateArrives ? stateView.Arrived : stateView.Departed).Add(ro);
             if (refHadFx) fxRefCount++;
@@ -1193,15 +1236,15 @@ static class TexturedScene
         // hands it each frame's.
         Action<OpenTK.Mathematics.Matrix4, OpenTK.Mathematics.Matrix4>? wireOverlay = null;
 
-        byte[] Draw(float[]? depthOut = null)
+        byte[] Draw(float[]? depthOut = null, bool singleSample = false)
         {
-            GL.BindFramebuffer(FramebufferTarget.Framebuffer, drawFbo);
+            GL.BindFramebuffer(FramebufferTarget.Framebuffer, singleSample ? fbo : drawFbo);
             GL.Viewport(0, 0, size, size);
             GL.ClearColor(skyColor.X, skyColor.Y, skyColor.Z, 1f);
             GL.Clear(ClearBufferMask.ColorBufferBit | ClearBufferMask.DepthBufferBit);
             renderer.Render(camera, size, size);   // clears again, with renderer.ClearColor = sky
             wireOverlay?.Invoke(camera.GetViewMatrix(), camera.GetProjectionMatrix(1f));
-            if (msFbo != 0)
+            if (msFbo != 0 && !singleSample)
             {
                 // Resolve colour AND depth: the occlusion test reads the depth buffer back, so it
                 // has to come from the same resolved frame the pixels did.
@@ -1455,32 +1498,64 @@ static class TexturedScene
         var capLines = captionLines.ToList();
         // The report reads the answer for the entry eye and nothing is pushed — the preview below
         // recomputes for itself, canary and all, so the two cannot contaminate each other.
-        if (planeReport is not null && planes.Count > 0)
+        if (planeReport is not null)
         {
             occl.Evaluate(cam.Eye);
-            // Which culled refs the eye would SEE: the plain scene's depth at the ref's centre pixel
-            // is no nearer than the near face of its box, i.e. nothing stands in front of it. One
-            // extra draw of the untouched scene, static path only (the window has no still frame).
-            // This is the audit's own shape — a plane culling what the player can see — measured
-            // rather than inferred from counts.
+            if (occl.Refs.Any(r => r.Issue is not null || r.Parts.Any(s => s.Issue is not null)))
+                occl.SceneIssues.Add("missing or unsupported scene geometry; visible pixels describe the rendered scene only");
+            if (cullAbove is not null) occl.SceneIssues.Add("height clipping changes occluding geometry");
+            if (stateView.BuiltMode == "diff") occl.SceneIssues.Add("state diff combines two populations and is not a gameplay state");
+            if (npcActors.Count > 0) occl.SceneIssues.Add("posed NPCs are rendered but their engine culling bounds are unsupported");
+            if (occl.Refs.Any(r => r.Ref.BosRandom)) occl.SceneIssues.Add("random BOS state is not pinned to a measured game state");
+            // Both depth passes use the same single-sample FBO. Resolving MSAA depth can select
+            // different covered samples when the rest of the scene is removed. Off-mode colour
+            // rendering still uses its original MSAA path after every saved visibility flag is restored.
             if (interactive is null)
             {
                 var plainDepth = new float[size * size];
-                Draw(plainDepth);
-                occl.MarkVisible(r =>
+                Draw(plainDepth, singleSample: true);
+                string DepthHash(float[] depth) => Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(
+                    System.Runtime.InteropServices.MemoryMarshal.AsBytes(depth.AsSpan())));
+                occl.SceneDepthHash = DepthHash(plainDepth);
+                var evidenceDir = Path.Combine(Path.GetDirectoryName(Path.GetFullPath(outPath))!,
+                    Path.GetFileNameWithoutExtension(outPath) + "-audit-evidence");
+                if (Directory.Exists(evidenceDir)) throw new System.IO.IOException("Refusing to replace audit evidence: " + evidenceDir);
+                Directory.CreateDirectory(evidenceDir);
+                occl.SceneDepthPath = Path.Combine(evidenceDir, "scene-depth-f32.bin");
+                File.WriteAllBytes(occl.SceneDepthPath, System.Runtime.InteropServices.MemoryMarshal.AsBytes(plainDepth.AsSpan()).ToArray());
+                var allMeshes = meshes.Concat(npcActors.SelectMany(a => a.Meshes)).Distinct().ToArray();
+                var savedVisibility = allMeshes.ToDictionary(m => m, m => m.IsRendering);
+                var ownDepth = new float[size * size];
+                occl.MarkVisible(part =>
                 {
-                    var c = (r.Min + r.Max) * 0.5f;
-                    if (ScreenOf(YUp(c)) is not { } sp) return false;
-                    float near = float.MaxValue;
-                    for (int i = 0; i < 8; i++)
+                    if (occl.VisibilityDraws >= occl.VisibilityBudget)
+                        return new ShapeVisibility(0, 0, 0, "explicit per-view visibility draw budget exhausted");
+                    if (part.Meshes.Count == 0) return new ShapeVisibility(0, 0, 0, "no shape geometry to rasterize");
+                    try
                     {
-                        var k = new Vector3((i & 1) == 0 ? r.Min.X : r.Max.X, (i & 2) == 0 ? r.Min.Y : r.Max.Y, (i & 4) == 0 ? r.Min.Z : r.Max.Z);
-                        near = MathF.Min(near, Vector3.Dot(YUp(k) - eyeY, viewFwd));
+                        var isolated = part.Meshes.ToHashSet();
+                        foreach (var m in allMeshes) m.IsRendering = savedVisibility[m] && isolated.Contains(m);
+                        Draw(ownDepth, singleSample: true);
+                        occl.VisibilityDraws++;
+                        part.IsolatedDepthHash = DepthHash(ownDepth);
+                        var measured = ShapeVisibility.Compare(ownDepth, plainDepth);
+                        var mask = new byte[size * size * 4];
+                        for (int i = 0; i < ownDepth.Length; i++)
+                        {
+                            mask[i*4+3] = 255;
+                            if (ownDepth[i] == 1) continue;
+                            mask[i*4 + (ownDepth[i] <= plainDepth[i] ? 1 : 0)] = 255;
+                        }
+                        part.VisibilityMask = Path.Combine(evidenceDir, $"shape-{occl.VisibilityDraws:D4}-block-{part.Block}.png");
+                        using var maskImage = Image.LoadPixelData<Rgba32>(mask, size, size);
+                        maskImage.Mutate(x => x.Flip(FlipMode.Vertical));
+                        maskImage.SaveAsPng(part.VisibilityMask);
+                        return measured;
                     }
-                    float scene = ViewDist(plainDepth[sp.Y * size + sp.X]);
-                    return scene >= near * 0.998f - 1.5f;
+                    finally { foreach (var (m, visible) in savedVisibility) m.IsRendering = visible; }
                 });
             }
+            else occl.SceneIssues.Add("interactive view has no captured shape visibility measurement");
             planeReport(occl);
         }
         if (occlusionMode != "off")
@@ -1495,15 +1570,14 @@ static class TexturedScene
                 // pixel is the honest outcome for well-placed planes (what they cull is behind a
                 // wall anyway), and this line is what separates that from a preview that failed.
                 int inFrame = occl.Refs.Count(r => r.Culled && ScreenOf(YUp((r.Min + r.Max) * 0.5f)) is not null);
-                Console.WriteLine($"      {inFrame:N0} of the culled ref(s) have their centre inside this frame"
-                                + (inFrame == 0 ? " — the preview changes no pixel of this picture" : ""));
+                Console.WriteLine($"      {inFrame:N0} predicted-culled ref centre(s) are inside this frame; this is not a shape visibility test");
                 foreach (var kv in occl.CulledByPlane.OrderByDescending(kv => kv.Value.Count).Take(12))
                     Console.WriteLine($"      {kv.Value.Count,5} culled by PLANE {kv.Key.Key} {kv.Key.KindLabel} {kv.Key.ExtentLabel} ({kv.Key.ProvenanceLabel})"
                                     + (occl.StraddlingByPlane.TryGetValue(kv.Key, out var st) ? $", {st} straddling" : ""));
                 if (occl.CulledByPlane.Count > 12) Console.WriteLine($"      ... and {occl.CulledByPlane.Count - 12} more plane(s) culling something");
-                capLines.Add($"OCCLUSION {occlusionMode}: {occl.CulledCount:N0} ref(s) wholly behind a plane from this eye — "
-                           + (occlusionMode == "on" ? "NOT DRAWN" : "tinted RED")
-                           + $" ({occl.CulledByPlane.Count} of {planes.Count} planes cull anything; straddlers kept)");
+                capLines.Add($"OCCLUSION RESEARCH {occlusionMode}: {occl.Refs.Sum(r => r.Parts.Count(s => s.Culled)):N0} shape(s) in {occl.CulledCount:N0} ref(s) predicted culled — "
+                           + (occlusionMode == "on" ? "affected shapes NOT DRAWN" : "affected shapes tinted RED")
+                           + "; inspect report coverage");
             }
         }
         // The BOS paint, before anything is drawn (the static frame) — the window re-applies it on B.

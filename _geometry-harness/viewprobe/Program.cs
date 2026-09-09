@@ -540,6 +540,7 @@ for (int i = argStart; i < args.Length; i++)
     else if (args[i] == "--planes") { showPlanes = true; textured = true; }
     else if (args[i] == "--occlusion" && i + 1 < args.Length) { occlusionMode = args[++i].ToLowerInvariant(); textured = true; }
     else if (args[i] == "--planes-report") { planesReport = true; textured = true; }
+    else if (args[i] == "--occlusion-rule" && i + 1 < args.Length) ViewProbe.ShapeCullPolicy.Load(args[++i]);
     else if (args[i] == "--planes-reach" && i + 1 < args.Length) planesReach = float.Parse(args[++i]);
     else if (args[i] == "--bos" && i + 1 < args.Length)
     {
@@ -590,6 +591,7 @@ if ((conflictsPath is not null || redSpecs.Count > 0) && !navModeExplicit) navMo
 // the previous shot's overrides.
 string cliNavMode = navMode; float? cliCullAbove = cullAbove;
 bool cliShowPlanes = showPlanes; string cliOcclusion = occlusionMode;
+string? cliStateSpec = stateSpec;
 if (navMode is not ("off" or "filled" or "wire" or "both"))
 { Console.Error.WriteLine($"--nav '{navMode}' is not one of: off, filled, wire, both."); return 1; }
 if (occlusionMode is not ("off" or "on" or "diff"))
@@ -1041,6 +1043,7 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot)
     // would quietly render cell 2 holding cell 1's references.
     winRef.Clear(); persistentWin.Clear(); refDisabledFlag.Clear(); refEnableParent.Clear(); refEditorIdAll.Clear();
     stateArm = null; activeFacts = EnableFactsOf; stateBaselineMemo.Clear();
+    stateSpec = cliStateSpec;
     planeHist.Clear(); cellContestedBy.Clear();
     npcRefWhere.Clear(); npcBaseWhere.Clear(); doorWhere.Clear();
     winNav.Clear(); navByPlugin.Clear();
@@ -1078,6 +1081,7 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot)
         if (wshot.CullAbove is { } shotCull) cullAbove = shotCull;
         if (wshot.Planes is { } shotPlanes) showPlanes = shotPlanes;
         if (wshot.Occlusion is { } shotOccl) occlusionMode = shotOccl;
+        if (wshot.State is { } shotState) stateSpec = shotState;
         if (wshot.Route is { Count: > 1 })
         {
             shotRoute = wshot.Route.Select(w => (w[0], w[1])).ToList();
@@ -1433,6 +1437,7 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot)
     // into the winning state as invented refs so the picture shows the obstacle the numbers were
     // measured against. Invented and said so — a high ID in the base's own plugin, never written; the
     // base itself is real and must carry a model, or there is nothing to draw and the shot is refused.
+    var constructedRefs = new HashSet<FormKey>();
     if (shotSpec?.Props is { Count: > 0 } wlProps)
     {
         int pi = 0;
@@ -1449,6 +1454,7 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot)
             }
             FormKey fk;
             do { fk = new FormKey(bk.ModKey, (uint)(0xFFF000 + pi++)); } while (winRef.ContainsKey(fk));
+            constructedRefs.Add(fk);
             winRef[fk] = new PlacedRef(fk, "PlacedObject", wp.Label, new Vec3(wp.Pos[0], wp.Pos[1], wp.Pos[2]),
                                        new Vec3(0f, 0f, float.DegreesToRadians(wp.Yaw)), wp.Scale, bk,
                                        Persistent: false, InitiallyDisabled: false, Deleted: false);
@@ -1670,7 +1676,7 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot)
             scene.Add(new ViewProbe.SceneRef(rel, rPos, rRot, rScale,
                                              (hiFp is { } h && r.FormKey == h) || conflictDoors.Contains(r.FormKey), isMarker,
                                              r.FormKey, bk, baseEditorId.TryGetValue(bk, out var bEd) ? bEd : null,
-                                             bosRecordBase, bosLabel, bosRandom, stateChange, stateLabel));
+                                             bosRecordBase, bosLabel, bosRandom, stateChange, stateLabel, constructedRefs.Contains(r.FormKey)));
         }
         foreach (var (qx, qy, qr) in refsAt)
         {
@@ -3181,7 +3187,8 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot)
         // physical ref whose placed OBND box the swept reach touches. The nearest hit over the
         // lattice is the answer; "none within N u" is an answer too, and the interesting one.
         Action<ViewProbe.OcclusionState>? planeReportSink = null;
-        if (planesReport && planes.Count > 0)
+        string? reportRenderPath = null;
+        if (planesReport)
         {
             var collGeo = new Dictionary<string, TriangleSoup?>(StringComparer.OrdinalIgnoreCase);
             TriangleSoup? CollisionSoupFor(string rel)
@@ -3225,14 +3232,15 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot)
                     string Largest(ViewProbe.RefOcclusion r)
                         => $"{r.Ref.RefKey} {(r.Ref.BaseEditorId is { Length: > 0 } e ? e : Path.GetFileName(r.Ref.MeshRelPath))} ({r.Size.X:0}x{r.Size.Y:0}x{r.Size.Z:0} u)";
                     if (culled.Count == 0) cullNothing++;
-                    int visible = culled.Count(r => r.Visible);
+                    bool VisibleHere(ViewProbe.RefOcclusion r) => r.Parts.Any(s => s.CulledBy.Contains(p) && s.Visible);
+                    int visible = culled.Count(VisibleHere);
                     if (visible > 0) cullsVisible++;
-                    var visibleLargest = culled.Where(r => r.Visible).OrderByDescending(r => r.Volume).Take(3).ToList();
+                    var visibleLargest = culled.Where(VisibleHere).OrderByDescending(r => r.Volume).Take(3).ToList();
                     Console.WriteLine(culled.Count == 0
-                        ? $"      culls nothing from this eye" + (straddling > 0 ? $" ({straddling} straddling its shadow)" : "")
+                        ? $"      no culling predicted from this eye; inspect unassessed candidates" + (straddling > 0 ? $" ({straddling} crossing its shadow)" : "")
                         : $"      culls {culled.Count} ref(s) from this eye ({straddling} straddling)"
-                          + (visible > 0 ? $" — {visible} of them VISIBLE from here (nothing in front of their box): {string.Join("; ", visibleLargest.Select(Largest))}"
-                                         : " — none of them visible from here")
+                          + (visible > 0 ? $" — {visible} have visible pixels of a predicted-culled shape in this rendered scene: {string.Join("; ", visibleLargest.Select(Largest))}"
+                                         : " — no measured visible shape pixels; inspect coverage before interpreting this")
                           + $"; largest: {string.Join("; ", largest.Select(Largest))}");
                     // The nearest solid collision behind it, on the far side from the eye.
                     var n = p.Normal;
@@ -3273,7 +3281,7 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot)
                     else if (candidates == 0 || withCollision == 0)
                     {
                         noCollisionCandidates++;
-                        behind = candidates == 0 ? $"nothing physical within {planesReach:0} u behind it — no candidate box even reaches the swept volume"
+                        behind = candidates == 0 ? $"legacy OBND broad phase supplied no candidate to the {planesReach:0} u ray sample; architecture absence is not established"
                                                  : $"none of the {candidates} candidate(s) behind it carries solid collision";
                     }
                     else
@@ -3290,16 +3298,37 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot)
                         rotationDeg = new[] { float.RadiansToDegrees(p.Rotation.X), float.RadiansToDegrees(p.Rotation.Y), float.RadiansToDegrees(p.Rotation.Z) },
                         scale = p.Scale, provenance = p.ProvenanceLabel, definedBy = p.DefinedBy, changedBy = p.ChangedBy, chain = p.Chain,
                         cullCount = culled.Count, straddling, visibleCulled = visible,
+                        candidates = os.Refs.SelectMany(r => r.Parts.Count == 0
+                            ? new object[] { new { subject = r.Ref.RefKey.ToString(), mesh = r.Ref.MeshRelPath,
+                                status = "unassessed", reason = r.Issue ?? "no source shapes" } }
+                            : r.Parts.Select(s => (object)new {
+                                subject = r.Ref.RefKey.ToString(), baseForm = r.Ref.BaseKey.ToString(), mesh = r.Ref.MeshRelPath,
+                                constructed = r.Ref.Constructed,
+                                shape = s.Name, block = s.Block, assetSha256 = s.AssetHash,
+                                storedBound = s.Stored,
+                                worldSphere = s.World is { } w ? new { center = new[] { w.Center.X, w.Center.Y, w.Center.Z }, radius = w.Radius } : null,
+                                relation = s.Relations.GetValueOrDefault(p, "unassessed: not evaluated"),
+                                predictedCulled = s.CulledBy.Contains(p),
+                                allCullingPlanes = s.CulledBy.Select(cp => cp.Key.ToString()).ToArray(),
+                                status = "research prediction; inspect relation, coverage and supplied rule evidence",
+                                reason = r.Issue ?? s.Issue,
+                                visibility = s.CulledBy.Contains(p) ? s.Visibility : null,
+                                visibilityMask = s.CulledBy.Contains(p) ? s.VisibilityMask : null,
+                                isolatedDepthSha256 = s.CulledBy.Contains(p) ? s.IsolatedDepthHash : null,
+                                refPosition = new[] { r.Ref.Position.X, r.Ref.Position.Y, r.Ref.Position.Z },
+                                refRotation = new[] { r.Ref.Rotation.X, r.Ref.Rotation.Y, r.Ref.Rotation.Z },
+                                refScale = r.Ref.Scale,
+                            })).ToArray(),
                         largestCulled = largest.Select(r => new { formKey = r.Ref.RefKey.ToString(), editorId = r.Ref.BaseEditorId, size = new[] { r.Size.X, r.Size.Y, r.Size.Z }, visible = r.Visible }).ToList(),
                         visibleLargest = visibleLargest.Select(r => new { formKey = r.Ref.RefKey.ToString(), editorId = r.Ref.BaseEditorId, size = new[] { r.Size.X, r.Size.Y, r.Size.Z } }).ToList(),
                         behind = bestRef is { } br2
                             ? new { distance = best, formKey = br2.FormKey.ToString(), editorId = br2.Base is { } bb3 && baseEditorId.TryGetValue(bb3, out var be3) ? be3 : null, candidates, withCollision }
                             : null,
-                        reach = planesReach,
+                        reach = planesReach, collisionMethod = "supporting 5x5 ray sample; legacy record-OBND broad phase; not an exhaustive architecture or visibility test",
                     });
                 }
-                Console.WriteLine($"   ---- report summary: {cullNothing} of {planes.Count} plane(s) cull nothing from this eye; "
-                                + $"{cullsVisible} cull something VISIBLE from it ({os.VisibleCulledCount} ref(s) in all); "
+                Console.WriteLine($"   ---- research report: {cullNothing} of {planes.Count} plane(s) have no predicted culling; "
+                                + $"{cullsVisible} predict culling of shapes with visible rendered samples ({os.VisibleCulledCount} unique ref(s)); inspect coverage; "
                                 + $"{touching} touching solid collision behind, {noneWithinReach} with none within {planesReach:0} u, "
                                 + $"{noCollisionCandidates} with no collision-bearing candidate behind at all ----");
                 // The dropped planes belong in the listing too — a plane a mod disabled is a fact the audit wants.
@@ -3311,10 +3340,49 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot)
                     Console.WriteLine($"   not drawn: {r.FormKey} = FormID {RuntimeId(r.FormKey)}  {(r.Deleted ? "deleted" : DisabledWhy(r))}"
                                     + (h is not null ? $"  — defined by {h.DefinedBy}{(h.ChangedBy is { } cb ? $", last changed by {cb}" : "")}  — chain: {string.Join(" -> ", h.Chain)}" : ""));
                 }
-                string jsonPath = Path.Combine(outDir, $"{safe}-planes.json");
+                string jsonPath = Path.Combine(outDir, $"{(reportRenderPath is null ? safe : Path.GetFileNameWithoutExtension(reportRenderPath))}-planes.json");
+                if (File.Exists(jsonPath)) throw new System.IO.IOException("Refusing to replace a report: " + jsonPath);
+                string HashFile(string path) { using var f = File.OpenRead(path); return Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(f)); }
+                var plugins = order.OrderedPaths.Select(p => new { file = Path.GetFileName(p), sha256 = HashFile(p) }).ToArray();
+                var inputJson = System.Text.Json.JsonSerializer.Serialize(new { plugins, stateSpec, bosMode, keepFx, cullAbove, size,
+                    ruleSha256 = ViewProbe.ShapeCullPolicy.Sha256,
+                    cell = cellKey.ToString(), eye = new[] { eyeS.X, eyeS.Y, eyeS.Z },
+                    look = new[] { lookPos.Value.X, lookPos.Value.Y, lookPos.Value.Z }, fov,
+                    scene = os.Refs.Select(r => new { subject = r.Ref.RefKey.ToString(), r.Ref.Position, r.Ref.Rotation,
+                        r.Ref.Scale, baseForm = r.Ref.BaseKey.ToString(), r.Ref.Constructed }).ToArray(),
+                    planeInputs = planes.Select(p => new { key = p.Key.ToString(), p.KindLabel, p.Rotation, p.Scale,
+                        position = new[] {p.Position.X,p.Position.Y,p.Position.Z}, bounds = new[] {p.Bounds.X,p.Bounds.Y,p.Bounds.Z} }).ToArray(),
+                    assets = os.Refs.SelectMany(r => r.Parts.Select(s => new { mesh = r.Ref.MeshRelPath, sha256 = s.AssetHash })).Distinct().ToArray() });
                 var doc = new
                 {
-                    cell = cellLabel, eye = new[] { eyeS.X, eyeS.Y, eyeS.Z }, reach = planesReach,
+                    schema = "occlusion-view-research-v1", status = "research; supplied rule scope does not certify general engine behavior",
+                    rule = ViewProbe.ShapeCullPolicy.Identity, scope = ViewProbe.ShapeCullPolicy.Scope,
+                    ruleSha256 = ViewProbe.ShapeCullPolicy.Sha256, ruleConfiguration = ViewProbe.ShapeCullPolicy.Configuration,
+                    inputSha256 = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(inputJson))),
+                    inputIdentityScope = "record files, source mesh bytes, effective scene placements, planes, camera and state; texture/material assets not yet fingerprinted",
+                    plugins, assemblies = new[] { typeof(ViewProbe.ShapeOcclusion).Assembly.Location, typeof(SphereBound).Assembly.Location,
+                        typeof(CharacterViewer.Rendering.GlMesh).Assembly.Location }
+                        .Select(p => new { file = Path.GetFileName(p), sha256 = HashFile(p) }).ToArray(),
+                    cell = cellLabel, cellFormKey = cellKey.ToString(), worldspace = targetWorldspace.ToString(),
+                    state = stateSpec ?? "load-time", stateView, bosMode,
+                    eye = new[] { eyeS.X, eyeS.Y, eyeS.Z }, look = new[] { lookPos.Value.X, lookPos.Value.Y, lookPos.Value.Z },
+                    fov, aspect = 1, rasterSize = size, nearClip = 15, farClip = 131072, reach = planesReach,
+                    viewpoint = shotSpec?.ViewpointKind ?? "diagnostic; reachability not established",
+                    control = shotSpec?.Control ?? false,
+                    viewpointEvidence = shotSpec?.ViewpointEvidence, viewLabel = shotSpec?.Label,
+                    image = reportRenderPath, coverageIssues = os.SceneIssues,
+                    population = new { recordRefs = winRef.Count, sceneRefs = os.Refs.Count,
+                        sourceShapes = os.Refs.Sum(r => r.Parts.Count), noModel, fxSkipped, markerSkipped,
+                        unsupportedRefs = os.Refs.Count(r => r.Issue is not null),
+                        unsupportedShapes = os.Refs.Sum(r => r.Parts.Count(s => s.Issue is not null)),
+                        visibilityDraws = os.VisibilityDraws, visibilityBudget = os.VisibilityBudget },
+                    counts = new { sampledViews = 1, planes = planes.Count, predictedAffectedUniqueRefs = os.CulledCount,
+                        visiblePredictedUniqueRefs = os.VisibleCulledCount,
+                        constructedVisibleUniqueRefs = os.Refs.Count(r => r.Ref.Constructed && r.Visible),
+                        nonControlVisibleUniqueRefs = (shotSpec?.Control ?? false) ? 0 : os.Refs.Count(r => !r.Ref.Constructed && r.Visible) },
+                    sceneDepthSha256 = os.SceneDepthHash, sceneDepth = os.SceneDepthPath,
+                    visibilityMethod = "same shape isolated depth against same-camera unculled scene; single sample; exact depth comparison; green mask pixels visible, red hidden",
+                    attribution = "none; plane provenance does not establish blame or a repair",
                     contestedBy = cellContestedBy, planes = rows,
                     notDrawn = dropped.Select(r => new { formKey = r.FormKey.ToString(), formId = RuntimeId(r.FormKey), why = r.Deleted ? "deleted" : DisabledWhy(r) }).ToList(),
                 };
@@ -3327,13 +3395,16 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot)
                    IReadOnlyList<(System.Numerics.Vector3, System.Numerics.Vector3, System.Numerics.Vector3)> r,
                    string outFile, IReadOnlyList<string> captionLines,
                    IReadOnlyList<System.Numerics.Vector3>? diffs = null)
-            => ViewProbe.TexturedScene.RenderToPng(
+        {
+            reportRenderPath = outFile;
+            return ViewProbe.TexturedScene.RenderToPng(
                    scene, assets, dataDir, modFolders, overwriteDir,
                    (eyePos.Value, lookPos.Value, fov), g, r, terrainPatches, terrainLayers, navMode, navColor,
                    skyColor, terrainHeightAt, dashUnderground, dashUnderStatics, msaa, cullAbove, cellBounds,
                    diffs ?? noDiff, diffColor, picks, captionLines, colourCaptions, npcActors, npcPucksOn, routeRenders,
                    gridRender, overlayLines, keepFx, fxStatic, listMeshes, waterPlanes, coverings, planes, showPlanes, occlusionMode,
                    size, outFile, camMeta, planeReport: planeReportSink, bosMode: bosMode, stateMode: stateView, stateName: stateArm?.Name ?? "");
+        }
 
         if (compare is { } cmp)
         {
