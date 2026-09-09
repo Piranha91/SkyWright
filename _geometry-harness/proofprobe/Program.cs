@@ -3565,6 +3565,8 @@ Console.WriteLine("\nPROOF — landscape seams: a synthetic order through CellBo
 BosProof.Run(Check);
 StateProof.Run(Check);
 NifChainProof.Run(Check);
+NifBoundProof.Run(Check);
+OcclusionGeometryProof.Run(Check);
 MaterialScaleProof.Run(Check);
 PopulationProof.Run(Check);
 
