@@ -1390,8 +1390,14 @@ the same camera and state. Both passes use the same single-sample layout and exa
 comparison. Green mask samples are visible and red samples hidden; counts describe that finite
 raster only. A culled rear shape entirely hidden by a drawn front shape is healthy. A hidden
 centre cannot suppress visible edge samples. The scene depth and per-shape masks are saved.
-The finite per-view draw budget is explicit; exhaustion remains unassessed. Off-mode colour
-uses its original rendering path after mesh visibility is restored.
+The per-view draw budget defaults to 256. For a bounded evaluation, pass
+`--visibility-budget N` (integer 1..16384, with `--planes-report`, non-interactive only).
+The budget resets for each view and is recorded in the report and its input identity.
+It limits isolated shape draws, preserving all surrounding geometry in the scene depth pass.
+Exhaustion remains explicitly unassessed; a larger budget does not make unsupported shapes
+assessable or clear unvisited views. Freeze the intended subjects and camera/state before
+evaluation, then check each subject's assessment or concrete refusal. Off-mode colour uses
+its original rendering path after mesh visibility is restored.
 
 Coverage names missing/unsupported geometry, alpha/effect materials, clipping, unsupported
 poses, unpinned random state, interactive views and camera/rule limits. Missing texture fallbacks

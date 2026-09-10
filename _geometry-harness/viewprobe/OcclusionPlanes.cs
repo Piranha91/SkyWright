@@ -366,7 +366,9 @@ sealed class OcclusionState
     public readonly List<string> SceneIssues = new();
     public string? SceneDepthHash;
     public string? SceneDepthPath;
-    public int VisibilityBudget = 256;
+    public const int DefaultVisibilityBudget = 256;
+    public const int MaximumVisibilityBudget = 16384;
+    public int VisibilityBudget = DefaultVisibilityBudget;
     public int VisibilityDraws;
     /// <summary>Per plane, the refs it culls from the last eye (a ref culled by several planes is listed under each).</summary>
     public readonly Dictionary<PlaneRender, List<RefOcclusion>> CulledByPlane = new(ReferenceEqualityComparer.Instance);

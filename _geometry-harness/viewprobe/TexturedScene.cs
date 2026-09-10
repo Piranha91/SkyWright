@@ -300,7 +300,8 @@ static class TexturedScene
         Action<OcclusionState>? planeReport = null,        // --planes-report: handed the planes' cull answer for the entry eye
         string bosMode = "on",                             // --bos off | on | diff: the Base Object Swapper layer's paint (BosView.cs)
         string stateMode = "on",                           // --state-view on | diff: the world state's paint (StateView.cs)
-        string stateName = "")                             // --state: the state's name for the caption and the window
+        string stateName = "",                             // --state: the state's name for the caption and the window
+        int visibilityBudget = OcclusionState.DefaultVisibilityBudget)
     {
         var logger = new ConsoleCvLogger();
         var gate = new CharacterViewerLogGate { Verbose = Environment.GetEnvironmentVariable("VP_CV_VERBOSE") == "1" };
@@ -404,7 +405,7 @@ static class TexturedScene
         // triangles uploaded, post-cull) and the meshes they became. Gathered whether or not the
         // preview is on — it is a few numbers per ref — and applied only when it is, so a default
         // render is untouched.
-        var occl = new OcclusionState(planes);
+        var occl = new OcclusionState(planes) { VisibilityBudget = visibilityBudget };
         bool needOcclusion = planeReport is not null || (planes.Count > 0 && (occlusionMode != "off" || interactive is not null));
         var boundsCache = new Dictionary<string, (NifGeometryModel? Model, string Hash, string? Issue)>(StringComparer.OrdinalIgnoreCase);
         var geometryInputIssues = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);

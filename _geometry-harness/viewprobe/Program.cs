@@ -179,6 +179,7 @@ string? stateSpec = null, switchMapPath = null;
 string stateView = "on";
 string occlusionMode = "off";
 bool planesReport = false;
+int visibilityBudget = ViewProbe.OcclusionState.DefaultVisibilityBudget;
 float planesReach = 256f;
 // TROUBLESHOOTING OVERLAY. --conflicts <emit.json> reads a detector's emitted ConflictFile and
 // paints the implicated navmeshes RED in this cell — whole records for CLOBBERED, the named
@@ -540,6 +541,16 @@ for (int i = argStart; i < args.Length; i++)
     else if (args[i] == "--planes") { showPlanes = true; textured = true; }
     else if (args[i] == "--occlusion" && i + 1 < args.Length) { occlusionMode = args[++i].ToLowerInvariant(); textured = true; }
     else if (args[i] == "--planes-report") { planesReport = true; textured = true; }
+    else if (args[i] == "--visibility-budget")
+    {
+        if (i + 1 >= args.Length || !int.TryParse(args[++i], System.Globalization.NumberStyles.None,
+            System.Globalization.CultureInfo.InvariantCulture, out visibilityBudget)
+            || visibilityBudget < 1 || visibilityBudget > ViewProbe.OcclusionState.MaximumVisibilityBudget)
+        {
+            Console.Error.WriteLine($"--visibility-budget requires an integer in 1..{ViewProbe.OcclusionState.MaximumVisibilityBudget} (default {ViewProbe.OcclusionState.DefaultVisibilityBudget}).");
+            return 1;
+        }
+    }
     else if (args[i] == "--occlusion-rule" && i + 1 < args.Length) ViewProbe.ShapeCullPolicy.Load(args[++i]);
     else if (args[i] == "--planes-reach" && i + 1 < args.Length) planesReach = float.Parse(args[++i]);
     else if (args[i] == "--bos" && i + 1 < args.Length)
@@ -598,6 +609,8 @@ if (occlusionMode is not ("off" or "on" or "diff"))
 { Console.Error.WriteLine($"--occlusion '{occlusionMode}' is not one of: off, on, diff."); return 1; }
 if (!planesReport && Array.IndexOf(args, "--planes-reach") >= 0)
 { Console.Error.WriteLine("--planes-reach only means anything with --planes-report: it is how far behind each plane the report looks for solid collision."); return 1; }
+if (Array.IndexOf(args, "--visibility-budget") >= 0 && (!planesReport || interactiveMode))
+{ Console.Error.WriteLine("--visibility-budget requires --planes-report in a non-interactive view."); return 1; }
 if (planesReach <= 0f)
 { Console.Error.WriteLine($"--planes-reach {planesReach} must be a positive number of units."); return 1; }
 if (npcPuck is not ("on" or "off" or "auto"))
@@ -3347,6 +3360,7 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot)
                 string HashFile(string path) { using var f = File.OpenRead(path); return Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(f)); }
                 var plugins = order.OrderedPaths.Select(p => new { file = Path.GetFileName(p), sha256 = HashFile(p) }).ToArray();
                 var inputJson = System.Text.Json.JsonSerializer.Serialize(new { plugins, stateSpec, bosMode, keepFx, cullAbove, size,
+                    visibilityBudget = os.VisibilityBudget,
                     ruleSha256 = ViewProbe.ShapeCullPolicy.Sha256,
                     cell = cellKey.ToString(), eye = new[] { eyeS.X, eyeS.Y, eyeS.Z },
                     look = new[] { lookPos.Value.X, lookPos.Value.Y, lookPos.Value.Z }, fov,
@@ -3362,7 +3376,7 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot)
                     rule = ViewProbe.ShapeCullPolicy.Identity, scope = ViewProbe.ShapeCullPolicy.Scope,
                     ruleSha256 = ViewProbe.ShapeCullPolicy.Sha256, ruleConfiguration = ViewProbe.ShapeCullPolicy.Configuration,
                     inputSha256 = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(inputJson))),
-                    inputIdentityScope = "record files, source mesh bytes, effective scene placements, planes, camera and state; texture/material assets not yet fingerprinted",
+                    inputIdentityScope = "record files, source mesh bytes, effective scene placements, planes, camera, state and visibility budget; texture/material assets not yet fingerprinted",
                     appearance = new { status = "unassessed", reasonCode = "appearance_inputs_not_fingerprinted",
                         reason = "Texture/material inputs and renderer fallbacks are not qualified; geometry visibility is not a claim of matching game appearance." },
                     plugins, assemblies = new[] { typeof(ViewProbe.ShapeOcclusion).Assembly.Location, typeof(SphereBound).Assembly.Location,
@@ -3408,7 +3422,8 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot)
                    skyColor, terrainHeightAt, dashUnderground, dashUnderStatics, msaa, cullAbove, cellBounds,
                    diffs ?? noDiff, diffColor, picks, captionLines, colourCaptions, npcActors, npcPucksOn, routeRenders,
                    gridRender, overlayLines, keepFx, fxStatic, listMeshes, waterPlanes, coverings, planes, showPlanes, occlusionMode,
-                   size, outFile, camMeta, planeReport: planeReportSink, bosMode: bosMode, stateMode: stateView, stateName: stateArm?.Name ?? "");
+                   size, outFile, camMeta, planeReport: planeReportSink, bosMode: bosMode, stateMode: stateView, stateName: stateArm?.Name ?? "",
+                   visibilityBudget: visibilityBudget);
         }
 
         if (compare is { } cmp)
