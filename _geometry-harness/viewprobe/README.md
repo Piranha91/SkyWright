@@ -1815,21 +1815,48 @@ python tools/shotplan.py devbench shots.json
 **Plan against the frame you are going to take, not against this one.** `--fov` is the VERTICAL
 angle and `--aspect` (default `1:1`, this renderer's square frame) widens the horizontal limit.
 A game camera is neither square nor at your chosen FOV -- its field of view is the player's own
-`.ini` setting. Pixel-matching two features between a viewprobe render and the game frame of the
-SAME camera on 2026-09-01 put the game frame at roughly 75-80 deg horizontal and ~49 deg vertical
-against the plan's 65 deg square: materially narrower vertically, and a shot the planner called
-comfortable fitted with almost nothing to spare. Re-running the framing test at `--fov 49
---aspect 16:9` refused it outright. This is a silent cropping hazard -- the numbers stay right
-while a subject's head leaves the picture.
+`.ini` setting. At the SE default the game frame is about 50.5 deg vertical against a plan's
+65 deg square: materially narrower, and a shot the planner calls comfortable can fit with
+nothing to spare. This is a silent cropping hazard -- the numbers stay right while a subject's
+head leaves the picture.
+
+**The setting is the HORIZONTAL angle at a fixed 16:9 base**, so the vertical angle is fixed by
+the setting alone and only the horizontal one moves with the frame shape:
+
+```
+vertical   = 2 * atan( tan(setting/2) / (16/9) )        # independent of the output aspect
+horizontal = 2 * atan( tan(vertical/2) * width/height ) # equals the setting only at 16:9
+```
+
+Measured 2026-09-09 across three settings, two output aspects and both camera modes; worst
+residual 0.032 deg. It is a RULE: a changed setting or resolution is a recalculation, not a
+re-measurement. Two earlier readings died here and are worth knowing about, because both failed
+the same way -- a single output aspect cannot identify the base aspect. "Horizontal at a 4:3
+base" survived a 2026-09-01 check only because it was paired with a wrong assumed setting (65
+where the game held 80) and the errors cancelled; "horizontal at the frame's own aspect" fits
+every 16:9 frame to 0.005 deg and is refuted at 1600x1200 by 14 deg. The evidence, the engine
+default, the ini precedence and the method for measuring another runtime are in the
+[camera contract](../../.claude/skills/devbench-screenshots/references/camera-and-capture.md#the-projection-rule),
+which is the authoritative home for all of it.
 
 **Read the target frame; do not assume it.** `frame --instance ... --profile ...` resolves
 which ini files an MO2 profile actually hands the game -- its own `settings.ini`
 `LocalSettings` decides between the profile's copies and the ones under Documents -- reads
 `iSize W`/`iSize H` and `fDefaultWorldFOV`, and prints the `--fov`/`--aspect` to plan with.
 `--from-profile` on `plan` or `check` applies them directly, reusing the instance and profile
-already given as target flags; `--explain` adds the derivation and the recipe for measuring
-the angle instead of deriving it. Any key defined in more than one file is reported with its
-winner, because a value set twice is exactly where a single answer would be confidently wrong.
+already given as target flags; `--explain` adds the derivation and the method for measuring the
+angle on a runtime where it is not established. Any key defined in more than one file is
+reported with every value, because a value set twice is exactly where a single answer would be
+confidently wrong -- and the winner is the FIRST file in load order, measured, not the last.
+With the key in no file at all the engine's own default is used, reported with its provenance
+(80 on SE 1.7.104, not the widely repeated 65, which is LE's); `--fov-setting` overrides it for
+a runtime where that default is not established.
+
+**The `camera get` readback is not the commanded angles.** `shotplan.py devbench` prints the
+`camYaw`/`camPitch` a driven pose should report, so a driver can assert the pose without
+comparing a readback to a command -- which would call a correct yaw-90 pitch-30 pose 30 degrees
+wrong. The contract, and the engine source it comes from, are in the
+[camera contract](../../.claude/skills/devbench-screenshots/references/camera-and-capture.md#the-commandreadback-contract).
 
 **Two heights, not one.** `--aim-height` is where the camera POINTS (composition); `--sight-height`
 is where the sightline probes AIM, and it defaults to head height on purpose. A ray fired at the
