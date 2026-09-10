@@ -1684,6 +1684,50 @@ What that protects against:
   are a good proxy for "is this the interesting cell"; a cell's EditorID is not a reliable guide to
   what is in it.
 
+### Matching this square frame to the game's 16:9 one
+
+viewprobe renders SQUARE, and `--fov` is the VERTICAL angle of that square. The game renders at the
+output resolution, and `fDefaultWorldFOV` is the HORIZONTAL angle at a fixed 16:9 base, so the
+game's vertical angle is fixed by the setting alone:
+
+    tan(fov_v / 2) = tan(setting / 2) / (16 / 9)
+    tan(fov_h / 2) = tan(fov_v / 2) * (width / height)
+
+`tools/shotplan.py frame --from-profile` reads the setting and the resolution and prints both.
+
+Choose a square that contains the native region you intend to evaluate:
+
+* **A square at the game's VERTICAL angle** covers the central square of a landscape frame.
+  It excludes the native frame's outer sides. Counts remain scoped to that region; they cannot
+  establish visibility of an entire subject that extends outside it. Off-frame is not hidden.
+* **A square at the game's HORIZONTAL angle** (equal to the setting at 16:9) contains the whole landscape frame
+  as its central band, of height
+
+      band = tan(fov_v / 2) / tan(fov_h / 2)          # exactly 0.5625 at 16:9
+
+  with the same pinhole pose, so every angle maps into the native frame by a single scale.
+
+For a whole landscape-frame comparison, use the second and record the band alongside the render.
+Recompute the angles from the effective setting and output dimensions. A portrait frame instead
+fits in a square at the vertical angle, with a central width band. Two practical notes:
+
+* **Pick a `--size` that preserves the focal scale** you were working at — near the frame centre,
+  pixels per radian is `size / (2 * tan(fov / 2))`. A close match keeps subject footprints
+  comparable across the projection change; record the residual scale difference.
+* **`--pick` coordinates are projection-dependent.** Recompute every one of them when the frame
+  changes; a stale pick silently samples a different world point.
+
+Verify the result against an actual game frame: crop the band, scale it to the native still, and
+check registration with a declared tolerance appropriate to the resolutions and scene. Keep pixels
+outside the matched native region unassessed. A projection match does not establish physical
+footing, enabled scene state, subject identity, or independent evidence of engine culling.
+
+`--nav-at` can print multiple covering triangles for one coordinate, including different storeys.
+Consumers must associate answers with the printed coordinates and preserve that multiplicity;
+pairing requests and output lines by position can silently assign the next point's floor. Printed
+coordinates are rounded, so ambiguous matches must be refused. Navmesh coverage alone does not
+prove that the loaded scene supplies a floor at that height.
+
 ### Getting there fast: the arithmetic, and what the render tells you for free
 
 The section above stops you shooting blind. This one stops you *iterating*. Most wasted renders
