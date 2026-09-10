@@ -407,6 +407,7 @@ static class TexturedScene
         var occl = new OcclusionState(planes);
         bool needOcclusion = planeReport is not null || (planes.Count > 0 && (occlusionMode != "off" || interactive is not null));
         var boundsCache = new Dictionary<string, (NifGeometryModel? Model, string Hash, string? Issue)>(StringComparer.OrdinalIgnoreCase);
+        var geometryInputIssues = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         // The Base Object Swapper layer's paint: the swapped refs' meshes, tinted in `diff` (BosView.cs).
         var bosView = new BosViewState(bosMode);
         // The world state's paint: the refs the flip brought in and took out (StateView.cs).
@@ -427,15 +428,17 @@ static class TexturedScene
                     try
                     {
                         var bytes = File.ReadAllBytes(boundPath);
+                        source = (null, Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(bytes)), null);
                         var measured = NifGeometry.Measure(bytes);
-                        source = (measured.Model, Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(bytes)),
+                        source = (measured.Model, source.Hash,
                                   measured.Model is null ? "NIF geometry unreadable" : null);
                     }
-                    catch (Exception ex) { source = (null, "", $"asset read failed: {ex.GetType().Name}: {ex.Message}"); }
+                    catch (Exception ex) { source = (null, source.Hash, $"asset read failed: {ex.GetType().Name}: {ex.Message}"); }
                 }
                 boundsCache[rel] = source;
             }
             ro.Issue = source.Issue;
+            ro.AssetHash = source.Hash;
             if (!builtCache.TryGetValue(rel, out var built))
             {
                 built = null;
@@ -446,12 +449,32 @@ static class TexturedScene
                     {
                         built = builder.BuildFromFile(abs);
                         StripNifRootTransform(abs, built);
+                        if (needOcclusion && source.Hash.Length > 0)
+                        {
+                            var renderedHash = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(File.ReadAllBytes(abs)));
+                            if (renderedHash != source.Hash)
+                                geometryInputIssues[rel] = "model asset changed between bounds and renderer reads";
+                        }
                     }
-                    catch (Exception ex) { logger.LogError($"BuildFromFile('{rel}')", ex); }
+                    catch (Exception ex)
+                    {
+                        logger.LogError($"BuildFromFile('{rel}')", ex);
+                        geometryInputIssues[rel] = $"renderer geometry read failed: {ex.GetType().Name}: {ex.Message}";
+                    }
                 }
                 builtCache[rel] = built;
             }
-            if (built is null || built.Count == 0) { missingMesh++; ro.Issue ??= "renderer produced no geometry"; continue; }
+            if (geometryInputIssues.TryGetValue(rel, out var geometryInputIssue)) ro.Issue ??= geometryInputIssue;
+            if (built is null || built.Count == 0)
+            {
+                missingMesh++; ro.Issue ??= "renderer produced no geometry";
+                if (source.Model is { } unrendered)
+                    foreach (var shape in unrendered.Shapes)
+                        ro.Parts.Add(new ShapeOcclusion { Name = shape.Name, Block = shape.BlockIndex,
+                            Stored = shape.StoredBound, AssetHash = source.Hash,
+                            Issue = shape.BoundIssue ?? shape.PoseIssue ?? "source shape absent in renderer" });
+                continue;
+            }
 
             if (shapeDump is { Length: > 0 }
                 && rel.Contains(shapeDump, StringComparison.OrdinalIgnoreCase)

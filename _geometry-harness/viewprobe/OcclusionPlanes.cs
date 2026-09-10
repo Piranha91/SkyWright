@@ -337,6 +337,7 @@ sealed class RefOcclusion
     public readonly List<GlMesh> Meshes = new();
     public readonly List<PickShape> Shapes = new();
     public readonly List<ShapeOcclusion> Parts = new();
+    public string AssetHash = "";
     public string? Issue;
     public bool Culled;
     public PlaneRender? CulledBy;
@@ -368,9 +369,9 @@ sealed class OcclusionState
     public int VisibilityBudget = 256;
     public int VisibilityDraws;
     /// <summary>Per plane, the refs it culls from the last eye (a ref culled by several planes is listed under each).</summary>
-    public readonly Dictionary<PlaneRender, List<RefOcclusion>> CulledByPlane = new();
+    public readonly Dictionary<PlaneRender, List<RefOcclusion>> CulledByPlane = new(ReferenceEqualityComparer.Instance);
     /// <summary>Per plane, the refs that reach into its shadow without being contained — the straddlers, kept.</summary>
-    public readonly Dictionary<PlaneRender, int> StraddlingByPlane = new();
+    public readonly Dictionary<PlaneRender, int> StraddlingByPlane = new(ReferenceEqualityComparer.Instance);
     public int CulledCount;
     /// <summary>Report only: culled refs the eye would see — set by <see cref="MarkVisible"/>.</summary>
     public int VisibleCulledCount;

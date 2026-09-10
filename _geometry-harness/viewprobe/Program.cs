@@ -3300,6 +3300,7 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot)
                         cullCount = culled.Count, straddling, visibleCulled = visible,
                         candidates = os.Refs.SelectMany(r => r.Parts.Count == 0
                             ? new object[] { new { subject = r.Ref.RefKey.ToString(), mesh = r.Ref.MeshRelPath,
+                                assetSha256 = r.AssetHash,
                                 status = "unassessed", reason = r.Issue ?? "no source shapes" } }
                             : r.Parts.Select(s => (object)new {
                                 subject = r.Ref.RefKey.ToString(), baseForm = r.Ref.BaseKey.ToString(), mesh = r.Ref.MeshRelPath,
@@ -3312,6 +3313,7 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot)
                                 allCullingPlanes = s.CulledBy.Select(cp => cp.Key.ToString()).ToArray(),
                                 status = "research prediction; inspect relation, coverage and supplied rule evidence",
                                 reason = r.Issue ?? s.Issue,
+                                sourceIssue = s.Issue,
                                 visibility = s.CulledBy.Contains(p) ? s.Visibility : null,
                                 visibilityMask = s.CulledBy.Contains(p) ? s.VisibilityMask : null,
                                 isolatedDepthSha256 = s.CulledBy.Contains(p) ? s.IsolatedDepthHash : null,
@@ -3352,7 +3354,8 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot)
                         r.Ref.Scale, baseForm = r.Ref.BaseKey.ToString(), r.Ref.Constructed }).ToArray(),
                     planeInputs = planes.Select(p => new { key = p.Key.ToString(), p.KindLabel, p.Rotation, p.Scale,
                         position = new[] {p.Position.X,p.Position.Y,p.Position.Z}, bounds = new[] {p.Bounds.X,p.Bounds.Y,p.Bounds.Z} }).ToArray(),
-                    assets = os.Refs.SelectMany(r => r.Parts.Select(s => new { mesh = r.Ref.MeshRelPath, sha256 = s.AssetHash })).Distinct().ToArray() });
+                    assets = os.Refs.Select(r => new { mesh = r.Ref.MeshRelPath, sha256 = r.AssetHash,
+                        issue = r.Issue }).Distinct().ToArray() });
                 var doc = new
                 {
                     schema = "occlusion-view-research-v1", status = "research; supplied rule scope does not certify general engine behavior",
@@ -3360,6 +3363,8 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot)
                     ruleSha256 = ViewProbe.ShapeCullPolicy.Sha256, ruleConfiguration = ViewProbe.ShapeCullPolicy.Configuration,
                     inputSha256 = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(inputJson))),
                     inputIdentityScope = "record files, source mesh bytes, effective scene placements, planes, camera and state; texture/material assets not yet fingerprinted",
+                    appearance = new { status = "unassessed", reasonCode = "appearance_inputs_not_fingerprinted",
+                        reason = "Texture/material inputs and renderer fallbacks are not qualified; geometry visibility is not a claim of matching game appearance." },
                     plugins, assemblies = new[] { typeof(ViewProbe.ShapeOcclusion).Assembly.Location, typeof(SphereBound).Assembly.Location,
                         typeof(CharacterViewer.Rendering.GlMesh).Assembly.Location }
                         .Select(p => new { file = Path.GetFileName(p), sha256 = HashFile(p) }).ToArray(),

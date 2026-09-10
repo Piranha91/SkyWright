@@ -1397,6 +1397,14 @@ Coverage names missing/unsupported geometry, alpha/effect materials, clipping, u
 poses, unpinned random state, interactive views and camera/rule limits. Missing texture fallbacks
 are currently printed by the renderer; texture/material asset bytes are not yet fingerprinted
 in report input identity. These limitations preclude a claim of complete game appearance.
+The structured `appearance` status is `unassessed` for every report. Source-mesh identity
+includes unreadable bytes and explicit missing-geometry entries; a detected mismatch between
+the bounds input and the file checked after the renderer read refuses that reference's prediction.
+These checks do not create an atomic snapshot of mutable assets.
+Source shapes remain listed when the renderer produces no geometry; `sourceIssue` keeps
+their bounds or pose refusal alongside the reference's rendering failure.
+Plane results use scene-object identity, so lazy geometry caches cannot invalidate
+the lookup of an unconfigured-rule or unsupported-Box refusal.
 The report records camera, state, source bounds, record/mesh/assembly hashes and evidence paths.
 Worklist `state` overrides reset for each shot. `control`, `viewpointKind` and `viewpointEvidence`
 label constructed controls and the declared viewpoint evidence; a declaration does not certify

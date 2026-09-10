@@ -17,7 +17,9 @@ sealed class ShapeOcclusion
     public readonly List<GlMesh> Meshes = new();
     public readonly List<PickShape> Picks = new();
     public readonly List<PlaneRender> CulledBy = new();
-    public readonly Dictionary<PlaneRender, string> Relations = new();
+    // PlaneRender's lazy geometry caches participate in its record hash. Match the
+    // same scene plane by identity so materializing those caches cannot lose a refusal.
+    public readonly Dictionary<PlaneRender, string> Relations = new(ReferenceEqualityComparer.Instance);
     public ShapeVisibility? Visibility;
     public string? VisibilityMask;
     public string? IsolatedDepthHash;
