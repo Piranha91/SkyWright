@@ -67,11 +67,13 @@ arithmetic between them.
     THE CONVENTION SEAM
     -------------------
     viewprobe yaw is DEGREES, 0 = north (+Y), clockwise. DevBench
-    `camera action=drive` wants the same angle in RADIANS, and its
-    `action=get` reports yaw NEGATED. Getting this wrong produces a plausible
+    `camera action=drive` wants the same angle in RADIANS and applies it
+    faithfully. Its `action=get` reports a DIFFERENT parameterization of the
+    same orientation -- not the commanded angles, and not simply their
+    negation: see `predict_readback`. Getting either wrong produces a plausible
     frame of the wrong thing with no error. Every pose this tool prints carries
-    both forms, and `shotplan.py devbench` converts a worklist without a human
-    doing the multiplication.
+    the drive form and the expected readback, and `shotplan.py devbench`
+    converts a worklist without a human doing the multiplication.
 
 Subcommands
     plan      pick a camera for a set of subjects, and emit it
@@ -167,6 +169,64 @@ def bearing_vec(deg: float) -> tuple[float, float]:
 def ang_diff(a: float, b: float) -> float:
     """Signed smallest difference a - b, in (-180, 180]."""
     return (a - b + 180.0) % 360.0 - 180.0
+
+
+def _ni_fast_atan2(a_y: float, a_x: float) -> float:
+    """`NiFastATan2`, transcribed from CommonLibSSE-NG `src/RE/N/NiMath.cpp`.
+
+    It is not `atan2`. It agrees with `-atan2` while |y| <= |x| and with `+atan2` otherwise, and
+    that branch is the whole reason `camera get` was read as "a convention that changes with
+    bearing" -- for the yaw pair the test |y| > |x| is
+    |sin(yaw) cos(pitch)| > |cos(yaw)|, i.e. |tan(yaw) cos(pitch)| > 1. It
+    reduces to |tan(yaw)| > 1 only at pitch zero; a non-zero pitch moves the
+    switch away from the odd multiples of 45 degrees.
+    """
+    if a_x == 0.0 and a_y == 0.0:
+        return 0.0
+    offset = 0.0
+    if abs(a_y) > abs(a_x):
+        z = a_x / a_y
+        if z > 0.0:
+            offset = math.pi / 2.0
+        elif z < 0.0:
+            offset = -math.pi / 2.0
+        else:
+            return math.pi / 2.0 if a_y > 0.0 else -math.pi / 2.0
+    else:
+        z = a_y / a_x
+        if z == 0.0:
+            return 0.0 if a_x > 0.0 else math.pi
+    z2 = z * z
+    r = 0.0208351
+    for c in (-0.0851330, 0.1801410, -0.3302995, 0.9998660):
+        r = r * z2 + c
+    r = offset - r * z
+    if a_y < 0.0 and a_x < 0.0:
+        r -= math.pi
+    if a_y > 0.0 and a_x < 0.0:
+        r += math.pi
+    return r
+
+
+def predict_readback(yaw_deg: float, pitch_deg: float):
+    """What DevBench's `camera get` reports, in RADIANS, for a camera driven to these degrees.
+
+    Derived from source, not fitted: DevBench (`src/Tools.cpp`) reports `camPitch = e.x` and
+    `camYaw = e.z` from `cameraRoot->world.rotate.ToEulerAnglesXYZ(e)`, and CommonLibSSE-NG
+    computes those as `-NiFastATan2(-m12, m22)` and `-NiFastATan2(-m01, m00)`. Checked against 26
+    retained observations and 42 held-out live poses across both camera modes; worst error
+    0.0007 deg, which is float32 quantization of the reported value.
+
+    Returns None where `ToEulerAnglesXYZ` returns false and DevBench writes NEITHER key -- treat
+    them as ABSENT there, not as zero. Compare a readback against THIS, never against the
+    commanded angles: at yaw 90 the reported pitch is zero for every pitch, and comparing it to
+    the command would call a correct pose 30 degrees wrong.
+    """
+    y, p = math.radians(yaw_deg), math.radians(pitch_deg)
+    sy, cy, sp, cp = math.sin(y), math.cos(y), math.sin(p), math.cos(p)
+    if abs(sy * sp) >= 1.0:
+        return None
+    return (-_ni_fast_atan2(-sy * cp, cy), -_ni_fast_atan2(-cy * sp, cp))
 
 
 def camera_basis(yaw_deg: float, pitch_deg: float):
@@ -629,24 +689,77 @@ def build_clearance(run: Runner, origin, floor_z, args) -> Clearance:
 # The game states its resolution and its field of view in the ini files an MO2 profile hands it,
 # so read them.
 #
-# The mapping from the setting to a frustum is the part that is NOT in the ini. Skyrim's
-# fDefaultWorldFOV is the HORIZONTAL angle at a 4:3 base and the engine widens horizontally
-# ("Hor+") for anything wider, so the VERTICAL angle is fixed by the setting alone:
+# The mapping from the setting to a frustum is the part that is NOT in the ini. It is MEASURED:
+# fDefaultWorldFOV is the HORIZONTAL angle at a fixed 16:9 BASE, so the VERTICAL angle is fixed
+# by the setting alone and a wider frame gets more horizontal view ("Hor+"):
 #
-#     tan(fov_v / 2) = tan(fov_setting / 2) / (4/3)
+#     tan(fov_v / 2) = tan(fov_setting / 2) / (16/9)
+#     tan(fov_h / 2) = tan(fov_v / 2) * (width / height)
 #
-# That model is CALIBRATED, not assumed. Registering two game frames (different pitches) against
-# viewprobe renders of the same camera measured the vertical angle at 50.5 deg on a 3840x2160
-# frame with no fDefaultWorldFOV in any ini; the model with the engine default 65 predicts
-# 51.08 deg -- a residual of 0.57 deg. So it is good to well under a degree, which is ~3 u at a
-# 350 u standoff -- fine for
-# deciding a standoff, and worth replacing with a measurement if a shot is tight. `--fov`
-# overrides it, and `frame --explain` prints the method for re-measuring.
+# Measured 2026-09-09 on Skyrim SE 1.7.104 by rotating a position-pinned camera through known
+# angles and fitting the frustum under which the two frames register -- a measurement that
+# depends on no renderer and on no knowledge of the scene:
+#
+#     setting  output       vertical            horizontal
+#     80       3840x2160    50.524 / 50.539     79.998 / 80.005     (free cam / player cam)
+#     100      3840x2160    67.684 / 67.698     99.999 / 99.997
+#     65       3840x2160    39.420              64.993              (set by the console `fov`)
+#     80       1600x1200    50.546 / 50.546     64.372 / 64.373
+#
+# THE VERTICAL ANGLE IS THE SAME AT BOTH OUTPUT ASPECTS. That is the whole finding, and it is
+# what a single-aspect campaign cannot see. Two earlier readings died on exactly that:
+#
+#   * "horizontal at a fixed 4:3 base", which stood here. It was checked against a 2026-09-01
+#     measurement of ~50.5 deg vertical and looked right to half a degree -- but only because it
+#     was paired with a WRONG setting: 65 was assumed where the running game held 80, and the
+#     two errors cancelled. At setting 80 it predicts 64.37 vertical against 50.53 measured.
+#   * "horizontal at the frame's OWN aspect", which fits every 16:9 number to 0.005 deg and is
+#     refuted the moment the output stops being 16:9: at 1600x1200 it predicts 64.37 vertical
+#     and 80.00 horizontal against 50.55 and 64.37 measured.
+#
+# It is a RULE, not a constant: change the setting or the output shape and RECALCULATE, do not
+# re-measure and do not fit a fresh empirical angle per session. What DOES need a fresh
+# measurement is a different runtime (VR) or a mod that takes the projection over.
 
-FOV_BASE_ASPECT = 4.0 / 3.0
-FOV_ENGINE_DEFAULT = 65.0
+FOV_BASE_ASPECT = 16.0 / 9.0
+
+# The value the engine holds when no ini sets the key. NOT a guess and not universal: measured on
+# Skyrim SE 1.7.104 by the 2026-09-05 ini audit (the setting is a `Name:Section` string in the
+# exe; SKSE's Utility.GetINIFloat reads the live collection) and confirmed 2026-09-09 by a live
+# query returning 80.0 with the key absent from every ini of the profile, on a frame that then
+# measured 50.53 deg vertical. The widely repeated 65 is Skyrim LE's default, and adopting it
+# here is exactly the error described above. Any other runtime needs its own reading, so this is
+# reported with its provenance and overridable with --fov-setting.
+FOV_ENGINE_DEFAULT = 80.0
+FOV_ENGINE_DEFAULT_PROVENANCE = ("measured on Skyrim SE 1.7.104; NOT the LE default of 65, and "
+                                 "not established for VR -- confirm with a live "
+                                 "Utility.GetINIFloat query or pass --fov-setting")
 
 INI_LOAD_ORDER = ["skyrim.ini", "skyrimcustom.ini", "skyrimprefs.ini"]
+
+# Which file WINS when a key is set in more than one. This is a different question from the
+# order the files are listed in, and conflating the two is how this got shipped wrong once:
+# arm B measured skyrim.ini beating skyrimprefs.ini, that was encoded as "the first hit in
+# INI_LOAD_ORDER wins", and arm D then measured skyrimcustom.ini beating skyrim.ini -- which
+# INI_LOAD_ORDER lists SECOND, so the selection silently picked 95 where the game used 110 and
+# the planner's vertical angle was out by 14.5 degrees. Precedence is now stated on its own.
+#
+# Measured 2026-09-09 on Skyrim SE 1.7.104, two pairs, one profile:
+#   skyrimcustom.ini 110  beats  skyrim.ini 95        (the game reported 110)
+#   skyrim.ini       100  beats  skyrimprefs.ini 110  (the game reported 100)
+# Highest precedence first. A file not named here ranks below every file that is.
+INI_PRECEDENCE = ["skyrimcustom.ini", "skyrim.ini", "skyrimprefs.ini"]
+
+
+def ini_winner(hits):
+    """The (path, value) the game will actually use, from `ini_lookup`'s hits.
+
+    Selects by INI_PRECEDENCE, not by position in the list -- see the note above.
+    """
+    if not hits:
+        return None
+    rank = {name: i for i, name in enumerate(INI_PRECEDENCE)}
+    return min(hits, key=lambda h: rank.get(os.path.basename(h[0]).lower(), len(rank)))
 MY_GAMES_CANDIDATES = ["Skyrim Special Edition", "Skyrim Special Edition GOG",
                        "Skyrim VR", "Skyrim"]
 
@@ -737,10 +850,17 @@ def resolve_inis(instance, profile, game=None, my_games=None):
 
 
 def ini_lookup(files, section, key):
-    """Every file that defines this key, in load order, with the winner last.
+    """Every file that defines this key, in INI_LOAD_ORDER. Ask `ini_winner` which one wins.
 
-    Reporting all of them rather than only the winner is the point: a value set in two files is
-    exactly the case where a single answer would be confidently wrong.
+    This function deliberately does NOT pick a winner: the listing order is file discovery, and
+    precedence is a separate measured fact (INI_PRECEDENCE). Reporting all the hits rather than
+    only the winner is the point -- a value set in two files is exactly the case where a single
+    answer would be confidently wrong.
+
+    Measured 2026-09-09 on Skyrim SE 1.7.104, from the running game's own `Utility.GetINIFloat`:
+    `fDefaultWorldFOV` 110 in `skyrimcustom.ini` beat 95 in `skyrim.ini`, and 100 in `skyrim.ini`
+    beat 110 in `skyrimprefs.ini`. Two pairs, one key, one profile, one runtime -- enough to
+    order the three files, not enough to generalise to other keys or a modded ini loader.
     """
     hits = []
     for f in files:
@@ -750,7 +870,23 @@ def ini_lookup(files, section, key):
     return hits
 
 
-def game_frame(instance, profile, game=None, my_games=None):
+def vertical_fov(setting_deg, aspect=None):
+    """The vertical angle the game renders. Fixed by the SETTING alone -- see the block above.
+
+    `aspect` is accepted and ignored so that a caller reading this line cannot conclude the
+    vertical angle depends on the output shape. It does not; the horizontal one does.
+    """
+    return 2.0 * math.degrees(math.atan(math.tan(math.radians(setting_deg) / 2.0)
+                                        / FOV_BASE_ASPECT))
+
+
+def horizontal_fov(setting_deg, aspect):
+    """The horizontal angle the game renders at this output aspect. Equals the setting at 16:9."""
+    v = vertical_fov(setting_deg)
+    return 2.0 * math.degrees(math.atan(math.tan(math.radians(v) / 2.0) * aspect))
+
+
+def game_frame(instance, profile, game=None, my_games=None, fov_setting=None):
     """Resolution, aspect and vertical field of view, read from the game's own configuration."""
     files, why, note = resolve_inis(instance, profile, game, my_games)
     w = ini_lookup(files, "Display", "iSize W")
@@ -759,17 +895,23 @@ def game_frame(instance, profile, game=None, my_games=None):
     if not w or not h:
         raise SystemExit("no 'iSize W'/'iSize H' in any of:\n  " + "\n  ".join(files)
                          + "\nThe resolution is not guessable -- it decides the frame shape.")
-    W, H = int(float(w[-1][1])), int(float(h[-1][1]))
-    if fov:
-        setting, src = float(fov[-1][1]), os.path.basename(fov[-1][0])
+    W = int(float(ini_winner(w)[1]))
+    H = int(float(ini_winner(h)[1]))
+    if fov_setting is not None:
+        setting, src = float(fov_setting), "--fov-setting on the command line"
+    elif fov:
+        win = ini_winner(fov)          # by INI_PRECEDENCE, not by list position
+        setting, src = float(win[1]), os.path.basename(win[0])
     else:
-        setting, src = FOV_ENGINE_DEFAULT, "ENGINE DEFAULT (no fDefaultWorldFOV in any ini)"
-    vert = 2.0 * math.degrees(math.atan(math.tan(math.radians(setting / 2.0)) / FOV_BASE_ASPECT))
+        setting = FOV_ENGINE_DEFAULT
+        src = ("ENGINE DEFAULT %g (no fDefaultWorldFOV in any ini) -- %s"
+               % (FOV_ENGINE_DEFAULT, FOV_ENGINE_DEFAULT_PROVENANCE))
+        note = note + ["fDefaultWorldFOV is set in NO ini, so this is the engine's own default: "
+                       + FOV_ENGINE_DEFAULT_PROVENANCE]
     return {"files": files, "why": why, "note": note, "width": W, "height": H,
             "aspect": W / H, "fov_setting": setting, "fov_source": src,
-            "fov_vertical": vert,
-            "fov_horizontal": 2.0 * math.degrees(math.atan(
-                math.tan(math.radians(vert / 2.0)) * W / H)),
+            "fov_vertical": vertical_fov(setting),
+            "fov_horizontal": horizontal_fov(setting, W / H),
             "w_hits": w, "h_hits": h, "fov_hits": fov}
 
 
@@ -782,12 +924,16 @@ def print_frame(fr):
         print(f"  !! {n}")
     for label, hits in (("iSize W/H", fr["w_hits"] + fr["h_hits"]), ("fDefaultWorldFOV", fr["fov_hits"])):
         if len(hits) > 2 if label == "iSize W/H" else len(hits) > 1:
-            print(f"  !! {label} is set in more than one file; the LAST wins:")
+            print(f"  !! {label} is set in more than one file; by measured precedence "
+                  f"({' > '.join(INI_PRECEDENCE)}) the winner is marked:")
+            win = ini_winner(hits)
             for f, v in hits:
-                print(f"       {os.path.basename(f)} = {v}")
+                mark = "  <-- wins" if (f, v) == win else ""
+                print(f"       {os.path.basename(f)} = {v}{mark}")
     print(f"  resolution   {fr['width']} x {fr['height']}   aspect {fr['aspect']:.4f}")
     print(f"  fov setting  {fr['fov_setting']:g}  ({fr['fov_source']})")
-    print(f"  -> vertical  {fr['fov_vertical']:.2f} deg    horizontal {fr['fov_horizontal']:.2f} deg")
+    print(f"  -> vertical   {fr['fov_vertical']:.2f} deg  (fixed by the setting alone)")
+    print(f"  -> horizontal {fr['fov_horizontal']:.2f} deg  (the setting only at 16:9)")
     print(f"  plan with:   --fov {fr['fov_vertical']:.2f} --aspect {fr['width']}:{fr['height']}")
 
 
@@ -1327,21 +1473,40 @@ def cmd_check(args):
 
 def cmd_frame(args):
     """What frame will the game actually render? Read it, do not estimate it."""
-    fr = game_frame(args.instance, args.profile, args.game, args.my_games)
+    fr = game_frame(args.instance, args.profile, args.game, args.my_games,
+                    getattr(args, "fov_setting", None))
     print_frame(fr)
     if args.explain:
         print()
-        print("How the vertical angle is derived, and how to check it:")
-        print("  The ini gives a SETTING, not a frustum. fDefaultWorldFOV is the horizontal")
-        print("  angle at a 4:3 base and the engine widens horizontally for anything wider, so")
-        print("      tan(fov_v/2) = tan(setting/2) / (4/3)")
-        print("  To MEASURE it instead of deriving it: take a game frame, render the same camera")
-        print("  pose in viewprobe at a deliberately wide --fov, and find the central crop of the")
-        print("  render that matches the game frame's central square. Cropping a rectilinear")
-        print("  image about its axis is exactly equivalent to a narrower fov, so a crop keeping")
-        print("  fraction f of the half-width means tan(fov_v/2) = f * tan(fov_render/2).")
-        print("  Match on gradient magnitude, not pixels -- the lighting differs enormously.")
-        print("  Two frames at different pitches are independent measurements of one number.")
+        print("How the vertical angle follows from the setting:")
+        print("  The ini gives a SETTING, not a frustum. fDefaultWorldFOV is the HORIZONTAL")
+        print("  angle at a fixed 16:9 BASE, so the VERTICAL angle is fixed by the setting")
+        print("  alone and a wider frame gets more horizontal view:")
+        print("      tan(fov_v/2) = tan(setting/2) / (16/9)")
+        print("      tan(fov_h/2) = tan(fov_v/2) * (width/height)")
+        print("  This is a rule, not a constant: change the setting or the resolution and")
+        print("  RECALCULATE. Do not re-measure, and do not fit an empirical angle per session.")
+        print()
+        print("  Measured 2026-09-09 on Skyrim SE 1.7.104, free camera / normal player camera:")
+        print("    setting  output       vertical          horizontal")
+        print("    80       3840x2160    50.524 / 50.539   79.998 / 80.005")
+        print("    100      3840x2160    67.684 / 67.698   99.999 / 99.997")
+        print("    65       3840x2160    39.420            64.993   (set by the console `fov`)")
+        print("    80       1600x1200    50.546 / 50.546   64.372 / 64.373")
+        print("  The vertical angle is the SAME at both output aspects. Two earlier readings")
+        print("  died on that: horizontal-at-4:3-base (predicts 64.37 vertical at setting 80)")
+        print("  and horizontal-at-the-actual-aspect (fits every 16:9 frame and predicts 64.37")
+        print("  vertical at 1600x1200). A single output aspect cannot identify the base.")
+        print()
+        print("  What DOES need re-measuring: another runtime (VR), or a mod that takes the")
+        print("  projection over. To measure it, do not crop a render against a game frame --")
+        print("  rotate a position-pinned free camera by a known angle and find the frustum")
+        print("  under which the two frames register. That depends on no renderer and on no")
+        print("  knowledge of the scene, and it measures each axis separately.")
+        print()
+        print("  A runtime SetINI of this key does NOT reach the running camera (measured: the")
+        print("  query changes, the frustum does not, and a POV cycle does not apply it either).")
+        print("  The console `fov` command does change it, immediately, and is a different path.")
     if args.json:
         with open(args.json, "w", encoding="utf-8") as f:
             json.dump({k: v for k, v in fr.items() if k not in ("w_hits", "h_hits", "fov_hits")},
@@ -1382,10 +1547,14 @@ def cmd_devbench(args):
             drive = {"action": "drive", "x": round(eye[0], 1), "y": round(eye[1], 1),
                      "z": round(eye[2], 1),
                      "yaw": round(math.radians(yaw), 4), "pitch": round(math.radians(pitch), 4)}
+            back = predict_readback(yaw, pitch)
             out.append({"n": n, "cell": cell["cell"], "label": shot.get("label", ""),
                         "floorZ": shot.get("floorZ"), "feet": shot.get("feet"),
                         "doors": shot.get("doors") or [], "yawDeg": round(yaw, 1),
-                        "pitchDeg": round(pitch, 1), "drive": drive})
+                        "pitchDeg": round(pitch, 1), "drive": drive,
+                        "expectReadback": (None if back is None else
+                                           {"camYaw": round(back[0], 4),
+                                            "camPitch": round(back[1], 4)})})
     if args.json:
         print(json.dumps(out, indent=2))
         return 0
@@ -1393,6 +1562,13 @@ def cmd_devbench(args):
         print(f"# shot {s['n']} -- {s['cell']}: {s['label']}")
         print(f"#   yaw {s['yawDeg']} deg -> {s['drive']['yaw']} rad, "
               f"pitch {s['pitchDeg']} deg -> {s['drive']['pitch']} rad  (DevBench wants RADIANS)")
+        if s["expectReadback"] is None:
+            print("#   camera action=get will report NEITHER camYaw NOR camPitch at this pose "
+                  "(the Euler extraction fails); check the aim in the image.")
+        else:
+            print(f"#   camera action=get should then report camYaw "
+                  f"{s['expectReadback']['camYaw']} camPitch {s['expectReadback']['camPitch']} "
+                  f"-- assert THAT, not the commanded angles")
         if s["feet"] is not None:
             print(f"#   the PLAYER stands at feet {s['feet']} -- the placement-tested spot at the "
                   f"floor; dbharness.move_within_cell(*feet) first, or the interior renders unlit")
@@ -1410,7 +1586,8 @@ def cmd_devbench(args):
               f"-H 'content-type: application/json' -d '" + json.dumps(s["drive"]) + "'")
         print()
     print(f"# {len(out)} shot(s). freecam is fire-and-forget -- poll camera action=get until")
-    print("# freeCam is true before driving, and never verify a pose by the readback: it is NEGATED.")
+    print("# freeCam is true before driving. Verify a pose against the expected readback above,")
+    print("# never against the commanded angles -- they are different quantities.")
     return 0
 
 
@@ -1426,7 +1603,7 @@ def apply_profile_frame(args):
     if not inst or not prof:
         raise SystemExit("--from-profile needs the instance and profile: give --instance/--profile, "
                          "or pass them through after -- as viewprobe already takes them")
-    fr = game_frame(inst, prof, gm, args.my_games)
+    fr = game_frame(inst, prof, gm, args.my_games, getattr(args, "fov_setting", None))
     print_frame(fr)
     args.fov, args.aspect = fr["fov_vertical"], fr["aspect"]
     print()
@@ -1511,6 +1688,9 @@ def add_common(p, need_subjects=True):
                    help="the viewprobe command (default: dotnet run against this checkout). "
                         "Anything that takes viewprobe's args, e.g. a wrapper script")
     p.add_argument("--quiet", action="store_true", help="do not echo each invocation")
+    p.add_argument("--fov-setting", type=float, default=None,
+                   help="the game's fDefaultWorldFOV, when no ini sets it and the runtime's own "
+                        "default is not the measured SE one (see FOV_ENGINE_DEFAULT)")
     p.add_argument("--from-profile", action="store_true",
                    help="read --fov and --aspect from the MO2 profile's own ini instead of "
                         "guessing the frame shape. Needs --instance/--profile (or the same flags "
