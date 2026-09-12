@@ -154,11 +154,26 @@ public sealed record RulesFile(int SchemaVersion, IReadOnlyList<string>? Fixed, 
 
 /// <summary>What a rules file parsed to: the rules, the fixed set, and the notes about what the file did NOT
 /// carry (an anonymous required rule, a duplicate collapsed).</summary>
-public sealed record ParsedRules(IReadOnlyList<OrderRule> Rules, IReadOnlyList<string> Fixed, IReadOnlyList<string> Notes);
+public sealed record ParsedRules(IReadOnlyList<OrderRule> Rules, IReadOnlyList<string> Fixed, IReadOnlyList<string> Notes)
+{
+    /// <summary>The "no --rules file was given" case, as a value rather than as a literal at each call site: no rules,
+    /// nothing fixed, and <see cref="OrderRules.NoRulesWarning"/> in the notes so the warning reaches the manifest by
+    /// the same path a parsed file's notes do.</summary>
+    public static ParsedRules NoFile() =>
+        new(Array.Empty<OrderRule>(), Array.Empty<string>(), new[] { OrderRules.NoRulesWarning });
+}
 
 public static class OrderRules
 {
     public const int CurrentSchema = 1;
+
+    /// <summary>What a run without a rules file owes its reader, spelled ONCE so the console line, the manifest note
+    /// and the proof case all read the same sentence. Without a rules file the only constraints are the ones the FILES
+    /// prove, and those say nothing about the hand-sorting a user did inside the legal space.</summary>
+    public const string NoRulesWarning =
+        "WARNING: no --rules file was given, so only the engine's own rules apply. Nothing pins the user's " +
+        "hand-sorted positions, so the candidates below may move plugins the user meant to stay put. A 'fixed' " +
+        "entry or a 'required' rule in a rules file is what stops that.";
 
     public static readonly JsonSerializerOptions Json = new()
     {
@@ -275,6 +290,10 @@ public sealed class OrderRuleSet
     readonly Dictionary<string, int> _basePos;
     readonly HashSet<string> _fixedSet;
     readonly HashSet<string> _present;
+
+    /// <summary>The base-game masters as a set, so the per-element test in <see cref="Check"/> is a hash lookup rather
+    /// than a linear scan of the array for every plugin in every candidate.</summary>
+    static readonly HashSet<string> BaseSet = new(EngineRule.BaseOrder, StringComparer.OrdinalIgnoreCase);
 
     OrderRuleSet(IReadOnlyList<string> baseline, IReadOnlyDictionary<string, PluginHeader?> headers,
                  IReadOnlyList<string> fixedPlugins, IReadOnlyList<OrderRule> input, IReadOnlyList<OrderRule> engine,
@@ -435,6 +454,199 @@ public sealed class OrderRuleSet
     }
 
     // -----------------------------------------------------------------------------------------------------
+    //  Pairs whose relative order is already FIXED
+    // -----------------------------------------------------------------------------------------------------
+    //
+    // A search that builds a move only to have Check refuse it has spent two constructed orders to learn something the
+    // rules already knew. For most pairs on a real order that is the whole answer: a patch and its master, two base-game
+    // masters, a plugin the user pinned — no legal candidate reverses them, in either direction. Those pairs carry no
+    // search value AND the heaviest contention weight (a master is contested by everything that overrides it), so left
+    // in they dominate the ranking and crowd out the pairs a reorder could actually change.
+    //
+    // "Fixed" here means exactly that: NO LEGAL CANDIDATE CAN REVERSE THIS PAIR. It is decided from the same facts Check
+    // uses, in a priority that reports the cheapest true reason first, and it never guesses — a pair the rules do not
+    // fix comes back null and is searched.
+
+    ulong[]? _reachMaster;                               // row per plugin: who it reaches through declared masters
+    ulong[]? _reachUnion;                                // the same plus the input's required rules; null when none apply
+    int _words;
+    List<(int To, OrderRule? Rule)>[]? _adjUnion;
+    Dictionary<string, string>? _fixedSpelling;
+
+    /// <summary>Which hard rule fixes the relative order of <paramref name="a"/> and <paramref name="b"/>, or null when
+    /// a legal candidate could reverse them. Symmetric in its arguments and deterministic.
+    ///
+    /// The priority, cheapest true reason first:
+    ///   1. <see cref="EngineRule.BaseMasters"/> — both are base-game masters, or exactly one is (they lead everything).
+    ///   2. <c>fixed: '&lt;name&gt;'</c> — the rules file pins one of them relative to EVERY other plugin.
+    ///   3. <see cref="EngineRule.Groups"/> — both headers readable, one master-flagged and the other not.
+    ///   4. <see cref="EngineRule.Masters"/> — one is reachable from the other through declared masters, transitively.
+    ///   5. a <c>required</c> input rule — reachable through the master edges PLUS those rules, but not without them;
+    ///      named by the first required rule on the path.
+    /// An unreadable header makes no claim: it fixes nothing under 3, and declares nothing under 4 or 5.</summary>
+    public string? OrderFixedBy(string a, string b)
+    {
+        if (string.IsNullOrEmpty(a) || string.IsNullOrEmpty(b)) return null;
+        if (a.Equals(b, StringComparison.OrdinalIgnoreCase)) return null;
+        if (!_basePos.TryGetValue(a, out int ia) || !_basePos.TryGetValue(b, out int ib)) return null;
+
+        // 1. the base-game masters: in their own order, and ahead of everything that is not one.
+        if (BaseSet.Contains(a) || BaseSet.Contains(b)) return EngineRule.BaseMasters;
+
+        // 2. a pinned plugin. When both are pinned, the name that sorts first — so the answer does not depend on which
+        //    way round the caller asked. The spelling is the rules file's, which is the spelling Check's violation uses.
+        EnsureFixedNames();
+        string? pinned = null;
+        if (_fixedSpelling!.TryGetValue(a, out var sa)) pinned = sa;
+        if (_fixedSpelling.TryGetValue(b, out var sb) && (pinned is null || string.Compare(sb, pinned, StringComparison.OrdinalIgnoreCase) < 0))
+            pinned = sb;
+        if (pinned is not null) return $"fixed: '{pinned}'";
+
+        // 3. the master / non-master grouping — a rank, so one of each can never swap. Both headers must be readable:
+        //    a null header is not "not master-flagged".
+        bool ka = Headers.TryGetValue(a, out var ha) && ha is not null;
+        bool kb = Headers.TryGetValue(b, out var hb) && hb is not null;
+        if (ka && kb && ha!.MasterFlag != hb!.MasterFlag) return EngineRule.Groups;
+
+        // 4. the declared-master closure, both directions. It does not ask where the two sit TODAY: if A declares B and
+        //    the baseline has A first, the baseline is already illegal — and the pair is still fixed.
+        EnsureReach();
+        if (Reaches(_reachMaster!, ia, ib) || Reaches(_reachMaster!, ib, ia)) return EngineRule.Masters;
+
+        // 5. a chain that needs one of the input's required rules to close.
+        if (_reachUnion is not null)
+        {
+            int lo = string.Compare(a, b, StringComparison.OrdinalIgnoreCase) <= 0 ? ia : ib;
+            int hi = lo == ia ? ib : ia;
+            int from = -1, to = -1;
+            if (Reaches(_reachUnion, lo, hi)) { from = lo; to = hi; }
+            else if (Reaches(_reachUnion, hi, lo)) { from = hi; to = lo; }
+            if (from >= 0)
+            {
+                var r = FirstRequiredOnPath(from, to);
+                if (r is not null) return r.Name;
+            }
+        }
+        return null;
+    }
+
+    void EnsureFixedNames()
+    {
+        if (_fixedSpelling is not null) return;
+        var d = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var f in Fixed) d[f] = f;
+        _fixedSpelling = d;
+    }
+
+    /// <summary>Build the reachability bitsets once, on first use. One BFS per plugin that declares something: on a
+    /// 1,700-plugin order with ~10,000 master edges that is milliseconds, and every later query is two bit tests.</summary>
+    void EnsureReach()
+    {
+        if (_reachMaster is not null) return;
+        int n = Baseline.Count;
+        _words = (n + 63) / 64;
+
+        var adjM = new List<int>[n];
+        for (int i = 0; i < n; i++) adjM[i] = new List<int>();
+        foreach (var name in Baseline)
+        {
+            if (!Headers.TryGetValue(name, out var h) || h is null) continue;   // an unreadable header declares nothing
+            if (!_basePos.TryGetValue(name, out int to)) continue;
+            foreach (var m in h.Masters)
+                if (_basePos.TryGetValue(m, out int from) && from != to) adjM[from].Add(to);
+        }
+        for (int i = 0; i < n; i++) { adjM[i].Sort(); Dedupe(adjM[i]); }
+        _reachMaster = Closure(i => adjM[i], n);
+
+        var required = Input.Where(r => r.Hardness == RuleHardness.Required)
+                            .Where(r => _basePos.ContainsKey(r.Before) && _basePos.ContainsKey(r.After))
+                            .Where(r => !r.Before.Equals(r.After, StringComparison.OrdinalIgnoreCase))
+                            .OrderBy(r => r.Name, StringComparer.Ordinal).ToList();
+        if (required.Count == 0) return;                                       // nothing to add, so rule 5 cannot apply
+
+        var adjU = new List<(int To, OrderRule? Rule)>[n];
+        for (int i = 0; i < n; i++)
+        {
+            adjU[i] = new List<(int, OrderRule?)>();
+            foreach (var t in adjM[i]) adjU[i].Add((t, null));
+        }
+        foreach (var r in required) adjU[_basePos[r.Before]].Add((_basePos[r.After], r));
+        for (int i = 0; i < n; i++)
+            adjU[i] = adjU[i].OrderBy(x => x.To).ThenBy(x => x.Rule?.Name ?? "", StringComparer.Ordinal).ToList();
+        _adjUnion = adjU;
+        _reachUnion = Closure(i => adjU[i].Select(x => x.To), n);
+    }
+
+    static void Dedupe(List<int> sorted)
+    {
+        int w = 0;
+        for (int i = 0; i < sorted.Count; i++)
+            if (i == 0 || sorted[i] != sorted[i - 1]) sorted[w++] = sorted[i];
+        sorted.RemoveRange(w, sorted.Count - w);
+    }
+
+    /// <summary>Transitive closure as one bitset row per node, by BFS from each node. BFS rather than a memoised union
+    /// over a DFS because a master table CAN contain a cycle — two plugins that declare each other — and a DFS that
+    /// skips grey nodes would quietly under-report the closure for exactly that case.</summary>
+    ulong[] Closure(Func<int, IEnumerable<int>> adj, int n)
+    {
+        var reach = new ulong[(long)n * _words];
+        var stack = new int[n];
+        var seen = new bool[n];
+        var touched = new List<int>();
+        for (int s = 0; s < n; s++)
+        {
+            int top = 0;
+            foreach (var t in adj(s)) if (!seen[t]) { seen[t] = true; stack[top++] = t; }
+            if (top == 0) continue;
+            long row = (long)s * _words;
+            touched.Clear();
+            while (top > 0)
+            {
+                int x = stack[--top];
+                touched.Add(x);
+                reach[row + (x >> 6)] |= 1UL << (x & 63);
+                foreach (var t in adj(x)) if (!seen[t]) { seen[t] = true; stack[top++] = t; }
+            }
+            foreach (var x in touched) seen[x] = false;
+        }
+        return reach;
+    }
+
+    bool Reaches(ulong[] reach, int from, int to) => (reach[(long)from * _words + (to >> 6)] & (1UL << (to & 63))) != 0;
+
+    /// <summary>The first required input rule on a shortest path from <paramref name="from"/> to <paramref name="to"/>
+    /// through the union graph. Shortest-first over a deterministically sorted adjacency, so the rule named for a pair
+    /// is the same on every run.</summary>
+    OrderRule? FirstRequiredOnPath(int from, int to)
+    {
+        if (_adjUnion is null) return null;
+        int n = Baseline.Count;
+        var prev = new int[n];
+        var via = new OrderRule?[n];
+        var seen = new bool[n];
+        for (int i = 0; i < n; i++) prev[i] = -1;
+        var q = new Queue<int>();
+        seen[from] = true; q.Enqueue(from);
+        while (q.Count > 0)
+        {
+            int x = q.Dequeue();
+            if (x == to) break;
+            foreach (var (t, rule) in _adjUnion[x])
+            {
+                if (seen[t]) continue;
+                seen[t] = true; prev[t] = x; via[t] = rule; q.Enqueue(t);
+            }
+        }
+        if (!seen[to]) return null;
+        var path = new List<int>();
+        for (int at = to; at >= 0; at = prev[at]) { path.Add(at); if (at == from) break; }
+        path.Reverse();
+        foreach (var at in path.Skip(1)) if (via[at] is not null) return via[at];
+        return null;
+    }
+
+    // -----------------------------------------------------------------------------------------------------
     //  Legality
     // -----------------------------------------------------------------------------------------------------
 
@@ -466,24 +678,43 @@ public sealed class OrderRuleSet
             if (pos[basePresent[i]] > pos[basePresent[i + 1]])
                 v.Add(new RuleViolation(EngineRule.BaseMasters,
                     $"'{basePresent[i]}' is at {pos[basePresent[i]]}, after '{basePresent[i + 1]}' at {pos[basePresent[i + 1]]}; the engine loads them the other way."));
+        // One prefix pass instead of a rescan per base master: how many non-base plugins sit before each index, and
+        // which one is first. Same two numbers the scan reported, because a reader acts on that sentence.
+        var nonBaseBefore = new int[candidate.Count + 1];
+        int firstNonBase = -1;
+        var masterPos = new List<int>();
+        for (int i = 0; i < candidate.Count; i++)
+        {
+            bool isBase = BaseSet.Contains(candidate[i]);
+            nonBaseBefore[i + 1] = nonBaseBefore[i] + (isBase ? 0 : 1);
+            if (!isBase && firstNonBase < 0) firstNonBase = i;
+            if (Headers.TryGetValue(candidate[i], out var hf) && hf is { MasterFlag: true }) masterPos.Add(i);
+        }
         foreach (var b in basePresent)
         {
-            var ahead = candidate.Take(pos[b]).Where(n => Array.FindIndex(EngineRule.BaseOrder, x => x.Equals(n, StringComparison.OrdinalIgnoreCase)) < 0).ToList();
-            if (ahead.Count > 0)
-                v.Add(new RuleViolation(EngineRule.BaseMasters,
-                    $"'{b}' is at {pos[b]}, behind {ahead.Count} plugin(s) that are not base-game masters (first: '{ahead[0]}'). The engine loads the base masters first."));
+            int aheadCount = nonBaseBefore[pos[b]];
+            if (aheadCount == 0) continue;
+            v.Add(new RuleViolation(EngineRule.BaseMasters,
+                $"'{b}' is at {pos[b]}, behind {aheadCount} plugin(s) that are not base-game masters (first: '{candidate[firstNonBase]}'). The engine loads the base masters first."));
         }
 
-        // the master / non-master grouping
+        // The master / non-master grouping. LINEAR: the master-flagged positions once, ascending (masterPos above), then
+        // a binary search per non-master plugin. The quadratic form of this test — rescanning the rest of the order for
+        // every non-master plugin — cost about 1.2 M dictionary lookups per check on a 1,700-plugin order, and the search
+        // calls Check twice per pair. The sentence is unchanged: the FIRST master-flagged plugin after it, and how many
+        // more, since that is what a reader moves.
         foreach (var name in candidate)
         {
             if (!Headers.TryGetValue(name, out var h) || h is null || h.MasterFlag) continue;
-            var mastersAfter = candidate.Skip(pos[name] + 1)
-                                        .Where(n => Headers.TryGetValue(n, out var hh) && hh is { MasterFlag: true }).ToList();
-            if (mastersAfter.Count == 0) continue;
+            int at = pos[name];
+            int k = masterPos.BinarySearch(at);
+            k = k < 0 ? ~k : k + 1;                                 // the first master-flagged position AFTER 'at'
+            int after = masterPos.Count - k;
+            if (after == 0) continue;
+            var first = candidate[masterPos[k]];
             v.Add(new RuleViolation(EngineRule.Groups,
-                $"'{name}' (not master-flagged, position {pos[name]}) loads ahead of master-flagged '{mastersAfter[0]}' (position {pos[mastersAfter[0]]})" +
-                (mastersAfter.Count > 1 ? $" and {mastersAfter.Count - 1} more" : "") +
+                $"'{name}' (not master-flagged, position {at}) loads ahead of master-flagged '{first}' (position {pos[first]})" +
+                (after > 1 ? $" and {after - 1} more" : "") +
                 ". The engine sorts masters first, so this is not the order the game would use."));
         }
 

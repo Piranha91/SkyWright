@@ -20,13 +20,21 @@ using HousecarlCore.Progress;
 //   candidate-NN-<slug>.json one CandidateFile each (_shared/Configuration.cs), the input a probe takes with
 //                            --order FILE.
 //
-// usage: orderprobe [--rules FILE] [--budget N] [--out DIR] [--instance DIR] [--profile NAME] [--game DIR]
+// usage: orderprobe [--rules FILE] [--budget N] [--min-contention N] [--out DIR] [--instance DIR] [--profile NAME]
+//                   [--game DIR]
 //
 //   --rules FILE   the ordering constraints, with provenance. Schema and the refusals are documented in the header
 //                  of _shared/OrderRules.cs — read it before writing one; advice without a source is refused.
+//                  Without one, nothing pins the user's hand-sorted positions and the run says so in a warning.
 //   --budget N     how many candidates to emit, baseline excluded (default 8). The outcome always says what the
 //                  budget cost: how many legal candidates were held back, and whether enumeration itself stopped
 //                  early. A search that stopped early reports its unexplored count as unknown, never as zero.
+//   --min-contention N  the least a pair of plugins must contest before the search spends a move on it. Default 0:
+//                  no threshold, every contested pair is walked heaviest-first until the enumeration cap — a pair
+//                  contesting one record can be the one that matters, so nothing is dropped for weight unless the
+//                  caller asks. Pass N to trade the light tail for speed (on a 1,700-plugin order, 10 roughly halves
+//                  the run); a pair a rule NAMES is exempt. What the threshold dropped is always printed and carried
+//                  in the manifest: pairs, edges and weight, never a silent filter.
 //   --out DIR      where the manifest and the candidate files go (default: ./orderprobe-out).
 //
 // WHAT IT DOES NOT DO, said here so nobody has to infer it:
@@ -35,6 +43,9 @@ using HousecarlCore.Progress;
 //   * it does not change asset priority. Every candidate's Mods is null, so the asset view stays the profile's,
 //     and the manifest says so under limits.
 //   * it compares LOOSE files only when looking for asset contention. BSA contents are not opened.
+//   * it does not reorder a pair whose order a hard rule already fixes, and it does not build a move for a pair that
+//     contests nothing or weighs less than --min-contention. Those pairs are COUNTED, by rule and by weight, and a
+//     reader can see how far down the weight the enumeration reached — they are not examined and found clean.
 
 using var __run = RunLog.BeginProcess("orderprobe", args);
 
@@ -44,6 +55,8 @@ string profileName = HarnessTarget.Profile;
 string? rulesPath = null;
 string outDir = Path.Combine(Directory.GetCurrentDirectory(), "orderprobe-out");
 int budget = 8;
+int minContention = 0;
+string minContentionSource = "default";
 
 for (int i = 0; i < args.Length; i++)
 {
@@ -56,6 +69,12 @@ for (int i = 0; i < args.Length; i++)
     {
         if (!int.TryParse(args[++i], out budget) || budget < 0)
         { Console.Error.WriteLine($"--budget needs a whole number of candidates (0 or more); got '{args[i]}'."); return 2; }
+    }
+    else if (args[i] == "--min-contention" && i + 1 < args.Length)
+    {
+        if (!int.TryParse(args[++i], out minContention) || minContention < 0)
+        { Console.Error.WriteLine($"--min-contention needs a whole number (0 or more; 0 turns the threshold off); got '{args[i]}'."); return 2; }
+        minContentionSource = "--min-contention";
     }
     else if (args[i].StartsWith("--"))
     { Console.Error.WriteLine($"unknown option '{args[i]}'. See the header of orderprobe/Program.cs for the flag list."); return 2; }
@@ -134,8 +153,9 @@ Console.WriteLine($"\nbaseline identity: {identity.Short}");
 //  The rules.
 // ---------------------------------------------------------------------------------------------------------
 ParsedRules parsed;
-try { parsed = rulesPath is null ? new ParsedRules(Array.Empty<OrderRule>(), Array.Empty<string>(), new[] { "no --rules file: only the engine's own rules apply" }) : OrderRules.ParseFile(rulesPath); }
+try { parsed = rulesPath is null ? ParsedRules.NoFile() : OrderRules.ParseFile(rulesPath); }
 catch (Exception ex) { Console.Error.WriteLine($"REFUSED to read the rules: {ex.Message}"); return 2; }
+if (rulesPath is null) Console.WriteLine($"   ! {OrderRules.NoRulesWarning}");
 
 var ruleSet = OrderRuleSet.Build(baseline, headers, parsed.Fixed, parsed.Rules);
 Console.WriteLine($"rules: {parsed.Rules.Count} from the file, {ruleSet.EngineRules.Count} derived from the plugins, {parsed.Fixed.Count} fixed");
@@ -258,8 +278,23 @@ var edgeList = edges.Values.OrderBy(e => e.A, StringComparer.OrdinalIgnoreCase)
                            .ThenBy(e => e.B, StringComparer.OrdinalIgnoreCase)
                            .ThenBy(e => e.Kind, StringComparer.Ordinal).ToList();
 __run.Stage("candidates", "building constrained alternatives", Math.Max(1, budget), "candidates");
-var report = OrderSearch.Run(ruleSet, edgeList, budget);
+var report = OrderSearch.Run(ruleSet, edgeList, budget, minContention: minContention, minContentionSource: minContentionSource);
 __run.Progress(report.Emitted);
+
+// What the search spent, always stated: which pairs never reached the enumeration and why, and how far down the weight
+// the enumeration got. A candidate list without these four lines cannot be told apart from one the cap chose.
+var s = report.Search;
+Console.WriteLine($"\nsearch: {s.EdgesSupplied} contention edge(s) over {s.PairsSupplied} pair(s) of plugins in this order");
+Console.WriteLine($"search: {s.OrderFixedPairs} pair(s) / {s.OrderFixedEdges} edge(s) / {s.OrderFixedContention} contention dropped — a hard rule already fixes their order, so both moves would be illegal"
+                + (s.OrderFixedByRule.Count == 0 ? "" : ": " + string.Join(", ", s.OrderFixedByRule.Select(r => $"{r.Rule} ({r.Pairs} pair(s), {r.Contention} contention)"))));
+foreach (var h in s.HeaviestOrderFixed.Take(3)) Console.WriteLine($"   heaviest dropped: {h}");
+Console.WriteLine($"search: the contention threshold is {s.MinContention} ({s.MinContentionSource}{(s.MinContention == 0 ? ", so no pair was dropped for weight" : "")}) — "
+                + $"{s.BelowThresholdPairs} pair(s) / {s.BelowThresholdEdges} edge(s) / {s.BelowThresholdContention} contention dropped below it, "
+                + $"{s.KeptByRulePairs} pair(s) under it kept because a rule names them");
+Console.WriteLine($"search: {s.PairsEnumerated} of {s.WeightedPairs} contested pair(s) enumerated heaviest-first, "
+                + $"reached contention {(s.ReachedContention?.ToString() ?? "none — no pair was enumerated")}, "
+                + $"{s.OrdersConstructed} order(s) constructed against a cap of {s.EnumerationCap}; "
+                + $"{s.NoContentionPairsNotBuilt} pair(s) inside a group contest nothing and were {OrderSearch.NoContentionNotBuilt}");
 
 Console.WriteLine($"\ngroups: {report.Groups.Count} interaction group(s) over {edgeList.Count} contention edge(s)");
 foreach (var g in report.Groups.Take(15))
@@ -322,6 +357,7 @@ var manifest = new OrderManifest(
     manifestCandidates,
     new ManifestBudget(budget, report.Result.ToString(), report.Emitted, report.GeneratedNotEmitted,
                        report.Unexplored, report.EnumerationCutShort, report.Outcome),
+    report.Search,
     report.RejectedMoves, report.Notes.Concat(warnings).ToList(), limits);
 
 var manifestPath = Path.Combine(outDir, "candidates.json");

@@ -69,9 +69,11 @@ static class OrderProof
         Plugin("D.esp", 0, "Skyrim.esm");
         Plugin("E.esp", 0, "Skyrim.esm");
         Plugin("F.esp", 0, "Skyrim.esm");
+        Plugin("G.esp", 0, "C.esp");                              // G declares C, which declares A: A -> C -> G
+        File.WriteAllText(Path.Combine(root, "Bad.esp"), "this is not a TES4 plugin");   // header unreadable on purpose
 
         var names = new[] { "Skyrim.esm", "Update.esm", "Dawnguard.esm", "Big.esm", "Flag.esp",
-                            "A.esp", "B.esp", "C.esp", "D.esp", "E.esp", "F.esp" };
+                            "A.esp", "B.esp", "C.esp", "D.esp", "E.esp", "F.esp", "G.esp" };
         var headers = new Dictionary<string, PluginHeader?>(StringComparer.OrdinalIgnoreCase);
         foreach (var n in names) headers[n] = PluginHeader.TryRead(Path.Combine(root, n));
         var baseline = names.ToList();
@@ -101,6 +103,18 @@ static class OrderProof
               !r.Legal && r.Violations.Any(v => v.Rule == EngineRule.Groups && v.Detail.Contains("A.esp") && v.Detail.Contains("Flag.esp")),
               r.Violations.FirstOrDefault(v => v.Rule == EngineRule.Groups)?.ToString() ?? "(no grouping violation)");
 
+        // The grouping test is LINEAR (one pass for the master-flagged positions, a binary search per plain plugin), and
+        // the sentence it writes is the part a reader acts on: the FIRST master-flagged plugin after the offender, its
+        // position, and how many more there are. A.esp before Big.esm puts it ahead of Big.esm AND Flag.esp — both
+        // numbers are hand-read off the order, not off the code.
+        r = plain.Check(OrderSearch.Move(baseline, "A.esp", "Big.esm", before: true));
+        Check("legality: one plain .esp ahead of TWO master-flagged plugins names the first and says 'and 1 more'",
+              r.Violations.Count == 1 && r.Violations[0].Rule == EngineRule.Groups
+              && r.Violations[0].Detail.Contains("(not master-flagged, position 3)")
+              && r.Violations[0].Detail.Contains("master-flagged 'Big.esm' (position 4)")
+              && r.Violations[0].Detail.Contains("and 1 more"),
+              r.Violations.FirstOrDefault()?.ToString() ?? "(no violation)");
+
         var movedBase = OrderSearch.Move(baseline, "Update.esm", "Dawnguard.esm", before: false);
         r = plain.Check(movedBase);
         Check("legality: a moved engine-fixed base master is refused, naming both",
@@ -124,8 +138,70 @@ static class OrderProof
         var fixedReport = OrderSearch.Run(fixedSet, new[] { new ContentionEdge("A.esp", "B.esp", "record", 4) }, 8);
         Check("fixed: a candidate that would move a fixed plugin is NEVER generated, and the refusal says which rule",
               fixedReport.Candidates.Count == 1 && fixedReport.Candidates[0].Name == "00-baseline"
-              && fixedReport.RejectedMoves.Any(m => m.Contains("fixed: 'B.esp'")),
-              fixedReport.RejectedMoves.FirstOrDefault() ?? "(nothing rejected)");
+              && fixedReport.Search.OrderFixedPairs == 1
+              && fixedReport.Search.OrderFixedByRule.Any(x => x.Rule == "fixed: 'B.esp'")
+              && fixedReport.Search.HeaviestOrderFixed.Any(h => h.Contains("fixed: 'B.esp'")),
+              fixedReport.Search.HeaviestOrderFixed.FirstOrDefault() ?? "(nothing dropped)");
+
+        // ---- pairs whose order is already fixed ----------------------------------------------------------------
+        // The question is not "is this order legal" but "could ANY legal candidate reverse these two". Every answer
+        // below is read off the fixture by hand: the base masters' own block, the pins in the rules file, the ESM flag
+        // bit, and the master tables A <- C <- G.
+        Check("order-fixed: two base-game masters are fixed against each other, by the base-master rule",
+              plain.OrderFixedBy("Skyrim.esm", "Update.esm") == EngineRule.BaseMasters,
+              plain.OrderFixedBy("Skyrim.esm", "Update.esm") ?? "(movable)");
+        Check("order-fixed: a base-game master against a plain .esp is fixed — the base masters lead everything",
+              plain.OrderFixedBy("Skyrim.esm", "A.esp") == EngineRule.BaseMasters
+              && plain.OrderFixedBy("A.esp", "Skyrim.esm") == EngineRule.BaseMasters,
+              "and the answer does not depend on which way round the caller asked");
+        Check("order-fixed: a master-flagged .esp against a plain .esp is fixed by the GROUPING rule, not by a master table",
+              plain.OrderFixedBy("Flag.esp", "A.esp") == EngineRule.Groups,
+              plain.OrderFixedBy("Flag.esp", "A.esp") ?? "(movable)");
+        Check("order-fixed: a plugin's declared master is fixed against it",
+              plain.OrderFixedBy("A.esp", "C.esp") == EngineRule.Masters,
+              plain.OrderFixedBy("A.esp", "C.esp") ?? "(movable)");
+        Check("order-fixed: the master closure is TRANSITIVE — G declares C, C declares A, so A and G are fixed too",
+              plain.OrderFixedBy("A.esp", "G.esp") == EngineRule.Masters
+              && plain.OrderFixedBy("G.esp", "A.esp") == EngineRule.Masters
+              && !headers["G.esp"]!.Masters.Contains("A.esp"),
+              "G.esp's own master table names only C.esp, so a pair-by-pair test would have called this movable");
+        Check("order-fixed: the negative control — two plain .esps with no rule between them are MOVABLE",
+              plain.OrderFixedBy("A.esp", "B.esp") is null && plain.Check(OrderSearch.Move(baseline, "B.esp", "A.esp", before: true)).Legal,
+              "and Check agrees: the reversed order is legal");
+        Check("order-fixed: the second negative control — two master-flagged plugins with no master table between them are MOVABLE",
+              plain.OrderFixedBy("Big.esm", "Flag.esp") is null,
+              "both load in the master block; the grouping rule is a rank, and a rank does not order within itself");
+
+        Check("order-fixed: a pinned plugin is fixed against everything, and the rule names it",
+              fixedSet.OrderFixedBy("A.esp", "B.esp") == "fixed: 'B.esp'" && fixedSet.OrderFixedBy("B.esp", "E.esp") == "fixed: 'B.esp'",
+              fixedSet.OrderFixedBy("A.esp", "B.esp") ?? "(movable)");
+        var twoPinned = OrderRuleSet.Build(baseline, headers, new[] { "E.esp", "B.esp" }, Array.Empty<OrderRule>());
+        Check("order-fixed: with BOTH pinned the rule named is the same whichever way round the pair is asked",
+              twoPinned.OrderFixedBy("E.esp", "B.esp") == "fixed: 'B.esp'" && twoPinned.OrderFixedBy("B.esp", "E.esp") == "fixed: 'B.esp'",
+              twoPinned.OrderFixedBy("E.esp", "B.esp") ?? "(movable)");
+
+        var requiredDE = OrderRuleSet.Build(baseline, headers, Array.Empty<string>(),
+            new[] { new OrderRule("D.esp", "E.esp", RuleHardness.Required, "t #0", null, "D must lose to E") });
+        Check("order-fixed: a REQUIRED input rule fixes its pair, and the answer names that rule",
+              requiredDE.OrderFixedBy("D.esp", "E.esp") == "required: 'D.esp' before 'E.esp' [t #0]"
+              && requiredDE.OrderFixedBy("E.esp", "D.esp") == "required: 'D.esp' before 'E.esp' [t #0]",
+              requiredDE.OrderFixedBy("D.esp", "E.esp") ?? "(movable)");
+        Check("order-fixed: a required rule fixes ITS pair only — D against F is still movable",
+              requiredDE.OrderFixedBy("D.esp", "F.esp") is null, "no chain of rules or masters reaches from one to the other");
+
+        // An unreadable header makes NO claim. It must not be read as "not master-flagged" (which would fix it against
+        // every master) and it declares nothing. The rules that do not need a header still apply.
+        var badNames = baseline.Append("Bad.esp").ToList();
+        var badHeaders = new Dictionary<string, PluginHeader?>(headers, StringComparer.OrdinalIgnoreCase)
+        { ["Bad.esp"] = PluginHeader.TryRead(Path.Combine(root, "Bad.esp")) };
+        var badSet = OrderRuleSet.Build(badNames, badHeaders, Array.Empty<string>(), Array.Empty<OrderRule>());
+        Check("order-fixed: an UNREADABLE header fixes nothing by the grouping or master rules, and Check agrees",
+              badHeaders["Bad.esp"] is null && badSet.OrderFixedBy("Bad.esp", "Flag.esp") is null
+              && badSet.Check(OrderSearch.Move(badNames, "Bad.esp", "Flag.esp", before: true)).Legal,
+              "a null header is not 'not master-flagged', and the move it would forbid is in fact legal");
+        Check("order-fixed: the rules that need no header still fire against an unreadable one",
+              badSet.OrderFixedBy("Bad.esp", "Skyrim.esm") == EngineRule.BaseMasters,
+              badSet.OrderFixedBy("Bad.esp", "Skyrim.esm") ?? "(movable)");
 
         // ---- the rules file ------------------------------------------------------------------------------------
         const string anon = """
@@ -162,6 +238,16 @@ static class OrderProof
         try { OrderRules.Parse("""{ "schemaVersion": 2, "rules": [] }""", "t"); }
         catch (InvalidDataException ex) { schemaMsg = ex.Message; }
         Check("rules: a future schema is refused rather than read with today's meanings", schemaMsg.Contains("schema"), schemaMsg);
+
+        // The path orderprobe takes when nobody passed --rules. Pinned here rather than left to a literal at the call
+        // site: without a rules file nothing holds the user's hand-sorted positions, and a run that does not SAY so
+        // hands back candidates that move plugins the user meant to stay put.
+        var noFile = ParsedRules.NoFile();
+        Check("rules: the no-file path carries the warning that nothing pins the user's hand-sorted positions",
+              noFile.Rules.Count == 0 && noFile.Fixed.Count == 0
+              && noFile.Notes.Any(n => n == OrderRules.NoRulesWarning)
+              && OrderRules.NoRulesWarning.Contains("fixed"),
+              noFile.Notes.FirstOrDefault() ?? "(no note)");
 
         var anonRequired = OrderRules.Parse("""{ "schemaVersion": 1, "rules": [ { "before": "A.esp", "after": "B.esp", "hardness": "required" } ] }""", "t");
         Check("rules: an anonymous REQUIRED rule is accepted but noted as anonymous, never silently equal to a sourced one",
@@ -226,8 +312,8 @@ static class OrderProof
         Check("search: the negative control — with B before C REQUIRED, the reversed order is illegal and never a candidate",
               !requiredBC.Check(OrderSearch.Move(baseline, "C.esp", "B.esp", before: true)).Legal
               && !negative.Candidates.Any(c => Index(c.Plugins, "C.esp") < Index(c.Plugins, "B.esp"))
-              && negative.RejectedMoves.Any(m => m.Contains("t #0")),
-              negative.RejectedMoves.FirstOrDefault() ?? "(nothing rejected)");
+              && negative.Search.OrderFixedByRule.Any(x => x.Rule.Contains("t #0")),
+              negative.Search.HeaviestOrderFixed.FirstOrDefault() ?? "(nothing dropped)");
 
         // D, E, F sit adjacent at the end of the baseline, so the pair distances are 1, 1 and 2 by construction.
         // Every edge weighs the SAME here, so displacement is the only thing left to sort on — the two cases after
@@ -299,9 +385,34 @@ static class OrderProof
               $"first: {outranksFirst.Changes[0]} (contested {outranksFirst.Contention}, displaced {outranksFirst.Displaced}); " +
               $"second displaced {outranks.Candidates[2].Displaced}, contested {outranks.Candidates[2].Contention}");
 
-        Check("search: contention comes from the edges the CALLER supplies — no edge between a pair means weight 0, never a guess",
-              outranks.Candidates.Skip(1).Any(c => c.Moves.Count == 1 && c.Contention == 0),
-              "E.esp and F.esp share no edge; they are in the group only through D.esp");
+        // Weight still comes from the caller's edges and nowhere else — and a pair the caller gave no edge for is now
+        // not built at all rather than built at weight 0. E and F are in the group only through D, so a move between
+        // them would change no winner between them; the count of such pairs is reported rather than hidden.
+        Check("search: contention comes from the edges the CALLER supplies — a pair with no edge is not built, and is counted",
+              outranks.Search.NoContentionPairsNotBuilt == 1
+              && !outranks.Candidates.Any(c => c.Moves.Any(m => PairIs(m, "E.esp", "F.esp")))
+              && outranks.Notes.Any(n => n.Contains(OrderSearch.NoContentionNotBuilt)),
+              $"E.esp and F.esp share no edge; they are in the group only through D.esp — {outranks.Search.NoContentionPairsNotBuilt} pair(s) not built, " +
+              $"{outranks.Search.WeightedPairs} weighted pair(s) walked");
+
+        // One direction of a pair can be illegal on its own: A sits at 5 and D at 8, and C declares A, so moving A to
+        // sit after D would put it behind its own dependent. The search must take the other direction and carry THAT
+        // order's legality — the candidate's own Legality is what the manifest and the console column report, and since
+        // the legality is computed by the caller and handed to the candidate, a swap would tell a reader the order being
+        // offered is illegal.
+        var oneWay = OrderSearch.Run(pairSet, new[] { new ContentionEdge("A.esp", "D.esp", "record", 30) }, 8);
+        var oneWayCand = oneWay.Candidates.Skip(1).FirstOrDefault();
+        Check("search: when only one direction is legal, that one is the candidate and the other way is named as refused",
+              oneWayCand is not null && oneWayCand.Moves[0].Moved == "D.esp" && oneWayCand.Moves[0].Placement == "before"
+              && oneWayCand.Legality.Legal && pairSet.Check(oneWayCand.Plugins).Legal
+              && !pairSet.Check(OrderSearch.Move(baseline, "A.esp", "D.esp", before: false)).Legal
+              && oneWay.RejectedMoves.Any(m => m.Contains("A.esp") && m.Contains(EngineRule.Masters)),
+              $"{oneWayCand?.Changes[0] ?? "(no candidate)"} — {oneWay.RejectedMoves.FirstOrDefault() ?? "(nothing rejected)"}");
+        Check("search: every emitted candidate's Legality is the legality of the order it actually ships",
+              new[] { oneWay, trioReport, tie, outranks }.All(rep => rep.Candidates.All(c =>
+                  c.Legality.Legal == pairSet.Check(c.Plugins).Legal
+                  && c.Legality.Violations.Count == pairSet.Check(c.Plugins).Violations.Count)),
+              "checked against a fresh Check of each candidate's own plugin list, not against the one the search held");
 
         // ---- the budget ----------------------------------------------------------------------------------------
         var tight = OrderSearch.Run(pairSet, trio, 1);
@@ -322,6 +433,93 @@ static class OrderProof
               capped.EnumerationCutShort && capped.Unexplored == "unknown"
               && capped.Notes.Any(n => n.Contains("unknown")), capped.Notes.FirstOrDefault() ?? "");
 
+        // ---- the prune, and what the enumeration spends its cap on ---------------------------------------------
+        // A pair a hard rule already orders has no search value — both moves are illegal, always — and on a real order
+        // those pairs carry the heaviest weight, because a master is contested by everything that overrides it. Here
+        // the heavy pair is A <- C (a declared master at 500) and the Skyrim.esm pair (a base master, 3 + 2 over two
+        // edges); the only movable pair weighs 20, and it is the one the search must spend its moves on.
+        var pruneEdges = new[]
+        {
+            new ContentionEdge("A.esp", "C.esp", "record", 500),
+            new ContentionEdge("Skyrim.esm", "A.esp", "record", 3),
+            new ContentionEdge("Skyrim.esm", "A.esp", "asset", 2),
+            new ContentionEdge("D.esp", "E.esp", "record", 20),
+        };
+        var pruned = OrderSearch.Run(pairSet, pruneEdges, 8);
+        var byMasters = pruned.Search.OrderFixedByRule.FirstOrDefault(x => x.Rule == EngineRule.Masters);
+        var byBase = pruned.Search.OrderFixedByRule.FirstOrDefault(x => x.Rule == EngineRule.BaseMasters);
+        Check("prune: the pairs a hard rule already orders are dropped before grouping, counted by rule and by weight",
+              pruned.Search.EdgesSupplied == 4 && pruned.Search.PairsSupplied == 3
+              && pruned.Search.OrderFixedPairs == 2 && pruned.Search.OrderFixedEdges == 3 && pruned.Search.OrderFixedContention == 505
+              && byMasters is { Pairs: 1, Edges: 1, Contention: 500 } && byBase is { Pairs: 1, Edges: 2, Contention: 5 },
+              $"{pruned.Search.OrderFixedPairs} pair(s) / {pruned.Search.OrderFixedEdges} edge(s) / {pruned.Search.OrderFixedContention} contention; " +
+              string.Join(" | ", pruned.Search.OrderFixedByRule.Select(x => $"{x.Rule} = {x.Pairs}/{x.Edges}/{x.Contention}")));
+        Check("prune: the heaviest dropped pair is named with its weight and its rule, so the weight is not silently gone",
+              pruned.Search.HeaviestOrderFixed.Count == 2
+              && pruned.Search.HeaviestOrderFixed[0] == $"A.esp | C.esp | 500 | {EngineRule.Masters}",
+              string.Join(" ;; ", pruned.Search.HeaviestOrderFixed));
+        Check("prune: a dropped pair enters no interaction group and no candidate — the 20 pair is candidate 1",
+              pruned.Groups.Count == 1 && pruned.Groups[0].Members.SequenceEqual(new[] { "D.esp", "E.esp" })
+              && pruned.Candidates.Count >= 2 && pruned.Candidates[1].Contention == 20
+              && Index(pruned.Candidates[1].Plugins, "E.esp") < Index(pruned.Candidates[1].Plugins, "D.esp")
+              && pruned.Candidates.Skip(1).All(c => c.Moves.All(m => m.Moved != "A.esp" && m.Moved != "C.esp" && m.Moved != "Skyrim.esm")),
+              $"groups [{string.Join(",", pruned.Groups.Select(g => g.Key))}]; candidate 1: {pruned.Candidates.ElementAtOrDefault(1)?.Changes[0] ?? "(none)"}");
+
+        // Heaviest-first, globally. 50, 20 and 5 over three movable pairs: with a cap that allows exactly one pair's two
+        // constructions, the 50 pair is the one that gets built — under a per-group walk in index order it would have
+        // been D|E, because D sorts first. The reached contention says where the walk stopped.
+        var weighted = new[]
+        {
+            new ContentionEdge("E.esp", "F.esp", "record", 50),
+            new ContentionEdge("D.esp", "E.esp", "record", 20),
+            new ContentionEdge("D.esp", "F.esp", "record", 5),
+        };
+        var capOne = OrderSearch.Run(pairSet, weighted, 8, enumerationCap: 2);
+        Check("heaviest-first: with room for one pair only, the HEAVIEST pair is the one built",
+              capOne.Search.WeightedPairs == 3 && capOne.Search.PairsEnumerated == 1
+              && capOne.Emitted == 1 && capOne.Candidates[1].Contention == 50
+              && capOne.Candidates[1].Moves[0].Moved == "F.esp" && capOne.Candidates[1].Moves[0].Reference == "E.esp"
+              && !capOne.Candidates.Any(c => c.Moves.Any(m => m.Moved == "D.esp" || m.Reference == "D.esp")),
+              $"{capOne.Search.PairsEnumerated} of {capOne.Search.WeightedPairs} pair(s) enumerated: {capOne.Candidates.ElementAtOrDefault(1)?.Changes[0] ?? "(none)"}");
+        Check("heaviest-first: the cut-short walk reports the weight it REACHED, and the rest as unknown rather than absent",
+              capOne.Search.ReachedContention == 50 && capOne.EnumerationCutShort && capOne.Unexplored == "unknown",
+              $"reached {capOne.Search.ReachedContention}, unexplored {capOne.Unexplored}");
+        var capNone = OrderSearch.Run(pairSet, weighted, 8);
+        Check("heaviest-first: a walk that completes reaches the LIGHTEST pair, and then nothing is unexplored",
+              capNone.Search.PairsEnumerated == 3 && capNone.Search.ReachedContention == 5
+              && !capNone.EnumerationCutShort && capNone.Unexplored == "0" && capNone.Candidates.Count >= 4
+              && capNone.Candidates[1].Contention == 50 && capNone.Candidates[2].Contention == 20 && capNone.Candidates[3].Contention == 5,
+              $"reached {capNone.Search.ReachedContention}; emitted contention " +
+              string.Join(", ", capNone.Candidates.Skip(1).Take(3).Select(c => c.Contention)));
+
+        // The threshold. It is a statement about what is worth a move, so what it dropped is reported in the same three
+        // numbers as the rule prune — and a pair a RULE names is exempt, because a rule is the caller saying the pair
+        // matters whatever the files weigh.
+        var thresholded = OrderSearch.Run(pairSet, weighted, 8, minContention: 10, minContentionSource: "--min-contention");
+        Check("threshold: a pair below --min-contention is dropped, counted, and its weight reported",
+              thresholded.Search.MinContention == 10 && thresholded.Search.MinContentionSource == "--min-contention"
+              && thresholded.Search.BelowThresholdPairs == 1 && thresholded.Search.BelowThresholdEdges == 1
+              && thresholded.Search.BelowThresholdContention == 5 && thresholded.Search.WeightedPairs == 2
+              && !thresholded.Candidates.Any(c => c.Moves.Any(m => PairIs(m, "D.esp", "F.esp"))),
+              $"{thresholded.Search.BelowThresholdPairs} pair(s) / {thresholded.Search.BelowThresholdContention} contention dropped, " +
+              $"{thresholded.Search.WeightedPairs} pair(s) left");
+        var noThreshold = OrderSearch.Run(pairSet, weighted, 8, minContention: 0);
+        Check("threshold: 0 means no threshold — every pair survives and the source of the number is reported",
+              noThreshold.Search.BelowThresholdPairs == 0 && noThreshold.Search.WeightedPairs == 3
+              && noThreshold.Search.MinContention == 0 && noThreshold.Search.MinContentionSource == "default",
+              $"{noThreshold.Search.WeightedPairs} weighted pair(s)");
+        var namedPair = OrderSearch.Run(pairSet, new[]
+        {
+            new ContentionEdge("E.esp", "F.esp", "record", 50),
+            new ContentionEdge("A.esp", "B.esp", "explicit", 1),
+        }, 8, minContention: 10);
+        Check("threshold: a pair a RULE names survives the threshold it is under, and is counted as kept by that rule",
+              namedPair.Search.KeptByRulePairs == 1 && namedPair.Search.BelowThresholdPairs == 0
+              && namedPair.Search.WeightedPairs == 2
+              && namedPair.Candidates.Skip(1).Any(c => c.Moves.Count == 1 && PairIs(c.Moves[0], "A.esp", "B.esp")),
+              $"{namedPair.Search.KeptByRulePairs} pair(s) kept by a rule; candidates " +
+              string.Join(" | ", namedPair.Candidates.Skip(1).Select(c => c.Changes[0])));
+
         // ---- determinism ---------------------------------------------------------------------------------------
         var m1 = BuildManifest(root, baseline, headers, trio, parsed);
         var m2 = BuildManifest(root, baseline, headers, trio, parsed);
@@ -330,6 +528,27 @@ static class OrderProof
         var shuffled = Enumerable.Reverse(trio).ToArray();
         Check("determinism: the same inputs in a different ARRIVAL order still produce the identical manifest",
               BuildManifest(root, baseline, headers, shuffled, parsed) == m1, "groups and candidates do not depend on edge order");
+
+        // The prune and the walk are only reportable if they reach the file a consumer reads. ordersweep reads this JSON
+        // as a dictionary, so the proof is on the bytes, not on the record in memory.
+        string searchSection = "(unreadable)";
+        bool searchOk = false;
+        try
+        {
+            using var doc = System.Text.Json.JsonDocument.Parse(m1);
+            var sec = doc.RootElement.GetProperty("Search");
+            searchSection = sec.ToString().Replace("\n", " ").Replace("\r", "");
+            searchOk = sec.GetProperty("MinContention").GetInt32() == 0
+                    && sec.GetProperty("MinContentionSource").GetString() == "default"
+                    && sec.GetProperty("WeightedPairs").GetInt32() == 3
+                    && sec.GetProperty("PairsEnumerated").GetInt32() == 3
+                    && sec.GetProperty("ReachedContention").GetInt32() == 1
+                    && sec.GetProperty("NoContentionPairsNotBuilt").GetInt64() == 0
+                    && sec.GetProperty("OrderFixedPairs").GetInt32() == 0;
+        }
+        catch (Exception ex) { searchSection = $"threw: {ex.Message}"; }
+        Check("manifest: the Search section reaches the written JSON, with the threshold, the walk and the prune in it",
+              searchOk, searchSection.Length > 400 ? searchSection[..400] : searchSection);
 
         // ---- the configuration identity ------------------------------------------------------------------------
         ConfigPlugin P(string n) => new(n, Path.Combine(root, n), ConfigurationIdentity.Sha256File(Path.Combine(root, n)),
@@ -353,6 +572,11 @@ static class OrderProof
         for (int i = 0; i < order.Count; i++) if (order[i].Equals(name, StringComparison.OrdinalIgnoreCase)) return i;
         return -1;
     }
+
+    /// <summary>Whether a move is the one that reverses {x, y} — the move's own pair, whichever of the two it moved.</summary>
+    static bool PairIs(CandidateMove m, string x, string y) =>
+        (m.Moved.Equals(x, StringComparison.OrdinalIgnoreCase) && m.Reference.Equals(y, StringComparison.OrdinalIgnoreCase))
+     || (m.Moved.Equals(y, StringComparison.OrdinalIgnoreCase) && m.Reference.Equals(x, StringComparison.OrdinalIgnoreCase));
 
     /// <summary>The manifest orderprobe writes, built from the same parts, so determinism is proven on the bytes a
     /// consumer actually reads rather than on a hash of the search's internals.</summary>
@@ -383,6 +607,7 @@ static class OrderProof
                 c.ViolatesAdvice.Select(x => x.Full).ToList())).ToList(),
             new ManifestBudget(8, report.Result.ToString(), report.Emitted, report.GeneratedNotEmitted,
                                report.Unexplored, report.EnumerationCutShort, report.Outcome),
+            report.Search,
             report.RejectedMoves, report.Notes, new[] { "synthetic fixture" });
         return manifest.Serialize();
     }
