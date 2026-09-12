@@ -3570,6 +3570,7 @@ OcclusionGeometryProof.Run(Check);
 MaterialScaleProof.Run(Check);
 PopulationProof.Run(Check);
 OrderProof.Run(Check);
+AdviceProof.Run(Check);
 ProofProbe.ConfigurationProof.Run(Check);
 
 Console.WriteLine();

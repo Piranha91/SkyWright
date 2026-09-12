@@ -16,6 +16,7 @@
     <Compile Include="..\_shared\Configuration.cs" Link="Configuration.cs" />
     <Compile Include="..\_shared\OrderRules.cs" Link="OrderRules.cs" />
     <Compile Include="..\_shared\OrderSearch.cs" Link="OrderSearch.cs" />
+    <Compile Include="..\_shared\OrderAdvice.cs" Link="OrderAdvice.cs" />
   </ItemGroup>
   <ItemGroup>
     <Compile Include="..\_shared\FomodModel.cs" Link="FomodModel.cs" />
