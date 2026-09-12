@@ -57,8 +57,12 @@ from runlog import Run, Runner  # noqa: E402
 sys.path.insert(0, str(HERE))
 import evalregistry  # noqa: E402
 
-SCHEMA_VERSION = 1
-BUNDLE_SCHEMA = 1
+#: Schema 2 is the evidence-chain schema: the plan freezes a per-arm REQUESTED identity, receipts record
+#: their comparison inputs, and finalize/bundle/verify walk the receipt-to-evidence chain. A schema-1
+#: artifact carries none of that, so it is refused BY NAME rather than certified by a reader that would
+#: silently find nothing to check.
+SCHEMA_VERSION = 2
+BUNDLE_SCHEMA = 2
 
 # Exit codes, spelled once.
 EXIT_OK = 0
@@ -113,6 +117,57 @@ def sha256_file(p: Path) -> str | None:
 
 def sha256_text(text: str) -> str:
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
+SHA256_RE = re.compile(r"^[0-9a-fA-F]{64}$")
+
+
+def is_sha256(value) -> bool:
+    return isinstance(value, str) and bool(SHA256_RE.match(value))
+
+
+#: The configuration schema the fingerprint text is keyed on (`ConfigurationIdentity.CurrentSchema`).
+CONFIG_SCHEMA = 1
+
+
+def configuration_fingerprint(plugins, providers, overlays, population, state, schema=None) -> str:
+    """`ConfigurationIdentity.Compute`'s canonical text, line for line.
+
+    The one fingerprint rule lives in `_geometry-harness/_shared/Configuration.cs`
+    (`ConfigurationIdentity.Compute`); this function is its only Python spelling in this controller, so
+    a second convention cannot be invented here. The text is: `schema:<n>`, `population:<p>`,
+    `state:<s>`, then one `plugin:<lowercase name>:<sha256>` per plugin IN ORDER, one
+    `provider:<kind>:<lowercase name>` per provider, one `overlay:<kind>:<sha256>` per overlay; every
+    line newline-terminated; the digest is sha256 hex, lower case. Paths are NOT in the text — names
+    and content hashes are."""
+    sb = [f"schema:{CONFIG_SCHEMA if schema is None else schema}\n",
+          f"population:{population}\n", f"state:{state}\n"]
+    for p in plugins or []:
+        sb.append(f"plugin:{str(p.get('name') or '').lower()}:{p.get('sha256') or ''}\n")
+    for v in providers or []:
+        sb.append(f"provider:{v.get('kind') or ''}:{str(v.get('name') or '').lower()}\n")
+    for o in overlays or []:
+        sb.append(f"overlay:{o.get('kind') or ''}:{o.get('sha256') or ''}\n")
+    return hashlib.sha256("".join(sb).encode("utf-8")).hexdigest()
+
+
+class HashMemo:
+    """One hash per (resolved path, size, mtime) per invocation: re-checking 80 plugins across 60
+    receipts reads each file once, not sixty times."""
+
+    def __init__(self):
+        self.cache: dict = {}
+
+    def sha256(self, p) -> str | None:
+        p = Path(p)
+        try:
+            st = p.stat()
+            key = (str(p.resolve()), st.st_size, st.st_mtime_ns)
+        except OSError:
+            return None
+        if key not in self.cache:
+            self.cache[key] = sha256_file(p)
+        return self.cache[key]
 
 
 def canonical(obj) -> str:
@@ -346,6 +401,16 @@ def read_candidate(p: Path) -> dict | None:
     return doc if isinstance(doc, dict) else None
 
 
+def requested_plugin(name, scope_plugins: dict) -> dict:
+    """One row of D1's requested plugin list. The hash is looked up in the MEASURED scope by
+    case-insensitive name; a name the scope does not list — a supplied plugin, or one the profile does
+    not load — is `unstated` with a null hash, never a hash invented from somewhere else."""
+    row = scope_plugins.get(Path(str(name)).name.lower()) or {}
+    sha = row.get("sha256") if is_sha256(row.get("sha256")) else None
+    return {"name": str(name), "sha256": sha, "path": row.get("path"),
+            "hashSource": "scope" if sha else "unstated"}
+
+
 def cmd_plan(a) -> int:
     run = Path(a.out)
     registry_path = Path(a.registry)
@@ -410,6 +475,13 @@ def cmd_plan(a) -> int:
             "name": p.get("name", p.get("Name")), "path": p.get("path", p.get("Path")),
             "sha256": p.get("sha256", p.get("Sha256"))}
     population = cfg.get("population", cfg.get("Population")) or "load-time"
+    # D1: the scope's providers and overlays are part of the REQUEST, not decoration. A provider list
+    # the plan never recorded cannot be compared to what a child says it read.
+    scope_providers = [{"name": v.get("name", v.get("Name")), "kind": v.get("kind", v.get("Kind"))}
+                       for v in (cfg.get("providers", cfg.get("Providers", [])) or [])]
+    scope_overlays = [{"kind": o.get("kind", o.get("Kind")), "path": o.get("path", o.get("Path")),
+                       "sha256": o.get("sha256", o.get("Sha256"))}
+                      for o in (cfg.get("overlays", cfg.get("Overlays", [])) or [])]
 
     states = [s.strip() for s in (a.states or "baseline").split(",") if s.strip()] or ["baseline"]
 
@@ -439,6 +511,17 @@ def cmd_plan(a) -> int:
             "loadedInGameNote": "offline hypothetical configuration; not verified loaded in game",
             "expected": {"population": population, "states": states},
             "heldBack": cand.name in held_back,
+            # D1: the frozen REQUEST for this arm — the plugin names in the candidate file's order,
+            # each with the hash the scope states for it (or an explicit `unstated`), the scope's
+            # overlays and providers, and the population and states the plan selected. Every accepted
+            # receipt on this arm is bound to THIS, not to whichever receipt happened to arrive first.
+            "requested": {
+                "plugins": [requested_plugin(n, scope_plugins) for n in plugins],
+                "overlays": [dict(o) for o in scope_overlays],
+                "providers": [dict(v) for v in scope_providers],
+                "population": population,
+                "states": list(states),
+            },
         }
         if kind == "supplied-combination":
             rec["supplied"] = {"declaredFiles": declared or [], "payloadMissing": payload_missing,
@@ -656,7 +739,8 @@ def cmd_plan(a) -> int:
                           "source": cfg.get("source", cfg.get("Source")),
                           "population": population,
                           "plugins": list(scope_plugins.values()),
-                          "overlays": cfg.get("overlays", cfg.get("Overlays", []) or [])},
+                          "providers": scope_providers,
+                          "overlays": scope_overlays},
         "candidatesDir": str(cdir),
         "arms": arms,
         "states": {"selected": states, "notExplored": states_not_explored},
@@ -720,19 +804,60 @@ def set_run_store(run: Path) -> None:
 
 
 def load_plan(run: Path) -> tuple[dict | None, str | None]:
-    """The plan, or the reason it is refused. Immutability is checked here and nowhere else."""
+    """The plan, or the reason it is refused, as `<cause>: <detail>`. Immutability and the schema
+    version are checked here and nowhere else."""
     p = Path(run) / "plan.json"
     if not p.exists():
-        return None, f"{p} does not exist: this is not an evalrun RUN directory"
+        return None, f"plan-missing: {p} does not exist: this is not an evalrun RUN directory"
     recorded = (Path(run) / "plan.sha256")
     if not recorded.exists():
-        return None, f"{recorded} is missing: the plan's immutability cannot be checked (plan-changed)"
+        return None, f"plan-changed: {recorded} is missing, so the plan's immutability cannot be checked"
     if sha256_file(p) != recorded.read_text(encoding="utf-8").strip():
         return None, "plan-changed: plan.json no longer hashes to plan.sha256"
     doc = load_json(p)
     if not isinstance(doc, dict):
-        return None, f"{p} is not readable as JSON"
+        return None, f"plan-unreadable: {p} is not readable as JSON"
+    # A-1: a plan written before the evidence-chain schema carries no per-arm `requested` identity, so
+    # nothing in it can bind a receipt to what was asked for. Refused by name, never read anyway.
+    if doc.get("schemaVersion") != SCHEMA_VERSION:
+        return None, (f"plan-schema-unsupported: plan.json declares schemaVersion "
+                      f"{doc.get('schemaVersion')!r}; this controller reads {SCHEMA_VERSION}. A schema-1 "
+                      f"plan carries no per-arm requested identity, so an accepted receipt could not be "
+                      f"bound to the configuration the arm asked for. Next action: plan again from the "
+                      f"same registry, scope and candidates.")
     return doc, None
+
+
+def refusal_cause(why: str) -> str:
+    """The cause word out of a `<cause>: <detail>` refusal, for the disposition's `refused` field."""
+    head = str(why or "").split(":", 1)[0].strip()
+    return head if re.fullmatch(r"[a-z][a-z-]*", head or "") else "plan-changed"
+
+
+def premise_refusal(plan: dict) -> str | None:
+    """D5: the registry and the scope are PREMISES of a frozen plan, not inputs a verb may re-read.
+    A checklist or a measured scope that changed after the plan froze changes which checks apply, and
+    that is a new plan — never reuse of the old applicability."""
+    reg = Path(plan["registry"]["path"])
+    nxt = "Next action: re-run scopeprobe and plan again."
+    if not reg.exists():
+        return (f"registry-missing: the plan's registry {reg} does not exist, so the checklist this run "
+                f"was derived from cannot be re-read. {nxt}")
+    if sha256_file(reg) != plan["registry"]["sha256"]:
+        return (f"registry-changed: {reg} now hashes {str(sha256_file(reg))[:12]}, the plan recorded "
+                f"{plan['registry']['sha256'][:12]}. A checklist cannot change under a frozen plan. {nxt}")
+    spath = (plan.get("scope") or {}).get("path")
+    if not spath:
+        return None  # a plan made without --scope has no scope premise
+    sp = Path(spath)
+    if not sp.exists():
+        return (f"scope-missing: the plan's scope {sp} does not exist, so the applicability this plan "
+                f"froze cannot be re-derived. {nxt}")
+    got = sha256_file(sp)
+    if got != plan["scope"]["sha256"]:
+        return (f"scope-changed: {sp} now hashes {str(got)[:12]}, the plan recorded "
+                f"{str(plan['scope']['sha256'])[:12]}. A scope change changes the checklist. {nxt}")
+    return None
 
 
 # ------------------------------------------------------------------- ledger and journal (D5) --
@@ -776,6 +901,7 @@ class Ledger:
                 self.doc["entries"][k] = {
                     "checkId": ev.get("checkId"), "armId": ev.get("armId"), "part": ev.get("part"),
                     "status": ev.get("to"), "cause": ev.get("cause"),
+                    "detail": ev.get("detail"), "nextAction": ev.get("nextAction"),
                     "receiptId": ev.get("receiptId"), "runId": ev.get("runId"),
                     "receiptPath": f"receipts/{k}.json", "updatedUtc": ev.get("t")}
         self.save()
@@ -792,12 +918,14 @@ class Ledger:
     def transition(self, check_id: str, arm_id: str, part: str | None, to: str, *,
                    cause: str | None = None, receipt_id: str | None = None,
                    detector: str | None = None, extra: dict | None = None,
-                   rejections: list | None = None) -> None:
+                   rejections: list | None = None, detail: str | None = None,
+                   next_action: str | None = None) -> None:
         k = self.key(check_id, arm_id, part)
         prev = self.doc["entries"].get(k)
         frm = prev.get("status") if prev else None
         rec = {"checkId": check_id, "armId": arm_id, "part": part, "status": to,
                "cause": cause, "receiptId": receipt_id, "detector": detector,
+               "detail": detail, "nextAction": next_action,
                "validation": {"accepted": not (rejections or []), "rejections": rejections or []},
                "result": {"detector": detector, "execution": to},
                "receiptPath": f"receipts/{k}.json", "runId": self.run_id, "updatedUtc": utcnow()}
@@ -810,6 +938,7 @@ class Ledger:
         with open(self.journal, "a", encoding="utf-8") as f:
             f.write(canonical({"t": utcnow(), "checkId": check_id, "armId": arm_id, "part": part,
                                "from": frm, "to": to, "cause": cause, "receiptId": receipt_id,
+                               "detail": detail, "nextAction": next_action,
                                "runId": self.run_id}) + "\n")
         self.save()
 
@@ -840,11 +969,18 @@ class Validator:
         # different fingerprints over identical inputs. Comparing them across an arm reports a
         # mismatch that is not one.
         self.arm_fingerprints: dict[tuple, str] = {}
-        #: armId -> the identity's CONTENT (plugins with hashes in order, providers, overlays).
-        #: THIS is what "the same arm" means; the fingerprint is a keyed digest of it plus more.
-        self.arm_content: dict[str, str] = {}
         self.arm_plugin_hashes: dict[str, dict[str, str]] = {}
         self.seen_keys: set[str] = set()
+
+    def reference_arm(self, arm: dict, part: str | None) -> dict:
+        """Which arm's frozen REQUEST an emit is compared against. A `reverse` part is the probe run on
+        the BASELINE order with the candidate as `--base`, so its own configuration is the baseline's
+        and the baseline's request is its reference — validated against it, never exempted from it."""
+        if part == "reverse":
+            base = next((a for a in self.plan.get("arms", []) if a.get("kind") == "baseline"), None)
+            if base is not None:
+                return base
+        return arm
 
     # -- readers ---------------------------------------------------------------------------
 
@@ -855,9 +991,12 @@ class Validator:
             return None
         return {"fingerprint": cfg.get("Fingerprint", cfg.get("fingerprint", "")),
                 "source": cfg.get("Source", cfg.get("source", "")),
+                "schemaVersion": cfg.get("SchemaVersion", cfg.get("schemaVersion")),
                 "plugins": [{"name": p.get("Name", p.get("name")), "path": p.get("Path", p.get("path")),
                              "sha256": p.get("Sha256", p.get("sha256"))}
                             for p in cfg.get("Plugins", cfg.get("plugins", []) or [])],
+                "providers": [{"name": v.get("Name", v.get("name")), "kind": v.get("Kind", v.get("kind"))}
+                              for v in cfg.get("Providers", cfg.get("providers", []) or [])],
                 "overlays": [{"kind": o.get("Kind", o.get("kind")), "path": o.get("Path", o.get("path")),
                               "sha256": o.get("Sha256", o.get("sha256"))}
                              for o in cfg.get("Overlays", cfg.get("overlays", []) or [])],
@@ -885,6 +1024,7 @@ class Validator:
                  pre_hashes: dict[str, str | None], started: float | None) -> dict:
         """Returns {accepted, rejections, detector, findings, coverage, verdict, identity}."""
         rej: list[dict] = []
+        identity_limits: list[dict] = []
         out_kind = adapter.get("output") or "conflict-file"
         key = Ledger.key(check["checkId"], arm["armId"], part)
         if key in self.seen_keys:
@@ -960,7 +1100,7 @@ class Validator:
                         rej.append({"cause": "identity-missing",
                                     "detail": "the emit carries no Configuration: what it consumed cannot be stated"})
                     else:
-                        rej += self._identity_checks(identity, arm, doc, adapter)
+                        rej += self._identity_checks(identity, arm, doc, adapter, part, identity_limits)
                     coverage = self.coverage_lines(doc)
                     if not coverage:
                         rej.append({"cause": "coverage-missing",
@@ -1056,44 +1196,125 @@ class Validator:
             if adapter.get("kind") == "scopeprobe" and doc is not None                     and "complete" in doc and not doc.get("complete"):
                 detector = "inconclusive"
             if identity:
+                ref = self.reference_arm(arm, part)
                 self.arm_fingerprints.setdefault(
-                    (arm["armId"], str(identity.get("population")), str(identity.get("state"))),
+                    (ref["armId"], str(identity.get("population")), str(identity.get("state"))),
                     identity["fingerprint"])
-                self.arm_content.setdefault(arm["armId"], canonical({
-                    "plugins": [[str(x.get("name") or "").lower(), str(x.get("sha256") or "").lower()]
-                                for x in identity.get("plugins", [])],
-                    "overlays": [[str(o.get("kind") or ""), str(o.get("sha256") or "").lower()]
-                                 for o in identity.get("overlays", [])]}))
         return {"accepted": accepted, "rejections": rej, "detector": detector, "findings": findings,
-                "coverage": coverage, "verdict": verdict, "identity": identity}
+                "coverage": coverage, "verdict": verdict, "identity": identity,
+                "identityLimits": identity_limits}
 
-    def _identity_checks(self, identity: dict, arm: dict, doc: dict, adapter: dict) -> list[dict]:
+    def _identity_checks(self, identity: dict, arm: dict, doc: dict, adapter: dict,
+                         part: str | None = None, limits: list | None = None) -> list[dict]:
+        """D2: an accepted emit must describe the configuration the plan ASKED FOR.
+
+        The reference is the frozen request of the reference arm (§`reference_arm`), never "whichever
+        receipt of this arm arrived first" — agreement between two outputs cannot establish agreement
+        with the request, and an incomplete identity is not accepted because it is the first one."""
         rej = []
+        ref = self.reference_arm(arm, part)
+        req = ref.get("requested") or {}
+        req_plugins = list(req.get("plugins") or [])
+        emit_plugins = list(identity.get("plugins") or [])
+
+        # (a) an incomplete identity is never accepted, first receipt or not.
+        if not emit_plugins:
+            rej.append({"cause": "identity-missing",
+                        "detail": "the emit's Configuration lists no plugins: what it consumed cannot "
+                                  "be stated, so it cannot be compared to the request"})
+            return rej
+        for i, p in enumerate(emit_plugins):
+            if not (p.get("name") or "").strip():
+                rej.append({"cause": "identity-missing",
+                            "detail": f"the emit's Configuration plugin at position {i} has no name"})
+            elif not is_sha256(p.get("sha256")):
+                rej.append({"cause": "identity-missing",
+                            "detail": f"the emit's Configuration gives no 64-hex sha256 for "
+                                      f"{p.get('name')} (position {i}): its content is not stated"})
+        if rej:
+            return rej
+
+        if not req_plugins:
+            rej.append({"cause": "identity-missing",
+                        "detail": f"the plan states no requested plugin list for arm {ref['armId']}, so "
+                                  f"this emit cannot be bound to a request"})
+            return rej
+
+        # (b) order and names, case-insensitively, position by position.
+        want_names = [str(p.get("name") or "") for p in req_plugins]
+        got_names = [str(p.get("name") or "") for p in emit_plugins]
+        if [n.lower() for n in want_names] != [n.lower() for n in got_names]:
+            want_set = {n.lower() for n in want_names}
+            got_set = {n.lower() for n in got_names}
+            extra = sorted(got_set - want_set)
+            absent = sorted(want_set - got_set)
+            first = next((i for i in range(max(len(want_names), len(got_names)))
+                          if (want_names[i:i + 1] or [""])[0].lower()
+                          != (got_names[i:i + 1] or [""])[0].lower()), 0)
+            how = ("the same names in a different order" if not extra and not absent else
+                   "the set differs (" + "; ".join(
+                       ([f"missing: {', '.join(absent)}"] if absent else [])
+                       + ([f"extra: {', '.join(extra)}"] if extra else [])) + ")")
+            rej.append({"cause": "identity-mismatch",
+                        "detail": f"plugin order differs from the request at position {first + 1}: "
+                                  f"expected {(want_names[first:first + 1] or ['(nothing)'])[0]}, "
+                                  f"found {(got_names[first:first + 1] or ['(nothing)'])[0]}; {how}"})
+        else:
+            # (c) hashes, only where the request can state one. An unstated hash is a recorded LIMIT,
+            # never a silent acceptance: the emit's own hash becomes what reuse re-checks on disk.
+            for want, got in zip(req_plugins, emit_plugins):
+                if want.get("hashSource") == "unstated" or not is_sha256(want.get("sha256")):
+                    (limits if limits is not None else []).append(
+                        {"plugin": want.get("name"), "recordedSha256": got.get("sha256"),
+                         "detail": f"the plan could not state a hash for {want.get('name')}; the emit's "
+                                   f"hash {str(got.get('sha256'))[:12]} is recorded and is what reuse "
+                                   f"re-checks on disk"})
+                    continue
+                if str(want["sha256"]).lower() != str(got.get("sha256") or "").lower():
+                    rej.append({"cause": "identity-mismatch",
+                                "detail": f"plugin {want.get('name')} was requested at "
+                                          f"{str(want['sha256'])[:12]} and consumed at "
+                                          f"{str(got.get('sha256'))[:12]}"})
+
+        # (d) overlays as a multiset of (kind, sha256).
+        def overlay_key(rows):
+            return sorted((str(o.get("kind") or ""), str(o.get("sha256") or "").lower())
+                          for o in rows or [])
+        if overlay_key(identity.get("overlays")) != overlay_key(req.get("overlays")):
+            rej.append({"cause": "identity-mismatch",
+                        "detail": f"the emit's overlays are {overlay_key(identity.get('overlays'))}, arm "
+                                  f"{ref['armId']} requested {overlay_key(req.get('overlays'))}"})
+
+        # (e) the fingerprint must be the digest of the configuration the emit itself states.
+        recomputed = configuration_fingerprint(
+            emit_plugins, identity.get("providers"), identity.get("overlays"),
+            identity.get("population"), identity.get("state"), schema=identity.get("schemaVersion"))
+        if str(identity.get("fingerprint") or "").lower() != recomputed:
+            rej.append({"cause": "identity-mismatch",
+                        "detail": f"the fingerprint is not the digest of the stated configuration: the "
+                                  f"emit says {str(identity.get('fingerprint'))[:12]}, its own plugins, "
+                                  f"providers, overlays, population and state digest to "
+                                  f"{recomputed[:12]}"})
+
+        # (f) the source must name the reference arm's candidate.
         source = (identity.get("source") or "")
-        want = f"candidate:{arm['candidateFile']}"
-        if source and arm["candidateFile"] and source.lower() != want.lower() \
-                and Path(arm["candidateFile"]).stem.lower() not in source.lower():
+        want_source = f"candidate:{ref['candidateFile']}"
+        if source and ref["candidateFile"] and source.lower() != want_source.lower() \
+                and Path(ref["candidateFile"]).stem.lower() not in source.lower():
             rej.append({"cause": "identity-mismatch",
-                        "detail": f"the emit's Configuration.Source is '{source}', not this arm's '{want}'"})
-        content = canonical({
-            "plugins": [[str(x.get("name") or "").lower(), str(x.get("sha256") or "").lower()]
-                        for x in identity.get("plugins", [])],
-            "overlays": [[str(o.get("kind") or ""), str(o.get("sha256") or "").lower()]
-                         for o in identity.get("overlays", [])],
-        })
-        prior_content = self.arm_content.get(arm["armId"])
-        if prior_content is not None and prior_content != content:
-            rej.append({"cause": "identity-mismatch",
-                        "detail": "this receipt consumed a different plugin, provider or overlay set "
-                                  "than this arm's other accepted receipts"})
-        key = (arm["armId"], str(identity.get("population")), str(identity.get("state")))
+                        "detail": f"the emit's Configuration.Source is '{source}', not this arm's "
+                                  f"'{want_source}'"})
+
+        # (g) the within-arm rules, keyed on the REFERENCE arm so a reverse part is compared with the
+        # baseline's other emits rather than with the candidate order it was never run on.
+        key = (ref["armId"], str(identity.get("population")), str(identity.get("state")))
         prior = self.arm_fingerprints.get(key)
         if prior and identity["fingerprint"] and prior != identity["fingerprint"]:
             rej.append({"cause": "identity-mismatch",
                         "detail": f"fingerprint {identity['fingerprint'][:12]} differs from this arm's "
                                   f"other accepted receipts declaring the same population and state "
                                   f"({prior[:12]})"})
-        seen = self.arm_plugin_hashes.setdefault(arm["armId"], {})
+        seen = self.arm_plugin_hashes.setdefault(ref["armId"], {})
         for p in identity.get("plugins", []):
             name = str(p.get("name") or "").lower()
             h = p.get("sha256")
@@ -1146,7 +1367,10 @@ def write_receipt(run: Path, *, plan: dict, check: dict, arm: dict, part: str | 
         "outputs": out_rows, "log": rel_to(run, log) if log and log.exists() else None,
         "consumed": consumed,
         "validation": {"accepted": bool(validation.get("accepted")),
-                       "rejections": validation.get("rejections", [])},
+                       "rejections": validation.get("rejections", []),
+                       # D2(c): a request plugin whose hash the plan could not state is accepted with
+                       # the emit's own hash recorded HERE, so the limit travels with the receipt.
+                       "identityLimits": validation.get("identityLimits") or []},
         "result": result,
     }
     receipt.update(extra or {})
@@ -1189,26 +1413,60 @@ class Executor:
     # -- the common consumed block ---------------------------------------------------------
 
     def consumed_for(self, arm: dict, adapter: dict, *, base_emit: Path | None = None,
-                     identity: dict | None = None) -> dict:
+                     identity: dict | None = None, inputs: list | None = None) -> dict:
+        """What this child actually read, as strongly as the child stated it.
+
+        D3: a child that states no identity — a json / text / probe-target adapter, or an accounting
+        row that ran nothing — gets THIS ARM's frozen request, with `configurationSource: "plan"` and a
+        null fingerprint plus a note. The scope's baseline fingerprint is never copied onto another
+        arm: that would present the baseline's identity as proof of what a different order consumed.
+        The baseline arm is the one place where the scope's configuration IS this arm's, so it is
+        recorded verbatim with `configurationSource: "scope"`."""
         exe = adapter.get("exe")
         tool = self.plan["tools"].get(exe) if exe else None
-        cfg = identity or {
-            "fingerprint": self.plan["configuration"].get("fingerprint"),
-            "source": self.plan["configuration"].get("source"),
-            "plugins": self.plan["configuration"].get("plugins", []),
-            "overlays": self.plan["configuration"].get("overlays", []),
-            "population": self.plan["configuration"].get("population"),
-            "state": None, "limits": [],
-        }
-        if identity is None and not cfg.get("plugins"):
-            cfg = dict(cfg)
-            cfg["reuseGap"] = ("scope.json states no plugin paths and hashes for this configuration, "
-                               "so what this child consumed cannot be re-checked on disk")
-        return {
+        if identity is not None:
+            cfg, source = dict(identity), "emit"
+        elif arm.get("kind") == "baseline":
+            cfg, source = {
+                "fingerprint": self.plan["configuration"].get("fingerprint"),
+                "source": self.plan["configuration"].get("source"),
+                "plugins": self.plan["configuration"].get("plugins", []),
+                "providers": self.plan["configuration"].get("providers", []),
+                "overlays": self.plan["configuration"].get("overlays", []),
+                "population": self.plan["configuration"].get("population"),
+                "state": None, "limits": [],
+            }, "scope"
+        else:
+            req = arm.get("requested") or {}
+            cfg, source = {
+                "fingerprint": None,
+                "fingerprintNote": "the child stated no identity; reuse re-checks the plan's stated "
+                                   "plugin hashes on disk",
+                "source": f"candidate:{arm.get('candidateFile')}",
+                "plugins": [{"name": p.get("name"), "path": p.get("path"), "sha256": p.get("sha256")}
+                            for p in (req.get("plugins") or [])],
+                "providers": [dict(v) for v in (req.get("providers") or [])],
+                "overlays": [dict(o) for o in (req.get("overlays") or [])],
+                "population": req.get("population") or self.plan["configuration"].get("population"),
+                "state": None, "limits": [],
+            }, "plan"
+        if source != "emit":
+            unstated = [p.get("name") for p in ((arm.get("requested") or {}).get("plugins") or [])
+                        if not is_sha256(p.get("sha256"))]
+            if unstated:
+                cfg["identityLimits"] = [
+                    {"plugin": n, "recordedSha256": None,
+                     "detail": f"the plan states no hash for {n}, so reuse cannot re-check its bytes: "
+                               f"this plugin is a named reuse gap, not a verified input"}
+                    for n in unstated]
+            if not cfg.get("plugins"):
+                cfg["reuseGap"] = ("scope.json states no plugin paths and hashes for this configuration, "
+                                   "so what this child consumed cannot be re-checked on disk")
+        block = {
             "candidateSha256": arm.get("candidateSha256"),
             "candidatePath": arm.get("candidatePath"),
             "configuration": cfg,
-            "configurationSource": "emit" if identity else "scope",
+            "configurationSource": source,
             "baseEmitSha256": sha256_file(base_emit) if base_emit and base_emit.exists() else None,
             "baseEmitPath": rel_to(self.run, base_emit) if base_emit else None,
             "registrySha256": self.plan["registry"]["sha256"],
@@ -1216,6 +1474,10 @@ class Executor:
             "optionsSha256": self.options_sha,
             "scopeSha256": self.plan["scope"]["sha256"],
         }
+        # D4: the comparison a receipt IS. A diff rests on two emits; reuse must follow both.
+        if inputs is not None:
+            block["inputs"] = inputs
+        return block
 
     # -- the accounting adapters (never run a child) ---------------------------------------
 
@@ -1260,7 +1522,7 @@ class Executor:
                            extra={"states": states} if states else None)
 
     def finish(self, check, arm, part, adapter, argv, res, started_iso, ended_iso, outputs, log, v,
-               *, base_emit=None, extra=None, verdict=None, execution=None) -> dict:
+               *, base_emit=None, extra=None, verdict=None, execution=None, inputs=None) -> dict:
         if v["accepted"]:
             status = execution or "completed"
         elif v["rejections"]:
@@ -1281,12 +1543,15 @@ class Executor:
                                 started=started_iso, ended=ended_iso,
                                 exit_code=(res or {}).get("exitCode"), outputs=outputs, log=log,
                                 consumed=self.consumed_for(arm, adapter, base_emit=base_emit,
-                                                           identity=v.get("identity")),
+                                                           identity=v.get("identity"), inputs=inputs),
                                 validation=v, result=result, extra=extra)
         self.ledger.transition(check["checkId"], arm["armId"], part, status,
                                cause=(v["rejections"][0]["cause"] if v["rejections"] else None),
                                receipt_id=receipt["receiptId"], detector=v["detector"],
                                rejections=v["rejections"],
+                               detail=(v["rejections"][0]["detail"] if v["rejections"] else None),
+                               next_action=("re-run this check once the cause above is fixed"
+                                            if v["rejections"] else None),
                                extra={"derivedFrom": (extra or {}).get("derivedFrom")})
         return receipt
 
@@ -1346,10 +1611,9 @@ def cmd_run(a, *, resuming: bool = False) -> int:
     if bad:
         return refuse(bad)
 
-    reg_path = Path(plan["registry"]["path"])
-    if sha256_file(reg_path) != plan["registry"]["sha256"]:
-        return refuse("registry-changed: the registry no longer hashes to the plan's recorded value. "
-                      "A checklist cannot change under a frozen plan; re-plan instead.")
+    bad = premise_refusal(plan)
+    if bad:
+        return refuse(bad)
 
     with Run("evalrun-checks", stage_source="counted") as parent:
         ledger.open_invocation("resume" if resuming else "run", parent.run_id, None)
@@ -1359,7 +1623,11 @@ def cmd_run(a, *, resuming: bool = False) -> int:
         if healed:
             print(f"   {healed} interrupted entr{'y' if healed == 1 else 'ies'} re-queued")
 
-        if resuming:
+        # D5: `run` and `resume` offer the SAME correctness guarantee. A run over a ledger that already
+        # holds terminal-ok entries is a reuse decision whatever the caller typed, so it revalidates
+        # too — the verb chosen never decides whether measured evidence is re-checked against disk.
+        if resuming or any(e.get("status") in TERMINAL_OK
+                           for e in ledger.doc["entries"].values()):
             revalidate(run, plan, ledger, ex)
 
         planned = [c for c in plan["checks"]]
@@ -1620,6 +1888,13 @@ def run_generic(ex: Executor, check: dict, arm: dict) -> None:
     probe does not accept is never appended."""
     adapter = check["adapter"]
     kind = adapter.get("kind")
+    stale = candidate_stale(arm)
+    if stale:
+        # The frozen candidate hash gates the LAUNCH, not just the receipt. A child read the changed
+        # file while the receipt recorded the plan's hash for it, which is a measurement of an order
+        # nobody approved, filed under the order they did.
+        ex.account(check, arm, "blocked(candidate-changed)", "stale-inputs", stale)
+        return
     prog = ex.exe_argv(adapter)
     if prog is None:
         ex.account(check, arm, "blocked(tool-missing)", None,
@@ -1771,6 +2046,26 @@ def run_generic(ex: Executor, check: dict, arm: dict) -> None:
     ex.run_child(check, arm, None, argv, outputs, states=states)
 
 
+def candidate_stale(arm: dict, memo: "HashMemo | None" = None) -> str | None:
+    """None when the LIVE candidate file still hashes to the plan's frozen value, else why not. The
+    order a child is about to be launched on is the file on disk now, not the copy the run assembled
+    earlier, so this is checked before every launch."""
+    path = arm.get("candidatePath")
+    want = arm.get("candidateSha256")
+    if not path or not is_sha256(want):
+        return None
+    p = Path(path)
+    nxt = "Next action: plan again."
+    if not p.exists():
+        return (f"the plan's candidate file {p} is gone, so the order this arm names cannot be read. {nxt}")
+    got = (memo or HashMemo()).sha256(p)
+    if got != want:
+        return (f"{arm.get('candidateFile')} at {p} now hashes {str(got)[:12]}; the plan froze "
+                f"{str(want)[:12]}. The order this arm would be measured on is not the one the plan "
+                f"approved. {nxt}")
+    return None
+
+
 def prereq_satisfied(ex: Executor, check: dict, arm_id: str) -> str | None:
     """None when every prerequisite of this check is settled on this arm, else the first that is
     not. A `not-applicable` prerequisite counts as satisfied: it is an answer, not an absence."""
@@ -1834,7 +2129,12 @@ def run_ordersweep(ex: Executor, sweep_checks: list[dict], parent, allowed: dict
         print("   ordersweep: not run - the baseline's prerequisite is not settled")
         return
 
-    # assemble RUN/candidates, hash-checked against the plan
+    # assemble RUN/candidates, hash-checked against the plan — the LIVE file, not only the copy this
+    # run assembled earlier: a copy that still matches the plan says nothing about the file the plan
+    # points at, and the sweep would otherwise measure a stale copy of a changed order.
+    baseline_id = next(a["armId"] for a in plan["arms"] if a["kind"] == "baseline")
+    memo = HashMemo()
+    stale_arms = set()
     for arm in plan["arms"]:
         if runnable is not None and arm["armId"] not in runnable:
             continue
@@ -1844,6 +2144,15 @@ def run_ordersweep(ex: Executor, sweep_checks: list[dict], parent, allowed: dict
             for check in sweep_checks:
                 ex.account(check, arm, "blocked(candidate-missing)", "output-missing",
                            f"the plan's candidate file {src} is gone")
+            stale_arms.add(arm["armId"])
+            dst.unlink(missing_ok=True)
+            continue
+        why = candidate_stale(arm, memo)
+        if why:
+            for check in sweep_checks:
+                ex.account(check, arm, "blocked(candidate-changed)", "stale-inputs", why)
+            stale_arms.add(arm["armId"])
+            dst.unlink(missing_ok=True)  # never hand ordersweep an order the plan did not approve
             continue
         if not dst.exists() or sha256_file(dst) != arm["candidateSha256"]:
             shutil.copy2(src, dst)
@@ -1851,7 +2160,15 @@ def run_ordersweep(ex: Executor, sweep_checks: list[dict], parent, allowed: dict
             for check in sweep_checks:
                 ex.account(check, arm, "blocked(candidate-changed)", "stale-inputs",
                            f"{arm['candidateFile']} no longer hashes to the plan's value")
-            return
+            stale_arms.add(arm["armId"])
+            dst.unlink(missing_ok=True)
+            continue
+    if baseline_id in stale_arms:
+        print("   ordersweep: not run - the baseline candidate file no longer hashes to the plan's value")
+        return
+    if stale_arms:
+        runnable = (runnable if runnable is not None
+                    else {a["armId"] for a in plan["arms"]}) - stale_arms
     src_manifest = Path(plan["candidatesDir"]) / "candidates.json"
     if src_manifest.exists():
         shutil.copy2(src_manifest, cdir / "candidates.json")
@@ -1875,6 +2192,14 @@ def run_ordersweep(ex: Executor, sweep_checks: list[dict], parent, allowed: dict
 
     for check in sweep_checks:
         for arm_row in check["arms"]:
+            if arm_row["armId"] in stale_arms:
+                continue
+            e = ex.ledger.entry(check["checkId"], arm_row["armId"], "arm")
+            if e and e.get("status") in TERMINAL_OK:
+                # An arm ordersweep will serve from its own cache is not being re-measured. Marking it
+                # `running` turned reused work into a fresh `completed` with a new receipt, which is a
+                # new measurement claim for a child that never ran.
+                continue
             ex.ledger.transition(check["checkId"], arm_row["armId"], "arm", "running")
     started_iso, started_mono = utcnow(), time.time()
     res = ex.runner.run([{"id": "ordersweep", "argv": argv, "env": ex.child_env()}])[0]
@@ -1886,6 +2211,9 @@ def run_ordersweep(ex: Executor, sweep_checks: list[dict], parent, allowed: dict
     for check in sweep_checks:
         probe = check["adapter"]["exe"]
         for arm_row in check["arms"]:
+            if arm_row["armId"] in stale_arms:
+                parent.advance()  # already accounted blocked(candidate-*) above
+                continue
             arm = ex.arms[arm_row["armId"]]
             split_sweep_receipts(ex, check, arm, probe, sweep_out, summary, res, started_iso,
                                  ended_iso, started_mono, log)
@@ -1899,6 +2227,9 @@ def split_sweep_receipts(ex: Executor, check: dict, arm: dict, probe: str, sweep
     is_base = arm["kind"] == "baseline"
     arm_emit = sweep_out / probe / ("baseline.json" if is_base else f"{stem}.json")
     rev_emit = sweep_out / probe / f"{stem}.reverse.json"
+    # D4: the baseline emit this check's candidate arm was measured AGAINST. A candidate arm, its
+    # reverse and its diff all rest on it, so every one of them records it and reuse follows it.
+    base_arm_emit = sweep_out / probe / "baseline.json"
     # The plan decides which receipts exist, NOT ordersweep's summary rows. An arm whose probe
     # produced nothing has no summary row, and that is exactly the arm whose specific cause
     # (output-missing, illegal-configuration, wrong-check, identity-missing, ...) must be written
@@ -1941,7 +2272,8 @@ def split_sweep_receipts(ex: Executor, check: dict, arm: dict, probe: str, sweep
                               outputs=[arm_emit], pre_hashes={},
                               started=None if arm_job in reused else started_mono)
     ex.finish(check, arm, "arm", check["adapter"], None, res, started_iso, ended_iso,
-              [arm_emit], arm_log if arm_log.exists() else log, v)
+              [arm_emit], arm_log if arm_log.exists() else log, v,
+              base_emit=None if is_base else base_arm_emit)
 
     if is_base:
         return
@@ -1952,14 +2284,13 @@ def split_sweep_receipts(ex: Executor, check: dict, arm: dict, probe: str, sweep
                                    else exit_from_log(text_of(rev_log), default=0),
                                    log_text=text_of(rev_log),
                                    outputs=[rev_emit], pre_hashes={}, started=None)
-        # The reverse arm is measured on the BASELINE order with the candidate as --base, so its
-        # own Configuration IS the baseline's: the arm identity check does not apply to it.
-        vr["rejections"] = [x for x in vr["rejections"] if x["cause"] != "identity-mismatch"]
-        vr["accepted"] = not vr["rejections"]
+        # The reverse arm is measured on the BASELINE order with the candidate as --base, so its own
+        # Configuration IS the baseline's — which is why D2 validates it against the BASELINE arm's
+        # frozen request (Validator.reference_arm) instead of exempting it from the identity check.
         if vr["accepted"] and vr["detector"] is None and vr["findings"] is not None:
             vr["detector"] = "finding" if vr["findings"] > 0 else "no-finding"
         ex.finish(check, arm, "reverse", check["adapter"], None, res, started_iso, ended_iso,
-                  [rev_emit], rev_log if rev_log.exists() else log, vr)
+                  [rev_emit], rev_log if rev_log.exists() else log, vr, base_emit=arm_emit)
     else:
         ex.account(check, arm, "blocked(no-reverse-measurement)", None,
                    "no reverse emit: every created row reads unmeasured under the baseline order")
@@ -1986,8 +2317,11 @@ def split_sweep_receipts(ex: Executor, check: dict, arm: dict, probe: str, sweep
     vd = {"accepted": not rejections, "rejections": rejections, "detector": detector,
           "findings": diff.get("counts", {}).get("created"), "coverage": [], "verdict": verdict,
           "identity": None}
+    diff_inputs = [{"part": "arm", "path": rel_to(ex.run, arm_emit), "sha256": sha256_file(arm_emit)},
+                   {"part": "reverse", "path": rel_to(ex.run, rev_emit), "sha256": sha256_file(rev_emit)}]
     ex.finish(check, arm, "diff", check["adapter"], None, res, started_iso, ended_iso,
               [diff_log], diff_log if diff_log.exists() else log, vd, verdict=verdict,
+              inputs=diff_inputs,
               extra={"orderEvaluation": {"classification": classification, "probes": [probe],
                                          "diff": diff, "created": created,
                                          "note": "ordersweep's own classification, verbatim and scoped "
@@ -2126,10 +2460,44 @@ def read_receipts(run: Path) -> dict[str, dict]:
 
 # ------------------------------------------------------------------- resume and reuse (D6) --
 
+def dependency_keys(plan: dict, receipts: dict, entry: dict) -> list[str]:
+    """The ledger keys an entry's result RESTS ON — D5's edges, in one place, so `resume`, `finalize`
+    and `bundle` cannot disagree about what follows what. `reverse` and `diff` follow the arm emit; a
+    diff follows its reverse; every part of a non-baseline arm follows the same check's BASELINE arm,
+    which is what it was measured against; a derived check follows every receipt it consumed; and any
+    check follows its prerequisites on this arm and on the baseline."""
+    baseline_id = next((a["armId"] for a in plan["arms"] if a["kind"] == "baseline"), "baseline")
+    cid, aid, part = entry["checkId"], entry["armId"], entry.get("part")
+    deps: list[str] = []
+    if part in ("reverse", "diff"):
+        deps.append(Ledger.key(cid, aid, "arm"))
+    if part == "diff":
+        deps.append(Ledger.key(cid, aid, "reverse"))
+    if aid != baseline_id and part in ("arm", "reverse", "diff"):
+        deps.append(Ledger.key(cid, baseline_id, "arm"))
+    r = receipts.get(Ledger.key(cid, aid, part)) or {}
+    for rid in (r.get("derivedFrom") or []):
+        for k2, r2 in receipts.items():
+            if r2.get("receiptId") == rid:
+                deps.append(k2)
+    check = next((c for c in plan["checks"] if c["checkId"] == cid), None)
+    for pre in (check or {}).get("prerequisites", []):
+        deps.append(Ledger.key(pre, aid, None))
+        deps.append(Ledger.key(pre, baseline_id, None))
+    return deps
+
+
 def revalidate(run: Path, plan: dict, ledger: Ledger, ex: Executor) -> None:
-    """Re-validate every completed/reused entry against disk, then invalidate transitively."""
+    """Re-validate every completed/reused entry against disk, then invalidate transitively.
+
+    D5's order per entry: the receipt gone, a foreign planId, an unverifiable input (a GAP — refused
+    reuse), a changed input (invalidated), else reused. Every transition names its reason and the next
+    action, and the hashing is memoised so 80 plugins across 60 receipts are read once each."""
     receipts = read_receipts(run)
+    memo = HashMemo()
     invalidated: dict[str, str] = {}
+    refused: dict[str, str] = {}
+    baseline_id = next((a["armId"] for a in plan["arms"] if a["kind"] == "baseline"), "baseline")
 
     for k, e in list(ledger.doc["entries"].items()):
         if e.get("status") not in TERMINAL_OK:
@@ -2143,105 +2511,142 @@ def revalidate(run: Path, plan: dict, ledger: Ledger, ex: Executor) -> None:
             continue
         gap = reuse_gap(r)
         if gap:
-            ledger.transition(e["checkId"], e["armId"], e.get("part"), f"refused-reuse({gap})",
-                              cause="stale-inputs")
+            refused[k] = gap
             continue
-        changed = changed_input(run, r)
+        changed = changed_input(run, r, memo)
         if changed:
             invalidated[k] = changed
 
-    # transitive: reverse and diff follow the arm emit; derived follows what it consumed;
-    # a check follows its prerequisites; everything follows the registry and the plan.
+    # transitive: reverse and diff follow the arm emit; every part of a non-baseline arm follows the
+    # BASELINE arm emit it was measured against (D4); derived follows what it consumed; a check
+    # follows its prerequisites; everything follows the registry and the plan.
     changed_flag = True
     while changed_flag:
         changed_flag = False
         for k, e in list(ledger.doc["entries"].items()):
-            if k in invalidated or e.get("status") not in TERMINAL_OK:
+            if k in invalidated or k in refused or e.get("status") not in TERMINAL_OK:
                 continue
-            cid, aid, part = e["checkId"], e["armId"], e.get("part")
-            deps = []
-            if part in ("reverse", "diff"):
-                deps.append(Ledger.key(cid, aid, "arm"))
-            if part == "diff":
-                deps.append(Ledger.key(cid, aid, "reverse"))
-            r = receipts.get(k) or {}
-            for rid in (r.get("derivedFrom") or []):
-                for k2, r2 in receipts.items():
-                    if r2.get("receiptId") == rid:
-                        deps.append(k2)
-            check = next((c for c in plan["checks"] if c["checkId"] == cid), None)
-            for pre in (check or {}).get("prerequisites", []):
-                deps.append(Ledger.key(pre, aid, None))
-                deps.append(Ledger.key(pre, "baseline", None))
-            for d in deps:
-                if d in invalidated:
+            for d in dependency_keys(plan, receipts, e):
+                if d in invalidated or d in refused:
                     invalidated[k] = f"an input it depends on was invalidated ({d})"
                     changed_flag = True
                     break
 
+    for k, gap in refused.items():
+        e = ledger.doc["entries"][k]
+        ledger.transition(e["checkId"], e["armId"], e.get("part"), f"refused-reuse({gap})",
+                          cause="stale-inputs", detail=gap,
+                          next_action="re-run this check; an input it cannot state cannot be re-checked, "
+                                      "so measured evidence is not reused on this entry")
     for k, why in invalidated.items():
         e = ledger.doc["entries"][k]
         ledger.transition(e["checkId"], e["armId"], e.get("part"), f"invalidated({why})",
-                          cause="stale-inputs")
+                          cause="stale-inputs", detail=why,
+                          next_action=("restore the named file and resume, or re-run this check to "
+                                       "measure the inputs as they are now"))
     kept = [k for k, e in ledger.doc["entries"].items() if e.get("status") in TERMINAL_OK]
     for k in kept:
         e = ledger.doc["entries"][k]
         if e.get("status") == "completed":
             ledger.transition(e["checkId"], e["armId"], e.get("part"), "reused",
                               receipt_id=e.get("receiptId"), detector=e.get("detector"),
+                              detail="every stated input still hashes to its recorded value",
+                              next_action="nothing: this measurement stands",
                               extra={"reusedFromRunId": e.get("runId")})
-    print(f"   resume: {len(kept)} receipt(s) reused, {len(invalidated)} invalidated")
+    print(f"   resume: {len(kept)} receipt(s) reused, {len(invalidated)} invalidated, "
+          f"{len(refused)} refused-reuse")
 
 
 def reuse_gap(receipt: dict) -> str | None:
-    """A receipt whose consumer cannot state an input is never reused: the gap is named."""
+    """D5a: a receipt whose consumer cannot state an input is never reused, and EVERY unverifiable
+    input is named — not the first one found. A gap is not a change: it is the admission that this
+    entry's inputs cannot be re-checked at all, which is why reuse is refused rather than granted."""
+    if not (receipt.get("validation") or {}).get("accepted"):
+        return None
     c = receipt.get("consumed") or {}
-    if receipt["validation"]["accepted"]:
-        if (c.get("configuration") or {}).get("reuseGap"):
-            return c["configuration"]["reuseGap"]
-        if not (c.get("configuration") or {}).get("fingerprint"):
-            return "no configuration fingerprint"
-        for o in receipt.get("outputs") or []:
-            if o.get("sha256") is None:
-                return f"output {o.get('path')} has no hash"
-    return None
-
-
-def changed_input(run: Path, receipt: dict) -> str | None:
+    cfg = c.get("configuration") or {}
+    gaps: list[str] = []
+    if cfg.get("reuseGap"):
+        gaps.append(str(cfg["reuseGap"]))
+    plugins = cfg.get("plugins") or []
+    if not plugins:
+        gaps.append("the receipt names no consumed plugins, so what it read cannot be re-checked on disk")
+    for p in plugins:
+        name = p.get("name") or "(unnamed)"
+        if not p.get("path"):
+            gaps.append(f"consumed plugin {name} has no path")
+        if not is_sha256(p.get("sha256")):
+            gaps.append(f"consumed plugin {name} has no 64-hex sha256")
+    for o in cfg.get("overlays") or []:
+        if not o.get("path") or not is_sha256(o.get("sha256")):
+            gaps.append(f"consumed overlay {o.get('kind') or '(unnamed)'} has no path or no sha256")
     for o in receipt.get("outputs") or []:
-        p = Path(run) / o["path"]
         if o.get("sha256") is None:
-            continue
-        if not p.exists():
-            return f"output {o['path']} is gone"
-        if sha256_file(p) != o["sha256"]:
-            return f"output {o['path']} changed on disk"
+            gaps.append(f"output {o.get('path')} has no hash")
+    tool = c.get("tool") or {}
+    if tool.get("present") and not is_sha256(tool.get("dllSha256")):
+        gaps.append(f"the tool {Path(str(tool.get('exe') or '?')).name} is present but its managed "
+                    f"assembly has no recorded hash, so the code that ran cannot be identified")
+    # A-9 (V's finding 2): a run-internal comparison input recorded WITHOUT a hash (the file was not
+    # there when the receipt was written) is unverifiable, so reuse refuses it — the same answer
+    # finalize's integrity walk gives, rather than a silent grant on one verb and a refusal on the other.
+    if c.get("baseEmitPath") and not is_sha256(c.get("baseEmitSha256")):
+        gaps.append(f"the base emit {c['baseEmitPath']} has no recorded hash")
+    for row in c.get("inputs") or []:
+        if row.get("path") and not is_sha256(row.get("sha256")):
+            gaps.append(f"the {row.get('part') or 'comparison'} input {row['path']} has no recorded hash")
+    return "; ".join(gaps) or None
+
+
+def changed_input(run: Path, receipt: dict, memo: "HashMemo | None" = None) -> str | None:
+    """D5b: what changed since this receipt was written, named with its path — and a file that is GONE
+    is a change, not an absence of one. `exists() and hash-differs` treated a deleted plugin as "no
+    change", which is how a receipt naming a file nobody could read any more stayed reusable.
+
+    EVERY change is named, not the first found: when a re-run has already rewritten an output, the
+    stale output is not the interesting half of the answer — the input that made it stale is."""
+    memo = memo or HashMemo()
+    changes: list[str] = []
+
+    def verify(p: Path, recorded: str, what: str) -> None:
+        if not Path(p).exists():
+            changes.append(f"{what} is gone at {p}")
+        elif memo.sha256(p) != recorded:
+            changes.append(f"{what} changed on disk at {p}")
+
+    for o in receipt.get("outputs") or []:
+        if o.get("sha256") is not None:
+            verify(Path(run) / o["path"], o["sha256"], f"output {o['path']}")
     c = receipt.get("consumed") or {}
     if c.get("candidatePath") and c.get("candidateSha256"):
-        p = Path(c["candidatePath"])
-        if p.exists() and sha256_file(p) != c["candidateSha256"]:
-            return f"candidate {p.name} changed"
+        verify(Path(c["candidatePath"]), c["candidateSha256"],
+               f"the candidate file {Path(c['candidatePath']).name}")
     for p in (c.get("configuration") or {}).get("plugins", []) or []:
-        if not p.get("path") or not p.get("sha256"):
-            continue
-        f = Path(p["path"])
-        if f.exists() and sha256_file(f) != p["sha256"]:
-            return f"plugin {p.get('name')} changed on disk"
+        if not p.get("path") or not is_sha256(p.get("sha256")):
+            continue  # unverifiable, not unchanged: reuse_gap names it
+        verify(Path(p["path"]), p["sha256"], f"plugin {p.get('name')}")
     for o in (c.get("configuration") or {}).get("overlays", []) or []:
-        if o.get("path") and o.get("sha256") and Path(o["path"]).exists() \
-                and sha256_file(Path(o["path"])) != o["sha256"]:
-            return f"overlay {Path(o['path']).name} changed on disk"
+        if not o.get("path") or not is_sha256(o.get("sha256")):
+            continue
+        verify(Path(o["path"]), o["sha256"], f"overlay {Path(o['path']).name}")
     tool = c.get("tool") or {}
-    if tool.get("exe") and tool.get("dllSha256"):
+    if tool.get("present") and tool.get("exe"):
         folder = Path(tool["exe"]).parent
         name = Path(tool["exe"]).stem
-        if (folder / f"{name}.dll").exists() and sha256_file(folder / f"{name}.dll") != tool["dllSha256"]:
-            return f"the managed assembly {name}.dll changed"
+        for fname, recorded, label in ((f"{name}.dll", tool.get("dllSha256"),
+                                        f"the managed assembly {name}.dll"),
+                                       ("housecarl-core.dll", tool.get("coreDllSha256"),
+                                        "the core assembly housecarl-core.dll")):
+            if is_sha256(recorded):
+                verify(folder / fname, recorded, label)
     if c.get("baseEmitPath") and c.get("baseEmitSha256"):
-        p = Path(run) / c["baseEmitPath"]
-        if p.exists() and sha256_file(p) != c["baseEmitSha256"]:
-            return "the base emit changed"
-    return None
+        verify(Path(run) / c["baseEmitPath"], c["baseEmitSha256"],
+               f"the base emit {c['baseEmitPath']}")
+    for row in c.get("inputs") or []:
+        if row.get("path") and is_sha256(row.get("sha256")):
+            verify(Path(run) / row["path"], row["sha256"],
+                   f"the {row.get('part') or 'comparison'} input {row['path']}")
+    return "; ".join(changes) or None
 
 
 def cmd_resume(a) -> int:
@@ -2256,7 +2661,7 @@ def cmd_finalize(a) -> int:
     plan, why = load_plan(run)
     if plan is None:
         print(f"REFUSED: {why}", file=sys.stderr)
-        write_refusal(run, "plan-changed", why)
+        write_refusal(run, refusal_cause(why), why)
         return EXIT_REFUSED_RESULT
     ledger = Ledger(run, plan)
     bad = ledger.refusal()
@@ -2265,13 +2670,12 @@ def cmd_finalize(a) -> int:
         write_refusal(run, "foreign-run" if "foreign-run" in bad else "ledger-unreadable", bad)
         return EXIT_REFUSED_RESULT
 
-    reg_sha = sha256_file(Path(plan["registry"]["path"]))
-    if reg_sha != plan["registry"]["sha256"]:
-        msg = (f"registry-changed: {plan['registry']['path']} now hashes {str(reg_sha)[:12]}, the plan "
-               f"recorded {plan['registry']['sha256'][:12]}. A checklist that changed after the plan "
-               f"froze cannot certify this run.")
-        print(f"REFUSED: {msg}", file=sys.stderr)
-        write_refusal(run, "registry-changed", msg)
+    # D5: the registry and the scope are premises of the frozen plan. Finalize refuses a changed or
+    # missing one as a refused RESULT — exit 3 with a refusal disposition written.
+    bad = premise_refusal(plan)
+    if bad:
+        print(f"REFUSED: {bad}", file=sys.stderr)
+        write_refusal(run, refusal_cause(bad), bad)
         return EXIT_REFUSED_RESULT
 
     receipts = read_receipts(run)
@@ -2297,21 +2701,135 @@ def cmd_finalize(a) -> int:
 
     with Run("evalrun-finalize", stage_source="counted") as r:
         r.stage("finalize", total=1, unit="dispositions")
-        disp = build_disposition(run, plan, ledger, receipts)
+        integrity, bad_keys = evidence_integrity(run, plan, ledger, receipts)
+        disp = build_disposition(run, plan, ledger, receipts, integrity=integrity, bad_keys=bad_keys)
         write_json(run / "disposition.json", disp)
         (run / "STATUS.md").write_text(status_md(plan, disp), encoding="utf-8")
         r.advance()
     print(f"evaluation.complete: {disp['evaluation']['complete']}   claim: {disp['evaluation']['claim']}")
+    for d in integrity["defects"][:20]:
+        print(f"   evidence {d['kind']}: {d['key']} {d['path'] or ''}", file=sys.stderr)
     for m in disp["evaluation"]["missing"][:20]:
         print(f"   missing {m['checkId']} [{m['armId']}] {m['status']}")
+    if not integrity["ok"]:
+        print(f"REFUSED: evidence-integrity: {len(integrity['defects'])} completed entr"
+              f"{'y' if len(integrity['defects']) == 1 else 'ies'} no longer match the evidence they were "
+              f"derived from. The disposition and STATUS.md are written with the defects listed first; no "
+              f"completed claim rests on them. Next action: `resume --run RUN` re-runs the affected "
+              f"entries (finalize never rewrites the ledger).", file=sys.stderr)
+        return EXIT_REFUSED_RESULT
     return EXIT_OK
+
+
+def evidence_integrity(run: Path, plan: dict, ledger: Ledger, receipts: dict) -> tuple[dict, dict]:
+    """D6: which terminal-ok entries still have the evidence their claim rests on.
+
+    Returns (`{ok, defects}`, `{ledger key -> the status word for evaluation.missing}`). A completed
+    ledger entry is a claim about a file on disk; when that file is gone, changed, or belongs to a
+    different receipt, the claim is not completed — it is a named defect, and its detector is counted
+    nowhere. The walk is the same one `resume` uses (`dependency_keys`), including the run-internal
+    inputs a receipt was compared against, so finalize and resume cannot disagree about what a claim
+    rests on. Finalize never rewrites the ledger: recovery is `resume`, which re-runs what it must."""
+    defects: list[dict] = []
+    bad: dict[str, str] = {}
+    memo = HashMemo()
+    for k, e in ledger.doc["entries"].items():
+        if e.get("status") not in TERMINAL_OK:
+            continue
+        rpath = Path(run) / "receipts" / f"{k}.json"
+        r = receipts.get(k)
+        if r is None:
+            defects.append({"key": k, "kind": "receipt-mismatch", "path": f"receipts/{k}.json",
+                            "recorded": e.get("receiptId"), "found": None,
+                            "nextAction": "resume: the receipt this claim rests on cannot be read"})
+            bad[k] = "receipt-mismatch"
+            continue
+        if e.get("receiptId") and r.get("receiptId") != e.get("receiptId"):
+            defects.append({"key": k, "kind": "receipt-mismatch", "path": rel_to(run, rpath),
+                            "recorded": e.get("receiptId"), "found": r.get("receiptId"),
+                            "nextAction": "resume: the ledger and the receipt name different measurements"})
+            bad[k] = "receipt-mismatch"
+            continue
+        if not (r.get("validation") or {}).get("accepted"):
+            defects.append({"key": k, "kind": "receipt-mismatch", "path": rel_to(run, rpath),
+                            "recorded": "accepted", "found": "not accepted",
+                            "nextAction": "resume: a terminal-ok entry whose receipt was not accepted "
+                                          "cannot complete a check"})
+            bad[k] = "receipt-mismatch"
+            continue
+        # Its own outputs AND the run-internal inputs it was measured against: a diff whose arm emit
+        # is gone is not a diff of anything, whatever its own log still says.
+        rows = [(o.get("path"), o.get("sha256"), "output") for o in (r.get("outputs") or [])]
+        c = r.get("consumed") or {}
+        if c.get("baseEmitPath"):
+            rows.append((c["baseEmitPath"], c.get("baseEmitSha256"), "base emit"))
+        for row in c.get("inputs") or []:
+            rows.append((row.get("path"), row.get("sha256"), f"{row.get('part') or 'comparison'} input"))
+        for rel, recorded, label in rows:
+            if not rel:
+                continue
+            p = Path(run) / rel
+            if recorded is None or not p.exists():
+                defects.append({"key": k, "kind": "evidence-missing", "path": rel,
+                                "recorded": recorded, "found": None,
+                                "nextAction": f"restore the {label} and finalize again, or resume to "
+                                              f"re-run the check"})
+                bad[k] = f"evidence-missing({rel})"
+                break
+            got = memo.sha256(p)
+            if got != recorded:
+                defects.append({"key": k, "kind": "evidence-changed", "path": rel,
+                                "recorded": recorded, "found": got,
+                                "nextAction": f"resume: the {label} this claim rests on is not the file "
+                                              f"that was measured"})
+                bad[k] = f"evidence-changed({rel})"
+                break
+
+    # Transitively, along the same edges resume uses: an entry whose input's claim is void has no
+    # claim of its own left, even when its own bytes are untouched.
+    spreading = True
+    while spreading:
+        spreading = False
+        for k, e in ledger.doc["entries"].items():
+            if k in bad or e.get("status") not in TERMINAL_OK:
+                continue
+            for d in dependency_keys(plan, receipts, e):
+                if d in bad:
+                    bad[k] = f"evidence-dependency({d})"
+                    defects.append({"key": k, "kind": "evidence-dependency", "path": None,
+                                    "recorded": d, "found": None,
+                                    "nextAction": f"resume: this entry rests on {d}, whose evidence is "
+                                                  f"not what was measured"})
+                    spreading = True
+                    break
+    return {"ok": not defects, "defects": defects}, bad
+
+
+def derived_from(root: Path, receipts: dict | None = None) -> dict:
+    """What a disposition was derived FROM, so a later verb can tell whether it still holds: the
+    ledger's own hash, one hash over the sorted (ledger key, receipt file hash) pairs, and the journal's
+    line count."""
+    root = Path(root)
+    if receipts is None:
+        receipts = read_receipts(root)
+    pairs = sorted((k, sha256_file(root / "receipts" / f"{k}.json")) for k in receipts)
+    journal = root / "journal.jsonl"
+    lines = 0
+    if journal.exists():
+        lines = sum(1 for ln in journal.read_text(encoding="utf-8", errors="replace").splitlines()
+                    if ln.strip())
+    return {"ledgerSha256": sha256_file(root / "ledger.json"),
+            "receipts": sha256_text(canonical(pairs)), "journalLines": lines}
 
 
 def write_refusal(run: Path, cause: str, detail: str) -> None:
     write_json(Path(run) / "disposition.json",
                {"schemaVersion": SCHEMA_VERSION, "createdUtc": utcnow(),
+                "derivedFrom": derived_from(Path(run)),
                 "evaluation": {"complete": False, "claim": "incomplete", "refused": cause,
-                               "detail": detail, "missing": [], "unknownApplicability": []}})
+                               "detail": detail, "missing": [], "unknownApplicability": [],
+                               "findings": [], "completedNullChecks": [], "completedCatalogues": [],
+                               "integrity": {"ok": False, "defects": []}}})
     (Path(run) / "STATUS.md").write_text(
         f"# Evaluation status — REFUSED\n\nThe finalizer refused to state a disposition.\n\n"
         f"- cause: `{cause}`\n- detail: {detail}\n\n"
@@ -2365,7 +2883,10 @@ def load_decisions(run: Path, plan: dict) -> list[dict]:
     return out
 
 
-def build_disposition(run: Path, plan: dict, ledger: Ledger, receipts: dict) -> dict:
+def build_disposition(run: Path, plan: dict, ledger: Ledger, receipts: dict, *,
+                      integrity: dict | None = None, bad_keys: dict | None = None) -> dict:
+    integrity = integrity or {"ok": True, "defects": []}
+    bad_keys = bad_keys or {}
     decisions = load_decisions(run, plan)
     dec_by_key = {(d["checkId"], d["armId"]): d for d in decisions if d.get("satisfiesCompletion")}
 
@@ -2401,6 +2922,19 @@ def build_disposition(run: Path, plan: dict, ledger: Ledger, receipts: dict) -> 
                 e = ledger.doc["entries"][k]
                 status, detector = e.get("status"), e.get("detector")
                 r = receipts.get(k) or {}
+                if k in bad_keys:
+                    # D6: the evidence this entry's claim rests on is gone, changed, or belongs to a
+                    # different receipt. It completes nothing and is counted nowhere.
+                    missing.append({"checkId": cid, "armId": aid, "part": e.get("part"),
+                                    "status": bad_keys[k], "required": check["required"],
+                                    "family": check["family"],
+                                    "cause": "the evidence this completed entry claimed no longer matches "
+                                             "the receipt that recorded it; see evaluation.integrity"})
+                    continue
+                # A detector row is a claim about a measurement that STANDS: only a terminal-ok entry
+                # can carry one into findings, completedNullChecks or completedCatalogues.
+                if status not in TERMINAL_OK:
+                    detector = None
                 if detector == "finding":
                     findings_rows.append({"checkId": cid, "armId": aid, "part": e.get("part"),
                                           "findings": (r.get("result") or {}).get("findings"),
@@ -2515,12 +3049,17 @@ def build_disposition(run: Path, plan: dict, ledger: Ledger, receipts: dict) -> 
                 "in an evaluated arm",
     }
 
+    evaluation_refused = None if integrity["ok"] else "evidence-integrity"
     return {
         "schemaVersion": SCHEMA_VERSION, "planId": plan["planId"], "createdUtc": utcnow(),
         "registryVersion": plan["registry"]["registryVersion"],
         "runIds": ledger.doc.get("runIds", []),
+        # What this disposition was derived FROM, so `bundle` can refuse a stale one by name rather
+        # than carrying yesterday's claims into today's package.
+        "derivedFrom": derived_from(run, receipts),
         "evaluation": {"complete": complete, "claim": claim, "missing": missing,
                        "unknownApplicability": unknown_app,
+                       "integrity": integrity, "refused": evaluation_refused,
                        "findings": findings_rows, "completedNullChecks": null_checks,
                        "completedCatalogues": catalogues,
                        "claimVocabulary": list(CLAIMS),
@@ -2553,6 +3092,21 @@ def status_md(plan: dict, disp: dict) -> str:
          f"- **evaluation.complete: {ev['complete']}**   claim: `{ev['claim']}`", "",
          "This is the review index, not the report. Every line below is derived from the ledger and the "
          "validated receipts; nothing here is a judgement this runner made about the mod.", ""]
+    integrity = ev.get("integrity") or {"ok": True, "defects": []}
+    if not integrity.get("ok"):
+        # Defects first: a reader must not scroll past a completed claim to learn its evidence is gone.
+        L += ["## Evidence integrity — REFUSED", "",
+              f"`evaluation.refused: evidence-integrity`. {len(integrity['defects'])} completed entr"
+              f"{'y' if len(integrity['defects']) == 1 else 'ies'} no longer match the evidence recorded "
+              f"for them, so nothing below counts them as completed.", "",
+              "| entry | defect | path | recorded | found | next action |",
+              "|---|---|---|---|---|---|"]
+        for d in integrity["defects"]:
+            L.append(f"| `{d['key']}` | `{d['kind']}` | {d['path'] or '-'} | "
+                     f"{str(d['recorded'] or '-')[:12]} | {str(d['found'] or '-')[:12]} | "
+                     f"{d['nextAction']} |")
+        L += ["", "The ledger was not rewritten. `resume --run RUN` invalidates and re-runs the affected "
+                  "entries.", ""]
     L += ["## Findings", ""]
     if ev["findings"]:
         L += ["| check | arm | part | findings | verdict | strength |", "|---|---|---|---|---|---|"]
@@ -2633,6 +3187,75 @@ def status_md(plan: dict, disp: dict) -> str:
 
 # --------------------------------------------------------------------------------- bundle (D8) --
 
+def bundle_refusal(run: Path, plan: dict, ledger: Ledger, receipts: dict, decisions: list) -> str | None:
+    """D7: a package is refused, by name, when it would have to carry a claim whose evidence is not
+    there. Every cause below names the receipt and the path, because "the bundle is incomplete" is not
+    something a reader can act on."""
+    run = Path(run)
+    # A-9 (V's finding 1): a control file missing from the RUN must be a refusal here, not a path that
+    # quietly drops out of `manifest.required` because nothing was copied under it — a bundle that lost
+    # STATUS.md verified complete on the first build.
+    for name in CONTROL_FILES:
+        if name == "disposition.json":
+            continue  # its own cause below, with its own next action
+        if not (run / name).exists():
+            return (f"control-missing: {name} is not in the run directory. Every control file is part of the "
+                    f"bundle's required set, and a manifest that omitted one could not prove completeness. "
+                    f"Next action: STATUS.md is rewritten by `finalize`; plan.json, plan.sha256, ledger.json "
+                    f"and journal.jsonl cannot be regenerated, so without them this run is not packageable.")
+    disp = load_json(run / "disposition.json")
+    if not isinstance(disp, dict):
+        return (f"disposition-missing: {run / 'disposition.json'} is absent or unreadable. A bundle "
+                f"carries a disposition's claims; there are none to carry. Next action: finalize first.")
+    if disp.get("planId") != plan["planId"]:
+        return (f"disposition-foreign: disposition.json carries planId {disp.get('planId')}, this run is "
+                f"{plan['planId']}. Next action: finalize this run.")
+    if (disp.get("evaluation") or {}).get("refused"):
+        return (f"disposition-refused: the disposition records "
+                f"`{disp['evaluation']['refused']}` and makes no claim. Next action: fix the cause it "
+                f"names, then finalize again.")
+    want = derived_from(run, receipts)
+    got = disp.get("derivedFrom")
+    if got != want:
+        return (f"disposition-stale: the disposition was derived from ledger "
+                f"{str((got or {}).get('ledgerSha256'))[:12]} / receipts "
+                f"{str((got or {}).get('receipts'))[:12]} / journal {(got or {}).get('journalLines')} "
+                f"line(s), the run now holds {str(want['ledgerSha256'])[:12]} / "
+                f"{str(want['receipts'])[:12]} / journal {want['journalLines']} line(s). Next action: "
+                f"finalize again.")
+    for k, e in ledger.doc["entries"].items():
+        if e.get("status") not in TERMINAL_OK:
+            continue
+        if not (run / "receipts" / f"{k}.json").exists():
+            return (f"receipt-missing: the ledger records {k} as {e['status']} but receipts/{k}.json is "
+                    f"gone. Next action: resume --run RUN.")
+    # The SAME walk finalize used (D6), so the two verbs cannot disagree about what a claim rests on.
+    integrity, _ = evidence_integrity(run, plan, ledger, receipts)
+    for d in integrity["defects"]:
+        if d["kind"] == "evidence-missing":
+            return (f"evidence-missing: the ledger entry {d['key']} claims {d['path']}, which is not on "
+                    f"disk. A bundle never drops a required file from its manifest to stay complete. "
+                    f"Next action: {d['nextAction']}.")
+        if d["kind"] == "evidence-changed":
+            return (f"evidence-changed: {d['key']} recorded {d['path']} at {str(d['recorded'])[:12]}; it "
+                    f"now hashes {str(d['found'])[:12]}. A freshly computed hash is never adopted for a "
+                    f"receipt's output. Next action: {d['nextAction']}.")
+        if d["kind"] == "evidence-dependency":
+            return (f"evidence-missing: {d['key']} rests on {d['recorded']}, whose evidence is not what "
+                    f"was measured. Next action: {d['nextAction']}.")
+        return (f"receipt-mismatch: {d['key']} — recorded {d['recorded']}, found {d['found']}. "
+                f"Next action: {d['nextAction']}.")
+    for d in decisions:
+        if not d.get("accepted"):
+            continue
+        for row in d.get("evidence") or []:
+            if not (run / row["path"]).exists():
+                return (f"decision-evidence-missing: the accepted decision on {d['checkId']} "
+                        f"[{d['armId']}] cites {row['path']}, which is not on disk. Next action: restore "
+                        f"it, or withdraw the decision.")
+    return None
+
+
 def cmd_bundle(a) -> int:
     run = Path(a.run)
     set_run_store(run)
@@ -2644,44 +3267,80 @@ def cmd_bundle(a) -> int:
     if ledger.refusal():
         return refuse(ledger.refusal())
 
+    receipts = read_receipts(run)
+    decisions = load_decisions(run, plan)
+    bad = bundle_refusal(run, plan, ledger, receipts, decisions)
+    if bad:
+        print(f"REFUSED: {bad}", file=sys.stderr)
+        return EXIT_REFUSED_RESULT
+
     with Run("evalrun-bundle", stage_source="counted") as r:
         r.stage("bundle", total=1, unit="bundles")
         out.mkdir(parents=True, exist_ok=True)
         evidence = []
+        copied: dict[str, dict] = {}
 
         def copy_in(src: Path, rel: str, *, check_id=None, arm_id=None, strength=None,
-                    kind="artifact", provenance=None) -> None:
+                    kind="artifact", provenance=None, recorded_sha256=None, recorded_by=None) -> None:
+            """Copy one file in and index it. D7: when the receipt RECORDED a hash for this file, the
+            copy happens only if the file on disk still hashes to it, and the manifest row carries the
+            RECORDED hash and the receipt that recorded it — never a freshly computed one that would
+            certify whatever happens to be there now."""
             src = Path(src)
-            if not src.exists() or src.is_dir():
+            rel = Path(rel).as_posix()
+            if rel in copied or not src.exists() or src.is_dir():
                 return
             if src.suffix.lower() in BINARY_SUFFIXES:
                 return
+            got = sha256_file(src)
+            if recorded_sha256 is not None and got != recorded_sha256:
+                return  # bundle_refusal already refuses this; never copy it under a new hash
             dst = out / rel
             dst.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(src, dst)
-            evidence.append({"id": sha256_text(rel)[:16], "kind": kind,
-                             "path": Path(rel).as_posix(), "sha256": sha256_file(dst),
-                             "bytes": dst.stat().st_size, "checkId": check_id, "armId": arm_id,
-                             "strength": strength, "provenance": provenance})
+            row = {"id": sha256_text(rel)[:16], "kind": kind,
+                   "path": rel, "sha256": recorded_sha256 if recorded_sha256 is not None else got,
+                   "bytes": dst.stat().st_size, "checkId": check_id, "armId": arm_id,
+                   "strength": strength, "provenance": provenance, "recordedBy": recorded_by}
+            evidence.append(row)
+            copied[rel] = row
 
-        for name in ("plan.json", "plan.sha256", "ledger.json", "journal.jsonl",
-                     "disposition.json", "STATUS.md"):
+        required: list[str] = []
+
+        def require(rel: str) -> None:
+            """A-9: a required path is required whether or not the copy happened. A path that failed
+            to copy must show up as `required-missing` at verify, never vanish from the list."""
+            rel = Path(rel).as_posix()
+            if rel not in required:
+                required.append(rel)
+
+        controls = CONTROL_FILES
+        for name in controls:
             copy_in(run / name, name, kind="control")
         for sub in ("receipts", "decisions", "candidates"):
             for p in sorted((run / sub).glob("**/*")):
                 if p.is_file():
                     copy_in(p, f"{sub}/{p.relative_to(run / sub).as_posix()}", kind=sub.rstrip("s"))
-        receipts = read_receipts(run)
         for k, rec in receipts.items():
+            accepted = bool((rec.get("validation") or {}).get("accepted"))
             for o in rec.get("outputs") or []:
                 src = run / o["path"]
                 copy_in(src, f"evidence/{o['path']}", check_id=rec["checkId"], arm_id=rec["armId"],
                         strength=(rec.get("result") or {}).get("strength"), kind="emit",
-                        provenance={"receiptId": rec["receiptId"], "runId": rec.get("runId")})
+                        provenance={"receiptId": rec["receiptId"], "runId": rec.get("runId")},
+                        recorded_sha256=o.get("sha256") if accepted else None,
+                        recorded_by=rec["receiptId"] if accepted else None)
             if rec.get("log"):
                 copy_in(run / rec["log"], f"logs/{Path(rec['log']).name}", check_id=rec["checkId"],
                         arm_id=rec["armId"], kind="log",
                         provenance={"receiptId": rec["receiptId"]})
+        for d in decisions:
+            if not d.get("accepted"):
+                continue
+            for row in d.get("evidence") or []:
+                copy_in(run / row["path"], f"evidence/{row['path']}", check_id=d["checkId"],
+                        arm_id=d["armId"], kind="decision-evidence", strength="attributed-decision",
+                        provenance={"decidedBy": d.get("decidedBy")})
         for p in sorted((run / "sweep").glob("**/*")):
             if p.is_file() and p.suffix.lower() in (".json", ".md", ".txt"):
                 copy_in(p, f"sweep/{p.relative_to(run / 'sweep').as_posix()}", kind="sweep")
@@ -2725,9 +3384,32 @@ def cmd_bundle(a) -> int:
                 copy_in(src, f"media/{src.name}", check_id=subject.get("checkId"), arm_id=aid,
                         strength="supplied-media", kind="media", provenance=item.get("provenance"))
 
+        # D7: what a reader may DEMAND of this bundle. A manifest that simply lists what it happened to
+        # copy cannot prove completeness — an omitted file would make the omission invisible.
+        for name in controls:
+            require(name)
+        require("registry/check-registry.json")
+        if plan["scope"].get("path"):
+            require("scope/scope.json")
+        for k, e in ledger.doc["entries"].items():
+            if e.get("status") in TERMINAL_OK:
+                require(f"receipts/{k}.json")
+        for k, rec in receipts.items():
+            if not (rec.get("validation") or {}).get("accepted"):
+                continue
+            for o in rec.get("outputs") or []:
+                if Path(o["path"]).suffix.lower() in BINARY_SUFFIXES:
+                    continue  # never copied by policy (identity only), so never a required path
+                require(f"evidence/{o['path']}")
+        for d in decisions:
+            if d.get("accepted"):
+                for row in d.get("evidence") or []:
+                    require(f"evidence/{row['path']}")
+
         manifest = {
             "bundleSchema": BUNDLE_SCHEMA, "planId": plan["planId"], "createdUtc": utcnow(),
             "runIds": ledger.doc.get("runIds", []),
+            "required": required,
             "evidence": evidence,
             "plan": "plan.json", "ledger": "ledger.json", "journal": "journal.jsonl",
             "disposition": "disposition.json", "status": "STATUS.md",
@@ -2748,32 +3430,190 @@ def cmd_bundle(a) -> int:
     return EXIT_OK
 
 
+MANIFEST_KEYS = ("bundleSchema", "planId", "required", "evidence", "plan", "ledger", "journal",
+                 "disposition", "status", "registry")
+
+#: The six control files of a run. Every one is required in a bundle (D7), and a run missing one cannot
+#: be packaged (`control-missing`); disposition.json has its own cause because its remedy differs.
+CONTROL_FILES = ("plan.json", "plan.sha256", "ledger.json", "journal.jsonl", "disposition.json", "STATUS.md")
+
+
 def cmd_verify_bundle(a) -> int:
+    """D8: structural validity, then hashes, then the evidence chain — reading NOTHING outside the
+    bundle. Structural validity and evaluation completion are two separate states and both are written:
+    a correctly accounted INCOMPLETE evaluation in an intact bundle is a valid deliverable and exits 0.
+    A list that omits a required file cannot prove completeness, so the chain is walked from the
+    bundle's own ledger and receipts rather than from what the manifest chose to list."""
     d = Path(a.dir)
+    defects: list[dict] = []
+    missing: list[str] = []
+    mismatched: list[dict] = []
+    ok = 0
+    memo = HashMemo()
+
+    def defect(kind: str, path: str | None, detail: str) -> None:
+        defects.append({"kind": kind, "path": path, "detail": detail})
+
+    # (1) the manifest itself
     manifest = load_json(d / "manifest.json")
-    if manifest is None:
-        print(f"REFUSED: {d / 'manifest.json'} is missing or unreadable", file=sys.stderr)
-        return EXIT_REFUSED_RESULT
-    missing, mismatched, ok = [], [], 0
-    for e in manifest.get("evidence", []):
-        p = d / e["path"]
-        if not p.exists():
-            missing.append(e["path"])
-            continue
-        got = sha256_file(p)
-        if got != e["sha256"]:
-            mismatched.append({"path": e["path"], "recorded": e["sha256"], "found": got})
+    schema_supported = False
+    if not isinstance(manifest, dict):
+        manifest = {}
+        defect("manifest-missing", "manifest.json",
+               f"{d / 'manifest.json'} is absent or not readable as JSON: this is not a bundle.")
+    else:
+        if manifest.get("bundleSchema") != BUNDLE_SCHEMA:
+            defect("schema-unsupported", "manifest.json",
+                   f"bundleSchema {manifest.get('bundleSchema')!r} is not {BUNDLE_SCHEMA}: this bundle "
+                   f"predates evidence-chain verification; rebuild it from its run.")
         else:
-            ok += 1
-    complete = not missing and not mismatched
+            schema_supported = True
+        absent_keys = [k for k in MANIFEST_KEYS if k not in manifest]
+        if absent_keys:
+            defect("manifest-incomplete", "manifest.json",
+                   "the manifest does not carry " + ", ".join(absent_keys))
+
+    if schema_supported:
+        # (2) required paths, then every listed evidence row against its recorded hash
+        for rel in manifest.get("required") or []:
+            if not (d / rel).exists():
+                defect("required-missing", rel, "a path the manifest declares required is not present")
+        for e in manifest.get("evidence") or []:
+            p = d / e["path"]
+            if not p.exists():
+                missing.append(e["path"])
+                continue
+            got = memo.sha256(p)
+            if got != e["sha256"]:
+                mismatched.append({"path": e["path"], "recorded": e["sha256"], "found": got})
+            else:
+                ok += 1
+
+        # (3) the plan's own immutability and the planId every document agrees on
+        plan = load_json(d / "plan.json") or {}
+        recorded_plan = (d / "plan.sha256")
+        if not (d / "plan.json").exists() or not recorded_plan.exists():
+            defect("plan-missing", "plan.json", "the bundle carries no plan and its recorded hash")
+        elif memo.sha256(d / "plan.json") != recorded_plan.read_text(encoding="utf-8").strip():
+            defect("plan-changed", "plan.json", "plan.json does not hash to plan.sha256")
+        ledger_doc = load_json(d / "ledger.json") or {}
+        disp = load_json(d / "disposition.json") or {}
+        ids = {"manifest": manifest.get("planId"), "plan": plan.get("planId"),
+               "ledger": ledger_doc.get("planId"), "disposition": disp.get("planId")}
+        if len({v for v in ids.values()}) > 1:
+            defect("planid-disagreement", None,
+                   "the manifest, plan, ledger and disposition do not agree on planId: " + canonical(ids))
+
+        # (4) the registry and scope copies against the hashes the plan froze
+        for rel, want, label in ((manifest.get("registry") or "registry/check-registry.json",
+                                  (plan.get("registry") or {}).get("sha256"), "registry"),
+                                 (manifest.get("scope") or "scope/scope.json",
+                                  (plan.get("scope") or {}).get("sha256"), "scope")):
+            if want is None:
+                continue  # a plan made without --scope froze no scope hash
+            if not (d / rel).exists():
+                defect(f"{label}-missing", rel, f"the plan froze a {label} hash but the copy is absent")
+            elif memo.sha256(d / rel) != want:
+                defect(f"{label}-mismatch", rel,
+                       f"the {label} copy hashes {str(memo.sha256(d / rel))[:12]}, the plan froze "
+                       f"{str(want)[:12]}")
+
+        # (5) the receipt-to-evidence chain, walked from the LEDGER
+        listed = {e["path"] for e in (manifest.get("evidence") or [])}
+        for k, e in (ledger_doc.get("entries") or {}).items():
+            if e.get("status") not in TERMINAL_OK:
+                continue
+            rec = load_json(d / "receipts" / f"{k}.json")
+            if not isinstance(rec, dict):
+                defect("receipt-missing", f"receipts/{k}.json",
+                       f"the ledger records {k} as {e.get('status')} and the bundle carries no receipt")
+                continue
+            if e.get("receiptId") and rec.get("receiptId") != e.get("receiptId"):
+                defect("receipt-mismatch", f"receipts/{k}.json",
+                       f"the ledger names receipt {e.get('receiptId')}, the file is {rec.get('receiptId')}")
+            if not (rec.get("validation") or {}).get("accepted"):
+                defect("receipt-mismatch", f"receipts/{k}.json",
+                       "a terminal-ok ledger entry whose receipt was not accepted")
+            # Its outputs AND the run-internal emits it was compared against: a diff whose arm emit the
+            # bundle omits cannot be re-read as a diff of anything.
+            chain = [(o.get("path"), o.get("sha256"), True) for o in (rec.get("outputs") or [])]
+            consumed = rec.get("consumed") or {}
+            if consumed.get("baseEmitPath"):
+                chain.append((consumed["baseEmitPath"], consumed.get("baseEmitSha256"), False))
+            for row in consumed.get("inputs") or []:
+                chain.append((row.get("path"), row.get("sha256"), False))
+            for path, recorded, is_output in chain:
+                if not path:
+                    continue
+                rel = f"evidence/{path}"
+                if not (d / rel).exists():
+                    defect("evidence-missing", rel,
+                           f"receipt {rec.get('receiptId')} records this file and the bundle omits it")
+                    continue
+                if recorded is not None and memo.sha256(d / rel) != recorded:
+                    defect("evidence-changed", rel,
+                           f"receipt {rec.get('receiptId')} recorded {str(recorded)[:12]}, the copy "
+                           f"hashes {str(memo.sha256(d / rel))[:12]}")
+                if is_output and rel not in listed:
+                    defect("manifest-omits-required", rel,
+                           "a receipt's required output is present but not listed in the manifest, so the "
+                           "manifest cannot prove the bundle complete")
+        for row in (disp.get("manualDecisions") or []):
+            if not row.get("accepted"):
+                continue
+            for ev_row in row.get("evidence") or []:
+                rel = f"evidence/{ev_row['path']}"
+                if not (d / rel).exists():
+                    defect("decision-evidence-missing", rel,
+                           f"the accepted decision on {row.get('checkId')} cites evidence the bundle omits")
+
+        # (6) the disposition must agree with the ledger it claims to be derived from
+        entries = ledger_doc.get("entries") or {}
+        ev = disp.get("evaluation") or {}
+        for label, rows, want_detector in (("findings", ev.get("findings") or [], "finding"),
+                                           ("completedNullChecks", ev.get("completedNullChecks") or [],
+                                            "no-finding"),
+                                           ("completedCatalogues", ev.get("completedCatalogues") or [],
+                                            "catalogue")):
+            for row in rows:
+                key = Ledger.key(row.get("checkId"), row.get("armId"), row.get("part"))
+                entry = entries.get(key)
+                if not entry or entry.get("status") not in TERMINAL_OK \
+                        or entry.get("detector") != want_detector:
+                    defect("disposition-unsupported-claim", None,
+                           f"disposition.evaluation.{label} names {key}, which the ledger does not hold "
+                           f"as a terminal-ok {want_detector} entry")
+        if ev.get("complete") and (ev.get("missing") or ev.get("unknownApplicability")):
+            defect("disposition-complete-contradiction", "disposition.json",
+                   "evaluation.complete is true while missing or unknownApplicability is non-empty")
+        want_derived = derived_from(d, read_receipts(d))
+        if disp.get("derivedFrom") != want_derived:
+            defect("disposition-stale", "disposition.json",
+                   f"the disposition was derived from ledger "
+                   f"{str((disp.get('derivedFrom') or {}).get('ledgerSha256'))[:12]}, the bundle carries "
+                   f"{str(want_derived['ledgerSha256'])[:12]}")
+
+    structurally_valid = schema_supported and not defects
+    complete = structurally_valid and not missing and not mismatched
+    disp = load_json(d / "disposition.json") or {}
+    ev = disp.get("evaluation") or {}
     verify = {"schemaVersion": SCHEMA_VERSION, "checkedUtc": utcnow(), "dir": str(d.resolve()),
               "bundleSchema": manifest.get("bundleSchema"), "planId": manifest.get("planId"),
-              "bundle": {"complete": complete, "verified": ok,
-                         "missing": missing, "mismatched": mismatched},
-              "note": "every path is bundle-relative, so a relocated bundle validates identically"}
+              "bundle": {"schemaSupported": schema_supported, "structurallyValid": structurally_valid,
+                         "complete": complete, "verified": ok,
+                         "missing": missing, "mismatched": mismatched, "defects": defects},
+              # READ from the bundle's disposition, never recomputed: verify-bundle says whether the
+              # package is intact, not whether the evaluation was finished.
+              "evaluation": {"complete": ev.get("complete"), "claim": ev.get("claim"),
+                             "missing": ev.get("missing", [])},
+              "note": "every path is bundle-relative, so a relocated bundle validates identically; bundle "
+                      "integrity and evaluation completion are two states and both are written here"}
     write_json(d / "verify.json", verify)
-    print(f"verify: {ok} file(s) verified, {len(missing)} missing, {len(mismatched)} mismatched; "
-          f"bundle.complete: {complete}")
+    print(f"verify: {ok} file(s) verified, {len(missing)} missing, {len(mismatched)} mismatched, "
+          f"{len(defects)} defect(s); bundle.complete: {complete}; "
+          f"evaluation.complete: {ev.get('complete')}")
+    for x in defects[:20]:
+        print(f"   {x['kind']}: {x['path'] or '-'} — {x['detail']}", file=sys.stderr)
     return EXIT_OK if complete else EXIT_REFUSED_RESULT
 
 

@@ -200,12 +200,17 @@ def case_paths(case: str):
     return d, d / "scope.json", d / "candidates", d / "scenario.json"
 
 
-def do_plan(run_dir: Path, case: str, extra=None):
-    d, scope, cands, scen = case_paths(case)
-    args = ["plan", "--registry", GEN / "registry" / "fixture-check-registry.json",
-            "--scope", scope, "--candidates", cands, "--out", run_dir,
+def do_plan(run_dir: Path, case: str, extra=None, registry: str | None = None,
+            gen: Path | None = None, scenario: Path | None = None):
+    """`registry` names a trim file other than the default (case 12 needs one with an extra check);
+    `gen` points at a fixture root other than the suite's shared one (case 15 generates its own and
+    then deletes it); `scenario` drives one of a case's damaged scenarios."""
+    root = Path(gen) if gen else GEN
+    d = root / "cases" / case
+    args = ["plan", "--registry", root / "registry" / (registry or "fixture-check-registry.json"),
+            "--scope", d / "scope.json", "--candidates", d / "candidates", "--out", run_dir,
             "--harness", REAL_HARNESS] + probe_cmds() + [str(x) for x in (extra or [])]
-    return evalrun(args, scen, expect_exit=0)
+    return evalrun(args, Path(scenario) if scenario else d / "scenario.json", expect_exit=0)
 
 
 def full_run(run_dir: Path, case: str, plan_extra=None, media: Path | None = None):
@@ -618,9 +623,614 @@ def case_11(tmp):
           f"{case}: the manifest says plugin and asset binaries are excluded (D8)")
 
 
+# ------------------------------------------------------- Q43: the evidence-integrity contract (12-15)
+
+def resolve_key(plan: dict, key: str) -> str:
+    """The oracle names an arm by its CANDIDATE STEM (`candidate-01-reorder`); the controller's arm ids are
+    its own (`candidate-01`). The plan carries the mapping, so the key is resolved rather than guessed."""
+    cid, _, rest = key.partition("__")
+    stem, _, part = rest.partition("__")
+    m = {Path(a.get("candidateFile", "")).stem: a.get("armId") for a in plan.get("arms") or []}
+    aid = m.get(stem, stem)
+    return f"{cid}__{aid}" + (f"__{part}" if part else "")
+
+
+def receipt(run: Path, plan: dict, key: str):
+    return load(run / "receipts" / f"{resolve_key(plan, key)}.json")
+
+
+def journal_rows(run: Path, since: int = 0) -> list[dict]:
+    p = run / "journal.jsonl"
+    if not p.exists():
+        return []
+    rows = []
+    for line in p.read_text(encoding="utf-8", errors="replace").splitlines()[since:]:
+        try:
+            rows.append(json.loads(line))
+        except ValueError:
+            continue
+    return rows
+
+
+def journal_len(run: Path) -> int:
+    p = run / "journal.jsonl"
+    return len(p.read_text(encoding="utf-8", errors="replace").splitlines()) if p.exists() else 0
+
+
+def split_key(resolved: str):
+    cid, _, rest = resolved.partition("__")
+    aid, _, part = rest.partition("__")
+    return cid, aid, (part or None)
+
+
+def transitions_to(rows, resolved_key: str, startswith: str):
+    """Journal rows for ONE ledger entry whose new status starts with `startswith`. The armId is part of
+    the filter: without it a candidate arm's transition answers for the baseline's, and the independence
+    assertions would read another arm's work."""
+    cid, aid, part = split_key(resolved_key)
+    out = []
+    for r in rows:
+        if r.get("checkId") != cid or r.get("armId") != aid:
+            continue
+        if (r.get("part") or None) != part:
+            continue
+        if str(r.get("to", "")).startswith(startswith):
+            out.append(r)
+    return out
+
+
+def scrub_paths(doc, res, d: Path) -> str:
+    """One searchable blob of a tool's answer with the DIRECTORY IT RAN IN removed. A temp directory named
+    after the damage makes `<defect kind> in blob` pass on the folder name; scrubbing is what keeps the
+    assertion about the tool's words."""
+    out = json.dumps(doc) + (res.stdout or "") + (res.stderr or "")
+    for form in (str(d), str(d).replace("\\", "/"), d.name):
+        out = out.replace(form, "<DIR>").replace(form.replace("\\", "\\\\"), "<DIR>")
+    return out
+
+
+def rejection_detail(rc: dict, cause: str) -> str:
+    return " | ".join(x.get("detail", "") for x in ((rc.get("validation") or {}).get("rejections") or [])
+                      if x.get("cause") == cause)
+
+
+def case_12(tmp):
+    case = "case-12-identity-binding"
+    o = load(EXPECTED / f"{case}.json")
+    reg = "fixture-check-registry-q43.json"
+    d = GEN / "cases" / case
+    run = tmp / case
+    do_plan(run, case, registry=reg)
+    plan = load(run / "plan.json") or {}
+    expect(plan.get("schemaVersion"), o["plan"]["schemaVersion"], f"{case}: plan.schemaVersion", "A-1")
+    # Keyed by BOTH the armId and the candidate stem: the oracle names the baseline arm "baseline" (its
+    # armId) and the others by their candidate stem, and a stem-only map reads [] for the baseline.
+    arms = {}
+    for a in plan.get("arms") or []:
+        arms[a.get("armId")] = a
+        arms.setdefault(Path(a.get("candidateFile", "")).stem, a)
+    for stem, want in o["plan"]["armsRequested"].items():
+        req = (arms.get(stem) or {}).get("requested") or {}
+        plugs = req.get("plugins") or []
+        expect([p.get("name") for p in plugs], want["plugins"], f"{case}: {stem} requested plugin order", "D1")
+        expect([p.get("hashSource") for p in plugs], want["hashSource"],
+               f"{case}: {stem} requested hashSource per plugin", "D1")
+        expect(sorted(p.get("name") for p in plugs if p.get("sha256") is None), sorted(want["sha256Null"]),
+               f"{case}: {stem} requested sha256 null for", "D1")
+    if o["plan"]["providersFromScope"]:
+        check(bool((plan.get("configuration") or {}).get("providers")),
+              f"{case}: plan.configuration keeps the scope's providers (D1)")
+
+    evalrun(["run", "--run", run], d / "scenario.json")
+    for key in o["healthy"]["acceptedEntries"]:
+        rc = receipt(run, plan, key)
+        check(bool(rc) and ((rc.get("validation") or {}).get("accepted") is True),
+              f"{case}: {key} accepted (healthy control, D2)")
+    lim = o["healthy"]["identityLimitsOn"]
+    rc = receipt(run, plan, lim["entry"]) or {}
+    check(lim["namesPlugin"] in json.dumps(rc.get("validation") or {}),
+          f"{case}: the unstated-hash plugin {lim['namesPlugin']} is recorded under validation.identityLimits (D2c)")
+    dp = o["healthy"]["differentPopulations"]
+    a1 = receipt(run, plan, "functional.quest-alias-split__candidate-01-reorder") or {}
+    a2 = receipt(run, plan, "geometry.navmesh-ownership__candidate-01-reorder__arm") or {}
+    f1 = ((a1.get("consumed") or {}).get("configuration") or {}).get("fingerprint")
+    f2 = ((a2.get("consumed") or {}).get("configuration") or {}).get("fingerprint")
+    check((a1.get("validation") or {}).get("accepted") is True and (a2.get("validation") or {}).get("accepted") is True,
+          f"{case}: two probes declaring different populations over the same plugins are BOTH accepted (D2g/h)")
+    check(bool(f1) and bool(f2) and f1 != f2,
+          f"{case}: their fingerprints differ ({str(f1)[:12]} vs {str(f2)[:12]}) and neither is a mismatch (D2g)")
+
+    j = o["consumed"]
+    for stem in ("baseline", "candidate-01-reorder"):
+        want = j[stem]
+        rc = receipt(run, plan, f"{j['jsonAdapterCheck']}__{stem}") or {}
+        cfg = (rc.get("consumed") or {}).get("configuration") or {}
+        expect((rc.get("consumed") or {}).get("configurationSource"), want["configurationSource"],
+               f"{case}: {j['jsonAdapterCheck']} [{stem}] consumed.configurationSource", "D3")
+        expect(cfg.get("fingerprint") is None, want["fingerprintIsNull"],
+               f"{case}: {j['jsonAdapterCheck']} [{stem}] consumed fingerprint is null", "D3")
+        expect([p.get("name", p.get("Name")) for p in cfg.get("plugins") or []], want["plugins"],
+               f"{case}: {j['jsonAdapterCheck']} [{stem}] consumed plugin order", "D3")
+
+    scope = load(d / "scope.json") or {}
+    scope_hash = {str(p["Name"]).lower(): p["Sha256"]
+                  for p in (scope.get("configuration") or {}).get("plugins") or []}
+    for spec in o["rejections"]:
+        r2 = tmp / f"{case}-{spec['id']}"
+        scen = d / spec["scenario"]
+        do_plan(r2, case, registry=reg, scenario=scen)
+        evalrun(["run", "--run", r2], scen)
+        plan2 = load(r2 / "plan.json") or {}
+        rc = receipt(r2, plan2, spec["entry"])
+        if rc is None:
+            check(False, f"{case}/{spec['id']}: a receipt was written for {spec['entry']}")
+            continue
+        expect((rc.get("validation") or {}).get("accepted"), False,
+               f"{case}/{spec['id']}: {spec['entry']} accepted", spec["rule"][:40])
+        causes = [x.get("cause") for x in ((rc.get("validation") or {}).get("rejections") or [])]
+        check(spec["cause"] in causes,
+              f"{case}/{spec['id']}: rejected for {spec['cause']} (got {causes})")
+        detail = rejection_detail(rc, spec["cause"])
+        for tok in spec.get("detailContains", []):
+            check(tok in detail, f"{case}/{spec['id']}: the detail names {tok!r} (got {detail[:160]!r})")
+        if spec.get("detailNamesBothHashes"):
+            want_h = scope_hash.get("fixturetarget.esp", "")
+            got_h = ("1" if want_h[:1] != "1" else "2") + want_h[1:]
+            check(want_h[:12] in detail and got_h[:12] in detail,
+                  f"{case}/{spec['id']}: the detail names both hashes at 12 hex (got {detail[:160]!r})")
+        base_key = spec["entry"].split("__")[0] + "__baseline__arm"
+        rb = receipt(r2, plan2, base_key) or {}
+        check((rb.get("validation") or {}).get("accepted") is True,
+              f"{case}/{spec['id']}: the undamaged baseline arm is still accepted (not a blanket rejection)")
+
+
+def case_13(tmp):
+    case = "case-13-reuse-boundary"
+    o = load(EXPECTED / f"{case}.json")
+    d = GEN / "cases" / case
+    scen = d / "scenario.json"
+    base = tmp / case
+    do_plan(base, case)
+    evalrun(["run", "--run", base], scen)
+    plan = load(base / "plan.json") or {}
+
+    b = o["baseEmitDependency"]
+    ca = receipt(base, plan, b["candidateArmReceipt"]["entry"]) or {}
+    cons = ca.get("consumed") or {}
+    expect(cons.get("baseEmitSha256") is None, b["candidateArmReceipt"]["baseEmitSha256IsNull"],
+           f"{case}: the candidate arm receipt's consumed.baseEmitSha256 is null", "D4")
+    check(b["candidateArmReceipt"]["baseEmitPathNames"] in str(cons.get("baseEmitPath") or ""),
+          f"{case}: it names the baseline emit (got {cons.get('baseEmitPath')!r}) (D4)")
+    rv = (receipt(base, plan, b["reverseReceipt"]["entry"]) or {}).get("consumed") or {}
+    expect(rv.get("baseEmitSha256") is None, b["reverseReceipt"]["baseEmitSha256IsNull"],
+           f"{case}: the reverse receipt's consumed.baseEmitSha256 is null", "D4")
+    df = (receipt(base, plan, b["diffReceipt"]["entry"]) or {}).get("consumed") or {}
+    ins = df.get("inputs") or []
+    expect(len(ins), b["diffReceipt"]["inputsCount"], f"{case}: the diff receipt's consumed.inputs count", "D4/A-4")
+    expect(sorted(str(x.get("part")) for x in ins), sorted(b["diffReceipt"]["inputParts"]),
+           f"{case}: the diff receipt's input parts", "A-4")
+    check(all(x.get("path") and x.get("sha256") for x in ins) if ins else False,
+          f"{case}: every diff input row carries a path and a sha256 (A-4)")
+    check(df.get("baseEmitPath") is None and df.get("baseEmitSha256") is None,
+          f"{case}: the diff receipt's own baseEmit stays null (A-4)")
+
+    steps = {s["id"]: s for s in o["steps"]}
+    plug = GEN / "plugins" / "FixtureTarget.esp"
+    body = plug.read_bytes()
+
+    # (i) the plugin is GONE - absence is a change, not "no change"
+    s = steps["plugin-gone"]
+    r = tmp / f"{case}-plugin-gone"
+    shutil.copytree(base, r)
+    n0 = journal_len(r)
+    try:
+        plug.unlink()
+        res = evalrun(["resume", "--run", r], scen)
+    finally:
+        plug.write_bytes(body)
+    expect(res.returncode, s["exit"], f"{case}/plugin-gone: resume exit", "D5")
+    rows = journal_rows(r, n0)
+    led = ledger_entries(load(r / "ledger.json") or {})
+    for key in s["invalidatedByName"]["entries"]:
+        rk = resolve_key(plan, key)
+        hits = [x for x in transitions_to(rows, rk, "invalidated")
+                if s["invalidatedByName"]["namesPlugin"] in str(x.get("to", "")) + str(x.get("detail", ""))]
+        check(bool(hits), f"{case}/plugin-gone: {key} invalidated by name, naming FixtureTarget.esp (D5b)")
+        check(not transitions_to(rows, rk, "reused"),
+              f"{case}/plugin-gone: {key} was never reused (D5b)")
+    if s.get("detailNamesNextAction"):
+        blob = json.dumps(led)
+        check(any(w in blob for w in ("re-run", "restore", "re-plan")),
+              f"{case}/plugin-gone: the ledger entry's detail names the next action (D5)")
+    evalrun(["finalize", "--run", r], scen)
+    disp = load(r / "disposition.json") or {}
+    miss = names_of(field(disp, "missing", default=[]))
+    for cid in s["afterRerunAndFinalize"]["affectedChecksNotCompleted"]:
+        check(cid in miss, f"{case}/plugin-gone: {cid} is not completed after the re-run (D2c on a zero hash)")
+    expect(field(disp, "complete"), False, f"{case}/plugin-gone: evaluation.complete", "D6")
+
+    # (ii) one arm's input changed - the other arm's work survives
+    s = steps["one-arm-input-changed"]
+    r = tmp / f"{case}-one-arm"
+    shutil.copytree(base, r)
+    cand = d / "candidates" / "candidate-01-reorder.json"
+    cbody = cand.read_bytes()
+    n0 = journal_len(r)
+    try:
+        cand.write_bytes(cbody + b"\n")
+        res = evalrun(["resume", "--run", r], scen)
+    finally:
+        cand.write_bytes(cbody)
+    expect(res.returncode, s["exit"], f"{case}/one-arm: resume exit", "D5")
+    rows = journal_rows(r, n0)
+    for key in s["invalidatedByName"]["entries"]:
+        rk = resolve_key(plan, key)
+        check(bool(transitions_to(rows, rk, "invalidated")),
+              f"{case}/one-arm: {key} invalidated by the changed candidate (D5b)")
+        inv = s["invalidatedByName"]
+        led_now = ledger_entries(load(r / "ledger.json") or {})
+        if inv.get("partRestingStatusStartsWith"):
+            got = str(execution_of(led_now.get(rk)))
+            check(got.startswith(inv["partRestingStatusStartsWith"]),
+                  f"{case}/one-arm: {key} rests at "
+                  f"{inv['partRestingStatusStartsWith']}(...) - the truthful reason (A-7); got {got!r}")
+        if inv.get("accountingEntry"):
+            # The launch refusal is the PART-LESS accounting entry, not a status on the part (A-7).
+            ak = resolve_key(plan, inv["accountingEntry"])
+            expect(execution_of(led_now.get(ak)), inv["accountingStatus"],
+                   f"{case}/one-arm: {inv['accountingEntry']} (no part) records the launch refusal", "A-7")
+    led = ledger_entries(load(r / "ledger.json") or {})
+    for key in s["independentStayReused"]["entries"]:
+        rk = resolve_key(plan, key)
+        e = led.get(rk)
+        expect(execution_of(e), s["independentStayReused"]["restingStatus"],
+               f"{case}/one-arm: {key} resting status", "D5 - independent entries stay reused")
+        check(not transitions_to(rows, rk, "invalidated"),
+              f"{case}/one-arm: {key} was not invalidated (D5)")
+        check(not transitions_to(rows, rk, "running"),
+              f"{case}/one-arm: {key} did no child work (D5)")
+
+    # (iii) an identity that cannot be verified is refused-reuse, never reused
+    s = steps["unverifiable-identity"]
+    r = tmp / f"{case}-unverifiable"
+    shutil.copytree(base, r)
+    key = resolve_key(plan, s["expect"]["entry"])
+    rp = r / "receipts" / f"{key}.json"
+    doc = load(rp) or {}
+    for p in ((doc.get("consumed") or {}).get("configuration") or {}).get("plugins") or []:
+        if str(p.get("name", p.get("Name"))).lower() == s["expect"]["gapNamesPlugin"].lower():
+            p["sha256" if "sha256" in p else "Sha256"] = ""
+    rp.write_text(json.dumps(doc, indent=1), encoding="utf-8")
+    n0 = journal_len(r)
+    res = evalrun(["resume", "--run", r], scen)
+    expect(res.returncode, s["exit"], f"{case}/unverifiable: resume exit", "D5a")
+    rows = journal_rows(r, n0)
+    gapped = transitions_to(rows, key, s["expect"]["statusStartsWith"])
+    check(bool(gapped), f"{case}/unverifiable: {s['expect']['entry']} went refused-reuse(<gap>) (D5a)")
+    check(any(s["expect"]["gapNamesPlugin"] in str(x.get("to", "")) + str(x.get("detail", "")) for x in gapped),
+          f"{case}/unverifiable: the gap names {s['expect']['gapNamesPlugin']} (D5a)")
+    check(not transitions_to(rows, key, "invalidated"),
+          f"{case}/unverifiable: it was not called invalidated - nobody measured a change (D5a)")
+
+    # (iii-b) a comparison input recorded without a hash is unverifiable too (A-9, V's finding 2)
+    s = steps["unverifiable-base-emit"]
+    r = tmp / f"{case}-unverifiable-base"
+    shutil.copytree(base, r)
+    key = resolve_key(plan, s["expect"]["entry"])
+    rp = r / "receipts" / f"{key}.json"
+    doc = load(rp) or {}
+    check(bool((doc.get("consumed") or {}).get("baseEmitSha256")),
+          f"{case}/unverifiable-base: the candidate arm receipt records a base emit hash to null (D4)")
+    doc.setdefault("consumed", {})["baseEmitSha256"] = None
+    rp.write_text(json.dumps(doc, indent=1), encoding="utf-8")
+    n0 = journal_len(r)
+    res = evalrun(["resume", "--run", r], scen)
+    expect(res.returncode, s["exit"], f"{case}/unverifiable-base: resume exit", "A-9")
+    rows = journal_rows(r, n0)
+    gapped = transitions_to(rows, key, s["expect"]["statusStartsWith"])
+    check(bool(gapped), f"{case}/unverifiable-base: {s['expect']['entry']} went refused-reuse(<gap>) (A-9)")
+    check(any(s["expect"]["gapNames"] in str(x.get("to", "")) + str(x.get("detail", "")) for x in gapped),
+          f"{case}/unverifiable-base: the gap names the {s['expect']['gapNames']} (A-9)")
+    check(not transitions_to(rows, key, "invalidated"),
+          f"{case}/unverifiable-base: it was not called invalidated (A-9)")
+
+    # (iv) the unchanged control: a resume over a run nothing touched does no child work
+    s = steps["unchanged-control"]
+    r = tmp / f"{case}-unchanged"
+    shutil.copytree(base, r)
+    ids0 = field(load(r / "ledger.json") or {}, "runIds", default=[])
+    n0 = journal_len(r)
+    res = evalrun(["resume", "--run", r], scen)
+    expect(res.returncode, s["exit"], f"{case}/unchanged: resume exit", "D5")
+    rows = journal_rows(r, n0)
+    led = ledger_entries(load(r / "ledger.json") or {})
+    terminal = [k for k, v in led.items() if execution_of(v) in ("completed", "reused")]
+    check(all(execution_of(led[k]) == "reused" for k in terminal) if terminal else False,
+          f"{case}/unchanged: every terminal-ok entry is reused (D5)")
+    check(len(field(load(r / "ledger.json") or {}, "runIds", default=[])) > len(ids0),
+          f"{case}/unchanged: a new runId is recorded (D5)")
+    check(not [x for x in rows if str(x.get("to", "")) == "running"],
+          f"{case}/unchanged: no `running` transition under the new runId - zero children (D5)")
+
+    # (v) the same guarantee from `run`, not only `resume`
+    s = steps["run-not-only-resume"]
+    r = tmp / f"{case}-run-verb"
+    shutil.copytree(base, r)
+    n0 = journal_len(r)
+    try:
+        plug.unlink()
+        res = evalrun(["run", "--run", r], scen)
+    finally:
+        plug.write_bytes(body)
+    expect(res.returncode, s["exit"], f"{case}/run-verb: run exit", "D5")
+    rows = journal_rows(r, n0)
+    for key in s["invalidatedByName"]["entries"]:
+        rk = resolve_key(plan, key)
+        hits = [x for x in transitions_to(rows, rk, "invalidated")
+                if s["invalidatedByName"]["namesPlugin"] in str(x.get("to", "")) + str(x.get("detail", ""))]
+        check(bool(hits), f"{case}/run-verb: {key} invalidated on `run` too - no verb difference (D5)")
+
+    # (vi) the frozen plan's premise changed
+    s = steps["scope-changed"]
+    r = tmp / f"{case}-scope-changed"
+    shutil.copytree(base, r)
+    sp = d / "scope.json"
+    sbody = sp.read_bytes()
+    n0 = journal_len(r)
+    try:
+        sp.write_bytes(sbody + b"\n")
+        res = evalrun(["resume", "--run", r], scen)
+    finally:
+        sp.write_bytes(sbody)
+    expect(res.returncode, s["exit"], f"{case}/scope-changed: resume exit", "D5 / A-3")
+    blob = res.stdout + res.stderr
+    for tok in s.get("stderrContains") or s["expect"].get("stderrContains") or []:
+        check(tok in blob, f"{case}/scope-changed: refused by name, {tok!r} in the output (A-3)")
+    check(s["expect"]["nextActionContains"] in blob,
+          f"{case}/scope-changed: the refusal names the next action (scopeprobe) (D5)")
+    check(not [x for x in journal_rows(r, n0) if str(x.get("to", "")) == "running"],
+          f"{case}/scope-changed: no work was done (A-3)")
+
+
+def case_14(tmp):
+    case = "case-14-evidence-chain"
+    o = load(EXPECTED / f"{case}.json")
+    d = GEN / "cases" / case
+    scen = d / "scenario.json"
+    base = tmp / case
+    do_plan(base, case)
+    evalrun(["run", "--run", base], scen)
+    plan = load(base / "plan.json") or {}
+    victim_rel = None
+    for p in sorted((base / "sweep" / "navownprobe").glob("baseline.json")):
+        victim_rel = p.relative_to(base).as_posix()
+    check(victim_rel is not None, f"{case}: the baseline navmesh emit exists to be damaged")
+
+    for spec in o["finalize"]:
+        r = tmp / f"{case}-{spec['id']}"
+        shutil.copytree(base, r)
+        v = r / victim_rel
+        if spec["id"] == "evidence-missing":
+            v.unlink()
+        else:
+            v.write_bytes(v.read_bytes() + b"\n")
+        res = evalrun(["finalize", "--run", r], scen)
+        e = spec["expect"]
+        expect(res.returncode, spec["exit"], f"{case}/{spec['id']}: finalize exit", "D6")
+        disp = load(r / "disposition.json") or {}
+        blob = json.dumps(disp)
+        integ = deep_find(disp, "integrity") or {}
+        expect(integ.get("ok") if isinstance(integ, dict) else None, e["integrityOk"],
+               f"{case}/{spec['id']}: evaluation.integrity.ok", "D6")
+        defects = json.dumps((integ or {}).get("defects") or deep_find(disp, "defects") or [])
+        check(e["defectsNamePath"] in defects.replace("\\\\", "/"),
+              f"{case}/{spec['id']}: the defect names {e['defectsNamePath']} (D6)")
+        check(e["defectKind"] in defects, f"{case}/{spec['id']}: the defect kind is {e['defectKind']} (D6)")
+        expect(deep_find(disp, "refused"), e["refused"], f"{case}/{spec['id']}: evaluation.refused", "D6")
+        nulls = json.dumps(deep_find(disp, "completedNullChecks") or [])
+        check(e["completedNullChecksExcludes"] not in nulls,
+              f"{case}/{spec['id']}: {e['completedNullChecksExcludes']} is NOT a completed null check (D6)")
+        miss = field(disp, "missing", default=[])
+        if e.get("missingIncludes"):
+            check(e["missingIncludes"] in json.dumps(miss),
+                  f"{case}/{spec['id']}: {e['missingIncludes']} is listed under missing (D6)")
+        if e.get("missingStatusStartsWith"):
+            check(e["missingStatusStartsWith"] in json.dumps(miss),
+                  f"{case}/{spec['id']}: its status is {e['missingStatusStartsWith']}(...) (D6)")
+        expect(field(disp, "complete"), False, f"{case}/{spec['id']}: evaluation.complete", "D6")
+        def missing_row(key):
+            cid, aid, part = split_key(resolve_key(plan, key))
+            return [m for m in (miss or []) if isinstance(m, dict) and m.get("checkId") == cid
+                    and m.get("armId") == aid and (m.get("part") or None) == part]
+
+        for key in e.get("dependentEntriesUnderMissing") or []:
+            rows = missing_row(key)
+            check(any(str(m.get("status", "")).startswith(e["dependencyStatus"]) for m in rows),
+                  f"{case}/{spec['id']}: {key} is listed under missing as {e['dependencyStatus']}(...) "
+                  f"(A-5, transitive like reuse); got {[m.get('status') for m in rows]}")
+        # A-8: an entry whose OWN output or run-internal input is the damaged file is a DIRECT loss even
+        # while it is also a dependent, so either status is a correct answer for the candidate arm.
+        for key in e.get("eitherStatusEntriesUnderMissing") or []:
+            rows = missing_row(key)
+            check(any(str(m.get("status", "")).startswith(w) for m in rows for w in e["eitherStatus"]),
+                  f"{case}/{spec['id']}: {key} is listed under missing as one of "
+                  f"{e['eitherStatus']} (A-8); got {[m.get('status') for m in rows]}")
+        if "findingsExcludes" in e:
+            check(e["findingsExcludes"] not in json.dumps(deep_find(disp, "findings") or []),
+                  f"{case}/{spec['id']}: it is not counted under findings either (D6)")
+        tb = spec.get("thenBundle")
+        if tb:
+            man_before = load(r / "bundle" / "manifest.json")
+            res = evalrun(["bundle", "--run", r], scen)
+            expect(res.returncode, tb["exit"], f"{case}/{spec['id']}: bundle exit", "D7")
+            out = res.stdout + res.stderr
+            check(tb["namesPath"] in out.replace("\\", "/") or tb["namesPath"] in json.dumps(load(r / "disposition.json") or {}).replace("\\\\", "/"),
+                  f"{case}/{spec['id']}: bundle names the lost path (D7)")
+            if tb.get("namesReceipt"):
+                rk = resolve_key(plan, "geometry.navmesh-ownership__baseline__arm")
+                rid = (load(r / "receipts" / f"{rk}.json") or {}).get("receiptId") or ""
+                blob2 = out + json.dumps(load(r / "disposition.json") or {})
+                check(rk in blob2 or (rid and rid in blob2),
+                      f"{case}/{spec['id']}: bundle names the receipt whose evidence is gone (D7)")
+            man_after = load(r / "bundle" / "manifest.json")
+            check(man_after is None or man_after == man_before,
+                  f"{case}/{spec['id']}: no manifest was written over a broken evidence chain (D7)")
+            vr = evalrun(["verify-bundle", r / "bundle"])
+            vj = load(r / "bundle" / "verify.json") or {}
+            check(vr.returncode != 0 or (vj.get("bundle") or {}).get("complete") is not True,
+                  f"{case}/{spec['id']}: no verify.json can claim a complete bundle (D8)")
+
+    # a HEALTHY bundle, then one damage per answer, each on its own copy
+    good = tmp / f"{case}-good"
+    shutil.copytree(base, good)
+    evalrun(["finalize", "--run", good], scen)
+    evalrun(["bundle", "--run", good], scen)
+    vr = evalrun(["verify-bundle", good / "bundle"])
+    expect(vr.returncode, o["verifyBundle"]["healthyInPlaceExit"],
+           f"{case}: verify-bundle on the healthy bundle", "D8")
+
+    # a control file missing from the RUN is a bundle refusal, never a quietly shorter required list (A-9)
+    rc = o["runControlMissing"]
+    lost = tmp / f"{case}-lost-control"
+    shutil.copytree(good, lost)
+    shutil.rmtree(lost / "bundle", ignore_errors=True)
+    (lost / rc["namesFile"]).unlink()
+    res = evalrun(["bundle", "--run", lost], scen)
+    expect(res.returncode, rc["bundleExit"], f"{case}/lost-control: bundle exit", "A-9")
+    blob = scrub_paths({}, res, lost)
+    check(rc["refusedBy"] in blob, f"{case}/lost-control: refused by name {rc['refusedBy']} (A-9)")
+    check(rc["namesFile"] in blob, f"{case}/lost-control: it names {rc['namesFile']} (A-9)")
+    check(not (lost / "bundle" / "manifest.json").exists(),
+          f"{case}/lost-control: no manifest was written (A-9)")
+
+    for i, spec in enumerate(o["verifyBundle"]["cases"], start=1):
+        # The directory must NOT be named after the damage: verify.json echoes its own path and the CLI
+        # prints it, so `schema-unsupported in blob` would pass on the folder name alone. (It did, first try.)
+        b = tmp / f"{case}-vb{i}"
+        shutil.copytree(good / "bundle", b)
+        (b / "verify.json").unlink(missing_ok=True)
+        man = load(b / "manifest.json") or {}
+        removed = None
+        if spec["id"] == "required-file-deleted":
+            (b / "disposition.json").unlink()
+        elif spec["id"] == "manifest-omits-required":
+            rows = [e for e in man.get("evidence", []) if str(e.get("path", "")).startswith("evidence/")]
+            check(bool(rows), f"{case}/{spec['id']}: the manifest lists a receipt output to drop")
+            if not rows:
+                continue
+            removed = rows[0]["path"]
+            man["evidence"] = [e for e in man.get("evidence", []) if e.get("path") != removed]
+            (b / "manifest.json").write_text(json.dumps(man, indent=1), encoding="utf-8")
+            check((b / removed).exists(), f"{case}/{spec['id']}: the dropped file is still on disk")
+        elif spec["id"] == "evidence-bytes-altered":
+            rows = [e for e in man.get("evidence", []) if str(e.get("path", "")).startswith("evidence/")]
+            removed = rows[0]["path"] if rows else None
+            if removed:
+                p = b / removed
+                p.write_bytes(p.read_bytes() + b"\n")
+        elif spec["id"] == "control-file-deleted":
+            (b / "STATUS.md").unlink()
+        elif spec["id"] == "schema-unsupported":
+            man["bundleSchema"] = 1
+            (b / "manifest.json").write_text(json.dumps(man, indent=1), encoding="utf-8")
+        res = evalrun(["verify-bundle", b])
+        expect(res.returncode, spec["exit"], f"{case}/{spec['id']}: verify-bundle exit", "D8")
+        vj = load(b / "verify.json") or {}
+        blob = scrub_paths({k: v for k, v in vj.items() if k != "dir"}, res, b)
+        check(spec["defectKind"] in blob,
+              f"{case}/{spec['id']}: the defect is named {spec['defectKind']} (D8)")
+        if spec.get("namesPath") is True and removed:
+            check(removed in blob.replace("\\\\", "/"), f"{case}/{spec['id']}: it names {removed} (D8)")
+        if spec.get("namesRemovedPath") and removed:
+            check(removed in blob.replace("\\\\", "/"), f"{case}/{spec['id']}: it names {removed} (D8)")
+        if "namesPath" in spec and isinstance(spec["namesPath"], str):
+            check(spec["namesPath"] in blob, f"{case}/{spec['id']}: it names {spec['namesPath']} (D8)")
+        if spec.get("completeIsFalse"):
+            check((vj.get("bundle") or {}).get("complete") is False or vj == {},
+                  f"{case}/{spec['id']}: bundle.complete is false (D8)")
+        if spec.get("schemaSupportedIsFalse"):
+            expect((vj.get("bundle") or {}).get("schemaSupported"), False,
+                   f"{case}/{spec['id']}: bundle.schemaSupported", "A-1 / D8")
+
+    # A-1's integration input: Q42's own demo bundle, verified on a COPY (verify writes verify.json)
+    q = o["q42DemoBundle"]
+    src = Path(os.environ.get(q["env"], q["path"]))
+    if src.is_dir():
+        cp = tmp / "q42-demo-bundle-copy"
+        shutil.copytree(src, cp)
+        (cp / "verify.json").unlink(missing_ok=True)
+        res = evalrun(["verify-bundle", cp])
+        expect(res.returncode, q["exit"], f"{case}: verify-bundle on Q42's demo bundle", "A-1")
+        blob = json.dumps(load(cp / "verify.json") or {}) + res.stdout + res.stderr
+        check(q["defectKind"] in blob,
+              f"{case}: the Q42 bundle is refused as {q['defectKind']} by name (A-1)")
+    else:
+        print(f"  NOTE  {case}: {src} is absent (the Q42 demo run is untracked and lives only in the main "
+              f"checkout), so A-1's refusal is covered here only by the synthetic bundleSchema 1 copy above.")
+
+
+def case_15(tmp):
+    case = "case-15-portable-incomplete"
+    o = load(EXPECTED / f"{case}.json")
+    priv = tmp / "fixtures-case-15"
+    gen = subprocess.run([sys.executable, str(FIXT / "make_fixtures.py"), "--out", str(priv)],
+                         capture_output=True, text=True)
+    check(gen.returncode == 0, f"{case}: its own fixture root was generated")
+    if gen.returncode != 0:
+        return
+    d = priv / "cases" / case
+    scen = d / "scenario.json"
+    run = tmp / case
+    do_plan(run, case, gen=priv)
+    evalrun(["run", "--run", run], scen)
+    fin = evalrun(["finalize", "--run", run], scen)
+    bun = evalrun(["bundle", "--run", run], scen)
+    inc = o["incompleteness"]
+    expect(fin.returncode, inc["finalizeExit"], f"{case}: finalize exit on an incomplete evaluation", "D7")
+    expect(bun.returncode, inc["bundleExit"], f"{case}: bundle exit on an incomplete evaluation", "D7")
+    disp = load(run / "disposition.json") or {}
+    expect(field(disp, "complete"), inc["complete"], f"{case}: evaluation.complete", "D7")
+    expect(field(disp, "claim"), inc["claim"], f"{case}: evaluation.claim", "D7")
+    check(bool(field(disp, "missing", default=[])), f"{case}: missing is non-empty (D7)")
+
+    moved = tmp / f"{case}-bundle-copy"
+    shutil.copytree(run / "bundle", moved)
+    (moved / "verify.json").unlink(missing_ok=True)
+    shutil.rmtree(priv, ignore_errors=True)
+    check(not priv.exists(), f"{case}: every original source path (plugins, scope, candidates, registry) is gone")
+    res = evalrun(["verify-bundle", moved])
+    e = o["afterDeletingEverySourcePath"]["expect"]
+    expect(res.returncode, o["afterDeletingEverySourcePath"]["exit"],
+           f"{case}: verify-bundle exit with no live path on disk", "D8")
+    vj = load(moved / "verify.json") or {}
+    bl = vj.get("bundle") or {}
+    expect(bl.get("schemaSupported"), e["bundleSchemaSupported"], f"{case}: bundle.schemaSupported", "D8")
+    expect(bl.get("structurallyValid"), e["bundleStructurallyValid"], f"{case}: bundle.structurallyValid", "D8")
+    expect(bl.get("complete"), e["bundleComplete"], f"{case}: bundle.complete", "D8")
+    expect(bl.get("missing"), [], f"{case}: bundle.missing", "D8")
+    expect(bl.get("mismatched"), [], f"{case}: bundle.mismatched", "D8")
+    ev = vj.get("evaluation") or {}
+    expect(ev.get("complete"), e["evaluationComplete"], f"{case}: verify.json evaluation.complete", "D8")
+    check(bool(ev.get("missing")), f"{case}: verify.json evaluation.missing is non-empty, read from the "
+                                   f"bundle's disposition (D8)")
+    man = load(moved / "manifest.json") or {}
+    req = man.get("required") or []
+    check(bool(req), f"{case}: the manifest carries `required` (D7)")
+    for name in e["requiredIncludes"]:
+        check(any(name == str(x).split("/")[-1] or name == x for x in req),
+              f"{case}: required lists {name} (D7)")
+    # `not absent` is vacuously true when `required` is empty, which is exactly the broken state, so the
+    # non-emptiness is part of this assertion rather than only of the one above.
+    absent = [x for x in req if not (moved / str(x)).exists()]
+    check(bool(req) and not absent,
+          f"{case}: every required path is present in the bundle (D8); {len(req)} required, absent {absent}")
+    bad = [p.name for p in moved.rglob("*") if p.suffix.lower() in (".esp", ".esm", ".esl", ".bsa")]
+    expect(bad, [], f"{case}: no plugin or asset binary in the bundle", "D8")
+
+
 CASES = {"case-01": case_01, "case-02": case_02, "case-03": case_03, "case-04": case_04, "case-05": case_05,
          "case-06": case_06, "case-07": case_07, "case-08": case_08, "case-09": case_09, "case-10": case_10,
-         "case-11": case_11}
+         "case-11": case_11, "case-12": case_12, "case-13": case_13, "case-14": case_14, "case-15": case_15}
 
 
 def main() -> int:

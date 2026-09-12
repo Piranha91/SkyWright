@@ -1,0 +1,50 @@
+{
+ "case": "case-15-portable-incomplete",
+ "rules": ["D7", "D8"],
+ "covers": "the packet's fourth outcome: a bundle of a genuinely INCOMPLETE evaluation verifies as a valid, complete BUNDLE with no live path of any kind still on disk",
+ "registry": "fixture-check-registry.json, generated into this case's OWN fixture root",
+ "note": "This case generates its own fixture tree (plugins, scope, candidates, registry) and DELETES it before verifying, so no other case can be run against a damaged fixture. The bundle is copied away from the run directory first, so the run's own files are not what answers.",
+
+ "incompleteness": {
+  "complete": false,
+  "claim": "incomplete",
+  "missingNonEmpty": true,
+  "why": "the fixture registry trim carries checks whose adapter kind is mcp-only / manual / unsupported, so no fixture run can reach evaluation.complete true (EXPECTED.md section 0). D7: an evaluation that is merely incomplete (checks not run) is unchanged: disposition, exit 0.",
+  "finalizeExit": 0,
+  "bundleExit": 0
+ },
+
+ "afterDeletingEverySourcePath": {
+  "deleted": ["the plugin files", "scope.json", "the candidates directory", "the registry file"],
+  "verifyBundleOn": "a COPY of the bundle at a different path",
+  "exit": 0,
+  "expect": {
+   "bundleSchemaSupported": true,
+   "bundleStructurallyValid": true,
+   "bundleComplete": true,
+   "bundleMissingEmpty": true,
+   "bundleMismatchedEmpty": true,
+   "evaluationComplete": false,
+   "evaluationMissingNonEmpty": true,
+   "evaluationReadFromDisposition": true,
+   "manifestHasRequired": true,
+   "requiredIncludes": ["plan.json", "plan.sha256", "ledger.json", "journal.jsonl", "disposition.json", "STATUS.md"],
+   "noPluginBinaries": true,
+   "rule": "D8: verify-bundle reads NOTHING outside the bundle. verify.json carries bundle {schemaSupported, structurallyValid, complete, verified, missing, mismatched, defects} and evaluation {complete, claim, missing} READ FROM THE BUNDLE'S DISPOSITION, not recomputed. Exit 0 only when bundle.complete; a structurally valid bundle of an incomplete evaluation exits 0 — two states, both written. No plugin or asset binary is ever required or copied."
+  }
+ },
+
+ "requiredSet": {
+  "rule": "D7: the manifest gains required: [paths] = the six control files, the registry copy, the scope copy when the plan had one, every terminal-ok receipt, every accepted receipt's outputs, and every accepted decision's evidence",
+  "includesRegistryCopy": true,
+  "includesScopeCopy": true,
+  "includesEveryTerminalOkReceipt": true,
+  "includesEveryAcceptedReceiptOutput": true,
+  "everyRequiredPathPresentInBundle": true
+ },
+
+ "unassessedMedia": {
+  "assertedHere": false,
+  "why": "the unassessed-media accounting is unchanged by D7/D8 (`Media rules unchanged; unassessed media stays unassessed`) and is already measured by case-10, which drives a matched and an unmatched media item through bundle --media. Re-fixturing it here would duplicate case-10's arm without adding a boundary."
+ }
+}

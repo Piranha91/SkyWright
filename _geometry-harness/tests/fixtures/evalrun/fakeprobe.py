@@ -21,6 +21,11 @@ What is REAL here and not faked:
 
 Behaviours (PLAN.md's fixture list): ok, exit, refuse, illegal, stale-output, no-emit, wrong-probe-name,
 no-configuration, wrong-state, extraction-failed, crash-after.
+
+A scenario may also carry `identityDamage`: a list of rules that mutate ONE thing about an otherwise
+canonical Configuration, keyed on the emit stem (one part of one arm) or the order stem (every
+emit-writing probe run over one candidate file). Kinds: wrong-order, wrong-hash, bad-fingerprint,
+empty-identity, wrong-reference-order. See `damage_identity`.
 """
 from __future__ import annotations
 
@@ -62,18 +67,69 @@ def fingerprint(plugins, providers, overlays, population, state) -> str:
     return hashlib.sha256("".join(sb).encode("utf-8")).hexdigest()
 
 
-def configuration(candidate: dict, candidate_path: Path, plugin_dir: Path, population: str, state: str, limits) -> dict:
-    plugins = []
-    for name in candidate.get("Plugins") or candidate.get("plugins") or []:
+def plugin_rows(names, plugin_dir: Path) -> list:
+    rows = []
+    for name in names:
         path = plugin_dir / name
         ext = path.suffix.lower()
-        plugins.append({
+        rows.append({
             "Name": name, "Path": str(path).replace("\\", "/"),
             "Sha256": sha256_file(path) if path.exists() else "0" * 64,
             "Bytes": path.stat().st_size if path.exists() else 0,
             "Provider": "fixture-mods", "MasterFlag": ext in (".esm", ".esl"),
             "LightFlag": ext == ".esl", "Masters": [],
         })
+    return rows
+
+
+def identity_rule(scen: dict, order_stem: str, emit_stem: str) -> dict | None:
+    """The scenario's `identityDamage` rules, matched on the EMIT stem first (which names one part of one
+    arm — `candidate-01-reorder.reverse`) then on the ORDER stem (which names every emit-writing probe run
+    over one candidate file, the shape R1 actually had). A rule keyed on the order stem therefore damages
+    the whole arm, and the within-arm consistency rules cannot mask the request rule under test."""
+    for rule in scen.get("identityDamage") or []:
+        if rule.get("emitStem") and rule["emitStem"] == emit_stem:
+            return rule
+        if rule.get("orderStem") and rule["orderStem"] == order_stem:
+            return rule
+    return None
+
+
+def damage_identity(cfg: dict, rule: dict, plugin_dir: Path) -> dict:
+    """Mutate ONE thing about a Configuration and leave everything else canonical, so exactly one of
+    D2's rules can fire. The Fingerprint is recomputed over the mutated content unless the rule pins it
+    (which is how `bad-fingerprint` is the only case where the digest itself is wrong)."""
+    kind = rule.get("kind")
+    if kind == "wrong-order":
+        cfg["Plugins"] = list(reversed(cfg["Plugins"]))
+    elif kind == "wrong-hash":
+        want = str(rule.get("plugin") or "FixtureTarget.esp").lower()
+        hit = [p for p in cfg["Plugins"] if str(p["Name"]).lower() == want]
+        if len(hit) != 1:
+            print(f"fakeprobe: identityDamage wrong-hash names {want!r}, which appears {len(hit)} time(s) "
+                  f"in this emit's Plugins: the fixture would sabotage nothing", file=sys.stderr)
+            return None
+        h = str(hit[0]["Sha256"])
+        hit[0]["Sha256"] = ("1" if h[:1] != "1" else "2") + h[1:]
+    elif kind == "empty-identity":
+        cfg["Plugins"] = []
+    elif kind == "wrong-reference-order":
+        cfg["Plugins"] = plugin_rows(rule.get("plugins") or [], plugin_dir)
+    elif kind == "bad-fingerprint":
+        pass
+    else:
+        print(f"fakeprobe: unknown identityDamage kind {kind!r}", file=sys.stderr)
+        return None
+    pinned = rule.get("fingerprint")
+    cfg["Fingerprint"] = pinned if pinned else fingerprint(
+        cfg["Plugins"], cfg["Providers"], cfg["Overlays"], cfg["Population"], cfg["State"])
+    print(f"fakeprobe: identityDamage {kind} applied ({len(cfg['Plugins'])} plugin(s), "
+          f"fingerprint {cfg['Fingerprint'][:12]})")
+    return cfg
+
+
+def configuration(candidate: dict, candidate_path: Path, plugin_dir: Path, population: str, state: str, limits) -> dict:
+    plugins = plugin_rows(candidate.get("Plugins") or candidate.get("plugins") or [], plugin_dir)
     providers = [{"Name": "overwrite", "Kind": "overwrite"},
                  {"Name": "fixture-mods", "Kind": "mod"},
                  {"Name": "Data", "Kind": "data"}]
@@ -271,6 +327,11 @@ def main(probe: str, argv=None) -> int:
     candidate = json.loads(order.read_text(encoding="utf-8")) if order else {"Plugins": []}
     limits = candidate.get("Limits") or []
     cfg = configuration(candidate, order, plugin_dir, population, state, limits)
+    rule = identity_rule(scen, order.stem if order else "-", stem)
+    if rule:
+        cfg = damage_identity(cfg, rule, plugin_dir)
+        if cfg is None:                       # a sabotage that would not sabotage is a broken fixture
+            return 2
 
     rows = entry.get("rows", [])
     coverage = entry.get("coverage")

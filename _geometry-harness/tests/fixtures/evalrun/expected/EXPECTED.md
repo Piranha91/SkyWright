@@ -515,3 +515,132 @@ switches / jointFlips` (the college-case emit's shape; the spec reads `summary.s
 `bosprobe --json` → `profile / plugins / inis / rows`; `adviceprobe --out` → `report-<id>.json` with `rules`,
 `resolutions`, `notes`, `staleness`, `noOrderStated`, `pagesRead`, `catalogue`, `warnings`, `choices`;
 `scopeprobe --json` → the case's own scope.json, re-stamped.
+
+---
+
+# Q43 — the corrected evidence-integrity contract (cases 12-15)
+
+**Written by agent O from `_claude/runs/2026-09-12-evaluation-evidence-integrity/PLAN.md`'s D1-D8 and amendment A-1,
+and committed BEFORE any of this wave's driver code and without reading the implementer's branch.** The reviewed
+controller (`evalrun.py` sha256 `86334e954a1a0e60...`) is the source these cases must be RED against: it is the one
+the Q42 review reproduced R1, R2 and R3 on. A case that passes on the reviewed source for a corrected-contract
+assertion tests nothing and is a defect in this oracle, not a pass.
+
+Same posture as the Q42 half above: where a definition leaves a value undetermined, the expectation derived is
+written down and marked `rulingNeeded` in the case JSON rather than guessed silently, and the machine-readable
+assertion is narrowed to the part the definitions do settle.
+
+## 12. `case-12-identity-binding` — the emit is bound to what the plan ASKED for (R1)
+
+The review's `wrong-configuration` case fed the production `Validator` an emit whose `Configuration.Plugins` were the
+plan's four plugins **reversed**, with a correct `Source`; it came back `accepted: true, rejections: []`. The cause is
+structural: `_identity_checks` compares an emit to the arm's *earlier accepted receipts* and to a source string, so
+the first receipt of an arm defines the arm.
+
+Two consequences for the fixture, both load-bearing:
+
+1. **Every damage is applied to every emit-writing probe of the arm**, so the arm stays internally consistent. A
+   mutation on one probe alone is caught by the within-arm content rule that already exists (D2(g)) and would prove
+   nothing about D2(b)-(e). This is also the honest reproduction of R1, whose emit was the only one of its arm.
+2. **Each damage is driven end to end through the CLI** (`plan` then `run` with a fake-probe behaviour), never by a
+   direct `Validator` call. The review's isolation was deliberate and it is exactly what leaves the question of
+   whether the run path reaches the rule at all.
+
+The case also carries the two controls that stop the contract from being "reject everything": the healthy baseline,
+the healthy legal alternative with its reverse and diff parts, and `functional.quest-alias-split` (driftprobe), which
+**declares a different population and state** (`n/a (placement history; no enable-state filter)` / `n/a`) from the
+geometry probes over the same plugins. D2(g)/(h) says both must pass with different fingerprints; the registry trim
+for this case therefore adds that check (a separate trim file, so cases 01-11 keep theirs).
+
+`candidate-02-unstated` puts `PatchA.esp` — a plugin the fixture scope does not list — in the order. D1 then makes its
+`hashSource` `unstated` with `sha256: null`, and D2(c) accepts the emit's own hash for it under
+`validation.identityLimits`. That is what the supplied-combination arm exists to exercise; the
+**`supplied-combination` kind itself is not re-fixtured here** because `cmd_plan` derives candidate arms from
+`candidate-*.json` and supplied arms from `--supplied`, so one file would produce two arms with one emit stem.
+Case-07 already carries the kind and its ESP-only limit sentence.
+
+D3 is asserted on `geometry.bos-overlay` (a `probe-json` adapter, which states no identity of its own): on the
+**candidate** arm the consumed block must be `configurationSource: "plan"` with `fingerprint: null` and the
+**candidate's** plugin order; on the baseline it must be `configurationSource: "scope"` with the scope's fingerprint.
+The reviewed source copies the scope's configuration — order and fingerprint — onto every arm.
+
+## 13. `case-13-reuse-boundary` — absence is a change, on both verbs (R2)
+
+The review deleted a consumed plugin and got `resumeExit: 0` with the baseline navmesh entry `reused`, because
+`changed_input` reads `exists() and hash differs`: absence is "no change". Six steps, on one fully-run directory:
+
+| step | damage | what D5 fixes |
+|---|---|---|
+| `plugin-gone` | delete the generated `FixtureTarget.esp` | D5b names a consumed plugin **gone**; the transitive rule carries it to reverse, diff and the derived order evaluation, and the re-run cannot restore a completed claim because the fake then writes a zero hash that D2(c) rejects |
+| `one-arm-input-changed` | append to `candidate-01-reorder.json` | that arm's entries invalidated **by name**, the baseline's still `reused` with no child work — "Independent entries stay reused" |
+| `unverifiable-identity` | blank a consumed plugin's sha256 inside an accepted receipt | D5a: a gap, so `refused-reuse(<gap naming the plugin>)` — neither a silent `reused` nor a false `invalidated` |
+| `unchanged-control` | none | every terminal-ok entry `reused`, a new runId, **no `running` transition under it** |
+| `run-not-only-resume` | delete the plugin, call `run` | "no verb reuses without it": the same invalidation |
+| `scope-changed` | append a byte to the scope file | `scope-changed` by name, with "re-run scopeprobe and plan again" |
+
+`baseEmitDependency` asserts D4 on the same run: the candidate `arm` receipt must record the baseline emit
+(`consumed.baseEmitSha256` is `null` on every receipt of the reviewed source), the reverse receipt the candidate
+emit, and the diff receipt two rows under `consumed.inputs`.
+
+### ruling needed — the exit code of a changed premise
+
+D5 fixes the refusal **name** and the next action, not the exit code. `scope-changed` on `resume` is written as **2**
+(refused input: the premise changed before any work), where case-09 has finalize's `registry-changed` at **3**
+(a refused result). The name is asserted strictly; the code is asserted as 2 and flagged.
+
+### ruling needed — what the diff receipt records
+
+D4 gives the diff receipt `consumed.inputs: [{part, path, sha256}]` and does not say whether `baseEmitPath/Sha256`
+are also filled for it. Only the presence of two input rows is asserted.
+
+## 14. `case-14-evidence-chain` — a completed claim is derived from evidence that still matches (R3)
+
+The review deleted an accepted receipt's recorded output and got `finalize` 0, `bundle` 0, `verify-bundle` 0 and
+`verify.json` `complete: true, verified: 64`, with the check still listed as a completed null check. The scenario here
+emits **zero rows with judged > 0** on every geometry probe, so the affected check really is a completed null check and
+`completedNullChecks` is the list the deleted evidence must fall out of.
+
+Two finalize damages (`evidence-missing`, `evidence-changed`), each asserting: exit 3,
+`evaluation.integrity.ok: false` with the path in `defects`, the check **absent** from `completedNullChecks` and
+**present** under `missing` with that status, `evaluation.refused: "evidence-integrity"`. The missing-evidence step
+then runs `bundle` and asserts exit 3 naming the receipt and the path, no manifest written (or an unchanged one), and
+that no `verify.json` in the run can claim a complete bundle.
+
+Four verify-bundle damages, each on its own copy of a healthy bundle, one damage per answer: a deleted `required`
+control file (`required`), a receipt output dropped from the manifest's evidence list while the file stays on disk
+(`manifest-omits-required` — the R3 hole at the verify layer), altered evidence bytes (`mismatched`), and
+`bundleSchema` forced to 1 (`schema-unsupported`, A-1).
+
+**Q42's demo bundle** is verified as A-1's integration input, **copied to a temp directory first** — `verify-bundle`
+writes `verify.json` into the directory it verifies, so the original artifact is never verified in place. It is
+untracked and lives only in the main checkout; when the path (or `HOUSECARL_EVALRUN_DEMO_BUNDLE`) is absent the case
+prints a NOTE and the rule stays covered by the synthetic `bundleSchema` 1 copy above.
+
+## 15. `case-15-portable-incomplete` — portable, valid, and honestly incomplete
+
+D8's two states in one answer. The case generates **its own** fixture root, runs and bundles, copies the bundle
+elsewhere, then deletes every original source path — plugins, scope, candidates, registry — and verifies the copy:
+exit 0, `bundle.schemaSupported` / `structurallyValid` / `complete` true with nothing missing or mismatched, and
+`evaluation.complete: false` with a non-empty `missing` **read from the bundle's disposition, not recomputed**. The
+manifest must carry `required`, every `required` path must be present in the bundle, and no `.esp` / `.esm` / `.esl` /
+`.bsa` may be in it. Its own fixture root is why deleting the sources cannot damage another case.
+
+The unassessed-media accounting is deliberately **not** re-asserted here: D7 leaves the media rules unchanged and
+case-10 already drives a matched and an unmatched item through `bundle --media`.
+
+## Rulings A-2, A-3, A-4 — the three undetermined values, decided
+
+The coordinator ruled on all three `rulingNeeded` items after the oracle was committed, and each ruling made an
+assertion **stricter** rather than changing an expected outcome:
+
+- **A-2 (D2(b))** — positions count from **1** and the detail reads `plugin order differs from the request at
+  position N: expected X, found Y`, then `; the set differs (missing: …; extra: …)` or `; the same names in a
+  different order`. Case-12's `wrong-order` therefore asserts `position 1`, `Skyrim.esm`, `FixtureBase.esp` and
+  `the same names in a different order`; `reverse-wrong-reference` asserts `position 3` against the BASELINE's
+  request, with `FixtureBase.esp` expected and `FixtureTarget.esp` found.
+- **A-3 (D5 premise refusals)** — `run` / `resume` refuse a changed or missing registry/scope with **exit 2**
+  (`REFUSED: scope-changed: …` on stderr, no work done); `finalize` refuses with **exit 3** and a refusal
+  disposition. Case-13's derived 2 stands and now also asserts the stderr prefix and that no child ran.
+- **A-4 (D4)** — the `diff` receipt's `consumed.inputs` has exactly two rows, `part: "arm"` and `part: "reverse"`,
+  each with a path and a sha256, and its own `baseEmitPath/Sha256` stay **null**. Case-13 asserts the count, both
+  part names, path+sha256 on each, and the null baseEmit.

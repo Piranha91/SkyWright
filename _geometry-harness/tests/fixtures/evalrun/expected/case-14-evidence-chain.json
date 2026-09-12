@@ -1,0 +1,150 @@
+{
+ "case": "case-14-evidence-chain",
+ "rules": [
+  "D6",
+  "D7",
+  "D8",
+  "A-1"
+ ],
+ "reproduces": "R3 missing-emit (runs/2026-09-12-q42-review/results.json): the baseline navmesh emit was deleted and finalize exited 0, the check stayed a completed null check, bundle exited 0 and verify-bundle reported complete: true with 64 files verified",
+ "registry": "fixture-check-registry.json",
+ "note": "The scenario emits ZERO conflict rows with judged > 0 on every geometry probe, so the checks are COMPLETED NULL CHECKS and the disposition's completedNullChecks list is the thing the deleted evidence must fall out of.",
+ "finalize": [
+  {
+   "id": "evidence-missing",
+   "damage": "delete sweep/navownprobe/baseline.json (an accepted receipt's recorded output), exactly as reproduce.py does",
+   "exit": 3,
+   "expect": {
+    "integrityOk": false,
+    "defectsNamePath": "navownprobe/baseline.json",
+    "defectKind": "evidence-missing",
+    "refused": "evidence-integrity",
+    "completedNullChecksExcludes": "geometry.navmesh-ownership",
+    "missingIncludes": "geometry.navmesh-ownership",
+    "missingStatusStartsWith": "evidence-missing",
+    "completeIsFalse": true,
+    "findingsExcludes": "geometry.navmesh-ownership",
+    "dependencyStatus": "evidence-dependency",
+    "dependentEntriesUnderMissing": [
+     "geometry.navmesh-ownership__candidate-01-reorder__reverse",
+     "geometry.navmesh-ownership__candidate-01-reorder__diff"
+    ],
+    "rulingApplied": "A-8: A-5 as written over-specified this. An entry whose OWN recorded output or run-internal input is the lost or changed file is evidence-missing(<path>) / evidence-changed(<path>) even when it is also a dependent - the candidate arm receipt records the baseline emit as its base emit (D4), so losing that emit is a DIRECT loss for it. evidence-dependency(<key>) is for entries whose own outputs and inputs are intact: the reverse and diff parts.",
+    "rule": "D6: every outputs[] file must exist and hash to the receipt's recorded sha256; an entry that fails is NOT completed, is listed under evaluation.missing with status evidence-missing(<path>), its detector is not counted under findings / completedNullChecks / completedCatalogues, and the disposition carries evaluation.integrity {ok, defects}. When any integrity defect exists finalize writes the full disposition and STATUS.md, sets evaluation.refused `evidence-integrity`, and exits 3.",
+    "eitherStatusEntriesUnderMissing": [
+     "geometry.navmesh-ownership__candidate-01-reorder__arm"
+    ],
+    "eitherStatus": [
+     "evidence-missing",
+     "evidence-dependency"
+    ]
+   },
+   "thenBundle": {
+    "exit": 3,
+    "namesReceipt": true,
+    "namesPath": "navownprobe/baseline.json",
+    "manifestNotWrittenOrUnchanged": true,
+    "noVerifyClaimsComplete": true,
+    "rule": "D7: bundle refuses (exit 3, by name) when any accepted receipt's output file is missing or hashes differently from the receipt's recorded value (evidence-missing / evidence-changed, naming receipt and path), and when the disposition records a refusal (disposition-refused). A bundle that cannot be assembled cannot then be verified as complete."
+   }
+  },
+  {
+   "id": "evidence-changed",
+   "damage": "append bytes to sweep/navownprobe/baseline.json so it exists but no longer hashes to the receipt's recorded sha256",
+   "exit": 3,
+   "expect": {
+    "integrityOk": false,
+    "defectKind": "evidence-changed",
+    "defectsNamePath": "navownprobe/baseline.json",
+    "refused": "evidence-integrity",
+    "completedNullChecksExcludes": "geometry.navmesh-ownership",
+    "missingStatusStartsWith": "evidence-changed",
+    "completeIsFalse": true,
+    "dependencyStatus": "evidence-dependency",
+    "dependentEntriesUnderMissing": [
+     "geometry.navmesh-ownership__candidate-01-reorder__reverse",
+     "geometry.navmesh-ownership__candidate-01-reorder__diff"
+    ],
+    "rulingApplied": "A-8: A-5 as written over-specified this. An entry whose OWN recorded output or run-internal input is the lost or changed file is evidence-missing(<path>) / evidence-changed(<path>) even when it is also a dependent - the candidate arm receipt records the baseline emit as its base emit (D4), so losing that emit is a DIRECT loss for it. evidence-dependency(<key>) is for entries whose own outputs and inputs are intact: the reverse and diff parts.",
+    "rule": "D6: evidence-changed(<path>), with the recorded and found hashes in the defect row",
+    "eitherStatusEntriesUnderMissing": [
+     "geometry.navmesh-ownership__candidate-01-reorder__arm"
+    ],
+    "eitherStatus": [
+     "evidence-changed",
+     "evidence-dependency"
+    ]
+   }
+  }
+ ],
+ "verifyBundle": {
+  "why": "D8's named defects, in order, each on its own copy of a HEALTHY bundle so one damage is one answer",
+  "healthyInPlaceExit": 0,
+  "cases": [
+   {
+    "id": "control-file-deleted",
+    "damage": "delete STATUS.md from the bundle copy — a control file verify-bundle reads for nothing else, so the ONLY thing that can bite is the required-set check",
+    "exit": 3,
+    "defectKind": "required-missing",
+    "namesPath": "STATUS.md",
+    "completeIsFalse": true,
+    "rule": "D8 step (2) alone: every `required` path present. (V's arm 13 note: deleting disposition.json also trips step (6), so this case isolates the required-set check.)"
+   },
+   {
+    "id": "required-file-deleted",
+    "damage": "delete disposition.json from the bundle copy",
+    "exit": 3,
+    "defectKind": "required",
+    "namesPath": "disposition.json",
+    "completeIsFalse": true,
+    "rule": "D8 step (2): every `required` path present. D7 fixes the six control files (plan.json, plan.sha256, ledger.json, journal.jsonl, disposition.json, STATUS.md) as manifest.required."
+   },
+   {
+    "id": "manifest-omits-required",
+    "damage": "remove one accepted receipt output's row from manifest.json's evidence list; the file itself stays on disk",
+    "exit": 3,
+    "defectKind": "manifest-omits-required",
+    "namesRemovedPath": true,
+    "completeIsFalse": true,
+    "rule": "D8 step (5): each output present under evidence/ with the receipt's recorded hash AND listed in the manifest (manifest-omits-required otherwise). This is the R3 hole at the verify layer: verify-bundle checked only the files the manifest chose to list."
+   },
+   {
+    "id": "evidence-bytes-altered",
+    "damage": "append bytes to one evidence file that the manifest lists",
+    "exit": 3,
+    "defectKind": "mismatched",
+    "namesPath": true,
+    "completeIsFalse": true,
+    "rule": "D8 step (2): every evidence row present and hashing to its recorded sha256"
+   },
+   {
+    "id": "schema-unsupported",
+    "damage": "set bundleSchema to 1 in the manifest of a bundle copy",
+    "exit": 3,
+    "defectKind": "schema-unsupported",
+    "explicit": true,
+    "schemaSupportedIsFalse": true,
+    "rule": "A-1: verify-bundle on a bundleSchema 1 manifest is schema-unsupported: `this bundle predates evidence-chain verification; rebuild it from its run`. D8 step (1): bundleSchema supported, else schema-unsupported, explicit."
+   }
+  ]
+ },
+ "runControlMissing": {
+  "damage": "after a healthy finalize, delete STATUS.md from the RUN directory, then bundle",
+  "bundleExit": 3,
+  "refusedBy": "control-missing",
+  "namesFile": "STATUS.md",
+  "noManifestWritten": true,
+  "rule": "A-9 (V's finding 1): a control file missing from the run is a bundle refusal by name, never a path that drops out of manifest.required because nothing was copied under it. Measured on the first build: STATUS.md deleted, bundle exit 0, 20 required paths without it, verify complete: true."
+ },
+ "q42DemoBundle": {
+  "path": "S:/Dev/houseCARL/_claude/runs/2026-09-12-evaluation-controller/demo/run/bundle",
+  "env": "HOUSECARL_EVALRUN_DEMO_BUNDLE",
+  "copiedFirst": true,
+  "whyCopied": "verify-bundle WRITES verify.json into the directory it verifies, so the original Q42 artifact is never verified in place",
+  "exit": 3,
+  "defectKind": "schema-unsupported",
+  "completeIsFalse": true,
+  "rule": "A-1: Q42's demo bundle is the integration input for the schema refusal \u2014 a bundleSchema 1 bundle is refused by name, never silently certified",
+  "unavailableNote": "the demo run is untracked and lives only in the main checkout. When the path is absent the case prints a NOTE and the same rule stays covered by verifyBundle.cases[schema-unsupported], which builds a bundleSchema 1 manifest from this run's own healthy bundle."
+ }
+}

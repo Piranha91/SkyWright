@@ -41,6 +41,11 @@ KEEP = ["loadability.masters-and-order", "loadability.dangling-references", "rec
         "functional.collective-route-connectivity", "environment.generated-output-regeneration",
         "patch.author-advice", "patch.order-evaluation", "runtime.supplied-observations"]
 
+# Q43 / case 12 only: driftprobe's check declares its own population ("n/a (placement history; ...)") and
+# state ("n/a"), so it is the second SUPPORTED probe whose accepted receipt on one arm carries a different
+# fingerprint over the same plugins. It lives in its own trim so cases 01-11 are untouched.
+KEEP_Q43 = ["functional.quest-alias-split"]
+
 SCOPE = {
     "schemaVersion": 1, "probe": "scopeprobe", "generatedUtc": "2026-09-12T18:00:00Z",
     "complete": True, "walkFailures": [],
@@ -186,24 +191,33 @@ def main() -> int:
             real = json.loads(subprocess.run(
                 ["git", "show", "q42-agent-a:.claude/skills/world-edit-compatibility/references/check-registry.json"],
                 cwd=REPO, capture_output=True, text=True, check=True).stdout)
-    keep = [c for c in real["checks"] if c["id"] in KEEP]
-    missing = [k for k in KEEP if k not in {c["id"] for c in keep}]
-    if missing:
-        raise SystemExit(f"the real registry no longer carries {missing}; the fixture trim must be revisited")
-    fams = {c["family"] for c in keep}
-    trimmed = dict(real)
-    trimmed["checks"] = keep
-    trimmed["families"] = [f for f in real["families"] if f["id"] in fams]
-    trimmed["about"] = ("A TRIM of the shipped check registry, for the evalrun fixtures: every check object is "
-                        "verbatim, only the set is smaller. " + real.get("about", ""))
-    write_json(out_root / "registry" / "fixture-check-registry.json", trimmed)
+    def trim(ids, name, extra_about=""):
+        keep = [c for c in real["checks"] if c["id"] in ids]
+        absent = [k for k in ids if k not in {c["id"] for c in keep}]
+        if absent:
+            raise SystemExit(f"the real registry no longer carries {absent}; the fixture trim must be revisited")
+        fams = {c["family"] for c in keep}
+        trimmed = dict(real)
+        trimmed["checks"] = keep
+        trimmed["families"] = [f for f in real["families"] if f["id"] in fams]
+        trimmed["about"] = ("A TRIM of the shipped check registry, for the evalrun fixtures: every check object is "
+                            "verbatim, only the set is smaller. " + extra_about + real.get("about", ""))
+        write_json(out_root / "registry" / name, trimmed)
+        return keep
+
+    keep = trim(KEEP, "fixture-check-registry.json")
+    # Case 12 needs a SECOND supported probe that declares its own population and state, so two accepted
+    # receipts of one arm legitimately carry different fingerprints over identical plugins (D2(g)/(h)).
+    # It gets its own trim file: cases 01-11 keep theirs unchanged, and their planIds do not move.
+    trim(KEEP + KEEP_Q43, "fixture-check-registry-q43.json",
+         "This trim adds " + ", ".join(KEEP_Q43) + " for the identity-binding case. ")
 
     # ---------------------------------------------------------------- cases
     cases = out_root / "cases"
     if cases.exists():
         shutil.rmtree(cases)
 
-    def case_dir(name, cands, scenario, scope=None):
+    def case_dir(name, cands, scenario, scope=None, extra_scenarios=None):
         d = cases / name
         write_json(d / "scope.json", scope or SCOPE)
         for fname, doc in cands.items():
@@ -217,6 +231,11 @@ def main() -> int:
         scenario.setdefault("pluginDir", str(pdir).replace("\\", "/"))
         scenario.setdefault("scopeFrom", str(d / "scope.json").replace("\\", "/"))
         write_json(d / "scenario.json", scenario)
+        for fname, damage in (extra_scenarios or {}).items():
+            import copy as _copy
+            alt = _copy.deepcopy(scenario)
+            alt["identityDamage"] = damage
+            write_json(d / fname, alt)
 
     base = candidate("candidate-00-baseline", BASE_ORDER, ["the profile's own order"])
     reorder = candidate("candidate-01-reorder",
@@ -342,6 +361,64 @@ def main() -> int:
                                                    "installed": False}]}}}
     case_dir("case-10-discovery-media",
              {"candidate-00-baseline.json": base, "candidate-01-reorder.json": reorder}, {"arms": arms})
+
+    # ---------------------------------------------------------------- Q43: cases 12-15
+    # 12 — identity binding. Three arms: the baseline, a legal reorder, and one whose order carries a
+    # plugin the scope does not list (so D1 makes its requested hash `unstated`). driftprobe runs with its
+    # registry-declared population and state, which is what makes it the differently-populated control.
+    unstated = candidate("candidate-02-unstated", BASE_ORDER + ["PatchA.esp"],
+                         ["enabled PatchA.esp, which this scope's configuration does not list"])
+    stems12 = ["baseline", "candidate-01-reorder", "candidate-01-reorder.reverse",
+               "candidate-02-unstated", "candidate-02-unstated.reverse"]
+    arms12 = arms_ok(stems12)
+    arms12["driftprobe"] = {"*": {"behaviour": "ok", "rows": [], "judged": 7,
+                                  "population": "n/a (placement history; no enable-state filter)",
+                                  "state": "n/a"}}
+    cand_order = ["Skyrim.esm", "Update.esm", "FixtureTarget.esp", "FixtureBase.esp"]
+    case_dir("case-12-identity-binding",
+             {"candidate-00-baseline.json": base, "candidate-01-reorder.json": reorder,
+              "candidate-02-unstated.json": unstated},
+             {"arms": arms12},
+             extra_scenarios={
+                 # keyed on the ORDER stem: every emit-writing probe of that arm is damaged the same way,
+                 # so the arm is internally consistent and only the request rule can reject it.
+                 "scenario-wrong-order.json": [
+                     {"orderStem": "candidate-01-reorder", "kind": "wrong-order"}],
+                 "scenario-wrong-hash.json": [
+                     {"orderStem": "candidate-01-reorder", "kind": "wrong-hash",
+                      "plugin": "FixtureTarget.esp"}],
+                 "scenario-bad-fingerprint.json": [
+                     {"orderStem": "candidate-01-reorder", "kind": "bad-fingerprint",
+                      "fingerprint": "f" * 64}],
+                 "scenario-empty-identity.json": [
+                     {"orderStem": "candidate-01-reorder", "kind": "empty-identity"}],
+                 # keyed on the EMIT stem: only the reverse part, whose reference is the BASELINE's request
+                 "scenario-reverse-wrong-reference.json": [
+                     {"emitStem": "candidate-01-reorder.reverse", "kind": "wrong-reference-order",
+                      "plugins": cand_order}],
+             })
+
+    # 13 — the reuse boundary. Case 01's shape; the damage is done to the run and to this case's own
+    # scope/candidate copies, never to a fixture another case reads.
+    case_dir("case-13-reuse-boundary",
+             {"candidate-00-baseline.json": base, "candidate-01-reorder.json": reorder},
+             {"arms": arms_ok(stems)})
+
+    # 14 — the evidence chain. Zero rows with judged > 0 on every geometry probe, so the checks are
+    # COMPLETED NULL CHECKS: `completedNullChecks` is the list the deleted evidence has to fall out of.
+    arms14 = {p: {s: ok([], judged=42) for s in stems} for p in ROWS}
+    for probe in ("bosprobe", "switchprobe", "stateprobe", "scopeprobe", "adviceprobe", "patchprobe",
+                  "driftprobe"):
+        arms14[probe] = {"*": ok()}
+    case_dir("case-14-evidence-chain",
+             {"candidate-00-baseline.json": base, "candidate-01-reorder.json": reorder},
+             {"arms": arms14})
+
+    # 15 — portability. Case 01's shape; the case generates its OWN fixture root and deletes it before
+    # verifying, which is why this must be a separate case directory rather than a shared one.
+    case_dir("case-15-portable-incomplete",
+             {"candidate-00-baseline.json": base, "candidate-01-reorder.json": reorder},
+             {"arms": arms_ok(stems)})
 
     print(f"fixtures written under {out_root}")
     print(f"  plugins: {len(PLUGINS)}   registry checks: {len(keep)}   cases: {len(list(cases.iterdir()))}")

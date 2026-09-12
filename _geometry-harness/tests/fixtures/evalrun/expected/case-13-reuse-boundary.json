@@ -1,0 +1,148 @@
+{
+ "case": "case-13-reuse-boundary",
+ "rules": ["D4", "D5"],
+ "reproduces": "R2 missing-plugin (runs/2026-09-12-q42-review/results.json): the baseline navmesh entry came back `reused` after its consumed plugin was deleted, because changed_input read `exists() and hash differs` so absence was `no change`",
+ "registry": "fixture-check-registry.json (the existing trim; this case needs no extra check)",
+ "note": "Every step drives the CLI on ONE run directory that was fully run first. The generated fixture tree is restored after each damage step, in a finally block, so a later case never runs against a damaged fixture.",
+
+ "steps": [
+  {
+   "id": "plugin-gone",
+   "damage": "delete the generated FixtureTarget.esp (a plugin every geometry receipt consumed)",
+   "verb": "resume",
+   "exit": 0,
+   "invalidatedByName": {
+    "namesPlugin": "FixtureTarget.esp",
+    "entries": [
+     "geometry.navmesh-ownership__baseline__arm",
+     "geometry.navmesh-ownership__candidate-01-reorder__arm",
+     "geometry.navmesh-ownership__candidate-01-reorder__reverse",
+     "geometry.navmesh-ownership__candidate-01-reorder__diff",
+     "geometry.object-overlap__baseline__arm",
+     "patch.order-evaluation__candidate-01-reorder"
+    ],
+    "transitionStartsWith": "invalidated",
+    "neverReused": true,
+    "rule": "D5b: a consumed plugin GONE or changed at its recorded path is a change, named with the path. D5's transitive rule then carries it to reverse, diff and the derived order evaluation."
+   },
+   "detailNamesNextAction": true,
+   "detailNextActionRule": "D5: every transition names the reason and, in the ledger entry's detail, the next action (re-run, re-plan, restore the file)",
+   "afterRerunAndFinalize": {
+    "affectedChecksNotCompleted": ["geometry.navmesh-ownership", "geometry.object-overlap"],
+    "why": "with the file gone the fake writes a zero sha256 for it, and D2(c) rejects an emit that consumed a request plugin at another hash, so the re-run cannot restore a completed claim",
+    "completeIsFalse": true
+   }
+  },
+  {
+   "id": "one-arm-input-changed",
+   "damage": "append bytes to candidate-01-reorder.json after the run (only that arm's input)",
+   "verb": "resume",
+   "exit": 0,
+   "invalidatedByName": {
+    "namesInput": "candidate-01-reorder",
+    "entries": ["geometry.navmesh-ownership__candidate-01-reorder__arm"],
+    "transitionStartsWith": "invalidated",
+    "partRestingStatusStartsWith": "invalidated",
+    "accountingEntry": "geometry.navmesh-ownership__candidate-01-reorder",
+    "accountingStatus": "blocked(candidate-changed)",
+    "rulingApplied": "A-6 as corrected by A-7: the PART entries (__arm, __reverse, __diff) rest at invalidated(the candidate file ... changed on disk ...) - the truthful reason - and the launch refusal is written as the PART-LESS accounting entry, the shape Q42's blocked(candidate-missing) already had. So blocked(candidate-changed) is asserted on the accounting entry and the invalidated transition stays asserted on the part.",
+    "rule": "D5b: the candidate file gone or changed, named with the path"
+   },
+   "independentStayReused": {
+    "entries": ["geometry.navmesh-ownership__baseline__arm", "geometry.object-overlap__baseline__arm"],
+    "restingStatus": "reused",
+    "noInvalidatedTransition": true,
+    "noRunningTransitionInThisInvocation": true,
+    "rule": "D5: Independent entries stay reused."
+   }
+  },
+  {
+   "id": "unverifiable-identity",
+   "damage": "blank one consumed plugin's sha256 inside an ACCEPTED receipt on disk (geometry.navmesh-ownership__baseline__arm, plugin FixtureTarget.esp)",
+   "verb": "resume",
+   "exit": 0,
+   "expect": {
+    "entry": "geometry.navmesh-ownership__baseline__arm",
+    "statusStartsWith": "refused-reuse",
+    "gapNamesPlugin": "FixtureTarget.esp",
+    "notReused": true,
+    "notInvalidated": true,
+    "rule": "D5a: any consumed plugin without a path or a 64-hex hash is a GAP (unverifiable), so the entry is refused-reuse(<gap>) — not reused (a silent certainty) and not invalidated (a change nobody measured)"
+   }
+  },
+  {
+   "id": "unverifiable-base-emit",
+   "damage": "null the recorded baseEmitSha256 inside an ACCEPTED candidate-arm receipt on disk (geometry.navmesh-ownership__candidate-01-reorder__arm), leaving baseEmitPath in place",
+   "verb": "resume",
+   "exit": 0,
+   "expect": {
+    "entry": "geometry.navmesh-ownership__candidate-01-reorder__arm",
+    "statusStartsWith": "refused-reuse",
+    "gapNames": "base emit",
+    "notInvalidated": true,
+    "rule": "A-9 (V's finding 2): a run-internal comparison input recorded without a hash is unverifiable, so reuse refuses it — the same answer finalize's integrity walk gives for that receipt, never a silent grant on one verb and a refusal on the other"
+   }
+  },
+  {
+   "id": "unchanged-control",
+   "damage": "none: a second resume over a run nothing has touched",
+   "verb": "resume",
+   "exit": 0,
+   "expect": {
+    "everyTerminalOkEntryReused": true,
+    "newRunIdRecorded": true,
+    "noRunningTransitionUnderNewRunId": true,
+    "rule": "D5: else `reused`. Zero children is the measurement that reuse actually happened."
+   }
+  },
+  {
+   "id": "run-not-only-resume",
+   "damage": "delete the generated FixtureTarget.esp and call `run` (not `resume`)",
+   "verb": "run",
+   "exit": 0,
+   "invalidatedByName": {
+    "namesPlugin": "FixtureTarget.esp",
+    "entries": ["geometry.navmesh-ownership__baseline__arm"],
+    "transitionStartsWith": "invalidated",
+    "neverReused": true,
+    "rule": "D5: `A run over a ledger with terminal-ok entries performs the same revalidation resume does; no verb reuses without it.` There is no verb difference."
+   }
+  },
+  {
+   "id": "scope-changed",
+   "damage": "append a byte to the scope file the plan recorded",
+   "verb": "resume",
+   "exit": 2,
+   "expect": {
+    "refusedBy": "scope-changed",
+    "byName": true,
+    "nextActionContains": "scopeprobe",
+    "rule": "D5: run, resume and finalize refuse by name when the registry file or the scope file at the plan's recorded path is missing or no longer hashes to the plan (registry-changed, registry-missing, scope-changed, scope-missing), with the next action `re-run scopeprobe and plan again`"
+   },
+   "rulingApplied": "A-3: run/resume refuse a changed or missing registry/scope with exit 2 (`REFUSED: scope-changed: ...` on stderr, no work done); finalize refuses with exit 3 and a refusal disposition. The derived 2 stands, and the stderr prefix is now asserted too.",
+   "stderrContains": ["REFUSED", "scope-changed"],
+   "noChildWorkDone": true
+  }
+ ],
+
+ "baseEmitDependency": {
+  "rule": "D4: for check C the candidate `arm` receipt records the baseline `arm` emit of C as its base emit (consumed.baseEmitPath/Sha256); the `reverse` receipt records the candidate `arm` emit; the `diff` receipt records both under consumed.inputs",
+  "candidateArmReceipt": {
+   "entry": "geometry.navmesh-ownership__candidate-01-reorder__arm",
+   "baseEmitSha256IsNull": false,
+   "baseEmitPathNames": "baseline"
+  },
+  "reverseReceipt": {
+   "entry": "geometry.navmesh-ownership__candidate-01-reorder__reverse",
+   "baseEmitSha256IsNull": false
+  },
+  "diffReceipt": {
+   "entry": "geometry.navmesh-ownership__candidate-01-reorder__diff",
+   "inputsCount": 2,
+   "inputParts": ["arm", "reverse"],
+   "everyInputHasPathAndSha256": true,
+   "baseEmitStaysNull": true,
+   "rulingApplied": "A-4: the diff receipt's consumed.inputs has exactly two rows (part `arm` and part `reverse`, each with path and sha256) and its baseEmitPath/Sha256 stay null; the candidate arm receipt's baseEmit is the baseline arm emit of the same check and the reverse receipt's baseEmit is the candidate arm emit."
+  }
+ }
+}

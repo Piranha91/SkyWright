@@ -1,0 +1,134 @@
+{
+ "case": "case-12-identity-binding",
+ "rules": ["D1", "D2", "D3", "A-1"],
+ "reproduces": "R1 wrong-configuration (runs/2026-09-12-q42-review/results.json): an emit whose Plugins are the request's reversed was accepted",
+ "registry": "fixture-check-registry-q43.json (the KEEP trim plus functional.quest-alias-split)",
+ "note": "Every rejection below is reached END TO END through the CLI (plan -> run) with a fake-probe behaviour, never by calling the Validator directly. The mutation is applied to EVERY emit-writing probe of the arm, so the arm is internally consistent: a mutation on one probe alone is caught by the within-arm rule that already exists and would prove nothing about D2.",
+
+ "plan": {
+  "schemaVersion": 2,
+  "schemaVersionRule": "A-1: SCHEMA_VERSION 1 -> 2, so a plan without `requested` is refused by name rather than silently certified",
+  "armsRequestedRule": "D1: plan.arms[].requested = {plugins: [{name, sha256|null, path|null, hashSource}], overlays, providers, population, states}",
+  "armsRequested": {
+   "baseline": {
+    "plugins": ["Skyrim.esm", "Update.esm", "FixtureBase.esp", "FixtureTarget.esp"],
+    "hashSource": ["scope", "scope", "scope", "scope"],
+    "sha256Null": []
+   },
+   "candidate-01-reorder": {
+    "plugins": ["Skyrim.esm", "Update.esm", "FixtureTarget.esp", "FixtureBase.esp"],
+    "hashSource": ["scope", "scope", "scope", "scope"],
+    "sha256Null": []
+   },
+   "candidate-02-unstated": {
+    "plugins": ["Skyrim.esm", "Update.esm", "FixtureBase.esp", "FixtureTarget.esp", "PatchA.esp"],
+    "hashSource": ["scope", "scope", "scope", "scope", "unstated"],
+    "sha256Null": ["PatchA.esp"],
+    "why": "D1: a name the scope does not list is hashSource `unstated`, sha256 null. The fixture scope lists only the four base-order plugins, so PatchA.esp is the unstated one. D2(c) then accepts the emit's own hash for it and records an entry under validation.identityLimits."
+   }
+  },
+  "providersFromScope": true,
+  "providersRule": "D1: plan.configuration additionally keeps the scope's providers"
+ },
+
+ "healthy": {
+  "why": "The controls. A contract that rejects wrong identities is worth nothing if it also rejects right ones.",
+  "acceptedEntries": [
+   "geometry.navmesh-ownership__baseline__arm",
+   "geometry.navmesh-ownership__candidate-01-reorder__arm",
+   "geometry.navmesh-ownership__candidate-01-reorder__reverse",
+   "geometry.navmesh-ownership__candidate-01-reorder__diff",
+   "geometry.object-overlap__candidate-01-reorder__arm",
+   "geometry.navmesh-ownership__candidate-02-unstated__arm",
+   "functional.quest-alias-split__baseline",
+   "functional.quest-alias-split__candidate-01-reorder"
+  ],
+  "identityLimitsOn": {
+   "entry": "geometry.navmesh-ownership__candidate-02-unstated__arm",
+   "namesPlugin": "PatchA.esp",
+   "rule": "D2(c): a request plugin with hashSource unstated is accepted with the emit's own hash recorded and listed under validation.identityLimits"
+  },
+  "differentPopulations": {
+   "checkId": "functional.quest-alias-split",
+   "exe": "driftprobe",
+   "declaredPopulation": "n/a (placement history; no enable-state filter)",
+   "declaredState": "n/a",
+   "accepted": true,
+   "alsoAcceptedOnSameArm": "geometry.navmesh-ownership (population load-time, state baseline)",
+   "fingerprintsDiffer": true,
+   "rule": "D2(g)/(h): two supported probes declaring different populations over the same plugins carry different fingerprints and both pass; content is compared to the request, fingerprints only within one population/state"
+  }
+ },
+
+ "consumed": {
+  "rule": "D3: the consumed block of a child that states no identity is the ARM's requested, configurationSource `plan`, fingerprint null with a fingerprintNote; the baseline arm's block is the scope's configuration verbatim (configurationSource `scope`, the scope's fingerprint)",
+  "jsonAdapterCheck": "geometry.bos-overlay",
+  "baseline": {
+   "configurationSource": "scope",
+   "fingerprintIsNull": false,
+   "plugins": ["Skyrim.esm", "Update.esm", "FixtureBase.esp", "FixtureTarget.esp"]
+  },
+  "candidate-01-reorder": {
+   "configurationSource": "plan",
+   "fingerprintIsNull": true,
+   "plugins": ["Skyrim.esm", "Update.esm", "FixtureTarget.esp", "FixtureBase.esp"],
+   "why": "never the scope's baseline fingerprint copied onto another arm"
+  }
+ },
+
+ "rejections": [
+  {
+   "id": "wrong-order",
+   "scenario": "scenario-wrong-order.json",
+   "damage": "every emit of arm candidate-01-reorder carries the request's plugins REVERSED (masters last), Source still correct, Fingerprint recomputed over the reversed list so only the order rule can fire",
+   "entry": "geometry.navmesh-ownership__candidate-01-reorder__arm",
+   "accepted": false,
+   "cause": "identity-mismatch",
+   "detailContains": ["position 1", "Skyrim.esm", "FixtureBase.esp", "the same names in a different order"],
+   "rule": "D2(b): the emit's plugin names in order must equal the request's names in order; the detail names the first differing position with the expected and the found name, and says whether the set differs or only the order",
+   "rulingApplied": "A-2: positions count from 1 and the detail reads `plugin order differs from the request at position N: expected X, found Y` then `; the same names in a different order` when only the order differs. The request is [Skyrim.esm, Update.esm, FixtureTarget.esp, FixtureBase.esp] and the emit is that reversed, so the first differing position is 1: expected Skyrim.esm, found FixtureBase.esp, same names."
+  },
+  {
+   "id": "wrong-hash",
+   "scenario": "scenario-wrong-hash.json",
+   "damage": "every emit of arm candidate-01-reorder consumes FixtureTarget.esp at a sha256 one nibble away from the scope's, Fingerprint recomputed so only the hash rule can fire",
+   "entry": "geometry.navmesh-ownership__candidate-01-reorder__arm",
+   "accepted": false,
+   "cause": "identity-mismatch",
+   "detailContains": ["FixtureTarget.esp"],
+   "detailNamesBothHashes": true,
+   "rule": "D2(c): every request plugin with a stated sha256 must be consumed at that sha256 (detail: plugin, both hashes, 12 hex)"
+  },
+  {
+   "id": "bad-fingerprint",
+   "scenario": "scenario-bad-fingerprint.json",
+   "damage": "every emit of arm candidate-01-reorder carries Fingerprint ffff...ff (64 f) with the plugins, providers, overlays, population and state otherwise correct",
+   "entry": "geometry.navmesh-ownership__candidate-01-reorder__arm",
+   "accepted": false,
+   "cause": "identity-mismatch",
+   "detailContains": ["fingerprint"],
+   "rule": "D2(e): the emit's Fingerprint must equal the canonical digest of its own Plugins / Providers / Overlays / Population / State. A mismatch: `the fingerprint is not the digest of the stated configuration`"
+  },
+  {
+   "id": "empty-identity",
+   "scenario": "scenario-empty-identity.json",
+   "damage": "every emit of arm candidate-01-reorder carries a Configuration whose Plugins list is empty (Fingerprint recomputed over the empty list, so the emit is self-consistent)",
+   "entry": "geometry.navmesh-ownership__candidate-01-reorder__arm",
+   "accepted": false,
+   "cause": "identity-missing",
+   "rule": "D2(a): identity-missing when there is no Configuration, OR an empty Plugins list, OR any plugin lacking a name or a 64-hex sha256. An incomplete identity is never accepted, first receipt or not."
+  },
+  {
+   "id": "reverse-wrong-reference",
+   "scenario": "scenario-reverse-wrong-reference.json",
+   "damage": "the reverse part of arm candidate-01-reorder (emit stem candidate-01-reorder.reverse, run on the BASELINE order) emits the CANDIDATE's plugin order instead",
+   "entry": "geometry.navmesh-ownership__candidate-01-reorder__reverse",
+   "accepted": false,
+   "cause": "identity-mismatch",
+   "detailContains": ["position 3", "FixtureBase.esp", "FixtureTarget.esp", "the same names in a different order"],
+   "rulingApplied": "A-2: the reverse part's reference is the BASELINE's request [Skyrim.esm, Update.esm, FixtureBase.esp, FixtureTarget.esp]; the emit carries the candidate's order, so the first differing position is 3: expected FixtureBase.esp, found FixtureTarget.esp, same names.",
+   "rule": "D2: the reference for part `reverse` is the BASELINE arm's requested (the reverse run is the probe on the baseline order with the candidate as --base); the reverse part is validated against that reference, never exempted",
+   "healthyControlInSameCase": "in every other scenario of this case the reverse emit carries the BASELINE order and is accepted — the reverse part is not simply always rejected"
+  }
+ ]
+}
