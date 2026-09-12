@@ -3571,6 +3571,7 @@ MaterialScaleProof.Run(Check);
 PopulationProof.Run(Check);
 OrderProof.Run(Check);
 AdviceProof.Run(Check);
+PlaceProof.Run(Check);
 ProofProbe.ConfigurationProof.Run(Check);
 
 Console.WriteLine();

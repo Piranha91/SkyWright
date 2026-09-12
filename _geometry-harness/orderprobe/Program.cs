@@ -15,10 +15,22 @@ using HousecarlCore.Progress;
 //
 //   candidates.json          the manifest — the baseline's configuration identity, the rules that were read and
 //                            where each came from, the contradictions, the interaction groups, every candidate
-//                            with its changes and what it costs the user, and the budget outcome in words.
+//                            with its changes, what it costs the user and the PLACES its pair meets in (the cells
+//                            and worldspaces the contested records are filed in, as blocks), the budget outcome in
+//                            words, and the places table: where movable pairs meet, by contention.
 //   candidate-00-baseline.json
 //   candidate-NN-<slug>.json one CandidateFile each (_shared/Configuration.cs), the input a probe takes with
-//                            --order FILE.
+//                            --order FILE. Its provenance carries `places` — the candidate's block strings.
+//
+// WHERE A RECORD IS (2026-09-12). Contention alone ranks a pair contesting 5,000 keywords above one rebuilding a
+// city. So every contested record also gets a PLACE — the cell or worldspace the FIRST plugin in the load order
+// that carries it files it in, read off each plugin's Cells and Worldspaces trees by _shared/PlaceIndex.cs; items,
+// spells, keywords, quests, dialogue and the like have none. Candidates rank by advice relevance, then CELL
+// contention — the placed records less two worldspace-wide containers, a WRLD record and a persistent cell's own
+// CELL record, which any plugin filing anything in a worldspace carries — then total contention; the ones whose
+// pair contests no cell are listed after a heading, never dropped. The definition (first sighting, the four place
+// kinds, edge-adjacent exterior blocks, the ranking) is the plan's P1–P4 with its amendment D-1; the console
+// prints the walk's wall time and one `places:` line with the totals.
 //
 // usage: orderprobe [--rules FILE] [--budget N] [--min-contention N] [--out DIR] [--instance DIR] [--profile NAME]
 //                   [--game DIR]
@@ -46,6 +58,11 @@ using HousecarlCore.Progress;
 //   * it does not reorder a pair whose order a hard rule already fixes, and it does not build a move for a pair that
 //     contests nothing or weighs less than --min-contention. Those pairs are COUNTED, by rule and by weight, and a
 //     reader can see how far down the weight the enumeration reached — they are not examined and found clean.
+//   * it does not walk, prune or threshold by place. The walk is heaviest-first by TOTAL contention and the
+//     threshold is on total contention, as before; place only RANKS what was built and NAMES where it meets. So
+//     when the cap cuts the walk, a light pair with places below the reached weight is unexamined, as before.
+//   * it does not move a record's place to a later plugin's filing: a disagreement is counted (PlaceDisputed) and
+//     the first 20 are listed in the notes, and the first sighting keeps the record.
 
 using var __run = RunLog.BeginProcess("orderprobe", args);
 
@@ -185,23 +202,34 @@ void Bump(string a, string b, string kind, int n)
 }
 
 int contestedRecords = 0;
+PlaceEvidence? placeEvidence = null;
 try
 {
     using var resolver = LoadOrderResolver.Build(paths);
     var view = resolver.Capture();
-    foreach (var fk in view.ConflictKeys())
-    {
-        var touching = view.TouchingPlugins(fk);
-        if (touching is null || touching.Count < 2) continue;
-        contestedRecords++;
-        for (int a = 0; a < touching.Count; a++)
-            for (int b = a + 1; b < touching.Count; b++)
-                Bump(touching[a], touching[b], "record", 1);
-    }
+
+    // The place walk, before the contested set is weighed: every plugin of the baseline once more, in load order,
+    // so a record's place is its FIRST sighting's (P1). Only the contested keys are kept — a record one plugin
+    // carries has no pair to weigh — and the plugins the index excluded file nothing.
+    var contested = new HashSet<Mutagen.Bethesda.Plugins.FormKey>(view.ConflictKeys());
+    var excludedNames = new HashSet<string>(view.ExcludedPlugins.Keys, StringComparer.OrdinalIgnoreCase);
+    var placeIndex = PlaceIndex.Build(paths, view.DataDir, contested, excludedNames);
+    __run.Feature("place_walk_seconds", placeIndex.WallTime.TotalSeconds, "s", FeatureAt.Discovered);
+    Console.WriteLine($"\nplaces: the place walk took {placeIndex.WallTime.TotalSeconds:F1}s over {placeIndex.PluginsWalked} plugin(s) — "
+                    + $"{placeIndex.CellsSeen} cell(s) and {placeIndex.WorldspacesSeen} worldspace(s) seen, {placeIndex.RecordsPlaced} contested record(s) placed, "
+                    + $"{placeIndex.DisputedFilings} disagreeing filing(s) on {placeIndex.PlaceDisputed} record(s)"
+                    + (placeIndex.PluginsSkippedAsExcluded > 0 ? $", {placeIndex.PluginsSkippedAsExcluded} plugin(s) skipped as excluded by the index" : "")
+                    + (placeIndex.WalkFailures.Count > 0 ? $", {placeIndex.WalkFailures.Count} plugin(s) could NOT be walked" : "")
+                    + (placeIndex.LandscapeUnreadable > 0 ? $", {placeIndex.LandscapeUnreadable} LAND record(s) unreadable" : ""));
+    foreach (var f in placeIndex.WalkFailures) { Console.WriteLine($"   ! place walk: {f}"); warnings.Add($"place walk: {f}"); }
+    foreach (var n in placeIndex.DisputeNotes) warnings.Add($"place disputed: {n}");
+
+    placeEvidence = placeIndex.Weigh(view, (a, b) => Bump(a, b, "record", 1), out contestedRecords);
     foreach (var f in view.LoadFailures.Take(10)) warnings.Add($"record contention: {f}");
 }
 catch (Exception ex)
 {
+    placeEvidence = null;
     warnings.Add($"record contention could not be computed — {ex.Message}. The groups below rest on asset contention alone, " +
                  "so a pair that only contests records is MISSING from them, not proven absent.");
 }
@@ -278,7 +306,8 @@ var edgeList = edges.Values.OrderBy(e => e.A, StringComparer.OrdinalIgnoreCase)
                            .ThenBy(e => e.B, StringComparer.OrdinalIgnoreCase)
                            .ThenBy(e => e.Kind, StringComparer.Ordinal).ToList();
 __run.Stage("candidates", "building constrained alternatives", Math.Max(1, budget), "candidates");
-var report = OrderSearch.Run(ruleSet, edgeList, budget, minContention: minContention, minContentionSource: minContentionSource);
+var report = OrderSearch.Run(ruleSet, edgeList, budget, minContention: minContention, minContentionSource: minContentionSource,
+                             places: placeEvidence);
 __run.Progress(report.Emitted);
 
 // What the search spent, always stated: which pairs never reached the enumeration and why, and how far down the weight
@@ -295,6 +324,16 @@ Console.WriteLine($"search: {s.PairsEnumerated} of {s.WeightedPairs} contested p
                 + $"reached contention {(s.ReachedContention?.ToString() ?? "none — no pair was enumerated")}, "
                 + $"{s.OrdersConstructed} order(s) constructed against a cap of {s.EnumerationCap}; "
                 + $"{s.NoContentionPairsNotBuilt} pair(s) inside a group contest nothing and were {OrderSearch.NoContentionNotBuilt}");
+// Where the contested records ARE (P2/P4): the same numbers the manifest's Search section carries, in one line — or,
+// when the resolver failed and no evidence reached the search, the one sentence that says the counts are unmeasured.
+if (s.PlaceEvidenceSupplied)
+    Console.WriteLine($"places: {s.RecordsWithPlace} contested record(s) with a place ({s.RecordsInterior} interior, {s.RecordsExterior} exterior, "
+                    + $"{s.RecordsPersistent} persistent, {s.RecordsWorldspace} worldspace; {s.RecordsWorldwideContainers} of them worldspace-wide containers), "
+                    + $"{s.RecordsWithoutPlace} without; {s.PlaceDisputed} disputed record(s); "
+                    + $"{s.WeightedPairsWithPlace} weighted pair(s) with a place ({s.WeightedPairsWithCell} with a cell), {s.WeightedPairsWithoutPlace} without; "
+                    + $"{s.GeneratedWithoutPlace} generated candidate(s) whose pair contests no place, {s.GeneratedWithoutCell} no cell");
+else
+    Console.WriteLine($"places: {SearchReport.NoPlaceEvidence}");
 
 Console.WriteLine($"\ngroups: {report.Groups.Count} interaction group(s) over {edgeList.Count} contention edge(s)");
 foreach (var g in report.Groups.Take(15))
@@ -307,13 +346,29 @@ foreach (var n in report.Notes) Console.WriteLine($"   note: {n}");
 foreach (var r in report.RejectedMoves.Take(10)) Console.WriteLine($"   rejected: {r}");
 if (report.RejectedMoves.Count > 10) Console.WriteLine($"   ... and {report.RejectedMoves.Count - 10} more rejected move(s) — see the manifest");
 
+// The listing (P4, D-1): the baseline, then the emitted candidates whose pair contests a CELL, then — after one
+// heading, never dropped — those whose pair contests none. Rank numbers are the search's; the heading only groups them.
 Console.WriteLine();
-foreach (var c in report.Candidates)
+void PrintCandidate(OrderCandidate c)
 {
-    Console.WriteLine($"   {c.Name,-44} contested {c.Contention,6}  displaced {c.Displaced,4}  phase {c.Phase}  {(c.Legality.Legal ? "legal" : "ILLEGAL")}"
+    Console.WriteLine($"   {c.Name,-44} contested {c.Contention,6}  in a cell {c.CellContention,6} (place {c.PlaceContention,6})  displaced {c.Displaced,4}  phase {c.Phase}  {(c.Legality.Legal ? "legal" : "ILLEGAL")}"
                     + (c.SatisfiesAdvice.Count > 0 ? $"  satisfies {c.SatisfiesAdvice.Count} advice rule(s)" : "")
                     + (c.ViolatesAdvice.Count > 0 ? $"  violates {c.ViolatesAdvice.Count} advice rule(s)" : ""));
     foreach (var ch in c.Changes) Console.WriteLine($"        {ch}");
+    foreach (var pl in c.Places) Console.WriteLine($"        place: {pl}");
+}
+foreach (var c in report.Candidates.Where(c => c.Phase == 0 || c.CellContention > 0)) PrintCandidate(c);
+var noCell = report.Candidates.Where(c => c.Phase > 0 && c.CellContention == 0).ToList();
+if (report.PlaceEvidenceSupplied && noCell.Count > 0) Console.WriteLine($"\n   {SearchReport.NoCellHeading}");
+foreach (var c in noCell) PrintCandidate(c);
+
+// The places table (P4, the grouping): where the movable pairs meet, heaviest first. Top 10 here, top 50 in the manifest.
+if (report.PlaceEvidenceSupplied)
+{
+    Console.WriteLine($"\nplaces: {report.Places.Count} place(s) contested by a movable pair; the top {Math.Min(10, report.Places.Count)} by pair-record contention:");
+    foreach (var pl in report.Places.Take(10))
+        Console.WriteLine($"   {pl.Name} [{pl.Kind}{(pl.Worldspace is null ? "" : $", {pl.Worldspace}")}{(pl.Grid is null ? "" : " " + pl.Grid)}] "
+                        + $"pairs {pl.Pairs}, contention {pl.Contention}: {string.Join(", ", pl.Plugins)}");
 }
 
 // ---------------------------------------------------------------------------------------------------------
@@ -331,7 +386,8 @@ foreach (var c in report.Candidates)
         ["satisfies"] = c.SatisfiesAdvice.Count == 0 ? "-" : string.Join(" | ", c.SatisfiesAdvice.Select(r => r.Full)),
         ["violates"] = c.ViolatesAdvice.Count == 0 ? "-" : string.Join(" | ", c.ViolatesAdvice.Select(r => r.Full)),
         ["legality"] = c.Legality.Summary,
-        ["contention"] = $"{c.Contention} contested record(s) and path(s) between the plugins this candidate moves",
+        ["contention"] = $"{c.Contention} contested record(s) and path(s) between the plugins this candidate moves; cell contention {c.CellContention} of place {c.PlaceContention}",
+        ["places"] = c.Places.Count == 0 ? "-" : string.Join(" | ", c.Places),
     };
     new CandidateFile(ConfigurationIdentity.CurrentSchema, c.Name, profileName, c.Plugins, null, c.Changes, prov)
         .Write(Path.Combine(outDir, file));
@@ -339,7 +395,8 @@ foreach (var c in report.Candidates)
         c.Name, file, c.Changes, c.Displaced, c.Contention, c.Moves.Count, c.Phase, c.Groups, c.Legality.Legal,
         c.Legality.Violations.Select(v => v.ToString()).ToList(),
         c.SatisfiesAdvice.Select(r => r.Full).ToList(),
-        c.ViolatesAdvice.Select(r => r.Full).ToList()));
+        c.ViolatesAdvice.Select(r => r.Full).ToList(),
+        c.PlaceContention, c.CellContention, c.NoPlaceContention, c.Blocks.Count, c.Places));
 }
 
 var presentNames = new HashSet<string>(baseline, StringComparer.OrdinalIgnoreCase);
@@ -358,7 +415,8 @@ var manifest = new OrderManifest(
     new ManifestBudget(budget, report.Result.ToString(), report.Emitted, report.GeneratedNotEmitted,
                        report.Unexplored, report.EnumerationCutShort, report.Outcome),
     report.Search,
-    report.RejectedMoves, report.Notes.Concat(warnings).ToList(), limits);
+    report.RejectedMoves, report.Notes.Concat(warnings).ToList(), limits,
+    report.Places.Take(50).ToList());
 
 var manifestPath = Path.Combine(outDir, "candidates.json");
 manifest.Write(manifestPath);
