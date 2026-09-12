@@ -10,6 +10,10 @@
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="..\..\src\housecarl-core\housecarl-core.csproj" />
+    <!-- The shared Nexus transport and the persistent page catalogue (roadmap 4.21). This reference is why the
+         probe no longer carries a copy of the ModDetail POST, and why a page the MCP server read is a page this
+         probe already has: ONE store, ONE freshness rule. -->
+    <ProjectReference Include="..\..\src\housecarl-nexus\housecarl-nexus.csproj" />
     <Compile Include="..\_shared\HarnessTarget.cs" Link="HarnessTarget.cs" />
     <Compile Include="..\_shared\Configuration.cs" Link="Configuration.cs" />
     <Compile Include="..\_shared\SyntheticOrder.cs" Link="SyntheticOrder.cs" />
