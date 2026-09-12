@@ -86,12 +86,18 @@ public sealed record CoverageLine(string Population, long Judged,
 /// <param name="State">WHICH WORLD STATE the run judged: <c>baseline</c> (the load-time state), a <c>--state</c> arm's
 /// name, or null for a flag-population run (a flag population is not a world state) and for any emit written before Q27.
 /// Two emits of different states can be compared deliberately; they cannot be credited as a repair by accident.</param>
+/// <param name="Configuration">WHAT THE RUN CONSUMED (roadmap 4.20, 2026-09-11): the loaded plugins in order with their content
+/// hashes, the asset providers in priority, the runtime overlays, and the limits of the view — <see cref="HarnessOrderCli"/>
+/// builds it, keyed with this emit's own Population and State. Null in an emit written before 4.20, and a reader must treat
+/// that as UNKNOWN rather than "the same": every verdict in this file is true of ONE configuration, and comparing two emits
+/// whose configurations are not both named compares two unnamed things. <see cref="ConfigurationGate"/> is that rule.</param>
 public sealed record ConflictFile(string Probe, string Instance, string GeneratedUtc, IReadOnlyList<Conflict> Conflicts,
                                   IReadOnlyList<CoverageLine>? Coverage = null,
                                   IReadOnlyList<Predicate>? Predicates = null,
                                   string? BaseEmit = null,
                                   string? Population = null,
-                                  string? State = null)
+                                  string? State = null,
+                                  ConfigurationIdentity? Configuration = null)
 {
     /// <summary>How this emit's population and state read for a human, and for the diff's refusal message. "unknown"
     /// is a real answer: an emit written before Q27 says nothing about either, and pretending otherwise is the silent
@@ -124,9 +130,90 @@ public static class ConflictIo
     /// refs (unordered — the later/other roles can swap under a patch); a contact row is (dependent, host). Keyed on the
     /// plugin pair, a sham that re-provides three dangling navmeshes read as three repaired and three created
     /// (2026-09-03, the navmesh S1 cell); keyed on the records it reads as three unchanged, re-attributed.</summary>
+    /// <para>CASE-INSENSITIVE (2026-09-11). A plugin filename's letter case can differ between loadorder.txt, a mod folder
+    /// and the game Data folder, and the FormKey text carries that filename. On the lab, one navownprobe row read
+    /// `ccBGSSSE025-AdvDSGS.esm` from one provider and `ccbgssse025-advdsgs.esm` from another, split into GONE + NEW,
+    /// and turned a no-op what-if into DIFFERENTIAL-RECLASSIFIED. The engine and MO2 treat the names as one file;
+    /// so does the key.</para>
     public static string RowIdentity(string kind, string formKey, string? other, string a)
     {
+        kind = kind.ToLowerInvariant(); formKey = formKey.ToLowerInvariant(); a = a.ToLowerInvariant(); other = other?.ToLowerInvariant();
         if (other is null) return $"{kind}|{formKey}|{a}";
         return string.CompareOrdinal(formKey, other) <= 0 ? $"{kind}|{formKey}|{other}" : $"{kind}|{other}|{formKey}";
     }
+}
+
+/// <summary>What the gate decided. <paramref name="Refused"/> means the comparison does not run (exit 3);
+/// <paramref name="Lines"/> is what to print either way, and <paramref name="Delta"/> is the configuration
+/// difference the differential is OF — empty when the two runs consumed the same configuration.</summary>
+public sealed record ConfigurationGateResult(bool Refused, IReadOnlyList<string> Lines, IReadOnlyList<string> Delta);
+
+/// <summary>THE CONFIGURATION GATE for a differential (roadmap 4.20, 2026-09-11) — the same posture as the Q27
+/// population/state gate one file over in conflictdiff, applied to what the two runs CONSUMED.
+///
+/// <para>A configuration difference is never refused when it is named: the delta between two configurations is
+/// exactly what a differential is a differential OF, so it is printed and the run proceeds. What IS refused is a
+/// comparison that cannot state what it is comparing — an emit with no configuration at all (an unlabelled emit is
+/// UNKNOWN, not "the same") and two emits from different probes (their rows are not the same kind of thing).</para>
+///
+/// <para>And the case that has no honest verdict: identical configurations that produced different rows. Nothing
+/// the identity covers changed, so the difference came from somewhere the identity does not model or from the run
+/// itself — either way it is not a repair, and it is not something to average over. That is DIFFERENTIAL-UNJUDGED
+/// with the reason said out loud.</para>
+///
+/// <para>WHY THIS LIVES IN THE FORMAT FILE and not in DetectorModel, where <c>Credit</c> and
+/// <c>DifferentialVerdict</c> live: those decide what a ROW is worth — detector semantics, and DetectorModel is
+/// linked by eighteen projects that know nothing of <see cref="ConflictFile"/>. This decides whether a FILE says
+/// enough about itself to be compared at all, it reads only <see cref="ConflictFile"/>'s own fields, and putting it
+/// here keeps <see cref="ConfigurationIdentity"/> off those eighteen projects' compile lists. <c>RowIdentity</c>
+/// above is the same shape of thing: a diff-side rule about the format, kept with the format.</para></summary>
+public static class ConfigurationGate
+{
+    public static ConfigurationGateResult Check(ConflictFile baseFile, ConflictFile changedFile)
+    {
+        var lines = new List<string>();
+
+        if (!string.Equals(baseFile.Probe, changedFile.Probe, StringComparison.OrdinalIgnoreCase))
+        {
+            lines.Add($"the two emits are from DIFFERENT probes ('{baseFile.Probe}' and '{changedFile.Probe}'): their rows are");
+            lines.Add("not the same kind of thing, so nothing crosses between them — a row present in one and absent in the other");
+            lines.Add("means only that the two detectors detect different things. REFUSED.");
+            return new ConfigurationGateResult(true, lines, Array.Empty<string>());
+        }
+
+        var a = baseFile.Configuration;
+        var b = changedFile.Configuration;
+        if (a is null || b is null)
+        {
+            string which = a is null && b is null ? "neither emit says" : a is null ? "the base emit does not say" : "the changed emit does not say";
+            lines.Add($"{which} which configuration produced it (written before 2026-09-11, or by a probe that was not wired).");
+            lines.Add("An unlabelled emit is UNKNOWN, not \"the same\": every verdict is true of one configuration — one set of plugins in");
+            lines.Add("one order over one asset view — and a row that vanished between two configurations nobody named is not evidence of");
+            lines.Add("anything. Re-emit with the current probe. REFUSED.");
+            return new ConfigurationGateResult(true, lines, Array.Empty<string>());
+        }
+
+        lines.Add($"configuration (base)   : {a.Short}");
+        lines.Add($"configuration (changed): {b.Short}");
+        var delta = a.DeltaTo(b);
+        if (delta.Count == 0)
+            lines.Add("configuration delta    : none — the two runs consumed the same plugins, in the same order, over the same providers and overlays.");
+        else
+        {
+            lines.Add("configuration delta    : this is what the differential below is a difference OF —");
+            foreach (var d in delta) lines.Add($"   - {d}");
+        }
+        return new ConfigurationGateResult(false, lines, delta);
+    }
+
+    /// <summary>The rows differ but the configuration does not. Nothing the identity covers changed, so the rows changed
+    /// for a reason this file cannot name — a non-deterministic detector, or an input the identity does not model. Never
+    /// a repair verdict.</summary>
+    public static bool Nondeterministic(ConfigurationGateResult gate, bool anyRowDiffers)
+        => !gate.Refused && gate.Delta.Count == 0 && anyRowDiffers;
+
+    public const string NondeterminismLine =
+        "!! IDENTICAL CONFIGURATIONS PRODUCED DIFFERENT ROWS. The two emits consumed the same plugins in the same order over the "
+      + "same asset providers and overlays, and still disagree. That is non-determinism in the detector or an input the "
+      + "configuration identity does not model — it is NOT a repair, and no number below is credit.";
 }

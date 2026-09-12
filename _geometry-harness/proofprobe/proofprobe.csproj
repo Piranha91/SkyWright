@@ -13,10 +13,14 @@
     <Compile Include="..\_shared\EnablePopulation.cs" Link="EnablePopulation.cs" />
     <Compile Include="..\_shared\EnableArms.cs" Link="EnableArms.cs" />
     <Compile Include="..\_shared\ConflictReport.cs" Link="ConflictReport.cs" />
+    <Compile Include="..\_shared\Configuration.cs" Link="Configuration.cs" />
+    <Compile Include="..\_shared\OrderRules.cs" Link="OrderRules.cs" />
+    <Compile Include="..\_shared\OrderSearch.cs" Link="OrderSearch.cs" />
   </ItemGroup>
   <ItemGroup>
     <Compile Include="..\_shared\FomodModel.cs" Link="FomodModel.cs" />
     <Compile Include="..\_shared\SyntheticOrder.cs" Link="SyntheticOrder.cs" />
+    <Compile Include="..\_shared\HarnessOrderCli.cs" Link="HarnessOrderCli.cs" />
     <Compile Include="..\_shared\DetectorModel.cs" Link="DetectorModel.cs" />
     <Compile Include="..\_shared\ActorBand.cs" Link="ActorBand.cs" />
     <Compile Include="..\_shared\FloorFeed.cs" Link="FloorFeed.cs" />

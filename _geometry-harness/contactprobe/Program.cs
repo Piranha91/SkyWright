@@ -96,6 +96,7 @@ HashSet<string>? only = null;
 bool bosOn = true;
 var enablePlugins = new List<string>();
 var disablePlugins = new List<string>();
+string? orderFile = null;
 for (int i = 0; i < args.Length; i++)
 {
     if (args[i] == "--list" && i + 1 < args.Length) listN = int.Parse(args[++i]);
@@ -112,6 +113,7 @@ for (int i = 0; i < args.Length; i++)
     else if (args[i] == "--absolute") absolute = true;
     else if (args[i] == "--vanilla-assets") vanillaAssets = true;
     else if (args[i] == "--interior-only") interiorOnly = true;
+    else if (args[i] == "--order" && i + 1 < args.Length) orderFile = args[++i];
     else if (args[i] == "--enable" && i + 1 < args.Length) enablePlugins.Add(args[++i]);
     else if (args[i] == "--disable" && i + 1 < args.Length) disablePlugins.Add(args[++i]);
     else if (args[i] == "--bos" && i + 1 < args.Length) bosOn = BosHook.ParseFlag(args[++i]) ?? throw new ArgumentException("--bos takes on|off");
@@ -128,28 +130,34 @@ for (int i = 0; i < args.Length; i++)
 }
 
 var sw = Stopwatch.StartNew();
-IReadOnlyList<string> paths;
-if (enablePlugins.Count > 0 || disablePlugins.Count > 0)
-{
-    var syn = SyntheticOrder.Build(profileDir, modsDir, dataDir, overwriteDir, enablePlugins, disablePlugins);
-    foreach (var w in syn.Warnings) Console.WriteLine($"   ! {w}");
-    foreach (var a in syn.Applied) Console.WriteLine($"   synthetic: {a}");
-    paths = syn.OrderedPaths;
-}
-else paths = Mo2LoadOrder.Build(profileDir, modsDir, dataDir, overwriteDir).OrderedPaths;
+// WHAT THIS RUN EVALUATES, decided in one place (_shared/HarnessOrderCli.cs): the real profile, a --enable/--disable
+// what-if, or a --order candidate file - and, in the same step, the ASSET VIEW that configuration implies, so a run
+// whose plugins changed no longer reads the profile's meshes and BSAs regardless. The identity it produces is written
+// into the emit, so a reader (and conflictdiff) can see exactly what was consumed instead of inferring it.
+var cfg = HarnessOrderCli.Resolve(profileName, profileDir, modsDir, dataDir, overwriteDir, GamePath,
+                                  orderFile, enablePlugins, disablePlugins);
+if (cfg.Refused) { Console.Error.WriteLine(cfg.RefusedReason); return 2; }
+var paths = cfg.OrderedPaths;
 if (only is not null)
 {
     paths = paths.Where(p => only.Contains(Path.GetFileName(p))).ToList();
     Console.WriteLine($"--only: {paths.Count} of the profile's plugins kept ({string.Join(", ", paths.Select(Path.GetFileName))})");
     foreach (var name in only.Where(n => !paths.Any(p => string.Equals(Path.GetFileName(p), n, StringComparison.OrdinalIgnoreCase))))
         Console.WriteLine($"   ! --only names '{name}', which the profile's order does not contain");
+    // --only means this run read FEWER plugins than the configuration offers, so the identity is narrowed to what was
+    // actually consumed. Left un-narrowed it would claim the whole order and two --only runs over different subsets
+    // would be indistinguishable — the identity's whole job.
+    cfg = cfg.NarrowedTo(paths, $"--only kept {paths.Count} plugin(s) of the configuration's {cfg.Plugins.Count}");
 }
-var comp = Mo2LoadOrder.ReadComposition(profileDir);
-var arch = ArchiveDiscovery.Discover(profileDir, modsDir, dataDir, overwriteDir, GamePath);
-IReadOnlyList<string> enabledMods = vanillaAssets ? Array.Empty<string>() : comp.EnabledMods;
-var archives = vanillaAssets ? arch.Archives.Where(a => a.Path.StartsWith(dataDir, StringComparison.OrdinalIgnoreCase)).ToList() : arch.Archives;
+IReadOnlyList<string> enabledMods = vanillaAssets ? Array.Empty<string>() : cfg.EnabledMods;
+var archives = vanillaAssets ? cfg.Archives.Archives.Where(a => a.Path.StartsWith(dataDir, StringComparison.OrdinalIgnoreCase)).ToList() : cfg.Archives.Archives;
+// --vanilla-assets is a DIFFERENT asset view from the one the configuration resolved, so the identity says so rather
+// than carrying the profile's providers over a run that deliberately read none of them.
+if (vanillaAssets) cfg = cfg.WithVanillaAssets();
 using var assets = AssetResolver.Build(vanillaAssets ? Path.Combine(Instance, "__no_overwrite__") : overwriteDir, modsDir, dataDir, enabledMods, archives);
-Console.WriteLine($"load order: {paths.Count} plugins; meshes from {(vanillaAssets ? $"the game's own archives only ({archives.Count} archives)" : $"the profile's VFS ({enabledMods.Count} mods, {archives.Count} archives)")}\n");
+Console.WriteLine($"load order: {paths.Count} plugins; meshes from {(vanillaAssets ? $"the game's own archives only ({archives.Count} archives)" : $"the profile's VFS ({enabledMods.Count} mods, {archives.Count} archives)")}");
+HarnessOrderCli.Print(cfg);
+Console.WriteLine();
 
 var Vanilla = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
 { "Skyrim.esm", "Update.esm", "Dawnguard.esm", "HearthFires.esm", "Dragonborn.esm", "SkyrimVR.esm", "_ResourcePack.esl" };
@@ -844,8 +852,10 @@ if (emitPath is not null)
             new Dictionary<string, long> { ["BoxesApart"] = skips.BoxesApart, ["DepIntroducedByMover"] = skips.DepIntroducedByMover, ["DepOtherSpace"] = skips.DepOtherSpace, ["DepAbsentInArm"] = skips.DepAbsentInArm },
             $"relationships {rel.Count:N0}, class {classRows.Count:N0}"),
     };
+    var identity = cfg.Identity("load-time", cidx.State?.Name ?? EnablePopulation.BaselineStateName);
     ConflictIo.Write(emitPath, new ConflictFile("contactprobe", Instance, DateTime.UtcNow.ToString("yyyy-MM-dd HH:mm:ssZ"), conflicts, coverage, predicates, basePath,
-                                                "load-time", cidx.State?.Name ?? EnablePopulation.BaselineStateName));
+                                                "load-time", cidx.State?.Name ?? EnablePopulation.BaselineStateName, identity));
+    Console.WriteLine($"configuration: {identity.Short}");
     Console.WriteLine($"\nemitted {conflicts.Count:N0} Fixed Stranded + Orphaned conflicts -> {emitPath}");
 }
 

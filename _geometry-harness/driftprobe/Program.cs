@@ -88,11 +88,17 @@ bool reachFilter = true;    // --no-reach: report the pairs as they were reporte
 bool generic = false;
 string? emitPath = null;
 bool bosOn = true;
+string? orderFile = null;
+// driftprobe has no --enable/--disable of its own; the reader takes the empty lists and resolves the
+// profile (or a --order candidate), so its emit carries the same configuration identity as every other.
+var enablePlugins = new List<string>();
+var disablePlugins = new List<string>();
 for (int i = 0; i < args.Length; i++)
 {
     if (args[i] == "--near" && i + 1 < args.Length) near = float.Parse(args[++i]);
     else if (args[i] == "--bos" && i + 1 < args.Length) bosOn = BosHook.ParseFlag(args[++i]) ?? throw new ArgumentException("--bos takes on|off");
     else if (args[i] == "--list" && i + 1 < args.Length) listN = int.Parse(args[++i]);
+    else if (args[i] == "--order" && i + 1 < args.Length) orderFile = args[++i];
     else if (args[i] == "--generic") generic = true;
     else if (args[i] == "--emit" && i + 1 < args.Length) emitPath = args[++i];
     else if (args[i] == "--actor" && i + 1 < args.Length) actorDump = args[++i];
@@ -100,9 +106,16 @@ for (int i = 0; i < args.Length; i++)
 }
 
 var sw = Stopwatch.StartNew();
-var order = Mo2LoadOrder.Build(profileDir, modsDir, dataDir, overwriteDir);
-var paths = order.OrderedPaths;
+// WHAT THIS RUN EVALUATES, decided in one place (_shared/HarnessOrderCli.cs): the real profile, a --enable/--disable
+// what-if, or a --order candidate file - and, in the same step, the ASSET VIEW that configuration implies, so a run
+// whose plugins changed no longer reads the profile's meshes and BSAs regardless. The identity it produces is written
+// into the emit, so a reader (and conflictdiff) can see exactly what was consumed instead of inferring it.
+var cfg = HarnessOrderCli.Resolve(profileName, profileDir, modsDir, dataDir, overwriteDir, GamePath,
+                                  orderFile, enablePlugins, disablePlugins);
+if (cfg.Refused) { Console.Error.WriteLine(cfg.RefusedReason); return 2; }
+var paths = cfg.OrderedPaths;
 Console.WriteLine($"load order: {paths.Count} plugins ({sw.ElapsedMilliseconds} ms)\n");
+HarnessOrderCli.Print(cfg);
 
 // ---------------------------------------------------------------------------------------
 // Pass 1 — every plugin once: placement history, quest graphs, master sets.
@@ -280,7 +293,7 @@ var bosSwaps = new Dictionary<FormKey, BaseObjectSwaps.BosResolution>();
 if (bosOn)
 {
     masterIdx[bosPlugin] = BosHook.PseudoMasters(paths.Count);
-    var bosLayer = bos.Load(BosHook.LooseRoots(overwriteDir, modsDir, dataDir, Mo2LoadOrder.ReadComposition(profileDir).EnabledMods));
+    var bosLayer = bos.Load(BosHook.LooseRoots(overwriteDir, modsDir, dataDir, cfg.EnabledMods));
     var bosRep = BosHook.Apply(history, refBase, refArm, refEz, bos.Index!, bosLayer, bosPlugin, recordBase, bosSwaps);
     Console.WriteLine("   " + bos.LayerLine());
     foreach (var l in bosRep.Summary()) Console.WriteLine("   " + l);
@@ -897,7 +910,8 @@ if (emitPath is not null)
         DateTime.UtcNow.ToString("yyyy-MM-dd HH:mm:ssZ"), conflicts,
         // driftprobe's population is placement history and package reach: no enable filter is applied and none belongs
         // here (an actor dormant at load is still an actor the order places). Labelled so a reader is never left to guess.
-        Population: "n/a (placement history; no enable-state filter)", State: "n/a"));
+        Population: "n/a (placement history; no enable-state filter)", State: "n/a",
+        Configuration: cfg.Identity("n/a (placement history; no enable-state filter)", "n/a")));
     Console.WriteLine($"\nemitted {conflicts.Count:N0} conflicts ({conflicts.Count(c => c.B.Length == 0)} with no second party to name) -> {emitPath}");
 }
 

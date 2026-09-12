@@ -31,8 +31,13 @@ using HousecarlCore.Progress;
 //              last word on the navmesh was spoken before they existed.
 //
 // usage: navownprobe [--list N] [--plugin Name.esp] [--emit out.json] [--base emit.json] [--enable X.esp]
-//                    [--disable X.esp] [--door-idx] [--reach-candidates] [--reach-json out.json]
+//                    [--disable X.esp] [--order FILE] [--door-idx] [--reach-candidates] [--reach-json out.json]
 //                    [--reach-top N] [--reach-witness] [--flags]
+//
+//   --order FILE     evaluate a CANDIDATE configuration (a CandidateFile: the loaded plugins in order and, optionally,
+//                    the mod folders in asset priority) instead of the profile's own. Mutually exclusive with
+//                    --enable/--disable — two descriptions of one order, and picking one silently is how a result
+//                    ends up being about an order nobody asked for. The emit records which one was consumed.
 //
 //   POPULATION (Q27, 2026-09-06): the two PHYSICAL populations here — the obstructing references UNCUT counts, and the
 //                    placed actors and package anchors the needs-witness join calls witnesses — are the LOAD-TIME state:
@@ -88,11 +93,13 @@ int listN = 25;
 string? onlyPlugin = null;
 string? emitPath = null;
 string? basePath = null;
+string? orderFile = null;
 var enablePlugins = new List<string>();
 var disablePlugins = new List<string>();
 for (int i = 0; i < args.Length; i++)
 {
     if (args[i] == "--flags") { flagsOnly = true; continue; }
+    if (args[i] == "--order" && i + 1 < args.Length) { orderFile = args[++i]; continue; }
     if (args[i] == "--state" && i + 1 < args.Length) { stateSpec = args[++i]; continue; }
     if (args[i] == "--list" && i + 1 < args.Length) listN = int.Parse(args[++i]);
     else if (args[i] == "--plugin" && i + 1 < args.Length) onlyPlugin = args[++i];
@@ -111,31 +118,18 @@ try { popMode = PopulationCli.Resolve("navownprobe", flagsOnly, stateSpec, state
 catch (ArgumentException ex) { Console.Error.WriteLine(ex.Message); return 2; }
 
 var sw = Stopwatch.StartNew();
-var comp = Mo2LoadOrder.ReadComposition(profileDir);
-var arch = ArchiveDiscovery.Discover(profileDir, modsDir, dataDir, overwriteDir, GamePath);
-using var assets = AssetResolver.Build(overwriteDir, modsDir, dataDir, comp.EnabledMods, arch.Archives);
-// The real order unless asked otherwise. --enable / --disable produce a SYNTHETIC order so a finding
-// can be tested against a known intervention without launching the game: enable the patch that
-// --verify says covers a conflict, and the conflict should disappear. See _shared/SyntheticOrder.cs.
-List<string> paths;
-if (enablePlugins.Count > 0 || disablePlugins.Count > 0)
-{
-    var syn = SyntheticOrder.Build(profileDir, modsDir, dataDir, overwriteDir, enablePlugins, disablePlugins);
-    paths = syn.OrderedPaths.ToList();
-    Console.WriteLine($"SYNTHETIC load order: {paths.Count} plugins ({syn.LoadedCount} loaded per the modified set)");
-    foreach (var a in syn.Applied) Console.WriteLine($"   {a}");
-    if (syn.Applied.Count == 0) Console.WriteLine($"   (nothing changed — every named plugin was already in that state)");
-    foreach (var w in syn.Warnings.Where(w => w.Contains("REFUSED") || w.Contains("nothing to do")
-                                           || w.Contains("MISSING MASTER") || w.Contains("unreadable")))
-        Console.WriteLine($"   ⚠ {w}");
-    Console.WriteLine();
-}
-else
-{
-    var order = Mo2LoadOrder.Build(profileDir, modsDir, dataDir, overwriteDir);
-    paths = order.OrderedPaths.ToList();
-    Console.WriteLine($"load order: {paths.Count} plugins\n");
-}
+// WHAT THIS RUN EVALUATES, decided in one place (_shared/HarnessOrderCli.cs): the real profile, a --enable/--disable
+// what-if, or a --order candidate file — and, in the same step, the ASSET VIEW that configuration implies, so a run
+// whose plugins changed no longer reads the profile's meshes and BSAs regardless. The identity it produces is written
+// into the emit, so a reader (and conflictdiff) can see exactly what was consumed instead of inferring it.
+var cfg = HarnessOrderCli.Resolve(profileName, profileDir, modsDir, dataDir, overwriteDir, GamePath,
+                                  orderFile, enablePlugins, disablePlugins);
+if (cfg.Refused) { Console.Error.WriteLine(cfg.RefusedReason); return 2; }
+using var assets = AssetResolver.Build(overwriteDir, modsDir, dataDir, cfg.EnabledMods, cfg.Archives.Archives);
+var paths = cfg.OrderedPaths.ToList();
+Console.WriteLine($"load order: {paths.Count} plugins");
+HarnessOrderCli.Print(cfg);
+Console.WriteLine();
 
 // Which base records can physically obstruct. XMarkers have no mesh and no collision; a dropped
 // coin is not a wall. Kept as data here rather than hard-coded judgement anywhere deeper.
@@ -1213,9 +1207,11 @@ if (emitPath is not null)
     };
     coverage.AddRange(coverageExtra);
 
+    var identity = cfg.Identity(pop.Identity, pop.StateName);
     ConflictIo.Write(emitPath, new ConflictFile("navownprobe", Instance,
         DateTime.UtcNow.ToString("yyyy-MM-dd HH:mm:ssZ"), conflicts, coverage, predicates, basePath,
-        pop.Identity, pop.StateName));
+        pop.Identity, pop.StateName, identity));
+    Console.WriteLine($"configuration: {identity.Short}");
     Console.WriteLine($"\nemitted {conflicts.Count:N0} conflicts ({conflicts.Count(c => c.B.Length == 0)} with no second party to name;"
                     + $" {floorDangles} class-A dangles and the class-A clobbers withheld as floor;"
                     + $" clobber predicates Holds {predicateTally.GetValueOrDefault(PhysicalState.Holds)} / Gone {predicateTally.GetValueOrDefault(PhysicalState.Gone)} / Unmeasured {predicateTally.GetValueOrDefault(PhysicalState.Unmeasured)}) -> {emitPath}");

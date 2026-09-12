@@ -45,6 +45,15 @@ using HousecarlCore.Progress;
 // - unknown on either side (an emit written before Q27 carries neither): also refused, for the same reason. An old
 //   emit is not certified equal to a new one; re-emit with the current probe.
 //
+// CONFIGURATION (roadmap 4.20, 2026-09-11). Population and state say which references a run judged; the CONFIGURATION says
+// what it read to judge them — which plugins loaded, in what order, with what content, over which asset providers and runtime
+// overlays. Every emit carries one (ConflictFile.Configuration, built by HarnessOrderCli). Unlike the population gate, a
+// configuration DIFFERENCE is never refused: it is exactly what the differential is a difference of, so both identities and
+// every line of the delta are printed and the run proceeds. Refused instead: an emit that names no configuration at all
+// (UNKNOWN is not "the same" — re-emit), and two emits from different probes. And the case with no honest verdict — identical
+// configurations that produced different rows — is called DIFFERENTIAL-UNJUDGED with the reason said out loud, because
+// nothing the identity covers changed and whatever moved came from outside it. The rule is ConfigurationGate, proof-pinned.
+//
 // usage: conflictdiff <base.json> <changed.json> [--tolerance PCT] [--compare-states]   (PCT in points; default 1)
 //   --compare-states  the two emits are DELIBERATELY of different populations or world states. The diff runs and every
 //                     line says so; the verdict is not an ordinary repair verdict.
@@ -111,6 +120,13 @@ else if (!identitySame)
     if (!compareStates) return 3;
 }
 if (compareStates && !identitySame) Console.WriteLine("   (--compare-states: running anyway; every number below is a POPULATION/STATE difference, not repair credit)");
+// The CONFIGURATION gate (roadmap 4.20), the same posture one level down: the population gate asks which references the
+// two runs judged, this asks which plugins, in what order, over which assets they read to judge them. A named difference
+// is printed and the run proceeds — the delta IS what the differential is of. An emit that names no configuration, or a
+// pair from different probes, is refused: a comparison that cannot state what it compares states nothing.
+var gate = ConfigurationGate.Check(baseFile, changedFile);
+foreach (var line in gate.Lines) Console.WriteLine($"   {line}");
+if (gate.Refused) return 3;
 Console.WriteLine();
 if (basePredicated == 0) Console.WriteLine("   ! the base emit carries no physical predicates (written before 2026-09-03?) — every vanished row reads UNMEASURED; re-emit with the current probe");
 if (predicates.Count == 0 && before.Keys.Any(k => !after.ContainsKey(k)))
@@ -197,7 +213,18 @@ var refusals = DetectorModel.CoverageRefusals(Cov(baseFile), Cov(changedFile), t
 foreach (var r in refusals) Console.WriteLine($"   ! REFUSED: {r}");
 if (baseFile.Coverage is null || changedFile.Coverage is null) Console.WriteLine("   ! one or both emits carry no coverage block — the unjudgeable-share test could not run");
 
+// Identical configurations that produced different rows have no honest verdict (roadmap 4.20): nothing the identity covers
+// changed, so whatever moved came from outside it. Said loud, and the verdict is UNJUDGED rather than a repair number.
+bool anyRowDiffers = outcome.Values.Any(v => v != CreditOutcome.Unchanged) || flipGone > 0 || flipHolds > 0;
+bool nondeterministic = ConfigurationGate.Nondeterministic(gate, anyRowDiffers);
+
 string verdict = DetectorModel.DifferentialVerdict(N(CreditOutcome.Repaired), N(CreditOutcome.Created), N(CreditOutcome.Reclassified), N(CreditOutcome.Unmeasured), refusals.Count);
+if (nondeterministic)
+{
+    Console.WriteLine();
+    Console.WriteLine($"   {ConfigurationGate.NondeterminismLine}");
+    verdict = "DIFFERENTIAL-UNJUDGED";
+}
 Console.WriteLine();
 Console.WriteLine($"   verdict : {verdict}{(identitySame ? "" : "   [POPULATION/STATE DIFFERENCE — not repair credit]")}  (repaired {N(CreditOutcome.Repaired):N0} - created {N(CreditOutcome.Created):N0} = net {N(CreditOutcome.Repaired) - N(CreditOutcome.Created):+#;-#;0}; reclassified {N(CreditOutcome.Reclassified):N0}, unmeasured {N(CreditOutcome.Unmeasured):N0})");
 Console.WriteLine();

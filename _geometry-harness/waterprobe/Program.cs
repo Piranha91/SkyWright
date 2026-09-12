@@ -66,6 +66,7 @@ string? jsonPath = null, emitPath = null, basePath = null;
 bool readLand = true;
 var enablePlugins = new List<string>();
 var disablePlugins = new List<string>();
+string? orderFile = null;
 for (int i = 0; i < args.Length; i++)
 {
     if (args[i] == "--list" && i + 1 < args.Length) listN = int.Parse(args[++i]);
@@ -79,23 +80,24 @@ for (int i = 0; i < args.Length; i++)
     else if (args[i] == "--emit" && i + 1 < args.Length) emitPath = args[++i];
     else if (args[i] == "--base" && i + 1 < args.Length) basePath = args[++i];
     else if (args[i] == "--no-land") readLand = false;
+    else if (args[i] == "--order" && i + 1 < args.Length) orderFile = args[++i];
     else if (args[i] == "--enable" && i + 1 < args.Length) enablePlugins.Add(args[++i]);
     else if (args[i] == "--disable" && i + 1 < args.Length) disablePlugins.Add(args[++i]);
 }
 
 Console.OutputEncoding = System.Text.Encoding.UTF8;
 var sw = Stopwatch.StartNew();
-IReadOnlyList<string> paths;
-if (enablePlugins.Count > 0 || disablePlugins.Count > 0)
-{
-    var syn = SyntheticOrder.Build(profileDir, modsDir, dataDir, overwriteDir, enablePlugins, disablePlugins);
-    foreach (var w in syn.Warnings) Console.WriteLine($"   ! {w}");
-    foreach (var a in syn.Applied) Console.WriteLine($"   synthetic: {a}");
-    paths = syn.OrderedPaths;
-}
-else paths = Mo2LoadOrder.Build(profileDir, modsDir, dataDir, overwriteDir).OrderedPaths;
+// WHAT THIS RUN EVALUATES, decided in one place (_shared/HarnessOrderCli.cs): the real profile, a --enable/--disable
+// what-if, or a --order candidate file - and, in the same step, the ASSET VIEW that configuration implies, so a run
+// whose plugins changed no longer reads the profile's meshes and BSAs regardless. The identity it produces is written
+// into the emit, so a reader (and conflictdiff) can see exactly what was consumed instead of inferring it.
+var cfg = HarnessOrderCli.Resolve(profileName, profileDir, modsDir, dataDir, overwriteDir, GamePath,
+                                  orderFile, enablePlugins, disablePlugins);
+if (cfg.Refused) { Console.Error.WriteLine(cfg.RefusedReason); return 2; }
+var paths = cfg.OrderedPaths;
 Console.WriteLine($"waterprobe — {Instance} / {profileName}");
 Console.WriteLine($"load order: {paths.Count} plugins ({sw.ElapsedMilliseconds} ms)   seam eps {eps:0.##} u; visible floor {minVisible:P0}; water-mod rule: ≥1 foreign WATR override or own WATR on ≥{waterModCells} cells\n");
+HarnessOrderCli.Print(cfg);
 
 // ---------------------------------------------------------------------------------------
 // Pass 1 — every plugin once, into the shared index.
@@ -369,7 +371,8 @@ if (emitPath is not null)
     };
     // CELL water records carry no placed references, so no enable population applies; said rather than left null.
     ConflictIo.Write(emitPath, new ConflictFile("waterprobe", Instance, DateTime.UtcNow.ToString("yyyy-MM-dd HH:mm:ssZ"), conflicts, coverage, predicates, basePath,
-                                                "n/a (CELL water records; no placed-reference population)", "n/a"));
+                                                "n/a (CELL water records; no placed-reference population)", "n/a",
+                                                cfg.Identity("n/a (CELL water records; no placed-reference population)", "n/a")));
     Console.WriteLine($"\nemitted {conflicts.Count:N0} rows ({missing.Count:N0} WATER-MISSING, {seamRows.Count:N0} WATER-SEAM) -> {emitPath}");
 }
 

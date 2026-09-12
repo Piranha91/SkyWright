@@ -3569,6 +3569,8 @@ NifBoundProof.Run(Check);
 OcclusionGeometryProof.Run(Check);
 MaterialScaleProof.Run(Check);
 PopulationProof.Run(Check);
+OrderProof.Run(Check);
+ProofProbe.ConfigurationProof.Run(Check);
 
 Console.WriteLine();
 Console.WriteLine($"==== {pass} passed, {fail} failed ====");

@@ -28,7 +28,9 @@ namespace HarnessShared;
 // in what order. It does NOT model the asset VFS: enabling a plugin that lives in a disabled mod
 // folder does not put that folder's meshes and textures in the resolver's path. Record-level probes
 // (navownprobe's clobber and dangling-link checks, driftprobe) are unaffected; anything that
-// measures a mesh is not, and must say so.
+// measures a mesh is not, and must say so. Since 2026-09-11 the caller says it for itself: the run's
+// ConfigurationIdentity (HarnessOrderCli / _shared/Configuration.cs) records each such plugin in its
+// Limits, so an emit computed over one carries the caveat instead of relying on a reader's memory.
 
 /// <param name="OrderedPaths">Real plugin paths, masters first, highest priority LAST — the same shape
 /// <see cref="Mo2LoadOrder.Build"/> returns, so a probe can swap one for the other.</param>
@@ -147,12 +149,24 @@ public static class SyntheticOrder
     }
 
     /// <summary>filename → winning real path, in MO2's own precedence: overwrite, then enabled mods by
-    /// modlist priority (top = highest, first seen wins), then DISABLED mods, then game Data.
+    /// modlist priority (top = highest, first seen wins), then game Data — and only THEN, below
+    /// everything the game can actually see, the DISABLED mod folders.
     /// <para>The disabled layer is what <see cref="Mo2LoadOrder.Build"/>'s map deliberately omits and
-    /// what this needs: a plugin worth switching on for a what-if is very often sitting in a folder
-    /// that is switched off. It is placed BELOW every enabled mod, so turning one on can never
-    /// silently outrank a mod that is genuinely installed.</para></summary>
-    static Dictionary<string, string> BuildFilenameMap(
+    /// what this needs, but for one job only: supplying a plugin that NO enabled folder and NOT Data
+    /// provides — the what-if of switching on a plugin whose only copy sits in a folder that is off.
+    /// A plugin Data already provides is served by Data, because that is the copy the game loads;
+    /// MO2 puts nothing from a switched-off folder into the game's view.</para>
+    /// <para>It sat ABOVE Data until 2026-09-11, and that was a defect with measured consequences. On
+    /// the SE conflict lab's profile, 21 Creation Club plugins exist both in the game's Data folder and
+    /// in a switched-off "Creation Club Content" mod folder, with DIFFERENT bytes —
+    /// ccbgssse018-shadowrend.esl is 299,516 B in Data and 253,552 B in the folder. The baseline arm
+    /// (<see cref="Mo2LoadOrder.Build"/>) read Data; every <c>--enable</c> arm read the folder. So every
+    /// differential run on that profile was comparing two configurations that differed in 21 plugins'
+    /// content as well as in the plugin under test, and nothing said so. The configuration identity
+    /// (roadmap 4.20) is what surfaced it, on its first real run.</para>
+    /// <para>Public because orderprobe resolves the SAME baseline this builds: a divergent copy of the precedence
+    /// rules there would silently disagree with a synthetic what-if about which file a name means.</para></summary>
+    public static Dictionary<string, string> BuildFilenameMap(
         Mo2Composition comp, string modsDir, string dataDir, string overwriteDir)
     {
         var map = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
@@ -173,8 +187,8 @@ public static class SyntheticOrder
 
         Layer(overwriteDir);
         foreach (var mod in comp.EnabledMods) Layer(Path.Combine(modsDir, mod));
+        Layer(dataDir);                             // the game's own copy beats any switched-off folder's
         foreach (var mod in comp.DisabledMods) Layer(Path.Combine(modsDir, mod));
-        Layer(dataDir);
         return map;
     }
 

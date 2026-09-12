@@ -86,27 +86,29 @@ string? jsonPath = null;
 bool bosOn = true;
 var enablePlugins = new List<string>();
 var disablePlugins = new List<string>();
+string? orderFile = null;
 for (int i = 0; i < args.Length; i++)
 {
     if (args[i] == "--list" && i + 1 < args.Length) listN = int.Parse(args[++i]);
     else if (args[i] == "--threshold" && i + 1 < args.Length) threshold = float.Parse(args[++i]);
     else if (args[i] == "--json" && i + 1 < args.Length) jsonPath = args[++i];
+    else if (args[i] == "--order" && i + 1 < args.Length) orderFile = args[++i];
     else if (args[i] == "--enable" && i + 1 < args.Length) enablePlugins.Add(args[++i]);
     else if (args[i] == "--disable" && i + 1 < args.Length) disablePlugins.Add(args[++i]);
     else if (args[i] == "--bos" && i + 1 < args.Length) bosOn = BosHook.ParseFlag(args[++i]) ?? throw new ArgumentException("--bos takes on|off");
 }
 
 var sw = Stopwatch.StartNew();
-IReadOnlyList<string> paths;
-if (enablePlugins.Count > 0 || disablePlugins.Count > 0)
-{
-    var syn = SyntheticOrder.Build(profileDir, modsDir, dataDir, overwriteDir, enablePlugins, disablePlugins);
-    foreach (var w in syn.Warnings) Console.WriteLine($"   ! {w}");
-    foreach (var a in syn.Applied) Console.WriteLine($"   synthetic: {a}");
-    paths = syn.OrderedPaths;
-}
-else paths = Mo2LoadOrder.Build(profileDir, modsDir, dataDir, overwriteDir).OrderedPaths;
+// WHAT THIS RUN EVALUATES, decided in one place (_shared/HarnessOrderCli.cs): the real profile, a --enable/--disable
+// what-if, or a --order candidate file - and, in the same step, the ASSET VIEW that configuration implies, so a run
+// whose plugins changed no longer reads the profile's meshes and BSAs regardless. The identity it produces is written
+// into the emit, so a reader (and conflictdiff) can see exactly what was consumed instead of inferring it.
+var cfg = HarnessOrderCli.Resolve(profileName, profileDir, modsDir, dataDir, overwriteDir, GamePath,
+                                  orderFile, enablePlugins, disablePlugins);
+if (cfg.Refused) { Console.Error.WriteLine(cfg.RefusedReason); return 2; }
+var paths = cfg.OrderedPaths;
 Console.WriteLine($"load order: {paths.Count} plugins ({sw.ElapsedMilliseconds} ms)   threshold {threshold:0}u\n");
+HarnessOrderCli.Print(cfg);
 
 // ---------------------------------------------------------------------------------------
 // Pass 1 — every plugin once, into the shared index.
@@ -149,7 +151,7 @@ var closure = DetectorModel.MasterClosure(masterIdx);
 if (bosOn)
 {
     idx.Bos!.SetLoadOrder(lightness);
-    var bosLayer = BosHook.Load(BosHook.LooseRoots(overwriteDir, modsDir, dataDir, Mo2LoadOrder.ReadComposition(profileDir).EnabledMods), idx.Bos);
+    var bosLayer = BosHook.Load(BosHook.LooseRoots(overwriteDir, modsDir, dataDir, cfg.EnabledMods), idx.Bos);
     var bosRep = BosHook.Apply(idx, bosLayer, bosPlugin);
     Console.WriteLine($"\n   BOS: {bosLayer.Inis.Count} *_SWAP.ini read ({bosLayer.LinesRead:N0} lines, {bosLayer.LinesFailed:N0} the game would refuse, {bosLayer.Anomalies.Count:N0} anomalies — bosprobe lists them)");
     foreach (var l in bosRep.Summary()) Console.WriteLine("   " + l);

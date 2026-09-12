@@ -16,6 +16,18 @@
 # A synthetic enable whose master set is not loadable is REFUSED by SyntheticOrder and shows up
 # here as INERT with a REFUSED warning in the navownprobe output — read the log, not just the verdict.
 #
+# CONFIGURATION (roadmap 4.20, 2026-09-11). Every emit now records what the run consumed — the loaded plugins in
+# order with their content hashes, the asset providers in priority, the runtime overlays — and conflictdiff prints
+# both identities plus the delta between them before it credits anything. Two consequences for a sweep:
+#   - DIFFERENTIAL-UNJUDGED gained a second cause: identical configurations that produced different rows. Nothing
+#     the identity covers changed, so whatever moved came from outside it — never a repair number.
+#   - conflictdiff EXITS 3 on an emit that names no configuration, so a base emit left over from before 4.20 stops
+#     the sweep at that candidate instead of being compared. Re-emit the base with the current probe.
+# The precedence fix that shipped with it also changes what a sweep on a lab-style profile measures: SyntheticOrder
+# used to rank switched-off mod folders above the game's Data folder, so a plugin present in both was read from the
+# folder on every --enable arm and from Data on the base arm. On the SE conflict lab that was 21 Creation Club
+# plugins' worth of different bytes inside each comparison, and it scored one row as GONE+NEW on a null intervention.
+#
 # PROGRESS (roadmap 4.16): one run for the sweep, one stage, one child run per candidate, so a
 # sweep of twenty candidates says which one it is on and roughly how long is left instead of
 # going quiet for twenty minutes. The candidate's output now STREAMS to the console as well as to

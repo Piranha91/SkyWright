@@ -56,6 +56,7 @@ string? jsonPath = null, emitPath = null, mapPath = null;
 bool all = false, routeOn = true;
 var stateSpecs = new List<string>(); var cellFilters = new List<string>();
 var enablePlugins = new List<string>(); var disablePlugins = new List<string>();
+string? orderFile = null;
 for (int i = 0; i < args.Length; i++)
 {
     if (args[i] == "--list" && i + 1 < args.Length) listN = int.Parse(args[++i]);
@@ -66,25 +67,24 @@ for (int i = 0; i < args.Length; i++)
     else if (args[i] == "--cell" && i + 1 < args.Length) cellFilters.Add(args[++i]);
     else if (args[i] == "--all") all = true;
     else if (args[i] == "--route" && i + 1 < args.Length) routeOn = args[++i].ToLowerInvariant() switch { "on" => true, "off" => false, _ => throw new ArgumentException("--route takes on|off") };
+    else if (args[i] == "--order" && i + 1 < args.Length) orderFile = args[++i];
     else if (args[i] == "--enable" && i + 1 < args.Length) enablePlugins.Add(args[++i]);
     else if (args[i] == "--disable" && i + 1 < args.Length) disablePlugins.Add(args[++i]);
 }
 if (stateSpecs.Count == 0 && cellFilters.Count == 0 && !all) { Console.Error.WriteLine("nothing to evaluate: give --state, --cell or --all"); return 2; }
 
 var sw = Stopwatch.StartNew();
-IReadOnlyList<string> paths;
-if (enablePlugins.Count > 0 || disablePlugins.Count > 0)
-{
-    var syn = SyntheticOrder.Build(profileDir, modsDir, dataDir, overwriteDir, enablePlugins, disablePlugins);
-    foreach (var w in syn.Warnings) Console.WriteLine($"   ! {w}");
-    foreach (var a in syn.Applied) Console.WriteLine($"   synthetic: {a}");
-    paths = syn.OrderedPaths;
-}
-else paths = Mo2LoadOrder.Build(profileDir, modsDir, dataDir, overwriteDir).OrderedPaths;
-var comp = Mo2LoadOrder.ReadComposition(profileDir);
-var arch = ArchiveDiscovery.Discover(profileDir, modsDir, dataDir, overwriteDir, GamePath);
-using var assets = AssetResolver.Build(overwriteDir, modsDir, dataDir, comp.EnabledMods, arch.Archives);
-Console.WriteLine($"load order: {paths.Count} plugins; VFS: {comp.EnabledMods.Count} enabled mods, {arch.Archives.Count} archives\n");
+// WHAT THIS RUN EVALUATES, decided in one place (_shared/HarnessOrderCli.cs): the real profile, a --enable/--disable
+// what-if, or a --order candidate file - and, in the same step, the ASSET VIEW that configuration implies, so a run
+// whose plugins changed no longer reads the profile's meshes and BSAs regardless. The identity it produces is written
+// into the emit, so a reader (and conflictdiff) can see exactly what was consumed instead of inferring it.
+var cfg = HarnessOrderCli.Resolve(profileName, profileDir, modsDir, dataDir, overwriteDir, GamePath,
+                                  orderFile, enablePlugins, disablePlugins);
+if (cfg.Refused) { Console.Error.WriteLine(cfg.RefusedReason); return 2; }
+var paths = cfg.OrderedPaths;
+using var assets = AssetResolver.Build(overwriteDir, modsDir, dataDir, cfg.EnabledMods, cfg.Archives.Archives);
+Console.WriteLine($"load order: {paths.Count} plugins; VFS: {cfg.EnabledMods.Count} enabled mods, {cfg.Archives.Archives.Count} archives\n");
+HarnessOrderCli.Print(cfg);
 
 // ---------------------------------------------------------------------------------------
 // Geometry — contactprobe's resolver: the actor-solid collision as the host surface, every solid body as the
@@ -538,7 +538,8 @@ if (emitPath is not null)
     // Every row of this emit is a DIFFERENTIAL between the baseline and one flipped state, so the emit's own state is
     // the baseline it differs from; the state each row belongs to is in the row's own kind (STATE-<kind>@<state>@<trigger>).
     ConflictIo.Write(emitPath, new ConflictFile("stateprobe", Instance, DateTime.UtcNow.ToString("yyyy-MM-dd HH:mm:ssZ"), conflicts, coverage,
-                                                Population: "load-time", State: EnablePopulation.BaselineStateName));
+                                                Population: "load-time", State: EnablePopulation.BaselineStateName,
+                                                Configuration: cfg.Identity("load-time", EnablePopulation.BaselineStateName)));
     Console.WriteLine($"emitted {conflicts.Count:N0} StateConditional conflicts -> {emitPath}");
 }
 

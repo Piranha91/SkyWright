@@ -54,6 +54,7 @@ int anomaliesN = 30, listN = 60;
 bool allSwapped = false, noApply = false;
 var cells = new List<string>(); var refs = new List<string>(); var resolveTokens = new List<string>();
 var enablePlugins = new List<string>(); var disablePlugins = new List<string>();
+string? orderFile = null;
 for (int i = 0; i < args.Length; i++)
 {
     if (args[i] == "--compare-log" && i + 1 < args.Length) compareLog = args[++i];
@@ -66,24 +67,23 @@ for (int i = 0; i < args.Length; i++)
     else if (args[i] == "--json" && i + 1 < args.Length) jsonPath = args[++i];
     else if (args[i] == "--all-swapped") allSwapped = true;
     else if (args[i] == "--no-apply") noApply = true;
+    else if (args[i] == "--order" && i + 1 < args.Length) orderFile = args[++i];
     else if (args[i] == "--enable" && i + 1 < args.Length) enablePlugins.Add(args[++i]);
     else if (args[i] == "--disable" && i + 1 < args.Length) disablePlugins.Add(args[++i]);
 }
 
 var sw = Stopwatch.StartNew();
-IReadOnlyList<string> paths;
-if (enablePlugins.Count > 0 || disablePlugins.Count > 0)
-{
-    var syn = SyntheticOrder.Build(profileDir, modsDir, dataDir, overwriteDir, enablePlugins, disablePlugins);
-    foreach (var w in syn.Warnings) Console.WriteLine($"   ! {w}");
-    foreach (var a in syn.Applied) Console.WriteLine($"   synthetic: {a}");
-    paths = syn.OrderedPaths;
-}
-else paths = Mo2LoadOrder.Build(profileDir, modsDir, dataDir, overwriteDir).OrderedPaths;
-var comp = Mo2LoadOrder.ReadComposition(profileDir);
-var arch = ArchiveDiscovery.Discover(profileDir, modsDir, dataDir, overwriteDir, GamePath);
-using var assets = AssetResolver.Build(overwriteDir, modsDir, dataDir, comp.EnabledMods, arch.Archives);
-Console.WriteLine($"load order: {paths.Count} plugins; VFS: {comp.EnabledMods.Count} enabled mods\n");
+// WHAT THIS RUN EVALUATES, decided in one place (_shared/HarnessOrderCli.cs): the real profile, a --enable/--disable
+// what-if, or a --order candidate file - and, in the same step, the ASSET VIEW that configuration implies, so a run
+// whose plugins changed no longer reads the profile's meshes and BSAs regardless. The identity it produces is written
+// into the emit, so a reader (and conflictdiff) can see exactly what was consumed instead of inferring it.
+var cfg = HarnessOrderCli.Resolve(profileName, profileDir, modsDir, dataDir, overwriteDir, GamePath,
+                                  orderFile, enablePlugins, disablePlugins);
+if (cfg.Refused) { Console.Error.WriteLine(cfg.RefusedReason); return 2; }
+var paths = cfg.OrderedPaths;
+using var assets = AssetResolver.Build(overwriteDir, modsDir, dataDir, cfg.EnabledMods, cfg.Archives.Archives);
+Console.WriteLine($"load order: {paths.Count} plugins; VFS: {cfg.EnabledMods.Count} enabled mods\n");
+HarnessOrderCli.Print(cfg);
 
 // ---------------------------------------------------------------------------------------
 // Discovery — what the game reads, in the order it reads it.
