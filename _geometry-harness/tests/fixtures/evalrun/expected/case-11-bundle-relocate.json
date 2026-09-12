@@ -1,0 +1,95 @@
+{
+ "case": "case-11-bundle-relocate",
+ "scenario": "Case 01's finished run is bundled, verified in place, verified again after the bundle directory is copied elsewhere, then verified a third time after one evidence file is deleted from the copy.",
+ "plan": {
+  "checks": {
+   "loadability.masters-and-order": {
+    "applicability": "yes",
+    "status": "planned"
+   },
+   "loadability.dangling-references": {
+    "applicability": "yes",
+    "status": "mcp-only"
+   },
+   "records.cell-attributes": {
+    "applicability": "yes",
+    "status": "mcp-only"
+   },
+   "geometry.navmesh-ownership": {
+    "applicability": "yes",
+    "status": "planned"
+   },
+   "geometry.object-overlap": {
+    "applicability": "yes",
+    "status": "planned"
+   },
+   "geometry.placement-contact": {
+    "applicability": "yes",
+    "status": "planned"
+   },
+   "geometry.bos-overlay": {
+    "applicability": "no",
+    "status": "not-applicable"
+   },
+   "functional.linked-dependencies": {
+    "applicability": "unknown",
+    "status": "planned"
+   },
+   "state.switch-census": {
+    "applicability": "yes",
+    "status": "planned"
+   },
+   "state.conditional-geometry": {
+    "applicability": "yes",
+    "status": "planned"
+   },
+   "functional.collective-route-connectivity": {
+    "applicability": "yes",
+    "status": "unsupported"
+   },
+   "environment.generated-output-regeneration": {
+    "applicability": "yes",
+    "status": "manual"
+   },
+   "patch.author-advice": {
+    "applicability": "yes",
+    "status": "planned"
+   },
+   "patch.order-evaluation": {
+    "applicability": "yes",
+    "status": "planned"
+   },
+   "runtime.supplied-observations": {
+    "applicability": "yes",
+    "status": "planned"
+   }
+  }
+ },
+ "ledger": {},
+ "disposition": {
+  "verifySteps": [
+   {
+    "step": "in-place",
+    "exit": 0,
+    "bundleComplete": true
+   },
+   {
+    "step": "relocated",
+    "exit": 0,
+    "bundleComplete": true
+   },
+   {
+    "step": "file-deleted",
+    "exit": 3,
+    "bundleComplete": false,
+    "listsMissingFile": true
+   }
+  ],
+  "excludedSaysBinaries": true,
+  "noPluginBinariesInBundle": true
+ },
+ "verifyBundleExit": 0,
+ "notes": [
+  "D8: a relocated bundle validates identically; a missing or mismatched file -> exit 3 and bundle.complete false listing them; never a plugin or asset binary."
+ ]
+}

@@ -1,0 +1,217 @@
+{
+ "case": "case-01-geometry-and-quest",
+ "scenario": "A target carrying NAVM/REFR/CELL/QUST, interior and exterior placements, masters and a nexusId; scope complete with `overlays` under unmeasured. Arms baseline + candidate-01-reorder; every fake probe ok; the candidate arm emits exactly the baseline's rows.",
+ "plan": {
+  "checks": {
+   "loadability.masters-and-order": {
+    "applicability": "yes",
+    "status": "planned"
+   },
+   "loadability.dangling-references": {
+    "applicability": "yes",
+    "status": "mcp-only"
+   },
+   "records.cell-attributes": {
+    "applicability": "yes",
+    "status": "mcp-only"
+   },
+   "geometry.navmesh-ownership": {
+    "applicability": "yes",
+    "status": "planned"
+   },
+   "geometry.object-overlap": {
+    "applicability": "yes",
+    "status": "planned"
+   },
+   "geometry.placement-contact": {
+    "applicability": "yes",
+    "status": "planned"
+   },
+   "geometry.bos-overlay": {
+    "applicability": "no",
+    "status": "not-applicable"
+   },
+   "functional.linked-dependencies": {
+    "applicability": "unknown",
+    "status": "planned"
+   },
+   "state.switch-census": {
+    "applicability": "yes",
+    "status": "planned"
+   },
+   "state.conditional-geometry": {
+    "applicability": "yes",
+    "status": "planned"
+   },
+   "functional.collective-route-connectivity": {
+    "applicability": "yes",
+    "status": "unsupported"
+   },
+   "environment.generated-output-regeneration": {
+    "applicability": "yes",
+    "status": "manual"
+   },
+   "patch.author-advice": {
+    "applicability": "yes",
+    "status": "planned"
+   },
+   "patch.order-evaluation": {
+    "applicability": "yes",
+    "status": "planned"
+   },
+   "runtime.supplied-observations": {
+    "applicability": "yes",
+    "status": "planned"
+   }
+  }
+ },
+ "ledger": {
+  "geometry.navmesh-ownership__baseline__arm": {
+   "execution": "completed",
+   "detector": "finding",
+   "rejection": null
+  },
+  "geometry.navmesh-ownership__candidate-01-reorder__arm": {
+   "execution": "completed",
+   "detector": "finding",
+   "rejection": null
+  },
+  "geometry.navmesh-ownership__candidate-01-reorder__reverse": {
+   "execution": "completed",
+   "detector": null,
+   "rejection": null
+  },
+  "geometry.navmesh-ownership__candidate-01-reorder__diff": {
+   "execution": "completed",
+   "detector": null,
+   "rejection": null
+  },
+  "geometry.object-overlap__baseline__arm": {
+   "execution": "completed",
+   "detector": "finding",
+   "rejection": null
+  },
+  "geometry.object-overlap__candidate-01-reorder__arm": {
+   "execution": "completed",
+   "detector": "finding",
+   "rejection": null
+  },
+  "geometry.object-overlap__candidate-01-reorder__reverse": {
+   "execution": "completed",
+   "detector": null,
+   "rejection": null
+  },
+  "geometry.object-overlap__candidate-01-reorder__diff": {
+   "execution": "completed",
+   "detector": null,
+   "rejection": null
+  },
+  "geometry.placement-contact__baseline__arm": {
+   "execution": "completed",
+   "detector": "finding",
+   "rejection": null
+  },
+  "geometry.placement-contact__candidate-01-reorder__arm": {
+   "execution": "completed",
+   "detector": "finding",
+   "rejection": null
+  },
+  "geometry.placement-contact__candidate-01-reorder__reverse": {
+   "execution": "completed",
+   "detector": null,
+   "rejection": null
+  },
+  "geometry.placement-contact__candidate-01-reorder__diff": {
+   "execution": "completed",
+   "detector": null,
+   "rejection": null
+  },
+  "loadability.masters-and-order__baseline": {
+   "execution": "completed",
+   "detector": null,
+   "rejection": null
+  },
+  "state.switch-census__baseline": {
+   "execution": "completed",
+   "detector": "catalogue",
+   "rejection": null
+  },
+  "patch.author-advice__baseline": {
+   "execution": "completed",
+   "detector": "catalogue",
+   "rejection": null
+  },
+  "patch.order-evaluation__baseline": {
+   "execution": "not-applicable",
+   "detector": null,
+   "rejection": null
+  },
+  "patch.order-evaluation__candidate-01-reorder": {
+   "execution": "completed",
+   "detector": null,
+   "rejection": null
+  },
+  "loadability.dangling-references__baseline": {
+   "execution": "mcp-only",
+   "detector": null,
+   "rejection": null
+  },
+  "records.cell-attributes__baseline": {
+   "execution": "mcp-only",
+   "detector": null,
+   "rejection": null
+  },
+  "geometry.bos-overlay__baseline": {
+   "execution": "not-applicable",
+   "detector": null,
+   "rejection": null
+  },
+  "functional.collective-route-connectivity__baseline": {
+   "execution": "unsupported",
+   "detector": null,
+   "rejection": null
+  }
+ },
+ "disposition": {
+  "complete": false,
+  "claim": "incomplete",
+  "missingIncludes": [
+   "loadability.dangling-references",
+   "records.cell-attributes",
+   "functional.collective-route-connectivity",
+   "environment.generated-output-regeneration",
+   "functional.linked-dependencies"
+  ],
+  "missingExcludes": [
+   "loadability.masters-and-order",
+   "geometry.navmesh-ownership",
+   "geometry.object-overlap",
+   "geometry.placement-contact",
+   "geometry.bos-overlay",
+   "state.switch-census",
+   "patch.order-evaluation"
+  ],
+  "unknownApplicability": [
+   "functional.linked-dependencies"
+  ],
+  "arms": {
+   "candidate-01-reorder": {
+    "classification": "PASSES-COMPLETED-CHECKS",
+    "regression": false,
+    "probes": [
+     "navownprobe",
+     "overlapprobe",
+     "contactprobe"
+    ]
+   }
+  },
+  "statesNotExploredNonEmpty": null
+ },
+ "verifyBundleExit": 0,
+ "notes": [
+  "D7: unsupported/mcp-only/manual keep complete false and are listed under missing.",
+  "D1: unknown never becomes no; listed under unknownApplicability.",
+  "conflictdiff verdict on each candidate arm: DIFFERENTIAL-INERT (identical rows, non-empty config delta).",
+  "PLAN A-6: a census or discovery listing is detector `catalogue` - it satisfies completion, is listed under evaluation.completedCatalogues, and is never a finding or a null check."
+ ]
+}

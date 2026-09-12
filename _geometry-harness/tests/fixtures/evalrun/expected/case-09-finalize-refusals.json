@@ -1,0 +1,95 @@
+{
+ "case": "case-09-finalize-refusals",
+ "scenario": "A finished run directory copied three times and damaged once each: the registry file edited; one receipt deleted; one receipt's planId rewritten.",
+ "plan": {
+  "checks": {
+   "loadability.masters-and-order": {
+    "applicability": "yes",
+    "status": "planned"
+   },
+   "loadability.dangling-references": {
+    "applicability": "yes",
+    "status": "mcp-only"
+   },
+   "records.cell-attributes": {
+    "applicability": "yes",
+    "status": "mcp-only"
+   },
+   "geometry.navmesh-ownership": {
+    "applicability": "yes",
+    "status": "planned"
+   },
+   "geometry.object-overlap": {
+    "applicability": "yes",
+    "status": "planned"
+   },
+   "geometry.placement-contact": {
+    "applicability": "yes",
+    "status": "planned"
+   },
+   "geometry.bos-overlay": {
+    "applicability": "no",
+    "status": "not-applicable"
+   },
+   "functional.linked-dependencies": {
+    "applicability": "unknown",
+    "status": "planned"
+   },
+   "state.switch-census": {
+    "applicability": "yes",
+    "status": "planned"
+   },
+   "state.conditional-geometry": {
+    "applicability": "yes",
+    "status": "planned"
+   },
+   "functional.collective-route-connectivity": {
+    "applicability": "yes",
+    "status": "unsupported"
+   },
+   "environment.generated-output-regeneration": {
+    "applicability": "yes",
+    "status": "manual"
+   },
+   "patch.author-advice": {
+    "applicability": "yes",
+    "status": "planned"
+   },
+   "patch.order-evaluation": {
+    "applicability": "yes",
+    "status": "planned"
+   },
+   "runtime.supplied-observations": {
+    "applicability": "yes",
+    "status": "planned"
+   }
+  }
+ },
+ "ledger": {},
+ "disposition": {
+  "refusals": [
+   {
+    "damage": "registry-edited",
+    "finalizeExit": 3,
+    "cause": "registry-changed",
+    "complete": false
+   },
+   {
+    "damage": "receipt-deleted",
+    "finalizeExit": 3,
+    "cause": "receipt-missing",
+    "complete": false
+   },
+   {
+    "damage": "foreign-planid",
+    "finalizeExit": 3,
+    "cause": "foreign-run",
+    "complete": false
+   }
+  ]
+ },
+ "verifyBundleExit": null,
+ "notes": [
+  "D7: refusals first (exit 3, complete false with the cause): registry-changed, plan-changed, receipt-missing, foreign-run."
+ ]
+}

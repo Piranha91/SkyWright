@@ -1,0 +1,1196 @@
+{
+  "schemaVersion": 1,
+  "registryVersion": 1,
+  "skill": "world-edit-compatibility",
+  "generatedUtc": "2026-09-12T19:05:00Z",
+  "about": "The checklist a world-edit compatibility evaluation must account for (Q42, roadmap 4.23). Domain knowledge only: which families exist, what each check is about, what it may claim and where it stops. The controller (_geometry-harness/evalrun.py) reads it through _geometry-harness/evalregistry.py and never decides applicability itself. Triggers name record-type families as DOMAIN knowledge; what a target actually contains comes from scopeprobe, by construction, out of Mutagen's own record enumeration. Check ids are stable: retired, never renamed.",
+  "notes": {
+    "recordTypeKeys": "anyType operands are the four-character record type signatures scopeprobe keys `recordTypes` by; the Mutagen registration class name travels beside each count as `className`.",
+    "adapterArgs": "adapter.args is the argv shape the check needs, with placeholders the controller fills: {order} {emit} {base} {json} {target} {switchMap} {pair} {nexusId} {out}. For kind ordersweep-probe the shape is what ordersweep.py hands the probe; the controller passes the exe name to `ordersweep.py --probes`, it does not spawn the probe itself.",
+    "claimRows": "evidence.claim names the row in _claude/GlobalDocs/CLAIMS.md a finding reports under. null means the ledger has no row for this check; evidence.limits then says why, and a finding from it is never upgraded to a ledger claim.",
+    "unmeasuredExtents": "scope.json's `unmeasured` is a list of {extent, why} over the closed vocabulary script-placement, alias-fill, bos-swaps, asset-replacers, door-destinations, generated-output (PLAN amendment A-1). A check may declare applicability.dependsOnExtents naming any of them; evalregistry then answers unknown whenever the scope lists one, whatever the trigger says.",
+    "triggerFields": "Each trigger key reads one scope field and nothing else: placed -> placed.total, exterior -> placed.exterior, land -> placed.land, navmesh -> placed.navm, anyType -> recordTypes, overlays -> configuration.overlays, nexusId -> nexusId, masters -> masters; always reads nothing.",
+    "adapterResult": "A-6: a check whose adapter output is json or text carries adapter.result {kind, findings, judged, unjudgeable}. A spec is a dotted path into the child's JSON output (a number is that number, a list is its length) or regex:<pattern> with a named group `n` over the child's log. A null spec means the probe prints no such count -- adapter.result.note says so, and the controller records the gap rather than reading a number that means something else. kind detector reads finding when findings > 0, else no-finding; catalogue and discovery read catalogue. scopeprobe is excepted (D2's `complete` field). A kind that runs no child (derived, media, mcp-only, manual, unsupported) has output null: there is no child output to read.",
+    "commonFlags": "A-10(b): --instance/--profile/--game are passed only where adapter.commonFlags is true. blockprobe, patchprobe, fomodprobe and poolprobe parse no --instance at all (grepped) and find the instance through HarnessTarget, which reads HOUSECARL_MO2_INSTANCE / HOUSECARL_MO2_PROFILE / HOUSECARL_GAME_PATH from the environment every child gets. A placeholder is substituted in the shape the args give it: a bare {target} is positional, --target {target} is a flag.",
+    "population": "A-10(d)/A-11(d): adapter.population / adapter.state name the population a probe's emit actually declares when it is not the arm's, so the receipt validator compares the emit against the probe's own words rather than the plan's. Three probes differ, each for the same reason -- their population is not placed references: driftprobe (placement history), seamprobe (LAND heightmaps) and waterprobe (CELL water records). navownprobe, overlapprobe, contactprobe and stateprobe emit load-time/baseline and declare nothing."
+  },
+  "families": [
+    {
+      "id": "loadability",
+      "title": "Loadability and data integrity",
+      "packetRow": "Loadability/data integrity"
+    },
+    {
+      "id": "records",
+      "title": "Record semantics",
+      "packetRow": "Record semantics"
+    },
+    {
+      "id": "geometry",
+      "title": "Effective geometry and placement",
+      "packetRow": "Effective geometry and placement"
+    },
+    {
+      "id": "functional",
+      "title": "Functional behaviour",
+      "packetRow": "Functional and state-dependent behavior"
+    },
+    {
+      "id": "state",
+      "title": "State-dependent behaviour",
+      "packetRow": "Functional and state-dependent behavior"
+    },
+    {
+      "id": "environment",
+      "title": "Environmental boundaries",
+      "packetRow": "Environmental boundaries"
+    },
+    {
+      "id": "patch",
+      "title": "Patch and order evaluation",
+      "packetRow": "Patch/order evaluation"
+    },
+    {
+      "id": "runtime",
+      "title": "Runtime and presentation evidence",
+      "packetRow": "Runtime/presentation evidence"
+    }
+  ],
+  "checks": [
+    {
+      "id": "loadability.masters-and-order",
+      "family": "loadability",
+      "title": "The target's masters resolve and the evaluated order is one the engine would load",
+      "required": true,
+      "applicability": {
+        "trigger": {
+          "always": true
+        },
+        "note": "Every arm is an order, and an order the engine would refuse has no findings worth reading. scopeprobe resolves the configuration through HarnessOrderCli, which refuses a plugin ahead of its master, an absent master or a non-master ahead of a master-flagged plugin; on an arm that refusal IS this check's finding."
+      },
+      "prerequisites": [],
+      "inputs": {
+        "arms": "all",
+        "states": "baseline"
+      },
+      "adapter": {
+        "kind": "scopeprobe",
+        "exe": "scopeprobe",
+        "args": [
+          "--order",
+          "{order}",
+          "--json",
+          "{json}"
+        ],
+        "reverse": false,
+        "output": "json",
+        "commonFlags": true
+      },
+      "evidence": {
+        "strength": "record-fact",
+        "claim": null,
+        "limits": "The claim ledger has no row for loadability: it is a record fact read off the plugin headers and the resolver's own refusal rules, not a detector class with a floor and a control. It says the order loads and what it contains; it says nothing about whether the content is compatible."
+      },
+      "manualDecisionAllowed": false
+    },
+    {
+      "id": "loadability.dangling-references",
+      "family": "loadability",
+      "title": "References, links and record integrity errors across the winning order",
+      "required": true,
+      "applicability": {
+        "trigger": {
+          "masters": true
+        },
+        "note": "A plugin with masters can name a record a master no longer defines; a master-less plugin defines everything it points at, so there is nothing to dangle."
+      },
+      "prerequisites": [
+        "loadability.masters-and-order"
+      ],
+      "inputs": {
+        "arms": "all",
+        "states": "baseline"
+      },
+      "adapter": {
+        "kind": "mcp-only",
+        "exe": null,
+        "args": [],
+        "reverse": false,
+        "output": null
+      },
+      "evidence": {
+        "strength": "record-fact",
+        "claim": null,
+        "limits": "No CLI adapter. The capability is the MCP tool housecarl_check_errors, which the controller cannot call: it is served by the in-process MCP server, not by a harness binary. The check therefore stays unsupported for the runner and keeps the evaluation incomplete until a human runs the tool and files a decision, which this check does not admit."
+      },
+      "manualDecisionAllowed": false,
+      "unsupportedReason": "housecarl_check_errors is an MCP tool with no command-line entry point; evalrun composes processes, not MCP verbs."
+    },
+    {
+      "id": "loadability.missing-assets",
+      "family": "loadability",
+      "title": "Meshes, textures and other assets the target's records name but the asset view does not provide",
+      "required": true,
+      "applicability": {
+        "trigger": {
+          "always": true
+        },
+        "note": "Any plugin can name an asset path; a record-free asset replacer can also remove one. Nothing in the footprint can rule this out, so it always applies."
+      },
+      "prerequisites": [
+        "loadability.masters-and-order"
+      ],
+      "inputs": {
+        "arms": "all",
+        "states": "baseline"
+      },
+      "adapter": {
+        "kind": "mcp-only",
+        "exe": null,
+        "args": [],
+        "reverse": false,
+        "output": null
+      },
+      "evidence": {
+        "strength": "record-fact",
+        "claim": null,
+        "limits": "No CLI adapter. The capability is the MCP tool housecarl_asset_status. scopeprobe lists the model paths the target's records carry (count, first 50) but does not resolve them against the VFS, so an ESP-only arm's missing meshes stay a stated limit of the arm, not a measured finding."
+      },
+      "manualDecisionAllowed": false,
+      "unsupportedReason": "housecarl_asset_status is an MCP tool with no command-line entry point."
+    },
+    {
+      "id": "records.contested-fields",
+      "family": "records",
+      "title": "Fields that actually differ between the winner and the records it overrides",
+      "required": true,
+      "applicability": {
+        "trigger": {
+          "masters": true
+        },
+        "note": "A record can only be contested where another plugin defined it, which needs a master. A plugin with no masters adds records nobody else has yet."
+      },
+      "prerequisites": [
+        "loadability.masters-and-order"
+      ],
+      "inputs": {
+        "arms": "all",
+        "states": "baseline"
+      },
+      "adapter": {
+        "kind": "mcp-only",
+        "exe": null,
+        "args": [],
+        "reverse": false,
+        "output": null
+      },
+      "evidence": {
+        "strength": "record-fact",
+        "claim": null,
+        "limits": "No CLI adapter. The capability is housecarl_cross_plugin_query plus housecarl_diff_record, read under the merge rules the world-edit-compatibility skill states (Skyrim is not uniformly winner-takes-all, and diffing runtime-merged subrecords reports noise as findings). orderprobe measures CONTENTION — how many records a pair contests — which is not the same question and never substitutes for it."
+      },
+      "manualDecisionAllowed": false,
+      "unsupportedReason": "housecarl_cross_plugin_query and housecarl_diff_record are MCP tools with no command-line entry point."
+    },
+    {
+      "id": "records.cell-attributes",
+      "family": "records",
+      "title": "CELL attributes a later plugin restates: lighting, water height, music, flags, encounter zone",
+      "required": true,
+      "applicability": {
+        "trigger": {
+          "anyType": [
+            "CELL"
+          ]
+        },
+        "note": "A CELL record in the target is the only way it can restate a cell's own attributes. Placing something in a cell carries the CELL record as a container, so this trigger fires on the container too — deliberately: the container's own fields are exactly what gets restated by accident."
+      },
+      "prerequisites": [
+        "loadability.masters-and-order"
+      ],
+      "inputs": {
+        "arms": "all",
+        "states": "baseline"
+      },
+      "adapter": {
+        "kind": "mcp-only",
+        "exe": null,
+        "args": [],
+        "reverse": false,
+        "output": null
+      },
+      "evidence": {
+        "strength": "record-fact",
+        "claim": null,
+        "limits": "No CLI adapter; the same MCP record tools as records.contested-fields. waterprobe covers the CELL water tuple at a worldspace boundary only (environment.water-boundaries) — it is not a general CELL attribute reader."
+      },
+      "manualDecisionAllowed": false,
+      "unsupportedReason": "the CELL attribute comparison is served by the MCP record tools, which have no command-line entry point."
+    },
+    {
+      "id": "records.registration-and-dialogue",
+      "family": "records",
+      "title": "Quest, dialogue and registration data: FLST membership, LCTN keywords, story-manager nodes, the dialogue graph",
+      "required": true,
+      "applicability": {
+        "trigger": {
+          "anyType": [
+            "QUST",
+            "DIAL",
+            "INFO",
+            "SCEN",
+            "FLST",
+            "LCTN",
+            "SMQN",
+            "SMBN",
+            "SMEN",
+            "PACK"
+          ]
+        },
+        "note": "These are the record kinds that carry registration and dialogue wiring. Naming them is domain knowledge; whether the target has any is scopeprobe's measurement. A winning topic silently drops any line it does not re-list, and a form list a patch restates loses the other mod's members, so the presence of any one of these types is enough to need the check."
+      },
+      "prerequisites": [
+        "loadability.masters-and-order"
+      ],
+      "inputs": {
+        "arms": "all",
+        "states": "baseline"
+      },
+      "adapter": {
+        "kind": "mcp-only",
+        "exe": null,
+        "args": [],
+        "reverse": false,
+        "output": null
+      },
+      "evidence": {
+        "strength": "record-fact",
+        "claim": null,
+        "limits": "No CLI adapter. housecarl_validate_dialogue validates the dialogue graph; the FLST / LCTN / SMQN membership rules are read with the record tools under the skill's merge semantics. driftprobe's SPLIT class (functional.quest-alias-split) covers alias geometry, not registration data."
+      },
+      "manualDecisionAllowed": false,
+      "unsupportedReason": "housecarl_validate_dialogue and the record query tools are MCP tools with no command-line entry point."
+    },
+    {
+      "id": "geometry.navmesh-ownership",
+      "family": "geometry",
+      "title": "Navmesh edits discarded by a later plugin, and the integrity of the winning mesh's links",
+      "required": true,
+      "applicability": {
+        "trigger": {
+          "anyOf": [
+            {
+              "navmesh": true
+            },
+            {
+              "placed": true
+            }
+          ]
+        },
+        "note": "A target that cuts navmesh can discard another plugin's cut; a target that only places references can still be the later plugin whose re-cut discards one, and its own placements are the UNCUT census's population. Either footprint needs the check."
+      },
+      "prerequisites": [
+        "loadability.masters-and-order"
+      ],
+      "inputs": {
+        "arms": "all",
+        "states": "baseline"
+      },
+      "adapter": {
+        "kind": "ordersweep-probe",
+        "exe": "navownprobe",
+        "args": [
+          "--order",
+          "{order}",
+          "--emit",
+          "{emit}",
+          "--base",
+          "{base}"
+        ],
+        "reverse": true,
+        "output": "conflict-file",
+        "commonFlags": true
+      },
+      "evidence": {
+        "strength": "calibrated-inference",
+        "claim": "CLOBBERED (with DANGLE / EDGE-IDX and UNCUT); DOOR-IDX is retired and off unless --door-idx is passed",
+        "limits": "CLOBBERED reports a LOST EDIT, never broken pathing; a row Holds on the 120 u victim-only-ground predicate and becomes a finding only with a witness. Connectivity is the selector's stated blind spot both ways. UNCUT is a census, not a verdict. Class A (Bethesda-on-Bethesda) is withheld."
+      },
+      "manualDecisionAllowed": false
+    },
+    {
+      "id": "geometry.object-overlap",
+      "family": "geometry",
+      "title": "References placed or moved into another plugin's reference",
+      "required": true,
+      "applicability": {
+        "trigger": {
+          "placed": true
+        },
+        "note": "The population is placed references; a target that files nothing under a cell cannot introduce an intersection."
+      },
+      "prerequisites": [
+        "loadability.masters-and-order"
+      ],
+      "inputs": {
+        "arms": "all",
+        "states": "baseline"
+      },
+      "adapter": {
+        "kind": "ordersweep-probe",
+        "exe": "overlapprobe",
+        "args": [
+          "--order",
+          "{order}",
+          "--emit",
+          "{emit}",
+          "--base",
+          "{base}"
+        ],
+        "reverse": true,
+        "output": "conflict-file",
+        "commonFlags": true
+      },
+      "evidence": {
+        "strength": "calibrated-inference",
+        "claim": "OVERLAP — Introduced + Blind",
+        "limits": "Depth >= 16 u and >= 0.25 of the smaller box; the population is the LOAD-TIME enable state (Q27's R1 rule), not the record's own initially-disabled flag. Introduced-vs-Inherited rests on a counterfactual arm, and a same-author intersection is not a defect."
+      },
+      "manualDecisionAllowed": false
+    },
+    {
+      "id": "geometry.placement-contact",
+      "family": "geometry",
+      "title": "Dependents left touching nothing after a later plugin moved their host",
+      "required": true,
+      "applicability": {
+        "trigger": {
+          "placed": true
+        },
+        "note": "The population is placed references and the surfaces they rest on; nothing filed under a cell means no contact to break."
+      },
+      "prerequisites": [
+        "loadability.masters-and-order"
+      ],
+      "inputs": {
+        "arms": "all",
+        "states": "baseline"
+      },
+      "adapter": {
+        "kind": "ordersweep-probe",
+        "exe": "contactprobe",
+        "args": [
+          "--order",
+          "{order}",
+          "--emit",
+          "{emit}",
+          "--base",
+          "{base}"
+        ],
+        "reverse": true,
+        "output": "conflict-file",
+        "commonFlags": true
+      },
+      "evidence": {
+        "strength": "calibrated-inference",
+        "claim": "STRANDED / ORPHANED (Fixed)",
+        "limits": "Fixed dependents only, judged within epsilon against the arm's own load-time enable state per arm. A dependent that was never touching as authored is out of the population."
+      },
+      "manualDecisionAllowed": false
+    },
+    {
+      "id": "geometry.declared-dependencies",
+      "family": "geometry",
+      "title": "Declared host edges (XESP / XLKR / XAPR) over the movement census",
+      "required": false,
+      "applicability": {
+        "trigger": {
+          "placed": true
+        },
+        "note": "Declared edges exist only between placed references."
+      },
+      "prerequisites": [
+        "loadability.masters-and-order"
+      ],
+      "inputs": {
+        "arms": "all",
+        "states": "baseline"
+      },
+      "adapter": {
+        "kind": "probe-json",
+        "exe": "depprobe",
+        "args": [
+          "--order",
+          "{order}",
+          "--json",
+          "{json}"
+        ],
+        "reverse": false,
+        "output": "json",
+        "result": {
+          "kind": "catalogue",
+          "findings": "verdicts.LeftBehind",
+          "judged": "hostEnableState.edgesJudged",
+          "unjudgeable": "verdicts.Unjudgeable"
+        },
+        "commonFlags": true
+      },
+      "evidence": {
+        "strength": "record-fact",
+        "claim": "DECLARED EDGES",
+        "limits": "A measured null, catalogue status: the declared slice of the movement census has produced no finding class. Optional, and a null result here says nothing about undeclared dependencies, which geometry.placement-contact measures physically."
+      },
+      "manualDecisionAllowed": false
+    },
+    {
+      "id": "geometry.bos-overlay",
+      "family": "geometry",
+      "title": "Base Object Swapper layer: which bases the game actually loads for the target's references",
+      "required": true,
+      "applicability": {
+        "trigger": {
+          "overlays": true
+        },
+        "note": "The configuration identity lists the *_SWAP.ini overlays it read. With no overlay there is no swap layer to account for; with one, every geometry answer is computed over swapped bases and the swap set is part of what a receipt consumed."
+      },
+      "prerequisites": [
+        "loadability.masters-and-order"
+      ],
+      "inputs": {
+        "arms": "all",
+        "states": "baseline"
+      },
+      "adapter": {
+        "kind": "probe-json",
+        "exe": "bosprobe",
+        "args": [
+          "--order",
+          "{order}",
+          "--json",
+          "{json}"
+        ],
+        "reverse": false,
+        "output": "json",
+        "result": {
+          "kind": "catalogue",
+          "findings": "rows",
+          "judged": "plugins",
+          "unjudgeable": null,
+          "note": "bosprobe's --json carries profile, plugins, inis and rows and no unjudgeable count; the lines the reader could not read as written are printed by --anomalies and are not in the file, so the spec is null rather than a number read off something else."
+        },
+        "commonFlags": true
+      },
+      "evidence": {
+        "strength": "record-fact",
+        "claim": null,
+        "limits": "No ledger row of its own: bosprobe is the reader the geometry probes apply, not a detector class. What it reports is which base each reference resolves to and which ini lines it could not read as written; those anomalies are the finding. Runtime BOS behaviour beyond the ini semantics is unmeasured."
+      },
+      "manualDecisionAllowed": false
+    },
+    {
+      "id": "geometry.route-cut",
+      "family": "geometry",
+      "title": "Placed objects standing across a corridor's path line",
+      "required": true,
+      "applicability": {
+        "trigger": {
+          "placed": true
+        },
+        "note": "The population is the target's own placed obstacles against the corridors of the cells it stands in."
+      },
+      "prerequisites": [
+        "loadability.masters-and-order"
+      ],
+      "inputs": {
+        "arms": "baseline",
+        "states": "baseline"
+      },
+      "adapter": {
+        "kind": "probe-target",
+        "exe": "blockprobe",
+        "args": [
+          "{target}"
+        ],
+        "reverse": false,
+        "output": "text",
+        "result": {
+          "kind": "detector",
+          "findings": null,
+          "judged": "regex:rule comparison, all on the same (?P<n>[\\d,]+) references",
+          "unjudgeable": "regex:navmesh triangles that could not be judged \\(inset consumed them\\): (?P<n>[\\d,]+)",
+          "note": "blockprobe prints its route-cut verdicts as a per-reference listing with no total line, so findings has no spec to read; the count must come from the listing or from a --json blockprobe does not have. Named here rather than matched out of a line that means something else."
+        },
+        "commonFlags": false
+      },
+      "evidence": {
+        "strength": "calibrated-inference",
+        "claim": "ROUTE CUT",
+        "limits": "blockprobe takes the target plugin positionally and has no --order, so it evaluates the PROFILE's order only: on every candidate or supplied-combination arm this check is unsupported-for-arm, visibly, and the baseline result must not be read as covering them. Q30's fold applies: a single object's clearance, not collective blockage."
+      },
+      "manualDecisionAllowed": false
+    },
+    {
+      "id": "functional.quest-alias-split",
+      "family": "functional",
+      "title": "Quest aliases authored together that the winning order pulls apart",
+      "required": true,
+      "applicability": {
+        "trigger": {
+          "anyType": [
+            "QUST",
+            "SCEN",
+            "PACK",
+            "ACHR",
+            "REFR"
+          ]
+        },
+        "note": "Aliases, scenes and packages are the wiring a split breaks, and an ACHR/REFR move is how it gets broken. Naming these kinds is domain knowledge; whether the target has any is scopeprobe's measurement."
+      },
+      "prerequisites": [
+        "loadability.masters-and-order"
+      ],
+      "inputs": {
+        "arms": "all",
+        "states": "baseline"
+      },
+      "adapter": {
+        "kind": "probe-emit",
+        "exe": "driftprobe",
+        "args": [
+          "--order",
+          "{order}",
+          "--emit",
+          "{emit}"
+        ],
+        "reverse": false,
+        "output": "conflict-file",
+        "commonFlags": true,
+        "population": "n/a (placement history; no enable-state filter)",
+        "state": "n/a"
+      },
+      "evidence": {
+        "strength": "calibrated-inference",
+        "claim": "SPLIT",
+        "limits": "driftprobe has no --base, so there is no reverse arm and no physical differential credit for this class: a candidate's rows are compared as rows, and a repaired SPLIT cannot be credited the way conflictdiff credits a physical predicate. Aliases together at authoring means <= 600 u and the same cell; both actors' governing packages must be editor-anchored."
+      },
+      "manualDecisionAllowed": false
+    },
+    {
+      "id": "functional.linked-dependencies",
+      "family": "functional",
+      "title": "What the target reaches outside its own cells: door destinations, neighbouring cells, outbound links",
+      "required": true,
+      "applicability": {
+        "trigger": {
+          "placed": true
+        },
+        "note": "Cell overlap alone cannot exclude cross-cell, asset or linked dependencies (packet outcome 1). Anything filed under a cell can reach outside it, so the expansion must be accounted for. It declares dependsOnExtents on the four extents scopeprobe always states as unmeasured, so its applicability is UNKNOWN on every scope today -- the visible \"unknown dependency extent\" the packet asks for, rather than a quiet yes over an extent nothing measured.",
+        "dependsOnExtents": [
+          "script-placement",
+          "alias-fill",
+          "bos-swaps",
+          "asset-replacers"
+        ]
+      },
+      "prerequisites": [
+        "loadability.masters-and-order"
+      ],
+      "inputs": {
+        "arms": "all",
+        "states": "baseline"
+      },
+      "adapter": {
+        "kind": "derived",
+        "exe": null,
+        "args": [],
+        "reverse": false,
+        "output": null
+      },
+      "evidence": {
+        "strength": "record-fact",
+        "claim": null,
+        "limits": "Derived from scope.expansion: the four-neighbour exterior cells, the resolved door destinations with their unresolved count, and the outbound form links by master. It is an EXTENT, not a verdict — it says where the evaluation would have to look, and the unresolved destinations plus the stated unmeasured extents are exactly what it cannot close."
+      },
+      "manualDecisionAllowed": false
+    },
+    {
+      "id": "functional.collective-route-connectivity",
+      "family": "functional",
+      "title": "Whether the surviving navigable surface still connects the places actors must reach",
+      "required": true,
+      "applicability": {
+        "trigger": {
+          "anyOf": [
+            {
+              "navmesh": true
+            },
+            {
+              "placed": true
+            }
+          ]
+        },
+        "note": "Any navmesh edit or placed obstacle can take part in a collective blockage; no footprint short of an empty one rules it out."
+      },
+      "prerequisites": [
+        "loadability.masters-and-order"
+      ],
+      "inputs": {
+        "arms": "all",
+        "states": "baseline"
+      },
+      "adapter": {
+        "kind": "unsupported",
+        "exe": null,
+        "args": [],
+        "reverse": false,
+        "output": null
+      },
+      "evidence": {
+        "strength": "calibrated-inference",
+        "claim": "CLOBBERED (its stated blind spot) and ROUTE CUT (Q30's fold)",
+        "limits": "Open research limit, not an adapter gap. Both existing route classes judge one object or one lost edit at a time: CLOBBERED names connectivity as its selector's blind spot in both directions, and ROUTE CUT was folded to a single object's clearance. Nothing measures whether several individually-passable changes jointly cut a route. Required, and therefore keeps every evaluation of a geometry target incomplete — which is the honest state."
+      },
+      "manualDecisionAllowed": false,
+      "unsupportedReason": "no detector measures collective route connectivity; it is an open limit in the claim ledger and this packet does not reopen detector research."
+    },
+    {
+      "id": "state.switch-census",
+      "family": "state",
+      "title": "The enable markers, their member sets and their triggers in the target's cells",
+      "required": true,
+      "applicability": {
+        "trigger": {
+          "placed": true
+        },
+        "note": "A switch is an enable-parent relationship between placed references; the census is over the cells the target files things in."
+      },
+      "prerequisites": [
+        "loadability.masters-and-order"
+      ],
+      "inputs": {
+        "arms": "all",
+        "states": "baseline"
+      },
+      "adapter": {
+        "kind": "probe-json",
+        "exe": "switchprobe",
+        "args": [
+          "--order",
+          "{order}",
+          "--json",
+          "{json}"
+        ],
+        "reverse": false,
+        "output": "json",
+        "result": {
+          "kind": "catalogue",
+          "findings": "summary.switches",
+          "judged": "plugins",
+          "unjudgeable": "unreadable"
+        },
+        "commonFlags": true
+      },
+      "evidence": {
+        "strength": "record-fact",
+        "claim": "STATE CONDITIONAL (its census half)",
+        "limits": "A census of switches and the triggers bound to them, not a verdict. Its --json output is the --switch-map the state arms consume, and it runs on EVERY arm (about 14 s each on the lab) because a candidate that reorders the plugins can change which switch wins: reusing the baseline's map would judge one arm's states with another arm's census, and running it only on the baseline leaves every candidate's state check blocked for want of a map. A switch whose binding the reader could not read as written is counted as an anomaly, never as absent."
+      },
+      "manualDecisionAllowed": false
+    },
+    {
+      "id": "state.conditional-geometry",
+      "family": "state",
+      "title": "Geometry rows that appear only once an enable marker is flipped",
+      "required": true,
+      "applicability": {
+        "trigger": {
+          "placed": true
+        },
+        "note": "A state-conditional row is a geometry row under a flipped switch; the population is the same placed references, resolved with those switches inverted."
+      },
+      "prerequisites": [
+        "state.switch-census"
+      ],
+      "inputs": {
+        "arms": "all",
+        "states": "selected"
+      },
+      "adapter": {
+        "kind": "probe-emit",
+        "exe": "stateprobe",
+        "args": [
+          "--order",
+          "{order}",
+          "--switch-map",
+          "{switchMap}",
+          "--emit",
+          "{emit}"
+        ],
+        "statesFlag": "--state",
+        "reverse": false,
+        "output": "conflict-file",
+        "commonFlags": true
+      },
+      "evidence": {
+        "strength": "calibrated-inference",
+        "claim": "STATE CONDITIONAL",
+        "limits": "Only the states the plan SELECTED are evaluated; every other state the census named is unexplored and listed as such (PLAN D7's `unassessed`). stateprobe has no --base, so there is no reverse arm and no physical differential credit for a state row. The Bethesda floor is withheld."
+      },
+      "manualDecisionAllowed": false
+    },
+    {
+      "id": "environment.water-boundaries",
+      "family": "environment",
+      "title": "A winning CELL override whose water tuple disagrees with its neighbour at the boundary",
+      "required": true,
+      "applicability": {
+        "trigger": {
+          "anyOf": [
+            {
+              "exterior": true
+            },
+            {
+              "anyType": [
+                "CELL"
+              ]
+            }
+          ]
+        },
+        "note": "The class is about CELL water statements and the seams they make with adjacent cells; either an exterior footprint or a CELL record in the target can produce one."
+      },
+      "prerequisites": [
+        "loadability.masters-and-order"
+      ],
+      "inputs": {
+        "arms": "all",
+        "states": "baseline"
+      },
+      "adapter": {
+        "kind": "ordersweep-probe",
+        "exe": "waterprobe",
+        "args": [
+          "--order",
+          "{order}",
+          "--emit",
+          "{emit}",
+          "--base",
+          "{base}"
+        ],
+        "reverse": true,
+        "output": "conflict-file",
+        "commonFlags": true,
+        "population": "n/a (CELL water records; no placed-reference population)",
+        "state": "n/a"
+      },
+      "evidence": {
+        "strength": "calibrated-inference",
+        "claim": "CELL WATER at the boundary",
+        "limits": "A difference from the last Bethesda/USSEP statement joined to a visible boundary; catalogue status in the ledger. No in-game observation of the water surface is implied."
+      },
+      "manualDecisionAllowed": false
+    },
+    {
+      "id": "environment.land-seams",
+      "family": "environment",
+      "title": "Edge-adjacent cells whose winning heightmaps disagree on a shared vertex",
+      "required": true,
+      "applicability": {
+        "trigger": {
+          "anyOf": [
+            {
+              "land": true
+            },
+            {
+              "exterior": true
+            }
+          ]
+        },
+        "note": "A seam needs a LAND edit, or an exterior footprint whose neighbour carries one. Either is enough to have to look."
+      },
+      "prerequisites": [
+        "loadability.masters-and-order"
+      ],
+      "inputs": {
+        "arms": "all",
+        "states": "baseline"
+      },
+      "adapter": {
+        "kind": "ordersweep-probe",
+        "exe": "seamprobe",
+        "args": [
+          "--order",
+          "{order}",
+          "--emit",
+          "{emit}",
+          "--base",
+          "{base}"
+        ],
+        "reverse": true,
+        "output": "conflict-file",
+        "commonFlags": true,
+        "population": "n/a (LAND heightmaps; no placed-reference population)",
+        "state": "n/a"
+      },
+      "evidence": {
+        "strength": "calibrated-inference",
+        "claim": "LAND SEAM",
+        "limits": "A vertex disagreement beyond epsilon, split Introduced Blind / Seen / Inherited; catalogue status in the ledger. A seam is a step or a gap in the heightmap, not an observed visual defect."
+      },
+      "manualDecisionAllowed": false
+    },
+    {
+      "id": "environment.occlusion",
+      "family": "environment",
+      "title": "Occlusion planes and room/portal evidence at supported scope",
+      "required": false,
+      "applicability": {
+        "trigger": {
+          "placed": true
+        },
+        "note": "Occlusion planes are placed references (base 000017 PlaneMarker); a target that places nothing cannot move one."
+      },
+      "prerequisites": [
+        "loadability.masters-and-order"
+      ],
+      "inputs": {
+        "arms": "baseline",
+        "states": "baseline"
+      },
+      "adapter": {
+        "kind": "unsupported",
+        "exe": null,
+        "args": [],
+        "reverse": false,
+        "output": null
+      },
+      "evidence": {
+        "strength": "engine-observation",
+        "claim": "OCCLUSION PLANES",
+        "limits": "Part D is ACCEPTED at its bounded scope with a constructed positive; no qualifying natural positive was established in the sampled views, and there is no natural-defect detector to run. Optional, because requiring a check nothing can perform would make every evaluation incomplete for a reason no run can resolve. The gap is recorded in `unassessed`, not hidden."
+      },
+      "manualDecisionAllowed": false,
+      "unsupportedReason": "the Part D result is bounded to its constructed positive; no natural-defect occlusion detector exists to adapt."
+    },
+    {
+      "id": "environment.generated-output-regeneration",
+      "family": "environment",
+      "title": "Generated output that must be rebuilt after this change: Occlusion.esp, DynDOLOD, xLODGen, Synthesis, Reqtificator",
+      "required": true,
+      "applicability": {
+        "trigger": {
+          "placed": true
+        },
+        "note": "Generated output is derived from placed geometry; a target that places or moves references invalidates whatever was generated from the old placement. Whether a given tool's output is installed is a fact about the profile, which is why this is a stated need rather than a measurement."
+      },
+      "prerequisites": [
+        "loadability.masters-and-order"
+      ],
+      "inputs": {
+        "arms": "all",
+        "states": "baseline"
+      },
+      "adapter": {
+        "kind": "manual",
+        "exe": null,
+        "args": [],
+        "reverse": false,
+        "output": null
+      },
+      "evidence": {
+        "strength": "record-fact",
+        "claim": null,
+        "limits": "No detector. The regeneration need is a consequence of the change, not a finding about it, and re-running the generators is out of this packet's scope. A decision here records WHICH generated outputs the reviewer judged stale and why; it never asserts that they were regenerated."
+      },
+      "manualDecisionAllowed": true,
+      "unsupportedReason": "regenerating LOD, occlusion and patcher output is outside the controller's scope; the check exists so the need is recorded rather than forgotten."
+    },
+    {
+      "id": "patch.discovery-installed",
+      "family": "patch",
+      "title": "Patches already installed in this instance that cover the target's contested pairs",
+      "required": true,
+      "applicability": {
+        "trigger": {
+          "masters": true
+        },
+        "note": "A patch is a plugin mastering both sides of a pair; with no masters there is no pair to patch."
+      },
+      "prerequisites": [
+        "loadability.masters-and-order"
+      ],
+      "inputs": {
+        "arms": "all",
+        "states": "baseline"
+      },
+      "adapter": {
+        "kind": "patchprobe",
+        "exe": "patchprobe",
+        "args": [
+          "--pair",
+          "{pair}"
+        ],
+        "reverse": false,
+        "output": "text",
+        "result": {
+          "kind": "discovery",
+          "findings": "regex:(?P<n>[\\d,]+) distinct master pairs",
+          "judged": "regex:indexed (?P<n>[\\d,]+) plugins",
+          "unjudgeable": "regex:indexed [\\d,]+ plugins \\((?P<n>[\\d,]+) unreadable\\)"
+        },
+        "commonFlags": false
+      },
+      "evidence": {
+        "strength": "record-fact",
+        "claim": "FOMOD / POOL / PATCH COVERAGE",
+        "limits": "patchprobe has no --json: its output is the console log, which the receipt hashes as text. It runs per ARM because A-10(g) derives its --pair arguments from the arm itself -- the plugin pairs whose relative order flips between the baseline and that candidate -- so a baseline-only run would leave patch.candidate-qualification, which runs on every arm, blocked for want of an input on every candidate. patchprobe itself reads the machine's installed plugins and takes no --order; only the pairs it is asked about change per arm. It searches the configured roots only; roots not configured are sources not searched and are listed as such. A hit is a candidate, never a verified repair."
+      },
+      "manualDecisionAllowed": false
+    },
+    {
+      "id": "patch.discovery-fomod",
+      "family": "patch",
+      "title": "Installer options that fit this order and were not taken",
+      "required": false,
+      "applicability": {
+        "trigger": {
+          "always": true
+        },
+        "note": "Any installed mod may have a FOMOD with an unchosen compatibility option; nothing in the target's footprint predicts it."
+      },
+      "prerequisites": [],
+      "inputs": {
+        "arms": "baseline",
+        "states": "baseline"
+      },
+      "adapter": {
+        "kind": "patchprobe",
+        "exe": "fomodprobe",
+        "args": [],
+        "reverse": false,
+        "output": "text",
+        "result": {
+          "kind": "discovery",
+          "findings": "regex:DISTINCT patches behind the ABSENT findings: (?P<n>[\\d,]+)",
+          "judged": "regex:\\.\\.\\.whose ModuleConfig parsed : (?P<n>[\\d,]+)",
+          "unjudgeable": "regex:\\.\\.\\.whose ModuleConfig parsed : [\\d,]+\\s+\\((?P<n>[\\d,]+) unreadable"
+        },
+        "commonFlags": false
+      },
+      "evidence": {
+        "strength": "record-fact",
+        "claim": "FOMOD / POOL / PATCH COVERAGE",
+        "limits": "fomodprobe has neither --order nor --json: it reads the instance's own installers and prints them, so it runs on the baseline profile only and its receipt hashes the log. Optional, because an unchosen installer option is a lead, not a defect in the evaluated order. Requires the download pool and 7z paths from the harness config; absent, it refuses."
+      },
+      "manualDecisionAllowed": false
+    },
+    {
+      "id": "patch.discovery-pool",
+      "family": "patch",
+      "title": "Downloads in the local pool that were never installed anywhere and whose masters are present",
+      "required": false,
+      "applicability": {
+        "trigger": {
+          "always": true
+        },
+        "note": "The pool is a property of the machine, not of the target; it is searched or it is not."
+      },
+      "prerequisites": [],
+      "inputs": {
+        "arms": "baseline",
+        "states": "baseline"
+      },
+      "adapter": {
+        "kind": "patchprobe",
+        "exe": "poolprobe",
+        "args": [],
+        "reverse": false,
+        "output": "text",
+        "result": {
+          "kind": "discovery",
+          "findings": "regex:\\.\\.\\.and PATCH-SHAPED \\(masters more than vanilla \\+ USSEP\\) : (?P<n>[\\d,]+)",
+          "judged": "regex:pool holds (?P<n>[\\d,]+) archives",
+          "unjudgeable": null,
+          "note": "poolprobe prints no count of archives it could not open; a failed extraction is reported per archive with its reason and never totalled, so the spec is null rather than a number read off something else."
+        },
+        "commonFlags": false
+      },
+      "evidence": {
+        "strength": "record-fact",
+        "claim": "FOMOD / POOL / PATCH COVERAGE",
+        "limits": "poolprobe has neither --order nor --json: baseline profile only, receipt hashes the log. A downloadable hit remains UNQUALIFIED until its actual payload has been evaluated in an arm (patch.candidate-qualification)."
+      },
+      "manualDecisionAllowed": false
+    },
+    {
+      "id": "patch.author-advice",
+      "family": "patch",
+      "title": "The patch author's stated requirements and load order, read off the page",
+      "required": true,
+      "applicability": {
+        "trigger": {
+          "nexusId": true
+        },
+        "note": "Advice is read from a mod page, which needs a Nexus id; scopeprobe reads it from the provider mod folder's meta.ini. No id means no page to read, and that is a measured no, not a skipped check."
+      },
+      "prerequisites": [
+        "loadability.masters-and-order"
+      ],
+      "inputs": {
+        "arms": "baseline",
+        "states": "baseline"
+      },
+      "adapter": {
+        "kind": "adviceprobe",
+        "exe": "adviceprobe",
+        "args": [
+          "--mod",
+          "{nexusId}",
+          "--out",
+          "{out}",
+          "--offline"
+        ],
+        "reverse": false,
+        "output": "json",
+        "result": {
+          "kind": "discovery",
+          "findings": "rules",
+          "judged": "pagesRead",
+          "unjudgeable": "warnings"
+        },
+        "commonFlags": true
+      },
+      "evidence": {
+        "strength": "record-fact",
+        "claim": "PATCH FILE DISCOVERY (its advice half)",
+        "limits": "Run OFFLINE by default here: the stored catalogue copy is read and no network request is made, so the advice is as fresh as its recorded read date and the receipt carries that date. Cached source age is not the date the report was assembled. Per-file requirements are not exposed by the source; the stated order is advice, not a measurement."
+      },
+      "manualDecisionAllowed": false
+    },
+    {
+      "id": "patch.order-evaluation",
+      "family": "patch",
+      "title": "Which of the examined orders passes the checks that were actually run",
+      "required": true,
+      "applicability": {
+        "trigger": {
+          "always": true
+        },
+        "note": "Every evaluation has at least a baseline arm, so there is always an order evaluation to report — even when it reports one arm and no alternative."
+      },
+      "prerequisites": [
+        "loadability.masters-and-order"
+      ],
+      "inputs": {
+        "arms": "all",
+        "states": "baseline"
+      },
+      "adapter": {
+        "kind": "derived",
+        "exe": null,
+        "args": [],
+        "reverse": false,
+        "output": null
+      },
+      "evidence": {
+        "strength": "calibrated-inference",
+        "claim": "ORDER-DEPENDENT EVALUATION and DIFFERENTIAL CREDIT",
+        "limits": "Derived from the ordersweep receipts: the per-candidate classification is retained VERBATIM and scoped to the probes that ran, and is never promoted into a whole-evaluation pass. REPAIRED only when a physical predicate goes Holds -> Gone; a row that changed hands is RECLASSIFIED, with no repair credit. Per-probe repaired / reclassified / created / unmeasured counts are kept apart: no sum across probes, no net, and a regression on any probe stays a regression."
+      },
+      "manualDecisionAllowed": false
+    },
+    {
+      "id": "patch.candidate-qualification",
+      "family": "patch",
+      "title": "Which discovered candidates were actually evaluated, and which remain leads",
+      "required": true,
+      "applicability": {
+        "trigger": {
+          "always": true
+        },
+        "note": "The distinction between an evaluated payload and a lead has to be stated for every evaluation, including one that discovered nothing."
+      },
+      "prerequisites": [
+        "patch.discovery-installed",
+        "patch.order-evaluation"
+      ],
+      "inputs": {
+        "arms": "all",
+        "states": "baseline"
+      },
+      "adapter": {
+        "kind": "derived",
+        "exe": null,
+        "args": [],
+        "reverse": false,
+        "output": null
+      },
+      "evidence": {
+        "strength": "record-fact",
+        "claim": "PATCH FILE DISCOVERY",
+        "limits": "A candidate is `qualified` only when the hash of an actual plugin file appears in an evaluated arm. A Nexus hit, a pool file or a FOMOD option is `unqualified` however well it matches by name. An ESP-only arm qualifies the plugin and not the mod: its meshes, scripts and installer choices were not staged."
+      },
+      "manualDecisionAllowed": false
+    },
+    {
+      "id": "runtime.supplied-observations",
+      "family": "runtime",
+      "title": "Screenshots, video and schematics supplied with an identity that matches an evaluated arm",
+      "required": false,
+      "applicability": {
+        "trigger": {
+          "always": true
+        },
+        "note": "Media may be supplied for any evaluation; whether any was is not a property of the target."
+      },
+      "prerequisites": [],
+      "inputs": {
+        "arms": "all",
+        "states": "selected"
+      },
+      "adapter": {
+        "kind": "media",
+        "exe": null,
+        "args": [],
+        "reverse": false,
+        "output": null
+      },
+      "evidence": {
+        "strength": "supplied-media",
+        "claim": null,
+        "limits": "Admitted as evidence only when the item's configuration fingerprint equals an accepted receipt's fingerprint on that arm and it names its subject, state and provenance. Anything else is listed under unassessedMedia with the reason and is not evidence. Media illustrates a result; it never establishes one."
+      },
+      "manualDecisionAllowed": false
+    },
+    {
+      "id": "runtime.crash-performance-appearance",
+      "family": "runtime",
+      "title": "Crashes, stutter, appearance and gameplay under the evaluated configuration",
+      "required": false,
+      "applicability": {
+        "trigger": {
+          "always": true
+        },
+        "note": "Any configuration can crash or look wrong; no static footprint bounds it."
+      },
+      "prerequisites": [],
+      "inputs": {
+        "arms": "all",
+        "states": "baseline"
+      },
+      "adapter": {
+        "kind": "unsupported",
+        "exe": null,
+        "args": [],
+        "reverse": false,
+        "output": null
+      },
+      "evidence": {
+        "strength": "engine-observation",
+        "claim": null,
+        "limits": "NEVER inferable from static checks. No number of clean record and geometry checks establishes that the configuration does not crash, stutter or render wrongly; only a run of the game does, and this packet launches none. Optional so that its permanent absence does not swamp the completion signal, and always listed under `unassessed` so the report cannot imply it was covered."
+      },
+      "manualDecisionAllowed": false,
+      "unsupportedReason": "runtime behaviour requires running the game; the controller performs no launch and cannot infer it from static evidence."
+    }
+  ]
+}

@@ -3,6 +3,7 @@
     python ordersweep.py --candidates DIR --out DIR [--probes navownprobe,overlapprobe,contactprobe]
                          [--instance DIR --profile NAME --game DIR] [--probe-args "..."]
                          [--harness DIR] [--baseline FILE] [--max-candidates N] [--no-reverse]
+                         [--probe-cmd NAME=<argv prefix>]...
 
 The question this answers is the roadmap's: WHICH of the examined configurations passes the required
 checks, what would the user change, and what remains unknown. It does not sort a load order and it
@@ -88,6 +89,26 @@ def probe_exe(harness: Path, probe: str) -> Path:
     if not p.exists():
         sys.exit(f"{probe}: no Release binary at {p} — build it first (dotnet build -c Release)")
     return p
+
+
+def probe_program(harness: Path, probe: str, overrides: dict[str, str]) -> list[str]:
+    """The argv PREFIX that runs one probe (or conflictdiff). Normally the Release binary; a
+    `--probe-cmd NAME=<argv prefix>` stands a different program in, which is how a fixture runs a
+    fake probe against the real driver. Nothing else about this driver changes: an override alters
+    WHICH program runs, never how its result is read or classified."""
+    override = overrides.get(probe)
+    if override:
+        return override.split()
+    return [str(probe_exe(harness, probe))]
+
+
+def program_key(harness: Path, probe: str, overrides: dict[str, str]) -> str:
+    """What the cache must key a program by: the binary's hash, or the override's own text when a
+    fixture stood a program in (a fake probe's identity is the command line, not a Release build)."""
+    override = overrides.get(probe)
+    if override:
+        return "probe-cmd:" + hashlib.sha256(override.encode("utf-8")).hexdigest()
+    return sha256_file(probe_exe(harness, probe))
 
 
 def load_json(p: Path):
@@ -284,6 +305,9 @@ def main() -> int:
     ap.add_argument("--max-candidates", type=int)
     ap.add_argument("--diff-tolerance", default=None, help="conflictdiff --tolerance (points)")
     ap.add_argument("--no-reverse", action="store_true", help="skip the reverse measurement (created rows then read unmeasured)")
+    ap.add_argument("--probe-cmd", action="append", default=[], metavar="NAME=<argv prefix>",
+                    help="run NAME (a probe, or conflictdiff) as <argv prefix> instead of its Release binary. "
+                         "Repeatable. A test seam: it changes which program runs, not how the result is read.")
     a = ap.parse_args()
 
     cdir, out, harness = Path(a.candidates), Path(a.out), Path(a.harness)
@@ -303,9 +327,15 @@ def main() -> int:
         stem = Path(mc.get("File", "")).stem
         rules_of[stem] = {"violates": list(mc.get("ViolatesAdvice") or []), "satisfies": list(mc.get("SatisfiesAdvice") or [])}
     cache = Cache(out / "cache.json", out / "cache-log.txt")
-    exes = {p: probe_exe(harness, p) for p in probes}
-    exe_sha = {p: sha256_file(exes[p]) for p in probes}
-    diff_exe = probe_exe(harness, "conflictdiff")
+    overrides = {}
+    for spec in a.probe_cmd:
+        name, _, prefix = spec.partition("=")
+        if not name.strip() or not prefix.strip():
+            sys.exit(f"--probe-cmd {spec!r}: expected NAME=<argv prefix>")
+        overrides[name.strip()] = prefix.strip()
+    exes = {p: probe_program(harness, p, overrides) for p in probes}
+    exe_sha = {p: program_key(harness, p, overrides) for p in probes}
+    diff_exe = probe_program(harness, "conflictdiff", overrides)
     logs = out / "logs"
 
     def key_for(probe: str, order_file: Path, base_emit: Path | None) -> str:
@@ -320,7 +350,7 @@ def main() -> int:
         reused = cache.lookup(k, job_id)
         if reused:
             return 0, False, False, reused
-        argv = [str(exes[probe]), "--order", str(order_file)] + (["--base", str(base_emit)] if base_emit else []) + ["--emit", str(emit)] + common + extra
+        argv = exes[probe] + ["--order", str(order_file)] + (["--base", str(base_emit)] if base_emit else []) + ["--emit", str(emit)] + common + extra
         res = runner.run([{"id": job_id, "argv": argv}])[0]
         log = logs / f"{job_id}.txt"
         text = log.read_text(encoding="utf-8", errors="replace") if log.exists() else ""
@@ -368,7 +398,7 @@ def main() -> int:
                         row["reverseExit"] = rcode
                         plan.advance()
                     row["created"] = created_breakdown(base_emit, got, reverse)
-                    dargs = [str(diff_exe), str(base_emit), str(got)] + (["--tolerance", a.diff_tolerance] if a.diff_tolerance else [])
+                    dargs = diff_exe + [str(base_emit), str(got)] + (["--tolerance", a.diff_tolerance] if a.diff_tolerance else [])
                     dres = runner.run([{"id": f"diff-{p}-{cand.stem}", "argv": dargs}])[0]
                     dlog = logs / f"diff-{p}-{cand.stem}.txt"
                     row["diff"] = parse_diff(dlog.read_text(encoding="utf-8", errors="replace") if dlog.exists() else "")

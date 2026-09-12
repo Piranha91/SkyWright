@@ -1,0 +1,103 @@
+{
+ "case": "case-08-interrupt-resume",
+ "scenario": "evalrun run is killed once a receipt exists, then resumed; then one fixture plugin's bytes change and resume runs again.",
+ "plan": {
+  "checks": {
+   "loadability.masters-and-order": {
+    "applicability": "yes",
+    "status": "planned"
+   },
+   "loadability.dangling-references": {
+    "applicability": "yes",
+    "status": "mcp-only"
+   },
+   "records.cell-attributes": {
+    "applicability": "yes",
+    "status": "mcp-only"
+   },
+   "geometry.navmesh-ownership": {
+    "applicability": "yes",
+    "status": "planned"
+   },
+   "geometry.object-overlap": {
+    "applicability": "yes",
+    "status": "planned"
+   },
+   "geometry.placement-contact": {
+    "applicability": "yes",
+    "status": "planned"
+   },
+   "geometry.bos-overlay": {
+    "applicability": "no",
+    "status": "not-applicable"
+   },
+   "functional.linked-dependencies": {
+    "applicability": "unknown",
+    "status": "planned"
+   },
+   "state.switch-census": {
+    "applicability": "yes",
+    "status": "planned"
+   },
+   "state.conditional-geometry": {
+    "applicability": "yes",
+    "status": "planned"
+   },
+   "functional.collective-route-connectivity": {
+    "applicability": "yes",
+    "status": "unsupported"
+   },
+   "environment.generated-output-regeneration": {
+    "applicability": "yes",
+    "status": "manual"
+   },
+   "patch.author-advice": {
+    "applicability": "yes",
+    "status": "planned"
+   },
+   "patch.order-evaluation": {
+    "applicability": "yes",
+    "status": "planned"
+   },
+   "runtime.supplied-observations": {
+    "applicability": "yes",
+    "status": "planned"
+   }
+  }
+ },
+ "ledger": {},
+ "disposition": {
+  "complete": false,
+  "claim": "incomplete",
+  "missingIncludes": [
+   "loadability.dangling-references",
+   "records.cell-attributes",
+   "functional.collective-route-connectivity",
+   "environment.generated-output-regeneration",
+   "functional.linked-dependencies"
+  ],
+  "missingExcludes": [],
+  "unknownApplicability": [
+   "functional.linked-dependencies"
+  ],
+  "journalHasInterrupted": true,
+  "reusedAfterResumeNonEmpty": true,
+  "invalidatedAfterPluginChange": [
+   "geometry.navmesh-ownership",
+   "geometry.object-overlap",
+   "geometry.placement-contact",
+   "loadability.masters-and-order"
+  ],
+  "stillReusedAfterPluginChange": [
+   "patch.author-advice"
+  ],
+  "runIdsAtLeast": 2,
+  "noCompletedWithoutReceiptFile": true
+ },
+ "verifyBundleExit": null,
+ "notes": [
+  "D5: a running entry with no terminal line becomes interrupted and is re-queued, never counted.",
+  "D6: a mismatch -> invalidated(<what changed>), dependents transitively; unchanged -> reused.",
+  "Not asserted: whether resume re-runs an invalidated check in the same invocation (D6 does not say)."
+ ]
+}

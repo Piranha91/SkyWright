@@ -1,0 +1,102 @@
+{
+ "case": "case-10-discovery-media",
+ "scenario": "adviceprobe returns a catalogued file whose hash is in no evaluated arm; media.json lists one item whose fingerprint matches an accepted baseline receipt and one whose fingerprint matches nothing.",
+ "plan": {
+  "checks": {
+   "loadability.masters-and-order": {
+    "applicability": "yes",
+    "status": "planned"
+   },
+   "loadability.dangling-references": {
+    "applicability": "yes",
+    "status": "mcp-only"
+   },
+   "records.cell-attributes": {
+    "applicability": "yes",
+    "status": "mcp-only"
+   },
+   "geometry.navmesh-ownership": {
+    "applicability": "yes",
+    "status": "planned"
+   },
+   "geometry.object-overlap": {
+    "applicability": "yes",
+    "status": "planned"
+   },
+   "geometry.placement-contact": {
+    "applicability": "yes",
+    "status": "planned"
+   },
+   "geometry.bos-overlay": {
+    "applicability": "no",
+    "status": "not-applicable"
+   },
+   "functional.linked-dependencies": {
+    "applicability": "unknown",
+    "status": "planned"
+   },
+   "state.switch-census": {
+    "applicability": "yes",
+    "status": "planned"
+   },
+   "state.conditional-geometry": {
+    "applicability": "yes",
+    "status": "planned"
+   },
+   "functional.collective-route-connectivity": {
+    "applicability": "yes",
+    "status": "unsupported"
+   },
+   "environment.generated-output-regeneration": {
+    "applicability": "yes",
+    "status": "manual"
+   },
+   "patch.author-advice": {
+    "applicability": "yes",
+    "status": "planned"
+   },
+   "patch.order-evaluation": {
+    "applicability": "yes",
+    "status": "planned"
+   },
+   "runtime.supplied-observations": {
+    "applicability": "yes",
+    "status": "planned"
+   }
+  }
+ },
+ "ledger": {},
+ "disposition": {
+  "complete": false,
+  "claim": "incomplete",
+  "missingIncludes": [
+   "loadability.dangling-references",
+   "records.cell-attributes",
+   "functional.collective-route-connectivity",
+   "environment.generated-output-regeneration",
+   "functional.linked-dependencies"
+  ],
+  "missingExcludes": [],
+  "unknownApplicability": [
+   "functional.linked-dependencies"
+  ],
+  "discovery": {
+   "candidateQualifications": [
+    "unqualified"
+   ],
+   "sourcesNotSearchedPresent": true
+  },
+  "mediaEvidenceStrength": "supplied-media",
+  "unassessedMediaIncludes": [
+   "old-shot.png"
+  ],
+  "unassessedMediaExcludes": [
+   "matched-shot.png"
+  ]
+ },
+ "verifyBundleExit": 0,
+ "notes": [
+  "D7: qualification 'qualified' only for a plugin whose hash is in an evaluated arm, else 'unqualified'.",
+  "D8: an item whose fingerprint equals an accepted receipt's fingerprint on that arm is evidence with strength supplied-media; anything else is unassessedMedia with the reason and is not evidence."
+ ]
+}

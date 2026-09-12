@@ -1,0 +1,133 @@
+{
+ "case": "case-02-select-three-probes",
+ "scenario": "Case 01's fixtures, planned with --select navownprobe,overlapprobe,contactprobe - the packet's own wording. A-3 expands the exe names to check ids and A-8 pulls in their transitive prerequisite.",
+ "plan": {
+  "checks": {
+   "loadability.masters-and-order": {
+    "applicability": "yes",
+    "status": "planned"
+   },
+   "loadability.dangling-references": {
+    "applicability": "yes",
+    "status": "mcp-only"
+   },
+   "records.cell-attributes": {
+    "applicability": "yes",
+    "status": "mcp-only"
+   },
+   "geometry.navmesh-ownership": {
+    "applicability": "yes",
+    "status": "planned"
+   },
+   "geometry.object-overlap": {
+    "applicability": "yes",
+    "status": "planned"
+   },
+   "geometry.placement-contact": {
+    "applicability": "yes",
+    "status": "planned"
+   },
+   "geometry.bos-overlay": {
+    "applicability": "no",
+    "status": "not-applicable"
+   },
+   "functional.linked-dependencies": {
+    "applicability": "unknown",
+    "status": "skipped-user"
+   },
+   "state.switch-census": {
+    "applicability": "yes",
+    "status": "skipped-user"
+   },
+   "state.conditional-geometry": {
+    "applicability": "yes",
+    "status": "skipped-user"
+   },
+   "functional.collective-route-connectivity": {
+    "applicability": "yes",
+    "status": "unsupported"
+   },
+   "environment.generated-output-regeneration": {
+    "applicability": "yes",
+    "status": "manual"
+   },
+   "patch.author-advice": {
+    "applicability": "yes",
+    "status": "skipped-user"
+   },
+   "patch.order-evaluation": {
+    "applicability": "yes",
+    "status": "skipped-user"
+   },
+   "runtime.supplied-observations": {
+    "applicability": "yes",
+    "status": "skipped-user"
+   }
+  }
+ },
+ "ledger": {
+  "geometry.navmesh-ownership__baseline__arm": {
+   "execution": "completed",
+   "detector": "finding",
+   "rejection": null
+  },
+  "geometry.object-overlap__baseline__arm": {
+   "execution": "completed",
+   "detector": "finding",
+   "rejection": null
+  },
+  "geometry.placement-contact__baseline__arm": {
+   "execution": "completed",
+   "detector": "finding",
+   "rejection": null
+  }
+ },
+ "disposition": {
+  "complete": false,
+  "claim": "incomplete",
+  "missingIncludes": [
+   "state.switch-census",
+   "state.conditional-geometry",
+   "patch.order-evaluation",
+   "patch.author-advice",
+   "loadability.dangling-references",
+   "records.cell-attributes",
+   "functional.collective-route-connectivity",
+   "environment.generated-output-regeneration",
+   "functional.linked-dependencies"
+  ],
+  "missingExcludes": [
+   "geometry.navmesh-ownership",
+   "geometry.object-overlap",
+   "geometry.placement-contact",
+   "loadability.masters-and-order",
+   "geometry.bos-overlay"
+  ],
+  "unknownApplicability": [
+   "functional.linked-dependencies"
+  ],
+  "arms": {
+   "candidate-01-reorder": {
+    "classification": "PASSES-COMPLETED-CHECKS",
+    "regression": false,
+    "probes": [
+     "navownprobe",
+     "overlapprobe",
+     "contactprobe"
+    ]
+   }
+  },
+  "explicitDecisionsMention": [
+   "geometry.navmesh-ownership",
+   "geometry.object-overlap",
+   "geometry.placement-contact"
+  ]
+ },
+ "verifyBundleExit": 0,
+ "notes": [
+  "D3: --select narrows what RUNS, never what is PLANNED; a required check not selected is skipped-user.",
+  "Q-2: adapter-derived statuses (mcp-only/manual/unsupported) win over skipped-user.",
+  "Q-3: an optional unselected check is skipped-user but not missing.",
+  "A-8/Q-8: --select implies the transitive prerequisites of the selected checks, recorded as implied-by:<check>, so loadability.masters-and-order runs and is not missing."
+ ]
+}

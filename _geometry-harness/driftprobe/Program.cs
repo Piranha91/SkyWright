@@ -571,6 +571,9 @@ foreach (var b in broken.Take(listN)) Console.WriteLine(b);
 // (The counters accumulate only meaningfully on the first FindSplits call — the sensitivity sweep
 // below re-runs the check at other thresholds after they are printed.)
 long skipNonPositional = 0, skipMultiPlacement = 0, skipNoAuthoringView = 0, skipNoWinning = 0;
+// The emit's Coverage needs the population the split test JUDGED, not the rows it found; these two are
+// the counts the console never had to print, so they are declared here beside the skips they pair with.
+long aliasesResolved = 0, pairsJudged = 0;
 // The reach filter's own unjudgeable count, by reason — the pairs CHECK 2 used to report on a
 // metric the field test disqualified. Counted, named, never quietly dropped.
 var reachDropped = new Dictionary<string, int>();
@@ -602,6 +605,7 @@ foreach (var q in quests.Values)
         if (Winning(rk) is not { } now) { skipNoWinning++; continue; }
         resolved.Add((a, rk, then, now));
     }
+    aliasesResolved += resolved.Count;
 
     for (int i = 0; i < resolved.Count; i++)
         for (int j = i + 1; j < resolved.Count; j++)
@@ -609,6 +613,10 @@ foreach (var q in quests.Values)
             var (a1, r1, t1, n1) = resolved[i];
             var (a2, r2, t2, n2) = resolved[j];
             if (r1 == r2) continue;
+            // Counted here, where the pair is actually compared: the emit's Coverage must say how many
+            // pairs the split test JUDGED, not how many came out split. Zero findings over a judged
+            // population and zero findings because nothing was judged are different answers.
+            pairsJudged++;
             bool togetherThen = t1.Cell == t2.Cell;
             float was = togetherThen ? Dist(t1.Pos, t2.Pos) : float.PositiveInfinity;
             bool apartNow = n1.Cell != n2.Cell;
@@ -906,8 +914,41 @@ if (emitPath is not null)
                 necessary, alternative));
     }
 
+    // What this run judged and what it could not, in the shape every other emitting probe writes (Part B of the
+    // 2026-09-12 handoff). Without it an empty Conflicts list is indistinguishable from a run that judged nothing,
+    // and a consumer has to guess which it was — the reading the evaluation controller refuses as coverage-missing.
+    // Every number here is one the console already prints; nothing new is computed.
+    var coverage = new List<CoverageLine>
+    {
+        new("plugins", paths.Count - unreadablePlugins.Count,
+            new Dictionary<string, long> { ["UnreadablePlugin"] = unreadablePlugins.Count }),
+        new("winning quests with stated alias pairs", statedPairs.Count, null, null,
+            $"{statedTotal:N0} stated alias pair(s), from {scenes.Count:N0} winning scene(s) and "
+          + $"{packageTargets.Count:N0} package(s) with an alias target"),
+        new("quest aliases (positional resolution)", aliasesResolved,
+            new Dictionary<string, long>
+            {
+                ["NonPositionalArm"] = skipNonPositional,
+                ["MultiPlacementUniqueActor"] = skipMultiPlacement,
+                ["NoAuthoringView"] = skipNoAuthoringView,
+                ["NoWinningPlacement"] = skipNoWinning,
+            }),
+        new("alias pairs (split test)", pairsJudged,
+            null,
+            reachFilter
+                ? new Dictionary<string, long>
+                {
+                    ["ReachFilterDropped"] = reachDropped.Values.Sum(),
+                    ["ReachAreasStillOverlap"] = reachOverlap,
+                    ["GoverningReadingsDisagree"] = reachReadingDisagrees,
+                }
+                : null,
+            reachFilter ? $"reach filter on; {split.Count:N0} pair(s) split, {split.Count(s => s.Stated):N0} of them stated"
+                        : $"--no-reach: raw placement distance; {split.Count:N0} pair(s) split, {split.Count(s => s.Stated):N0} of them stated"),
+    };
+
     ConflictIo.Write(emitPath, new ConflictFile("driftprobe", Instance,
-        DateTime.UtcNow.ToString("yyyy-MM-dd HH:mm:ssZ"), conflicts,
+        DateTime.UtcNow.ToString("yyyy-MM-dd HH:mm:ssZ"), conflicts, coverage,
         // driftprobe's population is placement history and package reach: no enable filter is applied and none belongs
         // here (an actor dormant at load is still an actor the order places). Labelled so a reader is never left to guess.
         Population: "n/a (placement history; no enable-state filter)", State: "n/a",

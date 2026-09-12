@@ -1,0 +1,124 @@
+{
+ "case": "case-05-rejections",
+ "scenario": "Baseline arms ok. candidate-01-stale: stale-output / wrong-state / illegal. candidate-02-broken: no-emit / wrong-probe-name / no-configuration.",
+ "plan": {
+  "checks": {
+   "loadability.masters-and-order": {
+    "applicability": "yes",
+    "status": "planned"
+   },
+   "loadability.dangling-references": {
+    "applicability": "yes",
+    "status": "mcp-only"
+   },
+   "records.cell-attributes": {
+    "applicability": "yes",
+    "status": "mcp-only"
+   },
+   "geometry.navmesh-ownership": {
+    "applicability": "yes",
+    "status": "planned"
+   },
+   "geometry.object-overlap": {
+    "applicability": "yes",
+    "status": "planned"
+   },
+   "geometry.placement-contact": {
+    "applicability": "yes",
+    "status": "planned"
+   },
+   "geometry.bos-overlay": {
+    "applicability": "no",
+    "status": "not-applicable"
+   },
+   "functional.linked-dependencies": {
+    "applicability": "unknown",
+    "status": "planned"
+   },
+   "state.switch-census": {
+    "applicability": "yes",
+    "status": "planned"
+   },
+   "state.conditional-geometry": {
+    "applicability": "yes",
+    "status": "planned"
+   },
+   "functional.collective-route-connectivity": {
+    "applicability": "yes",
+    "status": "unsupported"
+   },
+   "environment.generated-output-regeneration": {
+    "applicability": "yes",
+    "status": "manual"
+   },
+   "patch.author-advice": {
+    "applicability": "yes",
+    "status": "planned"
+   },
+   "patch.order-evaluation": {
+    "applicability": "yes",
+    "status": "planned"
+   },
+   "runtime.supplied-observations": {
+    "applicability": "yes",
+    "status": "planned"
+   }
+  }
+ },
+ "ledger": {
+  "geometry.navmesh-ownership__candidate-01-stale__arm": {
+   "execution": "rejected(output-stale)",
+   "detector": null,
+   "rejection": "output-stale"
+  },
+  "geometry.object-overlap__candidate-01-stale__arm": {
+   "execution": "rejected(population-mismatch)",
+   "detector": null,
+   "rejection": "population-mismatch"
+  },
+  "geometry.placement-contact__candidate-01-stale__arm": {
+   "execution": "rejected(illegal-configuration)",
+   "detector": null,
+   "rejection": "illegal-configuration"
+  },
+  "geometry.navmesh-ownership__candidate-02-broken__arm": {
+   "execution": "rejected(output-missing)",
+   "detector": null,
+   "rejection": "output-missing"
+  },
+  "geometry.object-overlap__candidate-02-broken__arm": {
+   "execution": "rejected(wrong-check)",
+   "detector": null,
+   "rejection": "wrong-check"
+  },
+  "geometry.placement-contact__candidate-02-broken__arm": {
+   "execution": "rejected(identity-missing)",
+   "detector": null,
+   "rejection": "identity-missing"
+  }
+ },
+ "disposition": {
+  "complete": false,
+  "claim": "incomplete",
+  "missingIncludes": [
+   "geometry.navmesh-ownership",
+   "geometry.object-overlap",
+   "geometry.placement-contact",
+   "loadability.dangling-references",
+   "records.cell-attributes",
+   "functional.collective-route-connectivity",
+   "environment.generated-output-regeneration",
+   "functional.linked-dependencies"
+  ],
+  "missingExcludes": [],
+  "unknownApplicability": [
+   "functional.linked-dependencies"
+  ],
+  "arms": {}
+ },
+ "verifyBundleExit": 0,
+ "notes": [
+  "D4's closed rejection vocabulary, one cause per receipt.",
+  "The arms' ordersweep classifications are deliberately not asserted: a stale emit is invisible to ordersweep by construction, which is why the receipt layer exists."
+ ]
+}
