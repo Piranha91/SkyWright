@@ -31,6 +31,7 @@ from __future__ import annotations
 
 import argparse
 import contextlib
+import copy
 import glob
 import hashlib
 import json
@@ -302,7 +303,7 @@ def plan_segments(pres: dict, ffmpeg: dict, bundle_dir: Path | None, chapter_fil
         if not caps:
             errors.append(f"{ch.get('id')}: no narrated scene is declared")
             continue
-        for cap in caps:
+        for caption_index, cap in enumerate(caps):
             if cap.get("omitFromReel") is True:
                 if ck in ("opening", "closing"):
                     errors.append(f"{ch.get('id')}: opening and closing scenes cannot be omitted")
@@ -382,6 +383,8 @@ def plan_segments(pres: dict, ffmpeg: dict, bundle_dir: Path | None, chapter_fil
             is_image = abs_path.suffix.lower() in IMAGE_SUFFIXES or row.get("mediaKind") in (
                 "offline-render", "native-screenshot", "historical-illustration")
             s = base(ch, "image" if is_image else "clip")
+            s["captionIndex"] = cap.get("captionIndex", caption_index)
+            s["occurrenceIndex"] = cap.get("occurrenceIndex", 0)
             s["mediaId"] = mid
             s["evidenceIds"] = list(cap.get("evidenceIds") or [])
             s["caption"] = cap.get("text") or ""
@@ -521,7 +524,8 @@ def write_srt(path: Path, segments: list[dict]) -> int:
 
 def contact_sheet(out: Path, reel: Path, segments: list[dict], ffmpeg: dict) -> dict:
     """A frame at each segment's start and midpoint, tiled four across with the segment index burned in.
-    Read from the produced reel, so it shows what a viewer would see."""
+    Read the exact integral frame bounds recorded in reel-map.json. Container timestamps may carry a
+    fixed muxing offset, so time seeking can land on the preceding scene even when the map is right."""
     frames_dir = out / "cache" / "sheet"
     if frames_dir.exists():
         shutil.rmtree(frames_dir, ignore_errors=True)
@@ -532,12 +536,17 @@ def contact_sheet(out: Path, reel: Path, segments: list[dict], ffmpeg: dict) -> 
         iv = s.get("reelInterval")
         if not iv:
             continue
-        for tag, t in (("start", iv["startSeconds"] + 0.5 / FPS),
-                       ("mid", (iv["startSeconds"] + iv["endSeconds"]) / 2)):
-            (frames_dir / "lab.ass").write_text(ass_document([("Sheet", ass_escape(f"#{s['index']} {tag} {t:.2f}s"))],
+        start_frame = int(iv["startFrame"])
+        frame_count = int(iv["frames"])
+        for tag, frame_number in (("start", start_frame),
+                                  ("mid", start_frame + frame_count // 2)):
+            nominal_time = frame_number / FPS
+            (frames_dir / "lab.ass").write_text(ass_document([("Sheet", ass_escape(
+                f"#{s['index']} {tag} frame {frame_number} ({nominal_time:.2f}s)"))],
                                                             2.0, 320, 180), encoding="utf-8")
-            r = run_ffmpeg(ffmpeg["path"], ["-loglevel", "error", "-ss", f"{t:.4f}", "-i", str(reel), "-frames:v", "1",
-                                            "-vf", "scale=320:180,ass=lab.ass", f"f-{n:03d}.png"], cwd=frames_dir)
+            r = run_ffmpeg(ffmpeg["path"], ["-loglevel", "error", "-i", str(reel), "-frames:v", "1",
+                                            "-vf", f"select=eq(n\\,{frame_number}),setpts=PTS-STARTPTS,scale=320:180,ass=lab.ass",
+                                            f"f-{n:03d}.png"], cwd=frames_dir)
             if r.returncode != 0 or not (frames_dir / f"f-{n:03d}.png").is_file():
                 errors.append(f"frame {n} ({s['index']} {tag}): {' '.join(r.stderr.split())[:200]}")
             n += 1
@@ -567,7 +576,7 @@ def cmd_storyboard_packet(a) -> int:
     scenes = []
     for ch in pres["chapters"]:
         for i, cap in enumerate(ch.get("captions") or []):
-            scenes.append({"chapterId": ch.get("id"), "captionIndex": i, "mediaId": cap.get("mediaId"),
+            scenes.append({"chapterId": ch.get("id"), "captionIndex": i, "occurrenceIndex": 0, "mediaId": cap.get("mediaId"),
                            "narration": cap.get("narration"), "storyboard": cap.get("storyboard"),
                            "omitFromReel": False, "omissionReason": None, "narrationAudio": cap.get("narrationAudio"),
                            "requiredReview": {"subjectVisible": True,
@@ -593,11 +602,22 @@ def apply_storyboard_answers(pres: dict, path: Path) -> str | None:
     if answers.get("presentationId") != pres.get("presentationId"):
         return "storyboard-answers-foreign: presentationId does not match"
     chapters = {c.get("id"): c for c in pres.get("chapters") or []}
+    replacements = {}
     for row in answers["scenes"]:
+        if not isinstance(row, dict):
+            return "storyboard-answers-invalid: scene must be an object"
         ch = chapters.get(row.get("chapterId")); idx = row.get("captionIndex")
         caps = (ch or {}).get("captions") or []
-        if not isinstance(idx, int) or idx < 0 or idx >= len(caps):
+        if type(idx) is not int or idx < 0 or idx >= len(caps):
             return f"storyboard-answers-invalid: unknown scene {row.get('chapterId')}[{idx}]"
+        occurrence = row.get("occurrenceIndex", 0)
+        if type(occurrence) is not int or occurrence < 0:
+            return "storyboard-answers-invalid: occurrenceIndex must be a nonnegative integer"
+        group = replacements.setdefault((row["chapterId"], idx), {})
+        if occurrence in group:
+            return f"storyboard-answers-invalid: duplicate scene occurrence {row['chapterId']}[{idx}][{occurrence}]"
+        cap = copy.deepcopy(caps[idx])
+        cap.update(captionIndex=idx, occurrenceIndex=occurrence)
         requested_mid = row.get("mediaId")
         original_mid = caps[idx].get("mediaId")
         if requested_mid != original_mid:
@@ -608,17 +628,33 @@ def apply_storyboard_answers(pres: dict, path: Path) -> str | None:
                 findings = [f for f in pres.get("findings") or [] if f.get("id") in ((ch or {}).get("findingIds") or [])]
                 if not any(requested_mid in (f.get("mediaIds") or []) for f in findings):
                     return f"storyboard-answers-invalid: replacement media subject does not match finding {row.get('chapterId')}[{idx}]"
-            caps[idx]["mediaId"] = requested_mid
-        if isinstance(row.get("storyboard"), dict): caps[idx]["storyboard"] = row["storyboard"]
-        if row.get("narrationAudio"): caps[idx]["narrationAudio"] = row["narrationAudio"]
-        if row.get("narration"): caps[idx]["narration"] = " ".join(str(row["narration"]).split())
+            cap["mediaId"] = requested_mid
+        if isinstance(row.get("storyboard"), dict): cap["storyboard"] = copy.deepcopy(row["storyboard"])
+        if row.get("narrationAudio"): cap["narrationAudio"] = row["narrationAudio"]
+        if row.get("narration"): cap["narration"] = " ".join(str(row["narration"]).split())
         if row.get("omitFromReel") is True:
             if (ch or {}).get("kind") in ("opening", "closing"):
                 return f"storyboard-answers-invalid: opening/closing cannot be omitted ({row.get('chapterId')}[{idx}])"
             if not str(row.get("omissionReason") or "").strip():
                 return f"storyboard-answers-invalid: an omitted scene needs an omissionReason ({row.get('chapterId')}[{idx}])"
-            caps[idx]["omitFromReel"] = True
-            caps[idx]["omissionReason"] = row["omissionReason"]
+            cap["omitFromReel"] = True
+            cap["omissionReason"] = row["omissionReason"]
+        group[occurrence] = cap
+    for (chapter, idx), group in replacements.items():
+        if sorted(group) != list(range(len(group))):
+            return f"storyboard-answers-invalid: occurrenceIndex must be contiguous from zero for {chapter}[{idx}]"
+    # Validate every binding against the original before expanding; absent answers retain their caption.
+    for ch in pres.get("chapters") or []:
+        expanded = []
+        for idx, original in enumerate(ch.get("captions") or []):
+            group = replacements.get((ch.get("id"), idx))
+            if group:
+                expanded.extend(group[n] for n in range(len(group)))
+            else:
+                cap = copy.deepcopy(original)
+                cap.update(captionIndex=idx, occurrenceIndex=0)
+                expanded.append(cap)
+        ch["captions"] = expanded
     return None
 
 
@@ -681,7 +717,7 @@ def render_reel(a, run) -> int:
     if segments[-1].get("chapterKind") != "closing":
         return refuse("storyboard-refused: the last included scene must be the closing", out)
     verdict = " ".join(str((pres.get("reader") or {}).get("verdict") or "").split())
-    if not verdict or not segments[0]["narration"].casefold().startswith(verdict.casefold()):
+    if not verdict or not segments[0]["narration"].startswith(verdict):
         return refuse("narration-refused: the opening must start with reader.verdict verbatim", out)
 
     audio_dir = out / "narration"
@@ -811,6 +847,7 @@ def render_reel(a, run) -> int:
         for s in segments:
             segments_out.append({
                 "index": s["index"], "chapterId": s["chapterId"], "chapterKind": s["chapterKind"], "kind": s["kind"],
+                "captionIndex": s["captionIndex"], "occurrenceIndex": s["occurrenceIndex"],
                 "findingIds": s["findingIds"], "mediaId": s["mediaId"],
                 "source": ({"path": s["source"]["path"], "sha256": s["source"]["sha256"]} if s["source"] else None),
                 "sourceInterval": s["sourceInterval"], "reelInterval": s.get("reelInterval"),

@@ -50,6 +50,8 @@ using var __run = RunLog.BeginProcess("viewprobe", args);
 
 if (args.Length == 2 && args[0] == "--report-mode-smoke")
     return ViewProbe.TexturedScene.ReportModeSmoke(args[1]);
+if (args.Length == 1 && args[0] == "--nav-selection-smoke")
+    return ViewProbe.NavmeshSelection.Smoke();
 
 bool guiLaunch = GuiLaunch();
 if (guiLaunch)
@@ -180,6 +182,7 @@ string bosMode = "on";
 // took out, arrivals tinted GREEN and departures RED (StateView.cs). Without --state the picture is the load-time state,
 // as every render before 2026-09-04.
 string? stateSpec = null, switchMapPath = null;
+string? orderFile = null;
 string stateView = "on";
 string occlusionMode = "off";
 bool planesReport = false;
@@ -199,6 +202,8 @@ bool navModeExplicit = false;
 // one camera — A's navmesh, B's navmesh, the winning state — and stitches them side by side;
 // the contested records stay red in every panel, so the re-cut is visible as a before/after.
 string? navPlugin = null;
+var navCellSpecs = new List<string>();
+var navVersionSpecs = new List<string>();
 (string A, string B)? compare = null;
 // Terrain: LAND heightmaps for the target cell and its ring-1 neighbours, textured with each
 // quadrant's winning base landscape texture. --no-terrain turns it off.
@@ -426,6 +431,14 @@ for (int i = argStart; i < args.Length; i++)
     else if (args[i] == "--conflicts" && i + 1 < args.Length) conflictsPath = args[++i];
     else if (args[i] == "--red" && i + 1 < args.Length) redSpecs.Add(args[++i]);
     else if (args[i] == "--nav-plugin" && i + 1 < args.Length) navPlugin = args[++i];
+    else if (args[i] is "--nav-cell" or "--nav-version")
+    {
+        var option = args[i];
+        if (i + 1 >= args.Length || args[i + 1].StartsWith("--", StringComparison.Ordinal))
+        { Console.Error.WriteLine($"{option} requires a full FormKey{(option == "--nav-version" ? "=Plugin.esp" : "[=colour]")}."); return 2; }
+        (option == "--nav-cell" ? navCellSpecs : navVersionSpecs).Add(args[++i]);
+        textured = true; // these annotation options use the textured renderer's colour/depth paths
+    }
     else if (args[i] == "--compare" && i + 1 < args.Length)
     { var p = args[++i].Split(','); if (p.Length == 2) compare = (p[0].Trim(), p[1].Trim()); }
     else if (args[i] == "--no-terrain") drawTerrain = false;
@@ -563,6 +576,12 @@ for (int i = argStart; i < args.Length; i++)
         bosMode = args[++i].ToLowerInvariant();
         if (bosMode is not ("off" or "on" or "diff")) { Console.Error.WriteLine("--bos takes off | on | diff"); return 1; }
         if (bosMode == "diff") textured = true;
+    }
+    else if (args[i] == "--order")
+    {
+        if (i + 1 >= args.Length || args[i + 1].StartsWith("--", StringComparison.Ordinal))
+        { Console.Error.WriteLine("--order requires a candidate configuration file."); return 2; }
+        orderFile = args[++i];
     }
     else if (args[i] == "--state" && i + 1 < args.Length) { stateSpec = args[++i]; textured = true; }
     // --flags is refused rather than added (Q27): the renderer has drawn the load-time enable chain since 2026-08-28,
@@ -808,6 +827,31 @@ var comp = Mo2LoadOrder.ReadComposition(profileDir);
 // Ordered BEFORE archive discovery so --emit-bats, which reads records and no assets at all, never
 // pays for BSA indexing it has no use for.
 var order = Mo2LoadOrder.Build(profileDir, modsDir, dataDir, overwriteDir);
+HarnessShared.ResolvedConfiguration? candidateConfiguration = null;
+string? candidateSha256 = null;
+if (orderFile is not null)
+{
+    try
+    {
+        // Hold the candidate read-only through hashing and resolution. A later edit must not
+        // replace the receipt's hash with bytes that did not supply this capture's inputs.
+        using var candidateSource = File.Open(orderFile, FileMode.Open, FileAccess.Read, FileShare.Read);
+        candidateSha256 = HarnessShared.ConfigurationIdentity.Sha256File(orderFile);
+        candidateConfiguration = HarnessShared.HarnessOrderCli.Resolve(profileName, profileDir, modsDir,
+            dataDir, overwriteDir, GamePath, orderFile, null, null);
+    }
+    catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+    {
+        Console.Error.WriteLine($"candidate file refused: {orderFile}: {ex.Message}");
+        return 2;
+    }
+    if (candidateConfiguration.Refused)
+    { Console.Error.WriteLine(candidateConfiguration.RefusedReason); return 2; }
+    order = new Mo2OrderResult(candidateConfiguration.OrderedPaths, candidateConfiguration.Warnings,
+                              candidateConfiguration.OrderedPaths.Count);
+    HarnessShared.HarnessOrderCli.Print(candidateConfiguration);
+}
+var assetMods = candidateConfiguration?.EnabledMods ?? comp.EnabledMods;
 
 // --emit-bats: the whole run is the bat files. It has its own compact walk (BatEmit.cs) covering
 // EVERY cell in the worklist at once, so it exits here rather than falling through to a renderer
@@ -822,8 +866,8 @@ if (emitBats is not null)
     return ViewProbe.BatEmit.Run(worklist!, worklistPaths[0], batsDir, batsName, order.OrderedPaths, Instance, batsProfiles);
 }
 
-var arch = ArchiveDiscovery.Discover(profileDir, modsDir, dataDir, overwriteDir, GamePath);
-using var assets = AssetResolver.Build(overwriteDir, modsDir, dataDir, comp.EnabledMods, arch.Archives);
+var arch = candidateConfiguration?.Archives ?? ArchiveDiscovery.Discover(profileDir, modsDir, dataDir, overwriteDir, GamePath);
+using var assets = AssetResolver.Build(overwriteDir, modsDir, dataDir, assetMods, arch.Archives);
 
 var winRef = new Dictionary<FormKey, PlacedRef>();
 // Conflicts are parsed BEFORE the load walk so implicated doors can be located wherever they
@@ -872,6 +916,9 @@ var navVersionPlugins = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 if (navPlugin is not null) navVersionPlugins.Add(navPlugin);
 if (compare is { } cmp0) { navVersionPlugins.Add(cmp0.A); navVersionPlugins.Add(cmp0.B); }
 var navByPlugin = new Dictionary<string, Dictionary<FormKey, NavmeshGeometry>>(StringComparer.OrdinalIgnoreCase);
+ViewProbe.NavmeshSelection? navSelection = null;
+if (navVersionSpecs.Count > 0 && (navPlugin is not null || compare is not null))
+{ Console.Error.WriteLine("--nav-version cannot be combined with --nav-plugin or --compare."); return 2; }
 var baseMesh = new Dictionary<FormKey, string>();
 // The Base Object Swapper reader's inputs, filled once during the load-order walk below (the same pass that
 // collects meshes): the form index the ini ids resolve against, each plugin's light flag for the runtime FormID
@@ -1177,6 +1224,9 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot)
         if (cellKey is not null) break;
     }
     if (cellKey is null) { Console.Error.WriteLine($"cell '{cellTarget}' not found in the active load order."); return 1; }
+    try { navSelection = new ViewProbe.NavmeshSelection(cellKey.Value, navCellSpecs, navVersionSpecs); }
+    catch (ArgumentException ex) { Console.Error.WriteLine(ex.Message); return 2; }
+    foreach (var plugin in navSelection.Overrides.Values) navVersionPlugins.Add(plugin);
 
     // The BOS form index fills on the FIRST walk only (a worklist re-walks per cell; the index does not change).
     bool bosFill = bosIdx is not null && bosIdx.RecordsSeen == 0;
@@ -1271,6 +1321,7 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot)
             string plgName = m.ModKey.FileName.String;
             foreach (var cp in PlacementExtract.FromMod(m))
             {
+                navSelection.Observe(cp, plgName, navVersionPlugins, winNav, navByPlugin);
                 if (bosFill) bosIdx!.NoteCell(cp.Cell, cp.Worldspace);
                 foreach (var r in cp.Refs)
                 {
@@ -1323,19 +1374,6 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot)
                     cellLabel = cp.CellEditorId ?? cp.Cell.ToString();
                     if (!ViewProbe.PlaneHistory.IsBethesda(plgName) && !cellContestedBy.Contains(plgName)) cellContestedBy.Add(plgName);
                     foreach (var r in cp.Refs) { winRef[r.FormKey] = r; refCellOf[r.FormKey] = cp.Cell; }
-                    // Navmesh (and with it the conflict overlay) stays TARGET-CELL-ONLY: it is
-                    // the annotation layer for the cell under examination, scoped like the cell
-                    // outline. The ring contributes world geometry, not annotations.
-                    foreach (var nav in cp.Navmeshes)
-                    {
-                        winNav[nav.FormKey] = nav;
-                        var pn = m.ModKey.FileName.String;
-                        if (navVersionPlugins.Contains(pn))
-                        {
-                            if (!navByPlugin.TryGetValue(pn, out var d)) navByPlugin[pn] = d = new();
-                            d[nav.FormKey] = nav;
-                        }
-                    }
                 }
                 else
                     foreach (var r in cp.Refs)
@@ -1343,6 +1381,12 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot)
             }
         }
     }
+    try
+    {
+        navSelection.Validate(ringRefs, winNav);
+        _ = navSelection.Substitute(winNav, navByPlugin); // refuse unresolved substitutions before building assets
+    }
+    catch (ArgumentException ex) { Console.Error.WriteLine(ex.Message); return 2; }
     if (bosIdx is not null && bosLayer is null)
     {
         if (bosFill) bosIdx.SetLoadOrder(bosLight);
@@ -1824,10 +1868,13 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot)
         // One navmesh SOURCE -> (green context, red finding) triangle sets. The red spec is applied
         // per source, so a single-triangle red lands on THAT version's triangle — in a compare, the
         // same record can be red-whole in every panel while its shape changes between them.
+        var navColourGroups = new List<ViewProbe.NavColourGroup>();
         (List<(System.Numerics.Vector3, System.Numerics.Vector3, System.Numerics.Vector3)> Green,
          List<(System.Numerics.Vector3, System.Numerics.Vector3, System.Numerics.Vector3)> Red)
         BuildNavSets(IReadOnlyDictionary<FormKey, NavmeshGeometry> navs)
         {
+            navColourGroups.Clear();
+            var groups = new Dictionary<string, List<(Vector3, Vector3, Vector3)>>();
             var green = new List<(System.Numerics.Vector3, System.Numerics.Vector3, System.Numerics.Vector3)>();
             var red = new List<(System.Numerics.Vector3, System.Numerics.Vector3, System.Numerics.Vector3)>();
             if (navMode == "off") return (green, red);
@@ -1838,15 +1885,20 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot)
                 for (int ti = 0; ti < nav.Triangles.Count; ti++)
                 {
                     var tri = nav.Triangles[ti];
-                    if ((tri.Flags & 0x08) != 0) continue;
-                    if (tri.A < 0 || tri.B < 0 || tri.C < 0) continue;
-                    if (tri.A >= nav.Vertices.Count || tri.B >= nav.Vertices.Count || tri.C >= nav.Vertices.Count) continue;
+                    if (!ViewProbe.NavmeshSelection.IsDrawable(nav, ti)) continue;
                     if (!NavZKeeps(nav, tri)) continue;
                     var t3 = (V(nav.Vertices[tri.A]), V(nav.Vertices[tri.B]), V(nav.Vertices[tri.C]));
                     if (wholeRed || (reds is not null && reds.Contains(ti))) red.Add(t3);
-                    else green.Add(t3);
+                    else
+                    {
+                        green.Add(t3);
+                        var colour = navSelection.Cells[navSelection.Provenance[nav].Cell] ?? "default";
+                        if (!groups.TryGetValue(colour, out var group)) groups[colour] = group = new();
+                        group.Add(t3);
+                    }
                 }
             }
+            foreach (var (colour, triangles) in groups) navColourGroups.Add(new(colour, triangles));
             return (green, red);
         }
 
@@ -2661,7 +2713,17 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot)
             }
         }
 
-        var (navTris, redTris) = BuildNavSets(winNav);
+        var evaluatedNav = navSelection.Substitute(winNav, navByPlugin);
+        var (navTris, redTris) = BuildNavSets(evaluatedNav);
+        IReadOnlyDictionary<FormKey, NavmeshGeometry> AsIfWon(string plugin)
+        {
+            var result = new Dictionary<FormKey, NavmeshGeometry>(winNav);
+            if (navByPlugin.TryGetValue(plugin, out var own)) foreach (var kv in own) result[kv.Key] = kv.Value;
+            return result;
+        }
+        var displayNav = navPlugin is not null
+            ? navByPlugin.GetValueOrDefault(navPlugin) ?? new Dictionary<FormKey, NavmeshGeometry>() : evaluatedNav;
+        string navLayerLabel = navPlugin ?? (navVersionSpecs.Count > 0 ? "winning navmesh with explicit record substitutions" : "winning state");
 
         if (redTris.Count > 0)
         {
@@ -2672,7 +2734,7 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot)
             Console.WriteLine($"   suggested view:  --eye {cen.X:0},{cen.Y - 450:0},{cen.Z + 260:0} --look {cen.X:0},{cen.Y:0},{cen.Z:0}");
         }
 
-        var modFolders = comp.EnabledMods.Select(m => Path.Combine(modsDir, m)).ToList();
+        var modFolders = assetMods.Select(m => Path.Combine(modsDir, m)).ToList();
 
         // Runtime FormIDs for captions: the load-order prefix each plugin gets in THIS profile
         // (ESL-flagged plugins share the FE space). Console-clickable numbers, straight in the image.
@@ -2997,6 +3059,9 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot)
         string camMeta = $"args: {replayArgs} | pose: {camPose}"
                        + $" look {lookPos.Value.X:0.##},{lookPos.Value.Y:0.##},{lookPos.Value.Z:0.##}"
                        + $" | cell {cellLabel}";
+        if (navCellSpecs.Count > 0 || navVersionSpecs.Count > 0)
+            camMeta += " | navmesh cells " + string.Join(",", navSelection.Cells.Keys)
+                     + " | navmesh layer " + navLayerLabel;
 
         string safe = new string(cellLabel.Select(c => char.IsLetterOrDigit(c) ? c : '_').ToArray());
         // A worklist renders several shots of the SAME cell, so the cell name alone would have each
@@ -3009,6 +3074,60 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot)
             string slug = new string(wsh.Label.Select(c => char.IsLetterOrDigit(c) ? c : '_').ToArray()).Trim('_');
             if (slug.Length > 48) slug = slug[..48].TrimEnd('_');
             safe = $"{safe}-c{wlCell + 1}s{wlShot + 1}-{slug}";
+        }
+
+        if (candidateConfiguration is not null)
+        {
+            // The source identity describes records/assets before diagnostic view transformations.
+            // A historical navmesh substitution or cutaway must remain distinguishable from that source.
+            var identity = candidateConfiguration.Identity("load-time", stateSpec ?? "baseline");
+            var captureInput = new
+            {
+                Configuration = identity,
+                CandidateSha256 = candidateSha256,
+                Cell = cellKey.ToString(),
+                View = new { navPlugin, navCellSpecs, navVersionSpecs, comparePlugins = compare is { } pair ? new[] { pair.A, pair.B } : null,
+                             cullAbove, bosMode, stateView, replayArgs },
+                Note = "Input configuration before diagnostic view transformations; inspect PNG pose and view settings before media qualification."
+            };
+            File.WriteAllText(Path.Combine(outDir, $"{safe}-configuration.json"),
+                System.Text.Json.JsonSerializer.Serialize(captureInput, HarnessShared.CandidateFile.Json));
+            Console.WriteLine($"   capture input configuration: {identity.Fingerprint}");
+        }
+
+        if (navCellSpecs.Count > 0 || navVersionSpecs.Count > 0)
+        {
+            object DescribeLayer(string label, IReadOnlyDictionary<FormKey, NavmeshGeometry> navs) => new
+            {
+                Label = label,
+                Records = navs.Values.OrderBy(n => n.FormKey.ToString(), StringComparer.Ordinal).Select(n => new
+                {
+                    FormKey = n.FormKey.ToString(), Cell = navSelection.Provenance[n].Cell.ToString(),
+                    Provider = navSelection.Provenance[n].Plugin, TriangleCount = n.Triangles.Count,
+                    Colour = navSelection.Cells[navSelection.Provenance[n].Cell] ?? navColor,
+                    DrawableTrianglesInBand = Enumerable.Range(0,n.Triangles.Count).Count(i =>
+                        ViewProbe.NavmeshSelection.IsDrawable(n,i) && NavZKeeps(n,n.Triangles[i])),
+                    RedWholeRecord = redNav.TryGetValue(n.FormKey,out var marked) && marked is null,
+                    RedRequests = redNav.TryGetValue(n.FormKey,out var requested) && requested is not null
+                        ? requested.Order().Select(i => new { Index = i, Exists = i >= 0 && i < n.Triangles.Count,
+                            DrawableInBand = ViewProbe.NavmeshSelection.IsDrawable(n,i) && NavZKeeps(n,n.Triangles[i]) }).ToArray() : null
+                }).ToArray()
+            };
+            object[] layers = compare is { } pair
+                ? new[] { DescribeLayer(pair.A,AsIfWon(pair.A)), DescribeLayer(pair.B,AsIfWon(pair.B)), DescribeLayer("winning state",winNav) }
+                : new[] { DescribeLayer(navLayerLabel,displayNav) };
+            var receipt = new
+            {
+                SchemaVersion = 1, Configuration = candidateConfiguration?.Identity("load-time",stateSpec ?? "baseline"),
+                CandidateSha256 = candidateSha256, TargetCell = cellKey.ToString(),
+                AdditionalCells = navCellSpecs, RecordSubstitutions = navVersionSpecs,
+                Pose = new { Eye = new[] { eyePos.Value.X,eyePos.Value.Y,eyePos.Value.Z },
+                    Look = new[] { lookPos.Value.X,lookPos.Value.Y,lookPos.Value.Z }, Fov = fov, Size = size },
+                ReplayArgs = replayArgs, Layers = layers,
+                Note = "Navmesh annotation selection only; world geometry/assets retain the evaluated configuration. Triangle admission is not pixel visibility or NPC movement evidence."
+            };
+            File.WriteAllText(Path.Combine(outDir,$"{safe}-navmeshes.json"),
+                System.Text.Json.JsonSerializer.Serialize(receipt,HarnessShared.CandidateFile.Json));
         }
 
         // The target cell's own footprint, for the outline. Exteriors only — an interior has no grid
@@ -3446,7 +3565,7 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot)
                    diffs ?? noDiff, diffColor, picks, captionLines, colourCaptions, npcActors, npcPucksOn, routeRenders,
                    gridRender, overlayLines, keepFx, fxStatic, listMeshes, waterPlanes, coverings, planes, showPlanes, occlusionMode,
                    size, outFile, reportMode, camMeta, planeReport: planeReportSink, bosMode: bosMode, stateMode: stateView, stateName: stateArm?.Name ?? "",
-                   visibilityBudget: visibilityBudget);
+                   visibilityBudget: visibilityBudget, navColourGroups: navColourGroups);
         }
 
         if (compare is { } cmp)
@@ -3457,13 +3576,6 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot)
             // Each side panel is the cell's FULL navmesh as if that plugin won: the winning state
             // with the plugin's own versions substituted in. Records neither plugin touches are then
             // IDENTICAL in all three panels, so any visible difference is the actual disagreement.
-            IReadOnlyDictionary<FormKey, NavmeshGeometry> AsIfWon(string plg)
-            {
-                var d = new Dictionary<FormKey, NavmeshGeometry>(winNav);
-                if (navByPlugin.TryGetValue(plg, out var own))
-                    foreach (var kv in own) d[kv.Key] = kv.Value;
-                return d;
-            }
             var panels = new (string Label, IReadOnlyDictionary<FormKey, NavmeshGeometry> Navs)[]
             {
                 (cmp.A, AsIfWon(cmp.A)),
@@ -3570,8 +3682,8 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot)
         }
 
         string fpOut = Path.Combine(outDir, $"{safe}-fp.png");
-        var fpCap = new List<string> { $"{cellLabel} \u2014 {(navPlugin ?? "winning state")} \u2014 {camPose}{CullCaption()}" };
-        if (redNav.Count > 0) fpCap.Add(RedCaption(navPlugin is not null && navByPlugin.TryGetValue(navPlugin, out var np0) ? np0 : winNav));
+        var fpCap = new List<string> { $"{cellLabel} \u2014 {navLayerLabel} \u2014 {camPose}{CullCaption()}" };
+        if (redNav.Count > 0) fpCap.Add(RedCaption(displayNav));
         if (DoorCaption() is { } fdc) fpCap.Add(fdc);
         if (showPlanes && planeLegend.Length > 0) fpCap.Add(planeLegend);
         if (bosLayer is not null && bosSwapped > 0) fpCap.Add($"BOS {bosMode}: {bosSwapped} swapped ref(s), {bosRandomCount} random{(bosMode == "diff" ? " - tinted TEAL" : "")}");
@@ -3584,7 +3696,7 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot)
             // (same source dict, same deleted/out-of-range filters), so a hover can only name
             // triangles that are actually drawn.
             var navSrc = navPlugin is not null && navByPlugin.TryGetValue(navPlugin, out var nsrc)
-                ? (IReadOnlyDictionary<FormKey, NavmeshGeometry>)nsrc : winNav;
+                ? (IReadOnlyDictionary<FormKey, NavmeshGeometry>)nsrc : evaluatedNav;
             var iopt = new ViewProbe.InteractiveOptions
             {
                 Window = fpGw,
@@ -3637,7 +3749,7 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot)
                 skyColor, terrainHeightAt, dashUnderground, dashUnderStatics, msaa, cullAbove, cellBounds,
                 noDiff, diffColor, picks, fpCap, colourCaptions, npcActors, npcPucksOn, routeRenders, gridRender, overlayLines, keepFx, fxStatic, listMeshes,
                 waterPlanes, coverings, planes, showPlanes, occlusionMode, size, fpOut,
-                reportMode, camMeta, iopt, planeReportSink, bosMode, stateView, stateArm?.Name ?? "");
+                reportMode, camMeta, iopt, planeReportSink, bosMode, stateView, stateArm?.Name ?? "", navColourGroups: navColourGroups);
             Console.WriteLine($"   interactive run over ({iShapes:N0} shapes were resident)");
         pendingSwitch = iopt.CellSwitch;
             NpcCleanup();

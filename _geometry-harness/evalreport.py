@@ -435,6 +435,13 @@ def compile_plan(bundle_dir: Path, verify: dict, settings: dict, pr: dict, bundl
         kinds.setdefault(a, v.get("kind"))
     arm_ids = sorted(set(arms_disp) | set(plan_arms), key=lambda a: arm_sort_key(a, kinds))
     templates = pr.get("templates") or {}
+    reader_data = pr.get("reader") or {}
+    reader_comparison_templates = reader_data.get("comparisonTemplates") or {}
+    reader_verdict_templates = reader_data.get("verdictTemplates") or {}
+    overlap_terms = (reader_data.get("kindPhrases") or {}).get("OVERLAP") or {}
+
+    def overlap_candidate_noun(count: int) -> str:
+        return (overlap_terms["candidateSingular"] if count == 1 else overlap_terms["candidatePlural"])
 
     # --- evidence rows: E-<manifest id>, with the receipt's part attached where the manifest lacks it
     evidence = []
@@ -817,10 +824,19 @@ def compile_plan(bundle_dir: Path, verify: dict, settings: dict, pr: dict, bundl
             repaired_count = int(c.get("readerRepaired") or 0)
             check_phrase = ((pr.get("reader") or {}).get("regressionCheckPhrases") or {}).get(
                 f.get("checkId"), "completed check")
-            f["readerPlain"] = (f"The supplied setup introduced {fmt_n(new_count)} new "
-                                f"{noun(new_count, 'problem')} in the {check_phrase}." +
-                                (f" It also repaired {fmt_n(repaired_count)} existing {noun(repaired_count, 'problem')}; "
-                                 "those repairs do not cancel the new problem." if repaired_count else ""))
+            if f.get("checkId") == "geometry.object-overlap":
+                f["readerPlain"] = bind(reader_comparison_templates["overlapRegression"],
+                                        {"newCount": new_count,
+                                         "candidateNoun": overlap_candidate_noun(new_count)})
+                if repaired_count:
+                    f["readerPlain"] += bind(reader_comparison_templates["overlapRegressionReduction"],
+                                             {"repairedCount": repaired_count,
+                                              "candidateNoun": overlap_candidate_noun(repaired_count)})
+            else:
+                f["readerPlain"] = (f"The supplied setup introduced {fmt_n(new_count)} new "
+                                    f"{noun(new_count, 'problem')} in the {check_phrase}." +
+                                    (f" It also repaired {fmt_n(repaired_count)} existing {noun(repaired_count, 'problem')}; "
+                                     "those repairs do not cancel the new problem." if repaired_count else ""))
         elif f["kind"] == "finding" and c.get("A") and c.get("B"):
             sample = next((r.get("label") for r in f.get("rows") or [] if r.get("label")
                            and " tris" not in str(r.get("label")).lower()
@@ -840,9 +856,22 @@ def compile_plan(bundle_dir: Path, verify: dict, settings: dict, pr: dict, bundl
         elif f["kind"] in ("repaired", "reclassified"):
             repaired_count = int(c.get("readerRepaired") or 0)
             reclassified_count = int(c.get("readerReclassified") or 0)
-            f["readerPlain"] = (f"The supplied setup repaired {fmt_n(repaired_count)} existing "
-                                f"{noun(repaired_count, 'problem')} and changed which mod owns "
-                                f"{fmt_n(reclassified_count)} still-present {noun(reclassified_count, 'problem')}.")
+            if f.get("checkId") == "geometry.object-overlap":
+                clauses = []
+                if repaired_count:
+                    clauses.append(bind(reader_comparison_templates["overlapReduction"],
+                                        {"repairedCount": repaired_count,
+                                         "candidateNoun": overlap_candidate_noun(repaired_count)}))
+                if reclassified_count:
+                    clauses.append(bind(reader_comparison_templates["overlapReclassification"],
+                                        {"reclassifiedCount": reclassified_count,
+                                         "candidateNoun": overlap_candidate_noun(reclassified_count)}))
+                clauses.append(reader_comparison_templates["overlapQualification"])
+                f["readerPlain"] = " ".join(clauses)
+            else:
+                f["readerPlain"] = (f"The supplied setup repaired {fmt_n(repaired_count)} existing "
+                                    f"{noun(repaired_count, 'problem')} and changed which mod owns "
+                                    f"{fmt_n(reclassified_count)} still-present {noun(reclassified_count, 'problem')}.")
         elif f["kind"] == "null":
             diff_null = ((pr.get("reader") or {}).get("differentialNullPhrases") or {}).get(f.get("checkId"))
             f["readerPlain"] = (diff_null or "This comparison found no additional problem in the records it examined; "
@@ -1058,20 +1087,41 @@ def compile_plan(bundle_dir: Path, verify: dict, settings: dict, pr: dict, bundl
                   + (f"The supplied patch evaluated is {patch_text}." if supplied else
                      "No separate patch plugin was included in the comparison."))
     candidate_orders = [a.get("orderEvaluation") or {} for a in arms_out if a.get("kind") != "baseline"]
-    has_regression = any(f.get("kind") == "regression" and f.get("readerRelevant") for f in findings)
+    reader_regressions = [f for f in findings if f.get("kind") == "regression" and f.get("readerRelevant")]
+    has_regression = bool(reader_regressions)
+    overlap_created_total = sum(int((f.get("counts") or {}).get("readerCreated") or 0)
+                                for f in reader_regressions if f.get("checkId") == "geometry.object-overlap")
+    has_other_regression = any(f.get("checkId") != "geometry.object-overlap" for f in reader_regressions)
     repaired_total = sum(int((f.get("counts") or {}).get("readerRepaired") or 0) for f in findings
-                         if f.get("kind") in ("repaired", "reclassified") and f.get("readerRelevant"))
+                         if f.get("kind") in ("repaired", "reclassified") and f.get("readerRelevant")
+                         and f.get("checkId") != "geometry.object-overlap")
+    overlap_reduction_total = sum(int((f.get("counts") or {}).get("readerRepaired") or 0) for f in findings
+                                  if f.get("kind") in ("repaired", "reclassified") and f.get("readerRelevant")
+                                  and f.get("checkId") == "geometry.object-overlap")
     has_alternative = any(a.get("kind") != "baseline" for a in arms_out)
     has_completed_result = any(f.get("kind") in ("regression", "finding", "repaired", "reclassified", "null", "catalogue")
                                and f.get("readerRelevant") for f in findings)
     has_context_only = any(f.get("readerEvidenceReason") in ("context-only-kind", "context-only-or-inseparable")
                            for f in findings)
     if has_regression:
-        verdict = (("The supplied setup resolves some measured conflicts, but it also introduces a new defect in a check that ran."
-                    if repaired_total else
-                    "The supplied setup introduces a new defect in a check that ran."))
+        if has_other_regression:
+            verdict = ("The supplied setup resolves some measured conflicts, but it also introduces a new defect in a check that ran."
+                       if repaired_total else
+                       "The supplied setup introduces a new defect in a check that ran.")
+            if overlap_created_total:
+                verdict += bind(reader_verdict_templates["overlapAlongsideDefect"],
+                                {"createdCount": overlap_created_total,
+                                 "candidateNoun": overlap_candidate_noun(overlap_created_total)})
+        else:
+            verdict = bind(reader_verdict_templates["overlapOnlyRegression"],
+                           {"createdCount": overlap_created_total,
+                            "candidateNoun": overlap_candidate_noun(overlap_created_total)})
+        if overlap_reduction_total:
+            verdict += reader_verdict_templates["overlapReductionAlongsideRegression"]
     elif repaired_total:
         verdict = "The supplied setup resolves some measured conflicts and no new defect was reported by the checks that ran."
+    elif overlap_reduction_total:
+        verdict = reader_verdict_templates["overlapOnlyReduction"]
     elif has_context_only and not any(f.get("kind") in ("regression", "finding") and f.get("readerRelevant") for f in findings):
         verdict = ("The available results record navmesh overwrite history, but they cannot determine incompatibility "
                    "without a measured mismatch in the winning scene or links.")
@@ -1094,7 +1144,6 @@ def compile_plan(bundle_dir: Path, verify: dict, settings: dict, pr: dict, bundl
         limitations.append("The supplied patch was tested as a plugin only; its meshes, scripts and installer choices were not included.")
     if has_context_only:
         limitations.append("Navmesh overwrite history is retained in the evidence index as context and is not treated as proof of incompatibility.")
-    reader_data = pr.get("reader") or {}
     scope_limits = reader_data.get("scopeLimits") or {}
     other_limits = [scope_limits.get(x.get("extent"), "An additional area could not be assessed; see the full scope in the evidence index.")
                     for x in un.get("scopeUnmeasured") or [] if isinstance(x, dict)]

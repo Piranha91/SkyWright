@@ -13,6 +13,7 @@
     <CharacterViewerRenderingPath Condition="'$(CharacterViewerRenderingPath)' == ''">..\..\..\SynthEBD\CharacterViewer.Rendering\CharacterViewer.Rendering.csproj</CharacterViewerRenderingPath>
   </PropertyGroup>
   <ItemGroup>
+    <Using Include="System.IO" />
     <ProjectReference Include="..\..\src\housecarl-core\housecarl-core.csproj" />
     <!-- CharacterViewer.Rendering lives in a SEPARATE repo. This was an absolute drive path, which
          built on exactly one machine. Default assumes the two repos are siblings; override with
@@ -26,6 +27,8 @@
     <Compile Include="..\_shared\HarnessTarget.cs" Link="HarnessTarget.cs" />
     <Compile Include="..\_shared\ConflictReport.cs" Link="ConflictReport.cs" />
     <Compile Include="..\_shared\Configuration.cs" Link="Configuration.cs" />
+    <Compile Include="..\_shared\HarnessOrderCli.cs" Link="HarnessOrderCli.cs" />
+    <Compile Include="..\_shared\SyntheticOrder.cs" Link="SyntheticOrder.cs" />
     <Compile Include="..\_shared\DetectorModel.cs" Link="DetectorModel.cs" />
     <Compile Include="..\_shared\Worklist.cs" Link="Worklist.cs" />
     <Compile Include="..\_shared\CollisionLayers.cs" Link="CollisionLayers.cs" />

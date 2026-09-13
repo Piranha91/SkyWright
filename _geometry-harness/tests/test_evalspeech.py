@@ -81,6 +81,47 @@ class NarrationTests(unittest.TestCase):
         self.assertIsNone(result["storyboard"])
         evalspeech.verify_manifest(self.manifest_path())
 
+    def test_repeated_media_binds_each_occurrence_to_its_own_narration(self):
+        first = self.packet["scenes"][0]
+        self.packet["scenes"][0:1] = [
+            {**copy.deepcopy(first), "occurrenceIndex": n, "narration": text}
+            for n, text in enumerate(("Highlighted objects.", "Normal appearance.", "The same highlights return."))]
+        self.source.write_text(json.dumps(self.packet))
+        result = self.prepare()
+        bound = evalspeech.read_json(result["storyboard"]["path"])
+        self.assertEqual([r["occurrenceIndex"] for r in result["scenes"][:3]], [0, 1, 2])
+        self.assertEqual(len({r["audioPath"] for r in result["scenes"][:3]}), 3)
+        self.assertEqual([r["narrationAudio"] for r in bound["scenes"][:3]],
+                         [r["audioPath"] for r in result["scenes"][:3]])
+        self.assertEqual(self.spoken[:3], [r["narration"] for r in self.packet["scenes"][:3]])
+        self.assertEqual(evalspeech.verify_manifest(self.manifest_path()), result)
+        result["scenes"][2]["occurrenceIndex"] = 0
+        self.manifest_path().write_text(json.dumps(result))
+        with self.assertRaisesRegex(evalspeech.Refused, "binding"):
+            evalspeech.verify_manifest(self.manifest_path())
+
+    def test_gapped_and_invalid_occurrences_refused_before_loading_model(self):
+        for occurrence in (2, -1, True, 1.5):
+            with self.subTest(occurrence=occurrence):
+                self.packet["scenes"][0]["occurrenceIndex"] = occurrence
+                self.source.write_text(json.dumps(self.packet))
+                loader = Mock(side_effect=AssertionError("model must not load"))
+                with self.assertRaisesRegex(evalspeech.Refused, "occurrenceIndex"):
+                    self.prepare(loader)
+                loader.assert_not_called()
+                self.assertFalse(Path(self.args.out).exists())
+
+    def test_legacy_manifest_without_occurrence_indices_still_verifies(self):
+        result = self.prepare()
+        for row in result["scenes"]:
+            row.pop("occurrenceIndex")
+        self.manifest_path().write_text(json.dumps(result))
+        self.assertEqual(evalspeech.verify_manifest(self.manifest_path()), result)
+        result["scenes"][0]["occurrenceIndex"] = False
+        self.manifest_path().write_text(json.dumps(result))
+        with self.assertRaisesRegex(evalspeech.Refused, "occurrenceIndex"):
+            evalspeech.verify_manifest(self.manifest_path())
+
     def test_missing_source_never_loads_model_or_creates_output(self):
         self.source.unlink()
         loader = Mock(side_effect=AssertionError("model load should not happen"))

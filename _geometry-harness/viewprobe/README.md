@@ -62,6 +62,14 @@ A successful save or size check alone does not establish clean pixels.
 - **Instance/profile:** `--instance DIR --profile NAME --game DIR`. **Nothing is compiled in** —
   see *Where it points* below. A run with none of it configured exits with guidance rather than
   walking a directory that isn't there.
+- **Evaluation candidate:** `--order FILE` reads the same candidate configuration as the probes,
+  through `HarnessOrderCli`. Its plugin order and optional asset-provider list are used together;
+  without a `Mods` list, assets still come from the supplied base profile. It does not edit MO2.
+  Missing/illegal candidates refuse before rendering. Textured captures write a sibling
+  `*-configuration.json` with the input fingerprint, plugin hashes/providers, candidate hash and
+  view transformations. Compare that fingerprint with the accepted evaluation arm before qualifying
+  the media. `--nav-plugin` and `--compare` remain historical navmesh substitutions within this
+  input scene; the sidecar records them separately. Worklist shots each retain their declared state.
 - **Camera** (Skyrim coordinates; a `getpos`/`getangle` console line pastes straight in):
   `--eye X,Y,Z` | `--eye-ref FORMID` (+`--eye-height`, default 120), `--look X,Y,Z` |
   `--look-ref FORMID` | `--yaw DEG` (0 = north/+Y, clockwise) + `--pitch`, `--fov` (default 65).
@@ -94,8 +102,8 @@ A successful save or size check alone does not establish clean pixels.
   ring, matching the terrain. Before this, neighbours contributed terrain and nothing else, so any
   eye-level shot read near objects → void → bare ring terrain, with everything between absent
   (fixed 2026-08-28; a building 700 u away in the next cell simply never loaded). Navmesh and the conflict
-  overlay stay TARGET-CELL-ONLY — they are the annotation layer for the cell under examination,
-  scoped like the cell outline — but implicated DOORS standing in ring cells now render and
+  overlay default to the target cell; `--nav-cell` explicitly adds neighbouring annotation layers.
+  Implicated DOORS standing in ring cells render and
   highlight, and the "implicated door is NOT in the rendered cell(s)" message fires only for doors
   beyond the whole loaded set. `--no-ring-refs` returns to target-cell-only refs (cheaper — a
   dense ring can be ~8× the shapes). Interiors have no ring.
@@ -116,7 +124,28 @@ A successful save or size check alone does not establish clean pixels.
   Side panels are the winning state with that plugin's navmesh versions substituted — "the cell if
   this plugin won" — so records neither plugin touches are identical across panels and any visible
   difference IS the disagreement. `--nav-plugin X.esp` renders one plugin's versions in a single
-  view.
+  view. This is an exact-version view: records that plugin does not supply are absent.
+- **Shared navmesh view:** repeat `--nav-cell FORMKEY[=COLOUR]` to add up to eight explicit
+  neighbouring exterior cells' navmeshes. Full CELL FormKeys are required; participants must be
+  in the same worldspace's existing ±1 geometry ring. Unresolved, distant, interior, duplicate or
+  navmesh-empty participants are refused, as is `--no-ring-refs`. Optional colours are green,
+  cyan, magenta, yellow or blue; the target retains `--nav-color`. Red findings retain priority.
+  This does not expand terrain/geometry scope or change the target-cell outline. All ordinary
+  navmesh filters, depth/dash rendering and historical comparison semantics apply to the selected
+  layers. A selected cell need not fit in the camera; visually verify both participants.
+- **One historical NAVM over winners:** repeat `--nav-version NAVM_FORMKEY=Plugin.esp` (at most
+  32) to substitute exact record versions while retaining every other winning navmesh. Use this
+  for a historical neighbouring endpoint with the current source held fixed. Unresolved versions
+  or records outside the selected cells are refused; this option cannot combine with `--compare`
+  or `--nav-plugin`. It changes only navmesh annotation, never the whole world scene.
+  Example: `--nav-color cyan --nav-cell 001002:World.esm=magenta
+  --nav-version "001010:World.esm=Earlier.esp" --red 001011:World.esm:3`.
+  These explicit selections write `<cell>-navmeshes.json` with layer/cell/provider identities,
+  triangle counts, requested red indices and their actual existence/admission, camera and replay
+  arguments. With `--order`, it also carries the evaluated configuration fingerprint; otherwise
+  configuration identity is explicitly null. An absent triangle is never reconstructed or painted
+  from another version. Triangle admission is not proof of visible pixels or NPC behaviour.
+  `viewprobe --nav-selection-smoke` runs production-path known-answer selection/refusal checks.
 - **Terrain:** `--no-terrain` (off entirely), `--no-terrain-layers` (base layer only — no painted
   alpha layers and no base stand-ins).
 - **Water and coverings** (both ON by default — their ABSENCE was the bug, not their look):
@@ -2056,7 +2085,7 @@ and *Runtime enable state* above for the narrower claims that the evidence suppo
 **Only the target cell's objects loaded** (fixed 2026-08-28). Neighbouring exterior cells
 contributed terrain and nothing else, so eye-level shots showed near objects, void, then distant
 ring terrain. The target's grid is now resolved in a pre-pass and the main walk admits the ±1
-ring's refs. See *Ring refs* above for scoping (navmesh/overlay stay target-only) and the
+ring's refs. See *Ring refs* above for scoping (navmesh/overlay default to target-only) and the
 `--no-ring-refs` opt-out. Re-baseline any byte-exact reference renders after picking this fix up —
 exterior scenes gain geometry, and a camera composed before it may now sit behind a neighbour
 cell's structure.

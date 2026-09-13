@@ -17,6 +17,8 @@ using GlVec4 = OpenTK.Mathematics.Vector4;
 
 namespace ViewProbe;
 
+internal sealed record NavColourGroup(string Colour, IReadOnlyList<(Vector3 A, Vector3 B, Vector3 C)> Triangles);
+
 // TEXTURED, FIRST-PERSON RENDERING — "see what the tester will see".
 //
 // This is the charter's documented upgrade executed as documented: CharacterViewer.Rendering
@@ -329,7 +331,8 @@ static class TexturedScene
         string bosMode = "on",                             // --bos off | on | diff: the Base Object Swapper layer's paint (BosView.cs)
         string stateMode = "on",                           // --state-view on | diff: the world state's paint (StateView.cs)
         string stateName = "",                             // --state: the state's name for the caption and the window
-        int visibilityBudget = OcclusionState.DefaultVisibilityBudget)
+        int visibilityBudget = OcclusionState.DefaultVisibilityBudget,
+        IReadOnlyList<NavColourGroup>? navColourGroups = null)
     {
         var logger = new ConsoleCvLogger();
         var gate = new CharacterViewerLogGate { Verbose = Environment.GetEnvironmentVariable("VP_CV_VERBOSE") == "1" };
@@ -1729,6 +1732,10 @@ static class TexturedScene
                 Console.WriteLine("   nav colour: auto -> green (no healthy navmesh to sample under)");
         }
 
+        var healthyGroups = navColourGroups ?? new[] { new NavColourGroup("default", navTris) };
+        Vector4 GroupColour(NavColourGroup group) => group.Colour == "default" ? healthy
+            : palette.Single(p => p.Name == group.Colour).Color;
+
         // The translucent sheet still goes through the library renderer — it is surface, not
         // annotation, and it is supposed to be hidden by whatever covers it.
         if (wantNav && fillMode)
@@ -1739,9 +1746,10 @@ static class TexturedScene
             // shader multiplies the two, so "both" is not 0.16 of this sheet but 0.16²/0.35 —
             // see InteractiveViewer.FillAlpha).
             float alpha = interactive is not null ? 0.35f : navMode == "both" ? 0.16f : 0.35f;
-            if (navTris.Count > 0)
+            foreach (var group in healthyGroups.Where(g => g.Triangles.Count > 0))
             {
-                var m0 = BuildFill(navTris, new Vector4(healthy.X, healthy.Y, healthy.Z, alpha), "navmesh-fill");
+                var colour = GroupColour(group);
+                var m0 = BuildFill(group.Triangles, new Vector4(colour.X, colour.Y, colour.Z, alpha), "navmesh-fill");
                 m0.IsDecal = true;             // same insertion-ordered channel, added after the ground
                 renderer.AddMesh(m0); meshes.Add(m0);
                 interactive?.NavFill.Add(m0);
@@ -1958,9 +1966,12 @@ static class TexturedScene
         {
             if (wireMode && navTris.Count > 0)
             {
-                var (s, d) = BuildWire(navTris, healthy, 2.2f);
-                if (s.Count > 0) layers.Add((s.ToArray(), true, false, 1, 1f));
-                if (d.Count > 0) layers.Add((d.ToArray(), false, false, 1, 1f));
+                foreach (var group in healthyGroups)
+                {
+                    var (s, d) = BuildWire(group.Triangles, GroupColour(group), 2.2f);
+                    if (s.Count > 0) layers.Add((s.ToArray(), true, false, 1, 1f));
+                    if (d.Count > 0) layers.Add((d.ToArray(), false, false, 1, 1f));
+                }
             }
             // The finding is ALWAYS outlined, wider than the healthy wire, in every mode that
             // draws navmesh at all.

@@ -82,6 +82,10 @@ def unchanged(identity):
         raise Refused(f"source is missing or altered: {path}")
 
 
+def scene_key(row):
+    return row["chapterId"], row["captionIndex"], row.get("occurrenceIndex", 0)
+
+
 def read_source(args):
     source = checked_file(args.storyboard or args.text_file)
     if args.text_file:
@@ -98,17 +102,21 @@ def read_source(args):
         raise Refused("storyboard needs its original presentationId")
     if not isinstance(packet.get("scenes"), list) or not packet["scenes"]:
         raise Refused("storyboard scenes must be a nonempty list")
-    included, seen = [], set()
+    included, seen, occurrences = [], set(), {}
     for row in packet["scenes"]:
         if not isinstance(row, dict):
             raise Refused("storyboard scene must be an object")
         chapter, index = row.get("chapterId"), row.get("captionIndex")
         if not isinstance(chapter, str) or not chapter.strip() or type(index) is not int or index < 0:
             raise Refused("scene needs chapterId and a nonnegative integer captionIndex")
-        key = (chapter, index)
+        occurrence = row.get("occurrenceIndex", 0)
+        if type(occurrence) is not int or occurrence < 0:
+            raise Refused("occurrenceIndex must be a nonnegative integer")
+        key = scene_key(row)
         if key in seen:
-            raise Refused(f"duplicate scene identity: {chapter}[{index}]")
+            raise Refused(f"duplicate scene identity: {chapter}[{index}][{occurrence}]")
         seen.add(key)
+        occurrences.setdefault((chapter, index), set()).add(occurrence)
         if "omitFromReel" in row and type(row["omitFromReel"]) is not bool:
             raise Refused(f"omitFromReel must be boolean: {chapter}[{index}]")
         if row.get("omitFromReel") is True:
@@ -118,6 +126,9 @@ def read_source(args):
         if not isinstance(row.get("narration"), str) or not row["narration"].strip():
             raise Refused(f"included scene needs narration: {chapter}[{index}]")
         included.append(row)
+    for (chapter, index), values in occurrences.items():
+        if sorted(values) != list(range(len(values))):
+            raise Refused(f"occurrenceIndex must be contiguous from zero: {chapter}[{index}]")
     if not included:
         raise Refused("storyboard has no included narration")
     unchanged(source)
@@ -344,6 +355,7 @@ def prepare(args, run, loader=load_engine):
         samples, rate, detail = synthesize(text)
         audio = write_wave(out / name, samples, rate)
         row = {"chapterId": scene["chapterId"], "captionIndex": scene["captionIndex"],
+               "occurrenceIndex": scene.get("occurrenceIndex", 0),
                "mediaId": scene.get("mediaId"), "sourceSceneSha256": sha_object(scene),
                "text": text, "textSha256": sha_text(text), "pronunciationChanges": [],
                "seed": config["seed"], "audioPath": str(out / name), "audio": audio,
@@ -351,7 +363,7 @@ def prepare(args, run, loader=load_engine):
         rows.append(row)
         if bound is not None:
             target = next(item for item in bound["scenes"] if
-                          (item["chapterId"], item["captionIndex"]) == (scene["chapterId"], scene["captionIndex"]))
+                          scene_key(item) == scene_key(scene))
             target["narrationAudio"] = str(out / name)
         run.advance()
         run.artifact(str(out / name))
@@ -395,10 +407,11 @@ def verify_manifest(path):
         raise Refused("manifest scene count differs from source")
     expected = copy.deepcopy(packet)
     for scene, result in zip(scenes, manifest["scenes"]):
+        if type(result.get("occurrenceIndex", 0)) is not int or result.get("occurrenceIndex", 0) < 0:
+            raise Refused("manifest occurrenceIndex must be a nonnegative integer")
         if (sha_object(scene) != result["sourceSceneSha256"] or scene["narration"] != result["text"]
                 or sha_text(result["text"]) != result["textSha256"]
-                or (scene["chapterId"], scene["captionIndex"], scene.get("mediaId")) !=
-                   (result["chapterId"], result["captionIndex"], result["mediaId"])):
+                or scene_key(scene) != scene_key(result) or scene.get("mediaId") != result["mediaId"]):
             raise Refused("narration scene binding or text differs from source")
         unchanged({"path": result["audioPath"], "sha256": result["audio"]["sha256"]})
         with wave.open(result["audioPath"], "rb") as audio:
@@ -407,7 +420,7 @@ def verify_manifest(path):
                 raise Refused("WAV transport differs from the manifest")
         if expected:
             target = next(item for item in expected["scenes"] if
-                          (item["chapterId"], item["captionIndex"]) == (scene["chapterId"], scene["captionIndex"]))
+                          scene_key(item) == scene_key(scene))
             target["narrationAudio"] = result["audioPath"]
     if expected:
         unchanged(manifest["storyboard"])

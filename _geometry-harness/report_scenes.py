@@ -5,6 +5,7 @@ both participants and a declared ranking basis. Missing measurements never becom
 """
 from __future__ import annotations
 
+from copy import deepcopy
 import hashlib
 import json
 import math
@@ -112,8 +113,9 @@ def capture_requests(presentation: dict, bundle: Path, policy_path: Path = POLIC
                                "ranking": {"value": rank, "measurements": values, "basis": rule["metricLabel"], "limit": rule["metricLimit"]},
                                "views": views, "highlights": highlights, "corroboration": corroboration,
                                "explanation": rule["explanation"],
-                               "camera": {"reportMode": True, "lockPoseAndFramingAcrossViews": True, "pose": None,
-                                          "nextAction": "Resolve the location and both subjects; use shotplan to measure one camera before capture."},
+                               "camera": deepcopy({**policy["camera"], **rule.get("camera", {})}),
+                               "sequence": deepcopy(rule.get("sequence", {})),
+                               "review": deepcopy(rule.get("review", {})),
                                "status": "needs-capture-and-visual-review"}
                         candidates[rid] = row
                         groups.setdefault(key, []).append(rid)

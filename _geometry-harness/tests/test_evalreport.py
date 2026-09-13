@@ -15,6 +15,7 @@ a skip.
 """
 from __future__ import annotations
 
+import copy
 import hashlib
 import importlib.util
 import json
@@ -741,6 +742,71 @@ def case_r4(tmp, index, common):
     pres, p, r, v = compile_case(case, bundle, out)
     if pres is None:
         return
+
+    def overlap_wording_control(regression: bool, policy_marker: bool = False):
+        spec = importlib.util.spec_from_file_location("evalreport_overlap_wording", EVALREPORT)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        bundle_view = module.Bundle(bundle)
+        bundle_view.disposition = copy.deepcopy(bundle_view.disposition)
+        bundle_view.plan = copy.deepcopy(bundle_view.plan)
+        wanted = {"baseline", "candidate-02-patchb"}
+        bundle_view.disposition["arms"] = {k: v for k, v in bundle_view.disposition["arms"].items() if k in wanted}
+        bundle_view.plan["arms"] = [a for a in bundle_view.plan.get("arms") or [] if a.get("armId") in wanted]
+        evaluation = bundle_view.disposition["evaluation"]
+        for key in ("missing", "findings", "completedNullChecks", "completedCatalogues"):
+            evaluation[key] = [row for row in evaluation.get(key) or [] if row.get("armId") in wanted]
+        if regression:
+            order = bundle_view.disposition["arms"]["candidate-02-patchb"]["orderEvaluation"]
+            order["classification"] = "REGRESSION"
+            order["regression"] = True
+            order["perProbe"]["overlapprobe"] = {"verdict": "DIFFERENTIAL-VERIFIED", "repaired": 0,
+                                                    "reclassified": 0, "created": 1, "newDefect": 1,
+                                                    "attributed": 0, "unmeasured": 0}
+            diff_path = bundle / "overlap-regression-wording-control.txt"
+            diff_path.write_text("NEW     OVERLAP    FixtureTarget.esp  x  FixtureBase.esp   +1 record(s): created 1\n",
+                                 encoding="utf-8")
+            original_diff_path = bundle_view.diff_log_path
+            bundle_view.diff_log_path = lambda check_id, arm_id: (
+                diff_path.name if (check_id, arm_id) == ("geometry.object-overlap", "candidate-02-patchb")
+                else original_diff_path(check_id, arm_id))
+        priorities = module.load_json(module.PRIORITIES)
+        if policy_marker:
+            priorities["reader"]["comparisonTemplates"]["overlapReduction"] = (
+                "POLICY OVERLAP REDUCTION {repairedCount} {candidateNoun}.")
+            priorities["reader"]["verdictTemplates"]["overlapOnlyReduction"] = "POLICY OVERLAP VERDICT."
+        concise = priorities.get("concise") or {}
+        page = priorities.get("page") or {}
+        settings = {"mode": "concise", "layout": concise.get("layout", "normal"), "maxPages": 8,
+                    "page": {"size": page.get("size", "A4"), "marginMm": page.get("marginMm", 16),
+                             "baseFontPt": page.get("baseFontPt", 10.5)},
+                    "rowsPerGroup": concise.get("rowsPerGroup", 3),
+                    "figuresPerFinding": concise.get("figuresPerFinding", 1),
+                    "reel": priorities.get("reel") or {}}
+        original_bundle = module.Bundle
+        try:
+            module.Bundle = lambda _: bundle_view
+            return module.compile_plan(bundle, {"bundle": {"complete": True},
+                                                "evaluation": {"complete": False, "claim": "incomplete"}},
+                                       settings, priorities, str(bundle))
+        finally:
+            module.Bundle = original_bundle
+
+    reduction_control = overlap_wording_control(False)
+    reduction_verdict = str((reduction_control.get("reader") or {}).get("verdict") or "").lower()
+    check("reduces the number of overlap candidates" in reduction_verdict and "resolves some measured conflicts" not in reduction_verdict,
+          f"{case}: compile_plan keeps an overlap-only reduction as candidates rather than a repair verdict")
+    regression_control = overlap_wording_control(True)
+    regression_verdict = str((regression_control.get("reader") or {}).get("verdict") or "").lower()
+    check("introduces 1 new overlap candidate" in regression_verdict and "new defect" not in regression_verdict,
+          f"{case}: compile_plan keeps an overlap-only regression as a candidate rather than a defect verdict")
+    policy_control = overlap_wording_control(False, policy_marker=True)
+    policy_overlap = [f for f in policy_control.get("findings") or []
+                      if f.get("checkId") == "geometry.object-overlap"
+                      and f.get("kind") in ("repaired", "reclassified")]
+    check((policy_control.get("reader") or {}).get("verdict") == "POLICY OVERLAP VERDICT."
+          and any(str(f.get("readerPlain") or "").startswith("POLICY OVERLAP REDUCTION") for f in policy_overlap),
+          f"{case}: compile_plan selects overlap reader wording from report-priorities policy")
     md, _ = assert_common(case, bundle, out, pres, common, v) or ("", "")
     fs = pres.get("findings") or []
     rg = o["regression"]
@@ -767,6 +833,14 @@ def case_r4(tmp, index, common):
     raw_terms.update((pres.get("scope") or {}).get("checks") or {})
     leaked = sorted(t for t in raw_terms if t and t in all_narration)
     expect(leaked, [], f"{case}: default chapter narration contains no probe, status, check-id or arm-id terms")
+    overlap_reductions = [f for f in fs if f.get("kind") in ("repaired", "reclassified")
+                          and f.get("checkId") == "geometry.object-overlap" and f.get("readerRelevant")]
+    confirmed_repairs = [f for f in fs if f.get("kind") in ("repaired", "reclassified")
+                         and f.get("checkId") != "geometry.object-overlap" and f.get("readerRelevant")
+                         and int((f.get("counts") or {}).get("readerRepaired") or 0)]
+    if overlap_reductions and not confirmed_repairs:
+        check("overlap candidates" in reader_verdict.lower() and "resolves some measured conflicts" not in reader_verdict.lower(),
+              f"{case}: overlap-candidate reductions do not become a repair claim in reader.verdict")
     check(rg["plainContainsNumber"] in [int(x) for x in re.findall(r"\b\d+\b", str(f1.get("plain") or ""))],
           f"{case}: F-001's sentence carries the bound number 1")
     low = str(f1.get("plain") or "").lower()
@@ -784,6 +858,17 @@ def case_r4(tmp, index, common):
             expect((hit[0].get("counts") or {}).get("repaired"), spec["countsRepaired"], f"{case}: {hit[0].get('id')} counts.repaired", "D3 (4)")
             expect(hit[0].get("verdict"), spec["verdict"], f"{case}: {hit[0].get('id')} verdict verbatim", "D3 (3)")
             check(hit[0].get("priority", 0) > f1.get("priority", 0), f"{case}: {hit[0].get('id')} priority > the regression's")
+            if spec["checkId"] == "geometry.object-overlap":
+                reader_plain = str(hit[0].get("readerPlain") or "").lower()
+                check("overlap candidate" in reader_plain and "visual review" in reader_plain,
+                      f"{case}: overlap reductions remain candidates for visual review")
+                check("repaired 1 existing problem" not in reader_plain,
+                      f"{case}: overlap reductions are not narrated as confirmed problem repairs")
+                comparison_narration = " ".join(str(cap.get("narration") or "") for chapter in pres.get("chapters") or []
+                                                if chapter.get("kind") == "comparison" and hit[0].get("id") in (chapter.get("findingIds") or [])
+                                                for cap in chapter.get("captions") or []).lower()
+                check("overlap candidate" in comparison_narration and "repaired 1 existing problem" not in comparison_narration,
+                      f"{case}: comparison narration preserves the overlap-candidate qualification")
     for s in o["report"]["mdContains"]:
         check(s in md, f"{case}: report.md contains {s!r}")
     rep_ids = [f.get("id") for f in fs if f.get("kind") == "repaired"]
