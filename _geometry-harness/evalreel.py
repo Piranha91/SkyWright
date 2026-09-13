@@ -692,6 +692,10 @@ def render_reel(a, run) -> int:
             apath = (bundle_dir / supplied) if bundle_dir else Path(supplied)
             method = "supplied"
         else:
+            if not a.voice or not a.voice.strip():
+                return refuse(f"narration-refused: {s['chapterId']}: prepare narrationAudio with evalspeech.py "
+                              "(Kokoro George on CPU by default), or explicitly select an installed Windows voice "
+                              "with --voice; no automatic voice fallback", out)
             helper = HERE / "winrt-tts" / "Program.cs"
             speech_key = sha256_text(s["narration"] + "\n" + (a.voice or "<default>") + "\n" + sha256_file(helper))[:12]
             apath = audio_dir / f"{s['index']:03d}-{speech_key}.wav"
@@ -884,7 +888,7 @@ def main(argv=None) -> int:
     r.add_argument("--bundle", default=None, help="where the plan's bundle-relative media paths resolve "
                                                   "(default: source.bundleDir, relative to the presentation)")
     r.add_argument("--ffmpeg", default=None, help="an explicit ffmpeg binary (first in the resolution order)")
-    r.add_argument("--voice", default=None, help="installed Windows System.Speech voice name (default: system voice)")
+    r.add_argument("--voice", default=None, help="explicitly opt into an installed Windows WinRT voice; otherwise supply narrationAudio from evalspeech.py")
     r.add_argument("--storyboard", default=None, help="reviewed storyboard packet; overlays visual direction in memory without changing presentation.json")
     r.add_argument("--dry-run", action="store_true", help="print the segment plan and render nothing")
     r.set_defaults(fn=cmd_render)

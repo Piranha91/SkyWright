@@ -118,6 +118,9 @@ def main():
       missing_audio=json.loads(pp.read_text()); missing_audio["chapters"][1]["captions"][0]["narrationAudio"]="media/absent.wav"
       ap=root/"absent-audio.json"; ap.write_text(json.dumps(missing_audio)); ar=call(ap,root/"absent-audio")
       check(ar.returncode==2 and "narration-refused" in ar.stdout+ar.stderr and not (root/"absent-audio/reel.mp4").exists(),"missing speech refuses without producing a silent reel")
+      unprepared=json.loads(pp.read_text()); unprepared["chapters"][0]["captions"][0].pop("narrationAudio")
+      up=root/"unprepared-audio.json"; up.write_text(json.dumps(unprepared)); ur=call(up,root/"unprepared-audio")
+      check(ur.returncode==2 and "prepare narrationAudio with evalspeech.py" in ur.stdout+ur.stderr and not list((root/"unprepared-audio/narration").glob("*.wav")),"unprepared narration refuses before choosing or generating a Windows voice")
       packet=root/"storyboard.json"; pr=subprocess.run([sys.executable,str(HARNESS/"evalreel.py"),"storyboard-packet","--presentation",str(pp),"--out",str(packet)],capture_output=True,text=True); check(pr.returncode==0 and len(load(packet)["scenes"])==4,"storyboard review packet covers every scene")
       relocated=root/"moved"; shutil.copytree(root/"media",relocated/"media"); moved=json.loads(pp.read_text()); moved["source"]["bundleDir"]=str(relocated); mpp=root/"moved.json"; mpp.write_text(json.dumps(moved)); mr=call(mpp,root/"moved-out"); check(mr.returncode==0,"bundle relocation preserves media resolution")
       check([s["cacheKey"] for s in load(out/"reel-map.json")["segments"]]==keys,"cache keys remain stable")
