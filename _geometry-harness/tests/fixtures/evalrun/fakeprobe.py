@@ -25,7 +25,30 @@ no-configuration, wrong-state, extraction-failed, crash-after.
 A scenario may also carry `identityDamage`: a list of rules that mutate ONE thing about an otherwise
 canonical Configuration, keyed on the emit stem (one part of one arm) or the order stem (every
 emit-writing probe run over one candidate file). Kinds: wrong-order, wrong-hash, bad-fingerprint,
-empty-identity, wrong-reference-order. See `damage_identity`.
+empty-identity, wrong-reference-order, wrong-copy. See `damage_identity` (and `resolve_name` for
+wrong-copy, which is applied while the order is resolved rather than after).
+
+RESOLVING A PLUGIN THE pluginDir DOES NOT HOLD (Q44 / D1). A candidate may name a plugin that is not
+in `pluginDir` — a supplied patch. It is then resolved through `--instance/--profile/--game` (or
+HOUSECARL_MO2_INSTANCE / _PROFILE / HOUSECARL_GAME_PATH, which every child also receives) by the
+probes' OWN precedence, written here from `_shared/HarnessOrderCli.cs` (`BuildLayerMap`, `ProviderOf`
+and the out-of-view LIMIT sentence) and `src/housecarl-core/Mo2LoadOrder.cs` (`ParseModlist`) — NOT
+from evalrun.py, which implements the same definition independently. The five layers, first sighting
+wins, names compared case-insensitively, `.esp/.esm/.esl` at a folder's top level only, an absent or
+unreadable folder skipped:
+
+    1 <instance>/overwrite
+    2 the view's mod folders in priority order (the candidate's `Mods` if it has one, else the
+      scope's `configuration.providers` of kind `mod` in their recorded order)
+    3 <game>/Data
+    4 the profile's enabled mods (`+` lines of modlist.txt, file order) that are not in the view
+    5 the profile's disabled mods (`-` lines, file order)
+
+`Provider` is the layer's name (`overwrite`, the mod folder's own name, `Data`). A plugin resolved
+from layer 4 or 5 adds the C#'s out-of-view sentence to `Configuration.Limits`, one line per folder.
+When an instance is configured and NO layer provides the name, this refuses with the C#'s wording and
+exits 2 without writing the emit. With no instance configured the pluginDir IS the layer map and a
+missing file keeps its zero-hash row — case 13's `plugin-gone` step rests on exactly that.
 """
 from __future__ import annotations
 
@@ -67,19 +90,160 @@ def fingerprint(plugins, providers, overlays, population, state) -> str:
     return hashlib.sha256("".join(sb).encode("utf-8")).hexdigest()
 
 
-def plugin_rows(names, plugin_dir: Path) -> list:
+PLUGIN_EXTS = (".esp", ".esm", ".esl")
+
+
+class Unresolved(Exception):
+    """No layer provides a name the candidate lists. The C# refuses the whole order for this."""
+
+
+def parse_modlist(path: Path):
+    """Mo2LoadOrder.ParseModlist: `+Name` enabled, `-Name` disabled, `#` a comment, a `…_separator`
+    name skipped from BOTH lists, every other line ignored; FILE ORDER, top line highest priority.
+    Returns (enabled, disabled, readable) — an unreadable modlist is not an empty one."""
+    p = Path(path)
+    if not p.is_file():
+        return [], [], False
+    try:
+        lines = p.read_text(encoding="utf-8", errors="replace").splitlines()
+    except OSError:
+        return [], [], False
+    enabled, disabled = [], []
+    for raw in lines:
+        line = raw.rstrip()
+        if not line or line[0] == "#":
+            continue
+        marker = line[0]
+        if marker not in "+-":
+            continue
+        name = line[1:].strip()
+        if not name or name.lower().endswith("_separator"):
+            continue
+        (enabled if marker == "+" else disabled).append(name)
+    return enabled, disabled, True
+
+
+def resolve_ctx(a: dict, scen: dict, candidate: dict) -> dict:
+    """The instance the layers are walked in. The flags come first; a probe run without them finds the
+    same instance through HarnessTarget's environment variables, so the fallback is not a guess."""
+    instance = a.get("instance") or os.environ.get("HOUSECARL_MO2_INSTANCE")
+    profile = a.get("profile") or os.environ.get("HOUSECARL_MO2_PROFILE")
+    game = a.get("game") or os.environ.get("HOUSECARL_GAME_PATH")
+    # HarnessOrderCli.cs:147 is `cand.Mods ?? comp.EnabledMods`: an EMPTY Mods list is a real empty
+    # view — the candidate stages no mod folders — and only a NULL or absent one falls back. A
+    # truthiness test here silently turns the first into the second.
+    view = candidate.get("Mods", candidate.get("mods"))
+    if view is None:
+        view = []
+        scope_path = scen.get("scopeFrom")
+        if scope_path and Path(scope_path).is_file():
+            try:
+                doc = json.loads(Path(scope_path).read_text(encoding="utf-8"))
+            except ValueError:
+                doc = {}
+            cfg = doc.get("configuration") or doc.get("Configuration") or {}
+            for v in cfg.get("providers", cfg.get("Providers", [])) or []:
+                if str(v.get("kind", v.get("Kind", ""))).lower() == "mod":
+                    view.append(str(v.get("name", v.get("Name"))))
+    return {"instance": instance, "profile": profile, "game": game, "view": list(view)}
+
+
+def build_layer_map(ctx: dict) -> dict:
+    """HarnessOrderCli.BuildLayerMap: lowercase filename -> (layer name, path), first sighting wins."""
+    inst = ctx.get("instance")
+    if not inst:
+        return {}
+    root = Path(inst)
+    mods = root / "mods"
+    layers = [("overwrite", root / "overwrite", "view")]
+    view = list(ctx.get("view") or [])
+    for m in view:
+        layers.append((m, mods / m, "view"))
+    if ctx.get("game"):
+        layers.append(("Data", Path(ctx["game"]) / "Data", "view"))
+    enabled, disabled, _ = parse_modlist(root / "profiles" / str(ctx.get("profile") or "") / "modlist.txt")
+    in_view = {m.lower() for m in view}
+    for m in enabled:
+        if m.lower() not in in_view:
+            layers.append((m, mods / m, "out-of-view"))
+    for m in disabled:
+        if m.lower() not in in_view:
+            layers.append((m, mods / m, "out-of-view"))
+
+    out = {}
+    for layer, d, kind in layers:
+        try:
+            entries = sorted(Path(d).iterdir())
+        except OSError:
+            continue                                   # an absent or unreadable folder is skipped
+        for f in entries:
+            if not f.is_file() or f.suffix.lower() not in PLUGIN_EXTS:
+                continue
+            out.setdefault(f.name.lower(), (layer, f, kind))
+    return out
+
+
+def resolve_name(name: str, plugin_dir: Path, ctx: dict | None, wrong_copy: dict | None):
+    """(path, provider, kind) for one plugin name. The pluginDir copy is the fixture's own in-view
+    layer; anything else is resolved through the instance. `wrong_copy` reads the named folder's copy
+    instead of the precedence winner — the fixture's way of being a probe that read another copy."""
+    if wrong_copy and str(wrong_copy.get("plugin", "")).lower() == name.lower():
+        folder = str(wrong_copy.get("folder") or "")
+        inst = (ctx or {}).get("instance")
+        if not inst:
+            raise Unresolved(f"identityDamage wrong-copy needs an instance to read '{folder}' from")
+        src = Path(inst) / "mods" / folder / name
+        if not src.is_file():
+            raise Unresolved(f"identityDamage wrong-copy names '{folder}', which holds no {name}")
+        return src, folder, "out-of-view"
+    local = plugin_dir / name
+    if local.exists():
+        return local, "fixture-mods", "view"
+    hit = build_layer_map(ctx or {}).get(name.lower())
+    if hit:
+        layer, path, kind = hit
+        return path, layer, kind
+    if (ctx or {}).get("instance"):
+        raise Unresolved(name)
+    return local, "fixture-mods", "view"               # no instance: today's zero-hash row
+
+
+def plugin_rows(names, plugin_dir: Path, ctx: dict | None = None, wrong_copy: dict | None = None) -> list:
     rows = []
     for name in names:
-        path = plugin_dir / name
-        ext = path.suffix.lower()
+        path, provider, _kind = resolve_name(name, plugin_dir, ctx, wrong_copy)
+        ext = Path(name).suffix.lower()
         rows.append({
             "Name": name, "Path": str(path).replace("\\", "/"),
             "Sha256": sha256_file(path) if path.exists() else "0" * 64,
             "Bytes": path.stat().st_size if path.exists() else 0,
-            "Provider": "fixture-mods", "MasterFlag": ext in (".esm", ".esl"),
+            "Provider": provider, "MasterFlag": ext in (".esm", ".esl"),
             "LightFlag": ext == ".esl", "Masters": [],
         })
     return rows
+
+
+def out_of_view_limits(rows, ctx: dict | None) -> list:
+    """HarnessOrderCli's sentence, one line per offending FOLDER naming its plugins — seventy
+    near-identical lines would bury the one that matters."""
+    in_view = {m.lower() for m in (ctx or {}).get("view") or []}
+    by_folder = {}
+    for r in rows:
+        p = str(r.get("Provider") or "")
+        if p in ("overwrite", "Data") or p.lower() in in_view:
+            continue
+        by_folder.setdefault(p, []).append(r["Name"])
+    return [f"{len(names)} plugin(s) were resolved from the folder '{folder}', which is NOT in this "
+            "configuration's asset view: their RECORDS load, but that folder's meshes, textures, "
+            "scripts and BSAs are not in the view, and the copy read there may not be the copy the "
+            "game would load. A geometry or script result that depends on them is not established "
+            f"here. [{', '.join(names)}]"
+            for folder, names in by_folder.items()]
+
+
+def refusal_text(name: str) -> str:
+    return (f"candidate names '{name}', but no mod folder, the overwrite layer or the game Data "
+            "folder provides a file by that name. A missing plugin is a DIFFERENT order, not this one.")
 
 
 def identity_rule(scen: dict, order_stem: str, emit_stem: str) -> dict | None:
@@ -128,8 +292,10 @@ def damage_identity(cfg: dict, rule: dict, plugin_dir: Path) -> dict:
     return cfg
 
 
-def configuration(candidate: dict, candidate_path: Path, plugin_dir: Path, population: str, state: str, limits) -> dict:
-    plugins = plugin_rows(candidate.get("Plugins") or candidate.get("plugins") or [], plugin_dir)
+def configuration(candidate: dict, candidate_path: Path, plugin_dir: Path, population: str, state: str, limits,
+                  ctx: dict | None = None, wrong_copy: dict | None = None) -> dict:
+    plugins = plugin_rows(candidate.get("Plugins") or candidate.get("plugins") or [], plugin_dir,
+                          ctx, wrong_copy)
     providers = [{"Name": "overwrite", "Kind": "overwrite"},
                  {"Name": "fixture-mods", "Kind": "mod"},
                  {"Name": "Data", "Kind": "data"}]
@@ -140,7 +306,8 @@ def configuration(candidate: dict, candidate_path: Path, plugin_dir: Path, popul
         "Source": f"candidate:{candidate_path.name}",
         "Plugins": plugins, "Providers": providers, "Overlays": overlays,
         "Population": population, "State": state,
-        "Limits": list(limits or []), "Unknown": dict(DEFAULT_UNKNOWN),
+        "Limits": list(limits or []) + out_of_view_limits(plugins, ctx),
+        "Unknown": dict(DEFAULT_UNKNOWN),
     }
 
 
@@ -326,9 +493,22 @@ def main(probe: str, argv=None) -> int:
     order = Path(a["order"]) if a.get("order") else None
     candidate = json.loads(order.read_text(encoding="utf-8")) if order else {"Plugins": []}
     limits = candidate.get("Limits") or []
-    cfg = configuration(candidate, order, plugin_dir, population, state, limits)
     rule = identity_rule(scen, order.stem if order else "-", stem)
-    if rule:
+    ctx = resolve_ctx(a, scen, candidate)
+    # wrong-copy is a RESOLUTION-time damage: the probe reads another folder's copy, so the path, the
+    # hash, the provider, the out-of-view limit and the fingerprint all follow from what it read.
+    wrong_copy = rule if rule and rule.get("kind") == "wrong-copy" else None
+    try:
+        cfg = configuration(candidate, order, plugin_dir, population, state, limits, ctx, wrong_copy)
+    except Unresolved as ex:
+        name = str(ex)
+        print("REFUSED: " + (refusal_text(name) if " " not in name else name), file=sys.stderr)
+        return 2
+    if wrong_copy:
+        row = next((p for p in cfg["Plugins"] if p["Name"].lower() == str(wrong_copy["plugin"]).lower()), None)
+        print(f"fakeprobe: identityDamage wrong-copy read {wrong_copy.get('folder')}'s copy of "
+              f"{wrong_copy.get('plugin')} (sha {str((row or {}).get('Sha256'))[:12]})")
+    elif rule:
         cfg = damage_identity(cfg, rule, plugin_dir)
         if cfg is None:                       # a sabotage that would not sabotage is a broken fixture
             return 2

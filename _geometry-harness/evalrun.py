@@ -126,6 +126,16 @@ def is_sha256(value) -> bool:
     return isinstance(value, str) and bool(SHA256_RE.match(value))
 
 
+def same_path(a, b) -> bool:
+    """Two spellings of one file compared the way the filesystem under these tools does: separators
+    unified, `.`/`..` folded, case ignored. `X:/inst\\mods\\M\\P.esp` and `X:\\inst\\mods\\M\\p.esp` are
+    one file, and a plan that resolved the first must not read the second as a different copy."""
+    def norm(p):
+        s = str(p).replace("\\", os.sep).replace("/", os.sep)
+        return os.path.normcase(os.path.normpath(s))
+    return bool(a) and bool(b) and norm(a) == norm(b)
+
+
 #: The configuration schema the fingerprint text is keyed on (`ConfigurationIdentity.CurrentSchema`).
 CONFIG_SCHEMA = 1
 
@@ -370,30 +380,152 @@ def arm_id(kind: str, stem: str, index: int) -> str:
     return "baseline" if kind == "baseline" else stem
 
 
-def provides(name: str, scope_plugins: dict, instance: str | None) -> str:
-    """Which layer provides this plugin file, in HarnessOrderCli's own precedence order: overwrite,
-    the enabled mod folders, Data - all of which the measured configuration already lists - and then
-    the folders OUT of the profile's view. A plugin only an out-of-view folder provides is a real
-    file whose assets are certainly not staged; `missing` is reserved for a file NO layer provides."""
+#: The file kinds a layer provides, from `HarnessOrderCli.BuildLayerMap`'s extension filter.
+PLUGIN_SUFFIXES = (".esp", ".esm", ".esl")
+
+_FOLDER_PLUGINS: dict[str, dict] = {}
+_MODLISTS: dict[tuple, tuple] = {}
+
+
+def _folder_plugins(folder: str) -> dict:
+    """The `.esp/.esm/.esl` files at ONE folder's top level, keyed by lower-case name — the C#'s
+    `Directory.GetFiles(dir)` inside its try/catch: an absent or unreadable folder is SKIPPED, which is
+    not the same as a folder that provides nothing, but the layer map cannot tell the two apart either.
+    Cached per folder: a profile lists hundreds of them and one plan reads each once."""
+    hit = _FOLDER_PLUGINS.get(folder)
+    if hit is None:
+        hit = {}
+        try:
+            with os.scandir(folder) as it:
+                for e in it:
+                    if e.is_file() and os.path.splitext(e.name)[1].lower() in PLUGIN_SUFFIXES:
+                        hit.setdefault(e.name.lower(), os.path.join(folder, e.name))
+        except OSError:
+            hit = {}
+        _FOLDER_PLUGINS[folder] = hit
+    return hit
+
+
+def _modlist(instance: str, profile: str | None) -> tuple[list, list, bool, str | None]:
+    """`(enabled, disabled, read, path)` for `<instance>/profiles/<profile>/modlist.txt`, mirroring
+    `Mo2LoadOrder.ParseModlist` (`src/housecarl-core/Mo2LoadOrder.cs`): `+Name` is enabled, `-Name`
+    disabled, `#` a comment, a `…_separator` name is skipped from BOTH lists, and the file's order is
+    the priority order with the TOP line the highest. `read` is false when no profile was named or the
+    file will not open — the layers it defines are then UNKNOWN, never empty."""
+    key = (str(instance), str(profile or ""))
+    hit = _MODLISTS.get(key)
+    if hit is not None:
+        return hit
+    if not profile:
+        hit = ([], [], False, None)
+    else:
+        path = os.path.join(instance, "profiles", str(profile), "modlist.txt")
+        enabled, disabled = [], []
+        try:
+            with open(path, "r", encoding="utf-8", errors="replace") as f:
+                lines = f.read().splitlines()
+        except OSError:
+            hit = ([], [], False, path)
+        else:
+            for raw in lines:
+                line = raw.rstrip()
+                if not line or line[0] == "#" or line[0] not in "+-":
+                    continue
+                mod = line[1:].strip()
+                if not mod or mod.lower().endswith("_separator"):
+                    continue
+                (enabled if line[0] == "+" else disabled).append(mod)
+            hit = (enabled, disabled, True, path)
+    _MODLISTS[key] = hit
+    return hit
+
+
+def plugin_layers(name: str, view_mods, *, instance: str | None, profile: str | None,
+                  game: str | None) -> dict:
+    """Every layer that provides this plugin file, in the probes' own precedence order.
+
+    The one Python spelling of `HarnessOrderCli.BuildLayerMap`
+    (`_geometry-harness/_shared/HarnessOrderCli.cs`), reading the profile through
+    `Mo2LoadOrder.ParseModlist` (`src/housecarl-core/Mo2LoadOrder.cs`). The layers, in order:
+    `<instance>/overwrite`; the VIEW's mod folders in priority order (the candidate's own `Mods` list
+    if it has one, else the scope's providers of kind `mod` as recorded), each `<instance>/mods/<name>`;
+    `<game>/Data`; the profile's ENABLED mods that are not in the view; then its DISABLED mods. First
+    sighting of a file name wins, names compare case-insensitively, only `.esp/.esm/.esl` at a folder's
+    top level count, and an absent or unreadable folder is skipped.
+
+    The probes take the game folder from `HOUSECARL_GAME_PATH` or the harness config and ALWAYS walk its
+    `Data`; a plan given no `--game` walks the other layers and says so in `gameWalked`, and one given no
+    `--profile` cannot list the profile's folders at all (`profileNamed`). The caller states a hash only
+    when the walk was whole enough to name the copy a probe would read.
+
+    Returns `{"rows": [{layer, path, sha256}, …], "views": [str, …], "modlistRead", "modlistPath",
+    "gameWalked", "profileNamed"}`.
+    `rows` is in precedence order, so `rows[0]` is the copy a probe would read, and each `views` entry
+    says `in-view` (layers 1–3), `out-of-view` (4–5) or `unknown`. An `unknown` row is a folder under
+    `mods/` seen only because modlist.txt would not read: it is NOT a layer — without the modlist the
+    probe has no priority order for those folders and refuses the order rather than pick a copy — and it
+    is listed so the ambiguity is stated rather than guessed at."""
+    out = {"rows": [], "views": [], "modlistRead": True, "modlistPath": None,
+           "gameWalked": bool(game), "profileNamed": bool(profile)}
+    if not instance:
+        out["modlistRead"] = False
+        return out
+    plain = os.path.basename(str(name))
+    key = plain.lower()
+    in_view = {str(m).lower() for m in view_mods}
+    layers: list[tuple[str, str, str]] = [("overwrite", os.path.join(instance, "overwrite"), "in-view")]
+    for m in view_mods:
+        layers.append((str(m), os.path.join(instance, "mods", str(m)), "in-view"))
+    if game:
+        layers.append(("Data", os.path.join(game, "Data"), "in-view"))
+    enabled, disabled, modlist_read, modlist_path = _modlist(instance, profile)
+    out["modlistRead"], out["modlistPath"] = modlist_read, modlist_path
+    for m in list(enabled) + list(disabled):
+        if str(m).lower() not in in_view:
+            layers.append((str(m), os.path.join(instance, "mods", str(m)), "out-of-view"))
+
+    seen_dirs = set()
+    for layer, folder, view in layers:
+        if folder.lower() in seen_dirs:
+            continue
+        seen_dirs.add(folder.lower())
+        path = _folder_plugins(folder).get(key)
+        if path:
+            out["rows"].append({"layer": layer, "path": path, "sha256": sha256_file(Path(path))})
+            out["views"].append(view)
+    if not modlist_read:
+        # The modlist is what puts the folders outside the view in priority order. Without it they are
+        # not layers, but the copies they hold are real and the reader is told where they are.
+        mods_dir = os.path.join(instance, "mods")
+        try:
+            folders = sorted((e.path for e in os.scandir(mods_dir) if e.is_dir()), key=str.lower)
+        except OSError:
+            folders = []
+        for folder in folders:
+            if folder.lower() in seen_dirs:
+                continue
+            path = _folder_plugins(folder).get(key)
+            if path:
+                out["rows"].append({"layer": "(not in modlist.txt)", "path": path,
+                                    "sha256": sha256_file(Path(path))})
+                out["views"].append("unknown")
+    return out
+
+
+def provides(name: str, scope_plugins: dict, resolve=None) -> str:
+    """Which layer provides this plugin file, derived from the SAME walk as `requested_plugin`
+    (`plugin_layers`): `in-view` when the measured configuration lists the name or a layer 1–3 provides
+    it, `out-of-view` when only a folder outside the view does — a real file whose assets are certainly
+    not staged — and `missing`, reserved for a name NO folder provides at all."""
     if name.lower() in scope_plugins:
         return "in-view"
-    if instance:
-        root = Path(instance)
-        for sub in ("overwrite", "mods"):
-            base = root / sub
-            if not base.is_dir():
-                continue
-            if (base / name).exists():
-                return "out-of-view"
-            try:
-                for folder in base.iterdir():
-                    if folder.is_dir() and (folder / name).exists():
-                        return "out-of-view"
-            except OSError:
-                continue
-        if (root / "Data" / name).exists():
-            return "out-of-view"
-    return "missing"
+    res = resolve(name) if resolve else None
+    views = (res or {}).get("views") or []
+    if not views:
+        return "missing"
+    # Precedence order: the first row is the copy a probe would read. A row the modlist could not rank
+    # is still a real file outside the view, so it answers out-of-view rather than missing.
+    return "in-view" if views[0] == "in-view" else "out-of-view"
 
 
 def read_candidate(p: Path) -> dict | None:
@@ -401,14 +533,68 @@ def read_candidate(p: Path) -> dict | None:
     return doc if isinstance(doc, dict) else None
 
 
-def requested_plugin(name, scope_plugins: dict) -> dict:
-    """One row of D1's requested plugin list. The hash is looked up in the MEASURED scope by
-    case-insensitive name; a name the scope does not list — a supplied plugin, or one the profile does
-    not load — is `unstated` with a null hash, never a hash invented from somewhere else."""
-    row = scope_plugins.get(Path(str(name)).name.lower()) or {}
-    sha = row.get("sha256") if is_sha256(row.get("sha256")) else None
-    return {"name": str(name), "sha256": sha, "path": row.get("path"),
-            "hashSource": "scope" if sha else "unstated"}
+def requested_plugin(name, scope_plugins: dict, resolve=None) -> dict:
+    """One row of D1's requested plugin list.
+
+    A name the MEASURED scope lists keeps that scope's path and hash (`hashSource: "scope"`). A name it
+    does not list — a supplied plugin, or one the profile does not load — is resolved at plan time by
+    the probes' own precedence (`plugin_layers`), and only when every layer they walk could be walked:
+    `--instance` and `--game` for the layers above the profile's other folders, and `--profile` for
+    those folders themselves when the name is found nowhere else. The row then carries the
+    winning copy's path and hash with `hashSource: "instance:<layer>"`, and `providedBy` lists EVERY
+    layer that provides the name, in precedence order, each copy hashed, so a reader sees whether an
+    ambiguity exists and whether it matters. Nothing is ever guessed: where the resolution cannot be
+    reproduced from the plan's inputs the row stays `unstated` with a null hash and says why."""
+    plain = Path(str(name)).name
+    scoped = scope_plugins.get(plain.lower())
+    if scoped is not None:
+        sha = scoped.get("sha256") if is_sha256(scoped.get("sha256")) else None
+        row = {"name": str(name), "sha256": sha, "path": scoped.get("path"),
+               "hashSource": "scope" if sha else "unstated"}
+        if not sha:
+            row["unstatedReason"] = (f"the measured scope lists {plain} with no 64-hex sha256, so the "
+                                     f"plan states no content for it")
+        return row
+
+    row = {"name": str(name), "sha256": None, "path": None, "hashSource": "unstated"}
+    res = resolve(plain) if resolve else None
+    if res is None:
+        row["unstatedReason"] = (f"no --instance was given, so the plan cannot resolve {plain} the way "
+                                 f"the probes resolve it")
+        return row
+    rows, views = res["rows"], res["views"]
+    win = next((i for i, v in enumerate(views) if v != "unknown"), None)
+    if not res.get("gameWalked"):
+        # The probes always walk the game's Data folder, and it outranks every mod folder outside the
+        # view. A walk that skipped it cannot say which copy they would read, whichever layer this
+        # partial walk found one in — so the plan states the missing flag rather than a guess.
+        row["unstatedReason"] = (
+            f"no --game was given, so the game's Data folder — a layer the probes always walk, above the "
+            f"profile's mod folders outside this configuration's view — was not walked, and the copy of "
+            f"{plain} the probes would read cannot be named")
+    elif win is not None and is_sha256(rows[win].get("sha256")):
+        row.update({"sha256": rows[win]["sha256"], "path": rows[win]["path"],
+                    "hashSource": f"instance:{rows[win]['layer']}"})
+    elif win is not None:
+        row["unstatedReason"] = (f"the copy of {plain} at {rows[win]['path']} would not hash, so the plan "
+                                 f"states no content for it")
+    elif rows and not res.get("profileNamed"):
+        row["unstatedReason"] = (
+            f"no --profile was given, so the profile's mod folders outside this configuration's view "
+            f"cannot be listed, let alone ranked: the copies of {plain} below sit in folders whose "
+            f"priority the plan cannot establish")
+    elif rows:
+        row["unstatedReason"] = (
+            f"{res['modlistPath'] or 'modlist.txt'} would not read, so the mod folders outside this "
+            f"configuration's view have no priority order: the probes would refuse the order rather than "
+            f"pick one of the copies of {plain} listed below, and so does this plan")
+    else:
+        row["unstatedReason"] = (f"no layer provides {plain}: not the overwrite folder, not a mod folder "
+                                 f"of this configuration's view, not the game's Data folder, and not one "
+                                 f"of the profile's other mod folders")
+    if rows:
+        row["providedBy"] = [dict(r) for r in rows]
+    return row
 
 
 def cmd_plan(a) -> int:
@@ -492,9 +678,26 @@ def cmd_plan(a) -> int:
         stem = cand.stem
         aid = arm_id(kind, stem, index)
         plugins = list(doc.get("Plugins") or doc.get("plugins") or [])
+        # D1: the VIEW this arm's plugins resolve through — the candidate's own mod list when it has
+        # one, else the scope's providers of kind `mod` in the order the probe recorded them. The same
+        # walk answers the request rows and `provides`, so a plan cannot say one thing in two places.
+        # `cand.Mods ?? comp.EnabledMods` (HarnessOrderCli.Resolve) coalesces on NULL: a candidate that
+        # carries the key with an EMPTY list is describing an empty view, not asking for the profile's.
+        declared_view = doc.get("Mods", doc.get("mods"))
+        if isinstance(declared_view, list):
+            view_mods = [str(m) for m in declared_view if str(m).strip()]
+        else:
+            view_mods = [str(v.get("name")) for v in scope_providers
+                         if str(v.get("kind") or "").lower() == "mod" and v.get("name")]
+
+        def resolve(plain: str, _view=tuple(view_mods)):
+            if not a.instance:
+                return None
+            return plugin_layers(plain, _view, instance=a.instance, profile=a.profile, game=a.game)
+
         payload_missing, out_of_view = [], []
         for name in (declared or []):
-            where = provides(Path(name).name, scope_plugins, a.instance)
+            where = provides(Path(name).name, scope_plugins, resolve)
             if where == "in-view":
                 continue
             if where == "out-of-view":
@@ -512,11 +715,13 @@ def cmd_plan(a) -> int:
             "expected": {"population": population, "states": states},
             "heldBack": cand.name in held_back,
             # D1: the frozen REQUEST for this arm — the plugin names in the candidate file's order,
-            # each with the hash the scope states for it (or an explicit `unstated`), the scope's
-            # overlays and providers, and the population and states the plan selected. Every accepted
-            # receipt on this arm is bound to THIS, not to whichever receipt happened to arrive first.
+            # each with the hash the scope states for it, or the hash of the copy the probes would read
+            # (resolved through this arm's view when `--instance` was given), or an explicit `unstated`
+            # saying why neither could be stated; the scope's overlays and providers; and the population
+            # and states the plan selected. Every accepted receipt on this arm is bound to THIS, not to
+            # whichever receipt happened to arrive first.
             "requested": {
-                "plugins": [requested_plugin(n, scope_plugins) for n in plugins],
+                "plugins": [requested_plugin(n, scope_plugins, resolve) for n in plugins],
                 "overlays": [dict(o) for o in scope_overlays],
                 "providers": [dict(v) for v in scope_providers],
                 "population": population,
@@ -1260,8 +1465,13 @@ class Validator:
                                   f"expected {(want_names[first:first + 1] or ['(nothing)'])[0]}, "
                                   f"found {(got_names[first:first + 1] or ['(nothing)'])[0]}; {how}"})
         else:
-            # (c) hashes, only where the request can state one. An unstated hash is a recorded LIMIT,
-            # never a silent acceptance: the emit's own hash becomes what reuse re-checks on disk.
+            # (c) hashes, wherever the request states one — a hash the scope measured and a hash the
+            # plan resolved through the probes' own layer precedence (`hashSource: instance:<layer>`)
+            # are checked alike, because both name the bytes this arm asked for. An unstated hash is a
+            # recorded LIMIT, never a silent acceptance: the emit's own hash becomes what reuse
+            # re-checks on disk. Hashes equal at a different path is accepted and recorded, not
+            # rejected: the binding is to content, and a probe that read an identical copy elsewhere
+            # measured the same bytes — the reader is told where.
             for want, got in zip(req_plugins, emit_plugins):
                 if want.get("hashSource") == "unstated" or not is_sha256(want.get("sha256")):
                     (limits if limits is not None else []).append(
@@ -1273,8 +1483,16 @@ class Validator:
                 if str(want["sha256"]).lower() != str(got.get("sha256") or "").lower():
                     rej.append({"cause": "identity-mismatch",
                                 "detail": f"plugin {want.get('name')} was requested at "
-                                          f"{str(want['sha256'])[:12]} and consumed at "
-                                          f"{str(got.get('sha256'))[:12]}"})
+                                          f"{str(want['sha256'])[:12]} ({want.get('path') or '(no path)'})"
+                                          f" and consumed at {str(got.get('sha256'))[:12]} "
+                                          f"({got.get('path') or '(no path)'})"})
+                elif want.get("path") and got.get("path") and not same_path(want["path"], got["path"]):
+                    (limits if limits is not None else []).append(
+                        {"plugin": want.get("name"), "recordedSha256": got.get("sha256"),
+                         "plannedPath": want.get("path"), "emitPath": got.get("path"),
+                         "detail": f"the plan resolved {want.get('name')} at {want['path']} and the emit "
+                                   f"read an identical copy at {got['path']}: the bytes are the same "
+                                   f"{str(got.get('sha256'))[:12]}, the file is not"})
 
         # (d) overlays as a multiset of (kind, sha256).
         def overlay_key(rows):
@@ -1443,7 +1661,11 @@ class Executor:
                 "fingerprintNote": "the child stated no identity; reuse re-checks the plan's stated "
                                    "plugin hashes on disk",
                 "source": f"candidate:{arm.get('candidateFile')}",
-                "plugins": [{"name": p.get("name"), "path": p.get("path"), "sha256": p.get("sha256")}
+                # D3: the request's rows WITH the `hashSource` that says where each hash came from —
+                # the measured scope, or the layer the plan resolved the file in. A reader of this
+                # receipt alone can tell a scope-measured input from a plan-resolved one.
+                "plugins": [{"name": p.get("name"), "path": p.get("path"), "sha256": p.get("sha256"),
+                             "hashSource": p.get("hashSource")}
                             for p in (req.get("plugins") or [])],
                 "providers": [dict(v) for v in (req.get("providers") or [])],
                 "overlays": [dict(o) for o in (req.get("overlays") or [])],
@@ -1451,8 +1673,10 @@ class Executor:
                 "state": None, "limits": [],
             }, "plan"
         if source != "emit":
+            # Only an `unstated` row is a reuse gap. A row the plan resolved states a path and a hash,
+            # so reuse re-checks its bytes at the path the plan named, like any scope-stated row.
             unstated = [p.get("name") for p in ((arm.get("requested") or {}).get("plugins") or [])
-                        if not is_sha256(p.get("sha256"))]
+                        if p.get("hashSource") == "unstated" or not is_sha256(p.get("sha256"))]
             if unstated:
                 cfg["identityLimits"] = [
                     {"plugin": n, "recordedSha256": None,

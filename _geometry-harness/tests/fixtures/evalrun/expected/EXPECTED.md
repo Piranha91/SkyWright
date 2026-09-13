@@ -644,3 +644,131 @@ assertion **stricter** rather than changing an expected outcome:
 - **A-4 (D4)** — the `diff` receipt's `consumed.inputs` has exactly two rows, `part: "arm"` and `part: "reverse"`,
   each with a path and a sha256, and its own `baseEmitPath/Sha256` stay **null**. Case-13 asserts the count, both
   part names, path+sha256 on each, and the null baseEmit.
+
+---
+
+## 16. `case-16-supplied-identity` — a supplied plugin's identity is stated at plan time (Q44)
+
+**Written from Q44's `PLAN.md` (D1–D4 and its fixture section) before the fixture, the fake probe's resolver or
+`case_16` existed** — the commit order is the evidence. The machine-readable half is
+`case-16-supplied-identity.json`; this section is the reasoning behind it.
+
+Q43 left one honest hole: the request is built from the measured scope, and the scope states no hash for a plugin
+the profile does not load. Such a plugin is `hashSource: unstated`, so D2(c) can only record the emit's own hash as
+a limit, `reuse_gap` refuses every receipt that consumed the plan's request, and the whole supplied arm re-runs on
+every `run`/`resume`. D1 closes it by resolving the plugin at plan time **the way the probes resolve it**.
+
+### The oracle's resolver is written from the C#, not from `evalrun.py`
+
+`_shared/HarnessOrderCli.cs`'s `BuildLayerMap` is the definition: `overwrite`, the view's mod folders in priority
+order, the game `Data` folder, then the profile's enabled mods that are not in the view, then its disabled ones —
+first sighting of a filename wins, case-insensitive, `.esp/.esm/.esl` at a folder's top level only, an absent folder
+skipped. `ProviderOf` gives the layer its name (`overwrite`, the mod folder's own name, `Data`).
+`Mo2LoadOrder.ParseModlist` gives the two lists: `+` enabled, `-` disabled, `#` a comment, a `…_separator` name
+skipped, **file order with the top line highest**. The fixture's fake probe implements that walk from those two
+files. The controller implements the same definition independently. Agreement on the same tree is then evidence;
+a copied implementation would only have been evidence of copying (the independent-oracle seam).
+
+### The tree, and why every layer is exercised
+
+`instance/overwrite` is empty (layer 1 falls through). The scope's only `mod` provider is `fixture-mods`, which has
+no folder under `instance/mods` (layer 2: an absent folder is skipped, not an error). `game/Data` is empty (layer
+3). `modlist.txt` carries `+Fixture Enabled Mod`, whose folder does not exist (layer 4, skipped), a `#` comment and
+a `…_separator` line (both skipped by the parser), and then `-Supplied Patch A` above `-Supplied Patch B` — two
+disabled folders that provide the SAME filename with DIFFERENT bytes. So the name resolves at layer 5, and
+`Supplied Patch A` wins **because of the modlist's line order**, which a directory walk would match only by
+accident. That is the lab's own shape (`JKs College of Winterhold - OCW Patch.esp`, modlist lines 58 and 72) in
+miniature, with the bytes deliberately different so the copy that was read is visible in the hash.
+
+### What the plan must say
+
+The supplied arm's request row for `FixtureSupplied.esp`: `hashSource: "instance:Supplied Patch A"`, the sha256 of
+that folder's copy, a path ending `mods/Supplied Patch A/FixtureSupplied.esp`, and `providedBy` with **both**
+copies in precedence order, each hashed — D1's "so a reader sees whether an ambiguity exists and whether it
+matters". The other four names keep `scope`. `supplied.outOfView` is `["FixtureSupplied.esp"]` (layer 5: records
+load, assets do not), `supplied.payloadMissing` is empty, and nothing on the arm rests at
+`blocked-payload-missing`.
+
+Four variants, each on a copy of the generated tree so the case's own run reads an untouched one:
+
+| variant | change | expected |
+|---|---|---|
+| `no-instance` | plan without `--instance` | `unstated`, null hash, an `unstatedReason` naming the instance |
+| `overwrite-copy` | a third copy (bytes C) in `overwrite/` | `instance:overwrite`, `providedBy` three rows, `outOfView` empty |
+| `modlist-removed` | delete `profiles/fixture/modlist.txt` | `unstated`, the reason names `modlist.txt`, `providedBy` both copies at layer `(not in modlist.txt)` |
+| `modlist-reordered` | `-Supplied Patch B` above `-Supplied Patch A` | `instance:Supplied Patch B` — the ORDER decides, not the name |
+
+`no-instance` is the standing control: its `unstated` row and null hash are today's answer and must stay green on
+an unchanged controller. Only the `unstatedReason` field is new.
+
+### What the run, the resume and the two damages must say
+
+- The sweep `arm` receipt of `geometry.navmesh-ownership` on the supplied arm is **accepted with
+  `validation.identityLimits == []`** — with the hash stated and met there is nothing left to record.
+- Two receipts of that arm whose child states no identity of its own consume the arm's request rows: the
+  `FixtureSupplied.esp` row carries the A path, sha(A) and its `hashSource` (D3), and no `identityLimits` entry
+  names it. They are `geometry.bos-overlay` — which this fixture's scope makes **not-applicable** (its trigger is
+  `{"overlays": true}` and the scope declares none), so its receipt is the accounting one D3 names word for word:
+  "a row that ran nothing gets THIS ARM's frozen request" — and `loadability.masters-and-order`, the arm's json
+  child that actually ran. The same row is asserted on both, so the rule is not read only off a row nothing
+  measured. For the same reason `bos-overlay` is absent from the invalidation list below: an entry that never
+  reached a terminal-ok status is never reused and never invalidated.
+- `resume` on the unchanged run: every terminal-ok entry of the supplied arm `reused`, the printed
+  `0 refused-reuse`, no `running` transition and no child — asserted from the journal exactly as case 13's
+  `unchanged-control` does. This is outcome 3 of the packet, and the whole point of the change.
+- `wrong-copy` (a new `identityDamage` kind: the fake reads the folder the rule names instead of the precedence
+  winner): the arm receipt is `accepted: false`, cause `identity-mismatch`, and the detail names both folders and
+  both hashes at 12 hex — D2's amended detail carries the path as well as the hash, which is what makes "a probe
+  read a different copy" legible instead of a bare pair of digests.
+- The bytes at A changed after the run, then `resume`: the arm's json receipts and its sweep `arm` part go
+  `invalidated(…)` with "changed on disk" and the A path, the baseline's entries stay `reused`, and
+  `0 refused-reuse` — a changed file is an invalidation, never a gap.
+
+### `rulingNeeded` — five places the definitions do not settle a value
+
+Written as expectations and flagged, never guessed silently and never narrowed to make a line pass:
+
+1. **The `unstatedReason` wording.** D1 fixes what it must say, not how. Only the naming token is asserted
+   (`instance`; `modlist.txt`).
+2. **Ruled, not open — `payloadMissing` with no `--instance`.** Ruling A-1 (coordinator, 2026-09-12): the name
+   stays in `supplied.payloadMissing` and the arm's checks stay `blocked-payload-missing` exactly as before Q44,
+   because D1's "no layer provides the name" covers the case where nothing could be consulted. Asserted strictly.
+3. **The `modlist-removed` variant's `supplied` block.** Whether a name whose copies exist but cannot be ordered
+   belongs in `payloadMissing`, in `outOfView`, or in neither is undetermined. Nothing is asserted about it — the
+   row, the reason and `providedBy` are.
+4. **`providedBy` on a `scope` row.** D1 gives the field in the shape of an instance-resolved row. A scope row is
+   expected to be unchanged from Q43; nothing is asserted.
+5. **`hashSource` on the consumed copy of a `scope` row.** D3 says the consumed block carries the request rows
+   with their `hashSource`; only the supplied row's is asserted.
+
+### Three folds from the verifier's read (rulings A-3, A-4, A-5)
+
+**A-3 (findings F1, F5) — a partial walk is not a resolution.** `HarnessOrderCli` always walks the game `Data`
+folder, and Data sits ABOVE the out-of-view block, so a Data copy outranks both mod folders. The plan can only
+walk it when `--game` was given. Two more variants: `no-game` (instance + profile, no game) and `no-profile`
+(instance + game, no profile) both stay `unstated` with a null hash, and the `unstatedReason` names what is
+actually missing — the token `game` in the first, `profile` in the second, never `modlist.txt` for a profile that
+was never named. `providedBy` still lists the copies the partial walk did find (as their folders in `no-game`,
+where the modlist was read; as `(not in modlist.txt)` in `no-profile`, where it was not), so the reader sees what
+was seen rather than nothing at all. `provides()` is untouched, so `supplied.outOfView` stays today's answer.
+
+**A-4 (finding F4) — an empty `Mods` list is a real empty view.** `HarnessOrderCli.cs:147` is
+`cand.Mods ?? comp.EnabledMods`: only a null or absent `Mods` falls back. Both Python resolvers used truthiness,
+which silently turns "this candidate stages no mods" into "use the profile's". The fake's `resolve_ctx` is
+null-coalescing now, and the discriminating pair is fixtured: on a copy of the tree with a fourth copy (bytes D)
+planted in `mods/fixture-mods/` — the scope's own mod provider — the supplied candidate with `Mods` **absent**
+resolves `instance:fixture-mods` at layer 2 and is IN the view (`outOfView` empty), while the same candidate with
+`"Mods": []` cannot see that folder at all and resolves `instance:Supplied Patch A` at layer 5. Same tree, same
+bytes on disk; only the presence of a key differs, which is the only way a truthiness resolver is visible.
+
+**A-5 (finding F3) — the identical-copy limit, fired.** D2 accepts an emit whose hash matches at a different path
+and records an `identityLimits` row instead of rejecting. Nothing in case 16 made that branch fire: its two
+folders carry different bytes by design, so the verifier could delete the branch and the case stayed green — while
+the lab's real shape is identical bytes in two folders (the combo patch at modlist lines 58 and 72). A run-level
+arm on a copy of the tree adds `Supplied Patch A copy` with bytes identical to A's, listed below A so A still
+wins, and points a `wrong-copy` damage at it: the sweep arm receipt is **accepted**, `validation.identityLimits`
+has exactly one row for `FixtureSupplied.esp` whose `recordedSha256` is sha(A), whose `plannedPath` ends in
+`Supplied Patch A/FixtureSupplied.esp` and whose `emitPath` ends in `Supplied Patch A copy/FixtureSupplied.esp`,
+with both folders named in the detail; the plan for that tree lists three `providedBy` rows. With the `wrong-copy`
+step above — the same damage over different bytes, which rejects — the pair shows the rule turning on content
+rather than on the path.

@@ -14,6 +14,7 @@ edited to match: the test fails and the disagreement is reported with both value
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import shutil
@@ -1228,9 +1229,315 @@ def case_15(tmp):
     expect(bad, [], f"{case}: no plugin or asset binary in the bundle", "D8")
 
 
+# ------------------------------------------- Q44: a supplied plugin's identity at plan time (16)
+
+def sha_of(p: Path) -> str:
+    return hashlib.sha256(Path(p).read_bytes()).hexdigest()
+
+
+def arm_map(plan: dict) -> dict:
+    """armId AND candidate stem -> the plan's arm record (the oracle names arms by stem)."""
+    out = {}
+    for a in plan.get("arms") or []:
+        out[a.get("armId")] = a
+        out.setdefault(Path(a.get("candidateFile", "")).stem, a)
+    return out
+
+
+def requested_row(plan: dict, stem: str, name: str) -> dict:
+    req = ((arm_map(plan).get(stem) or {}).get("requested") or {}).get("plugins") or []
+    return next((p for p in req if str(p.get("name", "")).lower() == name.lower()), {})
+
+
+def norm(p) -> str:
+    return str(p or "").replace("\\", "/")
+
+
+def case_16(tmp):
+    case = "case-16-supplied-identity"
+    o = load(EXPECTED / f"{case}.json")
+    d = GEN / "cases" / case
+    scen = d / "scenario.json"
+    inst, game = GEN / "instance", GEN / "game"
+    plug = o["fixture"]["suppliedPlugin"]
+    stem = o["fixture"]["armStem"]
+    supplied_file = d / "supplied" / "candidate-02-supplied.json"
+
+    def plan_args(instance: Path | None, profile=True, with_game=True, cand: Path | None = None):
+        """The flags are separable on purpose: A-3 turns on a walk that is missing ONE of them."""
+        args = ["--supplied", f"{plug}={cand or supplied_file}"]
+        if instance is not None:
+            args += ["--instance", instance]
+            if profile:
+                args += ["--profile", "fixture"]
+            if with_game:
+                args += ["--game", game]
+        return args
+
+    # ---------------------------------------------------------------- the plan (D1)
+    run = tmp / case
+    p = do_plan(run, case, plan_args(inst))
+    expect(p.returncode, o["plan"]["exit"], f"{case}: plan exit", "D1")
+    plan = load(run / "plan.json") or {}
+    if not plan:
+        check(False, f"{case}: plan.json written")
+        return
+    for s, want in o["plan"]["armsRequested"].items():
+        req = ((arm_map(plan).get(s) or {}).get("requested") or {}).get("plugins") or []
+        expect([x.get("name") for x in req], want["plugins"], f"{case}: {s} requested plugin order", "D1")
+        expect([x.get("hashSource") for x in req], want["hashSource"],
+               f"{case}: {s} requested hashSource per plugin", "D1")
+        expect(sorted(x.get("name") for x in req if x.get("sha256") is None), sorted(want["sha256Null"]),
+               f"{case}: {s} requested sha256 null for", "D1")
+
+    rr = o["plan"]["resolvedRow"]
+    row = requested_row(plan, rr["arm"], rr["plugin"])
+    expect(row.get("hashSource"), rr["hashSource"], f"{case}: {rr['plugin']} hashSource", "D1")
+    expect(row.get("sha256"), sha_of(inst / rr["sha256Of"]),
+           f"{case}: {rr['plugin']} sha256 is the hash of {rr['sha256Of']}", "D1 - the precedence winner")
+    check(norm(row.get("path")).endswith(rr["pathEndsWith"]),
+          f"{case}: its path ends with {rr['pathEndsWith']} (got {row.get('path')!r}) (D1)")
+    got_by = row.get("providedBy") or []
+    expect([x.get("layer") for x in got_by], [x["layer"] for x in rr["providedBy"]],
+           f"{case}: providedBy layers in precedence order", "D1")
+    for i, want in enumerate(rr["providedBy"]):
+        g = got_by[i] if i < len(got_by) else {}
+        expect(g.get("sha256"), sha_of(inst / want["sha256Of"]),
+               f"{case}: providedBy[{i}] ({want['layer']}) sha256", "D1 - every copy hashed")
+        check(norm(g.get("path")).endswith(want["pathEndsWith"]),
+              f"{case}: providedBy[{i}] path ends with {want['pathEndsWith']} (got {g.get('path')!r}) (D1)")
+
+    sup = (arm_map(plan).get(stem) or {}).get("supplied") or {}
+    expect(sup.get("payloadMissing"), o["plan"]["supplied"]["payloadMissing"],
+           f"{case}: supplied.payloadMissing", "D1")
+    expect(sup.get("outOfView"), o["plan"]["supplied"]["outOfView"],
+           f"{case}: supplied.outOfView", "D1 - resolved from layers 4-5")
+    blocked = [c.get("checkId", c.get("id")) for c in (plan.get("checks") or [])
+               for r in (c.get("arms") or [])
+               if r.get("armId") == stem and r.get("status") == o["plan"]["supplied"]["noStatus"]]
+    expect(blocked, [], f"{case}: no check on the supplied arm is {o['plan']['supplied']['noStatus']}", "D1")
+
+    # ---------------------------------------------------------------- the four plan variants (D1)
+    for v in o["variants"]:
+        vid = v["id"]
+        fl = v.get("flags") or {"instance": vid != "no-instance", "profile": True, "game": True}
+        vrun = tmp / f"{case}-{vid}"
+        vinst = None
+        if fl["instance"]:
+            vinst = tmp / f"{case}-{vid}-instance"
+            shutil.copytree(inst, vinst)
+            if v.get("plant"):
+                # A-4: a copy inside the view's OWN mod folder, so `Mods` absent and `Mods` empty
+                # resolve differently over one tree.
+                (vinst / "mods" / v["plant"]).mkdir(parents=True, exist_ok=True)
+                (vinst / "mods" / v["plant"] / plug).write_bytes(
+                    o["fixture"]["bytes"]["D"].encode("utf-8"))
+            if vid == "overwrite-copy":
+                (vinst / "overwrite" / plug).write_bytes(
+                    o["fixture"]["bytes"]["C"].encode("utf-8"))
+            elif vid == "modlist-removed":
+                (vinst / "profiles" / "fixture" / "modlist.txt").unlink()
+            elif vid == "modlist-reordered":
+                ml = vinst / "profiles" / "fixture" / "modlist.txt"
+                body = ml.read_text(encoding="utf-8")
+                ml.write_text(body.replace("-Supplied Patch A\n-Supplied Patch B\n",
+                                           "-Supplied Patch B\n-Supplied Patch A\n"),
+                              encoding="utf-8", newline="\n")
+                check("-Supplied Patch B\n-Supplied Patch A" in
+                      ml.read_text(encoding="utf-8").replace("\r\n", "\n"),
+                      f"{case}/{vid}: the modlist really was reordered")
+        vcand = d / "supplied" / v["candidateFile"] if v.get("candidateFile") else None
+        r = do_plan(vrun, case, plan_args(vinst, fl.get("profile", True), fl.get("game", True), vcand))
+        expect(r.returncode, v["exit"], f"{case}/{vid}: plan exit", "D1")
+        vplan = load(vrun / "plan.json") or {}
+        vstem = Path(vcand).stem if vcand else stem     # the arm is named after ITS candidate file
+        row = requested_row(vplan, vstem, plug)
+        expect(row.get("hashSource"), v["hashSource"], f"{case}/{vid}: hashSource", "D1")
+        if v.get("sha256IsNull"):
+            expect(row.get("sha256"), None, f"{case}/{vid}: sha256", "D1")
+            reason = str(row.get("unstatedReason") or "")
+            check(v["reasonContains"] in reason,
+                  f"{case}/{vid}: the unstatedReason names {v['reasonContains']!r} (got {reason[:120]!r}) (D1)")
+        if v.get("sha256Of"):
+            expect(row.get("sha256"), sha_of(vinst / v["sha256Of"]), f"{case}/{vid}: sha256", "D1")
+            check(norm(row.get("path")).endswith(v["pathEndsWith"]),
+                  f"{case}/{vid}: path ends with {v['pathEndsWith']} (got {row.get('path')!r}) (D1)")
+        got_by = row.get("providedBy") or []
+        if v.get("providedBy"):
+            expect([x.get("layer") for x in got_by], [x["layer"] for x in v["providedBy"]],
+                   f"{case}/{vid}: providedBy layers", "D1")
+            for i, want in enumerate(v["providedBy"]):
+                g = got_by[i] if i < len(got_by) else {}
+                expect(g.get("sha256"), sha_of(vinst / want["sha256Of"]),
+                       f"{case}/{vid}: providedBy[{i}] ({want['layer']}) sha256", "D1")
+        if v.get("providedByLayers"):
+            expect([x.get("layer") for x in got_by], v["providedByLayers"],
+                   f"{case}/{vid}: providedBy layers", "D1")
+        if v.get("providedByCount") is not None:
+            expect(len(got_by), v["providedByCount"], f"{case}/{vid}: providedBy row count", "D1")
+        if "outOfView" in v:
+            expect(((arm_map(vplan).get(vstem) or {}).get("supplied") or {}).get("outOfView"),
+                   v["outOfView"], f"{case}/{vid}: supplied.outOfView", "D1")
+        if "payloadMissing" in v:
+            expect(((arm_map(vplan).get(vstem) or {}).get("supplied") or {}).get("payloadMissing"),
+                   v["payloadMissing"], f"{case}/{vid}: supplied.payloadMissing", "D1 / ruling A-1")
+
+    # ---------------------------------------------------------------- the run (D2, D3)
+    evalrun(["run", "--run", run], scen)
+    sw = o["run"]["sweepArmReceipt"]
+    rc = receipt(run, plan, sw["entry"]) or {}
+    val = rc.get("validation") or {}
+    expect(val.get("accepted"), sw["accepted"], f"{case}: {sw['entry']} accepted", "D2")
+    expect(val.get("identityLimits"), sw["identityLimits"],
+           f"{case}: {sw['entry']} validation.identityLimits", "D2 - a stated hash, met, leaves nothing to limit")
+    want = o["run"]["consumedPluginRow"]
+    for jr in o["run"]["jsonReceipts"]:
+        rc = receipt(run, plan, jr["entry"]) or {}
+        cons = rc.get("consumed") or {}
+        cfg = cons.get("configuration") or {}
+        expect(cons.get("configurationSource"), jr["configurationSource"],
+               f"{case}: {jr['entry']} consumed.configurationSource", "D3")
+        got = next((x for x in (cfg.get("plugins") or [])
+                    if str(x.get("name", x.get("Name", ""))).lower() == want["name"].lower()), {})
+        expect(got.get("sha256"), sha_of(inst / want["sha256Of"]),
+               f"{case}: {jr['entry']} consumed {want['name']} sha256", "D3")
+        check(norm(got.get("path")).endswith(want["pathEndsWith"]),
+              f"{case}: {jr['entry']} consumed {want['name']} path ends with {want['pathEndsWith']} "
+              f"(got {got.get('path')!r}) (D3)")
+        expect(got.get("hashSource"), want["hashSource"],
+               f"{case}: {jr['entry']} consumed {want['name']} hashSource", "D3")
+        check(o["run"]["noIdentityLimitsEntryFor"] not in json.dumps(cfg.get("identityLimits") or []),
+              f"{case}: {jr['entry']} records no identityLimits entry for "
+              f"{o['run']['noIdentityLimitsEntryFor']} (D3)")
+    bc = o["run"]["baselineControl"]
+    rb = receipt(run, plan, bc["entry"]) or {}
+    expect((rb.get("validation") or {}).get("accepted"), bc["accepted"],
+           f"{case}: {bc['entry']} accepted (the baseline control)", "D2")
+
+    # ---------------------------------------------------------------- resume, unchanged (D4)
+    s = o["resume"]
+    r = tmp / f"{case}-unchanged"
+    shutil.copytree(run, r)
+    n0 = journal_len(r)
+    res = evalrun(["resume", "--run", r], scen)
+    expect(res.returncode, s["exit"], f"{case}/unchanged: resume exit", "D4")
+    rows = journal_rows(r, n0)
+    led = ledger_entries(load(r / "ledger.json") or {})
+    arm_keys = [k for k, v in led.items() if v.get("armId") == stem or f"__{stem}" in k]
+    terminal = [k for k in arm_keys if execution_of(led[k]) in ("completed", "reused")]
+    check(bool(terminal) and all(execution_of(led[k]) == "reused" for k in terminal),
+          f"{case}/unchanged: every terminal-ok entry of the supplied arm is reused "
+          f"(got {sorted({execution_of(led[k]) for k in terminal})}) (D4)")
+    check(s["stdoutContains"] in (res.stdout + res.stderr),
+          f"{case}/unchanged: the resume printed {s['stdoutContains']!r} (D4)")
+    check(not [x for x in rows if str(x.get("to", "")) == "running" and x.get("armId") == stem],
+          f"{case}/unchanged: no `running` transition on the supplied arm - zero children (D4)")
+    check(not [x for x in rows if str(x.get("to", "")) == "running"],
+          f"{case}/unchanged: no `running` transition at all under the new runId (D4)")
+
+    # ---------------------------------------------------------------- the probe read another copy (D2)
+    w = o["wrongCopy"]
+    wscen = d / w["scenario"]
+    r2 = tmp / f"{case}-wrong-copy"
+    do_plan(r2, case, plan_args(inst), scenario=wscen)
+    evalrun(["run", "--run", r2], wscen)
+    plan2 = load(r2 / "plan.json") or {}
+    rc = receipt(r2, plan2, w["entry"])
+    if rc is None:
+        check(False, f"{case}/wrong-copy: a receipt was written for {w['entry']}")
+    else:
+        expect((rc.get("validation") or {}).get("accepted"), w["accepted"],
+               f"{case}/wrong-copy: {w['entry']} accepted", "D2")
+        causes = [x.get("cause") for x in ((rc.get("validation") or {}).get("rejections") or [])]
+        check(w["cause"] in causes, f"{case}/wrong-copy: rejected for {w['cause']} (got {causes})")
+        detail = rejection_detail(rc, w["cause"])
+        for tok in w["detailContains"]:
+            check(tok in detail, f"{case}/wrong-copy: the detail names {tok!r} (got {detail[:200]!r})")
+        h = w["detailNamesBothHashesAt12Hex"]
+        for role, rel in h.items():
+            check(sha_of(inst / rel)[:12] in detail,
+                  f"{case}/wrong-copy: the detail names the {role} hash at 12 hex "
+                  f"({sha_of(inst / rel)[:12]}); got {detail[:200]!r}")
+        rb = receipt(r2, plan2, w["baselineStillAccepted"]) or {}
+        check((rb.get("validation") or {}).get("accepted") is True,
+              f"{case}/wrong-copy: the undamaged baseline arm is still accepted")
+
+    # ------------------------------------------- the same content at a path the plan did not name (D2)
+    ic = o["identicalCopyElsewhere"]
+    icinst = tmp / f"{case}-identical-copy-instance"
+    shutil.copytree(inst, icinst)
+    twin = icinst / "mods" / "Supplied Patch A copy"
+    twin.mkdir(parents=True, exist_ok=True)
+    (twin / plug).write_bytes((inst / "mods" / "Supplied Patch A" / plug).read_bytes())
+    ml = icinst / "profiles" / "fixture" / "modlist.txt"
+    ml.write_text(ml.read_text(encoding="utf-8").replace(
+        "-Supplied Patch A\n", "-Supplied Patch A\n-Supplied Patch A copy\n", 1),
+        encoding="utf-8", newline="\n")
+    check(sha_of(twin / plug) == sha_of(inst / "mods" / "Supplied Patch A" / plug),
+          f"{case}/identical-copy: the twin folder's bytes really are identical to A's")
+    icscen = d / ic["scenario"]
+    icrun = tmp / f"{case}-identical-copy"
+    do_plan(icrun, case, plan_args(icinst), scenario=icscen)
+    icplan = load(icrun / "plan.json") or {}
+    expect([x.get("layer") for x in (requested_row(icplan, stem, plug).get("providedBy") or [])],
+           ic["planProvidedByLayers"], f"{case}/identical-copy: providedBy layers", "D1")
+    evalrun(["run", "--run", icrun], icscen)
+    rc = receipt(icrun, icplan, ic["entry"]) or {}
+    val = rc.get("validation") or {}
+    expect(val.get("accepted"), ic["accepted"],
+           f"{case}/identical-copy: {ic['entry']} accepted", "D2 - the binding is to content")
+    lims = val.get("identityLimits") or []
+    expect(len(lims), ic["identityLimitsCount"],
+           f"{case}/identical-copy: validation.identityLimits row count", "D2")
+    w = ic["identityLimitsRow"]
+    lim = next((x for x in lims if str(x.get("plugin", "")).lower() == w["plugin"].lower()), {})
+    expect(lim.get("plugin"), w["plugin"], f"{case}/identical-copy: the limit names the plugin", "D2")
+    expect(lim.get("recordedSha256"), sha_of(icinst / w["recordedSha256Of"]),
+           f"{case}/identical-copy: the limit's recordedSha256", "D2")
+    check(norm(lim.get("plannedPath")).endswith(w["plannedPathEndsWith"]),
+          f"{case}/identical-copy: plannedPath ends with {w['plannedPathEndsWith']} "
+          f"(got {lim.get('plannedPath')!r}) (D2)")
+    check(norm(lim.get("emitPath")).endswith(w["emitPathEndsWith"]),
+          f"{case}/identical-copy: emitPath ends with {w['emitPathEndsWith']} "
+          f"(got {lim.get('emitPath')!r}) (D2)")
+    for tok in w["detailContains"]:
+        check(tok in str(lim.get("detail") or ""),
+              f"{case}/identical-copy: the detail names {tok!r} (got {str(lim.get('detail'))[:160]!r}) (D2)")
+
+    # ---------------------------------------------------------------- the resolved bytes changed (D4)
+    b = o["bytesChanged"]
+    r3 = tmp / f"{case}-bytes-changed"
+    shutil.copytree(run, r3)
+    victim = inst / "mods" / "Supplied Patch A" / plug
+    body = victim.read_bytes()
+    n0 = journal_len(r3)
+    try:
+        victim.write_bytes(body + b"a byte that changes the supplied copy's content hash\n")
+        res = evalrun(["resume", "--run", r3], scen)
+    finally:
+        victim.write_bytes(body)
+    expect(res.returncode, b["exit"], f"{case}/bytes-changed: resume exit", "D4")
+    rows = journal_rows(r3, n0)
+    inv = b["invalidated"]
+    for key in inv["entries"]:
+        rk = resolve_key(plan, key)
+        hits = [x for x in transitions_to(rows, rk, inv["transitionStartsWith"])
+                if all(t in str(x.get("to", "")) + str(x.get("detail", "")) for t in inv["detailContains"])]
+        check(bool(hits), f"{case}/bytes-changed: {key} invalidated naming {inv['detailContains']} (D4); "
+                          f"got {[str(x.get('to'))[:90] for x in transitions_to(rows, rk, '')][:3]}")
+    led = ledger_entries(load(r3 / "ledger.json") or {})
+    for key in b["baselineStaysReused"]["entries"]:
+        rk = resolve_key(plan, key)
+        expect(execution_of(led.get(rk)), b["baselineStaysReused"]["restingStatus"],
+               f"{case}/bytes-changed: {key} resting status", "D4 - the baseline is untouched")
+    check(b["stdoutContains"] in (res.stdout + res.stderr),
+          f"{case}/bytes-changed: the resume printed {b['stdoutContains']!r} - a change, never a gap (D4)")
+
+
 CASES = {"case-01": case_01, "case-02": case_02, "case-03": case_03, "case-04": case_04, "case-05": case_05,
          "case-06": case_06, "case-07": case_07, "case-08": case_08, "case-09": case_09, "case-10": case_10,
-         "case-11": case_11, "case-12": case_12, "case-13": case_13, "case-14": case_14, "case-15": case_15}
+         "case-11": case_11, "case-12": case_12, "case-13": case_13, "case-14": case_14, "case-15": case_15,
+         "case-16": case_16}
 
 
 def main() -> int:

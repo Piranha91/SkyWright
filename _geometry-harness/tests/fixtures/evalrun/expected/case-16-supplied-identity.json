@@ -1,0 +1,304 @@
+{
+ "case": "case-16-supplied-identity",
+ "rules": ["D1", "D2", "D3", "D4"],
+ "writtenBefore": "any line of the fixture, the fake probe's resolver or case_16 — the commit order is the evidence",
+ "derivedFrom": "runs/2026-09-12-supplied-plugin-identity/PLAN.md D1-D4 and its `Fixture — case-16-supplied-identity` section",
+ "registry": "fixture-check-registry.json (the existing KEEP trim; this case needs no extra check)",
+ "note": "The oracle's resolver is written from _shared/HarnessOrderCli.cs (BuildLayerMap / ProviderOf / the out-of-view LIMIT sentence / the refusal wording) and src/housecarl-core/Mo2LoadOrder.cs (ParseModlist), NOT from evalrun.py. The fixture and the controller must agree because both implement D1, not because one read the other.",
+
+ "fixture": {
+  "instanceTree": {
+   "overwrite": "empty",
+   "mods/Supplied Patch A/FixtureSupplied.esp": "bytes A",
+   "mods/Supplied Patch B/FixtureSupplied.esp": "bytes B (different from A)",
+   "profiles/fixture/modlist.txt": "a '#' comment line, '+Fixture Enabled Mod' (an enabled folder that does not exist — layer 4, skipped), a '-…_separator' line, then '-Supplied Patch A' ABOVE '-Supplied Patch B'",
+   "gameData": "game/Data, empty"
+  },
+  "bytes": {
+   "A": "fixture supplied patch A: the copy modlist.txt ranks first\n",
+   "B": "fixture supplied patch B: a different copy of the same filename\n",
+   "C": "fixture supplied patch C: the overwrite layer's copy\n",
+   "D": "fixture supplied patch D: the copy inside the view's own mod folder\n"
+  },
+  "suppliedPlugin": "FixtureSupplied.esp",
+  "suppliedCandidate": "cases/case-16-supplied-identity/supplied/candidate-02-supplied.json (OUTSIDE candidates/, as the lab's is), plugins = the base order + FixtureSupplied.esp",
+  "armStem": "candidate-02-supplied",
+  "baselineStem": "baseline",
+  "whyTheLayerWalkIsExercised": "layer 1 (overwrite) is empty, layer 2 (the view's mods — the scope's one `mod` provider, 'fixture-mods') has no folder on disk, layer 3 (game/Data) is empty, layer 4 (enabled, not in the view) names a folder that does not exist, so the name resolves at layer 5 (disabled, file order) and 'Supplied Patch A' wins because modlist.txt puts it first — directory order would only match that by accident."
+ },
+
+ "plan": {
+  "exit": 0,
+  "flags": "--supplied FixtureSupplied.esp=<abs path to candidate-02-supplied.json> --instance <instance> --profile fixture --game <game>",
+  "armsRequested": {
+   "baseline": {
+    "plugins": ["Skyrim.esm", "Update.esm", "FixtureBase.esp", "FixtureTarget.esp"],
+    "hashSource": ["scope", "scope", "scope", "scope"],
+    "sha256Null": [],
+    "rule": "D1: a name the scope lists keeps hashSource `scope` and the scope's path and hash, exactly as Q43 left it. This arm is the control — the supplied resolution must not touch it."
+   },
+   "candidate-02-supplied": {
+    "plugins": ["Skyrim.esm", "Update.esm", "FixtureBase.esp", "FixtureTarget.esp", "FixtureSupplied.esp"],
+    "hashSource": ["scope", "scope", "scope", "scope", "instance:Supplied Patch A"],
+    "sha256Null": [],
+    "rule": "D1: the request row of a plugin the scope does not list is resolved through the instance by the probes' own precedence; `hashSource` is `instance:<layer>` and <layer> is the mod folder's own name."
+   }
+  },
+  "resolvedRow": {
+   "arm": "candidate-02-supplied",
+   "plugin": "FixtureSupplied.esp",
+   "hashSource": "instance:Supplied Patch A",
+   "sha256Of": "mods/Supplied Patch A/FixtureSupplied.esp",
+   "pathEndsWith": "mods/Supplied Patch A/FixtureSupplied.esp",
+   "providedBy": [
+    {"layer": "Supplied Patch A", "sha256Of": "mods/Supplied Patch A/FixtureSupplied.esp",
+     "pathEndsWith": "mods/Supplied Patch A/FixtureSupplied.esp"},
+    {"layer": "Supplied Patch B", "sha256Of": "mods/Supplied Patch B/FixtureSupplied.esp",
+     "pathEndsWith": "mods/Supplied Patch B/FixtureSupplied.esp"}
+   ],
+   "providedByRule": "D1: `providedBy` lists EVERY layer that provides the name, in precedence order, each copy hashed — so a reader sees whether an ambiguity exists and whether it matters. Two copies exist, so two rows, A first."
+  },
+  "supplied": {
+   "payloadMissing": [],
+   "outOfView": ["FixtureSupplied.esp"],
+   "outOfViewRule": "D1: the arm's supplied.outOfView lists the names resolved from layers 4-5 (records load, assets do not). 'Supplied Patch A' is a disabled folder, so layer 5.",
+   "noStatus": "blocked-payload-missing",
+   "noStatusRule": "D1: a name a layer provides is neither payload-missing nor blocked; nothing on this arm may rest at blocked-payload-missing."
+  }
+ },
+
+ "variants": [
+  {
+   "id": "no-instance",
+   "change": "the same plan without --instance/--profile/--game",
+   "exit": 0,
+   "hashSource": "unstated",
+   "sha256IsNull": true,
+   "reasonContains": "instance",
+   "todayControl": true,
+   "rule": "D1: the row stays {sha256: null, path: null, hashSource: 'unstated'} and carries an `unstatedReason` when --instance was not given — the reason says so; this is today's behaviour, unchanged (case 12's control).",
+   "greenOnBaseSource": "hashSource `unstated` and a null sha256 are today's answer and must stay green on the unchanged controller; the `unstatedReason` FIELD is new in D1 and is expected to be red until it is implemented.",
+   "payloadMissing": ["FixtureSupplied.esp"],
+   "payloadMissingRulingApplied": "A-1 (coordinator, 2026-09-12): with no --instance the name stays in supplied.payloadMissing — D1's `no layer provides the name` covers the case where nothing could be consulted, so the plan cannot say the file exists and the arm's checks stay blocked-payload-missing exactly as before Q44. Asserted strictly; settled, not a ruling gap."
+  },
+  {
+   "id": "overwrite-copy",
+   "change": "on a COPY of the instance tree, a third copy of FixtureSupplied.esp (bytes C) is written into overwrite/",
+   "exit": 0,
+   "hashSource": "instance:overwrite",
+   "sha256Of": "overwrite/FixtureSupplied.esp",
+   "pathEndsWith": "overwrite/FixtureSupplied.esp",
+   "providedBy": [
+    {"layer": "overwrite", "sha256Of": "overwrite/FixtureSupplied.esp"},
+    {"layer": "Supplied Patch A", "sha256Of": "mods/Supplied Patch A/FixtureSupplied.esp"},
+    {"layer": "Supplied Patch B", "sha256Of": "mods/Supplied Patch B/FixtureSupplied.esp"}
+   ],
+   "outOfView": [],
+   "rule": "D1 layer 1: <instance>/overwrite is the first layer and first sighting wins; <layer> is the literal `overwrite`. A name resolved from layers 1-3 is in the view, so it is neither out-of-view nor payload-missing."
+  },
+  {
+   "id": "modlist-removed",
+   "change": "on a COPY of the instance tree, profiles/fixture/modlist.txt is deleted",
+   "exit": 0,
+   "hashSource": "unstated",
+   "sha256IsNull": true,
+   "reasonContains": "modlist.txt",
+   "providedByLayers": ["(not in modlist.txt)", "(not in modlist.txt)"],
+   "providedByCount": 2,
+   "rule": "D1: modlist.txt cannot be read and the name is provided only by folders under mods/ that layers 1-3 do not cover — the probe would not walk those folders either, so nothing is resolved; the reason names modlist.txt and providedBy lists the copies found with layer '(not in modlist.txt)'. That is the ambiguity STATED on the arm, never a guess.",
+   "notAsserted": "whether the name also reaches supplied.payloadMissing or supplied.outOfView in this state — see rulingNeeded"
+  },
+  {
+   "id": "no-game",
+   "change": "the same plan with --instance and --profile but NO --game",
+   "flags": {"instance": true, "profile": true, "game": false},
+   "exit": 0,
+   "hashSource": "unstated",
+   "sha256IsNull": true,
+   "reasonContains": "game",
+   "providedByLayers": ["Supplied Patch A", "Supplied Patch B"],
+   "rulingApplied": "A-3 / finding F1 (coordinator, 2026-09-12): the C# ALWAYS walks the game Data folder; the plan can only do so when --game was given. A walk missing layer 3 cannot claim a winner, so the row stays unstated and the reason names the missing --game. providedBy still lists the copies the partial walk DID find, so the reader sees what was seen; provides() is unchanged, so supplied.outOfView is today's answer.",
+   "why": "Data sits ABOVE the out-of-view block (the 2026-09-11 fix), so a Data copy would outrank both mod folders. Resolving to 'Supplied Patch A' without having looked at Data would be a guess dressed as a resolution."
+  },
+  {
+   "id": "no-profile",
+   "change": "the same plan with --instance and --game but NO --profile",
+   "flags": {"instance": true, "profile": false, "game": true},
+   "exit": 0,
+   "hashSource": "unstated",
+   "sha256IsNull": true,
+   "reasonContains": "profile",
+   "providedByLayers": ["(not in modlist.txt)", "(not in modlist.txt)"],
+   "rulingApplied": "A-3 / finding F5: with no profile there is no modlist.txt to read, and the reason must name what is actually missing — the profile, not the file it would have led to. The copies are listed at the same '(not in modlist.txt)' layer the unreadable-modlist case uses, because that is exactly what is true of them."
+  },
+  {
+   "id": "mods-absent",
+   "change": "on a COPY of the tree with a fourth copy (bytes D) planted in mods/fixture-mods/, the supplied candidate whose `Mods` key is ABSENT",
+   "flags": {"instance": true, "profile": true, "game": true},
+   "plant": "fixture-mods",
+   "exit": 0,
+   "hashSource": "instance:fixture-mods",
+   "outOfView": [],
+   "rulingApplied": "A-4 / finding F4 (coordinator, 2026-09-12): HarnessOrderCli.cs:147 is `cand.Mods ?? comp.EnabledMods` — only a NULL/absent Mods falls back. Absent here, so the view is the scope's mod providers ['fixture-mods'], layer 2 provides the name, and a layer 1-3 hit is IN the view.",
+   "pairedWith": "mods-empty"
+  },
+  {
+   "id": "mods-empty",
+   "change": "the same tree, the supplied candidate whose `Mods` is an EMPTY list",
+   "flags": {"instance": true, "profile": true, "game": true},
+   "plant": "fixture-mods",
+   "candidateFile": "candidate-03-supplied-empty-mods.json",
+   "exit": 0,
+   "hashSource": "instance:Supplied Patch A",
+   "sha256Of": "mods/Supplied Patch A/FixtureSupplied.esp",
+   "pathEndsWith": "mods/Supplied Patch A/FixtureSupplied.esp",
+   "rulingApplied": "A-4 / finding F4: an EMPTY Mods list is a real empty view, not an absent one — `?? ` does not fall back on it. Layer 2 is then empty, the planted fixture-mods copy is invisible, and the name resolves at layer 5. The two rows of this pair are the same tree and the same bytes on disk: only the presence of a key decides, which is what makes a truthiness resolver visible.",
+   "pairedWith": "mods-absent"
+  },
+  {
+   "id": "modlist-reordered",
+   "change": "on a COPY of the instance tree, modlist.txt puts -Supplied Patch B ABOVE -Supplied Patch A",
+   "exit": 0,
+   "hashSource": "instance:Supplied Patch B",
+   "sha256Of": "mods/Supplied Patch B/FixtureSupplied.esp",
+   "pathEndsWith": "mods/Supplied Patch B/FixtureSupplied.esp",
+   "providedByLayers": ["Supplied Patch B", "Supplied Patch A"],
+   "rule": "D1 layer 5 reads the `-` lines in FILE ORDER: the modlist's order decides, not the folder name, not the directory walk. Nothing about the tree changed except two lines of a text file, and the resolved copy must follow them."
+  }
+ ],
+
+ "run": {
+  "exit": 0,
+  "sweepArmReceipt": {
+   "entry": "geometry.navmesh-ownership__candidate-02-supplied__arm",
+   "accepted": true,
+   "identityLimits": [],
+   "rule": "D2: every request plugin with a stated hash — `scope` or `instance:*` alike — must be consumed at that hash. The fake reads the copy D1 resolves, so the emit agrees with the plan and there is nothing left to record as a limit. `identityLimits` is empty, not merely absent of a rejection."
+  },
+  "jsonReceipts": [
+   {
+    "entry": "geometry.bos-overlay__candidate-02-supplied",
+    "configurationSource": "plan",
+    "fixtureNote": "In THIS fixture the scope declares no overlays, so `geometry.bos-overlay` (trigger `{overlays: true}`) is not-applicable on every arm and its receipt is the accounting one. D3 covers it word for word — 'a row that ran nothing gets THIS ARM's frozen request' — so the consumed block is exactly the thing under test; only its execution status is uninteresting. Case 12 asserts D3 on the same receipt for the same reason."
+   },
+   {
+    "entry": "loadability.masters-and-order__candidate-02-supplied",
+    "configurationSource": "plan",
+    "fixtureNote": "the completed json child of the same arm (a scopeprobe adapter writing --json states no identity of its own), so the same consumed row is asserted on a receipt that actually ran."
+   }
+  ],
+  "consumedPluginRow": {
+   "name": "FixtureSupplied.esp",
+   "sha256Of": "mods/Supplied Patch A/FixtureSupplied.esp",
+   "pathEndsWith": "mods/Supplied Patch A/FixtureSupplied.esp",
+   "hashSource": "instance:Supplied Patch A"
+  },
+  "noIdentityLimitsEntryFor": "FixtureSupplied.esp",
+  "consumedRule": "D3: a child that states no identity consumes the arm's request rows WITH their hashSource; only an `unstated` row produces an identityLimits entry. A resolved row's path and hash are what reuse re-checks on disk.",
+  "baselineControl": {
+   "entry": "geometry.navmesh-ownership__baseline__arm",
+   "accepted": true,
+   "rule": "the undamaged baseline arm is accepted throughout — the contract is not `reject everything`."
+  }
+ },
+
+ "resume": {
+  "id": "unchanged-control",
+  "damage": "none: a resume over a run nothing has touched",
+  "exit": 0,
+  "everyTerminalOkEntryOfTheSuppliedArmReused": true,
+  "stdoutContains": "0 refused-reuse",
+  "noRunningTransition": true,
+  "noChildLaunched": true,
+  "rule": "D4: on an unchanged supplied arm every terminal-ok entry reads `reused`, `refused-reuse` is 0, no `running` transition and no child. Zero children is the measurement that reuse actually happened (case 13's unchanged-control, applied to the arm Q43 could not reuse)."
+ },
+
+ "wrongCopy": {
+  "id": "wrong-copy",
+  "scenario": "scenario-wrong-copy.json",
+  "damage": "every emit-writing probe of arm candidate-02-supplied reads the 'Supplied Patch B' copy instead of the precedence winner; everything else about the Configuration stays canonical and the fingerprint is the digest of what it states, so only the hash rule can fire",
+  "entry": "geometry.navmesh-ownership__candidate-02-supplied__arm",
+  "accepted": false,
+  "cause": "identity-mismatch",
+  "detailContains": ["FixtureSupplied.esp", "Supplied Patch A", "Supplied Patch B"],
+  "detailNamesBothHashesAt12Hex": {"planned": "mods/Supplied Patch A/FixtureSupplied.esp",
+                                   "consumed": "mods/Supplied Patch B/FixtureSupplied.esp"},
+  "baselineStillAccepted": "geometry.navmesh-ownership__baseline__arm",
+  "rule": "D2: a difference is identity-mismatch whose detail names the plugin, the plan's hash AND path, and the emit's hash AND path ('plugin X was requested at H1 (P1) and consumed at H2 (P2)'). Both folder names appear because both paths do.",
+  "why": "This is outcome 2 of the packet — a probe that read a different copy than the plan named is loud, never silent. Q43's controller cannot see it: with no stated hash there is nothing to compare."
+ },
+
+ "identicalCopyElsewhere": {
+  "id": "identical-copy",
+  "scenario": "scenario-identical-copy.json",
+  "tree": "a COPY of the instance with a third folder 'Supplied Patch A copy' holding bytes IDENTICAL to A's, listed in modlist.txt BELOW '-Supplied Patch A' so A still wins the resolution",
+  "damage": "identityDamage wrong-copy pointing at 'Supplied Patch A copy': the probe reads an identical copy from a folder the plan did not name",
+  "planProvidedByLayers": ["Supplied Patch A", "Supplied Patch A copy", "Supplied Patch B"],
+  "entry": "geometry.navmesh-ownership__candidate-02-supplied__arm",
+  "accepted": true,
+  "identityLimitsCount": 1,
+  "identityLimitsRow": {
+   "plugin": "FixtureSupplied.esp",
+   "recordedSha256Of": "mods/Supplied Patch A/FixtureSupplied.esp",
+   "plannedPathEndsWith": "Supplied Patch A/FixtureSupplied.esp",
+   "emitPathEndsWith": "Supplied Patch A copy/FixtureSupplied.esp",
+   "detailContains": ["Supplied Patch A", "Supplied Patch A copy"]
+  },
+  "rule": "D2: hashes equal but the path different after normalisation (separators, case) is ACCEPTED with an identityLimits row {plugin, recordedSha256, plannedPath, emitPath, detail} saying the emit read an identical copy elsewhere — loud in the receipt, not a rejection, because the binding is to content.",
+  "rulingApplied": "A-5 / finding F3 (coordinator, 2026-09-12): that sentence had no firing-direction coverage — the two fixture folders carry DIFFERENT bytes by design, so deleting the whole branch left case 16 green. The lab's real shape is identical bytes in two folders (the combo patch at modlist lines 58 and 72), which is exactly this arm.",
+  "whyNotAMismatch": "the wrong-copy step above is the same damage with different bytes and is a rejection. The pair is what shows the rule turning on content rather than on the path."
+ },
+
+ "bytesChanged": {
+  "id": "supplied-bytes-changed",
+  "damage": "after a completed run, the bytes of mods/Supplied Patch A/FixtureSupplied.esp are changed on disk, then `resume`",
+  "verb": "resume",
+  "exit": 0,
+  "invalidated": {
+   "entries": ["geometry.navmesh-ownership__candidate-02-supplied__arm",
+               "loadability.masters-and-order__candidate-02-supplied"],
+   "entriesNote": "geometry.bos-overlay is not in this list: not-applicable in this fixture's scope, it never reaches a terminal-ok status, and reuse only speaks about entries that completed.",
+   "transitionStartsWith": "invalidated",
+   "detailContains": ["changed on disk", "Supplied Patch A"],
+   "rule": "D4: the resolved file changed on disk -> invalidated(plugin X changed on disk at P). P is the path the plan named, so the detail carries the folder."
+  },
+  "baselineStaysReused": {
+   "entries": ["geometry.navmesh-ownership__baseline__arm", "loadability.masters-and-order__baseline"],
+   "restingStatus": "reused",
+   "rule": "D4: the baseline's entries stay `reused` — one arm's changed input is not every arm's."
+  },
+  "stdoutContains": "0 refused-reuse",
+  "stdoutRule": "a changed file is an invalidation, never a gap: with the hash stated there is nothing left that reuse cannot re-check."
+ },
+
+ "rulingNeeded": [
+  {
+   "id": "unstated-reason-wording",
+   "where": "variants no-instance and modlist-removed",
+   "undetermined": "D1 fixes WHAT the unstatedReason must say (that --instance was not given / that modlist.txt could not be read) but no sentence.",
+   "expectationWritten": "the reason names the thing: the token 'instance' for the first, 'modlist.txt' for the second.",
+   "asserted": "the token only, never a whole sentence."
+  },
+  {
+   "id": "modlist-unreadable-supplied-block",
+   "where": "variant modlist-removed",
+   "undetermined": "whether a name whose copies exist but cannot be ordered belongs in supplied.payloadMissing (no usable layer), in supplied.outOfView (the copies are certainly out of the view), or in neither.",
+   "expectationWritten": "none — the definitions settle the request row and stop there.",
+   "asserted": "nothing about payloadMissing/outOfView in this variant; the row, the reason and providedBy only."
+  },
+  {
+   "id": "providedBy-on-scope-rows",
+   "where": "plan.armsRequested",
+   "undetermined": "D1 gives `providedBy` in the shape of the instance-resolved row and says nothing about a row the scope states (hashSource `scope`).",
+   "expectationWritten": "a scope row is unchanged from Q43 — no providedBy required, and one would not be wrong either.",
+   "asserted": "nothing; only the supplied row's providedBy is checked."
+  },
+  {
+   "id": "hashSource-on-consumed-scope-rows",
+   "where": "run.jsonReceipt",
+   "undetermined": "D3 says the consumed block carries the request rows WITH their hashSource; whether a scope row's consumed copy must also spell `scope` is not stated separately.",
+   "expectationWritten": "it presumably does, and nothing depends on it here.",
+   "asserted": "hashSource on the supplied row only."
+  }
+ ]
+}

@@ -32,6 +32,25 @@ PLUGINS = {
 }
 BASE_ORDER = ["Skyrim.esm", "Update.esm", "FixtureBase.esp", "FixtureTarget.esp"]
 
+# Q44 / case 16: a plugin that is NOT in `plugins/` and NOT in the scope — a supplied patch. Two mod
+# folders provide the same filename with DIFFERENT bytes, so which copy a reader resolved is visible
+# in the hash; a third copy (bytes C) is written into `overwrite/` by the test's own variant.
+SUPPLIED_PLUGIN = "FixtureSupplied.esp"
+SUPPLIED_BYTES = {
+    "Supplied Patch A": b"fixture supplied patch A: the copy modlist.txt ranks first\n",
+    "Supplied Patch B": b"fixture supplied patch B: a different copy of the same filename\n",
+}
+SUPPLIED_OVERWRITE_BYTES = b"fixture supplied patch C: the overwrite layer's copy\n"
+# Mo2LoadOrder.ParseModlist's own shape: `#` a comment, `+` enabled, `-` disabled, a `…_separator`
+# skipped from both lists, FILE ORDER with the TOP line the highest priority. `Fixture Enabled Mod`
+# has no folder on disk, so layer 4 is exercised as "an absent folder is skipped"; the two disabled
+# folders are layer 5, and A is above B, which is the only reason A wins.
+MODLIST = ("# fixture modlist.txt: MO2 writes the highest-priority mod on the TOP line\n"
+           "+Fixture Enabled Mod\n"
+           "-Fixture patches_separator\n"
+           "-Supplied Patch A\n"
+           "-Supplied Patch B\n")
+
 # The checks trimmed out of the real registry: one per family, plus the only real prerequisite chain
 # (state.conditional-geometry <- state.switch-census) and one check of each non-runnable kind.
 KEEP = ["loadability.masters-and-order", "loadability.dangling-references", "records.cell-attributes",
@@ -162,6 +181,19 @@ def main() -> int:
     pdir.mkdir(parents=True, exist_ok=True)
     for name, body in PLUGINS.items():
         (pdir / name).write_bytes(body)
+
+    # ---------------------------------------------------------------- the MO2-shaped instance (Q44)
+    # An instance tree beside `plugins/`, for the ONE case that resolves a plugin the scope does not
+    # list. Every layer of D1's walk is present and empty or absent except the one that must win.
+    inst = out_root / "instance"
+    (inst / "overwrite").mkdir(parents=True, exist_ok=True)
+    for folder, body in SUPPLIED_BYTES.items():
+        (inst / "mods" / folder).mkdir(parents=True, exist_ok=True)
+        (inst / "mods" / folder / SUPPLIED_PLUGIN).write_bytes(body)
+    (inst / "profiles" / "fixture").mkdir(parents=True, exist_ok=True)
+    (inst / "profiles" / "fixture" / "modlist.txt").write_text(MODLIST, encoding="utf-8", newline="\n")
+    gdir = out_root / "game"
+    (gdir / "Data").mkdir(parents=True, exist_ok=True)
 
     # The configuration the scope reports, with the fixture plugins' real paths and content hashes - what a
     # resume re-hashes (PLAN D6 / A-9). Written here rather than typed above because the hashes are of files
@@ -419,6 +451,41 @@ def main() -> int:
     case_dir("case-15-portable-incomplete",
              {"candidate-00-baseline.json": base, "candidate-01-reorder.json": reorder},
              {"arms": arms_ok(stems)})
+
+    # ---------------------------------------------------------------- Q44: case 16
+    # 16 — a supplied plugin's identity at plan time. The candidates dir holds the BASELINE ONLY: the
+    # supplied arm comes from `--supplied FixtureSupplied.esp=<the file under supplied/>`, whose
+    # candidate file lives OUTSIDE candidates/ exactly as the lab's does (a file inside it would make
+    # a second, ordinary candidate arm out of the same order).
+    supplied_cand = candidate("candidate-02-supplied", BASE_ORDER + [SUPPLIED_PLUGIN],
+                              [f"enabled {SUPPLIED_PLUGIN}, a supplied patch the profile does not load"],
+                              kind_note="supplied combination, ESP-only")
+    stems16 = ["baseline", "candidate-02-supplied", "candidate-02-supplied.reverse"]
+    case_dir("case-16-supplied-identity", {"candidate-00-baseline.json": base},
+             {"arms": arms_ok(stems16)},
+             extra_scenarios={
+                 # The probe reads the LOSING copy of the two folders that provide the name: the
+                 # emit's Configuration is canonical in every other respect and its fingerprint is
+                 # the digest of what it states, so only the hash rule can fire.
+                 "scenario-wrong-copy.json": [
+                     {"orderStem": "candidate-02-supplied", "kind": "wrong-copy",
+                      "plugin": SUPPLIED_PLUGIN, "folder": "Supplied Patch B"}],
+                 # The same damage over a folder whose bytes are IDENTICAL to the winner's — D2's
+                 # accepted-with-a-limit direction. The folder is planted by the test on its own
+                 # copy of the instance tree, which is why only the scenario lives here.
+                 "scenario-identical-copy.json": [
+                     {"orderStem": "candidate-02-supplied", "kind": "wrong-copy",
+                      "plugin": SUPPLIED_PLUGIN, "folder": "Supplied Patch A copy"}],
+             })
+    write_json(cases / "case-16-supplied-identity" / "supplied" / "candidate-02-supplied.json",
+               supplied_cand)
+    # The other half of the `Mods` pair: the SAME order with an EMPTY Mods list. `cand.Mods ??
+    # comp.EnabledMods` falls back only on an absent one, so this candidate stages no mod folders
+    # and cannot see a copy inside the view's own folder.
+    write_json(cases / "case-16-supplied-identity" / "supplied" / "candidate-03-supplied-empty-mods.json",
+               candidate("candidate-03-supplied-empty-mods", BASE_ORDER + [SUPPLIED_PLUGIN],
+                         [f"enabled {SUPPLIED_PLUGIN} with an empty Mods list: no mod folder is staged"],
+                         mods=[], kind_note="supplied combination, ESP-only"))
 
     print(f"fixtures written under {out_root}")
     print(f"  plugins: {len(PLUGINS)}   registry checks: {len(keep)}   cases: {len(list(cases.iterdir()))}")
