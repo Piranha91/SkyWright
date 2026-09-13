@@ -41,6 +41,24 @@ findings they demonstrate) lives with that instance, not here.
 
 ## CLI reference (first positional arg = CellEditorID, FormID, or a worklist `.json`)
 
+### Clean report and video capture
+
+Pass `--report-mode` with any textured still, compare, worklist, or interactive run to preserve the camera,
+projection, canvas, crop, scene geometry and diagnostic overlays while removing every text surface from the
+pixels. Static PNGs omit caption bars, coloured NPC/route captions and grid numbers. Interactive windows and
+F12 captures omit the control bar, hover/status HUD and help card. Console output, PNG `viewprobe` metadata,
+camera pose and sidecars remain complete. Without the flag, output is unchanged.
+
+In textured mode, `--ref` is repeatable: bare `--ref FORMKEY` keeps the orange halo; `--ref FORMKEY=cyan` and
+`--ref FORMKEY=magenta` distinguish objects in one frame. Accepted colours are orange, cyan, magenta, yellow,
+green and blue. Later entries for one FormKey win; an explicit colour overrides a conflict door's orange. Flat
+diagnostic mode retains one bare `--ref FORMKEY` and refuses repeated or coloured forms because it has one
+highlight channel.
+
+Before publication, inspect report-mode frames at full size. Verify that no caption, control, hover, help or
+grid-label pixels remain, requested overlays remain visible, and PNG metadata still carries the replay pose.
+A successful save or size check alone does not establish clean pixels.
+
 - **Instance/profile:** `--instance DIR --profile NAME --game DIR`. **Nothing is compiled in** —
   see *Where it points* below. A run with none of it configured exits with guidance rather than
   walking a directory that isn't there.

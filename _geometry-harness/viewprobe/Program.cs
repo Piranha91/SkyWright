@@ -48,6 +48,9 @@ using Image = SixLabors.ImageSharp.Image;
 // anything. The console dies with the process on a GUI launch, so every exit path pauses.
 using var __run = RunLog.BeginProcess("viewprobe", args);
 
+if (args.Length == 2 && args[0] == "--report-mode-smoke")
+    return ViewProbe.TexturedScene.ReportModeSmoke(args[1]);
+
 bool guiLaunch = GuiLaunch();
 if (guiLaunch)
     AppDomain.CurrentDomain.ProcessExit += (_, _) =>
@@ -77,7 +80,7 @@ string dataDir = Path.Combine(GamePath, "Data");
 if (args.Length > 0 && args[0] == "--smoke") return Smoke();
 if (args.Length == 0)
 {
-    Console.Error.WriteLine("usage: viewprobe <CellEditorID|FormID> [--out DIR] [--size N] [--angles 0,90,180] [--elev 25] [--no-nav] [--ref FORMID] [--interactive [--fly-speed 600] [--look-sens 0.15]]");
+    Console.Error.WriteLine("usage: viewprobe <CellEditorID|FormID> [--out DIR] [--size N] [--angles 0,90,180] [--elev 25] [--no-nav] [--ref FORMKEY[=COLOR]]... [--report-mode] [--interactive [--fly-speed 600] [--look-sens 0.15]]");
     Console.Error.WriteLine("       viewprobe <worklist.json> [more.json ...]   — or DROP worklists onto this exe to fly through them.");
     return 1;
 }
@@ -115,13 +118,14 @@ string outDir = Path.Combine(AppContext.BaseDirectory, "shots");
 int size = 2560;
 float elev = 28f;
 bool drawNav = true;
-string? highlight = null;
+var highlightSpecs = new List<string>();
 var angles = new List<float> { 35f, 125f };
 // First-person textured mode ("see what the tester will see"): real textures via
 // CharacterViewer.Rendering, camera INSIDE the cell at eye height, game-style FOV.
 // --eye/--eye-ref implies --tex. Coordinates are SKYRIM's (a `getpos` line pastes straight in);
 // yaw matches the game's Z angle (0 = north/+Y, clockwise), positive pitch looks down.
 bool textured = false;
+bool reportMode = false;                         // clean scene pixels for report/video capture; metadata stays external
 System.Numerics.Vector3? eye = null, look = null;
 string? eyeRef = null, lookRef = null;
 float eyeHeight = 120f;                       // standing eye level; the player is 128u tall
@@ -403,7 +407,7 @@ for (int i = argStart; i < args.Length; i++)
     else if (args[i] == "--size" && i + 1 < args.Length) size = int.Parse(args[++i]);
     else if (args[i] == "--elev" && i + 1 < args.Length) elev = float.Parse(args[++i]);
     else if (args[i] == "--no-nav") drawNav = false;
-    else if (args[i] == "--ref" && i + 1 < args.Length) highlight = args[++i];
+    else if (args[i] == "--ref" && i + 1 < args.Length) highlightSpecs.Add(args[++i]);
     else if (args[i] == "--euler") euler = true;
     else if (args[i] == "--angles" && i + 1 < args.Length)
         angles = args[++i].Split(',').Select(float.Parse).ToList();
@@ -528,6 +532,7 @@ for (int i = argStart; i < args.Length; i++)
         textured = true;
     }
     else if (args[i] == "--interactive") { interactiveMode = true; textured = true; }
+    else if (args[i] == "--report-mode") { reportMode = true; textured = true; }
     else if (args[i] == "--fly-speed" && i + 1 < args.Length) flySpeed = float.Parse(args[++i]);
     else if (args[i] == "--look-sens" && i + 1 < args.Length) lookSens = float.Parse(args[++i]);
     else if (args[i] == "--worklist" && i + 1 < args.Length) worklistPaths.Add(args[++i]);
@@ -1513,10 +1518,26 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot)
     // First-person textured mode — see TexturedScene.cs. Exits here; the flat diagnostic mode
     // below is unchanged and stays the default.
     // ---------------------------------------------------------------------------------------
+    if (!textured && (highlightSpecs.Count > 1 || highlightSpecs.Any(s => s.Contains('='))))
+    {
+        Console.Error.WriteLine("flat diagnostic mode accepts one bare --ref FORMKEY only; repeatable or coloured --ref values require --tex or --report-mode");
+        return 1;
+    }
+
     if (textured)
     {
-        FormKey? hiFp = null;
-        if (highlight is not null) { try { hiFp = FormKey.Factory(highlight); } catch { } }
+        var highlightColors = new Dictionary<FormKey, System.Numerics.Vector3>();
+        var namedHighlightColors = new Dictionary<string, System.Numerics.Vector3>(StringComparer.OrdinalIgnoreCase)
+        { ["orange"] = new(1f,.35f,.10f), ["cyan"] = new(.05f,.85f,.95f), ["magenta"] = new(.90f,.20f,.95f),
+          ["yellow"] = new(1f,.88f,.10f), ["green"] = new(.05f,.85f,.30f), ["blue"] = new(.25f,.45f,1f) };
+        foreach (var hs in highlightSpecs)
+        {
+            var eq = hs.LastIndexOf('='); var keyText = eq < 0 ? hs : hs[..eq]; var colorText = eq < 0 ? "orange" : hs[(eq + 1)..];
+            if (!namedHighlightColors.TryGetValue(colorText, out var hc))
+            { Console.Error.WriteLine($"--ref '{hs}': colour must be orange, cyan, magenta, yellow, green or blue."); return 1; }
+            try { highlightColors[FormKey.Factory(keyText)] = hc; }
+            catch { Console.Error.WriteLine($"--ref '{hs}' is not FORMKEY[=COLOR]."); return 1; }
+        }
 
         System.Numerics.Vector3? RefPos(string spec, float lift)
         {
@@ -1686,10 +1707,12 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot)
             // Editor markers are not world geometry; the game never draws them. --markers keeps them
             // as a translucent extra layer instead of dropping them.
             if (isMarker && !showMarkers) { markerSkipped++; continue; }
+            var explicitlyHighlighted = highlightColors.TryGetValue(r.FormKey, out var highlightColor);
+            if (!explicitlyHighlighted && conflictDoors.Contains(r.FormKey)) highlightColor = new(1f,.35f,.10f);
             scene.Add(new ViewProbe.SceneRef(rel, rPos, rRot, rScale,
-                                             (hiFp is { } h && r.FormKey == h) || conflictDoors.Contains(r.FormKey), isMarker,
+                                             explicitlyHighlighted || conflictDoors.Contains(r.FormKey), isMarker,
                                              r.FormKey, bk, baseEditorId.TryGetValue(bk, out var bEd) ? bEd : null,
-                                             bosRecordBase, bosLabel, bosRandom, stateChange, stateLabel, constructedRefs.Contains(r.FormKey)));
+                                             bosRecordBase, bosLabel, bosRandom, stateChange, stateLabel, constructedRefs.Contains(r.FormKey), highlightColor));
         }
         foreach (var (qx, qy, qr) in refsAt)
         {
@@ -3422,7 +3445,7 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot)
                    skyColor, terrainHeightAt, dashUnderground, dashUnderStatics, msaa, cullAbove, cellBounds,
                    diffs ?? noDiff, diffColor, picks, captionLines, colourCaptions, npcActors, npcPucksOn, routeRenders,
                    gridRender, overlayLines, keepFx, fxStatic, listMeshes, waterPlanes, coverings, planes, showPlanes, occlusionMode,
-                   size, outFile, camMeta, planeReport: planeReportSink, bosMode: bosMode, stateMode: stateView, stateName: stateArm?.Name ?? "",
+                   size, outFile, reportMode, camMeta, planeReport: planeReportSink, bosMode: bosMode, stateMode: stateView, stateName: stateArm?.Name ?? "",
                    visibilityBudget: visibilityBudget);
         }
 
@@ -3594,6 +3617,7 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot)
                 PlaneCount = planes.Count,
                 ShowPlanes = showPlanes,
                 PlaneLegend = planeLegend,
+                ReportMode = reportMode,
             };
             if (navMode != "off")
                 foreach (var nav in navSrc.Values)
@@ -3613,7 +3637,7 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot)
                 skyColor, terrainHeightAt, dashUnderground, dashUnderStatics, msaa, cullAbove, cellBounds,
                 noDiff, diffColor, picks, fpCap, colourCaptions, npcActors, npcPucksOn, routeRenders, gridRender, overlayLines, keepFx, fxStatic, listMeshes,
                 waterPlanes, coverings, planes, showPlanes, occlusionMode, size, fpOut,
-                camMeta, iopt, planeReportSink, bosMode, stateView, stateArm?.Name ?? "");
+                reportMode, camMeta, iopt, planeReportSink, bosMode, stateView, stateArm?.Name ?? "");
             Console.WriteLine($"   interactive run over ({iShapes:N0} shapes were resident)");
         pendingSwitch = iopt.CellSwitch;
             NpcCleanup();
@@ -3686,7 +3710,7 @@ long triCount = 0;
 var bounds = Aabb.Empty;
 
 FormKey? hi = null;
-if (highlight is not null) { try { hi = FormKey.Factory(highlight); } catch { } }
+if (highlightSpecs.Count > 0) { try { hi = FormKey.Factory(highlightSpecs[0]); } catch { } }
 
 var activeOrder = SpatialOverlap.EulerOrder.Xyz;
 

@@ -182,6 +182,7 @@ sealed class InteractiveOptions
     public int WorklistCell;                               // index into Worklist.Cells that THIS scene is
     public int WorklistShot;                               // shot to open on
     public bool CanSwitchCell;                             // false when the host cannot rebuild (says so on the key)
+    public bool ReportMode;                               // scene-only window and captures; suppress all text/UI overlays
     public (int Cell, int Shot)? CellSwitch;               // set by Ctrl+PageUp/Down, read by the host after Run returns
 }
 
@@ -775,6 +776,7 @@ static class InteractiveViewer
         void DrawOverlays(int fbW, int fbH)
         {
             if (fbW <= 0 || fbH <= 0) return;
+            if (opt.ReportMode) return;
             bar.Sync(fbW);
             RebuildHud(fbW);
             if (showHelp) help.Sync(HelpLines(), fbW, fbH);
@@ -814,7 +816,7 @@ static class InteractiveViewer
                 new[] { $"{opt.CellLabel} — fly capture — {pose}" },
                 Array.Empty<(string, Vector3)>(),
                 $"pose: {pose} | cell {opt.CellLabel}",
-                outPath);
+                outPath, reportMode: opt.ReportMode);
             Console.WriteLine($"   wrote {outPath}");
             Console.WriteLine($"   replay: {PoseArgs()}");
         }

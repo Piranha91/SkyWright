@@ -392,6 +392,28 @@ def conflict_rows(conflict: dict, evidence_id: str | None) -> list[dict]:
     return rows
 
 
+def infer_clobber_direction(finding: dict, plugin_order: list[str]) -> dict | None:
+    c = finding.get("counts") or {}
+    if c.get("groupKind") != "CLOBBERED" or not c.get("A") or not c.get("B"):
+        return None
+    a_name, b_name = str(c["A"]), str(c["B"])
+    rows = finding.get("allRows") or finding.get("rows") or []
+    summaries = [str(r.get("summary") or "") for r in rows]
+    details = " ".join(str(r.get("physicalDetail") or "") for r in rows)
+    direction_pattern = re.compile(r"re-cut by\s+" + re.escape(a_name) + r"\s+and then re-cut again by\s+"
+                                   + re.escape(b_name) + r"(?:\s|,)", re.I)
+    stated = bool(summaries) and all(direction_pattern.search(s) for s in summaries)
+    named_winners = {m.group(1) for m in re.finditer(r"winner's \(([^)]+)\)", details, re.I)}
+    winner_name = b_name if not named_winners or {x.lower() for x in named_winners} == {b_name.lower()} else None
+    folded = {str(n).lower(): i for i, n in enumerate(plugin_order)}
+    ordered = (winner_name is not None and a_name.lower() in folded and winner_name.lower() in folded
+               and folded[a_name.lower()] < folded[winner_name.lower()])
+    if not stated or not ordered:
+        return None
+    return {"overwrittenPlugin": a_name, "winningPlugin": winner_name, "order": "earlier-to-later",
+            "basis": "conflict evidence and recorded plugin order"}
+
+
 def bind(template: str, values: dict) -> str:
     class Safe(dict):
         def __missing__(self, k):
@@ -401,7 +423,8 @@ def bind(template: str, values: dict) -> str:
     return template.format_map(Safe(vals))
 
 
-def compile_plan(bundle_dir: Path, verify: dict, settings: dict, pr: dict, bundle_dir_as_given: str) -> dict:
+def compile_plan(bundle_dir: Path, verify: dict, settings: dict, pr: dict, bundle_dir_as_given: str,
+                 location_scopes: dict | None = None) -> dict:
     b = Bundle(bundle_dir)
     disp = b.disposition
     ev = disp.get("evaluation") or {}
@@ -494,6 +517,10 @@ def compile_plan(bundle_dir: Path, verify: dict, settings: dict, pr: dict, bundl
     mode = settings["mode"]
     rows_per_group = settings["rowsPerGroup"]
     reverse_rule = (pr.get("concise") or {}).get("reversePartRows", "index-only")
+    context_only_by_check = ((pr.get("reader") or {}).get("contextOnlyKinds") or {})
+
+    def context_only(check_id, group_kind) -> bool:
+        return str(group_kind or "") in set(context_only_by_check.get(str(check_id), []) or [])
 
     def add(f: dict) -> dict:
         f.setdefault("rows", [])
@@ -522,7 +549,9 @@ def compile_plan(bundle_dir: Path, verify: dict, settings: dict, pr: dict, bundl
             emit = b.emit(emit_path) if emit_path else None
             if (p.get("newDefect") or 0) > 0:
                 created_groups = [d for d in diff_lines if d["change"] in ("NEW", "GREW") and d.get("created", 0) > 0]
+                shrank_groups = [d for d in diff_lines if d["change"] in ("SHRANK", "GONE")]
                 rows = []
+                reader_form_keys = set()
                 group = None
                 for d in created_groups:
                     g = group_for(check_id, d["kind"], d["A"], d["B"])
@@ -530,10 +559,21 @@ def compile_plan(bundle_dir: Path, verify: dict, settings: dict, pr: dict, bundl
                     if isinstance(emit, dict):
                         for c in emit.get("Conflicts") or []:
                             if (c.get("Kind"), c.get("A"), c.get("B")) == (d["kind"], d["A"], d["B"]):
-                                rows.extend(conflict_rows(c, eid_by_path.get(emit_path)))
+                                group_rows = conflict_rows(c, eid_by_path.get(emit_path))
+                                rows.extend(group_rows)
+                                if not context_only(check_id, d.get("kind")):
+                                    reader_form_keys.update(x.get("formKey") for x in group_rows if x.get("formKey"))
                 first = created_groups[0] if created_groups else {}
+                gated = bool(context_only_by_check.get(str(check_id)))
+                reader_groups = [d for d in created_groups if not context_only(check_id, d.get("kind"))]
+                reader_shrank = [d for d in shrank_groups if not context_only(check_id, d.get("kind"))]
+                reader_created = (sum(int(d.get("created") or 0) for d in reader_groups) if created_groups
+                                  else (0 if gated else int(p.get("newDefect") or p.get("created") or 0)))
+                reader_repaired = (sum(int(d.get("repaired") or 0) for d in reader_shrank) if shrank_groups
+                                   else (0 if gated else int(p.get("repaired") or 0)))
                 counts_r = {**counts, "groups": [{"kind": d["kind"], "A": d["A"], "B": d["B"], "created": d.get("created", 0)}
-                                                 for d in created_groups]}
+                                                 for d in created_groups], "readerCreated": reader_created,
+                            "readerRepaired": reader_repaired}
                 f = add({"id": None, "kind": "regression", "priority": 1, "checkId": check_id,
                          "family": b.check_family(check_id), "armId": arm_id, "part": "diff",
                          "title": b.check_title(check_id), "strength": strength, "verdict": p.get("verdict"),
@@ -542,18 +582,31 @@ def compile_plan(bundle_dir: Path, verify: dict, settings: dict, pr: dict, bundl
                          "counts": {**counts_r, "diffLines": [d["line"] for d in created_groups]},
                          "evidenceIds": eids_for(check_id, arm_id, "diff") + [x for x in eids_for(check_id, arm_id, "arm")
                                                                              if x not in eids_for(check_id, arm_id, "diff")],
-                         "mediaIds": media_for(check_id, arm_id, {r["formKey"] for r in rows}),
+                         "mediaIds": media_for(check_id, arm_id, reader_form_keys),
                          "groupId": group, "rows": rows})
+                f["readerRelevant"] = bool(reader_groups) if created_groups else not gated
+                if not f["readerRelevant"] and gated:
+                    f["readerEvidenceReason"] = "context-only-or-inseparable"
                 f["_group"] = group
             if (p.get("repaired") or 0) > 0 or (p.get("reclassified") or 0) > 0:
                 kind = "repaired" if (p.get("repaired") or 0) > 0 else "reclassified"
                 shrank = [d for d in diff_lines if d["change"] in ("SHRANK", "GONE")]
+                reader_shrank = [d for d in shrank if not context_only(check_id, d.get("kind"))]
+                gated = bool(context_only_by_check.get(str(check_id)))
+                reader_repaired = (sum(int(d.get("repaired") or 0) for d in reader_shrank) if shrank
+                                   else (0 if gated else int(p.get("repaired") or 0)))
+                reader_reclassified = (sum(int(d.get("reclassified") or 0) for d in reader_shrank) if shrank
+                                       else (0 if gated else int(p.get("reclassified") or 0)))
                 f = add({"id": None, "kind": kind, "priority": 4, "checkId": check_id,
                          "family": b.check_family(check_id), "armId": arm_id, "part": "diff",
                          "title": b.check_title(check_id), "strength": strength, "verdict": p.get("verdict"),
                          "plain": bind(templates.get(kind, ""), {**counts, "armId": arm_id}),
-                         "counts": {**counts, "diffLines": [d["line"] for d in shrank]},
+                         "counts": {**counts, "diffLines": [d["line"] for d in shrank],
+                                    "readerRepaired": reader_repaired, "readerReclassified": reader_reclassified},
                          "evidenceIds": eids_for(check_id, arm_id, "diff"), "rows": []})
+                f["readerRelevant"] = bool(reader_shrank) if shrank else not gated
+                if not f["readerRelevant"] and gated:
+                    f["readerEvidenceReason"] = "context-only-or-inseparable"
 
     # (2) missing, verbatim from the disposition
     for m in ev.get("missing") or []:
@@ -579,20 +632,26 @@ def compile_plan(bundle_dir: Path, verify: dict, settings: dict, pr: dict, bundl
             if (check_id, arm_id) in regression_keys:
                 continue
             p = oe.get(exe) or {}
-            add({"id": None, "kind": "finding", "priority": 3, "checkId": check_id, "family": b.check_family(check_id),
+            f = add({"id": None, "kind": "finding", "priority": 3, "checkId": check_id, "family": b.check_family(check_id),
                  "armId": arm_id, "part": part, "title": b.check_title(check_id), "strength": r.get("strength"),
                  "verdict": verdict, "plain": bind(templates.get("finding-diff", ""), {**p, "probe": exe, "armId": arm_id}),
                  "counts": {"findings": r.get("findings"), **p}, "evidenceIds": base_eids, "rows": []})
+            if context_only_by_check.get(str(check_id)):
+                f["readerRelevant"] = False  # aggregate diff cannot honestly separate context-only kinds
+                f["readerEvidenceReason"] = "context-only-or-inseparable"
             continue
         emit_path = b.output_emit_path(check_id, arm_id, part)
         emit = b.emit(emit_path) if emit_path else None
         conflicts = emit.get("Conflicts") if isinstance(emit, dict) else None
         if not isinstance(conflicts, list):
-            add({"id": None, "kind": "finding", "priority": 3, "checkId": check_id, "family": b.check_family(check_id),
+            f = add({"id": None, "kind": "finding", "priority": 3, "checkId": check_id, "family": b.check_family(check_id),
                  "armId": arm_id, "part": part, "title": b.check_title(check_id), "strength": r.get("strength"),
                  "verdict": verdict, "plain": bind(templates.get("finding-count", ""), {"findings": r.get("findings"),
                                                                                        "armId": arm_id, "strength": r.get("strength")}),
                  "counts": {"findings": r.get("findings")}, "evidenceIds": base_eids, "rows": []})
+            if context_only_by_check.get(str(check_id)):
+                f["readerRelevant"] = False  # count-only result cannot identify which kinds are reader findings
+                f["readerEvidenceReason"] = "context-only-or-inseparable"
             continue
         by_key: dict[tuple, list] = collections.OrderedDict()
         for c in conflicts:
@@ -621,6 +680,9 @@ def compile_plan(bundle_dir: Path, verify: dict, settings: dict, pr: dict, bundl
                                 "population": emit.get("Population"), "state": emit.get("State")},
                      "evidenceIds": base_eids, "mediaIds": media_for(check_id, arm_id, {x["formKey"] for x in rows}, part),
                      "rows": rows})
+            f["readerRelevant"] = not context_only(check_id, kind)
+            if not f["readerRelevant"]:
+                f["readerEvidenceReason"] = "context-only-kind"
             f["_group"] = g
 
     # (5) completed null checks with their coverage lines from the receipt
@@ -751,33 +813,42 @@ def compile_plan(bundle_dir: Path, verify: dict, settings: dict, pr: dict, bundl
         group_label = (phrases.get("singular") if count_rows == 1 else phrases.get("plural")) or labels.get(
             group_kind, noun(count_rows, "reported conflict"))
         if f["kind"] == "regression":
-            new_count = int(c.get("newDefect") or 0)
-            repaired_count = int(c.get("repaired") or 0)
+            new_count = int(c.get("readerCreated") or 0)
+            repaired_count = int(c.get("readerRepaired") or 0)
             check_phrase = ((pr.get("reader") or {}).get("regressionCheckPhrases") or {}).get(
                 f.get("checkId"), "completed check")
             f["readerPlain"] = (f"The supplied setup introduced {fmt_n(new_count)} new "
-                                f"{noun(new_count, 'problem')} in the {check_phrase}. It also repaired "
-                                f"{fmt_n(repaired_count)} existing {noun(repaired_count, 'problem')}; "
-                                "those repairs do not cancel the new problem.")
+                                f"{noun(new_count, 'problem')} in the {check_phrase}." +
+                                (f" It also repaired {fmt_n(repaired_count)} existing {noun(repaired_count, 'problem')}; "
+                                 "those repairs do not cancel the new problem." if repaired_count else ""))
         elif f["kind"] == "finding" and c.get("A") and c.get("B"):
             sample = next((r.get("label") for r in f.get("rows") or [] if r.get("label")
                            and " tris" not in str(r.get("label")).lower()
                            and not re.match(r"^[0-9a-f]{6}:", str(r.get("label")), re.I)), None)
-            verb = "shows" if count_rows == 1 else "show"
-            f["readerPlain"] = (f"{fmt_n(count_rows)} {noun(count_rows, 'record')} {verb} {group_label} between "
-                                f"{c.get('A')} and {c.get('B')}" + (f", including {sample}" if sample else "") + ".")
+            unit = phrases.get("unitSingular") if count_rows == 1 else phrases.get("unitPlural")
+            if unit:
+                f["readerPlain"] = (f"{fmt_n(count_rows)} {unit} {'was' if count_rows == 1 else 'were'} reported between {c.get('A')} and {c.get('B')}. "
+                                    f"{phrases.get('readerQualification', '')}".strip())
+            else:
+                verb = "shows" if count_rows == 1 else "show"
+                f["readerPlain"] = (f"{fmt_n(count_rows)} {noun(count_rows, 'record')} {verb} {group_label} between "
+                                    f"{c.get('A')} and {c.get('B')}" + (f", including {sample}" if sample else "") + ".")
         elif f["kind"] == "finding":
             finding_count = int(c.get("findings") or c.get("created") or count_rows or 0)
             f["readerPlain"] = (f"This check reported {fmt_n(finding_count)} "
                                 f"{noun(finding_count, 'finding')} for this setup. The exact result is in the evidence index.")
         elif f["kind"] in ("repaired", "reclassified"):
-            repaired_count = int(c.get("repaired") or 0)
-            reclassified_count = int(c.get("reclassified") or 0)
+            repaired_count = int(c.get("readerRepaired") or 0)
+            reclassified_count = int(c.get("readerReclassified") or 0)
             f["readerPlain"] = (f"The supplied setup repaired {fmt_n(repaired_count)} existing "
                                 f"{noun(repaired_count, 'problem')} and changed which mod owns "
                                 f"{fmt_n(reclassified_count)} still-present {noun(reclassified_count, 'problem')}.")
         elif f["kind"] == "null":
-            f["readerPlain"] = "This completed check found no problem in the records it examined."
+            diff_null = ((pr.get("reader") or {}).get("differentialNullPhrases") or {}).get(f.get("checkId"))
+            f["readerPlain"] = (diff_null or "This comparison found no additional problem in the records it examined; "
+                                "problems already present in either setup are reported separately."
+                                if f.get("part") == "diff" else
+                                "This completed check found no problem in the records it examined.")
         elif f["kind"] == "catalogue":
             f["readerPlain"] = f"The check recorded {fmt_n(c.get('count'))} {c.get('unit') or 'item(s)'} for reference."
         else:
@@ -819,6 +890,27 @@ def compile_plan(bundle_dir: Path, verify: dict, settings: dict, pr: dict, bundl
     targets = [{"name": t.get("name"), "sha256": t.get("sha256"), "bytes": t.get("bytes"), "provider": t.get("provider"),
                 "providerKind": t.get("providerKind"), "records": (t.get("footprint") or {}).get("records")}
                for t in (b.plan.get("targets") or []) if isinstance(t, dict)]
+    target_names_for_scope = [str(t.get("name")) for t in targets if t.get("name")]
+    target_set_for_scope = {n.lower() for n in target_names_for_scope}
+    evidence_plugins_by_arm = collections.defaultdict(set)
+    for f in findings:
+        if f.get("part") == "reverse" or f.get("readerRelevant") is False:
+            continue
+        pair = [str(x) for x in ((f.get("counts") or {}).get("A"), (f.get("counts") or {}).get("B")) if x]
+        if any(x.lower() in target_set_for_scope for x in pair):
+            evidence_plugins_by_arm[f.get("armId")].update(pair)
+    scope_locations = []
+    for target in b.plan.get("targets") or []:
+        placed = ((target.get("footprint") or {}).get("placed") or {}) if isinstance(target, dict) else {}
+        for cell in placed.get("cells") or []:
+            if not isinstance(cell, dict):
+                continue
+            if cell.get("worldspace") and cell.get("x") is not None and cell.get("y") is not None:
+                label = f"{cell['worldspace']} ({cell['x']}, {cell['y']})"
+            else:
+                label = cell.get("name") or cell.get("cell")
+            if label and label not in scope_locations:
+                scope_locations.append(label)
     base_names = [p.get("name") for p in ((plan_arms.get("baseline") or {}).get("requested") or {}).get("plugins") or []]
     base_set = {n.lower() for n in base_names if n}
     arms_out = []
@@ -837,12 +929,32 @@ def compile_plan(bundle_dir: Path, verify: dict, settings: dict, pr: dict, bundl
                 limits += len((rc.get("validation") or {}).get("identityLimits") or [])
         added_label = ", ".join(added)
         display_label = ("Measured load order" if arm_id == "baseline" else
-                         (("With supplied patch" if kinds.get(arm_id) == "supplied-combination" else "Tested alternative setup") +
+                         (("Setup including supplied patch" if kinds.get(arm_id) == "supplied-combination" else "Tested alternative setup") +
                           (f": {added_label}" if added_label else "")))
         payload = (da.get("payload") or pa.get("payload") or {})
         setup_limits = []
         if payload.get("espOnly"):
             setup_limits.append("Only the plugin was included; its meshes, scripts and installer choices were not tested.")
+        supplied_location_scope = ((location_scopes or {}).get(arm_id) or {}).get("locationContributors") or pa.get("locationContributors") or {}
+        supplied_locations = supplied_location_scope.get("locations") or []
+        supplied_contributors = [p for loc in supplied_locations if isinstance(loc, dict)
+                                  for p in loc.get("plugins") or []]
+        selected_plugins = {str(p.get("name")).lower() for p in supplied_contributors
+                            if isinstance(p, dict) and p.get("name")}
+        location_basis = "measured per-location contributors"
+        location_complete = bool(supplied_location_scope.get("complete"))
+        location_missing = supplied_location_scope.get("missingInput")
+        if not location_missing and supplied_location_scope.get("missing"):
+            location_missing = "; ".join(str(x) for x in supplied_location_scope.get("missing") or [])
+        if not location_missing and supplied_location_scope.get("limits"):
+            location_missing = " ".join(str(x) for x in supplied_location_scope.get("limits") or [])
+        if not selected_plugins:
+            selected_plugins = {n.lower() for n in evidence_plugins_by_arm.get(arm_id, set()) if n}
+            location_basis = "plugins named by accepted target-conflict evidence"
+            location_complete = False
+            location_missing = (location_missing or
+                                "This bundle does not enumerate every plugin that changes the listed cells or worldspace coordinates.")
+        affecting_subset = [n for n in names if n and n.lower() in selected_plugins]
         arms_out.append({"armId": arm_id, "kind": kinds.get(arm_id), "displayLabel": display_label,
                          "candidateFile": da.get("candidateFile") or pa.get("candidateFile"),
                          "pluginsAdded": added, "pluginsRemoved": removed,
@@ -850,11 +962,47 @@ def compile_plan(bundle_dir: Path, verify: dict, settings: dict, pr: dict, bundl
                          "espOnly": (da.get("payload") or pa.get("payload") or {}).get("espOnly"),
                          "loadedInGameNote": da.get("loadedInGameNote") or pa.get("loadedInGameNote"),
                          "readerLimits": setup_limits,
+                         "locationPluginOrder": affecting_subset,
+                         "locationPluginScope": {"basis": location_basis, "complete": location_complete,
+                                                 "missingInput": location_missing,
+                                                 "locations": [((f"{x.get('worldspace')} ({x.get('x')}, {x.get('y')})"
+                                                                  if x.get('worldspace') and x.get('x') is not None and x.get('y') is not None
+                                                                  else x.get('name') or x.get('cell')))
+                                                               for x in supplied_locations if isinstance(x, dict)] or scope_locations},
                          "orderEvaluation": da.get("orderEvaluation"),
                          "identity": {"pluginCount": len(names), "unstatedRows": unstated, "identityLimits": limits}})
     arm_labels = {a["armId"]: a["displayLabel"] for a in arms_out}
     for f in findings:
         f["readerArmLabel"] = arm_labels.get(f.get("armId"), "Measured setup")
+        c = f.get("counts") or {}
+        if f.get("kind") != "finding" or c.get("groupKind") != "CLOBBERED" or not c.get("A") or not c.get("B"):
+            continue
+        arm = next((x for x in arms_out if x.get("armId") == f.get("armId")), None)
+        pa = plan_arms.get(f.get("armId")) or {}
+        order = [p.get("name") for p in ((pa.get("requested") or {}).get("plugins") or []) if p.get("name")]
+        direction = infer_clobber_direction(f, order)
+        if direction:
+            f["overwriteDirection"] = direction
+            f["readerPlain"] = (f"{direction['winningPlugin']}, loaded later, overwrites {fmt_n(f.get('rowsTotal'))} "
+                                f"{noun(f.get('rowsTotal'), 'navmesh edit')} from {direction['overwrittenPlugin']}.")
+    # Context-only overwrite history remains fully indexed, but is never presented as a compatibility finding.
+    # A candidate is called pre-existing only when the same structured group and every record key occur at baseline.
+    baseline_context = {}
+    for f in findings:
+        c = f.get("counts") or {}
+        if f.get("armId") == "baseline" and context_only(f.get("checkId"), c.get("groupKind")):
+            baseline_context[(f.get("checkId"), c.get("groupKind"), c.get("A"), c.get("B"))] = {
+                r.get("formKey") for r in f.get("allRows") or [] if r.get("formKey")}
+    for f in findings:
+        c = f.get("counts") or {}
+        if not context_only(f.get("checkId"), c.get("groupKind")):
+            continue
+        keys = {r.get("formKey") for r in f.get("allRows") or [] if r.get("formKey")}
+        prior = baseline_context.get((f.get("checkId"), c.get("groupKind"), c.get("A"), c.get("B")))
+        if f.get("armId") != "baseline" and keys and prior is not None and keys <= prior:
+            f["readerContext"] = "Already present before adding the patch; this remains overwrite history, not an established incompatibility."
+        else:
+            f["readerContext"] = "Recorded overwrite history for this setup; it does not by itself establish an incompatibility or attribute the result to the patch."
     missing = ev.get("missing") or []
     by_cause = collections.Counter(str(m.get("status")) for m in missing)
     run_ids = b.manifest.get("runIds") or []
@@ -864,6 +1012,8 @@ def compile_plan(bundle_dir: Path, verify: dict, settings: dict, pr: dict, bundl
                  "bundleCreatedUtc": b.manifest.get("createdUtc"),
                  "scopeGeneratedUtc": (b.scope or {}).get("generatedUtc") if isinstance(b.scope, dict) else None,
                  "dispositionCreatedUtc": disp.get("createdUtc"),
+                 "locationScope": {"locations": scope_locations,
+                                   "basis": "locations recorded in the target footprint"},
                  "arms": arms_out, "states": b.plan.get("states") or {"selected": [], "notExplored": []},
                  "completion": {"complete": bool(ev.get("complete")), "claim": ev.get("claim"), "missingRequired": len(missing),
                                 "byCause": dict(sorted(by_cause.items())), "unknownApplicability": ev.get("unknownApplicability") or []},
@@ -885,6 +1035,8 @@ def compile_plan(bundle_dir: Path, verify: dict, settings: dict, pr: dict, bundl
     supplied = sorted({n for a in arms_out if a.get("kind") == "supplied-combination" for n in a.get("pluginsAdded") or []})
     comparison_weight = collections.Counter()
     for f in findings:
+        if f.get("readerRelevant") is False:
+            continue
         c = f.get("counts") or {}
         pair = [str(x) for x in (c.get("A"), c.get("B")) if x]
         if not any(x.lower() in target_set for x in pair):
@@ -897,7 +1049,7 @@ def compile_plan(bundle_dir: Path, verify: dict, settings: dict, pr: dict, bundl
     for f in findings:
         c = f.get("counts") or {}
         pair = {str(x).lower() for x in (c.get("A"), c.get("B")) if x}
-        f["readerRelevant"] = not pair or bool(pair & reader_scope_names)
+        f["readerRelevant"] = bool(f.get("readerRelevant", True)) and (not pair or bool(pair & reader_scope_names))
     compared = ", ".join(comparison_names) if comparison_names else "the measured load order"
     patch_text = ", ".join(supplied) if supplied else "no separate patch plugin"
     scope_line = (f"This report evaluates {', '.join(target_names) or 'the target mod'} within the measured load order. "
@@ -906,22 +1058,28 @@ def compile_plan(bundle_dir: Path, verify: dict, settings: dict, pr: dict, bundl
                   + (f"The supplied patch evaluated is {patch_text}." if supplied else
                      "No separate patch plugin was included in the comparison."))
     candidate_orders = [a.get("orderEvaluation") or {} for a in arms_out if a.get("kind") != "baseline"]
-    has_regression = any(o.get("regression") for o in candidate_orders)
-    repaired_total = sum(int(v.get("repaired") or 0) for o in candidate_orders for v in (o.get("perProbe") or {}).values())
+    has_regression = any(f.get("kind") == "regression" and f.get("readerRelevant") for f in findings)
+    repaired_total = sum(int((f.get("counts") or {}).get("readerRepaired") or 0) for f in findings
+                         if f.get("kind") in ("repaired", "reclassified") and f.get("readerRelevant"))
     has_alternative = any(a.get("kind") != "baseline" for a in arms_out)
     has_completed_result = any(f.get("kind") in ("regression", "finding", "repaired", "reclassified", "null", "catalogue")
-                               for f in findings)
+                               and f.get("readerRelevant") for f in findings)
+    has_context_only = any(f.get("readerEvidenceReason") in ("context-only-kind", "context-only-or-inseparable")
+                           for f in findings)
     if has_regression:
         verdict = (("The supplied setup resolves some measured conflicts, but it also introduces a new defect in a check that ran."
                     if repaired_total else
                     "The supplied setup introduces a new defect in a check that ran."))
     elif repaired_total:
         verdict = "The supplied setup resolves some measured conflicts and no new defect was reported by the checks that ran."
+    elif has_context_only and not any(f.get("kind") in ("regression", "finding") and f.get("readerRelevant") for f in findings):
+        verdict = ("The available results record navmesh overwrite history, but they cannot determine incompatibility "
+                   "without a measured mismatch in the winning scene or links.")
     elif claim == "no-findings-in-completed-checks":
         verdict = "The completed checks found no problem in what they examined."
     elif has_alternative:
         verdict = "The completed checks do not establish that the supplied setup improves the target mod."
-    elif any(f.get("kind") == "finding" for f in findings):
+    elif any(f.get("kind") == "finding" and f.get("readerRelevant") for f in findings):
         verdict = "The completed checks found conflicts involving the target mod; no alternative setup was supplied for comparison."
     elif has_completed_result:
         verdict = "The completed checks found no problem in what they examined; no alternative setup was supplied for comparison."
@@ -934,6 +1092,8 @@ def compile_plan(bundle_dir: Path, verify: dict, settings: dict, pr: dict, bundl
         limitations.append("No matching play-time evidence was supplied, so this does not show what happened during play.")
     if any(a.get("espOnly") for a in arms_out):
         limitations.append("The supplied patch was tested as a plugin only; its meshes, scripts and installer choices were not included.")
+    if has_context_only:
+        limitations.append("Navmesh overwrite history is retained in the evidence index as context and is not treated as proof of incompatibility.")
     reader_data = pr.get("reader") or {}
     scope_limits = reader_data.get("scopeLimits") or {}
     other_limits = [scope_limits.get(x.get("extent"), "An additional area could not be assessed; see the full scope in the evidence index.")
@@ -944,18 +1104,34 @@ def compile_plan(bundle_dir: Path, verify: dict, settings: dict, pr: dict, bundl
         other_limits.append("Some supplied images or clips could not be matched to this evaluation and were excluded from the evidence shown.")
     check_titles = reader_data.get("checkTitles") or {}
     reason_labels = reader_data.get("missingReasons") or {}
+    reason_explanations = reader_data.get("missingReasonExplanations") or {}
     missing_summary = []
     for status in sorted({str(m.get("status")) for m in missing}):
         subjects = sorted({check_titles.get(str(m.get("checkId")), b.check_title(m.get("checkId")))
                            for m in missing if str(m.get("status")) == status})
-        missing_summary.append({"reason": reason_labels.get(status, "has no accepted result"), "subjects": subjects})
+        missing_summary.append({"reason": reason_labels.get(status, "has no accepted result"), "subjects": subjects,
+                                "explanation": reason_explanations.get(status)})
     null_summary = []
+    comparison_summary = []
     for f in findings:
         if f.get("kind") != "null":
             continue
         subject = check_titles.get(str(f.get("checkId")), f.get("title"))
-        context = ("the comparison found no additional issue" if f.get("part") == "diff" else
-                   "no problem was found in the records examined")
+        if f.get("part") in ("diff", "reverse"):
+            if f.get("part") == "diff":
+                baseline_total = sum(int(x.get("rowsTotal") or 0) for x in findings
+                                     if x.get("kind") == "finding" and x.get("checkId") == f.get("checkId")
+                                     and x.get("armId") == "baseline" and x.get("part") != "reverse" and not x.get("readerEvidenceReason"))
+                result_total = sum(int(x.get("rowsTotal") or 0) for x in findings
+                                   if x.get("kind") == "finding" and x.get("checkId") == f.get("checkId")
+                                   and x.get("armId") == f.get("armId") and x.get("part") not in ("diff", "reverse")
+                                   and not x.get("readerEvidenceReason"))
+                totals = (f" The measured totals are {fmt_n(baseline_total)} before and {fmt_n(result_total)} in this setup."
+                          if baseline_total or result_total else "")
+                comparison_summary.append(f"{subject} — {f.get('readerArmLabel')}: {f.get('readerPlain')}{totals}")
+            continue
+        context = (f.get("readerPlain") or ("the comparison found no additional issue" if f.get("part") == "diff" else
+                                            "no problem was found in the records examined")).rstrip(".")
         null_summary.append(f"{subject} — {f.get('readerArmLabel')}: {context}")
     null_summary = sorted(set(null_summary))
     catalogue_summary = sorted({check_titles.get(str(f.get("checkId")), f.get("title"))
@@ -965,9 +1141,11 @@ def compile_plan(bundle_dir: Path, verify: dict, settings: dict, pr: dict, bundl
     reader = {"title": title_subject + (f" with {title_compared}" if title_compared else "") + " — patch review",
               "scopeLine": scope_line, "verdict": verdict, "limitations": limitations,
               "comparisonMods": comparison_names, "suppliedPatches": supplied, "checkTitles": check_titles,
+              "locationOrder": reader_data.get("locationOrder") or {},
               "otherLimits": list(dict.fromkeys(other_limits)),
               "checkExplanations": reader_data.get("checkExplanations") or {},
               "missingSummary": missing_summary, "nullSummary": null_summary,
+              "comparisonSummary": comparison_summary,
               "catalogueSummary": catalogue_summary,
               "context": {"evaluatedAt": disp.get("createdUtc") or b.manifest.get("createdUtc"),
                           "statesExamined": (b.plan.get("states") or {}).get("selected") or [],
@@ -994,7 +1172,7 @@ def compile_plan(bundle_dir: Path, verify: dict, settings: dict, pr: dict, bundl
     media_by_id = {m["id"]: m for m in media}
     blocks: dict = collections.OrderedDict()
     for f in findings:
-        if f["kind"] in ("regression", "finding"):
+        if f["kind"] in ("regression", "finding") and f.get("readerRelevant"):
             blocks.setdefault((f["checkId"], f["armId"], f.get("part")), []).append(f)
     order = {f["id"]: i for i, f in enumerate(findings)}
     ordered_blocks = sorted(blocks.items(), key=lambda kv: (0 if any(x["kind"] == "regression" for x in kv[1]) else 1,
@@ -1042,12 +1220,15 @@ def compile_plan(bundle_dir: Path, verify: dict, settings: dict, pr: dict, bundl
     for a in arms_out:
         oe = a.get("orderEvaluation") or {}
         if oe.get("classification"):
-            n += 1
             per = oe.get("perProbe") or {}
             text = (f"Arm {a['armId']}: classification {oe.get('classification')}; " +
                     "; ".join(f"{p}: {v.get('verdict')} repaired {fmt_n(v.get('repaired'))} reclassified {fmt_n(v.get('reclassified'))} "
                               f"created {fmt_n(v.get('created'))}" for p, v in sorted(per.items())) + ". " + str(a.get("payloadNote") or ""))
-            fids = [f["id"] for f in findings if f["armId"] == a["armId"] and f["kind"] in ("regression", "repaired", "reclassified")]
+            fids = [f["id"] for f in findings if f["armId"] == a["armId"] and f["kind"] in ("regression", "repaired", "reclassified")
+                    and f.get("readerRelevant")]
+            if not fids:
+                continue
+            n += 1
             chapters.append({"id": f"C-{n:02d}", "kind": "comparison", "title": f"Order evaluation: {a['armId']}", "findingIds": fids,
                              "mediaIds": [], "captions": [{"text": text, "evidenceIds": sorted({e for f in findings if f["id"] in fids for e in f["evidenceIds"]}),
                                                           "mediaId": None}],
@@ -1076,7 +1257,8 @@ def compile_plan(bundle_dir: Path, verify: dict, settings: dict, pr: dict, bundl
                 status = sorted(missing_by_status)[i]
                 subjects = sorted({check_titles.get(str(m.get("checkId")), "an additional check")
                                    for m in missing_by_status[status]})
-                caption["narration"] = reason_labels.get(status, "Still needs checking").capitalize() + ": " + "; ".join(subjects) + "."
+                reason = reason_labels.get(status, "Still needs checking")
+                caption["narration"] = reason[:1].upper() + reason[1:] + ": " + "; ".join(subjects) + "."
             elif chapter["kind"] == "comparison":
                 caption["narration"] = " ".join(f["readerPlain"] for f in findings
                                                  if f["id"] in chapter["findingIds"] and f["kind"] in ("regression", "repaired", "reclassified")) or "The completed checks do not establish an improvement for this setup."
@@ -1240,7 +1422,7 @@ def effective_view(plan: dict, rows_per_group: int, figures_per_finding: int, pr
     # section 3, compact: per check, per (arm, part) block with its groups
     blocks = collections.OrderedDict()
     for f in findings:
-        if f["kind"] != "finding":
+        if f["kind"] != "finding" or not f.get("readerRelevant"):
             continue
         cb = blocks.setdefault(f["checkId"], {"checkId": f["checkId"], "title": f.get("title"),
                                               "check": (plan["scope"].get("checks") or {}).get(f["checkId"]) or {},
@@ -1296,6 +1478,22 @@ def copy_media(plan: dict, bundle_dir: Path, out: Path) -> list[dict]:
     return rows
 
 
+def copy_supporting_evidence(plan: dict, presentation_dir: Path, out: Path) -> list[dict]:
+    rows = []
+    for e in plan.get("evidence") or []:
+        if e.get("storage") != "presentation" or not e.get("path"):
+            continue
+        src = presentation_dir / e["path"]
+        if not src.exists() or sha256_file(src) != e.get("sha256"):
+            raise ValueError(f"supporting-evidence-changed: {e['path']} is absent or does not match its recorded sha256")
+        dest = out / e["path"]
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        if src.resolve() != dest.resolve():
+            shutil.copy2(src, dest)
+        rows.append({"id": e.get("id"), "path": e["path"], "sha256": e["sha256"], "bytes": dest.stat().st_size})
+    return rows
+
+
 def render_all(plan: dict, view: dict, out: Path, css: str) -> dict:
     e_md = env(False)
     e_html = env(True)
@@ -1340,6 +1538,43 @@ def cmd_plan(a) -> int:
             more = f" and {len(defects) - 8} more" if len(defects) > 8 else ""
             return refuse(r, f"bundle-refused: verify-bundle found the bundle incomplete: {names}{more}; nothing is compiled "
                              f"from a bundle whose evidence does not hash to what was measured")
+        bundle_plan = load_json(bundle / manifest["plan"])
+        plan_arms = {x.get("armId"): x for x in bundle_plan.get("arms") or []}
+        location_scopes = {}
+        requested_scopes = list(getattr(a, "location_scope", None) or [])
+        normal_scope = load_json(bundle / manifest["scope"]) if manifest.get("scope") else None
+        if isinstance(normal_scope, dict) and normal_scope.get("locationContributors"):
+            requested_scopes.insert(0, "baseline=" + str(bundle / manifest["scope"]))
+        for binding in requested_scopes:
+            if "=" not in binding:
+                return refuse(r, f"location-scope-invalid: {binding!r} must be ARM=FILE")
+            arm_id, source = binding.split("=", 1)
+            if arm_id not in plan_arms:
+                return refuse(r, f"location-scope-arm-unknown: {arm_id!r} is not a planned arm")
+            doc = load_json(Path(source))
+            if not isinstance(doc, dict) or doc.get("probe") != "scopeprobe" or not isinstance(doc.get("locationContributors"), dict):
+                return refuse(r, f"location-scope-invalid: {source} is not a scopeprobe document with locationContributors")
+            req_plugins = [(p.get("name") or p.get("Name"), p.get("sha256") or p.get("Sha256"))
+                           for p in ((plan_arms[arm_id].get("requested") or {}).get("plugins") or [])]
+            got_plugins = [(p.get("name") or p.get("Name"), p.get("sha256") or p.get("Sha256"))
+                           for p in ((doc.get("configuration") or {}).get("plugins") or [])]
+            if req_plugins != got_plugins:
+                return refuse(r, f"location-scope-foreign: {source} plugin order or hashes do not match arm {arm_id}")
+            requested = plan_arms[arm_id].get("requested") or {}
+            config = doc.get("configuration") or {}
+            def named(rows):
+                return [(x.get("name") or x.get("Name"), x.get("kind") or x.get("Kind"),
+                         x.get("sha256") or x.get("Sha256")) for x in rows or []]
+            if named(requested.get("providers")) != named(config.get("providers")):
+                return refuse(r, f"location-scope-foreign: {source} providers do not match arm {arm_id}")
+            if named(requested.get("overlays")) != named(config.get("overlays")):
+                return refuse(r, f"location-scope-foreign: {source} overlays do not match arm {arm_id}")
+            if requested.get("population") not in (None, config.get("population")):
+                return refuse(r, f"location-scope-foreign: {source} population does not match arm {arm_id}")
+            requested_states = requested.get("states") or []
+            if requested_states and config.get("state") not in requested_states:
+                return refuse(r, f"location-scope-foreign: {source} state does not match arm {arm_id}")
+            location_scopes[arm_id] = doc
         r.advance(1)
         r.stage("compile", total=1, unit="plans")
         conc = pr.get("concise") or {}
@@ -1352,7 +1587,16 @@ def cmd_plan(a) -> int:
                     "reel": {k: (pr.get("reel") or {}).get(k) for k in ("maxSeconds", "fps", "width", "height")}}
         if a.mode == "exhaustive":
             settings["maxPages"] = None
-        plan = compile_plan(bundle, verify, settings, pr, str(a.bundle))
+        plan = compile_plan(bundle, verify, settings, pr, str(a.bundle), location_scopes)
+        for arm_id, doc in location_scopes.items():
+            dest = out / "evidence" / f"location-scope-{arm_id}.json"
+            write_json(dest, doc)
+            location_sha = sha256_file(dest)
+            plan["evidence"].append({"id": "E-" + location_sha[:16], "kind": "scope",
+                                     "path": dest.relative_to(out).as_posix(), "sha256": location_sha,
+                                     "bytes": dest.stat().st_size, "checkId": None, "armId": arm_id,
+                                     "part": None, "strength": "measured-scope", "recordedBy": "scopeprobe",
+                                     "storage": "presentation"})
         stamp(plan)
         write_json(out / "presentation.json", plan)
         r.artifact(str(out / "presentation.json"))
@@ -1395,6 +1639,10 @@ def cmd_report(a) -> int:
         if not bundle_dir.is_absolute():
             bundle_dir = (ppath.parent / bundle_dir).resolve() if not bundle_dir.exists() else bundle_dir
         out.mkdir(parents=True, exist_ok=True)
+        try:
+            supporting_rows = copy_supporting_evidence(plan, ppath.parent, out)
+        except ValueError as ex:
+            return refuse(r, str(ex))
         css = read_text(TEMPLATES / "report.css") if (TEMPLATES / "report.css").exists() else ""
         settings = plan["settings"]
         mode = settings.get("mode", "concise")
@@ -1506,6 +1754,7 @@ def cmd_report(a) -> int:
         manifest = {"schemaVersion": 1, "presentationId": plan.get("presentationId"), "generatedUtc": utc_now(),
                     "source": plan["source"], "compiler": plan["compiler"], "settings": settings, "effective": effective,
                     "artifacts": produced, "media": media_rows,
+                    "supportingEvidence": supporting_rows,
                     "omissions": view["omissions"] if view else plan.get("omissions"),
                     "print": print_info}
         write_json(out / "presentation-manifest.json", manifest)
@@ -1567,9 +1816,9 @@ def cmd_verify(a) -> int:
         if plan is None:
             return refuse(r, err)
         defects = []
-        counter = {"links": 0, "artifacts": 0, "media": 0}
+        counter = {"links": 0, "artifacts": 0, "media": 0, "supportingEvidence": 0}
         arts = man.get("artifacts") or []
-        r.stage("verify", total=len(arts) + len(man.get("media") or []) + 1, unit="checks")
+        r.stage("verify", total=len(arts) + len(man.get("media") or []) + len(man.get("supportingEvidence") or []) + 1, unit="checks")
         if plan.get("presentationId") != man.get("presentationId"):
             defects.append({"kind": "presentation-mismatch", "path": "presentation.json",
                             "detail": f"presentationId {plan.get('presentationId')} is not the manifest's {man.get('presentationId')}"})
@@ -1591,6 +1840,14 @@ def cmd_verify(a) -> int:
             elif sha256_file(p) != m.get("sha256"):
                 defects.append({"kind": "media-changed", "path": m["path"], "detail": "does not hash to the manifest's sha256"})
             r.advance(1)
+        for e in man.get("supportingEvidence") or []:
+            p = out / e["path"]
+            counter["supportingEvidence"] += 1
+            if not p.exists():
+                defects.append({"kind": "supporting-evidence-missing", "path": e["path"], "detail": "listed in the manifest, absent on disk"})
+            elif sha256_file(p) != e.get("sha256"):
+                defects.append({"kind": "supporting-evidence-changed", "path": e["path"], "detail": "does not hash to the manifest's sha256"})
+            r.advance(1)
         pi = man.get("print") or {}
         pages_now = None
         if pi.get("status") in ("within-limit", "over-limit", "rendered", "count-unverified"):
@@ -1606,7 +1863,8 @@ def cmd_verify(a) -> int:
                                     "detail": f"{pages_now} page(s) exceed the limit {pi['maxPages']} yet the status is within-limit"})
         r.advance(1)
         result = {"schemaVersion": 1, "checkedUtc": utc_now(), "out": str(out), "presentationId": plan.get("presentationId"),
-                  "ok": not defects, "artifacts": counter["artifacts"], "media": counter["media"], "links": counter["links"],
+                  "ok": not defects, "artifacts": counter["artifacts"], "media": counter["media"],
+                  "supportingEvidence": counter["supportingEvidence"], "links": counter["links"],
                   "pages": pages_now, "printStatus": pi.get("status"), "defects": defects}
         write_json(out / "presentation-verify.json", result)
         r.feature("links", counter["links"], "links")
@@ -1851,6 +2109,8 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--figures-per-finding", type=int, default=None)
     p.add_argument("--verify-copy", action="store_true",
                    help="verify a temporary copy of the bundle so the bundle directory itself is never written to")
+    p.add_argument("--location-scope", action="append", default=[], metavar="ARM=FILE",
+                   help="bind a scopeprobe location-contributor document to an arm; repeat for multiple arms")
     p.set_defaults(fn=cmd_plan)
     p = sub.add_parser("report", help="render report.md / report.html / report.pdf / evidence-index.md from the plan")
     p.add_argument("--presentation", required=True)

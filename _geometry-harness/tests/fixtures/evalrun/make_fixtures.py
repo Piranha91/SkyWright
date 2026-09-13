@@ -68,6 +68,14 @@ KEEP_Q43 = ["functional.quest-alias-split"]
 SCOPE = {
     "schemaVersion": 1, "probe": "scopeprobe", "generatedUtc": "2026-09-12T18:00:00Z",
     "complete": True, "walkFailures": [],
+    "locationContributors": {
+        "complete": True,
+        "locations": [{"cell": "001234:FixtureBase.esp", "kind": "exterior", "name": "FixtureExterior",
+                       "worldspace": "Tamriel", "x": 5, "y": 12,
+                       "plugins": [{"name": "FixtureBase.esp", "recordKinds": ["CELL"]},
+                                   {"name": "FixtureTarget.esp", "recordKinds": ["NAVM", "placed-record"]}]}],
+        "limits": ["Local world-record contributors only."], "missing": []
+    },
     "targets": [{
         "name": "FixtureTarget.esp", "provider": "fixture-mods",
         "sha256": None,

@@ -11,6 +11,59 @@ def load(p): return json.loads(p.read_text())
 def call(p,o,*xs,cwd=None): return subprocess.run([sys.executable,str(HARNESS/"evalreel.py"),"render","--presentation",str(p),"--out",str(o),*xs],capture_output=True,text=True,cwd=cwd)
 def frame(ff,p,seconds):
     return subprocess.run([ff,"-v","error","-ss",str(seconds),"-i",str(p),"-frames:v","1","-vf","scale=32:18","-f","rawvideo","-pix_fmt","rgb24","-"],capture_output=True,check=True).stdout
+def capture_selection(root):
+    source=root/"overlap-emit.json"
+    conflicts=[]
+    for i,(depth,fraction) in enumerate([(10,.3),(40,.5),(50,.8),(80,.4),(None,None)]):
+        conflicts.append({"Kind":"OVERLAP","A":"Earlier.esp","B":"Later.esp",
+            "Necessary":[{"FormKey":f"{i+1:06X}:Later.esp","Label":"ExampleCell","Physical":"Holds",
+                          "PhysicalDetail":f"the winning boxes overlap {depth}u deep, {fraction} of the smaller"}],
+            "Alternative":[{"FormKey":f"{i+1:06X}:Earlier.esp"}]})
+    emit={"Probe":"overlapprobe","State":"baseline","Configuration":{"Fingerprint":"fixture-order","Plugins":[{"Name":"Earlier.esp"},{"Name":"Later.esp"}]},"Conflicts":conflicts}
+    source.write_text(json.dumps(emit))
+    f={"id":"F-overlap","kind":"finding","checkId":"geometry.object-overlap","armId":"baseline","part":"arm","counts":{"A":"Earlier.esp","B":"Later.esp"},"allRows":[{"formKey":c["Necessary"][0]["FormKey"]} for c in conflicts],"evidenceIds":["E-overlap"]}
+    p={"findings":[f],"evidence":[{"id":"E-overlap","kind":"emit","part":"arm","armId":"baseline","path":source.name,"sha256":sha(source)}]}
+    result=evalreel.capture_requests(p,root); rows=result["requests"]
+    check([r["ranking"]["value"] for r in rows]==[40,32,20],"representative overlaps use measured depth/fraction instead of record order")
+    check(rows[0]["recordKeys"]==["000003:Later.esp","000003:Earlier.esp"] and [h["color"] for h in rows[0]["highlights"]]==["cyan","magenta"],"overlap capture preserves both participants and assigns distinct colours")
+    check(rows[0]["selection"]=={"eligible":5,"selected":3,"omitted":2,"unranked":1},"sampling discloses omitted and unranked candidates")
+    check(all(r["camera"]["reportMode"] and r["camera"]["lockPoseAndFramingAcrossViews"] and r["camera"]["pose"] is None for r in rows),"capture requests require clean frames and measured camera planning")
+    original=source.read_bytes(); source.write_bytes(original+b" ")
+    try: evalreel.capture_requests(p,root); refused=False
+    except ValueError as e: refused="changed" in str(e)
+    check(refused,"capture selection refuses source evidence changed after planning")
+    source.write_bytes(original)
+    emit["Probe"]="navownprobe"; emit["Conflicts"]=[{"Kind":"CLOBBERED","A":"Earlier.esp","B":"Later.esp","Necessary":[{"FormKey":"000001:Base.esm","Physical":"Holds","PhysicalDetail":"victim-only ground: 120 sample(s)","Label":"ExampleCell"}]}]
+    source.write_text(json.dumps(emit)); p["evidence"][0]["sha256"]=sha(source)
+    f.update(checkId="geometry.navmesh-ownership",allRows=[{"formKey":"000001:Base.esm"}],
+             counts={"groupKind":"CLOBBERED","A":"Earlier.esp","B":"Later.esp"})
+    check(not evalreel.capture_requests(p,root)["requests"],"sampled lost coverage alone cannot select an incompatibility scene")
+    emit["Conflicts"][0]["Necessary"][0].update(Physical="Gone",PhysicalDetail="no lost coverage measured")
+    support={"Kind":"EDGE-IDX","A":"Later.esp","B":"Patch.esp","Necessary":[
+        {"FormKey":"000001:Base.esm","Physical":"Holds","PhysicalDetail":"edge index exceeds winning neighbour count"}],
+        "Alternative":[{"FormKey":"000002:Base.esm"}]}
+    emit["Conflicts"].append(support)
+    source.write_text(json.dumps(emit)); p["evidence"][0]["sha256"]=sha(source)
+    check(not evalreel.capture_requests(p,root)["requests"],"a bare overwrite finding cannot borrow an unrelated finding's status")
+    f["counts"]={"groupKind":"EDGE-IDX","A":"Later.esp","B":"Patch.esp"}
+    nav=evalreel.capture_requests(p,root)["requests"]
+    check(len(nav)==1 and [v["navPlugin"] for v in nav[0]["views"]]==["Earlier.esp","Later.esp"],"a measured link mismatch can request paired navmesh history without claiming the overwrite is the problem")
+    check(nav[0]["recordKeys"]==["000001:Base.esm","000002:Base.esm"] and nav[0]["corroboration"][0]["kind"]=="EDGE-IDX" and "Patch.esp" in nav[0]["plugins"],
+          "navmesh scene names both ends of the actual broken link and retains its evidence")
+    support["Necessary"][0]["FormKey"]="000003:Base.esm"
+    source.write_text(json.dumps(emit)); p["evidence"][0]["sha256"]=sha(source)
+    check(not evalreel.capture_requests(p,root)["requests"],"a mismatch on another record cannot corroborate this overwrite")
+    support["Necessary"][0].update(FormKey="000001:Base.esm",Physical="Gone")
+    source.write_text(json.dumps(emit)); p["evidence"][0]["sha256"]=sha(source)
+    check(not evalreel.capture_requests(p,root)["requests"],"a repaired link cannot justify a remaining incompatibility scene")
+    support["Necessary"][0]["Physical"]="Holds"
+    source.write_text(json.dumps(emit)); p["evidence"][0]["sha256"]=sha(source)
+    p["evidence"][0]["armId"]="other-setup"
+    check(not evalreel.capture_requests(p,root)["requests"],"corroboration from another setup cannot justify a scene")
+    p["evidence"][0]["armId"]="baseline"
+    emit["Configuration"]["Plugins"].reverse(); source.write_text(json.dumps(emit)); p["evidence"][0]["sha256"]=sha(source)
+    bad=evalreel.capture_requests(p,root)
+    check(not bad["requests"] and bad["limitations"],"navmesh comparison direction refuses a contradictory recorded order")
 def media(ff,root):
     d=root/"media"; d.mkdir(); still=d/"viewprobe-clean.png"; clip=d/"game.mp4"; audio=d/"narration.wav"
     subprocess.run([ff,"-y","-f","lavfi","-i","testsrc2=size=1280x720:rate=1","-frames:v","1",str(still)],capture_output=True,check=True)
@@ -34,6 +87,7 @@ def main():
     if not found:return 1
     ff=found["exe"]; root=Path(tempfile.mkdtemp(prefix="hc-evalreel-test-")); os.environ.setdefault("HOUSECARL_RUNLOG_DIR",str(root/"runlog"))
     try:
+      capture_selection(root)
       still,clip,audio=media(ff,root); doc=plan(root,still,clip,audio); pp=root/"presentation.json"; pp.write_text(json.dumps(doc)); out=root/"reel"
       dry=call(pp,out,"--dry-run"); check(dry.returncode==0 and not (out/"reel.mp4").exists(),"dry run plans without rendering")
       r=call(pp,out); check(r.returncode==0,"narrated still/clip reel renders")

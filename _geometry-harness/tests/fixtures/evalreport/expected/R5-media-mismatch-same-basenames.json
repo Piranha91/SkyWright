@@ -1,6 +1,6 @@
 {
  "case": "R5-media-mismatch-same-basenames",
- "fixtureShape": "test_evalrun case-10's run, bundled with a media.json in the D5 schema-2 shape: (a) renders-baseline/cell-view.png, offline-render, baseline arm, fingerprint = the baseline's accepted navownprobe receipt, fingerprintSource asserted; (b) renders-candidate/cell-view.png - the SAME basename, different bytes - candidate-01-reorder arm, fingerprint = that arm's own accepted `arm` receipt; (c) stale-render.png declared on the CANDIDATE arm but carrying the BASELINE order's fingerprint, which only that arm's `reverse` receipt consumed (amendment A-3); (d) unkinded.png with no mediaKind; (e) walk.mp4, game-video, baseline fingerprint, sourceInterval whose sourcePath does not exist.",
+ "fixtureShape": "test_evalrun case-10's run with its illustrated nav rows changed to active EDGE-IDX link evidence, bundled with a media.json in the D5 schema-2 shape: (a) renders-baseline/cell-view.png, offline-render, baseline arm, fingerprint = the baseline's accepted navownprobe receipt, fingerprintSource asserted; (b) renders-candidate/cell-view.png - the SAME basename, different bytes - candidate-01-reorder arm, fingerprint = that arm's own accepted `arm` receipt; (c) stale-render.png declared on the CANDIDATE arm but carrying the BASELINE order's fingerprint, which only that arm's `reverse` receipt consumed (amendment A-3); (d) unkinded.png with no mediaKind; (e) walk.mp4, game-video, baseline fingerprint, sourceInterval whose sourcePath does not exist.",
  "acceptanceRow": "Media mismatch and same basenames: wrong arm/state/subject or missing metadata is refused/unassessed by name; two distinct images survive without overwrite.",
  "rules": ["D5", "D2 media rows and M- ids", "D3 (7)", "D4 report images by relative path"],
  "planExit": 0,
@@ -19,7 +19,8 @@
   "bothPathsExistUnderBundle": true,
   "pathsDistinct": true,
   "eachInSomeChapterMediaIds": true,
-  "eachInSomeCaptionMediaId": true
+  "eachInSomeCaptionMediaId": true,
+  "hostFindingGroupKind": "EDGE-IDX"
  },
  "unassessed": [
   {"basename": "stale-render.png", "reason": "fingerprint-mismatch"},
@@ -47,6 +48,7 @@
  },
  "notes": [
   "D5: `bundle --media` copies an accepted item to media/<sha256[:12]>-<basename>, so two files with one basename land at two paths; D2's M- id is the first 12 hex of the file's sha256, so they never collide. Both rows, both paths, both ids distinct - 'two distinct images survive without overwrite'.",
+  "The positive illustration control uses EDGE-IDX because a measured broken navmesh link is reader evidence; CLOBBERED overwrite history alone is retained only in the evidence index and cannot qualify an image for a finding chapter.",
   "D5 as amended by PLAN.md A-3 (Fable, 18:58, after this oracle's first commit): an item's fingerprint is compared to the arm's OWN accepted receipts (part null or `arm`) only; a fingerprint that appears only on that arm's `reverse` or `diff` receipts is fingerprint-mismatch. (c) is exactly that trap - declared on the candidate arm with the baseline's fingerprint, which the candidate's reverse receipt also carries - so a compiler/bundle that matches any receipt on the arm accepts it wrongly, and the pre-A-3 evalrun does. A picture of the baseline order illustrates the baseline arm and nothing else.",
   "D5: a rejected item goes to unassessedMedia with the item verbatim and ONE closed reason. (c) has every field and an accepted receipt on its arm, so only fingerprint-mismatch can fire; (d) lacks mediaKind, so kind-missing (a schema-1 item is unassessed by the missing field's name); (e) has a matching fingerprint and a sourceInterval whose sourcePath is absent, so source-missing. The presentation carries each with assessed false and exactly that reason, and D3 (7) puts media not assessed in its own section: a finding of kind `unassessed` names each.",
   "D5: fingerprintSource asserted is accepted and travels into the report as the quoted sentence, verbatim.",

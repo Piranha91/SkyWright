@@ -46,6 +46,7 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE.parent / "scripts"))
 from runlog import Run  # noqa: E402
+from report_scenes import capture_requests
 
 EXIT_OK, EXIT_NOT_RENDERED, EXIT_REFUSED = 0, 1, 2
 
@@ -573,7 +574,13 @@ def cmd_storyboard_packet(a) -> int:
                                               "addedText": "none | excluded-by-source-region"}})
     with Run("evalreel-storyboard-packet", stage_source="counted") as run:
         run.stage("scenes", total=len(scenes), unit="scenes")
-        write_json(Path(a.out), {"schemaVersion": 1, "presentationId": pres.get("presentationId"), "scenes": scenes})
+        try:
+            captures = capture_requests(pres, resolve_bundle_dir(pres, Path(a.presentation).resolve(), a.bundle))
+        except (OSError, ValueError, KeyError, TypeError) as exc:
+            run.refuse(str(exc), EXIT_REFUSED)
+            return refuse(f"capture-plan-refused: {exc}")
+        write_json(Path(a.out), {"schemaVersion": 1, "presentationId": pres.get("presentationId"), "scenes": scenes,
+                                "capturePlan": captures})
         run.advance(len(scenes)); run.artifact(str(Path(a.out))); run.tally(ok=len(scenes))
     print(f"storyboard packet: {len(scenes)} scene(s); {a.out}")
     return EXIT_OK
@@ -865,6 +872,7 @@ def main(argv=None) -> int:
     p = sub.add_parser("storyboard-packet", help="write the scenes that require human visual review")
     p.add_argument("--presentation", required=True)
     p.add_argument("--out", required=True)
+    p.add_argument("--bundle", default=None, help="relocated evidence bundle used to plan representative captures")
     p.set_defaults(fn=cmd_storyboard_packet)
     r = sub.add_parser("render", help="cut the reel of a presentation plan")
     r.add_argument("--presentation", required=True, help="OUT/presentation.json (schema 1)")

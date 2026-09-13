@@ -46,6 +46,7 @@ import os
 import re
 import shutil
 import sys
+import tempfile
 import time
 from datetime import datetime, timezone
 from pathlib import Path
@@ -2877,6 +2878,223 @@ def cmd_resume(a) -> int:
     return cmd_run(a, resuming=True)
 
 
+# -------------------------------------------------------- imported MCP evidence (generic lane) --
+
+IMPORT_DETECTORS = ("finding", "no-finding")
+
+
+def _cmd_import_results(a, runlog: Run) -> int:
+    """Bind already-produced MCP evidence to one frozen plan arm and write a normal receipt."""
+    run, src = Path(a.run), Path(a.file)
+    set_run_store(run)
+    plan, why = load_plan(run)
+    if plan is None:
+        return refuse(why)
+    ledger = Ledger(run, plan)
+    if ledger.refusal():
+        return refuse(ledger.refusal())
+    try:
+        manifest_bytes = src.read_bytes()
+        doc = json.loads(manifest_bytes)
+    except (OSError, ValueError) as ex:
+        return refuse(f"--file {src}: not readable as JSON ({type(ex).__name__}: {ex})")
+    if not isinstance(doc, dict):
+        return refuse(f"--file {src}: not readable as a JSON object")
+    manifest_sha256 = hashlib.sha256(manifest_bytes).hexdigest()
+    if doc.get("schemaVersion") != 1:
+        return refuse(f"schema-unsupported: imported result schemaVersion must be 1, found "
+                      f"{doc.get('schemaVersion')!r}")
+    if doc.get("planId") != plan["planId"]:
+        return refuse(f"foreign-run: imported result belongs to plan {doc.get('planId')!r}, this run is "
+                      f"{plan['planId']}")
+    cid, aid = doc.get("checkId"), doc.get("armId")
+    check = next((c for c in plan.get("checks", []) if c.get("checkId") == cid), None)
+    arm = next((x for x in plan.get("arms", []) if x.get("armId") == aid), None)
+    if check is None:
+        return refuse(f"wrong-check: plan {plan['planId']} has no check {cid!r}")
+    if (check.get("adapter") or {}).get("kind") != "mcp-only":
+        return refuse(f"wrong-check: {cid} is {(check.get('adapter') or {}).get('kind')!r}, not mcp-only; "
+                      "import-results cannot replace a runnable or unsupported detector")
+    if arm is None or aid not in [x.get("armId") for x in check.get("arms", [])]:
+        return refuse(f"identity-mismatch: check {cid} has no planned arm {aid!r}")
+    key = Ledger.key(cid, aid, None)
+    if (ledger.entry(cid, aid, None) or {}).get("status") in TERMINAL_OK:
+        return refuse(f"duplicate-receipt: {key} already has accepted evidence")
+
+    captured, tool = doc.get("capturedUtc"), doc.get("tool")
+    try:
+        identity = Validator.emit_identity({"configuration": doc.get("configuration")})
+    except (AttributeError, TypeError):
+        identity = None
+    result, rows, errors = doc.get("result"), doc.get("outputs"), []
+    if not captured or not isinstance(tool, dict) or not tool.get("name"):
+        errors.append("the import must name capturedUtc and tool.name")
+    elif isinstance(captured, str):
+        try:
+            captured_time = datetime.fromisoformat(captured.replace("Z", "+00:00"))
+            if captured_time.tzinfo is None:
+                raise ValueError("timezone missing")
+        except ValueError:
+            errors.append("capturedUtc must be an ISO-8601 timestamp with a timezone")
+    else:
+        errors.append("capturedUtc must be an ISO-8601 timestamp with a timezone")
+    if identity is None:
+        errors.append("identity-missing: configuration is absent")
+    if not isinstance(result, dict):
+        errors.append("result is absent")
+        result = {}
+    detector, findings, coverage = result.get("detector"), result.get("findings"), result.get("coverage")
+    if detector not in IMPORT_DETECTORS:
+        errors.append(f"result.detector must be one of {', '.join(IMPORT_DETECTORS)}")
+    if not isinstance(findings, int) or isinstance(findings, bool) or findings < 0:
+        errors.append("result.findings must be a non-negative integer")
+    elif (detector == "finding") != (findings > 0):
+        errors.append("result.detector contradicts result.findings")
+    if not isinstance(coverage, list) or not coverage:
+        errors.append("coverage-missing: result.coverage must contain at least one population")
+    else:
+        judged = unjudgeable = 0
+        for i, line in enumerate(coverage):
+            if not isinstance(line, dict):
+                errors.append(f"coverage-invalid: result.coverage[{i}] must be an object")
+                continue
+            population = line.get("Population", line.get("population"))
+            if not isinstance(population, str) or not population.strip():
+                errors.append(f"coverage-invalid: result.coverage[{i}].Population must be a non-empty string")
+            count = line.get("Judged", line.get("judged"))
+            reasons = line.get("Unjudgeable", line.get("unjudgeable", {}))
+            if not isinstance(count, int) or isinstance(count, bool) or count < 0:
+                errors.append(f"coverage-invalid: result.coverage[{i}].Judged must be a non-negative integer")
+            else:
+                judged += count
+            if not isinstance(reasons, dict) or any(not isinstance(v, int) or isinstance(v, bool) or v < 0
+                                                    for v in reasons.values()):
+                errors.append(f"coverage-invalid: result.coverage[{i}].Unjudgeable values must be "
+                              "non-negative integers")
+            else:
+                unjudgeable += sum(reasons.values())
+        if not errors and judged <= 0:
+            errors.append(f"extraction-failed: imported evidence judged {judged} with "
+                          f"{unjudgeable} unjudgeable")
+    if not isinstance(rows, list) or len(rows) != 2:
+        errors.append("output-missing: outputs must include the raw MCP request and response files")
+    elif {str(x.get("role")) for x in rows if isinstance(x, dict)} != {"request", "response"}:
+        errors.append("output-missing: outputs must contain exactly the roles request and response")
+
+    limits = []
+    if identity is not None:
+        if doc.get("state") != identity.get("state"):
+            errors.append(f"population-mismatch: import state {doc.get('state')!r} differs from "
+                          f"configuration state {identity.get('state')!r}")
+        for kind, values in (("plugin", identity.get("plugins") or []),
+                             ("overlay", identity.get("overlays") or [])):
+            for row in values:
+                path, want = Path(str(row.get("path") or "")), row.get("sha256")
+                if not row.get("path") or not path.is_file() or not is_sha256(want):
+                    errors.append(f"identity-missing: {kind} {row.get('name') or row.get('kind')} "
+                                  "must name an existing path and 64-hex sha256")
+                elif sha256_file(path) != str(want).lower():
+                    errors.append(f"identity-mismatch: {kind} {row.get('name') or row.get('kind')} "
+                                  "does not hash to its stated sha256")
+        validator = Validator(run, plan)
+        errors.extend(f"{x['cause']}: {x['detail']}" for x in
+                      validator._identity_checks(identity, arm, doc, check.get("adapter") or {},
+                                                 None, limits))
+        req = arm.get("requested") or {}
+        expected_fp = configuration_fingerprint(
+            req.get("plugins") or [], req.get("providers") or [], req.get("overlays") or [],
+            req.get("population"), identity.get("state"), schema=identity.get("schemaVersion"))
+        if identity.get("fingerprint") != expected_fp:
+            errors.append(f"identity-mismatch: imported fingerprint "
+                          f"{str(identity.get('fingerprint'))[:12]} does not equal this arm's frozen "
+                          f"request {expected_fp[:12]}")
+
+    sources = []
+    if isinstance(rows, list):
+        for i, row in enumerate(rows):
+            if not isinstance(row, dict) or not row.get("path") or not is_sha256(row.get("sha256")):
+                errors.append(f"output-missing: outputs[{i}] must name path and 64-hex sha256")
+                continue
+            if not isinstance(row["path"], str) or not row["path"].strip():
+                errors.append(f"output-missing: outputs[{i}].path must be a non-empty string")
+                continue
+            path = Path(row["path"])
+            if not path.is_absolute():
+                path = src.parent / path
+            if not path.is_file():
+                errors.append(f"output-missing: {path}")
+            elif sha256_file(path) != str(row["sha256"]).lower():
+                errors.append(f"output-stale: {path} does not hash to the imported sha256")
+            elif path.suffix.lower() in BINARY_SUFFIXES:
+                errors.append(f"output-missing: raw evidence {path.name} is a binary excluded from bundles")
+            else:
+                sources.append(path)
+    if errors:
+        return refuse("import-results refused: " + "; ".join(errors))
+
+    dest = run / "imports" / key
+    if dest.exists():
+        return refuse(f"duplicate-receipt: import destination {dest} already exists")
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    temp = Path(tempfile.mkdtemp(prefix=key + "-", dir=dest.parent))
+    try:
+        (temp / "result.json").write_bytes(manifest_bytes)
+        for i, path in enumerate(sources, start=1):
+            shutil.copy2(path, temp / f"{i:02d}-{path.name}")
+        copied_hashes = [sha256_file(temp / f"{i:02d}-{path.name}")
+                         for i, path in enumerate(sources, start=1)]
+        approved_hashes = [str(row["sha256"]).lower() for row in rows]
+        if sha256_file(temp / "result.json") != manifest_sha256 or copied_hashes != approved_hashes:
+            return refuse("output-stale: imported evidence changed while it was being copied")
+        os.replace(temp, dest)
+    finally:
+        if temp.exists():
+            shutil.rmtree(temp, ignore_errors=True)
+    copied = [dest / "result.json"] + [dest / f"{i:02d}-{path.name}"
+                                        for i, path in enumerate(sources, start=1)]
+    manifest_copy = copied[0]
+
+    runlog.feature("outputs", len(copied), "files")
+    receipt = write_receipt(
+        run, plan=plan, check=check, arm=arm, part=None,
+        adapter={"kind": "mcp-import", "sourceKind": "mcp-only"}, argv=None,
+        run_id=runlog.run_id, parent_run_id=None, started=captured, ended=utcnow(), exit_code=0,
+        outputs=copied, log=None,
+        consumed={"candidateSha256": arm.get("candidateSha256"),
+                  "candidatePath": arm.get("candidatePath"),
+                  "configuration": identity, "configurationSource": "emit",
+                  "registrySha256": plan["registry"]["sha256"], "tool": tool,
+                  "optionsSha256": sha256_text(canonical(plan["options"])),
+                  "scopeSha256": plan["scope"]["sha256"]},
+        validation={"accepted": True, "rejections": [], "identityLimits": limits},
+        result={"execution": "completed", "detector": detector, "findings": findings,
+                "coverage": coverage, "strength": (check.get("evidence") or {}).get("strength"),
+                "verdict": result.get("verdict"), "note": result.get("note")},
+        extra={"imported": {"sourceSha256": sha256_file(manifest_copy),
+                            "capturedUtc": captured, "tool": tool}})
+    ledger.transition(cid, aid, None, "completed", receipt_id=receipt["receiptId"],
+                      detector=detector, extra={"imported": True})
+    runlog.artifact(str(manifest_copy))
+    runlog.advance()
+    print(f"imported {cid} [{aid}]: {detector}, {findings} finding(s), "
+          f"{len(copied)} evidence file(s)")
+    return EXIT_OK
+
+
+def cmd_import_results(a) -> int:
+    """Runlogged entry point for the generic MCP evidence importer."""
+    set_run_store(Path(a.run))
+    with Run("evalrun-import-results", stage_source="counted") as runlog:
+        runlog.stage("validate-and-import", total=1, unit="results")
+        rc = _cmd_import_results(a, runlog)
+        if rc == EXIT_REFUSED_INPUT:
+            runlog.refuse("import validation refused; the diagnostic above names the cause",
+                          EXIT_REFUSED_INPUT)
+        elif rc != EXIT_OK:
+            runlog.fail("import failed", rc)
+        return rc
+
+
 # ------------------------------------------------------------------------------ finalize (D7) --
 
 def cmd_finalize(a) -> int:
@@ -4012,6 +4230,12 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--rebuild-ledger", action="store_true",
                    help="rebuild ledger.json from journal.jsonl and the receipts on disk")
     p.set_defaults(fn=cmd_resume)
+
+    p = sub.add_parser("import-results", help="bind external MCP-only evidence to one planned arm")
+    p.add_argument("--run", required=True)
+    p.add_argument("--file", required=True,
+                   help="schema-1 import result naming identity, coverage and hashed raw request/response")
+    p.set_defaults(fn=cmd_import_results)
 
     p = sub.add_parser("finalize", help="derive the disposition from the ledger; never from a claim")
     p.add_argument("--run", required=True)

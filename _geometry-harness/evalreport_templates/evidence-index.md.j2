@@ -14,7 +14,7 @@ Complete in every mode: every finding with all of its rows, every evidence file 
 
 ### Arms
 
-{% for a in p.scope.arms %}- `{{ a.armId }}` / `{{ a.kind }}` / `{{ a.candidateFile }}`; added `{{ a.pluginsAdded|tojson }}`; removed `{{ a.pluginsRemoved|tojson }}`; payload {{ a.payloadNote }}; loaded in game {{ a.loadedInGameNote }}; identity `{{ a.identity|tojson }}`; order evaluation `{{ a.orderEvaluation|tojson }}`
+{% for a in p.scope.arms %}- `{{ a.armId }}` / `{{ a.kind }}` / `{{ a.candidateFile }}`; added `{{ a.pluginsAdded|tojson }}`; removed `{{ a.pluginsRemoved|tojson }}`; location order `{{ a.locationPluginOrder|tojson }}`; location scope `{{ a.locationPluginScope|tojson }}`; payload {{ a.payloadNote }}; loaded in game {{ a.loadedInGameNote }}; identity `{{ a.identity|tojson }}`; order evaluation `{{ a.orderEvaluation|tojson }}`
 {% endfor %}
 
 <a id="missing-results"></a>
@@ -33,6 +33,8 @@ Complete in every mode: every finding with all of its rows, every evidence file 
 {% set evs %}{% for e in f.evidenceIds %}[{{ e }}](#{{ e }}){% if not loop.last %}, {% endif %}{% else %}none recorded{% endfor %}{% if f.mediaIds %}; media: {% for m in f.mediaIds %}[{{ m }}](#{{ m }}){% if not loop.last %}, {% endif %}{% endfor %}{% endif %}{% endset %}
 - check `{{ f.checkId }}` ({{ f.family }}); arm {{ f.armId }}; part {{ f.part or "-" }}; strength {{ f.strength }}; verdict {{ f.verdict or "-" }}{{ grp }}
 - {{ f.plain|md }}
+{% if f.get("readerContext") %}- reader context: {{ f.readerContext|md }}
+{% endif %}
 - evidence: {{ evs }}
 - counts: `{{ f.counts|tojson|md|short(600) }}`
 {% if f.allRows %}
@@ -71,7 +73,7 @@ No media row: nothing was supplied to this bundle under `--media`, and no unasse
 | evidence | kind | path | sha256 | bytes | check | arm | part | strength | recorded by |
 |---|---|---|---|---|---|---|---|---|---|
 {% for e in p.evidence %}
-| <a id="{{ e.id }}"></a>{{ e.id }} | {{ e.kind }} | `{{ e.path|md }}` | `{{ e.sha256 }}` | {{ e.bytes|n }} | {{ e.checkId or "-" }} | {{ e.armId or "-" }} | {{ e.part or "-" }} | {{ e.strength or "-" }} | {{ e.recordedBy or "-" }} |
+| <a id="{{ e.id }}"></a>{{ e.id }} | {{ e.kind }} | {% if e.get("storage") == "presentation" %}[`{{ e.path|md }}`]({{ e.path }}){% else %}`{{ e.path|md }}`{% endif %} | `{{ e.sha256 }}` | {{ e.bytes|n }} | {{ e.checkId or "-" }} | {{ e.armId or "-" }} | {{ e.part or "-" }} | {{ e.strength or "-" }} | {{ e.recordedBy or "-" }} |
 {% endfor %}
 
 ## Checks in the registry copy ({{ p.scope.checks|length }})

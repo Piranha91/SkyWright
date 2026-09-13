@@ -1,7 +1,7 @@
 {
  "case": "R4-repaired-plus-regression",
  "fixtureShape": "test_evalrun case-07: PatchA repairs R1 alone (navownprobe repaired 1), PatchB repairs R2 alone (overlapprobe repaired 1), the combined arm repairs both and creates R3 - navownprobe repaired 1, created 1, newDefect 1, verdict DIFFERENTIAL-NEUTRAL; ordersweep classifies the combined arm REGRESSION.",
- "acceptanceRow": "Repaired rows plus a new regression: regression remains prominent across report, captions and reel, with attribution/reclassification kept separate from physical repair.",
+ "acceptanceRow": "A CLOBBERED-only aggregate remains raw evidence but is excluded from reader regression, repair, caption and reel claims.",
  "rules": ["D3 (1) and (4)", "D2 finding kinds regression / repaired", "D6 chapters", "D7 template narration"],
  "planExit": 0,
  "regression": {
@@ -14,8 +14,9 @@
   "verdict": "DIFFERENTIAL-NEUTRAL",
   "counts": {"newDefect": 1, "created": 1, "repaired": 1, "reclassified": 0, "attributed": 0},
   "evidenceIdsNonEmpty": true,
+  "readerRelevant": false,
   "inSomeChapterOfKind": "finding",
-  "thatChapterHasCaption": true,
+  "inSomeChapter": false,
   "captionsAreTemplateText": {"narrationSource": "template", "narrationRefused": []},
   "plainContainsNumber": 1,
   "plainDoesNotContain": ["on balance", "outweigh"],
@@ -30,21 +31,19 @@
  "repairedFindingsAllHavePriorityGreaterThanRegression": true,
  "regressionCountIsOne": true,
  "report": {
-  "mdContains": ["Problems introduced by the supplied setup", "introduced 1 new problem in the navmesh check", "Full evidence"],
-  "firstFindingIdMentionedIsF001": true,
-  "f001AppearsBeforeAnyRepairedFindingId": true,
-  "mdDoesNotContain": ["on balance"],
+  "mdContains": ["Problems introduced by the supplied setup", "Full evidence"],
+  "mdDoesNotContain": ["on balance", "introduced 1 new problem in the navmesh check", "F-001"],
   "mdNoAffirmativeNettingClaim": true,
   "print": {"status": "within-limit", "pagesAtMost": 8},
   "overLimitKept": {"layout": "compact", "rowsPerGroupEqualsSettings": true, "figuresPerFinding": 1, "reasonMentions": "unreachable"}
  },
  "notes": [
-  "D3 (1): new regressions come first (orderEvaluation.regression / created.newDefect > 0), so the combined arm's navownprobe regression is F-001 with priority 1. Its verdict field is conflictdiff's DIFFERENTIAL-NEUTRAL verbatim (repaired 1 against created 1) and its kind is still `regression`: strength, verdict and counts are independent fields (D3), so the verdict word never softens the kind.",
-  "D3 (4): repaired / reclassified counts are their own section, never netted against a regression - so the combined arm's navownprobe repaired 1 is a SEPARATE finding of kind `repaired`, after the regression, and F-001's counts carry both numbers verbatim with no difference or sum.",
+  "D3 (1): raw regression ordering is retained: the combined arm's navownprobe regression remains F-001 with priority 1 and keeps conflictdiff's DIFFERENTIAL-NEUTRAL verdict and all source counts in the evidence index. The reader context gate supersedes the former prominence claim because this fixture's differential contains only CLOBBERED overwrite history, with no independently measured winning-scene or link mismatch.",
+  "D3 (4): raw repaired / reclassified counts remain separate from the raw regression and are never netted. The CLOBBERED-only reader gate excludes these counts from repair, regression, caption and reel claims while preserving them in the evidence index.",
   "Attribution and reclassification (reclassified 0, attributed 0 here) are separate count fields from repaired: asserting them on F-001 is what keeps 'attribution kept separate from physical repair' measurable on this fixture; case-06's RECLASSIFIED arm is the differential's own oracle for the non-zero case and is not re-fixtured here.",
   "Only arms whose perProbe row has repaired > 0 are asserted to have a `repaired` finding; whether a repaired-0 row gets one is unspecified by D3 and not asserted.",
-  "D6: the regression is a chapter of kind `finding` with at least one caption whose text is the template's (narration.source template, refused empty on a fresh plan) - 'prominent across report, captions and reel'.",
-  "Prominence in report.md: F-001 is the first finding id the report mentions and appears before any repaired finding's id.",
+  "D6: F-001 has no reader chapter or caption because a bare navmesh overwrite is context rather than evidence of incompatibility; its raw finding and priority remain available in the evidence index.",
+  "The report omits F-001 from reader prose while the plan retains its raw ordering and counts for traceability.",
   "A-11 (Fable, 20:42): the `within-limit` / pages <= 4 expectations stand as written - they record the open decision on a machine where R4 prints over the limit. WHEN the status is over-limit, print.kept names the least abridged content-preserving step (layout compact, rowsPerGroup equal to settings.rowsPerGroup, figuresPerFinding 1) and print.reason says the limit is unreachable; keeping the fewest-pages step instead loses content for no gain."
  ]
 }

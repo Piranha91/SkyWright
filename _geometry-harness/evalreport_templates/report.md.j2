@@ -17,7 +17,28 @@ Evaluation record: {{ p.reader.context.evaluatedAt or "date not supplied" }}. St
 
 {% endfor %}
 
-{% set regressions = p.findings|selectattr("kind", "equalto", "regression")|list %}
+## {{ p.reader.locationOrder.heading or "Load order for these locations" }}
+
+{{ p.reader.locationOrder.intro or "Plugins tied to the places discussed below, in measured order." }}
+
+{% for a in p.scope.arms %}
+**{{ a.displayLabel }}**
+
+{% for plugin in a.locationPluginOrder %}- {{ plugin }}
+{% else %}{{ p.reader.locationOrder.empty or "No evidenced plugin was identified." }}
+{% endfor %}
+
+Scope:
+
+```text
+{{ (a.locationPluginScope.locations|join("; ") or "no CELL or worldspace location was supplied")|wordwrap(90, break_long_words=false, break_on_hyphens=false) }}
+```
+
+Coverage: {{ "all contributors to the listed locations identified" if a.locationPluginScope.complete else "incomplete — " ~ a.locationPluginScope.missingInput }}
+
+{% endfor %}
+
+{% set regressions = p.findings|selectattr("kind", "equalto", "regression")|selectattr("readerRelevant")|list %}
 ## Problems introduced by the supplied setup
 
 {% if regressions %}{% for f in regressions %}
@@ -49,13 +70,16 @@ Evaluation record: {{ p.reader.context.evaluatedAt or "date not supplied" }}. St
 
 ## Changes made by the supplied setup
 
-{% set changes = p.findings|selectattr("kind", "in", ["repaired", "reclassified"])|list %}{% if changes %}{% for f in changes %}- **{{ f.readerArmLabel }} — {{ (p.reader.checkTitles or {}).get(f.checkId, 'Additional check') }}:** {{ f.readerPlain }} [Full evidence](evidence-index.md#{{ f.id }}).
+{% set changes = p.findings|selectattr("kind", "in", ["repaired", "reclassified"])|selectattr("readerRelevant")|list %}{% if changes %}{% for f in changes %}- **{{ f.readerArmLabel }} — {{ (p.reader.checkTitles or {}).get(f.checkId, 'Additional check') }}:** {{ f.readerPlain }} [Full evidence](evidence-index.md#{{ f.id }}).
 {% endfor %}{% else %}No measured repair or ownership change was recorded.
 {% endif %}
+{% for item in p.reader.comparisonSummary %}- {{ item }}
+{% endfor %}
 
 ## What still needs checking
 
-{% if p.scope.completion.missingRequired %}{% for row in p.reader.missingSummary %}- **{{ row.reason|capitalize }}:** {{ row.subjects|join("; ") }}.
+{% if p.scope.completion.missingRequired %}{% for row in p.reader.missingSummary %}- **{{ row.reason[:1]|upper }}{{ row.reason[1:] }}:** {{ row.subjects|join("; ") }}.{{ " " ~ row.explanation if row.explanation else "" }}
+
 {% endfor %}
 The exact missing checks and recorded reasons are in the [evidence index](evidence-index.md#missing-results).
 {% else %}Every required comparison has an accepted result.

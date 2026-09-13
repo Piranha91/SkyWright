@@ -109,6 +109,7 @@ sealed class CvSettings : ICharacterViewerSettings
     public bool CharacterViewerVerboseLog { get; set; } = false;
 }
 
+
 /// <summary>One placed instance handed over from Program.cs: the mesh to draw, the Skyrim-space
 /// placement to draw it at, and (for the interactive picker's reports) who it is — the placed
 /// ref's own FormKey, its base, and the base's EditorID. Under the Base Object Swapper layer
@@ -119,7 +120,7 @@ readonly record struct SceneRef(string MeshRelPath, Vec3 Position, Vec3 Rotation
                                 bool Marker = false, FormKey RefKey = default, FormKey BaseKey = default,
                                 string? BaseEditorId = null, FormKey? BosRecordBase = null, string? BosLabel = null,
                                 bool BosRandom = false, int StateChange = 0, string? StateLabel = null,
-                                bool Constructed = false)
+                                bool Constructed = false, Vector3 HighlightColor = default)
 {
     public bool BosSwapped => BosRecordBase is not null;
     /// <summary>--state: +1 the flip brings this ref in, −1 it takes it out (drawn only in the diff view), 0 unchanged.</summary>
@@ -184,6 +185,32 @@ readonly record struct WaterPlane(float Z,                                      
 
 static class TexturedScene
 {
+    internal static int ReportModeSmoke(string outDir)
+    {
+        Directory.CreateDirectory(outDir);
+        const int w = 320, h = 180;
+        var pixels = new byte[w * h * 4];
+        for (int y = 0; y < h; y++) for (int x = 0; x < w; x++)
+        { int p = (y * w + x) * 4; pixels[p] = (byte)(x % 251); pixels[p + 1] = (byte)(y % 251); pixels[p + 2] = 90; pixels[p + 3] = 255; }
+        var normal = Path.Combine(outDir, "captioned.png"); var clean = Path.Combine(outDir, "report.png");
+        var captions = new[] { "CAPTION_SENTINEL" };
+        var coloured = new[] { ("COLOUR_SENTINEL", new Vector3(0, 1, 1)) };
+        var pinned = new[] { ("GRID_SENTINEL", 20, 100) };
+        SaveFrame((byte[])pixels.Clone(), w, h, captions, coloured, "pose: identical", normal,
+            pinned, new Vector3(1, 1, 0));
+        SaveFrame((byte[])pixels.Clone(), w, h, captions, coloured, "pose: identical", clean,
+            pinned, new Vector3(1, 1, 0), reportMode: true);
+        using var expected = Image.LoadPixelData<Rgba32>((byte[])pixels.Clone(), w, h);
+        expected.Mutate(x => x.Flip(FlipMode.Vertical));
+        using var a = Image.Load<Rgba32>(normal); using var b = Image.Load<Rgba32>(clean);
+        bool differ = false, rawSceneIdentical = true;
+        for (int y = 0; y < h; y++) for (int x = 0; x < w; x++)
+        { if (a[x, y] != b[x, y]) differ = true; if (b[x, y] != expected[x, y]) rawSceneIdentical = false; }
+        bool meta = b.Metadata.GetPngMetadata().TextData.Any(t => t.Keyword == "viewprobe" && t.Value == "pose: identical");
+        Console.WriteLine($"report-mode-smoke: textPixelsRemoved={differ} rawSceneIdentical={rawSceneIdentical} metadataPreserved={meta}");
+        return differ && rawSceneIdentical && meta ? 0 : 1;
+    }
+
     // Z-up (Skyrim) -> Y-up (viewer): the exact swap NifMeshBuilder uses.
     internal static Vector3 YUp(Vector3 z) => new(z.X, z.Z, -z.Y);
 
@@ -295,6 +322,7 @@ static class TexturedScene
         bool showPlanes,                                   // --planes: draw the planes layer
         string occlusionMode,                              // --occlusion off | on | diff: preview what the planes cull
         int size, string outPath,
+        bool reportMode = false,                           // omit all raster text; preserve pixels, overlays and metadata
         string? pngTextMeta = null,                        // replication chunk: written as a PNG tEXt entry keyed "viewprobe"
         InteractiveOptions? interactive = null,            // non-null: open the fly-through window instead of saving a PNG
         Action<OcclusionState>? planeReport = null,        // --planes-report: handed the planes' cull answer for the entry eye
@@ -629,6 +657,7 @@ static class TexturedScene
 
                 if (r.Highlight)
                 {
+                    var haloColor = r.HighlightColor == default ? haloOrange : r.HighlightColor;
                     // The implicated ref keeps its OWN texture; the highlight is a thick orange
                     // OUTLINE — the same mesh inflated ~8u along its normals with flipped
                     // winding, drawn depth-tested + back-culled by the overlay pass, so it
@@ -667,21 +696,21 @@ static class TexturedScene
                         // face is behind every occluder by construction.
                         if (outward)
                         {
-                            Overlay.Vertex(haloTris, p2, haloOrange, Vector3.Zero);
-                            Overlay.Vertex(haloTris, p1, haloOrange, Vector3.Zero);
-                            Overlay.Vertex(haloTris, p0, haloOrange, Vector3.Zero);
-                            Overlay.Vertex(haloNear, p0, haloOrange, Vector3.Zero);
-                            Overlay.Vertex(haloNear, p1, haloOrange, Vector3.Zero);
-                            Overlay.Vertex(haloNear, p2, haloOrange, Vector3.Zero);
+                            Overlay.Vertex(haloTris, p2, haloColor, Vector3.Zero);
+                            Overlay.Vertex(haloTris, p1, haloColor, Vector3.Zero);
+                            Overlay.Vertex(haloTris, p0, haloColor, Vector3.Zero);
+                            Overlay.Vertex(haloNear, p0, haloColor, Vector3.Zero);
+                            Overlay.Vertex(haloNear, p1, haloColor, Vector3.Zero);
+                            Overlay.Vertex(haloNear, p2, haloColor, Vector3.Zero);
                         }
                         else
                         {
-                            Overlay.Vertex(haloTris, p0, haloOrange, Vector3.Zero);
-                            Overlay.Vertex(haloTris, p1, haloOrange, Vector3.Zero);
-                            Overlay.Vertex(haloTris, p2, haloOrange, Vector3.Zero);
-                            Overlay.Vertex(haloNear, p2, haloOrange, Vector3.Zero);
-                            Overlay.Vertex(haloNear, p1, haloOrange, Vector3.Zero);
-                            Overlay.Vertex(haloNear, p0, haloOrange, Vector3.Zero);
+                            Overlay.Vertex(haloTris, p0, haloColor, Vector3.Zero);
+                            Overlay.Vertex(haloTris, p1, haloColor, Vector3.Zero);
+                            Overlay.Vertex(haloTris, p2, haloColor, Vector3.Zero);
+                            Overlay.Vertex(haloNear, p2, haloColor, Vector3.Zero);
+                            Overlay.Vertex(haloNear, p1, haloColor, Vector3.Zero);
+                            Overlay.Vertex(haloNear, p0, haloColor, Vector3.Zero);
                         }
                     }
                 }
@@ -2497,7 +2526,7 @@ static class TexturedScene
         if (msFbo != 0) { GL.DeleteFramebuffer(msFbo); GL.DeleteRenderbuffer(msColorRb); GL.DeleteRenderbuffer(msDepthRb); }
 
         SaveFrame(pixels, size, size, capLines, colourCaptionLines, pngTextMeta, outPath,
-                  gridSpacing > 0f ? gridLabels : null, gridColour3);
+                  gridSpacing > 0f ? gridLabels : null, gridColour3, reportMode);
 
         // Give back the borrowed NPC meshes BEFORE this renderer can dispose them —
         // ClearMeshes()/Dispose() destroy what they hold, and the actors' VAOs must
@@ -2522,8 +2551,15 @@ static class TexturedScene
     internal static void SaveFrame(byte[] pixels, int width, int height,
         IReadOnlyList<string> captionLines, IReadOnlyList<(string Text, Vector3 Color)> colourCaptionLines,
         string? pngTextMeta, string outPath,
-        IReadOnlyList<(string Text, int X, int Y)>? pinnedLabels = null, Vector3 pinnedColor = default)
+        IReadOnlyList<(string Text, int X, int Y)>? pinnedLabels = null, Vector3 pinnedColor = default,
+        bool reportMode = false)
     {
+        if (reportMode)
+        {
+            captionLines = Array.Empty<string>();
+            colourCaptionLines = Array.Empty<(string, Vector3)>();
+            pinnedLabels = null;
+        }
         // The frame is a screenshot: opaque by definition. The colour buffer's ALPHA, though, is
         // whatever the material shader happened to write — the ground comes back at alpha ~50 and
         // alpha-blended canopy at 0 — and ImageSharp honours it, so the compare stitch was

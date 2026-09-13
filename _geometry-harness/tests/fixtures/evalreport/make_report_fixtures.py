@@ -84,9 +84,13 @@ def r3_rows_by_probe() -> dict:
     for name in LONG.values():
         assert len(name) >= 80, name
     nav = (long_rows("CLOBBERED", LONG["A"], LONG["B"], 0x0B0001, 20, "navmesh", "FixtureInterior01",
-                     "a navmesh re-cut without a declared dependency")
+                     f"20 navmesh record(s) re-cut by {LONG['A']} and then re-cut again by {LONG['B']}, which declares no dependency on it")
            + long_rows("CLOBBERED", LONG["C"], LONG["D"], 0x0B0101, 10, "navmesh", "FixtureExterior",
-                       "a navmesh re-cut without a declared dependency"))
+                       f"10 navmesh record(s) re-cut by {LONG['C']} and then re-cut again by {LONG['D']}, which declares no dependency on it"))
+    for i, row in enumerate(nav):
+        row["physical"] = "Gone" if i == 0 else "Holds"
+        row["detail"] = (f"no point of the loser's mesh is farther from the winner's ({row['b']})" if i == 0 else
+                         f"victim-only ground on the loser's mesh farther from the winner's ({row['b']})")
     ovl = long_rows("OVERLAP", LONG["A"], LONG["B"], 0x0B0201, 20, "reference", "FixtureInterior01",
                     "two placed references intersect")
     con = long_rows("CONTACT", LONG["C"], LONG["B"], 0x0B0301, 12, "reference", "FixtureExterior",
@@ -113,6 +117,28 @@ def make_r3_case(gen_root: Path):
     scen["arms"] = arms
     write_json(dst / "scenario.json", scen)
     return dst
+
+
+def make_r5_case(gen_root: Path):
+    """Keep R5's strict media controls attached to independently reportable evidence.
+
+    The source evalrun fixture uses a CLOBBERED ownership row.  That row is now reader context only,
+    so it cannot be the positive control for illustrated report chapters.  R5 keeps the same record,
+    arms, receipts, fingerprints and media identities while making the measured condition an active
+    broken edge-link finding.
+    """
+    case = gen_root / "cases" / "case-10-discovery-media"
+    scen = load(case / "scenario.json")
+    for arm in (scen.get("arms") or {}).get("navownprobe", {}).values():
+        for row in arm.get("rows") or []:
+            row.update({
+                "kind": "EDGE-IDX",
+                "summary": "a navmesh link points to a nonexistent edge",
+                "physical": "Holds",
+                "detail": "the linked triangle index exceeds the target navmesh triangle count",
+            })
+    write_json(case / "scenario.json", scen)
+    return case
 
 
 # ---------------------------------------------------------------------------------- R5's media
@@ -261,6 +287,7 @@ def generate(root: Path, only: str | None = None) -> dict:
     if r.returncode != 0:
         raise SystemExit("make_fixtures.py did not run:\n" + r.stdout + r.stderr)
     make_r3_case(gen)
+    make_r5_case(gen)
     T.GEN = gen
     # HOUSECARL_EVALRUN names another tree's evalrun.py to build the bundles with (an integration head, or a
     # worktree carrying the media-boundary change); the default is this checkout's own.

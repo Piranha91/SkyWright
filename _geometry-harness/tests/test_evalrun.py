@@ -1269,6 +1269,18 @@ def sha_of(p: Path) -> str:
     return hashlib.sha256(Path(p).read_bytes()).hexdigest()
 
 
+def import_fingerprint(cfg):
+    lines = [f"schema:{cfg.get('schemaVersion', 1)}\n", f"population:{cfg.get('population')}\n",
+             f"state:{cfg.get('state')}\n"]
+    lines += [f"plugin:{str(p.get('name') or '').lower()}:{p.get('sha256') or ''}\n"
+              for p in cfg.get("plugins") or []]
+    lines += [f"provider:{p.get('kind') or ''}:{str(p.get('name') or '').lower()}\n"
+              for p in cfg.get("providers") or []]
+    lines += [f"overlay:{o.get('kind') or ''}:{o.get('sha256') or ''}\n"
+              for o in cfg.get("overlays") or []]
+    return hashlib.sha256("".join(lines).encode("utf-8")).hexdigest()
+
+
 def arm_map(plan: dict) -> dict:
     """armId AND candidate stem -> the plan's arm record (the oracle names arms by stem)."""
     out = {}
@@ -1568,10 +1580,151 @@ def case_16(tmp):
           f"{case}/bytes-changed: the resume printed {b['stdoutContains']!r} - a change, never a gap (D4)")
 
 
+def case_17(tmp):
+    """A generic MCP import is identity-bound, evidence-backed and relocatable."""
+    case = "case-01-geometry-and-quest"
+    run = tmp / "case-17-mcp-import"
+    expect(do_plan(run, case).returncode, 0, "case-17: plan exit", "import")
+    _, _, _, scen = case_paths(case)
+    expect(evalrun(["run", "--run", run], scen).returncode, 0, "case-17: accounting run", "import")
+    plan = load(run / "plan.json") or {}
+    checks = plan_checks(plan)
+    cid = next((c for c in ("loadability.dangling-references", "loadability.missing-assets",
+                            "records.contested-fields", "records.cell-attributes")
+                if ((checks.get(c) or {}).get("adapter") or {}).get("kind") == "mcp-only"), None)
+    check(cid is not None, "case-17: fixture registry contains an mcp-only check")
+    planned_arm_ids = [x.get("armId") for x in ((checks.get(cid) or {}).get("arms") or [])]
+    arms = [a for a in (plan.get("arms") or []) if a.get("armId") in planned_arm_ids]
+    check(len(arms) >= 2, "case-17: mcp-only check applies to two arms")
+
+    def make_import(folder, arm, detector="no-finding", findings=0):
+        folder.mkdir(parents=True, exist_ok=True)
+        request, response = folder / "request.json", folder / "response.json"
+        request.write_text(json.dumps({"tool": "fixture_mcp", "arguments": {"plugins": arm["plugins"]}}),
+                           encoding="utf-8")
+        response.write_text(json.dumps({"findings": findings}), encoding="utf-8")
+        req = arm["requested"]
+        cfg = {"schemaVersion": 1, "source": f"candidate:{arm['candidateFile']}",
+               "plugins": [{"name": p["name"], "path": p["path"], "sha256": p["sha256"]}
+                           for p in req["plugins"]],
+               "providers": req["providers"], "overlays": req["overlays"],
+               "population": req["population"], "state": "baseline"}
+        cfg["fingerprint"] = import_fingerprint(cfg)
+        doc = {"schemaVersion": 1, "planId": plan["planId"], "checkId": cid,
+               "armId": arm["armId"], "state": "baseline", "capturedUtc": "2026-09-13T00:00:00Z",
+               "tool": {"name": "fixture_mcp", "version": "1"}, "configuration": cfg,
+               "result": {"detector": detector, "findings": findings,
+                          "coverage": [{"Population": "records", "Judged": 3, "Unjudgeable": {}}]},
+               "outputs": [{"role": role, "path": p.name, "sha256": sha_of(p)}
+                           for role, p in (("request", request), ("response", response))]}
+        manifest = folder / "import.json"
+        manifest.write_text(json.dumps(doc, indent=2), encoding="utf-8")
+        return manifest, doc
+
+    manifest, _ = make_import(tmp / "case-17-good-null", arms[0])
+    r = evalrun(["import-results", "--run", run, "--file", manifest])
+    expect(r.returncode, 0, "case-17: accepted no-finding import", "import")
+    imported = load(run / "receipts" / f"{cid}__{arms[0]['armId']}.json") or {}
+    check((imported.get("validation") or {}).get("accepted") is True,
+          "case-17: imported receipt accepted")
+    expect((imported.get("result") or {}).get("detector"), "no-finding",
+           "case-17: null conclusion retained", "import")
+    expect(len(imported.get("outputs") or []), 3,
+           "case-17: manifest plus raw request and response retained", "import")
+
+    # Missing raw response, a foreign arm and a plugin/fingerprint mismatch all refuse before a receipt changes.
+    missing, missing_doc = make_import(tmp / "case-17-missing", arms[1], "finding", 2)
+    (missing.parent / "response.json").unlink()
+    expect(evalrun(["import-results", "--run", run, "--file", missing]).returncode, 2,
+           "case-17: missing raw response refuses", "import")
+    wrong_arm, wrong_arm_doc = make_import(tmp / "case-17-wrong-arm", arms[1], "finding", 2)
+    wrong_arm_doc["armId"] = "foreign-arm"
+    wrong_arm.write_text(json.dumps(wrong_arm_doc), encoding="utf-8")
+    expect(evalrun(["import-results", "--run", run, "--file", wrong_arm]).returncode, 2,
+           "case-17: foreign arm refuses", "import")
+    wrong_order, wrong_order_doc = make_import(tmp / "case-17-wrong-order", arms[1], "finding", 2)
+    wrong_order_doc["configuration"]["plugins"] = list(
+        reversed(wrong_order_doc["configuration"]["plugins"]))
+    wrong_order_doc["configuration"]["fingerprint"] = import_fingerprint(
+        wrong_order_doc["configuration"])
+    wrong_order.write_text(json.dumps(wrong_order_doc), encoding="utf-8")
+    expect(evalrun(["import-results", "--run", run, "--file", wrong_order]).returncode, 2,
+           "case-17: wrong plugin order refuses", "import")
+    wrong_hash, wrong_hash_doc = make_import(tmp / "case-17-wrong-hash", arms[1], "finding", 2)
+    wrong_hash_doc["configuration"]["plugins"][0]["sha256"] = "0" * 64
+    wrong_hash_doc["configuration"]["fingerprint"] = import_fingerprint(wrong_hash_doc["configuration"])
+    wrong_hash.write_text(json.dumps(wrong_hash_doc), encoding="utf-8")
+    expect(evalrun(["import-results", "--run", run, "--file", wrong_hash]).returncode, 2,
+           "case-17: wrong plugin bytes refuse", "import")
+    stale, stale_doc = make_import(tmp / "case-17-stale-output", arms[1], "finding", 2)
+    stale_doc["outputs"][1]["sha256"] = "0" * 64
+    stale.write_text(json.dumps(stale_doc), encoding="utf-8")
+    expect(evalrun(["import-results", "--run", run, "--file", stale]).returncode, 2,
+           "case-17: stale raw response hash refuses", "import")
+    malformed, malformed_doc = make_import(tmp / "case-17-malformed-coverage", arms[1], "finding", 2)
+    malformed_doc["result"]["coverage"] = [{"Population": "records", "Judged": -1,
+                                                "Unjudgeable": {"parse": 0.5}}]
+    malformed.write_text(json.dumps(malformed_doc), encoding="utf-8")
+    expect(evalrun(["import-results", "--run", run, "--file", malformed]).returncode, 2,
+           "case-17: malformed coverage counts refuse", "import")
+    zero, zero_doc = make_import(tmp / "case-17-zero-coverage", arms[1])
+    zero_doc["result"]["coverage"][0]["Judged"] = 0
+    zero.write_text(json.dumps(zero_doc), encoding="utf-8")
+    expect(evalrun(["import-results", "--run", run, "--file", zero]).returncode, 2,
+           "case-17: zero-assessed evidence refuses", "import")
+    no_population, no_population_doc = make_import(tmp / "case-17-no-population", arms[1])
+    no_population_doc["result"]["coverage"][0]["Population"] = ""
+    no_population.write_text(json.dumps(no_population_doc), encoding="utf-8")
+    expect(evalrun(["import-results", "--run", run, "--file", no_population]).returncode, 2,
+           "case-17: coverage without a population refuses", "import")
+    bad_path, bad_path_doc = make_import(tmp / "case-17-bad-path", arms[1])
+    bad_path_doc["outputs"][0]["path"] = {"not": "a path"}
+    bad_path.write_text(json.dumps(bad_path_doc), encoding="utf-8")
+    expect(evalrun(["import-results", "--run", run, "--file", bad_path]).returncode, 2,
+           "case-17: malformed output path refuses without crashing", "import")
+    bad_config, bad_config_doc = make_import(tmp / "case-17-bad-config", arms[1])
+    bad_config_doc["configuration"] = ["not", "an", "object"]
+    bad_config.write_text(json.dumps(bad_config_doc), encoding="utf-8")
+    expect(evalrun(["import-results", "--run", run, "--file", bad_config]).returncode, 2,
+           "case-17: malformed configuration refuses without crashing", "import")
+    pending_key = f"{cid}__{arms[1]['armId']}"
+    expect(((load(run / "ledger.json") or {}).get("entries") or {}).get(pending_key, {}).get("status"),
+           "mcp-only", "case-17: refused import remains explicitly mcp-only", "import")
+
+    finding, _ = make_import(tmp / "case-17-good-finding", arms[1], "finding", 2)
+    expect(evalrun(["import-results", "--run", run, "--file", finding]).returncode, 0,
+           "case-17: accepted finding import", "import")
+    expect(evalrun(["resume", "--run", run]).returncode, 0,
+           "case-17: resume accepts and retains imported evidence", "import")
+    resumed = load(run / "ledger.json") or {}
+    expect(((resumed.get("entries") or {}).get(pending_key) or {}).get("status"), "reused",
+           "case-17: imported finding is reused rather than rerun", "import")
+
+    imported_response = run / "imports" / pending_key / "02-response.json"
+    original_response = imported_response.read_bytes()
+    imported_response.write_bytes(original_response + b"\nchanged")
+    expect(evalrun(["finalize", "--run", run]).returncode, 3,
+           "case-17: changed imported raw evidence refuses finalize", "import")
+    imported_response.write_bytes(original_response)
+    expect(evalrun(["finalize", "--run", run]).returncode, 0,
+           "case-17: finalize accepts imported receipts", "import")
+    bundle = tmp / "case-17-bundle"
+    expect(evalrun(["bundle", "--run", run, "--out", bundle]).returncode, 0,
+           "case-17: bundle includes imported evidence", "import")
+    moved = tmp / "case-17-relocated"
+    shutil.copytree(bundle, moved)
+    expect(evalrun(["verify-bundle", moved]).returncode, 0,
+           "case-17: relocated imported evidence verifies", "import")
+    bundled_response = next((moved / "evidence" / "imports" / pending_key).glob("*response.json"))
+    bundled_response.write_bytes(bundled_response.read_bytes() + b"\nchanged")
+    expect(evalrun(["verify-bundle", moved]).returncode, 3,
+           "case-17: changed bundled raw evidence refuses verification", "import")
+
+
 CASES = {"case-01": case_01, "case-02": case_02, "case-03": case_03, "case-04": case_04, "case-05": case_05,
          "case-06": case_06, "case-07": case_07, "case-08": case_08, "case-09": case_09, "case-10": case_10,
          "case-11": case_11, "case-12": case_12, "case-13": case_13, "case-14": case_14, "case-15": case_15,
-         "case-16": case_16}
+         "case-16": case_16, "case-17": case_17}
 
 
 def main() -> int:

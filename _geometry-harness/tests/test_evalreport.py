@@ -16,6 +16,7 @@ a skip.
 from __future__ import annotations
 
 import hashlib
+import importlib.util
 import json
 import os
 import re
@@ -274,6 +275,26 @@ def assert_common(case: str, bundle: Path, out: Path, pres: dict, common: dict, 
     got_arms = [a.get("armId") for a in sc.get("arms") or []]
     expect(sorted(got_arms), sorted(plan_arms), f"{case}: scope.arms are the plan's arms", "D2")
     check(got_arms[:1] == ["baseline"], f"{case}: the baseline arm is first in scope.arms (D3)")
+    baseline_scope = next((a for a in (pres.get("scope") or {}).get("arms") or [] if a.get("armId") == "baseline"), {})
+    if (baseline_scope.get("locationPluginScope") or {}).get("complete"):
+        recorded = [p.get("name") for p in (((load(bundle / "plan.json") or {}).get("arms") or [{}])[0].get("requested") or {}).get("plugins") or []]
+        subset = baseline_scope.get("locationPluginOrder") or []
+        expect(subset, [n for n in recorded if n in subset], f"{case}: location contributors preserve recorded relative order")
+        check("FixtureBase.esp" in subset and "FixtureTarget.esp" in subset,
+              f"{case}: measured non-conflicting location contributors appear in the reader subset")
+    target_names = {str(t.get("name")).lower() for t in (pres.get("scope") or {}).get("targets") or [] if t.get("name")}
+    for arm in (pres.get("scope") or {}).get("arms") or []:
+        if (arm.get("locationPluginScope") or {}).get("basis") != "plugins named by accepted target-conflict evidence":
+            continue
+        own = set()
+        for f in pres.get("findings") or []:
+            if f.get("armId") != arm.get("armId") or f.get("part") == "reverse":
+                continue
+            pair = {str(x) for x in ((f.get("counts") or {}).get("A"), (f.get("counts") or {}).get("B")) if x}
+            if {x.lower() for x in pair} & target_names:
+                own.update(pair)
+        check(set(arm.get("locationPluginOrder") or []) <= own,
+              f"{case}: legacy location fallback uses only that arm's non-reverse target conflicts")
     integ = sc.get("integrity") or {}
     expect(integ.get("ok"), True, f"{case}: scope.integrity.ok", "D2")
     expect(integ.get("defects"), [], f"{case}: scope.integrity.defects", "D2")
@@ -299,12 +320,19 @@ def assert_common(case: str, bundle: Path, out: Path, pres: dict, common: dict, 
               f"{case}: {fid} rowsShown <= rowsTotal")
         check(all(r.get("evidenceId") in evid for r in rows), f"{case}: {fid} every row's evidenceId resolves")
         check(bool(str(f.get("plain") or "").strip()), f"{case}: {fid} plain sentence is not empty")
+        supplied_count = int((f.get("counts") or {}).get("findings") or 0)
+        if f.get("kind") == "finding" and supplied_count > 0 and f.get("rowsTotal") == 0:
+            check(str(supplied_count) in str(f.get("readerPlain") or ""),
+                  f"{case}: rowless imported finding reports its supplied count instead of zero records")
     # evidence
     man_ev = {e.get("id"): e for e in man.get("evidence") or []}
     for eid, e in evid.items():
-        ok = re.fullmatch(c["evidence"]["idPattern"], str(eid)) is not None and eid[2:] in man_ev
-        check(ok, f"{case}: evidence {eid} is E-<manifest evidence id>")
+        external_scope = e.get("kind") == "scope" and e.get("recordedBy") == "scopeprobe" and eid[2:] == str(e.get("sha256") or "")[:16]
+        ok = re.fullmatch(c["evidence"]["idPattern"], str(eid)) is not None and (eid[2:] in man_ev or external_scope)
+        check(ok, f"{case}: evidence {eid} is E-<manifest evidence id> or a content-addressed bound scope")
         if ok:
+            if external_scope:
+                continue
             check(e.get("path") == man_ev[eid[2:]].get("path") and e.get("sha256") == man_ev[eid[2:]].get("sha256"),
                   f"{case}: evidence {eid} path and sha256 equal the manifest row's")
     # media
@@ -375,6 +403,12 @@ def assert_common(case: str, bundle: Path, out: Path, pres: dict, common: dict, 
     reader = pres.get("reader") or {}
     check(bool(reader.get("title") and reader.get("scopeLine") and reader.get("verdict")),
           f"{case}: presentation carries a human title, comparison scope and conservative verdict")
+    diff_nulls = [f for f in pres.get("findings") or [] if f.get("kind") == "null" and f.get("part") == "diff"]
+    if diff_nulls:
+        check(bool(reader.get("comparisonSummary")), f"{case}: differential nulls are summarized with patch changes")
+        null_text = " ".join(reader.get("nullSummary") or [])
+        check(all(str(f.get("readerPlain") or "") not in null_text for f in diff_nulls),
+              f"{case}: differential null sentences are absent from the no-problem section")
     check(reader.get("title") in md and reader.get("scopeLine") in md and reader.get("verdict") in md,
           f"{case}: report opens with the reader title, comparison scope and verdict")
     check(all(n in reader.get("scopeLine", "") for n in reader.get("comparisonMods") or []),
@@ -410,6 +444,10 @@ def assert_common(case: str, bundle: Path, out: Path, pres: dict, common: dict, 
         if p and (out / p).exists() and a.get("sha256") and sha256_file(out / p) != a.get("sha256"):
             bad.append(p)
     expect(bad, [], f"{case}: every artifact's sha256 matches the file", "D4")
+    support = pm.get("supportingEvidence") or []
+    for e in support:
+        check((out / e["path"]).exists() and sha256_file(out / e["path"]) == e.get("sha256"),
+              f"{case}: copied supporting scope evidence exists and matches the presentation manifest")
     pr_ = pm.get("print") or {}
     expect(pr_.get("maxPages"), r["manifest"]["print"]["maxPages"], f"{case}: print.maxPages", "D4")
     check(pr_.get("status") in r["manifest"]["print"]["statusWords"], f"{case}: print.status is a D4 word (got {pr_.get('status')!r})")
@@ -429,6 +467,14 @@ def assert_common(case: str, bundle: Path, out: Path, pres: dict, common: dict, 
     expect(unresolved, [], f"{case}: tokens still resolve after relocation", "D4")
     missing_imgs = [p for p in image_paths(md2) if not (moved / p).exists()]
     expect(missing_imgs, [], f"{case}: image paths still exist after relocation", "D4")
+    if support:
+        sp = moved / support[0]["path"]
+        original = sp.read_bytes()
+        sp.write_bytes(original + b"\nchanged")
+        changed = evalreport(["verify", "--out", moved])
+        check(changed.returncode != 0 and "supporting-evidence-changed" in changed.stderr,
+              f"{case}: verify refuses a changed copied scope document")
+        sp.write_bytes(original)
     shutil.move(str(moved), str(out))
     return md, index
 
@@ -457,6 +503,24 @@ def numbers_in(obj) -> set:
 def chapter_captions(pres, kinds) -> str:
     return " ".join(str(cap.get("text") or "") for x in pres.get("chapters") or [] if x.get("kind") in kinds
                     for cap in x.get("captions") or [])
+
+
+def check_direction_inference():
+    spec = importlib.util.spec_from_file_location("evalreport_under_test", EVALREPORT)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    finding = {"counts": {"groupKind": "CLOBBERED", "A": "Earlier.esp", "B": "Later.esp"},
+               "rows": [{"summary": "1 navmesh record(s) re-cut by Earlier.esp and then re-cut again by Later.esp, which declares no dependency on it",
+                         "physicalDetail": "victim-only ground on the loser's mesh farther from the winner's (Later.esp)"}]}
+    got = module.infer_clobber_direction(finding, ["Base.esm", "Earlier.esp", "Later.esp"])
+    expect((got or {}).get("overwrittenPlugin"), "Earlier.esp", "direction: evidence names the overwritten plugin")
+    expect((got or {}).get("winningPlugin"), "Later.esp", "direction: evidence and order name the later winner")
+    expect(module.infer_clobber_direction(finding, ["Later.esp", "Earlier.esp"]), None,
+           "direction: contradictory recorded order prevents a directional claim")
+    reversed_finding = {**finding, "rows": [{"summary": "1 navmesh record(s) re-cut by Later.esp and then re-cut again by Earlier.esp, which declares no dependency on it",
+                                              "physicalDetail": "winner's (Later.esp)"}]}
+    expect(module.infer_clobber_direction(reversed_finding, ["Earlier.esp", "Later.esp"]), None,
+           "direction: a reversed source sentence cannot be inferred from loose name matching")
 
 
 # ---------------------------------------------------------------------------- cases
@@ -535,6 +599,12 @@ def case_r2(tmp, index, common):
         for s in n["plainDoesNotContain"]:
             check(s not in plain, f"{case}: null finding's sentence does not say {s!r}")
         null_plain = plain
+        reader_plain = str(f.get("readerPlain") or "").lower()
+        if f.get("part") == "diff":
+            check("no additional problem" in reader_plain,
+                  f"{case}: differential null says the comparison found no additional problem")
+            check("reported separately" in reader_plain,
+                  f"{case}: differential null preserves the possibility of existing setup problems")
     for m in o["missingFindings"]:
         hit = finding_where(pres, checkId=m["checkId"], armId=m["armId"], kind="missing")
         check(bool(hit), f"{case}: a `missing` finding for {m['checkId']} [{m['armId']}] (D3 (2))")
@@ -604,6 +674,20 @@ def case_r3(tmp, index, common):
         if f.get("kind") == "finding":
             seq.append((f.get("checkId"), 0 if f.get("armId") == "baseline" else 1, -f.get("rowsTotal", 0)))
     check(seq == sorted(seq), f"{case}: findings sorted by checkId, baseline first, then count descending (D3)")
+    clobber = [f for f in pres.get("findings") or []
+               if (f.get("counts") or {}).get("groupKind") == "CLOBBERED"]
+    check(bool(clobber) and all(f.get("readerRelevant") is False for f in clobber),
+          f"{case}: bare navmesh overwrite groups remain indexed but are not reader compatibility findings")
+    clobber_states = {r.get("physical") for f in clobber for r in f.get("allRows") or []}
+    check({"Holds", "Gone"} <= clobber_states,
+          f"{case}: both sampled-loss and no-sampled-loss overwrite controls are present and hidden")
+    chapter_fids = {fid for c in pres.get("chapters") or [] if c.get("kind") == "finding" for fid in c.get("findingIds") or []}
+    check(not chapter_fids.intersection({f.get("id") for f in clobber}),
+          f"{case}: context-only overwrite groups produce no finding chapter")
+    candidate_clobber = [f for f in clobber if f.get("armId") != "baseline" and f.get("part") != "reverse"]
+    check(all(str(f.get("readerContext") or "").startswith("Already present before adding the patch") for f in candidate_clobber),
+          f"{case}: exact baseline group/record matches are labeled pre-existing without claiming patch causation")
+    check(all(f.get("id") in idx for f in clobber), f"{case}: every context-only overwrite remains in the evidence index")
     pm = load(out / "presentation-manifest.json") or {}
     expect((pm.get("print") or {}).get("status"), cs["print"]["status"], f"{case}: concise print.status", "D4 / acceptance")
     pages_c = (pm.get("print") or {}).get("pages")
@@ -669,8 +753,8 @@ def case_r4(tmp, index, common):
         expect(cnt.get(k), n, f"{case}: F-001.counts.{k} verbatim", "D3 (4) never netted")
     check(bool(f1.get("evidenceIds")), f"{case}: F-001 has evidence ids")
     chs = [x for x in pres.get("chapters") or [] if x.get("kind") == rg["inSomeChapterOfKind"] and "F-001" in (x.get("findingIds") or [])]
-    check(bool(chs), f"{case}: F-001 is in a chapter of kind finding (D6)")
-    check(any(x.get("captions") for x in chs), f"{case}: that chapter has a caption")
+    expect(f1.get("readerRelevant"), rg["readerRelevant"], f"{case}: CLOBBERED-only regression reader relevance")
+    expect(bool(chs), rg["inSomeChapter"], f"{case}: CLOBBERED-only regression chapter membership")
     reader_verdict = str((pres.get("reader") or {}).get("verdict") or "")
     opening = next((x for x in pres.get("chapters") or [] if x.get("kind") == "opening"), {})
     opening_narration = " ".join(str(c.get("narration") or "") for c in opening.get("captions") or [])
@@ -702,14 +786,11 @@ def case_r4(tmp, index, common):
             check(hit[0].get("priority", 0) > f1.get("priority", 0), f"{case}: {hit[0].get('id')} priority > the regression's")
     for s in o["report"]["mdContains"]:
         check(s in md, f"{case}: report.md contains {s!r}")
-    first = re.search(r"\bF-\d{3}\b", md)
-    expect(first.group(0) if first else None, "F-001", f"{case}: the first finding id report.md mentions", "prominence")
     rep_ids = [f.get("id") for f in fs if f.get("kind") == "repaired"]
-    i1 = md.find("F-001")
-    check(all(md.find(x) == -1 or md.find(x) > i1 for x in rep_ids), f"{case}: F-001 appears before any repaired finding id")
+    check("F-001" in text(out / "evidence-index.md"), f"{case}: raw context-only regression remains in the evidence index")
     low = md.lower()
     for s in o["report"]["mdDoesNotContain"]:
-        check(s not in low, f"{case}: report.md does not say {s!r}")
+        check(s.lower() not in low, f"{case}: report.md does not contain {s!r}")
     if o["report"].get("mdNoAffirmativeNettingClaim"):
         expect(netting_claims(md), [], f"{case}: report.md makes no affirmative netting claim (a negated 'net' is allowed)", "D3 (4)")
     pm = load(out / "presentation-manifest.json") or {}
@@ -755,6 +836,11 @@ def case_r5(tmp, index, common):
         check(any(m.get("id") in (x.get("mediaIds") or []) for x in pres.get("chapters") or []), f"{case}: {m.get('id')} is in a chapter")
         check(any(cap.get("mediaId") == m.get("id") for x in pres.get("chapters") or [] for cap in x.get("captions") or []),
               f"{case}: {m.get('id')} has a caption")
+        hosts = [f for f in pres.get("findings") or [] if m.get("id") in (f.get("mediaIds") or [])
+                 and f.get("kind") == "finding"]
+        check(any((f.get("counts") or {}).get("groupKind") == ar["hostFindingGroupKind"]
+                  and f.get("readerRelevant") is True for f in hosts),
+              f"{case}: {m.get('id')} illustrates active {ar['hostFindingGroupKind']} reader evidence")
     for spec in o["assessed"]:
         hit = [m for m in assessed if (m.get("subject") or {}).get("armId") == spec["subjectArmId"]]
         check(len(hit) == 1, f"{case}: one assessed row on arm {spec['subjectArmId']}")
@@ -891,6 +977,7 @@ def main() -> int:
     common = load(EXPECTED / "common.json")
     try:
         import make_report_fixtures as MF
+        check_direction_inference()
         print("=== fixtures ===")
         t0 = time.time()
         try:
