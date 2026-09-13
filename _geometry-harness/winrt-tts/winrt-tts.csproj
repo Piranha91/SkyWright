@@ -1,0 +1,13 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net9.0-windows10.0.19041.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <NuGetAudit>false</NuGetAudit>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="../../src/housecarl-core/AtomicFile.cs" Link="AtomicFile.cs" />
+    <Compile Include="../../src/housecarl-core/Progress/*.cs" Link="Progress/%(Filename)%(Extension)" />
+  </ItemGroup>
+</Project>

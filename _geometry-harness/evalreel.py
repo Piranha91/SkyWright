@@ -5,14 +5,14 @@
         [--max-seconds 120] [--chapters C-01,C-03] [--bundle DIR] [--ffmpeg EXE] [--dry-run]
 
 Consumes the presentation plan (standards/HOUSECARL_EVALUATION_PRESENTATION.md, schema 1) and cuts a 1280x720,
-30 fps, H.264 reel: an opening card, one segment per chapter caption — an image held for 5 s, a clip's
-`sourceInterval` cut and conformed to 30 fps, or a text card labelled "no qualified media" — and a closing card
-listing what the evaluation did not establish. Editing, layout and declared overlays only: nothing is
-reconstructed, generated or filled in.
+30 fps, H.264/AAC narrated reel. Every scene uses qualified evidence media at full-frame scale, and any crop,
+pan, or highlight comes from explicit `storyboard` metadata. The opening speaks the overall verdict. There are
+no title cards, caption bands, subtitles, or other added text. Missing media, narration, or clean-frame
+declarations refuse the render instead of silently substituting a card.
 
-Layout (`.claude/skills/evaluation-reporting/references/reel-layout.md`): the image region is the top 1280x600,
-the source scaled to fit and letterboxed (never stretched, never cropped); the bottom 120 px band carries the
-label (`arm · state · media kind`, top-left of the band) and the caption. Nothing is drawn over the image region.
+Layout and reviewed storyboard input are documented in
+`.claude/skills/evaluation-reporting/references/reel-layout.md`. The scene fills the canvas with its aspect
+ratio preserved; only declared crops, pans and subject highlights alter its framing.
 
 Outputs under --out: `reel.mp4`, `reel.srt`, `reel-map.json`, `reel-status.json`, `contact-sheet.png`, and a
 per-segment cache under `cache/` keyed by the source's hash, the segment's parameters, the caption text and the
@@ -30,15 +30,16 @@ Exit codes: 0 rendered; 1 partial or failed (the status file says which and why)
 from __future__ import annotations
 
 import argparse
+import contextlib
 import glob
 import hashlib
 import json
+import math
 import os
 import re
 import shutil
 import subprocess
 import sys
-import textwrap
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -49,27 +50,19 @@ from runlog import Run  # noqa: E402
 EXIT_OK, EXIT_NOT_RENDERED, EXIT_REFUSED = 0, 1, 2
 
 # ---------------------------------------------------------------------------------------------- the layout
-LAYOUT_VERSION = "1"
+LAYOUT_VERSION = "2-narrated-clean-frame"
 WIDTH, HEIGHT, FPS = 1280, 720, 30
-IMAGE_H = 600                      # the image region: y 0..600
-BAND_H = HEIGHT - IMAGE_H          # the caption band: y 600..720
+IMAGE_H = HEIGHT                   # retained in output schema: the visual occupies the full frame
+BAND_H = 0
 CANVAS_COLOUR = "0x0f1218"         # behind a letterboxed source
-BAND_COLOUR = "0x1c2230"
-OPENING_SECONDS, CLOSING_SECONDS, IMAGE_SECONDS, MISSING_SECONDS = 6.0, 8.0, 5.0, 5.0
-CAPTION_WRAP, CAPTION_WRAP_SMALL = 84, 100     # characters per line at 26 px / 22 px Arial on 1200 px
-CARD_BODY_MAX_LINES = 14
+IMAGE_SECONDS = 5.0
 IMAGE_SUFFIXES = {".png", ".jpg", ".jpeg", ".bmp", ".webp", ".tif", ".tiff"}
-MISSING_LABEL = "no qualified media"
 DURATION_TOLERANCE = 0.1
 
 # ASS colours are &HAABBGGRR
 ASS_STYLES = (
     # name, font, size, primary, outline colour, bold, border style (1 outline, 3 opaque box), outline px,
     # alignment (numpad: 7 top-left, 2 bottom-centre), marginL, marginR, marginV
-    ("Label", "Arial", 20, "&H00D8E0F0", "&H00101418", 0, 1, 1, 7, 20, 20, IMAGE_H + 6),
-    ("Caption", "Arial", 26, "&H00FFFFFF", "&H00101418", 0, 1, 1, 2, 40, 40, 10),
-    ("Title", "Arial", 42, "&H00FFFFFF", "&H00101418", 1, 1, 1, 7, 64, 64, 60),
-    ("Body", "Arial", 28, "&H00E6EAF0", "&H00101418", 0, 1, 1, 7, 64, 64, 136),
     ("Sheet", "Arial", 14, "&H00FFFFFF", "&H00000000", 1, 3, 2, 7, 4, 4, 4),
 )
 
@@ -157,7 +150,8 @@ def probe_header(exe: str, path: Path) -> dict:
     r = subprocess.run([exe, "-hide_banner", "-i", str(path)], capture_output=True, text=True,
                        encoding="utf-8", errors="replace")
     text = r.stderr
-    out = {"durationSeconds": None, "width": None, "height": None, "fps": None}
+    out = {"durationSeconds": None, "width": None, "height": None, "fps": None,
+           "hasAudio": bool(re.search(r"Audio:", text))}
     m = _DUR.search(text)
     if m:
         out["durationSeconds"] = int(m.group(1)) * 3600 + int(m.group(2)) * 60 + float(m.group(3))
@@ -200,8 +194,40 @@ def decodable(exe: str, path: Path) -> tuple[bool, str]:
 def probe_video(exe: str, path: Path) -> dict:
     h = probe_header(exe, path)
     h["frames"] = count_frames(exe, path)
+    ar = subprocess.run([exe, "-hide_banner", "-nostdin", "-v", "error", "-i", str(path), "-map", "0:a:0",
+                        "-f", "null", "-"], capture_output=True, text=True, encoding="utf-8", errors="replace")
+    h["audioDecoded"] = ar.returncode == 0
     h["bytes"] = path.stat().st_size if path.exists() else None
     return h
+
+
+def synthesize_windows(text: str, out: Path, voice: str | None = None, parent_run_id=None) -> tuple[bool, str]:
+    """Use Windows' installed WinRT voices; no network, install, or remote service is involved."""
+    if os.name != "nt":
+        return False, "local speech synthesis is only available on Windows; supply narrationAudio"
+    dotnet = shutil.which("dotnet")
+    if not dotnet:
+        return False, ".NET 9 is unavailable for the local WinRT speech helper; supply narrationAudio"
+    txt = out.with_suffix(".txt")
+    txt.write_text(text, encoding="utf-8")
+    project = HERE / "winrt-tts" / "winrt-tts.csproj"
+    try:
+        r = subprocess.run([dotnet, "run", "--project", str(project), "--", str(txt.resolve()), str(out.resolve()), voice or ""],
+                           capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=120,
+                           env={**os.environ, "HC_REEL_PARENT_RUN_ID": parent_run_id or ""})
+    except (OSError, subprocess.SubprocessError) as exc:
+        out.unlink(missing_ok=True)
+        return False, f"Windows speech synthesis could not finish: {exc}"
+    finally:
+        txt.unlink(missing_ok=True)
+    if r.returncode or not out.is_file() or out.stat().st_size == 0:
+        out.unlink(missing_ok=True)
+        return False, "Windows speech synthesis failed: " + " ".join((r.stderr or r.stdout).split())[-300:]
+    if out.stat().st_size <= 46:
+        out.unlink(missing_ok=True)
+        return False, "Windows speech synthesis produced no speech; repair the WinRT voice or supply narrationAudio"
+    identity = next((line.split("=", 1)[1] for line in r.stdout.splitlines() if line.startswith("voice=")), "unknown")
+    return True, "Windows WinRT " + identity
 
 
 # ---------------------------------------------------------------------------------------------- ASS text
@@ -233,40 +259,12 @@ def ass_document(events: list[tuple[str, str]], seconds: float, play_w: int = WI
     return "\n".join(lines) + "\n"
 
 
-def wrap_caption(text: str) -> tuple[str, bool]:
-    """The caption as ASS text: at most two lines at 26 px, else three at 22 px, else truncated and flagged.
-    Truncation is reported in the map (`captionTruncated`), never silent."""
-    text = " ".join((text or "").split())
-    lines = textwrap.wrap(text, CAPTION_WRAP) or [""]
-    if len(lines) <= 2:
-        return ass_escape("\n".join(lines)), False
-    lines = textwrap.wrap(text, CAPTION_WRAP_SMALL)
-    truncated = len(lines) > 3
-    if truncated:
-        lines = lines[:3]
-        lines[-1] = lines[-1][:CAPTION_WRAP_SMALL - 2].rstrip() + " …"
-    return "{\\fs22}" + ass_escape("\n".join(lines)), truncated
-
-
-def card_events(title: str, body_lines: list[str], label: str) -> list[tuple[str, str]]:
-    """A text card: a title and up to CARD_BODY_MAX_LINES body lines, each wrapped to the card width, plus
-    the persistent label in the band — every segment carries one."""
-    wrapped: list[str] = []
-    for line in body_lines:
-        wrapped += textwrap.wrap(" ".join(str(line).split()), 78) or [""]
-    if len(wrapped) > CARD_BODY_MAX_LINES:
-        kept = wrapped[:CARD_BODY_MAX_LINES - 1]
-        kept.append(f"… and {len(wrapped) - len(kept)} more line(s): see the report")
-        wrapped = kept
-    return [("Label", ass_escape(label)), ("Title", ass_escape(title)), ("Body", ass_escape("\n".join(wrapped)))]
-
-
 # ---------------------------------------------------------------------------------------------- the plan
 def resolve_bundle_dir(pres: dict, pres_path: Path, override: str | None) -> Path | None:
     """Where the plan's bundle-relative media paths resolve: the flag, else `source.bundleDir` (absolute, or
     relative to the presentation's own directory, then to the working directory)."""
     if override:
-        return Path(override)
+        return Path(override).resolve()
     given = ((pres.get("source") or {}).get("bundleDir")) or "."
     p = Path(given)
     if p.is_absolute():
@@ -277,72 +275,18 @@ def resolve_bundle_dir(pres: dict, pres_path: Path, override: str | None) -> Pat
     return (pres_path.parent / p).resolve()
 
 
-def opening_lines(pres: dict) -> tuple[str, list[str]]:
-    scope = pres.get("scope") or {}
-    src = pres.get("source") or {}
-    targets = scope.get("targets") or []
-    target_names = [t.get("name") or t.get("file") or str(t) if isinstance(t, dict) else str(t) for t in targets]
-    arms = scope.get("arms") or []
-    completion = scope.get("completion") or {}
-    claim = completion.get("claim") or ((src.get("verify") or {}).get("claim")) or "unknown"
-    missing = completion.get("missingRequired")
-    findings = pres.get("findings") or []
-    kinds: dict[str, int] = {}
-    for f in findings:
-        kinds[f.get("kind", "finding")] = kinds.get(f.get("kind", "finding"), 0) + 1
-    lines = [f"Target: {', '.join(target_names) or '(unnamed)'}"]
-    lines.append("Arms: " + ("; ".join(
-        f"{a.get('armId')} ({a.get('kind')}{', ' + Path(a['candidateFile']).name if a.get('candidateFile') else ''})"
-        for a in arms) or "(none)"))
-    if completion.get("complete") is True:
-        lines.append("Completion: every required check has an accepted result")
-    else:
-        lines.append("Completion: the evaluation is incomplete"
-                     + (f" — {missing} required check(s) without an accepted result" if missing is not None else ""))
-    lines.append(f"Claim: {claim}")
-    lines.append("Findings: " + (", ".join(f"{n} {k}" for k, n in sorted(kinds.items())) or "none listed"))
-    lines.append(f"Bundle plan {src.get('planId', '?')} · presentation {pres.get('presentationId', '?')}")
-    return "Evaluation reel", lines
-
-
-def closing_lines(pres: dict) -> tuple[str, list[str]]:
-    scope = pres.get("scope") or {}
-    completion = scope.get("completion") or {}
-    lines = []
-    by_cause = completion.get("byCause") or {}
-    missing = completion.get("missingRequired")
-    if missing:
-        lines.append(f"Required checks still without an accepted result: {missing}"
-                     + (" (" + ", ".join(f"{k} {v}" for k, v in sorted(by_cause.items())) + ")" if by_cause else ""))
-    else:
-        lines.append("Required checks still without an accepted result: none listed")
-    for f in (pres.get("findings") or []):
-        if f.get("kind") == "missing":
-            lines.append(f"  missing: {f.get('checkId') or f.get('title')} [{f.get('armId') or '-'}]")
-    unknown = completion.get("unknownApplicability") or []
-    if unknown:
-        lines.append(f"Applicability unknown: {', '.join(map(str, unknown))}")
-    un = pres.get("unassessed") or {}
-    areas = [f"{k} ({len(v) if isinstance(v, (list, dict)) else v})" for k, v in un.items() if k != "media" and v]
-    if areas:
-        lines.append("Unassessed: " + ", ".join(areas))
-    media_un = [m for m in (pres.get("media") or []) if m.get("assessed") is False] or (un.get("media") or [])
-    if media_un:
-        lines.append(f"Media not assessed: {len(media_un)} item(s) — shown as \"{MISSING_LABEL}\" cards")
-    lines.append("What was not measured is not shown; nothing in this reel is reconstructed.")
-    return "What this reel does not show", lines
-
-
 def plan_segments(pres: dict, ffmpeg: dict, bundle_dir: Path | None, chapter_filter: set[str] | None,
                   max_seconds: float | None) -> tuple[list[dict], list[dict]]:
-    """The chapters of the plan, as segments — one per caption. A segment with qualified media whose file is
-    absent, altered or undecodable becomes a `missing` card with `status: missing-media` (the reel is then
-    `partial`); a chapter planned without qualified media is a `missing` card with `status: no-media`."""
+    """Plan one narrated evidence scene per caption; refuse rather than inventing missing visuals."""
     media_by_id = {m.get("id"): m for m in (pres.get("media") or [])}
     chapters = [c for c in (pres.get("chapters") or [])
                 if chapter_filter is None or c.get("id") in chapter_filter]
     probes: dict[str, dict] = {}
     segments: list[dict] = []
+    omitted: list[dict] = []
+    if chapter_filter is not None:
+        omitted.extend({"chapterId": c.get("id"), "reason": "explicit chapter selection"}
+                       for c in pres.get("chapters") or [] if c.get("id") not in chapter_filter)
 
     def base(ch: dict, kind: str) -> dict:
         return {"chapterId": ch.get("id"), "chapterKind": ch.get("kind"), "kind": kind,
@@ -350,58 +294,81 @@ def plan_segments(pres: dict, ffmpeg: dict, bundle_dir: Path | None, chapter_fil
                 "source": None, "sourceInterval": None, "caption": "", "label": "", "status": "planned",
                 "error": None, "durationSeconds": 0.0, "events": [], "captionTruncated": False}
 
-    def missing_card(ch: dict, cap: dict | None, media_id, reason: str, status: str) -> dict:
-        s = base(ch, "missing")
-        s["mediaId"] = media_id
-        s["evidenceIds"] = list((cap or {}).get("evidenceIds") or [])
-        s["caption"] = (cap or {}).get("text") or ch.get("title") or ""
-        s["label"] = MISSING_LABEL
-        s["status"] = status
-        s["error"] = reason
-        s["durationSeconds"] = MISSING_SECONDS
-        body = [f"Chapter {ch.get('id')}: {ch.get('title') or ''}", "", f"Why: {reason}"]
-        if s["caption"]:
-            body.insert(1, s["caption"])
-        s["events"] = card_events(MISSING_LABEL, body, MISSING_LABEL)
-        return s
-
+    errors = []
     for ch in chapters:
         ck = ch.get("kind")
-        if ck in ("opening", "closing"):
-            s = base(ch, f"card-{ck}")
-            s["durationSeconds"] = OPENING_SECONDS if ck == "opening" else CLOSING_SECONDS
-            title, lines = opening_lines(pres) if ck == "opening" else closing_lines(pres)
-            caps = ch.get("captions") or []
-            if caps:
-                lines = [c.get("text") or "" for c in caps]
-                s["evidenceIds"] = sorted({e for c in caps for e in (c.get("evidenceIds") or [])})
-            s["label"] = ck
-            s["caption"] = ch.get("title") or title
-            s["events"] = card_events(ch.get("title") or title, lines, ck)
-            segments.append(s)
-            continue
         caps = ch.get("captions") or []
         if not caps:
-            segments.append(missing_card(ch, None, None, "the chapter carries no caption and no media", "no-media"))
+            errors.append(f"{ch.get('id')}: no narrated scene is declared")
             continue
         for cap in caps:
+            if cap.get("omitFromReel") is True:
+                if ck in ("opening", "closing"):
+                    errors.append(f"{ch.get('id')}: opening and closing scenes cannot be omitted")
+                    continue
+                if not str(cap.get("omissionReason") or "").strip():
+                    errors.append(f"{ch.get('id')}: an omitted scene needs an omissionReason")
+                    continue
+                omitted.append({"chapterId": ch.get("id"), "mediaId": cap.get("mediaId"),
+                                "caption": cap.get("text"), "reason": cap.get("omissionReason") or "explicit storyboard omission"})
+                continue
+            narration = " ".join(str(cap.get("narration") or "").split())
+            board = cap.get("storyboard")
+            if not narration:
+                errors.append(f"{ch.get('id')}: caption has no narration")
+                continue
+            if not isinstance(board, dict):
+                errors.append(f"{ch.get('id')}: caption has no explicit storyboard")
+                continue
+            if board.get("mode") not in ("full-frame", "crop-pan"):
+                errors.append(f"{ch.get('id')}: storyboard mode must be full-frame or crop-pan")
+                continue
+            if board.get("mode") == "crop-pan":
+                scales = [float(board.get("startScale", 1)), float(board.get("endScale", 1.12))]
+                if any(not math.isfinite(x) or not 1 <= x <= 4 for x in scales):
+                    errors.append(f"{ch.get('id')}: crop-pan scales must be finite numbers from 1 to 4")
+                    continue
+            review = board.get("visualReview") or {}
+            if review.get("subjectVisible") is not True or review.get("addedText") not in ("none", "excluded-by-source-region"):
+                errors.append(f"{ch.get('id')}: storyboard lacks visualReview confirming the subject and added-text treatment")
+                continue
+            clean = board.get("cleanFrame") is True
+            crop_ok = isinstance(board.get("sourceRegion"), dict) and board.get("excludesAddedText") is True
+            if not (clean or crop_ok):
+                errors.append(f"{ch.get('id')}: storyboard must declare cleanFrame=true or an authored sourceRegion with excludesAddedText=true")
+                continue
+            if crop_ok:
+                try:
+                    vals = [float(board["sourceRegion"][k]) for k in ("x", "y", "width", "height")]
+                    if not all(math.isfinite(v) for v in vals) or min(vals) < 0 or max(vals) > 1 or vals[2] <= 0 or vals[3] <= 0 or vals[0] + vals[2] > 1 or vals[1] + vals[3] > 1:
+                        raise ValueError
+                except (KeyError, TypeError, ValueError):
+                    errors.append(f"{ch.get('id')}: sourceRegion must be a normalized rectangle inside the source")
+                    continue
+            for h in board.get("highlights", []):
+                try:
+                    vals = [float(h[k]) for k in ("x", "y", "width", "height")]
+                    if h.get("shape", "rect") != "rect" or not all(math.isfinite(v) for v in vals) or min(vals) < 0 or max(vals) > 1 or vals[2] <= 0 or vals[3] <= 0 or vals[0] + vals[2] > 1 or vals[1] + vals[3] > 1:
+                        raise ValueError
+                except (KeyError, TypeError, ValueError):
+                    errors.append(f"{ch.get('id')}: highlight must be a normalized rectangle inside the scene")
+                    continue
             mid = cap.get("mediaId")
             row = media_by_id.get(mid)
             if mid is None or row is None:
-                segments.append(missing_card(ch, cap, mid, "no media is bound to this caption", "no-media"))
+                errors.append(f"{ch.get('id')}: no qualified media is bound to the narrated scene")
                 continue
             if row.get("assessed") is not True:
-                segments.append(missing_card(ch, cap, mid, f"the media is unassessed: {row.get('reason')}", "no-media"))
+                errors.append(f"{ch.get('id')}: media {mid} is unassessed ({row.get('reason')})")
                 continue
             rel = row.get("path") or ""
             abs_path = (bundle_dir / rel) if bundle_dir else Path(rel)
             if not abs_path.is_file():
-                segments.append(missing_card(ch, cap, mid, f"the media file {rel} is not on disk", "missing-media"))
+                errors.append(f"{ch.get('id')}: media file {rel} is not on disk")
                 continue
             got = sha256_file(abs_path)
             if row.get("sha256") and got != row["sha256"]:
-                segments.append(missing_card(ch, cap, mid, f"the media file {rel} hashes to {got[:12]}, not the "
-                                             f"plan's {str(row['sha256'])[:12]}", "missing-media"))
+                errors.append(f"{ch.get('id')}: media file {rel} changed since planning")
                 continue
             if got not in probes:
                 ok, err = decodable(ffmpeg["path"], abs_path)
@@ -409,8 +376,7 @@ def plan_segments(pres: dict, ffmpeg: dict, bundle_dir: Path | None, chapter_fil
                                "header": probe_header(ffmpeg["path"], abs_path) if ok else None}
             pr = probes[got]
             if not pr["ok"]:
-                segments.append(missing_card(ch, cap, mid, f"the media file {rel} does not decode: {pr['error']}",
-                                             "missing-media"))
+                errors.append(f"{ch.get('id')}: media file {rel} does not decode: {pr['error']}")
                 continue
             is_image = abs_path.suffix.lower() in IMAGE_SUFFIXES or row.get("mediaKind") in (
                 "offline-render", "native-screenshot", "historical-illustration")
@@ -418,6 +384,9 @@ def plan_segments(pres: dict, ffmpeg: dict, bundle_dir: Path | None, chapter_fil
             s["mediaId"] = mid
             s["evidenceIds"] = list(cap.get("evidenceIds") or [])
             s["caption"] = cap.get("text") or ""
+            s["narration"] = narration
+            s["storyboard"] = board
+            s["narrationAudio"] = cap.get("narrationAudio")
             subj = row.get("subject") or {}
             s["label"] = " · ".join(str(x) for x in (subj.get("armId") or "?", row.get("state") or "?",
                                                       row.get("mediaKind") or "?"))
@@ -435,31 +404,22 @@ def plan_segments(pres: dict, ffmpeg: dict, bundle_dir: Path | None, chapter_fil
                 if src_dur is not None and end > src_dur + 0.05:
                     end, clamped = src_dur, True
                 if end <= start:
-                    segments.append(missing_card(ch, cap, mid, f"the source interval {start}-{end} s is empty",
-                                                 "missing-media"))
+                    errors.append(f"{ch.get('id')}: source interval {start}-{end} s is empty")
                     continue
                 s["sourceInterval"] = {"startSeconds": start, "endSeconds": end,
                                        "sourcePath": iv.get("sourcePath"), "sourceSha256": iv.get("sourceSha256"),
                                        "clampedToSource": clamped, "sourceDurationSeconds": src_dur,
                                        "sourceFps": pr["header"].get("fps")}
                 s["durationSeconds"] = round(end - start, 3)
-            cap_text, truncated = wrap_caption(s["caption"])
-            s["captionTruncated"] = truncated
-            s["events"] = [("Label", ass_escape(s["label"])), ("Caption", cap_text)]
+            s["durationSeconds"] = max(s["durationSeconds"], round(len(narration.split()) / 2.35 + .75, 3))
+            s["events"] = []
             segments.append(s)
 
-    omitted: list[dict] = []
-    if max_seconds is not None:
-        total = sum(s["durationSeconds"] for s in segments)
-        droppable = [i for i, s in enumerate(segments) if not s["kind"].startswith("card-")]
-        while total > max_seconds and droppable:
-            i = droppable.pop()
-            s = segments[i]
-            total -= s["durationSeconds"]
-            omitted.append({"chapterId": s["chapterId"], "mediaId": s["mediaId"], "caption": s["caption"],
-                            "seconds": s["durationSeconds"], "reason": f"over the {max_seconds} s budget"})
-            segments[i] = None
-        segments = [s for s in segments if s is not None]
+    if errors:
+        raise ValueError("storyboard-refused: " + "; ".join(errors))
+
+    if max_seconds is not None and sum(s["durationSeconds"] for s in segments) > max_seconds:
+        raise ValueError(f"storyboard-refused: narrated scenes exceed the {max_seconds} s budget; shorten narration or explicitly select a complete shorter presentation")
     for i, s in enumerate(segments):
         s["index"] = i
         s["plannedFrames"] = int(round(s["durationSeconds"] * FPS))
@@ -471,32 +431,46 @@ def cache_key(seg: dict, ffmpeg_version: str) -> str:
     params = {"layout": LAYOUT_VERSION, "kind": seg["kind"], "w": WIDTH, "h": HEIGHT, "fps": FPS,
               "source": (seg["source"] or {}).get("sha256"), "interval": seg["sourceInterval"],
               "duration": seg["durationSeconds"], "frames": seg["plannedFrames"], "caption": seg["caption"],
-              "label": seg["label"], "events": seg["events"], "ffmpeg": ffmpeg_version}
+              "narration": seg.get("narration"), "audio": seg.get("audioSha256"),
+              "storyboard": seg.get("storyboard"), "ffmpeg": ffmpeg_version}
     return sha256_text(json.dumps(params, sort_keys=True, ensure_ascii=False))[:16]
 
 
-FILTER_TAIL = (f"drawbox=x=0:y={IMAGE_H}:w={WIDTH}:h={BAND_H}:color={BAND_COLOUR}:t=fill,"
-               f"ass=seg.ass,format=yuv420p[out]")
-FIT = f"scale={WIDTH}:{IMAGE_H}:force_original_aspect_ratio=decrease:flags=lanczos"
-PLACE = f"overlay=x=(main_w-overlay_w)/2:y=({IMAGE_H}-overlay_h)/2:shortest=1"
+FIT = f"scale={WIDTH}:{HEIGHT}:force_original_aspect_ratio=decrease:flags=lanczos"
 ENCODE = ["-r", str(FPS), "-c:v", "libx264", "-preset", "veryfast", "-crf", "20", "-pix_fmt", "yuv420p",
-          "-an", "-movflags", "+faststart"]
+          "-c:a", "aac", "-b:a", "160k", "-movflags", "+faststart"]
 
 
 def segment_command(seg: dict) -> list[str]:
     d = f"{seg['durationSeconds']:.3f}"
-    colour = ["-f", "lavfi", "-t", d, "-i", f"color=c={CANVAS_COLOUR}:s={WIDTH}x{HEIGHT}:r={FPS}"]
+    audio = ["-i", seg["audioPath"]]
+    board = seg.get("storyboard") or {}
+    if board.get("mode") not in ("full-frame", "crop-pan"):
+        raise ValueError("storyboard mode must be full-frame or crop-pan")
+    region = board.get("sourceRegion")
+    crop = ""
+    if isinstance(region, dict):
+        crop = (f"crop=iw*{float(region['width'])}:ih*{float(region['height'])}:"
+                f"iw*{float(region['x'])}:ih*{float(region['y'])},")
+    highlights = "".join(f",drawbox=x=iw*{float(h['x'])}:y=ih*{float(h['y'])}:w=iw*{float(h['width'])}:"
+                         f"h=ih*{float(h['height'])}:color={h.get('color','yellow')}@0.9:t=4"
+                         for h in board.get("highlights", []) if h.get("shape", "rect") == "rect")
+    motion = ""
+    if board.get("mode") == "crop-pan":
+        z0, z1 = float(board.get("startScale", 1.0)), float(board.get("endScale", 1.12))
+        motion = (f",zoompan=z='{z0}+({z1}-{z0})*on/{max(1,seg['plannedFrames']-1)}':"
+                  f"x='iw/2-iw/zoom/2':y='ih/2-ih/zoom/2':d=1:s={WIDTH}x{HEIGHT}:fps={FPS}")
+    vf = f"{crop}{FIT},pad={WIDTH}:{HEIGHT}:(ow-iw)/2:(oh-ih)/2:{CANVAS_COLOUR}{motion}{highlights},format=yuv420p[out]"
     if seg["kind"] == "image":
-        return (["-loop", "1", "-framerate", str(FPS), "-t", d, "-i", seg["source"]["absPath"]] + colour
-                + ["-filter_complex", f"[0:v]{FIT},format=rgba[img];[1:v][img]{PLACE},{FILTER_TAIL}"]
-                + ["-map", "[out]", "-frames:v", str(seg["plannedFrames"])] + ENCODE + ["seg.mp4"])
+        return (["-loop", "1", "-framerate", str(FPS), "-t", d, "-i", seg["source"]["absPath"]] + audio
+                + ["-filter_complex", f"[0:v]{vf};[1:a]apad=whole_dur={d}[aud]",
+                   "-map", "[out]", "-map", "[aud]", "-t", d, "-frames:v", str(seg["plannedFrames"])] + ENCODE + ["seg.mp4"])
     if seg["kind"] == "clip":
         iv = seg["sourceInterval"]
-        return (["-ss", f"{iv['startSeconds']:.3f}", "-t", d, "-i", seg["source"]["absPath"]] + colour
-                + ["-filter_complex", f"[0:v]fps={FPS},{FIT},setsar=1[img];[1:v][img]{PLACE},{FILTER_TAIL}"]
-                + ["-map", "[out]", "-frames:v", str(seg["plannedFrames"])] + ENCODE + ["seg.mp4"])
-    return (colour + ["-filter_complex", f"[0:v]{FILTER_TAIL}", "-map", "[out]",
-                      "-frames:v", str(seg["plannedFrames"])] + ENCODE + ["seg.mp4"])
+        return (["-ss", f"{iv['startSeconds']:.3f}", "-i", seg["source"]["absPath"]] + audio
+                + ["-filter_complex", f"[0:v]trim=duration={iv['endSeconds']-iv['startSeconds']},setpts=PTS-STARTPTS,fps={FPS},tpad=stop_mode=clone:stop_duration={d},{vf};[1:a]apad=whole_dur={d}[aud]",
+                   "-map", "[out]", "-map", "[aud]", "-t", d, "-frames:v", str(seg["plannedFrames"])] + ENCODE + ["seg.mp4"])
+    raise ValueError(f"unsupported scene kind {seg['kind']}")
 
 
 def render_segment(seg: dict, out: Path, ffmpeg: dict) -> dict:
@@ -512,7 +486,6 @@ def render_segment(seg: dict, out: Path, ffmpeg: dict) -> dict:
         cached["reused"] = True
         return cached
     work.mkdir(parents=True, exist_ok=True)
-    (work / "seg.ass").write_text(ass_document(seg["events"], seg["durationSeconds"]), encoding="utf-8")
     r = run_ffmpeg(ffmpeg["path"], ["-loglevel", "warning"] + segment_command(seg), cwd=work)
     stderr = " ".join(r.stderr.split())[-600:]
     if r.returncode != 0 or not mp4.is_file():
@@ -539,7 +512,7 @@ def write_srt(path: Path, segments: list[dict]) -> int:
         iv = s.get("reelInterval")
         if not iv:
             continue
-        text = s["caption"] if s["kind"] in ("image", "clip") else f"[{s['label']}] {s['caption']}".strip()
+        text = s.get("narration") or s.get("caption") or ""
         cues.append(f"{len(cues) + 1}\n{srt_time(iv['startSeconds'])} --> {srt_time(iv['endSeconds'])}\n{text}\n")
     path.write_text("\n".join(cues) + ("\n" if cues else ""), encoding="utf-8")
     return len(cues)
@@ -586,9 +559,79 @@ def refuse(reason: str, out: Path | None = None) -> int:
     return EXIT_REFUSED
 
 
+def cmd_storyboard_packet(a) -> int:
+    pres = load_json(Path(a.presentation))
+    if not isinstance(pres, dict) or not isinstance(pres.get("chapters"), list):
+        return refuse("presentation-unreadable: storyboard packet needs a presentation with chapters")
+    scenes = []
+    for ch in pres["chapters"]:
+        for i, cap in enumerate(ch.get("captions") or []):
+            scenes.append({"chapterId": ch.get("id"), "captionIndex": i, "mediaId": cap.get("mediaId"),
+                           "narration": cap.get("narration"), "storyboard": cap.get("storyboard"),
+                           "omitFromReel": False, "omissionReason": None, "narrationAudio": cap.get("narrationAudio"),
+                           "requiredReview": {"subjectVisible": True,
+                                              "addedText": "none | excluded-by-source-region"}})
+    with Run("evalreel-storyboard-packet", stage_source="counted") as run:
+        run.stage("scenes", total=len(scenes), unit="scenes")
+        write_json(Path(a.out), {"schemaVersion": 1, "presentationId": pres.get("presentationId"), "scenes": scenes})
+        run.advance(len(scenes)); run.artifact(str(Path(a.out))); run.tally(ok=len(scenes))
+    print(f"storyboard packet: {len(scenes)} scene(s); {a.out}")
+    return EXIT_OK
+
+
+def apply_storyboard_answers(pres: dict, path: Path) -> str | None:
+    answers = load_json(path)
+    if not isinstance(answers, dict) or not isinstance(answers.get("scenes"), list):
+        return "storyboard-answers-unreadable: expected an object with scenes[]"
+    if answers.get("presentationId") != pres.get("presentationId"):
+        return "storyboard-answers-foreign: presentationId does not match"
+    chapters = {c.get("id"): c for c in pres.get("chapters") or []}
+    for row in answers["scenes"]:
+        ch = chapters.get(row.get("chapterId")); idx = row.get("captionIndex")
+        caps = (ch or {}).get("captions") or []
+        if not isinstance(idx, int) or idx < 0 or idx >= len(caps):
+            return f"storyboard-answers-invalid: unknown scene {row.get('chapterId')}[{idx}]"
+        requested_mid = row.get("mediaId")
+        original_mid = caps[idx].get("mediaId")
+        if requested_mid != original_mid:
+            media = next((m for m in pres.get("media") or [] if m.get("id") == requested_mid and m.get("assessed") is True), None)
+            if not media:
+                return f"storyboard-answers-invalid: replacement media is not assessed for {row.get('chapterId')}[{idx}]"
+            if (ch or {}).get("kind") == "finding":
+                findings = [f for f in pres.get("findings") or [] if f.get("id") in ((ch or {}).get("findingIds") or [])]
+                if not any(requested_mid in (f.get("mediaIds") or []) for f in findings):
+                    return f"storyboard-answers-invalid: replacement media subject does not match finding {row.get('chapterId')}[{idx}]"
+            caps[idx]["mediaId"] = requested_mid
+        if isinstance(row.get("storyboard"), dict): caps[idx]["storyboard"] = row["storyboard"]
+        if row.get("narrationAudio"): caps[idx]["narrationAudio"] = row["narrationAudio"]
+        if row.get("narration"): caps[idx]["narration"] = " ".join(str(row["narration"]).split())
+        if row.get("omitFromReel") is True:
+            if (ch or {}).get("kind") in ("opening", "closing"):
+                return f"storyboard-answers-invalid: opening/closing cannot be omitted ({row.get('chapterId')}[{idx}])"
+            if not str(row.get("omissionReason") or "").strip():
+                return f"storyboard-answers-invalid: an omitted scene needs an omissionReason ({row.get('chapterId')}[{idx}])"
+            caps[idx]["omitFromReel"] = True
+            caps[idx]["omissionReason"] = row["omissionReason"]
+    return None
+
+
 def cmd_render(a) -> int:
-    pres_path = Path(a.presentation)
-    out = Path(a.out)
+    out = Path(a.out).resolve()
+    if not (os.environ.get("HOUSECARL_RUNLOG_DIR") or "").strip():
+        os.environ["HOUSECARL_RUNLOG_DIR"] = str(out / "runlog")
+    with Run("evalreel-render", stage_source="counted") as run:
+        run.stage("prepare", total=1, unit="presentations")
+        result = render_reel(a, run)
+        if result == EXIT_REFUSED:
+            run.refuse("The storyboard or narration prerequisites were refused.", result)
+        elif result != EXIT_OK:
+            run.fail("The reel did not pass output verification.", result)
+        return result
+
+
+def render_reel(a, run) -> int:
+    pres_path = Path(a.presentation).resolve()
+    out = Path(a.out).resolve()
     pres = load_json(pres_path)
     if not isinstance(pres, dict):
         return refuse(f"presentation-unreadable: {pres_path} is absent or not JSON")
@@ -596,6 +639,9 @@ def cmd_render(a) -> int:
         return refuse(f"schema-unsupported: presentation schemaVersion {pres.get('schemaVersion')!r}, expected 1")
     if not isinstance(pres.get("chapters"), list):
         return refuse("presentation-incomplete: no `chapters` list")
+    if a.storyboard:
+        err = apply_storyboard_answers(pres, Path(a.storyboard))
+        if err: return refuse(err, out)
     out.mkdir(parents=True, exist_ok=True)
     if not (os.environ.get("HOUSECARL_RUNLOG_DIR") or "").strip():
         os.environ["HOUSECARL_RUNLOG_DIR"] = str((out / "runlog").resolve())
@@ -605,17 +651,59 @@ def cmd_render(a) -> int:
                       "(ShareX, winget Gyan.FFmpeg, Program Files\\ffmpeg)", out)
     ffmpeg = ffmpeg_identity(found["exe"])
     ffmpeg["how"] = found["how"]
-    lacking = [f for f in ("ass", "drawbox", "overlay", "scale", "fps", "tile") if f not in ffmpeg["filters"]]
+    lacking = [f for f in ("drawbox", "scale", "fps", "tile") if f not in ffmpeg["filters"]]
     if lacking or not ffmpeg["libx264"]:
         return refuse(f"ffmpeg-incapable: {found['exe']} ({ffmpeg['version']}) lacks "
-                      f"{', '.join(lacking + ([] if ffmpeg['libx264'] else ['libx264']))}; the reel needs libass "
-                      f"captions and an H.264 encoder", out)
+                      f"{', '.join(lacking + ([] if ffmpeg['libx264'] else ['libx264']))}; the reel needs "
+                      f"scene-layout filters and an H.264 encoder", out)
     settings_reel = ((pres.get("settings") or {}).get("reel") or {})
     max_seconds = a.max_seconds if a.max_seconds is not None else settings_reel.get("maxSeconds")
     chapter_filter = {c.strip() for c in a.chapters.split(",") if c.strip()} if a.chapters else None
+    if chapter_filter:
+        required_bookends = {c.get("id") for c in pres["chapters"] if c.get("kind") in ("opening", "closing")}
+        if not required_bookends.issubset(chapter_filter):
+            return refuse("storyboard-refused: --chapters must include the opening and closing scenes", out)
     bundle_dir = resolve_bundle_dir(pres, pres_path, a.bundle)
 
-    segments, omitted = plan_segments(pres, ffmpeg, bundle_dir, chapter_filter, max_seconds)
+    try:
+        segments, omitted = plan_segments(pres, ffmpeg, bundle_dir, chapter_filter, max_seconds)
+    except (ValueError, KeyError, TypeError) as e:
+        return refuse(str(e), out)
+    if not segments or segments[0].get("chapterKind") != "opening":
+        return refuse("storyboard-refused: the first included scene must be the opening", out)
+    if segments[-1].get("chapterKind") != "closing":
+        return refuse("storyboard-refused: the last included scene must be the closing", out)
+    verdict = " ".join(str((pres.get("reader") or {}).get("verdict") or "").split())
+    if not verdict or not segments[0]["narration"].casefold().startswith(verdict.casefold()):
+        return refuse("narration-refused: the opening must start with reader.verdict verbatim", out)
+
+    audio_dir = out / "narration"
+    audio_dir.mkdir(parents=True, exist_ok=True)
+    for s in segments:
+        supplied = s.get("narrationAudio")
+        if supplied:
+            apath = (bundle_dir / supplied) if bundle_dir else Path(supplied)
+            method = "supplied"
+        else:
+            helper = HERE / "winrt-tts" / "Program.cs"
+            speech_key = sha256_text(s["narration"] + "\n" + (a.voice or "<default>") + "\n" + sha256_file(helper))[:12]
+            apath = audio_dir / f"{s['index']:03d}-{speech_key}.wav"
+            method = "Windows WinRT " + (a.voice or "default voice")
+            if not apath.is_file():
+                ok, detail = synthesize_windows(s["narration"], apath, a.voice, run.run_id)
+                if not ok:
+                    return refuse(f"narration-refused: {s['chapterId']}: {detail}", out)
+                method = detail
+        if not apath.is_file():
+            return refuse(f"narration-refused: {s['chapterId']}: audio file {apath} is absent", out)
+        ah = probe_header(ffmpeg["path"], apath)
+        if not ah.get("hasAudio") or not ah.get("durationSeconds"):
+            return refuse(f"narration-refused: {s['chapterId']}: audio file {apath} is not decodable audio", out)
+        s["audioPath"], s["audioSha256"], s["audioMethod"] = str(apath), sha256_file(apath), method
+        s["durationSeconds"] = max(s["durationSeconds"], round(ah["durationSeconds"] + .25, 3))
+        s["plannedFrames"] = int(round(s["durationSeconds"] * FPS))
+    if max_seconds is not None and sum(s["durationSeconds"] for s in segments) > max_seconds:
+        return refuse(f"storyboard-refused: synthesized narration exceeds the {max_seconds} s budget; shorten narration", out)
     planned_seconds = round(sum(s["durationSeconds"] for s in segments), 3)
     planned_frames = sum(s["plannedFrames"] for s in segments)
     if a.dry_run:
@@ -628,13 +716,15 @@ def cmd_render(a) -> int:
             print(f"  omitted {o['chapterId']}: {o['reason']}")
         return EXIT_OK
 
+    storyboard_hash = sha256_file(Path(a.storyboard)) if a.storyboard else None
     status_doc = {"schemaVersion": 1, "status": "failed", "presentationId": pres.get("presentationId"),
+                  "storyboardSha256": storyboard_hash,
                   "generatedUtc": utcnow(), "out": str(out), "bundleDir": str(bundle_dir),
                   "ffmpeg": {"path": ffmpeg["path"], "version": ffmpeg["version"], "how": ffmpeg["how"]},
                   "planned": {"seconds": planned_seconds, "frames": planned_frames, "segments": len(segments)},
                   "expected": None, "probe": None, "reused": 0, "rendered": 0, "missingCards": 0,
                   "omittedChapters": omitted, "segments": [], "outputs": {}, "errors": []}
-    with Run("evalreel-render", stage_source="counted") as run:
+    with contextlib.nullcontext(run):
         run.feature("segments", len(segments), "segments")
         run.feature("sourceSeconds", planned_seconds, "seconds")
         run.feature("chapters", len(pres.get("chapters") or []), "chapters")
@@ -698,6 +788,8 @@ def cmd_render(a) -> int:
                     checks.append(f"size {probe.get('width')}x{probe.get('height')}, {WIDTH}x{HEIGHT} planned")
                 if probe.get("fps") != FPS:
                     checks.append(f"fps {probe.get('fps')}, {FPS} planned")
+                if not probe.get("hasAudio") or not probe.get("audioDecoded"):
+                    checks.append("no independently decoded audio stream")
                 if checks:
                     failed = True
                     status_doc["errors"].append("reel.mp4 does not match the plan: " + "; ".join(checks))
@@ -712,9 +804,12 @@ def cmd_render(a) -> int:
                 "source": ({"path": s["source"]["path"], "sha256": s["source"]["sha256"]} if s["source"] else None),
                 "sourceInterval": s["sourceInterval"], "reelInterval": s.get("reelInterval"),
                 "caption": s["caption"], "label": s["label"], "evidenceIds": s["evidenceIds"],
+                "narration": s.get("narration"), "storyboard": s.get("storyboard"),
+                "audio": {"sha256": s.get("audioSha256"), "method": s.get("audioMethod")},
                 "status": s["status"], "error": s["error"], "captionTruncated": s["captionTruncated"],
                 "cacheKey": s.get("cacheKey"), "file": s.get("file")})
         map_doc = {"schemaVersion": 1, "presentationId": pres.get("presentationId"), "generatedUtc": utcnow(),
+                   "storyboardSha256": storyboard_hash,
                    "canvas": {"width": WIDTH, "height": HEIGHT, "fps": FPS, "imageRegionHeight": IMAGE_H,
                               "captionBandHeight": BAND_H, "layoutVersion": LAYOUT_VERSION},
                    "reel": ({"path": "reel.mp4", "sha256": probe.get("sha256"), "frames": probe.get("frames"),
@@ -726,6 +821,7 @@ def cmd_render(a) -> int:
         if probe and not failed:
             sheet = contact_sheet(out, reel, segments, ffmpeg)
             if sheet.get("error"):
+                failed = True
                 status_doc["errors"].append("contact sheet: " + sheet["error"])
 
         partial = any(s["status"] == "missing-media" for s in segments)
@@ -766,6 +862,10 @@ def cmd_render(a) -> int:
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(prog="evalreel", description=__doc__.split("\n\n")[0])
     sub = ap.add_subparsers(dest="cmd", required=True)
+    p = sub.add_parser("storyboard-packet", help="write the scenes that require human visual review")
+    p.add_argument("--presentation", required=True)
+    p.add_argument("--out", required=True)
+    p.set_defaults(fn=cmd_storyboard_packet)
     r = sub.add_parser("render", help="cut the reel of a presentation plan")
     r.add_argument("--presentation", required=True, help="OUT/presentation.json (schema 1)")
     r.add_argument("--out", required=True, help="output directory (reel.mp4, reel.srt, reel-map.json, "
@@ -776,6 +876,8 @@ def main(argv=None) -> int:
     r.add_argument("--bundle", default=None, help="where the plan's bundle-relative media paths resolve "
                                                   "(default: source.bundleDir, relative to the presentation)")
     r.add_argument("--ffmpeg", default=None, help="an explicit ffmpeg binary (first in the resolution order)")
+    r.add_argument("--voice", default=None, help="installed Windows System.Speech voice name (default: system voice)")
+    r.add_argument("--storyboard", default=None, help="reviewed storyboard packet; overlays visual direction in memory without changing presentation.json")
     r.add_argument("--dry-run", action="store_true", help="print the segment plan and render nothing")
     r.set_defaults(fn=cmd_render)
     a = ap.parse_args(argv)

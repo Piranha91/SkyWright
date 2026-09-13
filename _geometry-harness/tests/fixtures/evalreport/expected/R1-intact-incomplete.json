@@ -27,7 +27,7 @@
   "missingOrClosingCaptionsNameEveryRequiredMissingCheckId": true
  },
  "report": {
-  "mdContains": ["incomplete", "PASSES-COMPLETED-CHECKS", "DIFFERENTIAL-INERT"],
+  "mdContains": ["What still needs checking", "do not establish that the supplied setup improves"],
   "mdNamesEveryRequiredMissingCheckId": true,
   "mdNeverSaysEvaluationComplete": true,
   "print": {"status": "within-limit", "pagesAtMost": 8}

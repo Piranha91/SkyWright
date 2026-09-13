@@ -40,7 +40,7 @@
   "findingOfKindUnassessedNamesEachBasename": true
  },
  "report": {
-  "mdContains": ["identity asserted by the supplier from the arm's accepted receipt, not computed by the capturing tool", "fingerprint-mismatch", "kind-missing", "source-missing"],
+  "mdContains": ["Evidence and limits", "Image provenance"],
   "mdEmbedsTwoDistinctImagePathsThatExist": true,
   "evidenceIndexListsBothAssessedSha256": true,
   "print": {"status": "within-limit", "pagesAtMost": 8}

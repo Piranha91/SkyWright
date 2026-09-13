@@ -1,219 +1,82 @@
-{% set compact = p.layout == "compact" %}
-{% macro ev(ids) -%}
-{% set shown = ids[:p.evidenceTokensCompact] if p.layout == "compact" else ids %}
-{% for i in shown %}[{{ i }}](evidence-index.md#{{ i }}){% if not loop.last %} {% endif %}{% endfor %}{% if ids|length > shown|length %} +{{ ids|length - shown|length }} in the index{% endif %}
-{%- endmacro %}
-{% macro sample(f) -%}
-{% for r in f.shownRows %}`{{ r.formKey|md }}` {{ r.label|md|short(48) }} ({{ r.physical|md }}){% if not loop.last %}; {% endif %}{% endfor %}{% if f.rowsShown < f.rowsTotal %} - {{ f.rowsShown|n }} of {{ f.rowsTotal|n }} listed, all in [{{ f.id }}](evidence-index.md#{{ f.id }}){% endif %}
-{%- endmacro %}
-{% macro figures(f) -%}
-{% for m in f.figures %}
-{% if m.reportPath %}
-![{{ m.id }}: {{ (m.subject or {}).description or m.mediaKind }}]({{ m.reportPath }})
+# {{ p.reader.title }}
 
-*{{ m.id }} - {{ m.mediaKind }}, arm {{ (m.subject or {}).armId }}, state {{ m.state }}{% if (m.subject or {}).description %}: {{ (m.subject or {}).description }}{% endif %}; {% if m.fingerprintSource == "asserted" %}{{ p.assertedSentence }}{% else %}fingerprint {{ m.fingerprintSource }}{% endif %}.* {{ ev([m.id]) }}
+{{ p.reader.scopeLine }}
 
-{% else %}
-*{{ m.id }}: media file not supplied at render time.* {{ ev([m.id]) }}
+Evaluation record: {{ p.reader.context.evaluatedAt or "date not supplied" }}. States examined: {{ p.reader.context.statesExamined|join(", ") or "none named" }}. Additional states not examined: {{ p.reader.context.statesNotExamined|join(", ") or "none named" }}.
 
-{% endif %}
-{% endfor %}
-{%- endmacro %}
-{% macro limits(c) -%}
-{% set cut = c.limits|sentences(220) %}
-Can claim: {{ c.claim or "no claim row (a record fact, not a detector class)" }}. Limits: {% if cut %}{{ cut }}{% else %}in the index.{% endif %}
-{%- endmacro %}
-<a id="top"></a>
-# Evaluation report - {{ p.scope.targets|map(attribute="name")|join(", ") }}
+## Result
 
-**Plan** `{{ p.source.planId }}` - **presentation** `{{ p.presentationId }}` - generated {{ p.generatedUtc }} - mode {{ p.settings.mode }}{% if p.effective %} ({{ p.effective.layout }} layout, {{ p.effective.rowsPerGroup }} row(s) per group, {{ p.effective.figuresPerFinding }} figure(s) per finding){% endif %}
+> **{{ p.reader.verdict }}**
 
-> **{{ p.claimSentence }}**
-> Bundle integrity: {{ p.source.verifiedFiles|n }} file(s) hash to the manifest (bundle complete: {{ p.source.verify.bundleComplete }}). Evaluation completion is a separate state: complete {{ p.source.verify.evaluationComplete }}, claim `{{ p.source.verify.claim }}`.
-> Print target: {{ p.settings.page.size }}, {{ p.settings.page.marginMm }} mm margins, base {{ p.settings.page.baseFontPt }} pt{% if p.settings.maxPages %}, limit {{ p.settings.maxPages }} page(s){% else %}, no page limit (exhaustive){% endif %}; the measured page count and its status are recorded in presentation-manifest.json, never in the rendition itself.
-
-## Scope
-
-{% if compact %}
-- **target(s):** {% for t in p.scope.targets %}{{ t.name|md }} (`{{ (t.sha256 or "")[:12] }}`, {{ t.records|n }} records, provider {{ t.provider|md }}){% if not loop.last %}; {% endif %}{% endfor %}
-- **registry / clock:** registry version {{ p.scope.registryVersion }}; plan {{ p.scope.planCreatedUtc }}; run {{ p.scope.runStartedUtc }}; bundle {{ p.scope.bundleCreatedUtc }}
-- **states:** selected {{ p.scope.states.selected|join(", ") }}; not explored: {% if p.scope.states.notExplored %}{{ p.scope.states.notExplored|join(", ") }}{% else %}none named (the extent of world states is not enumerated){% endif %}
-- **completion:** complete {{ p.scope.completion.complete }}; claim `{{ p.scope.completion.claim }}`; {{ p.scope.completion.missingRequired|n }} required check-arm(s) without an accepted result{% if p.scope.completion.byCause %} ({% for k, v in p.scope.completion.byCause.items() %}{{ k }} {{ v|n }}{% if not loop.last %}, {% endif %}{% endfor %}){% endif %}; integrity {% if p.scope.integrity.ok %}no defects{% else %}{{ p.scope.integrity.defects|length }} defect(s){% endif %}
-- **explicit decisions:** --select {% if p.scope.explicitDecisions.select %}{{ p.scope.explicitDecisions.select|join(", ") }}{% else %}not used{% endif %}; --exclude {% if p.scope.explicitDecisions.exclude %}{{ p.scope.explicitDecisions.exclude }}{% else %}not used{% endif %}
-{% if p.scope.completion.unknownApplicability %}
-- **unknown applicability** (never read as not-applicable): {% for u in p.scope.completion.unknownApplicability %}`{{ u.checkId }}` - {{ u.evidence|md }}{% if not loop.last %}; {% endif %}{% endfor %}
-{% endif %}
-{% else %}
-| | |
-|---|---|
-| target(s) | {% for t in p.scope.targets %}{{ t.name|md }} (`{{ (t.sha256 or "")[:12] }}`, {{ t.records|n }} records, provider {{ t.provider|md }}){% if not loop.last %}; {% endif %}{% endfor %} |
-| registry / clock | registry version {{ p.scope.registryVersion }}; plan {{ p.scope.planCreatedUtc }}; run {{ p.scope.runStartedUtc }}; bundle {{ p.scope.bundleCreatedUtc }} |
-| states | selected {{ p.scope.states.selected|join(", ") }}; not explored: {% if p.scope.states.notExplored %}{{ p.scope.states.notExplored|join(", ") }}{% else %}none named (the extent of world states is not enumerated){% endif %} |
-| completion | complete {{ p.scope.completion.complete }}; claim `{{ p.scope.completion.claim }}`; {{ p.scope.completion.missingRequired|n }} required check-arm(s) without an accepted result{% if p.scope.completion.byCause %} ({% for k, v in p.scope.completion.byCause.items() %}{{ k }} {{ v|n }}{% if not loop.last %}, {% endif %}{% endfor %}){% endif %}; integrity {% if p.scope.integrity.ok %}no defects{% else %}{{ p.scope.integrity.defects|length }} defect(s){% endif %} |
-| explicit decisions | --select {% if p.scope.explicitDecisions.select %}{{ p.scope.explicitDecisions.select|join(", ") }}{% else %}not used{% endif %}; --exclude {% if p.scope.explicitDecisions.exclude %}{{ p.scope.explicitDecisions.exclude }}{% else %}not used{% endif %} |
-{% if p.scope.completion.unknownApplicability %}
-| unknown applicability | never read as not-applicable: {% for u in p.scope.completion.unknownApplicability %}`{{ u.checkId }}` - {{ u.evidence|md }}{% if not loop.last %}; {% endif %}{% endfor %} |
-{% endif %}
-{% endif %}
-
-### Arms
-
-{% for a in p.scope.arms %}
-- **{{ a.armId }}** ({{ a.kind }}): `{{ a.candidateFile }}`{% if a.pluginsAdded %}; adds {{ a.pluginsAdded|join(", ") }}{% endif %}{% if a.pluginsRemoved %}; removes {{ a.pluginsRemoved|join(", ") }}{% endif %}. Payload: {{ a.payloadNote }}. Loaded in game: {{ a.loadedInGameNote }}. Identity: {{ a.identity.pluginCount|n }} plugin(s) requested{% if a.identity.unstatedRows %}, {{ a.identity.unstatedRows|length }} with no stated hash ({% for u in a.identity.unstatedRows %}{{ u.name }}: {{ u.unstatedReason }}{% if not loop.last %}; {% endif %}{% endfor %}){% endif %}{% if a.identity.identityLimits %}, {{ a.identity.identityLimits|n }} identity limit(s) recorded on accepted receipts{% endif %}.
-{% if a.orderEvaluation and a.orderEvaluation.classification %}
-  Order evaluation: classification **{{ a.orderEvaluation.classification }}** over {{ a.orderEvaluation.probes|join(", ") }}; {% for probe, v in a.orderEvaluation.perProbe|dictsort %}{{ probe }} {{ v.verdict }} (repaired {{ v.repaired|n }}, reclassified {{ v.reclassified|n }}, created {{ v.created|n }}, new {{ v.newDefect|n }}, unmeasured {{ v.unmeasured|n }}){% if not loop.last %}; {% endif %}{% endfor %}.
-{% endif %}
+{% for item in p.reader.limitations %}- {{ item }}
 {% endfor %}
 
-{% for s in p.sections %}
-{% set fs = s.findings %}
-## {{ s.order }}. {{ s.title }}
+## Setups compared
 
-*{{ s.lead }}*
-
-{% if not fs %}
-{% if s.id == "regressions" %}
-No arm carries a new physical defect on any probe that ran. (A statement about the probes that ran, listed under the arms above, not about the checks that did not.)
-{% elif s.id == "missing" %}
-Every required check has an accepted result on every arm it applies to.
-{% elif s.id == "findings" %}
-No completed check reported a finding.
-{% elif s.id == "media" %}
-No media row is listed.
-{% else %}
-Nothing listed.
-{% endif %}
-
-{% elif s.id == "regressions" %}
-{% for f in fs %}
-<a id="{{ f.id }}"></a>
-### {{ f.id }} - {{ f.title }} ({{ f.armId }})
-
-{{ f.plain }} {{ ev(f.evidenceIds) }}
-
-{% if f.counts.diffLines %}
-```
-{% for l in f.counts.diffLines %}{{ l }}
-{% endfor %}```
-
-{% endif %}
-{% if f.shownRows %}
-| form key | label | physical | detail |
-|---|---|---|---|
-{% for r in f.shownRows %}
-| `{{ r.formKey|md }}` | {{ r.label|md }} | {{ r.physical|md }} | {{ r.physicalDetail|md|short(120) }} |
-{% endfor %}
-
-{% endif %}
-{% if f.rowsShown < f.rowsTotal %}
-*{{ f.rowsShown|n }} of {{ f.rowsTotal|n }} row(s) listed; every row is in [evidence-index.md#{{ f.id }}](evidence-index.md#{{ f.id }}).*
-
-{% endif %}
-{{ figures(f) }}
-{% endfor %}
-{% elif s.id == "missing" %}
-{% if compact %}
-{% for r in p.missingRows %}
-{% for i in r.findingIds %}<a id="{{ i }}"></a>{% endfor %}**{{ r.status }} ({{ r.count|n }})** - {{ (r.cause|sentences(160) or r.cause|short(160))|md }} - {% for c in r.checks %}`{{ c.checkId }}` ({{ c.arms|join(", ") }}){% if not loop.last %}; {% endif %}{% endfor %}
+{% for a in p.scope.arms %}- **{{ a.displayLabel }}**{% if a.pluginsAdded %}: adds {{ a.pluginsAdded|join(", ") }}{% endif %}{% if a.pluginsRemoved %}; removes {{ a.pluginsRemoved|join(", ") }}{% endif %}. {% for limit in a.readerLimits %}{{ limit }}{% if not loop.last %} {% endif %}{% endfor %}
 
 {% endfor %}
-{% else %}
-| status | check-arm(s) | checks (arms) | cause |
-|---|---|---|---|
-{% for r in p.missingRows %}
-| {{ r.status }} | {% for i in r.findingIds %}<a id="{{ i }}"></a>{% endfor %}{{ r.count|n }} | {% for c in r.checks %}`{{ c.checkId }}` ({{ c.arms|join(", ") }}){% if not loop.last %}; {% endif %}{% endfor %} | {{ (r.cause|sentences(160) or r.cause|short(160))|md }} |
-{% endfor %}
 
+{% set regressions = p.findings|selectattr("kind", "equalto", "regression")|list %}
+## Problems introduced by the supplied setup
+
+{% if regressions %}{% for f in regressions %}
+### {{ (p.reader.checkTitles or {}).get(f.checkId, f.title) }}
+
+**{{ f.readerArmLabel }}:** {{ f.readerPlain }} [See the full evidence and record list](evidence-index.md#{{ f.id }}).
+
+{% for m in f.figures %}{% if m.reportPath %}![{{ (m.subject or {}).description or "Evidence image" }}]({{ m.reportPath }})
+
+*Evidence image.* [Image provenance](evidence-index.md#{{ m.id }}).
+{% endif %}{% endfor %}{% endfor %}{% else %}The completed comparisons did not report a newly introduced physical defect.
 {% endif %}
-{% elif s.id == "findings" %}
+
+## What the checks found
+
 {% for cb in p.findingBlocks %}
-### {{ cb.checkId }} - {{ cb.title }}
+### {{ (p.reader.checkTitles or {}).get(cb.checkId, cb.title) }}
 
-*{{ limits(cb.check) }}*
-
-{% for part in cb.parts %}
-{% if part.indexOnly %}
-- **{{ part.armId }} / {{ part.part }}**: {{ part.findingsInPart|n }} conflict(s), {{ part.rowsTotal|n }} row(s) in {{ part.groups|length }} group(s) ({% for f in part.groups %}<a id="{{ f.id }}"></a>{{ f.id }}{% if not loop.last %}, {% endif %}{% endfor %}); verdict {{ part.verdict or "-" }}. Reverse-part rows repeat the baseline's and are listed in the evidence index only. {{ ev(part.evidenceIds) }}
-
-{% elif compact %}
-- **{{ part.armId }} / {{ part.part or "arm" }}**: {{ part.findingsInPart|n }} conflict(s) reported, {{ part.rowsTotal|n }} row(s); verdict {{ part.verdict or "-" }}; strength {{ part.strength }}; population {{ part.population }} / state {{ part.state }}. {{ ev(part.evidenceIds) }}
-{% for f in part.groups %}
-  - <a id="{{ f.id }}"></a>{{ f.id }} {% if f.counts.get("groupKind") %}{{ f.counts.groupKind|md }}: {{ f.counts.A|md }} x {{ f.counts.B|md }}{% elif f.part == "diff" %}differential ({{ f.counts.get("probe") }}): created {{ f.counts.get("created")|n }}, repaired {{ f.counts.get("repaired")|n }}, reclassified {{ f.counts.get("reclassified")|n }}{% else %}{{ f.counts.get("findings")|n }} finding(s), not a conflict file{% endif %} - {{ f.rowsTotal|n }} row(s){% if f.rowsTotal %}; sample: {{ sample(f) }}{% else %}; {{ f.plain|md|short(140) }}{% endif %}
-{% endfor %}
-
-{% for f in part.groups if f.figures %}
-{{ figures(f) }}
-{% endfor %}
-{% else %}
-- **{{ part.armId }} / {{ part.part or "arm" }}**: {{ part.findingsInPart|n }} conflict(s) reported, {{ part.rowsTotal|n }} row(s); verdict {{ part.verdict or "-" }}; strength {{ part.strength }}; population {{ part.population }} / state {{ part.state }}. {{ ev(part.evidenceIds) }}
-
-| finding | group | rows | sample rows (form key, label, physical) |
-|---|---|---|---|
-{% for f in part.groups %}
-| <a id="{{ f.id }}"></a>{{ f.id }} | {% if f.counts.get("groupKind") %}{{ f.counts.groupKind|md }}: {{ f.counts.A|md }} x {{ f.counts.B|md }}{% elif f.part == "diff" %}differential ({{ f.counts.get("probe") }}): created {{ f.counts.get("created")|n }}, repaired {{ f.counts.get("repaired")|n }}, reclassified {{ f.counts.get("reclassified")|n }}{% else %}{{ f.counts.get("findings")|n }} finding(s), not a conflict file{% endif %} | {{ f.rowsTotal|n }} | {% if f.rowsTotal %}{{ sample(f) }}{% else %}{{ f.plain|md|short(140) }}{% endif %} |
-{% endfor %}
-
-{% for f in part.groups if f.figures %}
-{{ figures(f) }}
-{% endfor %}
-{% endif %}
-{% endfor %}
-{% endfor %}
-{% elif s.id == "repairs" %}
-| finding | check | arm | probe | verdict | repaired | reclassified | created | unmeasured |
-|---|---|---|---|---|---|---|---|---|
-{% for f in fs %}
-| <a id="{{ f.id }}"></a>{{ f.id }} | `{{ f.checkId }}` | {{ f.armId }} | {{ f.counts.probe }} | {{ f.verdict }} | {{ f.counts.repaired|n }} | {{ f.counts.reclassified|n }} | {{ f.counts.created|n }} | {{ f.counts.unmeasured|n }} |
-{% endfor %}
-
-{% for f in fs %}
-{{ f.id }}: {{ f.plain }} {{ ev(f.evidenceIds) }}
-
-{% endfor %}
-{% elif s.id == "null" %}
-| finding | check | arm / part | coverage the probe declared (population: judged; unjudgeable) |
-|---|---|---|---|
-{% for f in fs %}
-| <a id="{{ f.id }}"></a>{{ f.id }} | `{{ f.checkId }}` | {{ f.armId }} / {{ f.part or "-" }} | {% if f.counts.coverageLines %}{% for c in f.counts.coverageLines %}{{ c.population|md }}: {{ c.judged|n }}; {{ c.unjudgeable|kv|md }}{% if not loop.last %} / {% endif %}{% endfor %}{% else %}{{ f.counts.coverage|n }} coverage line(s) declared{% endif %} {{ ev(f.evidenceIds[:1]) }} |
-{% endfor %}
-
-{% elif s.id == "catalogues" %}
-| finding | check | arm | rows | unit | evidence |
-|---|---|---|---|---|---|
-{% for f in fs %}
-| <a id="{{ f.id }}"></a>{{ f.id }} | `{{ f.checkId }}` - {{ f.title|md|short(60) }} | {{ f.armId }} | {{ f.counts.count|n }} | {{ f.counts.unit }} | {{ ev(f.evidenceIds[:1]) }} |
-{% endfor %}
-
-{% elif s.id == "media" %}
-{% for f in fs %}
-{% set tail %}{% if f.mediaIds %} {{ ev(f.mediaIds) }}{% endif %}{% endset %}
-- <a id="{{ f.id }}"></a>**{{ f.id }}** {{ f.plain }}{{ tail }}
-
-{% endfor %}
-{% else %}
-{% for f in p.unassessedOther %}
-{% set tail %}{% if f.evidenceIds %} {{ ev(f.evidenceIds[:1]) }}{% endif %}{% endset %}
-- <a id="{{ f.id }}"></a>**{{ f.id }}** {{ f.plain }}{{ tail }}
-
-{% endfor %}
-{% if p.unjudgeable %}
-| finding | check | arm | population | judged | unjudgeable |
-|---|---|---|---|---|---|
-{% for f in p.unjudgeable %}
-| <a id="{{ f.id }}"></a>{{ f.id }} | `{{ f.checkId }}` | {{ f.armId }} | {{ f.counts.population|md }} | {{ f.counts.judged|n }} | {{ f.counts.unjudgeable|kv|md }} |
-{% endfor %}
+{% if (p.reader.checkExplanations or {}).get(cb.checkId) %}{{ p.reader.checkExplanations.get(cb.checkId) }}
 
 {% endif %}
+
+{% for part in cb.parts if not part.indexOnly %}{% for f in part.groups if f.readerRelevant %}- **{{ f.readerArmLabel }}:** {{ f.readerPlain }} [Full evidence](evidence-index.md#{{ f.id }}).
+{% endfor %}{% for f in part.groups if f.readerRelevant %}{% for m in f.figures %}{% if m.reportPath %}
+![{{ (m.subject or {}).description or "Evidence image" }}]({{ m.reportPath }})
+
+*Evidence image.* [Image provenance](evidence-index.md#{{ m.id }}).
+{% endif %}{% endfor %}{% endfor %}{% endfor %}{% endfor %}
+
+## Changes made by the supplied setup
+
+{% set changes = p.findings|selectattr("kind", "in", ["repaired", "reclassified"])|list %}{% if changes %}{% for f in changes %}- **{{ f.readerArmLabel }} — {{ (p.reader.checkTitles or {}).get(f.checkId, 'Additional check') }}:** {{ f.readerPlain }} [Full evidence](evidence-index.md#{{ f.id }}).
+{% endfor %}{% else %}No measured repair or ownership change was recorded.
 {% endif %}
+
+## What still needs checking
+
+{% if p.scope.completion.missingRequired %}{% for row in p.reader.missingSummary %}- **{{ row.reason|capitalize }}:** {{ row.subjects|join("; ") }}.
 {% endfor %}
-## Omissions
-
-{% if p.omissions %}
-{{ p.omissions|length }} abridgement(s), each pointing into the evidence index: {% for o in p.omissions %}{{ o.what|short(80) }} ([index]({{ o.where }})){% if not loop.last %}; {% endif %}{% endfor %}.
-{% else %}
-Nothing was abridged: every row of every finding is listed above.
+The exact missing checks and recorded reasons are in the [evidence index](evidence-index.md#missing-results).
+{% else %}Every required comparison has an accepted result.
 {% endif %}
 
-## Evidence
+## Checks that found no problem
 
-Every `E-` token links into [evidence-index.md](evidence-index.md), which lists every finding with all of its rows, every evidence file with its sha256, and every media row. `M-` tokens are media rows. The bundle is the authority; this report prints nothing the bundle does not carry. Compiled by evalreport {{ p.compiler.version }} (`{{ (p.compiler.sourceSha256["evalreport.py"] or "")[:12] }}`) from bundle plan `{{ p.source.planId }}` (manifest `{{ (p.source.manifestSha256 or "")[:12] }}`, disposition `{{ (p.source.dispositionSha256 or "")[:12] }}`).
+{% if p.reader.nullSummary %}{% for item in p.reader.nullSummary %}- {{ item }}.
+{% endfor %}
+{% else %}No completed no-finding check is recorded.
+{% endif %}
+
+## Reference information collected
+
+{% if p.reader.catalogueSummary %}These checks collected reference information rather than reporting defects: {{ p.reader.catalogueSummary|join("; ") }}.
+{% else %}No catalogue-only result is recorded.
+{% endif %}
+
+## Evidence and limits
+
+{% for item in p.reader.get('otherLimits', []) %}- {{ item }}
+{% endfor %}
+
+The [evidence index](evidence-index.md) contains the exact check names, setup identifiers, result codes, confidence labels, record keys, hashes, omitted rows, and compiler provenance. The bundle remains the authority for every statement in this report.

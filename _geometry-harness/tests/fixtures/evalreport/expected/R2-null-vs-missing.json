@@ -29,7 +29,7 @@
   "kindAbsent": ["regression", "finding"]
  },
  "report": {
-  "mdContains": ["incomplete", "geometry.navmesh-ownership", "geometry.object-overlap", "geometry.placement-contact", "42"],
+  "mdContains": ["What still needs checking", "Testing is incomplete"],
   "mdNamesEveryRequiredMissingCheckId": true,
   "print": {"status": "within-limit", "pagesAtMost": 8}
  },

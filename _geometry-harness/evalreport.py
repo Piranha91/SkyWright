@@ -54,7 +54,7 @@ EVALRUN = HERE / "evalrun.py"
 
 PRESENTATION_SCHEMA = 1
 BUNDLE_SCHEMA = 2
-COMPILER_VERSION = "1"
+COMPILER_VERSION = "2"
 EXIT_OK = 0
 EXIT_REFUSED_INPUT = 2
 EXIT_REFUSED_RESULT = 3
@@ -235,7 +235,7 @@ def print_pdf(browser: Path, html: Path, pdf: Path, timeout: int = 180) -> tuple
     try:
         argv = [str(browser), "--headless=new", "--disable-gpu", "--no-pdf-header-footer",
                 "--no-first-run", "--no-default-browser-check", "--disable-extensions",
-                f"--user-data-dir={profile}", f"--print-to-pdf={pdf}", html.resolve().as_uri()]
+                f"--user-data-dir={profile}", f"--print-to-pdf={pdf.resolve()}", html.resolve().as_uri()]
         try:
             r = subprocess.run(argv, capture_output=True, text=True, timeout=timeout)
         except subprocess.TimeoutExpired:
@@ -734,6 +734,54 @@ def compile_plan(bundle_dir: Path, verify: dict, settings: dict, pr: dict, bundl
     for i, f in enumerate(findings, 1):
         f["id"] = f"F-{i:03d}"
         f["priority"] = sec(f)
+        c = f.get("counts") or {}
+        labels = (pr.get("reader") or {}).get("kindLabels") or {}
+        group_kind = str(c.get("groupKind") or "")
+        kind_phrases = (pr.get("reader") or {}).get("kindPhrases") or {}
+
+        def noun(count, singular, plural=None):
+            try:
+                one = int(count or 0) == 1
+            except (TypeError, ValueError):
+                one = False
+            return singular if one else (plural or singular + "s")
+
+        count_rows = int(f.get("rowsTotal") or 0)
+        phrases = kind_phrases.get(group_kind) or {}
+        group_label = (phrases.get("singular") if count_rows == 1 else phrases.get("plural")) or labels.get(
+            group_kind, noun(count_rows, "reported conflict"))
+        if f["kind"] == "regression":
+            new_count = int(c.get("newDefect") or 0)
+            repaired_count = int(c.get("repaired") or 0)
+            check_phrase = ((pr.get("reader") or {}).get("regressionCheckPhrases") or {}).get(
+                f.get("checkId"), "completed check")
+            f["readerPlain"] = (f"The supplied setup introduced {fmt_n(new_count)} new "
+                                f"{noun(new_count, 'problem')} in the {check_phrase}. It also repaired "
+                                f"{fmt_n(repaired_count)} existing {noun(repaired_count, 'problem')}; "
+                                "those repairs do not cancel the new problem.")
+        elif f["kind"] == "finding" and c.get("A") and c.get("B"):
+            sample = next((r.get("label") for r in f.get("rows") or [] if r.get("label")
+                           and " tris" not in str(r.get("label")).lower()
+                           and not re.match(r"^[0-9a-f]{6}:", str(r.get("label")), re.I)), None)
+            verb = "shows" if count_rows == 1 else "show"
+            f["readerPlain"] = (f"{fmt_n(count_rows)} {noun(count_rows, 'record')} {verb} {group_label} between "
+                                f"{c.get('A')} and {c.get('B')}" + (f", including {sample}" if sample else "") + ".")
+        elif f["kind"] == "finding":
+            finding_count = int(c.get("findings") or c.get("created") or count_rows or 0)
+            f["readerPlain"] = (f"This check reported {fmt_n(finding_count)} "
+                                f"{noun(finding_count, 'finding')} for this setup. The exact result is in the evidence index.")
+        elif f["kind"] in ("repaired", "reclassified"):
+            repaired_count = int(c.get("repaired") or 0)
+            reclassified_count = int(c.get("reclassified") or 0)
+            f["readerPlain"] = (f"The supplied setup repaired {fmt_n(repaired_count)} existing "
+                                f"{noun(repaired_count, 'problem')} and changed which mod owns "
+                                f"{fmt_n(reclassified_count)} still-present {noun(reclassified_count, 'problem')}.")
+        elif f["kind"] == "null":
+            f["readerPlain"] = "This completed check found no problem in the records it examined."
+        elif f["kind"] == "catalogue":
+            f["readerPlain"] = f"The check recorded {fmt_n(c.get('count'))} {c.get('unit') or 'item(s)'} for reference."
+        else:
+            f["readerPlain"] = "Details are recorded in the evidence index."
     gi = 0
     for key in sorted(groups):
         gi += 1
@@ -787,13 +835,26 @@ def compile_plan(bundle_dir: Path, verify: dict, settings: dict, pr: dict, bundl
         for rc in b.receipts.values():
             if rc.get("armId") == arm_id and (rc.get("validation") or {}).get("accepted"):
                 limits += len((rc.get("validation") or {}).get("identityLimits") or [])
-        arms_out.append({"armId": arm_id, "kind": kinds.get(arm_id), "candidateFile": da.get("candidateFile") or pa.get("candidateFile"),
+        added_label = ", ".join(added)
+        display_label = ("Measured load order" if arm_id == "baseline" else
+                         (("With supplied patch" if kinds.get(arm_id) == "supplied-combination" else "Tested alternative setup") +
+                          (f": {added_label}" if added_label else "")))
+        payload = (da.get("payload") or pa.get("payload") or {})
+        setup_limits = []
+        if payload.get("espOnly"):
+            setup_limits.append("Only the plugin was included; its meshes, scripts and installer choices were not tested.")
+        arms_out.append({"armId": arm_id, "kind": kinds.get(arm_id), "displayLabel": display_label,
+                         "candidateFile": da.get("candidateFile") or pa.get("candidateFile"),
                          "pluginsAdded": added, "pluginsRemoved": removed,
                          "payloadNote": (da.get("payload") or pa.get("payload") or {}).get("note"),
                          "espOnly": (da.get("payload") or pa.get("payload") or {}).get("espOnly"),
                          "loadedInGameNote": da.get("loadedInGameNote") or pa.get("loadedInGameNote"),
+                         "readerLimits": setup_limits,
                          "orderEvaluation": da.get("orderEvaluation"),
                          "identity": {"pluginCount": len(names), "unstatedRows": unstated, "identityLimits": limits}})
+    arm_labels = {a["armId"]: a["displayLabel"] for a in arms_out}
+    for f in findings:
+        f["readerArmLabel"] = arm_labels.get(f.get("armId"), "Measured setup")
     missing = ev.get("missing") or []
     by_cause = collections.Counter(str(m.get("status")) for m in missing)
     run_ids = b.manifest.get("runIds") or []
@@ -819,6 +880,98 @@ def compile_plan(bundle_dir: Path, verify: dict, settings: dict, pr: dict, bundl
     claim = ev.get("claim")
     claim_sentence = bind((pr.get("claimSentences") or {}).get(claim or "incomplete", "{claim}"),
                           {"missingRequired": len(missing), "claim": claim})
+    target_names = [t["name"] for t in targets if t.get("name")]
+    target_set = {str(x).lower() for x in target_names}
+    supplied = sorted({n for a in arms_out if a.get("kind") == "supplied-combination" for n in a.get("pluginsAdded") or []})
+    comparison_weight = collections.Counter()
+    for f in findings:
+        c = f.get("counts") or {}
+        pair = [str(x) for x in (c.get("A"), c.get("B")) if x]
+        if not any(x.lower() in target_set for x in pair):
+            continue
+        for name in pair:
+            if name.lower() not in target_set and name not in supplied:
+                comparison_weight[name] += max(1, int(f.get("rowsTotal") or 0))
+    comparison_names = [n for n, _ in sorted(comparison_weight.items(), key=lambda x: (-x[1], x[0].lower()))]
+    reader_scope_names = target_set | {x.lower() for x in supplied}
+    for f in findings:
+        c = f.get("counts") or {}
+        pair = {str(x).lower() for x in (c.get("A"), c.get("B")) if x}
+        f["readerRelevant"] = not pair or bool(pair & reader_scope_names)
+    compared = ", ".join(comparison_names) if comparison_names else "the measured load order"
+    patch_text = ", ".join(supplied) if supplied else "no separate patch plugin"
+    scope_line = (f"This report evaluates {', '.join(target_names) or 'the target mod'} within the measured load order. "
+                  + (f"The main recorded conflicts involving the target are with {compared}. " if comparison_names else
+                     "No comparison mod was identified by the recorded conflicts. ")
+                  + (f"The supplied patch evaluated is {patch_text}." if supplied else
+                     "No separate patch plugin was included in the comparison."))
+    candidate_orders = [a.get("orderEvaluation") or {} for a in arms_out if a.get("kind") != "baseline"]
+    has_regression = any(o.get("regression") for o in candidate_orders)
+    repaired_total = sum(int(v.get("repaired") or 0) for o in candidate_orders for v in (o.get("perProbe") or {}).values())
+    has_alternative = any(a.get("kind") != "baseline" for a in arms_out)
+    has_completed_result = any(f.get("kind") in ("regression", "finding", "repaired", "reclassified", "null", "catalogue")
+                               for f in findings)
+    if has_regression:
+        verdict = (("The supplied setup resolves some measured conflicts, but it also introduces a new defect in a check that ran."
+                    if repaired_total else
+                    "The supplied setup introduces a new defect in a check that ran."))
+    elif repaired_total:
+        verdict = "The supplied setup resolves some measured conflicts and no new defect was reported by the checks that ran."
+    elif claim == "no-findings-in-completed-checks":
+        verdict = "The completed checks found no problem in what they examined."
+    elif has_alternative:
+        verdict = "The completed checks do not establish that the supplied setup improves the target mod."
+    elif any(f.get("kind") == "finding" for f in findings):
+        verdict = "The completed checks found conflicts involving the target mod; no alternative setup was supplied for comparison."
+    elif has_completed_result:
+        verdict = "The completed checks found no problem in what they examined; no alternative setup was supplied for comparison."
+    else:
+        verdict = "The available results cannot determine whether the target mod has a problem in the measured setup."
+    limitations = []
+    if missing:
+        limitations.append("Testing is incomplete; outstanding areas are listed below.")
+    if not any(m.get("assessed") and m.get("mediaKind") == "game-video" for m in media):
+        limitations.append("No matching play-time evidence was supplied, so this does not show what happened during play.")
+    if any(a.get("espOnly") for a in arms_out):
+        limitations.append("The supplied patch was tested as a plugin only; its meshes, scripts and installer choices were not included.")
+    reader_data = pr.get("reader") or {}
+    scope_limits = reader_data.get("scopeLimits") or {}
+    other_limits = [scope_limits.get(x.get("extent"), "An additional area could not be assessed; see the full scope in the evidence index.")
+                    for x in un.get("scopeUnmeasured") or [] if isinstance(x, dict)]
+    if un.get("unjudgeablePopulations"):
+        other_limits.append("Some objects could not be assessed because the needed geometry or links were unavailable. Their counts and reasons are in the evidence index.")
+    if unassessed_media:
+        other_limits.append("Some supplied images or clips could not be matched to this evaluation and were excluded from the evidence shown.")
+    check_titles = reader_data.get("checkTitles") or {}
+    reason_labels = reader_data.get("missingReasons") or {}
+    missing_summary = []
+    for status in sorted({str(m.get("status")) for m in missing}):
+        subjects = sorted({check_titles.get(str(m.get("checkId")), b.check_title(m.get("checkId")))
+                           for m in missing if str(m.get("status")) == status})
+        missing_summary.append({"reason": reason_labels.get(status, "has no accepted result"), "subjects": subjects})
+    null_summary = []
+    for f in findings:
+        if f.get("kind") != "null":
+            continue
+        subject = check_titles.get(str(f.get("checkId")), f.get("title"))
+        context = ("the comparison found no additional issue" if f.get("part") == "diff" else
+                   "no problem was found in the records examined")
+        null_summary.append(f"{subject} — {f.get('readerArmLabel')}: {context}")
+    null_summary = sorted(set(null_summary))
+    catalogue_summary = sorted({check_titles.get(str(f.get("checkId")), f.get("title"))
+                                for f in findings if f.get("kind") == "catalogue"})
+    title_subject = ", ".join(target_names) or "Target mod"
+    title_compared = ", ".join(comparison_names[:2])
+    reader = {"title": title_subject + (f" with {title_compared}" if title_compared else "") + " — patch review",
+              "scopeLine": scope_line, "verdict": verdict, "limitations": limitations,
+              "comparisonMods": comparison_names, "suppliedPatches": supplied, "checkTitles": check_titles,
+              "otherLimits": list(dict.fromkeys(other_limits)),
+              "checkExplanations": reader_data.get("checkExplanations") or {},
+              "missingSummary": missing_summary, "nullSummary": null_summary,
+              "catalogueSummary": catalogue_summary,
+              "context": {"evaluatedAt": disp.get("createdUtc") or b.manifest.get("createdUtc"),
+                          "statesExamined": (b.plan.get("states") or {}).get("selected") or [],
+                          "statesNotExamined": (b.plan.get("states") or {}).get("notExplored") or []}}
     # the `missing` chapter names every required missing check id, one caption per status group
     missing_by_status: dict = collections.OrderedDict()
     for m in missing:
@@ -860,7 +1013,7 @@ def compile_plan(bundle_dir: Path, verify: dict, settings: dict, pr: dict, bundl
         return secs
 
     # one `finding` chapter per (checkId, armId, part) block; one caption per qualified media item bound to the
-    # block, else a single text caption with mediaId null (the reel draws its "no qualified media" card)
+    # block, else an unbound scene that needs qualified media or an explicit reviewed omission.
     for (check_id, arm_id, part), fs in ordered_blocks:
         n += 1
         mids = []
@@ -873,15 +1026,16 @@ def compile_plan(bundle_dir: Path, verify: dict, settings: dict, pr: dict, bundl
             m = media_by_id[mid]
             owner = next(f for f in fs if mid in (f.get("mediaIds") or []))
             desc = str((m.get("subject") or {}).get("description") or "").strip()
-            captions.append({"text": (desc + " " if desc else "") + owner["plain"], "evidenceIds": owner.get("evidenceIds") or [],
-                             "mediaId": mid})
+            spoken = (desc + " " if desc else "") + owner["plain"]
+            captions.append({"text": spoken, "narration": owner["readerPlain"], "storyboard": {"mode": "full-frame"},
+                             "evidenceIds": owner.get("evidenceIds") or [], "mediaId": mid})
         if not captions:
             head = fs[0]
             text = head["plain"] if len(fs) == 1 else (
                 f"{check_id} on arm {arm_id} ({part or 'arm'}): {len(fs)} conflict group(s), "
                 f"{fmt_n(sum(x['rowsTotal'] for x in fs))} row(s). " + head["plain"])
-            captions.append({"text": text, "evidenceIds": sorted({e for f in fs for e in (f.get("evidenceIds") or [])}),
-                             "mediaId": None})
+            captions.append({"text": text, "narration": head["readerPlain"], "storyboard": {"mode": "full-frame"},
+                             "evidenceIds": sorted({e for f in fs for e in (f.get("evidenceIds") or [])}), "mediaId": None})
         chapters.append({"id": f"C-{n:02d}", "kind": "finding", "title": f"{fs[0]['title']} - {arm_id} / {part or 'arm'}",
                          "findingIds": [f["id"] for f in fs], "mediaIds": mids, "captions": captions,
                          "plannedSeconds": sum(seconds_for(c["mediaId"]) for c in captions)})
@@ -912,6 +1066,26 @@ def compile_plan(bundle_dir: Path, verify: dict, settings: dict, pr: dict, bundl
                                    + " Not assessed: " + ", ".join(sorted({f.get("area") or "" for f in findings if f["kind"] == "unassessed"})) + ".",
                                    "evidenceIds": [], "mediaId": None}],
                      "plannedSeconds": reel.get("closingSeconds", 8)})
+    for chapter in chapters:
+        for i, caption in enumerate(chapter.get("captions") or []):
+            if chapter["kind"] == "opening":
+                caption["narration"] = " ".join([verdict, scope_line] + limitations)
+            elif chapter["kind"] == "closing":
+                caption["narration"] = " ".join(limitations + ["Review the findings and unfinished checks in the report before choosing this setup."])
+            elif chapter["kind"] == "missing":
+                status = sorted(missing_by_status)[i]
+                subjects = sorted({check_titles.get(str(m.get("checkId")), "an additional check")
+                                   for m in missing_by_status[status]})
+                caption["narration"] = reason_labels.get(status, "Still needs checking").capitalize() + ": " + "; ".join(subjects) + "."
+            elif chapter["kind"] == "comparison":
+                caption["narration"] = " ".join(f["readerPlain"] for f in findings
+                                                 if f["id"] in chapter["findingIds"] and f["kind"] in ("regression", "repaired", "reclassified")) or "The completed checks do not establish an improvement for this setup."
+            caption.setdefault("narration", "Review this scene alongside the findings in the report.")
+            storyboard = caption.setdefault("storyboard", {})
+            storyboard.setdefault("mode", "full-frame")
+            storyboard.setdefault("cleanFrame", False)
+            storyboard.setdefault("needsAuthorReview", True)
+            storyboard.setdefault("visualReview", {"addedText": "none", "subjectVisible": False})
 
     plan = {
         "schemaVersion": PRESENTATION_SCHEMA,
@@ -928,6 +1102,15 @@ def compile_plan(bundle_dir: Path, verify: dict, settings: dict, pr: dict, bundl
         "compiler": {"name": "evalreport", "version": COMPILER_VERSION, "sourceSha256": compiler_hashes()},
         "settings": settings,
         "scope": scope_out,
+        "reader": reader,
+        "reelNarration": {
+            "opening": {"mediaId": None, "narration": verdict + " " + scope_line,
+                        "storyboard": {"mode": "full-frame", "cleanFrame": False, "needsAuthorReview": True,
+                                       "visualReview": {"addedText": "none", "subjectVisible": False}}},
+            "closing": {"mediaId": None, "narration": " ".join(limitations),
+                        "storyboard": {"mode": "full-frame", "cleanFrame": False, "needsAuthorReview": True,
+                                       "visualReview": {"addedText": "none", "subjectVisible": False}}}
+        },
         "claimSentence": claim_sentence,
         "findings": findings,
         "groups": [groups[k] for k in sorted(groups)],
@@ -1195,6 +1378,8 @@ def load_presentation(path: Path):
     for k in ("findings", "settings", "source", "scope", "evidence"):
         if k not in plan:
             return None, f"presentation-incomplete: no `{k}`"
+    if not isinstance(plan.get("reader"), dict):
+        return None, "presentation-needs-replan: run evalreport plan again to add the modder-facing summary"
     return plan, ""
 
 
@@ -1626,8 +1811,17 @@ def cmd_narrate_apply(a) -> int:
                     refused.append({"id": fid, **x})
             else:
                 f.setdefault("templatePlain", f["plain"])
+                old_plain = f["plain"]
                 f["plain"] = text.strip()
+                f["readerPlain"] = text.strip()
                 f["narrated"] = True
+                for chapter in plan.get("chapters") or []:
+                    if f.get("id") not in (chapter.get("findingIds") or []):
+                        continue
+                    for caption in chapter.get("captions") or []:
+                        for key in ("text", "narration"):
+                            if old_plain in str(caption.get(key) or ""):
+                                caption[key] = str(caption[key]).replace(old_plain, text.strip())
                 accepted += 1
             r.advance(1)
         plan["narration"] = {"source": f"answers:{sha256_file(Path(a.answers))[:12]}", "validated": True,

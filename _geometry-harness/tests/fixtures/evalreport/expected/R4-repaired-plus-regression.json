@@ -30,7 +30,7 @@
  "repairedFindingsAllHavePriorityGreaterThanRegression": true,
  "regressionCountIsOne": true,
  "report": {
-  "mdContains": ["REGRESSION", "DIFFERENTIAL-NEUTRAL", "DIFFERENTIAL-VERIFIED", "F-001"],
+  "mdContains": ["Problems introduced by the supplied setup", "introduced 1 new problem in the navmesh check", "Full evidence"],
   "firstFindingIdMentionedIsF001": true,
   "f001AppearsBeforeAnyRepairedFindingId": true,
   "mdDoesNotContain": ["on balance"],

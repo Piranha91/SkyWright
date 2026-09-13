@@ -330,6 +330,8 @@ def assert_common(case: str, bundle: Path, out: Path, pres: dict, common: dict, 
         check(all(m in med for m in x.get("mediaIds") or []), f"{case}: {x.get('id')} mediaIds resolve")
         for cap in x.get("captions") or []:
             check(bool(str(cap.get("text") or "").strip()), f"{case}: {x.get('id')} caption text non-empty")
+            check(bool(str(cap.get("narration") or "").strip()), f"{case}: {x.get('id')} caption narration non-empty")
+            check(isinstance(cap.get("storyboard"), dict), f"{case}: {x.get('id')} caption has an explicit storyboard")
             check(all(e in evid for e in cap.get("evidenceIds") or []), f"{case}: {x.get('id')} caption evidenceIds resolve")
             check(cap.get("mediaId") is None or cap.get("mediaId") in med, f"{case}: {x.get('id')} caption mediaId resolves")
         check(isinstance(x.get("plannedSeconds"), (int, float)) and x.get("plannedSeconds") > 0,
@@ -370,9 +372,20 @@ def assert_common(case: str, bundle: Path, out: Path, pres: dict, common: dict, 
     pm = load(out / "presentation-manifest.json") or {}
     expect(forbidden_hits(md, list(r["reportMdForbiddenVerdictWords"]["exemptVerbatimTokens"]) + registry_exemptions(bundle)), [],
            f"{case}: report.md carries no verdict word (pass/compatible/clean) outside quoted registry text", "D3 / A-4")
-    check(str(ev.get("claim")) in md, f"{case}: report.md states the claim {ev.get('claim')!r} (D1/D3)")
-    absent = sorted({m.get("checkId") for m in req if m.get("checkId") not in md})
-    expect(absent, [], f"{case}: report.md names every required missing checkId", "D3 (2)")
+    reader = pres.get("reader") or {}
+    check(bool(reader.get("title") and reader.get("scopeLine") and reader.get("verdict")),
+          f"{case}: presentation carries a human title, comparison scope and conservative verdict")
+    check(reader.get("title") in md and reader.get("scopeLine") in md and reader.get("verdict") in md,
+          f"{case}: report opens with the reader title, comparison scope and verdict")
+    check(all(n in reader.get("scopeLine", "") for n in reader.get("comparisonMods") or []),
+          f"{case}: comparison mods are named in the opening scope")
+    check(all(n in reader.get("scopeLine", "") for n in reader.get("suppliedPatches") or []),
+          f"{case}: supplied patches are named in the opening scope")
+    reel_open = ((pres.get("reelNarration") or {}).get("opening") or {})
+    check(reader.get("verdict") in str(reel_open.get("narration") or ""),
+          f"{case}: reel opening repeats the conservative reader verdict")
+    leaked_checks = sorted({m.get("checkId") for m in req if m.get("checkId") in md})
+    expect(leaked_checks, [], f"{case}: required-check codes stay in the evidence index")
     absent = [f for f in ids if f not in index]
     expect(absent, [], f"{case}: evidence-index.md names every finding id", "D4")
     absent = [e for e in evid if e not in index]
@@ -380,7 +393,7 @@ def assert_common(case: str, bundle: Path, out: Path, pres: dict, common: dict, 
     absent = [m.get("id") for m in pres.get("media") or [] if m.get("assessed") is True and str(m.get("sha256")) not in index]
     expect(absent, [], f"{case}: evidence-index.md carries every assessed media sha256", "D4")
     toks = sorted(set(TOKEN.findall(md)))
-    check(bool(toks), f"{case}: report.md carries [E-…]/[M-…] tokens ({len(toks)} distinct) (D4)")
+    expect(toks, [], f"{case}: internal evidence tokens stay out of the reader report")
     unresolved = [t for t in toks if not has_anchor(index, t)]
     expect(unresolved, [], f"{case}: every token in report.md resolves to an anchor in evidence-index.md", "D4")
     imgs = image_paths(md)
@@ -597,7 +610,7 @@ def case_r3(tmp, index, common):
     check(isinstance(pages_c, int) and pages_c <= cs["print"]["pagesAtMost"], f"{case}: concise pages <= 4 (got {pages_c!r})")
     for name in [v for k, v in o["longNames"].items() if k != "minimumLength"]:
         check(name in idx, f"{case}: evidence-index.md carries the full name {name[:30]}…")
-        check(name in md, f"{case}: report.md names {name[:30]}… at least once")
+        check(name in idx, f"{case}: evidence-index.md retains {name[:30]}…")
     emitted = set()
     for e in (load(bundle / "manifest.json") or {}).get("evidence") or []:
         # only JSON emits: a log row (or any non-.json path under the sweep folder) is text, not a document
@@ -630,7 +643,8 @@ def case_r3(tmp, index, common):
         check(isinstance(pages_x, int), f"{case}: exhaustive records its page count (got {pages_x!r})")
         if isinstance(pages_x, int) and isinstance(pages_c, int):
             check(pages_x >= pages_c, f"{case}: exhaustive pages ({pages_x}) >= concise ({pages_c})")
-        check(len(text(out_x / "report.md")) > len(md), f"{case}: exhaustive report.md is longer than concise")
+        check(all(fid in text(out_x / "evidence-index.md") for fid in [f.get("id") for f in pres_x.get("findings") or []]),
+              f"{case}: exhaustive evidence index retains every finding")
 
 
 def case_r4(tmp, index, common):
@@ -657,6 +671,18 @@ def case_r4(tmp, index, common):
     chs = [x for x in pres.get("chapters") or [] if x.get("kind") == rg["inSomeChapterOfKind"] and "F-001" in (x.get("findingIds") or [])]
     check(bool(chs), f"{case}: F-001 is in a chapter of kind finding (D6)")
     check(any(x.get("captions") for x in chs), f"{case}: that chapter has a caption")
+    reader_verdict = str((pres.get("reader") or {}).get("verdict") or "")
+    opening = next((x for x in pres.get("chapters") or [] if x.get("kind") == "opening"), {})
+    opening_narration = " ".join(str(c.get("narration") or "") for c in opening.get("captions") or [])
+    check(bool(reader_verdict) and opening_narration.startswith(reader_verdict),
+          f"{case}: opening chapter narration begins with the shared reader verdict")
+    all_narration = " ".join(str(c.get("narration") or "") for x in pres.get("chapters") or []
+                             for c in x.get("captions") or [])
+    raw_terms = {"navownprobe", "overlapprobe", "DIFFERENTIAL-NEUTRAL", "DIFFERENTIAL-VERIFIED", "REGRESSION"}
+    raw_terms.update(a.get("armId") for a in (pres.get("scope") or {}).get("arms") or [] if a.get("armId"))
+    raw_terms.update((pres.get("scope") or {}).get("checks") or {})
+    leaked = sorted(t for t in raw_terms if t and t in all_narration)
+    expect(leaked, [], f"{case}: default chapter narration contains no probe, status, check-id or arm-id terms")
     check(rg["plainContainsNumber"] in [int(x) for x in re.findall(r"\b\d+\b", str(f1.get("plain") or ""))],
           f"{case}: F-001's sentence carries the bound number 1")
     low = str(f1.get("plain") or "").lower()
@@ -834,9 +860,11 @@ def case_fidelity(tmp, index, common):
             rule = " ".join(str(x.get("rule", "")) for x in refused if isinstance(x, dict) and x.get("id") == spec["id"]).lower()
             check(any(k in rule for k in spec["ruleKeywords"]), f"{name}: the refusal rule names {spec['ruleKeywords']} (got {rule!r})")
         plains = {f.get("id"): f.get("plain") for f in after.get("findings") or []}
+        reader_plains = {f.get("id"): f.get("readerPlain") for f in after.get("findings") or []}
         for fid, want in pair["afterApply"].items():
             if want.get("plainEqualsAnswer"):
                 expect(plains.get(fid), answers[fid], f"{name}: {fid} plain is the accepted answer", "D7")
+                expect(reader_plains.get(fid), answers[fid], f"{name}: {fid} reader prose is the accepted answer", "D7")
                 check(fid in (pair["expected"]["accepted"]), f"{name}: {fid} was expected accepted")
             if want.get("plainEqualsTemplate"):
                 expect(plains.get(fid), template.get(fid), f"{name}: {fid} keeps the template sentence", "D7")

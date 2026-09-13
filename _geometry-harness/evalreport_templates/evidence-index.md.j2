@@ -3,6 +3,26 @@
 
 Complete in every mode: every finding with all of its rows, every evidence file with its sha256, every media row. Generated {{ p.generatedUtc }} from the bundle at `{{ p.source.bundleDir }}` (manifest `{{ p.source.manifestSha256 }}`, disposition `{{ p.source.dispositionSha256 }}`, ledger `{{ p.source.ledgerSha256 }}`). Back to [report.md](report.md).
 
+## Technical scope
+
+- target identities: `{{ p.scope.targets|tojson }}`
+- registry/version and dates: registry `{{ p.scope.registryVersion }}`; plan {{ p.scope.planCreatedUtc }}; run {{ p.scope.runStartedUtc }}; bundle {{ p.scope.bundleCreatedUtc }}; disposition {{ p.scope.dispositionCreatedUtc }}
+- states: `{{ p.scope.states|tojson }}`
+- explicit decisions: `{{ p.scope.explicitDecisions|tojson }}`
+- completion: `{{ p.scope.completion|tojson }}`
+- integrity: `{{ p.scope.integrity|tojson }}`
+
+### Arms
+
+{% for a in p.scope.arms %}- `{{ a.armId }}` / `{{ a.kind }}` / `{{ a.candidateFile }}`; added `{{ a.pluginsAdded|tojson }}`; removed `{{ a.pluginsRemoved|tojson }}`; payload {{ a.payloadNote }}; loaded in game {{ a.loadedInGameNote }}; identity `{{ a.identity|tojson }}`; order evaluation `{{ a.orderEvaluation|tojson }}`
+{% endfor %}
+
+<a id="missing-results"></a>
+## Missing results
+
+{% for f in p.findings if f.kind == "missing" %}- [{{ f.id }}](#{{ f.id }}): {{ f.plain }}
+{% endfor %}
+
 ## Findings ({{ p.findings|length }})
 
 {% for f in p.findings %}
