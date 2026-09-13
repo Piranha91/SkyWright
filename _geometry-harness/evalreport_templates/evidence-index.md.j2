@@ -1,0 +1,79 @@
+<a id="top"></a>
+# Evidence index - plan `{{ p.source.planId }}`, presentation `{{ p.presentationId }}`
+
+Complete in every mode: every finding with all of its rows, every evidence file with its sha256, every media row. Generated {{ p.generatedUtc }} from the bundle at `{{ p.source.bundleDir }}` (manifest `{{ p.source.manifestSha256 }}`, disposition `{{ p.source.dispositionSha256 }}`, ledger `{{ p.source.ledgerSha256 }}`). Back to [report.md](report.md).
+
+## Findings ({{ p.findings|length }})
+
+{% for f in p.findings %}
+<a id="{{ f.id }}"></a>
+### {{ f.id }} - {{ f.kind }} - {{ f.title|md }}
+
+{% set grp %}{% if f.groupId %}; group [{{ f.groupId }}](#{{ f.groupId }}){% endif %}{% endset %}
+{% set evs %}{% for e in f.evidenceIds %}[{{ e }}](#{{ e }}){% if not loop.last %}, {% endif %}{% else %}none recorded{% endfor %}{% if f.mediaIds %}; media: {% for m in f.mediaIds %}[{{ m }}](#{{ m }}){% if not loop.last %}, {% endif %}{% endfor %}{% endif %}{% endset %}
+- check `{{ f.checkId }}` ({{ f.family }}); arm {{ f.armId }}; part {{ f.part or "-" }}; strength {{ f.strength }}; verdict {{ f.verdict or "-" }}{{ grp }}
+- {{ f.plain|md }}
+- evidence: {{ evs }}
+- counts: `{{ f.counts|tojson|md|short(600) }}`
+{% if f.allRows %}
+- rows: {{ f.rowsTotal|n }} (all listed; the report showed {{ f.rowsShown|n }})
+
+| form key | label | physical | detail | summary | evidence |
+|---|---|---|---|---|---|
+{% for r in f.allRows %}
+| `{{ r.formKey|md }}` | {{ r.label|md }} | {{ r.physical|md }} | {{ r.physicalDetail|md }} | {{ r.summary|md }} | {% if r.evidenceId %}[{{ r.evidenceId }}](#{{ r.evidenceId }}){% endif %} |
+{% endfor %}
+{% endif %}
+
+{% endfor %}
+## Groups ({{ p.groups|length }})
+
+| group | check | key | findings | rows |
+|---|---|---|---|---|
+{% for g in p.groups %}
+| <a id="{{ g.id }}"></a>{{ g.id }} | `{{ g.checkId }}` | {{ g.key|md }} | {% for i in g.findingIds %}[{{ i }}](#{{ i }}){% if not loop.last %}, {% endif %}{% endfor %} | {{ g.rowsTotal|n }} |
+{% endfor %}
+
+## Media ({{ p.media|length }})
+
+{% if p.media %}
+| media | assessed | kind | subject | state | fingerprint | source | path | sha256 | reason |
+|---|---|---|---|---|---|---|---|---|---|
+{% for m in p.media %}
+| <a id="{{ m.id }}"></a>{{ m.id }} | {{ m.assessed }} | {{ m.mediaKind|md }} | {{ (m.subject or {})|tojson|md|short(120) }} | {{ m.state|md }} | `{{ (m.configurationFingerprint or "")[:12] }}` | {{ m.fingerprintSource|md }}{% if m.fingerprintSource == "asserted" %} ({{ p.assertedSentence }}){% endif %} | `{{ m.path|tailpath|md }}` | `{{ m.sha256|md }}` | {{ m.reason|md }} |
+{% endfor %}
+{% else %}
+No media row: nothing was supplied to this bundle under `--media`, and no unassessed media item is listed in its manifest.
+{% endif %}
+
+## Evidence files ({{ p.evidence|length }})
+
+| evidence | kind | path | sha256 | bytes | check | arm | part | strength | recorded by |
+|---|---|---|---|---|---|---|---|---|---|
+{% for e in p.evidence %}
+| <a id="{{ e.id }}"></a>{{ e.id }} | {{ e.kind }} | `{{ e.path|md }}` | `{{ e.sha256 }}` | {{ e.bytes|n }} | {{ e.checkId or "-" }} | {{ e.armId or "-" }} | {{ e.part or "-" }} | {{ e.strength or "-" }} | {{ e.recordedBy or "-" }} |
+{% endfor %}
+
+## Checks in the registry copy ({{ p.scope.checks|length }})
+
+| check | family | required | strength | claim | limits |
+|---|---|---|---|---|---|
+{% for cid, c in p.scope.checks|dictsort %}
+| `{{ cid }}` | {{ c.family }} | {{ c.required }} | {{ c.strength }} | {{ (c.claim or "-")|md }} | {{ (c.limits or "-")|md }} |
+{% endfor %}
+
+## Omissions in the report ({{ p.omissions|length }})
+
+{% for o in p.omissions %}
+- {{ o.what }} - {{ o.why }} ({{ o.where }})
+{% else %}
+- none
+{% endfor %}
+
+## Chapters ({{ p.chapters|length }})
+
+| chapter | kind | title | findings | media | seconds |
+|---|---|---|---|---|---|
+{% for c in p.chapters %}
+| {{ c.id }} | {{ c.kind }} | {{ c.title|md }} | {{ c.findingIds|join(", ") }} | {{ c.mediaIds|join(", ") }} | {{ c.plannedSeconds }} |
+{% endfor %}

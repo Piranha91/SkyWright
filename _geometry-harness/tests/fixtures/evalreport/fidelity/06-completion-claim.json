@@ -1,0 +1,16 @@
+{
+ "case": "completion-claim",
+ "presentation": "R4-repaired-plus-regression (concise)",
+ "finding": "F-001; the prose is otherwise correct and adds a completion claim in one of the forbidden words",
+ "answers": {
+  "F-001": "This arm creates 1 new navmesh defect while repairing 1 row, and the order is otherwise compatible."
+ },
+ "expected": {
+  "accepted": [],
+  "refused": [{"id": "F-001", "rule": "forbidden-word", "ruleKeywords": ["word", "compatible", "vocabulary", "claim"]}]
+ },
+ "afterApply": {
+  "F-001": {"plainEqualsTemplate": true}
+ },
+ "rule": "D7: an answer containing any of the words pass / compatible / clean / verified-in-game is refused. Numbers and names are all bound, so the word rule is the only one that fires; and D3's rule that those words never appear in template text is what makes the refusal load-bearing - the report would otherwise carry a completion claim the evaluation (claim: incomplete) never made."
+}

@@ -1,0 +1,58 @@
+{
+ "case": "R5-media-mismatch-same-basenames",
+ "fixtureShape": "test_evalrun case-10's run, bundled with a media.json in the D5 schema-2 shape: (a) renders-baseline/cell-view.png, offline-render, baseline arm, fingerprint = the baseline's accepted navownprobe receipt, fingerprintSource asserted; (b) renders-candidate/cell-view.png - the SAME basename, different bytes - candidate-01-reorder arm, fingerprint = that arm's own accepted `arm` receipt; (c) stale-render.png declared on the CANDIDATE arm but carrying the BASELINE order's fingerprint, which only that arm's `reverse` receipt consumed (amendment A-3); (d) unkinded.png with no mediaKind; (e) walk.mp4, game-video, baseline fingerprint, sourceInterval whose sourcePath does not exist.",
+ "acceptanceRow": "Media mismatch and same basenames: wrong arm/state/subject or missing metadata is refused/unassessed by name; two distinct images survive without overwrite.",
+ "rules": ["D5", "D2 media rows and M- ids", "D3 (7)", "D4 report images by relative path"],
+ "planExit": 0,
+ "assessed": [
+  {"basename": "cell-view.png", "subjectArmId": "baseline", "mediaKind": "offline-render", "fingerprintSource": "asserted", "state": "baseline", "assessed": true, "reason": null},
+  {"basename": "cell-view.png", "subjectArmId": "candidate-01-reorder", "mediaKind": "offline-render", "fingerprintSource": "asserted", "state": "baseline", "assessed": true, "reason": null}
+ ],
+ "assessedRules": {
+  "count": 2,
+  "idPattern": "^M-[0-9a-f]{12}$",
+  "idsDistinct": true,
+  "idIsFirst12HexOfSha256": true,
+  "sha256Distinct": true,
+  "pathStartsWith": "media/",
+  "pathBasenameEndsWith": "-cell-view.png",
+  "bothPathsExistUnderBundle": true,
+  "pathsDistinct": true,
+  "eachInSomeChapterMediaIds": true,
+  "eachInSomeCaptionMediaId": true
+ },
+ "unassessed": [
+  {"basename": "stale-render.png", "reason": "fingerprint-mismatch"},
+  {"basename": "unkinded.png", "reason": "kind-missing"},
+  {"basename": "walk.mp4", "reason": "source-missing"},
+  {"basename": "no-provenance.png", "reason": "provenance-missing"}
+ ],
+ "armPartRules": {
+  "candidateArm": "candidate-01-reorder",
+  "hostParts": ["arm", "diff"],
+  "noReversePartFindingCarriesMedia": true
+ },
+ "unassessedRules": {
+  "count": 4,
+  "listedUnderUnassessedMedia": true,
+  "eachRowAssessedFalseWithExactlyThatReason": true,
+  "neverInAnyChapterMediaIds": true,
+  "findingOfKindUnassessedNamesEachBasename": true
+ },
+ "report": {
+  "mdContains": ["identity asserted by the supplier from the arm's accepted receipt, not computed by the capturing tool", "fingerprint-mismatch", "kind-missing", "source-missing"],
+  "mdEmbedsTwoDistinctImagePathsThatExist": true,
+  "evidenceIndexListsBothAssessedSha256": true,
+  "print": {"status": "within-limit", "pagesAtMost": 8}
+ },
+ "notes": [
+  "D5: `bundle --media` copies an accepted item to media/<sha256[:12]>-<basename>, so two files with one basename land at two paths; D2's M- id is the first 12 hex of the file's sha256, so they never collide. Both rows, both paths, both ids distinct - 'two distinct images survive without overwrite'.",
+  "D5 as amended by PLAN.md A-3 (Fable, 18:58, after this oracle's first commit): an item's fingerprint is compared to the arm's OWN accepted receipts (part null or `arm`) only; a fingerprint that appears only on that arm's `reverse` or `diff` receipts is fingerprint-mismatch. (c) is exactly that trap - declared on the candidate arm with the baseline's fingerprint, which the candidate's reverse receipt also carries - so a compiler/bundle that matches any receipt on the arm accepts it wrongly, and the pre-A-3 evalrun does. A picture of the baseline order illustrates the baseline arm and nothing else.",
+  "D5: a rejected item goes to unassessedMedia with the item verbatim and ONE closed reason. (c) has every field and an accepted receipt on its arm, so only fingerprint-mismatch can fire; (d) lacks mediaKind, so kind-missing (a schema-1 item is unassessed by the missing field's name); (e) has a matching fingerprint and a sourceInterval whose sourcePath is absent, so source-missing. The presentation carries each with assessed false and exactly that reason, and D3 (7) puts media not assessed in its own section: a finding of kind `unassessed` names each.",
+  "D5: fingerprintSource asserted is accepted and travels into the report as the quoted sentence, verbatim.",
+  "D5 extended (Fable, 20:42): every item carries provenance {tool, capturedUtc}; (f) no-provenance.png is otherwise valid (baseline arm, matching fingerprint, asserted) with no provenance at all, so the one reason that fires is provenance-missing, checked after fingerprint-source-missing.",
+  "A-14 (Fable, 20:42): a finding whose part is `reverse` never carries mediaIds - the reverse part measured the BASELINE order, so a candidate-arm picture on it would illustrate the wrong configuration; the accepted candidate-arm item sits on that arm's `arm` (or `diff`) finding.",
+  "The media.json bundle side is agent B's; this case is generated at test time against whatever evalrun is present, and the expectation is D5's. If the bundle side does not yet write schema-2 rows, the case fails at the bundle step and says so - never a skip.",
+  "The state word `baseline` on every item: D5 requires `state`; the fixture probes run in state baseline."
+ ]
+}

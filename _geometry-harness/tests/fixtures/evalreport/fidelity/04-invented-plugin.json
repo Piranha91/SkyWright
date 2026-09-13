@@ -1,0 +1,16 @@
+{
+ "case": "invented-plugin",
+ "presentation": "R4-repaired-plus-regression (concise)",
+ "finding": "F-001; ImaginaryPatch.esp is in no arm, no row and no group of the plan",
+ "answers": {
+  "F-001": "ImaginaryPatch.esp creates 1 new navmesh defect while repairing 1 row; the regression stands."
+ },
+ "expected": {
+  "accepted": [],
+  "refused": [{"id": "F-001", "rule": "name-unbound", "ruleKeywords": ["name", "plugin"]}]
+ },
+ "afterApply": {
+  "F-001": {"plainEqualsTemplate": true}
+ },
+ "rule": "D7: every plugin / cell / formKey the prose names must be bound to the finding; ImaginaryPatch.esp is bound to nothing. Numbers are all bound (1, 1), so the name rule is the only one that fires."
+}

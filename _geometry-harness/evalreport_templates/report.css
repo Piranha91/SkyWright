@@ -1,0 +1,48 @@
+/* evalreport print stylesheet: A4, 16 mm margins, 10.5 pt base, nothing below 9 pt, figures at most 100 mm tall.
+   The abridgement ladder is the only response to an over-long print; this file never shrinks the font. */
+@page { size: A4; margin: 16mm; }
+html { font-size: 10.5pt; }
+body { font-family: "Segoe UI", Arial, Helvetica, sans-serif; color: #111; line-height: 1.35; margin: 0; background: #fff; }
+h1 { font-size: 17pt; margin: 0 0 4pt; }
+h2 { font-size: 13pt; margin: 11pt 0 4pt; page-break-after: avoid; border-bottom: 1px solid #999; padding-bottom: 1pt; }
+h3 { font-size: 11pt; margin: 8pt 0 3pt; page-break-after: avoid; }
+h4 { font-size: 10.5pt; margin: 6pt 0 2pt; page-break-after: avoid; }
+p { margin: 3pt 0; }
+ul { margin: 2pt 0 4pt; padding-left: 16pt; }
+li { margin: 1pt 0; }
+table { border-collapse: collapse; width: 100%; table-layout: fixed; font-size: 9.5pt; margin: 3pt 0 6pt; }
+th, td { border: 1px solid #bbb; padding: 2pt 4pt; vertical-align: top; overflow-wrap: anywhere; word-break: break-word; }
+th { background: #eee; text-align: left; font-weight: 600; }
+tr { page-break-inside: avoid; }
+thead { display: table-header-group; }
+code { font-family: Consolas, "Courier New", monospace; font-size: 9pt; overflow-wrap: anywhere; }
+pre { font-family: Consolas, "Courier New", monospace; font-size: 9pt; white-space: pre-wrap; overflow-wrap: anywhere;
+      background: #f6f6f6; border: 1px solid #ddd; padding: 3pt 5pt; margin: 3pt 0; }
+figure { margin: 5pt 0; page-break-inside: avoid; }
+figure img { max-height: 100mm; max-width: 100%; display: block; }
+figcaption { font-size: 9pt; color: #333; margin-top: 2pt; }
+.small { font-size: 9pt; color: #333; }
+.claim { border-left: 3px solid #444; padding: 4pt 7pt; background: #f3f3f3; margin: 6pt 0; }
+.lead { font-size: 9.5pt; color: #333; font-style: italic; margin: 2pt 0 4pt; }
+.ev { font-family: Consolas, "Courier New", monospace; font-size: 9pt; }
+.ev a { color: #1a4a8a; text-decoration: none; }
+.finding { page-break-inside: avoid; margin-bottom: 6pt; }
+.meta { color: #444; font-size: 9.5pt; }
+.omit { font-size: 9pt; color: #444; }
+.kv td:first-child { width: 28%; font-weight: 600; background: #f7f7f7; }
+@media screen { body { max-width: 190mm; margin: 12mm auto; padding: 0 8mm; } }
+
+/* compact layout (ladder step 1+): the same type sizes, less chrome - tight definition lines instead of the
+   scope table, single-line list items instead of per-group tables, 2 px cell padding elsewhere */
+body.compact h2 { margin: 7pt 0 2pt; }
+body.compact h3 { margin: 5pt 0 1pt; }
+body.compact p, body.compact .lead { margin: 1pt 0; }
+body.compact ul { margin: 1pt 0 2pt; padding-left: 12pt; }
+body.compact li { margin: 0; }
+body.compact table { margin: 2pt 0 3pt; }
+body.compact th, body.compact td { padding: 1px 3px; }
+body.compact pre { margin: 2pt 0; padding: 2pt 4pt; }
+body.compact figure { margin: 3pt 0; }
+body.compact .claim { padding: 3pt 6pt; margin: 4pt 0; }
+body.compact .defs { margin: 2pt 0; }
+body.compact .defs div { margin: 0; }

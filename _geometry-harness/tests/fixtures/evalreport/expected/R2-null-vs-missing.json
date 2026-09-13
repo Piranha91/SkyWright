@@ -1,0 +1,42 @@
+{
+ "case": "R2-null-vs-missing",
+ "fixtureShape": "test_evalrun case-03: navownprobe emits zero conflicts with judged 42 (a completed null check with declared coverage); overlapprobe and contactprobe fail extraction (judged 0 / unjudgeable 17, every population judged 0) and their entries are rejected(extraction-failed), so the checks are MISSING.",
+ "acceptanceRow": "Qualified null versus missing extraction: both produce useful reports with distinct conclusions; zero findings cannot replace missing coverage.",
+ "rules": ["D2 finding kinds null / missing", "D3 (2) and (5)", "D3 null sentence"],
+ "planExit": 0,
+ "scope": {
+  "completion": {
+   "complete": false,
+   "claim": "incomplete",
+   "byCauseIncludes": {"mcp-only": 4, "rejected(extraction-failed)": 6, "unknown-applicability": 2, "unsupported": 4, "manual": 2}
+  }
+ },
+ "nullFinding": {
+  "checkId": "geometry.navmesh-ownership", "armId": "baseline", "part": "arm",
+  "kind": "null",
+  "rowsTotal": 0,
+  "countsContainNumber": 42,
+  "plainDoesNotContain": ["missing", "not run", "extraction"]
+ },
+ "missingFindings": [
+  {"checkId": "geometry.object-overlap", "armId": "baseline", "kind": "missing", "rowsTotal": 0,
+   "plainDoesNotContain": ["no finding", "no findings", "zero findings"]},
+  {"checkId": "geometry.placement-contact", "armId": "baseline", "kind": "missing", "rowsTotal": 0,
+   "plainDoesNotContain": ["no finding", "no findings", "zero findings"]}
+ ],
+ "nullAndMissingDifferByKindNotByCount": true,
+ "findings": {
+  "kindAbsent": ["regression", "finding"]
+ },
+ "report": {
+  "mdContains": ["incomplete", "geometry.navmesh-ownership", "geometry.object-overlap", "geometry.placement-contact", "42"],
+  "mdNamesEveryRequiredMissingCheckId": true,
+  "print": {"status": "within-limit", "pagesAtMost": 8}
+ },
+ "notes": [
+  "The completed null check and the missing extraction both have zero rows: rowsTotal 0 on both. What distinguishes them is the KIND (null vs missing) and the coverage the null carries (judged 42 from the emit's Coverage line, D3 (5) 'completed null checks with their coverage lines'). The compiler reads the coverage from the bundle's evidence (the emit), because the disposition's completedNullChecks row records only the number of coverage lines.",
+  "D3: 'no findings in the completed checks' is the strongest null sentence, so the null finding's plain sentence may say that; the missing finding's plain sentence must not say 'no finding(s)' - zero findings cannot replace missing coverage (acceptance table).",
+  "The number 42 must appear in report.md: the null's coverage is a factual line, and D4 says every factual line is in the report with its evidence token.",
+  "byCause for a rejected entry is keyed by the disposition row's status string `rejected(extraction-failed)` (see R1 note on the key); its count is 6 = two checks x (baseline arm + candidate arm + candidate reverse)."
+ ]
+}

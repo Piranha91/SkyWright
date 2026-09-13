@@ -1,0 +1,25 @@
+{
+ "case": "R6-changed-or-missing-source",
+ "fixtureShape": "two damaged COPIES of R5's bundle (the bundle itself is never written to): (a) one accepted media file's bytes altered after bundling; (b) manifest.json rewritten with bundleSchema 1.",
+ "acceptanceRow": "Changed or missing source: damaged bundles are refused; changed media/settings invalidate affected presentation work; unchanged compilation reuses valid work. Relocated outputs retain usable links.",
+ "rules": ["D1 refusals by name", "D2 determinism", "D4 verify after relocation"],
+ "refusals": [
+  {"damage": "media-bytes-altered", "planExitNonZero": true, "refusedByName": "bundle-refused", "verifyBundleSays": "mismatched", "presentationNotProduced": true},
+  {"damage": "manifest-schema-1", "planExitNonZero": true, "refusedByName": "schema-unsupported", "presentationNotProduced": true}
+ ],
+ "reuse": {
+  "unchangedBundleTwoPlansSamePresentationId": true,
+  "changedSettingsDifferentPresentationId": true
+ },
+ "relocation": {
+  "verifyOutExitAfterMove": 0,
+  "tokensStillResolveAfterMove": true,
+  "imagePathsStillExistAfterMove": true
+ },
+ "notes": [
+  "D1: the compiler runs `evalrun.py verify-bundle DIR` first and refuses, by name, schema-unsupported (bundle schema != 2) and bundle-refused (bundle.complete false, defects listed). An altered media file is an evidence row that no longer hashes to its recorded sha256 - verify-bundle's `mismatched` - so bundle.complete is false and the compiler refuses bundle-refused. The refusal name is asserted on the tool's own words with the case directory's name scrubbed out (the directory is named after the damage).",
+  "The exit code number is not fixed by D1; non-zero is asserted. Whether a refused plan writes any file is not fixed either; what is asserted is that no presentation.json claiming schemaVersion 1 with integrity ok is written for a refused bundle.",
+  "'Unchanged compilation reuses valid work' is measured as D2's determinism (two plans over one unchanged bundle give one presentationId) and 'changed settings invalidate' as a different presentationId under --exhaustive (R3). The reel's per-segment cache (D6 `reused`) is agent B's test_evalreel territory and is not asserted here.",
+  "'Relocated outputs retain usable links': `evalreport verify --out MOVED` exits 0 after the whole OUT directory is moved, and the driver's own link check (every [E-]/[M-] token in report.md has an anchor in evidence-index.md, every relative image path exists) holds from the new location."
+ ]
+}

@@ -1,0 +1,17 @@
+{
+ "case": "wrong-arm",
+ "presentation": "R4-repaired-plus-regression (concise)",
+ "finding": "F-001 is the combined arm's (candidate-03-combined); the prose attributes it to candidate-01-patcha, an arm IN the plan but not this finding's",
+ "answers": {
+  "F-001": "On {{arm:candidate-01-patcha}} the order creates 1 new navmesh defect while repairing 1 row."
+ },
+ "placeholders": "{{arm:<candidate stem>}} is replaced by the driver with the armId the presentation's scope.arms gives that candidate file, so the prose names a real arm of the plan.",
+ "expected": {
+  "accepted": [],
+  "refused": [{"id": "F-001", "rule": "arm-unbound", "ruleKeywords": ["arm"]}]
+ },
+ "afterApply": {
+  "F-001": {"plainEqualsTemplate": true}
+ },
+ "rule": "D7 lists 'wrong arm' as a fidelity case beside 'wrong count' and 'invented check'. Its binding rule speaks of names bound to the FINDING (plugin / cell / formKey) and of checks and arms 'outside the plan'. A wrong-arm attribution to an arm inside the plan is the case the acceptance table needs refused (an answer that moves a regression to another arm is a fidelity failure), so the oracle reads the finding's armId as one of its bound names: an answer naming a different arm is refused with an arm rule. Fable rules if the implementation reads D7's letter instead; the oracle is not re-based silently."
+}

@@ -1,0 +1,16 @@
+{
+ "case": "correct",
+ "presentation": "R4-repaired-plus-regression (concise)",
+ "finding": "F-001 - the combined arm's navownprobe regression: created 1, newDefect 1, repaired 1, reclassified 0, attributed 0, unmeasured 0",
+ "answers": {
+  "F-001": "This arm creates 1 new navmesh defect while repairing 1 row; the regression stands."
+ },
+ "expected": {
+  "accepted": ["F-001"],
+  "refused": []
+ },
+ "afterApply": {
+  "F-001": {"plainEqualsAnswer": true}
+ },
+ "rule": "D7: every number in the prose (1, 1) is one of the finding's bound numbers; it names no plugin, cell, formKey, check or arm; none of pass / compatible / clean / verified-in-game appears."
+}

@@ -1,0 +1,42 @@
+{
+ "case": "R1-intact-incomplete",
+ "fixtureShape": "test_evalrun case-15 (case-01's scenario): every probe ok, the candidate arm repeats the baseline's rows; the trimmed registry carries mcp-only / unsupported / manual checks, so the evaluation is INCOMPLETE while the bundle verifies COMPLETE.",
+ "acceptanceRow": "Intact incomplete evaluation: report and reel preserve missing required checks and scoped comparison results; package integrity is never presented as evaluation completion.",
+ "rules": ["D1", "D2", "D3 (2) and (3)", "D4", "D6 closing card"],
+ "planExit": 0,
+ "source": {
+  "verify": {"bundleComplete": true, "evaluationComplete": false, "claim": "incomplete"}
+ },
+ "scope": {
+  "completion": {
+   "complete": false,
+   "claim": "incomplete",
+   "byCauseIncludes": {"mcp-only": 4, "unsupported": 4, "manual": 2, "unknown-applicability": 2},
+   "missingRequiredAtLeast": 10
+  },
+  "arms": ["baseline", "candidate-01-reorder"]
+ },
+ "findings": {
+  "kindPresent": ["missing", "finding"],
+  "kindAbsent": ["regression"],
+  "oneMissingFindingPerRequiredMissingRow": true,
+  "verdictsVerbatimInclude": ["DIFFERENTIAL-INERT"]
+ },
+ "chapters": {
+  "kindsPresent": ["opening", "finding", "missing", "closing"],
+  "missingOrClosingCaptionsNameEveryRequiredMissingCheckId": true
+ },
+ "report": {
+  "mdContains": ["incomplete", "PASSES-COMPLETED-CHECKS", "DIFFERENTIAL-INERT"],
+  "mdNamesEveryRequiredMissingCheckId": true,
+  "mdNeverSaysEvaluationComplete": true,
+  "print": {"status": "within-limit", "pagesAtMost": 8}
+ },
+ "notes": [
+  "D1: completeness, the claim and the missing list are read from disposition.json, never recomputed; the driver reads the same file and compares.",
+  "D2 scope.completion.byCause is keyed by the missing row's `status` word (the D2 example key `mcp-only` is a status, not the cause sentence); the counts are the disposition's own.",
+  "Section (2) of D3 puts every required check with no accepted result in the report; D6's closing card lists the required checks still missing. So report.md and the missing/closing chapters name every required missing checkId.",
+  "The classification PASSES-COMPLETED-CHECKS and the per-probe DIFFERENTIAL-INERT verdicts are ordersweep's and conflictdiff's own words, retained verbatim (D3 (3)). PASSES-COMPLETED-CHECKS is the one token exempt from the forbidden-word scan because it is quoted, not asserted.",
+  "The acceptance table's 'never presented as evaluation completion': report.md carries the claim `incomplete`; the words `evaluation complete` / `evaluation.complete: true` never appear."
+ ]
+}

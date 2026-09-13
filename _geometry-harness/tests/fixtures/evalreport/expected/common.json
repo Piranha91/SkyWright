@@ -1,0 +1,109 @@
+{
+ "about": "Properties every successful `evalreport plan` / `report` / `verify` run must have, whatever the case. Written from PLAN.md D1-D4 and D7 before the compiler existed; test_evalreport.py asserts these on every case that compiles, then the case file's own properties.",
+ "presentation": {
+  "schemaVersion": 1,
+  "presentationIdPattern": "^[0-9a-f]{12}$",
+  "source": {
+   "bundleSchema": 2,
+   "planIdEqualsManifest": true,
+   "manifestSha256IsSha256OfBundleManifest": true,
+   "dispositionSha256IsSha256OfBundleDisposition": true,
+   "ledgerSha256IsSha256OfBundleLedger": true,
+   "verify": {
+    "bundleComplete": true,
+    "evaluationCompleteEqualsDisposition": true,
+    "claimEqualsDisposition": true
+   }
+  },
+  "compiler": {"name": "evalreport", "sourceSha256HasEvalreportPy": true},
+  "settingsDefault": {
+   "mode": "concise", "maxPages": 8,
+   "page": {"size": "A4", "marginMm": 16, "baseFontPt": 10.5},
+   "rowsPerGroup": 3, "figuresPerFinding": 1,
+   "reel": {"maxSeconds": 120, "fps": 30, "width": 1280, "height": 720}
+  },
+  "scope": {
+   "completionCompleteEqualsDisposition": true,
+   "completionClaimEqualsDisposition": true,
+   "missingRequiredEqualsCountOfRequiredMissingRows": true,
+   "byCauseKeyedByMissingRowStatusWithCountsEqualToDisposition": true,
+   "armIdsEqualPlanArms": true,
+   "baselineArmFirst": true,
+   "integrity": {"ok": true, "defects": []}
+  },
+  "findings": {
+   "idPattern": "^F-[0-9]{3}$",
+   "idsSequentialFrom": "F-001",
+   "kinds": ["regression", "repaired", "reclassified", "finding", "null", "catalogue", "missing", "unassessed"],
+   "priorityNonDecreasingInListOrder": true,
+   "everyEvidenceIdResolves": true,
+   "everyMediaIdResolves": true,
+   "everyGroupIdResolves": true,
+   "rowsLengthEqualsRowsShown": true,
+   "rowsShownAtMostRowsTotal": true,
+   "everyRowEvidenceIdResolves": true,
+   "plainNeverEmpty": true
+  },
+  "evidence": {
+   "idPattern": "^E-[0-9a-f]{16}$",
+   "idIsManifestEvidenceId": true,
+   "pathAndSha256EqualManifestRow": true
+  },
+  "media": {
+   "assessedIdPattern": "^M-[0-9a-f]{12}$",
+   "assessedIdIsFirst12HexOfSha256": true,
+   "assessedRowsHaveReasonNull": true,
+   "unassessedRowsHaveOneClosedReason": ["file-missing", "kind-missing", "subject-missing", "state-missing", "fingerprint-missing", "fingerprint-source-missing", "provenance-missing", "no-accepted-receipt-on-arm", "fingerprint-mismatch", "source-missing", "original-missing"]
+  },
+  "chapters": {
+   "idPattern": "^C-[0-9]{2}$",
+   "firstKind": "opening",
+   "lastKind": "closing",
+   "everyFindingIdResolves": true,
+   "everyMediaIdResolves": true,
+   "everyCaptionEvidenceIdResolves": true,
+   "captionTextNeverEmpty": true,
+   "plannedSecondsPositive": true
+  },
+  "narration": {"source": "template", "validated": true, "refused": []},
+  "forbiddenVerdictWords": {
+   "pattern": "\\b(pass|passes|passed|compatible|clean)\\b",
+   "caseInsensitive": true,
+   "exemptVerbatimTokens": ["PASSES-COMPLETED-CHECKS"],
+   "exemptRegistryStringsPerRulingA4": ["checks[].title", "checks[].evidence.claim", "checks[].evidence.limits"],
+   "exemptQuotedStringsPerRulingA12": ["disposition.unassessed (every string leaf)", "scope copy unmeasured[].why"],
+   "scannedFields": ["findings[].plain", "findings[].title", "groups[].title", "chapters[].title", "chapters[].captions[].text"]
+  },
+  "determinism": {
+   "secondPlanIdenticalExcept": ["generatedUtc"],
+   "presentationIdIdentical": true
+  }
+ },
+ "report": {
+  "files": ["report.md", "report.html", "evidence-index.md", "presentation-manifest.json"],
+  "pdfWhenRendered": "report.pdf",
+  "reportMdForbiddenVerdictWords": {
+   "pattern": "\\b(pass|passes|passed|compatible|clean)\\b",
+   "caseInsensitive": true,
+   "exemptVerbatimTokens": ["PASSES-COMPLETED-CHECKS"]
+  },
+  "reportMdContainsClaim": true,
+  "reportMdNamesEveryRequiredMissingCheckId": true,
+  "evidenceIndexNamesEveryFindingId": true,
+  "evidenceIndexNamesEveryEvidenceId": true,
+  "evidenceIndexNamesEveryAssessedMediaSha256": true,
+  "everyTokenInReportMdResolvesToAnchorInEvidenceIndex": {
+   "tokenPattern": "\\[(E-[0-9a-f]{16}|M-[0-9a-f]{12})\\]",
+   "anchorForms": ["a markdown heading line containing the id", "id=\"<id>\"", "name=\"<id>\"", "{#<id>}"]
+  },
+  "everyRelativeImagePathInReportMdExists": true,
+  "htmlHasPageRule": "size: A4",
+  "htmlHasNoFontBelow9pt": true,
+  "manifest": {
+   "artifactsHaveSha256MatchingFiles": true,
+   "print": {"maxPages": 8, "statusWords": ["within-limit", "over-limit", "not-rendered"], "pagesEqualsIndependentPdfPageCount": true}
+  },
+  "verifyOutExit": 0,
+  "afterRelocation": {"verifyOutExit": 0, "tokensStillResolve": true, "imagePathsStillExist": true}
+ }
+}

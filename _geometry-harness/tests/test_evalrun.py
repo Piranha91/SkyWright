@@ -564,21 +564,43 @@ def case_10(tmp):
     evalrun(["finalize", "--run", run], scen)
     # one media item whose fingerprint matches an accepted receipt, one that matches nothing
     fp = None
+    cand_arm = None
     for r in sorted((run / "receipts").glob("*.json")):
         d = load(r)
-        fp = fp or (((d.get("consumed") or {}).get("configuration") or {}).get("fingerprint"))
+        if not ((d.get("validation") or {}).get("accepted")):
+            continue
+        got = (((d.get("consumed") or {}).get("configuration") or {}).get("fingerprint"))
+        if d.get("armId") == "baseline" and d.get("part") in (None, "arm"):
+            fp = fp or got
+        elif d.get("armId") != "baseline":
+            cand_arm = cand_arm or d.get("armId")
     media_dir = run / "supplied"
     media_dir.mkdir(parents=True, exist_ok=True)
-    for n in ("matched-shot.png", "old-shot.png"):
+    for n in ("matched-shot.png", "old-shot.png", "wrong-arm-shot.png", "unsourced-shot.png"):
         (media_dir / n).write_bytes(b"\x89PNG\r\n\x1a\n" + n.encode())
     mediajson = run / "media.json"
+    # media item schema 2 (bundle standard §8): kind, a described subject, state, the fingerprint and where
+    # it came from, provenance. The first item's fingerprint is an accepted baseline receipt's; the second's
+    # matches nothing.
+    subject = {"checkId": "geometry.navmesh-ownership", "armId": "baseline",
+               "description": "the contested navmesh cell from the fixture's suggested camera"}
     mediajson.write_text(json.dumps([
-        {"path": str(media_dir / "matched-shot.png"), "configurationFingerprint": fp,
-         "subject": {"checkId": "geometry.navmesh-ownership", "armId": "baseline"}, "state": "baseline",
+        {"path": str(media_dir / "matched-shot.png"), "mediaKind": "native-screenshot", "subject": subject,
+         "state": "baseline", "configurationFingerprint": fp, "fingerprintSource": "asserted",
          "provenance": {"tool": "devbench", "capturedUtc": "2026-09-11T00:00:00Z"}},
-        {"path": str(media_dir / "old-shot.png"), "configurationFingerprint": "deadbeef" * 8,
-         "subject": {"checkId": "geometry.navmesh-ownership", "armId": "baseline"}, "state": "baseline",
+        {"path": str(media_dir / "old-shot.png"), "mediaKind": "native-screenshot", "subject": subject,
+         "state": "baseline", "configurationFingerprint": "deadbeef" * 8, "fingerprintSource": "asserted",
          "provenance": {"tool": "devbench", "capturedUtc": "2026-05-01T00:00:00Z"}},
+        # A-3's trap: a baseline-order picture declared for the CANDIDATE arm with the baseline fingerprint.
+        # The candidate's reverse part consumed the baseline order, so its receipt carries this fingerprint;
+        # the comparison set is the arm's OWN configuration, so this is a mismatch, not evidence.
+        {"path": str(media_dir / "wrong-arm-shot.png"), "mediaKind": "native-screenshot",
+         "subject": {**subject, "armId": cand_arm or "candidate-01"},
+         "state": "baseline", "configurationFingerprint": fp, "fingerprintSource": "asserted",
+         "provenance": {"tool": "devbench", "capturedUtc": "2026-09-11T00:00:00Z"}},
+        # a matching item that names no provenance: refused by that field, never accepted with provenance null
+        {"path": str(media_dir / "unsourced-shot.png"), "mediaKind": "native-screenshot", "subject": subject,
+         "state": "baseline", "configurationFingerprint": fp, "fingerprintSource": "asserted"},
     ], indent=1), encoding="utf-8")
     evalrun(["bundle", "--run", run, "--media", mediajson], scen)
     man = load(run / "bundle" / "manifest.json") or {}
@@ -587,8 +609,20 @@ def case_10(tmp):
         check(n in unassessed, f"{case}: {n} is unassessedMedia, not evidence (D8)")
     for n in o["disposition"]["unassessedMediaExcludes"]:
         check(n not in unassessed, f"{case}: {n} is NOT unassessed (its fingerprint matched) (D8)")
+    for n, reason in (o["disposition"].get("unassessedMediaReasons") or {}).items():
+        rows = [u for u in man.get("unassessedMedia", []) if n in str(u.get("path"))]
+        expect(rows[0].get("reason") if rows else None, reason,
+               f"{case}: {n} is unassessed by ONE closed reason (D8, media item schema 2)")
     ev = json.dumps(man.get("evidence", []))
     check("supplied-media" in ev, f"{case}: the matching media is evidence with strength supplied-media (D8)")
+    rows = [e for e in man.get("evidence", []) if e.get("kind") == "media"]
+    row = rows[0] if rows else {}
+    digest = hashlib.sha256((media_dir / "matched-shot.png").read_bytes()).hexdigest()
+    expect(row.get("path"), f"media/{digest[:12]}-matched-shot.png",
+           f"{case}: the accepted media is copied to media/<sha256[:12]>-<basename> (D8)")
+    for k in o["disposition"].get("mediaRowCarries") or []:
+        check(k in row, f"{case}: the media row carries {k} (D8, media item schema 2)")
+    check((run / "bundle" / row.get("path", "missing")).exists(), f"{case}: the media copy is on disk (D8)")
     disp = load(run / "disposition.json") or {}
     quals = [q for q in json.dumps(field(disp, "discovery", default={})).split('"') if q in ("qualified", "unqualified")]
     check("qualified" not in quals or "unqualified" in quals,

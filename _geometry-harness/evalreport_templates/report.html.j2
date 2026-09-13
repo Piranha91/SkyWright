@@ -1,0 +1,213 @@
+{% set compact = p.layout == "compact" %}
+{% macro ev(ids) -%}
+{% set shown = ids[:p.evidenceTokensCompact] if p.layout == "compact" else ids %}
+<span class="ev">{% for i in shown %}<a href="evidence-index.md#{{ i }}">{{ i }}</a>{% if not loop.last %} {% endif %}{% endfor %}{% if ids|length > shown|length %} +{{ ids|length - shown|length }} in the index{% endif %}</span>
+{%- endmacro %}
+{% macro sample(f) -%}
+{% for r in f.shownRows %}<code>{{ r.formKey }}</code> {{ r.label|short(48) }} ({{ r.physical }}){% if not loop.last %}; {% endif %}{% endfor %}{% if f.rowsShown < f.rowsTotal %} <span class="omit">- {{ f.rowsShown|n }} of {{ f.rowsTotal|n }} listed, all in <a href="evidence-index.md#{{ f.id }}">{{ f.id }}</a></span>{% endif %}
+{%- endmacro %}
+{% macro figures(f) -%}
+{% for m in f.figures %}
+<figure>
+{% if m.reportPath %}
+<img src="{{ m.reportPath }}" alt="{{ m.id }}">
+<figcaption>{{ m.id }} - {{ m.mediaKind }}, arm {{ (m.subject or {}).armId }}, state {{ m.state }}{% if (m.subject or {}).description %}: {{ (m.subject or {}).description }}{% endif %}; {% if m.fingerprintSource == "asserted" %}{{ p.assertedSentence }}{% else %}fingerprint {{ m.fingerprintSource }}{% endif %}. {{ ev([m.id]) }}</figcaption>
+{% else %}
+<figcaption>{{ m.id }}: media file not supplied at render time. {{ ev([m.id]) }}</figcaption>
+{% endif %}
+</figure>
+{% endfor %}
+{%- endmacro %}
+{% macro limits(c) -%}
+{% set cut = c.limits|sentences(220) %}
+Can claim: {{ c.claim or "no claim row (a record fact, not a detector class)" }}. Limits: {% if cut %}{{ cut }}{% else %}in the index.{% endif %}
+{%- endmacro %}
+{% macro group_label(f) -%}
+{% if f.counts.get("groupKind") %}{{ f.counts.groupKind }}: {{ f.counts.A }} x {{ f.counts.B }}{% elif f.part == "diff" %}differential ({{ f.counts.get("probe") }}): created {{ f.counts.get("created")|n }}, repaired {{ f.counts.get("repaired")|n }}, reclassified {{ f.counts.get("reclassified")|n }}{% else %}{{ f.counts.get("findings")|n }} finding(s), not a conflict file{% endif %}
+{%- endmacro %}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Evaluation report - {{ p.scope.targets|map(attribute="name")|join(", ") }}</title>
+<style>
+{{ css|safe }}
+</style>
+</head>
+<body class="{{ 'compact' if compact else 'normal' }}">
+<a id="top"></a>
+<h1>Evaluation report - {{ p.scope.targets|map(attribute="name")|join(", ") }}</h1>
+<p class="meta">Plan <code>{{ p.source.planId }}</code> - presentation <code>{{ p.presentationId }}</code> - generated {{ p.generatedUtc }} - mode {{ p.settings.mode }}{% if p.effective %} ({{ p.effective.layout }} layout, {{ p.effective.rowsPerGroup }} row(s) per group, {{ p.effective.figuresPerFinding }} figure(s) per finding){% endif %}</p>
+<div class="claim">
+<p><strong>{{ p.claimSentence }}</strong></p>
+<p>Bundle integrity: {{ p.source.verifiedFiles|n }} file(s) hash to the manifest (bundle complete: {{ p.source.verify.bundleComplete }}). Evaluation completion is a separate state: complete {{ p.source.verify.evaluationComplete }}, claim <code>{{ p.source.verify.claim }}</code>.</p>
+<p class="small">Print target: {{ p.settings.page.size }}, {{ p.settings.page.marginMm }} mm margins, base {{ p.settings.page.baseFontPt }} pt{% if p.settings.maxPages %}, limit {{ p.settings.maxPages }} page(s){% else %}, no page limit (exhaustive){% endif %}; the measured page count and its status are recorded in presentation-manifest.json, never in the rendition itself.</p>
+</div>
+
+<h2>Scope</h2>
+{% if compact %}
+<div class="defs">
+<div><strong>target(s):</strong> {% for t in p.scope.targets %}{{ t.name }} (<code>{{ (t.sha256 or "")[:12] }}</code>, {{ t.records|n }} records, provider {{ t.provider }}){% if not loop.last %}; {% endif %}{% endfor %}</div>
+<div><strong>registry / clock:</strong> registry version {{ p.scope.registryVersion }}; plan {{ p.scope.planCreatedUtc }}; run {{ p.scope.runStartedUtc }}; bundle {{ p.scope.bundleCreatedUtc }}</div>
+<div><strong>states:</strong> selected {{ p.scope.states.selected|join(", ") }}; not explored: {% if p.scope.states.notExplored %}{{ p.scope.states.notExplored|join(", ") }}{% else %}none named (the extent of world states is not enumerated){% endif %}</div>
+<div><strong>completion:</strong> complete {{ p.scope.completion.complete }}; claim <code>{{ p.scope.completion.claim }}</code>; {{ p.scope.completion.missingRequired|n }} required check-arm(s) without an accepted result{% if p.scope.completion.byCause %} ({% for k, v in p.scope.completion.byCause.items() %}{{ k }} {{ v|n }}{% if not loop.last %}, {% endif %}{% endfor %}){% endif %}; integrity {% if p.scope.integrity.ok %}no defects{% else %}{{ p.scope.integrity.defects|length }} defect(s){% endif %}</div>
+<div><strong>explicit decisions:</strong> --select {% if p.scope.explicitDecisions.select %}{{ p.scope.explicitDecisions.select|join(", ") }}{% else %}not used{% endif %}; --exclude {% if p.scope.explicitDecisions.exclude %}{{ p.scope.explicitDecisions.exclude }}{% else %}not used{% endif %}</div>
+{% if p.scope.completion.unknownApplicability %}
+<div><strong>unknown applicability</strong> (never read as not-applicable): {% for u in p.scope.completion.unknownApplicability %}<code>{{ u.checkId }}</code> - {{ u.evidence }}{% if not loop.last %}; {% endif %}{% endfor %}</div>
+{% endif %}
+</div>
+{% else %}
+<table class="kv"><tbody>
+<tr><td>target(s)</td><td>{% for t in p.scope.targets %}{{ t.name }} (<code>{{ (t.sha256 or "")[:12] }}</code>, {{ t.records|n }} records, provider {{ t.provider }}){% if not loop.last %}; {% endif %}{% endfor %}</td></tr>
+<tr><td>registry / clock</td><td>registry version {{ p.scope.registryVersion }}; plan {{ p.scope.planCreatedUtc }}; run {{ p.scope.runStartedUtc }}; bundle {{ p.scope.bundleCreatedUtc }}</td></tr>
+<tr><td>states</td><td>selected {{ p.scope.states.selected|join(", ") }}; not explored: {% if p.scope.states.notExplored %}{{ p.scope.states.notExplored|join(", ") }}{% else %}none named (the extent of world states is not enumerated){% endif %}</td></tr>
+<tr><td>completion</td><td>complete {{ p.scope.completion.complete }}; claim <code>{{ p.scope.completion.claim }}</code>; {{ p.scope.completion.missingRequired|n }} required check-arm(s) without an accepted result{% if p.scope.completion.byCause %} ({% for k, v in p.scope.completion.byCause.items() %}{{ k }} {{ v|n }}{% if not loop.last %}, {% endif %}{% endfor %}){% endif %}; integrity {% if p.scope.integrity.ok %}no defects{% else %}{{ p.scope.integrity.defects|length }} defect(s){% endif %}</td></tr>
+<tr><td>explicit decisions</td><td>--select {% if p.scope.explicitDecisions.select %}{{ p.scope.explicitDecisions.select|join(", ") }}{% else %}not used{% endif %}; --exclude {% if p.scope.explicitDecisions.exclude %}{{ p.scope.explicitDecisions.exclude }}{% else %}not used{% endif %}</td></tr>
+{% if p.scope.completion.unknownApplicability %}
+<tr><td>unknown applicability</td><td>never read as not-applicable: {% for u in p.scope.completion.unknownApplicability %}<code>{{ u.checkId }}</code> - {{ u.evidence }}{% if not loop.last %}; {% endif %}{% endfor %}</td></tr>
+{% endif %}
+</tbody></table>
+{% endif %}
+
+<h3>Arms</h3>
+<ul>
+{% for a in p.scope.arms %}
+<li><strong>{{ a.armId }}</strong> ({{ a.kind }}): <code>{{ a.candidateFile }}</code>{% if a.pluginsAdded %}; adds {{ a.pluginsAdded|join(", ") }}{% endif %}{% if a.pluginsRemoved %}; removes {{ a.pluginsRemoved|join(", ") }}{% endif %}. Payload: {{ a.payloadNote }}. Loaded in game: {{ a.loadedInGameNote }}. Identity: {{ a.identity.pluginCount|n }} plugin(s) requested{% if a.identity.unstatedRows %}, {{ a.identity.unstatedRows|length }} with no stated hash ({% for u in a.identity.unstatedRows %}{{ u.name }}: {{ u.unstatedReason }}{% if not loop.last %}; {% endif %}{% endfor %}){% endif %}{% if a.identity.identityLimits %}, {{ a.identity.identityLimits|n }} identity limit(s) recorded on accepted receipts{% endif %}.
+{% if a.orderEvaluation and a.orderEvaluation.classification %}
+<br>Order evaluation: classification <strong>{{ a.orderEvaluation.classification }}</strong> over {{ a.orderEvaluation.probes|join(", ") }}; {% for probe, v in a.orderEvaluation.perProbe|dictsort %}{{ probe }} {{ v.verdict }} (repaired {{ v.repaired|n }}, reclassified {{ v.reclassified|n }}, created {{ v.created|n }}, new {{ v.newDefect|n }}, unmeasured {{ v.unmeasured|n }}){% if not loop.last %}; {% endif %}{% endfor %}.
+{% endif %}
+</li>
+{% endfor %}
+</ul>
+
+{% for s in p.sections %}
+{% set fs = s.findings %}
+<h2>{{ s.order }}. {{ s.title }}</h2>
+<p class="lead">{{ s.lead }}</p>
+{% if not fs %}
+<p>{% if s.id == "regressions" %}No arm carries a new physical defect on any probe that ran. (A statement about the probes that ran, listed under the arms above, not about the checks that did not.){% elif s.id == "missing" %}Every required check has an accepted result on every arm it applies to.{% elif s.id == "findings" %}No completed check reported a finding.{% elif s.id == "media" %}No media row is listed.{% else %}Nothing listed.{% endif %}</p>
+{% elif s.id == "regressions" %}
+{% for f in fs %}
+<div class="finding">
+<h3 id="{{ f.id }}">{{ f.id }} - {{ f.title }} ({{ f.armId }})</h3>
+<p>{{ f.plain }} {{ ev(f.evidenceIds) }}</p>
+{% if f.counts.diffLines %}
+<pre>{% for l in f.counts.diffLines %}{{ l }}
+{% endfor %}</pre>
+{% endif %}
+{% if f.shownRows %}
+<table><colgroup><col style="width:19%"><col style="width:27%"><col style="width:9%"><col style="width:45%"></colgroup>
+<thead><tr><th>form key</th><th>label</th><th>physical</th><th>detail</th></tr></thead><tbody>
+{% for r in f.shownRows %}
+<tr><td><code>{{ r.formKey }}</code></td><td>{{ r.label }}</td><td>{{ r.physical }}</td><td>{{ r.physicalDetail|short(120) }}</td></tr>
+{% endfor %}
+</tbody></table>
+{% endif %}
+{% if f.rowsShown < f.rowsTotal %}
+<p class="omit">{{ f.rowsShown|n }} of {{ f.rowsTotal|n }} row(s) listed; every row is in <a href="evidence-index.md#{{ f.id }}">evidence-index.md#{{ f.id }}</a>.</p>
+{% endif %}
+{{ figures(f) }}
+</div>
+{% endfor %}
+{% elif s.id == "missing" %}
+{% if compact %}
+{% for r in p.missingRows %}
+<p>{% for i in r.findingIds %}<a id="{{ i }}"></a>{% endfor %}<strong>{{ r.status }} ({{ r.count|n }})</strong> - {{ r.cause|sentences(160) or r.cause|short(160) }} - {% for c in r.checks %}<code>{{ c.checkId }}</code> ({{ c.arms|join(", ") }}){% if not loop.last %}; {% endif %}{% endfor %}</p>
+{% endfor %}
+{% else %}
+<table><colgroup><col style="width:13%"><col style="width:9%"><col style="width:48%"><col style="width:30%"></colgroup>
+<thead><tr><th>status</th><th>check-arm(s)</th><th>checks (arms)</th><th>cause</th></tr></thead><tbody>
+{% for r in p.missingRows %}
+<tr><td>{{ r.status }}</td><td>{% for i in r.findingIds %}<a id="{{ i }}"></a>{% endfor %}{{ r.count|n }}</td><td>{% for c in r.checks %}<code>{{ c.checkId }}</code> ({{ c.arms|join(", ") }}){% if not loop.last %}; {% endif %}{% endfor %}</td><td>{{ r.cause|sentences(160) or r.cause|short(160) }}</td></tr>
+{% endfor %}
+</tbody></table>
+{% endif %}
+{% elif s.id == "findings" %}
+{% for cb in p.findingBlocks %}
+<h3>{{ cb.checkId }} - {{ cb.title }}</h3>
+<p class="small">{{ limits(cb.check) }}</p>
+{% for part in cb.parts %}
+{% if part.indexOnly %}
+<p><strong>{{ part.armId }} / {{ part.part }}</strong>: {{ part.findingsInPart|n }} conflict(s), {{ part.rowsTotal|n }} row(s) in {{ part.groups|length }} group(s) ({% for f in part.groups %}<span id="{{ f.id }}">{{ f.id }}</span>{% if not loop.last %}, {% endif %}{% endfor %}); verdict {{ part.verdict or "-" }}. Reverse-part rows repeat the baseline's and are listed in the evidence index only. {{ ev(part.evidenceIds) }}</p>
+{% elif compact %}
+<p><strong>{{ part.armId }} / {{ part.part or "arm" }}</strong>: {{ part.findingsInPart|n }} conflict(s) reported, {{ part.rowsTotal|n }} row(s); verdict {{ part.verdict or "-" }}; strength {{ part.strength }}; population {{ part.population }} / state {{ part.state }}. {{ ev(part.evidenceIds) }}</p>
+<ul>
+{% for f in part.groups %}
+<li id="{{ f.id }}">{{ f.id }} {{ group_label(f) }} - {{ f.rowsTotal|n }} row(s){% if f.rowsTotal %}; sample: {{ sample(f) }}{% else %}; {{ f.plain|short(140) }}{% endif %}</li>
+{% endfor %}
+</ul>
+{% for f in part.groups if f.figures %}
+{{ figures(f) }}
+{% endfor %}
+{% else %}
+<p><strong>{{ part.armId }} / {{ part.part or "arm" }}</strong>: {{ part.findingsInPart|n }} conflict(s) reported, {{ part.rowsTotal|n }} row(s); verdict {{ part.verdict or "-" }}; strength {{ part.strength }}; population {{ part.population }} / state {{ part.state }}. {{ ev(part.evidenceIds) }}</p>
+<table><colgroup><col style="width:8%"><col style="width:34%"><col style="width:7%"><col style="width:51%"></colgroup>
+<thead><tr><th>finding</th><th>group</th><th>rows</th><th>sample rows (form key, label, physical)</th></tr></thead><tbody>
+{% for f in part.groups %}
+<tr><td id="{{ f.id }}">{{ f.id }}</td><td>{{ group_label(f) }}</td><td>{{ f.rowsTotal|n }}</td><td>{% if f.rowsTotal %}{{ sample(f) }}{% else %}{{ f.plain|short(140) }}{% endif %}</td></tr>
+{% endfor %}
+</tbody></table>
+{% for f in part.groups if f.figures %}
+{{ figures(f) }}
+{% endfor %}
+{% endif %}
+{% endfor %}
+{% endfor %}
+{% elif s.id == "repairs" %}
+<table><colgroup><col style="width:7%"><col style="width:19%"><col style="width:16%"><col style="width:10%"><col style="width:16%"><col style="width:8%"><col style="width:9%"><col style="width:7%"><col style="width:8%"></colgroup>
+<thead><tr><th>finding</th><th>check</th><th>arm</th><th>probe</th><th>verdict</th><th>repaired</th><th>reclassified</th><th>created</th><th>unmeasured</th></tr></thead><tbody>
+{% for f in fs %}
+<tr><td id="{{ f.id }}">{{ f.id }}</td><td><code>{{ f.checkId }}</code></td><td>{{ f.armId }}</td><td>{{ f.counts.probe }}</td><td>{{ f.verdict }}</td><td>{{ f.counts.repaired|n }}</td><td>{{ f.counts.reclassified|n }}</td><td>{{ f.counts.created|n }}</td><td>{{ f.counts.unmeasured|n }}</td></tr>
+{% endfor %}
+</tbody></table>
+{% for f in fs %}
+<p class="small">{{ f.id }}: {{ f.plain }} {{ ev(f.evidenceIds) }}</p>
+{% endfor %}
+{% elif s.id == "null" %}
+<table><colgroup><col style="width:8%"><col style="width:22%"><col style="width:20%"><col style="width:50%"></colgroup>
+<thead><tr><th>finding</th><th>check</th><th>arm / part</th><th>coverage the probe declared (population: judged; unjudgeable)</th></tr></thead><tbody>
+{% for f in fs %}
+<tr><td id="{{ f.id }}">{{ f.id }}</td><td><code>{{ f.checkId }}</code></td><td>{{ f.armId }} / {{ f.part or "-" }}</td><td>{% if f.counts.coverageLines %}{% for c in f.counts.coverageLines %}{{ c.population }}: {{ c.judged|n }}; {{ c.unjudgeable|kv }}{% if not loop.last %} / {% endif %}{% endfor %}{% else %}{{ f.counts.coverage|n }} coverage line(s) declared{% endif %} {{ ev(f.evidenceIds[:1]) }}</td></tr>
+{% endfor %}
+</tbody></table>
+{% elif s.id == "catalogues" %}
+<table><colgroup><col style="width:8%"><col style="width:36%"><col style="width:20%"><col style="width:8%"><col style="width:8%"><col style="width:20%"></colgroup>
+<thead><tr><th>finding</th><th>check</th><th>arm</th><th>rows</th><th>unit</th><th>evidence</th></tr></thead><tbody>
+{% for f in fs %}
+<tr><td id="{{ f.id }}">{{ f.id }}</td><td><code>{{ f.checkId }}</code> - {{ f.title|short(60) }}</td><td>{{ f.armId }}</td><td>{{ f.counts.count|n }}</td><td>{{ f.counts.unit }}</td><td>{{ ev(f.evidenceIds[:1]) }}</td></tr>
+{% endfor %}
+</tbody></table>
+{% elif s.id == "media" %}
+<ul>
+{% for f in fs %}
+<li id="{{ f.id }}"><strong>{{ f.id }}</strong> {{ f.plain }}{% if f.mediaIds %} {{ ev(f.mediaIds) }}{% endif %}</li>
+{% endfor %}
+</ul>
+{% else %}
+<ul>
+{% for f in p.unassessedOther %}
+<li id="{{ f.id }}"><strong>{{ f.id }}</strong> {{ f.plain }}{% if f.evidenceIds %} {{ ev(f.evidenceIds[:1]) }}{% endif %}</li>
+{% endfor %}
+</ul>
+{% if p.unjudgeable %}
+<table><colgroup><col style="width:8%"><col style="width:26%"><col style="width:24%"><col style="width:18%"><col style="width:10%"><col style="width:14%"></colgroup>
+<thead><tr><th>finding</th><th>check</th><th>arm</th><th>population</th><th>judged</th><th>unjudgeable</th></tr></thead><tbody>
+{% for f in p.unjudgeable %}
+<tr><td id="{{ f.id }}">{{ f.id }}</td><td><code>{{ f.checkId }}</code></td><td>{{ f.armId }}</td><td>{{ f.counts.population }}</td><td>{{ f.counts.judged|n }}</td><td>{{ f.counts.unjudgeable|kv }}</td></tr>
+{% endfor %}
+</tbody></table>
+{% endif %}
+{% endif %}
+{% endfor %}
+
+<h2>Omissions</h2>
+{% if p.omissions %}
+<p class="omit">{{ p.omissions|length }} abridgement(s), each pointing into the evidence index: {% for o in p.omissions %}{{ o.what|short(80) }} (<a href="{{ o.where }}">index</a>){% if not loop.last %}; {% endif %}{% endfor %}.</p>
+{% else %}
+<p>Nothing was abridged: every row of every finding is listed above.</p>
+{% endif %}
+
+<h2>Evidence</h2>
+<p class="small">Every <code>E-</code> token links into <a href="evidence-index.md">evidence-index.md</a>, which lists every finding with all of its rows, every evidence file with its sha256, and every media row. <code>M-</code> tokens are media rows. The bundle is the authority; this report prints nothing the bundle does not carry. Compiled by evalreport {{ p.compiler.version }} (<code>{{ (p.compiler.sourceSha256["evalreport.py"] or "")[:12] }}</code>) from bundle plan <code>{{ p.source.planId }}</code> (manifest <code>{{ (p.source.manifestSha256 or "")[:12] }}</code>, disposition <code>{{ (p.source.dispositionSha256 or "")[:12] }}</code>).</p>
+</body>
+</html>

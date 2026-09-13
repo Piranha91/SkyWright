@@ -1,0 +1,16 @@
+{
+ "case": "wrong-count",
+ "presentation": "R4-repaired-plus-regression (concise)",
+ "finding": "F-001 - created 1, newDefect 1, repaired 1; the number 7 is bound to nothing in this plan",
+ "answers": {
+  "F-001": "This arm creates 7 new navmesh defects while repairing 1 row; the regression stands."
+ },
+ "expected": {
+  "accepted": [],
+  "refused": [{"id": "F-001", "rule": "number-unbound", "ruleKeywords": ["number", "count"]}]
+ },
+ "afterApply": {
+  "F-001": {"plainEqualsTemplate": true}
+ },
+ "rule": "D7: an answer is accepted only when every number in its prose is one of the finding's bound numbers; 7 is not. The refused answer keeps the template sentence and is listed under narration.refused with the rule. The rule's spelling is the oracle's (`number-unbound`); the driver requires the rule string to contain one of the keywords."
+}

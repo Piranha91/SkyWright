@@ -1,0 +1,134 @@
+{
+ "_note": "A hand-written presentation plan (schema 1, D2 field names) for test_evalreel.py. The test copies it, generates the media files it names under media/, and replaces the M-WIDE / M-TALL / M-CLIP / M-UNASSESSED ids and the null sha256 / bytes values with the generated files' real ones. Nothing here is an observation of any load order.",
+ "schemaVersion": 1,
+ "presentationId": "f1x7u2e0000a",
+ "generatedUtc": "2026-09-12T00:00:00Z",
+ "source": {
+  "bundleDir": ".",
+  "planId": "f1x7u2ep1an0",
+  "bundleSchema": 2,
+  "manifestSha256": "0000000000000000000000000000000000000000000000000000000000000000",
+  "dispositionSha256": "0000000000000000000000000000000000000000000000000000000000000000",
+  "ledgerSha256": "0000000000000000000000000000000000000000000000000000000000000000",
+  "verify": {"bundleComplete": true, "evaluationComplete": false, "claim": "incomplete"}
+ },
+ "compiler": {"name": "evalreport", "version": "1", "sourceSha256": {}},
+ "settings": {
+  "mode": "concise", "maxPages": 4, "page": {"size": "A4", "marginMm": 16, "baseFontPt": 10.5},
+  "rowsPerGroup": 3, "figuresPerFinding": 1,
+  "reel": {"maxSeconds": 120, "fps": 30, "width": 1280, "height": 720}
+ },
+ "scope": {
+  "targets": [{"name": "FixtureTown.esp"}],
+  "registryVersion": "fixture",
+  "planCreatedUtc": "2026-09-12T00:00:00Z",
+  "runStartedUtc": "2026-09-12T00:00:00Z",
+  "bundleCreatedUtc": "2026-09-12T00:00:00Z",
+  "scopeGeneratedUtc": "2026-09-12T00:00:00Z",
+  "arms": [
+   {"armId": "baseline", "kind": "baseline", "candidateFile": null, "pluginsAdded": [], "pluginsRemoved": [],
+    "payloadNote": null, "loadedInGameNote": null,
+    "identity": {"pluginCount": 3, "unstatedRows": [], "identityLimits": 0}},
+   {"armId": "candidate-01", "kind": "candidate", "candidateFile": "FixtureTown.esp", "pluginsAdded": ["FixtureTown.esp"],
+    "pluginsRemoved": [], "payloadNote": null, "loadedInGameNote": null,
+    "identity": {"pluginCount": 4, "unstatedRows": [], "identityLimits": 0}}
+  ],
+  "states": {"selected": ["baseline"], "notExplored": []},
+  "completion": {"complete": false, "claim": "incomplete", "missingRequired": 2,
+                 "byCause": {"mcp-only": 1, "manual": 1}, "unknownApplicability": []},
+  "integrity": {"ok": true, "defects": []}
+ },
+ "findings": [
+  {"id": "F-001", "kind": "regression", "priority": 1, "checkId": "geometry.navmesh-ownership", "family": "geometry",
+   "armId": "candidate-01", "part": null, "title": "Navmesh ownership", "strength": "record-fact", "verdict": "REGRESSION",
+   "plain": "The candidate arm creates 1 new navmesh defect in the fixture cell and repairs 2.",
+   "counts": {"created": 1, "repaired": 2}, "evidenceIds": ["E-0000000000000001"], "mediaIds": ["M-WIDE", "M-TALL"],
+   "groupId": null, "rows": [], "rowsTotal": 1, "rowsShown": 1},
+  {"id": "F-002", "kind": "finding", "priority": 3, "checkId": "runtime.supplied-observations", "family": "runtime",
+   "armId": "baseline", "part": null, "title": "Supplied observations", "strength": "supplied-media", "verdict": "OBSERVED",
+   "plain": "A supplied clip of the fixture cell on the baseline arm, 3 seconds from the recording.",
+   "counts": {}, "evidenceIds": [], "mediaIds": ["M-CLIP"], "groupId": null, "rows": [], "rowsTotal": 0, "rowsShown": 0},
+  {"id": "F-003", "kind": "missing", "priority": 2, "checkId": "records.cell-attributes", "family": "records",
+   "armId": "candidate-01", "part": null, "title": "Cell attributes", "strength": null, "verdict": null,
+   "plain": "records.cell-attributes has no accepted result on candidate-01 (mcp-only).",
+   "counts": {}, "evidenceIds": [], "mediaIds": [], "groupId": null, "rows": [], "rowsTotal": 0, "rowsShown": 0},
+  {"id": "F-004", "kind": "unassessed", "priority": 7, "checkId": "runtime.supplied-observations", "family": "runtime",
+   "armId": "candidate-01", "part": null, "title": "Media not assessed", "strength": null, "verdict": null,
+   "plain": "One supplied clip's fingerprint matches no accepted receipt on candidate-01; it is not evidence.",
+   "counts": {}, "evidenceIds": [], "mediaIds": ["M-UNASSESSED"], "groupId": null, "rows": [], "rowsTotal": 0, "rowsShown": 0}
+ ],
+ "groups": [],
+ "evidence": [
+  {"id": "E-0000000000000001", "kind": "emit", "path": "evidence/emits/navownprobe-candidate-01.json",
+   "sha256": "0000000000000000000000000000000000000000000000000000000000000000", "bytes": 0,
+   "checkId": "geometry.navmesh-ownership", "armId": "candidate-01", "part": null, "strength": "record-fact",
+   "recordedBy": "receipt-0001"}
+ ],
+ "media": [
+  {"id": "M-WIDE", "manifestId": "0000000000000001", "path": "media/wide.png", "sha256": null, "bytes": null,
+   "mediaKind": "offline-render",
+   "subject": {"checkId": "geometry.navmesh-ownership", "armId": "baseline", "formKey": null,
+               "description": "the fixture cell from the renderer's suggested camera, 16:9"},
+   "state": "baseline", "configurationFingerprint": "fixturefingerprint00000000000000000000000000000000000000000000ab",
+   "fingerprintSource": "asserted",
+   "provenance": {"tool": "test_evalreel", "toolVersion": "1", "capturedUtc": "2026-09-12T00:00:00Z"},
+   "sourceInterval": null, "original": null, "transformation": null, "assessed": true, "reason": null},
+  {"id": "M-TALL", "manifestId": "0000000000000002", "path": "media/tall.png", "sha256": null, "bytes": null,
+   "mediaKind": "offline-render",
+   "subject": {"checkId": "geometry.navmesh-ownership", "armId": "baseline", "formKey": null,
+               "description": "the same cell from above, a portrait crop"},
+   "state": "baseline", "configurationFingerprint": "fixturefingerprint00000000000000000000000000000000000000000000ab",
+   "fingerprintSource": "asserted",
+   "provenance": {"tool": "test_evalreel", "toolVersion": "1", "capturedUtc": "2026-09-12T00:00:00Z"},
+   "sourceInterval": null, "original": null, "transformation": null, "assessed": true, "reason": null},
+  {"id": "M-CLIP", "manifestId": "0000000000000003", "path": "media/clip.mp4", "sha256": null, "bytes": null,
+   "mediaKind": "game-video",
+   "subject": {"checkId": "runtime.supplied-observations", "armId": "baseline", "formKey": null,
+               "description": "a synthetic test pattern standing in for a recording"},
+   "state": "baseline", "configurationFingerprint": "fixturefingerprint00000000000000000000000000000000000000000000ab",
+   "fingerprintSource": "asserted",
+   "provenance": {"tool": "test_evalreel", "toolVersion": "1", "capturedUtc": "2026-09-12T00:00:00Z"},
+   "sourceInterval": {"startSeconds": 1.0, "endSeconds": 4.0, "timebase": "seconds",
+                      "sourcePath": "media/clip.mp4", "sourceSha256": null},
+   "original": null, "transformation": null, "assessed": true, "reason": null},
+  {"id": "M-UNASSESSED", "manifestId": null, "path": "media/other-order.mp4", "sha256": null, "bytes": null,
+   "mediaKind": "game-video",
+   "subject": {"checkId": "runtime.supplied-observations", "armId": "candidate-01", "formKey": null,
+               "description": "a clip recorded under a different configuration"},
+   "state": "baseline", "configurationFingerprint": "otherfingerprint000000000000000000000000000000000000000000000000",
+   "fingerprintSource": "asserted",
+   "provenance": {"tool": "test_evalreel", "toolVersion": "1", "capturedUtc": "2026-09-12T00:00:00Z"},
+   "sourceInterval": null, "original": null, "transformation": null, "assessed": false, "reason": "fingerprint-mismatch"}
+ ],
+ "unassessed": {
+  "media": [{"path": "media/other-order.mp4", "reason": "fingerprint-mismatch"}]
+ },
+ "omissions": [],
+ "chapters": [
+  {"id": "C-01", "kind": "opening", "title": "Evaluation reel — FixtureTown.esp", "findingIds": [], "mediaIds": [],
+   "captions": [], "plannedSeconds": 6},
+  {"id": "C-02", "kind": "finding", "title": "Navmesh ownership — candidate-01", "findingIds": ["F-001"],
+   "mediaIds": ["M-WIDE", "M-TALL"],
+   "captions": [
+    {"text": "F-001 Navmesh ownership: the candidate arm creates 1 new navmesh defect in the fixture cell and repairs 2 [E-0000000000000001].",
+     "evidenceIds": ["E-0000000000000001"], "mediaId": "M-WIDE"},
+    {"text": "The same cell from above; the contested navmesh triangle sits at the bridge's landward end. Identity asserted by the supplier from the arm's accepted receipt, not computed by the capturing tool.",
+     "evidenceIds": ["E-0000000000000001"], "mediaId": "M-TALL"}
+   ], "plannedSeconds": 10},
+  {"id": "C-03", "kind": "finding", "title": "Supplied observations — baseline", "findingIds": ["F-002"],
+   "mediaIds": ["M-CLIP"],
+   "captions": [
+    {"text": "F-002 Supplied observations: 3 seconds of the recording, from 1.0 s to 4.0 s, on the baseline arm.",
+     "evidenceIds": [], "mediaId": "M-CLIP"}
+   ], "plannedSeconds": 3},
+  {"id": "C-04", "kind": "missing", "title": "Media not assessed — candidate-01", "findingIds": ["F-004"],
+   "mediaIds": ["M-UNASSESSED"],
+   "captions": [
+    {"text": "F-004: one supplied clip's fingerprint matches no accepted receipt on candidate-01; it is not evidence and is not shown.",
+     "evidenceIds": [], "mediaId": "M-UNASSESSED"}
+   ], "plannedSeconds": 5},
+  {"id": "C-05", "kind": "closing", "title": "What this reel does not show", "findingIds": ["F-003"], "mediaIds": [],
+   "captions": [], "plannedSeconds": 8}
+ ],
+ "narration": {"source": "template", "validated": true, "refused": []}
+}

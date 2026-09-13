@@ -1,0 +1,16 @@
+{
+ "case": "invented-check",
+ "presentation": "R4-repaired-plus-regression (concise)",
+ "finding": "F-001 is geometry.navmesh-ownership; geometry.route-cut is not in the fixture registry trim and so not in the plan",
+ "answers": {
+  "F-001": "geometry.route-cut creates 1 new navmesh defect while repairing 1 row; the regression stands."
+ },
+ "expected": {
+  "accepted": [],
+  "refused": [{"id": "F-001", "rule": "check-unknown", "ruleKeywords": ["check"]}]
+ },
+ "afterApply": {
+  "F-001": {"plainEqualsTemplate": true}
+ },
+ "rule": "D7: the prose names no check outside the plan; geometry.route-cut is outside it. Numbers are all bound, no plugin is named, no forbidden word appears, so the check rule is the only one that fires."
+}

@@ -3480,6 +3480,97 @@ def bundle_refusal(run: Path, plan: dict, ledger: Ledger, receipts: dict, decisi
     return None
 
 
+#: media item schema 2 (standards/HOUSECARL_EVALUATION_BUNDLE.md §8). The vocabularies are closed and spelled
+#: here so a typo is a KeyError at the call site rather than an invented reason in a bundle.
+MEDIA_KINDS = ("offline-render", "native-screenshot", "game-video", "historical-illustration")
+FINGERPRINT_SOURCES = ("emitted", "asserted")
+MEDIA_REASONS = ("file-missing", "kind-missing", "subject-missing", "state-missing", "fingerprint-missing",
+                 "fingerprint-source-missing", "provenance-missing", "no-accepted-receipt-on-arm",
+                 "fingerprint-mismatch", "source-missing", "original-missing")
+
+
+def media_item_refusal(item: dict, src: Path, fingerprints: dict,
+                       other_fingerprints: dict | None = None) -> tuple[str | None, str | None]:
+    """Why a media item is unassessed: ONE closed reason from MEDIA_REASONS plus a plain sentence, or
+    (None, None) when it is accepted. The checks run in the standard's order — the file, then the
+    schema-2 fields (kind, subject, state, fingerprint, fingerprint source, provenance), then the arm's
+    accepted receipts, then the fingerprint comparison, then the clip's source and the original. A schema-1 item
+    (no `mediaKind`, no `fingerprintSource`) is refused by the first missing field's name.
+
+    `fingerprints` is each arm's OWN configuration (its accepted part-null / part-arm receipts);
+    `other_fingerprints` is what the arm's reverse / diff parts consumed — the other order — and only ever
+    explains a refusal (A-3)."""
+    other_fingerprints = other_fingerprints or {}
+    def r(reason: str, detail: str) -> tuple[str, str]:
+        assert reason in MEDIA_REASONS, reason
+        return reason, detail
+
+    if not item.get("path") or not src.exists() or src.is_dir():
+        return r("file-missing", f"the file {item.get('path')!r} does not exist")
+    kind = item.get("mediaKind")
+    if kind not in MEDIA_KINDS:
+        return r("kind-missing", (f"mediaKind is absent (a schema-1 item)" if kind is None else
+                                  f"mediaKind {kind!r} is not one of {', '.join(MEDIA_KINDS)}"))
+    subject = item.get("subject")
+    if not isinstance(subject, dict) or not all(subject.get(k) for k in ("checkId", "armId", "description")):
+        return r("subject-missing", "subject must carry checkId, armId and description")
+    if not item.get("state"):
+        return r("state-missing", "the item names no world state")
+    fp = item.get("configurationFingerprint")
+    if not fp:
+        return r("fingerprint-missing",
+                 "the item names no configuration fingerprint: it cannot be tied to a measured arm")
+    fps = item.get("fingerprintSource")
+    if fps not in FINGERPRINT_SOURCES:
+        return r("fingerprint-source-missing",
+                 (f"fingerprintSource is absent (a schema-1 item)" if fps is None else
+                  f"fingerprintSource {fps!r} is not one of {', '.join(FINGERPRINT_SOURCES)}"))
+    prov = item.get("provenance")
+    if not isinstance(prov, dict) or not prov.get("tool") or not prov.get("capturedUtc"):
+        return r("provenance-missing", "provenance must be an object naming tool and capturedUtc")
+    aid = subject["armId"]
+    if aid not in fingerprints:
+        return r("no-accepted-receipt-on-arm",
+                 f"no accepted receipt measured arm {aid!r}'s own configuration"
+                 + (" (its reverse / diff parts measured the other order)" if aid in other_fingerprints else ""))
+    if fp not in fingerprints[aid]:
+        if fp in other_fingerprints.get(aid, set()):
+            return r("fingerprint-mismatch",
+                     f"the fingerprint {str(fp)[:12]} belongs to the other order this arm's reverse part "
+                     f"measured, not to arm {aid}'s own configuration; a picture of the baseline order "
+                     f"illustrates the baseline arm")
+        return r("fingerprint-mismatch",
+                 f"the fingerprint {str(fp)[:12]} does not match any accepted receipt's configuration on "
+                 f"arm {aid}: this is not an illustration of a verified result")
+    interval = item.get("sourceInterval")
+    if interval is not None:
+        if not isinstance(interval, dict) or not interval.get("sourcePath"):
+            return r("source-missing", "sourceInterval names no sourcePath")
+        sp = Path(interval["sourcePath"])
+        if not sp.exists() or sp.is_dir():
+            return r("source-missing", f"the clip's source {interval['sourcePath']!r} does not exist")
+        if not interval.get("sourceSha256"):
+            return r("source-missing", "sourceInterval names no sourceSha256 to check the source against")
+        got = sha256_file(sp)
+        if got != interval["sourceSha256"]:
+            return r("source-missing", f"the clip's source hashes to {got[:12]}, not the recorded "
+                                       f"{str(interval['sourceSha256'])[:12]}")
+    original = item.get("original")
+    if original is not None:
+        if not isinstance(original, dict) or not original.get("path"):
+            return r("original-missing", "original names no path")
+        op = Path(original["path"])
+        if not op.exists() or op.is_dir():
+            return r("original-missing", f"the original {original['path']!r} does not exist")
+        if not original.get("sha256"):
+            return r("original-missing", "original names no sha256 to check the file against")
+        got = sha256_file(op)
+        if got != original["sha256"]:
+            return r("original-missing", f"the original hashes to {got[:12]}, not the recorded "
+                                         f"{str(original['sha256'])[:12]}")
+    return None, None
+
+
 def cmd_bundle(a) -> int:
     run = Path(a.run)
     set_run_store(run)
@@ -3580,33 +3671,45 @@ def cmd_bundle(a) -> int:
         media_doc = load_json(Path(a.media)) if a.media else None
         if a.media and media_doc is None:
             return refuse(f"--media {a.media}: not readable as JSON")
-        fingerprints = {}
+        # A-3: an arm's comparison set is the fingerprint of its OWN configuration — the accepted receipts
+        # whose part is null or "arm". A `reverse` part is measured on the OTHER order (the baseline for a
+        # candidate arm) and its receipt carries that order's fingerprint; a picture of the baseline order
+        # illustrates the baseline arm, never the candidate, so those fingerprints are kept apart and used
+        # only to say why an item was refused.
+        fingerprints: dict[str, set] = {}
+        other_fingerprints: dict[str, set] = {}
         for rec in receipts.values():
             if rec["validation"]["accepted"]:
                 fp = (rec.get("consumed") or {}).get("configuration", {}).get("fingerprint")
                 if fp:
-                    fingerprints.setdefault(rec["armId"], set()).add(fp)
+                    target = fingerprints if rec.get("part") in (None, "arm") else other_fingerprints
+                    target.setdefault(rec["armId"], set()).add(fp)
         media_items = media_doc if isinstance(media_doc, list) else (media_doc or {}).get("items") or []
         for item in media_items:
-            src = Path(item.get("path", ""))
-            subject = item.get("subject") or {}
-            aid = subject.get("armId")
-            fp = item.get("configurationFingerprint")
-            why = None
-            if not src.exists():
-                why = "the file does not exist"
-            elif not fp:
-                why = "the item names no configuration fingerprint: it cannot be tied to a measured arm"
-            elif aid not in fingerprints:
-                why = f"no accepted receipt exists for arm {aid!r}"
-            elif fp not in fingerprints.get(aid, set()):
-                why = (f"the fingerprint {str(fp)[:12]} does not match any accepted receipt's configuration "
-                       f"on arm {aid}: this is not an illustration of a verified result")
-            if why:
-                unassessed_media.append({**item, "reason": why})
-            else:
-                copy_in(src, f"media/{src.name}", check_id=subject.get("checkId"), arm_id=aid,
-                        strength="supplied-media", kind="media", provenance=item.get("provenance"))
+            if not isinstance(item, dict):
+                return refuse(f"--media {a.media}: an item is not an object: {str(item)[:80]!r}")
+            src = Path(item.get("path") or "")
+            if src.suffix.lower() in BINARY_SUFFIXES:
+                return refuse(f"--media {a.media}: {src.name} has a suffix that is never copied by policy "
+                              f"({src.suffix}); a media item is an image or video file")
+            reason, detail = media_item_refusal(item, src, fingerprints, other_fingerprints)
+            if reason:
+                unassessed_media.append({**item, "reason": reason, "detail": detail})
+                continue
+            subject = item["subject"]
+            digest = sha256_file(src)
+            rel = f"media/{digest[:12]}-{src.name}"
+            copy_in(src, rel, check_id=subject.get("checkId"), arm_id=subject.get("armId"),
+                    strength="supplied-media", kind="media", provenance=item.get("provenance"))
+            row = copied.get(rel)
+            if row is None:
+                return refuse(f"--media {a.media}: {src} could not be copied into the bundle")
+            # the manifest row carries EVERY field of the item (schema 2) on top of id/sha256/bytes;
+            # `path` becomes the bundle-relative copy, and the row's own keys are never overwritten
+            for k, v in item.items():
+                if k not in ("path", "sha256", "bytes", "id", "kind", "checkId", "armId", "strength",
+                             "recordedBy"):
+                    row[k] = v
 
         # D7: what a reader may DEMAND of this bundle. A manifest that simply lists what it happened to
         # copy cannot prove completeness — an omitted file would make the omission invisible.

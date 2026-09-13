@@ -1,0 +1,67 @@
+{
+ "case": "R3-many-findings-long-names",
+ "fixtureShape": "a new case (make_report_fixtures.py): case-01's scope, candidates and registry trim; the fake probes emit 62 rows per arm across four (Kind, A, B) groups whose plugin names are 80+ characters, on the baseline arm, the candidate arm and the candidate's reverse part (identical rows, so the sweep is INERT). navownprobe: CLOBBERED|A|B x20 and CLOBBERED|C|D x10; overlapprobe: OVERLAP|A|B x20; contactprobe: CONTACT|C|B x12.",
+ "acceptanceRow": "Many findings and long names: stable grouping, complete counts/evidence links and a readable print export within four pages; exhaustive mode deliberately expands it.",
+ "rules": ["D2 groups / rowsTotal / rowsShown / omissions", "D3 grouping key, sort order, abridgement", "D4 print limit and the abridgement ladder, exhaustive mode"],
+ "planExit": 0,
+ "longNames": {
+  "A": "FixtureLongNameAlpha-the-first-plugin-whose-name-runs-past-eighty-characters-for-the-print-check.esp",
+  "B": "FixtureLongNameBravo-the-second-plugin-whose-name-runs-past-eighty-characters-for-the-print-check.esp",
+  "C": "FixtureLongNameCharlie-the-third-plugin-whose-name-runs-past-eighty-characters-for-the-print-check.esp",
+  "D": "FixtureLongNameDelta-the-fourth-plugin-whose-name-runs-past-eighty-characters-for-the-print-check.esp",
+  "minimumLength": 80
+ },
+ "groups": {
+  "count": 4,
+  "keys": [
+   "CLOBBERED|FixtureLongNameAlpha-the-first-plugin-whose-name-runs-past-eighty-characters-for-the-print-check.esp|FixtureLongNameBravo-the-second-plugin-whose-name-runs-past-eighty-characters-for-the-print-check.esp",
+   "CLOBBERED|FixtureLongNameCharlie-the-third-plugin-whose-name-runs-past-eighty-characters-for-the-print-check.esp|FixtureLongNameDelta-the-fourth-plugin-whose-name-runs-past-eighty-characters-for-the-print-check.esp",
+   "OVERLAP|FixtureLongNameAlpha-the-first-plugin-whose-name-runs-past-eighty-characters-for-the-print-check.esp|FixtureLongNameBravo-the-second-plugin-whose-name-runs-past-eighty-characters-for-the-print-check.esp",
+   "CONTACT|FixtureLongNameCharlie-the-third-plugin-whose-name-runs-past-eighty-characters-for-the-print-check.esp|FixtureLongNameBravo-the-second-plugin-whose-name-runs-past-eighty-characters-for-the-print-check.esp"
+  ],
+  "checkIdByKind": {"CLOBBERED": "geometry.navmesh-ownership", "OVERLAP": "geometry.object-overlap", "CONTACT": "geometry.placement-contact"},
+  "findingIdsAtLeastPerGroup": 2,
+  "groupRowsTotalEqualsSumOfItsFindings": true,
+  "idsUniqueAndSequentialFrom": "G-001"
+ },
+ "emittedRowsPerArmPart": {
+  "geometry.navmesh-ownership": 30,
+  "geometry.object-overlap": 20,
+  "geometry.placement-contact": 12,
+  "partsWithRows": ["arm", "reverse"],
+  "sumOfFindingRowsTotalPerCheckArmPartEqualsDispositionFindingsCount": true
+ },
+ "concise": {
+  "rowsPerGroup": 3,
+  "everyFindingRowsShownAtMostRowsPerGroup": true,
+  "everyFindingRowsLengthEqualsRowsShown": true,
+  "omissionRowForEveryAbridgedFinding": {"whereStartsWith": "evidence-index.md#", "namesFindingOrGroupId": true},
+  "abridgedFindingsAtLeast": 8,
+  "sortWithinSection": "checkId ascending, then baseline arm before candidate arms, then rowsTotal descending",
+  "print": {"status": "within-limit", "pagesAtMost": 8}
+ },
+ "exhaustive": {
+  "flag": "--exhaustive",
+  "mode": "exhaustive",
+  "everyFindingRowsShownEqualsRowsTotal": true,
+  "noAbridgementOmissions": true,
+  "presentationIdDiffersFromConcise": true,
+  "print": {"pagesIsInteger": true, "pagesAtLeastConcise": true},
+  "reportMdLongerThanConcise": true
+ },
+ "evidenceIndex": {
+  "containsEveryLongNameInFull": true,
+  "namesEveryEmittedFormKey": true
+ },
+ "reportMd": {
+  "containsEveryLongNameAtLeastOnce": true
+ },
+ "notes": [
+  "D2: a finding carries ONE groupId and a group carries many findingIds, so a finding is one (checkId, armId, part) x (Kind, A, B) bucket and a group is the (checkId, Kind, A, B) key across arms and parts. rowsTotal on a finding is that bucket's emitted row count; the sum over a (checkId, armId, part) equals the disposition's `findings` number for that row - complete counts, whatever is shown.",
+  "D3 concise mode lists rowsPerGroup (3) rows per group and records rowsTotal; every abridgement is an omissions row pointing into the evidence index. With 62 rows per arm in four groups, at least eight findings are abridged (four groups x two arm parts with more than three rows each, at minimum).",
+  "D4: the evidence index is complete in both modes, so every emitted formKey and every long name appears there in full. D3 abridges ROWS, never names, so each long name appears in report.md at least once (the group that names it must name it).",
+  "D4 concise mode over the limit walks the abridgement ladder (rowsPerGroup 3->2->1, figuresPerFinding 1->0) and never a smaller font; the acceptance row requires the print to land within four pages, so status is within-limit here. If the ladder had to run, rowsShown is at most the LADDER's rowsPerGroup, which is at most 3 - the assertion holds either way.",
+  "D4 exhaustive mode has no limit and records its count: `pages` is an integer and the status word is not asserted for exhaustive (D4 names none for it).",
+  "Settings are part of the canonical plan that presentationId hashes (D2), so the concise and exhaustive presentations have different ids."
+ ]
+}
