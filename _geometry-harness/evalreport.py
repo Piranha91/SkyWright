@@ -237,8 +237,13 @@ def compile_triage_catalogue(manifest: dict, policy: dict, source_sha: str, sour
                      "members": member_rows})
     for index, row in enumerate(rows):
         row["page"] = f"incidents-{index // 50 + 1:04d}.html"
+    report_qualification = (manifest.get("scope") or {}).get("reportQualification")
+    if report_qualification is not None and (not isinstance(report_qualification, str) or not report_qualification.strip()):
+        raise ValueError("triage-report-qualification-invalid: scope.reportQualification must be a non-empty string")
+    report_qualification = report_qualification.strip() if report_qualification else None
     identity_input = {"generator": f"evalreport-{COMPILER_VERSION}", "triageSchemaVersion": TRIAGE_SCHEMA,
-                      "sourceSha256": source_sha, "policySha256": policy_sha}
+                      "sourceSha256": source_sha, "policySha256": policy_sha,
+                      "reportQualification": report_qualification}
     accounting.update({
         "reviewedPairs": sum(row["reviewedMemberCount"] for row in rows),
         "unreviewedPairs": sum(row["unreviewedMemberCount"] for row in rows),
@@ -285,6 +290,8 @@ def compile_triage_catalogue(manifest: dict, policy: dict, source_sha: str, sour
              (f'<p>Canonical full data: <a href="{html.escape(href_for(source_path), quote=True)}">annotated manifest</a> '
               f'<code>{html.escape(source_sha)}</code>.</p>' if source_path else
               f'<p>Canonical full data hash: <code>{html.escape(source_sha)}</code>.</p>'),
+             (f'<p><strong>Scope qualification:</strong> {html.escape(report_qualification)}</p>'
+              if report_qualification else ""),
              "<ul><li>Total pairs: ", str(accounting.get("pairsTotal", 0)), "</li><li>Total incidents: ",
              str(accounting.get("incidentsTotal", 0)), "</li><li>", html.escape(unreviewed_label), ": ",
              str(accounting.get("unreviewedPairs", 0)), "</li><li>", html.escape(unknown_label), ": ",
@@ -365,6 +372,9 @@ def render_triage_incident_pages(catalogue: dict, page_size: int = 50) -> dict[s
                  "pre{white-space:pre-wrap;overflow-wrap:anywhere;background:#f5f5f5;padding:.75rem}"
                  "article{border-top:1px solid #bbb;margin-top:2rem}</style></head><body>",
                  '<p><a href="overlap-triage-catalogue.html">Catalogue index</a></p>',
+                 (f'<p><strong>Scope qualification:</strong> '
+                  f'{html.escape(str((catalogue.get("source") or {}).get("reportQualification")))}</p>'
+                  if (catalogue.get("source") or {}).get("reportQualification") else ""),
                  f"<p>Detail page {page_index + 1} of {total_pages}; {len(subset)} incidents on this page. Pages: {nav}</p>"]
         for row in subset:
             members = row.get("members") or []

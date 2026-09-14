@@ -96,14 +96,21 @@ def test_cli():
 def test_report_catalogue():
     policy = json.loads(triage.DEFAULT_POLICY.read_text(encoding="utf-8"))
     annotated = triage.annotate(fixture(), policy)
+    qualification = ("Legacy retained-population replay; counts cover only retained identities, not an "
+                     "R2-corrected exterior recapture; exterior completeness is unestablished and distant "
+                     "origin is not clearance.")
+    annotated["scope"]["reportQualification"] = qualification
     catalogue, page = evalreport.compile_triage_catalogue(annotated, policy, "c" * 64)
     assert catalogue["schemaVersion"] == "overlap-triage-catalogue-v1"
     assert len(catalogue["incidents"]) == annotated["accounting"]["triage"]["incidentsTotal"]
     assert "Pairs awaiting review" in page and "Unknown or unsupported feature values" in page
     assert "TestPlace" in page and "Door" in page and "new" in page
+    assert catalogue["source"]["reportQualification"] == qualification
+    assert qualification in page
     detail_pages = evalreport.render_triage_incident_pages(catalogue, page_size=1)
     assert len(detail_pages) == len(catalogue["incidents"])
     rendered_members = "".join(detail_pages.values())
+    assert all(qualification in detail for detail in detail_pages.values())
     assert all(key in rendered_members for key in {p["pairKey"] for p in annotated["pairs"]})
     assert all(f'incidents-{n:04d}.html' in rendered_members for n in range(1, len(detail_pages) + 1))
     changed = copy.deepcopy(policy); changed["incidentRadius"] += 1
