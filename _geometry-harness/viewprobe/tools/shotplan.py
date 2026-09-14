@@ -553,12 +553,36 @@ def subjects_from_game(args):
 
 
 def collect_subjects(args):
-    """--subject specs plus the ones read off the game; at least one is required."""
-    specs = list(args.subject) + subjects_from_game(args)
-    if not specs:
-        raise SystemExit("no subjects: give --subject X,Y[,Z][=label] and/or "
-                         "--subject-from-game FORMID[=label]")
-    return [Subject(s, args.floor_z if args.floor_z is not None else 0.0) for s in specs]
+    """--subject / --surface specs plus the ones read off the game; at least one is required.
+
+    ONE input contract, stated here so no caller has to guess it:
+
+        --subject X,Y[,Z][=label]   a thing standing at its feet: framing extent comes from
+                                    --subject-height / --subject-width
+        --surface X,Y,Z[=label]     a DECLARED point on an opaque face, supplied by the caller
+                                    from source evidence; framing context comes from
+                                    --surface-extent
+
+    Both are repeatable and may be mixed. The surface points are NOT discovered -- this tool does
+    not read meshes and does not find a contact curve. A caller that has such points (from a
+    record, a dumped soup, a retained worklist) declares them; a caller that does not has to get
+    them somewhere else first. That limit is deliberate and is restated in the output.
+    """
+    default_z = args.floor_z if args.floor_z is not None else 0.0
+    out = [Subject(s, default_z) for s in list(args.subject) + subjects_from_game(args)]
+    extent = getattr(args, "surface_extent", 0.0)
+    out += [Subject(s, default_z, kind="surface", extent=extent)
+            for s in (getattr(args, "surface", None) or [])]
+    if not out:
+        raise SystemExit("no subjects: give --subject X,Y[,Z][=label], --surface X,Y,Z[=label] "
+                         "and/or --subject-from-game FORMID[=label]")
+    n_surf = sum(1 for s in out if s.kind == "surface")
+    cap = getattr(args, "surface_max", 8)
+    if n_surf > cap:
+        raise SystemExit(f"--surface takes a small bounded set: {n_surf} given, --surface-max is "
+                         f"{cap}. Every surface point costs a pick in the verification render and "
+                         "widens the frame it has to fit in; declare the few that carry the claim.")
+    return out
 
 
 def vp_command(vp: str | None) -> list[str]:
@@ -942,19 +966,111 @@ def print_frame(fr):
 # --------------------------------------------------------------------------------------
 
 class Subject:
-    def __init__(self, spec, default_z):
+    """One thing the camera must see. Two KINDS, and the difference decides what proves it.
+
+    `space` (from `--subject`) is the original: a thing standing at its FEET, whose sightline is
+    proved by a ray reaching AT LEAST as far as it. Geometry further out is fine -- the subject is
+    somewhere in front of it.
+
+    `surface` (from `--surface`) is a declared point ON an opaque face -- the corner of a step,
+    the lip of a table, a point on a contact seam. Its sightline is proved by a ray that stops
+    THERE. A ray that runs past it has not established the surface at all: either the point is not
+    where the source said, or the face is alpha-blended and the depth probe cannot see it. Reading
+    "further than the target" as "clear" is correct for a space subject and wrong for a surface
+    one, which is the whole reason the kind is carried rather than inferred.
+    """
+
+    def __init__(self, spec, default_z, kind="space", extent=0.0):
         body, _, label = spec.partition("=")
-        parts = [float(v) for v in body.split(",")]
+        flag = "--subject" if kind == "space" else "--surface"
+        try:
+            parts = [float(v) for v in body.split(",")]
+        except ValueError:
+            raise SystemExit(f"{flag} wants X,Y[,Z][=label]; got {spec!r}")
         if len(parts) == 2:
+            if kind == "surface":
+                raise SystemExit(f"{flag} wants X,Y,Z[=label] -- a surface point has no default "
+                                 f"height, the height is the point of it; got {spec!r}")
             parts.append(default_z)
         if len(parts) != 3:
-            raise SystemExit(f"--subject wants X,Y[,Z][=label]; got {spec!r}")
+            raise SystemExit(f"{flag} wants X,Y[,Z][=label]; got {spec!r}")
         self.x, self.y, self.z = parts
+        self.kind, self.extent = kind, extent
         self.label = label or f"{self.x:.0f},{self.y:.0f}"
         self.cl: Clearance | None = None
 
     def pos(self):
         return (self.x, self.y, self.z)
+
+    def aim_point(self, args):
+        """The point the sightline probe shoots at: a surface point is the target ITSELF."""
+        if self.kind == "surface":
+            return (self.x, self.y, self.z)
+        return (self.x, self.y, self.z + args.sight_height)
+
+    def frame_offsets(self, args):
+        """(dz, dx, dy) offsets that must all be inside the frame.
+
+        A space subject is a standing figure -- feet to `--subject-height`, widened by
+        `--subject-width`. A surface target is a POINT, widened only by `--surface-extent`: the
+        context the caller asked to keep around it. Modelling a declared point as a 128 u figure
+        would push the camera back for a body that is not there.
+        """
+        if self.kind == "surface":
+            e = self.extent
+            if e <= 0.0:
+                return [(0.0, 0.0, 0.0)]
+            return [(dz, dx, dy) for dz in (-e, 0.0, e)
+                    for dx, dy in ((0, 0), (e, 0), (-e, 0), (0, e), (0, -e))]
+        return [(dz, dx, dy) for dz in (0.0, args.subject_height)
+                for dx, dy in ((0, 0), (args.subject_width, 0), (-args.subject_width, 0),
+                               (0, args.subject_width), (0, -args.subject_width))]
+
+    def frame_centre(self, args):
+        """The height the framing report treats as this target's middle."""
+        if self.kind == "surface":
+            return self.z
+        return self.z + args.subject_height / 2.0
+
+
+def resolve_floor(subjects, args):
+    """Which storey are we planning on?
+
+    A SPACE subject stands on the floor, so the lowest one gives it. A SURFACE point does not --
+    its Z is a feature height, which is the entire reason the kind exists. Taking a lintel at
+    z 200 for the floor puts the probe eye at 320 and aims the camera at 300, and the result is
+    a plausible pose of the ceiling. So when nothing stands on the floor, this REFUSES and names
+    the flag rather than inventing a storey.
+    """
+    if args.floor_z is not None:
+        return float(args.floor_z)
+    standing = [s.z for s in subjects if s.kind == "space"]
+    if standing:
+        return min(standing)
+    raise SystemExit(
+        "--floor-z is required when every target is a --surface point: a surface point's Z is "
+        "the height of a FEATURE, not of a storey, and the eye height, the placement test and "
+        "the default aim are all measured from the floor. Give --floor-z for the storey the "
+        "camera stands on.")
+
+
+def resolve_aim(subjects, floor_z, args):
+    """Where the camera looks by default.
+
+    Space subjects are aimed at `--aim-height` above their centroid -- a standing head. With only
+    surface points there is no body to aim at: the default becomes the centroid of the declared
+    points themselves, at their own mean height, because that is the feature the caller asked to
+    expose. `--aim` overrides either.
+    """
+    if args.aim:
+        return tuple(float(v) for v in args.aim.split(","))
+    standing = [s for s in subjects if s.kind == "space"]
+    pool = standing or subjects
+    cx = sum(s.x for s in pool) / len(pool)
+    cy = sum(s.y for s in pool) / len(pool)
+    if standing:
+        return (cx, cy, floor_z + args.aim_height)
+    return (cx, cy, sum(s.z for s in pool) / len(pool))
 
 
 def nav_verdict(entry, floor_z, args):
@@ -1003,22 +1119,20 @@ def frame_check(eye, yaw, pitch, fov, subjects, args):
     th = t * getattr(args, "aspect", 1.0)
     worst_h = worst_v = 0.0
     for s in subjects:
-        for dz in (0.0, args.subject_height):
-            for wx, wy in ((0, 0), (args.subject_width, 0), (-args.subject_width, 0),
-                           (0, args.subject_width), (0, -args.subject_width)):
-                d = (s.x + wx - eye[0], s.y + wy - eye[1], s.z + dz - eye[2])
-                zf = d[0] * f[0] + d[1] * f[1] + d[2] * f[2]
-                if zf <= 1.0:
-                    return False, 9.9, f"{s.label} is behind the camera", 0.5
-                xr = (d[0] * r[0] + d[1] * r[1] + d[2] * r[2]) / (zf * th)
-                yu = (d[0] * u[0] + d[1] * u[1] + d[2] * u[2]) / (zf * t)
-                worst_h, worst_v = max(worst_h, abs(xr)), max(worst_v, abs(yu))
+        for dz, wx, wy in s.frame_offsets(args):
+            d = (s.x + wx - eye[0], s.y + wy - eye[1], s.z + dz - eye[2])
+            zf = d[0] * f[0] + d[1] * f[1] + d[2] * f[2]
+            if zf <= 1.0:
+                return False, 9.9, f"{s.label} is behind the camera", 0.5
+            xr = (d[0] * r[0] + d[1] * r[1] + d[2] * r[2]) / (zf * th)
+            yu = (d[0] * u[0] + d[1] * u[1] + d[2] * u[2]) / (zf * t)
+            worst_h, worst_v = max(worst_h, abs(xr)), max(worst_v, abs(yu))
     fill = max(worst_h, worst_v)
     # Where the subjects sit vertically, 0 = top edge, 1 = bottom edge. Containment says they
     # are in the picture; this says whether they are in the MIDDLE of it.
     ctr = []
     for s in subjects:
-        d = (s.x - eye[0], s.y - eye[1], s.z + args.subject_height / 2.0 - eye[2])
+        d = (s.x - eye[0], s.y - eye[1], s.frame_centre(args) - eye[2])
         zf = d[0] * f[0] + d[1] * f[1] + d[2] * f[2]
         yu = (d[0] * u[0] + d[1] * u[1] + d[2] * u[2]) / (zf * t)
         ctr.append(0.5 - yu / 2.0)
@@ -1080,6 +1194,7 @@ def evaluate(eye, subjects, floor_z, nav_entry, args, aim, skip_nav=False, insid
     pitch = math.degrees(math.atan2(eye[2] - aim[2], dxy)) if dxy > 1 else 0.0
     v = {"eye": eye, "yaw": yaw, "pitch": pitch, "fail": [], "note": [], "sight": {}}
 
+    rank_penalty = 0.0
     for s in subjects:
         d = math.hypot(eye[0] - s.x, eye[1] - s.y)
         b = bearing_deg(eye[0] - s.x, eye[1] - s.y)
@@ -1088,13 +1203,29 @@ def evaluate(eye, subjects, floor_z, nav_entry, args, aim, skip_nav=False, insid
             continue
         c, why = s.cl.at(b)
         v["sight"][s.label] = {"bearing": b, "need": d, "clear": c}
+        # A clearance map is built at EYE HEIGHT around the target's XY. For a space subject --
+        # a figure standing at that XY, spanning the eye's own height band -- that is the right
+        # ray and it REFUSES on it. For a declared surface point at some other height it is not:
+        # a step's lip can be hidden behind a chest the eye-height ray flies over, and a lintel
+        # can be clear while the eye-height ray hits the wall under it. Measured on both sides in
+        # this tool's offline cases. So for a surface target the map RANKS -- it moves the score,
+        # never the verdict -- and the aimed in-pose probe is what decides.
+        soft = s.kind == "surface"
         if c is None:
-            v["fail"].append(f"{s.label}: {why} (bearing {b:.0f} deg)")
+            msg = f"{s.label}: {why} (bearing {b:.0f} deg)"
         elif c <= d + args.sight_margin:
-            v["fail"].append(f"{s.label}: geometry at {c:.0f} u blocks the {d:.0f} u sightline "
-                             f"on bearing {b:.0f} deg (needs {args.sight_margin:.0f} u of margin)")
+            msg = (f"{s.label}: geometry at {c:.0f} u blocks the {d:.0f} u sightline "
+                   f"on bearing {b:.0f} deg (needs {args.sight_margin:.0f} u of margin)")
         else:
-            v["note"].append(f"{s.label}: clear -- first geometry {c:.0f} u along a {d:.0f} u ray")
+            v["note"].append(f"{s.label}: clear -- first geometry {c:.0f} u along a {d:.0f} u ray"
+                             + (" (eye-height map: RANKING only for a surface target)" if soft else ""))
+            continue
+        if soft:
+            rank_penalty += 30.0
+            v["note"].append(msg + " -- eye-height map only, which cannot refuse a surface target "
+                                   "at another height; ranked down, decided by the aimed probe")
+        else:
+            v["fail"].append(msg)
 
     ok, fill, why, v_centre = frame_check(eye, yaw, pitch, args.fov, subjects, args)
     v["fill"], v["v_centre"] = fill, v_centre
@@ -1104,7 +1235,10 @@ def evaluate(eye, subjects, floor_z, nav_entry, args, aim, skip_nav=False, insid
     kind, msg = ("skipped", "not probed yet") if skip_nav else \
         nav_verdict(nav_entry, floor_z, args)
     v["nav"] = kind
-    if kind in ("wrong-storey", "no-floor"):
+    # "unknown" is a MISSING answer, not a passing one. A point the probe never reported on has
+    # not been placement-tested, and letting it through would be exactly the silent degradation
+    # the aimed-verification fix above exists to stop -- the same bug one query lower down.
+    if kind in ("wrong-storey", "no-floor", "unknown"):
         v["fail"].append(f"placement: {msg}")
     else:
         v["note"].append(f"placement: {msg}")
@@ -1112,6 +1246,9 @@ def evaluate(eye, subjects, floor_z, nav_entry, args, aim, skip_nav=False, insid
         v["inside"] = "skipped"
     else:
         v["inside"], ifails, inotes = inside_verdict(inside_entry, args)
+        if v["inside"] == "unknown":
+            ifails = ifails + ["inside: no --inside-at answer for this point -- the eye was NOT "
+                               "tested against the refs whose box encloses it"]
         v["fail"] += ifails
         v["note"] += inotes
 
@@ -1122,8 +1259,232 @@ def evaluate(eye, subjects, floor_z, nav_entry, args, aim, skip_nav=False, insid
                   100.0
                   - 70.0 * abs(fill - args.fill)
                   - 25.0 * (1.0 - min(1.0, (v["wall_margin"] or 0) / args.comfort))
-                  + (8.0 if kind == "on-storey" else 0.0))
+                  + (8.0 if kind == "on-storey" else 0.0)
+                  - rank_penalty)
     return v
+
+
+# --------------------------------------------------------------------------------------
+# the final check: the pose that will be delivered, probed as itself
+# --------------------------------------------------------------------------------------
+#
+# The check that decides the answer has to be taken THROUGH THE DELIVERED POSE. The older
+# per-subject confirmation re-aimed the camera at each subject in turn (`--look SUBJECT`), which
+# answers "could a camera at this point see it" and NOT "does the camera we are about to hand
+# over see it". Those differ whenever the pose is aimed anywhere but straight at that one target,
+# which is every multi-target shot and every shot with an --aim. So: one render at the emitted
+# eye/yaw/pitch, and one `--pick` at the pixel each target actually lands on.
+
+
+def surface_tolerance(dist, probe_fov, size, args):
+    """How far from a declared surface point a depth hit may land and still BE that surface.
+
+    Derived from the instrument, not copied from a scene. Four terms:
+
+      abs    viewprobe prints hit position and distance as WHOLE UNITS, and a declared point
+             carried out of a record or a dump is itself rounded. --surface-tol (default 2 u).
+      pixel  a pick samples the ray through a PIXEL CENTRE, which misses the exact direction to
+             the target by up to half a pixel: fov/size/2 in angle.
+      pose   the emitted pose is rounded to 0.1 deg of yaw and pitch, so the ray the runner
+             actually takes is up to 0.05 deg off the one planned.
+      slant  a lateral miss of L on a face tilted t from perpendicular reads as a RANGE error of
+             L*tan(t). --surface-obliquity is tan(t) (default 1.73 = 60 deg of tilt).
+
+    so   tol(d) = surface_tol + d * (half_pixel_rad + pose_round_rad) * obliquity.
+
+    At d 250, size 320, fov 65 that is about 3 u -- which is why the counterexamples this is
+    tested against (a blocker tens of units short, a background hit hundreds of units beyond)
+    are nowhere near the boundary. A tolerance this small is NOT a claim that the planner can
+    resolve a 3 u feature; it is the width of the band in which "the ray stopped here" and "the
+    ray stopped at the declared point" cannot be told apart by this instrument.
+    """
+    half_pixel = math.radians(probe_fov / max(size, 1) / 2.0)
+    pose_round = math.radians(0.05)
+    return (args.surface_tol
+            + abs(dist) * (half_pixel + pose_round) * args.surface_obliquity)
+
+
+def pose_identity(cell, eye, yaw, pitch, fov, aspect, size, subjects, args):
+    """A short digest over the pose AND the inputs that produced it.
+
+    A verification result is only about the thing it was run on. Every artifact this tool writes
+    carries this id, so a saved camera, a saved verification and a saved worklist can be checked
+    to be the SAME candidate -- the failure the 2026-09-14 review found in a hand-built packet,
+    where the recommended camera and the saved camera were different poses and nothing in the
+    files said so.
+    """
+    import hashlib
+    payload = {
+        "cell": cell,
+        "eye": [round(v, 1) for v in eye],
+        "yaw": round(yaw, 1), "pitch": round(pitch, 1),
+        "fov": round(fov, 4), "aspect": round(aspect, 6), "size": int(size),
+        "targets": sorted((s.kind, s.label, round(s.x, 2), round(s.y, 2), round(s.z, 2),
+                           round(s.extent, 2)) for s in subjects),
+        "policy": {k: getattr(args, k, None) for k in
+                   ("sight_margin", "sight_height", "surface_tol", "surface_obliquity",
+                    "frame_pad", "eye_height")},
+    }
+    blob = json.dumps(payload, sort_keys=True, default=str).encode("utf-8")
+    return hashlib.sha256(blob).hexdigest()[:16]
+
+
+def target_pixels(eye, yaw, pitch, subjects, args, size):
+    """Where each target lands, and the probe fov needed to reach it.
+
+    Returns (rows, probe_fov). Each row has the target's angular offsets from the axis, whether
+    it is inside the DELIVERABLE frame (--fov by --aspect), and -- once the probe fov is settled
+    -- the pixel to --pick. The two frames are different objects and are reported separately: the
+    probe's canvas is square, and a 16:9 deliverable is WIDER, so a target near the left edge of
+    the delivered picture can sit outside a square probe frame at the same --fov. Widening the
+    PROBE frustum does not move the camera and does not change what the delivered frame contains.
+    """
+    f, r, u = camera_basis(yaw, pitch)
+    rows = []
+    t_v = math.tan(math.radians(args.fov) / 2.0)
+    t_h = t_v * getattr(args, "aspect", 1.0)
+    for s in subjects:
+        p = s.aim_point(args)
+        d = (p[0] - eye[0], p[1] - eye[1], p[2] - eye[2])
+        zf = d[0] * f[0] + d[1] * f[1] + d[2] * f[2]
+        xr = d[0] * r[0] + d[1] * r[1] + d[2] * r[2]
+        yu = d[0] * u[0] + d[1] * u[1] + d[2] * u[2]
+        row = {"label": s.label, "kind": s.kind, "point": p,
+               "dist": math.dist(eye, p), "behind": zf <= 1.0}
+        if row["behind"]:
+            row.update({"h_off": None, "v_off": None, "in_frame": False,
+                        "frame_xy": None, "pixel": None})
+        else:
+            row["h_off"] = math.degrees(math.atan2(xr, zf))
+            row["v_off"] = math.degrees(math.atan2(yu, zf))
+            # normalized position in the DELIVERED frame: |x| and |y| <= 1 is inside it
+            fx, fy = xr / (zf * t_h), yu / (zf * t_v)
+            row["frame_xy"] = (fx, fy)
+            row["in_frame"] = abs(fx) <= 1.0 and abs(fy) <= 1.0
+        rows.append(row)
+    need = max((max(abs(r_["h_off"]), abs(r_["v_off"]))
+                for r_ in rows if r_["h_off"] is not None), default=0.0)
+    # A little headroom so the target is not sampled by the outermost pixel, where half a pixel
+    # of angle is the largest fraction of the remaining margin.
+    probe_fov = args.fov
+    if need * 2.0 + 4.0 > probe_fov:
+        probe_fov = min(args.verify_fov_max, need * 2.0 + 4.0)
+    for row in rows:
+        row["probe_fov"] = probe_fov
+        row["pixel"] = (None if row["h_off"] is None else
+                        pixel_for_angles(row["h_off"], row["v_off"], probe_fov, size))
+    return rows, probe_fov
+
+
+def verify_in_pose(run, cell, eye, yaw, pitch, subjects, args):
+    """Probe the DELIVERED pose once, and judge every target in it.
+
+    Per-target status, and what each one means:
+
+      clear         a space subject: the first depth-writing geometry on its ray is at least as
+                    far as the subject, so nothing stands between them
+      confirmed     a surface target: the ray STOPPED at the declared point, within tolerance
+      blocked       geometry substantially nearer than the target -- something is in the way
+      not-surface   a surface target whose ray ran substantially PAST it. NOT a success: either
+                    the point is not where it was declared, or its face is alpha-blended and
+                    the depth probe cannot see it. Unproven, with the reason stated.
+      unproven      no depth-writing geometry on the ray at all (background, or alpha)
+      off-probe     the target is outside the probe canvas even widened -- not judged
+      behind        the target is behind the camera
+
+    The overall status is `verified` only when EVERY target is clear or confirmed.
+    """
+    rows, probe_fov = target_pixels(eye, yaw, pitch, subjects, args, run.size)
+    flags = ["--eye", f"{eye[0]:.1f},{eye[1]:.1f},{eye[2]:.1f}",
+             "--yaw", f"{yaw:.1f}", "--pitch", f"{pitch:.1f}", "--fov", f"{probe_fov:g}"]
+    picked = [r_ for r_ in rows if r_["pixel"] is not None]
+    for r_ in picked:
+        flags += ["--pick", f"{r_['pixel'][0]},{r_['pixel'][1]}"]
+    got = run.probe(*flags).picks() if picked else {}
+
+    results, bad = [], []
+    for r_ in rows:
+        d, tol = r_["dist"], surface_tolerance(r_["dist"], probe_fov, run.size, args)
+        res = {"label": r_["label"], "kind": r_["kind"], "want": round(d, 1),
+               "point": [round(v, 1) for v in r_["point"]], "pixel": r_["pixel"],
+               "probeFov": round(probe_fov, 2),
+               "hOff": None if r_["h_off"] is None else round(r_["h_off"], 3),
+               "vOff": None if r_["v_off"] is None else round(r_["v_off"], 3),
+               "inDeliveredFrame": r_["in_frame"], "tolerance": round(tol, 2)}
+        if r_["behind"]:
+            res.update(status="behind", why="the target is behind the camera")
+        elif r_["pixel"] is None:
+            res.update(status="off-probe", why=(
+                f"the target is {max(abs(r_['h_off']), abs(r_['v_off'])):.1f} deg off the axis and "
+                f"falls outside a {probe_fov:.0f} deg probe canvas (--verify-fov-max "
+                f"{args.verify_fov_max:.0f}) -- NOT judged"))
+        else:
+            hit = got.get(r_["pixel"])
+            if hit is None:
+                res.update(status="unproven", hit=None, why=(
+                    "the ray found no depth-writing geometry. An alpha-blended surface -- a "
+                    "curtain, a banner, a waterfall -- reads exactly this way, so this is "
+                    "UNPROVEN, not clear"))
+            else:
+                res["hit"] = {"pos": [hit[0], hit[1], hit[2]], "dist": hit[3]}
+                if r_["kind"] == "surface":
+                    if hit[3] < d - tol:
+                        res.update(status="blocked", why=(
+                            f"geometry at {hit[3]:.0f} u stands in front of the declared surface "
+                            f"at {d:.0f} u (tolerance {tol:.1f} u)"))
+                    elif hit[3] > d + tol:
+                        res.update(status="not-surface", why=(
+                            f"the ray ran to {hit[3]:.0f} u, past the declared surface at "
+                            f"{d:.0f} u (tolerance {tol:.1f} u). Nothing opaque was found AT the "
+                            "point: either it is not where it was declared, or its face is "
+                            "alpha-blended. The surface is NOT established"))
+                    else:
+                        res.update(status="confirmed", why=(
+                            f"the ray stopped at {hit[3]:.0f} u against a declared surface at "
+                            f"{d:.0f} u (within {tol:.1f} u)"))
+                else:
+                    if hit[3] >= d - args.sight_margin:
+                        res.update(status="clear", why=(
+                            f"first geometry {hit[3]:.0f} u along a {d:.0f} u ray"))
+                    else:
+                        res.update(status="blocked", why=(
+                            f"geometry at {hit[3]:.0f} u, short of the {d:.0f} u subject "
+                            f"(at {hit[0]:.0f},{hit[1]:.0f},{hit[2]:.0f})"))
+        if res["status"] not in ("clear", "confirmed"):
+            bad.append(res["label"])
+        if not res["inDeliveredFrame"] and res["status"] != "behind":
+            bad.append(res["label"])
+        results.append(res)
+
+    ok = not bad
+    return {"status": "verified" if ok else "failed",
+            "poseId": pose_identity(cell, eye, yaw, pitch, args.fov,
+                                    getattr(args, "aspect", 1.0), run.size, subjects, args),
+            "pose": {"eye": [round(v, 1) for v in eye], "yaw": round(yaw, 1),
+                     "pitch": round(pitch, 1), "fov": round(args.fov, 2),
+                     "aspect": round(getattr(args, "aspect", 1.0), 4), "probeFov": round(probe_fov, 2),
+                     "probeSize": run.size},
+            "targets": results,
+            "failed": sorted(set(bad))}
+
+
+def print_verification(v, indent="  "):
+    st = v["status"]
+    print(f"{indent}pose id {v['poseId']}   probe fov {v['pose']['probeFov']:.0f} deg on a "
+          f"{v['pose']['probeSize']}px square canvas; the DELIVERED frame is "
+          f"{v['pose']['fov']:.1f} deg vertical at aspect {v['pose']['aspect']:.3f}")
+    for t in v["targets"]:
+        mark = {"clear": "CLEAR", "confirmed": "CONFIRMED", "blocked": "BLOCKED",
+                "not-surface": "NOT-SURFACE", "unproven": "UNPROVEN",
+                "off-probe": "OFF-PROBE", "behind": "BEHIND"}[t["status"]]
+        px = "-" if t["pixel"] is None else f"{t['pixel'][0]},{t['pixel'][1]}"
+        print(f"{indent}  {t['label']:<18} {mark:<12} [{t['kind']}] pick {px}  {t['why']}")
+        if not t["inDeliveredFrame"] and t["status"] != "behind":
+            fx, fy = (t["hOff"], t["vOff"])
+            print(f"{indent}                   OFF-FRAME -- {fx} deg h / {fy} deg v is outside the "
+                  f"DELIVERED frame. The sightline above is a separate question from containment;"
+                  f" this target would not be in the picture")
+    print(f"{indent}=> {'VERIFIED' if st == 'verified' else 'FAILED: ' + ', '.join(v['failed'])}")
 
 
 # --------------------------------------------------------------------------------------
@@ -1185,12 +1546,10 @@ def print_verdict(v, fov, target=None, indent="  "):
 def cmd_plan(args):
     apply_profile_frame(args)
     subjects = collect_subjects(args)
-    floor_z = args.floor_z if args.floor_z is not None else min(s.z for s in subjects)
+    floor_z = resolve_floor(subjects, args)
     cx = sum(s.x for s in subjects) / len(subjects)
     cy = sum(s.y for s in subjects) / len(subjects)
-    aim = (cx, cy, floor_z + args.aim_height)
-    if args.aim:
-        aim = tuple(float(v) for v in args.aim.split(","))
+    aim = resolve_aim(subjects, floor_z, args)
 
     run = Runner(args.cell, args.vp, args.passthrough, args.out, args.size, not args.quiet)
 
@@ -1286,49 +1645,86 @@ def cmd_plan(args):
         print(f"  score {v['score']:5.1f}  bearing {v['_bearing']:5.1f} deg  standoff {v['_standoff']:4.0f} u  "
               f"fill {v['fill']:.2f}  wall margin {v['wall_margin']:.0f} u  nav {v['nav']}  inside {v['inside']}")
 
-    best = ok[0]
-    print(f"\n=== chosen ===")
+    # The final check, and the candidate walk it drives. The map is interpolated between sampled
+    # bearings and is probed FROM the target at eye height; this shoots the ray the DELIVERED
+    # camera will actually use, and it is the claim that counts. When the top candidate fails,
+    # walking down the ranked list is cheap (one render each) and is the thing a human would do
+    # by hand anyway -- but it is a SAMPLED search over the candidates this grid happened to
+    # produce, so exhausting it says nothing about whether some other camera exists.
+    best, verification, attempts = ok[0], None, []
+    if args.no_verify:
+        print(f"\n=== chosen (PROPOSAL -- NOT VERIFIED) ===")
+    else:
+        tries = max(1, args.verify_candidates)
+        print(f"\n--- verification: the chosen pose, probed as itself "
+              f"(up to {tries} candidate(s)) ---")
+        for i, cand in enumerate(ok[:tries]):
+            v = verify_in_pose(run, args.cell, cand["eye"], cand["yaw"], cand["pitch"],
+                               subjects, args)
+            attempts.append({"rank": i + 1, "bearing": cand["_bearing"],
+                             "standoff": cand["_standoff"], "poseId": v["poseId"],
+                             "status": v["status"], "failed": v["failed"]})
+            print(f"  candidate {i+1} of {tries}: bearing {cand['_bearing']:.0f} deg, standoff "
+                  f"{cand['_standoff']:.0f} u")
+            print_verification(v, indent="    ")
+            best, verification = cand, v
+            if v["status"] == "verified":
+                break
+        if verification["status"] != "verified":
+            print(f"\n  !! no candidate verified in {len(attempts)} attempt(s). The map and the "
+                  f"aimed probe DISAGREE, and the aimed probe wins.")
+            print("     This is a SAMPLED search over the candidates this grid produced -- it is "
+                  "NOT a proof that no camera can see these targets. Try a finer --bearing-step, "
+                  "a different --standoff range, more --verify-candidates, or declare the feature "
+                  "points differently.")
+
+    pose_id = pose_identity(args.cell, best["eye"], best["yaw"], best["pitch"], args.fov,
+                            getattr(args, "aspect", 1.0), run.size, subjects, args)
+    if verification is None:
+        status = "unverified"
+    elif verification["status"] == "verified":
+        status = "verified"
+    else:
+        status = "refused"
+    best = dict(best)
+    best["poseId"] = pose_id
+    best["verified"] = status == "verified"
+    if status == "refused":
+        # The pre-verification verdict said ok; the check that counts said no. `ok` is the field
+        # callers read, so it has to carry the FINAL answer or the old bug is still here under a
+        # new name. The pre-verification detail is kept beside it rather than thrown away.
+        best["preVerificationOk"] = best["ok"]
+        best["ok"] = False
+        best["fail"] = list(best["fail"]) + [
+            f"verification: {t['label']} {t['status']} -- {t['why']}"
+            for t in verification["targets"] if t["status"] not in ("clear", "confirmed")]
+
+    print(f"\n=== chosen ({status.upper()}) ===")
     print(pose_block(best, args.fov))
+    print(f"  pose id    {pose_id}   (the camera, its targets and its policy; every artifact "
+          f"below carries it)")
     print()
     print_verdict(best, args.fov, args.fill)
     print(f"  feet       {best['eye'][0]:.1f}, {best['eye'][1]:.1f}, {floor_z:.1f}"
           "   (the player's spot: the eye's X,Y at the floor, placement-tested)")
+    if status == "unverified":
+        print("  !! --no-verify was given: this is a PROPOSAL whose final check was never run. "
+              "It is not a verified camera and nothing below says it is.")
     print_doors(doors, args)
 
-    if not args.no_verify:
-        print("\n--- verification: an aimed probe render per subject, from the chosen camera ---")
-        print("  (the map is interpolated between sampled bearings and is probed FROM the subject;")
-        print("   this shoots the actual ray the camera will use, and is the claim that counts)")
-        bad = []
-        for s in subjects:
-            head = (s.x, s.y, s.z + args.sight_height)
-            d = math.dist(best["eye"], head)
-            c = run.size // 2
-            p = run.probe("--eye", "{:.1f},{:.1f},{:.1f}".format(*best["eye"]),
-                          "--look", "{:.1f},{:.1f},{:.1f}".format(*head),
-                          "--fov", f"{args.fov:g}", "--pick", f"{c},{c}")
-            hit = p.picks().get((c, c))
-            if hit is None:
-                print(f"  {s.label:<18} centre ray hit NOTHING at {d:.0f} u -- "
-                      f"no depth-writing geometry on the ray. Treat as UNPROVEN, not clear.")
-                bad.append(s.label)
-            elif hit[3] >= d - args.sight_margin:
-                print(f"  {s.label:<18} CLEAR -- first geometry {hit[3]:.0f} u along a {d:.0f} u ray")
-            else:
-                print(f"  {s.label:<18} BLOCKED -- geometry at {hit[3]:.0f} u, "
-                      f"short of the {d:.0f} u subject")
-                bad.append(s.label)
-        if bad:
-            print(f"\n  !! the map and the aimed probe DISAGREE for: {', '.join(bad)}")
-            print("     the aimed probe wins. Re-run with a finer --bearing-step, or take the "
-                  "next candidate.")
-        else:
-            print("  all subjects confirmed from the chosen camera.")
-
-    if args.worklist:
-        shot = {"label": (args.label or "planned camera") + f" -- {', '.join(s.label for s in subjects)}",
+    if args.worklist and status == "refused" and not args.emit_refused:
+        print(f"\nworklist NOT written: the final check refused this camera "
+              f"({', '.join(verification['failed'])}). Pass --emit-refused to write it anyway "
+              f"(it is marked REFUSED in the file).")
+    elif args.worklist:
+        mark = {"verified": "", "unverified": "UNVERIFIED -- ", "refused": "REFUSED -- "}[status]
+        shot = {"label": mark + (args.label or "planned camera")
+                         + f" -- {', '.join(s.label for s in subjects)}",
                 "eye": [round(best["eye"][0], 1), round(best["eye"][1], 1), round(best["eye"][2], 1)],
                 "floorZ": round(floor_z, 1),
+                "poseId": pose_id,
+                "status": status,
+                "verification": verification,
                 # the PLAYER's spot: the point the placement test just passed, at the floor --
                 # a runner takes it from here, never from a coordinate typed at the storey's height
                 "feet": [round(best["eye"][0], 1), round(best["eye"][1], 1), round(floor_z, 1)],
@@ -1362,7 +1758,16 @@ def cmd_plan(args):
     if args.json:
         with open(args.json, "w", encoding="utf-8") as f:
             json.dump({"cell": args.cell, "floorZ": floor_z, "aim": aim,
-                       "subjects": [{"label": s.label, "pos": s.pos()} for s in subjects],
+                       # THE field to read. "verified" means the delivered pose was probed as
+                       # itself and every target came back clear or confirmed; "refused" means it
+                       # was probed and did not; "unverified" means --no-verify, so the final
+                       # check was never run and this is a proposal.
+                       "status": status,
+                       "poseId": pose_id,
+                       "verification": verification,
+                       "verifyAttempts": attempts,
+                       "subjects": [{"label": s.label, "pos": s.pos(), "kind": s.kind,
+                                     "extent": s.extent} for s in subjects],
                        "feet": [best["eye"][0], best["eye"][1], floor_z], "doors": doors,
                        "chosen": {k: v for k, v in best.items() if k != "_target"},
                        "top": [{k: v for k, v in x.items() if k != "_target"} for x in ok[:args.top]],
@@ -1371,6 +1776,10 @@ def cmd_plan(args):
         print(f"json     -> {args.json}")
 
     print(f"\n{run.renders} viewprobe renders, {run.seconds:.0f}s of load walks.")
+    # The exit code is the last place the answer can go wrong: a caller that reads neither the
+    # stdout nor the JSON still has to be told. refused -> 1, unverified -> 2 (an explicit
+    # request, so not an error, but never mistakable for a pass), verified -> 0.
+    return {"verified": 0, "refused": 1, "unverified": 2}[status]
 
 
 def cmd_check(args):
@@ -1381,60 +1790,50 @@ def cmd_check(args):
     """
     apply_profile_frame(args)
     subjects = collect_subjects(args)
-    floor_z = args.floor_z if args.floor_z is not None else min(s.z for s in subjects)
+    floor_z = resolve_floor(subjects, args)
     eye = tuple(float(v) for v in args.eye.split(","))
-    aim = (sum(s.x for s in subjects) / len(subjects),
-           sum(s.y for s in subjects) / len(subjects), floor_z + args.aim_height)
-    if args.aim:
-        aim = tuple(float(v) for v in args.aim.split(","))
+    aim = resolve_aim(subjects, floor_z, args)
+
+    yaw = bearing_deg(aim[0] - eye[0], aim[1] - eye[1])
+    dxy = math.hypot(aim[0] - eye[0], aim[1] - eye[1])
+    pitch = math.degrees(math.atan2(eye[2] - aim[2], dxy)) if dxy > 1 else 0.0
 
     run = Runner(args.cell, args.vp, args.passthrough, args.out, args.size, not args.quiet)
     print(f"cell {args.cell}   camera {eye[0]:.1f},{eye[1]:.1f},{eye[2]:.1f}   floor z {floor_z:.0f}")
 
-    c = run.size // 2
-    verdicts, first = {}, True
+    # Same contract as `plan`: the pose that would be delivered is probed AS ITSELF, in one
+    # render, with a pick at the pixel each target lands on -- not re-aimed at each target in
+    # turn. The old per-target `--look` render answered "could a camera here see it", which is a
+    # different question from "does THIS camera, aimed where it is aimed, see it", and the two
+    # separate on every shot that is not aimed straight at one target.
     eye_i = (round(eye[0]), round(eye[1]), round(eye[2]))
-    for s in subjects:
-        head = (s.x, s.y, s.z + args.sight_height)
-        d = math.dist(eye, head)
-        extra = []
-        if first:
-            extra = ["--nav-at", f"{eye_i[0]},{eye_i[1]}",
-                     "--inside-at", f"{eye_i[0]},{eye_i[1]},{eye_i[2]}",
-                     "--refs-at", f"{eye[0]:.0f},{eye[1]:.0f},{args.refs_radius:g}"]
-            for s2 in subjects:
-                extra += ["--refs-at", f"{round(s2.x)},{round(s2.y)},{int(args.door_radius)}"]
-        p = run.probe("--eye", "{:.1f},{:.1f},{:.1f}".format(*eye),
-                      "--look", "{:.1f},{:.1f},{:.1f}".format(*head),
-                      "--fov", f"{args.fov:g}", "--pick", f"{c},{c}", *extra)
-        if first:
-            nav = p.nav().get((round(eye[0]), round(eye[1])))
-            inside = p.inside().get(eye_i)
-            doors = doors_near(subjects, p.refs_near(), args)
-            refs = p.refs()[:14]
-            first = False
-        hit = p.picks().get((c, c))
-        verdicts[s.label] = (hit, d)
+    extra = ["--nav-at", f"{eye_i[0]},{eye_i[1]}",
+             "--inside-at", f"{eye_i[0]},{eye_i[1]},{eye_i[2]}",
+             "--refs-at", f"{eye[0]:.0f},{eye[1]:.0f},{args.refs_radius:g}"]
+    for s2 in subjects:
+        extra += ["--refs-at", f"{round(s2.x)},{round(s2.y)},{int(args.door_radius)}"]
+    p = run.probe("--eye", "{:.1f},{:.1f},{:.1f}".format(*eye), "--yaw", "0", *extra)
+    nav = p.nav().get((round(eye[0]), round(eye[1])))
+    inside = p.inside().get(eye_i)
+    doors = doors_near(subjects, p.refs_near(), args)
+    refs = p.refs()[:14]
 
-    print("\n--- sightlines (the aimed ray the camera will actually use) ---")
-    fails = []
-    for label, (hit, d) in verdicts.items():
-        if hit is None:
-            print(f"  {label:<18} centre ray hit NOTHING at {d:.0f} u -- UNPROVEN "
-                  f"(no depth-writing geometry; an alpha-blended surface would read this way too)")
-            fails.append(f"{label}: unproven")
-        elif hit[3] >= d - args.sight_margin:
-            print(f"  {label:<18} CLEAR -- first geometry {hit[3]:.0f} u along a {d:.0f} u ray")
-        else:
-            print(f"  {label:<18} BLOCKED -- geometry at {hit[3]:.0f} u, short of the {d:.0f} u subject "
-                  f"(at {hit[0]:.0f},{hit[1]:.0f},{hit[2]:.0f})")
-            fails.append(f"{label}: blocked at {hit[3]:.0f} u")
+    ver = verify_in_pose(run, args.cell, eye, yaw, pitch, subjects, args)
+    print(f"\n--- sightlines, in the pose this camera would be delivered in "
+          f"(aimed at {aim[0]:.0f},{aim[1]:.0f},{aim[2]:.0f}) ---")
+    print_verification(ver)
+    fails = [f"{t['label']}: {t['status']}" for t in ver["targets"]
+             if t["status"] not in ("clear", "confirmed")]
+    fails += [f"{t['label']}: off-frame" for t in ver["targets"]
+              if not t["inDeliveredFrame"] and t["status"] != "behind"]
 
     kind, msg = nav_verdict(nav, floor_z, args)
     print(f"\n--- placement ---\n  {kind}: {msg}")
-    if kind in ("wrong-storey", "no-floor"):
+    if kind in ("wrong-storey", "no-floor", "unknown"):
         fails.append(f"placement: {kind}")
     ikind, ifails, inotes = inside_verdict(inside, args)
+    if ikind == "unknown":
+        ifails = ifails + ["inside: no --inside-at answer -- the eye was NOT tested"]
     print(f"\n--- inside (whose OBND box encloses the eye; --inside-cap {args.inside_cap:.0f} u) ---")
     for f in ifails:
         print(f"  REFUSED  {f}")
@@ -1444,9 +1843,6 @@ def cmd_check(args):
         fails.append("inside: " + "; ".join(f.split(": ", 1)[1] for f in ifails))
     print_doors(doors, args)
 
-    yaw = bearing_deg(aim[0] - eye[0], aim[1] - eye[1])
-    dxy = math.hypot(aim[0] - eye[0], aim[1] - eye[1])
-    pitch = math.degrees(math.atan2(eye[2] - aim[2], dxy)) if dxy > 1 else 0.0
     ok, fill, why, v_centre = frame_check(eye, yaw, pitch, args.fov, subjects, args)
     print(f"\n--- framing (aimed at {aim[0]:.0f},{aim[1]:.0f},{aim[2]:.0f}) ---")
     print(f"  subjects reach {fill:.2f} of the half-frame at vertical fov {args.fov:.2f}"
@@ -1462,11 +1858,25 @@ def cmd_check(args):
             print("  " + ln.strip())
 
     print("\n=== verdict ===")
+    print(f"  pose id {ver['poseId']}")
     if fails:
         print("  REFUSED -- " + "; ".join(fails))
     else:
         print("  ACCEPTED")
         print(pose_block({"eye": eye, "yaw": yaw, "pitch": pitch}, args.fov))
+    if args.json:
+        with open(args.json, "w", encoding="utf-8") as f:
+            json.dump({"cell": args.cell, "floorZ": floor_z, "aim": aim,
+                       "status": "refused" if fails else "verified",
+                       "poseId": ver["poseId"], "verification": ver,
+                       "subjects": [{"label": s.label, "pos": s.pos(), "kind": s.kind,
+                                     "extent": s.extent} for s in subjects],
+                       "framing": {"fill": round(fill, 3), "vCentre": round(v_centre, 3),
+                                   "ok": ok},
+                       "doors": doors, "fails": fails,
+                       "renders": run.renders, "seconds": round(run.seconds, 1)}, f, indent=2,
+                      default=str)
+        print(f"  json -> {args.json}")
     print(f"\n{run.renders} viewprobe renders, {run.seconds:.0f}s.")
     return 1 if fails else 0
 
@@ -1631,6 +2041,33 @@ def add_common(p, need_subjects=True):
                         "Repeatable. REFUSES when no game answers -- a movable item has dropped by "
                         "the time the cell is loaded, so it is planned from the game, never from "
                         "its record")
+    p.add_argument("--surface", action="append", default=[], metavar="X,Y,Z[=label]",
+                   help="a DECLARED point on an opaque face that the shot must expose -- the lip "
+                        "of a step, a point on a contact seam, the corner of a table. Repeatable. "
+                        "Unlike --subject it is proved by a ray that STOPS there: a ray that runs "
+                        "PAST it establishes nothing. The points are supplied BY THE CALLER from "
+                        "source evidence (a record, a dumped mesh, a retained worklist) -- this "
+                        "tool reads no meshes and finds no features")
+    p.add_argument("--surface-extent", type=float, default=0.0,
+                   help="half-extent of context kept in frame around each --surface point "
+                        "(default 0: the point alone). This is the framing/context extent; the "
+                        "point itself is what gets verified")
+    p.add_argument("--surface-max", type=int, default=8,
+                   help="how many --surface points are accepted (default 8). Each costs a pick "
+                        "in the verification render and widens the frame they must all fit in")
+    p.add_argument("--surface-tol", type=float, default=2.0,
+                   help="the CONSTANT term of the surface-hit tolerance, in units (default 2). "
+                        "viewprobe prints hit positions and distances as whole units and a "
+                        "declared point is itself rounded; the distance-dependent terms (pixel "
+                        "centre, pose rounding, face slant) are computed -- see surface_tolerance")
+    p.add_argument("--surface-obliquity", type=float, default=1.73,
+                   help="tan of the worst face tilt assumed when converting a lateral sampling "
+                        "miss into a range error (default 1.73 = 60 deg)")
+    p.add_argument("--verify-fov-max", type=float, default=150.0,
+                   help="widest PROBE frustum the final check may open to reach an off-axis "
+                        "target (default 150). The probe canvas is square and a wide deliverable "
+                        "frame is wider still; widening the probe does NOT move the camera and "
+                        "does not change what the delivered frame contains")
     p.add_argument("--port", type=int, default=None,
                    help="DevBench port for --subject-from-game (default: DEVBENCH_PORT, then the "
                         "port in the file DEVBENCH_RUNTIME_JSON names, then 8920)")
@@ -1737,8 +2174,18 @@ def main(argv=None):
     p.add_argument("--top", type=int, default=5)
     p.add_argument("--dump-survivors", action="store_true",
                    help="with --dump, dump only the nav-probed survivors instead of everything")
+    p.add_argument("--verify-candidates", type=int, default=3,
+                   help="how far down the ranked list the final check may walk when the top "
+                        "candidate fails (default 3, one render each). Exhausting them is a "
+                        "SAMPLED search, never a proof that no camera exists")
+    p.add_argument("--emit-refused", action="store_true",
+                   help="write the worklist even when the final check REFUSED the camera (it is "
+                        "labelled REFUSED in the file). Without this a refused camera writes no "
+                        "worklist at all")
     p.add_argument("--no-verify", action="store_true",
-                   help="skip the aimed per-subject confirmation renders")
+                   help="skip the final check. The result is then a PROPOSAL with its verification "
+                        "MISSING: status `unverified`, exit code 2, and the worklist label carries "
+                        "UNVERIFIED. It never means the check passed")
     p.add_argument("--worklist", default=None, help="write the chosen shot as a viewprobe worklist")
     p.add_argument("--json", default=None, help="write the full result as JSON")
     p.add_argument("--dump", default=None,
@@ -1752,6 +2199,8 @@ def main(argv=None):
     p.add_argument("--eye", required=True, metavar="X,Y,Z", help="the camera to judge")
     p.add_argument("--refs-radius", type=float, default=96.0)
     p.add_argument("--show-refs", action="store_true", help="print what is around the camera")
+    p.add_argument("--json", default=None,
+                   help="write the verdict, its pose id and its per-target verification as JSON")
     p.set_defaults(func=cmd_check)
 
     p = sub.add_parser("frame", help="read the game's own resolution and fov from its ini")

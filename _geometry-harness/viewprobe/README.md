@@ -1902,9 +1902,94 @@ Three passes, each paying only for what it needs:
    pass 1 because the full grid is ~1,400 probes and that many flags overruns a Windows command
    line; anything dropped by `--nav-probe-max` is named, never silently cut.
 
-Then an aimed probe render per subject from the chosen camera (`--eye P --look S`, picking the image
-centre) shoots the exact ray the game camera will use, where the map is an interpolation between
-sampled bearings. `--no-verify` skips it; do not, on a camera you have not seen.
+Then the **final check**: one render using the chosen camera's eye, yaw and pitch, with a `--pick`
+projected for each target. This replaces re-aiming the camera separately at each subject. The
+map is an interpolation between sampled bearings probed from the target's XY at eye height.
+
+**The final check governs the result.** It used to print its refusal and then write a successful
+worklist, a `chosen.ok: true` and exit 0 anyway; that cost a session. Now:
+
+| situation | `status` | `chosen.ok` | exit | worklist |
+|---|---|---|---|---|
+| verified | `verified` | `true` | 0 | written |
+| the check refused it | `refused` | `false` | 1 | **not written** (`--emit-refused` writes it marked `REFUSED -- `) |
+| `--no-verify` | `unverified` | pre-check value, with `verified: false` | 2 | written, marked `UNVERIFIED -- ` |
+
+For a final refusal, `chosen.ok` becomes false and its previous value is retained as
+`preVerificationOk`. With `--no-verify`, use `status` and `verified`: `chosen.ok` still contains
+the pre-check result. Every artifact carries a `poseId` digest over the pose, targets and selected
+policy values, and **each candidate attempt carries its own**. This identifies the candidate;
+it does not bind the scene configuration. When the top candidate fails, the
+check walks down the ranked list (`--verify-candidates`, default 3, one render each) — a SAMPLED
+search over the candidates this grid produced, never a proof that no camera exists.
+
+**Known correctness gaps in this checkpoint:**
+
+- A failed rerun can leave a previous successful worklist at the requested path; early input
+  failure can also leave the previous JSON result. The table describes new writes, not cleanup
+  of existing files. Use fresh output paths and check the invocation's exit code.
+- Skipped verification does not yet clear `chosen.ok`; it is not a reliable final boolean.
+- Pick projection uses the unrounded pose while renderer arguments are rounded to one decimal.
+  Near a surface edge this can sample the wrong pixel. The tolerance does not repair that error.
+- `poseId` does not include the effective scene or renderer identity. Matching IDs alone cannot
+  establish that a saved verification applies to the current inputs.
+
+These need regression fixes before treating saved results as a reliable automated acceptance
+gate. The current tests cover the baseline behavior below, not these remaining counterexamples.
+
+A query that was never answered is not a pass: a silent `--nav-at` or `--inside-at` now refuses
+the point by name rather than filing it as a note.
+
+##### Declared surface targets (`--surface`)
+
+`--subject` is a thing standing at its FEET, proved by a ray reaching AT LEAST as far as it.
+Sometimes what must be exposed is a point ON a face — the lip of a step, a point on a contact
+seam, the corner of a table — and for that the rule inverts: the ray has to STOP there. A ray that
+runs past a declared point establishes nothing.
+
+```
+--subject X,Y[,Z][=label]    extent from --subject-height / --subject-width
+--surface X,Y,Z[=label]      context extent from --surface-extent; bounded by --surface-max
+```
+
+Repeatable and mixable. A negative coordinate needs the `--surface=-852,...` form, or argparse
+reads the leading minus as a flag. **The points are supplied by the caller from its own source
+evidence** — this tool reads no meshes and discovers no features. With only surface targets,
+`--floor-z` is REQUIRED: a surface point's Z is a feature height, not a storey, and taking it for
+the floor puts the probe eye above the feature and aims the camera at the ceiling.
+
+Four verdicts, where a space subject has two:
+
+| depth hit `h` vs declared distance `d` | verdict |
+|---|---|
+| within `tol(d)` | **confirmed** |
+| `h < d − tol` | **blocked** — something is in front of it |
+| `h > d + tol` | **not-surface** — the ray ran past it; nothing opaque is there. Either the point is not where it was declared, or the face is alpha-blended. Unproven, NOT clear |
+| no hit | **unproven** — no depth-writing geometry; alpha reads exactly this way |
+
+`tol(d) = --surface-tol + d × (half_pixel + pose_round) × --surface-obliquity` — derived from the
+instrument, not from a scene: a pick samples a pixel CENTRE (`fov/size/2`), the pose is exported
+rounded to 0.1°, and a lateral miss on a face tilted `t` reads as a range error of `L·tan(t)`.
+`--surface-tol` (2 u) covers this renderer printing hit positions and distances as whole units.
+Around 3 u at 250–280 u on a 512px canvas at fov 65. That is the width of the band in which
+"stopped here" and "stopped at the declared point" cannot be told apart — **not** a claim that a
+3 u feature can be resolved.
+
+**An eye-height clearance map cannot certify a feature at another height.** A step's lip hides
+behind a chest the eye-height ray flies over; a lintel is clear while the eye-height ray hits the
+wall beneath it. So for a surface target the map RANKS — it moves the score, never the verdict —
+and the aimed in-pose probe decides. For a space subject the map still refuses as before.
+
+**Containment and sightline are reported separately.** A target can be confirmed on its ray and
+still be outside the picture. Containment is computed against the DELIVERED frame (`--fov` by
+`--aspect`); the probe's own canvas is square, so the probe frustum may be widened (capped by
+`--verify-fov-max`) to reach an off-axis pixel. Widening the probe does not move the camera and
+does not change what the delivered frame contains, and the report prints both.
+
+The baseline offline regression is `tools/test_shotplan_plan.py`, which drives the real CLI
+against `tools/fake_viewprobe.py` — a stand-in that replays this tool's own line formats over a
+declared toy scene, so the real parsers, scoring, verification and writers all run. Its scenes are
+synthetic known answers and are evidence about the planner, never about a cell.
 
 **The navmesh test is deliberately not "must be on navmesh".** Navmesh is cut out around furniture,
 and a measured good vantage stood on a bed footprint with its nearest triangle 80 u away. What IS a
