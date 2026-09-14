@@ -12,6 +12,7 @@ lacks something the report says "not assessed" or "not supplied" - never a guess
 Subcommands (contract: standards/HOUSECARL_EVALUATION_PRESENTATION.md):
 
   plan            --bundle DIR --out OUT [--mode concise|exhaustive] [--max-pages N] [--verify-copy]
+  triage          --manifest ANNOTATED.json --out OUT [--policy POLICY.json]
   report          --presentation OUT/presentation.json --out OUT [--no-print]
   verify          --out OUT
   narrate-packet  --presentation P --out FILE
@@ -28,8 +29,10 @@ from __future__ import annotations
 
 import argparse
 import collections
+import copy
 import datetime as dt
 import hashlib
+import html
 import json
 import os
 import re
@@ -60,6 +63,8 @@ EXIT_REFUSED_INPUT = 2
 EXIT_REFUSED_RESULT = 3
 
 ARTIFACTS = ("report.md", "report.html", "report.pdf", "evidence-index.md")
+TRIAGE_SCHEMA = "overlap-triage-v1"
+TRIAGE_POLICY = HERE.parent / ".claude" / "skills" / "world-edit-compatibility" / "references" / "overlap-triage-policy.json"
 
 
 # ------------------------------------------------------------------------------------------ helpers --
@@ -106,6 +111,291 @@ def write_text(p: Path, text: str) -> None:
     p.parent.mkdir(parents=True, exist_ok=True)
     with open(p, "w", encoding="utf-8", newline="\n") as f:
         f.write(text)
+
+
+def compile_triage_catalogue(manifest: dict, policy: dict, source_sha: str, source_path: str | None = None,
+                             report_base: str | None = None) -> tuple[dict, str]:
+    """Compile the triage extension through evalreport without changing the canonical manifest."""
+    if manifest.get("triageSchemaVersion") != TRIAGE_SCHEMA:
+        raise ValueError(f"triage-schema-unsupported: expected {TRIAGE_SCHEMA}")
+    policy_sha = sha256_text(canonical(policy))
+    recorded_policy = manifest.get("attributionPolicy") or {}
+    recorded = (recorded_policy.get("triageRanking") or {}).get("sha256") or recorded_policy.get("sha256")
+    if recorded != policy_sha:
+        raise ValueError("triage-policy-changed: the supplied policy does not match the manifest; rerun overlap_triage")
+    records = {str(x.get("formid")): x for x in manifest.get("records") or [] if isinstance(x, dict)}
+    pairs = {str(x.get("pairKey")): x for x in manifest.get("pairs") or [] if isinstance(x, dict)}
+    accounting_root = manifest.get("accounting") or {}
+    accounting = dict(accounting_root.get("triage") or accounting_root)
+    memberships = [key for incident in manifest.get("incidents") or [] for key in incident.get("pairKeys") or []]
+    duplicates = sorted(k for k, n in collections.Counter(memberships).items() if n > 1)
+    dangling = sorted(set(memberships) - set(pairs))
+    unaccounted = sorted(set(pairs) - set(memberships))
+    if (duplicates or dangling or unaccounted or accounting.get("pairsTotal") != len(pairs) or
+            accounting.get("incidentsTotal") != len(manifest.get("incidents") or [])):
+        raise ValueError(f"triage-accounting-invalid: duplicates={len(duplicates)}, dangling={len(dangling)}, "
+                         f"unaccounted={len(unaccounted)}, declared={accounting.get('pairsTotal')}, actual={len(pairs)}, "
+                         f"declaredIncidents={accounting.get('incidentsTotal')}, actualIncidents={len(manifest.get('incidents') or [])}")
+
+    def is_reviewed(review):
+        return isinstance(review, dict) and (review.get("status", "unreviewed") != "unreviewed" or
+                                              review.get("consequence") is not None)
+
+    def member_summary(pair):
+        pair_objects = []
+        for key in (pair.get("a"), pair.get("b")):
+            record = records.get(str(key), {})
+            fields = record.get("fields") or {}; base = fields.get("effectiveBase") or {}
+            pair_objects.append({"formKey": key,
+                                 "label": record.get("name") or record.get("editorid") or
+                                          base.get("name") or base.get("editorid") or str(key),
+                                 "type": base.get("type") or record.get("type"),
+                                 "mod": fields.get("responsiblePlugin") or record.get("winner")})
+        comparisons = []
+        for comparison in (pair.get("attribution") or {}).get("comparisons") or []:
+            changes = comparison.get("changedFields") or {}
+            before_objects = {str(x.get("formid")): x for x in (comparison.get("before") or {}).get("objects") or []}
+            after_objects = {str(x.get("formid")): x for x in (comparison.get("after") or {}).get("objects") or []}
+            changed_values = {}
+            for formid, names in changes.items():
+                before, after = before_objects.get(str(formid), {}), after_objects.get(str(formid), {})
+                changed_values[str(formid)] = {name: {"before": before.get(name), "after": after.get(name)}
+                                               for name in names or []}
+            comparisons.append({"beforeSetupId": comparison.get("beforeSetupId"),
+                                "afterSetupId": comparison.get("afterSetupId"),
+                                "status": comparison.get("status"), "reason": comparison.get("reason"),
+                                "changedFields": {str(k): list(v or []) for k, v in changes.items() if v},
+                                "changedValues": changed_values})
+        features = {name: {"status": f.get("status"), "reason": f.get("reason")}
+                    for name, f in (pair.get("features") or {}).items()}
+        actual = pair.get("actualShape") or {}
+        review = copy.deepcopy(pair.get("review") or {"status": "unreviewed", "consequence": None})
+        unknown_names = sorted(name for name, feature in features.items() if feature.get("status") != "measured")
+        confidence = {
+            "actualShapeStatus": actual.get("status"), "intersects": actual.get("intersects"),
+            "unknownFeatureNames": unknown_names,
+            "analogueConfidence": sorted({str(a.get("confidence")) for a in pair.get("analogues") or [] if a.get("confidence")})}
+        return {"pairKey": pair.get("pairKey"), "a": pair.get("a"), "b": pair.get("b"),
+                "objects": pair_objects,
+                "attribution": {"status": (pair.get("attribution") or {}).get("status"),
+                                "reasons": (pair.get("attribution") or {}).get("reasons") or [],
+                                "comparisons": comparisons},
+                "review": review, "reviewed": is_reviewed(review), "confidenceBasis": confidence,
+                "queues": copy.deepcopy(pair.get("queues") or {}),
+                "analogues": [{"matchKind": a.get("matchKind"), "confidence": a.get("confidence"),
+                               "sourceSetupId": a.get("sourceSetupId"),
+                               "sourcePairKey": a.get("sourcePairKey"), "limits": a.get("limits") or []}
+                              for a in pair.get("analogues") or []],
+                "features": features}
+    rows = []
+    for incident in manifest.get("incidents") or []:
+        members = [pairs[k] for k in incident.get("pairKeys") or [] if k in pairs]
+        objects, mods, limits = [], set(), set(incident.get("limits") or [])
+        comparison_counts, field_counts = collections.Counter(), collections.Counter()
+        for pair in members:
+            for key in (pair.get("a"), pair.get("b")):
+                record = records.get(str(key), {})
+                fields = record.get("fields") or {}
+                base = fields.get("effectiveBase") or {}
+                label = record.get("name") or record.get("editorid") or base.get("name") or base.get("editorid") or str(key)
+                objects.append({"formKey": key, "label": label, "type": base.get("type") or record.get("type"),
+                                "mod": fields.get("responsiblePlugin") or record.get("winner")})
+                if objects[-1]["mod"]:
+                    mods.add(objects[-1]["mod"])
+            attr = pair.get("attribution") or {}
+            for comparison in attr.get("comparisons") or []:
+                comparison_counts[(comparison.get("beforeSetupId"), comparison.get("afterSetupId"),
+                                   comparison.get("status") or "unresolved")] += 1
+                for names in (comparison.get("changedFields") or {}).values():
+                    field_counts.update(str(name) for name in names or [])
+            for feature in (pair.get("features") or {}).values():
+                if feature.get("status") != "measured" and feature.get("reason"):
+                    limits.add(feature["reason"])
+        dedup_objects = list({str(x["formKey"]): x for x in objects}.values())
+        member_rows = [member_summary(p) for p in members]
+        reviewed_count = sum(m["reviewed"] for m in member_rows)
+        review_scope = "fully_reviewed" if member_rows and reviewed_count == len(member_rows) else \
+                       "partially_reviewed" if reviewed_count else "unreviewed"
+        confidence_basis = {
+            "measuredActualIntersections": sum(m["confidenceBasis"]["intersects"] is True for m in member_rows),
+            "unknownActualGeometry": sum(m["confidenceBasis"]["intersects"] is None for m in member_rows),
+            "membersWithAnalogueContext": sum(bool(m["analogues"]) for m in member_rows),
+        }
+        effective_change = [f"{before}→{after}: {status} ×{count}" for (before, after, status), count in
+                            sorted(comparison_counts.items(), key=lambda item: tuple(str(x) for x in item[0]))]
+        if field_counts:
+            effective_change.append("effective fields: " + ", ".join(
+                f"{name} ×{count}" for name, count in sorted(field_counts.items())))
+        rows.append({"incidentId": incident.get("incidentId"), "place": incident.get("place"),
+                     "objects": dedup_objects, "mods": sorted(mods), "effectiveChange": effective_change,
+                     "pairKeys": list(incident.get("pairKeys") or []), "ranking": incident.get("ranking"),
+                     "review": incident.get("review"), "reviewScope": review_scope,
+                     "reviewedMemberCount": reviewed_count, "unreviewedMemberCount": len(member_rows) - reviewed_count,
+                     "confidenceBasis": confidence_basis,
+                     "limits": sorted(limits),
+                     "sourceSetups": incident.get("sourceSetups") or [],
+                     "members": member_rows})
+    for index, row in enumerate(rows):
+        row["page"] = f"incidents-{index // 50 + 1:04d}.html"
+    identity_input = {"generator": f"evalreport-{COMPILER_VERSION}", "triageSchemaVersion": TRIAGE_SCHEMA,
+                      "sourceSha256": source_sha, "policySha256": policy_sha}
+    accounting.update({
+        "reviewedPairs": sum(row["reviewedMemberCount"] for row in rows),
+        "unreviewedPairs": sum(row["unreviewedMemberCount"] for row in rows),
+        "fullyReviewedIncidents": sum(row["reviewScope"] == "fully_reviewed" for row in rows),
+        "partiallyReviewedIncidents": sum(row["reviewScope"] == "partially_reviewed" for row in rows),
+        "unreviewedIncidents": sum(row["reviewScope"] == "unreviewed" for row in rows),
+        "outstandingReviewIncidents": sum(row["unreviewedMemberCount"] > 0 for row in rows),
+        "newOrChangedGeometryUnknownPairs": sum(bool((m.get("queues") or {}).get("newOrChangedGeometryUnknown"))
+                                                 for row in rows for m in row["members"]),
+        "newOrChangedGeometryUnknownIncidents": sum(any((m.get("queues") or {}).get("newOrChangedGeometryUnknown")
+                                                        for m in row["members"]) for row in rows),
+        "pairsByAttribution": {status: sum(m["attribution"]["status"] == status for row in rows for m in row["members"])
+                               for status in ("unresolved", "new", "changed_existing", "absent_excluded", "inherited")},
+        "pairsWithAnalogueContext": sum(bool(m["analogues"]) for row in rows for m in row["members"]),
+        "pairsDeprioritizedByAnalogue": sum(any(reason.get("quantity") == "analogue" and int(reason.get("points") or 0) < 0
+                                                 for reason in (pairs[m["pairKey"]].get("ranking") or {}).get("reasons") or [])
+                                            for row in rows for m in row["members"]),
+    })
+    catalogue = {"schemaVersion": "overlap-triage-catalogue-v1", "identity": sha256_text(canonical(identity_input)),
+                 "source": identity_input, "accounting": accounting, "incidents": rows}
+    catalogue["source"]["canonicalManifest"] = {"path": source_path, "sha256": source_sha}
+    catalogue["source"]["reportBase"] = report_base
+    base_title = (policy.get("catalogue") or {}).get("title") or "Overlap incident review catalogue"
+    attribution_policy = manifest.get("attributionPolicy") or {}
+    candidate_names = attribution_policy.get("candidatePlugins") or []
+    comparison_ids = attribution_policy.get("comparisonSetupIds") or []
+    title_scope = ", ".join(candidate_names) + ((" across " if candidate_names else "") + ", ".join(comparison_ids) if comparison_ids else "")
+    title = base_title + (f" — {title_scope}" if title_scope else "")
+    unknown_label = (policy.get("catalogue") or {}).get("unknownLabel") or "Unknown feature values"
+    unreviewed_label = (policy.get("catalogue") or {}).get("unreviewedLabel") or "Pairs awaiting review"
+    unreviewed_consequence = (policy.get("catalogue") or {}).get("unreviewedConsequence") or "No consequence established."
+    next_action = (policy.get("catalogue") or {}).get("nextAction") or "Review the representative pair."
+    def href_for(path):
+        if not path:
+            return None
+        if report_base:
+            return Path(os.path.relpath(Path(path).resolve(), Path(report_base).resolve())).as_posix()
+        return Path(path).resolve().as_uri()
+    parts = ["<!doctype html><html><head><meta charset=\"utf-8\"><title>", html.escape(title),
+             "</title><style>body{font:16px/1.45 system-ui;max-width:1100px;margin:2rem auto;padding:0 1rem}"
+             "table{border-collapse:collapse;width:100%}th,td{border:1px solid #bbb;padding:.45rem;vertical-align:top}"
+             "th{text-align:left}code{overflow-wrap:anywhere}</style></head><body><h1>", html.escape(title), "</h1>",
+             "<p>Every discovered pair remains listed under one local incident. Ranking orders review and does not decide consequence.</p>",
+             (f'<p>Canonical full data: <a href="{html.escape(href_for(source_path), quote=True)}">annotated manifest</a> '
+              f'<code>{html.escape(source_sha)}</code>.</p>' if source_path else
+              f'<p>Canonical full data hash: <code>{html.escape(source_sha)}</code>.</p>'),
+             "<ul><li>Total pairs: ", str(accounting.get("pairsTotal", 0)), "</li><li>Total incidents: ",
+             str(accounting.get("incidentsTotal", 0)), "</li><li>", html.escape(unreviewed_label), ": ",
+             str(accounting.get("unreviewedPairs", 0)), "</li><li>", html.escape(unknown_label), ": ",
+             str(accounting.get("unknownFeatureValues", 0)), " values across ", str(accounting.get("unknownPairs", 0)),
+             " of ", str(accounting.get("pairsTotal", 0)), " pairs</li><li>New/changed pairs with unknown geometry: ",
+             str(accounting.get("newOrChangedGeometryUnknownPairs", 0)), " of ", str(accounting.get("pairsTotal", 0)),
+             " pairs, in ", str(accounting.get("newOrChangedGeometryUnknownIncidents", 0)),
+             " incidents (a separately visible subset that can overlap the broader unknown-feature view)</li><li>Inherited pairs: ",
+             str((accounting.get("pairsByAttribution") or {}).get("inherited", 0)), " of ", str(accounting.get("pairsTotal", 0)),
+             "</li><li>Pairs with analogue context: ", str(accounting.get("pairsWithAnalogueContext", 0)), " of ",
+             str(accounting.get("pairsTotal", 0)), "; ranking-deprioritized by analogue: ",
+             str(accounting.get("pairsDeprioritizedByAnalogue", 0)), "</li></ul>",
+             "<p>Views: <button onclick=\"showRows('all')\">All incidents (", str(accounting.get("incidentsTotal", 0)),
+             ")</button> <button onclick=\"showRows('unknown')\">Incidents with unknowns (", str(sum(any(f.get("status") != "measured" for m in row["members"] for f in m["features"].values()) for row in rows)),
+             ")</button> <button onclick=\"showRows('outstanding')\">Outstanding review (", str(accounting.get("outstandingReviewIncidents", 0)),
+             ")</button> <button onclick=\"showRows('partially_reviewed')\">Partially reviewed (", str(accounting.get("partiallyReviewedIncidents", 0)),
+             ")</button> <button onclick=\"showRows('geometry-unknown-change')\">New/changed geometry unknown (", str(accounting.get("newOrChangedGeometryUnknownIncidents", 0)),
+             ")</button></p><table><thead><tr><th>Incident and place</th><th>Objects and mods</th><th>Effective change</th>"
+             "<th>Review order, status and next action</th><th>Limits and evidence</th></tr></thead><tbody>"]
+    for row in rows:
+        place = row.get("place") or {}; cell = place.get("cell") or {}
+        place_text = cell.get("editorid") or cell.get("formid") or place.get("space") or "place not supplied"
+        object_text = "; ".join(f"{x.get('label')} ({x.get('type') or 'type unknown'}, {x.get('mod') or 'mod unknown'})"
+                                for x in row["objects"])
+        ranking = row.get("ranking") or {}; review = row.get("review") or {}
+        rank_reasons = "; ".join(f"{x.get('quantity')}={x.get('value')} ({int(x.get('points') or 0):+d})"
+                                 for x in ranking.get("reasons") or [])
+        consequence = review.get("consequence") or unreviewed_consequence
+        row_next_action = (f"Review each of the {row['unreviewedMemberCount']} outstanding member pairs in fixed-camera source and combined scenes; "
+                           "a representative review applies only to that pair."
+                           if row["unreviewedMemberCount"] else
+                           (review.get("nextAction") or "Every member pair has an individual review."))
+        confidence = row.get("confidenceBasis") or {}
+        confidence_text = (f"confidence basis: {confidence.get('measuredActualIntersections', 0)} measured intersections; "
+                           f"{confidence.get('unknownActualGeometry', 0)} geometry unknown; "
+                           f"{confidence.get('membersWithAnalogueContext', 0)} with analogue context")
+        unknown = any(f.get("status") != "measured" for member in row["members"] for f in member["features"].values())
+        queue_unknown = any((m.get("queues") or {}).get("newOrChangedGeometryUnknown") for m in row["members"])
+        row_class = "unknown " if unknown else ""
+        row_class += row["reviewScope"] + " "
+        row_class += "outstanding " if row["unreviewedMemberCount"] else ""
+        row_class += "geometry-unknown-change" if queue_unknown else ""
+        source_parts = []
+        for source_setup in row["sourceSetups"]:
+            source_path = source_setup.get("manifestPath")
+            label = html.escape(str(source_setup.get("setupId")))
+            if source_path:
+                label = f'<a href="{html.escape(href_for(source_path), quote=True)}">{label}</a>'
+            source_parts.append(f"{label}: {html.escape(str(source_path or 'path unavailable'))} "
+                                f"[{html.escape(str(source_setup.get('manifestSha256') or 'hash unavailable'))}]")
+        sources = "; ".join(source_parts)
+        detail_link = f'{row["page"]}#{html.escape(str(row.get("incidentId")), quote=True)}'
+        parts.extend(["<tr class=\"", row_class, "\"><td><strong>", html.escape(str(row.get("incidentId"))), "</strong><br>", html.escape(str(place_text)),
+                      "<br><small>", str(len(row["pairKeys"])), " pair(s)</small></td><td>", html.escape(object_text),
+                      "</td><td>", html.escape(", ".join(row["effectiveChange"])), "</td><td>score ",
+                      html.escape(str(ranking.get("score"))), " — ", html.escape(rank_reasons), "<br>",
+                      html.escape(row["reviewScope"]), " (", str(row["reviewedMemberCount"]), " reviewed; ",
+                      str(row["unreviewedMemberCount"]), " outstanding): ", html.escape(str(consequence)),
+                      "<br>", html.escape(row_next_action),
+                      "</td><td>", html.escape(confidence_text), "<br>", html.escape("; ".join(row["limits"])), "<p>", sources or "No source setup link supplied.",
+                      f'</p><a href="{detail_link}">Every member pair and source-evidence citation</a></td></tr>'])
+    parts.extend(["</tbody></table><p><small>Catalogue identity <code>", catalogue["identity"],
+                  "</code>; source <code>", source_sha, "</code>; policy <code>", policy_sha,
+                  "</code>.</small></p><script>function showRows(k){document.querySelectorAll('tbody tr').forEach(r=>r.hidden=k!=='all'&&!r.classList.contains(k));}</script></body></html>"])
+    return catalogue, "".join(parts)
+
+
+def render_triage_incident_pages(catalogue: dict, page_size: int = 50) -> dict[str, str]:
+    """Render bounded detail pages while retaining every incident and pair membership."""
+    rows = catalogue.get("incidents") or []
+    total_pages = max(1, (len(rows) + page_size - 1) // page_size)
+    rendered = {}
+    for page_index in range(total_pages):
+        subset = rows[page_index * page_size:(page_index + 1) * page_size]
+        nav = " ".join(f'<a href="incidents-{n:04d}.html">{n}</a>' for n in range(1, total_pages + 1))
+        parts = ["<!doctype html><html><head><meta charset=\"utf-8\"><title>Overlap incident details</title>",
+                 "<style>body{font:16px/1.45 system-ui;max-width:1100px;margin:2rem auto;padding:0 1rem}"
+                 "pre{white-space:pre-wrap;overflow-wrap:anywhere;background:#f5f5f5;padding:.75rem}"
+                 "article{border-top:1px solid #bbb;margin-top:2rem}</style></head><body>",
+                 '<p><a href="overlap-triage-catalogue.html">Catalogue index</a></p>',
+                 f"<p>Detail page {page_index + 1} of {total_pages}; {len(subset)} incidents on this page. Pages: {nav}</p>"]
+        for row in subset:
+            members = row.get("members") or []
+            page_unknown = sum(any(f.get("status") != "measured" for f in (m.get("features") or {}).values()) for m in members)
+            page_unreviewed = row.get("unreviewedMemberCount", 0)
+            member_summaries = []
+            for member in members:
+                labels = " ↔ ".join(f"{x.get('label')} [{x.get('formKey')}, {x.get('mod') or 'mod unknown'}]"
+                                    for x in member.get("objects") or [])
+                comparisons = "; ".join(
+                    f"{c.get('beforeSetupId')}→{c.get('afterSetupId')}: {c.get('status')}"
+                    for c in (member.get("attribution") or {}).get("comparisons") or [])
+                review = member.get("review") or {}
+                consequence = review.get("consequence") or "unreviewed"
+                member_summaries.append("<li><strong>" + html.escape(str(member.get("pairKey"))) +
+                    "</strong>: " + html.escape(labels) + "<br>" + html.escape(comparisons) +
+                    "<br>Consequence: " + html.escape(str(consequence)) + "</li>")
+            parts.extend([f'<article id="{html.escape(str(row.get("incidentId")), quote=True)}"><h2>',
+                          html.escape(str(row.get("incidentId"))), "</h2><p>", str(len(members)),
+                          " member pairs; review scope: ", html.escape(str(row.get("reviewScope"))),
+                          "; unreviewed members: ", str(page_unreviewed),
+                          "; member pairs with unknown features: ", str(page_unknown),
+                          ". Global totals: ", str(catalogue.get("accounting", {}).get("pairsTotal", 0)),
+                          " pairs, ", str(catalogue.get("accounting", {}).get("unreviewedPairs", 0)),
+                          " unreviewed.</p><ul>", "".join(member_summaries),
+                          "</ul><details><summary>Full member evidence, changes, confidence and review data</summary><pre>",
+                          html.escape(json.dumps(members, indent=2, ensure_ascii=False)),
+                          "</pre></details></article>"])
+        parts.append("</body></html>")
+        rendered[f"incidents-{page_index + 1:04d}.html"] = "".join(parts)
+    return rendered
 
 
 def read_text(p: Path) -> str:
@@ -1662,6 +1952,40 @@ def cmd_plan(a) -> int:
     return EXIT_OK
 
 
+def cmd_triage(a) -> int:
+    """Render the version-bound overlap incident catalogue via the report entry point."""
+    source = Path(a.manifest)
+    out = Path(a.out)
+    with Run("evalreport-triage", stage_source="counted") as r:
+        r.stage("compile", total=1, unit="catalogues")
+        manifest = load_json(source)
+        policy = load_json(Path(a.policy))
+        if not isinstance(manifest, dict):
+            return refuse(r, f"triage-manifest-unreadable: {source} is absent or not JSON")
+        if not isinstance(policy, dict):
+            return refuse(r, f"triage-policy-unreadable: {a.policy} is absent or not JSON")
+        source_sha = sha256_file(source)
+        try:
+            catalogue, rendered = compile_triage_catalogue(manifest, policy, source_sha, str(source.resolve()), str(out.resolve()))
+        except ValueError as exc:
+            return refuse(r, str(exc))
+        out.mkdir(parents=True, exist_ok=True)
+        write_json(out / "overlap-triage-catalogue.json", catalogue)
+        write_text(out / "overlap-triage-catalogue.html", rendered)
+        detail_pages = render_triage_incident_pages(catalogue)
+        for name, content in detail_pages.items():
+            write_text(out / name, content)
+        r.artifact(str(out / "overlap-triage-catalogue.json"))
+        r.artifact(str(out / "overlap-triage-catalogue.html"))
+        for name in detail_pages:
+            r.artifact(str(out / name))
+        r.feature("incidents", len(catalogue["incidents"]), "incidents")
+        r.feature("pairs", int(catalogue["accounting"].get("pairsTotal") or 0), "pairs")
+        r.advance(1)
+        print(f"triage catalogue {catalogue['identity']}: {len(catalogue['incidents'])} incidents; wrote {out}")
+    return EXIT_OK
+
+
 def load_presentation(path: Path):
     plan = load_json(path)
     if not isinstance(plan, dict):
@@ -2161,6 +2485,11 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--location-scope", action="append", default=[], metavar="ARM=FILE",
                    help="bind a scopeprobe location-contributor document to an arm; repeat for multiple arms")
     p.set_defaults(fn=cmd_plan)
+    p = sub.add_parser("triage", help="compile an annotated overlap manifest into a readable incident catalogue")
+    p.add_argument("--manifest", required=True)
+    p.add_argument("--out", required=True)
+    p.add_argument("--policy", default=str(TRIAGE_POLICY))
+    p.set_defaults(fn=cmd_triage)
     p = sub.add_parser("report", help="render report.md / report.html / report.pdf / evidence-index.md from the plan")
     p.add_argument("--presentation", required=True)
     p.add_argument("--out", required=True)

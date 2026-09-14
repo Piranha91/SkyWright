@@ -1,0 +1,54 @@
+{
+  "schemaVersion": "overlap-triage-policy-v1",
+  "about": "Generic, explainable ordering and conservative local grouping for overlap pairs. Scores order review; they are not probabilities and never suppress a pair.",
+  "incidentRadius": 384.0,
+  "incidentRadiusQuantity": "maximum diagonal of an incident's combined world-space contact-support boxes, in Skyrim units; complete contact envelopes are preferred, otherwise the intersection of measured placed-NIF world bounds; unknown or individually larger supports are singleton",
+  "maxAnalogueExamplesPerPair": 3,
+  "analogueSourceRoles": ["source", "baseline", "vanilla"],
+  "analogueVanillaPlugins": [
+    "Skyrim.esm",
+    "Update.esm",
+    "Dawnguard.esm",
+    "HearthFires.esm",
+    "Dragonborn.esm"
+  ],
+  "pose": {
+    "positionScale": 128.0,
+    "rotationScaleRadians": 0.2617993877991494,
+    "scaleRelativeTolerance": 0.1
+  },
+  "meshFamilies": {},
+  "ranking": {
+    "attribution": {
+      "new": 50,
+      "changed_existing": 40,
+      "unresolved": 30,
+      "inherited": 10,
+      "absent_excluded": 0
+    },
+    "actualIntersection": 20,
+    "functionalPriority": {
+      "Door": 24,
+      "Furniture": 18,
+      "Activator": 16,
+      "Container": 12
+    },
+    "exactMeshAnalogueAdjustment": -6,
+    "meshFamilyAnalogueAdjustment": -2,
+    "exactBaseAnalogueAdjustment": -4,
+    "unknownFeatureAdjustment": 0
+  },
+  "catalogue": {
+    "title": "Overlap incident review catalogue",
+    "unknownLabel": "Unknown or unsupported feature values",
+    "unreviewedLabel": "Pairs awaiting review",
+    "unreviewedConsequence": "No consequence has been established.",
+    "nextAction": "Review the representative pair in a fixed-camera source and combined scene."
+  },
+  "limits": [
+    "Ranking is an explainable review order, not a consequence probability.",
+    "Analogue matches provide context and never make a pair benign.",
+    "No pair is suppressed; every pair remains recoverable from its incident membership.",
+    "Floor height and winning-navmesh distance remain unsupported without an identity-bound spatial-context receipt."
+  ]
+}

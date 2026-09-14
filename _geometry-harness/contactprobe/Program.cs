@@ -43,10 +43,11 @@ using HousecarlCore.Progress;
 //                          labelled positive set for the primitive (no game, no judgement)
 //   --overlap-json FILE    supplied overlap rows/pairs through the strict NIF render-surface narrow phase;
 //                          requires --json OUTPUT, which persists all attempted and budget-unrun rows
+//   --contact-evidence     with --overlap-json, enumerate the classified-contact support envelope for each supplied pair
 //
 // usage: contactprobe [--list N] [--eps U] [--reach U] [--json FILE] [--emit FILE] [--base EMIT] [--all-rows] [--interior-only]
 //                     [--absolute] [--labelled-mover X.esp] [--overlap-json FILE]
-//                     [--contact-budget-seconds 1200] [--pair-budget-seconds 120] [--contact-max-pairs 128]
+//                     [--contact-evidence] [--contact-budget-seconds 1200] [--pair-budget-seconds 120] [--contact-max-pairs 128]
 //                     [--only A.esm,B.esm,...] [--vanilla-assets] [--bos on|off]
 //                     [--enable X.esp]* [--disable X.esp]* [--instance DIR] [--game DIR] [--profile NAME]
 //   POPULATION      the LOAD-TIME state, and it always has been (R1, 2026-09-03): a reference exists in an arm when its
@@ -69,27 +70,25 @@ using HousecarlCore.Progress;
 
 // Nothing is compiled in — see _shared/HarnessTarget.cs. Flags win over the environment and over
 // harness.local.json; Require() runs AFTER them.
+if (args.Contains("--help") || args.Contains("-h"))
+{
+    Console.WriteLine("""
+contactprobe: placement contact and explicit render-surface pair review
+  --overlap-json INPUT --json OUTPUT [--contact-evidence]
+  --contact-budget-seconds N --pair-budget-seconds N --contact-max-pairs N
+  --surface-tolerance N --mesh-max-triangle-pairs N
+  --instance DIR --game DIR --profile NAME --order CANDIDATE.json
+Candidate Mods lists select asset priority. Surface/contact evidence is not a defect verdict.
+Other modes: --absolute or --labelled-mover PLUGIN; default is the moved-host pass.
+See contactprobe/Program.cs usage documentation for those modes. Help performs no load-order scan.
+""");
+    return 0;
+}
 using var __run = RunLog.BeginProcess("contactprobe", args);
 
 string Instance = HarnessTarget.Instance;
 string GamePath = HarnessTarget.Game;
 string profileName = HarnessTarget.Profile;
-{
-    for (int i = 0; i < args.Length; i++)
-    {
-        if (args[i] == "--instance" && i + 1 < args.Length) Instance = args[i + 1];
-        else if (args[i] == "--game" && i + 1 < args.Length) GamePath = args[i + 1];
-        else if (args[i] == "--profile" && i + 1 < args.Length) profileName = args[i + 1];
-    }
-}
-Instance = HarnessTarget.Require(Instance, "MO2 instance directory", "instance", "--instance");
-GamePath = HarnessTarget.Require(GamePath, "game directory", "game", "--game");
-profileName = HarnessTarget.Require(profileName, "MO2 profile name", "profile", "--profile");
-string profileDir = Path.Combine(Instance, "profiles", profileName);
-string modsDir = Path.Combine(Instance, "mods");
-string overwriteDir = Path.Combine(Instance, "overwrite");
-string dataDir = Path.Combine(GamePath, "Data");
-
 int listN = 25;
 double contactBudgetSeconds = 1200, pairBudgetSeconds = 120;
 int contactMaxPairs = 128;
@@ -99,56 +98,97 @@ string? stateSpec = null, switchMapPath = null;
 float eps = 4f;            // touching: surfaces within ε and no vertex deeper than ε inside. A chosen number, stated.
 float reach = 128f;        // how far from a moved host a dependent is looked for (the records pass's contact-plausible radius).
 string? jsonPath = null, emitPath = null, basePath = null, overlapJson = null, labelledMover = null, geomReport = null;
-bool allRows = false, absolute = false, vanillaAssets = false, interiorOnly = false;
+bool allRows = false, absolute = false, vanillaAssets = false, interiorOnly = false, contactEvidence = false;
 HashSet<string>? only = null;
 bool bosOn = true;
 var enablePlugins = new List<string>();
 var disablePlugins = new List<string>();
 string? orderFile = null;
-for (int i = 0; i < args.Length; i++)
+string NeedValue(int index, string flag)
 {
-    if (args[i] == "--list" && i + 1 < args.Length) listN = int.Parse(args[++i]);
-    else if (args[i] == "--eps" && i + 1 < args.Length) eps = float.Parse(args[++i]);
-    else if (args[i] == "--reach" && i + 1 < args.Length) reach = float.Parse(args[++i]);
-    else if (args[i] == "--json" && i + 1 < args.Length) jsonPath = args[++i];
-    else if (args[i] == "--emit" && i + 1 < args.Length) emitPath = args[++i];
-    else if (args[i] == "--base" && i + 1 < args.Length) basePath = args[++i];
-    else if (args[i] == "--overlap-json" && i + 1 < args.Length) overlapJson = args[++i];
-    else if (args[i] == "--contact-budget-seconds" && i + 1 < args.Length) contactBudgetSeconds = double.Parse(args[++i], System.Globalization.CultureInfo.InvariantCulture);
-    else if (args[i] == "--pair-budget-seconds" && i + 1 < args.Length) pairBudgetSeconds = double.Parse(args[++i], System.Globalization.CultureInfo.InvariantCulture);
-    else if (args[i] == "--contact-max-pairs" && i + 1 < args.Length) contactMaxPairs = int.Parse(args[++i]);
-    else if (args[i] == "--surface-tolerance" && i + 1 < args.Length) surfaceTolerance = double.Parse(args[++i], System.Globalization.CultureInfo.InvariantCulture);
-    else if (args[i] == "--mesh-max-triangle-pairs" && i + 1 < args.Length) meshMaxTrianglePairs = long.Parse(args[++i]);
-    else if (args[i] == "--labelled-mover" && i + 1 < args.Length) labelledMover = args[++i];
-    else if (args[i] == "--geom-report" && i + 1 < args.Length) geomReport = args[++i];
-    else if (args[i] == "--only" && i + 1 < args.Length) only = new HashSet<string>(args[++i].Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries), StringComparer.OrdinalIgnoreCase);
-    else if (args[i] == "--all-rows") allRows = true;
-    else if (args[i] == "--absolute") absolute = true;
-    else if (args[i] == "--vanilla-assets") vanillaAssets = true;
-    else if (args[i] == "--interior-only") interiorOnly = true;
-    else if (args[i] == "--order" && i + 1 < args.Length) orderFile = args[++i];
-    else if (args[i] == "--enable" && i + 1 < args.Length) enablePlugins.Add(args[++i]);
-    else if (args[i] == "--disable" && i + 1 < args.Length) disablePlugins.Add(args[++i]);
-    else if (args[i] == "--bos" && i + 1 < args.Length) bosOn = BosHook.ParseFlag(args[++i]) ?? throw new ArgumentException("--bos takes on|off");
-    else if (args[i] == "--state" && i + 1 < args.Length) stateSpec = args[++i];
-    // --flags is refused rather than added (Q27): contactprobe has resolved the enable chain since R1 (2026-09-03), so
-    // there is no flag-only population of it to reproduce, and one would be a mode known to be wrong about the game.
-    else if (args[i] == "--flags")
-    {
-        try { PopulationCli.Resolve("contactprobe", true, null, flagsSupported: false); }
-        catch (ArgumentException ex) { Console.Error.WriteLine(ex.Message); }
-        return 2;
-    }
-    else if (args[i] == "--switch-map" && i + 1 < args.Length) switchMapPath = args[++i];
+    if (index + 1 >= args.Length || args[index + 1].StartsWith("--", StringComparison.Ordinal))
+        throw new ArgumentException($"{flag} requires a value");
+    return args[index + 1];
 }
-
-if (overlapJson is not null && (jsonPath is null || !double.IsFinite(contactBudgetSeconds) || contactBudgetSeconds <= 0
-    || !double.IsFinite(pairBudgetSeconds) || pairBudgetSeconds <= 0 || contactMaxPairs < 0
-    || !double.IsFinite(surfaceTolerance) || surfaceTolerance < 0 || meshMaxTrianglePairs <= 0))
+try
 {
-    Console.Error.WriteLine("--overlap-json requires --json OUTPUT; time budgets must be finite positive, --contact-max-pairs nonnegative, surface tolerance finite nonnegative, and --mesh-max-triangle-pairs positive.");
+    for (int i = 0; i < args.Length; i++)
+    {
+        string flag = args[i];
+        if (flag == "--list") { if (!int.TryParse(NeedValue(i, flag), out listN)) throw new ArgumentException("--list requires an integer"); i++; }
+        else if (flag == "--eps") { if (!float.TryParse(NeedValue(i, flag), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out eps)) throw new ArgumentException("--eps requires a number"); i++; }
+        else if (flag == "--reach") { if (!float.TryParse(NeedValue(i, flag), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out reach)) throw new ArgumentException("--reach requires a number"); i++; }
+        else if (flag == "--json") { jsonPath = NeedValue(i, flag); i++; }
+        else if (flag == "--emit") { emitPath = NeedValue(i, flag); i++; }
+        else if (flag == "--base") { basePath = NeedValue(i, flag); i++; }
+        else if (flag == "--overlap-json") { overlapJson = NeedValue(i, flag); i++; }
+        else if (flag == "--contact-evidence") contactEvidence = true;
+        else if (flag == "--contact-budget-seconds") { if (!double.TryParse(NeedValue(i, flag), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out contactBudgetSeconds)) throw new ArgumentException("--contact-budget-seconds requires a number"); i++; }
+        else if (flag == "--pair-budget-seconds") { if (!double.TryParse(NeedValue(i, flag), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out pairBudgetSeconds)) throw new ArgumentException("--pair-budget-seconds requires a number"); i++; }
+        else if (flag == "--contact-max-pairs") { if (!int.TryParse(NeedValue(i, flag), out contactMaxPairs)) throw new ArgumentException("--contact-max-pairs requires an integer"); i++; }
+        else if (flag == "--surface-tolerance") { if (!double.TryParse(NeedValue(i, flag), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out surfaceTolerance)) throw new ArgumentException("--surface-tolerance requires a number"); i++; }
+        else if (flag == "--mesh-max-triangle-pairs") { if (!long.TryParse(NeedValue(i, flag), out meshMaxTrianglePairs)) throw new ArgumentException("--mesh-max-triangle-pairs requires an integer"); i++; }
+        else if (flag == "--labelled-mover") { labelledMover = NeedValue(i, flag); i++; }
+        else if (flag == "--geom-report") { geomReport = NeedValue(i, flag); i++; }
+        else if (flag == "--only")
+        {
+            only = new HashSet<string>(NeedValue(i, flag).Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries), StringComparer.OrdinalIgnoreCase);
+            if (only.Count == 0) throw new ArgumentException("--only requires at least one plugin name");
+            i++;
+        }
+        else if (flag == "--all-rows") allRows = true;
+        else if (flag == "--absolute") absolute = true;
+        else if (flag == "--vanilla-assets") vanillaAssets = true;
+        else if (flag == "--interior-only") interiorOnly = true;
+        else if (flag == "--order") { orderFile = NeedValue(i, flag); i++; }
+        else if (flag == "--enable") { enablePlugins.Add(NeedValue(i, flag)); i++; }
+        else if (flag == "--disable") { disablePlugins.Add(NeedValue(i, flag)); i++; }
+        else if (flag == "--bos") { bosOn = BosHook.ParseFlag(NeedValue(i, flag)) ?? throw new ArgumentException("--bos takes on|off"); i++; }
+        else if (flag == "--state") { stateSpec = NeedValue(i, flag); i++; }
+        // --flags is refused rather than added (Q27): contactprobe has resolved the enable chain since R1 (2026-09-03).
+        else if (flag == "--flags")
+        {
+            try { _ = PopulationCli.Resolve("contactprobe", true, null, flagsSupported: false); }
+            catch (ArgumentException ex) { throw new ArgumentException(ex.Message); }
+            throw new ArgumentException("contactprobe does not support --flags");
+        }
+        else if (flag == "--switch-map") { switchMapPath = NeedValue(i, flag); i++; }
+        else if (flag == "--instance") { Instance = NeedValue(i, flag); i++; }
+        else if (flag == "--game") { GamePath = NeedValue(i, flag); i++; }
+        else if (flag == "--profile") { profileName = NeedValue(i, flag); i++; }
+        else throw new ArgumentException($"unknown argument: {flag}");
+    }
+}
+catch (ArgumentException ex) { Console.Error.WriteLine(ex.Message); return 2; }
+
+if (listN < 0 || !float.IsFinite(eps) || eps < 0 || !float.IsFinite(reach) || reach < 0
+    || !double.IsFinite(contactBudgetSeconds) || contactBudgetSeconds <= 0
+    || !double.IsFinite(pairBudgetSeconds) || pairBudgetSeconds <= 0 || contactMaxPairs < 0
+    || !double.IsFinite(surfaceTolerance) || surfaceTolerance < 0 || meshMaxTrianglePairs <= 0)
+{
+    Console.Error.WriteLine("list/contact limits must be nonnegative; time budgets must be finite positive; eps, reach and surface tolerance must be finite nonnegative; mesh triangle pairs must be positive");
     return 2;
 }
+if (overlapJson is not null && jsonPath is null) { Console.Error.WriteLine("--overlap-json requires --json OUTPUT"); return 2; }
+if (contactEvidence && overlapJson is null)
+{
+    Console.Error.WriteLine("--contact-evidence is valid only with --overlap-json FILE.");
+    return 2;
+}
+int selectedModes = (overlapJson is null ? 0 : 1) + (absolute ? 1 : 0) + (labelledMover is null ? 0 : 1);
+if (selectedModes > 1) { Console.Error.WriteLine("--overlap-json, --absolute and --labelled-mover select different modes; pass only one"); return 2; }
+foreach (var input in new[] { (Flag: "--overlap-json", Path: overlapJson), (Flag: "--base", Path: basePath),
+    (Flag: "--switch-map", Path: switchMapPath), (Flag: "--order", Path: orderFile) })
+    if (input.Path is not null && !File.Exists(input.Path))
+    { Console.Error.WriteLine($"{input.Flag} input does not exist: {input.Path}"); return 2; }
+
+Instance = HarnessTarget.Require(Instance, "MO2 instance directory", "instance", "--instance");
+GamePath = HarnessTarget.Require(GamePath, "game directory", "game", "--game");
+profileName = HarnessTarget.Require(profileName, "MO2 profile name", "profile", "--profile");
+string profileDir = Path.Combine(Instance, "profiles", profileName);
+string modsDir = Path.Combine(Instance, "mods");
+string overwriteDir = Path.Combine(Instance, "overwrite");
+string dataDir = Path.Combine(GamePath, "Data");
 var sw = Stopwatch.StartNew();
 // WHAT THIS RUN EVALUATES, decided in one place (_shared/HarnessOrderCli.cs): the real profile, a --enable/--disable
 // what-if, or a --order candidate file - and, in the same step, the ASSET VIEW that configuration implies, so a run
@@ -371,7 +411,7 @@ if (overlapJson is not null)
     try
     {
         return OverlapPairReview.Run(overlapJson, jsonPath!, contactBudgetSeconds, pairBudgetSeconds,
-            contactMaxPairs, surfaceTolerance, meshMaxTrianglePairs, assets, idx, cidx.Arms,
+            contactMaxPairs, surfaceTolerance, meshMaxTrianglePairs, contactEvidence, assets, idx, cidx.Arms,
             cfg.Identity("load-time", cidx.State?.Name ?? "baseline"), idx.WinningGeometryPose, __run);
     }
     catch (Exception ex)

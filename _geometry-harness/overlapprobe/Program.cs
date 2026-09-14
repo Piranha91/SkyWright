@@ -68,32 +68,28 @@ using HousecarlCore.Progress;
 // Defaults are the configured instance; --instance / --game / --profile point every path at another
 // MO2 layout. Nothing is compiled in — see _shared/HarnessTarget.cs. Flags win over the environment
 // and over harness.local.json; Require() runs AFTER them.
+if (args.Contains("--help") || args.Contains("-h"))
+{
+    Console.WriteLine("""
+overlapprobe: bounded strict render-surface scene capture
+  --scene-id ID --scene-role ROLE --geometry-manifest OUTPUT
+  --scene-preflight --order CANDIDATE.json
+  --candidate-plugin PLUGIN (repeatable) --candidate-mod FOLDER (repeatable)
+  --scene-scope-from MANIFEST (repeatable) --scene-cell FORMKEY (repeatable)
+  --contact-evidence-pairs INPUT --surface-tolerance N --max-triangle-pairs N --pair-seconds N
+  --instance DIR --game DIR --profile NAME --order CANDIDATE.json
+Scene candidates require explicit Mods asset priority; preflight checks MO2 names and relative priority.
+An exterior persistent cell cannot define a bounded scope. Unknown geometry remains explicit.
+Legacy mode: --responsible-pair PLUGIN_A PLUGIN_B with --geometry-manifest OUTPUT.
+See overlapprobe/Program.cs usage documentation. Help performs no load-order scan.
+""");
+    return 0;
+}
 using var __run = RunLog.BeginProcess("overlapprobe", args);
 
 string Instance = HarnessTarget.Instance;
 string GamePath = HarnessTarget.Game;
 string profileName = HarnessTarget.Profile;
-{
-    for (int i = 0; i < args.Length; i++)
-    {
-        if (args[i] == "--instance" && i + 1 < args.Length) Instance = args[i + 1];
-        else if (args[i] == "--game" && i + 1 < args.Length) GamePath = args[i + 1];
-        else if (args[i] == "--profile" && i + 1 < args.Length) profileName = args[i + 1];
-    }
-}
-if (args.Any(a => a is "--depth" or "--frac" or "--maxdim"))
-{
-    Console.Error.WriteLine("--depth, --frac and --maxdim are unsupported: actual-shape discovery has no box depth, fraction or size decision gates");
-    return 3;
-}
-Instance = HarnessTarget.Require(Instance, "MO2 instance directory", "instance", "--instance");
-GamePath = HarnessTarget.Require(GamePath, "game directory", "game", "--game");
-profileName = HarnessTarget.Require(profileName, "MO2 profile name", "profile", "--profile");
-string profileDir = Path.Combine(Instance, "profiles", profileName);
-string modsDir = Path.Combine(Instance, "mods");
-string overwriteDir = Path.Combine(Instance, "overwrite");
-string dataDir = Path.Combine(GamePath, "Data");
-
 int listN = 25;
 string? stateSpec = null, switchMapPath = null;
 // --state: the runtime enable state per reference under the arm (null = the winning flag, the default population).
@@ -113,33 +109,90 @@ string? dumpPath = null;
 string? jsonPath = null;
 string? geometryManifestPath = null;
 string? historicalPairsPath = null;
+string? contactEvidencePairsPath = null;
 var responsiblePairNames = new List<(string A, string B)>();
+string? sceneId = null, sceneRole = null;
+var candidatePluginNames = new List<string>();
+var candidateModNames = new List<string>();
+var sceneScopeFromPaths = new List<string>();
+var explicitSceneCells = new List<string>();
 bool bosOn = true;
 bool flagsOnly = false;
+bool scenePreflight = false;
 var enablePlugins = new List<string>();
 var disablePlugins = new List<string>();
 string? orderFile = null;
-for (int i = 0; i < args.Length; i++)
+string NeedValue(int index, string flag)
 {
-    if (args[i] == "--list" && i + 1 < args.Length) listN = int.Parse(args[++i]);
-    else if (args[i] == "--surface-tolerance" && i + 1 < args.Length) surfaceTolerance = double.Parse(args[++i]);
-    else if (args[i] == "--max-triangle-pairs" && i + 1 < args.Length) maxTrianglePairs = long.Parse(args[++i]);
-    else if (args[i] == "--pair-seconds" && i + 1 < args.Length) pairSeconds = double.Parse(args[++i]);
-    else if (args[i] == "--emit" && i + 1 < args.Length) emitPath = args[++i];
-    else if (args[i] == "--base" && i + 1 < args.Length) basePath = args[++i];
-    else if (args[i] == "--dump" && i + 1 < args.Length) dumpPath = args[++i];
-    else if (args[i] == "--json" && i + 1 < args.Length) jsonPath = args[++i];
-    else if (args[i] == "--geometry-manifest" && i + 1 < args.Length) geometryManifestPath = args[++i];
-    else if (args[i] == "--historical-pairs" && i + 1 < args.Length) historicalPairsPath = args[++i];
-    else if (args[i] == "--responsible-pair" && i + 2 < args.Length)
-        responsiblePairNames.Add((args[++i], args[++i]));
-    else if (args[i] == "--order" && i + 1 < args.Length) orderFile = args[++i];
-    else if (args[i] == "--enable" && i + 1 < args.Length) enablePlugins.Add(args[++i]);
-    else if (args[i] == "--disable" && i + 1 < args.Length) disablePlugins.Add(args[++i]);
-    else if (args[i] == "--bos" && i + 1 < args.Length) bosOn = BosHook.ParseFlag(args[++i]) ?? throw new ArgumentException("--bos takes on|off");
-    else if (args[i] == "--state" && i + 1 < args.Length) stateSpec = args[++i];
-    else if (args[i] == "--switch-map" && i + 1 < args.Length) switchMapPath = args[++i];
-    else if (args[i] == "--flags") flagsOnly = true;
+    if (index + 1 >= args.Length || args[index + 1].StartsWith("--", StringComparison.Ordinal))
+        throw new ArgumentException($"{flag} requires a value");
+    return args[index + 1];
+}
+try
+{
+    for (int i = 0; i < args.Length; i++)
+    {
+        string flag = args[i];
+        if (flag is "--depth" or "--frac" or "--maxdim")
+            throw new ArgumentException("--depth, --frac and --maxdim are unsupported: actual-shape discovery has no box depth, fraction or size decision gates");
+        if (flag == "--list") { if (!int.TryParse(NeedValue(i, flag), out listN)) throw new ArgumentException("--list requires an integer"); i++; }
+        else if (flag == "--surface-tolerance") { if (!double.TryParse(NeedValue(i, flag), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out surfaceTolerance)) throw new ArgumentException("--surface-tolerance requires a number"); i++; }
+        else if (flag == "--max-triangle-pairs") { if (!long.TryParse(NeedValue(i, flag), out maxTrianglePairs)) throw new ArgumentException("--max-triangle-pairs requires an integer"); i++; }
+        else if (flag == "--pair-seconds") { if (!double.TryParse(NeedValue(i, flag), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out pairSeconds)) throw new ArgumentException("--pair-seconds requires a number"); i++; }
+        else if (flag == "--emit") { emitPath = NeedValue(i, flag); i++; }
+        else if (flag == "--base") { basePath = NeedValue(i, flag); i++; }
+        else if (flag == "--dump") { dumpPath = NeedValue(i, flag); i++; }
+        else if (flag == "--json") { jsonPath = NeedValue(i, flag); i++; }
+        else if (flag == "--geometry-manifest") { geometryManifestPath = NeedValue(i, flag); i++; }
+        else if (flag == "--historical-pairs") { historicalPairsPath = NeedValue(i, flag); i++; }
+        else if (flag == "--contact-evidence-pairs") { contactEvidencePairsPath = NeedValue(i, flag); i++; }
+        else if (flag == "--responsible-pair")
+        {
+            string a = NeedValue(i, flag);
+            if (i + 2 >= args.Length || args[i + 2].StartsWith("--", StringComparison.Ordinal)) throw new ArgumentException("--responsible-pair requires two plugin names");
+            responsiblePairNames.Add((a, args[i + 2])); i += 2;
+        }
+        else if (flag == "--scene-id") { sceneId = NeedValue(i, flag); i++; }
+        else if (flag == "--scene-role") { sceneRole = NeedValue(i, flag); i++; }
+        else if (flag == "--candidate-plugin") { candidatePluginNames.Add(NeedValue(i, flag)); i++; }
+        else if (flag == "--candidate-mod") { candidateModNames.Add(NeedValue(i, flag)); i++; }
+        else if (flag == "--scene-scope-from") { sceneScopeFromPaths.Add(NeedValue(i, flag)); i++; }
+        else if (flag == "--scene-cell") { explicitSceneCells.Add(NeedValue(i, flag)); i++; }
+        else if (flag == "--scene-space") throw new ArgumentException("--scene-space is refused because an exterior worldspace is unbounded; use bounded --scene-cell FormKey values");
+        else if (flag == "--scene-preflight") scenePreflight = true;
+        else if (flag == "--order") { orderFile = NeedValue(i, flag); i++; }
+        else if (flag == "--enable") { enablePlugins.Add(NeedValue(i, flag)); i++; }
+        else if (flag == "--disable") { disablePlugins.Add(NeedValue(i, flag)); i++; }
+        else if (flag == "--bos") { bosOn = BosHook.ParseFlag(NeedValue(i, flag)) ?? throw new ArgumentException("--bos takes on|off"); i++; }
+        else if (flag == "--state") { stateSpec = NeedValue(i, flag); i++; }
+        else if (flag == "--switch-map") { switchMapPath = NeedValue(i, flag); i++; }
+        else if (flag == "--flags") flagsOnly = true;
+        else if (flag == "--instance") { Instance = NeedValue(i, flag); i++; }
+        else if (flag == "--game") { GamePath = NeedValue(i, flag); i++; }
+        else if (flag == "--profile") { profileName = NeedValue(i, flag); i++; }
+        else throw new ArgumentException($"unknown argument: {flag}");
+    }
+}
+catch (ArgumentException ex) { Console.Error.WriteLine(ex.Message); return 2; }
+
+bool sceneCapture = sceneId is not null;
+if (sceneCapture && orderFile is null)
+{
+    Console.Error.WriteLine("scene capture requires --order CANDIDATE with an explicit Mods list; bare-profile and --enable/--disable source scenes are refused before loading the order");
+    return 2;
+}
+if (scenePreflight && orderFile is null) { Console.Error.WriteLine("--scene-preflight requires --order CANDIDATE"); return 2; }
+if (scenePreflight && sceneCapture) { Console.Error.WriteLine("--scene-preflight validates only the setup; omit --scene-id and capture in a separate invocation"); return 2; }
+if (geometryManifestPath is not null && responsiblePairNames.Count == 0 && !sceneCapture)
+{
+    Console.Error.WriteLine("--geometry-manifest requires at least one --responsible-pair <plugin-a> <plugin-b>; an unscoped whole-order geometry catalogue is refused");
+    return 2;
+}
+if (sceneCapture && geometryManifestPath is null) { Console.Error.WriteLine("--scene-id requires --geometry-manifest OUTPUT"); return 2; }
+if (sceneCapture && candidatePluginNames.Count == 0 && candidateModNames.Count == 0 && sceneScopeFromPaths.Count == 0 && explicitSceneCells.Count == 0)
+{
+    Console.Error.WriteLine("scene capture requires at least one --candidate-plugin, --candidate-mod, --scene-scope-from or --scene-cell; an implicit whole-order scene is refused");
+    return 2;
 }
 if (!double.IsFinite(surfaceTolerance) || surfaceTolerance < 0 || maxTrianglePairs <= 0 || !double.IsFinite(pairSeconds) || pairSeconds <= 0)
 {
@@ -149,6 +202,66 @@ if (!double.IsFinite(surfaceTolerance) || surfaceTolerance < 0 || maxTrianglePai
 PopulationMode popMode;
 try { popMode = PopulationCli.Resolve("overlapprobe", flagsOnly, stateSpec); }
 catch (ArgumentException ex) { Console.Error.WriteLine(ex.Message); return 2; }
+
+Instance = HarnessTarget.Require(Instance, "MO2 instance directory", "instance", "--instance");
+GamePath = HarnessTarget.Require(GamePath, "game directory", "game", "--game");
+profileName = HarnessTarget.Require(profileName, "MO2 profile name", "profile", "--profile");
+string profileDir = Path.Combine(Instance, "profiles", profileName);
+string modsDir = Path.Combine(Instance, "mods");
+string overwriteDir = Path.Combine(Instance, "overwrite");
+string dataDir = Path.Combine(GamePath, "Data");
+SceneCapture.AssetPreflight? assetPreflight = null;
+if (sceneCapture || scenePreflight)
+{
+    try { assetPreflight = SceneCapture.PreflightCandidateAssets(orderFile!, profileName, profileDir, modsDir); }
+    catch (Exception ex) { Console.Error.WriteLine($"scene asset preflight refused: {ex.Message}"); return 2; }
+    Console.WriteLine($"scene asset preflight: {assetPreflight.Providers.Count} selected provider(s), all match MO2 names and retain strongest-first priority; subset of {assetPreflight.ProfileProviderCount}, {assetPreflight.OmittedProviderCount} deliberately omitted by the candidate view");
+    foreach (var provider in assetPreflight.Providers)
+        Console.WriteLine($"   priority {provider.Mo2Priority}: {provider.Mo2Name} ({(provider.Enabled ? "enabled" : "disabled in base profile; explicitly selected")})");
+    if (scenePreflight) return 0;
+}
+
+var explicitCellKeys = new HashSet<FormKey>();
+foreach (var textCell in explicitSceneCells)
+{
+    try { explicitCellKeys.Add(FormKey.Factory(textCell)); }
+    catch (Exception ex) { Console.Error.WriteLine($"--scene-cell '{textCell}' is not a FormKey: {ex.Message}"); return 2; }
+}
+var importedSceneScopes = new List<SceneCapture.ImportedScope>();
+foreach (var scopePath in sceneScopeFromPaths)
+{
+    try { importedSceneScopes.Add(SceneCapture.ReadScope(scopePath)); }
+    catch (Exception ex) { Console.Error.WriteLine($"could not read --scene-scope-from '{scopePath}': {ex.Message}"); return 2; }
+}
+IReadOnlySet<string> contactEvidenceKeys;
+string? contactEvidencePairsSha256 = null;
+try
+{
+    contactEvidenceKeys = contactEvidencePairsPath is null ? new HashSet<string>() : SceneCapture.ReadPairKeys(contactEvidencePairsPath);
+    if (contactEvidencePairsPath is not null) contactEvidencePairsSha256 = ConfigurationIdentity.Sha256File(contactEvidencePairsPath);
+}
+catch (Exception ex) { Console.Error.WriteLine($"could not read --contact-evidence-pairs: {ex.Message}"); return 2; }
+HistoricalCrosswalk? historicalCrosswalk = null;
+string? historicalCrosswalkSha256 = null;
+if (historicalPairsPath is not null)
+{
+    byte[] crosswalkBytes;
+    try { crosswalkBytes = File.ReadAllBytes(historicalPairsPath); }
+    catch (Exception ex) { Console.Error.WriteLine($"could not read --historical-pairs: {ex.Message}"); return 2; }
+    try
+    {
+        historicalCrosswalk = JsonSerializer.Deserialize<HistoricalCrosswalk>(crosswalkBytes,
+            new JsonSerializerOptions { PropertyNameCaseInsensitive = true })
+            ?? throw new InvalidDataException("the file decoded as null");
+    }
+    catch (Exception ex) { Console.Error.WriteLine($"could not parse --historical-pairs: {ex.Message}"); return 2; }
+    if (!historicalCrosswalk.Complete || historicalCrosswalk.Pairs is null)
+    { Console.Error.WriteLine("--historical-pairs must be a complete crosswalk with pairs[]"); return 2; }
+    historicalCrosswalkSha256 = Convert.ToHexString(SHA256.HashData(crosswalkBytes)).ToLowerInvariant();
+}
+foreach (var input in new[] { (Flag: "--base", Path: basePath), (Flag: "--switch-map", Path: switchMapPath) })
+    if (input.Path is not null && !File.Exists(input.Path))
+    { Console.Error.WriteLine($"{input.Flag} input does not exist: {input.Path}"); return 2; }
 
 var sw = Stopwatch.StartNew();
 // WHAT THIS RUN EVALUATES, decided in one place (_shared/HarnessOrderCli.cs): the real profile, a --enable/--disable
@@ -211,12 +324,13 @@ Console.WriteLine($"\nindexed {idx.History.Count:N0} winning refs ({idx.Placemen
 Console.WriteLine($"   plugins that could not be read (contribute nothing, counted per rule 6): {unreadablePlugins.Count:N0}"
                 + (unreadablePlugins.Count > 0 ? "  — " + string.Join(", ", unreadablePlugins) : ""));
 Console.WriteLine($"   overrides that changed only rotation or scale (not a step in the history; the plugin is not responsible): {idx.SilentRePlacements:N0}");
+BosLayer? activeBosLayer = null;
 if (bosOn)
 {
     idx.Bos!.SetLoadOrder(lightness);
-    var bosLayer = BosHook.Load(assets.LooseRoots, idx.Bos);
-    var bosRep = BosHook.Apply(idx, bosLayer, bosPlugin);
-    Console.WriteLine($"   BOS: {bosLayer.Inis.Count} *_SWAP.ini read ({bosLayer.LinesRead:N0} lines, {bosLayer.LinesFailed:N0} the game would refuse, {bosLayer.Anomalies.Count:N0} anomalies — bosprobe lists them)");
+    activeBosLayer = BosHook.Load(assets.LooseRoots, idx.Bos);
+    var bosRep = BosHook.Apply(idx, activeBosLayer, bosPlugin);
+    Console.WriteLine($"   BOS: {activeBosLayer.Inis.Count} *_SWAP.ini read ({activeBosLayer.LinesRead:N0} lines, {activeBosLayer.LinesFailed:N0} the game would refuse, {activeBosLayer.Anomalies.Count:N0} anomalies — bosprobe lists them)");
     foreach (var l in bosRep.Summary()) Console.WriteLine("   " + l);
 }
 else Console.WriteLine("   BOS: off — record bases (--bos on to apply the *_SWAP.ini layer)");
@@ -230,11 +344,6 @@ string TypeOf(FormKey baseKey) => idx.BaseInfo.TryGetValue(baseKey, out var bi) 
 string MeshOf(FormKey baseKey) => idx.BaseMesh.TryGetValue(baseKey, out var m) ? m : "";
 static string Short(string s, int n) => s.Length <= n ? s : "..." + s[^(n - 3)..];
 
-if (geometryManifestPath is not null && responsiblePairNames.Count == 0)
-{
-    Console.Error.WriteLine("--geometry-manifest requires at least one --responsible-pair <plugin-a> <plugin-b>; an unscoped whole-order geometry catalogue is refused");
-    return 2;
-}
 var pluginByName = Enumerable.Range(0, paths.Count)
     .Where(p => !pluginKey[p].IsNull)
     .ToDictionary(p => PluginName(p), p => p, StringComparer.OrdinalIgnoreCase);
@@ -251,27 +360,73 @@ foreach (var named in responsiblePairNames)
 }
 responsiblePairs = responsiblePairs.DistinctBy(p => (p.A, p.B)).ToList();
 var scopedResponsiblePlugins = responsiblePairs.SelectMany(p => new[] { p.A, p.B }).ToHashSet();
+var candidatePlugins = candidatePluginNames.Where(pluginByName.ContainsKey).Select(n => pluginByName[n]).ToHashSet();
+var absentCandidatePlugins = candidatePluginNames.Where(n => !pluginByName.ContainsKey(n))
+    .Distinct(StringComparer.OrdinalIgnoreCase).OrderBy(n => n, StringComparer.OrdinalIgnoreCase).ToList();
+if (sceneCapture && absentCandidatePlugins.Count > 0 && sceneScopeFromPaths.Count == 0 && explicitSceneCells.Count == 0)
+{
+    Console.Error.WriteLine("candidate plugin(s) are absent from this setup and no explicit seeded scope proves that this is an intentional source pole: "
+        + string.Join(", ", absentCandidatePlugins));
+    return 2;
+}
+var candidateMods = candidateModNames.Where(n => cfg.EnabledMods.Contains(n, StringComparer.OrdinalIgnoreCase)).ToHashSet(StringComparer.OrdinalIgnoreCase);
+var absentCandidateMods = candidateModNames.Where(n => !candidateMods.Contains(n)).Distinct(StringComparer.OrdinalIgnoreCase).OrderBy(n => n, StringComparer.OrdinalIgnoreCase).ToList();
+if (sceneCapture && absentCandidateMods.Count > 0 && sceneScopeFromPaths.Count == 0 && explicitSceneCells.Count == 0)
+{
+    Console.Error.WriteLine("candidate mod folder(s) are absent from this asset view and no explicit seeded scope proves an intentional source pole: " + string.Join(", ", absentCandidateMods));
+    return 2;
+}
+var importedSceneReferences = importedSceneScopes.SelectMany(s => s.References).ToHashSet();
+var sceneReferenceSeeds = importedSceneScopes.SelectMany(s => s.Seeds).Select(s => s.Reference).ToHashSet();
+var sceneCells = new HashSet<FormKey>();
+if (sceneCapture)
+{
+    foreach (var (key, _) in idx.History.Refs)
+    {
+        bool candidateTouched = idx.Touchers.TryGetValue(key, out var touchers) && touchers.Any(candidatePlugins.Contains);
+        candidateTouched |= idx.BaseChanges.TryGetValue(key, out var bases) && bases.Any(b => candidatePlugins.Contains(b.Plugin));
+        candidateTouched |= idx.WinningGeometryPose(key) is { } pose && candidatePlugins.Contains(pose.Plugin);
+        if (!candidateTouched && !sceneReferenceSeeds.Contains(key)) continue;
+        sceneReferenceSeeds.Add(key);
+    }
+}
+var sceneSeedPoses = importedSceneScopes.SelectMany(s => s.Seeds)
+    .Select(s => (s.Reference, s.Cell, s.Space, s.X, s.Y, s.Z, s.Interior, s.WorldBounds, s.BoundsReason, s.Provenance, IsImported: true)).ToList();
+foreach (var key in sceneReferenceSeeds)
+    if (idx.WinningGeometryPose(key) is { } pose)
+    {
+        bool interior = idx.CellName.TryGetValue(pose.Cell, out var ci) && ci.Interior;
+        sceneSeedPoses.Add((key, pose.Cell, pose.Space, (double)pose.Pos.X, (double)pose.Pos.Y, (double)pose.Pos.Z, interior, (Aabb?)null, (string?)null, "current-candidate-or-imported", false));
+    }
+foreach (var cell in explicitCellKeys)
+{
+    bool interior = idx.CellName.TryGetValue(cell, out var ci) && ci.Interior;
+    if (interior) { sceneCells.Add(cell); continue; }
+    if (idx.PersistentCells.Contains(cell))
+    { Console.Error.WriteLine($"--scene-cell {cell} is an exterior persistent cell and has no bounded spatial footprint; supply --scene-scope-from or candidate seeds"); return 2; }
+    var filed = idx.History.Refs.Select(kv => (kv.Key, Pose: idx.WinningGeometryPose(kv.Key)))
+        .Where(x => x.Pose is { } p && p.Cell == cell).ToList();
+    if (filed.Count == 0)
+    { Console.Error.WriteLine($"--scene-cell {cell} has no placed reference from which to derive a bounded exterior footprint"); return 2; }
+    foreach (var x in filed)
+    {
+        var p = x.Pose!.Value;
+        sceneReferenceSeeds.Add(x.Key);
+        sceneSeedPoses.Add((x.Key, p.Cell, p.Space, (double)p.Pos.X, (double)p.Pos.Y, (double)p.Pos.Z, false, (Aabb?)null, (string?)null, "explicit-exterior-cell", false));
+    }
+}
+foreach (var seed in sceneSeedPoses.Where(s => s.Interior)) sceneCells.Add(seed.Cell);
+var exteriorSeedSpaces = sceneSeedPoses.Where(s => !s.Interior).Select(s => s.Space).ToHashSet();
+bool InSceneScope(FormKey key, Snap pose)
+{
+    if (!sceneCapture) return true;
+    if (sceneCells.Contains(pose.Cell)) return true;
+    // Origin distance cannot reject a mesh: a displaced-origin or very large NIF can reach the fixed seed
+    // envelope from anywhere in the coordinate space. Geometry bounds perform the only spatial rejection.
+    return exteriorSeedSpaces.Contains(pose.Space);
+}
 bool ScopedPair(int a, int b) => responsiblePairs.Count == 0
     || responsiblePairs.Any(p => (p.A == a && p.B == b) || (p.A == b && p.B == a));
-HistoricalCrosswalk? historicalCrosswalk = null;
-string? historicalCrosswalkSha256 = null;
-if (historicalPairsPath is not null)
-{
-    byte[] crosswalkBytes;
-    try { crosswalkBytes = File.ReadAllBytes(historicalPairsPath); }
-    catch (Exception ex) { Console.Error.WriteLine($"could not read --historical-pairs: {ex.Message}"); return 2; }
-    try
-    {
-        historicalCrosswalk = JsonSerializer.Deserialize<HistoricalCrosswalk>(crosswalkBytes,
-            new JsonSerializerOptions { PropertyNameCaseInsensitive = true })
-            ?? throw new InvalidDataException("the file decoded as null");
-    }
-    catch (Exception ex) { Console.Error.WriteLine($"could not parse --historical-pairs: {ex.Message}"); return 2; }
-    if (!historicalCrosswalk.Complete || historicalCrosswalk.Pairs is null)
-    { Console.Error.WriteLine("--historical-pairs must be a complete crosswalk with pairs[]"); return 2; }
-    historicalCrosswalkSha256 = Convert.ToHexString(SHA256.HashData(crosswalkBytes)).ToLowerInvariant();
-}
-
 // ---------------------------------------------------------------------------------------
 // Pass 2 — strict decoded render geometry per base record. Record ObjectBounds never enter this path.
 // ---------------------------------------------------------------------------------------
@@ -353,6 +508,76 @@ GeometryRead GeometryOf(FormKey baseKey)
         : (null, '-', geometry.Reason ?? "no complete strict render triangles");
 }
 
+if (sceneCapture && candidateMods.Count > 0)
+    foreach (var (key, _) in idx.History.Refs)
+    {
+        bool candidateAsset = false;
+        if (idx.RefBase.TryGetValue(key, out var baseKey) && idx.BaseMesh.TryGetValue(baseKey, out var rel) && !string.IsNullOrWhiteSpace(rel))
+        {
+            var full = (rel.StartsWith("meshes", StringComparison.OrdinalIgnoreCase) ? rel : Path.Combine("meshes", rel)).Replace('/', '\\');
+            var source = assets.ResolveForPlacement(full).Sources.FirstOrDefault();
+            candidateAsset = source is not null && candidateMods.Contains(source.ProviderName);
+        }
+        bool candidateBos = idx.BosSwaps.TryGetValue(key, out var bos) && activeBosLayer is not null
+            && new[] { bos.PropertiesFrom?.Ini, bos.SwapFrom?.Where.Ini }.Where(x => x is not null)
+                .Any(ini => activeBosLayer.Inis.Any(file => string.Equals(file.Name, ini, StringComparison.OrdinalIgnoreCase)
+                    && candidateMods.Contains(file.Provider)));
+        if (!candidateAsset && !candidateBos) continue;
+        sceneReferenceSeeds.Add(key);
+        if (idx.WinningGeometryPose(key) is { } pose && !sceneSeedPoses.Any(s => s.Reference == key))
+        {
+            bool interior = idx.CellName.TryGetValue(pose.Cell, out var ci) && ci.Interior;
+            sceneSeedPoses.Add((key, pose.Cell, pose.Space, (double)pose.Pos.X, (double)pose.Pos.Y, (double)pose.Pos.Z, interior, (Aabb?)null, (string?)null, candidateAsset ? "candidate-winning-nif-provider" : "candidate-bos-provider", false));
+            if (interior) sceneCells.Add(pose.Cell);
+            else exteriorSeedSpaces.Add(pose.Space);
+        }
+    }
+if (sceneCapture && sceneReferenceSeeds.Count == 0 && explicitCellKeys.Count == 0)
+{
+    Console.Error.WriteLine("scene scope resolved no seed references; candidate plugins/mods made no discoverable record, winning-NIF or BOS change, so supply --scene-scope-from or --scene-cell");
+    return 2;
+}
+
+var sceneSeedBounds = sceneSeedPoses.Where(s => s.WorldBounds is { IsEmpty: false })
+    .Select(s => (s.Reference, s.Space, Bounds: s.WorldBounds!.Value, Source: "imported")).ToList();
+var unknownSceneSeedBounds = sceneSeedPoses.Where(s => s.IsImported && s.WorldBounds is null)
+    .Select(s => $"{s.Reference}: {s.BoundsReason ?? "imported seed footprint is unknown"}").Distinct(StringComparer.Ordinal).ToList();
+if (sceneCapture)
+    foreach (var seed in sceneSeedPoses.DistinctBy(s => s.Reference))
+    {
+        if (idx.WinningGeometryPose(seed.Reference) is not { } pose || !idx.RefBase.TryGetValue(seed.Reference, out var baseKey))
+        { if (seed.WorldBounds is null) unknownSceneSeedBounds.Add($"{seed.Reference}: absent here and imported scope has no bounds"); continue; }
+        var (soup, _, reason) = SurfaceGeometryOf(baseKey);
+        if (soup is not { TriangleCount: > 0 } || pose.Scale == 0)
+        { if (seed.WorldBounds is null) unknownSceneSeedBounds.Add($"{seed.Reference}: {reason ?? "placed geometry unavailable"}"); continue; }
+        var bounds = SpatialOverlap.SoupBounds(SpatialOverlap.TransformSoup(soup, pose.Pos, pose.Rot, pose.Scale));
+        if (bounds.IsEmpty || !SpatialOverlap.IsFinite(bounds))
+        { if (seed.WorldBounds is null) unknownSceneSeedBounds.Add($"{seed.Reference}: placed bounds invalid"); continue; }
+        sceneSeedBounds.Add((seed.Reference, pose.Space, bounds, "current"));
+    }
+var sceneSeedBoundsBySpace = sceneSeedBounds.GroupBy(s => s.Space)
+    .ToDictionary(g => g.Key, g => g.Select(s => s.Bounds).ToArray());
+var exteriorScopeSeeds = new List<SceneCapture.ImportedSeed>();
+foreach (var seed in sceneSeedPoses.Where(s => !s.Interior).DistinctBy(s => s.Reference))
+{
+    var known = sceneSeedBounds.Where(b => b.Reference == seed.Reference && b.Space == seed.Space).ToList();
+    if (known.Count == 0)
+        exteriorScopeSeeds.Add(new(seed.Reference, seed.Cell, seed.Space, seed.X, seed.Y, seed.Z, false,
+            null, seed.BoundsReason ?? "seed footprint is unavailable", seed.Provenance));
+    else
+        exteriorScopeSeeds.AddRange(known.Select(b => new SceneCapture.ImportedSeed(seed.Reference, seed.Cell,
+            seed.Space, seed.X, seed.Y, seed.Z, false, b.Bounds, null, seed.Provenance)));
+}
+bool BoundsInSceneScope(SurfaceOverlapCandidate candidate)
+{
+    if (!sceneCapture || sceneReferenceSeeds.Contains(candidate.Key) || sceneCells.Contains(candidate.Win.Cell)) return true;
+    float margin = (float)SceneCapture.ExteriorContextMargin;
+    return sceneSeedBoundsBySpace.TryGetValue(candidate.Win.Space, out var bounds)
+        && bounds.Any(seed => candidate.WorldBounds.Max.X >= seed.Min.X - margin && candidate.WorldBounds.Min.X <= seed.Max.X + margin
+        && candidate.WorldBounds.Max.Y >= seed.Min.Y - margin && candidate.WorldBounds.Min.Y <= seed.Max.Y + margin
+        && candidate.WorldBounds.Max.Z >= seed.Min.Z - margin && candidate.WorldBounds.Min.Z <= seed.Max.Z + margin);
+}
+
 // THE PHYSICAL PREDICATE of an OVERLAP row: the two winning strict render surfaces still intersect under this arm.
 // Bounds can reject only provable separation inside MeshIntersection; their depth, volume and dimensions never decide.
 EnableArms? resolvedArms = null;
@@ -413,7 +638,7 @@ if (stateSpec is not null)
 else pop = popMode == PopulationMode.Flags ? EnablePopulation.Flags() : EnablePopulation.Of(arms.WinnerRawFacts, EnablePopulation.BaselineStateName);
 // Null in flags mode: Candidates then reads the winning snap's own flag, exactly as it always did.
 enabledOf = pop.Predicate;
-bool ExcludeResponsible(int p) => responsiblePairs.Count > 0 ? !scopedResponsiblePlugins.Contains(p) : IsBaseGame(p);
+bool ExcludeResponsible(int p) => sceneCapture ? false : responsiblePairs.Count > 0 ? !scopedResponsiblePlugins.Contains(p) : IsBaseGame(p);
 long candidateGeometryLookups = 0;
 __run.Stage("render-geometry", "preparing strict render geometry and candidates", total: null, unit: "geometry lookups");
 (TriangleSoup? Soup, char Source, string? Reason) CandidateGeometryOf(FormKey baseKey)
@@ -423,7 +648,37 @@ __run.Stage("render-geometry", "preparing strict render geometry and candidates"
     __run.Advance();
     return result;
 }
-var candidates = idx.SurfaceCandidates(CandidateGeometryOf, Obstructing, ExcludeResponsible, out var skips, enabledOf);
+var candidates = idx.SurfaceCandidates(CandidateGeometryOf, Obstructing, ExcludeResponsible, out var skips, enabledOf,
+    sceneCapture ? InSceneScope : null);
+candidates = candidates.Where(BoundsInSceneScope).ToList();
+var sceneUnknownScope = new Dictionary<FormKey, string>();
+var sceneUnlocalizedExterior = new Dictionary<FormKey, string>();
+var sceneOutsideExterior = new Dictionary<FormKey, string>();
+if (sceneCapture)
+    foreach (var (key, _) in idx.History.Refs)
+    {
+        var pose = idx.WinningGeometryPose(key);
+        if (pose is null || !idx.RefBase.TryGetValue(key, out var baseKey)
+            || !idx.BaseInfo.TryGetValue(baseKey, out var baseInfo) || !Obstructing.Contains(baseInfo.Type)) continue;
+        var geometry = GeometryOf(baseKey);
+        if (geometry.Outcome is { UsableForSurfaceIntersection: true, Soup.TriangleCount: > 0 }) continue;
+        bool interior = idx.CellName.TryGetValue(pose.Value.Cell, out var ci) && ci.Interior;
+        if (sceneReferenceSeeds.Contains(key) || (interior && sceneCells.Contains(pose.Value.Cell)))
+            sceneUnknownScope[key] = geometry.Reason ?? "no complete strict render triangles; spatial membership is unresolved";
+        else if (!interior)
+        {
+            var disposition = SceneCapture.ExteriorUnknownDisposition(pose.Value.Space,
+                pose.Value.Pos.X, pose.Value.Pos.Y, pose.Value.Pos.Z, exteriorScopeSeeds);
+            if (disposition.AdmitToScene)
+                sceneUnknownScope[key] = geometry.Reason ?? "no complete strict render triangles in the bounded seed neighbourhood";
+            else if (disposition.Membership == SceneCapture.ExteriorMembership.OutsideNeighbourhood)
+                sceneOutsideExterior[key] = $"{geometry.Reason ?? "strict render geometry is unavailable"}; {disposition.ScopeReason}";
+            else if (disposition.RetainUnassessed)
+                sceneUnlocalizedExterior[key] = $"{geometry.Reason ?? "strict render geometry is unavailable"}; {disposition.ScopeReason}";
+        }
+    }
+var sceneIncludedKeys = candidates.Select(c => c.Key).Concat(sceneReferenceSeeds).Concat(importedSceneReferences)
+    .Concat(sceneUnknownScope.Keys).ToHashSet();
 candidates = candidates.Where(c =>
 {
     if (popMode != PopulationMode.Flags && !arms.Winner(c.Key).Resolved) { skips.EnableStateUnresolved++; return false; }
@@ -447,11 +702,11 @@ if (dumpPath is not null)
     Console.WriteLine($"\ndumped {candidates.Count:N0} candidates -> {dumpPath}");
 }
 
-Console.WriteLine($"\ncandidates: {candidates.Count:N0} refs" + (responsiblePairs.Count > 0 ? " in the responsible-pair scope" : " whose responsible plugin is not the base game"));
+Console.WriteLine($"\ncandidates: {candidates.Count:N0} refs" + (sceneCapture ? " in the declared scene scope" : responsiblePairs.Count > 0 ? " in the responsible-pair scope" : " whose responsible plugin is not the base game"));
 Console.WriteLine("   geometry (strict decoded render vertices; record ObjectBounds unused): "
                 + string.Join(", ", geometryCounts.OrderBy(k => k.Key).Select(k => $"{k.Key} {k.Value:N0}")));
 Console.WriteLine($"   skipped (counted, per rule 6): {skips.Deleted:N0} deleted, {skips.Disabled:N0} not present at load, "
-                + $"{skips.NonObstructingType:N0} non-obstructing type, {skips.NoGeometry:N0} no geometry, {skips.ExcludedResponsible:N0} base-game-responsible,");
+                + $"{skips.NonObstructingType:N0} non-obstructing type, {skips.NoGeometry:N0} no geometry, {skips.ExcludedResponsible:N0} base-game-responsible, {skips.ScopeExcluded:N0} outside explicit scene scope,");
 Console.WriteLine($"                                  {skips.InvalidTransform:N0} invalid transforms, {skips.DegenerateGeometry:N0} zero-scale transforms, {skips.MarkerMesh:N0} editor markers (no rendered mesh, cannot obstruct), "
                 + $"{skips.EnableStateUnresolved:N0} unresolved enable state, {skips.BosUnresolved:N0} unresolved BOS outcome");
 
@@ -465,7 +720,7 @@ var sweep = OverlapIndex.SurfacePairs(candidates, closure, surfaceTolerance, max
         if (checkedPairs - lastPairProgress < 250) return;
         lastPairProgress = checkedPairs;
         Console.WriteLine($"   ... {checkedPairs:N0} actual-shape pairs tested ({sw.Elapsed.TotalSeconds:0}s)");
-    });
+    }, retainSameResults: sceneCapture);
 __run.ReviseTotal(sweep.PairsChecked, "the bounds sweep established the exact number of mesh queries");
 
 // A published, ACTIVE patch mastering both sides is the community saying "these two are known to
@@ -483,7 +738,7 @@ bool Reconciled(int a, int b)
 }
 
 Console.WriteLine($"\npairs checked by actual strict render surfaces: {sweep.PairsChecked:N0}; tolerance {surfaceTolerance:R}, work cap {maxTrianglePairs:N0} triangle pairs, time cap {pairSeconds:R}s/pair");
-Console.WriteLine($"\n==== THE FLOOR — same author, deliberate actual-surface intersections ====");
+Console.WriteLine($"\n==== SAME-RESPONSIBLE ACTUAL-SURFACE INTERSECTIONS ====");
 Console.WriteLine($"   same-responsible pairs   : {sweep.SameChecked,10:N0} checked, {sweep.SameIntersects,7:N0} intersect, {sweep.SameUnknown,7:N0} unknown");
 foreach (var (dom, v) in sweep.SameByDomain.OrderBy(k => k.Key))
     Console.WriteLine($"      {dom,-8}              : {v.Checked,10:N0} checked, {v.Intersects,7:N0} intersect, {v.Unknown,7:N0} unknown");
@@ -542,7 +797,7 @@ foreach (var r in cls.OrderBy(r => r.Hit.A.Key.ToString(), StringComparer.Ordina
 
 var knowing = provenanceRows.Where(r => r.Origin == OverlapOrigin.Introduced && r.Sight == OverlapSight.Seen).ToList();
 var inherited = provenanceRows.Where(r => r.Origin == OverlapOrigin.Inherited).ToList();
-Console.WriteLine($"\nknowingly intersecting (Introduced + Seen): {knowing.Count:N0}; inherited: {inherited.Count:N0}; Bethesda floor: {floorRows.Count:N0}");
+Console.WriteLine($"\nintroduced + seen intersections: {knowing.Count:N0}; inherited: {inherited.Count:N0}; Bethesda same-responsible relationships: {floorRows.Count:N0}");
 foreach (var r in floorRows.OrderBy(r => r.Hit.A.Key.ToString(), StringComparer.Ordinal).Take(listN))
     Console.WriteLine($"   {Verdict(r),-22} {Describe(r)}");
 
@@ -661,7 +916,15 @@ if (geometryManifestPath is not null)
         return string.CompareOrdinal(x, y) <= 0 ? x + "||" + y : y + "||" + x;
     }
 
-    var historicalPairs = historicalCrosswalk?.Pairs ?? new List<HistoricalPair>();
+    var historicalPairs = historicalCrosswalk?.Pairs?.ToList() ?? new List<HistoricalPair>();
+    var retainedHistoricalKeys = historicalPairs.Select(p => p.PairKey).ToHashSet(StringComparer.Ordinal);
+    foreach (var pairKey in importedSceneScopes.SelectMany(s => s.PairKeys).Distinct(StringComparer.Ordinal))
+    {
+        var halves = pairKey.Split("||", StringSplitOptions.None);
+        if (halves.Length == 2 && retainedHistoricalKeys.Add(pairKey))
+            historicalPairs.Add(new HistoricalPair("scene-scope:" + pairKey, pairKey,
+                ConflictIo.RowIdentity("OVERLAP", halves[0], halves[1], ""), halves[0], halves[1]));
+    }
     var historicalRefKeys = new HashSet<FormKey>();
     try
     {
@@ -674,7 +937,9 @@ if (geometryManifestPath is not null)
     {
         __run.Advance();
         var pose = idx.WinningGeometryPose(key);
-        if (pose is null || (!scopedResponsiblePlugins.Contains(pose.Value.Plugin) && !historicalRefKeys.Contains(key))) continue;
+        if (pose is null || (sceneCapture
+            ? !sceneIncludedKeys.Contains(key)
+            : !scopedResponsiblePlugins.Contains(pose.Value.Plugin) && !historicalRefKeys.Contains(key))) continue;
         var p = pose.Value;
         bool deleted = p.Deleted || idx.IsDeletedNow(key);
         EnableResolution? enable = popMode == PopulationMode.Flags ? null : arms.Winner(key);
@@ -850,7 +1115,8 @@ if (geometryManifestPath is not null)
       : b.Eligibility != "eligible" ? b.EligibilityReason
       : "both records pass discovery gates";
 
-    var freshByKey = sweep.CrossResults.ToDictionary(x => PairWire(x.A.Key, x.B.Key), StringComparer.Ordinal);
+    var freshSceneResults = sweep.CrossResults.Concat(sweep.SameResults).ToList();
+    var freshByKey = freshSceneResults.ToDictionary(x => PairWire(x.A.Key, x.B.Key), StringComparer.Ordinal);
     var directQueryByKey = new Dictionary<string, SurfaceQueryOutcome>(StringComparer.Ordinal);
     SurfaceQueryOutcome ActualShape(string key, ReviewRef? a, ReviewRef? b)
     {
@@ -877,6 +1143,19 @@ if (geometryManifestPath is not null)
     };
     static ManifestActualShape ShapeWire(SurfaceQueryOutcome q) =>
         new(q.Status, q.Reason, q.SurfaceRelation, q.Containment, q.Intersects, q.TrianglePairsTested);
+    var narrowByKey = rows.ToDictionary(r => PairWire(r.Hit.A.Key, r.Hit.B.Key), r => new ManifestNarrowVerdict(
+        "measured", r.Origin?.ToString().ToLowerInvariant(), r.Sight.ToString().ToLowerInvariant(), r.Why,
+        r.CounterfactualStatus, r.CounterfactualReason), StringComparer.Ordinal);
+    ManifestNarrowVerdict Narrow(string key) => narrowByKey.TryGetValue(key, out var n) ? n
+        : new("unavailable", null, null, "Q46 narrow provenance is available only for current cross-responsible intersections", null, null);
+    MeshContactEvidence ContactEvidence(string key, ReviewRef? a, ReviewRef? b)
+    {
+        if (!contactEvidenceKeys.Contains(key)) return new("unmeasured", "pair was not nominated by --contact-evidence-pairs", null, null, 0, MeshIntersection.ContactEvidencePolicyVersion);
+        if (a?.WorldSoup is not { TriangleCount: > 0 } sa || b?.WorldSoup is not { TriangleCount: > 0 } sb)
+            return new("unknown", "a nominated endpoint has no complete placed render triangles", null, null, 0, MeshIntersection.ContactEvidencePolicyVersion);
+        using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(pairSeconds));
+        return MeshIntersection.MeasureContactEvidence(sa, sb, surfaceTolerance, maxTrianglePairs, deadline.Token);
+    }
 
     var pairRows = new List<ManifestPair>();
     var historicalGroups = historicalPairs.GroupBy(p => p.PairKey, StringComparer.Ordinal).ToList();
@@ -891,10 +1170,10 @@ if (geometryManifestPath is not null)
         pairRows.Add(new(group.Key, first.ConflictIoRowIdentity, first.A, first.B,
             group.Select(p => p.HistoricalRowId).ToArray(), false, Discovery(actual),
             new(ar?.Eligibility == "eligible" && br?.Eligibility == "eligible" ? "eligible" : "ineligible",
-                PairEligibilityReason(ar, br)), ShapeWire(actual), PairMeasurements(ar, br)));
+                PairEligibilityReason(ar, br)), ShapeWire(actual), PairMeasurements(ar, br), Narrow(group.Key), ContactEvidence(group.Key, ar, br)));
         __run.Advance();
     }
-    foreach (var fresh in sweep.CrossResults.Where(x => (x.Query.Intersects == true || x.Query.Unknown)
+    foreach (var fresh in freshSceneResults.Where(x => (x.Query.Intersects == true || x.Query.Unknown)
              && !historicalKeys.Contains(PairWire(x.A.Key, x.B.Key))))
     {
         string key = PairWire(fresh.A.Key, fresh.B.Key);
@@ -902,11 +1181,29 @@ if (geometryManifestPath is not null)
         pairRows.Add(new(key, ConflictIo.RowIdentity("OVERLAP", fresh.A.Key.ToString(), fresh.B.Key.ToString(), ""),
             fresh.A.Key.ToString(), fresh.B.Key.ToString(), Array.Empty<string>(), true,
             Discovery(fresh.Query), new("eligible", "both records pass source, state, type and strict render-geometry gates"),
-            ShapeWire(fresh.Query), PairMeasurements(ar, br)));
+            ShapeWire(fresh.Query), PairMeasurements(ar, br), Narrow(key), ContactEvidence(key, ar, br)));
     }
     pairRows = pairRows.OrderBy(p => p.pairKey, StringComparer.Ordinal).ToList();
 
     var manifestIdentity = cfg.Identity(pop.Identity, pop.StateName);
+    var seedDefinitionRows = sceneSeedPoses.DistinctBy(s => (s.Reference, s.Cell, s.Space, s.X, s.Y, s.Z,
+            MinX: s.WorldBounds?.Min.X, MinY: s.WorldBounds?.Min.Y, MinZ: s.WorldBounds?.Min.Z,
+            MaxX: s.WorldBounds?.Max.X, MaxY: s.WorldBounds?.Max.Y, MaxZ: s.WorldBounds?.Max.Z,
+            s.BoundsReason, s.Provenance, s.IsImported))
+        .OrderBy(s => s.Reference.ToString(), StringComparer.Ordinal).ThenBy(s => s.Provenance, StringComparer.Ordinal)
+        .Select(seed =>
+        {
+            var measured = sceneSeedBounds.LastOrDefault(b => b.Reference == seed.Reference && b.Source == "current");
+            Aabb? bounds = seed.WorldBounds ?? (seed.IsImported || measured.Reference.IsNull || measured.Bounds.IsEmpty ? null : measured.Bounds);
+            return new
+            {
+                formid = seed.Reference.ToString(), cell = seed.Cell.ToString(), space = seed.Space.ToString(),
+                position = new[] { seed.X, seed.Y, seed.Z }, interior = seed.Interior,
+                worldBounds = BoundsArray(bounds),
+                boundsReason = bounds is null ? seed.BoundsReason ?? "seed has no finite placed world bounds" : null,
+                provenance = seed.WorldBounds is not null ? seed.Provenance : measured.Reference.IsNull ? seed.Provenance : measured.Source
+            };
+        }).ToArray();
     var manifest = new
     {
         schemaVersion = "nif-overlap-actual-shape-manifest-v2",
@@ -918,17 +1215,76 @@ if (geometryManifestPath is not null)
             responsiblePairs = responsiblePairs.Select(p => new[] { p.AName, p.BName }).ToArray(),
             population = pop.Identity, state = pop.StateName, bos = bosOn ? "on" : "off",
             historicalPairs = historicalPairsPath is null ? null : new { path = Path.GetFullPath(historicalPairsPath), sha256 = historicalCrosswalkSha256 },
+            contactEvidencePairs = contactEvidencePairsPath is null ? null : new { path = Path.GetFullPath(contactEvidencePairsPath), sha256 = contactEvidencePairsSha256, count = contactEvidenceKeys.Count },
             predicate = new { tolerance = surfaceTolerance, maxTrianglePairs, pairSeconds, policyVersion = MeshIntersection.PolicyVersion },
             configuration = manifestIdentity
         },
+        scene = !sceneCapture ? null : new
+        {
+            sceneId,
+            role = sceneRole ?? "unspecified",
+            candidatePlugins = candidatePluginNames.Distinct(StringComparer.OrdinalIgnoreCase).OrderBy(n => n, StringComparer.OrdinalIgnoreCase).ToArray(),
+            candidatePluginsPresent = candidatePluginNames.Where(pluginByName.ContainsKey).Distinct(StringComparer.OrdinalIgnoreCase).OrderBy(n => n, StringComparer.OrdinalIgnoreCase).ToArray(),
+            candidatePluginsAbsent = absentCandidatePlugins,
+            candidateMods = candidateModNames.Distinct(StringComparer.OrdinalIgnoreCase).OrderBy(n => n, StringComparer.OrdinalIgnoreCase).ToArray(),
+            candidateModsPresent = candidateMods.OrderBy(n => n, StringComparer.OrdinalIgnoreCase).ToArray(),
+            candidateModsAbsent = absentCandidateMods,
+            assetPreflight = assetPreflight is null ? null : new
+            {
+                status = "passed",
+                candidate = assetPreflight.CandidatePath,
+                baseProfile = assetPreflight.BaseProfile,
+                selectedProviderCount = assetPreflight.Providers.Count,
+                profileProviderCount = assetPreflight.ProfileProviderCount,
+                omittedProviderCount = assetPreflight.OmittedProviderCount,
+                subsetPolicy = "the candidate Mods list intentionally selects a subset; every selected provider must match an MO2 name and retain relative strongest-first priority",
+                providers = assetPreflight.Providers.Select(p => new { candidateName = p.CandidateName, mo2Name = p.Mo2Name,
+                    mo2Priority = p.Mo2Priority, enabledInBaseProfile = p.Enabled, directory = p.Directory }).ToArray()
+            },
+            discovery = new
+            {
+                method = "candidate-effective-bounded-neighbourhood-v2",
+                actualBoundsContextMargin = SceneCapture.ExteriorContextMargin,
+                cells = sceneCells.Select(s => s.ToString()).OrderBy(s => s, StringComparer.Ordinal).ToArray(),
+                seedReferences = sceneReferenceSeeds.Select(s => s.ToString()).OrderBy(s => s, StringComparer.Ordinal).ToArray(),
+                seedDefinitions = seedDefinitionRows,
+                importedScopes = importedSceneScopes.Select(s => new { path = s.Path, sha256 = s.Sha256,
+                    referenceCount = s.References.Count, pairCount = s.PairKeys.Count, cellCount = s.Cells.Count }).ToArray(),
+                missingImportedReferences = importedSceneReferences.Where(k => idx.History.Of(k) is null).Select(k => k.ToString()).OrderBy(k => k, StringComparer.Ordinal).ToArray(),
+                seedBounds = sceneSeedBounds.Select(s => new { reference = s.Reference.ToString(), space = s.Space.ToString(),
+                    min = new[] { (double)s.Bounds.Min.X, s.Bounds.Min.Y, s.Bounds.Min.Z }, max = new[] { (double)s.Bounds.Max.X, s.Bounds.Max.Y, s.Bounds.Max.Z }, source = s.Source }).ToArray(),
+                unknownSeedBounds = unknownSceneSeedBounds,
+                scopeUnknownRecords = sceneUnknownScope.OrderBy(k => k.Key.ToString(), StringComparer.Ordinal)
+                    .Select(k => new { formid = k.Key.ToString(), reason = k.Value }).ToArray(),
+                exteriorMembershipUnresolved = sceneUnlocalizedExterior.OrderBy(k => k.Key.ToString(), StringComparer.Ordinal)
+                    .Select(k => new { formid = k.Key.ToString(), reason = k.Value }).ToArray(),
+                exteriorOutsideOriginNeighbourhood = sceneOutsideExterior.OrderBy(k => k.Key.ToString(), StringComparer.Ordinal)
+                    .Select(k => new { formid = k.Key.ToString(), reason = k.Value }).ToArray(),
+                knownSpatialMemberCount = candidates.Count,
+                unresolvedSpatialMemberCount = sceneUnknownScope.Count,
+                unresolvedExteriorMembershipCount = sceneUnlocalizedExterior.Count,
+                outsideOriginNeighbourhoodUnassessedCount = sceneOutsideExterior.Count,
+                retainedPopulation = "all eligible obstructing references whose placed NIF bounds meet the existing fixed seed envelope plus 4096-unit context margin, plus geometry-unknown references whose placed origins lie in that bounded neighbourhood; distant-origin and unresolved exterior identities are retained separately as physically unassessed and never expanded to the whole worldspace"
+            },
+            validity = new
+            {
+                status = unreadablePlugins.Count == 0 && !assets.ReadIncomplete ? "valid" : "unresolved",
+                reasons = unreadablePlugins.Select(p => $"plugin unreadable: {p}")
+                    .Concat(assets.BsaFailures.Select(p => $"archive unreadable: {p}" )).ToArray()
+            }
+        },
         total = recordRows.Count,
-        complete = unreadablePlugins.Count == 0 && !assets.ReadIncomplete && pairRows.All(p => p.actualShape.intersects is not null),
+        complete = unreadablePlugins.Count == 0 && !assets.ReadIncomplete && sceneUnknownScope.Count == 0
+            && unknownSceneSeedBounds.Count == 0 && sceneUnlocalizedExterior.Count == 0 && sceneOutsideExterior.Count == 0
+            && pairRows.All(p => p.actualShape.intersects is not null),
         notes = new[]
         {
             "Actual-shape results come from symmetric intersection of placed strict decoded render triangles; record ObjectBounds and stored NIF spheres have zero influence.",
             "Bounds enclose the placed triangle soups and reject only provably separated geometry; their overlap magnitudes are diagnostics and never discovery or severity gates.",
             "LOD shapes are conservatively included; statically hidden shapes are excluded; unsupported live poses and partial reads are unmeasurable.",
-            "The scoped run resolves the full order, winner history, selected state and BOS layer before restricting candidates to the named responsible pair."
+            sceneCapture
+                ? "The scene run resolves the full order, winner history, selected state and BOS layer, then applies its recorded fixed seed geometry and context scope."
+                : "The scoped run resolves the full order, winner history, selected state and BOS layer before restricting candidates to the named responsible pair."
         },
         records = recordRows,
         assets = assetRows,
@@ -958,7 +1314,8 @@ if (geometryManifestPath is not null)
             contentCacheHits = renderCache.Hits,
             trianglePairsTested = pairRows.Sum(p => p.actualShape.trianglePairsTested)
         },
-        limitations = new { unreadablePlugins, archiveReadFailures = assets.BsaFailures }
+        limitations = new { unreadablePlugins, archiveReadFailures = assets.BsaFailures,
+            sceneDiscovery = !sceneCapture ? null : $"The declared scene uses the pre-existing 4096-unit search envelope around explicit/candidate/imported seed bounds; this correction adds no new distance weight. Every eligible placed mesh in each selected coordinate space was bounds-tested; geometry-unknown references are admitted only when their placed origin lies in that envelope. {sceneUnknownScope.Count} are scoped unknown sources, {sceneOutsideExterior.Count} have distant origins but unavailable extents, and {sceneUnlocalizedExterior.Count} lack a localizing seed footprint. Both excluded groups retain identity as physically unassessed, force incomplete coverage, and never expand to the whole worldspace. --candidate-mod seeds winning NIF providers and attributable BOS property sources; texture-only material changes and runtime asset selection beyond those layers require an imported/explicit seed scope." }
     };
     var manifestDir = Path.GetDirectoryName(Path.GetFullPath(geometryManifestPath));
     if (!string.IsNullOrEmpty(manifestDir)) Directory.CreateDirectory(manifestDir);
@@ -1002,8 +1359,11 @@ sealed record ManifestMeasurements(string status, string? reason,
     string? overlapFractionReason, ManifestZRelation? zRelation);
 sealed record ManifestActualShape(string status, string? reason, string surfaceRelation, string containment,
                                   bool? intersects, long trianglePairsTested);
+sealed record ManifestNarrowVerdict(string status, string? origin, string? sight, string reason,
+                                    string? counterfactualStatus, string? counterfactualReason);
 sealed record ManifestPair(string pairKey, string conflictIoRowIdentity, string a, string b,
     string[] historicalRowIds, bool newCandidate, ManifestStatus discovery, ManifestStatus eligibility,
-    ManifestActualShape actualShape, ManifestMeasurements diagnosticBounds);
+    ManifestActualShape actualShape, ManifestMeasurements diagnosticBounds, ManifestNarrowVerdict oldNarrowVerdict,
+    MeshContactEvidence contactEvidence);
 sealed record HistoricalCrosswalk(int SchemaVersion, bool Complete, List<HistoricalPair>? Pairs);
 sealed record HistoricalPair(string HistoricalRowId, string PairKey, string ConflictIoRowIdentity, string A, string B);

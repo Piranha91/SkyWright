@@ -126,6 +126,8 @@ public sealed class SurfacePairSweep
                 CrossDeclaredChecked, CrossDeclaredIntersects, CrossUndeclaredChecked,
                 CrossUndeclaredIntersects, CrossUnknown;
     public readonly Dictionary<string, (long Intersects, long Unknown, long Checked)> SameByDomain = new();
+    /// <summary>Same-responsible queries already measured by the sweep, retained only when requested by a caller.</summary>
+    public readonly List<SurfaceOverlapHit> SameResults = new();
     /// <summary>Every cross-responsible query reached by the tolerance-aware broad phase, including separation and unknown.</summary>
     public readonly List<SurfaceOverlapHit> CrossResults = new();
     /// <summary>Every cross-responsible actual-shape intersection; unknown is never promoted into this list.</summary>
@@ -136,7 +138,7 @@ public sealed class SurfacePairSweep
 public sealed class CandidateSkips
 {
     public long Deleted, Disabled, NonObstructingType, NoGeometry, InvalidTransform, DegenerateGeometry,
-                ExcludedResponsible, Volume, MarkerMesh, EnableStateUnresolved, BosUnresolved;
+                ExcludedResponsible, ScopeExcluded, Volume, MarkerMesh, EnableStateUnresolved, BosUnresolved;
 }
 
 /// <summary>The pair sweep's tallies: the same-author floor by domain, and the two cross populations.</summary>
@@ -384,13 +386,14 @@ public sealed class OverlapIndex
     public List<SurfaceOverlapCandidate> SurfaceCandidates(
         Func<FormKey, (TriangleSoup? Soup, char Src, string? Reason)> geometryOf,
         ISet<string> obstructing, Func<int, bool> excludeResponsible, out CandidateSkips skips,
-        Func<FormKey, bool>? enabledOf = null)
+        Func<FormKey, bool>? enabledOf = null, Func<FormKey, Snap, bool>? includeReference = null)
     {
         skips = new CandidateSkips();
         var list = new List<SurfaceOverlapCandidate>();
         foreach (var (key, snaps) in History.Refs)
         {
             var s = WinningGeometryPose(key) ?? snaps[^1];
+            if (includeReference is not null && !includeReference(key, s)) { skips.ScopeExcluded++; continue; }
             if (s.Deleted || IsDeletedNow(key)) { skips.Deleted++; continue; }
             if (enabledOf is null ? s.Disabled : !enabledOf(key)) { skips.Disabled++; continue; }
             if (excludeResponsible(s.Plugin)) { skips.ExcludedResponsible++; continue; }
@@ -415,7 +418,8 @@ public sealed class OverlapIndex
     public static SurfacePairSweep SurfacePairs(IReadOnlyList<SurfaceOverlapCandidate> candidates,
         IReadOnlyList<HashSet<int>> closure, double tolerance = 1e-5, long maxTrianglePairs = 2_000_000,
         TimeSpan? pairTimeout = null, Func<int, int, bool>? includeResponsiblePair = null,
-        Action<long>? onProgress = null, float tile = 256f, CancellationToken cancellationToken = default)
+        Action<long>? onProgress = null, float tile = 256f, CancellationToken cancellationToken = default,
+        bool retainSameResults = false)
     {
         var timeout = pairTimeout ?? TimeSpan.FromSeconds(120);
         var sweep = new SurfacePairSweep();
@@ -442,6 +446,7 @@ public sealed class OverlapIndex
 
                     if (a.Win.Plugin == b.Win.Plugin)
                     {
+                        if (retainSameResults) sweep.SameResults.Add(new(a, b, query, true));
                         sweep.SameChecked++;
                         if (intersects) sweep.SameIntersects++;
                         if (unknown) sweep.SameUnknown++;

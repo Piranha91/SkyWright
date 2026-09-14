@@ -128,6 +128,7 @@ var angles = new List<float> { 35f, 125f };
 // yaw matches the game's Z angle (0 = north/+Y, clockwise), positive pitch looks down.
 bool textured = false;
 bool reportMode = false;                         // clean scene pixels for report/video capture; metadata stays external
+bool refSurface = false;                         // exact, depth-tested opaque subject contribution; no halo or ghost
 System.Numerics.Vector3? eye = null, look = null;
 string? eyeRef = null, lookRef = null;
 float eyeHeight = 120f;                       // standing eye level; the player is 128u tall
@@ -546,6 +547,7 @@ for (int i = argStart; i < args.Length; i++)
     }
     else if (args[i] == "--interactive") { interactiveMode = true; textured = true; }
     else if (args[i] == "--report-mode") { reportMode = true; textured = true; }
+    else if (args[i] == "--ref-surface") { refSurface = true; textured = true; }
     else if (args[i] == "--fly-speed" && i + 1 < args.Length) flySpeed = float.Parse(args[++i]);
     else if (args[i] == "--look-sens" && i + 1 < args.Length) lookSens = float.Parse(args[++i]);
     else if (args[i] == "--worklist" && i + 1 < args.Length) worklistPaths.Add(args[++i]);
@@ -3565,7 +3567,7 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot)
                    diffs ?? noDiff, diffColor, picks, captionLines, colourCaptions, npcActors, npcPucksOn, routeRenders,
                    gridRender, overlayLines, keepFx, fxStatic, listMeshes, waterPlanes, coverings, planes, showPlanes, occlusionMode,
                    size, outFile, reportMode, camMeta, planeReport: planeReportSink, bosMode: bosMode, stateMode: stateView, stateName: stateArm?.Name ?? "",
-                   visibilityBudget: visibilityBudget, navColourGroups: navColourGroups);
+                   visibilityBudget: visibilityBudget, navColourGroups: navColourGroups, refSurface: refSurface);
         }
 
         if (compare is { } cmp)
@@ -3749,7 +3751,7 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot)
                 skyColor, terrainHeightAt, dashUnderground, dashUnderStatics, msaa, cullAbove, cellBounds,
                 noDiff, diffColor, picks, fpCap, colourCaptions, npcActors, npcPucksOn, routeRenders, gridRender, overlayLines, keepFx, fxStatic, listMeshes,
                 waterPlanes, coverings, planes, showPlanes, occlusionMode, size, fpOut,
-                reportMode, camMeta, iopt, planeReportSink, bosMode, stateView, stateArm?.Name ?? "", navColourGroups: navColourGroups);
+                reportMode, camMeta, iopt, planeReportSink, bosMode, stateView, stateArm?.Name ?? "", navColourGroups: navColourGroups, refSurface: refSurface);
             Console.WriteLine($"   interactive run over ({iShapes:N0} shapes were resident)");
         pendingSwitch = iopt.CellSwitch;
             NpcCleanup();

@@ -43,6 +43,16 @@ findings they demonstrate) lives with that instance, not here.
 
 ### Clean report and video capture
 
+For controlled subject-view diagnostics, add `--ref-surface` and highlight one `--ref` at a time.
+This opt-in mode overlays the original placed opaque triangles with depth testing, preserves the
+normal texture path, and omits the usual inflated outline and through-occluder ghost. Unsupported
+alpha, effect, marker or non-depth-writing shapes emit `subject-surface-refused` and leave that
+participant's coverage incomplete. A coloured portion of a model alone cannot qualify its contact
+elsewhere. Keep normal and independent participant/elsewhere repeats and use
+`../subject_gate.py` for source-bound post-render qualification with a normal-view witness.
+Capture success, diagnostic qualification and supported consequence are separate states.
+
+
 Pass `--report-mode` with any textured still, compare, worklist, or interactive run to preserve the camera,
 projection, canvas, crop, scene geometry and diagnostic overlays while removing every text surface from the
 pixels. Static PNGs omit caption bars, coloured NPC/route captions and grid numbers. Interactive windows and

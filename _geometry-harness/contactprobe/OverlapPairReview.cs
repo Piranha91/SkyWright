@@ -27,6 +27,7 @@ internal static class OverlapPairReview
         public string Status { get; set; } = "budget_unrun";
         public string? Reason { get; set; } = "not reached within the declared batch budget";
         public SurfaceQueryOutcome? ActualShape { get; set; }
+        public MeshContactEvidence? ContactEvidence { get; set; }
         public object? GeometryA { get; set; }
         public object? GeometryB { get; set; }
         public double Seconds { get; set; }
@@ -63,7 +64,8 @@ internal static class OverlapPairReview
     sealed record Geometry(string Status, string? Reason, TriangleSoup? Soup, Aabb Box, object? Evidence);
 
     public static int Run(string inputPath, string outputPath, double budgetSeconds, double pairSeconds,
-                          int maxPairs, double surfaceTolerance, long maxTrianglePairs, AssetResolver assets, OverlapIndex index,
+                          int maxPairs, double surfaceTolerance, long maxTrianglePairs, bool contactEvidence,
+                          AssetResolver assets, OverlapIndex index,
                           EnableArms arms, ConfigurationIdentity configuration, Func<FormKey, Snap?> winningPose,
                           Run run)
     {
@@ -85,6 +87,7 @@ internal static class OverlapPairReview
                 readerVersion = NifOverlapGeometry.ReaderVersion, policyVersion = NifOverlapGeometry.SurfaceMeasurementIdentity(surfaceTolerance),
                 inputPath = Path.GetFullPath(inputPath), inputSha256,
                 configuration, budget = new { budgetSeconds, pairSeconds, maxPairs, surfaceTolerance, maxTrianglePairs,
+                    contactEvidence, contactEvidencePolicy = MeshIntersection.ContactEvidencePolicyVersion,
                     cancellation = "cooperative during each mesh query; asset decode may finish after the deadline" },
                 total = rows.Count, complete = finished && rows.All(r => r.Status is not ("budget_unrun" or "running")), attempted = attempts,
                 measured = rows.Count(r => r.ActualShape?.Intersects is not null),
@@ -157,6 +160,9 @@ internal static class OverlapPairReview
                 using var cancel = new CancellationTokenSource(TimeSpan.FromSeconds(secondsLeft));
                 row.ActualShape = SurfaceQueryOutcome.Query(ga.Soup!, gb.Soup!, surfaceTolerance,
                     maxTrianglePairs, TimeSpan.FromSeconds(secondsLeft), cancel.Token);
+                if (contactEvidence)
+                    row.ContactEvidence = MeshIntersection.MeasureContactEvidence(
+                        ga.Soup!, gb.Soup!, surfaceTolerance, maxTrianglePairs, cancel.Token);
                 row.Status = row.ActualShape.Intersects is null ? "unknown" : "measured";
                 row.Reason = row.ActualShape.Reason;
             }

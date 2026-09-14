@@ -118,5 +118,31 @@ static class MeshPipelineProof
         var incomplete = bad.SurfaceCandidates(Missing, Types, _ => false, out var unknownSkips);
         check("surface pipeline: missing NIF remains counted unknown despite supplied OBND",
             incomplete.Count == 1 && unknownSkips.NoGeometry == 1, $"candidates={incomplete.Count}, unknown={unknownSkips.NoGeometry}");
+
+        // Retaining same-responsible query rows is an observation option only. It cannot change the
+        // sweep population, counters, cross rows, or query outcomes already measured by the sweep.
+        var retention = Index(Crossing, 1, out var retentionGeometry);
+        var sameKey = new FormKey(AMod, 0x901);
+        retention.Record(1, Cell, FormKey.Null, Ref(sameKey, BaseB));
+        var retentionCandidates = retention.SurfaceCandidates(retentionGeometry, Types, _ => false, out _);
+        var defaultRetention = OverlapIndex.SurfacePairs(retentionCandidates, Closure);
+        var explicitRetention = OverlapIndex.SurfacePairs(retentionCandidates, Closure, retainSameResults: true);
+        string Counters(SurfacePairSweep s) => string.Join("|", s.PairsChecked, s.SameChecked, s.SameIntersects,
+            s.SameUnknown, s.CrossDeclaredChecked, s.CrossDeclaredIntersects, s.CrossUndeclaredChecked,
+            s.CrossUndeclaredIntersects, s.CrossUnknown,
+            string.Join(",", s.SameByDomain.OrderBy(x => x.Key).Select(x => $"{x.Key}:{x.Value}")));
+        string Cross(SurfacePairSweep s) => string.Join("|", s.CrossResults.Select(x =>
+            $"{x.A.Key}/{x.B.Key}:{x.Declared}:{x.Query.Status}:{x.Query.SurfaceRelation}:{x.Query.Intersects}:{x.Query.TrianglePairsTested}"));
+        check("surface retention: default discards same-responsible rows without changing their counters",
+            defaultRetention.SameResults.Count == 0 && defaultRetention.SameChecked > 0,
+            $"sameResults={defaultRetention.SameResults.Count}, counters={Counters(defaultRetention)}");
+        check("surface retention: opt-in preserves identical counters and cross query rows",
+            Counters(defaultRetention) == Counters(explicitRetention) && Cross(defaultRetention) == Cross(explicitRetention),
+            $"default={Counters(defaultRetention)} / {Cross(defaultRetention)}; retained={Counters(explicitRetention)} / {Cross(explicitRetention)}");
+        check("surface retention: retained same rows exactly account for the measured same population",
+            explicitRetention.SameResults.Count == explicitRetention.SameChecked
+            && explicitRetention.SameResults.Count(x => x.Query.Intersects == true) == explicitRetention.SameIntersects
+            && explicitRetention.SameResults.Count(x => x.Query.Unknown) == explicitRetention.SameUnknown,
+            $"rows={explicitRetention.SameResults.Count}, checked={explicitRetention.SameChecked}, intersects={explicitRetention.SameIntersects}, unknown={explicitRetention.SameUnknown}");
     }
 }

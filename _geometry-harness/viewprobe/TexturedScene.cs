@@ -332,7 +332,8 @@ static class TexturedScene
         string stateMode = "on",                           // --state-view on | diff: the world state's paint (StateView.cs)
         string stateName = "",                             // --state: the state's name for the caption and the window
         int visibilityBudget = OcclusionState.DefaultVisibilityBudget,
-        IReadOnlyList<NavColourGroup>? navColourGroups = null)
+        IReadOnlyList<NavColourGroup>? navColourGroups = null,
+        bool refSurface = false)
     {
         var logger = new ConsoleCvLogger();
         var gate = new CharacterViewerLogGate { Verbose = Environment.GetEnvironmentVariable("VP_CV_VERBOSE") == "1" };
@@ -425,6 +426,9 @@ static class TexturedScene
         // emitted here and drawn by the OVERLAY pass, whose zero-normal vertices render as the
         // exact flat colour — the library pass would shade the hull's inward faces to black.
         var haloTris = new List<float>();
+        var subjectSurface = new List<float>();
+        var subjectSurfaceDoubleSided = new List<float>();
+        var subjectSurfaceRefusals = new HashSet<string>();
         // Near faces (outward winding), for the deep-occlusion boost: they pass a GREATER
         // depth test only when the occluder sits in front of the WHOLE hull — a wall, never
         // the object itself or its own door-jamb — so the through-wall ghost gets a second
@@ -658,7 +662,7 @@ static class TexturedScene
                 mesh.DstBlendIndex = b.DstBlendIndex;
                 mesh.IsModelSpace = b.IsModelSpaceNormals;
 
-                if (r.Highlight)
+                if (r.Highlight && !refSurface)
                 {
                     var haloColor = r.HighlightColor == default ? haloOrange : r.HighlightColor;
                     // The implicated ref keeps its OWN texture; the highlight is a thick orange
@@ -737,6 +741,22 @@ static class TexturedScene
                     {
                         int h = textures.LoadTexture(normal);
                         if (h != textures.WhiteTexture) { mesh.NormalTexture = h; mesh.HasNormalMap = true; }
+                    }
+                }
+
+                if (r.Highlight && refSurface)
+                {
+                    // An identity pass must preserve the scene depth and the normal material path.
+                    // A solid overlay cannot reproduce alpha-card coverage, so these participants
+                    // remain explicitly unqualified instead of becoming opaque diagnostic sheets.
+                    if (b.HasAlphaBlend || b.HasAlphaTest || b.MaterialAlpha < 1f ||
+                        !b.ZBufferWrite || b.HasEffectShader || r.Marker)
+                        subjectSurfaceRefusals.Add(r.RefKey.ToString());
+                    else
+                    {
+                        var surface = b.IsDoubleSided ? subjectSurfaceDoubleSided : subjectSurface;
+                        var colour = r.HighlightColor == default ? haloOrange : r.HighlightColor;
+                        foreach (var index in tri) Overlay.Vertex(surface, wp[index], colour, Vector3.Zero);
                     }
                 }
 
@@ -1941,6 +1961,14 @@ static class TexturedScene
         // was before the field existed (blend off, u_alpha 1). Only the route's waypoint discs ask
         // for less: a translucent fill marks a spot without hiding the ground it marks.
         var layers = new List<(float[] Data, bool DepthTested, bool CullBack, int Nav, float Alpha)>();
+        if (refSurface)
+        {
+            Console.WriteLine("subject-surface-mode: exact placed opaque triangles; depth-tested; no inflated hull or occluded ghost");
+            foreach (var key in subjectSurfaceRefusals.OrderBy(x => x, StringComparer.Ordinal))
+                Console.WriteLine($"subject-surface-refused: {key}: alpha, effect, marker or non-depth-writing shape; participant coverage incomplete");
+            if (subjectSurface.Count > 0) layers.Add((subjectSurface.ToArray(), true, true, 0, 1f));
+            if (subjectSurfaceDoubleSided.Count > 0) layers.Add((subjectSurfaceDoubleSided.ToArray(), true, false, 0, 1f));
+        }
         // Highlight halos: the SAME hull buffer is drawn twice — solid depth-tested rim here,
         // then again as the translucent Greater-pass ghost (see the draw loop).
         float[]? haloData = haloTris.Count > 0 ? haloTris.ToArray() : null;
