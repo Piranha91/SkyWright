@@ -75,6 +75,10 @@ PLINTH = {"id": "000301:Test.esp", "edid": "Plinth", "min": [-60, -60, 0], "max"
 PLINTH_ALPHA = dict(PLINTH, alpha=True)
 CHEST = {"id": "000302:Test.esp", "edid": "Chest", "min": [-120, -210, 0], "max": [120, -150, 60]}
 PANEL = {"id": "000303:Test.esp", "edid": "Panel", "min": [-100, 38, 180], "max": [100, 42, 240]}
+# One curb, on the +Y approach only: its top (110) is under the probe eye (120), so the clearance
+# map flies over it and ranks that bearing first, while the aimed ray down to the subject clips
+# it. The R10 shape again -- but on ONE side, so the FIRST candidate fails and a later one passes.
+CURB_N = {"id": "000401:Test.esp", "edid": "CurbN", "min": [-120, 100, 0], "max": [120, 120, 110]}
 
 LOW = "0,-60,10"     # mid-height on the plinth's -Y face
 HIGH = "0,38,200"    # on the panel's -Y face, 80 u above the probe eye
@@ -152,7 +156,9 @@ def test_failed_verification_cannot_export_success():
           doc["chosen"]["preVerificationOk"] is True)
     check("R10 shape: the refusal reason reaches chosen.fail",
           any("verification:" in f for f in doc["chosen"]["fail"]))
-    check("R10 shape: no worklist is written", not os.path.exists(wl))
+    check("R10 shape: the worklist path holds a refusal record, not a renderable shot",
+          json.load(open(wl, encoding="utf-8")).get("status") == "refused"
+          and json.load(open(wl, encoding="utf-8")).get("cells") == [])
     check("R10 shape: the candidate walk is reported", len(doc["verifyAttempts"]) == 3,
           f"{len(doc['verifyAttempts'])} attempts")
     check("R10 shape: an exhausted search is not called a proof",
@@ -376,6 +382,304 @@ def test_surface_map_ranks_but_never_refuses():
           or "CONFIRMED" in out)
 
 
+# --------------------------------------------------------------------------------------
+# 3. the four findings of the 2026-09-14 implementation review
+# --------------------------------------------------------------------------------------
+
+CURB = [{"id": "000401:Test.esp", "edid": "CurbN", "min": [-120, 100, 0], "max": [120, 120, 110]},
+        {"id": "000402:Test.esp", "edid": "CurbS", "min": [-120, -120, 0], "max": [120, -100, 110]},
+        {"id": "000403:Test.esp", "edid": "CurbE", "min": [100, -120, 0], "max": [120, 120, 110]},
+        {"id": "000404:Test.esp", "edid": "CurbW", "min": [-120, -120, 0], "max": [-100, 120, 110]}]
+
+
+def test_a_failed_rerun_cannot_leave_a_verified_artifact_behind():
+    """Finding 1. The killer is path REUSE, which every fresh-path test misses."""
+    d = tempfile.mkdtemp()
+    wl, jp = os.path.join(d, "wl.json"), os.path.join(d, "plan.json")
+    a, _ = run_cli(["plan", "TestCell", "--subject", "0,0,0=t", "--vp", FAKE, "--quiet",
+                    "--json", jp, "--worklist", wl], room(PLINTH))
+    first = json.load(open(wl, encoding="utf-8"))
+    check("reuse: the first run really did verify and emit", a == 0
+          and first["cells"][0]["shots"][0]["status"] == "verified")
+    b, _ = run_cli(["plan", "TestCell", "--subject", "0,0,0=t", "--vp", FAKE, "--quiet",
+                    "--json", jp, "--worklist", wl], room(*CURB))
+    after_wl = json.load(open(wl, encoding="utf-8"))
+    after_jp = json.load(open(jp, encoding="utf-8"))
+    check("reuse: the second run refuses", b == 1, f"exit {b}")
+    check("reuse: the worklist at that path NO LONGER claims verified",
+          after_wl.get("status") == "refused", str(after_wl.get("status")))
+    check("reuse: and offers no renderable shot", after_wl.get("cells") == [])
+    check("reuse: the json at that path is the second run's", after_jp["status"] == "refused")
+    check("reuse: no earlier pose id survives at either path",
+          after_wl.get("poseId") != first["cells"][0]["shots"][0]["poseId"])
+
+
+def test_an_early_refusal_cannot_leave_a_verified_artifact_behind():
+    """Finding 1, second half: an early exit never reaches a writer at all."""
+    d = tempfile.mkdtemp()
+    jp = os.path.join(d, "plan.json")
+    a, _ = run_cli(["plan", "TestCell", "--subject", "0,0,0=t", "--vp", FAKE, "--quiet",
+                    "--json", jp], room(PLINTH))
+    check("early refusal: a verified result exists first", a == 0
+          and json.load(open(jp, encoding="utf-8"))["status"] == "verified")
+    # No candidate can survive: nothing is bounded and nothing is walkable.
+    b, _ = run_cli(["plan", "TestCell", "--subject", "0,0,0=t", "--vp", FAKE, "--quiet",
+                    "--json", jp], {"floorZ": None, "boxes": [], "nav": []})
+    doc = json.load(open(jp, encoding="utf-8"))
+    check("early refusal: the run exits non-zero", b != 0, f"exit {b}")
+    check("early refusal: the stale verified result is GONE",
+          doc["status"] != "verified", doc["status"])
+
+
+def test_skipped_verification_clears_the_final_boolean():
+    """Finding 2. `chosen.ok` is documented as the final answer, so it cannot stay true."""
+    d = tempfile.mkdtemp()
+    jp = os.path.join(d, "plan.json")
+    code, _ = run_cli(["plan", "TestCell", "--subject", "0,0,0=t", "--vp", FAKE, "--quiet",
+                       "--no-verify", "--json", jp], room(PLINTH))
+    doc = json.load(open(jp, encoding="utf-8"))
+    check("--no-verify: chosen.ok is FALSE, matching the documented contract",
+          doc["chosen"]["ok"] is False, str(doc["chosen"]["ok"]))
+    check("--no-verify: the pre-verification success is preserved beside it",
+          doc["chosen"]["preVerificationOk"] is True)
+    check("--no-verify: and the reason names the skip",
+          any("SKIPPED" in f for f in doc["chosen"]["fail"]))
+    check("--no-verify: status and exit are unchanged",
+          doc["status"] == "unverified" and code == 2)
+
+
+def test_projection_uses_the_pose_that_is_actually_submitted():
+    """Finding 3. Projecting from unrounded angles samples a different ray than it submits.
+
+    A panel whose left edge is at x=0 with a declared point 0.15 u inside it. The candidate's
+    angles round to 0.0/0.0 on submission; projecting from the unrounded values picks the pixel
+    one column left, misses the panel entirely and reports `not-surface` against the far wall --
+    while the pose actually submitted confirms it. Same exported pose, same pose id.
+    """
+    panel = {"id": "000601:Test.esp", "edid": "Panel",
+             "min": [0, 250, 0], "max": [400, 254, 300]}
+    back = {"id": "000602:Test.esp", "edid": "Back",
+            "min": [-900, 800, 0], "max": [900, 804, 400]}
+    scene = {"floorZ": None, "boxes": [panel, back], "nav": [], "navSilent": [],
+             "insideSilent": []}
+    fd, jp = tempfile.mkstemp(suffix=".json")
+    os.close(fd)
+    code, out = run_cli(["check", "TestCell", "--eye", "0,0,100", "--floor-z", "0",
+                         "--surface", "0.15,250,100.15=edge", "--aim", "0.15,250,100.15",
+                         "--size", "1024", "--vp", FAKE, "--quiet", "--json", jp], scene)
+    doc = json.load(open(jp, encoding="utf-8"))
+    t = doc["verification"]["targets"][0]
+    check("canonical pose: the edge target is CONFIRMED, not lost to a rounding mismatch",
+          t["status"] == "confirmed", f"{t['status']} at {t.get('hit', {}).get('dist')}")
+    p = doc["verification"]["pose"]
+    check("canonical pose: the exported pose is already rounded to what was submitted",
+          p["yaw"] == round(p["yaw"], 1) and p["pitch"] == round(p["pitch"], 1)
+          and all(v == round(v, 1) for v in p["eye"]))
+
+
+def test_pose_identity_binds_the_scene_configuration():
+    """Finding 4. The same pose against two different declared scenes is not the same evidence."""
+    d = tempfile.mkdtemp()
+    ids = []
+    for prof in ("ProfileA", "ProfileB"):
+        jp = os.path.join(d, f"{prof}.json")
+        run_cli(["plan", "TestCell", "--subject", "0,0,0=t", "--vp", FAKE, "--quiet",
+                 "--json", jp, "--", "--profile", prof], room(PLINTH))
+        ids.append(json.load(open(jp, encoding="utf-8")))
+    check("scene binding: two profiles do NOT share a pose id",
+          ids[0]["poseId"] != ids[1]["poseId"], f"{ids[0]['poseId']} vs {ids[1]['poseId']}")
+    check("scene binding: the declared configuration is recorded",
+          "ProfileA" in json.dumps(ids[0]["scene"]["declared"]))
+    check("scene binding: an absent renderer fingerprint is stated, not implied",
+          ids[0]["scene"]["renderer"] is None and "ABSENT" in ids[0]["scene"]["rendererIs"])
+    check("scene binding: the declaration is labelled as not proof of bytes",
+          "NOT proof" in ids[0]["scene"]["declaredIs"])
+
+
+def test_an_input_refusal_cannot_leave_a_verified_artifact_behind():
+    """Finding 1, third shape: a refusal raised while READING the inputs.
+
+    The early-refusal case above fails after the maps have run. These three fail before any input
+    is resolved at all, which is earlier than every writer -- and was earlier than the point where
+    the output paths were claimed. Measured before the fix: each exited 1 while the previous run's
+    `status: verified` JSON and its renderable worklist sat at the requested paths, still carrying
+    that run's pose id. One case per refusing input reader, not per implementation detail.
+    """
+    d = tempfile.mkdtemp()
+    jp, wp = os.path.join(d, "plan.json"), os.path.join(d, "worklist.json")
+    scene = room(PLINTH)
+    ok, _ = run_cli(["plan", "TestCell", "--subject", "0,0,0=t", "--vp", FAKE, "--quiet",
+                     "--json", jp, "--worklist", wp], scene)
+    first = json.load(open(jp, encoding="utf-8"))
+    check("input refusal: a verified result and a renderable worklist exist first",
+          ok == 0 and first["status"] == "verified"
+          and bool(json.load(open(wp, encoding="utf-8"))["cells"][0]["shots"]), f"exit {ok}")
+    stale = first["poseId"]
+    cases = {
+        "--surface with no Z": ["--surface=0,-60"],                       # collect_subjects
+        "surface-only, no --floor-z": ["--surface=0,-60,10"],             # resolve_floor
+        "more points than --surface-max": ["--surface=0,-60,10", "--surface=1,-60,10",
+                                           "--surface=2,-60,10", "--surface-max", "2",
+                                           "--floor-z", "0"],             # the bound
+    }
+    for name, extra in cases.items():
+        code, _ = run_cli(["plan", "TestCell", "--vp", FAKE, "--quiet",
+                           "--json", jp, "--worklist", wp, *extra], scene)
+        doc = json.load(open(jp, encoding="utf-8"))
+        wl = json.load(open(wp, encoding="utf-8"))
+        check(f"input refusal ({name}): exits non-zero", code != 0, f"exit {code}")
+        check(f"input refusal ({name}): no verified result survives at that path",
+              doc.get("status") == "incomplete" and stale not in json.dumps(doc),
+              str(doc.get("status")))
+        check(f"input refusal ({name}): and no renderable worklist survives either",
+              not wl.get("cells"), str(wl.get("status")))
+
+
+def test_the_renderer_fingerprint_binds_when_viewprobe_prints_one():
+    """Finding 4's other half: the renderer's OWN word about its inputs, when there is one.
+
+    A declared profile name is a claim about bytes; viewprobe's `capture input configuration:`
+    line is a hash of them. It is printed only for a candidate configuration (`--order`), so this
+    case passes one through and the stand-in prints it under viewprobe's own gate. Two different
+    fingerprints over the SAME pose and the SAME declared flags must not share an identity, or a
+    verification cannot be shown to belong to the scene it ran against. Without this case the
+    parser was never exercised and the binding was a claim about a regex.
+    """
+    d = tempfile.mkdtemp()
+    fps = ["3f" + "0" * 62, "c7" + "1" * 62]
+    got = []
+    for i, fp in enumerate(fps):
+        jp, wp = os.path.join(d, f"o{i}.json"), os.path.join(d, f"o{i}-wl.json")
+        code, _ = run_cli(["plan", "TestCell", "--subject", "0,0,0=t", "--vp", FAKE, "--quiet",
+                           "--json", jp, "--worklist", wp, "--", "--order", "cand.json"],
+                          dict(room(PLINTH), configFingerprint=fp))
+        got.append((code, json.load(open(jp, encoding="utf-8")),
+                    json.load(open(wp, encoding="utf-8"))))
+    (c0, a, awl), (_, b, _) = got
+    check("renderer binding: the run verified", c0 == 0 and a["status"] == "verified", str(c0))
+    check("renderer binding: viewprobe's own fingerprint reached the artifact",
+          a["scene"]["renderer"] == fps[0], str(a["scene"]["renderer"])[:20])
+    check("renderer binding: and it is no longer reported as absent",
+          "ABSENT" not in a["scene"]["rendererIs"])
+    check("renderer binding: two fingerprints do NOT share a pose id",
+          a["poseId"] != b["poseId"], f"{a['poseId']} vs {b['poseId']}")
+    check("renderer binding: the verification carries the plan's own pose and scene",
+          a["verification"]["poseId"] == a["poseId"] and a["verification"]["scene"] == a["scene"])
+    check("renderer binding: and the worklist names that same pose, scene and status",
+          awl["poseId"] == a["poseId"] and awl["scene"] == a["scene"]
+          and awl["status"] == a["status"], str(awl.get("status")))
+
+
+def test_every_command_that_names_a_path_claims_it():
+    """The artifact contract is not `plan`-only: `frame` reads an ini and can refuse too.
+
+    A documented contract with one silent exception is worse than none, so the third subcommand
+    that takes an output path is held to it as well -- a refused read must not leave the previous
+    run's frame JSON at that path.
+    """
+    d = tempfile.mkdtemp()
+    jp = os.path.join(d, "frame.json")
+    prof = os.path.join(d, "inst", "profiles", "P")
+    os.makedirs(prof)
+    for name, body in (("settings.ini", "[General]\nLocalSettings=true\n"),
+                       ("skyrimprefs.ini", "[Display]\niSize W=3840\niSize H=2160\n"
+                                           "fDefaultWorldFOV=80.0\n")):
+        with open(os.path.join(prof, name), "w", encoding="utf-8") as f:
+            f.write(body)
+    ok, _ = run_cli(["frame", "--instance", os.path.join(d, "inst"), "--profile", "P",
+                     "--json", jp], {})
+    check("frame: a real frame is written first", ok == 0
+          and json.load(open(jp, encoding="utf-8")).get("fov_setting") == 80.0, f"exit {ok}")
+    bad, _ = run_cli(["frame", "--instance", os.path.join(d, "inst"), "--profile", "Missing",
+                      "--json", jp], {})
+    doc = json.load(open(jp, encoding="utf-8"))
+    check("frame: a refused read exits non-zero", bad != 0, f"exit {bad}")
+    check("frame: and the earlier frame does not survive at that path",
+          doc.get("status") == "incomplete" and "fov_setting" not in doc, str(doc.get("status")))
+
+
+def test_the_planner_asks_the_renderer_for_its_configuration():
+    """The other half of finding 4: a plain profile run must not be declaration-only by default.
+
+    The earlier binding only worked when the CALLER happened to pass `--order`, which no normal
+    run does -- so every ordinary plan recorded `renderer: null`. The planner now asks for the
+    identity itself on the render whose answers decide the verdict, and asks ONCE, because
+    resolving it hashes every loaded plugin. The scope
+    is reported with it: this is a hash of records and providers, never of drawn pixels.
+    """
+    d = tempfile.mkdtemp()
+    fp = "9b" + "e" * 62
+    scene = dict(room(PLINTH), configFingerprint=fp)
+    jp = os.path.join(d, "bound.json")
+    trace = os.path.join(d, "trace.txt")
+    os.environ["FAKE_VIEWPROBE_TRACE"] = trace
+    try:
+        code, _ = run_cli(["plan", "TestCell", "--subject", "0,0,0=t", "--vp", FAKE, "--quiet",
+                           "--json", jp], scene)
+    finally:
+        os.environ.pop("FAKE_VIEWPROBE_TRACE", None)
+    calls = [l for l in open(trace, encoding="utf-8").read().splitlines() if l.strip()]
+    asked = [l for l in calls if "--config-identity" in l]
+    doc = json.load(open(jp, encoding="utf-8"))
+    check("asks: a plain run with no --order now binds the renderer's own fingerprint",
+          code == 0 and doc["scene"]["renderer"] == fp, str(doc["scene"]["renderer"])[:20])
+    check("asks: and it is asked for exactly once, not on every probe",
+          len(asked) == 1 and len(calls) > 1, f"{len(asked)} of {len(calls)} invocation(s)")
+    check("asks: the scope of the hash travels with it",
+          any("plugins" in c for c in doc["scene"]["rendererCovers"])
+          and "NOT mesh/material bytes" in doc["scene"]["rendererIs"])
+    check("asks: the declaration is still labelled as not proof of bytes",
+          "not a renderer build hash" in doc["scene"]["declaredIs"])
+
+    jp2 = os.path.join(d, "unbound.json")
+    code2, _ = run_cli(["plan", "TestCell", "--subject", "0,0,0=t", "--vp", FAKE, "--quiet",
+                        "--no-bind-scene", "--json", jp2], scene)
+    un = json.load(open(jp2, encoding="utf-8"))
+    check("asks: --no-bind-scene returns to declaration-only and says so",
+          code2 == 0 and un["scene"]["renderer"] is None
+          and "ABSENT" in un["scene"]["rendererIs"] and un["scene"]["rendererCovers"] is None)
+    check("asks: binding the scene changes the identity of the evidence",
+          doc["poseId"] != un["poseId"], f"{doc['poseId']} vs {un['poseId']}")
+
+
+def test_a_later_candidate_cannot_inherit_an_earlier_identity():
+    """Reviewed 2026-09-14: the Runner cached the last fingerprint it had seen.
+
+    A candidate whose verification supplied one, then a candidate whose verification supplied
+    none, and the second reported the first's -- an identity the render in hand never produced,
+    which is the silent wrong answer this binding exists to prevent. viewprobe really has that
+    shape: a refused configuration resolve carries on rendering without an identity.
+
+    One curb on the +Y approach gives the two-candidate retry; the stand-in answers the FIRST
+    asking invocation and no other. Both existing suites passed with the defect present, so the
+    case is the point: an identity has to belong to the render it is attached to.
+    """
+    d = tempfile.mkdtemp()
+    jp, wp = os.path.join(d, "retry.json"), os.path.join(d, "retry-wl.json")
+    fp = "ab" + "0" * 62
+    code, _ = run_cli(["plan", "TestCell", "--subject", "0,0,0=t", "--vp", FAKE, "--quiet",
+                       "--json", jp, "--worklist", wp],
+                      dict(room(PLINTH, CURB_N), configFingerprint=fp,
+                           configFingerprintAsks=[1]))
+    doc = json.load(open(jp, encoding="utf-8"))
+    wl = json.load(open(wp, encoding="utf-8"))
+    at = doc["verifyAttempts"]
+    check("retry: candidate 1 failed and candidate 2 verified",
+          code == 0 and len(at) == 2 and at[0]["status"] == "failed"
+          and at[1]["status"] == "verified", f"exit {code}, {len(at)} attempt(s)")
+    check("retry: the first attempt keeps the identity ITS render reported",
+          at[0]["renderer"] == fp, str(at[0]["renderer"])[:20])
+    check("retry: the second reports ABSENT rather than inheriting it",
+          at[1]["renderer"] is None, str(at[1]["renderer"])[:20])
+    check("retry: the exported verification carries that absence",
+          doc["verification"]["scene"]["renderer"] is None
+          and "ABSENT" in doc["verification"]["scene"]["rendererIs"])
+    check("retry: the plan and the worklist say the same thing, not a recomputed opinion",
+          doc["scene"] == doc["verification"]["scene"] and wl["scene"] == doc["scene"])
+    check("retry: and the exported pose id is the candidate that actually verified",
+          doc["poseId"] == at[1]["poseId"] and doc["poseId"] != at[0]["poseId"])
+
+
 ALL = [test_failed_verification_cannot_export_success,
        test_pose_identity_binds_the_result,
        test_skipped_verification_is_not_a_pass,
@@ -394,7 +698,17 @@ ALL = [test_failed_verification_cannot_export_success,
        test_surface_input_contract_refuses_a_flat_spec,
        test_surface_count_is_bounded,
        test_surface_only_plan_refuses_to_invent_a_storey,
-       test_surface_map_ranks_but_never_refuses]
+       test_surface_map_ranks_but_never_refuses,
+       test_a_failed_rerun_cannot_leave_a_verified_artifact_behind,
+       test_an_early_refusal_cannot_leave_a_verified_artifact_behind,
+       test_skipped_verification_clears_the_final_boolean,
+       test_projection_uses_the_pose_that_is_actually_submitted,
+       test_pose_identity_binds_the_scene_configuration,
+       test_an_input_refusal_cannot_leave_a_verified_artifact_behind,
+       test_the_renderer_fingerprint_binds_when_viewprobe_prints_one,
+       test_every_command_that_names_a_path_claims_it,
+       test_the_planner_asks_the_renderer_for_its_configuration,
+       test_a_later_candidate_cannot_inherit_an_earlier_identity]
 
 
 if __name__ == "__main__":

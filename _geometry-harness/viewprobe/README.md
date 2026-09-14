@@ -152,10 +152,20 @@ A successful save or size check alone does not establish clean pixels.
   --nav-version "001010:World.esm=Earlier.esp" --red 001011:World.esm:3`.
   These explicit selections write `<cell>-navmeshes.json` with layer/cell/provider identities,
   triangle counts, requested red indices and their actual existence/admission, camera and replay
-  arguments. With `--order`, it also carries the evaluated configuration fingerprint; otherwise
-  configuration identity is explicitly null. An absent triangle is never reconstructed or painted
+  arguments. With `--order` — or with `--config-identity`, below — it also carries the evaluated
+  configuration fingerprint; otherwise configuration identity is explicitly null. An absent triangle is never reconstructed or painted
   from another version. Triangle admission is not proof of visible pixels or NPC behaviour.
   `viewprobe --nav-selection-smoke` runs production-path known-answer selection/refusal checks.
+- **Unrecognised flags are refused:** an unmatched `--` token exits 2 before rendering. Use
+  `--eye X,Y,Z`; the parser does not accept `--flag=value`. Dropping a camera argument could
+  otherwise silently select an overview. The error also covers a trailing flag missing its value.
+- **`--config-identity`**: report WHAT THIS RUN CONSUMED when no `--order`
+  replaced it — the same `capture input configuration:` line and `<cell>-configuration.json`
+  sidecar a candidate run emits, resolved from the profile itself. It is **opt-in** because
+  resolving it hashes every loaded plugin; the planner requests it on each verification render
+  rather than every exploratory probe. It is a REPORTING flag: it is held in its own
+  variable, so asking the question never changes the order, the asset view or the archives the
+  capture draws from. A run that predates the flag ignores it and reports no identity.
 - **Terrain:** `--no-terrain` (off entirely), `--no-terrain-layers` (base layer only — no painted
   alpha layers and no base stand-ins).
 - **Water and coverings** (both ON by default — their ABSENCE was the bug, not their look):
@@ -1912,30 +1922,67 @@ worklist, a `chosen.ok: true` and exit 0 anyway; that cost a session. Now:
 | situation | `status` | `chosen.ok` | exit | worklist |
 |---|---|---|---|---|
 | verified | `verified` | `true` | 0 | written |
-| the check refused it | `refused` | `false` | 1 | **not written** (`--emit-refused` writes it marked `REFUSED -- `) |
-| `--no-verify` | `unverified` | pre-check value, with `verified: false` | 2 | written, marked `UNVERIFIED -- ` |
+| the check refused it | `refused` | `false` | 1 | a **refusal record with no shots** (`--emit-refused` writes the shot itself, marked `REFUSED -- `) |
+| `--no-verify` | `unverified` | `false` | 2 | written, marked `UNVERIFIED -- ` |
 
-For a final refusal, `chosen.ok` becomes false and its previous value is retained as
-`preVerificationOk`. With `--no-verify`, use `status` and `verified`: `chosen.ok` still contains
-the pre-check result. Every artifact carries a `poseId` digest over the pose, targets and selected
-policy values, and **each candidate attempt carries its own**. This identifies the candidate;
-it does not bind the scene configuration. When the top candidate fails, the
-check walks down the ranked list (`--verify-candidates`, default 3, one render each) — a SAMPLED
-search over the candidates this grid produced, never a proof that no camera exists.
+`chosen.ok` carries the FINAL answer in every row — a SKIPPED check leaves it `false` just as a
+failed one does, because a proposal whose verification is missing has not been shown to be ok. The
+pre-verification verdict survives beside it as `preVerificationOk`. The **worklist** carries
+`status`, `poseId` and `scene` at its top level in every row of that table, so one read answers
+*what is this file* whether it holds a shot or a refusal. When the top candidate fails,
+the check walks down the ranked list (`--verify-candidates`, default 3, one render each) — a
+SAMPLED search over the candidates this grid produced, never a proof that no camera exists.
 
-**Known correctness gaps in this checkpoint:**
+**Every requested output path is claimed before the inputs are read.** Declining to WRITE a
+success artifact is not enough when a caller reuses a path: an earlier run's verified worklist
+otherwise sits there byte-identical, still saying `verified` and carrying the earlier run's pose
+id, while the new run exits 1. Nor is claiming them once the run is under way: a refusal raised
+while *reading* the inputs — a malformed `--surface`, a surface-only plan with no `--floor-z`,
+more points than `--surface-max`, a `--from-profile` whose ini is missing — exits before every
+writer, and each of those was measured leaving the previous run's verified JSON and its
+renderable worklist in place. So the claim is the first statement of the command: every path the
+caller NAMED is stamped `incomplete` up front and overwritten by the real result. Nothing else is
+discovered, moved or deleted. The one case it cannot cover is argparse rejecting the command line
+itself — the command never runs, and nothing at those paths is touched, which is correct.
 
-- A failed rerun can leave a previous successful worklist at the requested path; early input
-  failure can also leave the previous JSON result. The table describes new writes, not cleanup
-  of existing files. Use fresh output paths and check the invocation's exit code.
-- Skipped verification does not yet clear `chosen.ok`; it is not a reliable final boolean.
-- Pick projection uses the unrounded pose while renderer arguments are rounded to one decimal.
-  Near a surface edge this can sample the wrong pixel. The tolerance does not repair that error.
-- `poseId` does not include the effective scene or renderer identity. Matching IDs alone cannot
-  establish that a saved verification applies to the current inputs.
+**The pose is canonicalised once, before anything reads it.** Every consumer here formats a pose
+to one decimal; projecting a target pixel from the UNROUNDED angles while submitting the rounded
+ones samples a different ray than the renderer takes, and near a surface edge that lands on the
+other side of it — a declared point 0.15 u inside a panel came back `not-surface` against a wall
+550 u beyond, carrying the SAME exported pose and the SAME pose id as the run that confirms it. A
+tolerance cannot repair that, because the error is *which surface was sampled*, not how far along
+the ray. `canonical_pose` settles the numbers once and projection, containment, target distance,
+identity and command generation all read those and no others.
 
-These need regression fixes before treating saved results as a reliable automated acceptance
-gate. The current tests cover the baseline behavior below, not these remaining counterexamples.
+Every artifact carries a `poseId` digest over the pose, its targets, the policy **and the scene**,
+and **each candidate attempt carries its own**, so a saved camera, a saved verification and a saved
+worklist can be checked to be the same candidate against the same scene. The scene half keeps two
+things deliberately apart:
+
+- **`declared`** — the caller's inputs (instance, profile, order, the viewprobe command). A
+  declaration, never proof of bytes: `vp` is a command path, not a build hash, and a profile NAME
+  is not its contents.
+- **`renderer`** — viewprobe's own `capture input configuration:` fingerprint. The verification
+  render *asks* for it (`--config-identity`, above) rather than hoping the caller passed
+  `--order`, because that render's answers are what the verdict rests on; it is asked once per
+  attempt, not once per probe. `rendererCovers` travels with it and says what the hash is OF:
+  the plugin set and order with their content hashes, the provider list, the BOS overlays, the
+  population and the state — **not** mesh or material bytes, not archive contents, not the
+  renderer build. Two runs sharing a fingerprint read the same records; that is a narrower claim
+  than "drew the same pixels", and it is written narrowly on purpose.
+
+When the renderer reports none — an older binary, `--no-bind-scene`, or a refused resolve — the
+field is `null` and reads **ABSENT**, and the binding is declaration-only. That is a limit the
+artifact states, not one it hides.
+
+**An identity belongs to the render that printed it.** It is carried on the probe result, never
+cached on the runner: a cache lends one render's identity to another, and the candidate-retry path
+makes that reachable — a first candidate whose verification reports a fingerprint, a second whose
+verification reports none, and the second inheriting the first's (reviewed 2026-09-14; viewprobe
+lets a refused resolve carry on rendering, so it is not hypothetical). Absence is the default,
+because a caller that does not have a render's own identity must not gain one by omission. Each
+candidate attempt records the identity its own render reported, and the plan exports the
+verification's scene verbatim rather than recomputing a second opinion about one render.
 
 A query that was never answered is not a pass: a silent `--nav-at` or `--inside-at` now refuses
 the point by name rather than filing it as a note.

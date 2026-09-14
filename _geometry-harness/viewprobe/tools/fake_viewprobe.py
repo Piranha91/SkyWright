@@ -23,7 +23,9 @@ Scene JSON:
                 "physical": true}],  # false = not offered by --inside-at
      "nav":  [{"min": [x,y], "max": [x,y], "z": 0.0, "name": "Test.esp tri"}],
      "navSilent": [[x,y]],           # queried points that get NO nav-at line at all
-     "insideSilent": [[x,y,z]]}      # queried points that get NO inside-at line at all
+     "insideSilent": [[x,y,z]],      # queried points that get NO inside-at line at all
+     "configFingerprint": "<64 hex>",  # what viewprobe prints for a candidate configuration
+     "configFingerprintAsks": [1]}     # print it only on these 1-based ASKING invocations
 """
 from __future__ import annotations
 
@@ -132,6 +134,13 @@ def parse_args(argv):
 
 def main(argv):
     scene = load_scene()
+    # FAKE_VIEWPROBE_TRACE: one line per invocation, the argv as received. A test that wants to
+    # know WHICH invocation carried a flag cannot read the planner's echo -- it goes to stderr and
+    # is truncated to the last 14 tokens -- so the stand-in records what it was actually asked.
+    trace_path = os.environ.get("FAKE_VIEWPROBE_TRACE")   # NOT `trace` -- that is the ray tracer
+    if trace_path:
+        with open(trace_path, "a", encoding="utf-8") as fh:   # NOT `f` -- the camera axis
+            fh.write(" ".join(argv) + "\n")
     a = parse_args(argv)
     eye = a["eye"] or (0.0, 0.0, 0.0)
     yaw, pitch = a["yaw"], a["pitch"]
@@ -146,6 +155,28 @@ def main(argv):
 
     print(f"cell {a['cell']} (interior)  000000:Test.esm")
     print(f"winning state: {len(scene.get('boxes', []))} refs, 1 navmeshes  (0.1s)")
+    # Match the renderer's identity request gate: a candidate configuration or an explicit
+    # profile-identity request. An unrequested identity must not make a binding test pass.
+    if scene.get("configFingerprint") and ("--order" in argv or "--config-identity" in argv):
+        # configFingerprintAsks: which ASKING invocations get an answer, 1-based, default all.
+        # A real renderer can be asked and still report nothing -- viewprobe's own code lets a
+        # refused resolve carry on rendering -- and a test cannot reach the stale-identity path
+        # without a run where one verification answers and the next does not. The counter lives
+        # beside the scene file, so it spans the processes of ONE run and dies with it.
+        asks = scene.get("configFingerprintAsks")
+        answer = True
+        if asks is not None:
+            counter = os.environ["FAKE_VIEWPROBE_SCENE"] + ".asks"
+            asked = 0
+            if os.path.exists(counter):
+                with open(counter, encoding="utf-8") as fh:   # NOT `f`/`n` -- both are in use
+                    asked = int(fh.read().strip() or 0)
+            asked += 1
+            with open(counter, "w", encoding="utf-8") as fh:
+                fh.write(str(asked))
+            answer = asked in asks
+        if answer:
+            print(f"   capture input configuration: {scene['configFingerprint']}")
 
     for spec in a["pick"]:
         ix, iy = (int(v) for v in spec.split(","))

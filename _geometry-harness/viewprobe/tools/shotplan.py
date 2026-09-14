@@ -291,6 +291,8 @@ REFS_ROW = re.compile(
 INSIDE_HEAD = re.compile(r"^\s*inside-at (-?\d+),(-?\d+),(-?\d+): (\d+ ref|no physical)")
 INSIDE_ROW = re.compile(r"^\s*(\S{6}:.+?\.es[pml])\s{2}(\S+)\s{2}(\S+)\s{2}dims (-?\d+)x(-?\d+)x(-?\d+) u")
 INSIDE_RAYS = re.compile(r"\srays ((?:(?:[+-][xy]|up|down) (?:\d+|-)\s*){6})")
+# viewprobe's own configuration fingerprint, printed for a candidate configuration (--order).
+CONFIG_FINGERPRINT = re.compile(r"capture input configuration:\s*([0-9a-fA-F]{16,64})")
 RAY_AXES = ("+x", "-x", "+y", "-y", "up", "down")
 
 
@@ -604,6 +606,13 @@ class Runner:
         self.base, self.cell = vp_command(vp), cell
         self.passthrough, self.out, self.size, self.echo = list(passthrough), out, size, echo
         self.renders, self.seconds = 0, 0.0
+        # NOTE: there is deliberately no run-wide `config_fingerprint` here. viewprobe's identity
+        # belongs to the INVOCATION that printed it, and a Runner-level cache quietly lent one
+        # render's identity to another: a candidate whose verification supplied a fingerprint, a
+        # second candidate whose verification supplied none, and the second reported the first's
+        # (reviewed 2026-09-14). An identity that the render in hand did not produce is exactly the
+        # silent wrong answer this binding exists to prevent, so each Probe carries its own and
+        # absence stays absence. See scene_identity.
 
     def probe(self, *args):
         cmd = self.base + [self.cell, "--size", str(self.size), "--msaa", "0", "--nav", "off"]
@@ -614,6 +623,9 @@ class Runner:
         p = Probe(cmd, echo=self.echo).run()
         self.renders += 1
         self.seconds += p.seconds
+        m = CONFIG_FINGERPRINT.search(p.stdout)
+        # THIS invocation's answer, every time -- including None, which is an answer.
+        p.config_fingerprint = m[1] if m else None
         return p
 
 
@@ -1276,6 +1288,31 @@ def evaluate(eye, subjects, floor_z, nav_entry, args, aim, skip_nav=False, insid
 # eye/yaw/pitch, and one `--pick` at the pixel each target actually lands on.
 
 
+POSE_DECIMALS = 1  # every pose this tool emits is formatted "%.1f"; see canonical_pose
+
+
+def canonical_pose(eye, yaw, pitch):
+    """The pose EXACTLY as it will be submitted and exported -- settled once, before use.
+
+    Every consumer of a pose here formats it to one decimal: the `--eye/--yaw/--pitch` flags, the
+    printed block, the DevBench conversion, the worklist, the identity digest. Projecting a target
+    pixel from the UNROUNDED angles while submitting the rounded ones samples a slightly different
+    ray than the one the renderer takes, and near a surface edge that lands on the other side of
+    it: a declared point 0.15 u inside a panel's edge came back `not-surface` against a background
+    wall 550 u away, while the pose actually submitted confirms it -- same exported pose, same
+    pose id, opposite verdicts (reviewed 2026-09-14).
+
+    A tolerance cannot repair that, because the error is WHICH SURFACE was sampled, not how far
+    along the ray. So the pose is canonicalised ONCE here and every step downstream -- projection,
+    containment, target distance, identity, command generation -- uses these numbers and no
+    others. The rounding term in `surface_tolerance` is retained as a floor for callers that hand
+    in a pose from elsewhere; on this path its residual is now zero by construction.
+    """
+    return ((round(eye[0], POSE_DECIMALS), round(eye[1], POSE_DECIMALS),
+             round(eye[2], POSE_DECIMALS)),
+            round(yaw, POSE_DECIMALS), round(pitch, POSE_DECIMALS))
+
+
 def surface_tolerance(dist, probe_fov, size, args):
     """How far from a declared surface point a depth hit may land and still BE that surface.
 
@@ -1304,26 +1341,88 @@ def surface_tolerance(dist, probe_fov, size, args):
             + abs(dist) * (half_pixel + pose_round) * args.surface_obliquity)
 
 
-def pose_identity(cell, eye, yaw, pitch, fov, aspect, size, subjects, args):
-    """A short digest over the pose AND the inputs that produced it.
+# What viewprobe's fingerprint is a hash OF -- copied from the definition, not from a hope.
+# `_shared/Configuration.cs::Compute` hashes a canonical text of: the loaded plugins (name +
+# content sha256, IN ORDER), the asset providers (kind + name, in priority), the BOS ini overlays
+# (kind + sha256), the population, the state and the schema version. It does NOT hash mesh or
+# material bytes, the archives' contents, or the renderer binary -- so two runs with the same
+# fingerprint read the same RECORDS and the same provider list, which is not the same claim as
+# "drew the same pixels with the same build". Say the narrow thing.
+SCENE_FINGERPRINT_COVERS = ["plugins: name + content sha256, in load order",
+                            "asset providers: kind + name, in priority order",
+                            "BOS ini overlays: kind + content sha256",
+                            "population, state, schema version"]
+SCENE_FINGERPRINT_SCOPE = (
+    "viewprobe's own capture-input-configuration fingerprint (_shared/Configuration.cs): a hash "
+    "of the plugin set/order and their content, the provider list, the BOS overlays, the "
+    "population and the state. NOT mesh/material bytes, archive contents or the renderer build")
+
+
+def scene_identity(run, args, fingerprint=None):
+    """What SCENE the camera was judged against -- declared inputs, and the renderer's own word.
+
+    Two halves, kept apart because they are worth different amounts:
+
+      declared   the target flags the caller passed through (instance, profile, game, order) and
+                 the viewprobe command itself. This is a DECLARATION. A profile NAME does not
+                 prove the bytes behind it, and this field must never be read as if it did.
+      renderer   the `capture input configuration:` fingerprint viewprobe printed for THE RENDER
+                 THIS SCENE DESCRIBES -- passed in by the caller that has that render in hand,
+                 never read from shared state. This one IS about bytes, within the scope in
+                 SCENE_FINGERPRINT_COVERS.
+
+    Without this, the same pose over two different profiles produced the SAME id, so a
+    verification could not be shown to belong to the scene it was run against (reviewed
+    2026-09-14).
+
+    `fingerprint=None` means the render in hand reported none, and the result says ABSENT. It is
+    the default because absence is the safe answer: a caller that does not have a render's own
+    identity must not be able to inherit one by omission.
+    """
+    # instance/profile/game may be given as flags OR passed through after `--` to viewprobe;
+    # resolved the same way `--from-profile` resolves them, so the recorded value is the one the
+    # run actually used rather than null beside a passthrough list that holds it.
+    declared = {"vp": list(run.base), "cell": run.cell,
+                "passthrough": list(getattr(args, "passthrough", []) or []),
+                "instance": getattr(args, "instance", None) or _passthrough_value(args, "--instance"),
+                "profile": getattr(args, "profile", None) or _passthrough_value(args, "--profile"),
+                "game": getattr(args, "game", None) or _passthrough_value(args, "--game")}
+    return {"declared": declared,
+            "declaredIs": "caller-declared inputs, NOT proof of bytes: `vp` is a command path, "
+                          "not a renderer build hash, and a profile NAME is not its contents",
+            "renderer": fingerprint,
+            "rendererIs": (SCENE_FINGERPRINT_SCOPE if fingerprint else
+                           "ABSENT -- the renderer reported no configuration identity for this "
+                           "run (it predates --config-identity, was asked not to with "
+                           "--no-bind-scene, or refused to resolve one); the binding here is "
+                           "declaration-only and proves nothing about bytes"),
+            "rendererCovers": SCENE_FINGERPRINT_COVERS if fingerprint else None}
+
+
+def pose_identity(cell, eye, yaw, pitch, fov, aspect, size, subjects, args, scene=None):
+    """A short digest over the pose, the inputs that produced it AND the scene it ran against.
 
     A verification result is only about the thing it was run on. Every artifact this tool writes
     carries this id, so a saved camera, a saved verification and a saved worklist can be checked
-    to be the SAME candidate -- the failure the 2026-09-14 review found in a hand-built packet,
-    where the recommended camera and the saved camera were different poses and nothing in the
-    files said so.
+    to be the SAME candidate against the SAME scene -- the failure the 2026-09-14 review found in
+    a hand-built packet, where the recommended camera and the saved camera were different poses
+    and nothing in the files said so.
+
+    `eye/yaw/pitch` are expected CANONICAL (see canonical_pose); they are rounded again here so a
+    caller that forgets still gets the id of the pose that would actually be submitted.
     """
     import hashlib
     payload = {
         "cell": cell,
-        "eye": [round(v, 1) for v in eye],
-        "yaw": round(yaw, 1), "pitch": round(pitch, 1),
+        "eye": [round(v, POSE_DECIMALS) for v in eye],
+        "yaw": round(yaw, POSE_DECIMALS), "pitch": round(pitch, POSE_DECIMALS),
         "fov": round(fov, 4), "aspect": round(aspect, 6), "size": int(size),
         "targets": sorted((s.kind, s.label, round(s.x, 2), round(s.y, 2), round(s.z, 2),
                            round(s.extent, 2)) for s in subjects),
         "policy": {k: getattr(args, k, None) for k in
                    ("sight_margin", "sight_height", "surface_tol", "surface_obliquity",
                     "frame_pad", "eye_height")},
+        "scene": scene,
     }
     blob = json.dumps(payload, sort_keys=True, default=str).encode("utf-8")
     return hashlib.sha256(blob).hexdigest()[:16]
@@ -1394,13 +1493,28 @@ def verify_in_pose(run, cell, eye, yaw, pitch, subjects, args):
 
     The overall status is `verified` only when EVERY target is clear or confirmed.
     """
+    # Settle the pose FIRST. Everything below -- the projection, the flags, the distances, the
+    # identity and the exported pose -- reads these numbers, so the ray that is projected is the
+    # ray that is submitted. See canonical_pose for the false refusal this prevents.
+    eye, yaw, pitch = canonical_pose(eye, yaw, pitch)
     rows, probe_fov = target_pixels(eye, yaw, pitch, subjects, args, run.size)
     flags = ["--eye", f"{eye[0]:.1f},{eye[1]:.1f},{eye[2]:.1f}",
              "--yaw", f"{yaw:.1f}", "--pitch", f"{pitch:.1f}", "--fov", f"{probe_fov:g}"]
+    # Ask the renderer what configuration it is about to read. This is THE render whose answers
+    # decide the verdict, so it is the one that has to be bound to a scene -- and asking here
+    # rather than on every probe pays the resolve once per attempt. A viewprobe that predates
+    # the flag ignores it and
+    # the binding stays declaration-only, which `scene_identity` reports rather than hides.
+    if not getattr(args, "no_bind_scene", False):
+        flags.append("--config-identity")
     picked = [r_ for r_ in rows if r_["pixel"] is not None]
     for r_ in picked:
         flags += ["--pick", f"{r_['pixel'][0]},{r_['pixel'][1]}"]
-    got = run.probe(*flags).picks() if picked else {}
+    # The probe object, not just its picks: the verification's scene identity comes from THIS
+    # render. When nothing was picked there is no render at all, and the identity is absent --
+    # which is the honest answer, not an invitation to borrow the last one.
+    probe = run.probe(*flags) if picked else None
+    got = probe.picks() if probe is not None else {}
 
     results, bad = [], []
     for r_ in rows:
@@ -1457,11 +1571,13 @@ def verify_in_pose(run, cell, eye, yaw, pitch, subjects, args):
         results.append(res)
 
     ok = not bad
+    scene = scene_identity(run, args, probe.config_fingerprint if probe is not None else None)
     return {"status": "verified" if ok else "failed",
             "poseId": pose_identity(cell, eye, yaw, pitch, args.fov,
-                                    getattr(args, "aspect", 1.0), run.size, subjects, args),
-            "pose": {"eye": [round(v, 1) for v in eye], "yaw": round(yaw, 1),
-                     "pitch": round(pitch, 1), "fov": round(args.fov, 2),
+                                    getattr(args, "aspect", 1.0), run.size, subjects, args, scene),
+            "scene": scene,
+            "pose": {"eye": list(eye), "yaw": yaw,
+                     "pitch": pitch, "fov": round(args.fov, 2),
                      "aspect": round(getattr(args, "aspect", 1.0), 4), "probeFov": round(probe_fov, 2),
                      "probeSize": run.size},
             "targets": results,
@@ -1490,6 +1606,39 @@ def print_verification(v, indent="  "):
 # --------------------------------------------------------------------------------------
 # reporting
 # --------------------------------------------------------------------------------------
+
+def claim_outputs(paths, cell):
+    """Stamp every requested output path as belonging to THIS run, before the run starts.
+
+    Refusing to write a success artifact is not enough when the caller reuses a path: a verified
+    worklist from an earlier run sits there byte-identical, still saying `verified`, still
+    carrying the earlier run's pose id, while the new run exits 1 (reviewed 2026-09-14). An early
+    refusal -- bad input, no surviving candidate -- left a stale verified JSON behind too, because
+    it exits before any writer is reached.
+
+    So each requested path is claimed up front with an `incomplete` stub, and the real writers
+    overwrite it. Whatever happens, the file at a path the caller asked to be written describes
+    the latest run that asked for it. Only paths the caller NAMED are touched -- nothing else is
+    discovered, moved or deleted.
+
+    This is called as the FIRST statement of a command, ahead of reading the inputs, because an
+    input refusal exits before any writer too. The one case it cannot cover is argparse rejecting
+    the command line itself: the command function never runs, nothing is claimed, and whatever is
+    at those paths is untouched -- correct, because no run of this tool started.
+    """
+    for p in paths:
+        if not p:
+            continue
+        try:
+            with open(p, "w", encoding="utf-8") as f:
+                json.dump({"status": "incomplete", "cell": cell,
+                           "note": "shotplan claimed this path at the start of a run that has "
+                                   "not written its result yet. If you are reading this, that "
+                                   "run did not finish -- it is NOT a plan, and any earlier "
+                                   "result at this path has been superseded."}, f, indent=2)
+        except OSError as e:
+            print(f"  !! cannot write {p}: {e}", file=sys.stderr)
+
 
 def report_refusals(scored):
     """Why the refused poses were refused, most common first.
@@ -1544,6 +1693,13 @@ def print_verdict(v, fov, target=None, indent="  "):
 # --------------------------------------------------------------------------------------
 
 def cmd_plan(args):
+    # FIRST, before a single input is read. A refusal raised while resolving the inputs -- a
+    # malformed --surface, a surface-only plan with no --floor-z, more points than --surface-max,
+    # a --from-profile whose ini cannot be found -- exits before every writer below, so claiming
+    # the paths any later leaves the PREVIOUS run's verified result and its renderable worklist
+    # sitting at the paths THIS run asked for (measured 2026-09-14: three such refusals each
+    # exited 1 over a stale `status: verified` JSON carrying the earlier run's pose id).
+    claim_outputs([args.worklist, args.json, args.dump], args.cell)
     apply_profile_frame(args)
     subjects = collect_subjects(args)
     floor_z = resolve_floor(subjects, args)
@@ -1663,6 +1819,9 @@ def cmd_plan(args):
                                subjects, args)
             attempts.append({"rank": i + 1, "bearing": cand["_bearing"],
                              "standoff": cand["_standoff"], "poseId": v["poseId"],
+                             # this attempt's OWN renderer identity: an attempt may keep the one
+                             # its render reported, and can never lend it to a later one
+                             "renderer": v["scene"]["renderer"],
                              "status": v["status"], "failed": v["failed"]})
             print(f"  candidate {i+1} of {tries}: bearing {cand['_bearing']:.0f} deg, standoff "
                   f"{cand['_standoff']:.0f} u")
@@ -1678,26 +1837,41 @@ def cmd_plan(args):
                   "a different --standoff range, more --verify-candidates, or declare the feature "
                   "points differently.")
 
-    pose_id = pose_identity(args.cell, best["eye"], best["yaw"], best["pitch"], args.fov,
-                            getattr(args, "aspect", 1.0), run.size, subjects, args)
+    best = dict(best)
+    # Adopt the SAME canonical pose the verification ran on, so the printed block, the worklist,
+    # the DevBench conversion and the identity all describe one pose rather than three roundings
+    # of it.
+    c_eye, c_yaw, c_pitch = canonical_pose(best["eye"], best["yaw"], best["pitch"])
+    best["eye"], best["yaw"], best["pitch"] = c_eye, c_yaw, c_pitch
+    # The verification's own scene, verbatim -- recomputing it here would be a second opinion
+    # about one render, and the two could disagree the moment they were gathered at different
+    # moments. With --no-verify there is no verification render, so there is no renderer identity
+    # to report and the binding is declaration-only.
+    scene = verification["scene"] if verification else scene_identity(run, args)
+    pose_id = pose_identity(args.cell, c_eye, c_yaw, c_pitch, args.fov,
+                            getattr(args, "aspect", 1.0), run.size, subjects, args, scene)
     if verification is None:
         status = "unverified"
     elif verification["status"] == "verified":
         status = "verified"
     else:
         status = "refused"
-    best = dict(best)
     best["poseId"] = pose_id
     best["verified"] = status == "verified"
-    if status == "refused":
-        # The pre-verification verdict said ok; the check that counts said no. `ok` is the field
-        # callers read, so it has to carry the FINAL answer or the old bug is still here under a
-        # new name. The pre-verification detail is kept beside it rather than thrown away.
+    if status != "verified":
+        # `ok` is the field callers read, so it carries the FINAL answer -- for a SKIPPED check as
+        # well as a failed one. A proposal whose verification is missing has not been shown to be
+        # ok, and leaving `ok: true` there was the original bug wearing a different hat. The
+        # pre-verification detail is kept beside it rather than thrown away.
         best["preVerificationOk"] = best["ok"]
         best["ok"] = False
-        best["fail"] = list(best["fail"]) + [
-            f"verification: {t['label']} {t['status']} -- {t['why']}"
-            for t in verification["targets"] if t["status"] not in ("clear", "confirmed")]
+        if verification is None:
+            best["fail"] = list(best["fail"]) + [
+                "verification: SKIPPED by --no-verify -- this camera's final check was never run"]
+        else:
+            best["fail"] = list(best["fail"]) + [
+                f"verification: {t['label']} {t['status']} -- {t['why']}"
+                for t in verification["targets"] if t["status"] not in ("clear", "confirmed")]
 
     print(f"\n=== chosen ({status.upper()}) ===")
     print(pose_block(best, args.fov))
@@ -1713,9 +1887,21 @@ def cmd_plan(args):
     print_doors(doors, args)
 
     if args.worklist and status == "refused" and not args.emit_refused:
-        print(f"\nworklist NOT written: the final check refused this camera "
-              f"({', '.join(verification['failed'])}). Pass --emit-refused to write it anyway "
-              f"(it is marked REFUSED in the file).")
+        # No renderable shot -- but the path the caller named must not be left holding an earlier
+        # run's verified worklist, so it gets a truthful, shot-less refusal record instead.
+        with open(args.worklist, "w", encoding="utf-8") as f:
+            json.dump({"label": args.label or f"shotplan -- {args.cell}",
+                       "status": "refused", "poseId": pose_id, "scene": scene,
+                       "verification": verification,
+                       "cells": [],
+                       "note": "REFUSED by the final check -- no shot is offered. This file "
+                               "replaces whatever was at this path so an earlier run's verified "
+                               "worklist cannot be mistaken for this run's result. "
+                               "--emit-refused writes the refused shot itself."},
+                      f, indent=2, default=str)
+        print(f"\nworklist REFUSED -> {args.worklist} (no shot: the final check refused this "
+              f"camera -- {', '.join(verification['failed'])}). Pass --emit-refused to write the "
+              f"shot anyway, marked REFUSED.")
     elif args.worklist:
         mark = {"verified": "", "unverified": "UNVERIFIED -- ", "refused": "REFUSED -- "}[status]
         shot = {"label": mark + (args.label or "planned camera")
@@ -1737,6 +1923,12 @@ def cmd_plan(args):
             shot["doors"] = [d["formkey"] for d in doors]
         wl = {
             "label": args.label or f"shotplan -- {args.cell}",
+            # The same three fields a REFUSED worklist carries, in the same place, so one read
+            # answers "what is this file" either way: a consumer that checks `status` at the top
+            # level must not get None on success and "refused" on refusal.
+            "status": status,
+            "poseId": pose_id,
+            "scene": scene,
             "eyeHeight": args.eye_height,
             "cells": [{"cell": args.cell, "shots": [shot]}],
         }
@@ -1764,6 +1956,9 @@ def cmd_plan(args):
                        # check was never run and this is a proposal.
                        "status": status,
                        "poseId": pose_id,
+                       # what scene this camera was judged against -- declared inputs, plus the
+                       # renderer's own fingerprint when it printed one. See scene_identity.
+                       "scene": scene,
                        "verification": verification,
                        "verifyAttempts": attempts,
                        "subjects": [{"label": s.label, "pos": s.pos(), "kind": s.kind,
@@ -1788,6 +1983,7 @@ def cmd_check(args):
     A planner that never refuses anything is not validated. Point this at a camera known to be
     bad and it must say so, for a reason you can check by hand.
     """
+    claim_outputs([args.json], args.cell)  # before the inputs are read; see cmd_plan
     apply_profile_frame(args)
     subjects = collect_subjects(args)
     floor_z = resolve_floor(subjects, args)
@@ -1797,6 +1993,9 @@ def cmd_check(args):
     yaw = bearing_deg(aim[0] - eye[0], aim[1] - eye[1])
     dxy = math.hypot(aim[0] - eye[0], aim[1] - eye[1])
     pitch = math.degrees(math.atan2(eye[2] - aim[2], dxy)) if dxy > 1 else 0.0
+
+    # Same canonicalisation as `plan`: judge, submit and export ONE pose.
+    eye, yaw, pitch = canonical_pose(eye, yaw, pitch)
 
     run = Runner(args.cell, args.vp, args.passthrough, args.out, args.size, not args.quiet)
     print(f"cell {args.cell}   camera {eye[0]:.1f},{eye[1]:.1f},{eye[2]:.1f}   floor z {floor_z:.0f}")
@@ -1868,7 +2067,7 @@ def cmd_check(args):
         with open(args.json, "w", encoding="utf-8") as f:
             json.dump({"cell": args.cell, "floorZ": floor_z, "aim": aim,
                        "status": "refused" if fails else "verified",
-                       "poseId": ver["poseId"], "verification": ver,
+                       "poseId": ver["poseId"], "scene": ver["scene"], "verification": ver,
                        "subjects": [{"label": s.label, "pos": s.pos(), "kind": s.kind,
                                      "extent": s.extent} for s in subjects],
                        "framing": {"fill": round(fill, 3), "vCentre": round(v_centre, 3),
@@ -1883,6 +2082,10 @@ def cmd_check(args):
 
 def cmd_frame(args):
     """What frame will the game actually render? Read it, do not estimate it."""
+    # Same contract as `plan` and `check`: the path is claimed before the ini is read, because a
+    # missing profile or an unreadable resolution exits before the writer below and would leave
+    # an earlier run's frame sitting at the path this run asked for.
+    claim_outputs([args.json], None)
     fr = game_frame(args.instance, args.profile, args.game, args.my_games,
                     getattr(args, "fov_setting", None))
     print_frame(fr)
@@ -2125,6 +2328,10 @@ def add_common(p, need_subjects=True):
                    help="the viewprobe command (default: dotnet run against this checkout). "
                         "Anything that takes viewprobe's args, e.g. a wrapper script")
     p.add_argument("--quiet", action="store_true", help="do not echo each invocation")
+    p.add_argument("--no-bind-scene", action="store_true",
+                   help="do not ask the renderer for its configuration identity on the "
+                        "verification render. The pose is then bound to the caller's DECLARED "
+                        "inputs only, and the artifact says so")
     p.add_argument("--fov-setting", type=float, default=None,
                    help="the game's fDefaultWorldFOV, when no ini sets it and the runtime's own "
                         "default is not the measured SE one (see FOV_ENGINE_DEFAULT)")

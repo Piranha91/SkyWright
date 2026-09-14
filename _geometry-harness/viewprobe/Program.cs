@@ -184,6 +184,11 @@ string bosMode = "on";
 // as every render before 2026-09-04.
 string? stateSpec = null, switchMapPath = null;
 string? orderFile = null;
+// --config-identity: report WHAT THIS RUN CONSUMED when no candidate file replaced it. The
+// identity is the same one --order emits (HarnessOrderCli.Resolve with no candidate resolves the
+// profile itself), so nothing new is hashed or named here. It is opt-in because resolving it
+// hashes every loaded plugin, and a caller that probes a cell six times should pay that once.
+bool configIdentity = false;
 string stateView = "on";
 string occlusionMode = "off";
 bool planesReport = false;
@@ -585,6 +590,7 @@ for (int i = argStart; i < args.Length; i++)
         { Console.Error.WriteLine("--order requires a candidate configuration file."); return 2; }
         orderFile = args[++i];
     }
+    else if (args[i] == "--config-identity") configIdentity = true;
     else if (args[i] == "--state" && i + 1 < args.Length) { stateSpec = args[++i]; textured = true; }
     // --flags is refused rather than added (Q27): the renderer has drawn the load-time enable chain since 2026-08-28,
     // and a flag-only scene would draw a room the game never shows.
@@ -608,6 +614,17 @@ for (int i = argStart; i < args.Length; i++)
     // and the run would die with "no cell given" while the user was looking straight at the cell
     // they gave. Flag VALUES never reach here — every branch above consumes its own with args[++i].
     else if (IsWorklistFile(args[i])) worklistPaths.Add(args[i]);
+    // Refuse unknown flags: silently dropping a camera argument can select an overview instead
+    // of the requested capture. Flag values are consumed above, so an unmatched `--` token is
+    // unknown or a known flag whose value is missing. The parser does not accept --flag=value.
+    else if (args[i].StartsWith("--", StringComparison.Ordinal))
+    {
+        Console.Error.WriteLine($"viewprobe does not recognise '{args[i]}'. Either this build has "
+                              + "no such flag, or it is a flag whose VALUE is missing.");
+        Console.Error.WriteLine("  NOTE: there is no --flag=value form here. Write `--eye X,Y,Z`, "
+                              + "not `--eye=X,Y,Z` — the second is not a flag this reads.");
+        return 2;
+    }
 }
 // Replication args: the command line verbatim, minus this machine's paths (instance/profile/
 // game/out). Embedded in every output PNG — a replay from these is BYTE-exact, which the
@@ -852,6 +869,25 @@ if (orderFile is not null)
     order = new Mo2OrderResult(candidateConfiguration.OrderedPaths, candidateConfiguration.Warnings,
                               candidateConfiguration.OrderedPaths.Count);
     HarnessShared.HarnessOrderCli.Print(candidateConfiguration);
+}
+// The configuration this capture REPORTS, which is not always the one it was built from:
+// --order REPLACES the configuration, while --config-identity only asks what the profile's own
+// inputs were. Kept in its own variable so asking the question cannot change the order, the asset
+// view or the archives this run draws from — a reporting flag that moved the picture would be
+// worse than no flag at all.
+HarnessShared.ResolvedConfiguration? reportedConfiguration = candidateConfiguration;
+if (reportedConfiguration is null && configIdentity)
+{
+    var resolved = HarnessShared.HarnessOrderCli.Resolve(profileName, profileDir, modsDir,
+        dataDir, overwriteDir, GamePath, null, null, null);
+    if (resolved.Refused)
+        Console.Error.WriteLine($"--config-identity: {resolved.RefusedReason} — the capture "
+                              + "proceeds and reports NO configuration identity.");
+    else
+    {
+        reportedConfiguration = resolved;
+        HarnessShared.HarnessOrderCli.Print(resolved);
+    }
 }
 var assetMods = candidateConfiguration?.EnabledMods ?? comp.EnabledMods;
 
@@ -3078,11 +3114,11 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot)
             safe = $"{safe}-c{wlCell + 1}s{wlShot + 1}-{slug}";
         }
 
-        if (candidateConfiguration is not null)
+        if (reportedConfiguration is not null)
         {
             // The source identity describes records/assets before diagnostic view transformations.
             // A historical navmesh substitution or cutaway must remain distinguishable from that source.
-            var identity = candidateConfiguration.Identity("load-time", stateSpec ?? "baseline");
+            var identity = reportedConfiguration.Identity("load-time", stateSpec ?? "baseline");
             var captureInput = new
             {
                 Configuration = identity,
@@ -3120,7 +3156,7 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot)
                 : new[] { DescribeLayer(navLayerLabel,displayNav) };
             var receipt = new
             {
-                SchemaVersion = 1, Configuration = candidateConfiguration?.Identity("load-time",stateSpec ?? "baseline"),
+                SchemaVersion = 1, Configuration = reportedConfiguration?.Identity("load-time",stateSpec ?? "baseline"),
                 CandidateSha256 = candidateSha256, TargetCell = cellKey.ToString(),
                 AdditionalCells = navCellSpecs, RecordSubstitutions = navVersionSpecs,
                 Pose = new { Eye = new[] { eyePos.Value.X,eyePos.Value.Y,eyePos.Value.Z },
