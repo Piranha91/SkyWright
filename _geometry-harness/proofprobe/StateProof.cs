@@ -256,16 +256,30 @@ static class StateProof
         Check("arm/changes: the baseline arm changes nothing", !StateArm.Baseline().Changes(sx).Any(), "");
 
         // ---- the class ----
-        var ev = new StateEvaluator(cidx, sx)
+        RouteAsk route = (StateArm _, FormKey k, bool navcut, out string why) =>
         {
-            Route = (StateArm _, FormKey k, bool navcut, out string why) =>
-            {
-                why = navcut ? "stand-in: a navcut box cuts the line" : "stand-in: beside the line";
-                if (k == R(9)) return RouteCutVerdict.LikelyBlocked;
-                if (k == R(25) || k == R(27)) return RouteCutVerdict.Blocked;
-                if (k == R(26)) return RouteCutVerdict.Clipped;
-                return null;
-            },
+            why = navcut ? "stand-in: a navcut box cuts the line" : "stand-in: beside the line";
+            if (k == R(9)) return RouteCutVerdict.LikelyBlocked;
+            if (k == R(25) || k == R(27)) return RouteCutVerdict.Blocked;
+            if (k == R(26)) return RouteCutVerdict.Clipped;
+            return null;
+        };
+        var defaultEv = new StateEvaluator(cidx, sx) { Route = route };
+        var defaultTallyM2 = new StateTally();
+        var defaultM2 = defaultEv.Evaluate(StateArm.Parse("M2", sx), p => p == 0, _ => false, defaultTallyM2);
+        var defaultM5 = defaultEv.Evaluate(StateArm.Parse("M5", sx), p => p == 0, _ => false, new StateTally());
+        Check("class/overlap policy: the default evaluator withholds legacy box overlap while contact and route remain active",
+              defaultM2.All(r => r.Kind != StateRowKind.Overlap)
+           && defaultTallyM2.StateOverlapUnmeasured > 0 && defaultTallyM2.PairsTested == 0
+           && defaultM2.Count(r => r.Kind == StateRowKind.Route) == 1
+           && defaultM5.All(r => r.Kind != StateRowKind.Overlap)
+           && defaultM5.Count(r => r.Kind == StateRowKind.Contact) == 1,
+              $"M2 {string.Join(", ", defaultM2.Select(r => r.Kind))}; M5 {string.Join(", ", defaultM5.Select(r => r.Kind))}");
+
+        // Historical box-overlap assertions below remain a construction proof only. Production uses the default.
+        var ev = new StateEvaluator(cidx, sx, allowLegacyBoundsOverlapForProof: true)
+        {
+            Route = route,
         };
         bool Van(int p) => p == 0;
         bool Us(int p) => false;

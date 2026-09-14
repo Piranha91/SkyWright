@@ -238,6 +238,11 @@ public static class BosHook
             var res = Step(idx.History, key, w, arm, recordBase, ez == default ? null : ez, idx.Bos, layer, bosPlugin, rep);
             if (res is null) continue;
             idx.BosSwaps[key] = res;
+            if (res.Properties is { IsValid: true })
+            {
+                var (pos, rot, scale, disabled) = res.Apply(w.Pos, w.Rot, w.Scale, w.Disabled);
+                idx.NoteEffectivePose(key, new Snap(bosPlugin, pos, w.Cell, disabled, w.Deleted, w.Worldspace, rot, scale));
+            }
             if (res.Swapped)
             {
                 idx.RecordBase[key] = recordBase;

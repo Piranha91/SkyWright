@@ -18,7 +18,8 @@ namespace HarnessShared;
 //
 // THE PHYSICAL PREDICATE (2026-09-03). Every class the detectors emit has a physical half and a
 // provenance half — a navmesh clobber is "the geometry differs" AND "the winner declares no dependency";
-// an overlap row is "the boxes intersect" AND "the later plugin introduced it blind"; a contact row is
+// an overlap row is "the placed render surfaces intersect (or validated solids contain one another)"
+// AND "the later plugin introduced it blind"; a contact row is
 // "the dependent touches nothing" AND "the mover's side did not re-place it". A sham patch that masters
 // both plugins and re-states the winner's record flips the provenance half and leaves the physical one
 // untouched, and a diff that credits a row's disappearance as repair credits the sham (the 2026-09-02
@@ -97,7 +98,8 @@ public sealed record ConflictFile(string Probe, string Instance, string Generate
                                   string? BaseEmit = null,
                                   string? Population = null,
                                   string? State = null,
-                                  ConfigurationIdentity? Configuration = null)
+                                  ConfigurationIdentity? Configuration = null,
+                                  string? MeasurementPolicy = null)
 {
     /// <summary>How this emit's population and state read for a human, and for the diff's refusal message. "unknown"
     /// is a real answer: an emit written before Q27 says nothing about either, and pretending otherwise is the silent
@@ -179,6 +181,23 @@ public static class ConfigurationGate
             lines.Add("not the same kind of thing, so nothing crosses between them — a row present in one and absent in the other");
             lines.Add("means only that the two detectors detect different things. REFUSED.");
             return new ConfigurationGateResult(true, lines, Array.Empty<string>());
+        }
+
+        // A changed geometry policy is a changed question, even when the files and world state
+        // are identical. Historical overlap emits lack this identity and cannot establish repair
+        // against current actual-shape measurements. Keep them readable for explicitly labelled audits.
+        if (string.Equals(baseFile.Probe, "overlapprobe", StringComparison.OrdinalIgnoreCase)
+            || baseFile.MeasurementPolicy is not null || changedFile.MeasurementPolicy is not null)
+        {
+            if (string.IsNullOrWhiteSpace(baseFile.MeasurementPolicy)
+                || string.IsNullOrWhiteSpace(changedFile.MeasurementPolicy)
+                || !string.Equals(baseFile.MeasurementPolicy, changedFile.MeasurementPolicy, StringComparison.Ordinal))
+            {
+                lines.Add($"measurement policy: base '{baseFile.MeasurementPolicy ?? "unknown"}', changed '{changedFile.MeasurementPolicy ?? "unknown"}'.");
+                lines.Add("Unknown or different measurement policies cannot establish repair credit. Re-emit both arms with the same policy. REFUSED.");
+                return new ConfigurationGateResult(true, lines, Array.Empty<string>());
+            }
+            lines.Add($"measurement policy: {baseFile.MeasurementPolicy}");
         }
 
         var a = baseFile.Configuration;

@@ -143,6 +143,37 @@ public static class ConfigurationProof
               gProbe.Refused && gProbe.Lines[0].Contains("navownprobe") && gProbe.Lines[0].Contains("overlapprobe"), gProbe.Lines[0][..60]);
 
         var gDiff = ConfigurationGate.Check(F("navownprobe", id), F("navownprobe", moved));
+
+        var overlap = F("overlapprobe", id) with { MeasurementPolicy = "render-vertices-v1" };
+        foreach (var missing in new[] { (Base: F("overlapprobe", id), Changed: overlap),
+                                        (Base: overlap, Changed: F("overlapprobe", moved)),
+                                        (Base: F("overlapprobe", id), Changed: F("overlapprobe", moved)) })
+        {
+            var g = ConfigurationGate.Check(missing.Base, missing.Changed);
+            check("gate: unknown overlap measurement policy refuses repair credit",
+                  g.Refused && g.Lines.Any(l => l.Contains("measurement policies cannot establish repair credit")),
+                  string.Join(" ", g.Lines));
+        }
+        var changedPolicy = ConfigurationGate.Check(overlap, overlap with { MeasurementPolicy = "render-vertices-v2", Configuration = moved });
+        check("gate: changed overlap policy refuses even when plugin configuration changed",
+              changedPolicy.Refused && changedPolicy.Lines.Any(l => l.Contains("render-vertices-v2")), string.Join(" ", changedPolicy.Lines));
+        var samePolicy = ConfigurationGate.Check(overlap, overlap with { Configuration = moved });
+        check("gate: matching overlap policy permits a named plugin configuration difference",
+              !samePolicy.Refused && samePolicy.Delta.Count == 1, string.Join(" ", samePolicy.Lines));
+        var historicalBounds = overlap with { MeasurementPolicy = HousecarlCore.NifOverlapGeometry.MeasurementPolicy };
+        var actualShape = overlap with { MeasurementPolicy = HousecarlCore.NifOverlapGeometry.SurfaceMeasurementIdentity(1e-5), Configuration = moved };
+        var shapeGate = ConfigurationGate.Check(historicalBounds, actualShape);
+        check("gate: historical bounds and actual-shape results cannot receive cross-method repair credit",
+              shapeGate.Refused, string.Join(" ", shapeGate.Lines));
+        check("gate: actual-shape identity includes the reader and independent mesh predicate",
+              actualShape.MeasurementPolicy!.Contains(HousecarlCore.NifOverlapGeometry.ReaderVersion, StringComparison.Ordinal)
+              && actualShape.MeasurementPolicy.Contains(HousecarlCore.MeshIntersection.PolicyVersion, StringComparison.Ordinal),
+              actualShape.MeasurementPolicy!);
+        var changedTolerance = actualShape with { MeasurementPolicy = HousecarlCore.NifOverlapGeometry.SurfaceMeasurementIdentity(.1) };
+        check("gate: changing contact tolerance cannot manufacture repair credit",
+              ConfigurationGate.Check(actualShape, changedTolerance).Refused
+              && !ConfigurationGate.Check(actualShape, actualShape).Refused,
+              $"base={actualShape.MeasurementPolicy}; changed={changedTolerance.MeasurementPolicy}");
         check("gate: a NAMED configuration difference is labelled, never refused — the delta is what the differential is of",
               !gDiff.Refused && gDiff.Delta.Count == 1 && gDiff.Lines.Any(l => l.Contains("configuration delta"))
               && gDiff.Lines.Any(l => l.Contains(id.Fingerprint[..12])) && gDiff.Lines.Any(l => l.Contains(moved.Fingerprint[..12])),

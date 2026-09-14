@@ -14,14 +14,14 @@ namespace HarnessShared;
 // did this reference look like BEFORE the later plugin touched it? That is the differential arm.
 //
 // Everything here is bookkeeping and geometry plumbing: placements into the history (with the
-// rotation and scale the world box needs), base-record types, mesh paths and OBND, the candidate
+// rotation and scale the world box needs), base-record types and mesh paths, the candidate
 // build, the spatial hash, and the facts for one hit. The DECISION is DetectorModel.OverlapProvenance,
 // owned by proofprobe; the broad-phase test is DetectorModel.BoxOverlap, likewise. Shared between
 // overlapprobe (the real order, meshes through the VFS) and proofprobe (a synthetic order written with
-// Mutagen, OBND boxes only), so the proof exercises the same extraction and the same arm construction
+// Mutagen, injected synthetic boxes), so the proof exercises the same extraction and the same arm construction
 // the live run uses.
 //
-// Standing rules applied: measured geometry first, OBND as a LABELLED fallback, no geometry = not
+// Standing rules applied: complete decoded NIF render geometry only; no geometry = not
 // judged, counted (rule 6); the same-author floor measured before any cross count is read; a broad
 // phase is a candidate, never a verdict; nothing verified in game.
 
@@ -41,7 +41,8 @@ public readonly record struct OverlapHit(OverlapCandidate A, OverlapCandidate B,
 /// in the arm without the later plugin (NaN when no box could be rebuilt).</summary>
 public sealed record OverlapRow(OverlapHit Hit, OverlapCandidate LaterRef, OverlapCandidate OtherRef,
                                 DetectorModel.OverlapFacts Facts, OverlapOrigin Origin, OverlapSight Sight, string Why,
-                                Snap? LaterPrevious, Snap? OtherAsSeenByLater, float WithoutDepth, float WithoutFrac)
+                                Snap? LaterPrevious, Snap? OtherAsSeenByLater, float WithoutDepth, float WithoutFrac,
+                                string CounterfactualStatus = "measured", string? CounterfactualReason = null)
 {
     public int Later => LaterRef.Win.Plugin;
     public int Earlier => OtherRef.Win.Plugin;
@@ -60,10 +61,82 @@ public sealed record OverlapRow(OverlapHit Hit, OverlapCandidate LaterRef, Overl
     public OverlapScale Scale => DetectorModel.ClassifyOverlapScale(SmallerMaxDim);
 }
 
+/// <summary>One actual placed render surface eligible for symmetric mesh intersection. The bounds enclose
+/// <paramref name="WorldSoup"/> and are used only for conservative indexing/rejection.</summary>
+public readonly record struct SurfaceOverlapCandidate(FormKey Key, Snap Win, FormKey Base, Aabb WorldBounds,
+                                                       TriangleSoup WorldSoup, char Src);
+
+/// <summary>The stable subset of the core mesh result consumed by probes and serialized evidence.</summary>
+public sealed record SurfaceQueryOutcome(string Status, string? Reason, string SurfaceRelation, string Containment,
+                                         bool? Intersects, long TrianglePairsTested)
+{
+    public bool Unknown => Intersects is null || Status == "unknown" || SurfaceRelation == "unknown";
+
+    public static SurfaceQueryOutcome Query(TriangleSoup a, TriangleSoup b, double tolerance, long maxTrianglePairs,
+                                            TimeSpan pairTimeout, CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            timeout.CancelAfter(pairTimeout);
+            var result = MeshIntersection.Query(a, b, tolerance, maxTrianglePairs, timeout.Token);
+            return new(Normalize(result.Status), result.Reason, Normalize(result.SurfaceRelation),
+                       Normalize(result.Containment), result.Intersects, result.TrianglePairsTested);
+        }
+        catch (OperationCanceledException)
+        {
+            return new("unknown", "pair time budget exhausted", "unknown", "unknown", null, 0);
+        }
+        catch (Exception ex)
+        {
+            return new("unknown", $"mesh query failed: {ex.GetType().Name}: {ex.Message}", "unknown", "unknown", null, 0);
+        }
+    }
+
+    static string Normalize(object? value)
+    {
+        string text = Convert.ToString(value, System.Globalization.CultureInfo.InvariantCulture) ?? "unknown";
+        if (text.Length == 0) return "unknown";
+        var b = new System.Text.StringBuilder(text.Length + 4);
+        for (int i = 0; i < text.Length; i++)
+        {
+            char c = text[i];
+            if (char.IsUpper(c) && i > 0 && text[i - 1] != '_') b.Append('_');
+            b.Append(char.ToLowerInvariant(c));
+        }
+        return b.ToString();
+    }
+}
+
+public readonly record struct SurfaceOverlapHit(SurfaceOverlapCandidate A, SurfaceOverlapCandidate B,
+                                                SurfaceQueryOutcome Query, bool Declared);
+
+public sealed record SurfaceOverlapRow(SurfaceOverlapHit Hit, SurfaceOverlapCandidate LaterRef,
+    SurfaceOverlapCandidate OtherRef, DetectorModel.OverlapFacts Facts, OverlapOrigin? Origin, OverlapSight Sight,
+    string Why, Snap? LaterPrevious, Snap? OtherAsSeenByLater, SurfaceQueryOutcome? Counterfactual,
+    string CounterfactualStatus, string? CounterfactualReason)
+{
+    public int Later => LaterRef.Win.Plugin;
+    public int Earlier => OtherRef.Win.Plugin;
+}
+
+public sealed class SurfacePairSweep
+{
+    public long PairsChecked, SameChecked, SameIntersects, SameUnknown,
+                CrossDeclaredChecked, CrossDeclaredIntersects, CrossUndeclaredChecked,
+                CrossUndeclaredIntersects, CrossUnknown;
+    public readonly Dictionary<string, (long Intersects, long Unknown, long Checked)> SameByDomain = new();
+    /// <summary>Every cross-responsible query reached by the tolerance-aware broad phase, including separation and unknown.</summary>
+    public readonly List<SurfaceOverlapHit> CrossResults = new();
+    /// <summary>Every cross-responsible actual-shape intersection; unknown is never promoted into this list.</summary>
+    public readonly List<SurfaceOverlapHit> CrossHits = new();
+}
+
 /// <summary>What the candidate build set aside, counted per rule 6.</summary>
 public sealed class CandidateSkips
 {
-    public long Deleted, Disabled, NonObstructingType, NoGeometry, ExcludedResponsible, Volume, MarkerMesh;
+    public long Deleted, Disabled, NonObstructingType, NoGeometry, InvalidTransform, DegenerateGeometry,
+                ExcludedResponsible, Volume, MarkerMesh, EnableStateUnresolved, BosUnresolved;
 }
 
 /// <summary>The pair sweep's tallies: the same-author floor by domain, and the two cross populations.</summary>
@@ -73,6 +146,9 @@ public sealed class PairSweep
     public readonly Dictionary<string, (long Deep, long Checked)> SameByDomain = new();
     /// <summary>Every cross-responsible deep hit, declared or not — the population the provenance rule runs over.</summary>
     public readonly List<OverlapHit> CrossDeep = new();
+    /// <summary>Every cross-responsible pair whose finite boxes intersect, including intersections below the detector
+    /// thresholds. This keeps "measurable but below threshold" distinct from an unmeasurable pair in review exports.</summary>
+    public readonly List<(OverlapCandidate A, OverlapCandidate B, float Depth, float Frac, bool Deep, bool Declared)> CrossIntersections = new();
 }
 
 public sealed class OverlapIndex
@@ -83,6 +159,10 @@ public sealed class OverlapIndex
     public Dictionary<FormKey, string> BaseMesh { get; } = new();
     /// <summary>base record -> OBND extents (|second − first| per axis).</summary>
     public Dictionary<FormKey, Vec3> BaseObnd { get; } = new();
+    /// <summary>The latest record/runtime pose for each reference, including rotation-only and scale-only overrides.
+    /// This is deliberately separate from <see cref="History"/>, whose last snap identifies the last plugin that made
+    /// an attributable placement step. Geometry uses this pose while provenance keeps the changed-only attribution.</summary>
+    readonly Dictionary<FormKey, Snap> _effectivePose = new();
     /// <summary>ref -> its winning base record.</summary>
     public Dictionary<FormKey, FormKey> RefBase { get; } = new();
     public Dictionary<FormKey, (string? Edid, bool Interior)> CellName { get; } = new();
@@ -154,13 +234,25 @@ public sealed class OverlapIndex
     /// not the last plugin that ever deleted it, and not the last plugin to change its placement (Q34).</summary>
     public bool IsDeletedNow(FormKey key) => Deletions.AtWinner(key);
 
+    /// <summary>The effective winning geometry pose with the responsible placement plugin retained in
+    /// <see cref="Snap.Plugin"/>. Returns null when the reference has no placement history. A rotation-only or scale-only
+    /// override therefore changes geometry without taking placement responsibility.</summary>
+    public Snap? WinningGeometryPose(FormKey key)
+    {
+        if (History.Winning(key) is not { } responsible || !_effectivePose.TryGetValue(key, out var effective)) return null;
+        return effective with { Plugin = responsible.Plugin };
+    }
+
+    /// <summary>Update the runtime pose after a non-record layer such as BOS applies properties.</summary>
+    public void NoteEffectivePose(FormKey key, Snap pose) => _effectivePose[key] = pose;
+
     /// <summary>…and the same question in the arm WITHOUT <paramref name="mover"/>'s side: the last record by a plugin
     /// that is neither the mover nor downstream of it. What the counterfactual arms ask, so an arm that excludes a
     /// RESTORING plugin sees the deletion that stands without it.</summary>
     public bool IsDeletedWithout(FormKey key, int mover, IReadOnlyList<HashSet<int>> closure)
         => Deletions.Without(key, mover, closure);
 
-    /// <summary>Read one plugin, in load order: placements into the history, base-record names, meshes and OBND.</summary>
+    /// <summary>Read one plugin, in load order: placements into the history and winning base-record names/meshes.</summary>
     public void Ingest(int plugin, ISkyrimModGetter mod)
     {
         foreach (var rec in mod.EnumerateMajorRecords())
@@ -178,6 +270,7 @@ public sealed class OverlapIndex
             {
                 BaseInfo[sm.FormKey] = (rec.GetType().Name.Replace("BinaryOverlay", ""), sm.EditorID);
                 if (mo.Model?.File is { } mf && !string.IsNullOrWhiteSpace(mf.GivenPath)) BaseMesh[sm.FormKey] = mf.GivenPath;
+                else BaseMesh.Remove(sm.FormKey);
                 if ((sm.MajorRecordFlagsRaw & EnableState.IsMarkerFlag) != 0) BaseIsMarker.Add(sm.FormKey); else BaseIsMarker.Remove(sm.FormKey);
                 if (rec is IObjectBoundedGetter ob && ob.ObjectBounds is { } bnd)
                     BaseObnd[sm.FormKey] = new Vec3(MathF.Abs(bnd.Second.X - bnd.First.X),
@@ -212,6 +305,7 @@ public sealed class OverlapIndex
              || MathF.Abs(prev.Rot.Z - snap.Rot.Z) > 1e-4f || MathF.Abs(prev.Scale - snap.Scale) > 1e-3f))
             SilentRePlacements++;
         History.Record(r.FormKey, snap);
+        _effectivePose[r.FormKey] = snap;
         if (!Touchers.TryGetValue(r.FormKey, out var touchers)) Touchers[r.FormKey] = touchers = new List<int>(1);
         if (touchers.Count == 0 || touchers[^1] != plugin) touchers.Add(plugin);
         {
@@ -235,8 +329,8 @@ public sealed class OverlapIndex
         }
     }
 
-    /// <summary>The OBND fallback box for a base record: the record's extents centred on the origin as the model box.
-    /// LABELLED ('o'), never blended with a measured mesh. Empty when the record carries no bounds.</summary>
+    /// <summary>A synthetic/test helper retained for historical proof fixtures. Production overlap discovery and
+    /// remeasurement never call it; record ObjectBounds are not a geometry source or fallback.</summary>
     public Aabb ObndBox(FormKey baseKey)
     {
         if (!BaseObnd.TryGetValue(baseKey, out var ob) || (ob.X <= 0 && ob.Y <= 0 && ob.Z <= 0)) return Aabb.Empty;
@@ -261,7 +355,7 @@ public sealed class OverlapIndex
         var list = new List<OverlapCandidate>();
         foreach (var (key, snaps) in History.Refs)
         {
-            var s = snaps[^1];
+            var s = WinningGeometryPose(key) ?? snaps[^1];
             // The winning RECORD decides, not the last placement step's own flag: a deletion that stripped the
             // placement leaves no step at all, so a reference removed that way used to stay a candidate (Q34).
             if (s.Deleted || IsDeletedNow(key)) { skips.Deleted++; continue; }
@@ -269,13 +363,15 @@ public sealed class OverlapIndex
             if (excludeResponsible(s.Plugin)) { skips.ExcludedResponsible++; continue; }
             if (!RefBase.TryGetValue(key, out var bk) || !BaseInfo.TryGetValue(bk, out var bi) || !obstructing.Contains(bi.Type))
             { skips.NonObstructingType++; continue; }
-            if (DetectorModel.ClassifyHost(bi.Type, bi.Edid) == HostClass.Marker
+            if (BaseIsMarker.Contains(bk) || DetectorModel.ClassifyHost(bi.Type, bi.Edid) == HostClass.Marker
                 || (BaseMesh.TryGetValue(bk, out var mesh) && Path.GetFileName(mesh).StartsWith("MarkerX", StringComparison.OrdinalIgnoreCase)))
             { skips.MarkerMesh++; continue; }
             var (box, src) = boxOf(bk);
             if (src == '-' || box.IsEmpty) { skips.NoGeometry++; continue; }
-            var world = SpatialOverlap.ToWorld(box, s.Pos, s.Rot, s.Scale);
-            if (world.IsEmpty) { skips.NoGeometry++; continue; }
+            var placed = SpatialOverlap.PlaceBounds(box, s.Pos, s.Rot, s.Scale);
+            if (placed.Status == "invalid_transform") { skips.InvalidTransform++; continue; }
+            if (placed.Status == "degenerate_geometry") { skips.DegenerateGeometry++; continue; }
+            if (!placed.UsableForOverlap || placed.Bounds is not { } world) { skips.NoGeometry++; continue; }
             if (MathF.Max(world.Max.X - world.Min.X, MathF.Max(world.Max.Y - world.Min.Y, world.Max.Z - world.Min.Z)) > maxDim)
             { skips.Volume++; continue; }
             list.Add(new OverlapCandidate(key, s, bk, world, src));
@@ -283,12 +379,163 @@ public sealed class OverlapIndex
         return list;
     }
 
+    /// <summary>Build actual-surface candidates under the same declared source/state/type/marker rules as the historical
+    /// overlap pass. No box size, depth or volume gate applies. Flat triangle soups remain eligible.</summary>
+    public List<SurfaceOverlapCandidate> SurfaceCandidates(
+        Func<FormKey, (TriangleSoup? Soup, char Src, string? Reason)> geometryOf,
+        ISet<string> obstructing, Func<int, bool> excludeResponsible, out CandidateSkips skips,
+        Func<FormKey, bool>? enabledOf = null)
+    {
+        skips = new CandidateSkips();
+        var list = new List<SurfaceOverlapCandidate>();
+        foreach (var (key, snaps) in History.Refs)
+        {
+            var s = WinningGeometryPose(key) ?? snaps[^1];
+            if (s.Deleted || IsDeletedNow(key)) { skips.Deleted++; continue; }
+            if (enabledOf is null ? s.Disabled : !enabledOf(key)) { skips.Disabled++; continue; }
+            if (excludeResponsible(s.Plugin)) { skips.ExcludedResponsible++; continue; }
+            if (!RefBase.TryGetValue(key, out var bk) || !BaseInfo.TryGetValue(bk, out var bi) || !obstructing.Contains(bi.Type))
+            { skips.NonObstructingType++; continue; }
+            if (BaseIsMarker.Contains(bk) || DetectorModel.ClassifyHost(bi.Type, bi.Edid) == HostClass.Marker
+                || (BaseMesh.TryGetValue(bk, out var mesh) && Path.GetFileName(mesh).StartsWith("MarkerX", StringComparison.OrdinalIgnoreCase)))
+            { skips.MarkerMesh++; continue; }
+            var (model, src, _) = geometryOf(bk);
+            if (src == '-' || model is not { TriangleCount: > 0 }) { skips.NoGeometry++; continue; }
+            if (s.Scale == 0) { skips.DegenerateGeometry++; continue; }
+            var world = SpatialOverlap.TransformSoup(model, s.Pos, s.Rot, s.Scale);
+            var bounds = SpatialOverlap.SoupBounds(world);
+            if (bounds.IsEmpty || !SpatialOverlap.IsFinite(bounds)) { skips.InvalidTransform++; continue; }
+            list.Add(new(key, s, bk, bounds, world, src));
+        }
+        return list;
+    }
+
+    /// <summary>Symmetric actual-surface discovery. Bounds only decide a provably separated broad-phase rejection;
+    /// every surviving pair reaches the generic mesh predicate with a per-pair work and time budget.</summary>
+    public static SurfacePairSweep SurfacePairs(IReadOnlyList<SurfaceOverlapCandidate> candidates,
+        IReadOnlyList<HashSet<int>> closure, double tolerance = 1e-5, long maxTrianglePairs = 2_000_000,
+        TimeSpan? pairTimeout = null, Func<int, int, bool>? includeResponsiblePair = null,
+        Action<long>? onProgress = null, float tile = 256f, CancellationToken cancellationToken = default)
+    {
+        var timeout = pairTimeout ?? TimeSpan.FromSeconds(120);
+        var sweep = new SurfacePairSweep();
+        // A sweep per coordinate space has no allocation proportional to an object's dimensions. This matters now that
+        // large real surfaces are eligible. Bounds reject only axis separation greater than the predicate tolerance.
+        foreach (var space in candidates.GroupBy(c => c.Win.Space))
+        {
+            var ordered = space.OrderBy(c => (double)c.WorldBounds.Min.X).ThenBy(c => c.Key.ToString(), StringComparer.Ordinal).ToList();
+            for (int ai = 0; ai < ordered.Count; ai++)
+                for (int bi = ai + 1; bi < ordered.Count; bi++)
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+                    var a = ordered[ai]; var b = ordered[bi];
+                    if ((double)b.WorldBounds.Min.X - a.WorldBounds.Max.X > tolerance) break;
+                    if ((double)b.WorldBounds.Min.Y - a.WorldBounds.Max.Y > tolerance
+                        || (double)a.WorldBounds.Min.Y - b.WorldBounds.Max.Y > tolerance
+                        || (double)b.WorldBounds.Min.Z - a.WorldBounds.Max.Z > tolerance
+                        || (double)a.WorldBounds.Min.Z - b.WorldBounds.Max.Z > tolerance) continue;
+                    if (includeResponsiblePair is not null && !includeResponsiblePair(a.Win.Plugin, b.Win.Plugin)) continue;
+                    sweep.PairsChecked++;
+                    var query = SurfaceQueryOutcome.Query(a.WorldSoup, b.WorldSoup, tolerance, maxTrianglePairs, timeout, cancellationToken);
+                    bool intersects = query.Intersects == true;
+                    bool unknown = query.Unknown;
+
+                    if (a.Win.Plugin == b.Win.Plugin)
+                    {
+                        sweep.SameChecked++;
+                        if (intersects) sweep.SameIntersects++;
+                        if (unknown) sweep.SameUnknown++;
+                        string domain = a.Win.Interior ? "interior" : "exterior";
+                        var old = sweep.SameByDomain.GetValueOrDefault(domain);
+                        sweep.SameByDomain[domain] = (old.Intersects + (intersects ? 1 : 0), old.Unknown + (unknown ? 1 : 0), old.Checked + 1);
+                    }
+                    else
+                    {
+                        bool declared = closure[a.Win.Plugin].Contains(b.Win.Plugin) || closure[b.Win.Plugin].Contains(a.Win.Plugin);
+                        var hit = new SurfaceOverlapHit(a, b, query, declared);
+                        sweep.CrossResults.Add(hit);
+                        if (intersects) sweep.CrossHits.Add(hit);
+                        if (unknown) sweep.CrossUnknown++;
+                        if (declared)
+                        {
+                            sweep.CrossDeclaredChecked++;
+                            if (intersects) sweep.CrossDeclaredIntersects++;
+                        }
+                        else
+                        {
+                            sweep.CrossUndeclaredChecked++;
+                            if (intersects) sweep.CrossUndeclaredIntersects++;
+                        }
+                    }
+                    onProgress?.Invoke(sweep.PairsChecked);
+                }
+        }
+        return sweep;
+    }
+
+    /// <summary>Apply the unchanged provenance rule to an actual-shape hit, rebuilding the arm without the later
+    /// responsible plugin from strict model triangles. An unknown counterfactual is retained and withheld from credit.</summary>
+    public SurfaceOverlapRow JudgeSurface(SurfaceOverlapHit hit, IReadOnlyList<HashSet<int>> closure,
+        Func<FormKey, (TriangleSoup? Soup, char Src, string? Reason)> geometryOf, double tolerance = 1e-5,
+        long maxTrianglePairs = 2_000_000, TimeSpan? pairTimeout = null, EnableArms? arms = null,
+        CancellationToken cancellationToken = default)
+    {
+        var (later, other) = hit.A.Win.Plugin > hit.B.Win.Plugin ? (hit.A, hit.B) : (hit.B, hit.A);
+        int mover = later.Win.Plugin;
+        var snaps = History.Of(later.Key)!;
+        int previousIndex = PlacementHistory.AuthoringSnapIndex(snaps, mover, closure);
+        Snap? previous = previousIndex >= 0 ? snaps[previousIndex] : null;
+        bool hadPrevious = previous is not null;
+        var previousEnable = previous is not null && arms is not null ? arms.Without(later.Key, mover, closure) : default;
+        bool enableKnown = previous is null || arms is null || previousEnable.Resolved;
+        bool previousPresent = enableKnown && previous is { Deleted: false } p && p.Space == other.Win.Space
+            && !IsDeletedWithout(later.Key, mover, closure)
+            && (arms is null ? !p.Disabled : previousEnable.Enabled);
+        SurfaceQueryOutcome? counterfactual = null;
+        string counterfactualStatus = !enableKnown ? "unknown" : previousPresent ? "unknown" : "absent";
+        string? counterfactualReason = !enableKnown ? "the previous arm's enable chain is unresolved"
+            : previousPresent ? "the previous-placement render surface was not measured" : null;
+
+        if (previousPresent)
+        {
+            FormKey previousBase = FormKey.Null;
+            if (BaseChanges.TryGetValue(later.Key, out var changes))
+                for (int i = changes.Count - 1; i >= 0; i--)
+                {
+                    int basePlugin = changes[i].Plugin;
+                    if (basePlugin == mover || closure[basePlugin].Contains(mover)) continue;
+                    previousBase = changes[i].Base;
+                    break;
+                }
+            var (model, _, reason) = previousBase.IsNull ? (null, '-', "the previous arm has no base record") : geometryOf(previousBase);
+            if (model is { TriangleCount: > 0 })
+            {
+                var world = SpatialOverlap.TransformSoup(model, previous!.Value.Pos, previous.Value.Rot, previous.Value.Scale);
+                counterfactual = SurfaceQueryOutcome.Query(world, other.WorldSoup, tolerance, maxTrianglePairs,
+                    pairTimeout ?? TimeSpan.FromSeconds(120), cancellationToken);
+                counterfactualStatus = counterfactual.Unknown ? "unknown" : "measured";
+                counterfactualReason = counterfactual.Reason;
+            }
+            else counterfactualReason = reason ?? "the previous arm has no complete strict render triangles";
+        }
+
+        bool withoutIntersection = counterfactual?.Intersects == true;
+        bool seen = closure[mover].Contains(other.Win.Plugin);
+        var facts = new DetectorModel.OverlapFacts(hadPrevious, previousPresent, withoutIntersection, seen);
+        var (origin, sight, why) = DetectorModel.OverlapProvenance(facts);
+        OverlapOrigin? assessedOrigin = counterfactualStatus == "unknown" ? null : origin;
+        if (assessedOrigin is null) why = counterfactualReason ?? "counterfactual actual-shape result is unknown";
+        return new(hit, later, other, facts, assessedOrigin, sight, why, previous,
+            History.AsSeenBy(other.Key, mover, closure), counterfactual, counterfactualStatus, counterfactualReason);
+    }
+
     /// <summary>The pair sweep: a spatial hash of 256 u tiles inside a space partition (interior cell | worldspace),
     /// every pair in a tile tested once with <see cref="DetectorModel.BoxOverlap"/>. Same-responsible pairs are the
     /// authored floor, tallied by domain; cross-responsible deep hits are collected for judgement, with the declared
     /// relation (closure in either direction) recorded on each.</summary>
     public static PairSweep Pairs(IReadOnlyList<OverlapCandidate> candidates, IReadOnlyList<HashSet<int>> closure,
-                                  float minDepth, float minFrac, float tile = 256f)
+                                  float minDepth, float minFrac, float tile = 256f,
+                                  Func<int, int, bool>? includeResponsiblePair = null)
     {
         var grid = new Dictionary<(FormKey Space, int X, int Y), List<int>>();
         for (int i = 0; i < candidates.Count; i++)
@@ -322,6 +569,7 @@ public sealed class OverlapIndex
                         : string.CompareOrdinal(ca.Key.ModKey.FileName.String, cb.Key.ModKey.FileName.String) <= 0;
                     var key = aFirst ? (ca.Key, cb.Key) : (cb.Key, ca.Key);
                     if (!seenPair.Add(key)) continue;
+                    if (includeResponsiblePair is not null && !includeResponsiblePair(ca.Win.Plugin, cb.Win.Plugin)) continue;
                     sweep.PairsChecked++;
 
                     var ov = Overlap(ca.World, cb.World);
@@ -337,6 +585,8 @@ public sealed class OverlapIndex
                         continue;
                     }
                     bool declared = closure[ca.Win.Plugin].Contains(cb.Win.Plugin) || closure[cb.Win.Plugin].Contains(ca.Win.Plugin);
+                    if (ov is { } intersection)
+                        sweep.CrossIntersections.Add((ca, cb, intersection.MinDepth, intersection.VolumeFraction, deep, declared));
                     if (declared) { sweep.CrossDeclaredChecked++; if (deep) sweep.CrossDeclaredDeep++; }
                     else sweep.CrossUndeclaredChecked++;
                     if (deep) sweep.CrossDeep.Add(new OverlapHit(ca, cb, ov!.Value.MinDepth, ov.Value.VolumeFraction, declared));
@@ -376,24 +626,33 @@ public sealed class OverlapIndex
                         && (arms is null ? !p.Disabled : arms.Without(later.Key, L, closure).Enabled);
         float wDepth = float.NaN, wFrac = float.NaN;
         bool withoutDeep = false;
+        string counterfactualStatus = prevPresent ? "unmeasurable" : "absent";
+        string? counterfactualReason = prevPresent ? "the previous-placement geometry was not measured" : null;
         if (prevPresent)
         {
             var (box, src) = boxOf(later.Base);
             if (src != '-' && !box.IsEmpty)
             {
-                var world = SpatialOverlap.ToWorld(box, prev!.Value.Pos, prev.Value.Rot, prev.Value.Scale);
-                if (Overlap(world, other.World) is { } o)
+                var placed = SpatialOverlap.PlaceBounds(box, prev!.Value.Pos, prev.Value.Rot, prev.Value.Scale);
+                if (placed.UsableForOverlap && placed.Bounds is { } world)
                 {
-                    wDepth = o.MinDepth; wFrac = o.VolumeFraction;
-                    withoutDeep = o.MinDepth >= minDepth && o.VolumeFraction >= minFrac;
+                    counterfactualStatus = "measured";
+                    counterfactualReason = null;
+                    if (Overlap(world, other.World) is { } o)
+                    {
+                        wDepth = o.MinDepth; wFrac = o.VolumeFraction;
+                        withoutDeep = o.MinDepth >= minDepth && o.VolumeFraction >= minFrac;
+                    }
+                    else { wDepth = 0; wFrac = 0; }
                 }
-                else { wDepth = 0; wFrac = 0; }
+                else counterfactualReason = placed.Reason;
             }
         }
         bool seen = closure[L].Contains(other.Win.Plugin);
         var facts = new DetectorModel.OverlapFacts(hadPrev, prevPresent, withoutDeep, seen);
         var (origin, sight, why) = DetectorModel.OverlapProvenance(facts);
         return new OverlapRow(hit, later, other, facts, origin, sight, why, prev,
-                              History.AsSeenBy(other.Key, L, closure), wDepth, wFrac);
+                              History.AsSeenBy(other.Key, L, closure), wDepth, wFrac,
+                              counterfactualStatus, counterfactualReason);
     }
 }

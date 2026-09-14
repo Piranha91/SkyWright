@@ -41,11 +41,12 @@ using HousecarlCore.Progress;
 //                          floating / sunk — the absolute floor the charter predicted is large
 //   --labelled-mover X.esp every ref X moved, contact BEFORE X vs AFTER X — USSEP's placement fixes as a
 //                          labelled positive set for the primitive (no game, no judgement)
-//   --overlap-json FILE    overlapprobe's judged rows through the narrow phase: no contact / touch / penetrate
-//                          — the milestone 6 ranker upgrade for 4.1
+//   --overlap-json FILE    supplied overlap rows/pairs through the strict NIF render-surface narrow phase;
+//                          requires --json OUTPUT, which persists all attempted and budget-unrun rows
 //
 // usage: contactprobe [--list N] [--eps U] [--reach U] [--json FILE] [--emit FILE] [--base EMIT] [--all-rows] [--interior-only]
 //                     [--absolute] [--labelled-mover X.esp] [--overlap-json FILE]
+//                     [--contact-budget-seconds 1200] [--pair-budget-seconds 120] [--contact-max-pairs 128]
 //                     [--only A.esm,B.esm,...] [--vanilla-assets] [--bos on|off]
 //                     [--enable X.esp]* [--disable X.esp]* [--instance DIR] [--game DIR] [--profile NAME]
 //   POPULATION      the LOAD-TIME state, and it always has been (R1, 2026-09-03): a reference exists in an arm when its
@@ -62,6 +63,9 @@ using HousecarlCore.Progress;
 //   --only          keep only the named plugins of the profile's order (the vanilla masters, or vanilla + USSEP)
 //   --vanilla-assets resolve meshes from the game's own archives only — no mod folder, no replacer — so a
 //                   labelled set authored against vanilla meshes is tested against vanilla meshes
+//   OVERLAP REVIEW  only decoded render triangles on both sides; partial/unsupported/missing NIFs stay unknown.
+//                   Budgets apply cooperatively to the review stage; asset decode/grid construction can overrun
+//                   a deadline before the next check. No contact/penetration result is a compatibility verdict.
 
 // Nothing is compiled in — see _shared/HarnessTarget.cs. Flags win over the environment and over
 // harness.local.json; Require() runs AFTER them.
@@ -87,6 +91,10 @@ string overwriteDir = Path.Combine(Instance, "overwrite");
 string dataDir = Path.Combine(GamePath, "Data");
 
 int listN = 25;
+double contactBudgetSeconds = 1200, pairBudgetSeconds = 120;
+int contactMaxPairs = 128;
+double surfaceTolerance = 1e-5;
+long meshMaxTrianglePairs = 2_000_000;
 string? stateSpec = null, switchMapPath = null;
 float eps = 4f;            // touching: surfaces within ε and no vertex deeper than ε inside. A chosen number, stated.
 float reach = 128f;        // how far from a moved host a dependent is looked for (the records pass's contact-plausible radius).
@@ -106,6 +114,11 @@ for (int i = 0; i < args.Length; i++)
     else if (args[i] == "--emit" && i + 1 < args.Length) emitPath = args[++i];
     else if (args[i] == "--base" && i + 1 < args.Length) basePath = args[++i];
     else if (args[i] == "--overlap-json" && i + 1 < args.Length) overlapJson = args[++i];
+    else if (args[i] == "--contact-budget-seconds" && i + 1 < args.Length) contactBudgetSeconds = double.Parse(args[++i], System.Globalization.CultureInfo.InvariantCulture);
+    else if (args[i] == "--pair-budget-seconds" && i + 1 < args.Length) pairBudgetSeconds = double.Parse(args[++i], System.Globalization.CultureInfo.InvariantCulture);
+    else if (args[i] == "--contact-max-pairs" && i + 1 < args.Length) contactMaxPairs = int.Parse(args[++i]);
+    else if (args[i] == "--surface-tolerance" && i + 1 < args.Length) surfaceTolerance = double.Parse(args[++i], System.Globalization.CultureInfo.InvariantCulture);
+    else if (args[i] == "--mesh-max-triangle-pairs" && i + 1 < args.Length) meshMaxTrianglePairs = long.Parse(args[++i]);
     else if (args[i] == "--labelled-mover" && i + 1 < args.Length) labelledMover = args[++i];
     else if (args[i] == "--geom-report" && i + 1 < args.Length) geomReport = args[++i];
     else if (args[i] == "--only" && i + 1 < args.Length) only = new HashSet<string>(args[++i].Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries), StringComparer.OrdinalIgnoreCase);
@@ -129,6 +142,13 @@ for (int i = 0; i < args.Length; i++)
     else if (args[i] == "--switch-map" && i + 1 < args.Length) switchMapPath = args[++i];
 }
 
+if (overlapJson is not null && (jsonPath is null || !double.IsFinite(contactBudgetSeconds) || contactBudgetSeconds <= 0
+    || !double.IsFinite(pairBudgetSeconds) || pairBudgetSeconds <= 0 || contactMaxPairs < 0
+    || !double.IsFinite(surfaceTolerance) || surfaceTolerance < 0 || meshMaxTrianglePairs <= 0))
+{
+    Console.Error.WriteLine("--overlap-json requires --json OUTPUT; time budgets must be finite positive, --contact-max-pairs nonnegative, surface tolerance finite nonnegative, and --mesh-max-triangle-pairs positive.");
+    return 2;
+}
 var sw = Stopwatch.StartNew();
 // WHAT THIS RUN EVALUATES, decided in one place (_shared/HarnessOrderCli.cs): the real profile, a --enable/--disable
 // what-if, or a --order candidate file - and, in the same step, the ASSET VIEW that configuration implies, so a run
@@ -348,72 +368,18 @@ string GeometryLine() => $"geometry: {meshesMeasured:N0} meshes measured (host s
 // ---------------------------------------------------------------------------------------
 if (overlapJson is not null)
 {
-    using var doc = JsonDocument.Parse(File.ReadAllText(overlapJson));
-    var tally = new Dictionary<(string Scale, string Verdict), int>();
-    var byPop = new Dictionary<(string Pop, string Verdict), int>();
-    var depthBands = new Dictionary<string, int>();
-    int n = 0, noGeom = 0, notPlaced = 0;
-    var examples = new List<(string Verdict, float Rank, string Text)>();
-    foreach (var row in doc.RootElement.EnumerateArray())
+    try
     {
-        n++;
-        FormKey later, other;
-        try { later = FormKey.Factory(row.GetProperty("Later").GetString()!); other = FormKey.Factory(row.GetProperty("Other").GetString()!); }
-        catch { notPlaced++; continue; }
-        string scale = row.TryGetProperty("Scale", out var sc) ? sc.GetString() ?? "?" : "?";
-        string pop = row.TryGetProperty("Population", out var pp) ? pp.GetString() ?? "?" : "?";
-        float rank = row.TryGetProperty("Rank", out var rk) ? rk.GetSingle() : 0f;
-        var pl = cidx.WinnerPlacement(later); var po = cidx.WinnerPlacement(other);
-        if (pl is null || po is null) { notPlaced++; continue; }
-        var bl = cidx.WinnerBase(later); var bo = cidx.WinnerBase(other);
-        var boxL = cidx.WorldBox(bl, pl.Value.Snap); var boxO = cidx.WorldBox(bo, po.Value.Snap);
-        if (boxL.IsEmpty || boxO.IsEmpty) { noGeom++; continue; }
-        static float Vol(Aabb b) => (b.Max.X - b.Min.X) * (b.Max.Y - b.Min.Y) * (b.Max.Z - b.Min.Z);
-        // The smaller box is the thing buried — the ranker's own convention — and it plays the dependent.
-        bool laterIsDep = Vol(boxL) <= Vol(boxO);
-        // Both sides are SURFACES here (the question is whether the two meet, not whether one holds the other), so a
-        // render-only mesh stands in, labelled 'r' on the row.
-        var c = laterIsDep ? cidx.PairContact(later, pl.Value.SnapIndex, bl, pl.Value.Snap, other, po.Value.SnapIndex, bo, po.Value.Snap, anySurface: true)
-                           : cidx.PairContact(other, po.Value.SnapIndex, bo, po.Value.Snap, later, pl.Value.SnapIndex, bl, pl.Value.Snap, anySurface: true);
-        if (c is null) { noGeom++; continue; }
-        string v = c.Contact.EffectivePenetration > eps ? "penetrate" : c.Contact.Crosses ? "cross" : c.Contact.FacingDistance <= eps ? "touch" : "no contact";
-        tally[(scale, v)] = tally.GetValueOrDefault((scale, v)) + 1;
-        byPop[(pop, v)] = byPop.GetValueOrDefault((pop, v)) + 1;
-        if (v == "penetrate")
-        {
-            string band = c.Contact.EffectivePenetration <= 16 ? "<=16u" : c.Contact.EffectivePenetration <= 64 ? "<=64u" : c.Contact.EffectivePenetration <= 256 ? "<=256u" : ">256u";
-            depthBands[band] = depthBands.GetValueOrDefault(band) + 1;
-        }
-        if (examples.Count < 4000)
-            examples.Add((v, rank, $"{BaseLabel(bl)} ({PluginName(pl.Value.Snap.Plugin)}) x {BaseLabel(bo)} ({PluginName(po.Value.Snap.Plugin)}) in {CellOf(pl.Value.Snap.Cell)}  {Contact(c)} [{Src(c)}]  {later} / {other}"));
+        return OverlapPairReview.Run(overlapJson, jsonPath!, contactBudgetSeconds, pairBudgetSeconds,
+            contactMaxPairs, surfaceTolerance, meshMaxTrianglePairs, assets, idx, cidx.Arms,
+            cfg.Identity("load-time", cidx.State?.Name ?? "baseline"), idx.WinningGeometryPose, __run);
     }
-    Console.WriteLine($"\n==== THE 4.1 RANKER UPGRADE — {n:N0} judged overlap rows through the narrow phase (ε {eps:0.#}u) ====");
-    Console.WriteLine($"   {GeometryLine()}");
-    Console.WriteLine($"   not judged: {notPlaced:N0} rows whose refs are not placed under this order, {noGeom:N0} without geometry on a side");
-    var verdicts = new[] { "no contact", "touch", "cross", "penetrate" };
-    var scales = tally.Keys.Select(k => k.Scale).Distinct().OrderBy(s => s).ToList();
-    Console.WriteLine($"   (touch: surfaces within ε and nothing crossed; cross: an edge of one passes through a face of the other, nothing deeper than ε along the contact normal — two walls through each other read here; penetrate: deeper than ε)");
-    Console.WriteLine($"   {"scale of the buried box",-26} " + string.Join(" ", verdicts.Select(v => $"{v,12}")) + $" {"total",8}");
-    foreach (var s in scales)
+    catch (Exception ex)
     {
-        int tot = verdicts.Sum(v => tally.GetValueOrDefault((s, v)));
-        Console.WriteLine($"   {s,-26} " + string.Join(" ", verdicts.Select(v => $"{tally.GetValueOrDefault((s, v)),12:N0}")) + $" {tot,8:N0}");
+        Console.Error.WriteLine($"overlap contact review refused: {ex.GetType().Name}: {ex.Message}");
+        return 2;
     }
-    int all = tally.Values.Sum();
-    Console.WriteLine($"   {"all",-26} " + string.Join(" ", verdicts.Select(v => $"{tally.Where(k => k.Key.Verdict == v).Sum(k => k.Value),12:N0}")) + $" {all,8:N0}");
-    Console.WriteLine($"   shares: " + string.Join(", ", verdicts.Select(v => $"{v} {Rate(tally.Where(k => k.Key.Verdict == v).Sum(k => k.Value), all):0.0}%")));
-    Console.WriteLine($"   by population: " + string.Join("; ", byPop.Keys.Select(k => k.Pop).Distinct().OrderBy(p => p).Select(p => $"{p}: " + string.Join(", ", verdicts.Select(v => $"{v} {byPop.GetValueOrDefault((p, v)):N0}")))));
-    Console.WriteLine($"   penetration depth of the penetrating rows: " + string.Join(", ", new[] { "<=16u", "<=64u", "<=256u", ">256u" }.Select(b => $"{b} {depthBands.GetValueOrDefault(b):N0}")));
-    foreach (var v in verdicts)
-    {
-        Console.WriteLine($"\n   ---- {v}: top {Math.Min(listN, 10)} by the broad-phase rank ----");
-        foreach (var e in examples.Where(e => e.Verdict == v).OrderByDescending(e => e.Rank).Take(Math.Min(listN, 10)))
-            Console.WriteLine($"   {e.Rank,7:0}  {e.Text}");
-    }
-    Console.WriteLine($"\nelapsed {sw.Elapsed.TotalSeconds:0.0}s");
-    return 0;
 }
-
 // ---------------------------------------------------------------------------------------
 // --labelled-mover: contact before vs after one plugin's moves — the labelled positive set for the primitive.
 // ---------------------------------------------------------------------------------------

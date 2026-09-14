@@ -11,12 +11,9 @@ namespace HarnessShared;
 // state's class is the differential over the references that ARRIVE (disabled at baseline, enabled in
 // the state) and DEPART (the reverse):
 //
-//   OVERLAP  an arriving reference's world box against every enabled box in its space at the overlap
-//            rule's threshold (16 u deep, a quarter of the smaller) is a StateConditional row; a
-//            departing reference's deep overlaps at baseline are StateResolved. Two members of the
-//            same set meeting each other is the set's own floor (SameSet), counted apart; so is a
-//            member meeting a reference its own placer placed (SameAuthor: the author designed the
-//            set against that geometry — the overlap pass's same-responsible floor, in state form).
+//   OVERLAP  is withheld until this evaluator has the strict placed render surfaces used by the current
+//            overlap predicate. Its former world-box rule remains reachable only by the synthetic historical
+//            proof fixture; production must never publish those box decisions as STATE-OVERLAP findings.
 //   CONTACT  a HOST that departs (physical, furniture-scale or larger, solid collision) strands what
 //            rested on or hung from it, unless something else in the state holds it — the contact rule
 //            with the switch as the mover (the R1 shape, a plugin's disable replaced by a flip). A host
@@ -55,7 +52,7 @@ public sealed record StateRow(
 public sealed class StateTally
 {
     public int States, Changes, Arrivals, Departures, SwitchesThemselves;
-    public int NoGeometry, NoBox, NotObstructing, Volume, PairsTested, SameSetPairs, Unchanged;
+    public int NoGeometry, NoBox, NotObstructing, Volume, PairsTested, SameSetPairs, Unchanged, StateOverlapUnmeasured;
     public int HostsLeaving, HostsArriving, DepsArriving, DepsLeaving, DepsRemainOnHost, ReSupported, FloatingOnArrival, TouchingOnArrival, ContactUnmeasured;
     public int RouteAsked, RouteUnjudged, RouteNoLine, RouteClipped, RouteNone;
     public double ElapsedMs;
@@ -86,13 +83,18 @@ public sealed class StateEvaluator
     [Flags] enum Role { None = 0, Obstructing = 1, Dependent = 2, Physical = 4, Host = 8, Navcut = 16 }
     readonly BoxHash<FormKey> _boxes = new();
     readonly Dictionary<FormKey, (Aabb Box, Role Role, FormKey Base)> _facts = new();
+    readonly HashSet<FormKey> _stateOverlapScope = new();
     readonly Dictionary<(string Arm, FormKey Key), (RouteCutVerdict? V, string Why)> _routeMemo = new();
+    readonly bool _allowLegacyBoundsOverlapForProof;
     public int Boxed => _facts.Count;
     public int BoxedNoGeometry, BoxedMarkers, BoxedFxVolumes;
 
-    public StateEvaluator(ContactIndex cidx, SwitchIndex sx)
+    public StateEvaluator(ContactIndex cidx, SwitchIndex sx) : this(cidx, sx, false) { }
+
+    internal StateEvaluator(ContactIndex cidx, SwitchIndex sx, bool allowLegacyBoundsOverlapForProof)
     {
         Contact = cidx; Switches = sx;
+        _allowLegacyBoundsOverlapForProof = allowLegacyBoundsOverlapForProof;
         // Every winning, undeleted reference with geometry, WHATEVER its enable state — the arm decides who is there.
         foreach (var (key, snaps) in Index.History.Refs)
         {
@@ -111,16 +113,19 @@ public sealed class StateEvaluator
                 continue;
             }
             if (cidx.IsMarker(b)) { BoxedMarkers++; continue; }
+            string type = Index.BaseInfo.TryGetValue(b, out var bi) ? bi.Type : "?";
+            // Preserve the state class's declared effects exclusion while counting every other obstructing
+            // reference as unmeasured, including missing geometry and formerly size-filtered surfaces.
+            bool fx = Index.BaseMesh.TryGetValue(b, out var mesh) && mesh.Replace('/', '\\').Contains(@"effects\", StringComparison.OrdinalIgnoreCase);
+            if (Obstructing.Contains(type) && !fx) _stateOverlapScope.Add(key);
             var g = cidx.GeomOf(b);
             if (g is null || !g.HasGeometry) { BoxedNoGeometry++; continue; }
             var box = cidx.WorldBox(b, s);
             if (box.IsEmpty) { BoxedNoGeometry++; continue; }
             var role = Role.None;
-            string type = Index.BaseInfo.TryGetValue(b, out var bi) ? bi.Type : "?";
             float dim = MathF.Max(box.Max.X - box.Min.X, MathF.Max(box.Max.Y - box.Min.Y, box.Max.Z - box.Min.Z));
             // An effect volume (a mesh under effects\ — a magic barrier, a mist, a glow) fills a room by design and
             // obstructs nothing; the renderer drops the same files. Set aside from the overlap role, counted.
-            bool fx = Index.BaseMesh.TryGetValue(b, out var mesh) && mesh.Replace('/', '\\').Contains(@"effects\", StringComparison.OrdinalIgnoreCase);
             if (fx) BoxedFxVolumes++;
             if (Obstructing.Contains(type) && dim <= MaxDim && !fx) role |= Role.Obstructing;
             if (cidx.IsDependentType(b) && g.CanDepend && dim <= cidx.MaxDependentDim) role |= Role.Dependent;
@@ -165,13 +170,16 @@ public sealed class StateEvaluator
         {
             if (after) tally.Arrivals++; else tally.Departures++;
             if (member is null) tally.SwitchesThemselves++;
+            if (!_allowLegacyBoundsOverlapForProof && _stateOverlapScope.Contains(key)) tally.StateOverlapUnmeasured++;
             if (!_facts.TryGetValue(key, out var f)) { tally.NoBox++; continue; }
             var win = Index.History.Winning(key)!.Value;
             int placer = PlacerOf(key), attacher = member?.Attacher ?? sx.AttacherOf(key), resp = ResponsibleOf(key);
             bool interior = win.Interior;
 
             // ---- OVERLAP ----
-            if ((f.Role & Role.Obstructing) != 0)
+            // Production never enumerates box-near pairs: that would turn a diagnostic broad phase into either
+            // a positive or a credible pair denominator. Only the historical proof opts into this block.
+            if ((f.Role & Role.Obstructing) != 0 && _allowLegacyBoundsOverlapForProof)
             {
                 foreach (var (n, nbox, _) in _boxes.Near(win.Space, f.Box, 0f))
                 {
@@ -192,7 +200,7 @@ public sealed class StateEvaluator
                     rows.Add(new StateRow(arm.Name, root.Key, root.Owner, StateRowKind.Overlap, v, why,
                         key, after, placer, attacher, f.Base, n, PlacerOf(n), nf.Base, win.Cell, win.Space, interior,
                         Pop(resp, nr), same, o.MinDepth, o.VolumeFraction, SameAuthor: resp == nr, MemberResponsible: resp, OtherResponsible: nr,
-                        Physical: PhysicalState.Holds, PhysicalDetail: $"the boxes overlap {o.MinDepth:0}u deep, {o.VolumeFraction:0.00} of the smaller, in the {(v == StateVerdict.StateConditional ? "state" : "baseline")}"));
+                        Physical: PhysicalState.Holds, PhysicalDetail: $"historical proof only: the boxes overlap {o.MinDepth:0}u deep, {o.VolumeFraction:0.00} of the smaller, in the {(v == StateVerdict.StateConditional ? "state" : "baseline")}"));
                 }
             }
 

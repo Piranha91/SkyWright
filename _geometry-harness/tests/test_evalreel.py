@@ -47,9 +47,11 @@ def capture_selection(root):
     f={"id":"F-overlap","kind":"finding","checkId":"geometry.object-overlap","armId":"baseline","part":"arm","counts":{"A":"Earlier.esp","B":"Later.esp"},"allRows":[{"formKey":c["Necessary"][0]["FormKey"]} for c in conflicts],"evidenceIds":["E-overlap"]}
     p={"findings":[f],"evidence":[{"id":"E-overlap","kind":"emit","part":"arm","armId":"baseline","path":source.name,"sha256":sha(source)}]}
     result=evalreel.capture_requests(p,root); rows=result["requests"]
-    check([r["ranking"]["value"] for r in rows]==[40,32,20],"representative overlaps use measured depth/fraction instead of record order")
-    check(rows[0]["recordKeys"]==["000003:Later.esp","000003:Earlier.esp"] and [h["color"] for h in rows[0]["highlights"]]==["cyan","magenta"],"overlap capture preserves both participants and assigns distinct colours")
-    check(rows[0]["selection"]=={"eligible":5,"selected":3,"omitted":2,"unranked":1},"sampling discloses omitted and unranked candidates")
+    check(len(rows)==3 and all(r["ranking"]["value"] is None and not r["ranking"]["measurements"] for r in rows),"historical box measurements cannot become an object-conflict ranking")
+    check(all(r["recordKeys"][0].split(":")[0]==r["recordKeys"][1].split(":")[0] and [h["color"] for h in r["highlights"]]==["cyan","magenta"] for r in rows),"overlap capture preserves both participants and assigns distinct colours")
+    check(rows[0]["selection"]=={"eligible":5,"selected":3,"omitted":2,"unranked":5},"sampling discloses omitted candidates and absence of a severity ranking")
+    reversed_plan=copy.deepcopy(p); reversed_plan["findings"][0]["allRows"].reverse()
+    check(evalreel.capture_requests(reversed_plan,root)["requests"]==rows,"unranked object-pair selection is stable across finding-row order")
     check(all(r["camera"]["reportMode"] and r["camera"]["lockPoseAndFramingAcrossViews"] and r["camera"]["pose"] is None for r in rows),"capture requests require clean frames and measured camera planning")
     sequence=rows[0]["sequence"]; review=rows[0]["review"]; model=review["imageModel"]
     check(sequence["states"]==["highlighted","unhighlighted","highlighted"] and

@@ -801,5 +801,42 @@ Console.WriteLine("   navmesh triangle: (0,0,0) (200,0,0) (0,200,0)   actor heig
           $"jar: {Show(rX)} extent {jarExtent:0.##} | block: {Show(rX2)} extent {blockExtent:0.##}");
 }
 
+// Q46: positive bounding-box volume is not a surface-contact or compatibility verdict.
+{
+    static TriangleSoup Soup((List<Vector3> V, List<int> I) m) => new(m.V.ToArray(), m.I.ToArray());
+    var outer = Box(new Vector3(-60), new Vector3(60));
+    var inner = Box(new Vector3(-50), new Vector3(50));
+    for (int i = 0; i < inner.I.Count; i += 3)
+        (inner.I[i + 1], inner.I[i + 2]) = (inner.I[i + 2], inner.I[i + 1]);
+    var shell = Soup(Merge(outer, inner));
+    var objectInRoom = Soup(Box(new Vector3(-5), new Vector3(5)));
+    var shellBounds = SpatialOverlap.MeasureAabbOverlap(SpatialOverlap.SoupBounds(shell), SpatialOverlap.SoupBounds(objectInRoom));
+    var shellContact = SpatialOverlap.Contact(objectInRoom, shell, 128f);
+    Check("Q46 hollow shell: bounds overlap 100%, surfaces remain 45 units apart",
+        shellBounds.IntersectionVolume == 1000d && shellBounds.FractionOfSmaller == 1d
+        && MathF.Abs(shellContact.Distance - 45f) < 0.001f && !shellContact.InContact
+        && !shellContact.Crosses && shellContact.EffectivePenetration == 0f,
+        $"volume={shellBounds.IntersectionVolume}, distance={shellContact.Distance}, penetration={shellContact.EffectivePenetration}");
+
+    var bar = Soup(Box(new Vector3(-100, -1, -1), new Vector3(100, 1, 1)));
+    var diagonal = new Vec3(0, 0, MathF.PI / 4);
+    var first = SpatialOverlap.TransformSoup(bar, new Vec3(0, 0, 0), diagonal, 1f);
+    var second = SpatialOverlap.TransformSoup(bar, new Vec3(10f / MathF.Sqrt(2), 10f / MathF.Sqrt(2), 0), diagonal, 1f);
+    var barBounds = SpatialOverlap.MeasureAabbOverlap(SpatialOverlap.SoupBounds(first), SpatialOverlap.SoupBounds(second));
+    var barContact = SpatialOverlap.Contact(first, second, 128f);
+    Check("Q46 rotated thin bars: positive AABB overlap, surfaces remain 8 units apart",
+        barBounds.IntersectionVolume > 0d && MathF.Abs(barContact.Distance - 8f) < 0.001f
+        && !barContact.InContact && !barContact.Crosses && barContact.EffectivePenetration == 0f,
+        $"volume={barBounds.IntersectionVolume}, distance={barContact.Distance}, penetration={barContact.EffectivePenetration}");
+
+    using var cancelled = new CancellationTokenSource();
+    cancelled.Cancel();
+    bool cancelledLoudly = false;
+    try { _ = SpatialOverlap.Contact(first, second, 128f, cancellationToken: cancelled.Token); }
+    catch (OperationCanceledException) { cancelledLoudly = true; }
+    Check("Q46 contact budget: a pre-cancelled query throws OperationCanceledException",
+          cancelledLoudly, "cancellation must never be returned as a no-contact measurement");
+}
+
 Console.WriteLine($"\n==== {pass} passed, {fail} failed ====");
 return fail == 0 ? 0 : 1;

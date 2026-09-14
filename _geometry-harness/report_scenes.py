@@ -92,7 +92,8 @@ def capture_requests(presentation: dict, bundle: Path, policy_path: Path = POLIC
                                 limits.append({"findingId": finding["id"], "reason": "The recorded order does not establish the requested navmesh-version direction."})
                                 continue
                             views = [{"role": v["role"], "navPlugin": conflict[v["pluginField"]], "navColor": v["navColor"], "formKey": refs[0]} for v in rule["views"]]
-                        match = re.search(rule["metricPattern"], record.get("PhysicalDetail") or "")
+                        pattern = rule.get("metricPattern")
+                        match = re.search(pattern, record.get("PhysicalDetail") or "") if pattern else None
                         values = {field: float(match[field].replace(",", "")) for field in rule["metricFields"]} if match else {}
                         rank = math.prod(values.values()) if values else None
                         if rank is not None and (not math.isfinite(rank) or rank < 0):

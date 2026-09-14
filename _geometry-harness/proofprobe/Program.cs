@@ -1840,7 +1840,7 @@ Console.WriteLine("\nPROOF — overlap provenance (_shared/DetectorModel.cs + _s
     var aKey = new ModKey("OvlA", ModType.Plugin);
     var yKey = new ModKey("OvlY", ModType.Plugin);
     FormKey M(uint id) => new(mKey, id);
-    var crateK = M(0x801); var markerK = M(0x802); var cell1K = M(0x810); var cell2K = M(0x811);
+    var crateK = M(0x801); var markerK = M(0x802); var slabK = M(0x803); var cell1K = M(0x810); var cell2K = M(0x811);
     FormKey R(int n) => M((uint)(0x900 + n));
 
     static void FileInterior(SkyrimMod mod, Cell cell)
@@ -1854,10 +1854,11 @@ Console.WriteLine("\nPROOF — overlap provenance (_shared/DetectorModel.cs + _s
         if (sub is null) { sub = new CellSubBlock { BlockNumber = subN, GroupType = GroupTypeEnum.InteriorCellSubBlock }; block.SubBlocks.Add(sub); }
         sub.Cells.Add(cell);
     }
-    static PlacedObject Ref(FormKey key, FormKey baseKey, float x, float y = 0, float z = 0, string? edid = null, bool disabled = false, float rotZ = 0)
+    static PlacedObject Ref(FormKey key, FormKey baseKey, float x, float y = 0, float z = 0, string? edid = null, bool disabled = false, float rotZ = 0, float scale = 1)
     {
         var r = new PlacedObject(key, SkyrimRelease.SkyrimSE) { EditorID = edid, Placement = new Placement { Position = new P3Float(x, y, z), Rotation = new P3Float(0, 0, rotZ) } };
         r.Base.SetTo(baseKey);
+        if (scale != 1f) r.Scale = scale;
         if (disabled) r.SkyrimMajorRecordFlags |= SkyrimMajorRecord.SkyrimMajorRecordFlag.InitiallyDisabled;
         return r;
     }
@@ -1873,6 +1874,7 @@ Console.WriteLine("\nPROOF — overlap provenance (_shared/DetectorModel.cs + _s
     var master = new SkyrimMod(mKey, release);
     master.Statics.Add(new Static(crateK, release) { EditorID = "OvlCrate", ObjectBounds = new ObjectBounds { First = new P3Int16(-32, -32, 0), Second = new P3Int16(32, 32, 64) } });
     master.Statics.Add(new Static(markerK, release) { EditorID = "XMarkerHeading", ObjectBounds = new ObjectBounds { First = new P3Int16(-32, -32, 0), Second = new P3Int16(32, 32, 64) } });
+    master.Statics.Add(new Static(slabK, release) { EditorID = "OvlSlab", ObjectBounds = new ObjectBounds { First = new P3Int16(-32, -8, 0), Second = new P3Int16(32, 8, 16) } });
     var m1 = Interior(cell1K, "OvlCell1"); var m2 = Interior(cell2K, "OvlCell2");
     m1.Temporary.Add(Ref(R(1), crateK, 0, edid: "a1"));                       // X will move it to 100; A places b1 into it
     m1.Temporary.Add(Ref(R(2), crateK, 1000, edid: "a2"));                    // A places b2 into it (M is in A's closure)
@@ -1885,7 +1887,8 @@ Console.WriteLine("\nPROOF — overlap provenance (_shared/DetectorModel.cs + _s
     m1.Temporary.Add(Ref(R(10), crateK, 5000, edid: "a8"));                   // B places b8 at 5500; A moves a8 INTO it
     m1.Temporary.Add(Ref(R(11), crateK, 9000, edid: "a11", disabled: true));  // X places b11 on it; A ENABLES a11
     m2.Temporary.Add(Ref(R(12), crateK, 0, edid: "a12"));                     // in cell 2; X places b12 in cell 1; A RELOCATES a12 onto it
-    m1.Temporary.Add(Ref(R(13), crateK, 11000, edid: "a13"));                 // A overrides with a rotation only — a silent re-placement
+    m1.Temporary.Add(Ref(R(13), crateK, 11000, edid: "a13"));                 // A overrides with scale only — a silent re-placement
+    m1.Temporary.Add(Ref(R(14), slabK, 12000, edid: "a14"));                  // A overrides a rectangular box with rotation only
     // Q34: deletion and restoration, both far from every other crate so they join no pair and change no hit.
     m1.Temporary.Add(Ref(R(20), crateK, 20000, edid: "d1"));                   // X deletes it (stripped), A restores it where it stood
     m1.Temporary.Add(Ref(R(21), crateK, 21000, edid: "d2"));                   // X deletes it, nobody restores — the control
@@ -1926,7 +1929,8 @@ Console.WriteLine("\nPROOF — overlap provenance (_shared/DetectorModel.cs + _s
     a1.Temporary.Add(Ref(new FormKey(aKey, 0x904), crateK, 8010, edid: "c2"));
     a1.Temporary.Add(Ref(R(11), crateK, 9000, edid: "a11"));                          // ENABLED onto b11@X      -> Introduced + Blind, 'enabled or relocated'
     a1.Temporary.Add(Ref(R(12), crateK, 10000, edid: "a12"));                         // RELOCATED onto b12@X    -> Introduced + Blind, 'enabled or relocated'
-    a1.Temporary.Add(Ref(R(13), crateK, 11000, edid: "a13", rotZ: 1.0f));             // rotation only           -> silent, not responsible
+    a1.Temporary.Add(Ref(R(13), crateK, 11000, edid: "a13", scale: 2f));              // scale only              -> silent, not responsible
+    a1.Temporary.Add(Ref(R(14), slabK, 12000, edid: "a14", rotZ: MathF.PI / 2));      // rotation only           -> silent, not responsible
     a1.Temporary.Add(Ref(new FormKey(aKey, 0x905), markerK, 2000, edid: "mk1"));      // an editor marker into a3 -> set aside, never a candidate
     a1.Temporary.Add(Ref(R(20), crateK, 20000, edid: "d1"));                          // Q34: restored exactly where M put it — no placement step
     FileInterior(a, a1);
@@ -1993,8 +1997,18 @@ Console.WriteLine("\nPROOF — overlap provenance (_shared/DetectorModel.cs + _s
               $"without A (restorer): resolved {withoutRestorer.Resolved}, deleted in that arm {idx.IsDeletedWithout(R(20), Ai, closure)}; "
             + $"without X (deleter): resolved {withoutDeleter.Resolved}, enabled {withoutDeleter.Enabled}");
     }
-    Check("ovl-synth: one silent re-placement — A's rotation-only override of a13",
-          idx.SilentRePlacements == 1 && idx.History.Winning(R(13))!.Value.Plugin == Mi, $"silent {idx.SilentRePlacements}, a13 responsible = plugin {idx.History.Winning(R(13))!.Value.Plugin}");
+    Check("ovl-synth: scale-only and rotation-only overrides stay silent for attribution",
+          idx.SilentRePlacements == 2 && idx.History.Winning(R(13))!.Value.Plugin == Mi && idx.History.Winning(R(14))!.Value.Plugin == Mi,
+          $"silent {idx.SilentRePlacements}, a13/a14 responsible = {idx.History.Winning(R(13))!.Value.Plugin}/{idx.History.Winning(R(14))!.Value.Plugin}");
+    var pose13 = idx.WinningGeometryPose(R(13)); var pose14 = idx.WinningGeometryPose(R(14));
+    var cand13 = cands.Single(c => c.Key == R(13)); var cand14 = cands.Single(c => c.Key == R(14));
+    Check("ovl-synth: scale-only winning override changes current geometry without taking responsibility",
+          pose13 is { Plugin: Mi, Scale: 2f } && MathF.Abs(cand13.World.Size.X - 128) < 1e-3f,
+          $"pose {pose13}; world {cand13.World}");
+    Check("ovl-synth: rotation-only winning override changes current geometry without taking responsibility",
+          pose14 is { Plugin: Mi } && MathF.Abs(pose14.Value.Rot.Z - MathF.PI / 2) < 1e-4f
+          && MathF.Abs(cand14.World.Size.X - 16) < 1e-3f && MathF.Abs(cand14.World.Size.Y - 64) < 1e-3f,
+          $"pose {pose14}; size {cand14.World.Size}");
     var sweep = OverlapIndex.Pairs(cands, closure, 16f, 0.25f);
     var rows = sweep.CrossDeep.Select(h => idx.Judge(h, closure, BoxOf, 16f, 0.25f)).ToList();
     OverlapRow? Row(FormKey p, FormKey q) => rows.FirstOrDefault(r => (r.Hit.A.Key == p && r.Hit.B.Key == q) || (r.Hit.A.Key == q && r.Hit.B.Key == p));
@@ -3566,6 +3580,9 @@ BosProof.Run(Check);
 StateProof.Run(Check);
 NifChainProof.Run(Check);
 NifBoundProof.Run(Check);
+OverlapGeometryProof.Run(Check);
+MeshIntersectionProof.Run(Check);
+MeshPipelineProof.Run(Check);
 OcclusionGeometryProof.Run(Check);
 MaterialScaleProof.Run(Check);
 PopulationProof.Run(Check);

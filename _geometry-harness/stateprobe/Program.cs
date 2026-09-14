@@ -8,10 +8,9 @@ using Mutagen.Bethesda.Skyrim;
 using HousecarlCore.Progress;
 
 // STATEPROBE — the state-conditional class (roadmap 4.11, handoff 2026-09-20 Part C.2): every switch (or the states
-// named) flipped, and the geometry detectors run across the flip on the switch's own sets — overlap, contact, the
-// route rule — with StateConditional rows (present only once the switch is flipped) and StateResolved rows (present at
-// load time, gone once it is flipped), split by population (rule 12) with the Bethesda floor and the same-defect
-// control first.
+// named) flipped, and the geometry detectors run across the flip on the switch's own sets. Contact and route retain
+// their established predicates. State overlap is explicitly withheld until this evaluator consumes the strict placed
+// render surfaces used by the current overlap predicate; legacy box overlap is never emitted as a current finding.
 //
 // The evaluation is _shared/StateClass.cs (StateEvaluator over ContactIndex + SwitchIndex); the census is
 // _shared/WorldState.cs; the decision DetectorModel.StateDifferential. This file is I/O: the load order into the
@@ -30,9 +29,10 @@ using HousecarlCore.Progress;
 //                    a flip can bring in a floor piece or a taller actor, and measuring an arriving obstacle against the
 //                    baseline's floor mixes two worlds. Fields are keyed on (cell, state) and the baseline's field is
 //                    reused where the flip changes nothing in that cell, so the cost is a lookup, not a rebuild.
-//   --emit FILE      the class as a ConflictFile (kind STATE-OVERLAP / STATE-CONTACT / STATE-ROUTE @ state), the Bethesda floor withheld
+//   --emit FILE      the measured class as a ConflictFile (STATE-CONTACT / STATE-ROUTE @ state); STATE-OVERLAP is explicitly unmeasured
 
 using var __run = RunLog.BeginProcess("stateprobe", args);
+const string StateMeasurementPolicy = "state-contact-route-v1|state-overlap-unmeasured-v1";
 
 string Instance = HarnessTarget.Instance;
 string GamePath = HarnessTarget.Game;
@@ -424,7 +424,7 @@ foreach (var arm in arms)
 static void Merge(StateTally a, StateTally b)
 {
     a.States += b.States; a.Changes += b.Changes; a.Arrivals += b.Arrivals; a.Departures += b.Departures; a.SwitchesThemselves += b.SwitchesThemselves;
-    a.NoGeometry += b.NoGeometry; a.NoBox += b.NoBox; a.NotObstructing += b.NotObstructing; a.Volume += b.Volume; a.PairsTested += b.PairsTested; a.SameSetPairs += b.SameSetPairs; a.Unchanged += b.Unchanged;
+    a.NoGeometry += b.NoGeometry; a.NoBox += b.NoBox; a.NotObstructing += b.NotObstructing; a.Volume += b.Volume; a.PairsTested += b.PairsTested; a.SameSetPairs += b.SameSetPairs; a.Unchanged += b.Unchanged; a.StateOverlapUnmeasured += b.StateOverlapUnmeasured;
     a.HostsLeaving += b.HostsLeaving; a.HostsArriving += b.HostsArriving; a.DepsArriving += b.DepsArriving; a.DepsLeaving += b.DepsLeaving; a.ReSupported += b.ReSupported; a.FloatingOnArrival += b.FloatingOnArrival; a.TouchingOnArrival += b.TouchingOnArrival; a.ContactUnmeasured += b.ContactUnmeasured;
     a.RouteAsked += b.RouteAsked; a.RouteUnjudged += b.RouteUnjudged; a.RouteNoLine += b.RouteNoLine; a.RouteClipped += b.RouteClipped; a.RouteNone += b.RouteNone; a.ElapsedMs += b.ElapsedMs;
 }
@@ -435,6 +435,7 @@ Console.WriteLine($"   {arms.Count:N0} states over {tally.Changes:N0} changed re
                 + $"{cellStates:N0} cell-states, {(cellStates == 0 ? 0 : 1000 * totalS / cellStates):0} ms per cell-state; the route half measured {routeMeasured:N0} obstacles");
 if (routeFloorLine is not null) Console.WriteLine("   " + routeFloorLine());
 Console.WriteLine($"   set aside (rule 6): {tally.NoBox:N0} changed refs without a box (no geometry, a marker, or a navcut without a primitive); route: {routeNoNav:N0} in a cell without navmesh, {routeNoGeo:N0} without actor-solid geometry, {routeSetAside:N0} doors / movables, {routeNoCross:N0} never entering an actor column, {tally.RouteUnjudged:N0} unjudged");
+Console.WriteLine($"   state overlap: unmeasured for {tally.StateOverlapUnmeasured:N0} changed obstructing reference-state(s); strict placed render-surface migration is pending, so no box overlap is a finding or repair predicate");
 
 var cls = rows.Where(r => r.Verdict == StateVerdict.StateConditional && !r.SameSet && !r.SameAuthor).ToList();
 var resolved = rows.Where(r => r.Verdict == StateVerdict.StateResolved && !r.SameSet && !r.SameAuthor).ToList();
@@ -497,8 +498,9 @@ if (jsonPath is not null)
     var dump = new
     {
         generated = DateTime.UtcNow.ToString("yyyy-MM-dd HH:mm:ssZ"), instance = Instance, profile = profileName, plugins = paths.Count,
+        measurementPolicy = StateMeasurementPolicy,
         states = arms.Count, elapsedSeconds = totalS, cellStates, routeMeasured,
-        tally = new { tally.Changes, tally.Arrivals, tally.Departures, tally.NoBox, tally.PairsTested, tally.SameSetPairs, tally.HostsLeaving, tally.HostsArriving, tally.DepsArriving, tally.ReSupported, tally.FloatingOnArrival, tally.TouchingOnArrival, tally.ContactUnmeasured, tally.RouteAsked, tally.RouteUnjudged, tally.RouteNoLine, tally.RouteClipped, tally.RouteNone, routeNoNav, routeNoGeo, routeSetAside, routeNoCross },
+        tally = new { tally.Changes, tally.Arrivals, tally.Departures, tally.NoBox, tally.PairsTested, tally.SameSetPairs, tally.StateOverlapUnmeasured, tally.HostsLeaving, tally.HostsArriving, tally.DepsArriving, tally.ReSupported, tally.FloatingOnArrival, tally.TouchingOnArrival, tally.ContactUnmeasured, tally.RouteAsked, tally.RouteUnjudged, tally.RouteNoLine, tally.RouteClipped, tally.RouteNone, routeNoNav, routeNoGeo, routeSetAside, routeNoCross },
         perState = perState.Select(p => new { state = p.Arm.Name, flips = p.Arm.Flips.Select(f => f.ToString()), p.Changes, p.Rows, p.Conditional, ms = p.Ms }),
         rows = rows.Select(r => new
         {
@@ -532,6 +534,9 @@ if (emitPath is not null)
         new("plugins", paths.Count - unreadable.Count, new Dictionary<string, long> { ["UnreadablePlugin"] = unreadable.Count }),
         new("states", arms.Count, null, null, $"{tally.Changes:N0} changed references"),
         new("changed references with a box", tally.Changes - tally.NoBox, new Dictionary<string, long> { ["NoBox"] = tally.NoBox }),
+        new("state-overlap changed obstructing references", 0,
+            new Dictionary<string, long> { ["ActualSurfacePredicateUnavailable"] = tally.StateOverlapUnmeasured }, null,
+            "STATE-OVERLAP is withheld: this evaluator does not yet carry strict placed render surfaces; diagnostic boxes provide no finding or repair credit"),
         new("route obstacles", routeMeasured, new Dictionary<string, long> { ["NoNavmesh"] = routeNoNav, ["NoGeometry"] = routeNoGeo, ["Unjudged"] = tally.RouteUnjudged }, new Dictionary<string, long> { ["DoorOrMovable"] = routeSetAside, ["NeverEntersColumn"] = routeNoCross }),
         new("contact pairs", tally.HostsLeaving + tally.HostsArriving + tally.DepsArriving, new Dictionary<string, long> { ["Unmeasured"] = tally.ContactUnmeasured }, new Dictionary<string, long> { ["ReSupported"] = tally.ReSupported, ["TouchingOnArrival"] = tally.TouchingOnArrival, ["FloatingOnArrival"] = tally.FloatingOnArrival }),
     };
@@ -539,13 +544,14 @@ if (emitPath is not null)
     // the baseline it differs from; the state each row belongs to is in the row's own kind (STATE-<kind>@<state>@<trigger>).
     ConflictIo.Write(emitPath, new ConflictFile("stateprobe", Instance, DateTime.UtcNow.ToString("yyyy-MM-dd HH:mm:ssZ"), conflicts, coverage,
                                                 Population: "load-time", State: EnablePopulation.BaselineStateName,
-                                                Configuration: cfg.Identity("load-time", EnablePopulation.BaselineStateName)));
+                                                Configuration: cfg.Identity("load-time", EnablePopulation.BaselineStateName),
+                                                MeasurementPolicy: StateMeasurementPolicy));
     Console.WriteLine($"emitted {conflicts.Count:N0} StateConditional conflicts -> {emitPath}");
 }
 
 Console.WriteLine();
 Console.WriteLine("A StateConditional row exists only once its switch is flipped — a quest stage, a scene or a trigger the records name, or one they do not (Unknown");
-Console.WriteLine("triggers are flipped all the same). Records only; boxes and soups, not the game. Part D flips one marker by console and reads the sets back.");
+Console.WriteLine("triggers are flipped all the same). Records only; contact/route geometry, not the game. STATE-OVERLAP is withheld until strict placed render surfaces are wired. Part D flips one marker by console and reads the sets back.");
 Console.WriteLine($"elapsed {sw.Elapsed.TotalSeconds:0.0}s");
 return 0;
 

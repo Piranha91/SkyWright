@@ -1,4 +1,6 @@
 using System.Diagnostics;
+using System.Security.Cryptography;
+using System.Text;
 using System.Text.Json;
 using HarnessShared;
 using HousecarlCore;
@@ -19,16 +21,15 @@ using HousecarlCore.Progress;
 // the same-source overlap rate is the "authored deliberately" baseline every cross-plugin number is
 // read against, split by interior/exterior.
 //
-// The first cut (2026-08-27) stopped at the absolute count. A deep overlap says two boxes intersect
-// NOW; it does not say who created the intersection or whether the later plugin could have seen the
-// other object. This cut asks both, the way the clobber, needs-witness and placement-dependency
-// detectors earned their findings: for every cross-responsible deep hit, with L the LATER of the two
+// The original cut used enclosing-box depth/fraction gates. Those are historical diagnostics only.
+// This cut asks whether the actual placed strict render surfaces intersect and who created that relation:
+// for every cross-responsible actual-shape hit, with L the LATER of the two
 // responsible plugins, rebuild the arm WITHOUT L's contribution (L's reference at its previous snap
 // in the placement history, or absent) — no overlap there means L INTRODUCED it, overlap already
 // there means L INHERITED it. And was the other reference's winning placement set by L's own masters
 // (SEEN — an author's choice) or outside its closure (BLIND — it could not have been in the editor)?
-// The class is Introduced + Blind. Geometry RANKS within it (depth × fraction, scale class); it does
-// not decide. Rule: DetectorModel.OverlapProvenance, proofprobe-owned; arm construction:
+// The class is Introduced + Blind after an actual-shape intersection. Surface relation is retained as
+// evidence and does not become a severity score. Provenance remains DetectorModel.OverlapProvenance;
 // _shared/OverlapIndex.cs, over PlacementHistory — the same history driftprobe and depprobe run on.
 //
 // "Responsible" = the plugin that last CHANGED a placement (position, cell, or enable/delete flag) —
@@ -36,18 +37,18 @@ using HousecarlCore.Progress;
 // responsibility; one that changes only rotation or scale is not a step either, and is COUNTED.
 //
 // Boundary (the standing rules, applied):
-//   - Geometry is the measured NIF, resolved through the VFS; OBND only as a labelled fallback;
-//     no geometry = not judged, counted (rule 6). Editor markers are not obstructions and are set aside.
+//   - Geometry is complete decoded visible render vertices from the winning VFS NIF. Record OBND and stored NIF
+//     spheres have zero influence; unavailable geometry = not judged, counted (rule 6). Editor markers are set aside.
 //   - Declared dependency is the transitive closure (DetectorModel.MasterClosure); Seen IS that
 //     relation read from the later side, and the run checks the two counts agree.
-//   - The broad phase decides with DetectorModel.BoxOverlap (proofprobe-owned); exact contact is
-//     no overlap, because flush placement is how modular architecture is authored.
-//   - This is a BROAD phase: world AABBs of rotated boxes are conservative, so a "deep" hit is a
-//     candidate for eyes or a narrow phase, never a verdict. Render geometry stands in for collision.
-//     NOT verified in game.
+//   - MeshIntersection symmetrically distinguishes crossing, coplanar area overlap, boundary touch,
+//     separation and validated solid containment. Bounds only reject provably separated soups.
+//   - These relations are geometry evidence, not compatibility severity, intent or a game verdict.
 //
-// usage: overlapprobe [--list N] [--depth U] [--frac F] [--maxdim U] [--emit path] [--base emit.json] [--dump path] [--json path]
+// usage: overlapprobe [--list N] [--surface-tolerance U] [--max-triangle-pairs N] [--pair-seconds S]
+//                     [--emit path] [--base emit.json] [--dump path] [--json path]
 //                     [--bos on|off] [--enable X.esp]* [--disable X.esp]* [--instance DIR] [--game DIR] [--profile NAME]
+//                     [--responsible-pair A.esp B.esp]* [--historical-pairs crosswalk.json] [--geometry-manifest output.json]
 //   POPULATION      (Q27, 2026-09-06) a candidate exists when its runtime enable state resolves ENABLED at load — the
 //                   XESP parent chain through EnableState (the R1 rule) — not when the winning snap's own
 //                   initially-disabled flag happens to be clear. The counterfactual arm the provenance rule rests on
@@ -80,6 +81,11 @@ string profileName = HarnessTarget.Profile;
         else if (args[i] == "--profile" && i + 1 < args.Length) profileName = args[i + 1];
     }
 }
+if (args.Any(a => a is "--depth" or "--frac" or "--maxdim"))
+{
+    Console.Error.WriteLine("--depth, --frac and --maxdim are unsupported: actual-shape discovery has no box depth, fraction or size decision gates");
+    return 3;
+}
 Instance = HarnessTarget.Require(Instance, "MO2 instance directory", "instance", "--instance");
 GamePath = HarnessTarget.Require(GamePath, "game directory", "game", "--game");
 profileName = HarnessTarget.Require(profileName, "MO2 profile name", "profile", "--profile");
@@ -93,13 +99,9 @@ string? stateSpec = null, switchMapPath = null;
 // --state: the runtime enable state per reference under the arm (null = the winning flag, the default population).
 Func<FormKey, bool>? enabledOf = null;
 StateArm? stateArm = null;
-float minDepth = 16f;      // a hit must need at least this much separation on some axis
-float minFrac = 0.25f;     // ...and bury at least this share of the smaller box
-// An "object" whose box spans more than this on ANY axis is a VOLUME — mountain fog, a LOD slab, a
-// skydome, a city-wide clutter shell. Volumes overlap everything by design and are not obstructions;
-// the first calibration run was dominated by them (worst hits at 11,000+u). A wall piece is 128–512u;
-// the biggest genuine architecture runs ~1–2k. Parameter, not constant.
-float maxDim = 1024f;
+double surfaceTolerance = 1e-5;
+long maxTrianglePairs = 2_000_000;
+double pairSeconds = 120;
 string? emitPath = null;
 // --base: the emit this run will be diffed against — every record of it is re-measured under THIS order and carried in
 // the emit as Predicates (the changed arm of a differential; conflictdiff reads both). See ConflictReport.cs.
@@ -109,6 +111,9 @@ string? basePath = null;
 // and what meshes they were — not part of the report. --json: every judged row, for spot-checks.
 string? dumpPath = null;
 string? jsonPath = null;
+string? geometryManifestPath = null;
+string? historicalPairsPath = null;
+var responsiblePairNames = new List<(string A, string B)>();
 bool bosOn = true;
 bool flagsOnly = false;
 var enablePlugins = new List<string>();
@@ -117,13 +122,17 @@ string? orderFile = null;
 for (int i = 0; i < args.Length; i++)
 {
     if (args[i] == "--list" && i + 1 < args.Length) listN = int.Parse(args[++i]);
-    else if (args[i] == "--depth" && i + 1 < args.Length) minDepth = float.Parse(args[++i]);
-    else if (args[i] == "--frac" && i + 1 < args.Length) minFrac = float.Parse(args[++i]);
-    else if (args[i] == "--maxdim" && i + 1 < args.Length) maxDim = float.Parse(args[++i]);
+    else if (args[i] == "--surface-tolerance" && i + 1 < args.Length) surfaceTolerance = double.Parse(args[++i]);
+    else if (args[i] == "--max-triangle-pairs" && i + 1 < args.Length) maxTrianglePairs = long.Parse(args[++i]);
+    else if (args[i] == "--pair-seconds" && i + 1 < args.Length) pairSeconds = double.Parse(args[++i]);
     else if (args[i] == "--emit" && i + 1 < args.Length) emitPath = args[++i];
     else if (args[i] == "--base" && i + 1 < args.Length) basePath = args[++i];
     else if (args[i] == "--dump" && i + 1 < args.Length) dumpPath = args[++i];
     else if (args[i] == "--json" && i + 1 < args.Length) jsonPath = args[++i];
+    else if (args[i] == "--geometry-manifest" && i + 1 < args.Length) geometryManifestPath = args[++i];
+    else if (args[i] == "--historical-pairs" && i + 1 < args.Length) historicalPairsPath = args[++i];
+    else if (args[i] == "--responsible-pair" && i + 2 < args.Length)
+        responsiblePairNames.Add((args[++i], args[++i]));
     else if (args[i] == "--order" && i + 1 < args.Length) orderFile = args[++i];
     else if (args[i] == "--enable" && i + 1 < args.Length) enablePlugins.Add(args[++i]);
     else if (args[i] == "--disable" && i + 1 < args.Length) disablePlugins.Add(args[++i]);
@@ -131,6 +140,11 @@ for (int i = 0; i < args.Length; i++)
     else if (args[i] == "--state" && i + 1 < args.Length) stateSpec = args[++i];
     else if (args[i] == "--switch-map" && i + 1 < args.Length) switchMapPath = args[++i];
     else if (args[i] == "--flags") flagsOnly = true;
+}
+if (!double.IsFinite(surfaceTolerance) || surfaceTolerance < 0 || maxTrianglePairs <= 0 || !double.IsFinite(pairSeconds) || pairSeconds <= 0)
+{
+    Console.Error.WriteLine("surface tolerance must be finite and nonnegative; max triangle pairs and pair seconds must be finite positive values");
+    return 3;
 }
 PopulationMode popMode;
 try { popMode = PopulationCli.Resolve("overlapprobe", flagsOnly, stateSpec); }
@@ -216,71 +230,164 @@ string TypeOf(FormKey baseKey) => idx.BaseInfo.TryGetValue(baseKey, out var bi) 
 string MeshOf(FormKey baseKey) => idx.BaseMesh.TryGetValue(baseKey, out var m) ? m : "";
 static string Short(string s, int n) => s.Length <= n ? s : "..." + s[^(n - 3)..];
 
-// ---------------------------------------------------------------------------------------
-// Pass 2 — measured geometry per base record (mesh through the VFS; OBND labelled fallback).
-// ---------------------------------------------------------------------------------------
-var boxCache = new Dictionary<FormKey, (Aabb Box, char Source)>();   // 'm' mesh, 'o' OBND, '-' none
-int measured = 0, fellBack = 0, noGeometry = 0;
-var meshBoxByPath = new Dictionary<string, Aabb?>(StringComparer.OrdinalIgnoreCase);
-
-(Aabb Box, char Source) BoxOf(FormKey baseKey)
+if (geometryManifestPath is not null && responsiblePairNames.Count == 0)
 {
-    if (boxCache.TryGetValue(baseKey, out var hit)) return hit;
-    (Aabb, char) result = (Aabb.Empty, '-');
-    if (idx.BaseMesh.TryGetValue(baseKey, out var rel))
+    Console.Error.WriteLine("--geometry-manifest requires at least one --responsible-pair <plugin-a> <plugin-b>; an unscoped whole-order geometry catalogue is refused");
+    return 2;
+}
+var pluginByName = Enumerable.Range(0, paths.Count)
+    .Where(p => !pluginKey[p].IsNull)
+    .ToDictionary(p => PluginName(p), p => p, StringComparer.OrdinalIgnoreCase);
+var responsiblePairs = new List<(int A, int B, string AName, string BName)>();
+foreach (var named in responsiblePairNames)
+{
+    if (!pluginByName.TryGetValue(named.A, out int a) || !pluginByName.TryGetValue(named.B, out int b))
     {
-        var full = rel.StartsWith("meshes", StringComparison.OrdinalIgnoreCase) ? rel : Path.Combine("meshes", rel);
-        if (!meshBoxByPath.TryGetValue(full, out var mb))
-        {
-            mb = null;
-            var res = assets.ResolveForPlacement(full);
-            if (res.Sources.Count > 0)
-            {
-                var (bytes, _) = AssetResolver.ReadPlacementSource(res.Sources[0]);
-                if (bytes is not null && NifGeometry.Measure(bytes) is { Model: { Bounds.IsEmpty: false } mdl })
-                    mb = mdl.Bounds;
-            }
-            meshBoxByPath[full] = mb;
-        }
-        if (mb is { } box) { result = (box, 'm'); measured++; }
+        Console.Error.WriteLine($"--responsible-pair names a plugin outside the evaluated order: '{named.A}' / '{named.B}'");
+        return 2;
     }
-    if (result.Item2 == '-')
+    if (a == b) { Console.Error.WriteLine("--responsible-pair requires two distinct plugins"); return 2; }
+    responsiblePairs.Add(a < b ? (a, b, PluginName(a), PluginName(b)) : (b, a, PluginName(b), PluginName(a)));
+}
+responsiblePairs = responsiblePairs.DistinctBy(p => (p.A, p.B)).ToList();
+var scopedResponsiblePlugins = responsiblePairs.SelectMany(p => new[] { p.A, p.B }).ToHashSet();
+bool ScopedPair(int a, int b) => responsiblePairs.Count == 0
+    || responsiblePairs.Any(p => (p.A == a && p.B == b) || (p.A == b && p.B == a));
+HistoricalCrosswalk? historicalCrosswalk = null;
+string? historicalCrosswalkSha256 = null;
+if (historicalPairsPath is not null)
+{
+    byte[] crosswalkBytes;
+    try { crosswalkBytes = File.ReadAllBytes(historicalPairsPath); }
+    catch (Exception ex) { Console.Error.WriteLine($"could not read --historical-pairs: {ex.Message}"); return 2; }
+    try
     {
-        var ob = idx.ObndBox(baseKey);
-        if (!ob.IsEmpty) { result = (ob, 'o'); fellBack++; }
+        historicalCrosswalk = JsonSerializer.Deserialize<HistoricalCrosswalk>(crosswalkBytes,
+            new JsonSerializerOptions { PropertyNameCaseInsensitive = true })
+            ?? throw new InvalidDataException("the file decoded as null");
     }
-    if (result.Item2 == '-') noGeometry++;
-    boxCache[baseKey] = result;
-    return result;
+    catch (Exception ex) { Console.Error.WriteLine($"could not parse --historical-pairs: {ex.Message}"); return 2; }
+    if (!historicalCrosswalk.Complete || historicalCrosswalk.Pairs is null)
+    { Console.Error.WriteLine("--historical-pairs must be a complete crosswalk with pairs[]"); return 2; }
+    historicalCrosswalkSha256 = Convert.ToHexString(SHA256.HashData(crosswalkBytes)).ToLowerInvariant();
 }
 
-// THE PHYSICAL PREDICATE of an OVERLAP row (2026-09-03; handoff 2026-09-12): the two refs' winning world boxes still meet
-// at the run's threshold under the arm being read — the class's own broad-phase test with the provenance half
-// (Introduced + Blind) taken off. A sham that masters both plugins and nudges the later ref 1 u becomes responsible for
-// it, reads Inherited + Seen and leaves the class; the boxes have not moved. Not used: the narrow-phase contact
-// (contactprobe --overlap-json, 4.1's ranker refinement — 56 % of class hits read "no contact" on it, so it would call
-// base rows Gone for reasons unrelated to the change; that reading belongs in the ranker). A ref deleted or initially
-// disabled under the arm is Gone (one side of the intersection is gone); one without geometry is Unmeasured.
+// ---------------------------------------------------------------------------------------
+// Pass 2 — strict decoded render geometry per base record. Record ObjectBounds never enter this path.
+// ---------------------------------------------------------------------------------------
+var geometryByBase = new Dictionary<FormKey, GeometryRead>();
+var geometryByPath = new Dictionary<string, GeometryRead>(StringComparer.OrdinalIgnoreCase);
+var renderCache = new NifRenderGeometryCache();
+var geometryCounts = new Dictionary<string, long>(StringComparer.Ordinal);
+long geometryLookupHits = 0;
+long pathCacheHits = 0;
+
+static string GeometryStatus(NifRenderGeometryStatus s) => s switch
+{
+    NifRenderGeometryStatus.Measured => "measured",
+    NifRenderGeometryStatus.DegenerateGeometry => "degenerate_geometry",
+    NifRenderGeometryStatus.MissingVertices => "missing_vertices",
+    NifRenderGeometryStatus.PartialGeometry => "partial_geometry",
+    NifRenderGeometryStatus.UnsupportedGeometry => "unsupported_geometry",
+    NifRenderGeometryStatus.UnsupportedPose => "unsupported_pose",
+    NifRenderGeometryStatus.InvalidTransform => "invalid_transform",
+    NifRenderGeometryStatus.ParseError => "parse_error",
+    NifRenderGeometryStatus.MissingAsset => "missing_asset",
+    _ => "measurement_error",
+};
+
+GeometryRead GeometryOf(FormKey baseKey)
+{
+    if (geometryByBase.TryGetValue(baseKey, out var byBase)) { geometryLookupHits++; return byBase; }
+    GeometryRead Finish(GeometryRead result)
+    {
+        geometryCounts[result.Status] = geometryCounts.GetValueOrDefault(result.Status) + 1;
+        return geometryByBase[baseKey] = result;
+    }
+    if (!idx.BaseMesh.TryGetValue(baseKey, out var rel) || string.IsNullOrWhiteSpace(rel))
+        return Finish(new("missing_asset", "the winning base record has no model path", null, null, null, null, null));
+
+    var full = rel.StartsWith("meshes", StringComparison.OrdinalIgnoreCase) ? rel : Path.Combine("meshes", rel);
+    full = full.Replace('/', '\\');
+    if (geometryByPath.TryGetValue(full, out var byPath)) { pathCacheHits++; return Finish(byPath); }
+    var resolution = assets.ResolveForPlacement(full);
+    string pathAssetId = "asset-" + Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(full.ToLowerInvariant()))).ToLowerInvariant()[..20];
+    GeometryRead result;
+    if (resolution.Sources.Count == 0)
+    {
+        result = new(resolution.ReadIncomplete ? "asset_resolution_incomplete" : "missing_asset",
+            resolution.ReadIncomplete
+                ? "asset resolution is incomplete because at least one active archive could not be scanned"
+                : "no active provider supplies the winning model path",
+            full, pathAssetId, resolution, null, null);
+    }
+    else if (resolution.ReadIncomplete && resolution.Sources[0].Kind == AssetKind.Bsa)
+    {
+        result = new("asset_resolution_incomplete",
+            "the apparent winner is archived while at least one active archive could not be scanned, so precedence is not established",
+            full, pathAssetId, resolution, resolution.Sources[0], null);
+    }
+    else
+    {
+        var source = resolution.Sources[0];
+        var (bytes, readError) = AssetResolver.ReadPlacementSource(source);
+        if (bytes is null)
+            result = new("asset_read_error", readError ?? "the resolved winner could not be read", full, pathAssetId,
+                         resolution, source, null);
+        else
+        {
+            var measured = renderCache.Measure(bytes, includeTriangles: true);
+            result = new(GeometryStatus(measured.Status), measured.Reason, full, pathAssetId, resolution, source, measured,
+                         bytes.LongLength);
+        }
+    }
+    geometryByPath[full] = result;
+    return Finish(result);
+}
+
+(TriangleSoup? Soup, char Source, string? Reason) SurfaceGeometryOf(FormKey baseKey)
+{
+    var geometry = GeometryOf(baseKey);
+    return geometry.Outcome is { UsableForSurfaceIntersection: true, Soup: { TriangleCount: > 0 } soup }
+        ? (soup, 'm', null)
+        : (null, '-', geometry.Reason ?? "no complete strict render triangles");
+}
+
+// THE PHYSICAL PREDICATE of an OVERLAP row: the two winning strict render surfaces still intersect under this arm.
+// Bounds can reject only provable separation inside MeshIntersection; their depth, volume and dimensions never decide.
+EnableArms? resolvedArms = null;
 (PhysicalState State, string Detail) OverlapPredicate(FormKey laterKey, FormKey otherKey)
 {
-    var sl = idx.History.Winning(laterKey); var so = idx.History.Winning(otherKey);
+    var sl = idx.WinningGeometryPose(laterKey); var so = idx.WinningGeometryPose(otherKey);
     if (sl is null || so is null) return (PhysicalState.Unmeasured, "a ref is not placed in this order");
     if (sl.Value.Deleted || idx.IsDeletedNow(laterKey) || so.Value.Deleted || idx.IsDeletedNow(otherKey)) return (PhysicalState.Gone, "a ref is deleted under this order");
-    if (enabledOf is null ? (sl.Value.Disabled || so.Value.Disabled) : (!enabledOf(laterKey) || !enabledOf(otherKey))) return (PhysicalState.Gone, enabledOf is null ? "a ref is initially disabled under this order" : "a ref is disabled at runtime under this state");
+    if (popMode != PopulationMode.Flags)
+    {
+        var el = resolvedArms!.Winner(laterKey); var eo = resolvedArms.Winner(otherKey);
+        if (!el.Resolved || !eo.Resolved) return (PhysicalState.Unmeasured, "a ref's enable-parent chain is unresolved");
+        if (!el.Enabled || !eo.Enabled) return (PhysicalState.Gone, "a ref is disabled at runtime under this state");
+    }
+    else if (sl.Value.Disabled || so.Value.Disabled) return (PhysicalState.Gone, "a ref is initially disabled under this order");
+    if ((idx.BosSwaps.TryGetValue(laterKey, out var bosLater) && (bosLater.Random || bosLater.PerSession || bosLater.PropertiesRandom || bosLater.Alternatives.Count != 1))
+     || (idx.BosSwaps.TryGetValue(otherKey, out var bosOther) && (bosOther.Random || bosOther.PerSession || bosOther.PropertiesRandom || bosOther.Alternatives.Count != 1)))
+        return (PhysicalState.Unmeasured, "a ref has more than one possible BOS runtime outcome");
     if (sl.Value.Space != so.Value.Space) return (PhysicalState.Gone, "the refs are no longer in the same space");
     if (!idx.RefBase.TryGetValue(laterKey, out var bl) || !idx.RefBase.TryGetValue(otherKey, out var bo)) return (PhysicalState.Unmeasured, "a ref has no base record");
-    var (boxL, srcL) = BoxOf(bl); var (boxO, srcO) = BoxOf(bo);
-    if (srcL == '-' || srcO == '-' || boxL.IsEmpty || boxO.IsEmpty) return (PhysicalState.Unmeasured, "a ref has no geometry");
-    var wl = SpatialOverlap.ToWorld(boxL, sl.Value.Pos, sl.Value.Rot, sl.Value.Scale);
-    var wo = SpatialOverlap.ToWorld(boxO, so.Value.Pos, so.Value.Rot, so.Value.Scale);
-    var ov = OverlapIndex.Overlap(wl, wo);
-    if (ov is { } o && o.MinDepth >= minDepth && o.VolumeFraction >= minFrac)
-        return (PhysicalState.Holds, $"the winning boxes overlap {o.MinDepth:0}u deep, {o.VolumeFraction:0.00} of the smaller [{srcL}{srcO}]");
-    return (PhysicalState.Gone, ov is { } o2 ? $"the winning boxes overlap only {o2.MinDepth:0}u / {o2.VolumeFraction:0.00}, under the threshold" : "the winning boxes no longer intersect");
+    var (modelL, srcL, whyL) = SurfaceGeometryOf(bl); var (modelO, srcO, whyO) = SurfaceGeometryOf(bo);
+    if (modelL is not { TriangleCount: > 0 } || modelO is not { TriangleCount: > 0 })
+        return (PhysicalState.Unmeasured, "a ref's strict decoded render geometry is unavailable");
+    var worldL = SpatialOverlap.TransformSoup(modelL, sl.Value.Pos, sl.Value.Rot, sl.Value.Scale);
+    var worldO = SpatialOverlap.TransformSoup(modelO, so.Value.Pos, so.Value.Rot, so.Value.Scale);
+    var q = SurfaceQueryOutcome.Query(worldL, worldO, surfaceTolerance, maxTrianglePairs, TimeSpan.FromSeconds(pairSeconds));
+    if (q.Intersects == true)
+        return (PhysicalState.Holds, $"actual render surfaces: {q.SurfaceRelation}; containment {q.Containment}; {q.TrianglePairsTested:N0} triangle pairs [{srcL}{srcO}]");
+    if (q.Intersects == false)
+        return (PhysicalState.Gone, $"actual render surfaces are separated; containment {q.Containment}; {q.TrianglePairsTested:N0} triangle pairs [{srcL}{srcO}]");
+    return (PhysicalState.Unmeasured, q.Reason ?? whyL ?? whyO ?? "actual render-surface query is unknown");
 }
 
 // ---------------------------------------------------------------------------------------
-// Pass 3 — candidates, world boxes, spatial hash, pairs.
+// Pass 3 — candidates, placed triangle soups, conservative bounds sweep, actual-shape pairs.
 // ---------------------------------------------------------------------------------------
 // A candidate is a winning, enabled, obstructing-typed ref whose responsible plugin is not the
 // base game — vanilla-vs-mod pairs are excluded by the closure anyway (every mod masters
@@ -290,6 +397,7 @@ var meshBoxByPath = new Dictionary<string, Aabb?>(StringComparer.OrdinalIgnoreCa
 // shared arms so the default run and an explicit `--state baseline` are the same run by construction. --state needs the
 // census as well, because a switch has to be looked up by name and its sets known.
 var arms = new EnableArms(idx);
+resolvedArms = arms;
 EnablePopulation pop;
 if (stateSpec is not null)
 {
@@ -305,7 +413,25 @@ if (stateSpec is not null)
 else pop = popMode == PopulationMode.Flags ? EnablePopulation.Flags() : EnablePopulation.Of(arms.WinnerRawFacts, EnablePopulation.BaselineStateName);
 // Null in flags mode: Candidates then reads the winning snap's own flag, exactly as it always did.
 enabledOf = pop.Predicate;
-var candidates = idx.Candidates(BoxOf, Obstructing, IsBaseGame, maxDim, out var skips, enabledOf);
+bool ExcludeResponsible(int p) => responsiblePairs.Count > 0 ? !scopedResponsiblePlugins.Contains(p) : IsBaseGame(p);
+long candidateGeometryLookups = 0;
+__run.Stage("render-geometry", "preparing strict render geometry and candidates", total: null, unit: "geometry lookups");
+(TriangleSoup? Soup, char Source, string? Reason) CandidateGeometryOf(FormKey baseKey)
+{
+    var result = SurfaceGeometryOf(baseKey);
+    candidateGeometryLookups++;
+    __run.Advance();
+    return result;
+}
+var candidates = idx.SurfaceCandidates(CandidateGeometryOf, Obstructing, ExcludeResponsible, out var skips, enabledOf);
+candidates = candidates.Where(c =>
+{
+    if (popMode != PopulationMode.Flags && !arms.Winner(c.Key).Resolved) { skips.EnableStateUnresolved++; return false; }
+    if (idx.BosSwaps.TryGetValue(c.Key, out var bos) && (bos.Random || bos.PerSession || bos.PropertiesRandom || bos.Alternatives.Count != 1))
+    { skips.BosUnresolved++; return false; }
+    return true;
+}).ToList();
+__run.ReviseTotal(candidateGeometryLookups, "candidate source and state gates established the exact geometry lookup count");
 Console.WriteLine("\n" + pop.Describe());
 
 if (dumpPath is not null)
@@ -316,18 +442,31 @@ if (dumpPath is not null)
     foreach (var c in candidates)
         dw.WriteLine($"{c.Key}\t{PluginName(c.Win.Plugin)}\t{TypeOf(c.Base)}\t{MeshOf(c.Base)}\t{c.Src}"
                    + $"\t{c.Win.Rot.X:R}\t{c.Win.Rot.Y:R}\t{c.Win.Rot.Z:R}\t{c.Win.Scale:R}"
-                   + $"\t{c.World.Min.X:R}\t{c.World.Min.Y:R}\t{c.World.Min.Z:R}\t{c.World.Max.X:R}\t{c.World.Max.Y:R}\t{c.World.Max.Z:R}");
+                   + $"\t{c.WorldBounds.Min.X:R}\t{c.WorldBounds.Min.Y:R}\t{c.WorldBounds.Min.Z:R}\t{c.WorldBounds.Max.X:R}\t{c.WorldBounds.Max.Y:R}\t{c.WorldBounds.Max.Z:R}");
+    __run.Artifact(dumpPath);
     Console.WriteLine($"\ndumped {candidates.Count:N0} candidates -> {dumpPath}");
 }
 
-Console.WriteLine($"\ncandidates: {candidates.Count:N0} refs whose responsible plugin is not the base game");
-Console.WriteLine($"   geometry: {measured:N0} base records measured from the mesh, {fellBack:N0} from OBND (labelled fallback), {noGeometry:N0} with neither");
+Console.WriteLine($"\ncandidates: {candidates.Count:N0} refs" + (responsiblePairs.Count > 0 ? " in the responsible-pair scope" : " whose responsible plugin is not the base game"));
+Console.WriteLine("   geometry (strict decoded render vertices; record ObjectBounds unused): "
+                + string.Join(", ", geometryCounts.OrderBy(k => k.Key).Select(k => $"{k.Key} {k.Value:N0}")));
 Console.WriteLine($"   skipped (counted, per rule 6): {skips.Deleted:N0} deleted, {skips.Disabled:N0} not present at load, "
                 + $"{skips.NonObstructingType:N0} non-obstructing type, {skips.NoGeometry:N0} no geometry, {skips.ExcludedResponsible:N0} base-game-responsible,");
-Console.WriteLine($"                                  {skips.Volume:N0} volume-scale (a box axis > {maxDim:0}u — fog, LOD, skydomes; not obstructions), "
-                + $"{skips.MarkerMesh:N0} editor markers (no rendered mesh, cannot obstruct)");
+Console.WriteLine($"                                  {skips.InvalidTransform:N0} invalid transforms, {skips.DegenerateGeometry:N0} zero-scale transforms, {skips.MarkerMesh:N0} editor markers (no rendered mesh, cannot obstruct), "
+                + $"{skips.EnableStateUnresolved:N0} unresolved enable state, {skips.BosUnresolved:N0} unresolved BOS outcome");
 
-var sweep = OverlapIndex.Pairs(candidates, closure, minDepth, minFrac);
+long lastPairProgress = 0;
+__run.Stage("actual-shape-queries", "querying candidate render surfaces", total: null, unit: "pairs");
+var sweep = OverlapIndex.SurfacePairs(candidates, closure, surfaceTolerance, maxTrianglePairs,
+    TimeSpan.FromSeconds(pairSeconds), responsiblePairs.Count > 0 ? ScopedPair : null,
+    checkedPairs =>
+    {
+        __run.Progress(checkedPairs);
+        if (checkedPairs - lastPairProgress < 250) return;
+        lastPairProgress = checkedPairs;
+        Console.WriteLine($"   ... {checkedPairs:N0} actual-shape pairs tested ({sw.Elapsed.TotalSeconds:0}s)");
+    });
+__run.ReviseTotal(sweep.PairsChecked, "the bounds sweep established the exact number of mesh queries");
 
 // A published, ACTIVE patch mastering both sides is the community saying "these two are known to
 // meet" — the pair is a LABELLED conflict, and its residual overlaps are what the patch did not
@@ -343,114 +482,69 @@ bool Reconciled(int a, int b)
     return patchMemo[k] = found;
 }
 
-Console.WriteLine($"\npairs checked: {sweep.PairsChecked:N0}   (threshold: depth >= {minDepth:0}u AND fraction >= {minFrac:0.00})");
-Console.WriteLine($"\n==== THE FLOOR — same author, deliberate: how often one plugin's own objects interpenetrate ====");
-Console.WriteLine($"   same-responsible pairs   : {sweep.SameChecked,10:N0} checked, {sweep.SameDeep,7:N0} deep  ({Rate(sweep.SameDeep, sweep.SameChecked),6:0.00}%)");
+Console.WriteLine($"\npairs checked by actual strict render surfaces: {sweep.PairsChecked:N0}; tolerance {surfaceTolerance:R}, work cap {maxTrianglePairs:N0} triangle pairs, time cap {pairSeconds:R}s/pair");
+Console.WriteLine($"\n==== THE FLOOR — same author, deliberate actual-surface intersections ====");
+Console.WriteLine($"   same-responsible pairs   : {sweep.SameChecked,10:N0} checked, {sweep.SameIntersects,7:N0} intersect, {sweep.SameUnknown,7:N0} unknown");
 foreach (var (dom, v) in sweep.SameByDomain.OrderBy(k => k.Key))
-    Console.WriteLine($"      {dom,-8}              : {v.Checked,10:N0} checked, {v.Deep,7:N0} deep  ({Rate(v.Deep, v.Checked),6:0.00}%)");
-Console.WriteLine($"   declared-dependency pairs: {sweep.CrossDeclaredChecked,10:N0} checked, {sweep.CrossDeclaredDeep,7:N0} deep  ({Rate(sweep.CrossDeclaredDeep, sweep.CrossDeclaredChecked),6:0.00}%)   <- coordination; reads SEEN below");
+    Console.WriteLine($"      {dom,-8}              : {v.Checked,10:N0} checked, {v.Intersects,7:N0} intersect, {v.Unknown,7:N0} unknown");
+Console.WriteLine($"   declared-dependency pairs: {sweep.CrossDeclaredChecked,10:N0} checked, {sweep.CrossDeclaredIntersects,7:N0} intersect");
 
-var undeclared = sweep.CrossDeep.Where(h => !h.Declared).ToList();
-Console.WriteLine($"\n==== CROSS-PLUGIN, NO DECLARED DEPENDENCY — the milestone 5 question, absolute ====");
-Console.WriteLine($"   pairs checked: {sweep.CrossUndeclaredChecked:N0}, deep overlaps: {undeclared.Count:N0}  ({Rate(undeclared.Count, sweep.CrossUndeclaredChecked),6:0.00}%)");
-OverlapPopulation PopOf(OverlapHit h) => DetectorModel.ClassifyOverlapPopulation(
+var undeclared = sweep.CrossHits.Where(h => !h.Declared).ToList();
+Console.WriteLine($"\n==== CROSS-PLUGIN, NO DECLARED DEPENDENCY — ACTUAL SURFACES ====");
+Console.WriteLine($"   pairs checked: {sweep.CrossUndeclaredChecked:N0}, intersections: {undeclared.Count:N0}, unknown: {sweep.CrossResults.Count(h => !h.Declared && h.Query.Unknown):N0}");
+OverlapPopulation PopOf(SurfaceOverlapHit h) => DetectorModel.ClassifyOverlapPopulation(
     IsVanilla(h.A.Win.Plugin), IsVanilla(h.B.Win.Plugin), IsUssep(h.A.Win.Plugin), IsUssep(h.B.Win.Plugin));
-Console.WriteLine($"   {undeclared.Count(h => PopOf(h) == OverlapPopulation.BethesdaFloor),6:N0}  A. Bethesda-on-Bethesda (floor)");
-Console.WriteLine($"   {undeclared.Count(h => PopOf(h) != OverlapPopulation.BethesdaFloor),6:N0}  C. cross-plugin  (of which USSEP-involved {undeclared.Count(h => PopOf(h) == OverlapPopulation.UssepInvolved):N0})");
+Console.WriteLine("   relations: " + string.Join(", ", undeclared.GroupBy(h => h.Query.SurfaceRelation).OrderBy(g => g.Key).Select(g => $"{g.Key} {g.Count():N0}")));
 
-// ---------------------------------------------------------------------------------------
-// Pass 4 — the differential: every cross-responsible deep hit judged for provenance.
-// ---------------------------------------------------------------------------------------
-// The counterfactual arm resolves its own enable chain (Q27) — in flags mode it stays on the previous snap's own flag,
-// which is what every run before then did.
-var rows = sweep.CrossDeep.Select(h => idx.Judge(h, closure, BoxOf, minDepth, minFrac, popMode == PopulationMode.Flags ? null : arms)).ToList();
-int seenRows = rows.Count(r => r.Sight == OverlapSight.Seen);
-Console.WriteLine($"\n==== PROVENANCE — with vs without the later plugin, and who saw what ({rows.Count:N0} cross-responsible deep hits) ====");
-Console.WriteLine(seenRows == sweep.CrossDeclaredDeep
-    ? $"   plumbing: SEEN rows = {seenRows:N0} = declared-dependency deep hits  OK — Seen is the closure relation read from the later side"
-    : $"   plumbing: SEEN rows = {seenRows:N0} but declared-dependency deep hits = {sweep.CrossDeclaredDeep:N0}  *** MISMATCH — the two tests should agree ***");
-
-string Verdict(OverlapRow r) => $"{r.Origin} + {r.Sight}";
-var pops = new[] { OverlapPopulation.BethesdaFloor, OverlapPopulation.UssepInvolved, OverlapPopulation.ModOnMod };
-Console.WriteLine($"\n   {"verdict",-22} {"Bethesda floor",16} {"USSEP involved",16} {"mod-on-mod",16} {"all",10}   (hits / distinct refs)");
-foreach (var (o, s) in new[] { (OverlapOrigin.Introduced, OverlapSight.Blind), (OverlapOrigin.Introduced, OverlapSight.Seen),
-                                (OverlapOrigin.Inherited, OverlapSight.Blind), (OverlapOrigin.Inherited, OverlapSight.Seen) })
+__run.Stage("provenance", "rebuilding actual-surface intersection provenance", sweep.CrossHits.Count, "intersections");
+var rows = new List<SurfaceOverlapRow>(sweep.CrossHits.Count);
+foreach (var h in sweep.CrossHits)
 {
-    var vr = rows.Where(r => r.Origin == o && r.Sight == s).ToList();
-    string Cell(IEnumerable<OverlapRow> g) { var l = g.ToList(); return $"{l.Count:N0} / {l.SelectMany(r => new[] { r.Hit.A.Key, r.Hit.B.Key }).Distinct().Count():N0}"; }
-    Console.WriteLine($"   {o + " + " + s,-22} {Cell(vr.Where(r => PopOf(r.Hit) == pops[0])),16} {Cell(vr.Where(r => PopOf(r.Hit) == pops[1])),16} {Cell(vr.Where(r => PopOf(r.Hit) == pops[2])),16} {Cell(vr),10}");
+    rows.Add(idx.JudgeSurface(h, closure, SurfaceGeometryOf, surfaceTolerance,
+        maxTrianglePairs, TimeSpan.FromSeconds(pairSeconds), popMode == PopulationMode.Flags ? null : arms));
+    __run.Advance();
 }
-var introduced = rows.Where(r => r.Origin == OverlapOrigin.Introduced).ToList();
-Console.WriteLine($"\n   Introduced {introduced.Count:N0} of {rows.Count:N0} ({Rate(introduced.Count, rows.Count):0.0}%); Blind share of Introduced {Rate(introduced.Count(r => r.Sight == OverlapSight.Blind), introduced.Count):0.0}%");
-Console.WriteLine($"   how the later plugin introduced it: {introduced.Count(r => !r.Facts.LaterHadPreviousPlacement):N0} new refs, "
-                + $"{introduced.Count(r => r.Facts.LaterHadPreviousPlacement && r.Facts.PreviousPlacementPresent):N0} moved in, "
-                + $"{introduced.Count(r => r.Facts.LaterHadPreviousPlacement && !r.Facts.PreviousPlacementPresent):N0} enabled or relocated in");
+var provenanceUnknown = rows.Where(r => r.CounterfactualStatus == "unknown").ToList();
+var provenanceRows = rows.Where(r => r.CounterfactualStatus != "unknown").ToList();
+int seenRows = rows.Count(r => r.Sight == OverlapSight.Seen);
+Console.WriteLine($"\n==== PROVENANCE — actual surface with vs without the later plugin ({rows.Count:N0} intersections) ====");
+Console.WriteLine($"   Seen rows {seenRows:N0}; declared intersections {sweep.CrossDeclaredIntersects:N0}; counterfactual unknown {provenanceUnknown.Count:N0}");
 
-// THE CLASS: Introduced + Blind. Seen is the declared relation, so this is all class-C by construction.
-var cls = rows.Where(r => r.Origin == OverlapOrigin.Introduced && r.Sight == OverlapSight.Blind && PopOf(r.Hit) != OverlapPopulation.BethesdaFloor).ToList();
-var floorRows = rows.Where(r => PopOf(r.Hit) == OverlapPopulation.BethesdaFloor).ToList();
+string Verdict(SurfaceOverlapRow r) => $"{r.Origin} + {r.Sight}";
+var introduced = provenanceRows.Where(r => r.Origin == OverlapOrigin.Introduced).ToList();
+Console.WriteLine($"   Introduced {introduced.Count:N0} of {provenanceRows.Count:N0} assessed; Blind {introduced.Count(r => r.Sight == OverlapSight.Blind):N0}");
+var cls = provenanceRows.Where(r => r.Origin == OverlapOrigin.Introduced && r.Sight == OverlapSight.Blind
+    && PopOf(r.Hit) != OverlapPopulation.BethesdaFloor).ToList();
+var floorRows = provenanceRows.Where(r => PopOf(r.Hit) == OverlapPopulation.BethesdaFloor).ToList();
 
-(string, string) PairKey(OverlapRow r)
+(string, string) PairKey(SurfaceOverlapRow r)
 {
     var (x, y) = (PluginName(r.Later), PluginName(r.Earlier));
     return string.CompareOrdinal(x, y) <= 0 ? (x, y) : (y, x);
 }
-int DistinctRefs(IEnumerable<OverlapRow> g) => g.SelectMany(r => new[] { r.Hit.A.Key, r.Hit.B.Key }).Distinct().Count();
-string Describe(OverlapRow r) =>
-    $"{TypeOf(r.LaterRef.Base)} from {PluginName(r.Later)} buried {r.Hit.Frac:0.00} deep ({r.Hit.Depth:0}u) in {TypeOf(r.OtherRef.Base)} from {PluginName(r.Earlier)}"
-  + $" in {CellOf(r.LaterRef.Win.Cell)}  [{r.LaterRef.Src}{r.OtherRef.Src}]  {r.LaterRef.Key} / {r.OtherRef.Key}";
+int DistinctRefs(IEnumerable<SurfaceOverlapRow> g) => g.SelectMany(r => new[] { r.Hit.A.Key, r.Hit.B.Key }).Distinct().Count();
+string Describe(SurfaceOverlapRow r) =>
+    $"{TypeOf(r.LaterRef.Base)} from {PluginName(r.Later)} / {TypeOf(r.OtherRef.Base)} from {PluginName(r.Earlier)}: "
+  + $"{r.Hit.Query.SurfaceRelation}, containment {r.Hit.Query.Containment}, {r.Hit.Query.TrianglePairsTested:N0} triangle pairs"
+  + $" in {CellOf(r.LaterRef.Win.Cell)} [{r.LaterRef.Src}{r.OtherRef.Src}] {r.LaterRef.Key} / {r.OtherRef.Key}";
 
-Console.WriteLine($"\n==== THE CLASS — INTRODUCED + BLIND, mod-on-mod and USSEP-involved: {cls.Count:N0} hits over {DistinctRefs(cls):N0} distinct refs ====");
-Console.WriteLine($"   by scale of the buried box: " + string.Join(", ",
-    new[] { OverlapScale.Architecture, OverlapScale.Furniture, OverlapScale.Clutter }.Select(sc => $"{sc} {cls.Count(r => r.Scale == sc):N0}")));
-Console.WriteLine($"\n   ---- by responsible-plugin pair (Introduced + Blind) ----");
-var byPair = cls.GroupBy(PairKey).OrderByDescending(g => g.Count()).ToList();
+Console.WriteLine($"\n==== THE CLASS — INTRODUCED + BLIND ACTUAL-SURFACE INTERSECTIONS: {cls.Count:N0} hits over {DistinctRefs(cls):N0} refs ====");
+var byPair = cls.GroupBy(PairKey).OrderByDescending(g => g.Count()).ThenBy(g => g.Key.Item1, StringComparer.Ordinal).ToList();
 foreach (var g in byPair.Take(listN))
 {
-    var worst = g.OrderByDescending(r => r.Rank).First();
-    bool rec = Reconciled(worst.Later, worst.Earlier);
-    Console.WriteLine($"   {g.Count(),5:N0} hits over {DistinctRefs(g),5:N0} distinct refs  "
-                    + $"{(rec ? "[patched, residual]" : "[NO RECONCILER]    "),-19} {g.Key.Item1}  x  {g.Key.Item2}");
-    Console.WriteLine($"          worst: {Describe(worst)}");
+    var first = g.OrderBy(r => r.Hit.A.Key.ToString(), StringComparer.Ordinal).ThenBy(r => r.Hit.B.Key.ToString(), StringComparer.Ordinal).First();
+    Console.WriteLine($"   {g.Count(),5:N0} hits over {DistinctRefs(g),5:N0} refs {(Reconciled(first.Later, first.Earlier) ? "[patched, residual]" : "[NO RECONCILER]")} {g.Key.Item1} x {g.Key.Item2}");
+    Console.WriteLine($"          first: {Describe(first)}");
 }
-Console.WriteLine($"\n   ---- the shortlist: Introduced + Blind pairs with NO plugin in this order reconciling them ----");
-foreach (var g in byPair.Where(g => { var r0 = g.First(); return !Reconciled(r0.Later, r0.Earlier); }).Take(listN))
-    Console.WriteLine($"   {g.Count(),5:N0} hits over {DistinctRefs(g),5:N0} distinct refs   {g.Key.Item1}  x  {g.Key.Item2}");
-Console.WriteLine($"   (a pair WITH a reconciler is a labelled conflict whose residue the patch did not cover —");
-Console.WriteLine($"    second-priority, and the count says how much residue)");
+Console.WriteLine($"\n   ---- first {listN} by canonical reference identity; relation is evidence, not severity ----");
+foreach (var r in cls.OrderBy(r => r.Hit.A.Key.ToString(), StringComparer.Ordinal).ThenBy(r => r.Hit.B.Key.ToString(), StringComparer.Ordinal).Take(listN))
+    Console.WriteLine("   " + Describe(r));
 
-Console.WriteLine($"\n   ---- the ranker: top {listN} Introduced + Blind by depth × fraction (geometry ranks, it does not decide) ----");
-Console.WriteLine($"   {"rank",7} {"scale",-12} {"depth",6} {"frac",5}  {"later ref (buried or burying) / other ref"}");
-foreach (var r in cls.OrderByDescending(r => r.Rank).ThenByDescending(r => r.SmallerMaxDim).Take(listN))
-    Console.WriteLine($"   {r.Rank,7:0} {r.Scale,-12} {r.Hit.Depth,6:0} {r.Hit.Frac,5:0.00}  {TypeOf(r.LaterRef.Base)} {Short(MeshOf(r.LaterRef.Base), 40)} ({PluginName(r.Later)})"
-                    + $"  x  {TypeOf(r.OtherRef.Base)} {Short(MeshOf(r.OtherRef.Base), 40)} ({PluginName(r.Earlier)})  in {CellOf(r.LaterRef.Win.Cell)}  {r.LaterRef.Key} / {r.OtherRef.Key}");
-Console.WriteLine($"\n   ---- the ranker, architecture-scale only (a wall through a house is a different finding from two bottles) ----");
-foreach (var r in cls.Where(r => r.Scale == OverlapScale.Architecture).OrderByDescending(r => r.Rank).Take(listN))
-    Console.WriteLine($"   {r.Rank,7:0} {r.Hit.Depth,6:0} {r.Hit.Frac,5:0.00}  {Describe(r)}");
-
-var knowing = rows.Where(r => r.Origin == OverlapOrigin.Introduced && r.Sight == OverlapSight.Seen).ToList();
-Console.WriteLine($"\n==== KNOWINGLY OVERLAPPING — Introduced + Seen: the author placed into context its own masters set ({knowing.Count:N0} hits) ====");
-foreach (var g in knowing.GroupBy(PairKey).OrderByDescending(g => g.Count()).Take(Math.Min(listN, 12)))
-    Console.WriteLine($"   {g.Count(),5:N0} hits over {DistinctRefs(g),5:N0} distinct refs   {g.Key.Item1}  x  {g.Key.Item2}");
-
-var inherited = rows.Where(r => r.Origin == OverlapOrigin.Inherited).ToList();
-Console.WriteLine($"\n==== INHERITED — the intersection pre-dates the later plugin; attributed to nobody here ({inherited.Count:N0} hits; Blind {inherited.Count(r => r.Sight == OverlapSight.Blind):N0}, Seen {inherited.Count(r => r.Sight == OverlapSight.Seen):N0}) ====");
-foreach (var g in inherited.GroupBy(PairKey).OrderByDescending(g => g.Count()).Take(Math.Min(listN, 12)))
-    Console.WriteLine($"   {g.Count(),5:N0} hits over {DistinctRefs(g),5:N0} distinct refs   {g.Key.Item1}  x  {g.Key.Item2}");
-
-Console.WriteLine($"\n==== THE BETHESDA FLOOR — every Bethesda-on-Bethesda cross-responsible deep hit, with its provenance (control candidates) ====");
-foreach (var r in floorRows.OrderByDescending(r => r.Rank))
-    Console.WriteLine($"   {Verdict(r),-22} {r.Scale,-12} {Describe(r)}");
-
-// Sensitivity, always-on: the class count at half and double both knobs.
-Console.WriteLine($"\n==== SENSITIVITY (Introduced + Blind count at other thresholds) ====");
-foreach (var (d, f) in new[] { (minDepth / 2, minFrac / 2), (minDepth, minFrac), (minDepth * 2, MathF.Min(1f, minFrac * 2)) })
-{
-    int n = cls.Count(r => r.Hit.Depth >= d && r.Hit.Frac >= f);
-    Console.WriteLine(d < minDepth
-        ? $"   depth>={d,3:0}u frac>={f:0.00}  ->  (not computable from this run's hit set — re-run with --depth {d:0} --frac {f:0.00})"
-        : $"   depth>={d,3:0}u frac>={f:0.00}  ->  {n:N0}");
-}
+var knowing = provenanceRows.Where(r => r.Origin == OverlapOrigin.Introduced && r.Sight == OverlapSight.Seen).ToList();
+var inherited = provenanceRows.Where(r => r.Origin == OverlapOrigin.Inherited).ToList();
+Console.WriteLine($"\nknowingly intersecting (Introduced + Seen): {knowing.Count:N0}; inherited: {inherited.Count:N0}; Bethesda floor: {floorRows.Count:N0}");
+foreach (var r in floorRows.OrderBy(r => r.Hit.A.Key.ToString(), StringComparer.Ordinal).Take(listN))
+    Console.WriteLine($"   {Verdict(r),-22} {Describe(r)}");
 
 // --emit: the CLASS only — Introduced + Blind, Bethesda floor withheld (the way navownprobe withholds
 // its floor). The LATER plugin's ref is the necessary fix target (it placed into existing context);
@@ -459,6 +553,8 @@ foreach (var (d, f) in new[] { (minDepth / 2, minFrac / 2), (minDepth, minFrac),
 // re-measured under this arm too (2026-09-03).
 if (emitPath is not null)
 {
+    long reconciliationPredicates = 0;
+    __run.Stage("reconciliation", "remeasuring emitted and prior overlap predicates", total: null, unit: "predicates");
     var conflicts = new List<Conflict>();
     foreach (var r in cls)
     {
@@ -467,6 +563,8 @@ if (emitPath is not null)
             "OVERLAP", PluginName(r.Earlier), PluginName(r.Later), Describe(r),
             new List<ConflictRecord> { new(r.LaterRef.Key.ToString(), "placed-ref", CellOf(r.LaterRef.Win.Cell), st, why) },
             new List<ConflictRecord> { new(r.OtherRef.Key.ToString(), "placed-ref", null) }));
+        reconciliationPredicates++;
+        __run.Advance();
     }
     List<Predicate>? predicates = null;
     if (basePath is not null)
@@ -478,6 +576,8 @@ if (emitPath is not null)
             string? other = c.Alternative is { Count: > 0 } alt ? alt[0].FormKey : null;
             foreach (var rec in c.Necessary)
             {
+                reconciliationPredicates++;
+                __run.Advance();
                 if (c.Kind != "OVERLAP" || other is null) { predicates.Add(new Predicate(c.Kind, c.A, c.B, rec.FormKey, other, PhysicalState.Unmeasured, "not an overlap row with two refs")); continue; }
                 var (st, why) = OverlapPredicate(FormKey.Factory(rec.FormKey), FormKey.Factory(other));
                 predicates.Add(new Predicate(c.Kind, c.A, c.B, rec.FormKey, other, st, why));
@@ -486,32 +586,45 @@ if (emitPath is not null)
         Console.WriteLine($"\n   --base {Path.GetFileName(basePath)}: {predicates.Count:N0} base-row predicate(s) re-measured under this order — "
                         + string.Join(", ", predicates.GroupBy(p => p.Physical).OrderBy(g => g.Key).Select(g => $"{g.Key} {g.Count():N0}")));
     }
-    int notRebuilt = rows.Count(r => r.Facts.PreviousPlacementPresent && float.IsNaN(r.WithoutDepth));
+    int notRebuilt = rows.Count(r => r.CounterfactualStatus == "unknown");
+    long measuredBases = geometryCounts.GetValueOrDefault("measured") + geometryCounts.GetValueOrDefault("degenerate_geometry");
+    var geometryUnknown = geometryCounts.Where(k => k.Key is not ("measured" or "degenerate_geometry") && k.Value > 0)
+        .ToDictionary(k => k.Key, k => k.Value, StringComparer.Ordinal);
     var coverage = new List<CoverageLine>
     {
         new("plugins", paths.Count - unreadablePlugins.Count, new Dictionary<string, long> { ["UnreadablePlugin"] = unreadablePlugins.Count }),
-        new("base records (geometry)", measured + fellBack, new Dictionary<string, long> { ["NoGeometry"] = noGeometry }, null, $"OBND fallback (labelled) {fellBack:N0} of the judged"),
+        new("base records (strict render geometry)", measuredBases, geometryUnknown, null,
+            $"policy {NifOverlapGeometry.SurfaceMeasurementIdentity(surfaceTolerance)}; record ObjectBounds unused"),
         // The unresolved enable chains join NoGeometry as unjudgeable: a candidate whose chain could not be read to the
         // end is in the population on EnableState's stated fallback, not on a measurement, and conflictdiff's coverage
         // test must be able to see that share rise (Q27).
         new("candidate refs", candidates.Count,
-            new Dictionary<string, long>(pop.Unjudgeable) { ["NoGeometry"] = skips.NoGeometry },
+            new Dictionary<string, long>(pop.Unjudgeable) { ["NoGeometry"] = skips.NoGeometry,
+                ["InvalidTransform"] = skips.InvalidTransform, ["DegenerateTransform"] = skips.DegenerateGeometry },
             new Dictionary<string, long> { ["Deleted"] = skips.Deleted, ["NotPresentAtLoad"] = skips.Disabled, ["NonObstructingType"] = skips.NonObstructingType,
-                                           ["BaseGameResponsible"] = skips.ExcludedResponsible, ["VolumeScale"] = skips.Volume, ["EditorMarker"] = skips.MarkerMesh },
+                                           ["BaseGameResponsible"] = skips.ExcludedResponsible, ["EditorMarker"] = skips.MarkerMesh },
             $"population {pop.Identity} / state {pop.StateName}"),
-        new("cross-responsible deep hits", rows.Count, new Dictionary<string, long>(), null,
-            $"class {cls.Count:N0}; {notRebuilt:N0} rows whose previous-snap box could not be rebuilt read Introduced by default (a stated limit)"),
+        new("cross-responsible actual-shape queries", sweep.CrossResults.Count - sweep.CrossUnknown,
+            sweep.CrossUnknown == 0 ? new Dictionary<string, long>() : new Dictionary<string, long> { ["MeshQueryUnknown"] = sweep.CrossUnknown }, null,
+            $"intersections {rows.Count:N0}; separated results remain measured and are not conflicts"),
+        new("actual-surface intersection counterfactuals", rows.Count - notRebuilt,
+            notRebuilt == 0 ? new Dictionary<string, long>() : new Dictionary<string, long> { ["CounterfactualGeometryUnmeasurable"] = notRebuilt }, null,
+            $"class {cls.Count:N0}; unknown counterfactual rows have null provenance and are withheld from the class"),
     };
     var identity = cfg.Identity(pop.Identity, pop.StateName);
+    __run.ReviseTotal(reconciliationPredicates, "the current class and optional base emit established the exact predicate count");
+    __run.Stage("emit-artifact", "writing overlap conflict artifact", 1, "artifacts");
     ConflictIo.Write(emitPath, new ConflictFile("overlapprobe", Instance,
         DateTime.UtcNow.ToString("yyyy-MM-dd HH:mm:ssZ"), conflicts, coverage, predicates, basePath,
-        pop.Identity, pop.StateName, identity));
+        pop.Identity, pop.StateName, identity, MeasurementPolicy: NifOverlapGeometry.SurfaceMeasurementIdentity(surfaceTolerance)));
+    __run.Advance().Artifact(emitPath);
     Console.WriteLine($"configuration: {identity.Short}");
     Console.WriteLine($"\nemitted {conflicts.Count:N0} Introduced + Blind conflicts -> {emitPath}");
 }
 
 if (jsonPath is not null)
 {
+    __run.Stage("json-artifact", "writing judged overlap rows", 1, "artifacts");
     var dir = Path.GetDirectoryName(Path.GetFullPath(jsonPath));
     if (!string.IsNullOrEmpty(dir)) Directory.CreateDirectory(dir);
     var dump = rows.Select(r => new
@@ -519,20 +632,378 @@ if (jsonPath is not null)
         Later = r.LaterRef.Key.ToString(), LaterPlugin = PluginName(r.Later), LaterType = TypeOf(r.LaterRef.Base), LaterMesh = MeshOf(r.LaterRef.Base), LaterSrc = r.LaterRef.Src.ToString(),
         Other = r.OtherRef.Key.ToString(), OtherPlugin = PluginName(r.Earlier), OtherType = TypeOf(r.OtherRef.Base), OtherMesh = MeshOf(r.OtherRef.Base), OtherSrc = r.OtherRef.Src.ToString(),
         Cell = CellOf(r.LaterRef.Win.Cell), Origin = r.Origin.ToString(), Sight = r.Sight.ToString(), Population = PopOf(r.Hit).ToString(),
-        Declared = r.Hit.Declared, Depth = r.Hit.Depth, Frac = r.Hit.Frac, Rank = r.Rank, Scale = r.Scale.ToString(), SmallerMaxDim = r.SmallerMaxDim,
-        WithoutDepth = r.WithoutDepth, WithoutFrac = r.WithoutFrac,
+        Declared = r.Hit.Declared, r.Hit.Query.Status, r.Hit.Query.Reason, r.Hit.Query.SurfaceRelation,
+        r.Hit.Query.Containment, r.Hit.Query.Intersects, r.Hit.Query.TrianglePairsTested,
+        Counterfactual = r.Counterfactual,
+        r.CounterfactualStatus, r.CounterfactualReason,
         LaterPrevious = r.LaterPrevious is { } lp ? new { Plugin = PluginName(lp.Plugin), lp.Pos.X, lp.Pos.Y, lp.Pos.Z, Cell = lp.Cell.ToString(), lp.Disabled, lp.Deleted } : null,
         OtherAsSeenByLater = r.OtherAsSeenByLater is { } os ? new { Plugin = PluginName(os.Plugin), os.Pos.X, os.Pos.Y, os.Pos.Z } : null,
         Reconciled = Reconciled(r.Later, r.Earlier), r.Why,
     });
     File.WriteAllText(jsonPath, JsonSerializer.Serialize(dump, new JsonSerializerOptions { WriteIndented = false, NumberHandling = System.Text.Json.Serialization.JsonNumberHandling.AllowNamedFloatingPointLiterals }));
+    __run.Advance().Artifact(jsonPath);
     Console.WriteLine($"wrote {rows.Count:N0} judged rows -> {jsonPath}");
 }
 
-Console.WriteLine($"\nNOT verified in game; a broad-phase AABB hit is a candidate for eyes or a narrow phase, never a verdict.");
-Console.WriteLine($"Limits: render geometry stands in for collision; rotation- and scale-only re-placements are not steps in the history ({idx.SilentRePlacements:N0} counted above);");
-Console.WriteLine($"        the arm without the later plugin steps back ONE placement — an intersection created two movers back reads Inherited and is attributed to nobody.");
+if (geometryManifestPath is not null)
+{
+    __run.Stage("manifest-records", "assembling actual-shape manifest records", idx.History.Refs.Count(), "references");
+    static ManifestBounds? BoundsArray(Aabb? b) => b is not { IsEmpty: false } box ? null
+        : new(new[] { (double)box.Min.X, (double)box.Min.Y, (double)box.Min.Z },
+              new[] { (double)box.Max.X, (double)box.Max.Y, (double)box.Max.Z });
+    static double[] Dimensions(Aabb b) => new[] { (double)b.Max.X - b.Min.X,
+                                                   (double)b.Max.Y - b.Min.Y,
+                                                   (double)b.Max.Z - b.Min.Z };
+    static double Volume(Aabb b) { var d = Dimensions(b); return d[0] * d[1] * d[2]; }
+    static string PairWire(FormKey a, FormKey b)
+    {
+        string x = a.ToString(), y = b.ToString();
+        return string.CompareOrdinal(x, y) <= 0 ? x + "||" + y : y + "||" + x;
+    }
+
+    var historicalPairs = historicalCrosswalk?.Pairs ?? new List<HistoricalPair>();
+    var historicalRefKeys = new HashSet<FormKey>();
+    try
+    {
+        foreach (var hp in historicalPairs) { historicalRefKeys.Add(FormKey.Factory(hp.A)); historicalRefKeys.Add(FormKey.Factory(hp.B)); }
+    }
+    catch (Exception ex) { Console.Error.WriteLine($"--historical-pairs contains an invalid FormKey: {ex.Message}"); return 2; }
+    var reviewByKey = new Dictionary<FormKey, ReviewRef>();
+    var recordRows = new List<object>();
+    foreach (var (key, _) in idx.History.Refs.OrderBy(k => k.Key.ToString(), StringComparer.Ordinal))
+    {
+        __run.Advance();
+        var pose = idx.WinningGeometryPose(key);
+        if (pose is null || (!scopedResponsiblePlugins.Contains(pose.Value.Plugin) && !historicalRefKeys.Contains(key))) continue;
+        var p = pose.Value;
+        bool deleted = p.Deleted || idx.IsDeletedNow(key);
+        EnableResolution? enable = popMode == PopulationMode.Flags ? null : arms.Winner(key);
+        bool enabled = popMode == PopulationMode.Flags ? !p.Disabled : enable!.Value.Enabled;
+        bool enableResolved = popMode == PopulationMode.Flags || enable!.Value.Resolved;
+        bool hasBase = idx.RefBase.TryGetValue(key, out var effectiveBase);
+        GeometryRead? geometry = hasBase ? GeometryOf(effectiveBase) : null;
+        bool geometryKnown = geometry?.Outcome is { UsableForSurfaceIntersection: true, Soup: { TriangleCount: > 0 } };
+        Aabb? modelBounds = geometryKnown ? geometry!.Outcome!.ModelBounds : null;
+        TriangleSoup? worldSoup = geometryKnown
+            ? SpatialOverlap.TransformSoup(geometry!.Outcome!.Soup!, p.Pos, p.Rot, p.Scale)
+            : null;
+        Aabb? worldBounds = worldSoup is null ? null : SpatialOverlap.SoupBounds(worldSoup);
+        bool zeroScale = p.Scale == 0;
+        bool worldGeometryKnown = !zeroScale && worldBounds is { IsEmpty: false } wb0 && SpatialOverlap.IsFinite(wb0);
+        bool bosUnknown = idx.BosSwaps.TryGetValue(key, out var bosResolution)
+                       && (bosResolution.Random || bosResolution.PerSession || bosResolution.PropertiesRandom || bosResolution.Alternatives.Count != 1);
+
+        string eligibility, eligibilityReason;
+        if (deleted) { eligibility = "state_excluded"; eligibilityReason = "the winning record is deleted"; }
+        else if (!enableResolved) { eligibility = "state_unresolved"; eligibilityReason = "the enable-parent chain did not resolve"; }
+        else if (!enabled) { eligibility = "state_excluded"; eligibilityReason = "the reference is absent in the selected state"; }
+        else if (bosUnknown) { eligibility = "bos_unresolved"; eligibilityReason = "BOS has more than one possible runtime outcome"; }
+        else if (!hasBase) { eligibility = "source_excluded"; eligibilityReason = "the winning reference has no base record"; }
+        else if (!idx.BaseInfo.TryGetValue(effectiveBase, out var bi) || !Obstructing.Contains(bi.Type))
+        { eligibility = "type_excluded"; eligibilityReason = "the winning base is not an obstructing record type"; }
+        else if (idx.BaseIsMarker.Contains(effectiveBase)
+              || (idx.BaseMesh.TryGetValue(effectiveBase, out var markerMesh) && Path.GetFileName(markerMesh).StartsWith("MarkerX", StringComparison.OrdinalIgnoreCase)))
+        { eligibility = "marker_excluded"; eligibilityReason = "the winning base is an editor marker"; }
+        else if (!geometryKnown) { eligibility = "geometry_unmeasurable"; eligibilityReason = geometry?.Reason ?? "no complete strict render triangles"; }
+        else if (zeroScale)
+        { eligibility = "degenerate_geometry"; eligibilityReason = "the placed reference has zero scale"; }
+        else if (!worldGeometryKnown)
+        { eligibility = "invalid_transform"; eligibilityReason = "placed render triangles have no finite bounds"; }
+        else { eligibility = "eligible"; eligibilityReason = "passes the discovery record gates"; }
+
+        bool runtimePoseKnown = !deleted && enableResolved && enabled && !bosUnknown;
+        Aabb? reportedWorldBounds = runtimePoseKnown && worldGeometryKnown ? worldBounds : null;
+        // This is the placed surface's availability, not a classification of its diagnostic AABB.
+        // In particular, a valid flat triangle sheet is render-ready even though the older bounds reader
+        // describes its zero-volume box as degenerate. Source failures must also survive unchanged rather
+        // than being relabelled as transform failures merely because there was no soup to transform.
+        string reportedGeometryStatus = !runtimePoseKnown ? eligibility
+            : !hasBase ? eligibility
+            : !geometryKnown ? geometry?.Status ?? eligibility
+            : zeroScale ? "degenerate_geometry"
+            : !worldGeometryKnown ? "invalid_transform"
+            : "measured";
+        string? reportedGeometryReason = !runtimePoseKnown ? eligibilityReason
+            : !hasBase ? eligibilityReason
+            : !geometryKnown ? geometry?.Reason ?? eligibilityReason
+            : !worldGeometryKnown ? eligibilityReason
+            : null;
+        reviewByKey[key] = new ReviewRef(key, eligibility, eligibilityReason, reportedGeometryStatus,
+                                         reportedGeometryReason, hasBase ? effectiveBase : null, p, reportedWorldBounds,
+                                         runtimePoseKnown && worldGeometryKnown ? worldSoup : null);
+
+        idx.Touchers.TryGetValue(key, out var touchers);
+        string winner = touchers is { Count: > 0 } ? PluginName(touchers[^1]) : PluginName(p.Plugin);
+        var recordBase = idx.RecordBase.TryGetValue(key, out var rb) ? rb : hasBase ? effectiveBase : FormKey.Null;
+        object bos = !bosOn ? new { status = "off", resolution = (object?)null }
+            : bosResolution is null ? new { status = "unchanged", resolution = (object?)null }
+            : new
+            {
+                status = bosUnknown ? "unresolved" : bosResolution.Swapped || bosResolution.HasTransform || bosResolution.SetsFlags ? "resolved" : "unchanged",
+                resolution = (object?)new
+                {
+                    effectiveBase = bosResolution.EffectiveBase.ToString(), bosResolution.Swapped, bosResolution.Random,
+                    bosResolution.Leveled, bosResolution.PerSession, bosResolution.PropertiesRandom,
+                    alternatives = bosResolution.Alternatives.Select(a => new { @base = a.Base.ToString(), a.Probability }).ToArray(),
+                    bosResolution.PropertiesSource, notes = bosResolution.Notes
+                }
+            };
+        recordRows.Add(new
+        {
+            formid = key.ToString(),
+            type = idx.RefArm.GetValueOrDefault(key, "placed-ref"),
+            editorid = idx.RefEditorId.GetValueOrDefault(key),
+            name = (string?)null,
+            winner,
+            fields = new
+            {
+                responsiblePlugin = PluginName(p.Plugin),
+                effectiveBase = !hasBase ? null : new
+                {
+                    formid = effectiveBase.ToString(),
+                    type = idx.BaseInfo.TryGetValue(effectiveBase, out var effectiveInfo) ? effectiveInfo.Type : null,
+                    editorid = idx.BaseInfo.TryGetValue(effectiveBase, out effectiveInfo) ? effectiveInfo.Edid : null,
+                    name = (string?)null
+                },
+                recordBase = recordBase.IsNull ? null : new
+                {
+                    formid = recordBase.ToString(),
+                    type = idx.BaseInfo.TryGetValue(recordBase, out var recordInfo) ? recordInfo.Type : null,
+                    editorid = idx.BaseInfo.TryGetValue(recordBase, out recordInfo) ? recordInfo.Edid : null,
+                    name = (string?)null
+                },
+                cell = new
+                {
+                    formid = p.Cell.ToString(),
+                    editorid = idx.CellName.TryGetValue(p.Cell, out var cellInfo) ? cellInfo.Edid : null,
+                    interior = idx.CellName.TryGetValue(p.Cell, out cellInfo) && cellInfo.Interior
+                },
+                space = p.Space.ToString(),
+                position = new[] { (double)p.Pos.X, (double)p.Pos.Y, (double)p.Pos.Z },
+                rotation = new[] { (double)p.Rot.X, (double)p.Rot.Y, (double)p.Rot.Z },
+                scale = (double)p.Scale, deletion = deleted,
+                resolvedEnable = new { enabled, resolved = enableResolved, population = pop.Identity, state = pop.StateName },
+                bos
+            },
+            eligibility = new { status = eligibility, reason = eligibilityReason },
+            geometry = new
+            {
+                assetId = geometry?.AssetId, status = reportedGeometryStatus, reason = reportedGeometryReason,
+                modelBounds = BoundsArray(modelBounds), worldBounds = BoundsArray(reportedWorldBounds),
+                dimensions = reportedWorldBounds is { } wb ? Dimensions(wb) : null,
+                volume = reportedWorldBounds is { } vb ? Volume(vb) : (double?)null
+            }
+        });
+    }
+
+    var assetRows = geometryByPath.Values.OrderBy(g => g.RelativePath, StringComparer.OrdinalIgnoreCase).Select(g => new
+    {
+        assetId = g.AssetId,
+        relativePath = g.RelativePath,
+        resolutionStatus = g.Status,
+        reason = g.Reason,
+        winner = g.Source is null ? null : new
+        {
+            providerName = g.Source.ProviderName,
+            kind = g.Source.Kind.ToString().ToLowerInvariant(),
+            looseFilePath = g.Source.LooseFilePath,
+            archivePath = g.Source.ArchivePath,
+            archiveEntry = g.Source.EntryPath
+        },
+        providers = g.Resolution?.Sources.Select(s => new
+        {
+            providerName = s.ProviderName, kind = s.Kind.ToString().ToLowerInvariant(),
+            looseFilePath = s.LooseFilePath, archivePath = s.ArchivePath, archiveEntry = s.EntryPath
+        }).ToArray() ?? Array.Empty<object>(),
+        ambiguity = g.Resolution?.Ambiguous ?? false,
+        readIncomplete = g.Resolution?.ReadIncomplete ?? assets.ReadIncomplete,
+        consumedSha256 = g.Outcome?.ContentSha256,
+        byteCount = g.ByteCount,
+        geometryStatus = g.Status,
+        modelBounds = BoundsArray(g.Outcome is { Complete: true } ? g.Outcome.ModelBounds : null),
+        totalVertices = g.Outcome?.Model?.TotalVertices,
+        totalTriangles = g.Outcome?.Model?.TotalTriangles,
+        visibleShapeCount = g.Outcome?.Model?.Shapes.Count(s => !s.Hidden),
+        decodedVisibleShapeCount = g.Outcome?.Model?.Shapes.Count(s => !s.Hidden && s.VerticesRead && !s.Bounds.IsEmpty)
+    }).ToList();
+
+    ManifestMeasurements PairMeasurements(ReviewRef? a, ReviewRef? b)
+    {
+        var ab = new ManifestBoxMeasure(a?.GeometryStatus ?? "missing_reference", a?.GeometryReason,
+            a?.WorldBounds is { } aw ? Dimensions(aw) : null, a?.WorldBounds is { } av ? Volume(av) : null);
+        var bb = new ManifestBoxMeasure(b?.GeometryStatus ?? "missing_reference", b?.GeometryReason,
+            b?.WorldBounds is { } bw ? Dimensions(bw) : null, b?.WorldBounds is { } bv ? Volume(bv) : null);
+        if (a?.WorldBounds is not { } aworld || b?.WorldBounds is not { } bworld)
+            return new("unmeasurable", a is null || b is null ? "a historical reference is absent from the evaluated order" : "at least one reference has no finite eligible world bounds",
+                       ab, bb, null, null, null, null, null, null);
+        var m = SpatialOverlap.MeasureAabbOverlap(aworld, bworld);
+        var extents = new[] {
+            Math.Max(0d, Math.Min((double)aworld.Max.X, bworld.Max.X) - Math.Max((double)aworld.Min.X, bworld.Min.X)),
+            Math.Max(0d, Math.Min((double)aworld.Max.Y, bworld.Max.Y) - Math.Max((double)aworld.Min.Y, bworld.Min.Y)),
+            Math.Max(0d, Math.Min((double)aworld.Max.Z, bworld.Max.Z) - Math.Max((double)aworld.Min.Z, bworld.Min.Z)) };
+        return new("measured", null, ab, bb, extents, m.IntersectionVolume, m.IntersectionAreaXy,
+                   m.FractionOfSmaller, m.FractionReason, new(m.ZRelation, m.SignedZIntersection, m.ZGap));
+    }
+    static string PairEligibilityReason(ReviewRef? a, ReviewRef? b) =>
+        a is null || b is null ? "a historical reference is absent from the evaluated order"
+      : a.Eligibility != "eligible" ? a.EligibilityReason
+      : b.Eligibility != "eligible" ? b.EligibilityReason
+      : "both records pass discovery gates";
+
+    var freshByKey = sweep.CrossResults.ToDictionary(x => PairWire(x.A.Key, x.B.Key), StringComparer.Ordinal);
+    var directQueryByKey = new Dictionary<string, SurfaceQueryOutcome>(StringComparer.Ordinal);
+    SurfaceQueryOutcome ActualShape(string key, ReviewRef? a, ReviewRef? b)
+    {
+        if (freshByKey.TryGetValue(key, out var fresh)) return fresh.Query;
+        if (directQueryByKey.TryGetValue(key, out var memo)) return memo;
+        SurfaceQueryOutcome result;
+        if (a is null || b is null)
+            result = new("unknown", "a historical reference is absent from the evaluated order", "unknown", "unknown", null, 0);
+        else if (a.Eligibility != "eligible" || b.Eligibility != "eligible")
+            result = new("unknown", PairEligibilityReason(a, b), "unknown", "unknown", null, 0);
+        else if (a.Pose.Space != b.Pose.Space)
+            result = new("measured", "references occupy different coordinate spaces", "separated", "none", false, 0);
+        else if (a.WorldSoup is not { TriangleCount: > 0 } sa || b.WorldSoup is not { TriangleCount: > 0 } sb)
+            result = new("unknown", "at least one reference has no complete placed render triangles", "unknown", "unknown", null, 0);
+        else
+            result = SurfaceQueryOutcome.Query(sa, sb, surfaceTolerance, maxTrianglePairs, TimeSpan.FromSeconds(pairSeconds));
+        return directQueryByKey[key] = result;
+    }
+    static ManifestStatus Discovery(SurfaceQueryOutcome q) => q.Intersects switch
+    {
+        true => new("actual_surface_intersection", $"{q.SurfaceRelation}; containment {q.Containment}"),
+        false => new("actual_surface_separated", $"surface relation {q.SurfaceRelation}; containment {q.Containment}"),
+        _ => new("actual_surface_unknown", q.Reason ?? "mesh predicate returned unknown")
+    };
+    static ManifestActualShape ShapeWire(SurfaceQueryOutcome q) =>
+        new(q.Status, q.Reason, q.SurfaceRelation, q.Containment, q.Intersects, q.TrianglePairsTested);
+
+    var pairRows = new List<ManifestPair>();
+    var historicalGroups = historicalPairs.GroupBy(p => p.PairKey, StringComparer.Ordinal).ToList();
+    var historicalKeys = historicalGroups.Select(g => g.Key).ToHashSet(StringComparer.Ordinal);
+    __run.Stage("manifest-historical-shape", "resolving historical pairs against current actual surfaces", historicalGroups.Count, "pairs");
+    foreach (var group in historicalGroups)
+    {
+        var first = group.First();
+        var ak = FormKey.Factory(first.A); var bk = FormKey.Factory(first.B);
+        reviewByKey.TryGetValue(ak, out var ar); reviewByKey.TryGetValue(bk, out var br);
+        var actual = ActualShape(group.Key, ar, br);
+        pairRows.Add(new(group.Key, first.ConflictIoRowIdentity, first.A, first.B,
+            group.Select(p => p.HistoricalRowId).ToArray(), false, Discovery(actual),
+            new(ar?.Eligibility == "eligible" && br?.Eligibility == "eligible" ? "eligible" : "ineligible",
+                PairEligibilityReason(ar, br)), ShapeWire(actual), PairMeasurements(ar, br)));
+        __run.Advance();
+    }
+    foreach (var fresh in sweep.CrossResults.Where(x => (x.Query.Intersects == true || x.Query.Unknown)
+             && !historicalKeys.Contains(PairWire(x.A.Key, x.B.Key))))
+    {
+        string key = PairWire(fresh.A.Key, fresh.B.Key);
+        var ar = reviewByKey[fresh.A.Key]; var br = reviewByKey[fresh.B.Key];
+        pairRows.Add(new(key, ConflictIo.RowIdentity("OVERLAP", fresh.A.Key.ToString(), fresh.B.Key.ToString(), ""),
+            fresh.A.Key.ToString(), fresh.B.Key.ToString(), Array.Empty<string>(), true,
+            Discovery(fresh.Query), new("eligible", "both records pass source, state, type and strict render-geometry gates"),
+            ShapeWire(fresh.Query), PairMeasurements(ar, br)));
+    }
+    pairRows = pairRows.OrderBy(p => p.pairKey, StringComparer.Ordinal).ToList();
+
+    var manifestIdentity = cfg.Identity(pop.Identity, pop.StateName);
+    var manifest = new
+    {
+        schemaVersion = "nif-overlap-actual-shape-manifest-v2",
+        readerVersion = NifOverlapGeometry.ReaderVersion,
+        policyVersion = NifOverlapGeometry.SurfaceMeasurementIdentity(surfaceTolerance),
+        job = "nif-overlap-actual-shape",
+        scope = new
+        {
+            responsiblePairs = responsiblePairs.Select(p => new[] { p.AName, p.BName }).ToArray(),
+            population = pop.Identity, state = pop.StateName, bos = bosOn ? "on" : "off",
+            historicalPairs = historicalPairsPath is null ? null : new { path = Path.GetFullPath(historicalPairsPath), sha256 = historicalCrosswalkSha256 },
+            predicate = new { tolerance = surfaceTolerance, maxTrianglePairs, pairSeconds, policyVersion = MeshIntersection.PolicyVersion },
+            configuration = manifestIdentity
+        },
+        total = recordRows.Count,
+        complete = unreadablePlugins.Count == 0 && !assets.ReadIncomplete && pairRows.All(p => p.actualShape.intersects is not null),
+        notes = new[]
+        {
+            "Actual-shape results come from symmetric intersection of placed strict decoded render triangles; record ObjectBounds and stored NIF spheres have zero influence.",
+            "Bounds enclose the placed triangle soups and reject only provably separated geometry; their overlap magnitudes are diagnostics and never discovery or severity gates.",
+            "LOD shapes are conservatively included; statically hidden shapes are excluded; unsupported live poses and partial reads are unmeasurable.",
+            "The scoped run resolves the full order, winner history, selected state and BOS layer before restricting candidates to the named responsible pair."
+        },
+        records = recordRows,
+        assets = assetRows,
+        pairs = pairRows,
+        measurementAccounting = new
+        {
+            recordCount = recordRows.Count, pairCount = pairRows.Count,
+            historicalRowCount = historicalPairs.Count, historicalPairCount = historicalGroups.Count,
+            duplicateHistoricalRowCount = historicalPairs.Count - historicalGroups.Count,
+            newCandidatePairCount = pairRows.Count(p => p.newCandidate),
+            measuredPairCount = pairRows.Count(p => p.actualShape.intersects is not null),
+            intersectingPairCount = pairRows.Count(p => p.actualShape.intersects == true),
+            separatedPairCount = pairRows.Count(p => p.actualShape.intersects == false),
+            unknownPairCount = pairRows.Count(p => p.actualShape.intersects is null),
+            relationCounts = pairRows.GroupBy(p => p.actualShape.surfaceRelation).ToDictionary(g => g.Key, g => g.Count(), StringComparer.Ordinal),
+            containmentCounts = pairRows.GroupBy(p => p.actualShape.containment).ToDictionary(g => g.Key, g => g.Count(), StringComparer.Ordinal)
+        },
+        workload = new
+        {
+            consumedBytes = assetRows.Sum(a => a.byteCount ?? 0L),
+            decodedVertices = assetRows.Sum(a => (long)(a.totalVertices ?? 0)),
+            decodedTriangles = assetRows.Sum(a => (long)(a.totalTriangles ?? 0)),
+            cacheHits = geometryLookupHits + pathCacheHits + renderCache.Hits,
+            cacheMisses = renderCache.Misses,
+            baseCacheHits = geometryLookupHits,
+            pathCacheHits,
+            contentCacheHits = renderCache.Hits,
+            trianglePairsTested = pairRows.Sum(p => p.actualShape.trianglePairsTested)
+        },
+        limitations = new { unreadablePlugins, archiveReadFailures = assets.BsaFailures }
+    };
+    var manifestDir = Path.GetDirectoryName(Path.GetFullPath(geometryManifestPath));
+    if (!string.IsNullOrEmpty(manifestDir)) Directory.CreateDirectory(manifestDir);
+    __run.Feature("nif_bytes", manifest.workload.consumedBytes, "bytes", FeatureAt.Final)
+         .Feature("nif_vertices", manifest.workload.decodedVertices, "vertices", FeatureAt.Final)
+         .Feature("nif_triangles", manifest.workload.decodedTriangles, "triangles", FeatureAt.Final)
+         .Feature("nif_cache_hits", manifest.workload.cacheHits, "lookups", FeatureAt.Final)
+         .Feature("nif_cache_misses", manifest.workload.cacheMisses, "lookups", FeatureAt.Final);
+    __run.Stage("manifest-artifact", "writing actual-shape manifest", 1, "artifacts");
+    File.WriteAllText(geometryManifestPath, JsonSerializer.Serialize(manifest, new JsonSerializerOptions
+    {
+        WriteIndented = true,
+        NumberHandling = System.Text.Json.Serialization.JsonNumberHandling.AllowNamedFloatingPointLiterals
+    }));
+    __run.Advance().Artifact(geometryManifestPath);
+    Console.WriteLine($"wrote geometry manifest: {recordRows.Count:N0} records, {pairRows.Count:N0} union pairs -> {geometryManifestPath}");
+}
+
+__run.Stage("finalize", "finalizing overlap run", 1, "runs").Advance();
+Console.WriteLine($"\nActual render-surface relations are geometry evidence, not compatibility severity, intent or a game-verified defect.");
+Console.WriteLine($"Limits: this measures static render surfaces; collision and runtime animation are unassessed; rotation- and scale-only re-placements are not provenance steps ({idx.SilentRePlacements:N0} counted above);");
+Console.WriteLine($"        the arm without the later plugin uses the last placement and base outside that plugin's downstream side; unavailable historical geometry stays unknown.");
 Console.WriteLine($"elapsed {sw.Elapsed.TotalSeconds:0.0}s");
 return 0;
 
 static float Rate(long hit, long total) => total == 0 ? 0 : 100f * hit / total;
+
+sealed record GeometryRead(string Status, string? Reason, string? RelativePath, string? AssetId,
+                           PlacementResolution? Resolution, PlacementSource? Source,
+                           NifRenderGeometryOutcome? Outcome, long? ByteCount = null);
+sealed record ManifestBounds(double[] min, double[] max);
+sealed record ReviewRef(FormKey key, string Eligibility, string EligibilityReason,
+                        string? GeometryStatus, string? GeometryReason, FormKey? Base, Snap Pose, Aabb? WorldBounds,
+                        TriangleSoup? WorldSoup);
+sealed record ManifestStatus(string status, string? reason);
+sealed record ManifestBoxMeasure(string geometryStatus, string? reason, double[]? dimensions, double? volume);
+sealed record ManifestZRelation(string relation, double signedIntersection, double gap);
+sealed record ManifestMeasurements(string status, string? reason,
+    ManifestBoxMeasure aBox, ManifestBoxMeasure bBox, double[]? intersectionExtents,
+    double? intersectionVolume, double? xyIntersectionArea, double? overlapFractionSmaller,
+    string? overlapFractionReason, ManifestZRelation? zRelation);
+sealed record ManifestActualShape(string status, string? reason, string surfaceRelation, string containment,
+                                  bool? intersects, long trianglePairsTested);
+sealed record ManifestPair(string pairKey, string conflictIoRowIdentity, string a, string b,
+    string[] historicalRowIds, bool newCandidate, ManifestStatus discovery, ManifestStatus eligibility,
+    ManifestActualShape actualShape, ManifestMeasurements diagnosticBounds);
+sealed record HistoricalCrosswalk(int SchemaVersion, bool Complete, List<HistoricalPair>? Pairs);
+sealed record HistoricalPair(string HistoricalRowId, string PairKey, string ConflictIoRowIdentity, string A, string B);

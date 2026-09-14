@@ -354,7 +354,7 @@
       "evidence": {
         "strength": "calibrated-inference",
         "claim": "OVERLAP — Introduced + Blind",
-        "limits": "Depth >= 16 u and >= 0.25 of the smaller box; the population is the LOAD-TIME enable state (Q27's R1 rule), not the record's own initially-disabled flag. Introduced-vs-Inherited rests on a counterfactual arm, and a same-author intersection is not a defect."
+        "limits": "Actual placed strict NIF render surfaces decide crossing, coplanar overlap, touching and separation; validated closed-solid containment is separate evidence. Bounds only accelerate safe rejection, with no box depth, fraction or size decision gate. The population is the LOAD-TIME enable state, not the reference flag alone. Introduced-vs-Inherited requires a measured counterfactual; missing geometry or unfinished work remains unknown. Geometric intersection does not establish harmful or unintended overlap. Historical bounds policies are not comparable for repair credit."
       },
       "manualDecisionAllowed": false
     },
@@ -734,7 +734,7 @@
       "evidence": {
         "strength": "calibrated-inference",
         "claim": "STATE CONDITIONAL",
-        "limits": "Only the states the plan SELECTED are evaluated; every other state the census named is unexplored and listed as such (PLAN D7's `unassessed`). stateprobe has no --base, so there is no reverse arm and no physical differential credit for a state row. The Bethesda floor is withheld."
+        "limits": "Only the states the plan SELECTED are evaluated; every other state the census named is unexplored and listed as such (PLAN D7's `unassessed`). STATE-OVERLAP is explicitly unmeasured and withheld until strict placed render triangles are available in this evaluator; diagnostic boxes cannot establish overlap findings. State contact and route roles remain available under their separate geometry contracts. The changed measurement identity refuses comparison against legacy box-based state emits. stateprobe has no --base, so there is no reverse arm and no physical differential credit for a state row. The Bethesda floor is withheld."
       },
       "manualDecisionAllowed": false
     },
