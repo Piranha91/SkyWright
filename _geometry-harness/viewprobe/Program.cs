@@ -311,6 +311,9 @@ float clearReach = 512f;   // --clear-reach: how far each ray looks before repor
 // mesh's own bounds; `obnd` restores the record-box filter this probe shipped with, so the two can
 // be compared on real data instead of the difference being asserted.
 string clearBounds = "nif";
+// --inside-bounds nif|obnd: which box NOMINATES a ref for the --inside-at ray test. Same choice,
+// same reason, as --clear-bounds; `obnd` restores the record-box nomination for comparison.
+string insideBounds = "nif";
 // --euler renders the SAME cell under all six Euler compositions. The numeric tests could not
 // separate them (0.62%-0.69%, then 1.84%-2.08%), which is itself a finding — but a wrong order
 // scatters kit pieces by hundreds of units, and that is trivially visible even when it is
@@ -503,6 +506,7 @@ for (int i = argStart; i < args.Length; i++)
     { var p = args[++i].Split(','); if (p.Length == 3) clearAt.Add((float.Parse(p[0]), float.Parse(p[1]), float.Parse(p[2]))); }
     else if (args[i] == "--clear-reach" && i + 1 < args.Length) clearReach = float.Parse(args[++i]);
     else if (args[i] == "--clear-bounds" && i + 1 < args.Length) clearBounds = args[++i].ToLowerInvariant();
+    else if (args[i] == "--inside-bounds" && i + 1 < args.Length) insideBounds = args[++i].ToLowerInvariant();
     else if (args[i] == "--nav-color" && i + 1 < args.Length) navColor = args[++i].ToLowerInvariant();
     else if (args[i] == "--npc" && i + 1 < args.Length) { npcSpecs.Add(args[++i]); textured = true; }
     else if (args[i] == "--npc-no-outfit") npcNoOutfit = true;
@@ -1867,38 +1871,99 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot)
         }
         foreach (var (qx, qy, qz) in insideAt)
         {
-            var hits = new List<(PlacedRef Ref, string Type, string? Edid, Aabb Box)>();
+            // WHAT NOMINATES. This used to be the base record's OBND, and that is the same defect the
+            // clearance broad phase carried: an authored box can UNDERSTATE its mesh, and then a ref
+            // whose geometry really does enclose the eye is never nominated, never ray-tested, and the
+            // eye reads "no physical ref's box encloses it" -- which the planner took as clearance
+            // (Piranha, 2026-09-14). The mesh's own bounds come from the thing being tested, so they
+            // are the conservative nomination. OBND survives as a COUNTED fallback for a ref whose
+            // mesh cannot be read at all: such a ref cannot be ruled out, and an empty answer over a
+            // population like that is not proven clearance. `--inside-bounds obnd` restores the old
+            // nomination so the difference stays measurable rather than asserted.
+            var hits = new List<(PlacedRef Ref, string Type, string? Edid, Aabb Box, bool FromNif, bool ObndToo)>();
+            int obndOnlyNom = 0;
             foreach (var r in winRef.Values)
             {
                 if (r.Deleted || DisabledWhy(r) is not null || r.Base is not { } bk) continue;
                 if (!baseType.TryGetValue(bk, out var bt) || !insidePhysical.Contains(bt)) continue;
                 if (baseIsMarker.Contains(bk)) continue;
                 if (baseEditorId.TryGetValue(bk, out var ed) && IsControlEditorId(ed)) continue;
-                if (baseMesh.TryGetValue(bk, out var bm)
-                    && (Path.GetFileName(bm).StartsWith("MarkerX", StringComparison.OrdinalIgnoreCase)
-                        || bm.Replace('/', '\\').Contains(@"effects\", StringComparison.OrdinalIgnoreCase))) continue;   // an FX volume encloses without obstructing
-                if (!baseObnd.TryGetValue(bk, out var ob)) continue;
-                var model = new Aabb(ob.Min, ob.Max, false);
-                if (model.Size.X <= 0 && model.Size.Y <= 0 && model.Size.Z <= 0) continue;
-                var box = SpatialOverlap.ToWorld(model, r.Position, r.Rotation, r.Scale);
-                if (box.IsEmpty) continue;
-                if (qx < box.Min.X || qx > box.Max.X || qy < box.Min.Y || qy > box.Max.Y || qz < box.Min.Z || qz > box.Max.Z) continue;
-                hits.Add((r, bt, ed, box));
+                if (baseMesh.TryGetValue(bk, out var bm0)
+                    && (Path.GetFileName(bm0).StartsWith("MarkerX", StringComparison.OrdinalIgnoreCase)
+                        || bm0.Replace('/', '\\').Contains(@"effects\", StringComparison.OrdinalIgnoreCase))) continue;   // an FX volume encloses without obstructing
+                Aabb obndWorld = Aabb.Empty;
+                bool haveObnd = false;
+                if (baseObnd.TryGetValue(bk, out var ob))
+                {
+                    var model = new Aabb(ob.Min, ob.Max, false);
+                    if (!(model.Size.X <= 0 && model.Size.Y <= 0 && model.Size.Z <= 0))
+                    {
+                        obndWorld = SpatialOverlap.ToWorld(model, r.Position, r.Rotation, r.Scale);
+                        haveObnd = !obndWorld.IsEmpty;
+                    }
+                }
+                Aabb nifWorld = Aabb.Empty;
+                bool haveNif = false;
+                if (insideBounds != "obnd" && baseMesh.TryGetValue(bk, out var bmN)
+                    && InsideMeshFor(bmN).Bounds is { IsEmpty: false } nb)
+                {
+                    nifWorld = SpatialOverlap.ToWorld(nb, r.Position, r.Rotation, r.Scale);
+                    haveNif = !nifWorld.IsEmpty;
+                }
+                static bool Encloses(Aabb b, float x, float y, float z) =>
+                    !b.IsEmpty && x >= b.Min.X && x <= b.Max.X && y >= b.Min.Y && y <= b.Max.Y && z >= b.Min.Z && z <= b.Max.Z;
+                bool obndSays = haveObnd && Encloses(obndWorld, qx, qy, qz);
+                if (haveNif)
+                {
+                    if (!Encloses(nifWorld, qx, qy, qz)) continue;
+                    hits.Add((r, bt, ed, nifWorld, true, obndSays));
+                }
+                else
+                {
+                    // No mesh bounds: the record box is the only thing left to nominate with, and
+                    // nobody checked it against the geometry. Nominating on it is still better than
+                    // dropping the ref, but the fact that it happened is reported.
+                    if (!obndSays) continue;
+                    if (insideBounds != "obnd") obndOnlyNom++;
+                    hits.Add((r, bt, ed, obndWorld, false, true));
+                }
             }
+            // A ref whose mesh could not be read is a ref this query could NOT rule out. The count
+            // travels with the answer -- including with an EMPTY answer, which is the case the
+            // planner used to read as clearance.
+            int unreadable = 0;
+            foreach (var r in winRef.Values)
+            {
+                if (insideBounds == "obnd") break;
+                if (r.Deleted || DisabledWhy(r) is not null || r.Base is not { } bk) continue;
+                if (!baseType.TryGetValue(bk, out var bt2) || !insidePhysical.Contains(bt2)) continue;
+                if (baseIsMarker.Contains(bk)) continue;
+                if (baseEditorId.TryGetValue(bk, out var ed2) && IsControlEditorId(ed2)) continue;
+                if (!baseMesh.TryGetValue(bk, out var bmU)) continue;
+                if (Path.GetFileName(bmU).StartsWith("MarkerX", StringComparison.OrdinalIgnoreCase)
+                    || bmU.Replace('/', '\\').Contains(@"effects\", StringComparison.OrdinalIgnoreCase)) continue;
+                if (InsideMeshFor(bmU).Bounds is null) unreadable++;
+            }
+            string nomination = insideBounds == "obnd"
+                ? "nominated by RECORD OBND (the legacy arm, kept for comparison: a box that understates its mesh nominates nothing)"
+                : $"nominated by mesh bounds, {obndOnlyNom} by record OBND alone (mesh unreadable), {unreadable} physical ref(s) whose mesh could not be read at all";
             if (hits.Count == 0)
             {
-                Console.WriteLine($"   inside-at {qx:0},{qy:0},{qz:0}: no physical ref's box encloses it");
+                Console.WriteLine($"   inside-at {qx:0},{qy:0},{qz:0}: no physical ref's box encloses it; {nomination}");
                 continue;
             }
-            Console.WriteLine($"   inside-at {qx:0},{qy:0},{qz:0}: {hits.Count} ref(s) whose box encloses it (smallest first)");
-            foreach (var (r, t, ed, box) in hits.OrderBy(h => MathF.Max(h.Box.Size.X, MathF.Max(h.Box.Size.Y, h.Box.Size.Z))))
+            Console.WriteLine($"   inside-at {qx:0},{qy:0},{qz:0}: {hits.Count} ref(s) whose box encloses it (smallest first); {nomination}");
+            foreach (var (r, t, ed, box, fromNif, obndToo) in hits.OrderBy(h => MathF.Max(h.Box.Size.X, MathF.Max(h.Box.Size.Y, h.Box.Size.Z))))
             {
                 var s = box.Size;
                 string mesh = baseMesh.TryGetValue(r.Base!.Value, out var bm2) ? bm2 : "";
                 string rays = mesh.Length > 0 ? InsideRays(r, mesh, qx, qy, qz) : "rays n/a (no mesh)";
                 Console.WriteLine($"      {r.FormKey}  {t}  {ed ?? "-"}  dims {s.X:0}x{s.Y:0}x{s.Z:0} u"
                                 + $"  at {r.Position.X:0},{r.Position.Y:0},{r.Position.Z:0}  scale {r.Scale:0.00}"
-                                + $"  {rays}" + (mesh.Length > 0 ? $"  mesh {mesh}" : ""));
+                                + $"  {rays}"
+                                + $"  [{(fromNif ? "mesh bounds" : "record OBND, mesh unreadable")}"
+                                + $"; record box {(obndToo ? "agrees" : "would NOT have nominated this ref")}]"
+                                + (mesh.Length > 0 ? $"  mesh {mesh}" : ""));
             }
         }
 

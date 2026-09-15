@@ -281,7 +281,9 @@ def off_mesh_scene(**kw):
           "navSilent": [], "insideSilent": [],
           "clearSilent": [list(q) for q in kw.pop("silent_clear", ())],
           "clearNoBox": kw.pop("no_box", 0), "clearUnread": kw.pop("unread", 0),
-          "clearObndOnly": kw.pop("obnd_only", 0)}
+          "clearObndOnly": kw.pop("obnd_only", 0),
+          "insideObndOnly": kw.pop("nom_obnd_only", 0),
+          "insideUnreadable": kw.pop("nom_unreadable", 0)}
     if (terrain := kw.pop("terrain", None)) is not None:
         sc["clearTerrain"] = terrain
     if not kw.pop("no_floor", False):
@@ -529,6 +531,64 @@ def test_a_ref_selected_only_by_its_record_box_is_a_coverage_caveat():
     check("obnd-only: the report names the unverified selection",
           "record OBND" in pl["supportWhy"], pl["supportWhy"])
     check("obnd-only: and the camera is REFUSED", code == 1, f"exit {code}")
+
+
+def test_incomplete_nomination_is_not_clearance():
+    """"No ref's box encloses the eye" is only clearance if every ref could be CHECKED.
+
+    A ref whose mesh would not read was never ruled out. The old nomination said nothing about
+    that population, so an empty answer read as a pass -- which is how an untested eye published a
+    camera. The absence now has to come with complete coverage or it is UNRESOLVED.
+    """
+    code, out, doc = off_mesh_check(off_mesh_scene(nom_unreadable=2))
+    fails = "; ".join(doc["fails"])
+    check("incomplete nomination: an empty answer over unreadable refs is refused",
+          code == 1, f"exit {code}")
+    check("incomplete nomination: and says the nomination was INCOMPLETE",
+          "INCOMPLETE" in fails, fails)
+    check("incomplete nomination: naming the refs it could not rule out",
+          "never ruled out" in fails, fails)
+
+
+def test_nomination_by_unverified_record_box_is_not_clearance():
+    """Same rule for a ref selectable only by a box nobody checked against its mesh."""
+    code, out, doc = off_mesh_check(off_mesh_scene(nom_obnd_only=1))
+    fails = "; ".join(doc["fails"])
+    check("obnd-only nomination: refused", code == 1, f"exit {code}")
+    check("obnd-only nomination: the report names the unverified box",
+          "nobody verified" in fails, fails)
+
+
+def test_a_complete_empty_nomination_is_still_clear():
+    """The control that must NOT change: when every physical ref was nominated from its own mesh
+    and none encloses the eye, that IS clearance, and the camera is accepted. A rule that refused
+    here would refuse every healthy open-room camera."""
+    code, out, doc = off_mesh_check(off_mesh_scene())
+    check("complete nomination: an eye nothing encloses is still accepted", code == 0, f"exit {code}")
+    check("complete nomination: and the note says the whole cell was tested",
+          "every physical ref" in out, "")
+
+
+def test_incomplete_nomination_prevents_publication():
+    """Refusal has to stop the ARTIFACT, not just set an exit code.
+
+    The acquisition path reads the worklist the planner emits; an untested eye that still wrote one
+    would publish a camera nobody checked, which is the outcome all of this exists to prevent.
+    """
+    wl = os.path.join(tempfile.mkdtemp(), "wl.json")
+    sc = room(PLINTH)
+    sc["insideUnreadable"] = 1
+    code, out = run_cli(["plan", "TestCell", "--subject", "0,0,0=target", "--vp", FAKE,
+                         "--quiet", "--worklist", wl], sc)
+    check("publication: the plan refuses", code != 0, f"exit {code}")
+    # The path is CLAIMED up front with an `incomplete` stub (see claim_outputs), so its existence
+    # is by design -- a stale verified worklist from an earlier run must not survive at that path.
+    # The gate is therefore the CONTENT: no camera, and the file says why.
+    doc = json.load(open(wl, encoding="utf-8"))
+    check("publication: the worklist carries no camera",
+          doc.get("status") == "incomplete" and "cells" not in doc, json.dumps(doc)[:120])
+    check("publication: and says the run that claimed it did not finish",
+          "did not finish" in doc.get("note", ""), doc.get("note", "")[:80])
 
 
 # --------------------------------------------------------------------------------------
@@ -987,6 +1047,10 @@ ALL = [test_failed_verification_cannot_export_success,
        test_unreadable_small_box_still_refuses,
        test_misleading_obnd_does_not_hide_the_mesh,
        test_a_ref_selected_only_by_its_record_box_is_a_coverage_caveat,
+       test_incomplete_nomination_is_not_clearance,
+       test_nomination_by_unverified_record_box_is_not_clearance,
+       test_a_complete_empty_nomination_is_still_clear,
+       test_incomplete_nomination_prevents_publication,
        test_support_does_not_override_the_other_placement_arms,
        test_surface_hit_is_confirmed,
        test_nearer_blocker_is_blocked,

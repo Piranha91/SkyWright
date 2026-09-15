@@ -32,6 +32,8 @@ Scene JSON:
      "clearTerrain": "terrain: ...", # the terrain state clear-at reports (default: interior)
      "clearObndOnly": 0,             # refs the broad phase could select only by their record box
      "clearObndWouldMiss": 0,        # candidates the record box alone would have excluded
+     "insideObndOnly": 0,            # refs --inside-at could nominate only by their record box
+     "insideUnreadable": 0,          # physical refs whose mesh would not read, so never ruled out
      "configFingerprint": "<64 hex>",  # what viewprobe prints for a candidate configuration
      "configFingerprintAsks": [1]}     # print it only on these 1-based ASKING invocations
 """
@@ -248,8 +250,11 @@ def main(argv):
             lo, hi = declared(b)
             if lo[0] <= x <= hi[0] and lo[1] <= y <= hi[1] and lo[2] <= z <= hi[2]:
                 hits.append(b)
-        print(f"   inside-at {x},{y},{z}: {len(hits)} ref" if hits
-              else f"   inside-at {x},{y},{z}: no physical")
+        cover = (f"nominated by mesh bounds, {scene.get('insideObndOnly', 0)} by record OBND alone "
+                 f"(mesh unreadable), {scene.get('insideUnreadable', 0)} physical ref(s) whose mesh "
+                 "could not be read at all")
+        print(f"   inside-at {x},{y},{z}: {len(hits)} ref(s) whose box encloses it; {cover}" if hits
+              else f"   inside-at {x},{y},{z}: no physical ref's box encloses it; {cover}")
         for b in hits:
             lo, hi = declared(b)
             dims = [hi[k] - lo[k] for k in range(3)]

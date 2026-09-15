@@ -289,6 +289,13 @@ REFS_ROW = re.compile(
     r"\s+base (\S+) (\S{6}:.+?\.es[pml]) (\S+)")
 # `--inside-at` header (both forms) and rows.
 INSIDE_HEAD = re.compile(r"^\s*inside-at (-?\d+),(-?\d+),(-?\d+): (\d+ ref|no physical)")
+# The nomination's own provenance, printed on the same header line: which box selected the refs,
+# how many could only be selected by an unverified record box, and how many refs the query could
+# not rule out at all because their mesh would not read. An EMPTY nomination over a non-zero
+# population of those is not clearance.
+INSIDE_COVER = re.compile(
+    r"nominated by mesh bounds, (\d+) by record OBND alone \(mesh unreadable\), "
+    r"(\d+) physical ref\(s\) whose mesh could not be read at all")
 INSIDE_ROW = re.compile(r"^\s*(\S{6}:.+?\.es[pml])\s{2}(\S+)\s{2}(\S+)\s{2}dims (-?\d+)x(-?\d+)x(-?\d+) u")
 INSIDE_RAYS = re.compile(r"\srays ((?:(?:[+-][xy]|up|down) (?:\d+|-)\s*){6})")
 # `--clear-at` header and rows: what placed mesh geometry is really around a point, on each world
@@ -413,6 +420,11 @@ class Probe:
                 cur = None
         return out
 
+    class _Nominations(list):
+        """The rows, plus the nomination's own coverage. A plain list cannot carry the second, and
+        the empty case is exactly where the coverage matters most."""
+        coverage: dict
+
     def inside(self):
         """{(x, y, z): [enclosing ref, ...]} for every `--inside-at` query; an empty list means
         no physical ref's box encloses the point. Each entry: formkey, type, edid, dims (the
@@ -421,7 +433,13 @@ class Probe:
         for ln in self.stdout.splitlines():
             m = INSIDE_HEAD.match(ln)
             if m:
-                cur = out.setdefault((int(m[1]), int(m[2]), int(m[3])), [])
+                key = (int(m[1]), int(m[2]), int(m[3]))
+                cur = out.setdefault(key, self._Nominations())
+                c = INSIDE_COVER.search(ln)
+                # Carried on the LIST, so an empty nomination still arrives with its coverage --
+                # which is the whole point: the empty case is the one that used to read as clear.
+                cur.coverage = ({"obnd_only": int(c[1]), "unreadable": int(c[2])} if c
+                                else {"obnd_only": 0, "unreadable": 0, "stated": False})
                 continue
             if cur is None:
                 continue
@@ -1337,9 +1355,31 @@ def inside_verdict(entry, args):
                             "Whether the eye is INSIDE that ref or in the room it walls is UNTESTED: "
                             "the box was the only evidence and a box cannot tell a shell from a "
                             "solid. Support under the eye does not make it unobstructed")
+    # THE NOMINATION'S OWN COVERAGE. The rows above are refs the query could test. What decides
+    # whether their ABSENCE means anything is how many refs it could not: one whose mesh would not
+    # read was never ruled out, and one selectable only by an unverified record box was selected on
+    # evidence nobody checked. An empty nomination over either population is UNRESOLVED, not clear
+    # -- the exact step that let a camera publish from "no physical ref's box encloses the eye"
+    # (Piranha, 2026-09-14).
+    cover = getattr(entry, "coverage", None) or {}
+    gaps = []
+    if cover.get("unreadable"):
+        gaps.append(f"{cover['unreadable']} physical ref(s) whose mesh could not be read at all, so "
+                    "they were never ruled out")
+    if cover.get("obnd_only"):
+        gaps.append(f"{cover['obnd_only']} ref(s) selectable only by their record OBND, whose "
+                    "agreement with the mesh nobody verified")
     if not entry:
-        notes.append("inside: no physical ref's box encloses the eye -- note this nomination is by "
-                     "record OBND, so a box that understates its mesh can fail to nominate at all")
+        if gaps:
+            untested.append("inside: no ref's geometry encloses the eye, but the nomination was "
+                            "INCOMPLETE -- " + "; ".join(gaps) + ". An absence over an incomplete "
+                            "nomination is not clearance")
+        else:
+            notes.append("inside: no physical ref's geometry encloses the eye; every physical ref "
+                         "in the cell was nominated from its own mesh bounds and tested")
+    elif gaps:
+        untested.append("inside: the refs that WERE tested read open, but the nomination was "
+                        "INCOMPLETE -- " + "; ".join(gaps))
     kind = "inside" if fails else ("unresolved" if untested else "clear")
     return kind, fails + untested, notes
 
