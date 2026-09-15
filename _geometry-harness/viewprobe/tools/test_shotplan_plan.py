@@ -280,7 +280,8 @@ def off_mesh_scene(**kw):
           "nav": NEAR_NAV,
           "navSilent": [], "insideSilent": [],
           "clearSilent": [list(q) for q in kw.pop("silent_clear", ())],
-          "clearNoBox": kw.pop("no_box", 0), "clearUnread": kw.pop("unread", 0)}
+          "clearNoBox": kw.pop("no_box", 0), "clearUnread": kw.pop("unread", 0),
+          "clearObndOnly": kw.pop("obnd_only", 0)}
     if (terrain := kw.pop("terrain", None)) is not None:
         sc["clearTerrain"] = terrain
     if not kw.pop("no_floor", False):
@@ -448,6 +449,86 @@ def test_support_does_not_override_the_other_placement_arms():
     check("on-storey: and the camera is still accepted", code == 0, f"exit {code}")
     check("the report states what support does NOT mean",
           "reachability" in pl["supportIs"], pl["supportIs"])
+
+
+# --------------------------------------------------------------------------------------
+# 1c. the two ways a box can lie
+# --------------------------------------------------------------------------------------
+#
+# Both reported by Piranha on 2026-09-14 against the first version of this correction.
+
+
+def test_unreadable_room_scale_mesh_is_unresolved_not_clear():
+    """A room-scale box whose mesh cannot be read used to be waved through as "a shell".
+
+    The box was the only evidence, and a box cannot tell a shell from a solid: the same eye is
+    enclosed by a tower-kit wall piece's box and by the room it walls. Calling it clear is an
+    assumption of exactly the kind the placement arm was corrected for. It is UNRESOLVED -- the eye
+    was never tested -- and an unresolved eye must not publish a camera, whatever is underneath it.
+    """
+    shell = {"id": "000501:Test.esp", "edid": "BigShell", "type": "Static",
+             "min": [-1400, -1400, -100], "max": [1400, 1400, 900], "meshUnreadable": True}
+    code, out, doc = off_mesh_check(off_mesh_scene(extra=[shell]))
+    fails = "; ".join(doc["fails"])
+    check("unreadable shell: the eye is refused, not passed", code == 1, f"exit {code}")
+    check("unreadable shell: the refusal says the eye was UNTESTED",
+          "UNTESTED" in fails, fails)
+    check("unreadable shell: and says a box cannot tell a shell from a solid",
+          "shell from a solid" in fails, fails)
+    check("unreadable shell: support underneath did NOT rescue it",
+          doc["placement"]["support"] == "supported", doc["placement"]["support"])
+
+
+def test_unreadable_small_box_still_refuses():
+    """The control beside it: the small-box arm already refused and must keep refusing."""
+    crate = {"id": "000502:Test.esp", "edid": "Crate", "type": "Container",
+             "min": [-120, -1020, 0], "max": [120, -780, 240], "meshUnreadable": True}
+    code, out, doc = off_mesh_check(off_mesh_scene(extra=[crate]))
+    check("unreadable crate: still refused", code == 1, f"exit {code}")
+    check("unreadable crate: and named as the box standing",
+          "the box stands" in "; ".join(doc["fails"]), "; ".join(doc["fails"]))
+
+
+def test_misleading_obnd_does_not_hide_the_mesh():
+    """A record box that understates its mesh must not remove that mesh from the geometry answer.
+
+    The floor here spans the room; its DECLARED box is a 20 u cube parked in a corner. The old
+    broad phase filtered candidates on the record box, so a box like this dropped the ref silently
+    and never touched the missing-box count -- which is why "zero coverage gaps" proved nothing.
+    The contract now is that the ray test answers about the MESH. (This is the stand-in, so it
+    proves the contract and not the renderer; the renderer's own arm is the real-cell A/B in
+    RESULT.md §9, where `--clear-bounds obnd` reproduces the old filter.)
+    """
+    liar = {"id": "000503:Test.esp", "edid": "WideFloor", "type": "Static",
+            "min": [-1100, -1100, -40], "max": [1100, 1100, 0],
+            "obnd": {"min": [1000, 1000, -40], "max": [1020, 1020, -20]}}
+    sc = off_mesh_scene(extra=[liar], no_floor=True)
+    code, out, doc = off_mesh_check(sc)
+    pl = doc["placement"]
+    check("misleading OBND: the mesh is still found under the eye",
+          pl["support"] == "supported", pl["support"] + " -- " + pl["supportWhy"])
+    check("misleading OBND: and it is named as the thing holding the eye up",
+          "WideFloor" in pl["supportWhy"], pl["supportWhy"])
+    check("misleading OBND: the eye is accepted on that evidence", code == 0, f"exit {code}")
+    # The point of the case is that the two evidence sources DISAGREE: the ray test finds the mesh
+    # while the box-based nomination, which sees only the declared 20 u cube in the corner, does
+    # not name it at all. Asserting both halves is what makes this a test of the distinction rather
+    # than of the happy path.
+    inside_block = out.split("--- inside")[1].split("--- doors")[0] if "--- inside" in out else ""
+    check("misleading OBND: the box-based nomination does NOT name it -- the two sources differ",
+          "WideFloor" not in inside_block, inside_block.strip()[:160])
+
+
+def test_a_ref_selected_only_by_its_record_box_is_a_coverage_caveat():
+    """When the mesh could not be read, the record box is all that is left to select with -- and
+    nobody verified that box against the mesh. An ABSENCE over such a population is unresolved."""
+    code, out, doc = off_mesh_check(off_mesh_scene(no_floor=True, obnd_only=2))
+    pl = doc["placement"]
+    check("obnd-only: absence over unverified boxes is UNRESOLVED",
+          pl["support"] == "unresolved", pl["support"] + " -- " + pl["supportWhy"])
+    check("obnd-only: the report names the unverified selection",
+          "record OBND" in pl["supportWhy"], pl["supportWhy"])
+    check("obnd-only: and the camera is REFUSED", code == 1, f"exit {code}")
 
 
 # --------------------------------------------------------------------------------------
@@ -902,6 +983,10 @@ ALL = [test_failed_verification_cannot_export_success,
        test_terrain_gap_at_this_xy_is_unresolved,
        test_interior_absence_is_still_contradicted,
        test_silent_clear_at_is_refused,
+       test_unreadable_room_scale_mesh_is_unresolved_not_clear,
+       test_unreadable_small_box_still_refuses,
+       test_misleading_obnd_does_not_hide_the_mesh,
+       test_a_ref_selected_only_by_its_record_box_is_a_coverage_caveat,
        test_support_does_not_override_the_other_placement_arms,
        test_surface_hit_is_confirmed,
        test_nearer_blocker_is_blocked,

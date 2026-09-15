@@ -18,9 +18,11 @@ Scene JSON:
 
     {"floorZ": 0.0,
      "boxes": [{"id": "000001:Test.esp", "edid": "TestCrate", "type": "Static",
-                "min": [x,y,z], "max": [x,y,z],
+                "min": [x,y,z], "max": [x,y,z],      # the MESH
+                "obnd": {"min": [...], "max": [...]},  # the record's CLAIM about it, if it differs
                 "alpha": false,      # true = draws with depth writes OFF: the ray passes through
-                "physical": true}],  # false = not offered by --inside-at
+                "physical": true,    # false = not offered by --inside-at
+                "meshUnreadable": false}],  # true = --inside-at reports no rays for it
      "nav":  [{"min": [x,y], "max": [x,y], "z": 0.0, "name": "Test.esp tri"}],
      "navSilent": [[x,y]],           # queried points that get NO nav-at line at all
      "insideSilent": [[x,y,z]],      # queried points that get NO inside-at line at all
@@ -28,6 +30,8 @@ Scene JSON:
      "clearNoBox": 0,                # physical refs the OBND broad phase could not offer
      "clearUnread": 0,               # candidate meshes that could not be read
      "clearTerrain": "terrain: ...", # the terrain state clear-at reports (default: interior)
+     "clearObndOnly": 0,             # refs the broad phase could select only by their record box
+     "clearObndWouldMiss": 0,        # candidates the record box alone would have excluded
      "configFingerprint": "<64 hex>",  # what viewprobe prints for a candidate configuration
      "configFingerprintAsks": [1]}     # print it only on these 1-based ASKING invocations
 """
@@ -232,20 +236,33 @@ def main(argv):
         x, y, z = (int(v) for v in spec.split(","))
         if (x, y, z) in silent_inside:
             continue
-        hits = [b for b in scene.get("boxes", [])
-                if b.get("physical", True)
-                and b["min"][0] <= x <= b["max"][0] and b["min"][1] <= y <= b["max"][1]
-                and b["min"][2] <= z <= b["max"][2]]
+        def declared(bx):
+            """The record OBND a ref claims, which may differ from its mesh -- see `obnd`."""
+            o = bx.get("obnd")
+            return (o["min"], o["max"]) if o else (bx["min"], bx["max"])
+
+        hits = []
+        for b in scene.get("boxes", []):
+            if not b.get("physical", True):
+                continue
+            lo, hi = declared(b)
+            if lo[0] <= x <= hi[0] and lo[1] <= y <= hi[1] and lo[2] <= z <= hi[2]:
+                hits.append(b)
         print(f"   inside-at {x},{y},{z}: {len(hits)} ref" if hits
               else f"   inside-at {x},{y},{z}: no physical")
         for b in hits:
-            dims = [b["max"][k] - b["min"][k] for k in range(3)]
+            lo, hi = declared(b)
+            dims = [hi[k] - lo[k] for k in range(3)]
             rays = {"+x": b["max"][0] - x, "-x": x - b["min"][0],
                     "+y": b["max"][1] - y, "-y": y - b["min"][1],
                     "up": b["max"][2] - z, "down": z - b["min"][2]}
             txt = " ".join(f"{k} {rays[k]:.0f}" for k in ("+x", "-x", "+y", "-y", "up", "down"))
+            # `meshUnreadable` reproduces viewprobe's own wording for a ref whose mesh it could not
+            # load: the row arrives with no ray distances at all, which is the shape the planner has
+            # to decide on, and the only evidence left is the box.
+            ray_txt = "rays n/a (mesh not loaded)" if b.get("meshUnreadable") else f"rays {txt}"
             print(f"      {b['id']}  {b.get('type', 'Static')}  {b.get('edid', '-')}  "
-                  f"dims {dims[0]:.0f}x{dims[1]:.0f}x{dims[2]:.0f} u  rays {txt}")
+                  f"dims {dims[0]:.0f}x{dims[1]:.0f}x{dims[2]:.0f} u  {ray_txt}")
 
     # --clear-at: the nearest box surface on each world axis, whether or not anything encloses the
     # point. The real probe ray-casts the placed meshes; the stand-in intersects the toy AABBs,
@@ -266,14 +283,20 @@ def main(argv):
               f"{reach:.0f} u - {len(phys)} candidate(s) in the broad phase, {len(phys)} with a "
               f"readable mesh, {scene.get('clearUnread', 0)} unreadable, "
               f"{scene.get('clearNoBox', 0)} physical ref(s) skipped for want of a usable OBND, "
-              f"{scene.get('clearNoMesh', 0)} physical ref(s) with no model at all; "
+              f"{scene.get('clearNoMesh', 0)} physical ref(s) with no model at all, "
+              f"{scene.get('clearObndOnly', 0)} selected by record OBND because their mesh could not "
+              f"be read, {scene.get('clearObndWouldMiss', 0)} admitted by mesh bounds that the record "
+              f"box alone would have excluded; "
               f"{scene.get('clearTerrain', 'terrain: interior cell, none expected')} "
-              "(the broad phase is OBND-based: a ref it cannot see is not evidence of open space; "
+              "(broad phase: the mesh's own NIF bounds, with record OBND only as a counted fallback; "
               "the four lateral rays ignore terrain)")
         for name, ax, sgn in axes:
             other = [k for k in range(3) if k != ax]
             best, who = None, None
             for b in phys:
+                # min/max is the MESH. `obnd` is the record's claim about it, which --inside-at
+                # nominates by and which clear-at deliberately does NOT use: a box can be present
+                # and wrong, and the ray test answers about the geometry.
                 if not all(b["min"][k] <= q[k] <= b["max"][k] for k in other):
                     continue
                 for face in (b["min"][ax], b["max"][ax]):

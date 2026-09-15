@@ -307,6 +307,10 @@ var insideAt = new List<(float X, float Y, float Z)>();
 // empty answer is stated as OBND-limited coverage rather than as proven clearance.
 var clearAt = new List<(float X, float Y, float Z)>();
 float clearReach = 512f;   // --clear-reach: how far each ray looks before reporting nothing
+// --clear-bounds nif|obnd: which box selects a broad-phase candidate. `nif` (the default) uses the
+// mesh's own bounds; `obnd` restores the record-box filter this probe shipped with, so the two can
+// be compared on real data instead of the difference being asserted.
+string clearBounds = "nif";
 // --euler renders the SAME cell under all six Euler compositions. The numeric tests could not
 // separate them (0.62%-0.69%, then 1.84%-2.08%), which is itself a finding — but a wrong order
 // scatters kit pieces by hundreds of units, and that is trivially visible even when it is
@@ -498,6 +502,7 @@ for (int i = argStart; i < args.Length; i++)
     else if (args[i] == "--clear-at" && i + 1 < args.Length)
     { var p = args[++i].Split(','); if (p.Length == 3) clearAt.Add((float.Parse(p[0]), float.Parse(p[1]), float.Parse(p[2]))); }
     else if (args[i] == "--clear-reach" && i + 1 < args.Length) clearReach = float.Parse(args[++i]);
+    else if (args[i] == "--clear-bounds" && i + 1 < args.Length) clearBounds = args[++i].ToLowerInvariant();
     else if (args[i] == "--nav-color" && i + 1 < args.Length) navColor = args[++i].ToLowerInvariant();
     else if (args[i] == "--npc" && i + 1 < args.Length) { npcSpecs.Add(args[++i]); textured = true; }
     else if (args[i] == "--npc-no-outfit") npcNoOutfit = true;
@@ -1002,7 +1007,7 @@ var baseType = new Dictionary<FormKey, string>();
 var baseObnd = new Dictionary<FormKey, (Vec3 Min, Vec3 Max)>();
 // Model-space render soups for the --inside-at ray test, by mesh path (the flat build keeps its
 // own cache further down; this one is filled only for the few refs whose box encloses a query).
-var insideGeo = new Dictionary<string, TriangleSoup?>(StringComparer.OrdinalIgnoreCase);
+var insideMesh = new Dictionary<string, (Aabb? Bounds, TriangleSoup? Soup)>(StringComparer.OrdinalIgnoreCase);
 var ltexToTxst = new Dictionary<FormKey, FormKey>();
 var ltexEditorId = new Dictionary<FormKey, string>();
 var txstDiffuse = new Dictionary<FormKey, string>();
@@ -1094,10 +1099,10 @@ bool IsControlEditorId(string ed) =>
 // behind all hit within arm's reach, a room's walls do not. The distances are printed per axis
 // and the caller applies its reach and count; a mesh that cannot be read is said, and the box
 // stands alone as the weaker answer.
-TriangleSoup? InsideSoupFor(string rel)
+(Aabb? Bounds, TriangleSoup? Soup) InsideMeshFor(string rel)
 {
-    if (insideGeo.TryGetValue(rel, out var cached)) return cached;
-    TriangleSoup? soup = null;
+    if (insideMesh.TryGetValue(rel, out var cached)) return cached;
+    (Aabb? Bounds, TriangleSoup? Soup) got = (null, null);
     var full = rel.StartsWith("meshes", StringComparison.OrdinalIgnoreCase) ? rel : Path.Combine("meshes", rel);
     var res = assets.ResolveForPlacement(full);
     if (res.Sources.Count > 0)
@@ -1106,12 +1111,19 @@ TriangleSoup? InsideSoupFor(string rel)
         if (bytes is not null)
         {
             var o = NifGeometry.Measure(bytes, includeTriangles: true);
-            if (o.Model?.Soup is { TriangleCount: > 0 and <= 300_000 } s) soup = s;
+            // The BOUNDS survive the triangle cap: a mesh too big to hold as a soup can still say
+            // how far it reaches, and that is exactly what the broad phase needs. Keeping the two
+            // apart is what lets an over-cap ref be reported as UNREADABLE for the ray test while
+            // still being admitted as a candidate rather than silently dropped.
+            var b = o.Model?.Bounds;
+            got = (b is { IsEmpty: false } ? b : null,
+                   o.Model?.Soup is { TriangleCount: > 0 and <= 300_000 } sp ? sp : null);
         }
     }
-    insideGeo[rel] = soup;
-    return soup;
+    insideMesh[rel] = got;
+    return got;
 }
+TriangleSoup? InsideSoupFor(string rel) => InsideMeshFor(rel).Soup;
 // Nearest hit along a ray against a world-space soup (Möller–Trumbore, both faces), or null
 // when nothing is hit within `limit`.
 static float? NearestHit(Vector3 o, Vector3 d, Vector3[] v, int[] idx, float limit)
@@ -2351,7 +2363,7 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot)
             // geometry, and what it could not see at all. The last one is the honest limit — a ref
             // with no usable OBND never reaches the ray test, so "nothing near this point" is a
             // statement about the boxes as much as about the meshes.
-            int candidates = 0, meshed = 0, unread = 0, noBox = 0, noMesh = 0;
+            int candidates = 0, meshed = 0, unread = 0, noBox = 0, noMesh = 0, obndOnly = 0, obndWouldMiss = 0;
             foreach (var r in winRef.Values)
             {
                 if (r.Deleted || DisabledWhy(r) is not null || r.Base is not { } bk) continue;
@@ -2361,14 +2373,46 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot)
                 if (!baseMesh.TryGetValue(bk, out var bm)) { noMesh++; continue; }
                 if (Path.GetFileName(bm).StartsWith("MarkerX", StringComparison.OrdinalIgnoreCase)
                     || bm.Replace('/', '\\').Contains(@"effects\", StringComparison.OrdinalIgnoreCase)) continue;
-                if (!baseObnd.TryGetValue(bk, out var ob)) { noBox++; continue; }
-                var model = new Aabb(ob.Min, ob.Max, false);
-                if (model.Size.X <= 0 && model.Size.Y <= 0 && model.Size.Z <= 0) { noBox++; continue; }
-                var box = SpatialOverlap.ToWorld(model, r.Position, r.Rotation, r.Scale);
+                // WHICH BOX SELECTS A CANDIDATE. Record OBND is authored data and it can be present
+                // and WRONG -- undersized, or offset from the mesh it claims to bound. A wrong box
+                // rejects the ref here, silently, and never touches the missing-box count, so an
+                // answer of "nothing found" over "zero coverage gaps" proved nothing about the
+                // geometry (reported by Piranha against the first version of this probe). The mesh's
+                // OWN bounds are the conservative choice: they come from the thing being tested
+                // rather than from a record describing it, and they survive the triangle cap, so an
+                // over-cap ref is admitted as a candidate and then reported UNREADABLE rather than
+                // dropped. OBND is the fallback when the mesh cannot be read at all, and that
+                // fallback is COUNTED -- a ref selected by a box nobody verified is a coverage
+                // caveat, not a clean answer. `--clear-bounds obnd` restores the old filter so the
+                // difference stays measurable rather than asserted.
+                var nifBounds = clearBounds == "obnd" ? null : InsideMeshFor(bm).Bounds;
+                Aabb obndWorld = Aabb.Empty;
+                bool haveObnd = false;
+                if (baseObnd.TryGetValue(bk, out var ob))
+                {
+                    var model = new Aabb(ob.Min, ob.Max, false);
+                    if (!(model.Size.X <= 0 && model.Size.Y <= 0 && model.Size.Z <= 0))
+                    {
+                        obndWorld = SpatialOverlap.ToWorld(model, r.Position, r.Rotation, r.Scale);
+                        haveObnd = !obndWorld.IsEmpty;
+                    }
+                }
+                Aabb box;
+                bool fromNif = nifBounds is { IsEmpty: false };
+                if (fromNif)
+                    box = SpatialOverlap.ToWorld(nifBounds!.Value, r.Position, r.Rotation, r.Scale);
+                // Only a FALLBACK counts: in the `obnd` arm every ref is selected that way by
+                // design, and labelling 555 refs "their mesh could not be read" would be a false
+                // coverage caveat in the arm that exists for comparison.
+                else if (haveObnd) { box = obndWorld; if (clearBounds != "obnd") obndOnly++; }
+                else { noBox++; continue; }
                 if (box.IsEmpty) { noBox++; continue; }
                 if (SpatialOverlap.BoxDistance(box, sweep) > 0f) continue;
+                // Admitted. Would the record's own box have admitted it too? The count is the
+                // measurement behind the claim, one per query rather than a survey.
+                if (fromNif && (!haveObnd || SpatialOverlap.BoxDistance(obndWorld, sweep) > 0f)) obndWouldMiss++;
                 candidates++;
-                if (InsideSoupFor(bm) is not { } soup) { unread++; continue; }
+                if (InsideMeshFor(bm).Soup is not { } soup) { unread++; continue; }
                 meshed++;
                 var world = SpatialOverlap.TransformSoup(soup, r.Position, r.Rotation, r.Scale);
                 for (int k = 0; k < dirs.Length; k++)
@@ -2407,8 +2451,10 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot)
             Console.WriteLine($"   clear-at {qx:0},{qy:0},{qz:0}: nearest placed geometry on each world axis "
                             + $"within {clearReach:0} u — {candidates} candidate(s) in the broad phase, {meshed} with a "
                             + $"readable mesh, {unread} unreadable, {noBox} physical ref(s) skipped for want of a usable OBND, "
-                            + $"{noMesh} physical ref(s) with no model at all; {terrainNote} "
-                            + "(the broad phase is OBND-based: a ref it cannot see is not evidence of open space; "
+                            + $"{noMesh} physical ref(s) with no model at all, {obndOnly} selected by record OBND "
+                            + $"because their mesh could not be read, {obndWouldMiss} admitted by mesh bounds that the "
+                            + $"record box alone would have excluded; {terrainNote} "
+                            + $"(broad phase: {(clearBounds == "obnd" ? "RECORD OBND \u2014 the legacy arm, kept for comparison; a wrong box drops a ref silently" : "the mesh's own NIF bounds, with record OBND only as a counted fallback")}; "
                             + "the four lateral rays ignore terrain)");
             for (int k = 0; k < dirs.Length; k++)
             {

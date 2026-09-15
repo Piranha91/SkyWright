@@ -299,7 +299,9 @@ CLEAR_HEAD = re.compile(
     r"^\s*clear-at (-?\d+),(-?\d+),(-?\d+): nearest placed geometry on each world axis within "
     r"([\d.]+) u . (\d+) candidate\(s\) in the broad phase, (\d+) with a readable mesh, "
     r"(\d+) unreadable, (\d+) physical ref\(s\) skipped for want of a usable OBND, "
-    r"(\d+) physical ref\(s\) with no model at all; terrain: (.*?) \(the broad phase")
+    r"(\d+) physical ref\(s\) with no model at all, (\d+) selected by record OBND because their "
+    r"mesh could not be read, (\d+) admitted by mesh bounds that the record box alone would have "
+    r"excluded; terrain: (.*?) \(broad phase")
 CLEAR_ROW = re.compile(
     r"^\s*([+-][xy]|up|down)\s+(?:([\d.]+) u\s+"
     r"((?:\S{6}:.+?\.es[pml])|(?:000000:TERRAIN))\s{2}(\S+)\s{2}at |-\s+nothing within )")
@@ -454,7 +456,8 @@ class Probe:
                 cur = out.setdefault((int(m[1]), int(m[2]), int(m[3])), {
                     "reach": float(m[4]), "candidates": int(m[5]), "meshed": int(m[6]),
                     "unread": int(m[7]), "no_box": int(m[8]), "no_mesh": int(m[9]),
-                    "terrain": m[10], "axes": {}})
+                    "obnd_only": int(m[10]), "obnd_would_miss": int(m[11]),
+                    "terrain": m[12], "axes": {}})
                 continue
             if cur is None:
                 continue
@@ -1192,6 +1195,13 @@ def support_verdict(entry, eye, floor_z, args):
                      "never offered them to the ray test")
     if entry["unread"]:
         blind.append(f"{entry['unread']} candidate mesh(es) could not be read")
+    # A ref the broad phase could only select by its RECORD box is a ref whose real extent nobody
+    # read. That box can be present and wrong -- undersized, or offset from the mesh it claims to
+    # bound -- and a wrong box drops the ref without leaving a trace, which is why the missing-box
+    # count alone never established an absence (Piranha, 2026-09-14).
+    if entry.get("obnd_only"):
+        blind.append(f"{entry['obnd_only']} ref(s) could be selected only by their record OBND, "
+                     "whose agreement with the mesh nobody verified")
     # Outdoors the ground is a LAND heightmap, not a placed ref. --clear-at reads it for the two
     # vertical rays, but only when the run BUILT it -- and a run that did not (`--no-terrain`, or
     # no LAND record at that XY) has not looked at the thing an exterior camera is standing on.
@@ -1220,7 +1230,9 @@ def support_verdict(entry, eye, floor_z, args):
                                   "incomplete: " + "; ".join(blind))
         return "contradicted", (f"NO geometry or ground below it within {reach:.0f} u -- nothing "
                                 f"holds this eye up on any storey ({entry['candidates']} candidate(s) "
-                                f"tested, all with readable meshes; {terrain})")
+                                f"tested on their own mesh bounds, all with readable meshes, "
+                                f"{entry.get('obnd_would_miss', 0)} of them a ref the record box "
+                                f"alone would have excluded; {terrain})")
     surface = eye[2] - down["dist"]
     off = surface - floor_z
     who = down["edid"] or down["formkey"]
@@ -1290,10 +1302,17 @@ def inside_verdict(entry, args):
     within arm's reach, a room's walls do not. Geometry within --inside-reach on at least
     --inside-rays of the six axes is ENCLOSED -- a refusal naming the ref. A ref whose mesh could
     not be read falls back to the box with --inside-cap, and says so: a weaker answer, stated.
+
+    A mesh too big to read used to be waved through as "a room shell". That was an assumption of
+    exactly the kind this planner's placement arm was corrected for: the box was the only evidence,
+    and a box cannot tell a shell from a solid. It is now UNRESOLVED -- the eye was not tested, the
+    camera does not publish, and finding support underneath does not make it unobstructed
+    (Piranha, 2026-09-14). Three outcomes, not two: `inside` is a positive refusal naming the ref,
+    `unresolved` is an untested eye, and only `clear` is a pass.
     """
     if entry is None:
         return "unknown", [], ["inside: no --inside-at answer for this point"]
-    fails, notes = [], []
+    fails, notes, untested = [], [], []
 
     def fmt(rays):
         return " ".join(f"{k} {'-' if rays.get(k) is None else f'{rays[k]:.0f}'}" for k in RAY_AXES)
@@ -1313,11 +1332,16 @@ def inside_verdict(entry, args):
             fails.append(f"inside: eye inside `{name}`'s box ({h['type']}, {dims}) and its mesh "
                          "could not be read to test further -- the box stands")
         else:
-            notes.append(f"inside: within room-scale box `{name}` ({h['maxdim']:.0f} u), mesh not "
-                         f"read -- over --inside-cap {args.inside_cap:.0f}, taken as a shell")
+            untested.append(f"inside: within room-scale box `{name}` ({h['type']}, {dims}) and its "
+                            f"mesh could not be read -- over --inside-cap {args.inside_cap:.0f}. "
+                            "Whether the eye is INSIDE that ref or in the room it walls is UNTESTED: "
+                            "the box was the only evidence and a box cannot tell a shell from a "
+                            "solid. Support under the eye does not make it unobstructed")
     if not entry:
-        notes.append("inside: no physical ref's box encloses the eye")
-    return ("inside" if fails else "clear"), fails, notes
+        notes.append("inside: no physical ref's box encloses the eye -- note this nomination is by "
+                     "record OBND, so a box that understates its mesh can fail to nominate at all")
+    kind = "inside" if fails else ("unresolved" if untested else "clear")
+    return kind, fails + untested, notes
 
 
 def evaluate(eye, subjects, floor_z, nav_entry, args, aim, skip_nav=False, inside_entry=None,
@@ -1932,10 +1956,11 @@ def cmd_plan(args):
         scored.append(v2)
     ok = [v for v in scored if v["ok"]]
     ok.sort(key=lambda v: -v["score"])
-    n_inside = sum(1 for v in scored if v.get("inside") == "inside")
+    n_inside = sum(1 for v in scored if v.get("inside") in ("inside", "unresolved", "unknown"))
     n_unsup = sum(1 for v in scored if v.get("support") in ("contradicted", "unresolved", "unknown"))
     print(f"  {len(ok)} of {len(scored)} survive the placement test; "
-          f"{len(scored) - len(ok)} refused ({n_inside} for an eye inside a physical ref's box, "
+          f"{len(scored) - len(ok)} refused ({n_inside} for an eye inside -- or untested against -- "
+          f"a physical ref's box, "
           f"{n_unsup} with no placed floor under the eye on its own storey)")
     report_refusals(scored)
     if not ok:
