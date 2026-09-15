@@ -1892,12 +1892,57 @@ def report_refusals(scored):
         print(f"    {n:5d}  {k}")
 
 
-def pose_block(v, fov, label=""):
+def aspect_spec_for(aspect, spec=None):
+    """Serialize the RESOLVED aspect in syntax the renderer accepts.
+
+    Two ways a caller's own spelling betrays this, both real:
+
+      * It can be STALE. `--from-profile` overwrites args.aspect from the game's ini and leaves
+        aspect_spec at its parse-time "1:1", so an effective 1.77778 exported as `--aspect 1:1` --
+        a command that reads as square and silently is (Piranha, 2026-09-15).
+      * It can be syntax the RENDERER does not take. shotplan accepts `16x9` (it rewrites `x` to
+        `:` before parsing); viewprobe splits on `:` only, so `16x9` reaches it as a bare float
+        parse and is refused. A command the planner prints must run.
+
+    So the ratio is the authority and the spelling is only a convenience: a spec is used only when
+    it PARSES to the resolved ratio, and then it is re-emitted canonically with a colon. Anything
+    else -- stale, unparseable, or a bare decimal -- is serialized from the ratio itself.
+    """
+    if spec:
+        parts = str(spec).replace("x", ":").replace("X", ":").split(":")
+        try:
+            if len(parts) == 2:
+                w, h = float(parts[0]), float(parts[1])
+                if h > 0 and abs(w / h - float(aspect)) <= 1e-6:
+                    # Canonical colon form, integers where they are integers: `16:9`, not `16x9`.
+                    return (f"{int(w)}:{int(h)}" if w.is_integer() and h.is_integer()
+                            else f"{w:g}:{h:g}")
+            elif len(parts) == 1 and abs(float(parts[0]) - float(aspect)) <= 1e-6:
+                return f"{float(aspect):.10g}"
+        except (TypeError, ValueError):
+            pass
+    return f"{float(aspect):.10g}"
+
+
+def aspect_flag(aspect, spec=None):
+    """The `--aspect` viewprobe needs to capture the frame this pose was PLANNED against, or "".
+
+    A capture command that omits it renders viewprobe's square whatever the plan said, which keeps
+    the vertical angle and crops the horizontal -- so the delivered picture stops matching the
+    framing numbers that qualified the pose, and nothing errors (Piranha, 2026-09-15). Square plans
+    emit nothing, because square is what viewprobe does without being asked.
+    """
+    if aspect is None or abs(float(aspect) - 1.0) <= 1e-6:
+        return ""
+    return f" --aspect {aspect_spec_for(aspect, spec)}"
+
+
+def pose_block(v, fov, label="", aspect=None, aspect_spec=None):
     e, yaw, pitch = v["eye"], v["yaw"], v["pitch"]
     return "\n".join([
         f"  {label}eye        {e[0]:.1f}, {e[1]:.1f}, {e[2]:.1f}",
         f"  viewprobe  --eye {e[0]:.1f},{e[1]:.1f},{e[2]:.1f} --yaw {yaw:.1f} "
-        f"--pitch {pitch:.1f} --fov {fov:.2f}",
+        f"--pitch {pitch:.1f} --fov {fov:.2f}{aspect_flag(aspect, aspect_spec)}",
         f"  DevBench   camera action=drive "
         f"{{\"x\": {e[0]:.1f}, \"y\": {e[1]:.1f}, \"z\": {e[2]:.1f}, "
         f"\"yaw\": {math.radians(yaw):.4f}, \"pitch\": {math.radians(pitch):.4f}}}",
@@ -2114,7 +2159,8 @@ def cmd_plan(args):
                 for t in verification["targets"] if t["status"] not in ("clear", "confirmed")]
 
     print(f"\n=== chosen ({status.upper()}) ===")
-    print(pose_block(best, args.fov))
+    print(pose_block(best, args.fov, aspect=getattr(args, "aspect", None),
+                     aspect_spec=getattr(args, "aspect_spec", None)))
     print(f"  pose id    {pose_id}   (the camera, its targets and its policy; every artifact "
           f"below carries it)")
     print()
@@ -2159,6 +2205,14 @@ def cmd_plan(args):
                          f"{best['_standoff']:.0f} u, subjects fill {best['fill']:.2f} of the "
                          f"half-frame, nearest obstruction behind the camera "
                          f"{best['wall_margin']:.0f} u further out")}
+        # The canvas SHAPE travels with the shot, or `viewprobe --worklist` -- the render this very
+        # function advertises two lines below -- renders the square and silently undoes the plan.
+        # Written only when the plan is non-square. A shot with no `aspect` INHERITS THE RUN'S
+        # setting, which is square unless the command line said otherwise -- so omitting it leaves
+        # a worklist identical to every one written before this field existed, without asserting
+        # "square" over a run that asked for something else.
+        if abs(float(getattr(args, "aspect", 1.0)) - 1.0) > 1e-6:
+            shot["aspect"] = round(float(args.aspect), 6)
         if doors:
             shot["doors"] = [d["formkey"] for d in doors]
         wl = {
@@ -2310,7 +2364,9 @@ def cmd_check(args):
         print("  REFUSED -- " + "; ".join(fails))
     else:
         print("  ACCEPTED")
-        print(pose_block({"eye": eye, "yaw": yaw, "pitch": pitch}, args.fov))
+        print(pose_block({"eye": eye, "yaw": yaw, "pitch": pitch}, args.fov,
+                         aspect=getattr(args, "aspect", None),
+                         aspect_spec=getattr(args, "aspect_spec", None)))
     if args.json:
         with open(args.json, "w", encoding="utf-8") as f:
             json.dump({"cell": args.cell, "floorZ": floor_z, "aim": aim,
@@ -2471,6 +2527,10 @@ def apply_profile_frame(args):
     fr = game_frame(inst, prof, gm, args.my_games, getattr(args, "fov_setting", None))
     print_frame(fr)
     args.fov, args.aspect = fr["fov_vertical"], fr["aspect"]
+    # And the SPELLING, or the exported command keeps saying whatever was on the command line --
+    # "1:1" by default, while the effective ratio is the game's. The profile knows its own pixels,
+    # so the pair is exact rather than a rounded ratio.
+    args.aspect_spec = f"{fr['width']}:{fr['height']}"
     print()
 
 
@@ -2691,6 +2751,10 @@ def main(argv=None):
     args = ap.parse_args(argv)
     args.passthrough = passthrough
     if isinstance(getattr(args, "aspect", None), str):
+        # Keep the SPELLING the caller used. The ratio is what the framing maths needs, but a
+        # capture command that says `--aspect 16:9` is the one they can read back against the plan,
+        # and round-tripping 1.7778 through a float loses that.
+        args.aspect_spec = args.aspect
         a = args.aspect.replace("x", ":").split(":")
         args.aspect = float(a[0]) / float(a[1]) if len(a) == 2 else float(a[0])
     if hasattr(args, "map_yaws"):

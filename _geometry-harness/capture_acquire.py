@@ -488,6 +488,12 @@ def build_result(request: dict, parts: list[dict], points: dict, source: dict, p
                       expectedFingerprint=expected, observedFingerprint=observed)
 
     pose = (verification or {}).get("pose") or {}
+    # THE EXPORTED COMMAND MUST CARRY THE ASPECT. It used to emit eye/yaw/pitch/fov only, beside a
+    # `camera.aspect` of 1.7778 -- so a caller who followed the command exactly got viewprobe's
+    # square, which keeps the vertical angle and crops about a third off the horizontal, and the
+    # framing numbers that qualified this camera stopped describing the picture they took. Nothing
+    # errored; the two fields simply disagreed and only the one nobody executes was right (Piranha,
+    # 2026-09-15, on a sequence captured square from exactly this command).
     camera = {"cell": plan.get("cell"),
               "eye": list(chosen["eye"]), "yaw": chosen["yaw"], "pitch": chosen["pitch"],
               "fov": pose.get("fov"), "aspect": pose.get("aspect"),
@@ -495,7 +501,8 @@ def build_result(request: dict, parts: list[dict], points: dict, source: dict, p
               "feet": plan.get("feet"), "floorZ": plan.get("floorZ"), "aim": plan.get("aim"),
               "viewprobe": (f"--eye {chosen['eye'][0]:.1f},{chosen['eye'][1]:.1f},"
                             f"{chosen['eye'][2]:.1f} --yaw {chosen['yaw']:.1f} "
-                            f"--pitch {chosen['pitch']:.1f} --fov {pose.get('fov')}")}
+                            f"--pitch {chosen['pitch']:.1f} --fov {pose.get('fov')}"
+                            + shotplan_mod.aspect_flag(pose.get("aspect")))}
     sequence = request.get("sequence") or {}
     states = [{"state": s, "poseId": plan["poseId"], "camera": camera,
                "onlyChangedProperty": sequence.get("onlyChangedProperty")}

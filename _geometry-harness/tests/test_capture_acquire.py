@@ -498,6 +498,86 @@ def case_publication_boundary(root: Path, packet: Path, rid: str, request: dict)
           f"got {refusal_code(saved, moved, 0)}")
 
 
+
+
+# --------------------------------------------------------------------------------------
+# case 7 -- the exported capture command carries the aspect (regression, Piranha 2026-09-15)
+# --------------------------------------------------------------------------------------
+
+def case_exported_command_keeps_the_aspect(root: Path, packet: Path, rid: str, request: dict):
+    """A camera planned for 16:9 must EXPORT as 16:9, not just record it in a field.
+
+    The acquisition document used to publish `camera.aspect: 1.7778` beside a `camera.viewprobe`
+    string of eye/yaw/pitch/fov only. Anyone who ran the command exactly as given got viewprobe's
+    square frame, which holds the vertical angle and crops about a third off the horizontal -- so
+    the delivered picture no longer matched the fill and centring numbers that qualified the
+    camera, and nothing errored, because the two fields simply disagreed and only the one nobody
+    executes was right. Found on a real sequence captured square from exactly this command.
+
+    Both directions are asserted. A regression that only checked the 16:9 arm would pass just as
+    well if the flag were emitted unconditionally, which would change every square capture that
+    ever worked.
+    """
+    # --- the non-square arm: the aspect reaches the command, and agrees with the field ---
+    proc, doc, _, _ = acquire(root, packet, rid, points_doc(rid, request["source"]["sha256"]),
+                              scene(), tag="aspect-wide")
+    ok = proc.returncode == 0 and doc and doc["status"] == "camera-ready"
+    check("a 16:9 camera still acquires", ok,
+          f"exit {proc.returncode}; " + " ".join((proc.stderr or proc.stdout).split())[-260:])
+    if not ok:
+        return
+
+    cam = doc["camera"]
+    cmd = cam["viewprobe"]
+    check("the 16:9 camera records a non-square aspect",
+          cam["aspect"] is not None and abs(float(cam["aspect"]) - 16 / 9) < 1e-3,
+          f"camera.aspect = {cam['aspect']!r}")
+    check("the EXPORTED command carries --aspect, not just the field beside it",
+          "--aspect" in cmd, f"camera.viewprobe = {cmd!r}")
+
+    if "--aspect" in cmd:
+        flag = cmd.split("--aspect", 1)[1].split()[0]
+        ratio = (float(flag.split(":")[0]) / float(flag.split(":")[1])
+                 if ":" in flag else float(flag))
+        check("the exported --aspect agrees with camera.aspect",
+              abs(ratio - float(cam["aspect"])) < 1e-3,
+              f"command says {flag!r} ({ratio:.6f}); field says {cam['aspect']}")
+        # The point of the flag is the frame it produces. Redo viewprobe's own arithmetic: at
+        # --size 1920 this aspect must give a 1080-tall canvas, not another 1920 square.
+        h = round(1920 / ratio / 2) * 2
+        check("following the exported command yields a 16:9 canvas, not a square",
+              h == 1080, f"--size 1920 with {flag!r} gives {1920}x{h}")
+
+    # The planner's own printed capture command is the same class of emitter, and had the same
+    # omission. Its stdout is kept as a receipt, so assert on what it actually printed.
+    stdout = Path(doc["receipts"]["plannerLog"]).read_text(encoding="utf-8", errors="replace")
+    lines = [l for l in stdout.splitlines() if "viewprobe  --eye" in l]
+    check("the planner PRINTS a capture command for the pose", bool(lines),
+          "no `viewprobe  --eye` line in the planner stdout")
+    if lines:
+        check("the planner's printed capture command carries --aspect too",
+              all("--aspect" in l for l in lines),
+              " | ".join(l.strip() for l in lines)[:300])
+
+    # --- the square arm: nothing is emitted, because square is viewprobe's default ---
+    square = points_doc(rid, request["source"]["sha256"])
+    square["camera"] = dict(square["camera"], aspect="1:1")
+    proc2, doc2, _, _ = acquire(root, packet, rid, square, scene(), tag="aspect-square")
+    ok2 = proc2.returncode == 0 and doc2 and doc2["status"] == "camera-ready"
+    check("a 1:1 camera still acquires", ok2,
+          f"exit {proc2.returncode}; " + " ".join((proc2.stderr or proc2.stdout).split())[-260:])
+    if ok2:
+        cmd2 = doc2["camera"]["viewprobe"]
+        check("a SQUARE camera exports no --aspect, so existing square commands are unchanged",
+              "--aspect" not in cmd2, f"camera.viewprobe = {cmd2!r}")
+        stdout2 = Path(doc2["receipts"]["plannerLog"]).read_text(encoding="utf-8",
+                                                                errors="replace")
+        printed = [l for l in stdout2.splitlines() if "viewprobe  --eye" in l]
+        check("the planner prints no --aspect for a square plan either",
+              printed and not any("--aspect" in l for l in printed),
+              " | ".join(l.strip() for l in printed)[:300])
+
+
 def main(argv):
     if len(argv) >= 2 and argv[0] == "--emit":
         root = Path(argv[1]).resolve()
@@ -528,6 +608,8 @@ def main(argv):
         case_packet_stays_declarative(root, packet, rid, request)
         print("\n-- case 6: the publication boundary (regression, review 2026-09-14)")
         case_publication_boundary(root, packet, rid, request)
+        print("\n-- case 7: the exported capture command keeps its aspect (regression 2026-09-15)")
+        case_exported_command_keeps_the_aspect(root, packet, rid, request)
 
     print()
     if FAILS:
