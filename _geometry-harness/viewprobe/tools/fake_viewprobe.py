@@ -34,6 +34,7 @@ Scene JSON:
      "clearObndWouldMiss": 0,        # candidates the record box alone would have excluded
      "insideObndOnly": 0,            # refs --inside-at could nominate only by their record box
      "insideUnreadable": 0,          # physical refs whose mesh would not read, so never ruled out
+     "insideCoverStyle": "mesh",     # "mesh" | "legacy" (the obnd arm) | "none" (older renderer)
      "configFingerprint": "<64 hex>",  # what viewprobe prints for a candidate configuration
      "configFingerprintAsks": [1]}     # print it only on these 1-based ASKING invocations
 """
@@ -250,11 +251,21 @@ def main(argv):
             lo, hi = declared(b)
             if lo[0] <= x <= hi[0] and lo[1] <= y <= hi[1] and lo[2] <= z <= hi[2]:
                 hits.append(b)
-        cover = (f"nominated by mesh bounds, {scene.get('insideObndOnly', 0)} by record OBND alone "
-                 f"(mesh unreadable), {scene.get('insideUnreadable', 0)} physical ref(s) whose mesh "
-                 "could not be read at all")
-        print(f"   inside-at {x},{y},{z}: {len(hits)} ref(s) whose box encloses it; {cover}" if hits
-              else f"   inside-at {x},{y},{z}: no physical ref's box encloses it; {cover}")
+        # `insideCoverStyle`: "mesh" (default) states the coverage, "legacy" reproduces the
+        # --inside-bounds obnd wording, "none" omits it entirely -- an older renderer's output.
+        style = scene.get("insideCoverStyle", "mesh")
+        if style == "none":
+            cover = None
+        elif style == "legacy":
+            cover = ("nominated by RECORD OBND (the legacy arm, kept for comparison: a box that "
+                     "understates its mesh nominates nothing)")
+        else:
+            cover = (f"nominated by mesh bounds, {scene.get('insideObndOnly', 0)} by record OBND "
+                     f"alone (mesh unreadable), {scene.get('insideUnreadable', 0)} physical ref(s) "
+                     "whose mesh could not be read at all")
+        tail = "" if cover is None else f"; {cover}"
+        print(f"   inside-at {x},{y},{z}: {len(hits)} ref(s) whose box encloses it{tail}" if hits
+              else f"   inside-at {x},{y},{z}: no physical ref's box encloses it{tail}")
         for b in hits:
             lo, hi = declared(b)
             dims = [hi[k] - lo[k] for k in range(3)]

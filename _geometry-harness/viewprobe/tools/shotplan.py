@@ -296,6 +296,11 @@ INSIDE_HEAD = re.compile(r"^\s*inside-at (-?\d+),(-?\d+),(-?\d+): (\d+ ref|no ph
 INSIDE_COVER = re.compile(
     r"nominated by mesh bounds, (\d+) by record OBND alone \(mesh unreadable\), "
     r"(\d+) physical ref\(s\) whose mesh could not be read at all")
+# The `--inside-bounds obnd` arm exists to reproduce the OLD nomination for comparison. Its answers
+# are a measurement of the legacy behaviour and must never qualify a production camera, so it is
+# recognised by name rather than left to fall through as "no statement" -- which is how a
+# comparison run could have published one.
+INSIDE_COVER_LEGACY = re.compile(r"nominated by RECORD OBND")
 INSIDE_ROW = re.compile(r"^\s*(\S{6}:.+?\.es[pml])\s{2}(\S+)\s{2}(\S+)\s{2}dims (-?\d+)x(-?\d+)x(-?\d+) u")
 INSIDE_RAYS = re.compile(r"\srays ((?:(?:[+-][xy]|up|down) (?:\d+|-)\s*){6})")
 # `--clear-at` header and rows: what placed mesh geometry is really around a point, on each world
@@ -438,8 +443,16 @@ class Probe:
                 c = INSIDE_COVER.search(ln)
                 # Carried on the LIST, so an empty nomination still arrives with its coverage --
                 # which is the whole point: the empty case is the one that used to read as clear.
-                cur.coverage = ({"obnd_only": int(c[1]), "unreadable": int(c[2])} if c
-                                else {"obnd_only": 0, "unreadable": 0, "stated": False})
+                # `source` is the load-bearing field: only "mesh" is evidence. A missing statement
+                # is NOT zero gaps, and the legacy comparison arm is not a production answer; both
+                # used to arrive as {0, 0} and read as fully-checked coverage.
+                if c:
+                    cur.coverage = {"source": "mesh", "obnd_only": int(c[1]),
+                                    "unreadable": int(c[2])}
+                elif INSIDE_COVER_LEGACY.search(ln):
+                    cur.coverage = {"source": "obnd-legacy", "obnd_only": 0, "unreadable": 0}
+                else:
+                    cur.coverage = {"source": None, "obnd_only": 0, "unreadable": 0}
                 continue
             if cur is None:
                 continue
@@ -1362,6 +1375,22 @@ def inside_verdict(entry, args):
     # -- the exact step that let a camera publish from "no physical ref's box encloses the eye"
     # (Piranha, 2026-09-14).
     cover = getattr(entry, "coverage", None) or {}
+    # WHAT MAKES AN ANSWER USABLE. Clearance is a positive claim -- "the refs that could enclose
+    # this eye were nominated from their own meshes and none does" -- and it can only be made by a
+    # run that SAID so. A missing statement is not a statement of zero gaps: it is an older
+    # renderer, a different arm, or output nobody can attribute, and reading it as full coverage is
+    # how a camera gets qualified by evidence that was never produced (Piranha, 2026-09-14).
+    source = cover.get("source")
+    if source == "mesh":
+        pass
+    elif source == "obnd-legacy":
+        untested.append("inside: this answer comes from the `--inside-bounds obnd` COMPARISON arm, "
+                        "which reproduces the old record-box nomination on purpose. It measures the "
+                        "legacy behaviour and cannot qualify a camera")
+    else:
+        untested.append("inside: the nomination carries NO mesh-coverage statement -- this renderer "
+                        "output does not say which refs were nominated from their own meshes, or "
+                        "how many it could not read. Absent coverage is not zero gaps")
     gaps = []
     if cover.get("unreadable"):
         gaps.append(f"{cover['unreadable']} physical ref(s) whose mesh could not be read at all, so "
@@ -1374,7 +1403,7 @@ def inside_verdict(entry, args):
             untested.append("inside: no ref's geometry encloses the eye, but the nomination was "
                             "INCOMPLETE -- " + "; ".join(gaps) + ". An absence over an incomplete "
                             "nomination is not clearance")
-        else:
+        elif source == "mesh":
             notes.append("inside: no physical ref's geometry encloses the eye; every physical ref "
                          "in the cell was nominated from its own mesh bounds and tested")
     elif gaps:

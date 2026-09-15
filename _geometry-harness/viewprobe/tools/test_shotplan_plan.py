@@ -283,7 +283,8 @@ def off_mesh_scene(**kw):
           "clearNoBox": kw.pop("no_box", 0), "clearUnread": kw.pop("unread", 0),
           "clearObndOnly": kw.pop("obnd_only", 0),
           "insideObndOnly": kw.pop("nom_obnd_only", 0),
-          "insideUnreadable": kw.pop("nom_unreadable", 0)}
+          "insideUnreadable": kw.pop("nom_unreadable", 0),
+          "insideCoverStyle": kw.pop("cover_style", "mesh")}
     if (terrain := kw.pop("terrain", None)) is not None:
         sc["clearTerrain"] = terrain
     if not kw.pop("no_floor", False):
@@ -569,12 +570,64 @@ def test_a_complete_empty_nomination_is_still_clear():
           "every physical ref" in out, "")
 
 
+def test_missing_coverage_statement_is_not_clearance():
+    """Absent coverage is NOT zero gaps.
+
+    The parser recorded a missing statement as `stated: False` and the verdict never read the
+    field, so output that never said what it had checked -- an older renderer, a build predating
+    the statement, anything unattributable -- returned `clear` AND printed "every physical ref in
+    the cell was nominated from its own mesh bounds and tested". It claimed the coverage it had
+    just failed to receive. Clearance is a positive claim and now requires a run that made it.
+    """
+    code, out, doc = off_mesh_check(off_mesh_scene(cover_style="none"))
+    fails = "; ".join(doc["fails"])
+    check("missing coverage: the camera is refused", code == 1, f"exit {code}")
+    check("missing coverage: and the reason is the absent statement",
+          "NO mesh-coverage statement" in fails, fails)
+    check("missing coverage: it says absence is not zero gaps",
+          "not zero gaps" in fails, fails)
+    check("missing coverage: and the fully-checked claim is NOT printed",
+          "every physical ref" not in out,
+          "" if "every physical ref" not in out else "the unbacked coverage claim WAS printed")
+
+
+def test_legacy_comparison_output_cannot_qualify_a_camera():
+    """`--inside-bounds obnd` reproduces the OLD nomination on purpose.
+
+    It is a measurement of the legacy behaviour and an instrument for the A/B in the result. It
+    must never qualify a production camera -- which it could, because its header says something the
+    coverage parser did not recognise and unrecognised read as fully checked.
+    """
+    code, out, doc = off_mesh_check(off_mesh_scene(cover_style="legacy"))
+    fails = "; ".join(doc["fails"])
+    check("legacy arm: the camera is refused", code == 1, f"exit {code}")
+    check("legacy arm: and is named as the comparison arm",
+          "COMPARISON arm" in fails, fails)
+    check("legacy arm: which cannot qualify a camera",
+          "cannot qualify a camera" in fails, fails)
+
+
 def test_incomplete_nomination_prevents_publication():
     """Refusal has to stop the ARTIFACT, not just set an exit code.
 
     The acquisition path reads the worklist the planner emits; an untested eye that still wrote one
     would publish a camera nobody checked, which is the outcome all of this exists to prevent.
     """
+    # Three ways the evidence can fall short, all of which must stop the artifact: a ref that could
+    # not be read, a renderer that never stated its coverage, and the legacy comparison arm.
+    for label, key, value in (("unreadable ref", "insideUnreadable", 1),
+                              ("missing coverage statement", "insideCoverStyle", "none"),
+                              ("legacy comparison arm", "insideCoverStyle", "legacy")):
+        wl2 = os.path.join(tempfile.mkdtemp(), "wl.json")
+        sc2 = room(PLINTH)
+        sc2[key] = value
+        code2, _ = run_cli(["plan", "TestCell", "--subject", "0,0,0=target", "--vp", FAKE,
+                            "--quiet", "--worklist", wl2], sc2)
+        doc2 = json.load(open(wl2, encoding="utf-8"))
+        check(f"publication ({label}): refused and no camera published",
+              code2 != 0 and doc2.get("status") == "incomplete" and "cells" not in doc2,
+              f"exit {code2}, {json.dumps(doc2)[:80]}")
+
     wl = os.path.join(tempfile.mkdtemp(), "wl.json")
     sc = room(PLINTH)
     sc["insideUnreadable"] = 1
@@ -1050,6 +1103,8 @@ ALL = [test_failed_verification_cannot_export_success,
        test_incomplete_nomination_is_not_clearance,
        test_nomination_by_unverified_record_box_is_not_clearance,
        test_a_complete_empty_nomination_is_still_clear,
+       test_missing_coverage_statement_is_not_clearance,
+       test_legacy_comparison_output_cannot_qualify_a_camera,
        test_incomplete_nomination_prevents_publication,
        test_support_does_not_override_the_other_placement_arms,
        test_surface_hit_is_confirmed,
