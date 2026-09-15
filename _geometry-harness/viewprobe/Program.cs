@@ -412,6 +412,11 @@ string? emitBats = null;
 // --bats-profiles <A,B>: enable that mod in these profiles and DISABLE it in every other profile of
 // the instance. Opt-in, because it edits MO2's own modlist.txt.
 var batsProfiles = new List<string>();
+// --depth-dump FILE: write the finished frame's depth buffer — the array --pick unprojects — to a
+// file, verbatim (size*size float32 window depth, GL rows bottom-up, 1.0 = background). Opt-in,
+// one explicit-camera capture only; a caller that wants to read a whole frame's depth instead of
+// asking pixel by pixel (the depth-survey demonstration, 2026-09-14).
+string? depthDump = null;
 for (int i = argStart; i < args.Length; i++)
 {
     if (args[i] == "--out" && i + 1 < args.Length) outDir = args[++i];
@@ -465,6 +470,7 @@ for (int i = argStart; i < args.Length; i++)
     else if (args[i] == "--msaa" && i + 1 < args.Length) msaa = int.Parse(args[++i]);
     else if (args[i] == "--pick" && i + 1 < args.Length)
     { var p = args[++i].Split(','); if (p.Length == 2) picks.Add((int.Parse(p[0]), int.Parse(p[1]))); }
+    else if (args[i] == "--depth-dump" && i + 1 < args.Length) { depthDump = args[++i]; textured = true; }
     else if (args[i] == "--list-terrain") listTerrain = true;
     else if (args[i] == "--find-ltex" && i + 1 < args.Length) findLtex = args[++i];
     else if (args[i] == "--no-cell-outline") cellOutline = false;
@@ -630,7 +636,7 @@ for (int i = argStart; i < args.Length; i++)
 // game/out). Embedded in every output PNG — a replay from these is BYTE-exact, which the
 // resolved camera pose alone is not: a --look camera replayed as the equivalent --yaw/--pitch
 // composes the same view direction but a sub-pixel-different frame (measured).
-var pathFlags = new HashSet<string>(StringComparer.Ordinal) { "--instance", "--profile", "--game", "--out" };
+var pathFlags = new HashSet<string>(StringComparer.Ordinal) { "--instance", "--profile", "--game", "--out", "--depth-dump" };
 var replArgs = new List<string>();
 for (int ai = 0; ai < args.Length; ai++)
 {
@@ -638,6 +644,12 @@ for (int ai = 0; ai < args.Length; ai++)
     replArgs.Add(args[ai].Contains(' ') ? $"\"{args[ai]}\"" : args[ai]);
 }
 string replayArgs = string.Join(' ', replArgs);
+if (depthDump is not null && (interactiveMode || compare is not null || worklistPaths.Count > 0))
+{
+    Console.Error.WriteLine("--depth-dump writes the depth buffer of ONE explicit-camera capture (--eye with --yaw/--pitch or --look). "
+                          + "It is refused with --interactive, --compare and worklists, which render several frames or none.");
+    return 2;
+}
 
 if (!drawNav) navMode = "off";
 if ((conflictsPath is not null || redSpecs.Count > 0) && !navModeExplicit) navMode = "wire";
@@ -3603,7 +3615,8 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot)
                    diffs ?? noDiff, diffColor, picks, captionLines, colourCaptions, npcActors, npcPucksOn, routeRenders,
                    gridRender, overlayLines, keepFx, fxStatic, listMeshes, waterPlanes, coverings, planes, showPlanes, occlusionMode,
                    size, outFile, reportMode, camMeta, planeReport: planeReportSink, bosMode: bosMode, stateMode: stateView, stateName: stateArm?.Name ?? "",
-                   visibilityBudget: visibilityBudget, navColourGroups: navColourGroups, refSurface: refSurface);
+                   visibilityBudget: visibilityBudget, navColourGroups: navColourGroups, refSurface: refSurface,
+                   depthDumpPath: depthDump);
         }
 
         if (compare is { } cmp)

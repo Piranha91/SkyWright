@@ -333,7 +333,8 @@ static class TexturedScene
         string stateName = "",                             // --state: the state's name for the caption and the window
         int visibilityBudget = OcclusionState.DefaultVisibilityBudget,
         IReadOnlyList<NavColourGroup>? navColourGroups = null,
-        bool refSurface = false)
+        bool refSurface = false,
+        string? depthDumpPath = null)                   // --depth-dump: write the finished frame's window depth (the array --pick reads) here, verbatim
     {
         var logger = new ConsoleCvLogger();
         var gate = new CharacterViewerLogGate { Verbose = Environment.GetEnvironmentVariable("VP_CV_VERBOSE") == "1" };
@@ -2478,8 +2479,21 @@ static class TexturedScene
             return shapes;
         }
 
-        float[]? pickDepth = picks.Count > 0 || npcActors.Count > 0 ? new float[size * size] : null;
+        float[]? pickDepth = picks.Count > 0 || npcActors.Count > 0 || depthDumpPath is not null ? new float[size * size] : null;
         var pixels = Draw(pickDepth);
+        // --depth-dump: the finished frame's depth buffer, exactly as --pick reads it below — size*size
+        // float32 window depth in [0,1], GL row order (row 0 = the BOTTOM image row), 1.0 = background.
+        // A distance along the view axis is the standard perspective inverse with the near/far printed
+        // here; a distance along a pixel's own ray follows from that pixel's angles. Nothing else in the
+        // output changes: the file is written beside whatever the caller asked for and named on the console.
+        if (depthDumpPath is not null && pickDepth is not null)
+        {
+            var dumpDir = Path.GetDirectoryName(Path.GetFullPath(depthDumpPath));
+            if (!string.IsNullOrEmpty(dumpDir)) Directory.CreateDirectory(dumpDir);
+            File.WriteAllBytes(depthDumpPath, System.Runtime.InteropServices.MemoryMarshal.AsBytes(pickDepth.AsSpan()).ToArray());
+            Console.WriteLine($"   depth-dump: {Path.GetFullPath(depthDumpPath)}  ({size}x{size} float32 window depth, rows bottom-up, "
+                            + $"1.0 = background; near {NearPlane:0} far {FarPlane:0}; fov {cam.FovDeg:0.##} square)");
+        }
         if (wireProg != 0) { GL.DeleteProgram(wireProg); GL.DeleteVertexArray(wireVao); GL.DeleteBuffer(wireVbo); }
 
         // --pick: "what is at this pixel". Reads the finished frame's depth and unprojects it,
