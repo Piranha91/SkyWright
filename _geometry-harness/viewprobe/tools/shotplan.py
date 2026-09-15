@@ -299,9 +299,10 @@ CLEAR_HEAD = re.compile(
     r"^\s*clear-at (-?\d+),(-?\d+),(-?\d+): nearest placed geometry on each world axis within "
     r"([\d.]+) u . (\d+) candidate\(s\) in the broad phase, (\d+) with a readable mesh, "
     r"(\d+) unreadable, (\d+) physical ref\(s\) skipped for want of a usable OBND, "
-    r"(\d+) physical ref\(s\) with no model at all")
+    r"(\d+) physical ref\(s\) with no model at all; terrain: (.*?) \(the broad phase")
 CLEAR_ROW = re.compile(
-    r"^\s*([+-][xy]|up|down)\s+(?:([\d.]+) u\s+(\S{6}:.+?\.es[pml])\s{2}(\S+)\s{2}at |-\s+nothing within )")
+    r"^\s*([+-][xy]|up|down)\s+(?:([\d.]+) u\s+"
+    r"((?:\S{6}:.+?\.es[pml])|(?:000000:TERRAIN))\s{2}(\S+)\s{2}at |-\s+nothing within )")
 # viewprobe's own configuration fingerprint, printed for a candidate configuration (--order).
 CONFIG_FINGERPRINT = re.compile(r"capture input configuration:\s*([0-9a-fA-F]{16,64})")
 RAY_AXES = ("+x", "-x", "+y", "-y", "up", "down")
@@ -452,7 +453,8 @@ class Probe:
             if m:
                 cur = out.setdefault((int(m[1]), int(m[2]), int(m[3])), {
                     "reach": float(m[4]), "candidates": int(m[5]), "meshed": int(m[6]),
-                    "unread": int(m[7]), "no_box": int(m[8]), "no_mesh": int(m[9]), "axes": {}})
+                    "unread": int(m[7]), "no_box": int(m[8]), "no_mesh": int(m[9]),
+                    "terrain": m[10], "axes": {}})
                 continue
             if cur is None:
                 continue
@@ -1190,6 +1192,18 @@ def support_verdict(entry, eye, floor_z, args):
                      "never offered them to the ray test")
     if entry["unread"]:
         blind.append(f"{entry['unread']} candidate mesh(es) could not be read")
+    # Outdoors the ground is a LAND heightmap, not a placed ref. --clear-at reads it for the two
+    # vertical rays, but only when the run BUILT it -- and a run that did not (`--no-terrain`, or
+    # no LAND record at that XY) has not looked at the thing an exterior camera is standing on.
+    # That is a blind spot, not an empty floor: calling it CONTRADICTED would refuse every
+    # exterior vantage on a missing input, which is the same silent wrong answer one level up.
+    # An interior is the one case where absent terrain is expected and says nothing.
+    terrain = entry.get("terrain") or ""
+    if "NOT BUILT" in terrain:
+        blind.append("the run built no terrain, so the ground itself was never tested "
+                     "(--no-terrain, or no LAND data loaded)")
+    elif "NO heightmap" in terrain:
+        blind.append("no LAND heightmap covers this XY, so the ground itself was never tested")
     down = entry["axes"].get("down")
     if down is None:
         return "unresolved", "the --clear-at answer carries no downward ray for this point"
@@ -1202,16 +1216,17 @@ def support_verdict(entry, eye, floor_z, args):
                               "the geometry, is what ran out")
     if down["dist"] is None:
         if blind:
-            return "unresolved", ("no placed geometry below it within " f"{reach:.0f} u, but "
-                                  "coverage was incomplete: " + "; ".join(blind))
-        return "contradicted", (f"NO placed geometry below it within {reach:.0f} u -- nothing holds "
-                                f"this eye up on any storey ({entry['candidates']} candidate(s) "
-                                f"tested, all with readable meshes)")
+            return "unresolved", (f"nothing found below it within {reach:.0f} u, but coverage was "
+                                  "incomplete: " + "; ".join(blind))
+        return "contradicted", (f"NO geometry or ground below it within {reach:.0f} u -- nothing "
+                                f"holds this eye up on any storey ({entry['candidates']} candidate(s) "
+                                f"tested, all with readable meshes; {terrain})")
     surface = eye[2] - down["dist"]
     off = surface - floor_z
     who = down["edid"] or down["formkey"]
+    kind = "terrain" if down["formkey"] == "000000:TERRAIN" else "placed floor"
     if abs(off) <= band:
-        return "supported", (f"placed floor {down['dist']:.0f} u below it -- `{who}` at z "
+        return "supported", (f"{kind} {down['dist']:.0f} u below it -- `{who}` at z "
                              f"{surface:.0f} ({off:+.0f} from the declared floor z {floor_z:.0f})")
     if blind:
         return "unresolved", (f"the nearest placed surface below it is `{who}` at z {surface:.0f}, "

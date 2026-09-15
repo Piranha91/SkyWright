@@ -281,6 +281,8 @@ def off_mesh_scene(**kw):
           "navSilent": [], "insideSilent": [],
           "clearSilent": [list(q) for q in kw.pop("silent_clear", ())],
           "clearNoBox": kw.pop("no_box", 0), "clearUnread": kw.pop("unread", 0)}
+    if (terrain := kw.pop("terrain", None)) is not None:
+        sc["clearTerrain"] = terrain
     if not kw.pop("no_floor", False):
         sc["floorZ"] = 0.0
     assert not kw, kw
@@ -375,6 +377,51 @@ def test_unreadable_meshes_are_unresolved_not_clear():
     check("unreadable mesh: the report says the meshes could not be read",
           "could not be read" in pl["supportWhy"], pl["supportWhy"])
     check("unreadable mesh: and the camera is REFUSED", code == 1, f"exit {code}")
+
+
+def test_missing_terrain_outdoors_is_unresolved_not_contradicted():
+    """Outdoors the ground is a LAND heightmap, not a placed reference.
+
+    A run that did not build terrain has not looked at the thing an exterior camera stands on, so
+    "nothing below" is a blind spot rather than an empty floor. Calling it CONTRADICTED would
+    refuse every exterior vantage on a missing input -- the same silent wrong answer one level up.
+    The camera is still refused, but for the reason that is true, and an operator reading the line
+    knows to build terrain rather than to move the camera.
+    """
+    code, out, doc = off_mesh_check(off_mesh_scene(
+        no_floor=True,
+        terrain="terrain: NOT BUILT for this run (--no-terrain, or no LAND data loaded) "
+                "-- absence below this eye is not evidence outdoors"))
+    pl = doc["placement"]
+    check("no terrain: the answer is UNRESOLVED, not contradicted",
+          pl["support"] == "unresolved", pl["support"] + " -- " + pl["supportWhy"])
+    check("no terrain: the report says the ground was never tested",
+          "ground itself was never tested" in pl["supportWhy"], pl["supportWhy"])
+    check("no terrain: an unresolved placement is still REFUSED", code == 1, f"exit {code}")
+
+
+def test_terrain_gap_at_this_xy_is_unresolved():
+    """Same rule one step finer: terrain was built, but no heightmap covers THIS XY."""
+    code, out, doc = off_mesh_check(off_mesh_scene(
+        no_floor=True,
+        terrain="terrain: NO heightmap covers this XY -- absence below this eye is not evidence"))
+    pl = doc["placement"]
+    check("terrain gap: the answer is UNRESOLVED", pl["support"] == "unresolved",
+          pl["support"] + " -- " + pl["supportWhy"])
+    check("terrain gap: the report names the gap",
+          "no LAND heightmap covers this XY" in pl["supportWhy"], pl["supportWhy"])
+    check("terrain gap: and the camera is REFUSED", code == 1, f"exit {code}")
+
+
+def test_interior_absence_is_still_contradicted():
+    """The control for the two above: indoors there IS no terrain, so its absence says nothing and
+    an empty answer stays a finding. A blind-spot rule that swallowed the interior case would have
+    undone the correction it was added to protect."""
+    code, out, doc = off_mesh_check(off_mesh_scene(no_floor=True))
+    pl = doc["placement"]
+    check("interior: absence below the eye is still CONTRADICTED",
+          pl["support"] == "contradicted", pl["support"] + " -- " + pl["supportWhy"])
+    check("interior: and the camera is REFUSED", code == 1, f"exit {code}")
 
 
 def test_silent_clear_at_is_refused():
@@ -851,6 +898,9 @@ ALL = [test_failed_verification_cannot_export_success,
        test_off_mesh_over_another_storey_is_refused,
        test_incomplete_obnd_coverage_is_unresolved_not_clear,
        test_unreadable_meshes_are_unresolved_not_clear,
+       test_missing_terrain_outdoors_is_unresolved_not_contradicted,
+       test_terrain_gap_at_this_xy_is_unresolved,
+       test_interior_absence_is_still_contradicted,
        test_silent_clear_at_is_refused,
        test_support_does_not_override_the_other_placement_arms,
        test_surface_hit_is_confirmed,

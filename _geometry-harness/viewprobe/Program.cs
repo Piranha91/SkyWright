@@ -1889,62 +1889,6 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot)
                                 + $"  {rays}" + (mesh.Length > 0 ? $"  mesh {mesh}" : ""));
             }
         }
-        foreach (var (qx, qy, qz) in clearAt)
-        {
-            var o = new Vector3(qx, qy, qz);
-            var dirs = new (string Name, Vector3 D)[]
-            {
-                ("+x", Vector3.UnitX), ("-x", -Vector3.UnitX), ("+y", Vector3.UnitY), ("-y", -Vector3.UnitY),
-                ("up", Vector3.UnitZ), ("down", -Vector3.UnitZ),
-            };
-            var best = new float?[dirs.Length];
-            var owner = new PlacedRef?[dirs.Length];
-            var sweep = Aabb.Empty;
-            foreach (var d in dirs) { sweep = sweep.Add(o); sweep = sweep.Add(o + d.D * clearReach); }
-            // Three populations, all reported: what the broad phase offered, what carried readable
-            // geometry, and what it could not see at all. The last one is the honest limit — a ref
-            // with no usable OBND never reaches the ray test, so "nothing near this point" is a
-            // statement about the boxes as much as about the meshes.
-            int candidates = 0, meshed = 0, unread = 0, noBox = 0, noMesh = 0;
-            foreach (var r in winRef.Values)
-            {
-                if (r.Deleted || DisabledWhy(r) is not null || r.Base is not { } bk) continue;
-                if (!baseType.TryGetValue(bk, out var bt) || !insidePhysical.Contains(bt)) continue;
-                if (baseIsMarker.Contains(bk)) continue;
-                if (baseEditorId.TryGetValue(bk, out var ed) && IsControlEditorId(ed)) continue;
-                if (!baseMesh.TryGetValue(bk, out var bm)) { noMesh++; continue; }
-                if (Path.GetFileName(bm).StartsWith("MarkerX", StringComparison.OrdinalIgnoreCase)
-                    || bm.Replace('/', '\\').Contains(@"effects\", StringComparison.OrdinalIgnoreCase)) continue;
-                if (!baseObnd.TryGetValue(bk, out var ob)) { noBox++; continue; }
-                var model = new Aabb(ob.Min, ob.Max, false);
-                if (model.Size.X <= 0 && model.Size.Y <= 0 && model.Size.Z <= 0) { noBox++; continue; }
-                var box = SpatialOverlap.ToWorld(model, r.Position, r.Rotation, r.Scale);
-                if (box.IsEmpty) { noBox++; continue; }
-                if (SpatialOverlap.BoxDistance(box, sweep) > 0f) continue;
-                candidates++;
-                if (InsideSoupFor(bm) is not { } soup) { unread++; continue; }
-                meshed++;
-                var world = SpatialOverlap.TransformSoup(soup, r.Position, r.Rotation, r.Scale);
-                for (int k = 0; k < dirs.Length; k++)
-                    if (NearestHit(o, dirs[k].D, world.Vertices, world.Indices, best[k] ?? clearReach) is { } h
-                        && (best[k] is null || h < best[k]))
-                    { best[k] = h; owner[k] = r; }
-            }
-            Console.WriteLine($"   clear-at {qx:0},{qy:0},{qz:0}: nearest placed geometry on each world axis "
-                            + $"within {clearReach:0} u — {candidates} candidate(s) in the broad phase, {meshed} with a "
-                            + $"readable mesh, {unread} unreadable, {noBox} physical ref(s) skipped for want of a usable OBND, "
-                            + $"{noMesh} physical ref(s) with no model at all "
-                            + "(the broad phase is OBND-based: a ref it cannot see is not evidence of open space)");
-            for (int k = 0; k < dirs.Length; k++)
-            {
-                string who = owner[k] is { } orf
-                    ? $"{orf.FormKey}  {(orf.Base is { } obk && baseEditorId.TryGetValue(obk, out var oed) ? oed : "-")}"
-                      + $"  at {orf.Position.X:0},{orf.Position.Y:0},{orf.Position.Z:0}  scale {orf.Scale:0.00}"
-                      + (orf.Base is { } obk2 && baseMesh.TryGetValue(obk2, out var obm) ? $"  mesh {obm}" : "")
-                    : $"nothing within {clearReach:0} u";
-                Console.WriteLine($"      {dirs[k].Name,-4} {(best[k] is { } b0 ? $"{b0,7:0.0} u" : "      -")}  {who}");
-            }
-        }
 
         // Every ref the scene drops is accounted for HERE, in one block — a silent category is how a
         // render missing a third of its content once read as fully accounted for.
@@ -2389,6 +2333,95 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot)
                                  : h00 + (h11 - h01) * u + (h01 - h00) * v;
                 return z;
             };
+
+        foreach (var (qx, qy, qz) in clearAt)
+        {
+            var o = new Vector3(qx, qy, qz);
+            var dirs = new (string Name, Vector3 D)[]
+            {
+                ("+x", Vector3.UnitX), ("-x", -Vector3.UnitX), ("+y", Vector3.UnitY), ("-y", -Vector3.UnitY),
+                ("up", Vector3.UnitZ), ("down", -Vector3.UnitZ),
+            };
+            var best = new float?[dirs.Length];
+            var owner = new PlacedRef?[dirs.Length];
+            var groundIsNearest = new bool[dirs.Length];
+            var sweep = Aabb.Empty;
+            foreach (var d in dirs) { sweep = sweep.Add(o); sweep = sweep.Add(o + d.D * clearReach); }
+            // Three populations, all reported: what the broad phase offered, what carried readable
+            // geometry, and what it could not see at all. The last one is the honest limit — a ref
+            // with no usable OBND never reaches the ray test, so "nothing near this point" is a
+            // statement about the boxes as much as about the meshes.
+            int candidates = 0, meshed = 0, unread = 0, noBox = 0, noMesh = 0;
+            foreach (var r in winRef.Values)
+            {
+                if (r.Deleted || DisabledWhy(r) is not null || r.Base is not { } bk) continue;
+                if (!baseType.TryGetValue(bk, out var bt) || !insidePhysical.Contains(bt)) continue;
+                if (baseIsMarker.Contains(bk)) continue;
+                if (baseEditorId.TryGetValue(bk, out var ed) && IsControlEditorId(ed)) continue;
+                if (!baseMesh.TryGetValue(bk, out var bm)) { noMesh++; continue; }
+                if (Path.GetFileName(bm).StartsWith("MarkerX", StringComparison.OrdinalIgnoreCase)
+                    || bm.Replace('/', '\\').Contains(@"effects\", StringComparison.OrdinalIgnoreCase)) continue;
+                if (!baseObnd.TryGetValue(bk, out var ob)) { noBox++; continue; }
+                var model = new Aabb(ob.Min, ob.Max, false);
+                if (model.Size.X <= 0 && model.Size.Y <= 0 && model.Size.Z <= 0) { noBox++; continue; }
+                var box = SpatialOverlap.ToWorld(model, r.Position, r.Rotation, r.Scale);
+                if (box.IsEmpty) { noBox++; continue; }
+                if (SpatialOverlap.BoxDistance(box, sweep) > 0f) continue;
+                candidates++;
+                if (InsideSoupFor(bm) is not { } soup) { unread++; continue; }
+                meshed++;
+                var world = SpatialOverlap.TransformSoup(soup, r.Position, r.Rotation, r.Scale);
+                for (int k = 0; k < dirs.Length; k++)
+                    if (NearestHit(o, dirs[k].D, world.Vertices, world.Indices, best[k] ?? clearReach) is { } h
+                        && (best[k] is null || h < best[k]))
+                    { best[k] = h; owner[k] = r; }
+            }
+            // TERRAIN. Outdoors the ground is not a placed reference — it is the LAND heightmap the
+            // renderer builds separately — so a probe that casts only against refs reports "nothing
+            // below" for a camera standing on a hillside. That is a WRONG answer, not a missing one,
+            // and it would refuse every exterior vantage. The height field is a function of XY, so
+            // the two vertical rays read it directly rather than marching it; the four lateral rays
+            // do NOT, and the line says so. Which of the three terrain states applies is printed,
+            // because "no ground here" and "no ground DATA here" are different facts and only the
+            // first is evidence of open space.
+            string terrainNote;
+            float? groundZ = null;
+            if (interior)
+                terrainNote = "terrain: interior cell, none expected";
+            else if (terrainHeightAt is null)
+                terrainNote = "terrain: NOT BUILT for this run (--no-terrain, or no LAND data loaded) "
+                            + "— absence below this eye is not evidence outdoors";
+            else if (terrainHeightAt(qx, qy) is not { } gz)
+                terrainNote = "terrain: NO heightmap covers this XY — absence below this eye is not evidence";
+            else
+            {
+                groundZ = gz;
+                terrainNote = $"terrain: ground at z {gz:0.0}";
+                float dz = qz - gz;
+                if (dz > 1e-3f && dz <= clearReach && (best[5] is null || dz < best[5]))
+                { best[5] = dz; owner[5] = null; groundIsNearest[5] = true; }
+                float uz = gz - qz;
+                if (uz > 1e-3f && uz <= clearReach && (best[4] is null || uz < best[4]))
+                { best[4] = uz; owner[4] = null; groundIsNearest[4] = true; }
+            }
+            Console.WriteLine($"   clear-at {qx:0},{qy:0},{qz:0}: nearest placed geometry on each world axis "
+                            + $"within {clearReach:0} u — {candidates} candidate(s) in the broad phase, {meshed} with a "
+                            + $"readable mesh, {unread} unreadable, {noBox} physical ref(s) skipped for want of a usable OBND, "
+                            + $"{noMesh} physical ref(s) with no model at all; {terrainNote} "
+                            + "(the broad phase is OBND-based: a ref it cannot see is not evidence of open space; "
+                            + "the four lateral rays ignore terrain)");
+            for (int k = 0; k < dirs.Length; k++)
+            {
+                string who = owner[k] is { } orf
+                    ? $"{orf.FormKey}  {(orf.Base is { } obk && baseEditorId.TryGetValue(obk, out var oed) ? oed : "-")}"
+                      + $"  at {orf.Position.X:0},{orf.Position.Y:0},{orf.Position.Z:0}  scale {orf.Scale:0.00}"
+                      + (orf.Base is { } obk2 && baseMesh.TryGetValue(obk2, out var obm) ? $"  mesh {obm}" : "")
+                    : groundIsNearest[k]
+                      ? $"000000:TERRAIN  LandHeightmap  at {qx:0},{qy:0},{groundZ ?? 0f:0}  scale 1.00  mesh (terrain)"
+                      : $"nothing within {clearReach:0} u";
+                Console.WriteLine($"      {dirs[k].Name,-4} {(best[k] is { } b0 ? $"{b0,7:0.0} u" : "      -")}  {who}");
+            }
+        }
 
         // What the render DROPS, said out loud: a triangle the picture never shows because it was
         // filtered is indistinguishable from one that does not exist, unless the counts are printed.

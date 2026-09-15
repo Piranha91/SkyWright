@@ -27,6 +27,7 @@ Scene JSON:
      "clearSilent": [[x,y,z]],       # queried points that get NO clear-at line at all
      "clearNoBox": 0,                # physical refs the OBND broad phase could not offer
      "clearUnread": 0,               # candidate meshes that could not be read
+     "clearTerrain": "terrain: ...", # the terrain state clear-at reports (default: interior)
      "configFingerprint": "<64 hex>",  # what viewprobe prints for a candidate configuration
      "configFingerprintAsks": [1]}     # print it only on these 1-based ASKING invocations
 """
@@ -265,8 +266,10 @@ def main(argv):
               f"{reach:.0f} u - {len(phys)} candidate(s) in the broad phase, {len(phys)} with a "
               f"readable mesh, {scene.get('clearUnread', 0)} unreadable, "
               f"{scene.get('clearNoBox', 0)} physical ref(s) skipped for want of a usable OBND, "
-              f"{scene.get('clearNoMesh', 0)} physical ref(s) with no model at all "
-              "(the broad phase is OBND-based: a ref it cannot see is not evidence of open space)")
+              f"{scene.get('clearNoMesh', 0)} physical ref(s) with no model at all; "
+              f"{scene.get('clearTerrain', 'terrain: interior cell, none expected')} "
+              "(the broad phase is OBND-based: a ref it cannot see is not evidence of open space; "
+              "the four lateral rays ignore terrain)")
         for name, ax, sgn in axes:
             other = [k for k in range(3) if k != ax]
             best, who = None, None
