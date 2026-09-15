@@ -323,7 +323,7 @@ static class TexturedScene
         IReadOnlyList<PlaneRender> planes,                 // every occlusion plane in the cell (+ ring); see OcclusionPlanes.cs
         bool showPlanes,                                   // --planes: draw the planes layer
         string occlusionMode,                              // --occlusion off | on | diff: preview what the planes cull
-        int size, string outPath,
+        int sizeW, string outPath,
         bool reportMode = false,                           // omit all raster text; preserve pixels, overlays and metadata
         string? pngTextMeta = null,                        // replication chunk: written as a PNG tEXt entry keyed "viewprobe"
         InteractiveOptions? interactive = null,            // non-null: open the fly-through window instead of saving a PNG
@@ -334,8 +334,20 @@ static class TexturedScene
         int visibilityBudget = OcclusionState.DefaultVisibilityBudget,
         IReadOnlyList<NavColourGroup>? navColourGroups = null,
         bool refSurface = false,
-        string? depthDumpPath = null)                   // --depth-dump: write the finished frame's window depth (the array --pick reads) here, verbatim
+        string? depthDumpPath = null,                   // --depth-dump: write the finished frame's window depth (the array --pick reads) here, verbatim
+        int sizeHeight = 0)                             // capture canvas HEIGHT in pixels; 0 keeps the historic square (sizeW x sizeW)
     {
+        // THE CANVAS IS TWO NUMBERS, NOT ONE. It used to be `size` on both axes, and the camera's
+        // fov went to the projection at aspect 1 -- so a pose planned for a 16:9 deliverable was
+        // captured as a square, which keeps the VERTICAL angle and crops roughly a third off the
+        // horizontal. Nothing failed: the frame rendered, the subjects were still in it, and the
+        // planner's framing numbers (fill, centring) silently stopped describing the delivered
+        // picture (Piranha, 2026-09-14). `sizeW` is the width; height defaults to it, so every
+        // existing caller keeps the exact square frame it had.
+        int sizeH = sizeHeight > 0 ? sizeHeight : sizeW;
+        // The projection's aspect comes from the canvas that will actually be read back, so the
+        // delivered pixels and the --pick unprojection cannot disagree about the frustum.
+        float canvasAspect = (float)sizeW / sizeH;
         var logger = new ConsoleCvLogger();
         var gate = new CharacterViewerLogGate { Verbose = Environment.GetEnvironmentVariable("VP_CV_VERBOSE") == "1" };
 
@@ -1273,12 +1285,12 @@ static class TexturedScene
         int fbo = GL.GenFramebuffer(), colorTex = GL.GenTexture(), depthRb = GL.GenRenderbuffer();
         GL.BindFramebuffer(FramebufferTarget.Framebuffer, fbo);
         GL.BindTexture(TextureTarget.Texture2D, colorTex);
-        GL.TexImage2D(TextureTarget.Texture2D, 0, PixelInternalFormat.Rgba8, size, size, 0, PixelFormat.Rgba, PixelType.UnsignedByte, IntPtr.Zero);
+        GL.TexImage2D(TextureTarget.Texture2D, 0, PixelInternalFormat.Rgba8, sizeW, sizeH, 0, PixelFormat.Rgba, PixelType.UnsignedByte, IntPtr.Zero);
         GL.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMinFilter, (int)TextureMinFilter.Linear);
         GL.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMagFilter, (int)TextureMagFilter.Linear);
         GL.FramebufferTexture2D(FramebufferTarget.Framebuffer, FramebufferAttachment.ColorAttachment0, TextureTarget.Texture2D, colorTex, 0);
         GL.BindRenderbuffer(RenderbufferTarget.Renderbuffer, depthRb);
-        GL.RenderbufferStorage(RenderbufferTarget.Renderbuffer, RenderbufferStorage.DepthComponent24, size, size);
+        GL.RenderbufferStorage(RenderbufferTarget.Renderbuffer, RenderbufferStorage.DepthComponent24, sizeW, sizeH);
         GL.FramebufferRenderbuffer(FramebufferTarget.Framebuffer, FramebufferAttachment.DepthAttachment, RenderbufferTarget.Renderbuffer, depthRb);
 
         int samples = 0, msFbo = 0, msColorRb = 0, msDepthRb = 0;
@@ -1292,10 +1304,10 @@ static class TexturedScene
             msFbo = GL.GenFramebuffer(); msColorRb = GL.GenRenderbuffer(); msDepthRb = GL.GenRenderbuffer();
             GL.BindFramebuffer(FramebufferTarget.Framebuffer, msFbo);
             GL.BindRenderbuffer(RenderbufferTarget.Renderbuffer, msColorRb);
-            GL.RenderbufferStorageMultisample(RenderbufferTarget.Renderbuffer, samples, RenderbufferStorage.Rgba8, size, size);
+            GL.RenderbufferStorageMultisample(RenderbufferTarget.Renderbuffer, samples, RenderbufferStorage.Rgba8, sizeW, sizeH);
             GL.FramebufferRenderbuffer(FramebufferTarget.Framebuffer, FramebufferAttachment.ColorAttachment0, RenderbufferTarget.Renderbuffer, msColorRb);
             GL.BindRenderbuffer(RenderbufferTarget.Renderbuffer, msDepthRb);
-            GL.RenderbufferStorageMultisample(RenderbufferTarget.Renderbuffer, samples, RenderbufferStorage.DepthComponent24, size, size);
+            GL.RenderbufferStorageMultisample(RenderbufferTarget.Renderbuffer, samples, RenderbufferStorage.DepthComponent24, sizeW, sizeH);
             GL.FramebufferRenderbuffer(FramebufferTarget.Framebuffer, FramebufferAttachment.DepthAttachment, RenderbufferTarget.Renderbuffer, msDepthRb);
             if (GL.CheckFramebufferStatus(FramebufferTarget.Framebuffer) != FramebufferErrorCode.FramebufferComplete)
             {
@@ -1316,27 +1328,27 @@ static class TexturedScene
         byte[] Draw(float[]? depthOut = null, bool singleSample = false)
         {
             GL.BindFramebuffer(FramebufferTarget.Framebuffer, singleSample ? fbo : drawFbo);
-            GL.Viewport(0, 0, size, size);
+            GL.Viewport(0, 0, sizeW, sizeH);
             GL.ClearColor(skyColor.X, skyColor.Y, skyColor.Z, 1f);
             GL.Clear(ClearBufferMask.ColorBufferBit | ClearBufferMask.DepthBufferBit);
-            renderer.Render(camera, size, size);   // clears again, with renderer.ClearColor = sky
-            wireOverlay?.Invoke(camera.GetViewMatrix(), camera.GetProjectionMatrix(1f));
+            renderer.Render(camera, sizeW, sizeH);   // clears again, with renderer.ClearColor = sky
+            wireOverlay?.Invoke(camera.GetViewMatrix(), camera.GetProjectionMatrix(canvasAspect));
             if (msFbo != 0 && !singleSample)
             {
                 // Resolve colour AND depth: the occlusion test reads the depth buffer back, so it
                 // has to come from the same resolved frame the pixels did.
                 GL.BindFramebuffer(FramebufferTarget.ReadFramebuffer, msFbo);
                 GL.BindFramebuffer(FramebufferTarget.DrawFramebuffer, fbo);
-                GL.BlitFramebuffer(0, 0, size, size, 0, 0, size, size,
+                GL.BlitFramebuffer(0, 0, sizeW, sizeH, 0, 0, sizeW, sizeH,
                                    ClearBufferMask.ColorBufferBit | ClearBufferMask.DepthBufferBit,
                                    BlitFramebufferFilter.Nearest);
             }
             GL.Finish();
-            var px = new byte[size * size * 4];
+            var px = new byte[sizeW * sizeH * 4];
             GL.BindFramebuffer(FramebufferTarget.Framebuffer, fbo);
-            GL.ReadPixels(0, 0, size, size, PixelFormat.Rgba, PixelType.UnsignedByte, px);
+            GL.ReadPixels(0, 0, sizeW, sizeH, PixelFormat.Rgba, PixelType.UnsignedByte, px);
             if (depthOut is not null)
-                GL.ReadPixels(0, 0, size, size, PixelFormat.DepthComponent, PixelType.Float, depthOut);
+                GL.ReadPixels(0, 0, sizeW, sizeH, PixelFormat.DepthComponent, PixelType.Float, depthOut);
             return px;
         }
 
@@ -1361,7 +1373,7 @@ static class TexturedScene
         // The camera's OWN matrices, not a hand-rolled replica: everything that has to agree
         // with what was rasterised (the colour sample, the depth compare) goes through these.
         var viewMat = camera.GetViewMatrix();
-        var projMat = camera.GetProjectionMatrix(1f);
+        var projMat = camera.GetProjectionMatrix(canvasAspect);
         var viewProj = viewMat * projMat;
         var viewFwd = Vector3.Normalize(lookY - eyeY);
 
@@ -1374,8 +1386,8 @@ static class TexturedScene
             if (clip.W <= 0.01f) return null;
             float nx = clip.X / clip.W, ny = clip.Y / clip.W, nz = clip.Z / clip.W;
             if (nx < -1f || nx > 1f || ny < -1f || ny > 1f || nz < -1f || nz > 1f) return null;
-            return (Math.Clamp((int)((nx * 0.5f + 0.5f) * size), 0, size - 1),
-                    Math.Clamp((int)((ny * 0.5f + 0.5f) * size), 0, size - 1));
+            return (Math.Clamp((int)((nx * 0.5f + 0.5f) * sizeW), 0, sizeW - 1),
+                    Math.Clamp((int)((ny * 0.5f + 0.5f) * sizeH), 0, sizeH - 1));
         }
 
         // ── THE WORLD-COORDINATE GRID ────────────────────────────────────────────────
@@ -1516,9 +1528,9 @@ static class TexturedScene
                         (int X, int Y) Pix(float t)
                         {
                             float nx = p.X + dx * t, ny = p.Y + dy * t;
-                            int ix = (int)MathF.Round((nx * 0.5f + 0.5f) * size);
-                            int iy = (int)MathF.Round((ny * 0.5f + 0.5f) * size);
-                            return (Math.Clamp(ix, 0, size - 1), Math.Clamp(size - 1 - iy, 0, size - 1));  // GL bottom-left -> image top-left
+                            int ix = (int)MathF.Round((nx * 0.5f + 0.5f) * sizeW);
+                            int iy = (int)MathF.Round((ny * 0.5f + 0.5f) * sizeH);
+                            return (Math.Clamp(ix, 0, sizeW - 1), Math.Clamp(sizeH - 1 - iy, 0, sizeH - 1));  // GL bottom-left -> image top-left
                         }
                         var e0 = Pix(t0); var e1 = Pix(t1);
                         // Vertical on screen -> label along the TOP edge; horizontal -> along the
@@ -1528,14 +1540,14 @@ static class TexturedScene
                         // Clamped to the band the burn-in can actually use BEFORE the overlap test,
                         // or two labels that only collide after clamping both survive the test and
                         // then print on top of each other.
-                        int lx = Math.Clamp(at.X + 4, 2, Math.Max(2, size - 40));
-                        int ly = Math.Clamp(at.Y + 3, 2, Math.Max(2, size - 30));
+                        int lx = Math.Clamp(at.X + 4, 2, Math.Max(2, sizeW - 40));
+                        int ly = Math.Clamp(at.Y + 3, 2, Math.Max(2, sizeH - 30));
                         // A line entering at a CORNER lands its label in the other family's row, and
                         // two numbers printed on top of each other are worse than one number: the
                         // reader cannot tell which axis either belongs to. First placed wins; the
                         // dropped line still has its neighbours a spacing away to interpolate from.
-                        float boxW = label.Length * 12f * (size / 1280f) * 0.62f + 6f;
-                        float boxH = 14f * (size / 1280f) + 3f;
+                        float boxW = label.Length * 12f * (sizeH / 1280f) * 0.62f + 6f;
+                        float boxH = 14f * (sizeH / 1280f) + 3f;
                         foreach (var (_, ox, oy) in gridLabels)
                             if (MathF.Abs(lx - ox) < boxW && MathF.Abs(ly - oy) < boxH) return;
                         gridLabels.Add((label, lx, ly));
@@ -1547,7 +1559,7 @@ static class TexturedScene
                     // defence is saying which storey it was ruled at. Placed BEFORE the lines so a
                     // line label that would land on it is the one dropped — the legend is the key
                     // to every other number in the picture and outranks any single one of them.
-                    gridLabels.Add(($"grid {gridSpacing:0.##} u  ·  ruled at z {grid.Z:0} ({grid.ZWhy})", 6, size - 24));
+                    gridLabels.Add(($"grid {gridSpacing:0.##} u  ·  ruled at z {grid.Z:0} ({grid.ZWhy})", 6, sizeH - 24));
                     for (int i = nx0; i <= nx1; i++)
                     {
                         float x = i * gridSpacing;
@@ -1589,7 +1601,7 @@ static class TexturedScene
             // rendering still uses its original MSAA path after every saved visibility flag is restored.
             if (interactive is null)
             {
-                var plainDepth = new float[size * size];
+                var plainDepth = new float[sizeW * sizeH];
                 Draw(plainDepth, singleSample: true);
                 string DepthHash(float[] depth) => Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(
                     System.Runtime.InteropServices.MemoryMarshal.AsBytes(depth.AsSpan())));
@@ -1602,7 +1614,7 @@ static class TexturedScene
                 File.WriteAllBytes(occl.SceneDepthPath, System.Runtime.InteropServices.MemoryMarshal.AsBytes(plainDepth.AsSpan()).ToArray());
                 var allMeshes = meshes.Concat(npcActors.SelectMany(a => a.Meshes)).Distinct().ToArray();
                 var savedVisibility = allMeshes.ToDictionary(m => m, m => m.IsRendering);
-                var ownDepth = new float[size * size];
+                var ownDepth = new float[sizeW * sizeH];
                 occl.MarkVisible(part =>
                 {
                     if (occl.VisibilityDraws >= occl.VisibilityBudget)
@@ -1616,7 +1628,7 @@ static class TexturedScene
                         occl.VisibilityDraws++;
                         part.IsolatedDepthHash = DepthHash(ownDepth);
                         var measured = ShapeVisibility.Compare(ownDepth, plainDepth);
-                        var mask = new byte[size * size * 4];
+                        var mask = new byte[sizeW * sizeH * 4];
                         for (int i = 0; i < ownDepth.Length; i++)
                         {
                             mask[i*4+3] = 255;
@@ -1624,7 +1636,7 @@ static class TexturedScene
                             mask[i*4 + (ownDepth[i] <= plainDepth[i] ? 1 : 0)] = 255;
                         }
                         part.VisibilityMask = Path.Combine(evidenceDir, $"shape-{occl.VisibilityDraws:D4}-block-{part.Block}.png");
-                        using var maskImage = Image.LoadPixelData<Rgba32>(mask, size, size);
+                        using var maskImage = Image.LoadPixelData<Rgba32>(mask, sizeW, sizeH);
                         maskImage.Mutate(x => x.Flip(FlipMode.Vertical));
                         maskImage.SaveAsPng(part.VisibilityMask);
                         return measured;
@@ -1693,7 +1705,7 @@ static class TexturedScene
         float[]? sceneDepth = null;
         if (wantNav && (autoColour || wantDepth))
         {
-            if (wantDepth) sceneDepth = new float[size * size];
+            if (wantDepth) sceneDepth = new float[sizeW * sizeH];
             var bg = Draw(sceneDepth);
             if (autoColour && navTris.Count > 0)
             {
@@ -1703,7 +1715,7 @@ static class TexturedScene
                 {
                     var (a, b, c) = navTris[i];
                     if (ScreenOf(YUp((a + b + c) / 3f + lift)) is not { } sp) continue;
-                    int o = (sp.Y * size + sp.X) * 4;
+                    int o = (sp.Y * sizeW + sp.X) * 4;
                     sr += bg[o] / 255f; sg += bg[o + 1] / 255f; sb += bg[o + 2] / 255f; hits++;
                 }
                 if (hits > 0)
@@ -1841,7 +1853,7 @@ static class TexturedScene
             if (sceneDepth is null) return Visible;
             var pY = YUp(pSkyrim);
             if (ScreenOf(pY) is not { } sp) return Visible;          // off-frame: nothing hides it
-            float scene = ViewDist(sceneDepth[sp.Y * size + sp.X]);
+            float scene = ViewDist(sceneDepth[sp.Y * sizeW + sp.X]);
             float mine = Vector3.Dot(pY - eyeY, viewFwd);
             // Slack, and only as much as the numbers actually need. A 24-bit depth buffer over a
             // 4..131072 frustum resolves ~0.06 world units at 2,000 out, so 2% + 3 u was ~40 u of
@@ -2433,7 +2445,7 @@ static class TexturedScene
         void PrintBuildCensus()
         {
         Console.WriteLine($"   textured: {shapes:N0} shapes ({texturedShapes:N0} with a real diffuse), {missingMesh:N0} refs without a resolvable mesh"
-                            + $"; {size}x{size}, {(samples >= 2 ? samples + "x msaa" : "no msaa")}");
+                            + $"; {sizeW}x{sizeH}, {(samples >= 2 ? samples + "x msaa" : "no msaa")}");
             if (cullAbove is { } cz2)
                 Console.WriteLine($"   cull-above z {cz2:0}: {cullTrisDropped:N0} static triangle(s) removed, "
                                 + $"{cullShapesDropped:N0} shape(s) wholly above the cut (terrain/nav/actors/overlay untouched)");
@@ -2479,7 +2491,7 @@ static class TexturedScene
             return shapes;
         }
 
-        float[]? pickDepth = picks.Count > 0 || npcActors.Count > 0 || depthDumpPath is not null ? new float[size * size] : null;
+        float[]? pickDepth = picks.Count > 0 || npcActors.Count > 0 || depthDumpPath is not null ? new float[sizeW * sizeH] : null;
         var pixels = Draw(pickDepth);
         // --depth-dump: the finished frame's depth buffer, exactly as --pick reads it below — size*size
         // float32 window depth in [0,1], GL row order (row 0 = the BOTTOM image row), 1.0 = background.
@@ -2491,7 +2503,7 @@ static class TexturedScene
             var dumpDir = Path.GetDirectoryName(Path.GetFullPath(depthDumpPath));
             if (!string.IsNullOrEmpty(dumpDir)) Directory.CreateDirectory(dumpDir);
             File.WriteAllBytes(depthDumpPath, System.Runtime.InteropServices.MemoryMarshal.AsBytes(pickDepth.AsSpan()).ToArray());
-            Console.WriteLine($"   depth-dump: {Path.GetFullPath(depthDumpPath)}  ({size}x{size} float32 window depth, rows bottom-up, "
+            Console.WriteLine($"   depth-dump: {Path.GetFullPath(depthDumpPath)}  ({sizeW}x{sizeH} float32 window depth, rows bottom-up, "
                             + $"1.0 = background; near {NearPlane:0} far {FarPlane:0}; fov {cam.FovDeg:0.##} square)");
         }
         if (wireProg != 0) { GL.DeleteProgram(wireProg); GL.DeleteVertexArray(wireVao); GL.DeleteBuffer(wireVbo); }
@@ -2506,12 +2518,12 @@ static class TexturedScene
             var invVp = viewProj.Inverted();
             foreach (var (ix, iy) in picks)
             {
-                if (ix < 0 || ix >= size || iy < 0 || iy >= size)
-                { Console.WriteLine($"   pick {ix},{iy}: outside a {size}x{size} frame"); continue; }
-                int gy = size - 1 - iy;
-                float d = pickDepth[gy * size + ix];
-                float nx = (ix + 0.5f) / size * 2f - 1f;
-                float ny = (gy + 0.5f) / size * 2f - 1f;
+                if (ix < 0 || ix >= sizeW || iy < 0 || iy >= sizeH)
+                { Console.WriteLine($"   pick {ix},{iy}: outside a {sizeW}x{sizeH} frame"); continue; }
+                int gy = sizeH - 1 - iy;
+                float d = pickDepth[gy * sizeW + ix];
+                float nx = (ix + 0.5f) / sizeW * 2f - 1f;
+                float ny = (gy + 0.5f) / sizeH * 2f - 1f;
                 // The planes are blended with depth writes off, so the depth buffer never holds
                 // one: the pixel's ray is tested against the drawn planes on the CPU first, and a
                 // plane it crosses is reported BEFORE what the depth buffer says is behind it.
@@ -2559,7 +2571,7 @@ static class TexturedScene
                 var headY = YUp(actor.PositionSkyrim + new Vector3(0, 0, 110f * aScale));
                 if (ScreenOf(headY) is not { } hp)
                 { Console.WriteLine($"   [npc] {actor.Label}: outside the frame at this camera"); continue; }
-                float sceneD = ViewDist(pickDepth[hp.Y * size + hp.X]);      // ScreenOf is GL bottom-left, like the buffer
+                float sceneD = ViewDist(pickDepth[hp.Y * sizeW + hp.X]);      // ScreenOf is GL bottom-left, like the buffer
                 float mineD = Vector3.Dot(headY - eyeY, viewFwd);
                 // The nav classifier's slack, PLUS the actor's own headroom: the sample
                 // point sits inside the head, so the visible surface at that pixel is the
@@ -2578,7 +2590,7 @@ static class TexturedScene
         GL.DeleteFramebuffer(fbo); GL.DeleteTexture(colorTex); GL.DeleteRenderbuffer(depthRb);
         if (msFbo != 0) { GL.DeleteFramebuffer(msFbo); GL.DeleteRenderbuffer(msColorRb); GL.DeleteRenderbuffer(msDepthRb); }
 
-        SaveFrame(pixels, size, size, capLines, colourCaptionLines, pngTextMeta, outPath,
+        SaveFrame(pixels, sizeW, sizeH, capLines, colourCaptionLines, pngTextMeta, outPath,
                   gridSpacing > 0f ? gridLabels : null, gridColour3, reportMode);
 
         // Give back the borrowed NPC meshes BEFORE this renderer can dispose them —

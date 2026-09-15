@@ -118,6 +118,7 @@ string outDir = Path.Combine(AppContext.BaseDirectory, "shots");
 // Frame size, square, and the 3D render resolution as well as the PNG's — there is no
 // downsample step, so this IS the sharpness knob. 2560 because 1280 fell apart under a zoom.
 int size = 2560;
+float canvasAspect = 1f;                         // --aspect: capture canvas width / height; 1 = the historic square
 float elev = 28f;
 bool drawNav = true;
 var highlightSpecs = new List<string>();
@@ -441,6 +442,24 @@ for (int i = argStart; i < args.Length; i++)
 {
     if (args[i] == "--out" && i + 1 < args.Length) outDir = args[++i];
     else if (args[i] == "--size" && i + 1 < args.Length) size = int.Parse(args[++i]);
+    // --aspect W:H (or a decimal) makes the CAPTURE canvas the shape the camera was planned for.
+    // --size stays the WIDTH and the height follows, so the default 1:1 is the historic square and
+    // every existing command renders the identical frame. --fov is the VERTICAL angle either way
+    // (OpenTK's CreatePerspectiveFieldOfView takes fovy), so widening the aspect widens the
+    // HORIZONTAL extent and leaves the vertical alone -- which is exactly the frame shotplan plans
+    // against with its own --aspect. Refused, never ignored, where it cannot take effect.
+    else if (args[i] == "--aspect" && i + 1 < args.Length)
+    {
+        var spec = args[++i];
+        var p = spec.Split(':');
+        bool ok = p.Length == 2
+            ? float.TryParse(p[0], System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var aw)
+              & float.TryParse(p[1], System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var ah)
+              && ah > 0 && aw > 0 && (canvasAspect = aw / ah) > 0
+            : float.TryParse(spec, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out canvasAspect) && canvasAspect > 0;
+        if (!ok)
+        { Console.Error.WriteLine($"--aspect wants W:H (e.g. 16:9) or a positive decimal; got '{spec}'."); return 2; }
+    }
     else if (args[i] == "--elev" && i + 1 < args.Length) elev = float.Parse(args[++i]);
     else if (args[i] == "--no-nav") drawNav = false;
     else if (args[i] == "--ref" && i + 1 < args.Length) highlightSpecs.Add(args[++i]);
@@ -682,6 +701,7 @@ if ((conflictsPath is not null || redSpecs.Count > 0) && !navModeExplicit) navMo
 // the previous shot's overrides.
 string cliNavMode = navMode; float? cliCullAbove = cullAbove;
 bool cliShowPlanes = showPlanes; string cliOcclusion = occlusionMode;
+float cliCanvasAspect = canvasAspect;   // the run's canvas shape, before any shot overrides it
 string? cliStateSpec = stateSpec;
 if (navMode is not ("off" or "filled" or "wire" or "both"))
 { Console.Error.WriteLine($"--nav '{navMode}' is not one of: off, filled, wire, both."); return 1; }
@@ -1224,6 +1244,12 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot)
         look = null; eyeRef = null; lookRef = null;      // the shot is the whole camera, not a base for one
         navMode = cliNavMode; cullAbove = cliCullAbove;     // the run's values first, then this shot's overrides
         showPlanes = cliShowPlanes; occlusionMode = cliOcclusion;
+        // The canvas SHAPE is part of the camera, so it resets per shot like the rest. A worklist
+        // that mixes a 16:9 shot with a square one must give each the frame it asked for, and a
+        // shot with no Aspect INHERITS THE RUN'S -- which is square unless --aspect said otherwise,
+        // so a legacy worklist renders exactly as it always did (Piranha, 2026-09-15).
+        canvasAspect = cliCanvasAspect;
+        if (wshot.Aspect is { } shotAspect) canvasAspect = shotAspect;
         if (wshot.Nav is { } shotNav) navMode = shotNav;
         if (wshot.CullAbove is { } shotCull) cullAbove = shotCull;
         if (wshot.Planes is { } shotPlanes) showPlanes = shotPlanes;
@@ -1649,6 +1675,24 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot)
         Console.Error.WriteLine("flat diagnostic mode accepts one bare --ref FORMKEY only; repeatable or coloured --ref values require --tex or --report-mode");
         return 1;
     }
+
+    // A non-square canvas that silently did nothing would be the same class of fault it exists to
+    // fix: a caller believing they captured the frame they asked for. Refuse where it cannot apply.
+    if (MathF.Abs(canvasAspect - 1f) > 1e-6f)
+    {
+        if (!textured)
+        { Console.Error.WriteLine("--aspect shapes the first-person CAPTURE canvas; the flat diagnostic mode's orbit views are square. Add --tex/--eye or drop --aspect."); return 2; }
+        if (interactiveMode)
+        { Console.Error.WriteLine("--aspect shapes the offscreen capture canvas; --interactive opens a resizable window whose shape is the window's. Drop one of the two."); return 2; }
+    }
+    // --size is the WIDTH; the height follows the aspect. Rounded to an even number of pixels so a
+    // centre column/row exists and MSAA resolve has no half-pixel to argue about.
+    // The 1:1 case takes --size verbatim rather than going through the arithmetic: an odd --size
+    // would round to even and quietly change a square frame that nobody asked to change.
+    int canvasH = MathF.Abs(canvasAspect - 1f) <= 1e-6f ? size
+                                                        : (int)MathF.Round(size / canvasAspect / 2f) * 2;
+    if (canvasH < 2)
+    { Console.Error.WriteLine($"--aspect {canvasAspect:0.####} with --size {size} gives a {canvasH}px height; pick a larger --size or a smaller aspect."); return 2; }
 
     if (textured)
     {
@@ -3793,7 +3837,8 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot)
                     cell = cellLabel, cellFormKey = cellKey.ToString(), worldspace = targetWorldspace.ToString(),
                     state = stateSpec ?? "load-time", stateView, bosMode,
                     eye = new[] { eyeS.X, eyeS.Y, eyeS.Z }, look = new[] { lookPos.Value.X, lookPos.Value.Y, lookPos.Value.Z },
-                    fov, aspect = 1, rasterSize = size, nearClip = 15, farClip = 131072, reach = planesReach,
+                    fov, aspect = Math.Round((double)size / canvasH, 6), rasterSize = size, rasterHeight = canvasH,
+                    nearClip = 15, farClip = 131072, reach = planesReach,
                     viewpoint = shotSpec?.ViewpointKind ?? "diagnostic; reachability not established",
                     control = shotSpec?.Control ?? false,
                     viewpointEvidence = shotSpec?.ViewpointEvidence, viewLabel = shotSpec?.Label,
@@ -3832,7 +3877,7 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot)
                    gridRender, overlayLines, keepFx, fxStatic, listMeshes, waterPlanes, coverings, planes, showPlanes, occlusionMode,
                    size, outFile, reportMode, camMeta, planeReport: planeReportSink, bosMode: bosMode, stateMode: stateView, stateName: stateArm?.Name ?? "",
                    visibilityBudget: visibilityBudget, navColourGroups: navColourGroups, refSurface: refSurface,
-                   depthDumpPath: depthDump);
+                   depthDumpPath: depthDump, sizeHeight: canvasH);
         }
 
         if (compare is { } cmp)

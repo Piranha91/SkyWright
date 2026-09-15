@@ -174,9 +174,21 @@ A successful save or size check alone does not establish clean pixels.
   *Projected coverings* under *Known rough edges* — **the water HEIGHT is a known open defect.**
 - **Scene filters:** `--fx` / `--fx-static` (see *Effect geometry*), `--markers` (translucent
   editor markers), `--list-meshes` (per-mesh census with its WHOLE-FILE class, `FX-file` vs
-  `geometry`), `--out DIR`, `--size N` (default 2560; square, and the 3D render resolution as well
-  as the PNG's — there is no downsample step, so `--size` IS the sharpness knob, with `--msaa` for
-  the edges).
+  `geometry`), `--out DIR`, `--size N` (default 2560; the render resolution as well as the PNG's —
+  there is no downsample step, so `--size` IS the sharpness knob, with `--msaa` for the edges).
+- **Capture canvas shape:** `--aspect W:H` (or a positive decimal; default `1:1`) makes the
+  first-person capture canvas the shape the camera was planned for. `--size` stays the **width**
+  and the height follows, so the default is the historic square and every existing command renders
+  the identical frame — verified bit-for-bit, not by inspection. **`--fov` is the VERTICAL angle**
+  (it reaches OpenTK's `CreatePerspectiveFieldOfView`, which takes fovy), so widening the aspect
+  widens the HORIZONTAL extent and leaves the vertical alone: `--fov 65 --aspect 16:9` is 65° tall
+  by 97.11° wide. That is the same frame `shotplan.py` plans against with its own `--aspect`, and
+  until 2026-09-14 viewprobe could not capture it — the projection was pinned to aspect 1, so a
+  pose planned for 16:9 was delivered as a square that keeps the vertical angle and crops about a
+  third off the horizontal. Nothing failed: the frame rendered, the subjects stayed in it, and the
+  planner's framing numbers silently stopped describing the delivered picture. **Capture the shape
+  you planned against.** Refused rather than ignored where it cannot apply: the flat diagnostic
+  mode's orbit views are square, and `--interactive` takes the window's own shape.
 - **Occlusion planes** (added 2026-09-04; its own section below): `--planes` draws every occlusion
   plane in the cell (+ ring) as a translucent quad with an outline — solid where visible, dashed
   where hidden — coloured by who put it there (grey vanilla, gold inherited, magenta added, teal

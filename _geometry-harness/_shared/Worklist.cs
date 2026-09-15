@@ -1,4 +1,4 @@
-using System.IO;
+﻿using System.IO;
 using System;
 using System.Linq;
 using System.Text.Json;
@@ -113,12 +113,24 @@ public sealed record WorklistNpc(
 /// </param>
 /// <param name="Planes">Per-shot occlusion-plane layer override (viewprobe's --planes); absent inherits the run's.</param>
 /// <param name="Occlusion">Per-shot occlusion preview override (off|on|diff, viewprobe's --occlusion); absent inherits the run's.</param>
+/// <param name="Aspect">
+/// Per-shot CAPTURE CANVAS SHAPE, width / height (viewprobe's --aspect); absent inherits the run's,
+/// which is square unless the command line said otherwise. Fov is the VERTICAL angle, so this
+/// widens the horizontal extent and leaves the vertical alone — 65 at 1.7778 is 65 deg tall by
+/// 97.11 wide. A shot planned for a non-square frame and rendered without this gets viewprobe's
+/// square, which holds the vertical angle and crops about a third off the horizontal, so the
+/// picture stops matching the framing that qualified the pose and nothing errors (Piranha,
+/// 2026-09-15). Absent is NOT 1.0 recorded: it is "this shot never said", so it INHERITS THE RUN'S
+/// setting — square by default, or whatever --aspect asked for — which is what keeps every worklist
+/// written before this field rendering exactly as it always did.
+/// </param>
 public sealed record WorklistShot(
     string Label,
     IReadOnlyList<float> Eye,
     float Yaw = 0f,
     float Pitch = 0f,
     float Fov = 65f,
+    float? Aspect = null,
     IReadOnlyList<float>? Look = null,
     float? FloorZ = null,
     string? Note = null,
@@ -243,6 +255,11 @@ public static class WorklistIo
                 if (s.Eye is null || s.Eye.Count != 3) Bad($"{sw}: eye must be [X, Y, Z].");
                 if (s.Look is not null && s.Look.Count != 3) Bad($"{sw}: look must be [X, Y, Z].");
                 if (s.Fov is <= 0f or >= 180f) Bad($"{sw}: fov {s.Fov} is out of range (0..180).");
+                // An aspect of 0, a negative, or a NaN would reach the projection and the canvas
+                // arithmetic and produce a degenerate frame rather than an error. Refuse it HERE,
+                // before a load walk is spent on it, like every other camera number.
+                if (s.Aspect is { } asp && !(asp > 0.01f && asp < 100f && float.IsFinite(asp)))
+                    Bad($"{sw}: aspect {asp} is out of range (0.01..100) — it is width / height, so 16:9 is 1.7778.");
                 if (s.Pitch is < -89f or > 89f) Bad($"{sw}: pitch {s.Pitch} is out of range (-89..89).");
                 if (s.Nav is not null && s.Nav is not ("off" or "filled" or "wire" or "both"))
                     Bad($"{sw}: nav '{s.Nav}' is not off|filled|wire|both.");
