@@ -24,6 +24,9 @@ Scene JSON:
      "nav":  [{"min": [x,y], "max": [x,y], "z": 0.0, "name": "Test.esp tri"}],
      "navSilent": [[x,y]],           # queried points that get NO nav-at line at all
      "insideSilent": [[x,y,z]],      # queried points that get NO inside-at line at all
+     "clearSilent": [[x,y,z]],       # queried points that get NO clear-at line at all
+     "clearNoBox": 0,                # physical refs the OBND broad phase could not offer
+     "clearUnread": 0,               # candidate meshes that could not be read
      "configFingerprint": "<64 hex>",  # what viewprobe prints for a candidate configuration
      "configFingerprintAsks": [1]}     # print it only on these 1-based ASKING invocations
 """
@@ -99,7 +102,8 @@ def trace(scene, eye, d):
 def parse_args(argv):
     """viewprobe's own command line, as much of it as shotplan drives. Unknown flags are ignored
     on purpose: the stand-in must not fail on a flag the planner passes through."""
-    out = {"pick": [], "nav_at": [], "inside_at": [], "refs_at": [],
+    out = {"pick": [], "nav_at": [], "inside_at": [], "refs_at": [], "clear_at": [],
+           "clear_reach": 512.0,
            "eye": None, "yaw": 0.0, "pitch": 0.0, "fov": 65.0, "size": 320, "look": None,
            "cell": None}
     takes = {"--eye", "--yaw", "--pitch", "--fov", "--size", "--look", "--msaa", "--nav",
@@ -115,6 +119,10 @@ def parse_args(argv):
             out["inside_at"].append(argv[i + 1]); i += 2
         elif a == "--refs-at":
             out["refs_at"].append(argv[i + 1]); i += 2
+        elif a == "--clear-at":
+            out["clear_at"].append(argv[i + 1]); i += 2
+        elif a == "--clear-reach":
+            out["clear_reach"] = float(argv[i + 1]); i += 2
         elif a in ("--eye", "--look"):
             out[a[2:]] = tuple(float(v) for v in argv[i + 1].split(",")); i += 2
         elif a in ("--yaw", "--pitch", "--fov"):
@@ -237,6 +245,53 @@ def main(argv):
             txt = " ".join(f"{k} {rays[k]:.0f}" for k in ("+x", "-x", "+y", "-y", "up", "down"))
             print(f"      {b['id']}  {b.get('type', 'Static')}  {b.get('edid', '-')}  "
                   f"dims {dims[0]:.0f}x{dims[1]:.0f}x{dims[2]:.0f} u  rays {txt}")
+
+    # --clear-at: the nearest box surface on each world axis, whether or not anything encloses the
+    # point. The real probe ray-casts the placed meshes; the stand-in intersects the toy AABBs,
+    # which is the same answer for box-shaped geometry. `clearSilent` withholds a whole answer,
+    # and `clearNoBox` / `clearUnread` declare the coverage the broad phase did NOT have, which is
+    # what makes an empty answer read as UNRESOLVED rather than as clear.
+    silent_clear = {tuple(p) for p in scene.get("clearSilent", [])}
+    axes = (("+x", 0, +1), ("-x", 0, -1), ("+y", 1, +1), ("-y", 1, -1),
+            ("up", 2, +1), ("down", 2, -1))
+    reach = a["clear_reach"]
+    phys = [b for b in scene.get("boxes", []) if b.get("physical", True)]
+    for spec in a["clear_at"]:
+        x, y, z = (int(float(v)) for v in spec.split(","))
+        if (x, y, z) in silent_clear:
+            continue
+        q = (x, y, z)
+        print(f"   clear-at {x},{y},{z}: nearest placed geometry on each world axis within "
+              f"{reach:.0f} u - {len(phys)} candidate(s) in the broad phase, {len(phys)} with a "
+              f"readable mesh, {scene.get('clearUnread', 0)} unreadable, "
+              f"{scene.get('clearNoBox', 0)} physical ref(s) skipped for want of a usable OBND, "
+              f"{scene.get('clearNoMesh', 0)} physical ref(s) with no model at all "
+              "(the broad phase is OBND-based: a ref it cannot see is not evidence of open space)")
+        for name, ax, sgn in axes:
+            other = [k for k in range(3) if k != ax]
+            best, who = None, None
+            for b in phys:
+                if not all(b["min"][k] <= q[k] <= b["max"][k] for k in other):
+                    continue
+                for face in (b["min"][ax], b["max"][ax]):
+                    t = (face - q[ax]) * sgn
+                    if 1e-3 < t <= reach and (best is None or t < best):
+                        best, who = t, b
+            # The scene's floor plane is geometry to the ray tracer above, so it is geometry here
+            # too -- a toy room declaring `floorZ` has a floor under the eye. A scene that omits
+            # `floorZ` has none, which is the shape the three Ratway cameras turned out to be.
+            fz = scene.get("floorZ")
+            if name == "down" and fz is not None:
+                t = q[2] - fz
+                if 1e-3 < t <= reach and (best is None or t < best):
+                    best, who = t, {"id": "000000:Test.esm", "edid": "SceneFloor",
+                                    "min": [0, 0, fz], "max": [0, 0, fz]}
+            if best is None:
+                print(f"      {name:<4}       -  nothing within {reach:.0f} u")
+            else:
+                c = [(who["min"][k] + who["max"][k]) / 2.0 for k in range(3)]
+                print(f"      {name:<4} {best:7.1f} u  {who['id']}  {who.get('edid', '-')}  "
+                      f"at {c[0]:.0f},{c[1]:.0f},{c[2]:.0f}  scale 1.00  mesh test\\{who['id']}.nif")
 
     for spec in a["refs_at"]:
         x, y, rad = (int(float(v)) for v in spec.split(","))

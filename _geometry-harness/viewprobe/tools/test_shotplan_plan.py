@@ -53,7 +53,8 @@ def check(name, cond, detail=""):
 #            furniture that the map cannot see.
 #   panel    a thin vertical board well ABOVE the eye; the declared HIGH point is on its -Y face
 
-def room(*extra, floor=0.0, nav=True, silent_nav=(), silent_inside=()):
+def room(*extra, floor=0.0, nav=True, silent_nav=(), silent_inside=(), silent_clear=(),
+         no_floor=False, no_box=0, unread=0):
     boxes = [
         {"id": "000201:Test.esp", "edid": "ShellN", "min": [-860, 800, 0], "max": [860, 860, 400]},
         {"id": "000202:Test.esp", "edid": "ShellS", "min": [-860, -860, 0], "max": [860, -800, 400]},
@@ -63,7 +64,13 @@ def room(*extra, floor=0.0, nav=True, silent_nav=(), silent_inside=()):
     boxes += list(extra)
     sc = {"floorZ": floor, "boxes": boxes,
           "navSilent": [list(p) for p in silent_nav],
-          "insideSilent": [list(p) for p in silent_inside]}
+          "insideSilent": [list(p) for p in silent_inside],
+          "clearSilent": [list(p) for p in silent_clear],
+          "clearNoBox": no_box, "clearUnread": unread}
+    # A room with NO floor at all -- the shape the three real off-mesh cameras turned out to be in,
+    # where the eye hangs in the void outside the shell and nothing is below it.
+    if no_floor:
+        del sc["floorZ"]
     if nav:
         sc["nav"] = [{"min": [-790, -790], "max": [790, 790], "z": floor, "name": "Test.esm"}]
     else:
@@ -241,6 +248,159 @@ def test_missing_placement_evidence_refuses():
     check("missing evidence: a silent --inside-at is refused too",
           any("inside" in f for f in doc["fails"]), "; ".join(doc["fails"]))
     check("missing evidence: the verdict is REFUSED", code == 1, f"exit {code}")
+
+
+# --------------------------------------------------------------------------------------
+# 1b. the off-mesh allowance, paid for in geometry
+# --------------------------------------------------------------------------------------
+#
+# `nav_verdict`'s `off-mesh-near` arm passes a point NO navmesh covers, on the strength of its
+# distance to the nearest triangle, and used to call it "a furniture footprint inside the room".
+# Distance cannot say that. The cases below are the two shapes that arm has to tell apart, plus
+# the three ways the geometry answer can be missing. Each is a KNOWN ANSWER over declared boxes.
+#
+# OFF_EYE stands on a 90 u pedestal 300 u out on -Y, outside the nav rectangle below, so every
+# case here takes the off-mesh-near arm and nothing else.
+
+OFF_EYE = "0,-900,120"
+# navmesh that stops short of the eye's XY: nearest triangle ~110 u away, inside --offmesh-tol 160
+NEAR_NAV = [{"min": [-790, -790], "max": [790, 790], "z": 0.0, "name": "Test.esm"}]
+# a shell one box further out, so the clearance map is still bounded on every bearing
+BIG_SHELL = [
+    {"id": "000201:Test.esp", "edid": "ShellN", "min": [-1160, 1100, 0], "max": [1160, 1160, 400]},
+    {"id": "000202:Test.esp", "edid": "ShellS", "min": [-1160, -1160, 0], "max": [1160, -1100, 400]},
+    {"id": "000203:Test.esp", "edid": "ShellE", "min": [1100, -1160, 0], "max": [1160, 1160, 400]},
+    {"id": "000204:Test.esp", "edid": "ShellW", "min": [-1160, -1160, 0], "max": [-1100, 1160, 400]},
+]
+
+
+def off_mesh_scene(**kw):
+    """A room whose navmesh stops 110 u short of the eye -- the off-mesh-near arm, every time."""
+    sc = {"boxes": list(BIG_SHELL) + list(kw.pop("extra", [])),
+          "nav": NEAR_NAV,
+          "navSilent": [], "insideSilent": [],
+          "clearSilent": [list(q) for q in kw.pop("silent_clear", ())],
+          "clearNoBox": kw.pop("no_box", 0), "clearUnread": kw.pop("unread", 0)}
+    if not kw.pop("no_floor", False):
+        sc["floorZ"] = 0.0
+    assert not kw, kw
+    return sc
+
+
+def off_mesh_check(scene):
+    fd, jp = tempfile.mkstemp(suffix=".json")
+    os.close(fd)
+    code, out = run_cli(["check", "TestCell", "--eye", OFF_EYE, "--vp", FAKE, "--quiet",
+                         "--floor-z", "0", "--json", jp,
+                         "--subject", "0,0,0=target"], scene)
+    with open(jp, "r", encoding="utf-8") as f:
+        doc = json.load(f)
+    os.unlink(jp)
+    return code, out, doc
+
+
+def test_off_mesh_over_a_floor_is_still_accepted():
+    """The vantage the allowance exists for: off navmesh, but a real floor under the eye.
+
+    This is the control that must NOT change. The rule was written for a camera standing on a
+    bed footprint 80 u from the nearest triangle, and a correction that refuses it has replaced
+    one wrong answer with another.
+    """
+    code, out, doc = off_mesh_check(off_mesh_scene())
+    pl = doc["placement"]
+    check("off-mesh + floor: the nav arm is still off-mesh-near", pl["nav"] == "off-mesh-near",
+          pl["nav"])
+    check("off-mesh + floor: the geometry SUPPORTS it", pl["support"] == "supported",
+          pl["support"] + " -- " + pl["supportWhy"])
+    check("off-mesh + floor: and the camera is accepted", code == 0, f"exit {code}")
+    check("off-mesh + floor: the report names the surface it measured",
+          "120" in pl["supportWhy"], pl["supportWhy"])
+
+
+def test_off_mesh_over_nothing_is_refused():
+    """The three real cameras this correction came from, reproduced: off navmesh AND nothing
+    at all under the eye."""
+    code, out, doc = off_mesh_check(off_mesh_scene(no_floor=True))
+    pl = doc["placement"]
+    check("off-mesh + void: the nav arm alone would still pass it",
+          pl["nav"] == "off-mesh-near", pl["nav"])
+    check("off-mesh + void: the geometry CONTRADICTS it", pl["support"] == "contradicted",
+          pl["support"] + " -- " + pl["supportWhy"])
+    check("off-mesh + void: the camera is REFUSED", code == 1, f"exit {code}")
+    check("off-mesh + void: and the refusal says the placement is why",
+          any("placement" in f and "support" in f for f in doc["fails"]), "; ".join(doc["fails"]))
+
+
+def test_off_mesh_over_another_storey_is_refused():
+    """A floor exists, but it belongs to a level below -- outside --storey-tol of the declared one.
+
+    `floorZ` -200 puts the only surface 320 u under a 120 u eye: 200 u below the declared floor 0,
+    past the 96 u storey band. Same shape as the Ratway camera whose only surface below was
+    another corridor 220 u down, 100 u under its own declared floor.
+    """
+    sc = off_mesh_scene()
+    sc["floorZ"] = -200.0
+    code, out, doc = off_mesh_check(sc)
+    pl = doc["placement"]
+    check("off-mesh + wrong level: the geometry CONTRADICTS it", pl["support"] == "contradicted",
+          pl["support"] + " -- " + pl["supportWhy"])
+    check("off-mesh + wrong level: the report says which level it found",
+          "another level" in pl["supportWhy"], pl["supportWhy"])
+    check("off-mesh + wrong level: the camera is REFUSED", code == 1, f"exit {code}")
+
+
+def test_incomplete_obnd_coverage_is_unresolved_not_clear():
+    """An absent answer over an INCOMPLETE broad phase is UNKNOWN, and unknown does not publish.
+
+    The broad phase nominates by record OBND, so a physical ref with no usable box never reaches
+    the ray test. "Nothing found" then says as much about the boxes as about the building, and
+    reading it as clearance is the same silent pass this whole correction is about.
+    """
+    code, out, doc = off_mesh_check(off_mesh_scene(no_floor=True, no_box=3))
+    pl = doc["placement"]
+    check("incomplete coverage: the answer is UNRESOLVED, not contradicted and not clear",
+          pl["support"] == "unresolved", pl["support"] + " -- " + pl["supportWhy"])
+    check("incomplete coverage: the report names the blind spot",
+          "OBND" in pl["supportWhy"], pl["supportWhy"])
+    check("incomplete coverage: and an unresolved placement is still REFUSED", code == 1,
+          f"exit {code}")
+
+
+def test_unreadable_meshes_are_unresolved_not_clear():
+    """Same rule for a candidate whose mesh could not be read: a weaker answer, stated."""
+    code, out, doc = off_mesh_check(off_mesh_scene(no_floor=True, unread=2))
+    pl = doc["placement"]
+    check("unreadable mesh: the answer is UNRESOLVED", pl["support"] == "unresolved",
+          pl["support"] + " -- " + pl["supportWhy"])
+    check("unreadable mesh: the report says the meshes could not be read",
+          "could not be read" in pl["supportWhy"], pl["supportWhy"])
+    check("unreadable mesh: and the camera is REFUSED", code == 1, f"exit {code}")
+
+
+def test_silent_clear_at_is_refused():
+    """A point the probe never answered for has NOT had its placement tested -- the same rule the
+    silent --nav-at case already carries, one query lower down."""
+    code, out, doc = off_mesh_check(off_mesh_scene(silent_clear=[(0, -900, 120)]))
+    pl = doc["placement"]
+    check("silent clear-at: the answer is UNKNOWN, not clear", pl["support"] == "unknown",
+          pl["support"] + " -- " + pl["supportWhy"])
+    check("silent clear-at: and the camera is REFUSED", code == 1, f"exit {code}")
+
+
+def test_support_does_not_override_the_other_placement_arms():
+    """The support answer DECIDES only on the off-mesh arm.
+
+    An on-storey eye keeps its navmesh answer, and the support line is reported beside it rather
+    than re-judging it -- and it must not rescue an eye the inside test refuses either.
+    """
+    code, out, doc = check_cli(room(PLINTH), "--surface", f"{LOW}=low")
+    pl = doc["placement"]
+    check("on-storey: the nav arm is unchanged", pl["nav"] == "on-storey", pl["nav"])
+    check("on-storey: the support answer is reported beside it",
+          pl["support"] in ("supported", "contradicted", "unresolved"), pl["support"])
+    check("on-storey: and the camera is still accepted", code == 0, f"exit {code}")
+    check("the report states what support does NOT mean",
+          "reachability" in pl["supportIs"], pl["supportIs"])
 
 
 # --------------------------------------------------------------------------------------
@@ -686,6 +846,13 @@ ALL = [test_failed_verification_cannot_export_success,
        test_verified_run_publishes_cleanly,
        test_emit_refused_marks_the_file,
        test_missing_placement_evidence_refuses,
+       test_off_mesh_over_a_floor_is_still_accepted,
+       test_off_mesh_over_nothing_is_refused,
+       test_off_mesh_over_another_storey_is_refused,
+       test_incomplete_obnd_coverage_is_unresolved_not_clear,
+       test_unreadable_meshes_are_unresolved_not_clear,
+       test_silent_clear_at_is_refused,
+       test_support_does_not_override_the_other_placement_arms,
        test_surface_hit_is_confirmed,
        test_nearer_blocker_is_blocked,
        test_farther_hit_does_not_establish_the_surface,

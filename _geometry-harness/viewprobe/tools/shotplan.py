@@ -291,6 +291,17 @@ REFS_ROW = re.compile(
 INSIDE_HEAD = re.compile(r"^\s*inside-at (-?\d+),(-?\d+),(-?\d+): (\d+ ref|no physical)")
 INSIDE_ROW = re.compile(r"^\s*(\S{6}:.+?\.es[pml])\s{2}(\S+)\s{2}(\S+)\s{2}dims (-?\d+)x(-?\d+)x(-?\d+) u")
 INSIDE_RAYS = re.compile(r"\srays ((?:(?:[+-][xy]|up|down) (?:\d+|-)\s*){6})")
+# `--clear-at` header and rows: what placed mesh geometry is really around a point, on each world
+# axis, whether or not any box encloses it. The header's four population counts are what makes an
+# EMPTY answer readable -- "nothing found" only means "nothing there" when the broad phase saw
+# everything, and the header says whether it did.
+CLEAR_HEAD = re.compile(
+    r"^\s*clear-at (-?\d+),(-?\d+),(-?\d+): nearest placed geometry on each world axis within "
+    r"([\d.]+) u . (\d+) candidate\(s\) in the broad phase, (\d+) with a readable mesh, "
+    r"(\d+) unreadable, (\d+) physical ref\(s\) skipped for want of a usable OBND, "
+    r"(\d+) physical ref\(s\) with no model at all")
+CLEAR_ROW = re.compile(
+    r"^\s*([+-][xy]|up|down)\s+(?:([\d.]+) u\s+(\S{6}:.+?\.es[pml])\s{2}(\S+)\s{2}at |-\s+nothing within )")
 # viewprobe's own configuration fingerprint, printed for a candidate configuration (--order).
 CONFIG_FINGERPRINT = re.compile(r"capture input configuration:\s*([0-9a-fA-F]{16,64})")
 RAY_AXES = ("+x", "-x", "+y", "-y", "up", "down")
@@ -422,6 +433,33 @@ class Probe:
                             for i in range(0, len(toks) - 1, 2)}
                 cur.append({"formkey": m[1], "type": m[2], "edid": None if m[3] == "-" else m[3],
                             "dims": dims, "maxdim": max(dims), "rays": rays})
+            elif ln.strip() and not ln.startswith("      "):
+                cur = None
+        return out
+
+    def clear(self):
+        """{(x, y, z): {reach, candidates, meshed, unread, no_box, no_mesh, axes}} per `--clear-at`.
+
+        `axes` maps each of the six world axes to `{'dist', 'formkey', 'edid'}`, with `dist` None
+        for "nothing within the reach". The population counts ride along because an axis with
+        nothing on it is only evidence of open space when the broad phase could see the refs that
+        would have been on it -- see support_verdict, which refuses to read an empty answer as a
+        clear one when coverage was incomplete. A query with no answer at all is ABSENT, not empty.
+        """
+        out, cur = {}, None
+        for ln in self.stdout.splitlines():
+            m = CLEAR_HEAD.match(ln)
+            if m:
+                cur = out.setdefault((int(m[1]), int(m[2]), int(m[3])), {
+                    "reach": float(m[4]), "candidates": int(m[5]), "meshed": int(m[6]),
+                    "unread": int(m[7]), "no_box": int(m[8]), "no_mesh": int(m[9]), "axes": {}})
+                continue
+            if cur is None:
+                continue
+            m = CLEAR_ROW.match(ln)
+            if m:
+                cur["axes"][m[1]] = {"dist": float(m[2]) if m[2] else None,
+                                     "formkey": m[3], "edid": None if m[4] in (None, "-") else m[4]}
             elif ln.strip() and not ln.startswith("      "):
                 cur = None
         return out
@@ -1113,6 +1151,78 @@ def nav_verdict(entry, floor_z, args):
                         f"(tolerance {args.offmesh_tol:.0f} u)")
 
 
+def support_verdict(entry, eye, floor_z, args):
+    """Is there real placed geometry UNDER this eye, on this eye's own storey?
+
+    `nav_verdict`'s `off-mesh-near` arm used to answer this by assertion: within --offmesh-tol of
+    a navmesh triangle it called the point "a furniture footprint inside the room" and passed it.
+    Distance to navmesh cannot say that. Three Ratway cameras the planner fully ACCEPTED on that
+    arm (2026-09-14) have NO placed geometry at all above or below them -- one of them finds
+    nothing within 2,048 u in either direction -- because they stand in the void OUTSIDE the
+    corridor shell, where a back-face-culled kit wall lets them render the room they are not in. An absent OBND box
+    said nothing either way: a point in the void is enclosed by nothing, exactly like a point in
+    the middle of the room.
+
+    So the question is asked of geometry, through `--clear-at`'s downward ray:
+
+      supported    a placed mesh is below the eye and its surface sits within --storey-tol of the
+                   declared floor -- which is the furniture case the off-mesh allowance exists for
+                   (a camera over a bed reads its physical floor a few tens of units down).
+      contradicted nothing is below it within the probe's reach, or the only thing below belongs to
+                   another storey, AND the broad phase saw every candidate that could have been
+                   there. Absence is a finding only when coverage was complete.
+      unresolved   the probe could not see enough to say: refs skipped for want of a usable OBND,
+                   meshes it could not read, or a reach too short to cover the storey band. NOT a
+                   pass -- an eye whose placement is unknown must not publish a camera.
+
+    Note what this does NOT claim. It is a statement about STATIC PLACED GEOMETRY in the rendered
+    scene, not about player reachability, actor collision or havok: a floor under the eye does not
+    make the spot walkable, and this function never says it does.
+    """
+    if entry is None:
+        return "unknown", "no --clear-at answer for this point"
+    band = args.storey_tol
+    reach = entry["reach"]
+    # Coverage the absence would have to survive to mean anything.
+    blind = []
+    if entry["no_box"]:
+        blind.append(f"{entry['no_box']} physical ref(s) carry no usable OBND, so the broad phase "
+                     "never offered them to the ray test")
+    if entry["unread"]:
+        blind.append(f"{entry['unread']} candidate mesh(es) could not be read")
+    down = entry["axes"].get("down")
+    if down is None:
+        return "unresolved", "the --clear-at answer carries no downward ray for this point"
+    # The reach has to cover the whole storey band below the eye, or "nothing below" is a statement
+    # about the reach rather than about the building.
+    need = (eye[2] - floor_z) + band
+    if down["dist"] is None and reach < need:
+        return "unresolved", (f"nothing below it within the probe's {reach:.0f} u reach, but the "
+                              f"storey band under this eye runs to {need:.0f} u -- the reach, not "
+                              "the geometry, is what ran out")
+    if down["dist"] is None:
+        if blind:
+            return "unresolved", ("no placed geometry below it within " f"{reach:.0f} u, but "
+                                  "coverage was incomplete: " + "; ".join(blind))
+        return "contradicted", (f"NO placed geometry below it within {reach:.0f} u -- nothing holds "
+                                f"this eye up on any storey ({entry['candidates']} candidate(s) "
+                                f"tested, all with readable meshes)")
+    surface = eye[2] - down["dist"]
+    off = surface - floor_z
+    who = down["edid"] or down["formkey"]
+    if abs(off) <= band:
+        return "supported", (f"placed floor {down['dist']:.0f} u below it -- `{who}` at z "
+                             f"{surface:.0f} ({off:+.0f} from the declared floor z {floor_z:.0f})")
+    if blind:
+        return "unresolved", (f"the nearest placed surface below it is `{who}` at z {surface:.0f}, "
+                              f"{off:+.0f} from the floor z {floor_z:.0f} and outside the "
+                              f"{band:.0f} u storey band -- but coverage was incomplete: "
+                              + "; ".join(blind))
+    return "contradicted", (f"the only placed surface below it is `{who}` at z {surface:.0f}, "
+                            f"{off:+.0f} from the declared floor z {floor_z:.0f} and outside the "
+                            f"{band:.0f} u storey band -- that floor belongs to another level")
+
+
 def frame_check(eye, yaw, pitch, fov, subjects, args):
     """Is every subject inside the frame, and how much of it do they fill?
 
@@ -1195,7 +1305,8 @@ def inside_verdict(entry, args):
     return ("inside" if fails else "clear"), fails, notes
 
 
-def evaluate(eye, subjects, floor_z, nav_entry, args, aim, skip_nav=False, inside_entry=None):
+def evaluate(eye, subjects, floor_z, nav_entry, args, aim, skip_nav=False, inside_entry=None,
+             clear_entry=None):
     """Every reason this camera could be wrong, collected rather than short-circuited.
 
     A planner that stops at the first failure teaches nothing when it refuses. The caller prints
@@ -1254,6 +1365,21 @@ def evaluate(eye, subjects, floor_z, nav_entry, args, aim, skip_nav=False, insid
         v["fail"].append(f"placement: {msg}")
     else:
         v["note"].append(f"placement: {msg}")
+    # The off-mesh allowance is the one arm that passes a point NO navmesh covers, on the strength
+    # of a distance. Distance cannot tell a furniture footprint in the room from the void outside
+    # the shell, so that arm now has to be paid for in geometry: the eye needs a real placed floor
+    # under it, on its own storey. on-storey points already have their walkable surface, and the
+    # two failing arms have already failed -- the support answer is reported for all of them so a
+    # refusal says what is really underneath, but it only DECIDES here.
+    if skip_nav:
+        v["support"] = "skipped"
+    else:
+        sup, smsg = support_verdict(clear_entry, eye, floor_z, args)
+        v["support"] = sup
+        if kind == "off-mesh-near" and sup != "supported":
+            v["fail"].append(f"placement: {msg}; and the geometry does not bear that out -- {smsg}")
+        else:
+            v["note"].append(f"support: {smsg}")
     if skip_nav:
         v["inside"] = "skipped"
     else:
@@ -1771,11 +1897,13 @@ def cmd_plan(args):
              f"those poses are NOT judged and NOT offered" if dropped else ""))
     flags = ["--eye", f"{cx:.1f},{cy:.1f},{floor_z + args.eye_height:.1f}", "--yaw", "0"]
     for x, y in pts:
-        flags += ["--nav-at", f"{x},{y}", "--inside-at", f"{x},{y},{eye_z}"]
+        flags += ["--nav-at", f"{x},{y}", "--inside-at", f"{x},{y},{eye_z}",
+                  "--clear-at", f"{x},{y},{eye_z}"]
+    flags += ["--clear-reach", f"{args.clear_reach:g}"]
     for s in subjects:
         flags += ["--refs-at", f"{round(s.x)},{round(s.y)},{int(args.door_radius)}"]
     p3 = run.probe(*flags)
-    nav, inside, near = p3.nav(), p3.inside(), p3.refs_near()
+    nav, inside, near, clear = p3.nav(), p3.inside(), p3.refs_near(), p3.clear()
     doors = doors_near(subjects, near, args)
     kept = set(pts)
     scored = []
@@ -1783,14 +1911,17 @@ def cmd_plan(args):
         if v["_xy"] not in kept:
             continue
         v2 = evaluate(v["eye"], subjects, floor_z, nav.get(v["_xy"]), args, aim,
-                      inside_entry=inside.get((v["_xy"][0], v["_xy"][1], eye_z)))
+                      inside_entry=inside.get((v["_xy"][0], v["_xy"][1], eye_z)),
+                      clear_entry=clear.get((v["_xy"][0], v["_xy"][1], eye_z)))
         v2["_bearing"], v2["_standoff"], v2["_xy"] = v["_bearing"], v["_standoff"], v["_xy"]
         scored.append(v2)
     ok = [v for v in scored if v["ok"]]
     ok.sort(key=lambda v: -v["score"])
     n_inside = sum(1 for v in scored if v.get("inside") == "inside")
+    n_unsup = sum(1 for v in scored if v.get("support") in ("contradicted", "unresolved", "unknown"))
     print(f"  {len(ok)} of {len(scored)} survive the placement test; "
-          f"{len(scored) - len(ok)} refused ({n_inside} for an eye inside a physical ref's box)")
+          f"{len(scored) - len(ok)} refused ({n_inside} for an eye inside a physical ref's box, "
+          f"{n_unsup} with no placed floor under the eye on its own storey)")
     report_refusals(scored)
     if not ok:
         raise SystemExit("\nEvery sightline-clear camera sits off the storey or inside a ref. Raise "
@@ -2008,12 +2139,15 @@ def cmd_check(args):
     eye_i = (round(eye[0]), round(eye[1]), round(eye[2]))
     extra = ["--nav-at", f"{eye_i[0]},{eye_i[1]}",
              "--inside-at", f"{eye_i[0]},{eye_i[1]},{eye_i[2]}",
+             "--clear-at", f"{eye_i[0]},{eye_i[1]},{eye_i[2]}",
+             "--clear-reach", f"{args.clear_reach:g}",
              "--refs-at", f"{eye[0]:.0f},{eye[1]:.0f},{args.refs_radius:g}"]
     for s2 in subjects:
         extra += ["--refs-at", f"{round(s2.x)},{round(s2.y)},{int(args.door_radius)}"]
     p = run.probe("--eye", "{:.1f},{:.1f},{:.1f}".format(*eye), "--yaw", "0", *extra)
     nav = p.nav().get((round(eye[0]), round(eye[1])))
     inside = p.inside().get(eye_i)
+    clear = p.clear().get(eye_i)
     doors = doors_near(subjects, p.refs_near(), args)
     refs = p.refs()[:14]
 
@@ -2027,9 +2161,14 @@ def cmd_check(args):
               if not t["inDeliveredFrame"] and t["status"] != "behind"]
 
     kind, msg = nav_verdict(nav, floor_z, args)
-    print(f"\n--- placement ---\n  {kind}: {msg}")
+    skind, smsg = support_verdict(clear, eye, floor_z, args)
+    print(f"\n--- placement ---\n  {kind}: {msg}\n  support ({skind}): {smsg}")
     if kind in ("wrong-storey", "no-floor", "unknown"):
         fails.append(f"placement: {kind}")
+    elif kind == "off-mesh-near" and skind != "supported":
+        # The off-mesh allowance passes a point no navmesh covers on the strength of a
+        # distance. It now has to be paid for in geometry -- see support_verdict.
+        fails.append(f"placement: off-mesh-near, support {skind}")
     ikind, ifails, inotes = inside_verdict(inside, args)
     if ikind == "unknown":
         ifails = ifails + ["inside: no --inside-at answer -- the eye was NOT tested"]
@@ -2072,6 +2211,10 @@ def cmd_check(args):
                                      "extent": s.extent} for s in subjects],
                        "framing": {"fill": round(fill, 3), "vCentre": round(v_centre, 3),
                                    "ok": ok},
+                       "placement": {"nav": kind, "navWhy": msg,
+                                     "support": skind, "supportWhy": smsg,
+                                     "supportIs": "static placed geometry under the eye, NOT player "
+                                                  "reachability or actor collision"},
                        "doors": doors, "fails": fails,
                        "renders": run.renders, "seconds": round(run.seconds, 1)}, f, indent=2,
                       default=str)
@@ -2322,6 +2465,10 @@ def add_common(p, need_subjects=True):
     p.add_argument("--offmesh-tol", type=float, default=160.0,
                    help="how far off navmesh a camera point may sit and still count as inside "
                         "the room (default 160 -- navmesh is cut around furniture)")
+    p.add_argument("--clear-reach", type=float, default=512.0,
+                   help="how far --clear-at's axis rays look for real placed geometry around the "
+                        "eye (default 512). It must cover the storey band under the eye, or "
+                        "'nothing below' is a statement about the reach and reads UNRESOLVED")
     p.add_argument("--size", type=int, default=320, help="probe render size (default 320)")
     p.add_argument("--out", default=None, help="where probe PNGs go")
     p.add_argument("--vp", default=None,

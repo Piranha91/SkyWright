@@ -294,6 +294,19 @@ var refsAt = new List<(float X, float Y, float R)>();
 // printed with its dimensions; what a room-scale box means is the caller's decision, so no cap
 // is applied here.
 var insideAt = new List<(float X, float Y, float Z)>();
+// --clear-at X,Y,Z asks the question --inside-at structurally cannot: what placed mesh geometry
+// is actually AROUND this world point, in every direction, whether or not any box encloses it.
+// --inside-at only ray-tests refs whose OBND box already contains the point, so a point with no
+// enclosing box gets ZERO rays and an empty answer — and an empty answer reads exactly like a
+// clear one. A camera standing in the void behind a corridor wall and a camera standing in the
+// middle of the corridor both return "no physical ref's box encloses it" (three vanilla Ratway
+// cameras, 2026-09-14). The distinction is what is near the point, which needs real geometry: the
+// broad-phase-then-transformed-soup pattern --planes-report uses. Six world-axis rays plus a
+// long floor ray, against every candidate's own placed mesh, both faces. The broad phase is
+// OBND-based, so a ref with no usable box is INVISIBLE to it — the count is printed, and an
+// empty answer is stated as OBND-limited coverage rather than as proven clearance.
+var clearAt = new List<(float X, float Y, float Z)>();
+float clearReach = 512f;   // --clear-reach: how far each ray looks before reporting nothing
 // --euler renders the SAME cell under all six Euler compositions. The numeric tests could not
 // separate them (0.62%-0.69%, then 1.84%-2.08%), which is itself a finding — but a wrong order
 // scatters kit pieces by hundreds of units, and that is trivially visible even when it is
@@ -482,6 +495,9 @@ for (int i = argStart; i < args.Length; i++)
     { var p = args[++i].Split(','); if (p.Length >= 2) refsAt.Add((float.Parse(p[0]), float.Parse(p[1]), p.Length > 2 ? float.Parse(p[2]) : 256f)); }
     else if (args[i] == "--inside-at" && i + 1 < args.Length)
     { var p = args[++i].Split(','); if (p.Length == 3) insideAt.Add((float.Parse(p[0]), float.Parse(p[1]), float.Parse(p[2]))); }
+    else if (args[i] == "--clear-at" && i + 1 < args.Length)
+    { var p = args[++i].Split(','); if (p.Length == 3) clearAt.Add((float.Parse(p[0]), float.Parse(p[1]), float.Parse(p[2]))); }
+    else if (args[i] == "--clear-reach" && i + 1 < args.Length) clearReach = float.Parse(args[++i]);
     else if (args[i] == "--nav-color" && i + 1 < args.Length) navColor = args[++i].ToLowerInvariant();
     else if (args[i] == "--npc" && i + 1 < args.Length) { npcSpecs.Add(args[++i]); textured = true; }
     else if (args[i] == "--npc-no-outfit") npcNoOutfit = true;
@@ -1871,6 +1887,62 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot)
                 Console.WriteLine($"      {r.FormKey}  {t}  {ed ?? "-"}  dims {s.X:0}x{s.Y:0}x{s.Z:0} u"
                                 + $"  at {r.Position.X:0},{r.Position.Y:0},{r.Position.Z:0}  scale {r.Scale:0.00}"
                                 + $"  {rays}" + (mesh.Length > 0 ? $"  mesh {mesh}" : ""));
+            }
+        }
+        foreach (var (qx, qy, qz) in clearAt)
+        {
+            var o = new Vector3(qx, qy, qz);
+            var dirs = new (string Name, Vector3 D)[]
+            {
+                ("+x", Vector3.UnitX), ("-x", -Vector3.UnitX), ("+y", Vector3.UnitY), ("-y", -Vector3.UnitY),
+                ("up", Vector3.UnitZ), ("down", -Vector3.UnitZ),
+            };
+            var best = new float?[dirs.Length];
+            var owner = new PlacedRef?[dirs.Length];
+            var sweep = Aabb.Empty;
+            foreach (var d in dirs) { sweep = sweep.Add(o); sweep = sweep.Add(o + d.D * clearReach); }
+            // Three populations, all reported: what the broad phase offered, what carried readable
+            // geometry, and what it could not see at all. The last one is the honest limit — a ref
+            // with no usable OBND never reaches the ray test, so "nothing near this point" is a
+            // statement about the boxes as much as about the meshes.
+            int candidates = 0, meshed = 0, unread = 0, noBox = 0, noMesh = 0;
+            foreach (var r in winRef.Values)
+            {
+                if (r.Deleted || DisabledWhy(r) is not null || r.Base is not { } bk) continue;
+                if (!baseType.TryGetValue(bk, out var bt) || !insidePhysical.Contains(bt)) continue;
+                if (baseIsMarker.Contains(bk)) continue;
+                if (baseEditorId.TryGetValue(bk, out var ed) && IsControlEditorId(ed)) continue;
+                if (!baseMesh.TryGetValue(bk, out var bm)) { noMesh++; continue; }
+                if (Path.GetFileName(bm).StartsWith("MarkerX", StringComparison.OrdinalIgnoreCase)
+                    || bm.Replace('/', '\\').Contains(@"effects\", StringComparison.OrdinalIgnoreCase)) continue;
+                if (!baseObnd.TryGetValue(bk, out var ob)) { noBox++; continue; }
+                var model = new Aabb(ob.Min, ob.Max, false);
+                if (model.Size.X <= 0 && model.Size.Y <= 0 && model.Size.Z <= 0) { noBox++; continue; }
+                var box = SpatialOverlap.ToWorld(model, r.Position, r.Rotation, r.Scale);
+                if (box.IsEmpty) { noBox++; continue; }
+                if (SpatialOverlap.BoxDistance(box, sweep) > 0f) continue;
+                candidates++;
+                if (InsideSoupFor(bm) is not { } soup) { unread++; continue; }
+                meshed++;
+                var world = SpatialOverlap.TransformSoup(soup, r.Position, r.Rotation, r.Scale);
+                for (int k = 0; k < dirs.Length; k++)
+                    if (NearestHit(o, dirs[k].D, world.Vertices, world.Indices, best[k] ?? clearReach) is { } h
+                        && (best[k] is null || h < best[k]))
+                    { best[k] = h; owner[k] = r; }
+            }
+            Console.WriteLine($"   clear-at {qx:0},{qy:0},{qz:0}: nearest placed geometry on each world axis "
+                            + $"within {clearReach:0} u — {candidates} candidate(s) in the broad phase, {meshed} with a "
+                            + $"readable mesh, {unread} unreadable, {noBox} physical ref(s) skipped for want of a usable OBND, "
+                            + $"{noMesh} physical ref(s) with no model at all "
+                            + "(the broad phase is OBND-based: a ref it cannot see is not evidence of open space)");
+            for (int k = 0; k < dirs.Length; k++)
+            {
+                string who = owner[k] is { } orf
+                    ? $"{orf.FormKey}  {(orf.Base is { } obk && baseEditorId.TryGetValue(obk, out var oed) ? oed : "-")}"
+                      + $"  at {orf.Position.X:0},{orf.Position.Y:0},{orf.Position.Z:0}  scale {orf.Scale:0.00}"
+                      + (orf.Base is { } obk2 && baseMesh.TryGetValue(obk2, out var obm) ? $"  mesh {obm}" : "")
+                    : $"nothing within {clearReach:0} u";
+                Console.WriteLine($"      {dirs[k].Name,-4} {(best[k] is { } b0 ? $"{b0,7:0.0} u" : "      -")}  {who}");
             }
         }
 
