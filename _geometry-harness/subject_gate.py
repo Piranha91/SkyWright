@@ -172,7 +172,12 @@ def qualify(case):
             raise ValueError("explicit frozen rendering arguments required")
         # Optional material choices are frozen inputs. They cannot override acquisition,
         # placement or diagnostic identity, or remove scene geometry from the normal view.
-        forbidden = {"--ref", "--ref-surface", "--eye", "--look", "--fov", "--size", "--out",
+        # --ref-surface-opacity is forbidden for the same reason as --ref: it changes what the
+        # diagnostic mark IS. A translucent mark shows the subject's material through the colour,
+        # which is a presentation choice for a human reader, not the opaque placed-triangle
+        # contribution this gate qualifies. The renderer also stops printing the opaque
+        # mode line below opacity 1, so such a capture is refused twice over, on purpose.
+        forbidden = {"--ref", "--ref-surface", "--ref-surface-opacity", "--eye", "--look", "--fov", "--size", "--out",
                      "--order", "--instance", "--profile", "--game", "--msaa", "--nav",
                      "--report-mode", "--cull-above", "--no-terrain", "--no-water",
                      "--no-coverings", "--no-ring-refs", "--markers", "--interactive"}

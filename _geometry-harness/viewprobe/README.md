@@ -52,6 +52,32 @@ elsewhere. Keep normal and independent participant/elsewhere repeats and use
 `../subject_gate.py` for source-bound post-render qualification with a normal-view witness.
 Capture success, diagnostic qualification and supported consequence are separate states.
 
+`--ref-surface-opacity V` (opt-in, `0 < V <= 1`, requires `--ref-surface`) composites the same
+depth-tested placed triangles at opacity `V` over the subject's **own material** instead of filling
+them with flat colour. Everything else is unchanged: the same triangles, the same depth test, the
+same back-face culling, the same refusals, no inflation and no through-occluder ghost. `1` is the
+default and is pixel-exact with the flag omitted, so an existing capture is unaffected.
+
+A marked pixel lands at `V*colour + (1-V)*material`, which is measurable: solve for `V` per pixel
+against the normal frame and it must return what was asked. Two properties are worth knowing before
+using it.
+
+- **`V` is the REQUESTED opacity, not a guaranteed per-pixel result.** On simple subjects a marked
+  pixel does land on the prediction, but this is not universal, and highlighting a single reference
+  does not guarantee it — a geometrically complex reference can read stronger than `V` over part of
+  its area.
+- **Where two marks cover the same pixels, the nearer reads stronger than `V`.** Measured by
+  highlighting each reference alone and then together: the deviation appears only when the other
+  mark is present. An opaque mark cannot show this at all, so it is new to the translucent mode.
+  Measure the frame if the exact delivered value matters.
+- Overlap between two marks is a fact about the **picture**, not about where the objects are in the
+  world. It is not evidence of contact between them.
+
+The mode is **not opaque identity evidence** and says so: below opacity 1 the renderer stops
+printing the `subject-surface-mode: exact placed opaque triangles` line that `../subject_gate.py`
+requires, and the gate additionally refuses `--ref-surface-opacity` among its frozen render
+arguments. Use it to make a diagnostic frame legible to a human reader, not to qualify a pair.
+
 
 Pass `--report-mode` with any textured still, compare, worklist, or interactive run to preserve the camera,
 projection, canvas, crop, scene geometry and diagnostic overlays while removing every text surface from the

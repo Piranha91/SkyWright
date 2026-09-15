@@ -167,6 +167,15 @@ class SubjectGateTests(unittest.TestCase):
         case["viewArgs"] += ["--cull-above", "10"]
         self.assertIn("override or remove required scene state", " ".join(qualify(case)["reasons"]))
 
+    def test_translucent_surface_mark_is_not_opaque_identity_evidence(self):
+        # A texture-preserving mark shows the subject's material through the colour. That is a
+        # presentation choice for a human reader, not the opaque placed-triangle contribution this
+        # gate qualifies, so it must be refused by the frozen-render-state check specifically --
+        # not merely fall through to a command-mismatch reason that a re-frozen command would hide.
+        case = self.fixture()
+        case["viewArgs"] += ["--ref-surface-opacity", "0.5"]
+        self.assertIn("override or remove required scene state", " ".join(qualify(case)["reasons"]))
+
     def test_candidate_hash_order_configuration_and_profile_are_bound(self):
         case = self.fixture()
         Path(case["candidate"]["candidatePath"]).write_text(json.dumps({"Mods": ["changed"]}), encoding="utf-8")

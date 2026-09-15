@@ -82,7 +82,7 @@ string dataDir = Path.Combine(GamePath, "Data");
 if (args.Length > 0 && args[0] == "--smoke") return Smoke();
 if (args.Length == 0)
 {
-    Console.Error.WriteLine("usage: viewprobe <CellEditorID|FormID> [--out DIR] [--size N] [--angles 0,90,180] [--elev 25] [--no-nav] [--ref FORMKEY[=COLOR]]... [--report-mode] [--interactive [--fly-speed 600] [--look-sens 0.15]]");
+    Console.Error.WriteLine("usage: viewprobe <CellEditorID|FormID> [--out DIR] [--size N] [--angles 0,90,180] [--elev 25] [--no-nav] [--ref FORMKEY[=COLOR]]... [--ref-surface [--ref-surface-opacity 0<v<=1]] [--report-mode] [--interactive [--fly-speed 600] [--look-sens 0.15]]");
     Console.Error.WriteLine("       viewprobe <worklist.json> [more.json ...]   — or DROP worklists onto this exe to fly through them.");
     return 1;
 }
@@ -130,6 +130,12 @@ var angles = new List<float> { 35f, 125f };
 bool textured = false;
 bool reportMode = false;                         // clean scene pixels for report/video capture; metadata stays external
 bool refSurface = false;                         // exact, depth-tested opaque subject contribution; no halo or ghost
+// --ref-surface-opacity: the subject overlay's own alpha. 1 is the shipped opaque mark and
+// stays the default, so an omitted flag renders the same pixels it always did. Below 1 the
+// mark is composited over the subject's OWN material, which is the only thing that changes:
+// same placed triangles, same depth test, same refusals, no inflation and no ghost.
+float refSurfaceOpacity = 1f;
+bool refSurfaceOpacitySet = false;               // given explicitly -> "without --ref-surface" is an error, not a silent no-op
 System.Numerics.Vector3? eye = null, look = null;
 string? eyeRef = null, lookRef = null;
 float eyeHeight = 120f;                       // standing eye level; the player is 128u tall
@@ -603,6 +609,21 @@ for (int i = argStart; i < args.Length; i++)
     else if (args[i] == "--interactive") { interactiveMode = true; textured = true; }
     else if (args[i] == "--report-mode") { reportMode = true; textured = true; }
     else if (args[i] == "--ref-surface") { refSurface = true; textured = true; }
+    else if (args[i] == "--ref-surface-opacity" && i + 1 < args.Length)
+    {
+        // (0,1]. 0 is refused rather than clamped: a mark that draws nothing is a silent
+        // failure wearing a valid-looking argument. A missing value falls through to the
+        // unrecognised-flag branch below, which already says so and exits 2.
+        if (!float.TryParse(args[++i], System.Globalization.NumberStyles.Float,
+                            System.Globalization.CultureInfo.InvariantCulture, out var rso)
+            || !(rso > 0f) || rso > 1f)
+        {
+            Console.Error.WriteLine($"--ref-surface-opacity '{args[i]}': expected a number in (0,1]. "
+                                  + "1 is the opaque mark; 0 would draw nothing at all.");
+            return 1;
+        }
+        refSurfaceOpacity = rso; refSurfaceOpacitySet = true;
+    }
     else if (args[i] == "--fly-speed" && i + 1 < args.Length) flySpeed = float.Parse(args[++i]);
     else if (args[i] == "--look-sens" && i + 1 < args.Length) lookSens = float.Parse(args[++i]);
     else if (args[i] == "--worklist" && i + 1 < args.Length) worklistPaths.Add(args[++i]);
@@ -688,6 +709,14 @@ for (int ai = 0; ai < args.Length; ai++)
     replArgs.Add(args[ai].Contains(' ') ? $"\"{args[ai]}\"" : args[ai]);
 }
 string replayArgs = string.Join(' ', replArgs);
+if (refSurfaceOpacitySet && !refSurface)
+{
+    Console.Error.WriteLine("--ref-surface-opacity only means anything with --ref-surface: it sets the opacity of "
+                          + "the exact placed-triangle subject overlay, which no other highlight mode draws.");
+    Console.Error.WriteLine("  Add --ref-surface, or drop the opacity. It is refused rather than ignored so a "
+                          + "capture cannot claim a treatment it did not render.");
+    return 1;
+}
 if (depthDump is not null && (interactiveMode || compare is not null || worklistPaths.Count > 0))
 {
     Console.Error.WriteLine("--depth-dump writes the depth buffer of ONE explicit-camera capture (--eye with --yaw/--pitch or --look). "
@@ -3877,6 +3906,7 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot)
                    gridRender, overlayLines, keepFx, fxStatic, listMeshes, waterPlanes, coverings, planes, showPlanes, occlusionMode,
                    size, outFile, reportMode, camMeta, planeReport: planeReportSink, bosMode: bosMode, stateMode: stateView, stateName: stateArm?.Name ?? "",
                    visibilityBudget: visibilityBudget, navColourGroups: navColourGroups, refSurface: refSurface,
+                   refSurfaceOpacity: refSurfaceOpacity,
                    depthDumpPath: depthDump, sizeHeight: canvasH);
         }
 
@@ -4061,7 +4091,7 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot)
                 skyColor, terrainHeightAt, dashUnderground, dashUnderStatics, msaa, cullAbove, cellBounds,
                 noDiff, diffColor, picks, fpCap, colourCaptions, npcActors, npcPucksOn, routeRenders, gridRender, overlayLines, keepFx, fxStatic, listMeshes,
                 waterPlanes, coverings, planes, showPlanes, occlusionMode, size, fpOut,
-                reportMode, camMeta, iopt, planeReportSink, bosMode, stateView, stateArm?.Name ?? "", navColourGroups: navColourGroups, refSurface: refSurface);
+                reportMode, camMeta, iopt, planeReportSink, bosMode, stateView, stateArm?.Name ?? "", navColourGroups: navColourGroups, refSurface: refSurface, refSurfaceOpacity: refSurfaceOpacity);
             Console.WriteLine($"   interactive run over ({iShapes:N0} shapes were resident)");
         pendingSwitch = iopt.CellSwitch;
             NpcCleanup();

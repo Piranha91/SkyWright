@@ -334,6 +334,7 @@ static class TexturedScene
         int visibilityBudget = OcclusionState.DefaultVisibilityBudget,
         IReadOnlyList<NavColourGroup>? navColourGroups = null,
         bool refSurface = false,
+        float refSurfaceOpacity = 1f,                   // --ref-surface-opacity, validated to (0,1] by the CLI; 1 is the shipped opaque mark
         string? depthDumpPath = null,                   // --depth-dump: write the finished frame's window depth (the array --pick reads) here, verbatim
         int sizeHeight = 0)                             // capture canvas HEIGHT in pixels; 0 keeps the historic square (sizeW x sizeW)
     {
@@ -1976,11 +1977,18 @@ static class TexturedScene
         var layers = new List<(float[] Data, bool DepthTested, bool CullBack, int Nav, float Alpha)>();
         if (refSurface)
         {
-            Console.WriteLine("subject-surface-mode: exact placed opaque triangles; depth-tested; no inflated hull or occluded ghost");
+            // The wording at opacity 1 is load-bearing and deliberately byte-identical: the
+            // contact gate (../subject_gate.py) reads this exact line to qualify a capture as
+            // OPAQUE identity evidence. A translucent mark is a presentation choice, not that
+            // evidence, so it reports itself differently and the gate refuses it by construction.
+            Console.WriteLine(refSurfaceOpacity >= 1f
+                ? "subject-surface-mode: exact placed opaque triangles; depth-tested; no inflated hull or occluded ghost"
+                : $"subject-surface-mode: exact placed triangles at opacity {refSurfaceOpacity:0.###} over the subject's own material; "
+                  + "depth-tested; no inflated hull or occluded ghost; NOT opaque identity evidence");
             foreach (var key in subjectSurfaceRefusals.OrderBy(x => x, StringComparer.Ordinal))
                 Console.WriteLine($"subject-surface-refused: {key}: alpha, effect, marker or non-depth-writing shape; participant coverage incomplete");
-            if (subjectSurface.Count > 0) layers.Add((subjectSurface.ToArray(), true, true, 0, 1f));
-            if (subjectSurfaceDoubleSided.Count > 0) layers.Add((subjectSurfaceDoubleSided.ToArray(), true, false, 0, 1f));
+            if (subjectSurface.Count > 0) layers.Add((subjectSurface.ToArray(), true, true, 0, refSurfaceOpacity));
+            if (subjectSurfaceDoubleSided.Count > 0) layers.Add((subjectSurfaceDoubleSided.ToArray(), true, false, 0, refSurfaceOpacity));
         }
         // Highlight halos: the SAME hull buffer is drawn twice — solid depth-tested rim here,
         // then again as the translucent Greater-pass ghost (see the draw loop).
