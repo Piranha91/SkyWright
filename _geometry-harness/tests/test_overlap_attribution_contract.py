@@ -253,4 +253,212 @@ class AttributionContractTests(unittest.TestCase):
         self.assertIn("Door",[x["type"] for x in row["features"]["functionalContext"]["value"]])
         self.assertNotEqual("measured",row["features"]["actualIntersectionExtent"]["status"])
 
+
+class RetainedPairAbsenceBoundaryTests(unittest.TestCase):
+    """Where the absence boundary sits once a scope import RETAINS a pair row.
+
+    Before scope import, a pair whose member vanished from the combined scene had no row at all,
+    so `after_missing` forced `unresolved` (covered by
+    test_missing_source_endpoint_is_new_but_combined_missing_stays_unresolved). Importing a scope
+    deliberately retains that row, which moves the decision onto the member snapshot -- so these
+    cases pin what the retained row is now allowed to conclude.
+    """
+
+    def _retained(self, a, b, reason):
+        """A retained pair row whose relation could not be measured, exactly as overlapprobe
+        emits it when a member is ineligible: unknown, no verdict, member's own reason."""
+        row = copy.deepcopy(_pair(a, b))
+        row["actualShape"] = {"status": "unknown", "reason": reason, "surfaceRelation": "unknown",
+                              "containment": "unknown", "intersects": None,
+                              "trianglePairsTested": 0}
+        return row
+
+    def _disabled(self, key, asset):
+        rec = _record(key, asset, resolvedEnable={"resolved": True, "enabled": False})
+        rec["eligibility"] = {"status": "state_excluded",
+                              "reason": "the reference is absent in the selected state"}
+        return rec
+
+    def test_retained_pair_with_enumerated_disabled_member_is_earned_absence(self):
+        """The member IS enumerated and its own resolved state says it is off. That is absence
+        established by measurement, which is what absent_excluded is for."""
+        a, b = "000001:A.esp", "000002:B.esp"
+        row = self._retained(a, b, "the reference is absent in the selected state")
+        source = _setup("source", [_record(a, "a"), _record(b, "b")], [_pair(a, b)])
+        combined = _setup("combined", [_record(a, "a"), self._disabled(b, "b")], [row])
+        out = _attribute({"source": source, "combined": combined}, ["source"])["pairs"][0]
+        self.assertEqual("absent_excluded", out["attribution"]["status"])
+        after = {o["formid"]: o for o in out["attribution"]["comparisons"][0]["after"]["objects"]}
+        self.assertEqual("absent", after[b]["status"])
+        self.assertFalse(after[b]["state"]["resolvedEnable"]["enabled"])
+        self.assertTrue(after[b]["state"]["resolvedEnable"]["resolved"])
+
+    def test_retained_pair_never_reports_a_measured_relation_for_an_absent_member(self):
+        """Whatever the status, a member that is gone must not yield a geometric verdict.
+        'separated' is a measurement, and there is nothing to measure against a reference that is
+        not there."""
+        a, b = "000001:A.esp", "000002:B.esp"
+        row = self._retained(a, b, "the reference is absent in the selected state")
+        source = _setup("source", [_record(a, "a"), _record(b, "b")], [_pair(a, b)])
+        combined = _setup("combined", [_record(a, "a"), self._disabled(b, "b")], [row])
+        out = _attribute({"source": source, "combined": combined}, ["source"])["pairs"][0]
+        relation = out["attribution"]["comparisons"][0]["after"]["relation"]
+        self.assertIsNone(relation["intersects"])
+        self.assertNotEqual("separated", relation["surfaceRelation"])
+        self.assertTrue(relation["reason"])
+
+    def _imported(self, setup, *, pair_count=1, missing=()):
+        """A scene whose scope was IMPORTED, with the producer's own accounting receipt.
+
+        missing=() is the case the producer-side invariant does not cover: a reference with
+        history but no winning geometry pose is skipped by the record loop (Program.cs:961) and
+        is NOT listed in missingImportedReferences, which filters on missing history
+        (Program.cs:1276). It is enumerated nowhere and declared missing nowhere.
+        """
+        scene = copy.deepcopy(setup)
+        scene["scene"]["discovery"] = {
+            "scope": "fixture", "complete": True, "method": "fixture-import",
+            "importedScopes": [{"path": "scope.json", "sha256": "sha256:scope",
+                                "referenceCount": 2, "pairCount": pair_count}],
+            "missingImportedReferences": list(missing)}
+        return scene
+
+    def test_retained_pair_with_unenumerated_member_is_unresolved(self):
+        """A retained pair naming an endpoint the scene never enumerated proves nothing about
+        that endpoint. Non-enumeration is not evidence of absence, so the conservative outcome
+        is unresolved -- the same floor an unretained pair gets."""
+        a, b = "000001:A.esp", "000002:B.esp"
+        source = _setup("source", [_record(a, "a"), _record(b, "b")], [_pair(a, b)])
+        combined = _setup("combined", [_record(a, "a")],
+                          [self._retained(a, b, "a historical reference is absent from the evaluated order")])
+        full = _attribute({"source": source, "combined": combined}, ["source"])
+        out = full["pairs"][0]
+        self.assertEqual("unresolved", out["attribution"]["status"])
+        self.assertEqual("a retained pair row names an endpoint this scene never enumerated, "
+                         "so its absence is unproven",
+                         out["attribution"]["comparisons"][0]["reason"])
+        after = {o["formid"]: o for o in out["attribution"]["comparisons"][0]["after"]["objects"]}
+        self.assertNotEqual("absent", after[b]["status"])
+        self.assertEqual({"unresolved": 1, "new": 0, "inherited": 0, "changed_existing": 0,
+                          "absent_excluded": 0},
+                         full["accounting"]["attribution"]["attributionCounts"])
+        self.assertFalse(full["accounting"]["attribution"]["complete"])
+
+    def test_the_two_absence_situations_are_now_distinguishable(self):
+        """The defect this replaced: enumerated-and-disabled and no-record-row produced the same
+        absent_excluded from the same 'absent' snapshot. They must now differ at BOTH layers."""
+        a, b = "000001:A.esp", "000002:B.esp"
+        source = _setup("source", [_record(a, "a"), _record(b, "b")], [_pair(a, b)])
+        row = self._retained(a, b, "the reference is absent in the selected state")
+        earned = _attribute({"source": source,
+                             "combined": _setup("combined", [_record(a, "a"), self._disabled(b, "b")], [row])},
+                            ["source"])["pairs"][0]
+        unproven = _attribute({"source": source,
+                               "combined": _setup("combined", [_record(a, "a")], [copy.deepcopy(row)])},
+                              ["source"])["pairs"][0]
+        self.assertEqual("absent_excluded", earned["attribution"]["status"])
+        self.assertEqual("unresolved", unproven["attribution"]["status"])
+        snapshot = lambda r: {o["formid"]: o["status"]
+                              for o in r["attribution"]["comparisons"][0]["after"]["objects"]}
+        self.assertNotEqual(snapshot(earned), snapshot(unproven))
+
+    def test_absence_is_decided_by_structured_fields_not_by_the_reason_string(self):
+        """Reason strings are for humans and get reworded. Swapping them between the two cases
+        must not move either status: the earned case keeps absent_excluded wearing the unproven
+        case's prose, and the unproven case stays unresolved wearing the earned case's prose."""
+        a, b = "000001:A.esp", "000002:B.esp"
+        source = _setup("source", [_record(a, "a"), _record(b, "b")], [_pair(a, b)])
+        for prose in ("the reference is absent in the selected state",
+                      "a historical reference is absent from the evaluated order",
+                      "", "totally reworded next release"):
+            with self.subTest(prose=prose):
+                enumerated = _setup("combined", [_record(a, "a"), self._disabled(b, "b")],
+                                    [self._retained(a, b, prose)])
+                unenumerated = _setup("combined", [_record(a, "a")], [self._retained(a, b, prose)])
+                self.assertEqual("absent_excluded",
+                    _attribute({"source": source, "combined": enumerated}, ["source"])["pairs"][0]["attribution"]["status"])
+                self.assertEqual("unresolved",
+                    _attribute({"source": source, "combined": unenumerated}, ["source"])["pairs"][0]["attribution"]["status"])
+
+    def test_before_side_unenumerated_endpoint_of_a_retained_pair_is_unresolved_not_new(self):
+        """The mirror. An unproven endpoint on the BEFORE side must not buy an unearned `new` any
+        more than one on the after side buys an unearned absent_excluded."""
+        a, b = "000001:A.esp", "000002:B.esp"
+        source = _setup("source", [_record(a, "a")],
+                        [self._retained(a, b, "a historical reference is absent from the evaluated order")])
+        combined = _setup("combined", [_record(a, "a"), _record(b, "b")], [_pair(a, b)])
+        out = _attribute({"source": source, "combined": combined}, ["source"])["pairs"][0]
+        self.assertEqual("unresolved", out["attribution"]["status"])
+        self.assertEqual("a retained pair row names an endpoint this scene never enumerated, "
+                         "so its absence is unproven",
+                         out["attribution"]["comparisons"][0]["reason"])
+        before = {o["formid"]: o for o in out["attribution"]["comparisons"][0]["before"]["objects"]}
+        self.assertNotEqual("absent", before[b]["status"])
+
+    def test_before_side_enumerated_absence_is_still_earned_new(self):
+        """Do not make everything unresolved. With the before scene's record row present and its
+        own state saying deleted or disabled, `new` is still earned on either kind of evidence."""
+        a, b = "000001:A.esp", "000002:B.esp"
+        combined = _setup("combined", [_record(a, "a"), _record(b, "b")], [_pair(a, b)])
+        for label, record_b in (("disabled", self._disabled(b, "b")),
+                                ("deleted", _record(b, "b", deletion=True))):
+            with self.subTest(evidence=label):
+                source = _setup("source", [_record(a, "a"), record_b], [_pair(a, b)])
+                out = _attribute({"source": source, "combined": combined}, ["source"])["pairs"][0]
+                self.assertEqual("new", out["attribution"]["status"])
+
+    def test_after_side_deleted_endpoint_of_a_retained_pair_is_still_earned_absence(self):
+        """The other earned-absence arm on the after side: deletion, not just a disabled state."""
+        a, b = "000001:A.esp", "000002:B.esp"
+        source = _setup("source", [_record(a, "a"), _record(b, "b")], [_pair(a, b)])
+        combined = _setup("combined", [_record(a, "a"), _record(b, "b", deletion=True)],
+                          [self._retained(a, b, "the reference is deleted")])
+        out = _attribute({"source": source, "combined": combined}, ["source"])["pairs"][0]
+        self.assertEqual("absent_excluded", out["attribution"]["status"])
+        after = {o["formid"]: o for o in out["attribution"]["comparisons"][0]["after"]["objects"]}
+        self.assertEqual("absent", after[b]["status"])
+        self.assertTrue(after[b]["state"]["deletion"])
+
+    def test_imported_reference_with_history_but_no_usable_pose_is_unresolved(self):
+        """The gap the producer-side argument missed. overlapprobe's record loop skips a
+        reference with no winning geometry pose, while missingImportedReferences filters on
+        missing HISTORY -- so this reference is enumerated nowhere AND declared missing nowhere.
+        The consumer must not read that silence as absence on either side."""
+        a, b = "000001:A.esp", "000002:B.esp"
+        reason = "a historical reference is absent from the evaluated order"
+        source = self._imported(_setup("source", [_record(a, "a"), _record(b, "b")], [_pair(a, b)]))
+        combined = self._imported(_setup("combined", [_record(a, "a")], [self._retained(a, b, reason)]))
+        out = _attribute({"source": source, "combined": combined}, ["source"])["pairs"][0]
+        self.assertEqual([], combined["scene"]["discovery"]["missingImportedReferences"])
+        self.assertEqual("unresolved", out["attribution"]["status"])
+        mirrored = _attribute({"source": self._imported(_setup("source", [_record(a, "a")],
+                                  [self._retained(a, b, reason)])),
+                               "combined": self._imported(_setup("combined",
+                                  [_record(a, "a"), _record(b, "b")], [_pair(a, b)]))},
+                              ["source"])["pairs"][0]
+        self.assertEqual("unresolved", mirrored["attribution"]["status"])
+
+    def test_unproven_endpoint_does_not_suppress_a_higher_precedence_finding(self):
+        """Aggregation is unchanged: unresolved already tops STATUS_PRECEDENCE, so one unproven
+        comparison makes the row unresolved while the resolved comparisons keep their own verdicts."""
+        a, b = "000001:A.esp", "000002:B.esp"
+        good = _setup("good", [_record(a, "a"), _record(b, "b", position=[12, 0, 0])], [_pair(a, b)])
+        unproven = _setup("unproven", [_record(a, "a")],
+                          [self._retained(a, b, "a historical reference is absent from the evaluated order")])
+        combined = _setup("combined", [_record(a, "a"), _record(b, "b")], [_pair(a, b)])
+        out = _attribute({"good": good, "unproven": unproven, "combined": combined},
+                         ["good", "unproven"])["pairs"][0]
+        self.assertEqual("unresolved", out["attribution"]["status"])
+        by_setup = {c["beforeSetupId"]: c["status"] for c in out["attribution"]["comparisons"]}
+        self.assertEqual({"good": "changed_existing", "unproven": "unresolved"}, by_setup)
+
+    def test_an_unretained_pair_is_still_unresolved_not_absent(self):
+        """The absence rule's floor, unchanged by this work: with no retained row the consumer
+        must not infer absence. An empty result never means absence."""
+        a, b = "000001:A.esp", "000002:B.esp"
+        source = _setup("source", [_record(a, "a"), _record(b, "b")], [_pair(a, b)])
+        combined = _setup("combined", [_record(a, "a")], [])
+        out = _attribute({"source": source, "combined": combined}, ["source"])["pairs"][0]
+        self.assertEqual("unresolved", out["attribution"]["status"])
+
 if __name__ == "__main__": unittest.main()

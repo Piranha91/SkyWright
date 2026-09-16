@@ -69,7 +69,11 @@ def _object_snapshot(manifest: dict[str, Any], formid: str, records: dict[str, d
                      assets: dict[str, dict[str, Any]]) -> dict[str, Any]:
     record = records.get(formid)
     if record is None:
-        return {"formid": formid, "status": "absent", "reason": "reference is absent from this explicit scene manifest"}
+        # No record row at all: the scene enumerated nothing about this reference, so nothing
+        # here establishes absence. Distinct from an enumerated record whose own resolved state
+        # says it is off, which is evidence. Callers gate on the pair row's retention.
+        return {"formid": formid, "status": "unknown",
+                "reason": "reference has no record row in this explicit scene manifest; absence is not established"}
     fields = record.get("fields") or {}
     geometry = record.get("geometry") or {}
     asset = assets.get(geometry.get("assetId"))
@@ -198,6 +202,11 @@ def attribute(setups: dict[str, dict], combined: str, comparisons: list[str],
             after_absent = after_pair is not None and any(o["status"] == "absent" for o in after_objects)
             before_missing = before_pair is None
             after_missing = after_pair is None
+            # A scene that retained a pair row naming a reference it never enumerated has not
+            # shown that reference to be absent; it has shown its own accounting to be incomplete.
+            # Decided from the record row's existence, never from a reason string.
+            unproven_endpoint = (before_pair is not None and any(o["status"] == "unknown" for o in before_objects)
+                or after_pair is not None and any(o["status"] == "unknown" for o in after_objects))
             before_predicate = ((before_manifest.get("scope") or {}).get("predicate") or {})
             after_predicate = ((after_manifest.get("scope") or {}).get("predicate") or {})
             before_policy = (before_manifest.get("readerVersion"), before_manifest.get("policyVersion"),
@@ -207,12 +216,16 @@ def attribute(setups: dict[str, dict], combined: str, comparisons: list[str],
             policy_mismatch = (not before_predicate or not after_predicate or before_policy != after_policy
                 or any(v is None for v in before_policy + after_policy))
             hard_unresolved = (not before_valid or not after_valid or after_missing or policy_mismatch
+                or unproven_endpoint
                 or any(o["status"] == "unresolved" for o in before_objects + after_objects))
             relation_unresolved = ((before_pair is not None and _relation(before_pair)["intersects"] is None and not before_absent)
                 or (after_pair is not None and _relation(after_pair)["intersects"] is None and not after_absent))
             if hard_unresolved:
-                status = "unresolved"; reason = ("reader/predicate/tolerance/limit identities do not match"
-                    if policy_mismatch else "a setup, object, or retained union row is unresolved")
+                status = "unresolved"
+                reason = ("reader/predicate/tolerance/limit identities do not match" if policy_mismatch
+                    else "a retained pair row names an endpoint this scene never enumerated, so its absence is unproven"
+                    if unproven_endpoint
+                    else "a setup, object, or retained union row is unresolved")
             elif after_absent:
                 status = "absent_excluded"; reason = "the pair or one object is explicitly absent/excluded in the combined scene"
             elif before_absent or before_missing:
