@@ -80,6 +80,9 @@ overlapprobe: bounded strict render-surface scene capture
   --instance DIR --game DIR --profile NAME --order CANDIDATE.json
 Scene candidates require explicit Mods asset priority; preflight checks MO2 names and relative priority.
 An exterior persistent cell cannot define a bounded scope. Unknown geometry remains explicit.
+--scene-scope-from accepts any scope declaring a bound: a non-empty scene.discovery.seedReferences[]
+or a non-empty scene.discovery.cells[]. An imported declared cell joins this capture's --scene-cell
+set, so a bounded cell scope and its pair/reference identities carry across configurations.
 Legacy mode: --responsible-pair PLUGIN_A PLUGIN_B with --geometry-manifest OUTPUT.
 See overlapprobe/Program.cs usage documentation. Help performs no load-order scan.
 """);
@@ -222,10 +225,13 @@ if (sceneCapture || scenePreflight)
 }
 
 var explicitCellKeys = new HashSet<FormKey>();
+var cellBoundOrigin = new Dictionary<FormKey, string>();
 foreach (var textCell in explicitSceneCells)
 {
-    try { explicitCellKeys.Add(FormKey.Factory(textCell)); }
+    FormKey cellKey;
+    try { cellKey = FormKey.Factory(textCell); }
     catch (Exception ex) { Console.Error.WriteLine($"--scene-cell '{textCell}' is not a FormKey: {ex.Message}"); return 2; }
+    if (explicitCellKeys.Add(cellKey)) cellBoundOrigin[cellKey] = "--scene-cell";
 }
 var importedSceneScopes = new List<SceneCapture.ImportedScope>();
 foreach (var scopePath in sceneScopeFromPaths)
@@ -233,6 +239,17 @@ foreach (var scopePath in sceneScopeFromPaths)
     try { importedSceneScopes.Add(SceneCapture.ReadScope(scopePath)); }
     catch (Exception ex) { Console.Error.WriteLine($"could not read --scene-scope-from '{scopePath}': {ex.Message}"); return 2; }
 }
+// An imported scope's declared cells are the bound its capture was taken under. Feeding them into
+// the same explicit-cell set is what carries a bounded scope across configurations: the cells are
+// interior-only by construction on the producing side and are re-validated as interior here, so
+// the bound travels without ever widening to a worldspace.
+var importedDeclaredCells = new HashSet<FormKey>();
+foreach (var scope in importedSceneScopes)
+    foreach (var cellKey in scope.DeclaredCells)
+    {
+        importedDeclaredCells.Add(cellKey);
+        if (explicitCellKeys.Add(cellKey)) cellBoundOrigin[cellKey] = $"--scene-scope-from '{scope.Path}'";
+    }
 IReadOnlySet<string> contactEvidenceKeys;
 string? contactEvidencePairsSha256 = null;
 try
@@ -398,16 +415,20 @@ foreach (var key in sceneReferenceSeeds)
         bool interior = idx.CellName.TryGetValue(pose.Cell, out var ci) && ci.Interior;
         sceneSeedPoses.Add((key, pose.Cell, pose.Space, (double)pose.Pos.X, (double)pose.Pos.Y, (double)pose.Pos.Z, interior, (Aabb?)null, (string?)null, "current-candidate-or-imported", false));
     }
-foreach (var cell in explicitCellKeys)
+// Ordered so a scope carrying several unusable cells always refuses on the same one. Without it
+// the refusal depends on set-insertion order, which is a different message run to run for the same
+// inputs — and a guard whose refusal is not reproducible cannot be asserted on.
+foreach (var cell in explicitCellKeys.OrderBy(c => c.ToString(), StringComparer.Ordinal))
 {
     bool interior = idx.CellName.TryGetValue(cell, out var ci) && ci.Interior;
     if (interior) { sceneCells.Add(cell); continue; }
+    string cellOrigin = cellBoundOrigin.TryGetValue(cell, out var declaredBy) ? declaredBy : "--scene-cell";
     if (idx.PersistentCells.Contains(cell))
-    { Console.Error.WriteLine($"--scene-cell {cell} is an exterior persistent cell and has no bounded spatial footprint; supply --scene-scope-from or candidate seeds"); return 2; }
+    { Console.Error.WriteLine($"{cellOrigin} declares cell {cell}, which is an exterior persistent cell and has no bounded spatial footprint; supply --scene-scope-from or candidate seeds"); return 2; }
     var filed = idx.History.Refs.Select(kv => (kv.Key, Pose: idx.WinningGeometryPose(kv.Key)))
         .Where(x => x.Pose is { } p && p.Cell == cell).ToList();
     if (filed.Count == 0)
-    { Console.Error.WriteLine($"--scene-cell {cell} has no placed reference from which to derive a bounded exterior footprint"); return 2; }
+    { Console.Error.WriteLine($"{cellOrigin} declares cell {cell}, which has no placed reference from which to derive a bounded exterior footprint"); return 2; }
     foreach (var x in filed)
     {
         var p = x.Pose!.Value;
@@ -1249,7 +1270,9 @@ if (geometryManifestPath is not null)
                 seedReferences = sceneReferenceSeeds.Select(s => s.ToString()).OrderBy(s => s, StringComparer.Ordinal).ToArray(),
                 seedDefinitions = seedDefinitionRows,
                 importedScopes = importedSceneScopes.Select(s => new { path = s.Path, sha256 = s.Sha256,
-                    referenceCount = s.References.Count, pairCount = s.PairKeys.Count, cellCount = s.Cells.Count }).ToArray(),
+                    referenceCount = s.References.Count, pairCount = s.PairKeys.Count, cellCount = s.Cells.Count,
+                    declaredCellCount = s.DeclaredCells.Count }).ToArray(),
+                importedDeclaredCells = importedDeclaredCells.Select(c => c.ToString()).OrderBy(c => c, StringComparer.Ordinal).ToArray(),
                 missingImportedReferences = importedSceneReferences.Where(k => idx.History.Of(k) is null).Select(k => k.ToString()).OrderBy(k => k, StringComparer.Ordinal).ToArray(),
                 seedBounds = sceneSeedBounds.Select(s => new { reference = s.Reference.ToString(), space = s.Space.ToString(),
                     min = new[] { (double)s.Bounds.Min.X, s.Bounds.Min.Y, s.Bounds.Min.Z }, max = new[] { (double)s.Bounds.Max.X, s.Bounds.Max.Y, s.Bounds.Max.Z }, source = s.Source }).ToArray(),

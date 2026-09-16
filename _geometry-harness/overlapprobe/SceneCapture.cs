@@ -19,8 +19,14 @@ static class SceneCapture
 
     internal sealed record ImportedSeed(FormKey Reference, FormKey Cell, FormKey Space,
         double X, double Y, double Z, bool Interior, Aabb? WorldBounds, string? BoundsReason, string Provenance);
+    /// <param name="Cells">Cells the scope's records are filed in. Accounting, derived from the
+    /// population; it is not a declared bound and never scopes a consuming capture.</param>
+    /// <param name="DeclaredCells">The bound the producing capture declared through --scene-cell,
+    /// read from its scene.discovery.cells receipt. Interior-only by construction, so it carries a
+    /// bounded footprint into a later configuration without ever widening to a worldspace.</param>
     internal sealed record ImportedScope(string Path, string Sha256, IReadOnlySet<FormKey> References,
-        IReadOnlySet<FormKey> Cells, IReadOnlySet<string> PairKeys, IReadOnlyList<ImportedSeed> Seeds);
+        IReadOnlySet<FormKey> Cells, IReadOnlySet<string> PairKeys, IReadOnlyList<ImportedSeed> Seeds,
+        IReadOnlySet<FormKey> DeclaredCells);
 
     internal static ImportedScope ReadScope(string path)
     {
@@ -35,6 +41,17 @@ static class SceneCapture
             || !discovery.TryGetProperty("seedReferences", out var seedRows) || seedRows.ValueKind != JsonValueKind.Array)
             throw new InvalidDataException("scene scope has no scene.discovery.seedReferences[] receipt");
         var declaredSeeds = new HashSet<FormKey>();
+        var declaredCells = new HashSet<FormKey>();
+        if (discovery.TryGetProperty("cells", out var cellRows))
+        {
+            if (cellRows.ValueKind != JsonValueKind.Array)
+                throw new InvalidDataException("scene scope scene.discovery.cells must be an array");
+            foreach (var cell in cellRows.EnumerateArray())
+            {
+                if (!TryForm(cell, out var cellKey)) throw new InvalidDataException("scene scope has a malformed declared cell");
+                declaredCells.Add(cellKey);
+            }
+        }
         bool seedDefinitionsProvided = discovery.TryGetProperty("seedDefinitions", out var seedDefinitions);
         if (seedDefinitionsProvided && seedDefinitions.ValueKind != JsonValueKind.Array)
             throw new InvalidDataException("scene scope scene.discovery.seedDefinitions must be an array");
@@ -44,13 +61,14 @@ static class SceneCapture
             if (!TryForm(seed, out var key)) throw new InvalidDataException("scene scope has a malformed seed reference");
             declaredSeeds.Add(key);
         }
-        if (declaredSeeds.Count == 0) throw new InvalidDataException("scene scope seedReferences[] is empty");
+        if (declaredSeeds.Count == 0 && declaredCells.Count == 0)
+            throw new InvalidDataException("scene scope declares no bound: scene.discovery.seedReferences[] and scene.discovery.cells[] are both empty");
         if (!doc.RootElement.TryGetProperty("records", out var records) || records.ValueKind != JsonValueKind.Array)
             throw new InvalidDataException("scene scope has no records[] array");
         if (!doc.RootElement.TryGetProperty("pairs", out var pairRows) || pairRows.ValueKind != JsonValueKind.Array)
             throw new InvalidDataException("scene scope has no pairs[] array");
-        if (records.GetArrayLength() == 0 && !hasSeedDefinitions)
-            throw new InvalidDataException("scene scope records[] is empty; an empty population is not a reusable scope");
+        if (records.GetArrayLength() == 0 && !hasSeedDefinitions && declaredCells.Count == 0)
+            throw new InvalidDataException("scene scope records[] is empty and no bound is declared; an empty population is not a reusable scope");
         foreach (var row in records.EnumerateArray())
         {
             if (!row.TryGetProperty("formid", out var formid) || !TryForm(formid, out var key))
@@ -135,7 +153,8 @@ static class SceneCapture
         var missingSeeds = declaredSeeds.Except(seeds.Select(s => s.Reference)).ToHashSet();
         if (missingSeeds.Count > 0)
             throw new InvalidDataException("scene scope seed reference(s) lack persisted definitions: " + string.Join(", ", missingSeeds));
-        return new(Path.GetFullPath(path), Convert.ToHexString(SHA256.HashData(bytes)).ToLowerInvariant(), refs, cells, pairs, seeds);
+        return new(Path.GetFullPath(path), Convert.ToHexString(SHA256.HashData(bytes)).ToLowerInvariant(),
+            refs, cells, pairs, seeds, declaredCells);
     }
 
     /// <summary>
