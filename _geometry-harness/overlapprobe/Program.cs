@@ -78,11 +78,21 @@ overlapprobe: bounded strict render-surface scene capture
   --scene-scope-from MANIFEST (repeatable) --scene-cell FORMKEY (repeatable)
   --contact-evidence-pairs INPUT --surface-tolerance N --max-triangle-pairs N --pair-seconds N
   --instance DIR --game DIR --profile NAME --order CANDIDATE.json
+  --self-check-imported-accounting FIXTURE.json (no load order; prints the accounting receipt)
 Scene candidates require explicit Mods asset priority; preflight checks MO2 names and relative priority.
 An exterior persistent cell cannot define a bounded scope. Unknown geometry remains explicit.
 --scene-scope-from accepts any scope declaring a bound: a non-empty scene.discovery.seedReferences[]
 or a non-empty scene.discovery.cells[]. An imported declared cell joins this capture's --scene-cell
 set, so a bounded cell scope and its pair/reference identities carry across configurations.
+Every imported reference identity -- every records[] formid AND both endpoints of every pairs[]
+row -- then receives exactly one disposition in scene.discovery.importedReferenceAccounting:
+emitted (a record row enumerates it), no_placement_history (missingImportedReferences, unchanged,
+and now derived from this partition), no_winning_pose (placement history but no resolved winning
+pose) or out_of_scope. Every input is about PLACEMENT: no_placement_history does NOT mean the order
+declares no record, because a placement-less record (a deletion typically strips placement) never
+enters the placement history. A disposition states what the manifest resolved about a placement; it
+never asserts a reference is present, absent or separated in the game state, nor that a record for
+it does or does not exist -- those are read from an enumerated record row's own fields.
 Legacy mode: --responsible-pair PLUGIN_A PLUGIN_B with --geometry-manifest OUTPUT.
 See overlapprobe/Program.cs usage documentation. Help performs no load-order scan.
 """);
@@ -122,6 +132,10 @@ var explicitSceneCells = new List<string>();
 bool bosOn = true;
 bool flagsOnly = false;
 bool scenePreflight = false;
+// A deterministic exercise of the imported-reference accounting partition, needing no load order:
+// it takes a fixture naming the identities and their history/pose/row state and prints the receipt
+// the real capture would emit. Handled before any target work, so a test can drive it anywhere.
+string? accountingFixture = null;
 var enablePlugins = new List<string>();
 var disablePlugins = new List<string>();
 string? orderFile = null;
@@ -163,6 +177,7 @@ try
         else if (flag == "--scene-cell") { explicitSceneCells.Add(NeedValue(i, flag)); i++; }
         else if (flag == "--scene-space") throw new ArgumentException("--scene-space is refused because an exterior worldspace is unbounded; use bounded --scene-cell FormKey values");
         else if (flag == "--scene-preflight") scenePreflight = true;
+        else if (flag == "--self-check-imported-accounting") { accountingFixture = NeedValue(i, flag); i++; }
         else if (flag == "--order") { orderFile = NeedValue(i, flag); i++; }
         else if (flag == "--enable") { enablePlugins.Add(NeedValue(i, flag)); i++; }
         else if (flag == "--disable") { disablePlugins.Add(NeedValue(i, flag)); i++; }
@@ -177,6 +192,8 @@ try
     }
 }
 catch (ArgumentException ex) { Console.Error.WriteLine(ex.Message); return 2; }
+
+if (accountingFixture is not null) return ImportedReferenceAccounting.SelfCheck(accountingFixture);
 
 bool sceneCapture = sceneId is not null;
 if (sceneCapture && orderFile is null)
@@ -954,6 +971,9 @@ if (geometryManifestPath is not null)
     catch (Exception ex) { Console.Error.WriteLine($"--historical-pairs contains an invalid FormKey: {ex.Message}"); return 2; }
     var reviewByKey = new Dictionary<FormKey, ReviewRef>();
     var recordRows = new List<object>();
+    // Which identities this loop actually enumerated. The accounting below reads it rather than
+    // re-deriving the loop's own gates, so it can never claim a row the manifest does not hold.
+    var emittedRecordKeys = new HashSet<FormKey>();
     foreach (var (key, _) in idx.History.Refs.OrderBy(k => k.Key.ToString(), StringComparer.Ordinal))
     {
         __run.Advance();
@@ -1034,6 +1054,7 @@ if (geometryManifestPath is not null)
                     bosResolution.PropertiesSource, notes = bosResolution.Notes
                 }
             };
+        emittedRecordKeys.Add(key);
         recordRows.Add(new
         {
             formid = key.ToString(),
@@ -1225,6 +1246,12 @@ if (geometryManifestPath is not null)
                 provenance = seed.WorldBounds is not null ? seed.Provenance : measured.Reference.IsNull ? seed.Provenance : measured.Source
             };
         }).ToArray();
+    // Every imported identity, classified exactly once against what this capture resolved for it.
+    var importedAccounting = ImportedReferenceAccounting.Partition(
+        importedSceneReferences, emittedRecordKeys,
+        hasHistory: k => idx.History.Of(k) is not null,
+        hasWinningPose: k => idx.WinningGeometryPose(k) is not null);
+
     var manifest = new
     {
         schemaVersion = "nif-overlap-actual-shape-manifest-v2",
@@ -1273,7 +1300,13 @@ if (geometryManifestPath is not null)
                     referenceCount = s.References.Count, pairCount = s.PairKeys.Count, cellCount = s.Cells.Count,
                     declaredCellCount = s.DeclaredCells.Count }).ToArray(),
                 importedDeclaredCells = importedDeclaredCells.Select(c => c.ToString()).OrderBy(c => c, StringComparer.Ordinal).ToArray(),
-                missingImportedReferences = importedSceneReferences.Where(k => idx.History.Of(k) is null).Select(k => k.ToString()).OrderBy(k => k, StringComparer.Ordinal).ToArray(),
+                // Unchanged in meaning: the imported identities the evaluated order has no winner
+                // history for. DERIVED from the partition below rather than recomputed beside it, so
+                // the two can no longer answer differently for the same reference.
+                missingImportedReferences = importedAccounting.WithDisposition(ImportedReferenceAccounting.NoPlacementHistory).ToArray(),
+                // SCHEMA ADDITION: every imported identity's disposition, so an identity that is
+                // neither enumerated nor historyless is stated instead of falling through both.
+                importedReferenceAccounting = ImportedReferenceAccounting.Receipt(importedAccounting),
                 seedBounds = sceneSeedBounds.Select(s => new { reference = s.Reference.ToString(), space = s.Space.ToString(),
                     min = new[] { (double)s.Bounds.Min.X, s.Bounds.Min.Y, s.Bounds.Min.Z }, max = new[] { (double)s.Bounds.Max.X, s.Bounds.Max.Y, s.Bounds.Max.Z }, source = s.Source }).ToArray(),
                 unknownSeedBounds = unknownSceneSeedBounds,

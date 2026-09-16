@@ -287,25 +287,86 @@ def test_every_imported_pair_identity_is_retained():
         f"{len(dropped)} imported pair identities were dropped, e.g. {sorted(dropped)[:3]}"
 
 
-def test_every_imported_reference_is_enumerated_or_declared_missing():
-    """Accounting check over a real captured manifest: every imported reference has a record row
-    or is named in missingImportedReferences.
+DISPOSITIONS = ("emitted", "no_placement_history", "no_winning_pose", "out_of_scope")
 
-    DO NOT read this as proof that the two conditions cover each other. They do not:
-    missingImportedReferences filters on missing HISTORY (Program.cs:1276) while the record loop
-    skips on a missing POSE (Program.cs:961), so a reference with history but no usable pose is
-    neither enumerated nor declared missing. This case passes on the retained fixture only because
-    that fixture holds ZERO missing references, so it never reaches the boundary. A manifest that
-    does exercise it belongs with the repair in
-    Handoffs/ToDo/2026-09-16-retained-pair-absence-correction.md."""
-    scope, captured = _accounting_inputs()
-    imported = {r["formid"] for r in scope["records"]}
-    enumerated = {r["formid"] for r in captured["records"]}
-    declared_missing = set(captured["scene"]["discovery"].get("missingImportedReferences") or [])
-    unaccounted = imported - enumerated - declared_missing
+
+def imported_identities(scope):
+    """The identity union SceneCapture.ReadScope actually imports.
+
+    BOTH sources, because the importer uses both: every records[] formid (SceneCapture.cs:76) and
+    BOTH endpoints of every pairs[] row (SceneCapture.cs:112). Defining the population from records[]
+    alone is how a pair-only endpoint disappears without any check noticing -- the identity is
+    imported, so the capturing manifest owes it a disposition."""
+    identities = {row["formid"] for row in scope.get("records") or []}
+    for pair in scope.get("pairs") or []:
+        identities.add(pair["a"])
+        identities.add(pair["b"])
+    return identities
+
+
+def assert_imports_are_accounted(scope, captured):
+    """THE INTEGRATION CONTRACT: the capturing manifest accounts for every identity its scope
+    imported -- by enumerating it, or by naming it with a disposition.
+
+    The receipt is checked against the ACTUAL import population, not only against itself. A receipt
+    whose counts agree with one another can still be describing a different, smaller population than
+    the one that was imported, and that shape is indistinguishable from a correct one until
+    importedCount is compared to the real union."""
+    imported = imported_identities(scope)
+    enumerated = {row["formid"] for row in captured.get("records") or []}
+    discovery = captured["scene"]["discovery"]
+    declared_missing = set(discovery.get("missingImportedReferences") or [])
+    accounting = discovery.get("importedReferenceAccounting")
+    unmeasured = list((accounting or {}).get("unmeasured") or [])
+    named = {row["formid"] for row in unmeasured}
+
+    unaccounted = imported - enumerated - declared_missing - named
     assert not unaccounted, (
-        f"{len(unaccounted)} imported references are neither enumerated nor declared missing, "
-        f"e.g. {sorted(unaccounted)[:3]}")
+        f"{len(unaccounted)} of {len(imported)} imported identities are neither enumerated nor "
+        f"given a disposition, e.g. {sorted(unaccounted)[:3]}")
+
+    if accounting is None:
+        return  # a manifest captured before the repair carries no receipt; read the older way
+
+    assert accounting["importedCount"] == len(imported), (
+        f"the receipt claims {accounting['importedCount']} imported identities but the scope "
+        f"imports {len(imported)} (records[] plus both endpoints of every pairs[] row)")
+    assert accounting["unaccounted"] == 0, \
+        f"the receipt reports {accounting['unaccounted']} unaccounted identities"
+    assert accounting["importedCount"] == sum(accounting["dispositions"].values()), \
+        "the dispositions do not add up to the imported count"
+    assert set(accounting["dispositions"]) == set(DISPOSITIONS), \
+        f"unexpected disposition set: {sorted(accounting['dispositions'])}"
+
+    # Exactly one disposition per identity: no row is classified twice, an unmeasured identity is
+    # not also enumerated, and nothing is named that was never imported.
+    assert len(named) == len(unmeasured), "an identity carries more than one unmeasured row"
+    assert not (named & enumerated), \
+        f"identities are both enumerated and unmeasured, e.g. {sorted(named & enumerated)[:3]}"
+    assert named <= imported, \
+        f"unmeasured names identities that were never imported, e.g. {sorted(named - imported)[:3]}"
+    assert declared_missing <= named, \
+        "missingImportedReferences is not drawn from the same partition as the unmeasured rows"
+    assert all(row["disposition"] in DISPOSITIONS for row in unmeasured), \
+        "an unmeasured row carries a disposition outside the declared set"
+    assert accounting["dispositions"]["emitted"] == len(imported & enumerated), \
+        "the emitted count does not match the imported identities the manifest enumerates"
+
+
+def test_every_imported_reference_is_accounted_for():
+    """The accounting read over a REAL captured pair, through the shared contract above.
+
+    The boundary this cannot reach on its own (an identity with placement history but no usable
+    pose, which the earlier receipt named nowhere because the record loop skipped on a null POSE
+    while missingImportedReferences filtered on null PLACEMENT HISTORY) is exercised
+    deterministically in tests/test_imported_reference_accounting.py, against the same producer
+    partition -- as are the omitted-endpoint and false-receipt cases this data-driven case cannot
+    manufacture.
+
+    An identity named as unmeasured is NOT evidence it is gone, and no disposition says whether a
+    record for it exists: every input is about placement."""
+    scope, captured = _accounting_inputs()
+    assert_imports_are_accounted(scope, captured)
 
 
 def test_a_retained_pair_with_an_ineligible_member_is_not_reported_separated():
