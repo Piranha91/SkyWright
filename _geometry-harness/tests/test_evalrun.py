@@ -2957,12 +2957,738 @@ def case_25(tmp):
           f"(got {[(execution_of(v), v.get('cause')) for v in geo.values()]})")
 
 
+LAUNCH_PROBE = r'''
+"""The ordinary fake PROBE, which first appends one line per launch (`<probe> <argv>`) to LAUNCHES."""
+import sys
+sys.path.insert(0, FIXT_DIR)
+from fakeprobe import main
+with open(LAUNCHES, "a", encoding="utf-8") as f:
+    f.write(PROBE + " " + " ".join(sys.argv[1:]) + "\n")
+raise SystemExit(main(PROBE))
+'''
+
+
+def case_26(tmp):
+    """The ordinary (non-derived, non-sweep) prerequisite gate takes the derived gate's rule: a prerequisite
+    MEASURED on an arm and failed there decides for that arm, and the dependent check is not launched on it;
+    a prerequisite not attempted on the arm still falls back to the baseline's answer.
+    (a) End to end: masters-and-order is refused on one candidate and accepted on the baseline and another
+    candidate. patch.discovery-installed is blocked on the refused arm by that prerequisite, and patchprobe is
+    launched only for the two arms whose own order loads (a launch log counts them).
+    (b) In process: the same plan with the reordered arm's masters-and-order not attempted there (accounted
+    blocked before any launch). Discovery still runs on that arm on the baseline's accepted answer."""
+    import importlib.util
+    case = "case-26-ordinary-prerequisite-gate"
+    mao, disc = "loadability.masters-and-order", "patch.discovery-installed"
+    a_name = "FixtureTarget.esp"
+    src = GEN / "cases" / "case-19-derived-prerequisites"
+    d = GEN / "cases" / case
+    pdir = d / "plugins"
+    pdir.mkdir(parents=True, exist_ok=True)
+    for p in (GEN / "plugins").iterdir():
+        shutil.copyfile(p, pdir / p.name)
+    scope = load(src / "scope.json")
+    for r in scope["configuration"]["plugins"]:
+        r["Path"] = str(pdir / r["Name"]).replace("\\", "/")
+    (d / "scope.json").write_text(json.dumps(scope, indent=1), encoding="utf-8")
+    cands = {
+        "candidate-00-baseline": (["Skyrim.esm", "Update.esm", "FixtureBase.esp", a_name], "the profile's order"),
+        "candidate-01-missing-master": (["Update.esm", "Skyrim.esm", a_name], "removed FixtureBase.esp"),
+        "candidate-02-reorder": (["Skyrim.esm", "Update.esm", a_name, "FixtureBase.esp"],
+                                 "moved FixtureTarget.esp above FixtureBase.esp"),
+    }
+    cdir = d / "candidates"
+    cdir.mkdir(parents=True, exist_ok=True)
+    for stem, (plugins, change) in cands.items():
+        (cdir / f"{stem}.json").write_text(json.dumps(
+            {"SchemaVersion": 1, "Name": stem, "BaseProfile": "fixture", "Plugins": plugins,
+             "Changes": [change], "Provenance": {"fixture": "evalrun test fixture"}}, indent=1), encoding="utf-8")
+    (cdir / "candidates.json").write_text(json.dumps(
+        {"SchemaVersion": 1, "Candidates": [{"File": f"{s}.json", "ViolatesAdvice": [], "SatisfiesAdvice": []}
+                                            for s in cands],
+         "Budget": {"evaluated": len(cands) - 1, "legalNotEvaluated": 0, "note": "fixture manifest"},
+         "Contradictions": []}, indent=1), encoding="utf-8")
+    scen = d / "scenario.json"
+    scen.write_text(json.dumps({
+        "pluginDir": str(pdir).replace("\\", "/"), "scopeFrom": str(d / "scope.json").replace("\\", "/"),
+        "arms": {}, "loadability": {"candidate-01-missing-master": {
+            "refuse": "MISSING MASTER - FixtureTarget.esp masters FixtureBase.esp, which the order does not load"}}},
+        indent=1), encoding="utf-8")
+    scope_fake = d / "scopeprobe_fake.py"
+    scope_fake.write_text(SCOPE_FAKE_20, encoding="utf-8")
+    reg = "fixture-check-registry-derived.json"
+
+    def plan_run(tag, select=disc, wrap=("patchprobe",), extra=()):
+        run = tmp / f"{case}-{tag}"
+        launches = tmp / f"{case}-{tag}.launches"
+        cmds = ["--probe-cmd", f"scopeprobe=python {scope_fake}"]
+        for probe in wrap:
+            wrapper = tmp / f"launch-probe-26-{tag}-{probe}.py"
+            wrapper.write_text(f"FIXT_DIR = {str(FIXT)!r}\nLAUNCHES = {str(launches)!r}\nPROBE = {probe!r}\n"
+                               + LAUNCH_PROBE, encoding="utf-8")
+            cmds += ["--probe-cmd", f"{probe}=python {wrapper}"]
+        expect(do_plan(run, case, ["--select", select] + cmds + list(extra), registry=reg).returncode, 0,
+               f"{case}/{tag}: plan exit", "§4.7")
+        plan = load(run / "plan.json") or {}
+        arm_of = {Path(a.get("candidateFile") or "").stem: a["armId"] for a in plan.get("arms") or []}
+        dchk = next((c for c in plan.get("checks") or [] if c.get("checkId") == select), {})
+        planned = {r.get("armId"): r.get("status") for r in dchk.get("arms") or []}
+        check(all(planned.get(arm_of.get(s)) == "planned" for s in cands),
+              f"{case}/{tag}: premise - {select} is planned on every arm (got {planned})")
+        return run, launches, arm_of
+
+    def launch_lines(p, probe="patchprobe"):
+        return [ln for ln in (p.read_text(encoding="utf-8").splitlines() if p.exists() else [])
+                if ln.startswith(probe + " ")]
+
+    def n_launches(p, probe="patchprobe"):
+        return len(launch_lines(p, probe))
+
+    def scenario(tag, refuse):
+        s = d / f"scenario-{tag}.json"
+        s.write_text(json.dumps({
+            "pluginDir": str(pdir).replace("\\", "/"), "scopeFrom": str(d / "scope.json").replace("\\", "/"),
+            "arms": {}, "loadability": {stem: {"refuse": f"MISSING MASTER - fixture refusal of {stem}"}
+                                        for stem in refuse}}, indent=1), encoding="utf-8")
+        return s
+
+    def inprocess(run, scen_path, override, verb="run"):
+        """One controller invocation in process, with run_generic replaced for the (check, arm) `override` claims."""
+        spec_ = importlib.util.spec_from_file_location("evalrun_case26", EVALRUN)
+        mod_ = importlib.util.module_from_spec(spec_)
+        spec_.loader.exec_module(mod_)
+        real = mod_.run_generic
+
+        def generic(ex, check_row, arm):
+            if not override(ex, check_row, arm):
+                real(ex, check_row, arm)
+        mod_.run_generic = generic
+        saved_ = os.environ.get("EVALRUN_FAKE_SCENARIO")
+        os.environ["EVALRUN_FAKE_SCENARIO"] = str(scen_path)
+        try:
+            a_ = mod_.build_parser().parse_args([verb, "--run", str(run)])
+            return a_.fn(a_)
+        finally:
+            mod_.run_generic = real
+            if saved_ is None:
+                os.environ.pop("EVALRUN_FAKE_SCENARIO", None)
+            else:
+                os.environ["EVALRUN_FAKE_SCENARIO"] = saved_
+
+    def not_attempted_on(arm_id):
+        def override(ex, check_row, arm):
+            if check_row["checkId"] == mao and arm["armId"] == arm_id:
+                ex.account(check_row, arm, "blocked(fixture-not-attempted)", "blocked-prerequisite",
+                           "fixture: accounted before any launch, so this arm's answer was never measured")
+                return True
+            return False
+        return override
+
+    def block_detail(entry):
+        return " ".join(str(x.get("detail") or "") for x in ((entry.get("validation") or {}).get("rejections") or []))
+
+    # (a) a measured failure on the arm blocks the dependent check there, and nothing is launched for it
+    run, launches, arm_of = plan_run("measured-failure")
+    expect(evalrun(["run", "--run", run], scen).returncode, 0, f"{case}/measured-failure: run exit", "§4.7")
+    led = ledger_entries(load(run / "ledger.json") or {})
+    bad, good = arm_of.get("candidate-01-missing-master"), arm_of.get("candidate-02-reorder")
+    expect(execution_of(led.get(f"{mao}__baseline")), "completed", f"{case}/measured-failure: premise - {mao} "
+           "accepted on the baseline")
+    expect(execution_of(led.get(f"{mao}__{bad}")), "rejected(illegal-configuration)",
+           f"{case}/measured-failure: premise - {mao} measured and refused on {bad}")
+    expect(execution_of(led.get(f"{mao}__{good}")), "completed", f"{case}/measured-failure: premise - {mao} "
+           f"accepted on {good}")
+    e = led.get(f"{disc}__{bad}") or {}
+    expect(execution_of(e), f"blocked(prerequisite:{mao})",
+           f"{case}/measured-failure: {disc} [{bad}] is blocked by its own arm's refused prerequisite", "§4.7")
+    expect(e.get("cause"), "blocked-prerequisite", f"{case}/measured-failure: {disc} [{bad}] cause", "§4.3")
+    detail = " ".join(str(x.get("detail") or "") for x in ((e.get("validation") or {}).get("rejections") or []))
+    check(f"{mao} (rejected(illegal-configuration) on this arm)" in detail,
+          f"{case}/measured-failure: the block names the arm's own refused prerequisite (got {detail[:160]!r})")
+    for aid in ("baseline", good):
+        expect(execution_of(led.get(f"{disc}__{aid}")), "completed",
+               f"{case}/measured-failure: {disc} [{aid}] still runs where its own order loads", "§4.7")
+    expect(n_launches(launches), 2, f"{case}/measured-failure: patchprobe launched for the baseline and "
+           f"{good} only, never for {bad}", "§4.7")
+
+    # (b) a prerequisite not attempted on the arm falls back to the baseline's accepted answer
+    run, launches, arm_of = plan_run("not-attempted")
+    good = arm_of.get("candidate-02-reorder")
+    expect(inprocess(run, scen, not_attempted_on(good)), 0, f"{case}/not-attempted: run exit")
+    led = ledger_entries(load(run / "ledger.json") or {})
+    expect(execution_of(led.get(f"{mao}__{good}")), "blocked(fixture-not-attempted)",
+           f"{case}/not-attempted: premise - {mao} was not attempted on {good}")
+    expect(execution_of(led.get(f"{disc}__{good}")), "completed",
+           f"{case}/not-attempted: {disc} [{good}] runs on the baseline's accepted {mao}", "§4.7")
+    expect(n_launches(launches), 2, f"{case}/not-attempted: patchprobe launched for the baseline and {good}")
+
+    # (c) one hop down: a prerequisite BLOCKED on this arm by the arm's own measured failure decides there too.
+    # switch-census is blocked on the refused arm by masters-and-order, so conditional-geometry is not launched there.
+    geo, census = "state.conditional-geometry", "state.switch-census"
+    run, launches, arm_of = plan_run("one-hop", select=geo, wrap=("switchprobe", "stateprobe"),
+                                     extra=["--states", "baseline,fixture-switched"])
+    bad_stem, good_stem = "candidate-01-missing-master", "candidate-02-reorder"
+    bad, good = arm_of.get(bad_stem), arm_of.get(good_stem)
+    expect(evalrun(["run", "--run", run], scen).returncode, 0, f"{case}/one-hop: run exit", "§4.7")
+    led = ledger_entries(load(run / "ledger.json") or {})
+    expect(execution_of(led.get(f"{census}__{bad}")), f"blocked(prerequisite:{mao})",
+           f"{case}/one-hop: premise - {census} [{bad}] blocked by the arm's refused {mao}")
+    expect(execution_of(led.get(f"{census}__baseline")), "completed",
+           f"{case}/one-hop: premise - {census} accepted on the baseline")
+    e = led.get(f"{geo}__{bad}") or {}
+    expect(execution_of(e), f"blocked(prerequisite:{census})",
+           f"{case}/one-hop: {geo} [{bad}] is blocked, not run on the baseline's {census}", "§4.6")
+    check(f"blocked(prerequisite:{mao}) on this arm" in block_detail(e),
+          f"{case}/one-hop: the block names the arm's own blocked prerequisite (got {block_detail(e)[:160]!r})")
+    state_lines = launch_lines(launches, "stateprobe")
+    check(any(good_stem in ln for ln in state_lines),
+          f"{case}/one-hop: stateprobe still launches for {good}, and its lines name their arm's order "
+          f"({len(state_lines)} lines)")
+    check(not any(bad_stem in ln for ln in state_lines),
+          f"{case}/one-hop: stateprobe was never launched for {bad} (got {[ln[:120] for ln in state_lines]})")
+
+    # (d) reuse: a dependent accepted on the baseline's answer is not reused once its own arm's prerequisite is
+    # measured and fails on resume - ordinary (discovery) and derived (order evaluation, qualification) alike -
+    # while entries whose prerequisites still hold are reused.
+    qual, order = "patch.candidate-qualification", "patch.order-evaluation"
+    run, launches, arm_of = plan_run("reuse", select=qual)
+    good = arm_of.get(good_stem)
+    expect(inprocess(run, scen, not_attempted_on(good)), 0, f"{case}/reuse: first run exit")
+    led = ledger_entries(load(run / "ledger.json") or {})
+    for cid in (disc, order, qual):
+        expect(execution_of(led.get(f"{cid}__{good}")), "completed",
+               f"{case}/reuse: premise - {cid} [{good}] completed on the baseline's answer")
+    bad = arm_of.get(bad_stem)
+    expect(execution_of(led.get(f"{qual}__{bad}")), f"blocked(prerequisite:{disc})",
+           f"{case}/reuse: one hop down in a derived check - {qual} [{bad}] does not derive over {disc} blocked by "
+           f"the arm's refused {mao}", "§4.6")
+    before = n_launches(launches)
+    scen_both = scenario("refuse-both", [bad_stem, good_stem])
+    expect(evalrun(["resume", "--run", run], scen_both).returncode, 0, f"{case}/reuse: resume exit")
+    led = ledger_entries(load(run / "ledger.json") or {})
+    expect(execution_of(led.get(f"{mao}__{good}")), "rejected(illegal-configuration)",
+           f"{case}/reuse: premise - resume measured {mao} on {good} and it was refused")
+    for cid in (disc, order, qual):
+        st = execution_of(led.get(f"{cid}__{good}"))
+        check(str(st).startswith("blocked(prerequisite:"),
+              f"{case}/reuse: {cid} [{good}] is blocked after its arm's prerequisite failed, not reused (got {st!r})")
+    expect(execution_of(led.get(f"{disc}__baseline")), "reused",
+           f"{case}/reuse: {disc} [baseline] whose prerequisite still holds is reused")
+    expect(n_launches(launches), before, f"{case}/reuse: resume launched no patchprobe")
+
+    # (e) `failed` is a measured failure like `rejected(...)`
+    run, launches, arm_of = plan_run("failed-status")
+    good = arm_of.get(good_stem)
+
+    def failed_on_good(ex, check_row, arm):
+        if check_row["checkId"] == mao and arm["armId"] == good:
+            ex.account(check_row, arm, "failed", None, "fixture: the child ran and failed")
+            return True
+        return False
+    expect(inprocess(run, scen, failed_on_good), 0, f"{case}/failed-status: run exit")
+    led = ledger_entries(load(run / "ledger.json") or {})
+    expect(execution_of(led.get(f"{mao}__{good}")), "failed", f"{case}/failed-status: premise - {mao} failed on {good}")
+    expect(execution_of(led.get(f"{disc}__{good}")), f"blocked(prerequisite:{mao})",
+           f"{case}/failed-status: {disc} [{good}] blocked by its arm's failed {mao}", "§4.6")
+    expect(n_launches(launches), 1, f"{case}/failed-status: patchprobe launched for the baseline only")
+
+    # (f) the sweep's all-reusable shortcut: an arm whose prerequisite failed on resume is not reused with the rest;
+    # its existing parts are blocked, and the other arms' parts stay reused.
+    nav = "geometry.navmesh-ownership"
+    run, launches, arm_of = plan_run("sweep-reuse", select=nav, wrap=("navownprobe",))
+    good = arm_of.get(good_stem)
+    scen_none = scenario("refuse-none", [])
+    expect(inprocess(run, scen_none, not_attempted_on(good)), 0, f"{case}/sweep-reuse: first run exit")
+    led = ledger_entries(load(run / "ledger.json") or {})
+    parts_ok = {k: execution_of(v) for k, v in led.items() if k.startswith(f"{nav}__")}
+    check(parts_ok and all(v == "completed" for v in parts_ok.values()),
+          f"{case}/sweep-reuse: premise - every sweep part completed on the first run (got {parts_ok})")
+    scen_good = scenario("refuse-good", [good_stem])
+    expect(evalrun(["resume", "--run", run], scen_good).returncode, 0, f"{case}/sweep-reuse: resume exit")
+    led = ledger_entries(load(run / "ledger.json") or {})
+    expect(execution_of(led.get(f"{mao}__{good}")), "rejected(illegal-configuration)",
+           f"{case}/sweep-reuse: premise - resume measured {mao} on {good} and it was refused")
+    good_parts = {k: execution_of(v) for k, v in led.items() if k.startswith(f"{nav}__{good}")}
+    check(good_parts and all(str(v).startswith(f"blocked(prerequisite:{mao})") for v in good_parts.values()),
+          f"{case}/sweep-reuse: every {nav} entry on {good} is blocked, none reused (got {good_parts})")
+    other = {k: execution_of(v) for k, v in led.items() if k.startswith(f"{nav}__") and f"__{good}" not in k}
+    check(other and all(v == "reused" for v in other.values()),
+          f"{case}/sweep-reuse: the other arms' sweep parts are reused (got {other})")
+
+
+def case_27(tmp):
+    """An ordersweep that was NOT stopped credits only what its own child produced or verifiably reused.
+    Everything runs in-process against a planned fixture run, with the Runner's ordersweep job wrapped so the
+    test controls what the child leaves on disk; the probes, ordersweep.py and conflictdiff stay real.
+    (a) An arm kept out of the sweep by its prerequisite keeps blocked(prerequisite:...): the sweep does not
+        measure it from a copy an earlier invocation left in RUN/candidates, and no part is written for it.
+    (b) A sweep child that fails before writing anything: the summary, per-job logs, emits, diff log and
+        cache-log REUSED lines left by EARLIER invocations credit nothing - no part is terminal-ok.
+    (c) The control for (b): the next invocation's genuine cache reuse (REUSED appended by its own child)
+        is still credited although the reused emits are an hour old.
+    (d) A per-job log this child wrote without a completion trailer is not an exit 0: that arm is not
+        credited, while a job of the same child that did complete is."""
+    import importlib.util
+    import re
+    case = "case-27-sweep-credits-own-results"
+    spec = importlib.util.spec_from_file_location("evalrun_case27", EVALRUN)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    fixture = "case-08-interrupt-resume"
+    _, _, _, scen = case_paths(fixture)
+    nav = "geometry.navmesh-ownership"
+    store = tmp / f"{case}-runlog"
+
+    base_runner = mod.Runner
+
+    class HookRunner(base_runner):
+        hook = None
+
+        def run(self, jobs, echo=True):
+            if HookRunner.hook is not None and jobs and jobs[0].get("id") == "ordersweep":
+                return HookRunner.hook(lambda js: base_runner.run(self, js, echo), jobs)
+            return base_runner.run(self, jobs, echo)
+
+    class Killed(Exception):
+        """The controller dies after its sweep child finished, before the split wrote a receipt."""
+
+    def plan(run):
+        p = subprocess.run([sys.executable, str(EVALRUN), "plan", "--registry",
+                            str(GEN / "registry" / "fixture-check-registry.json"),
+                            "--scope", str(GEN / "cases" / fixture / "scope.json"),
+                            "--candidates", str(GEN / "cases" / fixture / "candidates"),
+                            "--out", str(run), "--harness", str(REAL_HARNESS)] + probe_cmds()
+                           + ["--select", "navownprobe"],
+                           capture_output=True, text=True, timeout=300,
+                           env=dict(os.environ, EVALRUN_FAKE_SCENARIO=str(scen), HOUSECARL_RUNLOG_DIR=str(store)))
+        expect(p.returncode, 0, f"{case}: plan exit for {run.name}")
+        if p.returncode != 0:
+            print(p.stdout[-2000:], p.stderr[-2000:])
+            return None
+        pl = load(run / "plan.json") or {}
+        return next((a for a in pl.get("arms") or [] if a.get("kind") == "candidate"), None)
+
+    def inproc(args, hook=None, scenario=None):
+        HookRunner.hook = hook
+        saved = {k: os.environ.get(k) for k in ("EVALRUN_FAKE_SCENARIO", "HOUSECARL_RUNLOG_DIR")}
+        os.environ.update(EVALRUN_FAKE_SCENARIO=str(scenario or scen), HOUSECARL_RUNLOG_DIR=str(store))
+        try:
+            a = mod.build_parser().parse_args([str(x) for x in args])
+            return a.fn(a)
+        finally:
+            HookRunner.hook = None
+            for k, v in saved.items():
+                if v is None:
+                    os.environ.pop(k, None)
+                else:
+                    os.environ[k] = v
+
+    def led_of(run):
+        return ledger_entries(load(run / "ledger.json") or {})
+
+    def status(led, key):
+        return execution_of(led.get(key))
+
+    def log_lines(p):
+        return p.read_text(encoding="utf-8").splitlines() if p.exists() else []
+
+    real_runner, real_allowed = mod.Runner, mod.sweep_arms_allowed
+    mod.Runner = HookRunner
+    try:
+        # (a) ---------------------------------------------------------------- the prerequisite-blocked arm
+        run_a = tmp / f"{case}-blocked"
+        cand = plan(run_a)
+        if cand is None:
+            return
+        cid, stem = cand["armId"], Path(cand["candidateFile"]).stem
+        (run_a / "candidates").mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(cand["candidatePath"], run_a / "candidates" / cand["candidateFile"])  # an earlier copy
+
+        def blocked_allowed(ex, sweep_checks):
+            allowed = real_allowed(ex, sweep_checks)
+            allowed[cid] = "blocked:loadability.masters-and-order"
+            return allowed
+        mod.sweep_arms_allowed = blocked_allowed
+        try:
+            expect(inproc(["run", "--run", run_a]), 0, f"{case}/blocked: the run exits 0")
+        finally:
+            mod.sweep_arms_allowed = real_allowed
+        led = led_of(run_a)
+        expect(status(led, f"{nav}__baseline__arm"), "completed",
+               f"{case}/blocked: premise - the sweep ran to completion on the baseline")
+        expect(status(led, f"{nav}__{cid}"), "blocked(prerequisite:loadability.masters-and-order)",
+               f"{case}/blocked: the kept-out arm keeps its prerequisite cause")
+        parts = {k: status(led, k) for k in led if k.startswith(f"{nav}__{cid}__")}
+        expect(parts, {}, f"{case}/blocked: no sweep part is written for the kept-out arm")
+        check(not (run_a / "candidates" / cand["candidateFile"]).exists(),
+              f"{case}/blocked: the earlier copy of the kept-out arm's order is removed from RUN/candidates")
+        check(not (run_a / "sweep" / "logs" / f"navownprobe-{stem}.txt").exists(),
+              f"{case}/blocked: ordersweep did not measure the kept-out arm")
+
+        # (b) ------------------------------------------------- results left by earlier invocations
+        run_b = tmp / f"{case}-stale"
+        cand = plan(run_b)
+        if cand is None:
+            return
+        cid, stem = cand["armId"], Path(cand["candidateFile"]).stem
+        sweep = run_b / "sweep"
+        clog = sweep / "cache-log.txt"
+
+        def kill_after(real, jobs):
+            real(jobs)
+            raise Killed()
+        for verb in ("run", "resume"):              # measured (RECORDED), then served from the cache (REUSED)
+            try:
+                inproc([verb, "--run", run_b], kill_after)
+                check(False, f"{case}/stale: premise - the {verb} invocation was killed after its sweep child")
+            except Killed:
+                pass
+        check(f"REUSED navownprobe-{stem}:" in "\n".join(log_lines(clog)),
+              f"{case}/stale: premise - an earlier invocation reused the candidate job from the cache")
+        check((sweep / "summary.json").exists() and (sweep / "logs" / f"diff-navownprobe-{stem}.txt").exists()
+              and (sweep / "navownprobe" / f"{stem}.reverse.json").exists(),
+              f"{case}/stale: premise - the earlier invocations left a summary, a diff log and a reverse emit")
+        old = time.time() - 3600
+        for p in sweep.rglob("*"):
+            if p.is_file():
+                os.utime(p, (old, old))             # the earlier invocations were an hour ago
+
+        def fail_early(real, jobs):
+            empty = run_b / "no-candidates"
+            empty.mkdir(exist_ok=True)
+            argv = list(jobs[0]["argv"])
+            argv[argv.index("--candidates") + 1] = str(empty)
+            return real([dict(jobs[0], argv=argv)])  # the real ordersweep exits 1 before writing anything
+        n_clog = len(log_lines(clog))
+        expect(inproc(["resume", "--run", run_b], fail_early), 0, f"{case}/stale: the failed-sweep resume exits 0")
+        check(any(ln.startswith("(exit 1,") for ln in log_lines(run_b / "logs" / "ordersweep.txt")),
+              f"{case}/stale: premise - this invocation's ordersweep child exited 1")
+        expect(len(log_lines(clog)), n_clog, f"{case}/stale: premise - this child appended nothing to cache-log.txt")
+        led = led_of(run_b)
+        want = {f"{nav}__baseline__arm": "rejected(completion-missing)",
+                f"{nav}__{cid}__arm": "rejected(completion-missing)",
+                f"{nav}__{cid}__reverse": "blocked(no-reverse-measurement)",
+                f"{nav}__{cid}__diff": "rejected(output-stale)"}
+        for key, st in want.items():
+            expect(status(led, key), st, f"{case}/stale: {key.split('__', 1)[1]} credits nothing earlier "
+                                         f"invocations left")
+
+        # (c) ------------------------------------------------------ genuine reuse is still credited
+        expect(inproc(["resume", "--run", run_b]), 0, f"{case}/reuse: the next resume exits 0")
+        added = log_lines(clog)[n_clog:]
+        for job in (f"navownprobe-baseline", f"navownprobe-{stem}", f"navownprobe-{stem}-reverse"):
+            check(any(ln.startswith(f"REUSED {job}:") for ln in added) and
+                  not any(ln.startswith(f"RECORDED {job}:") for ln in added),
+                  f"{case}/reuse: premise - this invocation's child reused {job} from its cache (added: {added})")
+        led = led_of(run_b)
+        for key in want:
+            expect(status(led, key), "completed", f"{case}/reuse: {key.split('__', 1)[1]} is credited "
+                                                  f"from this invocation's verified reuse")
+
+        # (d) ------------------------------------------- a log this child wrote with no completion trailer
+        run_d = tmp / f"{case}-unfinished"
+        cand = plan(run_d)
+        if cand is None:
+            return
+        cid, stem = cand["armId"], Path(cand["candidateFile"]).stem
+        sweep = run_d / "sweep"
+        subs = []
+
+        def unfinished(real, jobs):
+            res = real(jobs)
+            (sweep / "summary.json").unlink(missing_ok=True)
+            log = sweep / "logs" / f"navownprobe-{stem}.txt"
+            text, n = re.subn(r"^\(exit -?\d+, [^)\n]*\)$",
+                              "(stopped at the deadline after 1.0s: launched process tree terminated and "
+                              "confirmed gone (fixture); no completion)",
+                              log.read_text(encoding="utf-8"), flags=re.M)
+            subs.append(n)
+            log.write_text(text, encoding="utf-8")
+            for p in (sweep / "navownprobe" / f"{stem}.reverse.json", sweep / "logs" / f"navownprobe-{stem}-reverse.txt",
+                      sweep / "logs" / f"diff-navownprobe-{stem}.txt"):
+                p.unlink(missing_ok=True)           # nothing after the unfinished job ran
+            return [dict(res[0], exitCode=1)]       # and ordersweep died before its summary
+        expect(inproc(["run", "--run", run_d], unfinished), 0, f"{case}/unfinished: the run exits 0")
+        expect(subs, [1], f"{case}/unfinished: premise - exactly one completion trailer was replaced")
+        check((sweep / "navownprobe" / f"{stem}.json").exists(),
+              f"{case}/unfinished: premise - the unfinished job's emit is on disk, written by this child")
+        led = led_of(run_d)
+        expect(status(led, f"{nav}__baseline__arm"), "completed",
+               f"{case}/unfinished: the job this child completed is credited")
+        expect(status(led, f"{nav}__{cid}__arm"), "rejected(completion-missing)",
+               f"{case}/unfinished: a log with no completion trailer is not an exit 0")
+        expect(status(led, f"{nav}__{cid}__reverse"), "blocked(no-reverse-measurement)",
+               f"{case}/unfinished: the reverse part keeps its own cause")
+        expect(status(led, f"{nav}__{cid}__diff"), "rejected(output-missing)",
+               f"{case}/unfinished: the diff part keeps its own cause")
+
+        # (e) ---------------- a reverse job this child ran that wrote nothing, over an earlier invocation's emit
+        run_e = tmp / f"{case}-reverse-no-emit"
+        cand = plan(run_e)
+        if cand is None:
+            return
+        cid, stem = cand["armId"], Path(cand["candidateFile"]).stem
+        sweep = run_e / "sweep"
+        try:
+            inproc(["run", "--run", run_e], kill_after)
+            check(False, f"{case}/reverse-no-emit: premise - the first invocation was killed after its sweep child")
+        except Killed:
+            pass
+        rev = sweep / "navownprobe" / f"{stem}.reverse.json"
+        check(rev.exists(), f"{case}/reverse-no-emit: premise - the earlier invocation wrote the reverse emit")
+        (sweep / "cache.json").unlink(missing_ok=True)    # the cache is lost: every job is measured again
+        old = time.time() - 3600
+        os.utime(rev, (old, old))
+        doc = load(scen)
+        doc["arms"]["navownprobe"][f"{stem}.reverse"] = {"behaviour": "no-emit"}
+        scen_e = tmp / f"{case}-reverse-no-emit.scenario.json"
+        scen_e.write_text(json.dumps(doc, indent=1), encoding="utf-8")
+        expect(inproc(["resume", "--run", run_e], scenario=scen_e), 0, f"{case}/reverse-no-emit: resume exits 0")
+        rl = sweep / "logs" / f"navownprobe-{stem}-reverse.txt"
+        check(rl.exists() and "without writing the emit" in rl.read_text(encoding="utf-8")
+              and any(ln.startswith("(exit 0,") for ln in log_lines(rl)),
+              f"{case}/reverse-no-emit: premise - this child ran the reverse job, which exited 0 writing nothing")
+        led = led_of(run_e)
+        expect(status(led, f"{nav}__{cid}__arm"), "completed",
+               f"{case}/reverse-no-emit: premise - this child measured the candidate arm")
+        expect(status(led, f"{nav}__{cid}__reverse"), "rejected(output-stale)",
+               f"{case}/reverse-no-emit: the earlier reverse emit is not this child's measurement")
+    finally:
+        mod.Runner, mod.sweep_arms_allowed = real_runner, real_allowed
+
+
+def case_28(tmp):
+    """ordersweep caches only an emit its own probe launch wrote. The real ordersweep.py over the case-08
+    candidates, four invocations into one --out: (1) every job measured and RECORDED; the cache is then lost;
+    (2) the candidate's probe exits 0 WITHOUT writing, while the earlier emit is still at its path - that job
+    must not be RECORDED, while the baseline job, which did write, is; (3) the candidate is therefore measured
+    again, writes a fresh emit and is RECORDED, not REUSED; (4) that fresh entry is REUSED. The earlier emit is
+    never deleted: an accepted receipt may hash it. (5) In the controller: a sweep child that ran every job and
+    died before writing its summary leaves the diff part rejected(completion-missing), not schema-unsupported."""
+    case = "case-28-cache-records-own-emit"
+    _, _, cands_src, scen = case_paths("case-08-interrupt-resume")
+    out = tmp / case / "sweep"
+    cdir = tmp / case / "candidates"
+    cdir.mkdir(parents=True, exist_ok=True)
+    for f in cands_src.iterdir():
+        shutil.copyfile(f, cdir / f.name)
+    base = next(cdir.glob("candidate-*-baseline.json"))
+    stem = next(f.stem for f in cdir.glob("candidate-*.json") if f != base)
+    doc = load(scen)
+    doc["arms"]["navownprobe"][stem] = {"behaviour": "no-emit"}
+    scen_no_emit = tmp / case / "scenario-no-emit.json"
+    scen_no_emit.write_text(json.dumps(doc, indent=1), encoding="utf-8")
+    clog = out / "cache-log.txt"
+    emit = out / "navownprobe" / f"{stem}.json"
+    job = f"navownprobe-{stem}"
+
+    def sweep(scenario):
+        n = len(clog.read_text(encoding="utf-8").splitlines()) if clog.exists() else 0
+        r = subprocess.run([sys.executable, str(HARNESS / "ordersweep.py"), "--candidates", str(cdir),
+                            "--out", str(out), "--probes", "navownprobe", "--harness", str(REAL_HARNESS),
+                            "--baseline", str(base),
+                            "--probe-cmd", f"navownprobe=python {FIXT / 'fakeprobes' / 'navownprobe.py'}"],
+                           capture_output=True, text=True, timeout=300,
+                           env=dict(os.environ, EVALRUN_FAKE_SCENARIO=str(scenario),
+                                    HOUSECARL_RUNLOG_DIR=str(tmp / f"{case}-runlog")))
+        if r.returncode != 0:
+            print(r.stdout[-2000:], r.stderr[-2000:])
+        return r.returncode, clog.read_text(encoding="utf-8").splitlines()[n:] if clog.exists() else []
+
+    def has(lines, word, j):
+        return any(ln.startswith(f"{word} {j}:") for ln in lines)
+
+    code, added = sweep(scen)
+    expect(code, 0, f"{case}/1: ordersweep exits 0")
+    check(has(added, "RECORDED", job) and has(added, "RECORDED", "navownprobe-baseline"),
+          f"{case}/1: a fresh emit with nothing earlier at its path is recorded (added: {added})")
+    (out / "cache.json").unlink(missing_ok=True)       # the cache is lost; the emits stay
+    earlier = emit.read_bytes()
+    earlier_mtime = emit.stat().st_mtime_ns            # a rewrite changes it even when the fake writes the same bytes
+
+    code, added = sweep(scen_no_emit)
+    expect(code, 0, f"{case}/2: ordersweep exits 0")
+    log2 = (out / "logs" / f"{job}.txt").read_text(encoding="utf-8")
+    check("without writing the emit" in log2 and "(exit 0," in log2 and emit.read_bytes() == earlier,
+          f"{case}/2: premise - the probe exited 0 without writing, and the earlier emit is still at its path")
+    check(has(added, "RECORDED", "navownprobe-baseline"),
+          f"{case}/2: the baseline job, which wrote its emit over an earlier one, is still recorded (added: {added})")
+    check(not has(added, "RECORDED", job) and has(added, "NOT-RECORDED", job),
+          f"{case}/2: the job that wrote nothing is NOT recorded with the earlier emit, and says so (added: {added})")
+
+    code, added = sweep(scen)
+    expect(code, 0, f"{case}/3: ordersweep exits 0")
+    check(has(added, "REUSED", "navownprobe-baseline"), f"{case}/3: premise - the baseline job is reused (added: {added})")
+    check(not has(added, "REUSED", job),
+          f"{case}/3: the earlier emit is never served from the cache (added: {added})")
+    check(has(added, "RECORDED", job) and emit.stat().st_mtime_ns != earlier_mtime,
+          f"{case}/3: the job is measured again and its fresh emit recorded (added: {added})")
+
+    code, added = sweep(scen)
+    expect(code, 0, f"{case}/4: ordersweep exits 0")
+    check(has(added, "REUSED", job), f"{case}/4: the fresh emit is reusable (added: {added})")
+
+    # The controller side, in-process (case 27's technique): the real ordersweep, with the Runner's ordersweep
+    # job and the split wrapped so the test controls what an interrupted or failed child leaves behind.
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("evalrun_case28", EVALRUN)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    fixture = "case-08-interrupt-resume"
+    store = tmp / f"{case}-runlog"
+    base_runner = mod.Runner
+
+    class HookRunner(base_runner):
+        hook = None
+
+        def run(self, jobs, echo=True):
+            if HookRunner.hook is not None and jobs and jobs[0].get("id") == "ordersweep":
+                return HookRunner.hook(lambda js: base_runner.run(self, js, echo), jobs)
+            return base_runner.run(self, jobs, echo)
+
+    def plan(run, extra):
+        p = subprocess.run([sys.executable, str(EVALRUN), "plan", "--registry",
+                            str(GEN / "registry" / "fixture-check-registry.json"),
+                            "--scope", str(GEN / "cases" / fixture / "scope.json"),
+                            "--candidates", str(GEN / "cases" / fixture / "candidates"),
+                            "--out", str(run), "--harness", str(REAL_HARNESS)] + probe_cmds() + extra,
+                           capture_output=True, text=True, timeout=300,
+                           env=dict(os.environ, EVALRUN_FAKE_SCENARIO=str(scen), HOUSECARL_RUNLOG_DIR=str(store)))
+        expect(p.returncode, 0, f"{case}: plan exit for {run.name}")
+        pl = load(run / "plan.json") or {}
+        return next((a for a in pl.get("arms") or [] if a.get("kind") == "candidate"), None)
+
+    def inproc(args, hook=None):
+        HookRunner.hook = hook
+        saved = {k: os.environ.get(k) for k in ("EVALRUN_FAKE_SCENARIO", "HOUSECARL_RUNLOG_DIR")}
+        os.environ.update(EVALRUN_FAKE_SCENARIO=str(scen), HOUSECARL_RUNLOG_DIR=str(store))
+        try:
+            a = mod.build_parser().parse_args([str(x) for x in args])
+            return a.fn(a)
+        finally:
+            HookRunner.hook = None
+            for k, v in saved.items():
+                if v is None:
+                    os.environ.pop(k, None)
+                else:
+                    os.environ[k] = v
+
+    nav = "geometry.navmesh-ownership"
+    mod.Runner = HookRunner
+    try:
+        # (5) a sweep child that measured every job and died before its summary: the diff part's cause is the
+        # missing summary row, not a conflictdiff without a verdict line
+        run5 = tmp / f"{case}-no-summary"
+        cand = plan(run5, ["--select", "navownprobe"])
+        if cand is None:
+            return
+        cid, cstem = cand["armId"], Path(cand["candidateFile"]).stem
+
+        def no_summary(real, jobs):
+            res = real(jobs)
+            (run5 / "sweep" / "summary.json").unlink()
+            return [dict(res[0], exitCode=1)]
+        expect(inproc(["run", "--run", run5], no_summary), 0, f"{case}/no-summary: run exits 0")
+        led = ledger_entries(load(run5 / "ledger.json") or {})
+        dlog = run5 / "sweep" / "logs" / f"diff-navownprobe-{cstem}.txt"
+        check(dlog.exists() and "(exit 0," in dlog.read_text(encoding="utf-8"),
+              f"{case}/no-summary: premise - this child ran the diff to completion")
+        expect(execution_of(led.get(f"{nav}__{cid}__arm")), "completed",
+               f"{case}/no-summary: premise - the probe job this child completed is credited")
+        expect(execution_of(led.get(f"{nav}__{cid}__diff")), "rejected(completion-missing)",
+               f"{case}/no-summary: a diff with no summary row names that cause")
+    finally:
+        mod.Runner = base_runner
+
+
 CASES["case-20"] = case_20
 CASES["case-21"] = case_21
 CASES["case-22"] = case_22
 CASES["case-23"] = case_23
 CASES["case-24"] = case_24
 CASES["case-25"] = case_25
+CASES["case-26"] = case_26
+CASES["case-27"] = case_27
+CASES["case-28"] = case_28
+
+
+def case_29(tmp):
+    """Review V2 H1. patch.order-evaluation derives only from the arm's ACCEPTED diff parts: when the sweep's summary
+    carries no verdict, the diff part is rejected and the order evaluation is blocked by it, not completed over it,
+    and the disposition's per-arm order evaluation reads nothing from it; the same run without that damage still
+    derives and names the probe."""
+    import importlib.util
+    case = "case-29-order-evaluation-accepted-diffs"
+    nav, order = "geometry.navmesh-ownership", "patch.order-evaluation"
+    fixture = "case-08-interrupt-resume"
+    _, _, _, scen = case_paths(fixture)
+
+    def oe_run(tag, damage):
+        spec = importlib.util.spec_from_file_location(f"evalrun_case29_{tag}", EVALRUN)
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        run = tmp / f"{case}-{tag}"
+        store = tmp / f"{case}-{tag}-runlog"
+        p = subprocess.run([sys.executable, str(EVALRUN), "plan", "--registry",
+                            str(GEN / "registry" / "fixture-check-registry.json"),
+                            "--scope", str(GEN / "cases" / fixture / "scope.json"),
+                            "--candidates", str(GEN / "cases" / fixture / "candidates"),
+                            "--out", str(run), "--harness", str(REAL_HARNESS)] + probe_cmds()
+                           + ["--select", f"navownprobe,{order}"],
+                           capture_output=True, text=True, timeout=300,
+                           env=dict(os.environ, EVALRUN_FAKE_SCENARIO=str(scen), HOUSECARL_RUNLOG_DIR=str(store)))
+        expect(p.returncode, 0, f"{case}/{tag}: plan exit")
+        cand = next(a for a in (load(run / "plan.json") or {}).get("arms", []) if a.get("kind") == "candidate")
+        stem = Path(cand["candidateFile"]).stem
+        base_runner = mod.Runner
+
+        class HookRunner(base_runner):
+            def run(self, jobs, echo=True):
+                res = base_runner.run(self, jobs, echo)
+                if damage and jobs and jobs[0].get("id") == "ordersweep":
+                    s = load(run / "sweep" / "summary.json")
+                    for r in s["candidates"][stem]["rows"]:
+                        r["diff"]["verdict"] = "(no verdict line)"
+                    (run / "sweep" / "summary.json").write_text(json.dumps(s, indent=1), encoding="utf-8")
+                return res
+        mod.Runner = HookRunner
+        saved = {k: os.environ.get(k) for k in ("EVALRUN_FAKE_SCENARIO", "HOUSECARL_RUNLOG_DIR")}
+        os.environ.update(EVALRUN_FAKE_SCENARIO=str(scen), HOUSECARL_RUNLOG_DIR=str(store))
+        try:
+            a = mod.build_parser().parse_args(["run", "--run", str(run)])
+            expect(a.fn(a), 0, f"{case}/{tag}: run exit")
+        finally:
+            mod.Runner = base_runner
+            for k, v in saved.items():
+                if v is None:
+                    os.environ.pop(k, None)
+                else:
+                    os.environ[k] = v
+        return ledger_entries(load(run / "ledger.json") or {}), cand["armId"], run
+
+    def finalized_probes(run, aid):
+        expect(evalrun(["finalize", "--run", run], scen).returncode, 0, f"{case}: finalize exit")
+        arms = field(load(run / "disposition.json") or {}, "arms") or {}
+        return ((arms.get(aid) or {}).get("orderEvaluation") or {}).get("probes")
+
+    led, aid, run = oe_run("clean", damage=False)
+    expect(execution_of(led.get(f"{nav}__{aid}__diff")), "completed", f"{case}/clean: premise - the diff is accepted")
+    expect(execution_of(led.get(f"{order}__{aid}")), "completed", f"{case}/clean: {order} derives from accepted diffs")
+    expect(finalized_probes(run, aid), ["navownprobe"], f"{case}/clean: the disposition's order evaluation names the probe")
+    led, aid, run = oe_run("no-verdict", damage=True)
+    expect(execution_of(led.get(f"{nav}__{aid}__diff")), "rejected(schema-unsupported)",
+           f"{case}/no-verdict: premise - the diff part is rejected")
+    e = led.get(f"{order}__{aid}") or {}
+    expect(execution_of(e), f"blocked(prerequisite:{nav})",
+           f"{case}/no-verdict: {order} is blocked by the rejected diff, not derived over it", "§4.6")
+    rc = load(run / "receipts" / f"{order}__{aid}.json") or {}
+    check(not (rc.get("validation") or {}).get("accepted"),
+          f"{case}/no-verdict: the order evaluation's receipt is not accepted")
+    expect(finalized_probes(run, aid), [],
+           f"{case}/no-verdict: the disposition's order evaluation reads nothing from the rejected diff")
+
+
+CASES["case-29"] = case_29
 
 
 def main() -> int:

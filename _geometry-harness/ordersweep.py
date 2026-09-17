@@ -187,6 +187,15 @@ def read_identity(emit: Path) -> dict | None:
 
 # ------------------------------------------------------------------------------------------ the cache
 
+def emit_signature(p: Path):
+    """(mtime_ns, size) of a file, None when absent: a write by the probe changes it."""
+    try:
+        st = p.stat()
+    except OSError:
+        return None
+    return (st.st_mtime_ns, st.st_size)
+
+
 class Cache:
     """Request key -> what was produced, with the identity's own hashes for re-validation."""
 
@@ -362,6 +371,9 @@ def main() -> int:
         if reused:
             return 0, False, False, reused
         argv = exes[probe] + ["--order", str(order_file)] + (["--base", str(base_emit)] if base_emit else []) + ["--emit", str(emit)] + common + extra
+        # An earlier invocation's emit may already be at this path (and an accepted receipt may hash it, so it
+        # is not deleted): only an emit THIS launch wrote is recorded.
+        before = emit_signature(emit)
         res = runner.run([{"id": job_id, "argv": argv}])[0]
         log = logs / f"{job_id}.txt"
         text = log.read_text(encoding="utf-8", errors="replace") if log.exists() else ""
@@ -371,7 +383,11 @@ def main() -> int:
             # stopped at (or refused by) the caller's deadline: not finished, never cached, never a clean exit
             return (res["exitCode"] if res["exitCode"] not in (None, 0) else -1), refused, False, emit
         if res["exitCode"] == 0 and emit.exists():
-            cache.record(k, job_id, emit)
+            if emit_signature(emit) != before:
+                cache.record(k, job_id, emit)
+            else:
+                cache.note(f"NOT-RECORDED {job_id}: exited 0 but did not write {emit.name}; the file at that path "
+                           f"is an earlier run's and is never cached as this request's result")
         return res["exitCode"], refused, illegal, emit
 
     results: dict[str, list[dict]] = {}

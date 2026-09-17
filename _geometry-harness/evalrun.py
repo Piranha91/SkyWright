@@ -91,7 +91,7 @@ REJECTION_CAUSES = (
     "schema-unsupported", "identity-missing", "identity-mismatch", "wrong-check",
     "duplicate-receipt", "foreign-run", "population-mismatch", "coverage-missing",
     "extraction-failed", "stale-inputs", "mixed-snapshot", "budget-exhausted",
-    "blocked-prerequisite",
+    "blocked-prerequisite", "completion-missing",
 )
 #: Kinds that consume a load order, and can therefore refuse the CONFIGURATION itself. A refusal
 #: from a probe that never reads an order (adviceprobe, patchprobe) is just `refused`.
@@ -2138,7 +2138,14 @@ def execute(ex: Executor, parent) -> None:
             arm = ex.arms[arm_row["armId"]]
             st = arm_row["status"]
             if already_done(check["checkId"], arm["armId"], None):
-                mark_reused(check["checkId"], arm["armId"], None)
+                pre = reuse_blocked_by(ex, check, arm["armId"]) if st == "planned" and kind != "media" else None
+                if kind == "derived":
+                    pass  # reused or blocked after the loop, where derived checks are decided
+                elif pre:
+                    ex.account(check, arm, f"blocked(prerequisite:{pre})", "blocked-prerequisite",
+                               prereq_block_detail(ex, pre, arm["armId"]))
+                else:
+                    mark_reused(check["checkId"], arm["armId"], None)
                 parent.advance()
                 continue
             if st == "not-applicable":
@@ -2174,10 +2181,12 @@ def execute(ex: Executor, parent) -> None:
             elif kind == "derived":
                 pass  # after the loop: derived checks consume other receipts
             else:
+                # The derived gate's rule (`decided_on_arm`): a prerequisite measured and failed on this arm, or
+                # blocked on it by such a failure, blocks it here even when the baseline's was accepted; one not
+                # attempted falls back.
                 missing = [p for p in check["prerequisites"]
-                           if not any(ledger.entry(p, x["armId"], None) and
-                                      ledger.entry(p, x["armId"], None).get("status") in TERMINAL_OK
-                                      for x in [arm, ex.arms["baseline"]])]
+                           if not any((ledger.entry(p, aid, None) or {}).get("status") in TERMINAL_OK
+                                      for aid in prereq_answer_arms(ex, p, arm["armId"]))]
                 # The budget first: once the deadline has passed, a prerequisite that is missing because the
                 # deadline stopped it is the budget's consequence, and naming it blocked(prerequisite) would
                 # hide that cause.
@@ -2185,7 +2194,10 @@ def execute(ex: Executor, parent) -> None:
                     ex.account(check, arm, "skipped-budget", "budget-exhausted", ex.budget_sentence())
                 elif missing:
                     ex.account(check, arm, f"blocked(prerequisite:{missing[0]})", "blocked-prerequisite",
-                               "a prerequisite check has no accepted receipt: " + ", ".join(missing))
+                               "a prerequisite check has no accepted receipt: " + ", ".join(
+                                   f"{p} ({(ledger.entry(p, arm['armId'], None) or {}).get('status')} on this arm)"
+                                   if len(prereq_answer_arms(ex, p, arm["armId"])) == 1 else p
+                                   for p in missing))
                 else:
                     run_generic(ex, check, arm)
             parent.advance()
@@ -2196,18 +2208,26 @@ def execute(ex: Executor, parent) -> None:
         for arm_row in check["arms"]:
             arm = ex.arms[arm_row["armId"]]
             if already_done(check["checkId"], arm["armId"], None):
-                mark_reused(check["checkId"], arm["armId"], None)
+                pre = reuse_blocked_by(ex, check, arm["armId"])
+                if pre:
+                    ex.account(check, arm, f"blocked(prerequisite:{pre})", "blocked-prerequisite",
+                               prereq_block_detail(ex, pre, arm["armId"]))
+                else:
+                    mark_reused(check["checkId"], arm["armId"], None)
                 continue
             run_derived(ex, check, arm)
 
 
 def sweep_all_reusable(ex: Executor, sweep_checks: list[dict]) -> bool:
     """True when every arm of every swept check already holds a terminal-ok entry — so re-running
-    the sweep would repeat measured work rather than measure anything."""
+    the sweep would repeat measured work rather than measure anything — and no arm's own prerequisite
+    now decides against it (`reuse_blocked_by`): such an arm goes through the sweep's prerequisite gate."""
     for c in sweep_checks:
         for r in c["arms"]:
             if r["status"] != "planned":
                 continue
+            if reuse_blocked_by(ex, c, r["armId"]):
+                return False
             e = ex.ledger.entry(c["checkId"], r["armId"], "arm")
             if not e or e.get("status") not in TERMINAL_OK:
                 return False
@@ -2482,19 +2502,47 @@ def candidate_stale(arm: dict, memo: "HashMemo | None" = None) -> str | None:
     return None
 
 
+def decided_on_arm(ex: Executor, pre: str, arm_id: str) -> str | None:
+    """The arm's own status for prerequisite `pre` when that status decides for this arm alone, else None.
+    A prerequisite MEASURED on this arm and failed there (`rejected(...)` or `failed`) decides: a
+    masters-and-order refused on this arm is not settled by the baseline's accepted one. So does one
+    `blocked(prerequisite:...)` on this arm - one hop down from such a failure (a switch census blocked by the
+    arm's refused order does not borrow the baseline's census); a prerequisite unsettled on the baseline as
+    well blocks either way. Anything else - no entry, or one not attempted (held back, blocked before launch
+    for another reason) - leaves the baseline's answer counting."""
+    own = str((ex.ledger.entry(pre, arm_id, None) or {}).get("status") or "")
+    return own if (own.startswith("rejected") or own == "failed" or own.startswith("blocked(prerequisite:")) \
+        else None
+
+
+def prereq_answer_arms(ex: Executor, pre: str, arm_id: str) -> tuple[str, ...]:
+    """The arms whose ledger entry answers prerequisite `pre` for `arm_id` (`decided_on_arm`)."""
+    return (arm_id,) if decided_on_arm(ex, pre, arm_id) else (arm_id, "baseline")
+
+
+def prereq_block_detail(ex: Executor, pre: str, arm_id: str) -> str:
+    own = decided_on_arm(ex, pre, arm_id)
+    if own:
+        return (f"the prerequisite {pre} is {own} on this arm, which decides for this arm: the baseline's "
+                "answer does not settle it")
+    return (f"the prerequisite {pre} has no accepted receipt on this arm"
+            + ("" if arm_id == "baseline" else " (or on the baseline every arm is measured against)"))
+
+
+def reuse_blocked_by(ex: Executor, check: dict, arm_id: str) -> str | None:
+    """The first prerequisite whose own status on this arm now decides against an entry accepted earlier
+    (typically on the baseline's answer, before the arm's own prerequisite was measured). Such an entry is
+    blocked, not reused: reuse must not keep what the prerequisite gate would refuse to launch."""
+    return next((p for p in check.get("prerequisites") or [] if decided_on_arm(ex, p, arm_id)), None)
+
+
 def prereq_satisfied(ex: Executor, check: dict, arm_id: str) -> str | None:
     """None when every prerequisite of this check is settled on this arm, else the first that is
-    not. A `not-applicable` prerequisite counts as satisfied: it is an answer, not an absence.
-
-    A prerequisite that was MEASURED on this arm and failed there (`rejected(...)` or `failed`) is
-    decided by this arm alone: a masters-and-order refused on this arm is not settled by the baseline's
-    accepted one. Otherwise - no entry, or one not attempted (held back, blocked before launch) - the
-    baseline's answer still counts, as before."""
+    not. A `not-applicable` prerequisite counts as satisfied: it is an answer, not an absence. Which
+    arms answer is `prereq_answer_arms`."""
     for pre in check.get("prerequisites") or []:
         ok = False
-        own = str((ex.ledger.entry(pre, arm_id, None) or {}).get("status") or "")
-        measured_failure = own.startswith("rejected") or own == "failed"
-        for aid in ((arm_id,) if measured_failure else (arm_id, "baseline")):
+        for aid in prereq_answer_arms(ex, pre, arm_id):
             e = ex.ledger.entry(pre, aid, None)
             if e and (e.get("status") in TERMINAL_OK
                       or str(e.get("status") or "").startswith("not-applicable")):
@@ -2542,11 +2590,15 @@ def run_ordersweep(ex: Executor, sweep_checks: list[dict], parent, allowed: dict
             state = allowed.get(r["armId"], "ok")
             if state != "ok":
                 pre = state.split(":", 1)[1]
+                detail = prereq_block_detail(ex, pre, r["armId"])
                 ex.account(c, ex.arms[r["armId"]], f"blocked(prerequisite:{pre})",
-                           "blocked-prerequisite",
-                           f"the prerequisite {pre} has no accepted receipt on this arm"
-                           + ("" if r["armId"] == "baseline" else
-                              " (or on the baseline every arm is measured against)"))
+                           "blocked-prerequisite", detail)
+                # parts an earlier invocation accepted for this arm are not reused under a prerequisite that
+                # now blocks it (a fresh run has no part entries, so nothing changes there)
+                for part in ("arm", "reverse", "diff"):
+                    if ex.ledger.entry(c["checkId"], r["armId"], part) is not None:
+                        ex.account(c, ex.arms[r["armId"]], f"blocked(prerequisite:{pre})",
+                                   "blocked-prerequisite", detail, part=part)
     runnable = {a for a, v in allowed.items() if v == "ok"} if allowed else None
     if runnable is not None and "baseline" not in runnable:
         print("   ordersweep: not run - the baseline's prerequisite is not settled")
@@ -2560,6 +2612,9 @@ def run_ordersweep(ex: Executor, sweep_checks: list[dict], parent, allowed: dict
     stale_arms = set()
     for arm in plan["arms"]:
         if runnable is not None and arm["armId"] not in runnable:
+            if arm.get("candidateFile"):
+                # a copy an earlier invocation assembled would hand ordersweep an arm this one keeps out
+                (cdir / arm["candidateFile"]).unlink(missing_ok=True)
             continue
         src = Path(arm["candidatePath"])
         dst = cdir / arm["candidateFile"]
@@ -2629,6 +2684,11 @@ def run_ordersweep(ex: Executor, sweep_checks: list[dict], parent, allowed: dict
     if ex.deadline is not None:
         # the sweep's probes get the tree rule too: ordersweep caches a probe only once its tree is empty
         argv += ["--deadline-seconds", f"{max(0.0, ex.deadline - time.perf_counter()):.3f}"]
+    # RUN/sweep keeps what earlier invocations left there. ordersweep writes summary.json only when it
+    # finishes and appends to cache-log.txt, so the old summary is removed and the rest is fingerprinted:
+    # only what THIS child writes, or reuses from its own cache, is credited below.
+    (sweep_out / "summary.json").unlink(missing_ok=True)
+    prior = sweep_prior(sweep_out)
     started_iso, started_mono = utcnow(), time.time()
     res = ex.runner.run([{"id": "ordersweep", "argv": argv, "env": ex.child_env()}])[0]
     log = ex.logs / "ordersweep.txt"
@@ -2695,18 +2755,37 @@ def run_ordersweep(ex: Executor, sweep_checks: list[dict], parent, allowed: dict
     for check in sweep_checks:
         probe = check["adapter"]["exe"]
         for arm_row in check["arms"]:
-            if arm_row["armId"] in stale_arms:
-                parent.advance()  # already accounted blocked(candidate-*) above
+            if arm_row["armId"] in stale_arms or (runnable is not None and arm_row["armId"] not in runnable):
+                parent.advance()  # already accounted blocked(...) above
                 continue
             arm = ex.arms[arm_row["armId"]]
             split_sweep_receipts(ex, check, arm, probe, sweep_out, summary, res, started_iso,
-                                 ended_iso, started_mono, log)
+                                 ended_iso, started_mono, log, prior)
             parent.advance()
+
+
+def sweep_prior(sweep_out: Path) -> dict:
+    """What RUN/sweep held before this invocation's ordersweep child started: the cache log's length and
+    each per-job log's (mtime, size). A log the child did not rewrite is an earlier invocation's."""
+    clog = sweep_out / "cache-log.txt"
+    logs = {}
+    if (sweep_out / "logs").is_dir():
+        for p in (sweep_out / "logs").glob("*.txt"):
+            st = p.stat()
+            logs[p.name] = (st.st_mtime_ns, st.st_size)
+    return {"cacheLogBytes": clog.stat().st_size if clog.exists() else 0, "logs": logs}
+
+
+def written_by_child(p: Path, prior: dict) -> bool:
+    if not p.exists():
+        return False
+    st = p.stat()
+    return prior["logs"].get(p.name) != (st.st_mtime_ns, st.st_size)
 
 
 def split_sweep_receipts(ex: Executor, check: dict, arm: dict, probe: str, sweep_out: Path,
                          summary: dict, res: dict, started_iso: str, ended_iso: str,
-                         started_mono: float, log: Path) -> None:
+                         started_mono: float, log: Path, prior: dict) -> None:
     stem = Path(arm["candidateFile"]).stem
     is_base = arm["kind"] == "baseline"
     arm_emit = sweep_out / probe / ("baseline.json" if is_base else f"{stem}.json")
@@ -2741,43 +2820,69 @@ def split_sweep_receipts(ex: Executor, check: dict, arm: dict, probe: str, sweep
     sweep_logs = sweep_out / "logs"
     arm_log = sweep_logs / (f"{probe}-baseline.txt" if is_base else f"{probe}-{stem}.txt")
     rev_log = sweep_logs / f"{probe}-{stem}-reverse.txt"
-    reused = reused_jobs(sweep_out)
+    # Only the REUSED lines this child appended: an earlier invocation's reuse is not this one's.
+    reused = reused_jobs(sweep_out, since=prior["cacheLogBytes"])
 
     def text_of(p: Path) -> str:
         return p.read_text(encoding="utf-8", errors="replace") if p.exists() else ""
 
+    def job_result(job: str, row_exit, job_log: Path):
+        """(exit code, why there is none, whether this child ran or reused the job). The exit code comes
+        only from this child: its summary row, its own cache reuse, or the completion trailer of a log it
+        wrote. A log without that trailer is a job that did not finish, never an exit 0."""
+        if row_exit is not None:
+            return row_exit, None, True
+        if job in reused:
+            return 0, None, True
+        if written_by_child(job_log, prior):
+            code = exit_from_log(text_of(job_log), default=None)
+            if code is None:
+                return None, (f"{rel_to(ex.run, job_log)} has no `(exit N, ...)` completion trailer: job {job} "
+                              f"did not finish, so nothing it wrote is accepted"), True
+            return code, None, True
+        return None, (f"the ordersweep child (exit {res.get('exitCode')}) recorded no result for job {job}: no "
+                      f"summary row, no reuse from its own cache, and "
+                      + (f"{rel_to(ex.run, job_log)} was written by an earlier invocation" if job_log.exists()
+                         else "no log")), False
+
+    def not_completed(why: str) -> dict:
+        return {"accepted": False, "rejections": [{"cause": "completion-missing", "detail": why}],
+                "detector": None, "findings": None, "coverage": [], "verdict": None, "identity": None}
+
     arm_job = f"{probe}-baseline" if is_base else f"{probe}-{stem}"
-    arm_exit = (row or {}).get("probeExit")
-    if arm_exit is None:
-        arm_exit = exit_from_log(text_of(arm_log), default=0 if arm_log.exists() else res["exitCode"])
-    v = ex.validator.validate(check=check, arm=arm, part="arm", adapter=check["adapter"],
-                              exit_code=arm_exit,
-                              log_text=text_of(arm_log),
-                              outputs=[arm_emit], pre_hashes={},
-                              started=None if arm_job in reused else started_mono)
+    arm_exit, arm_gap, _ = job_result(arm_job, (row or {}).get("probeExit"), arm_log)
+    own_arm_log = arm_log.exists() and (arm_job in reused or written_by_child(arm_log, prior))
+    v = not_completed(arm_gap) if arm_gap else ex.validator.validate(
+        check=check, arm=arm, part="arm", adapter=check["adapter"], exit_code=arm_exit,
+        log_text=text_of(arm_log) if own_arm_log else "", outputs=[arm_emit], pre_hashes={},
+        started=None if arm_job in reused else started_mono)
     ex.finish(check, arm, "arm", check["adapter"], None, res, started_iso, ended_iso,
-              [arm_emit], arm_log if arm_log.exists() else log, v,
+              [arm_emit], arm_log if own_arm_log else log, v,
               base_emit=None if is_base else base_arm_emit)
 
     if is_base:
         return
 
-    if rev_emit.exists():
-        vr = ex.validator.validate(check=check, arm=arm, part="reverse", adapter=check["adapter"],
-                                   exit_code=(row or {}).get("reverseExit") if (row or {}).get("reverseExit") is not None
-                                   else exit_from_log(text_of(rev_log), default=0),
-                                   log_text=text_of(rev_log),
-                                   outputs=[rev_emit], pre_hashes={}, started=None)
+    rev_job = f"{probe}-{stem}-reverse"
+    rev_exit, rev_gap, rev_own = job_result(rev_job, (row or {}).get("reverseExit"), rev_log)
+    if rev_emit.exists() and rev_own:
+        own_rev_log = rev_log.exists() and (rev_job in reused or written_by_child(rev_log, prior))
+        vr = not_completed(rev_gap) if rev_gap else ex.validator.validate(
+            check=check, arm=arm, part="reverse", adapter=check["adapter"], exit_code=rev_exit,
+            log_text=text_of(rev_log) if own_rev_log else "", outputs=[rev_emit], pre_hashes={},
+            started=None if rev_job in reused else started_mono)
         # The reverse arm is measured on the BASELINE order with the candidate as --base, so its own
         # Configuration IS the baseline's — which is why D2 validates it against the BASELINE arm's
         # frozen request (Validator.reference_arm) instead of exempting it from the identity check.
         if vr["accepted"] and vr["detector"] is None and vr["findings"] is not None:
             vr["detector"] = "finding" if vr["findings"] > 0 else "no-finding"
         ex.finish(check, arm, "reverse", check["adapter"], None, res, started_iso, ended_iso,
-                  [rev_emit], rev_log if rev_log.exists() else log, vr, base_emit=arm_emit)
+                  [rev_emit], rev_log if own_rev_log else log, vr, base_emit=arm_emit)
     else:
+        # A reverse emit this child neither wrote nor reused is an earlier invocation's: no reverse here.
         ex.account(check, arm, "blocked(no-reverse-measurement)", None,
-                   "no reverse emit: every created row reads unmeasured under the baseline order")
+                   "no reverse emit from this invocation's sweep: every created row reads unmeasured under "
+                   "the baseline order", part="reverse")
 
     diff_log = sweep_out / "logs" / f"diff-{probe}-{stem}.txt"
     diff = (row or {}).get("diff") or {}
@@ -2787,6 +2892,15 @@ def split_sweep_receipts(ex: Executor, check: dict, arm: dict, probe: str, sweep
     rejections = []
     if not diff_log.exists():
         rejections.append({"cause": "output-missing", "detail": rel_to(ex.run, diff_log)})
+    elif not written_by_child(diff_log, prior):
+        # conflictdiff is never cached: a diff log this child did not write compared an earlier sweep's emits
+        rejections.append({"cause": "output-stale",
+                           "detail": f"{rel_to(ex.run, diff_log)} was written by an earlier invocation: this "
+                                     f"ordersweep child did not run the diff"})
+    elif row is None:
+        rejections.append({"cause": "completion-missing",
+                           "detail": f"the ordersweep child (exit {res.get('exitCode')}) wrote no summary row for "
+                                     f"{probe}/{stem}, which is where this diff's verdict and created rows are read"})
     elif verdict in (None, "(not run)", "(no verdict line)"):
         rejections.append({"cause": "schema-unsupported",
                            "detail": f"conflictdiff produced no verdict line for {probe}/{stem}"})
@@ -2822,13 +2936,17 @@ def exit_from_log(text: str, default: int | None = 0) -> int | None:
     return int(m.group(1)) if m else default
 
 
-def reused_jobs(sweep_out: Path) -> set[str]:
+def reused_jobs(sweep_out: Path, since: int = 0) -> set[str]:
     """Job ids ordersweep REUSED from its own cache. Their emits legitimately predate this child,
-    so the staleness rule must not read a reused result as a stale one."""
+    so the staleness rule must not read a reused result as a stale one. The log is append-only across
+    invocations, so `since` (its length before this child started) keeps an earlier reuse out."""
     log = Path(sweep_out) / "cache-log.txt"
     out = set()
     if log.exists():
-        for line in log.read_text(encoding="utf-8", errors="replace").splitlines():
+        with open(log, "rb") as f:
+            f.seek(since)
+            text = f.read().decode("utf-8", errors="replace")
+        for line in text.splitlines():
             if line.startswith("REUSED "):
                 out.add(line.split()[1].rstrip(":"))
     return out
@@ -2851,9 +2969,7 @@ def run_derived(ex: Executor, check: dict, arm: dict) -> None:
         pre = prereq_satisfied(ex, check, arm["armId"])
         if pre:
             ex.account(check, arm, f"blocked(prerequisite:{pre})", "blocked-prerequisite",
-                       f"the prerequisite {pre} has no accepted receipt on this arm"
-                       + ("" if arm["kind"] == "baseline" else
-                          " (or on the baseline every arm is measured against)"))
+                       prereq_block_detail(ex, pre, arm["armId"]))
         return bool(pre)
 
     if adapter.get("derives") == "order-evaluation" or cid.endswith("order-evaluation"):
@@ -2865,6 +2981,18 @@ def run_derived(ex: Executor, check: dict, arm: dict) -> None:
                        "evaluation of the baseline against itself is not a measurement")
             return
         if blocked():
+            return
+        # Derived only from this arm's ACCEPTED diff parts: a diff part the sweep planned for this arm that is
+        # rejected, stopped, blocked or absent would otherwise leave the evaluation reading clean over it.
+        swept = [c["checkId"] for c in ex.plan["checks"]
+                 if c["adapter"].get("kind") == "ordersweep-probe" and c.get("status") == "planned"
+                 and any(r.get("armId") == arm["armId"] and r.get("status") == "planned" for r in c.get("arms") or [])]
+        unsettled = [(c, (ex.ledger.entry(c, arm["armId"], "diff") or {}).get("status")) for c in swept
+                     if (ex.ledger.entry(c, arm["armId"], "diff") or {}).get("status") not in TERMINAL_OK]
+        if unsettled:
+            ex.account(check, arm, f"blocked(prerequisite:{unsettled[0][0]})", "blocked-prerequisite",
+                       "an order evaluation derives only from this arm's accepted diff parts; not accepted: "
+                       + ", ".join(f"{c} diff ({s or 'no entry'})" for c, s in unsettled))
             return
         rows = [r for r in receipts.values()
                 if r.get("armId") == arm["armId"] and r.get("part") == "diff"
@@ -3699,7 +3827,9 @@ def build_disposition(run: Path, plan: dict, ledger: Ledger, receipts: dict, *,
 
     arms = {}
     for arm in plan["arms"]:
-        rows = [r for r in receipts.values() if r.get("armId") == arm["armId"] and r.get("orderEvaluation")]
+        # only accepted receipts: a rejected diff's classification is not this arm's order evaluation
+        rows = [r for r in receipts.values() if r.get("armId") == arm["armId"] and r.get("orderEvaluation")
+                and (r.get("validation") or {}).get("accepted")]
         per_probe = {}
         regression = False
         classification = None
