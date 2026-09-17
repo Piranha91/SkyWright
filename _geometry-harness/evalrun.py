@@ -64,6 +64,10 @@ import evalregistry  # noqa: E402
 #: silently find nothing to check.
 SCHEMA_VERSION = 2
 BUNDLE_SCHEMA = 2
+#: D1: what a plan's `arms[].requested.providers` means. `arm-view`: the providers THAT arm's configuration
+#: reads — its own `Mods` view when the candidate declares one. A plan without this marker froze the scope's
+#: providers onto every arm, so `run`, `resume` and `import-results` refuse it by name (`request_refusal`).
+REQUEST_PROVIDERS = "arm-view"
 
 # Exit codes, spelled once.
 EXIT_OK = 0
@@ -598,6 +602,26 @@ def requested_plugin(name, scope_plugins: dict, resolve=None) -> dict:
     return row
 
 
+def requested_providers(scope_providers: list[dict], view_mods: list[str] | None) -> list[dict]:
+    """D1: the asset providers an arm's configuration reads, in `HarnessOrderCli.Resolve`'s order — the
+    overwrite layer, the view's mod folders, then the game's Data folder.
+
+    `view_mods` is None when the candidate declares no `Mods`: the probe then reads the scope's view, and the
+    scope's providers are returned as recorded. A declared list — an EMPTY one included — replaces the
+    scope's `mod` rows. The other kinds are kept from the scope: the overwrite layer and the Data folder come
+    from the instance and the game path, not from the candidate, so every arm resolved under one instance
+    reads the same ones, and the scope recorded which of them exist."""
+    rows = [dict(v) for v in scope_providers]
+    if view_mods is None:
+        return rows
+
+    def kind(v):
+        return str(v.get("kind") or "").lower()
+    return ([v for v in rows if kind(v) == "overwrite"]
+            + [{"name": m, "kind": "mod"} for m in view_mods]
+            + [v for v in rows if kind(v) not in ("overwrite", "mod")])
+
+
 def cmd_plan(a) -> int:
     run = Path(a.out)
     registry_path = Path(a.registry)
@@ -685,8 +709,9 @@ def cmd_plan(a) -> int:
         # `cand.Mods ?? comp.EnabledMods` (HarnessOrderCli.Resolve) coalesces on NULL: a candidate that
         # carries the key with an EMPTY list is describing an empty view, not asking for the profile's.
         declared_view = doc.get("Mods", doc.get("mods"))
+        own_view = None
         if isinstance(declared_view, list):
-            view_mods = [str(m) for m in declared_view if str(m).strip()]
+            view_mods = own_view = [str(m) for m in declared_view if str(m).strip()]
         else:
             view_mods = [str(v.get("name")) for v in scope_providers
                          if str(v.get("kind") or "").lower() == "mod" and v.get("name")]
@@ -718,13 +743,14 @@ def cmd_plan(a) -> int:
             # D1: the frozen REQUEST for this arm — the plugin names in the candidate file's order,
             # each with the hash the scope states for it, or the hash of the copy the probes would read
             # (resolved through this arm's view when `--instance` was given), or an explicit `unstated`
-            # saying why neither could be stated; the scope's overlays and providers; and the population
-            # and states the plan selected. Every accepted receipt on this arm is bound to THIS, not to
-            # whichever receipt happened to arrive first.
+            # saying why neither could be stated; the scope's overlays; the providers THIS arm's view
+            # reads (`requested_providers`), never the scope's for an arm that declares a different
+            # view; and the population and states the plan selected. Every accepted receipt on this arm
+            # is bound to THIS, not to whichever receipt happened to arrive first.
             "requested": {
                 "plugins": [requested_plugin(n, scope_plugins, resolve) for n in plugins],
                 "overlays": [dict(o) for o in scope_overlays],
-                "providers": [dict(v) for v in scope_providers],
+                "providers": requested_providers(scope_providers, own_view),
                 "population": population,
                 "states": list(states),
             },
@@ -926,6 +952,7 @@ def cmd_plan(a) -> int:
     plan = {
         "schemaVersion": SCHEMA_VERSION,
         "planId": None,
+        "requestProviders": REQUEST_PROVIDERS,
         "createdUtc": utcnow(),
         "registry": {"path": str(registry_path), "registryVersion": reg.version, "sha256": reg.sha256},
         "tools": tools,
@@ -1032,6 +1059,21 @@ def load_plan(run: Path) -> tuple[dict | None, str | None]:
                       f"bound to the configuration the arm asked for. Next action: plan again from the "
                       f"same registry, scope and candidates.")
     return doc, None
+
+
+def request_refusal(plan: dict) -> str | None:
+    """D1: a plan frozen before `requestProviders` carries the scope's providers on EVERY arm. A receipt newly
+    bound to it on an arm whose own view differs is bound to a configuration that arm never read: an honest
+    import is refused `identity-mismatch`, and one stating the scope's view is accepted. The plan cannot be
+    re-read under the new meaning either — `arms[].mods` does not keep an empty `Mods` apart from an absent
+    one — so the verbs that bind new receipts (`run`, `resume`, `import-results`) refuse it by name. The
+    verbs that only read what was already bound (`finalize`, `bundle`, `status`, `verify-bundle`) do not."""
+    if plan.get("requestProviders") == REQUEST_PROVIDERS:
+        return None
+    return (f"plan-request-outdated: plan.json declares requestProviders {plan.get('requestProviders')!r}, "
+            f"not {REQUEST_PROVIDERS!r}: it froze the scope's providers onto every arm, so a receipt bound to "
+            f"it now could be bound to a view that arm never read. Next action: plan again from the same "
+            f"registry, scope and candidates.")
 
 
 def refusal_cause(why: str) -> str:
@@ -1828,6 +1870,9 @@ def cmd_run(a, *, resuming: bool = False) -> int:
     set_run_store(run)
     plan, why = load_plan(run)
     if plan is None:
+        return refuse(why)
+    why = request_refusal(plan)
+    if why:
         return refuse(why)
     ledger = Ledger(run, plan)
     if getattr(a, "rebuild_ledger", False):
@@ -2889,6 +2934,9 @@ def _cmd_import_results(a, runlog: Run) -> int:
     set_run_store(run)
     plan, why = load_plan(run)
     if plan is None:
+        return refuse(why)
+    why = request_refusal(plan)
+    if why:
         return refuse(why)
     ledger = Ledger(run, plan)
     if ledger.refusal():

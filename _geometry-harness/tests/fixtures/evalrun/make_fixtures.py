@@ -495,6 +495,38 @@ def main() -> int:
                          [f"enabled {SUPPLIED_PLUGIN} with an empty Mods list: no mod folder is staged"],
                          mods=[], kind_note="supplied combination, ESP-only"))
 
+    # ---------------------------------------------------------------- case 18
+    # 18 — each arm's requested providers are ITS OWN view. The scope's view holds two mod folders; one
+    # candidate declares a narrower `Mods`, one the same list, one none (the scope's view), one an EMPTY
+    # list (no mod folder). The folder names are fixture names: nothing is read from them.
+    import copy as _copy
+    scope18 = _copy.deepcopy(SCOPE)
+    view18 = ["fixture-mods", "fixture-extra-mods"]
+    scope18["configuration"]["providers"] = ([{"Name": "overwrite", "Kind": "overwrite"}]
+                                             + [{"Name": m, "Kind": "mod"} for m in view18]
+                                             + [{"Name": "Data", "Kind": "data"}])
+    scope18["configuration"]["fingerprint"] = fingerprint(
+        scope18["configuration"]["plugins"], scope18["configuration"]["providers"],
+        scope18["configuration"]["overlays"], "load-time", "baseline")
+    stems18 = ["baseline", "candidate-01-narrow-view", "candidate-01-narrow-view.reverse"]
+    case_dir("case-18-arm-view-providers",
+             {"candidate-00-baseline.json": candidate("candidate-00-baseline", BASE_ORDER,
+                                                      ["the profile's own order and view"], mods=list(view18)),
+              "candidate-01-narrow-view.json": candidate(
+                  "candidate-01-narrow-view", reorder["Plugins"],
+                  ["moved FixtureTarget.esp above FixtureBase.esp; stages fixture-mods only"],
+                  mods=["fixture-mods"]),
+              "candidate-02-same-view.json": candidate(
+                  "candidate-02-same-view", reorder_b["Plugins"],
+                  ["moved Update.esm above Skyrim.esm; stages the scope's view"], mods=list(view18)),
+              "candidate-03-scope-view.json": candidate(
+                  "candidate-03-scope-view", reorder["Plugins"],
+                  ["moved FixtureTarget.esp above FixtureBase.esp; declares no Mods"]),
+              "candidate-04-empty-view.json": candidate(
+                  "candidate-04-empty-view", reorder_b["Plugins"],
+                  ["moved Update.esm above Skyrim.esm; stages no mod folder"], mods=[])},
+             {"arms": arms_ok(stems18)}, scope=scope18)
+
     print(f"fixtures written under {out_root}")
     print(f"  plugins: {len(PLUGINS)}   registry checks: {len(keep)}   cases: {len(list(cases.iterdir()))}")
     return 0

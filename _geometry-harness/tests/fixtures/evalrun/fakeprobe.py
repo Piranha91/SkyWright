@@ -296,9 +296,14 @@ def configuration(candidate: dict, candidate_path: Path, plugin_dir: Path, popul
                   ctx: dict | None = None, wrong_copy: dict | None = None) -> dict:
     plugins = plugin_rows(candidate.get("Plugins") or candidate.get("plugins") or [], plugin_dir,
                           ctx, wrong_copy)
-    providers = [{"Name": "overwrite", "Kind": "overwrite"},
-                 {"Name": "fixture-mods", "Kind": "mod"},
-                 {"Name": "Data", "Kind": "data"}]
+    # HarnessOrderCli.Resolve: `overwrite`, then the view's mod folders in order, then `Data`. A candidate
+    # that declares `Mods` (an empty list included) reads THAT view; one that does not keeps the fixture
+    # scope's single mod folder, which is every case's scope but case 18's.
+    declared = candidate.get("Mods", candidate.get("mods"))
+    view = [str(m) for m in declared] if isinstance(declared, list) else ["fixture-mods"]
+    providers = ([{"Name": "overwrite", "Kind": "overwrite"}]
+                 + [{"Name": m, "Kind": "mod"} for m in view]
+                 + [{"Name": "Data", "Kind": "data"}])
     overlays = []
     return {
         "SchemaVersion": SCHEMA,

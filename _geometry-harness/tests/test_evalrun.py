@@ -1721,10 +1721,152 @@ def case_17(tmp):
            "case-17: changed bundled raw evidence refuses verification", "import")
 
 
+def view_providers(mods):
+    """HarnessOrderCli.Resolve's provider list for a configuration whose view is `mods`: the overwrite
+    layer, the view's mod folders in order, the game's Data folder. Written from the C#, not from evalrun."""
+    return ([{"name": "overwrite", "kind": "overwrite"}] + [{"name": m, "kind": "mod"} for m in mods]
+            + [{"name": "Data", "kind": "data"}])
+
+
+def mcp_import(folder: Path, plan: dict, cid: str, arm: dict, providers: list):
+    """A schema-1 import of one no-finding MCP result for `arm`, stating `providers` as what it read and
+    everything else from the arm's frozen request. Returns the manifest path."""
+    folder.mkdir(parents=True, exist_ok=True)
+    request, response = folder / "request.json", folder / "response.json"
+    request.write_text(json.dumps({"tool": "fixture_mcp", "arguments": {"plugins": arm["plugins"]}}),
+                       encoding="utf-8")
+    response.write_text(json.dumps({"findings": 0}), encoding="utf-8")
+    req = arm["requested"]
+    cfg = {"schemaVersion": 1, "source": f"candidate:{arm['candidateFile']}",
+           "plugins": [{"name": p["name"], "path": p["path"], "sha256": p["sha256"]} for p in req["plugins"]],
+           "providers": [dict(v) for v in providers], "overlays": req["overlays"],
+           "population": req["population"], "state": "baseline"}
+    cfg["fingerprint"] = import_fingerprint(cfg)
+    doc = {"schemaVersion": 1, "planId": plan["planId"], "checkId": cid, "armId": arm["armId"],
+           "state": "baseline", "capturedUtc": "2026-09-16T00:00:00Z",
+           "tool": {"name": "fixture_mcp", "version": "1"}, "configuration": cfg,
+           "result": {"detector": "no-finding", "findings": 0,
+                      "coverage": [{"Population": "records", "Judged": 3, "Unjudgeable": {}}]},
+           "outputs": [{"role": role, "path": p.name, "sha256": sha_of(p)}
+                       for role, p in (("request", request), ("response", response))]}
+    manifest = folder / "import.json"
+    manifest.write_text(json.dumps(doc, indent=2), encoding="utf-8")
+    return manifest
+
+
+def case_18(tmp):
+    """D1: an arm's requested providers are what THAT arm's configuration reads, and a plan frozen under
+    the old meaning (the scope's providers on every arm) is refused by name wherever it would bind a
+    new receipt."""
+    case = "case-18-arm-view-providers"
+    d, scope_path, cdir, scen = case_paths(case)
+    scope = load(scope_path) or {}
+    scope_prov = [{"name": v["Name"], "kind": v["Kind"]} for v in scope["configuration"]["providers"]]
+    view = ["fixture-mods", "fixture-extra-mods"]
+    expect(scope_prov, view_providers(view), f"{case}: the fixture scope's view is overwrite + two mods + Data")
+
+    # ---------------------------------------------------------------- the plan (D1)
+    run = tmp / case
+    expect(do_plan(run, case).returncode, 0, f"{case}: plan exit", "D1")
+    plan = load(run / "plan.json") or {}
+    arms = arm_map(plan)
+    want = {"candidate-00-baseline": view_providers(view),          # Mods == the scope's view
+            "candidate-01-narrow-view": view_providers(["fixture-mods"]),
+            "candidate-02-same-view": view_providers(view),
+            "candidate-03-scope-view": scope_prov,                   # no Mods: the scope's view
+            "candidate-04-empty-view": view_providers([])}           # Mods []: no mod folder at all
+    for stem, providers in want.items():
+        got = ((arms.get(stem) or {}).get("requested") or {}).get("providers")
+        expect(got, providers, f"{case}: {stem} requested.providers", "D1 - the arm's own view")
+    narrow = arms.get("candidate-01-narrow-view") or {}
+    same = arms.get("candidate-02-same-view") or {}
+    check("fixture-extra-mods" not in json.dumps(((narrow.get("requested") or {}).get("providers")) or []),
+          f"{case}: the narrow arm's request excludes the provider only the scope's view has (D1)")
+
+    checks = plan_checks(plan)
+    cid = next((c for c in ("loadability.dangling-references", "records.cell-attributes")
+                if ((checks.get(c) or {}).get("adapter") or {}).get("kind") == "mcp-only"), None)
+    check(cid is not None, f"{case}: fixture registry contains an mcp-only check")
+    if cid is None or not narrow or not same:
+        return
+
+    # ---------------------------------------------------------------- import-results against each request
+    def imp(tag, arm, providers, want_exit, want_text=None):
+        m = mcp_import(tmp / f"{case}-{tag}", plan, cid, arm, providers)
+        r = evalrun(["import-results", "--run", run, "--file", m])
+        expect(r.returncode, want_exit, f"{case}/{tag}: import-results exit", "D1 / §4.8")
+        if want_text:
+            check(want_text in r.stderr, f"{case}/{tag}: the refusal names {want_text!r} "
+                                         f"(got {r.stderr.strip()[-220:]!r})")
+
+    imp("narrow-with-scope-providers", narrow, scope_prov, 2, "identity-mismatch")
+    imp("narrow-with-own-view", narrow, view_providers(["fixture-mods"]), 0)
+    imp("same-with-narrower-providers", same, view_providers(["fixture-mods"]), 2, "identity-mismatch")
+    imp("same-with-own-view", same, view_providers(view), 0)
+
+    # ---------------------------------------------------------------- the sweep: arm, reverse, diff (§4.3/§4.4)
+    srun = tmp / f"{case}-sweep"
+    expect(do_plan(srun, case, ["--alt", "candidate-01-narrow-view.json", "--select", "navownprobe"]).returncode,
+           0, f"{case}/sweep: plan exit", "D1")
+    splan = load(srun / "plan.json") or {}
+    expect(evalrun(["run", "--run", srun], scen).returncode, 0, f"{case}/sweep: run exit", "D2")
+    sarms = arm_map(splan)
+    sn, sb = sarms.get("candidate-01-narrow-view") or {}, sarms.get("baseline") or {}
+
+    def request_fp(arm, state, schema):
+        req = arm.get("requested") or {}
+        return import_fingerprint({"schemaVersion": schema, "population": req.get("population"), "state": state,
+                                   "plugins": req.get("plugins"), "providers": req.get("providers"),
+                                   "overlays": req.get("overlays")})
+
+    nav = "geometry.navmesh-ownership"
+    parts = {p: load(srun / "receipts" / f"{nav}__{sn.get('armId')}__{p}.json") or {}
+             for p in ("arm", "reverse", "diff")}
+    for p, rc in parts.items():
+        expect((rc.get("validation") or {}).get("accepted"), True, f"{case}/sweep: {p} part accepted", "D2")
+    for p, ref, label in (("arm", sn, "the narrow arm's own"), ("reverse", sb, "the BASELINE arm's")):
+        cfg = (parts[p].get("consumed") or {}).get("configuration") or {}
+        expect(cfg.get("fingerprint"), request_fp(ref, cfg.get("state"), cfg.get("schemaVersion")),
+               f"{case}/sweep: the {p} emit's fingerprint is the digest of {label} request", "§4.3 / §4.4")
+    check("fixture-extra-mods" in json.dumps((parts["reverse"].get("consumed") or {}).get("configuration") or {}),
+          f"{case}/sweep: the reverse emit read the baseline's view, the extra folder included (§4.4)")
+    ins = {x.get("part"): x.get("sha256") for x in ((parts["diff"].get("consumed") or {}).get("inputs") or [])}
+    expect(ins, {q: ((parts[q].get("outputs") or [{}])[0]).get("sha256") for q in ("arm", "reverse")},
+           f"{case}/sweep: the diff's inputs are exactly the accepted arm and reverse emits", "§4.4")
+
+    # ---------------------------------------------------------------- a plan frozen under the old meaning
+    old = tmp / f"{case}-old-meaning"
+    shutil.copytree(srun, old)
+    op = load(old / "plan.json")
+    op.pop("requestProviders", None)
+    for a in op.get("arms") or []:
+        a["requested"]["providers"] = [dict(v) for v in (op.get("configuration") or {}).get("providers") or []]
+    (old / "plan.json").write_text(json.dumps(op, indent=1, ensure_ascii=False), encoding="utf-8")
+    (old / "plan.sha256").write_text(sha_of(old / "plan.json") + "\n", encoding="utf-8")
+    for verb in ("run", "resume"):
+        r = evalrun([verb, "--run", old], scen)
+        expect(r.returncode, 2, f"{case}/old-meaning: {verb} exit", "D1 - refused by name")
+        check("plan-request-outdated" in r.stdout + r.stderr,
+              f"{case}/old-meaning: {verb} names plan-request-outdated (got {(r.stdout + r.stderr).strip()[-200:]!r})")
+    m = mcp_import(tmp / f"{case}-old-meaning-import", op, cid, next(a for a in op["arms"]
+                                                                 if a["armId"] == sn.get("armId")), scope_prov)
+    r = evalrun(["import-results", "--run", old, "--file", m])
+    expect(r.returncode, 2, f"{case}/old-meaning: import-results exit", "D1 - refused by name")
+    check("plan-request-outdated" in r.stderr,
+          f"{case}/old-meaning: import-results names plan-request-outdated (got {r.stderr.strip()[-200:]!r})")
+    expect(evalrun(["finalize", "--run", old], scen).returncode, 0,
+           f"{case}/old-meaning: finalize still reads what was already bound", "compatibility")
+    ob = tmp / f"{case}-old-meaning-bundle"
+    expect(evalrun(["bundle", "--run", old, "--out", ob], scen).returncode, 0,
+           f"{case}/old-meaning: bundle still packages it", "compatibility")
+    expect(evalrun(["verify-bundle", ob]).returncode, 0,
+           f"{case}/old-meaning: verify-bundle still verifies it", "compatibility")
+
+
 CASES = {"case-01": case_01, "case-02": case_02, "case-03": case_03, "case-04": case_04, "case-05": case_05,
          "case-06": case_06, "case-07": case_07, "case-08": case_08, "case-09": case_09, "case-10": case_10,
          "case-11": case_11, "case-12": case_12, "case-13": case_13, "case-14": case_14, "case-15": case_15,
-         "case-16": case_16, "case-17": case_17}
+         "case-16": case_16, "case-17": case_17, "case-18": case_18}
 
 
 def main() -> int:
