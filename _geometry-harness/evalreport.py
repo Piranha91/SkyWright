@@ -723,6 +723,55 @@ def bind(template: str, values: dict) -> str:
     return template.format_map(Safe(vals))
 
 
+IMPORT_ORIGINS = ("fresh", "reused")
+PREREQUISITE_STATUS = re.compile(r"^blocked\(prerequisite:([^)]+)\)$")
+
+
+def imported_evidence(b: Bundle) -> dict:
+    """Where each credited MCP import's evidence came from.
+
+    WHICH imports are credited: the disposition's `importedEvidence` list when the bundle carries one; a bundle
+    finalized before that list existed has none, and then an accepted receipt with an `imported` block whose
+    (check, arm) is a completed result in the disposition counts. WHAT the origin is: the receipt's own
+    `imported.origin` when the bundle carries the receipt (the controller's recovery authority), else the
+    disposition row's. Anything but fresh or reused - including a receipt written before an origin had to be
+    declared - is `unknown`, never fresh. `reused` is the import's declaration that the evidence was captured for
+    another evaluation; the ledger's own `reused` status (this run re-using its receipt on resume) is not read."""
+    by_rid = {rid: rc for rid, rc in b.receipts.items() if isinstance(rc.get("imported"), dict)}
+    ev = b.disposition.get("evaluation") or {}
+    listed = b.disposition.get("importedEvidence")
+    if isinstance(listed, list):
+        source = "disposition"
+        credited = [(r.get("checkId"), r.get("armId"), r.get("receiptId"), r) for r in listed if isinstance(r, dict)]
+    else:
+        source = "receipts"
+        completed = {(r.get("checkId"), r.get("armId")) for key in ("findings", "completedNullChecks", "completedCatalogues")
+                     for r in ev.get(key) or [] if isinstance(r, dict)}
+        credited = sorted(((rc.get("checkId"), rc.get("armId"), rid, {}) for rid, rc in by_rid.items()
+                           if (rc.get("validation") or {}).get("accepted") and (rc.get("checkId"), rc.get("armId")) in completed),
+                          key=lambda x: (str(x[0]), str(x[1])))
+    rows = []
+    for check_id, arm_id, rid, drow in credited:
+        imp = (by_rid.get(rid) or {}).get("imported")
+        declared = imp.get("origin") if isinstance(imp, dict) else drow.get("origin")
+        origin = declared if declared in IMPORT_ORIGINS else "unknown"
+        imp = imp if isinstance(imp, dict) else {}
+        row = {"checkId": check_id, "armId": arm_id, "receiptId": rid, "origin": origin,
+               "capturedUtc": imp.get("capturedUtc") or drow.get("capturedUtc"),
+               "tool": imp.get("tool"), "sourceSha256": imp.get("sourceSha256"),
+               "receiptPath": f"receipts/{check_id}__{arm_id}.json"}
+        if origin == "fresh":
+            row["originCheck"] = imp.get("originCheck")
+        elif origin == "reused":
+            row["reusedFrom"] = imp.get("reusedFrom") or drow.get("reusedFrom")
+            row["reusedFromVerified"] = bool(imp.get("reusedFromVerified", drow.get("reusedFromVerified")))
+            row["reusedFromNote"] = imp.get("reusedFromNote")
+            within = imp.get("reusedWithin") or drow.get("reusedWithin")
+            row["reusedWithin"] = within if within in ("this-evaluation", "another-evaluation") else "unstated"
+        rows.append(row)
+    return {"source": source if rows or isinstance(listed, list) else None, "rows": rows}
+
+
 def compile_plan(bundle_dir: Path, verify: dict, settings: dict, pr: dict, bundle_dir_as_given: str,
                  location_scopes: dict | None = None) -> dict:
     b = Bundle(bundle_dir)
@@ -1393,6 +1442,30 @@ def compile_plan(bundle_dir: Path, verify: dict, settings: dict, pr: dict, bundl
             f["readerContext"] = "Already present before adding the patch; this remains overwrite history, not an established incompatibility."
         else:
             f["readerContext"] = "Recorded overwrite history for this setup; it does not by itself establish an incompatibility or attribute the result to the patch."
+    # Imported MCP evidence: the reader sees a practical qualification beside the result it affects (reused: not
+    # measured for this evaluation, source stated not re-checked; origin unknown: not recorded whether it was);
+    # fresh stays unremarked. Plan, arm, hash and receipt detail go to the evidence index. Counts are untouched.
+    origin_words = reader_data.get("importOrigin") or {}
+    imports = imported_evidence(b)
+    imports["limit"] = origin_words.get("limit")
+    import_by_key = {(r["checkId"], r["armId"]): r for r in imports["rows"]}
+    for row in imports["rows"]:
+        row["receiptEvidenceId"] = eid_by_path.get(row["receiptPath"])
+        # Reuse between two setups of THIS evaluation is a different statement from reuse across evaluations, so it
+        # has its own sentence; a receipt that does not say which keeps the cautious cross-evaluation wording.
+        row["originWording"] = ("reusedWithinEvaluation"
+                                if row["origin"] == "reused" and row.get("reusedWithin") == "this-evaluation"
+                                else row["origin"])
+        row["readerProvenance"] = origin_words.get(row["originWording"]) or None
+        row["indexOrigin"] = origin_words.get("index", {}).get(row["originWording"])
+        row["findingIds"] = []
+    for f in findings:
+        row = import_by_key.get((f.get("checkId"), f.get("armId")))
+        if row is None or f.get("kind") not in ("finding", "null", "catalogue") or f.get("part") is not None:
+            continue
+        f["importOrigin"] = row["origin"]
+        f["readerProvenance"] = row["readerProvenance"]
+        row["findingIds"].append(f["id"])
     missing = ev.get("missing") or []
     by_cause = collections.Counter(str(m.get("status")) for m in missing)
     run_ids = b.manifest.get("runIds") or []
@@ -1528,12 +1601,20 @@ def compile_plan(bundle_dir: Path, verify: dict, settings: dict, pr: dict, bundl
         other_limits.append("Some supplied images or clips could not be matched to this evaluation and were excluded from the evidence shown.")
     check_titles = reader_data.get("checkTitles") or {}
     reason_labels = reader_data.get("missingReasons") or {}
+
+    def missing_reason(status: str, fallback: str) -> str:
+        # `blocked(prerequisite:<check>)` carries the check it waited for; the reader is told which one, in its title
+        blocked_by = PREREQUISITE_STATUS.match(status)
+        if blocked_by and reader_data.get("missingPrerequisiteReason"):
+            prerequisite = check_titles.get(blocked_by.group(1)) or b.check_title(blocked_by.group(1))
+            return bind(reader_data["missingPrerequisiteReason"], {"prerequisite": lower_first(prerequisite)})
+        return reason_labels.get(status, fallback)
     reason_explanations = reader_data.get("missingReasonExplanations") or {}
     missing_summary = []
     for status in sorted({str(m.get("status")) for m in missing}):
         subjects = sorted({check_titles.get(str(m.get("checkId")), b.check_title(m.get("checkId")))
                            for m in missing if str(m.get("status")) == status})
-        missing_summary.append({"reason": reason_labels.get(status, "has no accepted result"), "subjects": subjects,
+        missing_summary.append({"reason": missing_reason(status, "has no accepted result"), "subjects": subjects,
                                 "explanation": reason_explanations.get(status)})
     null_summary = []
     comparison_summary = []
@@ -1602,10 +1683,15 @@ def compile_plan(bundle_dir: Path, verify: dict, settings: dict, pr: dict, bundl
             continue
         context = (f.get("readerPlain") or ("the comparison found no additional issue" if f.get("part") == "diff" else
                                             "no problem was found in the records examined")).rstrip(".")
+        if f.get("readerProvenance"):
+            context += ". " + str(f["readerProvenance"]).rstrip(".")
         null_summary.append(f"{subject} — {f.get('readerArmLabel')}: {context}")
     null_summary = sorted(set(null_summary))
     catalogue_summary = sorted({check_titles.get(str(f.get("checkId")), f.get("title"))
                                 for f in findings if f.get("kind") == "catalogue"})
+    catalogue_summary += sorted({f"{check_titles.get(str(f.get('checkId')), f.get('title'))} — {f.get('readerArmLabel')}: "
+                                 f"{str(f['readerProvenance']).rstrip('.')}"
+                                 for f in findings if f.get("kind") == "catalogue" and f.get("readerProvenance")})
     title_subject = ", ".join(target_names) or "Target mod"
     alternative_subject = lower_first(setup_subject(alternative_arms))
     # A patch review names the patch. With no separate patch the setups differ only by the target mods themselves,
@@ -1683,14 +1769,16 @@ def compile_plan(bundle_dir: Path, verify: dict, settings: dict, pr: dict, bundl
             owner = next(f for f in fs if mid in (f.get("mediaIds") or []))
             desc = str((m.get("subject") or {}).get("description") or "").strip()
             spoken = (desc + " " if desc else "") + owner["plain"]
-            captions.append({"text": spoken, "narration": owner["readerPlain"], "storyboard": {"mode": "full-frame"},
+            captions.append({"text": spoken, "narration": " ".join(x for x in (owner["readerPlain"], owner.get("readerProvenance")) if x),
+                             "storyboard": {"mode": "full-frame"},
                              "evidenceIds": owner.get("evidenceIds") or [], "mediaId": mid})
         if not captions:
             head = fs[0]
             text = head["plain"] if len(fs) == 1 else (
                 f"{check_id} on arm {arm_id} ({part or 'arm'}): {len(fs)} conflict group(s), "
                 f"{fmt_n(sum(x['rowsTotal'] for x in fs))} row(s). " + head["plain"])
-            captions.append({"text": text, "narration": head["readerPlain"], "storyboard": {"mode": "full-frame"},
+            captions.append({"text": text, "narration": " ".join(x for x in (head["readerPlain"], head.get("readerProvenance")) if x),
+                             "storyboard": {"mode": "full-frame"},
                              "evidenceIds": sorted({e for f in fs for e in (f.get("evidenceIds") or [])}), "mediaId": None})
         chapters.append({"id": f"C-{n:02d}", "kind": "finding", "title": f"{fs[0]['title']} - {arm_id} / {part or 'arm'}",
                          "findingIds": [f["id"] for f in fs], "mediaIds": mids, "captions": captions,
@@ -1735,7 +1823,7 @@ def compile_plan(bundle_dir: Path, verify: dict, settings: dict, pr: dict, bundl
                 status = sorted(missing_by_status)[i]
                 subjects = sorted({check_titles.get(str(m.get("checkId")), "an additional check")
                                    for m in missing_by_status[status]})
-                reason = reason_labels.get(status, "Still needs checking")
+                reason = missing_reason(status, "Still needs checking")
                 caption["narration"] = reason[:1].upper() + reason[1:] + ": " + "; ".join(subjects) + "."
             elif chapter["kind"] == "comparison":
                 caption["narration"] = " ".join(f["readerPlain"] for f in findings
@@ -1772,6 +1860,7 @@ def compile_plan(bundle_dir: Path, verify: dict, settings: dict, pr: dict, bundl
                                        "visualReview": {"addedText": "none", "subjectVisible": False}}}
         },
         "claimSentence": claim_sentence,
+        "imports": imports,
         "findings": findings,
         "groups": [groups[k] for k in sorted(groups)],
         "evidence": evidence,
@@ -2082,6 +2171,7 @@ def cmd_plan(a) -> int:
         r.feature("groups", len(plan["groups"]), "groups")
         r.feature("media", len(plan["media"]), "media")
         r.feature("evidence", len(plan["evidence"]), "files")
+        r.feature("imports", len((plan["imports"] or {}).get("rows") or []), "imports")
         r.advance(1)
         print(f"presentation {plan['presentationId']}: {len(plan['findings'])} findings, {len(plan['groups'])} groups, "
               f"{len(plan['media'])} media rows, {len(plan['evidence'])} evidence files; mode {a.mode}; "
@@ -2137,6 +2227,11 @@ def load_presentation(path: Path):
     if (not isinstance(plan.get("reader"), dict) or "sectionHeadings" not in plan["reader"]
             or any(isinstance(a, dict) and "readerLabel" not in a for a in (plan.get("scope") or {}).get("arms") or [])):
         return None, "presentation-needs-replan: run evalreport plan again to add the modder-facing summary"
+    if not isinstance(plan.get("imports"), dict):
+        # a plan made before imported evidence was described cannot say whether a result was measured for this
+        # evaluation, and a report that stays silent about that would read as if it had been
+        return None, ("presentation-needs-replan: run evalreport plan again to record where imported evidence "
+                      "came from")
     return plan, ""
 
 

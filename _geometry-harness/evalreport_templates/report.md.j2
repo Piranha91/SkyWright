@@ -61,7 +61,7 @@ Coverage: {{ "all contributors to the listed locations identified" if a.location
 
 {% endif %}
 
-{% for part in cb.parts if not part.indexOnly %}{% for f in part.groups if f.readerRelevant %}- **{{ f.readerArmLabel }}:** {{ f.readerPlain }} [Full evidence](evidence-index.md#{{ f.id }}).
+{% for part in cb.parts if not part.indexOnly %}{% for f in part.groups if f.readerRelevant %}- **{{ f.readerArmLabel }}:** {{ f.readerPlain }}{% if f.get("readerProvenance") %} {{ f.readerProvenance }}{% endif %} [Full evidence](evidence-index.md#{{ f.id }}).
 {% endfor %}{% for f in part.groups if f.readerRelevant %}{% for m in f.figures %}{% if m.reportPath %}
 ![{{ (m.subject or {}).description or "Evidence image" }}]({{ m.reportPath }})
 

@@ -1107,6 +1107,281 @@ def followup_identical_label_control(bundle: Path):
           and "candidate-03-combined" not in md,
           f"{label}/nochange: the setups-compared row carries the number and no setup id")
 
+# ---------------------------------------------------------------- imported evidence: where it came from
+
+IMPORT_ORIGIN_CASE = "R7-import-origin"
+
+
+def import_origin_view(bundle: Path, drop_disposition_list: bool, strip_receipts: bool, same_evaluation=None):
+    """The same bundle read with less (or differently declared) origin information, compiled in memory (the
+    patch-direction control's method).
+
+      drop_disposition_list   a bundle finalized before the disposition listed its imports: origin is derived from
+                              the accepted receipts
+      strip_receipts          no origin anywhere: receipts in the shape they had before an import declared one
+      same_evaluation         an arm id whose reused import declares its source INSIDE this evaluation
+                              (`reusedWithin: this-evaluation`, source plan = this plan), which the reader must be
+                              told differently from reuse across evaluations
+
+    Returns (plan, report.md, report.html)."""
+    spec = importlib.util.spec_from_file_location(
+        f"evalreport_import_origin_{drop_disposition_list}_{strip_receipts}", EVALREPORT)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    view = module.Bundle(bundle)
+    view.disposition = copy.deepcopy(view.disposition)
+    if drop_disposition_list:
+        view.disposition.pop("importedEvidence", None)
+    if strip_receipts:
+        view.receipts = copy.deepcopy(view.receipts)
+        for rc in view.receipts.values():
+            imported = rc.get("imported")
+            if isinstance(imported, dict):
+                for key in ("origin", "originCheck", "reusedFrom", "reusedFromVerified", "reusedFromNote"):
+                    imported.pop(key, None)
+        view.receipt_by_key = {(rc.get("checkId"), rc.get("armId"), rc.get("part")): rc
+                               for rc in view.receipts.values()}
+    if same_evaluation:
+        view.receipts = copy.deepcopy(view.receipts)
+        this_plan = (view.plan or {}).get("planId")
+        for rc in view.receipts.values():
+            imported = rc.get("imported")
+            if rc.get("armId") == same_evaluation and isinstance(imported, dict) and imported.get("reusedFrom"):
+                imported["reusedWithin"] = "this-evaluation"
+                imported["reusedFrom"] = dict(imported["reusedFrom"], planId=this_plan)
+        view.receipt_by_key = {(rc.get("checkId"), rc.get("armId"), rc.get("part")): rc
+                               for rc in view.receipts.values()}
+        view.disposition = copy.deepcopy(view.disposition)
+        for row in view.disposition.get("importedEvidence") or []:
+            if row.get("armId") == same_evaluation:
+                row["reusedWithin"] = "this-evaluation"
+    priorities = module.load_json(module.PRIORITIES)
+    concise = priorities.get("concise") or {}
+    page = priorities.get("page") or {}
+    settings = {"mode": "concise", "layout": concise.get("layout", "normal"), "maxPages": 8,
+                "page": {"size": page.get("size", "A4"), "marginMm": page.get("marginMm", 16),
+                         "baseFontPt": page.get("baseFontPt", 10.5)},
+                "rowsPerGroup": concise.get("rowsPerGroup", 3),
+                "figuresPerFinding": concise.get("figuresPerFinding", 1),
+                "reel": priorities.get("reel") or {}}
+    original = module.Bundle
+    try:
+        module.Bundle = lambda _: view
+        plan = module.compile_plan(bundle, {"bundle": {"complete": True},
+                                            "evaluation": {"complete": False, "claim": "incomplete"}},
+                                   settings, priorities, str(bundle))
+    finally:
+        module.Bundle = original
+    shown = module.effective_view(plan, settings["rowsPerGroup"], settings["figuresPerFinding"], priorities,
+                                  settings["layout"])
+    md = module.env(False).get_template("report.md.j2").render(p=shown, css="")
+    html = module.env(True).get_template("report.html.j2").render(p=shown, css="")
+    return plan, md, html
+
+
+def import_origin_skeleton(plan: dict) -> list:
+    """Everything a measured count is read from, with no origin information in it: one row per finding with its
+    identity, its counts and its row total, plus the completion block and the summary lengths."""
+    rows = [(f.get("id"), f.get("kind"), f.get("checkId"), f.get("armId"), f.get("part"), f.get("rowsTotal"),
+             json.dumps(f.get("counts"), sort_keys=True)) for f in plan.get("findings") or []]
+    return [sorted(rows), (plan.get("scope") or {}).get("completion"), len(plan.get("evidence") or []),
+            len((plan.get("reader") or {}).get("nullSummary") or []),
+            len((plan.get("reader") or {}).get("missingSummary") or [])]
+
+
+def all_reader_lines(pres: dict) -> list:
+    """Every reader-facing sentence that names one setup: the no-problem lines, the comparison and catalogue lines,
+    and each relevant finding's own sentence with its qualification."""
+    reader = pres.get("reader") or {}
+    titles = reader.get("checkTitles") or {}
+    lines = [str(x) for x in (reader.get("nullSummary") or []) + (reader.get("comparisonSummary") or [])
+             + (reader.get("catalogueSummary") or [])]
+    for f in pres.get("findings") or []:
+        if f.get("readerRelevant") and f.get("kind") in ("regression", "finding", "repaired", "reclassified",
+                                                         "null", "catalogue"):
+            title = titles.get(str(f.get("checkId")), f.get("title"))
+            lines.append(f"{title} - {f.get('readerArmLabel')}: {f.get('readerPlain')} "
+                         f"{f.get('readerProvenance') or ''}".strip())
+    return lines
+
+
+def import_origin_control(tmp: Path, index: dict):
+    """Known answers for how a report describes imported MCP evidence (option A, 2026-09-17). The fixture bundle is
+    real: one mcp-only check imported by the controller on four arms - fresh, reused from another evaluation, a
+    receipt written before an origin had to be declared, and one whose prerequisite failed after the import had been
+    accepted. Beside the affected result the reader must be told that a reused result was not measured for this
+    evaluation and that its source was declared rather than re-checked; that a legacy result's origin is not
+    recorded (never that it is fresh); and which prerequisite a blocked check waited for. Plan, arm and hash detail
+    belongs to the evidence index, and no measured count may move because of any of it."""
+    case = IMPORT_ORIGIN_CASE
+    label = "R7/import-origin"
+    if not cli_present(case):
+        return
+    fixture = index[case]
+    bundle = Path(fixture["bundle"])
+    arms = fixture["arms"]
+    fresh_arm, reused_arm = arms["candidate-00-baseline"], arms["candidate-01-reorder"]
+    legacy_arm, blocked_arm = arms["candidate-02-legacy"], arms["candidate-03-missing-master"]
+    check_id, prerequisite = fixture["importCheck"], fixture["prerequisite"]
+    out = tmp / case
+    pres, _, _, v = compile_case(case, bundle, out)
+    if pres is None:
+        return
+    md, html, idx = text(out / "report.md"), text(out / "report.html"), text(out / "evidence-index.md")
+    expect(v.returncode, 0, f"{label}: premise - verify exits 0 on the report built from the import fixture", "D5")
+
+    # ---- the premises this bundle was built for, read from the bundle itself
+    disp = load(bundle / "disposition.json") or {}
+    ledger = load(bundle / "ledger.json") or {}
+    declared = {r.get("armId"): r.get("origin") for r in disp.get("importedEvidence") or []}
+    expect([declared.get(fresh_arm), declared.get(reused_arm), declared.get(legacy_arm), declared.get(blocked_arm)],
+           ["fresh", "reused", "unknown", None],
+           f"{label}: premise - the bundle credits a fresh, a reused and a legacy import and no blocked one")
+    expect(next((m.get("status") for m in (disp.get("evaluation") or {}).get("missing") or []
+                 if m.get("checkId") == check_id and m.get("armId") == blocked_arm), None),
+           f"blocked(prerequisite:{prerequisite})",
+           f"{label}: premise - the blocked import is missing by its prerequisite")
+    expect(((ledger.get("entries") or {}).get(f"{check_id}__{fresh_arm}") or {}).get("status"), "reused",
+           f"{label}: premise - the FRESH import's ledger status is the controller's own `reused`")
+
+    # ---- the plan records each credited import's origin, from the receipt, and no uncredited one
+    rows = {r.get("armId"): r for r in ((pres.get("imports") or {}).get("rows") or [])}
+    expect([(pres.get("imports") or {}).get("source"), sorted(rows)],
+           ["disposition", sorted([fresh_arm, reused_arm, legacy_arm])],
+           f"{label}: the plan lists the three credited imports and where the list came from")
+    expect([rows.get(a, {}).get("origin") for a in (fresh_arm, reused_arm, legacy_arm)],
+           ["fresh", "reused", "unknown"], f"{label}: each import's origin as the receipt records it")
+    expect((rows.get(reused_arm) or {}).get("reusedFrom"), fixture["reusedFrom"],
+           f"{label}: the reused import keeps the source plan, arm and result hash it declared")
+    expect((rows.get(reused_arm) or {}).get("reusedFromVerified"), False,
+           f"{label}: the declared source is never presented as verified")
+
+    # ---- the reader sentences, beside the affected result, in report.md and report.html
+    arm_labels = {a.get("armId"): a.get("readerLabel") for a in (pres.get("scope") or {}).get("arms") or []}
+    reused_sentence = ("This result was not measured for this evaluation: it was reused from an earlier one, and "
+                       "that source was stated by whoever supplied it rather than re-checked here.")
+    unknown_sentence = "It is not recorded whether this result was captured for this evaluation."
+    lines = all_reader_lines(pres)
+    import_title = ((pres.get("reader") or {}).get("checkTitles") or {}).get(check_id, check_id)
+
+    def line_for(arm_id: str) -> str:
+        """The reader-facing line of the IMPORTED check on one setup, so a neighbouring check's line on the same
+        setup cannot stand in for it."""
+        return next((x for x in lines if arm_labels[arm_id] in x and import_title in x), "")
+
+    reused_line, legacy_line, fresh_line = line_for(reused_arm), line_for(legacy_arm), line_for(fresh_arm)
+    check(reused_sentence.rstrip(".") in reused_line,
+          f"{label}: the reused result's own line says it was not measured here and its source was not re-checked "
+          f"(got {reused_line!r})")
+    check(unknown_sentence.rstrip(".") in legacy_line,
+          f"{label}: the legacy result's own line says its origin is not recorded (got {legacy_line!r})")
+    check(bool(fresh_line) and reused_sentence.rstrip(".") not in fresh_line
+          and unknown_sentence.rstrip(".") not in fresh_line
+          and "reused" not in fresh_line.lower(),
+          f"{label}: a fresh result carries no reuse or unknown-origin qualification, and the controller's `reused` "
+          f"ledger status never reaches the reader (got {fresh_line!r})")
+    check(normalise(reused_sentence) in normalise(md) and normalise(unknown_sentence) in normalise(md),
+          f"{label}: report.md carries both qualifications")
+    check(html_escape(reused_sentence) in html and html_escape(unknown_sentence) in html,
+          f"{label}: report.html carries both qualifications")
+    check("fresh" not in normalise(legacy_line).lower() and legacy_arm not in md,
+          f"{label}: the legacy result is never called fresh and no setup id leaks into the report")
+    for token in (fixture["reusedFrom"]["planId"], fixture["reusedFrom"]["resultSha256"],
+                  str((rows.get(reused_arm) or {}).get("receiptId"))):
+        check(token not in md and token not in html,
+              f"{label}: the technical provenance {token[:12]!r} stays out of the reader report")
+
+    # ---- reuse between two setups of THIS evaluation is a different statement, and gets its own sentence
+    # (decided 2026-09-17). The same bundle read with that declaration must say "not measured for this SETUP",
+    # not "not measured for this evaluation".
+    same_words = ("This result was not measured for this setup: it was reused from another setup in this evaluation "
+                  "whose tested configuration is the same, and that source was stated by whoever supplied it rather "
+                  "than re-checked here.")
+    same_plan, same_md, same_html = import_origin_view(bundle, False, False, same_evaluation=reused_arm)
+    same_lines = all_reader_lines(same_plan)
+    same_line = next((x for x in same_lines if arm_labels[reused_arm] in x and import_title in x), "")
+    check(same_words.rstrip(".") in same_line,
+          f"{label}/within: the line says it was not measured for this SETUP and was reused from another setup of "
+          f"this evaluation (got {same_line!r})")
+    check(reused_sentence.rstrip(".") not in same_line,
+          f"{label}/within: and no longer claims it came from an earlier evaluation (got {same_line!r})")
+    check(normalise(same_words) in normalise(same_md) and html_escape(same_words) in same_html,
+          f"{label}/within: both report formats carry it")
+    # against the SAME in-memory path with only the declaration changed (comparing an in-memory plan with the
+    # on-disk compile would compare two different code paths, which differ by one evidence row for the report itself)
+    base_view, _, _ = import_origin_view(bundle, False, False)
+    expect(import_origin_skeleton(same_plan), import_origin_skeleton(base_view),
+           f"{label}/within: and no measured count moves with the wording", "counts")
+    same_rows = {r["armId"]: r for r in ((same_plan.get("imports") or {}).get("rows") or [])}
+    expect((same_rows.get(reused_arm) or {}).get("reusedWithin"), "this-evaluation",
+           f"{label}/within: the plan records the reuse scope for the evidence index")
+
+    # ---- the evidence index carries the technical provenance and states the limit once
+    limit = ("These labels catch evidence filed under the wrong evaluation by mistake. They are not proof of where "
+             "the evidence came from: the capture token and the timestamps are public and can be rewritten.")
+    expect(normalise(idx).count(normalise(limit)), 1,
+           f"{label}: the relabelling-not-authenticity limit is stated once, where imported evidence is described")
+    for token in (fixture["reusedFrom"]["planId"], fixture["reusedFrom"]["armId"],
+                  fixture["reusedFrom"]["resultSha256"]):
+        check(token in idx, f"{label}: the evidence index carries the reused import's {token[:12]!r}")
+    for arm in (fresh_arm, reused_arm, legacy_arm):
+        rid = str((rows.get(arm) or {}).get("receiptId"))
+        check(rid in idx, f"{label}: the evidence index names the receipt of the import on {arm}")
+    check(f"`{check_id}` | {legacy_arm} | `unknown`" in idx,
+          f"{label}: the evidence index labels the legacy import's origin unknown")
+
+    # ---- the blocked import: named by its prerequisite, credited nowhere
+    prerequisite_reason = ("Was not checked, because the check it depends on (whether the tested load order can "
+                           "resolve its required plugins) has no accepted result for that setup")
+    check(prerequisite_reason in normalise(md),
+          f"{label}: what still needs checking names the prerequisite the blocked import waited for")
+    check(prerequisite_reason in html, f"{label}: report.html names it too")
+    check(blocked_arm not in rows and not line_for(blocked_arm),
+          f"{label}: the blocked import is not credited and gets no result line "
+          f"(got {line_for(blocked_arm)!r})")
+    blocked = finding_where(pres, kind="missing", checkId=check_id, armId=blocked_arm)
+    check(len(blocked) == 1 and prerequisite in str(blocked[0].get("plain")),
+          f"{label}: its evidence-index sentence keeps the prerequisite's own check id")
+
+    # ---- an older bundle: no disposition list, the same origins derived from the receipts
+    derived, derived_md, _ = import_origin_view(bundle, drop_disposition_list=True, strip_receipts=False)
+    derived_rows = {r.get("armId"): r.get("origin") for r in ((derived.get("imports") or {}).get("rows") or [])}
+    expect([(derived.get("imports") or {}).get("source"),
+            [derived_rows.get(a) for a in (fresh_arm, reused_arm, legacy_arm)]],
+           ["receipts", ["fresh", "reused", "unknown"]],
+           f"{label}: a bundle whose disposition lists no imports derives the same origins from its receipts")
+    check(normalise(reused_sentence) in normalise(derived_md)
+          and normalise(unknown_sentence) in normalise(derived_md),
+          f"{label}: that older bundle's report carries the same qualifications")
+
+    # ---- no measured count moves because of any of it
+    stripped, stripped_md, _ = import_origin_view(bundle, drop_disposition_list=True, strip_receipts=True)
+    stripped_rows = {r.get("armId"): r.get("origin") for r in ((stripped.get("imports") or {}).get("rows") or [])}
+    expect([stripped_rows.get(a) for a in (fresh_arm, reused_arm, legacy_arm)], ["unknown"] * 3,
+           f"{label}: premise - with the origin fields removed every import reads unknown")
+    check(normalise(reused_sentence) not in normalise(stripped_md),
+          f"{label}: premise - and no result is then called reused")
+    with_origin, _, _ = import_origin_view(bundle, drop_disposition_list=False, strip_receipts=False)
+    expect(import_origin_skeleton(with_origin), import_origin_skeleton(stripped),
+           f"{label}: every finding identity, count, row total and completion number is identical to the same "
+           f"bundle with no origin information")
+
+    # ---- a plan made before imports were described is refused, not rendered silently
+    stale = tmp / f"{case}-stale"
+    shutil.copytree(out, stale)
+    stale_plan = copy.deepcopy(pres)
+    stale_plan.pop("imports", None)
+    (stale / "presentation.json").write_text(json.dumps(stale_plan), encoding="utf-8")
+    stale_res = evalreport(["report", "--presentation", stale / "presentation.json", "--out", stale / "out",
+                            "--no-print"])
+    check(stale_res.returncode == 2
+          and "presentation-needs-replan" in (stale_res.stdout or "") + (stale_res.stderr or ""),
+          f"{label}: a presentation planned before imported evidence was described is refused by name "
+          f"(exit {stale_res.returncode})")
+
+
+def case_r7(tmp, index, common):
+    import_origin_control(tmp, index)
 
 # ---------------------------------------------------------------------------- cases
 
@@ -1662,6 +1937,7 @@ CASES = {
     "R4-repaired-plus-regression": case_r4,
     "R5-media-mismatch-same-basenames": case_r5,
     "R6-changed-or-missing-source": case_r6,
+    "R7-import-origin": case_r7,
     "fidelity": case_fidelity,
 }
 

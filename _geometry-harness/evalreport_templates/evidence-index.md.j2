@@ -23,6 +23,21 @@ Complete in every mode: every finding with all of its rows, every evidence file 
 {% for f in p.findings if f.kind == "missing" %}- [{{ f.id }}](#{{ f.id }}): {{ f.plain }}
 {% endfor %}
 
+<a id="imported-evidence"></a>
+## Imported evidence ({{ (p.imports.rows if p.imports else [])|length }})
+
+{% if p.imports and p.imports.rows %}
+Results a houseCARL tool produced and `evalrun import-results` bound to a frozen setup. {{ p.imports.limit }} Credited imports read from {{ "the disposition's importedEvidence list" if p.imports.source == "disposition" else "the accepted receipts (this bundle was finalized before the disposition listed imports)" }}; each origin below is the receipt's own. The controller's ledger status `reused` means this run re-used its own accepted receipt on a resume and is not an origin.
+
+| finding(s) | check | arm | origin | what that means | captured (UTC) | receipt | source plan / arm / result sha256 | source verified |
+|---|---|---|---|---|---|---|---|---|
+{% for x in p.imports.rows %}
+| {% for i in x.findingIds %}[{{ i }}](#{{ i }}){% if not loop.last %}, {% endif %}{% else %}none{% endfor %} | `{{ x.checkId }}` | {{ x.armId }} | `{{ x.origin }}` | {{ x.indexOrigin|md }} | {{ x.capturedUtc or "-" }} | {% if x.receiptEvidenceId %}[{{ x.receiptEvidenceId }}](#{{ x.receiptEvidenceId }}){% else %}`{{ x.receiptPath|md }}`{% endif %} `{{ x.receiptId }}` | {% if x.get("reusedFrom") %}`{{ x.reusedFrom.planId }}` / `{{ x.reusedFrom.armId }}` / `{{ x.reusedFrom.resultSha256 }}`{% else %}-{% endif %} | {% if x.get("reusedFrom") %}{{ x.reusedFromVerified }} - {{ x.reusedFromNote|md }}{% else %}-{% endif %} |
+{% endfor %}
+{% else %}
+No result in this bundle was imported: every accepted receipt was written by a check this runner ran itself.
+{% endif %}
+
 ## Findings ({{ p.findings|length }})
 
 {% for f in p.findings %}
@@ -34,6 +49,8 @@ Complete in every mode: every finding with all of its rows, every evidence file 
 - check `{{ f.checkId }}` ({{ f.family }}); arm {{ f.armId }}; part {{ f.part or "-" }}; strength {{ f.strength }}; verdict {{ f.verdict or "-" }}{{ grp }}
 - {{ f.plain|md }}
 {% if f.get("readerContext") %}- reader context: {{ f.readerContext|md }}
+{% endif %}
+{% if f.get("importOrigin") %}- imported evidence, origin `{{ f.importOrigin }}`: see [imported evidence](#imported-evidence) for the receipt, capture time and declared source{{ ("; the report says: " ~ (f.readerProvenance|md)) if f.get("readerProvenance") else "" }}
 {% endif %}
 - evidence: {{ evs }}
 - counts: `{{ f.counts|tojson|md|short(600) }}`

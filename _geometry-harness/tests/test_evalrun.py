@@ -22,6 +22,7 @@ import subprocess
 import sys
 import tempfile
 import time
+import types
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
@@ -1639,7 +1640,8 @@ def case_17(tmp):
     def make_import(folder, arm, detector="no-finding", findings=0):
         folder.mkdir(parents=True, exist_ok=True)
         request, response = folder / "request.json", folder / "response.json"
-        request.write_text(json.dumps({"tool": "fixture_mcp", "arguments": {"plugins": arm["plugins"]}}),
+        request.write_text(json.dumps(initialize(f"evalrun:{plan['planId']}:{arm['armId']}")) + "\n"
+                           + json.dumps({"tool": "fixture_mcp", "arguments": {"plugins": arm["plugins"]}}) + "\n",
                            encoding="utf-8")
         response.write_text(json.dumps({"findings": findings}), encoding="utf-8")
         req = arm["requested"]
@@ -1650,7 +1652,7 @@ def case_17(tmp):
                "population": req["population"], "state": "baseline"}
         cfg["fingerprint"] = import_fingerprint(cfg)
         doc = {"schemaVersion": 1, "planId": plan["planId"], "checkId": cid,
-               "armId": arm["armId"], "state": "baseline", "capturedUtc": "2026-09-13T00:00:00Z",
+               "armId": arm["armId"], "state": "baseline", "origin": "fresh", "capturedUtc": datetime_now_z(),
                "tool": {"name": "fixture_mcp", "version": "1"}, "configuration": cfg,
                "result": {"detector": detector, "findings": findings,
                           "coverage": [{"Population": "records", "Judged": 3, "Unjudgeable": {}}]},
@@ -1772,7 +1774,8 @@ def mcp_import(folder: Path, plan: dict, cid: str, arm: dict, providers: list):
     everything else from the arm's frozen request. Returns the manifest path."""
     folder.mkdir(parents=True, exist_ok=True)
     request, response = folder / "request.json", folder / "response.json"
-    request.write_text(json.dumps({"tool": "fixture_mcp", "arguments": {"plugins": arm["plugins"]}}),
+    request.write_text(json.dumps(initialize(f"evalrun:{plan['planId']}:{arm['armId']}")) + "\n"
+                       + json.dumps({"tool": "fixture_mcp", "arguments": {"plugins": arm["plugins"]}}) + "\n",
                        encoding="utf-8")
     response.write_text(json.dumps({"findings": 0}), encoding="utf-8")
     req = arm["requested"]
@@ -1782,7 +1785,7 @@ def mcp_import(folder: Path, plan: dict, cid: str, arm: dict, providers: list):
            "population": req["population"], "state": "baseline"}
     cfg["fingerprint"] = import_fingerprint(cfg)
     doc = {"schemaVersion": 1, "planId": plan["planId"], "checkId": cid, "armId": arm["armId"],
-           "state": "baseline", "capturedUtc": "2026-09-16T00:00:00Z",
+           "state": "baseline", "origin": "fresh", "capturedUtc": datetime_now_z(),
            "tool": {"name": "fixture_mcp", "version": "1"}, "configuration": cfg,
            "result": {"detector": "no-finding", "findings": 0,
                       "coverage": [{"Population": "records", "Judged": 3, "Unjudgeable": {}}]},
@@ -1806,7 +1809,9 @@ def case_18(tmp):
 
     # ---------------------------------------------------------------- the plan (D1)
     run = tmp / case
-    expect(do_plan(run, case).returncode, 0, f"{case}: plan exit", "D1")
+    expect(do_plan(run, case, ["--select", "loadability.masters-and-order"]).returncode, 0, f"{case}: plan exit", "D1")
+    # import-results credits evidence only where the check could run (review V2 L3): its prerequisite is measured first
+    expect(evalrun(["run", "--run", run], scen).returncode, 0, f"{case}: prerequisite run exit", "§4.8")
     plan = load(run / "plan.json") or {}
     arms = arm_map(plan)
     want = {"candidate-00-baseline": view_providers(view),          # Mods == the scope's view
@@ -5053,6 +5058,748 @@ def case_41(tmp):
 CASES["case-39"] = case_39
 CASES["case-40"] = case_40
 CASES["case-41"] = case_41
+
+
+# ------------------------------------------- imported MCP evidence: origin (42) and prerequisites (43) --
+
+IMPORT_CHECK = "loadability.dangling-references"
+MAO = "loadability.masters-and-order"
+
+
+def import_case_dir(case: str, cands: dict, refuse=()) -> tuple[Path, Path]:
+    """A small derived-registry fixture (case 26's shape): the fixture plugins, a scope naming them, the given
+    candidates `{stem: plugin list}` and a scenario whose scopeprobe fake refuses the stems in `refuse`.
+    Returns (case dir, scenario path)."""
+    src = GEN / "cases" / "case-19-derived-prerequisites"
+    d = GEN / "cases" / case
+    pdir = d / "plugins"
+    pdir.mkdir(parents=True, exist_ok=True)
+    for p in (GEN / "plugins").iterdir():
+        shutil.copyfile(p, pdir / p.name)
+    scope = load(src / "scope.json")
+    for r in scope["configuration"]["plugins"]:
+        r["Path"] = str(pdir / r["Name"]).replace("\\", "/")
+    (d / "scope.json").write_text(json.dumps(scope, indent=1), encoding="utf-8")
+    cdir = d / "candidates"
+    cdir.mkdir(parents=True, exist_ok=True)
+    for stem, plugins in cands.items():
+        (cdir / f"{stem}.json").write_text(json.dumps(
+            {"SchemaVersion": 1, "Name": stem, "BaseProfile": "fixture", "Plugins": plugins,
+             "Changes": [f"fixture arm {stem}"], "Provenance": {"fixture": "evalrun test fixture"}}, indent=1),
+            encoding="utf-8")
+    (cdir / "candidates.json").write_text(json.dumps(
+        {"SchemaVersion": 1, "Candidates": [{"File": f"{s}.json", "ViolatesAdvice": [], "SatisfiesAdvice": []}
+                                            for s in cands],
+         "Budget": {"evaluated": len(cands) - 1, "legalNotEvaluated": 0, "note": "fixture manifest"},
+         "Contradictions": []}, indent=1), encoding="utf-8")
+    return d, import_scenario(d, "scenario.json", refuse)
+
+
+def import_scenario(d: Path, name: str, refuse=()) -> Path:
+    s = d / name
+    s.write_text(json.dumps({
+        "pluginDir": str(d / "plugins").replace("\\", "/"), "scopeFrom": str(d / "scope.json").replace("\\", "/"),
+        "arms": {}, "loadability": {stem: {"refuse": f"MISSING MASTER - fixture refusal of {stem}"}
+                                    for stem in refuse}}, indent=1), encoding="utf-8")
+    return s
+
+
+def import_plan(run: Path, case: str, tag: str) -> dict:
+    """Plan `case` selecting only masters-and-order (scopeprobe fake), so `run` is fast and the mcp-only import
+    check is planned on every arm with masters-and-order as its prerequisite."""
+    scope_fake = GEN / "cases" / case / "scopeprobe_fake.py"
+    scope_fake.write_text(SCOPE_FAKE_20, encoding="utf-8")
+    expect(do_plan(run, case, ["--select", MAO, "--probe-cmd", f"scopeprobe=python {scope_fake}"],
+                   registry="fixture-check-registry-derived.json").returncode, 0, f"{tag}: plan exit", "import")
+    plan = load(run / "plan.json") or {}
+    row = next((c for c in plan.get("checks") or [] if c.get("checkId") == IMPORT_CHECK), {})
+    check((row.get("adapter") or {}).get("kind") == "mcp-only" and MAO in (row.get("prerequisites") or []),
+          f"{tag}: premise - {IMPORT_CHECK} is mcp-only and requires {MAO} (got {row.get('prerequisites')})")
+    return plan
+
+
+def arm_by_stem(plan: dict, stem: str) -> dict:
+    return next((a for a in plan.get("arms") or [] if Path(a.get("candidateFile") or "").stem == stem), {})
+
+
+def capture_token(plan: dict, arm: dict) -> str:
+    return f"evalrun:{plan['planId']}:{arm['armId']}"
+
+
+def initialize(name) -> dict:
+    ci = {"version": "1"} if name is None else {"name": name, "version": "fixture-capture 1"}
+    return {"jsonrpc": "2.0", "id": 0, "method": "initialize",
+            "params": {"protocolVersion": "2025-06-18", "capabilities": {}, "clientInfo": ci}}
+
+
+def tools_call(n: int, text: str = "") -> dict:
+    return {"jsonrpc": "2.0", "id": n, "method": "tools/call",
+            "params": {"name": "housecarl_read_plugin_file", "arguments": {"path": "FixtureTarget.esp",
+                                                                          "note": text}}}
+
+
+def origin_import(folder: Path, plan: dict, arm: dict, *, origin="fresh", request=None, captured=None,
+                  reused_from=None, drop=(), response=None) -> tuple[Path, dict]:
+    """A schema-1 import of a no-finding result for `arm` of `plan`. `request` is the raw request file's exact text
+    (default: one JSON-RPC message per line, a tokened initialize, an initialized notification and a call)."""
+    folder.mkdir(parents=True, exist_ok=True)
+    req_p, resp_p = folder / "request.jsonl", folder / "response.jsonl"
+    if request is None:
+        request = "\n".join(json.dumps(m) for m in (
+            initialize(capture_token(plan, arm)), {"jsonrpc": "2.0", "method": "notifications/initialized"},
+            tools_call(1))) + "\n"
+    req_p.write_bytes(request.encode("utf-8") if isinstance(request, str) else request)
+    resp_p.write_text(response if response is not None else
+                      json.dumps({"jsonrpc": "2.0", "id": 1, "result": {"findings": 0}}) + "\n", encoding="utf-8")
+    req = arm["requested"]
+    cfg = {"schemaVersion": 1, "source": f"candidate:{arm['candidateFile']}",
+           "plugins": [{"name": p["name"], "path": p["path"], "sha256": p["sha256"]} for p in req["plugins"]],
+           "providers": req["providers"], "overlays": req["overlays"],
+           "population": req["population"], "state": "baseline"}
+    cfg["fingerprint"] = import_fingerprint(cfg)
+    doc = {"schemaVersion": 1, "planId": plan["planId"], "checkId": IMPORT_CHECK, "armId": arm["armId"],
+           "state": "baseline", "origin": origin,
+           "capturedUtc": captured or datetime_now_z(),
+           "tool": {"name": "fixture_mcp", "version": "1"}, "configuration": cfg,
+           "result": {"detector": "no-finding", "findings": 0,
+                      "coverage": [{"Population": "records", "Judged": 3, "Unjudgeable": {}}]},
+           "outputs": [{"role": role, "path": p.name, "sha256": sha_of(p)}
+                       for role, p in (("request", req_p), ("response", resp_p))]}
+    if reused_from is not None:
+        doc["reusedFrom"] = reused_from
+    for k in drop:
+        doc.pop(k, None)
+    manifest = folder / "import.json"
+    manifest.write_text(json.dumps(doc, indent=2), encoding="utf-8")
+    return manifest, doc
+
+
+def datetime_now_z() -> str:
+    from datetime import datetime, timezone
+    return datetime.now(timezone.utc).isoformat(timespec="microseconds").replace("+00:00", "Z")
+
+
+def shift_iso(text: str, seconds: float = 0, offset_hours: int = 0) -> str:
+    """`text` moved by `seconds` and written in UTC`offset_hours` - the same instant when seconds is 0."""
+    from datetime import datetime, timedelta, timezone
+    t = datetime.fromisoformat(text.replace("Z", "+00:00")) + timedelta(seconds=seconds)
+    return t.astimezone(timezone(timedelta(hours=offset_hours))).isoformat()
+
+
+def write_doc(manifest: Path, doc: dict) -> Path:
+    manifest.write_text(json.dumps(doc, indent=2), encoding="utf-8")
+    return manifest
+
+
+def import_state(run: Path, cid: str, aid: str) -> tuple[str | None, dict, bool]:
+    """(ledger status, receipt, whether any imports/<key>* folder exists) for one import key."""
+    key = f"{cid}__{aid}"
+    status = ((load(run / "ledger.json") or {}).get("entries") or {}).get(key, {}).get("status")
+    rc = load(run / "receipts" / f"{key}.json") if (run / "receipts" / f"{key}.json").exists() else {}
+    # this key's folders only: `<key>` and its re-imports `<key>~<n>`, never an arm whose id starts with this one
+    folders = [p for p in (run / "imports").glob(f"{key}*")
+               if p.name == key or p.name.startswith(key + "~")] if (run / "imports").exists() else []
+    return status, rc or {}, bool(folders)
+
+
+def case_42(tmp):
+    """Option A (2026-09-17): an import declares where its evidence came from. `fresh` evidence must have been
+    captured for THIS plan's arm - every MCP initialize in its hash-checked raw request names
+    evalrun:<planId>:<armId> in clientInfo.name and capturedUtc is not before the plan was made. `reused` evidence
+    names its source plan, arm and result hash and is labelled reused end to end. The exact relabelling mistake
+    (retained evidence with only planId, armId and configuration.source edited) is refused as fresh; every existing
+    identity and hash check still applies to both origins."""
+    case = "case-42-import-origin"
+    stems1 = {"candidate-00-baseline": ["Skyrim.esm", "Update.esm", "FixtureBase.esp", "FixtureTarget.esp"],
+              "candidate-01-reorder": ["Skyrim.esm", "Update.esm", "FixtureBase.esp", "FixtureTarget.esp"]}
+    # plan 2: the same plugins under a different candidate file, so its arm has another id and source and the same
+    # configuration fingerprint - the relabelling V2 reproduced.
+    stems2 = {"candidate-00-baseline": stems1["candidate-00-baseline"],
+              "candidate-01-renamed": stems1["candidate-01-reorder"],
+              # a second setup with the SAME configuration (the destination of a sibling-arm reuse) and one with a
+              # different order, whose configuration fingerprint differs (the mismatch control)
+              "candidate-02-same": stems1["candidate-01-reorder"],
+              "candidate-03-different": ["Skyrim.esm", "Update.esm", "FixtureTarget.esp", "FixtureBase.esp"]}
+    _, scen1 = import_case_dir(case + "-p1", stems1)
+    _, scen2 = import_case_dir(case + "-p2", stems2)
+    run1, run2 = tmp / f"{case}-run1", tmp / f"{case}-run2"
+    plan1 = import_plan(run1, case + "-p1", f"{case}/p1")
+    time.sleep(1.1)  # plan 2 is created at a later second than plan 1
+    plan2 = import_plan(run2, case + "-p2", f"{case}/p2")
+    for run, scen, tag in ((run1, scen1, "p1"), (run2, scen2, "p2")):
+        expect(evalrun(["run", "--run", run], scen).returncode, 0, f"{case}/{tag}: run exit", "import")
+    if not plan1 or not plan2:
+        return
+    check(plan1["planId"] != plan2["planId"], f"{case}: premise - the two plans have different ids")
+    a1, a2 = arm_by_stem(plan1, "candidate-01-reorder"), arm_by_stem(plan2, "candidate-01-renamed")
+    b1, b2 = arm_by_stem(plan1, "candidate-00-baseline"), arm_by_stem(plan2, "candidate-00-baseline")
+    for run, arm, tag in ((run1, a1, "p1"), (run2, a2, "p2"), (run1, b1, "p1-base"), (run2, b2, "p2-base")):
+        expect(execution_of((ledger_entries(load(run / "ledger.json") or {})).get(f"{MAO}__{arm.get('armId')}")),
+               "completed", f"{case}/{tag}: premise - {MAO} accepted on {arm.get('armId')}")
+    check(a1.get("armId") != a2.get("armId")
+          and [(p["name"], p["sha256"]) for p in a1["requested"]["plugins"]]
+          == [(p["name"], p["sha256"]) for p in a2["requested"]["plugins"]],
+          f"{case}: premise - the relabel target arm differs in id and matches in plugin names and bytes")
+
+    def imp(run, manifest, want, tag, text=None, absent=None):
+        r = evalrun(["import-results", "--run", run, "--file", manifest])
+        expect(r.returncode, want, f"{case}/{tag}: import-results exit", "option A")
+        if text:
+            check(text in r.stderr, f"{case}/{tag}: the refusal names {text!r} (got {r.stderr.strip()[-300:]!r})")
+        if absent:
+            check(absent not in r.stderr, f"{case}/{tag}: the refusal does not blame {absent!r} "
+                                          f"(got {r.stderr.strip()[-300:]!r})")
+        return r
+
+    def untouched(run, arm, tag):
+        status, rc, folder = import_state(run, IMPORT_CHECK, arm["armId"])
+        expect(status, "mcp-only", f"{case}/{tag}: the refused import leaves the entry mcp-only", "import")
+        check(not (rc.get("validation") or {}).get("accepted") and not folder,
+              f"{case}/{tag}: no accepted receipt and no imports folder after a refusal")
+
+    # ---- a valid fresh capture for plan 1 is accepted and says so
+    good1, good1_doc = origin_import(tmp / f"{case}-good1", plan1, a1)
+    imp(run1, good1, 0, "fresh-valid")
+    _, rc1, _ = import_state(run1, IMPORT_CHECK, a1["armId"])
+    imported1 = rc1.get("imported") or {}
+    expect(imported1.get("origin"), "fresh", f"{case}/fresh-valid: the receipt records origin fresh", "option A")
+    expect((imported1.get("originCheck") or {}).get("token"), capture_token(plan1, a1),
+           f"{case}/fresh-valid: the receipt records the token it checked", "option A")
+    expect((imported1.get("originCheck") or {}).get("initializeRequests"), 1,
+           f"{case}/fresh-valid: the receipt counts the initialize requests it read", "option A")
+    source_sha = sha_of(run1 / "imports" / f"{IMPORT_CHECK}__{a1['armId']}" / "result.json")
+    expect(imported1.get("sourceSha256"), source_sha, f"{case}: premise - sourceSha256 is the copied result.json")
+
+    # ---- the exact V2 mistake: plan 1's accepted envelope with ONLY planId, armId and configuration.source edited
+    relabel = json.loads(json.dumps(good1_doc))
+    relabel["planId"], relabel["armId"] = plan2["planId"], a2["armId"]
+    relabel["configuration"]["source"] = f"candidate:{a2['candidateFile']}"
+    changed = sorted(k for k in good1_doc if good1_doc[k] != relabel[k])
+    expect(changed, ["armId", "configuration", "planId"], f"{case}/relabel: premise - exactly the three labels differ")
+    expect(import_fingerprint(relabel["configuration"]), relabel["configuration"]["fingerprint"],
+           f"{case}/relabel: premise - the fingerprint is unchanged and still valid")
+    rel_m = write_doc(good1.parent / "relabel.json", relabel)
+    imp(run2, rel_m, 2, "relabel-as-fresh", text="evalrun:", absent="capturedUtc")
+    untouched(run2, a2, "relabel-as-fresh")
+    # the same relabelled envelope with no origin at all (as retained envelopes are) is refused by name too
+    legacy = dict(relabel)
+    legacy.pop("origin")
+    imp(run2, write_doc(good1.parent / "relabel-no-origin.json", legacy), 2, "relabel-no-origin", text="origin")
+    untouched(run2, a2, "relabel-no-origin")
+
+    # ---- origin declarations
+    def variant(tag, run, plan, arm, **kw):
+        return origin_import(tmp / f"{case}-{tag}", plan, arm, **kw)[0]
+
+    imp(run2, variant("no-origin", run2, plan2, a2, drop=("origin",)), 2, "origin-missing", text="origin-missing")
+    imp(run2, variant("bad-origin", run2, plan2, a2, origin="measured"), 2, "origin-invalid", text="origin")
+    imp(run2, variant("fresh-with-source", run2, plan2, a2,
+                      reused_from={"planId": plan1["planId"], "armId": a1["armId"], "resultSha256": source_sha}),
+        2, "fresh-declares-source", text="reusedFrom")
+
+    # ---- the token: absent, wrong arm, wrong plan, mixed, only in unrelated text, no initialize, empty, unreadable
+    t2 = capture_token(plan2, a2)
+
+    def lines(*msgs):
+        return "\n".join(m if isinstance(m, str) else json.dumps(m) for m in msgs) + "\n"
+
+    token_cases = [
+        ("token-absent", lines(initialize("another-capture-wrapper"), tools_call(1))),
+        ("token-name-missing", lines(initialize(None), tools_call(1))),
+        ("token-wrong-arm", lines(initialize(capture_token(plan2, b2)), tools_call(1))),
+        ("token-wrong-plan", lines(initialize(capture_token(plan1, a2)), tools_call(1))),
+        ("token-in-version", lines({**initialize("capture"), "params": {**initialize("capture")["params"],
+                                    "clientInfo": {"name": "capture", "version": t2}}}, tools_call(1))),
+        ("token-mixed", lines(initialize(t2), tools_call(1), initialize("another-capture-wrapper"),
+                              tools_call(2))),
+        ("token-mixed-batch", lines([initialize(t2), tools_call(1)], [initialize(t2 + "x"), tools_call(2)])),
+        ("token-only-in-call", lines(tools_call(1, t2), {"batchMarker": t2})),
+        ("token-only-in-marker", lines({"batchMarker": t2, "clientInfo": {"name": t2}},
+                                       initialize("another-capture-wrapper"), tools_call(1))),
+        ("token-empty-file", ""),
+        ("token-unreadable-line", lines(initialize(t2), "{not json " + t2)),
+    ]
+    for tag, text in token_cases:
+        imp(run2, variant(tag, run2, plan2, a2, request=text), 2, tag, text="evalrun:" if text else "initialize")
+    untouched(run2, a2, "token-controls")
+
+    # ---- capturedUtc against the plan's createdUtc, compared as instants
+    created2 = plan2["createdUtc"]
+    imp(run2, variant("time-old", run2, plan2, a2, captured=shift_iso(created2, -1)), 2, "time-before-plan",
+        text="capturedUtc")
+    imp(run2, variant("time-old-offset", run2, plan2, a2, captured=shift_iso(created2, -1, -7)), 2,
+        "time-before-plan-other-offset", text="capturedUtc")
+    imp(run2, variant("time-naive", run2, plan2, a2, captured=created2.replace("Z", "")), 2, "time-naive",
+        text="capturedUtc")
+    imp(run2, variant("time-invalid", run2, plan2, a2, captured="yesterday"), 2, "time-invalid", text="capturedUtc")
+    untouched(run2, a2, "time-controls")
+    # the boundary: exactly the plan's instant, written at UTC-07:00, is not earlier
+    imp(run2, variant("time-boundary", run2, plan2, b2, captured=shift_iso(created2, 0, -7)), 0, "time-boundary-equal")
+    # a JSON-RPC batch line (an array) is read as messages too
+    imp(run1, variant("batch-array", run1, plan1, b1,
+                      request=lines([initialize(capture_token(plan1, b1)), tools_call(1)])), 0, "fresh-batch-array")
+
+    # ---- reused: the source must be declared, well formed and not this plan's own arm; identity still decides
+    src = {"planId": plan1["planId"], "armId": a1["armId"], "resultSha256": source_sha}
+    reuse_request = (good1.parent / "request.jsonl").read_text(encoding="utf-8")  # plan 1's token, by design
+
+    def reused(tag, **kw):
+        kw.setdefault("reused_from", src)
+        kw.setdefault("request", reuse_request)
+        kw.setdefault("captured", good1_doc["capturedUtc"])
+        return variant(tag, run2, plan2, a2, origin="reused", **kw)
+
+    imp(run2, reused("reuse-no-source", reused_from=None), 2, "reuse-without-source", text="reusedFrom")
+    for tag, bad in (("reuse-short-hash", {**src, "resultSha256": "abc"}),
+                     ("reuse-no-arm", {k: v for k, v in src.items() if k != "armId"}),
+                     ("reuse-empty-plan", {**src, "planId": ""}),
+                     ("reuse-not-object", "plan 1")):
+        imp(run2, reused(tag, reused_from=bad), 2, tag, text="reusedFrom")
+    imp(run2, reused("reuse-self", reused_from={**src, "planId": plan2["planId"], "armId": a2["armId"]}), 2,
+        "reuse-names-itself", text="reusedFrom")
+    # a sibling arm of THIS plan is a legitimate source when the two setups' configurations match: the evidence is
+    # measured once and reused, and the receipt says which statement that is (decided 2026-09-17). The
+    # configuration check is unchanged, so a sibling whose configuration does NOT match still refuses: that control
+    # is below, on the plan-1 baseline arm, whose requested configuration differs from the candidate's.
+    wrong_cfg = reused("reuse-wrong-config")
+    wd = load(wrong_cfg)
+    wd["configuration"]["plugins"][0]["sha256"] = "0" * 64
+    wd["configuration"]["fingerprint"] = import_fingerprint(wd["configuration"])
+    imp(run2, write_doc(wrong_cfg, wd), 2, "reuse-changed-configuration", text="identity-mismatch")
+    wrong_fp = reused("reuse-wrong-fingerprint")
+    wf = load(wrong_fp)
+    wf["configuration"]["plugins"] = list(reversed(wf["configuration"]["plugins"]))
+    wf["configuration"]["fingerprint"] = import_fingerprint(wf["configuration"])
+    imp(run2, write_doc(wrong_fp, wf), 2, "reuse-changed-order", text="identity-mismatch")
+    stale = reused("reuse-changed-evidence")
+    (stale.parent / "response.jsonl").write_text('{"jsonrpc": "2.0", "id": 1, "result": {"findings": 7}}\n',
+                                                 encoding="utf-8")
+    imp(run2, stale, 2, "reuse-changed-evidence", text="output-stale")
+    zero = reused("reuse-zero-coverage")
+    zd = load(zero)
+    zd["result"]["coverage"][0]["Judged"] = 0
+    imp(run2, write_doc(zero, zd), 2, "reuse-zero-coverage", text="extraction-failed")
+    untouched(run2, a2, "reuse-controls")
+
+    ok = reused("reuse-valid")
+    imp(run2, ok, 0, "reuse-valid")
+    status, rc2, _ = import_state(run2, IMPORT_CHECK, a2["armId"])
+    imported2 = rc2.get("imported") or {}
+    expect(status, "completed", f"{case}/reuse-valid: ledger completed", "option A")
+    expect(imported2.get("origin"), "reused", f"{case}/reuse-valid: the receipt records origin reused", "option A")
+    expect(imported2.get("reusedFrom"), src, f"{case}/reuse-valid: the receipt retains the declared source", "option A")
+    expect(imported2.get("reusedFromVerified"), False,
+           f"{case}/reuse-valid: the declared source is not presented as verified", "option A")
+    check("originCheck" not in imported2, f"{case}/reuse-valid: a reused import claims no capture-token check")
+    expect(imported2.get("reusedWithin"), "another-evaluation",
+           f"{case}/reuse-valid: the receipt says the source is another evaluation", "option A")
+
+    # ---- reuse between two setups of THIS evaluation (decided 2026-09-17): measured once for identical
+    # configurations, accepted, and labelled as reuse WITHIN this evaluation rather than from an earlier one.
+    c2, d2 = arm_by_stem(plan2, "candidate-02-same"), arm_by_stem(plan2, "candidate-03-different")
+    check(bool(c2) and bool(d2), f"{case}: premise - plan 2 has an identical-configuration arm and a different one")
+    for arm, same in ((c2, True), (d2, False)):
+        expect([(p["name"], p["sha256"]) for p in (arm.get("requested") or {}).get("plugins") or []]
+               == [(p["name"], p["sha256"]) for p in a2["requested"]["plugins"]], same,
+               f"{case}: premise - {arm.get('armId')} configuration matches the reuse source: {same}")
+    sibling = {"planId": plan2["planId"], "armId": a2["armId"],
+               "resultSha256": sha_of(run2 / "imports" / f"{IMPORT_CHECK}__{a2['armId']}" / "result.json")}
+    # the configuration checks are untouched: an envelope for this arm carrying ANOTHER setup's configuration refuses,
+    # sibling-arm source or not
+    mism, mism_doc = origin_import(tmp / f"{case}-sibling-mismatch", plan2, c2, origin="reused",
+                                   reused_from=sibling, request=reuse_request, captured=good1_doc["capturedUtc"])
+    mism_doc["configuration"]["plugins"] = [{"name": p["name"], "path": p["path"], "sha256": p["sha256"]}
+                                            for p in d2["requested"]["plugins"]]
+    mism_doc["configuration"]["fingerprint"] = import_fingerprint(mism_doc["configuration"])
+    imp(run2, write_doc(mism, mism_doc), 2, "sibling-reuse-wrong-configuration", text="identity-mismatch")
+    untouched(run2, c2, "sibling-reuse-wrong-configuration")
+    # and the arm's own prerequisite still has to be settled - it is, so the honest declaration is accepted
+    sib = origin_import(tmp / f"{case}-sibling-valid", plan2, c2, origin="reused", reused_from=sibling,
+                        request=reuse_request, captured=good1_doc["capturedUtc"])[0]
+    imp(run2, sib, 0, "sibling-reuse-valid")
+    status_c2, rc_c2, _ = import_state(run2, IMPORT_CHECK, c2["armId"])
+    imported_c2 = rc_c2.get("imported") or {}
+    expect(status_c2, "completed", f"{case}/sibling-reuse-valid: ledger completed", "reuse within this evaluation")
+    expect(imported_c2.get("origin"), "reused", f"{case}/sibling-reuse-valid: origin reused")
+    expect(imported_c2.get("reusedWithin"), "this-evaluation",
+           f"{case}/sibling-reuse-valid: the receipt says the source is another setup of THIS evaluation",
+           "reuse within this evaluation")
+    expect(imported_c2.get("reusedFrom"), sibling,
+           f"{case}/sibling-reuse-valid: the declared source is retained")
+    expect(imported_c2.get("reusedFromVerified"), False,
+           f"{case}/sibling-reuse-valid: still declared, not verified")
+    # the destination's own (plan, arm) is still not a source
+    imp(run2, origin_import(tmp / f"{case}-sibling-self", plan2, d2, origin="reused",
+                            reused_from={**sibling, "armId": d2["armId"]}, request=reuse_request,
+                            captured=good1_doc["capturedUtc"])[0], 2, "sibling-self-still-refused", text="reusedFrom")
+
+    # ---- the label survives resume, a ledger rebuild, finalize, a relocated bundle and STATUS.md
+    receipt_bytes = (run2 / "receipts" / f"{IMPORT_CHECK}__{a2['armId']}.json").read_bytes()
+    expect(evalrun(["resume", "--run", run2], scen2).returncode, 0, f"{case}/resume: exit", "option A")
+    # the ledger's own note that this entry came from an import, and with what origin, survives the transition that
+    # re-uses it (review R1b F5); a --rebuild-ledger reads the journal, which carries no extras, and the receipt is
+    # then the authority - asserted below.
+    resumed_entry = ((load(run2 / "ledger.json") or {}).get("entries") or {}).get(
+        f"{IMPORT_CHECK}__{a2['armId']}") or {}
+    expect(resumed_entry.get("status"), "reused", f"{case}/ledger: premise - the executor re-used the entry")
+    expect(resumed_entry.get("importOrigin"), "reused",
+           f"{case}/ledger: the ledger still records the import's origin after resume", "option A")
+    check(resumed_entry.get("imported") is True,
+          f"{case}/ledger: the ledger still records that it was imported after resume")
+    expect(evalrun(["resume", "--run", run2, "--rebuild-ledger"], scen2).returncode, 0,
+           f"{case}/rebuild: exit", "option A")
+    status, rc2b, _ = import_state(run2, IMPORT_CHECK, a2["armId"])
+    expect(status, "reused", f"{case}/rebuild: the import is still credited (executor reuse)", "option A")
+    check((run2 / "receipts" / f"{IMPORT_CHECK}__{a2['armId']}.json").read_bytes() == receipt_bytes,
+          f"{case}/rebuild: the import receipt is byte-identical after resume and rebuild")
+    expect(evalrun(["finalize", "--run", run2], scen2).returncode, 0, f"{case}/finalize: exit", "option A")
+    status_md = (run2 / "STATUS.md").read_text(encoding="utf-8")
+    check("reused" in status_md and plan1["planId"] in status_md,
+          f"{case}/finalize: STATUS.md names the reused import and its source plan")
+    check("of THIS plan" in status_md and a2["armId"] in status_md,
+          f"{case}/finalize: STATUS.md says the sibling-arm reuse came from another setup of this plan, "
+          f"not from an earlier evaluation")
+    rows_md = {r.get("armId"): r for r in (load(run2 / "disposition.json") or {}).get("importedEvidence") or []}
+    expect((rows_md.get(c2["armId"]) or {}).get("reusedWithin"), "this-evaluation",
+           f"{case}/finalize: the disposition carries the reuse scope", "reuse within this evaluation")
+    expect((rows_md.get(a2["armId"]) or {}).get("reusedWithin"), "another-evaluation",
+           f"{case}/finalize: and distinguishes the cross-evaluation one", "reuse within this evaluation")
+    check("fresh" in status_md, f"{case}/finalize: STATUS.md names the fresh import's origin")
+    bundle, moved = tmp / f"{case}-bundle", tmp / f"{case}-relocated"
+    expect(evalrun(["bundle", "--run", run2, "--out", bundle], scen2).returncode, 0, f"{case}/bundle: exit")
+    shutil.copytree(bundle, moved)
+    expect(evalrun(["verify-bundle", moved]).returncode, 0, f"{case}/relocated: verify-bundle exit", "option A")
+    brc = load(moved / "receipts" / f"{IMPORT_CHECK}__{a2['armId']}.json") or {}
+    expect((brc.get("imported") or {}).get("origin"), "reused", f"{case}/relocated: bundled receipt says reused")
+    expect((brc.get("imported") or {}).get("reusedFrom"), src, f"{case}/relocated: bundled receipt keeps the source")
+
+    # ---- a receipt accepted before origin existed: its `imported` block is exactly what the earlier importer wrote
+    # ({sourceSha256, capturedUtc, tool}). It stays readable, credited and verifiable, and is reported as origin
+    # unknown - never as fresh.
+    legacy_p = run1 / "receipts" / f"{IMPORT_CHECK}__{a1['armId']}.json"
+    lrc = load(legacy_p)
+    lrc["imported"] = {k: lrc["imported"][k] for k in ("sourceSha256", "capturedUtc", "tool")}
+    legacy_p.write_text(json.dumps(lrc, indent=1), encoding="utf-8")
+    expect(evalrun(["resume", "--run", run1], scen1).returncode, 0, f"{case}/legacy: resume exit")
+    status, _, _ = import_state(run1, IMPORT_CHECK, a1["armId"])
+    expect(status, "reused", f"{case}/legacy: the legacy import is still credited after resume", "option A")
+    expect(evalrun(["finalize", "--run", run1], scen1).returncode, 0, f"{case}/legacy: finalize exit")
+    rows = {(x.get("armId")): x for x in (load(run1 / "disposition.json") or {}).get("importedEvidence") or []}
+    expect((rows.get(a1["armId"]) or {}).get("origin"), "unknown",
+           f"{case}/legacy: disposition reports the legacy import's origin as unknown", "option A")
+    expect((rows.get(b1["armId"]) or {}).get("origin"), "fresh",
+           f"{case}/legacy: the fresh import beside it stays fresh", "option A")
+    s1 = (run1 / "STATUS.md").read_text(encoding="utf-8")
+    check("origin not recorded" in s1, f"{case}/legacy: STATUS.md says the legacy import's origin is not recorded")
+    lb, lmoved = tmp / f"{case}-legacy-bundle", tmp / f"{case}-legacy-relocated"
+    expect(evalrun(["bundle", "--run", run1, "--out", lb], scen1).returncode, 0, f"{case}/legacy: bundle exit")
+    shutil.copytree(lb, lmoved)
+    expect(evalrun(["verify-bundle", lmoved]).returncode, 0, f"{case}/legacy: relocated verify-bundle exit")
+
+    # ---- after a --rebuild-ledger the journal (which carries no extras) is the source, so the RECEIPT is the
+    # authority on origin: the rebuilt entry says nothing about it and the receipt still says reused.
+    rebuilt = ((load(run2 / "ledger.json") or {}).get("entries") or {}).get(f"{IMPORT_CHECK}__{a2['armId']}") or {}
+    check(rebuilt.get("importOrigin") is None,
+          f"{case}/ledger: a rebuilt entry claims no origin of its own (got {rebuilt.get('importOrigin')!r})")
+    expect(((load(run2 / "receipts" / f"{IMPORT_CHECK}__{a2['armId']}.json") or {}).get("imported")
+            or {}).get("origin"), "reused",
+           f"{case}/ledger: and the receipt still carries it after the rebuild", "option A")
+
+    # ---- the request file is JSON LINES as the contract defines it: a raw U+2028 inside a JSON string is part of
+    # the line, not a line break, so a genuine capture carrying one is read rather than refused (review R1a 2 / R1b F3)
+    ev = import_evalrun_module()
+    sep_line = json.dumps({"jsonrpc": "2.0", "id": 0, "method": "initialize",
+                           "params": {"clientInfo": {"name": "evalrun:P:A", "version": "note sep"}}},
+                          ensure_ascii=False)
+    inits, why = ev.initialize_requests((sep_line + "\r\n").encode("utf-8"))
+    expect(why, None, f"{case}/lines: a U+2028 inside a JSON string does not make the file unreadable", "§4.8")
+    expect(len(inits or []), 1, f"{case}/lines: the one initialize request is read", "§4.8")
+    expect(ev.client_name((inits or [{}])[0]), "evalrun:P:A", f"{case}/lines: and its clientInfo.name is intact")
+    bad_inits, bad_why = ev.initialize_requests(b'{"jsonrpc": "2.0"\n}\n')
+    check(bad_inits is None and "not JSON" in str(bad_why),
+          f"{case}/lines: a real newline inside a message is still refused (got {bad_why!r})")
+
+    # ---- the superseded record names THIS key's import folders only. An arm id can be a prefix of another arm's
+    # (`...-order` and `...-order-plus-patch`), and a prefix match would point a reader at that arm's evidence
+    # (review R2a L1 / R2b F2).
+    folder_run = tmp / f"{case}-folder-scope"
+    (folder_run / "receipts").mkdir(parents=True, exist_ok=True)
+    fcheck, farm = {"checkId": "loadability.x"}, {"armId": "cand-01-order"}
+    fkey = f"{fcheck['checkId']}__{farm['armId']}"
+    for name in (fkey, f"{fkey}~2", f"{fkey}-plus-patch", f"{fkey}-plus-patch~2"):
+        (folder_run / "imports" / name).mkdir(parents=True, exist_ok=True)
+    (folder_run / "receipts" / f"{fkey}.json").write_text(json.dumps(
+        {"receiptId": "r1", "validation": {"accepted": True},
+         "imported": {"origin": "fresh", "sourceSha256": "a" * 64, "capturedUtc": "2026-09-17T00:00:00Z"}}),
+        encoding="utf-8")
+    got = ev.superseded_import(types.SimpleNamespace(run=folder_run), fcheck, farm)
+    expect(sorted((got or {}).get("supersededImport", {}).get("folders") or []),
+           [f"imports/{fkey}", f"imports/{fkey}~2"],
+           f"{case}/folders: only this key's import folders are named", "R2a-L1")
+
+
+def import_evalrun_module():
+    """The controller imported as a library, for function-level known-answer checks."""
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("evalrun_lib", EVALRUN)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def evalrun_inprocess(run: Path, scen_path: Path, override, verb="run", extra=()):
+    """One controller invocation in process with run_generic replaced for what `override` claims (case 26's tool)."""
+    import importlib.util
+    spec_ = importlib.util.spec_from_file_location("evalrun_inproc", EVALRUN)
+    mod_ = importlib.util.module_from_spec(spec_)
+    spec_.loader.exec_module(mod_)
+    real = mod_.run_generic
+
+    def generic(ex, check_row, arm):
+        if not override(ex, check_row, arm):
+            real(ex, check_row, arm)
+    mod_.run_generic = generic
+    saved_ = os.environ.get("EVALRUN_FAKE_SCENARIO")
+    os.environ["EVALRUN_FAKE_SCENARIO"] = str(scen_path)
+    try:
+        a_ = mod_.build_parser().parse_args([verb, "--run", str(run)] + list(extra))
+        return a_.fn(a_)
+    finally:
+        mod_.run_generic = real
+        if saved_ is None:
+            os.environ.pop("EVALRUN_FAKE_SCENARIO", None)
+        else:
+            os.environ["EVALRUN_FAKE_SCENARIO"] = saved_
+
+
+def case_43(tmp):
+    """Review V2 L3: import-results consults the controller's prerequisite gate (`prereq_satisfied`) for both
+    origins before anything is written, and an import accepted earlier stops being credited when run/resume
+    establishes a prerequisite failure on its arm. A failed arm is not rescued by the baseline; a prerequisite not
+    attempted on the arm still falls back to the baseline; recovery is a re-import once the arm's prerequisite is
+    legitimately satisfied."""
+    case = "case-43-import-prerequisites"
+    stems = {"candidate-00-baseline": ["Skyrim.esm", "Update.esm", "FixtureBase.esp", "FixtureTarget.esp"],
+             "candidate-01-missing-master": ["Update.esm", "Skyrim.esm", "FixtureTarget.esp"],
+             "candidate-02-reorder": ["Skyrim.esm", "Update.esm", "FixtureTarget.esp", "FixtureBase.esp"]}
+    d, scen = import_case_dir(case, stems, refuse=("candidate-01-missing-master",))
+    scen_ok = import_scenario(d, "scenario-recovered.json", ())
+
+    def imp(run, manifest, want, tag, text=None):
+        r = evalrun(["import-results", "--run", run, "--file", manifest])
+        expect(r.returncode, want, f"{case}/{tag}: import-results exit", "V2 L3")
+        if text:
+            check(text in r.stderr, f"{case}/{tag}: the refusal names {text!r} (got {r.stderr.strip()[-300:]!r})")
+        return r
+
+    def refused_clean(run, arm, tag, want_status):
+        status, rc, folder = import_state(run, IMPORT_CHECK, arm["armId"])
+        expect(status, want_status, f"{case}/{tag}: the ledger entry is unchanged by the refusal", "V2 L3")
+        check(not (rc.get("validation") or {}).get("accepted"), f"{case}/{tag}: no accepted receipt for the key")
+        check(not folder, f"{case}/{tag}: no imports folder was written")
+
+    def nulls_and_missing(run):
+        disp = load(run / "disposition.json") or {}
+        nulls = {(r.get("checkId"), r.get("armId")) for r in (field(disp, "completedNullChecks") or [])}
+        missing = {(r.get("checkId"), r.get("armId")): r.get("status") for r in (field(disp, "missing") or [])}
+        return nulls, missing
+
+    # ---- (a) prerequisite unsettled everywhere: nothing has run yet
+    run = tmp / f"{case}-main"
+    plan = import_plan(run, case, f"{case}/main")
+    if not plan:
+        return
+    bad, good, base = (arm_by_stem(plan, "candidate-01-missing-master"), arm_by_stem(plan, "candidate-02-reorder"),
+                       arm_by_stem(plan, "candidate-00-baseline"))
+    source = {"planId": "0123456789ab", "armId": "candidate-02-other", "resultSha256": "a" * 64}
+    m_good = origin_import(tmp / f"{case}-good-fresh", plan, good)[0]
+    imp(run, m_good, 2, "unsettled-fresh", text=MAO)
+    m_good_reused = origin_import(tmp / f"{case}-good-reused", plan, good, origin="reused", reused_from=source)[0]
+    imp(run, m_good_reused, 2, "unsettled-reused", text=MAO)
+    refused_clean(run, good, "unsettled", None)
+
+    # ---- (b) run: the baseline and the reorder arm load, the missing-master arm is refused
+    expect(evalrun(["run", "--run", run], scen).returncode, 0, f"{case}/main: run exit", "V2 L3")
+    led = ledger_entries(load(run / "ledger.json") or {})
+    expect(execution_of(led.get(f"{MAO}__{base['armId']}")), "completed", f"{case}: premise - {MAO} baseline")
+    expect(execution_of(led.get(f"{MAO}__{bad['armId']}")), "rejected(illegal-configuration)",
+           f"{case}: premise - {MAO} refused on {bad['armId']}")
+    expect(execution_of(led.get(f"{MAO}__{good['armId']}")), "completed", f"{case}: premise - {MAO} {good['armId']}")
+
+    # ---- (c) a failed arm with a passing baseline refuses, fresh and reused alike, naming the prerequisite
+    m_bad = origin_import(tmp / f"{case}-bad-fresh", plan, bad)[0]
+    r = imp(run, m_bad, 2, "failed-arm-fresh", text=MAO)
+    check("rejected" in r.stderr, f"{case}/failed-arm-fresh: the refusal says the prerequisite was refused on this "
+                                  f"arm (got {r.stderr.strip()[-300:]!r})")
+    m_bad_reused = origin_import(tmp / f"{case}-bad-reused", plan, bad, origin="reused", reused_from=source)[0]
+    imp(run, m_bad_reused, 2, "failed-arm-reused", text=MAO)
+    refused_clean(run, bad, "failed-arm", "mcp-only")
+
+    # ---- (d) the arms whose prerequisite is settled import normally
+    imp(run, m_good, 0, "settled-fresh")
+    imp(run, origin_import(tmp / f"{case}-base-reused", plan, base, origin="reused", reused_from=source)[0], 0,
+        "settled-baseline-reused")
+    expect(evalrun(["finalize", "--run", run], scen).returncode, 0, f"{case}/main: finalize exit")
+    nulls, missing = nulls_and_missing(run)
+    check((IMPORT_CHECK, good["armId"]) in nulls and (IMPORT_CHECK, base["armId"]) in nulls,
+          f"{case}/main: the accepted imports are completed null checks")
+    check((IMPORT_CHECK, bad["armId"]) not in nulls and (IMPORT_CHECK, bad["armId"]) in missing,
+          f"{case}/main: the refused import is missing, never a completed null (got {missing.get((IMPORT_CHECK, bad['armId']))})")
+
+    # ---- (e) justified fallback: the arm's own prerequisite was NOT attempted, the baseline's was accepted
+    run2 = tmp / f"{case}-fallback"
+    plan2 = import_plan(run2, case, f"{case}/fallback")
+    bad2, base2 = arm_by_stem(plan2, "candidate-01-missing-master"), arm_by_stem(plan2, "candidate-00-baseline")
+
+    chain2 = arm_by_stem(plan2, "candidate-02-reorder")
+
+    def not_attempted(ex, check_row, arm):
+        """On one arm the prerequisite is never attempted (the baseline's answer counts); on another it is blocked one
+        hop down by a prerequisite of its own, which decides for that arm (`decided_on_arm`)."""
+        if check_row["checkId"] != MAO:
+            return False
+        if arm["armId"] == bad2["armId"]:
+            ex.account(check_row, arm, "blocked(fixture-not-attempted)", "blocked-prerequisite",
+                       "fixture: accounted before any launch, so this arm's answer was never measured")
+            return True
+        if arm["armId"] == chain2["armId"]:
+            ex.account(check_row, arm, "blocked(prerequisite:patch.discovery-installed)", "blocked-prerequisite",
+                       "fixture: this arm's prerequisite is blocked by a prerequisite of its own")
+            return True
+        return False
+
+    expect(evalrun_inprocess(run2, scen, not_attempted), 0, f"{case}/fallback: run exit")
+    led2 = ledger_entries(load(run2 / "ledger.json") or {})
+    expect(execution_of(led2.get(f"{MAO}__{bad2['armId']}")), "blocked(fixture-not-attempted)",
+           f"{case}/fallback: premise - {MAO} not attempted on {bad2['armId']}")
+    expect(execution_of(led2.get(f"{MAO}__{chain2['armId']}")), "blocked(prerequisite:patch.discovery-installed)",
+           f"{case}/chain: premise - {MAO} is blocked one hop down on {chain2['armId']}")
+    expect(execution_of(led2.get(f"{MAO}__{base2['armId']}")), "completed",
+           f"{case}/fallback: premise - {MAO} accepted on the baseline")
+    m_fb = origin_import(tmp / f"{case}-fallback-fresh", plan2, bad2)[0]
+    imp(run2, m_fb, 0, "fallback-accepted")
+    # the chain arm is NOT rescued by that accepted baseline: a prerequisite blocked by its own prerequisite on this
+    # arm decides for this arm
+    m_chain = origin_import(tmp / f"{case}-chain-fresh", plan2, chain2)[0]
+    imp(run2, m_chain, 2, "chain-blocked", text=MAO)
+    refused_clean(run2, chain2, "chain-blocked", "mcp-only")
+
+    # ---- (f) lifecycle: resume measures the arm's own prerequisite, it fails, and the import stops counting
+    expect(evalrun(["resume", "--run", run2], scen).returncode, 0, f"{case}/lifecycle: resume exit")
+    led2 = ledger_entries(load(run2 / "ledger.json") or {})
+    expect(execution_of(led2.get(f"{MAO}__{bad2['armId']}")), "rejected(illegal-configuration)",
+           f"{case}/lifecycle: premise - resume measured {MAO} on {bad2['armId']} and it was refused")
+    status, rc, _ = import_state(run2, IMPORT_CHECK, bad2["armId"])
+    expect(status, f"blocked(prerequisite:{MAO})", f"{case}/lifecycle: the earlier import is blocked, not reused",
+           "V2 L3")
+    check(not (rc.get("validation") or {}).get("accepted"), f"{case}/lifecycle: its receipt is no longer accepted")
+    blocked_rc = rc
+    expect((blocked_rc.get("supersededImport") or {}).get("origin"), "fresh",
+           f"{case}/lifecycle: the blocked receipt records the import it replaced", "R1a-1")
+    expect(evalrun(["resume", "--run", run2, "--rebuild-ledger"], scen).returncode, 0, f"{case}/rebuild: exit")
+    status, rc, _ = import_state(run2, IMPORT_CHECK, bad2["armId"])
+    expect(status, f"blocked(prerequisite:{MAO})", f"{case}/rebuild: still blocked after the ledger is rebuilt",
+           "V2 L3")
+    # the record of the superseded import survives the SECOND and later accounting passes, not only the first
+    # (review R2a M1): by now this row has been accounted twice.
+    sup2 = rc.get("supersededImport") or {}
+    expect(sup2.get("origin"), "fresh",
+           f"{case}/rebuild: the superseded import is still recorded after a second accounting pass", "R2a-M1")
+    expect(sup2.get("folders"), (blocked_rc.get("supersededImport") or {}).get("folders"),
+           f"{case}/rebuild: with the same evidence folders", "R2a-M1")
+    expect(evalrun(["finalize", "--run", run2], scen).returncode, 0, f"{case}/lifecycle: finalize exit")
+    nulls, missing = nulls_and_missing(run2)
+    check((IMPORT_CHECK, bad2["armId"]) not in nulls, f"{case}/lifecycle: not a completed null check")
+    expect(missing.get((IMPORT_CHECK, bad2["armId"])), f"blocked(prerequisite:{MAO})",
+           f"{case}/lifecycle: listed missing by its prerequisite", "V2 L3")
+    lb = tmp / f"{case}-lifecycle-bundle"
+    expect(evalrun(["bundle", "--run", run2, "--out", lb], scen).returncode, 0, f"{case}/lifecycle: bundle exit")
+    check(not list((lb / "evidence" / "imports").glob(f"{IMPORT_CHECK}__{bad2['armId']}*"))
+          if (lb / "evidence" / "imports").exists() else True,
+          f"{case}/lifecycle: the uncredited import's files do not travel in the bundle")
+    imp(run2, m_fb, 2, "lifecycle-reimport-still-failed", text=MAO)
+
+    # ---- (g) recovery: the arm's prerequisite is legitimately satisfied, and a re-import is credited again
+    expect(evalrun(["resume", "--run", run2], scen_ok).returncode, 0, f"{case}/recovery: resume exit")
+    led2 = ledger_entries(load(run2 / "ledger.json") or {})
+    expect(execution_of(led2.get(f"{MAO}__{bad2['armId']}")), "completed",
+           f"{case}/recovery: premise - {MAO} now accepted on {bad2['armId']}")
+    imp(run2, m_fb, 0, "recovery-reimport")
+    status, rc, _ = import_state(run2, IMPORT_CHECK, bad2["armId"])
+    expect(status, "completed", f"{case}/recovery: the re-import is credited", "V2 L3")
+    check(any("~2" in (o.get("path") or "") for o in rc.get("outputs") or []),
+          f"{case}/recovery: the re-import is copied to a new folder, the old one untouched "
+          f"(got {[o.get('path') for o in rc.get('outputs') or []]})")
+    expect(evalrun(["finalize", "--run", run2], scen_ok).returncode, 0, f"{case}/recovery: finalize exit")
+    nulls, _ = nulls_and_missing(run2)
+    check((IMPORT_CHECK, bad2["armId"]) in nulls, f"{case}/recovery: a completed null check again")
+    rb, rmoved = tmp / f"{case}-recovery-bundle", tmp / f"{case}-recovery-relocated"
+    expect(evalrun(["bundle", "--run", run2, "--out", rb], scen_ok).returncode, 0, f"{case}/recovery: bundle exit")
+    shutil.copytree(rb, rmoved)
+    expect(evalrun(["verify-bundle", rmoved]).returncode, 0, f"{case}/recovery: relocated verify-bundle exit")
+
+    # ---- (h) an import the resume INVALIDATES (its prerequisite's own evidence is gone) keeps that cause and says an
+    # import was superseded, rather than reading as a row where nothing was ever imported (review R1a finding 1)
+    run3 = tmp / f"{case}-invalidated"
+    plan3 = import_plan(run3, case, f"{case}/invalidated")
+    good3 = arm_by_stem(plan3, "candidate-02-reorder")
+    expect(evalrun(["run", "--run", run3], scen).returncode, 0, f"{case}/invalidated: run exit")
+    m3 = origin_import(tmp / f"{case}-invalidated-fresh", plan3, good3)[0]
+    imp(run3, m3, 0, "invalidated-import-accepted")
+    for p in (run3 / "outputs").rglob("*.json"):
+        if MAO in p.as_posix():
+            p.unlink()                      # a cleaned-up run folder: the prerequisite's own emit is gone
+    expect(evalrun(["resume", "--run", run3], scen).returncode, 0, f"{case}/invalidated: resume exit")
+    status, rc3, _ = import_state(run3, IMPORT_CHECK, good3["armId"])
+    check(str(status).startswith("invalidated("),
+          f"{case}/invalidated: the entry keeps the invalidation as its cause (got {status!r})")
+    sup = rc3.get("supersededImport") or {}
+    expect(sup.get("origin"), "fresh", f"{case}/invalidated: the accounting receipt records the superseded import's "
+           f"origin", "R1a-1")
+    check(any(f"{IMPORT_CHECK}__{good3['armId']}" in f for f in sup.get("folders") or []),
+          f"{case}/invalidated: and where its copied evidence is (got {sup.get('folders')})")
+    check(not (rc3.get("validation") or {}).get("accepted"), f"{case}/invalidated: it is not an accepted receipt")
+    expect(evalrun(["finalize", "--run", run3], scen).returncode, 0, f"{case}/invalidated: finalize exit")
+    nulls3, missing3 = nulls_and_missing(run3)
+    check((IMPORT_CHECK, good3["armId"]) not in nulls3,
+          f"{case}/invalidated: not a completed null check")
+    check(str(missing3.get((IMPORT_CHECK, good3["armId"]))).startswith("invalidated("),
+          f"{case}/invalidated: listed missing by its real cause (got "
+          f"{missing3.get((IMPORT_CHECK, good3['armId']))!r})")
+    disp3 = load(run3 / "disposition.json") or {}
+    check(not [x for x in disp3.get("importedEvidence") or [] if x.get("armId") == good3["armId"]],
+          f"{case}/invalidated: it is not listed as credited imported evidence")
+    imp(run3, m3, 0, "invalidated-reimport")     # recovery is a re-import, as the contract says
+    status, rc3b, _ = import_state(run3, IMPORT_CHECK, good3["armId"])
+    expect(status, "completed", f"{case}/invalidated: the re-import is credited again", "R1a-1")
+
+    # ---- (i) a row the plan did not leave open for an import is refused. The fixture registry has no inapplicable
+    # mcp-only check, so the row status is written into the frozen plan (with its hash) - the shape the planner
+    # writes for applicability `no`. Synthetic by construction, and labelled as such.
+    run4 = tmp / f"{case}-not-applicable"
+    plan4 = import_plan(run4, case, f"{case}/not-applicable")
+    arm4 = arm_by_stem(plan4, "candidate-02-reorder")
+    doc4 = load(run4 / "plan.json")
+    for c in doc4["checks"]:
+        if c["checkId"] == IMPORT_CHECK:
+            for r in c["arms"]:
+                r["status"] = "not-applicable"
+            c["applicabilityEvidence"] = "fixture: the registry answered applicability no for this scope"
+    (run4 / "plan.json").write_text(json.dumps(doc4, indent=1, ensure_ascii=False), encoding="utf-8")
+    (run4 / "plan.sha256").write_text(sha_of(run4 / "plan.json") + "\n", encoding="utf-8")
+    expect(evalrun(["run", "--run", run4], scen).returncode, 0, f"{case}/not-applicable: run exit")
+    m4 = origin_import(tmp / f"{case}-not-applicable-fresh", plan4, arm4)[0]
+    r4 = imp(run4, m4, 2, "not-applicable-row", text="not-applicable")
+    check("wrong-check" in r4.stderr, f"{case}/not-applicable: refused as wrong-check "
+                                      f"(got {r4.stderr.strip()[-200:]!r})")
+    status4, rc4, folder4 = import_state(run4, IMPORT_CHECK, arm4["armId"])
+    expect(status4, "not-applicable", f"{case}/not-applicable: the plan's answer stands", "R1b-F1")
+    check(not (rc4.get("validation") or {}).get("accepted") and not folder4,
+          f"{case}/not-applicable: nothing was written")
+
+
+CASES["case-42"] = case_42
+CASES["case-43"] = case_43
 
 
 def main() -> int:

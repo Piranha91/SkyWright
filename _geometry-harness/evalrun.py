@@ -51,6 +51,7 @@ import tempfile
 import time
 from datetime import datetime, timezone
 from pathlib import Path
+from types import SimpleNamespace
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE.parent / "scripts"))
@@ -1179,7 +1180,7 @@ class Ledger:
                "result": {"detector": detector, "execution": to},
                "receiptPath": f"receipts/{k}.json", "runId": self.run_id, "updatedUtc": utcnow()}
         if prev:
-            for keep in ("reusedFromRunId", "derivedFrom"):
+            for keep in ("reusedFromRunId", "derivedFrom", "imported", "importOrigin"):
                 if keep in prev and (extra or {}).get(keep) is None:
                     rec[keep] = prev[keep]
         rec.update(extra or {})
@@ -1872,7 +1873,7 @@ class Executor:
 
     def account(self, check: dict, arm: dict, status: str, cause: str | None, detail: str, *,
                 part: str | None = None, run_id: str | None = None, log: Path | None = None,
-                exit_code: int | None = None) -> None:
+                exit_code: int | None = None, extra: dict | None = None) -> None:
         adapter = check["adapter"]
         validation = {"accepted": False, "rejections": ([{"cause": cause, "detail": detail}] if cause else [])}
         result = {"execution": status, "detector": None, "findings": None, "coverage": [],
@@ -1881,7 +1882,8 @@ class Executor:
         write_receipt(self.run, plan=self.plan, check=check, arm=arm, part=part, adapter=adapter,
                       argv=None, run_id=run_id, parent_run_id=self.parent_run_id,
                       started=None, ended=utcnow(), exit_code=exit_code, outputs=[], log=log,
-                      consumed=self.consumed_for(arm, adapter), validation=validation, result=result)
+                      consumed=self.consumed_for(arm, adapter), validation=validation, result=result,
+                      extra=extra)
         stopped = status == "stopped(deadline)"
         uncontained = status == "blocked(uncontained)"
         self.ledger.transition(check["checkId"], arm["armId"], part, status, cause=cause,
@@ -2168,11 +2170,19 @@ def execute(ex: Executor, parent) -> None:
             st = arm_row["status"]
             if already_done(check["checkId"], arm["armId"], None):
                 pre = reuse_blocked_by(ex, check, arm["armId"]) if st == "planned" and kind != "media" else None
+                if st == "mcp-only":
+                    # Only an import credits an mcp-only row, and it was admitted by `prereq_satisfied`: it stays
+                    # credited only while that same gate still holds on this arm.
+                    pre = prereq_satisfied(ex, check, arm["armId"])
                 if kind == "derived":
                     pass  # reused or blocked after the loop, where derived checks are decided
                 elif pre:
                     ex.account(check, arm, f"blocked(prerequisite:{pre})", "blocked-prerequisite",
-                               prereq_block_detail(ex, pre, arm["armId"]))
+                               prereq_block_detail(ex, pre, arm["armId"])
+                               + ("" if st != "mcp-only" else
+                                  ". The imported evidence stays under imports/ but is no longer credited; import it "
+                                  "again once the prerequisite is settled on this arm"),
+                               extra=superseded_import(ex, check, arm))
                 else:
                     mark_reused(check["checkId"], arm["armId"], None)
                 parent.advance()
@@ -2196,6 +2206,28 @@ def execute(ex: Executor, parent) -> None:
                 ex.account(check, arm, "blocked(payload-missing)", "blocked-prerequisite",
                            "the supplied arm declares files that are not in the configuration: "
                            + ", ".join(arm["supplied"]["payloadMissing"]))
+            elif st == "mcp-only" and uncredited_import_still_blocked(ex, check, arm["armId"]):
+                # An import this gate un-credited earlier stays blocked, by name, while its prerequisite still fails;
+                # once the prerequisite holds it is an ordinary mcp-only row again, waiting for a re-import.
+                pre = prereq_satisfied(ex, check, arm["armId"])
+                ex.account(check, arm, f"blocked(prerequisite:{pre})", "blocked-prerequisite",
+                           prereq_block_detail(ex, pre, arm["armId"])
+                           + ". The imported evidence stays under imports/ but is no longer credited; import it "
+                             "again once the prerequisite is settled on this arm",
+                           extra=superseded_import(ex, check, arm))
+            elif st == "mcp-only" and uncredited_import_cause(ex, check, arm["armId"]):
+                # An import whose entry was invalidated or refused reuse (its inputs, or a prerequisite's evidence,
+                # changed) keeps THAT cause: flattening it to a plain mcp-only row would say no import was ever made.
+                was = uncredited_import_cause(ex, check, arm["armId"])
+                also = prereq_satisfied(ex, check, arm["armId"])
+                ex.account(check, arm, was, "stale-inputs",
+                           "an accepted import of this check is no longer credited: " + was
+                           + ". Its copied evidence stays under imports/ but backs no receipt; import it again "
+                             "(the re-import is copied beside the old folder) once its inputs are what it states"
+                           + ("" if not also else
+                              f". A re-import is refused until {also} is settled on this arm as well: "
+                              + prereq_block_detail(ex, also, arm["armId"])),
+                           extra=superseded_import(ex, check, arm))
             elif st in ("unsupported", "mcp-only"):
                 ex.account(check, arm, st, None, check.get("unsupportedReason") or
                            "the registry records no CLI adapter for this check")
@@ -2618,6 +2650,47 @@ def prereq_block_detail(ex: Executor, pre: str, arm_id: str) -> str:
                 "answer does not settle it")
     return (f"the prerequisite {pre} has no accepted receipt on this arm"
             + ("" if arm_id == "baseline" else " (or on the baseline every arm is measured against)"))
+
+
+def uncredited_import_still_blocked(ex: Executor, check: dict, arm_id: str) -> bool:
+    """True when this mcp-only entry is `blocked(prerequisite:...)` - an import the lifecycle gate stopped crediting -
+    and `prereq_satisfied` still names a prerequisite for the arm."""
+    own = str((ex.ledger.entry(check["checkId"], arm_id, None) or {}).get("status") or "")
+    return own.startswith("blocked(prerequisite:") and prereq_satisfied(ex, check, arm_id) is not None
+
+
+def uncredited_import_cause(ex: Executor, check: dict, arm_id: str) -> str | None:
+    """The status word of an mcp-only entry that `resume` stopped crediting because its inputs could not be
+    re-checked - `invalidated(...)` or `refused-reuse(...)`. Kept rather than flattened to `mcp-only`, which would
+    read as "nothing was ever imported here"."""
+    own = str((ex.ledger.entry(check["checkId"], arm_id, None) or {}).get("status") or "")
+    return own if own.startswith(("invalidated(", "refused-reuse(")) else None
+
+
+def superseded_import(ex: Executor, check: dict, arm: dict) -> dict | None:
+    """`{"supersededImport": {...}}` when the receipt an accounting receipt is about to replace is an ACCEPTED import,
+    so its origin does not vanish with it: the run still says an import was made, where its copied evidence is, and
+    what it claimed. A receipt that ALREADY carries a superseded record hands it on, so the record survives the
+    second and every later accounting pass over the same row rather than only the first (review R2a M1). None when
+    neither is there."""
+    key = Ledger.key(check["checkId"], arm["armId"], None)
+    rc = load_json(ex.run / "receipts" / f"{key}.json")
+    if not isinstance(rc, dict):
+        return None
+    imported = rc.get("imported")
+    if not isinstance(imported, dict) or not (rc.get("validation") or {}).get("accepted"):
+        carried = rc.get("supersededImport")
+        return {"supersededImport": carried} if isinstance(carried, dict) else None
+    # The folders of THIS key only: `<key>` and its re-imports `<key>~<n>`. A prefix glob also matched an arm whose
+    # id starts with this one (review R2a L1 / R2b F2), which would point a reader at another arm's evidence.
+    folders = [rel_to(ex.run, p) for p in sorted((ex.run / "imports").glob(f"{key}*"))
+               if p.is_dir() and (p.name == key or p.name.startswith(key + "~"))]
+    return {"supersededImport": {"receiptId": rc.get("receiptId"), "origin": imported.get("origin") or "unknown",
+                                 "reusedFrom": imported.get("reusedFrom"),
+                                 "sourceSha256": imported.get("sourceSha256"),
+                                 "capturedUtc": imported.get("capturedUtc"), "folders": folders,
+                                 "note": "this check was credited by an import that is no longer credited; the "
+                                         "status and cause on this receipt say why"}}
 
 
 def reuse_blocked_by(ex: Executor, check: dict, arm_id: str) -> str | None:
@@ -3554,6 +3627,143 @@ def cmd_resume(a) -> int:
 # -------------------------------------------------------- imported MCP evidence (generic lane) --
 
 IMPORT_DETECTORS = ("finding", "no-finding")
+IMPORT_ORIGINS = ("fresh", "reused")
+
+
+def capture_token(plan_id: str, arm_id: str) -> str:
+    """What a capture made for this plan's arm puts in every MCP `initialize` request's `clientInfo.name`."""
+    return f"evalrun:{plan_id}:{arm_id}"
+
+
+def initialize_requests(data: bytes) -> tuple[list[dict] | None, str | None]:
+    """The MCP `initialize` requests in a raw request file, or (None, why the file cannot be read as requests).
+
+    The file is JSON Lines, as the stdio capture wrapper writes it: every non-blank line is one JSON value. A value
+    that is an array is a JSON-RPC batch whose object members are messages; a whole file that is one JSON document is
+    the one-line case. An `initialize` request is an object whose `method` is exactly "initialize". Nothing else is
+    read for the token: a token in a call's arguments or an annotation line says nothing about who connected."""
+    try:
+        text = data.decode("utf-8-sig")
+    except UnicodeDecodeError as ex:
+        return None, f"the request file is not UTF-8 ({ex.reason} at byte {ex.start})"
+    found: list[dict] = []
+    # Split on "\n" only, as the contract defines the format: `str.splitlines()` also breaks on U+2028, U+2029,
+    # U+0085 and the C0 separators, which are legal INSIDE a JSON string, and refusing a capture that carries one in
+    # a note or a name would blame the caller for a reader's bug (review R1a finding 2 / R1b F3).
+    for n, line in enumerate(text.split("\n"), start=1):
+        line = line.rstrip("\r")
+        if not line.strip():
+            continue
+        try:
+            value = json.loads(line)
+        except ValueError:
+            return None, f"line {n} of the request file is not JSON, so its requests cannot be read"
+        for msg in (value if isinstance(value, list) else [value]):
+            if isinstance(msg, dict) and msg.get("method") == "initialize":
+                found.append(msg)
+    return found, None
+
+
+def client_name(msg: dict):
+    """`params.clientInfo.name` of one initialize request, or None when any level is absent or not an object."""
+    params = msg.get("params")
+    info = params.get("clientInfo") if isinstance(params, dict) else None
+    return info.get("name") if isinstance(info, dict) else None
+
+
+def origin_refusals(doc: dict, plan: dict, arm_id, captured_time, request: tuple[Path, str] | None
+                    ) -> tuple[list[str], dict]:
+    """Option A's origin checks for one import document: (refusal sentences, the receipt's origin fields).
+
+    `fresh` must have been captured for THIS plan's arm: every initialize request in the hash-checked request file
+    names capture_token(planId, armId) in clientInfo.name, and capturedUtc is not before the plan's createdUtc as
+    an instant. `reused` names the evaluation it was captured for; that declaration is recorded, not verified.
+    Neither proves authenticity: the token is public and a caller can rewrite every file and hash. These checks
+    catch evidence relabelled by mistake."""
+    errors: list[str] = []
+    origin = doc.get("origin")
+    token = capture_token(plan["planId"], str(arm_id))
+    how = (f"declare origin fresh for evidence captured for this plan's arm (every MCP initialize request carries "
+           f"clientInfo.name \"{token}\" and capturedUtc is not before the plan), or origin reused with reusedFrom "
+           "{planId, armId, resultSha256} naming the evaluation it was captured for")
+    if "origin" not in doc:
+        return [f"origin-missing: the import does not say where its evidence came from; {how}. An envelope written "
+                "before origin was required takes one of those two paths"], {}
+    if origin not in IMPORT_ORIGINS:
+        return [f"origin-invalid: origin must be fresh or reused, found {origin!r}; {how}"], {}
+    if origin == "reused":
+        src = doc.get("reusedFrom")
+        if not isinstance(src, dict):
+            return [f"reusedFrom-missing: origin reused must name its source as reusedFrom {{planId, armId, "
+                    f"resultSha256}}, found {src!r}"], {}
+        bad = [f"reusedFrom.{k} must be a non-empty string" for k in ("planId", "armId")
+               if not isinstance(src.get(k), str) or not src.get(k).strip()]
+        if not is_sha256(src.get("resultSha256")):
+            bad.append("reusedFrom.resultSha256 must be 64-hex: the sha256 of the source run's "
+                       "imports/<checkId>__<armId>/result.json, the import document that evaluation accepted")
+        if bad:
+            return ["reusedFrom-invalid: " + "; ".join(bad)], {}
+        if src["planId"] == plan["planId"] and src["armId"] == arm_id:
+            return [f"reusedFrom-invalid: reusedFrom names this plan's own arm {arm_id}; reuse means evidence "
+                    "captured for another setup or another evaluation, not for this one"], {}
+        # Reuse between two setups of THIS plan is legitimate — two setups with identical configurations are measured
+        # once — but it is a different statement from reuse across evaluations, and every reader says which
+        # (decided 2026-09-17: allow it and word it accurately, rather than forcing a capture per arm).
+        within = "this-evaluation" if src["planId"] == plan["planId"] else "another-evaluation"
+        return [], {"origin": "reused", "reusedWithin": within,
+                    "reusedFrom": {"planId": src["planId"], "armId": src["armId"],
+                                   "resultSha256": str(src["resultSha256"]).lower()},
+                    "reusedFromVerified": False,
+                    "reusedFromNote": "declared by the importer's caller: the source run was not read, so "
+                                      "resultSha256 is a statement, not verified provenance"}
+    # fresh
+    if "reusedFrom" in doc:
+        errors.append("origin-invalid: origin fresh must not declare reusedFrom; evidence captured for another "
+                      "evaluation is imported as origin reused")
+    count = 0
+    if request is None:
+        errors.append(f"origin-unverified: origin fresh requires the request output to be readable so every MCP "
+                      f"initialize request can be checked for clientInfo.name \"{token}\"")
+    else:
+        path, want_sha = request
+        data = path.read_bytes()
+        if hashlib.sha256(data).hexdigest() != want_sha:
+            errors.append(f"output-stale: {path} changed while its requests were being read")
+        else:
+            inits, why = initialize_requests(data)
+            if inits is None:
+                errors.append(f"origin-unverified: {why}; origin fresh requires every MCP initialize request to "
+                              f"carry clientInfo.name \"{token}\"")
+            elif not inits:
+                errors.append(f"origin-unverified: the request file contains no MCP initialize request, so it "
+                              f"cannot show a capture for this plan's arm; origin fresh requires every initialize "
+                              f"request to carry clientInfo.name \"{token}\"")
+            else:
+                count = len(inits)
+                wrong = [n for n in (client_name(m) for m in inits) if n != token]
+                if wrong:
+                    errors.append(f"origin-mismatch: {len(wrong)} of {len(inits)} MCP initialize request(s) do not "
+                                  f"carry clientInfo.name \"{token}\" (found "
+                                  + ", ".join(sorted({repr(n) for n in wrong})[:4])
+                                  + "), so this evidence was not captured for this plan's arm; if it was captured "
+                                    "for another evaluation, import it as origin reused with reusedFrom")
+    if captured_time is not None:
+        try:
+            created = datetime.fromisoformat(str(plan.get("createdUtc")).replace("Z", "+00:00"))
+            if created.tzinfo is None:
+                raise ValueError("timezone missing")
+        except ValueError:
+            errors.append(f"origin-unverified: the plan's createdUtc {plan.get('createdUtc')!r} is not a "
+                          "timezone-aware timestamp, so a fresh capture time cannot be compared with it")
+        else:
+            if captured_time < created:
+                errors.append(f"origin-mismatch: capturedUtc {doc.get('capturedUtc')} is before this plan was "
+                              f"created ({plan.get('createdUtc')}), so it was not captured for this plan")
+    if errors:
+        return errors, {}
+    return [], {"origin": "fresh",
+                "originCheck": {"token": token, "initializeRequests": count,
+                                "capturedUtc": doc.get("capturedUtc"), "planCreatedUtc": plan.get("createdUtc")}}
 
 
 def _cmd_import_results(a, runlog: Run) -> int:
@@ -3593,6 +3803,15 @@ def _cmd_import_results(a, runlog: Run) -> int:
                       "import-results cannot replace a runnable or unsupported detector")
     if arm is None or aid not in [x.get("armId") for x in check.get("arms", [])]:
         return refuse(f"identity-mismatch: check {cid} has no planned arm {aid!r}")
+    # The row the plan left OPEN for an import is the one it recorded `mcp-only`. A check the registry answered
+    # `not-applicable` on this arm is answered; an import must not turn it into a completed one (review R1b F1).
+    row_status = next((x.get("status") for x in check.get("arms") or [] if x.get("armId") == aid), None)
+    if row_status != "mcp-only":
+        return refuse(f"wrong-check: the plan records {cid} as {row_status!r} on arm {aid}, not mcp-only, so it is "
+                      f"not waiting for imported evidence"
+                      + (f": {check.get('applicabilityEvidence')}" if str(row_status).startswith("not-applicable")
+                         and check.get("applicabilityEvidence") else "")
+                      + ". An import completes a check the plan left open; it never overrides the plan's answer")
     key = Ledger.key(cid, aid, None)
     if (ledger.entry(cid, aid, None) or {}).get("status") in TERMINAL_OK:
         return refuse(f"duplicate-receipt: {key} already has accepted evidence")
@@ -3603,13 +3822,15 @@ def _cmd_import_results(a, runlog: Run) -> int:
     except (AttributeError, TypeError):
         identity = None
     result, rows, errors = doc.get("result"), doc.get("outputs"), []
+    captured_time = None
     if not captured or not isinstance(tool, dict) or not tool.get("name"):
         errors.append("the import must name capturedUtc and tool.name")
     elif isinstance(captured, str):
         try:
-            captured_time = datetime.fromisoformat(captured.replace("Z", "+00:00"))
-            if captured_time.tzinfo is None:
+            parsed = datetime.fromisoformat(captured.replace("Z", "+00:00"))
+            if parsed.tzinfo is None:
                 raise ValueError("timezone missing")
+            captured_time = parsed
         except ValueError:
             errors.append("capturedUtc must be an ISO-8601 timestamp with a timezone")
     else:
@@ -3685,7 +3906,7 @@ def _cmd_import_results(a, runlog: Run) -> int:
                           f"{str(identity.get('fingerprint'))[:12]} does not equal this arm's frozen "
                           f"request {expected_fp[:12]}")
 
-    sources = []
+    sources, request = [], None
     if isinstance(rows, list):
         for i, row in enumerate(rows):
             if not isinstance(row, dict) or not row.get("path") or not is_sha256(row.get("sha256")):
@@ -3705,12 +3926,30 @@ def _cmd_import_results(a, runlog: Run) -> int:
                 errors.append(f"output-missing: raw evidence {path.name} is a binary excluded from bundles")
             else:
                 sources.append(path)
+                if row.get("role") == "request":
+                    request = (path, str(row["sha256"]).lower())
+
+    # Option A: where the evidence came from, checked on the hash-checked request bytes themselves.
+    origin_errors, origin_fields = origin_refusals(doc, plan, aid, captured_time, request)
+    errors.extend(origin_errors)
+
+    # The controller's own prerequisite gate (`prereq_satisfied`, the one sweep and derived checks use): evidence
+    # for a check that could not have run on this arm is not credited here either, whatever its origin.
+    gate = SimpleNamespace(ledger=ledger)
+    pre = prereq_satisfied(gate, check, aid)
+    if pre:
+        errors.append(f"blocked-prerequisite: {prereq_block_detail(gate, pre, aid)}. An import is credited only "
+                      f"where the check could run; settle {pre} on this arm (`run` or `resume --run RUN` measures "
+                      "it; an arm whose order is refused must be fixed and planned again), then import again")
     if errors:
         return refuse("import-results refused: " + "; ".join(errors))
 
-    dest = run / "imports" / key
-    if dest.exists():
-        return refuse(f"duplicate-receipt: import destination {dest} already exists")
+    # A folder left by an import that is no longer credited (its entry was blocked or invalidated later) backs no
+    # current receipt; it is kept as it is, and a re-import is copied beside it.
+    dest, n = run / "imports" / key, 1
+    while dest.exists():
+        n += 1
+        dest = run / "imports" / f"{key}~{n}"
     dest.parent.mkdir(parents=True, exist_ok=True)
     temp = Path(tempfile.mkdtemp(prefix=key + "-", dir=dest.parent))
     try:
@@ -3747,13 +3986,15 @@ def _cmd_import_results(a, runlog: Run) -> int:
                 "coverage": coverage, "strength": (check.get("evidence") or {}).get("strength"),
                 "verdict": result.get("verdict"), "note": result.get("note")},
         extra={"imported": {"sourceSha256": sha256_file(manifest_copy),
-                            "capturedUtc": captured, "tool": tool}})
+                            "capturedUtc": captured, "tool": tool, **origin_fields}})
     ledger.transition(cid, aid, None, "completed", receipt_id=receipt["receiptId"],
-                      detector=detector, extra={"imported": True})
+                      detector=detector, extra={"imported": True, "importOrigin": origin_fields["origin"]})
     runlog.artifact(str(manifest_copy))
     runlog.advance()
     print(f"imported {cid} [{aid}]: {detector}, {findings} finding(s), "
-          f"{len(copied)} evidence file(s)")
+          f"{len(copied)} evidence file(s), origin {origin_fields['origin']}"
+          + (f" (declared source: plan {origin_fields['reusedFrom']['planId']} arm "
+             f"{origin_fields['reusedFrom']['armId']}, not verified)" if origin_fields["origin"] == "reused" else ""))
     return EXIT_OK
 
 
@@ -4191,8 +4432,38 @@ def build_disposition(run: Path, plan: dict, ledger: Ledger, receipts: dict, *,
         "explicitDecisions": plan["explicitDecisions"],
         "discovery": discovery,
         "catalogues": catalogues,
+        "importedEvidence": imported_evidence(ledger, receipts, bad_keys),
         "ledgerCounts": _counts(ledger),
     }
+
+
+def imported_evidence(ledger: Ledger, receipts: dict, bad_keys: dict) -> list[dict]:
+    """Where each CREDITED import's evidence came from, as its receipt records it. A receipt written before an import
+    had to declare origin says nothing, and that is reported as `unknown` - never as fresh. `reused` is the import's
+    own declaration about another evaluation, not the controller re-using this run's receipt (ledger `reused`)."""
+    rows = []
+    for k, e in sorted(ledger.doc["entries"].items()):
+        r = receipts.get(k) or {}
+        imp = r.get("imported")
+        if (e.get("status") not in TERMINAL_OK or k in bad_keys or not isinstance(imp, dict)
+                or not (r.get("validation") or {}).get("accepted")):
+            continue
+        origin = imp.get("origin") if imp.get("origin") in IMPORT_ORIGINS else "unknown"
+        row = {"checkId": e["checkId"], "armId": e["armId"], "receiptId": r.get("receiptId"), "origin": origin,
+               "capturedUtc": imp.get("capturedUtc")}
+        if origin == "reused":
+            row["reusedFrom"] = imp.get("reusedFrom")
+            row["reusedFromVerified"] = bool(imp.get("reusedFromVerified"))
+            # which statement this is: reuse between two setups of this evaluation, or from another evaluation. A
+            # receipt written before the distinction existed says neither, and is reported as `unstated`.
+            row["reusedWithin"] = (imp.get("reusedWithin")
+                                   if imp.get("reusedWithin") in ("this-evaluation", "another-evaluation")
+                                   else "unstated")
+        elif origin == "unknown":
+            row["note"] = ("imported before an import had to declare its origin: whether this evidence was captured "
+                           "for this plan is not recorded")
+        rows.append(row)
+    return rows
 
 
 def _counts(ledger: Ledger) -> dict:
@@ -4249,6 +4520,27 @@ def status_md(plan: dict, disp: dict) -> str:
                      f"({c['kind']}); a catalogue completes its check and is never a finding")
     else:
         L.append("- none")
+    imports = disp.get("importedEvidence") or []
+    if imports:
+        L += ["", "## Imported evidence and where it came from", "",
+              "Origin is checked for accidental relabelling only: a capture token and timestamps are public and "
+              "rewritable, so this is not proof of authenticity.", "",
+              "| check | arm | origin |", "|---|---|---|"]
+        for x in imports:
+            if x["origin"] == "fresh":
+                said = "fresh: captured for this plan's arm (capture token and time checked)"
+            elif x["origin"] == "reused":
+                src = x.get("reusedFrom") or {}
+                where = ("reused from setup `%s` of THIS plan; not measured for this setup" % src.get("armId")
+                         if x.get("reusedWithin") == "this-evaluation" else
+                         "reused from plan `%s` arm `%s`; not measured for this plan"
+                         % (src.get("planId"), src.get("armId")))
+                said = (f"{where} (result `{str(src.get('resultSha256'))[:12]}`, declared, not verified)"
+                        + ("" if x.get("reusedWithin") != "unstated" else
+                           "; the receipt does not say whether the source is this evaluation or another"))
+            else:
+                said = "origin not recorded: imported before origin was required"
+            L.append(f"| `{x['checkId']}` | {x['armId']} | {said} |")
     L += ["", "## Missing checks (each keeps the evaluation incomplete)", ""]
     if ev["missing"]:
         L += ["| check | arm | status | cause |", "|---|---|---|---|"]
@@ -4926,7 +5218,10 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("import-results", help="bind external MCP-only evidence to one planned arm")
     p.add_argument("--run", required=True)
     p.add_argument("--file", required=True,
-                   help="schema-1 import result naming identity, coverage and hashed raw request/response")
+                   help="schema-1 import result naming identity, coverage and hashed raw request/response, and "
+                        "its origin: fresh (every MCP initialize carries clientInfo.name evalrun:<planId>:<armId>) "
+                        "or reused with reusedFrom {planId, armId, resultSha256}; refused while the check's "
+                        "prerequisite is not settled on the arm (§4.8)")
     p.set_defaults(fn=cmd_import_results)
 
     p = sub.add_parser("finalize", help="derive the disposition from the ledger; never from a claim")
