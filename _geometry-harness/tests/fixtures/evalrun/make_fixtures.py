@@ -65,6 +65,10 @@ KEEP = ["loadability.masters-and-order", "loadability.dangling-references", "rec
 # fingerprint over the same plugins. It lives in its own trim so cases 01-11 are untouched.
 KEEP_Q43 = ["functional.quest-alias-split"]
 
+# Case 19 only: the second derived check and the discovery check it requires, so a derivation can be run with
+# its prerequisite settled and unsettled. Its own trim, so no other case's plan changes.
+KEEP_DERIVED = ["patch.discovery-installed", "patch.candidate-qualification"]
+
 SCOPE = {
     "schemaVersion": 1, "probe": "scopeprobe", "generatedUtc": "2026-09-12T18:00:00Z",
     "complete": True, "walkFailures": [],
@@ -251,6 +255,8 @@ def main() -> int:
     # It gets its own trim file: cases 01-11 keep theirs unchanged, and their planIds do not move.
     trim(KEEP + KEEP_Q43, "fixture-check-registry-q43.json",
          "This trim adds " + ", ".join(KEEP_Q43) + " for the identity-binding case. ")
+    trim(KEEP + KEEP_DERIVED, "fixture-check-registry-derived.json",
+         "This trim adds " + ", ".join(KEEP_DERIVED) + " for the derived-prerequisite case. ")
 
     # ---------------------------------------------------------------- cases
     cases = out_root / "cases"
@@ -526,6 +532,11 @@ def main() -> int:
                   "candidate-04-empty-view", reorder_b["Plugins"],
                   ["moved Update.esm above Skyrim.esm; stages no mod folder"], mods=[])},
              {"arms": arms_ok(stems18)}, scope=scope18)
+
+    # 19 — a derived check over a settled and an unsettled prerequisite. Case 01's shape, its own trim.
+    case_dir("case-19-derived-prerequisites",
+             {"candidate-00-baseline.json": base, "candidate-01-reorder.json": reorder},
+             {"arms": arms_ok(stems)})
 
     print(f"fixtures written under {out_root}")
     print(f"  plugins: {len(PLUGINS)}   registry checks: {len(keep)}   cases: {len(list(cases.iterdir()))}")

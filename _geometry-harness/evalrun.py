@@ -2630,6 +2630,18 @@ def run_derived(ex: Executor, check: dict, arm: dict) -> None:
     findings = None
     payload = {}
 
+    def blocked() -> bool:
+        # §4.7: the prerequisite gate every other adapter path passes, applied once the derivation is
+        # known to be one this controller computes. A derivation over an unsettled prerequisite reads
+        # an absence as an input, and its `no-finding` would be counted as a clean check.
+        pre = prereq_satisfied(ex, check, arm["armId"])
+        if pre:
+            ex.account(check, arm, f"blocked(prerequisite:{pre})", "blocked-prerequisite",
+                       f"the prerequisite {pre} has no accepted receipt on this arm"
+                       + ("" if arm["kind"] == "baseline" else
+                          " (or on the baseline every arm is measured against)"))
+        return bool(pre)
+
     if adapter.get("derives") == "order-evaluation" or cid.endswith("order-evaluation"):
         if arm["kind"] == "baseline":
             # The baseline is the reference every other arm is measured AGAINST. There is no order
@@ -2637,6 +2649,8 @@ def run_derived(ex: Executor, check: dict, arm: dict) -> None:
             ex.account(check, arm, "not-applicable", None,
                        "the baseline is the reference the other arms are measured against; an order "
                        "evaluation of the baseline against itself is not a measurement")
+            return
+        if blocked():
             return
         rows = [r for r in receipts.values()
                 if r.get("armId") == arm["armId"] and r.get("part") == "diff"
@@ -2678,6 +2692,8 @@ def run_derived(ex: Executor, check: dict, arm: dict) -> None:
         findings = new_defect_probes
 
     elif adapter.get("derives") == "candidate-qualification" or cid.endswith("candidate-qualification"):
+        if blocked():
+            return
         evaluated: dict[str, str] = {}
         for r in receipts.values():
             if r["validation"]["accepted"]:

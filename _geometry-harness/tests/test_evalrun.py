@@ -1863,10 +1863,78 @@ def case_18(tmp):
            f"{case}/old-meaning: verify-bundle still verifies it", "compatibility")
 
 
+def case_19(tmp):
+    """§4.6 / §4.7: a derived check derives only over prerequisites that are settled. An unsettled one blocks
+    it by name, keeps it out of completedNullChecks and keeps the evaluation incomplete on it."""
+    case = "case-19-derived-prerequisites"
+    reg = "fixture-check-registry-derived.json"
+    qual, order = "patch.candidate-qualification", "patch.order-evaluation"
+    disc, mao = "patch.discovery-installed", "loadability.masters-and-order"
+    _, _, _, scen = case_paths(case)
+
+    def run_case(tag, extra):
+        run = tmp / f"{case}-{tag}"
+        expect(do_plan(run, case, ["--select", qual] + extra, registry=reg).returncode, 0,
+               f"{case}/{tag}: plan exit", "§4.6")
+        expect(evalrun(["run", "--run", run], scen).returncode, 0, f"{case}/{tag}: run exit", "§4.6")
+        expect(evalrun(["finalize", "--run", run], scen).returncode, 0, f"{case}/{tag}: finalize exit", "D7")
+        plan = load(run / "plan.json") or {}
+        base = next((a["armId"] for a in plan.get("arms") or [] if a.get("kind") == "baseline"), "baseline")
+        cand = next((a["armId"] for a in plan.get("arms") or [] if a.get("kind") == "candidate"), None)
+        return (ledger_entries(load(run / "ledger.json") or {}), load(run / "disposition.json") or {},
+                base, cand)
+
+    def nulls(disp):
+        return {(r.get("checkId"), r.get("armId")) for r in (field(disp, "completedNullChecks") or [])}
+
+    def missing(disp):
+        return {(r.get("checkId"), r.get("armId")): r.get("status") for r in (field(disp, "missing") or [])}
+
+    def blocked_on(led, disp, cid, aid, pre, tag):
+        e = led.get(f"{cid}__{aid}") or {}
+        expect(execution_of(e), f"blocked(prerequisite:{pre})", f"{case}/{tag}: {cid} [{aid}] status", "§4.7")
+        expect(e.get("cause"), "blocked-prerequisite", f"{case}/{tag}: {cid} [{aid}] cause", "§4.3")
+        detail = " ".join(str(x.get("detail") or "") for x in ((e.get("validation") or {}).get("rejections") or []))
+        check(pre in detail, f"{case}/{tag}: {cid} [{aid}] rejection detail names {pre} (got {detail[:120]!r})")
+        check((cid, aid) not in nulls(disp), f"{case}/{tag}: {cid} [{aid}] is NOT a completed null check (D7)")
+        expect(missing(disp).get((cid, aid)), f"blocked(prerequisite:{pre})",
+               f"{case}/{tag}: {cid} [{aid}] is listed missing", "D7")
+        expect(field(disp, "complete"), False, f"{case}/{tag}: evaluation.complete", "D7")
+
+    # the discovery prerequisite unsettled: candidate-qualification blocks on every arm
+    led, disp, base, cand = run_case("discovery-excluded",
+                                     ["--exclude", f"{disc}=fixture: the prerequisite is deliberately unsettled"])
+    for aid in (base, cand):
+        blocked_on(led, disp, qual, aid, disc, "discovery-excluded")
+    # ... while order-evaluation, whose own prerequisite IS settled there, still derives as before
+    expect(execution_of(led.get(f"{order}__{cand}")), "completed",
+           f"{case}/discovery-excluded: {order} [{cand}] still derives", "§4.6")
+    expect(execution_of(led.get(f"{order}__{base}")), "not-applicable",
+           f"{case}/discovery-excluded: {order} [{base}] stays not-applicable", "§4.6")
+
+    # every prerequisite settled: candidate-qualification derives and is a completed null, as before
+    led, disp, base, cand = run_case("settled", [])
+    for aid in (base, cand):
+        expect(execution_of(led.get(f"{disc}__{aid}")), "completed",
+               f"{case}/settled: {disc} [{aid}] completed (the prerequisite really is settled)", "§4.5")
+        expect(execution_of(led.get(f"{qual}__{aid}")), "completed", f"{case}/settled: {qual} [{aid}] status",
+               "§4.6")
+        check((qual, aid) in nulls(disp), f"{case}/settled: {qual} [{aid}] is a completed null check (D7)")
+
+    # the order check's own prerequisite unsettled: order-evaluation blocks on the candidate arm; the baseline
+    # keeps its answer (the reference is not measured against itself), and qualification blocks on discovery
+    led, disp, base, cand = run_case("masters-excluded",
+                                     ["--exclude", f"{mao}=fixture: the prerequisite is deliberately unsettled"])
+    blocked_on(led, disp, order, cand, mao, "masters-excluded")
+    expect(execution_of(led.get(f"{order}__{base}")), "not-applicable",
+           f"{case}/masters-excluded: {order} [{base}] stays not-applicable", "§4.6")
+    blocked_on(led, disp, qual, cand, disc, "masters-excluded")
+
+
 CASES = {"case-01": case_01, "case-02": case_02, "case-03": case_03, "case-04": case_04, "case-05": case_05,
          "case-06": case_06, "case-07": case_07, "case-08": case_08, "case-09": case_09, "case-10": case_10,
          "case-11": case_11, "case-12": case_12, "case-13": case_13, "case-14": case_14, "case-15": case_15,
-         "case-16": case_16, "case-17": case_17, "case-18": case_18}
+         "case-16": case_16, "case-17": case_17, "case-18": case_18, "case-19": case_19}
 
 
 def main() -> int:

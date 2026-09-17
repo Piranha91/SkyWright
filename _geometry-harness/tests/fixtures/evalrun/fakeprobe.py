@@ -480,6 +480,15 @@ def main(probe: str, argv=None) -> int:
         (d / f"rules-{mod}.json").write_text(json.dumps(entry.get("rules") or {"SchemaVersion": 1, "Rules": []}, indent=1), encoding="utf-8")
         return 0
 
+    if probe == "patchprobe" and emit is None:
+        # A `text` adapter: the registry reads patchprobe's counts off its printed lines
+        # (`indexed N plugins (U unreadable)`, `M distinct master pairs`), so that is all it prints.
+        if behaviour == "exit":
+            return int(entry.get("code", 4))
+        print(f"fakeprobe patchprobe: indexed {int(entry.get('plugins', 4))} plugins "
+              f"({int(entry.get('unreadableCount', 0))} unreadable)")
+        print(f"{int(entry.get('masterPairs', 0))} distinct master pairs")
+        return 0
     if emit is None:
         print("fakeprobe: no --emit and no --json/--out", file=sys.stderr)
         return 2
