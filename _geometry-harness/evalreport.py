@@ -1340,7 +1340,9 @@ def compile_plan(bundle_dir: Path, verify: dict, settings: dict, pr: dict, bundl
     # Several alternatives can share one display label (every removal-only arm is "Tested alternative setup").
     # A per-setup sentence then names WHICH one in the setups-compared list's own words, so a result on one
     # alternative is never read as another's and no-problem lines are never merged across them. A label no other
-    # arm carries is kept as it is; arms whose changes are also identical fall back to the arm id.
+    # arm carries is kept as it is. Arms whose changes are also identical are numbered in the order the setups-compared
+    # list shows them ("2 of 2 setups with this change"), and that list's row carries the same words, so the label
+    # still points at one row without exposing the technical setup id.
     def change_words(arm) -> str:
         return "; ".join(([f"adds {', '.join(arm['pluginsAdded'])}"] if arm.get("pluginsAdded") else []) +
                          ([f"removes {', '.join(arm['pluginsRemoved'])}"] if arm.get("pluginsRemoved") else []))
@@ -1350,10 +1352,15 @@ def compile_plan(bundle_dir: Path, verify: dict, settings: dict, pr: dict, bundl
         words = change_words(a) if shared_labels[a["displayLabel"]] > 1 else ""
         a["readerLabel"] = f"{a['displayLabel']} ({words})" if words else a["displayLabel"]
     shared_labels = collections.Counter(a["readerLabel"] for a in arms_out)
+    seen_labels = collections.Counter()
     for a in arms_out:
-        if shared_labels[a["readerLabel"]] > 1:
+        shared = a["readerLabel"]
+        if shared_labels[shared] > 1:
+            seen_labels[shared] += 1
             words = change_words(a)
-            a["readerLabel"] = f"{a['displayLabel']} ({words + '; ' if words else ''}setup {a['armId']})"
+            a["setupOrdinal"] = (f"{seen_labels[shared]} of {shared_labels[shared]} setups with "
+                                 + ("this change" if words else "no plugin change"))
+            a["readerLabel"] = f"{a['displayLabel']} ({words + '; ' if words else ''}{a['setupOrdinal']})"
     arm_labels = {a["armId"]: a["readerLabel"] for a in arms_out}
     for f in findings:
         f["readerArmLabel"] = arm_labels.get(f.get("armId"), "Measured setup")
@@ -1530,22 +1537,68 @@ def compile_plan(bundle_dir: Path, verify: dict, settings: dict, pr: dict, bundl
                                 "explanation": reason_explanations.get(status)})
     null_summary = []
     comparison_summary = []
+    kind_phrases_all = reader_data.get("kindPhrases") or {}
+
+    def bare_phrase(phrase: str) -> str:
+        return re.sub(r"^(a|an) ", "", phrase)
+
+    def setup_totals_sentence(comparison) -> str:
+        # The totals beside a no-additional-problem comparison. Each number counts the listed rows (records, or a
+        # kind's own unit) of this check's findings on one setup: the measured load order's arm part, and this
+        # setup's own measurement. They cover every plugin pair the check reported, including pairs the report
+        # does not list because they involve neither a target nor a compared patch. Rows of a context-only kind
+        # (navmesh overwrite history) are left out of both numbers but still counted by the probe - the evidence
+        # index's "out of N conflicts" includes them - so the sentence names what it leaves out.
+        def rows_on(arm_id, skip_parts):
+            return [x for x in findings if x.get("kind") == "finding" and x.get("checkId") == comparison.get("checkId")
+                    and x.get("armId") == arm_id and x.get("part") not in skip_parts]
+        before = rows_on("baseline", ("reverse",))
+        after = rows_on(comparison.get("armId"), ("diff", "reverse"))
+        counted_before = [x for x in before if not x.get("readerEvidenceReason")]
+        counted_after = [x for x in after if not x.get("readerEvidenceReason")]
+        total_before = sum(int(x.get("rowsTotal") or 0) for x in counted_before)
+        total_after = sum(int(x.get("rowsTotal") or 0) for x in counted_after)
+        if not (total_before or total_after):
+            return ""
+        units = {(kind_phrases_all.get(str((x.get("counts") or {}).get("groupKind") or "")) or {}).get("unitPlural")
+                 for x in counted_before + counted_after if int(x.get("rowsTotal") or 0)}
+        unit_kind = (next((k for k, v in kind_phrases_all.items() if v.get("unitPlural") in units and v.get("unitSingular")), None)
+                     if len(units) == 1 and None not in units else None)
+        if unit_kind:
+            one, many = kind_phrases_all[unit_kind]["unitSingular"], kind_phrases_all[unit_kind]["unitPlural"]
+        else:
+            one, many = "record with a problem", "records with a problem"
+        sentence = (f" In total this check reported {fmt_n(total_before)} {one if total_before == 1 else many} "
+                    f"in the measured load order and {fmt_n(total_after)} in this setup")
+        if any(x.get("readerRelevant") is False and int(x.get("rowsTotal") or 0) for x in counted_before + counted_after):
+            involved = "the target mods" + (" or a compared patch" if supplied else "")
+            sentence += f", including conflicts that do not involve {involved}, which this report does not list"
+        sentence += "."
+        history_before = [x for x in before if x.get("readerEvidenceReason") == "context-only-kind"]
+        history_after = [x for x in after if x.get("readerEvidenceReason") == "context-only-kind"]
+        hist_before = sum(int(x.get("rowsTotal") or 0) for x in history_before)
+        hist_after = sum(int(x.get("rowsTotal") or 0) for x in history_after)
+        if hist_before or hist_after:
+            kinds_ = {str((x.get("counts") or {}).get("groupKind") or "") for x in history_before + history_after
+                      if int(x.get("rowsTotal") or 0)}
+            phrase = kind_phrases_all.get(next(iter(kinds_))) if len(kinds_) == 1 else None
+            if phrase and phrase.get("singular") and phrase.get("plural"):
+                noun_ = bare_phrase(phrase["singular"]) if hist_before == 1 else phrase["plural"]
+            else:
+                noun_ = "record of overwrite history" if hist_before == 1 else "records of overwrite history"
+            sentence += (f" Not counted: {fmt_n(hist_before)} {noun_} in the measured load order and "
+                         f"{fmt_n(hist_after)} in this setup, kept in the evidence index as history rather than "
+                         "as problems.")
+        return sentence
+
     for f in findings:
         if f.get("kind") != "null":
             continue
         subject = check_titles.get(str(f.get("checkId")), f.get("title"))
         if f.get("part") in ("diff", "reverse"):
             if f.get("part") == "diff":
-                baseline_total = sum(int(x.get("rowsTotal") or 0) for x in findings
-                                     if x.get("kind") == "finding" and x.get("checkId") == f.get("checkId")
-                                     and x.get("armId") == "baseline" and x.get("part") != "reverse" and not x.get("readerEvidenceReason"))
-                result_total = sum(int(x.get("rowsTotal") or 0) for x in findings
-                                   if x.get("kind") == "finding" and x.get("checkId") == f.get("checkId")
-                                   and x.get("armId") == f.get("armId") and x.get("part") not in ("diff", "reverse")
-                                   and not x.get("readerEvidenceReason"))
-                totals = (f" The measured totals are {fmt_n(baseline_total)} before and {fmt_n(result_total)} in this setup."
-                          if baseline_total or result_total else "")
-                comparison_summary.append(f"{subject} — {f.get('readerArmLabel')}: {f.get('readerPlain')}{totals}")
+                comparison_summary.append(f"{subject} — {f.get('readerArmLabel')}: {f.get('readerPlain')}"
+                                          f"{setup_totals_sentence(f)}")
             continue
         context = (f.get("readerPlain") or ("the comparison found no additional issue" if f.get("part") == "diff" else
                                             "no problem was found in the records examined")).rstrip(".")
@@ -1554,9 +1607,14 @@ def compile_plan(bundle_dir: Path, verify: dict, settings: dict, pr: dict, bundl
     catalogue_summary = sorted({check_titles.get(str(f.get("checkId")), f.get("title"))
                                 for f in findings if f.get("kind") == "catalogue"})
     title_subject = ", ".join(target_names) or "Target mod"
-    title_compared = ", ".join(supplied) if supplied else ", ".join(comparison_names[:2])
     alternative_subject = lower_first(setup_subject(alternative_arms))
-    reader = {"title": title_subject + (f" with {title_compared}" if title_compared else "") + " — patch review",
+    # A patch review names the patch. With no separate patch the setups differ only by the target mods themselves,
+    # so the title says what was evaluated against what: the target within the measured load order. The mods its
+    # recorded conflicts involve are named in the opening as the main conflicts found, not in the title as the
+    # comparison.
+    title = (f"{title_subject} with {', '.join(supplied)} — patch review" if supplied else
+             f"{title_subject} within the measured load order — conflict review")
+    reader = {"title": title,
               "scopeLine": scope_line, "verdict": verdict, "limitations": limitations,
               "sectionHeadings": {"regressions": f"Problems introduced by {alternative_subject}",
                                   "changes": f"Changes made by {alternative_subject}"},

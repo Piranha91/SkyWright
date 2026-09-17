@@ -680,9 +680,7 @@ def check_patch_direction(bundle: Path):
     expect(reader.get("suppliedPatches"), [], f"{label}/none: removing a target is not a patch")
     check("No separate patch plugin was included in the comparison." in str(reader.get("scopeLine")),
           f"{label}/none: the opening keeps the no-separate-patch wording (got {reader.get('scopeLine')!r})")
-    mods = reader.get("comparisonMods") or []
-    expect(reader.get("title"), "FixtureTarget.esp" + (f" with {', '.join(mods[:2])}" if mods else "") + " — patch review",
-           f"{label}/none: with no patch the title keeps the comparison mods")
+    # the title with no separate patch: followup_title_control
     expect(reader.get("verdict"), "Removing FixtureTarget.esp introduces a new defect in a check that ran.",
            f"{label}/none: the Result names the removal even when no patch is involved")
     check("supplied setup" not in md.lower() and "This setup also loads" not in md,
@@ -791,11 +789,14 @@ def alternative_identity_control(bundle: Path, identical: bool = False):
     target_row["name"] = "FixtureSecond.esp"
     view.plan["targets"].append(target_row)
     measured = base + [second]
+    # identical="nochange": candidates 02 and 03 both keep the measured plugin list (the same label, no change)
     orders = {"baseline": measured,
               "candidate-01-patcha": [p for p in measured if p.get("name") not in ("FixtureTarget.esp", "FixtureSecond.esp")],
-              "candidate-02-patchb": [p for p in measured if p.get("name") != "FixtureSecond.esp"],
-              "candidate-03-combined": [p for p in measured
-                                        if p.get("name") != ("FixtureSecond.esp" if identical else "FixtureTarget.esp")]}
+              "candidate-02-patchb": (list(measured) if identical == "nochange" else
+                                      [p for p in measured if p.get("name") != "FixtureSecond.esp"]),
+              "candidate-03-combined": (list(measured) if identical == "nochange" else
+                                        [p for p in measured
+                                         if p.get("name") != ("FixtureSecond.esp" if identical else "FixtureTarget.esp")])}
     for arm_id, plugins in orders.items():
         arms[arm_id]["requested"]["plugins"] = plugins
         arms[arm_id]["kind"] = "baseline" if arm_id == "baseline" else "candidate"
@@ -900,13 +901,10 @@ def check_alternative_identity(bundle: Path):
     check("**Tested alternative setup**\n" not in md and "<h3>Tested alternative setup</h3>" not in html,
           f"{label}: the per-setup load-order headings do not repeat the bare shared label")
 
-    # two alternatives with the same label AND the same change still get one line each, told apart by setup id
-    plan, md, html = alternative_identity_control(bundle, identical=True)
-    links = [str(x) for x in (plan.get("reader") or {}).get("nullSummary") or []
-             if str(x).startswith("Missing or broken record links — ")]
-    check(len(links) == 2 and any("candidate-02-patchb" in x for x in links) and any("candidate-03-combined" in x for x in links)
-          and all("removes FixtureSecond.esp" in x for x in links),
-          f"{label}/identical: identical changes keep one line per arm, each naming its change and setup (got {links!r})")
+    # two alternatives with the same label AND the same change: followup_identical_label_control
+    check("setups with this change" not in md and "setups with no plugin change" not in md
+          and not any(a.get("setupOrdinal") for a in (plan.get("scope") or {}).get("arms") or []),
+          f"{label}: alternatives told apart by their changes carry no setup number")
 
     # a single alternative is the only setup with its label: it keeps the bare label everywhere
     plan, md, html = patch_direction_control(bundle, "removes")
@@ -917,6 +915,197 @@ def check_alternative_identity(bundle: Path):
 
 def html_escape(s: str) -> str:
     return s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace('"', "&#34;").replace("'", "&#39;")
+
+
+def followup_title_control(bundle: Path):
+    """Known answer: with no separate patch plugin the title is not a patch review and does not name the target's
+    incidental conflict partners as the comparison; it names the target within the measured load order. A title
+    with a patch keeps naming the patch."""
+    label = "R4/followup-title"
+    plan, md, html = patch_direction_control(bundle, "none")
+    reader = plan.get("reader") or {}
+    want = "FixtureTarget.esp within the measured load order — conflict review"
+    expect(reader.get("title"), want, f"{label}/none: the title with no separate patch")
+    check(md.startswith(f"# {want}") and f"<title>{want}</title>" in html and f"<h1>{want}</h1>" in html,
+          f"{label}/none: report.md and report.html carry that title")
+    mods = [str(m) for m in reader.get("comparisonMods") or []]
+    check("patch review" not in str(reader.get("title")) and not any(m in str(reader.get("title")) for m in mods),
+          f"{label}/none: no 'patch review' and no conflict partner in the title (mods {mods!r})")
+    check("No separate patch plugin was included in the comparison." in str(reader.get("scopeLine")),
+          f"{label}/none: the opening still says no separate patch was compared")
+    plan, md, html = patch_direction_control(bundle, "removes")
+    expect((plan.get("reader") or {}).get("title"), "FixtureTarget.esp with Patch.esp — patch review",
+           f"{label}/removes: a compared patch keeps the patch-review title")
+
+
+NAVMESH_CHECK = "geometry.navmesh-ownership"
+
+
+def followup_totals_control(bundle: Path, variant: str):
+    """The totals beside a no-additional-problem comparison. Built in memory from R4's bundle with synthetic probe
+    emits for one check, in the shape a real navmesh probe run produced: the probe's conflict list for the measured
+    load order holds broken-link rows (EDGE-IDX) AND an overwrite-history row (CLOBBERED), so the probe reports
+    4 conflicts while the report counts 3 problems. Variants:
+
+      navmesh  baseline: EDGE-IDX FixtureBase|FixtureOther x2, EDGE-IDX FixtureBase|FixtureTarget x1,
+               CLOBBERED FixtureBase|FixtureOther x1 (4 rows); the alternative removes FixtureTarget.esp and keeps
+               EDGE-IDX FixtureBase|FixtureOther x2 + CLOBBERED x1 (3 rows)
+      plain    only the target's EDGE-IDX row at baseline, nothing on the alternative (no other pair, no history)
+      patch    as navmesh, but the measured order also loads Patch.esp and the alternative removes Patch.esp
+      overlap  geometry.object-overlap: OVERLAP FixtureBase|FixtureOther x2 at baseline, x1 on the alternative
+
+    Returns (plan, report.md, report.html, comparison line)."""
+    spec = importlib.util.spec_from_file_location(f"evalreport_followup_totals_{variant}", EVALREPORT)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    view = module.Bundle(bundle)
+    view.disposition = copy.deepcopy(view.disposition)
+    view.plan = copy.deepcopy(view.plan)
+    wanted = {"baseline", "candidate-02-patchb"}
+    view.disposition["arms"] = {k: v for k, v in view.disposition["arms"].items() if k in wanted}
+    view.plan["arms"] = [a for a in view.plan.get("arms") or [] if a.get("armId") in wanted]
+    arms = {a["armId"]: a for a in view.plan["arms"]}
+    base = list(arms["baseline"]["requested"]["plugins"])
+    patch = copy.deepcopy(base[-1])
+    patch["name"] = "Patch.esp"
+    if variant == "patch":
+        orders = {"baseline": base + [patch], "candidate-02-patchb": base}
+    else:
+        orders = {"baseline": base, "candidate-02-patchb": [p for p in base if p.get("name") != "FixtureTarget.esp"]}
+    for arm_id, plugins in orders.items():
+        arms[arm_id]["requested"]["plugins"] = plugins
+        arms[arm_id]["kind"] = "baseline" if arm_id == "baseline" else "candidate"
+        view.disposition["arms"][arm_id]["kind"] = arms[arm_id]["kind"]
+        view.disposition["arms"][arm_id].pop("orderEvaluation", None)
+    check_id = "geometry.object-overlap" if variant == "overlap" else NAVMESH_CHECK
+
+    def conflict(kind, a, b, n, tag):
+        return {"Kind": kind, "A": a, "B": b, "Summary": f"synthetic {kind} {tag}",
+                "Necessary": [{"FormKey": f"{n:06X}:FixtureBase.esp", "Label": f"FixtureCell{n}", "Physical": "Holds"}]}
+
+    other = ("FixtureBase.esp", "FixtureOther.esp")
+    if variant == "overlap":
+        emits = {"baseline": [conflict("OVERLAP", *other, 0x800 + i, "base") for i in range(2)],
+                 "candidate-02-patchb": [conflict("OVERLAP", *other, 0x800, "alt")]}
+    elif variant == "plain":
+        emits = {"baseline": [conflict("EDGE-IDX", "FixtureBase.esp", "FixtureTarget.esp", 0x900, "base")],
+                 "candidate-02-patchb": []}
+    else:
+        history = conflict("CLOBBERED", *other, 0xA00, "history")
+        emits = {"baseline": [conflict("EDGE-IDX", *other, 0xB00 + i, "base") for i in range(2)]
+                             + [conflict("EDGE-IDX", "FixtureBase.esp", "FixtureTarget.esp", 0xC00, "base"), history],
+                 "candidate-02-patchb": [conflict("EDGE-IDX", *other, 0xB00 + i, "alt") for i in range(2)] + [history]}
+    paths = {arm_id: f"synthetic/{check_id}/{arm_id}.json" for arm_id in emits}
+    original_emit, original_path = view.emit, view.output_emit_path
+    view.emit = lambda p: ({"Conflicts": emits[next(k for k, v in paths.items() if v == p)], "Coverage": []}
+                           if p in paths.values() else original_emit(p))
+    view.output_emit_path = lambda c, a, part: (paths.get(a) if c == check_id and part == "arm" else original_path(c, a, part))
+    evaluation = view.disposition["evaluation"]
+    for key in ("missing", "findings", "completedNullChecks", "completedCatalogues"):
+        evaluation[key] = [r for r in evaluation.get(key) or [] if r.get("armId") in wanted and r.get("checkId") != check_id]
+    evaluation["findings"] += [{"checkId": check_id, "armId": arm_id, "part": "arm", "findings": len(rows),
+                                "verdict": None, "strength": "calibrated-inference"}
+                               for arm_id, rows in emits.items() if rows]
+    evaluation["completedNullChecks"].append({"checkId": check_id, "armId": "candidate-02-patchb", "part": "diff", "coverage": 0})
+    priorities = module.load_json(module.PRIORITIES)
+    concise = priorities.get("concise") or {}
+    page = priorities.get("page") or {}
+    settings = {"mode": "concise", "layout": concise.get("layout", "normal"), "maxPages": 8,
+                "page": {"size": page.get("size", "A4"), "marginMm": page.get("marginMm", 16),
+                         "baseFontPt": page.get("baseFontPt", 10.5)},
+                "rowsPerGroup": concise.get("rowsPerGroup", 3),
+                "figuresPerFinding": concise.get("figuresPerFinding", 1),
+                "reel": priorities.get("reel") or {}}
+    original_bundle = module.Bundle
+    try:
+        module.Bundle = lambda _: view
+        plan = module.compile_plan(bundle, {"bundle": {"complete": True},
+                                            "evaluation": {"complete": False, "claim": "incomplete"}},
+                                   settings, priorities, str(bundle))
+    finally:
+        module.Bundle = original_bundle
+    shown = module.effective_view(plan, settings["rowsPerGroup"], settings["figuresPerFinding"], priorities,
+                                  settings["layout"])
+    md = module.env(False).get_template("report.md.j2").render(p=shown, css="")
+    html = module.env(True).get_template("report.html.j2").render(p=shown, css="")
+    title = ((priorities.get("reader") or {}).get("checkTitles") or {}).get(check_id, check_id)
+    line = next((str(x) for x in (plan.get("reader") or {}).get("comparisonSummary") or []
+                 if str(x).startswith(f"{title} — ")), "")
+    return plan, md, html, line
+
+
+def followup_totals_wording_control(bundle: Path):
+    """Known answers for a 'probe says 4, report says 3' reading of a navmesh comparison. The probe's conflict list for
+    a setup counts every row it emits, overwrite history included (the evidence index's "out of N conflict(s)"
+    is that number); the report's totals count only rows reported as problems, across every plugin pair the check
+    reported. Neither number is wrong. The sentence must name what it counts, that it includes pairs the report does
+    not list, and the overwrite history it leaves out, so the two numbers cannot read as a contradiction."""
+    label = "R4/followup-totals"
+    plan, md, html, line = followup_totals_control(bundle, "navmesh")
+    base_rows = [f for f in plan.get("findings") or [] if f.get("kind") == "finding"
+                 and f.get("checkId") == NAVMESH_CHECK and f.get("armId") == "baseline"]
+    probe_total = {int((f.get("counts") or {}).get("findingsInPart") or 0) for f in base_rows}
+    counted = sum(int(f.get("rowsTotal") or 0) for f in base_rows if not f.get("readerEvidenceReason"))
+    history = sum(int(f.get("rowsTotal") or 0) for f in base_rows if f.get("readerEvidenceReason") == "context-only-kind")
+    check(probe_total == {4} and counted == 3 and history == 1 and counted + history == 4,
+          f"{label}: the fixture reproduces the shape: the probe reports 4, 3 are problems, 1 is overwrite history "
+          f"(got probe {probe_total!r}, counted {counted}, history {history})")
+    check("out of 4 conflict(s) the probe reported" in " ".join(str(f.get("plain")) for f in base_rows),
+          f"{label}: the evidence-index sentence keeps the probe's own total of 4")
+    want = ("In total this check reported 3 records with a problem in the measured load order and 2 in this setup, "
+            "including conflicts that do not involve the target mods, which this report does not list.")
+    check(want in line, f"{label}/navmesh: the totals name their unit and the unlisted pairs (got {line!r})")
+    want_history = ("Not counted: 1 navmesh edit overwritten by another mod in the measured load order and 1 in this "
+                    "setup, kept in the evidence index as history rather than as problems.")
+    check(want_history in line, f"{label}/navmesh: the totals name the overwrite history they leave out (got {line!r})")
+    check("The measured totals are" not in line and " before and " not in line,
+          f"{label}/navmesh: no unqualified 'measured totals ... before and ...' sentence")
+    check(want in md and want_history in md and html_escape(want) in html and html_escape(want_history) in html,
+          f"{label}/navmesh: report.md and report.html carry both sentences")
+    plan, md, html, line = followup_totals_control(bundle, "plain")
+    check(line.endswith("In total this check reported 1 record with a problem in the measured load order and 0 in this setup.")
+          and "Not counted" not in line and "do not involve" not in line,
+          f"{label}/plain: with no unlisted pair and no history, neither clause appears (got {line!r})")
+    plan, md, html, line = followup_totals_control(bundle, "patch")
+    check("including conflicts that do not involve the target mods or a compared patch, which this report does not list."
+          in line, f"{label}/patch: with a compared patch the unlisted pairs involve neither (got {line!r})")
+    plan, md, html, line = followup_totals_control(bundle, "overlap")
+    check("In total this check reported 2 overlap pairs in the measured load order and 1 in this setup" in line
+          and "records with a problem" not in line,
+          f"{label}/overlap: an overlap check counts overlap pairs, the unit its finding sentences use (got {line!r})")
+
+
+def followup_identical_label_control(bundle: Path):
+    """Known answer: two alternatives with the same label AND the same change are told apart in reader words - their
+    position among the setups making that change, which the setups-compared row states too - never by setup id."""
+    label = "R4/followup-identical"
+    plan, md, html = alternative_identity_control(bundle, identical=True)
+    arms = {a.get("armId"): a for a in (plan.get("scope") or {}).get("arms") or []}
+    want = {"candidate-02-patchb": "Tested alternative setup (removes FixtureSecond.esp; 1 of 2 setups with this change)",
+            "candidate-03-combined": "Tested alternative setup (removes FixtureSecond.esp; 2 of 2 setups with this change)"}
+    for arm_id, reader_label in want.items():
+        expect(arms.get(arm_id, {}).get("readerLabel"), reader_label, f"{label}: {arm_id}'s reader label")
+    links = [str(x) for x in (plan.get("reader") or {}).get("nullSummary") or []
+             if str(x).startswith("Missing or broken record links — ")]
+    check(sorted(links) == sorted(f"Missing or broken record links — {x}: This completed check found no problem in the "
+                                  "records it examined" for x in want.values()),
+          f"{label}: one no-problem line per identical arm, each with its own number (got {links!r})")
+    for n in (1, 2):
+        row = f"removes FixtureSecond.esp ({n} of 2 setups with this change)."
+        check(f"- **Tested alternative setup**: {row}" in md and f"<strong>Tested alternative setup</strong>: {row}" in html,
+              f"{label}: the setups-compared row states '{n} of 2 setups with this change' in report.md and report.html")
+    leaked = [s for s in ("candidate-02-patchb", "candidate-03-combined", "setup candidate-")
+              if s in md or s in html or any(s in x for x in links)]
+    check(not leaked, f"{label}: no technical setup id in report.md, report.html or the no-problem lines (got {leaked!r})")
+    plan, md, html = alternative_identity_control(bundle, identical="nochange")
+    arms = {a.get("armId"): a for a in (plan.get("scope") or {}).get("arms") or []}
+    expect([arms.get(x, {}).get("readerLabel") for x in ("candidate-02-patchb", "candidate-03-combined")],
+           ["Tested alternative setup (1 of 2 setups with no plugin change)",
+            "Tested alternative setup (2 of 2 setups with no plugin change)"],
+           f"{label}/nochange: two alternatives with no plugin change are numbered too")
+    check("- **Tested alternative setup** (2 of 2 setups with no plugin change)." in md
+          and "candidate-03-combined" not in md,
+          f"{label}/nochange: the setups-compared row carries the number and no setup id")
 
 
 # ---------------------------------------------------------------------------- cases
@@ -1204,6 +1393,9 @@ def case_r4(tmp, index, common):
           f"{case}: compile_plan selects overlap reader wording from report-priorities policy")
     check_patch_direction(bundle)
     check_alternative_identity(bundle)
+    followup_title_control(bundle)
+    followup_totals_wording_control(bundle)
+    followup_identical_label_control(bundle)
     reader = pres.get("reader") or {}
     expect(reader.get("suppliedPatches"), ["PatchA.esp", "PatchB.esp"],
            f"{case}: patches added by candidate arms are named although no arm is a supplied combination")

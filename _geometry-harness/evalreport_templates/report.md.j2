@@ -13,7 +13,7 @@ Evaluation record: {{ p.reader.context.evaluatedAt or "date not supplied" }}. St
 
 ## Setups compared
 
-{% for a in p.scope.arms %}- **{{ a.displayLabel }}**{% if a.pluginsAdded %}: adds {{ a.pluginsAdded|join(", ") }}{% endif %}{% if a.pluginsRemoved %}{{ "; " if a.pluginsAdded else ": " }}removes {{ a.pluginsRemoved|join(", ") }}{% endif %}. {% for limit in a.readerLimits %}{{ limit }}{% if not loop.last %} {% endif %}{% endfor %}
+{% for a in p.scope.arms %}- **{{ a.displayLabel }}**{% if a.pluginsAdded %}: adds {{ a.pluginsAdded|join(", ") }}{% endif %}{% if a.pluginsRemoved %}{{ "; " if a.pluginsAdded else ": " }}removes {{ a.pluginsRemoved|join(", ") }}{% endif %}{% if a.get("setupOrdinal") %} ({{ a.get("setupOrdinal") }}){% endif %}. {% for limit in a.readerLimits %}{{ limit }}{% if not loop.last %} {% endif %}{% endfor %}
 
 {% endfor %}
 
