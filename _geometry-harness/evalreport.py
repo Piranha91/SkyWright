@@ -1337,7 +1337,24 @@ def compile_plan(bundle_dir: Path, verify: dict, settings: dict, pr: dict, bundl
                                                                for x in supplied_locations if isinstance(x, dict)] or scope_locations},
                          "orderEvaluation": da.get("orderEvaluation"),
                          "identity": {"pluginCount": len(names), "unstatedRows": unstated, "identityLimits": limits}})
-    arm_labels = {a["armId"]: a["displayLabel"] for a in arms_out}
+    # Several alternatives can share one display label (every removal-only arm is "Tested alternative setup").
+    # A per-setup sentence then names WHICH one in the setups-compared list's own words, so a result on one
+    # alternative is never read as another's and no-problem lines are never merged across them. A label no other
+    # arm carries is kept as it is; arms whose changes are also identical fall back to the arm id.
+    def change_words(arm) -> str:
+        return "; ".join(([f"adds {', '.join(arm['pluginsAdded'])}"] if arm.get("pluginsAdded") else []) +
+                         ([f"removes {', '.join(arm['pluginsRemoved'])}"] if arm.get("pluginsRemoved") else []))
+
+    shared_labels = collections.Counter(a["displayLabel"] for a in arms_out)
+    for a in arms_out:
+        words = change_words(a) if shared_labels[a["displayLabel"]] > 1 else ""
+        a["readerLabel"] = f"{a['displayLabel']} ({words})" if words else a["displayLabel"]
+    shared_labels = collections.Counter(a["readerLabel"] for a in arms_out)
+    for a in arms_out:
+        if shared_labels[a["readerLabel"]] > 1:
+            words = change_words(a)
+            a["readerLabel"] = f"{a['displayLabel']} ({words + '; ' if words else ''}setup {a['armId']})"
+    arm_labels = {a["armId"]: a["readerLabel"] for a in arms_out}
     for f in findings:
         f["readerArmLabel"] = arm_labels.get(f.get("armId"), "Measured setup")
         c = f.get("counts") or {}
@@ -2059,7 +2076,8 @@ def load_presentation(path: Path):
     for k in ("findings", "settings", "source", "scope", "evidence"):
         if k not in plan:
             return None, f"presentation-incomplete: no `{k}`"
-    if not isinstance(plan.get("reader"), dict) or "sectionHeadings" not in plan["reader"]:
+    if (not isinstance(plan.get("reader"), dict) or "sectionHeadings" not in plan["reader"]
+            or any(isinstance(a, dict) and "readerLabel" not in a for a in (plan.get("scope") or {}).get("arms") or [])):
         return None, "presentation-needs-replan: run evalreport plan again to add the modder-facing summary"
     return plan, ""
 

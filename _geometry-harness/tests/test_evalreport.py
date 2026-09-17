@@ -769,6 +769,156 @@ def check_patch_direction(bundle: Path):
           f"{label}/removes: a removal-only row reads 'Tested alternative setup: removes …' with no leading semicolon")
 
 
+def alternative_identity_control(bundle: Path, identical: bool = False):
+    """Several alternatives that only REMOVE plugins share one display label. Built in memory from R4's bundle:
+    the measured load order loads FixtureTarget.esp and FixtureSecond.esp (both targets); candidate-01 removes
+    both, candidate-02 removes FixtureSecond.esp, candidate-03 removes FixtureTarget.esp. The results are placed
+    directly: the record-link check finds a problem on candidate-01 and none on candidates 02 and 03; the
+    required-plugins check finds a problem on candidates 01 and 03 and none on candidate-02; the contact
+    comparison adds no problem on candidates 02 and 03. `identical`: candidate-03 removes FixtureSecond.esp too,
+    so two alternatives share both the label and the change. Returns (plan, report.md, report.html)."""
+    spec = importlib.util.spec_from_file_location("evalreport_alternative_identity", EVALREPORT)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    view = module.Bundle(bundle)
+    view.disposition = copy.deepcopy(view.disposition)
+    view.plan = copy.deepcopy(view.plan)
+    arms = {a["armId"]: a for a in view.plan["arms"]}
+    base = list(arms["baseline"]["requested"]["plugins"])
+    second = copy.deepcopy(next(p for p in base if p.get("name") == "FixtureTarget.esp"))
+    second["name"] = "FixtureSecond.esp"
+    target_row = copy.deepcopy(next(t for t in view.plan["targets"] if t.get("name") == "FixtureTarget.esp"))
+    target_row["name"] = "FixtureSecond.esp"
+    view.plan["targets"].append(target_row)
+    measured = base + [second]
+    orders = {"baseline": measured,
+              "candidate-01-patcha": [p for p in measured if p.get("name") not in ("FixtureTarget.esp", "FixtureSecond.esp")],
+              "candidate-02-patchb": [p for p in measured if p.get("name") != "FixtureSecond.esp"],
+              "candidate-03-combined": [p for p in measured
+                                        if p.get("name") != ("FixtureSecond.esp" if identical else "FixtureTarget.esp")]}
+    for arm_id, plugins in orders.items():
+        arms[arm_id]["requested"]["plugins"] = plugins
+        arms[arm_id]["kind"] = "baseline" if arm_id == "baseline" else "candidate"
+        view.disposition["arms"][arm_id]["kind"] = arms[arm_id]["kind"]
+        view.disposition["arms"][arm_id].pop("orderEvaluation", None)
+    used = {"loadability.dangling-references", "loadability.masters-and-order", "geometry.placement-contact"}
+    evaluation = view.disposition["evaluation"]
+    evaluation["missing"] = [r for r in evaluation.get("missing") or [] if r.get("checkId") not in used]
+    evaluation["findings"] = [
+        {"checkId": "loadability.dangling-references", "armId": "candidate-01-patcha", "part": None, "findings": 1,
+         "verdict": None, "strength": "calibrated-inference"},
+        {"checkId": "loadability.masters-and-order", "armId": "candidate-01-patcha", "part": None, "findings": 1,
+         "verdict": None, "strength": "calibrated-inference"},
+        {"checkId": "loadability.masters-and-order", "armId": "candidate-03-combined", "part": None, "findings": 1,
+         "verdict": None, "strength": "calibrated-inference"}]
+    evaluation["completedNullChecks"] = [
+        {"checkId": "loadability.dangling-references", "armId": "candidate-02-patchb", "part": None, "coverage": 0},
+        {"checkId": "loadability.dangling-references", "armId": "candidate-03-combined", "part": None, "coverage": 0},
+        {"checkId": "loadability.masters-and-order", "armId": "candidate-02-patchb", "part": None, "coverage": 0},
+        {"checkId": "geometry.placement-contact", "armId": "candidate-02-patchb", "part": "diff", "coverage": 0},
+        {"checkId": "geometry.placement-contact", "armId": "candidate-03-combined", "part": "diff", "coverage": 0}]
+    priorities = module.load_json(module.PRIORITIES)
+    concise = priorities.get("concise") or {}
+    page = priorities.get("page") or {}
+    settings = {"mode": "concise", "layout": concise.get("layout", "normal"), "maxPages": 8,
+                "page": {"size": page.get("size", "A4"), "marginMm": page.get("marginMm", 16),
+                         "baseFontPt": page.get("baseFontPt", 10.5)},
+                "rowsPerGroup": concise.get("rowsPerGroup", 3),
+                "figuresPerFinding": concise.get("figuresPerFinding", 1),
+                "reel": priorities.get("reel") or {}}
+    original_bundle = module.Bundle
+    try:
+        module.Bundle = lambda _: view
+        plan = module.compile_plan(bundle, {"bundle": {"complete": True},
+                                            "evaluation": {"complete": False, "claim": "incomplete"}},
+                                   settings, priorities, str(bundle))
+    finally:
+        module.Bundle = original_bundle
+    shown = module.effective_view(plan, settings["rowsPerGroup"], settings["figuresPerFinding"], priorities,
+                                  settings["layout"])
+    md = module.env(False).get_template("report.md.j2").render(p=shown, css="")
+    html = module.env(True).get_template("report.html.j2").render(p=shown, css="")
+    return plan, md, html
+
+
+def check_alternative_identity(bundle: Path):
+    """Known answers: when alternatives share a display label, every per-setup sentence says WHICH alternative, in
+    the words the setups-compared list uses, and a no-problem line is never merged across arms whose results
+    differ. A single alternative keeps its bare label."""
+    label = "R4/alternative-identity"
+    plan, md, html = alternative_identity_control(bundle)
+    reader = plan.get("reader") or {}
+    changes = {"candidate-01-patcha": "removes FixtureTarget.esp, FixtureSecond.esp",
+               "candidate-02-patchb": "removes FixtureSecond.esp",
+               "candidate-03-combined": "removes FixtureTarget.esp"}
+    for arm_id, change in changes.items():
+        check(f"- **Tested alternative setup**: {change}." in md
+              and f"<strong>Tested alternative setup</strong>: {change}." in html,
+              f"{label}: the setups-compared row for {arm_id} keeps its label and reads '{change}'")
+
+    def names(line, arm_id):
+        # the arm's change as a whole phrase: a shorter change is a prefix of candidate-01's, so it must END there
+        return re.search(re.escape(changes[arm_id]) + r"(?!,\s*[\w-]|[\w-])", line) is not None
+
+    def section(text, heading, stop):
+        start = text.find(heading)
+        end = text.find(stop, start + len(heading)) if start >= 0 else -1
+        return text[start:end] if start >= 0 and end >= 0 else ""
+
+    null_lines = [str(x) for x in reader.get("nullSummary") or []]
+    bare = [x for x in null_lines if "— Tested alternative setup:" in x]
+    check(not bare, f"{label}: no no-problem line names a setup by the bare shared label (got {bare!r})")
+    links = [x for x in null_lines if x.startswith("Missing or broken record links — ")]
+    expect(len(links), 2, f"{label}: the record-link check has one no-problem line per clean arm, never merged")
+    check(any(names(x, "candidate-02-patchb") for x in links) and any(names(x, "candidate-03-combined") for x in links),
+          f"{label}: the record-link no-problem lines name candidate-02's and candidate-03's changes (got {links!r})")
+    check(not any(names(x, "candidate-01-patcha") for x in links),
+          f"{label}: the arm whose record-link check found a problem is never described as clean (got {links!r})")
+    masters = [x for x in null_lines if x.startswith("Whether the tested load order can resolve its required plugins — ")]
+    check(len(masters) == 1 and names(masters[0], "candidate-02-patchb")
+          and not names(masters[0], "candidate-01-patcha") and not names(masters[0], "candidate-03-combined"),
+          f"{label}: a check clean on exactly one arm names that arm alone (got {masters!r})")
+    md_null = section(md, "## Checks that found no problem", "## Reference information collected")
+    html_null = section(html, "<h2>Checks that found no problem</h2>", "</ul>")
+    check(md_null and "Tested alternative setup:" not in md_null and all(x in md_null for x in links + masters),
+          f"{label}: report.md's no-problem section carries the identified lines and no bare shared label")
+    check(html_null and "Tested alternative setup:" not in html_null
+          and all(html_escape(x) in html_null for x in links + masters),
+          f"{label}: report.html's no-problem section carries the identified lines and no bare shared label")
+    contact = [str(x) for x in reader.get("comparisonSummary") or []
+               if str(x).startswith("Objects left without their supporting surface — ")]
+    expect(len(contact), 2, f"{label}: the contact comparison has one no-additional-problem line per arm")
+    check(not any("— Tested alternative setup:" in x for x in contact)
+          and any(names(x, "candidate-02-patchb") for x in contact)
+          and any(names(x, "candidate-03-combined") for x in contact),
+          f"{label}: each no-additional-problem comparison line names its own arm's change (got {contact!r})")
+    found = [f for f in plan.get("findings") or [] if f.get("kind") == "finding"
+             and f.get("checkId") == "loadability.dangling-references"]
+    check(len(found) == 1 and names(str(found[0].get("readerArmLabel")), "candidate-01-patcha"),
+          f"{label}: the record-link finding names the arm it was found on "
+          f"(got {[f.get('readerArmLabel') for f in found]!r})")
+    check("**Tested alternative setup**\n" not in md and "<h3>Tested alternative setup</h3>" not in html,
+          f"{label}: the per-setup load-order headings do not repeat the bare shared label")
+
+    # two alternatives with the same label AND the same change still get one line each, told apart by setup id
+    plan, md, html = alternative_identity_control(bundle, identical=True)
+    links = [str(x) for x in (plan.get("reader") or {}).get("nullSummary") or []
+             if str(x).startswith("Missing or broken record links — ")]
+    check(len(links) == 2 and any("candidate-02-patchb" in x for x in links) and any("candidate-03-combined" in x for x in links)
+          and all("removes FixtureSecond.esp" in x for x in links),
+          f"{label}/identical: identical changes keep one line per arm, each naming its change and setup (got {links!r})")
+
+    # a single alternative is the only setup with its label: it keeps the bare label everywhere
+    plan, md, html = patch_direction_control(bundle, "removes")
+    single = [str(x) for x in (plan.get("reader") or {}).get("nullSummary") or [] if " — Tested alternative setup" in str(x)]
+    check(single and all("— Tested alternative setup: " in x for x in single) and "**Tested alternative setup**\n" in md,
+          f"{label}/single: one removal alternative keeps the bare label in its lines and heading (got {single!r})")
+
+
+def html_escape(s: str) -> str:
+    return s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace('"', "&#34;").replace("'", "&#39;")
+
+
 # ---------------------------------------------------------------------------- cases
 
 def case_r1(tmp, index, common):
@@ -1053,6 +1203,7 @@ def case_r4(tmp, index, common):
           and any(str(f.get("readerPlain") or "").startswith("POLICY OVERLAP REDUCTION") for f in policy_overlap),
           f"{case}: compile_plan selects overlap reader wording from report-priorities policy")
     check_patch_direction(bundle)
+    check_alternative_identity(bundle)
     reader = pres.get("reader") or {}
     expect(reader.get("suppliedPatches"), ["PatchA.esp", "PatchB.esp"],
            f"{case}: patches added by candidate arms are named although no arm is a supplied combination")
@@ -1068,6 +1219,13 @@ def case_r4(tmp, index, common):
     stale_res = evalreport(["report", "--presentation", stale / "presentation.json", "--out", stale / "out", "--no-print"])
     check(stale_res.returncode == 2 and "presentation-needs-replan" in (stale_res.stdout or "") + (stale_res.stderr or ""),
           f"{case}: a presentation planned before section headings existed is refused by name, not rendered "
+          f"(exit {stale_res.returncode})")
+    unlabelled_plan = copy.deepcopy(pres)
+    ((unlabelled_plan.get("scope") or {}).get("arms") or [{}])[-1].pop("readerLabel", None)
+    (stale / "presentation.json").write_text(json.dumps(unlabelled_plan), encoding="utf-8")
+    stale_res = evalreport(["report", "--presentation", stale / "presentation.json", "--out", stale / "out-unlabelled", "--no-print"])
+    check(stale_res.returncode == 2 and "presentation-needs-replan" in (stale_res.stdout or "") + (stale_res.stderr or ""),
+          f"{case}: a presentation planned before setups had reader labels is refused by name, not rendered "
           f"(exit {stale_res.returncode})")
     md, _ = assert_common(case, bundle, out, pres, common, v) or ("", "")
     fs = pres.get("findings") or []

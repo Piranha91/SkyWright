@@ -22,7 +22,7 @@ Evaluation record: {{ p.reader.context.evaluatedAt or "date not supplied" }}. St
 {{ p.reader.locationOrder.intro or "Plugins tied to the places discussed below, in measured order." }}
 
 {% for a in p.scope.arms %}
-**{{ a.displayLabel }}**
+**{{ a.readerLabel }}**
 
 {% for plugin in a.locationPluginOrder %}- {{ plugin }}
 {% else %}{{ p.reader.locationOrder.empty or "No evidenced plugin was identified." }}
