@@ -83,6 +83,31 @@ def load(p: Path):
     return json.loads(Path(p).read_text(encoding="utf-8")) if Path(p).exists() else None
 
 
+def sweep_launches(run: Path) -> list[Path]:
+    """The run's ordersweep launch folders (`RUN/sweep/inv-NNNN`), oldest first: one per launch, never rewritten."""
+    root = Path(run) / "sweep"
+    if not root.is_dir():
+        return []
+    return sorted((p for p in root.iterdir() if p.is_dir() and p.name.startswith("inv-")),
+                  key=lambda p: int(p.name.split("-", 1)[1]))
+
+
+def last_sweep(run: Path) -> Path:
+    """The newest launch folder (a path that does not exist when nothing was launched)."""
+    launches = sweep_launches(run)
+    return launches[-1] if launches else Path(run) / "sweep" / "inv-none"
+
+
+def sweep_cache_lines(run: Path) -> list[str]:
+    """Every launch's cache-log lines, oldest launch first."""
+    out = []
+    for f in sweep_launches(run):
+        p = f / "cache-log.txt"
+        if p.exists():
+            out += p.read_text(encoding="utf-8").splitlines()
+    return out
+
+
 # ------------------------------------------------------------------ tolerant accessors over B's shapes
 
 def as_map(blob, key_names=("checkId", "id")):
@@ -395,7 +420,7 @@ def case_06(tmp):
     disp = load(run / "disposition.json") or {}
     assert_disposition(disp, o, case)
     # the real conflictdiff's own verdict, retained verbatim somewhere in the run
-    blob = json.dumps(disp) + json.dumps(load(run / "sweep" / "summary.json") or {})
+    blob = json.dumps(disp) + json.dumps(load(last_sweep(run) / "summary.json") or {})
     check("DIFFERENTIAL-RECLASSIFIED" in blob, f"{case}: the RECLASSIFIED verdict is retained verbatim (D4/D7)")
     check("DIFFERENTIAL-VERIFIED" not in blob, f"{case}: nothing on this arm was credited as a repair")
 
@@ -817,6 +842,20 @@ def case_12(tmp):
         rb = receipt(r2, plan2, base_key) or {}
         check((rb.get("validation") or {}).get("accepted") is True,
               f"{case}/{spec['id']}: the undamaged baseline arm is still accepted (not a blanket rejection)")
+        if spec["entry"].endswith("__arm"):
+            # Review V2 H2's mechanism: reverse and diff were credited whatever the arm part's acceptance. An arm emit
+            # rejected for its identity measured some other configuration, so nothing built on it is credited.
+            for part in ("reverse", "diff"):
+                rp = receipt(r2, plan2, spec["entry"][:-len("arm")] + part) or {}
+                check(rp and not (rp.get("validation") or {}).get("accepted"),
+                      f"{case}/{spec['id']}: the {part} built on the rejected arm emit is not accepted "
+                      f"(got {(rp.get('result') or {}).get('execution')})")
+        if spec["entry"].endswith("__reverse"):
+            # Review R1 M1-S5: the diff's created rows were split by that rejected reverse emit, so it is not credited.
+            rp = receipt(r2, plan2, spec["entry"][:-len("reverse")] + "diff") or {}
+            check(rp and not (rp.get("validation") or {}).get("accepted"),
+                  f"{case}/{spec['id']}: the diff split by the rejected reverse emit is not accepted "
+                  f"(got {(rp.get('result') or {}).get('execution')})")
 
 
 def case_13(tmp):
@@ -1037,7 +1076,7 @@ def case_14(tmp):
     evalrun(["run", "--run", base], scen)
     plan = load(base / "plan.json") or {}
     victim_rel = None
-    for p in sorted((base / "sweep" / "navownprobe").glob("baseline.json")):
+    for p in sorted((last_sweep(base) / "navownprobe").glob("baseline.json")):
         victim_rel = p.relative_to(base).as_posix()
     check(victim_rel is not None, f"{case}: the baseline navmesh emit exists to be damaged")
 
@@ -2033,17 +2072,21 @@ def case_21(tmp):
     base_id = next((a["armId"] for a in plan.get("arms") or [] if a.get("kind") == "baseline"), "baseline")
 
     # an EARLIER invocation's leftovers that must never be adopted: a summary claiming the slow arm passed,
-    # and a per-arm log carrying the Runner's completion trailer
-    sweep = run / "sweep"
-    (sweep / "logs").mkdir(parents=True, exist_ok=True)
+    # and a per-arm log carrying the Runner's completion trailer - in the older shared layout (RUN/sweep) and in an
+    # earlier launch folder (RUN/sweep/inv-0001) alike
     row = {"probe": "navownprobe", "candidate": cand_stem, "probeExit": 0, "reverseExit": 0, "diffExit": 0,
            "probeRefused": False, "illegal": False,
            "diff": {"verdict": "DIFFERENTIAL-VERIFIED", "counts": {"created": 0}, "refusals": [], "delta": []},
            "created": {"created": 0, "newDefect": 0, "attributed": 0, "unmeasured": 0}}
-    (sweep / "summary.json").write_text(json.dumps({"baseline": "stale", "probes": ["navownprobe"], "candidates": {
-        cand_stem: {"classification": "PASSES-COMPLETED-CHECKS", "rows": [row]}}}), encoding="utf-8")
-    (sweep / "logs" / f"navownprobe-{cand_stem}.txt").write_text(
-        "$ stale\n(exit 0, 1.0s)\n\nfrom an earlier invocation\n", encoding="utf-8")
+    for leftovers in (run / "sweep", run / "sweep" / "inv-0001"):
+        (leftovers / "logs").mkdir(parents=True, exist_ok=True)
+        (leftovers / "summary.json").write_text(json.dumps({"baseline": "stale", "probes": ["navownprobe"], "candidates": {
+            cand_stem: {"classification": "PASSES-COMPLETED-CHECKS", "rows": [row]}}}), encoding="utf-8")
+        (leftovers / "logs" / f"navownprobe-{cand_stem}.txt").write_text(
+            "$ stale\n(exit 0, 1.0s)\n\nfrom an earlier invocation\n", encoding="utf-8")
+        (leftovers / "jobs.jsonl").write_text(json.dumps(
+            {"job": f"navownprobe-{cand_stem}", "kind": "probe", "outcome": "ran", "exitCode": 0,
+             "emitWritten": True}) + "\n", encoding="utf-8")
 
     # ---- the interrupted run: the deadline must stop the sweep's tree with nobody's help
     fired = threading.Event()
@@ -2146,8 +2189,8 @@ def case_21(tmp):
     expect(vb.returncode, 0, f"{case}: verify-bundle on the interrupted run exits 0", "D8")
 
     # ---- resume: the slow arm now behaves; completed work is reused, the rest re-run under a fresh deadline
-    cache_log = sweep / "cache-log.txt"
-    before_cache = cache_log.read_text(encoding="utf-8") if cache_log.exists() else ""
+    launches_before = sweep_launches(run)
+    before_cache = "\n".join(sweep_cache_lines(run))
     journal_before = (run / "journal.jsonl").read_text(encoding="utf-8")
     res = ev(["resume", "--run", run])
     expect(res.returncode, 0, f"{case}: resume exits 0")
@@ -2156,8 +2199,11 @@ def case_21(tmp):
         check(execution_of(led.get(f"{nav}__{aid}__{part}")) in ("completed", "reused"),
               f"{case}: after resume {nav} [{aid}/{part}] is terminal-ok "
               f"(got {execution_of(led.get(f'{nav}__{aid}__{part}'))})")
-    after_cache = cache_log.read_text(encoding="utf-8") if cache_log.exists() else ""
-    new_cache = after_cache[len(before_cache):]
+    new_launches = [f for f in sweep_launches(run) if f not in launches_before]
+    check(len(new_launches) == 1, f"{case}: the resume launched the sweep once, into a folder of its own "
+                                  f"(new launch folders: {[f.name for f in new_launches]})")
+    new_cache = "\n".join(ln for f in new_launches if (f / "cache-log.txt").exists()
+                          for ln in (f / "cache-log.txt").read_text(encoding="utf-8").splitlines())
     check("RECORDED navownprobe-baseline" in before_cache and f"REUSED navownprobe-baseline" in new_cache
           and "RECORDED navownprobe-baseline" not in new_cache,
           f"{case}: the baseline probe that finished before the stop is reused from the verified cache, "
@@ -2169,8 +2215,11 @@ def case_21(tmp):
           f"{case}: resume appends; the stop's journal history is not erased")
     check(len(field(load(run / "ledger.json") or {}, "runIds", default=[])) >= 2,
           f"{case}: the ledger lists both invocations")
-    summ = load(sweep / "summary.json") or {}
-    check(summ.get("baseline") != "stale", f"{case}: the stale summary was replaced by this sweep's own")
+    summ = load(last_sweep(run) / "summary.json") or {}
+    check(summ.get("baseline") not in (None, "stale"), f"{case}: the resume's credit comes from this sweep's own summary")
+    check((load(run / "sweep" / "inv-0001" / "summary.json") or {}).get("baseline") == "stale"
+          and (load(run / "sweep" / "summary.json") or {}).get("baseline") == "stale",
+          f"{case}: the earlier leftovers were neither adopted nor rewritten")
 
     # ---- a clean re-invocation adopts nothing new and runs no child
     again = ev(["run", "--run", run])
@@ -2443,6 +2492,14 @@ def case_23(tmp):
     # phase B: refuse only the ordersweep launch -> every planned sweep part is blocked(uncontained)
     r = ev(["run", "--run", run], extra_env={"PYTHONPATH": str(hook), "EVALRUN_TEST_REFUSE_ARGV": "ordersweep"})
     expect(r.returncode, 0, f"{case}: run exits 0 (an incomplete evaluation is not a crash)")
+    # Review R1 L1: a launch the Runner refused before the child ran creates no launch folder, and this invocation's
+    # ledger row names none (`an invocation that launches nothing creates none`).
+    check(not sweep_launches(run), f"{case}: the refused ordersweep launch left no RUN/sweep/inv-* folder "
+                                   f"({[f.name for f in sweep_launches(run)]})")
+    run_rows = (load(run / "ledger.json") or {}).get("runIds") or []
+    named = (run_rows[-1].get("sweepFolders") or []) if run_rows else None
+    check(named is not None and not any("inv-" in str(f) for f in named),
+          f"{case}: the ledger's last runIds row names no launch folder for the refused launch (sweepFolders {named})")
     if (store / "history.jsonl").exists():
         rows = [json.loads(l) for l in (store / "history.jsonl").read_text(encoding="utf-8").splitlines() if l.strip()]
     else:
@@ -2451,7 +2508,8 @@ def case_23(tmp):
     check(bool(sweep_rows) and sweep_rows[-1].get("stoppedBy") == "containment",
           f"{case}: the refusal really came from the Runner (RunLog stoppedBy "
           f"{[x.get('stoppedBy') for x in sweep_rows]})")
-    check(not (run / "sweep" / "summary.json").exists(), f"{case}: the sweep child never ran (no summary written)")
+    check(not any((f / "summary.json").exists() for f in sweep_launches(run)),
+          f"{case}: the sweep child never ran (no summary written)")
     led = ledger_entries(load(run / "ledger.json") or {})
     parts = [(base_id, "arm"), (cand_id, "arm"), (cand_id, "reverse"), (cand_id, "diff")]
     for aid, part in parts:
@@ -2748,15 +2806,14 @@ def case_24(tmp):
     led1 = ledger_entries(load(run / "ledger.json") or {})
     stopped_entry = led1.get(f"{nav}__{cand_id}__arm") or {}
     expect(execution_of(stopped_entry), "stopped(deadline)", f"{case}: the early-exit arm was stopped at the deadline")
-    clog = run / "sweep" / "cache-log.txt"
-    before = clog.read_text(encoding="utf-8").splitlines() if clog.exists() else []
+    before = sweep_cache_lines(run)
     check(not any(l.startswith(f"RECORDED {job}:") for l in before),
           f"{case}: the stopped invocation did not cache the probe whose descendant was still running "
           f"(cache log: {before})")
 
     r2 = ev(["resume", "--run", run], timeout=180)
     expect(r2.returncode, 0, f"{case}: resume exits 0")
-    added = (clog.read_text(encoding="utf-8").splitlines() if clog.exists() else [])[len(before):]
+    added = sweep_cache_lines(run)[len(before):]
     check(not any(l.startswith(f"REUSED {job}:") for l in added),
           f"{case}: resume does NOT reuse the stopped invocation's cache entry (added: {added})")
     check(any(l.startswith(f"RECORDED {job}:") for l in added),
@@ -3220,14 +3277,22 @@ def case_27(tmp):
     """An ordersweep that was NOT stopped credits only what its own child produced or verifiably reused.
     Everything runs in-process against a planned fixture run, with the Runner's ordersweep job wrapped so the
     test controls what the child leaves on disk; the probes, ordersweep.py and conflictdiff stay real.
+    Since 2026-09-17 every launch writes its own `RUN/sweep/inv-NNNN` folder and a job is credited only from the
+    record that launch appended to its `jobs.jsonl`; the earlier invocations' files below sit in EARLIER launch
+    folders, which is where they now are.
     (a) An arm kept out of the sweep by its prerequisite keeps blocked(prerequisite:...): the sweep does not
         measure it from a copy an earlier invocation left in RUN/candidates, and no part is written for it.
     (b) A sweep child that fails before writing anything: the summary, per-job logs, emits, diff log and
-        cache-log REUSED lines left by EARLIER invocations credit nothing - no part is terminal-ok.
-    (c) The control for (b): the next invocation's genuine cache reuse (REUSED appended by its own child)
-        is still credited although the reused emits are an hour old.
-    (d) A per-job log this child wrote without a completion trailer is not an exit 0: that arm is not
-        credited, while a job of the same child that did complete is."""
+        cache-log REUSED lines left by EARLIER launches credit nothing - no part is terminal-ok. (The diff part's
+        cause was `output-stale` while an earlier diff log sat at this launch's path; no earlier file is at any
+        path this launch reads now, so its cause is that no diff ran on an unaccepted arm: `output-missing`.)
+    (c) The control for (b): the next invocation's genuine cache reuse (REUSED by its own child from an earlier
+        launch's verified cache) is still credited although the reused emits are an hour old.
+    (d) A job this child started and did not finish has no record in its `jobs.jsonl`, whatever its log or emit
+        holds: that arm is not credited, while a job of the same child that did complete is.
+    (e) A reverse job this child ran that wrote nothing, after an earlier launch wrote that reverse emit: it is
+        not this child's measurement. (Its cause was `output-stale` while the earlier emit sat at the same path; the
+        earlier emit is in its own launch folder now, so the cause is `output-missing`.)"""
     import importlib.util
     import re
     case = "case-27-sweep-credits-own-results"
@@ -3322,7 +3387,7 @@ def case_27(tmp):
         expect(parts, {}, f"{case}/blocked: no sweep part is written for the kept-out arm")
         check(not (run_a / "candidates" / cand["candidateFile"]).exists(),
               f"{case}/blocked: the earlier copy of the kept-out arm's order is removed from RUN/candidates")
-        check(not (run_a / "sweep" / "logs" / f"navownprobe-{stem}.txt").exists(),
+        check(not any((f / "logs" / f"navownprobe-{stem}.txt").exists() for f in sweep_launches(run_a)),
               f"{case}/blocked: ordersweep did not measure the kept-out arm")
 
         # (b) ------------------------------------------------- results left by earlier invocations
@@ -3331,8 +3396,6 @@ def case_27(tmp):
         if cand is None:
             return
         cid, stem = cand["armId"], Path(cand["candidateFile"]).stem
-        sweep = run_b / "sweep"
-        clog = sweep / "cache-log.txt"
 
         def kill_after(real, jobs):
             real(jobs)
@@ -3343,13 +3406,14 @@ def case_27(tmp):
                 check(False, f"{case}/stale: premise - the {verb} invocation was killed after its sweep child")
             except Killed:
                 pass
-        check(f"REUSED navownprobe-{stem}:" in "\n".join(log_lines(clog)),
-              f"{case}/stale: premise - an earlier invocation reused the candidate job from the cache")
-        check((sweep / "summary.json").exists() and (sweep / "logs" / f"diff-navownprobe-{stem}.txt").exists()
-              and (sweep / "navownprobe" / f"{stem}.reverse.json").exists(),
-              f"{case}/stale: premise - the earlier invocations left a summary, a diff log and a reverse emit")
+        earlier = sweep_launches(run_b)
+        check(len(earlier) == 2 and f"REUSED navownprobe-{stem}:" in "\n".join(log_lines(earlier[-1] / "cache-log.txt")),
+              f"{case}/stale: premise - the second of two earlier launches reused the candidate job from the cache")
+        check(all((f / "summary.json").exists() and (f / "logs" / f"diff-navownprobe-{stem}.txt").exists()
+                  for f in earlier) and (earlier[0] / "navownprobe" / f"{stem}.reverse.json").exists(),
+              f"{case}/stale: premise - the earlier launches left summaries, diff logs and a reverse emit")
         old = time.time() - 3600
-        for p in sweep.rglob("*"):
+        for p in (run_b / "sweep").rglob("*"):
             if p.is_file():
                 os.utime(p, (old, old))             # the earlier invocations were an hour ago
 
@@ -3359,23 +3423,24 @@ def case_27(tmp):
             argv = list(jobs[0]["argv"])
             argv[argv.index("--candidates") + 1] = str(empty)
             return real([dict(jobs[0], argv=argv)])  # the real ordersweep exits 1 before writing anything
-        n_clog = len(log_lines(clog))
         expect(inproc(["resume", "--run", run_b], fail_early), 0, f"{case}/stale: the failed-sweep resume exits 0")
         check(any(ln.startswith("(exit 1,") for ln in log_lines(run_b / "logs" / "ordersweep.txt")),
               f"{case}/stale: premise - this invocation's ordersweep child exited 1")
-        expect(len(log_lines(clog)), n_clog, f"{case}/stale: premise - this child appended nothing to cache-log.txt")
+        failed = last_sweep(run_b)
+        check(failed not in earlier and not log_lines(failed / "cache-log.txt") and not log_lines(failed / "jobs.jsonl"),
+              f"{case}/stale: premise - this child wrote no cache line and no job record in its own folder")
         led = led_of(run_b)
         want = {f"{nav}__baseline__arm": "rejected(completion-missing)",
                 f"{nav}__{cid}__arm": "rejected(completion-missing)",
                 f"{nav}__{cid}__reverse": "blocked(no-reverse-measurement)",
-                f"{nav}__{cid}__diff": "rejected(output-stale)"}
+                f"{nav}__{cid}__diff": "rejected(output-missing)"}
         for key, st in want.items():
             expect(status(led, key), st, f"{case}/stale: {key.split('__', 1)[1]} credits nothing earlier "
                                          f"invocations left")
 
         # (c) ------------------------------------------------------ genuine reuse is still credited
         expect(inproc(["resume", "--run", run_b]), 0, f"{case}/reuse: the next resume exits 0")
-        added = log_lines(clog)[n_clog:]
+        added = log_lines(last_sweep(run_b) / "cache-log.txt")
         for job in (f"navownprobe-baseline", f"navownprobe-{stem}", f"navownprobe-{stem}-reverse"):
             check(any(ln.startswith(f"REUSED {job}:") for ln in added) and
                   not any(ln.startswith(f"RECORDED {job}:") for ln in added),
@@ -3385,17 +3450,17 @@ def case_27(tmp):
             expect(status(led, key), "completed", f"{case}/reuse: {key.split('__', 1)[1]} is credited "
                                                   f"from this invocation's verified reuse")
 
-        # (d) ------------------------------------------- a log this child wrote with no completion trailer
+        # (d) ------------------------------------------- a job this child started and did not finish
         run_d = tmp / f"{case}-unfinished"
         cand = plan(run_d)
         if cand is None:
             return
         cid, stem = cand["armId"], Path(cand["candidateFile"]).stem
-        sweep = run_d / "sweep"
         subs = []
 
         def unfinished(real, jobs):
             res = real(jobs)
+            sweep = Path(jobs[0]["argv"][jobs[0]["argv"].index("--out") + 1])
             (sweep / "summary.json").unlink(missing_ok=True)
             log = sweep / "logs" / f"navownprobe-{stem}.txt"
             text, n = re.subn(r"^\(exit -?\d+, [^)\n]*\)$",
@@ -3404,13 +3469,18 @@ def case_27(tmp):
                               log.read_text(encoding="utf-8"), flags=re.M)
             subs.append(n)
             log.write_text(text, encoding="utf-8")
+            # the job died before ordersweep could append its record, and nothing after it ran
+            keep = [ln for ln in (sweep / "jobs.jsonl").read_text(encoding="utf-8").splitlines()
+                    if json.loads(ln)["job"] == "navownprobe-baseline"]
+            subs.append(len(keep))
+            (sweep / "jobs.jsonl").write_text("".join(ln + "\n" for ln in keep), encoding="utf-8")
             for p in (sweep / "navownprobe" / f"{stem}.reverse.json", sweep / "logs" / f"navownprobe-{stem}-reverse.txt",
                       sweep / "logs" / f"diff-navownprobe-{stem}.txt"):
-                p.unlink(missing_ok=True)           # nothing after the unfinished job ran
+                p.unlink(missing_ok=True)
             return [dict(res[0], exitCode=1)]       # and ordersweep died before its summary
         expect(inproc(["run", "--run", run_d], unfinished), 0, f"{case}/unfinished: the run exits 0")
-        expect(subs, [1], f"{case}/unfinished: premise - exactly one completion trailer was replaced")
-        check((sweep / "navownprobe" / f"{stem}.json").exists(),
+        expect(subs, [1, 1], f"{case}/unfinished: premise - one completion trailer replaced, one job record kept")
+        check((last_sweep(run_d) / "navownprobe" / f"{stem}.json").exists(),
               f"{case}/unfinished: premise - the unfinished job's emit is on disk, written by this child")
         led = led_of(run_d)
         expect(status(led, f"{nav}__baseline__arm"), "completed",
@@ -3428,15 +3498,15 @@ def case_27(tmp):
         if cand is None:
             return
         cid, stem = cand["armId"], Path(cand["candidateFile"]).stem
-        sweep = run_e / "sweep"
         try:
             inproc(["run", "--run", run_e], kill_after)
             check(False, f"{case}/reverse-no-emit: premise - the first invocation was killed after its sweep child")
         except Killed:
             pass
-        rev = sweep / "navownprobe" / f"{stem}.reverse.json"
+        first = last_sweep(run_e)
+        rev = first / "navownprobe" / f"{stem}.reverse.json"
         check(rev.exists(), f"{case}/reverse-no-emit: premise - the earlier invocation wrote the reverse emit")
-        (sweep / "cache.json").unlink(missing_ok=True)    # the cache is lost: every job is measured again
+        (first / "cache.json").unlink(missing_ok=True)    # the cache is lost: every job is measured again
         old = time.time() - 3600
         os.utime(rev, (old, old))
         doc = load(scen)
@@ -3444,15 +3514,19 @@ def case_27(tmp):
         scen_e = tmp / f"{case}-reverse-no-emit.scenario.json"
         scen_e.write_text(json.dumps(doc, indent=1), encoding="utf-8")
         expect(inproc(["resume", "--run", run_e], scenario=scen_e), 0, f"{case}/reverse-no-emit: resume exits 0")
-        rl = sweep / "logs" / f"navownprobe-{stem}-reverse.txt"
-        check(rl.exists() and "without writing the emit" in rl.read_text(encoding="utf-8")
+        rl = last_sweep(run_e) / "logs" / f"navownprobe-{stem}-reverse.txt"
+        check(last_sweep(run_e) != first and rl.exists() and "without writing the emit" in rl.read_text(encoding="utf-8")
               and any(ln.startswith("(exit 0,") for ln in log_lines(rl)),
               f"{case}/reverse-no-emit: premise - this child ran the reverse job, which exited 0 writing nothing")
         led = led_of(run_e)
         expect(status(led, f"{nav}__{cid}__arm"), "completed",
                f"{case}/reverse-no-emit: premise - this child measured the candidate arm")
-        expect(status(led, f"{nav}__{cid}__reverse"), "rejected(output-stale)",
+        expect(status(led, f"{nav}__{cid}__reverse"), "rejected(output-missing)",
                f"{case}/reverse-no-emit: the earlier reverse emit is not this child's measurement")
+        rc = load(run_e / "receipts" / f"{nav}__{cid}__reverse.json") or {}
+        check(rev.exists() and not any(str(o.get("path", "")).startswith(f"sweep/{first.name}/")
+                                       for o in rc.get("outputs") or []),
+              f"{case}/reverse-no-emit: the reverse receipt names no file of the earlier launch, which is left in place")
     finally:
         mod.Runner, mod.sweep_arms_allowed = real_runner, real_allowed
 
@@ -3515,6 +3589,20 @@ def case_28(tmp):
           f"{case}/2: the baseline job, which wrote its emit over an earlier one, is still recorded (added: {added})")
     check(not has(added, "RECORDED", job) and has(added, "NOT-RECORDED", job),
           f"{case}/2: the job that wrote nothing is NOT recorded with the earlier emit, and says so (added: {added})")
+    # Review V2 H2 inside ordersweep: a zero exit over a file this launch did not write is not a measurement, so no
+    # reverse or diff is built on it and its classification is not a pass (evalrun gives every launch a fresh folder;
+    # a hand-run ordersweep reusing one --out is where an earlier emit can still sit at the path).
+    rec2 = {}
+    for ln in ((out / "jobs.jsonl").read_text(encoding="utf-8").splitlines() if (out / "jobs.jsonl").exists() else []):
+        rec2[json.loads(ln)["job"]] = json.loads(ln)
+    summ2 = (load(out / "summary.json") or {}).get("candidates", {}).get(stem, {})
+    row2 = next((r for r in summ2.get("rows", []) if r.get("probe") == "navownprobe"), {})
+    check((rec2.get(job) or {}).get("outcome") == "ran" and (rec2.get(job) or {}).get("emitWritten") is False,
+          f"{case}/2: the job record says the job ran and wrote nothing (record: {rec2.get(job)})")
+    check(f"{job}-reverse" not in rec2 and f"diff-{job}" not in rec2 and row2.get("emitNotWritten") is True
+          and (row2.get("diff") or {}).get("verdict") == "(not run)" and summ2.get("classification") == "UNRESOLVED",
+          f"{case}/2: no reverse or diff is built on the earlier emit and the candidate reads UNRESOLVED "
+          f"(jobs {sorted(rec2)}, classification {summ2.get('classification')}, diff {(row2.get('diff') or {}).get('verdict')})")
 
     code, added = sweep(scen)
     expect(code, 0, f"{case}/3: ordersweep exits 0")
@@ -3586,11 +3674,11 @@ def case_28(tmp):
 
         def no_summary(real, jobs):
             res = real(jobs)
-            (run5 / "sweep" / "summary.json").unlink()
+            (last_sweep(run5) / "summary.json").unlink()
             return [dict(res[0], exitCode=1)]
         expect(inproc(["run", "--run", run5], no_summary), 0, f"{case}/no-summary: run exits 0")
         led = ledger_entries(load(run5 / "ledger.json") or {})
-        dlog = run5 / "sweep" / "logs" / f"diff-navownprobe-{cstem}.txt"
+        dlog = last_sweep(run5) / "logs" / f"diff-navownprobe-{cstem}.txt"
         check(dlog.exists() and "(exit 0," in dlog.read_text(encoding="utf-8"),
               f"{case}/no-summary: premise - this child ran the diff to completion")
         expect(execution_of(led.get(f"{nav}__{cid}__arm")), "completed",
@@ -3646,10 +3734,10 @@ def case_29(tmp):
             def run(self, jobs, echo=True):
                 res = base_runner.run(self, jobs, echo)
                 if damage and jobs and jobs[0].get("id") == "ordersweep":
-                    s = load(run / "sweep" / "summary.json")
+                    s = load(last_sweep(run) / "summary.json")
                     for r in s["candidates"][stem]["rows"]:
                         r["diff"]["verdict"] = "(no verdict line)"
-                    (run / "sweep" / "summary.json").write_text(json.dumps(s, indent=1), encoding="utf-8")
+                    (last_sweep(run) / "summary.json").write_text(json.dumps(s, indent=1), encoding="utf-8")
                 return res
         mod.Runner = HookRunner
         saved = {k: os.environ.get(k) for k in ("EVALRUN_FAKE_SCENARIO", "HOUSECARL_RUNLOG_DIR")}
@@ -3689,6 +3777,1282 @@ def case_29(tmp):
 
 
 CASES["case-29"] = case_29
+
+
+# ------------------------------------------------------ cases 30-36: sweep evidence per invocation
+# Review V2's H2, M1, M2, M3, M4 and the reused-diff defect (3b), plus the verified-reuse guard. The assertions
+# read what the controller records (ledger statuses, receipt exit codes, output hashes, finalize's integrity,
+# the disposition, and how many children it launched), not where RUN/sweep keeps its files. A check that
+# holds only for the per-invocation folder layout says `(layout)`.
+
+TERMINAL = ("completed", "reused")
+
+REFUSE_ORDER_PROBE = r'''
+"""The ordinary fake PROBE, except that it refuses the order file whose stem is REFUSE_STEM (exit 4)."""
+import sys
+from pathlib import Path
+sys.path.insert(0, FIXT_DIR)
+from fakeprobe import main
+argv = sys.argv[1:]
+order = argv[argv.index("--order") + 1] if "--order" in argv else ""
+if Path(order).stem == REFUSE_STEM:
+    print("REFUSED: fixture - this order's masters do not resolve")
+    raise SystemExit(4)
+raise SystemExit(main(PROBE))
+'''
+
+
+def sweep_folders(run: Path) -> list[Path]:
+    """The folders an ordersweep launch writes into, oldest first: RUN/sweep/inv-* when any exist, else
+    RUN/sweep itself (the shared folder)."""
+    s = Path(run) / "sweep"
+    inv = sorted(p for p in s.glob("inv-*") if p.is_dir()) if s.is_dir() else []
+    return inv or [s]
+
+
+def text_lines(p: Path) -> list[str]:
+    return Path(p).read_text(encoding="utf-8", errors="replace").splitlines() if Path(p).exists() else []
+
+
+def cache_log_snapshot(run: Path) -> dict:
+    return {str(f): len(text_lines(f / "cache-log.txt")) for f in sweep_folders(run)}
+
+
+def cache_log_added(run: Path, snap: dict) -> list[str]:
+    """The cache-log lines written since `snap`, in either layout: the new lines of a folder that existed, and
+    every line of a folder that did not."""
+    out = []
+    for f in sweep_folders(run):
+        out += text_lines(f / "cache-log.txt")[snap.get(str(f), 0):]
+    return out
+
+
+def receipt_paths(rc: dict) -> list[str]:
+    """Every path a receipt names as evidence or as an input it was measured against."""
+    c = rc.get("consumed") or {}
+    out = [o.get("path") for o in rc.get("outputs") or []] + [rc.get("log"), c.get("baseEmitPath")]
+    out += [i.get("path") for i in c.get("inputs") or []]
+    return [p for p in out if p]
+
+
+def inside(run: Path, rel: str) -> bool:
+    p = Path(rel)
+    p = p if p.is_absolute() else Path(run) / p
+    try:
+        p.resolve().relative_to(Path(run).resolve())
+        return True
+    except ValueError:
+        return False
+
+
+def kill_recorded(pidfile: Path) -> list:
+    """Protects the machine ONLY: kill whatever a slow fake recorded and is still alive."""
+    left = []
+    for name, pid in _pids(pidfile).items():
+        if _pid_alive(pid):
+            left.append((name, pid))
+            if os.name == "nt":
+                subprocess.run(["taskkill", "/T", "/F", "/PID", str(pid)], capture_output=True)
+            else:
+                os.kill(pid, 9)
+    return left
+
+
+class SweepInProc:
+    """case_27's in-process technique, shared: a private copy of the evalrun module whose Runner counts every
+    child it is handed, records the RUN/candidates listing at each ordersweep launch (before the child starts),
+    and lets a case wrap the ordersweep job. The probes, ordersweep.py and conflictdiff stay real."""
+
+    def __init__(self, tmp: Path, case: str, fixture: str = "case-08-interrupt-resume"):
+        import importlib.util
+        spec = importlib.util.spec_from_file_location("evalrun_" + case.replace("-", "_"), EVALRUN)
+        self.mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(self.mod)
+        self.case, self.fixture = case, fixture
+        self.scen = case_paths(fixture)[3]
+        self.store = tmp / f"{case}-runlog"
+        self.launches: list = []           # one RUN/candidates listing per ordersweep launch
+        self.jobs: list[str] = []          # every job id handed to a Runner
+        self.hook = None
+        base_runner = self.mod.Runner
+        outer = self
+
+        class HookRunner(base_runner):
+            def run(self, jobs, echo=True):
+                outer.jobs += [str(j.get("id")) for j in jobs]
+                if jobs and jobs[0].get("id") == "ordersweep":
+                    argv = list(jobs[0].get("argv") or [])
+                    cdir = Path(argv[argv.index("--candidates") + 1]) if "--candidates" in argv else None
+                    outer.launches.append(sorted(p.name for p in cdir.iterdir())
+                                          if cdir is not None and cdir.is_dir() else [])
+                    if outer.hook is not None:
+                        return outer.hook(lambda js: base_runner.run(self, js, echo), jobs)
+                return base_runner.run(self, jobs, echo)
+        self.mod.Runner = HookRunner
+
+    def plan(self, run: Path, extra=(), fixture: str | None = None):
+        fx = fixture or self.fixture
+        p = subprocess.run([sys.executable, str(EVALRUN), "plan", "--registry",
+                            str(GEN / "registry" / "fixture-check-registry.json"),
+                            "--scope", str(GEN / "cases" / fx / "scope.json"),
+                            "--candidates", str(GEN / "cases" / fx / "candidates"),
+                            "--out", str(run), "--harness", str(REAL_HARNESS)] + probe_cmds()
+                           + [str(x) for x in extra],
+                           capture_output=True, text=True, timeout=300,
+                           env=dict(os.environ, EVALRUN_FAKE_SCENARIO=str(self.scen),
+                                    HOUSECARL_RUNLOG_DIR=str(self.store)))
+        expect(p.returncode, 0, f"{self.case}: plan exit for {run.name}")
+        if p.returncode != 0:
+            print(p.stdout[-2000:], p.stderr[-2000:])
+            return None
+        return load(run / "plan.json") or {}
+
+    def inproc(self, args, hook=None, scenario=None, env=None):
+        self.hook = hook
+        names = ["EVALRUN_FAKE_SCENARIO", "HOUSECARL_RUNLOG_DIR"] + list(env or {})
+        saved = {k: os.environ.get(k) for k in names}
+        os.environ.update(EVALRUN_FAKE_SCENARIO=str(scenario or self.scen), HOUSECARL_RUNLOG_DIR=str(self.store),
+                          **{k: str(v) for k, v in (env or {}).items()})
+        try:
+            a = self.mod.build_parser().parse_args([str(x) for x in args])
+            return a.fn(a)
+        finally:
+            self.hook = None
+            for k, v in saved.items():
+                if v is None:
+                    os.environ.pop(k, None)
+                else:
+                    os.environ[k] = v
+
+    def scenario_with(self, path: Path, probe: str, stem: str, entry: dict) -> Path:
+        doc = load(self.scen)
+        doc["arms"].setdefault(probe, {})[stem] = entry
+        path.write_text(json.dumps(doc, indent=1), encoding="utf-8")
+        return path
+
+
+def first_candidate(plan: dict) -> dict:
+    return next((a for a in (plan or {}).get("arms") or [] if a.get("kind") == "candidate"), {})
+
+
+def case_30(tmp):
+    """Review V2 H2. An earlier invocation's sweep left the candidate's emit; the next invocation's candidate job
+    exits 0 WITHOUT writing and nothing in the cache serves it. Nothing of that arm is credited: not the arm, not
+    the reverse or diff that would rest on the earlier file, not the order evaluation, and no accepted diff receipt
+    carries a classification for it. The control: the same sequence with a probe that writes credits all of it."""
+    case = "case-30-no-emit-credits-nothing"
+    nav, order = "geometry.navmesh-ownership", "patch.order-evaluation"
+
+    class Killed(Exception):
+        """The controller dies after its sweep child finished, before the split wrote a receipt."""
+
+    def kill_after(real, jobs):
+        real(jobs)
+        raise Killed()
+
+    def sequence(tag, writes):
+        h = SweepInProc(tmp, f"{case}-{tag}")
+        run = tmp / f"{case}-{tag}"
+        pl = h.plan(run, ["--select", f"navownprobe,{order}"])
+        if pl is None:
+            return None
+        cand = first_candidate(pl)
+        cid, stem = cand["armId"], Path(cand["candidateFile"]).stem
+        oe_row = next((r for c in pl.get("checks") or [] if c["checkId"] == order
+                       for r in c["arms"] if r["armId"] == cid), {})
+        expect(oe_row.get("status"), "planned", f"{case}/{tag}: premise - {order} is planned on the candidate")
+        try:
+            h.inproc(["run", "--run", run], kill_after)
+            check(False, f"{case}/{tag}: premise - the first invocation was killed after its sweep child")
+        except Killed:
+            pass
+        check(any((f / "navownprobe" / f"{stem}.json").exists() for f in sweep_folders(run)),
+              f"{case}/{tag}: premise - the earlier invocation left the candidate's emit")
+        for p in (run / "sweep").rglob("cache.json"):
+            p.unlink()                                  # the cache is lost: nothing can serve the candidate job
+        old = time.time() - 3600
+        for p in (run / "sweep").rglob("*"):
+            if p.is_file():
+                os.utime(p, (old, old))                 # the earlier invocation was an hour ago
+        scen = h.scen if writes else h.scenario_with(tmp / f"{case}-{tag}.scenario.json", "navownprobe", stem,
+                                                     {"behaviour": "no-emit"})
+        snap, n = cache_log_snapshot(run), len(h.launches)
+        expect(h.inproc(["resume", "--run", run], scenario=scen), 0, f"{case}/{tag}: resume exits 0")
+        expect(len(h.launches), n + 1, f"{case}/{tag}: premise - the resume launched one sweep")
+        added = cache_log_added(run, snap)
+        check(not any(ln.startswith(f"REUSED navownprobe-{stem}:") for ln in added),
+              f"{case}/{tag}: premise - no cache served the candidate job (added: {added})")
+        return run, cid, stem
+
+    got = sequence("no-emit", writes=False)
+    if got is None:
+        return
+    run, cid, stem = got
+    arm_log = sweep_folders(run)[-1] / "logs" / f"navownprobe-{stem}.txt"
+    check("without writing the emit" in "\n".join(text_lines(arm_log))
+          and any(ln.startswith("(exit 0,") for ln in text_lines(arm_log)),
+          f"{case}/no-emit: premise - this launch's candidate job exited 0 writing nothing")
+    led = ledger_entries(load(run / "ledger.json") or {})
+    for part in ("arm", "reverse", "diff"):
+        st = execution_of(led.get(f"{nav}__{cid}__{part}"))
+        check(st not in TERMINAL, f"{case}/no-emit: the candidate's {part} part is not credited (got {st})")
+    st = execution_of(led.get(f"{order}__{cid}"))
+    check(st not in TERMINAL, f"{case}/no-emit: {order} is not completed over the unmeasured arm (got {st})")
+    rc = load(run / "receipts" / f"{nav}__{cid}__diff.json") or {}
+    cls = ((rc.get("orderEvaluation") or {}).get("classification"))
+    check(not ((rc.get("validation") or {}).get("accepted") and cls),
+          f"{case}/no-emit: no accepted diff receipt carries a classification for the arm (got {cls!r})")
+
+    got = sequence("control", writes=True)
+    if got is None:
+        return
+    run, cid, stem = got
+    led = ledger_entries(load(run / "ledger.json") or {})
+    for part in ("arm", "reverse", "diff"):
+        st = execution_of(led.get(f"{nav}__{cid}__{part}"))
+        check(st in TERMINAL, f"{case}/control: a candidate job that writes its emit credits the {part} part (got {st})")
+    st = execution_of(led.get(f"{order}__{cid}"))
+    check(st in TERMINAL, f"{case}/control: {order} derives from the measured arm (got {st})")
+
+
+def case_31(tmp):
+    """Review V2 M2. A copied RUN folder credits only evidence inside the copy. The original run is complete and
+    copied; the ORIGINAL's candidate emit then changes (a created row that moves the diff's counts), and the copy
+    loses its candidate receipts, so its resume launches the sweep. The copy's diff must compare the copy's own
+    emits: its counts equal the original run's before the change, its diff log names no file of the original,
+    and every path its receipts name resolves inside the copy."""
+    import importlib.util
+    case = "case-31-copied-run-own-evidence"
+    nav = "geometry.navmesh-ownership"
+    h = SweepInProc(tmp, case)
+    orig, copy = tmp / f"{case}-original", tmp / f"{case}-copied"
+    pl = h.plan(orig, ["--select", "navownprobe"])
+    if pl is None:
+        return
+    cand = first_candidate(pl)
+    cid = cand["armId"]
+    expect(h.inproc(["run", "--run", orig]), 0, f"{case}: premise - the original run exits 0")
+    led = ledger_entries(load(orig / "ledger.json") or {})
+    for part in ("arm", "reverse", "diff"):
+        expect(execution_of(led.get(f"{nav}__{cid}__{part}")), "completed",
+               f"{case}: premise - the original run completed the candidate's {part}")
+    keys = {part: f"{nav}__{cid}__{part}" for part in ("arm", "reverse", "diff")}
+    want = (load(orig / "receipts" / f"{keys['diff']}.json") or {}).get("orderEvaluation") or {}
+    want_counts, want_created = (want.get("diff") or {}).get("counts"), want.get("created")
+    check(want_counts is not None and want_created is not None,
+          f"{case}: premise - the original diff receipt records counts and created rows")
+
+    shutil.copytree(orig, copy)
+
+    # the ORIGINAL's candidate emit changes afterwards: one more conflict row, holding
+    arm_rc = load(orig / "receipts" / f"{keys['arm']}.json") or {}
+    emit = orig / arm_rc["outputs"][0]["path"]
+    base_emit = orig / (arm_rc.get("consumed") or {}).get("baseEmitPath", "")
+    doc = json.loads(emit.read_text(encoding="utf-8"))
+    extra = json.loads(json.dumps(doc["Conflicts"][0]))
+    extra["Necessary"][0]["FormKey"] = "0A00FF:FixtureBase.esp"
+    extra["Summary"] = "a row the original gained after it was copied"
+    doc["Conflicts"].append(extra)
+    emit.write_text(json.dumps(doc, indent=1), encoding="utf-8")
+    spec = importlib.util.spec_from_file_location("ordersweep_case31", HARNESS / "ordersweep.py")
+    osw = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(osw)
+    d = subprocess.run([str(DIFF_EXE), str(base_emit), str(emit)], capture_output=True, text=True, timeout=120)
+    changed = osw.parse_diff(d.stdout + d.stderr).get("counts")
+    check(changed != want_counts,
+          f"{case}: premise - the change moves the diff's counts (before {want_counts}, after {changed})")
+
+    for k in keys.values():
+        (copy / "receipts" / f"{k}.json").unlink()
+    n = len(h.launches)
+    expect(h.inproc(["resume", "--run", copy]), 0, f"{case}: the copy's resume exits 0")
+    expect(len(h.launches), n + 1, f"{case}: premise - the copy's resume launched the sweep")
+    led = ledger_entries(load(copy / "ledger.json") or {})
+    for part, k in keys.items():
+        st = execution_of(led.get(k))
+        check(st in TERMINAL, f"{case}: premise - the copy credits the candidate's {part} (got {st})")
+
+    outside = []
+    for rp in sorted((copy / "receipts").glob("*.json")):
+        for p in receipt_paths(load(rp) or {}):
+            if not inside(copy, p):
+                outside.append(f"{rp.name}: {p}")
+    check(not outside, f"{case}: every path the copy's receipts name resolves inside the copy (outside: {outside})")
+    rc = load(copy / "receipts" / f"{keys['diff']}.json") or {}
+    got = rc.get("orderEvaluation") or {}
+    expect((got.get("diff") or {}).get("counts"), want_counts,
+           f"{case}: the copy's diff counts are those of the copy's own emits")
+    expect(got.get("created"), want_created, f"{case}: the copy's created rows are those of the copy's own emits")
+    dlog = copy / ((rc.get("outputs") or [{}])[0].get("path") or "missing-diff-log")
+    # the Runner's command line and conflictdiff's own `base :` / `changed :` lines name the files it read
+    read = [norm(ln).lower() for ln in text_lines(dlog) if ln.startswith(("$ ", "base ", "changed "))]
+    check(dlog.exists() and bool(read) and not any(norm(orig).lower() in ln for ln in read),
+          f"{case}: the diff log the copy's receipt names compared no file of the original run ({read[:1]})")
+
+    def emits(doc):
+        if isinstance(doc, dict):
+            for k, v in doc.items():
+                if k == "emit" and isinstance(v, str):
+                    yield v
+                else:
+                    yield from emits(v)
+        elif isinstance(doc, list):
+            for v in doc:
+                yield from emits(v)
+    caches = list((copy / "sweep").rglob("cache.json"))
+    absolute = [f"{cj.relative_to(copy)}: {e}" for cj in caches for e in emits(load(cj)) if Path(e).is_absolute()]
+    check(bool(caches) and not absolute,
+          f"{case}: (layout) no cache entry in the copy names an absolute path ({absolute[:3]})")
+
+
+def case_32(tmp):
+    """Review V2 M3. (a) A run whose candidate reverse job failed accepted the arm and not the reverse; `resume`
+    with a healthy reverse repairs it: the sweep is launched, the reverse and the diff resting on it are credited,
+    and the accepted arm is reused with its receipt untouched. (b) An arm kept out of the sweep by its
+    prerequisite (its masters-and-order check really refused) does not relaunch ordersweep on every unchanged
+    `run`: it stays blocked(prerequisite:...) without a child."""
+    case = "case-32-resume-repairs-partial-sweep"
+    nav, pre = "geometry.navmesh-ownership", "loadability.masters-and-order"
+
+    # (a) --------------------------------------------------------------------------------------------------
+    h = SweepInProc(tmp, f"{case}-a")
+    run = tmp / f"{case}-reverse-failed"
+    pl = h.plan(run, ["--select", "navownprobe"])
+    if pl is None:
+        return
+    cand = first_candidate(pl)
+    cid, stem = cand["armId"], Path(cand["candidateFile"]).stem
+    scen = h.scenario_with(tmp / f"{case}-a.scenario.json", "navownprobe", f"{stem}.reverse",
+                           {"behaviour": "refuse", "code": 5})
+    expect(h.inproc(["run", "--run", run], scenario=scen), 0, f"{case}/a: run 1 exits 0")
+    led = ledger_entries(load(run / "ledger.json") or {})
+    k_arm, k_rev, k_diff = (f"{nav}__{cid}__{p}" for p in ("arm", "reverse", "diff"))
+    expect(execution_of(led.get(k_arm)), "completed", f"{case}/a: premise - run 1 accepted the candidate arm")
+    check(execution_of(led.get(k_rev)) not in TERMINAL,
+          f"{case}/a: premise - run 1 did not accept the reverse (got {execution_of(led.get(k_rev))})")
+    arm_receipt = run / "receipts" / f"{k_arm}.json"
+    arm_sha = sha_of(arm_receipt) if arm_receipt.exists() else None
+    n = len(h.launches)
+    expect(h.inproc(["resume", "--run", run]), 0, f"{case}/a: the resume exits 0")
+    expect(len(h.launches), n + 1, f"{case}/a: the resume launches the sweep to repair the reverse")
+    led = ledger_entries(load(run / "ledger.json") or {})
+    st = execution_of(led.get(k_rev))
+    check(st in TERMINAL, f"{case}/a: the reverse is credited from the resume (got {st})")
+    st = execution_of(led.get(k_diff))
+    check(st in TERMINAL, f"{case}/a: the diff is credited after the resume (got {st})")
+    rev_rc = load(run / "receipts" / f"{k_rev}.json") or {}
+    diff_rc = load(run / "receipts" / f"{k_diff}.json") or {}
+    rev_sha = next((o.get("sha256") for o in rev_rc.get("outputs") or []), None)
+    diff_rev = next((i.get("sha256") for i in (diff_rc.get("consumed") or {}).get("inputs") or []
+                     if i.get("part") == "reverse"), None)
+    check(rev_sha is not None and diff_rev == rev_sha,
+          f"{case}/a: the diff rests on the reverse the resume measured (diff input {diff_rev}, reverse {rev_sha})")
+    expect(execution_of(led.get(k_arm)), "reused", f"{case}/a: the accepted arm is reused, not re-measured")
+    check(arm_sha is not None and arm_receipt.exists() and sha_of(arm_receipt) == arm_sha,
+          f"{case}/a: the accepted arm's receipt is unchanged")
+
+    # (b) --------------------------------------------------------------------------------------------------
+    h = SweepInProc(tmp, f"{case}-b")
+    run = tmp / f"{case}-kept-out"
+    cstem = next(f.stem for f in sorted((GEN / "cases" / h.fixture / "candidates").glob("candidate-*.json"))
+                 if not f.stem.endswith("baseline"))
+    wrapper = tmp / f"{case}-scopeprobe-refuses.py"
+    wrapper.write_text(f"FIXT_DIR = {str(FIXT)!r}\nPROBE = 'scopeprobe'\nREFUSE_STEM = {cstem!r}\n"
+                       + REFUSE_ORDER_PROBE, encoding="utf-8")
+    pl = h.plan(run, ["--select", "navownprobe", "--probe-cmd", f"scopeprobe=python {wrapper}"])
+    if pl is None:
+        return
+    cid = first_candidate(pl)["armId"]
+    expect(h.inproc(["run", "--run", run]), 0, f"{case}/b: run 1 exits 0")
+    led = ledger_entries(load(run / "ledger.json") or {})
+    check(execution_of(led.get(f"{pre}__{cid}")) not in TERMINAL and
+          execution_of(led.get(f"{pre}__baseline")) in TERMINAL,
+          f"{case}/b: premise - the candidate's {pre} was refused and the baseline's accepted "
+          f"(got {execution_of(led.get(f'{pre}__{cid}'))}, {execution_of(led.get(f'{pre}__baseline'))})")
+    expect(execution_of(led.get(f"{nav}__baseline__arm")), "completed",
+           f"{case}/b: premise - run 1 measured the baseline")
+    n = len(h.launches)
+    expect(n, 1, f"{case}/b: premise - run 1 launched one sweep, for the baseline")
+    for i in (2, 3):
+        expect(h.inproc(["run", "--run", run]), 0, f"{case}/b: unchanged run {i} exits 0")
+        expect(len(h.launches), n, f"{case}/b: unchanged run {i} launches no ordersweep child")
+        led = ledger_entries(load(run / "ledger.json") or {})
+        st = str(execution_of(led.get(f"{nav}__{cid}")))
+        check(st.startswith(f"blocked(prerequisite:{pre}"), f"{case}/b: run {i} keeps the arm blocked (got {st})")
+
+
+def case_33(tmp):
+    """Review V2 M4. A sweep job's own exit code and cause survive, on the job's FIRST execution in a fresh RUN.
+    (a) the candidate's reverse job refuses with exit 5 and writes nothing: the reverse part is rejected (not
+    blocked(no-reverse-measurement)) and its receipt's exitCode is 5; (b) the reverse exits 0 writing nothing:
+    rejected(output-missing), exitCode 0; (c) the candidate's ARM job refuses with exit 5: its receipt's exitCode
+    is the job's 5, not ordersweep's; (d) the same for the baseline's arm job."""
+    case = "case-33-sweep-job-exit-and-cause"
+    nav = "geometry.navmesh-ownership"
+
+    def fresh(tag, stem_of, entry):
+        h = SweepInProc(tmp, f"{case}-{tag}")
+        run = tmp / f"{case}-{tag}"
+        pl = h.plan(run, ["--select", "navownprobe"])
+        if pl is None:
+            return None, None
+        cand = first_candidate(pl)
+        stem = Path(cand["candidateFile"]).stem
+        scen = h.scenario_with(tmp / f"{case}-{tag}.scenario.json", "navownprobe", stem_of(stem), entry)
+        expect(h.inproc(["run", "--run", run], scenario=scen), 0, f"{case}/{tag}: the run exits 0")
+        expect(len(h.launches), 1, f"{case}/{tag}: premise - one sweep was launched")
+        check(not (run / "sweep").exists() or not any(
+            ln.startswith("REUSED ") for f in sweep_folders(run) for ln in text_lines(f / "cache-log.txt")),
+              f"{case}/{tag}: premise - a fresh RUN: nothing was served from a cache")
+        return run, cand["armId"]
+
+    def causes(e):
+        return [r.get("cause") for r in ((e or {}).get("rejections") or ((e or {}).get("validation") or {})
+                                         .get("rejections") or [])] + [(e or {}).get("cause")]
+
+    # (a)
+    run, cid = fresh("reverse-refuses", lambda s: f"{s}.reverse", {"behaviour": "refuse", "code": 5})
+    if run is not None:
+        led = ledger_entries(load(run / "ledger.json") or {})
+        expect(execution_of(led.get(f"{nav}__{cid}__arm")), "completed", f"{case}/a: premise - the arm was accepted")
+        e = led.get(f"{nav}__{cid}__reverse")
+        st = str(execution_of(e))
+        rc = load(run / "receipts" / f"{nav}__{cid}__reverse.json") or {}
+        rc_causes = [r.get("cause") for r in (rc.get("validation") or {}).get("rejections") or []]
+        check(st.startswith("rejected("), f"{case}/a: a reverse job that failed is rejected, not blocked (got {st})")
+        check(any(c in ("exit-nonzero", "refused") for c in causes(e) + rc_causes),
+              f"{case}/a: the reverse part names the job's own cause (ledger {causes(e)}, receipt {rc_causes})")
+        expect(rc.get("exitCode"), 5, f"{case}/a: the reverse receipt carries the job's own exit code")
+
+    # (b)
+    run, cid = fresh("reverse-no-emit", lambda s: f"{s}.reverse", {"behaviour": "no-emit"})
+    if run is not None:
+        led = ledger_entries(load(run / "ledger.json") or {})
+        expect(execution_of(led.get(f"{nav}__{cid}__arm")), "completed", f"{case}/b: premise - the arm was accepted")
+        expect(execution_of(led.get(f"{nav}__{cid}__reverse")), "rejected(output-missing)",
+               f"{case}/b: a reverse job that exited 0 writing nothing is rejected for its missing output")
+        rc = load(run / "receipts" / f"{nav}__{cid}__reverse.json") or {}
+        expect(rc.get("exitCode"), 0, f"{case}/b: the reverse receipt carries the job's own exit code")
+
+    # (c)
+    run, cid = fresh("arm-refuses", lambda s: s, {"behaviour": "refuse", "code": 5})
+    if run is not None:
+        led = ledger_entries(load(run / "ledger.json") or {})
+        st = str(execution_of(led.get(f"{nav}__{cid}__arm")))
+        check(st.startswith("rejected("), f"{case}/c: the failed candidate arm job is rejected (got {st})")
+        rc = load(run / "receipts" / f"{nav}__{cid}__arm.json") or {}
+        expect(rc.get("exitCode"), 5, f"{case}/c: the arm receipt carries the job's own exit code, not ordersweep's")
+
+    # (d)
+    run, cid = fresh("baseline-refuses", lambda s: "baseline", {"behaviour": "refuse", "code": 5})
+    if run is not None:
+        led = ledger_entries(load(run / "ledger.json") or {})
+        st = str(execution_of(led.get(f"{nav}__baseline__arm")))
+        check(st.startswith("rejected("), f"{case}/d: the failed baseline arm job is rejected (got {st})")
+        rc = load(run / "receipts" / f"{nav}__baseline__arm.json") or {}
+        expect(rc.get("exitCode"), 5, f"{case}/d: the baseline receipt carries the job's own exit code, not ordersweep's")
+
+    # (e), (f) a job that WROTE its emit and then exited non-zero, with no refusal marker: only its exit code says it
+    # failed, so that code must reach the validator (a zero there accepts the emit)
+    for tag, stem_of, part in (("e", lambda s: f"{s}.reverse", "reverse"), ("f", lambda s: s, "arm")):
+        run, cid = fresh(f"{part}-writes-then-exits", stem_of, {"behaviour": "exit", "code": 4})
+        if run is None:
+            continue
+        led = ledger_entries(load(run / "ledger.json") or {})
+        rc = load(run / "receipts" / f"{nav}__{cid}__{part}.json") or {}
+        check(any(o.get("sha256") for o in rc.get("outputs") or []),
+              f"{case}/{tag}: premise - the {part} job wrote its emit before exiting 4")
+        expect(execution_of(led.get(f"{nav}__{cid}__{part}")), "rejected(exit-nonzero)",
+               f"{case}/{tag}: a {part} job that wrote its emit and exited 4 is rejected for its exit code")
+        expect(rc.get("exitCode"), 4, f"{case}/{tag}: the {part} receipt carries the job's own exit code")
+
+
+def case_34(tmp):
+    """Review V2 3b. A later invocation's sweep never rewrites the evidence of a diff part it keeps as reused. Run 1
+    accepts navownprobe's candidate diff while overlapprobe's candidate job fails, so the resume relaunches the
+    sweep, which runs conflictdiff again through a pass-through wrapper that prints the time (a re-run's log can
+    never be byte-identical by chance). The navownprobe diff part stays reused, the file its receipt names still
+    hashes to the receipt, evidence_integrity reports nothing for it, and finalize exits 0."""
+    case = "case-34-reused-diff-evidence-kept"
+    nav, ovl = "geometry.navmesh-ownership", "geometry.object-overlap"
+    h = SweepInProc(tmp, case)
+    run = tmp / case
+    wrapper = tmp / f"{case}-conflictdiff-wrapper.py"
+    wrapper.write_text("import subprocess, sys, time\n"
+                       f"r = subprocess.run([{str(DIFF_EXE)!r}] + sys.argv[1:])\n"
+                       "print('fixture wrapper: finished at', time.time_ns(), flush=True)\n"
+                       "sys.exit(r.returncode)\n", encoding="utf-8")
+    pl = h.plan(run, ["--select", "navownprobe,overlapprobe", "--probe-cmd", f"conflictdiff=python {wrapper}"])
+    if pl is None:
+        return
+    cand = first_candidate(pl)
+    cid, stem = cand["armId"], Path(cand["candidateFile"]).stem
+    scen = h.scenario_with(tmp / f"{case}.scenario.json", "overlapprobe", stem, {"behaviour": "exit", "code": 4})
+    expect(h.inproc(["run", "--run", run], scenario=scen), 0, f"{case}: run 1 exits 0")
+    key = f"{nav}__{cid}__diff"
+    led = ledger_entries(load(run / "ledger.json") or {})
+    rc = load(run / "receipts" / f"{key}.json") or {}
+    out = (rc.get("outputs") or [{}])[0]
+    expect(execution_of(led.get(key)), "completed", f"{case}: premise - run 1 accepted the navownprobe diff")
+    check(out.get("sha256") and (run / out.get("path", "-")).exists() and sha_of(run / out["path"]) == out["sha256"],
+          f"{case}: premise - its receipt hashes the diff log it names")
+    check(execution_of(led.get(f"{ovl}__{cid}__arm")) not in TERMINAL,
+          f"{case}: premise - run 1 did not accept overlapprobe's candidate arm")
+    n, t0 = len(h.launches), time.time_ns()
+    expect(h.inproc(["resume", "--run", run]), 0, f"{case}: the resume exits 0")
+    expect(len(h.launches), n + 1, f"{case}: premise - the resume relaunched the sweep")
+    stamps = [int(ln.rsplit(" ", 1)[1]) for ln in
+              text_lines(sweep_folders(run)[-1] / "logs" / f"diff-navownprobe-{stem}.txt")
+              if ln.startswith("fixture wrapper: finished at ")]
+    check(any(s > t0 for s in stamps),
+          f"{case}: premise - the relaunched sweep ran navownprobe's conflictdiff again (wrapper stamps {stamps})")
+    led = ledger_entries(load(run / "ledger.json") or {})
+    expect(execution_of(led.get(key)), "reused", f"{case}: the navownprobe diff part is reused")
+    rc2 = load(run / "receipts" / f"{key}.json") or {}
+    out2 = (rc2.get("outputs") or [{}])[0]
+    p = run / (out2.get("path") or "-")
+    check(out2.get("sha256") and p.exists() and sha_of(p) == out2["sha256"],
+          f"{case}: the file the reused diff receipt names still hashes to the receipt's sha256")
+    plan = load(run / "plan.json")
+    integ, bad = h.mod.evidence_integrity(run, plan, h.mod.Ledger(run, plan), h.mod.read_receipts(run))
+    check(key not in bad, f"{case}: evidence_integrity reports no defect for the reused diff ({bad.get(key)})")
+    fin = evalrun(["finalize", "--run", run], h.scen)
+    disp = load(run / "disposition.json") or {}
+    defects = [d for d in (field(disp, "integrity", default={}) or {}).get("defects") or []
+               if d.get("key") == key]
+    check(not any(d.get("kind") == "evidence-changed" for d in defects),
+          f"{case}: finalize lists no evidence-changed defect for the reused diff ({defects})")
+    expect(fin.returncode, 0, f"{case}: finalize exits 0")
+
+
+def case_35(tmp):
+    """Verified reuse is preserved (a guard; the defects above must not be fixed by re-measuring everything).
+    (a) `run` twice on an unchanged RUN: the second launches no child at all, every sweep part reads reused, and
+    no new launch folder appears. (b) A sweep stopped at the deadline after its baseline and candidate arm jobs
+    finished and were cached; `resume` credits those jobs from that cache, and the resuming launch's cache log
+    says REUSED for them."""
+    case = "case-35-verified-reuse-kept"
+    nav = "geometry.navmesh-ownership"
+
+    # (a) --------------------------------------------------------------------------------------------------
+    h = SweepInProc(tmp, f"{case}-a")
+    run = tmp / f"{case}-twice"
+    pl = h.plan(run, ["--select", "navownprobe"])
+    if pl is None:
+        return
+    cid = first_candidate(pl)["armId"]
+    expect(h.inproc(["run", "--run", run]), 0, f"{case}/a: run 1 exits 0")
+    expect(len(h.launches), 1, f"{case}/a: premise - run 1 launched the sweep")
+    folders, n_jobs = [str(f) for f in sweep_folders(run)], len(h.jobs)
+    expect(h.inproc(["run", "--run", run]), 0, f"{case}/a: run 2 exits 0")
+    expect(len(h.launches), 1, f"{case}/a: run 2 launches no ordersweep child")
+    expect(h.jobs[n_jobs:], [], f"{case}/a: run 2 launches no child at all")
+    led = ledger_entries(load(run / "ledger.json") or {})
+    parts = {k: execution_of(v) for k, v in led.items() if k.startswith(f"{nav}__")}
+    check(len(parts) == 4 and all(v == "reused" for v in parts.values()),
+          f"{case}/a: every sweep part reads reused ({parts})")
+    expect([str(f) for f in sweep_folders(run)], folders, f"{case}/a: (layout) no new launch folder appears")
+
+    # (b) --------------------------------------------------------------------------------------------------
+    run = tmp / f"{case}-stopped"
+    slow = tmp / f"{case}-slowprobe.py"
+    slow.write_text(f"FIXT_DIR = {str(FIXT)!r}\n" + DEADLINE_SLOWPROBE, encoding="utf-8")
+    pidfile = tmp / f"{case}.pids"
+    _, _, _, scen = case_paths("case-08-interrupt-resume")
+    env = dict(os.environ, EVALRUN_FAKE_SCENARIO=str(scen), HOUSECARL_RUNLOG_DIR=str(tmp / f"{case}-b-runlog"))
+
+    def ev(args, extra_env=None, timeout=300):
+        return subprocess.run([sys.executable, str(EVALRUN)] + [str(a) for a in args], capture_output=True,
+                              text=True, env=dict(env, **(extra_env or {})), timeout=timeout)
+
+    p = ev(["plan", "--registry", GEN / "registry" / "fixture-check-registry.json",
+            "--scope", GEN / "cases" / "case-08-interrupt-resume" / "scope.json",
+            "--candidates", GEN / "cases" / "case-08-interrupt-resume" / "candidates",
+            "--out", run, "--harness", REAL_HARNESS] + probe_cmds()
+           + ["--select", "navownprobe", "--budget-minutes", "0.3", "--probe-cmd", f"navownprobe=python {slow} navownprobe"])
+    expect(p.returncode, 0, f"{case}/b: plan exit")
+    if p.returncode != 0:
+        print(p.stdout[-2000:], p.stderr[-2000:])
+        return
+    cand = first_candidate(load(run / "plan.json") or {})
+    cid, stem = cand["armId"], Path(cand["candidateFile"]).stem
+    try:
+        r1 = ev(["run", "--run", run], {"EVALRUN_SLOW_ARM": f"{stem}.reverse", "EVALRUN_SLOW_PIDFILE": str(pidfile)},
+                timeout=150)
+    finally:
+        left = kill_recorded(pidfile)
+    check(not left, f"{case}/b: premise - the stopped run left no recorded process alive (killed {left})")
+    expect(r1.returncode, 0, f"{case}/b: premise - the stopped run exits 0")
+    led = ledger_entries(load(run / "ledger.json") or {})
+    expect(execution_of(led.get(f"{nav}__{cid}__reverse")), "stopped(deadline)",
+           f"{case}/b: premise - the sweep was stopped at the deadline in the candidate's reverse job")
+    recorded = [ln for f in sweep_folders(run) for ln in text_lines(f / "cache-log.txt") if ln.startswith("RECORDED ")]
+    for job in ("navownprobe-baseline", f"navownprobe-{stem}"):
+        check(any(ln.startswith(f"RECORDED {job}:") for ln in recorded),
+              f"{case}/b: premise - the stopped launch cached {job} (recorded: {recorded})")
+    snap = cache_log_snapshot(run)
+    r2 = ev(["resume", "--run", run], timeout=180)
+    expect(r2.returncode, 0, f"{case}/b: resume exits 0")
+    added = cache_log_added(run, snap)
+    led = ledger_entries(load(run / "ledger.json") or {})
+    for job, key in (("navownprobe-baseline", f"{nav}__baseline__arm"), (f"navownprobe-{stem}", f"{nav}__{cid}__arm")):
+        check(any(ln.startswith(f"REUSED {job}:") for ln in added),
+              f"{case}/b: the resuming launch's cache log says REUSED for {job} (added: {added})")
+        st = execution_of(led.get(key))
+        check(st in TERMINAL, f"{case}/b: {key.split('__', 1)[1]} served from the earlier launch's cache is credited "
+                              f"(got {st})")
+    for part in ("reverse", "diff"):
+        st = execution_of(led.get(f"{nav}__{cid}__{part}"))
+        check(st in TERMINAL, f"{case}/b: the resume completes the candidate's {part} (got {st})")
+    # The bundle carries a sweep receipt's log at its own RUN-relative path: two launches write logs of the same name
+    # (every launch's cache-log.txt names the jobs it reused), and a flattened logs/<name> copy kept the first and
+    # attributed it to both.
+    expect(ev(["finalize", "--run", run]).returncode, 0, f"{case}/b: premise - finalize exits 0")
+    expect(ev(["bundle", "--run", run]).returncode, 0, f"{case}/b: premise - bundle exits 0")
+    sweep_logs = sorted({(load(rp) or {}).get("log") for rp in (run / "receipts").glob("*.json")
+                         if str((load(rp) or {}).get("log") or "").startswith("sweep/")})
+    check(len(sweep_logs) >= 2 and all((run / "bundle" / rel).is_file()
+                                       and (run / "bundle" / rel).read_bytes() == (run / rel).read_bytes()
+                                       for rel in sweep_logs),
+          f"{case}/b: every sweep receipt's log is in the bundle at its own path, byte for byte ({sweep_logs})")
+    flat = sorted(p.name for p in (run / "bundle" / "logs").glob("*")
+                  if any(Path(rel).name == p.name for rel in sweep_logs)) if (run / "bundle" / "logs").is_dir() else []
+    check(not flat, f"{case}/b: no sweep log is flattened into the bundle's logs/ ({flat})")
+
+
+def case_36(tmp):
+    """Review V2 M1. `--max-candidates` bounds the sweep: an arm held back is never handed to ordersweep (its order
+    is not in RUN/candidates when the child starts), never `running`, its sweep parts are skipped-budget, its
+    required sweep checks are under evaluation.missing, and unassessed.candidatesHeldBack names it - on a sweep
+    that runs to completion and on one stopped at the deadline."""
+    case = "case-36-held-back-arm-not-measured"
+    nav = "geometry.navmesh-ownership"
+    fixture = "case-04-blocked-and-budget"
+    common = ["--max-candidates", "1", "--exclude", "geometry.placement-contact=not-relevant-to-this-review",
+              "--select", "navownprobe"]
+
+    def assert_held_back(tag, h, run, pl):
+        held = [a for a in pl.get("arms") or [] if a.get("heldBack")]
+        expect(len(held), 1, f"{case}/{tag}: premise - the plan holds one candidate back")
+        if not held:
+            return
+        hid, hfile, hstem = held[0]["armId"], held[0]["candidateFile"], Path(held[0]["candidateFile"]).stem
+        row = next((r for c in pl.get("checks") or [] if c["checkId"] == nav for r in c["arms"]
+                    if r["armId"] == hid), {})
+        expect(row.get("status"), "skipped-budget", f"{case}/{tag}: premise - its {nav} row is skipped-budget")
+        expect(len(h.launches), 1, f"{case}/{tag}: premise - one ordersweep child was launched")
+        check(bool(h.launches) and all(hfile not in listing for listing in h.launches),
+              f"{case}/{tag}: the held-back order is not in RUN/candidates when ordersweep starts ({h.launches})")
+        running = [r for r in journal_rows(run) if r.get("armId") == hid and str(r.get("to", "")) == "running"]
+        check(not running, f"{case}/{tag}: no entry of the held-back arm is ever running ({running[:2]})")
+        led = ledger_entries(load(run / "ledger.json") or {})
+        parts = {k: execution_of(v) for k, v in led.items() if k.startswith(f"{nav}__{hid}")}
+        check(bool(parts) and all(v == "skipped-budget" for v in parts.values()),
+              f"{case}/{tag}: the held-back arm's sweep entries are skipped-budget ({parts})")
+        accepted = [rp.name for rp in (run / "receipts").glob(f"{nav}__{hid}*.json")
+                    if ((load(rp) or {}).get("validation") or {}).get("accepted")]
+        check(not accepted, f"{case}/{tag}: no accepted receipt for the held-back arm's sweep parts ({accepted})")
+        fin = evalrun(["finalize", "--run", run], h.scen)
+        check(fin.returncode in (0,), f"{case}/{tag}: premise - finalize exits 0 (got {fin.returncode})")
+        disp = load(run / "disposition.json") or {}
+        missing = [m for m in field(disp, "missing", default=[]) or [] if isinstance(m, dict)]
+        check(any(m.get("checkId") == nav and m.get("armId") == hid for m in missing),
+              f"{case}/{tag}: {nav} on the held-back arm is under evaluation.missing")
+        blob = json.dumps(field(disp, "unassessed", default={}))
+        check("candidatesHeldBack" in blob and (hstem in blob or hid in blob),
+              f"{case}/{tag}: unassessed.candidatesHeldBack names the held-back candidate")
+
+    # not stopped ------------------------------------------------------------------------------------------
+    h = SweepInProc(tmp, f"{case}-unstopped", fixture=fixture)
+    run = tmp / f"{case}-unstopped"
+    pl = h.plan(run, common)
+    if pl is None:
+        return
+    expect(h.inproc(["run", "--run", run]), 0, f"{case}/unstopped: the run exits 0")
+    led = ledger_entries(load(run / "ledger.json") or {})
+    cand = next((a for a in pl.get("arms") or [] if a.get("kind") == "candidate" and not a.get("heldBack")), {})
+    expect(execution_of(led.get(f"{nav}__{cand.get('armId')}__diff")), "completed",
+           f"{case}/unstopped: premise - the sweep ran to completion on the candidate within the bound")
+    assert_held_back("unstopped", h, run, pl)
+
+    # stopped at the deadline ------------------------------------------------------------------------------
+    h = SweepInProc(tmp, f"{case}-stopped", fixture=fixture)
+    run = tmp / f"{case}-stopped"
+    slow = tmp / f"{case}-slowprobe.py"
+    slow.write_text(f"FIXT_DIR = {str(FIXT)!r}\n" + DEADLINE_SLOWPROBE, encoding="utf-8")
+    pidfile = tmp / f"{case}.pids"
+    pl = h.plan(run, common + ["--budget-minutes", "0.3", "--probe-cmd", f"navownprobe=python {slow} navownprobe"])
+    if pl is None:
+        return
+    cand = next((a for a in pl.get("arms") or [] if a.get("kind") == "candidate" and not a.get("heldBack")), {})
+    stem = Path(cand.get("candidateFile") or "x.json").stem
+    try:
+        rc = h.inproc(["run", "--run", run],
+                      env={"EVALRUN_SLOW_ARM": f"{stem}.reverse", "EVALRUN_SLOW_PIDFILE": str(pidfile)})
+    finally:
+        left = kill_recorded(pidfile)
+    check(not left, f"{case}/stopped: premise - the stopped run left no recorded process alive (killed {left})")
+    expect(rc, 0, f"{case}/stopped: the run exits 0")
+    led = ledger_entries(load(run / "ledger.json") or {})
+    expect(execution_of(led.get(f"{nav}__{cand.get('armId')}__reverse")), "stopped(deadline)",
+           f"{case}/stopped: premise - the sweep was stopped at the deadline")
+    assert_held_back("stopped", h, run, pl)
+
+
+CASES["case-30"] = case_30
+CASES["case-31"] = case_31
+CASES["case-32"] = case_32
+CASES["case-33"] = case_33
+CASES["case-34"] = case_34
+CASES["case-35"] = case_35
+CASES["case-36"] = case_36
+
+
+# ------------------------------------------------------ cases 37-38: review R1 of the per-invocation sweep
+
+def jobs_of(folder: Path) -> dict:
+    """One launch folder's job records (`jobs.jsonl`), by job id."""
+    out = {}
+    for ln in text_lines(Path(folder) / "jobs.jsonl"):
+        if ln.strip():
+            rec = json.loads(ln)
+            out[rec["job"]] = rec
+    return out
+
+
+def drop_cache_entries(run: Path, label: str) -> int:
+    """Remove every cache entry recorded for one job, in every launch folder; the other jobs stay servable. Returns
+    how many were removed. (Deleting a whole cache.json re-measures the baseline too, whose bytes then differ from
+    run to run by the fake probe's GeneratedUtc second - a timing-dependent change to what the arm rests on.)"""
+    dropped = 0
+    for cj in (Path(run) / "sweep").rglob("cache.json"):
+        entries = load(cj) or {}
+        kept = {k: v for k, v in entries.items() if (v or {}).get("label") != label}
+        dropped += len(entries) - len(kept)
+        cj.write_text(json.dumps(kept, indent=1), encoding="utf-8")
+    return dropped
+
+
+def case_37(tmp):
+    """Review R1 H1. A candidate's sweep parts are credited only over an ACCEPTED baseline arm of the same check. The
+    baseline navownprobe emit is written with exit 0 and rejected (extraction-failed; in the second variant, its
+    identity); the candidate's probe is healthy. The candidate's arm, reverse and diff are not accepted - an otherwise
+    acceptable part reads blocked(baseline-not-accepted), a part whose own validation fails may keep its own cause -
+    the order evaluation is not completed, and the disposition carries no PASSES-COMPLETED-CHECKS for the candidate.
+    The control: the same plan with a healthy baseline credits every candidate part and the order evaluation."""
+    case = "case-37-baseline-not-accepted-credits-no-candidate"
+    nav, order = "geometry.navmesh-ownership", "patch.order-evaluation"
+
+    def sequence(tag, damage):
+        h = SweepInProc(tmp, f"{case}-{tag}")
+        run = tmp / f"{case}-{tag}"
+        pl = h.plan(run, ["--select", f"navownprobe,{order}"])
+        if pl is None:
+            return None
+        cid = first_candidate(pl)["armId"]
+        oe_row = next((r for c in pl.get("checks") or [] if c["checkId"] == order
+                       for r in c["arms"] if r["armId"] == cid), {})
+        expect(oe_row.get("status"), "planned", f"{case}/{tag}: premise - {order} is planned on the candidate")
+        doc = load(h.scen)
+        if damage == "extraction-failed":
+            doc["arms"].setdefault("navownprobe", {})["baseline"] = {"behaviour": "extraction-failed"}
+        elif damage == "identity":
+            doc["identityDamage"] = list(doc.get("identityDamage") or []) + [{"emitStem": "baseline",
+                                                                              "kind": "wrong-order"}]
+        scen = tmp / f"{case}-{tag}.scenario.json"
+        scen.write_text(json.dumps(doc, indent=1), encoding="utf-8")
+        expect(h.inproc(["run", "--run", run], scenario=scen), 0, f"{case}/{tag}: the run exits 0")
+        expect(len(h.launches), 1, f"{case}/{tag}: premise - one sweep was launched")
+        return h, run, cid, scen
+
+    got = sequence("control", None)
+    if got is None:
+        return
+    h, run, cid, _ = got
+    led = ledger_entries(load(run / "ledger.json") or {})
+    expect(execution_of(led.get(f"{nav}__baseline__arm")), "completed", f"{case}/control: premise - baseline accepted")
+    for part in ("arm", "reverse", "diff"):
+        expect(execution_of(led.get(f"{nav}__{cid}__{part}")), "completed",
+               f"{case}/control: a healthy baseline credits the candidate's {part}")
+    st = execution_of(led.get(f"{order}__{cid}"))
+    check(st in TERMINAL, f"{case}/control: {order} derives over the accepted parts (got {st})")
+
+    for tag, damage, want_base in (("extraction-failed", "extraction-failed", "rejected(extraction-failed)"),
+                                   ("identity", "identity", "rejected(identity-mismatch)")):
+        got = sequence(tag, damage)
+        if got is None:
+            continue
+        h, run, cid, scen = got
+        led = ledger_entries(load(run / "ledger.json") or {})
+        expect(execution_of(led.get(f"{nav}__baseline__arm")), want_base,
+               f"{case}/{tag}: premise - the baseline arm emit was written and rejected")
+        for part in ("arm", "reverse", "diff"):
+            key = f"{nav}__{cid}__{part}"
+            rc = load(run / "receipts" / f"{key}.json") or {}
+            st = str(execution_of(led.get(key)))
+            check((rc.get("validation") or {}).get("accepted") is not True and st not in TERMINAL,
+                  f"{case}/{tag}: the candidate's {part} is not credited over the rejected baseline "
+                  f"(status {st}, receipt accepted {(rc.get('validation') or {}).get('accepted')})")
+            if part == "arm":
+                expect(st, "blocked(baseline-not-accepted)",
+                       f"{case}/{tag}: the healthy candidate arm reads blocked(baseline-not-accepted)")
+            else:
+                check(st == "blocked(baseline-not-accepted)" or st.startswith("rejected("),
+                      f"{case}/{tag}: the {part} reads blocked(baseline-not-accepted) or its own rejection (got {st})")
+        st = execution_of(led.get(f"{order}__{cid}"))
+        check(st not in TERMINAL, f"{case}/{tag}: {order} is not completed over a baseline that was not accepted "
+                                  f"(got {st})")
+        evalrun(["finalize", "--run", run], scen)
+        disp = load(run / "disposition.json") or {}
+        check(bool(disp), f"{case}/{tag}: premise - finalize wrote the disposition")
+        oe = (arm_block(disp, cid) or {}).get("orderEvaluation") or {}
+        check(oe.get("classification") != "PASSES-COMPLETED-CHECKS",
+              f"{case}/{tag}: the disposition's candidate orderEvaluation carries no PASSES-COMPLETED-CHECKS "
+              f"(got {oe.get('classification')!r})")
+
+
+def case_38(tmp):
+    """Review R1 folds, each sub-part self-contained.
+    (a) M1-S1: an emit an earlier launch cached, edited in place afterwards, is INVALIDATED by its recorded hash and
+        re-measured by the resuming launch, never credited.
+    (b) M1-S10: an accepted arm re-measured with DIFFERENT bytes gets a new receipt, and its reverse and diff are
+        credited on that new emit, not on the earlier receipt's.
+    (c) M2: an accepted arm whose job fails in a later launch stays reused; the reverse that could not run on it reads
+        blocked(no-reverse-measurement) naming that job and its exit code, never completion-missing.
+    (d) L2: an unchanged `run` after the candidate file changed launches no ordersweep child and no launch folder;
+        the arm reads blocked(candidate-changed).
+    (e) L4: a diff job recorded `stopped: before-launch` is skipped-budget, as the arm and reverse parts are."""
+    import re
+    case = "case-38-review-r1-folds"
+    nav = "geometry.navmesh-ownership"
+    fixture = "case-08-interrupt-resume"
+
+    # (a) M1-S1 ---------------------------------------------------------------------------------------------
+    run = tmp / f"{case}-a-edited-cached-emit"
+    slow = tmp / f"{case}-slowprobe.py"
+    slow.write_text(f"FIXT_DIR = {str(FIXT)!r}\n" + DEADLINE_SLOWPROBE, encoding="utf-8")
+    pidfile = tmp / f"{case}-a.pids"
+    _, _, _, scen = case_paths(fixture)
+    env = dict(os.environ, EVALRUN_FAKE_SCENARIO=str(scen), HOUSECARL_RUNLOG_DIR=str(tmp / f"{case}-a-runlog"))
+
+    def ev(args, extra_env=None, timeout=300):
+        return subprocess.run([sys.executable, str(EVALRUN)] + [str(a) for a in args], capture_output=True,
+                              text=True, env=dict(env, **(extra_env or {})), timeout=timeout)
+
+    p = ev(["plan", "--registry", GEN / "registry" / "fixture-check-registry.json",
+            "--scope", GEN / "cases" / fixture / "scope.json", "--candidates", GEN / "cases" / fixture / "candidates",
+            "--out", run, "--harness", REAL_HARNESS] + probe_cmds()
+           + ["--select", "navownprobe", "--budget-minutes", "0.3", "--probe-cmd", f"navownprobe=python {slow} navownprobe"])
+    expect(p.returncode, 0, f"{case}/a: plan exit")
+    if p.returncode != 0:
+        print(p.stdout[-2000:], p.stderr[-2000:])
+    else:
+        cand = first_candidate(load(run / "plan.json") or {})
+        cid, stem = cand["armId"], Path(cand["candidateFile"]).stem
+        try:
+            r1 = ev(["run", "--run", run], {"EVALRUN_SLOW_ARM": f"{stem}.reverse", "EVALRUN_SLOW_PIDFILE": str(pidfile)},
+                    timeout=150)
+        finally:
+            left = kill_recorded(pidfile)
+        check(not left, f"{case}/a: premise - the stopped run left no recorded process alive (killed {left})")
+        expect(r1.returncode, 0, f"{case}/a: premise - the stopped run exits 0")
+        led = ledger_entries(load(run / "ledger.json") or {})
+        expect(execution_of(led.get(f"{nav}__{cid}__reverse")), "stopped(deadline)",
+               f"{case}/a: premise - the sweep was stopped at the deadline in the candidate's reverse job")
+        first = sweep_launches(run)
+        check(len(first) == 1 and any(ln.startswith(f"RECORDED navownprobe-{stem}:")
+                                      for ln in text_lines(first[-1] / "cache-log.txt")),
+              f"{case}/a: premise - the stopped launch cached the candidate arm job")
+        emit = (first[-1] if first else run / "sweep" / "inv-none") / "navownprobe" / f"{stem}.json"
+        if emit.exists():
+            doc = json.loads(emit.read_text(encoding="utf-8"))
+            extra = json.loads(json.dumps(doc["Conflicts"][0]))
+            extra["Necessary"][0]["FormKey"] = "0A00FF:FixtureBase.esp"
+            extra["Summary"] = "a row written into the cached emit after its launch recorded it"
+            doc["Conflicts"].append(extra)
+            emit.write_text(json.dumps(doc, indent=1), encoding="utf-8")
+        edited = sha_of(emit) if emit.exists() else None
+        check(edited is not None, f"{case}/a: premise - the cached candidate emit was edited in place (valid JSON)")
+        snap = cache_log_snapshot(run)
+        r2 = ev(["resume", "--run", run], timeout=180)
+        expect(r2.returncode, 0, f"{case}/a: resume exits 0")
+        new = [f for f in sweep_launches(run) if f not in first]
+        expect(len(new), 1, f"{case}/a: premise - the resume launched one sweep")
+        added = cache_log_added(run, snap)
+        check(any(ln.startswith(f"INVALIDATED navownprobe-{stem}:") and "no longer hashes" in ln for ln in added),
+              f"{case}/a: the resuming launch's cache log says INVALIDATED navownprobe-{stem} by its hash "
+              f"(added: {added})")
+        check(not any(ln.startswith(f"REUSED navownprobe-{stem}:") for ln in added),
+              f"{case}/a: the edited emit is not REUSED")
+        rec = jobs_of(new[-1]).get(f"navownprobe-{stem}") if new else None
+        check(bool(rec) and rec.get("outcome") == "ran",
+              f"{case}/a: the resuming launch re-measured the candidate arm job (record {rec})")
+        rc = load(run / "receipts" / f"{nav}__{cid}__arm.json") or {}
+        out = (rc.get("outputs") or [{}])[0]
+        check(bool(out.get("sha256")) and out.get("sha256") != edited
+              and Path(str(out.get("path"))).as_posix() != emit.relative_to(run).as_posix(),
+              f"{case}/a: the arm receipt's output is not the edited file ({out.get('path')}, {str(out.get('sha256'))[:12]})")
+
+    # (b) M1-S10 --------------------------------------------------------------------------------------------
+    h = SweepInProc(tmp, f"{case}-b")
+    run = tmp / f"{case}-b-different-bytes"
+    pl = h.plan(run, ["--select", "navownprobe"])
+    if pl is not None:
+        cand = first_candidate(pl)
+        cid, stem = cand["armId"], Path(cand["candidateFile"]).stem
+        k_arm, k_rev, k_diff = (f"{nav}__{cid}__{part}" for part in ("arm", "reverse", "diff"))
+        expect(h.inproc(["run", "--run", run]), 0, f"{case}/b: run 1 exits 0")
+        led = ledger_entries(load(run / "ledger.json") or {})
+        for k in (k_arm, k_rev, k_diff):
+            expect(execution_of(led.get(k)), "completed", f"{case}/b: premise - run 1 accepted {k.split('__', 1)[1]}")
+        arm1 = load(run / "receipts" / f"{k_arm}.json") or {}
+        sha1 = ((arm1.get("outputs") or [{}])[0]).get("sha256")
+        emit1 = run / ((arm1.get("outputs") or [{}])[0]).get("path", "-")
+        stamp = (load(emit1) or {}).get("GeneratedUtc") if emit1.is_file() else None
+        # Only the candidate arm job loses its cache entry: the baseline stays served and reused, so a new arm receipt
+        # can rest on nothing but the arm emit's own bytes differing.
+        expect(drop_cache_entries(run, f"navownprobe-{stem}"), 1,
+               f"{case}/b: premise - the candidate arm job's one cache entry was removed")
+        (run / "receipts" / f"{k_rev}.json").unlink()
+        t_end = time.time() + 5
+        while time.strftime("%Y-%m-%d %H:%M:%SZ", time.gmtime()) == stamp and time.time() < t_end:
+            time.sleep(0.05)                          # the fake probe stamps GeneratedUtc to the second
+        n = len(h.launches)
+        expect(h.inproc(["resume", "--run", run]), 0, f"{case}/b: the resume exits 0")
+        expect(len(h.launches), n + 1, f"{case}/b: premise - the resume relaunched the sweep")
+        jobs = jobs_of(sweep_launches(run)[-1]) if sweep_launches(run) else {}
+        arec, brec = jobs.get(f"navownprobe-{stem}") or {}, jobs.get("navownprobe-baseline") or {}
+        check(brec.get("outcome") == "reused", f"{case}/b: premise - the baseline job was served from the cache ({brec})")
+        check(arec.get("outcome") == "ran" and arec.get("emitWritten") and arec.get("exitCode") == 0
+              and arec.get("emitSha256") not in (None, sha1),
+              f"{case}/b: premise - the arm job was re-measured with different bytes ({str(arec.get('emitSha256'))[:12]} "
+              f"vs {str(sha1)[:12]})")
+        led = ledger_entries(load(run / "ledger.json") or {})
+        expect(execution_of(led.get(f"{nav}__baseline__arm")), "reused", f"{case}/b: premise - the baseline arm is reused")
+        expect(execution_of(led.get(k_arm)), "completed", f"{case}/b: the re-measured arm is recorded anew, not reused")
+        arm2 = load(run / "receipts" / f"{k_arm}.json") or {}
+        sha2 = ((arm2.get("outputs") or [{}])[0]).get("sha256")
+        check(bool(sha2) and sha2 != sha1 and sha2 == arec.get("emitSha256"),
+              f"{case}/b: the arm's new receipt names the new emit ({str(sha2)[:12]}; run 1 {str(sha1)[:12]})")
+        for k in (k_rev, k_diff):
+            st = execution_of(led.get(k))
+            check(st in TERMINAL, f"{case}/b: {k.split('__', 1)[1]} is credited after the re-measure (got {st})")
+        rev = load(run / "receipts" / f"{k_rev}.json") or {}
+        got = (rev.get("consumed") or {}).get("baseEmitSha256")
+        check(bool(sha2) and got == sha2, f"{case}/b: the reverse rests on the new arm emit (base {str(got)[:12]})")
+        dif = load(run / "receipts" / f"{k_diff}.json") or {}
+        got = next((i.get("sha256") for i in (dif.get("consumed") or {}).get("inputs") or [] if i.get("part") == "arm"),
+                   None)
+        check(bool(sha2) and got == sha2, f"{case}/b: the diff rests on the new arm emit (arm input {str(got)[:12]})")
+
+    # (c) M2 ------------------------------------------------------------------------------------------------
+    # Two first runs that leave the reverse unaccepted. `refused`: the reverse job refuses and writes nothing, so run
+    # 1's diff read no reverse and was accepted; the resume's diff job never runs (its arm job failed), so D5 keeps
+    # that diff reused. `written-rejected`: the reverse emit is written and rejected, so run 1's diff (split by it) was
+    # not accepted, and the resume has no diff to credit: it is not accepted and not blamed on a missing completion.
+    for tag, rev_entry in (("refused", {"behaviour": "refuse", "code": 5}),
+                           ("written-rejected", {"behaviour": "extraction-failed"})):
+        h = SweepInProc(tmp, f"{case}-c-{tag}")
+        run = tmp / f"{case}-c-arm-rerun-fails-{tag}"
+        pl = h.plan(run, ["--select", "navownprobe"])
+        if pl is None:
+            continue
+        cand = first_candidate(pl)
+        cid, stem = cand["armId"], Path(cand["candidateFile"]).stem
+        k_arm, k_rev, k_diff = (f"{nav}__{cid}__{part}" for part in ("arm", "reverse", "diff"))
+        s1 = h.scenario_with(tmp / f"{case}-c1-{tag}.scenario.json", "navownprobe", f"{stem}.reverse", rev_entry)
+        expect(h.inproc(["run", "--run", run], scenario=s1), 0, f"{case}/c/{tag}: run 1 exits 0")
+        led = ledger_entries(load(run / "ledger.json") or {})
+        expect(execution_of(led.get(k_arm)), "completed", f"{case}/c/{tag}: premise - run 1 accepted the candidate arm")
+        check(execution_of(led.get(k_rev)) not in TERMINAL,
+              f"{case}/c/{tag}: premise - run 1 did not accept the reverse (got {execution_of(led.get(k_rev))})")
+        diff1 = execution_of(led.get(k_diff))
+        check((diff1 in TERMINAL) == (tag == "refused"),
+              f"{case}/c/{tag}: premise - run 1's diff is {'accepted' if tag == 'refused' else 'not accepted'} "
+              f"(got {diff1})")
+        arm_receipt, diff_receipt = run / "receipts" / f"{k_arm}.json", run / "receipts" / f"{k_diff}.json"
+        arm_sha = sha_of(arm_receipt) if arm_receipt.exists() else None
+        diff_sha = sha_of(diff_receipt) if diff_receipt.exists() else None
+        # nothing can serve the arm job, so it runs again; the baseline stays served, so the arm's receipt still rests
+        # on the baseline emit this launch credits
+        expect(drop_cache_entries(run, f"navownprobe-{stem}"), 1,
+               f"{case}/c/{tag}: premise - the candidate arm job's one cache entry was removed")
+        s2 = h.scenario_with(tmp / f"{case}-c2-{tag}.scenario.json", "navownprobe", stem,
+                             {"behaviour": "refuse", "code": 5})
+        n = len(h.launches)
+        expect(h.inproc(["resume", "--run", run], scenario=s2), 0, f"{case}/c/{tag}: the resume exits 0")
+        expect(len(h.launches), n + 1, f"{case}/c/{tag}: premise - the resume launched the sweep")
+        arm_job = f"navownprobe-{stem}"
+        jobs = jobs_of(sweep_launches(run)[-1]) if sweep_launches(run) else {}
+        rec = jobs.get(arm_job) or {}
+        check(rec.get("outcome") == "ran" and rec.get("exitCode") == 5,
+              f"{case}/c/{tag}: premise - this launch's arm job ran and exited 5 ({rec})")
+        check((jobs.get("navownprobe-baseline") or {}).get("outcome") == "reused",
+              f"{case}/c/{tag}: premise - the baseline job was served from the cache")
+        check(f"{arm_job}-reverse" not in jobs and f"diff-{arm_job}" not in jobs,
+              f"{case}/c/{tag}: premise - no reverse or diff job ran in this launch ({sorted(jobs)})")
+        led = ledger_entries(load(run / "ledger.json") or {})
+        expect(execution_of(led.get(k_arm)), "reused", f"{case}/c/{tag}: the accepted arm stays reused")
+        check(arm_sha is not None and arm_receipt.exists() and sha_of(arm_receipt) == arm_sha,
+              f"{case}/c/{tag}: the accepted arm's run-1 receipt is unchanged")
+        e = led.get(k_rev) or {}
+        expect(execution_of(e), "blocked(no-reverse-measurement)",
+               f"{case}/c/{tag}: the reverse that could not run on this launch's failed arm job reads "
+               f"no-reverse-measurement")
+        # A status with no cause keeps its sentence on the receipt (`result.note`), not in the ledger's detail.
+        rrc = load(run / "receipts" / f"{k_rev}.json") or {}
+        detail = " | ".join(str(x) for x in [e.get("detail"), (rrc.get("result") or {}).get("note")]
+                            + [r.get("detail") for r in (e.get("rejections") or [])
+                               + ((rrc.get("validation") or {}).get("rejections") or [])] if x)
+        check(re.search(re.escape(arm_job) + r"(?!-reverse)", detail) is not None
+              and "exit" in detail and re.search(r"\b5\b", detail) is not None,
+              f"{case}/c/{tag}: the reverse's detail names the arm job {arm_job} and its exit code 5 "
+              f"(got {detail[:220]!r})")
+        d = led.get(k_diff) or {}
+        drc = load(diff_receipt) or {}
+        dst = str(execution_of(d))
+        if tag == "refused":
+            expect(dst, "reused", f"{case}/c/{tag}: run 1's accepted diff, whose job did not run again, stays reused (D5)")
+            check(diff_sha is not None and diff_receipt.exists() and sha_of(diff_receipt) == diff_sha,
+                  f"{case}/c/{tag}: its run-1 receipt is unchanged")
+            continue
+        check(dst not in TERMINAL and (drc.get("validation") or {}).get("accepted") is not True,
+              f"{case}/c/{tag}: the diff is not accepted (got {dst})")
+        blob = " ".join([dst, str(d.get("cause")), str(d.get("detail"))]
+                        + [f"{x.get('cause')} {x.get('detail')}" for x in (drc.get("validation") or {}).get("rejections") or []])
+        check("completion-missing" not in blob, f"{case}/c/{tag}: the diff's cause and detail do not say "
+                                                f"completion-missing ({blob[:220]!r})")
+
+    # (d) L2 ------------------------------------------------------------------------------------------------
+    h = SweepInProc(tmp, f"{case}-d")
+    run = tmp / f"{case}-d-candidate-changed"
+    pl = h.plan(run, ["--select", "navownprobe"])
+    if pl is not None:
+        cand = first_candidate(pl)
+        cid = cand["armId"]
+        src = Path(cand["candidatePath"])
+        original = src.read_bytes()
+        try:
+            expect(h.inproc(["run", "--run", run]), 0, f"{case}/d: run 1 exits 0")
+            expect(len(h.launches), 1, f"{case}/d: premise - run 1 launched the sweep")
+            src.write_bytes(original + b"\n ")        # the live candidate file changes after planning
+            folders_before = [f.name for f in sweep_launches(run)]
+            n = len(h.launches)
+            for i in (2, 3):
+                expect(h.inproc(["run", "--run", run]), 0, f"{case}/d: run {i} exits 0")
+                expect(len(h.launches), n, f"{case}/d: run {i} after the candidate changed launches no ordersweep child")
+                expect([f.name for f in sweep_launches(run)], folders_before,
+                       f"{case}/d: run {i} creates no new launch folder")
+                led = ledger_entries(load(run / "ledger.json") or {})
+                expect(execution_of(led.get(f"{nav}__{cid}")), "blocked(candidate-changed)",
+                       f"{case}/d: run {i} writes the arm's blocked(candidate-changed) entry")
+        finally:
+            src.write_bytes(original)                 # the fixture is shared by later cases
+
+    # (e) L4 ------------------------------------------------------------------------------------------------
+    h = SweepInProc(tmp, f"{case}-e")
+    run = tmp / f"{case}-e-stopped-records"
+    pl = h.plan(run, ["--select", "navownprobe"])
+    if pl is not None:
+        cand = first_candidate(pl)
+        cid, stem = cand["armId"], Path(cand["candidateFile"]).stem
+        rewrote = []
+
+        def race(real, jobs):
+            res = real(jobs)
+            out = Path(jobs[0]["argv"][jobs[0]["argv"].index("--out") + 1])
+            lines = []
+            for ln in text_lines(out / "jobs.jsonl"):
+                if not ln.strip():
+                    continue
+                r = json.loads(ln)
+                if r["job"] == f"navownprobe-{stem}-reverse":
+                    r.update(outcome="stopped", stopped="deadline", exitCode=None)
+                    rewrote.append(r["job"])
+                elif r["job"] == f"diff-navownprobe-{stem}":
+                    r.update(outcome="stopped", stopped="before-launch", exitCode=None)
+                    rewrote.append(r["job"])
+                lines.append(json.dumps(r))
+            (out / "jobs.jsonl").write_text("".join(x + "\n" for x in lines), encoding="utf-8")
+            return res
+        expect(h.inproc(["run", "--run", run], race), 0, f"{case}/e: the run exits 0")
+        expect(sorted(rewrote), sorted([f"navownprobe-{stem}-reverse", f"diff-navownprobe-{stem}"]),
+               f"{case}/e: premise - the reverse and diff records were rewritten to the race's outcome")
+        led = ledger_entries(load(run / "ledger.json") or {})
+        expect(execution_of(led.get(f"{nav}__{cid}__arm")), "completed", f"{case}/e: premise - the arm was accepted")
+        expect(execution_of(led.get(f"{nav}__{cid}__reverse")), "stopped(deadline)",
+               f"{case}/e: a reverse record stopped at the deadline reads stopped(deadline)")
+        expect(execution_of(led.get(f"{nav}__{cid}__diff")), "skipped-budget",
+               f"{case}/e: a diff record stopped before launch reads skipped-budget")
+
+
+CASES["case-37"] = case_37
+CASES["case-38"] = case_38
+
+
+def case_39(tmp):
+    """Review R2 M-1. A sweep job that ordersweep's own Runner refuses to contain never ran and no deadline was reached:
+    its part reads blocked(uncontained), never stopped(deadline) / budget-exhausted, and the parts resting on it name
+    that job. Honest fixture: case_23's containment-refusal hook, aimed at ONE inner job of a real ordersweep child, with
+    a budget far longer than the run. (a) the candidate's reverse job; (b) the candidate's arm job."""
+    case = "case-39-sweep-job-uncontained"
+    nav = "geometry.navmesh-ownership"
+    site = tmp / f"{case}-site"
+    site.mkdir(parents=True, exist_ok=True)
+    (site / "sitecustomize.py").write_text(REFUSE_CONTAINMENT_SITECUSTOMIZE, encoding="utf-8")
+    h = SweepInProc(tmp, case)
+    for tag, want_of, part in (("a", lambda s: f"{s}.reverse.json", "reverse"),
+                               ("b", lambda s: f"navownprobe{os.sep}{s}.json", "arm")):
+        run = tmp / f"{case}-{tag}"
+        pl = h.plan(run, ["--select", "navownprobe", "--budget-minutes", "3"])
+        if pl is None:
+            continue
+        cand = first_candidate(pl)
+        cid, stem = cand["armId"], Path(cand["candidateFile"]).stem
+        env = dict(os.environ, EVALRUN_FAKE_SCENARIO=str(h.scen), HOUSECARL_RUNLOG_DIR=str(h.store),
+                   PYTHONPATH=str(site), EVALRUN_TEST_REFUSE_ARGV=want_of(stem))
+        t0 = time.monotonic()
+        r = subprocess.run([sys.executable, str(EVALRUN), "run", "--run", str(run)], capture_output=True, text=True,
+                           env=env, timeout=240)
+        expect(r.returncode, 0, f"{case}/{tag}: premise - the run exits 0")
+        check(time.monotonic() - t0 < 150, f"{case}/{tag}: premise - the run ended well inside its 3-minute budget")
+        inv = last_sweep(run)
+        jobs = {}
+        for ln in text_lines(inv / "jobs.jsonl"):
+            jobs[json.loads(ln)["job"]] = json.loads(ln)
+        job = f"navownprobe-{stem}-reverse" if part == "reverse" else f"navownprobe-{stem}"
+        rec = jobs.get(job) or {}
+        check(rec.get("outcome") == "stopped" and rec.get("stopped") == "uncontained",
+              f"{case}/{tag}: premise - the {part} job's record says ordersweep's Runner refused to contain it ({rec})")
+        led = ledger_entries(load(run / "ledger.json") or {})
+        e = led.get(f"{nav}__{cid}__{part}") or {}
+        expect(execution_of(e), "blocked(uncontained)", f"{case}/{tag}: the {part} part reads blocked(uncontained)")
+        check(e.get("cause") != "budget-exhausted",
+              f"{case}/{tag}: the {part} part is not blamed on the budget (cause {e.get('cause')})")
+        if part == "arm":
+            rv = led.get(f"{nav}__{cid}__reverse") or {}
+            rc = load(run / "receipts" / f"{nav}__{cid}__reverse.json") or {}
+            said = " ".join(str(x) for x in (rv.get("detail"), rv.get("rejections"), (rc.get("result") or {}).get("note")))
+            check("uncontained" in said or "blocked(uncontained)" in said,
+                  f"{case}/{tag}: the reverse names the arm part's containment refusal, not a budget stop ({said[:200]})")
+            check("budget" not in said, f"{case}/{tag}: nothing downstream mentions a budget ({said[:200]})")
+
+
+def case_40(tmp):
+    """Review R2 M-3. A diff that conflictdiff refuses before any verdict (exit 3: the two emits describe different
+    populations, states or configurations) is rejected for its exit code with conflictdiff's own refusal line, and its
+    receipt carries exit 3 - not rejected(schema-unsupported) "no verdict line". The same run's baseline arm stays
+    accepted (the refusal is this pair's, not a blanket rejection)."""
+    case = "case-40-diff-refused-by-conflictdiff"
+    nav = "geometry.navmesh-ownership"
+    h = SweepInProc(tmp, case)
+    for tag, entry in (("wrong-state", {"behaviour": "wrong-state"}),):
+        run = tmp / f"{case}-{tag}"
+        pl = h.plan(run, ["--select", "navownprobe"])
+        if pl is None:
+            continue
+        cand = first_candidate(pl)
+        cid, stem = cand["armId"], Path(cand["candidateFile"]).stem
+        scen = h.scenario_with(tmp / f"{case}-{tag}.scenario.json", "navownprobe", stem, entry)
+        expect(h.inproc(["run", "--run", run], scenario=scen), 0, f"{case}/{tag}: premise - the run exits 0")
+        inv = last_sweep(run)
+        rec = {}
+        for ln in text_lines(inv / "jobs.jsonl"):
+            if json.loads(ln)["job"] == f"diff-navownprobe-{stem}":
+                rec = json.loads(ln)
+        check(rec.get("outcome") == "ran" and rec.get("exitCode") == 3,
+              f"{case}/{tag}: premise - conflictdiff ran and exited 3 ({rec.get('outcome')}, {rec.get('exitCode')})")
+        rc = load(run / "receipts" / f"{nav}__{cid}__diff.json") or {}
+        causes = [x.get("cause") for x in (rc.get("validation") or {}).get("rejections") or []]
+        details = " ".join(str(x.get("detail")) for x in (rc.get("validation") or {}).get("rejections") or [])
+        check((rc.get("validation") or {}).get("accepted") is False, f"{case}/{tag}: the refused diff is not accepted")
+        expect(rc.get("exitCode"), 3, f"{case}/{tag}: the diff receipt carries conflictdiff's exit code")
+        check("exit-nonzero" in causes and "schema-unsupported" not in causes,
+              f"{case}/{tag}: the diff is rejected for its exit code, not for a missing verdict line (causes {causes})")
+        check("!" in details or "exit code 3" in details,
+              f"{case}/{tag}: the rejection quotes conflictdiff's refusal or its exit ({details[:200]})")
+        rb = load(run / "receipts" / f"{nav}__baseline__arm.json") or {}
+        check((rb.get("validation") or {}).get("accepted") is True,
+              f"{case}/{tag}: premise - the baseline arm is still accepted")
+
+
+def case_41(tmp):
+    """Review R2 M-2. After a resume repairs one probe of a candidate, the order evaluation's classification word is
+    CURRENT: taken from the one launch that measured every accepted diff of the arm (the repairing launch re-ran the
+    kept diff with the same emits and rows), with that launch named - never the word an earlier launch gave while a
+    probe was still failing. (b) When no single launch measured every accepted diff (the kept diff's probe did not run
+    again in the repairing launch), there is no classification word; a note says why and the launches' words are kept
+    as historical; the per-probe numbers are unchanged."""
+    case = "case-41-order-classification-current"
+    nav, ovl, oe_id = "geometry.navmesh-ownership", "geometry.object-overlap", "patch.order-evaluation"
+
+    def classification_of(run, cid):
+        rc = load(run / "receipts" / f"{oe_id}__{cid}.json") or {}
+        return rc
+    for tag in ("a", "b"):
+        h = SweepInProc(tmp, f"{case}-{tag}")
+        run = tmp / f"{case}-{tag}"
+        pl = h.plan(run, ["--select", f"navownprobe,overlapprobe,{oe_id}"])
+        if pl is None:
+            continue
+        cand = first_candidate(pl)
+        cid, stem = cand["armId"], Path(cand["candidateFile"]).stem
+        s1 = h.scenario_with(tmp / f"{case}-{tag}-ovl-exit4.json", "overlapprobe", stem, {"behaviour": "exit", "code": 4})
+        expect(h.inproc(["run", "--run", run], scenario=s1), 0, f"{case}/{tag}: premise - run 1 exits 0")
+        first = last_sweep(run)
+        s1_class = ((load(first / "summary.json") or {}).get("candidates", {}).get(stem) or {}).get("classification")
+        check(s1_class not in (None, "PASSES-COMPLETED-CHECKS"),
+              f"{case}/{tag}: premise - run 1's launch did not classify the candidate as passing ({s1_class})")
+        led = ledger_entries(load(run / "ledger.json") or {})
+        expect(execution_of(led.get(f"{nav}__{cid}__diff")), "completed", f"{case}/{tag}: premise - navownprobe's diff accepted in run 1")
+        scen2 = h.scen
+        if tag == "b":
+            # the repairing launch cannot serve or re-run navownprobe's candidate job: its diff stays kept from run 1
+            cache = load(first / "cache.json") or {}
+            (first / "cache.json").write_text(json.dumps({k: v for k, v in cache.items()
+                                                         if v.get("label") != f"navownprobe-{stem}"}, indent=1),
+                                              encoding="utf-8")
+            scen2 = h.scenario_with(tmp / f"{case}-b-nav-refuses.json", "navownprobe", stem,
+                                    {"behaviour": "refuse", "code": 5})
+        expect(h.inproc(["resume", "--run", run], scenario=scen2), 0, f"{case}/{tag}: premise - the resume exits 0")
+        second = last_sweep(run)
+        check(second != first, f"{case}/{tag}: premise - the resume launched the sweep again")
+        led = ledger_entries(load(run / "ledger.json") or {})
+        expect(execution_of(led.get(f"{nav}__{cid}__diff")), "reused", f"{case}/{tag}: premise - navownprobe's diff is kept")
+        check(execution_of(led.get(f"{ovl}__{cid}__diff")) in TERMINAL,
+              f"{case}/{tag}: premise - overlapprobe's diff is repaired ({execution_of(led.get(f'{ovl}__{cid}__diff'))})")
+        s2_class = ((load(second / "summary.json") or {}).get("candidates", {}).get(stem) or {}).get("classification")
+        expect(evalrun(["finalize", "--run", run], h.scen).returncode, 0, f"{case}/{tag}: premise - finalize exits 0")
+        blk = arm_block(load(run / "disposition.json") or {}, cid) or {}
+        oe = blk.get("orderEvaluation") or {}
+        derived = ((classification_of(run, cid).get("derived")) or {})
+        if tag == "a":
+            check(s2_class is not None and s2_class != s1_class,
+                  f"{case}/a: premise - the repairing launch classified the candidate differently ({s1_class} -> {s2_class})")
+            expect(oe.get("classification"), s2_class,
+                   f"{case}/a: the disposition quotes the repairing launch's classification, not run 1's")
+            expect((oe.get("classificationSource") or {}).get("launch"), f"sweep/{second.name}",
+                   f"{case}/a: the disposition names the launch its classification came from")
+            expect(derived.get("classification"), s2_class,
+                   f"{case}/a: the order-evaluation receipt carries the same current classification")
+        else:
+            check(oe.get("classification") is None,
+                  f"{case}/b: no classification word when no single launch measured every accepted diff "
+                  f"(got {oe.get('classification')})")
+            check("no single launch" in str(oe.get("classificationNote")),
+                  f"{case}/b: the disposition says why ({oe.get('classificationNote')})")
+            hist = {(x.get("launch"), x.get("classification")) for x in oe.get("historicalClassifications") or []}
+            check((f"sweep/{first.name}", s1_class) in hist,
+                  f"{case}/b: run 1's word is kept as historical ({sorted(hist)})")
+            check(derived.get("classification") is None and derived.get("classificationNote"),
+                  f"{case}/b: the order-evaluation receipt agrees ({derived.get('classification')})")
+        check(set((oe.get("perProbe") or {})) == {"navownprobe", "overlapprobe"},
+              f"{case}/{tag}: the per-probe numbers name both probes ({sorted(oe.get('perProbe') or {})})")
+
+
+CASES["case-39"] = case_39
+CASES["case-40"] = case_40
+CASES["case-41"] = case_41
 
 
 def main() -> int:

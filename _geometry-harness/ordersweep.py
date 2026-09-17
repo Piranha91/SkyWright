@@ -42,9 +42,16 @@ REUSE (the handoff's requirement 4). A probe run is expensive, so a result is re
 input it consumed is unchanged: the request key covers the probe binary (its hash), the candidate file,
 the base emit and the arguments; and before an entry is reused, every plugin and overlay the emit's own
 ConfigurationIdentity recorded is re-hashed on disk. A cache entry whose emit carries no identity is
-never reused — a missing identity prevents reuse, it does not permit it. Every decision is printed and
+never reused — a missing identity prevents reuse, it does not permit it. An entry names its emit relative
+to the cache file's folder with the emit's sha256, and is reused only when that file still hashes to it.
+Earlier launches' caches can be searched read-only (`--reuse-cache`). Every decision is printed and
 written to `cache-log.txt` (REUSED / MISS / INVALIDATED <reason>), so reuse and invalidation are
 observable rather than assumed.
+
+JOB RECORDS. `jobs.jsonl` gets one line per job (probe or diff) as soon as it has a result: whether it ran,
+was reused or was stopped, its own exit code, the emit it produced or was served and whether this launch
+wrote it, and the emits it read. A zero exit that wrote no emit is not a measurement: no reverse or diff is
+built on it and its candidate reads UNRESOLVED.
 
 The report (`REPORT.md`) ends with the search outcome from the manifest — exhausted or not, how many
 legal candidates were not evaluated, which constraints contradicted — and, whenever no candidate passes,
@@ -62,7 +69,7 @@ import os
 import re
 import sys
 import time
-from pathlib import Path
+from pathlib import Path, PurePosixPath, PureWindowsPath
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE.parent / "scripts"))
@@ -196,12 +203,28 @@ def emit_signature(p: Path):
     return (st.st_mtime_ns, st.st_size)
 
 
-class Cache:
-    """Request key -> what was produced, with the identity's own hashes for re-validation."""
+CACHE_VERSION = 2
 
-    def __init__(self, path: Path, log: Path):
+
+class Cache:
+    """Request key -> what was produced, with the identity's own hashes for re-validation.
+
+    An entry names its emit RELATIVE to the cache file's own folder and records the emit's sha256. A copied folder
+    therefore resolves every entry inside the copy, and a file whose bytes are not the ones recorded is refused
+    rather than trusted. Earlier caches (`--reuse-cache`, one per earlier launch when evalrun keeps a folder per
+    launch) are read and never written: only this launch's own `cache.json` receives entries."""
+
+    def __init__(self, path: Path, log: Path, prior: list[Path] | None = None):
         self.path, self.log = path, log
-        self.entries = load_json(path) or {} if path.exists() else {}
+        self.entries = (load_json(path) or {}) if path.exists() else {}
+        self.prior: list[tuple[Path, dict]] = []
+        for p in prior or []:
+            p = Path(p)
+            doc = load_json(p) if p.exists() else None
+            if not isinstance(doc, dict):
+                self.note(f"PRIOR {p}: no readable cache file there (that launch recorded nothing); nothing reused from it")
+                continue
+            self.prior.append((p, doc))
 
     def save(self):
         # Atomic: a sweep stopped at the controller's deadline can die mid-save, and this cache is the
@@ -215,34 +238,81 @@ class Cache:
         with open(self.log, "a", encoding="utf-8") as f:
             f.write(line + "\n")
 
-    def lookup(self, key: str, label: str) -> Path | None:
-        e = self.entries.get(key)
-        if e is None:
+    @staticmethod
+    def entry_emit(e: dict, cache_file: Path) -> tuple[Path | None, str | None]:
+        """(the emit an entry names, None) when the entry can be verified at all, else (None, why not)."""
+        if e.get("cacheVersion") != CACHE_VERSION or not e.get("emitSha256"):
+            return None, ("the entry predates folder-relative, hashed entries, so the emit it names cannot be "
+                          "verified — never reused")
+        rel = str(e.get("emit") or "")
+        pure = PurePosixPath(rel)
+        if not rel or pure.is_absolute() or PureWindowsPath(rel).drive or PureWindowsPath(rel).is_absolute() \
+                or ".." in pure.parts:
+            return None, f"emit path {rel!r} is not inside the cache's own folder"
+        folder = cache_file.parent.resolve()
+        emit = folder.joinpath(*pure.parts)
+        try:
+            emit.resolve().relative_to(folder)
+        except ValueError:
+            return None, f"emit path {rel!r} resolves outside the cache's own folder"
+        return emit, None
+
+    def lookup(self, key: str, label: str) -> tuple[Path, Path] | None:
+        """(emit, the cache file that served it) for a verified entry, else None. This launch's own entries come
+        first, then each earlier cache in the order given; an entry that fails verification is named and the next
+        source is tried."""
+        found = False
+        for cache_file, entries in [(self.path, self.entries)] + self.prior:
+            e = entries.get(key)
+            if e is None:
+                continue
+            found = True
+            where = "" if cache_file == self.path else f" (earlier launch {cache_file.parent.name})"
+            emit, why = self.entry_emit(e, cache_file)
+            if emit is None:
+                self.note(f"INVALIDATED {label}: {why}{where}")
+                continue
+            if not emit.is_file():
+                self.note(f"INVALIDATED {label}: emit {e['emit']} is gone{where}")
+                continue
+            if sha256_file(emit) != str(e["emitSha256"]).lower():
+                self.note(f"INVALIDATED {label}: emit {e['emit']} no longer hashes to the value recorded with it{where}")
+                continue
+            if not e.get("identity"):
+                self.note(f"INVALIDATED {label}: the cached emit carries no configuration identity — missing identity prevents reuse{where}")
+                continue
+            changed = None
+            for kind, items in (("plugin", e["identity"].get("plugins", [])), ("overlay", e["identity"].get("overlays", []))):
+                for it in items:
+                    p = Path(it["path"])
+                    if not p.exists():
+                        changed = f"{kind} {p} no longer exists"
+                    elif sha256_file(p) != it["sha256"].lower():
+                        changed = f"{kind} {p.name} content changed since the cached run"
+                    if changed:
+                        break
+                if changed:
+                    break
+            if changed:
+                self.note(f"INVALIDATED {label}: {changed}{where}")
+                continue
+            n = len(e["identity"].get("plugins", [])); m = len(e["identity"].get("overlays", []))
+            self.note(f"REUSED {label}: request key {key[:12]} matched; {n} plugin and {m} overlay hashes and the emit's "
+                      f"own hash re-verified on disk; emit {e['emit']}{where}")
+            return emit, cache_file
+        if not found:
             self.note(f"MISS {label}: no entry for request key {key[:12]}")
-            return None
-        emit = Path(e["emit"])
-        if not emit.exists():
-            self.note(f"INVALIDATED {label}: emit {emit} is gone")
-            return None
-        if not e.get("identity"):
-            self.note(f"INVALIDATED {label}: the cached emit carries no configuration identity — missing identity prevents reuse")
-            return None
-        for kind, items in (("plugin", e["identity"].get("plugins", [])), ("overlay", e["identity"].get("overlays", []))):
-            for it in items:
-                p = Path(it["path"])
-                if not p.exists():
-                    self.note(f"INVALIDATED {label}: {kind} {p} no longer exists")
-                    return None
-                if sha256_file(p) != it["sha256"].lower():
-                    self.note(f"INVALIDATED {label}: {kind} {p.name} content changed since the cached run")
-                    return None
-        n = len(e["identity"].get("plugins", [])); m = len(e["identity"].get("overlays", []))
-        self.note(f"REUSED {label}: request key {key[:12]} matched; {n} plugin and {m} overlay hashes re-verified on disk; emit {emit.name}")
-        return emit
+        return None
 
     def record(self, key: str, label: str, emit: Path):
         ident = read_identity(emit)
-        self.entries[key] = {"emit": str(emit), "label": label,
+        try:
+            rel = emit.resolve().relative_to(self.path.parent.resolve()).as_posix()
+        except ValueError:
+            self.note(f"NOT-RECORDED {label}: emit {emit} is not inside this cache's folder, so an entry could not name "
+                      f"it relative to the cache")
+            return
+        self.entries[key] = {"cacheVersion": CACHE_VERSION, "emit": rel, "emitSha256": sha256_file(emit), "label": label,
                              "recordedUtc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()), "identity": ident}
         if ident is None:
             self.note(f"RECORDED {label}: emit carries NO configuration identity — this entry can never be reused")
@@ -298,7 +368,7 @@ def classify(rows: list[dict]) -> str:
         return "ILLEGAL"
     if any(r["created"]["newDefect"] > 0 for r in rows):
         return "REGRESSION"
-    if any(r["probeExit"] != 0 or r["probeRefused"] or r["diff"]["verdict"] in ("DIFFERENTIAL-UNJUDGED", "(no verdict line)", "(not run)")
+    if any(r["probeExit"] != 0 or r["probeRefused"] or r.get("emitNotWritten") or r["diff"]["verdict"] in ("DIFFERENTIAL-UNJUDGED", "(no verdict line)", "(not run)")
            or r["diff"]["refusals"] or r["diff"]["counts"].get("unmeasured", 0) > 0 or r["created"]["unmeasured"] > 0 for r in rows):
         return "UNRESOLVED"
     return "PASSES-COMPLETED-CHECKS"
@@ -324,6 +394,9 @@ def main() -> int:
     ap.add_argument("--probe-cmd", action="append", default=[], metavar="NAME=<argv prefix>",
                     help="run NAME (a probe, or conflictdiff) as <argv prefix> instead of its Release binary. "
                          "Repeatable. A test seam: it changes which program runs, not how the result is read.")
+    ap.add_argument("--reuse-cache", action="append", default=[], metavar="FILE",
+                    help="an earlier launch's cache.json to reuse verified emits from, read-only; repeatable, searched "
+                         "in the order given after this --out's own cache (evalrun passes one per earlier launch)")
     a = ap.parse_args()
 
     cdir, out, harness = Path(a.candidates), Path(a.out), Path(a.harness)
@@ -342,7 +415,29 @@ def main() -> int:
     for mc in manifest.get("Candidates", []) if isinstance(manifest, dict) else []:
         stem = Path(mc.get("File", "")).stem
         rules_of[stem] = {"violates": list(mc.get("ViolatesAdvice") or []), "satisfies": list(mc.get("SatisfiesAdvice") or [])}
-    cache = Cache(out / "cache.json", out / "cache-log.txt")
+    cache = Cache(out / "cache.json", out / "cache-log.txt", prior=[Path(p) for p in a.reuse_cache])
+    # One record per job, appended the moment the job has a result, so a launch that dies later still says what each
+    # finished job produced. A reader credits a job from its record, never from a file's presence at a path. Emptied
+    # first: a record is this launch's or it is nothing.
+    jobs_log = out / "jobs.jsonl"
+    jobs_log.write_text("", encoding="utf-8")
+
+    def record_job(job: str, kind: str, outcome: str, exit_code, emit: Path | None, *, written: bool,
+                   reused_from: Path | None = None, stopped=None, log: Path | None = None, inputs: dict | None = None,
+                   runner: dict | None = None):
+        rec = {"job": job, "kind": kind, "outcome": outcome, "exitCode": exit_code, "stopped": stopped,
+               # what the Runner said about a stop (why, how long, whether the tree was confirmed gone), so a reader
+               # names the real cause - a containment refusal is not a budget stop
+               "stop": ({k: runner.get(k) for k in ("seconds", "treeStopped", "refused", "launchedExitCode")}
+                        if stopped and runner else None),
+               "emit": str(emit.resolve()) if emit else None, "emitWritten": bool(written),
+               "emitSha256": sha256_file(emit) if emit and emit.is_file() else None,
+               "reusedFrom": str(reused_from.resolve()) if reused_from else None,
+               "log": str(log.resolve()) if log and log.exists() else None,
+               "inputs": {k: (str(Path(v).resolve()) if v else None) for k, v in (inputs or {}).items()}}
+        with open(jobs_log, "a", encoding="utf-8") as f:
+            f.write(json.dumps(rec) + "\n")
+
     overrides = {}
     for spec in a.probe_cmd:
         name, _, prefix = spec.partition("=")
@@ -364,31 +459,43 @@ def main() -> int:
     deadline = None if a.deadline_seconds is None else time.perf_counter() + max(0.0, a.deadline_seconds)
     runner = Runner("ordersweep", out_dir=logs, retries=0, deadline=deadline)
 
-    def run_probe(job_id: str, probe: str, order_file: Path, base_emit: Path | None, emit: Path) -> tuple[int, bool, bool, Path]:
-        """Run (or reuse) one probe arm. Returns (exit, refused, illegal, emit path)."""
+    def run_probe(job_id: str, probe: str, order_file: Path, base_emit: Path | None, emit: Path) -> tuple[int, bool, bool, Path, bool]:
+        """Run (or reuse) one probe arm. Returns (exit, refused, illegal, emit path, measured).
+
+        `measured` is True only for an emit this launch wrote or a cache entry it verified. A zero exit over a file
+        this launch did not write is not a measurement: nothing downstream (reverse, diff, classification) is built
+        on it, and it is never cached."""
         k = key_for(probe, order_file, base_emit)
-        reused = cache.lookup(k, job_id)
-        if reused:
-            return 0, False, False, reused
+        hit = cache.lookup(k, job_id)
+        inputs = {"order": order_file, "base": base_emit}
+        if hit:
+            reused, src = hit
+            record_job(job_id, "probe", "reused", 0, reused, written=False, reused_from=src, inputs=inputs)
+            return 0, False, False, reused, True
         argv = exes[probe] + ["--order", str(order_file)] + (["--base", str(base_emit)] if base_emit else []) + ["--emit", str(emit)] + common + extra
-        # An earlier invocation's emit may already be at this path (and an accepted receipt may hash it, so it
-        # is not deleted): only an emit THIS launch wrote is recorded.
+        # An earlier run's emit may already be at this path when --out is reused by hand (evalrun gives every launch
+        # a fresh folder): only an emit THIS launch wrote is recorded or measured.
         before = emit_signature(emit)
         res = runner.run([{"id": job_id, "argv": argv}])[0]
         log = logs / f"{job_id}.txt"
         text = log.read_text(encoding="utf-8", errors="replace") if log.exists() else ""
         refused = bool(REFUSED_RE.search(text))
         illegal = res["exitCode"] == 2 and "REFUSED" in text and not emit.exists()
+        after = emit_signature(emit)
+        written = after is not None and after != before
         if res.get("stopped"):
             # stopped at (or refused by) the caller's deadline: not finished, never cached, never a clean exit
-            return (res["exitCode"] if res["exitCode"] not in (None, 0) else -1), refused, False, emit
+            record_job(job_id, "probe", "stopped", res["exitCode"], emit, written=written, stopped=res["stopped"],
+                       log=log, inputs=inputs, runner=res)
+            return (res["exitCode"] if res["exitCode"] not in (None, 0) else -1), refused, False, emit, False
         if res["exitCode"] == 0 and emit.exists():
-            if emit_signature(emit) != before:
+            if written:
                 cache.record(k, job_id, emit)
             else:
                 cache.note(f"NOT-RECORDED {job_id}: exited 0 but did not write {emit.name}; the file at that path "
-                           f"is an earlier run's and is never cached as this request's result")
-        return res["exitCode"], refused, illegal, emit
+                           f"is an earlier run's and is neither cached nor measured as this request's result")
+        record_job(job_id, "probe", "ran", res["exitCode"], emit, written=written, log=log, inputs=inputs)
+        return res["exitCode"], refused, illegal, emit, res["exitCode"] == 0 and written
 
     results: dict[str, list[dict]] = {}
     base_emits: dict[str, Path] = {}
@@ -397,11 +504,12 @@ def main() -> int:
         plan.stage("baseline", total=len(probes), unit="probes")
         for p in probes:
             emit = out / p / "baseline.json"; emit.parent.mkdir(parents=True, exist_ok=True)
-            code, _, _, got = run_probe(f"{p}-baseline", p, baseline, None, emit)
-            if code == 0 and got.exists():
+            code, _, _, got, measured = run_probe(f"{p}-baseline", p, baseline, None, emit)
+            if measured:
                 base_emits[p] = got
             else:
-                print(f"   !! {p} baseline exited {code} — its candidates read UNRESOLVED")
+                print(f"   !! {p} baseline exited {code}" + ("" if code != 0 else " without writing its emit")
+                      + " — its candidates read UNRESOLVED")
             plan.advance()
 
         arms = 3 if not a.no_reverse else 2
@@ -416,23 +524,36 @@ def main() -> int:
                 if base_emit is None:
                     row["probeExit"] = -1; rows.append(row); plan.advance(arms); continue
                 emit = out / p / f"{cand.stem}.json"
-                code, refused, illegal, got = run_probe(f"{p}-{cand.stem}", p, cand, base_emit, emit)
+                code, refused, illegal, got, measured = run_probe(f"{p}-{cand.stem}", p, cand, base_emit, emit)
                 row.update(probeExit=code, probeRefused=refused, illegal=illegal, emit=str(got))
+                if code == 0 and not measured:
+                    row["emitNotWritten"] = True
                 plan.advance()
-                if code == 0 and got.exists():
+                if measured:
                     reverse = None
                     if not a.no_reverse:
                         rev_emit = out / p / f"{cand.stem}.reverse.json"
-                        rcode, _, _, rgot = run_probe(f"{p}-{cand.stem}-reverse", p, baseline, got, rev_emit)
-                        reverse = rgot if rcode == 0 and rgot.exists() else None
+                        rcode, _, _, rgot, rmeasured = run_probe(f"{p}-{cand.stem}-reverse", p, baseline, got, rev_emit)
+                        reverse = rgot if rmeasured else None
                         row["reverseExit"] = rcode
+                        row["reverseEmit"] = str(rgot)
+                        if rcode == 0 and not rmeasured:
+                            row["reverseEmitNotWritten"] = True
                         plan.advance()
                     row["created"] = created_breakdown(base_emit, got, reverse)
                     dargs = diff_exe + [str(base_emit), str(got)] + (["--tolerance", a.diff_tolerance] if a.diff_tolerance else [])
-                    dres = runner.run([{"id": f"diff-{p}-{cand.stem}", "argv": dargs}])[0]
-                    dlog = logs / f"diff-{p}-{cand.stem}.txt"
+                    djob = f"diff-{p}-{cand.stem}"
+                    dlog = logs / f"{djob}.txt"
+                    dbefore = emit_signature(dlog)
+                    dres = runner.run([{"id": djob, "argv": dargs}])[0]
+                    dafter = emit_signature(dlog)
                     row["diff"] = parse_diff(dlog.read_text(encoding="utf-8", errors="replace") if dlog.exists() else "")
                     row["diffExit"] = dres["exitCode"]
+                    # The diff's own record names every emit its result was read from: conflictdiff compared base and
+                    # arm, and the created rows were split by the reverse emit (none when it was not measured).
+                    record_job(djob, "diff", "stopped" if dres.get("stopped") else "ran", dres["exitCode"], dlog,
+                               written=dafter is not None and dafter != dbefore, stopped=dres.get("stopped"),
+                               log=dlog, inputs={"base": base_emit, "arm": got, "reverse": reverse}, runner=dres)
                     plan.advance()
                 else:
                     plan.advance(arms - 1)

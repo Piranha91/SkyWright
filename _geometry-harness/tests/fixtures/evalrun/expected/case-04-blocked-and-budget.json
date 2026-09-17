@@ -93,12 +93,11 @@
    "records.cell-attributes",
    "functional.collective-route-connectivity",
    "environment.generated-output-regeneration",
-   "functional.linked-dependencies"
-  ],
-  "missingExcludes": [
+   "functional.linked-dependencies",
    "geometry.object-overlap",
    "geometry.navmesh-ownership"
   ],
+  "missingExcludes": [],
   "unknownApplicability": [
    "functional.linked-dependencies"
   ],
@@ -113,6 +112,7 @@
  "notes": [
   "D4: exit-nonzero, blocked-prerequisite.",
   "D7: unassessed lists candidates held back; D8: the bundle is written while the evaluation is incomplete.",
-  "A-4: arms beyond --max-candidates N are held back and their per-arm checks are skipped-budget."
+  "A-4: arms beyond --max-candidates N are held back and their per-arm checks are skipped-budget.",
+  "The earlier oracle excluded geometry.object-overlap and geometry.navmesh-ownership from missing, which was satisfiable only while the arm held back by --max-candidates was measured by the sweep (defect M1); with the bound enforced the held-back arm's required sweep checks are skipped-budget and therefore missing (decision 2026-09-17, design record DESIGN-per-invocation-sweep.md D7)."
  ]
 }

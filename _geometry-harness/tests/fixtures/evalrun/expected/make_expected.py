@@ -139,6 +139,10 @@ for arm in ("baseline", "candidate-01-reorder"):
                                                       "rejection": "extraction-failed"}
     led[f"geometry.placement-contact__{arm}__arm"] = {"execution": "rejected(extraction-failed)", "detector": None,
                                                     "rejection": "extraction-failed"}
+# A diff over an arm emit that was not accepted is not credited (review V2 H2, corrected 2026-09-17).
+for c in ("geometry.object-overlap", "geometry.placement-contact"):
+    led[f"{c}__candidate-01-reorder__diff"] = {"execution": "blocked(baseline-not-accepted)", "detector": None,
+                                               "rejection": None}
 cases.append(case(
     "case-03-null-and-extraction",
     "navownprobe emits zero conflicts with judged 42 / unjudgeable 0; overlapprobe emits zero conflicts with judged 0 "
@@ -150,11 +154,19 @@ cases.append(case(
      "missingExcludes": ["geometry.navmesh-ownership"],
      "unknownApplicability": ["functional.linked-dependencies"],
      "arms": {"candidate-01-reorder": {"classification": "PASSES-COMPLETED-CHECKS", "regression": False,
-                                       "probes": ["navownprobe", "overlapprobe", "contactprobe"]}}},
+                                       "probes": ["navownprobe"]}}},
     verify=0,
     notes=["D4: empty Conflicts with the primary population judged > 0 is no-finding.",
            "D4: primary population judged 0 while unjudgeable > 0, or every population judged 0, is extraction-failed.",
-           "The sweep's own PASSES-COMPLETED-CHECKS is retained verbatim and does not make the evaluation complete."]))
+           "The sweep's own PASSES-COMPLETED-CHECKS is retained verbatim and does not make the evaluation complete.",
+           "Corrected 2026-09-17 (sweep evidence per invocation, review V2 H2): the per-arm orderEvaluation was "
+           "expected to be scoped to navownprobe, overlapprobe and contactprobe. overlapprobe's and contactprobe's arm "
+           "emits are rejected(extraction-failed) on both arms - zero assessed subjects - and the diff parts built on "
+           "them were credited only because reverse and diff credit did not depend on the arm part's acceptance (the "
+           "H2 defect). A diff over an emit that was not accepted is now blocked - here "
+           "blocked(baseline-not-accepted), because the baseline arm emit it compared is rejected as well (review R1 "
+           "H1: credit rests on the accepted baseline too) - so the order evaluation is scoped to the one probe "
+           "whose emits were accepted."]))
 
 # ---------------------------------------------------------------- 04
 led = {
@@ -174,8 +186,8 @@ cases.append(case(
     led,
     {"complete": False, "claim": "incomplete",
      "missingIncludes": ["state.switch-census", "state.conditional-geometry", "geometry.placement-contact",
-                         *NEVER_COMPLETE],
-     "missingExcludes": ["geometry.object-overlap", "geometry.navmesh-ownership"],
+                         *NEVER_COMPLETE, "geometry.object-overlap", "geometry.navmesh-ownership"],
+     "missingExcludes": [],
      "unknownApplicability": ["functional.linked-dependencies"],
      "maxCandidates": 1,
      "candidatesHeldBackMentions": "candidate-02-reorder-b",
@@ -184,7 +196,11 @@ cases.append(case(
     verify=0,
     notes=["D4: exit-nonzero, blocked-prerequisite.",
            "D7: unassessed lists candidates held back; D8: the bundle is written while the evaluation is incomplete.",
-           "A-4: arms beyond --max-candidates N are held back and their per-arm checks are skipped-budget."]))
+           "A-4: arms beyond --max-candidates N are held back and their per-arm checks are skipped-budget.",
+           "The earlier oracle excluded geometry.object-overlap and geometry.navmesh-ownership from missing, which "
+           "was satisfiable only while the arm held back by --max-candidates was measured by the sweep (defect M1); "
+           "with the bound enforced the held-back arm's required sweep checks are skipped-budget and therefore "
+           "missing (decision 2026-09-17, design record DESIGN-per-invocation-sweep.md D7)."]))
 
 # ---------------------------------------------------------------- 05
 led = {

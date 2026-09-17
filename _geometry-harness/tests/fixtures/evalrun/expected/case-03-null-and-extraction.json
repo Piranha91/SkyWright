@@ -95,6 +95,16 @@
    "execution": "rejected(extraction-failed)",
    "detector": null,
    "rejection": "extraction-failed"
+  },
+  "geometry.object-overlap__candidate-01-reorder__diff": {
+   "execution": "blocked(baseline-not-accepted)",
+   "detector": null,
+   "rejection": null
+  },
+  "geometry.placement-contact__candidate-01-reorder__diff": {
+   "execution": "blocked(baseline-not-accepted)",
+   "detector": null,
+   "rejection": null
   }
  },
  "disposition": {
@@ -120,9 +130,7 @@
     "classification": "PASSES-COMPLETED-CHECKS",
     "regression": false,
     "probes": [
-     "navownprobe",
-     "overlapprobe",
-     "contactprobe"
+     "navownprobe"
     ]
    }
   }
@@ -131,6 +139,7 @@
  "notes": [
   "D4: empty Conflicts with the primary population judged > 0 is no-finding.",
   "D4: primary population judged 0 while unjudgeable > 0, or every population judged 0, is extraction-failed.",
-  "The sweep's own PASSES-COMPLETED-CHECKS is retained verbatim and does not make the evaluation complete."
+  "The sweep's own PASSES-COMPLETED-CHECKS is retained verbatim and does not make the evaluation complete.",
+  "Corrected 2026-09-17 (sweep evidence per invocation, review V2 H2): the per-arm orderEvaluation was expected to be scoped to navownprobe, overlapprobe and contactprobe. overlapprobe's and contactprobe's arm emits are rejected(extraction-failed) on both arms - zero assessed subjects - and the diff parts built on them were credited only because reverse and diff credit did not depend on the arm part's acceptance (the H2 defect). A diff over an emit that was not accepted is now blocked - here blocked(baseline-not-accepted), because the baseline arm emit it compared is rejected as well (review R1 H1: credit rests on the accepted baseline too) - so the order evaluation is scoped to the one probe whose emits were accepted."
  ]
 }
