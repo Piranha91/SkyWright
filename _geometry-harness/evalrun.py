@@ -1230,6 +1230,69 @@ class Validator:
                 return base
         return arm
 
+    #: scopeprobe/Program.cs's own wording for a named target the resolved configuration lacks.
+    SCOPE_ABSENT_TARGET = "'{name}' is not in the resolved configuration ("
+
+    def scope_omission(self, arm: dict, part: str | None, doc) -> dict:
+        """Is a scopeprobe exit 1 on this arm fully explained by LEGAL target omissions?
+
+        A plan names its targets once, and every arm is told all of them. An add/remove arm's frozen
+        request leaves some out by design, and scopeprobe then reports each as a walk failure. That is
+        not a loadability failure, but it is only treated as an omission when ALL of these hold:
+          - the resolved configuration is exactly the arm's frozen request (names, in order), so the
+            order that loaded is the order the plan approved;
+          - every walk failure is the probe's absent-target sentence for a plan target the request
+            does NOT load, and that target is really absent from the resolved configuration;
+          - every plan target the request DOES load was measured.
+        A requested target the configuration lacks, any other walk failure, or an unreadable document
+        is not an omission, and `why` says which rule failed."""
+        ref = self.reference_arm(arm, part)
+        out = {"legal": False, "why": "", "omitted": [], "measured": [], "coverage": None}
+        if not isinstance(doc, dict):
+            out["why"] = "the scope JSON could not be read, so its walk failures cannot be classified"
+            return out
+        failures = [str(f) for f in (doc.get("walkFailures") or [])]
+        cfg = doc.get("configuration") or doc.get("Configuration") or {}
+        resolved = [str(p.get("Name", p.get("name")) or "") for p in (cfg.get("plugins") or cfg.get("Plugins") or [])
+                    if isinstance(p, dict)]
+        req_rows = (ref.get("requested") or {}).get("plugins")
+        requested = ([str(p.get("name") or "") for p in req_rows if isinstance(p, dict)]
+                     if isinstance(req_rows, list) else [str(p) for p in (ref.get("plugins") or [])])
+        targets = [str(t.get("name")) for t in (self.plan.get("targets") or [])
+                   if isinstance(t, dict) and t.get("name")]
+        req_low = {n.lower() for n in requested}
+        res_low = {n.lower() for n in resolved}
+        omitted = [t for t in targets if t.lower() not in req_low]
+        loaded = [t for t in targets if t.lower() in req_low]
+        measured = [str(t.get("name") or "") for t in (doc.get("targets") or []) if isinstance(t, dict)]
+        out["omitted"], out["measured"] = omitted, measured
+        unexplained = [f for f in failures
+                       if not any(f.startswith(self.SCOPE_ABSENT_TARGET.format(name=t))
+                                  and t.lower() not in res_low for t in omitted)]
+        if unexplained:
+            out["why"] = ("walk failure(s) that are not a target this arm's request leaves out: "
+                          + "; ".join(unexplained))
+        elif not failures:
+            # Every failure above is explained by an omitted target, so a non-empty list implies one.
+            out["why"] = "the probe named no walk failure, so its incompleteness is not a target this arm leaves out"
+        elif not resolved or [n.lower() for n in resolved] != [n.lower() for n in requested]:
+            out["why"] = (f"the resolved configuration ({len(resolved)} plugins) is not this arm's frozen "
+                          f"request ({len(requested)} plugins), so what loaded is not the order the plan approved")
+        elif sorted(n.lower() for n in measured) != sorted(t.lower() for t in loaded):
+            out["why"] = ("a plan target this arm's request loads was not measured: "
+                          + ", ".join(t for t in loaded if t.lower() not in {m.lower() for m in measured}))
+        else:
+            out["legal"] = True
+            it = "it" if len(omitted) == 1 else "them"
+            out["coverage"] = {
+                "Population": "target footprints", "Judged": len(measured),
+                "Unjudgeable": {"not-loaded-by-this-arm": len(omitted)},
+                "Note": (f"the order resolved to this arm's frozen request ({len(resolved)} plugins); that is "
+                         f"this check's loadability answer. Not measured on this arm: "
+                         + ", ".join(omitted) + f" - the arm's request does not load {it}, so no footprint "
+                         f"of {it} was requested or measured here, and nothing in this receipt describes {it}.")}
+        return out
+
     # -- readers ---------------------------------------------------------------------------
 
     @staticmethod
@@ -1290,18 +1353,32 @@ class Validator:
         refused = bool(marker) and (exit_code not in (0, None) or not produced)
         order_kind = adapter.get("kind") in ORDER_CONSUMING_KINDS
 
+        # scopeprobe's exit 1 means "written but incomplete". An arm that legally omits a plan target
+        # (its frozen request does not load it) always exits 1, so that exit alone says nothing about
+        # the order's loadability; `scope_omission` decides whether every walk failure is such an
+        # omission and nothing else. Anything it cannot explain stays a rejection, named.
+        omission = None
+        if (adapter.get("kind") == "scopeprobe" and exit_code == 1 and produced and not refused
+                and out_kind == "json"):
+            omission = self.scope_omission(arm, part, load_json(primary))
+
         if exit_code == 2 and refused and not produced and order_kind:
+            line = next((ln.strip() for ln in (log_text or "").splitlines() if REFUSED_RE.search(ln)), "")
             rej.append({"cause": "illegal-configuration",
                         "detail": "the child refused the CONFIGURATION itself (exit 2, a refusal "
-                                  "marker, no output): the game would not load it as written"})
+                                  "marker, no output): the game would not load it as written"
+                                  + (f" - the child's refusal: {line[:300]!r}" if line else "")})
         elif refused:
             rej.append({"cause": "refused",
                         "detail": f"refusal marker in the child's log (stderr included): "
                                   f"{marker.group(0).strip()!r}"})
             if exit_code not in (0, None):
                 rej.append({"cause": "exit-nonzero", "detail": f"exit code {exit_code}"})
+        elif omission is not None and omission["legal"]:
+            pass
         elif exit_code not in (0, None):
-            rej.append({"cause": "exit-nonzero", "detail": f"exit code {exit_code}"})
+            rej.append({"cause": "exit-nonzero", "detail": f"exit code {exit_code}"
+                        + (f": {omission['why']}" if omission is not None else "")})
 
         doc = None
         detector = None
@@ -1365,6 +1442,12 @@ class Validator:
             elif adapter.get("kind") == "scopeprobe" and "complete" in doc:
                 # D2 defines scope.json's own `complete`; this is the probe's contract, not a guess.
                 findings = 0 if doc.get("complete") else None
+                if omission is not None and omission["legal"]:
+                    # The order resolved to exactly this arm's request, so its loadability is answered.
+                    # The footprint of a target the arm does not load was never requested here: it is
+                    # stated as unmeasured, never counted as measured.
+                    findings = 0
+                    coverage = [omission["coverage"]]
             else:
                 # A-6: a json / text output is read ONLY where the registry's `adapter.result` says
                 # its numbers live. Nothing is inferred from a shape the controller was not told.
@@ -1441,7 +1524,7 @@ class Validator:
                 detector = "finding"
             else:
                 detector = "no-finding"
-            if adapter.get("kind") == "scopeprobe" and doc is not None                     and "complete" in doc and not doc.get("complete"):
+            if adapter.get("kind") == "scopeprobe" and doc is not None                     and "complete" in doc and not doc.get("complete")                     and not (omission is not None and omission["legal"]):
                 detector = "inconclusive"
             if identity:
                 ref = self.reference_arm(arm, part)
@@ -2338,10 +2421,17 @@ def candidate_stale(arm: dict, memo: "HashMemo | None" = None) -> str | None:
 
 def prereq_satisfied(ex: Executor, check: dict, arm_id: str) -> str | None:
     """None when every prerequisite of this check is settled on this arm, else the first that is
-    not. A `not-applicable` prerequisite counts as satisfied: it is an answer, not an absence."""
+    not. A `not-applicable` prerequisite counts as satisfied: it is an answer, not an absence.
+
+    A prerequisite that was MEASURED on this arm and failed there (`rejected(...)` or `failed`) is
+    decided by this arm alone: a masters-and-order refused on this arm is not settled by the baseline's
+    accepted one. Otherwise - no entry, or one not attempted (held back, blocked before launch) - the
+    baseline's answer still counts, as before."""
     for pre in check.get("prerequisites") or []:
         ok = False
-        for aid in (arm_id, "baseline"):
+        own = str((ex.ledger.entry(pre, arm_id, None) or {}).get("status") or "")
+        measured_failure = own.startswith("rejected") or own == "failed"
+        for aid in ((arm_id,) if measured_failure else (arm_id, "baseline")):
             e = ex.ledger.entry(pre, aid, None)
             if e and (e.get("status") in TERMINAL_OK
                       or str(e.get("status") or "").startswith("not-applicable")):
@@ -3666,6 +3756,11 @@ def status_md(plan: dict, disp: dict) -> str:
                        ("families unsupported or manual", "familiesUnsupportedOrManual"),
                        ("scope extents the footprint probe does not read", "scopeUnmeasured")):
         L.append(f"- {label}: {canonical(u[key])[:400]}")
+    for p in u.get("unjudgeablePopulations") or []:
+        # A completed check can still leave part of its population unjudged (a target an arm does not
+        # load has no footprint there); it is stated here, not only counted in the null-check list.
+        L.append(f"- `{p['checkId']}` [{p['armId']}] {p['population']}: {p['judged']} judged, not judged "
+                 f"{canonical(p['unjudgeable'])}")
     L.append(f"- media: {u['mediaUnassessed']}")
     L.append(f"- runtime: {u['runtimeObservations']}")
     L += ["", "## Regeneration needs", ""]

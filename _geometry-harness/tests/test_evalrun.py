@@ -1937,6 +1937,219 @@ CASES = {"case-01": case_01, "case-02": case_02, "case-03": case_03, "case-04": 
          "case-16": case_16, "case-17": case_17, "case-18": case_18, "case-19": case_19}
 
 
+# ------------------------------- loadability on an add/remove arm: a legal target omission (20)
+
+# The stand-in follows scopeprobe/Program.cs at HEAD, not evalrun.py: at least one --target or exit 2; an
+# order the engine would refuse is REFUSED on stderr, exit 2, no JSON; otherwise the JSON is written, each
+# named target the resolved configuration lacks is a walk failure in the probe's own wording, and the exit is
+# 0 when complete, 1 when not. `loadability` in the scenario, keyed by order stem, makes an order refuse
+# (`refuse`), makes resolution lose a plugin the order names (`lose`), or leaves a resolved target unmeasured
+# without naming it (`silent` - a damaged output, so the controller's measured-target rule has an arm).
+SCOPE_FAKE_20 = r'''
+import json, os, sys
+from pathlib import Path
+a = sys.argv[1:]
+targets, order, out = [], None, None
+i = 0
+while i < len(a):
+    if a[i] == "--target": targets.append(a[i + 1]); i += 2; continue
+    if a[i] == "--order": order = a[i + 1]; i += 2; continue
+    if a[i] == "--json": out = a[i + 1]; i += 2; continue
+    if a[i] in ("--instance", "--profile", "--game", "--assets"): i += 2; continue
+    i += 1
+if not targets:
+    print("scopeprobe needs at least one --target Plugin.esp", file=sys.stderr); sys.exit(2)
+scen = json.loads(Path(os.environ["EVALRUN_FAKE_SCENARIO"]).read_text(encoding="utf-8"))
+pdir = Path(scen["pluginDir"])
+stem = Path(order).stem
+rule = (scen.get("loadability") or {}).get(stem) or {}
+names = list(json.loads(Path(order).read_text(encoding="utf-8")).get("Plugins") or [])
+if rule.get("refuse"):
+    print("REFUSED: " + rule["refuse"], file=sys.stderr)
+    print("no scope.json was written: a footprint measured in an order the engine would not load describes "
+          "a game that cannot start.", file=sys.stderr)
+    sys.exit(2)
+for n in names:
+    if not (pdir / n).exists():
+        print(f"REFUSED: the order names '{n}' and no provider in the view supplies it", file=sys.stderr)
+        sys.exit(2)
+resolved = [n for n in names if n.lower() != str(rule.get("lose") or "").lower()]
+src = "candidate:" + Path(order).name
+print(f"configuration: {src} - {len(resolved)} plugins")
+failures, measured = [], []
+for t in targets:
+    if t.lower() not in {n.lower() for n in resolved}:
+        failures.append(f"'{t}' is not in the resolved configuration ({len(resolved)} plugins, {src}); "
+                        "its footprint was not measured, so nothing below describes it")
+    elif t.lower() != str(rule.get("silent") or "").lower():
+        measured.append({"name": t, "footprint": {"recordTypes": {}}})
+for f in failures:
+    print("  WALK FAILURE: " + f)
+complete = not failures and len(measured) == len(targets)
+doc = {"schemaVersion": 1, "probe": "scopeprobe", "complete": complete, "walkFailures": failures,
+       "targets": measured, "unmeasured": [],
+       "configuration": {"source": src, "population": "load-time", "state": "baseline",
+                         "plugins": [{"Name": n, "Path": str(pdir / n), "Provider": "fixture-mods"}
+                                     for n in resolved]}}
+Path(out).parent.mkdir(parents=True, exist_ok=True)
+Path(out).write_text(json.dumps(doc, indent=1), encoding="utf-8")
+sys.exit(0 if complete else 1)
+'''
+
+
+def case_20(tmp):
+    """Defect iii: loadability.masters-and-order on an add/remove arm. A target the arm's own frozen request
+    does not load is a legal omission - the order's loadability is measured and accepted, the omitted
+    target's footprint is stated as not measured on that arm. A refused order (missing master, invalid
+    order) and a target the arm DOES request but the configuration lacks still fail, on the receipt, on
+    the derived prerequisite gate and in the disposition."""
+    case = "case-20-loadability-omission"
+    mao, order = "loadability.masters-and-order", "patch.order-evaluation"
+    a_name, b_name = "FixtureTarget.esp", "FixtureTargetB.esp"
+    src = GEN / "cases" / "case-19-derived-prerequisites"
+    d = GEN / "cases" / case
+    pdir = d / "plugins"
+    pdir.mkdir(parents=True, exist_ok=True)
+    for p in (GEN / "plugins").iterdir():
+        shutil.copyfile(p, pdir / p.name)
+    (pdir / b_name).write_bytes(b"fixture second target: another mod the plan names\n")
+    scope = load(src / "scope.json")
+    first = scope["targets"][0]
+    scope["targets"].append(dict(first, name=b_name))
+    rows = scope["configuration"]["plugins"]
+    for r in rows:
+        r["Path"] = str(pdir / r["Name"]).replace("\\", "/")
+    rows.append({"Name": b_name, "Path": str(pdir / b_name).replace("\\", "/"),
+                 "Sha256": sha_of(pdir / b_name), "Bytes": (pdir / b_name).stat().st_size,
+                 "Provider": "fixture-mods"})
+    (d / "scope.json").write_text(json.dumps(scope, indent=1), encoding="utf-8")
+
+    deps = ["Skyrim.esm", "Update.esm", "FixtureBase.esp"]
+    cands = {
+        "candidate-00-baseline": (deps + [a_name, b_name], "the combined order: both targets"),
+        "candidate-01-dependency-only": (list(deps), "removed both targets"),
+        "candidate-02-plus-a": (deps + [a_name], "removed the second target"),
+        "candidate-03-plus-b": (deps + [b_name], "removed the first target"),
+        "candidate-04-missing-master": (["Skyrim.esm", "Update.esm", a_name, b_name], "removed FixtureBase.esp"),
+        "candidate-05-invalid-order": (deps + ["FixtureAbsent.esp", a_name, b_name], "added an absent plugin"),
+        "candidate-06-target-lost": (deps + [b_name, a_name], "moved the second target above the first"),
+        "candidate-07-view-differs": (deps + [a_name], "removed the second target; resolution loses a master"),
+        "candidate-08-target-unmeasured": (deps + [a_name], "removed the second target; first left unmeasured"),
+        "candidate-09-silent-incomplete": (deps + [b_name, a_name], "every target; one left unmeasured"),
+    }
+    cdir = d / "candidates"
+    cdir.mkdir(parents=True, exist_ok=True)
+    for stem, (plugins, change) in cands.items():
+        (cdir / f"{stem}.json").write_text(json.dumps(
+            {"SchemaVersion": 1, "Name": stem, "BaseProfile": "fixture", "Plugins": plugins,
+             "Changes": [change], "Provenance": {"fixture": "evalrun test fixture"}}, indent=1), encoding="utf-8")
+    (cdir / "candidates.json").write_text(json.dumps(
+        {"SchemaVersion": 1, "Candidates": [{"File": f"{s}.json", "ViolatesAdvice": [], "SatisfiesAdvice": []}
+                                            for s in cands],
+         "Budget": {"evaluated": len(cands) - 1, "legalNotEvaluated": 0, "note": "fixture manifest"},
+         "Contradictions": []}, indent=1), encoding="utf-8")
+    missing_master = "MISSING MASTER - FixtureTarget.esp masters FixtureBase.esp, which the order does not load"
+    scen = d / "scenario.json"
+    scen.write_text(json.dumps({
+        "pluginDir": str(pdir).replace("\\", "/"), "scopeFrom": str(d / "scope.json").replace("\\", "/"),
+        "arms": {}, "loadability": {"candidate-04-missing-master": {"refuse": missing_master},
+                                    "candidate-06-target-lost": {"lose": b_name},
+                                    "candidate-07-view-differs": {"lose": "FixtureBase.esp"},
+                                    "candidate-08-target-unmeasured": {"silent": a_name},
+                                    "candidate-09-silent-incomplete": {"silent": b_name}}}, indent=1),
+                    encoding="utf-8")
+    fake = d / "scopeprobe_fake.py"
+    fake.write_text(SCOPE_FAKE_20, encoding="utf-8")
+
+    # The wording the controller relies on is scopeprobe's own; if the probe rewords it this goes RED here.
+    prog = (HARNESS / "scopeprobe" / "Program.cs").read_text(encoding="utf-8")
+    check("$\"'{wanted}' is not in the resolved configuration (" in prog,
+          f"{case}: scopeprobe/Program.cs still words an absent target as the controller reads it")
+    check("return complete ? 0 : 1;" in prog and "return 2;" in prog,
+          f"{case}: scopeprobe/Program.cs exit contract is still 0 complete / 1 incomplete / 2 refused")
+
+    run = tmp / case
+    reg = "fixture-check-registry-derived.json"
+    expect(do_plan(run, case, ["--select", order, "--probe-cmd", f"scopeprobe=python {fake}"],
+                   registry=reg).returncode, 0, f"{case}: plan exit", "§4.6")
+    expect(evalrun(["run", "--run", run], scen).returncode, 0, f"{case}: run exit", "§4.6")
+    expect(evalrun(["finalize", "--run", run], scen).returncode, 0, f"{case}: finalize exit", "D7")
+    plan = load(run / "plan.json") or {}
+    led = ledger_entries(load(run / "ledger.json") or {})
+    disp = load(run / "disposition.json") or {}
+    arm_of = {Path(a.get("candidateFile") or "").stem: a["armId"] for a in plan.get("arms") or []}
+    nulls = {(r.get("checkId"), r.get("armId")) for r in (field(disp, "completedNullChecks") or [])}
+    missing = {(r.get("checkId"), r.get("armId")): r.get("status") for r in (field(disp, "missing") or [])}
+    unassessed = field(disp, "unassessed") or {}
+    unjudged = {(u.get("checkId"), u.get("armId")): u for u in (unassessed.get("unjudgeablePopulations") or [])}
+
+    def rc(stem):
+        return load(run / "receipts" / f"{mao}__{arm_of.get(stem)}.json") or {}
+
+    def footprint_line(r):
+        return next((c for c in ((r.get("result") or {}).get("coverage") or [])
+                     if "footprint" in str(c.get("Population", "")).lower()), None)
+
+    # 3 - the normal unchanged view: every target present, measured, completed, a null check as before
+    s = "candidate-00-baseline"
+    r, aid = rc(s), arm_of.get(s)
+    expect(r.get("exitCode"), 0, f"{case}/{s}: scopeprobe exit (complete)", "D4")
+    expect(execution_of(led.get(f"{mao}__{aid}")), "completed", f"{case}/{s}: {mao} status", "D4")
+    expect((r.get("result") or {}).get("detector"), "no-finding", f"{case}/{s}: {mao} detector", "D4")
+    expect((r.get("result") or {}).get("coverage"), [], f"{case}/{s}: coverage unchanged (no omission to state)", "D4")
+    check((mao, aid) in nulls and (mao, aid) not in missing, f"{case}/{s}: {mao} is a completed null, not missing")
+    expect(execution_of(led.get(f"{order}__{aid}")), "not-applicable", f"{case}/{s}: {order} as before", "§4.6")
+
+    # 1 / 2 - a legal omission: accepted as the order's loadability; the omitted footprint is stated unmeasured
+    for s, omitted, measured in (("candidate-01-dependency-only", [a_name, b_name], 0),
+                                 ("candidate-02-plus-a", [b_name], 1),
+                                 ("candidate-03-plus-b", [a_name], 1)):
+        r, aid = rc(s), arm_of.get(s)
+        expect(r.get("exitCode"), 1, f"{case}/{s}: scopeprobe exit (walk failures for the omitted targets)", "D4")
+        expect(execution_of(led.get(f"{mao}__{aid}")), "completed",
+               f"{case}/{s}: {mao} accepted, not rejected(exit-nonzero)", "defect iii")
+        expect((r.get("validation") or {}).get("rejections"), [], f"{case}/{s}: no rejection", "defect iii")
+        expect((r.get("result") or {}).get("detector"), "no-finding", f"{case}/{s}: {mao} detector", "defect iii")
+        fp = footprint_line(r) or {}
+        expect(fp.get("Judged"), measured, f"{case}/{s}: footprint line counts only the measured targets",
+               "defect iii")
+        expect(sum((fp.get("Unjudgeable") or {}).values()), len(omitted),
+               f"{case}/{s}: footprint line counts the omitted targets as not measured", "defect iii")
+        check(all(n in str(fp.get("Note", "")) for n in omitted),
+              f"{case}/{s}: footprint line names every omitted target (got {str(fp.get('Note'))[:160]!r})")
+        check((mao, aid) not in missing, f"{case}/{s}: {mao} is not listed missing/rejected in the disposition")
+        check((mao, aid) in nulls, f"{case}/{s}: {mao} is a completed null (the order loads)")
+        check((mao, aid) in unjudged, f"{case}/{s}: the unmeasured footprint reaches unassessed")
+        status_md = (run / "STATUS.md").read_text(encoding="utf-8") if (run / "STATUS.md").exists() else ""
+        check(any(f"[{aid}] target footprints: {measured} judged" in ln and "not-loaded-by-this-arm" in ln
+                  for ln in status_md.splitlines()),
+              f"{case}/{s}: STATUS.md states the unmeasured footprint, not only a null check")
+        expect(execution_of(led.get(f"{order}__{aid}")), "completed",
+               f"{case}/{s}: {order} is not blocked on the prerequisite", "§4.7")
+
+    # 4 / 5 / 6 - real failures stay failures, each with its own cause; 07-09 pin the omission rule's other
+    # conditions (the configuration is the request; every loaded target measured; a silent incompleteness)
+    for s, status, needle in (("candidate-04-missing-master", "rejected(illegal-configuration)", "MISSING MASTER"),
+                              ("candidate-05-invalid-order", "rejected(illegal-configuration)", "FixtureAbsent.esp"),
+                              ("candidate-06-target-lost", "rejected(exit-nonzero)", b_name),
+                              ("candidate-07-view-differs", "rejected(exit-nonzero)", "frozen request"),
+                              ("candidate-08-target-unmeasured", "rejected(exit-nonzero)", "was not measured"),
+                              ("candidate-09-silent-incomplete", "rejected(exit-nonzero)", "no walk failure")):
+        r, aid = rc(s), arm_of.get(s)
+        e = led.get(f"{mao}__{aid}") or {}
+        expect(execution_of(e), status, f"{case}/{s}: {mao} status", "D4")
+        detail = " ".join(str(x.get("detail") or "") for x in ((r.get("validation") or {}).get("rejections") or []))
+        check(needle in detail, f"{case}/{s}: the rejection names its real cause {needle!r} (got {detail[:200]!r})")
+        check((mao, aid) not in nulls, f"{case}/{s}: {mao} is NOT a completed null")
+        expect(missing.get((mao, aid)), status, f"{case}/{s}: {mao} listed missing with its status", "D7")
+        expect(execution_of(led.get(f"{order}__{aid}")), f"blocked(prerequisite:{mao})",
+               f"{case}/{s}: {order} blocked on the arm's own failed prerequisite", "§4.7")
+        check((order, aid) not in nulls, f"{case}/{s}: {order} is NOT a completed null")
+
+
+CASES["case-20"] = case_20
+
+
 def main() -> int:
     want = sys.argv[1] if len(sys.argv) > 1 else ""
     tmp = Path(tempfile.mkdtemp(prefix="hc-evalrun-test-"))
