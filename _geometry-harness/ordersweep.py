@@ -195,7 +195,11 @@ class Cache:
         self.entries = load_json(path) or {} if path.exists() else {}
 
     def save(self):
-        self.path.write_text(json.dumps(self.entries, indent=1), encoding="utf-8")
+        # Atomic: a sweep stopped at the controller's deadline can die mid-save, and this cache is the
+        # only thing that carries probe jobs finished before the stop into the next invocation.
+        tmp = self.path.with_name(self.path.name + ".tmp")
+        tmp.write_text(json.dumps(self.entries, indent=1), encoding="utf-8")
+        os.replace(tmp, self.path)
 
     def note(self, line: str):
         print(f"   cache: {line}")
@@ -305,6 +309,9 @@ def main() -> int:
     ap.add_argument("--max-candidates", type=int)
     ap.add_argument("--diff-tolerance", default=None, help="conflictdiff --tolerance (points)")
     ap.add_argument("--no-reverse", action="store_true", help="skip the reverse measurement (created rows then read unmeasured)")
+    ap.add_argument("--deadline-seconds", type=float,
+                    help="the caller's remaining deadline: each probe is then finished only when its whole process "
+                         "tree is empty, and a probe is cached only after that (evalrun passes it under a budget)")
     ap.add_argument("--probe-cmd", action="append", default=[], metavar="NAME=<argv prefix>",
                     help="run NAME (a probe, or conflictdiff) as <argv prefix> instead of its Release binary. "
                          "Repeatable. A test seam: it changes which program runs, not how the result is read.")
@@ -342,7 +349,11 @@ def main() -> int:
         parts = [probe, exe_sha[probe], sha256_file(order_file), sha256_file(base_emit) if base_emit else "-", " ".join(common + extra)]
         return hashlib.sha256("|".join(parts).encode("utf-8")).hexdigest()
 
-    runner = Runner("ordersweep", out_dir=logs, retries=0)
+    # Under a caller's deadline the Runner's tree semantics apply: a probe whose launched process exits while
+    # a descendant still runs is not finished, so it is never recorded in the cache - a later `resume` must not
+    # reuse work whose tree was not shown empty. Without one, the historical behaviour is unchanged.
+    deadline = None if a.deadline_seconds is None else time.perf_counter() + max(0.0, a.deadline_seconds)
+    runner = Runner("ordersweep", out_dir=logs, retries=0, deadline=deadline)
 
     def run_probe(job_id: str, probe: str, order_file: Path, base_emit: Path | None, emit: Path) -> tuple[int, bool, bool, Path]:
         """Run (or reuse) one probe arm. Returns (exit, refused, illegal, emit path)."""
@@ -356,6 +367,9 @@ def main() -> int:
         text = log.read_text(encoding="utf-8", errors="replace") if log.exists() else ""
         refused = bool(REFUSED_RE.search(text))
         illegal = res["exitCode"] == 2 and "REFUSED" in text and not emit.exists()
+        if res.get("stopped"):
+            # stopped at (or refused by) the caller's deadline: not finished, never cached, never a clean exit
+            return (res["exitCode"] if res["exitCode"] not in (None, 0) else -1), refused, False, emit
         if res["exitCode"] == 0 and emit.exists():
             cache.record(k, job_id, emit)
         return res["exitCode"], refused, illegal, emit

@@ -1931,6 +1931,559 @@ def case_19(tmp):
     blocked_on(led, disp, qual, cand, disc, "masters-excluded")
 
 
+# ------------------------------------------- defect iv: the budget is a deadline on the running tree (20)
+
+DEADLINE_SLOWPROBE = r'''
+"""A fake probe that, on ONE named arm, writes its complete emit and then never exits - and spawns a
+descendant that never exits either. Both write their PIDs. Every other arm is the ordinary fake."""
+import os, subprocess, sys, time
+from pathlib import Path
+sys.path.insert(0, FIXT_DIR)
+from fakeprobe import main
+probe, argv = sys.argv[1], sys.argv[2:]
+emit = argv[argv.index("--emit") + 1] if "--emit" in argv else ""
+stem = Path(emit).name[:-5] if emit.endswith(".json") else ""
+if stem and stem == os.environ.get("EVALRUN_SLOW_ARM"):
+    code = main(probe, argv)
+    pidfile = os.environ["EVALRUN_SLOW_PIDFILE"]
+    with open(pidfile, "a") as f:
+        f.write("parent %d\n" % os.getpid())
+    child = "import os, sys, time\nopen(sys.argv[1], 'a').write('child %d\\n' % os.getpid())\ntime.sleep(900)\n"
+    subprocess.Popen([sys.executable, "-c", child, pidfile])
+    time.sleep(900)
+    raise SystemExit(code)
+raise SystemExit(main(probe, argv))
+'''
+
+
+def _pid_alive(pid: int) -> bool:
+    if os.name == "nt":
+        import ctypes
+        from ctypes import wintypes
+        k32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        k32.OpenProcess.restype = wintypes.HANDLE
+        k32.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+        k32.GetExitCodeProcess.argtypes = [wintypes.HANDLE, ctypes.POINTER(wintypes.DWORD)]
+        k32.CloseHandle.argtypes = [wintypes.HANDLE]
+        h = k32.OpenProcess(0x1000, False, pid)
+        if not h:
+            return False
+        try:
+            code = wintypes.DWORD()
+            return bool(k32.GetExitCodeProcess(h, ctypes.byref(code))) and code.value == 259
+        finally:
+            k32.CloseHandle(h)
+    try:
+        os.kill(pid, 0)
+        return True
+    except OSError:
+        return False
+
+
+def _pids(pidfile: Path) -> dict:
+    out = {}
+    if pidfile.exists():
+        for line in pidfile.read_text(encoding="utf-8").splitlines():
+            parts = line.split()
+            if len(parts) == 2 and parts[1].isdigit():
+                out[parts[0]] = int(parts[1])
+    return out
+
+
+def case_21(tmp):
+    """Defect iv. `--budget-minutes` is a deadline on the process tree evalrun launched, not only a gate
+    before launch: a sweep still running at the deadline is stopped (its probe AND the probe's descendant),
+    nothing from the stopped sweep is accepted (a complete emit with no completion, a stale summary.json and
+    a stale per-arm log from an 'earlier invocation' are all present), every affected entry is accounted
+    with a named cause, finalize/bundle/verify-bundle report a valid incomplete evaluation, and resume
+    recovers reusing only intact evidence. Expiry before launch still starts nothing."""
+    import threading
+    case = "case-21-deadline-stops-tree"
+    fixture = "case-08-interrupt-resume"
+    _, _, _, scen = case_paths(fixture)
+    allowance = 15.0                     # the stated cleanup allowance (SEMANTICS; evalrun --budget-minutes)
+    budget_min = 0.3
+    budget_s = budget_min * 60
+    nav = "geometry.navmesh-ownership"
+    evidence_dir = os.environ.get("HOUSECARL_DEADLINE_EVIDENCE_DIR")
+
+    run = tmp / case
+    slow = tmp / "deadline-slowprobe.py"
+    slow.write_text(f"FIXT_DIR = {str(FIXT)!r}\n" + DEADLINE_SLOWPROBE, encoding="utf-8")
+    pidfile = tmp / f"{case}.pids"
+    store = run.parent / f"{case}-runlog"
+    env = dict(os.environ, EVALRUN_FAKE_SCENARIO=str(scen), HOUSECARL_RUNLOG_DIR=str(store))
+
+    def ev(args, extra_env=None, timeout=300):
+        return subprocess.run([sys.executable, str(EVALRUN)] + [str(a) for a in args], capture_output=True,
+                              text=True, env=dict(env, **(extra_env or {})), timeout=timeout)
+
+    p = ev(["plan", "--registry", GEN / "registry" / "fixture-check-registry.json",
+            "--scope", GEN / "cases" / fixture / "scope.json", "--candidates", GEN / "cases" / fixture / "candidates",
+            "--out", run, "--harness", REAL_HARNESS] + probe_cmds()
+           + ["--select", "navownprobe", "--budget-minutes", str(budget_min),
+              "--probe-cmd", f"navownprobe=python {slow} navownprobe"])
+    expect(p.returncode, 0, f"{case}: plan exit")
+    if p.returncode != 0:
+        print(p.stdout[-2000:], p.stderr[-2000:])
+        return
+    plan = load(run / "plan.json") or {}
+    cand = next((a for a in plan.get("arms") or [] if a.get("kind") == "candidate"), {})
+    cand_id, cand_stem = cand.get("armId"), Path(cand.get("candidateFile") or "x.json").stem
+    base_id = next((a["armId"] for a in plan.get("arms") or [] if a.get("kind") == "baseline"), "baseline")
+
+    # an EARLIER invocation's leftovers that must never be adopted: a summary claiming the slow arm passed,
+    # and a per-arm log carrying the Runner's completion trailer
+    sweep = run / "sweep"
+    (sweep / "logs").mkdir(parents=True, exist_ok=True)
+    row = {"probe": "navownprobe", "candidate": cand_stem, "probeExit": 0, "reverseExit": 0, "diffExit": 0,
+           "probeRefused": False, "illegal": False,
+           "diff": {"verdict": "DIFFERENTIAL-VERIFIED", "counts": {"created": 0}, "refusals": [], "delta": []},
+           "created": {"created": 0, "newDefect": 0, "attributed": 0, "unmeasured": 0}}
+    (sweep / "summary.json").write_text(json.dumps({"baseline": "stale", "probes": ["navownprobe"], "candidates": {
+        cand_stem: {"classification": "PASSES-COMPLETED-CHECKS", "rows": [row]}}}), encoding="utf-8")
+    (sweep / "logs" / f"navownprobe-{cand_stem}.txt").write_text(
+        "$ stale\n(exit 0, 1.0s)\n\nfrom an earlier invocation\n", encoding="utf-8")
+
+    # ---- the interrupted run: the deadline must stop the sweep's tree with nobody's help
+    fired = threading.Event()
+    t_launch = time.monotonic()
+    proc = subprocess.Popen([sys.executable, str(EVALRUN), "run", "--run", str(run)],
+                            stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
+                            env=dict(env, EVALRUN_SLOW_ARM=cand_stem, EVALRUN_SLOW_PIDFILE=str(pidfile)))
+
+    def watchdog():                      # protects the machine ONLY; if it fires the control has FAILED
+        fired.set()
+        if os.name == "nt":
+            subprocess.run(["taskkill", "/T", "/F", "/PID", str(proc.pid)], capture_output=True)
+            for pid in _pids(pidfile).values():
+                subprocess.run(["taskkill", "/F", "/PID", str(pid)], capture_output=True)
+        else:
+            proc.kill()
+            for pid in _pids(pidfile).values():
+                try:
+                    os.kill(pid, 9)
+                except OSError:
+                    pass
+
+    dog = threading.Timer(budget_s + allowance + 30, watchdog)
+    dog.daemon = True
+    dog.start()
+    out_text = []
+    reader = threading.Thread(target=lambda: out_text.append(proc.stdout.read()), daemon=True)
+    reader.start()
+    gone_at, exited_at = None, None
+    while time.monotonic() - t_launch < budget_s + allowance + 45:
+        pids = _pids(pidfile)
+        if exited_at is None and proc.poll() is not None:
+            exited_at = time.monotonic() - t_launch
+        if gone_at is None and "parent" in pids and "child" in pids and not any(_pid_alive(x) for x in pids.values()):
+            gone_at = time.monotonic() - t_launch
+        if gone_at is not None and exited_at is not None:
+            break
+        time.sleep(0.1)
+    dog.cancel()
+    if proc.poll() is None:
+        proc.kill()
+    reader.join(timeout=10)
+    pids = _pids(pidfile)
+    line = (f"budget {budget_s:.1f}s + allowance {allowance:.1f}s (measured from controller launch, which "
+            f"precedes the deadline's start); pids {pids}; both gone at "
+            f"{None if gone_at is None else round(gone_at, 2)}s; controller exited at "
+            f"{None if exited_at is None else round(exited_at, 2)}s (exit {proc.returncode}); alive now "
+            f"{ {k: _pid_alive(v) for k, v in pids.items()} }; watchdog fired {fired.is_set()}")
+    print("   evidence: " + line)
+    if evidence_dir:
+        Path(evidence_dir).mkdir(parents=True, exist_ok=True)
+        (Path(evidence_dir) / "evalrun-sweep-tree-stop.txt").write_text(
+            line + "\n\n---- controller output ----\n" + "".join(out_text), encoding="utf-8")
+    check("parent" in pids and "child" in pids,
+          f"{case}: the slow sweep arm was reached before the deadline (probe and descendant recorded PIDs)")
+    check(not fired.is_set(), f"{case}: the watchdog did not have to intervene (enforcement came from evalrun)")
+    check(gone_at is not None and gone_at <= budget_s + allowance,
+          f"{case}: probe AND descendant are gone within budget + allowance ({budget_s + allowance:.0f}s)")
+    check(exited_at is not None and exited_at <= budget_s + allowance + 10,
+          f"{case}: the controller finished its own accounting promptly after the stop")
+    expect(proc.returncode, 0, f"{case}: the interrupted run exits 0 (an incomplete evaluation is not a crash)")
+
+    led = ledger_entries(load(run / "ledger.json") or {})
+    parts = [(base_id, "arm"), (cand_id, "arm"), (cand_id, "reverse"), (cand_id, "diff")]
+    for aid, part in parts:
+        e = led.get(f"{nav}__{aid}__{part}") or {}
+        expect(execution_of(e), "stopped(deadline)", f"{case}: {nav} [{aid}/{part}] after the stop", "defect iv")
+        expect(e.get("cause"), "budget-exhausted", f"{case}: {nav} [{aid}/{part}] named cause", "defect iv")
+        rc = load(run / "receipts" / f"{nav}__{aid}__{part}.json") or {}
+        check(rc and (rc.get("validation") or {}).get("accepted") is False,
+              f"{case}: {nav} [{aid}/{part}] receipt exists and is NOT accepted")
+    check(not any(execution_of(v) == "running" for v in led.values()),
+          f"{case}: no entry is left running after the stop")
+    runlog_rows = []
+    hist = store / "history.jsonl"
+    if hist.exists():
+        for l in hist.read_text(encoding="utf-8").splitlines():
+            try:
+                runlog_rows.append(json.loads(l))
+            except ValueError:
+                pass
+    sweep_rows = [r for r in runlog_rows if r.get("op") == "ordersweep" and r.get("mode") == "child"]
+    check(bool(sweep_rows) and sweep_rows[-1].get("status") == "Cancelled"
+          and sweep_rows[-1].get("stoppedBy") == "deadline",
+          f"{case}: RunLog records the sweep child as Cancelled, stoppedBy deadline "
+          f"(got {[(r.get('status'), r.get('stoppedBy')) for r in sweep_rows]})")
+    slog = (run / "logs" / "ordersweep.txt")
+    check(slog.exists() and "stopped at the deadline" in slog.read_text(encoding="utf-8", errors="replace"),
+          f"{case}: the controller's sweep log says it was stopped at the deadline")
+
+    fin = ev(["finalize", "--run", run])
+    expect(fin.returncode, 0, f"{case}: finalize on the interrupted run exits 0 (a valid, incomplete disposition)")
+    disp = load(run / "disposition.json") or {}
+    expect(field(disp, "complete"), False, f"{case}: the interrupted evaluation is incomplete", "D7")
+    miss = {(m.get("checkId"), m.get("armId")): m.get("status") for m in (field(disp, "missing") or [])}
+    expect(miss.get((nav, cand_id)), "stopped(deadline)", f"{case}: missing names the stopped candidate arm", "D7")
+    bun = ev(["bundle", "--run", run])
+    expect(bun.returncode, 0, f"{case}: bundle on the interrupted run exits 0", "D8")
+    vb = ev(["verify-bundle", run / "bundle"])
+    expect(vb.returncode, 0, f"{case}: verify-bundle on the interrupted run exits 0", "D8")
+
+    # ---- resume: the slow arm now behaves; completed work is reused, the rest re-run under a fresh deadline
+    cache_log = sweep / "cache-log.txt"
+    before_cache = cache_log.read_text(encoding="utf-8") if cache_log.exists() else ""
+    journal_before = (run / "journal.jsonl").read_text(encoding="utf-8")
+    res = ev(["resume", "--run", run])
+    expect(res.returncode, 0, f"{case}: resume exits 0")
+    led = ledger_entries(load(run / "ledger.json") or {})
+    for aid, part in parts:
+        check(execution_of(led.get(f"{nav}__{aid}__{part}")) in ("completed", "reused"),
+              f"{case}: after resume {nav} [{aid}/{part}] is terminal-ok "
+              f"(got {execution_of(led.get(f'{nav}__{aid}__{part}'))})")
+    after_cache = cache_log.read_text(encoding="utf-8") if cache_log.exists() else ""
+    new_cache = after_cache[len(before_cache):]
+    check("RECORDED navownprobe-baseline" in before_cache and f"REUSED navownprobe-baseline" in new_cache
+          and "RECORDED navownprobe-baseline" not in new_cache,
+          f"{case}: the baseline probe that finished before the stop is reused from the verified cache, "
+          f"not re-measured")
+    check(f"RECORDED navownprobe-{cand_stem}:" in new_cache,
+          f"{case}: the stopped candidate arm is genuinely re-measured on resume")
+    journal_after = (run / "journal.jsonl").read_text(encoding="utf-8")
+    check(journal_after.startswith(journal_before) and "stopped(deadline)" in journal_after,
+          f"{case}: resume appends; the stop's journal history is not erased")
+    check(len(field(load(run / "ledger.json") or {}, "runIds", default=[])) >= 2,
+          f"{case}: the ledger lists both invocations")
+    summ = load(sweep / "summary.json") or {}
+    check(summ.get("baseline") != "stale", f"{case}: the stale summary was replaced by this sweep's own")
+
+    # ---- a clean re-invocation adopts nothing new and runs no child
+    again = ev(["run", "--run", run])
+    expect(again.returncode, 0, f"{case}: a clean re-run exits 0")
+    check("every arm reused, no child run" in again.stdout, f"{case}: the clean re-run runs no sweep child")
+    led = ledger_entries(load(run / "ledger.json") or {})
+    for aid, part in parts:
+        expect(execution_of(led.get(f"{nav}__{aid}__{part}")), "reused",
+               f"{case}: clean re-run {nav} [{aid}/{part}]", "D6")
+
+    # ---- expiry before launch: nothing starts
+    run3 = tmp / f"{case}-expired"
+    p3 = ev(["plan", "--registry", GEN / "registry" / "fixture-check-registry.json",
+             "--scope", GEN / "cases" / fixture / "scope.json", "--candidates", GEN / "cases" / fixture / "candidates",
+             "--out", run3, "--harness", REAL_HARNESS] + probe_cmds()
+            + ["--select", "navownprobe", "--budget-minutes", "0.000001"])
+    expect(p3.returncode, 0, f"{case}/expired: plan exit")
+    r3 = ev(["run", "--run", run3])
+    expect(r3.returncode, 0, f"{case}/expired: run exit")
+    logs3 = [x.name for x in (run3 / "logs").glob("*.txt")] if (run3 / "logs").exists() else []
+    expect(logs3, [], f"{case}/expired: no child log exists - no child was started", "defect iv")
+    j3 = (run3 / "journal.jsonl").read_text(encoding="utf-8") if (run3 / "journal.jsonl").exists() else ""
+    check('"to":"running"' not in j3.replace(" ", ""), f"{case}/expired: no entry ever went running")
+    led3 = ledger_entries(load(run3 / "ledger.json") or {})
+    expect(execution_of(led3.get(f"{nav}__{cand_id}")), "skipped-budget",
+           f"{case}/expired: the sweep check is skipped-budget", "defect iv")
+
+
+DEADLINE_EARLYEXIT_PROBE = r'''
+"""A fake probe that, on ONE named arm, writes its complete emit, starts a descendant that sleeps (with
+its own stdio, so no pipe keeps the probe's caller waiting) and exits at once. Every other arm is the
+ordinary fake."""
+import os, subprocess, sys
+from pathlib import Path
+sys.path.insert(0, FIXT_DIR)
+from fakeprobe import main
+probe, argv = sys.argv[1], sys.argv[2:]
+emit = argv[argv.index("--emit") + 1] if "--emit" in argv else ""
+stem = Path(emit).name[:-5] if emit.endswith(".json") else ""
+if stem and stem == os.environ.get("EVALRUN_SLOW_ARM"):
+    code = main(probe, argv)
+    p = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(900)"], stdin=subprocess.DEVNULL,
+                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, close_fds=True)
+    with open(os.environ["EVALRUN_SLOW_PIDFILE"], "a") as f:
+        f.write("parent %d\nchild %d\n" % (os.getpid(), p.pid))
+    raise SystemExit(code)
+raise SystemExit(main(probe, argv))
+'''
+
+
+def case_22(tmp):
+    """The deadline covers descendants that outlive the process they came from. A probe writes a valid emit
+    and exits 0 at once but leaves a sleeping descendant; the sweep itself then finishes. The job is the unit
+    of work, so the check must NOT be accepted: at the deadline the descendant is stopped, every planned part
+    is `stopped(deadline)` / budget-exhausted, no entry is left running, and finalize reports it missing."""
+    import threading
+    case = "case-22-deadline-descendant-outlives-probe"
+    fixture = "case-08-interrupt-resume"
+    _, _, _, scen = case_paths(fixture)
+    allowance = 15.0
+    budget_min = 0.3
+    budget_s = budget_min * 60
+    nav = "geometry.navmesh-ownership"
+    evidence_dir = os.environ.get("HOUSECARL_DEADLINE_EVIDENCE_DIR")
+
+    run = tmp / case
+    probe = tmp / "deadline-earlyexit-probe.py"
+    probe.write_text(f"FIXT_DIR = {str(FIXT)!r}\n" + DEADLINE_EARLYEXIT_PROBE, encoding="utf-8")
+    pidfile = tmp / f"{case}.pids"
+    store = run.parent / f"{case}-runlog"
+    env = dict(os.environ, EVALRUN_FAKE_SCENARIO=str(scen), HOUSECARL_RUNLOG_DIR=str(store))
+
+    def ev(args, extra_env=None, timeout=300):
+        return subprocess.run([sys.executable, str(EVALRUN)] + [str(a) for a in args], capture_output=True,
+                              text=True, env=dict(env, **(extra_env or {})), timeout=timeout)
+
+    p = ev(["plan", "--registry", GEN / "registry" / "fixture-check-registry.json",
+            "--scope", GEN / "cases" / fixture / "scope.json", "--candidates", GEN / "cases" / fixture / "candidates",
+            "--out", run, "--harness", REAL_HARNESS] + probe_cmds()
+           + ["--select", "navownprobe", "--budget-minutes", str(budget_min),
+              "--probe-cmd", f"navownprobe=python {probe} navownprobe"])
+    expect(p.returncode, 0, f"{case}: plan exit")
+    if p.returncode != 0:
+        print(p.stdout[-2000:], p.stderr[-2000:])
+        return
+    plan = load(run / "plan.json") or {}
+    cand = next((a for a in plan.get("arms") or [] if a.get("kind") == "candidate"), {})
+    cand_id, cand_stem = cand.get("armId"), Path(cand.get("candidateFile") or "x.json").stem
+    base_id = next((a["armId"] for a in plan.get("arms") or [] if a.get("kind") == "baseline"), "baseline")
+
+    t_launch = time.monotonic()
+    proc = subprocess.Popen([sys.executable, str(EVALRUN), "run", "--run", str(run)],
+                            stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
+                            env=dict(env, EVALRUN_SLOW_ARM=cand_stem, EVALRUN_SLOW_PIDFILE=str(pidfile)))
+    out_text = []
+    reader = threading.Thread(target=lambda: out_text.append(proc.stdout.read()), daemon=True)
+    reader.start()
+    gone_at, exited_at = None, None
+    while time.monotonic() - t_launch < budget_s + allowance + 5:
+        pids = _pids(pidfile)
+        if exited_at is None and proc.poll() is not None:
+            exited_at = time.monotonic() - t_launch
+        if gone_at is None and "parent" in pids and "child" in pids and not any(_pid_alive(x) for x in pids.values()):
+            gone_at = time.monotonic() - t_launch
+        if gone_at is not None and exited_at is not None:
+            break
+        time.sleep(0.1)
+    pids = _pids(pidfile)
+    killed = []                          # protects the machine ONLY; anything killed here is a FAILED control
+    if proc.poll() is None:
+        killed.append(("controller", proc.pid))
+        proc.kill()
+    for name, pid in pids.items():
+        if _pid_alive(pid):
+            killed.append((name, pid))
+            if os.name == "nt":
+                subprocess.run(["taskkill", "/F", "/PID", str(pid)], capture_output=True)
+            else:
+                try:
+                    os.kill(pid, 9)
+                except OSError:
+                    pass
+    reader.join(timeout=10)
+    line = (f"budget {budget_s:.1f}s + allowance {allowance:.1f}s (measured from controller launch, which "
+            f"precedes the deadline's start); pids {pids}; both gone at "
+            f"{None if gone_at is None else round(gone_at, 2)}s; controller exited at "
+            f"{None if exited_at is None else round(exited_at, 2)}s (exit {proc.returncode}); killed by the test "
+            f"{killed}")
+    print("   evidence: " + line)
+    if evidence_dir:
+        Path(evidence_dir).mkdir(parents=True, exist_ok=True)
+        (Path(evidence_dir) / "evalrun-descendant-outlives-probe.txt").write_text(
+            line + "\n\n---- controller output ----\n" + "".join(out_text), encoding="utf-8")
+    check("parent" in pids and "child" in pids,
+          f"{case}: the early-exit arm was reached before the deadline (probe and descendant recorded PIDs)")
+    check(not killed, f"{case}: the test killed nothing (enforcement came from evalrun; killed {killed})")
+    check(gone_at is not None and gone_at <= budget_s + allowance,
+          f"{case}: probe AND descendant are gone within budget + allowance ({budget_s + allowance:.0f}s)")
+    check(exited_at is not None and exited_at <= budget_s + allowance + 5,
+          f"{case}: the controller finished its accounting promptly after the stop")
+    expect(proc.returncode, 0, f"{case}: the run exits 0 (an incomplete evaluation is not a crash)")
+
+    led = ledger_entries(load(run / "ledger.json") or {})
+    for aid, part in [(base_id, "arm"), (cand_id, "arm"), (cand_id, "reverse"), (cand_id, "diff")]:
+        e = led.get(f"{nav}__{aid}__{part}") or {}
+        expect(execution_of(e), "stopped(deadline)", f"{case}: {nav} [{aid}/{part}] is not accepted as completed",
+               "deadline covers the job")
+        expect(e.get("cause"), "budget-exhausted", f"{case}: {nav} [{aid}/{part}] named cause", "deadline covers the job")
+        rc = load(run / "receipts" / f"{nav}__{aid}__{part}.json") or {}
+        check(rc and (rc.get("validation") or {}).get("accepted") is False,
+              f"{case}: {nav} [{aid}/{part}] receipt exists and is NOT accepted")
+    check(not any(execution_of(v) == "running" for v in led.values()),
+          f"{case}: no entry is left running after the stop")
+    rows = []
+    hist = store / "history.jsonl"
+    if hist.exists():
+        for l in hist.read_text(encoding="utf-8").splitlines():
+            try:
+                rows.append(json.loads(l))
+            except ValueError:
+                pass
+    sweep_rows = [r for r in rows if r.get("op") == "ordersweep" and r.get("mode") == "child"]
+    check(bool(sweep_rows) and sweep_rows[-1].get("status") == "Cancelled"
+          and sweep_rows[-1].get("stoppedBy") == "deadline",
+          f"{case}: RunLog records the sweep child as Cancelled, stoppedBy deadline "
+          f"(got {[(r.get('status'), r.get('stoppedBy')) for r in sweep_rows]})")
+    fin = ev(["finalize", "--run", run])
+    expect(fin.returncode, 0, f"{case}: finalize exits 0 (a valid, incomplete disposition)")
+    disp = load(run / "disposition.json") or {}
+    expect(field(disp, "complete"), False, f"{case}: the evaluation is incomplete", "D7")
+    miss = {(m.get("checkId"), m.get("armId")): m.get("status") for m in (field(disp, "missing") or [])}
+    expect(miss.get((nav, cand_id)), "stopped(deadline)", f"{case}: missing names the stopped candidate arm", "D7")
+
+
+# Test-only, and only on the PYTHONPATH of the one evalrun subprocess below: when that process imports
+# runlog, its kernel32 binding is wrapped so AssignProcessToJobObject refuses. Nothing in evalrun or runlog
+# reads an environment switch for this; containment genuinely fails inside a real Runner.
+REFUSE_CONTAINMENT_SITECUSTOMIZE = r'''
+import importlib.abc, importlib.machinery, os, sys
+class _RefuseContainment(importlib.abc.MetaPathFinder):
+    def find_spec(self, name, path, target=None):
+        if name != "runlog":
+            return None
+        spec = importlib.machinery.PathFinder.find_spec(name, path)
+        if spec is None:
+            return None
+        original = spec.loader.exec_module
+        def exec_module(module):
+            original(module)
+            real = module._kernel32
+            class Refusing:
+                def __init__(self, k):
+                    self._k = k
+                def __getattr__(self, n):
+                    return getattr(self._k, n)
+                def AssignProcessToJobObject(self, job, h):
+                    if match[0]:
+                        return False
+                    return self._k.AssignProcessToJobObject(job, h)
+            module._kernel32 = lambda: Refusing(real())
+            match = [False]
+            launch = module._ProcessTree.launch.__func__
+            def refusing_launch(cls, argv, **kw):
+                want = os.environ.get("EVALRUN_TEST_REFUSE_ARGV", "")
+                match[0] = (not want) or any(want in str(a) for a in argv)
+                return launch(cls, argv, **kw)
+            module._ProcessTree.launch = classmethod(refusing_launch)
+        spec.loader.exec_module = exec_module
+        return spec
+sys.meta_path.insert(0, _RefuseContainment())
+'''
+
+
+def case_23(tmp):
+    """A child whose containment cannot be established under a deadline never runs, and the controller names
+    that cause, on both launch paths: a single check child (the loadability prerequisite, run_child) and the
+    ordersweep child (every planned part). Each is `blocked(uncontained)` with a sentence quoting the Runner's
+    refusal - never `stopped(deadline)` / budget-exhausted, never accepted - finalize lists it missing, and
+    resume (containment working again) re-runs it."""
+    case = "case-23-deadline-containment-refused"
+    if os.name != "nt":
+        print(f"   {case}: Windows job objects only; not applicable on this platform")
+        return
+    fixture = "case-08-interrupt-resume"
+    _, _, _, scen = case_paths(fixture)
+    nav = "geometry.navmesh-ownership"
+    run = tmp / case
+    hook = tmp / f"{case}-site"
+    hook.mkdir(parents=True, exist_ok=True)
+    (hook / "sitecustomize.py").write_text(REFUSE_CONTAINMENT_SITECUSTOMIZE, encoding="utf-8")
+    store = run.parent / f"{case}-runlog"
+    env = dict(os.environ, EVALRUN_FAKE_SCENARIO=str(scen), HOUSECARL_RUNLOG_DIR=str(store))
+
+    def ev(args, extra_env=None, timeout=300):
+        return subprocess.run([sys.executable, str(EVALRUN)] + [str(a) for a in args], capture_output=True,
+                              text=True, env=dict(env, **(extra_env or {})), timeout=timeout)
+
+    p = ev(["plan", "--registry", GEN / "registry" / "fixture-check-registry.json",
+            "--scope", GEN / "cases" / fixture / "scope.json", "--candidates", GEN / "cases" / fixture / "candidates",
+            "--out", run, "--harness", REAL_HARNESS] + probe_cmds()
+           + ["--select", "navownprobe", "--budget-minutes", "0.3"])
+    expect(p.returncode, 0, f"{case}: plan exit")
+    if p.returncode != 0:
+        print(p.stdout[-2000:], p.stderr[-2000:])
+        return
+    plan = load(run / "plan.json") or {}
+    cand_id = next((a["armId"] for a in plan.get("arms") or [] if a.get("kind") == "candidate"), None)
+    base_id = next((a["armId"] for a in plan.get("arms") or [] if a.get("kind") == "baseline"), "baseline")
+    pre = "loadability.masters-and-order"
+    run_a = tmp / f"{case}-single"
+    shutil.copytree(run, run_a)
+    ra = ev(["run", "--run", run_a], extra_env={"PYTHONPATH": str(hook), "EVALRUN_TEST_REFUSE_ARGV": ""})
+    expect(ra.returncode, 0, f"{case}/single: run exits 0")
+    led_a = ledger_entries(load(run_a / "ledger.json") or {})
+    pre_rows = {k: v for k, v in led_a.items() if k.startswith(pre + "__")}
+    check(bool(pre_rows) and all(execution_of(v) == "blocked(uncontained)" for v in pre_rows.values()),
+          f"{case}/single: the run_child prerequisite is blocked(uncontained) "
+          f"(got {[execution_of(v) for v in pre_rows.values()]})")
+    check(bool(pre_rows) and all("never ran" in str(v.get("detail") or "")
+                                 and "AssignProcessToJobObject refused" in str(v.get("detail") or "")
+                                 and v.get("cause") != "budget-exhausted" for v in pre_rows.values()),
+          f"{case}/single: its detail quotes the refusal and says it never ran; the budget is not blamed")
+    fin_a = ev(["finalize", "--run", run_a])
+    miss_a = {m.get("checkId"): m.get("status") for m in (field(load(run_a / "disposition.json") or {}, "missing") or [])}
+    expect(miss_a.get(pre), "blocked(uncontained)", f"{case}/single: missing names the refused prerequisite", "D7")
+    res_a = ev(["resume", "--run", run_a])
+    led_a = ledger_entries(load(run_a / "ledger.json") or {})
+    check(all(execution_of(v) in ("completed", "reused") for k, v in led_a.items() if k.startswith(pre + "__")),
+          f"{case}/single: resume re-runs the refused prerequisite to terminal-ok")
+    # phase B: refuse only the ordersweep launch -> every planned sweep part is blocked(uncontained)
+    r = ev(["run", "--run", run], extra_env={"PYTHONPATH": str(hook), "EVALRUN_TEST_REFUSE_ARGV": "ordersweep"})
+    expect(r.returncode, 0, f"{case}: run exits 0 (an incomplete evaluation is not a crash)")
+    if (store / "history.jsonl").exists():
+        rows = [json.loads(l) for l in (store / "history.jsonl").read_text(encoding="utf-8").splitlines() if l.strip()]
+    else:
+        rows = []
+    sweep_rows = [x for x in rows if x.get("op") == "ordersweep" and x.get("mode") == "child"]
+    check(bool(sweep_rows) and sweep_rows[-1].get("stoppedBy") == "containment",
+          f"{case}: the refusal really came from the Runner (RunLog stoppedBy "
+          f"{[x.get('stoppedBy') for x in sweep_rows]})")
+    check(not (run / "sweep" / "summary.json").exists(), f"{case}: the sweep child never ran (no summary written)")
+    led = ledger_entries(load(run / "ledger.json") or {})
+    parts = [(base_id, "arm"), (cand_id, "arm"), (cand_id, "reverse"), (cand_id, "diff")]
+    for aid, part in parts:
+        e = led.get(f"{nav}__{aid}__{part}") or {}
+        expect(execution_of(e), "blocked(uncontained)", f"{case}: {nav} [{aid}/{part}] status", "containment")
+        check(e.get("cause") != "budget-exhausted",
+              f"{case}: {nav} [{aid}/{part}] is not blamed on the budget (cause {e.get('cause')!r})")
+        detail = str(e.get("detail") or "")
+        check("never ran" in detail and "AssignProcessToJobObject refused" in detail,
+              f"{case}: {nav} [{aid}/{part}] detail quotes the refusal and says the child never ran "
+              f"(got {detail[:160]!r})")
+        rc = load(run / "receipts" / f"{nav}__{aid}__{part}.json") or {}
+        check(rc and (rc.get("validation") or {}).get("accepted") is False,
+              f"{case}: {nav} [{aid}/{part}] receipt exists and is NOT accepted")
+    check(not any(execution_of(v) == "running" for v in led.values()), f"{case}: no entry is left running")
+    fin = ev(["finalize", "--run", run])
+    expect(fin.returncode, 0, f"{case}: finalize exits 0")
+    disp = load(run / "disposition.json") or {}
+    expect(field(disp, "complete"), False, f"{case}: the evaluation is incomplete", "D7")
+    miss = {(m.get("checkId"), m.get("armId")): m.get("status") for m in (field(disp, "missing") or [])}
+    expect(miss.get((nav, cand_id)), "blocked(uncontained)", f"{case}: missing names the refused arm", "D7")
+    nulls = {(n.get("checkId"), n.get("armId")) for n in (field(disp, "completedNullChecks") or [])}
+    check((nav, cand_id) not in nulls, f"{case}: the refused arm is NOT a completed null")
+    res = ev(["resume", "--run", run])
+    expect(res.returncode, 0, f"{case}: resume exits 0")
+    led = ledger_entries(load(run / "ledger.json") or {})
+    for aid, part in parts:
+        check(execution_of(led.get(f"{nav}__{aid}__{part}")) in ("completed", "reused"),
+              f"{case}: after resume {nav} [{aid}/{part}] is re-run to terminal-ok "
+              f"(got {execution_of(led.get(f'{nav}__{aid}__{part}'))})")
+
+
 CASES = {"case-01": case_01, "case-02": case_02, "case-03": case_03, "case-04": case_04, "case-05": case_05,
          "case-06": case_06, "case-07": case_07, "case-08": case_08, "case-09": case_09, "case-10": case_10,
          "case-11": case_11, "case-12": case_12, "case-13": case_13, "case-14": case_14, "case-15": case_15,
@@ -2147,7 +2700,269 @@ def case_20(tmp):
         check((order, aid) not in nulls, f"{case}/{s}: {order} is NOT a completed null")
 
 
+def case_24(tmp):
+    """`resume` after a stopped sweep adopts nothing the stopped invocation recorded. A probe writes its emit
+    and exits 0 while its descendant keeps running, so ordersweep's cache records it; the sweep is then stopped
+    at the deadline. The cache entry proves only that the launched process exited, not that its tree was empty,
+    so `resume` must re-measure that arm (the cache log shows RECORDED, not REUSED) and accept only the work of
+    the resuming invocation."""
+    case = "case-24-resume-after-stop-remeasures"
+    fixture = "case-08-interrupt-resume"
+    _, _, _, scen = case_paths(fixture)
+    nav = "geometry.navmesh-ownership"
+    run = tmp / case
+    probe = tmp / "deadline-earlyexit-probe-24.py"
+    probe.write_text(f"FIXT_DIR = {str(FIXT)!r}\n" + DEADLINE_EARLYEXIT_PROBE, encoding="utf-8")
+    pidfile = tmp / f"{case}.pids"
+    env = dict(os.environ, EVALRUN_FAKE_SCENARIO=str(scen), HOUSECARL_RUNLOG_DIR=str(run.parent / f"{case}-runlog"))
+
+    def ev(args, extra_env=None, timeout=300):
+        return subprocess.run([sys.executable, str(EVALRUN)] + [str(a) for a in args], capture_output=True,
+                              text=True, env=dict(env, **(extra_env or {})), timeout=timeout)
+
+    p = ev(["plan", "--registry", GEN / "registry" / "fixture-check-registry.json",
+            "--scope", GEN / "cases" / fixture / "scope.json", "--candidates", GEN / "cases" / fixture / "candidates",
+            "--out", run, "--harness", REAL_HARNESS] + probe_cmds()
+           + ["--select", "navownprobe", "--budget-minutes", "0.3",
+              "--probe-cmd", f"navownprobe=python {probe} navownprobe"])
+    expect(p.returncode, 0, f"{case}: plan exit")
+    if p.returncode != 0:
+        print(p.stdout[-2000:], p.stderr[-2000:])
+        return
+    plan = load(run / "plan.json") or {}
+    cand = next((a for a in plan.get("arms") or [] if a.get("kind") == "candidate"), {})
+    cand_id, cand_stem = cand.get("armId"), Path(cand.get("candidateFile") or "x.json").stem
+    job = f"navownprobe-{cand_stem}"
+    try:
+        r1 = ev(["run", "--run", run], {"EVALRUN_SLOW_ARM": cand_stem, "EVALRUN_SLOW_PIDFILE": str(pidfile)},
+                timeout=120)
+    finally:
+        left = []                        # protects the machine ONLY: kill by recorded PID
+        for name, pid in _pids(pidfile).items():
+            if _pid_alive(pid):
+                left.append((name, pid))
+                subprocess.run(["taskkill", "/F", "/PID", str(pid)], capture_output=True) if os.name == "nt" \
+                    else os.kill(pid, 9)
+    check(not left, f"{case}: the stopped run left no recorded process alive (killed {left})")
+    expect(r1.returncode, 0, f"{case}: the stopped run exits 0")
+    led1 = ledger_entries(load(run / "ledger.json") or {})
+    stopped_entry = led1.get(f"{nav}__{cand_id}__arm") or {}
+    expect(execution_of(stopped_entry), "stopped(deadline)", f"{case}: the early-exit arm was stopped at the deadline")
+    clog = run / "sweep" / "cache-log.txt"
+    before = clog.read_text(encoding="utf-8").splitlines() if clog.exists() else []
+    check(not any(l.startswith(f"RECORDED {job}:") for l in before),
+          f"{case}: the stopped invocation did not cache the probe whose descendant was still running "
+          f"(cache log: {before})")
+
+    r2 = ev(["resume", "--run", run], timeout=180)
+    expect(r2.returncode, 0, f"{case}: resume exits 0")
+    added = (clog.read_text(encoding="utf-8").splitlines() if clog.exists() else [])[len(before):]
+    check(not any(l.startswith(f"REUSED {job}:") for l in added),
+          f"{case}: resume does NOT reuse the stopped invocation's cache entry (added: {added})")
+    check(any(l.startswith(f"RECORDED {job}:") for l in added),
+          f"{case}: resume re-measures the arm (RECORDED in the cache log; added: {added})")
+    led2 = ledger_entries(load(run / "ledger.json") or {})
+    e2 = led2.get(f"{nav}__{cand_id}__arm") or {}
+    expect(execution_of(e2), "completed", f"{case}: the re-measured arm is completed after resume")
+    check(e2.get("runId") and e2.get("runId") != stopped_entry.get("runId"),
+          f"{case}: the accepted entry belongs to the resuming invocation, not the stopped one")
+    check(not e2.get("reusedFromRunId"), f"{case}: nothing is carried over from the stopped invocation")
+
+
+def case_25(tmp):
+    """A stopped attempt's receipt carries no exit code of its own, and a stopped sweep keeps each part's own
+    cause. (a) In-process through `Executor.account_stop`: a Runner result stopped at the deadline, whether its
+    code is the stop's own 124 or the launched process's 0, writes `exit_code` None; a `launchedExitCode` is
+    named in the detail only. (b) End to end under `--no-reverse`: a sweep stopped at the deadline accounts
+    the candidate's reverse part `blocked(no-reverse-measurement)` - no reverse was ever going to be measured -
+    and its arm part's receipt has a null exit code although the probe itself exited 0."""
+    import importlib.util
+    case = "case-25-stopped-receipt-and-own-causes"
+    spec = importlib.util.spec_from_file_location("evalrun_case25", EVALRUN)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+
+    class Stub:
+        plan = {"budgets": {"minutes": 0.3}}
+
+        def __init__(self):
+            self.calls = []
+
+        def account(self, check, arm, status, cause, detail, **kw):
+            self.calls.append({"status": status, "cause": cause, "detail": detail, **kw})
+
+        def stop_sentence(self, res, what):
+            return mod.Executor.stop_sentence(self, res, what)
+
+    for label, res, launched in [
+            ("stop code 124", {"stopped": "deadline", "exitCode": 124, "treeStopped": True, "seconds": 18.0}, None),
+            ("launched exited 0", {"stopped": "deadline", "exitCode": None, "launchedExitCode": 0,
+                                   "treeStopped": True, "seconds": 18.0}, 0),
+            ("old shape, exit 0", {"stopped": "deadline", "exitCode": 0, "treeStopped": True, "seconds": 18.0}, None)]:
+        stub = Stub()
+        mod.Executor.account_stop(stub, {"checkId": "x"}, {"armId": "baseline"}, "arm", res, "the child")
+        c = stub.calls[0] if stub.calls else {}
+        expect(c.get("status"), "stopped(deadline)", f"{case}/{label}: accounted stopped(deadline)")
+        check("exit_code" in c and c.get("exit_code") is None,
+              f"{case}/{label}: the receipt's exit_code is None (got {c.get('exit_code', '<absent>')!r})")
+        if launched is not None:
+            check(f"exited with code {launched}" in (c.get("detail") or ""),
+                  f"{case}/{label}: the launched process's own code is named in the detail")
+        else:
+            check("launched process" not in (c.get("detail") or ""),
+                  f"{case}/{label}: no launched-process code is invented")
+
+    fixture = "case-08-interrupt-resume"
+    _, _, _, scen = case_paths(fixture)
+    nav = "geometry.navmesh-ownership"
+    run = tmp / case
+    probe = tmp / "deadline-earlyexit-probe-25.py"
+    probe.write_text(f"FIXT_DIR = {str(FIXT)!r}\n" + DEADLINE_EARLYEXIT_PROBE, encoding="utf-8")
+    pidfile = tmp / f"{case}.pids"
+    env = dict(os.environ, EVALRUN_FAKE_SCENARIO=str(scen), HOUSECARL_RUNLOG_DIR=str(run.parent / f"{case}-runlog"))
+    p = subprocess.run([sys.executable, str(EVALRUN), "plan", "--registry",
+                        str(GEN / "registry" / "fixture-check-registry.json"),
+                        "--scope", str(GEN / "cases" / fixture / "scope.json"),
+                        "--candidates", str(GEN / "cases" / fixture / "candidates"),
+                        "--out", str(run), "--harness", str(REAL_HARNESS)] + probe_cmds()
+                       + ["--select", "navownprobe", "--budget-minutes", "0.3", "--no-reverse",
+                          "--probe-cmd", f"navownprobe=python {probe} navownprobe"],
+                       capture_output=True, text=True, env=env, timeout=300)
+    expect(p.returncode, 0, f"{case}: plan exit")
+    if p.returncode != 0:
+        print(p.stdout[-2000:], p.stderr[-2000:])
+        return
+    plan = load(run / "plan.json") or {}
+    cand = next((a for a in plan.get("arms") or [] if a.get("kind") == "candidate"), {})
+    cand_id, cand_stem = cand.get("armId"), Path(cand.get("candidateFile") or "x.json").stem
+    try:
+        r = subprocess.run([sys.executable, str(EVALRUN), "run", "--run", str(run)], capture_output=True, text=True,
+                           env=dict(env, EVALRUN_SLOW_ARM=cand_stem, EVALRUN_SLOW_PIDFILE=str(pidfile)), timeout=120)
+    finally:
+        left = []                        # protects the machine ONLY: kill by recorded PID
+        for name, pid in _pids(pidfile).items():
+            if _pid_alive(pid):
+                left.append((name, pid))
+                subprocess.run(["taskkill", "/F", "/PID", str(pid)], capture_output=True) if os.name == "nt" \
+                    else os.kill(pid, 9)
+    check(not left, f"{case}: the stopped run left no recorded process alive (killed {left})")
+    expect(r.returncode, 0, f"{case}: the stopped run exits 0")
+    led = ledger_entries(load(run / "ledger.json") or {})
+    expect(execution_of(led.get(f"{nav}__{cand_id}__arm")), "stopped(deadline)", f"{case}: the arm part is stopped")
+    expect(execution_of(led.get(f"{nav}__{cand_id}__diff")), "stopped(deadline)", f"{case}: the diff part is stopped")
+    expect(execution_of(led.get(f"{nav}__{cand_id}__reverse")), "blocked(no-reverse-measurement)",
+           f"{case}: under --no-reverse the reverse part keeps its own cause, not the deadline")
+    check(not any(execution_of(v) == "running" for v in led.values()), f"{case}: no entry is left running")
+    rc = load(run / "receipts" / f"{nav}__{cand_id}__arm.json") or {}
+    check(bool(rc) and "exitCode" in rc and rc["exitCode"] is None,
+          f"{case}: the stopped arm's receipt has a null exit code (got {rc.get('exitCode', '<absent>')!r})")
+
+    # (c) A sweep stopped at the deadline while a candidate arm is kept out of it by its own prerequisite
+    # (the baseline's is settled, so the sweep runs): that arm keeps blocked(prerequisite:...) and none of its
+    # parts is left `running`. The arm's prerequisite result is imposed in-process on the one controller call.
+    run_c = tmp / f"{case}-blocked-arm"
+    pidfile_c = tmp / f"{case}-blocked-arm.pids"
+    p = subprocess.run([sys.executable, str(EVALRUN), "plan", "--registry",
+                        str(GEN / "registry" / "fixture-check-registry.json"),
+                        "--scope", str(GEN / "cases" / fixture / "scope.json"),
+                        "--candidates", str(GEN / "cases" / fixture / "candidates"),
+                        "--out", str(run_c), "--harness", str(REAL_HARNESS)] + probe_cmds()
+                       + ["--select", "navownprobe", "--budget-minutes", "0.3",
+                          "--probe-cmd", f"navownprobe=python {probe} navownprobe"],
+                       capture_output=True, text=True, env=env, timeout=300)
+    expect(p.returncode, 0, f"{case}/blocked-arm: plan exit")
+    if p.returncode != 0:
+        return
+    real_allowed = mod.sweep_arms_allowed
+
+    def blocked_allowed(ex, sweep_checks):
+        allowed = real_allowed(ex, sweep_checks)
+        allowed[cand_id] = "blocked:loadability.masters-and-order"
+        return allowed
+    mod.sweep_arms_allowed = blocked_allowed
+    saved = {k: os.environ.get(k) for k in ("EVALRUN_FAKE_SCENARIO", "HOUSECARL_RUNLOG_DIR", "EVALRUN_SLOW_ARM",
+                                            "EVALRUN_SLOW_PIDFILE")}
+    os.environ.update(EVALRUN_FAKE_SCENARIO=env["EVALRUN_FAKE_SCENARIO"],
+                      HOUSECARL_RUNLOG_DIR=env["HOUSECARL_RUNLOG_DIR"],
+                      EVALRUN_SLOW_ARM="baseline", EVALRUN_SLOW_PIDFILE=str(pidfile_c))
+    try:
+        a = mod.build_parser().parse_args(["run", "--run", str(run_c)])
+        rc_c = a.fn(a)
+    finally:
+        mod.sweep_arms_allowed = real_allowed
+        for k, v in saved.items():
+            if v is None:
+                os.environ.pop(k, None)
+            else:
+                os.environ[k] = v
+        left = []
+        for name, pid in _pids(pidfile_c).items():
+            if _pid_alive(pid):
+                left.append((name, pid))
+                subprocess.run(["taskkill", "/F", "/PID", str(pid)], capture_output=True) if os.name == "nt" \
+                    else os.kill(pid, 9)
+    check(not left, f"{case}/blocked-arm: the stopped run left no recorded process alive (killed {left})")
+    expect(rc_c, 0, f"{case}/blocked-arm: the run exits 0")
+    led_c = ledger_entries(load(run_c / "ledger.json") or {})
+    expect(execution_of(led_c.get(f"{nav}__baseline__arm")), "stopped(deadline)",
+           f"{case}/blocked-arm: premise - the sweep was stopped at the deadline")
+    expect(execution_of(led_c.get(f"{nav}__{cand_id}")), "blocked(prerequisite:loadability.masters-and-order)",
+           f"{case}/blocked-arm: the kept-out arm keeps its prerequisite cause")
+    check(not any(execution_of(v) == "running" for v in led_c.values()),
+          f"{case}/blocked-arm: no entry is left running "
+          f"(running: {[k for k, v in led_c.items() if execution_of(v) == 'running']})")
+
+    # (d) A check whose prerequisite was stopped by the deadline is named for the budget: switchprobe never
+    # finishes, state.switch-census is stopped at the deadline, and state.conditional-geometry, which requires
+    # it, is `skipped-budget` (budget-exhausted), not blocked(prerequisite:...).
+    run_d = tmp / f"{case}-dependent"
+    pidfile_d = tmp / f"{case}-dependent.pids"
+    hang = tmp / "hang-probe-25.py"
+    hang.write_text("import os, sys, time\nopen(%r, 'a').write('probe %%d\\n' %% os.getpid())\ntime.sleep(900)\n"
+                    % str(pidfile_d), encoding="utf-8")
+    p = subprocess.run([sys.executable, str(EVALRUN), "plan", "--registry",
+                        str(GEN / "registry" / "fixture-check-registry.json"),
+                        "--scope", str(GEN / "cases" / fixture / "scope.json"),
+                        "--candidates", str(GEN / "cases" / fixture / "candidates"),
+                        "--out", str(run_d), "--harness", str(REAL_HARNESS)] + probe_cmds()
+                       + ["--select", "stateprobe", "--budget-minutes", "0.2",
+                          "--probe-cmd", f"switchprobe=python {hang} switchprobe"],
+                       capture_output=True, text=True, env=env, timeout=300)
+    expect(p.returncode, 0, f"{case}/dependent: plan exit")
+    if p.returncode != 0:
+        print(p.stdout[-2000:], p.stderr[-2000:])
+        return
+    try:
+        r = subprocess.run([sys.executable, str(EVALRUN), "run", "--run", str(run_d)], capture_output=True,
+                           text=True, env=env, timeout=120)
+    finally:
+        left = []
+        for line in (pidfile_d.read_text().splitlines() if pidfile_d.exists() else []):
+            pid = int(line.split()[1])
+            if _pid_alive(pid):
+                left.append(pid)
+                subprocess.run(["taskkill", "/F", "/PID", str(pid)], capture_output=True) if os.name == "nt" \
+                    else os.kill(pid, 9)
+    check(not left, f"{case}/dependent: the stopped run left no recorded process alive (killed {left})")
+    expect(r.returncode, 0, f"{case}/dependent: the run exits 0")
+    led_d = ledger_entries(load(run_d / "ledger.json") or {})
+    census = [v for k, v in led_d.items() if k.startswith("state.switch-census__")]
+    geo = {k: v for k, v in led_d.items() if k.startswith("state.conditional-geometry__")}
+    check(any(execution_of(v) == "stopped(deadline)" for v in census),
+          f"{case}/dependent: premise - state.switch-census was stopped at the deadline "
+          f"(got {[execution_of(v) for v in census]})")
+    check(bool(geo) and all(execution_of(v) == "skipped-budget" and v.get("cause") == "budget-exhausted"
+                            for v in geo.values()),
+          f"{case}/dependent: state.conditional-geometry is skipped-budget / budget-exhausted after the stop "
+          f"(got {[(execution_of(v), v.get('cause')) for v in geo.values()]})")
+
+
 CASES["case-20"] = case_20
+CASES["case-21"] = case_21
+CASES["case-22"] = case_22
+CASES["case-23"] = case_23
+CASES["case-24"] = case_24
+CASES["case-25"] = case_25
 
 
 def main() -> int:
@@ -2170,10 +2985,12 @@ def main() -> int:
         print(f"  FAIL  conflictdiff is not built at {DIFF_EXE} - build it (dotnet build -c Release) or set "
               f"HOUSECARL_EVALRUN_TEST_HARNESS to a tree that has it. The real diff is not optional here.")
         return 1
+    ran = 0
     try:
         for name, fn in CASES.items():
             if want and not name.startswith(want) and not want.startswith(name):
                 continue
+            ran += 1
             print(f"\n=== {name} ===")
             t0 = time.time()
             try:
@@ -2184,6 +3001,10 @@ def main() -> int:
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
     print()
+    if not ran:
+        # A filter that selects nothing tested nothing; reporting it as passed would be a vacuous green.
+        print(f"  FAIL  no case matches {want!r}; case names are " + ", ".join(CASES))
+        return 2
     if DISAGREEMENTS:
         print("ORACLE vs CODE disagreements (the oracle is NOT re-based on the code; these go to Fable):")
         for d in DISAGREEMENTS:

@@ -1734,10 +1734,16 @@ class Executor:
         self.harness = Path(self.opts["harness"])
         self.validator = Validator(self.run, plan)
         self.logs = self.run / "logs"
-        self.runner = Runner("evalrun-check", out_dir=self.logs, retries=0)
         self.parent_run_id = None
-        self.t0 = time.monotonic()
+        # The budget is a DEADLINE for this invocation, measured from here with a high-resolution
+        # monotonic clock (perf_counter: time.monotonic's ~16 ms tick on Windows let a budget shorter
+        # than one tick launch a child). `run` and `resume` each start their own deadline from the
+        # plan's frozen minutes. The Runner enforces it on the process tree it launched.
+        self.t0 = time.perf_counter()
         self.budget_s = (plan["budgets"].get("minutes") or 0) * 60 or None
+        self.deadline = (self.t0 + self.budget_s) if self.budget_s else None
+        self.runner = Runner("evalrun-check", out_dir=self.logs, retries=0, deadline=self.deadline)
+        self.deadline_stops = 0
         self.arms = {a["armId"]: a for a in plan["arms"]}
         self.options_sha = sha256_text(canonical(self.opts))
         self.children = 0
@@ -1745,14 +1751,46 @@ class Executor:
     # -- budgeting ------------------------------------------------------------------------
 
     def budget_left(self) -> bool:
-        """Checked BEFORE a child launches. A running child is never killed: the budget stops new
-        work, it does not truncate work already measuring something."""
-        return self.budget_s is None or (time.monotonic() - self.t0) < self.budget_s
+        """Checked BEFORE a child launches, so an expired budget starts nothing. A child still running
+        when the deadline passes is stopped by the Runner - its whole launched process tree - and is
+        accounted `stopped(deadline)`; see `stop_sentence`."""
+        return self.deadline is None or time.perf_counter() < self.deadline
 
     def budget_sentence(self) -> str:
         return (f"the plan's budget of {self.plan['budgets']['minutes']} minute(s) was reached "
-                f"{(time.monotonic() - self.t0) / 60:.1f} minutes into this run, before this check "
+                f"{(time.perf_counter() - self.t0) / 60:.1f} minutes into this run, before this check "
                 f"launched: it was planned and not evaluated")
+
+    def stop_sentence(self, res: dict, what: str) -> str:
+        return (f"the plan's budget of {self.plan['budgets']['minutes']} minute(s) was reached while {what} "
+                f"was running: its process tree was stopped at the deadline after {res.get('seconds', 0):.1f}s "
+                f"({'confirmed gone' if res.get('treeStopped') else 'NOT confirmed gone'}); nothing it "
+                f"wrote is accepted, and the check was planned and not evaluated")
+
+    def account_stop(self, check: dict, arm: dict, part: str | None, res: dict, what: str,
+                     log: Path | None = None) -> None:
+        """A deadline outcome for one (check, arm, part): `stopped(deadline)` when a child was stopped
+        mid-run, `skipped-budget` when the Runner refused to launch it. Never accepted, never read."""
+        if res.get("stopped") == "before-launch":
+            self.account(check, arm, "skipped-budget", "budget-exhausted", self.budget_sentence(), part=part)
+            return
+        if res.get("stopped") == "uncontained":
+            # Not the budget: the Runner could not contain the child's process tree, so the deadline could
+            # not be enforced on it, and it terminated the child before it ran.
+            self.account(check, arm, "blocked(uncontained)", None,
+                         f"{what} never ran: its process could not be contained, so the deadline could not be "
+                         f"enforced on its tree, and it was terminated before it started "
+                         f"({res.get('refused') or 'no reason given'}); nothing was measured",
+                         part=part, run_id=res.get("runId"), log=log)
+            return
+        # exit_code stays None: a stopped child returned nothing. The Runner's code is the stop it imposed, or
+        # the launched process's own code when that process had exited but its tree had not; the latter is
+        # carried only in the detail, never as the receipt's exit code.
+        detail = self.stop_sentence(res, what)
+        if res.get("launchedExitCode") is not None:
+            detail += f" (the launched process itself had exited with code {res['launchedExitCode']})"
+        self.account(check, arm, "stopped(deadline)", "budget-exhausted", detail,
+                     part=part, run_id=res.get("runId"), log=log, exit_code=None)
 
     # -- the common consumed block ---------------------------------------------------------
 
@@ -1831,18 +1869,26 @@ class Executor:
 
     # -- the accounting adapters (never run a child) ---------------------------------------
 
-    def account(self, check: dict, arm: dict, status: str, cause: str | None, detail: str) -> None:
+    def account(self, check: dict, arm: dict, status: str, cause: str | None, detail: str, *,
+                part: str | None = None, run_id: str | None = None, log: Path | None = None,
+                exit_code: int | None = None) -> None:
         adapter = check["adapter"]
         validation = {"accepted": False, "rejections": ([{"cause": cause, "detail": detail}] if cause else [])}
         result = {"execution": status, "detector": None, "findings": None, "coverage": [],
                   "strength": (check.get("evidence") or {}).get("strength"), "verdict": None,
                   "note": detail}
-        write_receipt(self.run, plan=self.plan, check=check, arm=arm, part=None, adapter=adapter,
-                      argv=None, run_id=None, parent_run_id=self.parent_run_id,
-                      started=None, ended=utcnow(), exit_code=None, outputs=[], log=None,
+        write_receipt(self.run, plan=self.plan, check=check, arm=arm, part=part, adapter=adapter,
+                      argv=None, run_id=run_id, parent_run_id=self.parent_run_id,
+                      started=None, ended=utcnow(), exit_code=exit_code, outputs=[], log=log,
                       consumed=self.consumed_for(arm, adapter), validation=validation, result=result)
-        self.ledger.transition(check["checkId"], arm["armId"], None, status, cause=cause,
-                               rejections=validation["rejections"])
+        stopped = status == "stopped(deadline)"
+        uncontained = status == "blocked(uncontained)"
+        self.ledger.transition(check["checkId"], arm["armId"], part, status, cause=cause,
+                               rejections=validation["rejections"],
+                               detail=detail if (stopped or uncontained) else None,
+                               next_action=("`resume --run RUN` re-runs it under a fresh deadline" if stopped
+                                            else "`resume --run RUN` re-runs it; it never ran" if uncontained
+                                            else None))
 
     # -- one child --------------------------------------------------------------------------
 
@@ -1858,9 +1904,18 @@ class Executor:
         self.ledger.transition(check["checkId"], arm["armId"], part, "running")
         started_iso, started_mono = utcnow(), time.time()
         res = self.runner.run([{"id": job_id, "argv": argv, "env": self.child_env()}])[0]
+        log = self.logs / f"{job_id}.txt"
+        if res.get("stopped"):
+            # Defect iv: a child stopped at (or refused by) the deadline is never validated - whatever
+            # it wrote before the stop is partial, and its log carries no completion trailer.
+            if res["stopped"] == "deadline":
+                self.children += 1
+                self.deadline_stops += 1
+            self.account_stop(check, arm, part, res, f"check {check['checkId']} [{arm['armId']}]",
+                              log=log if log.exists() else None)
+            return {}
         self.children += 1
         ended_iso = utcnow()
-        log = self.logs / f"{job_id}.txt"
         text = log.read_text(encoding="utf-8", errors="replace") if log.exists() else ""
         if (adapter.get("output") or "conflict-file") == "text" and log.exists():
             outputs = [log]
@@ -1990,6 +2045,11 @@ def cmd_run(a, *, resuming: bool = False) -> int:
         parent.stage("checks", total=sum(len(c["arms"]) for c in planned), unit="check-arms")
 
         execute(ex, parent)
+        if ex.deadline_stops:
+            parent.note(f"deadline: {ex.deadline_stops} running child(ren) stopped at the budget's deadline")
+            print(f"   deadline: {ex.deadline_stops} running child(ren) stopped when the plan's budget of "
+                  f"{plan['budgets']['minutes']} minute(s) ran out; their checks are stopped(deadline) and "
+                  f"`resume` re-runs them under a fresh deadline")
 
     print_status(run, plan, ledger)
     return EXIT_OK
@@ -2118,11 +2178,14 @@ def execute(ex: Executor, parent) -> None:
                            if not any(ledger.entry(p, x["armId"], None) and
                                       ledger.entry(p, x["armId"], None).get("status") in TERMINAL_OK
                                       for x in [arm, ex.arms["baseline"]])]
-                if missing:
+                # The budget first: once the deadline has passed, a prerequisite that is missing because the
+                # deadline stopped it is the budget's consequence, and naming it blocked(prerequisite) would
+                # hide that cause.
+                if not ex.budget_left():
+                    ex.account(check, arm, "skipped-budget", "budget-exhausted", ex.budget_sentence())
+                elif missing:
                     ex.account(check, arm, f"blocked(prerequisite:{missing[0]})", "blocked-prerequisite",
                                "a prerequisite check has no accepted receipt: " + ", ".join(missing))
-                elif not ex.budget_left():
-                    ex.account(check, arm, "skipped-budget", "budget-exhausted", ex.budget_sentence())
                 else:
                     run_generic(ex, check, arm)
             parent.advance()
@@ -2552,7 +2615,9 @@ def run_ordersweep(ex: Executor, sweep_checks: list[dict], parent, allowed: dict
 
     for check in sweep_checks:
         for arm_row in check["arms"]:
-            if arm_row["armId"] in stale_arms:
+            if arm_row["armId"] in stale_arms or (runnable is not None and arm_row["armId"] not in runnable):
+                # Kept out of the sweep and accounted above: it is not being measured, so it is never marked
+                # `running` - a stop would otherwise leave it running, later healed to a wrong cause.
                 continue
             e = ex.ledger.entry(check["checkId"], arm_row["armId"], "arm")
             if e and e.get("status") in TERMINAL_OK:
@@ -2561,11 +2626,70 @@ def run_ordersweep(ex: Executor, sweep_checks: list[dict], parent, allowed: dict
                 # new measurement claim for a child that never ran.
                 continue
             ex.ledger.transition(check["checkId"], arm_row["armId"], "arm", "running")
+    if ex.deadline is not None:
+        # the sweep's probes get the tree rule too: ordersweep caches a probe only once its tree is empty
+        argv += ["--deadline-seconds", f"{max(0.0, ex.deadline - time.perf_counter()):.3f}"]
     started_iso, started_mono = utcnow(), time.time()
     res = ex.runner.run([{"id": "ordersweep", "argv": argv, "env": ex.child_env()}])[0]
+    log = ex.logs / "ordersweep.txt"
+    if res.get("stopped"):
+        # Defect iv: the sweep was stopped at the deadline (or never launched). Its summary.json, its
+        # per-job logs and its emits are NOT read: the summary is absent or an earlier invocation's, an
+        # emit may be written by a probe that never finished, and a per-arm log may be a stale one.
+        # Every planned part not already terminal-ok is accounted with the named cause. Probe jobs whose
+        # process tree emptied before the stop are kept only by ordersweep's own identity-verified cache,
+        # which `resume` reuses: under a deadline (`--deadline-seconds`) ordersweep records a probe only
+        # after its whole tree is empty, so a probe that exited 0 with a descendant still running is never
+        # cached and is re-measured.
+        if res["stopped"] == "deadline":
+            ex.children += 1
+            ex.deadline_stops += 1
+        for check in sweep_checks:
+            for arm_row in check["arms"]:
+                aid = arm_row["armId"]
+                if aid in stale_arms or (runnable is not None and aid not in runnable):
+                    parent.advance()  # already accounted blocked(...) above
+                    continue
+                arm = ex.arms[aid]
+                parts = ("arm",) if arm["kind"] == "baseline" else ("arm", "reverse", "diff")
+                for part in parts:
+                    e = ex.ledger.entry(check["checkId"], aid, part)
+                    if e and e.get("status") in TERMINAL_OK:
+                        ex.ledger.transition(check["checkId"], aid, part, "reused",
+                                             receipt_id=e.get("receiptId"), detector=e.get("detector"),
+                                             extra={"reusedFromRunId": e.get("runId")})
+                        continue
+                    st = arm_row.get("status")
+                    # An arm the plan never meant to measure keeps its own cause: the deadline stopped nothing.
+                    if st == "skipped-budget":
+                        # held back by --max-candidates at plan time: that, not the deadline, is its cause
+                        ex.account(check, arm, "skipped-budget", "budget-exhausted",
+                                   f"arm {aid} was held back by --max-candidates "
+                                   f"{plan['budgets']['maxCandidates']}: it was planned and not evaluated",
+                                   part=part)
+                        continue
+                    if st == "blocked-payload-missing":
+                        ex.account(check, arm, "blocked(payload-missing)", "blocked-prerequisite",
+                                   "the supplied arm declares files that are not in the configuration: "
+                                   + ", ".join(arm["supplied"]["payloadMissing"]), part=part)
+                        continue
+                    if st != "planned":
+                        ex.account(check, arm, "not-applicable" if st == "not-applicable" else
+                                   "skipped-user" if st in ("excluded", "skipped-user") else "unsupported", None,
+                                   f"plan status {st}: this arm was not going to be measured", part=part)
+                        continue
+                    if part == "reverse" and ex.opts.get("noReverse"):
+                        # no reverse was going to be measured, stop or no stop: the unstopped path's own entry
+                        ex.account(check, arm, "blocked(no-reverse-measurement)", None,
+                                   "no reverse emit: --no-reverse was given, so every created row reads "
+                                   "unmeasured under the baseline order", part=part)
+                        continue
+                    ex.account_stop(check, arm, part, res, "the ordersweep child",
+                                    log=log if log.exists() else None)
+                parent.advance()
+        return
     ex.children += 1
     ended_iso = utcnow()
-    log = ex.logs / "ordersweep.txt"
     summary = load_json(sweep_out / "summary.json") or {}
 
     for check in sweep_checks:
@@ -4367,8 +4491,12 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--select", action="append", help="CHECK,... — narrows what RUNS, never what is PLANNED")
     p.add_argument("--exclude", action="append", metavar="CHECK=reason")
     p.add_argument("--budget-minutes", type=float,
-                   help="stop launching new children once this much wall time has passed since `run` "
-                        "began (fractional allowed; 0 or absent = no budget). A running child is never killed.")
+                   help="a wall-time DEADLINE per `run`/`resume` invocation, measured from when that "
+                        "invocation opens its executor, after its plan/ledger/premise checks and before "
+                        "re-validation (fractional allowed; 0 or absent = no budget). "
+                        "No child is launched after it; a child still running at it has its whole launched "
+                        "process tree stopped, confirmed within a 15 s cleanup allowance, and its checks are "
+                        "recorded stopped(deadline) - never completed. `resume` gets a fresh deadline.")
     p.add_argument("--max-candidates", type=int)
     p.add_argument("--out", required=True, metavar="RUN")
     p.add_argument("--instance"); p.add_argument("--profile"); p.add_argument("--game")
