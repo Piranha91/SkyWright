@@ -13,7 +13,7 @@ Evaluation record: {{ p.reader.context.evaluatedAt or "date not supplied" }}. St
 
 ## Setups compared
 
-{% for a in p.scope.arms %}- **{{ a.displayLabel }}**{% if a.pluginsAdded %}: adds {{ a.pluginsAdded|join(", ") }}{% endif %}{% if a.pluginsRemoved %}; removes {{ a.pluginsRemoved|join(", ") }}{% endif %}. {% for limit in a.readerLimits %}{{ limit }}{% if not loop.last %} {% endif %}{% endfor %}
+{% for a in p.scope.arms %}- **{{ a.displayLabel }}**{% if a.pluginsAdded %}: adds {{ a.pluginsAdded|join(", ") }}{% endif %}{% if a.pluginsRemoved %}{{ "; " if a.pluginsAdded else ": " }}removes {{ a.pluginsRemoved|join(", ") }}{% endif %}. {% for limit in a.readerLimits %}{{ limit }}{% if not loop.last %} {% endif %}{% endfor %}
 
 {% endfor %}
 
@@ -39,7 +39,7 @@ Coverage: {{ "all contributors to the listed locations identified" if a.location
 {% endfor %}
 
 {% set regressions = p.findings|selectattr("kind", "equalto", "regression")|selectattr("readerRelevant")|list %}
-## Problems introduced by the supplied setup
+## {{ p.reader.sectionHeadings.regressions }}
 
 {% if regressions %}{% for f in regressions %}
 ### {{ (p.reader.checkTitles or {}).get(f.checkId, f.title) }}
@@ -68,7 +68,7 @@ Coverage: {{ "all contributors to the listed locations identified" if a.location
 *Evidence image.* [Image provenance](evidence-index.md#{{ m.id }}).
 {% endif %}{% endfor %}{% endfor %}{% endfor %}{% endfor %}
 
-## Changes made by the supplied setup
+## {{ p.reader.sectionHeadings.changes }}
 
 {% set changes = p.findings|selectattr("kind", "in", ["repaired", "reclassified"])|selectattr("readerRelevant")|list %}{% if changes %}{% for f in changes %}- **{{ f.readerArmLabel }} — {{ (p.reader.checkTitles or {}).get(f.checkId, 'Additional check') }}:** {{ f.readerPlain }} [Full evidence](evidence-index.md#{{ f.id }}).
 {% endfor %}{% else %}No measured repair or ownership change was recorded.

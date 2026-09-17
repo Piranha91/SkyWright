@@ -734,6 +734,41 @@ def compile_plan(bundle_dir: Path, verify: dict, settings: dict, pr: dict, bundl
     for a, v in plan_arms.items():
         kinds.setdefault(a, v.get("kind"))
     arm_ids = sorted(set(arms_disp) | set(plan_arms), key=lambda a: arm_sort_key(a, kinds))
+
+    # --- what each alternative setup changes in the measured load order (the baseline arm's requested plugins).
+    #     The patch is whatever non-target plugin distinguishes an alternative from the baseline, in EITHER
+    #     direction: a candidate may add it, or the baseline may carry it and the candidate remove it. A comparison
+    #     sentence names that change, and a setup that removes a plugin is never called the supplied setup.
+    base_names = [p.get("name") for p in ((plan_arms.get("baseline") or {}).get("requested") or {}).get("plugins") or []]
+    base_set = {n.lower() for n in base_names if n}
+    arm_changes = {}
+    for arm_id in arm_ids:
+        names = [p.get("name") for p in ((plan_arms.get(arm_id) or {}).get("requested") or {}).get("plugins") or []]
+        added = [n for n in names if n and n.lower() not in base_set] if arm_id != "baseline" else []
+        removed = [n for n in base_names if n and n.lower() not in {x.lower() for x in names if x}] if (arm_id != "baseline" and names) else []
+        arm_changes[arm_id] = (added, removed)
+    plan_target_set = {str(t.get("name")).lower() for t in (b.plan.get("targets") or []) if isinstance(t, dict) and t.get("name")}
+    supplied = sorted({n for added, removed in arm_changes.values() for n in added + removed if n.lower() not in plan_target_set})
+
+    def arm_subject(arm_id) -> str:
+        added, removed = arm_changes.get(arm_id) or ([], [])
+        change = " and ".join(([f"adding {', '.join(added)}"] if added else []) + ([f"removing {', '.join(removed)}"] if removed else []))
+        return change[:1].upper() + change[1:] if change else "The supplied setup"
+
+    def setup_subject(ids) -> str:
+        subjects = {arm_subject(a) for a in ids}
+        if len(subjects) == 1:
+            return subjects.pop()
+        return "A tested alternative setup" if any((arm_changes.get(a) or ([], []))[1] for a in ids) else "The supplied setup"
+
+    def lower_first(s: str) -> str:
+        return s[:1].lower() + s[1:]
+
+    def subject_values(ids) -> dict:
+        # the skill's wording templates take the same subject as {subject} (sentence start) / {subjectLower}
+        subject = setup_subject(ids)
+        return {"subject": subject, "subjectLower": lower_first(subject)}
+
     templates = pr.get("templates") or {}
     reader_data = pr.get("reader") or {}
     reader_comparison_templates = reader_data.get("comparisonTemplates") or {}
@@ -1126,14 +1161,14 @@ def compile_plan(bundle_dir: Path, verify: dict, settings: dict, pr: dict, bundl
                 f.get("checkId"), "completed check")
             if f.get("checkId") == "geometry.object-overlap":
                 f["readerPlain"] = bind(reader_comparison_templates["overlapRegression"],
-                                        {"newCount": new_count,
+                                        {"newCount": new_count, **subject_values([f.get("armId")]),
                                          "candidateNoun": overlap_candidate_noun(new_count)})
                 if repaired_count:
                     f["readerPlain"] += bind(reader_comparison_templates["overlapRegressionReduction"],
                                              {"repairedCount": repaired_count,
                                               "candidateNoun": overlap_candidate_noun(repaired_count)})
             else:
-                f["readerPlain"] = (f"The supplied setup introduced {fmt_n(new_count)} new "
+                f["readerPlain"] = (f"{arm_subject(f.get('armId'))} introduced {fmt_n(new_count)} new "
                                     f"{noun(new_count, 'problem')} in the {check_phrase}." +
                                     (f" It also repaired {fmt_n(repaired_count)} existing {noun(repaired_count, 'problem')}; "
                                      "those repairs do not cancel the new problem." if repaired_count else ""))
@@ -1160,7 +1195,7 @@ def compile_plan(bundle_dir: Path, verify: dict, settings: dict, pr: dict, bundl
                 clauses = []
                 if repaired_count:
                     clauses.append(bind(reader_comparison_templates["overlapReduction"],
-                                        {"repairedCount": repaired_count,
+                                        {"repairedCount": repaired_count, **subject_values([f.get("armId")]),
                                          "candidateNoun": overlap_candidate_noun(repaired_count)}))
                 if reclassified_count:
                     clauses.append(bind(reader_comparison_templates["overlapReclassification"],
@@ -1169,7 +1204,7 @@ def compile_plan(bundle_dir: Path, verify: dict, settings: dict, pr: dict, bundl
                 clauses.append(reader_comparison_templates["overlapQualification"])
                 f["readerPlain"] = " ".join(clauses)
             else:
-                f["readerPlain"] = (f"The supplied setup repaired {fmt_n(repaired_count)} existing "
+                f["readerPlain"] = (f"{arm_subject(f.get('armId'))} repaired {fmt_n(repaired_count)} existing "
                                     f"{noun(repaired_count, 'problem')} and changed which mod owns "
                                     f"{fmt_n(reclassified_count)} still-present {noun(reclassified_count, 'problem')}.")
         elif f["kind"] == "null":
@@ -1240,16 +1275,13 @@ def compile_plan(bundle_dir: Path, verify: dict, settings: dict, pr: dict, bundl
                 label = cell.get("name") or cell.get("cell")
             if label and label not in scope_locations:
                 scope_locations.append(label)
-    base_names = [p.get("name") for p in ((plan_arms.get("baseline") or {}).get("requested") or {}).get("plugins") or []]
-    base_set = {n.lower() for n in base_names if n}
     arms_out = []
     for arm_id in arm_ids:
         pa = plan_arms.get(arm_id) or {}
         da = arms_disp.get(arm_id) or {}
         req = pa.get("requested") or {}
         names = [p.get("name") for p in req.get("plugins") or []]
-        added = [n for n in names if n and n.lower() not in base_set] if arm_id != "baseline" else []
-        removed = [n for n in base_names if n and n.lower() not in {x.lower() for x in names if x}] if (arm_id != "baseline" and names) else []
+        added, removed = arm_changes[arm_id]
         unstated = [{"name": p.get("name"), "unstatedReason": p.get("unstatedReason")}
                     for p in req.get("plugins") or [] if p.get("hashSource") == "unstated"]
         limits = 0
@@ -1281,8 +1313,13 @@ def compile_plan(bundle_dir: Path, verify: dict, settings: dict, pr: dict, bundl
             selected_plugins = {n.lower() for n in evidence_plugins_by_arm.get(arm_id, set()) if n}
             location_basis = "plugins named by accepted target-conflict evidence"
             location_complete = False
-            location_missing = (location_missing or
-                                "This bundle does not enumerate every plugin that changes the listed cells or worldspace coordinates.")
+            # the fallback list is only the target's recorded conflict partners, so it says so, and names a compared
+            # patch this setup loads that the list leaves out rather than let the list read as the setup's order
+            location_missing = ("This list names only plugins that appear in recorded conflicts involving the target mods. "
+                                + (location_missing or
+                                   "This bundle does not enumerate every plugin that changes the listed cells or worldspace coordinates.")
+                                + "".join(f" This setup also loads {n}, which is not listed." for n in names
+                                          if n in supplied and n.lower() not in selected_plugins))
         affecting_subset = [n for n in names if n and n.lower() in selected_plugins]
         arms_out.append({"armId": arm_id, "kind": kinds.get(arm_id), "displayLabel": display_label,
                          "candidateFile": da.get("candidateFile") or pa.get("candidateFile"),
@@ -1361,7 +1398,6 @@ def compile_plan(bundle_dir: Path, verify: dict, settings: dict, pr: dict, bundl
                           {"missingRequired": len(missing), "claim": claim})
     target_names = [t["name"] for t in targets if t.get("name")]
     target_set = {str(x).lower() for x in target_names}
-    supplied = sorted({n for a in arms_out if a.get("kind") == "supplied-combination" for n in a.get("pluginsAdded") or []})
     comparison_weight = collections.Counter()
     for f in findings:
         if f.get("readerRelevant") is False:
@@ -1381,11 +1417,18 @@ def compile_plan(bundle_dir: Path, verify: dict, settings: dict, pr: dict, bundl
         f["readerRelevant"] = bool(f.get("readerRelevant", True)) and (not pair or bool(pair & reader_scope_names))
     compared = ", ".join(comparison_names) if comparison_names else "the measured load order"
     patch_text = ", ".join(supplied) if supplied else "no separate patch plugin"
+    patch_adds = any(n in supplied for added, _ in arm_changes.values() for n in added)
+    patch_removes = any(n in supplied for _, removed in arm_changes.values() for n in removed)
+    patch_how = ("added or removed for comparison" if patch_adds and patch_removes else
+                 "included in the measured load order and removed for comparison" if patch_removes else
+                 "added to the measured load order for comparison")
     scope_line = (f"This report evaluates {', '.join(target_names) or 'the target mod'} within the measured load order. "
                   + (f"The main recorded conflicts involving the target are with {compared}. " if comparison_names else
                      "No comparison mod was identified by the recorded conflicts. ")
-                  + (f"The supplied patch evaluated is {patch_text}." if supplied else
+                  + ((f"The patch evaluated is {patch_text}, {patch_how}." if len(supplied) == 1 else
+                      f"The patches evaluated are {patch_text}, {patch_how}.") if supplied else
                      "No separate patch plugin was included in the comparison."))
+    alternative_arms = [a["armId"] for a in arms_out if a.get("kind") != "baseline"]
     candidate_orders = [a.get("orderEvaluation") or {} for a in arms_out if a.get("kind") != "baseline"]
     reader_regressions = [f for f in findings if f.get("kind") == "regression" and f.get("readerRelevant")]
     has_regression = bool(reader_regressions)
@@ -1395,9 +1438,14 @@ def compile_plan(bundle_dir: Path, verify: dict, settings: dict, pr: dict, bundl
     repaired_total = sum(int((f.get("counts") or {}).get("readerRepaired") or 0) for f in findings
                          if f.get("kind") in ("repaired", "reclassified") and f.get("readerRelevant")
                          and f.get("checkId") != "geometry.object-overlap")
+    repair_arms = {f.get("armId") for f in findings if f.get("kind") in ("repaired", "reclassified") and f.get("readerRelevant")
+                   and f.get("checkId") != "geometry.object-overlap" and int((f.get("counts") or {}).get("readerRepaired") or 0)}
     overlap_reduction_total = sum(int((f.get("counts") or {}).get("readerRepaired") or 0) for f in findings
                                   if f.get("kind") in ("repaired", "reclassified") and f.get("readerRelevant")
                                   and f.get("checkId") == "geometry.object-overlap")
+    overlap_reduction_arms = {f.get("armId") for f in findings if f.get("kind") in ("repaired", "reclassified")
+                              and f.get("readerRelevant") and f.get("checkId") == "geometry.object-overlap"
+                              and int((f.get("counts") or {}).get("readerRepaired") or 0)}
     has_alternative = any(a.get("kind") != "baseline" for a in arms_out)
     has_completed_result = any(f.get("kind") in ("regression", "finding", "repaired", "reclassified", "null", "catalogue")
                                and f.get("readerRelevant") for f in findings)
@@ -1405,9 +1453,11 @@ def compile_plan(bundle_dir: Path, verify: dict, settings: dict, pr: dict, bundl
                            for f in findings)
     if has_regression:
         if has_other_regression:
-            verdict = ("The supplied setup resolves some measured conflicts, but it also introduces a new defect in a check that ran."
+            change_subject = setup_subject({f.get("armId") for f in reader_regressions
+                                            if f.get("checkId") != "geometry.object-overlap"} | repair_arms)
+            verdict = (f"{change_subject} resolves some measured conflicts, but it also introduces a new defect in a check that ran."
                        if repaired_total else
-                       "The supplied setup introduces a new defect in a check that ran.")
+                       f"{change_subject} introduces a new defect in a check that ran.")
             if overlap_created_total:
                 verdict += bind(reader_verdict_templates["overlapAlongsideDefect"],
                                 {"createdCount": overlap_created_total,
@@ -1415,20 +1465,21 @@ def compile_plan(bundle_dir: Path, verify: dict, settings: dict, pr: dict, bundl
         else:
             verdict = bind(reader_verdict_templates["overlapOnlyRegression"],
                            {"createdCount": overlap_created_total,
+                            **subject_values({f.get("armId") for f in reader_regressions}),
                             "candidateNoun": overlap_candidate_noun(overlap_created_total)})
         if overlap_reduction_total:
             verdict += reader_verdict_templates["overlapReductionAlongsideRegression"]
     elif repaired_total:
-        verdict = "The supplied setup resolves some measured conflicts and no new defect was reported by the checks that ran."
+        verdict = f"{setup_subject(repair_arms)} resolves some measured conflicts and no new defect was reported by the checks that ran."
     elif overlap_reduction_total:
-        verdict = reader_verdict_templates["overlapOnlyReduction"]
+        verdict = bind(reader_verdict_templates["overlapOnlyReduction"], subject_values(overlap_reduction_arms))
     elif has_context_only and not any(f.get("kind") in ("regression", "finding") and f.get("readerRelevant") for f in findings):
         verdict = ("The available results record navmesh overwrite history, but they cannot determine incompatibility "
                    "without a measured mismatch in the winning scene or links.")
     elif claim == "no-findings-in-completed-checks":
         verdict = "The completed checks found no problem in what they examined."
     elif has_alternative:
-        verdict = "The completed checks do not establish that the supplied setup improves the target mod."
+        verdict = f"The completed checks do not establish that {lower_first(setup_subject(alternative_arms))} improves the target mod."
     elif any(f.get("kind") == "finding" and f.get("readerRelevant") for f in findings):
         verdict = "The completed checks found conflicts involving the target mod; no alternative setup was supplied for comparison."
     elif has_completed_result:
@@ -1486,9 +1537,12 @@ def compile_plan(bundle_dir: Path, verify: dict, settings: dict, pr: dict, bundl
     catalogue_summary = sorted({check_titles.get(str(f.get("checkId")), f.get("title"))
                                 for f in findings if f.get("kind") == "catalogue"})
     title_subject = ", ".join(target_names) or "Target mod"
-    title_compared = ", ".join(comparison_names[:2])
+    title_compared = ", ".join(supplied) if supplied else ", ".join(comparison_names[:2])
+    alternative_subject = lower_first(setup_subject(alternative_arms))
     reader = {"title": title_subject + (f" with {title_compared}" if title_compared else "") + " — patch review",
               "scopeLine": scope_line, "verdict": verdict, "limitations": limitations,
+              "sectionHeadings": {"regressions": f"Problems introduced by {alternative_subject}",
+                                  "changes": f"Changes made by {alternative_subject}"},
               "comparisonMods": comparison_names, "suppliedPatches": supplied, "checkTitles": check_titles,
               "locationOrder": reader_data.get("locationOrder") or {},
               "otherLimits": list(dict.fromkeys(other_limits)),
@@ -2005,7 +2059,7 @@ def load_presentation(path: Path):
     for k in ("findings", "settings", "source", "scope", "evidence"):
         if k not in plan:
             return None, f"presentation-incomplete: no `{k}`"
-    if not isinstance(plan.get("reader"), dict):
+    if not isinstance(plan.get("reader"), dict) or "sectionHeadings" not in plan["reader"]:
         return None, "presentation-needs-replan: run evalreport plan again to add the modder-facing summary"
     return plan, ""
 

@@ -524,6 +524,251 @@ def check_direction_inference():
            "direction: a reversed source sentence cannot be inferred from loose name matching")
 
 
+PATCH_OUTCOMES = {
+    # the orderEvaluation.perProbe placed on every alternative arm; contactprobe's diff in R4 is unchanged, so its
+    # reader counts come from these numbers, and overlapprobe's candidate-02 diff reports one earlier pair gone
+    "contact-regression": {"contactprobe": {"repaired": 0, "created": 2, "newDefect": 2}},
+    "contact-repair": {"contactprobe": {"repaired": 2, "created": 0, "newDefect": 0}},
+    "contact-regression-repair": {"contactprobe": {"repaired": 1, "created": 2, "newDefect": 2}},
+    "overlap-regression": {"overlapprobe": {"repaired": 0, "created": 1, "newDefect": 1}},
+    "overlap-reduction": {"overlapprobe": {"repaired": 1, "created": 0, "newDefect": 0}},
+}
+
+
+def patch_direction_control(bundle: Path, variant: str, outcome: str = "contact-regression"):
+    """The reference patch is named, and each comparison says what it changes, in EITHER direction. Built in
+    memory from R4's bundle, as the overlap wording control is: the arms' requested plugin lists are rewritten
+    and one PATCH_OUTCOMES result (default: a contact-check regression) is placed on every alternative arm.
+
+      removes  the measured load order loads Patch.esp; the alternative removes it (a removal arm)
+      adds     the alternative is a supplied combination that adds Patch.esp
+      none     the alternative removes only the target, so no separate patch distinguishes the arms
+      mixed    Other.esp is in the measured order; one alternative adds Patch.esp, another removes Other.esp
+      listed   the alternative removes FixtureBase.esp, which the target's recorded conflicts already name
+      both     Other.esp is in the measured order; the one alternative adds Patch.esp AND removes Other.esp
+
+    Returns (plan, report.md, report.html)."""
+    spec = importlib.util.spec_from_file_location(f"evalreport_patch_direction_{variant}_{outcome}", EVALREPORT)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    view = module.Bundle(bundle)
+    view.disposition = copy.deepcopy(view.disposition)
+    view.plan = copy.deepcopy(view.plan)
+    wanted = {"baseline", "candidate-02-patchb"} | ({"candidate-01-patcha"} if variant == "mixed" else set())
+    view.disposition["arms"] = {k: v for k, v in view.disposition["arms"].items() if k in wanted}
+    view.plan["arms"] = [a for a in view.plan.get("arms") or [] if a.get("armId") in wanted]
+    evaluation = view.disposition["evaluation"]
+    for key in ("missing", "findings", "completedNullChecks", "completedCatalogues"):
+        evaluation[key] = [row for row in evaluation.get(key) or [] if row.get("armId") in wanted]
+    arms = {a["armId"]: a for a in view.plan["arms"]}
+    base = list(arms["baseline"]["requested"]["plugins"])
+
+    def plugin(name):
+        row = copy.deepcopy(base[-1])
+        row["name"] = name
+        return row
+
+    without_target = [p for p in base if p.get("name") != "FixtureTarget.esp"]
+    orders = {"removes": {"baseline": base + [plugin("Patch.esp")], "candidate-02-patchb": base},
+              "adds": {"baseline": base, "candidate-02-patchb": base + [plugin("Patch.esp")]},
+              "none": {"baseline": base, "candidate-02-patchb": without_target},
+              "listed": {"baseline": base, "candidate-02-patchb": [p for p in base if p.get("name") != "FixtureBase.esp"]},
+              "mixed": {"baseline": base + [plugin("Other.esp")],
+                        "candidate-01-patcha": base + [plugin("Other.esp"), plugin("Patch.esp")],
+                        "candidate-02-patchb": base},
+              "both": {"baseline": base + [plugin("Other.esp")], "candidate-02-patchb": base + [plugin("Patch.esp")]}}[variant]
+    for arm_id, plugins in orders.items():
+        arms[arm_id]["requested"]["plugins"] = plugins
+    if variant == "adds":
+        arms["candidate-02-patchb"]["kind"] = "supplied-combination"
+        view.disposition["arms"]["candidate-02-patchb"]["kind"] = "supplied-combination"
+    per_probe = PATCH_OUTCOMES[outcome]
+    regression = any(p["newDefect"] for p in per_probe.values())
+    for arm_id in wanted - {"baseline"}:
+        view.disposition["arms"][arm_id]["orderEvaluation"] = {
+            "classification": "REGRESSION" if regression else "PASSES-COMPLETED-CHECKS", "regression": regression,
+            "probes": sorted(per_probe),
+            "perProbe": {probe: {"verdict": "DIFFERENTIAL-VERIFIED", "reclassified": 0, "attributed": 0, "unmeasured": 0, **p}
+                         for probe, p in per_probe.items()}}
+    priorities = module.load_json(module.PRIORITIES)
+    concise = priorities.get("concise") or {}
+    page = priorities.get("page") or {}
+    settings = {"mode": "concise", "layout": concise.get("layout", "normal"), "maxPages": 8,
+                "page": {"size": page.get("size", "A4"), "marginMm": page.get("marginMm", 16),
+                         "baseFontPt": page.get("baseFontPt", 10.5)},
+                "rowsPerGroup": concise.get("rowsPerGroup", 3),
+                "figuresPerFinding": concise.get("figuresPerFinding", 1),
+                "reel": priorities.get("reel") or {}}
+    original_bundle = module.Bundle
+    try:
+        module.Bundle = lambda _: view
+        plan = module.compile_plan(bundle, {"bundle": {"complete": True},
+                                            "evaluation": {"complete": False, "claim": "incomplete"}},
+                                   settings, priorities, str(bundle))
+    finally:
+        module.Bundle = original_bundle
+    shown = module.effective_view(plan, settings["rowsPerGroup"], settings["figuresPerFinding"], priorities,
+                                  settings["layout"])
+    md = module.env(False).get_template("report.md.j2").render(p=shown, css="")
+    html = module.env(True).get_template("report.html.j2").render(p=shown, css="")
+    return plan, md, html
+
+
+def check_patch_direction(bundle: Path):
+    """Known answers for the patch named in the title and opening, the direction each Result / finding sentence
+    states, and the local load-order list's own statement of what it lists."""
+    label = "R4/patch-direction"
+    only_listed = "This list names only plugins that appear in recorded conflicts involving the target mods."
+    loads_patch = "This setup also loads Patch.esp, which is not listed."
+
+    def arm(plan, arm_id):
+        return next((a for a in (plan.get("scope") or {}).get("arms") or [] if a.get("armId") == arm_id), {})
+
+    def missing_input(plan, arm_id):
+        return str((arm(plan, arm_id).get("locationPluginScope") or {}).get("missingInput") or "")
+
+    def regression_plain(plan, arm_id):
+        return next((str(f.get("readerPlain") or "") for f in plan.get("findings") or []
+                     if f.get("kind") == "regression" and f.get("armId") == arm_id), "")
+
+    # (a) the measured load order has the patch; the alternative removes it
+    plan, md, html = patch_direction_control(bundle, "removes")
+    reader = plan.get("reader") or {}
+    expect(reader.get("title"), "FixtureTarget.esp with Patch.esp — patch review",
+           f"{label}/removes: the title names the patch the alternative removes")
+    expect(reader.get("suppliedPatches"), ["Patch.esp"], f"{label}/removes: the patch is derived from the removal arm")
+    check("The patch evaluated is Patch.esp, included in the measured load order and removed for comparison."
+          in str(reader.get("scopeLine")) and "No separate patch plugin" not in str(reader.get("scopeLine")),
+          f"{label}/removes: the opening names the patch and says the comparison removes it (got {reader.get('scopeLine')!r})")
+    expect(reader.get("verdict"), "Removing Patch.esp introduces a new defect in a check that ran.",
+           f"{label}/removes: the Result says the defect comes with removing the patch")
+    check(regression_plain(plan, "candidate-02-patchb").startswith("Removing Patch.esp introduced 2 new problems"),
+          f"{label}/removes: the finding sentence names the removal (got {regression_plain(plan, 'candidate-02-patchb')!r})")
+    check("## Problems introduced by removing Patch.esp" in md and "Problems introduced by removing Patch.esp" in html,
+          f"{label}/removes: the problems heading names the removal in report.md and report.html")
+    check("supplied setup" not in md.lower() and "supplied setup" not in html.lower(),
+          f"{label}/removes: a removal arm is never called the supplied setup (report.md, report.html)")
+    check(only_listed in missing_input(plan, "baseline") and loads_patch in missing_input(plan, "baseline"),
+          f"{label}/removes: the measured order's list says what it lists and names the patch it loads but omits "
+          f"(got {missing_input(plan, 'baseline')!r})")
+    check(only_listed in missing_input(plan, "candidate-02-patchb") and "Patch.esp" not in missing_input(plan, "candidate-02-patchb"),
+          f"{label}/removes: the alternative, which does not load the patch, does not claim to load it")
+    expect(md.count(loads_patch), 1, f"{label}/removes: report.md names the omitted patch once, for the arm that loads it")
+
+    # (b) a supplied combination adds the patch
+    plan, md, html = patch_direction_control(bundle, "adds")
+    reader = plan.get("reader") or {}
+    expect(reader.get("title"), "FixtureTarget.esp with Patch.esp — patch review",
+           f"{label}/adds: the title names the patch the supplied combination adds")
+    check("The patch evaluated is Patch.esp, added to the measured load order for comparison." in str(reader.get("scopeLine"))
+          and "removed for comparison" not in str(reader.get("scopeLine")),
+          f"{label}/adds: the opening names the patch and says the comparison adds it (got {reader.get('scopeLine')!r})")
+    expect(reader.get("verdict"), "Adding Patch.esp introduces a new defect in a check that ran.",
+           f"{label}/adds: the Result says the defect comes with adding the patch")
+    check(regression_plain(plan, "candidate-02-patchb").startswith("Adding Patch.esp introduced 2 new problems"),
+          f"{label}/adds: the finding sentence names the addition (got {regression_plain(plan, 'candidate-02-patchb')!r})")
+    check("## Problems introduced by adding Patch.esp" in md and "Problems introduced by adding Patch.esp" in html,
+          f"{label}/adds: the problems heading names the addition in report.md and report.html")
+    expect(arm(plan, "candidate-02-patchb").get("displayLabel"), "Setup including supplied patch: Patch.esp",
+           f"{label}/adds: the supplied combination keeps its label")
+    check(loads_patch in missing_input(plan, "candidate-02-patchb") and "Patch.esp" not in missing_input(plan, "baseline"),
+          f"{label}/adds: only the arm that loads the patch names it as omitted from its list")
+
+    # (c) no separate patch distinguishes the arms: the alternative removes the target itself
+    plan, md, html = patch_direction_control(bundle, "none")
+    reader = plan.get("reader") or {}
+    expect(reader.get("suppliedPatches"), [], f"{label}/none: removing a target is not a patch")
+    check("No separate patch plugin was included in the comparison." in str(reader.get("scopeLine")),
+          f"{label}/none: the opening keeps the no-separate-patch wording (got {reader.get('scopeLine')!r})")
+    mods = reader.get("comparisonMods") or []
+    expect(reader.get("title"), "FixtureTarget.esp" + (f" with {', '.join(mods[:2])}" if mods else "") + " — patch review",
+           f"{label}/none: with no patch the title keeps the comparison mods")
+    expect(reader.get("verdict"), "Removing FixtureTarget.esp introduces a new defect in a check that ran.",
+           f"{label}/none: the Result names the removal even when no patch is involved")
+    check("supplied setup" not in md.lower() and "This setup also loads" not in md,
+          f"{label}/none: a removal arm is not the supplied setup, and no omitted patch is claimed")
+
+    # (d) mixed: one alternative adds a patch, another removes a different one
+    plan, md, html = patch_direction_control(bundle, "mixed")
+    reader = plan.get("reader") or {}
+    expect(reader.get("suppliedPatches"), ["Other.esp", "Patch.esp"], f"{label}/mixed: both distinguishing plugins")
+    expect(reader.get("title"), "FixtureTarget.esp with Other.esp, Patch.esp — patch review", f"{label}/mixed: title")
+    check("The patches evaluated are Other.esp, Patch.esp, added or removed for comparison." in str(reader.get("scopeLine")),
+          f"{label}/mixed: the opening says the comparisons add or remove them (got {reader.get('scopeLine')!r})")
+    expect(reader.get("verdict"), "A tested alternative setup introduces a new defect in a check that ran.",
+           f"{label}/mixed: arms that change different things share no single subject, and one removes a plugin")
+    check(regression_plain(plan, "candidate-01-patcha").startswith("Adding Patch.esp introduced")
+          and regression_plain(plan, "candidate-02-patchb").startswith("Removing Other.esp introduced"),
+          f"{label}/mixed: each finding sentence names its own arm's change")
+    check("## Problems introduced by a tested alternative setup" in md and "supplied setup" not in md.lower(),
+          f"{label}/mixed: the problems heading does not call a set that includes a removal the supplied setup")
+
+    # (e) the compared plugin is already in the measured order's list: nothing is claimed omitted
+    plan, md, html = patch_direction_control(bundle, "listed")
+    check("FixtureBase.esp" in (arm(plan, "baseline").get("locationPluginOrder") or [])
+          and only_listed in missing_input(plan, "baseline") and "This setup also loads" not in missing_input(plan, "baseline"),
+          f"{label}/listed: a compared plugin the list already shows is not reported as omitted "
+          f"(got {arm(plan, 'baseline').get('locationPluginOrder')!r} / {missing_input(plan, 'baseline')!r})")
+
+    def plain_of(plan, arm_id, kinds, check_id):
+        return " ".join(str(f.get("readerPlain") or "") for f in plan.get("findings") or []
+                        if f.get("armId") == arm_id and f.get("kind") in kinds and f.get("checkId") == check_id)
+
+    subjects = {"adds": "Adding Patch.esp", "removes": "Removing Patch.esp", "mixed": "A tested alternative setup"}
+
+    # (f) overlap-only results name the change in both directions: the skill's overlap wording is bound to it
+    for variant in ("adds", "removes"):
+        subject = subjects[variant]
+        plan, md, html = patch_direction_control(bundle, variant, "overlap-regression")
+        verdict = str((plan.get("reader") or {}).get("verdict") or "")
+        check(verdict.startswith(f"{subject} introduces 1 new overlap candidate for visual review."),
+              f"{label}/{variant}/overlap-regression: the overlap-only Result names the change (got {verdict!r})")
+        got = plain_of(plan, "candidate-02-patchb", ("regression",), "geometry.object-overlap")
+        check(got.startswith(f"{subject} introduced 1 new overlap candidate for visual review."),
+              f"{label}/{variant}/overlap-regression: the overlap finding names the change (got {got!r})")
+        check("supplied setup" not in md.lower() and "supplied setup" not in html.lower(),
+              f"{label}/{variant}/overlap-regression: no supplied-setup wording in report.md or report.html")
+        plan, md, html = patch_direction_control(bundle, variant, "overlap-reduction")
+        verdict = str((plan.get("reader") or {}).get("verdict") or "")
+        check(verdict.startswith(f"{subject} reduces the number of overlap candidates reported by the checks that ran."),
+              f"{label}/{variant}/overlap-reduction: the overlap-only Result names the change (got {verdict!r})")
+        got = plain_of(plan, "candidate-02-patchb", ("repaired", "reclassified"), "geometry.object-overlap")
+        check(f"no longer present after {subject[:1].lower() + subject[1:]}." in got,
+              f"{label}/{variant}/overlap-reduction: the overlap reduction names the change (got {got!r})")
+        check("supplied setup" not in md.lower() and "supplied setup" not in html.lower(),
+              f"{label}/{variant}/overlap-reduction: no supplied-setup wording in report.md or report.html")
+
+    # (g) the repaired-only and regression-plus-repair Results, adding / removing / several arms
+    for variant in ("adds", "removes", "mixed"):
+        subject = subjects[variant]
+        plan, md, html = patch_direction_control(bundle, variant, "contact-repair")
+        expect((plan.get("reader") or {}).get("verdict"),
+               f"{subject} resolves some measured conflicts and no new defect was reported by the checks that ran.",
+               f"{label}/{variant}/contact-repair: the repaired-only Result names the change")
+        plan, md, html = patch_direction_control(bundle, variant, "contact-regression-repair")
+        expect((plan.get("reader") or {}).get("verdict"),
+               f"{subject} resolves some measured conflicts, but it also introduces a new defect in a check that ran.",
+               f"{label}/{variant}/contact-regression-repair: the regression-plus-repair Result names the change")
+
+    # (h) one arm that adds one plugin and removes another names both changes
+    plan, md, html = patch_direction_control(bundle, "both")
+    reader = plan.get("reader") or {}
+    expect(reader.get("verdict"), "Adding Patch.esp and removing Other.esp introduces a new defect in a check that ran.",
+           f"{label}/both: the Result names the addition and the removal")
+    check("The patches evaluated are Other.esp, Patch.esp, added or removed for comparison." in str(reader.get("scopeLine")),
+          f"{label}/both: the opening says the comparison adds or removes them (got {reader.get('scopeLine')!r})")
+    check("## Problems introduced by adding Patch.esp and removing Other.esp" in md and "supplied setup" not in md.lower(),
+          f"{label}/both: the problems heading names both changes")
+
+    # (i) the setups-compared row joins its clauses without a stray separator, in both directions
+    check(": adds Patch.esp; removes Other.esp." in md and ": adds Patch.esp; removes Other.esp." in html,
+          f"{label}/both: an arm that adds and removes lists both, separated by a semicolon")
+    plan, md, html = patch_direction_control(bundle, "removes")
+    check("- **Tested alternative setup**: removes Patch.esp." in md
+          and "<strong>Tested alternative setup</strong>: removes Patch.esp." in html,
+          f"{label}/removes: a removal-only row reads 'Tested alternative setup: removes …' with no leading semicolon")
+
+
 # ---------------------------------------------------------------------------- cases
 
 def case_r1(tmp, index, common):
@@ -807,6 +1052,23 @@ def case_r4(tmp, index, common):
     check((policy_control.get("reader") or {}).get("verdict") == "POLICY OVERLAP VERDICT."
           and any(str(f.get("readerPlain") or "").startswith("POLICY OVERLAP REDUCTION") for f in policy_overlap),
           f"{case}: compile_plan selects overlap reader wording from report-priorities policy")
+    check_patch_direction(bundle)
+    reader = pres.get("reader") or {}
+    expect(reader.get("suppliedPatches"), ["PatchA.esp", "PatchB.esp"],
+           f"{case}: patches added by candidate arms are named although no arm is a supplied combination")
+    expect(reader.get("title"), "FixtureTarget.esp with PatchA.esp, PatchB.esp — patch review",
+           f"{case}: the title names the patches rather than the comparison mods")
+    check("The patches evaluated are PatchA.esp, PatchB.esp, added to the measured load order for comparison."
+          in str(reader.get("scopeLine")), f"{case}: the opening says the comparisons add the patches (got {reader.get('scopeLine')!r})")
+    stale = tmp / f"{case}-stale-presentation"
+    shutil.copytree(out, stale)                     # beside its supporting evidence, so only the plan differs
+    stale_plan = copy.deepcopy(pres)
+    (stale_plan.get("reader") or {}).pop("sectionHeadings", None)
+    (stale / "presentation.json").write_text(json.dumps(stale_plan), encoding="utf-8")
+    stale_res = evalreport(["report", "--presentation", stale / "presentation.json", "--out", stale / "out", "--no-print"])
+    check(stale_res.returncode == 2 and "presentation-needs-replan" in (stale_res.stdout or "") + (stale_res.stderr or ""),
+          f"{case}: a presentation planned before section headings existed is refused by name, not rendered "
+          f"(exit {stale_res.returncode})")
     md, _ = assert_common(case, bundle, out, pres, common, v) or ("", "")
     fs = pres.get("findings") or []
     rg = o["regression"]
