@@ -62,7 +62,7 @@ EXIT_OK = 0
 EXIT_REFUSED_INPUT = 2
 EXIT_REFUSED_RESULT = 3
 
-ARTIFACTS = ("report.md", "report.html", "report.pdf", "evidence-index.md")
+ARTIFACTS = ("report.md", "report.html", "report.pdf", "evidence-index.md", "evidence-index.html")
 TRIAGE_SCHEMA = "overlap-triage-v1"
 TRIAGE_POLICY = HERE.parent / ".claude" / "skills" / "world-edit-compatibility" / "references" / "overlap-triage-policy.json"
 
@@ -1610,10 +1610,21 @@ def compile_plan(bundle_dir: Path, verify: dict, settings: dict, pr: dict, bundl
             return bind(reader_data["missingPrerequisiteReason"], {"prerequisite": lower_first(prerequisite)})
         return reason_labels.get(status, fallback)
     reason_explanations = reader_data.get("missingReasonExplanations") or {}
+    # Grouped by status, as the reason is a statement about the status - but each subject names the setup it is
+    # missing ON, in the setups-compared list's own words. The disposition's missing list is per arm, so a check
+    # supplied on one setup and missing on another is never told as a statement about the evaluation as a whole.
+    # The no-problem list below already names the setup this way.
+    arm_order = {a["armId"]: i for i, a in enumerate(arms_out)}
     missing_summary = []
     for status in sorted({str(m.get("status")) for m in missing}):
-        subjects = sorted({check_titles.get(str(m.get("checkId")), b.check_title(m.get("checkId")))
-                           for m in missing if str(m.get("status")) == status})
+        rows_ = []
+        for m in missing:
+            if str(m.get("status")) != status:
+                continue
+            title = check_titles.get(str(m.get("checkId")), b.check_title(m.get("checkId")))
+            rows_.append((title, arm_order.get(m.get("armId"), len(arm_order)),
+                          arm_labels.get(m.get("armId"), "Measured setup")))
+        subjects = [f"{title} — {setup}" for title, _, setup in sorted(dict.fromkeys(rows_))]
         missing_summary.append({"reason": missing_reason(status, "has no accepted result"), "subjects": subjects,
                                 "explanation": reason_explanations.get(status)})
     null_summary = []
@@ -1898,6 +1909,9 @@ def env(autoescape: bool):
     e.filters["n"] = fmt_n
     e.filters["slug"] = slug
     e.filters["md"] = lambda s: str(s if s is not None else "").replace("|", "\\|").replace("\n", " ")
+    # the HTML index's counterpart to `md`: autoescaping handles the escaping, so all that is left is the
+    # None-to-empty rule, which keeps an absent value blank in both indexes rather than printing "None"
+    e.filters["txt"] = lambda s: str(s if s is not None else "")
     e.filters["short"] = lambda s, n=96: (str(s) if s is not None else "")[:n] + ("..." if s and len(str(s)) > n else "")
     e.filters["kv"] = fmt_kv
     e.filters["sentences"] = sentence_cut
@@ -2068,10 +2082,15 @@ def render_all(plan: dict, view: dict, out: Path, css: str) -> dict:
     md = e_md.get_template("report.md.j2").render(**ctx)
     html = e_html.get_template("report.html.j2").render(**ctx)
     idx = e_md.get_template("evidence-index.md.j2").render(**ctx)
+    # the same index as a browser can read: report.html links into THIS one, report.md into the Markdown one.
+    # One template per format, as the report itself has - not a converter, so every sentence stays a template
+    # sentence bound to bundle values.
+    idx_html = e_html.get_template("evidence-index.html.j2").render(**ctx)
     write_text(out / "report.md", md)
     write_text(out / "report.html", html)
     write_text(out / "evidence-index.md", idx)
-    return {"report.md": md, "report.html": html, "evidence-index.md": idx}
+    write_text(out / "evidence-index.html", idx_html)
+    return {"report.md": md, "report.html": html, "evidence-index.md": idx, "evidence-index.html": idx_html}
 
 
 # -------------------------------------------------------------------------------------- commands --
@@ -2282,8 +2301,7 @@ def cmd_report(a) -> int:
         def render_step(step):
             nonlocal rendered
             v = effective_view(plan, step["rowsPerGroup"], step["figuresPerFinding"], pr, step.get("layout", "normal"))
-            render_all(plan, v, out, css)
-            rendered += 3
+            rendered += len(render_all(plan, v, out, css))
             r.feature("figures", sum(len(f.get("figures") or []) for f in v["findings"]), "figures")
             return v
 

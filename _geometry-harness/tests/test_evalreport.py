@@ -178,6 +178,76 @@ def has_anchor(index_text: str, ident: str) -> bool:
     return any(line.lstrip().startswith("#") and ident in line for line in index_text.splitlines())
 
 
+ANCHOR_ID = re.compile(r'id="([^"]+)"')
+HREF = re.compile(r'href="([^"]+)"')
+
+
+def anchor_ids(text_: str) -> set:
+    return set(ANCHOR_ID.findall(text_))
+
+
+def check_html_index(case: str, out: Path, pres: dict, md: str, html: str, index: str) -> None:
+    """The evidence index a browser can read (2026-09-17). A static server hands `.md` to the reader as text:
+    no headings, no element to scroll to, so every `evidence-index.md#F-001` link in report.html landed at the
+    top of ~38,000px of Markdown source. report.html now links into `evidence-index.html`, rendered from its own
+    template beside the Markdown one - so the two must anchor the SAME id set, or they drift apart silently.
+    report.md keeps linking to the Markdown index, which stays the data artifact."""
+    idx_html_path = out / "evidence-index.html"
+    check(idx_html_path.exists(), f"{case}: evidence-index.html written (D4)")
+    targets = [t for t in HREF.findall(html) if t.startswith("evidence-index")]
+    expect(sorted({t.split("#")[0] for t in targets}), ["evidence-index.html"],
+           f"{case}: report.html links only to the browser-readable index")
+    if not idx_html_path.exists():
+        return
+    idx_html = text(idx_html_path)
+    md_ids, html_ids = anchor_ids(index), anchor_ids(idx_html)
+    expect(sorted(md_ids - html_ids), [], f"{case}: every id the Markdown index anchors is anchored in the HTML index")
+    expect(sorted(html_ids - md_ids), [], f"{case}: and the HTML index anchors nothing the Markdown index does not")
+    families = {"F-": sorted(f.get("id") for f in pres.get("findings") or []),
+                "G-": sorted(g.get("id") for g in pres.get("groups") or []),
+                "M-": sorted(m.get("id") for m in pres.get("media") or []),
+                "E-": sorted(e.get("id") for e in pres.get("evidence") or []),
+                "section": ["top", "missing-results", "imported-evidence"]}
+    for family, want in families.items():
+        expect([x for x in want if x not in html_ids], [],
+               f"{case}: the HTML index anchors every {family} id, case preserved")
+    # the defect's own repro, the other way round: follow report.html's links into the HTML index
+    frags = sorted({t.split("#", 1)[1] for t in targets if "#" in t})
+    expect([f for f in frags if f'id="{f}"' not in idx_html], [],
+           f"{case}: every report.html evidence link resolves to a real id= in evidence-index.html")
+    # and that resolution check is not vacuous wherever the report has a result to link: a case whose findings
+    # are all index-only (R2, R3: every conflict involves neither a target nor a compared patch) links none
+    linkable = any(f.get("readerRelevant") and f.get("kind") in ("regression", "finding", "repaired", "reclassified")
+                   for f in pres.get("findings") or [])
+    if linkable:
+        check(bool(frags), f"{case}: report.html carries at least one evidence link to follow")
+    # report.md is unchanged: it still points at the data artifact
+    check("(evidence-index.html" not in md and "evidence-index.md" in md,
+          f"{case}: report.md still links to evidence-index.md")
+    # Anchors alone do not protect CONTENT. Every section of the HTML template that carries no id= was
+    # invisible to the checks above: deleting the per-finding row tables - the index's own headline promise,
+    # "every finding with all of its rows" - left the whole suite green (measured 2026-09-17, review round).
+    # Two counting identities catch that: a table, a heading or a set of rows that goes missing in one
+    # rendition and not the other changes them. What they do NOT do is prove the two renditions carry the
+    # same content - an altered or wrong cell value preserves every count. They are counts, not text,
+    # because the two renditions format cells differently on purpose; text equality would be brittle. A
+    # content difference that keeps the structure intact is out of this check's reach and stays so.
+    # A Markdown table is one separator line, one header line above it, and its data rows; the HTML's
+    # <thead> holds that header. Compare DATA rows on both sides.
+    pipes = [ln for ln in index.splitlines() if ln.startswith("|")]
+    seps = [ln for ln in pipes if set(ln) <= set("|-: ")]
+    md_rows = len(pipes) - 2 * len(seps)
+    # `<tr[ >]`, not `<tr>`: the group and evidence rows carry the anchor themselves (`<tr id="G-001">`),
+    # and a bare `<tr>` pattern silently scores those two whole tables as empty.
+    html_rows = len(re.findall(r"<tr[ >]", idx_html)) - len(re.findall(r"<thead>", idx_html))
+    expect(html_rows, md_rows, f"{case}: the HTML index carries one table data row per Markdown index data row")
+    md_heads = len(re.findall(r"(?m)^#{1,6} ", index))
+    html_heads = len(re.findall(r"<h[1-6][ >]", idx_html))
+    expect(html_heads, md_heads, f"{case}: the HTML index carries one heading per Markdown index heading")
+    arts = {a.get("path") for a in ((load(out / "presentation-manifest.json") or {}).get("artifacts") or [])}
+    check("evidence-index.html" in arts, f"{case}: the presentation manifest lists evidence-index.html")
+
+
 def image_paths(md: str) -> list[str]:
     return [p for p in IMG_MD.findall(md) + IMG_HTML.findall(md) if not p.startswith(("http://", "https://", "data:"))]
 
@@ -434,6 +504,7 @@ def assert_common(case: str, bundle: Path, out: Path, pres: dict, common: dict, 
     imgs = image_paths(md)
     missing_imgs = [p for p in imgs if not (out / p).exists()]
     expect(missing_imgs, [], f"{case}: every relative image path in report.md exists under OUT", "D4")
+    check_html_index(case, out, pres, md, html, index)
     check("size: A4" in html.replace("size:A4", "size: A4"), f"{case}: report.html has @page size A4 (D4)")
     small = [m for m in re.findall(r"font-size\s*:\s*([0-9.]+)pt", html) if float(m) < 9]
     expect(small, [], f"{case}: report.html has no font below 9pt", "D4")
@@ -1107,6 +1178,117 @@ def followup_identical_label_control(bundle: Path):
           and "candidate-03-combined" not in md,
           f"{label}/nochange: the setups-compared row carries the number and no setup id")
 
+
+# ------------------------------------------------- what still needs checking: which setup is it missing on
+
+def missing_setup_control(bundle: Path):
+    """Two setups, and a missing list with the asymmetry the real end-user bundle has (2026-09-17): one check
+    `mcp-only` on BOTH setups, one `mcp-only` on the alternative ONLY (accepted on the measured load order), and
+    one `skipped-user` on the measured load order ONLY. Built in memory from R4's bundle the way the overlap
+    wording control is. Returns (plan, report.md, report.html)."""
+    spec = importlib.util.spec_from_file_location("evalreport_missing_setup", EVALREPORT)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    view = module.Bundle(bundle)
+    view.disposition = copy.deepcopy(view.disposition)
+    view.plan = copy.deepcopy(view.plan)
+    wanted = {"baseline", "candidate-02-patchb"}
+    view.disposition["arms"] = {k: v for k, v in view.disposition["arms"].items() if k in wanted}
+    view.plan["arms"] = [a for a in view.plan.get("arms") or [] if a.get("armId") in wanted]
+    evaluation = view.disposition["evaluation"]
+    for key in ("missing", "findings", "completedNullChecks", "completedCatalogues"):
+        evaluation[key] = [row for row in evaluation.get(key) or [] if row.get("armId") in wanted]
+    used = {"loadability.dangling-references", "loadability.masters-and-order", "geometry.route-cut"}
+    for key in ("missing", "findings", "completedNullChecks", "completedCatalogues"):
+        evaluation[key] = [row for row in evaluation.get(key) or [] if row.get("checkId") not in used]
+    evaluation["missing"] = (evaluation["missing"] +
+                             [{"checkId": "loadability.dangling-references", "armId": arm, "part": None,
+                               "status": "mcp-only", "cause": "mcp-only", "required": True} for arm in sorted(wanted)] +
+                             [{"checkId": "loadability.masters-and-order", "armId": "candidate-02-patchb", "part": None,
+                               "status": "mcp-only", "cause": "mcp-only", "required": True},
+                              {"checkId": "geometry.route-cut", "armId": "baseline", "part": None,
+                               "status": "skipped-user", "cause": "skipped-user", "required": True}])
+    evaluation["completedNullChecks"] = evaluation["completedNullChecks"] + [
+        {"checkId": "loadability.masters-and-order", "armId": "baseline", "part": None, "coverage": 0}]
+    priorities = module.load_json(module.PRIORITIES)
+    concise = priorities.get("concise") or {}
+    page = priorities.get("page") or {}
+    settings = {"mode": "concise", "layout": concise.get("layout", "normal"), "maxPages": 8,
+                "page": {"size": page.get("size", "A4"), "marginMm": page.get("marginMm", 16),
+                         "baseFontPt": page.get("baseFontPt", 10.5)},
+                "rowsPerGroup": concise.get("rowsPerGroup", 3),
+                "figuresPerFinding": concise.get("figuresPerFinding", 1),
+                "reel": priorities.get("reel") or {}}
+    original_bundle = module.Bundle
+    try:
+        module.Bundle = lambda _: view
+        plan = module.compile_plan(bundle, {"bundle": {"complete": True},
+                                            "evaluation": {"complete": False, "claim": "incomplete"}},
+                                   settings, priorities, str(bundle))
+    finally:
+        module.Bundle = original_bundle
+    shown = module.effective_view(plan, settings["rowsPerGroup"], settings["figuresPerFinding"], priorities,
+                                  settings["layout"])
+    md = module.env(False).get_template("report.md.j2").render(p=shown, css="")
+    html = module.env(True).get_template("report.html.j2").render(p=shown, css="")
+    return plan, md, html
+
+
+def check_missing_setup_naming(bundle: Path):
+    """Known answers for "What still needs checking" (the retained 2026-09-17 defect): the disposition's missing
+    list is per arm, so every not-supplied line names the setup it is missing ON. A check supplied on one setup
+    and missing on another must name only the setup it is missing on - the RED control is the merged wording,
+    which named no setup and spoke for the evaluation as a whole."""
+    label = "R4/missing-setup"
+    plan, md, html = missing_setup_control(bundle)
+    reader = plan.get("reader") or {}
+    arms = {a.get("armId"): a for a in (plan.get("scope") or {}).get("arms") or []}
+    base_label = arms.get("baseline", {}).get("readerLabel")
+    alt_label = arms.get("candidate-02-patchb", {}).get("readerLabel")
+    titles = reader.get("checkTitles") or {}
+    both = titles.get("loadability.dangling-references")
+    alt_only = titles.get("loadability.masters-and-order")
+    base_only = titles.get("geometry.route-cut")
+    check(bool(base_label and alt_label and both and alt_only and base_only),
+          f"{label}: the control names both setups and all three checks "
+          f"(got {base_label!r}, {alt_label!r}, {both!r}, {alt_only!r}, {base_only!r})")
+    # the rows stay grouped by status (the reason is a statement about the status, and one check can be missing
+    # under two different statuses); each SUBJECT names the setup it is missing on
+    by_reason = {str(r.get("reason")): list(r.get("subjects") or []) for r in reader.get("missingSummary") or []}
+    not_supplied = "is available through houseCARL, but its result was not supplied for this evaluation"
+    left_out = "was left out of this run"
+    expect(sorted(x for x in by_reason.get(not_supplied, []) if x.split(" — ")[0] in (both, alt_only)),
+           sorted([f"{both} — {base_label}", f"{both} — {alt_label}", f"{alt_only} — {alt_label}"]),
+           f"{label}: the not-supplied group names the setup per check, and only the setups it is missing on")
+    expect([x for x in by_reason.get(left_out, []) if x.split(" — ")[0] == base_only],
+           [f"{base_only} — {base_label}"],
+           f"{label}: a check left out on one setup only names that setup")
+    check(f"{alt_only} — {base_label}" not in by_reason.get(not_supplied, []),
+          f"{label}: the setup that supplied {alt_only!r} is not listed as missing it")
+    # scoped to the section itself: the same "check — setup" phrase legitimately appears in the no-problem list
+    # for the setup that DID supply the result, which is the point
+    for fmt, text_, start, end in (("report.md", md, "## What still needs checking", "\n## "),
+                                   ("report.html", html, "<h2>What still needs checking</h2>", "<h2>")):
+        esc = html_escape if fmt == "report.html" else (lambda s: s)
+        body = text_.split(start, 1)[1]
+        body = body.split(end, 1)[0]
+        check(bool(body.strip()), f"{label}/{fmt}: the what-still-needs-checking section was located")
+        for title, setup in ((both, base_label), (both, alt_label), (alt_only, alt_label)):
+            check(esc(f"{title} — {setup}") in body,
+                  f"{label}/{fmt}: '{title} — {setup}' is named in what still needs checking")
+        for title, setup in ((alt_only, base_label), (base_only, alt_label)):
+            check(esc(f"{title} — {setup}") not in body,
+                  f"{label}/{fmt}: '{title} — {setup}' is NOT named there - that setup is not missing that check")
+        check(esc(f"{base_only} — {base_label}") in body,
+              f"{label}/{fmt}: '{base_only} — {base_label}' is named")
+        # the reason clause stays the group's lead, said once per status, with its explanation attached to it
+        check(body.count(not_supplied[:1].upper() + not_supplied[1:]) == 1,
+              f"{label}/{fmt}: the not-supplied reason is stated once, as the group's lead")
+    explanation = "These checks still need to be completed for each setup being considered."
+    expect([md.count(explanation), html.count(explanation)], [1, 1],
+           f"{label}: the status explanation stays attached to its own group, once")
+
+
 # ---------------------------------------------------------------- imported evidence: where it came from
 
 IMPORT_ORIGIN_CASE = "R7-import-origin"
@@ -1668,6 +1850,7 @@ def case_r4(tmp, index, common):
           f"{case}: compile_plan selects overlap reader wording from report-priorities policy")
     check_patch_direction(bundle)
     check_alternative_identity(bundle)
+    check_missing_setup_naming(bundle)
     followup_title_control(bundle)
     followup_totals_wording_control(bundle)
     followup_identical_label_control(bundle)

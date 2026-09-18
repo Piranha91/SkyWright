@@ -1,0 +1,152 @@
+<!doctype html><html><head><meta charset="utf-8"><title>Evidence index - presentation {{ p.presentationId }}</title><style>{{ css|safe }}</style>
+<style>/* report.css is inlined UNESCAPED: this environment autoescapes, and escaping the stylesheet turns
+   `font-family: "Segoe UI", Arial, ...` into `font-family: &#34;Segoe UI&#34;, ...`, which no browser parses.
+   The value is this repo's own report.css, never bundle data. (report.html.j2 does not do this yet.)
+   The index is read in a browser, not printed: let the wide tables use the window. */
+@media screen { body.index { max-width: none; margin: 8mm 10mm; padding: 0; } body.index table { table-layout: auto; } }
+:target { background: #fffbcc; }</style></head><body class="index {{ p.layout }}"><main>
+<h1 id="top">Evidence index - plan <code>{{ p.source.planId }}</code>, presentation <code>{{ p.presentationId }}</code></h1>
+
+<p>Complete in every mode: every finding with all of its rows, every evidence file with its sha256, every media row. Generated {{ p.generatedUtc }} from the bundle at <code>{{ p.source.bundleDir }}</code> (manifest <code>{{ p.source.manifestSha256 }}</code>, disposition <code>{{ p.source.dispositionSha256 }}</code>, ledger <code>{{ p.source.ledgerSha256 }}</code>). Back to <a href="report.html">report.html</a>; the same index as data is <a href="evidence-index.md">evidence-index.md</a>.</p>
+
+<h2>Technical scope</h2>
+
+<ul>
+<li>target identities: <code>{{ p.scope.targets|tojson }}</code></li>
+<li>registry/version and dates: registry <code>{{ p.scope.registryVersion }}</code>; plan {{ p.scope.planCreatedUtc }}; run {{ p.scope.runStartedUtc }}; bundle {{ p.scope.bundleCreatedUtc }}; disposition {{ p.scope.dispositionCreatedUtc }}</li>
+<li>states: <code>{{ p.scope.states|tojson }}</code></li>
+<li>explicit decisions: <code>{{ p.scope.explicitDecisions|tojson }}</code></li>
+<li>completion: <code>{{ p.scope.completion|tojson }}</code></li>
+<li>integrity: <code>{{ p.scope.integrity|tojson }}</code></li>
+</ul>
+
+<h3>Arms</h3>
+
+<ul>
+{% for a in p.scope.arms %}<li><code>{{ a.armId }}</code> / <code>{{ a.kind }}</code> / <code>{{ a.candidateFile }}</code>; added <code>{{ a.pluginsAdded|tojson }}</code>; removed <code>{{ a.pluginsRemoved|tojson }}</code>; location order <code>{{ a.locationPluginOrder|tojson }}</code>; location scope <code>{{ a.locationPluginScope|tojson }}</code>; payload {{ a.payloadNote }}; loaded in game {{ a.loadedInGameNote }}; identity <code>{{ a.identity|tojson }}</code>; order evaluation <code>{{ a.orderEvaluation|tojson }}</code></li>
+{% endfor %}
+</ul>
+
+<h2 id="missing-results">Missing results</h2>
+
+<ul>
+{% for f in p.findings if f.kind == "missing" %}<li><a href="#{{ f.id }}">{{ f.id }}</a>: {{ f.plain }}</li>
+{% endfor %}
+</ul>
+
+<h2 id="imported-evidence">Imported evidence ({{ (p.imports.rows if p.imports else [])|length }})</h2>
+
+{% if p.imports and p.imports.rows %}
+<p>Results a houseCARL tool produced and <code>evalrun import-results</code> bound to a frozen setup. {{ p.imports.limit }} Credited imports read from {{ "the disposition's importedEvidence list" if p.imports.source == "disposition" else "the accepted receipts (this bundle was finalized before the disposition listed imports)" }}; each origin below is the receipt's own. The controller's ledger status <code>reused</code> means this run re-used its own accepted receipt on a resume and is not an origin.</p>
+
+<table>
+<thead><tr><th>finding(s)</th><th>check</th><th>arm</th><th>origin</th><th>what that means</th><th>captured (UTC)</th><th>receipt</th><th>source plan / arm / result sha256</th><th>source verified</th></tr></thead>
+<tbody>
+{% for x in p.imports.rows %}
+<tr><td>{% for i in x.findingIds %}<a href="#{{ i }}">{{ i }}</a>{% if not loop.last %}, {% endif %}{% else %}none{% endfor %}</td><td><code>{{ x.checkId }}</code></td><td>{{ x.armId }}</td><td><code>{{ x.origin }}</code></td><td>{{ x.indexOrigin|txt }}</td><td>{{ x.capturedUtc or "-" }}</td><td>{% if x.receiptEvidenceId %}<a href="#{{ x.receiptEvidenceId }}">{{ x.receiptEvidenceId }}</a>{% else %}<code>{{ x.receiptPath|txt }}</code>{% endif %} <code>{{ x.receiptId }}</code></td><td>{% if x.get("reusedFrom") %}<code>{{ x.reusedFrom.planId }}</code> / <code>{{ x.reusedFrom.armId }}</code> / <code>{{ x.reusedFrom.resultSha256 }}</code>{% else %}-{% endif %}</td><td>{% if x.get("reusedFrom") %}{{ x.reusedFromVerified }} - {{ x.reusedFromNote|txt }}{% else %}-{% endif %}</td></tr>
+{% endfor %}
+</tbody>
+</table>
+{% else %}
+<p>No result in this bundle was imported: every accepted receipt was written by a check this runner ran itself.</p>
+{% endif %}
+
+<h2>Findings ({{ p.findings|length }})</h2>
+
+{% for f in p.findings %}
+<div class="finding">
+<h3 id="{{ f.id }}">{{ f.id }} - {{ f.kind }} - {{ f.title|txt }}</h3>
+
+<ul>
+<li>check <code>{{ f.checkId }}</code> ({{ f.family }}); arm {{ f.armId }}; part {{ f.part or "-" }}; strength {{ f.strength }}; verdict {{ f.verdict or "-" }}{% if f.groupId %}; group <a href="#{{ f.groupId }}">{{ f.groupId }}</a>{% endif %}</li>
+<li>{{ f.plain|txt }}</li>
+{% if f.get("readerContext") %}<li>reader context: {{ f.readerContext|txt }}</li>
+{% endif %}
+{% if f.get("importOrigin") %}<li>imported evidence, origin <code>{{ f.importOrigin }}</code>: see <a href="#imported-evidence">imported evidence</a> for the receipt, capture time and declared source{{ ("; the report says: " ~ (f.readerProvenance|txt)) if f.get("readerProvenance") else "" }}</li>
+{% endif %}
+<li>evidence: {% for e in f.evidenceIds %}<a href="#{{ e }}">{{ e }}</a>{% if not loop.last %}, {% endif %}{% else %}none recorded{% endfor %}{% if f.mediaIds %}; media: {% for m in f.mediaIds %}<a href="#{{ m }}">{{ m }}</a>{% if not loop.last %}, {% endif %}{% endfor %}{% endif %}</li>
+<li>counts: <code>{{ f.counts|tojson|short(600) }}</code></li>
+</ul>
+{% if f.allRows %}
+<p>rows: {{ f.rowsTotal|n }} (all listed; the report showed {{ f.rowsShown|n }})</p>
+
+<table>
+<thead><tr><th>form key</th><th>label</th><th>physical</th><th>detail</th><th>summary</th><th>evidence</th></tr></thead>
+<tbody>
+{% for r in f.allRows %}
+<tr><td><code>{{ r.formKey|txt }}</code></td><td>{{ r.label|txt }}</td><td>{{ r.physical|txt }}</td><td>{{ r.physicalDetail|txt }}</td><td>{{ r.summary|txt }}</td><td>{% if r.evidenceId %}<a href="#{{ r.evidenceId }}">{{ r.evidenceId }}</a>{% endif %}</td></tr>
+{% endfor %}
+</tbody>
+</table>
+{% endif %}
+</div>
+
+{% endfor %}
+<h2>Groups ({{ p.groups|length }})</h2>
+
+<table>
+<thead><tr><th>group</th><th>check</th><th>key</th><th>findings</th><th>rows</th></tr></thead>
+<tbody>
+{% for g in p.groups %}
+<tr id="{{ g.id }}"><td>{{ g.id }}</td><td><code>{{ g.checkId }}</code></td><td>{{ g.key|txt }}</td><td>{% for i in g.findingIds %}<a href="#{{ i }}">{{ i }}</a>{% if not loop.last %}, {% endif %}{% endfor %}</td><td>{{ g.rowsTotal|n }}</td></tr>
+{% endfor %}
+</tbody>
+</table>
+
+<h2>Media ({{ p.media|length }})</h2>
+
+{% if p.media %}
+<table>
+<thead><tr><th>media</th><th>assessed</th><th>kind</th><th>subject</th><th>state</th><th>fingerprint</th><th>source</th><th>path</th><th>sha256</th><th>reason</th></tr></thead>
+<tbody>
+{% for m in p.media %}
+<tr id="{{ m.id }}"><td>{{ m.id }}</td><td>{{ m.assessed }}</td><td>{{ m.mediaKind|txt }}</td><td>{{ (m.subject or {})|tojson|short(120) }}</td><td>{{ m.state|txt }}</td><td><code>{{ (m.configurationFingerprint or "")[:12] }}</code></td><td>{{ m.fingerprintSource|txt }}{% if m.fingerprintSource == "asserted" %} ({{ p.assertedSentence }}){% endif %}</td><td><code>{{ m.path|tailpath|txt }}</code></td><td><code>{{ m.sha256|txt }}</code></td><td>{{ m.reason|txt }}</td></tr>
+{% endfor %}
+</tbody>
+</table>
+{% else %}
+<p>No media row: nothing was supplied to this bundle under <code>--media</code>, and no unassessed media item is listed in its manifest.</p>
+{% endif %}
+
+<h2>Evidence files ({{ p.evidence|length }})</h2>
+
+<table>
+<thead><tr><th>evidence</th><th>kind</th><th>path</th><th>sha256</th><th>bytes</th><th>check</th><th>arm</th><th>part</th><th>strength</th><th>recorded by</th></tr></thead>
+<tbody>
+{% for e in p.evidence %}
+<tr id="{{ e.id }}"><td>{{ e.id }}</td><td>{{ e.kind }}</td><td>{% if e.get("storage") == "presentation" %}<a href="{{ e.path }}"><code>{{ e.path }}</code></a>{% else %}<code>{{ e.path }}</code>{% endif %}</td><td><code>{{ e.sha256 }}</code></td><td>{{ e.bytes|n }}</td><td>{{ e.checkId or "-" }}</td><td>{{ e.armId or "-" }}</td><td>{{ e.part or "-" }}</td><td>{{ e.strength or "-" }}</td><td>{{ e.recordedBy or "-" }}</td></tr>
+{% endfor %}
+</tbody>
+</table>
+
+<h2>Checks in the registry copy ({{ p.scope.checks|length }})</h2>
+
+<table>
+<thead><tr><th>check</th><th>family</th><th>required</th><th>strength</th><th>claim</th><th>limits</th></tr></thead>
+<tbody>
+{% for cid, c in p.scope.checks|dictsort %}
+<tr><td><code>{{ cid }}</code></td><td>{{ c.family }}</td><td>{{ c.required }}</td><td>{{ c.strength }}</td><td>{{ (c.claim or "-")|txt }}</td><td>{{ (c.limits or "-")|txt }}</td></tr>
+{% endfor %}
+</tbody>
+</table>
+
+<h2>Omissions in the report ({{ p.omissions|length }})</h2>
+
+<ul>
+{# `where` is a data field on the plan, spelled against the Markdown index and unchanged there. A reader of THIS document is in a browser, so the pointer names this rendition - the target is an anchor in this very file. Display only: presentation.json keeps its own spelling. #}
+{% for o in p.omissions %}{% set frag = o.where.split('#')[1] if '#' in o.where else '' %}<li>{{ o.what }} - {{ o.why }} ({% if frag %}<a href="#{{ frag }}">{{ o.where|replace('evidence-index.md#', 'evidence-index.html#') }}</a>{% else %}{{ o.where }}{% endif %})</li>
+{% else %}<li>none</li>
+{% endfor %}
+</ul>
+
+<h2>Chapters ({{ p.chapters|length }})</h2>
+
+<table>
+<thead><tr><th>chapter</th><th>kind</th><th>title</th><th>findings</th><th>media</th><th>seconds</th></tr></thead>
+<tbody>
+{% for c in p.chapters %}
+<tr><td>{{ c.id }}</td><td>{{ c.kind }}</td><td>{{ c.title|txt }}</td><td>{{ c.findingIds|join(", ") }}</td><td>{{ c.mediaIds|join(", ") }}</td><td>{{ c.plannedSeconds }}</td></tr>
+{% endfor %}
+</tbody>
+</table>
+</main></body></html>
