@@ -39,6 +39,13 @@
 {% if p.imports and p.imports.rows %}
 <p>Results a houseCARL tool produced and <code>evalrun import-results</code> bound to a frozen setup. {{ p.imports.limit }} Credited imports read from {{ "the disposition's importedEvidence list" if p.imports.source == "disposition" else "the accepted receipts (this bundle was finalized before the disposition listed imports)" }}; each origin below is the receipt's own. The controller's ledger status <code>reused</code> means this run re-used its own accepted receipt on a resume and is not an origin.</p>
 
+{% if p.imports.get('notes') %}
+<p>Notes the importing tool recorded about what these results are. Reuse provenance says where the evidence came from; a note says what was done with it, which is a different question.</p>
+
+{% for n in p.imports.notes %}
+<blockquote>{{ n|txt }}</blockquote>
+{% endfor %}
+{% endif %}
 <table>
 <thead><tr><th>finding(s)</th><th>check</th><th>arm</th><th>origin</th><th>what that means</th><th>captured (UTC)</th><th>receipt</th><th>source plan / arm / result sha256</th><th>source verified</th></tr></thead>
 <tbody>

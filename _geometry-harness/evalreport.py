@@ -1795,9 +1795,32 @@ def compile_plan(bundle_dir: Path, verify: dict, settings: dict, pr: dict, bundl
         other_limits.append("Some objects could not be assessed because the needed geometry or links were unavailable. Their counts and reasons are in the evidence index.")
     if unassessed_media:
         other_limits.append("Some supplied images or clips could not be matched to this evaluation and were excluded from the evidence shown.")
-    for note in import_notes:
-        other_limits.append("The imported results in this report carry a note from the tool "
-                            "that produced them: " + note.strip())
+    # One bullet, not one per import. Notes that embed per-import counts differ only in their
+    # tails, so deduplicating on the whole string leaves a dozen near-identical paragraphs --
+    # the reader needs the explanation once. Emit the shared opening once and send the
+    # per-import remainder to the evidence index, which is the reference document and keeps
+    # every note in full. Nothing is summarised: the shared text is the importer's own, cut
+    # only at a sentence boundary.
+    if import_notes:
+        # The shared text is every SENTENCE present in all the notes, in the order the first
+        # note gives them -- not the common prefix. A note that puts per-import figures in the
+        # middle has common sentences on BOTH sides of them, and a prefix rule silently drops
+        # everything after the first difference. That is how "this correction was made after
+        # the subject was inspected" fell off the page while surviving in the index.
+        def sentences(text):
+            return [x.strip() for x in re.split(r"(?<=[.!?])\s+", text.strip()) if x.strip()]
+        note_sentences = [sentences(n) for n in import_notes]
+        common = set(note_sentences[0]).intersection(*(set(x) for x in note_sentences[1:]))             if len(note_sentences) > 1 else set(note_sentences[0])
+        shared = " ".join(x for x in note_sentences[0] if x in common)
+        if len(import_notes) > 1 and len(shared) >= 40:
+            other_limits.append(
+                "The imported results in this report carry a note from the tool that produced "
+                "them: " + shared + " Each import's own note, including the figures that "
+                "differ between them, is in the evidence index.")
+        else:
+            for note in import_notes:
+                other_limits.append("The imported results in this report carry a note from the "
+                                    "tool that produced them: " + note.strip())
     check_titles = reader_data.get("checkTitles") or {}
     reason_labels = reader_data.get("missingReasons") or {}
 

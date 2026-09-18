@@ -92,7 +92,32 @@ def make_bundle(root: Path, arms, repaired_on=None, created_on=None, patches=Non
     disp = {"evaluation": {"complete": False, "claim": "incomplete", "missing": []},
             "arms": arms_disp, "importedEvidence": [], "unassessed": {}}
     receipts = {}
-    if import_note:
+    if isinstance(import_note, dict):
+        # several credited imports, each with its own note
+        disp["importedEvidence"] = []
+        (root / "receipts").mkdir(exist_ok=True)
+        for a_id, note in import_note.items():
+            rid = f"{CHECK}__{a_id}"
+            disp["importedEvidence"].append({"checkId": CHECK, "armId": a_id,
+                                             "receiptId": rid, "origin": "reused"})
+            receipts[rid] = {
+                "receiptId": rid, "checkId": CHECK, "armId": a_id, "part": None,
+                "schemaVersion": 1, "exitCode": 0,
+                "adapter": {"kind": "mcp-import", "sourceKind": "mcp-only"},
+                "validation": {"accepted": True, "identityLimits": []},
+                "imported": {"origin": "reused", "capturedUtc": "2026-01-01T00:00:00+00:00",
+                             "sourceSha256": "0" * 64, "reusedWithin": "another-evaluation",
+                             "reusedFrom": {"planId": "src000000000", "armId": a_id,
+                                            "resultSha256": "1" * 64},
+                             "reusedFromVerified": False, "reusedFromNote": "declared",
+                             "tool": {"name": "test"}},
+                "result": {"detector": "finding", "findings": 1, "note": note,
+                           "coverage": [{"Population": CHECK, "Judged": 1,
+                                         "Unjudgeable": {}}]},
+            }
+            (root / "receipts" / f"{rid}.json").write_text(json.dumps(receipts[rid]),
+                                                           encoding="utf-8")
+    elif import_note:
         # A credited import whose result carries a note. This is how a corrected rendition
         # says what it is: reuse provenance states where the evidence came from, the note
         # states what was done with it. A reader shown only the first cannot tell that the
@@ -168,6 +193,23 @@ def run_compiler(arms, repaired_on=None, created_on=None, patches=None, declared
                 verdict = blob
                 break
     return kinds, verdict, json.dumps(plan), plan
+
+
+def render_artifacts(plan):
+    """Render the REAL templates and return {artifact name: text}.
+
+    A plan-level assertion checks the data the templates consume, which passes whether or not
+    any given template consumes it. That is exactly how the correction disclosure reached the
+    Markdown evidence index and not the HTML one: `p.imports.notes` was present and correct,
+    one of two templates read it, and a test on the data could not tell. These cells assert on
+    the rendered text of every artifact instead.
+    """
+    pr = json.loads((HERE.parent.parent / ".claude/skills/evaluation-reporting/"
+                     "references/report-priorities.json").read_text(encoding="utf-8"))
+    view = R.effective_view(plan, 3, 1, pr, "normal")
+    css = ""
+    with tempfile.TemporaryDirectory() as td:
+        return R.render_all(plan, view, Path(td), css)
 
 
 def main(argv=None):
@@ -313,8 +355,46 @@ def main(argv=None):
          f"reader.otherLimits carries it: {NOTE in limits8}")
     cell("import-note-available-to-the-index",
          NOTE in ((plan8.get("imports") or {}).get("notes") or []),
-         f"the evidence index renders p.imports.notes: "
+         f"the plan carries the note for the templates to render: "
          f"{(plan8.get('imports') or {}).get('notes')}")
+    # ... and it must actually appear in EVERY rendered artifact that documents the imports.
+    # The note reached evidence-index.md and not evidence-index.html because only one of the
+    # two templates was updated, and the plan-level cell above could not see the difference.
+    arts8 = render_artifacts(plan8)
+    missing_in = [name for name in ("report.md", "report.html",
+                                    "evidence-index.md", "evidence-index.html")
+                  if NOTE not in arts8[name]]
+    cell("import-note-in-every-rendered-artifact",
+         not missing_in,
+         f"rendered artifacts carrying the note: "
+         f"{[n for n in arts8 if NOTE in arts8[n]]}"
+         + (f"; MISSING FROM {missing_in}" if missing_in else ""))
+    # Several imports whose notes share an explanation but differ in their figures must yield
+    # ONE reader bullet, not one per import. Twelve near-identical 900-character paragraphs is
+    # what the naive whole-string dedup produced on the real run.
+    SHARED = "CORRECTED RENDITION. Recomputed under corrected rules."
+    # A sentence every note shares but which sits AFTER the differing figures. A prefix-based
+    # rule drops it; the reader loses the disclosure that matters most.
+    TRAILER = "This correction was made AFTER the subject was inspected."
+    _k10, _v10, _t10, plan10 = run_compiler(
+        [arm("baseline", DEPS + TARGETS, kind="baseline"),
+         arm("with-patch", DEPS + TARGETS + [PATCH]),
+         arm("other", DEPS + TARGETS + [PATCH, UNRELATED])],
+        patches=[PATCH],
+        import_note={"with-patch": SHARED + " This check counted 5 (was 7). " + TRAILER,
+                     "other": SHARED + " This check counted 9 (was 11). " + TRAILER})
+    assert len((plan10.get("imports") or {}).get("notes") or []) == 2,         "the fixture must really carry two distinct notes"
+    lim10 = [x for x in (plan10.get("reader") or {}).get("otherLimits") or []
+             if "carry a note" in x]
+    cell("shared-note-explanation-appears-once",
+         len(lim10) == 1 and SHARED in lim10[0] and "evidence index" in lim10[0],
+         f"{len(lim10)} reader bullet(s) for notes sharing an explanation; the per-import "
+         f"figures go to the index")
+    cell("shared-sentence-after-the-difference-survives",
+         bool(lim10) and TRAILER in lim10[0],
+         f"a sentence every note shares must reach the page even when it sits after the "
+         f"figures that differ: {TRAILER in (lim10[0] if lim10 else '')}")
+
     # ... and it must appear ONCE, not once per import, and never invented when absent.
     _k9, _v9, _t9, plan9 = run_compiler(
         [arm("baseline", DEPS + TARGETS, kind="baseline"),
@@ -323,6 +403,13 @@ def main(argv=None):
          not ((plan9.get("imports") or {}).get("notes"))
          and NOTE not in " ".join((plan9.get("reader") or {}).get("otherLimits") or []),
          "an evaluation whose imports carry no note gets no note sentence")
+    arts9 = render_artifacts(plan9)
+    leaked = [name for name, text in arts9.items()
+              if "Notes the importing tool recorded" in text]
+    cell("no-note-renders-no-notes-block",
+         not leaked,
+         f"with no note, no artifact may render the notes heading"
+         + (f"; LEAKED INTO {leaked}" if leaked else ""))
 
     for name, ok, detail in cells:
         print(f"[{'PASS' if ok else 'FAIL'}] {name}: {detail}")
