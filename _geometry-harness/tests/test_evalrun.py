@@ -5496,11 +5496,21 @@ def case_42(tmp):
     shutil.copytree(lb, lmoved)
     expect(evalrun(["verify-bundle", lmoved]).returncode, 0, f"{case}/legacy: relocated verify-bundle exit")
 
-    # ---- after a --rebuild-ledger the journal (which carries no extras) is the source, so the RECEIPT is the
-    # authority on origin: the rebuilt entry says nothing about it and the receipt still says reused.
+    # ---- after a --rebuild-ledger the RECEIPT is the authority on origin, and the rebuilt entry now CARRIES
+    # what the receipt says rather than a hole. This expectation was corrected on 2026-09-17: it previously
+    # asserted the rebuilt entry claimed no origin, which encoded the defect Piranha's handback named - the
+    # journal carries no extras, and `rebuild` was not consulting the receipts either, although its own
+    # docstring and `--rebuild-ledger`'s help both say it is a view of the journal AND the receipts. The
+    # consequence was not cosmetic: `finalize` reads `detector` from the ledger, so every rebuilt entry
+    # finalized as `detector-undetermined` and an import with accepted evidence on disk was reported missing.
+    # The authority is unchanged - the value below comes FROM the receipt, and a receipt that does not match
+    # this entry donates nothing (`Ledger.receipt_facts`).
     rebuilt = ((load(run2 / "ledger.json") or {}).get("entries") or {}).get(f"{IMPORT_CHECK}__{a2['armId']}") or {}
-    check(rebuilt.get("importOrigin") is None,
-          f"{case}/ledger: a rebuilt entry claims no origin of its own (got {rebuilt.get('importOrigin')!r})")
+    expect(rebuilt.get("importOrigin"), "reused",
+           f"{case}/ledger: a rebuilt entry recovers the origin its receipt records", "option A")
+    expect(rebuilt.get("detector"), (load(run2 / "receipts" / f"{IMPORT_CHECK}__{a2['armId']}.json")
+                                     or {}).get("result", {}).get("detector"),
+           f"{case}/ledger: and the detector, which is what finalize reads from the ledger", "option A")
     expect(((load(run2 / "receipts" / f"{IMPORT_CHECK}__{a2['armId']}.json") or {}).get("imported")
             or {}).get("origin"), "reused",
            f"{case}/ledger: and the receipt still carries it after the rebuild", "option A")
@@ -5798,8 +5808,386 @@ def case_43(tmp):
           f"{case}/not-applicable: nothing was written")
 
 
+
+#: the ledger statuses that mean "this entry currently holds credit" (evalrun.TERMINAL_OK)
+CREDITED = ("completed", "reused")
+
+
+def case_44(tmp):
+    """The candidate FILENAME is provenance, not this arm's identity (2026-09-17).
+
+    A declared reuse carries the capture's own `Configuration.Source` - the file the SOURCE arm was measured
+    against - because rewriting it would edit the capture's statement of what it measured, the one thing the
+    contract says must not be edited. That name alone must not refuse the import when the configuration the emit
+    STATES is this arm's frozen request; the difference is recorded as an identity limit, the source name is kept
+    as captured, and the reader is told. Nothing else is relaxed: the same envelope declared FRESH is still
+    refused by name, a changed configuration or order still refuses on its own cause, a bare `origin: reused`
+    never reaches the exception, self-reuse still refuses, and the acceptance survives resume, a ledger rebuild,
+    finalize and a relocated bundle while tampered evidence still loses credit. Case 42's reuse envelopes are all
+    built by the DESTINATION arm's helper, so they name the destination's candidate and could not have caught
+    this; every envelope here is built by the SOURCE arm's helper, as a retained capture really is."""
+    case = "case-44-import-reuse-filename"
+    plugins = ["Skyrim.esm", "Update.esm", "FixtureBase.esp", "FixtureTarget.esp"]
+    stems1 = {"candidate-00-baseline": plugins, "candidate-01-source": plugins}
+    stems2 = {"candidate-00-baseline": plugins,
+              # the destination of the cross-evaluation reuse: same configuration, a DIFFERENT filename
+              "candidate-01-destination": plugins,
+              # a second setup of plan 2, for the sibling reuse whose source is plan 2's own other arm
+              "candidate-02-sibling": plugins,
+              # a setup whose plugin ORDER differs, so its configuration fingerprint differs
+              "candidate-03-other-order": ["Skyrim.esm", "Update.esm", "FixtureTarget.esp", "FixtureBase.esp"],
+              # the OTHER arm of the filename conditional: a reuse whose capture names a file with THIS arm's
+              # own name, which must be an ordinary reuse with no limit and nothing extra said about it
+              "candidate-04-same-name": plugins,
+              # destinations for the three inputs that used to skip, or must not trigger, the disclosure
+              "candidate-05-no-source": plugins,
+              "candidate-06-stem": plugins,
+              "candidate-07-cross-unknown": plugins}
+    _, scen1 = import_case_dir(case + "-p1", stems1)
+    _, scen2 = import_case_dir(case + "-p2", stems2)
+    run1, run2 = tmp / f"{case}-run1", tmp / f"{case}-run2"
+    plan1 = import_plan(run1, case + "-p1", f"{case}/p1")
+    time.sleep(1.1)
+    plan2 = import_plan(run2, case + "-p2", f"{case}/p2")
+    for run, scen, tag in ((run1, scen1, "p1"), (run2, scen2, "p2")):
+        expect(evalrun(["run", "--run", run], scen).returncode, 0, f"{case}/{tag}: run exit", "reuse-filename")
+    if not plan1 or not plan2:
+        return
+    a1 = arm_by_stem(plan1, "candidate-01-source")
+    a2 = arm_by_stem(plan2, "candidate-01-destination")
+    c2 = arm_by_stem(plan2, "candidate-02-sibling")
+    d2 = arm_by_stem(plan2, "candidate-03-other-order")
+    for arm, tag in ((a1, "p1-source"), (a2, "p2-destination"), (c2, "p2-sibling"), (d2, "p2-other-order")):
+        check(bool(arm), f"{case}: premise - the fixture has a {tag} arm")
+    if not (a1 and a2 and c2 and d2):
+        return
+
+    def rows(arm):
+        return [(p["name"], p["sha256"]) for p in (arm.get("requested") or {}).get("plugins") or []]
+
+    # ---- the premise this case rests on: the arms differ in FILENAME and in nothing identity is made of.
+    for other, tag in ((a2, "destination"), (c2, "sibling")):
+        check(a1["candidateFile"] != other["candidateFile"],
+              f"{case}: premise - source and {tag} candidate FILENAMES differ "
+              f"({a1['candidateFile']} vs {other['candidateFile']})")
+    for arm, same, tag in ((a2, True, "destination"), (c2, True, "sibling"), (d2, False, "other-order")):
+        expect(rows(arm) == rows(a1), same,
+               f"{case}: premise - {tag} plugin names and bytes match the source: {same}", "reuse-filename")
+    for key in ("providers", "overlays", "population"):
+        expect((a2.get("requested") or {}).get(key), (a1.get("requested") or {}).get(key),
+               f"{case}: premise - destination {key} equals the source's", "reuse-filename")
+
+    def imp(run, manifest, want, tag, text=None, absent=None):
+        """`text` may be one string or several: a refusal that would still be produced with the filename rule
+        wrongly relaxed pins nothing on its own, so those controls name the clause that DISAPPEARS too."""
+        r = evalrun(["import-results", "--run", run, "--file", manifest])
+        expect(r.returncode, want, f"{case}/{tag}: import-results exit", "reuse-filename")
+        for want_text in ([text] if isinstance(text, str) else (text or [])):
+            check(want_text in r.stderr, f"{case}/{tag}: the refusal names {want_text!r} "
+                                         f"(got {r.stderr.strip()[-300:]!r})")
+        if absent:
+            check(absent not in r.stderr, f"{case}/{tag}: the refusal does not blame {absent!r} "
+                                          f"(got {r.stderr.strip()[-300:]!r})")
+        return r
+
+    def untouched(run, arm, tag):
+        status, rc, folder = import_state(run, IMPORT_CHECK, arm["armId"])
+        expect(status, "mcp-only", f"{case}/{tag}: the refused import leaves the entry mcp-only", "reuse-filename")
+        check(not (rc.get("validation") or {}).get("accepted") and not folder,
+              f"{case}/{tag}: no accepted receipt and no imports folder after a refusal")
+
+    def limit_row(rc):
+        """The identity limit this change records, or None."""
+        return next((x for x in (rc.get("validation") or {}).get("identityLimits") or []
+                     if isinstance(x, dict) and x.get("capturedAgainst")), None)
+
+    # ---- plan 1 measures the evidence once, freshly, on its own arm.
+    src_manifest, src_doc = origin_import(tmp / f"{case}-source", plan1, a1)
+    imp(run1, src_manifest, 0, "source-fresh")
+    source_sha = sha_of(run1 / "imports" / f"{IMPORT_CHECK}__{a1['armId']}" / "result.json")
+    src = {"planId": plan1["planId"], "armId": a1["armId"], "resultSha256": source_sha}
+    src_request = (src_manifest.parent / "request.jsonl").read_text(encoding="utf-8")
+
+    def retained(folder_tag, plan, arm, dest_arm, **kw):
+        """A reuse envelope for `dest_arm` whose configuration is built by the SOURCE arm's helper, so it keeps
+        the source capture's own `Configuration.Source`. The destination-arm helper cannot produce this shape,
+        and a real retained capture always has it."""
+        manifest, doc = origin_import(tmp / f"{case}-{folder_tag}", plan, arm, origin="reused",
+                                      request=src_request, captured=src_doc["capturedUtc"],
+                                      reused_from=kw.pop("reused_from", src))
+        doc["planId"], doc["armId"] = plan2["planId"], dest_arm["armId"]
+        for k, v in kw.items():
+            doc[k] = v
+        return write_doc(manifest, doc), doc
+
+    # ---- the accepted case: cross-evaluation reuse whose capture names the SOURCE arm's candidate.
+    ok, ok_doc = retained("cross-eval", plan1, a1, a2)
+    expect(ok_doc["configuration"]["source"], f"candidate:{a1['candidateFile']}",
+           f"{case}: premise - the envelope keeps the SOURCE capture's candidate name", "reuse-filename")
+    check(ok_doc["configuration"]["source"] != f"candidate:{a2['candidateFile']}",
+          f"{case}: premise - and that is not the destination arm's candidate name")
+    expect(import_fingerprint(ok_doc["configuration"]), ok_doc["configuration"]["fingerprint"],
+           f"{case}: premise - the envelope's fingerprint is the digest of what it states")
+    imp(run2, ok, 0, "cross-eval-retained-source")
+    status, rc, folder = import_state(run2, IMPORT_CHECK, a2["armId"])
+    expect(status, "completed", f"{case}/cross-eval: ledger completed", "reuse-filename")
+    check(folder, f"{case}/cross-eval: the evidence was copied into imports/")
+    expect((rc.get("validation") or {}).get("accepted"), True, f"{case}/cross-eval: the receipt is accepted")
+    expect((rc.get("validation") or {}).get("rejections"), [], f"{case}/cross-eval: with no rejections")
+    # provenance: the capture's own statement survives, unedited
+    expect(((rc.get("consumed") or {}).get("configuration") or {}).get("source"),
+           f"candidate:{a1['candidateFile']}",
+           f"{case}/cross-eval: the receipt keeps the ORIGINAL capture source, not the destination's",
+           "reuse-filename")
+    lim = limit_row(rc)
+    check(lim is not None, f"{case}/cross-eval: the filename difference is recorded as an identity LIMIT")
+    if lim:
+        expect(lim.get("capturedAgainst"), f"candidate:{a1['candidateFile']}",
+               f"{case}/cross-eval: the limit names the capture's own source", "reuse-filename")
+        expect(lim.get("armCandidate"), f"candidate:{a2['candidateFile']}",
+               f"{case}/cross-eval: and this arm's candidate", "reuse-filename")
+        expect((lim.get("declaredSource") or {}).get("planId"), plan1["planId"],
+               f"{case}/cross-eval: and the declared source plan")
+    imported = rc.get("imported") or {}
+    expect(imported.get("origin"), "reused", f"{case}/cross-eval: origin reused")
+    expect(imported.get("reusedFrom"), src, f"{case}/cross-eval: the declared source is retained verbatim")
+    expect(imported.get("reusedFromVerified"), False, f"{case}/cross-eval: still declared, not verified")
+    expect(imported.get("reusedWithin"), "another-evaluation", f"{case}/cross-eval: from another evaluation")
+    check("originCheck" not in imported, f"{case}/cross-eval: a reused import claims no capture-token check")
+
+    # ---- the SAME wrong source declared FRESH is still refused by name. This is the both-direction control: one
+    #      field of the envelope decides, and the strict rule is untouched for everything that is not a reuse.
+    fresh_wrong, fresh_doc = origin_import(tmp / f"{case}-fresh-wrong-source", plan2, c2)
+    before_fp = fresh_doc["configuration"]["fingerprint"]
+    fresh_doc["configuration"]["source"] = f"candidate:{a1['candidateFile']}"
+    expect(import_fingerprint(fresh_doc["configuration"]), before_fp,
+           f"{case}: premise - Source is not a fingerprint input, so nothing else changed", "reuse-filename")
+    imp(run2, write_doc(fresh_wrong, fresh_doc), 2, "fresh-wrong-source", text="Configuration.Source")
+    untouched(run2, c2, "fresh-wrong-source")
+
+    # ---- a bare `origin: reused` with no source declaration never reaches the exception.
+    bare, bare_doc = retained("bare-reuse", plan1, a1, c2)
+    bare_doc.pop("reusedFrom", None)
+    # Both clauses matter: `reusedFrom` shows the origin check refused it, and `Configuration.Source` shows
+    # the strict filename rule still ran. With the exception wrongly reached, the second clause disappears and
+    # the exit code and the first clause would not notice (review 2, 2026-09-17).
+    imp(run2, write_doc(bare, bare_doc), 2, "bare-reused", text=["reusedFrom", "Configuration.Source"])
+    untouched(run2, c2, "bare-reused")
+
+    # ---- self-reuse still refuses, retained source or not.
+    self_m, self_doc = retained("self-reuse", plan1, a1, c2,
+                                reused_from={"planId": plan2["planId"], "armId": c2["armId"],
+                                             "resultSha256": source_sha})
+    imp(run2, write_doc(self_m, self_doc), 2, "self-reuse", text=["reusedFrom", "Configuration.Source"])
+    untouched(run2, c2, "self-reuse")
+
+    # ---- a changed configuration still refuses on its OWN cause, never on the filename: relaxing (f) did not
+    #      swallow the content checks.
+    bad_m, bad_doc = retained("changed-config", plan1, a1, c2)
+    bad_doc["configuration"]["plugins"][0]["sha256"] = "0" * 64
+    bad_doc["configuration"]["fingerprint"] = import_fingerprint(bad_doc["configuration"])
+    imp(run2, write_doc(bad_m, bad_doc), 2, "changed-configuration", text="identity-mismatch",
+        absent="Configuration.Source")
+    untouched(run2, c2, "changed-configuration")
+
+    # ---- a changed ORDER (the same bytes) still refuses.
+    ord_m, ord_doc = retained("changed-order", plan1, a1, c2)
+    ord_doc["configuration"]["plugins"] = list(reversed(ord_doc["configuration"]["plugins"]))
+    ord_doc["configuration"]["fingerprint"] = import_fingerprint(ord_doc["configuration"])
+    imp(run2, write_doc(ord_m, ord_doc), 2, "changed-order", text="identity-mismatch",
+        absent="Configuration.Source")
+    untouched(run2, c2, "changed-order")
+
+    # ---- the raw evidence still has to hash to what the envelope says.
+    stale_m, _ = retained("changed-evidence", plan1, a1, c2)
+    (stale_m.parent / "response.jsonl").write_text(
+        '{"jsonrpc": "2.0", "id": 1, "result": {"findings": 9}}\n', encoding="utf-8")
+    imp(run2, stale_m, 2, "changed-evidence", text="output-stale")
+    untouched(run2, c2, "changed-evidence")
+
+    # ---- a configuration that is a DIFFERENT setup's is refused even with a retained source and a well-formed
+    #      declaration: the destination's frozen request decides, not the source's name.
+    wrong_dest, wrong_doc = retained("wrong-destination", plan1, a1, c2)
+    wrong_doc["configuration"]["plugins"] = [{"name": p["name"], "path": p["path"], "sha256": p["sha256"]}
+                                             for p in d2["requested"]["plugins"]]
+    wrong_doc["configuration"]["fingerprint"] = import_fingerprint(wrong_doc["configuration"])
+    imp(run2, write_doc(wrong_dest, wrong_doc), 2, "wrong-destination-configuration", text="identity-mismatch")
+    untouched(run2, c2, "wrong-destination-configuration")
+
+    # ---- the disclosure must not be skippable by shaping or omitting the source string. Both of these were
+    #      credited with NOTHING recorded before the disclosure was separated from the refusal predicate: a source
+    #      that CONTAINS this arm's candidate stem (the refusal predicate tolerates a substring), and an emit with
+    #      no Configuration.Source at all (that predicate needs a truthy source).
+    stem_arm = arm_by_stem(plan2, "candidate-06-stem")
+    none_arm = arm_by_stem(plan2, "candidate-05-no-source")
+    cross_arm = arm_by_stem(plan2, "candidate-07-cross-unknown")
+    check(bool(stem_arm) and bool(none_arm) and bool(cross_arm),
+          f"{case}: premise - plan 2 has the three extra destinations")
+    if stem_arm:
+        stem_m, stem_doc = retained("stem-swallow", plan1, a1, stem_arm)
+        swallowed = f"candidate:{stem_arm['candidateFile'].rsplit('.', 1)[0]}-alternate.json"
+        stem_doc["configuration"]["source"] = swallowed
+        check(stem_arm["candidateFile"].rsplit(".", 1)[0].lower() in swallowed.lower()
+              and swallowed != f"candidate:{stem_arm['candidateFile']}",
+              f"{case}: premise - the source CONTAINS this arm's candidate stem and is still another file")
+        imp(run2, write_doc(stem_m, stem_doc), 0, "stem-swallow-reuse")
+        _, rc_stem, _ = import_state(run2, IMPORT_CHECK, stem_arm["armId"])
+        lim_stem = limit_row(rc_stem)
+        check(lim_stem is not None,
+              f"{case}/stem-swallow: the difference is recorded even where the refusal predicate tolerates it")
+        if lim_stem:
+            expect(lim_stem.get("capturedAgainst"), swallowed,
+                   f"{case}/stem-swallow: and names the capture's own source", "reuse-filename")
+    if none_arm:
+        none_m, none_doc = retained("no-source", plan1, a1, none_arm)
+        none_doc["configuration"].pop("source", None)
+        imp(run2, write_doc(none_m, none_doc), 0, "no-source-reuse")
+        _, rc_none, _ = import_state(run2, IMPORT_CHECK, none_arm["armId"])
+        stated = [x for x in (rc_none.get("validation") or {}).get("identityLimits") or []
+                  if isinstance(x, dict) and "NO candidate source" in str(x.get("detail"))]
+        check(bool(stated),
+              f"{case}/no-source: a reuse stating no source is credited only with THAT recorded as a limit "
+              f"(got {(rc_none.get('validation') or {}).get('identityLimits')!r})")
+        check(limit_row(rc_none) is None,
+              f"{case}/no-source: and it names no file, because the capture named none")
+
+    # ---- a WITHIN-evaluation source must be a real arm of this plan whose frozen request is this arm's.
+    #      Without that, a reader is told the source setup's tested configuration is the same while the plan
+    #      itself says it is not. The cross-evaluation case is deliberately not checked this way.
+    ghost = retained("ghost-source", plan1, a1, c2,
+                     reused_from={"planId": plan2["planId"], "armId": "candidate-99-not-an-arm",
+                                  "resultSha256": source_sha})[0]
+    imp(run2, ghost, 2, "within-source-not-an-arm", text="no such arm")
+    untouched(run2, c2, "within-source-not-an-arm")
+    other = retained("other-config-source", plan1, a1, c2,
+                     reused_from={"planId": plan2["planId"], "armId": d2["armId"],
+                                  "resultSha256": source_sha})[0]
+    imp(run2, other, 2, "within-source-other-configuration", text="FROZEN request is not this arm's")
+    untouched(run2, c2, "within-source-other-configuration")
+    if cross_arm:
+        # the same unknown arm id, declared against ANOTHER plan, is accepted: that plan is not read here, and
+        # the reader's wording claims correspondingly less.
+        cross = retained("cross-unknown-arm", plan1, a1, cross_arm,
+                         reused_from={"planId": plan1["planId"], "armId": "candidate-99-not-an-arm",
+                                      "resultSha256": source_sha})[0]
+        imp(run2, cross, 0, "cross-eval-unknown-arm-allowed")
+        _, rc_cross, _ = import_state(run2, IMPORT_CHECK, cross_arm["armId"])
+        expect((rc_cross.get("imported") or {}).get("reusedWithin"), "another-evaluation",
+               f"{case}/cross-unknown-arm: recorded as reuse from another evaluation", "reuse-filename")
+
+    # ---- sibling-setup reuse with a retained source: the same exception, the other `reusedWithin` statement.
+    sib_src = {"planId": plan2["planId"], "armId": a2["armId"],
+               "resultSha256": sha_of(run2 / "imports" / f"{IMPORT_CHECK}__{a2['armId']}" / "result.json")}
+    sib, sib_doc = retained("sibling", plan2, a2, c2, reused_from=sib_src)
+    expect(sib_doc["configuration"]["source"], f"candidate:{a2['candidateFile']}",
+           f"{case}: premise - the sibling envelope names the SOURCE setup's candidate", "reuse-filename")
+    imp(run2, sib, 0, "sibling-retained-source")
+    status_c2, rc_c2, _ = import_state(run2, IMPORT_CHECK, c2["armId"])
+    expect(status_c2, "completed", f"{case}/sibling: ledger completed", "reuse-filename")
+    expect(((rc_c2.get("consumed") or {}).get("configuration") or {}).get("source"),
+           f"candidate:{a2['candidateFile']}",
+           f"{case}/sibling: the receipt keeps the source setup's candidate name", "reuse-filename")
+    check(limit_row(rc_c2) is not None, f"{case}/sibling: the filename difference is recorded as a limit")
+    expect((rc_c2.get("imported") or {}).get("reusedWithin"), "this-evaluation",
+           f"{case}/sibling: reuse WITHIN this evaluation", "reuse-filename")
+
+    # ---- the other arm of the filename conditional: a reuse whose capture names a file with the DESTINATION
+    #      arm's own name. Rule (f) is satisfied, so there is no limit to record and no reader is told anything
+    #      extra - "not measured for this setup" must not be followed by "measured against this setup's own file".
+    e2 = arm_by_stem(plan2, "candidate-04-same-name")
+    check(bool(e2), f"{case}: premise - plan 2 has a same-name arm")
+    if e2:
+        same_name, same_doc = origin_import(tmp / f"{case}-same-name", plan2, e2, origin="reused",
+                                            request=src_request, captured=src_doc["capturedUtc"],
+                                            reused_from=sib_src)
+        expect(same_doc["configuration"]["source"], f"candidate:{e2['candidateFile']}",
+               f"{case}: premise - this envelope names the DESTINATION arm's own candidate", "reuse-filename")
+        imp(run2, same_name, 0, "same-name-reuse")
+        status_e2, rc_e2, _ = import_state(run2, IMPORT_CHECK, e2["armId"])
+        expect(status_e2, "completed", f"{case}/same-name: an ordinary reuse is accepted", "reuse-filename")
+        check(limit_row(rc_e2) is None,
+              f"{case}/same-name: no filename limit is recorded when the names agree", )
+
+    # ---- lifecycle: the acceptance survives resume and a ledger rebuild, and finalize reports it as reuse.
+    for args, tag in ((["resume", "--run", run2], "resume"),
+                      (["resume", "--run", run2, "--rebuild-ledger"], "rebuild-ledger")):
+        expect(evalrun(args, scen2).returncode, 0, f"{case}/{tag}: exit", "reuse-filename")
+        for arm, who in ((a2, "cross-eval"), (c2, "sibling")):
+            st = import_state(run2, IMPORT_CHECK, arm["armId"])[0]
+            check(st in CREDITED, f"{case}/{tag}: the {who} reuse still stands (got {st!r})")
+        # A credited STATUS is not a surviving RESULT. `finalize` reads the detector from the ledger while
+        # reading everything else from the receipt, so an entry that keeps `completed`/`reused` through a
+        # reconstruction but loses its detector finalizes as `detector-undetermined` - an accepted import
+        # reported as a missing check. The status assertion above cannot see that; this one can, and this is
+        # the assertion whose absence let the reconstruction gap ship (Piranha's handback, 2026-09-17).
+        expect(evalrun(["finalize", "--run", run2], scen2).returncode, 0,
+               f"{case}/{tag}: finalize exit", "reuse-filename")
+        disp_after = load(run2 / "disposition.json") or {}
+        missing_after = {(m.get("checkId"), m.get("armId"))
+                         for m in (disp_after.get("evaluation") or {}).get("missing") or []}
+        for arm, who in ((a2, "cross-eval"), (c2, "sibling")):
+            check((IMPORT_CHECK, arm["armId"]) not in missing_after,
+                  f"{case}/{tag}: after finalize the {who} reuse is NOT reported missing "
+                  f"(cause: {next((m.get('cause') for m in (disp_after.get('evaluation') or {}).get('missing') or [] if (m.get('checkId'), m.get('armId')) == (IMPORT_CHECK, arm['armId'])), None)!r})")
+        credited_after = {(x.get("checkId"), x.get("armId"))
+                          for x in disp_after.get("importedEvidence") or []}
+        for arm, who in ((a2, "cross-eval"), (c2, "sibling")):
+            check((IMPORT_CHECK, arm["armId"]) in credited_after,
+                  f"{case}/{tag}: and it is still listed as credited imported evidence")
+    expect(evalrun(["finalize", "--run", run2], scen2).returncode, 0, f"{case}/finalize: exit", "reuse-filename")
+    disp_rows = {r.get("armId"): r for r in (load(run2 / "disposition.json") or {}).get("importedEvidence") or []}
+    for arm, want_source, who in ((a2, a1["candidateFile"], "cross-eval"), (c2, a2["candidateFile"], "sibling")):
+        row = disp_rows.get(arm["armId"]) or {}
+        expect(row.get("origin"), "reused", f"{case}/finalize: {who} is listed as reused", "reuse-filename")
+        expect(row.get("capturedAgainst"), f"candidate:{want_source}",
+               f"{case}/finalize: {who} names the capture's own candidate in the disposition", "reuse-filename")
+    if e2:
+        row_e2 = disp_rows.get(e2["armId"]) or {}
+        expect(row_e2.get("origin"), "reused", f"{case}/finalize: the same-name reuse is listed as reused")
+        check("capturedAgainst" not in row_e2,
+              f"{case}/finalize: and carries NO capturedAgainst, because there is no difference to report "
+              f"(got {row_e2.get('capturedAgainst')!r})")
+    status_text = (run2 / "STATUS.md").read_text(encoding="utf-8") if (run2 / "STATUS.md").exists() else ""
+    check("not measured for this" in status_text,
+          f"{case}/finalize: STATUS.md says the evidence was not measured for the setup")
+    check(f"candidate:{a1['candidateFile']}" in status_text,
+          f"{case}/finalize: STATUS.md names the capture's own candidate file")
+    if e2:
+        check(f"measured against `candidate:{e2['candidateFile']}`" not in status_text,
+              f"{case}/finalize: STATUS.md never tells a reader the evidence was measured against the very "
+              f"setup it also says it was not measured for")
+
+    # ---- the bundle carries it, and a RELOCATED bundle still verifies.
+    expect(evalrun(["bundle", "--run", run2], scen2).returncode, 0, f"{case}/bundle: exit", "reuse-filename")
+    moved = tmp / f"{case}-bundle-moved"
+    shutil.copytree(run2 / "bundle", moved)
+    vr = evalrun(["verify-bundle", moved])
+    expect(vr.returncode, 0, f"{case}/relocated-bundle: verify exit", "reuse-filename")
+    vj = load(moved / "verify.json") or {}
+    check((vj.get("bundle") or {}).get("complete") is True,
+          f"{case}/relocated-bundle: the relocated bundle verifies complete")
+    breceipt = load(moved / "receipts" / f"{IMPORT_CHECK}__{a2['armId']}.json") or {}
+    expect(((breceipt.get("consumed") or {}).get("configuration") or {}).get("source"),
+           f"candidate:{a1['candidateFile']}",
+           f"{case}/relocated-bundle: the bundled receipt still names the original capture source",
+           "reuse-filename")
+
+    # ---- and tampered evidence still loses credit, reuse or not. Done LAST, on the sibling entry.
+    victim = run2 / "imports" / f"{IMPORT_CHECK}__{c2['armId']}" / "02-response.jsonl"
+    check(victim.exists(), f"{case}/tamper: premise - the copied raw response is where the receipt says")
+    if victim.exists():
+        victim.write_text('{"jsonrpc": "2.0", "id": 1, "result": {"findings": 99}}\n', encoding="utf-8")
+        expect(evalrun(["resume", "--run", run2], scen2).returncode, 0, f"{case}/tamper: resume exit")
+        st_bad = import_state(run2, IMPORT_CHECK, c2["armId"])[0]
+        check(st_bad not in CREDITED and "invalidated" in str(st_bad),
+              f"{case}/tamper: the tampered reuse loses credit (got {st_bad!r})")
+        st_ok = import_state(run2, IMPORT_CHECK, a2["armId"])[0]
+        check(st_ok in CREDITED, f"{case}/tamper: the untouched reuse keeps its credit (got {st_ok!r})")
+
+
 CASES["case-42"] = case_42
 CASES["case-43"] = case_43
+CASES["case-44"] = case_44
 
 
 def main() -> int:

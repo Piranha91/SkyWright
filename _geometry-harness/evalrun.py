@@ -1135,7 +1135,15 @@ class Ledger:
         return None
 
     def rebuild(self) -> None:
-        """The journal is the recovery source: the ledger is a view of it plus the receipts."""
+        """The journal is the recovery source: the ledger is a view of it PLUS the receipts.
+
+        The journal line records the transition (from, to, cause, receiptId); it has never carried the
+        per-entry facts a transition also writes — `detector`, `validation`, and an import's `imported` /
+        `importOrigin` block. Those live in the receipt, which is why this is a view of both. Replaying the
+        journal alone dropped them, and `finalize` reads `detector` from the LEDGER while reading everything
+        else from the receipt, so every rebuilt entry then finalized as `detector-undetermined` — a check
+        with accepted evidence on disk reported as missing (Piranha, 2026-09-17). A fact is restored only
+        from the receipt this entry actually names, so a stale or foreign receipt file cannot donate one."""
         self.doc = {"schemaVersion": SCHEMA_VERSION, "planId": self.plan["planId"],
                     "registrySha256": self.plan["registry"]["sha256"], "runIds": [], "entries": {}}
         if self.journal.exists():
@@ -1154,7 +1162,38 @@ class Ledger:
                     "detail": ev.get("detail"), "nextAction": ev.get("nextAction"),
                     "receiptId": ev.get("receiptId"), "runId": ev.get("runId"),
                     "receiptPath": f"receipts/{k}.json", "updatedUtc": ev.get("t")}
+        for k, e in self.doc["entries"].items():
+            e.update(self.receipt_facts(k, e))
         self.save()
+
+    def receipt_facts(self, key: str, entry: dict) -> dict:
+        """The per-entry facts the journal does not carry, read from the receipt this entry NAMES.
+
+        Refused unless the receipt on disk is this plan's, this (check, arm, part)'s, and the very
+        `receiptId` the journal recorded — a rebuild recovers what was written, it never adopts whatever
+        file happens to sit at the path. An entry that names no receipt, or whose receipt does not match,
+        gets nothing back and keeps the journal's own account of itself."""
+        rid = entry.get("receiptId")
+        if not rid:
+            return {}
+        r = load_json(Path(self.run) / "receipts" / f"{key}.json")
+        if not isinstance(r, dict) or r.get("receiptId") != rid:
+            return {}
+        if (r.get("planId") != self.plan["planId"] or r.get("checkId") != entry.get("checkId")
+                or r.get("armId") != entry.get("armId") or r.get("part") != entry.get("part")):
+            return {}
+        out: dict = {}
+        detector = (r.get("result") or {}).get("detector")
+        if detector is not None:
+            out["detector"] = detector
+            out["result"] = {"detector": detector, "execution": entry.get("status")}
+        if isinstance(r.get("validation"), dict):
+            out["validation"] = {"accepted": bool(r["validation"].get("accepted")),
+                                 "rejections": r["validation"].get("rejections") or []}
+        if isinstance(r.get("imported"), dict):
+            out["imported"] = True
+            out["importOrigin"] = r["imported"].get("origin")
+        return out
 
     def open_invocation(self, command: str, run_id: str | None, parent: str | None) -> None:
         self.run_id = run_id
@@ -1538,13 +1577,25 @@ class Validator:
                 "identityLimits": identity_limits}
 
     def _identity_checks(self, identity: dict, arm: dict, doc: dict, adapter: dict,
-                         part: str | None = None, limits: list | None = None) -> list[dict]:
+                         part: str | None = None, limits: list | None = None,
+                         declared_reuse: dict | None = None) -> list[dict]:
         """D2: an accepted emit must describe the configuration the plan ASKED FOR.
 
         The reference is the frozen request of the reference arm (§`reference_arm`), never "whichever
         receipt of this arm arrived first" — agreement between two outputs cannot establish agreement
-        with the request, and an incomplete identity is not accepted because it is the first one."""
+        with the request, and an incomplete identity is not accepted because it is the first one.
+
+        `declared_reuse` is the origin block `origin_refusals` returned for an import it has ALREADY
+        accepted as a well-formed `origin: reused` (§4.8): a capture made for another setup or another
+        evaluation. Only rule (f), the candidate FILENAME, is relaxed for it, and only into a recorded
+        limit — see there. Every other caller passes nothing and keeps the strict rule, so the run and
+        resume lanes are unchanged by construction rather than by argument."""
         rej = []
+        if declared_reuse and limits is None:
+            # The recorded limit is the whole price of the exception: an acceptance nobody can read about is
+            # not a limited relaxation, it is a silent one (review 2 F6). A caller that wants the exception
+            # must supply somewhere to put the record.
+            raise TypeError("_identity_checks: declared_reuse requires a `limits` list to record into")
         ref = self.reference_arm(arm, part)
         req = ref.get("requested") or {}
         req_plugins = list(req.get("plugins") or [])
@@ -1642,10 +1693,45 @@ class Validator:
                                   f"providers, overlays, population and state digest to "
                                   f"{recomputed[:12]}"})
 
-        # (f) the source must name the reference arm's candidate.
+        # (f) the source must name the reference arm's candidate — except for a declared reuse, whose capture
+        # names the candidate of the arm it WAS measured against. Where the two setups' candidate files happen
+        # to share a name the rule is satisfied and nothing below happens; where the names DIFFER the rule has
+        # no honest answer, because the only way past it would be to edit the capture's own statement of what
+        # it measured. The question it stands in for — "was this measured on the configuration this arm asked
+        # for?" — is answered above and by the importer's comparison against the frozen request: (b) names and
+        # order, (c) content hashes, (d) overlays, (e) the fingerprint as the digest of the stated
+        # configuration, and the importer's own equality against the fingerprint recomputed from this arm's
+        # request, which binds the plugins and their order, their bytes, the providers and their order, and
+        # the population. It does NOT bind state: that comparison takes state from the emit, so the state line
+        # is identical on both sides and cancels — state is bound by (g) below, against the plan's selected
+        # states. Nothing is rewritten to make (f) pass: the capture keeps its own Source, and a DIFFERENCE
+        # becomes a recorded LIMIT so a reader is told the evidence names another file. The digest binds the
+        # configuration text and nothing outside it (asset bytes among them); that is stated here, not widened.
         source = (identity.get("source") or "")
         want_source = f"candidate:{ref['candidateFile']}"
-        if source and ref["candidateFile"] and source.lower() != want_source.lower() \
+        differs = bool(ref["candidateFile"]) and source.lower() != want_source.lower()
+        if declared_reuse:
+            # The DISCLOSURE, decided on exact inequality and on an absent source - deliberately NOT on the
+            # refusal predicate below, whose substring tolerance would let `candidate-01-alternate.json` pass
+            # silently for an arm whose file is `candidate-01.json`, and whose `if source` would let an emit
+            # that simply omits Source say nothing at all (review 2 F2, 2026-09-17). The disclosure is what
+            # pays for the exception, so it is not skippable by shaping or omitting one string.
+            if differs:
+                src = declared_reuse.get("reusedFrom") or {}
+                (limits if limits is not None else []).append(
+                    {"capturedAgainst": source or None, "armCandidate": want_source,
+                     "declaredSource": {"planId": src.get("planId"), "armId": src.get("armId")},
+                     "detail": (f"declared reuse: the capture states it was measured against '{source}', "
+                                f"not this arm's '{want_source}'. It is credited because its stated "
+                                f"configuration equals this arm's frozen request, not because the files "
+                                f"are the same file; the source name is kept as captured, and which run "
+                                f"it names is the importer's caller's declaration, not verified here"
+                                if source else
+                                f"declared reuse: the capture states NO candidate source, so which file it "
+                                f"was measured against is not stated at all - this arm's is '{want_source}'. "
+                                f"It is credited because its stated configuration equals this arm's frozen "
+                                f"request; nothing here says the two are the same file")})
+        elif source and ref["candidateFile"] and source.lower() != want_source.lower() \
                 and Path(ref["candidateFile"]).stem.lower() not in source.lower():
             rej.append({"cause": "identity-mismatch",
                         "detail": f"the emit's Configuration.Source is '{source}', not this arm's "
@@ -3710,6 +3796,34 @@ def origin_refusals(doc: dict, plan: dict, arm_id, captured_time, request: tuple
         # once — but it is a different statement from reuse across evaluations, and every reader says which
         # (decided 2026-09-17: allow it and word it accurately, rather than forcing a capture per arm).
         within = "this-evaluation" if src["planId"] == plan["planId"] else "another-evaluation"
+        if within == "this-evaluation":
+            # A within-evaluation source is the ONE source this controller can check without reading another run:
+            # both frozen requests are in this plan. The reader is told, as fact, that the evidence came from
+            # another setup of this evaluation "whose tested configuration is the same" — so a declared armId that
+            # is not an arm of this plan, or is an arm whose frozen request differs, makes that sentence false and
+            # is refused here. Reading the SOURCE RUN stays out of scope; this reads only the plan already loaded.
+            named = next((a for a in plan.get("arms") or [] if a.get("armId") == src["armId"]), None)
+            if named is None:
+                return [f"reusedFrom-invalid: reusedFrom names setup {src['armId']!r} of this plan, which has no "
+                        f"such arm; a within-evaluation source must be one of this plan's setups "
+                        f"({', '.join(str(a.get('armId')) for a in plan.get('arms') or []) or 'none'})"], {}
+            here = next((a for a in plan.get("arms") or [] if a.get("armId") == arm_id), None)
+
+            def frozen(a):
+                r = (a or {}).get("requested") or {}
+                return ([(str(p.get("name") or "").lower(), str(p.get("sha256") or "").lower())
+                         for p in r.get("plugins") or []],
+                        [(str(v.get("kind") or ""), str(v.get("name") or "").lower())
+                         for v in r.get("providers") or []],
+                        sorted((str(o.get("kind") or ""), str(o.get("sha256") or "").lower())
+                               for o in r.get("overlays") or []),
+                        r.get("population"))
+            if here is not None and frozen(named) != frozen(here):
+                return [f"reusedFrom-invalid: reusedFrom names setup {src['armId']!r} of this plan, whose FROZEN "
+                        f"request is not this arm's: a reader of a within-evaluation reuse is told the source "
+                        f"setup's tested configuration is the same, and here the plan itself says it is not. "
+                        f"Import this evidence against the setup it was measured for, or as origin reused from "
+                        f"the evaluation it really came from"], {}
         return [], {"origin": "reused", "reusedWithin": within,
                     "reusedFrom": {"planId": src["planId"], "armId": src["armId"],
                                    "resultSha256": str(src["resultSha256"]).lower()},
@@ -3878,34 +3992,6 @@ def _cmd_import_results(a, runlog: Run) -> int:
     elif {str(x.get("role")) for x in rows if isinstance(x, dict)} != {"request", "response"}:
         errors.append("output-missing: outputs must contain exactly the roles request and response")
 
-    limits = []
-    if identity is not None:
-        if doc.get("state") != identity.get("state"):
-            errors.append(f"population-mismatch: import state {doc.get('state')!r} differs from "
-                          f"configuration state {identity.get('state')!r}")
-        for kind, values in (("plugin", identity.get("plugins") or []),
-                             ("overlay", identity.get("overlays") or [])):
-            for row in values:
-                path, want = Path(str(row.get("path") or "")), row.get("sha256")
-                if not row.get("path") or not path.is_file() or not is_sha256(want):
-                    errors.append(f"identity-missing: {kind} {row.get('name') or row.get('kind')} "
-                                  "must name an existing path and 64-hex sha256")
-                elif sha256_file(path) != str(want).lower():
-                    errors.append(f"identity-mismatch: {kind} {row.get('name') or row.get('kind')} "
-                                  "does not hash to its stated sha256")
-        validator = Validator(run, plan)
-        errors.extend(f"{x['cause']}: {x['detail']}" for x in
-                      validator._identity_checks(identity, arm, doc, check.get("adapter") or {},
-                                                 None, limits))
-        req = arm.get("requested") or {}
-        expected_fp = configuration_fingerprint(
-            req.get("plugins") or [], req.get("providers") or [], req.get("overlays") or [],
-            req.get("population"), identity.get("state"), schema=identity.get("schemaVersion"))
-        if identity.get("fingerprint") != expected_fp:
-            errors.append(f"identity-mismatch: imported fingerprint "
-                          f"{str(identity.get('fingerprint'))[:12]} does not equal this arm's frozen "
-                          f"request {expected_fp[:12]}")
-
     sources, request = [], None
     if isinstance(rows, list):
         for i, row in enumerate(rows):
@@ -3930,8 +4016,41 @@ def _cmd_import_results(a, runlog: Run) -> int:
                     request = (path, str(row["sha256"]).lower())
 
     # Option A: where the evidence came from, checked on the hash-checked request bytes themselves.
+    # This runs BEFORE the identity checks so they know which of two things they are reading: a capture
+    # made for this arm, or a declared reuse of a capture made for another setup or evaluation. Only a
+    # reuse this function has already accepted — a well-formed `reusedFrom`, not this arm's own, not a
+    # bare `origin: reused` — reaches the relaxed filename rule (`_identity_checks` (f)).
     origin_errors, origin_fields = origin_refusals(doc, plan, aid, captured_time, request)
     errors.extend(origin_errors)
+    declared_reuse = origin_fields if origin_fields.get("origin") == "reused" else None
+
+    limits = []
+    if identity is not None:
+        if doc.get("state") != identity.get("state"):
+            errors.append(f"population-mismatch: import state {doc.get('state')!r} differs from "
+                          f"configuration state {identity.get('state')!r}")
+        for kind, values in (("plugin", identity.get("plugins") or []),
+                             ("overlay", identity.get("overlays") or [])):
+            for row in values:
+                path, want = Path(str(row.get("path") or "")), row.get("sha256")
+                if not row.get("path") or not path.is_file() or not is_sha256(want):
+                    errors.append(f"identity-missing: {kind} {row.get('name') or row.get('kind')} "
+                                  "must name an existing path and 64-hex sha256")
+                elif sha256_file(path) != str(want).lower():
+                    errors.append(f"identity-mismatch: {kind} {row.get('name') or row.get('kind')} "
+                                  "does not hash to its stated sha256")
+        validator = Validator(run, plan)
+        errors.extend(f"{x['cause']}: {x['detail']}" for x in
+                      validator._identity_checks(identity, arm, doc, check.get("adapter") or {},
+                                                 None, limits, declared_reuse))
+        req = arm.get("requested") or {}
+        expected_fp = configuration_fingerprint(
+            req.get("plugins") or [], req.get("providers") or [], req.get("overlays") or [],
+            req.get("population"), identity.get("state"), schema=identity.get("schemaVersion"))
+        if identity.get("fingerprint") != expected_fp:
+            errors.append(f"identity-mismatch: imported fingerprint "
+                          f"{str(identity.get('fingerprint'))[:12]} does not equal this arm's frozen "
+                          f"request {expected_fp[:12]}")
 
     # The controller's own prerequisite gate (`prereq_satisfied`, the one sweep and derived checks use): evidence
     # for a check that could not have run on this arm is not credited here either, whatever its origin.
@@ -4454,6 +4573,20 @@ def imported_evidence(ledger: Ledger, receipts: dict, bad_keys: dict) -> list[di
         if origin == "reused":
             row["reusedFrom"] = imp.get("reusedFrom")
             row["reusedFromVerified"] = bool(imp.get("reusedFromVerified"))
+            # What the capture says about the file it was measured against. THREE states, and the reader is
+            # told which: the capture names another file (`other-file`), the capture names no file at all
+            # (`unstated` - a real limitation on what can be checked, which used to vanish because every
+            # consumer filtered on a truthy name), or the names agree and there is nothing extra to say (no
+            # `sourceDisclosure` key - appending "measured against <this setup's own file>" to "not measured
+            # for this setup" would read as a contradiction). The state is read from the identity limit rule
+            # (f) wrote, never re-derived here: one rule decides it, so the disposition and the receipt cannot
+            # disagree (reviews 2026-09-17, and Piranha's handback on the `unstated` case).
+            lim = next((x for x in (r.get("validation") or {}).get("identityLimits") or []
+                        if isinstance(x, dict) and x.get("armCandidate")), None)
+            if lim is not None:
+                row["sourceDisclosure"] = "other-file" if lim.get("capturedAgainst") else "unstated"
+                row["capturedAgainst"] = lim.get("capturedAgainst") or None
+                row["armCandidate"] = lim.get("armCandidate")
             # which statement this is: reuse between two setups of this evaluation, or from another evaluation. A
             # receipt written before the distinction existed says neither, and is reported as `unstated`.
             row["reusedWithin"] = (imp.get("reusedWithin")
@@ -4537,7 +4670,12 @@ def status_md(plan: dict, disp: dict) -> str:
                          % (src.get("planId"), src.get("armId")))
                 said = (f"{where} (result `{str(src.get('resultSha256'))[:12]}`, declared, not verified)"
                         + ("" if x.get("reusedWithin") != "unstated" else
-                           "; the receipt does not say whether the source is this evaluation or another"))
+                           "; the receipt does not say whether the source is this evaluation or another")
+                        + ("; the capture states it was measured against "
+                           f"`{x.get('capturedAgainst')}`" if x.get("sourceDisclosure") == "other-file"
+                           else "; the capture names NO candidate file, so which file it was measured "
+                                "against is not stated at all" if x.get("sourceDisclosure") == "unstated"
+                           else ""))
             else:
                 said = "origin not recorded: imported before origin was required"
             L.append(f"| `{x['checkId']}` | {x['armId']} | {said} |")

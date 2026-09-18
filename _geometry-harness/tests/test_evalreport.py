@@ -18,6 +18,7 @@ from __future__ import annotations
 import copy
 import hashlib
 import importlib.util
+import types
 import json
 import os
 import re
@@ -2113,6 +2114,110 @@ def case_fidelity(tmp, index, common):
         expect(others, [], f"{name}: no other finding's sentence changed", "D7")
 
 
+# ------------------------------------------------- the reuse source disclosure, all three states
+
+def case_r8(tmp, index, common) -> None:
+    """R8: a reused import's SOURCE disclosure survives to the reader in all three of its states.
+
+    A declared reuse (bundle contract 4.3, source rule) leaves one of three things to tell a reader, and
+    they are different claims:
+
+      other-file  the capture names a different candidate file, which is the case the exception exists for;
+      unstated    the capture names NO candidate file at all - a real limitation on what can be checked;
+      (neither)   the two candidate files have the same name, so there is nothing extra to say, and saying
+                  "measured against <this setup's own file>" beside "not measured for this setup" would
+                  read as a contradiction.
+
+    Every consumer used to filter on a truthy filename, so `unstated` was indistinguishable from the
+    no-mismatch case at every layer after the receipt (Piranha's handback, 2026-09-17). This exercises the
+    ACTUAL compiler function and the ACTUAL index templates, not a reimplementation of either."""
+    label = "R8/reuse-source-disclosure"
+    spec = importlib.util.spec_from_file_location("evalreport_r8", EVALREPORT)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+
+    def limit(captured, arm_candidate="candidate:this-arm.json"):
+        return {"capturedAgainst": captured, "armCandidate": arm_candidate,
+                "declaredSource": {"planId": "SRCPLAN", "armId": "src-arm"},
+                "detail": "declared reuse"}
+
+    # one receipt per state, in the shape the controller writes
+    arms = {
+        "arm-other": [limit("candidate:another-file.json")],
+        "arm-unstated": [limit(None)],
+        "arm-same": [],                      # rule (f) satisfied: no source-rule limit exists
+    }
+    receipts, disposition_rows = {}, []
+    for i, (arm, limits) in enumerate(sorted(arms.items()), start=1):
+        rid = f"receipt{i:02d}"
+        receipts[rid] = {
+            "receiptId": rid, "checkId": "mcp.check", "armId": arm, "part": None, "planId": "PLAN",
+            "validation": {"accepted": True, "rejections": [], "identityLimits": limits},
+            "consumed": {"configuration": {"source": "candidate:whatever-the-capture-said.json"}},
+            "imported": {"origin": "reused", "reusedFrom": {"planId": "SRCPLAN", "armId": "src-arm",
+                                                            "resultSha256": "a" * 64},
+                         "reusedFromVerified": False, "reusedWithin": "another-evaluation",
+                         "reusedFromNote": "declared", "capturedUtc": "2026-09-17T00:00:00Z",
+                         "tool": {"name": "t"}, "sourceSha256": "b" * 64},
+        }
+        disposition_rows.append({"checkId": "mcp.check", "armId": arm, "receiptId": rid, "origin": "reused"})
+    # the fields the real pipeline attaches after imported_evidence() and before rendering
+
+    view = types.SimpleNamespace(
+        receipts=receipts,
+        disposition={"importedEvidence": disposition_rows, "evaluation": {}},
+    )
+    got = module.imported_evidence(view)
+    by_arm = {r["armId"]: r for r in got["rows"]}
+    expect(sorted(by_arm), ["arm-other", "arm-same", "arm-unstated"],
+           f"{label}: premise - the compiler returned a row per arm")
+
+    # ---- the compiler tells the three states apart
+    expect(by_arm["arm-other"].get("sourceDisclosure"), "other-file",
+           f"{label}: a capture naming another file is `other-file`", "4.3 source rule")
+    expect(by_arm["arm-other"].get("capturedAgainst"), "candidate:another-file.json",
+           f"{label}: and the name reaches the row")
+    expect(by_arm["arm-unstated"].get("sourceDisclosure"), "unstated",
+           f"{label}: a capture naming NO file is `unstated`, not silence", "4.3 source rule")
+    expect(by_arm["arm-unstated"].get("capturedAgainst"), None,
+           f"{label}: with no filename, because the capture named none")
+    expect(by_arm["arm-unstated"].get("armCandidate"), "candidate:this-arm.json",
+           f"{label}: and this arm's own file, so the reader knows what was NOT confirmed")
+    check("sourceDisclosure" not in by_arm["arm-same"],
+          f"{label}: matching names carry NO disclosure - there is nothing extra to say "
+          f"(got {by_arm['arm-same'].get('sourceDisclosure')!r})")
+    check(not by_arm["arm-same"].get("capturedAgainst"),
+          f"{label}: and no filename either")
+
+    # ---- and the two index renditions say three different things
+    got["limit"] = "These labels catch evidence filed under the wrong evaluation by mistake."
+    for r in got["rows"]:
+        r.setdefault("findingIds", [])
+        r.setdefault("receiptEvidenceId", None)
+        r.setdefault("indexOrigin", "captured for another evaluation and reused here")
+    shown = {"imports": got, "findings": [], "groups": [], "media": [], "evidence": [], "omissions": [],
+             "chapters": [], "presentationId": "P", "generatedUtc": "now", "layout": "normal",
+             "source": {"planId": "PLAN", "bundleDir": ".", "manifestSha256": "", "dispositionSha256": "",
+                        "ledgerSha256": ""},
+             "scope": {"targets": [], "registryVersion": "", "planCreatedUtc": "", "runStartedUtc": "",
+                       "bundleCreatedUtc": "", "dispositionCreatedUtc": "", "states": {}, "arms": [],
+                       "explicitDecisions": {}, "completion": {}, "integrity": {}, "checks": {}}}
+    for fmt, autoescape in (("md", False), ("html", True)):
+        body = module.env(autoescape).get_template(f"evidence-index.{fmt}.j2").render(p=shown, css="")
+        check("states it was measured against" in body and "another-file.json" in body,
+              f"{label}/{fmt}: the other-file state names the file the capture gave")
+        check("names NO candidate file" in body,
+              f"{label}/{fmt}: the unstated state is SAID, not dropped for want of a filename")
+        check("this-arm.json" in body,
+              f"{label}/{fmt}: and the unstated state names this arm's own file for contrast")
+        # the no-mismatch row must not acquire either sentence
+        expect(body.count("names NO candidate file"), 1,
+               f"{label}/{fmt}: exactly one row is unstated", "4.3 source rule")
+        expect(body.count("states it was measured against"), 1,
+               f"{label}/{fmt}: exactly one row names another file - and the unstated sentence, which also "
+               f"contains the words 'measured against', is not miscounted as one", "4.3 source rule")
+
+
 CASES = {
     "R1-intact-incomplete": case_r1,
     "R2-null-vs-missing": case_r2,
@@ -2121,6 +2226,7 @@ CASES = {
     "R5-media-mismatch-same-basenames": case_r5,
     "R6-changed-or-missing-source": case_r6,
     "R7-import-origin": case_r7,
+    "R8-reuse-source-disclosure": case_r8,
     "fidelity": case_fidelity,
 }
 

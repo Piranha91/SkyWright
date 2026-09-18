@@ -768,6 +768,24 @@ def imported_evidence(b: Bundle) -> dict:
             row["reusedFromNote"] = imp.get("reusedFromNote")
             within = imp.get("reusedWithin") or drow.get("reusedWithin")
             row["reusedWithin"] = within if within in ("this-evaluation", "another-evaluation") else "unstated"
+            # What the capture says about the file it was measured against, in the same three states the
+            # controller records (bundle contract 4.3, source rule): `other-file` names another candidate,
+            # `unstated` means the capture names none at all, and no key means the names agree and there is
+            # nothing extra to tell the reader. `unstated` is a limitation in its own right and must survive to
+            # the page - filtering on a truthy filename dropped it silently (Piranha's handback, 2026-09-17).
+            # Read from the identity limit the controller wrote, never re-derived here. The bundle's own
+            # receipt is the authority; the disposition row is the fallback when this reader lacks the receipt.
+            lim = next((x for x
+                        in ((by_rid.get(rid) or {}).get("validation") or {}).get("identityLimits") or []
+                        if isinstance(x, dict) and x.get("armCandidate")), None)
+            if lim is not None:
+                row["sourceDisclosure"] = "other-file" if lim.get("capturedAgainst") else "unstated"
+                row["capturedAgainst"] = lim.get("capturedAgainst") or None
+                row["armCandidate"] = lim.get("armCandidate")
+            elif drow.get("sourceDisclosure") in ("other-file", "unstated"):
+                row["sourceDisclosure"] = drow["sourceDisclosure"]
+                row["capturedAgainst"] = drow.get("capturedAgainst") or None
+                row["armCandidate"] = drow.get("armCandidate")
         rows.append(row)
     return {"source": source if rows or isinstance(listed, list) else None, "rows": rows}
 
