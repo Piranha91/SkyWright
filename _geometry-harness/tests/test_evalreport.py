@@ -37,6 +37,9 @@ FIDELITY = FIXT / "fidelity"
 # HOUSECARL_EVALREPORT names another tree's compiler to test (an integration head); the default is this
 # checkout's own. HOUSECARL_EVALRUN does the same for the controller the fixtures are built with.
 EVALREPORT = Path(os.environ.get("HOUSECARL_EVALREPORT") or (HARNESS / "evalreport.py"))
+# the stylesheet the compiler under test inlines - beside that compiler, so an integration head is read from
+# its own tree rather than this checkout's
+REPORT_CSS = EVALREPORT.parent / "evalreport_templates" / "report.css"
 sys.path.insert(0, str(FIXT))
 
 FAILURES: list[str] = []
@@ -185,6 +188,42 @@ HREF = re.compile(r'href="([^"]+)"')
 
 def anchor_ids(text_: str) -> set:
     return set(ANCHOR_ID.findall(text_))
+
+
+STYLE_BLOCK = re.compile(r"<style>(.*?)</style>", re.S)
+CHAR_REF = re.compile(r"&(?:#\d+|#x[0-9a-fA-F]+|[A-Za-z][A-Za-z0-9]*);")
+FONT_FAMILY = re.compile(r"font-family:[^;{}]*")
+
+
+def check_stylesheet(case: str, label: str, doc: str, css: str) -> None:
+    """The bundled stylesheet reaches the browser as CSS, not as escaped HTML text (2026-09-18).
+
+    The templates render in an autoescaping environment, which is right for every value that comes from the
+    bundle and wrong for the one value that does not: `<style>{{ css }}</style>` wrote
+    `font-family: &#34;Segoe UI&#34;, Arial, ...` into report.html. A character reference is HTML text - CSS
+    has no such syntax, so the browser drops the whole declaration and lays the page out in its default font
+    at other metrics. The existing D4 checks (`size: A4`, no font below 9pt) matched straight through the
+    escaping, because neither of those declarations contains a character that autoescaping rewrites.
+
+    Three assertions, because each fails on its own: report.css appears verbatim (nothing was rewritten),
+    no character reference is left in the style block (nothing a browser would refuse to parse), and the
+    first font-family declaration - the one the defect broke - survives with its quotes intact."""
+    if not css.strip():
+        check(False, f"{case}: the bundled stylesheet exists at {REPORT_CSS} (a missing file is a failure, not a skip)")
+        return
+    blocks = STYLE_BLOCK.findall(doc)
+    check(bool(blocks), f"{case}: {label} carries a <style> block")
+    if not blocks:
+        return
+    style = blocks[0]
+    check(css.strip() in style,
+          f"{case}: {label} inlines report.css verbatim - autoescaping the stylesheet is what broke it")
+    refs = sorted(set(CHAR_REF.findall(style)))
+    expect(refs, [], f"{case}: {label}'s stylesheet carries no HTML character reference", "D4")
+    want = FONT_FAMILY.search(css)
+    check(want is not None and want.group(0) in style,
+          f"{case}: {label} keeps the stylesheet's first font-family declaration, quotes and all "
+          f"(want {(want.group(0) if want else None)!r})")
 
 
 def check_html_index(case: str, out: Path, pres: dict, md: str, html: str, index: str) -> None:
@@ -509,6 +548,11 @@ def assert_common(case: str, bundle: Path, out: Path, pres: dict, common: dict, 
     check("size: A4" in html.replace("size:A4", "size: A4"), f"{case}: report.html has @page size A4 (D4)")
     small = [m for m in re.findall(r"font-size\s*:\s*([0-9.]+)pt", html) if float(m) < 9]
     expect(small, [], f"{case}: report.html has no font below 9pt", "D4")
+    # ...and the stylesheet those two read is the file, unchanged - asserted on what `evalreport report`
+    # actually wrote here, not on a template rendered in the test
+    css_text = text(REPORT_CSS)
+    check_stylesheet(case, "report.html", html, css_text)
+    check_stylesheet(case, "evidence-index.html", text(out / "evidence-index.html"), css_text)
     arts = pm.get("artifacts") or []
     check(bool(arts), f"{case}: presentation-manifest lists produced artifacts (D4)")
     bad = []
@@ -594,6 +638,43 @@ def check_direction_inference():
                                               "physicalDetail": "winner's (Later.esp)"}]}
     expect(module.infer_clobber_direction(reversed_finding, ["Earlier.esp", "Later.esp"]), None,
            "direction: a reversed source sentence cannot be inferred from loose name matching")
+
+
+def check_stylesheet_escaping():
+    """One template, two kinds of value: the stylesheet is markup we ship and must not be escaped; everything
+    the bundle supplies is data and must be. Rendered from the templates alone - no fixture, no compiler run -
+    so the control runs even when one case is named on the command line, and so the two halves are asserted
+    against the same rendering.
+
+    The second half is the reason `|safe` on `css` is safe to state: it is applied to one value read from the
+    templates folder, and a report value carrying markup still arrives escaped."""
+    label = "stylesheet-escaping"
+    spec = importlib.util.spec_from_file_location("evalreport_stylesheet", EVALREPORT)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    css = text(REPORT_CSS)
+    markup = 'Fixture <b>"&" mod</b>'                       # a report value that looks like markup
+    arm = {"armId": "baseline", "displayLabel": markup, "readerLabel": markup, "pluginsAdded": [],
+           "pluginsRemoved": [], "readerLimits": [], "locationPluginOrder": [],
+           "locationPluginScope": {"locations": [], "complete": True, "missingInput": ""}}
+    shown = {"layout": "normal", "findings": [], "findingBlocks": [], "scope": {"arms": [arm]},
+             "reader": {"title": markup, "scopeLine": "", "verdict": "", "limitations": [],
+                        "context": {"evaluatedAt": None, "statesExamined": [], "statesNotExamined": []},
+                        "locationOrder": {"heading": "", "intro": "", "empty": ""},
+                        "sectionHeadings": {"regressions": "Problems introduced", "changes": "What changed"},
+                        "checkTitles": {}, "checkExplanations": {}, "comparisonSummary": [],
+                        "missingSummary": [], "nullSummary": [], "catalogueSummary": [], "otherLimits": []}}
+    try:
+        html = module.env(True).get_template("report.html.j2").render(p=shown, css=css)
+    except Exception as ex:                                  # StrictUndefined: a new template field, not a skip
+        check(False, f"{label}: report.html.j2 renders from this control's view ({type(ex).__name__}: {ex})")
+        return
+    check_stylesheet(label, "report.html", html, css)
+    # the negative control: autoescaping is still on for everything that came from the bundle
+    check(markup not in html and "<b>" not in html,
+          f"{label}: a report value containing markup is not written into report.html raw")
+    check("&lt;b&gt;" in html and "&amp;" in html,
+          f"{label}: it is written escaped - the stylesheet is the only unescaped value in the template")
 
 
 PATCH_OUTCOMES = {
@@ -2240,6 +2321,7 @@ def main() -> int:
     try:
         import make_report_fixtures as MF
         check_direction_inference()
+        check_stylesheet_escaping()
         print("=== fixtures ===")
         t0 = time.time()
         try:
