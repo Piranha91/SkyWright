@@ -60,7 +60,8 @@ def arm(arm_id, names, kind="candidate", provenance=None):
             "expected": {"states": ["baseline"], "population": "load-time"}}
 
 
-def make_bundle(root: Path, arms, repaired_on=None, created_on=None, patches=None):
+def make_bundle(root: Path, arms, repaired_on=None, created_on=None, patches=None,
+                import_note=None, import_arm=None):
     """A bundle small enough to build by hand and complete enough to reach the verdict.
 
     `repaired_on` / `created_on` name arms whose orderEvaluation reports a repair or a new
@@ -90,6 +91,34 @@ def make_bundle(root: Path, arms, repaired_on=None, created_on=None, patches=Non
                                                      "perProbe": per, "scope": "test"}}
     disp = {"evaluation": {"complete": False, "claim": "incomplete", "missing": []},
             "arms": arms_disp, "importedEvidence": [], "unassessed": {}}
+    receipts = {}
+    if import_note:
+        # A credited import whose result carries a note. This is how a corrected rendition
+        # says what it is: reuse provenance states where the evidence came from, the note
+        # states what was done with it. A reader shown only the first cannot tell that the
+        # numbers were recomputed.
+        a_id = import_arm or arms[-1]["armId"]
+        rid = f"{CHECK}__{a_id}"
+        disp["importedEvidence"] = [{"checkId": CHECK, "armId": a_id, "receiptId": rid,
+                                     "origin": "reused"}]
+        receipts[rid] = {
+            "receiptId": rid, "checkId": CHECK, "armId": a_id, "part": None,
+            "schemaVersion": 1, "exitCode": 0,
+            "adapter": {"kind": "mcp-import", "sourceKind": "mcp-only"},
+            "validation": {"accepted": True, "identityLimits": []},
+            "imported": {"origin": "reused", "capturedUtc": "2026-01-01T00:00:00+00:00",
+                         "sourceSha256": "0" * 64, "reusedWithin": "another-evaluation",
+                         "reusedFrom": {"planId": "src000000000", "armId": a_id,
+                                        "resultSha256": "1" * 64},
+                         "reusedFromVerified": False,
+                         "reusedFromNote": "declared, not re-checked",
+                         "tool": {"name": "test"}},
+            "result": {"detector": "finding", "findings": 1, "note": import_note,
+                       "coverage": [{"Population": CHECK, "Judged": 1, "Unjudgeable": {}}]},
+        }
+        (root / "receipts").mkdir(exist_ok=True)
+        (root / "receipts" / f"{rid}.json").write_text(json.dumps(receipts[rid]),
+                                                       encoding="utf-8")
     (root / "plan.json").write_text(json.dumps(plan), encoding="utf-8")
     (root / "disposition.json").write_text(json.dumps(disp), encoding="utf-8")
     (root / "ledger.json").write_text(json.dumps({"entries": []}), encoding="utf-8")
@@ -98,16 +127,21 @@ def make_bundle(root: Path, arms, repaired_on=None, created_on=None, patches=Non
         {"registryVersion": 1,
          "checks": [{"checkId": CHECK, "family": "geometry", "title": "Contact"}]}),
         encoding="utf-8")
+    evidence = [{"id": f"r-{rid}", "kind": "receipt", "path": f"receipts/{rid}.json",
+                 "sha256": "0" * 64, "checkId": CHECK, "armId": receipts[rid]["armId"],
+                 "recordedBy": rid} for rid in receipts]
     (root / "manifest.json").write_text(json.dumps({
         "bundleSchema": 2, "plan": "plan.json", "disposition": "disposition.json",
         "ledger": "ledger.json", "registry": "registry/check-registry.json",
-        "evidence": []}), encoding="utf-8")
+        "evidence": evidence}), encoding="utf-8")
     return root
 
 
-def run_compiler(arms, repaired_on=None, created_on=None, patches=None, declared=None):
+def run_compiler(arms, repaired_on=None, created_on=None, patches=None, declared=None,
+                 import_note=None, import_arm=None):
     with tempfile.TemporaryDirectory() as td:
-        bdir = make_bundle(Path(td) / "bundle", arms, repaired_on, created_on, patches)
+        bdir = make_bundle(Path(td) / "bundle", arms, repaired_on, created_on, patches,
+                           import_note, import_arm)
         pr = json.loads((HERE.parent.parent / ".claude/skills/evaluation-reporting/"
                          "references/report-priorities.json").read_text(encoding="utf-8"))
         conc, page = pr.get("concise") or {}, pr.get("page") or {}
@@ -133,7 +167,7 @@ def run_compiler(arms, repaired_on=None, created_on=None, patches=None, declared
             if probe in blob:
                 verdict = blob
                 break
-    return kinds, verdict, json.dumps(plan)
+    return kinds, verdict, json.dumps(plan), plan
 
 
 def main(argv=None):
@@ -159,7 +193,7 @@ def main(argv=None):
         arm("minus-b", DEPS + ["ModA.esp"]),
         arm("minus-a", DEPS + ["ModB.esp"] + COMPANIONS),
     ]
-    kinds, verdict, text = run_compiler(ablation, repaired_on=["minus-b"])
+    kinds, verdict, text, _pl = run_compiler(ablation, repaired_on=["minus-b"])
     cell("ablation-kinds",
          kinds.get("dep-only") == "dependency-control"
          and kinds.get("minus-b") == "mod-removal" and kinds.get("minus-a") == "mod-removal",
@@ -176,7 +210,7 @@ def main(argv=None):
         arm("baseline", DEPS + TARGETS, kind="baseline"),
         arm("with-patch", DEPS + TARGETS + [PATCH]),
     ]
-    kinds2, verdict2, text2 = run_compiler(declared, repaired_on=["with-patch"],
+    kinds2, verdict2, text2, _pl = run_compiler(declared, repaired_on=["with-patch"],
                                            patches=[PATCH])
     cell("declared-patch-is-a-patch-comparison",
          kinds2.get("with-patch") == "patch-comparison", f"{kinds2.get('with-patch')!r}")
@@ -189,7 +223,7 @@ def main(argv=None):
         arm("baseline", DEPS + TARGETS, kind="baseline"),
         arm("plus-unrelated", DEPS + TARGETS + [UNRELATED]),
     ]
-    kinds3, verdict3, text3 = run_compiler(undeclared, repaired_on=["plus-unrelated"])
+    kinds3, verdict3, text3, _pl = run_compiler(undeclared, repaired_on=["plus-unrelated"])
     cell("undeclared-plugin-is-not-a-patch",
          kinds3.get("plus-unrelated") == "unstated-difference",
          f"{kinds3.get('plus-unrelated')!r}; plugin membership does not identify a patch")
@@ -206,7 +240,7 @@ def main(argv=None):
         arm("baseline", DEPS + ["ModA.esp", "ModB.esp"], kind="baseline"),
         arm("swapped", DEPS + ["ModB.esp", "ModA.esp"]),
     ]
-    kinds4, verdict4, _ = run_compiler(reordered, repaired_on=["swapped"])
+    kinds4, verdict4, _, _pl = run_compiler(reordered, repaired_on=["swapped"])
     cell("reorder-is-not-a-control",
          kinds4.get("swapped") == "reordered-alternative",
          f"{kinds4.get('swapped')!r}; a load order is ordered and reordering changes winners")
@@ -219,7 +253,7 @@ def main(argv=None):
         arm("baseline", DEPS + TARGETS, kind="baseline"),
         arm("control", DEPS + TARGETS),
     ]
-    kinds5, _, _ = run_compiler(same)
+    kinds5, _, _, _pl = run_compiler(same)
     cell("identical-order-is-a-control",
          kinds5.get("control") == "same-order-control", f"{kinds5.get('control')!r}")
 
@@ -229,21 +263,66 @@ def main(argv=None):
         arm("without-patch", DEPS + TARGETS),
         arm("minus-a", DEPS + ["ModB.esp"] + [PATCH]),
     ]
-    kinds6, verdict6, _ = run_compiler(mixed, repaired_on=["minus-a"], patches=[PATCH])
+    kinds6, verdict6, _, _pl = run_compiler(mixed, repaired_on=["minus-a"], patches=[PATCH])
     cell("inverted-declared-patch",
          kinds6.get("without-patch") == "patch-comparison",
          f"{kinds6.get('without-patch')!r}; the patch sits in the measured order and the "
          f"alternative removes it")
+    # A NEGATIVE assertion alone is what let a false sentence ship. "RESOLVES not in verdict"
+    # passes for every wrong sentence as well as every right one, and the verdict went on to
+    # deny that any patch setup was compared -- in a plan whose baseline carries the declared
+    # patch and whose `without-patch` arm removes exactly it. Assert what the sentence must
+    # SAY, given what this fixture is.
     cell("repair-from-a-removal-arm-is-not-claimed",
          RESOLVES not in verdict6,
-         f"the repair came from the removal arm, not the patch arm: {verdict6[:120]!r}")
+         f"the repair came from the removal arm, not the patch arm: {verdict6[:110]!r}")
+    cell("mixed-plan-does-not-deny-an-existing-patch-comparison",
+         "No setup containing a patch was compared" not in verdict6
+         and PATCH in verdict6 and "was also compared" in verdict6,
+         f"a declared patch comparison exists in this plan, so the verdict must not deny one "
+         f"and must say what happened to it: {verdict6[:220]!r}")
+    # ... and the denial must still appear when it is TRUE, or the fix has simply deleted it.
+    kinds6b, verdict6b, _, _pl = run_compiler(
+        [arm("baseline", DEPS + TARGETS + COMPANIONS, kind="baseline"),
+         arm("minus-b", DEPS + ["ModA.esp"])],
+        repaired_on=["minus-b"])
+    cell("no-patch-arm-still-says-none-was-compared",
+         "No setup containing a patch was compared" in verdict6b,
+         f"with no patch arm anywhere the denial is accurate and must survive: "
+         f"{verdict6b[:160]!r}")
 
     # --- 7. --declare-patch reaches the classifier ----------------------------------------
-    kinds7, verdict7, _ = run_compiler(undeclared, repaired_on=["plus-unrelated"],
+    kinds7, verdict7, _, _pl = run_compiler(undeclared, repaired_on=["plus-unrelated"],
                                        declared=[UNRELATED])
     cell("declare-patch-setting-is-honoured",
          kinds7.get("plus-unrelated") == "patch-comparison" and RESOLVES in verdict7,
          f"declaring it makes it a patch comparison: {kinds7.get('plus-unrelated')!r}")
+
+    # --- 8. an import's note must reach the READER, not only the receipt ------------------
+    NOTE = ("CORRECTED RENDITION. Recomputed under corrected rules after the patch was "
+            "inspected.")
+    _k8, _v8, text8, plan8 = run_compiler(
+        [arm("baseline", DEPS + TARGETS, kind="baseline"),
+         arm("with-patch", DEPS + TARGETS + [PATCH])],
+        patches=[PATCH], import_note=NOTE, import_arm="with-patch")
+    reader8 = (plan8.get("reader") or {})
+    limits8 = " ".join(reader8.get("otherLimits") or [])
+    cell("import-note-reaches-the-reader",
+         NOTE in limits8,
+         f"an import that says what it is must say it on the page, not only in the receipt; "
+         f"reader.otherLimits carries it: {NOTE in limits8}")
+    cell("import-note-available-to-the-index",
+         NOTE in ((plan8.get("imports") or {}).get("notes") or []),
+         f"the evidence index renders p.imports.notes: "
+         f"{(plan8.get('imports') or {}).get('notes')}")
+    # ... and it must appear ONCE, not once per import, and never invented when absent.
+    _k9, _v9, _t9, plan9 = run_compiler(
+        [arm("baseline", DEPS + TARGETS, kind="baseline"),
+         arm("with-patch", DEPS + TARGETS + [PATCH])], patches=[PATCH])
+    cell("no-note-invents-no-disclosure",
+         not ((plan9.get("imports") or {}).get("notes"))
+         and NOTE not in " ".join((plan9.get("reader") or {}).get("otherLimits") or []),
+         "an evaluation whose imports carry no note gets no note sentence")
 
     for name, ok, detail in cells:
         print(f"[{'PASS' if ok else 'FAIL'}] {name}: {detail}")

@@ -1587,10 +1587,18 @@ def compile_plan(bundle_dir: Path, verify: dict, settings: dict, pr: dict, bundl
     # fresh stays unremarked. Plan, arm, hash and receipt detail go to the evidence index. Counts are untouched.
     origin_words = reader_data.get("importOrigin") or {}
     imports = imported_evidence(b)
+    by_rid = {rid: rc for rid, rc in b.receipts.items() if isinstance(rc.get("imported"), dict)}
     imports["limit"] = origin_words.get("limit")
     import_by_key = {(r["checkId"], r["armId"]): r for r in imports["rows"]}
     for row in imports["rows"]:
         row["receiptEvidenceId"] = eid_by_path.get(row["receiptPath"])
+        # The importer's own note about what this result IS. Reuse provenance ("captured for
+        # another evaluation") and correction provenance ("re-interpreted under corrected
+        # rules") answer different questions, and a reader shown only the first cannot tell
+        # that the numbers were recomputed. The note is the import's statement about itself,
+        # carried verbatim and attributed, never summarised into a claim of our own.
+        rc_note = ((by_rid.get(row.get("receiptId")) or {}).get("result") or {}).get("note")
+        row["note"] = rc_note if isinstance(rc_note, str) and rc_note.strip() else None
         # Reuse between two setups of THIS evaluation is a different statement from reuse across evaluations, so it
         # has its own sentence; a receipt that does not say which keeps the cautious cross-evaluation wording.
         row["originWording"] = ("reusedWithinEvaluation"
@@ -1606,6 +1614,11 @@ def compile_plan(bundle_dir: Path, verify: dict, settings: dict, pr: dict, bundl
         f["importOrigin"] = row["origin"]
         f["readerProvenance"] = row["readerProvenance"]
         row["findingIds"].append(f["id"])
+    # Distinct import notes, in first-seen order. One sentence per DISTINCT note, not one per
+    # import: twelve identical copies of the same explanation is noise, and the reader needs
+    # the statement once.
+    import_notes = list(dict.fromkeys(r["note"] for r in imports["rows"] if r.get("note")))
+    imports["notes"] = import_notes
     missing = ev.get("missing") or []
     by_cause = collections.Counter(str(m.get("status")) for m in missing)
     run_ids = b.manifest.get("runIds") or []
@@ -1722,13 +1735,35 @@ def compile_plan(bundle_dir: Path, verify: dict, settings: dict, pr: dict, bundl
     elif repaired_total and repair_claimable(repair_arms):
         verdict = f"{setup_subject(repair_arms)} resolves some measured conflicts and no new defect was reported by the checks that ran."
     elif repaired_total:
-        # Fewer conflicts, but produced by removal. Say what was actually observed and refuse
-        # the repair reading rather than letting the count imply a fix exists.
+        # Fewer conflicts, but produced by an arm that cannot carry a repair reading. Say what
+        # was observed and refuse the repair reading -- then say what happened to the patch
+        # comparison SEPARATELY, because which arm improved and whether a patch arm exists are
+        # different questions. Appending "no setup containing a patch was compared"
+        # unconditionally denied a declared patch comparison that had in fact been measured,
+        # whenever the reduction happened to come from a removal control.
+        patch_arms = [a for a in alternative_arms
+                      if comparison_kinds.get(a) == "patch-comparison"]
+        if not patch_arms:
+            patch_clause = (" No setup containing a patch was compared, so these results do "
+                            "not say whether a patch would resolve them.")
+        else:
+            patch_named = ", ".join(supplied) if supplied else "a patch"
+            patch_repaired = any(a in repair_arms for a in patch_arms)
+            patch_regressed = any(a in {f.get("armId") for f in reader_regressions}
+                                  for a in patch_arms)
+            if patch_repaired:
+                patch_clause = ""          # handled by the repair branch above
+            elif patch_regressed:
+                patch_clause = (f" A setup containing {patch_named} was also compared, and it "
+                                f"introduced a new defect in a check that ran.")
+            else:
+                patch_clause = (f" A setup containing {patch_named} was also compared; the "
+                                f"checks that ran recorded no reduction and no new defect from "
+                                f"it, so the patch was tested and this result is not a "
+                                f"statement that it went untested.")
         verdict = (f"{setup_subject(repair_arms)} records fewer conflicts than the measured "
                    f"load order, and no new defect was reported by the checks that ran. "
-                   + non_repair_reason(repair_arms)
-                   + " No setup containing a patch was compared, so these results do not say "
-                     "whether a patch would resolve them.")
+                   + non_repair_reason(repair_arms) + patch_clause)
     elif overlap_reduction_total:
         verdict = bind(reader_verdict_templates["overlapOnlyReduction"], subject_values(overlap_reduction_arms))
     elif has_context_only and not any(f.get("kind") in ("regression", "finding") and f.get("readerRelevant") for f in findings):
@@ -1760,6 +1795,9 @@ def compile_plan(bundle_dir: Path, verify: dict, settings: dict, pr: dict, bundl
         other_limits.append("Some objects could not be assessed because the needed geometry or links were unavailable. Their counts and reasons are in the evidence index.")
     if unassessed_media:
         other_limits.append("Some supplied images or clips could not be matched to this evaluation and were excluded from the evidence shown.")
+    for note in import_notes:
+        other_limits.append("The imported results in this report carry a note from the tool "
+                            "that produced them: " + note.strip())
     check_titles = reader_data.get("checkTitles") or {}
     reason_labels = reader_data.get("missingReasons") or {}
 

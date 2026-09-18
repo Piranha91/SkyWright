@@ -29,6 +29,15 @@ Complete in every mode: every finding with all of its rows, every evidence file 
 {% if p.imports and p.imports.rows %}
 Results a houseCARL tool produced and `evalrun import-results` bound to a frozen setup. {{ p.imports.limit }} Credited imports read from {{ "the disposition's importedEvidence list" if p.imports.source == "disposition" else "the accepted receipts (this bundle was finalized before the disposition listed imports)" }}; each origin below is the receipt's own. The controller's ledger status `reused` means this run re-used its own accepted receipt on a resume and is not an origin.
 
+{% if p.imports.get('notes') %}
+Notes the importing tool recorded about what these results are. Reuse provenance says where the
+evidence came from; a note says what was done with it, which is a different question.
+
+{% for n in p.imports.notes %}
+> {{ n|md }}
+
+{% endfor %}
+{% endif %}
 | finding(s) | check | arm | origin | what that means | captured (UTC) | receipt | source plan / arm / result sha256 | source verified |
 |---|---|---|---|---|---|---|---|---|
 {% for x in p.imports.rows %}
