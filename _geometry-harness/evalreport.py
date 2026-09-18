@@ -808,12 +808,14 @@ def compile_plan(bundle_dir: Path, verify: dict, settings: dict, pr: dict, bundl
     #     sentence names that change, and a setup that removes a plugin is never called the supplied setup.
     base_names = [p.get("name") for p in ((plan_arms.get("baseline") or {}).get("requested") or {}).get("plugins") or []]
     base_set = {n.lower() for n in base_names if n}
-    arm_changes = {}
+    arm_changes, arm_orders = {}, {}
     for arm_id in arm_ids:
         names = [p.get("name") for p in ((plan_arms.get(arm_id) or {}).get("requested") or {}).get("plugins") or []]
+        arm_orders[arm_id] = [n for n in names if n]
         added = [n for n in names if n and n.lower() not in base_set] if arm_id != "baseline" else []
         removed = [n for n in base_names if n and n.lower() not in {x.lower() for x in names if x}] if (arm_id != "baseline" and names) else []
         arm_changes[arm_id] = (added, removed)
+    base_order = [n.lower() for n in arm_orders.get("baseline") or []]
     plan_target_set = {str(t.get("name")).lower() for t in (b.plan.get("targets") or []) if isinstance(t, dict) and t.get("name")}
 
     # --- WHAT KIND of comparison each alternative arm is.
@@ -834,6 +836,30 @@ def compile_plan(bundle_dir: Path, verify: dict, settings: dict, pr: dict, bundl
     #   same-order-control  the arm's plugin set equals the baseline's -- a comparability
     #                       control, not a change.
     #   mixed               adds and removes at once; described explicitly, never summarised.
+    # --- DECLARED patch identity. A patch is declared, never inferred.
+    #
+    # Inferring it from plugin membership was wrong in both directions: adding any unrelated
+    # plugin was read as a patch comparison, and nothing distinguished a patch from a plugin
+    # that merely differs. Plugin membership does not identify a patch. Sources, in order:
+    # the plan's own `patches` list, an arm's `provenance.patch`/`patches`/`patchPlugins`, and
+    # `--declare-patch` at report time for a plan that predates the field. Absent all three,
+    # the difference is reported as UNSTATED rather than named as a patch.
+    declared_patches = set()
+    for v in (b.plan.get("patches") or []):
+        name = v if isinstance(v, str) else (v or {}).get("name")
+        if name:
+            declared_patches.add(str(name).lower())
+    for a in plan_arms.values():
+        prov = (a or {}).get("provenance") or {}
+        for key in ("patch", "patches", "patchPlugins"):
+            v = prov.get(key)
+            for name in ([v] if isinstance(v, str) else (v or [])):
+                if isinstance(name, str) and name.strip():
+                    declared_patches.add(name.strip().lower())
+    for name in (settings.get("declaredPatches") or []):
+        if isinstance(name, str) and name.strip():
+            declared_patches.add(name.strip().lower())
+
     def arm_comparison_kind(arm_id) -> str:
         if arm_id == "baseline":
             return "baseline"
@@ -843,7 +869,12 @@ def compile_plan(bundle_dir: Path, verify: dict, settings: dict, pr: dict, bundl
         if added and removed:
             return "mixed"
         if not added and not removed:
-            return "same-order-control"
+            # Same MEMBERSHIP is not the same configuration. A load order is ordered, and
+            # reordering it is a real tested alternative that can change every winner.
+            # Calling it a control asserted an equality that was never checked.
+            return ("same-order-control"
+                    if [n.lower() for n in arm_orders.get(arm_id) or []] == base_order
+                    else "reordered-alternative")
         # An evaluated MOD moving decides the kind, whichever direction it moves in. Its
         # companion files travel with it and are collateral, not a patch: a mod's own extra
         # masters differ from the baseline for the same reason the mod does.
@@ -853,10 +884,13 @@ def compile_plan(bundle_dir: Path, verify: dict, settings: dict, pr: dict, bundl
                         if plan_target_set and len(removed_targets) >= len(plan_target_set)
                         else "mod-removal")
             return "mixed"
-        # Only NON-target plugins move. That is a patch comparison in EITHER direction: an
-        # alternative may add the patch, or the measured order may carry it and the
-        # alternative remove it (the inverted layout a patched phase uses).
-        return "patch-comparison"
+        # Only NON-target plugins move. That is a patch comparison in either direction ONLY
+        # if every plugin that moved is a DECLARED patch. Otherwise the identity is unstated
+        # and is reported as such.
+        moved = [n for n in added + removed]
+        if moved and all(n.lower() in declared_patches for n in moved):
+            return "patch-comparison"
+        return "unstated-difference"
 
     comparison_kinds = {a: arm_comparison_kind(a) for a in arm_ids}
 
@@ -867,26 +901,43 @@ def compile_plan(bundle_dir: Path, verify: dict, settings: dict, pr: dict, bundl
     supplied = sorted({n
                        for arm_id, (added, removed) in arm_changes.items()
                        if comparison_kinds.get(arm_id) == "patch-comparison"
-                       for n in added + removed if n.lower() not in plan_target_set})
+                       for n in added + removed
+                       if n.lower() in declared_patches and n.lower() not in plan_target_set})
+    # Differences carried by an arm whose patch identity is not declared. Named to the reader
+    # as what they are -- a plugin that differs -- and never as an evaluated patch.
+    unstated_difference_plugins = sorted({n
+                                          for arm_id, (added, removed) in arm_changes.items()
+                                          if comparison_kinds.get(arm_id) == "unstated-difference"
+                                          for n in added + removed})
 
     def repair_claimable(ids) -> bool:
-        """Can a reduction in conflicts across these arms be read as REPAIR?
+        """Can a reduction across these arms be read as REPAIR the reader could install?
 
-        Only if at least one of them added something. Otherwise the reduction is produced by
-        removing content, and reporting it as a resolution would describe arithmetic as a fix
-        the reader could install.
+        Only from an arm that is a DECLARED patch comparison. A reduction from removing a mod
+        is arithmetic; a reduction from reordering is a load-order change, not a patch; and a
+        reduction from an undeclared plugin cannot be attributed to a patch at all, because
+        nothing establishes that the plugin is one.
         """
         return any(comparison_kinds.get(a) == "patch-comparison" for a in ids)
 
-    def removal_only_note(ids) -> str:
+    def non_repair_reason(ids) -> str:
         kinds_here = {comparison_kinds.get(a) for a in ids}
         if kinds_here <= {"dependency-control"}:
             return ("These setups remove every evaluated mod, so what remains is the shared "
                     "dependencies. Fewer conflicts here does not describe a fix; it separates "
                     "what the dependencies already carried from what the mods add.")
+        if kinds_here <= {"reordered-alternative"}:
+            return ("These setups hold the same plugins in a different load order. A change "
+                    "here is a load-order effect, not a patch, and installing nothing would "
+                    "reproduce it.")
+        if kinds_here <= {"unstated-difference"}:
+            return ("These setups differ by a plugin that is not declared as a patch, so the "
+                    "change cannot be attributed to one. Declare the patch to have this "
+                    "reported as a patch comparison.")
         return ("These setups reach that by removing content rather than by patching it: a "
                 "setup without a mod does not have that mod's conflicts. They are controls "
                 "for attribution, not a configuration to install.")
+
 
     def arm_subject(arm_id) -> str:
         added, removed = arm_changes.get(arm_id) or ([], [])
@@ -1602,6 +1653,10 @@ def compile_plan(bundle_dir: Path, verify: dict, settings: dict, pr: dict, bundl
         pair = {str(x).lower() for x in (c.get("A"), c.get("B")) if x}
         f["readerRelevant"] = bool(f.get("readerRelevant", True)) and (not pair or bool(pair & reader_scope_names))
     compared = ", ".join(comparison_names) if comparison_names else "the measured load order"
+    unstated_text = (f" One tested setup differs by {', '.join(unstated_difference_plugins)}, "
+                     f"which is not declared as a patch; it is reported as a plugin that "
+                     f"differs, not as an evaluated patch."
+                     if unstated_difference_plugins else "")
     patch_text = ", ".join(supplied) if supplied else "no separate patch plugin"
     patch_adds = any(n in supplied for added, _ in arm_changes.values() for n in added)
     patch_removes = any(n in supplied for _, removed in arm_changes.values() for n in removed)
@@ -1613,7 +1668,8 @@ def compile_plan(bundle_dir: Path, verify: dict, settings: dict, pr: dict, bundl
                      "No comparison mod was identified by the recorded conflicts. ")
                   + ((f"The patch evaluated is {patch_text}, {patch_how}." if len(supplied) == 1 else
                       f"The patches evaluated are {patch_text}, {patch_how}.") if supplied else
-                     "No separate patch plugin was included in the comparison."))
+                     "No separate patch plugin was declared for this comparison.")
+                  + unstated_text)
     for _a in arms_out:
         _a["comparisonKind"] = comparison_kinds.get(_a.get("armId"))
     alternative_arms = [a["armId"] for a in arms_out if a.get("kind") != "baseline"]
@@ -1649,7 +1705,7 @@ def compile_plan(bundle_dir: Path, verify: dict, settings: dict, pr: dict, bundl
             elif repaired_total:
                 verdict = (f"{change_subject} records fewer conflicts than the measured load "
                            f"order and also introduces a new defect in a check that ran. "
-                           + removal_only_note(repair_arms))
+                           + non_repair_reason(repair_arms))
             else:
                 verdict = f"{change_subject} introduces a new defect in a check that ran."
             if overlap_created_total:
@@ -1670,7 +1726,7 @@ def compile_plan(bundle_dir: Path, verify: dict, settings: dict, pr: dict, bundl
         # the repair reading rather than letting the count imply a fix exists.
         verdict = (f"{setup_subject(repair_arms)} records fewer conflicts than the measured "
                    f"load order, and no new defect was reported by the checks that ran. "
-                   + removal_only_note(repair_arms)
+                   + non_repair_reason(repair_arms)
                    + " No setup containing a patch was compared, so these results do not say "
                      "whether a patch would resolve them.")
     elif overlap_reduction_total:
@@ -2273,6 +2329,7 @@ def cmd_plan(a) -> int:
         settings = {"mode": a.mode, "layout": conc.get("layout", "normal"),
                     "maxPages": (a.max_pages if a.max_pages is not None else conc.get("maxPages", 8)),
                     "page": {"size": page.get("size", "A4"), "marginMm": page.get("marginMm", 16), "baseFontPt": page.get("baseFontPt", 10.5)},
+                    "declaredPatches": list(a.declare_patch or []),
                     "rowsPerGroup": (a.rows_per_group if a.rows_per_group is not None else conc.get("rowsPerGroup", 3)),
                     "figuresPerFinding": (a.figures_per_finding if a.figures_per_finding is not None else conc.get("figuresPerFinding", 1)),
                     "reel": {k: (pr.get("reel") or {}).get(k) for k in ("maxSeconds", "fps", "width", "height")}}
@@ -2842,6 +2899,11 @@ def build_parser() -> argparse.ArgumentParser:
                    help="verify a temporary copy of the bundle so the bundle directory itself is never written to")
     p.add_argument("--location-scope", action="append", default=[], metavar="ARM=FILE",
                    help="bind a scopeprobe location-contributor document to an arm; repeat for multiple arms")
+    p.add_argument("--declare-patch", action="append", default=[], metavar="PLUGIN",
+                   help="declare a plugin as a patch under evaluation; repeat for several. Patch "
+                        "identity is never inferred from plugin membership, so an arm that differs "
+                        "only by an undeclared plugin is reported as an unstated difference. Use "
+                        "this for a plan whose candidates predate the declaration field.")
     p.set_defaults(fn=cmd_plan)
     p = sub.add_parser("triage", help="compile an annotated overlap manifest into a readable incident catalogue")
     p.add_argument("--manifest", required=True)

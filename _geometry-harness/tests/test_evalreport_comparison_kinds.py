@@ -1,27 +1,37 @@
 #!/usr/bin/env python
-"""Checks for how the report compiler classifies an alternative setup.
+"""Checks for how the report compiler classifies a setup and what it is then allowed to claim.
 
-The defect these guard against produced two wrong statements in a delivered report:
+These guard two defects that reached a delivered report, and one that a review found in the
+first attempt to fix them:
 
-  * a setup that merely REMOVED a mod was described as resolving measured conflicts, which
-    a reader takes as "a fix exists". Removing a mod removes that mod's conflicts by
-    construction -- that is arithmetic, not a repair.
+  * a setup that merely REMOVED a mod was described as resolving measured conflicts, which a
+    reader takes as "a fix exists". Removing a mod removes that mod's conflicts by
+    construction -- arithmetic, not a repair.
   * a mod's own companion master files, which differ from the baseline only because the mod
-    they belong to was removed, were named to the reader as "the patches evaluated".
+    they belong to was removed, were named as "the patches evaluated".
+  * the first fix still GUESSED patch identity from plugin membership, so adding any unrelated
+    plugin was read as a patch comparison; and it compared plugin membership as a SET, so
+    reversing the load order was called a same-order control.
 
-Both came from one concept doing three jobs: "the non-target plugin that differs". The fix
-classifies each arm by WHAT KIND of comparison it is, and only a patch comparison may carry
-a repair reading.
+Patch identity is now declared, never inferred, and order is compared as order.
 
-These cells drive the real `compile_plan` over a minimal on-disk bundle, so they fail if the
-classification is removed -- not a local re-implementation of the rule.
+**The verdict cells below drive real findings through to the reader-facing sentence.** The
+first version of this file asserted only on `comparisonKind`, over fixtures with an empty
+ledger and registry -- so the repair branch was never reached and replacing the whole gate
+with `return True` left all nine cells passing. `--prove-gate` re-runs the suite with the gate
+forced open, in memory, and requires it to FAIL; a suite that still passes with the gate
+disabled does not protect the sentence.
 
-Usage: python _geometry-harness/tests/test_evalreport_comparison_kinds.py
+Usage:
+  python _geometry-harness/tests/test_evalreport_comparison_kinds.py
+  python _geometry-harness/tests/test_evalreport_comparison_kinds.py --prove-gate
 Exit 0 all pass, 1 a cell failed.
 """
 from __future__ import annotations
 
+import argparse
 import json
+import subprocess
 import sys
 import tempfile
 from pathlib import Path
@@ -32,38 +42,62 @@ import evalreport as R                                               # noqa: E40
 
 TARGETS = ["ModA.esp", "ModB.esp"]
 DEPS = ["Skyrim.esm", "Update.esm"]
-# ModB ships companion master files. They are NOT patches; they travel with ModB.
-COMPANIONS = ["ModB0.esp", "ModB1.esp"]
+COMPANIONS = ["ModB0.esp", "ModB1.esp"]          # ModB's own extra masters, not patches
 PATCH = "ModA - ModB patch.esp"
+UNRELATED = "UnrelatedQuest.esp"                 # not a patch, not a target
+CHECK = "geometry.placement-contact"
 
 
 def plugins(*names):
     return [{"name": n, "sha256": "0" * 64, "path": f"X:/x/{n}"} for n in names]
 
 
-def arm(arm_id, names, kind="candidate"):
+def arm(arm_id, names, kind="candidate", provenance=None):
     return {"armId": arm_id, "kind": kind, "candidateFile": f"{arm_id}.json",
+            "provenance": provenance or {},
             "requested": {"plugins": plugins(*names), "providers": [], "overlays": [],
                           "population": "load-time"},
             "expected": {"states": ["baseline"], "population": "load-time"}}
 
 
-def make_bundle(root: Path, arms):
-    """The smallest bundle shape compile_plan will read."""
+def make_bundle(root: Path, arms, repaired_on=None, created_on=None, patches=None):
+    """A bundle small enough to build by hand and complete enough to reach the verdict.
+
+    `repaired_on` / `created_on` name arms whose orderEvaluation reports a repair or a new
+    defect, which is what drives the reader-facing Result sentence.
+    """
     root.mkdir(parents=True, exist_ok=True)
     plan = {"planId": "test00000000", "requestProviders": "arm-view",
             "createdUtc": "2026-01-01T00:00:00+00:00",
             "targets": [{"name": t} for t in TARGETS],
-            "arms": arms, "checks": [], "states": {"selected": ["baseline"]}}
+            "arms": arms, "states": {"selected": ["baseline"]},
+            "checks": [{"checkId": CHECK, "family": "geometry", "title": "Contact",
+                        "arms": [{"armId": a["armId"], "status": "probe"} for a in arms]}]}
+    if patches:
+        plan["patches"] = list(patches)
+    arms_disp = {}
+    for a in arms:
+        per = {}
+        if a["armId"] in (repaired_on or []):
+            per[CHECK] = {"verdict": "REPAIRED", "repaired": 3, "reclassified": 0,
+                          "created": 0, "newDefect": 0, "attributed": 0, "unmeasured": 0}
+        if a["armId"] in (created_on or []):
+            per[CHECK] = {"verdict": "HARMFUL", "repaired": 0, "reclassified": 0,
+                          "created": 2, "newDefect": 2, "attributed": 0, "unmeasured": 0}
+        arms_disp[a["armId"]] = {"kind": a["kind"],
+                                 "orderEvaluation": {"classification": None, "probes": [CHECK],
+                                                     "regression": bool(per.get(CHECK, {}).get("created")),
+                                                     "perProbe": per, "scope": "test"}}
     disp = {"evaluation": {"complete": False, "claim": "incomplete", "missing": []},
-            "arms": {a["armId"]: {"kind": a["kind"]} for a in arms},
-            "importedEvidence": [], "unassessed": {}}
+            "arms": arms_disp, "importedEvidence": [], "unassessed": {}}
     (root / "plan.json").write_text(json.dumps(plan), encoding="utf-8")
     (root / "disposition.json").write_text(json.dumps(disp), encoding="utf-8")
     (root / "ledger.json").write_text(json.dumps({"entries": []}), encoding="utf-8")
     (root / "registry").mkdir(exist_ok=True)
-    (root / "registry" / "check-registry.json").write_text(
-        json.dumps({"registryVersion": 1, "checks": []}), encoding="utf-8")
+    (root / "registry" / "check-registry.json").write_text(json.dumps(
+        {"registryVersion": 1,
+         "checks": [{"checkId": CHECK, "family": "geometry", "title": "Contact"}]}),
+        encoding="utf-8")
     (root / "manifest.json").write_text(json.dumps({
         "bundleSchema": 2, "plan": "plan.json", "disposition": "disposition.json",
         "ledger": "ledger.json", "registry": "registry/check-registry.json",
@@ -71,10 +105,9 @@ def make_bundle(root: Path, arms):
     return root
 
 
-def kinds_and_supplied(arms):
-    """Run the REAL compile_plan and read back what it decided."""
+def run_compiler(arms, repaired_on=None, created_on=None, patches=None, declared=None):
     with tempfile.TemporaryDirectory() as td:
-        bdir = make_bundle(Path(td) / "bundle", arms)
+        bdir = make_bundle(Path(td) / "bundle", arms, repaired_on, created_on, patches)
         pr = json.loads((HERE.parent.parent / ".claude/skills/evaluation-reporting/"
                          "references/report-priorities.json").read_text(encoding="utf-8"))
         conc, page = pr.get("concise") or {}, pr.get("page") or {}
@@ -83,91 +116,134 @@ def kinds_and_supplied(arms):
                     "page": {"size": page.get("size", "A4"),
                              "marginMm": page.get("marginMm", 16),
                              "baseFontPt": page.get("baseFontPt", 10.5)},
+                    "declaredPatches": list(declared or []),
                     "rowsPerGroup": conc.get("rowsPerGroup", 3),
                     "figuresPerFinding": conc.get("figuresPerFinding", 1),
                     "reel": {k: (pr.get("reel") or {}).get(k)
                              for k in ("maxSeconds", "fps", "width", "height")}}
         plan = R.compile_plan(bdir, {"bundle": {"complete": True}}, settings, pr, str(bdir))
     scope = plan.get("scope") or {}
-    got = {a["armId"]: a.get("comparisonKind") for a in scope.get("arms") or []}
-    text = json.dumps(plan)
-    return got, text, scope
+    kinds = {a["armId"]: a.get("comparisonKind") for a in scope.get("arms") or []}
+    verdict = ((plan.get("reader") or {}).get("verdict")
+               or (plan.get("result") or {}).get("verdict") or "")
+    if not verdict:
+        blob = json.dumps(plan)
+        for probe in ("resolves some measured conflicts", "records fewer conflicts",
+                      "do not establish", "introduces a new defect"):
+            if probe in blob:
+                verdict = blob
+                break
+    return kinds, verdict, json.dumps(plan)
 
 
-def main():
+def main(argv=None):
+    ap = argparse.ArgumentParser(description=__doc__,
+                                 formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("--prove-gate", action="store_true",
+                    help="force repair_claimable open in memory and require this suite to FAIL")
+    args = ap.parse_args(argv)
+    if args.prove_gate:
+        return prove_gate()
+
     cells = []
 
     def cell(name, ok, detail):
         cells.append((name, bool(ok), detail))
 
-    # --- layout 1: the ABLATION layout. Baseline has both mods; alternatives remove them. --
+    RESOLVES = "resolves some measured conflicts"
+
+    # --- 1. ABLATION layout, WITH a repair reported: the sentence must not claim repair ----
     ablation = [
         arm("baseline", DEPS + TARGETS + COMPANIONS, kind="baseline"),
-        arm("dep-only", DEPS),                                    # removes BOTH targets
-        arm("minus-b", DEPS + ["ModA.esp"]),                      # removes ModB + companions
-        arm("minus-a", DEPS + ["ModB.esp"] + COMPANIONS),         # removes ModA only
+        arm("dep-only", DEPS),
+        arm("minus-b", DEPS + ["ModA.esp"]),
+        arm("minus-a", DEPS + ["ModB.esp"] + COMPANIONS),
     ]
-    kinds, text, _ = kinds_and_supplied(ablation)
-    cell("ablation-dependency-control", kinds.get("dep-only") == "dependency-control",
-         f"dep-only -> {kinds.get('dep-only')!r} (removes every evaluated mod)")
-    cell("ablation-mod-removal",
-         kinds.get("minus-b") == "mod-removal" and kinds.get("minus-a") == "mod-removal",
-         f"minus-b -> {kinds.get('minus-b')!r}, minus-a -> {kinds.get('minus-a')!r}")
-    # the companion masters must NOT be reported as patches
+    kinds, verdict, text = run_compiler(ablation, repaired_on=["minus-b"])
+    cell("ablation-kinds",
+         kinds.get("dep-only") == "dependency-control"
+         and kinds.get("minus-b") == "mod-removal" and kinds.get("minus-a") == "mod-removal",
+         f"{ {k: v for k, v in kinds.items() if k != 'baseline'} }")
+    cell("removal-with-repair-does-not-claim-repair",
+         RESOLVES not in verdict and "removing content" in verdict,
+         f"verdict: {verdict[:150]!r}")
     cell("companions-are-not-patches",
-         "No separate patch plugin was included in the comparison" in text
-         and "ModB0.esp, ModB1.esp, " not in text.replace("\\", ""),
-         "a mod's companion masters travel with the mod; naming them as the evaluated "
-         "patches is the mislabel this guards")
-    # And a reduction measured here must not be readable as a repair. The verdict gate is
-    # `repair_claimable`, which asks whether ANY arm carrying a reduction is a patch
-    # comparison -- so the discriminating assertion is that no arm in this layout is one.
-    # Asserting on the verdict STRING instead would be vacuous in a fixture with no findings:
-    # the repair branch is never reached, so the sentence is absent whatever the code does.
-    cell("removal-layout-cannot-claim-repair",
-         set(kinds.values()) == {"baseline", "dependency-control", "mod-removal"}
-         and "patch-comparison" not in set(kinds.values()),
-         f"kinds present: {sorted(set(kinds.values()))}; none is a patch comparison, so a "
-         f"reduction in this layout cannot reach the repair sentence")
+         "No separate patch plugin was declared" in text and "ModB0.esp, ModB1.esp," not in text,
+         "a mod's companion masters must never be named as the evaluated patches")
 
-    # --- layout 2: an ADDED patch. Baseline has both mods; the alternative adds a patch. ---
-    added = [
+    # --- 2. a DECLARED patch that repairs: the sentence MUST claim repair ------------------
+    declared = [
         arm("baseline", DEPS + TARGETS, kind="baseline"),
         arm("with-patch", DEPS + TARGETS + [PATCH]),
     ]
-    kinds2, text2, _ = kinds_and_supplied(added)
-    cell("added-patch-is-a-patch-comparison",
-         kinds2.get("with-patch") == "patch-comparison",
-         f"with-patch -> {kinds2.get('with-patch')!r}")
-    cell("added-patch-is-named",
-         PATCH in text2 and "No separate patch plugin" not in text2,
-         f"the added patch must be named to the reader")
+    kinds2, verdict2, text2 = run_compiler(declared, repaired_on=["with-patch"],
+                                           patches=[PATCH])
+    cell("declared-patch-is-a-patch-comparison",
+         kinds2.get("with-patch") == "patch-comparison", f"{kinds2.get('with-patch')!r}")
+    cell("declared-patch-repair-is-claimed",
+         RESOLVES in verdict2, f"verdict: {verdict2[:150]!r}")
+    cell("declared-patch-is-named", PATCH in text2, "the declared patch must be named")
 
-    # --- layout 3: the INVERTED patched-phase layout. Baseline HAS the patch; the -------
-    #     alternative removes it. This is still a patch comparison, in reverse.
-    inverted = [
-        arm("baseline", DEPS + TARGETS + [PATCH], kind="baseline"),
-        arm("without-patch", DEPS + TARGETS),
+    # --- 3. an UNDECLARED plugin must NOT become a patch, and must not claim repair --------
+    undeclared = [
+        arm("baseline", DEPS + TARGETS, kind="baseline"),
+        arm("plus-unrelated", DEPS + TARGETS + [UNRELATED]),
     ]
-    kinds3, text3, _ = kinds_and_supplied(inverted)
-    cell("inverted-patch-is-a-patch-comparison",
-         kinds3.get("without-patch") == "patch-comparison",
-         f"without-patch -> {kinds3.get('without-patch')!r}; the patch sits in the measured "
-         f"order and the alternative removes it")
-    cell("inverted-patch-is-named",
-         PATCH in text3 and "No separate patch plugin" not in text3,
-         "the patch must still be named when the comparison runs in reverse")
+    kinds3, verdict3, text3 = run_compiler(undeclared, repaired_on=["plus-unrelated"])
+    cell("undeclared-plugin-is-not-a-patch",
+         kinds3.get("plus-unrelated") == "unstated-difference",
+         f"{kinds3.get('plus-unrelated')!r}; plugin membership does not identify a patch")
+    cell("undeclared-plugin-does-not-claim-repair",
+         RESOLVES not in verdict3 and "not declared as a patch" in verdict3,
+         f"verdict: {verdict3[:150]!r}")
+    cell("undeclared-plugin-not-named-as-patch",
+         "No separate patch plugin was declared" in text3
+         and f"The patch evaluated is {UNRELATED}" not in text3,
+         f"{UNRELATED} must be reported as a plugin that differs, not an evaluated patch")
 
-    # --- layout 4: a same-order control ------------------------------------------------
+    # --- 4. the SAME plugins in a different ORDER is not a control ------------------------
+    reordered = [
+        arm("baseline", DEPS + ["ModA.esp", "ModB.esp"], kind="baseline"),
+        arm("swapped", DEPS + ["ModB.esp", "ModA.esp"]),
+    ]
+    kinds4, verdict4, _ = run_compiler(reordered, repaired_on=["swapped"])
+    cell("reorder-is-not-a-control",
+         kinds4.get("swapped") == "reordered-alternative",
+         f"{kinds4.get('swapped')!r}; a load order is ordered and reordering changes winners")
+    cell("reorder-does-not-claim-repair",
+         RESOLVES not in verdict4 and "different load order" in verdict4,
+         f"verdict: {verdict4[:150]!r}")
+
+    # --- 5. identical ORDER really is a control ------------------------------------------
     same = [
         arm("baseline", DEPS + TARGETS, kind="baseline"),
         arm("control", DEPS + TARGETS),
     ]
-    kinds4, _, _ = kinds_and_supplied(same)
-    cell("same-order-control",
-         kinds4.get("control") == "same-order-control",
-         f"control -> {kinds4.get('control')!r}; an identical plugin set is a comparability "
-         f"control, not a change")
+    kinds5, _, _ = run_compiler(same)
+    cell("identical-order-is-a-control",
+         kinds5.get("control") == "same-order-control", f"{kinds5.get('control')!r}")
+
+    # --- 6. mixed: a declared patch alongside a removal arm ------------------------------
+    mixed = [
+        arm("baseline", DEPS + TARGETS + [PATCH], kind="baseline"),
+        arm("without-patch", DEPS + TARGETS),
+        arm("minus-a", DEPS + ["ModB.esp"] + [PATCH]),
+    ]
+    kinds6, verdict6, _ = run_compiler(mixed, repaired_on=["minus-a"], patches=[PATCH])
+    cell("inverted-declared-patch",
+         kinds6.get("without-patch") == "patch-comparison",
+         f"{kinds6.get('without-patch')!r}; the patch sits in the measured order and the "
+         f"alternative removes it")
+    cell("repair-from-a-removal-arm-is-not-claimed",
+         RESOLVES not in verdict6,
+         f"the repair came from the removal arm, not the patch arm: {verdict6[:120]!r}")
+
+    # --- 7. --declare-patch reaches the classifier ----------------------------------------
+    kinds7, verdict7, _ = run_compiler(undeclared, repaired_on=["plus-unrelated"],
+                                       declared=[UNRELATED])
+    cell("declare-patch-setting-is-honoured",
+         kinds7.get("plus-unrelated") == "patch-comparison" and RESOLVES in verdict7,
+         f"declaring it makes it a patch comparison: {kinds7.get('plus-unrelated')!r}")
 
     for name, ok, detail in cells:
         print(f"[{'PASS' if ok else 'FAIL'}] {name}: {detail}")
@@ -176,6 +252,40 @@ def main():
     if failed:
         print("failed: " + ", ".join(failed))
     return 1 if failed else 0
+
+
+def prove_gate():
+    """Force the repair gate open in memory and require this suite to FAIL.
+
+    This is the control the first version of this file lacked. Its fixtures never reached the
+    verdict, so the gate could be replaced wholesale and every cell still passed. If the suite
+    passes here, it is not protecting the sentence and must not be reported as if it were.
+    """
+    script = (
+        "import sys, json, types\n"
+        f"sys.path.insert(0, {str(HERE.parent)!r})\n"
+        f"sys.path.insert(0, {str(HERE)!r})\n"
+        "import evalreport as R\n"
+        "src = open(R.__file__, encoding='utf-8').read()\n"
+        "needle = '        return any(comparison_kinds.get(a) == \"patch-comparison\" for a in ids)'\n"
+        "assert src.count(needle) == 1, 'gate anchor not found: %d' % src.count(needle)\n"
+        "src = src.replace(needle, '        return True')\n"
+        "mod = types.ModuleType('evalreport'); mod.__file__ = R.__file__\n"
+        "sys.modules['evalreport'] = mod\n"
+        "exec(compile(src, R.__file__, 'exec'), mod.__dict__)\n"
+        "import test_evalreport_comparison_kinds as T\n"
+        "T.R = mod\n"
+        "sys.exit(T.main([]))\n")
+    proc = subprocess.run([sys.executable, "-B", "-c", script],
+                          capture_output=True, text=True, cwd=str(HERE))
+    print(proc.stdout[-2500:] or proc.stderr[-2000:])
+    if proc.returncode == 0:
+        print("\nGATE NOT PROTECTED: the suite passed with repair_claimable forced open. "
+              "These cells do not protect the repair sentence.", file=sys.stderr)
+        return 1
+    print(f"\ngate proven: with repair_claimable forced open the suite FAILS "
+          f"(exit {proc.returncode}), so the cells are coupled to it")
+    return 0
 
 
 if __name__ == "__main__":
