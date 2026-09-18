@@ -815,7 +815,78 @@ def compile_plan(bundle_dir: Path, verify: dict, settings: dict, pr: dict, bundl
         removed = [n for n in base_names if n and n.lower() not in {x.lower() for x in names if x}] if (arm_id != "baseline" and names) else []
         arm_changes[arm_id] = (added, removed)
     plan_target_set = {str(t.get("name")).lower() for t in (b.plan.get("targets") or []) if isinstance(t, dict) and t.get("name")}
-    supplied = sorted({n for added, removed in arm_changes.values() for n in added + removed if n.lower() not in plan_target_set})
+
+    # --- WHAT KIND of comparison each alternative arm is.
+    #
+    # This distinction is load-bearing and its absence produced two wrong statements. One
+    # concept -- "the plugin that differs from baseline" -- was doing three incompatible
+    # jobs, so an arm that merely REMOVES content was eligible to be described as resolving
+    # conflicts, and any non-target plugin that happened to differ was named as a patch.
+    #
+    #   patch-comparison    the arm ADDS a non-target plugin. Only this kind can support a
+    #                       repair reading, because only here does the alternative contain
+    #                       something the reader could install.
+    #   dependency-control  the arm removes every target, leaving the shared dependencies. A
+    #                       finding surviving here is inherited, not created by the targets.
+    #   mod-removal         the arm removes some but not all targets. Fewer conflicts here is
+    #                       arithmetic: a setup without a mod does not have that mod's
+    #                       conflicts.
+    #   same-order-control  the arm's plugin set equals the baseline's -- a comparability
+    #                       control, not a change.
+    #   mixed               adds and removes at once; described explicitly, never summarised.
+    def arm_comparison_kind(arm_id) -> str:
+        if arm_id == "baseline":
+            return "baseline"
+        added, removed = arm_changes.get(arm_id) or ([], [])
+        removed_targets = [n for n in removed if n.lower() in plan_target_set]
+        added_targets = [n for n in added if n.lower() in plan_target_set]
+        if added and removed:
+            return "mixed"
+        if not added and not removed:
+            return "same-order-control"
+        # An evaluated MOD moving decides the kind, whichever direction it moves in. Its
+        # companion files travel with it and are collateral, not a patch: a mod's own extra
+        # masters differ from the baseline for the same reason the mod does.
+        if removed_targets or added_targets:
+            if removed_targets and not added:
+                return ("dependency-control"
+                        if plan_target_set and len(removed_targets) >= len(plan_target_set)
+                        else "mod-removal")
+            return "mixed"
+        # Only NON-target plugins move. That is a patch comparison in EITHER direction: an
+        # alternative may add the patch, or the measured order may carry it and the
+        # alternative remove it (the inverted layout a patched phase uses).
+        return "patch-comparison"
+
+    comparison_kinds = {a: arm_comparison_kind(a) for a in arm_ids}
+
+    # A plugin is "a patch evaluated" only when it is the difference in an arm that is a
+    # PATCH COMPARISON. Previously any non-target plugin that differed at all was named as a
+    # patch, so a mod's own companion masters -- removed only because the mod they belong to
+    # was removed -- were reported to the reader as the patches under evaluation.
+    supplied = sorted({n
+                       for arm_id, (added, removed) in arm_changes.items()
+                       if comparison_kinds.get(arm_id) == "patch-comparison"
+                       for n in added + removed if n.lower() not in plan_target_set})
+
+    def repair_claimable(ids) -> bool:
+        """Can a reduction in conflicts across these arms be read as REPAIR?
+
+        Only if at least one of them added something. Otherwise the reduction is produced by
+        removing content, and reporting it as a resolution would describe arithmetic as a fix
+        the reader could install.
+        """
+        return any(comparison_kinds.get(a) == "patch-comparison" for a in ids)
+
+    def removal_only_note(ids) -> str:
+        kinds_here = {comparison_kinds.get(a) for a in ids}
+        if kinds_here <= {"dependency-control"}:
+            return ("These setups remove every evaluated mod, so what remains is the shared "
+                    "dependencies. Fewer conflicts here does not describe a fix; it separates "
+                    "what the dependencies already carried from what the mods add.")
+        return ("These setups reach that by removing content rather than by patching it: a "
+                "setup without a mod does not have that mod's conflicts. They are controls "
+                "for attribution, not a configuration to install.")
 
     def arm_subject(arm_id) -> str:
         added, removed = arm_changes.get(arm_id) or ([], [])
@@ -1543,6 +1614,8 @@ def compile_plan(bundle_dir: Path, verify: dict, settings: dict, pr: dict, bundl
                   + ((f"The patch evaluated is {patch_text}, {patch_how}." if len(supplied) == 1 else
                       f"The patches evaluated are {patch_text}, {patch_how}.") if supplied else
                      "No separate patch plugin was included in the comparison."))
+    for _a in arms_out:
+        _a["comparisonKind"] = comparison_kinds.get(_a.get("armId"))
     alternative_arms = [a["armId"] for a in arms_out if a.get("kind") != "baseline"]
     candidate_orders = [a.get("orderEvaluation") or {} for a in arms_out if a.get("kind") != "baseline"]
     reader_regressions = [f for f in findings if f.get("kind") == "regression" and f.get("readerRelevant")]
@@ -1570,9 +1643,15 @@ def compile_plan(bundle_dir: Path, verify: dict, settings: dict, pr: dict, bundl
         if has_other_regression:
             change_subject = setup_subject({f.get("armId") for f in reader_regressions
                                             if f.get("checkId") != "geometry.object-overlap"} | repair_arms)
-            verdict = (f"{change_subject} resolves some measured conflicts, but it also introduces a new defect in a check that ran."
-                       if repaired_total else
-                       f"{change_subject} introduces a new defect in a check that ran.")
+            if repaired_total and repair_claimable(repair_arms):
+                verdict = (f"{change_subject} resolves some measured conflicts, but it also "
+                           f"introduces a new defect in a check that ran.")
+            elif repaired_total:
+                verdict = (f"{change_subject} records fewer conflicts than the measured load "
+                           f"order and also introduces a new defect in a check that ran. "
+                           + removal_only_note(repair_arms))
+            else:
+                verdict = f"{change_subject} introduces a new defect in a check that ran."
             if overlap_created_total:
                 verdict += bind(reader_verdict_templates["overlapAlongsideDefect"],
                                 {"createdCount": overlap_created_total,
@@ -1584,8 +1663,16 @@ def compile_plan(bundle_dir: Path, verify: dict, settings: dict, pr: dict, bundl
                             "candidateNoun": overlap_candidate_noun(overlap_created_total)})
         if overlap_reduction_total:
             verdict += reader_verdict_templates["overlapReductionAlongsideRegression"]
-    elif repaired_total:
+    elif repaired_total and repair_claimable(repair_arms):
         verdict = f"{setup_subject(repair_arms)} resolves some measured conflicts and no new defect was reported by the checks that ran."
+    elif repaired_total:
+        # Fewer conflicts, but produced by removal. Say what was actually observed and refuse
+        # the repair reading rather than letting the count imply a fix exists.
+        verdict = (f"{setup_subject(repair_arms)} records fewer conflicts than the measured "
+                   f"load order, and no new defect was reported by the checks that ran. "
+                   + removal_only_note(repair_arms)
+                   + " No setup containing a patch was compared, so these results do not say "
+                     "whether a patch would resolve them.")
     elif overlap_reduction_total:
         verdict = bind(reader_verdict_templates["overlapOnlyReduction"], subject_values(overlap_reduction_arms))
     elif has_context_only and not any(f.get("kind") in ("regression", "finding") and f.get("readerRelevant") for f in findings):
