@@ -466,10 +466,9 @@ public static class StationRule
                             NavZ = env.NavZ, FloorZ = floorZ,
                             FloorSource = env.Floor.Source,
                             FloorOffset = env.NavZ - floorZ,
-                            // DEFECT G2: the anchor the ground was read at is not carried onto the
-                            // pose, so a station standing on a buried navmesh looks like any other.
-                            FloorAnchor = FloorAnchor.Navmesh,
-                            NavmeshBurial = 0f, NavmeshBuried = false,
+                            FloorAnchor = env.FloorAnchor,
+                            NavmeshBurial = env.NavmeshBurial,
+                            NavmeshBuried = env.NavmeshBuried,
                             FeetAboveSurface = feetAbove,
                             PlaneZLow = zLow, PlaneZHigh = zHigh,
                             Water = env.Water,

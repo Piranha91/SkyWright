@@ -16,10 +16,25 @@ namespace HarnessShared;
 //  a placed mesh far BELOW the landscape. Nothing a placed body settles on
 //  in an exterior is underground.
 //
-//  WHAT THIS FILE IS RIGHT NOW: the read as it stood - anchored on the
-//  navmesh whatever the terrain does, with no burial reported. The defect
-//  is reproduced ON PURPOSE so that proofprobe's G1 cases fail on a WRONG
-//  ANSWER rather than on a missing member.
+//  THE RULE: the band is anchored at max(navmesh, terrain). Where the
+//  landscape stands above the navmesh the navmesh is BURIED there, and the
+//  body stands on the ground; where it does not, nothing changes. A
+//  surface within the step reach ABOVE the terrain - a street mesh, a rock
+//  standing on it - still wins, because the band is read upward from the
+//  anchor exactly as before.
+//
+//  A floor below the terrain is then never chosen, and that follows from
+//  the anchor rather than being bolted on: a surface under the terrain can
+//  only lie inside the band when the terrain lies inside it too, and the
+//  read takes the HIGHEST up-facing surface, so the terrain wins. Where
+//  the navmesh is more than the band's depth above the landscape - a
+//  bridge deck over a gorge - the band's floor is already above the
+//  terrain and nothing under it is reachable either. proofprobe's G1 cases
+//  pin both arms.
+//
+//  No constant is chosen here and NavmeshFloor's defaults are untouched;
+//  the step reach is only read, to say whether a burial is deep enough to
+//  be worth counting.
 // ======================================================================
 
 /// <summary>Which height a station's floor read was anchored at.</summary>
@@ -40,10 +55,16 @@ public readonly record struct GroundReading(
 public static class StationGround
 {
     /// <summary>Read the floor for a station. <paramref name="readAt"/> is the floor field's own
-    /// read at this XY, taking the height to anchor the band on.
-    /// DEFECT G1: the anchor is the navmesh whatever the landscape does, and the burial is never
-    /// measured.</summary>
+    /// read at this XY, taking the height to anchor the band on; <paramref name="stepReach"/> is
+    /// only used to say whether the burial is deep enough to count, never to move the band.</summary>
     public static GroundReading Read(Func<float, FloorReading> readAt, float navZ, float? terrainZ,
                                      float stepReach = NavmeshFloor.DefaultUpReach)
-        => new(readAt(navZ), FloorAnchor.Navmesh, navZ, navZ, terrainZ, 0f, false);
+    {
+        float burial = terrainZ is { } t && t > navZ ? t - navZ : 0f;
+        bool onTerrain = burial > 0f;
+        float anchorZ = onTerrain ? terrainZ!.Value : navZ;
+        return new(readAt(anchorZ),
+                   onTerrain ? FloorAnchor.Terrain : FloorAnchor.Navmesh,
+                   anchorZ, navZ, terrainZ, burial, burial > stepReach);
+    }
 }

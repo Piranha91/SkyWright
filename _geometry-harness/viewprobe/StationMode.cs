@@ -152,7 +152,7 @@ static class StationMode
             return f;
         }
 
-        int multiCovered = 0, offGrid = 0;
+        int multiCovered = 0, offGrid = 0, buried = 0;
         StationEnvironment Environment(float x, float y)
         {
             var (answered, covered, drawn, navZ, covers) = NavAt(input.Navmeshes, x, y);
@@ -161,13 +161,23 @@ static class StationMode
             if (!input.RefsByGrid.ContainsKey(place.Grid) && !input.LandByGrid.ContainsKey(place.Grid))
                 offGrid++;
             // No floor is READ where there is no navmesh height to read it against: the floor rule
-            // is a band around navZ, and asking it about NaN answers nothing. The station is already
-            // refused for the navmesh, and the precedence counts it there.
-            var floor = answered && covered && drawn
-                ? FieldFor(place.Grid).Read(x, y, navZ)
-                : new FloorReading(navZ, 0f, FloorSource.None, NoFloorReason.NoSurface, false, 0);
-            return new StationEnvironment(answered, covered, drawn, navZ, floor,
-                                          place.Cell, place.Worldspace, place.Water);
+            // is a band around a height, and asking it about NaN answers nothing. The station is
+            // already refused for the navmesh, and the precedence counts it there.
+            if (!(answered && covered && drawn))
+                return new StationEnvironment(answered, covered, drawn, navZ,
+                    new FloorReading(navZ, 0f, FloorSource.None, NoFloorReason.NoSurface, false, 0),
+                    place.Cell, place.Worldspace, place.Water);
+            // WHERE the read is anchored is StationGround's; the landscape height is read with the
+            // same function the field reads it with, from the same filed heightmaps.
+            float? terrainZ = null;
+            if (input.LandByGrid.TryGetValue(place.Grid, out var heights))
+                terrainZ = NavmeshFloor.LandHeightAt(heights, place.Grid.X, place.Grid.Y, x, y, out _);
+            var field = FieldFor(place.Grid);
+            var ground = StationGround.Read(z => field.Read(x, y, z), navZ, terrainZ);
+            if (ground.NavmeshBuried) buried++;
+            return new StationEnvironment(answered, covered, drawn, navZ, ground.Floor,
+                                          place.Cell, place.Worldspace, place.Water,
+                                          ground.Anchor, ground.NavmeshBurial, ground.NavmeshBuried);
         }
 
         var yields = new List<StationYield>(chosen.Count);
@@ -197,6 +207,12 @@ static class StationMode
                             + $"({string.Join(", ", tiltedKeys)}{(tilted > tiltedKeys.Count ? ", ..." : "")}). "
                             + "The rule models an upright primitive turned about Z only, so their "
                             + "normals and extents are the upright reading - stated, not hidden.");
+        if (buried > 0)
+            Console.WriteLine($"   --stations: {buried} station read(s) stood on ground the navmesh "
+                            + $"is buried more than {NavmeshFloor.DefaultUpReach:0} u beneath. The "
+                            + "floor read is anchored at the landscape there, because a placed body "
+                            + "stands on the ground and not on a mesh authored under it; every pose "
+                            + "carries its anchor and its burial depth.");
         if (offGrid > 0)
             Console.WriteLine($"   --stations: {offGrid} station(s) fell in a grid square with no "
                             + "floor candidates and no terrain filed. They are refused for want of a "
@@ -224,8 +240,10 @@ static class StationMode
                 ["maxDepthBelowNavmesh"] = NavmeshFloor.DefaultMaxDepth,
                 ["upReachAboveNavmesh"] = NavmeshFloor.DefaultUpReach,
                 ["neighbourhood"] = "3x3 grid squares around the station's own square",
+                ["anchor"] = "max(navmesh, terrain) at the station's own XY",
             },
             ["primitives"] = chosen.Count,
+            ["groundReadsOnBuriedNavmesh"] = buried,
             ["primitivesTiltedOffZ"] = tilted,
             ["stationsWithMoreThanOneCoveringTriangle"] = multiCovered,
             ["spec"] = new Dictionary<string, object?>

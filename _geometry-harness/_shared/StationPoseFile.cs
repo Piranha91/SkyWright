@@ -113,8 +113,9 @@ public static class StationPoseFile
         public void Add(StationYield y)
         {
             Composed += y.Composed; Accepted += y.Accepted;
-            // DEFECT G3: the stations standing on ground the navmesh is buried beneath are not
-            // counted, so their share is invisible in the table.
+            // The stations standing on ground the navmesh is buried beneath, counted from the poses
+            // themselves so the share cannot drift from what the file publishes.
+            foreach (var p in y.Poses) if (p.NavmeshBuried) Buried++;
             foreach (var (r, n) in y.Rejected)
                 Rejected[r.ToString()] = (Rejected.TryGetValue(r.ToString(), out int m) ? m : 0) + n;
         }

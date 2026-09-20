@@ -1619,17 +1619,20 @@ it stands off (`faceAxis` X or Y).
   "composedAtUtc": …,
   "ladder":    { "k": […], "laterals": […], "side": [1,-1], "standoffFloor": …,
                  "standoffCap": …, "eyeHeight": …, "fovDeg": …, "isTheSealedLadder": true },
-  "floorRule": { "maxDepthBelowNavmesh": …, "upReachAboveNavmesh": …, "neighbourhood": … },
-  "primitives": 1, "primitivesTiltedOffZ": 0,
+  "floorRule": { "maxDepthBelowNavmesh": …, "upReachAboveNavmesh": …, "neighbourhood": …,
+                 "anchor": "max(navmesh, terrain) at the station's own XY" },
+  "primitives": 1, "primitivesTiltedOffZ": 0, "groundReadsOnBuriedNavmesh": 0,
   "stationsWithMoreThanOneCoveringTriangle": 0,
   "spec":       { "path": …, "sha256": … },
   "instrument": { "assembly": …, "sha256": …, "builtUtc": … },
   "commandLine": …,
   "yield": {
     "bySetup":     { "<setup>": { "composed": n, "accepted": n,
-                                  "rejected": { "<reason>": n }, "primitivesWithAStation": n } },
+                                  "rejected": { "<reason>": n }, "stationsWithBuriedNavmesh": n,
+                                  "primitivesWithAStation": n } },
     "byPrimitive": { "<formKey>": { "<setup>": { "composed": n, "accepted": n,
-                                                 "rejected": { "<reason>": n } } } }
+                                                 "rejected": { "<reason>": n },
+                                                 "stationsWithBuriedNavmesh": n } } }
   },
   "poses": [ {
     "primitive": …, "kind": "PortalBox|Box", "setup": …,
@@ -1639,6 +1642,7 @@ it stands off (`faceAxis` X or Y).
     "pitchDeg": …, "bearingDeg": …,           // bearing: 0 = +Y, clockwise
     "angleToPlaneNormalDeg": …, "fovDeg": …,
     "navZ": …, "floorZ": …, "floorSource": "Mesh|Land|None", "floorOffset": …,
+    "floorAnchor": "Navmesh|Terrain", "navmeshBurial": …, "navmeshBuried": bool,
     "eyeHeight": …, "feetAboveSurface": …, "planeZLow": …, "planeZHigh": …,
     "water": { "verdict": "Real|WorldspaceDefault|KnownDryNoSurface|Unresolved",
                "surfaceZ": …, "cellHeight": …, "kind": …, "worldDefault": …,
@@ -1672,10 +1676,26 @@ typed.
 | C6 | **The eye lies within the primitive's vertical extent**, so the primitive's silhouette bounds the view. | — |
 
 The floor is the highest up-facing actor-solid surface (or the terrain) within `maxDepth` below and
-`upReach` above the navmesh height at the station's XY, read over the 3×3 grid-square neighbourhood
-of the station's own square — a floor mesh placed in the next cell reaches under this one. Both
-numbers are published in the pose file's `floorRule`. **C3 tests the FEET, not the eye**: a rule
-that tests the eye passes a station standing in water up to its neck.
+`upReach` above **the anchor**, read over the 3×3 grid-square neighbourhood of the station's own
+square — a floor mesh placed in the next cell reaches under this one. Both numbers are published in
+the pose file's `floorRule`. **C3 tests the FEET, not the eye**: a rule that tests the eye passes a
+station standing in water up to its neck.
+
+**The anchor is `max(navmesh, terrain)` at the station's own XY**, and every pose says which of the
+two it used (`floorAnchor`) and how far the landscape stands over the navmesh there
+(`navmeshBurial`, with `navmeshBuried` when that exceeds the step reach). The reason is physical,
+not a fitted number: in places the navmesh is authored **under the landscape** by more than a body
+can step, and a band opened around a buried navmesh opens underground — the ground the body
+actually stands on falls outside it and the rule answers with the highest thing it can see, which
+can be a placed mesh far below the terrain. Nothing a placed body settles on in an exterior is
+underground. Anchoring at the higher of the two fixes that, and **a floor below the terrain is then
+never chosen** — which follows from the anchor rather than being bolted on: a surface under the
+terrain can only lie inside the band when the terrain lies inside it too, and the read takes the
+highest, so the terrain wins. A surface within the step reach **above** the terrain — a street mesh,
+a rock standing on it — still wins, because the band is read upward from the anchor exactly as
+before. The yield counts the buried-navmesh stations per primitive and per setup, so their share is
+visible rather than discovered later. `NavmeshFloor`'s own defaults and semantics are untouched;
+every other detector reads the floor exactly as it did.
 
 Where several drawn navmesh triangles cover one XY — storeys that overlap, a deck over a path —
 the **highest** is taken, and the number of such stations is reported in the header. The lower
