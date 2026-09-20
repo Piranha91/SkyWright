@@ -108,11 +108,13 @@ public static class StationPoseFile
 
     sealed class Bucket
     {
-        public int Composed, Accepted;
+        public int Composed, Accepted, Buried;
         public readonly Dictionary<string, int> Rejected = new();
         public void Add(StationYield y)
         {
             Composed += y.Composed; Accepted += y.Accepted;
+            // DEFECT G3: the stations standing on ground the navmesh is buried beneath are not
+            // counted, so their share is invisible in the table.
             foreach (var (r, n) in y.Rejected)
                 Rejected[r.ToString()] = (Rejected.TryGetValue(r.ToString(), out int m) ? m : 0) + n;
         }
@@ -123,6 +125,7 @@ public static class StationPoseFile
             var d = new Dictionary<string, object?>
             {
                 ["composed"] = Composed, ["accepted"] = Accepted, ["rejected"] = Rejected,
+                ["stationsWithBuriedNavmesh"] = Buried,
             };
             if (primitivesWithAStation is { } p) d["primitivesWithAStation"] = p;
             return d;
@@ -155,6 +158,9 @@ public static class StationPoseFile
         ["floorZ"] = N(p.FloorZ),
         ["floorSource"] = p.FloorSource.ToString(),
         ["floorOffset"] = N(p.FloorOffset),
+        ["floorAnchor"] = p.FloorAnchor.ToString(),
+        ["navmeshBurial"] = N(p.NavmeshBurial),
+        ["navmeshBuried"] = p.NavmeshBuried,
         ["eyeHeight"] = N(p.EyeHeight),
         ["feetAboveSurface"] = p.FeetAboveSurface is { } fa ? N(fa) : null,
         ["planeZLow"] = N(p.PlaneZLow),

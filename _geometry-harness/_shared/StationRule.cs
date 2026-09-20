@@ -105,7 +105,9 @@ public readonly record struct WaterResolution(
 /// can stand in several cells, so this is looked up per station and never per primitive.</summary>
 public readonly record struct StationEnvironment(
     bool Answered, bool Covered, bool Drawn, float NavZ, FloorReading Floor,
-    string Cell, string Worldspace, WaterResolution Water);
+    string Cell, string Worldspace, WaterResolution Water,
+    FloorAnchor FloorAnchor = FloorAnchor.Navmesh, float NavmeshBurial = 0f,
+    bool NavmeshBuried = false);
 
 /// <summary>One candidate station, accepted or refused, with the aim geometry published so a
 /// pose file can be judged before anything is rendered.</summary>
@@ -137,6 +139,13 @@ public sealed record StationPose
     public required float FloorZ { get; init; }
     public required FloorSource FloorSource { get; init; }
     public required float FloorOffset { get; init; }
+    /// <summary>Which height the floor read was anchored at, and how far the landscape stands over
+    /// the navmesh under this station. Published on EVERY pose: a station standing on ground the
+    /// navmesh is buried beneath is a different kind of answer, and its share has to be visible
+    /// rather than discovered later.</summary>
+    public FloorAnchor FloorAnchor { get; init; } = FloorAnchor.Navmesh;
+    public float NavmeshBurial { get; init; }
+    public bool NavmeshBuried { get; init; }
     public float EyeHeight { get; init; } = StationRule.EyeHeight;
     public float? FeetAboveSurface { get; init; }
     public required float PlaneZLow { get; init; }
@@ -457,6 +466,10 @@ public static class StationRule
                             NavZ = env.NavZ, FloorZ = floorZ,
                             FloorSource = env.Floor.Source,
                             FloorOffset = env.NavZ - floorZ,
+                            // DEFECT G2: the anchor the ground was read at is not carried onto the
+                            // pose, so a station standing on a buried navmesh looks like any other.
+                            FloorAnchor = FloorAnchor.Navmesh,
+                            NavmeshBurial = 0f, NavmeshBuried = false,
                             FeetAboveSurface = feetAbove,
                             PlaneZLow = zLow, PlaneZHigh = zHigh,
                             Water = env.Water,
