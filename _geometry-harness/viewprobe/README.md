@@ -1469,13 +1469,29 @@ control this instrument does not have.
 
 The preview is a **research implementation, pending acceptance**. `--occlusion-rule FILE` supplies an
 explicit JSON rule with `identity`, `minimumEyeDistance`, `maximumAbsNormalZ`, `frozen` and
-nonempty `evidence` references. The numeric limits must be finite and in range. They describe
-the supplied evidence scope; the file's `frozen` label is not independent validation. With no
-rule, engine culling is unassessed. Box face behaviour is currently unassessed. The plane layer
-itself remains available without a rule.
+nonempty `evidence` references, and an optional `boxSilhouette` (default **false**). The numeric
+limits must be finite and in range. They describe the supplied evidence scope; the file's `frozen`
+label is not independent validation. With no rule, engine culling is unassessed. A rule that omits
+`boxSilhouette` leaves Box face behaviour unassessed, with the same refusal as before. The plane
+layer itself remains available without a rule.
+
+**Box primitives (`boxSilhouette: true`).** A Box is then predicted by its **view shadow**: the
+region behind the box's silhouette as seen from the eye, together with the box's own volume —
+exactly the points whose segment from the eye meets the box. `ConvexShadow.FromBox` builds it from
+one plane through the eye and each silhouette edge (an edge whose two adjacent faces disagree about
+facing the eye, so an oblique eye, where the silhouette is not the near face's outline, is handled
+by construction) plus one half-space per front-facing face — the near cap that admits the volume.
+A sphere bound is classified by the same `Classify` a rectangle uses, so exact contact is
+`Crossing` and is never promoted to a cull. **A union of per-face shadows is NOT separated from the
+silhouette by the supporting evidence and remains untested**; the reported `scope` says so whenever
+a rule opts in. Outside the opted-in scope the Box is refused **by name**, never silently: a box
+that is not upright within the rule's own `maximumAbsNormalZ`, an eye inside or on the box, a
+degenerate box, non-positive bounds or scale, and an eye nearer than `minimumEyeDistance` each
+give their own reason. The near-eye distance for a box is measured to its nearest surface point.
 
 The geometry primitive tests each source NIF shape's stored sphere against the finite
-PortalBox shadow's surface and four side half-spaces. It applies below-root NIF node transforms
+PortalBox shadow's surface and four side half-spaces — or, where a rule opts in, against that Box
+view shadow. It applies below-root NIF node transforms
 and the reference placement, retaining the original source block, raw bound, applied chain,
 asset hash and resulting world sphere. It does not replace the sphere with an uploaded-vertex
 box. Invalid bounds, ambiguous shape identities, unsupported poses and removed geometry retain
