@@ -206,12 +206,14 @@ public static class StationRule
         StationRejection.NonLevelGaze,
     };
 
-    /// <summary>The reason a station is counted under, when it fails several.
-    /// DEFECT B3: this returns whichever was offered first, not the most decisive.</summary>
+    /// <summary>The reason a station is counted under, when it fails several.</summary>
     public static StationRejection FirstByPrecedence(IEnumerable<StationRejection> reasons)
     {
+        var seen = new HashSet<StationRejection>();
         foreach (var r in reasons)
-            if (r != StationRejection.None) return r;   // DEFECT B3: input order, not Precedence
+            if (r != StationRejection.None) seen.Add(r);
+        foreach (var r in Precedence)
+            if (seen.Contains(r)) return r;
         return StationRejection.None;
     }
 
@@ -230,22 +232,42 @@ public static class StationRule
         return new Vector3(v.X * side, v.Y * side, 0f);
     }
 
-    /// <summary>The faces a primitive of this kind is composed around.
-    /// DEFECT A3: a Box has four upright faces and is predicted by its silhouette, but this
-    /// returns the single authored axis for both kinds.</summary>
+    /// <summary>The faces a primitive of this kind is composed around. A PortalBox is a rectangle
+    /// with one authored normal; a Box is a volume predicted by its silhouette, so its four upright
+    /// faces are two axes times two sides.</summary>
     public static FaceAxis[] FacesOf(PrimitiveKind kind)
+        => kind == PrimitiveKind.Box ? new[] { FaceAxis.Y, FaceAxis.X } : new[] { FaceAxis.Y };
+
+    /// <summary>The primitive's local +X and +Y in the world, for a Z-only rotation.</summary>
+    static (Vector3 X, Vector3 Y) LocalAxes(Vector3 rotationRad)
     {
-        _ = kind;
-        return new[] { FaceAxis.Y };                    // DEFECT A3: a Box gets one face, not two axes
+        var y = Normal(rotationRad);
+        return (new Vector3(-y.Y, y.X, 0f), y);
+    }
+
+    /// <summary>Half-extents: the face's own outward half-depth, the half-width a lateral offset
+    /// runs along, and the half-height. A PortalBox is a rectangle - its authored thickness is
+    /// nominal and a station stands off its MID-plane, which is what reproduces the sealed
+    /// 2026-09-19 station set. A Box is a volume, so a station stands off its FACE.</summary>
+    static (float FaceHalf, float LateralHalf, float HalfHeight) Halves(PrimitiveGeometry p, FaceAxis axis)
+    {
+        float hx = p.ExtentFull.X / 2f, hy = p.ExtentFull.Y / 2f, hz = p.ExtentFull.Z / 2f;
+        float faceHalf = p.Kind == PrimitiveKind.Box ? (axis == FaceAxis.Y ? hy : hx) : 0f;
+        float lateralHalf = axis == FaceAxis.Y ? hx : hy;
+        return (faceHalf, lateralHalf, hz);
     }
 
     /// <summary>Whether an eye lies inside or on the primitive's own volume, where
-    /// <c>ConvexShadow.FromBox</c> yields no shadow and the station cannot be ranked.
-    /// DEFECT: the historical rule had no such test, so this answers "never inside".</summary>
+    /// <c>ConvexShadow.FromBox</c> yields no shadow and the station cannot be ranked.</summary>
     public static bool EyeInside(PrimitiveGeometry p, Vector3 eye)
     {
-        _ = p; _ = eye;
-        return false;                                   // DEFECT A3: no inside test existed
+        if (!float.IsFinite(eye.X) || !float.IsFinite(eye.Y) || !float.IsFinite(eye.Z)) return false;
+        var (ax, ay) = LocalAxes(p.RotationRad);
+        var d = eye - p.Position;
+        float lx = Vector3.Dot(d, ax), ly = Vector3.Dot(d, ay), lz = d.Z;
+        return MathF.Abs(lx) <= p.ExtentFull.X / 2f
+            && MathF.Abs(ly) <= p.ExtentFull.Y / 2f
+            && MathF.Abs(lz) <= p.ExtentFull.Z / 2f;
     }
 
     /// <summary>Horizontal bearing of a direction, 0 = +Y, increasing clockwise, in [0, 360).</summary>
@@ -259,21 +281,28 @@ public static class StationRule
     /// not a level gaze, whatever composed it.
     /// DEFECT 1's guard: the historical rule had none, so this returns None unconditionally.</summary>
     public static StationRejection CheckLevel(StationPose pose)
-    {
-        _ = pose;
-        return StationRejection.None;          // DEFECT 1 (guard): no level-gaze check existed
-    }
+        => MathF.Abs(pose.LookAt.Z - pose.Eye.Z) > 1e-4f
+            ? StationRejection.NonLevelGaze : StationRejection.None;
 
     /// <summary>A worldspace's usable default water height, following the parent chain when the
     /// worldspace itself defers - a city worldspace commonly takes its water from Tamriel.
     /// <paramref name="lookup"/> answers (this worldspace's own DefaultWaterHeight, its parent).
-    /// DEFECT: this reads the worldspace's own value and never follows the parent.</summary>
+    /// A chain that ends, loops, or runs past <paramref name="maxHops"/> without a usable height
+    /// resolves to nothing, which the caller refuses as unknown rather than reading as dry.</summary>
     public static (float? Value, string From, int Hops, bool Cycle) ResolveWorldDefault(
         string worldspace, Func<string, (float? Default, string? Parent)> lookup, int maxHops = 8)
     {
-        _ = maxHops;
-        var (own, _parent) = lookup(worldspace);        // DEFECT: no parent walk
-        return (DetectorModel.HeightKind(own) == WaterHeightKind.Real ? own : null, worldspace, 0, false);
+        var seen = new HashSet<string>();
+        string at = worldspace;
+        for (int hops = 0; hops <= maxHops; hops++)
+        {
+            if (!seen.Add(at)) return (null, at, hops, true);
+            var (own, parent) = lookup(at);
+            if (DetectorModel.HeightKind(own) == WaterHeightKind.Real) return (own, at, hops, false);
+            if (parent is null) return (null, at, hops, false);
+            at = parent;
+        }
+        return (null, at, maxHops, false);
     }
 
     /// <summary>Classify ONE resolver's answer about a cell into the verdict the station rule acts
@@ -323,18 +352,20 @@ public static class StationRule
         kValues ??= DefaultK;
         laterals ??= DefaultLaterals;
 
-        float w = p.ExtentFull.X, h = p.ExtentFull.Z;
-        float hw = w / 2f, hh = h / 2f;
-        float basis = MathF.Min(hw, hh);
         var c = p.Position;
-        float zLow = c.Z - hh, zHigh = c.Z + hh;
+        float hz = p.ExtentFull.Z / 2f;
+        float zLow = c.Z - hz, zHigh = c.Z + hz;
+        bool degenerate = Degenerate(p);
+        var reasons = new List<StationRejection>(4);
 
         int index = 0;
         foreach (var axis in FacesOf(p.Kind))
         {
-            var n = axis == FaceAxis.Y ? Normal(p.RotationRad)
-                                       : new Vector3(-Normal(p.RotationRad).Y, Normal(p.RotationRad).X, 0f);
+            var (ax, ay) = LocalAxes(p.RotationRad);
+            var n = axis == FaceAxis.Y ? ay : ax;       // the face's outward direction, unsided
             var right = new Vector3(-n.Y, n.X, 0f);
+            var (faceHalf, lateralHalf, _) = Halves(p, axis);
+            float basis = MathF.Min(lateralHalf, hz);
             foreach (float k in kValues)
             {
                 float d = MathF.Max(StandoffFloor, MathF.Min(StandoffCap, k * basis));
@@ -344,28 +375,56 @@ public static class StationRule
                     {
                         y.Composed++;
                         int thisIndex = index++;
-                        float x = c.X + n.X * d * side + right.X * lat * hw;
-                        float yy = c.Y + n.Y * d * side + right.Y * lat * hw;
+                        float offset = faceHalf + d;
+                        float x = c.X + n.X * offset * side + right.X * lat * lateralHalf;
+                        float yy = c.Y + n.Y * offset * side + right.Y * lat * lateralHalf;
+
+                        reasons.Clear();
+                        if (degenerate) reasons.Add(StationRejection.DegeneratePlane);
 
                         var env = environment(x, yy);
-                        if (!env.Answered) continue;               // DEFECT: dropped, never counted
-                        if (!env.Covered) continue;                // DEFECT: dropped, never counted
-                        if (!env.Drawn) continue;                  // DEFECT: dropped, never counted
+                        bool ground = env.Answered && env.Covered && env.Drawn;
+                        if (!env.Answered) reasons.Add(StationRejection.NoNavmeshAnswer);
+                        else if (!env.Covered) reasons.Add(StationRejection.NoCoveringTriangle);
+                        else if (!env.Drawn) reasons.Add(StationRejection.AllCoveringTrianglesDeleted);
+                        else if (!env.Floor.Found) reasons.Add(StationRejection.FloorUnknown);
 
-                        // DEFECT 4: the eye is taken from the navmesh triangle. The physical floor
-                        // (env.Floor.FloorZ, from HousecarlCore.FloorField) is read and published
-                        // but is not what the eye stands on, and a missing floor does not refuse.
-                        float eyeZ = env.NavZ + EyeHeight;
+                        // The eye stands on the PHYSICAL FLOOR. There is no fallback to the
+                        // navmesh height: falling back is the defect, and it would hide it.
+                        bool floorKnown = ground && env.Floor.Found;
+                        float floorZ = env.Floor.FloorZ;
+                        float eyeZ = floorKnown ? floorZ + EyeHeight : float.NaN;
 
-                        if (eyeZ < zLow || eyeZ > zHigh) continue; // DEFECT: dropped, never counted
-
-                        // DEFECT 1: the aim point is the primitive's CENTRE, so the gaze dips to it.
+                        // A LEVEL gaze: the aim point stands at the eye's own height, so the
+                        // camera never dips to a centre a thousand units under the ground.
                         var eye = new Vector3(x, yy, eyeZ);
-                        var lookAt = new Vector3(c.X, c.Y, c.Z);
+                        var lookAt = new Vector3(c.X, c.Y, eyeZ);
 
-                        float dx = lookAt.X - eye.X, dy = lookAt.Y - eye.Y, dz = lookAt.Z - eye.Z;
+                        // The primitive-relative tests are gathered BEFORE the water, although
+                        // they rank BELOW it. The order is deliberate: it is what makes the stated
+                        // precedence load-bearing here rather than an accident of the order the
+                        // checks happen to run in, and a sabotage arm that drops the precedence
+                        // has to be able to show it.
+                        if (floorKnown)
+                        {
+                            if (EyeInside(p, eye)) reasons.Add(StationRejection.EyeInsidePrimitive);
+                            if (eyeZ < zLow || eyeZ > zHigh)
+                                reasons.Add(StationRejection.EyeOutsidePlaneExtent);
+                        }
+
+                        // The water, as the ONE resolver answered it for THIS station's cell.
+                        float? feetAbove = null;
+                        if (env.Water.Verdict == StationWaterVerdict.Unresolved)
+                            reasons.Add(StationRejection.WaterUnknown);
+                        else if (env.Water.SurfaceZ is { } surfaceZ && floorKnown)
+                        {
+                            feetAbove = floorZ - surfaceZ;
+                            if (floorZ < surfaceZ) reasons.Add(StationRejection.StationUnderwater);
+                        }
+
+                        float dx = lookAt.X - eye.X, dy = lookAt.Y - eye.Y;
                         float dxy = MathF.Sqrt(dx * dx + dy * dy);
-                        float pitch = MathF.Atan2(dz, dxy) * 180f / MathF.PI;
+                        float pitch = 0f;               // level by construction; the guard checks it
                         float bearing = Bearing(dx, dy);
 
                         var view = dxy > 0f ? new Vector3(dx / dxy, dy / dxy, 0f) : Vector3.Zero;
@@ -373,29 +432,86 @@ public static class StationRule
                         float dot = Math.Clamp(Vector3.Dot(view, inward), -1f, 1f);
                         float toNormal = MathF.Acos(dot) * 180f / MathF.PI;
 
-                        // DEFECTS 2, 3 and B1: no water test at all, and the pose names the
-                        // PRIMITIVE's cell and worldspace rather than the station's own.
-                        y.Accepted++;
-                        y.Poses.Add(new StationPose
+                        var pose = new StationPose
                         {
                             Primitive = p.Key, Kind = p.Kind, Setup = setup,
-                            Cell = p.Cell, Worldspace = p.Worldspace,
+                            Cell = env.Cell, Worldspace = env.Worldspace,
                             StationIndex = thisIndex, FaceAxis = axis,
                             K = k, Side = side, Lateral = lat, Standoff = d,
                             Eye = eye, LookAt = lookAt, PitchDeg = pitch, BearingDeg = bearing,
                             AngleToPlaneNormalDeg = toNormal,
-                            NavZ = env.NavZ, FloorZ = env.Floor.FloorZ,
+                            NavZ = env.NavZ, FloorZ = floorZ,
                             FloorSource = env.Floor.Source,
-                            FloorOffset = env.NavZ - env.Floor.FloorZ,
-                            FeetAboveSurface = null,
+                            FloorOffset = env.NavZ - floorZ,
+                            FeetAboveSurface = feetAbove,
                             PlaneZLow = zLow, PlaneZHigh = zHigh,
-                            Water = WaterResolution.NotTested,
-                            Accepted = true,
-                        });
+                            Water = env.Water,
+                            Accepted = false,
+                        };
+
+                        var guard = CheckLevel(pose);
+                        if (guard != StationRejection.None) reasons.Add(guard);
+
+                        var reason = FirstByPrecedence(reasons);
+                        if (reason == StationRejection.None)
+                        {
+                            y.Accepted++;
+                            y.Poses.Add(pose with { Accepted = true });
+                        }
+                        else
+                        {
+                            y.Rejected[reason] = (y.Rejected.TryGetValue(reason, out int m) ? m : 0) + 1;
+                            y.Poses.Add(pose with
+                            {
+                                RejectionReason = reason,
+                                RejectionDetail = Detail(reason, env, floorZ, eyeZ, zLow, zHigh, p),
+                            });
+                        }
                     }
                 }
             }
         }
         return y;
     }
+
+    static bool Degenerate(PrimitiveGeometry p)
+    {
+        foreach (float v in new[] { p.ExtentFull.X, p.ExtentFull.Y, p.ExtentFull.Z })
+            if (!float.IsFinite(v) || v <= 0f) return true;
+        foreach (float v in new[] { p.Position.X, p.Position.Y, p.Position.Z,
+                                    p.RotationRad.X, p.RotationRad.Y, p.RotationRad.Z })
+            if (!float.IsFinite(v)) return true;
+        return false;
+    }
+
+    /// <summary>The numbers that decided a refusal, so a pose file can be judged without rerunning
+    /// the rule. Never empty: a refusal with no numbers is a refusal nobody can check.</summary>
+    static string Detail(StationRejection reason, StationEnvironment env, float floorZ, float eyeZ,
+                         float zLow, float zHigh, PrimitiveGeometry p) => reason switch
+    {
+        StationRejection.DegeneratePlane =>
+            $"extent {p.ExtentFull}, position {p.Position}, rotation {p.RotationRad}",
+        StationRejection.NoNavmeshAnswer =>
+            "the navmesh was asked about this XY and returned nothing at all",
+        StationRejection.NoCoveringTriangle =>
+            $"no winning triangle covers the XY; nearest navmesh height read {env.NavZ:0.###}",
+        StationRejection.AllCoveringTrianglesDeleted =>
+            $"every covering triangle is flagged deleted; navmesh height {env.NavZ:0.###}",
+        StationRejection.FloorUnknown =>
+            $"navmesh {env.NavZ:0.###}, no physical floor: {env.Floor.Reason}, "
+            + $"{env.Floor.Surfaces} surface(s) in the column",
+        StationRejection.WaterUnknown =>
+            $"cell WaterHeight {env.Water.CellHeight:R} ({env.Water.Kind}), worldspace default "
+            + $"{env.Water.WorldDefault:R} from {env.Water.FromWorldspace}: {env.Water.How}",
+        StationRejection.StationUnderwater =>
+            $"floor {floorZ:0.###} is below the surface {env.Water.SurfaceZ:0.###} "
+            + $"({env.Water.Verdict}: {env.Water.How})",
+        StationRejection.EyeInsidePrimitive =>
+            $"eye z {eyeZ:0.###} lies inside the primitive's own volume {p.ExtentFull}",
+        StationRejection.EyeOutsidePlaneExtent =>
+            $"eye z {eyeZ:0.###} outside the primitive's vertical extent [{zLow:0.###}, {zHigh:0.###}]",
+        StationRejection.NonLevelGaze =>
+            $"the composed look-at left the eye's height {eyeZ:0.###}",
+        _ => "no reason recorded",
+    };
 }
