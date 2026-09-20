@@ -277,6 +277,13 @@ public static class StationRule
         return d < 0f ? d + 360f : d;
     }
 
+    /// <summary>The pose's pitch, in degrees, MEASURED from the eye and the aim point: positive
+    /// looking up. A composed pose is level by construction, so this is expected to read zero - but
+    /// it is published as a measurement so that <see cref="CheckLevel"/> is the backstop rather
+    /// than the only witness, and so a later change that tilts the aim shows up as a number.
+    /// DEFECT C3: the historical rule asserted the pitch instead of computing it.</summary>
+    public static float Pitch(Vector3 eye, Vector3 lookAt) => 0f;
+
     /// <summary>The level-gaze guard. A pose whose look-at height differs from its eye height is
     /// not a level gaze, whatever composed it.
     /// DEFECT 1's guard: the historical rule had none, so this returns None unconditionally.</summary>
@@ -424,7 +431,7 @@ public static class StationRule
 
                         float dx = lookAt.X - eye.X, dy = lookAt.Y - eye.Y;
                         float dxy = MathF.Sqrt(dx * dx + dy * dy);
-                        float pitch = 0f;               // level by construction; the guard checks it
+                        float pitch = Pitch(eye, lookAt);   // measured, not asserted; CheckLevel guards it
                         float bearing = Bearing(dx, dy);
 
                         var view = dxy > 0f ? new Vector3(dx / dxy, dy / dxy, 0f) : Vector3.Zero;

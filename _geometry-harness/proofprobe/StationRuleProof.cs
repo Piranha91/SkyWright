@@ -1,4 +1,5 @@
 using System.Numerics;
+using System.Text.Json;
 using HarnessShared;
 using HousecarlCore;
 
@@ -21,11 +22,43 @@ static class StationRuleProof
 {
     /// <summary>Cases run below, excluding this count's own check. A case added without moving
     /// this number fails the last check rather than passing unnoticed.</summary>
-    public const int DeclaredCases = 76;
+    public const int DeclaredCases = 96;
 
     const string WS = "WS-FIXTURE";
     const string CELL_A = "CELL-A";
     const string CELL_B = "CELL-B";
+
+    // ---- the fixture the XY -> cell -> water lookup is proven on -------------------------------
+    // Six exterior grid squares in a row, chosen so that each way a READ can fail has a square of
+    // its own and the two sides of the x = 0 border have DIFFERENT real surfaces - a lookup that
+    // attributes a station to the wrong side cannot pass by accident.
+    const string CITY = "CITY";
+    const string TAMRIEL = "TAMRIEL";
+    const string ORPHANWS = "ORPHAN-WS";      // no record: the read FAILED
+    const string CHILDWS = "CHILD-WS";        // a record, whose PARENT link cannot be read
+    const string GHOSTWS = "GHOST-WS";
+
+    static GridCellFacts? Squares((int X, int Y) g) => g switch
+    {
+        (-1, 0) => new GridCellFacts("CELL-WEST", CITY, Tuple(true, 60f)),
+        (0, 0) => new GridCellFacts("CELL-EAST", CITY, Tuple(true, -100f)),
+        (1, 0) => new GridCellFacts("CELL-DEFER", CITY, Tuple(true, float.MaxValue)),
+        (2, 0) => new GridCellFacts("CELL-ORPHAN", ORPHANWS, Tuple(false, float.MaxValue)),
+        (3, 0) => new GridCellFacts("CELL-CHILD", CHILDWS, Tuple(false, float.MaxValue)),
+        (4, 0) => new GridCellFacts("CELL-SOLO", ORPHANWS, Tuple(true, 60f)),
+        _ => null,                            // the order defines no cell here
+    };
+
+    static WorldFacts? Worlds(string ws) => ws switch
+    {
+        CITY => new WorldFacts(float.MaxValue, TAMRIEL),   // defers to its parent
+        TAMRIEL => new WorldFacts(-14000f, null),
+        CHILDWS => new WorldFacts(float.MaxValue, GHOSTWS),
+        _ => null,                            // ORPHAN-WS and GHOST-WS could not be READ
+    };
+
+    /// <summary>The middle of grid square (gx, 0), so a case names a square rather than a number.</summary>
+    static float MidOf(int gx) => gx * StationLookup.GridSize + StationLookup.GridSize / 2f;
 
     static DetectorModel.WaterTuple Tuple(bool hasWater, float? height)
         => new(hasWater, false, null, height, null, null, null, null);
@@ -486,6 +519,144 @@ static class StationRuleProof
             C("G1 the guard refuses a pose whose gaze is not level", false, "no pose to tilt");
             C("G1 the guard passes a level pose", false, "no pose to level");
         }
+
+        // ------------------------------------------ C3, the pitch is measured, not asserted --
+        float pLevel = StationRule.Pitch(new Vector3(0f, 0f, 0f), new Vector3(0f, 100f, 0f));
+        C("INHERITED the pitch of a level eye and aim point is zero", MathF.Abs(pLevel) < 1e-4f,
+          $"{pLevel:0.####} deg");
+        // 50 up over 100 along is atan(0.5) = 26.565 deg, computed here from the geometry rather
+        // than copied from the rule - a constant copied from the code under test proves nothing.
+        float pUp = StationRule.Pitch(new Vector3(0f, 0f, 0f), new Vector3(0f, 100f, 50f));
+        float pWant = MathF.Atan2(50f, 100f) * 180f / MathF.PI;
+        C("C3 the pitch of a raised aim point is the angle the eye and that point give",
+          MathF.Abs(pUp - pWant) < 1e-3f, $"{pUp:0.###} deg, expected {pWant:0.###} deg");
+        bool pitchPublished = ladder.Poses.Count > 0;
+        foreach (var p in ladder.Poses)
+            if (MathF.Abs(p.PitchDeg - StationRule.Pitch(p.Eye, p.LookAt)) > 1e-4f) pitchPublished = false;
+        C("C3b every composed pose publishes the pitch its own eye and aim point give",
+          pitchPublished, "a pose whose published pitch is a constant is not a measurement");
+
+        // -------------------------------------- the XY -> cell -> water lookup (L1 - L7) --
+        // L1: the lookup's grid square has to be the one the FLOOR is filed by, or a station gets
+        // one cell's water and another cell's floor. FloorFeed.GridOf floors toward minus infinity.
+        var gNeg = StationLookup.GridOf(-10f, -10f);
+        var gFeed = FloorFeed.GridOf(new Vec3(-10f, -10f, 0f));
+        C("L1 the lookup's grid square is the one the floor is filed by, west of the origin",
+          gNeg == gFeed && gNeg == (-1, -1), $"lookup {gNeg}, FloorFeed {gFeed}");
+        var gPos = StationLookup.GridOf(5000f, 9000f);
+        C("INHERITED the lookup's grid square is right east and north of the origin",
+          gPos == (1, 2) && gPos == FloorFeed.GridOf(new Vec3(5000f, 9000f, 0f)), $"{gPos}");
+
+        // L2: a station 10 u west of the border stands in the WEST cell and takes ITS surface.
+        var west = StationLookup.At(-10f, 100f, Squares, Worlds, TAMRIEL);
+        C("L2 a station across a cell border takes the NEIGHBOUR's cell and its water",
+          west.Cell == "CELL-WEST" && west.Water.Verdict == StationWaterVerdict.Real
+          && west.Water.SurfaceZ is { } ws1 && MathF.Abs(ws1 - 60f) < 1e-3f,
+          $"cell {west.Cell}, {west.Water.Verdict}, surface {west.Water.SurfaceZ}");
+        var east = StationLookup.At(10f, 100f, Squares, Worlds, TAMRIEL);
+        C("INHERITED a station inside its own cell takes that cell's water",
+          east.Cell == "CELL-EAST" && east.Water.SurfaceZ is { } ws2 && MathF.Abs(ws2 + 100f) < 1e-3f,
+          $"cell {east.Cell}, surface {east.Water.SurfaceZ}");
+
+        // L4: a city worldspace that defers takes its default from its parent, and the pose says
+        // WHICH worldspace the height came from, so an inherited surface is visible not implied.
+        var defer = StationLookup.At(MidOf(1), 100f, Squares, Worlds, TAMRIEL);
+        C("L4 a cell that defers takes the worldspace chain's default, naming where it came from",
+          defer.Water.Verdict == StationWaterVerdict.WorldspaceDefault
+          && defer.Water.SurfaceZ is { } ws3 && MathF.Abs(ws3 + 14000f) < 1e-3f
+          && defer.Water.FromWorldspace == TAMRIEL,
+          $"{defer.Water.Verdict}, surface {defer.Water.SurfaceZ}, from {defer.Water.FromWorldspace}");
+
+        // L3: the C1 row. HasWater clear, a sentinel height, and a worldspace whose record could
+        // not be READ - which the one resolver, handed a null snap, answers "dry" for.
+        var unread = StationLookup.At(MidOf(2), 100f, Squares, Worlds, TAMRIEL);
+        C("L3 a worldspace that could not be READ is Unresolved, never dry",
+          unread.Water.Verdict == StationWaterVerdict.Unresolved,
+          $"{unread.Water.Verdict}: {unread.Water.How}");
+        C("L3 the refusal names the worldspace that could not be read",
+          unread.Water.How.Contains(ORPHANWS, StringComparison.Ordinal), unread.Water.How);
+
+        // L5: the record is there; the PARENT it points at is not.
+        var child = StationLookup.At(MidOf(3), 100f, Squares, Worlds, TAMRIEL);
+        C("L5 a parent link that could not be read is Unresolved, and names the link",
+          child.Water.Verdict == StationWaterVerdict.Unresolved
+          && child.Water.How.Contains(GHOSTWS, StringComparison.Ordinal),
+          $"{child.Water.Verdict}: {child.Water.How}");
+
+        // L6: the other arm of the same condition. An unreadable worldspace cannot change a cell
+        // that states its own real height, so it must NOT refuse one.
+        var solo = StationLookup.At(MidOf(4), 100f, Squares, Worlds, TAMRIEL);
+        C("INHERITED an unreadable worldspace does not refuse a cell that states its own height",
+          solo.Water.Verdict == StationWaterVerdict.Real
+          && solo.Water.SurfaceZ is { } ws4 && MathF.Abs(ws4 - 60f) < 1e-3f,
+          $"{solo.Water.Verdict}, surface {solo.Water.SurfaceZ}");
+
+        // L7: a grid square the order defines no cell for.
+        var nowhere = StationLookup.At(MidOf(9), 100f, Squares, Worlds, TAMRIEL);
+        C("L7 a grid square the order does not define is Unresolved, never dry",
+          nowhere.Water.Verdict == StationWaterVerdict.Unresolved,
+          $"{nowhere.Water.Verdict}: {nowhere.Water.How}");
+        C("L7 the refusal names the grid square that is not defined",
+          nowhere.Water.How.Contains("9,0", StringComparison.Ordinal), nowhere.Water.How);
+
+        // The two rows the reviewer asked to be PINNED with the verdict and the reason, because
+        // both are reachable only when the caller has already refused: the mode never hands the
+        // resolver a null snap for a worldspace it failed to read (L3 above), and it carries the
+        // raw value in the refusal detail. What the ONE resolver does with them is recorded here
+        // rather than argued about, and the README states it.
+        Pin("B2 HasWater clear with a sentinel height and NO worldspace snap is read as dry",
+            false, float.MaxValue, null, true, StationWaterVerdict.KnownDryNoSurface);
+        Pin("B2 HasWater clear with an unmodelled sentinel is read as dry, not refused",
+            false, -3.4028235E+38f, 60f, true, StationWaterVerdict.KnownDryNoSurface);
+
+        // ------------------------------------------------------- the pose file's own writer --
+        var hdr = new Dictionary<string, object?> { ["label"] = "proof" };
+        string why4 = ""; bool eyeNull = false;
+        try
+        {
+            using var d4 = JsonDocument.Parse(StationPoseFile.Render(hdr, new[] { noFloor }));
+            eyeNull = d4.RootElement.GetProperty("poses").GetArrayLength() > 0;
+            foreach (var pe in d4.RootElement.GetProperty("poses").EnumerateArray())
+                if (pe.GetProperty("eye")[2].ValueKind != JsonValueKind.Null) eyeNull = false;
+        }
+        catch (Exception ex) { why4 = ex.GetType().Name + ": " + ex.Message; }
+        C("C4 the writer publishes null for an eye a refused pose never had", eyeNull,
+          why4.Length > 0 ? why4 : "every refused pose's eye z is null");
+
+        string why4b = ""; bool eyeNumber = false;
+        try
+        {
+            using var d5 = JsonDocument.Parse(StationPoseFile.Render(hdr, new[] { ladder }));
+            var first = d5.RootElement.GetProperty("poses")[0].GetProperty("eye")[2];
+            eyeNumber = first.ValueKind == JsonValueKind.Number
+                        && MathF.Abs(first.GetSingle() - StationRule.EyeHeight) < 1e-3f;
+        }
+        catch (Exception ex) { why4b = ex.GetType().Name + ": " + ex.Message; }
+        C("INHERITED the writer publishes an accepted pose's eye as a number", eyeNumber,
+          why4b.Length > 0 ? why4b : "");
+
+        var bad = new StationYield { Primitive = "PRIM-BAD", Setup = "A1" };
+        bad.Composed = 3; bad.Accepted = 1;            // 1 + 0 != 3: the table would be wrong
+        bool refusedBad = false; string badDetail = "";
+        try { badDetail = StationPoseFile.Render(hdr, new[] { bad })[..40]; }
+        catch (InvalidOperationException ex) { refusedBad = true; badDetail = ex.Message; }
+        C("P1 the writer refuses a yield whose accounting does not close", refusedBad, badDetail);
+
+        string why4c = ""; bool headerOk = false;
+        try
+        {
+            var second = StationRule.Compose(tall, "A2", Flat(0f, 0f));
+            using var d6 = JsonDocument.Parse(StationPoseFile.Render(hdr, new[] { ladder, second }));
+            var yj = d6.RootElement.GetProperty("yield");
+            headerOk = yj.GetProperty("bySetup").TryGetProperty("A1", out var a1)
+                       && yj.GetProperty("bySetup").TryGetProperty("A2", out _)
+                       && a1.GetProperty("composed").GetInt32() == ladder.Composed
+                       && a1.GetProperty("primitivesWithAStation").GetInt32() == 1
+                       && yj.GetProperty("byPrimitive").GetProperty(tall.Key)
+                            .GetProperty("A2").GetProperty("accepted").GetInt32() == second.Accepted;
+        }
+        catch (Exception ex) { why4c = ex.GetType().Name + ": " + ex.Message; }
+        C("INHERITED the writer publishes the yield per primitive and per setup", headerOk, why4c);
 
         check("stationrule: declared case count", ran == DeclaredCases,
               $"{ran} cases ran, {DeclaredCases} declared");

@@ -27,6 +27,8 @@
     <Compile Include="..\_shared\ActorBand.cs" Link="ActorBand.cs" />
     <Compile Include="..\_shared\FloorFeed.cs" Link="FloorFeed.cs" />
     <Compile Include="..\_shared\StationRule.cs" Link="StationRule.cs" />
+    <Compile Include="..\_shared\StationLookup.cs" Link="StationLookup.cs" />
+    <Compile Include="..\_shared\StationPoseFile.cs" Link="StationPoseFile.cs" />
     <Compile Include="..\_shared\PlacementHistory.cs" Link="PlacementHistory.cs" />
     <Compile Include="..\_shared\DeletionHistory.cs" Link="DeletionHistory.cs" />
     <Compile Include="..\_shared\BosHook.cs" Link="BosHook.cs" />
