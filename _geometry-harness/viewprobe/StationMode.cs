@@ -132,14 +132,6 @@ static class StationMode
                                   + $"in {input.TargetCell} or its ring: {string.Join(", ", missing)}");
             return 2;
         }
-        if (chosen.Count == 0)
-        {
-            Console.Error.WriteLine($"--stations: no occlusion primitive to compose for in "
-                                  + $"{input.TargetCell}. A cell with no PortalBox or Box has no "
-                                  + "stations; this is an answer, but it is not a pose file.");
-            return 2;
-        }
-
         // The floor field per grid square, built once and kept: FloorFeed reads the 3x3
         // neighbourhood, because a floor mesh placed in the next cell reaches under this one.
         var fields = new Dictionary<(int, int), FloorField>();
@@ -289,6 +281,14 @@ static class StationMode
             }
             else Console.Error.WriteLine($"VP_STATION_COLUMN='{cxy}' is not X,Y; no diagnostic written.");
         }
+
+        if (chosen.Count == 0)
+        {
+            Console.Error.WriteLine($"--stations: no occlusion primitive to compose for in "
+                                  + $"{input.TargetCell}. A cell with no PortalBox or Box has no "
+                                  + "stations; this is an answer, but it is not a pose file.");
+            return 2;
+        }
         Console.WriteLine($"   --stations: {chosen.Count} primitive(s), {composed:N0} station(s) "
                         + $"composed, {accepted:N0} accepted, {composed - accepted:N0} refused"
                         + (parts.Count > 0 ? " (" + string.Join(", ", parts) + ")" : ""));
@@ -360,7 +360,11 @@ static class StationMode
         float? landZ = null; float saddle = 0f;
         if (input.LandByGrid.TryGetValue(grid, out var heights))
             landZ = NavmeshFloor.LandHeightAt(heights, grid.X, grid.Y, x, y, out saddle);
-        var reading = field.Read(x, y, navZ);
+        // The reading the RULE would give here - anchored, exactly as a station's is - and, beside
+        // it and labelled, the unanchored read, so the diagnostic shows what the anchor changed.
+        var ground = StationGround.Read(z => field.Read(x, y, z), navZ, landZ);
+        var reading = ground.Floor;
+        var unanchored = field.Read(x, y, navZ);
         var doc = new Dictionary<string, object?>
         {
             ["terrainAtXY"] = landZ is { } lz
@@ -388,6 +392,16 @@ static class StationMode
                 ["found"] = reading.Found, ["floorZ"] = StationPoseFileNumber(reading.FloorZ),
                 ["source"] = reading.Source.ToString(), ["reason"] = reading.Reason.ToString(),
                 ["surfacesSeen"] = reading.Surfaces, ["embedded"] = reading.Embedded,
+                ["anchor"] = ground.Anchor.ToString(),
+                ["anchorZ"] = StationPoseFileNumber(ground.AnchorZ),
+                ["navmeshBurial"] = StationPoseFileNumber(ground.NavmeshBurial),
+                ["navmeshBuried"] = ground.NavmeshBuried,
+            },
+            ["fieldReadingAnchoredOnTheNavmesh"] = new Dictionary<string, object?>
+            {
+                ["note"] = "what the read answered BEFORE the anchor rule - kept for the diagnosis",
+                ["found"] = unanchored.Found, ["floorZ"] = StationPoseFileNumber(unanchored.FloorZ),
+                ["source"] = unanchored.Source.ToString(), ["reason"] = unanchored.Reason.ToString(),
             },
             ["candidatesInNeighbourhood"] = refs.Count,
             ["surfacesAtXY"] = surfaces,
