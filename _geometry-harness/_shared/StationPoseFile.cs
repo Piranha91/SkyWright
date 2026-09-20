@@ -13,15 +13,16 @@ namespace HarnessShared;
 //  no floor to stand it on - and a writer that throws on that pose loses
 //  exactly the poses the refusal accounting exists to show.
 //
-//  WHAT THIS FILE IS RIGHT NOW: the naive writer. Both defects are
-//  reproduced ON PURPOSE so the cases in proofprobe/StationRuleProof.cs
-//  fail on a WRONG ANSWER rather than on a missing member.
-//
-//  The defects held down by the proofs:
-//    P1  the yield's closure (accepted + sum(refused) == composed) is not
-//        asserted at write time, so a miscount is published as a table;
-//    P2  a pose's eye is written as a raw float, so the ONE pose kind that
-//        has no eye - a refused one - takes the whole file down with it.
+//  Two rules, each held down by a case recorded red at 34c5261d:
+//    P1  the closure is asserted AT WRITE TIME, per bucket: accepted plus
+//        the refusals must equal composed, and a bucket that does not close
+//        refuses the write. The table is generated from one keyed
+//        structure and checked, never typed - it was typed wrongly twice.
+//    C4  a number nobody measured is published as null, never as a
+//        sentinel. A refused pose has no eye (its height is NaN by
+//        construction, because there was no floor to stand it on) and no
+//        pitch either; a writer that throws on those poses loses exactly
+//        what the refusal accounting exists to show.
 // ======================================================================
 
 public static class StationPoseFile
@@ -36,6 +37,12 @@ public static class StationPoseFile
     {
         var doc = new Dictionary<string, object?> { ["schema"] = Schema };
         foreach (var (k, v) in header) doc[k] = v;
+        foreach (var y in yields)
+            if (!y.Closes)
+                throw new InvalidOperationException(
+                    $"the yield for {y.Primitive} under {y.Setup} does not close: {y.Accepted} "
+                    + $"accepted + {y.RejectedTotal} refused != {y.Composed} composed. Refusing to "
+                    + "write a table whose total is wrong.");
         doc["yield"] = YieldHeader(yields);
         var poses = new List<object>();
         foreach (var y in yields)
@@ -55,8 +62,8 @@ public static class StationPoseFile
     }
 
     /// <summary>Per primitive and per setup, with the totals a reader would otherwise have to add
-    /// up by hand - and which were added up wrongly twice before this header existed.
-    /// DEFECT P1: nothing here checks that a bucket closes.</summary>
+    /// up by hand - and which were added up wrongly twice before this header existed. Every bucket
+    /// is checked, aggregates included: the aggregate is what was wrong both times.</summary>
     static Dictionary<string, object?> YieldHeader(IReadOnlyList<StationYield> yields)
     {
         var bySetup = new Dictionary<string, Bucket>();
@@ -76,15 +83,27 @@ public static class StationPoseFile
         }
         var setups = new Dictionary<string, object?>();
         foreach (var (k, v) in bySetup)
+        {
+            Close(v, "setup " + k);
             setups[k] = v.Json(withAStation.TryGetValue(k, out var w) ? w.Count : 0);
+        }
         var prims = new Dictionary<string, object?>();
         foreach (var (k, m) in byPrimitive)
         {
             var inner = new Dictionary<string, object?>();
-            foreach (var (s, b) in m) inner[s] = b.Json(null);
+            foreach (var (s, b) in m) { Close(b, $"{k} under {s}"); inner[s] = b.Json(null); }
             prims[k] = inner;
         }
         return new Dictionary<string, object?> { ["bySetup"] = setups, ["byPrimitive"] = prims };
+    }
+
+    static void Close(Bucket b, string what)
+    {
+        if (!b.Closes)
+            throw new InvalidOperationException(
+                $"the yield bucket for {what} does not close: {b.Accepted} accepted + "
+                + $"{b.RejectedTotal} refused != {b.Composed} composed. Refusing to write a table "
+                + "whose total is wrong.");
     }
 
     sealed class Bucket
@@ -110,9 +129,9 @@ public static class StationPoseFile
         }
     }
 
-    /// <summary>One pose as it is published.
-    /// DEFECT P2: the eye, the aim point and the heights are written as raw floats, and a REFUSED
-    /// pose's eye is NaN by construction.</summary>
+    /// <summary>One pose as it is published. Every measured quantity goes through
+    /// <see cref="N"/>: a refused pose's eye, pitch and offsets were never measured, and null says
+    /// so where a sentinel number would be read as a height.</summary>
     static Dictionary<string, object?> Dto(StationPose p) => new()
     {
         ["primitive"] = p.Primitive,
@@ -125,21 +144,21 @@ public static class StationPoseFile
         ["k"] = p.K,
         ["side"] = p.Side,
         ["lateral"] = p.Lateral,
-        ["standoff"] = p.Standoff,
-        ["eye"] = new[] { p.Eye.X, p.Eye.Y, p.Eye.Z },
-        ["lookAt"] = new[] { p.LookAt.X, p.LookAt.Y, p.LookAt.Z },
-        ["pitchDeg"] = p.PitchDeg,
-        ["bearingDeg"] = p.BearingDeg,
-        ["angleToPlaneNormalDeg"] = p.AngleToPlaneNormalDeg,
-        ["fovDeg"] = p.FovDeg,
-        ["navZ"] = p.NavZ,
-        ["floorZ"] = p.FloorZ,
+        ["standoff"] = N(p.Standoff),
+        ["eye"] = new[] { N(p.Eye.X), N(p.Eye.Y), N(p.Eye.Z) },
+        ["lookAt"] = new[] { N(p.LookAt.X), N(p.LookAt.Y), N(p.LookAt.Z) },
+        ["pitchDeg"] = N(p.PitchDeg),
+        ["bearingDeg"] = N(p.BearingDeg),
+        ["angleToPlaneNormalDeg"] = N(p.AngleToPlaneNormalDeg),
+        ["fovDeg"] = N(p.FovDeg),
+        ["navZ"] = N(p.NavZ),
+        ["floorZ"] = N(p.FloorZ),
         ["floorSource"] = p.FloorSource.ToString(),
-        ["floorOffset"] = p.FloorOffset,
-        ["eyeHeight"] = p.EyeHeight,
-        ["feetAboveSurface"] = p.FeetAboveSurface,
-        ["planeZLow"] = p.PlaneZLow,
-        ["planeZHigh"] = p.PlaneZHigh,
+        ["floorOffset"] = N(p.FloorOffset),
+        ["eyeHeight"] = N(p.EyeHeight),
+        ["feetAboveSurface"] = p.FeetAboveSurface is { } fa ? N(fa) : null,
+        ["planeZLow"] = N(p.PlaneZLow),
+        ["planeZHigh"] = N(p.PlaneZHigh),
         ["water"] = Water(p.Water),
         ["accepted"] = p.Accepted,
         ["rejectionReason"] = p.RejectionReason.ToString(),
@@ -149,10 +168,12 @@ public static class StationPoseFile
     static Dictionary<string, object?> Water(WaterResolution w) => new()
     {
         ["verdict"] = w.Verdict.ToString(),
-        ["surfaceZ"] = w.SurfaceZ,
-        ["cellHeight"] = w.CellHeight,
+        ["surfaceZ"] = w.SurfaceZ is { } sz ? N(sz) : null,
+        // The cell's height as READ, sentinels and all: 3.4028235E+38 is a finite float and stays a
+        // number here on purpose, because the raw value is what a reader checks the verdict against.
+        ["cellHeight"] = w.CellHeight is { } ch ? N(ch) : null,
         ["kind"] = w.Kind.ToString(),
-        ["worldDefault"] = w.WorldDefault,
+        ["worldDefault"] = w.WorldDefault is { } wd ? N(wd) : null,
         ["fromWorldspace"] = w.FromWorldspace,
         ["how"] = w.How,
     };

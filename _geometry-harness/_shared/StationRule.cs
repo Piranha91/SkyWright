@@ -7,14 +7,14 @@ namespace HarnessShared;
 //  StationRule - the rule that chooses camera stations for an occlusion
 //  primitive, and the record it publishes for every station it considers.
 //
-//  WHAT THIS FILE IS RIGHT NOW: a faithful reproduction of the station rule
-//  as it stood on 2026-09-19/20, when it lived in run-local scripts. That
-//  rule produced views no player can have, and each of its defects is
-//  reproduced here ON PURPOSE so that the cases in
-//  proofprobe/StationRuleProof.cs fail on a WRONG ANSWER rather than on a
-//  missing member. The corrected behaviour is specified by those cases and
-//  lands in later commits; until then every defect is marked DEFECT and
-//  nothing in the tree calls this file except the proofs.
+//  WHERE IT CAME FROM. The rule began as a faithful reproduction of the one
+//  that stood on 2026-09-19/20, when it lived in run-local scripts and
+//  produced views no player can have. Each of its defects was reproduced
+//  here on purpose, recorded RED by proofprobe/StationRuleProof.cs from the
+//  commit that introduced it, and then fixed - so every case fails on a
+//  WRONG ANSWER rather than on a missing member. The DEFECT marks below are
+//  kept as history: each names what the historical rule did, beside the
+//  code that no longer does it. viewprobe's --stations mode calls this file.
 //
 //  The defects held down by the proofs:
 //    1  the camera aimed at the primitive's CENTRE, which on an exterior
@@ -281,8 +281,15 @@ public static class StationRule
     /// looking up. A composed pose is level by construction, so this is expected to read zero - but
     /// it is published as a measurement so that <see cref="CheckLevel"/> is the backstop rather
     /// than the only witness, and so a later change that tilts the aim shows up as a number.
-    /// DEFECT C3: the historical rule asserted the pitch instead of computing it.</summary>
-    public static float Pitch(Vector3 eye, Vector3 lookAt) => 0f;
+    /// A pose with no eye (no floor was found) has no pitch either: the arithmetic carries the NaN
+    /// through, and the pose file publishes null rather than a number nobody measured.</summary>
+    public static float Pitch(Vector3 eye, Vector3 lookAt)
+    {
+        float dx = lookAt.X - eye.X, dy = lookAt.Y - eye.Y, dz = lookAt.Z - eye.Z;
+        // Atan2 needs no guard for a vertical gaze: Atan2(dz, 0) is +/- 90 deg and Atan2(0, 0) is 0,
+        // which is exactly what a straight-up and a degenerate aim should read.
+        return MathF.Atan2(dz, MathF.Sqrt(dx * dx + dy * dy)) * 180f / MathF.PI;
+    }
 
     /// <summary>The level-gaze guard. A pose whose look-at height differs from its eye height is
     /// not a level gaze, whatever composed it.
