@@ -118,7 +118,7 @@ public static class StationPoseFile
             foreach (var p in y.Poses)
             {
                 if (p.FloorAnchor == FloorAnchor.Terrain) Buried++;
-                // DEFECT G3b: the stations where the terrain is ANOTHER STOREY are not counted.
+                if (p.TerrainIsAnotherStorey) AnotherStorey++;
             }
             foreach (var (r, n) in y.Rejected)
                 Rejected[r.ToString()] = (Rejected.TryGetValue(r.ToString(), out int m) ? m : 0) + n;

@@ -32,14 +32,18 @@ namespace HarnessShared;
 //  terrain and nothing under it is reachable either. proofprobe's G1 cases
 //  pin both arms.
 //
-//  WHAT THIS FILE IS RIGHT NOW: the anchor with NO BOUND on it - it moves
-//  to the terrain however far below the navmesh lies. Measured consequence
-//  (the run record's storey diagnosis): a city mod's navmesh override
-//  three thousand units under the landscape, in empty space, anchored
-//  twenty stations on ground that says nothing about whether a body can
-//  stand where the navmesh is. The bound is reproduced here at the STEP
-//  REACH so proofprobe's G2 cases fail on a WRONG ANSWER, and the plan's
-//  revision 10 states the physical condition that replaces it.
+//  THE BOUND, and it is a physical condition rather than a fitted number:
+//  the terrain anchors the read only when a body standing at the navmesh
+//  height would INTERSECT the landscape - the terrain above the navmesh by
+//  less than an actor's standing height. Beyond that the two are different
+//  STOREYS: the navmesh anchor stays, the floor and the water decide as
+//  they always did, and the gap is published so those stations are
+//  countable. Measured why (the 2026-09-20 storey diagnosis): a city mod's
+//  navmesh override about 3,080 u under the ground, in the same worldspace
+//  and grid square as the landscape over it, with NOTHING within reach in
+//  any direction around it. A navmesh in empty space is not a lower
+//  storey, and the ground above it says nothing about standing there -
+//  but neither does it make that ground the navmesh's own floor.
 // ======================================================================
 
 /// <summary>Which height a station's floor read was anchored at.</summary>
@@ -62,21 +66,22 @@ public static class StationGround
     /// <summary>How far above the navmesh the landscape may stand and still be ground the navmesh
     /// is merely buried under: a body standing at the navmesh height reaches this high, so above it
     /// the terrain is a different storey and says nothing about standing where the navmesh is.
-    /// DEFECT G2: this is the STEP reach - what a walker steps onto - not what a body occupies.</summary>
-    public static readonly float StandingHeight = NavmeshFloor.DefaultUpReach;
+    /// The constant is the tree's own, engine-measured, and is not invented here: the scale-1
+    /// humanoid's nominal head height scaled by the controller factor measured in game on
+    /// 2026-09-02 (ActorBand's overhead-ladder arm), which is the controller's top ABOVE THE
+    /// NAVMESH at the measuring station - the frame this burial is measured in.</summary>
+    public static readonly float StandingHeight = ActorBand.ControllerTop(ActorBand.ScaleOneHeight);
 
     /// <summary>Read the floor for a station. <paramref name="readAt"/> is the floor field's own
-    /// read at this XY, taking the height to anchor the band on; <paramref name="stepReach"/> is
-    /// only used to say whether the burial is deep enough to count, never to move the band.</summary>
-    public static GroundReading Read(Func<float, FloorReading> readAt, float navZ, float? terrainZ,
-                                     float stepReach = NavmeshFloor.DefaultUpReach)
+    /// read at this XY, taking the height to anchor the band on.</summary>
+    public static GroundReading Read(Func<float, FloorReading> readAt, float navZ, float? terrainZ)
     {
         float burial = terrainZ is { } t && t > navZ ? t - navZ : 0f;
-        // DEFECT G2: no bound. Any burial at all moves the anchor to the terrain.
-        bool onTerrain = burial > 0f;
+        bool anotherStorey = burial >= StandingHeight;
+        bool onTerrain = burial > 0f && !anotherStorey;
         float anchorZ = onTerrain ? terrainZ!.Value : navZ;
         return new(readAt(anchorZ),
                    onTerrain ? FloorAnchor.Terrain : FloorAnchor.Navmesh,
-                   anchorZ, navZ, terrainZ, burial, burial > stepReach);
+                   anchorZ, navZ, terrainZ, burial, anotherStorey);
     }
 }

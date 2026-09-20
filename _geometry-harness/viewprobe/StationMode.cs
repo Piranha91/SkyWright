@@ -201,11 +201,11 @@ static class StationMode
                             + "The rule models an upright primitive turned about Z only, so their "
                             + "normals and extents are the upright reading - stated, not hidden.");
         if (buried > 0)
-            Console.WriteLine($"   --stations: {buried} station read(s) stood on ground the navmesh "
-                            + $"is buried more than {NavmeshFloor.DefaultUpReach:0} u beneath. The "
-                            + "floor read is anchored at the landscape there, because a placed body "
-                            + "stands on the ground and not on a mesh authored under it; every pose "
-                            + "carries its anchor and its burial depth.");
+            Console.WriteLine($"   --stations: at {buried} station read(s) the landscape stands a "
+                            + $"whole actor's height ({StationGround.StandingHeight:0.#} u) or more "
+                            + "above the navmesh. Those are two STOREYS, not ground the navmesh is "
+                            + "buried under: the navmesh anchor stays and the gap is published, so "
+                            + "they are countable rather than silently re-grounded.");
         if (offGrid > 0)
             Console.WriteLine($"   --stations: {offGrid} station(s) fell in a grid square with no "
                             + "floor candidates and no terrain filed. They are refused for want of a "
@@ -233,10 +233,12 @@ static class StationMode
                 ["maxDepthBelowNavmesh"] = NavmeshFloor.DefaultMaxDepth,
                 ["upReachAboveNavmesh"] = NavmeshFloor.DefaultUpReach,
                 ["neighbourhood"] = "3x3 grid squares around the station's own square",
-                ["anchor"] = "max(navmesh, terrain) at the station's own XY",
+                ["anchor"] = "the terrain where the navmesh is buried under it by less than an "
+                             + "actor's standing height, the navmesh otherwise",
+                ["standingHeight"] = StationGround.StandingHeight,
             },
             ["primitives"] = chosen.Count,
-            ["groundReadsOnBuriedNavmesh"] = buried,
+            ["groundReadsWhereTerrainIsAnotherStorey"] = buried,
             ["primitivesTiltedOffZ"] = tilted,
             ["stationsWithMoreThanOneCoveringTriangle"] = multiCovered,
             ["spec"] = new Dictionary<string, object?>
