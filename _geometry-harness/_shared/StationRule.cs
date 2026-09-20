@@ -107,7 +107,7 @@ public readonly record struct StationEnvironment(
     bool Answered, bool Covered, bool Drawn, float NavZ, FloorReading Floor,
     string Cell, string Worldspace, WaterResolution Water,
     FloorAnchor FloorAnchor = FloorAnchor.Navmesh, float NavmeshBurial = 0f,
-    bool NavmeshBuried = false);
+    bool TerrainIsAnotherStorey = false);
 
 /// <summary>One candidate station, accepted or refused, with the aim geometry published so a
 /// pose file can be judged before anything is rendered.</summary>
@@ -145,7 +145,10 @@ public sealed record StationPose
     /// rather than discovered later.</summary>
     public FloorAnchor FloorAnchor { get; init; } = FloorAnchor.Navmesh;
     public float NavmeshBurial { get; init; }
-    public bool NavmeshBuried { get; init; }
+    /// <summary>The landscape stands a whole actor's height or more above the navmesh here: the two
+    /// are different storeys, the navmesh anchor stays, and the gap is published so such stations
+    /// are countable.</summary>
+    public bool TerrainIsAnotherStorey { get; init; }
     public float EyeHeight { get; init; } = StationRule.EyeHeight;
     public float? FeetAboveSurface { get; init; }
     public required float PlaneZLow { get; init; }
@@ -468,7 +471,7 @@ public static class StationRule
                             FloorOffset = env.NavZ - floorZ,
                             FloorAnchor = env.FloorAnchor,
                             NavmeshBurial = env.NavmeshBurial,
-                            NavmeshBuried = env.NavmeshBuried,
+                            TerrainIsAnotherStorey = env.TerrainIsAnotherStorey,
                             FeetAboveSurface = feetAbove,
                             PlaneZLow = zLow, PlaneZHigh = zHigh,
                             Water = env.Water,

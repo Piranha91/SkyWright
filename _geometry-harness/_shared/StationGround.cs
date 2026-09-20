@@ -32,9 +32,14 @@ namespace HarnessShared;
 //  terrain and nothing under it is reachable either. proofprobe's G1 cases
 //  pin both arms.
 //
-//  No constant is chosen here and NavmeshFloor's defaults are untouched;
-//  the step reach is only read, to say whether a burial is deep enough to
-//  be worth counting.
+//  WHAT THIS FILE IS RIGHT NOW: the anchor with NO BOUND on it - it moves
+//  to the terrain however far below the navmesh lies. Measured consequence
+//  (the run record's storey diagnosis): a city mod's navmesh override
+//  three thousand units under the landscape, in empty space, anchored
+//  twenty stations on ground that says nothing about whether a body can
+//  stand where the navmesh is. The bound is reproduced here at the STEP
+//  REACH so proofprobe's G2 cases fail on a WRONG ANSWER, and the plan's
+//  revision 10 states the physical condition that replaces it.
 // ======================================================================
 
 /// <summary>Which height a station's floor read was anchored at.</summary>
@@ -50,10 +55,16 @@ public enum FloorAnchor : byte
 /// and how far the landscape stands over the navmesh underneath it.</summary>
 public readonly record struct GroundReading(
     FloorReading Floor, FloorAnchor Anchor, float AnchorZ, float NavZ, float? TerrainZ,
-    float NavmeshBurial, bool NavmeshBuried);
+    float NavmeshBurial, bool TerrainIsAnotherStorey);
 
 public static class StationGround
 {
+    /// <summary>How far above the navmesh the landscape may stand and still be ground the navmesh
+    /// is merely buried under: a body standing at the navmesh height reaches this high, so above it
+    /// the terrain is a different storey and says nothing about standing where the navmesh is.
+    /// DEFECT G2: this is the STEP reach - what a walker steps onto - not what a body occupies.</summary>
+    public static readonly float StandingHeight = NavmeshFloor.DefaultUpReach;
+
     /// <summary>Read the floor for a station. <paramref name="readAt"/> is the floor field's own
     /// read at this XY, taking the height to anchor the band on; <paramref name="stepReach"/> is
     /// only used to say whether the burial is deep enough to count, never to move the band.</summary>
@@ -61,6 +72,7 @@ public static class StationGround
                                      float stepReach = NavmeshFloor.DefaultUpReach)
     {
         float burial = terrainZ is { } t && t > navZ ? t - navZ : 0f;
+        // DEFECT G2: no bound. Any burial at all moves the anchor to the terrain.
         bool onTerrain = burial > 0f;
         float anchorZ = onTerrain ? terrainZ!.Value : navZ;
         return new(readAt(anchorZ),

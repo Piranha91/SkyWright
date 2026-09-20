@@ -22,7 +22,7 @@ static class StationRuleProof
 {
     /// <summary>Cases run below, excluding this count's own check. A case added without moving
     /// this number fails the last check rather than passing unnoticed.</summary>
-    public const int DeclaredCases = 104;
+    public const int DeclaredCases = 110;
 
     const string WS = "WS-FIXTURE";
     const string CELL_A = "CELL-A";
@@ -675,9 +675,9 @@ static class StationRuleProof
           + "the only mesh at -100)");
         C("G1 a buried navmesh anchors the floor read on the terrain",
           buried.Anchor == FloorAnchor.Terrain && MathF.Abs(buried.AnchorZ) < 1e-3f
-          && MathF.Abs(buried.NavmeshBurial - 60f) < 1e-3f && buried.NavmeshBuried,
+          && MathF.Abs(buried.NavmeshBurial - 60f) < 1e-3f && !buried.TerrainIsAnotherStorey,
           $"anchor {buried.Anchor} at {buried.AnchorZ:0.###}, burial {buried.NavmeshBurial:0.###}, "
-          + $"buried {buried.NavmeshBuried}");
+          + $"another storey {buried.TerrainIsAnotherStorey}");
 
         // A street mesh standing ON that ground, within the step reach: it must still win.
         var onGround = StationGround.Read(z => Ground(z, new[] { (30f, true) }, 0f), -60f, 0f);
@@ -689,11 +689,11 @@ static class StationRuleProof
         // The terrain a little above the navmesh is not a BURIED navmesh - it is the ordinary
         // within-cell texture - but the read still stands on the higher of the two.
         var shallowBury = StationGround.Read(z => Ground(z, new[] { (-5f, true) }, 10f), 0f, 10f);
-        C("G1 a terrain within the step reach is not counted as a buried navmesh",
-          shallowBury.Anchor == FloorAnchor.Terrain && !shallowBury.NavmeshBuried
+        C("G1 a terrain a few units above the navmesh is not another storey",
+          shallowBury.Anchor == FloorAnchor.Terrain && !shallowBury.TerrainIsAnotherStorey
           && MathF.Abs(shallowBury.NavmeshBurial - 10f) < 1e-3f,
           $"anchor {shallowBury.Anchor}, burial {shallowBury.NavmeshBurial:0.###}, "
-          + $"buried {shallowBury.NavmeshBuried}");
+          + $"another storey {shallowBury.TerrainIsAnotherStorey}");
 
         var normal = StationGround.Read(z => Ground(z, new[] { (-5f, true) }, -20f), 0f, -20f);
         C("INHERITED an unburied station reads the same floor it always did",
@@ -713,7 +713,7 @@ static class StationRuleProof
         bool carried = buriedLadder.Poses.Count > 0;
         foreach (var p in buriedLadder.Poses)
             if (p.FloorAnchor != FloorAnchor.Terrain || MathF.Abs(p.NavmeshBurial - 60f) > 1e-3f
-                || !p.NavmeshBuried) carried = false;
+                || !p.TerrainIsAnotherStorey) carried = false;
         C("G1 every composed pose publishes the anchor its ground was read at",
           carried, buriedLadder.Poses.Count > 0
             ? $"{buriedLadder.Poses[0].FloorAnchor}, burial {buriedLadder.Poses[0].NavmeshBurial}"
@@ -726,13 +726,63 @@ static class StationRuleProof
             var yG = dG.RootElement.GetProperty("yield");
             countedBuried =
                 yG.GetProperty("bySetup").GetProperty("A3")
-                  .GetProperty("stationsWithBuriedNavmesh").GetInt32() == buriedLadder.Composed
+                  .GetProperty("stationsAnchoredOnTerrain").GetInt32() == buriedLadder.Composed
                 && yG.GetProperty("byPrimitive").GetProperty(tall.Key).GetProperty("A3")
-                     .GetProperty("stationsWithBuriedNavmesh").GetInt32() == buriedLadder.Composed;
+                     .GetProperty("stationsAnchoredOnTerrain").GetInt32() == buriedLadder.Composed;
         }
         catch (Exception ex) { whyG = ex.GetType().Name + ": " + ex.Message; }
         C("G1 the yield counts the stations whose navmesh is buried, per primitive and per setup",
           countedBuried, whyG.Length > 0 ? whyG : $"of {buriedLadder.Composed} composed");
+
+        // -------------------------- G2, the anchor needs a BOUND: one storey, not two --
+        // A navmesh a whole storey below the landscape is not ground the landscape was raised
+        // over. Measured on the real order (the run record's storey diagnosis): a city mod's
+        // navmesh override about 3,080 u under the ground, in empty space - a ray probe there
+        // found nothing within reach in any direction. The terrain above it says nothing about
+        // whether a body can stand where the navmesh is.
+        C("G2 the bound is the engine-measured standing height, not the step reach",
+          MathF.Abs(StationGround.StandingHeight
+                    - ActorBand.ControllerTop(ActorBand.ScaleOneHeight)) < 1e-3f
+          && StationGround.StandingHeight > DetectorModel.StepHeight,
+          $"{StationGround.StandingHeight:0.###} u, against a step of {DetectorModel.StepHeight:0.###}");
+
+        var storey = StationGround.Read(z => Ground(z, new[] { (-3050f, true) }, 0f), -3000f, 0f);
+        C("G2 a navmesh a whole storey below the landscape does not anchor on the terrain",
+          storey.Anchor == FloorAnchor.Navmesh && MathF.Abs(storey.AnchorZ + 3000f) < 1e-3f,
+          $"anchor {storey.Anchor} at {storey.AnchorZ:0.###}");
+        C("G2 the storey gap is published, and the flag says the terrain is another storey",
+          storey.TerrainIsAnotherStorey && MathF.Abs(storey.NavmeshBurial - 3000f) < 1e-3f,
+          $"another storey {storey.TerrainIsAnotherStorey}, gap {storey.NavmeshBurial:0.###}");
+        C("G2 the floor beside a storey-deep navmesh is read at the navmesh, not at the ground",
+          storey.Floor.Found && MathF.Abs(storey.Floor.FloorZ + 3050f) < 1e-3f
+          && storey.Floor.Source == FloorSource.Mesh,
+          $"{storey.Floor.Source} at {storey.Floor.FloorZ:0.###}");
+
+        // The other arm of the same condition, one unit under the bound.
+        float justUnder = StationGround.StandingHeight - 1f;
+        var nearBound = StationGround.Read(z => Ground(z, new[] { (-5f, true) }, justUnder), 0f, justUnder);
+        C("G2 a burial just under an actor's height still anchors on the terrain",
+          nearBound.Anchor == FloorAnchor.Terrain && !nearBound.TerrainIsAnotherStorey,
+          $"anchor {nearBound.Anchor}, another storey {nearBound.TerrainIsAnotherStorey}, "
+          + $"gap {nearBound.NavmeshBurial:0.###}");
+
+        string whyS = ""; bool countedStorey = false;
+        var storeyLadder = StationRule.Compose(tall, "A4",
+            (_, _) => new StationEnvironment(true, true, true, -60f, Floor(-60f, 0f),
+                                             CELL_A, WS, Dry(), FloorAnchor.Navmesh, 3000f, true));
+        try
+        {
+            using var dS = JsonDocument.Parse(StationPoseFile.Render(hdr, new[] { storeyLadder }));
+            var yS = dS.RootElement.GetProperty("yield");
+            countedStorey =
+                yS.GetProperty("bySetup").GetProperty("A4")
+                  .GetProperty("stationsWhereTerrainIsAnotherStorey").GetInt32() == storeyLadder.Composed
+                && yS.GetProperty("byPrimitive").GetProperty(tall.Key).GetProperty("A4")
+                     .GetProperty("stationsWhereTerrainIsAnotherStorey").GetInt32() == storeyLadder.Composed;
+        }
+        catch (Exception ex) { whyS = ex.GetType().Name + ": " + ex.Message; }
+        C("G2 the yield counts the stations where the terrain is another storey",
+          countedStorey, whyS.Length > 0 ? whyS : $"of {storeyLadder.Composed} composed");
 
         check("stationrule: declared case count", ran == DeclaredCases,
               $"{ran} cases ran, {DeclaredCases} declared");

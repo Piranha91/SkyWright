@@ -166,10 +166,11 @@ static class StationMode
                 terrainZ = NavmeshFloor.LandHeightAt(heights, place.Grid.X, place.Grid.Y, x, y, out _);
             var field = FieldFor(place.Grid);
             var ground = StationGround.Read(z => field.Read(x, y, z), navZ, terrainZ);
-            if (ground.NavmeshBuried) buried++;
+            if (ground.TerrainIsAnotherStorey) buried++;
             return new StationEnvironment(answered, covered, drawn, navZ, ground.Floor,
                                           place.Cell, place.Worldspace, place.Water,
-                                          ground.Anchor, ground.NavmeshBurial, ground.NavmeshBuried);
+                                          ground.Anchor, ground.NavmeshBurial,
+                                          ground.TerrainIsAnotherStorey);
         }
 
         var yields = new List<StationYield>(chosen.Count);
@@ -395,7 +396,7 @@ static class StationMode
                 ["anchor"] = ground.Anchor.ToString(),
                 ["anchorZ"] = StationPoseFileNumber(ground.AnchorZ),
                 ["navmeshBurial"] = StationPoseFileNumber(ground.NavmeshBurial),
-                ["navmeshBuried"] = ground.NavmeshBuried,
+                ["terrainIsAnotherStorey"] = ground.TerrainIsAnotherStorey,
             },
             ["fieldReadingAnchoredOnTheNavmesh"] = new Dictionary<string, object?>
             {

@@ -108,14 +108,18 @@ public static class StationPoseFile
 
     sealed class Bucket
     {
-        public int Composed, Accepted, Buried;
+        public int Composed, Accepted, Buried, AnotherStorey;
         public readonly Dictionary<string, int> Rejected = new();
         public void Add(StationYield y)
         {
             Composed += y.Composed; Accepted += y.Accepted;
             // The stations standing on ground the navmesh is buried beneath, counted from the poses
             // themselves so the share cannot drift from what the file publishes.
-            foreach (var p in y.Poses) if (p.NavmeshBuried) Buried++;
+            foreach (var p in y.Poses)
+            {
+                if (p.FloorAnchor == FloorAnchor.Terrain) Buried++;
+                // DEFECT G3b: the stations where the terrain is ANOTHER STOREY are not counted.
+            }
             foreach (var (r, n) in y.Rejected)
                 Rejected[r.ToString()] = (Rejected.TryGetValue(r.ToString(), out int m) ? m : 0) + n;
         }
@@ -126,7 +130,8 @@ public static class StationPoseFile
             var d = new Dictionary<string, object?>
             {
                 ["composed"] = Composed, ["accepted"] = Accepted, ["rejected"] = Rejected,
-                ["stationsWithBuriedNavmesh"] = Buried,
+                ["stationsAnchoredOnTerrain"] = Buried,
+                ["stationsWhereTerrainIsAnotherStorey"] = AnotherStorey,
             };
             if (primitivesWithAStation is { } p) d["primitivesWithAStation"] = p;
             return d;
@@ -161,7 +166,7 @@ public static class StationPoseFile
         ["floorOffset"] = N(p.FloorOffset),
         ["floorAnchor"] = p.FloorAnchor.ToString(),
         ["navmeshBurial"] = N(p.NavmeshBurial),
-        ["navmeshBuried"] = p.NavmeshBuried,
+        ["terrainIsAnotherStorey"] = p.TerrainIsAnotherStorey,
         ["eyeHeight"] = N(p.EyeHeight),
         ["feetAboveSurface"] = p.FeetAboveSurface is { } fa ? N(fa) : null,
         ["planeZLow"] = N(p.PlaneZLow),
