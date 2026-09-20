@@ -444,6 +444,12 @@ var batsProfiles = new List<string>();
 // one explicit-camera capture only; a caller that wants to read a whole frame's depth instead of
 // asking pixel by pixel (the depth-survey demonstration, 2026-09-14).
 string? depthDump = null;
+// --stations SPEC.json / --stations-out POSES.json: compose the camera stations for this cell's
+// occlusion primitives and write the pose file. It renders NOTHING — it rides the load-order walk
+// the renderer already does, composes, writes, and exits. The logic is StationMode.cs; the rule it
+// calls is HarnessShared.StationRule, with proofprobe's cases on it.
+string? stationsSpec = null;
+string? stationsOut = null;
 for (int i = argStart; i < args.Length; i++)
 {
     if (args[i] == "--out" && i + 1 < args.Length) outDir = args[++i];
@@ -648,6 +654,10 @@ for (int i = argStart; i < args.Length; i++)
         }
     }
     else if (args[i] == "--occlusion-rule" && i + 1 < args.Length) ViewProbe.ShapeCullPolicy.Load(args[++i]);
+    // textured, because the load walk this mode rides — the winning refs, the navmesh, the cells'
+    // water — is inside that block. Nothing is drawn: the mode returns before the render section.
+    else if (args[i] == "--stations" && i + 1 < args.Length) { stationsSpec = args[++i]; textured = true; }
+    else if (args[i] == "--stations-out" && i + 1 < args.Length) stationsOut = args[++i];
     else if (args[i] == "--planes-reach" && i + 1 < args.Length) planesReach = float.Parse(args[++i]);
     else if (args[i] == "--bos" && i + 1 < args.Length)
     {
@@ -1078,6 +1088,22 @@ var watrRec = new Dictionary<FormKey, (string Ed, string? Noise, float NoiseUv,
                                        byte Opacity, float Fresnel)>();
 // Per-cell water, keyed by grid point, plus the worldspace fallbacks the cells defer to.
 var cellWater = new Dictionary<(int X, int Y), (bool Has, float Height, FormKey? Water)>();
+// --stations only. WHICH cell each grid square is (the pose names the cell the STATION stands in,
+// and the in-game driver verifies it by formId), every worldspace's own default water height and
+// its parent link (a city worldspace commonly takes its water from Tamriel), and the floor
+// neighbourhood filed by grid the way navprobe files it. All three cost nothing when the mode is
+// off: nothing fills them.
+var cellAtGrid = new Dictionary<(int X, int Y), (FormKey Key, string? Ed)>();
+var worldChain = new Dictionary<string, (float? Default, string? Parent)>(StringComparer.OrdinalIgnoreCase);
+string stationWorldspaceEd = "";
+var stationRefsByGrid = new Dictionary<(int, int), Dictionary<FormKey, PlacedRef>>();
+var stationLandByGrid = new Dictionary<(int, int), float[,]>();
+// How far out the cells' water and identity are harvested. One ring is all the renderer needs; a
+// station reaches up to the standoff cap plus a lateral from its primitive, which can leave the
+// target cell, so the mode widens it and the floor is filed one square wider still (FloorFeed
+// reads the 3x3 around the station's own square).
+int stationCellRadius = stationsSpec is not null ? 3 : 1;
+const int StationFloorRadius = 4;
 FormKey? wsWater = null;
 float wsDefaultWaterHeight = float.MaxValue;
 // The TRUTH arm of the same three (--water-arm truth): the last Bethesda-or-USSEP statement, by filename
@@ -1177,6 +1203,43 @@ bool IsControlEditorId(string ed) =>
     return got;
 }
 TriangleSoup? InsideSoupFor(string rel) => InsideMeshFor(rel).Soup;
+// A FLOOR candidate's solid, for --stations. Not InsideMeshFor's soup: that is the RENDER mesh,
+// and a floor is what an actor stands on — the collision soup on the actor-solid layers, with ITS
+// own box for the broad phase. navprobe's Geometry(), restated here over viewprobe's own resolver,
+// including its three outcomes: none (no actor-solid body — the object is not a floor), collision
+// (the complete solid), fallback (the decode was incomplete, so the render soup stands in).
+var floorGeo = new Dictionary<string, (Aabb Box, TriangleSoup Soup)?>(StringComparer.OrdinalIgnoreCase);
+(Aabb Box, TriangleSoup Soup)? FloorSolidFor(string rel)
+{
+    if (floorGeo.TryGetValue(rel, out var hit)) return hit;
+    (Aabb Box, TriangleSoup Soup)? got = null;
+    var full = rel.StartsWith("meshes", StringComparison.OrdinalIgnoreCase) ? rel : Path.Combine("meshes", rel);
+    var res = assets.ResolveForPlacement(full);
+    if (res.Sources.Count > 0)
+    {
+        var (bytes, _) = AssetResolver.ReadPlacementSource(res.Sources[0]);
+        if (bytes is not null && NifGeometry.Measure(bytes, includeTriangles: true).Model is { } m)
+        {
+            bool anySolid = m.CollisionBodies is not null
+                && m.CollisionBodies.Any(b => b.Solid && CollisionLayers.IsActorSolid(b.Layer));
+            var solid = m.HasCollision && anySolid
+                ? m.CollisionSoupFor(b => b.Solid && CollisionLayers.IsActorSolid(b.Layer)) : null;
+            if (m.HasCollision && anySolid && m.CollisionComplete && solid is { TriangleCount: > 0 })
+            {
+                var box = Aabb.Empty;
+                foreach (var v in solid.Vertices) box = box.Add(v);
+                if (!box.IsEmpty) got = (box, solid);
+            }
+            else if (m.HasCollision && anySolid && m.Soup is { TriangleCount: > 0 and <= 300_000 } rs
+                     && !m.Bounds.IsEmpty)
+                got = (m.Bounds, rs);          // fallback: an incomplete decode, labelled by this branch
+        }
+    }
+    floorGeo[rel] = got;
+    return got;
+}
+(Aabb Box, TriangleSoup Soup)? StationFloorGeometry(PlacedRef r)
+    => r.Base is { } b && baseMesh.TryGetValue(b, out var rel) ? FloorSolidFor(rel) : null;
 // Nearest hit along a ray against a world-space soup (Möller–Trumbore, both faces), or null
 // when nothing is hit within `limit`.
 static float? NearestHit(Vector3 o, Vector3 d, Vector3[] v, int[] idx, float limit)
@@ -1459,6 +1522,17 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot)
             foreach (var cp in PlacementExtract.FromMod(m))
             {
                 navSelection.Observe(cp, plgName, navVersionPlugins, winNav, navByPlugin);
+                // The floor neighbourhood, filed IN LOAD ORDER (a later plugin's ref of the same
+                // FormKey replaces an earlier one) — the LAND heightmaps with it, which is what
+                // stops a station on bare terrain being refused for want of a floor that is there.
+                // The worldspace's persistent cell has no grid of its own and its refs reach
+                // anywhere, so it is filed whole; a gridded cell is filed within reach of the
+                // target. Nothing here runs unless --stations asked for it.
+                if (stationsSpec is not null && !cp.Interior && cp.Worldspace == targetWorldspace
+                    && (cp.Grid is not { } cgS || targetGrid is not { } tgS
+                        || (Math.Abs(cgS.X - tgS.X) <= StationFloorRadius
+                            && Math.Abs(cgS.Y - tgS.Y) <= StationFloorRadius)))
+                    FloorFeed.FileByGrid(cp, stationRefsByGrid, stationLandByGrid);
                 if (bosFill) bosIdx!.NoteCell(cp.Cell, cp.Worldspace);
                 foreach (var r in cp.Refs)
                 {
@@ -2220,7 +2294,17 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot)
                     bool truthPlugin = HarnessShared.PluginKinds.ByName(Path.GetFileName(path)) is HarnessShared.PluginKind.Bethesda or HarnessShared.PluginKind.Ussep;
                     foreach (var ws in m2.Worldspaces.Records)
                     {
+                        // --stations: EVERY worldspace's default AS READ (sentinels kept — the one
+                        // resolver classifies them, this does not) and its parent link, taken
+                        // BEFORE the target filter, because the chain a city worldspace defers
+                        // along runs through worldspaces that are not the target.
+                        if (stationsSpec is not null)
+                            worldChain[ws.FormKey.ToString()] =
+                                (ws.LandDefaults?.DefaultWaterHeight,
+                                 ws.Parent?.Worldspace.FormKeyNullable is { IsNull: false } wp
+                                     ? wp.ToString() : null);
                         if (ws.FormKey != targetWorldspace) continue;
+                        if (ws.EditorID is { Length: > 0 } wsed) stationWorldspaceEd = wsed;
                         // The worldspace's own water, and the height its cells fall back to. Read
                         // per plugin in load order, so the last one to state either of them wins.
                         if (ws.Water.FormKeyNullable is { } wsw && !wsw.IsNull) wsWater = wsw;
@@ -2241,7 +2325,12 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot)
                         foreach (var c in Cells())
                         {
                             if (c.Grid?.Point is not { } gp) continue;
-                            if (Math.Abs(gp.X - tg.X) > 1 || Math.Abs(gp.Y - tg.Y) > 1) continue;
+                            if (Math.Abs(gp.X - tg.X) > stationCellRadius
+                                || Math.Abs(gp.Y - tg.Y) > stationCellRadius) continue;
+                            // WHICH cell this grid square is, for --stations: a pose names the cell
+                            // the STATION stands in, and one ladder reaches across a cell border.
+                            // In load order, so the last plugin to state the square wins it.
+                            if (stationsSpec is not null) cellAtGrid[(gp.X, gp.Y)] = (c.FormKey, c.EditorID);
                             // Water is harvested BEFORE the LAND gate below: a cell can be all
                             // sea with no heightmap at all, and that is exactly the cell whose
                             // water matters most.
@@ -2249,6 +2338,11 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot)
                                                        c.WaterHeight ?? float.MaxValue,
                                                        c.Water.FormKeyNullable is { } cw && !cw.IsNull ? cw : null);
                             if (truthPlugin) cellWaterTruth[(gp.X, gp.Y)] = cellWater[(gp.X, gp.Y)];
+                            // The TERRAIN stays at ring 1 whatever the water radius is: it is the
+                            // renderer's, and --stations gets its heightmaps from FloorFeed's own
+                            // filing instead. Widening it would decode a 7x7 block of LAND for a
+                            // mode that draws nothing.
+                            if (Math.Abs(gp.X - tg.X) > 1 || Math.Abs(gp.Y - tg.Y) > 1) continue;
                             if (c.Landscape?.VertexHeightMap is not { } vh) continue;
                             var grad = new sbyte[33, 33];
                             try
@@ -2716,6 +2810,69 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot)
                 Console.WriteLine($"   nav-at {qx:0},{qy:0}: NO winning triangle covers this point"
                                 + (bi >= 0 ? $"; nearest is {bk} tri {bi}, {best:0} u away (centroid)" : "; no navmesh at all in this cell"));
             }
+        }
+
+        // ---- --stations: compose the stations, write the pose file, and STOP ------------------
+        // Here, because everything it needs is now in hand — the winning refs and navmeshes, the
+        // cells' water, the worldspace chain, the floor filed by grid — and nothing below it is
+        // wanted: the route and the render sections are what this mode is not.
+        if (stationsSpec is not null)
+        {
+            if (stationsOut is null)
+            { Console.Error.WriteLine("--stations also needs --stations-out FILE to write the poses to."); return 2; }
+            if (interior)
+            {
+                Console.Error.WriteLine($"--stations: {cellLabel} is an INTERIOR cell. The water and "
+                                      + "the floor are both looked up by exterior grid square, and an "
+                                      + "interior has no grid — refusing rather than running a path "
+                                      + "nothing has tested.");
+                return 2;
+            }
+            var stationPrims = new List<ViewProbe.StationMode.Primitive>();
+            foreach (var r in winRef.Values.Where(r => r.Base is { } b && b == planeMarkerKey)
+                                           .OrderBy(r => r.FormKey.ToString(), StringComparer.Ordinal))
+            {
+                if (r.Deleted || !RefEnabled(r.FormKey)) continue;
+                var pk = r.Primitive?.Type switch
+                {
+                    "PortalBox" => (HarnessShared.PrimitiveKind?)HarnessShared.PrimitiveKind.PortalBox,
+                    "Box" => HarnessShared.PrimitiveKind.Box,
+                    _ => null,
+                };
+                if (pk is not { } kind || r.Primitive is not { } prim) continue;
+                var ph = planeHist.TryGetValue(r.FormKey, out var phh) ? phh : null;
+                stationPrims.Add(new ViewProbe.StationMode.Primitive(
+                    r.FormKey.ToString(), kind,
+                    new System.Numerics.Vector3(prim.Bounds.X, prim.Bounds.Y, prim.Bounds.Z) * r.Scale,
+                    new System.Numerics.Vector3(r.Position.X, r.Position.Y, r.Position.Z),
+                    new System.Numerics.Vector3(r.Rotation.X, r.Rotation.Y, r.Rotation.Z),
+                    ph?.DefinedBy ?? r.FormKey.ModKey.FileName.String,
+                    cellKey.ToString()));
+            }
+            return ViewProbe.StationMode.Run(new ViewProbe.StationMode.Inputs
+            {
+                SpecPath = stationsSpec,
+                OutPath = stationsOut,
+                Worldspace = targetWorldspace.ToString(),
+                WorldspaceEditorId = stationWorldspaceEd,
+                TargetCell = cellKey.ToString(),
+                Primitives = stationPrims,
+                Navmeshes = winNav.Values,
+                RefsByGrid = stationRefsByGrid,
+                LandByGrid = stationLandByGrid,
+                Geometry = StationFloorGeometry,
+                Enabled = RefEnabled,
+                CellAt = g => cellAtGrid.TryGetValue(g, out var ci)
+                    ? new HarnessShared.GridCellFacts(ci.Key.ToString(), targetWorldspace.ToString(),
+                                        cellWater.TryGetValue(g, out var cw)
+                                            ? new HarnessShared.DetectorModel.WaterTuple(cw.Has, false, cw.Water?.ToString(),
+                                                                           cw.Height, null, null, null, null)
+                                            : HarnessShared.DetectorModel.WaterTuple.None)
+                    : null,
+                WorldAt = name => worldChain.TryGetValue(name, out var wc)
+                    ? new HarnessShared.WorldFacts(wc.Default, wc.Parent) : null,
+                CommandLine = replayArgs,
+            });
         }
 
         // ---- the route: resolve every waypoint's z from the winning navmesh, then check it ----

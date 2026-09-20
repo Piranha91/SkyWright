@@ -226,6 +226,10 @@ A successful save or size check alone does not establish clean pixels.
   `diff` tints them. `--planes-report` writes per-view research JSON with source bounds,
   same-shape raster visibility and explicit coverage; no rule means unassessed. The nearby
   collision listing is supporting evidence. See the research limitations below.
+- **Camera stations for a cell's occlusion primitives:** `--stations SPEC.json --stations-out
+  POSES.json` composes the stations a player could stand at to look at each primitive, writes the
+  pose file with its yield header, and exits **without rendering anything**. Exteriors only. See
+  *Camera stations for occlusion primitives* below.
 - **Placed NPC actors:** `--npc FORMKEY[@X,Y,Z[,HEADING]][=label]` (repeatable; implies textured
   mode) renders the NPC's actual character model — FaceGen head, skinned body, and the outfit the
   RUNTIME will dress it in — at its winning placement or an explicit position (see *Placed NPC
@@ -1548,6 +1552,215 @@ The discarded whole-reference box predicate, sharp near-eye threshold and centre
 visibility decision are not operational guidance. Historical investigation belongs in the
 project's research corpus. The current bounded engine model, calibration and release acceptance
 remain pending; passing geometry or renderer fixtures alone does not establish them.
+
+---
+
+## Camera stations for occlusion primitives (`--stations`)
+
+A mode that **renders nothing**. It composes the camera stations a player could stand at to look
+at each occlusion primitive in a cell, writes a pose file with its yield accounting, and exits. It
+rides the load-order walk the renderer already does rather than starting a second one, which is
+why it takes the same worklist, profile and `--order` arguments as a render.
+
+```
+viewprobe <worklist.json> --stations <spec.json> --stations-out <poses.json>
+          --instance <MO2 instance> --profile <profile> --game <game dir>
+          [--order <candidate order file>] [--occlusion-rule <rule.json>]
+```
+
+The worklist names the target cell, because that is what drives the load-order walk. Nothing is
+drawn and no image is written; `--stations-out` is required, and its directory is created.
+
+The rule itself is not in this file: composition, the closed refusal set and the precedence are
+`_shared/StationRule.cs`, the cell-and-water lookup is `_shared/StationLookup.cs`, the pose file
+and its closure assertion are `_shared/StationPoseFile.cs`, and all three have known-answer cases
+in `proofprobe` (`stationrule: ...`). This mode is the plumbing between them and the load order.
+
+### The spec
+
+```jsonc
+{
+  "setup": "A3",                       // required: the arm this pose set belongs to. The yield
+                                       //   is kept per setup, and a pose carries it.
+  "label": "…",                        // optional, defaults to the setup
+  "primitives": ["000ABC:Some.esp"],   // optional: FormKeys to compose for. Omitted = every
+                                       //   occlusion primitive the winning state places in the
+                                       //   cell and its ring. A named primitive the arm does
+                                       //   not place REFUSES the run.
+  "k":        [0.25, 0.5, 1.0],        // optional; the sealed ladder is the default
+  "laterals": [-0.35, 0.0, 0.35],      // optional; likewise
+  "fovDeg": 80.0,                      // optional; the field of view carried on every pose
+  "eyeHeight": 120.5                   // optional, and CHECKED rather than applied: the eye
+                                       //   height is part of the rule. A spec that asks for a
+                                       //   different one is refused, not obeyed.
+}
+```
+
+A ladder that is not the sealed one is composed, but the run prints a warning and the pose file
+records `ladder.isTheSealedLadder: false` — a yield composed on a changed ladder is not comparable
+with one composed on the sealed ladder, and that has to be visible in the file rather than
+remembered.
+
+### The ladder
+
+Per primitive face: `k` × `side` (+1, −1) × `lateral`, so eighteen stations for a `PortalBox`
+and thirty-six for a `Box`. The standoff is `clamp(k × min(halfWidth, halfHeight), 250, 3000)`
+measured from the face along its outward normal; the lateral offset is `lateral × halfWidth` along
+the face. A `PortalBox` is a rectangle with one authored normal and stands off its mid-plane; a
+`Box` is a volume with four upright faces, so it gets a ladder per face and a pose names the face
+it stands off (`faceAxis` X or Y).
+
+### The pose file
+
+```jsonc
+{
+  "schema": "occl-transfer/station-poses/1",
+  "label": …, "setup": …, "worldspace": …, "worldspaceEditorId": …, "targetCell": …,
+  "composedAtUtc": …,
+  "ladder":    { "k": […], "laterals": […], "side": [1,-1], "standoffFloor": …,
+                 "standoffCap": …, "eyeHeight": …, "fovDeg": …, "isTheSealedLadder": true },
+  "floorRule": { "maxDepthBelowNavmesh": …, "upReachAboveNavmesh": …, "neighbourhood": … },
+  "primitives": 1, "primitivesTiltedOffZ": 0,
+  "stationsWithMoreThanOneCoveringTriangle": 0,
+  "spec":       { "path": …, "sha256": … },
+  "instrument": { "assembly": …, "sha256": …, "builtUtc": … },
+  "commandLine": …,
+  "yield": {
+    "bySetup":     { "<setup>": { "composed": n, "accepted": n,
+                                  "rejected": { "<reason>": n }, "primitivesWithAStation": n } },
+    "byPrimitive": { "<formKey>": { "<setup>": { "composed": n, "accepted": n,
+                                                 "rejected": { "<reason>": n } } } }
+  },
+  "poses": [ {
+    "primitive": …, "kind": "PortalBox|Box", "setup": …,
+    "cell": …, "worldspace": …,               // the cell the STATION stands in, not the primitive's
+    "stationIndex": n, "faceAxis": "Y|X", "k": …, "side": …, "lateral": …, "standoff": …,
+    "eye": [x,y,z], "lookAt": [x,y,z],        // lookAt.z == eye.z by construction
+    "pitchDeg": …, "bearingDeg": …,           // bearing: 0 = +Y, clockwise
+    "angleToPlaneNormalDeg": …, "fovDeg": …,
+    "navZ": …, "floorZ": …, "floorSource": "Mesh|Land|None", "floorOffset": …,
+    "eyeHeight": …, "feetAboveSurface": …, "planeZLow": …, "planeZHigh": …,
+    "water": { "verdict": "Real|WorldspaceDefault|KnownDryNoSurface|Unresolved",
+               "surfaceZ": …, "cellHeight": …, "kind": …, "worldDefault": …,
+               "fromWorldspace": …, "how": "…" },
+    "accepted": bool, "rejectionReason": "None|…", "rejectionDetail": "…"
+  } ]
+}
+```
+
+**Every composed station is published, accepted or refused**, so a pose file can be judged before
+anything is rendered. **A number the rule never measured is `null`, never a sentinel**: a refused
+station has no eye (there was no floor to stand it on) and therefore no pitch or offsets either,
+and `null` says so where a number would be read as a height. `cellHeight` is the exception that
+proves it — the engine's no-value markers are finite floats and stay numbers, because the raw
+value is what a reader checks the verdict against.
+
+**The yield closes or the file is not written.** For every bucket, per primitive and per setup and
+in the aggregate, `accepted + Σ rejected == composed`; a bucket that does not close refuses the
+write with the bucket named. The table is generated from one keyed structure and checked, never
+typed.
+
+### What a station has to satisfy
+
+| # | condition | number |
+|---|---|---|
+| C1 | **Level gaze.** `lookAt.z == eye.z`, and the published `pitchDeg` is measured from the eye and the aim point rather than asserted. | \|pitch\| ≤ 1e-4° |
+| C2 | **The eye stands on the physical floor**, not on the navmesh triangle: `eye.z = floorZ + eyeHeight`. A missing floor refuses; there is no fallback to the navmesh height. | 120.5 u |
+| C3 | **The feet are above the applicable water surface**: `floorZ ≥ waterSurfaceZ`. Every pose publishes `feetAboveSurface`. | 0 u |
+| C4 | **The surface is known.** Unresolvable refuses. | — |
+| C5 | **The station is standable**: a winning, drawn navmesh triangle covers the XY. | — |
+| C6 | **The eye lies within the primitive's vertical extent**, so the primitive's silhouette bounds the view. | — |
+
+The floor is the highest up-facing actor-solid surface (or the terrain) within `maxDepth` below and
+`upReach` above the navmesh height at the station's XY, read over the 3×3 grid-square neighbourhood
+of the station's own square — a floor mesh placed in the next cell reaches under this one. Both
+numbers are published in the pose file's `floorRule`. **C3 tests the FEET, not the eye**: a rule
+that tests the eye passes a station standing in water up to its neck.
+
+Where several drawn navmesh triangles cover one XY — storeys that overlap, a deck over a path —
+the **highest** is taken, and the number of such stations is reported in the header. The lower
+surface would put the eye inside whatever is above it.
+
+### Refusal reasons, and their precedence
+
+A station can fail several conditions at once, and the yield table depends on which one it is
+counted under, so the order is stated rather than left to the order the tests happen to run in.
+Most decisive first:
+
+| order | reason | when |
+|---|---|---|
+| 1 | `DegeneratePlane` | the primitive's extent, position or rotation is zero or non-finite |
+| 2 | `NoNavmeshAnswer` | the navmesh was asked and returned nothing at all — an instrument failure, never a geometric miss |
+| 3 | `NoCoveringTriangle` | no winning navmesh triangle covers the XY |
+| 4 | `AllCoveringTrianglesDeleted` | every covering triangle carries the deleted flag (0x08) |
+| 5 | `FloorUnknown` | a navmesh answer exists but no physical floor was found under it |
+| 6 | `WaterUnknown` | the applicable surface could not be resolved. Refused, never read as dry |
+| 7 | `StationUnderwater` | the feet stand below the applicable surface |
+| 8 | `EyeInsidePrimitive` | the eye lies inside or on the primitive, where it has no view shadow to be ranked by |
+| 9 | `EyeOutsidePlaneExtent` | the eye is outside the primitive's vertical extent |
+| 10 | `NonLevelGaze` | a guard. Level gaze is by construction, so this cannot fire on a composed pose; it exists so a later change cannot reintroduce a tilted aim in silence |
+
+Why this order: an instrument that said nothing has not measured a miss, so instrument failures
+outrank geometry. A surface can only be compared with feet that have a floor, so the ground
+outranks the water. "Unknown" outranks "under water", because a station whose surface cannot be
+resolved is not known to be under anything. The primitive-relative tests come last because they
+need a finished eye. Every refusal carries the numbers that decided it in `rejectionDetail`.
+
+### The water, and what it does about worldspaces
+
+One resolver decides — `CellBoundaryIndex.Resolve` over `DetectorModel`, the same one the water
+detectors use — and it is asked about **the cell the station's own XY falls in**, never the
+primitive's. One ladder reaches up to the standoff cap either side of its primitive while an
+exterior cell is 4,096 u across, so a station over the border stands in the neighbour's cell and is
+judged by the neighbour's surface.
+
+- A cell that states a usable height of its own gets it (`Real`).
+- A cell whose height is one of the engine's "use the level above" markers defers to the
+  worldspace default (`WorldspaceDefault`). **"No water height logged" is not dry** — it is the
+  marker, and the default applies.
+- A worldspace that itself defers is followed to its **parent** worldspace, and the pose's
+  `fromWorldspace` names the worldspace the height actually came from, so an inherited surface is
+  visible rather than implied. A chain that ends, loops or runs past its hop limit without a usable
+  height resolves to nothing. **This parent walk is a records-based reading, not an engine
+  measurement:** nothing in this project has watched the engine follow a worldspace parent for
+  water. It is what the records say, and it is stated here so a result that depends on it can be
+  weighed accordingly.
+- **A failed READ is never an answer.** A grid square the order defines no cell for, a worldspace
+  record that could not be read, or a parent link that leads to a record that could not be read
+  all resolve to `Unresolved`, and the station is refused `WaterUnknown` with a sentence naming
+  what failed. It is never read as dry — that substitution is the defect this rule was written
+  against.
+- Where a cell's own height settles the surface, an unreadable worldspace record does **not**
+  refuse the station: it could not have changed the answer.
+
+**What the one resolver does with the flag and the unmodelled markers**, recorded because it is
+counter-intuitive and because a written plan for this work said otherwise:
+
+- An **exterior** cell that clears its has-water flag but defers to the worldspace still has the
+  sea (measured on a constructed harbour fixture — the swimmer swam). The flag is honoured where
+  the cell states its own height.
+- An unmodelled out-of-range marker is `Unresolved` — refused — **when the has-water flag is
+  set**. With the flag **clear**, the resolver answers *known dry*, and this rule follows it
+  rather than overruling it from the outside. Both rows are pinned by cases in `proofprobe`
+  (`stationrule: B2 …`), which is where to look before assuming either.
+
+### What it deliberately does not check, and does not do
+
+- **Interiors.** Both the water and the floor are looked up by exterior grid square, and an
+  interior cell has no grid. An interior target is **refused with a message** rather than run
+  through a path nothing has tested.
+- **Whether the eye is inside a solid reference's bounds.** `shotplan.py`'s `inside_verdict` does
+  that for interiors; this mode does not.
+- **Whether the body would slide after landing.** A pose that is standable is not the same as a
+  pose a landed body keeps; the in-game landing assertion is the gate for that.
+- **Whether the station is reachable on foot.** A station that passes C1–C6 is one a body can
+  *stand at*, which is what a render needs. "Walk to" is a stronger claim and this mode never
+  makes it.
+- **Primitives tilted off the vertical.** The rule models an upright primitive turned about Z only.
+  A primitive carrying a rotation about X or Y is composed on that upright reading, counted in the
+  header as `primitivesTiltedOffZ` and named on the console — stated, not hidden.
+- **It does not rank stations, and it does not pick one.** It publishes every station it composed
+  with the numbers that decided its verdict; choosing among the accepted ones is the caller's.
 
 ---
 

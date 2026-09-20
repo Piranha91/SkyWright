@@ -33,6 +33,14 @@
     <Compile Include="..\_shared\Worklist.cs" Link="Worklist.cs" />
     <Compile Include="..\_shared\CollisionLayers.cs" Link="CollisionLayers.cs" />
     <Compile Include="..\_shared\CellBoundaryIndex.cs" Link="CellBoundaryIndex.cs" />
+    <!-- The stations mode: the station rule, the XY to cell to water lookup, the pose file, and
+         the floor plumbing every route probe already stands on. Compiled here so the mode calls
+         the SAME code proofprobe's cases are on, rather than a restatement of it. -->
+    <Compile Include="..\_shared\ActorBand.cs" Link="ActorBand.cs" />
+    <Compile Include="..\_shared\FloorFeed.cs" Link="FloorFeed.cs" />
+    <Compile Include="..\_shared\StationRule.cs" Link="StationRule.cs" />
+    <Compile Include="..\_shared\StationLookup.cs" Link="StationLookup.cs" />
+    <Compile Include="..\_shared\StationPoseFile.cs" Link="StationPoseFile.cs" />
     <PackageReference Include="SixLabors.ImageSharp" Version="3.1.11" />
     <PackageReference Include="SixLabors.ImageSharp.Drawing" Version="2.1.6" />
     <Compile Include="..\_shared\StateArm.cs" Link="StateArm.cs" />
