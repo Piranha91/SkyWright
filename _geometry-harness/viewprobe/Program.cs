@@ -4309,13 +4309,17 @@ if (worklist is not null)
         for (int wls = 0; wls < worklist.Cells[wlc].Shots.Count; wls++)
         {
             int rc = RunCellTextured(worklist.Cells[wlc].Cell, wlc, wls);
-            if (rc > 0) return rc;
+            if (rc > 0) return ViewProbe.ExtractionScratch.GuardExitCode(rc);
         }
-    return 0;
+    // GuardExitCode, not a bare 0. The extraction guard throws, and two of this file's own callers
+    // catch Exception and carry on, so whether the refusal reaches here is call-order luck. The
+    // refusal is latched where it happens; this is where a latched refusal becomes an exit code
+    // that no catch can improve on.
+    return ViewProbe.ExtractionScratch.GuardExitCode(0);
 }
 
 int singleRc = RunCellTextured(target, 0, 0);
-if (singleRc >= 0) return singleRc;
+if (singleRc >= 0) return ViewProbe.ExtractionScratch.GuardExitCode(singleRc);
 
 
 // ---------------------------------------------------------------------------------------

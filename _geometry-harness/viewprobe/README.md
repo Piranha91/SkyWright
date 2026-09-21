@@ -400,18 +400,27 @@ extracts — and an asset that changed on disk can never be read from a stale co
 **The destination is guarded.** Every extraction destination is checked against this process's own
 folder, and one outside it **refuses the run** instead of writing. If the library ever stops taking
 the destination from `AppContext.BaseDirectory`, that is a loud failure on the first extraction
-rather than a silent return to the shared folder.
+rather than a silent return to the shared folder. The refusal does not depend on its exception
+reaching the top: two of this tool's own call sites resolve assets inside `catch (Exception)` blocks
+that log and carry on, so the refusal is recorded the instant it happens and a run that was refused
+cannot end at exit 0 whatever became of the throw. It exits **4** if nothing worse happened first.
 
 **A killed process leaves its folder behind**, so the next run sweeps the parent for orphans. The
 sweep is a deleter, and what it may never delete is the whole of its contract:
 
-- a directory is viewprobe's **only** if it carries `viewprobe-extract.json` with a parsable marker.
-  A directory with exactly the right name and no marker is untouchable;
-- ownership is the process id **and** that process's start time, so a recycled id can neither get a
+- a directory is viewprobe's **only** if it carries `viewprobe-extract.json` with a marker this
+  build understands — its schema, its tool name, and both owner fields. A directory with exactly the
+  right name and no marker is untouchable, and so is one whose marker came from a later schema or
+  another tool;
+- ownership is the process id **and** that process's start time (in UTC, so a daylight-saving
+  transition cannot make a live process look like a recycled id), so a recycled id can neither get a
   live process's folder deleted nor hide the fact that an orphan was kept;
 - an owner whose liveness cannot be determined means **keep** — "I could not tell" is not "it is
   dead" — and so does a marker that cannot be read;
-- the delete at exit obeys the same rule and says why when it refuses.
+- **a delete is authorised only when the owner is this process or is provably gone**, at exit and on
+  the command line alike, and it says why when it refuses. `--delete-only` takes any path, so a rule
+  that stopped at "it carries a marker" would let one command remove a sibling's folder in the middle
+  of its render — this defect's own failure, coming back through the deleter.
 
 `viewprobe --extraction-scratch-sweep <dir> [--delete-only <subdir>]` runs exactly that code from
 the command line and prints one JSON object: what it deleted, and **everything it kept with the
@@ -420,6 +429,13 @@ reported as kept, so a leak is visible rather than silent. The ownership rule ab
 point's only authority: point it at the wrong directory and it will still refuse to touch anything
 that is not viewprobe's. The start-up sweep runs the same code and prints nothing, so the console of
 a render is unchanged; use the entry point when you want the report.
+
+**A folder the sweep cannot account for is recorded in the run log.** A sibling that is still
+rendering is normal and says nothing, but a folder with no marker, an unreadable marker, or an owner
+whose id has been recycled is disk this tool can no longer reclaim, and the renderer can die out of
+memory on a large cell, so this happens for real and costs gigabytes. The start-up sweep writes a
+note on the run record — per-run by construction, so it cannot make two simultaneous consoles differ
+— naming the count and the command that explains it.
 
 The library's own `ClearExtractedFiles()` is deliberately not called. Deleting the process's whole
 folder is strictly stronger, and the library documents that method as unsafe to call while a render

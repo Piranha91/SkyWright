@@ -181,12 +181,33 @@ def main():
         protective("the exit-time delete refuses a directory without the marker, and says why",
                    decoy.exists() and rc != 0 and MARKER.split(".")[0] in text,
                    "exit %s; %s" % (rc, " ".join(text.split())[:120]))
-        # Its OWN call. This check used to read the refusal's exit code above, so it asked for one
-        # code to be both non-zero (the refusal) and zero (the success) - and `mine` was never
-        # handed to --delete-only at all, so no behaviour could have satisfied it.
-        rc, doc, text = sweep(root, extra=["--delete-only", str(mine)])
-        check("the exit-time delete removes a directory that carries the marker",
-              not mine.exists() and rc == 0, "exit %s" % rc)
+        # A LIVE owner's folder, handed to the deleter on the command line. The marker alone must
+        # not authorise this: --delete-only takes any path, so a marker-only rule would let one
+        # command remove a sibling's extraction folder in the middle of its render - the exact
+        # failure the per-process folder exists to prevent, coming back through the deleter.
+        rc, doc, text = sweep(root, extra=["--delete-only", str(theirs)])
+        protective("--delete-only refuses a LIVE owner's folder, and says why",
+                   theirs.exists() and rc != 0 and "not gone" in text.lower(),
+                   "exit %s; %s" % (rc, " ".join(text.split())[:160]))
+        # Its OWN call, and a DEAD owner. This check used to read the refusal's exit code above, so
+        # it asked for one code to be both non-zero (the refusal) and zero (the success) - and no
+        # directory was ever handed to --delete-only at all, so no behaviour could have satisfied
+        # it.
+        gone = owned(root, "vp-gone-1", pid=dead_a)
+        rc, doc, text = sweep(root, extra=["--delete-only", str(gone)])
+        check("the exit-time delete removes a marked directory whose owner is gone",
+              not gone.exists() and rc == 0, "exit %s" % rc)
+
+        # --- a marker this build does not understand -------------------------------------------
+        future = owned(root, "vp-future-1", pid=dead_a, schema=99)
+        other = Path(root) / "vp-othertool-1"
+        (other).mkdir(parents=True, exist_ok=True)
+        (other / MARKER).write_text(json.dumps(
+            {"schema": 1, "tool": "something-else", "pid": dead_a, "startTicks": 1}),
+            encoding="utf-8")
+        rc, doc, text = sweep(root)
+        protective("a marker of a schema this build does not know is KEPT", future.exists())
+        protective("a marker belonging to another tool is KEPT", other.exists())
 
         # --- the root is honoured for the protections too --------------------------------------
         protective("nothing outside the given root was touched", Path(root).exists())

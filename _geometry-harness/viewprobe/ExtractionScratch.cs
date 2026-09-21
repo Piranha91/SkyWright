@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Text.Json;
+using HousecarlCore.Progress;
 
 namespace ViewProbe;
 
@@ -46,6 +47,16 @@ static class ExtractionScratch
     static readonly object Gate = new();
     static string? _root;
     static bool _exitHooked;
+    static string? _originalBase;
+    static bool _bracketOpen;
+    /// <summary>Set the instant the guard refuses, BEFORE the refusal is thrown. A throw can be
+    /// swallowed — two of the library's callers in this very file sit inside `catch (Exception)`
+    /// blocks that log and carry on — so the exit code must not depend on the exception reaching
+    /// `Main`. <see cref="Refusal"/> is what makes a refused run impossible to end at zero.</summary>
+    static string? _refusal;
+
+    /// <summary>The guard's refusal, if one happened, whatever became of the exception.</summary>
+    public static string? Refusal { get { lock (Gate) return _refusal; } }
 
     /// <summary>This process's extraction root once claimed, else null. Null after release.</summary>
     public static string? ClaimedRoot { get { lock (Gate) return _root; } }
@@ -86,9 +97,23 @@ static class ExtractionScratch
             Directory.CreateDirectory(baseDir);
             using var me = Process.GetCurrentProcess();
             long startTicks = StartTicks(me);
-            try { SweepCore(baseDir, delete: true); } catch (Exception) { /* a sweep that cannot run
-                must never stop a render: the worst case is disk left behind, which the next sweep
-                or the CLI entry point reports. */ }
+            try
+            {
+                var swept = SweepCore(baseDir, delete: true);
+                // WHERE A LEAK BECOMES VISIBLE. Not on the console: a start-up line whose text
+                // depended on what siblings happen to be running would make two simultaneous
+                // renders print different things, and those consoles are compared. The run record
+                // is per-run by construction, so it can carry this without that cost - and a
+                // recycled process id keeps an orphan for as long as that unrelated process lives,
+                // which on a renderer that can die out of memory means gigabytes nobody is told
+                // about.
+                if (swept.leaks > 0)
+                    RunLog.Current?.Note($"extraction scratch: {swept.leaks} folder(s) kept and not "
+                        + $"accounted for under '{baseDir}' - run "
+                        + $"`viewprobe --extraction-scratch-sweep \"{baseDir}\"` to see why");
+            }
+            catch (Exception) { /* a sweep that cannot run must never stop a render: the worst case
+                is disk left behind, which the next sweep or the CLI entry point reports. */ }
 
             string name = $"vp-{Environment.ProcessId}-{(uint)(startTicks & 0xFFFFFFFF):x8}";
             string root = Path.Combine(baseDir, name);
@@ -122,19 +147,35 @@ static class ExtractionScratch
     public static IDisposable Redirect()
     {
         string root = Claim();
-        string previous = AppContext.BaseDirectory;
+        lock (Gate)
+        {
+            // The value restored is the one captured the FIRST time a bracket opened, never the
+            // live slot: two brackets that nested or interleaved would otherwise restore the
+            // REDIRECTED value last and leave the process pointing at a folder that is about to be
+            // deleted. Nesting is refused outright as well, so neither can happen by construction.
+            if (_bracketOpen)
+                throw new InvalidOperationException(
+                    "viewprobe extraction scratch: a redirect bracket is already open. The bracket " +
+                    "exists to wrap ONE constructor; nesting it would restore the redirected value.");
+            _originalBase ??= AppContext.BaseDirectory;
+            _bracketOpen = true;
+        }
         AppContext.SetData(BaseDirectoryKey, root + Path.DirectorySeparatorChar);
-        return new Restorer(previous);
+        return new Restorer();
     }
 
-    sealed class Restorer(string previous) : IDisposable
+    sealed class Restorer : IDisposable
     {
         bool _done;
         public void Dispose()
         {
             if (_done) return;
             _done = true;
-            AppContext.SetData(BaseDirectoryKey, previous);
+            lock (Gate)
+            {
+                AppContext.SetData(BaseDirectoryKey, _originalBase);
+                _bracketOpen = false;
+            }
         }
     }
 
@@ -170,22 +211,46 @@ static class ExtractionScratch
     /// <summary>Every extraction destination passes through here. Outside this process's root — or
     /// before it has one — the run is refused rather than allowed to write where another process may
     /// be reading. Throws, and deliberately not from inside the extractor's catch: a guard whose
-    /// refusal becomes an error string is a guard that returns false and carries on.</summary>
+    /// refusal becomes an error string is a guard that returns false and carries on.
+    ///
+    /// THE THROW IS NOT THE ONLY THING THAT HAPPENS. Two of the library's callers in this repository
+    /// sit inside `catch (Exception)` blocks that log and carry on (TexturedScene's covering-model
+    /// resolve and its BuildFromFile), so an exception is not a reliable way to stop a run: whether
+    /// the refusal reaches Main is a matter of which call site trips first. The refusal is therefore
+    /// LATCHED before it is thrown, and <see cref="Program"/> turns a latched refusal into a
+    /// non-zero exit whatever happened to the exception.</summary>
     public static void RequireInside(string destPath)
     {
         string full = Path.GetFullPath(destPath);
         string? root = ClaimedRoot;
         if (root is null)
-            throw new InvalidOperationException(
+            throw Refuse(
                 "viewprobe extraction guard: the rendering library asked to extract '" + full +
                 "' but this process has not claimed an extraction scratch. Refusing the run rather " +
                 "than writing into a folder another render may be reading.");
         string rootFull = Path.GetFullPath(root).TrimEnd(Path.DirectorySeparatorChar);
         if (!full.StartsWith(rootFull + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase))
-            throw new InvalidOperationException(
+            throw Refuse(
                 "viewprobe extraction guard: the rendering library asked to extract to '" + full +
                 "', which is outside this process's extraction scratch '" + rootFull +
                 "'. Refusing the run: simultaneous renders must not share an extraction folder.");
+    }
+
+    static InvalidOperationException Refuse(string message)
+    {
+        lock (Gate) _refusal ??= message;
+        // Printed here as well as latched: a caught exception prints nothing of its own, and the
+        // person reading the console is owed the reason at the moment it happened.
+        Console.Error.WriteLine("   " + message);
+        return new InvalidOperationException(message);
+    }
+
+    /// <summary>The exit code a run must not improve on. Zero when the guard never refused.
+    /// Called on every path out of <c>Main</c> that returns a code.</summary>
+    public static int GuardExitCode(int rc)
+    {
+        if (Refusal is null) return rc;
+        return rc != 0 ? rc : 4;
     }
 
     // ---------------------------------------------------------------- sweep
@@ -223,7 +288,7 @@ static class ExtractionScratch
 
     sealed record SweepReport(string tool, string action, string root, bool rootExists,
                               IReadOnlyList<string> deleted, IReadOnlyList<object> kept,
-                              IReadOnlyList<object> errors);
+                              IReadOnlyList<object> errors, int leaks);
 
     /// <summary>The rule, in one place. A directory under <paramref name="root"/> is removed ONLY
     /// when it carries a parsable marker AND that marker's owner is provably gone. Everything else
@@ -234,8 +299,16 @@ static class ExtractionScratch
         var deleted = new List<string>();
         var kept = new List<object>();
         var errors = new List<object>();
+        int leaks = 0;
+        void Keep(string dir, string reason, bool leak)
+        {
+            // `leak` is the difference between a sibling that is simply still rendering and disk
+            // this tool can no longer account for. Only the second is worth anyone's attention.
+            if (leak) leaks++;
+            kept.Add(new { dir, reason, leak });
+        }
         if (!Directory.Exists(root))
-            return new SweepReport("viewprobe", "extraction-scratch-sweep", root, false, deleted, kept, errors);
+            return new SweepReport("viewprobe", "extraction-scratch-sweep", root, false, deleted, kept, errors, 0);
 
         foreach (var dir in Directory.GetDirectories(root))
         {
@@ -244,25 +317,14 @@ static class ExtractionScratch
                 var marker = Path.Combine(dir, MarkerName);
                 if (!File.Exists(marker))
                 {
-                    kept.Add(new { dir, reason = $"no {MarkerName}: not viewprobe's, or a crash before the marker was written" });
+                    Keep(dir, $"no {MarkerName}: not viewprobe's, or a crash before the marker was written", true);
                     continue;
                 }
-                int pid;
-                long ticks;
-                try
-                {
-                    using var doc = JsonDocument.Parse(File.ReadAllText(marker));
-                    pid = doc.RootElement.GetProperty("pid").GetInt32();
-                    ticks = doc.RootElement.GetProperty("startTicks").GetInt64();
-                }
-                catch (Exception ex)
-                {
-                    kept.Add(new { dir, reason = $"{MarkerName} could not be read ({ex.GetType().Name}); kept" });
-                    continue;
-                }
-                var (gone, why) = OwnerIsGone(pid, ticks);
-                if (!gone) { kept.Add(new { dir, reason = why }); continue; }
-                if (!delete) { kept.Add(new { dir, reason = "would delete: " + why }); continue; }
+                var m = ReadMarker(marker);
+                if (m.Why is not null) { Keep(dir, m.Why, true); continue; }
+                var (gone, why) = OwnerIsGone(m.Pid, m.StartTicks);
+                if (!gone) { Keep(dir, why, !why.EndsWith("is alive", StringComparison.Ordinal)); continue; }
+                if (!delete) { Keep(dir, "would delete: " + why, false); continue; }
                 Directory.Delete(dir, recursive: true);
                 deleted.Add(dir);
             }
@@ -271,7 +333,35 @@ static class ExtractionScratch
                 errors.Add(new { dir, error = ex.GetType().Name + ": " + ex.Message });
             }
         }
-        return new SweepReport("viewprobe", "extraction-scratch-sweep", root, true, deleted, kept, errors);
+        return new SweepReport("viewprobe", "extraction-scratch-sweep", root, true, deleted, kept, errors, leaks);
+    }
+
+    readonly record struct MarkerRead(int Pid, long StartTicks, string? Why);
+
+    /// <summary>Read a marker, or say why it cannot be used. "A parsable marker" is the contract's
+    /// words and it means all of it: the schema this build understands, this tool's name, and both
+    /// owner fields. Anything else is a directory we do not understand, and an unrecognised
+    /// directory is KEPT — a future schema must not be deletable by an older build.</summary>
+    static MarkerRead ReadMarker(string markerPath)
+    {
+        try
+        {
+            using var doc = JsonDocument.Parse(File.ReadAllText(markerPath));
+            var root = doc.RootElement;
+            if (!root.TryGetProperty("schema", out var schema) || schema.GetInt32() != MarkerSchema)
+                return new MarkerRead(0, 0, $"{MarkerName} carries schema "
+                    + (root.TryGetProperty("schema", out var s2) ? s2.ToString() : "(none)")
+                    + $", not {MarkerSchema}: this build does not understand it; kept");
+            if (!root.TryGetProperty("tool", out var tool) || tool.GetString() != "viewprobe")
+                return new MarkerRead(0, 0, $"{MarkerName} is not viewprobe's "
+                    + $"(tool = {(root.TryGetProperty("tool", out var t2) ? t2.ToString() : "(none)")}); kept");
+            return new MarkerRead(root.GetProperty("pid").GetInt32(),
+                                  root.GetProperty("startTicks").GetInt64(), null);
+        }
+        catch (Exception ex)
+        {
+            return new MarkerRead(0, 0, $"{MarkerName} could not be read ({ex.GetType().Name}); kept");
+        }
     }
 
     /// <summary>Is the owner provably gone? "I could not tell" is NOT "it is dead", and a process id
@@ -299,14 +389,24 @@ static class ExtractionScratch
         }
     }
 
+    /// <summary>UTC, deliberately. <c>Process.StartTime</c> is LOCAL time: across a daylight-saving
+    /// transition the same live process reads an hour different, which would turn "this is my own
+    /// folder" into "a recycled id". That only ever costs a kept folder here, never a wrong delete —
+    /// but a later rule that treated a different start time as proof of death would be wrong twice a
+    /// year, so the value stored is the one that does not move.</summary>
     static long StartTicks(Process p)
     {
-        try { return p.StartTime.Ticks; }
+        try { return p.StartTime.ToUniversalTime().Ticks; }
         catch (Exception) { return 0; }   // unreadable here means unmatchable there: the folder is kept
     }
 
-    /// <summary>The exit-time delete. Same authority as the sweep: the marker, and nothing else.
-    /// A directory without one is refused with the reason, never removed.</summary>
+    /// <summary>The exit-time delete, and the whole of what <c>--delete-only</c> may do. The SAME
+    /// authority as the sweep, in both halves: the marker says the directory is viewprobe's, and the
+    /// owner must be this process or be provably gone.
+    ///
+    /// The second half is not decoration. Without it the command line could delete a live sibling's
+    /// folder in the middle of its render — which is the very failure this whole file exists to
+    /// prevent, reintroduced through the deleter's own front door.</summary>
     static (bool deleted, string reason) DeleteOwned(string dir)
     {
         try
@@ -315,13 +415,20 @@ static class ExtractionScratch
             var marker = Path.Combine(dir, MarkerName);
             if (!File.Exists(marker))
                 return (false, $"refusing to delete '{dir}': it does not carry {MarkerName}, so it is not viewprobe's");
-            try { using var _ = JsonDocument.Parse(File.ReadAllText(marker)); }
-            catch (Exception ex)
+            var m = ReadMarker(marker);
+            if (m.Why is not null)
+                return (false, $"refusing to delete '{dir}': {m.Why}");
+            bool mine;
+            using (var me = Process.GetCurrentProcess())
+                mine = m.Pid == Environment.ProcessId && m.StartTicks == StartTicks(me);
+            if (!mine)
             {
-                return (false, $"refusing to delete '{dir}': its {MarkerName} could not be read ({ex.GetType().Name})");
+                var (gone, why) = OwnerIsGone(m.Pid, m.StartTicks);
+                if (!gone)
+                    return (false, $"refusing to delete '{dir}': it is not this process's and its owner is not gone — {why}");
             }
             Directory.Delete(dir, recursive: true);
-            return (true, "deleted");
+            return (true, mine ? "deleted: this process's own scratch" : "deleted: the owner is gone");
         }
         catch (Exception ex)
         {
