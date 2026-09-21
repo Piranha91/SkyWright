@@ -1769,7 +1769,20 @@ at the current eye, but does not supply a captured visibility measurement. The p
 
 `--planes-report` writes one `<render-stem>-planes.json` per rendered view and refuses to replace
 existing reports or their evidence directory. Every candidate shape is retained in JSON; console
-shortlists are not the candidate population. Each shape keeps every predicting plane, while
+shortlists are not the candidate population.
+
+**The report is serialised straight to the file.** A campaign report is around 600 MB of indented
+JSON, and it used to be built as one string and handed to `File.WriteAllText` — a .NET string is
+UTF-16, so that was over a gigabyte, plus another 600 MB to encode it back to UTF-8 to write, both
+live at the end of the heaviest step a render has. It now goes through the file stream. **The bytes
+are the same bytes**: the serialiser writes through the same writer either way and its indented
+output does not depend on the destination, which matters because a reader of a city report scans
+its text rather than decoding it. This removes the copies, not the document: the per-plane rows are
+still built before the write, and they are most of what the process holds. Because a streamed file
+exists on disk while it is still being written, it is written as `<render-stem>-planes.json.writing`
+and renamed only once it is complete and flushed — **a run that fails or is killed mid-report leaves
+nothing that globbing for `*-planes.json` can find**, and a leftover `.writing` file says what it
+is. `--report-sink-selftest <dir>` checks the byte-identity, the refusal and the failure path. Each shape keeps every predicting plane, while
 affected references are counted uniquely. The report is still research, not a completed defect
 classifier or a compatibility attribution.
 

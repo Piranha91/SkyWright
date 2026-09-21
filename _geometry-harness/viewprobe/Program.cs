@@ -87,6 +87,13 @@ if (args.Length >= 2 && args[0] == "--asset-path-budget")
 // value either side of a mask pixel. Needs no MO2 instance.
 if (args.Length >= 2 && args[0] == "--mask-evidence-selftest")
     return ViewProbe.MaskEvidenceSelfTest.Run(args[1]);
+// The report sink's two promises - the same bytes the string route wrote, and never a half-written
+// report under the real name. The second needs a process to be killed in the middle of a write, so
+// the slow arm is here too. Needs no MO2 instance.
+if (args.Length >= 2 && args[0] == "--report-sink-selftest")
+    return ViewProbe.ReportSinkSelfTest.Run(args[1]);
+if (args.Length >= 3 && args[0] == "--report-sink-kill-arm")
+    return ViewProbe.ReportSinkSelfTest.KillArm(args[1], int.Parse(args[2]));
 
 bool guiLaunch = GuiLaunch();
 if (guiLaunch)
@@ -4123,7 +4130,10 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot)
                     // opt-out let the run succeed anyway. See UnreadableAssets.ReportBlock.
                     unreadableAssets = ViewProbe.UnreadableAssets.ReportBlock(),
                 };
-                File.WriteAllText(jsonPath, System.Text.Json.JsonSerializer.Serialize(doc, new System.Text.Json.JsonSerializerOptions { WriteIndented = true }));
+                // Straight to the file rather than to a string first: this document is ~600 MB of
+                // indented JSON and the string was a gigabyte of UTF-16 on top of it. The bytes are
+                // the same bytes, and the file only takes its own name once it is complete.
+                ViewProbe.ReportSink.Write(jsonPath, doc);
                 Console.WriteLine($"   wrote {jsonPath}");
             };
         }
