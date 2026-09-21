@@ -81,6 +81,12 @@ if (args.Length >= 2 && args[0] == "--extraction-scratch-fail")
 // so a test can stand one character either side of the limit. Needs no MO2 instance.
 if (args.Length >= 2 && args[0] == "--asset-path-budget")
     return ViewProbe.AssetPathBudget.Report(args[1..]);
+// The visibility-mask evidence writer - how a mask is derived from the isolated depth buffer, how
+// it is identified, and that a repeat written from the cache is byte-identical to one encoded
+// again - over buffers built in the test rather than rendered, so a check can stand one depth
+// value either side of a mask pixel. Needs no MO2 instance.
+if (args.Length >= 2 && args[0] == "--mask-evidence-selftest")
+    return ViewProbe.MaskEvidenceSelfTest.Run(args[1]);
 
 bool guiLaunch = GuiLaunch();
 if (guiLaunch)

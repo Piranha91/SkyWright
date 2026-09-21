@@ -357,6 +357,7 @@ all knowledge.
 | `VP_FLY_PLANES=on\|off` | show or hide the occlusion-planes layer before the capture — the `L` key's effect, headlessly. The layer is resident in every fly-through whether or not `--planes` was given, so this works without it |
 | `VP_FLY_OCCLUSION=off\|on\|diff` | set the occlusion preview before the capture — the `O` key's effect, headlessly |
 | `VP_OCCL_TINT_ALL=1` | the occlusion preview's POSITIVE CONTROL: every drawn ref counts as culled, so `--occlusion diff` must come out washed red and `on` must come out empty. A well-placed plane's cull changes no pixel (its shadow lies inside the shadow of the wall it stands in), which looks exactly like a preview that failed; this is what tells them apart |
+| `HOUSECARL_VERIFY_MASK_CACHE=1` | with `--planes-report`: re-encode every visibility mask the per-view cache serves from memory and compare it to what was cached, print the counts, and FAIL the run on a mismatch rather than writing a mask it cannot confirm. The cache's correctness is an argument about the key (see *Research preview and report*); this is the switch that puts the argument to a real render |
 
 ---
 
@@ -1777,6 +1778,26 @@ the same camera and state. Both passes use the same single-sample layout and exa
 comparison. Green mask samples are visible and red samples hidden; counts describe that finite
 raster only. A culled rear shape entirely hidden by a drawn front shape is healthy. A hidden
 centre cannot suppress visible edge samples. The scene depth and per-shape masks are saved.
+
+**One encode per distinct mask.** A mask is a picture of one comparison, so it carries two bits per
+pixel and most of a view's shapes produce a picture the view has already produced — an off-screen
+or fully hidden shape gives the same mask as every other. The writer keeps a per-view cache and
+writes a repeat from bytes it has already encoded. **Nothing about the output changes**: the same
+file names, the same bytes, the same digests, so anything reading the masks or digesting them sees
+exactly what it saw before. What changes is that a view stops encoding the same picture over and
+over, and encoding — not creating the files — is nearly all of what that step costs.
+
+The cache is keyed on the isolated depth buffer's SHA-256, which the report already carries as
+`isolatedDepthSha256`, so the key is free. Within a view the scene depth is fixed, and a mask is
+computed from that one buffer and nothing else (`MaskEvidence.BuildMask`), so a key that matches
+means a mask that matches. The implication runs one way: two different depth buffers can produce
+the same mask, and then the cache simply misses the repeat and encodes it, which costs what today
+costs. The cache is created beside the depth buffers it is keyed on and dies with them, so a
+process rendering several views cannot carry one view's pictures into another.
+`HOUSECARL_VERIFY_MASK_CACHE=1` re-encodes every cache hit and compares it, prints the counts, and
+fails the run rather than writing a mask it cannot confirm; `--mask-evidence-selftest <dir>` runs
+the mechanism over built buffers and prints what it measured.
+
 The per-view draw budget defaults to 256. For a bounded evaluation, pass
 `--visibility-budget N` (integer 1..16384, with `--planes-report`, non-interactive only).
 The budget resets for each view and is recorded in the report and its input identity.

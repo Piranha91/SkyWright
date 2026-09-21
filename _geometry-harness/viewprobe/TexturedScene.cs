@@ -1639,8 +1639,7 @@ static class TexturedScene
             {
                 var plainDepth = new float[sizeW * sizeH];
                 Draw(plainDepth, singleSample: true);
-                string DepthHash(float[] depth) => Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(
-                    System.Runtime.InteropServices.MemoryMarshal.AsBytes(depth.AsSpan())));
+                string DepthHash(float[] depth) => ViewProbe.MaskEvidence.DepthHash(depth);
                 occl.SceneDepthHash = DepthHash(plainDepth);
                 var evidenceDir = Path.Combine(Path.GetDirectoryName(Path.GetFullPath(outPath))!,
                     Path.GetFileNameWithoutExtension(outPath) + "-audit-evidence");
@@ -1651,6 +1650,12 @@ static class TexturedScene
                 var allMeshes = meshes.Concat(npcActors.SelectMany(a => a.Meshes)).Distinct().ToArray();
                 var savedVisibility = allMeshes.ToDictionary(m => m, m => m.IsRendering);
                 var ownDepth = new float[sizeW * sizeH];
+                // Created HERE, beside the depth buffers whose contents its keys identify, and
+                // thrown away with them. A view's masks cannot reach the next view's because the
+                // cache does not outlive the buffers it is keyed on - not because anything
+                // remembers to clear it. `plainDepth` is per view, so a key from another view would
+                // not mean the same mask.
+                var maskCache = new ViewProbe.MaskEvidenceCache(ViewProbe.MaskEvidence.VerifyRequested);
                 occl.MarkVisible(part =>
                 {
                     if (occl.VisibilityDraws >= occl.VisibilityBudget)
@@ -1664,21 +1669,26 @@ static class TexturedScene
                         occl.VisibilityDraws++;
                         part.IsolatedDepthHash = DepthHash(ownDepth);
                         var measured = ShapeVisibility.Compare(ownDepth, plainDepth);
-                        var mask = new byte[sizeW * sizeH * 4];
-                        for (int i = 0; i < ownDepth.Length; i++)
-                        {
-                            mask[i*4+3] = 255;
-                            if (ownDepth[i] == 1) continue;
-                            mask[i*4 + (ownDepth[i] <= plainDepth[i] ? 1 : 0)] = 255;
-                        }
+                        var mask = ViewProbe.MaskEvidence.BuildMask(ownDepth, plainDepth);
                         part.VisibilityMask = Path.Combine(evidenceDir, $"shape-{occl.VisibilityDraws:D4}-block-{part.Block}.png");
-                        using var maskImage = Image.LoadPixelData<Rgba32>(mask, sizeW, sizeH);
-                        maskImage.Mutate(x => x.Flip(FlipMode.Vertical));
-                        maskImage.SaveAsPng(part.VisibilityMask);
+                        // Keyed on the hash of the buffer the mask was just built from, which this
+                        // shape has already paid for above. Most of a view's shapes produce a
+                        // picture the view has already encoded.
+                        maskCache.Write(part.IsolatedDepthHash, mask, sizeW, sizeH, part.VisibilityMask);
                         return measured;
                     }
                     finally { foreach (var (m, visible) in savedVisibility) m.IsRendering = visible; }
                 });
+                // Only when verification was asked for: a healthy run's console says exactly what
+                // it said before. A mismatch has already been reported on stderr, per mask.
+                if (maskCache.Verifying)
+                {
+                    Console.WriteLine("   " + maskCache.VerifySummary());
+                    if (maskCache.Mismatches > 0)
+                        throw new InvalidOperationException(
+                            $"mask evidence verification failed: {maskCache.Mismatches} of {maskCache.Hits} "
+                            + "cache hit(s) re-encoded to different bytes");
+                }
             }
             else occl.SceneIssues.Add("interactive view has no captured shape visibility measurement");
             // BEFORE the sink, because the sink WRITES the report and the report carries the
