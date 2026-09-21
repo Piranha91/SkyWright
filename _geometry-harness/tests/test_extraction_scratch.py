@@ -181,6 +181,10 @@ def main():
         protective("the exit-time delete refuses a directory without the marker, and says why",
                    decoy.exists() and rc != 0 and MARKER.split(".")[0] in text,
                    "exit %s; %s" % (rc, " ".join(text.split())[:120]))
+        # Its OWN call. This check used to read the refusal's exit code above, so it asked for one
+        # code to be both non-zero (the refusal) and zero (the success) - and `mine` was never
+        # handed to --delete-only at all, so no behaviour could have satisfied it.
+        rc, doc, text = sweep(root, extra=["--delete-only", str(mine)])
         check("the exit-time delete removes a directory that carries the marker",
               not mine.exists() and rc == 0, "exit %s" % rc)
 
