@@ -503,6 +503,28 @@ is in progress — which at process exit is not something the host can establish
 deletes it for you, because it sits inside your binaries and this tool does not delete things it
 did not create; remove it by hand when you want the space back.
 
+### How many renders may run at once — computed, not typed
+
+Renders that no longer corrupt each other can still exhaust the machine, and graphics and system
+memory run out together: `tools/renderlimit.py` computes the limit and `tools/renderagree.py`
+obeys it. The rule is the minimum of what each resource allows — `(free − reserve) ÷ what one
+process of this job needs` — capped by the `-n` you asked for, which is a **ceiling, never a
+floor**. What one process needs is measured from the solo render the driver already does, or
+supplied with `--per-process-gpu-mib` / `--per-process-sys-mib`, which always wins; there is no
+constant in the tree for it, because it depends on the cell, the frame size and the report.
+
+The measured figure is the **peak drop in free memory over the baseline** taken before the solo
+render — machine-wide and labelled as such, since Windows does not report per-process graphics
+memory, so anything else running inflates it. The reserve is the one policy number (default 2000
+MiB, `--reserve-mib`), and the plan prints it.
+
+When the machine cannot be asked — no `nvidia-smi` on PATH, a reader that fails, a reader that
+answers something that is not a number — the plan runs **one** process and prints the reason; it
+never becomes "as many as asked". If not even one process fits, it refuses at exit 2 rather than
+starting hopefully. `--dry-run` prints the plan and renders nothing, and `--gpu-free-mib` /
+`--sys-free-mib` / `--no-memory-reader` stand in for the machine, which is how the rule is
+exercised on hardware that has no such reader at all.
+
 ### An asset that was found and could not be read fails the run
 
 The two census counts above — *refs without a resolvable mesh* and *textures the resolver could NOT

@@ -33,6 +33,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 sys.path.insert(0, os.path.abspath(os.path.join(HERE, "..", "..", "..", "scripts")))
 import renderequiv as RE  # noqa: E402
+import renderlimit as RL  # noqa: E402
 
 try:
     from runlog import Run                     # the project's run records
@@ -79,20 +80,65 @@ def child_record(tag, result, parent_id, session):
         return child.run_id
 
 
+def memory_plan(a, need=None):
+    """What the machine allows, and the sentence that says why.
+
+    A supplied figure always wins over a measured one; a supplied READING likewise, which is what
+    makes this checkable on a machine with no GPU reader at all.
+    """
+    graphics = (RL.Reading(RL.GRAPHICS, a.gpu_free_mib, None, "supplied", True)
+                if a.gpu_free_mib is not None else
+                RL.Reading(RL.GRAPHICS, None, None, "none", False,
+                           "no memory reader was consulted (--no-memory-reader)")
+                if a.no_memory_reader else RL.read_graphics_free())
+    system = (RL.Reading(RL.SYSTEM, a.sys_free_mib, None, "supplied", True)
+              if a.sys_free_mib is not None else
+              RL.Reading(RL.SYSTEM, None, None, "none", False,
+                         "no memory reader was consulted (--no-memory-reader)")
+              if a.no_memory_reader else RL.read_system_free())
+    if need is None and a.per_process_gpu_mib is not None and a.per_process_sys_mib is not None:
+        need = RL.Need(a.per_process_gpu_mib, a.per_process_sys_mib, "supplied")
+    return RL.plan_limit(asked=a.n, need=need, graphics=graphics, system=system,
+                         reserve_mib=a.reserve_mib)
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--exe", required=True)
     ap.add_argument("--work", required=True, help="a directory for the outputs; it is rewritten")
-    ap.add_argument("-n", type=int, default=2, help="how many renders start together")
+    ap.add_argument("-n", type=int, default=2, help="how many renders start together. It is a "
+                                                    "CEILING: the memory plan may allow fewer")
     ap.add_argument("--trials", type=int, default=1)
     ap.add_argument("--waive", default="", help="parts not to compare, by NAME (e.g. reports,masks)")
     ap.add_argument("--json", default="", help="write the whole result here")
+    ap.add_argument("--dry-run", action="store_true",
+                    help="print the memory plan and exit without rendering anything")
+    ap.add_argument("--per-process-gpu-mib", type=float, default=None,
+                    help="graphics memory ONE render of this job needs. Supplied wins over the "
+                         "figure measured from the solo run")
+    ap.add_argument("--per-process-sys-mib", type=float, default=None,
+                    help="system memory one render of this job needs")
+    ap.add_argument("--gpu-free-mib", type=float, default=None,
+                    help="use this instead of asking the machine for free graphics memory")
+    ap.add_argument("--sys-free-mib", type=float, default=None,
+                    help="use this instead of asking the machine for free system memory")
+    ap.add_argument("--reserve-mib", type=float, default=RL.RESERVE_MIB,
+                    help="memory held back from the plan (default %(default)s)")
+    ap.add_argument("--no-memory-reader", action="store_true",
+                    help="do not ask the machine at all: the unreadable case, on purpose")
     ap.add_argument("rest", nargs=argparse.REMAINDER,
                     help="-- then every viewprobe argument except --out")
     a = ap.parse_args(argv)
     args = [x for x in a.rest if x != "--"]
     if not args:
         ap.error("give the viewprobe arguments after --")
+    if a.dry_run:
+        plan = memory_plan(a)
+        print(plan.line())
+        print("   reserve: %.0f MiB held back" % a.reserve_mib)
+        for key in ("graphics", "system"):
+            print("   %s" % plan.detail.get(key, key))
+        return 2 if plan.refused else 0
     if not os.path.isfile(a.exe):
         print("no such executable: %s" % a.exe)
         return 2
@@ -103,6 +149,7 @@ def main(argv=None):
 
     parent_id, session = None, os.environ.get("HOUSECARL_SESSION_ID")
     doc = {"exe": a.exe, "n": a.n, "trials": a.trials, "waived": list(waive), "trialResults": []}
+    n = a.n                                        # a ceiling until the memory plan says otherwise
     ctx = Run("renderagree", mode="runner", stage_source="counted", heartbeat=True,
               session_id=session) if Run is not None else None
     try:
@@ -112,7 +159,16 @@ def main(argv=None):
             ctx.feature("renders", a.n * a.trials + 1, "renders")
             ctx.stage("trials", "comparing simultaneous renders", a.trials, "trials")
 
-        solo = finish(render(a.exe, args, os.path.join(a.work, "solo"), "renderagree-solo"))
+        # The solo render is also the measurement: what ONE process of THIS job needs is sampled
+        # while it runs alone, unless the caller supplied the figure, which always wins.
+        job = render(a.exe, args, os.path.join(a.work, "solo"), "renderagree-solo")
+        supplied = a.per_process_gpu_mib is not None and a.per_process_sys_mib is not None
+        if supplied or a.no_memory_reader:
+            measured, samples = None, {"skipped": "a supplied per-process figure wins"
+                                       if supplied else "no memory reader was consulted"}
+        else:
+            measured, samples = RL.measure_need(lambda: job["proc"].poll() is None)
+        solo = finish(job)
         child_record("renderagree-solo", solo, parent_id, session)
         doc["solo"] = {"exit": solo["exit"], "census": RE.census(solo["console"])}
         if solo["exit"] != 0:
@@ -120,10 +176,25 @@ def main(argv=None):
             doc["verdict"] = "the reference render failed"
             return 2
 
+        plan = memory_plan(a, need=measured)
+        print(plan.line())
+        print("   reserve: %.0f MiB held back" % a.reserve_mib)
+        doc["memoryPlan"] = {"limit": plan.limit, "basis": plan.basis, "reason": plan.reason,
+                             "refused": plan.refused, "detail": plan.detail, "samples": samples}
+        if ctx is not None:
+            ctx.note(plan.line())
+        if plan.refused:
+            print("refusing to start the simultaneous renders: %s" % plan.reason)
+            doc["verdict"] = "refused before rendering: " + plan.reason
+            return 2
+        n = plan.limit
+        if n < a.n:
+            print("   starting %d of the %d asked for" % (n, a.n))
+
         bad_total = 0
         for t in range(1, a.trials + 1):
             jobs = [render(a.exe, args, os.path.join(a.work, "t%d-%d" % (t, i + 1)),
-                           "renderagree-t%d-%d" % (t, i + 1)) for i in range(a.n)]
+                           "renderagree-t%d-%d" % (t, i + 1)) for i in range(n)]
             started = time.perf_counter()
             group = [finish(j) for j in jobs]
             span = round(time.perf_counter() - started, 2)
@@ -141,12 +212,12 @@ def main(argv=None):
             doc["trialResults"].append({"trial": t, "seconds": span, "renders": rows,
                                         "differing": len(bad)})
             print("trial %d: %d of %d renders differ from the solo run%s"
-                  % (t, len(bad), a.n,
+                  % (t, len(bad), n,
                      "" if not bad else " — " + "; ".join("%s: %s" % (r["render"], ",".join(r["notEqual"]))
                                                           for r in bad)))
             if ctx is not None:
                 ctx.advance()
-                ctx.tally(ok=a.n - len(bad), failed=len(bad))
+                ctx.tally(ok=n - len(bad), failed=len(bad))
         doc["differingRenders"] = bad_total
         doc["verdict"] = ("every simultaneous render matched the solo render" if bad_total == 0
                           else "%d simultaneous render(s) did not match the solo render" % bad_total)
