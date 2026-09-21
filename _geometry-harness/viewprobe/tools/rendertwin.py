@@ -728,6 +728,13 @@ def makelist(a):
             shots.append({"Label": "%d an actor" % (ci + 1), "Eye": base, "Look": look,
                           "Nav": "off", "Npcs": [{"Form": a.npc, "Label": "actor"}]})
             varied.add("Npcs")
+        # LAST, and deliberately bare: a shot that overrides nothing and so INHERITS the run's own
+        # settings. Inheriting is what a leak looks like - a shot that states a cut height is
+        # immune to a leaked cut height, and a worklist all of whose shots state everything cannot
+        # show one. This shot follows two that DO state a cut, so a reset that goes missing lands
+        # here and nowhere else.
+        shots.append({"Label": "%d inherits everything, after the cuts" % (ci + 1),
+                      "Eye": [base[0] + 5.0, base[1] - 5.0, base[2]], "Look": look})
         cells.append({"Cell": cell, "Shots": shots})
     doc = {"Label": "rendertwin equivalence", "Cells": cells, "EyeHeight": 120.0}
     with open(a.out, "w", encoding="utf-8") as f:
