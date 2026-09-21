@@ -102,7 +102,8 @@ SHOT_ROWS = {
     "Look":       "varied: one shot aims by Look (which wins over Yaw/Pitch), the others do not",
     "FloorZ":     "varied: present on one shot, absent on another",
     "Nav":        "varied: the navmesh overlay is off on one shot and drawn on another",
-    "CullAbove":  "varied: absent, and two different cut heights",
+    "CullAbove":  "varied: absent, and two different cut heights - measured from the LOOK point, "
+                  "so the cut lands in the geometry being looked at rather than above the eye",
     "Planes":     "varied: the occlusion-plane layer is off on one shot and on for another",
     "Occlusion":  "varied: the occlusion preview mode, --occlusion-mode (off by default: on|diff "
                   "needs planes in the cell, so the caller turns it on where the cell has them)",
@@ -691,12 +692,12 @@ def makelist(a):
              "Nav": "off", "ViewpointKind": "diagnostic", "Control": False},
             {"Label": "%d a yaw aim, cut low" % (ci + 1),
              "Eye": [base[0] + 40.0, base[1] - 40.0, base[2] + 10.0], "Yaw": 135.0, "Pitch": 12.0,
-             "Fov": 80.0, "Aspect": 1.7777778, "CullAbove": base[2] + 200.0, "Nav": "off",
+             "Fov": 80.0, "Aspect": 1.7777778, "CullAbove": look[2] + 200.0, "Nav": "off",
              "FloorZ": base[2] - 120.0, "ViewpointKind": "control",
              "ViewpointEvidence": "the second row of the coverage table", "Control": True},
             {"Label": "%d turned around, cut high, planes on" % (ci + 1),
              "Eye": [base[0] - 60.0, base[1] + 30.0, base[2] - 20.0], "Yaw": 300.0, "Pitch": -8.0,
-             "Fov": 50.0, "CullAbove": base[2] + 600.0, "Nav": a.nav_on, "Planes": True,
+             "Fov": 50.0, "CullAbove": look[2] + 600.0, "Nav": a.nav_on, "Planes": True,
              "ViewpointKind": "diagnostic", "Control": False},
         ]
         varied |= {"Label", "Eye", "Yaw", "Pitch", "Fov", "Aspect", "Look", "FloorZ", "Nav",
