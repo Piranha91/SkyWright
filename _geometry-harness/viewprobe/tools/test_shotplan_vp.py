@@ -183,22 +183,35 @@ def test_resolver_reports_both_halves():
 
 
 def test_this_checkout_default():
-    """The path every caller actually takes. This checkout has a built viewprobe.exe, so the
-    default command must be that executable - this is the case the packet is about."""
+    """The path every caller actually takes, on the real checkout - so which arm applies is
+    MEASURED here rather than assumed. A source file touched after the last build (a sabotage
+    restore does exactly that, content unchanged) is a real stale executable to this rule, and the
+    honest answer is then the fallback, naming that file. After a rebuild the other arm applies.
+    """
     built = os.path.join(S.VIEWPROBE_DIR, "bin", "Release", "net9.0-windows10.0.19041.0",
                          "viewprobe.exe")
     if not os.path.isfile(built):
         check("this checkout has a built viewprobe to prefer", False,
               "not built: %s - this case cannot decide anything here" % built)
         return
+    src, when = S.newest_source(S.VIEWPROBE_DIR)
+    stale = when > os.stat(built).st_mtime
     cmd, out, err = call_vp_command(None)
     print("       vp_command(None) here -> %r" % (cmd,))
     if err.strip():
         print("       and it said: %s" % err.strip().splitlines()[0])
-    check("the default command is not a dotnet build check",
-          cmd[:2] != ["dotnet", "run"], repr(cmd))
-    check("the default command is the built executable",
-          cmd and os.path.normcase(cmd[0]) == os.path.normcase(built), repr(cmd[:1]))
+    check("the notice never touches stdout", out == "", repr(out))
+    if stale:
+        check("a checkout whose sources are newer than its build falls back",
+              cmd[:2] == ["dotnet", "run"], repr(cmd[:2]))
+        check("...naming the source that is newer",
+              os.path.basename(src or "") in err, repr(err[:160]))
+    else:
+        check("the default command is not a dotnet build check",
+              cmd[:2] != ["dotnet", "run"], repr(cmd))
+        check("the default command is the built executable",
+              cmd and os.path.normcase(cmd[0]) == os.path.normcase(built), repr(cmd[:1]))
+        check("...with nothing printed, because nothing was given up", err == "", repr(err))
 
 
 def test_cell_is_still_the_first_argument_viewprobe_sees():

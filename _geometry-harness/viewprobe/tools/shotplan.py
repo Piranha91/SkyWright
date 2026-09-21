@@ -85,6 +85,7 @@ Run `shotplan.py <subcommand> --help` for the flags.
 from __future__ import annotations
 
 import argparse
+import glob
 import json
 import math
 import os
@@ -661,10 +662,84 @@ def collect_subjects(args):
     return out
 
 
-def vp_command(vp: str | None) -> list[str]:
+SOURCE_SUFFIXES = (".cs", ".csproj")
+SKIP_DIRS = {"bin", "obj", ".git", "__pycache__", "node_modules"}
+# Said on every fallback. The rendering library is a project reference into ANOTHER repository, so
+# nothing here can tell whether the built executable predates a change in it. A reader must not be
+# left to assume that question was asked and answered.
+LIBRARY_NOTE = ("the rendering library lives in another repository, so its freshness is not part "
+                "of this check either way")
+
+
+def _source_roots(root: str) -> list[str]:
+    """Every project IN THIS REPOSITORY the executable is built from: the probe, the shared
+    harness sources beside it, and the core library it links."""
+    harness = os.path.dirname(root)
+    repo = os.path.dirname(harness)
+    return [root, os.path.join(harness, "_shared"), os.path.join(repo, "src", "housecarl-core")]
+
+
+def newest_source(root: str) -> tuple[str | None, float]:
+    """(path, mtime) of the newest source under those projects. Build output is skipped: `bin/`
+    holds generated .cs files that are newer than the executable by construction, and counting
+    them would make every executable stale and the preference pointless."""
+    newest, when = None, 0.0
+    for r in _source_roots(root):
+        for dirpath, dirnames, filenames in os.walk(r):
+            dirnames[:] = [d for d in dirnames if d.lower() not in SKIP_DIRS]
+            for name in filenames:
+                if not name.endswith(SOURCE_SUFFIXES):
+                    continue
+                path = os.path.join(dirpath, name)
+                try:
+                    m = os.stat(path).st_mtime
+                except OSError:                      # vanished mid-walk: not a reason to refuse
+                    continue
+                if m > when:
+                    newest, when = path, m
+    return newest, when
+
+
+def viewprobe_exe(root: str | None = None) -> tuple[str | None, str]:
+    """(path, reason): the built executable to launch, or None and why it is not being used.
+
+    The reason is returned rather than printed so a driver can record it; `vp_command` prints it.
+    """
+    root = root or VIEWPROBE_DIR
+    built = os.path.join(root, "bin", "Release")
+    found = [p for p in glob.glob(os.path.join(built, "*", "viewprobe.exe")) if os.path.isfile(p)]
+    if not found:
+        return None, "no built viewprobe.exe under %s" % built.replace("\\", "/")
+    exe = max(found, key=lambda p: os.stat(p).st_mtime)
+    src, when = newest_source(root)
+    if src is not None and when > os.stat(exe).st_mtime:
+        rel = os.path.relpath(src, os.path.dirname(os.path.dirname(root))).replace("\\", "/")
+        return None, "%s is newer than the built viewprobe.exe" % rel
+    return exe, "the built viewprobe.exe is newer than every source in this repository it is built from"
+
+
+def _to_stderr(line: str) -> None:
+    print(line, file=sys.stderr)
+
+
+def vp_command(vp: str | None = None, root: str | None = None, say=None) -> list[str]:
+    """The command every probe invocation is built on.
+
+    An explicit --vp always wins. Otherwise the built executable is preferred - `dotnet run` costs
+    a build check per invocation, and the planner makes many - and the fallback to `dotnet run` is
+    announced with its reason, because that build check is exactly what is being given up. The
+    notice goes to stderr, where the per-invocation echo already goes, so a caller parsing stdout
+    (the configuration fingerprint line) sees nothing new.
+    """
     if vp:
         return shlex.split(vp)
-    return ["dotnet", "run", "--project", VIEWPROBE_DIR, "-c", "Release", "--no-launch-profile", "--"]
+    root = root or VIEWPROBE_DIR
+    exe, why = viewprobe_exe(root)
+    if exe:
+        return [exe]
+    (say or _to_stderr)("viewprobe: %s, so this falls back to `dotnet run`, which builds it first "
+                        "(%s)." % (why, LIBRARY_NOTE))
+    return ["dotnet", "run", "--project", root, "-c", "Release", "--no-launch-profile", "--"]
 
 
 class Runner:
@@ -2641,8 +2716,10 @@ def add_common(p, need_subjects=True):
     p.add_argument("--size", type=int, default=320, help="probe render size (default 320)")
     p.add_argument("--out", default=None, help="where probe PNGs go")
     p.add_argument("--vp", default=None,
-                   help="the viewprobe command (default: dotnet run against this checkout). "
-                        "Anything that takes viewprobe's args, e.g. a wrapper script")
+                   help="the viewprobe command. Anything that takes viewprobe's args, e.g. a "
+                        "wrapper script. Default: the built bin/Release viewprobe.exe, falling "
+                        "back to `dotnet run` — with the reason printed — when there is none or a "
+                        "source in this repository is newer than it")
     p.add_argument("--quiet", action="store_true", help="do not echo each invocation")
     p.add_argument("--no-bind-scene", action="store_true",
                    help="do not ask the renderer for its configuration identity on the "
