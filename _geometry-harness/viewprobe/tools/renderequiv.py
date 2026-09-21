@@ -304,6 +304,17 @@ def selftest(tmp_root):
     check("...but a parenthesised COUNT is still compared",
           g3["parts"]["console"]["status"] == DIFFERENT)
 
+    # The second elapsed form, both ways round. A comment claiming a rule holds for a pattern it was
+    # never run against is a claim, not a test - and the first form's cells above cannot see this one.
+    hashed = "configuration: candidate - 8 plugins, 19 archives (hashed in %s)\n"
+    g4 = compare(a, b, con + hashed % "0.3s", con_b + hashed % "0.4s", 0, 0, waive=W)
+    check("GREEN: a different 'hashed in' time is not a difference in the answer", g4["equal"])
+    g5 = compare(a, b,
+                 con + "configuration: candidate - 19 archives (hashed in 0.3s)\n",
+                 con_b + "configuration: candidate - 18 archives (hashed in 0.4s)\n", 0, 0, waive=W)
+    check("...and a COUNT on that same line still differs, duration or no duration",
+          g5["parts"]["console"]["status"] == DIFFERENT)
+
     c = _synthetic(os.path.join(tmp_root, "red-pixels"), (10, 20, 31, 255), r"D:\other\b-fp.png")
     check("RED: one changed pixel value is caught",
           compare(a, c, con, con_b, 0, 0, waive=W)["parts"]["frames"]["status"] == DIFFERENT)
