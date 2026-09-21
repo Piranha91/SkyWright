@@ -512,6 +512,11 @@ directory to keep a job's history with the job). A render used to file itself un
 render reported fifteen seconds of "walking the order for the target cell" at one plugin of five,
 and a multi-shot run repeated that same stage once per shot.
 
+Snapshot writes from one run are serialized with its terminal transition. A heartbeat already in
+flight finishes before the terminal history record retires the active snapshot, and a liveness
+callback arriving after completion is a no-op. Genuine store I/O failures still print the run-log
+degradation warning and remain recorded; the ordering guard does not retry or suppress them.
+
 It now opens a stage per phase, per shot, at the cuts the cost model measures: `find-cell`,
 `record-walk`, `scene-build`, `report` (only when one is asked for) and `encode`. Each carries real
 counters — plugins, plugins, references, shape draws, frames — and `find-cell` **revises** its total
