@@ -226,6 +226,11 @@ bool showPlanes = false;
 // every ref with the base and transform the game loads after *_SWAP.ini; diff the same, swapped refs tinted teal
 // and named in the hover; off the record bases, as every render did before 2026-09-04.
 string bosMode = "on";
+// --reuse-cell — EXPERIMENTAL, opt-in, default off (CellScene.cs). A worklist's shots are built one
+// per SHOT, so two shots of one cell do the camera-independent work twice. With this flag the shots
+// of a cell share a lease that is constructed for the cell and dropped when the cell is done. The
+// default path is untouched: no flag, no lease, every shot builds its own exactly as before.
+bool reuseCell = false;
 // --state SPEC — the world state (roadmap 4.11, _shared/WorldState.cs): <switch>[,<switch>…] by editor id or FormKey,
 // stage:<quest>:<n> with --switch-map (switchprobe's --json), or baseline. Every ref's existence becomes its runtime
 // enable state with those switches flipped. --state-view on (default) draws the state; diff also draws what the flip
@@ -706,6 +711,7 @@ for (int i = argStart; i < args.Length; i++)
     else if (args[i] == "--stations" && i + 1 < args.Length) { stationsSpec = args[++i]; textured = true; }
     else if (args[i] == "--stations-out" && i + 1 < args.Length) stationsOut = args[++i];
     else if (args[i] == "--planes-reach" && i + 1 < args.Length) planesReach = float.Parse(args[++i]);
+    else if (args[i] == "--reuse-cell") reuseCell = true;
     else if (args[i] == "--bos" && i + 1 < args.Length)
     {
         bosMode = args[++i].ToLowerInvariant();
@@ -1346,6 +1352,11 @@ string InsideRays(PlacedRef r, string mesh, float qx, float qy, float qz)
 // diagnostic mode after the call runs on the state this call left behind — exactly as it did when
 // this was straight-line code.
 // ---------------------------------------------------------------------------------------
+// The cell's lease, when --reuse-cell is on: created by the worklist loop for each cell, dropped
+// when that cell's shots are done, null in every other run. A shot reads it and shares nothing
+// beyond it; see CellScene.cs for what may and may not live there.
+ViewProbe.CellScene? cellScene = null;
+
 int RunCellTextured(string cellTarget, int wlCell, int wlShot)
 {
     // Per-cell state is declared OUTSIDE this function, because the flat mode reads it too — so a
@@ -4153,7 +4164,7 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot)
                    size, outFile, reportMode, camMeta, planeReport: planeReportSink, bosMode: bosMode, stateMode: stateView, stateName: stateArm?.Name ?? "",
                    visibilityBudget: visibilityBudget, navColourGroups: navColourGroups, refSurface: refSurface,
                    refSurfaceOpacity: refSurfaceOpacity,
-                   depthDumpPath: depthDump, sizeHeight: canvasH);
+                   depthDumpPath: depthDump, sizeHeight: canvasH, cellScene: cellScene);
         }
 
         if (compare is { } cmp)
@@ -4359,6 +4370,14 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot)
 // ---------------------------------------------------------------------------------------
 // THE RUN
 // ---------------------------------------------------------------------------------------
+// Q3: a flag that quietly does nothing is a wrong answer. The lease is a WORKLIST's, and only on
+// the static path — --interactive already keeps one cell resident by design, and a single shot has
+// nobody to share with.
+if (reuseCell && (worklist is null || interactiveMode))
+    Console.WriteLine("   --reuse-cell: ignored here. It shares a cell's work between the SHOTS of "
+                    + "a worklist on the static path; this run has "
+                    + (worklist is null ? "one shot." : "--interactive, which already keeps a cell resident."));
+
 if (worklist is not null)
 {
     if (interactiveMode)
@@ -4383,11 +4402,21 @@ if (worklist is not null)
         Console.WriteLine($"worklist: {totalShots} shots over {worklist.Cells.Count} cell(s) — "
                         + "the load walk runs once PER SHOT in static mode (use --interactive to pay it once per cell).");
     for (int wlc = 0; wlc < worklist.Cells.Count; wlc++)
-        for (int wls = 0; wls < worklist.Cells[wlc].Shots.Count; wls++)
+    {
+        // --reuse-cell: ONE lease per cell, constructed here and disposed in the finally — a scope,
+        // not a cache that gets cleared, so nothing built for this cell can answer in the next one.
+        // Without the flag the lease is null and every shot builds its own, as it always did.
+        cellScene = reuseCell ? new ViewProbe.CellScene(worklist.Cells[wlc].Cell) : null;
+        try
         {
-            int rc = RunCellTextured(worklist.Cells[wlc].Cell, wlc, wls);
-            if (rc > 0) return ViewProbe.ExtractionScratch.GuardExitCode(rc);
+            for (int wls = 0; wls < worklist.Cells[wlc].Shots.Count; wls++)
+            {
+                int rc = RunCellTextured(worklist.Cells[wlc].Cell, wlc, wls);
+                if (rc > 0) return ViewProbe.ExtractionScratch.GuardExitCode(rc);
+            }
         }
+        finally { cellScene?.Dispose(); cellScene = null; }
+    }
     // GuardExitCode, not a bare 0. The extraction guard throws, and two of this file's own callers
     // catch Exception and carry on, so whether the refusal reaches here is call-order luck. The
     // refusal is latched where it happens; this is where a latched refusal becomes an exit code

@@ -355,7 +355,8 @@ static class TexturedScene
         bool refSurface = false,
         float refSurfaceOpacity = 1f,                   // --ref-surface-opacity, validated to (0,1] by the CLI; 1 is the shipped opaque mark
         string? depthDumpPath = null,                   // --depth-dump: write the finished frame's window depth (the array --pick reads) here, verbatim
-        int sizeHeight = 0)                             // capture canvas HEIGHT in pixels; 0 keeps the historic square (sizeW x sizeW)
+        int sizeHeight = 0,                             // capture canvas HEIGHT in pixels; 0 keeps the historic square (sizeW x sizeW)
+        CellScene? cellScene = null)                    // --reuse-cell: this CELL's lease (CellScene.cs); null = build everything for this shot, as before
     {
         // THE CANVAS IS TWO NUMBERS, NOT ONE. It used to be `size` on both axes, and the camera's
         // fov went to the projection at aspect 1 -- so a pose planned for a 16:9 deliverable was
@@ -376,10 +377,20 @@ static class TexturedScene
         // The bracket. GameAssetResolver captures Path.Combine(AppContext.BaseDirectory,
         // "CharacterViewerCache") in its constructor and never re-reads it, so this is the one line
         // in the run where the redirect has to be in force — see ExtractionScratch.cs.
-        GameAssetResolver resolver;
-        using (ExtractionScratch.Redirect())
-            resolver = new GameAssetResolver(new HcDataFolder(dataDir), new HcBsaProvider(assets), gate, logger);
-        resolver.SetAdditionalFolders(folders);
+        GameAssetResolver MakeResolver()
+        {
+            GameAssetResolver made;
+            using (ExtractionScratch.Redirect())
+                made = new GameAssetResolver(new HcDataFolder(dataDir), new HcBsaProvider(assets), gate, logger);
+            made.SetAdditionalFolders(folders);
+            return made;
+        }
+        // The cell lease's first slice (CellScene.cs). Its inputs are PROCESS-level — the data
+        // folder, the archive view and the loose-folder precedence list, none of which a shot can
+        // change — while its extraction index is an INSTANCE field, so today the second shot of a
+        // cell re-extracts from the archives every file the first shot already pulled out. With no
+        // lease this is the same line it always was: one resolver, built here, for this shot.
+        var resolver = cellScene is null ? MakeResolver() : cellScene.Resolver(MakeResolver);
 
         var builder = new NifMeshBuilder(logger, gate, resolver, new CvSettings());
         var cache = new CharacterPreviewCache(new NullNpcSource(), resolver, logger, gate, new CvSettings());

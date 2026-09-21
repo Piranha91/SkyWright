@@ -586,6 +586,29 @@ verbatim refuses every run given a path-valued flag — an order candidate, a ru
 command carries that path. Any other line holding an absolute path still makes the comparison
 refuse, and says which line.
 
+### Keeping one cell's work across its shots — `--reuse-cell`, experimental
+
+A worklist run builds its scene once per **shot**, which the run says out loud when it starts: two
+shots of one cell walk the load order twice, resolve the same assets twice and parse the same
+meshes twice. The shots of a cell differ in where the camera stands, and a built scene is
+camera-independent, so that work can be done once for the cell.
+
+`--reuse-cell` is an **experimental, opt-in** flag that does exactly that, one piece at a time.
+**The default is unchanged**: without the flag there is no lease and every shot builds its own, the
+same code it always ran. With it, the shots of a cell share a lease that is *constructed for the
+cell and dropped when the cell is done* — a scope, not a cache that gets cleared, so nothing built
+for one cell can still answer in the next.
+
+What it shares today: the asset resolver (and with it the extraction index, which is why the second
+shot of a cell no longer re-extracts what the first shot already pulled out of the archives). What
+it will not share, because the camera decides it: the uploaded meshes (`--cull-above` drops
+triangles above the cut *before* upload), the route's ground z, and `--npc-puck auto`. The rest of
+the list, and the reasoning, is in `CellScene.cs`.
+
+Every change to what the lease holds is checked with the equivalence suite above, run with the flag
+**on and off**, on an interior, an exterior with water, a multi-cell worklist and a fixture whose
+load order carries a base-object swap.
+
 ### An asset that was found and could not be read fails the run
 
 The two census counts above — *refs without a resolvable mesh* and *textures the resolver could NOT
