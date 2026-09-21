@@ -97,7 +97,11 @@ static class NpcActorBuilder
 
         var logger = new ConsoleCvLogger();
         var gate = new CharacterViewerLogGate { Verbose = Environment.GetEnvironmentVariable("VP_CV_VERBOSE") == "1" };
-        var resolver = new GameAssetResolver(new HcDataFolder(dataDir), new HcBsaProvider(assets), gate, logger);
+        // The same bracket as TexturedScene's: this constructor captures the extraction directory
+        // too, and an NPC render that skipped it would go on sharing the folder beside the exe.
+        GameAssetResolver resolver;
+        using (ExtractionScratch.Redirect())
+            resolver = new GameAssetResolver(new HcDataFolder(dataDir), new HcBsaProvider(assets), gate, logger);
         resolver.SetAdditionalFolders(TexturedScene.ResolverFolders(modFoldersHighestFirst, overwriteDir));
         var cache = new CharacterPreviewCache(new NullNpcSource(), resolver, logger, gate, new CvSettings());
         return new Host

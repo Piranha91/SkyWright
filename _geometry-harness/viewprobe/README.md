@@ -185,6 +185,10 @@ A successful save or size check alone does not establish clean pixels.
 - **Unrecognised flags are refused:** an unmatched `--` token exits 2 before rendering. Use
   `--eye X,Y,Z`; the parser does not accept `--flag=value`. Dropping a camera argument could
   otherwise silently select an overview. The error also covers a trailing flag missing its value.
+- **`--extraction-scratch-sweep <dir> [--delete-only <subdir>]`**: remove the extraction folders of
+  renderer processes that are gone, and report — as JSON — everything kept and why. Needs no MO2
+  instance, no game and no load order. See *The extraction scratch* below for the ownership rule
+  that decides what it may touch; it is the only authority this entry point has.
 - **`--config-identity`**: report WHAT THIS RUN CONSUMED when no `--order`
   replaced it — the same `capture input configuration:` line and `<cell>-configuration.json`
   sidecar a candidate run emits, resolved from the profile itself. It is **opt-in** because
@@ -370,6 +374,60 @@ and the parser error for it is unhelpful enough that the loader adds its own hin
 Renders are large (a five-cell set runs to hundreds of MB) and every one of them is a picture of
 one specific load order, so they are neither reusable nor shareable. `_geometry-harness/_runs/` is
 gitignored for the same reason: probe transcripts name the plugins of whatever list produced them.
+
+### The extraction scratch, and why it is not beside the exe
+
+The rendering library cannot read an asset out of a BSA in place: it extracts it to disk first. The
+destination it picks is `AppContext.BaseDirectory\CharacterViewerCache`, captured once when the
+resolver is constructed — the same folder for **every** process started from one build. Two renders
+started together therefore wrote the same files at the same moment, and because a failed read on
+that path is swallowed (a mesh that will not parse becomes "no geometry", a texture that will not
+decode becomes a white fallback) both runs still ended at exit 0 with a picture that was quietly
+wrong. Nothing in the console said so.
+
+**Each process now extracts into its own folder**, and removes it when it ends
+(`ExtractionScratch.cs`). Where that folder lives, first hit wins — the same order the run store
+uses, and never inside the installed binaries:
+
+1. `HOUSECARL_DATA_DIR\viewprobe-extract`
+2. `%LOCALAPPDATA%\houseCARL\viewprobe-extract` (Windows)
+3. `$XDG_STATE_HOME/housecarl/viewprobe-extract`, else `~/.local/state/housecarl/viewprobe-extract`
+
+**Nothing is held between runs.** The folder belongs to one process; no other process may use it,
+and it is gone when that process exits. It is a scratch, not a cache, so a run's cost is what it
+extracts — and an asset that changed on disk can never be read from a stale copy.
+
+**The destination is guarded.** Every extraction destination is checked against this process's own
+folder, and one outside it **refuses the run** instead of writing. If the library ever stops taking
+the destination from `AppContext.BaseDirectory`, that is a loud failure on the first extraction
+rather than a silent return to the shared folder.
+
+**A killed process leaves its folder behind**, so the next run sweeps the parent for orphans. The
+sweep is a deleter, and what it may never delete is the whole of its contract:
+
+- a directory is viewprobe's **only** if it carries `viewprobe-extract.json` with a parsable marker.
+  A directory with exactly the right name and no marker is untouchable;
+- ownership is the process id **and** that process's start time, so a recycled id can neither get a
+  live process's folder deleted nor hide the fact that an orphan was kept;
+- an owner whose liveness cannot be determined means **keep** — "I could not tell" is not "it is
+  dead" — and so does a marker that cannot be read;
+- the delete at exit obeys the same rule and says why when it refuses.
+
+`viewprobe --extraction-scratch-sweep <dir> [--delete-only <subdir>]` runs exactly that code from
+the command line and prints one JSON object: what it deleted, and **everything it kept with the
+reason**. A folder with no marker — what a crash between the `mkdir` and the marker leaves — is
+reported as kept, so a leak is visible rather than silent. The ownership rule above is this entry
+point's only authority: point it at the wrong directory and it will still refuse to touch anything
+that is not viewprobe's. The start-up sweep runs the same code and prints nothing, so the console of
+a render is unchanged; use the entry point when you want the report.
+
+The library's own `ClearExtractedFiles()` is deliberately not called. Deleting the process's whole
+folder is strictly stronger, and the library documents that method as unsafe to call while a render
+is in progress — which at process exit is not something the host can establish.
+
+**An existing `CharacterViewerCache` beside an older build is no longer read or written.** Nothing
+deletes it for you, because it sits inside your binaries and this tool does not delete things it
+did not create; remove it by hand when you want the space back.
 
 ---
 

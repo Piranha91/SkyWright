@@ -81,6 +81,12 @@ sealed class HcBsaProvider(AssetResolver assets) : IBsaArchiveProvider
 
     public bool TryExtractToDisk(string containingBsaPath, string subpath, string destPath, out string? error)
     {
+        // THE GUARD, and deliberately OUTSIDE the try below: a refusal that became an `error` string
+        // would be a refusal the library swallows into a white fallback. Every destination the
+        // library picks passes through here, so if it ever stops taking that destination from
+        // AppContext.BaseDirectory this run stops loudly on the first extraction instead of quietly
+        // returning to the folder beside the exe that every process shares.
+        ExtractionScratch.RequireInside(destPath);
         try
         {
             var bytes = AssetResolver.TryReadArchiveEntry(containingBsaPath, subpath);
@@ -354,7 +360,12 @@ static class TexturedScene
 
         var folders = ResolverFolders(modFoldersHighestFirst, overwriteDir);
 
-        var resolver = new GameAssetResolver(new HcDataFolder(dataDir), new HcBsaProvider(assets), gate, logger);
+        // The bracket. GameAssetResolver captures Path.Combine(AppContext.BaseDirectory,
+        // "CharacterViewerCache") in its constructor and never re-reads it, so this is the one line
+        // in the run where the redirect has to be in force — see ExtractionScratch.cs.
+        GameAssetResolver resolver;
+        using (ExtractionScratch.Redirect())
+            resolver = new GameAssetResolver(new HcDataFolder(dataDir), new HcBsaProvider(assets), gate, logger);
         resolver.SetAdditionalFolders(folders);
 
         var builder = new NifMeshBuilder(logger, gate, resolver, new CvSettings());

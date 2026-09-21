@@ -47,11 +47,23 @@ using Image = SixLabors.ImageSharp.Image;
 // a window that closes on the one message explaining how to configure it has taught nobody
 // anything. The console dies with the process on a GUI launch, so every exit path pauses.
 using var __run = RunLog.BeginProcess("viewprobe", args);
+// THE EXTRACTION SCRATCH. The rendering library unpacks BSA assets to disk before it can read
+// them, and every process started from one build folder used to unpack them to the SAME place —
+// so two renders started together overwrote each other's files and produced quietly wrong
+// pictures at exit 0. Each process now gets its own folder; this is what removes it again on
+// every path out of Main, including the early returns just below (where nothing was claimed and
+// it does nothing at all). See ExtractionScratch.cs.
+using var __scratch = ViewProbe.ExtractionScratch.ProcessScope();
 
 if (args.Length == 2 && args[0] == "--report-mode-smoke")
     return ViewProbe.TexturedScene.ReportModeSmoke(args[1]);
 if (args.Length == 1 && args[0] == "--nav-selection-smoke")
     return ViewProbe.NavmeshSelection.Smoke();
+// The deleter, on the command line, so its contract can be tested against a directory state a test
+// owns rather than against whatever a render happened to leave. Ahead of the harness Require()
+// calls below: it needs no MO2 instance, no game and no load order.
+if (args.Length >= 2 && args[0] == "--extraction-scratch-sweep")
+    return ViewProbe.ExtractionScratch.Sweep(args);
 
 bool guiLaunch = GuiLaunch();
 if (guiLaunch)
