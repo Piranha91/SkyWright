@@ -53,8 +53,17 @@ import re
 import sys
 
 ABSOLUTE = re.compile(r"[A-Za-z]:[\\/][^\s\"]*")
-# An elapsed time in parentheses - "(8.7s)". Durations are not answers; see the module docstring.
+# The elapsed times this renderer prints, ENUMERATED - never "any number followed by an s". Each
+# entry is a duration, and a duration is not an answer; a parenthesised COUNT beside one still has
+# to differ, which the self-test checks.
+#   "(8.7s)"            the stage timings
+#   "(hashed in 0.4s)"  the configuration line's own timing. An n=4 exterior arm moved it by a tenth
+#                       of a second while its frames, its report, its file set and its census were
+#                       all identical - so the suite called four correct renders different. Found
+#                       2026-09-21; the same species as the green control's first red, in different
+#                       words, which is why these are listed rather than matched by a pattern.
 ELAPSED = re.compile(r"\((\d+(?:[.,]\d+)?)s\)")
+ELAPSED_HASHED = re.compile(r"\(hashed in (\d+(?:[.,]\d+)?)s\)")
 
 # Fields in the planes report that hold a path this run chose. Read from the report writer at fork
 # d31445ae: Program.cs:4031 (image), :4041 (sceneDepth), :3969 (planes[].candidates[].visibilityMask).
@@ -90,8 +99,15 @@ def canonical_report(path):
 
 def scrub_console(text):
     """Console lines with the two enumerated run-specific fragments removed, blank lines dropped."""
-    return [ELAPSED.sub("(<elapsed>)", ABSOLUTE.sub("<path>", ln)).rstrip()
-            for ln in (text or "").splitlines() if ln.strip()]
+    out = []
+    for ln in (text or "").splitlines():
+        if not ln.strip():
+            continue
+        ln = ABSOLUTE.sub("<path>", ln)
+        ln = ELAPSED_HASHED.sub("(hashed in <elapsed>)", ln)
+        ln = ELAPSED.sub("(<elapsed>)", ln)
+        out.append(ln.rstrip())
+    return out
 
 
 def census(text):
