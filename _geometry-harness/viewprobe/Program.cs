@@ -4078,9 +4078,11 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot)
                     attribution = "none; plane provenance does not establish blame or a repair",
                     contestedBy = cellContestedBy, planes = rows,
                     notDrawn = dropped.Select(r => new { formKey = r.FormKey.ToString(), formId = RuntimeId(r.FormKey), why = r.Deleted ? "deleted" : DisabledWhy(r) }).ToList(),
-                    // Null on a healthy run, so a report that had nothing wrong with it gains
-                    // nothing. When it is not null it names every asset that was found and could
-                    // not be read, and says whether an opt-out let the run succeed anyway.
+                    // Null on a healthy run - and WRITTEN as null, one line this report did not
+                    // carry before the check existed. That is deliberate: an absent key means a
+                    // build that never looked, null means it looked and found none, and an object
+                    // names every asset that was found and could not be read and says whether an
+                    // opt-out let the run succeed anyway. See UnreadableAssets.ReportBlock.
                     unreadableAssets = ViewProbe.UnreadableAssets.ReportBlock(),
                 };
                 File.WriteAllText(jsonPath, System.Text.Json.JsonSerializer.Serialize(doc, new System.Text.Json.JsonSerializerOptions { WriteIndented = true }));

@@ -537,10 +537,20 @@ parses it, the library draws nothing from it — is what an extracted path past 
 limit looks like, and the entry names the length and the limit rather than leaving it to be found.
 See *The path budget* above for the arithmetic and how to shorten it.
 
-On a healthy load order none of this prints and no report gains a block, so what an existing caller
-reads is unchanged. When it does fire, the census names every asset and the reason, and the report
-gains an `unreadableAssets` block. **The census and the block are per shot** — they describe the
-picture in front of you, not what an earlier shot in the same worklist found — while **the exit code
+On a healthy load order none of this prints, so a console an existing caller compares is unchanged
+to the character. **A report gains one line either way**: `"unreadableAssets": null`. That is the
+one respect in which a healthy report from this build differs from one written before the check
+existed, and it is deliberate — it is what lets a driver tell the three states apart:
+
+| what the report carries | what it means |
+|---|---|
+| **no `unreadableAssets` key** | written by a build that never checked. Say nothing about the picture. |
+| **`"unreadableAssets": null`** | checked, and nothing was found unreadable in that shot |
+| **an `unreadableAssets` object** | assets were found and could not be read; `count` and `assets` name them, and `exitCode` there is 3 unless an opt-out was in force, which `suppressedBy` names |
+
+When it does fire, the census names every asset and the reason too. **The census and the block are
+per shot** — they describe the picture in front of you, not what an earlier shot in the same
+worklist found — while **the exit code
 is per process**: a multi-shot worklist runs every shot and spends the code once at the end, because
 stopping at the first degraded shot would throw away the rest of the batch. The run record carries
 the outcome `Partial`, opted out or not, so a degraded render is never filed as a clean one.

@@ -263,8 +263,16 @@ static class UnreadableAssets
                             + (e.ResolvedPath is null ? "" : $" [{e.ResolvedPath}]"));
     }
 
-    /// <summary>The same facts for the report. Null when there is nothing to report, so a healthy
-    /// report gains nothing it did not have.</summary>
+    /// <summary>The same facts for the report, or null when this shot found nothing.
+    ///
+    /// NULL IS NOT ABSENT, AND THAT IS ON PURPOSE. The report writer emits the key either way, so a
+    /// healthy report carries <c>"unreadableAssets": null</c> — one line it did not have before this
+    /// signal existed. That line is worth its width because it is the only way a reader can tell
+    /// "this build looked and found none" from "this build never looked": the key is MISSING in a
+    /// report written by a build from before the check, and null in a healthy one from a build that
+    /// has it. A driver reads the three states as: key absent → not checked; null → checked, clean;
+    /// object → assets were found and could not be read, and <c>exitCode</c> there says whether an
+    /// opt-out let the run succeed anyway.</summary>
     public static object? ReportBlock()
     {
         var entries = ShotEntries;
