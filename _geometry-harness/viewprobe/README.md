@@ -599,11 +599,23 @@ same code it always ran. With it, the shots of a cell share a lease that is *con
 cell and dropped when the cell is done* — a scope, not a cache that gets cleared, so nothing built
 for one cell can still answer in the next.
 
-What it shares today: the asset resolver (and with it the extraction index, which is why the second
-shot of a cell no longer re-extracts what the first shot already pulled out of the archives). What
-it will not share, because the camera decides it: the uploaded meshes (`--cull-above` drops
-triangles above the cut *before* upload), the route's ground z, and `--npc-puck auto`. The rest of
-the list, and the reasoning, is in `CellScene.cs`.
+What it shares today, as one pair made together and dropped together:
+
+* the **asset resolver** (and with it the extraction index, which is why the second shot of a cell
+  no longer re-extracts what the first shot already pulled out of the archives);
+* the **decoded-pixel cache** built on that resolver — the BGRA32 pixels, cubemap faces and
+  "fully transparent?" verdicts a texture decodes to, each keyed on the file's *resolved disk path*
+  — which is why the second shot of a cell no longer decodes textures the first shot decoded. It is
+  one slot with the resolver because it resolves every key through it, so the two cannot be paired
+  wrongly or outlive each other.
+
+What it will not share, because the camera decides it: the uploaded meshes (`--cull-above` drops
+triangles above the cut *before* upload), the route's ground z, and `--npc-puck auto`. What it will
+not hold at all: anything owning a GL handle — the context is built per shot, so the textures the
+renderer uploads stay with the per-shot texture manager that deletes them. The rest of the list,
+and the reasoning, is in `CellScene.cs`; `viewprobe --cell-scene-selftest` holds the lease to its
+three promises (one set of objects per cell, a new set for the next cell, nothing after the cell)
+with no game, no instance and no GL context.
 
 Every change to what the lease holds is checked with the equivalence suite above, run with the flag
 **on and off**, on an interior, an exterior with water, a multi-cell worklist and a fixture whose

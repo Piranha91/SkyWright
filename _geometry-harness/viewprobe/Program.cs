@@ -94,6 +94,11 @@ if (args.Length >= 2 && args[0] == "--report-sink-selftest")
     return ViewProbe.ReportSinkSelfTest.Run(args[1]);
 if (args.Length >= 3 && args[0] == "--report-sink-kill-arm")
     return ViewProbe.ReportSinkSelfTest.KillArm(args[1], int.Parse(args[2]));
+// The --reuse-cell lease's three promises - one set of shared objects per cell, a new set for the
+// next cell, and nothing at all once the cell is done - over objects built in the test, so a check
+// can hold the lifetime itself. Needs no MO2 instance, no game and no GL context.
+if (args.Length >= 1 && args[0] == "--cell-scene-selftest")
+    return ViewProbe.CellSceneSelfTest.Run();
 
 bool guiLaunch = GuiLaunch();
 if (guiLaunch)

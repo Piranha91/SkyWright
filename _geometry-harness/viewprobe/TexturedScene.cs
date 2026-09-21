@@ -385,15 +385,22 @@ static class TexturedScene
             made.SetAdditionalFolders(folders);
             return made;
         }
-        // The cell lease's first slice (CellScene.cs). Its inputs are PROCESS-level — the data
-        // folder, the archive view and the loose-folder precedence list, none of which a shot can
-        // change — while its extraction index is an INSTANCE field, so today the second shot of a
-        // cell re-extracts from the archives every file the first shot already pulled out. With no
-        // lease this is the same line it always was: one resolver, built here, for this shot.
-        var resolver = cellScene is null ? MakeResolver() : cellScene.Resolver(MakeResolver);
+        // What the cell lease holds (CellScene.cs) — the resolver and the cache of pixels it
+        // decodes, made TOGETHER because the cache captures the resolver and resolves every key
+        // through it. Both are shot-independent: the resolver's inputs are process-level and the
+        // cache keys on the resolved disk path, while their instance state is exactly the work
+        // repeated today — the second shot of a cell re-extracts from the archives, and re-decodes
+        // through Pfim, everything the first shot already did. With no lease these are the same
+        // two lines they always were, built here, for this shot.
+        CellAssets MakeAssets()
+        {
+            var made = MakeResolver();
+            return new CellAssets(made,
+                new CharacterPreviewCache(new NullNpcSource(), made, logger, gate, new CvSettings()));
+        }
+        var (resolver, cache) = cellScene is null ? MakeAssets() : cellScene.Assets(MakeAssets);
 
         var builder = new NifMeshBuilder(logger, gate, resolver, new CvSettings());
-        var cache = new CharacterPreviewCache(new NullNpcSource(), resolver, logger, gate, new CvSettings());
         using var textures = new GlTextureManager(cache, logger);
         textures.Initialize();
 
