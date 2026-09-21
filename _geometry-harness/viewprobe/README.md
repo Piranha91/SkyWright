@@ -576,9 +576,15 @@ this shot's block prints no line of the same kind**, so a line whose value chang
 Every arm then runs a cross-pair control — shot A against shot B's twin — and requires the decoded
 pixels to differ, which is what proves the cut is not what is making shots equal.
 
-The comparison itself is `renderequiv.py`'s, unchanged: decoded pixels, reports under the
-enumerated-field rule, the console, the census, the exit code, and a part that was not compared
-must be waived by name.
+The comparison itself is `renderequiv.py`'s: decoded pixels, reports under the enumerated-field
+rule, the console, the census, the exit code, and a part that was not compared must be waived by
+name. That report rule has **two** enumerated classes, not one. A field holding a path this run
+*chose* (the frame, the scene depth, a candidate's visibility mask) is dropped. A field holding the
+*command that reproduces the frame* is kept, with the paths inside it normalised: dropping it would
+stop the comparison noticing a batch that handed a shot another shot's command, and comparing it
+verbatim refuses every run given a path-valued flag — an order candidate, a rule file — because the
+command carries that path. Any other line holding an absolute path still makes the comparison
+refuse, and says which line.
 
 ### An asset that was found and could not be read fails the run
 

@@ -848,19 +848,35 @@ def selftest(tmp):
     check("RED: a file that belongs to no shot is reported as a leftover",
           leftover2 == ["run-summary-fp.png"], json.dumps(leftover2))
 
-    # The report-path refusal, named rather than folded into `equal`.
+    # The command field, and the refusal that is still a refusal. A batched shot and its twin are
+    # rendered from different worklist files by construction - the twin's is written for it - so
+    # their replay commands hold different paths and the same answer.
     pa = _mk(os.path.join(tmp, "pa"), {"C-c1s1-one-fp.png": (10, 20, 30, 255)},
              {"C-c1s1-one-fp-planes.json": {"image": r"C:\a\one.png",
                                             "replayArgs": r"C:\w\list.json --size 512"}})
     pb = _mk(os.path.join(tmp, "pb"), {"C-c1s1-one-fp.png": (10, 20, 30, 255)},
              {"C-c1s1-one-fp-planes.json": {"image": r"D:\b\one.png",
-                                            "replayArgs": r"D:\w\list.json --size 512"}})
+                                            "replayArgs": r"D:\w\twin01.json --size 512"}})
     spa, _ = slice_run(pa, os.path.join(tmp, "spa"), {(1, 1): "one"})
     spb, _ = slice_run(pb, os.path.join(tmp, "spb"), {(1, 1): "one"})
-    pr = compare_shot(spa["one"], spb["one"], blocks["one"], twin["two"], 0, 0, False, W)
-    check("RED: a report field holding a path that the enumerated list does not name is refused, "
-          "and named", not pr["equal"] and pr.get("reportPathRefusal"),
-          json.dumps((pr.get("reportPathRefusal") or [])[:1]))
+    pr = compare_shot(spa["one"], spb["one"], blocks["one"], twin_one["one"], 0, 0, False, W)
+    check("GREEN: a batched shot and its twin name the same command from two worklist files",
+          pr["equal"] and not pr.get("reportPathRefusal"), json.dumps(statuses(pr)))
+
+    pc = _mk(os.path.join(tmp, "pc"), {"C-c1s1-one-fp.png": (10, 20, 30, 255)},
+             {"C-c1s1-one-fp-planes.json": {"image": r"C:\a\one.png",
+                                            "replayArgs": r"C:\w\list.json --size 512",
+                                            "someNewField": r"C:\x\order.txt"}})
+    pd = _mk(os.path.join(tmp, "pd"), {"C-c1s1-one-fp.png": (10, 20, 30, 255)},
+             {"C-c1s1-one-fp-planes.json": {"image": r"D:\b\one.png",
+                                            "replayArgs": r"D:\w\twin01.json --size 512",
+                                            "someNewField": r"D:\y\order.txt"}})
+    spc, _ = slice_run(pc, os.path.join(tmp, "spc"), {(1, 1): "one"})
+    spd, _ = slice_run(pd, os.path.join(tmp, "spd"), {(1, 1): "one"})
+    pr2 = compare_shot(spc["one"], spd["one"], blocks["one"], twin_one["one"], 0, 0, False, W)
+    check("RED: a report field holding a path that NEITHER enumerated list names is still refused, "
+          "and named", not pr2["equal"] and pr2.get("reportPathRefusal"),
+          json.dumps((pr2.get("reportPathRefusal") or [])[:1]))
 
     # The permutation, and the refusal when it is the identity.
     wl = {"Label": "x", "Cells": [{"Cell": "A", "Shots": [{"Label": "one"}, {"Label": "two"},

@@ -19,10 +19,11 @@ and each is now a red cell in `selftest`.
             a difference, not something to skip.
   reports   every `-planes.json`, paired by name, compared CANONICALLY AND BY STREAMING: a
             campaign report is ~600 MB and `json.load` of two of those will not fit, so the file is
-            read line by line, the enumerated run-specific fields are dropped by key, absolute
-            paths are replaced, and the surviving lines are hashed. The same pass reports any OTHER
-            line that contained an absolute path - which covers the whole document by construction,
-            where an in-memory walk truncated at the 50th list element did not.
+            read line by line, the enumerated run-specific fields are dropped by key, the
+            enumerated COMMAND fields are kept with their paths normalised, absolute paths are
+            replaced, and the surviving lines are hashed. The same pass reports any OTHER line that
+            contained an absolute path - which covers the whole document by construction, where an
+            in-memory walk truncated at the 50th list element did not.
   masks     decoded-pixel digests of the `*-audit-evidence` masks. Off by default because it costs
             a decode per mask and a campaign view writes over a thousand; when off it is an
             uncompared part and must be waived by name, so the choice is recorded rather than
@@ -72,6 +73,30 @@ ELAPSED_HASHED = re.compile(r"\(hashed in (\d+(?:[.,]\d+)?)s\)")
 ABSOLUTE_PATH_FIELDS = ("image", "sceneDepth", "visibilityMask")
 _KEY_LINE = re.compile(r'^\s*"(%s)"\s*:' % "|".join(ABSOLUTE_PATH_FIELDS))
 
+# The SECOND enumerated class, and it is not the first one: a field whose value is a COMMAND, not a
+# path. `replayArgs` is the command a frame names as the one that reproduces IT (added to the planes
+# report and the configuration sidecar in stage 2). The paths inside it are this machine's and this
+# run's - the worklist the shot came from, an `--order` candidate, a rule file - while everything
+# around them is the answer: which shot the batch told this frame it was.
+#
+# So the field is NORMALISED, never dropped. Dropping it is the tempting fix and the wrong one: it
+# would stop the comparator noticing a batch that handed a shot another shot's command, which is
+# exactly the mistake a batch makes. Leaving it alone is the other wrong one: the line holds an
+# absolute path in a field the list above does not name, so every run given a path-valued flag was
+# refused outright. Both mistakes are self-test cells.
+NORMALISED_COMMAND_FIELDS = ("replayArgs",)
+_COMMAND_LINE = re.compile(r'^\s*"(%s)"\s*:' % "|".join(NORMALISED_COMMAND_FIELDS))
+# A path QUOTED because it holds a space, inside a JSON string: `\"C:\\a dir\\list.json\"`. The bare
+# ABSOLUTE pattern stops at the space and would leave the rest of the path in the line, so this runs
+# first. Non-greedy to the closing escaped quote, over one line.
+_QUOTED_ABSOLUTE = re.compile(r'\\"[A-Za-z]:[\\/].*?\\"')
+
+
+def normalise_command(line):
+    """A command-field line with every absolute path in it replaced and nothing else touched."""
+    return ABSOLUTE.sub("<path>", _QUOTED_ABSOLUTE.sub("<path>", line))
+
+
 EQUAL, DIFFERENT, NOT_COMPARED = "equal", "different", "notCompared"
 
 
@@ -87,6 +112,9 @@ def canonical_report(path):
         for line in f:
             n += 1
             if _KEY_LINE.match(line):
+                continue
+            if _COMMAND_LINE.match(line):
+                h.update(normalise_command(line).encode("utf-8"))
                 continue
             scrubbed = ABSOLUTE.sub("<path>", line)
             if scrubbed != line and len(unlisted) < 20:
@@ -365,6 +393,42 @@ def selftest(tmp_root):
           r9["parts"]["reports"]["status"] == DIFFERENT
           and r9["parts"]["reports"]["unlistedPathLines"],
           json.dumps(r9["parts"]["reports"]["unlistedPathLines"][:2]))
+
+    # --- the command field, both ways ------------------------------------------------------
+    # `replayArgs` is the command a frame names as the one that reproduces IT. Its paths are this
+    # run's; everything around them is the answer. So it is NORMALISED - and the two cells below
+    # are the two mistakes that would make: refusing one command run from two folders, and going
+    # quiet about a shot handed another shot's command.
+    cmd = lambda s: {"replayArgs": s}
+    ca = _synthetic(os.path.join(tmp_root, "cmd-a"), (10, 20, 30, 255), r"C:\a\b-fp.png",
+                    extra=cmd(r"C:\w\list.json --size 512 --yaw 90"))
+    cb = _synthetic(os.path.join(tmp_root, "cmd-b"), (10, 20, 30, 255), r"D:\other\b-fp.png",
+                    extra=cmd(r"D:\elsewhere\list.json --size 512 --yaw 90"))
+    rc = compare(ca, cb, con, con_b, 0, 0, waive=W)
+    check("GREEN: one command run from two folders is ONE command - replayArgs is normalised, "
+          "not refused", rc["equal"],
+          json.dumps(rc["parts"]["reports"].get("unlistedPathLines", [])[:1]))
+
+    cc = _synthetic(os.path.join(tmp_root, "cmd-c"), (10, 20, 30, 255), r"D:\other\b-fp.png",
+                    extra=cmd(r"C:\w\list.json --size 512 --yaw 180"))
+    r10 = compare(ca, cc, con, con_b, 0, 0, waive=W)
+    check("RED: a shot given ANOTHER shot's command still differs - normalised, never dropped",
+          r10["parts"]["reports"]["status"] == DIFFERENT and not r10["equal"])
+
+    cq = _synthetic(os.path.join(tmp_root, "cmd-q"), (10, 20, 30, 255), r"C:\a\b-fp.png",
+                    extra=cmd('"C:\\a dir\\list.json" --size 512'))
+    cr = _synthetic(os.path.join(tmp_root, "cmd-r"), (10, 20, 30, 255), r"D:\other\b-fp.png",
+                    extra=cmd('"D:\\another dir\\list.json" --size 512'))
+    r11 = compare(cq, cr, con, con_b, 0, 0, waive=W)
+    check("GREEN: ...including a path QUOTED because it has a space in it, which the bare "
+          "path pattern stops at", r11["equal"],
+          json.dumps(r11["parts"]["reports"].get("unlistedPathLines", [])[:1]))
+
+    cs = _synthetic(os.path.join(tmp_root, "cmd-s"), (10, 20, 30, 255), r"D:\other\b-fp.png",
+                    extra=cmd('"C:\\a dir\\list.json" --size 256'))
+    r12 = compare(cq, cs, con, con_b, 0, 0, waive=W)
+    check("RED: ...and a different value BESIDE a quoted path is still a difference",
+          r12["parts"]["reports"]["status"] == DIFFERENT)
 
     print("SELFTEST PASS" if not fails else "SELFTEST FAIL: " + ", ".join(fails))
     return 1 if fails else 0
