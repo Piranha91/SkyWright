@@ -176,6 +176,13 @@ static class NpcActorBuilder
                         + (hidden > 0 ? $" ({hidden} slot-hidden under the outfit)" : "")
                         + $", scale {worldScale:0.###} (ref {placement.RefScale:0.##} x npc {npc.TotalHeight:0.###})"
                         + (vm.MissingTexturePaths.Count > 0 ? $", {vm.MissingTexturePaths.Count} texture(s) unresolved" : ""));
+        // The NPC path has its own texture manager and its own miss list, so it needs its own call:
+        // an actor's unreadable face texture is exactly as silent as a building's without it.
+        if (vm.MissingTexturePaths.Count > 0)
+        {
+            UnreadableAssets.Classify(host.Resolver, vm.MissingTexturePaths, Array.Empty<string>());
+            UnreadableAssets.PrintCensus();
+        }
 
         return new NpcActorRender(meshes, placement.Position, 34f * worldScale, puckColor, label);
     }

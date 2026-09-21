@@ -90,13 +90,26 @@ sealed class HcBsaProvider(AssetResolver assets) : IBsaArchiveProvider
         try
         {
             var bytes = AssetResolver.TryReadArchiveEntry(containingBsaPath, subpath);
-            if (bytes is null) { error = $"'{subpath}' not present in '{Path.GetFileName(containingBsaPath)}'"; return false; }
+            if (bytes is null)
+            {
+                error = $"'{subpath}' not present in '{Path.GetFileName(containingBsaPath)}'";
+                // LOCATED IN AN ARCHIVE AND STILL NOT READABLE. The library turns this into the
+                // same "not found" that an asset nobody shipped produces, so it is recorded here,
+                // where the difference is still visible.
+                UnreadableAssets.ExtractionFailed(subpath, containingBsaPath, error);
+                return false;
+            }
             Directory.CreateDirectory(Path.GetDirectoryName(destPath)!);
             File.WriteAllBytes(destPath, bytes);
             error = null;
             return true;
         }
-        catch (Exception ex) { error = ex.Message; return false; }
+        catch (Exception ex)
+        {
+            error = ex.Message;
+            UnreadableAssets.ExtractionFailed(subpath, containingBsaPath, error);
+            return false;
+        }
     }
 }
 
@@ -469,6 +482,10 @@ static class TexturedScene
         bool needOcclusion = planeReport is not null || (planes.Count > 0 && (occlusionMode != "off" || interactive is not null));
         var boundsCache = new Dictionary<string, (NifGeometryModel? Model, string Hash, string? Issue)>(StringComparer.OrdinalIgnoreCase);
         var geometryInputIssues = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        // The meshes the renderer drew nothing for, kept so UnreadableAssets can re-read each one
+        // AFTER the render and say which of them was found-and-unreadable rather than absent or
+        // simply empty. A count cannot be re-read; these can.
+        var noGeometry = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         // The Base Object Swapper layer's paint: the swapped refs' meshes, tinted in `diff` (BosView.cs).
         var bosView = new BosViewState(bosMode);
         // The world state's paint: the refs the flip brought in and took out (StateView.cs).
@@ -528,7 +545,7 @@ static class TexturedScene
             if (geometryInputIssues.TryGetValue(rel, out var geometryInputIssue)) ro.Issue ??= geometryInputIssue;
             if (built is null || built.Count == 0)
             {
-                missingMesh++; ro.Issue ??= "renderer produced no geometry";
+                missingMesh++; ro.Issue ??= "renderer produced no geometry"; noGeometry.Add(rel);
                 if (source.Model is { } unrendered)
                     foreach (var shape in unrendered.Shapes)
                         ro.Parts.Add(new ShapeOcclusion { Name = shape.Name, Block = shape.BlockIndex,
@@ -1657,6 +1674,10 @@ static class TexturedScene
                 });
             }
             else occl.SceneIssues.Add("interactive view has no captured shape visibility measurement");
+            // BEFORE the sink, because the sink WRITES the report and the report carries the
+            // unreadable-asset block. Classifying only at the census - which prints after this -
+            // left every report's block empty, which is how this ordering was found.
+            ClassifyUnreadable();
             planeReport(occl);
         }
         if (occlusionMode != "off")
@@ -2489,7 +2510,19 @@ static class TexturedScene
             }
             if (textures.MissingTexturePaths.Count > 0)
                 Console.WriteLine($"   textures the resolver could NOT find (white fallback, counted per rule 6): {textures.MissingTexturePaths.Count:N0}");
+            // WHICH OF THOSE WERE FOUND AND COULD NOT BE READ. The two counts above cannot tell an
+            // asset nobody shipped from one whose file will not parse, and the second is a defect
+            // in this picture. The classifier redoes each failed read to decide; it prints nothing
+            // when every one of them was simply absent, so a healthy run's console is unchanged.
+            ClassifyUnreadable();
+            UnreadableAssets.PrintCensus();
         }
+
+        // Idempotent within a render: the report sink and the census both need the answer, and the
+        // sink runs first. Classify() rebuilds this render's list each time it is called, so a
+        // second call cannot double-count.
+        void ClassifyUnreadable()
+            => UnreadableAssets.Classify(resolver, textures.MissingTexturePaths, noGeometry, geometryInputIssues);
 
         if (interactive is not null)
         {

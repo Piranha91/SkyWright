@@ -189,6 +189,10 @@ A successful save or size check alone does not establish clean pixels.
   renderer processes that are gone, and report — as JSON — everything kept and why. Needs no MO2
   instance, no game and no load order. See *The extraction scratch* below for the ownership rule
   that decides what it may touch; it is the only authority this entry point has.
+- **`--allow-unreadable-assets`**: do not fail the run when an asset was found and could not be read
+  (see *An asset that was found and could not be read fails the run*, below). The environment
+  variable `VP_ALLOW_UNREADABLE_ASSETS=1` does the same for a caller whose command line cannot
+  change. Whichever one applied is named in the census, in the report and in the run record.
 - **`--config-identity`**: report WHAT THIS RUN CONSUMED when no `--order`
   replaced it — the same `capture input configuration:` line and `<cell>-configuration.json`
   sidecar a candidate run emits, resolved from the profile itself. It is **opt-in** because
@@ -444,6 +448,39 @@ is in progress — which at process exit is not something the host can establish
 **An existing `CharacterViewerCache` beside an older build is no longer read or written.** Nothing
 deletes it for you, because it sits inside your binaries and this tool does not delete things it
 did not create; remove it by hand when you want the space back.
+
+### An asset that was found and could not be read fails the run
+
+The two census counts above — *refs without a resolvable mesh* and *textures the resolver could NOT
+find* — each cover two very different situations, and the library gives them the same answer:
+
+| what happened | what the picture is | what viewprobe does |
+|---|---|---|
+| **absent** — the resolver found it nowhere | a load order that does not contain the asset | counted, nothing more. Every campaign render has some. |
+| **present, valid, nothing to draw** — found, parsed, no render geometry | correct | counted, nothing more. Collision-only meshes are exactly this and healthy exteriors are full of them. |
+| **present and unreadable** — found, and the read failed | **wrong**: something that should be there was silently dropped | named, and the run **exits 3** |
+
+The third used to be invisible: a mesh that would not parse became "no geometry", a texture that
+would not decode became a white fallback, and the run still ended at exit 0 with a picture missing a
+building. The rule that separates them turns on **whether the read failed**, never on whether the
+result was empty — a mesh that parses with zero shapes is a valid mesh with nothing to draw, and
+failing runs over those would fail every healthy campaign render. Each swallowed path is re-resolved
+and re-read after the render to decide, so "found" is the resolver's own answer and "unreadable" is a
+read that failed again. An extraction that fails is unreadable too: the asset was located in an
+archive and could not be taken out of it.
+
+On a healthy load order none of this prints and no report gains a block, so what an existing caller
+reads is unchanged. When it does fire, the census names every asset and the reason, the report gains
+an `unreadableAssets` block, and the process exits 3 — **per process, not per shot**: a multi-shot
+worklist runs every shot and spends the exit code once at the end, because stopping at the first
+degraded shot would throw away the rest of the batch.
+
+**The opt-out is deliberate and it says so.** `--allow-unreadable-assets`, or
+`VP_ALLOW_UNREADABLE_ASSETS=1` in the environment so an existing caller can pass it through without
+its command line changing. Either one turns the exit code back to 0 — and when it does, the census
+block, the report block and the run record all say so and name **which of the two** did it. An
+ambient variable set once in a profile is exactly the thing a reader has to be able to tell from a
+flag someone typed, which is why neither is allowed to be silent.
 
 ---
 

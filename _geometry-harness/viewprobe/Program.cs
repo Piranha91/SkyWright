@@ -655,6 +655,11 @@ for (int i = argStart; i < args.Length; i++)
     else if (args[i] == "--planes") { showPlanes = true; textured = true; }
     else if (args[i] == "--occlusion" && i + 1 < args.Length) { occlusionMode = args[++i].ToLowerInvariant(); textured = true; }
     else if (args[i] == "--planes-report") { planesReport = true; textured = true; }
+    // The deliberate opt-out from failing on an asset that was found and could not be read. It is
+    // also honoured as an environment variable so an existing caller can pass it through without
+    // its command line changing - and whenever either of them is what suppressed the exit code, the
+    // census block, the report block and the run record all say so and name which one.
+    else if (args[i] == ViewProbe.UnreadableAssets.OptOutFlag) ViewProbe.UnreadableAssets.OptOutByFlag();
     else if (args[i] == "--visibility-budget")
     {
         if (i + 1 >= args.Length || !int.TryParse(args[++i], System.Globalization.NumberStyles.None,
@@ -4055,6 +4060,10 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot)
                     attribution = "none; plane provenance does not establish blame or a repair",
                     contestedBy = cellContestedBy, planes = rows,
                     notDrawn = dropped.Select(r => new { formKey = r.FormKey.ToString(), formId = RuntimeId(r.FormKey), why = r.Deleted ? "deleted" : DisabledWhy(r) }).ToList(),
+                    // Null on a healthy run, so a report that had nothing wrong with it gains
+                    // nothing. When it is not null it names every asset that was found and could
+                    // not be read, and says whether an opt-out let the run succeed anyway.
+                    unreadableAssets = ViewProbe.UnreadableAssets.ReportBlock(),
                 };
                 File.WriteAllText(jsonPath, System.Text.Json.JsonSerializer.Serialize(doc, new System.Text.Json.JsonSerializerOptions { WriteIndented = true }));
                 Console.WriteLine($"   wrote {jsonPath}");
@@ -4315,11 +4324,14 @@ if (worklist is not null)
     // catch Exception and carry on, so whether the refusal reaches here is call-order luck. The
     // refusal is latched where it happens; this is where a latched refusal becomes an exit code
     // that no catch can improve on.
-    return ViewProbe.ExtractionScratch.GuardExitCode(0);
+    return ViewProbe.ExtractionScratch.GuardExitCode(ViewProbe.UnreadableAssets.FinalExitCode(0));
 }
 
 int singleRc = RunCellTextured(target, 0, 0);
-if (singleRc >= 0) return ViewProbe.ExtractionScratch.GuardExitCode(singleRc);
+// FinalExitCode, not a bare return: a shot must never return 3 itself, because the worklist loop
+// above stops at the first shot with a non-zero code and a degraded shot must not stop the ones
+// after it. The condition accumulates across the process and is spent HERE, once.
+if (singleRc >= 0) return ViewProbe.ExtractionScratch.GuardExitCode(ViewProbe.UnreadableAssets.FinalExitCode(singleRc));
 
 
 // ---------------------------------------------------------------------------------------
