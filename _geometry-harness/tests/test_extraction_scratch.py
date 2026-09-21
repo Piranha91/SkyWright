@@ -131,6 +131,10 @@ def scratch_fail(case, data_dir):
     Returns (exit code, stdout, stderr)."""
     env = dict(os.environ)
     env["HOUSECARL_DATA_DIR"] = str(data_dir)
+    # The data directory here is deliberately unusable - that is how the claim is made to fail.
+    # The run store resolves under it when HOUSECARL_RUNLOG_DIR is unset, so it would degrade
+    # loudly too and this case would see two stderr lines instead of the one it is testing for.
+    env["HOUSECARL_RUNLOG_DIR"] = str(Path(data_dir).parent / "runlog")
     p = subprocess.run([str(VP), "--extraction-scratch-fail", case], capture_output=True,
                        text=True, encoding="utf-8", errors="replace", env=env)
     return p.returncode, p.stdout or "", p.stderr or ""
