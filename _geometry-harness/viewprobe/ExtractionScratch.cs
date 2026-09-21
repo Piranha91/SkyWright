@@ -49,14 +49,14 @@ static class ExtractionScratch
     static bool _exitHooked;
     static string? _originalBase;
     static bool _bracketOpen;
-    /// <summary>Set the instant the guard refuses, BEFORE the refusal is thrown. A throw can be
-    /// swallowed — two of the library's callers in this very file sit inside `catch (Exception)`
-    /// blocks that log and carry on — so the exit code must not depend on the exception reaching
-    /// `Main`. <see cref="Refusal"/> is what makes a refused run impossible to end at zero.</summary>
-    static string? _refusal;
 
-    /// <summary>The guard's refusal, if one happened, whatever became of the exception.</summary>
-    public static string? Refusal { get { lock (Gate) return _refusal; } }
+    /// <summary>This process's scratch failure, if one happened, whatever became of the exception.
+    /// Latched the instant it happens, BEFORE anything is thrown, because a throw can be swallowed
+    /// — two of the library's callers sit inside `catch (Exception)` blocks that log and carry on —
+    /// so the exit code must not depend on the exception reaching `Main`. Both failures latch here:
+    /// a scratch that cannot be claimed and an extraction the guard refused. See
+    /// <see cref="ExtractionScratchExit"/>, which owns the latch, the one line and the one code.</summary>
+    public static string? Refusal => ExtractionScratchExit.Failure;
 
     /// <summary>This process's extraction root once claimed, else null. Null after release.</summary>
     public static string? ClaimedRoot { get { lock (Gate) return _root; } }
@@ -93,6 +93,32 @@ static class ExtractionScratch
         lock (Gate)
         {
             if (_root is not null) return _root;
+            try { return ClaimCore(); }
+            catch (ExtractionScratchException) { throw; }
+            catch (Exception ex)
+            {
+                // A SCRATCH THAT CANNOT BE CREATED IS A REFUSAL TO RENDER, NOT A CRASH. The data
+                // directory is the caller's to choose (HOUSECARL_DATA_DIR), so "it is a file", "it
+                // is read-only" and "the disk is full" are things a person does by accident and is
+                // owed a sentence about - not a stack trace behind a runtime crash code. The
+                // alternative to failing here is extracting into the folder beside the exe, which
+                // is the defect this whole file exists to remove.
+                throw ExtractionScratchExit.Fail(
+                    "viewprobe extraction scratch: this process could not create its own extraction "
+                    + $"folder under '{BaseDir()}' ({ex.GetType().Name}: {ex.Message}). Refusing the "
+                    + "run rather than extracting where another render may be reading.");
+            }
+        }
+    }
+
+    /// <summary>The claim itself. Separated only so <see cref="Claim"/> can turn anything this
+    /// throws into the one documented ending. It takes the gate again — a re-entrant lock the
+    /// caller already holds — so the method is correct on its own terms rather than by a comment
+    /// about where it may be called from.</summary>
+    static string ClaimCore()
+    {
+        lock (Gate)
+        {
             var baseDir = BaseDir();
             Directory.CreateDirectory(baseDir);
             using var me = Process.GetCurrentProcess();
@@ -198,8 +224,14 @@ static class ExtractionScratch
     }
 
     /// <summary>A <c>using</c> for <c>Program.cs</c>: releases whatever was claimed, and does nothing
-    /// at all when a run never rendered.</summary>
-    public static IDisposable ProcessScope() => new Scope();
+    /// at all when a run never rendered. It is also where the last-chance handler goes in, because
+    /// this is the one call every run makes at the top of Main — so no entry point can be added
+    /// that has the scratch and not its ending.</summary>
+    public static IDisposable ProcessScope()
+    {
+        ExtractionScratchExit.Install();
+        return new Scope();
+    }
 
     sealed class Scope : IDisposable
     {
@@ -217,8 +249,9 @@ static class ExtractionScratch
     /// sit inside `catch (Exception)` blocks that log and carry on (TexturedScene's covering-model
     /// resolve and its BuildFromFile), so an exception is not a reliable way to stop a run: whether
     /// the refusal reaches Main is a matter of which call site trips first. The refusal is therefore
-    /// LATCHED before it is thrown, and <see cref="Program"/> turns a latched refusal into a
-    /// non-zero exit whatever happened to the exception.</summary>
+    /// LATCHED before it is thrown — and the run ends at the SAME documented code and the SAME one
+    /// line either way, swallowed through <see cref="GuardExitCode"/> and uncaught through
+    /// <see cref="ExtractionScratchExit"/>.</summary>
     public static void RequireInside(string destPath)
     {
         string full = Path.GetFullPath(destPath);
@@ -236,21 +269,20 @@ static class ExtractionScratch
                 "'. Refusing the run: simultaneous renders must not share an extraction folder.");
     }
 
-    static InvalidOperationException Refuse(string message)
-    {
-        lock (Gate) _refusal ??= message;
-        // Printed here as well as latched: a caught exception prints nothing of its own, and the
-        // person reading the console is owed the reason at the moment it happened.
-        Console.Error.WriteLine("   " + message);
-        return new InvalidOperationException(message);
-    }
+    /// <summary>Latched, said once, and thrown as the scratch's own type — all three in
+    /// <see cref="ExtractionScratchExit.Fail"/>, so a refusal that is swallowed and a refusal that
+    /// reaches Main end the same way. Said here rather than at the end because a caught exception
+    /// prints nothing of its own and the reader is owed the reason at the moment it happened.</summary>
+    static ExtractionScratchException Refuse(string message) => ExtractionScratchExit.Fail(message);
 
-    /// <summary>The exit code a run must not improve on. Zero when the guard never refused.
-    /// Called on every path out of <c>Main</c> that returns a code.</summary>
+    /// <summary>The exit code a run must not improve on. Zero when the scratch never failed.
+    /// Called on every path out of <c>Main</c> that returns a code — and the uncaught path, which
+    /// returns nothing at all, ends at the same code through
+    /// <see cref="ExtractionScratchExit.Install"/>.</summary>
     public static int GuardExitCode(int rc)
     {
         if (Refusal is null) return rc;
-        return rc != 0 ? rc : 4;
+        return rc != 0 ? rc : ExtractionScratchExit.ExitCode;
     }
 
     // ---------------------------------------------------------------- sweep

@@ -68,6 +68,11 @@ if (args.Length >= 2 && args[0] == "--extraction-scratch-sweep")
 // can put a REAL mesh in front of the real decision and read the answer. Needs no MO2 instance.
 if (args.Length >= 2 && args[0] == "--unreadable-asset-smoke")
     return ViewProbe.UnreadableAssets.MeshSmoke(args[1..]);
+// The three ways a scratch failure travels - the claim throwing, the guard's refusal escaping, the
+// same refusal swallowed by a catch-all - each reachable from the command line, so a test can prove
+// they all end at one code with one line and no stack trace. Needs no MO2 instance.
+if (args.Length >= 2 && args[0] == "--extraction-scratch-fail")
+    return ViewProbe.ExtractionScratchExit.FailSelfTest(args[1]);
 
 bool guiLaunch = GuiLaunch();
 if (guiLaunch)

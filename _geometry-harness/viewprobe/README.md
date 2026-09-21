@@ -189,6 +189,10 @@ A successful save or size check alone does not establish clean pixels.
   renderer processes that are gone, and report — as JSON — everything kept and why. Needs no MO2
   instance, no game and no load order. See *The extraction scratch* below for the ownership rule
   that decides what it may touch; it is the only authority this entry point has.
+- **`--extraction-scratch-fail claim|guard|guard-swallowed`**: take one of the three routes a
+  scratch failure can travel, on purpose, and end the run the way it would end in a render — one
+  line, no stack trace, exit 4. Needs no MO2 instance, no game and no load order. `claim` against a
+  usable data directory is the green control and exits 0.
 - **`--allow-unreadable-assets`**: do not fail the run when an asset was found and could not be read
   (see *An asset that was found and could not be read fails the run*, below). The environment
   variable `VP_ALLOW_UNREADABLE_ASSETS=1` does the same for a caller whose command line cannot
@@ -404,10 +408,23 @@ extracts — and an asset that changed on disk can never be read from a stale co
 **The destination is guarded.** Every extraction destination is checked against this process's own
 folder, and one outside it **refuses the run** instead of writing. If the library ever stops taking
 the destination from `AppContext.BaseDirectory`, that is a loud failure on the first extraction
-rather than a silent return to the shared folder. The refusal does not depend on its exception
-reaching the top: two of this tool's own call sites resolve assets inside `catch (Exception)` blocks
-that log and carry on, so the refusal is recorded the instant it happens and a run that was refused
-cannot end at exit 0 whatever became of the throw. It exits **4** if nothing worse happened first.
+rather than a silent return to the shared folder.
+
+**Any failure of the scratch ends the run at exit `4`**, with one line on stderr and no stack trace.
+Two things are failures of the scratch: the guard refusing an extraction, and the scratch itself
+being impossible to create — the data directory is a file, the path is refused, the disk is full.
+There is one ending because a caller cannot control which route the failure takes: two of this
+tool's own call sites resolve assets inside `catch (Exception)` blocks that log and carry on, so
+whether the refusal's exception reaches the top is a matter of which call site tripped first. The
+failure is therefore latched the instant it happens and spent on the way out of `Main` — swallowed
+or not, the run says the same line and exits the same code. Exit `3` is a different thing entirely:
+an asset that was **found and could not be read** (the next section). Exit `4` means nothing was
+rendered at all.
+
+`viewprobe --extraction-scratch-fail claim|guard|guard-swallowed` takes each of the three routes
+deliberately — the claim throwing, the guard's refusal escaping, the same refusal swallowed by a
+catch-all — which is how that single ending is tested with no game install. `claim` against a usable
+data directory is the green control: it claims, prints the folder and exits 0.
 
 **A killed process leaves its folder behind**, so the next run sweeps the parent for orphans. The
 sweep is a deleter, and what it may never delete is the whole of its contract:

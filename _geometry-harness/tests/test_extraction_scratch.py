@@ -1,4 +1,14 @@
-"""The extraction scratch's deleter contract - what viewprobe may and may not remove.
+"""The extraction scratch's two contracts: what viewprobe may not DELETE, and how it FAILS.
+
+The second half of this file is the failure ending. A scratch that cannot be claimed and an
+extraction the guard refuses are both refusals to render, and they used to end the run in two
+different ways depending on nothing a caller controls: swallowed by one of the library's catch-alls
+they became exit 4, and uncaught they became a stack trace behind the runtime's crash code. So the
+cases below take each of the three routes on purpose and require ONE documented code, ONE line, and
+no stack trace from every one of them - with a green control first, because an entry point that
+refused everything would satisfy all three for the wrong reason.
+
+
 
 viewprobe gives each render process its own extraction folder and removes it when the process ends.
 That makes viewprobe a program that deletes directories, and a deleter is judged by what it can
@@ -28,6 +38,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -40,8 +51,10 @@ VP = HARNESS / "viewprobe" / "bin" / "Release" / "net9.0-windows10.0.19041.0" / 
 # A private build may be pointed at instead, which is how this is run against a build under test
 # without touching the production folder another session may be rendering from.
 VP = Path(os.environ.get("VIEWPROBE_EXE", str(VP)))
+README = HARNESS / "viewprobe" / "README.md"
 
 MARKER = "viewprobe-extract.json"      # what makes a directory OURS; the contract's whole basis
+SCRATCH_FAIL_EXIT = 4                  # the ONE code every scratch failure ends at, documented
 FAILS: list[str] = []
 FUNCTIONAL = [False]                   # set once the sweep is shown to actually delete an orphan
 
@@ -110,6 +123,74 @@ def foreign(root, name):
     d.mkdir(parents=True, exist_ok=True)
     (d / "important.txt").write_text("not viewprobe's", encoding="utf-8")
     return d
+
+
+def scratch_fail(case, data_dir):
+    """Take one of the three routes a scratch failure travels, with a data directory this test owns.
+    Returns (exit code, stdout, stderr)."""
+    env = dict(os.environ)
+    env["HOUSECARL_DATA_DIR"] = str(data_dir)
+    p = subprocess.run([str(VP), "--extraction-scratch-fail", case], capture_output=True,
+                       text=True, encoding="utf-8", errors="replace", env=env)
+    return p.returncode, p.stdout or "", p.stderr or ""
+
+
+def failure_ending():
+    """One failure, one line, one exit code - whichever way the throw travelled."""
+    work = Path(tempfile.mkdtemp(prefix="hc-extract-fail-"))
+    usable = work / "usable"
+    usable.mkdir()
+    a_file = work / "a-file"            # a data directory that is a FILE: the claim cannot succeed
+    a_file.write_text("not a directory", encoding="utf-8")
+    names = ["claim: refused with the documented code", "guard: refused with the documented code",
+             "guard-swallowed: refused with the documented code",
+             "every route ends at the same documented code"]
+    try:
+        # THE GATE. A build whose entry point refused everything would pass every failure check
+        # below for the wrong reason, so the working case has to be seen working first.
+        rc, out, err = scratch_fail("claim", usable)
+        green = rc == 0 and out.startswith("claimed ") and err.strip() == ""
+        check("a claim on a usable data directory succeeds, says where, and prints no refusal",
+              green, "exit %s; out=%s; err=%s" % (rc, out.strip()[:90], " ".join(err.split())[:90]))
+        if not green:
+            for n in names:
+                print("  SKIP " + n + "  (the entry point does not work; a refusal check would pass "
+                                      "for the wrong reason)")
+                FAILS.append(n + " [not exercised]")
+            return
+
+        codes = {}
+        for case, root, names_it in (("claim", a_file, "extraction scratch"),
+                                     ("guard", usable, "extraction guard"),
+                                     ("guard-swallowed", usable, "extraction guard")):
+            rc, out, err = scratch_fail(case, root)
+            lines = [ln for ln in err.splitlines() if ln.strip()]
+            codes[case] = rc
+            check("%s: refused with the documented code" % case, rc == SCRATCH_FAIL_EXIT,
+                  "exit %s, expected %s" % (rc, SCRATCH_FAIL_EXIT))
+            check("%s: ONE line on stderr, and it names the failure" % case,
+                  len(lines) == 1 and names_it in lines[0].lower(),
+                  "%d line(s): %s" % (len(lines), " ".join(err.split())[:140]))
+            check("%s: no stack trace" % case,
+                  "unhandled exception" not in err.lower()
+                  and not any(ln.strip().startswith("at ") for ln in lines),
+                  " ".join(err.split())[:140])
+        check("every route ends at the same documented code",
+              set(codes.values()) == {SCRATCH_FAIL_EXIT}, json.dumps(codes))
+
+        # Nothing is held between runs - on the refused paths too. The uncaught route leaves through
+        # a last-chance handler, so this is the check that it did not skip the exit-time delete.
+        left = sorted(p.name for p in (usable / "viewprobe-extract").glob("vp-*"))
+        check("a refused run still removes its own extraction folder", left == [], str(left[:4]))
+
+        # The code is only documented if the README says the same number. A run that changed the
+        # ending without changing the page would leave every caller reading the old one.
+        m = re.search(r"failure of the scratch ends the run at exit `(\d+)`",
+                      README.read_text(encoding="utf-8")) if README.exists() else None
+        check("the README documents that code", m is not None and int(m.group(1)) == SCRATCH_FAIL_EXIT,
+              "README says %s" % (m.group(1) if m else "nothing matching"))
+    finally:
+        shutil.rmtree(work, ignore_errors=True)
 
 
 def main():
@@ -213,6 +294,9 @@ def main():
         protective("nothing outside the given root was touched", Path(root).exists())
     finally:
         shutil.rmtree(root, ignore_errors=True)
+
+    # --- the other contract: how a scratch failure ends the run ------------------------------
+    failure_ending()
 
     print("PASS" if not FAILS else "FAIL: " + "; ".join(FAILS))
     return 1 if FAILS else 0
