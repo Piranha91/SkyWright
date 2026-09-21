@@ -549,6 +549,37 @@ starting hopefully. `--dry-run` prints the plan and renders nothing, and `--gpu-
 `--sys-free-mib` / `--no-memory-reader` stand in for the machine, which is how the rule is
 exercised on hardware that has no such reader at all.
 
+### Does a shot rendered in a batch equal the same shot rendered alone?
+
+One process can be asked for several shots — a worklist with many shots, and many cells — and that
+is the path any sharing of work between shots would be built on. What such sharing risks is not a
+crash but a quietly wrong picture, so `tools/rendertwin.py` compares outputs rather than exit codes:
+
+- `twins` renders a worklist as one process, then renders **each of its shots alone** from a
+  one-shot worklist of its own, and compares each batched shot with its fresh twin;
+- `shuffle` renders the same shots in **two different orders** and compares each shot with itself —
+  an answer that depends on what was rendered before it is state carried between shots;
+- `control` renders one command twice into different folders, where the answer is known before it
+  runs: a suite whose green control comes back red is a broken suite, not a finding;
+- `fields` checks the worklist shot record's properties against the table of what the generated
+  worklist varies, so a new shot field cannot quietly become a row nothing ever varies, and
+  `makelist` writes that worklist; `selftest` is a known-answer run over synthetic folders.
+
+Cutting one shot out of a batch is the part that could hide the answer, so both cuts are made by
+something the renderer writes and both are controlled. Files carry `-c<cell>s<shot>-` — the shot's
+position in the run — and are hard-linked into a folder per shot with that segment removed; the
+console is cut at the `=== worklist cell i/n shot j/m: LABEL ===` line, whose counts are replaced
+and whose **label is kept**. What a run prints before its first marker is the process preamble,
+compared as its own part. What a batch prints once for the whole process (the base-object-swap layer
+is loaded on the first shot and kept) is removed from the other side's block **by name and only when
+this shot's block prints no line of the same kind**, so a line whose value changed is never removed.
+Every arm then runs a cross-pair control — shot A against shot B's twin — and requires the decoded
+pixels to differ, which is what proves the cut is not what is making shots equal.
+
+The comparison itself is `renderequiv.py`'s, unchanged: decoded pixels, reports under the
+enumerated-field rule, the console, the census, the exit code, and a part that was not compared
+must be waived by name.
+
 ### An asset that was found and could not be read fails the run
 
 The two census counts above — *refs without a resolvable mesh* and *textures the resolver could NOT
