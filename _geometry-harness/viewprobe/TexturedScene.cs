@@ -491,8 +491,11 @@ static class TexturedScene
         // The world state's paint: the refs the flip brought in and took out (StateView.cs).
         var stateView = new StateViewState(stateMode, stateName);
 
+        ViewProbe.RenderStages.Open(ViewProbe.RenderStages.SceneBuild,
+            "resolving and building every reference's meshes and textures", refs.Count, "references");
         foreach (var r in refs)
         {
+            ViewProbe.RenderStages.Advance();
             var ro = new RefOcclusion { Ref = r };
             occl.Refs.Add(ro); // Missing and unsupported assets stay in the audit population.
             var rel = r.MeshRelPath.StartsWith("meshes", StringComparison.OrdinalIgnoreCase)
@@ -1618,6 +1621,10 @@ static class TexturedScene
         // recomputes for itself, canary and all, so the two cannot contaminate each other.
         if (planeReport is not null)
         {
+            // Total unknown on purpose: how many shapes the visibility pass reaches depends on the
+            // budget and on what the camera can see, and a made-up total is worse than none (§5).
+            ViewProbe.RenderStages.Open(ViewProbe.RenderStages.Report,
+                "the occlusion report: per-shape visibility, then writing it", null, "shape draws");
             occl.Evaluate(cam.Eye);
             if (occl.Refs.Any(r => r.Issue is not null || r.Parts.Any(s => s.Issue is not null)))
                 occl.SceneIssues.Add("missing or unsupported scene geometry; visible pixels describe the rendered scene only");
@@ -1679,6 +1686,7 @@ static class TexturedScene
             // left every report's block empty, which is how this ordering was found.
             ClassifyUnreadable();
             planeReport(occl);
+            ViewProbe.RenderStages.Progress(occl.VisibilityDraws);
         }
         if (occlusionMode != "off")
         {
@@ -2679,6 +2687,8 @@ static class TexturedScene
         IReadOnlyList<(string Text, int X, int Y)>? pinnedLabels = null, Vector3 pinnedColor = default,
         bool reportMode = false)
     {
+        ViewProbe.RenderStages.Open(ViewProbe.RenderStages.Encode,
+            "encoding the frame and writing it", 1, "frames");
         if (reportMode)
         {
             captionLines = Array.Empty<string>();
@@ -2776,6 +2786,7 @@ static class TexturedScene
             img.Metadata.GetPngMetadata().TextData.Add(
                 new SixLabors.ImageSharp.Formats.Png.Chunks.PngTextData("viewprobe", pngTextMeta, string.Empty, string.Empty));
         img.SaveAsPng(outPath);
+        ViewProbe.RenderStages.Advance();
     }
 
     /// <summary>Overlay geometry that is not a navmesh edge: the dashed cell outline and the

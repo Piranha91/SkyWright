@@ -46,7 +46,10 @@ using Image = SixLabors.ImageSharp.Image;
 // ahead of the Require() calls just below, because an unconfigured harness exits from inside those:
 // a window that closes on the one message explaining how to configure it has taught nobody
 // anything. The console dies with the process on a GUI launch, so every exit path pauses.
-using var __run = RunLog.BeginProcess("viewprobe", args);
+using var __run = RunLog.BeginProcess("viewprobe", args,
+    // A render is not one indivisible step and no longer says it is: RenderStages.cs opens one
+    // stage per phase, which is what makes the coverage manifest's `counted` claim true.
+    new RunOptions { StageSource = StageSource.Counted });
 // THE EXTRACTION SCRATCH. The rendering library unpacks BSA assets to disk before it can read
 // them, and every process started from one build folder used to unpack them to the SAME place —
 // so two renders started together overwrote each other's files and produced quietly wrong
@@ -913,6 +916,9 @@ if (worklistPaths.Count > 0)
     Console.WriteLine($"worklist '{worklist.Label}': {worklist.Cells.Count} cell(s), "
                     + $"{worklist.Cells.Sum(c => c.Shots.Count)} shot(s)  [{src}]");
 }
+// How many shots this run renders, so a reader of the record knows how many times the per-shot
+// stages are expected to repeat. One when there is no worklist.
+ViewProbe.RenderStages.Feature("shots", worklist?.Cells.Sum(c => c.Shots.Count) ?? 1, "shots");
 
 // A DROP IS A HUMAN AT A MOUSE. Static mode writes numbered PNGs into a folder they would then have
 // to go and find, and pays the load walk once per SHOT; the fly-through pays it once per CELL and
@@ -1012,6 +1018,11 @@ if (reportedConfiguration is null && configIdentity)
         HarnessShared.HarnessOrderCli.Print(resolved);
     }
 }
+// WHAT ran, as an opaque id, and only when this run had already resolved one: asking for a
+// configuration costs a resolve, and a record is not a reason to pay it. The fingerprint is a hash
+// and names no plugin, which is the form the contract permits for an input (§11).
+ViewProbe.RenderStages.Configuration(
+    reportedConfiguration?.Identity("load-time", stateSpec ?? "baseline").Fingerprint);
 var assetMods = candidateConfiguration?.EnabledMods ?? comp.EnabledMods;
 
 // --emit-bats: the whole run is the bat files. It has its own compact walk (BatEmit.cs) covering
@@ -1439,9 +1450,11 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot)
         || cp.Cell.ID.ToString("X6").Equals(cellTarget.TrimStart('0'), StringComparison.OrdinalIgnoreCase);
     __run.Feature("plugins", order.OrderedPaths.Count, "plugins").Stage("find-cell", "walking the order for the target cell", order.OrderedPaths.Count, "plugins");
 
+    int scannedForCell = 0;
     foreach (var path in order.OrderedPaths)
     {
         __run.Advance();
+        scannedForCell++;
         ISkyrimModGetter m;
         try { m = SkyrimMod.CreateFromBinaryOverlay(path, SkyrimRelease.SkyrimSE); } catch { continue; }
         using (m as IDisposable)
@@ -1460,14 +1473,22 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot)
         if (cellKey is not null) break;
     }
     if (cellKey is null) { Console.Error.WriteLine($"cell '{cellTarget}' not found in the active load order."); return 1; }
+    // The walk STOPS at the plugin that has the cell, so the plugins after it were never work.
+    // Saying so is the difference between a stage that ended at 1 of 5 and one that ended at 1 of 1.
+    ViewProbe.RenderStages.Revise(scannedForCell,
+        $"the cell was found in plugin {scannedForCell} of {order.OrderedPaths.Count}; the rest were not walked");
     try { navSelection = new ViewProbe.NavmeshSelection(cellKey.Value, navCellSpecs, navVersionSpecs); }
     catch (ArgumentException ex) { Console.Error.WriteLine(ex.Message); return 2; }
     foreach (var plugin in navSelection.Overrides.Values) navVersionPlugins.Add(plugin);
 
     // The BOS form index fills on the FIRST walk only (a worklist re-walks per cell; the index does not change).
     bool bosFill = bosIdx is not null && bosIdx.RecordsSeen == 0;
+    ViewProbe.RenderStages.Open(ViewProbe.RenderStages.RecordWalk,
+        "the winning state: every plugin, for the refs and navmeshes that win",
+        order.OrderedPaths.Count, "plugins");
     foreach (var path in order.OrderedPaths)
     {
+        ViewProbe.RenderStages.Advance();
         ISkyrimModGetter m;
         try { m = SkyrimMod.CreateFromBinaryOverlay(path, SkyrimRelease.SkyrimSE); } catch { if (bosFill) bosLight.Add((ModKey.Null, false)); continue; }
         using (m as IDisposable)

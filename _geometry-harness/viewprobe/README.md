@@ -503,6 +503,29 @@ is in progress — which at process exit is not something the host can establish
 deletes it for you, because it sits inside your binaries and this tool does not delete things it
 did not create; remove it by hand when you want the space back.
 
+### What a render says it is doing, while it is doing it
+
+Every run opens a record (`standards/HOUSECARL_RUN_EVENTS.md`; point `HOUSECARL_RUNLOG_DIR` at a
+directory to keep a job's history with the job). A render used to file itself under **one** stage —
+`find-cell`, opened while the load order was walked and then never replaced — so a seventeen-second
+render reported fifteen seconds of "walking the order for the target cell" at one plugin of five,
+and a multi-shot run repeated that same stage once per shot.
+
+It now opens a stage per phase, per shot, at the cuts the cost model measures: `find-cell`,
+`record-walk`, `scene-build`, `report` (only when one is asked for) and `encode`. Each carries real
+counters — plugins, plugins, references, shape draws, frames — and `find-cell` **revises** its total
+when the cell turns up early, because a walk that stopped at the first plugin did not leave four
+plugins unprocessed, it never had them to do. `housecarl-runlog history --stages` prints them, and
+`stageSource` on the record is now `counted`, which is what the coverage manifest always claimed.
+
+The record also carries `shots` (how many the run renders, so a reader knows how often the per-shot
+phases should repeat) and, when the run had already resolved one, the configuration **fingerprint**
+as an opaque resource — a hash that names no plugin, which is the form the contract permits for an
+input. Nothing resolves a configuration merely to record it.
+
+Weights are left at the default: an unmeasured weight would be a claim about the split this build
+cannot make yet, and the estimator learns the shape from history instead.
+
 ### How many renders may run at once — computed, not typed
 
 Renders that no longer corrupt each other can still exhaust the machine, and graphics and system
