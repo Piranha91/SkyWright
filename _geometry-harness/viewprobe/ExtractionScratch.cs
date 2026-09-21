@@ -145,6 +145,12 @@ static class ExtractionScratch
             string root = Path.Combine(baseDir, name);
             for (int n = 2; Directory.Exists(root) && n < 100; n++)
                 root = Path.Combine(baseDir, $"{name}-{n}");
+            // BEFORE the directory exists: a root this long cannot deliver a single asset, and the
+            // failure it would otherwise produce is the silent one - the library reads nothing from
+            // a path past its limit WITHOUT throwing. Checked here rather than guessed at, and only
+            // for the case arithmetic settles; see AssetPathBudget.ClaimRefusal.
+            if (AssetPathBudget.ClaimRefusal(root) is { } tooLong)
+                throw ExtractionScratchExit.Fail(tooLong);
             Directory.CreateDirectory(root);
             // The marker goes in immediately: the window between the mkdir and this line is the
             // only window in which a crash leaves a directory nothing can ever claim, and the sweep

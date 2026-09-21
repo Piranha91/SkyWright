@@ -71,10 +71,16 @@ static class UnreadableAssets
     public static int Count { get { lock (Gate) return Found.Count; } }
 
     /// <summary>Remember one, for the exit code and the report. Returns the entry either way, so a
-    /// caller can print what THIS render found without printing what an earlier shot found.</summary>
+    /// caller can print what THIS render found without printing what an earlier shot found.
+    ///
+    /// ONE PLACE FOR THE PATH-LENGTH CAUSE. Every entry is built here — the census line, the report
+    /// block and the run record all read what this returns — so a path too long for the library's
+    /// reader is named once, in the reason, for whichever kind of asset hit it. See
+    /// <see cref="AssetPathBudget"/> for what was measured and why an archive entry is left
+    /// alone.</summary>
     public static Entry Record(string kind, string asset, string? resolved, string reason)
     {
-        var e = new Entry(kind, asset, resolved, reason);
+        var e = new Entry(kind, asset, resolved, reason + AssetPathBudget.Clause(kind, resolved));
         lock (Gate)
         {
             if (!Found.Any(f => f.Kind == kind && string.Equals(f.Asset, asset, StringComparison.OrdinalIgnoreCase)))

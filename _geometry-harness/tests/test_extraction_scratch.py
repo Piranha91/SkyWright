@@ -55,6 +55,7 @@ README = HARNESS / "viewprobe" / "README.md"
 
 MARKER = "viewprobe-extract.json"      # what makes a directory OURS; the contract's whole basis
 SCRATCH_FAIL_EXIT = 4                  # the ONE code every scratch failure ends at, documented
+LIMIT = 260                            # the measured length the library's mesh reader stops at
 FAILS: list[str] = []
 FUNCTIONAL = [False]                   # set once the sweep is shown to actually delete an orphan
 
@@ -193,6 +194,92 @@ def failure_ending():
         shutil.rmtree(work, ignore_errors=True)
 
 
+def budget(paths):
+    """Run the real path budget over paths given on the command line. Returns a list of its JSON."""
+    p = subprocess.run([str(VP), "--asset-path-budget", *paths], capture_output=True, text=True,
+                       encoding="utf-8", errors="replace")
+    return [json.loads(ln) for ln in (p.stdout or "").splitlines() if ln.strip().startswith("{")]
+
+
+def path_budget():
+    """A path too long for the rendering library's reader is NAMED as the cause, and a root that
+    cannot deliver any asset at all is refused when it is claimed.
+
+    Both directions of both decisions, one character apart, because a rule that fires on everything
+    and a rule that fires on nothing pass the same one-sided check."""
+    pad = "C:\\" + "d" * 400
+    under = pad[:LIMIT - 1]                 # the longest path the library's reader still reads
+    at = pad[:LIMIT]                        # one character past it
+    rows = {r["path"]: r for r in budget([under, at])}
+    if len(rows) != 2:
+        check("the path budget answers on the command line", False, "got %d row(s)" % len(rows))
+        return
+    lo, hi = rows[under], rows[at]
+    check("the limit the tool uses is the measured one", lo["limit"] == LIMIT, str(lo["limit"]))
+    check("a path one character under the limit is readable and gains no words",
+          lo["readable"] and lo["clause"]["mesh"] is None and lo["clause"]["texture"] is None,
+          json.dumps(lo)[:160])
+    check("a path AT the limit is not readable", not hi["readable"], json.dumps(hi)[:120])
+    check("a mesh at the limit is told the path is why, with its length and the limit",
+          hi["clause"]["mesh"] is not None and str(LIMIT) in hi["clause"]["mesh"]
+          and str(hi["length"]) in hi["clause"]["mesh"],
+          str(hi["clause"]["mesh"])[:200])
+    check("another kind at the limit is told to rule the path out, not that it is proven",
+          hi["clause"]["texture"] is not None and "rule the path length out" in hi["clause"]["texture"],
+          str(hi["clause"]["texture"])[:200])
+    # An `archive` entry records the BSA the asset was found in, not the destination that was too
+    # long, so length-checking it would be a sentence about the wrong string.
+    check("an archive entry is left alone whatever its length",
+          hi["clause"]["archive"] is None and lo["clause"]["archive"] is None,
+          str(hi["clause"]["archive"])[:120])
+
+    # The claim-time refusal, both ways: a root with one character of room claims, a root with none
+    # is refused. The tool computes the room from the library's own layout, so the test asks IT
+    # where the boundary is rather than restating the arithmetic.
+    roots = {r["path"]: r for r in budget([pad[:n] for n in range(LIMIT - 60, LIMIT)])}
+    usable = [r for r in roots.values() if r["remainingForAssetIfUsedAsRoot"] == 1]
+    empty = [r for r in roots.values() if r["remainingForAssetIfUsedAsRoot"] == 0]
+    if not usable or not empty:
+        check("the budget brackets a root with one character of room", False, str(len(roots)))
+        return
+    check("a root with room is not refused", usable[0]["claimRefusal"] is None,
+          str(usable[0]["claimRefusal"])[:120])
+    check("a root with no room for any asset is refused, and says how to fix it",
+          empty[0]["claimRefusal"] is not None
+          and "HOUSECARL_DATA_DIR" in empty[0]["claimRefusal"],
+          str(empty[0]["claimRefusal"])[:160])
+
+    # And the refusal is real at claim time, not only an opinion this entry point prints. The data
+    # directory is what a caller sets, so it is what this drives - the root underneath it is longer
+    # by the folder the tool adds and its own process-named folder.
+    work = Path(tempfile.mkdtemp(prefix="hc-extract-long-"))
+    try:
+        target = LIMIT - 40            # leaves no room once the tool adds its own two folders
+        deep = work
+        while len(str(deep)) < target:
+            seg = min(40, target - len(str(deep)) - 1)
+            if seg < 1:
+                break
+            deep = deep / ("d" * seg)
+        deep.mkdir(parents=True, exist_ok=True)
+        rc, out, err = scratch_fail("claim", deep)
+        check("a data directory too long to extract under is refused when the scratch is claimed",
+              rc == SCRATCH_FAIL_EXIT and "too long" in err.lower(),
+              "exit %s; %s" % (rc, " ".join(err.split())[:160]))
+        check("...and it is the same one-line ending, not a stack trace",
+              "unhandled exception" not in err.lower()
+              and len([ln for ln in err.splitlines() if ln.strip()]) == 1,
+              " ".join(err.split())[:160])
+        # The budget is only documented if the README carries the same number.
+        m = re.search(r"an empty list from \*\*(\d+)\*\*",
+                      README.read_text(encoding="utf-8")) if README.exists() else None
+        check("the README documents the measured limit",
+              m is not None and int(m.group(1)) == LIMIT,
+              "README says %s" % (m.group(1) if m else "nothing matching"))
+    finally:
+        shutil.rmtree(work, ignore_errors=True)
+
+
 def main():
     if not VP.exists():
         print("viewprobe.exe not found at %s - build it or set VIEWPROBE_EXE" % VP)
@@ -297,6 +384,9 @@ def main():
 
     # --- the other contract: how a scratch failure ends the run ------------------------------
     failure_ending()
+
+    # --- and the path budget the scratch is spending -------------------------------------------
+    path_budget()
 
     print("PASS" if not FAILS else "FAIL: " + "; ".join(FAILS))
     return 1 if FAILS else 0

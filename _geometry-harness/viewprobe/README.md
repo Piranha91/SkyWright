@@ -189,6 +189,10 @@ A successful save or size check alone does not establish clean pixels.
   renderer processes that are gone, and report — as JSON — everything kept and why. Needs no MO2
   instance, no game and no load order. See *The extraction scratch* below for the ownership rule
   that decides what it may touch; it is the only authority this entry point has.
+- **`--asset-path-budget <path>…`**: what the path budget makes of each path — its length, whether
+  the rendering library's reader can read a file there, how much room it would leave an asset if it
+  were the extraction root, and the sentence an unreadable-asset entry would gain. See *The path
+  budget* below. Needs no MO2 instance, no game and no load order.
 - **`--extraction-scratch-fail claim|guard|guard-swallowed`**: take one of the three routes a
   scratch failure can travel, on purpose, and end the run the way it would end in a render — one
   line, no stack trace, exit 4. Needs no MO2 instance, no game and no load order. `claim` against a
@@ -405,6 +409,39 @@ uses, and never inside the installed binaries:
 and it is gone when that process exits. It is a scratch, not a cache, so a run's cost is what it
 extracts — and an asset that changed on disk can never be read from a stale copy.
 
+#### The path budget: how long that folder's name may be
+
+The rendering library reads a mesh with a **native** loader, and a native open on Windows still
+stops at `MAX_PATH`. Measured on the library's own reader, with one mesh copied to every length in
+a range: it returns geometry at **259** characters of full path and an empty list from **260** —
+without throwing, with the file present and readable by every managed API in the process. A second
+sweep moved the same total between the directory and the file name and flipped at the same total,
+so it is the whole path, not one component. houseCARL's own parse reads such a file fine, which is
+why a mesh past the limit shows up as *found, parses with N drawable shape(s), but the renderer
+produced no geometry* — and the entry now **says the path is why**, with its length, instead of
+leaving you to find it.
+
+The path the limit applies to is the extracted one, and it is built like this:
+
+```
+<scratch root>\CharacterViewerCache\<8-char source token>\<the asset's own path>
+    ^-- <data directory>\viewprobe-extract\vp-<pid>-<8 hex>
+```
+
+So the budget for an asset's own path is `259 − len(scratch root) − 31`. At the default location on
+a normal Windows profile that leaves comfortably over a hundred characters, and an ordinary game
+asset path is well under that. **`HOUSECARL_DATA_DIR` is what can spend it**: point it somewhere
+deep and ordinary assets stop being read. To shorten it, set `HOUSECARL_DATA_DIR` to a short
+directory — near the root of a drive, for instance — or unset it and take the default.
+
+`viewprobe --asset-path-budget <path>…` prints what the tool thinks of a path: its length, whether
+the library's reader could read it, how much room it would leave an asset if it were the scratch
+root, and the words an entry would gain. **A root that leaves an asset zero characters is refused
+when it is claimed** (exit 4, above): that one is arithmetic rather than a guess — nothing in such a
+run could be read. A root that is merely tight is not refused, because the tool does not know how
+long the longest path in your load order is, and a guess would fail runs whose assets are all
+short-named.
+
 **The destination is guarded.** Every extraction destination is checked against this process's own
 folder, and one outside it **refuses the run** instead of writing. If the library ever stops taking
 the destination from `AppContext.BaseDirectory`, that is a loud failure on the first extraction
@@ -494,6 +531,11 @@ finds zero drawable shapes does agree, so collision-only meshes — of which a h
 full — stay silent. `viewprobe --unreadable-asset-smoke <file>…` runs that decision over files you
 name and prints the verdict and the drawable-shape count for each, which is how the rule is tested
 against real meshes of all three kinds.
+
+**When the path is the cause, the entry says so.** A disagreement of exactly that shape — houseCARL
+parses it, the library draws nothing from it — is what an extracted path past the library reader's
+limit looks like, and the entry names the length and the limit rather than leaving it to be found.
+See *The path budget* above for the arithmetic and how to shorten it.
 
 On a healthy load order none of this prints and no report gains a block, so what an existing caller
 reads is unchanged. When it does fire, the census names every asset and the reason, and the report

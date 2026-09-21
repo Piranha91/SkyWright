@@ -73,6 +73,11 @@ if (args.Length >= 2 && args[0] == "--unreadable-asset-smoke")
 // they all end at one code with one line and no stack trace. Needs no MO2 instance.
 if (args.Length >= 2 && args[0] == "--extraction-scratch-fail")
     return ViewProbe.ExtractionScratchExit.FailSelfTest(args[1]);
+// The path budget's two decisions - is this path too long for the library's reader, and does this
+// root leave an asset any room - over paths on the command line. Both are decisions about a string,
+// so a test can stand one character either side of the limit. Needs no MO2 instance.
+if (args.Length >= 2 && args[0] == "--asset-path-budget")
+    return ViewProbe.AssetPathBudget.Report(args[1..]);
 
 bool guiLaunch = GuiLaunch();
 if (guiLaunch)
