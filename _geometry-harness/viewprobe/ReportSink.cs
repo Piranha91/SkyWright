@@ -85,7 +85,7 @@ public static class ReportSinkSelfTest
                 visibilityMask = i % 2 == 0 ? @"C:\x\shape-0001-block-0.png" : null,
                 refPosition = new[] { 1.0f, float.MaxValue, -0.0f },
             });
-        return new { formKey = "00083A:Occlusion.esp", planes = cands, reach = 4096.0 };
+        return new { formKey = "00BEEF:Some Plugin.esp", planes = cands, reach = 4096.0 };
     }
 
     static IEnumerable<object> Slow(int rows)
