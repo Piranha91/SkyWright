@@ -64,6 +64,10 @@ if (args.Length == 1 && args[0] == "--nav-selection-smoke")
 // calls below: it needs no MO2 instance, no game and no load order.
 if (args.Length >= 2 && args[0] == "--extraction-scratch-sweep")
     return ViewProbe.ExtractionScratch.Sweep(args);
+// The mesh half of the unreadable-asset decision, over files given on the command line, so a test
+// can put a REAL mesh in front of the real decision and read the answer. Needs no MO2 instance.
+if (args.Length >= 2 && args[0] == "--unreadable-asset-smoke")
+    return ViewProbe.UnreadableAssets.MeshSmoke(args[1..]);
 
 bool guiLaunch = GuiLaunch();
 if (guiLaunch)
@@ -1320,6 +1324,10 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot)
     winRef.Clear(); persistentWin.Clear(); refDisabledFlag.Clear(); refEnableParent.Clear(); refEditorIdAll.Clear();
     stateArm = null; activeFacts = EnableFactsOf; stateBaselineMemo.Clear();
     stateSpec = cliStateSpec;
+    // The unreadable-asset list is per SHOT for the same reason: the census line and the report
+    // block describe THIS picture. The process-wide total, which the exit code is spent on, is
+    // kept separately and is not cleared here.
+    ViewProbe.UnreadableAssets.BeginShot();
     planeHist.Clear(); cellContestedBy.Clear();
     npcRefWhere.Clear(); npcBaseWhere.Clear(); doorWhere.Clear();
     winNav.Clear(); navByPlugin.Clear();

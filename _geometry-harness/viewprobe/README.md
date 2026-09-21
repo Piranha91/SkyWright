@@ -462,18 +462,33 @@ find* — each cover two very different situations, and the library gives them t
 
 The third used to be invisible: a mesh that would not parse became "no geometry", a texture that
 would not decode became a white fallback, and the run still ended at exit 0 with a picture missing a
-building. The rule that separates them turns on **whether the read failed**, never on whether the
-result was empty — a mesh that parses with zero shapes is a valid mesh with nothing to draw, and
-failing runs over those would fail every healthy campaign render. Each swallowed path is re-resolved
-and re-read after the render to decide, so "found" is the resolver's own answer and "unreadable" is a
-read that failed again. An extraction that fails is unreadable too: the asset was located in an
-archive and could not be taken out of it.
+building. Each swallowed path is re-resolved and re-read after the render to decide, so "found" is
+the resolver's own answer and "unreadable" is a read that failed again. An extraction that fails is
+unreadable too: the asset was located in an archive and could not be taken out of it.
+
+**A mesh the renderer drew nothing from is dismissed only when a second, independent parse AGREES
+there was nothing to draw.** Not when the parse merely succeeds. A mesh that parses with drawable
+shapes and that the renderer produced no geometry from is an asset that was found and not drawn,
+whatever the reason — and that is exactly the shape of the extraction race's own mesh mode, where
+the library reads a file another process is rewriting, returns no geometry *without throwing*, and
+the file is whole again by the time anything looks at it. A rule that accepted "it parses" would be
+blind to the very defect above, and to any other transient failure inside the library. A parse that
+finds zero drawable shapes does agree, so collision-only meshes — of which a healthy exterior is
+full — stay silent. `viewprobe --unreadable-asset-smoke <file>…` runs that decision over files you
+name and prints the verdict and the drawable-shape count for each, which is how the rule is tested
+against real meshes of all three kinds.
 
 On a healthy load order none of this prints and no report gains a block, so what an existing caller
-reads is unchanged. When it does fire, the census names every asset and the reason, the report gains
-an `unreadableAssets` block, and the process exits 3 — **per process, not per shot**: a multi-shot
-worklist runs every shot and spends the exit code once at the end, because stopping at the first
-degraded shot would throw away the rest of the batch.
+reads is unchanged. When it does fire, the census names every asset and the reason, and the report
+gains an `unreadableAssets` block. **The census and the block are per shot** — they describe the
+picture in front of you, not what an earlier shot in the same worklist found — while **the exit code
+is per process**: a multi-shot worklist runs every shot and spends the code once at the end, because
+stopping at the first degraded shot would throw away the rest of the batch. The run record carries
+the outcome `Partial`, opted out or not, so a degraded render is never filed as a clean one.
+
+On a degraded run the white-fallback line says how many of the textures it counted were in fact
+found and unreadable, because a line that said "could NOT find" about a file this tool has just
+opened would be false. On a healthy run that line is unchanged to the character.
 
 **The opt-out is deliberate and it says so.** `--allow-unreadable-assets`, or
 `VP_ALLOW_UNREADABLE_ASSETS=1` in the environment so an existing caller can pass it through without

@@ -2508,13 +2508,21 @@ static class TexturedScene
                     foreach (var kv in fxByMesh.OrderByDescending(k => k.Value))
                         Console.WriteLine($"      {kv.Value,4} unshadeable shape(s)  {kv.Key}");
             }
-            if (textures.MissingTexturePaths.Count > 0)
-                Console.WriteLine($"   textures the resolver could NOT find (white fallback, counted per rule 6): {textures.MissingTexturePaths.Count:N0}");
-            // WHICH OF THOSE WERE FOUND AND COULD NOT BE READ. The two counts above cannot tell an
-            // asset nobody shipped from one whose file will not parse, and the second is a defect
-            // in this picture. The classifier redoes each failed read to decide; it prints nothing
-            // when every one of them was simply absent, so a healthy run's console is unchanged.
+            // WHICH OF THOSE WERE FOUND AND COULD NOT BE READ, decided BEFORE the line below is
+            // printed: the two counts above cannot tell an asset nobody shipped from one whose file
+            // will not parse, and a line that said "could NOT find" about a file this tool has just
+            // opened would be false. The classifier redoes each failed read to decide, and prints
+            // nothing when every one of them was simply absent - so a healthy run's console, this
+            // line included, is unchanged to the character.
             ClassifyUnreadable();
+            if (textures.MissingTexturePaths.Count > 0)
+            {
+                int unreadableTextures = UnreadableAssets.ShotTextureCount;
+                Console.WriteLine($"   textures the resolver could NOT find (white fallback, counted per rule 6): {textures.MissingTexturePaths.Count:N0}"
+                                + (unreadableTextures > 0
+                                   ? $" — {unreadableTextures:N0} of them WERE found and could not be read, listed below"
+                                   : ""));
+            }
             UnreadableAssets.PrintCensus();
         }
 
