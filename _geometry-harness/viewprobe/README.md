@@ -755,6 +755,26 @@ flag someone typed, which is why neither is allowed to be silent.
   shot's derived orbit pose per line (its camera follows the geometry bounds, so the numbers,
   not the arguments, are the durable record). Read the chunk with any PNG tool, e.g. Python:
   `Image.open(p).text["viewprobe"]`.
+- **A worklist shot names its OWN command, not the run's.** `args:` used to be built once per
+  process, so every frame of a multi-shot run carried the worklist's command line: replaying it
+  re-rendered the whole worklist, and once the worklist file was gone — which is what a driver
+  that writes one per render leaves behind — it reproduced nothing at all. Each shot now composes
+  a standalone command from the inputs it rendered with: the cell, `--eye` with the shot's
+  `--yaw`/`--pitch`/`--fov` (the inputs, at round-trip precision, so the replay takes the same
+  code path and lands on the same pixels), the view settings this shot resolved to (`--nav`,
+  `--aspect`, `--cull-above`, `--planes`, `--occlusion`, `--state`) and the rest of the process's
+  arguments, still minus the machine-local paths. A single-shot run is unchanged: its command line
+  already was that command.
+  **The exception is a shot the command line cannot express** — synthetic `Props`, several
+  coloured `Routes`, a measured path, shot-local `Npcs`. A camera-only command for one of those
+  would render a *different* picture and claim to be that frame, which is worse than needing a
+  side file, so such a shot keeps the worklist-based string and says so in the same breath:
+  `[this shot needs the worklist file: routes 1]`.
+  The same per-shot command is written into the shot's `-configuration.json`, its
+  `-navmeshes.json` receipt **and the planes report** (`replayArgs`), because a report found on
+  disk later needs to name its own frame exactly as the picture does. That is an added identity
+  field: nothing about what the report says of the scene changes, and two runs of one shot still
+  compare equal.
 - **Highlighted refs** keep their own texture and get a three-part orange highlight from one
   centroid-inflated hull (winding normalized geometrically — some door NIFs carry inward normals):
   a solid depth-tested rim where directly visible; a light 0.22-alpha amber wash wherever the hull

@@ -742,14 +742,10 @@ for (int i = argStart; i < args.Length; i++)
 // game/out). Embedded in every output PNG — a replay from these is BYTE-exact, which the
 // resolved camera pose alone is not: a --look camera replayed as the equivalent --yaw/--pitch
 // composes the same view direction but a sub-pixel-different frame (measured).
-var pathFlags = new HashSet<string>(StringComparer.Ordinal) { "--instance", "--profile", "--game", "--out", "--depth-dump" };
-var replArgs = new List<string>();
-for (int ai = 0; ai < args.Length; ai++)
-{
-    if (pathFlags.Contains(args[ai])) { ai++; continue; }
-    replArgs.Add(args[ai].Contains(' ') ? $"\"{args[ai]}\"" : args[ai]);
-}
-string replayArgs = string.Join(' ', replArgs);
+// A WORKLIST SHOT does not use this: it names its own camera instead, because this string is the
+// whole process's and every frame of a multi-shot run would otherwise claim the same command.
+// See ReplayCommand.cs.
+string replayArgs = ViewProbe.ReplayCommand.ForProcess(args);
 if (refSurfaceOpacitySet && !refSurface)
 {
     Console.Error.WriteLine("--ref-surface-opacity only means anything with --ref-surface: it sets the opacity of "
@@ -1359,6 +1355,10 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot)
     string routeLabel = "";
     float? shotFloorZ = null;
     HarnessShared.WorklistShot? shotSpec = null;   // the shot's own props, routes and NPCs, each applied where it belongs below
+    // The camera INPUTS this shot renders from, kept so the frame can name the command that
+    // reproduces IT rather than the whole worklist's. Null outside a worklist, where the process's
+    // own command line already is that command.
+    ViewProbe.ReplayCommand.ShotCamera? replayCam = null;
 
     // A worklist shot IS the camera: eye, aim and fov come from the shot and override whatever the
     // command line asked for, so one file drives both the picture and the bat that stands there.
@@ -1389,6 +1389,7 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot)
         }
         shotFloorZ = wshot.FloorZ;      // the MEASURED floor, when the author had one
         shotSpec = wshot;
+        replayCam = new ViewProbe.ReplayCommand.ShotCamera(eye.Value, wsYaw, wsPitch, wshot.Fov);
         textured = true;
         Console.WriteLine($"\n=== worklist cell {wlCell + 1}/{worklist.Cells.Count} "
                         + $"shot {wlShot + 1}/{worklist.Cells[wlCell].Shots.Count}: {wshot.Label} ===");
@@ -3585,9 +3586,19 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot)
         float camPitchDeg = PitchDownDeg();
         string camPose = $"eye {eyePos.Value.X:0.##},{eyePos.Value.Y:0.##},{eyePos.Value.Z:0.##}"
                        + $" yaw {camYawDeg:0.#}° pitch {camPitchDeg:0.#}° fov {fov:0.#}°";
-        // args = byte-exact replay; pose = the camera those args resolved to THIS run (matters
-        // when the camera came from --eye-ref/--look-ref, whose positions move with the load order).
-        string camMeta = $"args: {replayArgs} | pose: {camPose}"
+        // args = the command that reproduces THIS frame — the process's own for a single-shot run,
+        // where it is already byte-exact, and this shot's own camera for a worklist shot, which
+        // otherwise inherited the worklist's command and could not be replayed at all once the
+        // worklist file was gone (ReplayCommand.cs). pose = the camera those args resolved to THIS
+        // run (matters when the camera came from --eye-ref/--look-ref, whose positions move with
+        // the load order).
+        string shotReplay = replayCam is { } shotCam && worklist is not null
+            ? ViewProbe.ReplayCommand.ForShot(args, worklist.Cells[wlCell].Cell, shotCam,
+                  new ViewProbe.ReplayCommand.ShotView(navMode, cullAbove, showPlanes,
+                                                       occlusionMode, stateSpec, canvasAspect),
+                  ViewProbe.ReplayCommand.Requires(shotSpec))
+            : replayArgs;
+        string camMeta = $"args: {shotReplay} | pose: {camPose}"
                        + $" look {lookPos.Value.X:0.##},{lookPos.Value.Y:0.##},{lookPos.Value.Z:0.##}"
                        + $" | cell {cellLabel}";
         if (navCellSpecs.Count > 0 || navVersionSpecs.Count > 0)
@@ -3618,7 +3629,7 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot)
                 CandidateSha256 = candidateSha256,
                 Cell = cellKey.ToString(),
                 View = new { navPlugin, navCellSpecs, navVersionSpecs, comparePlugins = compare is { } pair ? new[] { pair.A, pair.B } : null,
-                             cullAbove, bosMode, stateView, replayArgs },
+                             cullAbove, bosMode, stateView, replayArgs = shotReplay },
                 Note = "Input configuration before diagnostic view transformations; inspect PNG pose and view settings before media qualification."
             };
             File.WriteAllText(Path.Combine(outDir, $"{safe}-configuration.json"),
@@ -3654,7 +3665,7 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot)
                 AdditionalCells = navCellSpecs, RecordSubstitutions = navVersionSpecs,
                 Pose = new { Eye = new[] { eyePos.Value.X,eyePos.Value.Y,eyePos.Value.Z },
                     Look = new[] { lookPos.Value.X,lookPos.Value.Y,lookPos.Value.Z }, Fov = fov, Size = size },
-                ReplayArgs = replayArgs, Layers = layers,
+                ReplayArgs = shotReplay, Layers = layers,
                 Note = "Navmesh annotation selection only; world geometry/assets retain the evaluated configuration. Triangle admission is not pixel visibility or NPC movement evidence."
             };
             File.WriteAllText(Path.Combine(outDir,$"{safe}-navmeshes.json"),
@@ -4063,7 +4074,7 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot)
                     viewpoint = shotSpec?.ViewpointKind ?? "diagnostic; reachability not established",
                     control = shotSpec?.Control ?? false,
                     viewpointEvidence = shotSpec?.ViewpointEvidence, viewLabel = shotSpec?.Label,
-                    image = reportRenderPath, coverageIssues = os.SceneIssues,
+                    image = reportRenderPath, replayArgs = shotReplay, coverageIssues = os.SceneIssues,
                     population = new { recordRefs = winRef.Count, sceneRefs = os.Refs.Count,
                         sourceShapes = os.Refs.Sum(r => r.Parts.Count), noModel, fxSkipped, markerSkipped,
                         unsupportedRefs = os.Refs.Count(r => r.Issue is not null),
