@@ -5,10 +5,11 @@ namespace ViewProbe;
 /// <summary>
 /// Where the planes report is written.
 ///
-/// It used to be serialised to a single string and handed to <c>File.WriteAllText</c>. A campaign
-/// report is around 600 MB of indented JSON, and a .NET string is UTF-16, so that one string was
-/// over a gigabyte, and encoding it back to UTF-8 to write it was another 600 MB on top - all of it
-/// live at once, at the end of a render that is already the heaviest thing this tool does.
+/// It used to be serialised to a single string and handed to <c>File.WriteAllText</c>. A busy
+/// exterior view's report runs to hundreds of megabytes, and a .NET string is UTF-16, so that one
+/// string was twice the file and encoding it back to UTF-8 to write it was the file's size again -
+/// three times the report, live at once, at the end of a render that is already the heaviest thing
+/// this tool does.
 /// Serialising straight to the file stream removes both. It does NOT remove the document itself:
 /// the per-plane rows are still built before this is called.
 ///

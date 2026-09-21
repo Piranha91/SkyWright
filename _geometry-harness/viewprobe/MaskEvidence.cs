@@ -13,8 +13,9 @@ namespace ViewProbe;
 /// A mask is a picture of ONE comparison. For each pixel: the shape drawn on its own
 /// (<c>ownDepth</c>) against the whole unculled scene from the same camera (<c>plainDepth</c>).
 /// Nothing at the far plane is drawn at all; everything else is green where the shape's own depth
-/// wins and red where the scene's does. So a mask carries two bits of information per pixel, and
-/// a campaign view writes over a thousand of them of which only a handful are different pictures.
+/// wins and red where the scene's does. So a mask carries two bits of information per pixel, and a
+/// view writes one per assessed shape - of which, in a busy exterior, most are the same picture:
+/// every shape the camera cannot see at all gives the same empty mask.
 ///
 /// THE KEY. Within one view <c>plainDepth</c> is fixed - it is drawn once, before the per-shape
 /// loop - so <see cref="BuildMask"/> reads exactly one thing that varies per shape: the

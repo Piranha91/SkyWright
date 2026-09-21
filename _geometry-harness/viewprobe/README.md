@@ -1771,10 +1771,12 @@ at the current eye, but does not supply a captured visibility measurement. The p
 existing reports or their evidence directory. Every candidate shape is retained in JSON; console
 shortlists are not the candidate population.
 
-**The report is serialised straight to the file.** A campaign report is around 600 MB of indented
-JSON, and it used to be built as one string and handed to `File.WriteAllText` — a .NET string is
-UTF-16, so that was over a gigabyte, plus another 600 MB to encode it back to UTF-8 to write, both
-live at the end of the heaviest step a render has. It now goes through the file stream. **The bytes
+**The report is serialised straight to the file.** A busy exterior view's report runs to hundreds of
+megabytes — how many depends entirely on the load order and the view, since the report lists every
+source shape of every scene reference under every plane — and it used to be built as one string and
+handed to `File.WriteAllText`. A .NET string is UTF-16, so that copy was twice the file, and
+encoding it back to UTF-8 to write it was the file's size again: three times the report, live at
+once, at the end of the heaviest step a render has. It now goes through the file stream. **The bytes
 are the same bytes**: the serialiser writes through the same writer either way and its indented
 output does not depend on the destination, which matters because a reader of a city report scans
 its text rather than decoding it. This removes the copies, not the document: the per-plane rows are
