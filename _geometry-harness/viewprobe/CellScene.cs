@@ -66,12 +66,18 @@ public sealed class CellScene : IDisposable
         return _assets ??= make();
     }
 
+    /// <summary>Instrumentation seam for the current per-shot mesh state. It deliberately neither
+    /// retains nor guards yet; the RED gate measures both missing lifetime promises.</summary>
+    public MeshState Mesh(Func<MeshState> make) => make();
+
     /// <summary>The cell is done. The lease drops what it held; nothing here owns an unmanaged
     /// handle today (neither the resolver nor the pixel cache holds one, and the per-shot path
     /// never disposed either), so this is the scope ending rather than a cleanup routine. A slice
     /// that adds something disposable disposes it HERE, and nowhere else.</summary>
     public void Dispose() { _assets = null; _done = true; }
 }
+
+public sealed record MeshState(NifMeshBuilder Builder);
 
 /// <summary>
 /// The two things one cell's shots share today, made together so they cannot be mismatched.

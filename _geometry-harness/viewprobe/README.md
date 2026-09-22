@@ -626,6 +626,12 @@ Every change to what the lease holds is checked with the equivalence suite above
 **on and off**, on an interior, an exterior with water, a multi-cell worklist and a fixture whose
 load order carries a base-object swap.
 
+`viewprobe --mesh-reuse-red <empty-output-directory>` is the renderer-path lifetime self-test used
+while extending this lease. It renders synthetic mesh outcomes through `RenderToPng`, checks camera
+and cut behavior, hashes every consumed array/material input, and exercises cell/disposal bounds.
+It uses no game or MO2 data. Exit 0 means every declared lifetime contract holds; exit 1 lists the
+contracts still unmet, and exit 2 is an unexpected test failure with its full stack.
+
 ### An asset that was found and could not be read fails the run
 
 The two census counts above — *refs without a resolvable mesh* and *textures the resolver could NOT

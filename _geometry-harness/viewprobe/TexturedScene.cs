@@ -206,6 +206,19 @@ readonly record struct WaterPlane(float Z,                                      
 
 static class TexturedScene
 {
+    /// <summary>Test-only dependencies around the real mesh miss block. Production leaves this
+    /// null and follows the existing resolver/builder/file path. The hook does not own or retain
+    /// the per-shot cache; the RED gate uses that fact to observe today's lifetime.</summary>
+    internal sealed class MeshReadHooks
+    {
+        public required Func<string, string?> Resolve { get; init; }
+        public required Func<string, List<NifMeshBuilder.BuiltMesh>> Build { get; init; }
+        public required Func<string, byte[]> ReadBytes { get; init; }
+        public Action<string, IReadOnlyList<NifMeshBuilder.BuiltMesh>?, string?, string?, string, string>? Observe { get; init; }
+        public Action<int, int>? ObserveCull { get; init; }
+        public Action? ObserveMeshStateFactory { get; init; }
+    }
+
     internal static int ReportModeSmoke(string outDir)
     {
         Directory.CreateDirectory(outDir);
@@ -356,7 +369,8 @@ static class TexturedScene
         float refSurfaceOpacity = 1f,                   // --ref-surface-opacity, validated to (0,1] by the CLI; 1 is the shipped opaque mark
         string? depthDumpPath = null,                   // --depth-dump: write the finished frame's window depth (the array --pick reads) here, verbatim
         int sizeHeight = 0,                             // capture canvas HEIGHT in pixels; 0 keeps the historic square (sizeW x sizeW)
-        CellScene? cellScene = null)                    // --reuse-cell: this CELL's lease (CellScene.cs); null = build everything for this shot, as before
+        CellScene? cellScene = null,                    // --reuse-cell: this CELL's lease (CellScene.cs); null = build everything for this shot, as before
+        MeshReadHooks? meshReadHooks = null)            // RED instrumentation only; null is the production path
     {
         // THE CANVAS IS TWO NUMBERS, NOT ONE. It used to be `size` on both axes, and the camera's
         // fov went to the projection at aspect 1 -- so a pose planned for a 16:9 deliverable was
@@ -400,7 +414,12 @@ static class TexturedScene
         }
         var (resolver, cache) = cellScene is null ? MakeAssets() : cellScene.Assets(MakeAssets);
 
-        var builder = new NifMeshBuilder(logger, gate, resolver, new CvSettings());
+        MeshState MakeMeshState()
+        {
+            meshReadHooks?.ObserveMeshStateFactory?.Invoke();
+            return new MeshState(new NifMeshBuilder(logger, gate, resolver, new CvSettings()));
+        }
+        var builder = (cellScene is null ? MakeMeshState() : cellScene.Mesh(MakeMeshState)).Builder;
         using var textures = new GlTextureManager(cache, logger);
         textures.Initialize();
 
@@ -520,13 +539,13 @@ static class TexturedScene
                 ? r.MeshRelPath : Path.Combine("meshes", r.MeshRelPath);
             if (!boundsCache.TryGetValue(rel, out var source))
             {
-                var boundPath = resolver.ResolveAssetPath(rel);
+                var boundPath = meshReadHooks is null ? resolver.ResolveAssetPath(rel) : meshReadHooks.Resolve(rel);
                 source = (null, "", "model asset missing");
                 if (needOcclusion && boundPath is not null)
                 {
                     try
                     {
-                        var bytes = File.ReadAllBytes(boundPath);
+                        var bytes = meshReadHooks?.ReadBytes(boundPath) ?? File.ReadAllBytes(boundPath);
                         source = (null, Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(bytes)), null);
                         var measured = NifGeometry.Measure(bytes);
                         source = (measured.Model, source.Hash,
@@ -538,19 +557,22 @@ static class TexturedScene
             }
             ro.Issue = source.Issue;
             ro.AssetHash = source.Hash;
+            string rendererInputHash = "";
             if (!builtCache.TryGetValue(rel, out var built))
             {
                 built = null;
-                var abs = resolver.ResolveAssetPath(rel);
+                    var abs = meshReadHooks is null ? resolver.ResolveAssetPath(rel) : meshReadHooks.Resolve(rel);
                 if (abs is not null)
                 {
                     try
                     {
-                        built = builder.BuildFromFile(abs);
+                        built = meshReadHooks is null ? builder.BuildFromFile(abs) : meshReadHooks.Build(abs);
                         StripNifRootTransform(abs, built);
                         if (needOcclusion && source.Hash.Length > 0)
                         {
-                            var renderedHash = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(File.ReadAllBytes(abs)));
+                            var renderedBytes = meshReadHooks?.ReadBytes(abs) ?? File.ReadAllBytes(abs);
+                            var renderedHash = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(renderedBytes));
+                            rendererInputHash = renderedHash;
                             if (renderedHash != source.Hash)
                                 geometryInputIssues[rel] = "model asset changed between bounds and renderer reads";
                         }
@@ -563,6 +585,9 @@ static class TexturedScene
                 }
                 builtCache[rel] = built;
             }
+            meshReadHooks?.Observe?.Invoke(rel, built,
+                geometryInputIssues.TryGetValue(rel, out var observedIssue) ? observedIssue : null,
+                source.Issue, source.Hash, rendererInputHash);
             if (geometryInputIssues.TryGetValue(rel, out var geometryInputIssue)) ro.Issue ??= geometryInputIssue;
             if (built is null || built.Count == 0)
             {
@@ -2523,8 +2548,11 @@ static class TexturedScene
         Console.WriteLine($"   textured: {shapes:N0} shapes ({texturedShapes:N0} with a real diffuse), {missingMesh:N0} refs without a resolvable mesh"
                             + $"; {sizeW}x{sizeH}, {(samples >= 2 ? samples + "x msaa" : "no msaa")}");
             if (cullAbove is { } cz2)
+            {
+                meshReadHooks?.ObserveCull?.Invoke(cullTrisDropped, cullShapesDropped);
                 Console.WriteLine($"   cull-above z {cz2:0}: {cullTrisDropped:N0} static triangle(s) removed, "
                                 + $"{cullShapesDropped:N0} shape(s) wholly above the cut (terrain/nav/actors/overlay untouched)");
+            }
             if (fxStaticShapes > 0)
                 Console.WriteLine($"   static effect shapes: {fxStaticShapes:N0} DRAWN on {fxStaticRefCount:N0} ref(s) "
                                 + "— --fx-static, frozen at the authored frame, additive, no depth write");
