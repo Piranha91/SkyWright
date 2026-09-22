@@ -30,7 +30,8 @@ public static class ReplayCommand
 {
     /// <summary>This machine's paths: never part of a replay string, on any path through here.</summary>
     static readonly HashSet<string> PathFlags = new(StringComparer.Ordinal)
-        { "--instance", "--profile", "--game", "--out", "--depth-dump" };
+        { "--instance", "--profile", "--game", "--out", "--depth-dump",
+          "--worklist-selection", "--progress-dir", "--worklist-readiness-sha256" };
 
     /// <summary>Flags whose EFFECTIVE value this shot re-emits, so the process's own must not also
     /// survive. Deliberately not `--npc` or `--route`: a process-level actor or path applies to
@@ -83,12 +84,14 @@ public static class ReplayCommand
 
     /// <summary>The string for ONE shot of a worklist run.</summary>
     public static string ForShot(string[] args, string cell, ShotCamera cam, ShotView view,
-                                 string? requires)
+                                 string? requires, string? processWorklistPath = null,
+                                 string? requiredWorklistPath = null)
     {
         if (requires is not null)
             // Ruled 2026-09-21: a command that renders a different picture is worse than one that
             // needs a side file. The string stays the worklist's and says what requires it.
-            return ForProcess(args) + $"   [this shot needs the worklist file: {requires}]";
+            return ForRequiredWorklist(args, processWorklistPath, requiredWorklistPath)
+                 + $"   [this shot needs the worklist file: {requires}]";
 
         var head = new List<string>
         {
@@ -119,6 +122,43 @@ public static class ReplayCommand
                 tail.Add(Quote(args[++i]));
         }
         return string.Join(' ', head.Concat(tail));
+    }
+
+    /// <summary>Keep the historical worklist replay, substituting the retained one-shot source
+    /// only for a composite campaign row. Operational driver paths never survive PathFlags.</summary>
+    static string ForRequiredWorklist(string[] args, string? processWorklistPath,
+                                      string? requiredWorklistPath)
+    {
+        if (string.IsNullOrEmpty(processWorklistPath) || string.IsNullOrEmpty(requiredWorklistPath)
+            || SamePath(processWorklistPath, requiredWorklistPath))
+            return ForProcess(args);
+
+        var kept = new List<string>();
+        bool replaced = false;
+        for (int i = 0; i < args.Length; i++)
+        {
+            string a = args[i];
+            if (PathFlags.Contains(a)) { i++; continue; }
+            if (a == "--worklist")
+            {
+                if (i + 1 >= args.Length || !SamePath(args[i + 1], processWorklistPath))
+                    throw new InvalidDataException("composite replay could not identify the process --worklist value");
+                kept.Add(Quote(a)); kept.Add(Quote(requiredWorklistPath)); i++; replaced = true; continue;
+            }
+            if (SamePath(a, processWorklistPath))
+            {
+                kept.Add(Quote(requiredWorklistPath)); replaced = true; continue;
+            }
+            kept.Add(Quote(a));
+        }
+        if (!replaced) throw new InvalidDataException("composite replay could not identify the process worklist path");
+        return string.Join(' ', kept);
+    }
+
+    static bool SamePath(string a, string b)
+    {
+        try { return Path.GetFullPath(a).Equals(Path.GetFullPath(b), StringComparison.OrdinalIgnoreCase); }
+        catch { return false; }
     }
 
     /// <summary>Round-trip formatting, invariant culture: a replayed camera must parse back to the

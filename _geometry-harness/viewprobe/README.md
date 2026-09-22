@@ -1266,6 +1266,44 @@ which no camera move can reach — the refs, terrain and navmesh all have to be 
 window closes, rebuilds and reopens on that cell's first shot (its LAST shot going backwards, the
 way turning a page back works). The HUD carries `[cell i/N · shot j/M] label` throughout.
 
+### Durable static selections (driver interface)
+
+The render-batch driver can run part of one unchanged worklist with three paired operational
+arguments:
+
+```
+--worklist-selection selection.json
+--progress-dir receipts
+--worklist-readiness-sha256 <64 hex characters>
+```
+
+All three are required together, with exactly one worklist in static mode. The selection pins the
+worklist and readiness digests and names ordered zero-based `{cell, shot}` coordinates. Viewprobe
+loads and validates the whole original worklist, then skips unselected coordinates in its existing
+loops; it never slices or renumbers it. Filenames, console markers, reports and cell leases therefore
+keep their original coordinates, and a cell with no selected shot is skipped before a `CellScene`
+is constructed.
+
+A successful selected shot gets one create-new `cNsN.json` receipt after every frame, report,
+scene-depth file, mask and applicable sidecar writer has returned and closed. The receipt hashes the
+exact writer-declared files. Report validation is streaming and bounded: its image, depth digest,
+mask references, replay and label must close over those same artifacts. A nonzero shot, malformed
+selection/report, stale worklist/source map, missing or extra artifact, or existing receipt is a
+terminal nonzero refusal and never produces a success receipt. Unsuppressed unreadable assets are
+also ineligible: because archive extraction failures are process-accounted rather than reliably
+shot-local, once one occurs the selected process conservatively writes no later success receipts
+and says why; the normal whole-worklist exit still spends exit 3 at the end.
+
+Composite campaigns also carry an immutable source-map file and exact file-byte SHA-256. Every
+selected row binds the copied shot to its original one-shot worklist/hash, canonical shot hash,
+label, caller artifact list, output stem and safe source-ordinal scratch directory. Viewprobe writes
+the original basenames directly before reports and masks are generated; a worklist-dependent replay
+names the original source worklist and contains none of the transient selection, progress,
+readiness or composite paths. Publishing the validated raw files to caller destinations remains the
+external driver's create-new, hash-verified job; viewprobe never rewrites a report after rendering.
+Every source must still be exactly one cell/one shot, and its worklist-level and cell-level options
+must equal the composite's; scratch destinations are unique across the complete map.
+
 ### `--emit-bats`: the same list, for the console
 
 `--emit-bats NAME` writes the worklist as Skyrim console batch files into `<instance>/mods/NAME` —

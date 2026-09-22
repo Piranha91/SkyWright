@@ -46,6 +46,11 @@ using Image = SixLabors.ImageSharp.Image;
 // ahead of the Require() calls just below, because an unconfigured harness exits from inside those:
 // a window that closes on the one message explaining how to configure it has taught nobody
 // anything. The console dies with the process on a GUI launch, so every exit path pauses.
+bool __batchFailureBoundary = args.Contains("--worklist-selection", StringComparer.Ordinal)
+    || args.Contains("--progress-dir", StringComparer.Ordinal)
+    || args.Contains("--worklist-readiness-sha256", StringComparer.Ordinal);
+try
+{
 using var __run = RunLog.BeginProcess("viewprobe", args,
     // A render is not one indivisible step and no longer says it is: RenderStages.cs opens one
     // stage per phase, which is what makes the coverage manifest's `counted` claim true.
@@ -497,6 +502,13 @@ bool routeSolve = false;
 // A bare name resolves to <instance>\mods\<NAME> — an MO2 mod folder, which is how the files end
 // up scoped to a profile rather than loose in the game directory. A path is used as given.
 string? emitBats = null;
+// Renderer-driver plumbing. These are one opt-in unit: the selection retains original worklist
+// coordinates, the progress directory receives create-new shot receipts, and the readiness value
+// independently pins the identity written inside the selection document.
+string? worklistSelectionPath = null;
+string? progressDir = null;
+string? worklistReadinessSha256 = null;
+int worklistSelectionCount = 0, progressDirCount = 0, worklistReadinessCount = 0;
 // --bats-profiles <A,B>: enable that mod in these profiles and DISABLE it in every other profile of
 // the instance. Opt-in, because it edits MO2's own modlist.txt.
 var batsProfiles = new List<string>();
@@ -694,6 +706,9 @@ for (int i = argStart; i < args.Length; i++)
     else if (args[i] == "--fly-speed" && i + 1 < args.Length) flySpeed = float.Parse(args[++i]);
     else if (args[i] == "--look-sens" && i + 1 < args.Length) lookSens = float.Parse(args[++i]);
     else if (args[i] == "--worklist" && i + 1 < args.Length) worklistPaths.Add(args[++i]);
+    else if (args[i] == "--worklist-selection" && i + 1 < args.Length) { worklistSelectionCount++; worklistSelectionPath = args[++i]; }
+    else if (args[i] == "--progress-dir" && i + 1 < args.Length) { progressDirCount++; progressDir = args[++i]; }
+    else if (args[i] == "--worklist-readiness-sha256" && i + 1 < args.Length) { worklistReadinessCount++; worklistReadinessSha256 = args[++i]; }
     else if (args[i] == "--emit-bats" && i + 1 < args.Length) emitBats = args[++i];
     else if (args[i] == "--bats-profiles" && i + 1 < args.Length)
         batsProfiles.AddRange(args[++i].Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries));
@@ -782,6 +797,30 @@ for (int i = argStart; i < args.Length; i++)
 // whole process's and every frame of a multi-shot run would otherwise claim the same command.
 // See ReplayCommand.cs.
 string replayArgs = ViewProbe.ReplayCommand.ForProcess(args);
+bool batchOptionPresent = worklistSelectionPath is not null || progressDir is not null
+    || worklistReadinessSha256 is not null;
+if (worklistSelectionCount > 1 || progressDirCount > 1 || worklistReadinessCount > 1)
+{
+    Console.Error.WriteLine("worklist selection/progress operational flags may each appear only once.");
+    return 2;
+}
+if (batchOptionPresent && (worklistSelectionPath is null || progressDir is null
+    || worklistReadinessSha256 is null))
+{
+    Console.Error.WriteLine("--worklist-selection, --progress-dir and --worklist-readiness-sha256 must be supplied together.");
+    return 2;
+}
+if (batchOptionPresent && (worklistPaths.Count != 1 || interactiveMode || emitBats is not null))
+{
+    Console.Error.WriteLine("worklist selection/progress requires exactly one worklist in static render mode (not --interactive or --emit-bats).");
+    return 2;
+}
+if (worklistReadinessSha256 is not null && (worklistReadinessSha256.Length != 64
+    || worklistReadinessSha256.Any(c => !Uri.IsHexDigit(c))))
+{
+    Console.Error.WriteLine("--worklist-readiness-sha256 requires exactly 64 hexadecimal characters.");
+    return 2;
+}
 if (refSurfaceOpacitySet && !refSurface)
 {
     Console.Error.WriteLine("--ref-surface-opacity only means anything with --ref-surface: it sets the opacity of "
@@ -932,33 +971,49 @@ if (!positionalTarget && worklistPaths.Count == 0)
 // The worklist is read and VALIDATED before the load walk. A malformed shot list found after a
 // multi-minute walk is a multi-minute walk wasted.
 HarnessShared.WorklistFile? worklist = null;
+ViewProbe.BatchProgress? batchProgress = null;
 if (worklistPaths.Count > 0)
 {
     var loaded = new List<(string Path, HarnessShared.WorklistFile File)>();
     foreach (var wp in worklistPaths)
     {
         try { loaded.Add((wp, HarnessShared.WorklistIo.Read(wp))); }
-        catch (Exception ex) { Console.Error.WriteLine(ex.Message); return 1; }
+        catch (Exception ex) { Console.Error.WriteLine(batchOptionPresent ? ex.ToString() : ex.Message); return batchOptionPresent ? 2 : 1; }
     }
     try { worklist = HarnessShared.WorklistIo.Merge(loaded); }
-    catch (Exception ex) { Console.Error.WriteLine(ex.Message); return 1; }
+    catch (Exception ex) { Console.Error.WriteLine(batchOptionPresent ? ex.ToString() : ex.Message); return batchOptionPresent ? 2 : 1; }
 
     string src = loaded.Count == 1
         ? worklistPaths[0]
         : $"{loaded.Count} files: {string.Join(", ", loaded.Select(l => Path.GetFileName(l.Path)))}";
     Console.WriteLine($"worklist '{worklist.Label}': {worklist.Cells.Count} cell(s), "
                     + $"{worklist.Cells.Sum(c => c.Shots.Count)} shot(s)  [{src}]");
+    if (batchOptionPresent)
+    {
+        try
+        {
+            batchProgress = ViewProbe.BatchProgress.Load(worklistSelectionPath!, progressDir!,
+                worklistPaths[0], worklistReadinessSha256!,
+                worklist.Cells.Select(c => c.Shots.Count).ToArray());
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine("worklist selection/progress refused:\n" + ex);
+            return 2;
+        }
+    }
 }
 // How many shots this run renders, so a reader of the record knows how many times the per-shot
 // stages are expected to repeat. One when there is no worklist.
-ViewProbe.RenderStages.Feature("shots", worklist?.Cells.Sum(c => c.Shots.Count) ?? 1, "shots");
+ViewProbe.RenderStages.Feature("shots", batchProgress?.SelectedCount
+    ?? worklist?.Cells.Sum(c => c.Shots.Count) ?? 1, "shots");
 
 // A DROP IS A HUMAN AT A MOUSE. Static mode writes numbered PNGs into a folder they would then have
 // to go and find, and pays the load walk once per SHOT; the fly-through pays it once per CELL and
 // puts the scene on a screen, which is what "open this" means when the gesture was dragging a file
 // onto an icon. Only the GUI launch is touched — a shell run, with or without --interactive, keeps
 // the behaviour it has always had.
-if (guiLaunch && worklist is not null && !interactiveMode)
+if (guiLaunch && worklist is not null && !interactiveMode && batchProgress is null)
 {
     interactiveMode = true;
     textured = true;
@@ -1374,8 +1429,13 @@ string InsideRays(PlacedRef r, string mesh, float qx, float qy, float qz)
 ViewProbe.CellScene? cellScene = null;
 var preparedProcessIdentity = new ViewProbe.PreparedProcessIdentity();
 
-int RunCellTextured(string cellTarget, int wlCell, int wlShot)
+int RunCellTextured(string cellTarget, int wlCell, int wlShot,
+                    ViewProbe.BatchProgress.ShotPlan? shotPlan,
+                    out ViewProbe.BatchProgress.ShotArtifacts shotArtifacts)
 {
+    var completedArtifacts = new ViewProbe.BatchProgress.ShotArtifacts();
+    shotArtifacts = completedArtifacts;
+    bool collectArtifacts = shotPlan is not null;
     // Per-cell state is declared OUTSIDE this function, because the flat mode reads it too — so a
     // SECOND call has to clear what the first left. A collection missed here would not throw; it
     // would quietly render cell 2 holding cell 1's references.
@@ -3814,8 +3874,10 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot)
             ? ViewProbe.ReplayCommand.ForShot(args, worklist.Cells[wlCell].Cell, shotCam,
                   new ViewProbe.ReplayCommand.ShotView(navMode, cullAbove, showPlanes,
                                                        occlusionMode, stateSpec, canvasAspect),
-                  ViewProbe.ReplayCommand.Requires(shotSpec))
+                  ViewProbe.ReplayCommand.Requires(shotSpec), worklistPaths.Count == 1 ? worklistPaths[0] : null,
+                  shotPlan?.ReplayWorklistPath)
             : replayArgs;
+        if (collectArtifacts) completedArtifacts.SetReplay(shotReplay);
         string camMeta = $"args: {shotReplay} | pose: {camPose}"
                        + $" look {lookPos.Value.X:0.##},{lookPos.Value.Y:0.##},{lookPos.Value.Z:0.##}"
                        + $" | cell {cellLabel}";
@@ -3835,6 +3897,50 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot)
             if (slug.Length > 48) slug = slug[..48].TrimEnd('_');
             safe = $"{safe}-c{wlCell + 1}s{wlShot + 1}-{slug}";
         }
+        string shotOutDir = outDir;
+        if (shotPlan is { Source: not null })
+        {
+            safe = shotPlan.OutputStem!;
+            shotOutDir = Path.GetFullPath(Path.Combine(outDir, shotPlan.ScratchDirectory!));
+            string root = Path.GetFullPath(outDir).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)
+                        + Path.DirectorySeparatorChar;
+            if (!shotOutDir.StartsWith(root, StringComparison.OrdinalIgnoreCase))
+                throw new InvalidDataException("composite scratch directory escapes --out");
+            Directory.CreateDirectory(shotOutDir);
+        }
+        if (collectArtifacts)
+        {
+            // Refuse every deterministic path before the first writer runs. In particular, an
+            // early configuration sidecar must not overwrite old evidence and only later discover
+            // that the frame/report destination was already occupied.
+            var renderFiles = compare is { } reservedCompare
+                ? new[] { reservedCompare.A, reservedCompare.B, "winning state" }
+                    .Select((label, index) => Path.Combine(shotOutDir,
+                        $"{safe}-cmp{index + 1}-{new string(label.Select(ch => char.IsLetterOrDigit(ch) ? ch : '_').ToArray())}.png"))
+                    .ToList()
+                : new List<string> { Path.Combine(shotOutDir, $"{safe}-fp.png") };
+            var plannedFiles = new List<string>(renderFiles);
+            var plannedDirectories = new List<string>();
+            if (compare is not null) plannedFiles.Add(Path.Combine(shotOutDir, $"{safe}-compare.png"));
+            if (reportedConfiguration is not null) plannedFiles.Add(Path.Combine(shotOutDir, $"{safe}-configuration.json"));
+            if (navCellSpecs.Count > 0 || navVersionSpecs.Count > 0)
+                plannedFiles.Add(Path.Combine(shotOutDir, $"{safe}-navmeshes.json"));
+            if (planesReport)
+                foreach (string frame in renderFiles)
+                {
+                    string stem = Path.GetFileNameWithoutExtension(frame);
+                    plannedFiles.Add(Path.Combine(shotOutDir, stem + "-planes.json"));
+                    string evidence = Path.Combine(shotOutDir, stem + "-audit-evidence");
+                    plannedDirectories.Add(evidence);
+                }
+            ViewProbe.BatchProgress.RefuseExistingOutputs(plannedFiles, plannedDirectories);
+        }
+
+        void WriteShotText(string path, string text)
+        {
+            if (!collectArtifacts) { File.WriteAllText(path, text); return; }
+            ViewProbe.BatchProgress.WriteTextCreateNew(path, text);
+        }
 
         if (reportedConfiguration is not null)
         {
@@ -3850,8 +3956,10 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot)
                              cullAbove, bosMode, stateView, replayArgs = shotReplay },
                 Note = "Input configuration before diagnostic view transformations; inspect PNG pose and view settings before media qualification."
             };
-            File.WriteAllText(Path.Combine(outDir, $"{safe}-configuration.json"),
+            string configurationPath = Path.Combine(shotOutDir, $"{safe}-configuration.json");
+            WriteShotText(configurationPath,
                 System.Text.Json.JsonSerializer.Serialize(captureInput, HarnessShared.CandidateFile.Json));
+            if (collectArtifacts) completedArtifacts.AddClosed(configurationPath, "sidecar");
             Console.WriteLine($"   capture input configuration: {identity.Fingerprint}");
         }
 
@@ -3886,8 +3994,10 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot)
                 ReplayArgs = shotReplay, Layers = layers,
                 Note = "Navmesh annotation selection only; world geometry/assets retain the evaluated configuration. Triangle admission is not pixel visibility or NPC movement evidence."
             };
-            File.WriteAllText(Path.Combine(outDir,$"{safe}-navmeshes.json"),
+            string navmeshPath = Path.Combine(shotOutDir,$"{safe}-navmeshes.json");
+            WriteShotText(navmeshPath,
                 System.Text.Json.JsonSerializer.Serialize(receipt,HarnessShared.CandidateFile.Json));
+            if (collectArtifacts) completedArtifacts.AddClosed(navmeshPath, "navmesh");
         }
 
         // The target cell's own footprint, for the outline. Exteriors only — an interior has no grid
@@ -4298,7 +4408,7 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot)
                     Console.WriteLine($"   not drawn: {r.FormKey} = FormID {RuntimeId(r.FormKey)}  {(r.Deleted ? "deleted" : DisabledWhy(r))}"
                                     + (h is not null ? $"  — defined by {h.DefinedBy}{(h.ChangedBy is { } cb ? $", last changed by {cb}" : "")}  — chain: {string.Join(" -> ", h.Chain)}" : ""));
                 }
-                string jsonPath = Path.Combine(outDir, $"{(reportRenderPath is null ? safe : Path.GetFileNameWithoutExtension(reportRenderPath))}-planes.json");
+                string jsonPath = Path.Combine(shotOutDir, $"{(reportRenderPath is null ? safe : Path.GetFileNameWithoutExtension(reportRenderPath))}-planes.json");
                 if (File.Exists(jsonPath)) throw new System.IO.IOException("Refusing to replace a report: " + jsonPath);
                 string HashFile(string path) { using var f = File.OpenRead(path); return Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(f)); }
                 var plugins = order.OrderedPaths.Select(p => new { file = Path.GetFileName(p), sha256 = HashFile(p) }).ToArray();
@@ -4359,6 +4469,14 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot)
                 // indented JSON and the string was a gigabyte of UTF-16 on top of it. The bytes are
                 // the same bytes, and the file only takes its own name once it is complete.
                 ViewProbe.ReportSink.Write(jsonPath, doc);
+                if (collectArtifacts)
+                {
+                    completedArtifacts.AddClosed(jsonPath, "report");
+                    if (os.SceneDepthPath is not null) completedArtifacts.AddClosed(os.SceneDepthPath, "depth");
+                    foreach (var mask in os.Refs.SelectMany(r => r.Parts).Select(s => s.VisibilityMask)
+                                 .Where(p => p is not null).Cast<string>().Distinct(StringComparer.OrdinalIgnoreCase))
+                        completedArtifacts.AddClosed(mask, "mask");
+                }
                 Console.WriteLine($"   wrote {jsonPath}");
             };
         }
@@ -4369,7 +4487,7 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot)
                    IReadOnlyList<System.Numerics.Vector3>? diffs = null)
         {
             reportRenderPath = outFile;
-            return ViewProbe.TexturedScene.RenderToPng(
+            int rendered = ViewProbe.TexturedScene.RenderToPng(
                    scene, assets, dataDir, modFolders, overwriteDir,
                    (eyePos.Value, lookPos.Value, fov), g, r, terrainPatches, terrainLayers, navMode, navColor,
                    skyColor, terrainHeightAt, dashUnderground, dashUnderStatics, msaa, cullAbove, cellBounds,
@@ -4379,6 +4497,8 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot)
                    visibilityBudget: visibilityBudget, navColourGroups: navColourGroups, refSurface: refSurface,
                    refSurfaceOpacity: refSurfaceOpacity,
                    depthDumpPath: depthDump, sizeHeight: canvasH, cellScene: cellScene);
+            if (collectArtifacts) completedArtifacts.AddClosed(outFile, "frame");
+            return rendered;
         }
 
         if (compare is { } cmp)
@@ -4448,7 +4568,7 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot)
                     Console.WriteLine($"   panel '{label}': provides NO navmesh version in this cell -- panel equals the winning state");
                 var (g, r) = BuildNavSets(navs);
                 var diffs = DiffFor(navs);
-                string pf = Path.Combine(outDir, $"{safe}-cmp{pi + 1}-{new string(label.Select(ch => char.IsLetterOrDigit(ch) ? ch : '_').ToArray())}.png");
+                string pf = Path.Combine(shotOutDir, $"{safe}-cmp{pi + 1}-{new string(label.Select(ch => char.IsLetterOrDigit(ch) ? ch : '_').ToArray())}.png");
                 var cap = new List<string> { $"[{pi + 1}/3] {(pi == 2 ? "winning state (actual merged navmesh)" : $"cell navmesh if {label} won")} \u2014 {cellLabel} \u2014 {camPose}{CullCaption()}" };
                 if (redNav.Count > 0) cap.Add(RedCaption(navs));
                 if (DoorCaption() is { } dc) cap.Add(dc);
@@ -4466,7 +4586,7 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot)
             }
 
             // Stitch left->right: A | B | winning.
-            string stitched = Path.Combine(outDir, $"{safe}-compare.png");
+            string stitched = Path.Combine(shotOutDir, $"{safe}-compare.png");
             using (var canvas = new Image<Rgba32>(size * 3 + 8, size))
             {
                 canvas.Mutate(ctx =>
@@ -4481,6 +4601,7 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot)
                     new SixLabors.ImageSharp.Formats.Png.Chunks.PngTextData("viewprobe", camMeta, string.Empty, string.Empty));
                 canvas.SaveAsPng(stitched);
             }
+            if (collectArtifacts) completedArtifacts.AddClosed(stitched, "frame");
             Console.WriteLine($"wrote:\n   {stitched}");
             Console.WriteLine($"   panels left->right: [1] {cmp.A}   [2] {cmp.B}   [3] winning state (+conflict red)");
             NpcCleanup();
@@ -4494,7 +4615,7 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot)
             (navTris, redTris) = BuildNavSets(navs);
         }
 
-        string fpOut = Path.Combine(outDir, $"{safe}-fp.png");
+        string fpOut = Path.Combine(shotOutDir, $"{safe}-fp.png");
         var fpCap = new List<string> { $"{cellLabel} \u2014 {navLayerLabel} \u2014 {camPose}{CullCaption()}" };
         if (redNav.Count > 0) fpCap.Add(RedCaption(displayNav));
         if (DoorCaption() is { } fdc) fpCap.Add(fdc);
@@ -4516,7 +4637,7 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot)
                 RuntimeId = RuntimeId,
                 TerrainDescribe = terrainDescribeAt,
                 CellLabel = cellLabel,
-                OutDir = outDir,
+                OutDir = shotOutDir,
                 SafeName = safe,
                 RedNav = redNav.Keys.ToHashSet(),
                 FlySpeed = flySpeed,
@@ -4602,7 +4723,7 @@ if (worklist is not null)
         while (true)
         {
             pendingSwitch = null;
-            int rc = RunCellTextured(worklist.Cells[wlc].Cell, wlc, wls);
+            int rc = RunCellTextured(worklist.Cells[wlc].Cell, wlc, wls, null, out _);
             if (pendingSwitch is not { } next) return rc < 0 ? 0 : rc;
             (wlc, wls) = next;
         }
@@ -4616,38 +4737,71 @@ if (worklist is not null)
                         + (reuseCell
                             ? "--reuse-cell retains one owned record-walk result per equal cell/input key."
                             : "the load walk runs once PER SHOT in static mode (use --interactive to pay it once per cell)."));
-    for (int wlc = 0; wlc < worklist.Cells.Count; wlc++)
+    try
     {
-        // --reuse-cell: ONE lease per cell, constructed here and disposed in the finally — a scope,
-        // not a cache that gets cleared, so nothing built for this cell can answer in the next one.
-        // Without the flag the lease is null and every shot builds its own, as it always did.
-        cellScene = reuseCell ? new ViewProbe.CellScene(worklist.Cells[wlc].Cell) : null;
-        try
+        for (int wlc = 0; wlc < worklist.Cells.Count; wlc++)
         {
-            for (int wls = 0; wls < worklist.Cells[wlc].Shots.Count; wls++)
+            // Do not construct a cell lease for a cell with no selected coordinate. The original
+            // worklist remains intact; this is only a dispatch decision over its original indices.
+            if (batchProgress is not null
+                && !Enumerable.Range(0, worklist.Cells[wlc].Shots.Count).Any(s => batchProgress.Contains(wlc, s)))
+                continue;
+            // --reuse-cell: ONE lease per cell, constructed here and disposed in the finally — a scope,
+            // not a cache that gets cleared, so nothing built for this cell can answer in the next one.
+            // Without the flag the lease is null and every shot builds its own, as it always did.
+            cellScene = reuseCell ? new ViewProbe.CellScene(worklist.Cells[wlc].Cell) : null;
+            try
             {
-                int rc;
-                try { rc = RunCellTextured(worklist.Cells[wlc].Cell, wlc, wls); }
-                catch (Exception ex) when (ViewProbe.CellFactsRed.IsExpectedFault(ex))
+                for (int wls = 0; wls < worklist.Cells[wlc].Shots.Count; wls++)
                 {
-                    // Test-only exception boundary: record the full exception and preserve the
-                    // production path's nonzero refusal without letting an intentional RED reach
-                    // Windows' unhandled-exception dialog. The cell finally below still owns cleanup.
-                    ViewProbe.CellFactsRed.CaughtExpectedFault(ex);
-                    rc = 2;
+                    if (batchProgress is not null && !batchProgress.Contains(wlc, wls)) continue;
+                    int rc;
+                    ViewProbe.BatchProgress.ShotArtifacts completed;
+                    try
+                    {
+                        var plan = batchProgress?.PlanFor(wlc, wls);
+                        rc = RunCellTextured(worklist.Cells[wlc].Cell, wlc, wls, plan, out completed);
+                    }
+                    catch (Exception ex) when (ViewProbe.CellFactsRed.IsExpectedFault(ex))
+                    {
+                        // Test-only exception boundary: record the full exception and preserve the
+                        // production path's nonzero refusal without letting an intentional RED reach
+                        // Windows' unhandled-exception dialog. The cell finally below still owns cleanup.
+                        ViewProbe.CellFactsRed.CaughtExpectedFault(ex);
+                        rc = 2; completed = new ViewProbe.BatchProgress.ShotArtifacts();
+                    }
+                    catch (Exception ex) when (ViewProbe.CellFactsRed.TestBoundaryEnabled)
+                    {
+                        // Any unexpected exception in a test-enabled run is captured with its full
+                        // stack and converted to a normal nonzero exit. Production keeps its existing
+                        // exception behavior because this boundary is absent without the test sink.
+                        ViewProbe.CellFactsRed.CaughtUnexpected(ex);
+                        rc = 2; completed = new ViewProbe.BatchProgress.ShotArtifacts();
+                    }
+                    if (rc > 0) return ViewProbe.ExtractionScratch.GuardExitCode(rc);
+                    if (batchProgress is not null && rc == 0)
+                    {
+                        if (ViewProbe.BatchProgress.ShotMayCommit(ViewProbe.UnreadableAssets.Count,
+                                                                 ViewProbe.UnreadableAssets.OptOutSource))
+                            batchProgress.CommitShot(wlc, wls, worklist.Cells[wlc].Shots[wls].Label, completed);
+                        else
+                            Console.Error.WriteLine($"batch progress: no success receipt for original c{wlc + 1}s{wls + 1}; "
+                                + $"this process has {ViewProbe.UnreadableAssets.Count} unsuppressed unreadable asset(s), "
+                                + $"including archive extraction failures not represented by ShotEntries. Exit {ViewProbe.UnreadableAssets.FailExitCode} "
+                                + "will be spent after the remaining shots.");
+                    }
                 }
-                catch (Exception ex) when (ViewProbe.CellFactsRed.TestBoundaryEnabled)
-                {
-                    // Any unexpected exception in a test-enabled run is captured with its full
-                    // stack and converted to a normal nonzero exit. Production keeps its existing
-                    // exception behavior because this boundary is absent without the test sink.
-                    ViewProbe.CellFactsRed.CaughtUnexpected(ex);
-                    rc = 2;
-                }
-                if (rc > 0) return ViewProbe.ExtractionScratch.GuardExitCode(rc);
             }
+            finally { cellScene?.Dispose(); cellScene = null; }
         }
-        finally { cellScene?.Dispose(); cellScene = null; }
+    }
+    catch (Exception ex) when (batchProgress is not null)
+    {
+        // The opt-in driver boundary includes CellScene construction, rendering, receipt commit
+        // and the lease's finally. Every failure is durable console text plus a normal nonzero exit,
+        // never a Windows unhandled-exception dialog.
+        Console.Error.WriteLine("worklist selection/progress failed:\n" + ex);
+        return 2;
     }
     // GuardExitCode, not a bare 0. The extraction guard throws, and two of this file's own callers
     // catch Exception and carry on, so whether the refusal reaches here is call-order luck. The
@@ -4658,7 +4812,7 @@ if (worklist is not null)
     return worklistExit;
 }
 
-int singleRc = RunCellTextured(target, 0, 0);
+int singleRc = RunCellTextured(target, 0, 0, null, out _);
 // FinalExitCode, not a bare return: a shot must never return 3 itself, because the worklist loop
 // above stops at the first shot with a non-zero code and a degraded shot must not stop the ones
 // after it. The condition accumulates across the process and is spent HERE, once.
@@ -5072,4 +5226,13 @@ static int Smoke()
     gw.MakeCurrent();
     Console.WriteLine($"GL {GL.GetString(StringName.Version)} on {GL.GetString(StringName.Renderer)}");
     return 0;
+}
+}
+catch (Exception ex) when (__batchFailureBoundary)
+{
+    // The opt-in driver must never surface a Windows application-error dialog. This outer edge
+    // includes setup and every using/finally disposal; ordinary production invocations retain the
+    // historical exception behavior because the filter is false when no driver flag was supplied.
+    Console.Error.WriteLine("worklist selection/progress unexpected failure:\n" + ex);
+    return 2;
 }
