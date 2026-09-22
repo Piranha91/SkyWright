@@ -50,7 +50,7 @@ public sealed class CellScene : IDisposable
         // ONE line per lease, not per shot: a per-shot line would differ between a batched shot and
         // the same shot rendered alone, and the equivalence suite compares those two consoles.
         Console.WriteLine("   cell scene: ON (--reuse-cell, experimental) - the shots of this cell "
-                        + "share the asset resolver and the textures it decodes; both are dropped "
+                        + "share asset resolution, decoded textures and parsed meshes; all are dropped "
                         + "when the cell is done");
     }
 
@@ -66,21 +66,37 @@ public sealed class CellScene : IDisposable
         return _assets ??= make();
     }
 
-    /// <summary>Instrumentation seam for the current per-shot mesh state. It deliberately neither
-    /// retains nor guards yet; the RED gate measures both missing lifetime promises.</summary>
-    public MeshState Mesh(Func<MeshState> make) => make();
+    MeshState? _mesh;
+
+    /// <summary>The builder and immutable parsed-mesh outcomes shared by this cell's shots.</summary>
+    public MeshState Mesh(Func<MeshState> make)
+    {
+        ObjectDisposedException.ThrowIf(_done, this);
+        return _mesh ??= make();
+    }
 
     /// <summary>The cell is done. The lease drops what it held; nothing here owns an unmanaged
-    /// handle today (neither the resolver nor the pixel cache holds one, and the per-shot path
-    /// never disposed either), so this is the scope ending rather than a cleanup routine. A slice
+    /// handle today (the resolver, pixel cache and parsed mesh arrays are managed, while GL uploads
+    /// remain per shot), so this is the scope ending rather than a cleanup routine. A slice
     /// that adds something disposable disposes it HERE, and nowhere else.</summary>
-    public void Dispose() { _assets = null; _done = true; }
+    public void Dispose() { _mesh = null; _assets = null; _done = true; }
 }
 
-public sealed record MeshState(NifMeshBuilder Builder);
+public sealed class MeshState
+{
+    readonly Dictionary<string, MeshOutcome> _outcomes = new(StringComparer.OrdinalIgnoreCase);
+    public NifMeshBuilder Builder { get; }
+    public MeshState(NifMeshBuilder builder) => Builder = builder;
+    internal bool TryGet(string rel, out MeshOutcome outcome) => _outcomes.TryGetValue(rel, out outcome!);
+    internal void Store(string rel, MeshOutcome outcome) => _outcomes[rel] = outcome;
+}
+
+internal sealed record MeshOutcome(List<NifMeshBuilder.BuiltMesh>? Built, string InputHash,
+    Exception? Failure, bool MissingPath);
 
 /// <summary>
-/// The two things one cell's shots share today, made together so they cannot be mismatched.
+/// The asset-side pair one cell's shots share, made together so they cannot be mismatched. Parsed
+/// mesh state is the lease's separate managed slot because it owns its builder and outcome table.
 ///
 /// <para><b>The resolver.</b> Its inputs (the game data folder, the archive view, the loose-folder
 /// precedence list) are PROCESS-level — a shot cannot change any of them. Sharing it is worth
@@ -91,7 +107,7 @@ public sealed record MeshState(NifMeshBuilder Builder);
 /// "decodes to fully transparent" verdict, each keyed on the RESOLVED DISK PATH rather than the
 /// game-relative one, plus an NPC mesh-path cache this renderer never fills (its data source
 /// resolves nothing) and a parsed-NIF cache of its own that viewprobe never reads — the scene's
-/// mesh builder is still built per shot. Nothing in those keys or values is a camera decision:
+/// library-owned parsed-NIF cache is not the scene's retained mesh table. Nothing in those keys or values is a camera decision:
 /// `--cull-above` is applied when the upload's index arrays are built, not by mutating decoded
 /// pixels, and the library's contract treats a decoded array as immutable — the texture manager's
 /// tint paths clone before they write. Sharing it is worth doing because without the lease the

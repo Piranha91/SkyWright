@@ -219,6 +219,27 @@ static class TexturedScene
         public Action? ObserveMeshStateFactory { get; init; }
     }
 
+    static List<NifMeshBuilder.BuiltMesh>? NormalizeMeshes(List<NifMeshBuilder.BuiltMesh>? built)
+    {
+        if (built is null) return null;
+        return built.Select(b => new NifMeshBuilder.BuiltMesh
+        {
+            Positions = (Vector3[])b.Positions.Clone(), Normals = (Vector3[])b.Normals.Clone(),
+            Indices = (int[])b.Indices.Clone(), TextureCoordinates = (Vector2[])b.TextureCoordinates.Clone(),
+            Tangents = (Vector3[])b.Tangents.Clone(), Bitangents = (Vector3[])b.Bitangents.Clone(),
+            VertexColors = b.VertexColors is null ? null : (Vector4[])b.VertexColors.Clone(),
+            ShapeName = b.ShapeName, TexturePaths = new Dictionary<int, string>(b.TexturePaths),
+            HasAlphaTest = b.HasAlphaTest, AlphaThreshold = b.AlphaThreshold,
+            HasAlphaBlend = b.HasAlphaBlend, MaterialAlpha = b.MaterialAlpha,
+            ZBufferWrite = b.ZBufferWrite, IsDecal = b.IsDecal,
+            IsDoubleSided = b.IsDoubleSided, IsModelSpaceNormals = b.IsModelSpaceNormals,
+            SrcBlendIndex = b.SrcBlendIndex, DstBlendIndex = b.DstBlendIndex,
+            HasEffectShader = b.HasEffectShader, EffectBaseColor = b.EffectBaseColor,
+            EffectBaseColorAlpha = b.EffectBaseColorAlpha, EffectBaseColorScale = b.EffectBaseColorScale,
+            EmissiveColor = b.EmissiveColor, EmissiveMultiple = b.EmissiveMultiple,
+        }).ToList();
+    }
+
     internal static int ReportModeSmoke(string outDir)
     {
         Directory.CreateDirectory(outDir);
@@ -419,7 +440,8 @@ static class TexturedScene
             meshReadHooks?.ObserveMeshStateFactory?.Invoke();
             return new MeshState(new NifMeshBuilder(logger, gate, resolver, new CvSettings()));
         }
-        var builder = (cellScene is null ? MakeMeshState() : cellScene.Mesh(MakeMeshState)).Builder;
+        var meshState = cellScene is null ? MakeMeshState() : cellScene.Mesh(MakeMeshState);
+        var builder = meshState.Builder;
         using var textures = new GlTextureManager(cache, logger);
         textures.Initialize();
 
@@ -560,28 +582,78 @@ static class TexturedScene
             string rendererInputHash = "";
             if (!builtCache.TryGetValue(rel, out var built))
             {
-                built = null;
-                    var abs = meshReadHooks is null ? resolver.ResolveAssetPath(rel) : meshReadHooks.Resolve(rel);
-                if (abs is not null)
+                if (cellScene is null)
                 {
-                    try
+                    built = null;
+                    var abs = meshReadHooks is null ? resolver.ResolveAssetPath(rel) : meshReadHooks.Resolve(rel);
+                    if (abs is not null)
                     {
-                        built = meshReadHooks is null ? builder.BuildFromFile(abs) : meshReadHooks.Build(abs);
-                        StripNifRootTransform(abs, built);
-                        if (needOcclusion && source.Hash.Length > 0)
+                        try
                         {
-                            var renderedBytes = meshReadHooks?.ReadBytes(abs) ?? File.ReadAllBytes(abs);
-                            var renderedHash = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(renderedBytes));
-                            rendererInputHash = renderedHash;
-                            if (renderedHash != source.Hash)
-                                geometryInputIssues[rel] = "model asset changed between bounds and renderer reads";
+                            built = meshReadHooks is null ? builder.BuildFromFile(abs) : meshReadHooks.Build(abs);
+                            StripNifRootTransform(abs, built);
+                            if (needOcclusion && source.Hash.Length > 0)
+                            {
+                                var renderedBytes = meshReadHooks?.ReadBytes(abs) ?? File.ReadAllBytes(abs);
+                                rendererInputHash = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(renderedBytes));
+                                if (rendererInputHash != source.Hash)
+                                    geometryInputIssues[rel] = "model asset changed between bounds and renderer reads";
+                            }
+                        }
+                        catch (Exception ex)
+                        {
+                            logger.LogError($"BuildFromFile('{rel}')", ex);
+                            geometryInputIssues[rel] = $"renderer geometry read failed: {ex.GetType().Name}: {ex.Message}";
                         }
                     }
-                    catch (Exception ex)
+                }
+                else
+                {
+                    MeshOutcome outcome;
+                    if (!meshState.TryGet(rel, out outcome!))
                     {
-                        logger.LogError($"BuildFromFile('{rel}')", ex);
-                        geometryInputIssues[rel] = $"renderer geometry read failed: {ex.GetType().Name}: {ex.Message}";
+                        built = null;
+                        var abs = meshReadHooks is null ? resolver.ResolveAssetPath(rel) : meshReadHooks.Resolve(rel);
+                        if (abs is null)
+                        {
+                            outcome = new MeshOutcome(null, "", null, true);
+                            meshState.Store(rel, outcome);
+                        }
+                        else
+                        {
+                            Exception? buildFailure = null;
+                            Exception? identityFailure = null;
+                            try
+                            {
+                                built = meshReadHooks is null ? builder.BuildFromFile(abs) : meshReadHooks.Build(abs);
+                                StripNifRootTransform(abs, built);
+                                built = NormalizeMeshes(built);
+                            }
+                            catch (Exception ex) { buildFailure = ex; built = null; }
+                            try
+                            {
+                                var renderedBytes = meshReadHooks?.ReadBytes(abs) ?? File.ReadAllBytes(abs);
+                                rendererInputHash = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(renderedBytes));
+                            }
+                            catch (Exception ex) { identityFailure = ex; }
+                            outcome = new MeshOutcome(built, rendererInputHash, buildFailure, false);
+                            // A build failure is itself the stable outcome to project each shot.
+                            // Successful geometry needs a real identity; empty is never equality.
+                            if (buildFailure is not null || identityFailure is null) meshState.Store(rel, outcome);
+                            if (buildFailure is null && identityFailure is not null)
+                                geometryInputIssues[rel] = $"renderer identity read failed: {identityFailure.GetType().Name}: {identityFailure.Message}";
+                        }
                     }
+                    built = outcome.Built;
+                    rendererInputHash = outcome.InputHash;
+                    if (outcome.Failure is { } failure)
+                    {
+                        logger.LogError($"BuildFromFile('{rel}')", failure);
+                        geometryInputIssues[rel] = $"renderer geometry read failed: {failure.GetType().Name}: {failure.Message}";
+                    }
+                    if (needOcclusion && source.Hash.Length > 0 && rendererInputHash.Length > 0
+                        && rendererInputHash != source.Hash)
+                        geometryInputIssues[rel] = "model asset changed between bounds and renderer reads";
                 }
                 builtCache[rel] = built;
             }

@@ -612,7 +612,12 @@ What it shares today, as one pair made together and dropped together:
   "fully transparent?" verdicts a texture decodes to, each keyed on the file's *resolved disk path*
   — which is why the second shot of a cell no longer decodes textures the first shot decoded. It is
   one slot with the resolver because it resolves every key through it, so the two cannot be paired
-  wrongly or outlive each other.
+  wrongly or outlive each other;
+* the **mesh builder and normalized parsed meshes**, keyed by game-relative mesh path. The retained
+  value owns cloned vertex/index/material inputs and also records null, empty, missing-path and
+  failed-build outcomes. Failures keep their per-shot console/audit projection. A readable file is
+  retained only with its SHA-256 identity; an unavailable identity rebuilds instead of treating an
+  empty hash as equal.
 
 What it will not share, because the camera decides it: the uploaded meshes (`--cull-above` drops
 triangles above the cut *before* upload), the route's ground z, and `--npc-puck auto`. What it will

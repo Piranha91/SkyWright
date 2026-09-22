@@ -117,8 +117,8 @@ internal static class MeshReuseRed
             return Convert.ToHexString(SHA256.HashData(bytes));
         }
 
-        int offBuilds = 0, offStateFactories = 0, cutTriangles = -1, cutShapes = -1; var offSeen = new List<ShotObservation>();
-        var offBaseHooks = Hooks(() => [Triangle()], _ => [1, 2, 3], offSeen,
+        int offBuilds = 0, offReads = 0, offStateFactories = 0, cutTriangles = -1, cutShapes = -1; var offSeen = new List<ShotObservation>();
+        var offBaseHooks = Hooks(() => [Triangle()], _ => { offReads++; return [1, 2, 3]; }, offSeen,
             () => offBuilds++, () => offStateFactories++);
         var offHooks = new TexturedScene.MeshReadHooks
         {
@@ -133,6 +133,7 @@ internal static class MeshReuseRed
         int offCutShapes = Render("off-b", offHooks, null, 0, false, cutEye);
         string offCutPixels = Pixels(Path.Combine(outDir, "off-b-2.png"));
         verdict["reuseOffBuildsPerShotAlreadyGreen"] = offBuilds == 2;
+        verdict["reuseOffPreservesNoFlagHashReads"] = offReads == 0;
         verdict["reuseOffMeshStateFactoryPerShotAlreadyGreen"] = offStateFactories == 2;
         verdict["geometryChangingCutAlreadyGreen"] = offUncutShapes > 0 && cutTriangles > 0 && cutShapes > 0
             && offUncutPixels != offCutPixels;
@@ -235,6 +236,38 @@ internal static class MeshReuseRed
         verdict["sameCellMismatchThenMatchClearsStaleIssueAlreadyGreen"] = transitionSeen.Count == 2
             && transitionSeen[0].Issue?.Contains("changed between") == true && transitionSeen[1].Issue is null;
 
+        int rendererIdentityBuilds = 0; var rendererIdentitySeen = new List<ShotObservation>();
+        var rendererIdentityHooks = Hooks(() => [Triangle()], _ => throw new IOException("renderer identity unavailable"),
+            rendererIdentitySeen, () => rendererIdentityBuilds++);
+        using (var cell = new CellScene("RendererIdentityFailure"))
+        {
+            Render("renderer-identity-a", rendererIdentityHooks, cell, null, false);
+            Render("renderer-identity-b", rendererIdentityHooks, cell, null, false);
+        }
+        verdict["rendererIdentityFailureReportedAndRebuilt"] = rendererIdentityBuilds == 2
+            && rendererIdentitySeen.Count == 2
+            && rendererIdentitySeen.All(x => x.Issue?.Contains("renderer identity unavailable") == true);
+
+        int failureWithoutIdentityBuilds = 0; var failureWithoutIdentitySeen = new List<ShotObservation>();
+        var failureWithoutIdentityHooks = Hooks(() => throw new InvalidDataException("FAILURE_WITHOUT_IDENTITY"),
+            _ => throw new IOException("identity unavailable"), failureWithoutIdentitySeen,
+            () => failureWithoutIdentityBuilds++);
+        using (var cell = new CellScene("FailureWithoutIdentity"))
+        {
+            Render("failure-no-identity-a", failureWithoutIdentityHooks, cell, null, false);
+            Render("failure-no-identity-b", failureWithoutIdentityHooks, cell, null, false);
+        }
+        verdict["buildFailureRetainedWithoutIdentity"] = failureWithoutIdentityBuilds == 1
+            && failureWithoutIdentitySeen.All(x => x.Issue?.Contains("FAILURE_WITHOUT_IDENTITY") == true);
+
+        bool builderReadStarted = false; var mutationSeen = new List<ShotObservation>();
+        var mutationHooks = Hooks(() => { builderReadStarted = true; return [Triangle()]; },
+            _ => builderReadStarted ? [2, 2] : [1, 1], mutationSeen);
+        using (var cell = new CellScene("MutatesDuringBuild"))
+        { Render("mutates-during-build", mutationHooks, cell, null, true); }
+        verdict["postBuildIdentityDetectsBuilderTimeMutation"] = mutationSeen.Count == 1
+            && mutationSeen[0].Issue?.Contains("changed between") == true;
+
         var mutation = Triangle(); string before = Fingerprint([mutation]); mutation.Positions[0].X += 1;
         verdict["positionMutationDetectedControl"] = before != Fingerprint([mutation]);
         mutation = Triangle(); before = Fingerprint([mutation]); mutation.Indices[0] = 2;
@@ -276,7 +309,7 @@ internal static class MeshReuseRed
 
         var failed = verdict.Where(x => !x.Value).Select(x => x.Key).ToArray();
         Console.WriteLine(System.Text.Json.JsonSerializer.Serialize(new { notMet = failed,
-            verdicts = verdict, counts = new { offBuilds, onBuilds, offStateFactories, onStateFactories,
+            verdicts = verdict, counts = new { offBuilds, offReads, onBuilds, offStateFactories, onStateFactories,
                 failBuilds, hashBuilds, hashReads },
             diagnostics = new
             {
