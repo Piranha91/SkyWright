@@ -95,6 +95,7 @@ public static class CellFactsRed
     static readonly Dictionary<int, (int Prepass, int Main)> Walks = new();
     static bool FaultFired;
     static string? CaughtFault;
+    static string? CaughtUnexpectedFault;
     static readonly string? Output = Environment.GetEnvironmentVariable("VP_CELL_FACTS_RED_OUT");
 
     internal static void Acquired(CellScene lease, CellFactsProbe facts)
@@ -136,11 +137,23 @@ public static class CellFactsRed
         throw new ExpectedFault();
     }
 
+    public static void ThrowUnexpectedAfterPublishIfRequested()
+    {
+        if (Output is null || Environment.GetEnvironmentVariable("VP_CELL_FACTS_RED_FAIL_UNEXPECTED") != "1") return;
+        throw new InvalidOperationException("CELL_FACTS_RED_UNEXPECTED_AFTER_PUBLISH");
+    }
+
     public static bool IsExpectedFault(Exception ex) => Output is not null && ex is ExpectedFault;
+    public static bool TestBoundaryEnabled => Output is not null;
 
     public static void CaughtExpectedFault(Exception ex)
     {
         lock (Gate) { CaughtFault = ex.ToString(); Write(); }
+    }
+
+    public static void CaughtUnexpected(Exception ex)
+    {
+        lock (Gate) { CaughtUnexpectedFault = ex.ToString(); Write(); }
     }
 
     public static bool Finish()
@@ -162,6 +175,9 @@ public static class CellFactsRed
         bool faultRequested = Environment.GetEnvironmentVariable("VP_CELL_FACTS_RED_FAIL_AFTER_PUBLISH") == "1";
         bool caughtFault = !faultRequested || (FaultFired && CaughtFault is not null
             && CaughtFault.Contains("CELL_FACTS_RED_AFTER_PUBLISH", StringComparison.Ordinal));
+        bool unexpectedRequested = Environment.GetEnvironmentVariable("VP_CELL_FACTS_RED_FAIL_UNEXPECTED") == "1";
+        bool caughtUnexpected = !unexpectedRequested || (CaughtUnexpectedFault is not null
+            && CaughtUnexpectedFault.Contains("CELL_FACTS_RED_UNEXPECTED_AFTER_PUBLISH", StringComparison.Ordinal));
         var verdicts = new Dictionary<string, bool>
         {
             ["actualWalkPublishedCopiedFacts"] = copiedReadable,
@@ -171,6 +187,7 @@ public static class CellFactsRed
             ["filteredWalkSelectionIsKeyed"] = watchKeyPresent,
             ["copiedFactsIgnoreSourceMutationAndHashEveryField"] = copySensitive,
             ["intentionalExceptionCaughtByTestBoundary"] = caughtFault,
+            ["unexpectedExceptionCaughtByTestBoundary"] = caughtUnexpected,
         };
         var doc = new
         {
@@ -180,7 +197,8 @@ public static class CellFactsRed
             disposedLeaseIds = Disposals.Order().ToArray(),
             perLeaseAcquisitionCounts = perLease.ToDictionary(g => g.Key.ToString(), g => g.Count()),
             walkCounts = Walks.ToDictionary(x => x.Key.ToString(), x => new { x.Value.Prepass, x.Value.Main }),
-            fault = new { requested = faultRequested, fired = FaultFired, caught = CaughtFault },
+            fault = new { requested = faultRequested, fired = FaultFired, caught = CaughtFault,
+                          unexpectedRequested, unexpectedCaught = CaughtUnexpectedFault },
             pendingG6 = new[] { "after-static-install fault", "borrowed NPC return and GL context disposal order" },
         };
         var path = Path.GetFullPath(Output!);

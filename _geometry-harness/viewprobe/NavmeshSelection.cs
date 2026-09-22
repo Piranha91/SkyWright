@@ -6,11 +6,44 @@ namespace ViewProbe;
 /// <summary>Explicit annotation participants within the renderer's existing exterior ring.</summary>
 internal sealed class NavmeshSelection
 {
+    internal sealed record OwnedGraph(NavmeshSelection Selection,
+        Dictionary<FormKey, NavmeshGeometry> Winners,
+        Dictionary<string, Dictionary<FormKey, NavmeshGeometry>> Versions);
+
     public Dictionary<FormKey, string?> Cells { get; } = new();
     public Dictionary<FormKey, string> Overrides { get; } = new();
     public Dictionary<NavmeshGeometry, (FormKey Cell, string Plugin)> Provenance { get; } = new(ReferenceEqualityComparer.Instance);
     private readonly Dictionary<FormKey, CellPlacements> observed = new();
     public FormKey Target { get; }
+
+    internal OwnedGraph CopyGraph(IReadOnlyDictionary<FormKey, NavmeshGeometry> winners,
+        IReadOnlyDictionary<string, Dictionary<FormKey, NavmeshGeometry>> versions)
+    {
+        var map = new Dictionary<NavmeshGeometry, NavmeshGeometry>(ReferenceEqualityComparer.Instance);
+        NavmeshGeometry Mesh(NavmeshGeometry old)
+        {
+            if (map.TryGetValue(old, out var found)) return found;
+            var copy = old with { Vertices = old.Vertices.ToArray(), Triangles = old.Triangles.ToArray(),
+                EdgeLinks = old.EdgeLinks?.ToArray(), DoorTriangles = old.DoorTriangles?.ToArray() };
+            map[old] = copy; return copy;
+        }
+        CellPlacements Cell(CellPlacements old) => old with
+        {
+            Refs = old.Refs.Select(r => r with { LinkedReferences = r.LinkedReferences?.ToArray(),
+                ActivateParents = r.ActivateParents?.ToArray() }).ToArray(),
+            Navmeshes = old.Navmeshes.Select(Mesh).ToArray(),
+            Land = old.Land is null ? null : (float[,])old.Land.Clone(),
+        };
+        var selection = new NavmeshSelection(Target, Array.Empty<string>(), Array.Empty<string>());
+        selection.Cells.Clear(); foreach (var x in Cells) selection.Cells[x.Key] = x.Value;
+        foreach (var x in Overrides) selection.Overrides[x.Key] = x.Value;
+        foreach (var x in observed) selection.observed[x.Key] = Cell(x.Value);
+        var win = winners.ToDictionary(x => x.Key, x => Mesh(x.Value));
+        var ver = versions.ToDictionary(x => x.Key,
+            x => x.Value.ToDictionary(y => y.Key, y => Mesh(y.Value)), StringComparer.OrdinalIgnoreCase);
+        foreach (var x in Provenance) selection.Provenance[Mesh(x.Key)] = x.Value;
+        return new(selection, win, ver);
+    }
 
     public NavmeshSelection(FormKey target, IEnumerable<string> cells, IEnumerable<string> versions)
     {
@@ -126,6 +159,16 @@ internal sealed class NavmeshSelection
         var historic = scope.Substitute(winners,versions);
         Check(ReferenceEquals(historic[na.FormKey],na) && ReferenceEquals(historic[nb.FormKey],prior), "one record substituted; current source preserved");
         Check(scope.Provenance[prior].Cell == b && scope.Provenance[prior].Plugin == "Prior.esp", "actual source provenance retained");
+        var owned = scope.CopyGraph(winners, versions);
+        var copiedPrior = owned.Versions["Prior.esp"][nb.FormKey];
+        Check(ReferenceEquals(copiedPrior, owned.Selection.Provenance.Keys.Single(n => n.FormKey == nb.FormKey
+                  && owned.Selection.Provenance[n].Plugin == "Prior.esp")),
+              "copied versions and provenance preserve reference identity");
+        var sourceVerts = (Vec3[])prior.Vertices;
+        var copiedFirst = copiedPrior.Vertices[0];
+        sourceVerts[0] = new Vec3(99, 99, 99);
+        Check(copiedPrior.Vertices[0] == copiedFirst,
+              "copied navigation graph ignores source-array mutation");
         Check(!IsDrawable(nb,1) && IsDrawable(prior,1), "absent current triangle never fabricated from historical version");
         Check(!IsDrawable(nb with { Triangles = new[] { new NavTri(0,1,9,0) } },0), "invalid vertex refused");
         Check(!IsDrawable(nb with { Triangles = new[] { new NavTri(0,1,2,8) } },0), "deleted triangle refused");

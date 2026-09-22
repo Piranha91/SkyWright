@@ -126,6 +126,28 @@ sealed class PlaneHistory
     float _scale;
     bool _disabled, _deleted;
 
+    /// <summary>Owned copy for a prepared cell. The history is built while plugin overlays are
+    /// alive, then survives them; each shot gets its own copy because <see cref="Record"/> is a
+    /// mutating accumulator.</summary>
+    public PlaneHistory Copy()
+    {
+        var copy = new PlaneHistory
+        {
+            DefinedBy = DefinedBy,
+            ChangedBy = ChangedBy,
+            Changed = Changed,
+            _type = _type,
+            _pos = _pos,
+            _rot = _rot,
+            _bounds = _bounds,
+            _scale = _scale,
+            _disabled = _disabled,
+            _deleted = _deleted,
+        };
+        copy.Chain.AddRange(Chain);
+        return copy;
+    }
+
     /// <summary>The five base masters. "Vanilla" here means one of these — Creation Club content and the
     /// unofficial patch are mods for this purpose, because the audit asks what a MOD did to the planes.</summary>
     static readonly HashSet<string> Bethesda = new(StringComparer.OrdinalIgnoreCase)

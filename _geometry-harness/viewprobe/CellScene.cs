@@ -42,6 +42,8 @@ public sealed class CellScene : IDisposable
     public string Cell { get; }
 
     CellAssets? _assets;
+    CellWalkFacts? _facts;
+    string? _factsKey;
     bool _done;
 
     public CellScene(string cell)
@@ -50,7 +52,7 @@ public sealed class CellScene : IDisposable
         // ONE line per lease, not per shot: a per-shot line would differ between a batched shot and
         // the same shot rendered alone, and the equivalence suite compares those two consoles.
         Console.WriteLine("   cell scene: ON (--reuse-cell, experimental) - the shots of this cell "
-                        + "share asset resolution, decoded textures and parsed meshes; all are dropped "
+                        + "share owned record facts, asset resolution, decoded textures and parsed meshes; all are dropped "
                         + "when the cell is done");
     }
 
@@ -68,15 +70,27 @@ public sealed class CellScene : IDisposable
 
     MeshState? _mesh;
 
-    /// <summary>The current, deliberately non-retaining adapter for the completed record-walk
-    /// facts. The G1 RED calls this through the real worklist path: today every shot invokes the
-    /// factory. A later reviewed slice may give it one guarded cell slot.</summary>
-    public CellFactsProbe Facts(Func<CellFactsProbe> make)
+    /// <summary>Try the complete owned result of this cell's record walks. A different key never
+    /// receives stale facts: the caller performs a fresh walk and replaces the one guarded slot.</summary>
+    internal bool TryFacts(string key, out CellWalkFacts facts)
     {
         ObjectDisposedException.ThrowIf(_done, this);
-        var facts = make();
-        CellFactsRed.Acquired(this, facts);
-        return facts;
+        if (_facts is not null && StringComparer.Ordinal.Equals(_factsKey, key))
+        {
+            facts = _facts;
+            return true;
+        }
+        facts = null!;
+        return false;
+    }
+
+    internal void StoreFacts(string key, CellWalkFacts facts, CellFactsProbe probe)
+    {
+        ObjectDisposedException.ThrowIf(_done, this);
+        CellFactsOwnership.Validate(facts);
+        _factsKey = key;
+        _facts = facts;
+        CellFactsRed.Acquired(this, probe);
     }
 
     /// <summary>The builder and immutable parsed-mesh outcomes shared by this cell's shots.</summary>
@@ -92,6 +106,7 @@ public sealed class CellScene : IDisposable
     /// that adds something disposable disposes it HERE, and nowhere else.</summary>
     public void Dispose()
     {
+        _facts = null; _factsKey = null;
         _mesh = null; _assets = null; _done = true;
         CellFactsRed.Disposed(this);
     }
@@ -213,11 +228,37 @@ public static class CellSceneSelfTest
         catch (ObjectDisposedException e) { refusal = e.GetType().Name; }
         bool nothingAfterTheCell = refusal is not null && built == builtBeforeRefusal;
 
+        bool ownershipBoundaryRefusesGetterShape = CellFactsOwnership.SelfTest();
+        bool changedRealInputAcrossOwnersRefuses = PreparedProcessIdentity.ChangedFileAcrossCellOwnersSelfTest();
+
+        var factsLease = new CellScene("FactsSlot");
+        var factsA = CellWalkFacts.SelfTestFixture("A");
+        var probe = new CellFactsProbe("A", Array.Empty<KeyValuePair<Mutagen.Bethesda.Plugins.FormKey, Mutagen.Bethesda.Plugins.FormKey>>(),
+            Array.Empty<string>(), Array.Empty<GridCellFact>(), Array.Empty<WaterTruthFact>(), null,
+            float.MaxValue, "", Array.Empty<KeyValuePair<Mutagen.Bethesda.Plugins.FormKey, string>>(),
+            Array.Empty<KeyValuePair<Mutagen.Bethesda.Plugins.FormKey, CellBoundsFact>>(), new string('0', 64));
+        factsLease.StoreFacts("A", factsA, probe);
+        bool factsKeyHit = factsLease.TryFacts("A", out var storedA) && ReferenceEquals(storedA, factsA);
+        bool changedSelectionMisses = !factsLease.TryFacts("B", out _);
+        var factsB = CellWalkFacts.SelfTestFixture("B");
+        factsLease.StoreFacts("B", factsB, probe with { Cell = "B" });
+        bool replacementOwned = factsLease.TryFacts("B", out var storedB)
+                             && ReferenceEquals(storedB, factsB) && !ReferenceEquals(storedB, storedA);
+        factsLease.Dispose();
+        bool factsDisposedRefuses = false;
+        try { factsLease.TryFacts("B", out _); }
+        catch (ObjectDisposedException) { factsDisposedRefuses = true; }
+
         var verdicts = new Dictionary<string, bool>
         {
             ["sharedWithinTheCell"] = sharedWithinTheCell,
             ["nextCellSharesNothing"] = nextCellSharesNothing,
             ["nothingAfterTheCell"] = nothingAfterTheCell,
+            ["getterAndCallbackContaminationRefused"] = ownershipBoundaryRefusesGetterShape,
+            ["equalFactsKeyHits"] = factsKeyHit,
+            ["changedSelectionKeyMissesThenReplaces"] = changedSelectionMisses && replacementOwned,
+            ["disposedFactsSlotRefuses"] = factsDisposedRefuses,
+            ["changedRealInputAcrossCellOwnersRefuses"] = changedRealInputAcrossOwnersRefuses,
         };
         var failed = verdicts.Where(kv => !kv.Value).Select(kv => kv.Key).ToArray();
         Console.WriteLine(System.Text.Json.JsonSerializer.Serialize(new

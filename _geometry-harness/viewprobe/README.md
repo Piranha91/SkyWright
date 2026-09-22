@@ -617,7 +617,21 @@ What it shares today, as one pair made together and dropped together:
   value owns cloned vertex/index/material inputs and also records null, empty, missing-path and
   failed-build outcomes. Failures keep their per-shot console/audit projection. A readable file is
   retained only with its SHA-256 identity; an unavailable identity rebuilds instead of treating an
-  empty hash as equal.
+  empty hash as equal;
+* the **complete record-walk facts**: copied winning and persistent placements, enable maps,
+  occlusion-plane history, NPC/door watch results, navigation winners/versions/provenance, base and
+  material tables, terrain/water/station results and the inputs BOS resolves against. Nested arrays
+  are owned copies, and each shot receives a new mutable working copy. No Mutagen getter, lazy
+  overlay enumeration or callback crosses the boundary. The process-owned BOS index/layer remains
+  outside this value and is applied afresh to each working copy.
+
+The prepared value is keyed by the normalized cell selection, watch sets and the ordered plugin
+files that supplied it. A process-scope guard separately binds the asset/BOS readers to each
+profile, plugin and BOS-rule path plus its observed size and last-write time; a detectable change
+while the process is alive makes reuse refuse instead of rebuilding only the cell while leaving an
+older process cache in place. This guard does not hash archive contents. A changed
+camera does not invalidate record facts. A changed watch/selection key rebuilds the guarded slot,
+and the next worklist cell always receives a new lease.
 
 What it will not share, because the camera decides it: the uploaded meshes (`--cull-above` drops
 triangles above the cut *before* upload), the route's ground z, and `--npc-puck auto`. What it will

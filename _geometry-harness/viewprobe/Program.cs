@@ -1120,6 +1120,7 @@ FormKey targetWorldspace = FormKey.Null;
 var navVersionPlugins = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 if (navPlugin is not null) navVersionPlugins.Add(navPlugin);
 if (compare is { } cmp0) { navVersionPlugins.Add(cmp0.A); navVersionPlugins.Add(cmp0.B); }
+var cliNavVersionPlugins = navVersionPlugins.ToArray();
 var navByPlugin = new Dictionary<string, Dictionary<FormKey, NavmeshGeometry>>(StringComparer.OrdinalIgnoreCase);
 ViewProbe.NavmeshSelection? navSelection = null;
 if (navVersionSpecs.Count > 0 && (navPlugin is not null || compare is not null))
@@ -1132,6 +1133,7 @@ var bosIdx = bosMode != "off" ? new BosFormIndex() : null;
 var bosLight = new List<(ModKey Key, bool Light)>();
 var refCellOf = new Dictionary<FormKey, FormKey>();
 BosLayer? bosLayer = null;
+IReadOnlyList<BosIniFile>? discoveredBosInis = null;
 var baseIsMarker = new HashSet<FormKey>();
 var baseEditorId = new Dictionary<FormKey, string>();
 // Base record TYPE and OBND, for --refs-at (WHAT is near a spot: a Door, a Container) and
@@ -1370,6 +1372,7 @@ string InsideRays(PlacedRef r, string mesh, float qx, float qy, float qz)
 // when that cell's shots are done, null in every other run. A shot reads it and shares nothing
 // beyond it; see CellScene.cs for what may and may not live there.
 ViewProbe.CellScene? cellScene = null;
+var preparedProcessIdentity = new ViewProbe.PreparedProcessIdentity();
 
 int RunCellTextured(string cellTarget, int wlCell, int wlShot)
 {
@@ -1386,10 +1389,15 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot)
     planeHist.Clear(); cellContestedBy.Clear();
     npcRefWhere.Clear(); npcBaseWhere.Clear(); doorWhere.Clear();
     winNav.Clear(); navByPlugin.Clear();
-    baseMesh.Clear(); baseIsMarker.Clear(); baseEditorId.Clear();
+    navVersionPlugins.Clear(); foreach (var plugin in cliNavVersionPlugins) navVersionPlugins.Add(plugin);
+    refCellOf.Clear();
+    baseMesh.Clear(); baseIsMarker.Clear(); baseEditorId.Clear(); baseType.Clear(); baseObnd.Clear();
     ltexToTxst.Clear(); ltexEditorId.Clear(); txstDiffuse.Clear();
     baseMato.Clear(); matoRec.Clear(); watrRec.Clear(); cellWater.Clear();
     wsWater = null; wsDefaultWaterHeight = float.MaxValue;
+    cellWaterTruth.Clear(); wsWaterTruth = null; wsDefaultWaterHeightTruth = float.MaxValue;
+    cellAtGrid.Clear(); worldChain.Clear(); stationWorldspaceEd = "";
+    stationRefsByGrid.Clear(); stationLandByGrid.Clear();
     enableMemo.Clear();
     targetWorldspace = FormKey.Null; targetGrid = null;
     cellKey = null; cellLabel = cellTarget; interior = false;
@@ -1459,6 +1467,51 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot)
         }
     var shotNpcWatch = new HashSet<FormKey>(shotNpcParsed.Select(sp => sp.Key));
 
+    // The retained walk is keyed by every input the walk consumes. File length/mtime bind each
+    // ordered path to the metadata observed at the boundary without paying for a second content read; the worklist
+    // selection closes over the filtered NPC/door/nav observations. Camera and presentation flags
+    // are deliberately absent because they do not decide which records the walk copies.
+    IEnumerable<string> ProcessInputIdentity()
+    {
+        yield return Path.GetFullPath(Instance); yield return profileName;
+        yield return "bos=" + bosMode;
+        foreach (var name in new[] { "plugins.txt", "loadorder.txt", "modlist.txt", "archives.txt", "Skyrim.ini", "SkyrimCustom.ini" })
+            yield return "profile:" + ViewProbe.PreparedProcessIdentity.FileToken(Path.Combine(profileDir, name));
+        if (orderFile is not null)
+            yield return "candidate:" + ViewProbe.PreparedProcessIdentity.FileToken(orderFile);
+        foreach (var path in order.OrderedPaths)
+            yield return "plugin:" + ViewProbe.PreparedProcessIdentity.FileToken(path);
+        foreach (var root in assets.LooseRoots.OrderBy(x => x.Dir, StringComparer.OrdinalIgnoreCase))
+            yield return $"asset-root:{root.Name}|{Path.GetFullPath(root.Dir)}";
+        if (bosMode != "off")
+        {
+            var currentBosInis = BosDiscovery.Discover(assets.LooseRoots);
+            discoveredBosInis ??= currentBosInis;
+            foreach (var ini in currentBosInis)
+                yield return "bos-rule:" + ViewProbe.PreparedProcessIdentity.FileToken(ini.Path);
+        }
+    }
+    IEnumerable<string> SelectionIdentity()
+    {
+        yield return cellTarget.Trim();
+        yield return $"ring={ringRefs};stations={stationsSpec is not null};terrain={drawTerrain};water={drawWater};stateRecords={stateSpec is not null}";
+        foreach (var x in shotNpcWatch.Order()) yield return "npc:" + x;
+        foreach (var x in doorWatchKeys.Order()) yield return "door:" + x;
+        foreach (var x in cliNavVersionPlugins.Order(StringComparer.OrdinalIgnoreCase)) yield return "navsource:" + x;
+        foreach (var x in navCellSpecs.Order(StringComparer.Ordinal)) yield return "navcell:" + x;
+        foreach (var x in navVersionSpecs.Order(StringComparer.Ordinal)) yield return "navver:" + x;
+    }
+    string? processKey = cellScene is null ? null : ViewProbe.CellFactsOwnership.Key(ProcessInputIdentity());
+    if (cellScene is not null && !preparedProcessIdentity.TryBind(processKey!, out var processRefusal))
+    { Console.Error.WriteLine(processRefusal); return 2; }
+    string? preparedKey = cellScene is null ? null
+        : ViewProbe.CellFactsOwnership.Key(new[] { processKey! }, SelectionIdentity());
+    ViewProbe.CellWalkFacts? retainedWalk = null;
+    bool retainedWalkHit = cellScene is not null && cellScene.TryFacts(preparedKey!, out retainedWalk);
+    if (retainedWalkHit) retainedWalk = retainedWalk!.CopyForShot();
+    ViewProbe.CellWalkFacts? builtWalkCore = null;
+    bool bosFill = false;
+
     // --nav-z's band, resolved for THIS shot — `auto` reads the shot's own floor, so it cannot be
     // settled on the command line. Refused rather than defaulted when auto has nothing to read:
     // a storey filter that quietly picked z 0 would draw an empty overlay over a full building.
@@ -1475,6 +1528,8 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot)
         }
     }
 
+    if (!retainedWalkHit)
+    {
     // ---------------------------------------------------------------------------------------
     // PRE-PASS: resolve the target cell's identity (FormKey, grid, worldspace) before the main
     // walk. The ring test needs the target's GRID, which the single-pass walk only learned when
@@ -1521,7 +1576,7 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot)
     foreach (var plugin in navSelection.Overrides.Values) navVersionPlugins.Add(plugin);
 
     // The BOS form index fills on the FIRST walk only (a worklist re-walks per cell; the index does not change).
-    bool bosFill = bosIdx is not null && bosIdx.RecordsSeen == 0;
+    bosFill = bosIdx is not null && bosIdx.RecordsSeen == 0;
     ViewProbe.RenderStages.Open(ViewProbe.RenderStages.RecordWalk,
         "the winning state: every plugin, for the refs and navmeshes that win",
         order.OrderedPaths.Count, "plugins");
@@ -1695,10 +1750,91 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot)
         _ = navSelection.Substitute(winNav, navByPlugin); // refuse unresolved substitutions before building assets
     }
     catch (ArgumentException ex) { Console.Error.WriteLine(ex.Message); return 2; }
+    }
+    else
+    {
+        var f = retainedWalk!;
+        cellKey = f.CellKey; cellLabel = f.CellLabel; interior = f.Interior;
+        targetWorldspace = f.TargetWorldspace; targetGrid = f.TargetGrid;
+        foreach (var x in f.WinningRefs) winRef[x.Key] = x.Value;
+        foreach (var x in f.PersistentRefs) persistentWin[x.Key] = x.Value;
+        foreach (var x in f.DisabledFlags) refDisabledFlag.Add(x);
+        foreach (var x in f.EnableParents) refEnableParent[x.Key] = x.Value;
+        foreach (var x in f.RefEditorIds) refEditorIdAll[x.Key] = x.Value;
+        foreach (var x in f.RefCells) refCellOf[x.Key] = x.Value;
+        foreach (var x in f.PlaneHistories) planeHist[x.Key] = x.Value;
+        cellContestedBy.AddRange(f.CellContestedBy);
+        foreach (var x in f.NpcRefs) npcRefWhere[x.Key] = x.Value;
+        foreach (var x in f.NpcBases) npcBaseWhere[x.Key] = x.Value;
+        foreach (var x in f.Doors) doorWhere[x.Key] = x.Value;
+        navSelection = f.Navigation.Selection;
+        foreach (var x in f.Navigation.Winners) winNav[x.Key] = x.Value;
+        foreach (var x in f.Navigation.Versions) navByPlugin[x.Key] = x.Value;
+        foreach (var x in navSelection.Overrides.Values) navVersionPlugins.Add(x);
+        foreach (var x in f.BaseMeshes) baseMesh[x.Key] = x.Value;
+        foreach (var x in f.MarkerBases) baseIsMarker.Add(x);
+        foreach (var x in f.BaseEditorIds) baseEditorId[x.Key] = x.Value;
+        foreach (var x in f.BaseTypes) baseType[x.Key] = x.Value;
+        foreach (var x in f.BaseBounds) baseObnd[x.Key] = x.Value;
+        foreach (var x in f.LtexToTxst) ltexToTxst[x.Key] = x.Value;
+        foreach (var x in f.LtexEditorIds) ltexEditorId[x.Key] = x.Value;
+        foreach (var x in f.TxstDiffuse) txstDiffuse[x.Key] = x.Value;
+        foreach (var x in f.BaseMato) baseMato[x.Key] = x.Value;
+        foreach (var x in f.Mato) matoRec[x.Key] = x.Value;
+        foreach (var x in f.WaterRecords) watrRec[x.Key] = x.Value;
+        foreach (var x in f.CellWater) cellWater[x.Key] = x.Value;
+        wsWater = f.WorldWater; wsDefaultWaterHeight = f.WorldDefaultWaterHeight;
+        foreach (var x in f.CellWaterTruth) cellWaterTruth[x.Key] = x.Value;
+        wsWaterTruth = f.WorldWaterTruth; wsDefaultWaterHeightTruth = f.WorldDefaultWaterHeightTruth;
+        foreach (var x in f.CellsAtGrid) cellAtGrid[x.Key] = x.Value;
+        foreach (var x in f.WorldChain) worldChain[x.Key] = x.Value;
+        stationWorldspaceEd = f.StationWorldspaceEditorId;
+        foreach (var x in f.StationRefs) stationRefsByGrid[x.Key] = x.Value;
+        foreach (var x in f.StationLand) stationLandByGrid[x.Key] = x.Value;
+    }
+    if (cellScene is not null && !retainedWalkHit)
+    {
+        // Capture the raw walk boundary before BOS, state arms, persistent merging, synthetic
+        // props or any other per-shot projection mutates the working dictionaries.
+        var navGraph = navSelection!.CopyGraph(winNav, navByPlugin);
+        builtWalkCore = new ViewProbe.CellWalkFacts
+        {
+            CellKey = cellKey!.Value, CellLabel = cellLabel, Interior = interior,
+            TargetWorldspace = targetWorldspace, TargetGrid = targetGrid,
+            WinningRefs = winRef.ToDictionary(x => x.Key, x => ViewProbe.CellWalkFacts.Copy(x.Value)),
+            PersistentRefs = persistentWin.ToDictionary(x => x.Key,
+                x => (x.Value.Ws, ViewProbe.CellWalkFacts.Copy(x.Value.Ref))),
+            DisabledFlags = refDisabledFlag.ToHashSet(), EnableParents = new(refEnableParent),
+            RefEditorIds = new(refEditorIdAll), RefCells = new(refCellOf),
+            PlaneHistories = planeHist.ToDictionary(x => x.Key, x => x.Value.Copy()),
+            CellContestedBy = cellContestedBy.ToArray(),
+            NpcRefs = npcRefWhere.ToDictionary(x => x.Key,
+                x => (x.Value.Cell, x.Value.CellEd, ViewProbe.CellWalkFacts.Copy(x.Value.Ref))),
+            NpcBases = npcBaseWhere.ToDictionary(x => x.Key, x => x.Value.ToDictionary(y => y.Key,
+                y => (y.Value.Cell, y.Value.CellEd, ViewProbe.CellWalkFacts.Copy(y.Value.Ref)))),
+            Doors = doorWhere.ToDictionary(x => x.Key,
+                x => (x.Value.Cell, x.Value.CellEd, ViewProbe.CellWalkFacts.Copy(x.Value.Ref))),
+            Navigation = navGraph,
+            BaseMeshes = new(baseMesh), MarkerBases = baseIsMarker.ToHashSet(),
+            BaseEditorIds = new(baseEditorId), BaseTypes = new(baseType), BaseBounds = new(baseObnd),
+            LtexToTxst = new(ltexToTxst), LtexEditorIds = new(ltexEditorId), TxstDiffuse = new(txstDiffuse),
+            BaseMato = new(baseMato), Mato = new(matoRec), WaterRecords = new(watrRec),
+            CellWater = new(), WorldWater = null, WorldDefaultWaterHeight = float.MaxValue,
+            CellWaterTruth = new(), WorldWaterTruth = null, WorldDefaultWaterHeightTruth = float.MaxValue,
+            CellsAtGrid = new(), WorldChain = new(StringComparer.OrdinalIgnoreCase),
+            StationWorldspaceEditorId = "",
+            StationRefs = stationRefsByGrid.ToDictionary(x => x.Key,
+                x => x.Value.ToDictionary(y => y.Key, y => ViewProbe.CellWalkFacts.Copy(y.Value))),
+            StationLand = stationLandByGrid.ToDictionary(x => x.Key, x => (float[,])x.Value.Clone()),
+            TerrainPatches = Array.Empty<ViewProbe.TerrainPatchFact>(),
+            TerrainLayers = Array.Empty<ViewProbe.TerrainLayerFact>(),
+            LandHeights = Array.Empty<ViewProbe.LandHeightFact>(),
+        };
+    }
     if (bosIdx is not null && bosLayer is null)
     {
         if (bosFill) bosIdx.SetLoadOrder(bosLight);
-        var bosInis = BosDiscovery.Discover(assets.LooseRoots);
+        var bosInis = discoveredBosInis ??= BosDiscovery.Discover(assets.LooseRoots);
         bosLayer = BaseObjectSwaps.Load(bosInis, bosIdx);
         Console.WriteLine($"   BOS {bosMode}: {bosInis.Count} *_SWAP.ini read from the VFS ({bosLayer.LinesRead:N0} lines, {bosLayer.LinesFailed:N0} the game refuses, "
                         + $"{bosLayer.Anomalies.Count:N0} anomalies — bosprobe lists them); every drawn ref takes the base and transform the game loads");
@@ -2368,10 +2504,31 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot)
         // --interactive: hovering bare ground answers with the quadrant's painted layers. Assigned
         // inside the terrain block (it captures the walked LAND census); null on interiors.
         Func<float, float, string?>? terrainDescribeAt = null;
+        // Reuse is restricted above to static worklists. Interactive terrain hover needs the
+        // LAND layer census callback and therefore cannot enter this retained branch.
+        if (retainedWalkHit && (drawTerrain || drawWater) && !interior && targetGrid is not null)
+        {
+            foreach (var p in retainedWalk!.TerrainPatches)
+                terrainPatches[p.Diffuse] = p.Triangles.ToList();
+            foreach (var l in retainedWalk.TerrainLayers)
+                terrainLayers.Add((l.Diffuse, l.Triangles.ToList()));
+            foreach (var h in retainedWalk.LandHeights)
+                landHeights[(h.X, h.Y)] = (float[,])h.Heights.Clone();
+            int terrTotal = terrainPatches.Values.Sum(v => v.Count);
+            if (terrTotal > 0)
+                Console.WriteLine($"   terrain: {landHeights.Count} cell(s) of LAND, {terrTotal:N0} triangles, "
+                                + $"{terrainPatches.Count(kv => kv.Key.Length > 0)} distinct ground texture(s)");
+            else
+                Console.WriteLine("   terrain: no LAND found for this cell (--no-terrain to silence)");
+            if (terrainLayers.Count > 0)
+                Console.WriteLine($"   terrain paint layers: {terrainLayers.Count} sheet(s), "
+                                + $"{terrainLayers.Sum(l => l.Tris.Count):N0} triangles, "
+                                + $"{terrainLayers.Select(l => l.Diffuse).Distinct(StringComparer.OrdinalIgnoreCase).Count()} distinct texture(s)");
+        }
         // Water rides this same cell walk (it is where CELL.WaterHeight is read), so the walk has
         // to run whenever EITHER is wanted — otherwise --no-terrain silently takes the sea with it,
         // which is a coupling nobody would guess from the flag's name.
-        if ((drawTerrain || drawWater) && !interior && targetGrid is { } tg)
+        if (!retainedWalkHit && (drawTerrain || drawWater) && !interior && targetGrid is { } tg)
         {
             // grid -> winning heightmap + the base landscape texture per quadrant (LTEX FormKeys,
             // resolved to diffuse paths after the walk), by load order (later plugin wins).
@@ -3912,27 +4069,46 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot)
                 Console.WriteLine($"   coverings: {coveringNoMato} base(s) name a MaterialObject no active plugin defines");
         }
 
-        // First prepared-cell RED seam. Every plugin overlay used above has left its `using`
-        // block before these owned arrays are made and hashed. The adapter is deliberately
-        // non-retaining today, so a two-shot cell records two real acquisitions. Keep the
-        // filtered-watch closure in the observation: a later retained value may share only when
-        // this selection (or a proven full-cell collection) is equal.
-        _ = cellScene?.Facts(() => new ViewProbe.CellFactsProbe(
-            cellLabel,
-            refCellOf.OrderBy(x => x.Key.ToString(), StringComparer.Ordinal)
-                     .Select(x => new KeyValuePair<FormKey, FormKey>(x.Key, x.Value)).ToArray(),
-            navVersionPlugins.Order(StringComparer.OrdinalIgnoreCase).ToArray(),
-            cellAtGrid.OrderBy(x => x.Key.X).ThenBy(x => x.Key.Y)
-                      .Select(x => new ViewProbe.GridCellFact(x.Key.X, x.Key.Y, x.Value.Key, x.Value.Ed)).ToArray(),
-            cellWaterTruth.OrderBy(x => x.Key.X).ThenBy(x => x.Key.Y)
-                          .Select(x => new ViewProbe.WaterTruthFact(x.Key.X, x.Key.Y, x.Value.Has, x.Value.Height, x.Value.Water)).ToArray(),
-            wsWaterTruth, wsDefaultWaterHeightTruth, stationWorldspaceEd,
-            baseType.OrderBy(x => x.Key.ToString(), StringComparer.Ordinal).ToArray(),
-            baseObnd.OrderBy(x => x.Key.ToString(), StringComparer.Ordinal)
-                    .Select(x => new KeyValuePair<FormKey, ViewProbe.CellBoundsFact>(
-                        x.Key, new(x.Value.Min, x.Value.Max))).ToArray(),
-            ViewProbe.CellFactsRed.HashWatchSelection(shotNpcWatch, doorWatchKeys, navVersionPlugins)));
+        // Complete the owned walk value after the separate terrain/water walk. The raw placement
+        // snapshot above was taken before state/BOS/population projection; only these follow-up
+        // record facts and derived terrain arrays are added here. BOS's index/layer remain the
+        // established process-owned readers and are freshly applied to each cloned working set.
+        if (builtWalkCore is not null)
+        {
+            var factsProbe = new ViewProbe.CellFactsProbe(
+                cellLabel,
+                refCellOf.OrderBy(x => x.Key.ToString(), StringComparer.Ordinal)
+                         .Select(x => new KeyValuePair<FormKey, FormKey>(x.Key, x.Value)).ToArray(),
+                navVersionPlugins.Order(StringComparer.OrdinalIgnoreCase).ToArray(),
+                cellAtGrid.OrderBy(x => x.Key.X).ThenBy(x => x.Key.Y)
+                          .Select(x => new ViewProbe.GridCellFact(x.Key.X, x.Key.Y, x.Value.Key, x.Value.Ed)).ToArray(),
+                cellWaterTruth.OrderBy(x => x.Key.X).ThenBy(x => x.Key.Y)
+                              .Select(x => new ViewProbe.WaterTruthFact(x.Key.X, x.Key.Y, x.Value.Has, x.Value.Height, x.Value.Water)).ToArray(),
+                wsWaterTruth, wsDefaultWaterHeightTruth, stationWorldspaceEd,
+                baseType.OrderBy(x => x.Key.ToString(), StringComparer.Ordinal).ToArray(),
+                baseObnd.OrderBy(x => x.Key.ToString(), StringComparer.Ordinal)
+                        .Select(x => new KeyValuePair<FormKey, ViewProbe.CellBoundsFact>(
+                            x.Key, new(x.Value.Min, x.Value.Max))).ToArray(),
+                ViewProbe.CellFactsRed.HashWatchSelection(shotNpcWatch, doorWatchKeys, navVersionPlugins));
+            builtWalkCore.CellWater = new(cellWater);
+            builtWalkCore.WorldWater = wsWater;
+            builtWalkCore.WorldDefaultWaterHeight = wsDefaultWaterHeight;
+            builtWalkCore.CellWaterTruth = new(cellWaterTruth);
+            builtWalkCore.WorldWaterTruth = wsWaterTruth;
+            builtWalkCore.WorldDefaultWaterHeightTruth = wsDefaultWaterHeightTruth;
+            builtWalkCore.CellsAtGrid = new(cellAtGrid);
+            builtWalkCore.WorldChain = new(worldChain, StringComparer.OrdinalIgnoreCase);
+            builtWalkCore.StationWorldspaceEditorId = stationWorldspaceEd;
+            builtWalkCore.TerrainPatches = terrainPatches.Select(x =>
+                new ViewProbe.TerrainPatchFact(x.Key, x.Value.ToArray())).ToArray();
+            builtWalkCore.TerrainLayers = terrainLayers.Select(x =>
+                new ViewProbe.TerrainLayerFact(x.Diffuse, x.Tris.ToArray())).ToArray();
+            builtWalkCore.LandHeights = landHeights.Select(x =>
+                new ViewProbe.LandHeightFact(x.Key.X, x.Key.Y, (float[,])x.Value.Clone())).ToArray();
+            cellScene!.StoreFacts(preparedKey!, builtWalkCore, factsProbe);
+        }
         ViewProbe.CellFactsRed.ThrowAfterPublishIfRequested();
+        ViewProbe.CellFactsRed.ThrowUnexpectedAfterPublishIfRequested();
 
         // Violet: not in the healthy palette (green/cyan/magenta/yellow/blue), not the reserved red,
         // not the white of the cell outline, not the orange of an implicated door.
@@ -4432,13 +4608,14 @@ if (worklist is not null)
         }
     }
 
-    // Static: every shot of every cell, each to its own PNG. One BUILD per shot — shots in the
-    // same cell do not share a walk, because the render happens inside the build rather than
-    // after it. Said out loud rather than hidden: on a multi-shot cell this is the dominant cost.
+    // Static: every shot of every cell, each to its own PNG. The opt-in lease retains the complete
+    // owned record-walk value; default runs still walk once per shot.
     int totalShots = worklist.Cells.Sum(c => c.Shots.Count);
     if (totalShots > worklist.Cells.Count)
         Console.WriteLine($"worklist: {totalShots} shots over {worklist.Cells.Count} cell(s) — "
-                        + "the load walk runs once PER SHOT in static mode (use --interactive to pay it once per cell).");
+                        + (reuseCell
+                            ? "--reuse-cell retains one owned record-walk result per equal cell/input key."
+                            : "the load walk runs once PER SHOT in static mode (use --interactive to pay it once per cell)."));
     for (int wlc = 0; wlc < worklist.Cells.Count; wlc++)
     {
         // --reuse-cell: ONE lease per cell, constructed here and disposed in the finally — a scope,
@@ -4457,6 +4634,14 @@ if (worklist is not null)
                     // production path's nonzero refusal without letting an intentional RED reach
                     // Windows' unhandled-exception dialog. The cell finally below still owns cleanup.
                     ViewProbe.CellFactsRed.CaughtExpectedFault(ex);
+                    rc = 2;
+                }
+                catch (Exception ex) when (ViewProbe.CellFactsRed.TestBoundaryEnabled)
+                {
+                    // Any unexpected exception in a test-enabled run is captured with its full
+                    // stack and converted to a normal nonzero exit. Production keeps its existing
+                    // exception behavior because this boundary is absent without the test sink.
+                    ViewProbe.CellFactsRed.CaughtUnexpected(ex);
                     rc = 2;
                 }
                 if (rc > 0) return ViewProbe.ExtractionScratch.GuardExitCode(rc);
