@@ -1,0 +1,1438 @@
+{
+  "schema": "viewprobe-renderbatch-invalidation-keys-v1",
+  "strategyRows": 201,
+  "operationalRows": 2,
+  "expectedCounts": {
+    "process": 47,
+    "configuration": 15,
+    "cell": 39,
+    "shot": 90,
+    "none": 10
+  },
+  "sourceForkCommit": "d31445aeeb8d4c15a938e9dd805ae587f8f98c07",
+  "options": [
+    {
+      "name": "--instance",
+      "surface": "cli",
+      "invalidates": "process",
+      "changesGeometry": true,
+      "verified": "read"
+    },
+    {
+      "name": "--game",
+      "surface": "cli",
+      "invalidates": "process",
+      "changesGeometry": true,
+      "verified": "read"
+    },
+    {
+      "name": "--profile",
+      "surface": "cli",
+      "invalidates": "process",
+      "changesGeometry": true,
+      "verified": "read"
+    },
+    {
+      "name": "--order",
+      "surface": "cli",
+      "invalidates": "process",
+      "changesGeometry": true,
+      "verified": "read"
+    },
+    {
+      "name": "--worklist",
+      "surface": "cli",
+      "invalidates": "process",
+      "changesGeometry": true,
+      "verified": "read"
+    },
+    {
+      "name": "--interactive",
+      "surface": "cli",
+      "invalidates": "process",
+      "changesGeometry": true,
+      "verified": "read"
+    },
+    {
+      "name": "--emit-bats",
+      "surface": "cli",
+      "invalidates": "process",
+      "changesGeometry": false,
+      "verified": "read"
+    },
+    {
+      "name": "--bats-profiles",
+      "surface": "cli",
+      "invalidates": "process",
+      "changesGeometry": false,
+      "verified": "read"
+    },
+    {
+      "name": "--smoke",
+      "surface": "cli",
+      "invalidates": "process",
+      "changesGeometry": false,
+      "verified": "read"
+    },
+    {
+      "name": "--report-mode-smoke",
+      "surface": "cli",
+      "invalidates": "process",
+      "changesGeometry": false,
+      "verified": "read"
+    },
+    {
+      "name": "--nav-selection-smoke",
+      "surface": "cli",
+      "invalidates": "process",
+      "changesGeometry": false,
+      "verified": "read"
+    },
+    {
+      "name": "--flags",
+      "surface": "cli",
+      "invalidates": "process",
+      "changesGeometry": false,
+      "verified": "read"
+    },
+    {
+      "name": "--config-identity",
+      "surface": "cli",
+      "invalidates": "process",
+      "changesGeometry": false,
+      "verified": "read"
+    },
+    {
+      "name": "--occlusion-rule",
+      "surface": "cli",
+      "invalidates": "process",
+      "changesGeometry": true,
+      "verified": "read"
+    },
+    {
+      "name": "--bos",
+      "surface": "cli",
+      "invalidates": "configuration",
+      "changesGeometry": true,
+      "verified": "read"
+    },
+    {
+      "name": "--state",
+      "surface": "cli",
+      "invalidates": "configuration",
+      "changesGeometry": true,
+      "verified": "read"
+    },
+    {
+      "name": "--switch-map",
+      "surface": "cli",
+      "invalidates": "configuration",
+      "changesGeometry": true,
+      "verified": "read"
+    },
+    {
+      "name": "--stations",
+      "surface": "cli",
+      "invalidates": "configuration",
+      "changesGeometry": false,
+      "verified": "read"
+    },
+    {
+      "name": "--npc",
+      "surface": "cli",
+      "invalidates": "configuration",
+      "changesGeometry": true,
+      "verified": "read"
+    },
+    {
+      "name": "--tex",
+      "surface": "cli",
+      "invalidates": "cell",
+      "changesGeometry": true,
+      "verified": "read"
+    },
+    {
+      "name": "--cull-above",
+      "surface": "cli",
+      "invalidates": "cell",
+      "changesGeometry": true,
+      "verified": "read"
+    },
+    {
+      "name": "--no-ring-refs",
+      "surface": "cli",
+      "invalidates": "cell",
+      "changesGeometry": true,
+      "verified": "read"
+    },
+    {
+      "name": "--nav-cell",
+      "surface": "cli",
+      "invalidates": "cell",
+      "changesGeometry": true,
+      "verified": "read"
+    },
+    {
+      "name": "--nav-version",
+      "surface": "cli",
+      "invalidates": "cell",
+      "changesGeometry": true,
+      "verified": "read"
+    },
+    {
+      "name": "--nav-plugin",
+      "surface": "cli",
+      "invalidates": "cell",
+      "changesGeometry": true,
+      "verified": "read"
+    },
+    {
+      "name": "--conflicts",
+      "surface": "cli",
+      "invalidates": "cell",
+      "changesGeometry": true,
+      "verified": "read"
+    },
+    {
+      "name": "--red",
+      "surface": "cli",
+      "invalidates": "cell",
+      "changesGeometry": true,
+      "verified": "read"
+    },
+    {
+      "name": "--compare",
+      "surface": "cli",
+      "invalidates": "cell",
+      "changesGeometry": true,
+      "verified": "read"
+    },
+    {
+      "name": "--markers",
+      "surface": "cli",
+      "invalidates": "cell",
+      "changesGeometry": true,
+      "verified": "read"
+    },
+    {
+      "name": "--fx",
+      "surface": "cli",
+      "invalidates": "cell",
+      "changesGeometry": true,
+      "verified": "read"
+    },
+    {
+      "name": "--fx-static",
+      "surface": "cli",
+      "invalidates": "cell",
+      "changesGeometry": true,
+      "verified": "read"
+    },
+    {
+      "name": "--no-terrain",
+      "surface": "cli",
+      "invalidates": "cell",
+      "changesGeometry": true,
+      "verified": "read"
+    },
+    {
+      "name": "--no-terrain-layers",
+      "surface": "cli",
+      "invalidates": "cell",
+      "changesGeometry": false,
+      "verified": "read"
+    },
+    {
+      "name": "--no-water",
+      "surface": "cli",
+      "invalidates": "cell",
+      "changesGeometry": true,
+      "verified": "read"
+    },
+    {
+      "name": "--water-arm",
+      "surface": "cli",
+      "invalidates": "cell",
+      "changesGeometry": true,
+      "verified": "read"
+    },
+    {
+      "name": "--no-coverings",
+      "surface": "cli",
+      "invalidates": "cell",
+      "changesGeometry": false,
+      "verified": "read"
+    },
+    {
+      "name": "--planes",
+      "surface": "cli",
+      "invalidates": "cell",
+      "changesGeometry": true,
+      "verified": "read"
+    },
+    {
+      "name": "--planes-reach",
+      "surface": "cli",
+      "invalidates": "shot",
+      "changesGeometry": false,
+      "verified": "read"
+    },
+    {
+      "name": "--seams",
+      "surface": "cli",
+      "invalidates": "cell",
+      "changesGeometry": true,
+      "verified": "read"
+    },
+    {
+      "name": "--ref",
+      "surface": "cli",
+      "invalidates": "cell",
+      "changesGeometry": false,
+      "verified": "read"
+    },
+    {
+      "name": "--ref-surface",
+      "surface": "cli",
+      "invalidates": "cell",
+      "changesGeometry": true,
+      "verified": "read"
+    },
+    {
+      "name": "--npc-no-outfit",
+      "surface": "cli",
+      "invalidates": "cell",
+      "changesGeometry": true,
+      "verified": "unverified"
+    },
+    {
+      "name": "--list-meshes",
+      "surface": "cli",
+      "invalidates": "cell",
+      "changesGeometry": false,
+      "verified": "read"
+    },
+    {
+      "name": "--eye",
+      "surface": "cli",
+      "invalidates": "shot",
+      "changesGeometry": false,
+      "verified": "read"
+    },
+    {
+      "name": "--eye-ref",
+      "surface": "cli",
+      "invalidates": "shot",
+      "changesGeometry": false,
+      "verified": "read"
+    },
+    {
+      "name": "--eye-height",
+      "surface": "cli",
+      "invalidates": "shot",
+      "changesGeometry": false,
+      "verified": "read"
+    },
+    {
+      "name": "--look",
+      "surface": "cli",
+      "invalidates": "shot",
+      "changesGeometry": false,
+      "verified": "read"
+    },
+    {
+      "name": "--look-ref",
+      "surface": "cli",
+      "invalidates": "shot",
+      "changesGeometry": false,
+      "verified": "read"
+    },
+    {
+      "name": "--yaw",
+      "surface": "cli",
+      "invalidates": "shot",
+      "changesGeometry": false,
+      "verified": "read"
+    },
+    {
+      "name": "--pitch",
+      "surface": "cli",
+      "invalidates": "shot",
+      "changesGeometry": false,
+      "verified": "read"
+    },
+    {
+      "name": "--fov",
+      "surface": "cli",
+      "invalidates": "shot",
+      "changesGeometry": false,
+      "verified": "read"
+    },
+    {
+      "name": "--aspect",
+      "surface": "cli",
+      "invalidates": "shot",
+      "changesGeometry": false,
+      "verified": "read"
+    },
+    {
+      "name": "--size",
+      "surface": "cli",
+      "invalidates": "shot",
+      "changesGeometry": false,
+      "verified": "read"
+    },
+    {
+      "name": "--msaa",
+      "surface": "cli",
+      "invalidates": "shot",
+      "changesGeometry": false,
+      "verified": "read"
+    },
+    {
+      "name": "--elev",
+      "surface": "cli",
+      "invalidates": "shot",
+      "changesGeometry": false,
+      "verified": "read"
+    },
+    {
+      "name": "--angles",
+      "surface": "cli",
+      "invalidates": "shot",
+      "changesGeometry": false,
+      "verified": "read"
+    },
+    {
+      "name": "--euler",
+      "surface": "cli",
+      "invalidates": "shot",
+      "changesGeometry": false,
+      "verified": "read"
+    },
+    {
+      "name": "--nav",
+      "surface": "cli",
+      "invalidates": "shot",
+      "changesGeometry": true,
+      "verified": "read"
+    },
+    {
+      "name": "--no-nav",
+      "surface": "cli",
+      "invalidates": "shot",
+      "changesGeometry": true,
+      "verified": "read"
+    },
+    {
+      "name": "--nav-color",
+      "surface": "cli",
+      "invalidates": "shot",
+      "changesGeometry": false,
+      "verified": "read"
+    },
+    {
+      "name": "--no-nav-underground",
+      "surface": "cli",
+      "invalidates": "shot",
+      "changesGeometry": false,
+      "verified": "read"
+    },
+    {
+      "name": "--no-nav-under-statics",
+      "surface": "cli",
+      "invalidates": "shot",
+      "changesGeometry": false,
+      "verified": "read"
+    },
+    {
+      "name": "--no-nav-diff",
+      "surface": "cli",
+      "invalidates": "shot",
+      "changesGeometry": true,
+      "verified": "read"
+    },
+    {
+      "name": "--nav-z",
+      "surface": "cli",
+      "invalidates": "shot",
+      "changesGeometry": true,
+      "verified": "unverified"
+    },
+    {
+      "name": "--no-cell-outline",
+      "surface": "cli",
+      "invalidates": "shot",
+      "changesGeometry": true,
+      "verified": "read"
+    },
+    {
+      "name": "--sky",
+      "surface": "cli",
+      "invalidates": "cell",
+      "changesGeometry": false,
+      "verified": "read"
+    },
+    {
+      "name": "--route",
+      "surface": "cli",
+      "invalidates": "shot",
+      "changesGeometry": true,
+      "verified": "read"
+    },
+    {
+      "name": "--route-color",
+      "surface": "cli",
+      "invalidates": "shot",
+      "changesGeometry": false,
+      "verified": "read"
+    },
+    {
+      "name": "--route-z",
+      "surface": "cli",
+      "invalidates": "shot",
+      "changesGeometry": true,
+      "verified": "read"
+    },
+    {
+      "name": "--route-arrows",
+      "surface": "cli",
+      "invalidates": "shot",
+      "changesGeometry": true,
+      "verified": "read"
+    },
+    {
+      "name": "--no-route-discs",
+      "surface": "cli",
+      "invalidates": "shot",
+      "changesGeometry": true,
+      "verified": "read"
+    },
+    {
+      "name": "--route-solve",
+      "surface": "cli",
+      "invalidates": "shot",
+      "changesGeometry": true,
+      "verified": "read"
+    },
+    {
+      "name": "--grid",
+      "surface": "cli",
+      "invalidates": "shot",
+      "changesGeometry": true,
+      "verified": "read"
+    },
+    {
+      "name": "--grid-color",
+      "surface": "cli",
+      "invalidates": "shot",
+      "changesGeometry": false,
+      "verified": "read"
+    },
+    {
+      "name": "--npc-puck",
+      "surface": "cli",
+      "invalidates": "shot",
+      "changesGeometry": true,
+      "verified": "read"
+    },
+    {
+      "name": "--occlusion",
+      "surface": "cli",
+      "invalidates": "shot",
+      "changesGeometry": true,
+      "verified": "read"
+    },
+    {
+      "name": "--visibility-budget",
+      "surface": "cli",
+      "invalidates": "shot",
+      "changesGeometry": true,
+      "verified": "read"
+    },
+    {
+      "name": "--planes-report",
+      "surface": "cli",
+      "invalidates": "shot",
+      "changesGeometry": false,
+      "verified": "read"
+    },
+    {
+      "name": "--state-view",
+      "surface": "cli",
+      "invalidates": "shot",
+      "changesGeometry": false,
+      "verified": "read"
+    },
+    {
+      "name": "--report-mode",
+      "surface": "cli",
+      "invalidates": "shot",
+      "changesGeometry": false,
+      "verified": "read"
+    },
+    {
+      "name": "--ref-surface-opacity",
+      "surface": "cli",
+      "invalidates": "shot",
+      "changesGeometry": false,
+      "verified": "read"
+    },
+    {
+      "name": "--pick",
+      "surface": "cli",
+      "invalidates": "shot",
+      "changesGeometry": false,
+      "verified": "read"
+    },
+    {
+      "name": "--depth-dump",
+      "surface": "cli",
+      "invalidates": "shot",
+      "changesGeometry": false,
+      "verified": "read"
+    },
+    {
+      "name": "--out",
+      "surface": "cli",
+      "invalidates": "shot",
+      "changesGeometry": false,
+      "verified": "read"
+    },
+    {
+      "name": "--stations-out",
+      "surface": "cli",
+      "invalidates": "shot",
+      "changesGeometry": false,
+      "verified": "read"
+    },
+    {
+      "name": "--list-terrain",
+      "surface": "cli",
+      "invalidates": "shot",
+      "changesGeometry": false,
+      "verified": "unverified"
+    },
+    {
+      "name": "--find-ltex",
+      "surface": "cli",
+      "invalidates": "shot",
+      "changesGeometry": false,
+      "verified": "unverified"
+    },
+    {
+      "name": "--nav-at",
+      "surface": "cli",
+      "invalidates": "shot",
+      "changesGeometry": false,
+      "verified": "read"
+    },
+    {
+      "name": "--refs-at",
+      "surface": "cli",
+      "invalidates": "shot",
+      "changesGeometry": false,
+      "verified": "read"
+    },
+    {
+      "name": "--inside-at",
+      "surface": "cli",
+      "invalidates": "shot",
+      "changesGeometry": false,
+      "verified": "read"
+    },
+    {
+      "name": "--clear-at",
+      "surface": "cli",
+      "invalidates": "shot",
+      "changesGeometry": false,
+      "verified": "read"
+    },
+    {
+      "name": "--clear-reach",
+      "surface": "cli",
+      "invalidates": "shot",
+      "changesGeometry": false,
+      "verified": "read"
+    },
+    {
+      "name": "--clear-bounds",
+      "surface": "cli",
+      "invalidates": "shot",
+      "changesGeometry": false,
+      "verified": "read"
+    },
+    {
+      "name": "--inside-bounds",
+      "surface": "cli",
+      "invalidates": "shot",
+      "changesGeometry": false,
+      "verified": "unverified"
+    },
+    {
+      "name": "--fly-speed",
+      "surface": "cli",
+      "invalidates": "shot",
+      "changesGeometry": false,
+      "verified": "read"
+    },
+    {
+      "name": "--look-sens",
+      "surface": "cli",
+      "invalidates": "shot",
+      "changesGeometry": false,
+      "verified": "read"
+    },
+    {
+      "name": "worklist.label",
+      "surface": "worklist-file",
+      "invalidates": "shot",
+      "changesGeometry": false,
+      "verified": "read"
+    },
+    {
+      "name": "worklist.cells",
+      "surface": "worklist-file",
+      "invalidates": "process",
+      "changesGeometry": true,
+      "verified": "read"
+    },
+    {
+      "name": "worklist.probe",
+      "surface": "worklist-file",
+      "invalidates": "none",
+      "changesGeometry": false,
+      "verified": "read"
+    },
+    {
+      "name": "worklist.instance",
+      "surface": "worklist-file",
+      "invalidates": "none",
+      "changesGeometry": false,
+      "verified": "read"
+    },
+    {
+      "name": "worklist.generatedUtc",
+      "surface": "worklist-file",
+      "invalidates": "none",
+      "changesGeometry": false,
+      "verified": "read"
+    },
+    {
+      "name": "worklist.eyeHeight",
+      "surface": "worklist-file",
+      "invalidates": "shot",
+      "changesGeometry": false,
+      "verified": "read"
+    },
+    {
+      "name": "cell.cell",
+      "surface": "worklist-cell",
+      "invalidates": "cell",
+      "changesGeometry": true,
+      "verified": "read"
+    },
+    {
+      "name": "cell.shots",
+      "surface": "worklist-cell",
+      "invalidates": "process",
+      "changesGeometry": true,
+      "verified": "read"
+    },
+    {
+      "name": "cell.travel",
+      "surface": "worklist-cell",
+      "invalidates": "none",
+      "changesGeometry": false,
+      "verified": "read"
+    },
+    {
+      "name": "cell.note",
+      "surface": "worklist-cell",
+      "invalidates": "none",
+      "changesGeometry": false,
+      "verified": "read"
+    },
+    {
+      "name": "shot.label",
+      "surface": "worklist-shot",
+      "invalidates": "shot",
+      "changesGeometry": false,
+      "verified": "read"
+    },
+    {
+      "name": "shot.eye",
+      "surface": "worklist-shot",
+      "invalidates": "shot",
+      "changesGeometry": false,
+      "verified": "read"
+    },
+    {
+      "name": "shot.yaw",
+      "surface": "worklist-shot",
+      "invalidates": "shot",
+      "changesGeometry": false,
+      "verified": "read"
+    },
+    {
+      "name": "shot.pitch",
+      "surface": "worklist-shot",
+      "invalidates": "shot",
+      "changesGeometry": false,
+      "verified": "read"
+    },
+    {
+      "name": "shot.fov",
+      "surface": "worklist-shot",
+      "invalidates": "shot",
+      "changesGeometry": false,
+      "verified": "read"
+    },
+    {
+      "name": "shot.aspect",
+      "surface": "worklist-shot",
+      "invalidates": "shot",
+      "changesGeometry": false,
+      "verified": "read"
+    },
+    {
+      "name": "shot.look",
+      "surface": "worklist-shot",
+      "invalidates": "shot",
+      "changesGeometry": false,
+      "verified": "read"
+    },
+    {
+      "name": "shot.floorZ",
+      "surface": "worklist-shot",
+      "invalidates": "shot",
+      "changesGeometry": true,
+      "verified": "read"
+    },
+    {
+      "name": "shot.note",
+      "surface": "worklist-shot",
+      "invalidates": "none",
+      "changesGeometry": false,
+      "verified": "read"
+    },
+    {
+      "name": "shot.nav",
+      "surface": "worklist-shot",
+      "invalidates": "shot",
+      "changesGeometry": true,
+      "verified": "read"
+    },
+    {
+      "name": "shot.cullAbove",
+      "surface": "worklist-shot",
+      "invalidates": "cell",
+      "changesGeometry": true,
+      "verified": "read"
+    },
+    {
+      "name": "shot.route",
+      "surface": "worklist-shot",
+      "invalidates": "shot",
+      "changesGeometry": true,
+      "verified": "read"
+    },
+    {
+      "name": "shot.props",
+      "surface": "worklist-shot",
+      "invalidates": "cell",
+      "changesGeometry": true,
+      "verified": "read"
+    },
+    {
+      "name": "shot.routes",
+      "surface": "worklist-shot",
+      "invalidates": "shot",
+      "changesGeometry": true,
+      "verified": "read"
+    },
+    {
+      "name": "shot.npcs",
+      "surface": "worklist-shot",
+      "invalidates": "configuration",
+      "changesGeometry": true,
+      "verified": "read"
+    },
+    {
+      "name": "shot.feet",
+      "surface": "worklist-shot",
+      "invalidates": "none",
+      "changesGeometry": false,
+      "verified": "read"
+    },
+    {
+      "name": "shot.doors",
+      "surface": "worklist-shot",
+      "invalidates": "none",
+      "changesGeometry": false,
+      "verified": "read"
+    },
+    {
+      "name": "shot.planes",
+      "surface": "worklist-shot",
+      "invalidates": "cell",
+      "changesGeometry": true,
+      "verified": "read"
+    },
+    {
+      "name": "shot.occlusion",
+      "surface": "worklist-shot",
+      "invalidates": "shot",
+      "changesGeometry": true,
+      "verified": "read"
+    },
+    {
+      "name": "shot.state",
+      "surface": "worklist-shot",
+      "invalidates": "configuration",
+      "changesGeometry": true,
+      "verified": "read"
+    },
+    {
+      "name": "shot.viewpointKind",
+      "surface": "worklist-shot",
+      "invalidates": "shot",
+      "changesGeometry": false,
+      "verified": "read"
+    },
+    {
+      "name": "shot.viewpointEvidence",
+      "surface": "worklist-shot",
+      "invalidates": "shot",
+      "changesGeometry": false,
+      "verified": "read"
+    },
+    {
+      "name": "shot.control",
+      "surface": "worklist-shot",
+      "invalidates": "shot",
+      "changesGeometry": false,
+      "verified": "read"
+    },
+    {
+      "name": "prop.form",
+      "surface": "worklist-shot",
+      "invalidates": "cell",
+      "changesGeometry": true,
+      "verified": "read"
+    },
+    {
+      "name": "prop.pos",
+      "surface": "worklist-shot",
+      "invalidates": "cell",
+      "changesGeometry": true,
+      "verified": "read"
+    },
+    {
+      "name": "prop.yaw",
+      "surface": "worklist-shot",
+      "invalidates": "cell",
+      "changesGeometry": true,
+      "verified": "read"
+    },
+    {
+      "name": "prop.scale",
+      "surface": "worklist-shot",
+      "invalidates": "cell",
+      "changesGeometry": true,
+      "verified": "read"
+    },
+    {
+      "name": "prop.label",
+      "surface": "worklist-shot",
+      "invalidates": "shot",
+      "changesGeometry": false,
+      "verified": "unverified"
+    },
+    {
+      "name": "route.points",
+      "surface": "worklist-shot",
+      "invalidates": "shot",
+      "changesGeometry": true,
+      "verified": "read"
+    },
+    {
+      "name": "route.color",
+      "surface": "worklist-shot",
+      "invalidates": "shot",
+      "changesGeometry": false,
+      "verified": "read"
+    },
+    {
+      "name": "route.label",
+      "surface": "worklist-shot",
+      "invalidates": "shot",
+      "changesGeometry": false,
+      "verified": "read"
+    },
+    {
+      "name": "route.discs",
+      "surface": "worklist-shot",
+      "invalidates": "shot",
+      "changesGeometry": true,
+      "verified": "read"
+    },
+    {
+      "name": "route.arrows",
+      "surface": "worklist-shot",
+      "invalidates": "shot",
+      "changesGeometry": true,
+      "verified": "read"
+    },
+    {
+      "name": "route.caption",
+      "surface": "worklist-shot",
+      "invalidates": "shot",
+      "changesGeometry": false,
+      "verified": "read"
+    },
+    {
+      "name": "npc.form",
+      "surface": "worklist-shot",
+      "invalidates": "configuration",
+      "changesGeometry": true,
+      "verified": "read"
+    },
+    {
+      "name": "npc.pos",
+      "surface": "worklist-shot",
+      "invalidates": "cell",
+      "changesGeometry": true,
+      "verified": "read"
+    },
+    {
+      "name": "npc.heading",
+      "surface": "worklist-shot",
+      "invalidates": "cell",
+      "changesGeometry": true,
+      "verified": "read"
+    },
+    {
+      "name": "npc.label",
+      "surface": "worklist-shot",
+      "invalidates": "shot",
+      "changesGeometry": false,
+      "verified": "read"
+    },
+    {
+      "name": "plugins (order.OrderedPaths)",
+      "surface": "input-file",
+      "invalidates": "configuration",
+      "changesGeometry": true,
+      "verified": "read"
+    },
+    {
+      "name": "profile modlist.txt",
+      "surface": "input-file",
+      "invalidates": "process",
+      "changesGeometry": true,
+      "verified": "read"
+    },
+    {
+      "name": "profile plugins.txt",
+      "surface": "input-file",
+      "invalidates": "process",
+      "changesGeometry": true,
+      "verified": "read"
+    },
+    {
+      "name": "profile loadorder.txt",
+      "surface": "input-file",
+      "invalidates": "process",
+      "changesGeometry": true,
+      "verified": "read"
+    },
+    {
+      "name": "mod folders (loose files)",
+      "surface": "input-file",
+      "invalidates": "cell",
+      "changesGeometry": false,
+      "verified": "read"
+    },
+    {
+      "name": ".bsa archives",
+      "surface": "input-file",
+      "invalidates": "process",
+      "changesGeometry": false,
+      "verified": "read"
+    },
+    {
+      "name": "extraction cache (CharacterViewerCache)",
+      "surface": "input-file",
+      "invalidates": "shot",
+      "changesGeometry": false,
+      "verified": "read"
+    },
+    {
+      "name": "the worklist file(s)",
+      "surface": "input-file",
+      "invalidates": "process",
+      "changesGeometry": true,
+      "verified": "read"
+    },
+    {
+      "name": "--order candidate file",
+      "surface": "input-file",
+      "invalidates": "process",
+      "changesGeometry": true,
+      "verified": "read"
+    },
+    {
+      "name": "--conflicts file",
+      "surface": "input-file",
+      "invalidates": "cell",
+      "changesGeometry": true,
+      "verified": "read"
+    },
+    {
+      "name": "--switch-map file",
+      "surface": "input-file",
+      "invalidates": "configuration",
+      "changesGeometry": true,
+      "verified": "read"
+    },
+    {
+      "name": "--stations spec file",
+      "surface": "input-file",
+      "invalidates": "configuration",
+      "changesGeometry": false,
+      "verified": "read"
+    },
+    {
+      "name": "--occlusion-rule file",
+      "surface": "input-file",
+      "invalidates": "process",
+      "changesGeometry": true,
+      "verified": "read"
+    },
+    {
+      "name": "BOS *_SWAP.ini (from the VFS)",
+      "surface": "input-file",
+      "invalidates": "configuration",
+      "changesGeometry": true,
+      "verified": "read"
+    },
+    {
+      "name": "harness.local.json",
+      "surface": "input-file",
+      "invalidates": "process",
+      "changesGeometry": true,
+      "verified": "read"
+    },
+    {
+      "name": "the game data folder",
+      "surface": "input-file",
+      "invalidates": "process",
+      "changesGeometry": true,
+      "verified": "read"
+    },
+    {
+      "name": "the MO2 overwrite folder",
+      "surface": "input-file",
+      "invalidates": "process",
+      "changesGeometry": false,
+      "verified": "read"
+    },
+    {
+      "name": "Skyrim.ini",
+      "surface": "input-file",
+      "invalidates": "process",
+      "changesGeometry": true,
+      "verified": "read"
+    },
+    {
+      "name": "SkyrimPrefs.ini",
+      "surface": "input-file",
+      "invalidates": "none",
+      "changesGeometry": false,
+      "verified": "read"
+    },
+    {
+      "name": "SPID *_DISTR.ini (from the VFS)",
+      "surface": "input-file",
+      "invalidates": "configuration",
+      "changesGeometry": true,
+      "verified": "read"
+    },
+    {
+      "name": "SkyPatcher npc configs (SKSE/Plugins/SkyPatcher/npc/**)",
+      "surface": "input-file",
+      "invalidates": "configuration",
+      "changesGeometry": true,
+      "verified": "read"
+    },
+    {
+      "name": "ModOrganizer.ini",
+      "surface": "input-file",
+      "invalidates": "none",
+      "changesGeometry": false,
+      "verified": "read"
+    },
+    {
+      "name": "HOUSECARL_MO2_INSTANCE",
+      "surface": "environment",
+      "invalidates": "process",
+      "changesGeometry": true,
+      "verified": "read"
+    },
+    {
+      "name": "HOUSECARL_MO2_PROFILE",
+      "surface": "environment",
+      "invalidates": "process",
+      "changesGeometry": true,
+      "verified": "read"
+    },
+    {
+      "name": "HOUSECARL_GAME_PATH",
+      "surface": "environment",
+      "invalidates": "process",
+      "changesGeometry": true,
+      "verified": "read"
+    },
+    {
+      "name": "HOUSECARL_HARNESS_CONFIG",
+      "surface": "environment",
+      "invalidates": "process",
+      "changesGeometry": true,
+      "verified": "read"
+    },
+    {
+      "name": "HOUSECARL_SEARCH_ROOTS",
+      "surface": "environment",
+      "invalidates": "process",
+      "changesGeometry": true,
+      "verified": "read"
+    },
+    {
+      "name": "VP_CV_VERBOSE",
+      "surface": "environment",
+      "invalidates": "shot",
+      "changesGeometry": false,
+      "verified": "read"
+    },
+    {
+      "name": "VP_ENABLE_DUMP",
+      "surface": "environment",
+      "invalidates": "shot",
+      "changesGeometry": false,
+      "verified": "read"
+    },
+    {
+      "name": "VP_DOOR_DEBUG",
+      "surface": "environment",
+      "invalidates": "shot",
+      "changesGeometry": false,
+      "verified": "read"
+    },
+    {
+      "name": "VP_ALPHA_DUMP",
+      "surface": "environment",
+      "invalidates": "shot",
+      "changesGeometry": false,
+      "verified": "read"
+    },
+    {
+      "name": "VP_SOLVE_DEBUG",
+      "surface": "environment",
+      "invalidates": "shot",
+      "changesGeometry": false,
+      "verified": "read"
+    },
+    {
+      "name": "VP_WATER_DUMP",
+      "surface": "environment",
+      "invalidates": "shot",
+      "changesGeometry": false,
+      "verified": "read"
+    },
+    {
+      "name": "VP_WATER_Z",
+      "surface": "environment",
+      "invalidates": "cell",
+      "changesGeometry": true,
+      "verified": "read"
+    },
+    {
+      "name": "VP_SHAPE_DUMP",
+      "surface": "environment",
+      "invalidates": "shot",
+      "changesGeometry": false,
+      "verified": "read"
+    },
+    {
+      "name": "VP_FXSTATIC_EMIT",
+      "surface": "environment",
+      "invalidates": "shot",
+      "changesGeometry": false,
+      "verified": "read"
+    },
+    {
+      "name": "VP_LAYER_ONLY",
+      "surface": "environment",
+      "invalidates": "cell",
+      "changesGeometry": false,
+      "verified": "read"
+    },
+    {
+      "name": "VP_LAYER_SOLID",
+      "surface": "environment",
+      "invalidates": "cell",
+      "changesGeometry": false,
+      "verified": "read"
+    },
+    {
+      "name": "VP_WATER_SHALLOW_ALPHA",
+      "surface": "environment",
+      "invalidates": "shot",
+      "changesGeometry": false,
+      "verified": "read"
+    },
+    {
+      "name": "VP_OCCL_SLACK",
+      "surface": "environment",
+      "invalidates": "shot",
+      "changesGeometry": true,
+      "verified": "read"
+    },
+    {
+      "name": "VP_OCCL_TINT_ALL",
+      "surface": "environment",
+      "invalidates": "shot",
+      "changesGeometry": false,
+      "verified": "read"
+    },
+    {
+      "name": "VP_STATION_COLUMN",
+      "surface": "environment",
+      "invalidates": "configuration",
+      "changesGeometry": false,
+      "verified": "read"
+    },
+    {
+      "name": "VP_FLY_FRAMES",
+      "surface": "environment",
+      "invalidates": "process",
+      "changesGeometry": true,
+      "verified": "read"
+    },
+    {
+      "name": "VP_FLY_PICK",
+      "surface": "environment",
+      "invalidates": "process",
+      "changesGeometry": true,
+      "verified": "read"
+    },
+    {
+      "name": "VP_FLY_LOCK",
+      "surface": "environment",
+      "invalidates": "process",
+      "changesGeometry": true,
+      "verified": "read"
+    },
+    {
+      "name": "VP_FLY_HUD",
+      "surface": "environment",
+      "invalidates": "process",
+      "changesGeometry": true,
+      "verified": "read"
+    },
+    {
+      "name": "VP_FLY_SHOT",
+      "surface": "environment",
+      "invalidates": "process",
+      "changesGeometry": true,
+      "verified": "read"
+    },
+    {
+      "name": "VP_FLY_CELL",
+      "surface": "environment",
+      "invalidates": "process",
+      "changesGeometry": true,
+      "verified": "read"
+    },
+    {
+      "name": "VP_FLY_NAV",
+      "surface": "environment",
+      "invalidates": "process",
+      "changesGeometry": true,
+      "verified": "read"
+    },
+    {
+      "name": "VP_FLY_ROUTE",
+      "surface": "environment",
+      "invalidates": "process",
+      "changesGeometry": true,
+      "verified": "read"
+    },
+    {
+      "name": "VP_FLY_PLANES",
+      "surface": "environment",
+      "invalidates": "process",
+      "changesGeometry": true,
+      "verified": "read"
+    },
+    {
+      "name": "VP_FLY_OCCLUSION",
+      "surface": "environment",
+      "invalidates": "process",
+      "changesGeometry": true,
+      "verified": "read"
+    },
+    {
+      "name": "VP_FLY_HELP",
+      "surface": "environment",
+      "invalidates": "process",
+      "changesGeometry": true,
+      "verified": "read"
+    },
+    {
+      "name": "VP_FLY_POSE",
+      "surface": "environment",
+      "invalidates": "process",
+      "changesGeometry": true,
+      "verified": "read"
+    },
+    {
+      "name": "VP_FLY_GLOW",
+      "surface": "environment",
+      "invalidates": "process",
+      "changesGeometry": true,
+      "verified": "read"
+    },
+    {
+      "name": "VP_FLY_BAR",
+      "surface": "environment",
+      "invalidates": "process",
+      "changesGeometry": true,
+      "verified": "read"
+    },
+    {
+      "name": "VP_FLY_CLIP",
+      "surface": "environment",
+      "invalidates": "process",
+      "changesGeometry": true,
+      "verified": "read"
+    },
+    {
+      "name": "--worklist-selection",
+      "surface": "operational-cli",
+      "invalidates": "process",
+      "changesGeometry": false,
+      "verified": "planned",
+      "operational": true
+    },
+    {
+      "name": "--progress-dir",
+      "surface": "operational-cli",
+      "invalidates": "none",
+      "changesGeometry": false,
+      "verified": "planned",
+      "operational": true
+    }
+  ]
+}
