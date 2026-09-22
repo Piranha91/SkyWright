@@ -1,7 +1,7 @@
 {
   "schema": "viewprobe-renderbatch-invalidation-keys-v1",
   "strategyRows": 201,
-  "operationalRows": 2,
+  "operationalRows": 3,
   "expectedCounts": {
     "process": 47,
     "configuration": 15,
@@ -1430,6 +1430,14 @@
       "name": "--progress-dir",
       "surface": "operational-cli",
       "invalidates": "none",
+      "changesGeometry": false,
+      "verified": "planned",
+      "operational": true
+    },
+    {
+      "name": "--worklist-readiness-sha256",
+      "surface": "operational-cli",
+      "invalidates": "process",
       "changesGeometry": false,
       "verified": "planned",
       "operational": true

@@ -554,6 +554,21 @@ starting hopefully. `--dry-run` prints the plan and renders nothing, and `--gpu-
 `--sys-free-mib` / `--no-memory-reader` stand in for the machine, which is how the rule is
 exercised on hardware that has no such reader at all.
 
+### Guarded campaign batches — `tools/renderbatch.py`
+
+`renderbatch.py` is the opt-in path for resuming a static worklist campaign without renumbering
+its shots or overwriting caller evidence. Its manifest must name one exact coordinate set in the
+items, expected artifacts and publication receipts; a mismatch refuses before launch. Every shot
+receipt is checked against the frozen readiness and worklist hashes, its original coordinate,
+zero exit, exact artifacts, evidence masks and current file hashes. All receipts must pass before
+the first caller file is copied.
+
+Publication keeps each source's relative directory tree, uses durable intents and create-new
+destinations, and starts only after the complete composite run validates. Resume uses the same
+immutable manifest with a fresh `--json` result path. Missing or invalid process, system or
+graphics telemetry stops the owned process tree. A correctness run made while the machine is busy
+makes no timing claim.
+
 ### Does a shot rendered in a batch equal the same shot rendered alone?
 
 One process can be asked for several shots — a worklist with many shots, and many cells — and that

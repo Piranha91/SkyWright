@@ -56,7 +56,8 @@ def load_key_table(path=KEY_TABLE):
     if len(set(identities)) != len(identities):
         raise ValueError("invalidation key table has duplicate surface/name rows")
     expected_ops = {("operational-cli", "--worklist-selection", "process"),
-                    ("operational-cli", "--progress-dir", "none")}
+                    ("operational-cli", "--progress-dir", "none"),
+                    ("operational-cli", "--worklist-readiness-sha256", "process")}
     got_ops = {(r.get("surface"), r.get("name"), r.get("invalidates")) for r in operational}
     if got_ops != expected_ops:
         raise ValueError(f"operational key rows differ: {sorted(got_ops)}")
@@ -79,7 +80,7 @@ def worklist_shape(path):
     return data, out
 
 
-def selection(path, readiness_sha256, coordinates):
+def selection(path, readiness_sha256, coordinates, source_map=None):
     _, all_rows = worklist_shape(path)
     valid = {(r["cell"], r["shot"]) for r in all_rows}
     coords = []
@@ -93,9 +94,186 @@ def selection(path, readiness_sha256, coordinates):
         raise ValueError("selection is empty or has an out-of-range coordinate")
     if len({c for c, _ in coords}) != 1:
         raise ValueError("one renderer launch may select shots from one original cell only")
-    return {"schema": "viewprobe-worklist-selection-v1",
+    result = {"schema": "viewprobe-worklist-selection-v1",
             "worklistSha256": sha256(path), "readinessSha256": readiness_sha256,
             "selected": [{"cell": c, "shot": s} for c, s in coords]}
+    if source_map is not None:
+        rows = source_map.get("rows")
+        by_coord = {(x["compositeCoordinate"]["cell"],x["compositeCoordinate"]["shot"]):x
+                    for x in rows or []}
+        if set(coords) - set(by_coord): raise ValueError("source map lacks a selected coordinate")
+        result["sourceMapSha256"] = source_map["sha256"]
+        result["sourceMapPath"] = source_map["sourceMapPath"]
+        result["sourceMapIdentityAlgorithm"] = "sha256-file-bytes-v1"
+        result["sources"] = [by_coord[x] for x in coords]
+    return result
+
+
+def compose_campaign(source_specs, composite_path, mapping_path, label="renderbatch composite"):
+    """Create one immutable multi-shot worklist and exact source/caller map from one-shot inputs."""
+    if not source_specs: raise ValueError("campaign has no sources")
+    shots=[]; rows=[]; common_cell=None; common_top=None; common_cell_fields=None
+    first_data=None; first_cell=None; scratches=set()
+    for ordinal,spec in enumerate(source_specs):
+        source=Path(spec["path"]).resolve()
+        if sha256(source) != spec["sha256"]: raise ValueError(f"campaign source changed: {source}")
+        data=json.loads(source.read_text(encoding="utf-8")); cells=data.get("Cells",data.get("cells"))
+        if not isinstance(cells,list) or len(cells)!=1:
+            raise ValueError(f"campaign source is not one-cell: {source}")
+        cell=cells[0]; source_shots=cell.get("Shots",cell.get("shots"))
+        cell_id=cell.get("Cell",cell.get("cell"))
+        if not isinstance(source_shots,list) or len(source_shots)!=1:
+            raise ValueError(f"campaign source is not one-shot: {source}")
+        if common_cell is None: common_cell=cell_id
+        if cell_id != common_cell: raise ValueError("campaign sources do not name one cell")
+        top_fields={k:v for k,v in data.items() if k not in {"Label","label","Cells","cells"}}
+        cell_fields={k:v for k,v in cell.items() if k not in {"Cell","cell","Shots","shots"}}
+        if common_top is None:
+            common_top,common_cell_fields=top_fields,cell_fields
+            first_data,first_cell=data,cell
+        if top_fields!=common_top or cell_fields!=common_cell_fields:
+            raise ValueError("campaign sources have differing top-level/cell defaults")
+        shot=source_shots[0]; shots.append(shot)
+        artifacts=spec.get("callerArtifacts")
+        if not isinstance(artifacts,list) or not artifacts:
+            raise ValueError(f"campaign source lacks exact caller artifacts: {source}")
+        output_stem=spec.get("outputStem"); scratch=spec.get("scratchDirectory")
+        if not isinstance(output_stem,str) or not output_stem or Path(output_stem).name != output_stem:
+            raise ValueError(f"campaign source lacks a safe explicit outputStem: {source}")
+        if not isinstance(scratch,str) or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]*",scratch):
+            raise ValueError(f"campaign source lacks a safe explicit scratchDirectory: {source}")
+        if scratch.lower() in scratches: raise ValueError("campaign scratch directories are duplicate")
+        scratches.add(scratch.lower())
+        rows.append({"ordinal":ordinal+1,"sourceWorklist":str(source),
+            "sourceWorklistSha256":spec["sha256"],"sourceCoordinate":{"cell":0,"shot":0},
+            "compositeCoordinate":{"cell":0,"shot":ordinal},
+            "label":shot.get("Label",shot.get("label","")),
+            "shotSha256":hashlib.sha256(canonical_value(shot).encode()).hexdigest().upper(),
+            "outputStem":output_stem,"scratchDirectory":scratch,
+            "callerArtifacts":artifacts})
+    label_key="Label" if "Label" in first_data else "label"
+    cells_key="Cells" if "Cells" in first_data else "cells"
+    cell_key="Cell" if "Cell" in first_cell else "cell"
+    shots_key="Shots" if "Shots" in first_cell else "shots"
+    composite={label_key:label,**common_top,
+        cells_key:[{cell_key:common_cell,**common_cell_fields,shots_key:shots}]}
+    cp,mp=Path(composite_path),Path(mapping_path)
+    for path in (cp,mp):
+        tmp=path.with_name(path.name+".tmp")
+        if path.exists() or tmp.exists(): raise FileExistsError(f"campaign output exists: {path}")
+        path.parent.mkdir(parents=True,exist_ok=True)
+    cp_tmp=cp.with_name(cp.name+".tmp"); cp_tmp.write_text(json.dumps(composite,indent=2)+"\n")
+    cp_tmp.replace(cp)
+    mapping={"schema":"viewprobe-composite-source-map-v1","sourceMapPath":str(mp.resolve()),
+             "identityAlgorithm":"sha256-file-bytes-v1",
+             "compositeWorklist":str(cp.resolve()),"compositeWorklistSha256":sha256(cp),"rows":rows}
+    mp_tmp=mp.with_name(mp.name+".tmp"); mp_tmp.write_text(json.dumps(mapping,indent=2)+"\n"); mp_tmp.replace(mp)
+    mapping["sha256"]=sha256(mp)
+    return composite,mapping
+
+
+def source_map_identity(mapping):
+    return sha256(mapping["sourceMapPath"])
+
+
+def publish_caller_artifacts(source_map, coordinate, raw_artifacts, publication_receipt):
+    """Copy a validated composite shot to its frozen caller paths without renaming or overwrite."""
+    map_path=Path(source_map["sourceMapPath"]); map_sha=sha256(map_path)
+    if map_sha != source_map.get("sha256"):
+        raise ValueError("source map file digest changed")
+    disk_map=json.loads(map_path.read_text(encoding="utf-8"))
+    if {k:v for k,v in source_map.items() if k!="sha256"} != disk_map:
+        raise ValueError("in-memory source map differs from immutable file")
+    rows=[x for x in disk_map["rows"] if
+          (x["compositeCoordinate"]["cell"],x["compositeCoordinate"]["shot"])==tuple(coordinate)]
+    if len(rows)!=1: raise ValueError("source map coordinate is missing or duplicate")
+    row=rows[0]; expected=row["callerArtifacts"]
+    if len(expected)!=len(raw_artifacts): raise ValueError("caller/raw artifact count differs")
+    receipt=Path(publication_receipt); intent=receipt.with_name(receipt.name+".intent.json")
+    plan=[]
+    for raw,target in zip(raw_artifacts,expected):
+        src=Path(raw["path"]); dst=Path(target["path"]); kind=raw["kind"]
+        if kind!=target["kind"] or src.name!=dst.name:
+            raise ValueError("caller artifact kind/basename differs from renderer source map")
+        if not src.is_file() or raw.get("sha256")!=sha256(src):
+            raise ValueError(f"raw artifact is missing or changed: {src}")
+        plan.append({"source":str(src.resolve()),"target":str(dst.resolve()),"kind":kind,
+                     "sha256":raw["sha256"]})
+    if len({x["target"].lower() for x in plan})!=len(plan): raise ValueError("duplicate caller target")
+    intent_doc={"schema":"viewprobe-caller-publication-intent-v1","sourceMapSha256":map_sha,
+                "coordinate":{"cell":coordinate[0],"shot":coordinate[1]},"artifacts":plan}
+    expected_published=[{"path":x["target"],"kind":x["kind"],"sha256":x["sha256"]} for x in plan]
+    expected_receipt={"schema":"viewprobe-caller-publication-v1","sourceMapPath":source_map["sourceMapPath"],
+         "sourceMapSha256":map_sha,"coordinate":{"cell":coordinate[0],"shot":coordinate[1]},
+         "sourceWorklist":row["sourceWorklist"],"sourceWorklistSha256":row["sourceWorklistSha256"],
+         "shotSha256":row["shotSha256"],"artifacts":expected_published}
+    if receipt.exists():
+        existing=json.loads(receipt.read_text())
+        if existing!=expected_receipt: raise ValueError("publication receipt identity/artifact set differs")
+        if all(Path(x["path"]).is_file() and sha256(x["path"])==x["sha256"] for x in existing["artifacts"]):
+            return existing
+        raise ValueError("publication receipt artifacts are stale")
+    intent_preexisting=intent.exists()
+    if intent_preexisting:
+        if json.loads(intent.read_text())!=intent_doc: raise ValueError("publication intent differs")
+    else:
+        collisions=[x["target"] for x in plan if Path(x["target"]).exists()]
+        if collisions: raise FileExistsError(f"foreign caller artifacts exist before intent: {collisions}")
+        intent.parent.mkdir(parents=True,exist_ok=True)
+        with open(intent,"x",encoding="utf-8") as stream: json.dump(intent_doc,stream,indent=2)
+    published=[]
+    for item in plan:
+        src=Path(item["source"]); dst=Path(item["target"]); tmp=dst.with_name(dst.name+".tmp")
+        if dst.exists():
+            if sha256(dst)==item["sha256"]: published.append({"path":str(dst),"kind":item["kind"],"sha256":item["sha256"]}); continue
+            raise FileExistsError(f"foreign caller artifact exists: {dst}")
+        if tmp.exists(): raise FileExistsError(f"caller temporary exists: {tmp}")
+        dst.parent.mkdir(parents=True,exist_ok=True); shutil.copy2(src,tmp)
+        if sha256(tmp)!=item["sha256"]: raise IOError(f"caller copy digest differs: {dst}")
+        try: os.link(tmp,dst)
+        except FileExistsError: raise FileExistsError(f"caller artifact raced publication: {dst}")
+        finally:
+            if tmp.exists(): tmp.unlink()
+        published.append({"path":str(dst.resolve()),"kind":item["kind"],"sha256":sha256(dst)})
+    tmp=receipt.with_name(receipt.name+".tmp")
+    if tmp.exists(): raise FileExistsError(f"publication receipt temporary exists: {tmp}")
+    doc={**expected_receipt,"artifacts":published}
+    tmp.write_text(json.dumps(doc,indent=2)+"\n"); os.link(tmp,receipt); tmp.unlink()
+    return doc
+
+
+def publish_completed_campaign(source_map, coordinates, receipt_dir, publication_receipts, *,
+                               readiness_sha256, worklist_sha256, expected_artifacts):
+    """Publish only renderer-validated receipts after the composite run completes."""
+    if not isinstance(publication_receipts,dict):
+        raise ValueError("composite run requires publicationReceipts")
+    validated=[]
+    for coord in sorted(coordinates):
+        key=f"{coord[0]},{coord[1]}"
+        if key not in publication_receipts:
+            raise ValueError(f"missing publication receipt path for {coord}")
+        raw_path=Path(receipt_dir)/f"c{coord[0]+1}s{coord[1]+1}.json"
+        if coord not in expected_artifacts:
+            raise ValueError(f"missing exact expected artifacts for publication {coord}")
+        ok, raw=validate_receipt(raw_path,readiness_sha256=readiness_sha256,
+            worklist_sha256=worklist_sha256,coordinate=coord,
+            expected_artifacts=expected_artifacts[coord])
+        if not ok: raise ValueError(f"publication receipt {coord} is invalid: {raw}")
+        validated.append((coord,raw["artifacts"],publication_receipts[key]))
+    published=[]
+    for coord,artifacts,receipt in validated:
+        published.append(publish_caller_artifacts(source_map,coord,artifacts,receipt))
+    return published
+
+
+def require_publication_coordinate_closure(grouped_coords, expected_artifacts, publication_receipts):
+    if not isinstance(publication_receipts,dict):
+        raise ValueError("composite run requires publicationReceipts")
+    try: publication_coords={tuple(int(x) for x in key.split(",")) for key in publication_receipts}
+    except (TypeError,ValueError): raise ValueError("publication receipt coordinate is malformed")
+    grouped=set(grouped_coords)
+    if set(expected_artifacts)!=grouped or publication_coords!=grouped:
+        raise ValueError("expectedArtifacts, grouped items and publicationReceipts coordinates differ")
 
 
 def write_selection(path, document):
@@ -400,7 +578,8 @@ def quarantine_outputs(coordinate, outputs, evidence_dir, *, authorized_output_r
 def execute_group(*, logical_id, ordered, worklist, readiness_sha256, receipt_dir,
                   expected_outputs, state, state_paths, state_environment,
                   attempt_root, argv_for, observer, shots_per_process, authorized_output_roots=None,
-                  runner_name="renderbatch", job_cwd=None, job_environment=None, run_identity=None):
+                  runner_name="renderbatch", job_cwd=None, job_environment=None, run_identity=None,
+                  source_map=None):
     """Run one original-cell group, retaining every attempt and isolating one suspect once.
 
     `argv_for(selection_path, attempt_path)` supplies the renderer argv. This function deliberately
@@ -498,7 +677,7 @@ def execute_group(*, logical_id, ordered, worklist, readiness_sha256, receipt_di
         save_schedule({"attempt":attempt_number,"selected":[list(x) for x in selected],
                        "attemptDirectory":str(ad)})
         sp = ad / "selection.json"
-        write_selection(sp, selection(worklist, readiness_sha256, selected))
+        write_selection(sp, selection(worklist, readiness_sha256, selected, source_map=source_map))
         result = Runner(runner_name, out_dir=ad / "runner").run([
             {"id": f"{logical_id}.attempt-{attempt_number}",
              "logicalId": logical_id, "attempt": attempt_number,
@@ -591,16 +770,30 @@ def main(argv=None):
                 graphics_reader=read_graphics_free,graphics_used_cap_mib=run["graphicsUsedCapMiB"])
             outputs={tuple(int(x) for x in key.split(",")):value
                      for key,value in run["expectedArtifacts"].items()}
+            grouped_coords={(x["coordinate"]["cell"],x["coordinate"]["shot"])
+                            for group in groups for x in group["items"]}
             def expected(coord):
                 if coord not in outputs: raise ValueError(f"no expected artifacts for {coord}")
                 return outputs[coord]
+            required_flags={"--worklist-selection","--progress-dir","--worklist-readiness-sha256"}
+            if not required_flags.issubset(set(run["argv"])):
+                raise ValueError(f"run argv lacks operational flags: {sorted(required_flags-set(run['argv']))}")
             def argv_for(selection_path,attempt_path):
                 return [str(x).replace("{selection}",str(selection_path))
-                        .replace("{attempt}",str(attempt_path)) for x in run["argv"]]
+                        .replace("{attempt}",str(attempt_path)).replace("{readiness}",computed_readiness)
+                        for x in run["argv"]]
             runs=[]
             computed_readiness=result["computedReadinessSha256"]
             if run.get("readinessSha256") != computed_readiness:
                 raise ValueError("caller readinessSha256 differs from computed durable run identity")
+            source_map=None
+            if run.get("sourceMapPath"):
+                source_map=json.loads(Path(run["sourceMapPath"]).read_text(encoding="utf-8"))
+                source_map["sha256"]=sha256(run["sourceMapPath"])
+                if source_map["sha256"]!=run.get("sourceMapSha256"):
+                    raise ValueError("run source map digest differs")
+                require_publication_coordinate_closure(grouped_coords,outputs,
+                    run.get("publicationReceipts"))
             for index,group in enumerate(groups):
                 coords=[(x["coordinate"]["cell"],x["coordinate"]["shot"])
                         for x in group["items"]]
@@ -611,9 +804,14 @@ def main(argv=None):
                     attempt_root=run["attemptRoot"],argv_for=argv_for,observer=observer,
                     shots_per_process=run["shotsPerProcess"],authorized_output_roots=run["outputRoots"],
                     job_cwd=run.get("cwd"),job_environment=run.get("environment",{}),
-                    run_identity=computed_readiness))
+                    run_identity=computed_readiness,source_map=source_map))
             result["runs"]=runs
             result["actualConcurrency"]=1
+            if source_map is not None and all(x.get("status")=="complete" for x in runs):
+                result["publications"]=publish_completed_campaign(source_map,outputs,
+                    run["receiptDir"],run.get("publicationReceipts"),
+                    readiness_sha256=run["readinessSha256"],worklist_sha256=sha256(run["worklist"]),
+                    expected_artifacts=outputs)
     text = json.dumps(result, indent=2) + "\n"
     if args.json_path:
         out = Path(args.json_path); tmp = out.with_name(out.name+".tmp")
@@ -626,4 +824,9 @@ def main(argv=None):
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    try: raise SystemExit(main())
+    except SystemExit: raise
+    except BaseException:
+        import traceback
+        traceback.print_exc()
+        raise SystemExit(1)

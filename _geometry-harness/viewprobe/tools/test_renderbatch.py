@@ -62,7 +62,7 @@ def main():
     table = rb.load_key_table()
     check(len([x for x in table['options'] if not x.get('operational')]) == 201,
           "scrubbed table contains all 201 strategy rows")
-    check(len([x for x in table['options'] if x.get('operational')]) == 2,
+    check(len([x for x in table['options'] if x.get('operational')]) == 3,
           "new selection/progress flags are explicitly classified")
     strategy=[x for x in table['options'] if not x.get('operational')]
     identity={rb.option_key(x):'same' for x in strategy}
@@ -124,6 +124,94 @@ def main():
         try: _,retained_rows=rb.worklist_shape(lowercase); retained_lower=bool(retained_rows)
         except (OSError,ValueError,KeyError,TypeError): retained_lower=False
         check(retained_lower,"real retained lowercase cells/shots/label worklist is accepted")
+        memory_ready=HERE.parents[2]/'_claude/runs/2026-09-21-render-throughput-stage4/evidence/memory-campaign-readiness.json'
+        memory=json.loads(memory_ready.read_text()); sources=[]
+        for view in memory['views']:
+            sources.append({'path':view['identity']['path'],'sha256':view['identity']['sha256'],
+                'outputStem':view['label'],'scratchDirectory':f"source-{view['ordinal']:03d}",
+                'callerArtifacts':[{'path':str(root/f"caller-{view['ordinal']}.png"),'kind':'frame'}]})
+        composite,mapping=rb.compose_campaign(sources,root/'memory-composite.json',root/'memory-map.json')
+        check(len(composite['cells'])==1 and len(composite['cells'][0]['shots'])==8
+              and [x['sourceWorklistSha256'] for x in mapping['rows']]
+                  ==[x['identity']['sha256'] for x in memory['views']],
+              "eight retained one-shot campaign inputs become one ordered mapped composite")
+        first_source=json.loads(Path(sources[0]['path']).read_text())
+        first_cells=first_source.get('Cells',first_source.get('cells'))
+        composite_cells=composite.get('Cells',composite.get('cells'))
+        check({k:v for k,v in composite.items() if k not in ('Label','label','Cells','cells')}
+                  =={k:v for k,v in first_source.items() if k not in ('Label','label','Cells','cells')}
+              and {k:v for k,v in composite_cells[0].items() if k not in ('Shots','shots')}
+                  =={k:v for k,v in first_cells[0].items() if k not in ('Shots','shots')},
+              "composite preserves exact common source and cell options")
+        duplicate=[dict(x) for x in sources]; duplicate[1]['scratchDirectory']=duplicate[0]['scratchDirectory']
+        try: rb.compose_campaign(duplicate,root/'duplicate.json',root/'duplicate-map.json'); duplicate_ok=True
+        except ValueError: duplicate_ok=False
+        check(not duplicate_ok,"duplicate composite scratch destinations refuse")
+        mapped_selection=rb.selection(root/'memory-composite.json',ready,[(0,7)],mapping)
+        check(mapped_selection['sources'][0]['sourceWorklist']==memory['views'][7]['identity']['path'],
+              "selection binds composite coordinate to original caller source")
+        check(mapped_selection['sources'][0]['outputStem']==memory['views'][7]['label']
+              and mapped_selection['sources'][0]['scratchDirectory']=='source-008',
+              "source map carries explicit output stem and isolated scratch directory")
+        check(mapped_selection['sourceMapPath']==str((root/'memory-map.json').resolve())
+              and mapped_selection['sourceMapSha256']==rb.source_map_identity(mapping),
+              "selection pins full map path and exact immutable file-byte digest")
+        raw0=root/'raw'/'source-001'/'caller-1.png'; raw0.parent.mkdir(parents=True); raw0.write_bytes(b'zero')
+        receipt_dir=root/'raw-receipts'; receipt_dir.mkdir()
+        raw0_art=[{'path':str(raw0),'kind':'frame','sha256':rb.sha256(raw0)}]
+        (receipt_dir/'c1s1.json').write_text(json.dumps({'schema':'viewprobe-shot-progress-v1',
+            'status':'complete','exitCode':0,'readinessSha256':ready,
+            'worklistSha256':rb.sha256(root/'memory-composite.json'),
+            'coordinate':{'cell':0,'shot':0},'artifacts':raw0_art,'evidenceMasks':[]}))
+        try: rb.require_publication_coordinate_closure({(0,0)},{(0,0):raw0_art,(0,1):raw0_art},
+            {'0,0':str(root/'publication0.json')}); extra_coord=False
+        except ValueError: extra_coord=True
+        check(extra_coord,"extra expected publication coordinate refuses before launch")
+        raw1=root/'raw'/'source-002'/'caller-2.png'; raw1.parent.mkdir(parents=True); raw1.write_bytes(b'one')
+        stale_art=[{'path':str(raw1),'kind':'frame','sha256':'0'*64}]
+        (receipt_dir/'c1s2.json').write_text(json.dumps({'schema':'viewprobe-shot-progress-v1',
+            'status':'complete','exitCode':0,'readinessSha256':ready,
+            'worklistSha256':rb.sha256(root/'memory-composite.json'),
+            'coordinate':{'cell':0,'shot':1},'artifacts':stale_art,'evidenceMasks':[]}))
+        try: rb.publish_completed_campaign(mapping,[(0,0),(0,1)],receipt_dir,
+            {'0,0':str(root/'publication0.json'),'0,1':str(root/'publication1.json')},
+            readiness_sha256=ready,worklist_sha256=rb.sha256(root/'memory-composite.json'),
+            expected_artifacts={(0,0):[{'path':str(raw0),'kind':'frame'}],
+                                (0,1):[{'path':str(raw1),'kind':'frame'}]}); stale_prevalidated=False
+        except ValueError: stale_prevalidated=not (root/'caller-1.png').exists()
+        check(stale_prevalidated,"all publication receipts revalidate before the first caller copy")
+        completed=rb.publish_completed_campaign(mapping,[(0,0)],receipt_dir,
+            {'0,0':str(root/'publication0.json')},readiness_sha256=ready,
+            worklist_sha256=rb.sha256(root/'memory-composite.json'),
+            expected_artifacts={(0,0):[{'path':str(raw0),'kind':'frame'}]})
+        check(len(completed)==1 and Path(completed[0]['artifacts'][0]['path']).read_bytes()==b'zero',
+              "completed campaign receipts publish through the CLI publication helper")
+        raw=root/'raw'/'source-008'/'caller-8.png'; raw.parent.mkdir(parents=True); raw.write_bytes(b'pixels')
+        publication=rb.publish_caller_artifacts(mapping,(0,7),
+            [{'path':str(raw),'kind':'frame','sha256':rb.sha256(raw)}],root/'publication.json')
+        check(Path(publication['artifacts'][0]['path']).read_bytes()==b'pixels'
+              and publication['sourceWorklistSha256']==memory['views'][7]['identity']['sha256'],
+              "validated raw composite artifact publishes at frozen original caller destination")
+        check(rb.publish_caller_artifacts(mapping,(0,7),
+            [{'path':str(raw),'kind':'frame','sha256':rb.sha256(raw)}],root/'publication.json')==publication,
+              "owned exact-digest publication resumes without overwrite")
+        saved_publication=json.loads((root/'publication.json').read_text())
+        bad_publication=dict(saved_publication); bad_publication['artifacts']=[]
+        (root/'publication.json').write_text(json.dumps(bad_publication))
+        try: rb.publish_caller_artifacts(mapping,(0,7),[{'path':str(raw),'kind':'frame','sha256':rb.sha256(raw)}],root/'publication.json'); bad_receipt_refused=False
+        except ValueError: bad_receipt_refused=True
+        check(bad_receipt_refused,"existing publication receipt requires full identity and exact artifact set")
+        (root/'publication.json').write_text(json.dumps(saved_publication))
+        raw7=root/'raw'/'source-007'/'caller-7.png'; raw7.parent.mkdir(parents=True); raw7.write_bytes(b'foreign')
+        (root/'caller-7.png').write_bytes(b'foreign')
+        try: rb.publish_caller_artifacts(mapping,(0,6),[{'path':str(raw7),'kind':'frame','sha256':rb.sha256(raw7)}],root/'publication7.json'); foreign_refused=False
+        except FileExistsError: foreign_refused=True
+        check(foreign_refused and not (root/'publication7.json.intent.json').exists(),
+              "foreign matching caller artifact refuses before publication intent")
+        tampered=dict(mapping); tampered['rows']=list(mapping['rows']); tampered['rows'][7]=dict(tampered['rows'][7]); tampered['rows'][7]['outputStem']='foreign'
+        try: rb.publish_caller_artifacts(tampered,(0,7),[{'path':str(raw),'kind':'frame','sha256':rb.sha256(raw)}],root/'tampered.json'); map_refused=False
+        except ValueError: map_refused=True
+        check(map_refused,"publication reloads immutable map and refuses in-memory row changes")
         refused=0
         for coords in ([(0,1),(0,1)],[(0,9)],[(False,1)],[(0,1.5)],[(0,'1')]):
             try: rb.selection(worklist,ready,coords)
