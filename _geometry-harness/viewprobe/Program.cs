@@ -1489,6 +1489,7 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot)
     __run.Feature("plugins", order.OrderedPaths.Count, "plugins").Stage("find-cell", "walking the order for the target cell", order.OrderedPaths.Count, "plugins");
 
     int scannedForCell = 0;
+    ViewProbe.CellFactsRed.Walk(cellScene, prepass: true);
     foreach (var path in order.OrderedPaths)
     {
         __run.Advance();
@@ -1524,6 +1525,7 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot)
     ViewProbe.RenderStages.Open(ViewProbe.RenderStages.RecordWalk,
         "the winning state: every plugin, for the refs and navmeshes that win",
         order.OrderedPaths.Count, "plugins");
+    ViewProbe.CellFactsRed.Walk(cellScene, prepass: false);
     foreach (var path in order.OrderedPaths)
     {
         ViewProbe.RenderStages.Advance();
@@ -3910,6 +3912,28 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot)
                 Console.WriteLine($"   coverings: {coveringNoMato} base(s) name a MaterialObject no active plugin defines");
         }
 
+        // First prepared-cell RED seam. Every plugin overlay used above has left its `using`
+        // block before these owned arrays are made and hashed. The adapter is deliberately
+        // non-retaining today, so a two-shot cell records two real acquisitions. Keep the
+        // filtered-watch closure in the observation: a later retained value may share only when
+        // this selection (or a proven full-cell collection) is equal.
+        _ = cellScene?.Facts(() => new ViewProbe.CellFactsProbe(
+            cellLabel,
+            refCellOf.OrderBy(x => x.Key.ToString(), StringComparer.Ordinal)
+                     .Select(x => new KeyValuePair<FormKey, FormKey>(x.Key, x.Value)).ToArray(),
+            navVersionPlugins.Order(StringComparer.OrdinalIgnoreCase).ToArray(),
+            cellAtGrid.OrderBy(x => x.Key.X).ThenBy(x => x.Key.Y)
+                      .Select(x => new ViewProbe.GridCellFact(x.Key.X, x.Key.Y, x.Value.Key, x.Value.Ed)).ToArray(),
+            cellWaterTruth.OrderBy(x => x.Key.X).ThenBy(x => x.Key.Y)
+                          .Select(x => new ViewProbe.WaterTruthFact(x.Key.X, x.Key.Y, x.Value.Has, x.Value.Height, x.Value.Water)).ToArray(),
+            wsWaterTruth, wsDefaultWaterHeightTruth, stationWorldspaceEd,
+            baseType.OrderBy(x => x.Key.ToString(), StringComparer.Ordinal).ToArray(),
+            baseObnd.OrderBy(x => x.Key.ToString(), StringComparer.Ordinal)
+                    .Select(x => new KeyValuePair<FormKey, ViewProbe.CellBoundsFact>(
+                        x.Key, new(x.Value.Min, x.Value.Max))).ToArray(),
+            ViewProbe.CellFactsRed.HashWatchSelection(shotNpcWatch, doorWatchKeys, navVersionPlugins)));
+        ViewProbe.CellFactsRed.ThrowAfterPublishIfRequested();
+
         // Violet: not in the healthy palette (green/cyan/magenta/yellow/blue), not the reserved red,
         // not the white of the cell outline, not the orange of an implicated door.
         var diffColor = new System.Numerics.Vector4(0.72f, 0.28f, 1f, 1f);
@@ -4425,7 +4449,16 @@ if (worklist is not null)
         {
             for (int wls = 0; wls < worklist.Cells[wlc].Shots.Count; wls++)
             {
-                int rc = RunCellTextured(worklist.Cells[wlc].Cell, wlc, wls);
+                int rc;
+                try { rc = RunCellTextured(worklist.Cells[wlc].Cell, wlc, wls); }
+                catch (Exception ex) when (ViewProbe.CellFactsRed.IsExpectedFault(ex))
+                {
+                    // Test-only exception boundary: record the full exception and preserve the
+                    // production path's nonzero refusal without letting an intentional RED reach
+                    // Windows' unhandled-exception dialog. The cell finally below still owns cleanup.
+                    ViewProbe.CellFactsRed.CaughtExpectedFault(ex);
+                    rc = 2;
+                }
                 if (rc > 0) return ViewProbe.ExtractionScratch.GuardExitCode(rc);
             }
         }
@@ -4435,7 +4468,9 @@ if (worklist is not null)
     // catch Exception and carry on, so whether the refusal reaches here is call-order luck. The
     // refusal is latched where it happens; this is where a latched refusal becomes an exit code
     // that no catch can improve on.
-    return ViewProbe.ExtractionScratch.GuardExitCode(ViewProbe.UnreadableAssets.FinalExitCode(0));
+    int worklistExit = ViewProbe.ExtractionScratch.GuardExitCode(ViewProbe.UnreadableAssets.FinalExitCode(0));
+    if (!ViewProbe.CellFactsRed.Finish()) return 1;
+    return worklistExit;
 }
 
 int singleRc = RunCellTextured(target, 0, 0);

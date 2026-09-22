@@ -68,6 +68,17 @@ public sealed class CellScene : IDisposable
 
     MeshState? _mesh;
 
+    /// <summary>The current, deliberately non-retaining adapter for the completed record-walk
+    /// facts. The G1 RED calls this through the real worklist path: today every shot invokes the
+    /// factory. A later reviewed slice may give it one guarded cell slot.</summary>
+    public CellFactsProbe Facts(Func<CellFactsProbe> make)
+    {
+        ObjectDisposedException.ThrowIf(_done, this);
+        var facts = make();
+        CellFactsRed.Acquired(this, facts);
+        return facts;
+    }
+
     /// <summary>The builder and immutable parsed-mesh outcomes shared by this cell's shots.</summary>
     public MeshState Mesh(Func<MeshState> make)
     {
@@ -79,7 +90,11 @@ public sealed class CellScene : IDisposable
     /// handle today (the resolver, pixel cache and parsed mesh arrays are managed, while GL uploads
     /// remain per shot), so this is the scope ending rather than a cleanup routine. A slice
     /// that adds something disposable disposes it HERE, and nowhere else.</summary>
-    public void Dispose() { _mesh = null; _assets = null; _done = true; }
+    public void Dispose()
+    {
+        _mesh = null; _assets = null; _done = true;
+        CellFactsRed.Disposed(this);
+    }
 }
 
 public sealed class MeshState
