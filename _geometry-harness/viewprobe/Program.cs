@@ -4793,6 +4793,8 @@ if (worklist is not null)
             // Without the flag the lease is null and every shot builds its own, as it always did.
             int cellBoundaryExit = 0;
             var cleanupFailures = new List<Exception>();
+            int cellShots = 0;              // resident telemetry (VP_RESIDENT_TELEMETRY_OUT): shots this cell started
+            string cellOutcome = "fault";   // ...and how its shot loop ended: completed, stopped (a nonzero shot) or fault
             try
             {
                 cellScene = reuseCell ? new ViewProbe.CellScene(worklist.Cells[wlc].Cell) : null;
@@ -4811,6 +4813,7 @@ if (worklist is not null)
                 for (int wls = 0; wls < worklist.Cells[wlc].Shots.Count; wls++)
                 {
                     if (batchProgress is not null && !batchProgress.Contains(wlc, wls)) continue;
+                    cellShots++;
                     int rc;
                     ViewProbe.BatchProgress.ShotArtifacts completed;
                     try
@@ -4869,6 +4872,7 @@ if (worklist is not null)
                     }
                 }
                 graphicsReuseRed?.AfterShotLoop();   // test-only (B10b RED): the cell-level fault point; inert without a RED session
+                cellOutcome = cellBoundaryExit > 0 ? "stopped" : "completed";
             }
             catch (Exception ex) when (ViewProbe.GraphicsReuseRed.TestBoundaryEnabled)
             {
@@ -4894,6 +4898,9 @@ if (worklist is not null)
                         else cleanupFailures.Add(ex);
                     }
                 }
+                // At cell end, on every exit path, before the cell's owners are disposed; a no-op unless enabled.
+                ViewProbe.ResidentTelemetry.WriteCell(wlc, worklist.Cells[wlc].Cell, reuseCell, cellOutcome, cellBoundaryExit,
+                    cellShots, graphicsCell);
                 CaptureCleanup(() => graphicsCell?.Dispose());
                 graphicsCell = null;
                 CaptureCleanup(() => cellScene?.Dispose());
@@ -4925,6 +4932,7 @@ if (worklist is not null)
     int worklistExit = ViewProbe.ExtractionScratch.GuardExitCode(ViewProbe.UnreadableAssets.FinalExitCode(0));
     if (!ViewProbe.CellFactsRed.Finish()) return 1;
     if (!ViewProbe.GraphicsReuseRed.Finish()) return 1;
+    if (ViewProbe.ResidentTelemetry.Failed && worklistExit == 0) return 2;   // a telemetry write failed; it printed why
     return worklistExit;
 }
 

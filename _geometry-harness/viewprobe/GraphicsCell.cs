@@ -20,6 +20,9 @@ internal sealed class GraphicsCell : IDisposable
     RendererSettings? rendererBaseline;   // F-G5-3: the renderer as created
     long epoch;
     bool disposed;
+    // Resident telemetry (VP_RESIDENT_TELEMETRY_OUT): read at cell end, before Dispose.
+    internal ResidentTextureCache? ResidentOrNull => resident;
+    internal int Passes { get; private set; }   // BeginRenderPass calls on this cell's resident cache
 
     internal GameWindow Window { get { ThrowIfDisposed(); return window; } }
     internal GlRenderer Renderer => renderer ?? throw new InvalidOperationException("graphics owners not initialized");
@@ -84,6 +87,7 @@ internal sealed class GraphicsCell : IDisposable
 
         red?.BeforeRenderPass(resident!, scene);   // measurement only (G4 RED): the 16th-pass pressure; inert without a RED session
         resident!.BeginRenderPass();
+        Passes++;
         red?.AfterRenderPass(resident, scene);     // measurement only (G4 RED): what the repoll did
         evidence?.ResidentEpochAdvanced(++epoch);
         string? priorKey = scene?.Key;

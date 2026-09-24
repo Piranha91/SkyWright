@@ -357,6 +357,7 @@ all knowledge.
 | `VP_FLY_PLANES=on\|off` | show or hide the occlusion-planes layer before the capture — the `L` key's effect, headlessly. The layer is resident in every fly-through whether or not `--planes` was given, so this works without it |
 | `VP_FLY_OCCLUSION=off\|on\|diff` | set the occlusion preview before the capture — the `O` key's effect, headlessly |
 | `VP_OCCL_TINT_ALL=1` | the occlusion preview's POSITIVE CONTROL: every drawn ref counts as culled, so `--occlusion diff` must come out washed red and `on` must come out empty. A well-placed plane's cull changes no pixel (its shadow lies inside the shadow of the wall it stands in), which looks exactly like a preview that failed; this is what tells them apart |
+| `VP_RESIDENT_TELEMETRY_OUT=<file>` | on a static worklist: at the end of every cell, on every exit path, append one JSON line to the file — the cell's index and target, how its shot loop ended, its shot and render-pass counts, and (with `--reuse-cell`) the resident texture cache's budget and repoll counter at that moment. The record describes how the shot loop ended, not how the cell tore down: it is written before the cell's graphics owners are disposed. Nothing per shot, nothing printed; a failed append prints one line and the run exits 2. Hand it a fresh file: lines are appended |
 | `HOUSECARL_VERIFY_MASK_CACHE=1` | with `--planes-report`: re-encode every visibility mask the per-view cache serves from memory and compare it to what was cached, print the counts, and FAIL the run on a mismatch rather than writing a mask it cannot confirm. The cache's correctness is an argument about the key (see *Research preview and report*); this is the switch that puts the argument to a real render |
 
 ---
@@ -746,6 +747,16 @@ drawn anyway.
 
 With the flag, a failure while the cell's GL side is set up, used or torn down is printed with its
 full stack and the run exits 2, instead of raising the Windows application-error dialog.
+
+**Measuring the resident cache.** `VP_RESIDENT_TELEMETRY_OUT=<file>` (see *Environment knobs*) appends one JSON line per
+worklist cell at cell end, on every exit path: the cell's index and target, its shot and render-pass counts, the resident
+cache's budget and repoll counter at that moment, and how the shot loop ended — `completed`; `stopped` with the exit code
+of the shot that returned nonzero; or `fault` when an exception left the loop. The record describes how the shot loop
+ended, not how the cell tore down: it is written before the cell's graphics owners are disposed, so a teardown failure
+after it shows only in the process exit code, and a reader must check that the two agree. The rendering library exposes
+no accessor for the repoll counter, so it is read from the library's private field; a library without that field gives
+`"counterField": "absent"` and a null value rather than a guess. Without `--reuse-cell` each cell still gets a line, with
+the cache fields null. Unset, nothing is written or printed.
 
 ### An asset that was found and could not be read fails the run
 
