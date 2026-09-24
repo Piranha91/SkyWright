@@ -49,6 +49,8 @@ using Image = SixLabors.ImageSharp.Image;
 bool __batchFailureBoundary = args.Contains("--worklist-selection", StringComparer.Ordinal)
     || args.Contains("--progress-dir", StringComparer.Ordinal)
     || args.Contains("--worklist-readiness-sha256", StringComparer.Ordinal);
+// Widened once the arguments are parsed: reuse is the default on a static worklist, so the boundary
+// covers those runs too (see the reuseCellExplicit check after the argument loop).
 bool __reuseFailureBoundary = args.Contains("--reuse-cell", StringComparer.Ordinal);
 try
 {
@@ -246,11 +248,14 @@ bool showPlanes = false;
 // every ref with the base and transform the game loads after *_SWAP.ini; diff the same, swapped refs tinted teal
 // and named in the hover; off the record bases, as every render did before 2026-09-04.
 string bosMode = "on";
-// --reuse-cell — EXPERIMENTAL, opt-in, default off (CellScene.cs). A worklist's shots are built one
-// per SHOT, so two shots of one cell do the camera-independent work twice. With this flag the shots
-// of a cell share a lease that is constructed for the cell and dropped when the cell is done. The
-// default path is untouched: no flag, no lease, every shot builds its own exactly as before.
-bool reuseCell = false;
+// --reuse-cell / --no-reuse-cell — cell reuse (CellScene.cs), ON by default for a static worklist
+// since 2026-09-24. Without it a worklist's shots are built one per SHOT, so two shots of one cell do
+// the camera-independent work twice; with it the shots of a cell share a lease that is constructed
+// for the cell and dropped when the cell is done. --no-reuse-cell restores the per-shot path, every
+// shot building its own exactly as before; --reuse-cell is still accepted and changes nothing.
+bool reuseCell = true;
+bool reuseCellExplicit = false;
+bool noReuseCell = false;
 // --state SPEC — the world state (roadmap 4.11, _shared/WorldState.cs): <switch>[,<switch>…] by editor id or FormKey,
 // stage:<quest>:<n> with --switch-map (switchprobe's --json), or baseline. Every ref's existence becomes its runtime
 // enable state with those switches flipped. --state-view on (default) draws the state; diff also draws what the flip
@@ -741,7 +746,8 @@ for (int i = argStart; i < args.Length; i++)
     else if (args[i] == "--stations" && i + 1 < args.Length) { stationsSpec = args[++i]; textured = true; }
     else if (args[i] == "--stations-out" && i + 1 < args.Length) stationsOut = args[++i];
     else if (args[i] == "--planes-reach" && i + 1 < args.Length) planesReach = float.Parse(args[++i]);
-    else if (args[i] == "--reuse-cell") reuseCell = true;
+    else if (args[i] == "--reuse-cell") reuseCellExplicit = true;
+    else if (args[i] == "--no-reuse-cell") { noReuseCell = true; reuseCell = false; }
     else if (args[i] == "--bos" && i + 1 < args.Length)
     {
         bosMode = args[++i].ToLowerInvariant();
@@ -790,6 +796,14 @@ for (int i = argStart; i < args.Length; i++)
         return 2;
     }
 }
+if (reuseCellExplicit && noReuseCell)
+{
+    Console.Error.WriteLine("--reuse-cell and --no-reuse-cell contradict each other; pass one.");
+    return 2;
+}
+// The lease is on for this run whenever it is a static worklist without --no-reuse-cell; such a run
+// gets the same no-dialog failure boundary an explicit --reuse-cell always had.
+if (reuseCell && worklistPaths.Count > 0 && !interactiveMode) __reuseFailureBoundary = true;
 // Replication args: the command line verbatim, minus this machine's paths (instance/profile/
 // game/out). Embedded in every output PNG — a replay from these is BYTE-exact, which the
 // resolved camera pose alone is not: a --look camera replayed as the equivalent --yaw/--pitch
@@ -4748,7 +4762,7 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot,
 // Q3: a flag that quietly does nothing is a wrong answer. The lease is a WORKLIST's, and only on
 // the static path — --interactive already keeps one cell resident by design, and a single shot has
 // nobody to share with.
-if (reuseCell && (worklist is null || interactiveMode))
+if (reuseCellExplicit && (worklist is null || interactiveMode))
     Console.WriteLine("   --reuse-cell: ignored here. It shares a cell's work between the SHOTS of "
                     + "a worklist on the static path; this run has "
                     + (worklist is null ? "one shot." : "--interactive, which already keeps a cell resident."));
@@ -4771,8 +4785,8 @@ if (worklist is not null)
         }
     }
 
-    // Static: every shot of every cell, each to its own PNG. The opt-in lease retains the complete
-    // owned record-walk value; default runs still walk once per shot.
+    // Static: every shot of every cell, each to its own PNG. The cell lease (the default)
+    // retains the complete owned record-walk value; --no-reuse-cell runs walk once per shot.
     int totalShots = worklist.Cells.Sum(c => c.Shots.Count);
     if (totalShots > worklist.Cells.Count)
         Console.WriteLine($"worklist: {totalShots} shots over {worklist.Cells.Count} cell(s) — "
@@ -4790,7 +4804,7 @@ if (worklist is not null)
                 continue;
             // --reuse-cell: ONE lease per cell, constructed here and disposed in the finally — a scope,
             // not a cache that gets cleared, so nothing built for this cell can answer in the next one.
-            // Without the flag the lease is null and every shot builds its own, as it always did.
+            // With --no-reuse-cell the lease is null and every shot builds its own, as before stage 4.
             int cellBoundaryExit = 0;
             var cleanupFailures = new List<Exception>();
             int cellShots = 0;              // resident telemetry (VP_RESIDENT_TELEMETRY_OUT): shots this cell started
@@ -5357,9 +5371,9 @@ static int Smoke()
 catch (Exception ex) when (__batchFailureBoundary || __reuseFailureBoundary
                            || ViewProbe.GraphicsReuseRed.TestBoundaryEnabled)
 {
-    // The opt-in driver and graphics-cell lease must never surface a Windows application-error
-    // dialog. This outer edge includes setup and every using/finally disposal; ordinary production
-    // invocations retain the historical exception behavior when neither mode was requested.
+    // The batch driver and the graphics-cell lease must never surface a Windows application-error
+    // dialog. This outer edge includes setup and every using/finally disposal; other invocations
+    // (single shots, --interactive, --no-reuse-cell) retain the historical exception behavior.
     Console.Error.WriteLine((__reuseFailureBoundary
         ? "graphics cell reuse unexpected failure:\n"
         : "worklist selection/progress unexpected failure:\n") + ex);

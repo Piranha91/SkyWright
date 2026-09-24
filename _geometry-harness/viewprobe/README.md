@@ -357,7 +357,7 @@ all knowledge.
 | `VP_FLY_PLANES=on\|off` | show or hide the occlusion-planes layer before the capture — the `L` key's effect, headlessly. The layer is resident in every fly-through whether or not `--planes` was given, so this works without it |
 | `VP_FLY_OCCLUSION=off\|on\|diff` | set the occlusion preview before the capture — the `O` key's effect, headlessly |
 | `VP_OCCL_TINT_ALL=1` | the occlusion preview's POSITIVE CONTROL: every drawn ref counts as culled, so `--occlusion diff` must come out washed red and `on` must come out empty. A well-placed plane's cull changes no pixel (its shadow lies inside the shadow of the wall it stands in), which looks exactly like a preview that failed; this is what tells them apart |
-| `VP_RESIDENT_TELEMETRY_OUT=<file>` | on a static worklist: at the end of every cell, on every exit path, append one JSON line to the file — the cell's index and target, how its shot loop ended, its shot and render-pass counts, and (with `--reuse-cell`) the resident texture cache's budget and repoll counter at that moment. The record describes how the shot loop ended, not how the cell tore down: it is written before the cell's graphics owners are disposed. Nothing per shot, nothing printed; a failed append prints one line and the run exits 2. Hand it a fresh file: lines are appended |
+| `VP_RESIDENT_TELEMETRY_OUT=<file>` | on a static worklist: at the end of every cell, on every exit path, append one JSON line to the file — the cell's index and target, how its shot loop ended, its shot and render-pass counts, and (with reuse on) the resident texture cache's budget and repoll counter at that moment. The record describes how the shot loop ended, not how the cell tore down: it is written before the cell's graphics owners are disposed. Nothing per shot, nothing printed; a failed append prints one line and the run exits 2. Hand it a fresh file: lines are appended |
 | `HOUSECARL_VERIFY_MASK_CACHE=1` | with `--planes-report`: re-encode every visibility mask the per-view cache serves from memory and compare it to what was cached, print the counts, and FAIL the run on a mismatch rather than writing a mask it cannot confirm. The cache's correctness is an argument about the key (see *Research preview and report*); this is the switch that puts the argument to a real render |
 
 ---
@@ -607,16 +607,19 @@ verbatim refuses every run given a path-valued flag — an order candidate, a ru
 command carries that path. Any other line holding an absolute path still makes the comparison
 refuse, and says which line.
 
-### Keeping one cell's work across its shots — `--reuse-cell`, experimental
+### Keeping one cell's work across its shots — cell reuse, on by default
 
 A worklist run builds its scene once per **shot**, which the run says out loud when it starts: two
 shots of one cell walk the load order twice, resolve the same assets twice and parse the same
 meshes twice. The shots of a cell differ in where the camera stands, and a built scene is
 camera-independent, so that work can be done once for the cell.
 
-`--reuse-cell` is an **experimental, opt-in** flag that does exactly that, one piece at a time.
-**The default is unchanged**: without the flag there is no lease and every shot builds its own, the
-same code it always ran. With it, the shots of a cell share a lease that is *constructed for the
+Cell reuse does exactly that, and since 2026-09-24 it is **on by default** for a static worklist.
+**`--no-reuse-cell`** turns it off: there is then no lease and every shot builds its own, the code
+every run used before. `--reuse-cell` is still accepted and changes nothing; passing both is refused.
+A single shot and `--interactive` never use the lease (a single shot has nothing to share with, and
+`--interactive` keeps a cell resident by design); an explicit `--reuse-cell` on one of them says it
+was ignored. With reuse on, the shots of a cell share a lease that is *constructed for the
 cell and dropped when the cell is done* — a scope, not a cache that gets cleared, so nothing built
 for one cell can still answer in the next.
 
@@ -656,7 +659,7 @@ described below. The rest of the list, and the reasoning, is in `CellScene.cs`;
 cell, a new set for the next cell, nothing after the cell) with no game, no instance and no GL
 context.
 
-Every change to what the lease holds is checked with the equivalence suite above, run with the flag
+Every change to what the lease holds is checked with the equivalence suite above, run with reuse
 **on and off**, on an interior, an exterior with water, a multi-cell worklist and a fixture whose
 load order carries a base-object swap.
 
@@ -668,10 +671,10 @@ contracts still unmet, and exit 2 is an unexpected test failure with its full st
 
 #### The GL side of a cell: one context, one static scene
 
-With `--reuse-cell`, a worklist cell also owns one hidden GL context for all of its shots. It is
+With reuse on, a worklist cell also owns one hidden GL context for all of its shots. It is
 created when the cell starts and destroyed when the cell is done, on the thread that created it, and
-the next cell gets a new one. **Without the flag none of this exists**: every shot creates and
-deletes its own context, as it always did.
+the next cell gets a new one. **With `--no-reuse-cell` none of this exists**: every shot creates and
+deletes its own context, as it did before.
 
 For the life of the cell it keeps:
 
@@ -740,12 +743,12 @@ texture upload refused before draw: the GL driver reported out of memory (GL_OUT
 
 and the run exits 2. The asset is not reported missing or unreadable: it exists, and the driver
 could not hold it. On the retained path `<budget>` names the resident cache's budget at that moment;
-on the per-shot path it says that path keeps no resident texture cache. The check also runs without
-`--reuse-cell` — a single shot, a worklist and `--interactive` alike — so this is the one change to
-the default path, and only in that failure case: the error used to be left unread and the shot was
+on the per-shot path it says that path keeps no resident texture cache. The check also runs with
+`--no-reuse-cell` — a single shot, a worklist and `--interactive` alike — so this is the one change to
+the per-shot path, and only in that failure case: the error used to be left unread and the shot was
 drawn anyway.
 
-With the flag, a failure while the cell's GL side is set up, used or torn down is printed with its
+With reuse on, a failure while the cell's GL side is set up, used or torn down is printed with its
 full stack and the run exits 2, instead of raising the Windows application-error dialog.
 
 **Measuring the resident cache.** `VP_RESIDENT_TELEMETRY_OUT=<file>` (see *Environment knobs*) appends one JSON line per
@@ -755,7 +758,7 @@ of the shot that returned nonzero; or `fault` when an exception left the loop. T
 ended, not how the cell tore down: it is written before the cell's graphics owners are disposed, so a teardown failure
 after it shows only in the process exit code, and a reader must check that the two agree. The rendering library exposes
 no accessor for the repoll counter, so it is read from the library's private field; a library without that field gives
-`"counterField": "absent"` and a null value rather than a guess. Without `--reuse-cell` each cell still gets a line, with
+`"counterField": "absent"` and a null value rather than a guess. With `--no-reuse-cell` each cell still gets a line, with
 the cache fields null. Unset, nothing is written or printed.
 
 ### An asset that was found and could not be read fails the run

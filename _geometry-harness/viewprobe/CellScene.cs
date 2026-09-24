@@ -3,7 +3,8 @@ using CharacterViewer.Rendering;
 namespace ViewProbe;
 
 /// <summary>
-/// What the shots of ONE CELL may share — an EXPERIMENTAL, opt-in lease behind <c>--reuse-cell</c>.
+/// What the shots of ONE CELL may share — a lease that is on by default for a static worklist
+/// (since 2026-09-24; <c>--no-reuse-cell</c> turns it off).
 ///
 /// A worklist run builds its scene once per SHOT: two shots of one cell walk the load order twice,
 /// resolve the same assets twice and parse the same meshes twice. The shots of a cell differ only
@@ -31,9 +32,8 @@ namespace ViewProbe;
 ///    destroyed PER SHOT, so an object that owns a texture or a buffer would hand the next shot a
 ///    handle from a context that no longer exists.
 ///
-/// The default is unchanged: with no flag the lease is null and every shot builds its own, exactly
-/// as before. The flag is experimental and the suite (`tools/rendertwin.py`) is what says whether a
-/// slice may stay: it renders a worklist as one process and each shot again alone, and compares the
+/// With <c>--no-reuse-cell</c> the lease is null and every shot builds its own, exactly as before
+/// stage 4. The suite (`tools/rendertwin.py`) is what says whether a slice may stay: it renders a worklist as one process and each shot again alone, and compares the
 /// pixels, the report, the console and the census.
 /// </summary>
 public sealed class CellScene : IDisposable
@@ -51,7 +51,7 @@ public sealed class CellScene : IDisposable
         Cell = cell;
         // ONE line per lease, not per shot: a per-shot line would differ between a batched shot and
         // the same shot rendered alone, and the equivalence suite compares those two consoles.
-        Console.WriteLine("   cell scene: ON (--reuse-cell, experimental) - the shots of this cell "
+        Console.WriteLine("   cell scene: ON (the default; --no-reuse-cell turns it off) - the shots of this cell "
                         + "share owned record facts, asset resolution, decoded textures and parsed meshes; all are dropped "
                         + "when the cell is done");
     }
