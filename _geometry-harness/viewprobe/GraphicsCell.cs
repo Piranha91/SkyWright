@@ -81,9 +81,16 @@ internal sealed class GraphicsCell : IDisposable
         string? priorKey = scene?.Key;
         if (scene is not null && !StringComparer.Ordinal.Equals(scene.Key, staticKey))
         {
-            red?.SceneReplacing(scene, staticKey);   // measurement only
+            red?.SceneReplacing(scene, staticKey, installTextures!.WhiteTexture);   // measurement only
             scene.Dispose();
             scene = null;
+            // G2 F1 (Gate B4, W1): the install manager's private path map served the retired scene and must not
+            // outlive it; after an eviction it would hand the replacement a deleted handle. ClearCache deletes only
+            // the manager's own non-resident uploads (never its white texture) and empties the map, so the
+            // replacement's loads go to the resident cache: a hit reuses the handle, an evicted path uploads again.
+            var clearing = red?.InstallCacheClearing(installTextures);   // measurement only
+            installTextures.ClearCache();
+            red?.InstallCacheCleared(installTextures, clearing);   // measurement only
         }
         bool sceneCreated = scene is null;
         scene ??= new BuiltScene(staticKey, renderer!);

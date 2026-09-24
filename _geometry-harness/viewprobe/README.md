@@ -692,6 +692,18 @@ Fresh in every shot: the camera and the frame target, and a per-shot texture man
 texture the static scene does not own. What that manager loads never joins the resident cache; it
 is deleted with the shot.
 
+**What makes it refuse instead of drawing.** Each of these is printed and the run exits 2:
+
+| what it prints | when |
+|---|---|
+| `--reuse-cell refused: a profile, plugin or BOS rule input changed while process-owned readers were live` | the process-scope guard above. The retained static scene is keyed on the same prepared identity, so a stale input identity refuses the GL side too |
+| `retained graphics requires the prepared-cell identity` | a retained shot reached the renderer without the identity its static key is built from |
+| `retained residency manifest refused before draw: …`, `populated residency manifest refused before draw: …` | before the static scene's first draw, and again once its bindings are complete, every texture it binds is checked against the resident cache. An entry that is **no longer resident (evicted)**, whose **resident binding changed** to another handle, or whose handle is **still mapped but no longer a live texture** refuses the shot, naming its category and path. It is never drawn with whatever that handle now holds |
+
+When a changed key replaces the static scene, the install texture manager's own path map is emptied
+with it, so the new scene's textures are looked up in the resident cache again: a resident texture
+reuses its handle, and an evicted one is uploaded again.
+
 With the flag, a failure while the cell's GL side is set up, used or torn down is printed with its
 full stack and the run exits 2, instead of raising the Windows application-error dialog.
 

@@ -101,7 +101,9 @@ internal sealed class GraphicsReuseRed : IDisposable
             throw new InvalidOperationException("cell teardown was not observed with its context current");
         string? version = GL.GetString(StringName.Version);
         bool current = !string.IsNullOrWhiteSpace(version);
-        var checks = cell.CellResources.Where(r => r.ContextId == contextId)
+        // G2 F2: retired resources left the survival set at replacement; teardown still checks every one of them.
+        var checks = cell.CellResources.Concat(cell.RetiredResources).Where(r => r.ContextId == contextId)
+            .GroupBy(r => r.Key).Select(g => g.First())
             .Select(r => ResourceCheck.For(r, current)).ToArray();
         cell.CellTeardownChecks.AddRange(checks);
         cell.CellTeardownContextCurrent = current;
@@ -143,7 +145,11 @@ internal sealed class GraphicsReuseRed : IDisposable
     }
 
     /// <summary>GraphicsCell calls this immediately before disposing a scene whose key no longer matches.</summary>
-    internal void SceneReplacing(BuiltScene old, string newKey)
+    /// <summary>G2 F2 (Gate B4, W2): the survival set follows the retained scene, not every integer handle the cell
+    /// ever tracked. The retired scene's meshes, owned textures and manifest textures (except the install manager's
+    /// white texture, which stays) leave the survival set here, before any new upload can reuse their GL names;
+    /// they are proven dead by the dispose record, and every one of them is checked again at cell teardown.</summary>
+    internal void SceneReplacing(BuiltScene old, string newKey, int installWhite)
     {
         ThrowIfDisposed();
         var retired = old.ResidentDiskPaths.ToArray();
@@ -152,11 +158,52 @@ internal sealed class GraphicsReuseRed : IDisposable
         var owned = old.OwnedTextureHandles;
         bool allLive = meshes.All(m => GL.IsVertexArray(m.Vao) && GL.IsBuffer(m.Vbo) && GL.IsBuffer(m.Ebo))
             && owned.All(o => GL.IsTexture(o.Handle));
+        var handles = new HashSet<(string Kind, int Handle)>();
+        foreach (var m in meshes) { handles.Add(("vertex-array", m.Vao)); handles.Add(("buffer", m.Vbo)); handles.Add(("buffer", m.Ebo)); }
+        foreach (var o in owned) handles.Add(("texture", o.Handle));
+        foreach (var t in old.TextureManifest) if (t.Handle > 0 && t.Handle != installWhite) handles.Add(("texture", t.Handle));
+        var moving = cell.CellResources.Where(r => handles.Contains((r.Kind, r.Handle))).ToArray();
+        foreach (var r in moving) cell.CellResources.Remove(r);
+        foreach (var r in moving) if (!cell.RetiredResources.Any(x => x.Key == r.Key)) cell.RetiredResources.Add(r);
         var shot = cell.Shots.LastOrDefault();
         var row = new SceneReplacement(session.ObjectId(old, "scene"), old.Key, newKey, shot?.ShotId, session.OrderMark(),
-            meshes.Count, owned.Count, retired.Length, allLive);
+            meshes.Count, owned.Count, retired.Length, allLive, moving.Length);
         cell.Replacements.Add(row);
         session.Emit("scene-replacing", cell, shot, row);
+    }
+
+    /// <summary>G2 F1 measurement, before the install manager's ClearCache on a retirement.</summary>
+    internal ClearProbe InstallCacheClearing(GlTextureManager manager)
+    {
+        ThrowIfDisposed();
+        var map = (Dictionary<string, int>)ManagerPathCache!.GetValue(manager)!;
+        var all = (List<int>)ManagerAllTextures!.GetValue(manager)!;
+        int white = manager.WhiteTexture;
+        return new(white, white > 0 && GL.IsTexture(white), map.Count, map.Keys.ToArray(),
+            manager.MissingTexturePaths.Count, all.Count(h => h != white), session.OrderMark());
+    }
+
+    /// <summary>G2 F1 post-conditions, measured right after ClearCache: the white texture is the same live texture,
+    /// the private path map is empty and a non-promoting peek of every path it held misses, and the missing-path
+    /// set is unchanged in count.</summary>
+    internal void InstallCacheCleared(GlTextureManager manager, ClearProbe? before)
+    {
+        ThrowIfDisposed();
+        if (before is null) return;
+        var map = (Dictionary<string, int>)ManagerPathCache!.GetValue(manager)!;
+        var all = (List<int>)ManagerAllTextures!.GetValue(manager)!;
+        int white = manager.WhiteTexture;
+        bool whiteLive = white > 0 && GL.IsTexture(white);
+        int peekHits = before.MappedPaths.Count(p => PeekPrivate(manager, p) != -1);
+        int missingAfter = manager.MissingTexturePaths.Count;
+        int ownedAfter = all.Count(h => h != white);
+        var shot = cell.Shots.LastOrDefault();
+        var row = new CacheClear(shot?.ShotId, before.White, white, before.WhiteLive, whiteLive, before.MapCount, map.Count,
+            before.MappedPaths.Length, peekHits, before.MissingCount, missingAfter, before.OwnedNonWhite, ownedAfter,
+            before.Order, session.OrderMark(),
+            white == before.White && whiteLive && map.Count == 0 && peekHits == 0 && missingAfter == before.MissingCount && ownedAfter == 0);
+        cell.CacheClears.Add(row);
+        session.Emit("install-cache-cleared", cell, shot, row);
     }
 
     internal void StaticKeyDecision(string key, string? priorKey, bool sceneCreated, BuiltScene scene)
@@ -185,6 +232,7 @@ internal sealed class GraphicsReuseRed : IDisposable
         var target = manifest.FirstOrDefault(x => x.Category == "static-terrain-diffuse");
         if (target.DiskPath is null) target = manifest[0];
         session.ResidencyFired = true;
+        string? entryId = ResidentEntryId(resident, target.DiskPath);
         int peekBefore = PeekResident(resident, target.DiskPath);
         int privateBefore = PeekPrivate(manager, target.GamePath);
         bool liveBefore = target.Handle > 0 && GL.IsTexture(target.Handle);
@@ -209,7 +257,8 @@ internal sealed class GraphicsReuseRed : IDisposable
         var row = new ResidencyMutation(mode, phase, target.Category, target.GamePath, target.DiskPath!, target.Handle, newHandle,
             peekBefore, PeekResident(resident, target.DiskPath), privateBefore, PeekPrivate(manager, target.GamePath),
             liveBefore, target.Handle > 0 && GL.IsTexture(target.Handle), newHandle > 0 && GL.IsTexture(newHandle),
-            session.OrderMark());
+            session.OrderMark(), entryId);
+        cell.Mutations.Add(row);
         shot?.ResidencyMutations.Add(row);
         session.Emit("residency-mutated", cell, shot, row);
     }
@@ -224,6 +273,20 @@ internal sealed class GraphicsReuseRed : IDisposable
         var row = CheckManifest(phase, 0, scene, resident, manager);
         shot?.ManifestChecks.Add(row);
         session.Emit("manifest-check", cell, shot, row);
+        // G2 F1 measurement: after an eviction, the evicted path's binding in the scene now being validated, against
+        // the resident cache (a new entry object means a new upload was added; the GL name itself may be reused).
+        foreach (var m in cell.Mutations.Where(x => x.Mode == "evict"))
+        {
+            var e = scene.TextureManifest.FirstOrDefault(x => StringComparer.OrdinalIgnoreCase.Equals(x.DiskPath, m.DiskPath));
+            string? now = ResidentEntryId(resident, m.DiskPath);
+            int peek = PeekResident(resident, m.DiskPath);
+            var check = new ReuploadCheck(shot?.ShotId, m.DiskPath, m.GamePath, m.Handle, e.DiskPath is null ? null : e.Handle,
+                peek, e.DiskPath is not null && e.Handle > 0 && GL.IsTexture(e.Handle), m.EntryId, now,
+                manager is null ? -1 : PeekPrivate(manager, m.GamePath),
+                e.DiskPath is not null && now is not null && now != m.EntryId && peek == e.Handle && e.Handle > 0 && GL.IsTexture(e.Handle));
+            cell.Reuploads.Add(check);
+            session.Emit("evicted-path-rebound", cell, shot, check);
+        }
     }
 
     /// <summary>The same check at each draw: a draw that begins with a manifest entry the resident cache does not
@@ -494,6 +557,7 @@ internal sealed class GraphicsReuseRed : IDisposable
                 mesh.Vao, mesh.Vbo, mesh.Ebo,
                 mesh.Vao > 0 && GL.IsVertexArray(mesh.Vao) && GL.IsBuffer(mesh.Vbo) && GL.IsBuffer(mesh.Ebo));
             shot.Uploads.Add(upload);
+            if (lifetimeKind == Lifetime.Cell && shot.FirstStaticUploadOrder == 0) shot.FirstStaticUploadOrder = session.OrderMark();
             session.Emit("mesh-uploaded", cell, shot, upload);
             return hash;
         }
@@ -830,7 +894,15 @@ internal sealed class GraphicsReuseRed : IDisposable
                 && s.ManifestValidations.All(x => x.Valid)
                 && s.ManifestValidations[1].ExpectedCount == s.ManifestValidations[1].FoundCount;
             bool manifests = two && ValidManifests(a!) && ValidManifests(b!);
-            bool shotCleanup = cells.SelectMany(c => c.Shots).All(s => s.TeardownContextCurrent == true
+            // G2 F2: a replacement's retired set must be proven dead by its dispose record, after the decision to
+            // replace and before the replacement's first static upload (the survival set no longer carries it).
+            bool retirementVerified = cells.All(c => c.Replacements.All(r =>
+            {
+                var d = c.SceneDisposals.FirstOrDefault(x => x.SceneId == r.OldSceneId);
+                long first = c.Shots.FirstOrDefault(s => s.ShotId == r.ShotId)?.FirstStaticUploadOrder ?? 0;
+                return d is not null && d.AllDeadAfter && d.Order > r.Order && (first == 0 || d.Order < first);
+            }));
+            bool shotCleanup = retirementVerified && cells.SelectMany(c => c.Shots).All(s => s.TeardownContextCurrent == true
                 && s.ShotTeardownChecks.All(x => x.Pass) && s.CellSurvivalChecks.All(x => x.Pass));
             bool cellCleanup = cells.All(c => c.CellTeardownContextCurrent == true && c.CellTeardownChecks.All(x => x.Pass));
             bool liveBoundaries = cells.SelectMany(c => c.Shots).SelectMany(s => s.Uploads).All(x => x.LiveAtBoundary)
@@ -874,7 +946,7 @@ internal sealed class GraphicsReuseRed : IDisposable
                 cells.SelectMany(c => c.Shots).Sum(s => s.ResidentEpochs.Count),
                 cells.SelectMany(c => c.Shots).Sum(s => s.ManifestValidations.Count),
                 bindingsPresent, equalInputs, sameBindings, oneInitialUploadPerBindingIdentity, dynamicExercise,
-                nextOwners, shotCleanup, cellCleanup, liveBoundaries, water, overlays, npcs, masks);
+                nextOwners, shotCleanup, cellCleanup, liveBoundaries, water, overlays, npcs, masks, retirementVerified);
         }
 
         static object CellBlock(CellState c) => new
@@ -884,7 +956,8 @@ internal sealed class GraphicsReuseRed : IDisposable
             cellTeardownContextCurrent = c.CellTeardownContextCurrent,
             cellTeardownChecks = c.CellTeardownChecks, residentAtCellEnd = c.ResidentAtCellEnd,
             residentAtCellEndG2 = c.ResidentAtCellEndG2, replacements = c.Replacements, sceneDisposals = c.SceneDisposals,
-            retiredResidentPathCount = c.RetiredResidentPaths.Count,
+            retiredResidentPathCount = c.RetiredResidentPaths.Count, retiredTrackedResources = c.RetiredResources.Count,
+            cacheClears = c.CacheClears, reuploads = c.Reuploads,
             shots = c.Shots.Select(s => new { s.ShotId, s.ContextId, s.Facts,
                 keyInputs = s.KeyInputs, keyDecisions = s.KeyDecisions, manifestChecks = s.ManifestChecks,
                 residencyMutations = s.ResidencyMutations,
@@ -919,6 +992,10 @@ internal sealed class GraphicsReuseRed : IDisposable
         internal List<SceneDisposal> SceneDisposals { get; } = [];
         internal List<int> OrphanHandles { get; } = [];
         internal ResidentInvariantG2? ResidentAtCellEndG2 { get; set; }
+        internal List<TrackedResource> RetiredResources { get; } = [];
+        internal List<CacheClear> CacheClears { get; } = [];
+        internal List<ResidencyMutation> Mutations { get; } = [];
+        internal List<ReuploadCheck> Reuploads { get; } = [];
         internal ShotState BeginShot(string shotId, string contextId, GraphicsShotFacts facts)
         { var s = new ShotState(shotId, contextId, facts); Shots.Add(s); return s; }
         internal void TrackCellResource(TrackedResource resource)
@@ -940,6 +1017,7 @@ internal sealed class GraphicsReuseRed : IDisposable
         internal List<KeyDecision> KeyDecisions { get; } = [];
         internal List<ManifestCheck> ManifestChecks { get; } = [];
         internal List<ResidencyMutation> ResidencyMutations { get; } = [];
+        internal long FirstStaticUploadOrder { get; set; }
     }
 
     // ---- G2 (Gate B4) records ----
@@ -949,12 +1027,19 @@ internal sealed class GraphicsReuseRed : IDisposable
         int FxPathCount, string TerrainSha256, string LayersSha256, string CoveringsSha256);
     internal sealed record KeyDecision(string Key, string? PriorKey, string Decision, string SceneId, long Order);
     internal sealed record SceneReplacement(string OldSceneId, string OldKey, string NewKey, string? ShotId, long Order,
-        int MeshCount, int OwnedTextureCount, int RetiredResidentPaths, bool AllLiveBeforeDispose);
+        int MeshCount, int OwnedTextureCount, int RetiredResidentPaths, bool AllLiveBeforeDispose, int RetiredTrackedResources);
     internal sealed record SceneDisposal(string SceneId, string Key, string? ShotId, long Order, int MeshCount,
         int OwnedTextureCount, int LiveMeshesAfter, int LiveOwnedAfter, bool AllDeadAfter);
     internal sealed record ResidencyMutation(string Mode, string Phase, string Category, string GamePath, string DiskPath,
         int Handle, int NewHandle, int ResidentPeekBefore, int ResidentPeekAfter, int PrivateCachePeekBefore,
-        int PrivateCachePeekAfter, bool HandleLiveBefore, bool HandleLiveAfter, bool NewHandleLive, long Order);
+        int PrivateCachePeekAfter, bool HandleLiveBefore, bool HandleLiveAfter, bool NewHandleLive, long Order, string? EntryId);
+    internal sealed record ClearProbe(int White, bool WhiteLive, int MapCount, string[] MappedPaths, int MissingCount,
+        int OwnedNonWhite, long Order);
+    internal sealed record CacheClear(string? ShotId, int WhiteBefore, int WhiteAfter, bool WhiteLiveBefore, bool WhiteLiveAfter,
+        int PrivateMapBefore, int PrivateMapAfter, int PathsPeeked, int PeekHitsAfter, int MissingBefore, int MissingAfter,
+        int OwnedNonWhiteBefore, int OwnedNonWhiteAfter, long OrderBefore, long OrderAfter, bool Holds);
+    internal sealed record ReuploadCheck(string? ShotId, string DiskPath, string GamePath, int EvictedHandle, int? ManifestHandle,
+        int ResidentPeek, bool Live, string? EvictedEntryId, string? CurrentEntryId, int PrivateCachePeek, bool Holds);
     internal sealed record ManifestRow(string Category, string GamePath, string? DiskPath, int ManifestHandle,
         int ResidentPeek, int PrivateCachePeek, bool Live);
     internal sealed record ManifestCheck(string Phase, int Index, long Order, int Entries, int Mismatched, int Dead,
@@ -968,11 +1053,12 @@ internal sealed class GraphicsReuseRed : IDisposable
     static readonly System.Reflection.FieldInfo? ResidentMap = typeof(ResidentTextureCache).GetField("_map", Private);
     static readonly Type? ResidentEntry = typeof(ResidentTextureCache).GetNestedType("Entry", System.Reflection.BindingFlags.NonPublic);
     static readonly System.Reflection.FieldInfo? ManagerPathCache = typeof(GlTextureManager).GetField("_textureCache", Private);
+    static readonly System.Reflection.FieldInfo? ManagerAllTextures = typeof(GlTextureManager).GetField("_allTextures", Private);
 
     static void ValidateReflection()
     {
         string[] entryFields = ["Handle", "Bytes", "InProtected", "Node"];
-        if (ResidentMap is null || ResidentEntry is null || ManagerPathCache is null
+        if (ResidentMap is null || ResidentEntry is null || ManagerPathCache is null || ManagerAllTextures is null
             || entryFields.Any(f => ResidentEntry.GetField(f) is null)
             || typeof(ResidentTextureCache).GetField("_currentBytes", Private) is null
             || typeof(ResidentTextureCache).GetField("_protectedBytes", Private) is null)
@@ -985,6 +1071,14 @@ internal sealed class GraphicsReuseRed : IDisposable
         var map = (System.Collections.IDictionary)ResidentMap!.GetValue(cache)!;
         object? entry = map.Contains(diskPath) ? map[diskPath] : null;
         return entry is null ? -1 : (int)ResidentEntry!.GetField("Handle")!.GetValue(entry)!;
+    }
+
+    string? ResidentEntryId(ResidentTextureCache cache, string? diskPath)
+    {
+        if (string.IsNullOrEmpty(diskPath)) return null;
+        var map = (System.Collections.IDictionary)ResidentMap!.GetValue(cache)!;
+        object? entry = map.Contains(diskPath) ? map[diskPath] : null;
+        return entry is null ? null : session.ObjectId(entry, "resident-entry");
     }
 
     static int PeekPrivate(GlTextureManager manager, string gamePath)
@@ -1052,7 +1146,7 @@ internal sealed class GraphicsReuseRed : IDisposable
         bool EqualStaticBindingInputs, bool SameStaticHandlesAcrossShots, bool OneInitialUploadPerStaticBindingIdentity,
         bool CameraDependentDynamicContentObserved, bool NewOwnersForNextCell, bool ShotCleanupPassed,
         bool CellCleanupPassed, bool LiveAtOperationBoundaries, string WaterStatus, string OverlayStatus,
-        string NpcStatus, string SubjectMaskStatus);
+        string NpcStatus, string SubjectMaskStatus, bool ReplacementRetirementVerified);
 
     static string HashArrays(float[] vertices, int[] indices)
     {

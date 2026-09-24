@@ -166,8 +166,11 @@ internal sealed class BuiltScene : IDisposable
                 found++;
                 continue;
             }
-            return new(false, manifest.Length, found,
-                $"resident binding changed for {entry.Category}/{entry.GamePath}: expected {entry.Handle}, got {current}");
+            // G2 F4 (Gate B4): name the three ways a retained binding fails, instead of calling all of them a change.
+            string why = current == -1 ? $"no longer resident (evicted); the manifest holds handle {entry.Handle}"
+                : current != entry.Handle ? $"resident binding changed: the manifest holds handle {entry.Handle}, the cache holds {current}"
+                : $"handle {entry.Handle} is still mapped but is no longer a live texture";
+            return new(false, manifest.Length, found, $"{entry.Category}/{entry.GamePath}: {why}");
         }
         return new(true, manifest.Length, found, null);
     }
