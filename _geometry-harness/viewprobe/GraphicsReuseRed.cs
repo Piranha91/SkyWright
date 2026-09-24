@@ -62,6 +62,38 @@ internal sealed class GraphicsReuseRed : IDisposable
         return new(session, cell, shot);
     }
 
+    /// <summary>G3 RED (launch 8): borrowed NPC meshes just before their owning VMs are disposed. Returns the handle
+    /// snapshot the after-call checks (GlMesh.Dispose keeps its integer handles; nothing allocates in between).</summary>
+    public IReadOnlyList<(GlMesh Mesh, int Vao, int Vbo, int Ebo)> BorrowedOwnersDisposing(IReadOnlyList<GlMesh> meshes, GlRenderer? renderer)
+    {
+        ThrowIfDisposed();
+        var snapshot = meshes.Select(m => (m, m.Vao, m.Vbo, m.Ebo)).ToArray();
+        BorrowedOwners("borrowed-owner-before-dispose", snapshot, renderer);
+        return snapshot;
+    }
+
+    public void BorrowedOwnersDisposed(IReadOnlyList<(GlMesh Mesh, int Vao, int Vbo, int Ebo)> snapshot, GlRenderer? renderer)
+    {
+        ThrowIfDisposed();
+        BorrowedOwners("borrowed-owner-after-dispose", snapshot, renderer);
+    }
+
+    void BorrowedOwners(string kind, IReadOnlyList<(GlMesh Mesh, int Vao, int Vbo, int Ebo)> snapshot, GlRenderer? renderer)
+    {
+        string? version = GL.GetString(StringName.Version);
+        var rows = snapshot.Select(x => new
+        {
+            meshId = session.ObjectId(x.Mesh, "mesh"), x.Vao, x.Vbo, x.Ebo,
+            vaoLive = x.Vao > 0 && GL.IsVertexArray(x.Vao), vboLive = x.Vbo > 0 && GL.IsBuffer(x.Vbo),
+            eboLive = x.Ebo > 0 && GL.IsBuffer(x.Ebo), inRenderer = renderer?.Meshes.Contains(x.Mesh)
+        }).ToArray();
+        session.Emit(kind, cell, null, new
+        {
+            count = rows.Length, order = session.OrderMark(), contextCurrent = !string.IsNullOrWhiteSpace(version),
+            rendererId = renderer is null ? null : session.ObjectId(renderer, "renderer"), rows
+        });
+    }
+
     /// <summary>GREEN owner calls this at cell end, before the scene and resident cache are disposed (Gate B2 review,
     /// C2 as corrected): the cache must hold exactly the retained manifest's distinct resident disk paths and no
     /// shot-local texture. TryGet's recency side effect is harmless here; the cache is disposed next.</summary>
@@ -109,6 +141,23 @@ internal sealed class GraphicsReuseRed : IDisposable
         cell.CellTeardownContextCurrent = current;
         session.Emit("cell-resources-after-owner-dispose", cell, null,
             new { contextId, contextCurrent = current, glVersion = version, checks });
+        // G3 (Gate B6 review, Q4): every borrowed NPC mesh this cell saw, at cell end with the context current:
+        // disposed by its owner (GlMesh's private _disposed, by reflection) and its recorded handles' liveness.
+        var disposedField = typeof(GlMesh).GetField("_disposed",
+            System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+        var borrowedRows = cell.BorrowedMeshes.GroupBy(b => b.Id).Select(g => g.First()).Select(b => new
+        {
+            meshId = b.Id, b.Vao, b.Vbo, b.Ebo,
+            disposed = disposedField is null ? (bool?)null : (bool)disposedField.GetValue(b.Mesh)!,
+            vaoLive = current && b.Vao > 0 && GL.IsVertexArray(b.Vao),
+            vboLive = current && b.Vbo > 0 && GL.IsBuffer(b.Vbo),
+            eboLive = current && b.Ebo > 0 && GL.IsBuffer(b.Ebo)
+        }).ToArray();
+        session.Emit("borrowed-at-cell-end", cell, null, new
+        {
+            contextCurrent = current, reflectionFound = disposedField is not null, count = borrowedRows.Length,
+            disposedCount = borrowedRows.Count(r => r.disposed == true), rows = borrowedRows
+        });
     }
 
     // ---- Gate B4, G2 RED: keys, replacement and residency. Measurement only; every call site is `red?.` or
@@ -570,6 +619,7 @@ internal sealed class GraphicsReuseRed : IDisposable
                 shot.ContextId, mesh.Vao, mesh.Vbo, mesh.Ebo,
                 mesh.Vao > 0 && GL.IsVertexArray(mesh.Vao) && GL.IsBuffer(mesh.Vbo) && GL.IsBuffer(mesh.Ebo));
             shot.StaticBindings.Add(binding);
+            cell.StaticMeshIds.Add(binding.MeshId);   // G3
             session.Emit("static-bound-for-shot", cell, shot, binding);
         }
 
@@ -577,6 +627,8 @@ internal sealed class GraphicsReuseRed : IDisposable
         {
             if (borrowed)
             {
+                cell.BorrowedMeshIds.Add(session.ObjectId(mesh, "mesh"));   // G3
+                cell.BorrowedMeshes.Add((mesh, mesh.Vao, mesh.Vbo, mesh.Ebo, session.ObjectId(mesh, "mesh")));   // G3 Q4
                 Track("vertex-array", category, mesh.Vao, Lifetime.Shot, Expectation.Alive, "borrowed-npc");
                 Track("buffer", category + ":vbo", mesh.Vbo, Lifetime.Shot, Expectation.Alive, "borrowed-npc");
                 Track("buffer", category + ":ebo", mesh.Ebo, Lifetime.Shot, Expectation.Alive, "borrowed-npc");
@@ -596,11 +648,49 @@ internal sealed class GraphicsReuseRed : IDisposable
             });
         }
 
-        public void RawBufferUploaded(string family, int handle, float[] data)
+        public void RawBufferUploaded(string family, int handle, float[] data, string? layer = null)
         {
-            var upload = new RawUpload(family, HashFloats(data), data.Length * sizeof(float), handle);
+            var upload = new RawUpload(family, HashFloats(data), data.Length * sizeof(float), handle, layer);
             shot.RawUploads.Add(upload);
             session.Emit("raw-buffer-uploaded", cell, shot, upload);
+        }
+
+        // ---- G3 RED (launch 8): measurement only; every call site is null-conditional. ----
+
+        /// <summary>What the renderer holds: this cell's static-bound meshes, borrowed NPC meshes, anything else.</summary>
+        public void RendererMembership(string phase, GlRenderer renderer)
+        {
+            var ids = renderer.Meshes.Select(m => session.ObjectId(m, "mesh")).ToArray();
+            int statics = ids.Count(cell.StaticMeshIds.Contains), borrowed = ids.Count(cell.BorrowedMeshIds.Contains);
+            session.Emit("renderer-membership", cell, shot, new
+            {
+                phase, rendererId = session.ObjectId(renderer, "renderer"), total = ids.Length, staticBound = statics,
+                borrowedNpc = borrowed, other = ids.Length - statics - borrowed,
+                otherIds = ids.Where(x => !cell.StaticMeshIds.Contains(x) && !cell.BorrowedMeshIds.Contains(x)).Take(64).ToArray(),
+                borrowedIds = ids.Where(cell.BorrowedMeshIds.Contains).ToArray()
+            });
+        }
+
+        public void SceneDepth(string? sceneDepthSha256)
+            => session.Emit("scene-depth", cell, shot, new { sceneDepthSha256 });
+
+        /// <summary>One per-shape isolated depth draw: renderer meshes rendering inside and outside the isolated set.</summary>
+        public void IsolationDraw(int drawIndex, IReadOnlySet<GlMesh> isolated, GlRenderer renderer, string? isolatedDepthSha256,
+            int rasterPixels, int visiblePixels, int hiddenPixels)
+        {
+            int inside = 0, outside = 0, outsideStatic = 0;
+            foreach (var m in renderer.Meshes)
+            {
+                if (!m.IsRendering) continue;
+                if (isolated.Contains(m)) inside++;
+                else { outside++; if (cell.StaticMeshIds.Contains(session.ObjectId(m, "mesh"))) outsideStatic++; }
+            }
+            session.Emit("isolation-draw", cell, shot, new
+            {
+                drawIndex, isolatedCount = isolated.Count, rendererMeshes = renderer.Meshes.Count, renderingInside = inside,
+                renderingOutside = outside, renderingOutsideStatic = outsideStatic, isolatedDepthSha256,
+                rasterPixels, visiblePixels, hiddenPixels
+            });
         }
 
         public void Checkpoint(string boundary)
@@ -996,6 +1086,10 @@ internal sealed class GraphicsReuseRed : IDisposable
         internal List<CacheClear> CacheClears { get; } = [];
         internal List<ResidencyMutation> Mutations { get; } = [];
         internal List<ReuploadCheck> Reuploads { get; } = [];
+        internal HashSet<string> StaticMeshIds { get; } = new(StringComparer.Ordinal);   // G3
+        internal HashSet<string> BorrowedMeshIds { get; } = new(StringComparer.Ordinal); // G3
+        // G3 (B6 review Q4): the borrowed wrappers and the handles recorded when each was added; RED session only.
+        internal List<(GlMesh Mesh, int Vao, int Vbo, int Ebo, string Id)> BorrowedMeshes { get; } = [];
         internal ShotState BeginShot(string shotId, string contextId, GraphicsShotFacts facts)
         { var s = new ShotState(shotId, contextId, facts); Shots.Add(s); return s; }
         internal void TrackCellResource(TrackedResource resource)
@@ -1135,7 +1229,7 @@ internal sealed class GraphicsReuseRed : IDisposable
         int Vao, int Vbo, int Ebo, bool LiveAtBoundary);
     internal sealed record StaticBinding(string Category, string MeshId, string InputSha256, string ContextId,
         int Vao, int Vbo, int Ebo, bool LiveAtBoundary);
-    internal sealed record RawUpload(string Family, string Sha256, int Bytes, int Handle);
+    internal sealed record RawUpload(string Family, string Sha256, int Bytes, int Handle, string? Layer = null);
     internal sealed record OverlayDelete(int Program, int CurrentProgram, int CurrentVertexArray, bool BoundAtDelete);
     internal sealed record ResidentInvariant(int ResidentCount, int DistinctManifestResidentPaths, int ManifestPathsFoundInCache,
         int ShotLocalDiskPathsChecked, string[] ShotLocalPathsInCache, bool Holds);

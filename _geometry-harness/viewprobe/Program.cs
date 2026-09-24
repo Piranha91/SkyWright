@@ -3861,7 +3861,12 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot,
                             + (npcPuck == "auto" ? $", camera {PitchDownDeg():0}° down" : "") + ")");
         void NpcCleanup()
         {
+            // G3 RED (test-only): each borrowed mesh's handles, liveness and renderer membership just before and
+            // just after its owning VMs are disposed. Inert without a RED session.
+            var redBorrowed = graphicsReuseRed is null ? null : npcActors.SelectMany(a => a.Meshes).ToArray();
+            var redSnapshot = graphicsReuseRed?.BorrowedOwnersDisposing(redBorrowed!, graphicsCell?.Renderer);
             npcHost?.Disposer();
+            if (redSnapshot is not null) graphicsReuseRed?.BorrowedOwnersDisposed(redSnapshot, graphicsCell?.Renderer);
             foreach (var m2 in npcLcMods) (m2 as IDisposable)?.Dispose();
         }
 

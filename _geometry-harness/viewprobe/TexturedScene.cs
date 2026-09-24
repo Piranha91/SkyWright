@@ -251,6 +251,7 @@ static class TexturedScene
                 try { mesh.Dispose(); } catch (Exception ex) { failures.Add(ex); }
             }
             owned.Clear();
+            try { evidence?.RendererMembership("shot-end", renderer); } catch (Exception ex) { failures.Add(ex); }   // G3 RED
             if (raw.Any(x => x.Kind == "framebuffer" && x.Handle > 0))
                 try { GL.BindFramebuffer(FramebufferTarget.Framebuffer, 0); }
                 catch (Exception ex) { failures.Add(ex); }
@@ -587,6 +588,7 @@ static class TexturedScene
 
         using var localRenderer = graphicsCell is null ? new GlRenderer() : null;
         var renderer = graphicsCell?.Renderer ?? localRenderer!;
+        graphicsShot?.RendererMembership("shot-start", renderer);   // G3 RED, measurement only
         if (localRenderer is not null)
         {
             renderer.Initialize(null);                  // embedded shaders
@@ -2028,6 +2030,7 @@ static class TexturedScene
                 Draw(plainDepth, singleSample: true);
                 string DepthHash(float[] depth) => ViewProbe.MaskEvidence.DepthHash(depth);
                 occl.SceneDepthHash = DepthHash(plainDepth);
+                graphicsShot?.SceneDepth(occl.SceneDepthHash);   // G3 RED, measurement only
                 var evidenceDir = Path.Combine(Path.GetDirectoryName(Path.GetFullPath(outPath))!,
                     Path.GetFileNameWithoutExtension(outPath) + "-audit-evidence");
                 if (Directory.Exists(evidenceDir)) throw new System.IO.IOException("Refusing to replace audit evidence: " + evidenceDir);
@@ -2056,6 +2059,8 @@ static class TexturedScene
                         occl.VisibilityDraws++;
                         part.IsolatedDepthHash = DepthHash(ownDepth);
                         var measured = ShapeVisibility.Compare(ownDepth, plainDepth);
+                        graphicsShot?.IsolationDraw(occl.VisibilityDraws, isolated, renderer, part.IsolatedDepthHash,
+                            measured.RasterPixels, measured.VisiblePixels, measured.HiddenPixels);   // G3 RED, measurement only
                         var mask = ViewProbe.MaskEvidence.BuildMask(ownDepth, plainDepth);
                         part.VisibilityMask = Path.Combine(evidenceDir, $"shape-{occl.VisibilityDraws:D4}-block-{part.Block}.png");
                         // Keyed on the hash of the buffer the mask was just built from, which this
@@ -2412,6 +2417,15 @@ static class TexturedScene
         // was before the field existed (blend off, u_alpha 1). Only the route's waypoint discs ask
         // for less: a translucent fill marks a spot without hiding the ground it marks.
         var layers = new List<(float[] Data, bool DepthTested, bool CullBack, int Nav, float Alpha)>();
+        // G3 RED (test-only): each layer's label, recorded only in a RED session so every overlay family is hashed
+        // on its own at its BufferData. Without a session AddLayer is exactly layers.Add.
+        var layerLabels = graphicsShot is null ? null
+            : new Dictionary<float[], string>(ReferenceEqualityComparer.Instance);
+        void AddLayer(string label, (float[] Data, bool DepthTested, bool CullBack, int Nav, float Alpha) layer)
+        {
+            layers.Add(layer);
+            if (layerLabels is not null) layerLabels[layer.Data] = label;
+        }
         if (refSurface)
         {
             // The wording at opacity 1 is load-bearing and deliberately byte-identical: the
@@ -2424,18 +2438,18 @@ static class TexturedScene
                   + "depth-tested; no inflated hull or occluded ghost; NOT opaque identity evidence");
             foreach (var key in subjectSurfaceRefusals.OrderBy(x => x, StringComparer.Ordinal))
                 Console.WriteLine($"subject-surface-refused: {key}: alpha, effect, marker or non-depth-writing shape; participant coverage incomplete");
-            if (subjectSurface.Count > 0) layers.Add((subjectSurface.ToArray(), true, true, 0, refSurfaceOpacity));
-            if (subjectSurfaceDoubleSided.Count > 0) layers.Add((subjectSurfaceDoubleSided.ToArray(), true, false, 0, refSurfaceOpacity));
+            if (subjectSurface.Count > 0) AddLayer("subject-surface", (subjectSurface.ToArray(), true, true, 0, refSurfaceOpacity));
+            if (subjectSurfaceDoubleSided.Count > 0) AddLayer("subject-surface-double-sided", (subjectSurfaceDoubleSided.ToArray(), true, false, 0, refSurfaceOpacity));
         }
         // Highlight halos: the SAME hull buffer is drawn twice — solid depth-tested rim here,
         // then again as the translucent Greater-pass ghost (see the draw loop).
         float[]? haloData = haloTris.Count > 0 ? haloTris.ToArray() : null;
-        if (haloData is not null) layers.Add((haloData, true, true, 0, 1f));
+        if (haloData is not null) AddLayer("halo", (haloData, true, true, 0, 1f));
         // The grid goes on FIRST, so every later layer paints over it: it is the ruling under the
         // picture, and a scale that hid the navmesh or the route it exists to measure would have
         // the priority exactly backwards. Depth test OFF — a reference line you can only see on
         // open floor is not a reference; it has to cross the pillars too.
-        if (gridSpacing > 0f && gridRibbon.Count > 0) layers.Add((gridRibbon.ToArray(), false, false, 0, 0.85f));
+        if (gridSpacing > 0f && gridRibbon.Count > 0) AddLayer("grid", (gridRibbon.ToArray(), false, false, 0, 0.85f));
         // Caller-drawn ribbons (the seam overlay): depth-tested, so a seam behind a hill stays behind it — the
         // caller lifts each ribbon a few units above the ground it marks, which is what keeps it on top of the terrain.
         if (overlayLines.Count > 0)
@@ -2446,7 +2460,7 @@ static class TexturedScene
                 float w = ol.Width;
                 Overlay.SolidPolyline(ribbon, ol.Pts, ol.Colour, d => Math.Clamp(d * 0.0012f * w, 0.5f * w, 20f * w), cam.Eye);
             }
-            if (ribbon.Count > 0) layers.Add((ribbon.ToArray(), true, false, 0, 1f));
+            if (ribbon.Count > 0) AddLayer("seams", (ribbon.ToArray(), true, false, 0, 1f));
         }
         if (wantNav)
         {
@@ -2455,8 +2469,8 @@ static class TexturedScene
                 foreach (var group in healthyGroups)
                 {
                     var (s, d) = BuildWire(group.Triangles, GroupColour(group), 2.2f);
-                    if (s.Count > 0) layers.Add((s.ToArray(), true, false, 1, 1f));
-                    if (d.Count > 0) layers.Add((d.ToArray(), false, false, 1, 1f));
+                    if (s.Count > 0) AddLayer("nav-wire-solid", (s.ToArray(), true, false, 1, 1f));
+                    if (d.Count > 0) AddLayer("nav-wire-dash", (d.ToArray(), false, false, 1, 1f));
                 }
             }
             // The finding is ALWAYS outlined, wider than the healthy wire, in every mode that
@@ -2464,8 +2478,8 @@ static class TexturedScene
             if (redTris.Count > 0)
             {
                 var (s, d) = BuildWire(redTris, red, 3.4f);
-                if (s.Count > 0) layers.Add((s.ToArray(), true, false, 2, 1f));
-                if (d.Count > 0) layers.Add((d.ToArray(), false, false, 2, 1f));
+                if (s.Count > 0) AddLayer("red-nav-solid", (s.ToArray(), true, false, 2, 1f));
+                if (d.Count > 0) AddLayer("red-nav-dash", (d.ToArray(), false, false, 2, 1f));
             }
             if (runVisible + runUnder + runHidden > 0)
             {
@@ -2509,7 +2523,7 @@ static class TexturedScene
             Edge(cb.X0, cb.Y1, cb.X0, cb.Y0);
             if (outline.Count > 0)
             {
-                layers.Add((outline.ToArray(), false, false, 0, 1f));
+                AddLayer("cell-outline", (outline.ToArray(), false, false, 0, 1f));
                 Console.WriteLine($"   cell outline: white dashes around {cb.X0:0},{cb.Y0:0} .. {cb.X1:0},{cb.Y1:0}");
             }
         }
@@ -2528,7 +2542,7 @@ static class TexturedScene
                 float d = MathF.Max(1f, Vector3.Distance(v, cam.Eye));
                 Overlay.Sphere(spheres, YUp(v + lift), Math.Clamp(d * 0.00275f, 1f, 45f), dc);
             }
-            layers.Add((spheres.ToArray(), false, true, 0, 1f));
+            AddLayer("nav-diff-spheres", (spheres.ToArray(), false, true, 0, 1f));
             Console.WriteLine($"   nav diff: {diffVerts.Count} vertex sphere(s) — vertices this version has and the other does not");
         }
 
@@ -2566,7 +2580,7 @@ static class TexturedScene
                     Overlay.Vertex(rim, i1, rimColour, Vector3.Zero);
                 }
             }
-            layers.Add((rim.ToArray(), false, false, 0, 1f));
+            AddLayer("npc-rim", (rim.ToArray(), false, false, 0, 1f));
             Console.WriteLine($"   npc pucks: {npcActors.Count} disc(s) + always-visible rim(s), one identity colour per actor");
         }
 
@@ -2735,10 +2749,10 @@ static class TexturedScene
             }
 
             // Discs first, so the line and its arrows draw ON the marker rather than under it.
-            if (rDisc.Count > 0) layers.Add((rDisc.ToArray(), false, false, 3, 0.35f));
-            if (rSolid.Count > 0) layers.Add((rSolid.ToArray(), true, false, 3, 1f));
-            if (rDash.Count > 0) layers.Add((rDash.ToArray(), false, false, 3, 1f));
-            if (rFlat.Count > 0) layers.Add((rFlat.ToArray(), false, false, 3, 1f));
+            if (rDisc.Count > 0) AddLayer("route-disc", (rDisc.ToArray(), false, false, 3, 0.35f));
+            if (rSolid.Count > 0) AddLayer("route-solid", (rSolid.ToArray(), true, false, 3, 1f));
+            if (rDash.Count > 0) AddLayer("route-dash", (rDash.ToArray(), false, false, 3, 1f));
+            if (rFlat.Count > 0) AddLayer("route-arrow", (rFlat.ToArray(), false, false, 3, 1f));
             Console.WriteLine($"   route: {route.Waypoints.Count} waypoint(s), {route.Legs.Count} leg(s) drawn as "
                             + $"{pathPoints:N0} ground-following point(s), {heads} arrowhead(s)"
                             + (route.Discs ? $", {route.Waypoints.Count} translucent disc(s) at r{48}" : "")
@@ -2763,10 +2777,10 @@ static class TexturedScene
             if (showPlanes || interactive is not null)
             {
                 var (quadFill, boxFill, pSolid, pDash) = PlaneOverlay.Build(planes, cam.Eye);
-                if (quadFill.Count > 0) layers.Add((quadFill.ToArray(), true, false, 4, PlaneOverlay.QuadAlpha));
-                if (boxFill.Count > 0) layers.Add((boxFill.ToArray(), true, false, 4, PlaneOverlay.BoxAlpha));
-                if (pSolid.Count > 0) layers.Add((pSolid.ToArray(), true, false, 4, 1f));
-                if (pDash.Count > 0) layers.Add((pDash.ToArray(), false, false, 4, 1f));
+                if (quadFill.Count > 0) AddLayer("plane-quad", (quadFill.ToArray(), true, false, 4, PlaneOverlay.QuadAlpha));
+                if (boxFill.Count > 0) AddLayer("plane-box", (boxFill.ToArray(), true, false, 4, PlaneOverlay.BoxAlpha));
+                if (pSolid.Count > 0) AddLayer("plane-solid", (pSolid.ToArray(), true, false, 4, 1f));
+                if (pDash.Count > 0) AddLayer("plane-dash", (pDash.ToArray(), false, false, 4, 1f));
                 int nPortal = planes.Count(p => p.Kind == PlaneKind.PortalBox);
                 Console.WriteLine($"   planes layer: {planes.Count} {(showPlanes ? "drawn" : "resident, hidden until L")} — {nPortal} PortalBox as translucent mid-quads, "
                                 + $"{planes.Count - nPortal} Box as fainter boxes; outline solid where visible, dashed where hidden; "
@@ -2846,7 +2860,7 @@ static class TexturedScene
                         3 => "route",
                         4 => "planes",
                         _ => "grid-seam-outline-mask"
-                    }, wireVbo, data);
+                    }, wireVbo, data, layerLabels?.GetValueOrDefault(data));
                     GL.DrawArrays(PrimitiveType.Triangles, 0, data.Length / 9);
                 }
                 if (ghostData is not null)
