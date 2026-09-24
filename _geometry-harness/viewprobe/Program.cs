@@ -4763,7 +4763,9 @@ if (worklist is not null)
         while (true)
         {
             pendingSwitch = null;
-            int rc = RunCellTextured(worklist.Cells[wlc].Cell, wlc, wls, null, out _);
+            int rc;
+            try { rc = RunCellTextured(worklist.Cells[wlc].Cell, wlc, wls, null, out _); }
+            catch (ViewProbe.GlAllocationRefusal ex) { Console.Error.WriteLine(ex.Message); return 2; }   // F-G4-1
             if (pendingSwitch is not { } next) return rc < 0 ? 0 : rc;
             (wlc, wls) = next;
         }
@@ -4815,6 +4817,11 @@ if (worklist is not null)
                     {
                         var plan = batchProgress?.PlanFor(wlc, wls);
                         rc = RunCellTextured(worklist.Cells[wlc].Cell, wlc, wls, plan, out completed);
+                    }
+                    catch (ViewProbe.GlAllocationRefusal ex)   // F-G4-1: refused before draw, in every mode
+                    {
+                        Console.Error.WriteLine(ex.Message);
+                        rc = 2; completed = new ViewProbe.BatchProgress.ShotArtifacts();
                     }
                     catch (Exception ex) when (ViewProbe.GraphicsReuseRed.IsExpectedFault(ex))
                     {
@@ -4920,7 +4927,9 @@ if (worklist is not null)
     return worklistExit;
 }
 
-int singleRc = RunCellTextured(target, 0, 0, null, out _);
+int singleRc;
+try { singleRc = RunCellTextured(target, 0, 0, null, out _); }
+catch (ViewProbe.GlAllocationRefusal ex) { Console.Error.WriteLine(ex.Message); return 2; }   // F-G4-1
 // FinalExitCode, not a bare return: a shot must never return 3 itself, because the worklist loop
 // above stops at the first shot with a non-zero code and a degraded shot must not stop the ones
 // after it. The condition accumulates across the process and is spent HERE, once.

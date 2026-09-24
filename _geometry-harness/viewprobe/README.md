@@ -700,6 +700,23 @@ shot that fails after building them still releases them before the cell goes on 
 subject's isolation mask is measured against everything the renderer draws in that shot, the
 retained static meshes included, so it is the same mask the per-shot path measures.
 
+**Every shot starts from the same state.** A retained context keeps whatever the previous shot left
+in it, so nothing is inherited:
+
+* before each draw's clear, on both paths, the GL state the draw depends on is set explicitly: depth
+  test, function, write mask and range; face culling and winding; blending; multisampling,
+  alpha-to-coverage and sample coverage; clip distance, scissor, colour mask, stencil, polygon
+  offset and sRGB writes; texture unit 0 active, and no program or vertex array bound;
+* the retained renderer's settings as it was created (every settable property, its light slots and
+  its overlay collections) are applied again at the start of every shot, before the shot sets its
+  own;
+* each retained mesh's visibility and full material state, captured once its bindings are complete
+  and before any per-shot paint, are restored at the end of every shot, so an occlusion, BOS or
+  state tint one shot paints never reaches the next.
+
+The captured lists are explicit: a property the rendering library adds later is not covered until
+it is added to them.
+
 **What makes it refuse instead of drawing.** Each of these is printed and the run exits 2:
 
 | what it prints | when |
@@ -711,6 +728,21 @@ retained static meshes included, so it is the same mask the per-shot path measur
 When a changed key replaces the static scene, the install texture manager's own path map is emptied
 with it, so the new scene's textures are looked up in the resident cache again: a resident texture
 reuses its handle, and an evicted one is uploaded again.
+
+**An allocation failure refuses the shot, with or without the flag.** After each texture the scene
+itself loads (reference, terrain, covering and water textures), viewprobe reads the GL error queue.
+A GL out-of-memory refuses the shot before its first draw with
+
+```
+texture upload refused before draw: the GL driver reported out of memory (GL_OUT_OF_MEMORY) during or before the upload of '<path>' (<category>); <budget>. The shot is refused rather than drawn with a substitute texture.
+```
+
+and the run exits 2. The asset is not reported missing or unreadable: it exists, and the driver
+could not hold it. On the retained path `<budget>` names the resident cache's budget at that moment;
+on the per-shot path it says that path keeps no resident texture cache. The check also runs without
+`--reuse-cell` — a single shot, a worklist and `--interactive` alike — so this is the one change to
+the default path, and only in that failure case: the error used to be left unread and the shot was
+drawn anyway.
 
 With the flag, a failure while the cell's GL side is set up, used or torn down is printed with its
 full stack and the run exits 2, instead of raising the Windows application-error dialog.

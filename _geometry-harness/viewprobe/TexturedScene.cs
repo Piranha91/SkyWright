@@ -635,6 +635,7 @@ static class TexturedScene
                 var oomOrdinary = isStatic ? graphicsReuseRed?.BeforeOrdinaryLoad(category, gamePath,
                     cache.ResolveAssetPath(gamePath), manager) : null;
                 int ordinary = manager.LoadTexture(gamePath);
+                GlAllocationRefusal.Check(category, gamePath, ordinary, manager.WhiteTexture, false, false, null);   // F-G4-1
                 if (oomOrdinary is not null) graphicsReuseRed!.AfterOrdinaryLoad(oomOrdinary, ordinary, manager);   // measurement only
                 if (graphicsShot is not null)
                     graphicsShot.TextureAssigned(category, gamePath, cache.ResolveAssetPath(gamePath), ordinary, manager.WhiteTexture);
@@ -656,6 +657,9 @@ static class TexturedScene
                     x => StringComparer.OrdinalIgnoreCase.Equals(x, gamePath));
                 if (oomProbe is not null)   // measurement only (G4 RED)
                     graphicsReuseRed!.AfterInstallLoad(oomProbe, loaded, missing, manager, graphicsCell!.Resident);
+                // F-G4-1: an allocation failure refuses before the first draw (the install manager is the resident one).
+                GlAllocationRefusal.Check(category, gamePath, loaded, manager.WhiteTexture, missing, diskPath is not null,
+                    isStatic ? graphicsCell!.Resident : null);
                 return new(loaded, missing ? [gamePath] : []);
             }
             var lease = isStatic && builtScene is not null
@@ -1774,6 +1778,7 @@ static class TexturedScene
         {
             GL.BindFramebuffer(FramebufferTarget.Framebuffer, singleSample ? fbo : drawFbo);
             GL.Viewport(0, 0, sizeW, sizeH);
+            ShotGlState.Establish(sizeW, sizeH);   // F-G5-1: nothing inherited from a previous shot or pass
             GL.ClearColor(skyColor.X, skyColor.Y, skyColor.Z, 1f);
             GL.Clear(ClearBufferMask.ColorBufferBit | ClearBufferMask.DepthBufferBit);
             graphicsCell?.ObserveDraw(graphicsShot);   // measurement only (Gate B4, G2 RED); inert without a RED session

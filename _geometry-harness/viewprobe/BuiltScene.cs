@@ -16,6 +16,7 @@ internal sealed class BuiltScene : IDisposable
     {
         internal bool AddedToRenderer { get; set; }
         internal bool BaselineRendering { get; set; } = true;
+        internal MeshMaterialState? BaselineMaterial { get; set; }   // F-G5-2
     }
     sealed record TextureEntry(string Category, string GamePath, string? DiskPath, int Handle, bool Resident,
         string[] MissingPaths);
@@ -150,6 +151,7 @@ internal sealed class BuiltScene : IDisposable
             if (!entry.AddedToRenderer)
                 throw new InvalidOperationException($"static mesh was uploaded but never added: {entry.Category}/{entry.InputSha256}");
             entry.BaselineRendering = entry.Mesh.IsRendering;
+            entry.BaselineMaterial = MeshMaterialState.Capture(entry.Mesh);   // F-G5-2: before any per-shot paint
         }
     }
 
@@ -178,7 +180,11 @@ internal sealed class BuiltScene : IDisposable
     internal void RestoreBaseline()
     {
         ThrowIfDisposed();
-        foreach (var entry in meshes) entry.Mesh.IsRendering = entry.BaselineRendering;
+        foreach (var entry in meshes)
+        {
+            entry.Mesh.IsRendering = entry.BaselineRendering;
+            entry.BaselineMaterial?.ApplyTo(entry.Mesh);   // F-G5-2: tints and any other per-shot write come off
+        }
     }
 
     public void Dispose()

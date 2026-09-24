@@ -17,6 +17,7 @@ internal sealed class GraphicsCell : IDisposable
     GlTextureManager? installTextures;
     GlRenderer? renderer;
     BuiltScene? scene;
+    RendererSettings? rendererBaseline;   // F-G5-3: the renderer as created
     long epoch;
     bool disposed;
 
@@ -69,6 +70,7 @@ internal sealed class GraphicsCell : IDisposable
             installTextures.Initialize();
             renderer = new GlRenderer();
             renderer.Initialize(null);
+            rendererBaseline = RendererSettings.Capture(renderer);
         }
         evidence?.ResidentOwnerReady(resident!, created);
         evidence?.TextureManagerReady(installTextures!, initializedNow: created, role: "install", cellLifetime: true);
@@ -77,6 +79,8 @@ internal sealed class GraphicsCell : IDisposable
         if (scene is not null) red?.PoisonBeforeShot(renderer!, scene, installTextures!);
         // Measurement only (Gate B4, G2 RED): a requested residency mutation between shots; inert without a RED session.
         if (scene is not null) red?.MutateResidency("before-validation", resident!, installTextures!, scene);
+        // F-G5-3: every shot starts from the renderer as created; the shot then sets its own six.
+        rendererBaseline!.ApplyTo(renderer!);
 
         red?.BeforeRenderPass(resident!, scene);   // measurement only (G4 RED): the 16th-pass pressure; inert without a RED session
         resident!.BeginRenderPass();
