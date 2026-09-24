@@ -49,6 +49,7 @@ using Image = SixLabors.ImageSharp.Image;
 bool __batchFailureBoundary = args.Contains("--worklist-selection", StringComparer.Ordinal)
     || args.Contains("--progress-dir", StringComparer.Ordinal)
     || args.Contains("--worklist-readiness-sha256", StringComparer.Ordinal);
+bool __reuseFailureBoundary = args.Contains("--reuse-cell", StringComparer.Ordinal);
 try
 {
 using var __run = RunLog.BeginProcess("viewprobe", args,
@@ -1427,6 +1428,8 @@ string InsideRays(PlacedRef r, string mesh, float qx, float qy, float qz)
 // when that cell's shots are done, null in every other run. A shot reads it and shares nothing
 // beyond it; see CellScene.cs for what may and may not live there.
 ViewProbe.CellScene? cellScene = null;
+ViewProbe.GraphicsReuseRed? graphicsReuseRed = null;
+ViewProbe.GraphicsCell? graphicsCell = null;
 var preparedProcessIdentity = new ViewProbe.PreparedProcessIdentity();
 
 int RunCellTextured(string cellTarget, int wlCell, int wlShot,
@@ -3725,8 +3728,16 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot,
             Profile = ContextProfile.Core,
             NumberOfSamples = interactiveMode && msaa >= 2 ? Math.Min(msaa, 8) : 0,
         };
-        using var fpGw = new GameWindow(GameWindowSettings.Default, fpNws);
-        fpGw.MakeCurrent();
+        using var graphicsContextRed = graphicsCell is null ? graphicsReuseRed?.BeginContext() : null;
+        using var fpGwOwner = graphicsCell is null ? new GameWindow(GameWindowSettings.Default, fpNws) : null;
+        var fpGw = graphicsCell?.Window ?? fpGwOwner!;
+        if (graphicsCell is null)
+        {
+            graphicsContextRed?.BindCreatedContext(fpGw.Context);
+            fpGw.MakeCurrent();
+            graphicsContextRed?.MadeCurrent();
+        }
+        else graphicsCell.MakeCurrent();
 
         // ---- --npc: build the actors on this context --------------------------------------
         // Record side first (a full-order link cache over fresh overlays — the walk above
@@ -4496,7 +4507,9 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot,
                    size, outFile, reportMode, camMeta, planeReport: planeReportSink, bosMode: bosMode, stateMode: stateView, stateName: stateArm?.Name ?? "",
                    visibilityBudget: visibilityBudget, navColourGroups: navColourGroups, refSurface: refSurface,
                    refSurfaceOpacity: refSurfaceOpacity,
-                   depthDumpPath: depthDump, sizeHeight: canvasH, cellScene: cellScene);
+                   depthDumpPath: depthDump, sizeHeight: canvasH, cellScene: cellScene,
+                   graphicsReuseRed: graphicsReuseRed, graphicsCell: graphicsCell,
+                   preparedIdentity: preparedKey);
             if (collectArtifacts) completedArtifacts.AddClosed(outFile, "frame");
             return rendered;
         }
@@ -4683,7 +4696,9 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot,
                 skyColor, terrainHeightAt, dashUnderground, dashUnderStatics, msaa, cullAbove, cellBounds,
                 noDiff, diffColor, picks, fpCap, colourCaptions, npcActors, npcPucksOn, routeRenders, gridRender, overlayLines, keepFx, fxStatic, listMeshes,
                 waterPlanes, coverings, planes, showPlanes, occlusionMode, size, fpOut,
-                reportMode, camMeta, iopt, planeReportSink, bosMode, stateView, stateArm?.Name ?? "", navColourGroups: navColourGroups, refSurface: refSurface, refSurfaceOpacity: refSurfaceOpacity);
+                reportMode, camMeta, iopt, planeReportSink, bosMode, stateView, stateArm?.Name ?? "", navColourGroups: navColourGroups,
+                refSurface: refSurface, refSurfaceOpacity: refSurfaceOpacity, graphicsReuseRed: graphicsReuseRed,
+                graphicsCell: graphicsCell, preparedIdentity: preparedKey);
             Console.WriteLine($"   interactive run over ({iShapes:N0} shapes were resident)");
         pendingSwitch = iopt.CellSwitch;
             NpcCleanup();
@@ -4749,9 +4764,22 @@ if (worklist is not null)
             // --reuse-cell: ONE lease per cell, constructed here and disposed in the finally — a scope,
             // not a cache that gets cleared, so nothing built for this cell can answer in the next one.
             // Without the flag the lease is null and every shot builds its own, as it always did.
-            cellScene = reuseCell ? new ViewProbe.CellScene(worklist.Cells[wlc].Cell) : null;
+            int cellBoundaryExit = 0;
+            var cleanupFailures = new List<Exception>();
             try
             {
+                cellScene = reuseCell ? new ViewProbe.CellScene(worklist.Cells[wlc].Cell) : null;
+                graphicsReuseRed = ViewProbe.GraphicsReuseRed.TryBeginCell(worklist.Cells[wlc].Cell, wlc);
+                if (reuseCell)
+                {
+                    var graphicsSettings = new NativeWindowSettings
+                    {
+                        ClientSize = new OpenTK.Mathematics.Vector2i(8, 8), StartVisible = false,
+                        StartFocused = false, WindowBorder = WindowBorder.Hidden,
+                        APIVersion = new Version(3, 3), Profile = ContextProfile.Core,
+                    };
+                    graphicsCell = new ViewProbe.GraphicsCell(graphicsSettings, graphicsReuseRed);
+                }
                 for (int wls = 0; wls < worklist.Cells[wlc].Shots.Count; wls++)
                 {
                     if (batchProgress is not null && !batchProgress.Contains(wlc, wls)) continue;
@@ -4762,12 +4790,24 @@ if (worklist is not null)
                         var plan = batchProgress?.PlanFor(wlc, wls);
                         rc = RunCellTextured(worklist.Cells[wlc].Cell, wlc, wls, plan, out completed);
                     }
+                    catch (Exception ex) when (ViewProbe.GraphicsReuseRed.IsExpectedFault(ex))
+                    {
+                        Console.Error.WriteLine(ex);
+                        ViewProbe.GraphicsReuseRed.CaughtExpectedFault(ex);
+                        rc = 2; completed = new ViewProbe.BatchProgress.ShotArtifacts();
+                    }
                     catch (Exception ex) when (ViewProbe.CellFactsRed.IsExpectedFault(ex))
                     {
                         // Test-only exception boundary: record the full exception and preserve the
                         // production path's nonzero refusal without letting an intentional RED reach
                         // Windows' unhandled-exception dialog. The cell finally below still owns cleanup.
                         ViewProbe.CellFactsRed.CaughtExpectedFault(ex);
+                        rc = 2; completed = new ViewProbe.BatchProgress.ShotArtifacts();
+                    }
+                    catch (Exception ex) when (ViewProbe.GraphicsReuseRed.TestBoundaryEnabled)
+                    {
+                        Console.Error.WriteLine(ex);
+                        ViewProbe.GraphicsReuseRed.CaughtUnexpected(ex);
                         rc = 2; completed = new ViewProbe.BatchProgress.ShotArtifacts();
                     }
                     catch (Exception ex) when (ViewProbe.CellFactsRed.TestBoundaryEnabled)
@@ -4778,7 +4818,11 @@ if (worklist is not null)
                         ViewProbe.CellFactsRed.CaughtUnexpected(ex);
                         rc = 2; completed = new ViewProbe.BatchProgress.ShotArtifacts();
                     }
-                    if (rc > 0) return ViewProbe.ExtractionScratch.GuardExitCode(rc);
+                    if (rc > 0)
+                    {
+                        cellBoundaryExit = ViewProbe.ExtractionScratch.GuardExitCode(rc);
+                        break;
+                    }
                     if (batchProgress is not null && rc == 0)
                     {
                         if (ViewProbe.BatchProgress.ShotMayCommit(ViewProbe.UnreadableAssets.Count,
@@ -4792,10 +4836,47 @@ if (worklist is not null)
                     }
                 }
             }
-            finally { cellScene?.Dispose(); cellScene = null; }
+            catch (Exception ex) when (ViewProbe.GraphicsReuseRed.TestBoundaryEnabled)
+            {
+                Console.Error.WriteLine(ex);
+                try { ViewProbe.GraphicsReuseRed.CaughtUnexpected(ex); }
+                catch (Exception logEx) { Console.Error.WriteLine(logEx); }
+                cellBoundaryExit = 2;
+            }
+            finally
+            {
+                void CaptureCleanup(Action cleanup)
+                {
+                    try { cleanup(); }
+                    catch (Exception ex)
+                    {
+                        Console.Error.WriteLine(ex);
+                        if (ViewProbe.GraphicsReuseRed.TestBoundaryEnabled)
+                        {
+                            try { ViewProbe.GraphicsReuseRed.CaughtUnexpected(ex); }
+                            catch (Exception logEx) { Console.Error.WriteLine(logEx); }
+                            cellBoundaryExit = 2;
+                        }
+                        else cleanupFailures.Add(ex);
+                    }
+                }
+                CaptureCleanup(() => graphicsCell?.Dispose());
+                graphicsCell = null;
+                CaptureCleanup(() => cellScene?.Dispose());
+                cellScene = null;
+                CaptureCleanup(() => graphicsReuseRed?.Dispose());
+                graphicsReuseRed = null;
+            }
+            if (cleanupFailures.Count > 0)
+                throw new AggregateException("worklist cell cleanup failed", cleanupFailures);
+            if (cellBoundaryExit > 0)
+            {
+                _ = ViewProbe.GraphicsReuseRed.Finish();
+                return ViewProbe.ExtractionScratch.GuardExitCode(cellBoundaryExit);
+            }
         }
     }
-    catch (Exception ex) when (batchProgress is not null)
+    catch (Exception ex) when (batchProgress is not null && !ViewProbe.GraphicsReuseRed.TestBoundaryEnabled)
     {
         // The opt-in driver boundary includes CellScene construction, rendering, receipt commit
         // and the lease's finally. Every failure is durable console text plus a normal nonzero exit,
@@ -4809,6 +4890,7 @@ if (worklist is not null)
     // that no catch can improve on.
     int worklistExit = ViewProbe.ExtractionScratch.GuardExitCode(ViewProbe.UnreadableAssets.FinalExitCode(0));
     if (!ViewProbe.CellFactsRed.Finish()) return 1;
+    if (!ViewProbe.GraphicsReuseRed.Finish()) return 1;
     return worklistExit;
 }
 
@@ -5228,11 +5310,20 @@ static int Smoke()
     return 0;
 }
 }
-catch (Exception ex) when (__batchFailureBoundary)
+catch (Exception ex) when (__batchFailureBoundary || __reuseFailureBoundary
+                           || ViewProbe.GraphicsReuseRed.TestBoundaryEnabled)
 {
-    // The opt-in driver must never surface a Windows application-error dialog. This outer edge
-    // includes setup and every using/finally disposal; ordinary production invocations retain the
-    // historical exception behavior because the filter is false when no driver flag was supplied.
-    Console.Error.WriteLine("worklist selection/progress unexpected failure:\n" + ex);
+    // The opt-in driver and graphics-cell lease must never surface a Windows application-error
+    // dialog. This outer edge includes setup and every using/finally disposal; ordinary production
+    // invocations retain the historical exception behavior when neither mode was requested.
+    Console.Error.WriteLine((__reuseFailureBoundary
+        ? "graphics cell reuse unexpected failure:\n"
+        : "worklist selection/progress unexpected failure:\n") + ex);
+    if (ViewProbe.GraphicsReuseRed.TestBoundaryEnabled)
+    {
+        try { ViewProbe.GraphicsReuseRed.CaughtUnexpected(ex); }
+        catch (Exception logEx) { Console.Error.WriteLine(logEx); }
+        _ = ViewProbe.GraphicsReuseRed.Finish();
+    }
     return 2;
 }

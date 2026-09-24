@@ -648,13 +648,12 @@ older process cache in place. This guard does not hash archive contents. A chang
 camera does not invalidate record facts. A changed watch/selection key rebuilds the guarded slot,
 and the next worklist cell always receives a new lease.
 
-What it will not share, because the camera decides it: the uploaded meshes (`--cull-above` drops
-triangles above the cut *before* upload), the route's ground z, and `--npc-puck auto`. What it will
-not hold at all: anything owning a GL handle — the context is built per shot, so the textures the
-renderer uploads stay with the per-shot texture manager that deletes them. The rest of the list,
-and the reasoning, is in `CellScene.cs`; `viewprobe --cell-scene-selftest` holds the lease to its
-three promises (one set of objects per cell, a new set for the next cell, nothing after the cell)
-with no game, no instance and no GL context.
+What it will not share, because the camera decides it: the route's ground z and `--npc-puck auto`.
+What it will not hold at all: anything owning a GL handle. The GL side of a cell has its own owner,
+described below. The rest of the list, and the reasoning, is in `CellScene.cs`;
+`viewprobe --cell-scene-selftest` holds the lease to its three promises (one set of objects per
+cell, a new set for the next cell, nothing after the cell) with no game, no instance and no GL
+context.
 
 Every change to what the lease holds is checked with the equivalence suite above, run with the flag
 **on and off**, on an interior, an exterior with water, a multi-cell worklist and a fixture whose
@@ -665,6 +664,36 @@ while extending this lease. It renders synthetic mesh outcomes through `RenderTo
 and cut behavior, hashes every consumed array/material input, and exercises cell/disposal bounds.
 It uses no game or MO2 data. Exit 0 means every declared lifetime contract holds; exit 1 lists the
 contracts still unmet, and exit 2 is an unexpected test failure with its full stack.
+
+#### The GL side of a cell: one context, one static scene
+
+With `--reuse-cell`, a worklist cell also owns one hidden GL context for all of its shots. It is
+created when the cell starts and destroyed when the cell is done, on the thread that created it, and
+the next cell gets a new one. **Without the flag none of this exists**: every shot creates and
+deletes its own context, as it always did.
+
+For the life of the cell it keeps:
+
+* the **context** and the **renderer**, created and initialised once;
+* the **install texture manager** and its **resident texture cache**, which hold the textures the
+  static scene draws with;
+* the **static scene**: the uploaded meshes of the placed references, the terrain and its painted
+  layers, and the coverings, with the textures they bind.
+
+The static scene is keyed on the prepared cell identity (the record-walk key above) and on every
+input that decides its geometry or materials without depending on the camera: each reference's
+mesh, placement, scale, highlight, marker, BOS and state labels; the terrain patches and layers; the
+coverings; `--fx` and `--fx-static`; `--cull-above` (the cut is applied before upload);
+`--ref-surface` and its opacity; and the `VP_LAYER_ONLY`, `VP_LAYER_SOLID` and `VP_FXSTATIC_EMIT`
+variables. A shot whose key differs from the retained one disposes that scene and builds a new one,
+so no shot draws a scene built for other inputs.
+
+Fresh in every shot: the camera and the frame target, and a per-shot texture manager for every
+texture the static scene does not own. What that manager loads never joins the resident cache; it
+is deleted with the shot.
+
+With the flag, a failure while the cell's GL side is set up, used or torn down is printed with its
+full stack and the run exits 2, instead of raising the Windows application-error dialog.
 
 ### An asset that was found and could not be read fails the run
 

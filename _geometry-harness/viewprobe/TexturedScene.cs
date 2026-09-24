@@ -219,6 +219,65 @@ static class TexturedScene
         public Action? ObserveMeshStateFactory { get; init; }
     }
 
+    sealed class ShotResourceScope : IDisposable
+    {
+        readonly GlRenderer renderer; readonly List<GlMesh> owned; readonly List<GlMesh> borrowed;
+        readonly GraphicsReuseRed.ShotScope? evidence; readonly List<(string Kind, int Handle)> raw = [];
+        readonly bool removeOwnedFromRenderer;
+        bool disposed;
+        internal ShotResourceScope(GlRenderer renderer, List<GlMesh> owned, List<GlMesh> borrowed,
+            GraphicsReuseRed.ShotScope? evidence, bool removeOwnedFromRenderer)
+        {
+            this.renderer = renderer; this.owned = owned; this.borrowed = borrowed;
+            this.evidence = evidence; this.removeOwnedFromRenderer = removeOwnedFromRenderer;
+        }
+        internal void TrackTexture(int handle) => raw.Add(("texture", handle));
+        internal void TrackTargets(int fbo, int color, int depth, int msFbo, int msColor, int msDepth)
+        { raw.Add(("framebuffer", fbo)); raw.Add(("texture", color)); raw.Add(("renderbuffer", depth)); raw.Add(("framebuffer", msFbo)); raw.Add(("renderbuffer", msColor)); raw.Add(("renderbuffer", msDepth)); }
+        internal void TrackOverlay(int program, int vao, int vbo)
+        { raw.Add(("program", program)); raw.Add(("vertex-array", vao)); raw.Add(("buffer", vbo)); }
+        public void Dispose()
+        {
+            if (disposed) return; disposed = true; List<Exception> failures = [];
+            foreach (var mesh in borrowed)
+                try { renderer.RemoveMesh(mesh); evidence?.MeshRemoved("dynamic-npc-borrowed", mesh, borrowed: true); }
+                catch (Exception ex) { failures.Add(ex); }
+            borrowed.Clear();
+            foreach (var mesh in owned)
+            {
+                if (removeOwnedFromRenderer)
+                    try { renderer.RemoveMesh(mesh); evidence?.MeshRemoved("dynamic-owned", mesh); }
+                    catch (Exception ex) { failures.Add(ex); }
+                try { mesh.Dispose(); } catch (Exception ex) { failures.Add(ex); }
+            }
+            owned.Clear();
+            if (raw.Any(x => x.Kind == "framebuffer" && x.Handle > 0))
+                try { GL.BindFramebuffer(FramebufferTarget.Framebuffer, 0); }
+                catch (Exception ex) { failures.Add(ex); }
+            // A program or vertex array deleted while still bound is only flagged, and outlives the shot in a
+            // retained context. Unbind both before deleting (the overlay's own deletion site does the same).
+            if (raw.Any(x => (x.Kind == "program" || x.Kind == "vertex-array") && x.Handle > 0))
+                try { GL.UseProgram(0); GL.BindVertexArray(0); }
+                catch (Exception ex) { failures.Add(ex); }
+            foreach (var (kind, handle) in raw.AsEnumerable().Reverse())
+            {
+                if (handle <= 0) continue;
+                try
+                {
+                    if (kind == "texture" && GL.IsTexture(handle)) GL.DeleteTexture(handle);
+                    else if (kind == "framebuffer" && GL.IsFramebuffer(handle)) GL.DeleteFramebuffer(handle);
+                    else if (kind == "renderbuffer" && GL.IsRenderbuffer(handle)) GL.DeleteRenderbuffer(handle);
+                    else if (kind == "program" && GL.IsProgram(handle)) GL.DeleteProgram(handle);
+                    else if (kind == "vertex-array" && GL.IsVertexArray(handle)) GL.DeleteVertexArray(handle);
+                    else if (kind == "buffer" && GL.IsBuffer(handle)) GL.DeleteBuffer(handle);
+                }
+                catch (Exception ex) { failures.Add(ex); }
+            }
+            raw.Clear();
+            if (failures.Count > 0) throw new AggregateException("shot graphics teardown failed", failures);
+        }
+    }
+
     static List<NifMeshBuilder.BuiltMesh>? NormalizeMeshes(List<NifMeshBuilder.BuiltMesh>? built)
     {
         if (built is null) return null;
@@ -336,6 +395,50 @@ static class TexturedScene
         return folders;
     }
 
+    static string StaticInputKey(string preparedIdentity, IReadOnlyList<SceneRef> refs,
+        IReadOnlyDictionary<string, List<(Vector3 A, Vector3 B, Vector3 C)>> terrainPatches,
+        IReadOnlyList<(string Diffuse, List<(Vector3 A, Vector3 B, Vector3 C, float Oa, float Ob, float Oc)> Tris)> terrainLayers,
+        IReadOnlyDictionary<FormKey, Covering> coverings, bool keepFx, bool fxStatic,
+        float? cullAbove, bool refSurface, float refSurfaceOpacity)
+    {
+        using var hash = System.Security.Cryptography.IncrementalHash.CreateHash(
+            System.Security.Cryptography.HashAlgorithmName.SHA256);
+        void Add(string? value)
+        {
+            byte[] bytes = System.Text.Encoding.UTF8.GetBytes(value ?? "<null>");
+            hash.AppendData(bytes); hash.AppendData(new byte[] { 0 });
+        }
+        static string F(float value) => value.ToString("R", System.Globalization.CultureInfo.InvariantCulture);
+        static string V(Vector3 value) => $"{F(value.X)},{F(value.Y)},{F(value.Z)}";
+        static string H(Vec3 value) => $"{F(value.X)},{F(value.Y)},{F(value.Z)}";
+        Add(preparedIdentity); Add($"fx={keepFx};fxStatic={fxStatic};cull={cullAbove?.ToString("R", System.Globalization.CultureInfo.InvariantCulture)};surface={refSurface};opacity={F(refSurfaceOpacity)}");
+        Add(Environment.GetEnvironmentVariable("VP_LAYER_ONLY")); Add(Environment.GetEnvironmentVariable("VP_LAYER_SOLID"));
+        Add(Environment.GetEnvironmentVariable("VP_FXSTATIC_EMIT"));
+        foreach (var r in refs)
+            Add(string.Join("|", r.MeshRelPath, r.RefKey, r.BaseKey, r.BaseEditorId, H(r.Position), H(r.Rotation),
+                F(r.Scale), r.Highlight, r.Marker, r.BosRecordBase, r.BosLabel, r.BosRandom, r.StateChange,
+                r.StateLabel, r.Constructed, V(r.HighlightColor)));
+        foreach (var patch in terrainPatches.OrderBy(x => x.Key, StringComparer.OrdinalIgnoreCase))
+        {
+            Add("patch:" + patch.Key);
+            foreach (var (a, b, c) in patch.Value) Add(V(a) + "|" + V(b) + "|" + V(c));
+        }
+        foreach (var layer in terrainLayers)
+        {
+            Add("layer:" + layer.Diffuse);
+            foreach (var (a, b, c, oa, ob, oc) in layer.Tris)
+                Add(V(a) + "|" + V(b) + "|" + V(c) + "|" + F(oa) + "|" + F(ob) + "|" + F(oc));
+        }
+        foreach (var pair in coverings.OrderBy(x => x.Key))
+        {
+            var c = pair.Value;
+            Add(string.Join("|", pair.Key, V(c.ProjectionVector), F(c.MaxAngleDeg), F(c.FalloffBias),
+                F(c.FalloffScale), F(c.UvScale), F(c.Color.X), F(c.Color.Y), F(c.Color.Z), F(c.Color.W),
+                c.ModelPath, c.Label));
+        }
+        return Convert.ToHexString(hash.GetHashAndReset());
+    }
+
     /// <summary>Build, render and save. The GL context must already be current (Program.cs owns the
     /// hidden GameWindow). Returns the number of shapes drawn.</summary>
     public static int RenderToPng(
@@ -391,7 +494,10 @@ static class TexturedScene
         string? depthDumpPath = null,                   // --depth-dump: write the finished frame's window depth (the array --pick reads) here, verbatim
         int sizeHeight = 0,                             // capture canvas HEIGHT in pixels; 0 keeps the historic square (sizeW x sizeW)
         CellScene? cellScene = null,                    // --reuse-cell: this CELL's lease (CellScene.cs); null = build everything for this shot, as before
-        MeshReadHooks? meshReadHooks = null)            // RED instrumentation only; null is the production path
+        MeshReadHooks? meshReadHooks = null,            // RED instrumentation only; null is the production path
+        GraphicsReuseRed? graphicsReuseRed = null,      // private graphics-lifetime RED; null is the production path
+        GraphicsCell? graphicsCell = null,              // opt-in retained GL owner; null preserves the per-shot path
+        string? preparedIdentity = null)                // retained CPU-walk identity; required with graphicsCell
     {
         // THE CANVAS IS TWO NUMBERS, NOT ONE. It used to be `size` on both axes, and the camera's
         // fov went to the projection at aspect 1 -- so a pose planned for a 16:9 deliverable was
@@ -404,6 +510,23 @@ static class TexturedScene
         // The projection's aspect comes from the canvas that will actually be read back, so the
         // delivered pixels and the --pick unprojection cannot disagree about the frustum.
         float canvasAspect = (float)sizeW / sizeH;
+        using var graphicsShot = graphicsReuseRed?.BeginShot(new GraphicsReuseRed.GraphicsShotFacts(
+            CameraSha256: Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(
+                System.Text.Encoding.UTF8.GetBytes(FormattableString.Invariant(
+                    $"{cam.Eye.X:R}|{cam.Eye.Y:R}|{cam.Eye.Z:R}|{cam.Look.X:R}|{cam.Look.Y:R}|{cam.Look.Z:R}|{cam.FovDeg:R}|{sizeW}|{sizeH}")))),
+            StaticRefPopulation: refs.Count,
+            TerrainPatchPopulation: terrainPatches.Sum(x => x.Value.Count),
+            TerrainLayerPopulation: terrainLayers.Sum(x => x.Tris.Count),
+            WaterPopulation: waterPlanes.Count,
+            NavTrianglePopulation: navTris.Count,
+            RedTrianglePopulation: redTris.Count,
+            NpcPopulation: npcActors.Count,
+            NpcPuckPopulation: npcPucks ? npcActors.Count : 0,
+            RoutePopulation: routes.Count,
+            GridPopulation: grid is null ? 0 : 1,
+            OverlayLinePopulation: overlayLines.Count,
+            PlanePopulation: planes.Count,
+            SubjectMaskPopulation: refs.Count(x => x.Highlight)));
         var logger = new ConsoleCvLogger();
         var gate = new CharacterViewerLogGate { Verbose = Environment.GetEnvironmentVariable("VP_CV_VERBOSE") == "1" };
 
@@ -442,11 +565,29 @@ static class TexturedScene
         }
         var meshState = cellScene is null ? MakeMeshState() : cellScene.Mesh(MakeMeshState);
         var builder = meshState.Builder;
-        using var textures = new GlTextureManager(cache, logger);
+        // Declared before the real GL owners so it disposes after them, while Program's real
+        // GameWindow/context is still current. The scope queries handles but owns none of them.
+        using var graphicsLifetime = graphicsShot?.BeginGraphicsLifetime();
+        if (graphicsCell is not null && string.IsNullOrWhiteSpace(preparedIdentity))
+            throw new InvalidOperationException("retained graphics requires the prepared-cell identity");
+        string staticKey = graphicsCell is null ? "unretained" : StaticInputKey(preparedIdentity!, refs,
+            terrainPatches, terrainLayers, coveringsByBase, keepFx, fxStatic, cullAbove, refSurface, refSurfaceOpacity);
+        BuiltScene? builtScene = graphicsCell?.BeginShot(staticKey, cache, logger, graphicsShot);
+        // Shot-local textures never join the cell's resident cache (Gate B2 review, C2 option A): in reuse mode the
+        // per-shot manager is built exactly as the no-flag path builds it, so what it loads dies with the shot and
+        // the resident cache holds only the retained install textures.
+        using var textures = new GlTextureManager(cache, logger, null);
         textures.Initialize();
+        graphicsShot?.TextureManagerReady(textures, initializedNow: true,
+            role: graphicsCell is null ? "install" : "shot", cellLifetime: graphicsCell is null);
 
-        using var renderer = new GlRenderer();
-        renderer.Initialize(null);                       // embedded shaders
+        using var localRenderer = graphicsCell is null ? new GlRenderer() : null;
+        var renderer = graphicsCell?.Renderer ?? localRenderer!;
+        if (localRenderer is not null)
+        {
+            renderer.Initialize(null);                  // embedded shaders
+            graphicsShot?.RendererReady(renderer, initializedNow: true);
+        }
         renderer.EnableBloom = false;                    // deterministic output; no post FX
         renderer.EnableShadows = false;
         renderer.EnableAmbientOcclusion = false;
@@ -457,14 +598,61 @@ static class TexturedScene
         renderer.SetAmbientIntensity(0.55f);
         renderer.SetKeyLight(azimuthDeg: 135f, elevationDeg: 55f, intensity01: 0.85f, new GlVec3(1f, 0.98f, 0.92f));
         renderer.SetFillLight(azimuthDeg: 315f, elevationDeg: 20f, intensity01: 0.35f, new GlVec3(0.85f, 0.9f, 1f));
+        var meshes = new List<GlMesh>();
+        var borrowedNpcMeshes = new List<GlMesh>();
+        using var shotResources = new ShotResourceScope(renderer, meshes, borrowedNpcMeshes, graphicsShot,
+            removeOwnedFromRenderer: graphicsCell is not null);
+        var retainedMissingTexturePaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        int LoadObservedTexture(string category, string gamePath)
+        {
+            bool isStatic = category.StartsWith("static-", StringComparison.Ordinal);
+            var manager = isStatic && graphicsCell is not null ? graphicsCell.InstallTextures : textures;
+            if (graphicsCell is null)
+            {
+                int ordinary = manager.LoadTexture(gamePath);
+                if (graphicsShot is not null)
+                    graphicsShot.TextureAssigned(category, gamePath, cache.ResolveAssetPath(gamePath), ordinary, manager.WhiteTexture);
+                return ordinary;
+            }
+            string? diskPath = cache.ResolveAssetPath(gamePath);
+            BuiltScene.TextureLease LoadAndCaptureMissing()
+            {
+                int loaded = manager.LoadTexture(gamePath);
+                // The manager's case-insensitive set is the diagnostic contract. A failed asset
+                // request enters it but is not handle-cached, so membership survives repeated
+                // calls and static-key replacement. White handle alone is insufficient: GL upload
+                // failure can also return (and cache) white without recording a missing asset.
+                bool missing = manager.MissingTexturePaths.Any(
+                    x => StringComparer.OrdinalIgnoreCase.Equals(x, gamePath));
+                return new(loaded, missing ? [gamePath] : []);
+            }
+            var lease = isStatic && builtScene is not null
+                ? builtScene.Texture(category, gamePath, diskPath, LoadAndCaptureMissing, manager.WhiteTexture)
+                : LoadAndCaptureMissing();
+            int handle = lease.Handle;
+            retainedMissingTexturePaths.UnionWith(lease.MissingPaths);
+            graphicsShot?.TextureAssigned(category, gamePath, diskPath, handle, manager.WhiteTexture);
+            return handle;
+        }
+
+        int staticWhite = graphicsCell?.InstallTextures.WhiteTexture ?? textures.WhiteTexture;
 
         // A 1x1 orange diffuse for the highlighted ref — the same signal color the flat mode uses.
-        int orange = GL.GenTexture();
-        GL.BindTexture(TextureTarget.Texture2D, orange);
-        GL.TexImage2D(TextureTarget.Texture2D, 0, PixelInternalFormat.Rgba8, 1, 1, 0,
-                      PixelFormat.Rgba, PixelType.UnsignedByte, new byte[] { 255, 90, 26, 255 });
-        GL.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMinFilter, (int)TextureMinFilter.Nearest);
-        GL.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMagFilter, (int)TextureMagFilter.Nearest);
+        int CreateOrange()
+        {
+            int made = GL.GenTexture();
+            GL.BindTexture(TextureTarget.Texture2D, made);
+            GL.TexImage2D(TextureTarget.Texture2D, 0, PixelInternalFormat.Rgba8, 1, 1, 0,
+                          PixelFormat.Rgba, PixelType.UnsignedByte, new byte[] { 255, 90, 26, 255 });
+            GL.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMinFilter, (int)TextureMinFilter.Nearest);
+            GL.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMagFilter, (int)TextureMagFilter.Nearest);
+            return made;
+        }
+        var orangeLease = builtScene?.OwnedTexture("static-diagnostic-orange", CreateOrange);
+        int orange = orangeLease?.Handle ?? CreateOrange();
+        if (builtScene is not null) graphicsShot?.TrackCellOwnedTexture("diagnostic-orange", orange);
+        else { graphicsShot?.TrackOwnedTexture("diagnostic-orange", orange); shotResources.TrackTexture(orange); }
 
         var builtCache = new Dictionary<string, List<NifMeshBuilder.BuiltMesh>?>(StringComparer.OrdinalIgnoreCase);
 
@@ -475,9 +663,9 @@ static class TexturedScene
         var matoTexCache = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
         int MatoTexture(string? modelPath)
         {
-            if (modelPath is not { Length: > 0 }) return textures.WhiteTexture;
+            if (modelPath is not { Length: > 0 }) return staticWhite;
             if (matoTexCache.TryGetValue(modelPath, out var cached)) return cached;
-            int handle = textures.WhiteTexture;
+            int handle = staticWhite;
             var mrel = modelPath.StartsWith("meshes", StringComparison.OrdinalIgnoreCase)
                      ? modelPath : Path.Combine("meshes", modelPath);
             try
@@ -487,8 +675,8 @@ static class TexturedScene
                     foreach (var mb in builder.BuildFromFile(mabs))
                         if (mb.TexturePaths.TryGetValue(0, out var t0) && t0 is { Length: > 0 })
                         {
-                            int h = textures.LoadTexture(t0);
-                            if (h != textures.WhiteTexture) { handle = h; break; }
+                            int h = LoadObservedTexture("static-covering-diffuse", t0);
+                            if (h != staticWhite) { handle = h; break; }
                         }
             }
             catch (Exception ex) { logger.LogError($"MATO model '{mrel}'", ex); }
@@ -518,7 +706,6 @@ static class TexturedScene
         // Printed once per distinct mesh, at build time, before any skip decision.
         string? shapeDump = Environment.GetEnvironmentVariable("VP_SHAPE_DUMP");
         var shapeDumped = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        var meshes = new List<GlMesh>();
         // Highlighted refs keep their own texture; their halo (an inflated inverted hull) is
         // emitted here and drawn by the OVERLAY pass, whose zero-normal vertices render as the
         // exact flat colour — the library pass would shade the hull's inward faces to black.
@@ -802,8 +989,18 @@ static class TexturedScene
                     if (keep.Count < tri.Length) tri = keep.ToArray();
                 }
 
-                var mesh = new GlMesh();
-                mesh.Upload(Interleave(wp, wn, b.TextureCoordinates, wt, wb, b.VertexColors), tri);
+                var meshVertices = Interleave(wp, wn, b.TextureCoordinates, wt, wb, b.VertexColors);
+                var retainedMesh = builtScene?.AcquireMesh("static-ref", meshVertices, tri);
+                var mesh = retainedMesh?.Mesh ?? new GlMesh();
+                bool meshCreatedNow = retainedMesh?.CreatedNow ?? true;
+                string? meshUploadHash = retainedMesh?.InputSha256;
+                if (graphicsShot is not null && meshUploadHash is null)
+                    meshUploadHash = BuiltScene.HashArrays(meshVertices, tri);
+                if (meshCreatedNow)
+                {
+                    mesh.Upload(meshVertices, tri);
+                    graphicsShot?.MeshUploaded("static-ref", mesh, meshVertices, tri);
+                }
                 mesh.ShapeName = b.ShapeName;
                 mesh.HasVertexColors = b.VertexColors is { Length: > 0 };
                 mesh.UseAlphaTest = b.HasAlphaTest;
@@ -831,8 +1028,8 @@ static class TexturedScene
                     // survives only where it pokes past the silhouette. (Was a flat orange
                     // repaint, which deleted every scale cue — Piranha, 2026-08-28.)
                     string? hd = b.TexturePaths.TryGetValue(0, out var hdp) ? hdp : null;
-                    mesh.DiffuseTexture = hd is { Length: > 0 } ? textures.LoadTexture(hd) : textures.WhiteTexture;
-                    if (mesh.DiffuseTexture != textures.WhiteTexture) texturedShapes++;
+                    mesh.DiffuseTexture = hd is { Length: > 0 } ? LoadObservedTexture("static-ref-diffuse", hd) : staticWhite;
+                    if (mesh.DiffuseTexture != staticWhite) texturedShapes++;
 
                     // Inflate from the shape's own centroid, NOT along stored normals — this
                     // door NIF's normals point inward, and a normal-inflated hull turns inside
@@ -886,7 +1083,7 @@ static class TexturedScene
                     // Markers are shown (only on --markers) as what they are: an editor overlay,
                     // not world geometry — their own texture at half strength over the scene.
                     string? md = b.TexturePaths.TryGetValue(0, out var mdp) ? mdp : null;
-                    mesh.DiffuseTexture = md is { Length: > 0 } ? textures.LoadTexture(md) : orange;
+                    mesh.DiffuseTexture = md is { Length: > 0 } ? LoadObservedTexture("static-ref-marker", md) : orange;
                     mesh.HasAlphaBlend = true;
                     mesh.MaterialAlpha = 0.5f;
                     mesh.DepthWrite = false;
@@ -895,12 +1092,12 @@ static class TexturedScene
                 {
                     string? diffuse = b.TexturePaths.TryGetValue(0, out var d) ? d : null;
                     string? normal = b.TexturePaths.TryGetValue(1, out var nrm) ? nrm : null;
-                    mesh.DiffuseTexture = diffuse is { Length: > 0 } ? textures.LoadTexture(diffuse) : textures.WhiteTexture;
-                    if (mesh.DiffuseTexture != textures.WhiteTexture) texturedShapes++;
+                    mesh.DiffuseTexture = diffuse is { Length: > 0 } ? LoadObservedTexture("static-ref-diffuse", diffuse) : staticWhite;
+                    if (mesh.DiffuseTexture != staticWhite) texturedShapes++;
                     if (normal is { Length: > 0 })
                     {
-                        int h = textures.LoadTexture(normal);
-                        if (h != textures.WhiteTexture) { mesh.NormalTexture = h; mesh.HasNormalMap = true; }
+                        int h = LoadObservedTexture("static-ref-normal", normal);
+                        if (h != staticWhite) { mesh.NormalTexture = h; mesh.HasNormalMap = true; }
                     }
                 }
 
@@ -962,8 +1159,14 @@ static class TexturedScene
                     refHadFxStatic = true;
                 }
 
-                renderer.AddMesh(mesh);
-                meshes.Add(mesh);
+                if (meshCreatedNow)
+                {
+                    renderer.AddMesh(mesh);
+                    builtScene?.AddedToRenderer(mesh);
+                    graphicsShot?.MeshAdded("static-ref", mesh);
+                }
+                if (graphicsShot is not null) graphicsShot.StaticBound("static-ref", mesh, meshUploadHash!);
+                if (builtScene is null) meshes.Add(mesh);
                 shapes++;
                 ro.Meshes.Add(mesh);
                 part.Meshes.Add(mesh);
@@ -1032,8 +1235,18 @@ static class TexturedScene
                     // and it is what keeps the covering pass from doubling the scene.
                     if (maxAlpha > 0.004f)
                     {
-                        var covMesh = new GlMesh();
-                        covMesh.Upload(Interleave(cp, wn, cu, wt, wb, cc), tri);
+                        var coveringVertices = Interleave(cp, wn, cu, wt, wb, cc);
+                        var retainedCovering = builtScene?.AcquireMesh("static-covering", coveringVertices, tri);
+                        var covMesh = retainedCovering?.Mesh ?? new GlMesh();
+                        bool coveringCreatedNow = retainedCovering?.CreatedNow ?? true;
+                        string? coveringUploadHash = retainedCovering?.InputSha256;
+                        if (graphicsShot is not null && coveringUploadHash is null)
+                            coveringUploadHash = BuiltScene.HashArrays(coveringVertices, tri);
+                        if (coveringCreatedNow)
+                        {
+                            covMesh.Upload(coveringVertices, tri);
+                            graphicsShot?.MeshUploaded("static-covering", covMesh, coveringVertices, tri);
+                        }
                         covMesh.ShapeName = $"covering:{cv.Label}";
                         covMesh.HasVertexColors = true;      // the shader's baseColor.a *= vertexColor.a
                         covMesh.HasAlphaBlend = true;
@@ -1043,8 +1256,14 @@ static class TexturedScene
                         covMesh.IsDecal = true;              // drawn after the sorted blend set, never writes depth
                         covMesh.IsDoubleSided = mesh.IsDoubleSided;
                         covMesh.DiffuseTexture = MatoTexture(cv.ModelPath);
-                        renderer.AddMesh(covMesh);
-                        meshes.Add(covMesh);
+                        if (coveringCreatedNow)
+                        {
+                            renderer.AddMesh(covMesh);
+                            builtScene?.AddedToRenderer(covMesh);
+                            graphicsShot?.MeshAdded("static-covering", covMesh);
+                        }
+                        if (graphicsShot is not null) graphicsShot.StaticBound("static-covering", covMesh, coveringUploadHash!);
+                        if (builtScene is null) meshes.Add(covMesh);
                         ro.Meshes.Add(covMesh);              // the snow is culled with its roof
                         part.Meshes.Add(covMesh);
                         // The live height clip walks PickShapes and a shell is deliberately not
@@ -1075,8 +1294,8 @@ static class TexturedScene
         foreach (var (texPath, patchTris) in terrainPatches)
         {
             if (patchTris.Count == 0) continue;
-            int texHandle = texPath.Length > 0 ? textures.LoadTexture(texPath) : textures.WhiteTexture;
-            bool textured = texPath.Length > 0 && texHandle != textures.WhiteTexture;
+            int texHandle = texPath.Length > 0 ? LoadObservedTexture("static-terrain-diffuse", texPath) : staticWhite;
+            bool textured = texPath.Length > 0 && texHandle != staticWhite;
             if (textured) terrainTexturedPatches++; else terrainFallbackPatches++;
 
             var tv = new List<Vector3>(); var ti = new List<int>();
@@ -1106,14 +1325,31 @@ static class TexturedScene
                 tc.Add(col); tc.Add(col); tc.Add(col);
                 ti.Add(at); ti.Add(at + 1); ti.Add(at + 2);
             }
-            var terra = new GlMesh();
-            terra.Upload(Interleave(tv.ToArray(), tn.ToArray(), tuv.ToArray(), tn.ToArray(), tn.ToArray(), tc.ToArray()), ti.ToArray());
+            var terrainIndices = ti.ToArray();
+            var terrainVertices = Interleave(tv.ToArray(), tn.ToArray(), tuv.ToArray(), tn.ToArray(), tn.ToArray(), tc.ToArray());
+            var retainedTerrain = builtScene?.AcquireMesh("static-terrain", terrainVertices, terrainIndices);
+            var terra = retainedTerrain?.Mesh ?? new GlMesh();
+            bool terrainCreatedNow = retainedTerrain?.CreatedNow ?? true;
+            string? terrainUploadHash = retainedTerrain?.InputSha256;
+            if (graphicsShot is not null && terrainUploadHash is null)
+                terrainUploadHash = BuiltScene.HashArrays(terrainVertices, terrainIndices);
+            if (terrainCreatedNow)
+            {
+                terra.Upload(terrainVertices, terrainIndices);
+                graphicsShot?.MeshUploaded("static-terrain", terra, terrainVertices, terrainIndices);
+            }
             terra.ShapeName = texPath.Length > 0 ? $"terrain:{texPath}" : "terrain";
             terra.DiffuseTexture = texHandle;
             terra.HasVertexColors = true;
             terra.IsDoubleSided = true;
-            renderer.AddMesh(terra);
-            meshes.Add(terra);
+            if (terrainCreatedNow)
+            {
+                renderer.AddMesh(terra);
+                builtScene?.AddedToRenderer(terra);
+                graphicsShot?.MeshAdded("static-terrain", terra);
+            }
+            if (graphicsShot is not null) graphicsShot.StaticBound("static-terrain", terra, terrainUploadHash!);
+            if (builtScene is null) meshes.Add(terra);
             if (interactive is not null)
             {
                 var ps = new PickShape { Kind = PickKind.Terrain, Verts = tv.ToArray(), Tris = ti.ToArray(), TerrainTex = texPath };
@@ -1140,8 +1376,8 @@ static class TexturedScene
         {
             if (layerTris.Count == 0) continue;
             if (layerOnly is { Length: > 0 } && !texPath.Contains(layerOnly, StringComparison.OrdinalIgnoreCase)) continue;
-            int texHandle = textures.LoadTexture(texPath);
-            if (texHandle == textures.WhiteTexture) continue;   // unresolvable: a white sheet is worse than none
+            int texHandle = LoadObservedTexture("static-terrain-layer", texPath);
+            if (texHandle == staticWhite) continue;   // unresolvable: a white sheet is worse than none
             var lv = new List<Vector3>(); var li = new List<int>();
             var ln = new List<Vector3>(); var lc = new List<Vector4>();
             var luv = new List<Vector2>();
@@ -1163,8 +1399,19 @@ static class TexturedScene
                 lc.Add(new Vector4(shade, shade, shade, layerSolid ? 1f : oc));
                 li.Add(at); li.Add(at + 1); li.Add(at + 2);
             }
-            var sheet = new GlMesh();
-            sheet.Upload(Interleave(lv.ToArray(), ln.ToArray(), luv.ToArray(), ln.ToArray(), ln.ToArray(), lc.ToArray()), li.ToArray());
+            var layerIndices = li.ToArray();
+            var layerVertices = Interleave(lv.ToArray(), ln.ToArray(), luv.ToArray(), ln.ToArray(), ln.ToArray(), lc.ToArray());
+            var retainedLayer = builtScene?.AcquireMesh("static-terrain-layer", layerVertices, layerIndices);
+            var sheet = retainedLayer?.Mesh ?? new GlMesh();
+            bool layerCreatedNow = retainedLayer?.CreatedNow ?? true;
+            string? layerUploadHash = retainedLayer?.InputSha256;
+            if (graphicsShot is not null && layerUploadHash is null)
+                layerUploadHash = BuiltScene.HashArrays(layerVertices, layerIndices);
+            if (layerCreatedNow)
+            {
+                sheet.Upload(layerVertices, layerIndices);
+                graphicsShot?.MeshUploaded("static-terrain-layer", sheet, layerVertices, layerIndices);
+            }
             sheet.ShapeName = $"terrain-layer:{texPath}";
             sheet.DiffuseTexture = texHandle;
             sheet.HasVertexColors = true;      // the opacity map rides in vertex alpha
@@ -1172,14 +1419,24 @@ static class TexturedScene
             sheet.IsDecal = true;              // draw after the sorted set, in insertion order
             sheet.DepthWrite = false;
             sheet.IsDoubleSided = true;
-            renderer.AddMesh(sheet);
-            meshes.Add(sheet);
+            if (layerCreatedNow)
+            {
+                renderer.AddMesh(sheet);
+                builtScene?.AddedToRenderer(sheet);
+                graphicsShot?.MeshAdded("static-terrain-layer", sheet);
+            }
+            if (graphicsShot is not null) graphicsShot.StaticBound("static-terrain-layer", sheet, layerUploadHash!);
+            if (builtScene is null) meshes.Add(sheet);
             layerMeshes++;
         }
         if (layerMeshes > 0) Console.WriteLine($"   terrain paint: {layerMeshes} painted layer sheet(s) drawn over the base");
 
         if (terrainTexturedPatches + terrainFallbackPatches > 0)
             Console.WriteLine($"   terrain paint: {terrainTexturedPatches} textured patch(es), {terrainFallbackPatches} untextured (snow fallback)");
+
+        // Static refs, coverings and terrain have completed their real uploads/AddMesh calls.
+        graphicsCell?.CompleteStaticBindings(graphicsShot);
+        graphicsShot?.Checkpoint("after-static");
 
         // ---- WATER --------------------------------------------------------------------------
         // One grid per loaded cell that has water, at that cell's own surface height. A GRID and
@@ -1201,7 +1458,7 @@ static class TexturedScene
             // The alpha at zero depth. 1 = opaque everywhere, matching the engine's opaque draw.
             float shoreAlpha = float.TryParse(Environment.GetEnvironmentVariable("VP_WATER_SHALLOW_ALPHA"),
                                               out var sa) ? Math.Clamp(sa, 0f, 1f) : 1f;
-            int texHandle = wpl.NoiseTexture is { Length: > 0 } wtx ? textures.LoadTexture(wtx) : 0;
+            int texHandle = wpl.NoiseTexture is { Length: > 0 } wtx ? LoadObservedTexture("dynamic-water-normal", wtx) : 0;
             bool hasNoise = texHandle != 0 && texHandle != textures.WhiteTexture;
 
             int side = WaterGrid + 1;
@@ -1289,9 +1546,12 @@ static class TexturedScene
                     int a = gy * side + gx, b2 = a + 1, c2 = a + side, d2 = c2 + 1;
                     idxs.Add(a); idxs.Add(b2); idxs.Add(c2);
                     idxs.Add(b2); idxs.Add(d2); idxs.Add(c2);
-                }
+            }
             var water = new GlMesh();
-            water.Upload(Interleave(pv, nv, uvv, tgt, btg, cvv2), idxs.ToArray());
+            var waterIndices = idxs.ToArray();
+            var waterVertices = Interleave(pv, nv, uvv, tgt, btg, cvv2);
+            water.Upload(waterVertices, waterIndices);
+            graphicsShot?.MeshUploaded("dynamic-water", water, waterVertices, waterIndices);
             water.ShapeName = $"water:{wpl.Label}";
             water.DiffuseTexture = textures.WhiteTexture;   // WATR has NO diffuse field; colour is the record's
             if (hasNoise)
@@ -1318,6 +1578,7 @@ static class TexturedScene
             water.MaterialGlossiness = 80f;
             water.MaterialSpecularStrength = 0.5f;
             renderer.AddMesh(water);
+            graphicsShot?.MeshAdded("dynamic-water", water);
             meshes.Add(water);
             waterMeshes++; waterTris += idxs.Count / 3;
             waterSubmerged += submerged; waterSamples += side * side;
@@ -1359,7 +1620,8 @@ static class TexturedScene
         // reserved red wins. --nav-color <name> forces one.
         var lift = new Vector3(0, 0, 2f);                           // Z-up lift before the swap
 
-        GlMesh BuildFill(IReadOnlyList<(Vector3 A, Vector3 B, Vector3 C)> tris, Vector4 color, string name)
+        GlMesh BuildFill(IReadOnlyList<(Vector3 A, Vector3 B, Vector3 C)> tris, Vector4 color, string name,
+            string graphicsCategory)
         {
             var nv = new List<Vector3>(); var ni = new List<int>();
             foreach (var (a, b, c) in tris)
@@ -1372,7 +1634,10 @@ static class TexturedScene
             var col = new Vector4[nv.Count];
             for (int i = 0; i < nv.Count; i++) { flat[i] = Vector3.UnitY; col[i] = color; }
             var mm = new GlMesh();
-            mm.Upload(Interleave(nv.ToArray(), flat, uv, flat, flat, col), ni.ToArray());
+            var fillIndices = ni.ToArray();
+            var fillVertices = Interleave(nv.ToArray(), flat, uv, flat, flat, col);
+            mm.Upload(fillVertices, fillIndices);
+            graphicsShot?.MeshUploaded(graphicsCategory, mm, fillVertices, fillIndices);
             mm.ShapeName = name;
             mm.DiffuseTexture = textures.WhiteTexture;
             mm.HasVertexColors = true;
@@ -1392,11 +1657,11 @@ static class TexturedScene
         // this renderer's Dispose()/ClearMeshes() DISPOSES what it holds, so every borrowed
         // mesh is RemoveMesh'd again before this method returns. The owning VMs outlive all
         // panels and are disposed by Program.cs after the last one.
-        var borrowedNpcMeshes = new List<GlMesh>();
         foreach (var actor in npcActors)
             foreach (var am in actor.Meshes)
             {
                 renderer.AddMesh(am);
+                graphicsShot?.MeshAdded("dynamic-npc-borrowed", am, borrowed: true);
                 borrowedNpcMeshes.Add(am);
             }
 
@@ -1465,6 +1730,8 @@ static class TexturedScene
                 msFbo = 0; samples = 0;
             }
         }
+        graphicsShot?.TrackTargets(fbo, colorTex, depthRb, msFbo, msColorRb, msDepthRb);
+        shotResources.TrackTargets(fbo, colorTex, depthRb, msFbo, msColorRb, msDepthRb);
         int drawFbo = msFbo != 0 ? msFbo : fbo;
 
         // viewprobe's own wire pass, installed once built. It takes the view/projection to draw
@@ -1948,16 +2215,16 @@ static class TexturedScene
             foreach (var group in healthyGroups.Where(g => g.Triangles.Count > 0))
             {
                 var colour = GroupColour(group);
-                var m0 = BuildFill(group.Triangles, new Vector4(colour.X, colour.Y, colour.Z, alpha), "navmesh-fill");
+                var m0 = BuildFill(group.Triangles, new Vector4(colour.X, colour.Y, colour.Z, alpha), "navmesh-fill", "dynamic-nav-fill");
                 m0.IsDecal = true;             // same insertion-ordered channel, added after the ground
-                renderer.AddMesh(m0); meshes.Add(m0);
+                renderer.AddMesh(m0); graphicsShot?.MeshAdded("dynamic-nav-fill", m0); meshes.Add(m0);
                 interactive?.NavFill.Add(m0);
             }
             if (redTris.Count > 0)
             {
-                var m1 = BuildFill(redTris, new Vector4(0.95f, 0.15f, 0.08f, MathF.Min(0.55f, alpha + 0.2f)), "navmesh-fill-red");
+                var m1 = BuildFill(redTris, new Vector4(0.95f, 0.15f, 0.08f, MathF.Min(0.55f, alpha + 0.2f)), "navmesh-fill-red", "dynamic-nav-red-fill");
                 m1.IsDecal = true;
-                renderer.AddMesh(m1); meshes.Add(m1);
+                renderer.AddMesh(m1); graphicsShot?.MeshAdded("dynamic-nav-red-fill", m1); meshes.Add(m1);
                 interactive?.NavFillRed.Add(m1);
             }
         }
@@ -1985,9 +2252,9 @@ static class TexturedScene
                 }
                 var disc = BuildFill(discTris,
                     new Vector4(actor.PuckColor.X, actor.PuckColor.Y, actor.PuckColor.Z, 0.38f),
-                    $"npc-puck:{actor.Label}");
+                    $"npc-puck:{actor.Label}", "dynamic-npc-puck");
                 disc.IsDecal = true;
-                renderer.AddMesh(disc); meshes.Add(disc);
+                renderer.AddMesh(disc); graphicsShot?.MeshAdded("dynamic-npc-puck", disc); meshes.Add(disc);
             }
         }
 
@@ -2520,6 +2787,8 @@ static class TexturedScene
         {
             wireProg = OverlayShader();
             wireVao = GL.GenVertexArray(); wireVbo = GL.GenBuffer();
+            graphicsShot?.TrackOverlayObjects(wireProg, wireVao, wireVbo);
+            shotResources.TrackOverlay(wireProg, wireVao, wireVbo);
             GL.BindVertexArray(wireVao);
             GL.BindBuffer(BufferTarget.ArrayBuffer, wireVbo);
             GL.VertexAttribPointer(0, 3, VertexAttribPointerType.Float, false, 9 * sizeof(float), 0);
@@ -2565,6 +2834,14 @@ static class TexturedScene
                     if (cullBack) { GL.Enable(EnableCap.CullFace); GL.CullFace(CullFaceMode.Back); }
                     else GL.Disable(EnableCap.CullFace);
                     GL.BufferData(BufferTarget.ArrayBuffer, data.Length * sizeof(float), data, BufferUsageHint.StreamDraw);
+                    graphicsShot?.RawBufferUploaded(nav switch
+                    {
+                        1 => "nav-wire",
+                        2 => "red-nav-wire",
+                        3 => "route",
+                        4 => "planes",
+                        _ => "grid-seam-outline-mask"
+                    }, wireVbo, data);
                     GL.DrawArrays(PrimitiveType.Triangles, 0, data.Length / 9);
                 }
                 if (ghostData is not null)
@@ -2583,6 +2860,7 @@ static class TexturedScene
                     // under the intended read or the wash turns back into a repaint.
                     GL.Uniform1(alphaLoc, 0.22f);
                     GL.BufferData(BufferTarget.ArrayBuffer, ghostData.Length * sizeof(float), ghostData, BufferUsageHint.StreamDraw);
+                    graphicsShot?.RawBufferUploaded("subject-mask-ghost", wireVbo, ghostData);
                     GL.DrawArrays(PrimitiveType.Triangles, 0, ghostData.Length / 9);
                     if (ghostNearData is not null)
                     {
@@ -2591,6 +2869,7 @@ static class TexturedScene
                         // surface or its jamb — so only the truly hidden case gets brighter.
                         GL.Uniform1(alphaLoc, 0.25f);
                         GL.BufferData(BufferTarget.ArrayBuffer, ghostNearData.Length * sizeof(float), ghostNearData, BufferUsageHint.StreamDraw);
+                        graphicsShot?.RawBufferUploaded("subject-mask-near", wireVbo, ghostNearData);
                         GL.DrawArrays(PrimitiveType.Triangles, 0, ghostNearData.Length / 9);
                     }
                     GL.Uniform1(alphaLoc, 1.0f);
@@ -2603,6 +2882,10 @@ static class TexturedScene
                 GL.BindVertexArray(0);
             };
         }
+
+        // All shot-local meshes and raw-overlay owners now exist. BufferData itself occurs in
+        // Draw and is separately observed at the exact call boundary above.
+        graphicsShot?.Checkpoint("after-dynamic");
 
         // ---- INTERACTIVE: hand the resident scene to the fly-through loop -----------------
         // Everything above — scene, overlay layers, pass-1 colour/classification — is shared
@@ -2651,10 +2934,13 @@ static class TexturedScene
             // nothing when every one of them was simply absent - so a healthy run's console, this
             // line included, is unchanged to the character.
             ClassifyUnreadable();
-            if (textures.MissingTexturePaths.Count > 0)
+            var missingTexturePaths = graphicsCell is null
+                ? textures.MissingTexturePaths.ToArray()
+                : retainedMissingTexturePaths.ToArray();
+            if (missingTexturePaths.Length > 0)
             {
                 int unreadableTextures = UnreadableAssets.ShotTextureCount;
-                Console.WriteLine($"   textures the resolver could NOT find (white fallback, counted per rule 6): {textures.MissingTexturePaths.Count:N0}"
+                Console.WriteLine($"   textures the resolver could NOT find (white fallback, counted per rule 6): {missingTexturePaths.Length:N0}"
                                 + (unreadableTextures > 0
                                    ? $" — {unreadableTextures:N0} of them WERE found and could not be read, listed below"
                                    : ""));
@@ -2666,24 +2952,20 @@ static class TexturedScene
         // sink runs first. Classify() rebuilds this render's list each time it is called, so a
         // second call cannot double-count.
         void ClassifyUnreadable()
-            => UnreadableAssets.Classify(resolver, textures.MissingTexturePaths, noGeometry, geometryInputIssues);
+            => UnreadableAssets.Classify(resolver,
+                graphicsCell is null ? textures.MissingTexturePaths.ToArray() : retainedMissingTexturePaths.ToArray(),
+                noGeometry, geometryInputIssues);
 
         if (interactive is not null)
         {
-            GL.BindFramebuffer(FramebufferTarget.Framebuffer, 0);
-            GL.DeleteFramebuffer(fbo); GL.DeleteTexture(colorTex); GL.DeleteRenderbuffer(depthRb);
-            if (msFbo != 0) { GL.DeleteFramebuffer(msFbo); GL.DeleteRenderbuffer(msColorRb); GL.DeleteRenderbuffer(msDepthRb); }
-
             // BEFORE the window opens, not after it closes: the console is what a person reads
             // while deciding where to fly, and a census printed on exit is a census nobody used.
             PrintBuildCensus();
 
             InteractiveViewer.Run(interactive, renderer, cam, wireOverlay);
 
-            if (wireProg != 0) { GL.DeleteProgram(wireProg); GL.DeleteVertexArray(wireVao); GL.DeleteBuffer(wireVbo); }
-            foreach (var bm in borrowedNpcMeshes) renderer.RemoveMesh(bm);
-            foreach (var m in meshes) m.Dispose();
-            GL.DeleteTexture(orange);
+            shotResources.Dispose();
+            graphicsCell?.EndShot();
             return shapes;
         }
 
@@ -2702,7 +2984,13 @@ static class TexturedScene
             Console.WriteLine($"   depth-dump: {Path.GetFullPath(depthDumpPath)}  ({sizeW}x{sizeH} float32 window depth, rows bottom-up, "
                             + $"1.0 = background; near {NearPlane:0} far {FarPlane:0}; fov {cam.FovDeg:0.##} square)");
         }
-        if (wireProg != 0) { GL.DeleteProgram(wireProg); GL.DeleteVertexArray(wireVao); GL.DeleteBuffer(wireVbo); }
+        if (wireProg != 0)
+        {
+            graphicsShot?.OverlayDeleteState(wireProg, GL.GetInteger(GetPName.CurrentProgram),
+                GL.GetInteger(GetPName.VertexArrayBinding));
+            GL.UseProgram(0); GL.BindVertexArray(0);   // unbind first, or the program's deletion is only deferred
+            GL.DeleteProgram(wireProg); GL.DeleteVertexArray(wireVao); GL.DeleteBuffer(wireVbo);
+        }
 
         // --pick: "what is at this pixel". Reads the finished frame's depth and unprojects it,
         // which is the only way to turn something SEEN in a render back into a coordinate that
@@ -2782,21 +3070,12 @@ static class TexturedScene
             }
         }
 
-        GL.BindFramebuffer(FramebufferTarget.Framebuffer, 0);
-        GL.DeleteFramebuffer(fbo); GL.DeleteTexture(colorTex); GL.DeleteRenderbuffer(depthRb);
-        if (msFbo != 0) { GL.DeleteFramebuffer(msFbo); GL.DeleteRenderbuffer(msColorRb); GL.DeleteRenderbuffer(msDepthRb); }
-
+        graphicsShot?.Checkpoint("before-encode");
         SaveFrame(pixels, sizeW, sizeH, capLines, colourCaptionLines, pngTextMeta, outPath,
                   gridSpacing > 0f ? gridLabels : null, gridColour3, reportMode);
 
-        // Give back the borrowed NPC meshes BEFORE this renderer can dispose them —
-        // ClearMeshes()/Dispose() destroy what they hold, and the actors' VAOs must
-        // survive into the next compare panel. Their owners (the VMs) are disposed
-        // by Program.cs after the last panel.
-        foreach (var bm in borrowedNpcMeshes) renderer.RemoveMesh(bm);
-
-        foreach (var m in meshes) m.Dispose();
-        GL.DeleteTexture(orange);
+        shotResources.Dispose();
+        graphicsCell?.EndShot();
         PrintBuildCensus();
         return shapes;
     }
