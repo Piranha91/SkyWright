@@ -73,19 +73,27 @@ internal sealed class GraphicsCell : IDisposable
         evidence?.ResidentOwnerReady(resident!, created);
         evidence?.TextureManagerReady(installTextures!, initializedNow: created, role: "install", cellLifetime: true);
         evidence?.RendererReady(renderer!, initializedNow: created);
+        // Measurement only (Gate B4, G2 RED): a requested residency mutation between shots; inert without a RED session.
+        if (scene is not null) red?.MutateResidency("before-validation", resident!, installTextures!, scene);
 
         resident!.BeginRenderPass();
         evidence?.ResidentEpochAdvanced(++epoch);
+        string? priorKey = scene?.Key;
         if (scene is not null && !StringComparer.Ordinal.Equals(scene.Key, staticKey))
         {
+            red?.SceneReplacing(scene, staticKey);   // measurement only
             scene.Dispose();
             scene = null;
         }
+        bool sceneCreated = scene is null;
         scene ??= new BuiltScene(staticKey, renderer!);
+        if (sceneCreated) red?.ObserveScene(scene);   // measurement only: attaches the dispose record
+        red?.StaticKeyDecision(staticKey, priorKey, sceneCreated, scene);   // measurement only
         var manifest = scene.TouchOrRefuse(resident);
         evidence?.ManifestValidated("before-static", manifest.Valid, manifest.ExpectedCount, manifest.FoundCount);
         if (!manifest.Valid)
             throw new InvalidOperationException("retained residency manifest refused before draw: " + manifest.Failure);
+        if (!sceneCreated) red?.MutateResidency("after-before-static", resident, installTextures!, scene);   // measurement only
         scene.BeginBindingPass();
         return scene;
     }
@@ -95,10 +103,19 @@ internal sealed class GraphicsCell : IDisposable
         ThrowIfDisposed();
         var current = scene ?? throw new InvalidOperationException("static scene not initialized");
         current.CompleteBindingPass();
+        red?.ManifestSnapshot(evidence, "after-static", current, Resident, installTextures);   // measurement only
         var manifest = current.TouchOrRefuse(Resident);
         evidence?.ManifestValidated("after-static", manifest.Valid, manifest.ExpectedCount, manifest.FoundCount);
         if (!manifest.Valid)
             throw new InvalidOperationException("populated residency manifest refused before draw: " + manifest.Failure);
+    }
+
+    /// <summary>Measurement only (Gate B4, G2 RED): the retained manifest against the resident cache at each
+    /// draw. Inert without a RED session.</summary>
+    internal void ObserveDraw(GraphicsReuseRed.ShotScope? evidence)
+    {
+        if (red is null || evidence is null || scene is null || resident is null) return;
+        red.DrawBoundary(evidence, scene, resident, installTextures);
     }
 
     internal void EndShot()

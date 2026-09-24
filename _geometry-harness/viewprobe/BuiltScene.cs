@@ -36,6 +36,17 @@ internal sealed class BuiltScene : IDisposable
         .Where(x => x.Resident && !string.IsNullOrEmpty(x.DiskPath)).Select(x => x.DiskPath!)
         .Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
 
+    // Measurement only (Gate B4, G2 RED): read-only views and a dispose callback for the private RED observer.
+    // The render path never reads them; DisposeObserved stays null without a RED session.
+    internal IReadOnlyList<(string Category, int Vao, int Vbo, int Ebo)> MeshHandles =>
+        meshes.Select(x => (x.Category, x.Mesh.Vao, x.Mesh.Vbo, x.Mesh.Ebo)).ToArray();
+    internal IReadOnlyList<(string Category, int Handle)> OwnedTextureHandles =>
+        ownedTextures.Select(x => (x.Key, x.Value)).ToArray();
+    internal IReadOnlyList<(string Category, string GamePath, string? DiskPath, int Handle, bool Resident)> TextureManifest =>
+        textures.Select(x => (x.Category, x.GamePath, x.DiskPath, x.Handle, x.Resident)).ToArray();
+    internal Action<BuiltScene, IReadOnlyList<(string Category, int Vao, int Vbo, int Ebo)>,
+        IReadOnlyList<(string Category, int Handle)>>? DisposeObserved { get; set; }
+
     internal BuiltScene(string key, GlRenderer renderer)
     {
         Key = key;
@@ -172,6 +183,9 @@ internal sealed class BuiltScene : IDisposable
         if (disposed) return;
         disposed = true;
         passOpen = false;
+        var observed = DisposeObserved;
+        var observedMeshes = observed is null ? null : MeshHandles;
+        var observedOwned = observed is null ? null : OwnedTextureHandles;
         List<Exception> failures = [];
         foreach (var entry in meshes)
         {
@@ -189,6 +203,9 @@ internal sealed class BuiltScene : IDisposable
             try { GL.DeleteTexture(handle); }
             catch (Exception ex) { failures.Add(ex); }
         ownedTextures.Clear();
+        if (observed is not null)
+            try { observed(this, observedMeshes!, observedOwned!); }
+            catch (Exception ex) { failures.Add(ex); }
         if (failures.Count > 0) throw new AggregateException("retained scene teardown failed", failures);
     }
 

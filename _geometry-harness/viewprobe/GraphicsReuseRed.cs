@@ -68,6 +68,10 @@ internal sealed class GraphicsReuseRed : IDisposable
     public void ResidentAtCellEnd(ResidentTextureCache resident, IReadOnlyCollection<string> manifestResidentPaths)
     {
         ThrowIfDisposed();
+        // G2 (Gate B4): the residency hook's displaced originals are deleted first, so its own substitution does
+        // not read as a leak in the cell teardown checks.
+        foreach (int orphan in cell.OrphanHandles)
+            if (orphan > 0 && GL.IsTexture(orphan)) GL.DeleteTexture(orphan);
         int count = resident.Count;
         var distinct = manifestResidentPaths.Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
         int found = distinct.Count(p => resident.TryGet(p) > 0);
@@ -76,6 +80,16 @@ internal sealed class GraphicsReuseRed : IDisposable
         cell.ResidentAtCellEnd = new(count, distinct.Length, found, shotLocal.Length, shotLocalInCache,
             count == distinct.Length && found == distinct.Length && shotLocalInCache.Length == 0);
         session.Emit("resident-at-cell-end", cell, null, cell.ResidentAtCellEnd);
+        // G2 (Gate B4) replacement-aware statement, beside the unchanged legacy one: the cache holds the current
+        // manifest's distinct paths, all found, no shot-local path, and a surplus that is exactly the retired
+        // scenes' paths still resident; retired paths the budget evicted are listed, not treated as errors.
+        var retiredOnly = cell.RetiredResidentPaths.Where(p => !distinct.Contains(p, StringComparer.OrdinalIgnoreCase)).ToArray();
+        var retiredFound = retiredOnly.Where(p => resident.TryGet(p) > 0).ToArray();
+        var retiredEvicted = retiredOnly.Except(retiredFound, StringComparer.OrdinalIgnoreCase).ToArray();
+        cell.ResidentAtCellEndG2 = new(count, distinct.Length, found, retiredOnly.Length, retiredFound.Length,
+            retiredEvicted, count - distinct.Length, shotLocalInCache,
+            count == distinct.Length + retiredFound.Length && found == distinct.Length && shotLocalInCache.Length == 0);
+        session.Emit("resident-at-cell-end-g2", cell, null, cell.ResidentAtCellEndG2);
     }
 
     /// <summary>GREEN owner calls this after disposing cell resources and before releasing its
@@ -93,6 +107,157 @@ internal sealed class GraphicsReuseRed : IDisposable
         cell.CellTeardownContextCurrent = current;
         session.Emit("cell-resources-after-owner-dispose", cell, null,
             new { contextId, contextCurrent = current, glVersion = version, checks });
+    }
+
+    // ---- Gate B4, G2 RED: keys, replacement and residency. Measurement only; every call site is `red?.` or
+    // `evidence?.`, so none of this runs without VP_GRAPHICS_REUSE_RED_OUT. ----
+
+    /// <summary>Attach the dispose record to a newly created retained scene.</summary>
+    internal void ObserveScene(BuiltScene scene)
+    {
+        ThrowIfDisposed();
+        string sceneId = session.ObjectId(scene, "scene");
+        scene.DisposeObserved = SceneDisposed;
+        session.Emit("scene-created", cell, cell.Shots.LastOrDefault(), new { sceneId, key = scene.Key });
+    }
+
+    /// <summary>Runs at the end of BuiltScene.Dispose, after its deletions and before anything else is created:
+    /// every mesh and owned-texture handle the scene held is queried now, so a reused GL name cannot hide a leak.</summary>
+    void SceneDisposed(BuiltScene scene, IReadOnlyList<(string Category, int Vao, int Vbo, int Ebo)> meshes,
+        IReadOnlyList<(string Category, int Handle)> owned)
+    {
+        string sceneId = session.ObjectId(scene, "scene");
+        var liveMeshes = meshes.Where(m => (m.Vao > 0 && GL.IsVertexArray(m.Vao)) || (m.Vbo > 0 && GL.IsBuffer(m.Vbo))
+            || (m.Ebo > 0 && GL.IsBuffer(m.Ebo))).ToArray();
+        var liveOwned = owned.Where(o => o.Handle > 0 && GL.IsTexture(o.Handle)).ToArray();
+        var shot = cell.Shots.LastOrDefault();
+        var row = new SceneDisposal(sceneId, scene.Key, shot?.ShotId, session.OrderMark(), meshes.Count, owned.Count,
+            liveMeshes.Length, liveOwned.Length, liveMeshes.Length == 0 && liveOwned.Length == 0);
+        cell.SceneDisposals.Add(row);
+        session.Emit("scene-disposed", cell, shot, new
+        {
+            row,
+            liveMeshes = liveMeshes.Take(20).Select(m => new { m.Category, m.Vao, m.Vbo, m.Ebo }).ToArray(),
+            liveOwned = liveOwned.Select(o => new { o.Category, o.Handle }).ToArray()
+        });
+    }
+
+    /// <summary>GraphicsCell calls this immediately before disposing a scene whose key no longer matches.</summary>
+    internal void SceneReplacing(BuiltScene old, string newKey)
+    {
+        ThrowIfDisposed();
+        var retired = old.ResidentDiskPaths.ToArray();
+        cell.RetiredResidentPaths.UnionWith(retired);
+        var meshes = old.MeshHandles;
+        var owned = old.OwnedTextureHandles;
+        bool allLive = meshes.All(m => GL.IsVertexArray(m.Vao) && GL.IsBuffer(m.Vbo) && GL.IsBuffer(m.Ebo))
+            && owned.All(o => GL.IsTexture(o.Handle));
+        var shot = cell.Shots.LastOrDefault();
+        var row = new SceneReplacement(session.ObjectId(old, "scene"), old.Key, newKey, shot?.ShotId, session.OrderMark(),
+            meshes.Count, owned.Count, retired.Length, allLive);
+        cell.Replacements.Add(row);
+        session.Emit("scene-replacing", cell, shot, row);
+    }
+
+    internal void StaticKeyDecision(string key, string? priorKey, bool sceneCreated, BuiltScene scene)
+    {
+        ThrowIfDisposed();
+        string decision = priorKey is null ? "created" : sceneCreated ? "replaced" : "reused";
+        var shot = cell.Shots.LastOrDefault();
+        var row = new KeyDecision(key, priorKey, decision, session.ObjectId(scene, "scene"), session.OrderMark());
+        shot?.KeyDecisions.Add(row);
+        session.Emit("static-key-decision", cell, shot, row);
+    }
+
+    /// <summary>The requested residency mutation (VP_GRAPHICS_REUSE_RED_RESIDENCY), once per session, at its phase:
+    /// delete | replace | evict before the next shot's validation, or replace-after-before-static after that
+    /// shot's first validation passed. The target is the retained manifest's first terrain diffuse, which every
+    /// static key of the fixture cell loads again.</summary>
+    internal void MutateResidency(string phase, ResidentTextureCache resident, GlTextureManager manager, BuiltScene scene)
+    {
+        ThrowIfDisposed();
+        string? mode = session.ResidencyMode;
+        if (mode is null || session.ResidencyFired) return;
+        string wanted = mode == "replace-after-before-static" ? "after-before-static" : "before-validation";
+        if (!StringComparer.Ordinal.Equals(phase, wanted)) return;
+        var manifest = scene.TextureManifest.Where(x => x.Resident && !string.IsNullOrEmpty(x.DiskPath)).ToArray();
+        if (manifest.Length == 0) throw new InvalidOperationException("G2 residency mutation found no resident manifest entry");
+        var target = manifest.FirstOrDefault(x => x.Category == "static-terrain-diffuse");
+        if (target.DiskPath is null) target = manifest[0];
+        session.ResidencyFired = true;
+        int peekBefore = PeekResident(resident, target.DiskPath);
+        int privateBefore = PeekPrivate(manager, target.GamePath);
+        bool liveBefore = target.Handle > 0 && GL.IsTexture(target.Handle);
+        int newHandle = 0;
+        switch (mode)
+        {
+            case "delete":
+                GL.DeleteTexture(target.Handle);
+                break;
+            case "replace":
+            case "replace-after-before-static":
+                newHandle = CreateSubstituteTexture();
+                SetResidentHandle(resident, target.DiskPath!, newHandle);
+                cell.OrphanHandles.Add(target.Handle);   // the displaced original stays live until cell end
+                break;
+            case "evict":
+                EvictResident(resident, target.DiskPath!);
+                GL.DeleteTexture(target.Handle);
+                break;
+        }
+        var shot = cell.Shots.LastOrDefault();
+        var row = new ResidencyMutation(mode, phase, target.Category, target.GamePath, target.DiskPath!, target.Handle, newHandle,
+            peekBefore, PeekResident(resident, target.DiskPath), privateBefore, PeekPrivate(manager, target.GamePath),
+            liveBefore, target.Handle > 0 && GL.IsTexture(target.Handle), newHandle > 0 && GL.IsTexture(newHandle),
+            session.OrderMark());
+        shot?.ResidencyMutations.Add(row);
+        session.Emit("residency-mutated", cell, shot, row);
+    }
+
+    /// <summary>Every resident manifest entry against a non-promoting read of the resident cache and of the
+    /// install manager's private path cache, just before the after-static validation.</summary>
+    internal void ManifestSnapshot(ShotScope? evidence, string phase, BuiltScene scene, ResidentTextureCache resident,
+        GlTextureManager? manager)
+    {
+        ThrowIfDisposed();
+        var shot = cell.Shots.LastOrDefault();
+        var row = CheckManifest(phase, 0, scene, resident, manager);
+        shot?.ManifestChecks.Add(row);
+        session.Emit("manifest-check", cell, shot, row);
+    }
+
+    /// <summary>The same check at each draw: a draw that begins with a manifest entry the resident cache does not
+    /// own, or with a dead handle, is the failure G2's refusal must prevent.</summary>
+    internal void DrawBoundary(ShotScope evidence, BuiltScene scene, ResidentTextureCache resident, GlTextureManager? manager)
+    {
+        ThrowIfDisposed();
+        var shot = cell.Shots.LastOrDefault();
+        int index = shot?.ManifestChecks.Count(x => x.Phase == "draw") ?? 0;
+        var row = CheckManifest("draw", index, scene, resident, manager);
+        shot?.ManifestChecks.Add(row);
+        session.Emit("manifest-check", cell, shot, row);
+    }
+
+    ManifestCheck CheckManifest(string phase, int index, BuiltScene scene, ResidentTextureCache resident, GlTextureManager? manager)
+    {
+        var entries = scene.TextureManifest.Where(x => x.Resident).ToArray();
+        var rows = new List<ManifestRow>();
+        int mismatched = 0, dead = 0, privateStale = 0;
+        foreach (var e in entries)
+        {
+            int peek = PeekResident(resident, e.DiskPath);
+            int privatePeek = manager is null ? -1 : PeekPrivate(manager, e.GamePath);
+            bool live = e.Handle > 0 && GL.IsTexture(e.Handle);
+            bool mismatch = peek != e.Handle;
+            bool stale = privatePeek == e.Handle && (mismatch || !live);
+            if (mismatch) mismatched++;
+            if (!live) dead++;
+            if (stale) privateStale++;
+            if ((mismatch || !live) && rows.Count < 50)
+                rows.Add(new(e.Category, e.GamePath, e.DiskPath, e.Handle, peek, privatePeek, live));
+        }
+        return new(phase, index, session.OrderMark(), entries.Length, mismatched, dead, privateStale,
+            mismatched == 0 && dead == 0, rows.ToArray());
     }
 
     public void Dispose()
@@ -394,11 +559,69 @@ internal sealed class GraphicsReuseRed : IDisposable
             if (ownerLifetime == Lifetime.Cell) cell.TrackCellResource(resource);
         }
 
+        /// <summary>G2 (Gate B4): per-component digests of the static key's inputs, computed independently of
+        /// StaticInputKey (which is not changed), so each arm shows which input moved the key. The first time a
+        /// reference set is seen, its references are listed for fixture selection.</summary>
+        public void StaticKeyInputs(string key, string preparedIdentity, IReadOnlyList<SceneRef> refs,
+            IReadOnlyDictionary<string, List<(System.Numerics.Vector3 A, System.Numerics.Vector3 B, System.Numerics.Vector3 C)>> terrainPatches,
+            IReadOnlyList<(string Diffuse, List<(System.Numerics.Vector3 A, System.Numerics.Vector3 B, System.Numerics.Vector3 C, float Oa, float Ob, float Oc)> Tris)> terrainLayers,
+            IReadOnlyDictionary<Mutagen.Bethesda.Plugins.FormKey, Covering> coverings, bool keepFx, bool fxStatic,
+            float? cullAbove, bool refSurface, float refSurfaceOpacity)
+        {
+            static string D(IEnumerable<string> parts)
+            {
+                using var h = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
+                foreach (var p in parts) { h.AppendData(System.Text.Encoding.UTF8.GetBytes(p)); h.AppendData(new byte[] { 0 }); }
+                return Convert.ToHexString(h.GetHashAndReset());
+            }
+            static string F(float v) => v.ToString("R", System.Globalization.CultureInfo.InvariantCulture);
+            static bool IsFx(SceneRef r) => r.MeshRelPath.Replace('/', '\\').Contains("effects\\", StringComparison.OrdinalIgnoreCase);
+            var inputs = new KeyInputs(
+                key, D([preparedIdentity]),
+                $"fx={keepFx};fxStatic={fxStatic};cull={cullAbove?.ToString("R", System.Globalization.CultureInfo.InvariantCulture)};surface={refSurface};opacity={F(refSurfaceOpacity)}",
+                D([Environment.GetEnvironmentVariable("VP_LAYER_ONLY") ?? "<null>", Environment.GetEnvironmentVariable("VP_LAYER_SOLID") ?? "<null>",
+                   Environment.GetEnvironmentVariable("VP_FXSTATIC_EMIT") ?? "<null>"]),
+                refs.Count, D(refs.Select(r => r.ToString())),
+                D(refs.Select(r => $"{r.MeshRelPath}|{r.RefKey}|{r.BaseKey}|{r.Position}|{r.Rotation}|{F(r.Scale)}")),
+                refs.Count(r => r.Highlight),
+                D(refs.Where(r => r.Highlight || r.HighlightColor != default).Select(r => $"{r.RefKey}|{r.Highlight}|{r.HighlightColor}")),
+                refs.Count(r => r.Marker), refs.Count(r => r.Constructed), refs.Count(r => r.StateChange != 0),
+                D(refs.Where(r => r.StateChange != 0 || r.StateLabel is not null).Select(r => $"{r.RefKey}|{r.StateChange}|{r.StateLabel}")),
+                refs.Count(r => r.BosRecordBase is not null), refs.Count(IsFx),
+                D(terrainPatches.OrderBy(p => p.Key, StringComparer.OrdinalIgnoreCase)
+                    .SelectMany(p => new[] { "patch:" + p.Key }.Concat(p.Value.Select(t => $"{t.A}|{t.B}|{t.C}")))),
+                D(terrainLayers.SelectMany(l => new[] { "layer:" + l.Diffuse }
+                    .Concat(l.Tris.Select(t => $"{t.A}|{t.B}|{t.C}|{F(t.Oa)}|{F(t.Ob)}|{F(t.Oc)}")))),
+                D(coverings.OrderBy(c => c.Key).Select(c => $"{c.Key}|{c.Value}")));
+            shot.KeyInputs.Add(inputs);
+            session.Emit("static-key-inputs", cell, shot, inputs);
+            if (session.SeenReferenceDigests.Add(inputs.RefsSha256))
+                session.Emit("static-refs-sample", cell, shot, new
+                {
+                    inputs.RefsSha256,
+                    refs = refs.Select(r => new
+                    {
+                        refKey = r.RefKey.ToString(), baseKey = r.BaseKey.ToString(), r.MeshRelPath,
+                        position = r.Position.ToString(), r.Highlight, r.Marker, r.Constructed, r.StateChange, r.StateLabel
+                    }).ToArray()
+                });
+        }
+
         public void Dispose()
         {
             if (disposed) return;
             disposed = true;
             shot.Ended = true;
+            // G2 (Gate B4): the process-identity arm moves one identity file's write time after the first shot, so
+            // the next shot's process key changes inside one process. Only VP_GRAPHICS_REUSE_RED_TOUCH enables it.
+            if (session.TouchPath is { } touch && !session.Touched)
+            {
+                session.Touched = true;
+                string before = PreparedProcessIdentity.FileToken(touch);
+                File.SetLastWriteTimeUtc(touch, new FileInfo(touch).LastWriteTimeUtc.AddSeconds(2));
+                string after = PreparedProcessIdentity.FileToken(touch);
+                session.Emit("identity-touched", cell, shot, new { path = touch, before, after, changed = before != after });
+            }
             session.Emit("shot-end", cell, shot, new { shot.ShotId });
         }
     }
@@ -475,6 +698,14 @@ internal sealed class GraphicsReuseRed : IDisposable
         internal bool RequestedFaultReached { get; set; }
         internal bool ExpectedFaultCaught { get; set; }
         internal bool UnexpectedFaultCaught { get; set; }
+        // G2 (Gate B4): VP_GRAPHICS_REUSE_RED_G2=1 makes Finish report instrumentation completeness only (the G2
+        // driver assesses the receipt); the residency and touch variables are accepted only in that mode.
+        internal bool G2Mode { get; }
+        internal string? ResidencyMode { get; }
+        internal bool ResidencyFired { get; set; }
+        internal string? TouchPath { get; }
+        internal bool Touched { get; set; }
+        internal HashSet<string> SeenReferenceDigests { get; } = new(StringComparer.Ordinal);
 
         internal Session(string outputPath, string? requestedFault)
         {
@@ -482,6 +713,18 @@ internal sealed class GraphicsReuseRed : IDisposable
             RequestedFault = string.IsNullOrWhiteSpace(requestedFault) ? null : requestedFault;
             if (RequestedFault is not null && RequestedFault is not ("after-static" or "after-dynamic" or "before-encode"))
                 throw new ArgumentException("VP_GRAPHICS_REUSE_RED_FAULT must be after-static, after-dynamic, or before-encode");
+            G2Mode = Environment.GetEnvironmentVariable("VP_GRAPHICS_REUSE_RED_G2") == "1";
+            string? residency = Environment.GetEnvironmentVariable("VP_GRAPHICS_REUSE_RED_RESIDENCY");
+            ResidencyMode = string.IsNullOrWhiteSpace(residency) ? null : residency;
+            string? touch = Environment.GetEnvironmentVariable("VP_GRAPHICS_REUSE_RED_TOUCH");
+            TouchPath = string.IsNullOrWhiteSpace(touch) ? null : Path.GetFullPath(touch);
+            if ((ResidencyMode is not null || TouchPath is not null) && !G2Mode)
+                throw new ArgumentException("VP_GRAPHICS_REUSE_RED_RESIDENCY and _TOUCH require VP_GRAPHICS_REUSE_RED_G2=1");
+            if (ResidencyMode is not null && ResidencyMode is not ("delete" or "replace" or "evict" or "replace-after-before-static"))
+                throw new ArgumentException("VP_GRAPHICS_REUSE_RED_RESIDENCY must be delete, replace, evict or replace-after-before-static");
+            if (TouchPath is not null && !File.Exists(TouchPath))
+                throw new ArgumentException("VP_GRAPHICS_REUSE_RED_TOUCH names no file: " + TouchPath);
+            if (G2Mode) ValidateReflection();
             eventPath = outputPath + ".events.jsonl";
             dependencyAssembly = typeof(GlRenderer).Assembly.Location;
             dependencySha256 = HashFile(dependencyAssembly);
@@ -530,6 +773,7 @@ internal sealed class GraphicsReuseRed : IDisposable
             {
                 finished = true; Emit("session-finish", null, null, new { });
                 var result = Evaluate();
+                if (G2Mode) return !UnexpectedFaultCaught;
                 return RequestedFault is null ? result.InstrumentationValid && result.RetentionAcceptance
                                               : result.FaultEvidenceComplete;
             }
@@ -639,7 +883,11 @@ internal sealed class GraphicsReuseRed : IDisposable
             c.ContextOwnerEndCount, c.LastContextOwnerEndOrder, c.CellFinallyOrder,
             cellTeardownContextCurrent = c.CellTeardownContextCurrent,
             cellTeardownChecks = c.CellTeardownChecks, residentAtCellEnd = c.ResidentAtCellEnd,
+            residentAtCellEndG2 = c.ResidentAtCellEndG2, replacements = c.Replacements, sceneDisposals = c.SceneDisposals,
+            retiredResidentPathCount = c.RetiredResidentPaths.Count,
             shots = c.Shots.Select(s => new { s.ShotId, s.ContextId, s.Facts,
+                keyInputs = s.KeyInputs, keyDecisions = s.KeyDecisions, manifestChecks = s.ManifestChecks,
+                residencyMutations = s.ResidencyMutations,
                 textureManagers = s.TextureManagers, renderers = s.Renderers,
                 residentOwners = s.ResidentOwners, residentEpochs = s.ResidentEpochs,
                 manifestValidations = s.ManifestValidations, uploads = s.Uploads,
@@ -666,6 +914,11 @@ internal sealed class GraphicsReuseRed : IDisposable
         internal bool Disposed { get; set; }
         internal HashSet<string> ShotLocalDiskPaths { get; } = new(StringComparer.OrdinalIgnoreCase);
         internal ResidentInvariant? ResidentAtCellEnd { get; set; }
+        internal HashSet<string> RetiredResidentPaths { get; } = new(StringComparer.OrdinalIgnoreCase);
+        internal List<SceneReplacement> Replacements { get; } = [];
+        internal List<SceneDisposal> SceneDisposals { get; } = [];
+        internal List<int> OrphanHandles { get; } = [];
+        internal ResidentInvariantG2? ResidentAtCellEndG2 { get; set; }
         internal ShotState BeginShot(string shotId, string contextId, GraphicsShotFacts facts)
         { var s = new ShotState(shotId, contextId, facts); Shots.Add(s); return s; }
         internal void TrackCellResource(TrackedResource resource)
@@ -683,6 +936,99 @@ internal sealed class GraphicsReuseRed : IDisposable
         internal List<ResourceCheck> CellSurvivalChecks { get; } = [];
         internal bool? TeardownContextCurrent { get; set; } internal bool Ended { get; set; }
         internal List<OverlayDelete> OverlayDeletes { get; } = [];
+        internal List<KeyInputs> KeyInputs { get; } = [];
+        internal List<KeyDecision> KeyDecisions { get; } = [];
+        internal List<ManifestCheck> ManifestChecks { get; } = [];
+        internal List<ResidencyMutation> ResidencyMutations { get; } = [];
+    }
+
+    // ---- G2 (Gate B4) records ----
+    internal sealed record KeyInputs(string Key, string PreparedIdentitySha256, string Flags, string EnvSha256,
+        int RefCount, string RefsSha256, string GeometrySha256, int HighlightCount, string HighlightSha256,
+        int MarkerCount, int ConstructedCount, int StateChangedCount, string StateSha256, int BosSwappedCount,
+        int FxPathCount, string TerrainSha256, string LayersSha256, string CoveringsSha256);
+    internal sealed record KeyDecision(string Key, string? PriorKey, string Decision, string SceneId, long Order);
+    internal sealed record SceneReplacement(string OldSceneId, string OldKey, string NewKey, string? ShotId, long Order,
+        int MeshCount, int OwnedTextureCount, int RetiredResidentPaths, bool AllLiveBeforeDispose);
+    internal sealed record SceneDisposal(string SceneId, string Key, string? ShotId, long Order, int MeshCount,
+        int OwnedTextureCount, int LiveMeshesAfter, int LiveOwnedAfter, bool AllDeadAfter);
+    internal sealed record ResidencyMutation(string Mode, string Phase, string Category, string GamePath, string DiskPath,
+        int Handle, int NewHandle, int ResidentPeekBefore, int ResidentPeekAfter, int PrivateCachePeekBefore,
+        int PrivateCachePeekAfter, bool HandleLiveBefore, bool HandleLiveAfter, bool NewHandleLive, long Order);
+    internal sealed record ManifestRow(string Category, string GamePath, string? DiskPath, int ManifestHandle,
+        int ResidentPeek, int PrivateCachePeek, bool Live);
+    internal sealed record ManifestCheck(string Phase, int Index, long Order, int Entries, int Mismatched, int Dead,
+        int PrivateStale, bool AllOwnedAndLive, ManifestRow[] Rows);
+    internal sealed record ResidentInvariantG2(int ResidentCount, int CurrentDistinctPaths, int CurrentFound,
+        int RetiredOnlyPaths, int RetiredFound, string[] RetiredEvicted, int Surplus, string[] ShotLocalPathsInCache,
+        bool Holds);
+
+    // ---- G2 (Gate B4) non-promoting reads of the Rendering caches, by reflection (measurement only) ----
+    const System.Reflection.BindingFlags Private = System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance;
+    static readonly System.Reflection.FieldInfo? ResidentMap = typeof(ResidentTextureCache).GetField("_map", Private);
+    static readonly Type? ResidentEntry = typeof(ResidentTextureCache).GetNestedType("Entry", System.Reflection.BindingFlags.NonPublic);
+    static readonly System.Reflection.FieldInfo? ManagerPathCache = typeof(GlTextureManager).GetField("_textureCache", Private);
+
+    static void ValidateReflection()
+    {
+        string[] entryFields = ["Handle", "Bytes", "InProtected", "Node"];
+        if (ResidentMap is null || ResidentEntry is null || ManagerPathCache is null
+            || entryFields.Any(f => ResidentEntry.GetField(f) is null)
+            || typeof(ResidentTextureCache).GetField("_currentBytes", Private) is null
+            || typeof(ResidentTextureCache).GetField("_protectedBytes", Private) is null)
+            throw new InvalidOperationException("G2 observer: the Rendering cache fields it reads are not present in this build");
+    }
+
+    static int PeekResident(ResidentTextureCache cache, string? diskPath)
+    {
+        if (string.IsNullOrEmpty(diskPath)) return -1;
+        var map = (System.Collections.IDictionary)ResidentMap!.GetValue(cache)!;
+        object? entry = map.Contains(diskPath) ? map[diskPath] : null;
+        return entry is null ? -1 : (int)ResidentEntry!.GetField("Handle")!.GetValue(entry)!;
+    }
+
+    static int PeekPrivate(GlTextureManager manager, string gamePath)
+    {
+        var map = (Dictionary<string, int>)ManagerPathCache!.GetValue(manager)!;
+        return map.TryGetValue(gamePath, out int handle) ? handle : -1;
+    }
+
+    static void SetResidentHandle(ResidentTextureCache cache, string diskPath, int handle)
+    {
+        var map = (System.Collections.IDictionary)ResidentMap!.GetValue(cache)!;
+        object entry = map[diskPath] ?? throw new InvalidOperationException("G2 replace: path not resident: " + diskPath);
+        ResidentEntry!.GetField("Handle")!.SetValue(entry, handle);
+    }
+
+    /// <summary>Exactly what ResidentTextureCache.EvictToBudget does to one victim, minus the GL delete (the caller
+    /// deletes): unlink from its segment, drop the map entry, subtract its bytes.</summary>
+    static void EvictResident(ResidentTextureCache cache, string diskPath)
+    {
+        var map = (System.Collections.IDictionary)ResidentMap!.GetValue(cache)!;
+        object entry = map[diskPath] ?? throw new InvalidOperationException("G2 evict: path not resident: " + diskPath);
+        bool inProtected = (bool)ResidentEntry!.GetField("InProtected")!.GetValue(entry)!;
+        long bytes = (long)ResidentEntry.GetField("Bytes")!.GetValue(entry)!;
+        object node = ResidentEntry.GetField("Node")!.GetValue(entry)!;
+        object list = node.GetType().GetProperty("List")!.GetValue(node)!;
+        list.GetType().GetMethod("Remove", [node.GetType()])!.Invoke(list, [node]);
+        map.Remove(diskPath);
+        var current = typeof(ResidentTextureCache).GetField("_currentBytes", Private)!;
+        current.SetValue(cache, (long)current.GetValue(cache)! - bytes);
+        if (inProtected)
+        {
+            var prot = typeof(ResidentTextureCache).GetField("_protectedBytes", Private)!;
+            prot.SetValue(cache, (long)prot.GetValue(cache)! - bytes);
+        }
+    }
+
+    static int CreateSubstituteTexture()
+    {
+        int made = GL.GenTexture();
+        GL.BindTexture(TextureTarget.Texture2D, made);
+        GL.TexImage2D(TextureTarget.Texture2D, 0, PixelInternalFormat.Rgba8, 1, 1, 0,
+                      PixelFormat.Rgba, PixelType.UnsignedByte, new byte[] { 0, 255, 255, 255 });
+        GL.BindTexture(TextureTarget.Texture2D, 0);
+        return made;
     }
 
     sealed class ExpectedGraphicsFault(string boundary, string cellId, string shotId)

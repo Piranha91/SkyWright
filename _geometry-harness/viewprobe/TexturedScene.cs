@@ -572,6 +572,10 @@ static class TexturedScene
             throw new InvalidOperationException("retained graphics requires the prepared-cell identity");
         string staticKey = graphicsCell is null ? "unretained" : StaticInputKey(preparedIdentity!, refs,
             terrainPatches, terrainLayers, coveringsByBase, keepFx, fxStatic, cullAbove, refSurface, refSurfaceOpacity);
+        // Measurement only (Gate B4, G2 RED): per-component digests of the key's inputs; inert without a RED session.
+        if (graphicsCell is not null)
+            graphicsShot?.StaticKeyInputs(staticKey, preparedIdentity!, refs, terrainPatches, terrainLayers, coveringsByBase,
+                keepFx, fxStatic, cullAbove, refSurface, refSurfaceOpacity);
         BuiltScene? builtScene = graphicsCell?.BeginShot(staticKey, cache, logger, graphicsShot);
         // Shot-local textures never join the cell's resident cache (Gate B2 review, C2 option A): in reuse mode the
         // per-shot manager is built exactly as the no-flag path builds it, so what it loads dies with the shot and
@@ -1745,6 +1749,7 @@ static class TexturedScene
             GL.Viewport(0, 0, sizeW, sizeH);
             GL.ClearColor(skyColor.X, skyColor.Y, skyColor.Z, 1f);
             GL.Clear(ClearBufferMask.ColorBufferBit | ClearBufferMask.DepthBufferBit);
+            graphicsCell?.ObserveDraw(graphicsShot);   // measurement only (Gate B4, G2 RED); inert without a RED session
             renderer.Render(camera, sizeW, sizeH);   // clears again, with renderer.ClearColor = sky
             wireOverlay?.Invoke(camera.GetViewMatrix(), camera.GetProjectionMatrix(canvasAspect));
             if (msFbo != 0 && !singleSample)
