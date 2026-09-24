@@ -219,6 +219,21 @@ static class TexturedScene
         public Action? ObserveMeshStateFactory { get; init; }
     }
 
+    /// <summary>The owner-release scope for resources a worklist shot creates outside RenderToPng and owns for the
+    /// whole shot (the NPC actors' VMs and their link-cache overlays, which must outlive every panel of the shot).
+    /// Declared with `using` where they are created, so an ordinary return and a fault release them the same way,
+    /// exactly once (Gate B6 review, Q4: a shot-scoped release must never sit at a site the fault path skips).</summary>
+    internal sealed class ShotOwnerRelease(Action release) : IDisposable
+    {
+        bool released;
+        public void Dispose()
+        {
+            if (released) return;
+            released = true;
+            release();
+        }
+    }
+
     sealed class ShotResourceScope : IDisposable
     {
         readonly GlRenderer renderer; readonly List<GlMesh> owned; readonly List<GlMesh> borrowed;
@@ -2037,7 +2052,11 @@ static class TexturedScene
                 Directory.CreateDirectory(evidenceDir);
                 occl.SceneDepthPath = Path.Combine(evidenceDir, "scene-depth-f32.bin");
                 File.WriteAllBytes(occl.SceneDepthPath, System.Runtime.InteropServices.MemoryMarshal.AsBytes(plainDepth.AsSpan()).ToArray());
-                var allMeshes = meshes.Concat(npcActors.SelectMany(a => a.Meshes)).Distinct().ToArray();
+                // The isolation universe is what the renderer draws, not the shot's own list: with a retained scene
+                // (--reuse-cell) the static meshes live in the renderer but never in `meshes`, and a shape measured
+                // against them is measured against the whole scene (Gate B6, W-G3-1). On the per-shot path the
+                // renderer holds exactly `meshes` plus the borrowed NPC meshes at this point, so nothing changes there.
+                var allMeshes = renderer.Meshes.Concat(npcActors.SelectMany(a => a.Meshes)).Distinct().ToArray();
                 var savedVisibility = allMeshes.ToDictionary(m => m, m => m.IsRendering);
                 var ownDepth = new float[sizeW * sizeH];
                 // Created HERE, beside the depth buffers whose contents its keys identify, and

@@ -3743,10 +3743,14 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot,
         // Record side first (a full-order link cache over fresh overlays — the walk above
         // disposed its own), then the runtime outfit stack, then one VM per NPC through the
         // character pipeline, world-baked. The VMs (and these overlays) must outlive every
-        // panel: NpcCleanup() runs before each return below.
+        // panel of the shot: the shot's owner-release scope (npcOwners) runs NpcCleanup() once on every exit,
+        // a fault included.
         var npcActors = new List<ViewProbe.NpcActorRender>();
         ViewProbe.NpcActorBuilder.Host? npcHost = null;
         var npcLcMods = new List<ISkyrimModGetter>();
+        // Shot-scoped owners are released from the shot's cleanup scope, never at the normal returns alone
+        // (Gate B6 review, Q4): a fault after the actors are built must not leave their VMs alive in a retained context.
+        using var npcOwners = new ViewProbe.TexturedScene.ShotOwnerRelease(NpcCleanup);
         // Coloured caption lines: each actor's identity colour, and the route's. Drawn under the
         // white lines, each in the colour of the thing it names, so a picture with several marked
         // things says which is which without anyone counting rings.
@@ -4622,7 +4626,6 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot,
             if (collectArtifacts) completedArtifacts.AddClosed(stitched, "frame");
             Console.WriteLine($"wrote:\n   {stitched}");
             Console.WriteLine($"   panels left->right: [1] {cmp.A}   [2] {cmp.B}   [3] winning state (+conflict red)");
-            NpcCleanup();
             return 0;
         }
 
@@ -4706,7 +4709,6 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot,
                 graphicsCell: graphicsCell, preparedIdentity: preparedKey);
             Console.WriteLine($"   interactive run over ({iShapes:N0} shapes were resident)");
         pendingSwitch = iopt.CellSwitch;
-            NpcCleanup();
             return 0;
         }
 
@@ -4714,7 +4716,6 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot,
         Console.WriteLine($"wrote:\n   {fpOut}");
         Console.WriteLine($"   eye {eyePos.Value.X:0},{eyePos.Value.Y:0},{eyePos.Value.Z:0} -> look {lookPos.Value.X:0},{lookPos.Value.Y:0},{lookPos.Value.Z:0}"
                         + $"  yaw {camYawDeg:0.#}° pitch {camPitchDeg:0.#}° fov {fov:0}°  ({drawnShapes:N0} shapes)");
-        NpcCleanup();
         return 0;
     }
 

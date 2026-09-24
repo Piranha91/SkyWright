@@ -692,6 +692,14 @@ Fresh in every shot: the camera and the frame target, and a per-shot texture man
 texture the static scene does not own. What that manager loads never joins the resident cache; it
 is deleted with the shot.
 
+Also built fresh in every shot and released at its end: the water; every overlay (navmesh wires and
+fills, routes, the grid, NPC pucks and rims, occlusion-plane marks, seams and the other diagnostic
+geometry); the placed NPC actors and the meshes they lend the renderer; and the subject masks and
+the scene depth. The NPC actors are released by a scope the shot opens where it builds them, so a
+shot that fails after building them still releases them before the cell goes on or ends. A
+subject's isolation mask is measured against everything the renderer draws in that shot, the
+retained static meshes included, so it is the same mask the per-shot path measures.
+
 **What makes it refuse instead of drawing.** Each of these is printed and the run exits 2:
 
 | what it prints | when |
