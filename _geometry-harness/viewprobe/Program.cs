@@ -4868,6 +4868,7 @@ if (worklist is not null)
                                 + "will be spent after the remaining shots.");
                     }
                 }
+                graphicsReuseRed?.AfterShotLoop();   // test-only (B10b RED): the cell-level fault point; inert without a RED session
             }
             catch (Exception ex) when (ViewProbe.GraphicsReuseRed.TestBoundaryEnabled)
             {

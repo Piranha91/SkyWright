@@ -145,6 +145,7 @@ internal sealed class GraphicsCell : IDisposable
     {
         if (disposed) return;
         List<Exception> failures = [];
+        DisposeOne(() => red?.ResidentOracle(resident), failures);   // measurement only (B10b RED): the resident cache at cell end
         bool current = false;
         try { MakeCurrent(); current = true; }
         catch (Exception ex) { failures.Add(ex); }

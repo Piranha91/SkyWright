@@ -865,6 +865,8 @@ internal sealed class GraphicsReuseRed : IDisposable
         internal long? G4BudgetBytes { get; }
         internal long G4RepollDeficitBytes { get; }
         internal string G4OomCategory { get; } = "static-terrain-diffuse";
+        // B10b (part 1b RED): the ceiling arm's requested OOM ceiling, applied just before a repolling pass.
+        internal long? G4CeilingBytes { get; }
         internal bool G5Observe { get; }
         internal List<string> G5Poison { get; } = [];
         internal int G5Shot { get; } = 2;
@@ -883,8 +885,8 @@ internal sealed class GraphicsReuseRed : IDisposable
         {
             OutputPath = outputPath;
             RequestedFault = string.IsNullOrWhiteSpace(requestedFault) ? null : requestedFault;
-            if (RequestedFault is not null && RequestedFault is not ("after-static" or "after-dynamic" or "before-encode"))
-                throw new ArgumentException("VP_GRAPHICS_REUSE_RED_FAULT must be after-static, after-dynamic, or before-encode");
+            if (RequestedFault is not null && RequestedFault is not ("after-static" or "after-dynamic" or "before-encode" or "after-shots"))
+                throw new ArgumentException("VP_GRAPHICS_REUSE_RED_FAULT must be after-static, after-dynamic, before-encode or after-shots");
             G2Mode = Environment.GetEnvironmentVariable("VP_GRAPHICS_REUSE_RED_G2") == "1";
             string? residency = Environment.GetEnvironmentVariable("VP_GRAPHICS_REUSE_RED_RESIDENCY");
             ResidencyMode = string.IsNullOrWhiteSpace(residency) ? null : residency;
@@ -906,6 +908,8 @@ internal sealed class GraphicsReuseRed : IDisposable
             G4RepollDeficitBytes = (string.IsNullOrWhiteSpace(deficit) ? 256L : long.Parse(deficit, inv)) << 20;
             string? oomCategory = Environment.GetEnvironmentVariable("VP_GRAPHICS_REUSE_RED_OOM_CATEGORY");
             if (!string.IsNullOrWhiteSpace(oomCategory)) G4OomCategory = oomCategory;
+            string? ceiling = Environment.GetEnvironmentVariable("VP_GRAPHICS_REUSE_RED_CEILING_MIB");
+            G4CeilingBytes = string.IsNullOrWhiteSpace(ceiling) ? null : long.Parse(ceiling, inv) << 20;
             string? g5 = Environment.GetEnvironmentVariable("VP_GRAPHICS_REUSE_RED_G5");
             G5Observe = !string.IsNullOrWhiteSpace(g5);
             if (G5Observe && g5 != "observe")
@@ -917,8 +921,10 @@ internal sealed class GraphicsReuseRed : IDisposable
             G5NoOp = string.IsNullOrWhiteSpace(g5NoOp) ? null : g5NoOp;
             if ((G4Mode is not null || G4BudgetBytes is not null || G5Observe) && !G2Mode)
                 throw new ArgumentException("VP_GRAPHICS_REUSE_RED_G4, _BUDGET and _G5 require VP_GRAPHICS_REUSE_RED_G2=1");
-            if (G4Mode is not null && G4Mode is not ("pin" or "repoll" or "oom"))
-                throw new ArgumentException("VP_GRAPHICS_REUSE_RED_G4 must be pin, repoll or oom");
+            if (G4Mode is not null && G4Mode is not ("pin" or "repoll" or "oom" or "passes" or "ceiling"))
+                throw new ArgumentException("VP_GRAPHICS_REUSE_RED_G4 must be pin, repoll, oom, passes or ceiling");
+            if ((G4Mode == "ceiling") != (G4CeilingBytes is not null))
+                throw new ArgumentException("VP_GRAPHICS_REUSE_RED_CEILING_MIB belongs to, and is required by, the ceiling arm");
             if (G4BudgetBytes is not null && G4Mode != "pin")
                 throw new ArgumentException("VP_GRAPHICS_REUSE_RED_BUDGET belongs to the pin arm (a pinned budget disables the repoll)");
             foreach (string item in G5Poison)
@@ -1420,6 +1426,7 @@ internal sealed class GraphicsReuseRed : IDisposable
     internal void BeforeRenderPass(ResidentTextureCache resident, BuiltScene? scene)
     {
         ThrowIfDisposed();
+        if (session.G4Mode is "passes" or "ceiling") { PassRecord(resident, "before"); return; }   // B10b
         if (session.G4Mode != "repoll") return;
         var shot = cell.Shots.LastOrDefault();
         int ordinal = cell.Shots.Count;
@@ -1489,6 +1496,7 @@ internal sealed class GraphicsReuseRed : IDisposable
     internal void AfterRenderPass(ResidentTextureCache resident, BuiltScene? scene)
     {
         ThrowIfDisposed();
+        if (session.G4Mode is "passes" or "ceiling") { PassRecord(resident, "after"); return; }   // B10b
         if (session.G4Mode != "repoll") return;
         var shot = cell.Shots.LastOrDefault();
         int ordinal = cell.Shots.Count;
@@ -1993,6 +2001,66 @@ internal sealed class GraphicsReuseRed : IDisposable
         ThrowIfDisposed();
         if (!session.G5Observe) return;
         session.Emit("g5-shot-camera", cell, null, new { values = values.ToDictionary(k => k.Key, k => Fmt(k.Value)) });
+    }
+
+    // ---- B10b (launch 10, part 1b RED): the resident cache at every render pass and at cell end. Measurement only, inert
+    // without a RED session; reads the dependency's fields without GL calls. The ceiling arm's one reflection write is
+    // labelled injected in its own event. ----
+    static object ResidentFields(ResidentTextureCache resident) => new
+    {
+        budgetBytes = resident.BudgetBytes, currentBytes = resident.CurrentBytes, count = resident.Count,
+        rendersSinceRepoll = ResidentField(resident, "_rendersSinceRepoll"), epoch = ResidentField(resident, "_epoch"),
+        oomCeilingBytes = ResidentField(resident, "_oomCeilingBytes"),
+        overrideBudgetBytes = ResidentField(resident, "_overrideBudgetBytes"),
+        vramQueryAvailable = ResidentField(resident, "_vramQueryAvailable"),
+    };
+
+    bool b10bCeilingFired;
+
+    /// <summary>B10b passes and ceiling arms: the resident cache just before and just after every BeginRenderPass. In the
+    /// ceiling arm, immediately before the pass whose BeginRenderPass is a repoll (the counter reads 15), lower the
+    /// dependency's OOM ceiling to the requested value, so that the dependency's own repoll moves the budget. On a GPU
+    /// whose free memory keeps the dynamic budget at its hard maximum, a repoll otherwise recomputes the same value.</summary>
+    void PassRecord(ResidentTextureCache resident, string phase)
+    {
+        var shot = cell.Shots.LastOrDefault();
+        int ordinal = cell.Shots.Count;
+        session.Emit("b10b-pass", cell, shot, new { ordinal, phase, fields = ResidentFields(resident) });
+        if (phase != "before" || session.G4Mode != "ceiling" || b10bCeilingFired) return;
+        if (ResidentField(resident, "_rendersSinceRepoll") is not int since || since != 15) return;
+        var field = typeof(ResidentTextureCache).GetField("_oomCeilingBytes", Private)
+            ?? throw new InvalidOperationException("B10b ceiling arm: ResidentTextureCache._oomCeilingBytes is absent");
+        object? before = field.GetValue(resident);
+        field.SetValue(resident, session.G4CeilingBytes!.Value);
+        b10bCeilingFired = true;
+        session.Emit("b10b-ceiling-injected", cell, shot, new
+        {
+            ordinal, injected = true, ceilingBefore = before, ceilingAfter = field.GetValue(resident),
+            budgetBefore = resident.BudgetBytes, nextPassIsRepoll = true
+        });
+    }
+
+    /// <summary>B10b cell-level fault point (test-only, observer revision 02): called after a cell's shot loop, inside the
+    /// cell's try, so a fault here leaves the shot loop and reaches the cell-level test boundary. Active only with
+    /// VP_GRAPHICS_REUSE_RED_FAULT=after-shots; otherwise it returns without recording anything.</summary>
+    internal void AfterShotLoop()
+    {
+        ThrowIfDisposed();
+        if (!StringComparer.Ordinal.Equals(session.RequestedFault, "after-shots")) return;
+        session.Emit("checkpoint", cell, null, new { boundary = "after-shots" });
+        session.RequestedFaultReached = true;
+        throw new ExpectedGraphicsFault("after-shots", cell.CellId, "cell");
+    }
+
+    /// <summary>B10b oracle: the resident cache at cell end, read by the observer independently of any telemetry hook.
+    /// Called first thing in GraphicsCell.Dispose, in every RED session.</summary>
+    internal void ResidentOracle(ResidentTextureCache? resident)
+    {
+        ThrowIfDisposed();
+        session.Emit("b10b-resident-cell-end", cell, cell.Shots.LastOrDefault(), new
+        {
+            present = resident is not null, fields = resident is null ? null : ResidentFields(resident)
+        });
     }
 
     /// <summary>G4/G5 cell end (context current): delete the scratch objects the hooks created and any device memory a
