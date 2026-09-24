@@ -1485,6 +1485,13 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot,
     if (worklist is not null)
     {
         var wshot = worklist.Cells[wlCell].Shots[wlShot];
+        // Measurement only (G5 RED, Gate B8): what the previous shot and the command line left, before the resets.
+        graphicsReuseRed?.ShotInputs(wlCell, wlShot, "pre-reset", new Dictionary<string, object?>
+        {
+            ["navMode"] = navMode, ["cullAbove"] = cullAbove, ["showPlanes"] = showPlanes, ["occlusionMode"] = occlusionMode,
+            ["canvasAspect"] = canvasAspect, ["eye"] = eye, ["yaw"] = yaw, ["pitch"] = pitch, ["fov"] = fov,
+            ["look"] = look, ["eyeRef"] = eyeRef, ["lookRef"] = lookRef, ["stateSpec"] = stateSpec,
+        });
         eye = new System.Numerics.Vector3(wshot.Eye[0], wshot.Eye[1], wshot.Eye[2]);
         var (wsYaw, wsPitch) = HarnessShared.WorklistIo.Aim(wshot);
         yaw = wsYaw; pitch = wsPitch; fov = wshot.Fov;
@@ -1513,6 +1520,13 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot,
         textured = true;
         Console.WriteLine($"\n=== worklist cell {wlCell + 1}/{worklist.Cells.Count} "
                         + $"shot {wlShot + 1}/{worklist.Cells[wlCell].Shots.Count}: {wshot.Label} ===");
+        // Measurement only (G5 RED, Gate B8): the shot's inputs after the per-shot resets and the row's overrides.
+        graphicsReuseRed?.ShotInputs(wlCell, wlShot, "post-reset", new Dictionary<string, object?>
+        {
+            ["navMode"] = navMode, ["cullAbove"] = cullAbove, ["showPlanes"] = showPlanes, ["occlusionMode"] = occlusionMode,
+            ["canvasAspect"] = canvasAspect, ["eye"] = eye, ["yaw"] = yaw, ["pitch"] = pitch, ["fov"] = fov,
+            ["look"] = look, ["eyeRef"] = eyeRef, ["lookRef"] = lookRef, ["stateSpec"] = stateSpec,
+        });
     }
 
     // The shot's own NPCs, on top of the command line's: the same shape --npc parses to, and watched by
@@ -2136,6 +2150,11 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot,
             lookPos = eyePos.Value + dir * 512f;
         }
 
+        // Measurement only (G5 RED, Gate B8): the camera this shot resolved.
+        graphicsReuseRed?.ShotCamera(new Dictionary<string, object?>
+        {
+            ["eyePos"] = eyePos, ["lookPos"] = lookPos, ["fov"] = fov, ["canvasAspect"] = canvasAspect,
+        });
         // Which navmeshes (or single triangles) are the FINDING. null tri-set = the whole record.
         var redNav = new Dictionary<FormKey, HashSet<int>?>();
         var conflictDoors = new HashSet<FormKey>();
@@ -4784,7 +4803,8 @@ if (worklist is not null)
                         StartFocused = false, WindowBorder = WindowBorder.Hidden,
                         APIVersion = new Version(3, 3), Profile = ContextProfile.Core,
                     };
-                    graphicsCell = new ViewProbe.GraphicsCell(graphicsSettings, graphicsReuseRed);
+                    // The pinned budget is a RED-session value only (G4 pin arm); null otherwise, as before.
+                    graphicsCell = new ViewProbe.GraphicsCell(graphicsSettings, graphicsReuseRed, graphicsReuseRed?.TestBudgetBytes);
                 }
                 for (int wls = 0; wls < worklist.Cells[wlc].Shots.Count; wls++)
                 {

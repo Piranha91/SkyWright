@@ -631,7 +631,11 @@ static class TexturedScene
             var manager = isStatic && graphicsCell is not null ? graphicsCell.InstallTextures : textures;
             if (graphicsCell is null)
             {
+                // Measurement only (G4 RED, Gate B8 review Q2): the same queued GL_OUT_OF_MEMORY on the per-shot path.
+                var oomOrdinary = isStatic ? graphicsReuseRed?.BeforeOrdinaryLoad(category, gamePath,
+                    cache.ResolveAssetPath(gamePath), manager) : null;
                 int ordinary = manager.LoadTexture(gamePath);
+                if (oomOrdinary is not null) graphicsReuseRed!.AfterOrdinaryLoad(oomOrdinary, ordinary, manager);   // measurement only
                 if (graphicsShot is not null)
                     graphicsShot.TextureAssigned(category, gamePath, cache.ResolveAssetPath(gamePath), ordinary, manager.WhiteTexture);
                 return ordinary;
@@ -639,6 +643,10 @@ static class TexturedScene
             string? diskPath = cache.ResolveAssetPath(gamePath);
             BuiltScene.TextureLease LoadAndCaptureMissing()
             {
+                // Measurement only (G4 RED, Gate B8): a real GL_OUT_OF_MEMORY queued before one chosen install
+                // upload; inert without a RED session.
+                var oomProbe = isStatic ? graphicsReuseRed?.BeforeInstallLoad(category, gamePath, diskPath, manager,
+                    graphicsCell!.Resident) : null;
                 int loaded = manager.LoadTexture(gamePath);
                 // The manager's case-insensitive set is the diagnostic contract. A failed asset
                 // request enters it but is not handle-cached, so membership survives repeated
@@ -646,6 +654,8 @@ static class TexturedScene
                 // failure can also return (and cache) white without recording a missing asset.
                 bool missing = manager.MissingTexturePaths.Any(
                     x => StringComparer.OrdinalIgnoreCase.Equals(x, gamePath));
+                if (oomProbe is not null)   // measurement only (G4 RED)
+                    graphicsReuseRed!.AfterInstallLoad(oomProbe, loaded, missing, manager, graphicsCell!.Resident);
                 return new(loaded, missing ? [gamePath] : []);
             }
             var lease = isStatic && builtScene is not null

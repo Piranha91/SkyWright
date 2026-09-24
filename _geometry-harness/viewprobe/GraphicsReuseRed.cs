@@ -860,6 +860,24 @@ internal sealed class GraphicsReuseRed : IDisposable
         internal string? TouchPath { get; }
         internal bool Touched { get; set; }
         internal HashSet<string> SeenReferenceDigests { get; } = new(StringComparer.Ordinal);
+        // G4/G5 (launch 9, Gate B8 RED): measurement variables, accepted only in G2 mode.
+        internal string? G4Mode { get; }
+        internal long? G4BudgetBytes { get; }
+        internal long G4RepollDeficitBytes { get; }
+        internal string G4OomCategory { get; } = "static-terrain-diffuse";
+        internal bool G5Observe { get; }
+        internal List<string> G5Poison { get; } = [];
+        internal int G5Shot { get; } = 2;
+        internal string? G5NoOp { get; }
+        internal static readonly string[] G5Items =
+        [
+            "mesh-visibility", "mesh-emissive-tint", "mesh-emissive-flags", "mesh-material",
+            "renderer-core", "renderer-lights", "renderer-extra",
+            "gl-framebuffer", "gl-viewport", "gl-clearcolor", "gl-depth-test", "gl-depth-func", "gl-depth-write", "gl-cull",
+            "gl-frontface", "gl-blend", "gl-blendfunc", "gl-multisample", "gl-a2c", "gl-clip", "gl-program", "gl-vao-attribs",
+            "gl-scissor", "gl-colormask", "gl-stencil", "gl-depthrange", "gl-blendeq", "gl-polyoffset", "gl-srgb",
+            "gl-activetexture",
+        ];
 
         internal Session(string outputPath, string? requestedFault)
         {
@@ -878,6 +896,35 @@ internal sealed class GraphicsReuseRed : IDisposable
                 throw new ArgumentException("VP_GRAPHICS_REUSE_RED_RESIDENCY must be delete, replace, evict or replace-after-before-static");
             if (TouchPath is not null && !File.Exists(TouchPath))
                 throw new ArgumentException("VP_GRAPHICS_REUSE_RED_TOUCH names no file: " + TouchPath);
+            // G4/G5 (launch 9, Gate B8 RED): measurement variables, accepted only in G2 mode.
+            var inv = System.Globalization.CultureInfo.InvariantCulture;
+            string? g4 = Environment.GetEnvironmentVariable("VP_GRAPHICS_REUSE_RED_G4");
+            G4Mode = string.IsNullOrWhiteSpace(g4) ? null : g4;
+            string? budget = Environment.GetEnvironmentVariable("VP_GRAPHICS_REUSE_RED_BUDGET");
+            G4BudgetBytes = string.IsNullOrWhiteSpace(budget) ? null : long.Parse(budget, inv);
+            string? deficit = Environment.GetEnvironmentVariable("VP_GRAPHICS_REUSE_RED_REPOLL_DEFICIT_MIB");
+            G4RepollDeficitBytes = (string.IsNullOrWhiteSpace(deficit) ? 256L : long.Parse(deficit, inv)) << 20;
+            string? oomCategory = Environment.GetEnvironmentVariable("VP_GRAPHICS_REUSE_RED_OOM_CATEGORY");
+            if (!string.IsNullOrWhiteSpace(oomCategory)) G4OomCategory = oomCategory;
+            string? g5 = Environment.GetEnvironmentVariable("VP_GRAPHICS_REUSE_RED_G5");
+            G5Observe = !string.IsNullOrWhiteSpace(g5);
+            if (G5Observe && g5 != "observe")
+                G5Poison = g5 == "all" ? [.. G5Items]
+                    : [.. g5!.Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries)];
+            string? g5Shot = Environment.GetEnvironmentVariable("VP_GRAPHICS_REUSE_RED_G5_SHOT");
+            if (!string.IsNullOrWhiteSpace(g5Shot)) G5Shot = int.Parse(g5Shot, inv);
+            string? g5NoOp = Environment.GetEnvironmentVariable("VP_GRAPHICS_REUSE_RED_G5_NOOP");
+            G5NoOp = string.IsNullOrWhiteSpace(g5NoOp) ? null : g5NoOp;
+            if ((G4Mode is not null || G4BudgetBytes is not null || G5Observe) && !G2Mode)
+                throw new ArgumentException("VP_GRAPHICS_REUSE_RED_G4, _BUDGET and _G5 require VP_GRAPHICS_REUSE_RED_G2=1");
+            if (G4Mode is not null && G4Mode is not ("pin" or "repoll" or "oom"))
+                throw new ArgumentException("VP_GRAPHICS_REUSE_RED_G4 must be pin, repoll or oom");
+            if (G4BudgetBytes is not null && G4Mode != "pin")
+                throw new ArgumentException("VP_GRAPHICS_REUSE_RED_BUDGET belongs to the pin arm (a pinned budget disables the repoll)");
+            foreach (string item in G5Poison)
+                if (!G5Items.Contains(item)) throw new ArgumentException("unknown VP_GRAPHICS_REUSE_RED_G5 item " + item);
+            if (G5NoOp is not null && !G5Poison.Contains(G5NoOp))
+                throw new ArgumentException("VP_GRAPHICS_REUSE_RED_G5_NOOP must name one of the poisoned items");
             if (G2Mode) ValidateReflection();
             eventPath = outputPath + ".events.jsonl";
             dependencyAssembly = typeof(GlRenderer).Assembly.Location;
@@ -1250,5 +1297,714 @@ internal sealed class GraphicsReuseRed : IDisposable
         return Convert.ToHexString(h.GetHashAndReset());
     }
     static string HashFloats(float[] values) => Convert.ToHexString(SHA256.HashData(MemoryMarshal.AsBytes(values.AsSpan())));
+    // ==== G4 / G5 (launch 9, Gate B8 RED): measurement-only hooks. Each returns at once unless its RED variable is
+    // set, and those variables are accepted only with VP_GRAPHICS_REUSE_RED_G2=1 inside a RED session. ====
+
+    /// <summary>G4 pin arm: the requested budget the cell hands its ResidentTextureCache (null without the variable).</summary>
+    public long? TestBudgetBytes => session.G4BudgetBytes;
+
+    readonly List<BallastEntry> g4Ballast = [];
+    readonly List<int> g4Vram = [];
+    long g4VramBytes;
+    bool g4RepollFired, g4OomFired;
+    int g45Fbo, g45FboTexture, g45Program, g45Vao;
+    readonly HashSet<string> g45PreDrawShots = new(StringComparer.Ordinal);
+    internal sealed record BallastEntry(string Key, int Handle, long EstimatedBytes, long AllocatedBytes, int ShotOrdinal, long Order);
+    internal sealed record OomProbe(string Category, string GamePath, string DiskPath, string[] Drained, string ProbeError,
+        long BudgetBefore, object? CeilingBefore, int WhiteBefore, long Order);
+    static System.Globalization.CultureInfo Inv => System.Globalization.CultureInfo.InvariantCulture;
+
+    static object? ResidentField(ResidentTextureCache cache, string name) =>
+        typeof(ResidentTextureCache).GetField(name, Private)?.GetValue(cache);
+
+    static int FreeVramKb() => GL.GetInteger((GetPName)0x9049);   // GL_GPU_MEMORY_INFO_CURRENT_AVAILABLE_VIDMEM_NVX, as the dependency reads it
+
+    static long PrivateBytes()
+    {
+        using var p = System.Diagnostics.Process.GetCurrentProcess();
+        return p.PrivateMemorySize64;
+    }
+
+    static (string Category, string GamePath, string? DiskPath, int Handle, bool Resident)[] ResidentManifest(BuiltScene? scene) =>
+        scene?.TextureManifest.Where(x => x.Resident && !string.IsNullOrEmpty(x.DiskPath)).ToArray()
+        ?? Array.Empty<(string Category, string GamePath, string? DiskPath, int Handle, bool Resident)>();
+
+    object ResidentView(ResidentTextureCache resident, BuiltScene? scene)
+    {
+        var manifest = ResidentManifest(scene);
+        int member = 0, live = 0;
+        foreach (var e in manifest)
+        {
+            if (PeekResident(resident, e.DiskPath) == e.Handle) member++;
+            if (e.Handle > 0 && GL.IsTexture(e.Handle)) live++;
+        }
+        return new
+        {
+            budgetBytes = resident.BudgetBytes, currentBytes = resident.CurrentBytes, count = resident.Count,
+            epoch = ResidentField(resident, "_epoch"), rendersSinceRepoll = ResidentField(resident, "_rendersSinceRepoll"),
+            overrideBudgetBytes = ResidentField(resident, "_overrideBudgetBytes"),
+            vramQueryAvailable = ResidentField(resident, "_vramQueryAvailable"),
+            totalVramBytes = ResidentField(resident, "_totalVramBytes"), oomCeilingBytes = ResidentField(resident, "_oomCeilingBytes"),
+            retainedEntries = manifest.Length, retainedMember = member, retainedLive = live,
+            freeVramKb = FreeVramKb(), privateBytes = PrivateBytes()
+        };
+    }
+
+    static long LevelBytes(int handle)
+    {
+        long total = 0;
+        for (int level = 0; level < 16; level++)
+        {
+            GL.GetTexLevelParameter(TextureTarget.Texture2D, level, GetTextureParameter.TextureWidth, out int w);
+            GL.GetTexLevelParameter(TextureTarget.Texture2D, level, GetTextureParameter.TextureHeight, out int h);
+            if (w <= 0 || h <= 0) break;
+            total += (long)w * h * 4;
+        }
+        return total;
+    }
+
+    /// <summary>G4 pin arm: after this shot's first validation touched the retained manifest in the new epoch, allocate
+    /// real 1024x1024 RGBA8 textures (full mip chain, the dependency's own upload shape) into the resident cache until its
+    /// measured bytes exceed the effective budget (at least 16, at most 128 per shot), from the second shot on; then
+    /// record the cache, every ballast entry's membership and liveness and the retained manifest.</summary>
+    internal void PressureAfterTouch(ResidentTextureCache resident, BuiltScene scene)
+    {
+        ThrowIfDisposed();
+        if (session.G4Mode != "pin") return;
+        var shot = cell.Shots.LastOrDefault();
+        int ordinal = cell.Shots.Count;
+        var before = ResidentView(resident, scene);
+        int made = 0;
+        if (ordinal >= 2)
+        {
+            const int side = 1024;
+            int prior = GL.GetInteger(GetPName.TextureBinding2D);
+            var pixels = new byte[side * side * 4];
+            for (int i = 0; i < pixels.Length; i++) pixels[i] = (byte)(i * 31);
+            while (made < 128 && (made < 16 || resident.CurrentBytes <= resident.BudgetBytes))
+            {
+                int h = GL.GenTexture();
+                GL.BindTexture(TextureTarget.Texture2D, h);
+                GL.TexImage2D(TextureTarget.Texture2D, 0, PixelInternalFormat.Rgba8, side, side, 0,
+                    PixelFormat.Rgba, PixelType.UnsignedByte, pixels);
+                GL.GenerateMipmap(GenerateMipmapTarget.Texture2D);
+                long allocated = LevelBytes(h);
+                long estimated = (long)side * side * 4 * 4 / 3;   // GlTextureManager.EstimateTextureBytes for this size
+                string key = FormattableString.Invariant($"g4-ballast/{shot?.ShotId}/{made:D3}");
+                resident.Add(key, h, estimated);
+                g4Ballast.Add(new(key, h, estimated, allocated, ordinal, session.OrderMark()));
+                made++;
+            }
+            GL.BindTexture(TextureTarget.Texture2D, prior);
+        }
+        var after = ResidentView(resident, scene);
+        var rows = g4Ballast.Select(b => new
+        {
+            b.Key, b.Handle, b.ShotOrdinal, b.EstimatedBytes, b.AllocatedBytes,
+            member = PeekResident(resident, b.Key) == b.Handle, live = b.Handle > 0 && GL.IsTexture(b.Handle)
+        }).ToArray();
+        session.Emit("g4-pressure", cell, shot, new
+        {
+            ordinal, made, before, after, ballastTotal = rows.Length, ballastMember = rows.Count(r => r.member),
+            ballastLive = rows.Count(r => r.live), evictedKeys = rows.Where(r => !r.member).Select(r => r.Key).ToArray(),
+            estimatedBytesThisShot = g4Ballast.Where(b => b.ShotOrdinal == ordinal).Sum(b => b.EstimatedBytes),
+            allocatedBytesThisShot = g4Ballast.Where(b => b.ShotOrdinal == ordinal).Sum(b => b.AllocatedBytes),
+            ballast = rows
+        });
+    }
+
+    /// <summary>G4 repoll arm: immediately before the pass whose BeginRenderPass is the 16th since the last repoll, take
+    /// real device memory (plain RGBA8 textures outside the cache, each cleared through a scratch framebuffer so the
+    /// driver commits it) until the vendor free-memory reading is below the dependency's headroom by the requested
+    /// deficit. Self-limited: stops on the target, on 3 GiB of process private-byte growth, or after 400 chunks.</summary>
+    internal void BeforeRenderPass(ResidentTextureCache resident, BuiltScene? scene)
+    {
+        ThrowIfDisposed();
+        if (session.G4Mode != "repoll") return;
+        var shot = cell.Shots.LastOrDefault();
+        int ordinal = cell.Shots.Count;
+        object? since = ResidentField(resident, "_rendersSinceRepoll");
+        bool arm = !g4RepollFired && scene is not null && since is int n && n == 15;
+        var view = ResidentView(resident, scene);
+        if (!arm)
+        {
+            session.Emit("g4-pass", cell, shot, new { ordinal, phase = "before", view });
+            return;
+        }
+        g4RepollFired = true;
+        long total = ResidentField(resident, "_totalVramBytes") is long t ? t : 0;
+        long headroom = total > 0 ? Math.Max(1L << 30, (long)(total * 0.15)) : 1L << 30;   // ResidentTextureCache.ComputeDynamicBudget
+        long deficit = session.G4RepollDeficitBytes;
+        long targetFreeKb = (headroom - deficit) / 1024;
+        long privateStart = PrivateBytes();
+        var steps = new List<object>();
+        string? stop = null;
+        int prevDraw = GL.GetInteger(GetPName.DrawFramebufferBinding), prevRead = GL.GetInteger(GetPName.ReadFramebufferBinding);
+        int prevTex = GL.GetInteger(GetPName.TextureBinding2D);
+        var clear = new float[4];
+        GL.GetFloat(GetPName.ColorClearValue, clear);
+        int fbo = GL.GenFramebuffer();
+        for (int i = 0; i < 400; i++)
+        {
+            int freeKb = FreeVramKb();
+            if (freeKb <= targetFreeKb) { stop = "target-reached"; break; }
+            if (PrivateBytes() - privateStart > (3L << 30)) { stop = "private-bytes-guard"; break; }
+            long gapKb = freeKb - targetFreeKb;
+            int w = 8192, h = gapKb > 512L * 1024 ? 4096 : 2048;   // 128 MiB chunks, 64 MiB near the target
+            int tex = GL.GenTexture();
+            GL.BindTexture(TextureTarget.Texture2D, tex);
+            GL.TexImage2D(TextureTarget.Texture2D, 0, PixelInternalFormat.Rgba8, w, h, 0, PixelFormat.Rgba, PixelType.UnsignedByte, IntPtr.Zero);
+            GL.BindFramebuffer(FramebufferTarget.Framebuffer, fbo);
+            GL.FramebufferTexture2D(FramebufferTarget.Framebuffer, FramebufferAttachment.ColorAttachment0, TextureTarget.Texture2D, tex, 0);
+            GL.ClearColor(0.25f, 0.5f, 0.75f, 1f);
+            GL.Clear(ClearBufferMask.ColorBufferBit);
+            GL.FramebufferTexture2D(FramebufferTarget.Framebuffer, FramebufferAttachment.ColorAttachment0, TextureTarget.Texture2D, 0, 0);
+            GL.Finish();
+            g4Vram.Add(tex);
+            g4VramBytes += (long)w * h * 4;
+            steps.Add(new { i, bytes = (long)w * h * 4, freeKbBefore = freeKb, freeKbAfter = FreeVramKb(), privateBytes = PrivateBytes() });
+        }
+        stop ??= "chunk-cap";
+        GL.BindFramebuffer(FramebufferTarget.DrawFramebuffer, prevDraw);
+        GL.BindFramebuffer(FramebufferTarget.ReadFramebuffer, prevRead);
+        GL.DeleteFramebuffer(fbo);
+        GL.BindTexture(TextureTarget.Texture2D, prevTex);
+        GL.ClearColor(clear[0], clear[1], clear[2], clear[3]);
+        int freeNow = FreeVramKb();
+        long current = resident.CurrentBytes;
+        long ceiling = ResidentField(resident, "_oomCeilingBytes") is long c ? c : 8L << 30;
+        long predicted = Math.Clamp(current + (long)freeNow * 1024 - headroom, 256L << 20, Math.Min(8L << 30, ceiling));
+        session.Emit("g4-repoll-ballast", cell, shot, new
+        {
+            ordinal, view, totalVramBytes = total, headroomBytes = headroom, deficitBytes = deficit, targetFreeKb, stop,
+            chunks = steps.Count, ballastBytes = g4VramBytes, freeKbAtRepoll = freeNow, privateBytesStart = privateStart,
+            privateBytesNow = PrivateBytes(), predictedTargetBytes = predicted, budgetBytesNow = resident.BudgetBytes,
+            currentBytesNow = current, predictedEviction = predicted < current && predicted != resident.BudgetBytes, steps
+        });
+    }
+
+    /// <summary>G4 repoll arm: right after BeginRenderPass and before the first validation: the budget the repoll chose,
+    /// which retained manifest entries it evicted (and whether their integers are still textures); then the device
+    /// memory taken above is released.</summary>
+    internal void AfterRenderPass(ResidentTextureCache resident, BuiltScene? scene)
+    {
+        ThrowIfDisposed();
+        if (session.G4Mode != "repoll") return;
+        var shot = cell.Shots.LastOrDefault();
+        int ordinal = cell.Shots.Count;
+        var view = ResidentView(resident, scene);
+        if (g4Vram.Count == 0)
+        {
+            session.Emit("g4-pass", cell, shot, new { ordinal, phase = "after", view });
+            return;
+        }
+        var manifest = ResidentManifest(scene);
+        var evicted = manifest.Where(e => PeekResident(resident, e.DiskPath) != e.Handle).Select(e => new
+        {
+            e.Category, e.GamePath, e.DiskPath, e.Handle, residentPeek = PeekResident(resident, e.DiskPath),
+            live = e.Handle > 0 && GL.IsTexture(e.Handle)
+        }).ToArray();
+        int freeBeforeRelease = FreeVramKb();
+        foreach (int tex in g4Vram) GL.DeleteTexture(tex);
+        g4Vram.Clear();
+        GL.Finish();
+        session.Emit("g4-repoll", cell, shot, new
+        {
+            ordinal, view, retainedEntries = manifest.Length, evictedCount = evicted.Length,
+            evictedLiveCount = evicted.Count(x => x.live), evicted = evicted.Take(60).ToArray(),
+            freeKbBeforeRelease = freeBeforeRelease, freeKbAfterRelease = FreeVramKb(), ballastBytes = g4VramBytes
+        });
+    }
+
+    /// <summary>G4 OOM arm: before the first install load of the requested category that must upload (not resident, not
+    /// in the manager's private map), queue a real driver GL_OUT_OF_MEMORY from an impossible scratch buffer allocation,
+    /// first confirmed by reading it once, then raised again and left for the dependency's single GetError.</summary>
+    internal OomProbe? BeforeInstallLoad(string category, string gamePath, string? diskPath, GlTextureManager manager,
+        ResidentTextureCache resident)
+    {
+        ThrowIfDisposed();
+        if (session.G4Mode != "oom" || g4OomFired) return null;
+        if (!StringComparer.Ordinal.Equals(category, session.G4OomCategory) || string.IsNullOrEmpty(diskPath)) return null;
+        if (PeekResident(resident, diskPath) != -1 || PeekPrivate(manager, gamePath) != -1) return null;
+        g4OomFired = true;
+        var drained = new List<string>();
+        for (int i = 0; i < 32; i++)
+        {
+            var e = GL.GetError();
+            if (e == ErrorCode.NoError) break;
+            drained.Add(e.ToString());
+        }
+        long budgetBefore = resident.BudgetBytes;
+        object? ceilingBefore = ResidentField(resident, "_oomCeilingBytes");
+        int prior = GL.GetInteger(GetPName.ArrayBufferBinding);
+        int buf = GL.GenBuffer();
+        GL.BindBuffer(BufferTarget.ArrayBuffer, buf);
+        GL.BufferData(BufferTarget.ArrayBuffer, new IntPtr(1L << 40), IntPtr.Zero, BufferUsageHint.StaticDraw);   // 1 TiB
+        var probe = GL.GetError();
+        if (probe == ErrorCode.OutOfMemory)
+            GL.BufferData(BufferTarget.ArrayBuffer, new IntPtr(1L << 40), IntPtr.Zero, BufferUsageHint.StaticDraw);
+        GL.BindBuffer(BufferTarget.ArrayBuffer, prior);
+        GL.DeleteBuffer(buf);
+        var row = new OomProbe(category, gamePath, diskPath!, drained.ToArray(), probe.ToString(), budgetBefore, ceilingBefore,
+            manager.WhiteTexture, session.OrderMark());
+        session.Emit("g4-oom-injected", cell, cell.Shots.LastOrDefault(), row);
+        return probe == ErrorCode.OutOfMemory ? row : null;
+    }
+
+    internal void AfterInstallLoad(OomProbe probe, int loaded, bool missing, GlTextureManager manager, ResidentTextureCache resident)
+    {
+        ThrowIfDisposed();
+        var pending = GL.GetError();   // NoError when the dependency's own GetError consumed the queued failure
+        int privatePeek = PeekPrivate(manager, probe.GamePath);
+        session.Emit("g4-oom-observed", cell, cell.Shots.LastOrDefault(), new
+        {
+            probe.Category, probe.GamePath, probe.DiskPath, loaded, white = manager.WhiteTexture,
+            returnedWhite = loaded == manager.WhiteTexture, calledMissing = missing,
+            missingSetCount = manager.MissingTexturePaths.Count,
+            missingSetHasPath = manager.MissingTexturePaths.Any(x => StringComparer.OrdinalIgnoreCase.Equals(x, probe.GamePath)),
+            budgetBefore = probe.BudgetBefore, budgetAfter = resident.BudgetBytes, ceilingBefore = probe.CeilingBefore,
+            ceilingAfter = ResidentField(resident, "_oomCeilingBytes"), residentPeek = PeekResident(resident, probe.DiskPath),
+            privateCachePeek = privatePeek, privateCachedWhite = privatePeek == manager.WhiteTexture,
+            pendingErrorAfter = pending.ToString()
+        });
+    }
+
+    /// <summary>G4 OOM arm, per-shot path (no resident cache): the same queued real GL_OUT_OF_MEMORY before the first
+    /// load of the requested category that is not already in the shot manager's private map.</summary>
+    internal OomProbe? BeforeOrdinaryLoad(string category, string gamePath, string? diskPath, GlTextureManager manager)
+    {
+        ThrowIfDisposed();
+        if (session.G4Mode != "oom" || g4OomFired) return null;
+        if (!StringComparer.Ordinal.Equals(category, session.G4OomCategory) || PeekPrivate(manager, gamePath) != -1) return null;
+        g4OomFired = true;
+        var drained = new List<string>();
+        for (int i = 0; i < 32; i++)
+        {
+            var e = GL.GetError();
+            if (e == ErrorCode.NoError) break;
+            drained.Add(e.ToString());
+        }
+        int prior = GL.GetInteger(GetPName.ArrayBufferBinding);
+        int buf = GL.GenBuffer();
+        GL.BindBuffer(BufferTarget.ArrayBuffer, buf);
+        GL.BufferData(BufferTarget.ArrayBuffer, new IntPtr(1L << 40), IntPtr.Zero, BufferUsageHint.StaticDraw);   // 1 TiB
+        var probe = GL.GetError();
+        if (probe == ErrorCode.OutOfMemory)
+            GL.BufferData(BufferTarget.ArrayBuffer, new IntPtr(1L << 40), IntPtr.Zero, BufferUsageHint.StaticDraw);
+        GL.BindBuffer(BufferTarget.ArrayBuffer, prior);
+        GL.DeleteBuffer(buf);
+        var row = new OomProbe(category, gamePath, diskPath ?? "", drained.ToArray(), probe.ToString(), -1, null,
+            manager.WhiteTexture, session.OrderMark());
+        session.Emit("g4-oom-injected", cell, cell.Shots.LastOrDefault(), new { path = "per-shot", probe = row });
+        return probe == ErrorCode.OutOfMemory ? row : null;
+    }
+
+    /// <summary>G4 OOM arm, per-shot path: what the load returned and every error still queued after it (read here, so the
+    /// record is the last reader).</summary>
+    internal void AfterOrdinaryLoad(OomProbe probe, int loaded, GlTextureManager manager)
+    {
+        ThrowIfDisposed();
+        var pending = new List<string>();
+        for (int i = 0; i < 32; i++)
+        {
+            var e = GL.GetError();
+            if (e == ErrorCode.NoError) break;
+            pending.Add(e.ToString());
+        }
+        session.Emit("g4-oom-observed", cell, cell.Shots.LastOrDefault(), new
+        {
+            path = "per-shot", probe.Category, probe.GamePath, loaded, white = manager.WhiteTexture,
+            returnedWhite = loaded == manager.WhiteTexture, liveTexture = loaded > 0 && GL.IsTexture(loaded),
+            calledMissing = manager.MissingTexturePaths.Any(x => StringComparer.OrdinalIgnoreCase.Equals(x, probe.GamePath)),
+            pendingErrorsAfter = pending.ToArray(), pendingErrorAfter = pending.Count == 0 ? "NoError" : pending[0]
+        });
+    }
+
+    // ---- G5: poison before a shot, the state immediately before its first draw, and the shot inputs ----
+
+    static string B(bool v) => v ? "true" : "false";
+    static string F(float v) => v.ToString("R", Inv);
+    static string V3(OpenTK.Mathematics.Vector3 v) => F(v.X) + "," + F(v.Y) + "," + F(v.Z);
+    static string V4(OpenTK.Mathematics.Vector4 v) => F(v.X) + "," + F(v.Y) + "," + F(v.Z) + "," + F(v.W);
+    static string N3(System.Numerics.Vector3 v) => F(v.X) + "," + F(v.Y) + "," + F(v.Z);   // GlMesh uses System.Numerics
+    static string I(int v) => v.ToString(Inv);
+    static string Digest(IEnumerable<string> values) =>
+        Convert.ToHexString(SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(string.Join("\n", values))))[..16];
+
+    Dictionary<string, string> GlState()
+    {
+        var x = new Dictionary<string, string>(StringComparer.Ordinal);
+        string Role(int h, int poison, string name) => h == 0 ? "0" : h == poison ? name : "other";
+        x["gl.drawFramebuffer"] = Role(GL.GetInteger(GetPName.DrawFramebufferBinding), g45Fbo, "poison-fbo");
+        x["gl.readFramebuffer"] = Role(GL.GetInteger(GetPName.ReadFramebufferBinding), g45Fbo, "poison-fbo");
+        var vp = new int[4]; GL.GetInteger(GetPName.Viewport, vp); x["gl.viewport"] = string.Join(",", vp.Select(I));
+        var cc = new float[4]; GL.GetFloat(GetPName.ColorClearValue, cc); x["gl.clearColor"] = string.Join(",", cc.Select(F));
+        x["gl.depthTest"] = B(GL.IsEnabled(EnableCap.DepthTest));
+        x["gl.depthFunc"] = I(GL.GetInteger(GetPName.DepthFunc));
+        x["gl.depthMask"] = B(GL.GetBoolean(GetPName.DepthWritemask));
+        x["gl.cull"] = B(GL.IsEnabled(EnableCap.CullFace));
+        x["gl.cullMode"] = I(GL.GetInteger(GetPName.CullFaceMode));
+        x["gl.frontFace"] = I(GL.GetInteger(GetPName.FrontFace));
+        x["gl.blend"] = B(GL.IsEnabled(EnableCap.Blend));
+        x["gl.blendFunc"] = I(GL.GetInteger(GetPName.BlendSrcRgb)) + "," + I(GL.GetInteger(GetPName.BlendDstRgb)) + ","
+                          + I(GL.GetInteger(GetPName.BlendSrcAlpha)) + "," + I(GL.GetInteger(GetPName.BlendDstAlpha));
+        x["gl.blendEq"] = I(GL.GetInteger(GetPName.BlendEquationRgb)) + "," + I(GL.GetInteger(GetPName.BlendEquationAlpha));
+        x["gl.multisample"] = B(GL.IsEnabled(EnableCap.Multisample));
+        x["gl.alphaToCoverage"] = B(GL.IsEnabled(EnableCap.SampleAlphaToCoverage));
+        x["gl.sampleCoverage"] = B(GL.IsEnabled(EnableCap.SampleCoverage));
+        x["gl.clip0"] = B(GL.IsEnabled(EnableCap.ClipDistance0));
+        x["gl.activeTexture"] = I(GL.GetInteger(GetPName.ActiveTexture));
+        x["gl.program"] = Role(GL.GetInteger(GetPName.CurrentProgram), g45Program, "poison-program");
+        int vao = GL.GetInteger(GetPName.VertexArrayBinding);
+        x["gl.vao"] = Role(vao, g45Vao, "poison-vao");
+        if (vao != 0)
+        {
+            string attribs = "";
+            for (int i = 0; i < 8; i++)
+            {
+                GL.GetVertexAttrib(i, VertexAttribParameter.ArrayEnabled, out int enabled);
+                attribs += enabled != 0 ? "1" : "0";
+            }
+            x["gl.attribs"] = attribs;
+        }
+        else x["gl.attribs"] = "vao0";
+        x["gl.scissor"] = B(GL.IsEnabled(EnableCap.ScissorTest));
+        var sb = new int[4]; GL.GetInteger(GetPName.ScissorBox, sb); x["gl.scissorBox"] = string.Join(",", sb.Select(I));
+        var cm = new bool[4]; GL.GetBoolean(GetPName.ColorWritemask, cm); x["gl.colorMask"] = string.Concat(cm.Select(b => b ? "1" : "0"));
+        x["gl.stencil"] = B(GL.IsEnabled(EnableCap.StencilTest));
+        var dr = new float[2]; GL.GetFloat(GetPName.DepthRange, dr); x["gl.depthRange"] = string.Join(",", dr.Select(F));
+        x["gl.polyOffsetFill"] = B(GL.IsEnabled(EnableCap.PolygonOffsetFill));
+        x["gl.polyOffset"] = F(GL.GetFloat(GetPName.PolygonOffsetFactor)) + "," + F(GL.GetFloat(GetPName.PolygonOffsetUnits));
+        x["gl.srgb"] = B(GL.IsEnabled(EnableCap.FramebufferSrgb));
+        return x;
+    }
+
+    static Dictionary<string, string> RendererState(GlRenderer? r)
+    {
+        var x = new Dictionary<string, string>(StringComparer.Ordinal);
+        if (r is null) return x;
+        x["r.bloom"] = B(r.EnableBloom); x["r.shadows"] = B(r.EnableShadows); x["r.ao"] = B(r.EnableAmbientOcclusion);
+        x["r.clearColor"] = V3(r.ClearColor);
+        for (int i = 0; i < r.Lights.Length; i++)
+        {
+            var l = r.Lights[i];
+            x["r.light" + I(i)] = I(l.Type) + "|" + V3(l.Direction) + "|" + V3(l.Color) + "|" + F(l.Intensity);
+        }
+        x["r.exposure"] = F(r.Exposure); x["r.tonemap"] = B(r.EnableToneMapping); x["r.vignette"] = F(r.VignetteIntensity);
+        x["r.modelScale"] = F(r.ModelScale); x["r.backlight"] = V3(r.BacklightColor);
+        x["r.clipEnabled"] = B(r.ClipEnabled); x["r.clipPlane"] = V4(r.ClipPlane);
+        return x;
+    }
+
+    static string[] G5MeshFields() =>
+    [
+        "IsRendering", "HasEmissive", "HasGlowMap", "EmissiveEnabled", "EmissiveColor", "EmissiveMultiple", "UseAlphaTest",
+        "AlphaThreshold", "HasAlphaBlend", "IsDoubleSided", "MaterialAlpha", "DepthWrite", "IsDecal", "SrcBlendIndex",
+        "DstBlendIndex", "IsModelSpace", "HasVertexColors", "HasNormalMap", "DiffuseTexture", "NormalTexture",
+    ];
+
+    /// <summary>The value each mesh poison writes, in the form the state readback prints it.</summary>
+    static string G5MeshPoison(string field) => field switch
+    {
+        "IsRendering" => "false", "HasEmissive" => "true", "HasGlowMap" => "true", "EmissiveEnabled" => "false",
+        "EmissiveColor" => N3(new(0.913f, 0.071f, 0.829f)), "EmissiveMultiple" => F(1.537f), "UseAlphaTest" => "true",
+        "AlphaThreshold" => F(0.771f), "HasAlphaBlend" => "true", "IsDoubleSided" => "true", "MaterialAlpha" => F(0.333f),
+        "DepthWrite" => "false", "IsDecal" => "true", "SrcBlendIndex" => "1", "DstBlendIndex" => "1", "IsModelSpace" => "true",
+        "HasVertexColors" => "true", "HasNormalMap" => "true", "DiffuseTexture" => "white", "NormalTexture" => "white",
+        _ => throw new ArgumentException(field)
+    };
+
+    static string FieldValue(GlMesh m, string field, Dictionary<int, string> labels) => field switch
+    {
+        "IsRendering" => B(m.IsRendering), "HasEmissive" => B(m.HasEmissive), "HasGlowMap" => B(m.HasGlowMap),
+        "EmissiveEnabled" => B(m.EmissiveEnabled), "EmissiveColor" => N3(m.EmissiveColor), "EmissiveMultiple" => F(m.EmissiveMultiple),
+        "UseAlphaTest" => B(m.UseAlphaTest), "AlphaThreshold" => F(m.AlphaThreshold), "HasAlphaBlend" => B(m.HasAlphaBlend),
+        "IsDoubleSided" => B(m.IsDoubleSided), "MaterialAlpha" => F(m.MaterialAlpha), "DepthWrite" => B(m.DepthWrite),
+        "IsDecal" => B(m.IsDecal), "SrcBlendIndex" => I(m.SrcBlendIndex), "DstBlendIndex" => I(m.DstBlendIndex),
+        "IsModelSpace" => B(m.IsModelSpace), "HasVertexColors" => B(m.HasVertexColors), "HasNormalMap" => B(m.HasNormalMap),
+        "DiffuseTexture" => labels.TryGetValue(m.DiffuseTexture, out var d) ? d : "other",
+        "NormalTexture" => labels.TryGetValue(m.NormalTexture, out var n) ? n : "other",
+        _ => throw new ArgumentException(field)
+    };
+
+    static Dictionary<int, string> TextureLabels(BuiltScene scene, GlTextureManager? install)
+    {
+        var labels = new Dictionary<int, string> { [0] = "0" };
+        if (install is not null) labels[install.WhiteTexture] = "white";
+        foreach (var t in scene.TextureManifest) labels.TryAdd(t.Handle, "tex:" + t.GamePath.ToLowerInvariant());
+        foreach (var t in scene.OwnedTextureHandles) labels.TryAdd(t.Handle, "owned:" + t.Category);
+        return labels;
+    }
+
+    static List<GlMesh> StaticMeshes(GlRenderer renderer, BuiltScene scene)
+    {
+        var vaos = scene.MeshHandles.Select(h => h.Vao).ToHashSet();
+        return renderer.Meshes.Where(m => vaos.Contains(m.Vao)).ToList();
+    }
+
+    static Dictionary<string, string> MeshState(GlRenderer? renderer, BuiltScene? scene, GlTextureManager? install)
+    {
+        var x = new Dictionary<string, string>(StringComparer.Ordinal);
+        if (renderer is null || scene is null) return x;
+        var vaos = scene.MeshHandles.Select(h => h.Vao).ToHashSet();
+        var labels = TextureLabels(scene, install);
+        foreach (var (name, list) in new[] { ("static", renderer.Meshes.Where(m => vaos.Contains(m.Vao)).ToList()),
+                                            ("dynamic", renderer.Meshes.Where(m => !vaos.Contains(m.Vao)).ToList()) })
+        {
+            x[$"mesh.{name}.count"] = I(list.Count);
+            foreach (string f in G5MeshFields())
+            {
+                var values = list.Select(m => FieldValue(m, f, labels)).ToArray();
+                x[$"mesh.{name}.{f}"] = Digest(values);
+                string poison = G5MeshPoison(f);
+                x[$"mesh.{name}.{f}.eqPoison"] = I(values.Count(v => v == poison));
+            }
+        }
+        return x;
+    }
+
+    void EnsurePoisonObjects()
+    {
+        if (g45Fbo == 0)
+        {
+            int prevTex = GL.GetInteger(GetPName.TextureBinding2D);
+            g45FboTexture = GL.GenTexture();
+            GL.BindTexture(TextureTarget.Texture2D, g45FboTexture);
+            GL.TexImage2D(TextureTarget.Texture2D, 0, PixelInternalFormat.Rgba8, 8, 8, 0, PixelFormat.Rgba, PixelType.UnsignedByte, IntPtr.Zero);
+            GL.BindTexture(TextureTarget.Texture2D, prevTex);
+            int prevDraw = GL.GetInteger(GetPName.DrawFramebufferBinding), prevRead = GL.GetInteger(GetPName.ReadFramebufferBinding);
+            g45Fbo = GL.GenFramebuffer();
+            GL.BindFramebuffer(FramebufferTarget.Framebuffer, g45Fbo);
+            GL.FramebufferTexture2D(FramebufferTarget.Framebuffer, FramebufferAttachment.ColorAttachment0, TextureTarget.Texture2D, g45FboTexture, 0);
+            GL.BindFramebuffer(FramebufferTarget.DrawFramebuffer, prevDraw);
+            GL.BindFramebuffer(FramebufferTarget.ReadFramebuffer, prevRead);
+        }
+        if (g45Program == 0)
+        {
+            int vs = GL.CreateShader(ShaderType.VertexShader);
+            GL.ShaderSource(vs, "#version 330 core\nvoid main() { gl_Position = vec4(0.0, 0.0, 0.0, 1.0); }\n");
+            GL.CompileShader(vs);
+            int fs = GL.CreateShader(ShaderType.FragmentShader);
+            GL.ShaderSource(fs, "#version 330 core\nout vec4 c;\nvoid main() { c = vec4(1.0, 0.0, 1.0, 1.0); }\n");
+            GL.CompileShader(fs);
+            g45Program = GL.CreateProgram();
+            GL.AttachShader(g45Program, vs);
+            GL.AttachShader(g45Program, fs);
+            GL.LinkProgram(g45Program);
+            GL.DeleteShader(vs);
+            GL.DeleteShader(fs);
+        }
+        if (g45Vao == 0)
+        {
+            int prevVao = GL.GetInteger(GetPName.VertexArrayBinding);
+            g45Vao = GL.GenVertexArray();
+            GL.BindVertexArray(g45Vao);
+            for (int i = 0; i < 8; i++) GL.EnableVertexAttribArray(i);
+            GL.BindVertexArray(prevVao);
+        }
+    }
+
+    /// <summary>Applies one poison (unless it is the requested no-op) and returns the readback keys and values that
+    /// confirm it.</summary>
+    Dictionary<string, string> ApplyPoison(string item, GlRenderer renderer, BuiltScene scene, GlTextureManager install, bool noop)
+    {
+        var x = new Dictionary<string, string>(StringComparer.Ordinal);
+        var statics = StaticMeshes(renderer, scene);
+        void Mesh(string field, Action<GlMesh> set)
+        {
+            if (!noop) foreach (var m in statics) set(m);
+            x[$"mesh.static.{field}.eqPoison"] = I(statics.Count);
+        }
+        void R(string key, string value, Action set) { if (!noop) set(); x[key] = value; }
+        switch (item)
+        {
+            case "mesh-visibility": Mesh("IsRendering", m => m.IsRendering = false); break;
+            case "mesh-emissive-tint":
+                Mesh("HasEmissive", m => m.HasEmissive = true);
+                Mesh("EmissiveColor", m => m.EmissiveColor = new(0.913f, 0.071f, 0.829f));
+                Mesh("EmissiveMultiple", m => m.EmissiveMultiple = 1.537f);
+                break;
+            case "mesh-emissive-flags":
+                Mesh("HasGlowMap", m => m.HasGlowMap = true);
+                Mesh("EmissiveEnabled", m => m.EmissiveEnabled = false);
+                break;
+            case "mesh-material":
+                Mesh("UseAlphaTest", m => m.UseAlphaTest = true); Mesh("AlphaThreshold", m => m.AlphaThreshold = 0.771f);
+                Mesh("HasAlphaBlend", m => m.HasAlphaBlend = true); Mesh("IsDoubleSided", m => m.IsDoubleSided = true);
+                Mesh("MaterialAlpha", m => m.MaterialAlpha = 0.333f); Mesh("DepthWrite", m => m.DepthWrite = false);
+                Mesh("IsDecal", m => m.IsDecal = true); Mesh("SrcBlendIndex", m => m.SrcBlendIndex = 1);
+                Mesh("DstBlendIndex", m => m.DstBlendIndex = 1); Mesh("IsModelSpace", m => m.IsModelSpace = true);
+                Mesh("HasVertexColors", m => m.HasVertexColors = true); Mesh("HasNormalMap", m => m.HasNormalMap = true);
+                Mesh("DiffuseTexture", m => m.DiffuseTexture = install.WhiteTexture);
+                Mesh("NormalTexture", m => m.NormalTexture = install.WhiteTexture);
+                break;
+            case "renderer-core":
+                R("r.bloom", "true", () => renderer.EnableBloom = true);
+                R("r.shadows", "true", () => renderer.EnableShadows = true);
+                R("r.ao", "true", () => renderer.EnableAmbientOcclusion = true);
+                R("r.clearColor", V3(new(0.913f, 0.071f, 0.829f)), () => renderer.ClearColor = new(0.913f, 0.071f, 0.829f));
+                break;
+            case "renderer-lights":
+                for (int i = 0; i < renderer.Lights.Length; i++)
+                {
+                    int slot = i;
+                    var poison = new GlRenderer.LightData { Type = 2, Direction = new(0.31f, -0.83f, 0.47f),
+                        Color = new(0.9f, 0.21f + 0.01f * slot, 0.1f), Intensity = 0.61f + 0.01f * slot };
+                    R("r.light" + I(slot), I(poison.Type) + "|" + V3(poison.Direction) + "|" + V3(poison.Color) + "|" + F(poison.Intensity),
+                        () => renderer.Lights[slot] = poison);
+                }
+                break;
+            case "renderer-extra":
+                R("r.exposure", F(2.5f), () => renderer.Exposure = 2.5f);
+                R("r.tonemap", "true", () => renderer.EnableToneMapping = true);
+                R("r.vignette", F(0.8f), () => renderer.VignetteIntensity = 0.8f);
+                R("r.modelScale", F(1.25f), () => renderer.ModelScale = 1.25f);
+                R("r.backlight", V3(new(1f, 0f, 0f)), () => renderer.BacklightColor = new(1f, 0f, 0f));
+                R("r.clipEnabled", "true", () => renderer.ClipEnabled = true);
+                R("r.clipPlane", V4(new(0f, 0f, 1f, 0f)), () => renderer.ClipPlane = new(0f, 0f, 1f, 0f));
+                break;
+            case "gl-framebuffer":
+                EnsurePoisonObjects();
+                R("gl.drawFramebuffer", "poison-fbo", () => GL.BindFramebuffer(FramebufferTarget.Framebuffer, g45Fbo));
+                x["gl.readFramebuffer"] = "poison-fbo";
+                break;
+            case "gl-viewport": R("gl.viewport", "3,5,17,11", () => GL.Viewport(3, 5, 17, 11)); break;
+            case "gl-clearcolor":
+                R("gl.clearColor", F(0.913f) + "," + F(0.071f) + "," + F(0.829f) + "," + F(0.5f), () => GL.ClearColor(0.913f, 0.071f, 0.829f, 0.5f));
+                break;
+            case "gl-depth-test": R("gl.depthTest", "false", () => GL.Disable(EnableCap.DepthTest)); break;
+            case "gl-depth-func": R("gl.depthFunc", I((int)DepthFunction.Greater), () => GL.DepthFunc(DepthFunction.Greater)); break;
+            case "gl-depth-write": R("gl.depthMask", "false", () => GL.DepthMask(false)); break;
+            case "gl-cull":
+                R("gl.cull", "true", () => GL.Enable(EnableCap.CullFace));
+                R("gl.cullMode", I((int)CullFaceMode.Front), () => GL.CullFace(CullFaceMode.Front));
+                break;
+            case "gl-frontface": R("gl.frontFace", I((int)FrontFaceDirection.Cw), () => GL.FrontFace(FrontFaceDirection.Cw)); break;
+            case "gl-blend": R("gl.blend", "true", () => GL.Enable(EnableCap.Blend)); break;
+            case "gl-blendfunc":
+                R("gl.blendFunc", "1,1,1,1", () => GL.BlendFunc(BlendingFactor.One, BlendingFactor.One));
+                break;
+            case "gl-multisample": R("gl.multisample", "false", () => GL.Disable(EnableCap.Multisample)); break;
+            case "gl-a2c": R("gl.alphaToCoverage", "true", () => GL.Enable(EnableCap.SampleAlphaToCoverage)); break;
+            case "gl-clip": R("gl.clip0", "true", () => GL.Enable(EnableCap.ClipDistance0)); break;
+            case "gl-program":
+                EnsurePoisonObjects();
+                R("gl.program", "poison-program", () => GL.UseProgram(g45Program));
+                break;
+            case "gl-vao-attribs":
+                EnsurePoisonObjects();
+                R("gl.vao", "poison-vao", () => GL.BindVertexArray(g45Vao));
+                x["gl.attribs"] = "11111111";
+                break;
+            case "gl-activetexture": R("gl.activeTexture", I((int)TextureUnit.Texture7), () => GL.ActiveTexture(TextureUnit.Texture7)); break;
+            case "gl-scissor":
+                R("gl.scissor", "true", () => GL.Enable(EnableCap.ScissorTest));
+                R("gl.scissorBox", "0,0,7,7", () => GL.Scissor(0, 0, 7, 7));
+                break;
+            case "gl-colormask": R("gl.colorMask", "1011", () => GL.ColorMask(true, false, true, true)); break;
+            case "gl-stencil": R("gl.stencil", "true", () => GL.Enable(EnableCap.StencilTest)); break;
+            case "gl-depthrange": R("gl.depthRange", F(0.5f) + "," + F(1f), () => GL.DepthRange(0.5, 1.0)); break;
+            case "gl-blendeq":
+                R("gl.blendEq", I((int)BlendEquationMode.FuncReverseSubtract) + "," + I((int)BlendEquationMode.FuncReverseSubtract),
+                    () => GL.BlendEquation(BlendEquationMode.FuncReverseSubtract));
+                break;
+            case "gl-polyoffset":
+                R("gl.polyOffsetFill", "true", () => GL.Enable(EnableCap.PolygonOffsetFill));
+                R("gl.polyOffset", F(4f) + "," + F(4f), () => GL.PolygonOffset(4f, 4f));
+                break;
+            case "gl-srgb": R("gl.srgb", "true", () => GL.Enable(EnableCap.FramebufferSrgb)); break;
+            default: throw new ArgumentException("unknown G5 poison item " + item);
+        }
+        return x;
+    }
+
+    /// <summary>G5: before the requested shot (default the second of the cell), after the previous shot's teardown and
+    /// before any of this shot's resets, poison the retained meshes, the renderer and the GL state, and confirm every
+    /// poison by reading it back (a poison that does not read back, or that equals the prior value, is a setup failure
+    /// for the driver, never a pass).</summary>
+    internal void PoisonBeforeShot(GlRenderer renderer, BuiltScene scene, GlTextureManager install)
+    {
+        ThrowIfDisposed();
+        if (session.G5Poison.Count == 0 || cell.Shots.Count != session.G5Shot) return;
+        var shot = cell.Shots.LastOrDefault();
+        Dictionary<string, string> All(Dictionary<string, string> a, Dictionary<string, string> b, Dictionary<string, string> c)
+        {
+            var m = new Dictionary<string, string>(a, StringComparer.Ordinal);
+            foreach (var kv in b) m[kv.Key] = kv.Value;
+            foreach (var kv in c) m[kv.Key] = kv.Value;
+            return m;
+        }
+        var before = All(GlState(), RendererState(renderer), MeshState(renderer, scene, install));
+        var applied = new List<(string Item, bool NoOp, Dictionary<string, string> Expected)>();
+        foreach (string item in session.G5Poison)
+        {
+            bool noop = StringComparer.Ordinal.Equals(item, session.G5NoOp);
+            applied.Add((item, noop, ApplyPoison(item, renderer, scene, install, noop)));
+        }
+        var after = All(GlState(), RendererState(renderer), MeshState(renderer, scene, install));
+        var rows = applied.Select(a => new
+        {
+            item = a.Item, noop = a.NoOp,
+            confirmed = a.Expected.All(kv => after.TryGetValue(kv.Key, out var v) && v == kv.Value)
+                        && a.Expected.Any(kv => !before.TryGetValue(kv.Key, out var v) || v != kv.Value),
+            expected = a.Expected,
+            readBack = a.Expected.Keys.ToDictionary(k => k, k => after.TryGetValue(k, out var v) ? v : null),
+            prior = a.Expected.Keys.ToDictionary(k => k, k => before.TryGetValue(k, out var v) ? v : null)
+        }).ToArray();
+        session.Emit("g5-poison", cell, shot, new
+        {
+            ordinal = cell.Shots.Count, items = rows.Length, confirmedCount = rows.Count(r => r.confirmed), rows, before, after
+        });
+    }
+
+    /// <summary>G5: the state at the first draw of every shot (retained or isolated), just before GlRenderer.Render.</summary>
+    internal void PreDrawState(GlRenderer? renderer, BuiltScene scene, GlTextureManager? install)
+    {
+        ThrowIfDisposed();
+        if (!session.G5Observe) return;
+        var shot = cell.Shots.LastOrDefault();
+        if (shot is null || !g45PreDrawShots.Add(shot.ShotId)) return;
+        var state = GlState();
+        foreach (var kv in RendererState(renderer)) state[kv.Key] = kv.Value;
+        foreach (var kv in MeshState(renderer, scene, install)) state[kv.Key] = kv.Value;
+        session.Emit("g5-predraw", cell, shot, new { ordinal = cell.Shots.Count, state });
+    }
+
+    static string? Fmt(object? v) => v switch
+    {
+        null => null, string s => s, bool b => B(b), float f => F(f), int i => I(i),
+        System.Numerics.Vector3 n => F(n.X) + "," + F(n.Y) + "," + F(n.Z),
+        _ => Convert.ToString(v, Inv)
+    };
+
+    /// <summary>G5: a worklist shot's inputs, before the per-shot resets ("pre-reset": what the previous shot or the
+    /// command line left, i.e. the poison) and after them and the row's overrides ("post-reset"), before preparation.</summary>
+    internal void ShotInputs(int wlCell, int wlShot, string phase, IReadOnlyDictionary<string, object?> values)
+    {
+        ThrowIfDisposed();
+        if (!session.G5Observe) return;
+        session.Emit("g5-shot-inputs", cell, null,
+            new { wlCell, wlShot, phase, values = values.ToDictionary(k => k.Key, k => Fmt(k.Value)) });
+    }
+
+    /// <summary>G5: the camera the shot actually resolved (eye, aim point, fov), before preparation and draw.</summary>
+    internal void ShotCamera(IReadOnlyDictionary<string, object?> values)
+    {
+        ThrowIfDisposed();
+        if (!session.G5Observe) return;
+        session.Emit("g5-shot-camera", cell, null, new { values = values.ToDictionary(k => k.Key, k => Fmt(k.Value)) });
+    }
+
+    /// <summary>G4/G5 cell end (context current): delete the scratch objects the hooks created and any device memory a
+    /// repoll arm still holds. Ballast added to the resident cache is the cache's and dies with it.</summary>
+    internal void G45CellEnd()
+    {
+        if (g4Vram.Count > 0) { foreach (int tex in g4Vram) GL.DeleteTexture(tex); g4Vram.Clear(); }
+        if (g45Program != 0) { GL.DeleteProgram(g45Program); g45Program = 0; }
+        if (g45Vao != 0) { GL.DeleteVertexArray(g45Vao); g45Vao = 0; }
+        if (g45Fbo != 0) { GL.DeleteFramebuffer(g45Fbo); g45Fbo = 0; }
+        if (g45FboTexture != 0) { GL.DeleteTexture(g45FboTexture); g45FboTexture = 0; }
+    }
+
     static readonly JsonSerializerOptions JsonOptions = new() { WriteIndented = true };
 }

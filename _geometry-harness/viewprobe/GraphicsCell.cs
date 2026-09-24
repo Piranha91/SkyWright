@@ -73,10 +73,14 @@ internal sealed class GraphicsCell : IDisposable
         evidence?.ResidentOwnerReady(resident!, created);
         evidence?.TextureManagerReady(installTextures!, initializedNow: created, role: "install", cellLifetime: true);
         evidence?.RendererReady(renderer!, initializedNow: created);
+        // Measurement only (G5 RED, Gate B8): poison retained mutable state before this shot's resets; inert without a RED session.
+        if (scene is not null) red?.PoisonBeforeShot(renderer!, scene, installTextures!);
         // Measurement only (Gate B4, G2 RED): a requested residency mutation between shots; inert without a RED session.
         if (scene is not null) red?.MutateResidency("before-validation", resident!, installTextures!, scene);
 
+        red?.BeforeRenderPass(resident!, scene);   // measurement only (G4 RED): the 16th-pass pressure; inert without a RED session
         resident!.BeginRenderPass();
+        red?.AfterRenderPass(resident, scene);     // measurement only (G4 RED): what the repoll did
         evidence?.ResidentEpochAdvanced(++epoch);
         string? priorKey = scene?.Key;
         if (scene is not null && !StringComparer.Ordinal.Equals(scene.Key, staticKey))
@@ -101,6 +105,7 @@ internal sealed class GraphicsCell : IDisposable
         if (!manifest.Valid)
             throw new InvalidOperationException("retained residency manifest refused before draw: " + manifest.Failure);
         if (!sceneCreated) red?.MutateResidency("after-before-static", resident, installTextures!, scene);   // measurement only
+        red?.PressureAfterTouch(resident, scene);   // measurement only (G4 RED): pinned-budget pressure after the touch
         scene.BeginBindingPass();
         return scene;
     }
@@ -123,6 +128,7 @@ internal sealed class GraphicsCell : IDisposable
     {
         if (red is null || evidence is null || scene is null || resident is null) return;
         red.DrawBoundary(evidence, scene, resident, installTextures);
+        red.PreDrawState(renderer, scene, installTextures);   // measurement only (G5 RED)
     }
 
     internal void EndShot()
@@ -141,6 +147,7 @@ internal sealed class GraphicsCell : IDisposable
         disposed = true;
         if (current)
         {
+            DisposeOne(() => red?.G45CellEnd(), failures);   // measurement only (G4/G5 RED): the hooks' scratch objects
             // Measurement only (inert without a RED session): the resident cache holds exactly the retained manifest.
             DisposeOne(() => { if (resident is not null) red?.ResidentAtCellEnd(resident, scene?.ResidentDiskPaths ?? Array.Empty<string>()); }, failures);
             DisposeOne(() => scene?.Dispose(), failures); scene = null;
