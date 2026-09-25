@@ -2158,7 +2158,8 @@ in `proofprobe` (`stationrule: ...`). This mode is the plumbing between them and
   "fovDeg": 80.0,                      // optional; the field of view carried on every pose
   "mode": "observing",                 // optional; ABSENT (or "face-on") is the face-on rule and
                                        //   its pose file is unchanged to the byte. "observing"
-                                       //   composes the ring below. Anything else is refused.
+                                       //   composes the ring below; "route" is the route mode,
+                                       //   with its own spec (below). Anything else is refused.
   "eyeHeight": 120.5                   // optional, and CHECKED rather than applied: the eye
                                        //   height is part of the rule. A spec that asks for a
                                        //   different one is refused, not obeyed.
@@ -2296,6 +2297,10 @@ Most decisive first:
 | 2 | `NoNavmeshAnswer` | the navmesh was asked and returned nothing at all — an instrument failure, never a geometric miss |
 | 3 | `NoCoveringTriangle` | no winning navmesh triangle covers the XY |
 | 4 | `AllCoveringTrianglesDeleted` | every covering triangle carries the deleted flag (0x08) |
+| 4a | `Unreachable` | route mode only: the covering triangle is not walkable (see Route mode) |
+| 4b | `OutsideArea` | route mode only: the covering triangle is not in the area A_W |
+| 4c | `InChildWorldspaceFootprint` | route mode only: the XY lies under a child worldspace's navmesh |
+| 4d | `TightClearance` | route mode only: fewer than 5 of 5 clearance probes on the same floor |
 | 5 | `FloorUnknown` | a navmesh answer exists but no physical floor was found under it |
 | 6 | `WaterUnknown` | the applicable surface could not be resolved. Refused, never read as dry |
 | 7 | `StationUnderwater` | the feet stand below the applicable surface |
@@ -2404,6 +2409,94 @@ stations that **can** see content inside the primitive's predicted shadow.
 The known answers are `stationrule: M1 … M9` in `proofprobe`. M1, M3 and M5 were checked against
 an independent sampling oracle that shares no code with `ConvexShadow`.
 
+### Route mode (`"mode": "route"`)
+
+The face-on and observing modes stand stations off one primitive. The route mode samples **player
+stations from the walkable ground around what one plugin changes in a worldspace**, and measures
+how much of that ground the stations cover. The rule is `HarnessShared.RouteStations`; its known
+answers are `stationrule: RT0 … RT17` in `proofprobe`. The positional cell only names the
+worldspace; one run samples one worldspace.
+
+```jsonc
+{
+  "mode": "route",
+  "setup": "U",                             // required, as for the other modes
+  "changedPlugin": "Some City.esp",         // required: whose changes the area is built around
+  "childWorldspaces": ["01A26F:Skyrim.esm"],// optional: a child worldspace whose winning navmesh
+                                            //   refuses a station of this one (see below)
+  "fileMarginSquares": 4,                   // optional: how far around the plugin's own content
+                                            //   the floor is filed; a loaded square outside it
+                                            //   REFUSES the run rather than composing on no floor
+  "dumpAllNavmeshes": false                 // optional: the raw dump holds every winning navmesh
+  // "rArea", "spacing", "coverageDistance", "eyeHeight", "retryAlternates", "fovDeg": optional,
+  //   and CHECKED, never applied - the sampling parameters are sealed in the rule
+}
+```
+
+- **The changed content, X_W.** Every placed record the plugin defines or overrides in the
+  worldspace, at the plugin's own position; for an override, the previous plugin's position too
+  when the plugin moved it by more than 1 u, or when its version sets the initially-disabled
+  (0x0800) or deleted (0x0020) header flag. Plan points; markers are kept, and the count whose base
+  has no model is published.
+- **Loading (one graph per worldspace).** The area squares are the 4,096 u squares any disc of
+  2,048 u around an X_W point touches, plus the squares holding the plugin's own navmesh
+  triangles; the loaded set is the winning navmeshes filed in those squares plus a one-square ring.
+  The renderer's walk is one-cell shaped, so the mode runs its own pass over the worldspace's cells
+  after it, reading the plugin's placed records raw (a deleted version with no position is kept).
+  Cross-cell links are traversed inside the loaded set; `ExternalLinks` counts only links that
+  leave it.
+- **Walkable.** A triangle is a node when it is not deleted (0x08) and its vertices are in range
+  (NavGraph). Components are undirected over the record's own links (`EdgeLink` with the flag bit
+  clear = same mesh, set = the `EdgeLinks` table, traversed when the target mesh is loaded). A
+  component is reachable when it holds a `DoorTriangles` entry or an exit (a cross-mesh link to a
+  mesh outside the loaded set). Doors are recorded, never traversed.
+- **The area A_W** is the walkable ground within 2,048 u (plan) of an X_W point, clipped
+  **exactly** (triangle ∩ union of discs), plus the whole of every walkable triangle of the
+  plugin's own navmeshes.
+- **Route candidates.** Endpoints are door and exit triangles in A_W. Each door is paired with its
+  4 nearest doors and its nearest exit (centroid plan distance, ties by mesh FormKey and index);
+  each pair is solved as `--route-solve` solves a leg (NavGraph A* on centroid distance, the
+  funnel, the 6 u corner inset). A path within 64 u of an already-kept path at every 32 u sample
+  is dropped. Candidates stand at 256 u along each kept path, then every 512 u. Note what the
+  method is: the funnel is taut **within A*'s channel**, which on a fine mesh can be a staircase,
+  so a solved path is not the shortest walk. Each route station publishes `fwdVsAheadDeg`, the
+  angle between its path direction and the path 512 u ahead, so that effect is measured.
+- **Fill candidates.** Every A_W piece with any point farther than 512 u from an accepted station
+  is split by 4-way midpoint subdivision until each part is at most 512² u²; the parts' centroids
+  are tested in the order of `sha256("g5-fill:20260925:<mesh>:<tri>:<subPath>")`, each only if it
+  is at least 512 u from every accepted station. A refused one gets up to 6 seeded alternates in
+  the same part (`g5-retry:20260925:…:<j>`).
+- **The player checks are the station rule's own** (`StationRule.CheckGround`, `CheckWater`: the
+  navmesh answer, the covering triangle, the physical floor + 120.5 u, the water through the one
+  resolver), plus the route refusals: `Unreachable` (the covering triangle - the highest drawn one,
+  searched over **every** winning navmesh of the worldspace - is not walkable, or lies in a navmesh
+  outside the loaded set), `OutsideArea`, `InChildWorldspaceFootprint` (a parent-worldspace XY
+  under any winning triangle of a named child worldspace, any flags: such an XY can arrive in the
+  child in the game), `TightClearance` (`NavCover.Clearance`, the test `--route` uses) and
+  `EyeInsidePrimitive` (any winning PortalBox or Box of the loaded set, under its full rotation).
+  A candidate within 128 u of an accepted station is dropped as `Deduplicated`.
+- **Gazes** per accepted station, level at the eye, 80° at 16:9: along the path both ways (a fill
+  station takes the first segment of its solved path to its nearest endpoint by walked length),
+  and the 5° bearing whose frustum holds the most X_W points with a model within 4,096 u; a gaze
+  within 30° of an earlier one is dropped.
+- **Coverage** is the plan area of A_W within 512 u of an accepted station, exactly (Green's
+  theorem over the triangle-edge pieces and the discs' boundary arcs), per worldspace. **Plan
+  distance is not line of sight.** The header adds the route-only share, the share on the
+  plugin's own navmesh, the uncovered area by the refusal reason found in each uncovered piece,
+  and the largest uncovered pieces located.
+- **The files**, all beside `--stations-out`:
+  - the pose file (`occl-transfer/station-poses-route/1`): one row per gaze of every accepted
+    station and one row per refused candidate, with the numbers that decided it; the per-family
+    yield (route, fill, fill-retry) must close - accepted + refused + dropped = composed - or the
+    write is refused;
+  - `stations-<worldspace>.json`: every composed candidate, accepted, refused or dropped;
+  - `classify-<worldspace>.json`: every triangle's verdict (walkable, component, in A_W, clipped
+    area, covered area), for reconciliation;
+  - `navdump-<worldspace>.json`: the raw record fields (navmesh vertices, triangles, link fields,
+    `EdgeLinks`, `DoorTriangles`; the plugin's placed records with every version's position and
+    header flags), written by code that classifies nothing, so an independent implementation can
+    recompute the area and the coverage.
+
 ### What it deliberately does not check, and does not do
 
 - **Interiors.** Both the water and the floor are looked up by exterior grid square, and an
@@ -2413,9 +2506,10 @@ an independent sampling oracle that shares no code with `ConvexShadow`.
   that for interiors; this mode does not.
 - **Whether the body would slide after landing.** A pose that is standable is not the same as a
   pose a landed body keeps; the in-game landing assertion is the gate for that.
-- **Whether the station is reachable on foot.** A station that passes C1–C6 is one a body can
-  *stand at*, which is what a render needs. "Walk to" is a stronger claim and this mode never
-  makes it.
+- **Whether the station is reachable on foot** (face-on and observing modes). A station that
+  passes C1–C6 is one a body can *stand at*, which is what a render needs. "Walk to" is a stronger
+  claim and those modes never make it; the route mode asks only that the station's triangle be in
+  a component with a door or an exit, which is still not a walk from anywhere in particular.
 - **Primitives tilted off the vertical.** The rule models an upright primitive turned about Z only.
   A primitive carrying a rotation about X or Y is composed on that upright reading, counted in the
   header as `primitivesTiltedOffZ` and named on the console — stated, not hidden.

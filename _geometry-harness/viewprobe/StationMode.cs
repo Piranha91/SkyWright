@@ -78,8 +78,8 @@ static class StationMode
                 ? md.GetString() : "" : null;
             if (mode is not null && mode != "observing" && mode != "face-on")
             {
-                Console.Error.WriteLine($"--stations: the spec's \"mode\" is '{mode}'. It is either "
-                                      + "\"observing\" or \"face-on\" (the default when absent); refusing.");
+                Console.Error.WriteLine($"--stations: the spec's \"mode\" is '{mode}'. It is \"observing\", "
+                                      + "\"route\" or \"face-on\" (the default when absent); refusing.");
                 return 2;
             }
             observing = mode == "observing";
@@ -144,46 +144,15 @@ static class StationMode
                                   + $"in {input.TargetCell} or its ring: {string.Join(", ", missing)}");
             return 2;
         }
-        // The floor field per grid square, built once and kept: FloorFeed reads the 3x3
-        // neighbourhood, because a floor mesh placed in the next cell reaches under this one.
-        var fields = new Dictionary<(int, int), FloorField>();
-        FloorField FieldFor((int X, int Y) g)
-        {
-            if (fields.TryGetValue(g, out var f)) return f;
-            var (refs, land) = FloorFeed.Neighbourhood(g, input.RefsByGrid, input.LandByGrid);
-            f = FloorFeed.Build(refs, input.Geometry, land, enabled: input.Enabled);
-            fields[g] = f;
-            return f;
-        }
-
-        int multiCovered = 0, offGrid = 0, buried = 0;
-        StationEnvironment Environment(float x, float y)
-        {
-            var (answered, covered, drawn, navZ, covers) = NavAt(input.Navmeshes, x, y);
-            if (covers > 1) multiCovered++;
-            var place = StationLookup.At(x, y, input.CellAt, input.WorldAt, input.Worldspace);
-            if (!input.RefsByGrid.ContainsKey(place.Grid) && !input.LandByGrid.ContainsKey(place.Grid))
-                offGrid++;
-            // No floor is READ where there is no navmesh height to read it against: the floor rule
-            // is a band around a height, and asking it about NaN answers nothing. The station is
-            // already refused for the navmesh, and the precedence counts it there.
-            if (!(answered && covered && drawn))
-                return new StationEnvironment(answered, covered, drawn, navZ,
-                    new FloorReading(navZ, 0f, FloorSource.None, NoFloorReason.NoSurface, false, 0),
-                    place.Cell, place.Worldspace, place.Water);
-            // WHERE the read is anchored is StationGround's; the landscape height is read with the
-            // same function the field reads it with, from the same filed heightmaps.
-            float? terrainZ = null;
-            if (input.LandByGrid.TryGetValue(place.Grid, out var heights))
-                terrainZ = NavmeshFloor.LandHeightAt(heights, place.Grid.X, place.Grid.Y, x, y, out _);
-            var field = FieldFor(place.Grid);
-            var ground = StationGround.Read(z => field.Read(x, y, z), navZ, terrainZ);
-            if (ground.TerrainIsAnotherStorey) buried++;
-            return new StationEnvironment(answered, covered, drawn, navZ, ground.Floor,
-                                          place.Cell, place.Worldspace, place.Water,
-                                          ground.Anchor, ground.NavmeshBurial,
-                                          ground.TerrainIsAnotherStorey);
-        }
+        // The station's environment - navmesh, cell, water, floor - is EnvironmentReader's, which
+        // the route mode reads through too (over its own navmesh set). The face-on and observing
+        // modes hand it this cell's navmeshes, as they always read them.
+        var reader = new EnvironmentReader(_ => input.Navmeshes, input.RefsByGrid, input.LandByGrid,
+                                           input.Geometry, input.Enabled, input.CellAt, input.WorldAt,
+                                           input.Worldspace);
+        var fields = reader.Fields;
+        FloorField FieldFor((int X, int Y) g) => reader.FieldFor(g);
+        StationEnvironment Environment(float x, float y) => reader.Read(x, y).Env;
 
         // OBSERVING MODE's content: every placed, enabled, undeleted ref with a collision solid, by
         // the sphere around that solid's world box. A PRE-FILTER, and one that can only undercount:
@@ -236,6 +205,7 @@ static class StationMode
             yields.Add(y);
         }
 
+        int multiCovered = reader.MultiCovered, offGrid = reader.OffGrid, buried = reader.Buried;
         if (tilted > 0)
             Console.WriteLine($"   --stations: {tilted} primitive(s) carry a rotation about X or Y "
                             + $"({string.Join(", ", tiltedKeys)}{(tilted > tiltedKeys.Count ? ", ..." : "")}). "
@@ -499,6 +469,75 @@ static class StationMode
 
     static readonly JsonSerializerOptions Opts = new() { WriteIndented = true };
     static float? StationPoseFileNumber(float v) => float.IsFinite(v) ? v : null;
+
+    /// <summary>What the load order answers at one station XY: the navmesh (<see cref="NavCover.At"/>
+    /// over the navmeshes <c>navsNear</c> hands it for that XY), the station's own cell and water
+    /// (<see cref="StationLookup.At"/>, through the one resolver), and the physical floor
+    /// (<see cref="StationGround"/> over <see cref="FloorFeed"/>). The face-on and observing modes
+    /// hand it the target cell's navmeshes; the route mode hands it every winning navmesh of the
+    /// worldspace near the XY. The counters are the run's summary lines.</summary>
+    internal sealed class EnvironmentReader
+    {
+        readonly Func<(float X, float Y), IEnumerable<NavmeshGeometry>> _navsNear;
+        readonly Dictionary<(int, int), Dictionary<FormKey, PlacedRef>> _refs;
+        readonly Dictionary<(int, int), float[,]> _land;
+        readonly FloorFeed.GeometryOf _geometry;
+        readonly Func<FormKey, bool> _enabled;
+        readonly Func<(int X, int Y), GridCellFacts?> _cellAt;
+        readonly Func<string, WorldFacts?> _worldAt;
+        readonly string _worldspace;
+        public readonly Dictionary<(int, int), FloorField> Fields = new();
+        public int MultiCovered, OffGrid, Buried;
+
+        public EnvironmentReader(Func<(float X, float Y), IEnumerable<NavmeshGeometry>> navsNear,
+                                 Dictionary<(int, int), Dictionary<FormKey, PlacedRef>> refsByGrid,
+                                 Dictionary<(int, int), float[,]> landByGrid, FloorFeed.GeometryOf geometry,
+                                 Func<FormKey, bool> enabled, Func<(int X, int Y), GridCellFacts?> cellAt,
+                                 Func<string, WorldFacts?> worldAt, string worldspace)
+        {
+            _navsNear = navsNear; _refs = refsByGrid; _land = landByGrid; _geometry = geometry;
+            _enabled = enabled; _cellAt = cellAt; _worldAt = worldAt; _worldspace = worldspace;
+        }
+
+        /// <summary>The floor field per grid square, built once and kept: FloorFeed reads the 3x3
+        /// neighbourhood, because a floor mesh placed in the next cell reaches under this one.</summary>
+        public FloorField FieldFor((int X, int Y) g)
+        {
+            if (Fields.TryGetValue(g, out var f)) return f;
+            var (refs, land) = FloorFeed.Neighbourhood(g, _refs, _land);
+            f = FloorFeed.Build(refs, _geometry, land, enabled: _enabled);
+            Fields[g] = f;
+            return f;
+        }
+
+        public (StationEnvironment Env, NavGraph.TriRef? Tri) Read(float x, float y)
+        {
+            var (answered, covered, drawn, navZ, covers, tri) = NavCover.At(_navsNear((x, y)), x, y);
+            if (covers > 1) MultiCovered++;
+            var place = StationLookup.At(x, y, _cellAt, _worldAt, _worldspace);
+            if (!_refs.ContainsKey(place.Grid) && !_land.ContainsKey(place.Grid))
+                OffGrid++;
+            // No floor is READ where there is no navmesh height to read it against: the floor rule
+            // is a band around a height, and asking it about NaN answers nothing. The station is
+            // already refused for the navmesh, and the precedence counts it there.
+            if (!(answered && covered && drawn))
+                return (new StationEnvironment(answered, covered, drawn, navZ,
+                    new FloorReading(navZ, 0f, FloorSource.None, NoFloorReason.NoSurface, false, 0),
+                    place.Cell, place.Worldspace, place.Water), tri);
+            // WHERE the read is anchored is StationGround's; the landscape height is read with the
+            // same function the field reads it with, from the same filed heightmaps.
+            float? terrainZ = null;
+            if (_land.TryGetValue(place.Grid, out var heights))
+                terrainZ = NavmeshFloor.LandHeightAt(heights, place.Grid.X, place.Grid.Y, x, y, out _);
+            var field = FieldFor(place.Grid);
+            var ground = StationGround.Read(z => field.Read(x, y, z), navZ, terrainZ);
+            if (ground.TerrainIsAnotherStorey) Buried++;
+            return (new StationEnvironment(answered, covered, drawn, navZ, ground.Floor,
+                                           place.Cell, place.Worldspace, place.Water,
+                                           ground.Anchor, ground.NavmeshBurial,
+                                           ground.TerrainIsAnotherStorey), tri);
+        }
+    }
 
     /// <summary>The winning navmesh's answer at one XY: whether there was a navmesh to ask at all,
     /// whether a triangle covers the point, whether any covering triangle is DRAWN (not flagged

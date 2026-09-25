@@ -3178,6 +3178,14 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot,
                                       + "nothing has tested.");
                 return 2;
             }
+            if (ViewProbe.RouteStationMode.IsRouteSpec(stationsSpec))
+                return ViewProbe.RouteStationMode.Run(new ViewProbe.RouteStationMode.Inputs
+                {
+                    SpecPath = stationsSpec, OutPath = stationsOut, CommandLine = replayArgs,
+                    Worldspace = targetWorldspace, OrderedPaths = order.OrderedPaths,
+                    BaseModel = b => baseMesh.TryGetValue(b, out var bm) ? bm : null,
+                    Geometry = StationFloorGeometry, Enabled = RefEnabled, PlaneMarkerBase = planeMarkerKey,
+                });
             var stationPrims = new List<ViewProbe.StationMode.Primitive>();
             foreach (var r in winRef.Values.Where(r => r.Base is { } b && b == planeMarkerKey)
                                            .OrderBy(r => r.FormKey.ToString(), StringComparer.Ordinal))
