@@ -365,27 +365,40 @@ static class RouteStationProof
 
         // ---- RT8 route gaze, and RT13 the yield on the same world ----------------------------------
         {
+            // A coarse L whose graph is a chain, so A*'s channel is unique and the rule's solved path
+            // can be worked out by hand: start door T2 -> T1 -> T4 -> T5 -> end door T6 (T3 a dead end).
+            // The straight line between the doors crosses the wall at x < 1536, y > 512, so the taut path
+            // bends once, at the inner corner (1536, 512). (A 128 u grid does NOT give that path: A* over
+            // centroid distances picks a staircase channel, and the funnel is taut only within its channel.)
             var m = new MeshB();
-            int leg1 = m.Grid(0, 0, 128, 128, 16, 4);          // x 0..2048, y 0..512
-            int leg2 = m.Grid(1536, 512, 128, 128, 4, 16);     // x 1536..2048, y 512..2560
-            for (int i = 0; i < 4; i++)
-                m.Join(leg1 + 2 * (3 * 16 + 12 + i) + 1, 1, leg2 + 2 * i, 0);
-            m.Door(leg1 + 1);                                  // cell (0,0) B, centroid (42.67, 85.33)
-            m.Door(leg2 + 2 * (15 * 4 + 2) + 1);               // leg 2 cell (2,15) B, centroid (1834.67, 2517.33)
+            int T1 = m.Tri(P(0, 0), P(1536, 0), P(1536, 512));
+            int T2 = m.Tri(P(0, 0), P(1536, 512), P(0, 512));
+            int T3 = m.Tri(P(1536, 0), P(2048, 0), P(2048, 512));
+            int T4 = m.Tri(P(1536, 0), P(2048, 512), P(1536, 512));
+            int T5 = m.Tri(P(1536, 512), P(2048, 512), P(2048, 2560));
+            int T6 = m.Tri(P(1536, 512), P(2048, 2560), P(1536, 2560));
+            m.Join(T1, 2, T2, 0);       // diagonal (0,0)-(1536,512)
+            m.Join(T1, 1, T4, 2);       // x = 1536, y 0..512
+            m.Join(T3, 2, T4, 0);       // diagonal (1536,0)-(2048,512)
+            m.Join(T4, 1, T5, 0);       // y = 512, x 1536..2048
+            m.Join(T5, 2, T6, 0);       // diagonal (1536,512)-(2048,2560)
+            m.Door(T2);                 // centroid (512, 341.33)
+            m.Door(T6);                 // centroid (1706.67, 1877.33)
             var a = RouteStations.Classify(World(new[] { m.Build(FK(0x80A)) }, new[] { Defined(0x80, 1024, 1024) }));
             var r = RouteStations.Sample(a, Env(a));
             C("RT8 the L-shaped world has two door endpoints and keeps one solved path",
               r.DoorEndpoints == 2 && r.Paths.Count(p => p.Kept) == 1,
               $"{r.DoorEndpoints} door endpoint(s), {r.Paths.Count(p => p.Kept)} kept path(s) of {r.Paths.Count}");
-            float leg2Bearing = StationRule.Bearing(1834.6667f - 1536f, 2517.3333f - 512f);
-            float chord = StationRule.Bearing(1834.6667f - 42.6667f, 2517.3333f - 85.3333f);
+            float leg2Bearing = StationRule.Bearing(1706.6667f - 1536f, 1877.3333f - 512f);
+            float chord = StationRule.Bearing(1706.6667f - 512f, 1877.3333f - 341.3333f);
             var onLeg2 = r.Stations.FirstOrDefault(s => s.Family == RouteFamily.Route && s.Accepted && s.Y > 1200f);
             var fwd = onLeg2?.Gazes.FirstOrDefault(g => g.Kind == RouteGazeKind.Fwd);
             var back = onLeg2?.Gazes.FirstOrDefault(g => g.Kind == RouteGazeKind.Back);
             C("RT8 a route station on leg 2 looks along leg 2's funnel segment (within 1 deg), not along the endpoint chord",
               fwd is not null && MathF.Min(AngDiff(fwd.BearingDeg, leg2Bearing), AngDiff(fwd.BearingDeg, leg2Bearing + 180f)) <= 1f
               && AngDiff(leg2Bearing, chord) > 5f,
-              fwd is null ? "no accepted route station on leg 2" : $"fwd {fwd.BearingDeg:0.###}, leg 2 {leg2Bearing:0.###}, chord {chord:0.###}");
+              (fwd is null ? "no accepted route station on leg 2" : $"fwd {fwd.BearingDeg:0.###} at {onLeg2!.X:0.#},{onLeg2.Y:0.#}, leg 2 {leg2Bearing:0.###}, chord {chord:0.###}")
+              + "; path " + string.Join(" ", r.Paths.Where(p => p.Kept).SelectMany(p => p.Corners).Select(c => $"{c.X:0.#},{c.Y:0.#}")));
             C("RT8 its back gaze is the fwd gaze turned 180 deg",
               fwd is not null && back is not null && MathF.Abs(AngDiff(fwd.BearingDeg, back.BearingDeg) - 180f) < 1e-3f,
               back is null ? "no back gaze" : $"fwd {fwd!.BearingDeg:0.###}, back {back.BearingDeg:0.###}");
