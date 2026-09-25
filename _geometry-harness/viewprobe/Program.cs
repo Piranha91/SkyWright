@@ -3392,25 +3392,11 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot,
                     // harm; if neither side is walkable the original corner stands and the 32 u
                     // check downstream still gets to complain. The endpoints are never moved:
                     // those are the author's waypoints, and they belong where they were put.
-                    const float CornerInset = 6f;
-                    {
-                        float insetRef = a.Z;
-                        for (int ci = 1; ci + 1 < corners.Count; ci++)
-                        {
-                            var cv = corners[ci];
-                            if (ViewProbe.BatEmit.NearestCoverZ(winNav, cv.X, cv.Y, insetRef) is { } cz
-                                && MathF.Abs(cz - insetRef) <= ViewProbe.BatEmit.SameFloorZ) insetRef = cz;
-                            var d0 = corners[ci - 1] - cv; var d1 = corners[ci + 1] - cv;
-                            if (d0.LengthSquared() < 1e-6f || d1.LengthSquared() < 1e-6f) continue;
-                            var bis = System.Numerics.Vector2.Normalize(d0) + System.Numerics.Vector2.Normalize(d1);
-                            if (bis.LengthSquared() < 1e-6f) continue;      // collinear: no corner to stand off from
-                            var step = System.Numerics.Vector2.Normalize(bis) * CornerInset;
-                            foreach (var cand in new[] { cv + step, cv - step })
-                                if (ViewProbe.BatEmit.NearestCoverZ(winNav, cand.X, cand.Y, insetRef) is { } mz
-                                    && MathF.Abs(mz - insetRef) <= ViewProbe.BatEmit.SameFloorZ)
-                                { corners[ci] = cand; break; }
-                        }
-                    }
+                    // The inset itself lives in NavGraph.InsetCorners (moved 2026-09-25, unchanged),
+                    // so the station rule's route sampler insets its paths with the same code.
+                    NavGraph.InsetCorners(corners, a.Z,
+                        (ix, iy, iz) => ViewProbe.BatEmit.NearestCoverZ(winNav, ix, iy, iz),
+                        ViewProbe.BatEmit.SameFloorZ);
                     if (Environment.GetEnvironmentVariable("VP_SOLVE_DEBUG") == "1")
                         Console.WriteLine("      [dbg] corners: " + string.Join("  ", corners.Select(cc => $"{cc.X:0.###},{cc.Y:0.###}")));
                     var leg = new List<System.Numerics.Vector3>();

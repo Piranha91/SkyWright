@@ -43,6 +43,7 @@
     <Compile Include="..\_shared\StationLookup.cs" Link="StationLookup.cs" />
     <Compile Include="..\_shared\StationGround.cs" Link="StationGround.cs" />
     <Compile Include="..\_shared\StationPoseFile.cs" Link="StationPoseFile.cs" />
+    <Compile Include="..\_shared\NavCover.cs" Link="NavCover.cs" />
     <PackageReference Include="SixLabors.ImageSharp" Version="3.1.11" />
     <PackageReference Include="SixLabors.ImageSharp.Drawing" Version="2.1.6" />
     <Compile Include="..\_shared\StateArm.cs" Link="StateArm.cs" />

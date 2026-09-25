@@ -507,40 +507,15 @@ static class StationMode
     ///
     /// Several drawn triangles can cover one XY where storeys overlap - a bridge deck over a path.
     /// The HIGHEST is taken and the count is reported, because a station stands on the top surface;
-    /// the lower one would put the eye inside the deck above it.</summary>
+    /// the lower one would put the eye inside the deck above it.
+    /// The body is <see cref="NavCover.At"/> (moved 2026-09-25, unchanged), which the route mode
+    /// also asks, and which additionally names the drawn triangle it took.</summary>
     static (bool Answered, bool Covered, bool Drawn, float Z, int Covers) NavAt(
         IReadOnlyCollection<NavmeshGeometry> navs, float qx, float qy)
     {
-        bool answered = false, covered = false;
-        float bestAny = float.NaN, bestDrawn = float.NaN;
-        int covers = 0;
-        foreach (var nav in navs)
-        {
-            if (nav.Triangles.Count > 0) answered = true;
-            for (int ti = 0; ti < nav.Triangles.Count; ti++)
-            {
-                var tri = nav.Triangles[ti];
-                if (tri.A < 0 || tri.B < 0 || tri.C < 0
-                    || tri.A >= nav.Vertices.Count || tri.B >= nav.Vertices.Count
-                    || tri.C >= nav.Vertices.Count) continue;
-                var a = V(nav.Vertices[tri.A]); var b = V(nav.Vertices[tri.B]); var c = V(nav.Vertices[tri.C]);
-                float d = (b.Y - c.Y) * (a.X - c.X) + (c.X - b.X) * (a.Y - c.Y);
-                if (MathF.Abs(d) < 1e-6f) continue;
-                float u = ((b.Y - c.Y) * (qx - c.X) + (c.X - b.X) * (qy - c.Y)) / d;
-                float v = ((c.Y - a.Y) * (qx - c.X) + (a.X - c.X) * (qy - c.Y)) / d;
-                float w = 1f - u - v;
-                if (u < 0f || v < 0f || w < 0f) continue;
-                covered = true; covers++;
-                float z = u * a.Z + v * b.Z + w * c.Z;
-                if (float.IsNaN(bestAny) || z > bestAny) bestAny = z;
-                if ((tri.Flags & 0x08) == 0 && (float.IsNaN(bestDrawn) || z > bestDrawn)) bestDrawn = z;
-            }
-        }
-        bool drawn = !float.IsNaN(bestDrawn);
-        return (answered, covered, drawn, drawn ? bestDrawn : bestAny, covers);
+        var r = NavCover.At(navs, qx, qy);
+        return (r.Answered, r.Covered, r.Drawn, r.Z, r.Covers);
     }
-
-    static Vector3 V(Vec3 p) => new(p.X, p.Y, p.Z);
 
     static bool Same(float[] a, float[] b)
     {

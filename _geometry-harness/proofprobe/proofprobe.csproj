@@ -31,6 +31,7 @@
     <Compile Include="..\_shared\StationLookup.cs" Link="StationLookup.cs" />
     <Compile Include="..\_shared\StationGround.cs" Link="StationGround.cs" />
     <Compile Include="..\_shared\StationPoseFile.cs" Link="StationPoseFile.cs" />
+    <Compile Include="..\_shared\NavCover.cs" Link="NavCover.cs" />
     <Compile Include="..\_shared\PlacementHistory.cs" Link="PlacementHistory.cs" />
     <Compile Include="..\_shared\DeletionHistory.cs" Link="DeletionHistory.cs" />
     <Compile Include="..\_shared\BosHook.cs" Link="BosHook.cs" />

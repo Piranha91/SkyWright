@@ -332,29 +332,14 @@ public static class StationRule
 
                         // ---- (a) the player constraints, exactly as the face-on rule has them --
                         var env = environment(x, yy);
-                        bool ground = env.Answered && env.Covered && env.Drawn;
-                        if (!env.Answered) reasons.Add(StationRejection.NoNavmeshAnswer);
-                        else if (!env.Covered) reasons.Add(StationRejection.NoCoveringTriangle);
-                        else if (!env.Drawn) reasons.Add(StationRejection.AllCoveringTrianglesDeleted);
-                        else if (!env.Floor.Found) reasons.Add(StationRejection.FloorUnknown);
-
-                        bool floorKnown = ground && env.Floor.Found;
-                        float floorZ = env.Floor.FloorZ;
-                        float eyeZ = floorKnown ? floorZ + EyeHeight : float.NaN;
+                        var (floorKnown, floorZ, eyeZ) = CheckGround(env, reasons);
                         var eye = new Vector3(x, yy, eyeZ);
                         var lookAt = new Vector3(c.X, c.Y, eyeZ);
 
                         // EyeOutsidePlaneExtent is NOT tested in this mode (see the summary).
                         if (floorKnown && EyeInside(p, eye)) reasons.Add(StationRejection.EyeInsidePrimitive);
 
-                        float? feetAbove = null;
-                        if (env.Water.Verdict == StationWaterVerdict.Unresolved)
-                            reasons.Add(StationRejection.WaterUnknown);
-                        else if (env.Water.SurfaceZ is { } surfaceZ && floorKnown)
-                        {
-                            feetAbove = floorZ - surfaceZ;
-                            if (floorZ < surfaceZ) reasons.Add(StationRejection.StationUnderwater);
-                        }
+                        float? feetAbove = CheckWater(env, floorKnown, floorZ, reasons);
 
                         float dx = lookAt.X - eye.X, dy = lookAt.Y - eye.Y;
                         float dxy = MathF.Sqrt(dx * dx + dy * dy);
@@ -656,9 +641,49 @@ public static class StationRule
     /// <summary>The level-gaze guard. A pose whose look-at height differs from its eye height is
     /// not a level gaze, whatever composed it.
     /// DEFECT 1's guard: the historical rule had none, so this returns None unconditionally.</summary>
-    public static StationRejection CheckLevel(StationPose pose)
-        => MathF.Abs(pose.LookAt.Z - pose.Eye.Z) > 1e-4f
+    public static StationRejection CheckLevel(StationPose pose) => CheckLevel(pose.Eye, pose.LookAt);
+
+    /// <summary>The level-gaze guard on one eye and aim point (C1). The pose overload asks this.</summary>
+    public static StationRejection CheckLevel(Vector3 eye, Vector3 lookAt)
+        => MathF.Abs(lookAt.Z - eye.Z) > 1e-4f
             ? StationRejection.NonLevelGaze : StationRejection.None;
+
+    /// <summary>C5 then C2, the per-candidate ground checks every composer runs - face-on, observing
+    /// and route - on the load order's answer at the station's own XY: the navmesh answered, a
+    /// triangle covers the XY, not every covering triangle is deleted, and a physical floor was
+    /// found. Adds at most one reason. The eye stands on the PHYSICAL FLOOR plus
+    /// <see cref="EyeHeight"/>; with no floor there is no eye (NaN), never a navmesh fallback.</summary>
+    internal static (bool FloorKnown, float FloorZ, float EyeZ) CheckGround(
+        StationEnvironment env, List<StationRejection> reasons)
+    {
+        bool ground = env.Answered && env.Covered && env.Drawn;
+        if (!env.Answered) reasons.Add(StationRejection.NoNavmeshAnswer);
+        else if (!env.Covered) reasons.Add(StationRejection.NoCoveringTriangle);
+        else if (!env.Drawn) reasons.Add(StationRejection.AllCoveringTrianglesDeleted);
+        else if (!env.Floor.Found) reasons.Add(StationRejection.FloorUnknown);
+
+        bool floorKnown = ground && env.Floor.Found;
+        float floorZ = env.Floor.FloorZ;
+        float eyeZ = floorKnown ? floorZ + EyeHeight : float.NaN;
+        return (floorKnown, floorZ, eyeZ);
+    }
+
+    /// <summary>C4 then C3, the per-candidate water checks every composer runs: the surface of the
+    /// station's own cell, as the one resolver answered it, is known (never read as dry), and the
+    /// feet are not below it. Returns the feet's height above the surface when both are known.</summary>
+    internal static float? CheckWater(StationEnvironment env, bool floorKnown, float floorZ,
+                                      List<StationRejection> reasons)
+    {
+        float? feetAbove = null;
+        if (env.Water.Verdict == StationWaterVerdict.Unresolved)
+            reasons.Add(StationRejection.WaterUnknown);
+        else if (env.Water.SurfaceZ is { } surfaceZ && floorKnown)
+        {
+            feetAbove = floorZ - surfaceZ;
+            if (floorZ < surfaceZ) reasons.Add(StationRejection.StationUnderwater);
+        }
+        return feetAbove;
+    }
 
     /// <summary>A worldspace's usable default water height, following the parent chain when the
     /// worldspace itself defers - a city worldspace commonly takes its water from Tamriel.
@@ -759,17 +784,9 @@ public static class StationRule
                         if (degenerate) reasons.Add(StationRejection.DegeneratePlane);
 
                         var env = environment(x, yy);
-                        bool ground = env.Answered && env.Covered && env.Drawn;
-                        if (!env.Answered) reasons.Add(StationRejection.NoNavmeshAnswer);
-                        else if (!env.Covered) reasons.Add(StationRejection.NoCoveringTriangle);
-                        else if (!env.Drawn) reasons.Add(StationRejection.AllCoveringTrianglesDeleted);
-                        else if (!env.Floor.Found) reasons.Add(StationRejection.FloorUnknown);
-
                         // The eye stands on the PHYSICAL FLOOR. There is no fallback to the
                         // navmesh height: falling back is the defect, and it would hide it.
-                        bool floorKnown = ground && env.Floor.Found;
-                        float floorZ = env.Floor.FloorZ;
-                        float eyeZ = floorKnown ? floorZ + EyeHeight : float.NaN;
+                        var (floorKnown, floorZ, eyeZ) = CheckGround(env, reasons);
 
                         // A LEVEL gaze: the aim point stands at the eye's own height, so the
                         // camera never dips to a centre a thousand units under the ground.
@@ -789,14 +806,7 @@ public static class StationRule
                         }
 
                         // The water, as the ONE resolver answered it for THIS station's cell.
-                        float? feetAbove = null;
-                        if (env.Water.Verdict == StationWaterVerdict.Unresolved)
-                            reasons.Add(StationRejection.WaterUnknown);
-                        else if (env.Water.SurfaceZ is { } surfaceZ && floorKnown)
-                        {
-                            feetAbove = floorZ - surfaceZ;
-                            if (floorZ < surfaceZ) reasons.Add(StationRejection.StationUnderwater);
-                        }
+                        float? feetAbove = CheckWater(env, floorKnown, floorZ, reasons);
 
                         float dx = lookAt.X - eye.X, dy = lookAt.Y - eye.Y;
                         float dxy = MathF.Sqrt(dx * dx + dy * dy);
