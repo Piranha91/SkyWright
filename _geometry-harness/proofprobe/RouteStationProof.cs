@@ -17,7 +17,7 @@ using Mutagen.Bethesda.Plugins;
 static class RouteStationProof
 {
     /// <summary>Cases run below, excluding this count's own check.</summary>
-    public const int DeclaredCases = 43;
+    public const int DeclaredCases = 45;
 
     static readonly ModKey Master = ModKey.FromNameAndExtension("Master.esm");
     static readonly ModKey City = ModKey.FromNameAndExtension("City.esp");
@@ -122,10 +122,13 @@ static class RouteStationProof
     static RouteWorld World(IEnumerable<NavmeshGeometry> masterMeshes, IEnumerable<RoutePlaced> placed,
                             IEnumerable<NavmeshGeometry>? cityMeshes = null,
                             IReadOnlyList<PrimitiveGeometry>? prims = null,
-                            IReadOnlyList<NavmeshGeometry>? child = null)
+                            IReadOnlyList<NavmeshGeometry>? child = null,
+                            IReadOnlyDictionary<FormKey, (int, int)>? filedUnder = null)
     {
         var navs = new List<RouteNavmesh>();
-        foreach (var m in masterMeshes) navs.Add(new RouteNavmesh(m, new[] { "Master.esm" }, SquareOf(m)));
+        foreach (var m in masterMeshes)
+            navs.Add(new RouteNavmesh(m, new[] { "Master.esm" },
+                filedUnder is not null && filedUnder.TryGetValue(m.FormKey, out var sq) ? sq : SquareOf(m)));
         var cityKeys = new List<FormKey>();
         foreach (var m in cityMeshes ?? Array.Empty<NavmeshGeometry>())
         {
@@ -491,6 +494,26 @@ static class RouteStationProof
             var l1 = RouteStations.CoverageL1(a, res);
             C("RT12 L1 counts accepted stations only, not a refused candidate",
               Math.Abs(l1.Covered - quarter) < 0.5, $"{l1.Covered:0.###} vs {quarter:0.###}");
+        }
+
+        // ---- RT17 the covering triangle is searched over every winning navmesh (AMENDMENT-01 r8) --
+        {
+            var pad = Pad();
+            var up = new MeshB();
+            int hi = up.Tri(P(200, 200), P(450, 200), P(300, 450), z: 200f);   // over the pad, 200 u up
+            up.Door(hi);
+            var keyUp = FK(0x80E);
+            // filed under a grid square far outside the loaded set, though its geometry lies over the pad
+            var a = RouteStations.Classify(World(new[] { pad.Build(FK(0x80D)), up.Build(keyUp) },
+                                                 new[] { Defined(0xA0, 512, 512) },
+                                                 filedUnder: new Dictionary<FormKey, (int, int)> { [keyUp] = (9, 9) }));
+            C("RT17 fixture: the higher navmesh is winning but outside the loaded set",
+              a.Winning.ContainsKey(keyUp) && !a.Loaded.ContainsKey(keyUp), $"loaded {a.Loaded.ContainsKey(keyUp)}");
+            var v = RouteStations.Test(a, Env(a), 300f, 283.333f);
+            C("RT17 a point whose highest covering node triangle is in an unloaded navmesh is refused Unreachable, "
+              + "not accepted on the lower loaded triangle",
+              v.Reason == StationRejection.Unreachable && v.Covering is { } ct && ct.Mesh == keyUp,
+              $"{v.Reason} on {v.Covering}: {v.Detail}");
         }
 
         // ---- RT15 the seeded fill order and retry alternates --------------------------------------
