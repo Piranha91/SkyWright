@@ -2004,6 +2004,26 @@ that is not upright within the rule's own `maximumAbsNormalZ`, an eye inside or 
 degenerate box, non-positive bounds or scale, and an eye nearer than `minimumEyeDistance` each
 give their own reason. The near-eye distance for a box is measured to its nearest surface point.
 
+**Horizontal PortalBoxes, one class (`horizontalPortalBoxNormalDownEyeAbove: true`).** By default a
+PortalBox is predicted only when it is upright: the rectangle's normal may leave level by at most
+`maximumAbsNormalZ`. This opt-in admits exactly one further class: a **horizontal** rectangle, with
+its authored normal (the reference's local +Y) within that same tolerance of straight **down** (−Z),
+seen from **above** its plane. That is the in-situ form of panels laid just under walkable floors
+(X about 90° with a Y yaw). It is predicted by the same rectangle shadow. **Everything else stays
+refused, by name:**
+- a horizontal rectangle with its normal **up**: "horizontal PortalBox with its normal up…";
+- the normal-down rectangle seen from **below** or on its plane: "horizontal PortalBox seen from
+  below…";
+- every other tilt, including one just outside the tolerance: the sealed "plane orientation outside
+  the supplied rule's evidence scope".
+
+A rule that omits the field predicts exactly what it always did. The field is not written into a
+report's `ruleConfiguration` unless it is on, so such a report is byte-identical to one written
+before the field existed. The decision is `HarnessShared.PortalBoxOrientation`, and its cases are
+`stationrule: H0…H9` in `proofprobe`. **Opting in is a claim about engine behaviour.** A rule that
+sets it must cite in-game evidence for the class. The reported `scope` names the class whenever a
+rule opts in.
+
 The geometry primitive tests each source NIF shape's stored sphere against the finite
 PortalBox shadow's surface and four side half-spaces — or, where a rule opts in, against that Box
 view shadow. It applies below-root NIF node transforms

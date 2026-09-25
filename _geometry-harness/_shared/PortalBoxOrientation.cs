@@ -37,7 +37,13 @@ public static class PortalBoxOrientation
     public static string? Check(Vector3 quadNormal, Vector3 authoredNormal, Vector3 centre, Vector3 eye,
                                 float maxAbsNormalZ, bool horizontalNormalDownEyeAbove)
     {
-        // STUB (handback 3): the sealed behaviour, the opt-in ignored - so the H cases fail as wrong answers.
-        return MathF.Abs(quadNormal.Z) <= maxAbsNormalZ ? null : OutsideScope;
+        if (MathF.Abs(quadNormal.Z) <= maxAbsNormalZ) return null;            // upright: the sealed class
+        if (!horizontalNormalDownEyeAbove) return OutsideScope;                // the default, byte for byte
+        bool horizontal = MathF.Abs(authoredNormal.X) <= maxAbsNormalZ
+                          && MathF.Abs(authoredNormal.Y) <= maxAbsNormalZ;
+        if (!horizontal) return OutsideScope;                                  // any other tilt
+        if (authoredNormal.Z > 0f) return HorizontalUp;
+        if (!(eye.Z - centre.Z > 0f)) return HorizontalEyeBelow;              // on the plane counts as below
+        return null;
     }
 }

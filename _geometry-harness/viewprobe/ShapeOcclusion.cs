@@ -35,8 +35,17 @@ static class ShapeCullPolicy
 {
     /// <param name="BoxSilhouette">Opt in to predicting Box primitives by their view shadow. A rule
     /// file that omits it keeps the catalogue behaviour, refusal text included.</param>
+    /// <param name="HorizontalPortalBoxNormalDownEyeAbove">Opt in to predicting ONE further PortalBox class:
+    /// horizontal (the authored normal's X and Y within <paramref name="MaximumAbsNormalZ"/> of 0), normal
+    /// pointing DOWN (-Z), seen from ABOVE its plane (HarnessShared.PortalBoxOrientation). The +Z form, an eye
+    /// below and every other tilt stay refused. A rule file that omits it predicts exactly what it always did,
+    /// and the field is not written into a report's ruleConfiguration unless it is on, so such a report is
+    /// byte-identical to one written before the field existed.</param>
     public sealed record Rule(string Identity, float MinimumEyeDistance, float MaximumAbsNormalZ,
-                              bool Frozen, string[] Evidence, bool BoxSilhouette = false);
+                              bool Frozen, string[] Evidence, bool BoxSilhouette = false,
+                              [property: System.Text.Json.Serialization.JsonIgnore(
+                                  Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingDefault)]
+                              bool HorizontalPortalBoxNormalDownEyeAbove = false);
     public static Rule? Configuration { get; private set; }
     public static string? Sha256 { get; private set; }
     public static string Identity => Configuration?.Identity ?? "unconfigured";
@@ -44,7 +53,9 @@ static class ShapeCullPolicy
     public const string BoxScope = " Upright Box primitives beyond the rule's minimum eye distance are predicted by the silhouette of the stored box from the eye together with the box's own volume; a union of per-face shadows is NOT separated from that silhouette by the supporting evidence and remains untested.";
     /// <summary>What the configured rule claims to cover. The Box clause appears only when a rule
     /// opts in, so a rule file that says nothing about boxes reports exactly what it always did.</summary>
-    public static string Scope => Configuration is { BoxSilhouette: true } ? RectangleScope + BoxScope : RectangleScope;
+    public const string HorizontalScope = " Horizontal PortalBox rectangles whose authored normal points down (-Z), seen from above their plane, are predicted by the same rectangle shadow; the normal-up form, an eye below the plane and every other tilt remain refused.";
+    public static string Scope => (Configuration is { BoxSilhouette: true } ? RectangleScope + BoxScope : RectangleScope)
+                                  + (Configuration is { HorizontalPortalBoxNormalDownEyeAbove: true } ? HorizontalScope : "");
 
     public static void Load(string path)
     {
@@ -86,8 +97,9 @@ static class ShapeCullPolicy
         var shadow = ConvexShadow.FromRectangle(p.Quad, eye);
         if (shadow is null) return (null, "degenerate plane or camera");
         var normal = Vector3.Normalize(Vector3.Cross(p.Quad[1]-p.Quad[0], p.Quad[3]-p.Quad[0]));
-        if (MathF.Abs(normal.Z) > rule.MaximumAbsNormalZ)
-            return (null, "plane orientation outside the supplied rule's evidence scope");
+        var orientation = HarnessShared.PortalBoxOrientation.Check(normal, p.Normal, p.Centre, eye,
+            rule.MaximumAbsNormalZ, rule.HorizontalPortalBoxNormalDownEyeAbove);
+        if (orientation is not null) return (null, orientation);
         if (shadow.EyeDistance <= rule.MinimumEyeDistance)
             return (null, "near-eye behavior unassessed; observations bracket an exemption and do not establish a sharp threshold");
         return (shadow, null);
