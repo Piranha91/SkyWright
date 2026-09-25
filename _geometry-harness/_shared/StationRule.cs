@@ -81,10 +81,27 @@ public enum StationRejection : byte
     /// ranked by.</summary>
     EyeInsidePrimitive,
     EyeOutsidePlaneExtent,
+    /// <summary>Observing mode only: the view is within <see cref="StationRule.EdgeOnDeg"/> of the
+    /// primitive's plane, so its rectangle projects to almost nothing.</summary>
+    EdgeOn,
+    /// <summary>Observing mode only: no part of the shadow volume's near face lies inside the
+    /// frame at the level gaze.</summary>
+    ShadowOutOfFrame,
+    /// <summary>Observing mode only: no content bound lies inside the shadow at this eye.</summary>
+    NoContentInShadow,
     /// <summary>A guard. Level gaze is by construction, so this should never appear on a composed
     /// pose; it exists so a later change cannot reintroduce defect 1 in silence.</summary>
     NonLevelGaze,
 }
+
+/// <summary>Which station rule composed a pose. <see cref="FaceOn"/> is the sealed rule and the
+/// default; <see cref="Observing"/> composes a ring of bearings for clean primitives so that
+/// content inside the primitive's predicted shadow can be seen from the eye (GATE-A §3.1).</summary>
+public enum StationComposeMode : byte { FaceOn, Observing }
+
+/// <summary>One piece of placed content, by its world sphere, that the observing mode counts when
+/// the bound lies inside the primitive's shadow at an eye.</summary>
+public readonly record struct ContentBound(string Key, SphereBound Bound);
 
 /// <summary>An occlusion primitive's geometry, as the renderer already models it.</summary>
 public readonly record struct PrimitiveGeometry(
@@ -161,6 +178,17 @@ public sealed record StationPose
     public required bool Accepted { get; init; }
     public StationRejection RejectionReason { get; init; } = StationRejection.None;
     public string RejectionDetail { get; init; } = "";
+
+    // observing mode only; null on a face-on pose, which the pose file publishes as it always did
+    public StationComposeMode Mode { get; init; } = StationComposeMode.FaceOn;
+    /// <summary>The ring bearing, degrees clockwise in plan from the face's outward normal.</summary>
+    public float? RingBearingDeg { get; init; }
+    /// <summary>How many content bounds lie inside the shadow at this eye.</summary>
+    public int? ContentInShadow { get; init; }
+    public IReadOnlyList<string>? ContentKeys { get; init; }
+    /// <summary>1-based rank among the primitive's accepted observing poses: most content first,
+    /// ties to the smaller angle to the normal.</summary>
+    public int? ObservingRank { get; init; }
 }
 
 /// <summary>One primitive's stations under one setup, with the accounting that has to close.</summary>
@@ -215,8 +243,30 @@ public static class StationRule
         StationRejection.StationUnderwater,
         StationRejection.EyeInsidePrimitive,
         StationRejection.EyeOutsidePlaneExtent,
+        StationRejection.EdgeOn,
+        StationRejection.ShadowOutOfFrame,
+        StationRejection.NoContentInShadow,
         StationRejection.NonLevelGaze,
     };
+
+    /// <summary>Observing mode: bearings on the ring, degrees clockwise from the face normal.</summary>
+    public static readonly float[] RingBearingsDeg =
+        { 0f, 30f, 60f, 90f, 120f, 150f, 180f, 210f, 240f, 270f, 300f, 330f };
+    /// <summary>Observing mode: a view within this many degrees of the plane is refused EdgeOn.</summary>
+    public const float EdgeOnDeg = 10f;
+    /// <summary>Observing mode: the frame the shadow must reach, horizontal FOV at this aspect.</summary>
+    public const float FrameAspect = 16f / 9f;
+
+    /// <summary>Observing mode (GATE-A §3.1): a ring of bearings around the primitive, the Part A
+    /// player constraints kept exactly and <see cref="StationRejection.EyeOutsidePlaneExtent"/>
+    /// dropped, and the two geometric refusals plus the content-in-shadow count.
+    /// STUB (Gate B code, handback 1): returns the face-on rule's output unchanged, so the REDs
+    /// written against this signature fail as wrong answers, not as compile errors.</summary>
+    public static StationYield ComposeObserving(
+        PrimitiveGeometry p, string setup, Func<float, float, StationEnvironment> environment,
+        IReadOnlyList<ContentBound> content, float[]? kValues = null, float[]? laterals = null,
+        float[]? bearingsDeg = null, float fovDeg = DefaultFovDeg)
+        => Compose(p, setup, environment, kValues, laterals);
 
     /// <summary>The reason a station is counted under, when it fails several.</summary>
     public static StationRejection FirstByPrecedence(IEnumerable<StationRejection> reasons)

@@ -22,7 +22,11 @@ static class StationRuleProof
 {
     /// <summary>Cases run below, excluding this count's own check. A case added without moving
     /// this number fails the last check rather than passing unnoticed.</summary>
-    public const int DeclaredCases = 110;
+    public const int DeclaredCases = 138;
+
+    /// <summary>M7: SHA-256 of the face-on pose file over eight fixtures, recorded at the API stub
+    /// over the unchanged face-on rule.</summary>
+    const string M7FaceOnSha256 = "CC4BA5F72ADF1A9E13C7073217EA630EC698CFFE72168F713851CE43EA83E100";
 
     const string WS = "WS-FIXTURE";
     const string CELL_A = "CELL-A";
@@ -783,6 +787,236 @@ static class StationRuleProof
         catch (Exception ex) { whyS = ex.GetType().Name + ": " + ex.Message; }
         C("G2 the yield counts the stations where the terrain is another storey",
           countedStorey, whyS.Length > 0 ? whyS : $"of {storeyLadder.Composed} composed");
+
+        // ================================================ M, the observing mode (GATE-A §3.2) ==
+        // Stations that can observe a MISS: a ring of bearings around a clean primitive, the
+        // player constraints kept exactly, and content inside the predicted shadow counted. The
+        // known answers for M1, M3 and M5 come from an INDEPENDENT numpy oracle
+        // (_claude/runs/2026-09-25-occlusion-arming-miss-tilted/partB/oracle_m5.py, which samples
+        // eye->surface segments through the rectangle and shares no code with ConvexShadow); the
+        // numbers below are copied from its output file oracle-m5.json and say so.
+        //
+        // Recorded RED at the API stub (ComposeObserving returning the face-on rule's output), so
+        // each case below fails on a WRONG ANSWER, not on a missing member.
+        var wall = new PrimitiveGeometry("PRIM-WALL", PrimitiveKind.PortalBox,
+            new Vector3(400f, 8f, 400f), new Vector3(0f, 0f, 200f), Vector3.Zero, WS, CELL_A);
+        ContentBound Ball(string key, float x, float y, float z, float r)
+            => new(key, new SphereBound(new Vector3(x, y, z), r));
+        var cIn = Ball("IN", 150f, -300f, 150f, 30f);
+        var cFront = Ball("FRONT", 60f, 100f, 125f, 20f);
+        var cBeside = Ball("BESIDE", -900f, -300f, 150f, 30f);
+        var cStraddle = Ball("STRADDLE", -615f, -300f, 150f, 60f);
+        var cFree = Ball("FREE", 900f, -500f, 150f, 30f);
+        bool Holds(StationPose p, string key) => p.ContentKeys is { } ks && ks.Contains(key);
+        int Oblique(StationYield y, Func<StationPose, bool> also)
+        {
+            int n = 0;
+            foreach (var p in y.Poses) if (p.AngleToPlaneNormalDeg >= 30f && also(p)) n++;
+            return n;
+        }
+        StationPose? AtBearing(StationYield y, float bearing, float lat, float k)
+        {
+            foreach (var p in y.Poses)
+                if (p.RingBearingDeg is { } b && MathF.Abs(b - bearing) < 1e-3f
+                    && MathF.Abs(p.Lateral - lat) < 1e-6f && MathF.Abs(p.K - k) < 1e-6f) return p;
+            return null;
+        }
+        float[] One(float v) => new[] { v };
+
+        // ---- M1 the wall panel: face-on sees nothing oblique; the ring does ------------------
+        var wallFace = StationRule.Compose(wall, "M1", Flat(0f, 0f));
+        float worstFace = 0f;
+        foreach (var p in wallFace.Poses) worstFace = MathF.Max(worstFace, p.AngleToPlaneNormalDeg);
+        C("M1 the face-on rule composes no pose 30 deg or more off the normal",
+          wallFace.Poses.Count > 0 && worstFace < 30f, $"worst {worstFace:0.###} deg over {wallFace.Poses.Count}");
+        var wallRing = StationRule.ComposeObserving(wall, "M1", Flat(0f, 0f), new[] { cFree });
+        int obliqueFree = Oblique(wallRing, p => p.Accepted && Holds(p, "FREE"));
+        // oracle-m5.json M1.obliqueAcceptedContaining = 12 (bearings 300 x3 laterals, 330 at +0.35,
+        // each at the three k, which all floor to the same 250 u standoff here)
+        C("M1 the observing mode accepts the 12 oblique poses whose shadow holds the free-edge ref",
+          obliqueFree == 12 && wallRing.Accepted == 12,
+          $"{obliqueFree} oblique accepted holding FREE, {wallRing.Accepted} accepted; oracle 12 and 12");
+        bool nearNormalRefused = true; int nearNormal = 0;
+        foreach (var p in wallRing.Poses)
+            if (p.AngleToPlaneNormalDeg < 30f)
+            {
+                nearNormal++;
+                if (p.Accepted || p.RejectionReason != StationRejection.NoContentInShadow) nearNormalRefused = false;
+            }
+        // oracle-m5.json M1.under30degContaining = 0
+        C("M1 every ring pose under 30 deg is refused NoContentInShadow (oracle: none holds FREE)",
+          nearNormal > 0 && nearNormalRefused, $"{nearNormal} pose(s) under 30 deg");
+
+        // ---- M2 the two geometric refusals, and the content refusal -------------------------
+        var edge = StationRule.ComposeObserving(wall, "M2", Flat(0f, 0f), new[] { cIn },
+                                                One(1f), One(0f), One(85f));
+        var e0 = edge.Poses.Count == 1 ? edge.Poses[0] : null;
+        C("M2 a pose 85 deg off the normal is refused EdgeOn, with its numbers",
+          e0 is { Accepted: false, RejectionReason: StationRejection.EdgeOn }
+          && e0.RejectionDetail.Contains("85", StringComparison.Ordinal),
+          e0 is null ? $"{edge.Poses.Count} poses composed, expected 1"
+                     : $"{e0.RejectionReason}: {e0.RejectionDetail}");
+        C("M2 the EdgeOn refusal is counted and the yield closes",
+          Count(edge, StationRejection.EdgeOn) == 1 && edge.Composed == 1 && edge.Closes,
+          $"EdgeOn {Count(edge, StationRejection.EdgeOn)}, composed {edge.Composed}");
+        var notEdge = StationRule.ComposeObserving(wall, "M2", Flat(0f, 0f), new[] { cIn },
+                                                   One(1f), One(0f), One(75f));
+        var n0p = notEdge.Poses.Count == 1 ? notEdge.Poses[0] : null;
+        C("M2 the other arm: a pose 75 deg off the normal is not refused EdgeOn",
+          n0p is { RingBearingDeg: { } b75 } && MathF.Abs(b75 - 75f) < 1e-3f
+          && n0p.RejectionReason != StationRejection.EdgeOn,
+          n0p is null ? $"{notEdge.Poses.Count} poses composed, expected 1"
+                      : $"bearing {n0p.RingBearingDeg}, {n0p.RejectionReason}");
+        var high = new PrimitiveGeometry("PRIM-HIGH", PrimitiveKind.PortalBox,
+            new Vector3(400f, 8f, 400f), new Vector3(0f, 0f, 1200f), Vector3.Zero, WS, CELL_A);
+        var above = StationRule.ComposeObserving(high, "M2", Flat(0f, 0f),
+            new[] { Ball("HIGH-IN", 150f, -300f, 1400f, 30f) }, One(1f), One(0f), One(30f));
+        C("M2 a panel 880 u above the eye at a 250 u standoff is refused ShadowOutOfFrame",
+          above.Composed == 1 && Count(above, StationRejection.ShadowOutOfFrame) == 1
+          && above.Poses[0].RejectionDetail.Length > 0,
+          above.Poses.Count > 0 ? $"{above.Poses[0].RejectionReason}: {above.Poses[0].RejectionDetail}"
+                                : "no poses");
+        var besideOnly = StationRule.ComposeObserving(wall, "M2", Flat(0f, 0f), new[] { cBeside },
+                                                      One(1f), One(0f), One(30f));
+        C("M2 a pose whose shadow holds no content is refused NoContentInShadow",
+          besideOnly.Composed == 1 && Count(besideOnly, StationRejection.NoContentInShadow) == 1,
+          besideOnly.Poses.Count > 0
+            ? $"{besideOnly.Poses[0].RejectionReason}: {besideOnly.Poses[0].RejectionDetail}" : "no poses");
+
+        // ---- M3 raised: a station standing above the panel's top ------------------------------
+        var low = new PrimitiveGeometry("PRIM-LOW", PrimitiveKind.PortalBox,
+            new Vector3(400f, 8f, 200f), new Vector3(0f, 0f, 100f), Vector3.Zero, WS, CELL_A);
+        var cLow = Ball("LOWIN", 150f, -200f, 60f, 15f);
+        var lowFace = StationRule.Compose(low, "M3", Flat(150f, 150f));
+        C("M3 the face-on rule refuses the raised ground EyeOutsidePlaneExtent",
+          lowFace.Composed > 0 && Count(lowFace, StationRejection.EyeOutsidePlaneExtent) == lowFace.Composed,
+          $"{Count(lowFace, StationRejection.EyeOutsidePlaneExtent)} of {lowFace.Composed}");
+        var lowRing = StationRule.ComposeObserving(low, "M3", Flat(150f, 150f), new[] { cLow });
+        // oracle-m5.json M3.posesContainingNotEdgeOnInFrame = 42 (14 bearing/lateral keys x 3 k)
+        C("M3 the observing mode accepts the raised ground (oracle 42) and refuses none of it for the extent",
+          lowRing.Accepted == 42 && Count(lowRing, StationRejection.EyeOutsidePlaneExtent) == 0,
+          $"{lowRing.Accepted} accepted (oracle 42), "
+          + $"{Count(lowRing, StationRejection.EyeOutsidePlaneExtent)} refused for the extent");
+        var lowFace0 = lowFace.Poses.Find(p => p.Side == 1 && p.Lateral == 0f && p.K == 1f);
+        var lowRing0 = AtBearing(lowRing, 0f, 0f, 1f);
+        C("M3 it is the same station: bearing 0 is the face-on +1 pose's eye, accepted in one mode only",
+          lowFace0 is not null && lowRing0 is not null
+          && Vector3.Distance(lowFace0.Eye, lowRing0.Eye) < 1e-3f
+          && !lowFace0.Accepted && lowRing0.Accepted,
+          lowRing0 is null ? "no bearing-0 pose in the observing yield"
+                           : $"face-on {lowFace0?.Eye} {lowFace0?.RejectionReason}, observing {lowRing0.Eye} {lowRing0.Accepted}");
+
+        // ---- M4 the player constraints hold for oblique poses, reason and precedence ----------
+        void Player(string name, Func<float, float, StationEnvironment> env, StationRejection want)
+        {
+            var face = StationRule.Compose(wall, "M4", env);
+            var ring = StationRule.ComposeObserving(wall, "M4", env, new[] { cIn });
+            int oblique = Oblique(ring, _ => true);
+            C("M4 " + name + ": oblique poses are refused as face-on ones are, for the same reason",
+              oblique > 0 && Count(face, want) == face.Composed
+              && Count(ring, want) == ring.Composed && AcceptedPoses(ring) == 0 && EveryRefusalCarries(ring, want),
+              $"{oblique} oblique; face-on {Count(face, want)}/{face.Composed}, "
+              + $"observing {Count(ring, want)}/{ring.Composed} {want}");
+        }
+        Player("under water", FlatWater(0f, 0f, wReal60), StationRejection.StationUnderwater);
+        Player("unknown water", FlatWater(0f, 0f, wUnknown), StationRejection.WaterUnknown);
+        Player("no physical floor",
+               (_, _) => new StationEnvironment(true, true, true, 0f, NoFloor(0f), CELL_A, WS, Dry()),
+               StationRejection.FloorUnknown);
+        Player("every covering triangle deleted",
+               (_, _) => new StationEnvironment(true, true, false, 0f, NoFloor(0f), CELL_A, WS, Dry()),
+               StationRejection.AllCoveringTrianglesDeleted);
+
+        // ---- M5 the content test, against the independent oracle ------------------------------
+        var m5 = StationRule.ComposeObserving(wall, "M5", Flat(0f, 0f),
+            new[] { cIn, cFront, cBeside, cStraddle }, One(1f), One(0f), One(30f));
+        var m5p = m5.Poses.Count == 1 ? m5.Poses[0] : null;
+        // oracle-m5.json M5.pose.eye = [125.0, 216.5064, 120.5], angle 30.0
+        C("M5 the pose is the oracle's eye at bearing 30",
+          m5p is { RingBearingDeg: { } b30 } && MathF.Abs(b30 - 30f) < 1e-3f
+          && Vector3.Distance(m5p.Eye, new Vector3(125f, 216.5064f, 120.5f)) < 1e-2f
+          && MathF.Abs(m5p.AngleToPlaneNormalDeg - 30f) < 1e-2f,
+          m5p is null ? $"{m5.Poses.Count} poses, expected 1"
+                      : $"bearing {m5p.RingBearingDeg}, eye {m5p.Eye}, angle {m5p.AngleToPlaneNormalDeg:0.###}");
+        C("M5 a ref inside the shadow counts (oracle: Inside, 40000 of 40000 segments blocked)",
+          m5p is not null && Holds(m5p, "IN"), m5p?.ContentKeys is { } k1 ? string.Join(",", k1) : "no content keys");
+        C("M5 a ref in front of the panel does not count (oracle: Outside)",
+          m5p?.ContentKeys is not null && !Holds(m5p, "FRONT"),
+          m5p?.ContentKeys is { } k2 ? string.Join(",", k2) : "no content keys");
+        C("M5 a ref beside the silhouette does not count (oracle: Outside)",
+          m5p?.ContentKeys is not null && !Holds(m5p, "BESIDE"),
+          m5p?.ContentKeys is { } k3 ? string.Join(",", k3) : "no content keys");
+        C("M5 a straddling ref does not count, though its centre's segment is blocked (oracle: Crossing)",
+          m5p?.ContentKeys is not null && !Holds(m5p, "STRADDLE"),
+          m5p?.ContentKeys is { } k4 ? string.Join(",", k4) : "no content keys");
+        C("M5 the pose counts exactly the oracle's one",
+          m5p is { ContentInShadow: 1, Accepted: true }, $"{m5p?.ContentInShadow} counted, accepted {m5p?.Accepted}");
+
+        // ---- M6 the accounting closes over the new refusals ------------------------------------
+        C("M6 the observing yield closes over 12 bearings x 3 k x 3 laterals, new refusals included",
+          wallRing.Closes && wallRing.Composed == 108
+          && Count(wallRing, StationRejection.EdgeOn) > 0
+          && Count(wallRing, StationRejection.NoContentInShadow) > 0,
+          $"{wallRing.Accepted} + {wallRing.RejectedTotal} vs {wallRing.Composed}; "
+          + $"EdgeOn {Count(wallRing, StationRejection.EdgeOn)}, "
+          + $"NoContentInShadow {Count(wallRing, StationRejection.NoContentInShadow)}");
+        var badRing = new StationYield { Primitive = "PRIM-WALL", Setup = "M6" };
+        badRing.Composed = 108; badRing.Accepted = 12;
+        badRing.Rejected[StationRejection.EdgeOn] = 24;       // 12 + 24 != 108
+        bool refusedRing = false;
+        try { StationPoseFile.Render(hdr, new[] { badRing }); }
+        catch (InvalidOperationException) { refusedRing = true; }
+        C("INHERITED M6 the writer refuses an observing yield that does not close", refusedRing, "");
+
+        // ---- M7 the face-on output is pinned to the byte ---------------------------------------
+        string faceOnDoc = StationPoseFile.Render(hdr, new[] { ladder, boxLadder, split, raised,
+                                                               noFloor, drowned, unknown, outside });
+        string faceOnSha = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(
+            System.Text.Encoding.UTF8.GetBytes(faceOnDoc)));
+        // Recorded at the API stub over the unchanged face-on rule; a change to the face-on
+        // output - a new pose field included - moves it.
+        C("M7 the face-on pose file over eight fixtures is byte-identical to the base",
+          faceOnSha == M7FaceOnSha256, $"{faceOnSha} ({faceOnDoc.Length} chars)");
+
+        // ---- M8 ranking ------------------------------------------------------------------------
+        var ranked = StationRule.ComposeObserving(wall, "M8", Flat(0f, 0f), new[] { cIn, cFree });
+        var acc = ranked.Poses.FindAll(p => p.Accepted);
+        acc.Sort((a, b) => (a.ObservingRank ?? int.MaxValue).CompareTo(b.ObservingRank ?? int.MaxValue));
+        bool rankOk = acc.Count > 1;
+        for (int i = 0; i < acc.Count; i++)
+        {
+            if (acc[i].ObservingRank != i + 1) { rankOk = false; break; }
+            if (i == 0) continue;
+            int ca = acc[i - 1].ContentInShadow ?? -1, cb = acc[i].ContentInShadow ?? -1;
+            if (ca < cb || (ca == cb && acc[i - 1].AngleToPlaneNormalDeg > acc[i].AngleToPlaneNormalDeg + 1e-4f))
+            { rankOk = false; break; }
+        }
+        bool rankedMixed = acc.Exists(p => p.ContentInShadow == 2) && acc.Exists(p => p.ContentInShadow == 1);
+        C("M8 accepted poses are ranked 1..n by content, ties to the smaller angle",
+          rankOk && rankedMixed, $"{acc.Count} accepted; first {acc.FirstOrDefault()?.ContentInShadow} "
+          + $"at {acc.FirstOrDefault()?.AngleToPlaneNormalDeg:0.#} deg");
+        bool refusedUnranked = true;
+        foreach (var p in ranked.Poses) if (!p.Accepted && p.ObservingRank is not null) refusedUnranked = false;
+        C("M8 a refused pose carries no rank", refusedUnranked && ranked.Poses.Count > 0, "");
+
+        // ---- M9 the pose file publishes the observing fields, and only for observing poses -----
+        string whyM9 = ""; bool obsFields = false, faceClean = false;
+        string[] obsKeys = { "mode", "ringBearingDeg", "contentInShadow", "contentKeys", "observingRank" };
+        try
+        {
+            using var dO = JsonDocument.Parse(StationPoseFile.Render(hdr, new[] { wallRing }));
+            obsFields = dO.RootElement.GetProperty("poses").GetArrayLength() > 0;
+            foreach (var pe in dO.RootElement.GetProperty("poses").EnumerateArray())
+                foreach (var k in obsKeys) if (!pe.TryGetProperty(k, out _)) obsFields = false;
+            using var dF = JsonDocument.Parse(faceOnDoc);
+            faceClean = true;
+            foreach (var pe in dF.RootElement.GetProperty("poses").EnumerateArray())
+                foreach (var k in obsKeys) if (pe.TryGetProperty(k, out _)) faceClean = false;
+        }
+        catch (Exception ex) { whyM9 = ex.GetType().Name + ": " + ex.Message; }
+        C("M9 every observing pose publishes its mode, bearing, content and rank", obsFields,
+          whyM9.Length > 0 ? whyM9 : string.Join(", ", obsKeys));
+        C("M9 no face-on pose publishes an observing field", faceClean, whyM9);
 
         check("stationrule: declared case count", ran == DeclaredCases,
               $"{ran} cases ran, {DeclaredCases} declared");
