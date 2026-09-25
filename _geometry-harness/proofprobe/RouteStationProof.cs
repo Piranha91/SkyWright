@@ -17,7 +17,7 @@ using Mutagen.Bethesda.Plugins;
 static class RouteStationProof
 {
     /// <summary>Cases run below, excluding this count's own check.</summary>
-    public const int DeclaredCases = 47;
+    public const int DeclaredCases = 48;
 
     static readonly ModKey Master = ModKey.FromNameAndExtension("Master.esm");
     static readonly ModKey City = ModKey.FromNameAndExtension("City.esp");
@@ -546,6 +546,13 @@ static class RouteStationProof
             var l1 = RouteStations.CoverageL1(a, res);
             C("RT12 L1 counts accepted stations only, not a refused candidate",
               Math.Abs(l1.Covered - quarter) < 0.5, $"{l1.Covered:0.###} vs {quarter:0.###}");
+            // a later level: station "b" dropped out of it for a named reason; its uncovered piece carries that reason
+            var lv = RouteStations.Coverage(a, new[] { P(0, 0) }, res.Stations,
+                s => s.Id == "b" ? "cannot assess" : null);
+            C("RT12 a later level's coverage uses its own set, and its uncovered piece carries the drop-out's reason",
+              Math.Abs(lv.Covered - quarter) < 0.5 && lv.Pieces.Count == 1 && lv.Pieces[0].Reason == "cannot assess"
+              && Math.Abs(lv.UncoveredByReason["cannot assess"] - (1024.0 * 1024.0 - quarter)) < 0.5,
+              $"covered {lv.Covered:0.###}, pieces {lv.Pieces.Count}, reason {(lv.Pieces.Count > 0 ? lv.Pieces[0].Reason : "none")}");
         }
 
         // ---- RT17 the covering triangle is searched over every winning navmesh (AMENDMENT-01 r8) --

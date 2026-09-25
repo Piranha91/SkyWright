@@ -799,9 +799,12 @@ public static class RouteStations
 
     /// <summary>§7: the part of A_W within D of at least one of <paramref name="stations"/>, exactly,
     /// with the uncovered pieces located and given the refusal reason of the refused candidates of
-    /// <paramref name="refused"/> that fall in them (DESIGN reading 19).</summary>
+    /// <paramref name="refused"/> that fall in them (DESIGN reading 19). For a later level (L2-L4),
+    /// <paramref name="reasonOf"/> names why a candidate is not in the level's set (null = not a
+    /// drop-out); the piece takes the most frequent such reason, ties to the ordinal-first.</summary>
     public static RouteCoverage Coverage(RouteArea area, IEnumerable<Vector2> stations,
-                                         IReadOnlyList<RouteStation>? refused = null)
+                                         IReadOnlyList<RouteStation>? refused = null,
+                                         Func<RouteStation, string?>? reasonOf = null)
     {
         var ds = new RouteGeometry.DiscSet(stations.Select(p => new RouteGeometry.D2(p.X, p.Y)), CoverageDistance);
         var per = new Dictionary<NavGraph.TriRef, double>();
@@ -837,15 +840,34 @@ public static class RouteStations
             }
             members.Add(list);
         }
+        // a candidate carrying no triangle is placed by its XY, among the uncovered triangles
+        NavGraph.TriRef? UncoveredAt(float x, float y)
+        {
+            foreach (var k in uncovered.Keys)
+            {
+                var t = area.Triangles[k];
+                if (RouteGeometry.Contains(D(t.A), D(t.B), D(t.C), new RouteGeometry.D2(x, y))) return k;
+            }
+            return null;
+        }
         var tally = new Dictionary<int, Dictionary<StationRejection, int>>();
+        var named = new Dictionary<int, Dictionary<string, int>>();
         if (refused is not null)
             foreach (var s in refused)
             {
-                if (s.Accepted || s.Verdict is null || s.Verdict.Reason == StationRejection.None) continue;
-                var tri = s.Verdict.Covering ?? s.SourceTri;
+                string? why = null;
+                if (reasonOf is not null) { why = reasonOf(s); if (why is null) continue; }
+                else if (s.Accepted || s.Verdict is null || s.Verdict.Reason == StationRejection.None) continue;
+                var tri = s.Verdict?.Covering ?? s.SourceTri ?? UncoveredAt(s.X, s.Y);
                 if (tri is not { } tr || !pieceOf.TryGetValue(tr, out int pid)) continue;
+                if (why is not null)
+                {
+                    if (!named.TryGetValue(pid, out var dn)) named[pid] = dn = new Dictionary<string, int>();
+                    dn[why] = (dn.TryGetValue(why, out int m) ? m : 0) + 1;
+                    continue;
+                }
                 if (!tally.TryGetValue(pid, out var d)) tally[pid] = d = new Dictionary<StationRejection, int>();
-                d[s.Verdict.Reason] = (d.TryGetValue(s.Verdict.Reason, out int n) ? n : 0) + 1;
+                d[s.Verdict!.Reason] = (d.TryGetValue(s.Verdict.Reason, out int n) ? n : 0) + 1;
             }
         var pieces = new List<RouteUncoveredPiece>();
         var byReason = new Dictionary<string, double>();
@@ -865,6 +887,8 @@ public static class RouteStations
                 foreach (var rr in StationRule.Precedence)
                     if (d.TryGetValue(rr, out int n) && n > best) { best = n; reason = rr.ToString(); }
             }
+            else if (named.TryGetValue(id, out var dn) && dn.Count > 0)
+                reason = dn.OrderByDescending(kv => kv.Value).ThenBy(kv => kv.Key, StringComparer.Ordinal).First().Key;
             pieces.Add(new RouteUncoveredPiece(a, wsum > 0 ? cen / (float)wsum : Vector2.Zero, members[id].Count, reason));
             byReason[reason] = (byReason.TryGetValue(reason, out double v) ? v : 0) + a;
         }

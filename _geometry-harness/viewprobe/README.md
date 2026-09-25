@@ -2427,7 +2427,11 @@ worldspace; one run samples one worldspace.
   "fileMarginSquares": 4,                   // optional: how far around the plugin's own content
                                             //   the floor is filed; a loaded square outside it
                                             //   REFUSES the run rather than composing on no floor
-  "dumpAllNavmeshes": false                 // optional: the raw dump holds every winning navmesh
+  "dumpAllNavmeshes": false,                // optional: the raw dump holds every winning navmesh
+  "coverageLevels": {                       // optional: coverage of later station sets (L2-L4), by
+    "L2": { "stations": ["<id>", "..."],    //   the same geometry; inline or a path to a file of
+            "droppedReasons": { "<id>": "<why>" } }   // this shape. An accepted station not in the
+  }                                         //   set drops out as "NotInLevel" unless a reason is given
   // "rArea", "spacing", "coverageDistance", "eyeHeight", "retryAlternates", "fovDeg": optional,
   //   and CHECKED, never applied - the sampling parameters are sealed in the rule
 }

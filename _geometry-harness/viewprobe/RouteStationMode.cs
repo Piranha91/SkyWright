@@ -80,6 +80,7 @@ static class RouteStationMode
         string setup, label, changed;
         var children = new List<FormKey>();
         int margin = 4; bool dumpAll = false;
+        var levels = new List<(string Name, HashSet<string> Ids, Dictionary<string, string> Reasons)>();
         try
         {
             using var spec = JsonDocument.Parse(specText);
@@ -98,6 +99,27 @@ static class RouteStationMode
                     if (e.GetString() is { Length: > 0 } s) children.Add(FormKey.Factory(s));
             if (root.TryGetProperty("fileMarginSquares", out var fm)) margin = fm.GetInt32();
             if (root.TryGetProperty("dumpAllNavmeshes", out var da)) dumpAll = da.GetBoolean();
+            // Later coverage levels (L2-L4): each names the station set that supports it, inline or as
+            // a path to a JSON file of the same shape: { "stations": [ids], "droppedReasons": { id: reason } }.
+            if (root.TryGetProperty("coverageLevels", out var cl) && cl.ValueKind == JsonValueKind.Object)
+                foreach (var lvl in cl.EnumerateObject())
+                {
+                    JsonDocument? owned = null;
+                    var body = lvl.Value;
+                    if (body.ValueKind == JsonValueKind.String)
+                    {
+                        owned = JsonDocument.Parse(File.ReadAllText(body.GetString()!));
+                        body = owned.RootElement;
+                    }
+                    var ids = new HashSet<string>(StringComparer.Ordinal);
+                    var reasons = new Dictionary<string, string>(StringComparer.Ordinal);
+                    if (body.TryGetProperty("stations", out var st))
+                        foreach (var e in st.EnumerateArray()) if (e.GetString() is { } id) ids.Add(id);
+                    if (body.TryGetProperty("droppedReasons", out var dr))
+                        foreach (var e in dr.EnumerateObject()) reasons[e.Name] = e.Value.GetString() ?? "";
+                    levels.Add((lvl.Name, ids, reasons));
+                    owned?.Dispose();
+                }
             // The sampling parameters are SEALED in the rule. A spec may state them, and each stated one is
             // checked against the constant and refused if it differs.
             foreach (var (name, value) in new (string, float)[]
@@ -169,6 +191,24 @@ static class RouteStationMode
         var cov = RouteStations.CoverageL1(area, result);
         var routeCov = RouteStations.Coverage(area,
             result.Stations.Where(s => s.Accepted && s.Family == RouteFamily.Route).Select(s => new Vector2(s.X, s.Y)));
+        var levelDocs = new Dictionary<string, object?>();
+        foreach (var (name, ids, reasons) in levels)
+        {
+            var inLevel = result.Stations.Where(s => s.Accepted && ids.Contains(s.Id)).ToList();
+            var unknown = ids.Where(id => !result.Stations.Any(s => s.Accepted && s.Id == id)).ToList();
+            var lc = RouteStations.Coverage(area, inLevel.Select(s => new Vector2(s.X, s.Y)), result.Stations,
+                s => s.Accepted && !ids.Contains(s.Id) ? (reasons.TryGetValue(s.Id, out var why) ? why : "NotInLevel") : null);
+            levelDocs[name] = new Dictionary<string, object?>
+            {
+                ["stations"] = inLevel.Count, ["idsNotAcceptedAtL1"] = unknown,
+                ["areaA"] = lc.AreaA, ["covered"] = lc.Covered, ["fraction"] = lc.Fraction,
+                ["uncoveredByReason"] = lc.UncoveredByReason, ["uncoveredPieces"] = lc.Pieces.Count,
+                ["largestUncoveredPieces"] = lc.Pieces.Take(20).Select(p => new Dictionary<string, object?>
+                { ["area"] = p.Area, ["x"] = p.Centroid.X, ["y"] = p.Centroid.Y, ["triangles"] = p.Triangles, ["reason"] = p.Reason }).ToList(),
+            };
+            Console.WriteLine($"   --stations (route): coverage level {name}: {inLevel.Count} station(s), {lc.Fraction:P2}"
+                            + (unknown.Count > 0 ? $"; {unknown.Count} listed id(s) are not accepted stations of this run" : ""));
+        }
         double ownArea = 0, ownCovered = 0;
         foreach (var t in area.Triangles.Values)
             if (t.InArea && t.CityOwn) { ownArea += t.AreaClipped; ownCovered += cov.CoveredPerTriangle.TryGetValue(t.Tri, out var c) ? c : 0; }
@@ -244,6 +284,7 @@ static class RouteStationMode
                     ["area"] = p.Area, ["x"] = p.Centroid.X, ["y"] = p.Centroid.Y, ["triangles"] = p.Triangles, ["reason"] = p.Reason,
                 }).ToList(),
             },
+            ["coverageLevels"] = levelDocs,
             ["environment"] = new Dictionary<string, object?>
             {
                 ["readsWithMoreThanOneCoveringTriangle"] = reader.MultiCovered,
