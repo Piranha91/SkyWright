@@ -215,12 +215,89 @@ public static class StationPoseFile
     /// through here.</summary>
     public const string RouteSchema = "occl-transfer/station-poses-route/1";
 
-    /// <summary>The route pose file as a string. STUB: no closure check yet.</summary>
+    /// <summary>The route pose file as a string. Every family's yield must close - accepted plus
+    /// refused plus dropped equals composed - or the write is refused. One row per gaze of every
+    /// accepted station (the camera a driver visits), and one row, with no gaze, per tested and
+    /// refused candidate with the numbers that decided it. Dropped candidates are counted in the
+    /// yield and published in the stations file, not here: they were never tested.</summary>
     public static string RenderRoute(IReadOnlyDictionary<string, object?> header, RouteResult result)
     {
         var doc = new Dictionary<string, object?> { ["schema"] = RouteSchema };
         foreach (var (k, v) in header) doc[k] = v;
-        doc["poses"] = new List<object>();
+        var yields = new Dictionary<string, object?>();
+        foreach (var (fam, y) in result.Yields)
+        {
+            if (!y.Closes)
+                throw new InvalidOperationException(
+                    $"the route yield for {fam} does not close: {y.Accepted} accepted + {y.RejectedTotal} refused + "
+                    + $"{y.DroppedTotal} dropped != {y.Composed} composed. Refusing to write a table whose total is wrong.");
+            var rej = new Dictionary<string, int>();
+            foreach (var (r, n) in y.Rejected) rej[r.ToString()] = n;
+            var drop = new Dictionary<string, int>();
+            foreach (var (d, n) in y.Dropped) drop[d.ToString()] = n;
+            yields[FamilyName(fam)] = new Dictionary<string, object?>
+            {
+                ["composed"] = y.Composed, ["accepted"] = y.Accepted, ["rejected"] = rej, ["dropped"] = drop,
+            };
+        }
+        doc["yield"] = yields;
+        var poses = new List<object>();
+        foreach (var s in result.Stations)
+        {
+            if (s.Verdict is not { } v) continue;
+            if (s.Accepted)
+                foreach (var g in s.Gazes) poses.Add(RouteDto(s, v, g));
+            else poses.Add(RouteDto(s, v, null));
+        }
+        doc["poses"] = poses;
         return JsonSerializer.Serialize(doc, Opts);
+    }
+
+    /// <summary>The family's name as the stations file spells it.</summary>
+    public static string FamilyName(RouteFamily f) => f switch
+    {
+        RouteFamily.Route => "route", RouteFamily.Fill => "fill", _ => "fill-retry",
+    };
+
+    static Dictionary<string, object?> RouteDto(RouteStation s, RouteTestVerdict v, RouteGaze? g)
+    {
+        var env = v.Env;
+        float floorZ = env.Floor.FloorZ;
+        bool eyeKnown = float.IsFinite(v.EyeZ);
+        return new Dictionary<string, object?>
+        {
+            ["stationId"] = s.Id,
+            ["family"] = FamilyName(s.Family),
+            ["gaze"] = g?.Kind.ToString(),
+            ["cell"] = env.Cell,
+            ["worldspace"] = env.Worldspace,
+            ["eye"] = new[] { N(s.X), N(s.Y), eyeKnown ? N(v.EyeZ) : null },
+            ["lookAt"] = g is null ? null : new[] { N(g.LookAt.X), N(g.LookAt.Y), N(g.LookAt.Z) },
+            ["pitchDeg"] = g is null ? null : N(StationRule.Pitch(new System.Numerics.Vector3(s.X, s.Y, v.EyeZ), g.LookAt)),
+            ["bearingDeg"] = g is null ? null : N(g.BearingDeg),
+            ["fovDeg"] = N(StationRule.DefaultFovDeg),
+            ["navZ"] = N(env.NavZ),
+            ["floorZ"] = eyeKnown ? N(floorZ) : null,
+            ["floorSource"] = env.Floor.Source.ToString(),
+            ["floorOffset"] = eyeKnown ? N(env.NavZ - floorZ) : null,
+            ["floorAnchor"] = env.FloorAnchor.ToString(),
+            ["navmeshBurial"] = N(env.NavmeshBurial),
+            ["terrainIsAnotherStorey"] = env.TerrainIsAnotherStorey,
+            ["eyeHeight"] = N(StationRule.EyeHeight),
+            ["feetAboveSurface"] = v.FeetAboveSurface is { } fa ? N(fa) : null,
+            ["water"] = Water(env.Water),
+            ["coveringTriangle"] = v.Covering is { } c ? new Dictionary<string, object?> { ["mesh"] = c.Mesh.ToString(), ["tri"] = c.Index } : null,
+            ["coveringFlags"] = v.CoveringFlags,
+            ["waterFlagged"] = (v.CoveringFlags & 0x200) != 0,
+            ["doorFlagged"] = (v.CoveringFlags & 0x400) != 0,
+            ["pathId"] = s.PathId,
+            ["walkedAt"] = s.WalkedAt is { } w ? N(w) : null,
+            ["sourceTriangle"] = s.SourceTri is { } st ? new Dictionary<string, object?> { ["mesh"] = st.Mesh.ToString(), ["tri"] = st.Index } : null,
+            ["subPath"] = s.SubPath,
+            ["retryJ"] = s.RetryJ,
+            ["accepted"] = s.Accepted,
+            ["rejectionReason"] = v.Reason.ToString(),
+            ["rejectionDetail"] = v.Detail,
+        };
     }
 }
