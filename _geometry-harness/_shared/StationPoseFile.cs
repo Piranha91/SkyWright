@@ -209,4 +209,18 @@ public static class StationPoseFile
     /// <summary>A number a reader can trust, or null for one that was never measured. A refused
     /// pose has no eye, and a sentinel number in its place would be read as a height.</summary>
     internal static float? N(float v) => float.IsFinite(v) ? v : null;
+
+    /// <summary>The route mode's pose file (<see cref="RouteStations"/>): its own schema, so a reader
+    /// of face-on rows cannot mistake a route row for one. Face-on and observing output does not pass
+    /// through here.</summary>
+    public const string RouteSchema = "occl-transfer/station-poses-route/1";
+
+    /// <summary>The route pose file as a string. STUB: no closure check yet.</summary>
+    public static string RenderRoute(IReadOnlyDictionary<string, object?> header, RouteResult result)
+    {
+        var doc = new Dictionary<string, object?> { ["schema"] = RouteSchema };
+        foreach (var (k, v) in header) doc[k] = v;
+        doc["poses"] = new List<object>();
+        return JsonSerializer.Serialize(doc, Opts);
+    }
 }

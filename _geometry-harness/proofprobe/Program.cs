@@ -3587,6 +3587,7 @@ MeshPipelineProof.Run(Check);
 SceneScopeProof.Run(Check);
 OcclusionGeometryProof.Run(Check);
 StationRuleProof.Run(Check);
+RouteStationProof.Run(Check);
 MaterialScaleProof.Run(Check);
 PopulationProof.Run(Check);
 OrderProof.Run(Check);

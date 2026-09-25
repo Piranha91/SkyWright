@@ -97,6 +97,18 @@ public enum StationRejection : byte
     /// <summary>A guard. Level gaze is by construction, so this should never appear on a composed
     /// pose; it exists so a later change cannot reintroduce defect 1 in silence.</summary>
     NonLevelGaze,
+    /// <summary>Route mode only: the covering triangle is not walkable - not in a component of the
+    /// area's navmesh graph that holds a door triangle or an exit, or in a navmesh outside the
+    /// loaded set (<see cref="RouteStations"/>).</summary>
+    Unreachable,
+    /// <summary>Route mode only: the covering triangle is not in the area A_W.</summary>
+    OutsideArea,
+    /// <summary>Route mode only: a parent-worldspace XY covered in plan by a winning navmesh triangle
+    /// of a child worldspace (any flags). In the game such an XY can arrive in the child.</summary>
+    InChildWorldspaceFootprint,
+    /// <summary>Route mode only: fewer than 5 of the 5 clearance probes (the point and +-64 u in x
+    /// and y) stand on a drawable triangle of the same floor (<see cref="NavCover.Clearance"/>).</summary>
+    TightClearance,
 }
 
 /// <summary>Which station rule composed a pose. <see cref="FaceOn"/> is the sealed rule and the
@@ -243,6 +255,12 @@ public static class StationRule
         StationRejection.NoNavmeshAnswer,
         StationRejection.NoCoveringTriangle,
         StationRejection.AllCoveringTrianglesDeleted,
+        // Route mode's four: they never arise in the face-on or observing modes, so inserting them
+        // here moves nothing those modes count.
+        StationRejection.Unreachable,
+        StationRejection.OutsideArea,
+        StationRejection.InChildWorldspaceFootprint,
+        StationRejection.TightClearance,
         StationRejection.FloorUnknown,
         StationRejection.WaterUnknown,
         StationRejection.StationUnderwater,

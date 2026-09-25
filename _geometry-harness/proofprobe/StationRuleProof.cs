@@ -22,11 +22,15 @@ static class StationRuleProof
 {
     /// <summary>Cases run below, excluding this count's own check. A case added without moving
     /// this number fails the last check rather than passing unnoticed.</summary>
-    public const int DeclaredCases = 148;
+    public const int DeclaredCases = 149;
 
     /// <summary>M7: SHA-256 of the face-on pose file over eight fixtures, recorded at the API stub
     /// over the unchanged face-on rule.</summary>
     const string M7FaceOnSha256 = "CC4BA5F72ADF1A9E13C7073217EA630EC698CFFE72168F713851CE43EA83E100";
+
+    /// <summary>M9b: SHA-256 of the observing pose file over the M6 ring, measured identical at
+    /// ca0059b2 and a2ac1440 before this pin was added (route mode's red-first commit).</summary>
+    const string M9ObservingSha256 = "E22B3E4CFFD6C384FA6A5C376D0DB6A29B1FF25056C0EA52EF7F26F4D821D320";
 
     const string WS = "WS-FIXTURE";
     const string CELL_A = "CELL-A";
@@ -1017,6 +1021,11 @@ static class StationRuleProof
         C("M9 every observing pose publishes its mode, bearing, content and rank", obsFields,
           whyM9.Length > 0 ? whyM9 : string.Join(", ", obsKeys));
         C("M9 no face-on pose publishes an observing field", faceClean, whyM9);
+        string obsDoc = StationPoseFile.Render(hdr, new[] { wallRing });
+        string obsSha = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(
+            System.Text.Encoding.UTF8.GetBytes(obsDoc)));
+        C("M9b the observing pose file over the M6 ring is byte-identical to the base",
+          obsSha == M9ObservingSha256, $"{obsSha} ({obsDoc.Length} chars)");
 
         // ======================== H, the opt-in horizontal PortalBox class (GATE-B-CODE §3) ==
         // HarnessShared.PortalBoxOrientation decides which PortalBox orientations viewprobe's rule
