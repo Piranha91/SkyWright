@@ -17,7 +17,7 @@ using Mutagen.Bethesda.Plugins;
 static class RouteStationProof
 {
     /// <summary>Cases run below, excluding this count's own check.</summary>
-    public const int DeclaredCases = 45;
+    public const int DeclaredCases = 47;
 
     static readonly ModKey Master = ModKey.FromNameAndExtension("Master.esm");
     static readonly ModKey City = ModKey.FromNameAndExtension("City.esp");
@@ -432,6 +432,45 @@ static class RouteStationProof
               rows > 0 && rows >= r.Stations.Count(s => s.Verdict is not null && !s.Accepted)
                                    + r.Stations.Where(s => s.Accepted).Sum(s => s.Gazes.Count),
               $"{rows} row(s)");
+        }
+
+        // ---- RT8b on a staircase path: the gaze is the kept path's own segment ---------------------
+        {
+            var m = new MeshB();
+            int leg1 = m.Grid(0, 0, 128, 128, 16, 4);          // x 0..2048, y 0..512
+            int leg2 = m.Grid(1536, 512, 128, 128, 4, 16);     // x 1536..2048, y 512..2560
+            for (int i = 0; i < 4; i++)
+                m.Join(leg1 + 2 * (3 * 16 + 12 + i) + 1, 1, leg2 + 2 * i, 0);
+            m.Door(leg1 + 1);
+            m.Door(leg2 + 2 * (15 * 4 + 2) + 1);
+            var a = RouteStations.Classify(World(new[] { m.Build(FK(0x80F)) }, new[] { Defined(0x81, 1024, 1024) }));
+            var r = RouteStations.Sample(a, Env(a));
+            var path = r.Paths.FirstOrDefault(p => p.Kept);
+            int checkedN = 0; float worst = 0f; bool ok = path is not null;
+            foreach (var s in r.Stations.Where(s => s.Family == RouteFamily.Route && s.Accepted))
+            {
+                // the segment containing the station's walked position, found here from the path's corners
+                float walked = s.WalkedAt ?? -1f, sum = 0f; int seg = -1;
+                for (int i = 0; path is not null && i + 1 < path.Corners.Count; i++)
+                {
+                    float l = Vector2.Distance(path.Corners[i], path.Corners[i + 1]);
+                    if (l > 0f && sum + l >= walked) { seg = i; break; }
+                    sum += l;
+                }
+                var fwd = s.Gazes.FirstOrDefault(g => g.Kind == RouteGazeKind.Fwd);
+                if (seg < 0 || fwd is null) { ok = false; break; }
+                var d = path!.Corners[seg + 1] - path.Corners[seg];
+                float want = StationRule.Bearing(d.X, d.Y);
+                worst = MathF.Max(worst, AngDiff(fwd.BearingDeg, want));
+                checkedN++;
+            }
+            C("RT8b on the 128 u grid L's staircase path, every accepted route station's G-fwd is its own segment's bearing",
+              ok && checkedN >= 2 && worst <= 1e-3f,
+              $"{checkedN} station(s) checked, worst difference {worst:0.######} deg; path "
+              + (path is null ? "none" : string.Join(" ", path.Corners.Select(c => $"{c.X:0.#},{c.Y:0.#}"))));
+            C("RT8b every route station publishes its G-fwd's deviation from the path 512 u ahead",
+              r.Stations.Where(s => s.Family == RouteFamily.Route && s.Accepted).All(s => s.FwdVsAheadDeg is { } v && v >= 0f && v <= 180f),
+              string.Join(" ", r.Stations.Where(s => s.Family == RouteFamily.Route && s.Accepted).Select(s => $"{s.FwdVsAheadDeg:0.#}")));
         }
 
         // ---- RT9 content gaze ---------------------------------------------------------------------

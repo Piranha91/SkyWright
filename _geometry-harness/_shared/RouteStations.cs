@@ -166,6 +166,10 @@ public sealed record RouteStation
     public NavGraph.TriRef? SourceTri { get; init; }
     public string? SubPath { get; init; }
     public int? RetryJ { get; init; }
+    /// <summary>Route family, a disclosure (not a rule term): the angle between the station's G-fwd (its own
+    /// funnel segment) and the bearing to the path point 512 u further along (or the path's end), which
+    /// measures how far a channel-taut path's local direction departs from where the walk goes.</summary>
+    public float? FwdVsAheadDeg { get; init; }
     public StationRejection Refusal => Verdict?.Reason ?? StationRejection.None;
 }
 
@@ -600,6 +604,9 @@ public static class RouteStations
                 var (pt, seg) = PointAt(corners, at);
                 var dir = corners[seg + 1] - corners[seg];
                 float fwd = StationRule.Bearing(dir.X, dir.Y);
+                var (aheadPt, _) = PointAt(corners, MathF.Min(at + Spacing, len));
+                var toAhead = aheadPt - pt;
+                float? vsAhead = toAhead.LengthSquared() > 1e-6f ? AngDiff(fwd, StationRule.Bearing(toAhead.X, toAhead.Y)) : null;
                 var v = Test(area, environment, pt.X, pt.Y);
                 RouteStation st;
                 string id = $"{ws}:R{nRoute++:D5}";
@@ -607,12 +614,12 @@ public static class RouteStations
                     or StationRejection.AllCoveringTrianglesDeleted or StationRejection.Unreachable or StationRejection.OutsideArea;
                 if (!notKept && accepted.AnyWithin(pt, CandidateDedup))
                     st = new RouteStation { Id = id, Family = RouteFamily.Route, X = pt.X, Y = pt.Y, Accepted = false,
-                                            Drop = RouteDrop.Deduplicated, PathId = path.Id, WalkedAt = at };
+                                            Drop = RouteDrop.Deduplicated, PathId = path.Id, WalkedAt = at, FwdVsAheadDeg = vsAhead };
                 else
                 {
                     st = new RouteStation { Id = id, Family = RouteFamily.Route, X = pt.X, Y = pt.Y,
                                             Accepted = v.Reason == StationRejection.None, Verdict = v,
-                                            PathId = path.Id, WalkedAt = at };
+                                            PathId = path.Id, WalkedAt = at, FwdVsAheadDeg = vsAhead };
                     if (st.Accepted) { accepted.Add(pt); fwdOf[r.Stations.Count] = fwd; }
                 }
                 r.Stations.Add(st);

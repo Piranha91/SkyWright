@@ -292,6 +292,7 @@ public static class StationPoseFile
             ["doorFlagged"] = (v.CoveringFlags & 0x400) != 0,
             ["pathId"] = s.PathId,
             ["walkedAt"] = s.WalkedAt is { } w ? N(w) : null,
+            ["fwdVsAheadDeg"] = s.FwdVsAheadDeg is { } fa2 ? N(fa2) : null,
             ["sourceTriangle"] = s.SourceTri is { } st ? new Dictionary<string, object?> { ["mesh"] = st.Mesh.ToString(), ["tri"] = st.Index } : null,
             ["subPath"] = s.SubPath,
             ["retryJ"] = s.RetryJ,
