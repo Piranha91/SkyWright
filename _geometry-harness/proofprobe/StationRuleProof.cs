@@ -22,7 +22,7 @@ static class StationRuleProof
 {
     /// <summary>Cases run below, excluding this count's own check. A case added without moving
     /// this number fails the last check rather than passing unnoticed.</summary>
-    public const int DeclaredCases = 138;
+    public const int DeclaredCases = 148;
 
     /// <summary>M7: SHA-256 of the face-on pose file over eight fixtures, recorded at the API stub
     /// over the unchanged face-on rule.</summary>
@@ -1017,6 +1017,67 @@ static class StationRuleProof
         C("M9 every observing pose publishes its mode, bearing, content and rank", obsFields,
           whyM9.Length > 0 ? whyM9 : string.Join(", ", obsKeys));
         C("M9 no face-on pose publishes an observing field", faceClean, whyM9);
+
+        // ======================== H, the opt-in horizontal PortalBox class (GATE-B-CODE §3) ==
+        // HarnessShared.PortalBoxOrientation decides which PortalBox orientations viewprobe's rule
+        // predicts. Kept here because it shares this file's geometry (StationRule.MidQuad, the
+        // renderer's quad) and proofprobe links it beside StationRule. The fixture rotations are the
+        // in-situ form measured at Gate A: X about 90 or 270 with a Y yaw.
+        const float Tol = 0.001f;
+        (Vector3 Quad, Vector3 Authored, Vector3 Centre) Orient(Vector3 rotDeg, Vector3 pos)
+        {
+            var rad = rotDeg * (MathF.PI / 180f);
+            var g = new PrimitiveGeometry("H", PrimitiveKind.PortalBox, new Vector3(400f, 2f, 300f), pos, rad, WS, CELL_A);
+            var q = StationRule.MidQuad(g);
+            var qn = Vector3.Normalize(Vector3.Cross(q[1] - q[0], q[3] - q[0]));   // as ShapeCullPolicy computes it
+            var an = Vector3.Normalize(Vector3.TransformNormal(Vector3.UnitY,
+                SpatialOverlap.RefrRotation(new Vec3(rad.X, rad.Y, rad.Z))));
+            return (qn, an, pos);
+        }
+        // pick the X (90 or 270) that puts the authored normal DOWN, and the other one for UP
+        var d90 = Orient(new Vector3(90f, 35f, 0f), Vector3.Zero);
+        var d270 = Orient(new Vector3(270f, 35f, 0f), Vector3.Zero);
+        var down = d90.Authored.Z < 0f ? d90 : d270;
+        var up = d90.Authored.Z < 0f ? d270 : d90;
+        float xDown = d90.Authored.Z < 0f ? 90f : 270f;
+        C("H0 the fixture: one in-situ rotation puts the normal down (-Z), the other up (+Z)",
+          down.Authored.Z < -0.9999f && up.Authored.Z > 0.9999f
+          && MathF.Abs(down.Quad.Z) > 0.9999f,
+          $"X {xDown}: authored {down.Authored}, quad {down.Quad}; other: authored {up.Authored}");
+        var hAbove = new Vector3(300f, 200f, 150f);
+        var hBelow = new Vector3(300f, 200f, -150f);
+        string? V(( Vector3 Quad, Vector3 Authored, Vector3 Centre) o, Vector3 eye, bool on)
+            => PortalBoxOrientation.Check(o.Quad, o.Authored, o.Centre, eye, Tol, on);
+        C("H1 (a) the sealed rule refuses a horizontal normal-down panel seen from above",
+          V(down, hAbove, false) == PortalBoxOrientation.OutsideScope, $"{V(down, hAbove, false) ?? "admitted"}");
+        C("H2 (a) with the opt-in, the same panel from above is admitted",
+          V(down, hAbove, true) is null, $"{V(down, hAbove, true) ?? "admitted"}");
+        var tilt30 = Orient(new Vector3(30f, 0f, 20f), Vector3.Zero);
+        C("H3 (b) a panel tilted 30 deg is still refused with the opt-in, for orientation",
+          V(tilt30, hAbove, true) == PortalBoxOrientation.OutsideScope, $"{V(tilt30, hAbove, true) ?? "admitted"}");
+        C("H4 (b) a horizontal normal-UP (+Z) panel is refused with the opt-in, and says why",
+          V(up, hAbove, true) == PortalBoxOrientation.HorizontalUp, $"{V(up, hAbove, true) ?? "admitted"}");
+        C("H5 (b) the normal-down panel seen from BELOW is refused with the opt-in, and says why",
+          V(down, hBelow, true) == PortalBoxOrientation.HorizontalEyeBelow, $"{V(down, hBelow, true) ?? "admitted"}");
+        var nearly = Orient(new Vector3(xDown + 0.2f, 35f, 0f), Vector3.Zero);   // |n.x|,|n.y| ~ 0.0035
+        C("H6 (b) a panel 0.2 deg off horizontal is outside the tolerance and refused with the opt-in",
+          MathF.Max(MathF.Abs(nearly.Authored.X), MathF.Abs(nearly.Authored.Y)) > Tol
+          && V(nearly, hAbove, true) == PortalBoxOrientation.OutsideScope,
+          $"authored {nearly.Authored}: {V(nearly, hAbove, true) ?? "admitted"}");
+        var upright = Orient(new Vector3(0f, 0f, 40f), new Vector3(0f, 0f, 150f));
+        C("INHERITED H7 an upright panel is admitted with the opt-in on or off",
+          V(upright, hAbove, true) is null && V(upright, hAbove, false) is null, "");
+        C("INHERITED H8 the default refusal is the sealed text, word for word",
+          PortalBoxOrientation.OutsideScope == "plane orientation outside the supplied rule's evidence scope", "");
+        // The admitted class predicts by the same shadow: a bound below the panel inside the eye's cone
+        // through it is Inside, one beside it Outside.
+        var hq = StationRule.MidQuad(new PrimitiveGeometry("H", PrimitiveKind.PortalBox, new Vector3(400f, 2f, 300f),
+            Vector3.Zero, new Vector3(xDown, 35f, 0f) * (MathF.PI / 180f), WS, CELL_A));
+        var hs = ConvexShadow.FromRectangle(hq, new Vector3(0f, 0f, 400f));
+        C("INHERITED H9 the horizontal panel's shadow holds a bound straight below it and not one beside it",
+          hs is not null && hs.Classify(new SphereBound(new Vector3(0f, 0f, -200f), 30f)) == ShadowRelation.Inside
+          && hs.Classify(new SphereBound(new Vector3(900f, 0f, -200f), 30f)) == ShadowRelation.Outside,
+          hs is null ? "no shadow" : "");
 
         check("stationrule: declared case count", ran == DeclaredCases,
               $"{ran} cases ran, {DeclaredCases} declared");

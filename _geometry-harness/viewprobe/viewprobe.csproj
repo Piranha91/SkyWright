@@ -39,6 +39,7 @@
     <Compile Include="..\_shared\ActorBand.cs" Link="ActorBand.cs" />
     <Compile Include="..\_shared\FloorFeed.cs" Link="FloorFeed.cs" />
     <Compile Include="..\_shared\StationRule.cs" Link="StationRule.cs" />
+    <Compile Include="..\_shared\PortalBoxOrientation.cs" Link="PortalBoxOrientation.cs" />
     <Compile Include="..\_shared\StationLookup.cs" Link="StationLookup.cs" />
     <Compile Include="..\_shared\StationGround.cs" Link="StationGround.cs" />
     <Compile Include="..\_shared\StationPoseFile.cs" Link="StationPoseFile.cs" />
