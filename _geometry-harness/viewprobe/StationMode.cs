@@ -65,12 +65,24 @@ static class StationMode
         string specText = File.ReadAllText(input.SpecPath);
         string setup; float[] kValues; float[] laterals; float fov; string label;
         HashSet<string>? wanted;
+        bool observing;
         try
         {
             using var spec = JsonDocument.Parse(specText);
             var root = spec.RootElement;
             setup = Str(root, "setup") ?? "";
             label = Str(root, "label") ?? setup;
+            // The station rule: "observing" composes the ring (GATE-A 3.1); an ABSENT field, or
+            // "face-on", is the sealed face-on rule, and its pose file is unchanged to the byte.
+            string? mode = root.TryGetProperty("mode", out var md) ? md.ValueKind == JsonValueKind.String
+                ? md.GetString() : "" : null;
+            if (mode is not null && mode != "observing" && mode != "face-on")
+            {
+                Console.Error.WriteLine($"--stations: the spec's \"mode\" is '{mode}'. It is either "
+                                      + "\"observing\" or \"face-on\" (the default when absent); refusing.");
+                return 2;
+            }
+            observing = mode == "observing";
             if (setup.Length == 0)
             {
                 Console.Error.WriteLine("--stations: the spec needs a \"setup\" label - the arm "
@@ -173,6 +185,32 @@ static class StationMode
                                           ground.TerrainIsAnotherStorey);
         }
 
+        // OBSERVING MODE's content: every placed, enabled, undeleted ref with a collision solid, by
+        // the sphere around that solid's world box. A PRE-FILTER, and one that can only undercount:
+        // a ref with no collision solid (foliage, collision-less clutter) is not counted, and the
+        // sphere is larger than the renderer's per-shape stored sphere. The render decides (d).
+        List<ContentBound>? content = null;
+        if (observing)
+        {
+            content = new List<ContentBound>();
+            var primitiveKeys = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var p in input.Primitives) primitiveKeys.Add(p.Key);
+            var seenRefs = new HashSet<FormKey>();
+            foreach (var grid in input.RefsByGrid.Values)
+                foreach (var (fk, r) in grid)
+                {
+                    if (!seenRefs.Add(fk) || r.Deleted || r.Base is null || !input.Enabled(fk)) continue;
+                    if (primitiveKeys.Contains(fk.ToString())) continue;
+                    if (input.Geometry(r) is not { } g || g.Box.IsEmpty || g.Soup.TriangleCount == 0) continue;
+                    var wb = SpatialOverlap.ToWorld(g.Box, r.Position, r.Rotation, r.Scale);
+                    if (wb.IsEmpty) continue;
+                    var lo = new Vector3(wb.Min.X, wb.Min.Y, wb.Min.Z);
+                    var hi = new Vector3(wb.Max.X, wb.Max.Y, wb.Max.Z);
+                    var sb = new SphereBound((lo + hi) * 0.5f, (hi - lo).Length() * 0.5f);
+                    if (sb.Valid) content.Add(new ContentBound(fk.ToString(), sb));
+                }
+        }
+
         var yields = new List<StationYield>(chosen.Count);
         int tilted = 0;
         var tiltedKeys = new List<string>();
@@ -185,7 +223,10 @@ static class StationMode
             }
             var geom = new PrimitiveGeometry(p.Key, p.Kind, p.ExtentFull, p.Position, p.RotationRad,
                                              input.Worldspace, p.PrimitiveCell);
-            var y = StationRule.Compose(geom, setup, Environment, kValues, laterals);
+            var y = observing
+                ? StationRule.ComposeObserving(geom, setup, Environment, content!, kValues, laterals,
+                                               fovDeg: fov)
+                : StationRule.Compose(geom, setup, Environment, kValues, laterals);
             if (MathF.Abs(fov - StationRule.DefaultFovDeg) > 1e-4f)
             {
                 var replaced = new List<StationPose>(y.Poses.Count);
@@ -248,6 +289,47 @@ static class StationMode
             ["instrument"] = Instrument(),
             ["commandLine"] = input.CommandLine,
         };
+        // Written ONLY in observing mode: a face-on header keeps exactly the keys it always had.
+        if (observing)
+        {
+            // Primitives the ring found no content for anywhere (0 accepted, at least one pose
+            // refused NoContentInShadow): what the collision-bounded pre-filter cost, countable.
+            var noContent = new List<string>();
+            // Primitives whose normal leaves level by more than the renderer's rule tolerance: the
+            // render refuses their shadow, so the walk counts them as refused by the render rule
+            // (orientation), never as "not armable".
+            var offLevel = new List<string>();
+            foreach (var y in yields)
+                if (y.Accepted == 0 && y.Rejected.ContainsKey(StationRejection.NoContentInShadow))
+                    noContent.Add(y.Primitive);
+            foreach (var p in chosen)
+            {
+                var r = SpatialOverlap.RefrRotation(new Vec3(p.RotationRad.X, p.RotationRad.Y, p.RotationRad.Z));
+                var nz = MathF.Abs(Vector3.TransformNormal(Vector3.UnitY, r).Z);
+                var xz = MathF.Abs(Vector3.TransformNormal(Vector3.UnitX, r).Z);
+                float tilt = p.Kind == PrimitiveKind.Box ? MathF.Max(nz, xz) : nz;
+                if (tilt > 0.001f) offLevel.Add(p.Key);
+            }
+            header["stationsMode"] = "observing";
+            header["observing"] = new Dictionary<string, object?>
+            {
+                ["bearingsDeg"] = StationRule.RingBearingsDeg,
+                ["edgeOnDeg"] = StationRule.EdgeOnDeg,
+                ["frame"] = $"horizontal {fov} deg at 16:9, near {StationRule.FrameNearClip} u",
+                ["contentBounds"] = content!.Count,
+                ["contentRule"] = "placed, enabled, undeleted refs with a collision solid, by the sphere "
+                                  + "around the solid's world box; a pre-filter that can only undercount",
+                ["primitivesWithNoAcceptedPoseForWantOfContent"] = noContent.Count,
+                ["primitivesWithNoAcceptedPoseForWantOfContentKeys"] = noContent,
+                ["primitivesNormalOffLevelBeyondRenderRule"] = offLevel.Count,
+                ["primitivesNormalOffLevelBeyondRenderRuleKeys"] = offLevel,
+                ["renderRuleTolerance"] = 0.001f,
+            };
+            Console.WriteLine($"   --stations: OBSERVING mode, {content.Count:N0} content bound(s); "
+                            + $"{noContent.Count} primitive(s) with no accepted pose for want of content in the "
+                            + $"shadow; {offLevel.Count} primitive(s) whose normal is off level beyond the "
+                            + "render rule's tolerance (the render will refuse them: orientation).");
+        }
 
         string written;
         try { written = StationPoseFile.Write(input.OutPath, header, yields); }

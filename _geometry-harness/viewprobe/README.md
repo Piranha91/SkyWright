@@ -2136,6 +2136,9 @@ in `proofprobe` (`stationrule: ...`). This mode is the plumbing between them and
   "k":        [0.25, 0.5, 1.0],        // optional; the sealed ladder is the default
   "laterals": [-0.35, 0.0, 0.35],      // optional; likewise
   "fovDeg": 80.0,                      // optional; the field of view carried on every pose
+  "mode": "observing",                 // optional; ABSENT (or "face-on") is the face-on rule and
+                                       //   its pose file is unchanged to the byte. "observing"
+                                       //   composes the ring below. Anything else is refused.
   "eyeHeight": 120.5                   // optional, and CHECKED rather than applied: the eye
                                        //   height is part of the rule. A spec that asks for a
                                        //   different one is refused, not obeyed.
@@ -2277,8 +2280,11 @@ Most decisive first:
 | 6 | `WaterUnknown` | the applicable surface could not be resolved. Refused, never read as dry |
 | 7 | `StationUnderwater` | the feet stand below the applicable surface |
 | 8 | `EyeInsidePrimitive` | the eye lies inside or on the primitive, where it has no view shadow to be ranked by |
-| 9 | `EyeOutsidePlaneExtent` | the eye is outside the primitive's vertical extent |
-| 10 | `NonLevelGaze` | a guard. Level gaze is by construction, so this cannot fire on a composed pose; it exists so a later change cannot reintroduce a tilted aim in silence |
+| 9 | `EyeOutsidePlaneExtent` | the eye is outside the primitive's vertical extent (face-on mode only) |
+| 10 | `EdgeOn` | observing mode only: the view is within 10° of the primitive's plane |
+| 11 | `ShadowOutOfFrame` | observing mode only: no part of the near face is inside the frame |
+| 12 | `NoContentInShadow` | observing mode only: no content bound lies inside the shadow at this eye |
+| 13 | `NonLevelGaze` | a guard. Level gaze is by construction, so this cannot fire on a composed pose; it exists so a later change cannot reintroduce a tilted aim in silence |
 
 Why this order: an instrument that said nothing has not measured a miss, so instrument failures
 outrank geometry. A surface can only be compared with feet that have a floor, so the ground
@@ -2324,6 +2330,60 @@ counter-intuitive and because a written plan for this work said otherwise:
   rather than overruling it from the outside. Both rows are pinned by cases in `proofprobe`
   (`stationrule: B2 …`), which is where to look before assuming either.
 
+### Observing mode (`"mode": "observing"`)
+
+The face-on ladder stands along each face's normal. For a panel set in a wall, that aims into the
+wall: nothing behind a panel that culls nothing is visible, so a **miss**, where the game hides
+something the rule called clean, cannot be seen from those stations. The observing mode composes
+stations that **can** see content inside the primitive's predicted shadow.
+
+- **A ring, not a line.** Per face, `k` × bearing × `lateral`, with bearings every 30° (0…330)
+  measured clockwise in plan from the face's outward normal: 108 stations for a `PortalBox` and
+  216 for a `Box`. The station stands at `centre + dir(θ)·(faceHalf + d) + lateral·halfWidth`
+  along the face-on lateral axis. `d` is the face-on standoff, so **bearings 0 and 180 are the
+  face-on +1 and −1 stations exactly**. The gaze is level, at the primitive centre's XY.
+  `angleToPlaneNormalDeg` is `acos|view·n|`, in 0…90, and `side` is the side of the plane the eye
+  stands on.
+- **The player constraints are the face-on rule's, unchanged:** C1–C5, the one water resolver, the
+  eye outside the primitive, one closed refusal set and one precedence. **C6 is dropped in this
+  mode only.** C6 is a primitive-relative test, not a player constraint, and dropping it is what
+  lets a station stand above a panel's top and look down behind it.
+- **Two geometric refusals.**
+  - `EdgeOn`: the view is within 10° of the plane.
+  - `ShadowOutOfFrame`: no part of the near face lies inside the frame. The near face is a
+    PortalBox's mid-quad, or a Box's front-facing faces. It is clipped against a level camera's
+    frustum: horizontal `fovDeg` at 16:9, near plane 15 u.
+- **Content in the shadow.** The shadow is `HousecarlCore.ConvexShadow` from the eye, built as the
+  renderer builds it. A content bound counts when `ConvexShadow.Classify` calls it `Inside`, the
+  renderer's own test. A pose with none is refused `NoContentInShadow`. Accepted poses carry
+  `observingRank`: most content first, ties to the smaller angle to the normal.
+- **Content is a pre-filter, and it can only undercount.** Content is every placed, enabled,
+  undeleted reference with a **collision solid**, taken as the sphere around that solid's world
+  box.
+  - A reference with no collision solid (foliage, collision-less clutter) is not counted.
+  - The sphere is larger than the renderer's per-shape stored sphere, so fewer references come
+    out Inside than the render would call so.
+  - A pose can therefore be refused for want of content that the render would have shown.
+  - It can never be accepted for content that is not there.
+
+  The header counts the primitives this cost:
+  `observing.primitivesWithNoAcceptedPoseForWantOfContent`.
+- **Visibility is not decided here.** This mode renders nothing. Whether the content inside the
+  shadow is drawn and visible from the eye is decided from each pose's render (the planes
+  report's per-shape `relation`, `predictedCulled` and `visibility.VisiblePixels`), outside
+  viewprobe.
+- **Tilted primitives** are composed. The shadow here is built from the full rotation, but the
+  renderer's rule refuses a normal off level beyond its tolerance, so their renders predict
+  nothing. The header lists them (`observing.primitivesNormalOffLevelBeyondRenderRule`) so a caller
+  counts them as refused by the render rule, not as unobservable.
+- **The file.** Each observing pose adds `mode`, `ringBearingDeg`, `contentInShadow`,
+  `contentKeys` and `observingRank`. The header adds `stationsMode` and an `observing` block.
+  A face-on run writes none of these, so its file is byte-identical to what it always was
+  (`proofprobe` M7, M9).
+
+The known answers are `stationrule: M1 … M9` in `proofprobe`. M1, M3 and M5 were checked against
+an independent sampling oracle that shares no code with `ConvexShadow`.
+
 ### What it deliberately does not check, and does not do
 
 - **Interiors.** Both the water and the floor are looked up by exterior grid square, and an
@@ -2339,8 +2399,9 @@ counter-intuitive and because a written plan for this work said otherwise:
 - **Primitives tilted off the vertical.** The rule models an upright primitive turned about Z only.
   A primitive carrying a rotation about X or Y is composed on that upright reading, counted in the
   header as `primitivesTiltedOffZ` and named on the console — stated, not hidden.
-- **It does not rank stations, and it does not pick one.** It publishes every station it composed
-  with the numbers that decided its verdict; choosing among the accepted ones is the caller's.
+- **It does not pick a station.** It publishes every station it composed with the numbers that
+  decided its verdict. The face-on mode does not rank stations. The observing mode ranks accepted
+  poses by content in the shadow, but choosing among them, and rendering them, is the caller's.
 
 ---
 

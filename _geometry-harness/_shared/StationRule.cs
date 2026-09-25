@@ -33,6 +33,11 @@ namespace HarnessShared;
 //    B3 a station failing several conditions was counted under whichever
 //       was tested first, not under a stated precedence.
 //
+//  A second mode, ComposeObserving, composes a RING of stations around a
+//  clean primitive so that content inside its predicted shadow can be seen
+//  (GATE-A §3.1, 2026-09-25). It keeps the player constraints above exactly
+//  and adds three enumerated refusals; its cases are proofprobe's M1-M9.
+//
 //  The services this rule stands on, named where each defect is marked:
 //  CellBoundaryIndex.Resolve (THE water resolver - one, not two) reading
 //  DetectorModel.HeightKind / SurfaceHeight; HousecarlCore.NavmeshFloor and
@@ -257,16 +262,311 @@ public static class StationRule
     /// <summary>Observing mode: the frame the shadow must reach, horizontal FOV at this aspect.</summary>
     public const float FrameAspect = 16f / 9f;
 
-    /// <summary>Observing mode (GATE-A §3.1): a ring of bearings around the primitive, the Part A
-    /// player constraints kept exactly and <see cref="StationRejection.EyeOutsidePlaneExtent"/>
-    /// dropped, and the two geometric refusals plus the content-in-shadow count.
-    /// STUB (Gate B code, handback 1): returns the face-on rule's output unchanged, so the REDs
-    /// written against this signature fail as wrong answers, not as compile errors.</summary>
+    /// <summary>The near plane the frame test clips at, in world units.</summary>
+    public const float FrameNearClip = 15f;
+
+    /// <summary>Observing mode (GATE-A §3.1): stations on a RING of bearings around the primitive,
+    /// so that content inside the primitive's predicted shadow can be seen from the eye - where a
+    /// face-on station of a panel set in a wall looks into the wall.
+    ///
+    /// (a) The player constraints are the face-on rule's, kept exactly: the physical floor + the
+    ///     sealed eye height with no navmesh fallback, the water through the one resolver, the
+    ///     navmesh answer and cover, the eye outside the primitive, the level-gaze guard, one
+    ///     closed refusal set and one precedence. DROPPED for this mode only:
+    ///     <see cref="StationRejection.EyeOutsidePlaneExtent"/>, a primitive-relative test, which
+    ///     is what lets a station stand above a panel's top.
+    /// (b) Bearing θ, clockwise in plan from the face's outward normal n, puts the station at
+    ///     centre + (n cosθ + cw(n) sinθ)(faceHalf + d) + right·lateral·lateralHalf, with d and the
+    ///     lateral axis exactly the face-on ladder's - so bearings 0 and 180 ARE the face-on +1 and
+    ///     -1 stations. A view within <see cref="EdgeOnDeg"/> of the plane is refused
+    ///     <see cref="StationRejection.EdgeOn"/>; a near face with no part inside the frame is
+    ///     refused <see cref="StationRejection.ShadowOutOfFrame"/>.
+    /// (c) The shadow is <see cref="ShadowOf"/> - the renderer's construction - and a content bound
+    ///     counts when <c>ConvexShadow.Classify</c> calls it Inside, the renderer's own test. A pose
+    ///     with none is refused <see cref="StationRejection.NoContentInShadow"/>. Accepted poses
+    ///     are ranked by that count, ties to the smaller angle to the normal.
+    /// (d) Whether that content is DRAWN and VISIBLE is decided outside this rule, from the pose's
+    ///     render; this rule renders nothing.</summary>
     public static StationYield ComposeObserving(
         PrimitiveGeometry p, string setup, Func<float, float, StationEnvironment> environment,
         IReadOnlyList<ContentBound> content, float[]? kValues = null, float[]? laterals = null,
         float[]? bearingsDeg = null, float fovDeg = DefaultFovDeg)
-        => Compose(p, setup, environment, kValues, laterals);
+    {
+        var y = new StationYield { Primitive = p.Key, Setup = setup };
+        kValues ??= DefaultK;
+        laterals ??= DefaultLaterals;
+        bearingsDeg ??= RingBearingsDeg;
+
+        var c = p.Position;
+        float hz = p.ExtentFull.Z / 2f;
+        float zLow = c.Z - hz, zHigh = c.Z + hz;
+        bool degenerate = Degenerate(p);
+        var reasons = new List<StationRejection>(6);
+
+        int index = 0;
+        foreach (var axis in FacesOf(p.Kind))
+        {
+            var (ax, ay) = LocalAxes(p.RotationRad);
+            var n = axis == FaceAxis.Y ? ay : ax;       // the face's outward direction, unsided
+            var right = new Vector3(-n.Y, n.X, 0f);     // the face-on ladder's lateral axis
+            var cw = new Vector3(n.Y, -n.X, 0f);        // n turned 90 deg clockwise in plan
+            var (faceHalf, lateralHalf, _) = Halves(p, axis);
+            float basis = MathF.Min(lateralHalf, hz);
+            foreach (float k in kValues)
+            {
+                float d = MathF.Max(StandoffFloor, MathF.Min(StandoffCap, k * basis));
+                foreach (float bearing in bearingsDeg)
+                {
+                    float th = bearing * MathF.PI / 180f;
+                    var dir = n * MathF.Cos(th) + cw * MathF.Sin(th);
+                    foreach (float lat in laterals)
+                    {
+                        y.Composed++;
+                        int thisIndex = index++;
+                        float offset = faceHalf + d;
+                        float x = c.X + dir.X * offset + right.X * lat * lateralHalf;
+                        float yy = c.Y + dir.Y * offset + right.Y * lat * lateralHalf;
+
+                        reasons.Clear();
+                        if (degenerate) reasons.Add(StationRejection.DegeneratePlane);
+
+                        // ---- (a) the player constraints, exactly as the face-on rule has them --
+                        var env = environment(x, yy);
+                        bool ground = env.Answered && env.Covered && env.Drawn;
+                        if (!env.Answered) reasons.Add(StationRejection.NoNavmeshAnswer);
+                        else if (!env.Covered) reasons.Add(StationRejection.NoCoveringTriangle);
+                        else if (!env.Drawn) reasons.Add(StationRejection.AllCoveringTrianglesDeleted);
+                        else if (!env.Floor.Found) reasons.Add(StationRejection.FloorUnknown);
+
+                        bool floorKnown = ground && env.Floor.Found;
+                        float floorZ = env.Floor.FloorZ;
+                        float eyeZ = floorKnown ? floorZ + EyeHeight : float.NaN;
+                        var eye = new Vector3(x, yy, eyeZ);
+                        var lookAt = new Vector3(c.X, c.Y, eyeZ);
+
+                        // EyeOutsidePlaneExtent is NOT tested in this mode (see the summary).
+                        if (floorKnown && EyeInside(p, eye)) reasons.Add(StationRejection.EyeInsidePrimitive);
+
+                        float? feetAbove = null;
+                        if (env.Water.Verdict == StationWaterVerdict.Unresolved)
+                            reasons.Add(StationRejection.WaterUnknown);
+                        else if (env.Water.SurfaceZ is { } surfaceZ && floorKnown)
+                        {
+                            feetAbove = floorZ - surfaceZ;
+                            if (floorZ < surfaceZ) reasons.Add(StationRejection.StationUnderwater);
+                        }
+
+                        float dx = lookAt.X - eye.X, dy = lookAt.Y - eye.Y;
+                        float dxy = MathF.Sqrt(dx * dx + dy * dy);
+                        float pitch = Pitch(eye, lookAt);
+                        float worldBearing = Bearing(dx, dy);
+                        var view = dxy > 0f ? new Vector3(dx / dxy, dy / dxy, 0f) : Vector3.Zero;
+                        float along = Vector3.Dot(view, n);
+                        float toNormal = MathF.Acos(Math.Clamp(MathF.Abs(along), 0f, 1f)) * 180f / MathF.PI;
+                        int side = (x - c.X) * n.X + (yy - c.Y) * n.Y >= 0f ? 1 : -1;
+
+                        // ---- (b) the geometric refusals ----------------------------------------
+                        if (dxy <= 0f || toNormal > 90f - EdgeOnDeg) reasons.Add(StationRejection.EdgeOn);
+
+                        // ---- (c) content in the shadow ----------------------------------------
+                        int? inShadow = null;
+                        List<string>? keys = null;
+                        bool inFrame = false, shadowBuilt = false;
+                        if (floorKnown && dxy > 0f)
+                        {
+                            inFrame = NearFaceInFrame(p, eye, lookAt, fovDeg);
+                            if (!inFrame) reasons.Add(StationRejection.ShadowOutOfFrame);
+                            var shadow = ShadowOf(p, eye);
+                            shadowBuilt = shadow is not null;
+                            keys = new List<string>();
+                            if (shadow is not null)
+                                foreach (var cb in content)
+                                    if (shadow.Classify(cb.Bound) == ShadowRelation.Inside) keys.Add(cb.Key);
+                            inShadow = keys.Count;
+                            if (keys.Count == 0) reasons.Add(StationRejection.NoContentInShadow);
+                        }
+
+                        var pose = new StationPose
+                        {
+                            Primitive = p.Key, Kind = p.Kind, Setup = setup,
+                            Cell = env.Cell, Worldspace = env.Worldspace,
+                            StationIndex = thisIndex, FaceAxis = axis,
+                            K = k, Side = side, Lateral = lat, Standoff = d,
+                            Eye = eye, LookAt = lookAt, PitchDeg = pitch, BearingDeg = worldBearing,
+                            AngleToPlaneNormalDeg = toNormal,
+                            NavZ = env.NavZ, FloorZ = floorZ,
+                            FloorSource = env.Floor.Source,
+                            FloorOffset = env.NavZ - floorZ,
+                            FloorAnchor = env.FloorAnchor,
+                            NavmeshBurial = env.NavmeshBurial,
+                            TerrainIsAnotherStorey = env.TerrainIsAnotherStorey,
+                            FeetAboveSurface = feetAbove,
+                            PlaneZLow = zLow, PlaneZHigh = zHigh,
+                            Water = env.Water,
+                            Accepted = false,
+                            Mode = StationComposeMode.Observing,
+                            RingBearingDeg = bearing,
+                            ContentInShadow = inShadow,
+                            ContentKeys = keys,
+                        };
+
+                        var guard = CheckLevel(pose);
+                        if (guard != StationRejection.None) reasons.Add(guard);
+
+                        var reason = FirstByPrecedence(reasons);
+                        if (reason == StationRejection.None)
+                        {
+                            y.Accepted++;
+                            y.Poses.Add(pose with { Accepted = true });
+                        }
+                        else
+                        {
+                            y.Rejected[reason] = (y.Rejected.TryGetValue(reason, out int m) ? m : 0) + 1;
+                            y.Poses.Add(pose with
+                            {
+                                RejectionReason = reason,
+                                RejectionDetail = reason switch
+                                {
+                                    StationRejection.EdgeOn =>
+                                        $"the view is {toNormal:0.###} deg off the normal, within "
+                                        + $"{EdgeOnDeg:0.#} deg of the primitive's plane (bearing {bearing:0.###})",
+                                    StationRejection.ShadowOutOfFrame =>
+                                        $"no part of the near face lies inside the {fovDeg:0.#} deg x 16:9 frame "
+                                        + $"at the level gaze from eye z {eyeZ:0.###}; primitive z "
+                                        + $"[{zLow:0.###}, {zHigh:0.###}]",
+                                    StationRejection.NoContentInShadow =>
+                                        shadowBuilt
+                                            ? $"none of {content.Count} content bound(s) lies inside the shadow at this eye"
+                                            : "no shadow volume could be built from this eye (degenerate or on the plane)",
+                                    _ => Detail(reason, env, floorZ, eyeZ, zLow, zHigh, p),
+                                },
+                            });
+                        }
+                    }
+                }
+            }
+        }
+
+        // Rank the accepted poses: most content first, ties to the smaller angle, then the index.
+        var order = new List<int>();
+        for (int i = 0; i < y.Poses.Count; i++) if (y.Poses[i].Accepted) order.Add(i);
+        order.Sort((a, b) =>
+        {
+            var pa = y.Poses[a]; var pb = y.Poses[b];
+            int byCount = (pb.ContentInShadow ?? 0).CompareTo(pa.ContentInShadow ?? 0);
+            if (byCount != 0) return byCount;
+            int byAngle = pa.AngleToPlaneNormalDeg.CompareTo(pb.AngleToPlaneNormalDeg);
+            return byAngle != 0 ? byAngle : pa.StationIndex.CompareTo(pb.StationIndex);
+        });
+        for (int r = 0; r < order.Count; r++)
+            y.Poses[order[r]] = y.Poses[order[r]] with { ObservingRank = r + 1 };
+        return y;
+    }
+
+    /// <summary>The primitive's eight box corners in the world, indexed by axis bits (1 = +x,
+    /// 2 = +y, 4 = +z) - the renderer's <c>PlaneGeometry.BoxCorners</c>, from the full rotation.
+    /// <see cref="PrimitiveGeometry.ExtentFull"/> is already scaled.</summary>
+    public static Vector3[] Corners(PrimitiveGeometry p)
+    {
+        var r = SpatialOverlap.RefrRotation(new Vec3(p.RotationRad.X, p.RotationRad.Y, p.RotationRad.Z));
+        var h = p.ExtentFull * 0.5f;
+        var c = new Vector3[8];
+        for (int i = 0; i < 8; i++)
+        {
+            var l = new Vector3((i & 1) == 0 ? -h.X : h.X, (i & 2) == 0 ? -h.Y : h.Y, (i & 4) == 0 ? -h.Z : h.Z);
+            c[i] = Vector3.Transform(l, r) + p.Position;
+        }
+        return c;
+    }
+
+    /// <summary>A PortalBox's mid-plane quad (local y = 0), ring-ordered - the renderer's
+    /// <c>PlaneGeometry.MidQuad</c>, from the full rotation.</summary>
+    public static Vector3[] MidQuad(PrimitiveGeometry p)
+    {
+        var r = SpatialOverlap.RefrRotation(new Vec3(p.RotationRad.X, p.RotationRad.Y, p.RotationRad.Z));
+        var h = p.ExtentFull * 0.5f;
+        return new[]
+        {
+            Vector3.Transform(new Vector3(-h.X, 0f, -h.Z), r) + p.Position,
+            Vector3.Transform(new Vector3(h.X, 0f, -h.Z), r) + p.Position,
+            Vector3.Transform(new Vector3(h.X, 0f, h.Z), r) + p.Position,
+            Vector3.Transform(new Vector3(-h.X, 0f, h.Z), r) + p.Position,
+        };
+    }
+
+    /// <summary>The primitive's view shadow from <paramref name="eye"/>, built as the renderer builds
+    /// it (<c>ShapeCullPolicy.Shadow</c>): a PortalBox by its mid-quad, a Box by its silhouette. The
+    /// renderer's rule-specific refusals (orientation scope, near-eye distance) are NOT applied
+    /// here; the render decides those, and a pose they refuse is dropped at (d).</summary>
+    public static ConvexShadow? ShadowOf(PrimitiveGeometry p, Vector3 eye)
+        => p.Kind == PrimitiveKind.Box ? ConvexShadow.FromBox(Corners(p), eye)
+                                       : ConvexShadow.FromRectangle(MidQuad(p), eye);
+
+    static readonly int[][] BoxFaceRings =
+    {
+        new[] { 0, 4, 6, 2 }, new[] { 1, 3, 7, 5 }, new[] { 0, 1, 5, 4 },
+        new[] { 2, 6, 7, 3 }, new[] { 0, 2, 3, 1 }, new[] { 4, 5, 7, 6 },
+    };
+
+    /// <summary>Whether any part of the primitive's near face lies inside the frame of a level
+    /// camera at <paramref name="eye"/> aimed at <paramref name="lookAt"/>: horizontal FOV
+    /// <paramref name="fovDeg"/> at <see cref="FrameAspect"/>, near plane
+    /// <see cref="FrameNearClip"/>. The near face is a PortalBox's quad, or a Box's front-facing
+    /// faces; each polygon is clipped against the five frustum planes and any remainder is in
+    /// frame.</summary>
+    public static bool NearFaceInFrame(PrimitiveGeometry p, Vector3 eye, Vector3 lookAt, float fovDeg)
+    {
+        var f = lookAt - eye;
+        if (!float.IsFinite(f.X) || !float.IsFinite(f.Y) || !float.IsFinite(f.Z) || f.LengthSquared() <= 0f)
+            return false;
+        f = Vector3.Normalize(f);
+        var rt = Vector3.Cross(f, Vector3.UnitZ);
+        if (rt.LengthSquared() < 1e-12f) return false;
+        rt = Vector3.Normalize(rt);
+        var up = Vector3.Cross(rt, f);
+        float th = MathF.Tan(fovDeg * MathF.PI / 360f), tv = th / FrameAspect;
+        // Inward half-spaces, each as g(q) = a·(q - eye) + b >= 0.
+        var planes = new (Vector3 A, float B)[]
+        {
+            (f, -FrameNearClip),
+            (th * f - rt, 0f), (th * f + rt, 0f),
+            (tv * f - up, 0f), (tv * f + up, 0f),
+        };
+        var polys = new List<Vector3[]>();
+        if (p.Kind == PrimitiveKind.Box)
+        {
+            var cs = Corners(p);
+            var centre = Vector3.Zero;
+            foreach (var v in cs) centre += v;
+            centre /= 8f;
+            foreach (var ring in BoxFaceRings)
+            {
+                var poly = new[] { cs[ring[0]], cs[ring[1]], cs[ring[2]], cs[ring[3]] };
+                var fc = (poly[0] + poly[1] + poly[2] + poly[3]) / 4f;
+                if (Vector3.Dot(fc - centre, eye - fc) > 0f) polys.Add(poly);   // faces the eye
+            }
+        }
+        else polys.Add(MidQuad(p));
+        foreach (var poly in polys)
+        {
+            var cur = new List<Vector3>(poly);
+            foreach (var (a, b) in planes)
+            {
+                if (cur.Count == 0) break;
+                var next = new List<Vector3>(cur.Count + 2);
+                for (int i = 0; i < cur.Count; i++)
+                {
+                    var s = cur[i]; var e = cur[(i + 1) % cur.Count];
+                    float gs = Vector3.Dot(a, s - eye) + b, ge = Vector3.Dot(a, e - eye) + b;
+                    if (gs >= 0f) next.Add(s);
+                    if ((gs >= 0f) != (ge >= 0f)) next.Add(s + (e - s) * (gs / (gs - ge)));
+                }
+                cur = next;
+            }
+            if (cur.Count > 0) return true;
+        }
+        return false;
+    }
 
     /// <summary>The reason a station is counted under, when it fails several.</summary>
     public static StationRejection FirstByPrecedence(IEnumerable<StationRejection> reasons)

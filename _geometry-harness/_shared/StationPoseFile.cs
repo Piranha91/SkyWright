@@ -141,7 +141,23 @@ public static class StationPoseFile
     /// <summary>One pose as it is published. Every measured quantity goes through
     /// <see cref="N"/>: a refused pose's eye, pitch and offsets were never measured, and null says
     /// so where a sentinel number would be read as a height.</summary>
-    static Dictionary<string, object?> Dto(StationPose p) => new()
+    static Dictionary<string, object?> Dto(StationPose p)
+    {
+        var d = FaceOnDto(p);
+        // The observing mode's own fields are written for an observing pose ONLY: a face-on pose
+        // file stays byte-identical to what the face-on rule always wrote (proofprobe M7, M9).
+        if (p.Mode == StationComposeMode.Observing)
+        {
+            d["mode"] = p.Mode.ToString();
+            d["ringBearingDeg"] = p.RingBearingDeg is { } rb ? N(rb) : null;
+            d["contentInShadow"] = p.ContentInShadow;
+            d["contentKeys"] = p.ContentKeys;
+            d["observingRank"] = p.ObservingRank;
+        }
+        return d;
+    }
+
+    static Dictionary<string, object?> FaceOnDto(StationPose p) => new()
     {
         ["primitive"] = p.Primitive,
         ["kind"] = p.Kind.ToString(),
