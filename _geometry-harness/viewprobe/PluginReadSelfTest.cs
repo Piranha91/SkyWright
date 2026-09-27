@@ -60,6 +60,7 @@ internal static class PluginReadSelfTest
     static readonly ModKey MKey = new("PrMaster", ModType.Master);
     static FormKey M(uint id) => new(MKey, id);
     static readonly FormKey ANew = new(new ModKey("PrA", ModType.Plugin), 0x850), R2 = new(new ModKey("PrA", ModType.Plugin), 0x901);
+    static readonly FormKey RD = new(new ModKey("PrMaster", ModType.Master), 0x902);   // placed by the master, deleted by PrA
     static readonly FormKey Stat = M(0x801), Ltex = M(0x802), W = M(0x830), E00 = M(0x840), E50 = M(0x842), Land = M(0x880), R1 = M(0x900);
 
     /// <summary>A layer header for quadrant q (0 bottom-left, 1 bottom-right, as viewprobe's terrain census indexes them).
@@ -117,6 +118,9 @@ internal static class PluginReadSelfTest
         master.LandscapeTextures.Add(new LandscapeTexture(Ltex, Rel) { EditorID = "PrLtex" });
         var e00 = new Cell(E00, Rel) { Flags = default, Grid = new CellGrid { Point = new P2Int(0, 0) }, EditorID = "PrE00" };
         e00.Temporary.Add(Ref(100, 100));
+        var rd = new PlacedObject(RD, Rel) { Placement = new Placement { Position = new P3Float(300, 300, 0), Rotation = new P3Float(0, 0, 0) } };
+        rd.Base.SetTo(Stat);
+        e00.Temporary.Add(rd);
         e00.Landscape = LandOf(0f, 1);
         var e50 = new Cell(E50, Rel) { Flags = default, Grid = new CellGrid { Point = new P2Int(5, 0) }, EditorID = "PrE50" };
         master.Worldspaces.Add(World(e00, e50));
@@ -127,6 +131,7 @@ internal static class PluginReadSelfTest
         var a = new SkyrimMod(new ModKey("PrA", ModType.Plugin), Rel);
         var a00 = new Cell(E00, Rel) { Flags = default, Grid = new CellGrid { Point = new P2Int(0, 0) }, EditorID = "PrE00" };
         a00.Landscape = LandOf(10f, 2);
+        a00.Temporary.Add(new PlacedObject(RD, Rel) { IsDeleted = true });   // deleted, no placement data (K6's shape)
         var a50 = new Cell(E50, Rel) { Flags = default, Grid = new CellGrid { Point = new P2Int(5, 0) }, EditorID = "PrE50" };
         a50.Temporary.Add(Ref(5 * 4096 + 100, 300));
         // A cell only the override defines, so the find-cell pass has to read PrA.esp to find it (arm S1).
@@ -572,6 +577,15 @@ internal static class PluginReadSelfTest
             var good = Conflicts(Path.Combine(root, "conf-ok"), R1.ToString());
             var g = RunViewprobe(Path.Combine(root, "arm-conf-ok"), mPath, aPath, true,
                                  terrainArgs.Concat(new[] { "--conflicts", good }).ToArray(), Path.Combine(root, "conf-ok.jsonl"));
+            // F3 (the fresh review): a deleted reference's earlier position must not be reported as where it sits.
+            var delDoor = Conflicts(Path.Combine(root, "conf-del"), RD.ToString());
+            var dd = RunViewprobe(Path.Combine(root, "arm-conf-del"), mPath, aPath, true,
+                                  terrainArgs.Concat(new[] { "--conflicts", delDoor }).ToArray(), Path.Combine(root, "conf-del.jsonl"));
+            Check("F3      a watched door deleted by a later plugin (no placement data): named as deleted, not 'sits in' the earlier cell",
+                  dd.Exit == 0 && Named(dd, "implicated door", RD.ToString(), "deleted by PrA.esp") && !Named(dd, RD.ToString(), "sits in"),
+                  Brief(dd) + (Named(dd, RD.ToString(), "sits in") ? "; reported at the EARLIER position" : ""));
+            Check("F3b     a watched door moved out of the loaded cells: still reported where it sits (conf-ok, R1)",
+                  Named(g, "implicated door", R1.ToString(), "sits in"), Brief(g));
             Check("L1b     a conflict file whose keys all parse: nothing named as unparseable",
                   g.Exit == 0 && !Named(g, "unparseable FormKey") && !Named(g, "is not a FormKey"), Brief(g));
         }
