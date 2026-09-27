@@ -134,6 +134,7 @@ internal static class WinningRefsSelfTest
         foreach (var (n, px0) in new[] { (1, 100f), (5, 110f), (6, 120f), (7, 130f), (12, 140f), (13, 150f), (14, 160f), (16, 170f), (17, 180f) }) mE00.Temporary.Add(Ref(R(n), stat, px0, 100));
         var mE10 = Ext(e10, 1, 0); mE10.Temporary.Add(Ref(R(2), stat, 4200, 100)); mE10.Temporary.Add(Ref(R(8), stat, 4210, 100));
         mE10.Persistent.Add(Ref(R(20), stat, 4250, 120));                   // persistent under an ORDINARY exterior cell (ring)
+        mE10.Temporary.Add(Ref(R(29), stat, 4220, 110));                    // X deletes it in a copy of E10 holding nothing else
         var mE55 = Ext(e55, 5, 5); mE55.Temporary.Add(Ref(R(9), stat, 5 * 4096 + 100, 5 * 4096 + 100));
         var mE50 = Ext(e50, 5, 0);
         // A second CELL record at the target's own grid (0,0) in the same worldspace.
@@ -178,7 +179,11 @@ internal static class WinningRefsSelfTest
         { var c00 = Ext(e00, 0, 0); c00.Temporary.Add(Ref(R(5), stat, 1500, 1500)); b.Worldspaces.Add(World(wKey, null, c00)); }
         // ---- X and Y: the order-permutation pair for R13 (X files it in E50, Y moves it within E00) ------------------
         var x = Plugin("WrX");
-        { var c50 = Ext(e50, 5, 0); c50.Temporary.Add(Ref(R(13), stat, 5 * 4096 + 400, 400)); x.Worldspaces.Add(World(wKey, null, c50)); }
+        {
+            var c50 = Ext(e50, 5, 0); c50.Temporary.Add(Ref(R(13), stat, 5 * 4096 + 400, 400));
+            var c10 = Ext(e10, 1, 0); c10.Temporary.Add(DeletedRef(R(29)));   // a cell copy whose ONLY content is a deletion
+            x.Worldspaces.Add(World(wKey, null, c50, c10));
+        }
         var y = Plugin("WrY");
         { var c00 = Ext(e00, 0, 0); c00.Temporary.Add(Ref(R(13), stat, 1800, 1800)); y.Worldspaces.Add(World(wKey, null, c00)); }
 
@@ -192,7 +197,7 @@ internal static class WinningRefsSelfTest
             foreach (var path in order)
             {
                 using var mod = SkyrimMod.CreateFromBinaryOverlay(path, Rel);
-                foreach (var cp in PlacementExtract.FromMod(mod))
+                foreach (var cp in PlacementExtract.FromMod(mod, includeDeletions: true))   // as the render's walk asks
                 {
                     var (isTarget, inRing) = WinningRefWalk.Classify(cp, cell, interior, ringRefs, interior ? FormKey.Null : wKey, grid);
                     walk.Observe(cp, isTarget, inRing);
@@ -280,6 +285,10 @@ internal static class WinningRefsSelfTest
         // K6: a later plugin deletes R12 with a record that carries no placement data. The game does not load a deleted
         // reference, so the earlier version must not be drawn, in any walk; and a deletion is not a move, so it is not in
         // the taken-out set either.
+        Check("K6b deleted in a cell copy whose only content is the deletion: not drawn (R29, ring cell E10)",
+              !main.WinRef.ContainsKey(R(29)) && !perm.WinRef.ContainsKey(R(29)) && !main.CellOf.ContainsKey(R(29))
+              && (main.TakenOut is null || !main.TakenOut.Contains(R(29))),
+              Where(main, R(29)));
         Check("K6  deleted by a later plugin with no placement data: not drawn, not a merge candidate, not 'moved' (R12)",
               !main.WinRef.ContainsKey(R(12)) && !main.Persistent.ContainsKey(R(12)) && !main.CellOf.ContainsKey(R(12))
               && !noRing.WinRef.ContainsKey(R(12)) && !perm.WinRef.ContainsKey(R(12))
