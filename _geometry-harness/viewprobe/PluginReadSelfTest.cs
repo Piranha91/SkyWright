@@ -354,8 +354,9 @@ internal static class PluginReadSelfTest
             }
             Note($"P2-rec arm uses: {used ?? "none (no damage made Mutagen throw)"}");
             var c = RunViewprobe(Path.Combine(root, "arm-rec"), mPath, p, true, new[] { target }, Path.Combine(root, "rec.jsonl"));
-            Check("P2-rec an override with one unparseable REFR: refused with the plugin named, not a crash, not the earlier R1",
-                  enumThrows is not null && c.Exit != 0 && c.Dump.Count == 0 && !Unhandled(c) && Named(c, "failed while reading", "PrA.esp"),
+            Check("P2-rec an override with one unparseable REFR: refused, the plugin and walk named, the stack kept, not a crash",
+                  enumThrows is not null && c.Exit != 0 && c.Dump.Count == 0 && !Unhandled(c) && Named(c, "failed while reading", "PrA.esp")
+                  && c.Err.Contains(enumThrows, StringComparison.Ordinal) && c.Err.Split('\n').Any(l => l.TrimStart().StartsWith("at ", StringComparison.Ordinal)),
                   Brief(c) + (Unhandled(c) ? "; UNHANDLED EXCEPTION" : "")
                   + (RefIn(c, R1) is { } rr ? $"; R1 in the dump at {rr.GetProperty("pos")[0].GetSingle():0},{rr.GetProperty("pos")[1].GetSingle():0}" : ""));
         }
@@ -512,7 +513,7 @@ internal static class PluginReadSelfTest
         Check("S13b    a profile whose every plugin has a file: runs, and walks both plugins (CTRL-MA)",
               cA.Exit == 0 && cA.Dump.Count == 1 && cA.Dump[0].GetProperty("plugins").GetArrayLength() == 2, Brief(cA));
         Check("OPEN-b  no plugin or record refusal on the undamaged order (CTRL-MA)",
-              cA.Exit == 0 && !Named(cA, "could not be read"), Brief(cA));
+              cA.Exit == 0 && !Named(cA, "could not be read") && !Named(cA, "failed while reading"), Brief(cA));
         {
             var f = RunViewprobe(Path.Combine(root, "arm-findltex-ok"), mPath, aPath, true,
                                  new[] { target, "--eye", "100,100,600", "--look", "2000,2000,0", "--find-ltex", "PrLtex" }, null);
