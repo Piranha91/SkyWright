@@ -30,6 +30,9 @@ internal sealed class WinningRefWalk
     readonly Dictionary<FormKey, FormKey> _refCellOf;
     // References a later sighting took out of the winning state; re-admission removes them again.
     readonly HashSet<FormKey> _takenOut = new();
+    // References some sighting admitted during this walk: a later non-admitted sighting of one is a move out of the loaded
+    // cells, even when a deletion came in between (the deletion alone is not a move, and is not counted).
+    readonly HashSet<FormKey> _everAdmitted = new();
 
     internal WinningRefWalk(Dictionary<FormKey, PlacedRef> winRef,
                             Dictionary<FormKey, (FormKey Ws, PlacedRef Ref)> persistentWin,
@@ -70,8 +73,8 @@ internal sealed class WinningRefWalk
             // is a question of POSITION, resolved after the target is known.
             bool candidate = cp.Worldspace != FormKey.Null && r.Persistent;
 
-            if (admit) { _winRef[r.FormKey] = r; _takenOut.Remove(r.FormKey); }
-            else if (_winRef.Remove(r.FormKey)) _takenOut.Add(r.FormKey);
+            if (admit) { _winRef[r.FormKey] = r; _takenOut.Remove(r.FormKey); _everAdmitted.Add(r.FormKey); }
+            else { _winRef.Remove(r.FormKey); if (_everAdmitted.Contains(r.FormKey)) _takenOut.Add(r.FormKey); }
 
             if (candidate) _persistentWin[r.FormKey] = (cp.Worldspace, r);
             else _persistentWin.Remove(r.FormKey);
@@ -106,6 +109,7 @@ internal sealed class WinningRefWalk
     internal void Reset(IEnumerable<FormKey>? retained = null)
     {
         _takenOut.Clear();
+        _everAdmitted.Clear();
         if (retained is not null) _takenOut.UnionWith(retained);
     }
 
