@@ -870,7 +870,19 @@ flag someone typed, which is why neither is allowed to be silent.
   (`-N ref(s) an earlier plugin placed in the loaded cells and a later plugin moved elsewhere`). Known
   gap: an override that deletes a ref and carries no placement data is invisible to `PlacementExtract`,
   so the earlier version is still drawn (`--winning-refs-selftest` reports it as KNOWN-GAP K6).
-  `viewprobe --winning-refs-selftest` holds the rule to known answers on Mutagen-written plugins.
+  `viewprobe --winning-refs-selftest` holds the rule to known answers on Mutagen-written plugins
+  (`VP_WINREF_KEEP=<empty dir>` keeps the fixture plugins there, so another reader can be checked
+  against the same files). The merge box includes its low edges and excludes its high edges; a
+  persistent ref filed under an ordinary exterior cell merges by position like one in the persistent
+  cell; and, because the ring is chosen by grid, a second CELL record at the target's own grid loads
+  like a ring cell (pinned by case C9, not verified against the engine).
+  `--winning-refs-dump FILE` runs the real walk for a cell (a positional cell, or one per line of
+  `--cells LIST`), appends one JSON line per target — its identity, the plugin files walked with their
+  sha256, and every winning-state entry with position, cell, persistent, deleted and merge-candidate
+  flags — and draws nothing. It filters nothing: it exists so the walk can be compared, reference by
+  reference, with an independent reader over many cells without rendering. `--dump-terrain` (with
+  `--eye`/`--look`) carries on through the terrain walk and adds each loaded grid square's winning
+  heightmap digest and layer count.
 - **Markers** are classified from the record's Is-Marker header flag (`0x00800000`) ONLY — the
   engine's own don't-render rule. Name heuristics (*marker* EditorID or model path) are wrong in
   both directions and were removed 2026-08-28. `Markers\BlackPlane01.nif` is an unflagged,

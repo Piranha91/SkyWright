@@ -361,6 +361,10 @@ bool drawCoverings = true;
 // layer for the cell under examination, same scoping as the cell outline. --no-ring-refs goes
 // back to target-cell-only refs (the old, cheaper behaviour). Interiors have no ring.
 bool ringRefs = true;
+// --winning-refs-dump FILE [--cells LIST] [--dump-terrain]: write the walk's winning state per target cell as one JSON line
+// and draw nothing (WinningRefsDump.cs).
+string? winRefsDump = null, dumpCellsFile = null;
+bool dumpTerrain = false;
 // In --compare, mark the navmesh vertices one plugin's version has and the other's does not with
 // small spheres, in every panel that contains them. --no-nav-diff drops them.
 bool navDiff = true;
@@ -609,6 +613,9 @@ for (int i = argStart; i < args.Length; i++)
     else if (args[i] == "--find-ltex" && i + 1 < args.Length) findLtex = args[++i];
     else if (args[i] == "--no-cell-outline") cellOutline = false;
     else if (args[i] == "--no-ring-refs") ringRefs = false;
+    else if (args[i] == "--winning-refs-dump" && i + 1 < args.Length) winRefsDump = args[++i];
+    else if (args[i] == "--cells" && i + 1 < args.Length) dumpCellsFile = args[++i];
+    else if (args[i] == "--dump-terrain") dumpTerrain = true;
     else if (args[i] == "--no-nav-diff") navDiff = false;
     else if (args[i] == "--nav-at" && i + 1 < args.Length)
     { var p = args[++i].Split(','); if (p.Length == 2) navAt.Add((float.Parse(p[0]), float.Parse(p[1]))); }
@@ -984,7 +991,13 @@ if (emitBats is not null && worklistPaths.Count > 1)
 { Console.Error.WriteLine("--emit-bats takes ONE worklist: the bat mod's MANIFEST.md names the file it was generated from, and a merge of several has no such file. Emit them one at a time."); return 1; }
 if (batsProfiles.Count > 0 && emitBats is null)
 { Console.Error.WriteLine("--bats-profiles only means anything with --emit-bats: it enables the mod folder that --emit-bats writes."); return 1; }
-if (!positionalTarget && worklistPaths.Count == 0)
+if ((dumpCellsFile is not null || dumpTerrain) && winRefsDump is null)
+{ Console.Error.WriteLine("--cells and --dump-terrain only mean anything with --winning-refs-dump FILE."); return 1; }
+if (winRefsDump is not null && (worklistPaths.Count > 0 || (dumpCellsFile is not null && positionalTarget)))
+{ Console.Error.WriteLine("--winning-refs-dump takes its cells from ONE place: a positional cell, or --cells FILE; not a worklist."); return 1; }
+if (dumpTerrain && (!textured || !drawTerrain))
+{ Console.Error.WriteLine("--dump-terrain needs the textured renderer's terrain walk: give --eye and --look, and not --no-terrain."); return 1; }
+if (!positionalTarget && worklistPaths.Count == 0 && !(winRefsDump is not null && dumpCellsFile is not null))
 { Console.Error.WriteLine("no cell given. Pass a CellEditorID/FormID as the first argument, or --worklist FILE to take the cells from a shot list."); return 1; }
 
 // The worklist is read and VALIDATED before the load walk. A malformed shot list found after a
@@ -2012,6 +2025,12 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot,
     if (winWalk.TakenOutCount is > 0 and var takenOut)
         Console.WriteLine($"   -{takenOut} ref(s) an earlier plugin placed in the loaded cells and a later plugin moved elsewhere: not drawn (the later plugin wins)");
     Console.WriteLine($"winning state: {winRef.Count:N0} refs, {winNav.Count:N0} navmeshes  ({sw.Elapsed.TotalSeconds:0.0}s)");
+    if (winRefsDump is not null && (!dumpTerrain || interior))
+    {
+        ViewProbe.WinningRefsDump.Write(winRefsDump, cellTarget, cellKey!.Value, interior, targetWorldspace, targetGrid, ringRefs,
+            order.OrderedPaths, winRef, refCellOf, persistentWin, winWalk.TakenOutKeys(), null, null);
+        return 0;
+    }
 
     // The shot's synthetic props: what a runtime PlaceAtMe stood in the cell during a test, put back
     // into the winning state as invented refs so the picture shows the obstacle the numbers were
@@ -2861,6 +2880,13 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot,
                 Console.WriteLine($"   terrain paint layers: {terrainLayers.Count} sheet(s), "
                                 + $"{terrainLayers.Sum(l => l.Tris.Count):N0} triangles, "
                                 + $"{terrainLayers.Select(l => l.Diffuse).Distinct(StringComparer.OrdinalIgnoreCase).Count()} distinct texture(s)");
+            if (winRefsDump is not null)
+            {
+                ViewProbe.WinningRefsDump.Write(winRefsDump, cellTarget, cellKey!.Value, interior, targetWorldspace, targetGrid, ringRefs,
+                    order.OrderedPaths, winRef, refCellOf, persistentWin, winWalk.TakenOutKeys(), landHeights,
+                    landLayers.ToDictionary(kv => kv.Key, kv => kv.Value.Count));
+                return 0;
+            }
 
             // A hover on bare ground has a real answer in the LAND census: which cell, which
             // quadrant, what base texture, and what each alpha layer paints AT THAT POINT (opacity
@@ -4927,6 +4953,18 @@ if (worklist is not null)
     return worklistExit;
 }
 
+// --winning-refs-dump: the real walk for each target in turn, one JSON line each, nothing drawn.
+if (winRefsDump is not null)
+{
+    var dumpTargets = dumpCellsFile is not null ? ViewProbe.WinningRefsDump.ReadCells(dumpCellsFile) : new List<string> { target };
+    for (int di = 0; di < dumpTargets.Count; di++)
+    {
+        int drc = RunCellTextured(dumpTargets[di], 0, 0, null, out _);
+        if (drc != 0) { Console.Error.WriteLine($"--winning-refs-dump: target {di + 1} of {dumpTargets.Count} ('{dumpTargets[di]}') exited {drc}; stopping."); return drc; }
+    }
+    Console.WriteLine($"--winning-refs-dump: {dumpTargets.Count} target(s) written to {Path.GetFullPath(winRefsDump)}");
+    return 0;
+}
 int singleRc;
 try { singleRc = RunCellTextured(target, 0, 0, null, out _); }
 catch (ViewProbe.GlAllocationRefusal ex) { Console.Error.WriteLine(ex.Message); return 2; }   // F-G4-1
