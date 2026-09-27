@@ -277,7 +277,13 @@ internal static class WinningRefsSelfTest
         Check("C9  a second CELL at the target's grid is loaded like a ring cell (R28; pins current behaviour)",
               At(main, R(28), 200, 300, M(0x844)) && !noRing.WinRef.ContainsKey(R(28)),
               Where(main, R(28)) + " | ring off: " + Where(noRing, R(28)));
-        KnownGap("K6  deleted by a later plugin with no placement data: should not be drawn (R12)",
-                 !main.WinRef.ContainsKey(R(12)), Where(main, R(12)) + " (PlacementExtract yields nothing for a record without DATA)");
+        // K6: a later plugin deletes R12 with a record that carries no placement data. The game does not load a deleted
+        // reference, so the earlier version must not be drawn, in any walk; and a deletion is not a move, so it is not in
+        // the taken-out set either.
+        Check("K6  deleted by a later plugin with no placement data: not drawn, not a merge candidate, not 'moved' (R12)",
+              !main.WinRef.ContainsKey(R(12)) && !main.Persistent.ContainsKey(R(12)) && !main.CellOf.ContainsKey(R(12))
+              && !noRing.WinRef.ContainsKey(R(12)) && !perm.WinRef.ContainsKey(R(12))
+              && (main.TakenOut is null || !main.TakenOut.Contains(R(12))),
+              Where(main, R(12)) + (main.TakenOut?.Contains(R(12)) == true ? "; IN the taken-out set" : ""));
     }
 }
