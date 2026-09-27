@@ -59,6 +59,7 @@ internal static class PluginReadSelfTest
     // ---- the fixture -------------------------------------------------------------------------------------------------
     static readonly ModKey MKey = new("PrMaster", ModType.Master);
     static FormKey M(uint id) => new(MKey, id);
+    static readonly FormKey ANew = new(new ModKey("PrA", ModType.Plugin), 0x850), R2 = new(new ModKey("PrA", ModType.Plugin), 0x901);
     static readonly FormKey Stat = M(0x801), Ltex = M(0x802), W = M(0x830), E00 = M(0x840), E50 = M(0x842), Land = M(0x880), R1 = M(0x900);
 
     /// <summary>A layer header for quadrant q (0 bottom-left, 1 bottom-right, as viewprobe's terrain census indexes them).
@@ -128,7 +129,12 @@ internal static class PluginReadSelfTest
         a00.Landscape = LandOf(10f, 2);
         var a50 = new Cell(E50, Rel) { Flags = default, Grid = new CellGrid { Point = new P2Int(5, 0) }, EditorID = "PrE50" };
         a50.Temporary.Add(Ref(5 * 4096 + 100, 300));
-        a.Worldspaces.Add(World(a00, a50));
+        // A cell only the override defines, so the find-cell pass has to read PrA.esp to find it (arm S1).
+        var a11 = new Cell(ANew, Rel) { Flags = default, Grid = new CellGrid { Point = new P2Int(1, 1) }, EditorID = "PrNew" };
+        var r2 = new PlacedObject(R2, Rel) { Placement = new Placement { Position = new P3Float(4200, 4200, 0), Rotation = new P3Float(0, 0, 0) } };
+        r2.Base.SetTo(Stat);
+        a11.Temporary.Add(r2);
+        a.Worldspaces.Add(World(a00, a50, a11));
         var aPath = Path.Combine(dir, "PrA.esp");
         a.BeginWrite.ToPath(aPath).WithLoadOrder(mOv).Write();
         return (mPath, aPath);
@@ -292,8 +298,24 @@ internal static class PluginReadSelfTest
             Note($"P2-open precondition: TES4 header intact {headerReads}; Mutagen open+enumerate throws: {openThrows ?? "NO"}");
             var c = RunViewprobe(Path.Combine(root, "arm-open"), mPath, p, true, new[] { target }, Path.Combine(root, "open.jsonl"));
             Check("P2-open an override whose body cannot be read: refused, the plugin named (not the earlier R1 drawn)",
-                  headerReads && openThrows is not null && c.Exit != 0 && c.Dump.Count == 0 && !Unhandled(c) && Named(c, "PrA.esp"),
+                  headerReads && openThrows is not null && c.Exit != 0 && c.Dump.Count == 0 && !Unhandled(c) && Named(c, "PrA.esp", "could not be read"),
                   Brief(c) + (RefIn(c, R1) is { } rr ? $"; R1 in the dump at {rr.GetProperty("pos")[0].GetSingle():0},{rr.GetProperty("pos")[1].GetSingle():0}" : ""));
+        }
+
+        // ---- S1: the find-cell pass meets the unreadable plugin before it finds the target ----------------------------------------
+        {
+            var bad = (byte[])aBytes.Clone();
+            int top = 24 + BitConverter.ToInt32(bad, 4);
+            BitConverter.GetBytes(bad.Length * 4).CopyTo(bad, top + 4);
+            var p = Path.Combine(root, "s1", "PrA.esp");
+            Directory.CreateDirectory(Path.GetDirectoryName(p)!);
+            File.WriteAllBytes(p, bad);
+            var c = RunViewprobe(Path.Combine(root, "arm-s1"), mPath, p, true, new[] { ANew.ToString() }, Path.Combine(root, "s1.jsonl"));
+            Check("S1      the target cell exists only in an override whose body cannot be read: refused, the plugin named",
+                  c.Exit != 0 && c.Dump.Count == 0 && !Unhandled(c) && Named(c, "PrA.esp", "could not be read"), Brief(c));
+            var ok = RunViewprobe(Path.Combine(root, "arm-s1-ok"), mPath, aPath, true, new[] { ANew.ToString() }, Path.Combine(root, "s1-ok.jsonl"));
+            Check("S1b     the same target in the undamaged override: found, and its ref in the dump",
+                  ok.Exit == 0 && RefIn(ok, R2) is not null, Brief(ok));
         }
 
         // ---- P2-rec: the plugin opens; one record inside it does not parse -----------------------------------------------------
@@ -301,22 +323,39 @@ internal static class PluginReadSelfTest
             var recs = Records(aBytes);
             var refr = recs.Single(x => x.Sig == "REFR" && (x.FormId & 0xFFFFFF) == 0x900);
             var (so, len) = Sub(aBytes, refr, "DATA");
-            var bad = (byte[])aBytes.Clone();
-            BitConverter.GetBytes((ushort)(len + 40)).CopyTo(bad, so + 4);   // DATA claims 40 bytes more than the record holds
             var p = Path.Combine(root, "rec", "PrA.esp");
             Directory.CreateDirectory(Path.GetDirectoryName(p)!);
-            File.WriteAllBytes(p, bad);
-            string? opens = "yes", enumThrows = null;
-            try
+            // Two ways to make the REFR's DATA claim more than the record holds. Each is measured; the arm uses the first
+            // that makes Mutagen throw while the placements are enumerated. A damage Mutagen reads WITHOUT throwing (it
+            // reads past the record into the next one) is reported here, not used: no catch can see it.
+            string? enumThrows = null, used = null;
+            foreach (var (name, claim) in new[] { ("DATA claims 40 bytes more", len + 40), ("DATA claims 65535 bytes", 65535) })
             {
-                using var ov = SkyrimMod.CreateFromBinaryOverlay(p, Rel);
-                try { foreach (var cp in PlacementExtract.FromMod(ov)) _ = cp.Refs.Count; } catch (Exception ex) { enumThrows = ex.GetType().Name; }
+                var b = (byte[])aBytes.Clone();
+                BitConverter.GetBytes((ushort)claim).CopyTo(b, so + 4);
+                File.WriteAllBytes(p, b);
+                string opens = "yes"; string? t = null;
+                try
+                {
+                    using var ov = SkyrimMod.CreateFromBinaryOverlay(p, Rel);
+                    try { foreach (var cp in PlacementExtract.FromMod(ov)) _ = cp.Refs.Count; } catch (Exception ex) { t = ex.GetType().Name; }
+                }
+                catch (Exception ex) { opens = "no: " + ex.GetType().Name; }
+                Note($"P2-rec precondition (measured): {name}: Mutagen opens it: {opens}; enumerating the placements throws: {t ?? "NO (read silently)"}");
+                if (used is null && opens == "yes" && t is not null) { used = name; enumThrows = t; }
+                else if (used is null) continue;
+                break;
             }
-            catch (Exception ex) { opens = "no: " + ex.GetType().Name; }
-            Note($"P2-rec precondition (measured): Mutagen opens it: {opens}; enumerating the placements throws: {enumThrows ?? "NO (read silently)"}");
+            if (used is not null)
+            {
+                var b = (byte[])aBytes.Clone();
+                BitConverter.GetBytes((ushort)(used.Contains("65535") ? 65535 : len + 40)).CopyTo(b, so + 4);
+                File.WriteAllBytes(p, b);
+            }
+            Note($"P2-rec arm uses: {used ?? "none (no damage made Mutagen throw)"}");
             var c = RunViewprobe(Path.Combine(root, "arm-rec"), mPath, p, true, new[] { target }, Path.Combine(root, "rec.jsonl"));
             Check("P2-rec an override with one unparseable REFR: refused with the plugin named, not a crash, not the earlier R1",
-                  c.Exit != 0 && c.Dump.Count == 0 && !Unhandled(c) && Named(c, "PrA.esp"),
+                  enumThrows is not null && c.Exit != 0 && c.Dump.Count == 0 && !Unhandled(c) && Named(c, "failed while reading", "PrA.esp"),
                   Brief(c) + (Unhandled(c) ? "; UNHANDLED EXCEPTION" : "")
                   + (RefIn(c, R1) is { } rr ? $"; R1 in the dump at {rr.GetProperty("pos")[0].GetSingle():0},{rr.GetProperty("pos")[1].GetSingle():0}" : ""));
         }
@@ -462,7 +501,7 @@ internal static class PluginReadSelfTest
             var c = RunViewprobe(Path.Combine(root, "arm-bats"), mPath, p, true,
                                  new[] { wl, "--emit-bats", Path.Combine(root, "bats", "out") }, null);
             Check("S5      --emit-bats over an override whose body cannot be read: refused, the plugin named",
-                  c.Exit != 0 && !Unhandled(c) && Named(c, "PrA.esp"), Brief(c));
+                  c.Exit != 0 && !Unhandled(c) && Named(c, "PrA.esp", "could not be read"), Brief(c));
             // The other direction: the same walk over the undamaged override still emits.
             var ok = RunViewprobe(Path.Combine(root, "arm-bats-ok"), mPath, aPath, true,
                                   new[] { wl, "--emit-bats", Path.Combine(root, "bats", "out-ok") }, null);
