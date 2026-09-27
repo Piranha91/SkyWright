@@ -1202,6 +1202,7 @@ var baseMesh = new Dictionary<FormKey, string>();
 var bosIdx = bosMode != "off" ? new BosFormIndex() : null;
 var bosLight = new List<(ModKey Key, bool Light)>();
 var refCellOf = new Dictionary<FormKey, FormKey>();
+var winWalk = new ViewProbe.WinningRefWalk(winRef, persistentWin, refCellOf);
 BosLayer? bosLayer = null;
 IReadOnlyList<BosIniFile>? discoveredBosInis = null;
 var baseIsMarker = new HashSet<FormKey>();
@@ -1786,13 +1787,10 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot,
                     else refEnableParent.Remove(r.FormKey);
                     if (r.Base is { } pbk && pbk == planeMarkerKey) ViewProbe.PlaneHistory.Record(planeHist, r, plgName);
                 }
-                // Worldspace PERSISTENT refs (doors above all). Not detected by the holding cell —
-                // the persistent cell masquerades as grid (0,0) — but by each ref's own Persistent
-                // flag: the game loads these with the worldspace, so membership in a rendered cell
-                // is a question of POSITION, resolved after the target is known.
-                if (cp.Worldspace != FormKey.Null)
-                    foreach (var r in cp.Refs)
-                        if (r.Persistent) { persistentWin[r.FormKey] = (cp.Worldspace, r); refCellOf[r.FormKey] = cp.Cell; }   // later plugin wins
+                // Which refs the winning state admits, and where: WinningRefs.cs (persistent refs are
+                // filed for the by-position merge; target and ring cells admit theirs).
+                var (isTarget, inRing) = ViewProbe.WinningRefWalk.Classify(cp, cellKey, interior, ringRefs, targetWorldspace, targetGrid);
+                winWalk.Observe(cp, isTarget, inRing);
                 if (shotNpcWatch.Count > 0)
                     foreach (var r in cp.Refs)
                     {
@@ -1811,27 +1809,11 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot,
                             { doorWhere[r.FormKey] = (cp.Cell, cp.CellEditorId, r);     // later plugin wins
                               if (Environment.GetEnvironmentVariable("VP_DOOR_DEBUG") == "1")
                                   Console.WriteLine($"   [debug] door {r.FormKey} in cp: Cell={cp.Cell} Grid={(cp.Grid is { } gg ? $"{gg.X},{gg.Y}" : "null")} Interior={cp.Interior} Ws={cp.Worldspace} plugin={m.ModKey}"); }
-                bool isTarget = cp.Cell == cellKey;
-                // ±1-ring neighbours (exteriors): their refs are in frame from any eye-level
-                // camera, so they load like the terrain always has. The worldspace persistent
-                // cell masquerades as grid (0,0) and must not be admitted as a neighbour —
-                // its refs are all Persistent, and only non-persistent refs are taken from
-                // ring cells (persistent refs merge by position, below, ring-wide).
-                bool inRing = !isTarget && ringRefs && !interior && !cp.Interior
-                    && cp.Worldspace == targetWorldspace && cp.Worldspace != FormKey.Null
-                    && targetGrid is { } tg && cp.Grid is { } cg
-                    && Math.Abs(cg.X - tg.X) <= 1 && Math.Abs(cg.Y - tg.Y) <= 1;
-                if (!isTarget && !inRing) continue;
-
                 if (isTarget)
                 {
                     cellLabel = cp.CellEditorId ?? cp.Cell.ToString();
                     if (!ViewProbe.PlaneHistory.IsBethesda(plgName) && !cellContestedBy.Contains(plgName)) cellContestedBy.Add(plgName);
-                    foreach (var r in cp.Refs) { winRef[r.FormKey] = r; refCellOf[r.FormKey] = cp.Cell; }
                 }
-                else
-                    foreach (var r in cp.Refs)
-                        if (!r.Persistent) { winRef[r.FormKey] = r; refCellOf[r.FormKey] = cp.Cell; }
             }
         }
     }
@@ -2012,19 +1994,9 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot,
     Console.WriteLine($"cell {cellLabel} {(interior ? "(interior)" : "(exterior)")}  {cellKey}");
     if (!interior && targetGrid is { } tgp)
     {
-        // Persistent refs merge by position over the whole REF-LOADED area: the 3x3 ring when
-        // ring refs are on, the target cell alone otherwise. A narrower test would silently
-        // drop exterior doors standing in a neighbour cell that visibly renders.
+        // Persistent refs merge by position over the whole REF-LOADED area (WinningRefs.cs).
         int ringR = ringRefs ? 1 : 0;
-        float px0 = (tgp.X - ringR) * 4096f, py0 = (tgp.Y - ringR) * 4096f;
-        float pspan = 4096f * (1 + 2 * ringR);
-        int addedPersist = 0;
-        foreach (var (pws, pr) in persistentWin.Values)
-            if (pws == targetWorldspace
-                && pr.Position.X >= px0 && pr.Position.X < px0 + pspan
-                && pr.Position.Y >= py0 && pr.Position.Y < py0 + pspan
-                && !winRef.ContainsKey(pr.FormKey))
-            { winRef[pr.FormKey] = pr; addedPersist++; }
+        int addedPersist = winWalk.MergePersistent(targetWorldspace, tgp, ringRefs);
         if (addedPersist > 0)
             Console.WriteLine($"   +{addedPersist} persistent worldspace ref(s) inside the rendered {(ringR > 0 ? "3x3 cells'" : "cell's")} bounds (doors live here)");
     }
