@@ -1215,6 +1215,9 @@ var cellContestedBy = new List<string>();
 // --npc placement watch, same shape as the door watch: every PlacedNpc whose own FormKey OR
 // whose Base is a requested NPC, wherever it lives (per-ref "later plugin wins").
 var npcRefWhere = new Dictionary<FormKey, (FormKey Cell, string? CellEd, PlacedRef Ref)>();
+// References whose last sighting is a deletion with no placement data (K6), and the plugin that deleted them: the
+// "where is it" tables above drop them, and a watched door or NPC is reported as deleted rather than at an earlier spot.
+var refDeletedBy = new Dictionary<FormKey, string>();
 var npcBaseWhere = new Dictionary<FormKey, Dictionary<FormKey, (FormKey Cell, string? CellEd, PlacedRef Ref)>>();
 var winNav = new Dictionary<FormKey, NavmeshGeometry>();
 FormKey targetWorldspace = FormKey.Null;
@@ -1499,7 +1502,7 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot,
     // kept separately and is not cleared here.
     ViewProbe.UnreadableAssets.BeginShot();
     planeHist.Clear(); cellContestedBy.Clear();
-    npcRefWhere.Clear(); npcBaseWhere.Clear(); doorWhere.Clear();
+    npcRefWhere.Clear(); npcBaseWhere.Clear(); doorWhere.Clear(); refDeletedBy.Clear();
     winNav.Clear(); navByPlugin.Clear();
     navVersionPlugins.Clear(); foreach (var plugin in cliNavVersionPlugins) navVersionPlugins.Add(plugin);
     refCellOf.Clear();
@@ -1837,6 +1840,16 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot,
                 // filed for the by-position merge; target and ring cells admit theirs).
                 var (isTarget, inRing) = ViewProbe.WinningRefWalk.Classify(cp, cellKey, interior, ringRefs, targetWorldspace, targetGrid);
                 winWalk.Observe(cp, isTarget, inRing);
+                // A later sighting undoes an earlier deletion; a deletion takes the ref out of every "where is it" table.
+                foreach (var r in cp.Refs) refDeletedBy.Remove(r.FormKey);
+                if (cp.DeletedRefs is { Count: > 0 } deletedHere)
+                    foreach (var d in deletedHere)
+                    {
+                        refDeletedBy[d.FormKey] = plgName;
+                        npcRefWhere.Remove(d.FormKey);
+                        doorWhere.Remove(d.FormKey);
+                        foreach (var perRef in npcBaseWhere.Values) perRef.Remove(d.FormKey);
+                    }
                 if (shotNpcWatch.Count > 0)
                     foreach (var r in cp.Refs)
                     {
@@ -1890,6 +1903,7 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot,
         foreach (var x in f.NpcRefs) npcRefWhere[x.Key] = x.Value;
         foreach (var x in f.NpcBases) npcBaseWhere[x.Key] = x.Value;
         foreach (var x in f.Doors) doorWhere[x.Key] = x.Value;
+        foreach (var x in f.DeletedBy) refDeletedBy[x.Key] = x.Value;
         navSelection = f.Navigation.Selection;
         foreach (var x in f.Navigation.Winners) winNav[x.Key] = x.Value;
         foreach (var x in f.Navigation.Versions) navByPlugin[x.Key] = x.Value;
@@ -1926,6 +1940,7 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot,
             TargetWorldspace = targetWorldspace, TargetGrid = targetGrid,
             WinningRefs = winRef.ToDictionary(x => x.Key, x => ViewProbe.CellWalkFacts.Copy(x.Value)),
             TakenOut = winWalk.TakenOutSnapshot(),
+            DeletedBy = new(refDeletedBy),
             PersistentRefs = persistentWin.ToDictionary(x => x.Key,
                 x => (x.Value.Ws, ViewProbe.CellWalkFacts.Copy(x.Value.Ref))),
             DisabledFlags = refDisabledFlag.ToHashSet(), EnableParents = new(refEnableParent),
@@ -2248,7 +2263,9 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot,
             // one in the target cell; this message now fires only for doors beyond all of that.
             foreach (var dfk in doorWatchKeys)
                 if (!winRef.ContainsKey(dfk))
-                    Console.WriteLine(doorWhere.TryGetValue(dfk, out var dw)
+                    Console.WriteLine(refDeletedBy.TryGetValue(dfk, out var delBy)
+                        ? $"   implicated door {dfk} was deleted by {delBy} (no placement data): the game does not load it"
+                        : doorWhere.TryGetValue(dfk, out var dw)
                         ? $"   implicated door {dfk} is NOT in the rendered cell(s): it sits in {dw.CellEd ?? dw.Cell.ToString()} at {dw.Ref.Position.X:0},{dw.Ref.Position.Y:0},{dw.Ref.Position.Z:0}"
                         : $"   implicated door {dfk}: no placed ref with this FormKey anywhere in the load order");
             if (redHere == 0 && conflictDoors.Count == 0)
@@ -2606,15 +2623,19 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot,
                                 {
                                     foreach (var layer in ls.Layers)
                                     {
+                                        // counted when its reads finish, so a throw from the enumerator or the body
+                                        // reports exactly the layers read before it
+                                        if (layer.Header?.Texture.FormKeyNullable is { } lk && wanted.ContainsKey(lk))
+                                        {
+                                            if (layer is IAlphaLayerGetter al)
+                                                painted += al.AlphaLayerData.Count(pt => pt.Opacity > 0.004f);
+                                            else { isBase = true; painted += 289; }
+                                        }
                                         layersRead++;
-                                        if (layer.Header?.Texture.FormKeyNullable is not { } lk || !wanted.ContainsKey(lk)) continue;
-                                        if (layer is IAlphaLayerGetter al)
-                                            painted += al.AlphaLayerData.Count(pt => pt.Opacity > 0.004f);
-                                        else { isBase = true; painted += 289; }
                                     }
                                 }
                                 // A layer that cannot be read is counted and named, not swallowed (PluginRead.cs).
-                                catch (Exception ex) { ViewProbe.TerrainLayerFailures.Add(msName, gp.X, gp.Y, layersRead - 1, ex, "--find-ltex"); }
+                                catch (Exception ex) { ViewProbe.TerrainLayerFailures.Add(msName, gp.X, gp.Y, layersRead, ex, "--find-ltex"); }
                                 // A later plugin's LAND for the same cell REPLACES the earlier one, so
                                 // overwrite rather than accumulate — same winner rule as the terrain walk.
                                 if (painted > 0 || isBase) hits[(gp.X, gp.Y)] = (painted, isBase, c.FormKey, c.EditorID);
