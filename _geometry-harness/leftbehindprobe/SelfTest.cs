@@ -125,6 +125,27 @@ public static class SelfTest
     static int _pass, _fail;
     static readonly List<string> _failures = new();
 
+    /// <summary>The BACKING-GAINED class, by its contract spelling.</summary>
+    const string BackingGained = "BACKING-GAINED";
+
+    /// <summary>Does the verdict credit the gained backing to <paramref name="refKey"/> (a FormKey, or LAND), changed in
+    /// the way <paramref name="how"/> names? Read by property name so the case needs no field the rule lacks.</summary>
+    static (bool Ok, string Why) Gained(PanelVerdict v, string refKey, string how)
+    {
+        if (v.GetType().GetProperty("GainedBy")?.GetValue(v) is not System.Collections.IEnumerable list)
+            return (false, "the verdict carries no gainedBy");
+        var seen = new List<string>();
+        foreach (var g in list)
+        {
+            var t = g.GetType();
+            string? r = t.GetProperty("Ref")?.GetValue(g) as string, h = t.GetProperty("How")?.GetValue(g) as string;
+            var share = t.GetProperty("ShareOfGain")?.GetValue(g) as float?;
+            seen.Add($"{r}:{h}:{share:0.00}");
+            if (r == refKey && h == how && share > 0.5f) return (true, $"gainedBy {r} {h} share {share:0.00}");
+        }
+        return (false, $"gainedBy [{string.Join(", ", seen)}] lacks {refKey}:{how} with most of the gain");
+    }
+
     static void Check(string name, bool ok, string detail)
     {
         if (ok) { _pass++; Console.WriteLine($"   PASS  {name,-62} {detail}"); }
@@ -266,6 +287,28 @@ public static class SelfTest
         var replaced = new Fx().PortalPanel().StandardWall();
         replaced.CityGeomOverride[Wall] = (new Vector3(40, 40, 40), "city:FxWall");
         Case("LB18 the partner's mesh replaced by the city arm's asset view", replaced, PanelClass.LeftBehind, PartnerCause.MeshReplaced);
+
+        // ---- BACKING-GAINED: a panel with nothing behind it in the base arm that the city arm builds up to ------------
+        // The class is asserted by its contract spelling and the credit read by name through reflection, so these cases
+        // compile against a rule that has neither yet and fail there; the same text then checks the rule that has both.
+        Case("BG1 open ground in the base arm, the city adds a wall at the panel", new Fx().PortalPanel().Place(2, NewRef, Wall2, WallPos),
+             BackingGained, null, v => Gained(v, NewRef.ToString(), "new"));
+        Case("BG2 a base wall 700 u away, moved by the city to the panel",
+             new Fx().PortalPanel().Place(0, W1, Wall, WallPos + new Vector3(0, 700, 0)).Place(2, W1, Wall, WallPos),
+             BackingGained, null, v => Gained(v, W1.ToString(), "moved"));
+        Case("BG3 a wall disabled through its parent in the base arm, the city enables the parent",
+             new Fx().PortalPanel().Place(0, M, Mark, new Vector3(2048, 3000, 0), disabled: true).StandardWall(parent: M)
+                     .Place(2, M, Mark, new Vector3(2048, 3000, 0)),
+             BackingGained, null, v => Gained(v, W1.ToString(), "parent-enabled"));
+        Case("BG3b the same wall, its chain unresolvable in the city arm (parent never placed)",
+             new Fx().PortalPanel().Place(0, M, Mark, new Vector3(2048, 3000, 0), disabled: true).StandardWall(parent: M)
+                     .Place(2, W1, Wall, WallPos, parent: Missing),
+             PanelClass.CannotAssess, null,
+             v => (v.Reason is not null && v.Reason.Contains("unresolved", StringComparison.OrdinalIgnoreCase), "reason names the unresolved chain"));
+        Case("BG4 the terrain far below the panel in the base arm, raised to it by the city",
+             new Fx { LandBase = -500f, LandCity = 90f }.PortalPanel(), BackingGained, null, v => Gained(v, "LAND", "terrain"));
+        Case("BG5 the city adds backing below tauPair: still UNPAIRED", new Fx().PortalPanel().Place(2, NewRef, Small, WallPos),
+             PanelClass.Unpaired, null, v => (v.BackingCity > 0f && v.BackingCity < Thresholds.Proposed.TauPair, $"bC {v.BackingCity:0.00} in (0, tauPair)"));
 
         Console.WriteLine();
         Console.WriteLine($"self-test: {_pass} passed, {_fail} failed{(_fail > 0 ? " — " + string.Join("; ", _failures) : "")}");
