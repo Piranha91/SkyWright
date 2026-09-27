@@ -18,7 +18,10 @@ using HousecarlCore.Progress;
 // If those two rates come out the same, the detector is not measuring what it claims to.
 //
 // usage: blockprobe <TargetPlugin.esp> [--exclude Other.esp ...] [--list N] [--geometry collision|render] [--bos on|off]
-//                   [--state SPEC] [--switch-map FILE] [--flags]
+//                   [--state SPEC] [--switch-map FILE] [--flags] [--order FILE]
+//   --order    evaluate a candidate configuration (a CandidateFile: the loaded plugins in order, and optionally the mod
+//              folders) instead of the profile's own, through _shared/HarnessOrderCli.cs as stateprobe and navownprobe do.
+//              Without it the run reads the profile exactly as before.
 //   POPULATION (Q27, 2026-09-06). By DEFAULT every physical read of this run — the target's obstacles, the floor under
 //              the band, the actor band itself, and the navcut boxes standing in the target's cells — judges the
 //              LOAD-TIME state: a reference is there when EnableState resolves its XESP parent chain enabled, not when
@@ -51,7 +54,8 @@ using var __run = RunLog.BeginProcess("blockprobe", args);
 
 string Instance = HarnessTarget.Require(HarnessTarget.Instance, "MO2 instance directory", "instance");
 string GamePath = HarnessTarget.Require(HarnessTarget.Game, "game directory", "game");
-string profileDir = Path.Combine(Instance, "profiles", HarnessTarget.Require(HarnessTarget.Profile, "MO2 profile name", "profile"));
+string profileName = HarnessTarget.Require(HarnessTarget.Profile, "MO2 profile name", "profile");
+string profileDir = Path.Combine(Instance, "profiles", profileName);
 string modsDir = Path.Combine(Instance, "mods");
 string overwriteDir = Path.Combine(Instance, "overwrite");
 string dataDir = Path.Combine(GamePath, "Data");
@@ -63,10 +67,11 @@ int listN = 25;
 string geometrySource = "collision";
 bool controllerBand = true;   // --band controller|nominal: the route rules' band top (the surface rules keep the nominal, as every run before)
 bool bosOn = true;
-string? stateSpec = null, switchMapPath = null;
+string? stateSpec = null, switchMapPath = null, orderFile = null;
 bool flagsOnly = false;
 for (int i = 1; i < args.Length; i++)
 {
+    if (args[i] == "--order" && i + 1 < args.Length) { orderFile = args[++i]; continue; }
     if (args[i] == "--state" && i + 1 < args.Length) { stateSpec = args[++i]; continue; }
     if (args[i] == "--switch-map" && i + 1 < args.Length) { switchMapPath = args[++i]; continue; }
     if (args[i] == "--flags") { flagsOnly = true; continue; }
@@ -82,12 +87,31 @@ try { popMode = PopulationCli.Resolve("blockprobe", flagsOnly, stateSpec); }
 catch (ArgumentException ex) { Console.Error.WriteLine(ex.Message); return 2; }
 
 var sw = Stopwatch.StartNew();
-var comp = Mo2LoadOrder.ReadComposition(profileDir);
-var arch = ArchiveDiscovery.Discover(profileDir, modsDir, dataDir, overwriteDir, GamePath);
-using var assets = AssetResolver.Build(overwriteDir, modsDir, dataDir, comp.EnabledMods, arch.Archives);
-var order = Mo2LoadOrder.Build(profileDir, modsDir, dataDir, overwriteDir);
+// --order: a candidate configuration through the shared resolver (its plugins, its asset view); otherwise the profile.
+ResolvedConfiguration? cfg = null;
+if (orderFile is not null)
+{
+    cfg = HarnessOrderCli.Resolve(profileName, profileDir, modsDir, dataDir, overwriteDir, GamePath, orderFile, null, null);
+    if (cfg.Refused) { Console.Error.WriteLine(cfg.RefusedReason); return 2; }
+    HarnessOrderCli.Print(cfg);
+}
+IReadOnlyList<string> orderedPaths;
+AssetResolver assetsBuilt;
+if (cfg is null)
+{
+    var comp = Mo2LoadOrder.ReadComposition(profileDir);
+    var arch = ArchiveDiscovery.Discover(profileDir, modsDir, dataDir, overwriteDir, GamePath);
+    assetsBuilt = AssetResolver.Build(overwriteDir, modsDir, dataDir, comp.EnabledMods, arch.Archives);
+    orderedPaths = Mo2LoadOrder.Build(profileDir, modsDir, dataDir, overwriteDir).OrderedPaths;
+}
+else
+{
+    assetsBuilt = AssetResolver.Build(overwriteDir, modsDir, dataDir, cfg.EnabledMods, cfg.Archives.Archives);
+    orderedPaths = cfg.OrderedPaths;
+}
+using var assets = assetsBuilt;
 
-var paths = order.OrderedPaths.Where(p => !exclude.Contains(Path.GetFileName(p))).ToList();
+var paths = orderedPaths.Where(p => !exclude.Contains(Path.GetFileName(p))).ToList();
 string? targetPath = paths.FirstOrDefault(p => string.Equals(Path.GetFileName(p), target, StringComparison.OrdinalIgnoreCase));
 if (targetPath is null) { Console.Error.WriteLine($"'{target}' is not in the active load order."); return 1; }
 
@@ -110,26 +134,21 @@ Console.WriteLine($"target touches {targetCells.Count:N0} cells: "
 // The floor under the target's exterior cells reaches across their borders (Q24, 2026-09-05 — _shared/FloorFeed.cs): the
 // 3×3 neighbourhood's refs and LAND, by worldspace and grid, are filed during the winning-state walk below. Nothing else
 // about the neighbours is loaded; the diff-based charter stands.
-var floorGrids = new HashSet<(FormKey Wrld, int X, int Y)>();
-foreach (var tc in targetCells.Values)
-    if (!tc.Interior && tc.Grid is { } tg)
-        for (int dx = -1; dx <= 1; dx++) for (int dy = -1; dy <= 1; dy++) floorGrids.Add((tc.Worldspace, tg.X + dx, tg.Y + dy));
-var floorRefsByWorld = new Dictionary<FormKey, Dictionary<(int, int), Dictionary<FormKey, PlacedRef>>>();
-var floorLandByWorld = new Dictionary<FormKey, Dictionary<(int, int), float[,]>>();
+// The walk's accumulation lives in BlockWalk.cs (so --moved-ref-selftest runs the same code); these are its maps.
+var walk = new BlockWalk(targetCells);
+var floorRefsByWorld = walk.FloorRefsByWorld;
+var floorLandByWorld = walk.FloorLandByWorld;
 var floorTally = new FloorFeed.Tally();
 
 // ---------- 2. resolve the WINNING state for exactly those cells ----------
 // Diff-based, per the charter: only the cells the target touches are ever loaded (plus the floor neighbourhood above).
 sw.Restart();
-var winRef = new Dictionary<FormKey, PlacedRef>();                       // ref FormKey -> winning placement
-var winRefCell = new Dictionary<FormKey, FormKey>();                     // ref FormKey -> winning cell
-// The LAST cell any plugin placed a tracked reference in. `winRefCell` remembers the last TARGET cell it was in, so a
-// later plugin that relocates it out of the target's cells leaves that stale; the navcut pass reads this instead, and a
-// box moved elsewhere is not measured against a navmesh it no longer stands on (the whole-order reading --state had).
-var lastCellOf = new Dictionary<FormKey, FormKey>();
-var winNav = new Dictionary<FormKey, (NavmeshGeometry Nav, string Plugin, FormKey Cell)>();
+var winRef = walk.WinRef;                 // ref FormKey -> winning placement
+var winRefCell = walk.WinRefCell;         // ref FormKey -> winning cell
+var lastCellOf = walk.LastCellOf;         // see BlockWalk.cs
+var winNav = walk.WinNav;
 var baseMesh = new Dictionary<FormKey, (string Mesh, string Type)>();
-var cellMeta = new Dictionary<FormKey, CellPlacements>();
+var cellMeta = walk.CellMeta;
 var npcFacts = new Dictionary<FormKey, ActorBand.NpcFacts>();
 var raceFacts = new Dictionary<FormKey, ActorBand.RaceFacts>();
 // The Base Object Swapper layer's index fills during this SAME walk (one pass): every plugin's slot in the runtime-id
@@ -145,15 +164,14 @@ var enableFacts = new EnableFactsIndex();
 // The COLL table by INDEX, and which layers are flagged NavmeshObstacle — what a navcut box is read by (XTRI carries the
 // layer's Index, not a FormID).
 var collByIndex = new Dictionary<uint, (string? Edid, bool NavmeshObstacle)>();
-var definedBy = new Dictionary<FormKey, string>();     // ref -> the first plugin that placed it, for the {NAVCUT by …} line
+var definedBy = walk.DefinedBy;     // ref -> the first plugin that placed it, for the {NAVCUT by …} line
 __run.Feature("plugins", paths.Count, "plugins").Stage("scan", "reading plugins", paths.Count, "plugins");
 
 
 foreach (var p in paths)
 {
     __run.Advance();
-    ISkyrimModGetter m;
-    try { m = SkyrimMod.CreateFromBinaryOverlay(p, SkyrimRelease.SkyrimSE); } catch { bos.Plugin(null); continue; }
+    if (BlockWalk.Open(p) is not { } m) { bos.Plugin(null); continue; }
     using (m as IDisposable)
     {
         bos.Plugin(m);
@@ -169,26 +187,16 @@ foreach (var p in paths)
             ActorBand.CollectRecord(rec, npcFacts, raceFacts);
         }
 
-        foreach (var cp in PlacementExtract.FromMod(m))
+        walk.Plugin(m, name, cp =>
         {
             bos.Cell(cp);
             foreach (var r in cp.Refs) enableFacts.Note(r);
-            if (!cp.Interior && cp.Grid is { } fg && floorGrids.Contains((cp.Worldspace, fg.X, fg.Y)))
-            {
-                if (!floorRefsByWorld.TryGetValue(cp.Worldspace, out var frg)) { floorRefsByWorld[cp.Worldspace] = frg = new(); floorLandByWorld[cp.Worldspace] = new(); }
-                FloorFeed.FileByGrid(cp, frg, floorLandByWorld[cp.Worldspace]);
-            }
-            bool targetCell = targetCells.ContainsKey(cp.Cell);
-            foreach (var r in cp.Refs) if (targetCell || lastCellOf.ContainsKey(r.FormKey)) lastCellOf[r.FormKey] = cp.Cell;
-            if (!targetCell) continue;
-            cellMeta[cp.Cell] = cp;
-            foreach (var r in cp.Refs) { winRef[r.FormKey] = r; winRefCell[r.FormKey] = cp.Cell; definedBy.TryAdd(r.FormKey, name); }
-            foreach (var nav in cp.Navmeshes) winNav[nav.FormKey] = (nav, name, cp.Cell);
-        }
+        });
     }
 }
 Console.WriteLine($"winning state for those cells: {winRef.Count:N0} refs, {winNav.Count:N0} navmeshes, "
                 + $"{baseMesh.Count:N0} base records  ({sw.Elapsed.TotalSeconds:0.0}s)");
+walk.Dump();
 // --bos on (default): the layer over the inis the game would read from this profile's VFS, resolved per reference below.
 // --bos off: the record bases and placements, as every run before 2026-09-04.
 if (bosOn) bos.Load(assets.LooseRoots);
@@ -218,8 +226,7 @@ if (stateSpec is not null)
     var stateIdx = new OverlapIndex();
     for (int p = 0; p < paths.Count; p++)
     {
-        ISkyrimModGetter m;
-        try { m = SkyrimMod.CreateFromBinaryOverlay(paths[p], SkyrimRelease.SkyrimSE); } catch { continue; }
+        if (BlockWalk.Open(paths[p]) is not { } m) continue;
         using (m as IDisposable) stateIdx.Ingest(p, m);
     }
     var sx = SwitchIndex.Build(stateIdx);

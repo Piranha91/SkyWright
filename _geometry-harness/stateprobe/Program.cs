@@ -207,61 +207,28 @@ long routeMeasured = 0, routeNoNav = 0, routeNoGeo = 0, routeSetAside = 0, route
 if (routeOn)
 {
     sw.Restart();
-    var winNav = new Dictionary<FormKey, Dictionary<FormKey, NavmeshGeometry>>();      // cell -> navmesh key -> geometry (winner)
-    var cellRefs = new Dictionary<FormKey, List<PlacedRef>>();
     var npcFacts = new Dictionary<FormKey, ActorBand.NpcFacts>();
     var raceFacts = new Dictionary<FormKey, ActorBand.RaceFacts>();
-    // The floor under a wanted exterior cell reaches across its borders (Q24, 2026-09-05 — _shared/FloorFeed.cs): the 3×3
-    // neighbourhood's refs and LAND are filed by worldspace and grid during the walk. A wanted cell's grid is learned from
-    // the first plugin that defines it (Skyrim.esm for all but a mod's own cells), read ahead of the walk below so the
-    // first plugin's own neighbours are filed too.
-    var cellGridOf = new Dictionary<FormKey, (FormKey Wrld, int X, int Y)>();
-    var floorGrids = new HashSet<(FormKey Wrld, int X, int Y)>();
-    var floorRefsByWorld = new Dictionary<FormKey, Dictionary<(int, int), Dictionary<FormKey, PlacedRef>>>();
-    var floorLandByWorld = new Dictionary<FormKey, Dictionary<(int, int), float[,]>>();
-    void LearnGrid(CellPlacements cp)
-    {
-        if (cp.Interior || cp.Grid is not { } g || !wantedCells.Contains(cp.Cell) || cellGridOf.ContainsKey(cp.Cell)) return;
-        cellGridOf[cp.Cell] = (cp.Worldspace, g.X, g.Y);
-        for (int dx = -1; dx <= 1; dx++) for (int dy = -1; dy <= 1; dy++) floorGrids.Add((cp.Worldspace, g.X + dx, g.Y + dy));
-    }
-    if (paths.Count > 0 && !pluginKey[0].IsNull)
-    {
-        try { using var m0 = SkyrimMod.CreateFromBinaryOverlay(paths[0], SkyrimRelease.SkyrimSE); foreach (var cp in PlacementExtract.FromMod(m0)) LearnGrid(cp); }
-        catch { }
-    }
+    // The walk's accumulation (the wanted cells' navmeshes and references, the floor filing) lives in RouteWalk.cs, so
+    // --moved-ref-selftest runs the same code.
+    var rwalk = new RouteWalk(wantedCells);
+    var winNav = rwalk.WinNav;
+    var cellRefs = rwalk.CellRefs;
+    var cellGridOf = rwalk.CellGridOf;
+    var floorRefsByWorld = rwalk.FloorRefsByWorld;
+    var floorLandByWorld = rwalk.FloorLandByWorld;
+    if (paths.Count > 0 && !pluginKey[0].IsNull) rwalk.Seed(paths[0]);
     for (int p = 0; p < paths.Count; p++)
     {
         if (pluginKey[p].IsNull) continue;
-        ISkyrimModGetter m;
-        try { m = SkyrimMod.CreateFromBinaryOverlay(paths[p], SkyrimRelease.SkyrimSE); } catch { continue; }
+        if (RouteWalk.Open(paths[p]) is not { } m) continue;
         using (m as IDisposable)
         {
             foreach (var rec in m.EnumerateMajorRecords()) ActorBand.CollectRecord(rec, npcFacts, raceFacts);
-            foreach (var cp in PlacementExtract.FromMod(m))
-            {
-                LearnGrid(cp);
-                if (!cp.Interior && cp.Grid is { } fg && floorGrids.Contains((cp.Worldspace, fg.X, fg.Y)))
-                {
-                    if (!floorRefsByWorld.TryGetValue(cp.Worldspace, out var frg)) { floorRefsByWorld[cp.Worldspace] = frg = new(); floorLandByWorld[cp.Worldspace] = new(); }
-                    FloorFeed.FileByGrid(cp, frg, floorLandByWorld[cp.Worldspace]);
-                }
-                if (!wantedCells.Contains(cp.Cell)) continue;
-                if (cp.Navmeshes.Count > 0)
-                {
-                    if (!winNav.TryGetValue(cp.Cell, out var d)) winNav[cp.Cell] = d = new Dictionary<FormKey, NavmeshGeometry>();
-                    foreach (var nav in cp.Navmeshes) d[nav.FormKey] = nav;
-                }
-                if (cp.Refs.Count > 0)
-                {
-                    if (!cellRefs.TryGetValue(cp.Cell, out var l)) cellRefs[cp.Cell] = l = new List<PlacedRef>();
-                    var seen = new HashSet<FormKey>(l.Select(r => r.FormKey));
-                    l.RemoveAll(r => cp.Refs.Any(x => x.FormKey == r.FormKey));
-                    l.AddRange(cp.Refs);
-                }
-            }
+            rwalk.Plugin(m);
         }
     }
+    rwalk.Dump();
     ActorBand.ResolveControllers(raceFacts, assets);
     var (fallbackTop, fallbackSrc) = ActorBand.TallestPlayable(raceFacts);
     Console.WriteLine($"route oracle: winning navmesh read for {winNav.Count:N0} of {wantedCells.Count:N0} cells; actor band fallback {fallbackSrc}; the band stands on the physical floor (Q24: {floorRefsByWorld.Values.Sum(w => w.Values.Sum(d => d.Count)):N0} exterior floor refs filed for {cellGridOf.Count:N0} exterior cells' neighbourhoods)  ({sw.Elapsed.TotalSeconds:0.0}s)");

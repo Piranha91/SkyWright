@@ -1219,6 +1219,7 @@ var npcRefWhere = new Dictionary<FormKey, (FormKey Cell, string? CellEd, PlacedR
 // "where is it" tables above drop them, and a watched door or NPC is reported as deleted rather than at an earlier spot.
 var refDeletedBy = new Dictionary<FormKey, string>();
 var npcBaseWhere = new Dictionary<FormKey, Dictionary<FormKey, (FormKey Cell, string? CellEd, PlacedRef Ref)>>();
+var whereTables = new ViewProbe.RefWhere.Tables(refDeletedBy, npcRefWhere, npcBaseWhere, doorWhere);   // filled by RefWhere.Observe
 var winNav = new Dictionary<FormKey, NavmeshGeometry>();
 FormKey targetWorldspace = FormKey.Null;
 (int X, int Y)? targetGrid = null;
@@ -1815,17 +1816,9 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot,
             foreach (var cp in PlacementExtract.FromMod(m, includeDeletions: true))
             {
                 navSelection.Observe(cp, plgName, navVersionPlugins, winNav, navByPlugin);
-                // The floor neighbourhood, filed IN LOAD ORDER (a later plugin's ref of the same
-                // FormKey replaces an earlier one) — the LAND heightmaps with it, which is what
-                // stops a station on bare terrain being refused for want of a floor that is there.
-                // The worldspace's persistent cell has no grid of its own and its refs reach
-                // anywhere, so it is filed whole; a gridded cell is filed within reach of the
-                // target. Nothing here runs unless --stations asked for it.
-                if (stationsSpec is not null && !cp.Interior && cp.Worldspace == targetWorldspace
-                    && (cp.Grid is not { } cgS || targetGrid is not { } tgS
-                        || (Math.Abs(cgS.X - tgS.X) <= StationFloorRadius
-                            && Math.Abs(cgS.Y - tgS.Y) <= StationFloorRadius)))
-                    FloorFeed.FileByGrid(cp, stationRefsByGrid, stationLandByGrid);
+                // The --stations floor neighbourhood (WalkSideTables.cs).
+                ViewProbe.StationFloorFiling.Observe(cp, stationsSpec is not null, targetWorldspace, targetGrid, StationFloorRadius,
+                                                     stationRefsByGrid, stationLandByGrid);
                 if (bosFill) bosIdx!.NoteCell(cp.Cell, cp.Worldspace);
                 foreach (var r in cp.Refs)
                 {
@@ -1840,34 +1833,8 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot,
                 // filed for the by-position merge; target and ring cells admit theirs).
                 var (isTarget, inRing) = ViewProbe.WinningRefWalk.Classify(cp, cellKey, interior, ringRefs, targetWorldspace, targetGrid);
                 winWalk.Observe(cp, isTarget, inRing);
-                // A later sighting undoes an earlier deletion; a deletion takes the ref out of every "where is it" table.
-                foreach (var r in cp.Refs) refDeletedBy.Remove(r.FormKey);
-                if (cp.DeletedRefs is { Count: > 0 } deletedHere)
-                    foreach (var d in deletedHere)
-                    {
-                        refDeletedBy[d.FormKey] = plgName;
-                        npcRefWhere.Remove(d.FormKey);
-                        doorWhere.Remove(d.FormKey);
-                        foreach (var perRef in npcBaseWhere.Values) perRef.Remove(d.FormKey);
-                    }
-                if (shotNpcWatch.Count > 0)
-                    foreach (var r in cp.Refs)
-                    {
-                        if (r.RecordType != "PlacedNpc") continue;
-                        if (shotNpcWatch.Contains(r.FormKey))
-                            npcRefWhere[r.FormKey] = (cp.Cell, cp.CellEditorId, r);         // later plugin wins
-                        if (r.Base is { } nb && shotNpcWatch.Contains(nb))
-                        {
-                            if (!npcBaseWhere.TryGetValue(nb, out var perRef)) npcBaseWhere[nb] = perRef = new();
-                            perRef[r.FormKey] = (cp.Cell, cp.CellEditorId, r);              // later plugin wins per ref
-                        }
-                    }
-                if (doorWatchKeys.Count > 0)
-                    foreach (var r in cp.Refs)
-                        if (doorWatchKeys.Contains(r.FormKey))
-                            { doorWhere[r.FormKey] = (cp.Cell, cp.CellEditorId, r);     // later plugin wins
-                              if (Environment.GetEnvironmentVariable("VP_DOOR_DEBUG") == "1")
-                                  Console.WriteLine($"   [debug] door {r.FormKey} in cp: Cell={cp.Cell} Grid={(cp.Grid is { } gg ? $"{gg.X},{gg.Y}" : "null")} Interior={cp.Interior} Ws={cp.Worldspace} plugin={m.ModKey}"); }
+                // The "where is it" tables: deletions, watched NPCs by reference and by base, watched doors (WalkSideTables.cs).
+                ViewProbe.RefWhere.Observe(cp, plgName, whereTables, shotNpcWatch, doorWatchKeys, m.ModKey);
                 if (isTarget)
                 {
                     cellLabel = cp.CellEditorId ?? cp.Cell.ToString();
@@ -2071,6 +2038,7 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot,
     if (winWalk.TakenOutCount is > 0 and var takenOut)
         Console.WriteLine($"   -{takenOut} ref(s) an earlier plugin placed in the loaded cells and a later plugin moved elsewhere: not drawn (the later plugin wins)");
     Console.WriteLine($"winning state: {winRef.Count:N0} refs, {winNav.Count:N0} navmeshes  ({sw.Elapsed.TotalSeconds:0.0}s)");
+    if (stationsSpec is not null) ViewProbe.StationFloorFiling.Dump(targetWorldspace, targetGrid, StationFloorRadius, stationRefsByGrid, stationLandByGrid);
     if (winRefsDump is not null && (!dumpTerrain || interior))
     {
         ViewProbe.WinningRefsDump.Write(winRefsDump, cellTarget, cellKey!.Value, interior, targetWorldspace, targetGrid, ringRefs,

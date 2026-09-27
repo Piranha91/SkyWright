@@ -126,6 +126,7 @@ HarnessOrderCli.Print(cfg);
 // changed-only rule, the authoring view — lives in _shared/PlacementHistory.cs since 2026-09-01,
 // shared with depprobe's placement-dependency pass.
 var history = new PlacementHistory();
+var aliasTargets = new AliasTargets(history);      // CHECK 1's question and its part of the walk (AliasTargets.cs)
 var refBase = new Dictionary<FormKey, FormKey>();
 var npcPlaced = new Dictionary<FormKey, List<FormKey>>();   // Npc base -> its placed references
 var baseName = new Dictionary<FormKey, (string Type, string? Edid)>();
@@ -192,7 +193,7 @@ for (int p = 0; p < paths.Count; p++)
         catch { /* an unreadable header means we cannot claim what it saw; leave the set empty */ }
         masterIdx[p] = mset;
 
-        foreach (var cp in PlacementExtract.FromMod(mod))
+        foreach (var cp in AliasTargets.Cells(mod))
         {
             cellName[cp.Cell] = (cp.CellEditorId, cp.Interior);
             bos.Cell(cp, withRefs: false);
@@ -208,7 +209,7 @@ for (int p = 0; p < paths.Count; p++)
                 // placement alone is not a step in the story and would swamp the history. Rotation and scale ride
                 // along (not part of SameAs — a rotation-only override is still no step) so the BOS hook's
                 // "rotation/scale-only" tally compares an override against the record's values, not against zero.
-                history.Record(r.FormKey, new Snap(p, r.Position, cp.Cell, r.InitiallyDisabled, r.Deleted, cp.Worldspace, r.Rotation, r.Scale));
+                aliasTargets.Placed(p, cp, r);
 
                 if (r.Base is { } bk)
                 {
@@ -234,6 +235,7 @@ for (int p = 0; p < paths.Count; p++)
         foreach (var rec in mod.EnumerateMajorRecords())
         {
             bos.Record(rec);
+            aliasTargets.Record(p, rec);
             // The census counts every record the plugin carries, by Mutagen type name — the "all
             // 19 records: 13 REFR, 3 ACHR, 2 CELL, 1 WRLD" evidence line, read instead of recited.
             var census = recordCensus.TryGetValue(p, out var cd) ? cd : recordCensus[p] = new Dictionary<string, int>();
@@ -546,14 +548,15 @@ foreach (var q in quests.Values)
     foreach (var a in q.Aliases)
     {
         if (AliasRef(a) is not { } rk) continue;
-        var w = Winning(rk);
+        var brk = aliasTargets.Break(rk);
         bool objTarget = q.Objectives.Any(o => o.TargetAliasIds.Contains(a.Id));
-        if (w is null)
+        if (brk is { Kind: "MISSING" })
             broken.Add($"   MISSING   {q.Label} [{PluginName(q.Plugin)}] alias '{a.Name}' -> {rk} (no placement anywhere){(objTarget ? "   OBJECTIVE" : "")}");
-        else if (w.Value.Deleted)
-            broken.Add($"   DELETED   {q.Label} [{PluginName(q.Plugin)}] alias '{a.Name}' -> {NameOf(rk)} deleted by {PluginName(w.Value.Plugin)}{(objTarget ? "   OBJECTIVE" : "")}");
+        else if (brk is { Kind: "DELETED" } d)
+            broken.Add($"   DELETED   {q.Label} [{PluginName(q.Plugin)}] alias '{a.Name}' -> {NameOf(rk)} deleted by {PluginName(d.Plugin)}{(objTarget ? "   OBJECTIVE" : "")}");
     }
 
+aliasTargets.Dump(PluginName);
 Console.WriteLine($"\n==== CHECK 1: alias anchored to a reference that is gone ====");
 Console.WriteLine($"   findings: {broken.Count:N0}");
 foreach (var b in broken.Take(listN)) Console.WriteLine(b);

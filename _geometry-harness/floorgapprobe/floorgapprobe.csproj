@@ -15,6 +15,10 @@
     <Compile Include="..\_shared\ActorBand.cs" Link="ActorBand.cs" />
     <Compile Include="..\_shared\DetectorModel.cs" Link="DetectorModel.cs" />
     <Compile Include="..\_shared\FloorFeed.cs" Link="FloorFeed.cs" />
+    <Compile Include="..\_shared\WinStateDump.cs" Link="WinStateDump.cs" />
+    <Compile Include="..\_shared\SyntheticOrder.cs" Link="SyntheticOrder.cs" />
+    <Compile Include="..\_shared\HarnessOrderCli.cs" Link="HarnessOrderCli.cs" />
+    <Compile Include="..\_shared\Configuration.cs" Link="Configuration.cs" />
     <ProjectReference Include="..\..\src\housecarl-core\housecarl-core.csproj" />
     <Compile Include="..\_shared\EnablePopulation.cs" Link="EnablePopulation.cs" />
   </ItemGroup>

@@ -157,7 +157,8 @@ var cellNewRefs = new Dictionary<(FormKey Cell, int Plugin), List<FormKey>>();  
 // rather than during it (Q27). Before then the walk filtered on the record's own flag as it went, which could not see a
 // parent an override enabled or disabled later.
 var enableFacts = new EnableFactsIndex();
-var uncutCandidates = new List<(FormKey Cell, int Plugin, FormKey Ref, FormKey Base)>();
+var uncutPop = new UncutPopulation();                 // the UNCUT candidates (UncutPopulation.cs)
+var uncutCandidates = uncutPop.Candidates;
 var cellName = new Dictionary<FormKey, (string? Edid, bool Interior)>();
 // A cell's spatial identity, for the reach pass: an exterior candidate near a cell border can be
 // rescued by the NEIGHBOUR cell's mesh, so "nearby coverage" must span the ±1 grid ring.
@@ -256,7 +257,7 @@ for (int p = 0; p < paths.Count; p++)
             }
         }
 
-        foreach (var cp in PlacementExtract.FromMod(mod))
+        foreach (var cp in UncutPopulation.Cells(mod))
         {
             cellName[cp.Cell] = (cp.CellEditorId, cp.Interior);
             cellSpace[cp.Cell] = (cp.Worldspace, cp.Grid?.X ?? int.MinValue, cp.Grid?.Y ?? int.MinValue, cp.Interior);
@@ -272,14 +273,8 @@ for (int p = 0; p < paths.Count; p++)
                 s.Add(p);
             }
 
-            foreach (var r in cp.Refs)
-            {
-                enableFacts.Note(r);
-                if (r.Deleted) continue;
-                if (r.FormKey.ModKey != mod.ModKey) continue;                  // an override is not an introduction
-                if (r.Base is not { } bk) continue;
-                uncutCandidates.Add((cp.Cell, p, r.FormKey, bk));
-            }
+            foreach (var r in cp.Refs) enableFacts.Note(r);
+            uncutPop.Note(cp, p, mod.ModKey);
         }
     }
     if ((p + 1) % 150 == 0) Console.WriteLine($"   ... {p + 1}/{paths.Count} plugins, {sw.Elapsed.TotalSeconds:0}s");
@@ -288,14 +283,9 @@ for (int p = 0; p < paths.Count; p++)
 // The UNCUT population, once every plugin has spoken: an obstructing base, and the reference present at load under the
 // run's population (Q27). The base type could not be tested during the walk either — a later plugin can define the base.
 var pop = flagsOnly ? EnablePopulation.Flags(enableFacts) : EnablePopulation.LoadTime(enableFacts);
-long uncutSkippedAbsent = 0, uncutSkippedType = 0;
-foreach (var (cell, plugin, refKey, baseKey) in uncutCandidates)
-{
-    if (!baseType.TryGetValue(baseKey, out var bt) || !Obstructing.Contains(bt)) { uncutSkippedType++; continue; }
-    if (!pop.Enabled(refKey)) { uncutSkippedAbsent++; continue; }
-    if (!cellNewRefs.TryGetValue((cell, plugin), out var bag)) cellNewRefs[(cell, plugin)] = bag = new List<FormKey>();
-    bag.Add(baseKey);
-}
+uncutPop.Resolve(k => baseType.TryGetValue(k, out var bt) ? bt : null, Obstructing, pop.Enabled, cellNewRefs,
+              out long uncutSkippedAbsent, out long uncutSkippedType);
+uncutPop.Dump();
 
 Console.WriteLine($"\nindexed {navProviders.Count:N0} navmesh records across {cellNavPlugins.Count:N0} cells  ({sw.Elapsed.TotalSeconds:0.0}s)");
 Console.WriteLine($"   {pop.Describe()}");
@@ -557,6 +547,7 @@ if (reachCandidates)
     {
         var wantedCells = pool.SelectMany(c => NearbyCells(navCell[c.Nav])).ToHashSet();
         census = NeedsWitnessJoin.Build(paths, wantedCells, popMode == PopulationMode.Flags);
+        NeedsWitnessJoin.Dump(census, wantedCells);
         Console.WriteLine($"   witness census: {census.RefsSeen:N0} placed refs in {wantedCells.Count:N0} cells (pool + ring), "
                         + $"{census.Packs.Count:N0} packages, {census.NpcPackages.Count:N0} NPC records, {census.NpcPlacedAnywhere.Count:N0} placed somewhere"
                         + (census.UnreadablePlugins > 0 ? $"; {census.UnreadablePlugins} plugins unreadable (counted per rule 6)" : "")

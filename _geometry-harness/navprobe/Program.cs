@@ -127,8 +127,7 @@ if (bosOn)
     foreach (var p in order.OrderedPaths)
     {
         __run.Advance();
-        ISkyrimModGetter om;
-        try { om = SkyrimMod.CreateFromBinaryOverlay(p, SkyrimRelease.SkyrimSE); } catch { bos.Plugin(null); continue; }
+        if (BosWalkOpen.Open(p) is not { } om) { bos.Plugin(null); continue; }
         using (om as IDisposable)
         {
             bos.Plugin(om);

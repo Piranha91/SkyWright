@@ -164,6 +164,7 @@ static class RouteStationMode
                         + $"{sw.Elapsed.TotalSeconds:0.0}s: {walk.NavWin.Count:N0} winning navmesh(es), "
                         + $"{walk.CityPlacedKeys.Count:N0} placed record(s) and {walk.CityNavKeys.Count:N0} navmesh(es) "
                         + $"carried by {changed}; floor filed over {walk.Bound.Count} grid square(s)");
+        walk.DumpWinState();
 
         string ed = walk.WsEditorId.Length > 0 ? walk.WsEditorId : input.Worldspace.ToString().Replace(':', '_');
         var world = walk.World(ed, changed, input.OrderedPaths.Select(p => Path.GetFileName(p)).ToList(), input.BaseModel);
@@ -410,7 +411,7 @@ static class RouteStationMode
 
     // ---- the worldspace pass: raw, and classifying nothing ----------------------------------------------
 
-    sealed class Walk
+    internal sealed class Walk
     {
         readonly FormKey _ws;
         readonly HashSet<FormKey> _children;
@@ -521,6 +522,20 @@ static class RouteStationMode
                                              RefsByGrid, LandByGrid);
                     }
                 }
+        }
+
+        /// <summary>HOUSECARL_WINSTATE_DUMP: the floor filing and the planes after the pass, for an independent reader.</summary>
+        public void DumpWinState()
+        {
+            if (!HarnessShared.WinStateDump.Asked) return;
+            HarnessShared.WinStateDump.Write("viewprobe-route", new
+            {
+                worldspace = _ws.ToString(), plane = _plane.ToString(),
+                bound = Bound.OrderBy(g => g).Select(g => new { x = g.X, y = g.Y }).ToList(),
+                prims = Prims.OrderBy(p => p.Key.ToString(), StringComparer.Ordinal)
+                             .Select(p => new { formKey = p.Key.ToString(), present = p.Value is not null, x = p.Value?.Position.X, y = p.Value?.Position.Y }).ToList(),
+                floor = HarnessShared.WinStateDump.Floor(_ws, RefsByGrid, LandByGrid),
+            });
         }
 
         public RouteWorld World(string ed, string changed, IReadOnlyList<string> arm, Func<FormKey, string?> baseModel)

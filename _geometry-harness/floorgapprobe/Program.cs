@@ -24,6 +24,8 @@ using HousecarlCore.Progress;
 //        floorgapprobe line <CellEditorID> --at X,Y,Z --heading DEG [--span 384] [--every 16]
 //        floorgapprobe points <CellEditorID> <file>     (lines of "x y z": a walker's positions; prints z − floor per point)
 //   common: [--plugin Skyrim.esm] [--winning] [--flags] [--instance DIR] [--game DIR] [--profile NAME] [--depth 128] [--reach 48] [--split 192] [--own]
+//           [--order FILE]   with --winning: walk a candidate configuration (a CandidateFile) instead of the profile's order,
+//                            through _shared/HarnessOrderCli.cs, assets included. Without it nothing changes.
 //   sweep     every cell of the plugin with navmesh and refs (navprobe's population): δ per triangle (the centroid; four
 //             interior points on a triangle longer than --split), per cell (median, spread, storeys), the histograms by
 //             interior / exterior / floor source / worldspace, the no-floor share by reason, the widest within-storey
@@ -62,7 +64,7 @@ using var __run = RunLog.BeginProcess("floorgapprobe", args);
 string Instance = HarnessTarget.Instance, GamePath = HarnessTarget.Game, profileName = HarnessTarget.Profile;
 string plugin = "Skyrim.esm";
 float depth = NavmeshFloor.DefaultMaxDepth, reach = NavmeshFloor.DefaultUpReach, split = NavmeshFloor.DefaultSplitAbove;
-string? tsvPath = null, trisPath = null, verdictsDir = null;
+string? tsvPath = null, trisPath = null, verdictsDir = null, orderFile = null;
 bool ownOnly = false, winning = false, flagsOnly = false;
 int maxCells = int.MaxValue;
 Vec3? at = null; float heading = 0f, span = 384f, every = 16f;
@@ -85,6 +87,7 @@ for (int i = 0; i < args.Length; i++)
         case "--verdicts": verdictsDir = Next(); break;
         case "--own": ownOnly = true; break;
         case "--winning": winning = true; break;
+        case "--order": orderFile = Next(); break;
         case "--flags": flagsOnly = true; break;
         case "--heading": heading = float.Parse(Next(), CultureInfo.InvariantCulture); break;
         case "--span": span = float.Parse(Next(), CultureInfo.InvariantCulture); break;
@@ -115,10 +118,31 @@ Console.WriteLine($"floorgapprobe {mode}: {(winning ? "the WINNING state of the 
 Console.WriteLine($"   actor-solid layers: {string.Join(", ", CollisionLayers.ActorSolid)}");
 
 // ---- the VFS, for the meshes ----
-var comp = Mo2LoadOrder.ReadComposition(profileDir);
-var arch = ArchiveDiscovery.Discover(profileDir, modsDir, dataDir, overwriteDir, GamePath);
-using var assets = AssetResolver.Build(overwriteDir, modsDir, dataDir, comp.EnabledMods, arch.Archives);
-Console.WriteLine($"assets: {arch.Archives.Count} BSAs indexed ({sw.ElapsedMilliseconds} ms)");
+// --order (with --winning): a candidate configuration through the shared resolver, its asset view included.
+ResolvedConfiguration? cfg = null;
+if (orderFile is not null)
+{
+    if (!winning) { Console.Error.WriteLine("--order describes a load order to walk, so it needs --winning"); return 2; }
+    cfg = HarnessOrderCli.Resolve(profileName, profileDir, modsDir, dataDir, overwriteDir, GamePath, orderFile, null, null);
+    if (cfg.Refused) { Console.Error.WriteLine(cfg.RefusedReason); return 2; }
+    HarnessOrderCli.Print(cfg);
+}
+AssetResolver assetsBuilt;
+int bsaCount;
+if (cfg is null)
+{
+    var comp = Mo2LoadOrder.ReadComposition(profileDir);
+    var arch = ArchiveDiscovery.Discover(profileDir, modsDir, dataDir, overwriteDir, GamePath);
+    assetsBuilt = AssetResolver.Build(overwriteDir, modsDir, dataDir, comp.EnabledMods, arch.Archives);
+    bsaCount = arch.Archives.Count;
+}
+else
+{
+    assetsBuilt = AssetResolver.Build(overwriteDir, modsDir, dataDir, cfg.EnabledMods, cfg.Archives.Archives);
+    bsaCount = cfg.Archives.Archives.Count;
+}
+using var assets = assetsBuilt;
+Console.WriteLine($"assets: {bsaCount} BSAs indexed ({sw.ElapsedMilliseconds} ms)");
 
 // ---- the plugin: base records with a mesh, worldspace names, every cell with its landscape ----
 // --plugin: the game's Data folder first, else the profile's load order (a mod's plugin lives in its mod folder).
@@ -126,8 +150,7 @@ var walk = new List<string>();
 if (winning)
 {
     if (mode == "sweep") { Console.Error.WriteLine("--winning is for cell, line and points (one cell resolved through the load order), not sweep"); return 2; }
-    var order = Mo2LoadOrder.Build(profileDir, modsDir, dataDir, overwriteDir);
-    walk.AddRange(order.OrderedPaths);
+    walk.AddRange(cfg is not null ? cfg.OrderedPaths : Mo2LoadOrder.Build(profileDir, modsDir, dataDir, overwriteDir).OrderedPaths);
 }
 else
 {
@@ -146,24 +169,16 @@ var baseMesh = new Dictionary<FormKey, (string Mesh, string Type)>();
 // unresolved" for those. Gathered here, used by the population below.
 var enableFacts = new EnableFactsIndex();
 var worldName = new Dictionary<FormKey, string>();
-var refsByWorld = new Dictionary<FormKey, Dictionary<(int, int), Dictionary<FormKey, PlacedRef>>>();
-var landByWorld = new Dictionary<FormKey, Dictionary<(int, int), float[,]>>();
-var cells = new List<CellPlacements>();
-// --winning: only the named cell is merged (refs and navmeshes by FormKey, a later plugin replacing an earlier one; the
-// meta from the first plugin that carries the cell, the LAND from the last that has one); the exterior neighbourhood is
-// filed from every plugin as the single-plugin path files it from one. A navmesh a later plugin DELETES outright is not
-// removed here (blockprobe's walk has the same simplification).
+// The walk's accumulation (the floor filing, and under --winning the one merged cell) lives in FloorgapWalk.cs, so
+// --moved-ref-selftest runs the same code.
 string? wantCell = winning && positional.Count > 1 ? positional[1] : null;
-FormKey? wantKey = null;
-if (wantCell is not null) { try { wantKey = FormKey.Factory(wantCell); } catch { } }
-CellPlacements? mergedMeta = null; float[,]? mergedLand = null;
-var mergedRefs = new Dictionary<FormKey, PlacedRef>(); var mergedNavs = new Dictionary<FormKey, NavmeshGeometry>();
-var pluginsWithCell = new List<string>();
+var fwalk = new FloorgapWalk(winning, wantCell);
+var refsByWorld = fwalk.RefsByWorld;
+var landByWorld = fwalk.LandByWorld;
+var cells = fwalk.Cells;
 foreach (var path in walk)
 {
-    ISkyrimModGetter mod;
-    try { mod = SkyrimMod.CreateFromBinaryOverlay(path, SkyrimRelease.SkyrimSE); }
-    catch (Exception ex) { if (!winning) throw; Console.Error.WriteLine($"   skipped {Path.GetFileName(path)}: {ex.Message}"); continue; }
+    if (fwalk.Open(path) is not { } mod) continue;
     using (mod as IDisposable)
     {
         foreach (var rec in mod.EnumerateMajorRecords())
@@ -173,26 +188,12 @@ foreach (var path in walk)
                 baseMesh[rec.FormKey] = (f.GivenPath, rec.GetType().Name.Replace("BinaryOverlay", ""));
         }
         foreach (var wrld in mod.Worldspaces.Records) worldName[wrld.FormKey] = wrld.EditorID ?? wrld.FormKey.ToString();
-        foreach (var cp in PlacementExtract.FromMod(mod))
-        {
-            foreach (var r in cp.Refs) enableFacts.Note(r);
-            if (!cp.Interior)
-            {
-                if (!refsByWorld.TryGetValue(cp.Worldspace, out var rg)) { refsByWorld[cp.Worldspace] = rg = new(); landByWorld[cp.Worldspace] = new(); }
-                FloorFeed.FileByGrid(cp, rg, landByWorld[cp.Worldspace]);
-            }
-            if (!winning) { cells.Add(cp); continue; }
-            bool isWanted = (wantKey is { } wk && cp.Cell == wk) || (wantCell is not null && string.Equals(cp.CellEditorId, wantCell, StringComparison.OrdinalIgnoreCase));
-            if (!isWanted) continue;
-            wantKey ??= cp.Cell;
-            mergedMeta ??= cp;
-            if (cp.Land is not null) mergedLand = cp.Land;
-            foreach (var r in cp.Refs) mergedRefs[r.FormKey] = r;
-            foreach (var nv in cp.Navmeshes) mergedNavs[nv.FormKey] = nv;
-            pluginsWithCell.Add(Path.GetFileName(path));
-        }
+        fwalk.Plugin(mod, path, cp => { foreach (var r in cp.Refs) enableFacts.Note(r); });
     }
 }
+fwalk.Dump();
+var mergedMeta = fwalk.MergedMeta; var mergedLand = fwalk.MergedLand;
+var mergedRefs = fwalk.MergedRefs; var mergedNavs = fwalk.MergedNavs; var pluginsWithCell = fwalk.PluginsWithCell;
 if (winning)
 {
     if (mergedMeta is null) { Console.Error.WriteLine($"cell '{wantCell}' is in no plugin of the load order"); return 2; }

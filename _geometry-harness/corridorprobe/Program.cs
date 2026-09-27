@@ -235,8 +235,7 @@ if (mode == "arms" || mode == "cut")
     {
         foreach (var p in order.OrderedPaths)
         {
-            ISkyrimModGetter om;
-            try { om = SkyrimMod.CreateFromBinaryOverlay(p, SkyrimRelease.SkyrimSE); } catch { bos.Plugin(null); continue; }
+            if (BosWalkOpen.Open(p) is not { } om) { bos.Plugin(null); continue; }
             using (om as IDisposable)
             {
                 bos.Plugin(om);

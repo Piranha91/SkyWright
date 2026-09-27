@@ -191,6 +191,22 @@ static class NeedsWitnessJoin
         return c;
     }
 
+    /// <summary>HOUSECARL_WINSTATE_DUMP: the census's witnesses, its whole-order cell table and the NPC bases it calls
+    /// placed, for an independent reader.</summary>
+    public static void Dump(Census c, HashSet<FormKey> wantedCells)
+    {
+        if (!WinStateDump.Asked) return;
+        WinStateDump.Write("navownprobe-census", new
+        {
+            wantedCells = wantedCells.Select(k => k.ToString()).OrderBy(k => k, StringComparer.Ordinal).ToList(),
+            refs = c.Refs.Values.OrderBy(r => r.Key.ToString(), StringComparer.Ordinal)
+                    .Select(r => new { formKey = r.Key.ToString(), cell = r.Cell.ToString(), x = r.Pos.X, y = r.Pos.Y, z = r.Pos.Z, state = r.State }).ToList(),
+            refCellAnywhere = c.RefCellAnywhere.OrderBy(k => k.Key.ToString(), StringComparer.Ordinal)
+                    .Select(k => new { formKey = k.Key.ToString(), cell = k.Value.ToString() }).ToList(),
+            npcPlacedAnywhere = c.NpcPlacedAnywhere.Select(k => k.ToString()).OrderBy(k => k, StringComparer.Ordinal).ToList(),
+        });
+    }
+
     /// <summary>The join for one record. <paramref name="cells"/> is the record's cell first, then
     /// (exteriors) its ±1 ring; <paramref name="L"/>/<paramref name="W"/> are the loser's and
     /// winner's versions of the record and <paramref name="others"/> every other winning mesh
