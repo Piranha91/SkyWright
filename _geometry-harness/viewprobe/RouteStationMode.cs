@@ -441,7 +441,7 @@ static class RouteStationMode
         public void PreRead(string path, int margin)
         {
             var seeds = new HashSet<(int, int)>();
-            var mod = SkyrimMod.CreateFromBinaryOverlay(path, SkyrimRelease.SkyrimSE);
+            var mod = PluginRead.Open(path, -1, 0, "--stations (route) pre-read");   // refused, not raw (PluginRead.cs)
             using var _ = mod as IDisposable;
             foreach (var ws in mod.Worldspaces.Records)
             {
@@ -466,9 +466,8 @@ static class RouteStationMode
         public void Plugin(string path)
         {
             string plugin = Path.GetFileName(path);
-            ISkyrimModGetter mod;
-            try { mod = SkyrimMod.CreateFromBinaryOverlay(path, SkyrimRelease.SkyrimSE); }
-            catch (Exception ex) { throw new InvalidOperationException($"{plugin} could not be read: {ex.Message}"); }
+            // Refused with a named exit through the render's top-level handler (PluginRead.cs).
+            ISkyrimModGetter mod = PluginRead.Open(path, -1, 0, "--stations (route) worldspace pass");
             using (mod as IDisposable)
                 foreach (var ws in mod.Worldspaces.Records)
                 {

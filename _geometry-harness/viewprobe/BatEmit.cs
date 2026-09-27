@@ -66,10 +66,14 @@ static class BatEmit
             || cp.Cell.ID.ToString("X6").Equals(want.TrimStart('0'), StringComparison.OrdinalIgnoreCase);
 
         Console.WriteLine($"emit-bats: walking the load order for {wl.Cells.Count} cell(s)...");
+        int batIndex = -1;
         foreach (var path in orderedPaths)
         {
-            ISkyrimModGetter m;
-            try { m = SkyrimMod.CreateFromBinaryOverlay(path, SkyrimRelease.SkyrimSE); } catch { continue; }
+            batIndex++;
+            // Refused, not skipped (PluginRead.cs): a skipped plugin left an earlier cell identity and navmesh behind.
+            ISkyrimModGetter m = PluginRead.Open(path, batIndex, orderedPaths.Count, "--emit-bats");
+            try
+            {
             using (m as IDisposable)
             {
                 // `cow` takes the worldspace's EditorID, not its FormID — and the name a mod list
@@ -88,6 +92,9 @@ static class BatEmit
                         foreach (var nm in cp.Navmeshes) nav[ci][nm.FormKey] = nm;
                     }
             }
+            }
+            catch (Exception ex) when (PluginRead.Wraps(ex))
+            { throw PluginRead.Failed(path, batIndex, orderedPaths.Count, "--emit-bats", ex); }
         }
 
         var missing = Enumerable.Range(0, wl.Cells.Count).Where(i => !ident.ContainsKey(i)).ToList();

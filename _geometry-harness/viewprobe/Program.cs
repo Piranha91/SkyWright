@@ -1123,6 +1123,17 @@ if (orderFile is not null)
                               candidateConfiguration.OrderedPaths.Count);
     HarnessShared.HarnessOrderCli.Print(candidateConfiguration);
 }
+// A profile that lists an active plugin no file provides: refused, as --order already refuses (PluginRead.cs). The
+// plugin used to drop out of the order silently, leaving an earlier plugin's version of everything it overrides.
+if (candidateConfiguration is null && order.OrderedPaths.Count < order.ActiveCount)
+{
+    foreach (var w in order.Warnings.Where(w => w.StartsWith("load order lists", StringComparison.Ordinal)))
+        Console.Error.WriteLine("   " + w);
+    Console.Error.WriteLine($"the profile's load order has {order.ActiveCount} active plugin(s) and only {order.OrderedPaths.Count} "
+                          + "resolve to a file; refusing: without the missing ones, an earlier plugin's version of every record "
+                          + "they override would be used silently.");
+    return 2;
+}
 // The configuration this capture REPORTS, which is not always the one it was built from:
 // --order REPLACES the configuration, while --config-identity only asks what the profile's own
 // inputs were. Kept in its own variable so asking the question cannot change the order, the asset
@@ -1159,7 +1170,8 @@ if (emitBats is not null)
     bool asPath = Path.IsPathRooted(emitBats) || Path.GetFileName(emitBats) != emitBats;
     string batsDir = asPath ? Path.GetFullPath(emitBats) : Path.Combine(modsDir, emitBats);
     string batsName = Path.GetFileName(Path.TrimEndingDirectorySeparator(batsDir));
-    return ViewProbe.BatEmit.Run(worklist!, worklistPaths[0], batsDir, batsName, order.OrderedPaths, Instance, batsProfiles);
+    try { return ViewProbe.BatEmit.Run(worklist!, worklistPaths[0], batsDir, batsName, order.OrderedPaths, Instance, batsProfiles); }
+    catch (ViewProbe.ReadRefusal ex) { Console.Error.WriteLine(ex.Message); return 2; }   // PluginRead.cs
 }
 
 var arch = candidateConfiguration?.Archives ?? ArchiveDiscovery.Discover(profileDir, modsDir, dataDir, overwriteDir, GamePath);
@@ -1663,8 +1675,11 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot,
     {
         __run.Advance();
         scannedForCell++;
-        ISkyrimModGetter m;
-        try { m = SkyrimMod.CreateFromBinaryOverlay(path, SkyrimRelease.SkyrimSE); } catch { continue; }
+        // A plugin that cannot be read is refused, not skipped (PluginRead.cs): the target's identity would otherwise
+        // come from whichever later plugin happened to be readable.
+        ISkyrimModGetter m = ViewProbe.PluginRead.Open(path, scannedForCell - 1, order.OrderedPaths.Count, "the find-cell pass");
+        try
+        {
         using (m as IDisposable)
         {
             foreach (var cp in PlacementExtract.FromMod(m))
@@ -1678,6 +1693,9 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot,
                 break;
             }
         }
+        }
+        catch (Exception ex) when (ViewProbe.PluginRead.Wraps(ex))
+        { throw ViewProbe.PluginRead.Failed(path, scannedForCell - 1, order.OrderedPaths.Count, "the find-cell pass", ex); }
         if (cellKey is not null) break;
     }
     if (cellKey is null) { Console.Error.WriteLine($"cell '{cellTarget}' not found in the active load order."); return 1; }
@@ -1695,11 +1713,16 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot,
         "the winning state: every plugin, for the refs and navmeshes that win",
         order.OrderedPaths.Count, "plugins");
     ViewProbe.CellFactsRed.Walk(cellScene, prepass: false);
+    int walkIndex = -1;
     foreach (var path in order.OrderedPaths)
     {
         ViewProbe.RenderStages.Advance();
-        ISkyrimModGetter m;
-        try { m = SkyrimMod.CreateFromBinaryOverlay(path, SkyrimRelease.SkyrimSE); } catch { if (bosFill) bosLight.Add((ModKey.Null, false)); continue; }
+        walkIndex++;
+        // Refused, not skipped (PluginRead.cs): a plugin this walk cannot read would leave an earlier plugin's version
+        // of every record it overrides in the winning state.
+        ISkyrimModGetter m = ViewProbe.PluginRead.Open(path, walkIndex, order.OrderedPaths.Count, "the winning-state walk");
+        try
+        {
         using (m as IDisposable)
         {
             if (bosFill) bosLight.Add((m.ModKey, m.IsSmallMaster || m.ModKey.Type == ModType.Light));
@@ -1838,6 +1861,9 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot,
                 }
             }
         }
+        }
+        catch (Exception ex) when (ViewProbe.PluginRead.Wraps(ex))
+        { throw ViewProbe.PluginRead.Failed(path, walkIndex, order.OrderedPaths.Count, "the winning-state walk", ex); }
     }
     try
     {
@@ -2197,14 +2223,19 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot,
         }
         if (conflictFile is { } cf)
         {
+            int badConflictKeys = 0;
             foreach (var c in cf.Conflicts)
                 foreach (var rec in c.Necessary.Concat(c.Alternative ?? Array.Empty<HarnessShared.ConflictRecord>()))
                 {
                     FormKey fk;
-                    try { fk = FormKey.Factory(rec.FormKey); } catch { continue; }
+                    // A FormKey that does not parse is counted and named, not skipped in silence (a bad input file).
+                    try { fk = FormKey.Factory(rec.FormKey); }
+                    catch { Console.Error.WriteLine($"   conflict file: '{rec.FormKey}' is not a FormKey; that record is not highlighted."); badConflictKeys++; continue; }
                     if (rec.Role == "navmesh" && winNav.ContainsKey(fk)) MarkRed(fk, null);
                     else if (rec.Role == "door" && winRef.ContainsKey(fk)) conflictDoors.Add(fk);
                 }
+            if (badConflictKeys > 0)
+                Console.Error.WriteLine($"   conflict file: {badConflictKeys} record(s) with an unparseable FormKey were not highlighted.");
             int redHere = redNav.Count(kv => winNav.ContainsKey(kv.Key));
             Console.WriteLine($"   conflicts overlay: {redHere} navmesh record(s) in this cell painted red, "
                             + $"{conflictDoors.Count} door(s) highlighted (from {cf.Conflicts.Count} conflicts in {Path.GetFileName(conflictsPath)})");
@@ -2546,10 +2577,14 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot,
             {
                 // grid -> (painted points across all quadrants, whether any quadrant uses it as BASE)
                 var hits = new Dictionary<(int X, int Y), (int Painted, bool Base, FormKey Cell, string? Ed)>();
+                int ltexIndex = -1;
                 foreach (var path in order.OrderedPaths)
                 {
-                    ISkyrimModGetter ms;
-                    try { ms = SkyrimMod.CreateFromBinaryOverlay(path, SkyrimRelease.SkyrimSE); } catch { continue; }
+                    ltexIndex++;
+                    ISkyrimModGetter ms = ViewProbe.PluginRead.Open(path, ltexIndex, order.OrderedPaths.Count, "--find-ltex");
+                    string msName = Path.GetFileName(path);
+                    try
+                    {
                     using (ms as IDisposable)
                         foreach (var ws in ms.Worldspaces.Records)
                         {
@@ -2565,24 +2600,29 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot,
                             foreach (var c in All())
                             {
                                 if (c.Grid?.Point is not { } gp || c.Landscape is not { } ls) continue;
-                                int painted = 0; bool isBase = false;
+                                int painted = 0; bool isBase = false; int layersRead = 0;
                                 try
                                 {
                                     foreach (var layer in ls.Layers)
                                     {
+                                        layersRead++;
                                         if (layer.Header?.Texture.FormKeyNullable is not { } lk || !wanted.ContainsKey(lk)) continue;
                                         if (layer is IAlphaLayerGetter al)
                                             painted += al.AlphaLayerData.Count(pt => pt.Opacity > 0.004f);
                                         else { isBase = true; painted += 289; }
                                     }
                                 }
-                                catch { }
+                                // A layer that cannot be read is counted and named, not swallowed (PluginRead.cs).
+                                catch (Exception ex) { ViewProbe.TerrainLayerFailures.Add(msName, gp.X, gp.Y, layersRead - 1, ex, "--find-ltex"); }
                                 // A later plugin's LAND for the same cell REPLACES the earlier one, so
                                 // overwrite rather than accumulate — same winner rule as the terrain walk.
                                 if (painted > 0 || isBase) hits[(gp.X, gp.Y)] = (painted, isBase, c.FormKey, c.EditorID);
                                 else hits.Remove((gp.X, gp.Y));
                             }
                         }
+                    }
+                    catch (Exception ex) when (ViewProbe.PluginRead.Wraps(ex))
+                    { throw ViewProbe.PluginRead.Failed(path, ltexIndex, order.OrderedPaths.Count, "--find-ltex", ex); }
                 }
                 Console.WriteLine($"   ---- cells painting it, top 20 of {hits.Count} ----");
                 foreach (var ((gx, gy), (painted, isBase, ck, ced)) in hits.OrderByDescending(k => k.Value.Painted).Take(20))
@@ -2593,6 +2633,8 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot,
             return 0;
         }
 
+        // Terrain layers that could not be read belong to the walk that read them: a retained walk keeps its list.
+        if (!retainedWalkHit) ViewProbe.TerrainLayerFailures.Reset();
         // ---- TERRAIN: winning LAND heightmaps for the target cell + its ring-1 neighbours --------
         // The placed rocks were floating in space without this; exteriors get actual ground now.
         // texture path ("" = none, off-white snow fallback) -> that patch's triangles.
@@ -2641,10 +2683,15 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot,
             // (-1 = the quadrant had a real base). A quadrant with no BTXT states no ground at all;
             // the honest stand-in is the layer that covers most of it, not a blank slab.
             var landPromoted = new Dictionary<(int X, int Y), int[]>();
+            int terrIndex = -1;
             foreach (var path in order.OrderedPaths)
             {
-                ISkyrimModGetter m2;
-                try { m2 = SkyrimMod.CreateFromBinaryOverlay(path, SkyrimRelease.SkyrimSE); } catch { continue; }
+                terrIndex++;
+                // Refused, not skipped (PluginRead.cs): a later plugin's LAND and water would silently lose to an earlier one.
+                ISkyrimModGetter m2 = ViewProbe.PluginRead.Open(path, terrIndex, order.OrderedPaths.Count, "the terrain walk");
+                string m2Name = Path.GetFileName(path);
+                try
+                {
                 using (m2 as IDisposable)
                 {
                     bool truthPlugin = HarnessShared.PluginKinds.ByName(Path.GetFileName(path)) is HarnessShared.PluginKind.Bethesda or HarnessShared.PluginKind.Ussep;
@@ -2707,7 +2754,8 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot,
                                     for (int x = 0; x < 33; x++)
                                         grad[x, y] = vh.HeightMap[x, y];
                             }
-                            catch { continue; }
+                            // An unreadable heightmap is refused: skipping it drew the earlier plugin's heights.
+                            catch (Exception ex) { throw new ViewProbe.TerrainUnreadable(m2Name, gp.X, gp.Y, ex); }
                             // Base layer per quadrant (a non-alpha layer names the quadrant's ground
                             // texture; alpha layers blend on top and are out of scope for this pass).
                             var quad = new FormKey?[4];
@@ -2748,13 +2796,18 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot,
                                     if (best.Count > 0 && best[0].Tex is { } bt) { quad[q] = bt; promoted[q] = best[0].Layer; }
                                 }
                             }
-                            catch { }
+                            // A texture layer that cannot be read changes paint, not ground: counted and named on the
+                            // console and in the report (PluginRead.cs), and the layers read before it are kept.
+                            catch (Exception ex) { ViewProbe.TerrainLayerFailures.Add(m2Name, gp.X, gp.Y, census.Count, ex, "the terrain walk"); }
                             landWin[(gp.X, gp.Y)] = (vh.Offset, grad, quad);   // later plugin overwrites = wins
                             landLayers[(gp.X, gp.Y)] = census;
                             landPromoted[(gp.X, gp.Y)] = promoted;
                         }
                     }
                 }
+                }
+                catch (Exception ex) when (ViewProbe.PluginRead.Wraps(ex))
+                { throw ViewProbe.PluginRead.Failed(path, terrIndex, order.OrderedPaths.Count, "the terrain walk", ex); }
             }
 
             string? QuadDiffuse(FormKey? ltex)
@@ -3605,7 +3658,8 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot,
                         Span<byte> hdr = stackalloc byte[12];
                         if (fs.Read(hdr) == 12) esl = (BitConverter.ToUInt32(hdr[8..]) & 0x200) != 0;
                     }
-                    catch { }
+                    // Refused, not assumed non-light (PluginRead.cs): a wrong guess shifts every runtime FormID caption.
+                    catch (Exception ex) { throw ViewProbe.PluginRead.Failed(pp, order.OrderedPaths.ToList().IndexOf(pp), order.OrderedPaths.Count, "the runtime FormID header read", ex); }
                 }
                 var name = Path.GetFileName(pp);
                 if (esl) fidPrefix[name] = 0xFE000000u | ((uint)light++ << 12);
@@ -3813,10 +3867,12 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot,
         if (npcPlacements.Count > 0)
         {
             var swNpc = Stopwatch.StartNew();
+            int npcIndex = -1;
             foreach (var pp2 in order.OrderedPaths)
             {
-                try { npcLcMods.Add(SkyrimMod.CreateFromBinaryOverlay(pp2, SkyrimRelease.SkyrimSE)); }
-                catch (Exception ex) { Console.Error.WriteLine($"   [npc] link cache: {Path.GetFileName(pp2)} skipped ({ex.Message})"); }
+                // Refused, not skipped (PluginRead.cs): a skipped plugin resolved NPCs from an earlier plugin's records.
+                npcIndex++;
+                npcLcMods.Add(ViewProbe.PluginRead.Open(pp2, npcIndex, order.OrderedPaths.Count, "the NPC link cache"));
             }
             var npcLinkCache = npcLcMods.ToImmutableLinkCache<ISkyrimMod, ISkyrimModGetter>();
             var npcPluginNames = order.OrderedPaths.Select(pp3 => Path.GetFileName(pp3)!).ToList();
@@ -4524,6 +4580,8 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot,
                     // names every asset that was found and could not be read and says whether an
                     // opt-out let the run succeed anyway. See UnreadableAssets.ReportBlock.
                     unreadableAssets = ViewProbe.UnreadableAssets.ReportBlock(),
+                    // Null when no terrain texture layer failed to read (also when no terrain walk ran); see PluginRead.cs.
+                    terrainLayersUnreadable = ViewProbe.TerrainLayerFailures.ReportBlock(),
                 };
                 // Straight to the file rather than to a string first: this document is ~600 MB of
                 // indented JSON and the string was a gigabyte of UTF-16 on top of it. The bytes are
@@ -4787,6 +4845,7 @@ if (worklist is not null)
             int rc;
             try { rc = RunCellTextured(worklist.Cells[wlc].Cell, wlc, wls, null, out _); }
             catch (ViewProbe.GlAllocationRefusal ex) { Console.Error.WriteLine(ex.Message); return 2; }   // F-G4-1
+            catch (ViewProbe.ReadRefusal ex) { Console.Error.WriteLine(ex.Message); return 2; }   // PluginRead.cs
             if (pendingSwitch is not { } next) return rc < 0 ? 0 : rc;
             (wlc, wls) = next;
         }
@@ -4843,6 +4902,11 @@ if (worklist is not null)
                         rc = RunCellTextured(worklist.Cells[wlc].Cell, wlc, wls, plan, out completed);
                     }
                     catch (ViewProbe.GlAllocationRefusal ex)   // F-G4-1: refused before draw, in every mode
+                    {
+                        Console.Error.WriteLine(ex.Message);
+                        rc = 2; completed = new ViewProbe.BatchProgress.ShotArtifacts();
+                    }
+                    catch (ViewProbe.ReadRefusal ex)   // a plugin or record that cannot be read (PluginRead.cs)
                     {
                         Console.Error.WriteLine(ex.Message);
                         rc = 2; completed = new ViewProbe.BatchProgress.ShotArtifacts();
@@ -4963,7 +5027,9 @@ if (winRefsDump is not null)
     var dumpTargets = dumpCellsFile is not null ? ViewProbe.WinningRefsDump.ReadCells(dumpCellsFile) : new List<string> { target };
     for (int di = 0; di < dumpTargets.Count; di++)
     {
-        int drc = RunCellTextured(dumpTargets[di], 0, 0, null, out _);
+        int drc;
+        try { drc = RunCellTextured(dumpTargets[di], 0, 0, null, out _); }
+        catch (ViewProbe.ReadRefusal ex) { Console.Error.WriteLine(ex.Message); drc = 2; }   // PluginRead.cs
         if (drc != 0) { Console.Error.WriteLine($"--winning-refs-dump: target {di + 1} of {dumpTargets.Count} ('{dumpTargets[di]}') exited {drc}; stopping."); return drc; }
     }
     Console.WriteLine($"--winning-refs-dump: {dumpTargets.Count} target(s) written to {Path.GetFullPath(winRefsDump)}");
@@ -4972,6 +5038,7 @@ if (winRefsDump is not null)
 int singleRc;
 try { singleRc = RunCellTextured(target, 0, 0, null, out _); }
 catch (ViewProbe.GlAllocationRefusal ex) { Console.Error.WriteLine(ex.Message); return 2; }   // F-G4-1
+catch (ViewProbe.ReadRefusal ex) { Console.Error.WriteLine(ex.Message); return 2; }   // PluginRead.cs
 // FinalExitCode, not a bare return: a shot must never return 3 itself, because the worklist loop
 // above stops at the first shot with a non-zero code and a degraded shot must not stop the ones
 // after it. The condition accumulates across the process and is spent HERE, once.

@@ -883,6 +883,17 @@ flag someone typed, which is why neither is allowed to be silent.
   reference, with an independent reader over many cells without rendering. `--dump-terrain` (with
   `--eye`/`--look`) carries on through the terrain walk and adds each loaded grid square's winning
   heightmap digest and layer count.
+- **A plugin, or a record, that cannot be read is refused, never skipped** (`PluginRead.cs`). Every
+  walk over the load order used to open each plugin inside a `catch` that moved on to the next one,
+  so an unreadable plugin left an earlier plugin's version of everything it overrides in the picture,
+  with no warning. Now a plugin that will not open, or fails while a walk reads it, stops the run
+  (exit 2) naming the plugin, its place in the order and the walk; so does a profile that lists an
+  active plugin no file provides, and a LAND whose heightmap cannot be read (naming the grid square).
+  A terrain texture layer that cannot be read changes paint, not ground, so it is not refused: it is
+  named on the console and listed in the planes report as `terrainLayersUnreadable` (null when none).
+  A conflict-file FormKey that does not parse is named and counted. `viewprobe --plugin-read-selftest`
+  damages a synthetic override byte by byte and runs this executable against it, each case in both
+  directions.
 - **Markers** are classified from the record's Is-Marker header flag (`0x00800000`) ONLY — the
   engine's own don't-render rule. Name heuristics (*marker* EditorID or model path) are wrong in
   both directions and were removed 2026-08-28. `Markers\BlackPlane01.nif` is an unflagged,
