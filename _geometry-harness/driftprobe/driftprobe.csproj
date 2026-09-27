@@ -10,6 +10,8 @@
     <ServerGarbageCollection>true</ServerGarbageCollection>
   </PropertyGroup>
   <ItemGroup>
+    <Compile Include="..\_shared\MovedRefFixture.cs" Link="MovedRefFixture.cs" />
+    <Compile Include="..\_shared\MovedRefSelfTest.cs" Link="MovedRefSelfTest.cs" />
     <ProjectReference Include="..\..\src\housecarl-core\housecarl-core.csproj" />
     <Compile Include="..\_shared\StateArm.cs" Link="StateArm.cs" />
     <Compile Include="..\_shared\EnableArms.cs" Link="EnableArms.cs" />

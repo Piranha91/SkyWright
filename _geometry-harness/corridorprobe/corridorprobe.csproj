@@ -9,6 +9,8 @@
     <NoWarn>CA1416</NoWarn>
   </PropertyGroup>
   <ItemGroup>
+    <Compile Include="..\_shared\MovedRefFixture.cs" Link="MovedRefFixture.cs" />
+    <Compile Include="..\_shared\MovedRefSelfTest.cs" Link="MovedRefSelfTest.cs" />
     <Compile Include="..\_shared\HarnessTarget.cs" Link="HarnessTarget.cs" />
     <Compile Include="..\_shared\CollisionLayers.cs" Link="CollisionLayers.cs" />
     <Compile Include="..\_shared\ActorBand.cs" Link="ActorBand.cs" />

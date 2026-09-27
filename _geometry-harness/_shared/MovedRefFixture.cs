@@ -4,6 +4,7 @@ using Mutagen.Bethesda.Plugins;
 using Mutagen.Bethesda.Plugins.Records;
 using Mutagen.Bethesda.Skyrim;
 using Noggog;
+using SkCell = Mutagen.Bethesda.Skyrim.Cell;
 
 namespace HarnessShared;
 
@@ -103,8 +104,8 @@ public static class MovedRefFixture
     }
     static PlacedObject Deleted(FormKey key) => new(key, Rel) { IsDeleted = true };
     static PlacedNpc DeletedNpc(FormKey key) => new(key, Rel) { IsDeleted = true };
-    static Cell Ext(FormKey key, int x, int y) => new(key, Rel) { Flags = default, Grid = new CellGrid { Point = new P2Int(x, y) } };
-    static Cell Int(FormKey key) => new(key, Rel) { Flags = Cell.Flag.IsInteriorCell };
+    static SkCell Ext(FormKey key, int x, int y) => new(key, Rel) { Flags = default, Grid = new CellGrid { Point = new P2Int(x, y) } };
+    static SkCell Int(FormKey key) => new(key, Rel) { Flags = SkCell.Flag.IsInteriorCell };
     static Landscape LandOf(FormKey key, float offset, bool withHeights = true, int alphaLayers = -1)
     {
         var land = withHeights
@@ -133,7 +134,7 @@ public static class MovedRefFixture
         return h;
     }
 
-    static void FileInterior(SkyrimMod mod, Cell cell)
+    static void FileInterior(SkyrimMod mod, SkCell cell)
     {
         uint id = cell.FormKey.ID;
         int blockN = (int)(id % 10), subN = (int)((id / 10) % 10);
@@ -143,7 +144,7 @@ public static class MovedRefFixture
         if (sub is null) { sub = new CellSubBlock { BlockNumber = subN, GroupType = GroupTypeEnum.InteriorCellSubBlock }; block.SubBlocks.Add(sub); }
         sub.Cells.Add(cell);
     }
-    static Worldspace World(FormKey wk, Cell? top, params Cell[] exteriors)
+    static Worldspace World(FormKey wk, SkCell? top, params SkCell[] exteriors)
     {
         var ws = new Worldspace(wk, Rel);
         if (top is not null) ws.TopCell = top;
@@ -156,7 +157,7 @@ public static class MovedRefFixture
         }
         return ws;
     }
-    static Cell TopOf() => new(T, Rel) { Flags = default, Grid = new CellGrid { Point = new P2Int(0, 0) } };
+    static SkCell TopOf() => new(T, Rel) { Flags = default, Grid = new CellGrid { Point = new P2Int(0, 0) } };
 
     /// <summary>Write the four plugins into <paramref name="dir"/> (created; must be empty or absent) and return their
     /// paths in load order.</summary>
@@ -195,7 +196,7 @@ public static class MovedRefFixture
         var em10 = Ext(Em10, -1, 0); em10.Landscape = LandOf(Landm10, 0f);
         var e20 = Ext(E20, 2, 0); e20.Landscape = LandOf(Land20, 0f); e20.Temporary.Add(Ref(L5, S, 2 * 4096 + 100, 100));
         m.Worldspaces.Add(World(W, top, e00, e10, e50, em10, e20));
-        m.Worldspaces.Add(World(W2, new Cell(W2Top, Rel) { Flags = default }, Ext(W2E00, 0, 0)));
+        m.Worldspaces.Add(World(W2, new SkCell(W2Top, Rel) { Flags = default }, Ext(W2E00, 0, 0)));
         FileInterior(m, Int(I1)); FileInterior(m, Int(I2));
         var mPath = Save(m);
         using var mOv = SkyrimMod.CreateFromBinaryOverlay(mPath, Rel);
@@ -212,7 +213,7 @@ public static class MovedRefFixture
             c00.Temporary.Add(Ref(U1, S, 500, 500)); c00.Temporary.Add(Ref(U2, S, 510, 500)); c00.Temporary.Add(Ref(U3, S, 520, 500));
             var c10 = Ext(E10, 1, 0);
             c10.Temporary.Add(Ref(M2, S, 4200, 100));
-            var d3 = Ref(D3, S, 4400, 200); d3.IsDeleted = true; c10.Temporary.Add(d3);
+            c10.Temporary.Add(Ref(D3, S, 4400, 200));                 // its Deleted flag is set in the bytes after writing (D3)
             c10.Temporary.Add(Ref(B0, null, 4500, 100));
             c10.Temporary.Add(DeletedNpc(NPC2));
             var c50 = Ext(E50, 5, 0);
@@ -226,6 +227,9 @@ public static class MovedRefFixture
             var ci2 = Int(I2); ci2.Temporary.Add(Ref(M3, S, 400, 0)); FileInterior(a, ci2);
         }
         var aPath = Save(a, mOv);
+        // D3: Mutagen writes a record marked deleted WITHOUT its placement, so the flag is set in the written bytes instead,
+        // leaving the placement in place: a deletion that still carries data.
+        File.WriteAllBytes(aPath, SetRecordFlag(File.ReadAllBytes(aPath), "REFR", D3.ID, 0x20));
 
         // ---- B: back in, placed again, the introductions moved or deleted, a readable LAND ----
         var b = new SkyrimMod(BKey, Rel);
@@ -289,6 +293,40 @@ public static class MovedRefFixture
             off += 6 + len;
         }
         throw new InvalidOperationException($"{r.Sig} has no {subSig}");
+    }
+
+    /// <summary>Set a record-header flag bit on one record.</summary>
+    static byte[] SetRecordFlag(byte[] b, string recSig, uint idLow, uint flag)
+    {
+        var r = Records(b).Single(x => x.Sig == recSig && (x.FormId & 0xFFFFFF) == idLow);
+        var outp = (byte[])b.Clone();
+        BitConverter.GetBytes(BitConverter.ToUInt32(b, r.Off + 8) | flag).CopyTo(outp, r.Off + 8);
+        return outp;
+    }
+
+    /// <summary>What the table says the written plugins hold, checked on the files: the cases that depend on how Mutagen
+    /// writes (a deletion that keeps its data, a heightmap that throws, a LAND with no VHGT, a reference with no base).</summary>
+    public static IEnumerable<(string Name, bool Ok, string Detail)> Preconditions(IReadOnlyList<string> paths)
+    {
+        using var a = SkyrimMod.CreateFromBinaryOverlay(paths[1], Rel);
+        using var l = SkyrimMod.CreateFromBinaryOverlay(paths[4], Rel);
+        IPlacedGetter? d3 = null, b0 = null; bool noVhgt = false;
+        foreach (var ws in a.Worldspaces.Records)
+            foreach (var blk in ws.SubCells) foreach (var sub in blk.Items) foreach (var c in sub.Items)
+            {
+                foreach (var p in c.Temporary) { if (p.FormKey == D3) d3 = p; if (p.FormKey == B0) b0 = p; }
+                if (c.FormKey == Em10) noVhgt = c.Landscape is not null && c.Landscape.VertexHeightMap is null;
+            }
+        yield return ("fixture: A's D3 is deleted and keeps its placement", d3 is { IsDeleted: true, Placement: not null },
+                      d3 is null ? "absent" : $"deleted {d3.IsDeleted}, placement {(d3.Placement is null ? "none" : "kept")}");
+        yield return ("fixture: A's B0 has no base", b0 is IPlacedObjectGetter po && po.Base.FormKeyNullable is not { IsNull: false }, b0 is null ? "absent" : "present");
+        yield return ("fixture: A's Em10 LAND has no VHGT (L4)", noVhgt, "");
+        string where = "no throw";
+        foreach (var ws in l.Worldspaces.Records)
+            foreach (var blk in ws.SubCells) foreach (var sub in blk.Items) foreach (var c in sub.Items)
+                if (c.FormKey == E00)
+                    try { _ = c.Landscape!.VertexHeightMap!.HeightMap[32, 32]; } catch (Exception ex) { where = ex.GetType().Name; }
+        yield return ("fixture: L's E00 heightmap throws when read (L1)", where != "no throw", where);
     }
 
     /// <summary>Shrink one subrecord's data to newLen bytes, fixing the record's and every enclosing group's size.</summary>

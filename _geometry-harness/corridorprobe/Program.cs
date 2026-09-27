@@ -56,6 +56,8 @@ using HousecarlCore.Progress;
 //          read back after any override applied), so a transform line is named, never re-applied. off: the record base.
 
 using var __run = RunLog.BeginProcess("corridorprobe", args);
+// Known answers for which version of a moved or deleted reference this probe's walk keeps (_shared/MovedRefFixture.cs).
+if (args.Length >= 1 && args[0] == "--moved-ref-selftest") return BosOpenSelfTest.Run("corridorprobe");
 
 string GamePath = HarnessTarget.Require(HarnessTarget.Game, "game directory", "game");
 string dataDir = Path.Combine(GamePath, "Data");

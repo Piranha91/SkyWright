@@ -61,6 +61,8 @@ using HousecarlCore.Progress;
 // trips it, and a run that configures nothing fails with guidance instead of walking a
 // directory that isn't there.
 using var __run = RunLog.BeginProcess("driftprobe", args);
+// Known answers for which version of a moved or deleted reference this probe's walk keeps (_shared/MovedRefFixture.cs).
+if (args.Length >= 1 && args[0] == "--moved-ref-selftest") return DriftSelfTest.Run();
 
 string Instance = HarnessTarget.Instance;
 string GamePath = HarnessTarget.Game;

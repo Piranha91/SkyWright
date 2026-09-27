@@ -39,6 +39,8 @@ using HousecarlCore.Progress;
 //              the route-cut section reports those rows apart. off: the pure vanilla floor, as every run before.
 
 using var __run = RunLog.BeginProcess("navprobe", args);
+// Known answers for which version of a moved or deleted reference this probe's walk keeps (_shared/MovedRefFixture.cs).
+if (args.Length >= 1 && args[0] == "--moved-ref-selftest") return BosOpenSelfTest.Run("navprobe");
 
 string Instance = HarnessTarget.Require(HarnessTarget.Instance, "MO2 instance directory", "instance");
 string GamePath = HarnessTarget.Require(HarnessTarget.Game, "game directory", "game");

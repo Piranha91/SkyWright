@@ -51,6 +51,8 @@ using HousecarlCore.Progress;
 //              No rule changes either way; the hook changes the input, and the summary says how much it moved.
 
 using var __run = RunLog.BeginProcess("blockprobe", args);
+// Known answers for which version of a moved or deleted reference this probe's walk keeps (_shared/MovedRefFixture.cs).
+if (args.Length >= 1 && args[0] == "--moved-ref-selftest") return BlockSelfTest.Run();
 
 string Instance = HarnessTarget.Require(HarnessTarget.Instance, "MO2 instance directory", "instance");
 string GamePath = HarnessTarget.Require(HarnessTarget.Game, "game directory", "game");

@@ -115,6 +115,10 @@ if (args.Length >= 1 && args[0] == "--winning-refs-selftest")
 // damaged byte by byte, run through this executable as a child process. Needs no MO2 instance, no game and no GL context.
 if (args.Length >= 1 && args[0] == "--plugin-read-selftest")
     return ViewProbe.PluginReadSelfTest.Run();
+// Known answers for the side tables the walk fills (the --stations floor, the "where is it" tables) and the route mode's
+// worldspace pass, against moved and deleted references (_shared/MovedRefFixture.cs). No MO2 instance, game or GL context.
+if (args.Length >= 1 && args[0] == "--moved-ref-selftest")
+    return ViewProbe.MovedRefSelfTestVp.Run();
 if (args.Length == 2 && args[0] == "--mesh-reuse-red")
 {
     try { return ViewProbe.MeshReuseRed.Run(args[1]); }

@@ -73,6 +73,7 @@ static class MovedRefProof
         string Name(FormKey key) => F.FirstOrDefault(kv => kv.Value == key).Key ?? key.ToString();
 
         // ---- preconditions: the fixture is what its table says ----
+        foreach (var (n, ok, d) in MovedRefFixture.Preconditions(paths)) Check("moved-ref/precondition: " + n, ok, d);
         {
             using var am = SkyrimMod.CreateFromBinaryOverlay(a, Rel);
             using var lm = SkyrimMod.CreateFromBinaryOverlay(lp, Rel);

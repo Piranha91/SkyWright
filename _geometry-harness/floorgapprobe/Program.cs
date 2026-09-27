@@ -60,6 +60,8 @@ using HousecarlCore.Progress;
 //   Initially-disabled and deleted refs are not floors. No Base Object Swapper layer (FloorFeed's header says why).
 
 using var __run = RunLog.BeginProcess("floorgapprobe", args);
+// Known answers for which version of a moved or deleted reference this probe's walk keeps (_shared/MovedRefFixture.cs).
+if (args.Length >= 1 && args[0] == "--moved-ref-selftest") return FloorgapSelfTest.Run();
 
 string Instance = HarnessTarget.Instance, GamePath = HarnessTarget.Game, profileName = HarnessTarget.Profile;
 string plugin = "Skyrim.esm";

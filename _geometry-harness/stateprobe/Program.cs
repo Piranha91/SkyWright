@@ -32,6 +32,8 @@ using HousecarlCore.Progress;
 //   --emit FILE      the measured class as a ConflictFile (STATE-CONTACT / STATE-ROUTE @ state); STATE-OVERLAP is explicitly unmeasured
 
 using var __run = RunLog.BeginProcess("stateprobe", args);
+// Known answers for which version of a moved or deleted reference this probe's walk keeps (_shared/MovedRefFixture.cs).
+if (args.Length >= 1 && args[0] == "--moved-ref-selftest") return RouteSelfTest.Run();
 const string StateMeasurementPolicy = "state-contact-route-v1|state-overlap-unmeasured-v1";
 
 string Instance = HarnessTarget.Instance;
