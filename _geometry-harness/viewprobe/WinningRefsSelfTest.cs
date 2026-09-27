@@ -51,7 +51,10 @@ internal static class WinningRefsSelfTest
     }
 
     sealed record Walked(Dictionary<FormKey, PlacedRef> WinRef, Dictionary<FormKey, (FormKey Ws, PlacedRef Ref)> Persistent,
-                         Dictionary<FormKey, FormKey> CellOf);
+                         Dictionary<FormKey, FormKey> CellOf)
+    {
+        public HashSet<FormKey>? TakenOut { get; set; }
+    }
 
     static void Body(string root)
     {
@@ -178,6 +181,10 @@ internal static class WinningRefsSelfTest
                 }
             }
             if (!interior && grid is { } g) walk.MergePersistent(wKey, g, ringRefs);
+            // Read by name: the count and its keys belong to the fix, and this file must compile against the walk
+            // before it (where the case then fails as "no taken-out keys").
+            w.TakenOut = walk.GetType().GetMethod("TakenOutKeys", System.Reflection.BindingFlags.Instance
+                | System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Public)?.Invoke(walk, null) as HashSet<FormKey>;
             return w;
         }
         static string Pos(PlacedRef? r) => r is null ? "absent" : $"at {r.Position.X:0},{r.Position.Y:0}";
@@ -230,6 +237,10 @@ internal static class WinningRefsSelfTest
         Check("C6  ringRefs off: target overrides still admitted, at the later position (R6, R8 control)",
               At(noRing, R(6), 1120, 1100, e00) && At(noRing, R(8), 1080, 1000, e00),
               Where(noRing, R(6)) + " | " + Where(noRing, R(8)));
+        var expectOut = new HashSet<FormKey> { R(1), R(14), R(16) };
+        Check("K11 the taken-out count names exactly the refs moved out of the loaded cells (R1, R14, R16)",
+              main.TakenOut is { } to && to.SetEquals(expectOut),
+              main.TakenOut is null ? "no taken-out keys" : "[" + string.Join(", ", main.TakenOut.Select(k => k.ToString()).OrderBy(x => x)) + "]");
         KnownGap("K6  deleted by a later plugin with no placement data: should not be drawn (R12)",
                  !main.WinRef.ContainsKey(R(12)), Where(main, R(12)) + " (PlacementExtract yields nothing for a record without DATA)");
     }
