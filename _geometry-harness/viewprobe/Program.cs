@@ -111,6 +111,10 @@ if (args.Length >= 1 && args[0] == "--cell-scene-selftest")
 // Mutagen-written synthetic plugins. Needs no MO2 instance, no game and no GL context.
 if (args.Length >= 1 && args[0] == "--winning-refs-selftest")
     return ViewProbe.WinningRefsSelfTest.Run();
+// What the render does when a plugin, or one record in it, cannot be read: a Mutagen-written master and override,
+// damaged byte by byte, run through this executable as a child process. Needs no MO2 instance, no game and no GL context.
+if (args.Length >= 1 && args[0] == "--plugin-read-selftest")
+    return ViewProbe.PluginReadSelfTest.Run();
 if (args.Length == 2 && args[0] == "--mesh-reuse-red")
 {
     try { return ViewProbe.MeshReuseRed.Run(args[1]); }
