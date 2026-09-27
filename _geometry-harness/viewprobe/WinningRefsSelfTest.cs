@@ -41,11 +41,19 @@ internal static class WinningRefsSelfTest
     public static int Run()
     {
         _pass = _fail = _gap = 0;
-        var root = Path.Combine(Path.GetTempPath(), "vp-winref-" + Environment.ProcessId);
+        // VP_WINREF_KEEP=<dir>: write the fixture plugins there and keep them, so an independent reader can be checked
+        // against the same files and the same answers. The folder must be empty or absent.
+        string? keep = Environment.GetEnvironmentVariable("VP_WINREF_KEEP") is { Length: > 0 } k ? Path.GetFullPath(k) : null;
+        if (keep is not null && Directory.Exists(keep) && Directory.EnumerateFileSystemEntries(keep).Any())
+        {
+            Console.WriteLine($"winning-refs-selftest: VP_WINREF_KEEP folder '{keep}' is not empty; refusing to write into it");
+            return 2;
+        }
+        var root = keep ?? Path.Combine(Path.GetTempPath(), "vp-winref-" + Environment.ProcessId);
         Directory.CreateDirectory(root);
         try { Body(root); }
         catch (Exception ex) { Check("fixture", false, $"threw {ex.GetType().Name}: {ex.Message}"); }
-        finally { try { Directory.Delete(root, true); } catch { } }
+        finally { if (keep is null) { try { Directory.Delete(root, true); } catch { } } else Console.WriteLine($"   fixture kept in {keep}"); }
         Console.WriteLine($"winning-refs-selftest: {_pass} passed, {_fail} failed, {_gap} known gap(s)");
         return _fail == 0 ? 0 : 1;
     }
@@ -115,12 +123,22 @@ internal static class WinningRefsSelfTest
         mTop.Persistent.Add(Ref(R(10), stat, 300, 300));                    // inside (0,0)
         mTop.Persistent.Add(Ref(R(15), stat, 400, 400));                    // inside (0,0); A moves it to W2
         mTop.Persistent.Add(Ref(R(11), stat, 5 * 4096 + 100, 100));         // inside (5,0): outside the 3x3 of (0,0)
+        // The merge box's edges, target E00 (0,0): ring on spans [-4096, 8192) on each axis, ring off [0, 4096).
+        mTop.Persistent.Add(Ref(R(22), stat, -4096, 100));                  // ring on: on the low X edge, inside
+        mTop.Persistent.Add(Ref(R(23), stat, 8192, 100));                   // ring on: on the high X edge, outside
+        mTop.Persistent.Add(Ref(R(24), stat, 100, -4096));                  // ring on: on the low Y edge, inside
+        mTop.Persistent.Add(Ref(R(25), stat, 100, 8192));                   // ring on: on the high Y edge, outside
+        mTop.Persistent.Add(Ref(R(26), stat, 0, 50));                       // ring off: on the low X edge, inside
+        mTop.Persistent.Add(Ref(R(27), stat, 4096, 50));                    // ring off: on the high X edge, outside
         var mE00 = Ext(e00, 0, 0);
         foreach (var (n, px0) in new[] { (1, 100f), (5, 110f), (6, 120f), (7, 130f), (12, 140f), (13, 150f), (14, 160f), (16, 170f), (17, 180f) }) mE00.Temporary.Add(Ref(R(n), stat, px0, 100));
         var mE10 = Ext(e10, 1, 0); mE10.Temporary.Add(Ref(R(2), stat, 4200, 100)); mE10.Temporary.Add(Ref(R(8), stat, 4210, 100));
+        mE10.Persistent.Add(Ref(R(20), stat, 4250, 120));                   // persistent under an ORDINARY exterior cell (ring)
         var mE55 = Ext(e55, 5, 5); mE55.Temporary.Add(Ref(R(9), stat, 5 * 4096 + 100, 5 * 4096 + 100));
         var mE50 = Ext(e50, 5, 0);
-        master.Worldspaces.Add(World(wKey, mTop, mE00, mE10, mE50, mE55));
+        // A second CELL record at the target's own grid (0,0) in the same worldspace.
+        var mE00b = Ext(M(0x844), 0, 0); mE00b.Temporary.Add(Ref(R(28), stat, 200, 300));
+        master.Worldspaces.Add(World(wKey, mTop, mE00, mE10, mE50, mE55, mE00b));
         var mI1 = Int(i1); mI1.Temporary.Add(Ref(R(4), stat, 400, 0)); FileInterior(master, mI1);
         var mI2 = Int(i2); FileInterior(master, mI2);
         var mPath = Write(master);
@@ -241,6 +259,24 @@ internal static class WinningRefsSelfTest
         Check("K11 the taken-out count names exactly the refs moved out of the loaded cells (R1, R14, R16)",
               main.TakenOut is { } to && to.SetEquals(expectOut),
               main.TakenOut is null ? "no taken-out keys" : "[" + string.Join(", ", main.TakenOut.Select(k => k.ToString()).OrderBy(x => x)) + "]");
+        // The merge box's edge convention: low edge inside, high edge outside, on both axes, ring on and off.
+        Check("C7  merge box, ring on: the low X and Y edges are inside, the high edges outside (R22-R27)",
+              At(main, R(22), -4096, 100, topK) && !main.WinRef.ContainsKey(R(23)) && At(main, R(24), 100, -4096, topK)
+              && !main.WinRef.ContainsKey(R(25)) && At(main, R(26), 0, 50, topK) && At(main, R(27), 4096, 50, topK),
+              string.Join(" | ", new[] { 22, 23, 24, 25, 26, 27 }.Select(n => $"R{n} " + Where(main, R(n)))));
+        Check("C7b merge box, ring off: [0,4096) (R22, R24, R26, R27)",
+              !noRing.WinRef.ContainsKey(R(22)) && !noRing.WinRef.ContainsKey(R(24))
+              && At(noRing, R(26), 0, 50, topK) && !noRing.WinRef.ContainsKey(R(27)),
+              string.Join(" | ", new[] { 22, 24, 26, 27 }.Select(n => $"R{n} " + Where(noRing, R(n)))));
+        // A persistent ref under an ordinary exterior cell is not a ring admission; it merges by position.
+        Check("C8  persistent ref under an ordinary ring cell: merged by position, in its own cell (R20)",
+              At(main, R(20), 4250, 120, e10) && !noRing.WinRef.ContainsKey(R(20)),
+              Where(main, R(20)) + " | ring off: " + Where(noRing, R(20)));
+        // Pins current behaviour, not a verified engine rule: the ring is chosen by grid, so another CELL record at the
+        // target's own grid is loaded as a ring cell.
+        Check("C9  a second CELL at the target's grid is loaded like a ring cell (R28; pins current behaviour)",
+              At(main, R(28), 200, 300, M(0x844)) && !noRing.WinRef.ContainsKey(R(28)),
+              Where(main, R(28)) + " | ring off: " + Where(noRing, R(28)));
         KnownGap("K6  deleted by a later plugin with no placement data: should not be drawn (R12)",
                  !main.WinRef.ContainsKey(R(12)), Where(main, R(12)) + " (PlacementExtract yields nothing for a record without DATA)");
     }
