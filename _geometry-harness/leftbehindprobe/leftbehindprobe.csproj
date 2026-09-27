@@ -1,0 +1,45 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net9.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <LangVersion>latest</LangVersion>
+    <AssemblyName>leftbehindprobe</AssemblyName>
+    <NoWarn>CA1416</NoWarn>
+    <ServerGarbageCollection>false</ServerGarbageCollection>
+    <ConcurrentGarbageCollection>false</ConcurrentGarbageCollection>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\housecarl-core\housecarl-core.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <!-- Reused unchanged: the placement history and the load-time enable chain (OverlapIndex, EnableArms),
+         the order/asset view (HarnessOrderCli), the panel shape convention (StationRule), the world column
+         index (FloorFeed). Nothing here is edited by this probe. -->
+    <Compile Include="..\_shared\EnablePopulation.cs" Link="EnablePopulation.cs" />
+    <Compile Include="..\_shared\EnableArms.cs" Link="EnableArms.cs" />
+    <Compile Include="..\_shared\HarnessTarget.cs" Link="HarnessTarget.cs" />
+    <Compile Include="..\_shared\ConflictReport.cs" Link="ConflictReport.cs" />
+    <Compile Include="..\_shared\DetectorModel.cs" Link="DetectorModel.cs" />
+    <Compile Include="..\_shared\SyntheticOrder.cs" Link="SyntheticOrder.cs" />
+    <Compile Include="..\_shared\HarnessOrderCli.cs" Link="HarnessOrderCli.cs" />
+    <Compile Include="..\_shared\Configuration.cs" Link="Configuration.cs" />
+    <Compile Include="..\_shared\PlacementHistory.cs" Link="PlacementHistory.cs" />
+    <Compile Include="..\_shared\DeletionHistory.cs" Link="DeletionHistory.cs" />
+    <Compile Include="..\_shared\DependencyIndex.cs" Link="DependencyIndex.cs" />
+    <Compile Include="..\_shared\BosHook.cs" Link="BosHook.cs" />
+    <Compile Include="..\_shared\OverlapIndex.cs" Link="OverlapIndex.cs" />
+    <Compile Include="..\_shared\ContactIndex.cs" Link="ContactIndex.cs" />
+    <Compile Include="..\_shared\CollisionLayers.cs" Link="CollisionLayers.cs" />
+    <Compile Include="..\_shared\WorldState.cs" Link="WorldState.cs" />
+    <Compile Include="..\_shared\StateArm.cs" Link="StateArm.cs" />
+    <Compile Include="..\_shared\StationRule.cs" Link="StationRule.cs" />
+    <Compile Include="..\_shared\PortalBoxOrientation.cs" Link="PortalBoxOrientation.cs" />
+    <Compile Include="..\_shared\FloorFeed.cs" Link="FloorFeed.cs" />
+    <Compile Include="..\_shared\ActorBand.cs" Link="ActorBand.cs" />
+    <Compile Include="..\_shared\StationGround.cs" Link="StationGround.cs" />
+    <Compile Include="..\_shared\StationLookup.cs" Link="StationLookup.cs" />
+    <Compile Include="..\_shared\CellBoundaryIndex.cs" Link="CellBoundaryIndex.cs" />
+  </ItemGroup>
+</Project>
