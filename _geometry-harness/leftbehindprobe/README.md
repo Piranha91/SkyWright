@@ -22,8 +22,8 @@ leftbehindprobe --base-order BASE.json --city-order CITY.json --panel-plugin OCC
 - `--panel-plugin`: panels are every placed reference with an XPRM primitive that this plugin defines or overrides.
   `--panel-list` (a JSON object with a `panels` array of `{formKey}`) restricts to that list and refuses if a listed
   key is not a panel in the records.
-- Output: a JSON file (`housecarl.leftbehind.classes/1`) with one row per panel, the class counts, the counts at
-  81 threshold combinations, and the run's identity (`dllSha256`, `exeSha256`, commit, argv). The console log carries
+- Output: a JSON file (`housecarl.leftbehind.classes/1`) with one row per panel (each with `gainedBy`, empty unless
+  BACKING-GAINED), the class counts, the counts at 81 threshold combinations (each with a `BACKING-GAINED` count), and the run's identity (`dllSha256`, `exeSha256`, commit, argv). The console log carries
   each arm's plugins, asset view, archives and Base Object Swapper inis.
 
 ## The rule
@@ -42,9 +42,18 @@ Each arm is its order's **winning** state. For each panel:
    own flag, opposite-state honoured. A chain that cannot be read to the end is **unknown**. The panel is classified
    with unknowns present and absent in each arm; if the class differs, it is CANNOT-ASSESS.
 5. **Class** (first match): CANNOT-ASSESS (not measurable; the panel itself changed; a changed occluder-type reference
-   within 1,024 u has no readable geometry; depends on unknowns) → UNPAIRED (b_B < τ_pair) → LEFT-BEHIND (lost ≥
-   τ_lost) → PARTIAL (lost ≥ τ_minor) → RE-BACKED (credit moved to a new or base-swapped reference for ≥ τ_lost of the
-   backing) → INTACT. Proposed δ = 64 u, τ_pair = 0.5, τ_lost = 0.5, τ_minor = 0.2.
+   within 1,024 u has no readable geometry; depends on unknowns) → BACKING-GAINED (b_B < τ_pair and b_C ≥ τ_pair) →
+   UNPAIRED (b_B < τ_pair) → LEFT-BEHIND (lost ≥ τ_lost) → PARTIAL (lost ≥ τ_minor) → RE-BACKED (credit moved to a new
+   or base-swapped reference for ≥ τ_lost of the backing) → INTACT. Proposed δ = 64 u, τ_pair = 0.5, τ_lost = 0.5,
+   τ_minor = 0.2.
+   - **BACKING-GAINED** (2026-09-27): nothing stood behind the panel in the base arm, and the city arm built up to it —
+     the panel now culls whatever the city put there. `gainedBy` credits the samples unbacked in B and backed in C to
+     their city backers, each with how the city arm produced it: `new`, `moved`, `enabled`, `parent-enabled`,
+     `base-swapped`, `mesh-replaced`, `terrain`, `unknown-enable` (or `unchanged`). The credit is reported evidence,
+     not a threshold, but it is checked: a gain credited to nothing the city arm changed (empty, or only `unchanged`)
+     is CANNOT-ASSESS with a reason, never emitted as BACKING-GAINED. The class names one mechanism by which a panel
+     comes to hide a mod's content, not every one: a panel already backed in the base arm can hide new content too,
+     and stays INTACT here.
 6. **Cause** per partner: deleted, unknown-enable, parent-disabled, disabled, base-swapped, moved (> 0.5 u, or any
    rotation or scale change), mesh-replaced, unchanged; `terrain` for the LAND partner when its heights differ.
 

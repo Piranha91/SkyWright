@@ -16,6 +16,10 @@ namespace LeftBehind;
 // backer. b_B / b_C are the backed shares. Precedence:
 //   CANNOT-ASSESS  the panel cannot be measured, a changed reference near it has no readable geometry, or the class
 //                  differs between the readings "Unknown present" and "Unknown absent" (in either arm)
+//   BACKING-GAINED b_B < tauPair and b_C >= tauPair: nothing behind the panel in the base arm, and the city arm built
+//                  up to it. The gain is credited (gainedBy) to the city backers of the samples unbacked in B and
+//                  backed in C, with how the city arm produced each. Evidence, not a threshold -- but checked: a gain
+//                  credited to nothing the city arm changed is CANNOT-ASSESS, never emitted silently (2026-09-27)
 //   UNPAIRED       b_B < tauPair
 //   LEFT-BEHIND    lost >= tauLost, lost = share of B's backed samples unbacked in C
 //   PARTIAL        tauMinor <= lost < tauLost
@@ -215,7 +219,7 @@ public static class LeftBehindRule
         }
         float bB = n == 0 ? 0 : (float)backedB / n, bC = n == 0 ? 0 : (float)backedC / n;
         float lostShare = backedB == 0 ? 0 : (float)lost / backedB, reShare = backedB == 0 ? 0 : (float)re / backedB;
-        string cls = bB < t.TauPair ? PanelClass.Unpaired
+        string cls = bB < t.TauPair ? (bC >= t.TauPair ? PanelClass.BackingGained : PanelClass.Unpaired)
                    : lostShare >= t.TauLost ? PanelClass.LeftBehind
                    : lostShare >= t.TauMinor ? PanelClass.Partial
                    : reShare >= t.TauLost ? PanelClass.ReBacked
@@ -260,8 +264,20 @@ public static class LeftBehindRule
                 r0.BB, r0.BC, r0.Lost, r0.LostCount * m.SampleWeight, m.WeightUnit, partners, m.Terrain, unknown);
         }
 
+        IReadOnlyList<Gain>? gained = null;
+        if (r0.Class == PanelClass.BackingGained)
+        {
+            gained = Gains(m, b, c, r0);
+            if (gained.Count == 0 || gained.All(g => g.How == GainHow.Unchanged))
+                return new PanelVerdict(m.Panel, PanelClass.CannotAssess,
+                    "backing gained in the city arm but credited to nothing the city arm changed: "
+                    + (gained.Count == 0 ? "no credited backer" : string.Join(", ", gained.Select(g => $"{g.Ref} {g.How} {g.ShareOfGain:0.00}"))),
+                    r0.BB, r0.BC, r0.Lost, r0.LostCount * m.SampleWeight, m.WeightUnit, partners, m.Terrain, unknown, gained);
+        }
         string? reason = r0.Class switch
         {
+            PanelClass.BackingGained => $"backed share {r0.BB:0.00} in the base arm (below tauPair {t.TauPair:0.00}) rose to {r0.BC:0.00} in the city arm; "
+                                        + "gained from " + string.Join(", ", gained!.Take(3).Select(g => $"{g.Ref} ({g.How}, {g.ShareOfGain:0.00})")),
             PanelClass.Unpaired => $"backed share in the base arm {r0.BB:0.00} is below tauPair {t.TauPair:0.00}: nothing to pair the panel with by this rule",
             PanelClass.ReBacked => $"{r0.ReShare:0.00} of the base arm's backing is now credited to a reference the city arm added or base-swapped"
                                    + (partners.FirstOrDefault(p => p.ReplacedBy is not null) is { } rp ? $" (e.g. {rp.Ref} -> {rp.ReplacedBy})" : ""),
@@ -270,7 +286,7 @@ public static class LeftBehindRule
         };
         if (unknown > 0) reason = (reason is null ? "" : reason + "; ") + $"{unknown} backer(s) with an unresolved enable chain, class unchanged under both readings";
         return new PanelVerdict(m.Panel, r0.Class, reason, r0.BB, r0.BC, r0.Lost, r0.LostCount * m.SampleWeight, m.WeightUnit,
-                                partners, m.Terrain, unknown);
+                                partners, m.Terrain, unknown, gained);
     }
 
     static string DominantLoss(PanelMeasure m, Reading r, IReadOnlyList<Partner> partners)
@@ -282,6 +298,42 @@ public static class LeftBehindRule
         var top = lostBy.OrderByDescending(x => x.Value).ThenBy(x => x.Key, StringComparer.Ordinal).First();
         var p = partners.FirstOrDefault(x => x.Ref == top.Key);
         return $"lost {r.Lost:0.00} of the base arm's backing; most from {top.Key} ({p?.Cause ?? "?"}, {top.Value} samples)";
+    }
+
+    /// <summary>How the city arm produced backer <paramref name="key"/> (a FormKey string, or LAND) for a sample the base
+    /// arm left unbacked.</summary>
+    public static string HowGained(string key, PanelMeasure m, LeftBehindArm b, LeftBehindArm c)
+    {
+        if (key == LandKey) return m.Terrain == "compared" ? GainHow.Terrain : GainHow.Unchanged;
+        var fk = FormKey.Factory(key);
+        var sb = b.StateOf(fk); var sc = c.StateOf(fk);
+        if (sb is null) return GainHow.New;
+        if (sc is null) return GainHow.Unchanged;
+        if (sb.Unknown || sc.Unknown) return GainHow.UnknownEnable;
+        if (!sb.Present && sc.Present) return sb.Enable.ViaParent ? GainHow.ParentEnabled : GainHow.Enabled;
+        if (sb.Base != sc.Base) return GainHow.BaseSwapped;
+        if (!SamePose(sb, sc)) return GainHow.Moved;
+        if (b.SourceOf(sb.Base) != c.SourceOf(sc.Base)) return GainHow.MeshReplaced;
+        return GainHow.Unchanged;
+    }
+
+    /// <summary>The gained samples (unbacked in the base arm, backed in the city arm, reading 0), grouped by city backer,
+    /// largest share first.</summary>
+    static IReadOnlyList<Gain> Gains(PanelMeasure m, LeftBehindArm b, LeftBehindArm c, Reading r)
+    {
+        var idx = Enumerable.Range(0, m.SampleCount).Where(i => r.CB[i] is null && r.CC[i] is not null).ToList();
+        if (idx.Count == 0) return Array.Empty<Gain>();
+        var list = new List<Gain>();
+        foreach (var g in idx.GroupBy(i => r.CC[i]!).OrderByDescending(g => g.Count()).ThenBy(g => g.Key, StringComparer.Ordinal))
+        {
+            float share = (float)g.Count() / idx.Count;
+            string how = HowGained(g.Key, m, b, c);
+            if (g.Key == LandKey) { list.Add(new Gain(LandKey, null, null, share, how, "terrain")); continue; }
+            var sc = c.StateOf(FormKey.Factory(g.Key))!;
+            string? edid = c.Index.BaseInfo.TryGetValue(sc.Base, out var bi) ? bi.Edid : null;
+            list.Add(new Gain(g.Key, sc.Base.ToString(), edid, share, how, c.GeometryLabel(sc.Base)));
+        }
+        return list;
     }
 
     static IReadOnlyList<Partner> Partners(PanelMeasure m, LeftBehindArm b, LeftBehindArm c, Reading r)

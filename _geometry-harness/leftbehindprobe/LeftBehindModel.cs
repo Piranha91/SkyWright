@@ -12,8 +12,9 @@ namespace LeftBehind;
 public static class PanelClass
 {
     public const string Unpaired = "UNPAIRED", LeftBehind = "LEFT-BEHIND", Partial = "PARTIAL",
-                        ReBacked = "RE-BACKED", Intact = "INTACT", CannotAssess = "CANNOT-ASSESS";
-    public static readonly string[] All = { Unpaired, LeftBehind, Partial, ReBacked, Intact, CannotAssess };
+                        ReBacked = "RE-BACKED", Intact = "INTACT", CannotAssess = "CANNOT-ASSESS",
+                        BackingGained = "BACKING-GAINED";
+    public static readonly string[] All = { BackingGained, Unpaired, LeftBehind, Partial, ReBacked, Intact, CannotAssess };
 }
 
 /// <summary>What became of a backing reference (or the terrain) in the city arm, spelled as the contract spells it.
@@ -85,6 +86,21 @@ public sealed record Partner(string Ref, string? Base, string? EditorId, float S
                              string? ReplacedBy, string Geometry);
 
 /// <summary>A classified panel.</summary>
+/// <summary>How the city arm produced backing the base arm did not have, spelled as the contract spells it
+/// (2026-09-27). <see cref="Unchanged"/> is never a valid credit for a BACKING-GAINED panel: such a verdict is
+/// CANNOT-ASSESS instead.</summary>
+public static class GainHow
+{
+    public const string New = "new", Moved = "moved", Enabled = "enabled", ParentEnabled = "parent-enabled",
+                        BaseSwapped = "base-swapped", MeshReplaced = "mesh-replaced", Terrain = "terrain",
+                        UnknownEnable = "unknown-enable", Unchanged = "unchanged";
+}
+
+/// <summary>One city backer credited with samples unbacked in the base arm and backed in the city arm.
+/// <paramref name="Ref"/> is a FormKey, or "LAND" for the terrain. <paramref name="ShareOfGain"/> is its share of the
+/// gained samples.</summary>
+public sealed record Gain(string Ref, string? Base, string? EditorId, float ShareOfGain, string How, string Geometry);
+
 public sealed record PanelVerdict(Panel Panel, string Class, string? Reason, float BackingBase, float BackingCity,
                                   float LostShare, float LostArea, string LostAreaUnit, IReadOnlyList<Partner> Partners,
-                                  string Terrain, int UnknownBackers);
+                                  string Terrain, int UnknownBackers, IReadOnlyList<Gain>? GainedBy = null);

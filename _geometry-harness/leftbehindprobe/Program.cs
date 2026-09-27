@@ -314,6 +314,8 @@ var outDoc = new Dictionary<string, object?>
         partners = v.Partners.Select(p => new { @ref = p.Ref, @base = p.Base, editorId = p.EditorId, shareOfBacking = p.ShareOfBacking,
                                                cause = p.Cause, moveU = p.MoveU, replacedBy = p.ReplacedBy, geometry = p.Geometry }),
         terrain = v.Terrain,
+        gainedBy = (v.GainedBy ?? Array.Empty<Gain>()).Select(g => new { @ref = g.Ref, @base = g.Base, editorId = g.EditorId,
+                                               shareOfGain = g.ShareOfGain, how = g.How, geometry = g.Geometry }),
     }),
     ["counts"] = counts,
     ["cannotAssess"] = cannot,
