@@ -26,6 +26,7 @@
     <Compile Include="..\_shared\DetectorModel.cs" Link="DetectorModel.cs" />
     <Compile Include="..\_shared\ActorBand.cs" Link="ActorBand.cs" />
     <Compile Include="..\_shared\FloorFeed.cs" Link="FloorFeed.cs" />
+    <Compile Include="..\_shared\MovedRefFixture.cs" Link="MovedRefFixture.cs" />
     <Compile Include="..\_shared\StationRule.cs" Link="StationRule.cs" />
     <Compile Include="..\_shared\PortalBoxOrientation.cs" Link="PortalBoxOrientation.cs" />
     <Compile Include="..\_shared\StationLookup.cs" Link="StationLookup.cs" />

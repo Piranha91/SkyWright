@@ -3590,6 +3590,7 @@ StationRuleProof.Run(Check);
 RouteStationProof.Run(Check);
 MaterialScaleProof.Run(Check);
 PopulationProof.Run(Check);
+MovedRefProof.Run(Check);
 OrderProof.Run(Check);
 AdviceProof.Run(Check);
 PlaceProof.Run(Check);
