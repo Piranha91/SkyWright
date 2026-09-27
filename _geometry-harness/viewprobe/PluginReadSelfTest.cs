@@ -412,10 +412,40 @@ internal static class PluginReadSelfTest
             Check("S10     one of the override's texture layers cannot be read: drawn, and the failure counted and named on the console",
                   where.StartsWith("enumerating") && c.Exit == 0 && d == aDigest && Named(c, "terrain layer", "could not be read", "PrA.esp", "0,0"),
                   Brief(c) + $"; terrain (0,0) {(d is null ? "none" : d == aDigest ? "= the override's heights" : d == mDigest ? "= the MASTER's" : d[..12])} layers {layers} (undamaged {aLayers})");
-            var f = RunViewprobe(Path.Combine(root, "arm-findltex"), mPath, p, true,
+            // S11 reads less of each layer than the census does (texture and alpha points, not the quadrant), so the
+            // ATXT cut above reads cleanly there. Its own damage cuts the same ATXT to 2 bytes, so the texture link
+            // itself cannot be read, and the precondition is measured with --find-ltex's own reads.
+            var bad11 = Shrink(aBytes, "LAND", 0x880, "ATXT", 2, nth: 1);
+            var p11 = Path.Combine(root, "atxt2", "PrA.esp");
+            Directory.CreateDirectory(Path.GetDirectoryName(p11)!);
+            File.WriteAllBytes(p11, bad11);
+            string where11 = "nowhere";
+            try
+            {
+                using var ov = SkyrimMod.CreateFromBinaryOverlay(p11, Rel);
+                foreach (var ws in ov.Worldspaces.Records)
+                    foreach (var blk in ws.SubCells) foreach (var sub in blk.Items) foreach (var cell in sub.Items)
+                    {
+                        if (cell.FormKey != E00 || cell.Landscape is not { } ls) continue;
+                        int n = 0;
+                        try
+                        {
+                            foreach (var l in ls.Layers)
+                            {
+                                n++;
+                                _ = l.Header?.Texture.FormKeyNullable;
+                                if (l is IAlphaLayerGetter al) _ = al.AlphaLayerData.Count(pt => pt.Opacity > 0.004f);
+                            }
+                        }
+                        catch (Exception ex) { where11 = $"enumerating Layers (layer {n}): " + ex.GetType().Name; }
+                    }
+            }
+            catch (Exception ex) { where11 = "opening: " + ex.GetType().Name; }
+            Note($"S11 precondition (measured): ATXT cut to 2 bytes: --find-ltex's read throws when {where11}");
+            var f = RunViewprobe(Path.Combine(root, "arm-findltex"), mPath, p11, true,
                                  new[] { target, "--eye", "100,100,600", "--look", "2000,2000,0", "--find-ltex", "PrLtex" }, null);
-            Check("S11     --find-ltex over the same damaged layer: the failure counted and named on the console",
-                  where.StartsWith("enumerating") && f.Exit == 0 && Named(f, "terrain layer", "could not be read", "PrA.esp", "0,0"),
+            Check("S11     --find-ltex over a layer whose texture cannot be read: the failure counted and named on the console",
+                  where11.StartsWith("enumerating") && f.Exit == 0 && Named(f, "terrain layer", "could not be read", "PrA.esp", "0,0"),
                   Brief(f));
         }
 
@@ -433,6 +463,77 @@ internal static class PluginReadSelfTest
                                  new[] { wl, "--emit-bats", Path.Combine(root, "bats", "out") }, null);
             Check("S5      --emit-bats over an override whose body cannot be read: refused, the plugin named",
                   c.Exit != 0 && !Unhandled(c) && Named(c, "PrA.esp"), Brief(c));
+            // The other direction: the same walk over the undamaged override still emits.
+            var ok = RunViewprobe(Path.Combine(root, "arm-bats-ok"), mPath, aPath, true,
+                                  new[] { wl, "--emit-bats", Path.Combine(root, "bats", "out-ok") }, null);
+            Check("S5b     --emit-bats over the undamaged override: runs (exit 0)", ok.Exit == 0, Brief(ok));
+        }
+
+        // ---- the other direction of every refusal and count: an undamaged order is not refused and names nothing ----
+        Check("S13b    a profile whose every plugin has a file: runs, and walks both plugins (CTRL-MA)",
+              cA.Exit == 0 && cA.Dump.Count == 1 && cA.Dump[0].GetProperty("plugins").GetArrayLength() == 2, Brief(cA));
+        Check("OPEN-b  no plugin or record refusal on the undamaged order (CTRL-MA)",
+              cA.Exit == 0 && !Named(cA, "could not be read"), Brief(cA));
+        {
+            var f = RunViewprobe(Path.Combine(root, "arm-findltex-ok"), mPath, aPath, true,
+                                 new[] { target, "--eye", "100,100,600", "--look", "2000,2000,0", "--find-ltex", "PrLtex" }, null);
+            Check("S11b    --find-ltex over the undamaged override: exit 0, no layer named as unreadable",
+                  f.Exit == 0 && !Named(f, "could not be read"), Brief(f));
+        }
+
+        // ---- the report's limits: terrainLayersUnreadable in the planes report, both directions --------------------------
+        {
+            string atxt = Path.Combine(root, "atxt", "PrA.esp");
+            JsonElement? ReportKey(Child c, string outDir, out bool found)
+            {
+                found = false;
+                if (!Directory.Exists(outDir)) return null;
+                var rep = Directory.GetFiles(outDir, "*-planes.json", SearchOption.AllDirectories).FirstOrDefault();
+                if (rep is null) return null;
+                using var doc = JsonDocument.Parse(File.ReadAllText(rep));
+                if (!doc.RootElement.TryGetProperty("terrainLayersUnreadable", out var k)) return null;
+                found = true;
+                return k.Clone();
+            }
+            string[] RenderArgs(string outDir) => new[] { target, "--eye", "100,100,600", "--look", "2000,2000,0", "--size", "64",
+                                                          "--planes-report", "--out", outDir };
+            var dOut = Path.Combine(root, "render-bad");
+            var d = RunViewprobe(Path.Combine(root, "arm-render-bad"), mPath, atxt, true, RenderArgs(dOut), null);
+            var dk = ReportKey(d, dOut, out bool dFound);
+            Check("S10r    a render with the unreadable layer: its planes report names it (terrainLayersUnreadable, count 1)",
+                  dFound && dk is { ValueKind: JsonValueKind.Object } o && o.GetProperty("count").GetInt32() == 1
+                  && o.GetProperty("layers")[0].GetProperty("plugin").GetString() == "PrA.esp",
+                  Brief(d) + $"; key {(dFound ? dk?.ValueKind.ToString() : "ABSENT or no report")}");
+            var gOut = Path.Combine(root, "render-ok");
+            var g = RunViewprobe(Path.Combine(root, "arm-render-ok"), mPath, aPath, true, RenderArgs(gOut), null);
+            var gk = ReportKey(g, gOut, out bool gFound);
+            Check("S10rb   a render of the undamaged override: the key is present and null",
+                  gFound && gk is { ValueKind: JsonValueKind.Null }, Brief(g) + $"; key {(gFound ? gk?.ValueKind.ToString() : "ABSENT or no report")}");
+        }
+
+        // ---- L1: a conflict file naming a FormKey that does not parse --------------------------------------------------------
+        {
+            string Conflicts(string dir, params string[] keys)
+            {
+                Directory.CreateDirectory(dir);
+                var recs = string.Join(",", keys.Select(k => "{\"FormKey\":\"" + k + "\",\"Role\":\"door\",\"Label\":null}"));
+                var path = Path.Combine(dir, "c.json");
+                File.WriteAllText(path, "{\"Probe\":\"selftest\",\"Instance\":\"selftest\",\"GeneratedUtc\":\"2026-01-01T00:00:00Z\","
+                                      + "\"Conflicts\":[{\"Kind\":\"OVERLAP\",\"A\":\"PrMaster.esm\",\"B\":\"PrA.esp\",\"Summary\":\"s\","
+                                      + "\"Necessary\":[" + recs + "]}]}");
+                return path;
+            }
+            var bad = Conflicts(Path.Combine(root, "conf-bad"), "NOT-A-FORMKEY", R1.ToString());
+            var c = RunViewprobe(Path.Combine(root, "arm-conf-bad"), mPath, aPath, true,
+                                 terrainArgs.Concat(new[] { "--conflicts", bad }).ToArray(), Path.Combine(root, "conf-bad.jsonl"));
+            Check("L1      a conflict file with an unparseable FormKey: the run goes on, the key named and counted",
+                  c.Exit == 0 && Named(c, "NOT-A-FORMKEY", "is not a FormKey") && Named(c, "1 record(s) with an unparseable FormKey"),
+                  Brief(c));
+            var good = Conflicts(Path.Combine(root, "conf-ok"), R1.ToString());
+            var g = RunViewprobe(Path.Combine(root, "arm-conf-ok"), mPath, aPath, true,
+                                 terrainArgs.Concat(new[] { "--conflicts", good }).ToArray(), Path.Combine(root, "conf-ok.jsonl"));
+            Check("L1b     a conflict file whose keys all parse: nothing named as unparseable",
+                  g.Exit == 0 && !Named(g, "unparseable FormKey") && !Named(g, "is not a FormKey"), Brief(g));
         }
     }
 }
