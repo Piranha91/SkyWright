@@ -20,8 +20,9 @@ namespace ViewProbe;
 // earlier admitted version, so a reference a later plugin moved out of the loaded cells was drawn at the earlier
 // plugin's position, still labelled as changed by the later one (Group 5, 2026-09-26).
 //
-// Known gap, not handled here: an override that deletes a reference and carries no placement data yields nothing from
-// PlacementExtract, so the walk never sees that sighting and the earlier version stays (--winning-refs-selftest K6).
+// A DELETION is a sighting too: an override that deletes a reference and carries no placement data arrives as a
+// CellPlacements.DeletedRefs entry (the walk asks FromMod for such cells), and it takes the earlier version out --
+// not admitted, not a merge candidate, and not counted as "moved elsewhere" (--winning-refs-selftest K6).
 internal sealed class WinningRefWalk
 {
     readonly Dictionary<FormKey, PlacedRef> _winRef;
@@ -78,6 +79,16 @@ internal sealed class WinningRefWalk
             if (admit || candidate) _refCellOf[r.FormKey] = cp.Cell;
             else _refCellOf.Remove(r.FormKey);
         }
+        // A deleted sighting with no placement data: the game does not load the reference, so no earlier version stays.
+        // It is a deletion, not a move, so it leaves the taken-out set as well.
+        if (cp.DeletedRefs is { Count: > 0 } deleted)
+            foreach (var d in deleted)
+            {
+                _winRef.Remove(d.FormKey);
+                _takenOut.Remove(d.FormKey);
+                _persistentWin.Remove(d.FormKey);
+                _refCellOf.Remove(d.FormKey);
+            }
     }
 
     /// <summary>After the walk and the merge: the references an earlier plugin placed in the loaded cells (the target, or

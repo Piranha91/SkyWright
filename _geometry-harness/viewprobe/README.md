@@ -867,9 +867,10 @@ flag someone typed, which is why neither is allowed to be silent.
   sighting's cell. It is a persistent-merge candidate if and only if its last sighting is a persistent
   ref of a worldspace. So a later plugin that files a ref in another cell, another worldspace or the
   persistent cell takes the earlier version out; the console says how many
-  (`-N ref(s) an earlier plugin placed in the loaded cells and a later plugin moved elsewhere`). Known
-  gap: an override that deletes a ref and carries no placement data is invisible to `PlacementExtract`,
-  so the earlier version is still drawn (`--winning-refs-selftest` reports it as KNOWN-GAP K6).
+  (`-N ref(s) an earlier plugin placed in the loaded cells and a later plugin moved elsewhere`). An
+  override that deletes a ref and carries no placement data is a sighting too (`PlacementExtract`
+  reports it in `CellPlacements.DeletedRefs`): the earlier version is not drawn, and a deletion is not
+  counted as a move (`--winning-refs-selftest` K6).
   `viewprobe --winning-refs-selftest` holds the rule to known answers on Mutagen-written plugins
   (`VP_WINREF_KEEP=<empty dir>` keeps the fixture plugins there, so another reader can be checked
   against the same files). The merge box includes its low edges and excludes its high edges; a

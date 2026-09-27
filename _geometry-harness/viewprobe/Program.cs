@@ -1808,7 +1808,8 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot,
             }
 
             string plgName = m.ModKey.FileName.String;
-            foreach (var cp in PlacementExtract.FromMod(m))
+            // includeDeletions: a cell whose only content is a deletion must still reach the winning-ref walk (K6).
+            foreach (var cp in PlacementExtract.FromMod(m, includeDeletions: true))
             {
                 navSelection.Observe(cp, plgName, navVersionPlugins, winNav, navByPlugin);
                 // The floor neighbourhood, filed IN LOAD ORDER (a later plugin's ref of the same
