@@ -861,6 +861,16 @@ flag someone typed, which is why neither is allowed to be silent.
   admits only non-persistent refs from neighbour cells). viewprobe collects refs by their own
   `Persistent` flag and merges them into the scene by position against the whole ref-loaded area's
   bounds — the 3×3 ring by default, the target cell alone under `--no-ring-refs`.
+- **Which plugin's version of a ref is drawn: the last sighting decides** (`WinningRefs.cs`). After the
+  load-order walk, a ref is in the winning state if and only if its **last sighting in load order** is
+  admitted — in the target cell, or temporary in a ring cell — at that sighting's position and in that
+  sighting's cell. It is a persistent-merge candidate if and only if its last sighting is a persistent
+  ref of a worldspace. So a later plugin that files a ref in another cell, another worldspace or the
+  persistent cell takes the earlier version out; the console says how many
+  (`-N ref(s) an earlier plugin placed in the loaded cells and a later plugin moved elsewhere`). Known
+  gap: an override that deletes a ref and carries no placement data is invisible to `PlacementExtract`,
+  so the earlier version is still drawn (`--winning-refs-selftest` reports it as KNOWN-GAP K6).
+  `viewprobe --winning-refs-selftest` holds the rule to known answers on Mutagen-written plugins.
 - **Markers** are classified from the record's Is-Marker header flag (`0x00800000`) ONLY — the
   engine's own don't-render rule. Name heuristics (*marker* EditorID or model path) are wrong in
   both directions and were removed 2026-08-28. `Markers\BlackPlane01.nif` is an unflagged,
@@ -3279,6 +3289,16 @@ cell's structure.
   neither inherited the previous top-down's dollhouse slice: no ceiling, and the overhead beam the
   shot existed to show reduced to a plank against sky. Every worklist shot now starts from the
   command line's values and applies its own overrides on top.
+
+- **A ref a later plugin moved to another cell was drawn at the earlier plugin's position**
+  (fixed 2026-09-27). Admission was decided per sighting: the walk wrote a ref's version when its cell
+  was the target or a ring cell, and nothing removed it when a later plugin filed the same ref outside
+  the loaded cells (or made a ring ref persistent, or a persistent ref temporary elsewhere). The stale
+  version was drawn at its old position, still labelled "changed by" the later plugin, with no warning.
+  Found in an offline occlusion assessment, where occlusion panels a patch moved into another cell were
+  still drawn and scored where the earlier plugin had them. Fixed by the last-sighting rule above.
+  Renders before the fix may show such refs at a prior position; re-render a view whose conclusion
+  rests on a ref a later plugin moved between cells.
 
 ## Known rough edges (candidate work)
 

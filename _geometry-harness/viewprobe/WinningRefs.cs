@@ -10,13 +10,25 @@ namespace ViewProbe;
 // dictionaries are Program.cs's own; this class only decides what goes into them, so the retained cell walk
 // (CellWalkFacts) and everything downstream read them exactly as before.
 //
-// Moved out of Program.cs's top-level statements unchanged, so that --winning-refs-selftest can drive the same code
-// the render runs.
+// THE INVARIANT (every accumulator here obeys it, through the one loop in Observe):
+//   After the walk, a reference is in the winning state if and only if its LAST sighting in load order is admitted --
+//   in the target cell, or temporary in a ring cell -- and it is at that sighting's position, in that sighting's cell.
+//   It is a persistent-merge candidate if and only if its last sighting is a persistent reference of a worldspace; the
+//   by-position merge then adds the candidates inside the loaded area that the winning state does not already hold.
+// A later plugin that files a reference anywhere else (another cell, another worldspace, the persistent cell) therefore
+// takes the earlier plugin's version OUT. Before this rule, admission was decided per sighting and nothing removed an
+// earlier admitted version, so a reference a later plugin moved out of the loaded cells was drawn at the earlier
+// plugin's position, still labelled as changed by the later one (Group 5, 2026-09-26).
+//
+// Known gap, not handled here: an override that deletes a reference and carries no placement data yields nothing from
+// PlacementExtract, so the walk never sees that sighting and the earlier version stays (--winning-refs-selftest K6).
 internal sealed class WinningRefWalk
 {
     readonly Dictionary<FormKey, PlacedRef> _winRef;
     readonly Dictionary<FormKey, (FormKey Ws, PlacedRef Ref)> _persistentWin;
     readonly Dictionary<FormKey, FormKey> _refCellOf;
+    // References a later sighting took out of the winning state; re-admission removes them again.
+    readonly HashSet<FormKey> _takenOut = new();
 
     internal WinningRefWalk(Dictionary<FormKey, PlacedRef> winRef,
                             Dictionary<FormKey, (FormKey Ws, PlacedRef Ref)> persistentWin,
@@ -42,22 +54,48 @@ internal sealed class WinningRefWalk
         return (isTarget, inRing);
     }
 
-    /// <summary>One cell of one plugin, in load order.</summary>
+    /// <summary>One cell of one plugin, in load order. Every sighting of every reference decides that reference's state
+    /// afresh (the invariant above): this sighting is the last one so far.</summary>
     internal void Observe(CellPlacements cp, bool isTarget, bool inRing)
     {
-        // Worldspace PERSISTENT refs (doors above all). Not detected by the holding cell —
-        // the persistent cell masquerades as grid (0,0) — but by each ref's own Persistent
-        // flag: the game loads these with the worldspace, so membership in a rendered cell
-        // is a question of POSITION, resolved after the target is known.
-        if (cp.Worldspace != FormKey.Null)
-            foreach (var r in cp.Refs)
-                if (r.Persistent) { _persistentWin[r.FormKey] = (cp.Worldspace, r); _refCellOf[r.FormKey] = cp.Cell; }   // later plugin wins
-        if (!isTarget && !inRing) return;
-        if (isTarget)
-            foreach (var r in cp.Refs) { _winRef[r.FormKey] = r; _refCellOf[r.FormKey] = cp.Cell; }
-        else
-            foreach (var r in cp.Refs)
-                if (!r.Persistent) { _winRef[r.FormKey] = r; _refCellOf[r.FormKey] = cp.Cell; }
+        foreach (var r in cp.Refs)
+        {
+            // Admitted: every ref of the target cell; a ring cell's non-persistent refs (persistent ones merge by
+            // position, ring-wide, in MergePersistent).
+            bool admit = isTarget || (inRing && !r.Persistent);
+            // Worldspace PERSISTENT refs (doors above all). Not detected by the holding cell —
+            // the persistent cell masquerades as grid (0,0) — but by each ref's own Persistent
+            // flag: the game loads these with the worldspace, so membership in a rendered cell
+            // is a question of POSITION, resolved after the target is known.
+            bool candidate = cp.Worldspace != FormKey.Null && r.Persistent;
+
+            if (admit) { _winRef[r.FormKey] = r; _takenOut.Remove(r.FormKey); }
+            else if (_winRef.Remove(r.FormKey)) _takenOut.Add(r.FormKey);
+
+            if (candidate) _persistentWin[r.FormKey] = (cp.Worldspace, r);
+            else _persistentWin.Remove(r.FormKey);
+
+            if (admit || candidate) _refCellOf[r.FormKey] = cp.Cell;
+            else _refCellOf.Remove(r.FormKey);
+        }
+    }
+
+    /// <summary>After the walk and the merge: the references an earlier plugin placed in the loaded cells (the target, or
+    /// temporary in a ring cell) that a later plugin filed somewhere the render does not load. They are not drawn. A
+    /// reference that only ever reached the render through the persistent merge is not counted here.</summary>
+    internal HashSet<FormKey> TakenOutKeys() => _takenOut.Where(k => !_winRef.ContainsKey(k)).ToHashSet();
+
+    internal int TakenOutCount => TakenOutKeys().Count;
+
+    /// <summary>The taken-out set, for the retained cell walk (CellWalkFacts) to carry to the next shot.</summary>
+    internal HashSet<FormKey> TakenOutSnapshot() => _takenOut.ToHashSet();
+
+    /// <summary>A new shot: forget the previous walk's taken-out set (the dictionaries are cleared by their owner), and,
+    /// for a retained walk, take the set it carried.</summary>
+    internal void Reset(IEnumerable<FormKey>? retained = null)
+    {
+        _takenOut.Clear();
+        if (retained is not null) _takenOut.UnionWith(retained);
     }
 
     /// <summary>Persistent refs merge by position over the whole REF-LOADED area: the 3x3 ring when

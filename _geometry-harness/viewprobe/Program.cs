@@ -1462,6 +1462,7 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot,
     // SECOND call has to clear what the first left. A collection missed here would not throw; it
     // would quietly render cell 2 holding cell 1's references.
     winRef.Clear(); persistentWin.Clear(); refDisabledFlag.Clear(); refEnableParent.Clear(); refEditorIdAll.Clear();
+    winWalk.Reset();
     stateArm = null; activeFacts = EnableFactsOf; stateBaselineMemo.Clear();
     stateSpec = cliStateSpec;
     // The unreadable-asset list is per SHOT for the same reason: the census line and the report
@@ -1835,6 +1836,7 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot,
         targetWorldspace = f.TargetWorldspace; targetGrid = f.TargetGrid;
         foreach (var x in f.WinningRefs) winRef[x.Key] = x.Value;
         foreach (var x in f.PersistentRefs) persistentWin[x.Key] = x.Value;
+        winWalk.Reset(f.TakenOut);
         foreach (var x in f.DisabledFlags) refDisabledFlag.Add(x);
         foreach (var x in f.EnableParents) refEnableParent[x.Key] = x.Value;
         foreach (var x in f.RefEditorIds) refEditorIdAll[x.Key] = x.Value;
@@ -1879,6 +1881,7 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot,
             CellKey = cellKey!.Value, CellLabel = cellLabel, Interior = interior,
             TargetWorldspace = targetWorldspace, TargetGrid = targetGrid,
             WinningRefs = winRef.ToDictionary(x => x.Key, x => ViewProbe.CellWalkFacts.Copy(x.Value)),
+            TakenOut = winWalk.TakenOutSnapshot(),
             PersistentRefs = persistentWin.ToDictionary(x => x.Key,
                 x => (x.Value.Ws, ViewProbe.CellWalkFacts.Copy(x.Value.Ref))),
             DisabledFlags = refDisabledFlag.ToHashSet(), EnableParents = new(refEnableParent),
@@ -2004,6 +2007,10 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot,
         if (addedPersist > 0)
             Console.WriteLine($"   +{addedPersist} persistent worldspace ref(s) inside the rendered {(ringR > 0 ? "3x3 cells'" : "cell's")} bounds (doors live here)");
     }
+    // A reference an earlier plugin placed in the loaded cells and a later plugin filed elsewhere is not drawn (the
+    // invariant in WinningRefs.cs). Said only when it happened, so a console with no such move reads as before.
+    if (winWalk.TakenOutCount is > 0 and var takenOut)
+        Console.WriteLine($"   -{takenOut} ref(s) an earlier plugin placed in the loaded cells and a later plugin moved elsewhere: not drawn (the later plugin wins)");
     Console.WriteLine($"winning state: {winRef.Count:N0} refs, {winNav.Count:N0} navmeshes  ({sw.Elapsed.TotalSeconds:0.0}s)");
 
     // The shot's synthetic props: what a runtime PlaceAtMe stood in the cell during a test, put back

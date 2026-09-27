@@ -29,6 +29,8 @@ internal sealed class CellWalkFacts
 
     internal required Dictionary<FormKey, PlacedRef> WinningRefs { get; init; }
     internal required Dictionary<FormKey, (FormKey Ws, PlacedRef Ref)> PersistentRefs { get; init; }
+    /// <summary>References a later plugin took out of the loaded cells (WinningRefs.cs), so a retained walk reports them too.</summary>
+    internal HashSet<FormKey> TakenOut { get; init; } = new();
     internal required HashSet<FormKey> DisabledFlags { get; init; }
     internal required Dictionary<FormKey, (FormKey Parent, bool Opposite)> EnableParents { get; init; }
     internal required Dictionary<FormKey, string> RefEditorIds { get; init; }
@@ -80,6 +82,7 @@ internal sealed class CellWalkFacts
             TargetWorldspace = TargetWorldspace, TargetGrid = TargetGrid,
             WinningRefs = WinningRefs.ToDictionary(x => x.Key, x => Copy(x.Value)),
             PersistentRefs = PersistentRefs.ToDictionary(x => x.Key, x => (x.Value.Ws, Copy(x.Value.Ref))),
+            TakenOut = TakenOut.ToHashSet(),
             DisabledFlags = DisabledFlags.ToHashSet(), EnableParents = new(EnableParents),
             RefEditorIds = new(RefEditorIds), RefCells = new(RefCells),
             PlaneHistories = PlaneHistories.ToDictionary(x => x.Key, x => x.Value.Copy()),
