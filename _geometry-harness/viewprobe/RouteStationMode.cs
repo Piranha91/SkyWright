@@ -152,8 +152,14 @@ static class RouteStationMode
         // ---- the pass ---------------------------------------------------------------------------------
         var sw = System.Diagnostics.Stopwatch.StartNew();
         var walk = new Walk(input.Worldspace, children, input.PlaneMarkerBase);
-        walk.PreRead(changedPath, margin);
-        foreach (var path in input.OrderedPaths) walk.Plugin(path);
+        // A throw while a plugin's records are read is a named refusal, as in every other walk (PluginRead.cs).
+        try { walk.PreRead(changedPath, margin); }
+        catch (Exception ex) when (PluginRead.Wraps(ex)) { throw PluginRead.Failed(changedPath, -1, 0, "--stations (route) pre-read", ex); }
+        foreach (var path in input.OrderedPaths)
+        {
+            try { walk.Plugin(path); }
+            catch (Exception ex) when (PluginRead.Wraps(ex)) { throw PluginRead.Failed(path, -1, 0, "--stations (route) worldspace pass", ex); }
+        }
         Console.WriteLine($"   --stations (route): worldspace pass over {input.OrderedPaths.Count} plugin(s) in "
                         + $"{sw.Elapsed.TotalSeconds:0.0}s: {walk.NavWin.Count:N0} winning navmesh(es), "
                         + $"{walk.CityPlacedKeys.Count:N0} placed record(s) and {walk.CityNavKeys.Count:N0} navmesh(es) "
