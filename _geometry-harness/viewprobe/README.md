@@ -889,7 +889,10 @@ flag someone typed, which is why neither is allowed to be silent.
   so an unreadable plugin left an earlier plugin's version of everything it overrides in the picture,
   with no warning. Now a plugin that will not open, or fails while a walk reads it, stops the run
   (exit 2) naming the plugin, its place in the order and the walk; so does a profile that lists an
-  active plugin no file provides, and a LAND whose heightmap cannot be read (naming the grid square).
+  active plugin no file provides, and a LAND whose heightmap the render's terrain walk cannot read
+  (naming the grid square). Not yet covered: the `--stations` floor, which takes its heights from the
+  shared floor filing through `PlacementExtract`, where an unreadable heightmap still reads as "no
+  LAND" and an earlier plugin's heights stay.
   A terrain texture layer that cannot be read changes paint, not ground, so it is not refused: it is
   named on the console and listed in the planes report as `terrainLayersUnreadable` (null when none).
   A conflict-file FormKey that does not parse is named and counted. `viewprobe --plugin-read-selftest`

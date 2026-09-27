@@ -18,7 +18,7 @@ namespace ViewProbe;
 // A later plugin that files a reference anywhere else (another cell, another worldspace, the persistent cell) therefore
 // takes the earlier plugin's version OUT. Before this rule, admission was decided per sighting and nothing removed an
 // earlier admitted version, so a reference a later plugin moved out of the loaded cells was drawn at the earlier
-// plugin's position, still labelled as changed by the later one (Group 5, 2026-09-26).
+// plugin's position, still labelled as changed by the later one (found 2026-09-26).
 //
 // A DELETION is a sighting too: an override that deletes a reference and carries no placement data arrives as a
 // CellPlacements.DeletedRefs entry (the walk asks FromMod for such cells), and it takes the earlier version out --
