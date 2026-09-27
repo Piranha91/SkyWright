@@ -1171,7 +1171,7 @@ if (emitBats is not null)
     string batsDir = asPath ? Path.GetFullPath(emitBats) : Path.Combine(modsDir, emitBats);
     string batsName = Path.GetFileName(Path.TrimEndingDirectorySeparator(batsDir));
     try { return ViewProbe.BatEmit.Run(worklist!, worklistPaths[0], batsDir, batsName, order.OrderedPaths, Instance, batsProfiles); }
-    catch (ViewProbe.ReadRefusal ex) { Console.Error.WriteLine(ex.Message); return 2; }   // PluginRead.cs
+    catch (ViewProbe.ReadRefusal ex) { ViewProbe.PluginRead.Report(ex); return 2; }   // PluginRead.cs
 }
 
 var arch = candidateConfiguration?.Archives ?? ArchiveDiscovery.Discover(profileDir, modsDir, dataDir, overwriteDir, GamePath);
@@ -4845,7 +4845,7 @@ if (worklist is not null)
             int rc;
             try { rc = RunCellTextured(worklist.Cells[wlc].Cell, wlc, wls, null, out _); }
             catch (ViewProbe.GlAllocationRefusal ex) { Console.Error.WriteLine(ex.Message); return 2; }   // F-G4-1
-            catch (ViewProbe.ReadRefusal ex) { Console.Error.WriteLine(ex.Message); return 2; }   // PluginRead.cs
+            catch (ViewProbe.ReadRefusal ex) { ViewProbe.PluginRead.Report(ex); return 2; }   // PluginRead.cs
             if (pendingSwitch is not { } next) return rc < 0 ? 0 : rc;
             (wlc, wls) = next;
         }
@@ -4908,7 +4908,7 @@ if (worklist is not null)
                     }
                     catch (ViewProbe.ReadRefusal ex)   // a plugin or record that cannot be read (PluginRead.cs)
                     {
-                        Console.Error.WriteLine(ex.Message);
+                        ViewProbe.PluginRead.Report(ex);
                         rc = 2; completed = new ViewProbe.BatchProgress.ShotArtifacts();
                     }
                     catch (Exception ex) when (ViewProbe.GraphicsReuseRed.IsExpectedFault(ex))
@@ -5029,7 +5029,7 @@ if (winRefsDump is not null)
     {
         int drc;
         try { drc = RunCellTextured(dumpTargets[di], 0, 0, null, out _); }
-        catch (ViewProbe.ReadRefusal ex) { Console.Error.WriteLine(ex.Message); drc = 2; }   // PluginRead.cs
+        catch (ViewProbe.ReadRefusal ex) { ViewProbe.PluginRead.Report(ex); drc = 2; }   // PluginRead.cs
         if (drc != 0) { Console.Error.WriteLine($"--winning-refs-dump: target {di + 1} of {dumpTargets.Count} ('{dumpTargets[di]}') exited {drc}; stopping."); return drc; }
     }
     Console.WriteLine($"--winning-refs-dump: {dumpTargets.Count} target(s) written to {Path.GetFullPath(winRefsDump)}");
@@ -5038,7 +5038,7 @@ if (winRefsDump is not null)
 int singleRc;
 try { singleRc = RunCellTextured(target, 0, 0, null, out _); }
 catch (ViewProbe.GlAllocationRefusal ex) { Console.Error.WriteLine(ex.Message); return 2; }   // F-G4-1
-catch (ViewProbe.ReadRefusal ex) { Console.Error.WriteLine(ex.Message); return 2; }   // PluginRead.cs
+catch (ViewProbe.ReadRefusal ex) { ViewProbe.PluginRead.Report(ex); return 2; }   // PluginRead.cs
 // FinalExitCode, not a bare return: a shot must never return 3 itself, because the worklist loop
 // above stops at the first shot with a non-zero code and a degraded shot must not stop the ones
 // after it. The condition accumulates across the process and is spent HERE, once.
