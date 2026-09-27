@@ -131,7 +131,7 @@ internal static class WinningRefsSelfTest
         mTop.Persistent.Add(Ref(R(26), stat, 0, 50));                       // ring off: on the low X edge, inside
         mTop.Persistent.Add(Ref(R(27), stat, 4096, 50));                    // ring off: on the high X edge, outside
         var mE00 = Ext(e00, 0, 0);
-        foreach (var (n, px0) in new[] { (1, 100f), (5, 110f), (6, 120f), (7, 130f), (12, 140f), (13, 150f), (14, 160f), (16, 170f), (17, 180f) }) mE00.Temporary.Add(Ref(R(n), stat, px0, 100));
+        foreach (var (n, px0) in new[] { (1, 100f), (5, 110f), (6, 120f), (7, 130f), (12, 140f), (13, 150f), (14, 160f), (16, 170f), (17, 180f), (30, 190f) }) mE00.Temporary.Add(Ref(R(n), stat, px0, 100));
         var mE10 = Ext(e10, 1, 0); mE10.Temporary.Add(Ref(R(2), stat, 4200, 100)); mE10.Temporary.Add(Ref(R(8), stat, 4210, 100));
         mE10.Persistent.Add(Ref(R(20), stat, 4250, 120));                   // persistent under an ORDINARY exterior cell (ring)
         mE10.Temporary.Add(Ref(R(29), stat, 4220, 110));                    // X deletes it in a copy of E10 holding nothing else
@@ -164,6 +164,7 @@ internal static class WinningRefsSelfTest
             var c00 = Ext(e00, 0, 0);
             c00.Temporary.Add(Ref(R(6), stat, 1120, 1100)); c00.Temporary.Add(Ref(R(8), stat, 1080, 1000));
             c00.Temporary.Add(Ref(R(9), stat, 1090, 1000)); c00.Temporary.Add(DeletedRef(R(12)));
+            c00.Temporary.Add(DeletedRef(R(30)));                           // R30: deleted here, placed again far away by B
             var c10 = Ext(e10, 1, 0); c10.Temporary.Add(Ref(R(7), stat, 4400, 200)); c10.Temporary.Add(Ref(R(17), stat, 4500, 200));
             var c50 = Ext(e50, 5, 0); c50.Temporary.Add(Ref(R(1), stat, 5 * 4096 + 200, 300)); c50.Temporary.Add(Ref(R(5), stat, 5 * 4096 + 210, 300));
             var c55 = Ext(e55, 5, 5); c55.Temporary.Add(Ref(R(3), stat, 5 * 4096 + 300, 5 * 4096 + 300));
@@ -176,7 +177,11 @@ internal static class WinningRefsSelfTest
         }
         // ---- B: R5 moves back into E00, at a third position ---------------------------------------------------------
         var b = Plugin("WrB");
-        { var c00 = Ext(e00, 0, 0); c00.Temporary.Add(Ref(R(5), stat, 1500, 1500)); b.Worldspaces.Add(World(wKey, null, c00)); }
+        {
+            var c00 = Ext(e00, 0, 0); c00.Temporary.Add(Ref(R(5), stat, 1500, 1500));
+            var c55 = Ext(e55, 5, 5); c55.Temporary.Add(Ref(R(30), stat, 5 * 4096 + 500, 5 * 4096 + 500));   // K6c
+            b.Worldspaces.Add(World(wKey, null, c00, c55));
+        }
         // ---- X and Y: the order-permutation pair for R13 (X files it in E50, Y moves it within E00) ------------------
         var x = Plugin("WrX");
         {
@@ -260,8 +265,10 @@ internal static class WinningRefsSelfTest
         Check("C6  ringRefs off: target overrides still admitted, at the later position (R6, R8 control)",
               At(noRing, R(6), 1120, 1100, e00) && At(noRing, R(8), 1080, 1000, e00),
               Where(noRing, R(6)) + " | " + Where(noRing, R(8)));
-        var expectOut = new HashSet<FormKey> { R(1), R(14), R(16) };
-        Check("K11 the taken-out count names exactly the refs moved out of the loaded cells (R1, R14, R16)",
+        // R30: placed in E00 by the master, deleted by A, placed again outside the 3x3 by B -- its last sighting is a
+        // move out of the loaded cells, so it counts (K6c); a deletion in between does not hide the move.
+        var expectOut = new HashSet<FormKey> { R(1), R(14), R(16), R(30) };
+        Check("K11 the taken-out count names exactly the refs moved out of the loaded cells (R1, R14, R16, R30)",
               main.TakenOut is { } to && to.SetEquals(expectOut),
               main.TakenOut is null ? "no taken-out keys" : "[" + string.Join(", ", main.TakenOut.Select(k => k.ToString()).OrderBy(x => x)) + "]");
         // The merge box's edge convention: low edge inside, high edge outside, on both axes, ring on and off.
