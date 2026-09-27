@@ -107,6 +107,10 @@ if (args.Length >= 3 && args[0] == "--report-sink-kill-arm")
 // can hold the lifetime itself. Needs no MO2 instance, no game and no GL context.
 if (args.Length >= 1 && args[0] == "--cell-scene-selftest")
     return ViewProbe.CellSceneSelfTest.Run();
+// Known answers for which placed references the winning state admits, and where (WinningRefs.cs), on
+// Mutagen-written synthetic plugins. Needs no MO2 instance, no game and no GL context.
+if (args.Length >= 1 && args[0] == "--winning-refs-selftest")
+    return ViewProbe.WinningRefsSelfTest.Run();
 if (args.Length == 2 && args[0] == "--mesh-reuse-red")
 {
     try { return ViewProbe.MeshReuseRed.Run(args[1]); }
