@@ -14,7 +14,8 @@ namespace ViewProbe;
 // admits, at which position, and in which cell.
 //
 // The world: worldspace W with a persistent cell T and exterior cells E00 (0,0), E10 (1,0), E50 (5,0), E55 (5,5);
-// interior cells I1 and I2. One modelled static base. Every position is the fixture's own.
+// interior cells I1 and I2; a second worldspace W2 with a persistent cell and a cell at the same grid (0,0), so the
+// same XY lies in two worlds. One modelled static base. Every position is the fixture's own.
 //
 // Exit 0 when every case passes (KNOWN-GAP rows do not fail the run); 1 otherwise. VP_WINREF_CANARY=1 plants one
 // deliberately wrong expectation (in C1), which must fail: a sweep whose canary passes is a broken sweep.
@@ -60,6 +61,7 @@ internal static class WinningRefsSelfTest
         var wKey = M(0x830); var topK = M(0x831);
         var e00 = M(0x840); var e10 = M(0x841); var e50 = M(0x842); var e55 = M(0x843);
         var i1 = M(0x850); var i2 = M(0x851);
+        var w2Key = M(0x860); var w2Top = M(0x861); var w2e00 = M(0x862);   // a second worldspace: the same XY, another world
         FormKey R(int n) => M((uint)(0x900 + n));
 
         static PlacedObject Ref(FormKey key, FormKey baseKey, float x, float y)
@@ -108,9 +110,10 @@ internal static class WinningRefsSelfTest
         var mTop = new Cell(topK, Rel) { Flags = default };
         mTop.Persistent.Add(Ref(R(3), stat, 200, 200));                     // inside (0,0)
         mTop.Persistent.Add(Ref(R(10), stat, 300, 300));                    // inside (0,0)
+        mTop.Persistent.Add(Ref(R(15), stat, 400, 400));                    // inside (0,0); A moves it to W2
         mTop.Persistent.Add(Ref(R(11), stat, 5 * 4096 + 100, 100));         // inside (5,0): outside the 3x3 of (0,0)
         var mE00 = Ext(e00, 0, 0);
-        foreach (var (n, px0) in new[] { (1, 100f), (5, 110f), (6, 120f), (7, 130f), (12, 140f), (13, 150f) }) mE00.Temporary.Add(Ref(R(n), stat, px0, 100));
+        foreach (var (n, px0) in new[] { (1, 100f), (5, 110f), (6, 120f), (7, 130f), (12, 140f), (13, 150f), (14, 160f), (16, 170f), (17, 180f) }) mE00.Temporary.Add(Ref(R(n), stat, px0, 100));
         var mE10 = Ext(e10, 1, 0); mE10.Temporary.Add(Ref(R(2), stat, 4200, 100)); mE10.Temporary.Add(Ref(R(8), stat, 4210, 100));
         var mE55 = Ext(e55, 5, 5); mE55.Temporary.Add(Ref(R(9), stat, 5 * 4096 + 100, 5 * 4096 + 100));
         var mE50 = Ext(e50, 5, 0);
@@ -139,10 +142,14 @@ internal static class WinningRefsSelfTest
             var c00 = Ext(e00, 0, 0);
             c00.Temporary.Add(Ref(R(6), stat, 1120, 1100)); c00.Temporary.Add(Ref(R(8), stat, 1080, 1000));
             c00.Temporary.Add(Ref(R(9), stat, 1090, 1000)); c00.Temporary.Add(DeletedRef(R(12)));
-            var c10 = Ext(e10, 1, 0); c10.Temporary.Add(Ref(R(7), stat, 4400, 200));
+            var c10 = Ext(e10, 1, 0); c10.Temporary.Add(Ref(R(7), stat, 4400, 200)); c10.Temporary.Add(Ref(R(17), stat, 4500, 200));
             var c50 = Ext(e50, 5, 0); c50.Temporary.Add(Ref(R(1), stat, 5 * 4096 + 200, 300)); c50.Temporary.Add(Ref(R(5), stat, 5 * 4096 + 210, 300));
             var c55 = Ext(e55, 5, 5); c55.Temporary.Add(Ref(R(3), stat, 5 * 4096 + 300, 5 * 4096 + 300));
             a.Worldspaces.Add(World(wKey, top, c00, c10, c50, c55));
+            var w2t = new Cell(w2Top, Rel) { Flags = default };
+            w2t.Persistent.Add(Ref(R(15), stat, 400, 400)); w2t.Persistent.Add(Ref(R(16), stat, 170, 100));
+            var w2c = Ext(w2e00, 0, 0); w2c.Temporary.Add(Ref(R(14), stat, 160, 100));
+            a.Worldspaces.Add(World(w2Key, w2t, w2c));
             var ci2 = Int(i2); ci2.Temporary.Add(Ref(R(4), stat, 450, 50)); FileInterior(a, ci2);
         }
         // ---- B: R5 moves back into E00, at a third position ---------------------------------------------------------
@@ -156,7 +163,8 @@ internal static class WinningRefsSelfTest
 
         var pa = Write(a, mOv); var pb = Write(b, mOv); var px = Write(x, mOv); var py = Write(y, mOv);
 
-        Walked Walk(FormKey cell, bool interior, (int, int)? grid, params string[] order)
+        Walked Walk(FormKey cell, bool interior, (int, int)? grid, params string[] order) => WalkR(cell, interior, grid, true, order);
+        Walked WalkR(FormKey cell, bool interior, (int, int)? grid, bool ringRefs, params string[] order)
         {
             var w = new Walked(new(), new(), new());
             var walk = new WinningRefWalk(w.WinRef, w.Persistent, w.CellOf);
@@ -165,11 +173,11 @@ internal static class WinningRefsSelfTest
                 using var mod = SkyrimMod.CreateFromBinaryOverlay(path, Rel);
                 foreach (var cp in PlacementExtract.FromMod(mod))
                 {
-                    var (isTarget, inRing) = WinningRefWalk.Classify(cp, cell, interior, ringRefs: true, interior ? FormKey.Null : wKey, grid);
+                    var (isTarget, inRing) = WinningRefWalk.Classify(cp, cell, interior, ringRefs, interior ? FormKey.Null : wKey, grid);
                     walk.Observe(cp, isTarget, inRing);
                 }
             }
-            if (!interior && grid is { } g) walk.MergePersistent(wKey, g, ringRefs: true);
+            if (!interior && grid is { } g) walk.MergePersistent(wKey, g, ringRefs);
             return w;
         }
         static string Pos(PlacedRef? r) => r is null ? "absent" : $"at {r.Position.X:0},{r.Position.Y:0}";
@@ -210,6 +218,18 @@ internal static class WinningRefsSelfTest
         Check("C4  moved from a far cell into the target: at the target position (R9)", At(main, R(9), 1090, 1000, e00), Where(main, R(9)));
         Check("C5  a persistent ref inside the 3x3 merges once; one outside does not (R10, R11)",
               At(main, R(10), 300, 300, topK) && !main.WinRef.ContainsKey(R(11)), Where(main, R(10)) + " | " + Where(main, R(11)));
+        Check("K8  temporary ref moved to ANOTHER worldspace's cell at the same XY: not drawn (R14)",
+              !main.WinRef.ContainsKey(R(14)), Where(main, R(14)));
+        Check("K9  persistent ref moved to another worldspace's persistent cell, same XY: not drawn (R15)",
+              !main.WinRef.ContainsKey(R(15)), Where(main, R(15)));
+        Check("K9b temporary ref made persistent in another worldspace, same XY: not drawn (R16)",
+              !main.WinRef.ContainsKey(R(16)), Where(main, R(16)));
+        var noRing = WalkR(e00, false, (0, 0), false, mPath, pa, pb, px, py);
+        Check("K10 ringRefs off: moved from the target into a neighbour cell, not drawn (R17)",
+              !noRing.WinRef.ContainsKey(R(17)), Where(noRing, R(17)));
+        Check("C6  ringRefs off: target overrides still admitted, at the later position (R6, R8 control)",
+              At(noRing, R(6), 1120, 1100, e00) && At(noRing, R(8), 1080, 1000, e00),
+              Where(noRing, R(6)) + " | " + Where(noRing, R(8)));
         KnownGap("K6  deleted by a later plugin with no placement data: should not be drawn (R12)",
                  !main.WinRef.ContainsKey(R(12)), Where(main, R(12)) + " (PlacementExtract yields nothing for a record without DATA)");
     }
