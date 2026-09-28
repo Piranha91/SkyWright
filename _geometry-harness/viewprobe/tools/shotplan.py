@@ -2511,6 +2511,50 @@ def cmd_frame(args):
     return 0
 
 
+# The worklist names this file reads, in the spelling it reads them. viewprobe's reader matches property names
+# case-insensitively (_shared/Worklist.cs, PropertyNameCaseInsensitive), so a PascalCase worklist is a worklist.
+WORKLIST_KEYS = {k.lower(): k for k in ("label", "cells", "cell", "shots", "eye", "yaw", "pitch", "look", "floorZ",
+                                        "feet", "doors", "eyeHeight", "fov", "note")}
+
+
+def _worklist_keys(obj, where):
+    """obj with the names above respelled as this file reads them, matched case-insensitively. Two spellings of one
+    name in one object are refused: which one the renderer keeps is not this file's guess."""
+    out, seen = {}, {}
+    for k, v in obj.items():
+        c = WORKLIST_KEYS.get(k.lower(), k) if isinstance(k, str) else k
+        if c in seen:
+            raise SystemExit(f"{where} spells {c!r} two ways ({seen[c]!r}, {k!r}): ambiguous, refused")
+        seen[c] = k
+        out[c] = v
+    return out
+
+
+def worklist_cells(wl, where):
+    """The worklist with its cells, shots and shot fields spelled as this file reads them. Refuses by name: no cells
+    list, a cell with no shots list, a name spelled two ways, 0 shots."""
+    if not isinstance(wl, dict):
+        raise SystemExit(f"{where} is not a JSON object -- that is not a worklist")
+    wl = _worklist_keys(wl, where)
+    if not isinstance(wl.get("cells"), list):
+        raise SystemExit(f"{where} has no 'cells' list (in any letter case) -- that is not a worklist. "
+                         "A conflict emit and a worklist share an extension and nothing else.")
+    cells, n = [], 0
+    for ci, cell in enumerate(wl["cells"]):
+        cell = _worklist_keys(cell, f"{where} cell {ci + 1}")
+        name = f"cell {ci + 1} ({cell.get('cell')})"
+        if not isinstance(cell.get("shots"), list):
+            raise SystemExit(f"{where}: {name} has no 'shots' list (in any letter case)")
+        cell["shots"] = [_worklist_keys(s, f"{where} {name} shot {si + 1}") for si, s in enumerate(cell["shots"])]
+        n += len(cell["shots"])
+        cells.append(cell)
+    if n == 0:
+        why = f" (status {wl['status']!r})" if wl.get("status") else ""
+        raise SystemExit(f"{where} has 0 shots{why} -- nothing to drive")
+    wl["cells"] = cells
+    return wl
+
+
 def cmd_devbench(args):
     """A worklist is already a shot list. This makes it a DevBench camera script.
 
@@ -2518,15 +2562,12 @@ def cmd_devbench(args):
     the render, the tester's feet and the screenshot all come from the same coordinates and
     cannot drift apart.
     """
-    with open(args.worklist, encoding="utf-8") as f:
-        wl = json.load(f)
-    if "cells" not in wl:
-        raise SystemExit(f"{args.worklist} has no 'cells' -- that is not a worklist. "
-                         "A conflict emit and a worklist share an extension and nothing else.")
+    with open(args.worklist, encoding="utf-8-sig") as f:
+        wl = worklist_cells(json.load(f), args.worklist)
     n = 0
     out = []
     for cell in wl["cells"]:
-        for shot in cell.get("shots", []):
+        for shot in cell["shots"]:
             n += 1
             if args.shot and n != args.shot:
                 continue
