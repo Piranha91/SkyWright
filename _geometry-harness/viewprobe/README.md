@@ -2103,10 +2103,10 @@ factoring to the `v1` rows on a fabricated two-plane scene, including the sparse
 real `unassessed: ` relation, and checks each of those refusals. `v1` reports stay readable; new
 reports are `v2` only.
 
-**Consumer migration status:** `tools/planes_report_rows.py` currently provides an explicit
-v1-only schema guard for the Python campaign readers. It refuses a v2 report before those readers
-can treat its overlays as complete rows. The guard will become a dual-version materialiser before
-the v2 writer is deployed; the reader contract above is the required final behavior.
+**Python readers:** `tools/planes_report_rows.py` materialises complete candidate rows from both
+schemas and refuses unknown schemas, invalid body ids, missing references and body/overlay key
+collisions. Its text scan reads the root schema structurally and, for v2, validates every overlay
+while decoding complete bodies only for rows with visibility masks.
 
 **The report is serialised straight to the file.** A busy exterior view's report runs to hundreds of
 megabytes — how many depends entirely on the load order and the view, since the report lists every
