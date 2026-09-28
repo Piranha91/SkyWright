@@ -147,7 +147,6 @@ var floorTally = new FloorFeed.Tally();
 sw.Restart();
 var winRef = walk.WinRef;                 // ref FormKey -> winning placement
 var winRefCell = walk.WinRefCell;         // ref FormKey -> winning cell
-var lastCellOf = walk.LastCellOf;         // see BlockWalk.cs
 var winNav = walk.WinNav;
 var baseMesh = new Dictionary<FormKey, (string Mesh, string Type)>();
 var cellMeta = walk.CellMeta;
@@ -173,7 +172,9 @@ __run.Feature("plugins", paths.Count, "plugins").Stage("scan", "reading plugins"
 foreach (var p in paths)
 {
     __run.Advance();
-    if (BlockWalk.Open(p) is not { } m) { bos.Plugin(null); continue; }
+    ISkyrimModGetter m;
+    try { m = BlockWalk.Open(p)!; }
+    catch (PluginUnreadableException ex) { Console.Error.WriteLine(ex.Message); return 2; }
     using (m as IDisposable)
     {
         bos.Plugin(m);
@@ -199,6 +200,9 @@ foreach (var p in paths)
 Console.WriteLine($"winning state for those cells: {winRef.Count:N0} refs, {winNav.Count:N0} navmeshes, "
                 + $"{baseMesh.Count:N0} base records  ({sw.Elapsed.TotalSeconds:0.0}s)");
 walk.Dump();
+if (walk.TakenOutCount > 0)
+    Console.WriteLine($"   {walk.TakenOutCount:N0} reference(s) a target cell held until a later plugin moved them out of those cells or "
+                    + "deleted them: not judged (the last sighting decides)");
 // --bos on (default): the layer over the inis the game would read from this profile's VFS, resolved per reference below.
 // --bos off: the record bases and placements, as every run before 2026-09-04.
 if (bosOn) bos.Load(assets.LooseRoots);
@@ -228,7 +232,9 @@ if (stateSpec is not null)
     var stateIdx = new OverlapIndex();
     for (int p = 0; p < paths.Count; p++)
     {
-        if (BlockWalk.Open(paths[p]) is not { } m) continue;
+        ISkyrimModGetter m;
+        try { m = BlockWalk.Open(paths[p])!; }
+        catch (PluginUnreadableException ex) { Console.Error.WriteLine(ex.Message); return 2; }
         using (m as IDisposable) stateIdx.Ingest(p, m);
     }
     var sx = SwitchIndex.Build(stateIdx);
@@ -261,20 +267,18 @@ Func<FormKey, bool>? enabledOf = pop.Predicate;
 // (before then, only under --state). A navcut is a placed reference whose XTRI names a COLL record flagged
 // NavmeshObstacle; its obstacle is its XPRM box at its transform.
 var navcutsByCell = new Dictionary<FormKey, List<FormKey>>();
-long navcutRelocated = 0;
 foreach (var (fk, r) in winRef)
 {
     if (r.Deleted || r.Primitive is null) continue;
     if (r.CollisionLayerIndex is not { } cl || !collByIndex.TryGetValue(cl, out var layer) || !layer.NavmeshObstacle) continue;
     var cell = winRefCell[fk];
-    if (lastCellOf.TryGetValue(fk, out var lastCell) && lastCell != cell) { navcutRelocated++; continue; }
     if (!navcutsByCell.TryGetValue(cell, out var nl)) navcutsByCell[cell] = nl = new List<FormKey>();
     nl.Add(fk);
 }
 bool NavcutPresent(FormKey k) => enabledOf is null ? !winRef[k].InitiallyDisabled : enabledOf(k);
 Console.WriteLine($"   {navcutsByCell.Values.Sum(l => l.Count):N0} navcut boxes stand in the target's cells "
                 + $"({navcutsByCell.Values.Sum(l => l.Count(NavcutPresent)):N0} present in this population; listed with {{NAVCUT}}"
-                + (navcutRelocated > 0 ? $"; {navcutRelocated:N0} set aside — a later plugin moved them out of those cells" : "") + ")");
+                + ")");
 
 var navcutTally = new Dictionary<RouteCutVerdict, int>();
 var navcutHits = new List<(RouteCutVerdict V, string Cell, FormKey Fk, string Why, int Touched, RouteLine? Line, string Plugin)>();
@@ -340,6 +344,15 @@ var winRefsByCell = winRef.Values.GroupBy(r => winRefCell[r.FormKey]).ToDictiona
 // for them would double every raster read in the summary tally and print the cell twice in the per-cell table.
 var floorFields = new List<(string Cell, FloorField Field)>();
 var floorByCell = new Dictionary<FormKey, FloorField>();
+// A cell whose floor neighbourhood holds a LAND that gives no heights (FloorFeed.FloorIndex) is not judged: its floor
+// would come from an earlier plugin's heights or from none. Counted and named, never guessed at.
+long floorLandUnjudged = 0;
+string? FloorLandProblem(FormKey cellKey)
+{
+    if (!cellMeta.TryGetValue(cellKey, out var m) || m.Interior || m.Grid is not { } g) return null;
+    var bad = walk.Floor.UnreadableNear(m.Worldspace, g);
+    return bad.Count == 0 ? null : string.Join("; ", bad);
+}
 FloorField FloorFor(FormKey cellKey, List<PlacedRef>? own)
 {
     if (floorByCell.TryGetValue(cellKey, out var cached)) return cached;
@@ -402,6 +415,7 @@ foreach (var (cellKey, tcell) in targetCells)
     var band = ActorBand.ForCell(winRefsByCell.TryGetValue(cellKey, out var cellRefs) ? cellRefs : Array.Empty<PlacedRef>(),
                                  npcFacts, raceFacts, fallbackTop, fallbackSrc, enabledOf);
     if (!float.IsFinite(band.Top)) { Console.WriteLine($"UNJUDGEABLE actor band in {cellKey}: {band.Source}"); continue; }
+    if (FloorLandProblem(cellKey) is { } landWhy) { Console.WriteLine($"UNJUDGEABLE floor in {cellKey}: LAND gives no heights at {landWhy}"); floorLandUnjudged++; continue; }
     ActorHeight = band.Top;
     float physicalTop = controllerBand ? ActorBand.PhysicalControllerTop(band.Top) : band.Top;
     var floor = FloorFor(cellKey, cellRefs);
@@ -554,6 +568,7 @@ foreach (var (cellKey, tcell) in targetCells)
         if (index.TriangleCount == 0) continue;
         var band = ActorBand.ForCell(winRefsByCell.TryGetValue(cellKey, out var cellRefs2) ? cellRefs2 : Array.Empty<PlacedRef>(), npcFacts, raceFacts, fallbackTop, fallbackSrc, enabledOf);
         if (!float.IsFinite(band.Top)) { Console.WriteLine($"UNJUDGEABLE actor band in {cellKey}: {band.Source}"); continue; }
+        if (FloorLandProblem(cellKey) is { } landWhy2) { Console.WriteLine($"UNJUDGEABLE floor in {cellKey}: LAND gives no heights at {landWhy2}"); floorLandUnjudged++; continue; }
         float routeTop = controllerBand ? ActorBand.PhysicalControllerTop(band.Top) : band.Top;
         var floor = FloorFor(cellKey, cellRefs2);
         Dictionary<NavGraph.TriRef, NavGraph.Node>? gnodes = null;
@@ -626,6 +641,8 @@ Console.WriteLine($"\n   ---- actor band, derived per cell ----");
 Console.WriteLine($"   cells with placed actors {cellsWithActors:N0} (templated-only {cellsTemplatedOnly:N0}); band top {(bandMin == float.MaxValue ? 0 : bandMin):0}..{bandMax:0} u; fallback {fallbackSrc}");
 foreach (var (_, ff) in floorFields) floorTally.Add(ff);
 Console.WriteLine("   " + floorTally.Line());
+if (floorLandUnjudged > 0)
+    Console.WriteLine($"   {floorLandUnjudged:N0} cell pass(es) UNJUDGEABLE: the floor neighbourhood holds a LAND that gives no heights (named above)");
 Console.WriteLine("   the floor each cell's band stood on (δ = navmesh − floor over the raster reads; a strongly negative median is a floor laid ABOVE the winning navmesh):");
 foreach (var (cell, ff) in floorFields.Where(x => x.Field.Reads > 0).OrderBy(x => x.Field.OffsetQuantile(0.5f)).Take(40))
     Console.WriteLine("      " + FloorFeed.Tally.CellLine(cell, ff));

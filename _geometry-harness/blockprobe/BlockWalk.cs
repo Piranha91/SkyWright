@@ -16,12 +16,14 @@ sealed class BlockWalk
     public Dictionary<FormKey, Dictionary<(int, int), Dictionary<FormKey, PlacedRef>>> FloorRefsByWorld => Floor.RefsByWorld;
     public Dictionary<FormKey, Dictionary<(int, int), float[,]>> FloorLandByWorld => Floor.LandByWorld;
     public IEnumerable<(FormKey Ws, int X, int Y)> UnreadableLand => Floor.UnreadableLand;
-    public readonly Dictionary<FormKey, PlacedRef> WinRef = new();                  // ref FormKey -> winning placement
-    public readonly Dictionary<FormKey, FormKey> WinRefCell = new();                // ref FormKey -> winning cell
-    // The LAST cell any plugin placed a tracked reference in. `WinRefCell` remembers the last TARGET cell it was in, so a
-    // later plugin that relocates it out of the target's cells leaves that stale; the navcut pass reads this instead, and a
-    // box moved elsewhere is not measured against a navmesh it no longer stands on (the whole-order reading --state had).
-    public readonly Dictionary<FormKey, FormKey> LastCellOf = new();
+    /// <summary>The winning state of the target cells under the last-sighting rule (_shared/LastSighting.cs): a reference
+    /// is held iff its last sighting stands in a target cell, at that sighting; a later plugin that moves it out of those
+    /// cells or deletes it takes it out.</summary>
+    readonly LastSightingSet _win = new();
+    public Dictionary<FormKey, PlacedRef> WinRef => _win.Refs;                      // ref FormKey -> winning placement
+    public Dictionary<FormKey, FormKey> WinRefCell => _win.CellOf;                  // ref FormKey -> winning cell
+    /// <summary>References a target cell held until a later plugin moved them out or deleted them: not judged.</summary>
+    public int TakenOutCount => _win.TakenOut.Count;
     public readonly Dictionary<FormKey, (NavmeshGeometry Nav, string Plugin, FormKey Cell)> WinNav = new();
     public readonly Dictionary<FormKey, CellPlacements> CellMeta = new();
     public readonly Dictionary<FormKey, string> DefinedBy = new();     // ref -> the first plugin that placed it, for the {NAVCUT by …} line
@@ -35,11 +37,8 @@ sealed class BlockWalk
         Floor = new FloorFeed.FloorIndex((ws, g) => FloorGrids.Contains((ws, g.X, g.Y)));
     }
 
-    /// <summary>Open one plugin of the order, or null when it cannot be read.</summary>
-    public static ISkyrimModGetter? Open(string path)
-    {
-        try { return SkyrimMod.CreateFromBinaryOverlay(path, SkyrimRelease.SkyrimSE); } catch { return null; }
-    }
+    /// <summary>Open one plugin of the order, or throw PluginUnreadableException (refused, never skipped).</summary>
+    public static ISkyrimModGetter? Open(string path) => PluginOpen.Open(path, "blockprobe's walk of the load order");
 
     /// <summary>One plugin's cells, in load order. <paramref name="perCell"/> runs first for every cell (the caller's own
     /// per-cell work).</summary>
@@ -50,10 +49,10 @@ sealed class BlockWalk
             perCell(cp);
             Floor.Observe(cp, name);
             bool targetCell = TargetCells.ContainsKey(cp.Cell);
-            foreach (var r in cp.Refs) if (targetCell || LastCellOf.ContainsKey(r.FormKey)) LastCellOf[r.FormKey] = cp.Cell;
+            _win.Observe(cp, (c, _) => targetCell);
             if (!targetCell) continue;
             CellMeta[cp.Cell] = cp;
-            foreach (var r in cp.Refs) { WinRef[r.FormKey] = r; WinRefCell[r.FormKey] = cp.Cell; DefinedBy.TryAdd(r.FormKey, name); }
+            foreach (var r in cp.Refs) DefinedBy.TryAdd(r.FormKey, name);
             foreach (var nav in cp.Navmeshes) WinNav[nav.FormKey] = (nav, name, cp.Cell);
         }
     }
@@ -67,6 +66,7 @@ sealed class BlockWalk
             targetCells = TargetCells.Keys.Select(k => k.ToString()).OrderBy(k => k, StringComparer.Ordinal).ToList(),
             floorGrids = FloorGrids.OrderBy(g => g.Wrld.ToString()).ThenBy(g => g.X).ThenBy(g => g.Y)
                                    .Select(g => new { worldspace = g.Wrld.ToString(), x = g.X, y = g.Y }).ToList(),
+            takenOut = _win.TakenOut.Select(k => k.ToString()).OrderBy(k => k, StringComparer.Ordinal).ToList(),
             winRef = WinRef.Values.OrderBy(r => r.FormKey.ToString(), StringComparer.Ordinal).Select(r => WinStateDump.Entry(r, WinRefCell[r.FormKey])).ToList(),
             floor = FloorRefsByWorld.Select(w => WinStateDump.Floor(w.Key, w.Value, Floor.LandOf(w.Key), Floor.UnreadableLand.Where(u => u.Ws == w.Key).Select(u => (u.X, u.Y)))).ToList(),
         });
