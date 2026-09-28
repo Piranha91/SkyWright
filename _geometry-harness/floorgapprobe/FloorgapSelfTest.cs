@@ -36,6 +36,13 @@ static class FloorgapSelfTest
                 walk.MergedLand is null && reason is string, $"{(walk.MergedLand is null ? "no heights" : $"heights {walk.MergedLand[16, 16]:0}")}; "
                 + (hasMember ? $"reason '{reason}'" : "no MergedLandUnreadable member"));
 
+        // A merged cell whose last LAND DECLARES no heights (E11, A): no heights, the master's not kept, and not named.
+        var wd = new FloorgapWalk(winning: true, wantCell: Fx.E11.ToString());
+        foreach (var path in t.Paths) { var md = wd.Open(path)!; using (md as IDisposable) wd.Plugin(md, path, _ => { }); }
+        t.Check("G1-L4d the merged cell's last LAND declares no heights: no heights (the master's not kept), not named",
+                wd.MergedLand is null && wd.MergedLandUnreadable is null,
+                $"{(wd.MergedLand is null ? "no heights" : $"heights {wd.MergedLand[16, 16]:0}")}; reason '{wd.MergedLandUnreadable}'");
+
         // The floor neighbourhood, filed from every exterior cell.
         t.CheckFloor("G2", walk.RefsByWorld.GetValueOrDefault(Fx.W), walk.LandByWorld.GetValueOrDefault(Fx.W),
                      MovedRefSelfTest.UnreadableLandOf(walk, Fx.W), new[] { (0, 0), (1, 0), (5, 0), (-1, 0), (2, 0), (1, 1) });
