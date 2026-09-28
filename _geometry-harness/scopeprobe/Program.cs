@@ -124,6 +124,7 @@ foreach (var v in cfg.Providers) providerKind[v.Name] = v.Kind;
 var walkFailures = new List<string>();
 var targetJson = new List<object>();
 var summaries = new List<TargetSummary>();
+var targetPlacedReports = new List<PlacedReport>();
 var destinationDoors = new HashSet<FormKey>();          // teleport destinations, resolved in pass 2
 var perTargetDoors = new List<(string Target, List<(FormKey From, FormKey To)> Links)>();
 
@@ -207,6 +208,7 @@ foreach (var wanted in targetNames)
                           + "so there is no meta.ini to read a Nexus id from";
 
         var report = placed.Report();
+        targetPlacedReports.Add(report);
         summaries.Add(new TargetSummary(
             plugin.Name, plugin.Sha256, plugin.Provider, kind ?? "unknown", records, types.Count,
             plugin.Masters.Count, scriptCarriers, assetCount, nexusId > 0 ? nexusId : null,
@@ -294,6 +296,215 @@ foreach (var (ws, x, y) in touched)
 
 bool complete = walkFailures.Count == 0 && summaries.Count == targetNames.Count;
 
+// The small load-order slice for the exact cells/grid coordinates in the target footprints. This walks every
+// plugin, but retains only membership and record kinds at those named locations; it is not a conflict detector.
+var contributorFailures = new List<string>();
+// summaries and targetPlacedReports are appended together, one per target FOUND; targetNames also holds absent targets.
+foreach (var (summary, report) in summaries.Zip(targetPlacedReports))
+    if (report.PersistentRefsWithoutPlacement > 0)
+        contributorFailures.Add($"'{summary.Name}' has {report.PersistentRefsWithoutPlacement:N0} persistent placed record(s) without placement coordinates; those records could not be assigned to a local worldspace grid");
+var wantedCells = targetPlacedReports.SelectMany(x => x.CellScopes).Where(x => x.Kind != "persistent")
+    .GroupBy(x => x.Cell).ToDictionary(x => x.Key, x => x.First());
+var wantedGrids = targetPlacedReports.SelectMany(x => x.CellScopes).Where(x => x.X is not null && x.Y is not null)
+    .GroupBy(x => (x.WorldspaceKey ?? "", x.X!.Value, x.Y!.Value)).ToDictionary(x => x.Key, x => x.ToList());
+var contributors = wantedCells.Values.ToDictionary(x => x.Cell, _ => new Dictionary<string, HashSet<string>>(StringComparer.OrdinalIgnoreCase));
+var worldHeaders = new Dictionary<FormKey, RecordFields>();
+var localLargeReferences = new Dictionary<(FormKey Worldspace, int X, int Y), string>();
+var localMaxHeights = new Dictionary<(FormKey Worldspace, int X, int Y), string?>();
+var worldHeaderAudit = new List<object>();
+var worldspaceWide = new List<object>();
+const int WorldHeaderReadDepth = 16;
+RecordFields ReadWorldHeader(IWorldspaceGetter ws)
+{
+    var childFields = OwnedChildContent.Fields(ws).Keys.ToHashSet(StringComparer.Ordinal);
+    // Mutagen exposes the worldspace child-group seek table/header beside the modeled WRLD fields. They describe
+    // where SubCells are stored, rather than a change to the worldspace itself, and therefore travel with an
+    // otherwise unchanged carrier. Keep that engine-container metadata out of the parent-record comparison.
+    // Pinned Mutagen 0.54.4 source: OffsetData is the rebuildable OFST seek cache; SubCellsTimestamp and
+    // SubCellsUnknown are read from and written to the WorldChildren GRUP header (Worldspace.cs 58-59, 146-147).
+    // LargeReferences (RNAM rows keyed by GridPosition) and MaxHeight (MHDT, one entry per grid cell) are compared
+    // per measured grid below, not as whole tables.
+    // VersionControl, Version2 and FormVersion are the main-record header's VCS1, VCS2 and form-version words, shared
+    // by every record type. xEdit (wbImplementation.pas, dev-4.1.5, TwbMainRecordStruct and the override copy path)
+    // resets VCS1 and VCS2 to defaults whenever it copies a record as an override: they are bookkeeping, not content.
+    // FormVersion is the serialization format version the Creation Kit wrote (43 LE, 44 SE), not worldspace content.
+    childFields.UnionWith(new[] { nameof(IWorldspaceGetter.OffsetData), nameof(IWorldspaceGetter.SubCellsTimestamp),
+        nameof(IWorldspaceGetter.SubCellsUnknown), nameof(IWorldspaceGetter.LargeReferences),
+        nameof(IWorldspaceGetter.MaxHeight), nameof(IMajorRecordGetter.VersionControl),
+        nameof(ISkyrimMajorRecordGetter.Version2), nameof(ISkyrimMajorRecordGetter.FormVersion) });
+    var root = ReadEngine.ReadFields(ws, null, depth: 1, containerHint: null);
+    var parentNames = root.Fields.Select(x => x.Path).Where(x => !childFields.Contains(x)).ToList();
+    return ReadEngine.ReadFields(ws, parentNames, depth: WorldHeaderReadDepth, containerHint: null);
+}
+// One grid cell's MaxHeight (MHDT) entry as hex, or null when the table is absent or does not cover the cell.
+// Mutagen 0.54.4 models CellData as an opaque byte array (Worldspace.xml WorldspaceMaxHeight); xEdit (wbDefinitionsTES5.pas)
+// names its element as four quad-height bytes per cell. Neither states the cell order, so it was measured: on
+// Skyrim.esm Tamriel terrain against Update.esm's table, Min..Max is inclusive (120 x 95 cells x 4 = 45,600 bytes exactly)
+// and the cells run column-major, index (x - Min.X) * height + (y - Min.Y): per-cell terrain maximum correlates
+// r = 0.977 with that mapping and |r| < 0.01 with row-major.
+// A length that does not match the bounds throws, so the caller reports the entry as unreadable instead of guessing.
+string? MaxHeightEntry(IWorldspaceMaxHeightGetter? mh, int x, int y)
+{
+    if (mh is null) return null;
+    int minX = mh.Min.X, minY = mh.Min.Y, width = mh.Max.X - minX + 1, height = mh.Max.Y - minY + 1;
+    if (width <= 0 || height <= 0 || mh.CellData.Length != width * height * 4)
+        throw new InvalidDataException($"MHDT CellData has {mh.CellData.Length} bytes for bounds {mh.Min.X},{mh.Min.Y}..{mh.Max.X},{mh.Max.Y}; "
+                                       + $"the measured layout needs {Math.Max(width, 0) * Math.Max(height, 0) * 4}");
+    if (x < minX || x >= minX + width || y < minY || y >= minY + height) return null;
+    int i = ((x - minX) * height + (y - minY)) * 4;
+    return Convert.ToHexString(mh.CellData.Slice(i, 4));
+}
+void AddContributor(string cell, string plugin, string kind)
+{
+    if (!contributors.TryGetValue(cell, out var byPlugin)) return;
+    if (!byPlugin.TryGetValue(plugin, out var kindsAtPlace)) byPlugin[plugin] = kindsAtPlace = new HashSet<string>(StringComparer.Ordinal);
+    kindsAtPlace.Add(kind);
+}
+foreach (var plugin in cfg.Plugins)
+{
+    ISkyrimModGetter mod;
+    try { mod = LoadOrderResolver.OpenOverlay(plugin.Path, dataDir); }
+    catch (Exception ex) { contributorFailures.Add($"'{plugin.Name}' could not be opened for the location-contributor walk — {Concise(ex)}"); continue; }
+    try
+    {
+        void ScanCell(ICellGetter cell, FormKey worldspace, bool persistent)
+        {
+            string cellKey = cell.FormKey.ToString();
+            var destinations = new List<ScopeCell>();
+            if (wantedCells.TryGetValue(cellKey, out var exact)) destinations.Add(exact);
+            if (!persistent && !worldspace.IsNull && cell.Grid?.Point is { } gp
+                && wantedGrids.TryGetValue((worldspace.ToString(), gp.X, gp.Y), out var gridDestinations))
+                destinations.AddRange(gridDestinations);
+            foreach (var destination in destinations.DistinctBy(x => x.Cell))
+            {
+                AddContributor(destination.Cell, plugin.Name, "CELL");
+                if (cell.NavigationMeshes.Any()) AddContributor(destination.Cell, plugin.Name, "NAVM");
+                try { if (cell.Landscape is not null) AddContributor(destination.Cell, plugin.Name, "LAND"); }
+                catch { contributorFailures.Add($"'{plugin.Name}' has unreadable LAND in {cellKey}"); }
+                if (cell.Persistent.Any() || cell.Temporary.Any()) AddContributor(destination.Cell, plugin.Name, "placed-record");
+            }
+        }
+        foreach (var ws in mod.Worldspaces.Records)
+        {
+            var cellsInWs = wantedCells.Values.Where(x => string.Equals(x.WorldspaceKey, ws.FormKey.ToString(), StringComparison.OrdinalIgnoreCase)).ToList();
+            if (cellsInWs.Count > 0)
+            {
+                var header = ReadWorldHeader(ws);
+                bool readable = header.Fields.All(x => x.Readable && x.Path != "…");
+                bool changed = !worldHeaders.TryGetValue(ws.FormKey, out var previous);
+                if (previous is not null)
+                {
+                    var diff = FieldsDiff.Compare(header, previous, "previous provider");
+                    readable &= diff.Complete;
+                    changed = diff.Deltas.Count > 0;
+                    worldHeaderAudit.Add(new { worldspace = ws.FormKey.ToString(), plugin = plugin.Name,
+                        status = readable ? (changed ? "changed" : "unchanged-container-excluded") : "unmeasured",
+                        deltas = readable && changed ? diff.Deltas.Take(3).Select(x => x.Length <= 240 ? x : x[..240] + "…").ToList() : new List<string>(),
+                        unreadable = header.Fields.Where(x => !x.Readable || x.Path == "…").Select(x => new { x.Path, x.Note }).ToList() });
+                }
+                else worldHeaderAudit.Add(new { worldspace = ws.FormKey.ToString(), plugin = plugin.Name,
+                    status = readable ? "definition" : "unmeasured", deltas = new List<string>(),
+                    unreadable = header.Fields.Where(x => !x.Readable || x.Path == "…").Select(x => new { x.Path, x.Note }).ToList() });
+                // A parent WRLD field (climate, water, flags, ...) applies to the whole worldspace. It is recorded as
+                // worldspace-wide, never stamped onto each measured cell: that would claim a locality nobody measured.
+                if (!readable)
+                    contributorFailures.Add($"'{plugin.Name}' has an incomplete parent-field read for worldspace {ws.FormKey}; its WRLD contribution could not be classified");
+                else if (changed)
+                    worldspaceWide.Add(new { worldspace = ws.FormKey.ToString(), plugin = plugin.Name,
+                        change = previous is null ? "definition" : "parent-fields" });
+                worldHeaders[ws.FormKey] = header;
+
+                // MaxHeight: compare this cell's own entry only. A table added or removed as a whole, or bounds that
+                // start or stop covering the cell, is a worldspace-wide change, not evidence at the cell.
+                bool maxHeightPresenceChanged = false;
+                foreach (var gridGroup in cellsInWs.Where(x => x.X is not null && x.Y is not null)
+                                                     .GroupBy(x => (x.X!.Value, x.Y!.Value)))
+                {
+                    var key = (ws.FormKey, gridGroup.Key.Item1, gridGroup.Key.Item2);
+                    string? current;
+                    try { current = MaxHeightEntry(ws.MaxHeight, key.Item2, key.Item3); }
+                    catch (Exception ex)
+                    {
+                        contributorFailures.Add($"'{plugin.Name}' has an unreadable MaxHeight entry at worldspace {ws.FormKey} grid {key.Item2},{key.Item3} — {Concise(ex)}");
+                        localMaxHeights.Remove(key);
+                        continue;
+                    }
+                    bool hadPrevious = localMaxHeights.TryGetValue(key, out var previousEntry);
+                    if (hadPrevious && (previousEntry is null) != (current is null)) maxHeightPresenceChanged = true;
+                    else if ((hadPrevious && previousEntry is not null && !string.Equals(previousEntry, current, StringComparison.Ordinal))
+                             || (!hadPrevious && current is not null))
+                        foreach (var destination in gridGroup) AddContributor(destination.Cell, plugin.Name, "WRLD-max-height");
+                    localMaxHeights[key] = current;
+                }
+                if (maxHeightPresenceChanged)
+                    worldspaceWide.Add(new { worldspace = ws.FormKey.ToString(), plugin = plugin.Name,
+                        change = "max-height-coverage" });
+
+                // Worldspace.xml defines LargeReferences as RNAM rows with GridPosition and reference/position
+                // children. Compare only rows at measured coordinates; a table delta elsewhere is not local evidence.
+                foreach (var gridGroup in cellsInWs.Where(x => x.X is not null && x.Y is not null)
+                                                     .GroupBy(x => (x.X!.Value, x.Y!.Value)))
+                {
+                    var key = (ws.FormKey, gridGroup.Key.Item1, gridGroup.Key.Item2);
+                    string current;
+                    try
+                    {
+                        current = string.Join("|", ws.LargeReferences
+                            .Where(x => x.GridPosition.X == key.Item2 && x.GridPosition.Y == key.Item3)
+                            .SelectMany(x => x.References)
+                            .Select(x => $"{x.Reference.FormKey}@{x.Position.X},{x.Position.Y}")
+                            .Order(StringComparer.Ordinal));
+                    }
+                    catch (Exception ex)
+                    {
+                        contributorFailures.Add($"'{plugin.Name}' has unreadable large-reference entries at worldspace {ws.FormKey} grid {key.Item2},{key.Item3} — {Concise(ex)}");
+                        continue;
+                    }
+                    bool hadPrevious = localLargeReferences.TryGetValue(key, out var previousLocal);
+                    if ((hadPrevious && !string.Equals(previousLocal, current, StringComparison.Ordinal)) || (!hadPrevious && current.Length > 0))
+                        foreach (var destination in gridGroup) AddContributor(destination.Cell, plugin.Name, "WRLD-large-reference");
+                    localLargeReferences[key] = current;
+                }
+            }
+            if (ws.TopCell is { } top) ScanCell(top, ws.FormKey, true);
+            foreach (var block in ws.SubCells) foreach (var sub in block.Items) foreach (var cell in sub.Items) ScanCell(cell, ws.FormKey, false);
+        }
+        foreach (var block in mod.Cells.Records) foreach (var sub in block.SubBlocks) foreach (var cell in sub.Cells) ScanCell(cell, FormKey.Null, false);
+        foreach (var cp in PlacementExtract.FromMod(mod))
+            if (!cp.Worldspace.IsNull)
+                foreach (var placedRef in cp.Refs.Where(x => x.Persistent))
+                {
+                    var grid = (cp.Worldspace.ToString(), (int)MathF.Floor(placedRef.Position.X / 4096f),
+                                         (int)MathF.Floor(placedRef.Position.Y / 4096f));
+                    if (wantedGrids.TryGetValue(grid, out var destinations))
+                        foreach (var destination in destinations)
+                            AddContributor(destination.Cell, plugin.Name, "persistent-placed-record");
+                }
+    }
+    catch (Exception ex) { contributorFailures.Add($"'{plugin.Name}' could not be walked for location contributors — {Concise(ex)}"); }
+    finally { (mod as IDisposable)?.Dispose(); }
+}
+// The map's completeness is its own. It is kept out of walkFailures and the top-level `complete`, which say whether the
+// target FOOTPRINT is whole (PLAN D2): evalrun reads walkFailures to recognise a legal target omission, and a
+// contributor hiccup in some unrelated plugin must not turn the footprint's triggers unknown. The console and the
+// JSON both state it; a consumer of the map reads locationContributors.complete.
+bool contributorsComplete = complete && contributorFailures.Count == 0;
+var locationContributors = new
+{
+    complete = contributorsComplete,
+    locations = wantedCells.Values.Select(c => new
+    {
+        cell = c.Cell, kind = c.Kind, name = c.Name, worldspace = c.Worldspace, worldspaceKey = c.WorldspaceKey, x = c.X, y = c.Y,
+        plugins = contributors[c.Cell].Select(p => new { name = p.Key, recordKinds = p.Value.Order().ToList() }).ToList()
+    }).ToList(),
+    limits = new[] { "Local world-record contributors only; asset-only replacers and runtime-created placements are outside this map.",
+                     "A location lists only evidence indexed to that cell or grid coordinate. A WRLD parent-field change (climate, water, flags, ...) applies to the whole worldspace and is listed under worldspaceWide, not at each location. Rebuildable OFST data, WorldChildren group metadata, record-header version bookkeeping (VCS1, VCS2, form version) and unchanged containers are excluded.",
+                     "Large-reference rows and MaxHeight entries are compared only at measured grid coordinates; a change to the same table elsewhere adds no local contributor, and a MaxHeight table added or removed as a whole is worldspace-wide." },
+    missing = contributorFailures,
+    worldspaceWide,
+    worldspaceHeaderAudit = worldHeaderAudit,
+};
+
 // The extents this probe does not read. Stated, never blank (PLAN D2, amended A-1): each is a key from the CLOSED
 // extent vocabulary with one sentence saying why. A registry check that declares `dependsOnExtents` naming one of
 // these answers UNKNOWN, whatever its trigger says — and unknown never becomes "not applicable".
@@ -316,6 +527,7 @@ var scope = new
     complete,
     walkFailures,
     targets = targetJson,
+    locationContributors,
     expansion = new
     {
         perTarget = expansions,
@@ -364,6 +576,11 @@ Console.WriteLine($"  four-neighbour expansion: {neighbours.Count} exterior cell
 Console.WriteLine($"  unmeasured extents stated: {unmeasured.Count}");
 foreach (var f in walkFailures) Console.WriteLine("  WALK FAILURE: " + f);
 Console.WriteLine($"  complete: {(complete ? "true" : "false — the footprint is partial, so every trigger over it reads unknown")}");
+Console.WriteLine($"  location contributors: {locationContributors.locations.Count} location(s), "
+                + $"{locationContributors.locations.SelectMany(l => l.plugins).Select(p => p.name).Distinct(StringComparer.OrdinalIgnoreCase).Count()} plugin(s), "
+                + $"{worldspaceWide.Count} worldspace-wide change(s); "
+                + (contributorsComplete ? "complete" : $"INCOMPLETE — {contributorFailures.Count} unclassified input(s), see locationContributors.missing"));
+foreach (var f in contributorFailures) Console.WriteLine("  CONTRIBUTOR FAILURE: " + f);
 Console.WriteLine($"  configuration {identity.Short}");
 Console.WriteLine($"  {sw.Elapsed.TotalSeconds:0.00} s");
 
@@ -419,17 +636,24 @@ sealed record TargetSummary(
     long Navmesh, long Land, int Cells, IReadOnlyList<GridCell> ExteriorCells, int Worldspaces);
 
 sealed record GridCell(string Worldspace, int X, int Y);
+sealed record ScopeCell(string Cell, string Kind, string? Name, string? Worldspace, string? WorldspaceKey, int? X, int? Y,
+                        long Refs, long Navmesh, long Land);
 
 /// <summary>One target's placement footprint: the counts, the cells and the grid cells.</summary>
 sealed record PlacedReport(
     long Total, long Interior, long Exterior, long Persistent, long Navmesh, long Land, int LandscapeUnreadable,
-    IReadOnlyList<object> Cells, IReadOnlyList<GridCell> ExteriorCells, IReadOnlyList<string> Worldspaces)
+    long PersistentRefs, long PersistentRefsMapped, long PersistentRefsWithoutPlacement,
+    IReadOnlyList<ScopeCell> CellScopes, IReadOnlyList<GridCell> ExteriorCells, IReadOnlyList<string> Worldspaces)
 {
+    public IReadOnlyList<ScopeCell> Cells => CellScopes;
     public object ToJson() => new
     {
         total = Total, interior = Interior, exterior = Exterior, persistent = Persistent,
         navm = Navmesh, land = Land, landscapeUnreadable = LandscapeUnreadable,
-        cells = Cells,
+        persistentRefs = PersistentRefs, persistentRefsMapped = PersistentRefsMapped,
+        persistentRefsWithoutPlacement = PersistentRefsWithoutPlacement,
+        cells = CellScopes.Select(c => new { cell = c.Cell, kind = c.Kind, name = c.Name, worldspace = c.Worldspace, worldspaceKey = c.WorldspaceKey,
+                                             x = c.X, y = c.Y, refs = c.Refs, navmesh = c.Navmesh, land = c.Land }).ToList(),
         exteriorCells = ExteriorCells.Select(c => new { worldspace = c.Worldspace, x = c.X, y = c.Y }).ToList(),
         worldspaces = Worldspaces,
     };
@@ -443,6 +667,7 @@ sealed class PlacedWalk
     readonly Dictionary<FormKey, CellCount> _cells = new();
     readonly List<FormKey> _worldspaces = new();
     readonly Dictionary<FormKey, string> _worldspaceNames = new();
+    readonly Dictionary<(FormKey Worldspace, int X, int Y), long> _persistentGrids = new();
 
     sealed class CellCount
     {
@@ -455,6 +680,7 @@ sealed class PlacedWalk
     }
 
     long _total, _interior, _exterior, _persistent, _navmesh, _land;
+    long _persistentRefs, _persistentRefsMapped, _persistentRefsWithoutPlacement;
     int _landscapeUnreadable;
 
     public void Walk(ISkyrimModGetter mod, List<(FormKey From, FormKey To)> doors)
@@ -473,6 +699,14 @@ sealed class PlacedWalk
             foreach (var sub in blk.SubBlocks)
                 foreach (var c in sub.Cells)
                     Cell(c, "interior", FormKey.Null, doors);
+        foreach (var cp in PlacementExtract.FromMod(mod))
+            if (!cp.Worldspace.IsNull)
+                foreach (var r in cp.Refs.Where(x => x.Persistent))
+                {
+                    var key = (cp.Worldspace, (int)MathF.Floor(r.Position.X / 4096f),
+                                              (int)MathF.Floor(r.Position.Y / 4096f));
+                    _persistentGrids[key] = _persistentGrids.TryGetValue(key, out var n) ? n + 1 : 1;
+                }
     }
 
     void Cell(ICellGetter c, string kind, FormKey ws, List<(FormKey From, FormKey To)> doors)
@@ -494,6 +728,11 @@ sealed class PlacedWalk
 
     void Ref(CellCount rec, string kind, IPlacedGetter r, List<(FormKey From, FormKey To)> doors)
     {
+        if (kind == "persistent")
+        {
+            _persistentRefs++;
+            if (r.Placement is null) _persistentRefsWithoutPlacement++; else _persistentRefsMapped++;
+        }
         rec.Refs++; _total++; Bucket(kind);
         if (r is IPlacedObjectGetter { TeleportDestination: { } dest } && !dest.Door.FormKey.IsNull)
             doors.Add((r.FormKey, dest.Door.FormKey));
@@ -506,22 +745,24 @@ sealed class PlacedWalk
         else _persistent++;
     }
 
-    public PlacedReport Report() => new(
-        _total, _interior, _exterior, _persistent, _navmesh, _land, _landscapeUnreadable,
-        _cells.Select(kv => (object)new
-        {
-            cell = kv.Key.ToString(),
-            kind = kv.Value.Kind,
-            name = kv.Value.EditorId,
-            worldspace = kv.Value.Worldspace.IsNull ? null : Name(kv.Value.Worldspace),
-            x = kv.Value.HasGrid ? kv.Value.X : (int?)null,
-            y = kv.Value.HasGrid ? kv.Value.Y : (int?)null,
-            refs = kv.Value.Refs,
-            navmesh = kv.Value.Navmesh,
-            land = kv.Value.Land,
-        }).ToList(),
-        _cells.Values.Where(v => v.HasGrid).Select(v => new GridCell(Name(v.Worldspace), v.X, v.Y)).ToList(),
-        _worldspaces.Select(Name).ToList());
+    public PlacedReport Report()
+    {
+        var cells = _cells.Select(kv => new ScopeCell(kv.Key.ToString(), kv.Value.Kind, kv.Value.EditorId,
+            kv.Value.Worldspace.IsNull ? null : Name(kv.Value.Worldspace),
+            kv.Value.Worldspace.IsNull ? null : kv.Value.Worldspace.ToString(),
+            kv.Value.HasGrid ? kv.Value.X : null, kv.Value.HasGrid ? kv.Value.Y : null,
+            kv.Value.Refs, kv.Value.Navmesh, kv.Value.Land)).ToList();
+        var existing = _cells.Values.Where(v => v.HasGrid).Select(v => (v.Worldspace, v.X, v.Y)).ToHashSet();
+        foreach (var (key, refs) in _persistentGrids)
+            if (!existing.Contains(key))
+                cells.Add(new ScopeCell($"grid:{key.Worldspace}:{key.X}:{key.Y}", "exterior-grid", null,
+                                        Name(key.Worldspace), key.Worldspace.ToString(), key.X, key.Y, refs, 0, 0));
+        return new PlacedReport(_total, _interior, _exterior, _persistent, _navmesh, _land, _landscapeUnreadable,
+            _persistentRefs, _persistentRefsMapped, _persistentRefsWithoutPlacement,
+            cells, cells.Where(v => v.X is not null && v.Y is not null)
+                        .Select(v => new GridCell(v.Worldspace ?? v.WorldspaceKey ?? "", v.X!.Value, v.Y!.Value)).ToList(),
+            _worldspaces.Select(Name).ToList());
+    }
 
     string Name(FormKey ws) => ws.IsNull ? "" : (_worldspaceNames.TryGetValue(ws, out var n) ? n : ws.ToString());
 }
