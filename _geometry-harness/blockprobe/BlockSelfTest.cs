@@ -17,6 +17,7 @@ static class BlockSelfTest
         t.Check("precondition: the target cells are E00 and E10", targets.Count == 2, string.Join(", ", targets.Keys));
 
         var walk = new BlockWalk(targets);
+        var winNavTakenEarly = walk.WinNav;   // Program.cs takes the table before the walk and reads it after (B3-live)
         foreach (var (_, mod, path) in t.Plugins())
         {
             if (BlockWalk.Open(path) is not { } m) { t.Check($"open {Path.GetFileName(path)}", false, "not readable"); continue; }
@@ -46,6 +47,9 @@ static class BlockSelfTest
         // or without data, are gone; NVR is B's restoration; NVC is A's override.
         t.CheckNavSet("B3  navmeshes of the target cells: moved out and deleted are gone; each at its last sighting",
                       walk.WinNav.Select(kv => (kv.Key, (FormKey?)kv.Value.Cell, kv.Value.Nav)),
+                      new Dictionary<FormKey, (FormKey? Cell, float X)> { [F.NVR] = (F.E00, 1420), [F.NVC] = (F.E00, 1510) });
+        t.CheckNavSet("B3-live the table taken before the walk, as Program.cs takes it, holds the same navmeshes after it",
+                      winNavTakenEarly.Select(kv => (kv.Key, (FormKey?)kv.Value.Cell, kv.Value.Nav)),
                       new Dictionary<FormKey, (FormKey? Cell, float X)> { [F.NVR] = (F.E00, 1420), [F.NVC] = (F.E00, 1510) });
         t.Check("B3-prov NVR's provider is the plugin of its last sighting (MrB.esp)",
                 walk.WinNav.TryGetValue(F.NVR, out var nvr) && nvr.Plugin == "MrB.esp", walk.WinNav.TryGetValue(F.NVR, out var nvr2) ? nvr2.Plugin : "absent");
