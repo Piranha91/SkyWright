@@ -200,6 +200,20 @@ static class MovedRefProof
         var near21 = fv.UnreadableNear?.Invoke(MovedRefFixture.W, (2, 1)) ?? new List<string> { "no UnreadableNear" };
         Check("moved-ref/F-near-declared  the 3x3 of (2,1), whose only heightless grid (1,1) DECLARES none, names nothing",
               near21.Count == 0, $"(2,1): [{string.Join("; ", near21)}]");
+        // An unreadable LAND followed by one that declares no heights, at one grid: the name goes, no heights come back.
+        {
+            var idx = new FloorFeed.FloorIndex();
+            var ws = MovedRefFixture.W;
+            CellPlacements Copy(string? why, bool declares, float[,]? land) => new(MovedRefFixture.E00, null, false, ws, (7, 7),
+                Array.Empty<PlacedRef>(), Array.Empty<NavmeshGeometry>(), land, Array.Empty<DeletedRef>(), why, declares);
+            idx.Observe(Copy(null, false, new float[33, 33]), "first.esp");
+            idx.Observe(Copy("VHGT unreadable: test", false, null), "second.esp");
+            bool namedMid = idx.UnreadableLandWhy.ContainsKey((ws, 7, 7));
+            idx.Observe(Copy(null, true, null), "third.esp");
+            bool named = idx.UnreadableLandWhy.ContainsKey((ws, 7, 7)), heights = idx.LandOf(ws).ContainsKey((7, 7));
+            Check("moved-ref/F-L4-declared-clears  unreadable then declared at one grid: the name is cleared, no heights",
+                  namedMid && !named && !heights, $"named after the unreadable copy {namedMid}; after the declared copy named {named}, heights {heights}");
+        }
         Check("moved-ref/F-L5  a later cell copy carrying ONLY a readable LAND: its heights",
               wLand.TryGetValue((2, 0), out var h20) && h20[16, 16] == MovedRefFixture.BHeight50 && !Unreadable(2, 0), $"{LandAt((2, 0))}; named {Unreadable(2, 0)}");
         _ = nbLand;
