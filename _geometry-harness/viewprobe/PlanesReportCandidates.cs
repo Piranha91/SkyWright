@@ -28,10 +28,70 @@ static class PlanesReportCandidates
     public static readonly string[] PlaneKeys = { "relation", "predictedCulled", "visibility", "visibilityMask", "isolatedDepthSha256" };
 
     /// <summary>Each candidate body once, with its report-local id, in v1 row order.</summary>
-    public static List<object> Bodies(IReadOnlyList<RefOcclusion> refs) => throw new NotImplementedException("v2 bodies");
+    public static List<object> Bodies(IReadOnlyList<RefOcclusion> refs)
+    {
+        var bodies = new List<object>();
+        foreach (var r in refs)
+        {
+            if (r.Parts.Count == 0)
+            {
+                bodies.Add(new { id = bodies.Count, subject = r.Ref.RefKey.ToString(), mesh = r.Ref.MeshRelPath,
+                    assetSha256 = r.AssetHash,
+                    status = "unassessed", reason = r.Issue ?? "no source shapes" });
+                continue;
+            }
+            foreach (var s in r.Parts)
+                bodies.Add(new {
+                    id = bodies.Count,
+                    subject = r.Ref.RefKey.ToString(), baseForm = r.Ref.BaseKey.ToString(), mesh = r.Ref.MeshRelPath,
+                    constructed = r.Ref.Constructed,
+                    shape = s.Name, block = s.Block, assetSha256 = s.AssetHash,
+                    storedBound = s.Stored,
+                    worldSphere = s.World is { } w ? new { center = new[] { w.Center.X, w.Center.Y, w.Center.Z }, radius = w.Radius } : null,
+                    allCullingPlanes = s.CulledBy.Select(cp => cp.Key.ToString()).ToArray(),
+                    status = "research prediction; inspect relation, coverage and supplied rule evidence",
+                    reason = r.Issue ?? s.Issue,
+                    sourceIssue = s.Issue,
+                    refPosition = new[] { r.Ref.Position.X, r.Ref.Position.Y, r.Ref.Position.Z },
+                    refRotation = new[] { r.Ref.Rotation.X, r.Ref.Rotation.Y, r.Ref.Rotation.Z },
+                    refScale = r.Ref.Scale,
+                });
+        }
+        return bodies;
+    }
+
+    /// <summary>A no-source ref's overlay: the reference and nothing else.</summary>
+    sealed record SparseOverlay(int candidate);
+
+    /// <summary>An assessed shape's overlay: the reference plus the five plane-dependent values.
+    /// A record rather than an anonymous type so the five keys have one declaration to drift from.</summary>
+    sealed record ShapeOverlay(int candidate, string relation, bool predictedCulled,
+        HousecarlCore.ShapeVisibility? visibility, string? visibilityMask, string? isolatedDepthSha256);
 
     /// <summary>One plane's overlays, in body order; overlay N references body N.</summary>
-    public static object[] Overlays(IReadOnlyList<RefOcclusion> refs, PlaneRender p, int bodyCount) => throw new NotImplementedException("v2 overlays");
+    public static object[] Overlays(IReadOnlyList<RefOcclusion> refs, PlaneRender p, int bodyCount)
+    {
+        var rows = new object[bodyCount];
+        int n = 0;
+        foreach (var r in refs)
+        {
+            if (r.Parts.Count == 0) { Put(new SparseOverlay(n)); continue; }
+            foreach (var s in r.Parts)
+            {
+                bool culled = s.CulledBy.Contains(p);
+                Put(new ShapeOverlay(n, s.Relations.GetValueOrDefault(p, "unassessed: not evaluated"), culled,
+                    culled ? s.Visibility : null, culled ? s.VisibilityMask : null, culled ? s.IsolatedDepthHash : null));
+            }
+        }
+        if (n != bodyCount) throw new InvalidOperationException($"plane {p.Key} has {n} candidate(s) but the report has {bodyCount} bodies; the scene changed between them");
+        return rows;
+
+        void Put(object o)
+        {
+            if (n >= bodyCount) throw new InvalidOperationException($"plane {p.Key} has more candidates than the report's {bodyCount} bodies; the scene changed between them");
+            rows[n++] = o;
+        }
+    }
 
     /// <summary>TEST ORACLE ONLY: the v1 rows for one plane, exactly as the v1 writer built them.</summary>
     internal static object[] V1Rows(IReadOnlyList<RefOcclusion> refs, PlaneRender p)

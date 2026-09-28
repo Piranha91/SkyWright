@@ -2086,9 +2086,25 @@ at the current eye, but does not supply a captured visibility measurement. The p
 existing reports or their evidence directory. Every candidate shape is retained in JSON; console
 shortlists are not the candidate population.
 
+**Schema `occlusion-view-research-v2`: each candidate written once.** A shape's description does not
+depend on the plane, so v2 writes it once, in the top-level `candidateBodies` array, each with a
+zero-based `id` equal to its index, in the order `v1` listed its rows. Every plane's `candidates` array
+keeps that order, and entry N is an overlay for body N: `{ "candidate": N }` plus the only five values
+that can differ by plane — `relation`, `predictedCulled`, `visibility`, `visibilityMask` and
+`isolatedDepthSha256`. A reference with no source shapes has a sparse body (`subject`, `mesh`,
+`assetSha256`, `status: "unassessed"`, `reason`) and an overlay that is only its `candidate`. To get a
+`v1` row back, take the body without `id` and add the overlay without `candidate`; the result equals
+the `v1` row key for key, null for null. A reader dispatches on `schema`: it accepts exactly
+`occlusion-view-research-v1` and `-v2`, refuses anything else, and refuses a non-contiguous or
+duplicate `id`, a reference to a missing body, and a key present in both a body and its overlay —
+never guessing the shape from which keys happen to be present. `--planes-report-selftest` holds the
+factoring to the `v1` rows on a fabricated two-plane scene, including the sparse no-source row and a
+real `unassessed: ` relation, and checks each of those refusals. `v1` reports stay readable; new
+reports are `v2` only.
+
 **The report is serialised straight to the file.** A busy exterior view's report runs to hundreds of
 megabytes — how many depends entirely on the load order and the view, since the report lists every
-source shape of every scene reference under every plane — and it used to be built as one string and
+source shape of every scene reference, and under `v1` repeated it under every plane — and it used to be built as one string and
 handed to `File.WriteAllText`. A .NET string is UTF-16, so that copy was twice the file, and
 encoding it back to UTF-8 to write it was the file's size again: three times the report, live at
 once, at the end of the heaviest step a render has. It now goes through the file stream. **The bytes

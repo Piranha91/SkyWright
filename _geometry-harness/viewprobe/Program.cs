@@ -4406,6 +4406,8 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot,
             {
                 var eyeS = eyePos.Value;
                 var rows = new List<object>();
+                // Each candidate body once; every plane below carries only its overlays (schema v2).
+                var candidateBodies = ViewProbe.PlanesReportCandidates.Bodies(os.Refs);
                 Console.WriteLine($"   ---- occlusion planes report: {planes.Count} plane(s) in {cellLabel}{(interior || !ringRefs ? "" : " + ring")}, "
                                 + $"from eye {eyeS.X:0},{eyeS.Y:0},{eyeS.Z:0}; collision reach {planesReach:0} u behind each ----");
                 int noCollisionCandidates = 0, noneWithinReach = 0, touching = 0, cullNothing = 0, cullsVisible = 0;
@@ -4490,29 +4492,7 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot,
                         rotationDeg = new[] { float.RadiansToDegrees(p.Rotation.X), float.RadiansToDegrees(p.Rotation.Y), float.RadiansToDegrees(p.Rotation.Z) },
                         scale = p.Scale, provenance = p.ProvenanceLabel, definedBy = p.DefinedBy, changedBy = p.ChangedBy, chain = p.Chain,
                         cullCount = culled.Count, straddling, visibleCulled = visible,
-                        candidates = os.Refs.SelectMany(r => r.Parts.Count == 0
-                            ? new object[] { new { subject = r.Ref.RefKey.ToString(), mesh = r.Ref.MeshRelPath,
-                                assetSha256 = r.AssetHash,
-                                status = "unassessed", reason = r.Issue ?? "no source shapes" } }
-                            : r.Parts.Select(s => (object)new {
-                                subject = r.Ref.RefKey.ToString(), baseForm = r.Ref.BaseKey.ToString(), mesh = r.Ref.MeshRelPath,
-                                constructed = r.Ref.Constructed,
-                                shape = s.Name, block = s.Block, assetSha256 = s.AssetHash,
-                                storedBound = s.Stored,
-                                worldSphere = s.World is { } w ? new { center = new[] { w.Center.X, w.Center.Y, w.Center.Z }, radius = w.Radius } : null,
-                                relation = s.Relations.GetValueOrDefault(p, "unassessed: not evaluated"),
-                                predictedCulled = s.CulledBy.Contains(p),
-                                allCullingPlanes = s.CulledBy.Select(cp => cp.Key.ToString()).ToArray(),
-                                status = "research prediction; inspect relation, coverage and supplied rule evidence",
-                                reason = r.Issue ?? s.Issue,
-                                sourceIssue = s.Issue,
-                                visibility = s.CulledBy.Contains(p) ? s.Visibility : null,
-                                visibilityMask = s.CulledBy.Contains(p) ? s.VisibilityMask : null,
-                                isolatedDepthSha256 = s.CulledBy.Contains(p) ? s.IsolatedDepthHash : null,
-                                refPosition = new[] { r.Ref.Position.X, r.Ref.Position.Y, r.Ref.Position.Z },
-                                refRotation = new[] { r.Ref.Rotation.X, r.Ref.Rotation.Y, r.Ref.Rotation.Z },
-                                refScale = r.Ref.Scale,
-                            })).ToArray(),
+                        candidates = ViewProbe.PlanesReportCandidates.Overlays(os.Refs, p, candidateBodies.Count),
                         largestCulled = largest.Select(r => new { formKey = r.Ref.RefKey.ToString(), editorId = r.Ref.BaseEditorId, size = new[] { r.Size.X, r.Size.Y, r.Size.Z }, visible = r.Visible }).ToList(),
                         visibleLargest = visibleLargest.Select(r => new { formKey = r.Ref.RefKey.ToString(), editorId = r.Ref.BaseEditorId, size = new[] { r.Size.X, r.Size.Y, r.Size.Z } }).ToList(),
                         behind = bestRef is { } br2
@@ -4551,7 +4531,7 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot,
                         issue = r.Issue }).Distinct().ToArray() });
                 var doc = new
                 {
-                    schema = "occlusion-view-research-v1", status = "research; supplied rule scope does not certify general engine behavior",
+                    schema = ViewProbe.PlanesReportCandidates.Schema, status = "research; supplied rule scope does not certify general engine behavior",
                     rule = ViewProbe.ShapeCullPolicy.Identity, scope = ViewProbe.ShapeCullPolicy.Scope,
                     ruleSha256 = ViewProbe.ShapeCullPolicy.Sha256, ruleConfiguration = ViewProbe.ShapeCullPolicy.Configuration,
                     inputSha256 = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(inputJson))),
@@ -4582,7 +4562,7 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot,
                     sceneDepthSha256 = os.SceneDepthHash, sceneDepth = os.SceneDepthPath,
                     visibilityMethod = "same shape isolated depth against same-camera unculled scene; single sample; exact depth comparison; green mask pixels visible, red hidden",
                     attribution = "none; plane provenance does not establish blame or a repair",
-                    contestedBy = cellContestedBy, planes = rows,
+                    contestedBy = cellContestedBy, candidateBodies, planes = rows,
                     notDrawn = dropped.Select(r => new { formKey = r.FormKey.ToString(), formId = RuntimeId(r.FormKey), why = r.Deleted ? "deleted" : DisabledWhy(r) }).ToList(),
                     // Null on a healthy run - and WRITTEN as null, one line this report did not
                     // carry before the check existed. That is deliberate: an absent key means a
