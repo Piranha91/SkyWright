@@ -28,7 +28,7 @@ and each is now a red cell in `selftest`.
             a decode per mask and a campaign view writes over a thousand; when off it is an
             uncompared part and must be waived by name, so the choice is recorded rather than
             implied.
-  console   stdout and stderr, line by line, with two enumerated kinds of fragment removed, each
+  console   stdout and stderr, line by line, with enumerated kinds of fragment removed, each
             for a stated reason and nothing else:
               - path fragments, because a second run writes to a different folder;
               - a parenthesised elapsed time such as `(8.7s)`, because how long the walk took is
@@ -38,6 +38,8 @@ and each is now a red cell in `selftest`.
                 that a difference would have called every simultaneous render different.
             The pattern requires the trailing `s` inside parentheses, so a parenthesised count is still
             compared.
+              - the duration in the Runner's own `(exit N, T.Ts)` line (scripts/runlog.py), when the
+                console given is a Runner log: the exit code in it is kept and compared.
   census    the renderer's own counts, which are the thing a wrong render moves.
   exitCode  compared as-is.
 
@@ -65,6 +67,11 @@ ABSOLUTE = re.compile(r"[A-Za-z]:[\\/][^\s\"]*")
 #                       words, which is why these are listed rather than matched by a pattern.
 ELAPSED = re.compile(r"\((\d+(?:[.,]\d+)?)s\)")
 ELAPSED_HASHED = re.compile(r"\(hashed in (\d+(?:[.,]\d+)?)s\)")
+#   "(exit 0, 39.2s)"   the line scripts/runlog.py's Runner writes into its log of a child (runlog.py: the completion
+#                       line, "(exit {code}, {secs:0.1f}s)"). Two identical renders logged by the Runner differed in
+#                       nothing else (winning-ref P6, 2026-09-27). The WHOLE line must match, and only the duration
+#                       goes: the exit code stays compared, and the Runner's stop lines ("(stopped ...") never match.
+RUNNER_EXIT = re.compile(r"^\(exit (-?\d+), \d+(?:[.,]\d+)?s\)$")
 
 # Fields in the planes report that hold a path this run chose. Read from the report writer at fork
 # d31445ae: Program.cs:4031 (image), :4041 (sceneDepth), :3969 (planes[].candidates[].visibilityMask).
@@ -131,6 +138,9 @@ def scrub_console(text):
     for ln in (text or "").splitlines():
         if not ln.strip():
             continue
+        m = RUNNER_EXIT.match(ln.strip())
+        if m:
+            ln = "(exit %s, <elapsed>)" % m.group(1)
         ln = ABSOLUTE.sub("<path>", ln)
         ln = ELAPSED_HASHED.sub("(hashed in <elapsed>)", ln)
         ln = ELAPSED.sub("(<elapsed>)", ln)

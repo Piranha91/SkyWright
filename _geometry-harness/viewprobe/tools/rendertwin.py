@@ -350,9 +350,49 @@ def why(res):
 
 # ------------------------------------------------------------------ worklists
 
+class WorklistRefused(ValueError):
+    """A worklist this tool will not run, and why - by name."""
+
+
+def _canonical_key(obj, name, where):
+    """Rename the one key of `obj` that spells `name` in any letter case to `name` itself, as viewprobe's reader does
+    (_shared/Worklist.cs: PropertyNameCaseInsensitive). Returns True if present. Two spellings in one object are refused:
+    which one the renderer would keep is not this tool's guess."""
+    hits = [k for k in obj if isinstance(k, str) and k.lower() == name.lower()]
+    if len(hits) > 1:
+        raise WorklistRefused("%s spells %s two ways (%s): ambiguous, refused"
+                              % (where, name, ", ".join(repr(h) for h in hits)))
+    if hits and hits[0] != name:
+        obj[name] = obj.pop(hits[0])
+    return bool(hits)
+
+
+def canonical_worklist(wl, where="the worklist"):
+    """The worklist with its structural keys (Cells, Cell, Shots, Label) spelled as this file reads them. Refuses, by name,
+    a worklist with no cells list, a cell with no shots list, a key spelled two ways, and a worklist with 0 shots."""
+    if not isinstance(wl, dict) or not _canonical_key(wl, "Cells", where) or not isinstance(wl["Cells"], list):
+        raise WorklistRefused("%s has no Cells list (in any letter case): not a worklist" % where)
+    _canonical_key(wl, "Label", where)
+    n = 0
+    for ci, cell in enumerate(wl["Cells"]):
+        if not isinstance(cell, dict):
+            raise WorklistRefused("%s: cell %d is not an object" % (where, ci + 1))
+        _canonical_key(cell, "Cell", "%s cell %d" % (where, ci + 1))
+        name = "cell %d (%s)" % (ci + 1, cell.get("Cell"))
+        if not _canonical_key(cell, "Shots", "%s %s" % (where, name)) or not isinstance(cell["Shots"], list):
+            raise WorklistRefused("%s: %s has no Shots list (in any letter case)" % (where, name))
+        for si, shot in enumerate(cell["Shots"]):
+            if isinstance(shot, dict):
+                _canonical_key(shot, "Label", "%s %s shot %d" % (where, name, si + 1))
+        n += len(cell["Shots"])
+    if n == 0:
+        raise WorklistRefused("%s has 0 shots: nothing to compare, refused" % where)
+    return wl
+
+
 def load_worklist(path):
     with open(path, encoding="utf-8-sig") as f:
-        return json.load(f)
+        return canonical_worklist(json.load(f), path)
 
 
 def shot_index(wl):
@@ -1035,6 +1075,11 @@ def main(argv=None):
         return 2
     if not os.path.isfile(a.worklist):
         print("no such worklist: %s" % a.worklist)
+        return 2
+    try:
+        load_worklist(a.worklist)
+    except (WorklistRefused, ValueError) as e:
+        print("refusing: %s" % e)
         return 2
     if foreign_renderer_running(a.exe):
         print("refusing: a renderer is already running, so this test cannot mean anything")
