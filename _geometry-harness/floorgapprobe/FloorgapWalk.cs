@@ -17,13 +17,17 @@ sealed class FloorgapWalk
     public Dictionary<FormKey, Dictionary<(int, int), float[,]>> LandByWorld => Floor.LandByWorld;
     public IEnumerable<(FormKey Ws, int X, int Y)> UnreadableLand => Floor.UnreadableLand;
     public readonly List<CellPlacements> Cells = new();
-    // --winning: only the named cell is merged (refs and navmeshes by FormKey, a later plugin replacing an earlier one; the
-    // meta from the first plugin that carries the cell, the LAND from the last that has one); the exterior neighbourhood is
-    // filed from every plugin as the single-plugin path files it from one. A navmesh a later plugin DELETES outright is not
-    // removed here (blockprobe's walk has the same simplification).
+    // --winning: only the named cell is merged. Its references under the last-sighting rule (_shared/LastSighting.cs): a
+    // reference is held iff its last sighting stands in the wanted cell, so a later plugin that moves it out or deletes it
+    // takes it out. Navmeshes by FormKey, a later plugin replacing an earlier one; the meta from the first plugin that
+    // carries the cell; the LAND from the last that has one, and a last LAND that gives no heights is named
+    // (MergedLandUnreadable), not replaced by an earlier one. A navmesh a later plugin DELETES outright is not removed here
+    // (blockprobe's walk has the same simplification; a follow-up).
     public CellPlacements? MergedMeta;
     public float[,]? MergedLand;
-    public readonly Dictionary<FormKey, PlacedRef> MergedRefs = new();
+    public string? MergedLandUnreadable;
+    readonly LastSightingSet _merged = new();
+    public Dictionary<FormKey, PlacedRef> MergedRefs => _merged.Refs;
     public readonly Dictionary<FormKey, NavmeshGeometry> MergedNavs = new();
     public readonly List<string> PluginsWithCell = new();
 
@@ -33,13 +37,9 @@ sealed class FloorgapWalk
         if (wantCell is not null) { try { WantKey = FormKey.Factory(wantCell); } catch { } }
     }
 
-    /// <summary>Open one plugin. Without --winning an unreadable plugin throws (it is the whole input); with it, the plugin
-    /// is skipped with a line on stderr, and null is returned.</summary>
-    public ISkyrimModGetter? Open(string path)
-    {
-        try { return SkyrimMod.CreateFromBinaryOverlay(path, SkyrimRelease.SkyrimSE); }
-        catch (Exception ex) { if (!Winning) throw; Console.Error.WriteLine($"   skipped {Path.GetFileName(path)}: {ex.Message}"); return null; }
-    }
+    /// <summary>Open one plugin, or throw PluginUnreadableException: refused, never skipped (an unreadable plugin under
+    /// --winning would leave an earlier plugin's version of every record it overrides).</summary>
+    public ISkyrimModGetter? Open(string path) => PluginOpen.Open(path, Winning ? "floorgapprobe's --winning walk" : "floorgapprobe");
 
     /// <summary>One plugin's cells, in load order. <paramref name="perCell"/> runs first for every cell.</summary>
     public void Plugin(ISkyrimModGetter mod, string path, Action<CellPlacements> perCell)
@@ -52,11 +52,12 @@ sealed class FloorgapWalk
             // measure.
             if (!Winning) { if (cp.Refs.Count > 0 || cp.Navmeshes.Count > 0) Cells.Add(cp); continue; }
             bool isWanted = (WantKey is { } wk && cp.Cell == wk) || (WantCell is not null && string.Equals(cp.CellEditorId, WantCell, StringComparison.OrdinalIgnoreCase));
+            _merged.Observe(cp, (_, _) => isWanted);
             if (!isWanted) continue;
             WantKey ??= cp.Cell;
             MergedMeta ??= cp;
-            if (cp.Land is not null) MergedLand = cp.Land;
-            foreach (var r in cp.Refs) MergedRefs[r.FormKey] = r;
+            if (cp.LandUnreadableReason is { } why) { MergedLand = null; MergedLandUnreadable = $"{why} ({Path.GetFileName(path)})"; }
+            else if (cp.Land is not null) { MergedLand = cp.Land; MergedLandUnreadable = null; }
             foreach (var nv in cp.Navmeshes) MergedNavs[nv.FormKey] = nv;
             PluginsWithCell.Add(Path.GetFileName(path));
         }

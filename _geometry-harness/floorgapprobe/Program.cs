@@ -180,7 +180,9 @@ var landByWorld = fwalk.LandByWorld;
 var cells = fwalk.Cells;
 foreach (var path in walk)
 {
-    if (fwalk.Open(path) is not { } mod) continue;
+    ISkyrimModGetter mod;
+    try { mod = fwalk.Open(path)!; }
+    catch (PluginUnreadableException ex) { Console.Error.WriteLine(ex.Message); return 2; }
     using (mod as IDisposable)
     {
         foreach (var rec in mod.EnumerateMajorRecords())
@@ -199,7 +201,8 @@ var mergedRefs = fwalk.MergedRefs; var mergedNavs = fwalk.MergedNavs; var plugin
 if (winning)
 {
     if (mergedMeta is null) { Console.Error.WriteLine($"cell '{wantCell}' is in no plugin of the load order"); return 2; }
-    cells.Add(mergedMeta with { Refs = mergedRefs.Values.ToList(), Navmeshes = mergedNavs.Values.ToList(), Land = mergedLand });
+    cells.Add(mergedMeta with { Refs = mergedRefs.Values.ToList(), Navmeshes = mergedNavs.Values.ToList(), Land = mergedLand,
+                                LandUnreadableReason = fwalk.MergedLandUnreadable });
     Console.WriteLine($"winning state of {mergedMeta.CellEditorId ?? mergedMeta.Cell.ToString()}: {pluginsWithCell.Count} plugin(s) touch it ({string.Join(", ", pluginsWithCell)}); {mergedRefs.Count:N0} refs, {mergedNavs.Count:N0} navmeshes after the walk of {walk.Count} plugins");
 }
 // The run's population (Q27, _shared/EnablePopulation.cs): the load-time enable chain over every placement walked, or
@@ -249,6 +252,17 @@ Geo Geometry(string rel)
 // The refs go through the load-time enable chain (R1: a switch child whose marker is initially disabled is not there when
 // the cell loads — Q25: Obscure's council dais read as the floor 48 u over the Arch-Mage quarters' navmesh until this);
 // --flags reads the record flag alone, the population the route rule's default run judges.
+// A floor over a LAND that gives no heights (FloorFeed.FloorIndex, CellPlacements.LandUnreadableReason) is not measured:
+// the one-cell modes refuse, the sweep counts and names the cell. Null when the floor's LAND is sound.
+string? LandProblem(CellPlacements cp)
+{
+    if (cp.Interior) return null;
+    if (ownOnly || cp.Grid is not { } g) return cp.LandUnreadableReason;
+    var bad = fwalk.Floor.UnreadableNear(cp.Worldspace, g);
+    if (cp.LandUnreadableReason is { } own && bad.Count == 0) bad.Add($"the cell's own LAND: {own}");
+    return bad.Count == 0 ? null : string.Join("; ", bad);
+}
+long landUnjudged = 0;
 FloorField Field(CellPlacements cp)
 {
     if (cp.Interior || ownOnly || cp.Grid is not { } g || !refsByWorld.TryGetValue(cp.Worldspace, out var rg))
@@ -287,6 +301,8 @@ if (mode is "line" or "points")
     if (positional.Count < 2) { Console.Error.WriteLine($"{mode} needs a cell"); return 2; }
     var e = FindCell(positional[1]);
     if (e is null) { Console.Error.WriteLine($"cell '{positional[1]}' not found in {plugin}"); return 2; }
+    if (LandProblem(e) is { } lw)
+    { Console.Error.WriteLine($"{Name(e)}: REFUSED — its floor needs a LAND that gives no heights ({lw}); an earlier plugin's heights, or none, would be read in its place."); return 2; }
     var navs = NavmeshIndex.Build(e.Navmeshes, out int malformed);
     var extent = Aabb.Empty;
     foreach (var nv in e.Navmeshes) foreach (var v in nv.Vertices) extent = extent.Add(new Vector3(v.X, v.Y, v.Z));
@@ -411,6 +427,14 @@ __run.Feature("cells", toSweep.Count, "cells").Stage("sweep", "sweeping cells", 
 foreach (var e in toSweep)
 {
     __run.Advance();
+    if (LandProblem(e) is { } lw)
+    {
+        if (mode != "sweep")
+        { Console.Error.WriteLine($"{Name(e)}: REFUSED — its floor needs a LAND that gives no heights ({lw}); an earlier plugin's heights, or none, would be read in its place."); return 2; }
+        Console.WriteLine($"   UNJUDGEABLE {Name(e)}: its floor needs a LAND that gives no heights ({lw})");
+        landUnjudged++;
+        continue;
+    }
     swept++;
     var field = Field(e);
     var cellOffs = new List<float>(); var cellNavZ = new List<float>();
@@ -525,6 +549,7 @@ if (mode == "cell") { Console.WriteLine($"\nelapsed {sw.Elapsed.TotalSeconds:0.0
 // ================================================================================================ the report ====
 Console.WriteLine($"\n==== NAVMESH-TO-FLOOR OFFSET δ (navmesh − floor; + = the navmesh floats above the floor) ====");
 Console.WriteLine($"cells swept              : {swept:N0} ({cellRows.Count(r => r.Interior):N0} interior, {cellRows.Count(r => !r.Interior):N0} exterior)");
+if (landUnjudged > 0) Console.WriteLine($"cells not measured       : {landUnjudged:N0} UNJUDGEABLE, their floor needs a LAND that gives no heights (named above)");
 Console.WriteLine($"navmesh triangles        : {trisTotal:N0} read ({trisDeleted:N0} deleted skipped); {samplesTotal:N0} sample points");
 Console.WriteLine($"floor found              : {trisFound:N0} ({100.0 * trisFound / Math.Max(1, trisTotal):0.0}%) — on a mesh {trisMesh:N0}, on the terrain {trisLand:N0}; navmesh embedded in a solid at {trisEmbedded:N0}");
 Console.WriteLine($"no floor within reach    : {trisTotal - trisFound:N0} ({100.0 * (trisTotal - trisFound) / Math.Max(1, trisTotal):0.0}%) — no surface {noFloor[1]:N0}, only deeper than {depth:0} u {noFloor[2]:N0}, only higher than {reach:0} u {noFloor[3]:N0}, only down-facing {noFloor[4]:N0}; of these water-flagged {trisWaterNoFloor:N0}");
