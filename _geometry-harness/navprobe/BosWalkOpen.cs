@@ -4,9 +4,7 @@ using Mutagen.Bethesda.Skyrim;
 // real run runs.
 static class BosWalkOpen
 {
-    /// <summary>One plugin of the order, or null when it cannot be read.</summary>
-    public static ISkyrimModGetter? Open(string path)
-    {
-        try { return SkyrimMod.CreateFromBinaryOverlay(path, SkyrimRelease.SkyrimSE); } catch { return null; }
-    }
+    /// <summary>One plugin of the order, or throw PluginUnreadableException: refused, never skipped (the swap index would
+    /// otherwise miss that plugin's records with no word).</summary>
+    public static ISkyrimModGetter? Open(string path) => HarnessShared.PluginOpen.Open(path, "navprobe's swap-layer walk");
 }

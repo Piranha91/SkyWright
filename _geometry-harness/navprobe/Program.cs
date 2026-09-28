@@ -113,6 +113,7 @@ foreach (var cp in LastSighting.Cells(mod))
 }
 Console.WriteLine($"floor candidates filed by grid: {floorRefsByWorld.Values.Sum(w => w.Values.Sum(d => d.Count)):N0} exterior refs, {floorLandByWorld.Values.Sum(w => w.Count):N0} LAND records in {floorRefsByWorld.Count} worldspaces  ({sw.Elapsed.TotalSeconds:0.0}s)");
 var floorTally = new FloorFeed.Tally();
+long floorLandUnjudged = 0;
 
 // --bos on (default): the swap layer's index wants the WHOLE order — the runtime-id table, every EditorID, the cells'
 // locations and keywords — and a swapped base may be defined anywhere in it, so the order is walked once for the index
@@ -129,7 +130,9 @@ if (bosOn)
     foreach (var p in order.OrderedPaths)
     {
         __run.Advance();
-        if (BosWalkOpen.Open(p) is not { } om) { bos.Plugin(null); continue; }
+        ISkyrimModGetter om;
+        try { om = BosWalkOpen.Open(p)!; }
+        catch (PluginUnreadableException ex) { Console.Error.WriteLine(ex.Message); return 2; }
         using (om as IDisposable)
         {
             bos.Plugin(om);
@@ -342,6 +345,9 @@ foreach (var cp in PlacementExtract.FromMod(mod))
 
     var band = ActorBand.ForCell(cp.Refs, npcFacts, raceFacts, fallbackTop, fallbackSrc, enabledOf);
     if (!float.IsFinite(band.Top)) { Console.WriteLine($"UNJUDGEABLE actor band in {cp.Cell}: {band.Source}"); continue; }
+    // A floor over a LAND that gives no heights (FloorFeed.FloorIndex) is not measured: counted and named, never guessed at.
+    if (!cp.Interior && cp.Grid is { } landGrid && floorIndex.UnreadableNear(cp.Worldspace, landGrid) is { Count: > 0 } badLand)
+    { Console.WriteLine($"UNJUDGEABLE floor in {cp.Cell}: a LAND in the neighbourhood gives no heights ({string.Join("; ", badLand)})"); floorLandUnjudged++; continue; }
     float bandTop = band.Top;
     float physicalTop = controllerBand ? ActorBand.PhysicalControllerTop(bandTop) : bandTop;
     // The floor the band stands on in this cell: its own refs for an interior, the 3×3 neighbourhood by position for an
@@ -521,6 +527,8 @@ if (geometrySource == "collision")
 Console.WriteLine($"distinct meshes measured  : {measured:N0}   (unreadable: {measureFail:N0})   cached triangles: {cachedTris:N0}");
 Console.WriteLine($"elapsed                   : {sw.Elapsed.TotalSeconds:0.0}s");
 Console.WriteLine("   " + floorTally.Line());
+if (floorLandUnjudged > 0)
+    Console.WriteLine($"   {floorLandUnjudged:N0} cell(s) UNJUDGEABLE: the floor neighbourhood holds a LAND that gives no heights (named above)");
 if (bosOn) foreach (var l in bosRep.Summary()) Console.WriteLine("   " + l);
 Console.WriteLine();
 

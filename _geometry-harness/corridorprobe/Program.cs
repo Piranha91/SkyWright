@@ -237,7 +237,9 @@ if (mode == "arms" || mode == "cut")
     {
         foreach (var p in order.OrderedPaths)
         {
-            if (BosWalkOpen.Open(p) is not { } om) { bos.Plugin(null); continue; }
+            ISkyrimModGetter om;
+            try { om = BosWalkOpen.Open(p)!; }
+            catch (PluginUnreadableException ex) { Console.Error.WriteLine(ex.Message); return 2; }
             using (om as IDisposable)
             {
                 bos.Plugin(om);
@@ -316,6 +318,10 @@ if (mode == "arms" || mode == "cut")
     var frg = floorIndex.RefsOf(cell.Worldspace); var flg = floorIndex.LandOf(cell.Worldspace);
     var pop = popMode == PopulationMode.Flags ? EnablePopulation.Flags(enableFacts) : EnablePopulation.LoadTime(enableFacts);
     FloorField floor;
+    // A floor over a LAND that gives no heights (FloorFeed.FloorIndex) is refused: an earlier plugin's heights, or none,
+    // would be read in its place.
+    if (!cell.Interior && cell.Grid is { } lg && floorIndex.UnreadableNear(cell.Worldspace, lg) is { Count: > 0 } badLand)
+    { Console.Error.WriteLine($"{cellId}: REFUSED — its floor needs a LAND that gives no heights ({string.Join("; ", badLand)})"); return 2; }
     if (!cell.Interior && cell.Grid is { } fg)
     {
         var (nbRefs, nbLand) = FloorFeed.Neighbourhood(fg, frg, flg);
