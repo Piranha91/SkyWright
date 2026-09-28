@@ -144,15 +144,11 @@ var Obstructing = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
 
 var pluginKey = new ModKey[paths.Count];
 var masterIdx = new HashSet<int>[paths.Count];
-var navProviders = new Dictionary<FormKey, List<int>>();                  // NAVM -> plugins, in order
-var navCell = new Dictionary<FormKey, FormKey>();                         // NAVM -> its cell
-// (NAVM, plugin) -> geometry size AND a content hash over every vertex, triangle index and flag.
-// Counts alone were the "material" test until 2026-08-27; a re-cut that moves vertices without
-// changing their number was invisible, and the 20 "forwarded unchanged" records rested on an
-// "almost always". The hash decides it: same counts + same hash IS a byte-identical forward.
-var navSize = new Dictionary<(FormKey, int), (int V, int T, int H)>();
-var navDeleted = new Dictionary<(FormKey, int), bool>();
-var cellNavPlugins = new Dictionary<FormKey, SortedSet<int>>();           // cell -> plugins supplying navmesh
+var navVersions = new NavVersions();                                      // NavVersions.cs
+var navProviders = navVersions.Providers;
+var navCell = navVersions.Cell;
+var navSize = navVersions.Size;
+var cellNavPlugins = navVersions.CellPlugins;
 var cellNewRefs = new Dictionary<(FormKey Cell, int Plugin), List<FormKey>>();   // base records a plugin INTRODUCES
 // The enable facts of every placement in the order, and the UNCUT candidates BEFORE any enable filter — the winning
 // enable state of a reference is not known until every plugin has been read, so the filter is applied after the walk
@@ -264,16 +260,7 @@ for (int p = 0; p < paths.Count; p++)
             cellName[cp.Cell] = (cp.CellEditorId, cp.Interior);
             cellSpace[cp.Cell] = (cp.Worldspace, cp.Grid?.X ?? int.MinValue, cp.Grid?.Y ?? int.MinValue, cp.Interior);
 
-            foreach (var nav in cp.Navmeshes)
-            {
-                if (!navProviders.TryGetValue(nav.FormKey, out var l)) navProviders[nav.FormKey] = l = new List<int>();
-                if (l.Count == 0 || l[^1] != p) l.Add(p);
-                navCell[nav.FormKey] = cp.Cell;
-                navSize[(nav.FormKey, p)] = (nav.Vertices.Count, nav.Triangles.Count, NavGeomHash(nav));
-                navDeleted[(nav.FormKey, p)] = deletedHere.Contains(nav.FormKey);
-                if (!cellNavPlugins.TryGetValue(cp.Cell, out var s)) cellNavPlugins[cp.Cell] = s = new SortedSet<int>();
-                s.Add(p);
-            }
+            navVersions.Note(cp, p, deletedHere, NavGeomHash);
 
             foreach (var r in cp.Refs) enableFacts.Note(r);
             uncutPop.Note(cp, p, mod.ModKey);
@@ -827,11 +814,12 @@ static object? Num(float f) => float.IsNaN(f) ? null : float.IsPositiveInfinity(
 // DELETED / EMPTIED — the hard break.
 // ---------------------------------------------------------------------------------------
 var broken = new List<string>();
+var deletedAtWinner = navVersions.DeletedAtWinner();
 foreach (var (nav, provs) in navProviders)
 {
-    int winner = provs[^1];
+    int winner = deletedAtWinner.TryGetValue(nav, out var deleter) ? deleter : provs[^1];
     if (!Wanted(winner)) continue;
-    if (navDeleted.GetValueOrDefault((nav, winner)))
+    if (deletedAtWinner.ContainsKey(nav))
         broken.Add($"   DELETED  {nav} in {Cell(navCell.GetValueOrDefault(nav))} by {pluginKey[winner].FileName}");
     else if (provs.Count > 1)
     {

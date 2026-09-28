@@ -28,7 +28,7 @@ namespace ViewProbe;
 static class BatEmit
 {
     /// <summary>A worklist cell's spatial identity, as the load order states it.</summary>
-    sealed record CellIdent(FormKey Key, string? EditorId, bool Interior, FormKey Worldspace, (int X, int Y)? Grid);
+    internal sealed record CellIdent(FormKey Key, string? EditorId, bool Interior, FormKey Worldspace, (int X, int Y)? Grid);
 
     /// <summary>One emitted file: its number, what it does, and the line that explains it in the manifest.</summary>
     sealed record BatFile(int Index, string Kind, string CellLabel, string ShotLabel, string Body, string Detail);
@@ -45,6 +45,28 @@ static class BatEmit
     /// clearance test asks of its endpoints.</summary>
     internal const float SameFloorZ = HarnessShared.NavCover.SameFloorZ;
 
+    static bool Matches(CellPlacements cp, string want) =>
+        string.Equals(cp.CellEditorId, want, StringComparison.OrdinalIgnoreCase)
+        || cp.Cell.ToString().Equals(want, StringComparison.OrdinalIgnoreCase)
+        || cp.Cell.ID.ToString("X6").Equals(want.TrimStart('0'), StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>One plugin of the order: each worklist cell's identity and winning navmeshes. Held apart from
+    /// <see cref="Run"/> so --moved-ref-selftest runs exactly this code.</summary>
+    internal static void WalkCells(ISkyrimModGetter m, IReadOnlyList<string> wanted, Dictionary<int, CellIdent> ident,
+                                   Dictionary<int, Dictionary<FormKey, NavmeshGeometry>> nav)
+    {
+        foreach (var cp in PlacementExtract.FromMod(m))
+            for (int ci = 0; ci < wanted.Count; ci++)
+            {
+                if (!Matches(cp, wanted[ci])) continue;
+                // IDENTITY from the first plugin that defines the cell (the defining
+                // master), matching the render's own pre-pass; NAVMESH winner-takes-all,
+                // because the point of the clearance test is what the game will use.
+                ident.TryAdd(ci, new CellIdent(cp.Cell, cp.CellEditorId, cp.Interior, cp.Worldspace, cp.Grid));
+                foreach (var nm in cp.Navmeshes) nav[ci][nm.FormKey] = nm;
+            }
+    }
+
     internal static int Run(
         WorklistFile wl,
         string worklistPath,
@@ -59,11 +81,6 @@ static class BatEmit
         var nav = new Dictionary<int, Dictionary<FormKey, NavmeshGeometry>>();
         var wrldEditorId = new Dictionary<FormKey, string>();
         for (int ci = 0; ci < wl.Cells.Count; ci++) nav[ci] = new();
-
-        bool Matches(CellPlacements cp, string want) =>
-            string.Equals(cp.CellEditorId, want, StringComparison.OrdinalIgnoreCase)
-            || cp.Cell.ToString().Equals(want, StringComparison.OrdinalIgnoreCase)
-            || cp.Cell.ID.ToString("X6").Equals(want.TrimStart('0'), StringComparison.OrdinalIgnoreCase);
 
         Console.WriteLine($"emit-bats: walking the load order for {wl.Cells.Count} cell(s)...");
         int batIndex = -1;
@@ -81,16 +98,7 @@ static class BatEmit
                 foreach (var w in m.Worldspaces.Records)
                     if (!string.IsNullOrWhiteSpace(w.EditorID)) wrldEditorId[w.FormKey] = w.EditorID!;
 
-                foreach (var cp in PlacementExtract.FromMod(m))
-                    for (int ci = 0; ci < wl.Cells.Count; ci++)
-                    {
-                        if (!Matches(cp, wl.Cells[ci].Cell)) continue;
-                        // IDENTITY from the first plugin that defines the cell (the defining
-                        // master), matching the render's own pre-pass; NAVMESH winner-takes-all,
-                        // because the point of the clearance test is what the game will use.
-                        ident.TryAdd(ci, new CellIdent(cp.Cell, cp.CellEditorId, cp.Interior, cp.Worldspace, cp.Grid));
-                        foreach (var nm in cp.Navmeshes) nav[ci][nm.FormKey] = nm;
-                    }
+                WalkCells(m, wl.Cells.Select(c => c.Cell).ToList(), ident, nav);
             }
             }
             catch (Exception ex) when (PluginRead.Wraps(ex))
