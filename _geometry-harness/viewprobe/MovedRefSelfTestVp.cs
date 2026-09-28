@@ -164,9 +164,23 @@ internal static class MovedRefSelfTestVp
             try { return s2.Substitute(w2, v2).TryGetValue(key, out var n) ? $"substituted x {n.Vertices[0].X:0}" : "absent"; }
             catch (ArgumentException e) { return "refused: " + e.Message; }
         }
+        // The same through the retained walk's copy (CopyGraph), as a render that reuses a cached walk substitutes.
+        string SubCopy(FormKey key)
+        {
+            var s2 = new NavmeshSelection(F.E00, Array.Empty<string>(), new[] { key + "=MrMaster.esm" });
+            var w2 = new Dictionary<FormKey, NavmeshGeometry>();
+            var v2 = new Dictionary<string, Dictionary<FormKey, NavmeshGeometry>>(StringComparer.OrdinalIgnoreCase);
+            var watch2 = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "MrMaster.esm" };
+            foreach (var (_, mod, path) in t.Plugins())
+                foreach (var cp in Cells(mod)) s2.Observe(cp, Path.GetFileName(path), watch2, w2, v2);
+            var g = s2.CopyGraph(w2, v2);
+            try { return g.Selection.Substitute(g.Winners, g.Versions).TryGetValue(key, out var n) ? $"substituted x {n.Vertices[0].X:0}" : "absent"; }
+            catch (ArgumentException e) { return "refused: " + e.Message; }
+        }
         t.Check("N1-sub --nav-version of a navmesh deleted at the winner, from a plugin whose version stood in the selected cell: accepted",
                 Sub(F.NVD) == "substituted x 1100", Sub(F.NVD));
         t.Check("N1-sub-out --nav-version of a navmesh never in a selected cell: refused", Sub(F.NVX).StartsWith("refused"), Sub(F.NVX));
+        t.Check("N1-sub-copy and through the retained walk's copy: accepted", SubCopy(F.NVD) == "substituted x 1100", SubCopy(F.NVD));
 
         // ---- B1: --emit-bats' per-cell navmeshes (BatEmit.WalkCells), worklist cells E00 and E11 ----
         var ident = new Dictionary<int, BatEmit.CellIdent>();
