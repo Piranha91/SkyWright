@@ -1081,7 +1081,56 @@ def test_a_later_candidate_cannot_inherit_an_earlier_identity():
           doc["poseId"] == at[1]["poseId"] and doc["poseId"] != at[0]["poseId"])
 
 
-ALL = [test_failed_verification_cannot_export_success,
+def test_devbench_reads_a_worklist_in_either_spelling_or_refuses_by_name():
+    """viewprobe reads a worklist's property names case-insensitively (_shared/Worklist.cs), so a PascalCase worklist
+    (rendertwin and renderbatch write one) is a worklist. `devbench` must read it as the renderer does, or refuse it BY
+    NAME - never 0 shots with exit 0, and never "not a worklist" for one the renderer renders."""
+    def run(doc, *extra):
+        d = tempfile.mkdtemp(prefix="sp-wl-")
+        p = os.path.join(d, "w.json")
+        with open(p, "w", encoding="utf-8") as f:
+            json.dump(doc, f)
+        out = io.StringIO()
+        try:
+            with contextlib.redirect_stdout(out):
+                code = S.main(["devbench", p, "--json", *extra])
+            return "ran", code, out.getvalue()
+        except SystemExit as e:
+            return "refused", e.code, str(e.code)
+        except Exception as e:  # noqa: BLE001 - a crash is an outcome under test, not a harness failure
+            return "crashed", None, "%s: %s" % (type(e).__name__, e)
+
+    def shots(r):
+        try:
+            return [s["label"] for s in json.loads(r[2])] if r[0] == "ran" else None
+        except ValueError:
+            return None
+
+    lower = {"label": "x", "cells": [{"cell": "A", "shots": [
+        {"label": "one", "eye": [0, 0, 100], "yaw": 90}, {"label": "two", "eye": [0, 0, 100], "look": [0, 100, 100]}]}]}
+    pascal = {"Label": "x", "Cells": [{"Cell": "A", "Shots": [
+        {"Label": "one", "Eye": [0, 0, 100], "Yaw": 90}, {"Label": "two", "Eye": [0, 0, 100], "Look": [0, 100, 100]}]}]}
+    r = run(lower)
+    check("SP-W1 control: a camelCase worklist gives its 2 shots", shots(r) == ["one", "two"], str(r)[:160])
+    r = run(pascal)
+    check("SP-W2 RED: a PascalCase worklist gives the same 2 shots, not 'not a worklist'",
+          shots(r) == ["one", "two"], str(r)[:160])
+    r = run({"cells": [{"cell": "A", "Shots": lower["cells"][0]["shots"]}]})
+    check("SP-W3 RED: a cell spelling Shots inside a camelCase file gives its shots, not 0",
+          shots(r) == ["one", "two"], str(r)[:160])
+    r = run({"cells": [{"cell": "A", "views": []}]})
+    check("SP-W4 RED: a cell with no shots list is refused, naming 'shots' and the cell",
+          r[0] == "refused" and "shots" in str(r[2]).lower() and "A" in str(r[2]), str(r)[:160])
+    r = run({"cells": [{"cell": "A", "shots": []}], "Cells": [{"Cell": "B", "Shots": []}]})
+    check("SP-W5 RED: one key spelled two ways is refused as ambiguous, naming both",
+          r[0] == "refused" and "Cells" in str(r[2]) and "cells" in str(r[2]), str(r)[:160])
+    r = run({"label": "x", "status": "refused", "cells": []})
+    check("SP-W6 RED: a worklist with 0 shots (a shotplan refusal record) is refused by name, not 0 lines and exit 0",
+          r[0] == "refused" and "0 shots" in str(r[2]), str(r)[:160])
+
+
+ALL = [test_devbench_reads_a_worklist_in_either_spelling_or_refuses_by_name,
+       test_failed_verification_cannot_export_success,
        test_pose_identity_binds_the_result,
        test_skipped_verification_is_not_a_pass,
        test_verified_run_publishes_cleanly,
