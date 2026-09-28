@@ -17,10 +17,10 @@ sealed class UncutPopulation
     public readonly List<(FormKey Cell, int Plugin, FormKey Ref, FormKey Base)> Candidates = new();
     /// <summary>The candidates Resolve counted.</summary>
     public readonly List<(FormKey Cell, int Plugin, FormKey Ref)> Counted = new();
-    // Every reference's last sighting over the whole order: the cell it stands in, or none when a deletion (with or
-    // without placement data) is its last word. An introduction counts only where the winning state still has it.
-    readonly Dictionary<FormKey, FormKey> _lastCell = new();
-    readonly HashSet<FormKey> _lastDeleted = new();
+    // Every reference's last sighting over the whole order (LastSightingSet, admitting any sighting that is not a deletion):
+    // where it stands, and with which base. An introduction counts only where the winning state still has it, and is judged
+    // by the base its last sighting names, not the one it was introduced with.
+    readonly LastSightingSet _last = new();
     /// <summary>Candidates Resolve set aside because a later plugin moved them out of their introduction cell or deleted
     /// them.</summary>
     public long SkippedMovedOrDeleted { get; private set; }
@@ -28,13 +28,7 @@ sealed class UncutPopulation
     /// <summary>One cell of plugin <paramref name="p"/> (whose own ModKey is <paramref name="modKey"/>), in load order.</summary>
     public void Note(CellPlacements cp, int p, ModKey modKey)
     {
-        foreach (var r in cp.Refs)
-        {
-            _lastCell[r.FormKey] = cp.Cell;
-            if (r.Deleted) _lastDeleted.Add(r.FormKey); else _lastDeleted.Remove(r.FormKey);
-        }
-        if (cp.DeletedRefs is { Count: > 0 } gone)
-            foreach (var d in gone) { _lastCell.Remove(d.FormKey); _lastDeleted.Add(d.FormKey); }
+        _last.Observe(cp, (_, r) => !r.Deleted);
         foreach (var r in cp.Refs)
         {
             if (r.Deleted) continue;
@@ -53,11 +47,11 @@ sealed class UncutPopulation
         skippedAbsent = 0; skippedType = 0; SkippedMovedOrDeleted = 0;
         foreach (var (cell, plugin, refKey, baseKey) in Candidates)
         {
-            if (_lastDeleted.Contains(refKey) || !_lastCell.TryGetValue(refKey, out var lc) || lc != cell) { SkippedMovedOrDeleted++; continue; }
-            if (baseTypeOf(baseKey) is not { } bt || !obstructing.Contains(bt)) { skippedType++; continue; }
+            if (!_last.Refs.TryGetValue(refKey, out var last) || _last.CellOf[refKey] != cell) { SkippedMovedOrDeleted++; continue; }
+            if (last.Base is not { } lastBase || baseTypeOf(lastBase) is not { } bt || !obstructing.Contains(bt)) { skippedType++; continue; }
             if (!enabled(refKey)) { skippedAbsent++; continue; }
             if (!cellNewRefs.TryGetValue((cell, plugin), out var bag)) cellNewRefs[(cell, plugin)] = bag = new List<FormKey>();
-            bag.Add(baseKey);
+            bag.Add(lastBase);
             Counted.Add((cell, plugin, refKey));
         }
     }
