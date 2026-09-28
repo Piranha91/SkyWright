@@ -28,7 +28,7 @@ static class PlanesReportCandidates
     public static readonly string[] PlaneKeys = { "relation", "predictedCulled", "visibility", "visibilityMask", "isolatedDepthSha256" };
 
     /// <summary>Each candidate body once, with its report-local id, in v1 row order.</summary>
-    public static List<object> Bodies(IReadOnlyList<RefOcclusion> refs)
+    public static List<object> Bodies(IReadOnlyList<RefOcclusion> refs, int planeCount)
     {
         var bodies = new List<object>();
         foreach (var r in refs)
@@ -246,7 +246,7 @@ static class PlanesReportCandidatesSelfTest
         JsonObject v2;
         try
         {
-            var bodies = PlanesReportCandidates.Bodies(refs);
+            var bodies = PlanesReportCandidates.Bodies(refs, planes.Count);
             v2 = Doc(PlanesReportCandidates.Schema, bodies,
                 planes.Select(p => (object)new { formKey = p.Key.ToString(), candidates = PlanesReportCandidates.Overlays(refs, p, bodies.Count) }));
         }
@@ -281,6 +281,12 @@ static class PlanesReportCandidatesSelfTest
               "no-source rows stay sparse: no shape, relation or predictedCulled invented");
         int t1 = m1.Sum(Tally), t2 = m2.Sum(Tally);
         Check(t1 == 2 && t2 == t1, $"Box refusal tally ('unassessed: ' relations) equal: v1 {t1}, v2 {t2}");
+
+        // A view with no planes: v1 wrote no candidate rows, so v2 writes no bodies either.
+        var none = new List<PlaneRender>();
+        var v2None = Doc(PlanesReportCandidates.Schema, PlanesReportCandidates.Bodies(refs, none.Count), Array.Empty<object>());
+        Check(((JsonArray)v2None["candidateBodies"]!).Count == 0 && PlanesReportCandidates.Materialise(v2None).Count == 0,
+              "a view with no planes writes no candidate bodies (v1 wrote no rows)");
 
         // Refusals.
         Refuses("unknown schema", () => { var d = (JsonObject)v2.DeepClone(); d["schema"] = "occlusion-view-research-v3"; PlanesReportCandidates.Materialise(d); });

@@ -4407,7 +4407,7 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot,
                 var eyeS = eyePos.Value;
                 var rows = new List<object>();
                 // Each candidate body once; every plane below carries only its overlays (schema v2).
-                var candidateBodies = ViewProbe.PlanesReportCandidates.Bodies(os.Refs);
+                var candidateBodies = ViewProbe.PlanesReportCandidates.Bodies(os.Refs, planes.Count);
                 Console.WriteLine($"   ---- occlusion planes report: {planes.Count} plane(s) in {cellLabel}{(interior || !ringRefs ? "" : " + ring")}, "
                                 + $"from eye {eyeS.X:0},{eyeS.Y:0},{eyeS.Z:0}; collision reach {planesReach:0} u behind each ----");
                 int noCollisionCandidates = 0, noneWithinReach = 0, touching = 0, cullNothing = 0, cullsVisible = 0;
