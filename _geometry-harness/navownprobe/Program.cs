@@ -291,7 +291,7 @@ uncutPop.Dump();
 
 Console.WriteLine($"\nindexed {navProviders.Count:N0} navmesh records across {cellNavPlugins.Count:N0} cells  ({sw.Elapsed.TotalSeconds:0.0}s)");
 Console.WriteLine($"   {pop.Describe()}");
-Console.WriteLine($"   UNCUT candidates: {uncutCandidates.Count:N0} introduced references — {uncutSkippedType:N0} of a non-obstructing type, "
+Console.WriteLine($"   UNCUT candidates: {uncutCandidates.Count:N0} introduced references — {uncutPop.SkippedMovedOrDeleted:N0} moved out of their cell or deleted by a later plugin, {uncutSkippedType:N0} of a non-obstructing type, "
                 + $"{uncutSkippedAbsent:N0} not present at load, {cellNewRefs.Values.Sum(b => b.Count):N0} counted");
 Console.WriteLine($"   plugins that could not be read (contribute nothing, counted per rule 6): {unreadablePlugins.Count:N0}"
                 + (unreadablePlugins.Count > 0 ? "  — " + string.Join(", ", unreadablePlugins) : ""));

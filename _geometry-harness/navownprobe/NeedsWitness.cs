@@ -94,6 +94,8 @@ static class NeedsWitnessJoin
     public static Census Build(IReadOnlyList<string> paths, HashSet<FormKey> wantedCells, bool flagsOnly = false)
     {
         var c = new Census();
+        var held = new LastSightingSet();
+        var npcBaseOf = new Dictionary<FormKey, FormKey>();     // PlacedNpc ref -> its base, at its last sighting
         for (int p = 0; p < paths.Count; p++)
         {
             ISkyrimModGetter mod;
@@ -101,16 +103,26 @@ static class NeedsWitnessJoin
             catch { c.UnreadablePlugins++; continue; }
             using (mod as IDisposable)
             {
-                foreach (var cp in PlacementExtract.FromMod(mod))
+                // The last-sighting rule (_shared/LastSighting.cs): every cell of the plugin, deletion-only ones included;
+                // a witness is held iff its last sighting stands in a wanted cell, and a later plugin that moves it out or
+                // deletes it takes it out of the census, of the whole-order cell table and of the placed-NPC set.
+                foreach (var cp in LastSighting.Cells(mod))
                 {
                     bool wanted = wantedCells.Contains(cp.Cell);
+                    held.Observe(cp, (_, _) => wanted);
+                    if (cp.DeletedRefs is { Count: > 0 } gone)
+                        foreach (var d in gone)
+                        {
+                            c.Refs.Remove(d.FormKey); c.RefCellAnywhere.Remove(d.FormKey); npcBaseOf.Remove(d.FormKey);
+                            c.EnableFacts.NoteDeleted(d.FormKey);
+                        }
                     foreach (var r in cp.Refs)
                     {
                         c.EnableFacts.Note(r);
                         bool isNpc = r.RecordType.Contains("PlacedNpc", StringComparison.Ordinal);
-                        if (isNpc && !r.Deleted && r.Base is { } bk) c.NpcPlacedAnywhere.Add(bk);
+                        if (isNpc && !r.Deleted && r.Base is { } bk) npcBaseOf[r.FormKey] = bk; else npcBaseOf.Remove(r.FormKey);
                         c.RefCellAnywhere[r.FormKey] = cp.Cell;
-                        if (!wanted) continue;
+                        if (!wanted) { c.Refs.Remove(r.FormKey); continue; }
                         c.RefsSeen++;
                         // A PROVISIONAL state: the chain cannot be resolved until every plugin has been read (an override
                         // three plugins later can enable or disable the parent), so the winning record's own shape is
@@ -149,6 +161,8 @@ static class NeedsWitnessJoin
                 }
             }
         }
+        // An NPC base is placed somewhere iff some reference's last sighting places it (not deleted, with that base).
+        foreach (var bk in npcBaseOf.Values) c.NpcPlacedAnywhere.Add(bk);
         foreach (var (k, r) in c.Refs)
         {
             if (!c.RefsByCell.TryGetValue(r.Cell, out var l)) c.RefsByCell[r.Cell] = l = new List<FormKey>();
