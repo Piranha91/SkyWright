@@ -826,7 +826,7 @@ foreach (var (nav, provs) in navProviders)
     int winner = deletedAtWinner.TryGetValue(nav, out var deleter) ? deleter : provs[^1];
     if (!Wanted(winner)) continue;
     if (deletedAtWinner.ContainsKey(nav))
-        broken.Add($"   DELETED  {nav} in {Cell(navCell.GetValueOrDefault(nav))} by {pluginKey[winner].FileName}");
+        broken.Add($"   DELETED  {nav} in {Cell(navCell.GetValueOrDefault(nav))} by {pluginKey[winner].FileName}{(navVersions.Last[nav].NoGeometry ? " (no geometry left)" : "")}");
     else if (provs.Count > 1)
     {
         var w = navSize.GetValueOrDefault((nav, winner));
@@ -835,6 +835,10 @@ foreach (var (nav, provs) in navProviders)
             broken.Add($"   EMPTIED  {nav} in {Cell(navCell.GetValueOrDefault(nav))} by {pluginKey[winner].FileName} ({first.T} tris -> 0)");
     }
 }
+// A navmesh no plugin ever gave geometry to, whose last record carries none: nothing to walk on either.
+foreach (var (nav, deleter) in deletedAtWinner)
+    if (!navProviders.ContainsKey(nav) && Wanted(deleter))
+        broken.Add($"   DELETED  {nav} in {Cell(navVersions.Last[nav].Cell)} by {pluginKey[deleter].FileName} (no version with geometry in the order)");
 Console.WriteLine($"\n==== DELETED or EMPTIED navmesh (hard break) ====");
 Console.WriteLine($"   findings: {broken.Count:N0}");
 foreach (var b in broken.Take(listN)) Console.WriteLine(b);

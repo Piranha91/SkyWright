@@ -15,6 +15,10 @@ sealed class NavVersions
     public readonly Dictionary<(FormKey, int), (int V, int T, int H)> Size = new();
     public readonly Dictionary<(FormKey, int), bool> Deleted = new();
     public readonly Dictionary<FormKey, SortedSet<int>> CellPlugins = new();               // cell -> plugins supplying navmesh
+    /// <summary>NAVM -> its last sighting in load order: the plugin, and whether that sighting carried no geometry
+    /// (CellPlacements.DeletedNavmeshes). A sighting with no geometry is not a version (it has no size to compare), but when
+    /// it is the last one it is the navmesh's winning state.</summary>
+    public readonly Dictionary<FormKey, (int Plugin, bool NoGeometry, FormKey Cell)> Last = new();
 
     /// <summary>One cell of plugin <paramref name="p"/>, in load order. <paramref name="deletedHere"/>: the navmeshes the
     /// plugin flags deleted (read from the records).</summary>
@@ -26,18 +30,22 @@ sealed class NavVersions
             if (l.Count == 0 || l[^1] != p) l.Add(p);
             Cell[nav.FormKey] = cp.Cell;
             Size[(nav.FormKey, p)] = (nav.Vertices.Count, nav.Triangles.Count, hash(nav));
-            Deleted[(nav.FormKey, p)] = deletedHere.Contains(nav.FormKey);
+            Deleted[(nav.FormKey, p)] = nav.Deleted || deletedHere.Contains(nav.FormKey);
             if (!CellPlugins.TryGetValue(cp.Cell, out var s)) CellPlugins[cp.Cell] = s = new SortedSet<int>();
             s.Add(p);
+            Last[nav.FormKey] = (p, false, cp.Cell);
         }
+        if (cp.DeletedNavmeshes is { Count: > 0 } gone)
+            foreach (var d in gone) Last[d.FormKey] = (p, true, cp.Cell);
     }
 
-    /// <summary>The navmeshes whose winning version is a deletion, with the plugin that deleted them.</summary>
+    /// <summary>The navmeshes whose winning state is a deletion, with the plugin that deleted them: the last sighting is a
+    /// version flagged deleted, or a record that carries no geometry (flagged deleted or not: nothing to walk on).</summary>
     public Dictionary<FormKey, int> DeletedAtWinner()
     {
         var d = new Dictionary<FormKey, int>();
-        foreach (var (nav, provs) in Providers)
-            if (Deleted.GetValueOrDefault((nav, provs[^1]))) d[nav] = provs[^1];
+        foreach (var (nav, last) in Last)
+            if (last.NoGeometry || Deleted.GetValueOrDefault((nav, last.Plugin))) d[nav] = last.Plugin;
         return d;
     }
 }
