@@ -12,7 +12,10 @@ public sealed class PluginUnreadableException : Exception
 {
     public PluginUnreadableException(string path, string walk, Exception inner, bool midWalk = false)
         : base($"{Path.GetFileName(path)} {(midWalk ? "failed while " + walk + " read it" : "could not be read by " + walk)}: "
-             + $"{inner.GetType().Name}: {inner.Message}. Refusing: "
+             + $"{inner.GetType().Name}: {inner.Message}. "
+             + (midWalk ? "The fault is in the plugin's records or in the reader (Mutagen or this walk); either way this "
+                          + "plugin's part of the walk is incomplete. " : "")
+             + "Refusing: "
              + "without it, an earlier plugin's version of every record it overrides would be used silently.", inner) { }
 }
 
