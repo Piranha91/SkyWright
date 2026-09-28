@@ -45,6 +45,33 @@ static class NavownSelfTest
         t.Check("N3  navmeshes whose winning version is a deletion, with or without data: NVD/1, NVK/1, NVX/3 (NVR restored by B)",
                 del.SequenceEqual(new[] { "NVD/1", "NVK/1", "NVX/3" }), string.Join(", ", del));
 
+        // ---- N4: the DELETED section's report, with the shipped-game deletions counted apart (default) or listed
+        // (--list-master-deletions). The fixture has no Bethesda master, so plugin A (1) stands in for one: its deletions
+        // (NVD, NVK) are the shipped game's; X's deletion (NVX, 3) is a mod's and a finding in both modes. ----
+        var names = t.Plugins().ToDictionary(p => p.Index, p => p.Mod.ModKey.FileName.String);
+        string CellOf(FormKey k) => k == F.E00 ? "E00" : k == F.E11 ? "E11" : k.ToString();
+        List<string> Report(bool listShipped) => NavDeletions.Report(hist, _ => true, p => p == 1, p => names[p], CellOf,
+                                                                     listN: 25, listShippedGame: listShipped);
+        var off = Report(false);
+        var on = Report(true);
+        string Show(List<string> l) => string.Join(" | ", l.Select(x => x.Trim()));
+        var nvx = $"   DELETED  {F.NVX} in E11 by {names[3]} (no geometry left)";
+        t.Check("N4-off default: the findings are X's deletion only; the shipped-game deletions are a count, never listed",
+                off.Contains(nvx) && off.Contains("   findings: 1")
+                && off.Contains("   deleted by a Bethesda master (the shipped game; not findings): 2")
+                && !off.Any(l => l.Contains(F.NVD.ToString()) || l.Contains(F.NVK.ToString())), Show(off));
+        var shipped = on.Where(l => l.Contains(F.NVD.ToString()) || l.Contains(F.NVK.ToString())).ToList();
+        t.Check("N4-on --list-master-deletions: NVD and NVK are listed, each line labelled a shipped-game deletion",
+                shipped.Count == 2 && shipped.All(l => l.Contains("shipped-game deletion") && l.Contains($"by {names[1]}")),
+                Show(on));
+        t.Check("N4-on a mod's deletion stays a finding when the shipped game's are listed: findings 1, NVX in the findings",
+                on.Contains(nvx) && on.Contains("   findings: 1")
+                && on.IndexOf(nvx) < on.FindIndex(l => l.Contains(F.NVD.ToString()) || l.Contains(F.NVK.ToString())), Show(on));
+        t.Check("N4-on the count line is unchanged by the toggle",
+                on.Contains("   deleted by a Bethesda master (the shipped game; not findings): 2"), Show(on));
+        t.Check("N4-off the default report is the toggle-on report minus the shipped-game listing, line for line",
+                off.SequenceEqual(on.Where(l => !shipped.Contains(l) && !l.Contains("shipped-game deletions ("))), Show(off));
+
         // ---- N2: the UNCUT population ----
         var uncut = new UncutPopulation();
         foreach (var (i, mod, _) in t.Plugins())
