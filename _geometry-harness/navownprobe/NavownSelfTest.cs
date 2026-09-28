@@ -72,6 +72,51 @@ static class NavownSelfTest
         t.Check("N4-off the default report is the toggle-on report minus the shipped-game listing, line for line",
                 off.SequenceEqual(on.Where(l => !shipped.Contains(l) && !l.Contains("shipped-game deletions ("))), Show(off));
 
+        // ---- N5: the command line. Every argv shape a tracked caller passes is accepted, and anything else is refused BY
+        // NAME: a typo of a flag used to run the default report with exit 0. Callers: differential-sweep.ps1 (base and
+        // candidate arms), ordersweep.py / evalrun.py (the check registry's adapter args plus the common pins), the
+        // navmesh-packet regression row, and the historical drivers' reach/state/flags shapes. ----
+        (string Name, string[] Argv)[] accepted =
+        {
+            ("differential-sweep base", new[] { "--emit", "base.json" }),
+            ("differential-sweep candidate", new[] { "--enable", "Cand.esp", "--base", "base.json", "--emit", "e.json" }),
+            ("ordersweep/evalrun arm", new[] { "--order", "o.json", "--base", "b.json", "--emit", "e.json", "--instance", "I", "--profile", "P", "--game", "G" }),
+            ("ordersweep/evalrun baseline", new[] { "--order", "o.json", "--emit", "e.json", "--instance", "I", "--profile", "P", "--game", "G" }),
+            ("regression row", new[] { "--instance", "I", "--game", "G", "--profile", "P", "--order", "o.json", "--emit", "e.json" }),
+            ("reach drivers", new[] { "--reach-candidates", "--reach-json", "r.json", "--reach-top", "5", "--reach-witness" }),
+            ("population and filters", new[] { "--flags", "--state", "s.json", "--list", "50", "--plugin", "A.esp", "--disable", "X.esp", "--door-idx" }),
+            ("the toggle", new[] { "--list-master-deletions" }),
+        };
+        foreach (var (name, argv) in accepted)
+        {
+            var a = NavownArgs.Parse(argv);
+            t.Check($"N5  accepted: {name}", a.Error is null, a.Error ?? string.Join(" ", argv));
+        }
+        var full = NavownArgs.Parse(new[] { "--instance", "I", "--game", "G", "--profile", "P", "--order", "o.json", "--base", "b.json",
+                                            "--emit", "e.json", "--list", "50", "--plugin", "A.esp", "--enable", "E.esp",
+                                            "--reach-json", "r.json", "--reach-top", "7", "--list-master-deletions" });
+        t.Check("N5  values land where the old loop put them",
+                full.Error is null && full.Instance == "I" && full.Game == "G" && full.Profile == "P" && full.OrderFile == "o.json"
+                && full.BasePath == "b.json" && full.EmitPath == "e.json" && full.ListN == 50 && full.OnlyPlugin == "A.esp"
+                && full.Enable.SequenceEqual(new[] { "E.esp" }) && full.ReachCandidates && full.ReachJsonPath == "r.json"
+                && full.ReachTopN == 7 && full.ListMasterDeletions && !full.ReachWitness && !full.FlagsOnly,
+                full.Error ?? "parsed");
+        var dflt = NavownArgs.Parse(Array.Empty<string>());
+        t.Check("N5  defaults: list 25, reach-top 20, toggle off", dflt.Error is null && dflt.ListN == 25 && dflt.ReachTopN == 20
+                && !dflt.ListMasterDeletions, dflt.Error ?? "");
+        var typo = NavownArgs.Parse(new[] { "--order", "o.json", "--list-master-deletion" });
+        t.Check("N5  RED: a typo of the toggle is refused, naming the argument",
+                typo.Error is not null && typo.Error.Contains("--list-master-deletion"), typo.Error ?? "accepted");
+        var stray = NavownArgs.Parse(new[] { "stray" });
+        t.Check("N5  RED: a stray positional argument is refused, naming it", stray.Error is not null && stray.Error.Contains("stray"),
+                stray.Error ?? "accepted");
+        var bare = NavownArgs.Parse(new[] { "--order", "o.json", "--emit" });
+        t.Check("N5  RED: a flag missing its value is refused, naming the flag", bare.Error is not null && bare.Error.Contains("--emit"),
+                bare.Error ?? "accepted");
+        var badN = NavownArgs.Parse(new[] { "--list", "many" });
+        t.Check("N5  RED: a non-integer --list is refused, naming the flag", badN.Error is not null && badN.Error.Contains("--list"),
+                badN.Error ?? "accepted");
+
         // ---- N2: the UNCUT population ----
         var uncut = new UncutPopulation();
         foreach (var (i, mod, _) in t.Plugins())
