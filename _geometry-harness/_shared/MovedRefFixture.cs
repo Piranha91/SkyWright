@@ -52,6 +52,15 @@ namespace HarnessShared;
 //         E11 (1,1): master offset 0; A's copy: a LAND with that flag clear and no VHGT: it DECLARES no heights (the
 //               engine draws no ground there and has no terrain collision, Q5 playtest 2026-09-27)   L4-declared
 //         E20: master offset 0 and one ref (L5, at (8292,100)); B's copy carries ONLY a readable LAND, offset 20 L5
+//   NAVM (each named by its first vertex's X, which differs per version; one triangle each)
+//   NVM   E00 (x 1000)             A: filed in E50 (x 21000)                            E50, A's
+//   NVD   E00 (x 1100)             A: deleted, no data                                  gone
+//   NVK   E00 (x 1200)             A: deleted WITH data (x 1210, flag set in bytes)     gone
+//   NVX   E11 (x 5000)             X: deleted, no data, in an E11 copy holding nothing else  gone
+//   NVR   E00 (x 1400)             A: deleted, no data; B: E00 again (x 1420)           E00, B's
+//   NVC   E00 (x 1500)             A: E00 (x 1510)                                      E00, A's (control)
+//   NVI   E00 (x 1600)             A: filed in interior I2 (x 1610)                     I2, A's
+//   NVW   E00 (x 1700)             A: filed in W2's cell at the same grid (x 1710)       W2E00, A's
 //   L1 lives in its own last plugin, so the cut VHGT is the end of the file: the read then throws. A VHGT cut the same way
 //   in the middle of a plugin is read SILENTLY by Mutagen (measured 2026-09-27 on this fixture: heights of 5,128 and
 //   4,776 u from the bytes that follow, no exception), which no catch can see.
@@ -73,6 +82,14 @@ public static class MovedRefFixture
     public static readonly FormKey M1 = Mk(0x901), M2 = Mk(0x902), M3 = Mk(0x903), M4 = Mk(0x904), M5 = Mk(0x905), M6 = Mk(0x906),
         M7 = Mk(0x90E), D1 = Mk(0x907), D2 = Mk(0x908), D3 = Mk(0x909), D4 = Mk(0x90A), B0 = Mk(0x90B), C1 = Mk(0x90C), C2 = Mk(0x90D),
         P1 = Mk(0x910), P2 = Mk(0x911), P3 = Mk(0x912), NPC1 = Mk(0x913), NPC2 = Mk(0x914), NPC3 = Mk(0x915), NPC4 = Mk(0x916), Q1 = Mk(0x920), L5 = Mk(0x921);
+    public static readonly FormKey NVM = Mk(0x960), NVD = Mk(0x961), NVK = Mk(0x962), NVX = Mk(0x963), NVR = Mk(0x964),
+        NVC = Mk(0x965), NVI = Mk(0x966), NVW = Mk(0x967);
+
+    /// <summary>Every navmesh the fixture places, by its table id.</summary>
+    public static readonly IReadOnlyDictionary<string, FormKey> Navs = new Dictionary<string, FormKey>
+    {
+        ["NVM"] = NVM, ["NVD"] = NVD, ["NVK"] = NVK, ["NVX"] = NVX, ["NVR"] = NVR, ["NVC"] = NVC, ["NVI"] = NVI, ["NVW"] = NVW,
+    };
     public static readonly FormKey U1 = new(AKey, 0x950), U2 = new(AKey, 0x951), U3 = new(AKey, 0x952), U4 = new(AKey, 0x953), U5 = new(AKey, 0x954);
 
     /// <summary>Every reference the fixture places, by its table id.</summary>
@@ -109,6 +126,23 @@ public static class MovedRefFixture
         return r;
     }
     static PlacedObject Deleted(FormKey key) => new(key, Rel) { IsDeleted = true };
+    /// <summary>A one-triangle navmesh whose first vertex stands at (x, y): exterior (parent worldspace and grid) or
+    /// interior (parent cell).</summary>
+    static NavigationMesh Nav(FormKey key, float x, float y, FormKey? ws, int gx = 0, int gy = 0, FormKey? cell = null)
+    {
+        var d = new NavigationMeshData
+        {
+            NavmeshVersion = 12, CrcHash = 0xA5E9A03C,
+            Parent = ws is { } w
+                ? new WorldspaceNavmeshParent { Parent = new FormLink<IWorldspaceGetter>(w), Coordinates = new P2Int16((short)gx, (short)gy) }
+                : new CellNavmeshParent { Parent = new FormLink<ICellGetter>(cell!.Value) },
+            Min = new P3Float(x, y, 0), Max = new P3Float(x + 100, y + 100, 0),
+        };
+        d.Vertices.Add(new P3Float(x, y, 0)); d.Vertices.Add(new P3Float(x + 100, y, 0)); d.Vertices.Add(new P3Float(x, y + 100, 0));
+        d.Triangles.Add(new NavmeshTriangle { Vertices = new P3Int16(0, 1, 2), EdgeLink_0_1 = -1, EdgeLink_1_2 = -1, EdgeLink_2_0 = -1 });
+        return new NavigationMesh(key, Rel) { Data = d };
+    }
+    static NavigationMesh DeletedNav(FormKey key) => new(key, Rel) { IsDeleted = true };
     static PlacedNpc DeletedNpc(FormKey key) => new(key, Rel) { IsDeleted = true };
     static SkCell Ext(FormKey key, int x, int y) => new(key, Rel) { Flags = default, Grid = new CellGrid { Point = new P2Int(x, y) } };
     static SkCell Int(FormKey key) => new(key, Rel) { Flags = SkCell.Flag.IsInteriorCell };
@@ -196,6 +230,8 @@ public static class MovedRefFixture
         e00.Temporary.Add(Ref(P1, P, 300, 300)); e00.Temporary.Add(Ref(P2, P, 310, 300)); e00.Temporary.Add(Ref(P3, P, 320, 300));
         e00.Temporary.Add(Npc(NPC1, N1, 400, 400));
         e00.Landscape = LandOf(Land00, 0f);
+        foreach (var (k, x) in new[] { (NVM, 1000f), (NVD, 1100f), (NVK, 1200f), (NVR, 1400f), (NVC, 1500f), (NVI, 1600f), (NVW, 1700f) })
+            e00.NavigationMeshes.Add(Nav(k, x, 2000, W));
         var e10 = Ext(E10, 1, 0);
         e10.Temporary.Add(Ref(D2, S, 4300, 100));
         e10.Temporary.Add(Npc(NPC2, N2, 4600, 400));
@@ -206,6 +242,7 @@ public static class MovedRefFixture
         var em10 = Ext(Em10, -1, 0); em10.Landscape = LandOf(Landm10, 0f);
         var e20 = Ext(E20, 2, 0); e20.Landscape = LandOf(Land20, 0f); e20.Temporary.Add(Ref(L5, S, 2 * 4096 + 100, 100));
         var e11 = Ext(E11, 1, 1); e11.Landscape = LandOf(Land11, 0f);
+        e11.NavigationMeshes.Add(Nav(NVX, 5000, 5000, W, 1, 1));
         m.Worldspaces.Add(World(W, top, e00, e10, e50, em10, e20, e11));
         m.Worldspaces.Add(World(W2, new SkCell(W2Top, Rel) { Flags = default }, Ext(W2E00, 0, 0)));
         FileInterior(m, Int(I1)); FileInterior(m, Int(I2));
@@ -222,6 +259,9 @@ public static class MovedRefFixture
             c00.Temporary.Add(Ref(P1, S, 300, 300));
             c00.Temporary.Add(Npc(NPC1, N2, 400, 400));
             c00.Temporary.Add(Ref(U1, S, 500, 500)); c00.Temporary.Add(Ref(U2, S, 510, 500)); c00.Temporary.Add(Ref(U3, S, 520, 500));
+            c00.NavigationMeshes.Add(DeletedNav(NVD)); c00.NavigationMeshes.Add(DeletedNav(NVR));
+            c00.NavigationMeshes.Add(Nav(NVK, 1210, 2000, W));          // its Deleted flag is set in the bytes after writing
+            c00.NavigationMeshes.Add(Nav(NVC, 1510, 2000, W));
             var c10 = Ext(E10, 1, 0);
             c10.Temporary.Add(Ref(M2, S, 4200, 100));
             c10.Temporary.Add(Ref(D3, S, 4400, 200));                 // its Deleted flag is set in the bytes after writing (D3)
@@ -232,20 +272,23 @@ public static class MovedRefFixture
             c50.Temporary.Add(Ref(M7, S, 700, 700));                   // filed in E50's cell, standing in grid (0,0)
             c50.Temporary.Add(Npc(NPC4, N2, 5 * 4096 + 320, 300));    // its Deleted flag is set in the bytes after writing
             c50.Temporary.Add(Ref(U4, S, 5 * 4096 + 400, 400)); c50.Temporary.Add(Ref(U5, S, 5 * 4096 + 410, 400));
+            c50.NavigationMeshes.Add(Nav(NVM, 21000, 2000, W, 5, 0));
             c50.Temporary.Add(new PlacedNpc(NPC3, Rel) { Placement = new Placement { Position = new P3Float(5 * 4096 + 300, 300, 0), Rotation = new P3Float(0, 0, 0) } });   // base cleared
             var cm10 = Ext(Em10, -1, 0); cm10.Landscape = LandOf(Landm10, 0f, withHeights: false, flags: Landscape.Flag.VertexNormalsHeightMap);   // L4-claimed
             var c11 = Ext(E11, 1, 1); c11.Landscape = LandOf(Land11, 0f, withHeights: false, flags: (Landscape.Flag)0);   // L4-declared
             a.Worldspaces.Add(World(W, t, c00, c10, c50, cm10, c11));
             var w2c = Ext(W2E00, 0, 0);
             w2c.Temporary.Add(Ref(M4, S, 130, 100)); w2c.Temporary.Add(Ref(P2, P, 310, 300));
+            w2c.NavigationMeshes.Add(Nav(NVW, 1710, 2000, W2));
             a.Worldspaces.Add(World(W2, null, w2c));
-            var ci2 = Int(I2); ci2.Temporary.Add(Ref(M3, S, 400, 0)); FileInterior(a, ci2);
+            var ci2 = Int(I2); ci2.Temporary.Add(Ref(M3, S, 400, 0)); ci2.NavigationMeshes.Add(Nav(NVI, 1610, 0, null, cell: I2)); FileInterior(a, ci2);
         }
         var aPath = Save(a, mOv);
         // D3: Mutagen writes a record marked deleted WITHOUT its placement, so the flag is set in the written bytes instead,
         // leaving the placement in place: a deletion that still carries data.
         File.WriteAllBytes(aPath, SetRecordFlag(File.ReadAllBytes(aPath), "REFR", D3.ID, 0x20));
         File.WriteAllBytes(aPath, SetRecordFlag(File.ReadAllBytes(aPath), "ACHR", NPC4.ID, 0x20));
+        File.WriteAllBytes(aPath, SetRecordFlag(File.ReadAllBytes(aPath), "NAVM", NVK.ID, 0x20));
 
         // ---- B: back in, placed again, the introductions moved or deleted, a readable LAND ----
         var b = new SkyrimMod(BKey, Rel);
@@ -253,6 +296,7 @@ public static class MovedRefFixture
             var c00 = Ext(E00, 0, 0);
             c00.Temporary.Add(Ref(M6, S, 1500, 1500));
             c00.Temporary.Add(Ref(U3, S, 600, 600)); c00.Temporary.Add(Deleted(U2));
+            c00.NavigationMeshes.Add(Nav(NVR, 1420, 2000, W));
             var c50 = Ext(E50, 5, 0);
             c50.Temporary.Add(Ref(D4, S, 5 * 4096 + 220, 300)); c50.Temporary.Add(Ref(U1, S, 5 * 4096 + 230, 300));
             c50.Landscape = LandOf(Land50, 20f);
@@ -266,7 +310,11 @@ public static class MovedRefFixture
 
         // ---- X: a cell copy whose only content is a deletion ----
         var xm = new SkyrimMod(XKey, Rel);
-        { var c10 = Ext(E10, 1, 0); c10.Temporary.Add(Deleted(D2)); xm.Worldspaces.Add(World(W, null, c10)); }
+        {
+            var c10 = Ext(E10, 1, 0); c10.Temporary.Add(Deleted(D2));
+            var c11 = Ext(E11, 1, 1); c11.NavigationMeshes.Add(DeletedNav(NVX));   // NVX: a copy holding only the deletion
+            xm.Worldspaces.Add(World(W, null, c10, c11));
+        }
         var xPath = Save(xm, mOv);
 
         // ---- L: E00's LAND overridden, its heightmap cut so it cannot be read (the recipe --plugin-read-selftest measured) ----
@@ -358,6 +406,14 @@ public static class MovedRefFixture
                 foreach (var p in c.Temporary) if (p.FormKey == NPC4) npc4 = p;
         yield return ("fixture: A's NPC4 is deleted and keeps its placement", npc4 is { IsDeleted: true, Placement: not null },
                       npc4 is null ? "absent" : $"deleted {npc4.IsDeleted}, placement {(npc4.Placement is null ? "none" : "kept")}");
+        INavigationMeshGetter? nvk = null, nvd = null;
+        foreach (var ws in a.Worldspaces.Records)
+            foreach (var blk in ws.SubCells) foreach (var sub in blk.Items) foreach (var c in sub.Items)
+                foreach (var n in c.NavigationMeshes) { if (n.FormKey == NVK) nvk = n; if (n.FormKey == NVD) nvd = n; }
+        yield return ("fixture: A's NVK navmesh is deleted and keeps its geometry", nvk is { IsDeleted: true, Data: not null },
+                      nvk is null ? "absent" : $"deleted {nvk.IsDeleted}, data {(nvk.Data is null ? "none" : "kept")}");
+        yield return ("fixture: A's NVD navmesh is deleted and carries no geometry", nvd is { IsDeleted: true, Data: null },
+                      nvd is null ? "absent" : $"deleted {nvd.IsDeleted}, data {(nvd.Data is null ? "none" : "kept")}");
         yield return ("fixture: A's B0 has no base", b0 is IPlacedObjectGetter po && po.Base.FormKeyNullable is not { IsNull: false }, b0 is null ? "absent" : "present");
         yield return ("fixture: A's Em10 LAND has no VHGT (L4)", noVhgt, "");
         string where = "no throw";

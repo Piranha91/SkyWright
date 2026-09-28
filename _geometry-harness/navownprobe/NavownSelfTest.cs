@@ -32,6 +32,19 @@ static class NavownSelfTest
         t.Check("C2 control: a witness untouched in E00" + (t.Canary ? " [CANARY: expectation planted wrong]" : ""),
                 t.Canary ? !c.Refs.ContainsKey(F.C2) : c.Refs.ContainsKey(F.C2), c.Refs.ContainsKey(F.C2) ? "present" : "absent");
 
+        // ---- N3: the navmesh version history (NavVersions, as the main walk feeds it): whose winning version is a deletion.
+        // NVD and NVK are deleted by A (1), NVK with its data; NVX by X (3), in a copy holding nothing else; NVR, deleted by
+        // A, is restored by B (2) ----
+        var hist = new NavVersions();
+        foreach (var (i, mod, _) in t.Plugins())
+        {
+            var deletedHere = mod.EnumerateMajorRecords<Mutagen.Bethesda.Skyrim.INavigationMeshGetter>().Where(n => n.IsDeleted).Select(n => n.FormKey).ToHashSet();
+            foreach (var cp in UncutPopulation.Cells(mod)) hist.Note(cp, i, deletedHere, _ => 0);
+        }
+        var del = hist.DeletedAtWinner().Select(kv => $"{MovedRefSelfTest.NavName(kv.Key)}/{kv.Value}").OrderBy(x => x).ToList();
+        t.Check("N3  navmeshes whose winning version is a deletion, with or without data: NVD/1, NVK/1, NVX/3 (NVR restored by B)",
+                del.SequenceEqual(new[] { "NVD/1", "NVK/1", "NVX/3" }), string.Join(", ", del));
+
         // ---- N2: the UNCUT population ----
         var uncut = new UncutPopulation();
         foreach (var (i, mod, _) in t.Plugins())

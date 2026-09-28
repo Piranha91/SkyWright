@@ -42,6 +42,14 @@ static class BlockSelfTest
         t.Check("C2 control: untouched, in E00 at its place" + (t.Canary ? " [CANARY: expectation planted wrong]" : ""),
                 Where(F.C2) == (t.Canary ? "at 999,999 cell " + F.E00 : "at 210,100 cell " + F.E00), Where(F.C2));
 
+        // The target cells' navmeshes, under the same rule (the NAVM table): moved to E50, an interior or W2, and deleted with
+        // or without data, are gone; NVR is B's restoration; NVC is A's override.
+        t.CheckNavSet("B3  navmeshes of the target cells: moved out and deleted are gone; each at its last sighting",
+                      walk.WinNav.Select(kv => (kv.Key, (FormKey?)kv.Value.Cell, kv.Value.Nav)),
+                      new Dictionary<FormKey, (FormKey? Cell, float X)> { [F.NVR] = (F.E00, 1420), [F.NVC] = (F.E00, 1510) });
+        t.Check("B3-prov NVR's provider is the plugin of its last sighting (MrB.esp)",
+                walk.WinNav.TryGetValue(F.NVR, out var nvr) && nvr.Plugin == "MrB.esp", walk.WinNav.TryGetValue(F.NVR, out var nvr2) ? nvr2.Plugin : "absent");
+
         // The floor under the target cells (their 3x3 neighbourhoods), and the LAND of the grids inside them.
         t.CheckFloor("B2", walk.FloorRefsByWorld.GetValueOrDefault(F.W), walk.FloorLandByWorld.GetValueOrDefault(F.W),
                      MovedRefSelfTest.UnreadableLandOf(walk, F.W), new[] { (0, 0), (1, 0), (-1, 0), (2, 0), (1, 1) });

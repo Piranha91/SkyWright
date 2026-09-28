@@ -47,6 +47,27 @@ public sealed partial class MovedRefSelfTest
         return t._fail == 0 ? 0 : 1;
     }
 
+    public static string NavName(FormKey key) => MovedRefFixture.Navs.FirstOrDefault(kv => kv.Value == key).Key ?? key.ToString();
+
+    /// <summary>The navmeshes a walk holds, against the hand-derived expectation: exact keys, each once, then per key its
+    /// cell (when given) and the version it holds, named by its first vertex's X (MovedRefFixture's NAVM table). Only the
+    /// fixture's navmeshes are judged; <paramref name="got"/> may hold no other.</summary>
+    public void CheckNavSet(string name, IEnumerable<(FormKey Key, FormKey? Cell, NavmeshGeometry Nav)> got,
+                            IReadOnlyDictionary<FormKey, (FormKey? Cell, float X)> expect)
+    {
+        var g = new Dictionary<FormKey, (FormKey? Cell, NavmeshGeometry Nav)>();
+        var twice = new List<string>();
+        foreach (var (k, c, n) in got) if (!g.TryAdd(k, (c, n))) twice.Add(NavName(k));
+        float X0(NavmeshGeometry n) => n.Vertices.Count > 0 ? n.Vertices[0].X : float.NaN;
+        var missing = expect.Keys.Where(k => !g.ContainsKey(k)).Select(NavName).OrderBy(x => x).ToList();
+        var extra = g.Keys.Where(k => !expect.ContainsKey(k)).Select(k => $"{NavName(k)} x {X0(g[k].Nav):0}").OrderBy(x => x).ToList();
+        var wrong = expect.Where(kv => g.TryGetValue(kv.Key, out var v)
+                                       && ((kv.Value.Cell is { } ec && v.Cell != ec) || MathF.Abs(X0(v.Nav) - kv.Value.X) > 0.01f))
+                          .Select(kv => $"{NavName(kv.Key)} x {X0(g[kv.Key].Nav):0} cell {g[kv.Key].Cell}").OrderBy(x => x).ToList();
+        Check(name, missing.Count == 0 && extra.Count == 0 && wrong.Count == 0 && twice.Count == 0,
+              $"missing [{string.Join(", ", missing)}] extra [{string.Join(", ", extra)}] wrong [{string.Join(", ", wrong)}] twice [{string.Join(", ", twice)}]");
+    }
+
     public static string Name(FormKey key) => MovedRefFixture.Refs.FirstOrDefault(kv => kv.Value == key).Key ?? key.ToString();
 
     /// <summary>Every plugin of the fixture opened in load order, with its index.</summary>

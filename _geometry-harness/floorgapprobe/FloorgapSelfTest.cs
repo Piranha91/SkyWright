@@ -43,6 +43,15 @@ static class FloorgapSelfTest
                 wd.MergedLand is null && wd.MergedLandUnreadable is null,
                 $"{(wd.MergedLand is null ? "no heights" : $"heights {wd.MergedLand[16, 16]:0}")}; reason '{wd.MergedLandUnreadable}'");
 
+        // The merged cell's navmeshes, under the same rule (the NAVM table): NVR is B's restoration, NVC A's override; the
+        // moved (NVM, NVI, NVW) and the deleted (NVD, NVK) are gone. E11's only navmesh, NVX, X deletes in a copy holding
+        // nothing else.
+        t.CheckNavSet("G3  the merged E00's navmeshes: moved out and deleted are gone; each at its last sighting",
+                      walk.MergedNavs.Select(kv => (kv.Key, (FormKey?)null, kv.Value)),
+                      new Dictionary<FormKey, (FormKey? Cell, float X)> { [Fx.NVR] = (null, 1420), [Fx.NVC] = (null, 1510) });
+        t.CheckNavSet("G3-X the merged E11's navmesh, deleted in a copy holding only the deletion, is gone",
+                      wd.MergedNavs.Select(kv => (kv.Key, (FormKey?)null, kv.Value)), new Dictionary<FormKey, (FormKey? Cell, float X)>());
+
         // The floor neighbourhood, filed from every exterior cell.
         t.CheckFloor("G2", walk.RefsByWorld.GetValueOrDefault(Fx.W), walk.LandByWorld.GetValueOrDefault(Fx.W),
                      MovedRefSelfTest.UnreadableLandOf(walk, Fx.W), new[] { (0, 0), (1, 0), (5, 0), (-1, 0), (2, 0), (1, 1) });

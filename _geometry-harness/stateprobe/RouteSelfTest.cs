@@ -33,6 +33,18 @@ static class RouteSelfTest
         t.Check("C2 control: untouched, in E00" + (t.Canary ? " [CANARY: expectation planted wrong]" : ""),
                 Cells(F.C2) == (t.Canary ? "nowhere" : $"{F.E00}@210,100"), Cells(F.C2));
 
+        // The wanted cells' navmeshes, under the same rule (the NAVM table).
+        t.CheckNavSet("S3  the wanted cells' navmeshes: moved out and deleted are gone; each at its last sighting",
+                      walk.WinNav.SelectMany(c => c.Value.Select(n => (n.Key, (FormKey?)c.Key, n.Value))),
+                      new Dictionary<FormKey, (FormKey? Cell, float X)> { [F.NVR] = (F.E00, 1420), [F.NVC] = (F.E00, 1510) });
+        // A navmesh moved between two wanted cells stands in the later one only (E00 and E50 wanted).
+        var walk2 = new RouteWalk(new HashSet<FormKey> { F.E00, F.E50 });
+        walk2.Seed(t.Paths[0]);
+        foreach (var path in t.Paths) { var m2 = RouteWalk.Open(path)!; using (m2 as IDisposable) walk2.Plugin(m2); }
+        t.CheckNavSet("S3-M navmesh moved between two wanted cells: in E50 only, A's version",
+                      walk2.WinNav.SelectMany(c => c.Value.Select(n => (n.Key, (FormKey?)c.Key, n.Value))),
+                      new Dictionary<FormKey, (FormKey? Cell, float X)> { [F.NVM] = (F.E50, 21000), [F.NVR] = (F.E00, 1420), [F.NVC] = (F.E00, 1510) });
+
         t.CheckFloor("S2", walk.FloorRefsByWorld.GetValueOrDefault(F.W), walk.FloorLandByWorld.GetValueOrDefault(F.W),
                      MovedRefSelfTest.UnreadableLandOf(walk, F.W), new[] { (0, 0), (1, 0), (-1, 0), (2, 0), (1, 1) });
 

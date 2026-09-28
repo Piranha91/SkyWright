@@ -106,5 +106,52 @@ internal static class MovedRefSelfTestVp
         var prims = walk.Prims.Where(p => p.Value is not null).Select(p => MovedRefSelfTest.Name(p.Key)).OrderBy(x => x).ToList();
         t.Check("R2  the planes: P3 only (P1 re-based to a static, P2 moved to another worldspace)",
                 prims.SequenceEqual(new[] { "P3" }), string.Join(", ", prims));
+
+        // ---- R3: the route mode's winning navmeshes of W, under the last-sighting rule (the fixture's NAVM table): NVM stands
+        // in E50 (square 5,0); NVR is B's restoration; NVC A's override; the deleted (NVD, NVK, NVX) and the moved out of W
+        // (NVI to an interior, NVW to W2) are gone ----
+        t.CheckNavSet("R3  the route's winning navmeshes of W: moved out of W and deleted are gone; each at its last sighting",
+                      walk.NavWin.Select(kv => (kv.Key, (FormKey?)null, kv.Value.Nav)),
+                      new Dictionary<FormKey, (FormKey? Cell, float X)> { [F.NVM] = (null, 21000), [F.NVR] = (null, 1420), [F.NVC] = (null, 1510) });
+        t.Check("R3-sq NVM's square is its last sighting's (5,0)", walk.NavWin.TryGetValue(F.NVM, out var nvm) && nvm.Square == (5, 0),
+                walk.NavWin.TryGetValue(F.NVM, out var nvm2) ? $"{nvm2.Square}" : "absent");
+        // The child-worldspace footprint, with W2 standing in as the child: NVW's last sighting is there (A's).
+        var cwalk = new RouteStationMode.Walk(F.W, new[] { F.W2 }, F.P);
+        cwalk.PreRead(t.Paths[1], 1);
+        foreach (var path in t.Paths) cwalk.Plugin(path);
+        t.CheckNavSet("R3-child the child worldspace's navmeshes: NVW, moved into it, A's version",
+                      cwalk.Child.Select(kv => (kv.Key, (FormKey?)null, kv.Value)),
+                      new Dictionary<FormKey, (FormKey? Cell, float X)> { [F.NVW] = (null, 1710) });
+
+        // ---- N1: the render's navmesh selection (NavmeshSelection.Observe), target E00 with E10 as a participant, every
+        // cell of every plugin in load order as the render's walk hands them ----
+        var sel = new NavmeshSelection(F.E00, new[] { F.E10 + "=cyan" }, Array.Empty<string>());
+        var selWin = new Dictionary<FormKey, NavmeshGeometry>();
+        var selVer = new Dictionary<string, Dictionary<FormKey, NavmeshGeometry>>(StringComparer.OrdinalIgnoreCase);
+        var watched = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "MrA.esp" };
+        foreach (var (_, mod, path) in t.Plugins())
+            foreach (var cp in Cells(mod)) sel.Observe(cp, Path.GetFileName(path), watched, selWin, selVer);
+        t.CheckNavSet("N1  the render's selected navmeshes: moved out and deleted are gone; each at its last sighting",
+                      selWin.Select(kv => (kv.Key, (FormKey?)sel.Provenance[kv.Value].Cell, kv.Value)),
+                      new Dictionary<FormKey, (FormKey? Cell, float X)> { [F.NVR] = (F.E00, 1420), [F.NVC] = (F.E00, 1510) });
+        t.Check("N1-prov NVR's provenance is its last sighting's plugin (MrB.esp)",
+                selWin.TryGetValue(F.NVR, out var snvr) && sel.Provenance[snvr].Plugin == "MrB.esp",
+                selWin.TryGetValue(F.NVR, out var snvr2) ? sel.Provenance[snvr2].Plugin : "absent");
+        t.Check("N1-ver a watched plugin's navmesh deleted with its data is no version to substitute (NVK in MrA.esp)",
+                !(selVer.TryGetValue("MrA.esp", out var av) && av.ContainsKey(F.NVK)),
+                selVer.TryGetValue("MrA.esp", out var av2) ? string.Join(",", av2.Keys.Select(MovedRefSelfTest.NavName).OrderBy(x => x)) : "none");
+
+        // ---- B1: --emit-bats' per-cell navmeshes (BatEmit.WalkCells), worklist cells E00 and E11 ----
+        var ident = new Dictionary<int, BatEmit.CellIdent>();
+        var bnav = new Dictionary<int, Dictionary<FormKey, NavmeshGeometry>> { [0] = new(), [1] = new() };
+        var wantedBat = new[] { F.E00.ToString(), F.E11.ToString() };
+        foreach (var (_, mod, _) in t.Plugins()) BatEmit.WalkCells(mod, wantedBat, ident, bnav);
+        t.CheckNavSet("B1  --emit-bats E00's navmeshes: moved out and deleted are gone; each at its last sighting",
+                      bnav[0].Select(kv => (kv.Key, (FormKey?)null, kv.Value)),
+                      new Dictionary<FormKey, (FormKey? Cell, float X)> { [F.NVR] = (null, 1420), [F.NVC] = (null, 1510) });
+        t.CheckNavSet("B1-X --emit-bats E11's navmesh, deleted in a copy holding only the deletion, is gone",
+                      bnav[1].Select(kv => (kv.Key, (FormKey?)null, kv.Value)), new Dictionary<FormKey, (FormKey? Cell, float X)>());
+        t.Check("B1-ident the cells' identity comes from the master (control)", ident.TryGetValue(0, out var i0) && i0.Key == F.E00
+                && ident.TryGetValue(1, out var i1) && i1.Key == F.E11, string.Join(",", ident.Select(kv => $"{kv.Key}:{kv.Value.Key}")));
     });
 }
