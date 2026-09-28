@@ -45,6 +45,7 @@ internal sealed class NavmeshSelection
         var ver = versions.ToDictionary(x => x.Key,
             x => x.Value.ToDictionary(y => y.Key, y => Mesh(y.Value)), StringComparer.OrdinalIgnoreCase);
         foreach (var x in Provenance) selection.Provenance[Mesh(x.Key)] = x.Value;
+        foreach (var k in this.win.TakenOut) selection.win.TakenOut.Add(k);   // Substitute reads it
         return new(selection, win, ver);
     }
 
@@ -128,7 +129,10 @@ internal sealed class NavmeshSelection
         var result = new Dictionary<FormKey, NavmeshGeometry>(winners);
         foreach (var (key, plugin) in Overrides)
         {
-            if (!winners.ContainsKey(key)) throw new ArgumentException($"--nav-version {key} is outside the selected navmesh cells or unresolved.");
+            // A navmesh that stood in a selected cell and that a later plugin moved out or deleted is still a record the
+            // selection knows: an earlier plugin's version of it may be substituted ("as if that plugin won").
+            if (!winners.ContainsKey(key) && !win.TakenOut.Contains(key))
+                throw new ArgumentException($"--nav-version {key} is outside the selected navmesh cells or unresolved.");
             if (!versions.TryGetValue(plugin, out var own) || !own.TryGetValue(key, out var nav))
                 throw new ArgumentException($"--nav-version: {plugin} provides no version of {key} in the selected cells.");
             result[key] = nav;
