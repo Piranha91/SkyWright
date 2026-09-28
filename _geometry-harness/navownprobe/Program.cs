@@ -821,12 +821,17 @@ if (WinStateDump.Asked)
         deleted = deletedAtWinner.OrderBy(d => d.Key.ToString(), StringComparer.Ordinal)
                                  .Select(d => new { formKey = d.Key.ToString(), plugin = pluginKey[d.Value].FileName.String }).ToList(),
     });
+// A navmesh a Bethesda master deletes is the shipped game (the DLCs delete Skyrim.esm navmeshes they replace), not a
+// clash between mods: counted apart, never listed as a finding (2026-09-28).
+int vanillaDeleted = 0;
+bool VanillaDeletion(FormKey nav) => deletedAtWinner.TryGetValue(nav, out var d) && Vanilla.Contains(pluginKey[d].FileName.String);
 foreach (var (nav, provs) in navProviders)
 {
     int winner = deletedAtWinner.TryGetValue(nav, out var deleter) ? deleter : provs[^1];
     if (!Wanted(winner)) continue;
+    if (VanillaDeletion(nav)) { vanillaDeleted++; continue; }
     if (deletedAtWinner.ContainsKey(nav))
-        broken.Add($"   DELETED  {nav} in {Cell(navCell.GetValueOrDefault(nav))} by {pluginKey[winner].FileName}{(navVersions.Last[nav].NoGeometry ? " (no geometry left)" : "")}");
+        broken.Add($"   DELETED  {nav} in {Cell(navVersions.Last[nav].Cell)} by {pluginKey[winner].FileName}{(navVersions.Last[nav].NoGeometry ? " (no geometry left)" : "")}");
     else if (provs.Count > 1)
     {
         var w = navSize.GetValueOrDefault((nav, winner));
@@ -837,10 +842,12 @@ foreach (var (nav, provs) in navProviders)
 }
 // A navmesh no plugin ever gave geometry to, whose last record carries none: nothing to walk on either.
 foreach (var (nav, deleter) in deletedAtWinner)
-    if (!navProviders.ContainsKey(nav) && Wanted(deleter))
+    if (!navProviders.ContainsKey(nav) && Wanted(deleter) && VanillaDeletion(nav)) vanillaDeleted++;
+    else if (!navProviders.ContainsKey(nav) && Wanted(deleter))
         broken.Add($"   DELETED  {nav} in {Cell(navVersions.Last[nav].Cell)} by {pluginKey[deleter].FileName} (no version with geometry in the order)");
 Console.WriteLine($"\n==== DELETED or EMPTIED navmesh (hard break) ====");
 Console.WriteLine($"   findings: {broken.Count:N0}");
+Console.WriteLine($"   deleted by a Bethesda master (the shipped game; not findings): {vanillaDeleted:N0}");
 foreach (var b in broken.Take(listN)) Console.WriteLine(b);
 
 // ---------------------------------------------------------------------------------------
