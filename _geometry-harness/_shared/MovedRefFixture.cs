@@ -14,7 +14,7 @@ namespace HarnessShared;
 // the table below. The one shared expectation, the floor neighbourhood of grid (0,0), is a literal (ExpectedFloor00).
 //
 // Load order: MrMaster.esm, MrA.esp, MrB.esp, MrX.esp, MrL.esp. World: worldspace W (persistent cell T at grid (0,0); exteriors
-// E00 (0,0), E10 (1,0), E50 (5,0), Em10 (-1,0)); interiors I1, I2; a second worldspace W2 (persistent cell, and a cell
+// E00 (0,0), E10 (1,0), E50 (5,0), Em10 (-1,0), E20 (2,0), E11 (1,1)); interiors I1, I2; a second worldspace W2 (persistent cell, and a cell
 // at grid (0,0), so the same XY lies in two worlds). Bases: a modeled static S, a plane-marker base P (no model), NPC
 // bases N1 and N2.
 //
@@ -47,7 +47,10 @@ namespace HarnessShared;
 //   LAND  E00: master offset 0; L (last) offset 10 with its VHGT cut to 100 bytes, unreadable   L1
 //         E10: master offset 0; A's and X's E10 copies carry no LAND                       L2 (master heights stand)
 //         E50: master offset 0; A's copy no LAND; B offset 20, readable                    L3 (B's heights, 160 u)
-//         Em10: master offset 0 (a cell with nothing but its LAND); A's copy: a LAND with no VHGT   L4
+//         Em10: master offset 0 (a cell with nothing but its LAND); A's copy: a LAND whose DATA flag says it has
+//               heights (VertexNormalsHeightMap) and no VHGT: it CLAIMS heights it lacks, unreadable   L4-claimed
+//         E11 (1,1): master offset 0; A's copy: a LAND with that flag clear and no VHGT: it DECLARES no heights (the
+//               engine draws no ground there and has no terrain collision, Q5 playtest 2026-09-27)   L4-declared
 //         E20: master offset 0 and one ref (L5, at (8292,100)); B's copy carries ONLY a readable LAND, offset 20 L5
 //   L1 lives in its own last plugin, so the cut VHGT is the end of the file: the read then throws. A VHGT cut the same way
 //   in the middle of a plugin is read SILENTLY by Mutagen (measured 2026-09-27 on this fixture: heights of 5,128 and
@@ -64,7 +67,7 @@ public static class MovedRefFixture
     public static readonly FormKey W = Mk(0x830), T = Mk(0x831), E00 = Mk(0x840), E10 = Mk(0x841), E50 = Mk(0x842), Em10 = Mk(0x843);
     public static readonly FormKey I1 = Mk(0x850), I2 = Mk(0x851);
     public static readonly FormKey W2 = Mk(0x860), W2Top = Mk(0x861), W2E00 = Mk(0x862);
-    public static readonly FormKey E20 = Mk(0x844), Ltex = Mk(0x802);
+    public static readonly FormKey E20 = Mk(0x844), E11 = Mk(0x845), Ltex = Mk(0x802), Land11 = Mk(0x885);
     public static readonly FormKey Land00 = Mk(0x880), Land10 = Mk(0x881), Land50 = Mk(0x882), Landm10 = Mk(0x883), Land20 = Mk(0x884);
 
     public static readonly FormKey M1 = Mk(0x901), M2 = Mk(0x902), M3 = Mk(0x903), M4 = Mk(0x904), M5 = Mk(0x905), M6 = Mk(0x906),
@@ -109,11 +112,12 @@ public static class MovedRefFixture
     static PlacedNpc DeletedNpc(FormKey key) => new(key, Rel) { IsDeleted = true };
     static SkCell Ext(FormKey key, int x, int y) => new(key, Rel) { Flags = default, Grid = new CellGrid { Point = new P2Int(x, y) } };
     static SkCell Int(FormKey key) => new(key, Rel) { Flags = SkCell.Flag.IsInteriorCell };
-    static Landscape LandOf(FormKey key, float offset, bool withHeights = true, int alphaLayers = -1)
+    static Landscape LandOf(FormKey key, float offset, bool withHeights = true, int alphaLayers = -1, Landscape.Flag? flags = null)
     {
         var land = withHeights
             ? new Landscape(key, Rel) { VertexHeightMap = new LandscapeVertexHeightMap { Offset = offset, HeightMap = new Array2d<sbyte>(new sbyte[33, 33]) } }
             : new Landscape(key, Rel);
+        if (flags is { } fl) land.Flags = fl;
         if (alphaLayers < 0) return land;
         var b = new BaseLayer { Header = Header(0, 0) };
         b.Header.Texture.SetTo(Ltex);
@@ -201,7 +205,8 @@ public static class MovedRefFixture
         e50.Temporary.Add(Npc(NPC4, N2, 5 * 4096 + 320, 300));
         var em10 = Ext(Em10, -1, 0); em10.Landscape = LandOf(Landm10, 0f);
         var e20 = Ext(E20, 2, 0); e20.Landscape = LandOf(Land20, 0f); e20.Temporary.Add(Ref(L5, S, 2 * 4096 + 100, 100));
-        m.Worldspaces.Add(World(W, top, e00, e10, e50, em10, e20));
+        var e11 = Ext(E11, 1, 1); e11.Landscape = LandOf(Land11, 0f);
+        m.Worldspaces.Add(World(W, top, e00, e10, e50, em10, e20, e11));
         m.Worldspaces.Add(World(W2, new SkCell(W2Top, Rel) { Flags = default }, Ext(W2E00, 0, 0)));
         FileInterior(m, Int(I1)); FileInterior(m, Int(I2));
         var mPath = Save(m);
@@ -228,8 +233,9 @@ public static class MovedRefFixture
             c50.Temporary.Add(Npc(NPC4, N2, 5 * 4096 + 320, 300));    // its Deleted flag is set in the bytes after writing
             c50.Temporary.Add(Ref(U4, S, 5 * 4096 + 400, 400)); c50.Temporary.Add(Ref(U5, S, 5 * 4096 + 410, 400));
             c50.Temporary.Add(new PlacedNpc(NPC3, Rel) { Placement = new Placement { Position = new P3Float(5 * 4096 + 300, 300, 0), Rotation = new P3Float(0, 0, 0) } });   // base cleared
-            var cm10 = Ext(Em10, -1, 0); cm10.Landscape = LandOf(Landm10, 0f, withHeights: false);   // L4
-            a.Worldspaces.Add(World(W, t, c00, c10, c50, cm10));
+            var cm10 = Ext(Em10, -1, 0); cm10.Landscape = LandOf(Landm10, 0f, withHeights: false, flags: Landscape.Flag.VertexNormalsHeightMap);   // L4-claimed
+            var c11 = Ext(E11, 1, 1); c11.Landscape = LandOf(Land11, 0f, withHeights: false, flags: (Landscape.Flag)0);   // L4-declared
+            a.Worldspaces.Add(World(W, t, c00, c10, c50, cm10, c11));
             var w2c = Ext(W2E00, 0, 0);
             w2c.Temporary.Add(Ref(M4, S, 130, 100)); w2c.Temporary.Add(Ref(P2, P, 310, 300));
             a.Worldspaces.Add(World(W2, null, w2c));
@@ -332,13 +338,18 @@ public static class MovedRefFixture
     {
         using var a = SkyrimMod.CreateFromBinaryOverlay(paths[1], Rel);
         using var l = SkyrimMod.CreateFromBinaryOverlay(paths[4], Rel);
-        IPlacedGetter? d3 = null, b0 = null; bool noVhgt = false;
+        IPlacedGetter? d3 = null, b0 = null; bool noVhgt = false; string claimed = "absent", declared = "absent";
+        static string LandShape(ILandscapeGetter? l) => l is null ? "no LAND"
+            : $"VHGT {(l.VertexHeightMap is null ? "none" : "present")}, flag {((l.Flags ?? 0).HasFlag(Landscape.Flag.VertexNormalsHeightMap) ? "set" : "clear")}";
         foreach (var ws in a.Worldspaces.Records)
             foreach (var blk in ws.SubCells) foreach (var sub in blk.Items) foreach (var c in sub.Items)
             {
                 foreach (var p in c.Temporary) { if (p.FormKey == D3) d3 = p; if (p.FormKey == B0) b0 = p; }
-                if (c.FormKey == Em10) noVhgt = c.Landscape is not null && c.Landscape.VertexHeightMap is null;
+                if (c.FormKey == Em10) { noVhgt = c.Landscape is not null && c.Landscape.VertexHeightMap is null; claimed = LandShape(c.Landscape); }
+                if (c.FormKey == E11) declared = LandShape(c.Landscape);
             }
+        yield return ("fixture: A's Em10 LAND claims heights (flag set) and has no VHGT (L4-claimed)", claimed == "VHGT none, flag set", claimed);
+        yield return ("fixture: A's E11 LAND declares none (flag clear) and has no VHGT (L4-declared)", declared == "VHGT none, flag clear", declared);
         yield return ("fixture: A's D3 is deleted and keeps its placement", d3 is { IsDeleted: true, Placement: not null },
                       d3 is null ? "absent" : $"deleted {d3.IsDeleted}, placement {(d3.Placement is null ? "none" : "kept")}");
         IPlacedGetter? npc4 = null;

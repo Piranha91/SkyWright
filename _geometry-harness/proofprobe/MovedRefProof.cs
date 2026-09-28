@@ -49,6 +49,13 @@ static class MovedRefProof
         return prop is null ? (false, null) : (true, prop.GetValue(cp) as string);
     }
 
+    /// <summary>The declared-heightless flag, read by name: added by the Q5 fold, and this file compiles without it.</summary>
+    static (bool Has, bool Declares) DeclaresOf(CellPlacements cp)
+    {
+        var prop = typeof(CellPlacements).GetProperty("LandDeclaresNoHeights");
+        return prop is null ? (false, false) : (true, prop.GetValue(cp) is true);
+    }
+
     public static void Run(Action<string, bool, string> Check)
     {
         Console.WriteLine("\nPROOF — moved and deleted references: FloorFeed and the core LAND read (_shared/MovedRefFixture.cs)");
@@ -106,8 +113,19 @@ static class MovedRefProof
                   hasA && rA is null && la.Land is null, hasA ? $"reason '{rA}', land {(la.Land is null ? "null" : "decoded")}" : "no LandUnreadableReason member");
             var l4 = CellOf(a, MovedRefFixture.Em10)!;
             var (has4, r4) = ReasonOf(l4);
-            Check("moved-ref/L4  a present LAND with no VHGT: named (no trustworthy floor), no heights",
-                  has4 && r4 is not null && l4.Land is null, has4 ? $"reason '{r4}'" : "no LandUnreadableReason member");
+            var (hasD4, d4) = DeclaresOf(l4);
+            Check("moved-ref/L4-claimed  a LAND whose flag claims heights and has no VHGT: named (no trustworthy floor), no heights, not declared",
+                  has4 && r4 is not null && l4.Land is null && !d4,
+                  (has4 ? $"reason '{r4}'" : "no LandUnreadableReason member") + (hasD4 ? $", declared {d4}" : ", no LandDeclaresNoHeights member"));
+            var l4d = CellOf(a, MovedRefFixture.E11)!;
+            var (hasR4d, r4d) = ReasonOf(l4d);
+            var (hasD4d, d4d) = DeclaresOf(l4d);
+            Check("moved-ref/L4-declared  a LAND whose flag declares no heights and has no VHGT: not named, no heights, declared",
+                  hasR4d && r4d is null && l4d.Land is null && hasD4d && d4d,
+                  (hasR4d ? $"reason '{r4d}'" : "no LandUnreadableReason member") + (hasD4d ? $", declared {d4d}" : ", no LandDeclaresNoHeights member"));
+            var (hasDr, dR) = DeclaresOf(lr);
+            Check("moved-ref/L-readable-declared  a readable LAND is not declared heightless (control)", hasDr && !dR,
+                  hasDr ? $"declared {dR}" : "no LandDeclaresNoHeights member");
             var li = CellOf(a, MovedRefFixture.I2)!;
             var (hasI, rI) = ReasonOf(li);
             Check("moved-ref/L-interior  an interior: no reason", hasI && rI is null, hasI ? $"reason '{rI}'" : "no LandUnreadableReason member");
@@ -169,14 +187,19 @@ static class MovedRefProof
               wLand.TryGetValue((1, 0), out var h10) && h10[16, 16] == MovedRefFixture.MasterHeight && !Unreadable(1, 0), $"{LandAt((1, 0))}; named {Unreadable(1, 0)}");
         Check("moved-ref/F-L3  a later readable LAND: its heights",
               wLand.TryGetValue((5, 0), out var h50) && h50[16, 16] == MovedRefFixture.BHeight50 && !Unreadable(5, 0), $"{LandAt((5, 0))}; named {Unreadable(5, 0)}");
-        Check("moved-ref/F-L4  a later LAND with no VHGT: no heights, named",
+        Check("moved-ref/F-L4-claimed  a later LAND claiming heights with no VHGT: no heights, named",
               !wLand.ContainsKey((-1, 0)) && Unreadable(-1, 0), $"{LandAt((-1, 0))}; named {Unreadable(-1, 0)}");
+        Check("moved-ref/F-L4-declared  a later LAND declaring no heights removes the master's heights and is not named",
+              !wLand.ContainsKey((1, 1)) && !Unreadable(1, 1), $"{LandAt((1, 1))}; named {Unreadable(1, 1)}");
         // What every floor consumer refuses or counts on: the unreadable grids inside a cell's 3x3 (added at Gate C).
         var near00 = fv.UnreadableNear?.Invoke(MovedRefFixture.W, (0, 0)) ?? new List<string>();
         var near50 = fv.UnreadableNear?.Invoke(MovedRefFixture.W, (5, 0)) ?? new List<string> { "no UnreadableNear" };
         Check("moved-ref/F-near  the 3x3 of (0,0) names the unreadable grids (0,0) and (-1,0); the 3x3 of (5,0) names none",
               near00.Count == 2 && near00.Any(s => s.StartsWith("grid 0,0")) && near00.Any(s => s.StartsWith("grid -1,0")) && near50.Count == 0,
               $"(0,0): [{string.Join("; ", near00)}] (5,0): [{string.Join("; ", near50)}]");
+        var near21 = fv.UnreadableNear?.Invoke(MovedRefFixture.W, (2, 1)) ?? new List<string> { "no UnreadableNear" };
+        Check("moved-ref/F-near-declared  the 3x3 of (2,1), whose only heightless grid (1,1) DECLARES none, names nothing",
+              near21.Count == 0, $"(2,1): [{string.Join("; ", near21)}]");
         Check("moved-ref/F-L5  a later cell copy carrying ONLY a readable LAND: its heights",
               wLand.TryGetValue((2, 0), out var h20) && h20[16, 16] == MovedRefFixture.BHeight50 && !Unreadable(2, 0), $"{LandAt((2, 0))}; named {Unreadable(2, 0)}");
         _ = nbLand;

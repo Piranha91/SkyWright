@@ -34,7 +34,7 @@ static class RouteSelfTest
                 Cells(F.C2) == (t.Canary ? "nowhere" : $"{F.E00}@210,100"), Cells(F.C2));
 
         t.CheckFloor("S2", walk.FloorRefsByWorld.GetValueOrDefault(F.W), walk.FloorLandByWorld.GetValueOrDefault(F.W),
-                     MovedRefSelfTest.UnreadableLandOf(walk, F.W), new[] { (0, 0), (1, 0), (-1, 0), (2, 0) });
+                     MovedRefSelfTest.UnreadableLandOf(walk, F.W), new[] { (0, 0), (1, 0), (-1, 0), (2, 0), (1, 1) });
 
         t.CheckRefusesUnreadable("P1 open", p => RouteWalk.Open(p));
         t.CheckRefusesUnreadable("P1 seed", p => { walk.Seed(p); return null; });

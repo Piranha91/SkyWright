@@ -44,7 +44,7 @@ static class BlockSelfTest
 
         // The floor under the target cells (their 3x3 neighbourhoods), and the LAND of the grids inside them.
         t.CheckFloor("B2", walk.FloorRefsByWorld.GetValueOrDefault(F.W), walk.FloorLandByWorld.GetValueOrDefault(F.W),
-                     MovedRefSelfTest.UnreadableLandOf(walk, F.W), new[] { (0, 0), (1, 0), (-1, 0), (2, 0) });
+                     MovedRefSelfTest.UnreadableLandOf(walk, F.W), new[] { (0, 0), (1, 0), (-1, 0), (2, 0), (1, 1) });
 
         // A plugin that cannot be read is refused, not skipped (P1).
         t.CheckRefusesUnreadable("P1 ", p => BlockWalk.Open(p));

@@ -40,7 +40,7 @@ internal static class MovedRefSelfTestVp
                 RefWhere.Observe(cp, Path.GetFileName(path), tables, watch, new HashSet<FormKey>(), mod.ModKey);
             }
         sf.Finish();
-        t.CheckFloor("V1", sf.Refs, sf.Land, sf.Unreadable, new[] { (0, 0), (1, 0), (-1, 0), (2, 0) });
+        t.CheckFloor("V1", sf.Refs, sf.Land, sf.Unreadable, new[] { (0, 0), (1, 0), (-1, 0), (2, 0), (1, 1) });
         // The station reader refuses a floor whose neighbourhood holds an unreadable LAND (grid 0,0 by L1), and builds one
         // whose neighbourhood does not (grid 5,0: B's readable LAND).
         var unreadable = (sf.Unreadable ?? new HashSet<(int X, int Y)>()).ToDictionary(g => (g.X, g.Y), g => "fixture");
@@ -49,6 +49,8 @@ internal static class MovedRefSelfTestVp
         string Try((int, int) g) { try { reader.FieldFor(g); return "built"; } catch (ReadRefusal ex) { return "refused: " + ex.GetType().Name; } }
         t.Check("V1-refuse the station reader refuses a floor over an unreadable LAND (grid 0,0)", Try((0, 0)).StartsWith("refused"), Try((0, 0)));
         t.Check("V1-build and builds one whose neighbourhood's LAND is sound (grid 5,0; control)", Try((5, 0)) == "built", Try((5, 0)));
+        t.Check("V1-declared and builds one whose only heightless grid DECLARES no heights (grid 2,1, over the declared 1,1: no terrain there, no refusal)",
+                Try((2, 1)) == "built", Try((2, 1)));
 
         // ---- V2: NPC references by base ----
         string Under(FormKey b) => tables.NpcBase.TryGetValue(b, out var per) ? string.Join(" ", per.Keys.Select(MovedRefSelfTest.Name).OrderBy(x => x)) : "";
@@ -66,10 +68,10 @@ internal static class MovedRefSelfTestVp
         // ---- R1, R2: the route mode's worldspace pass, W with no child worldspaces, the plane base P, A as the changed plugin ----
         var walk = new RouteStationMode.Walk(F.W, Array.Empty<FormKey>(), F.P);
         walk.PreRead(t.Paths[1], 1);
-        t.Check("R precondition: the bound covers grids -1..2 around the city's content", new[] { (-1, 0), (0, 0), (1, 0), (2, 0) }.All(g => walk.Bound.Contains(g)),
+        t.Check("R precondition: the bound covers grids -1..2 and (1,1) around the city's content", new[] { (-1, 0), (0, 0), (1, 0), (2, 0), (1, 1) }.All(g => walk.Bound.Contains(g)),
                 $"{walk.Bound.Count} squares");
         foreach (var path in t.Paths) walk.Plugin(path);
-        t.CheckFloor("R1", walk.RefsByGrid, walk.LandByGrid, MovedRefSelfTest.UnreadableLandOf(walk, F.W), new[] { (0, 0), (1, 0), (-1, 0), (2, 0) });
+        t.CheckFloor("R1", walk.RefsByGrid, walk.LandByGrid, MovedRefSelfTest.UnreadableLandOf(walk, F.W), new[] { (0, 0), (1, 0), (-1, 0), (2, 0), (1, 1) });
         var prims = walk.Prims.Where(p => p.Value is not null).Select(p => MovedRefSelfTest.Name(p.Key)).OrderBy(x => x).ToList();
         t.Check("R2  the planes: P3 only (P1 re-based to a static, P2 moved to another worldspace)",
                 prims.SequenceEqual(new[] { "P3" }), string.Join(", ", prims));

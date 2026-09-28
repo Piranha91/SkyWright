@@ -38,7 +38,10 @@ public sealed partial class MovedRefSelfTest
                     Check($"{prefix} F-L3  a later readable LAND: its heights",
                           land.TryGetValue(g, out var h50) && h50[16, 16] == MovedRefFixture.BHeight50 && !IsNamed(g), $"{LandAt(g)}; {Named(g)}"); break;
                 case (-1, 0):
-                    Check($"{prefix} F-L4  a later LAND with no VHGT: no heights, named", !land.ContainsKey(g) && IsNamed(g), $"{LandAt(g)}; {Named(g)}"); break;
+                    Check($"{prefix} F-L4-claimed  a later LAND claiming heights with no VHGT: no heights, named", !land.ContainsKey(g) && IsNamed(g), $"{LandAt(g)}; {Named(g)}"); break;
+                case (1, 1):
+                    Check($"{prefix} F-L4-declared  a later LAND declaring no heights: the master's heights removed, not named",
+                          !land.ContainsKey(g) && unreadable is not null && !IsNamed(g), $"{LandAt(g)}; {Named(g)}"); break;
                 case (2, 0):
                     Check($"{prefix} F-L5  a later cell copy carrying only a readable LAND: its heights",
                           land.TryGetValue(g, out var h20) && h20[16, 16] == MovedRefFixture.BHeight50 && !IsNamed(g), $"{LandAt(g)}; {Named(g)}"); break;
