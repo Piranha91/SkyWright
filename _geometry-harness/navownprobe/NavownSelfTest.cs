@@ -22,6 +22,7 @@ static class NavownSelfTest
         t.Check("N1-D1 RefCellAnywhere: a reference deleted with no placement data has no cell", !c.RefCellAnywhere.ContainsKey(F.D1), Cell(F.D1));
         t.Check("N1-D2 RefCellAnywhere: deleted in a copy holding only the deletion: no cell", !c.RefCellAnywhere.ContainsKey(F.D2), Cell(F.D2));
         t.Check("N1-M3 RefCellAnywhere: moved to an interior, that interior", Cell(F.M3) == F.I2.ToString(), Cell(F.M3));
+        t.Check("N1-NPC4 RefCellAnywhere: a reference deleted WITH its data is placed nowhere", !c.RefCellAnywhere.ContainsKey(F.NPC4), Cell(F.NPC4));
         var npcs = c.NpcPlacedAnywhere.Select(k => k == F.N1 ? "N1" : k == F.N2 ? "N2" : k.ToString()).OrderBy(x => x).ToList();
         t.Check("N1-NPC NpcPlacedAnywhere: N2 only (N1's one reference was re-based to N2; N2's other was deleted)",
                 npcs.SequenceEqual(new[] { "N2" }), string.Join(", ", npcs));
@@ -36,7 +37,7 @@ static class NavownSelfTest
         uncut.Resolve(k => k == F.S ? "Static" : null, new HashSet<string> { "Static" }, _ => true, cellNewRefs, out _, out _);
         // A's introductions only (plugin 1): the master's own placements are introductions too, and are not this case.
         var counted = uncut.Counted.Where(x => x.Plugin == 1).Select(x => $"{MovedRefSelfTest.Name(x.Ref)}@{(x.Cell == F.E00 ? "E00" : x.Cell.ToString())}/{x.Plugin}").OrderBy(x => x).ToList();
-        t.Check("N2  UNCUT counts A's introductions still standing in E00: U3 only (U1 moved out, U2 deleted by B)",
+        t.Check("N2  UNCUT counts A's introductions still standing and still obstructing: U3 only (U1 moved out, U2 deleted by B, U4 re-based to a marker, U5 base cleared)",
                 counted.SequenceEqual(new[] { "U3@E00/1" }), string.Join(", ", counted));
     });
 }

@@ -103,6 +103,32 @@ public sealed partial class MovedRefSelfTest
         return outp;
     }
 
+    /// <summary>A plugin that OPENS but fails while a walk reads it must be refused too, naming it: <paramref name="walk"/>
+    /// runs the site's own walk over the damaged copy and must throw PluginUnreadableException carrying the file name. First
+    /// the copy is shown to open and to throw while its placements are enumerated (the precondition).</summary>
+    public void CheckRefusesMidWalk(string name, Action<string> walk)
+    {
+        var dir = Path.Combine(Root, "damaged-mid"); Directory.CreateDirectory(dir);
+        var bad = Path.Combine(dir, Path.GetFileName(Paths[1]));
+        File.WriteAllBytes(bad, MovedRefFixture.BreakFirstRefData(File.ReadAllBytes(Paths[1])));
+        string pre;
+        try
+        {
+            using var m = SkyrimMod.CreateFromBinaryOverlay(bad, MovedRefFixture.Rel);
+            try { foreach (var cp in HousecarlCore.PlacementExtract.FromMod(m)) _ = cp.Refs.Count; pre = "opens; enumerating does NOT throw"; }
+            catch (Exception ex) { pre = "opens; enumerating throws " + ex.GetType().Name; }
+        }
+        catch (Exception ex) { pre = "does not open: " + ex.GetType().Name; }
+        Check($"{name} precondition: the damaged copy opens and throws while its placements are read", pre.StartsWith("opens; enumerating throws"), pre);
+        try { walk(bad); Check($"{name} a plugin that fails mid-walk is refused, named", false, "no exception"); }
+        catch (Exception ex)
+        {
+            Check($"{name} a plugin that fails mid-walk is refused, named",
+                  ex.GetType().Name == "PluginUnreadableException" && ex.Message.Contains(Path.GetFileName(bad), StringComparison.OrdinalIgnoreCase),
+                  $"{ex.GetType().Name}: {ex.Message[..Math.Min(160, ex.Message.Length)]}");
+        }
+    }
+
     /// <summary>A plugin that cannot be read must be refused, naming it: <paramref name="open"/> must throw, and its message
     /// must carry the file name. First the damaged copy is shown to throw on a plain open (the precondition).</summary>
     public void CheckRefusesUnreadable(string name, Func<string, object?> open)

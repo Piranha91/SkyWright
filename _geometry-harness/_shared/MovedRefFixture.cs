@@ -39,6 +39,8 @@ namespace HarnessShared;
 //   NPC1  PlacedNpc N1, E00 (400,400)  A: base N2                                        E00, base N2
 //   NPC2  PlacedNpc N2, E10 (4600,400) A: deleted, no data                               gone
 //   NPC3  PlacedNpc N1, E50 (20780,300) A: same place, base cleared                      no base (N1 not placed by it)
+//   NPC4  PlacedNpc N2, E50 (20800,300) A: same place, deleted WITH data (flag set in bytes)  deleted (flag), E50
+//   U4-5  (introduced by A in E50 at (20880/20890,400), base S)  B: U4 re-based to the marker M; U5 base cleared
 //   U1-3  (introduced by A in E00 at (500..520,500), base S)  B: U1 to E50; U2 deleted, no data; U3 to E00 (600,600)
 //   Q1    persistent in T at (20530,50) (grid 5,0)   untouched                           T (control, far)
 //
@@ -58,7 +60,7 @@ public static class MovedRefFixture
         LKey = new("MrL", ModType.Plugin);
     static FormKey Mk(uint id) => new(MasterKey, id);
 
-    public static readonly FormKey S = Mk(0x801), P = Mk(0x805), N1 = Mk(0x806), N2 = Mk(0x807), Race = Mk(0x808);
+    public static readonly FormKey S = Mk(0x801), P = Mk(0x805), N1 = Mk(0x806), N2 = Mk(0x807), Race = Mk(0x808), Marker = Mk(0x809);
     public static readonly FormKey W = Mk(0x830), T = Mk(0x831), E00 = Mk(0x840), E10 = Mk(0x841), E50 = Mk(0x842), Em10 = Mk(0x843);
     public static readonly FormKey I1 = Mk(0x850), I2 = Mk(0x851);
     public static readonly FormKey W2 = Mk(0x860), W2Top = Mk(0x861), W2E00 = Mk(0x862);
@@ -67,15 +69,15 @@ public static class MovedRefFixture
 
     public static readonly FormKey M1 = Mk(0x901), M2 = Mk(0x902), M3 = Mk(0x903), M4 = Mk(0x904), M5 = Mk(0x905), M6 = Mk(0x906),
         M7 = Mk(0x90E), D1 = Mk(0x907), D2 = Mk(0x908), D3 = Mk(0x909), D4 = Mk(0x90A), B0 = Mk(0x90B), C1 = Mk(0x90C), C2 = Mk(0x90D),
-        P1 = Mk(0x910), P2 = Mk(0x911), P3 = Mk(0x912), NPC1 = Mk(0x913), NPC2 = Mk(0x914), NPC3 = Mk(0x915), Q1 = Mk(0x920), L5 = Mk(0x921);
-    public static readonly FormKey U1 = new(AKey, 0x950), U2 = new(AKey, 0x951), U3 = new(AKey, 0x952);
+        P1 = Mk(0x910), P2 = Mk(0x911), P3 = Mk(0x912), NPC1 = Mk(0x913), NPC2 = Mk(0x914), NPC3 = Mk(0x915), NPC4 = Mk(0x916), Q1 = Mk(0x920), L5 = Mk(0x921);
+    public static readonly FormKey U1 = new(AKey, 0x950), U2 = new(AKey, 0x951), U3 = new(AKey, 0x952), U4 = new(AKey, 0x953), U5 = new(AKey, 0x954);
 
     /// <summary>Every reference the fixture places, by its table id.</summary>
     public static readonly IReadOnlyDictionary<string, FormKey> Refs = new Dictionary<string, FormKey>
     {
         ["M1"] = M1, ["M2"] = M2, ["M3"] = M3, ["M4"] = M4, ["M5"] = M5, ["M6"] = M6, ["M7"] = M7,
         ["D1"] = D1, ["D2"] = D2, ["D3"] = D3, ["D4"] = D4, ["B0"] = B0, ["C1"] = C1, ["C2"] = C2,
-        ["P1"] = P1, ["P2"] = P2, ["P3"] = P3, ["NPC1"] = NPC1, ["NPC2"] = NPC2, ["NPC3"] = NPC3, ["U1"] = U1, ["U2"] = U2, ["U3"] = U3, ["Q1"] = Q1, ["L5"] = L5,
+        ["P1"] = P1, ["P2"] = P2, ["P3"] = P3, ["NPC1"] = NPC1, ["NPC2"] = NPC2, ["NPC3"] = NPC3, ["NPC4"] = NPC4, ["U1"] = U1, ["U2"] = U2, ["U3"] = U3, ["U4"] = U4, ["U5"] = U5, ["Q1"] = Q1, ["L5"] = L5,
     };
 
     /// <summary>Hand-derived: the floor candidates of worldspace W whose position lies in the 3x3 around grid (0,0)
@@ -176,6 +178,7 @@ public static class MovedRefFixture
         var m = new SkyrimMod(MasterKey, Rel);
         m.Statics.Add(new Static(S, Rel) { EditorID = "MrStatic", Model = new Model { File = "Meshes\\mr\\static.nif" } });
         m.Statics.Add(new Static(P, Rel) { EditorID = "MrPlaneMarker" });
+        m.Statics.Add(new Static(Marker, Rel) { EditorID = "MrMarker" });
         m.LandscapeTextures.Add(new LandscapeTexture(Ltex, Rel) { EditorID = "MrLtex" });
         m.Races.Add(new Race(Race, Rel) { EditorID = "MrRace", Flags = Mutagen.Bethesda.Skyrim.Race.Flag.Playable });
         m.Npcs.Add(new Npc(N1, Rel) { EditorID = "MrN1", Height = 1.0f, Race = new FormLinkNullable<IRaceGetter>(Race) });
@@ -195,6 +198,7 @@ public static class MovedRefFixture
         e10.Landscape = LandOf(Land10, 0f);
         var e50 = Ext(E50, 5, 0); e50.Landscape = LandOf(Land50, 0f);
         e50.Temporary.Add(Npc(NPC3, N1, 5 * 4096 + 300, 300));
+        e50.Temporary.Add(Npc(NPC4, N2, 5 * 4096 + 320, 300));
         var em10 = Ext(Em10, -1, 0); em10.Landscape = LandOf(Landm10, 0f);
         var e20 = Ext(E20, 2, 0); e20.Landscape = LandOf(Land20, 0f); e20.Temporary.Add(Ref(L5, S, 2 * 4096 + 100, 100));
         m.Worldspaces.Add(World(W, top, e00, e10, e50, em10, e20));
@@ -221,6 +225,8 @@ public static class MovedRefFixture
             var c50 = Ext(E50, 5, 0);
             c50.Temporary.Add(Ref(M1, S, 5 * 4096 + 200, 300)); c50.Temporary.Add(Ref(M6, S, 5 * 4096 + 210, 300));
             c50.Temporary.Add(Ref(M7, S, 700, 700));                   // filed in E50's cell, standing in grid (0,0)
+            c50.Temporary.Add(Npc(NPC4, N2, 5 * 4096 + 320, 300));    // its Deleted flag is set in the bytes after writing
+            c50.Temporary.Add(Ref(U4, S, 5 * 4096 + 400, 400)); c50.Temporary.Add(Ref(U5, S, 5 * 4096 + 410, 400));
             c50.Temporary.Add(new PlacedNpc(NPC3, Rel) { Placement = new Placement { Position = new P3Float(5 * 4096 + 300, 300, 0), Rotation = new P3Float(0, 0, 0) } });   // base cleared
             var cm10 = Ext(Em10, -1, 0); cm10.Landscape = LandOf(Landm10, 0f, withHeights: false);   // L4
             a.Worldspaces.Add(World(W, t, c00, c10, c50, cm10));
@@ -233,6 +239,7 @@ public static class MovedRefFixture
         // D3: Mutagen writes a record marked deleted WITHOUT its placement, so the flag is set in the written bytes instead,
         // leaving the placement in place: a deletion that still carries data.
         File.WriteAllBytes(aPath, SetRecordFlag(File.ReadAllBytes(aPath), "REFR", D3.ID, 0x20));
+        File.WriteAllBytes(aPath, SetRecordFlag(File.ReadAllBytes(aPath), "ACHR", NPC4.ID, 0x20));
 
         // ---- B: back in, placed again, the introductions moved or deleted, a readable LAND ----
         var b = new SkyrimMod(BKey, Rel);
@@ -243,6 +250,7 @@ public static class MovedRefFixture
             var c50 = Ext(E50, 5, 0);
             c50.Temporary.Add(Ref(D4, S, 5 * 4096 + 220, 300)); c50.Temporary.Add(Ref(U1, S, 5 * 4096 + 230, 300));
             c50.Landscape = LandOf(Land50, 20f);
+            c50.Temporary.Add(Ref(U4, Marker, 5 * 4096 + 400, 400)); c50.Temporary.Add(Ref(U5, null, 5 * 4096 + 410, 400));
             var c20 = Ext(E20, 2, 0); c20.Landscape = LandOf(Land20, 20f);   // L5: a cell copy carrying only its LAND
             b.Worldspaces.Add(World(W, null, c00, c50, c20));
         }
@@ -298,6 +306,17 @@ public static class MovedRefFixture
         throw new InvalidOperationException($"{r.Sig} has no {subSig}");
     }
 
+    /// <summary>A copy of plugin bytes whose first REFR claims a 65,535-byte DATA: the plugin OPENS, and reading its
+    /// placements throws (the recipe viewprobe's --plugin-read-selftest measured, P2-rec).</summary>
+    public static byte[] BreakFirstRefData(byte[] b)
+    {
+        var r = Records(b).First(x => x.Sig == "REFR");
+        var (so, _) = Sub(b, r, "DATA");
+        var outp = (byte[])b.Clone();
+        BitConverter.GetBytes((ushort)65535).CopyTo(outp, so + 4);
+        return outp;
+    }
+
     /// <summary>Set a record-header flag bit on one record.</summary>
     static byte[] SetRecordFlag(byte[] b, string recSig, uint idLow, uint flag)
     {
@@ -322,6 +341,12 @@ public static class MovedRefFixture
             }
         yield return ("fixture: A's D3 is deleted and keeps its placement", d3 is { IsDeleted: true, Placement: not null },
                       d3 is null ? "absent" : $"deleted {d3.IsDeleted}, placement {(d3.Placement is null ? "none" : "kept")}");
+        IPlacedGetter? npc4 = null;
+        foreach (var ws in a.Worldspaces.Records)
+            foreach (var blk in ws.SubCells) foreach (var sub in blk.Items) foreach (var c in sub.Items)
+                foreach (var p in c.Temporary) if (p.FormKey == NPC4) npc4 = p;
+        yield return ("fixture: A's NPC4 is deleted and keeps its placement", npc4 is { IsDeleted: true, Placement: not null },
+                      npc4 is null ? "absent" : $"deleted {npc4.IsDeleted}, placement {(npc4.Placement is null ? "none" : "kept")}");
         yield return ("fixture: A's B0 has no base", b0 is IPlacedObjectGetter po && po.Base.FormKeyNullable is not { IsNull: false }, b0 is null ? "absent" : "present");
         yield return ("fixture: A's Em10 LAND has no VHGT (L4)", noVhgt, "");
         string where = "no throw";

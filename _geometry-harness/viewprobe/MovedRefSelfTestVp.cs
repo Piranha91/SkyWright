@@ -53,6 +53,10 @@ internal static class MovedRefSelfTestVp
         // ---- V2: NPC references by base ----
         string Under(FormKey b) => tables.NpcBase.TryGetValue(b, out var per) ? string.Join(" ", per.Keys.Select(MovedRefSelfTest.Name).OrderBy(x => x)) : "";
         t.Check("V2  an NPC reference re-based N1 -> N2 is listed under N2 only", Under(F.N1) == "" && Under(F.N2) == "NPC1", $"N1 [{Under(F.N1)}] N2 [{Under(F.N2)}]");
+        t.Check("V2-NPC4 a watched NPC reference deleted WITH its data is in no table and is noted as deleted",
+                !tables.NpcBase.Values.Any(p => p.ContainsKey(F.NPC4)) && tables.DeletedBy.ContainsKey(F.NPC4),
+                (tables.NpcBase.Values.Any(p => p.ContainsKey(F.NPC4)) ? "listed under a base" : "in no table") + "; "
+                + (tables.DeletedBy.TryGetValue(F.NPC4, out var db4) ? $"deleted by {db4}" : "not noted as deleted"));
         t.Check("V2-NPC2 an NPC reference deleted with no data is in no table (control)", !tables.NpcBase.Values.Any(p => p.ContainsKey(F.NPC2)) && tables.DeletedBy.ContainsKey(F.NPC2),
                 tables.DeletedBy.TryGetValue(F.NPC2, out var db) ? $"deleted by {db}" : "not noted as deleted");
         t.Check("C2 control: V2's NPC1 is in E00" + (t.Canary ? " [CANARY: expectation planted wrong]" : ""),

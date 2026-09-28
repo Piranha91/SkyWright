@@ -38,5 +38,7 @@ static class RouteSelfTest
 
         t.CheckRefusesUnreadable("P1 open", p => RouteWalk.Open(p));
         t.CheckRefusesUnreadable("P1 seed", p => { walk.Seed(p); return null; });
+        t.CheckRefusesMidWalk("P1-mid walk", p => { var m = RouteWalk.Open(p)!; using (m as IDisposable) new RouteWalk(new HashSet<FormKey> { F.E00 }).Plugin(m); });
+        t.CheckRefusesMidWalk("P1-mid seed", p => new RouteWalk(new HashSet<FormKey> { F.E00 }).Seed(p));
     });
 }

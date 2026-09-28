@@ -48,5 +48,6 @@ static class BlockSelfTest
 
         // A plugin that cannot be read is refused, not skipped (P1).
         t.CheckRefusesUnreadable("P1 ", p => BlockWalk.Open(p));
+        t.CheckRefusesMidWalk("P1-mid", p => { var m = BlockWalk.Open(p)!; using (m as IDisposable) new BlockWalk(targets).Plugin(m, Path.GetFileName(p), _ => { }); });
     });
 }

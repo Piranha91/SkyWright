@@ -41,5 +41,6 @@ static class FloorgapSelfTest
                      MovedRefSelfTest.UnreadableLandOf(walk, Fx.W), new[] { (0, 0), (1, 0), (5, 0), (-1, 0), (2, 0) });
 
         t.CheckRefusesUnreadable("P1 ", p => walk.Open(p));
+        t.CheckRefusesMidWalk("P1-mid", p => { var w2 = new FloorgapWalk(true, Fx.E00.ToString()); var m = w2.Open(p)!; using (m as IDisposable) w2.Plugin(m, p, _ => { }); });
     });
 }
