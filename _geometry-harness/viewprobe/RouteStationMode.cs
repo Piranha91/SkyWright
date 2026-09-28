@@ -515,7 +515,6 @@ static class RouteStationMode
                                 Vector3? pos = p.Placement is { } pl ? new Vector3(pl.Position.X, pl.Position.Y, pl.Position.Z) : null;
                                 vl.Add((plugin, pos, p.MajorRecordFlagsRaw, ReadBase(p)));
                             }
-                            if (p.IsDeleted && Prims.ContainsKey(p.FormKey)) Prims[p.FormKey] = null;
                         }
                         foreach (var n in c.NavigationMeshes)
                         {
@@ -525,14 +524,22 @@ static class RouteStationMode
                         }
                         var cp = PlacementExtract.FromCell(c, ws.FormKey);
                         foreach (var nav in cp.Navmeshes) NavWin[nav.FormKey] = (nav, grid);
-                        foreach (var r in cp.Refs)
-                            if (r.Base is { } b && b == _plane) Prims[r.FormKey] = r.Deleted ? null : r;
                     }
                 }
             // The floor: every cell of the plugin, every worldspace and interior (LastSighting.Cells), in load order.
             var fmod = PluginRead.Open(path, -1, 0, "--stations (route) floor pass");
             using (fmod as IDisposable)
-                foreach (var fcp in LastSighting.Cells(fmod)) Floor.Observe(fcp, plugin);
+                foreach (var fcp in LastSighting.Cells(fmod))
+                {
+                    Floor.Observe(fcp, plugin);
+                    // The planes, under the last-sighting rule: a reference is a plane of this worldspace iff its last
+                    // sighting is here with the plane-marker base; a later plugin that re-bases it, moves it to another
+                    // worldspace or an interior, or deletes it takes it out.
+                    foreach (var r in fcp.Refs)
+                        if (fcp.Worldspace == _ws && r.Base is { } b && b == _plane) Prims[r.FormKey] = r.Deleted ? null : r;
+                        else Prims.Remove(r.FormKey);
+                    if (fcp.DeletedRefs is { Count: > 0 } gone) foreach (var d in gone) Prims.Remove(d.FormKey);
+                }
         }
 
         /// <summary>HOUSECARL_WINSTATE_DUMP: the floor filing and the planes after the pass, for an independent reader.</summary>

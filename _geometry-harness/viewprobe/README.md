@@ -890,9 +890,11 @@ flag someone typed, which is why neither is allowed to be silent.
   with no warning. Now a plugin that will not open, or fails while a walk reads it, stops the run
   (exit 2) naming the plugin, its place in the order and the walk; so does a profile that lists an
   active plugin no file provides, and a LAND whose heightmap the render's terrain walk cannot read
-  (naming the grid square). Not yet covered: the `--stations` floor, which takes its heights from the
-  shared floor filing through `PlacementExtract`, where an unreadable heightmap still reads as "no
-  LAND" and an earlier plugin's heights stay.
+  (naming the grid square). The `--stations` floor takes its heights from the shared floor filing
+  (`FloorFeed.FloorIndex`), where a LAND that gives no heights is named
+  (`CellPlacements.LandUnreadableReason`) and a station floor over it is refused (exit 2). A heightmap
+  Mutagen misreads WITHOUT an exception (a VHGT cut short in the middle of a plugin reads the bytes
+  that follow) is not seen there.
   A terrain texture layer that cannot be read changes paint, not ground, so it is not refused: it is
   named on the console and listed in the planes report as `terrainLayersUnreadable` (null when none).
   A conflict-file FormKey that does not parse is named and counted. `viewprobe --plugin-read-selftest`
@@ -2478,12 +2480,19 @@ worldspace; one run samples one worldspace.
   worldspace, at the plugin's own position; for an override, the previous plugin's position too
   when the plugin moved it by more than 1 u, or when its version sets the initially-disabled
   (0x0800) or deleted (0x0020) header flag. Plan points; markers are kept, and the count whose base
-  has no model is published.
+  has no model is published. **Known limit:** the versions are read from this worldspace's cells
+  only, so when an earlier plugin had moved the record to another worldspace or an interior, "the
+  previous plugin's position" is the latest one still in this worldspace, not that plugin's.
 - **Loading (one graph per worldspace).** The area squares are the 4,096 u squares any disc of
   2,048 u around an X_W point touches, plus the squares holding the plugin's own navmesh
   triangles; the loaded set is the winning navmeshes filed in those squares plus a one-square ring.
   The renderer's walk is one-cell shaped, so the mode runs its own pass over the worldspace's cells
   after it, reading the plugin's placed records raw (a deleted version with no position is kept).
+  The floor and the occlusion planes of that pass follow each reference's last sighting over every
+  cell of every plugin (`_shared/LastSighting.cs`, `FloorFeed.FloorIndex`): a reference a later
+  plugin moves out of the bound, to another worldspace or an interior, re-bases or deletes is not
+  kept at its earlier place, and a station floor over a grid whose last LAND gives no heights is
+  refused (exit 2) rather than read from an earlier plugin's heights.
   Cross-cell links are traversed inside the loaded set; `ExternalLinks` counts only links that
   leave it.
 - **Walkable.** A triangle is a node when it is not deleted (0x08) and its vertices are in range

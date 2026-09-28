@@ -70,6 +70,9 @@ internal static class RefWhere
             foreach (var r in cp.Refs)
             {
                 if (r.RecordType != "PlacedNpc") continue;
+                // The last sighting decides the base too: a later override that re-bases the reference takes it out of
+                // every other base's entry.
+                foreach (var (b, per) in t.NpcBase) if (r.Base is not { } rb || b != rb) per.Remove(r.FormKey);
                 if (shotNpcWatch.Contains(r.FormKey))
                     t.NpcRef[r.FormKey] = (cp.Cell, cp.CellEditorId, r);         // later plugin wins
                 if (r.Base is { } nb && shotNpcWatch.Contains(nb))
