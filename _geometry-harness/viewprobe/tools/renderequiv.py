@@ -75,6 +75,10 @@ RUNNER_EXIT = re.compile(r"^\(exit (-?\d+), \d+(?:[.,]\d+)?s\)$")
 
 # Fields in the planes report that hold a path this run chose. Read from the report writer at fork
 # d31445ae: Program.cs:4031 (image), :4041 (sceneDepth), :3969 (planes[].candidates[].visibilityMask).
+# Schema v2 (PlanesReportCandidates.cs) keeps all three names: visibilityMask moved from the full
+# candidate row into the per-plane overlay, still at planes[].candidates[]. The comparison is by
+# line, so a v2 body and a v2 overlay are both compared; a v1 report and a v2 report of one view
+# are different bytes and compare DIFFERENT, which is right - they are different writers.
 # The digests beside them - sceneDepthSha256, isolatedDepthSha256, assetSha256, inputSha256 - are
 # content, not paths, and stay in the comparison.
 ABSOLUTE_PATH_FIELDS = ("image", "sceneDepth", "visibilityMask")
@@ -296,7 +300,7 @@ def compare(a_dir, b_dir, a_console=None, b_console=None, a_exit=None, b_exit=No
 
 # --------------------------------------------------------------------------- self-test
 
-def _synthetic(tmp, colour, report_image_path, extra=None, report=True, second_frame=None):
+def _synthetic(tmp, colour, report_image_path, extra=None, report=True, second_frame=None, v2=False):
     from PIL import Image
     os.makedirs(tmp, exist_ok=True)
     Image.new("RGBA", (16, 16), colour).save(os.path.join(tmp, "shot-fp.png"))
@@ -308,6 +312,11 @@ def _synthetic(tmp, colour, report_image_path, extra=None, report=True, second_f
                "planes": [{"candidates": [{"visibilityMask": report_image_path + ".mask",
                                            "assetSha256": "def"}]}],
                "filler": [{"k": i} for i in range(80)]}
+        if v2:
+            doc["schema"] = "occlusion-view-research-v2"
+            doc["candidateBodies"] = [{"id": 0, "subject": "000B01:Mod.esp", "assetSha256": "def"}]
+            doc["planes"] = [{"candidates": [{"candidate": 0, "relation": "Inside",
+                                              "visibilityMask": report_image_path + ".mask"}]}]
         if extra:
             doc.update(extra)
         with open(os.path.join(tmp, "shot-planes.json"), "w", encoding="utf-8") as f:
@@ -439,6 +448,24 @@ def selftest(tmp_root):
     r12 = compare(cq, cs, con, con_b, 0, 0, waive=W)
     check("RED: ...and a different value BESIDE a quoted path is still a difference",
           r12["parts"]["reports"]["status"] == DIFFERENT)
+
+    # --- schema v2: a body written once, an overlay per plane. Both halves must stay compared ----
+    v2a = _synthetic(os.path.join(tmp_root, "v2-a"), (10, 20, 30, 255), r"C:\a\b-fp.png", v2=True)
+    v2b = _synthetic(os.path.join(tmp_root, "v2-b"), (10, 20, 30, 255), r"D:\other\b-fp.png", v2=True)
+    gv2 = compare(v2a, v2b, con, con_b, 0, 0, waive=W)
+    check("V1 GREEN: two v2 runs of one command into different folders compare equal", gv2["equal"],
+          json.dumps({k: v["status"] for k, v in gv2["parts"].items()}))
+    v2body = _synthetic(os.path.join(tmp_root, "v2-body"), (10, 20, 30, 255), r"D:\other\b-fp.png", v2=True,
+                        extra={"candidateBodies": [{"id": 0, "subject": "000B01:Mod.esp", "assetSha256": "CHANGED"}]})
+    check("V2 RED: a changed v2 candidate BODY is caught",
+          compare(v2a, v2body, con, con_b, 0, 0, waive=W)["parts"]["reports"]["status"] == DIFFERENT)
+    v2ov = _synthetic(os.path.join(tmp_root, "v2-overlay"), (10, 20, 30, 255), r"D:\other\b-fp.png", v2=True,
+                      extra={"planes": [{"candidates": [{"candidate": 0, "relation": "Outside",
+                                                         "visibilityMask": r"D:\other\b-fp.png.mask"}]}]})
+    check("V3 RED: a changed v2 per-plane OVERLAY is caught",
+          compare(v2a, v2ov, con, con_b, 0, 0, waive=W)["parts"]["reports"]["status"] == DIFFERENT)
+    check("V4: a v1 report and a v2 report of one view are different writers, never 'equal'",
+          compare(a, v2b, con, con_b, 0, 0, waive=W)["parts"]["reports"]["status"] == DIFFERENT)
 
     # --- the Runner's log header (scripts/runlog.py writes "$ argv" then "(exit N, T.Ts)") ----------
     # Two identical renders logged by the Runner differ only in how long they took. The duration is
