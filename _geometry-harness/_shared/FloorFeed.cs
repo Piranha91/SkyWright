@@ -92,8 +92,10 @@ internal static class FloorFeed
     /// once, in Build, against the run's population.
     ///
     /// LAND: the last LAND record at a grid wins. A later cell copy with no LAND leaves the earlier heights; a later LAND
-    /// that gives no heights (CellPlacements.LandUnreadableReason) removes them and names the grid in UnreadableLandWhy,
-    /// which a caller refuses or counts on; a later readable LAND clears the name.
+    /// that says it has heights and gives none (CellPlacements.LandUnreadableReason) removes them and names the grid in
+    /// UnreadableLandWhy, which a caller refuses or counts on; a later LAND that DECLARES no heights
+    /// (CellPlacements.LandDeclaresNoHeights: the engine draws no ground there and has no terrain collision) removes them
+    /// and clears any name, so the grid reads as having no terrain; a later readable LAND takes the grid and clears the name.
     ///
     /// RefsByWorld and LandByWorld are the maps Neighbourhood reads, kept current as cells are observed.
     /// </summary>
@@ -142,6 +144,11 @@ internal static class FloorFeed
             {
                 LandOf(cp.Worldspace).Remove(cg);
                 UnreadableLandWhy[(cp.Worldspace, cg.X, cg.Y)] = why + (plugin is null ? "" : $" ({plugin})");
+            }
+            else if (cp.LandDeclaresNoHeights)
+            {
+                LandOf(cp.Worldspace).Remove(cg);
+                UnreadableLandWhy.Remove((cp.Worldspace, cg.X, cg.Y));
             }
             else if (cp.Land is { } land)
             {

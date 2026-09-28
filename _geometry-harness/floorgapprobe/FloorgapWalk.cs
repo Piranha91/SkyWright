@@ -21,7 +21,8 @@ sealed class FloorgapWalk
     // reference is held iff its last sighting stands in the wanted cell, so a later plugin that moves it out or deletes it
     // takes it out. Navmeshes by FormKey, a later plugin replacing an earlier one; the meta from the first plugin that
     // carries the cell; the LAND from the last that has one, and a last LAND that gives no heights is named
-    // (MergedLandUnreadable), not replaced by an earlier one. A navmesh a later plugin DELETES outright is not removed here
+    // (MergedLandUnreadable), not replaced by an earlier one; a last LAND that declares no heights leaves none (no terrain
+    // there) and no name. A navmesh a later plugin DELETES outright is not removed here
     // (blockprobe's walk has the same simplification; a follow-up).
     public CellPlacements? MergedMeta;
     public float[,]? MergedLand;
@@ -60,6 +61,7 @@ sealed class FloorgapWalk
             WantKey ??= cp.Cell;
             MergedMeta ??= cp;
             if (cp.LandUnreadableReason is { } why) { MergedLand = null; MergedLandUnreadable = $"{why} ({Path.GetFileName(path)})"; }
+            else if (cp.LandDeclaresNoHeights) { MergedLand = null; MergedLandUnreadable = null; }   // no terrain here (FloorIndex)
             else if (cp.Land is not null) { MergedLand = cp.Land; MergedLandUnreadable = null; }
             foreach (var nv in cp.Navmeshes) MergedNavs[nv.FormKey] = nv;
             PluginsWithCell.Add(Path.GetFileName(path));
