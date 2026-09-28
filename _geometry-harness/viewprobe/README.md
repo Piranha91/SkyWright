@@ -2092,7 +2092,8 @@ zero-based `id` equal to its index, in the order `v1` listed its rows. Every pla
 keeps that order, and entry N is an overlay for body N: `{ "candidate": N }` plus the only five values
 that can differ by plane — `relation`, `predictedCulled`, `visibility`, `visibilityMask` and
 `isolatedDepthSha256`. A reference with no source shapes has a sparse body (`subject`, `mesh`,
-`assetSha256`, `status: "unassessed"`, `reason`) and an overlay that is only its `candidate`. To get a
+`assetSha256`, `status: "unassessed"`, `reason`) and an overlay that is only its `candidate`. A view with
+no planes writes an empty `candidateBodies`, as `v1` wrote no rows for it. To get a
 `v1` row back, take the body without `id` and add the overlay without `candidate`; the result equals
 the `v1` row key for key, null for null. A reader dispatches on `schema`: it accepts exactly
 `occlusion-view-research-v1` and `-v2`, refuses anything else, and refuses a non-contiguous or

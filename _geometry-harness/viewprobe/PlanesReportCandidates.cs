@@ -27,10 +27,13 @@ static class PlanesReportCandidates
     /// <summary>The values that can differ by plane. Nothing else may sit in an overlay.</summary>
     public static readonly string[] PlaneKeys = { "relation", "predictedCulled", "visibility", "visibilityMask", "isolatedDepthSha256" };
 
-    /// <summary>Each candidate body once, with its report-local id, in v1 row order.</summary>
+    /// <summary>Each candidate body once, with its report-local id, in v1 row order; none when the view has no planes.</summary>
     public static List<object> Bodies(IReadOnlyList<RefOcclusion> refs, int planeCount)
     {
         var bodies = new List<object>();
+        // No plane, no overlay to reference a body - and v1 wrote no rows. A plane-less view's
+        // report stays as small as it was rather than gaining every scene shape.
+        if (planeCount == 0) return bodies;
         foreach (var r in refs)
         {
             if (r.Parts.Count == 0)
