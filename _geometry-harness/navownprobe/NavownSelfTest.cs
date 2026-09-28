@@ -34,7 +34,8 @@ static class NavownSelfTest
             foreach (var cp in UncutPopulation.Cells(mod)) uncut.Note(cp, i, mod.ModKey);
         var cellNewRefs = new Dictionary<(FormKey Cell, int Plugin), List<FormKey>>();
         uncut.Resolve(k => k == F.S ? "Static" : null, new HashSet<string> { "Static" }, _ => true, cellNewRefs, out _, out _);
-        var counted = uncut.Counted.Select(x => $"{MovedRefSelfTest.Name(x.Ref)}@{(x.Cell == F.E00 ? "E00" : x.Cell.ToString())}/{x.Plugin}").OrderBy(x => x).ToList();
+        // A's introductions only (plugin 1): the master's own placements are introductions too, and are not this case.
+        var counted = uncut.Counted.Where(x => x.Plugin == 1).Select(x => $"{MovedRefSelfTest.Name(x.Ref)}@{(x.Cell == F.E00 ? "E00" : x.Cell.ToString())}/{x.Plugin}").OrderBy(x => x).ToList();
         t.Check("N2  UNCUT counts A's introductions still standing in E00: U3 only (U1 moved out, U2 deleted by B)",
                 counted.SequenceEqual(new[] { "U3@E00/1" }), string.Join(", ", counted));
     });
