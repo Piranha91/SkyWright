@@ -2103,6 +2103,11 @@ factoring to the `v1` rows on a fabricated two-plane scene, including the sparse
 real `unassessed: ` relation, and checks each of those refusals. `v1` reports stay readable; new
 reports are `v2` only.
 
+**Consumer migration status:** `tools/planes_report_rows.py` currently provides an explicit
+v1-only schema guard for the Python campaign readers. It refuses a v2 report before those readers
+can treat its overlays as complete rows. The guard will become a dual-version materialiser before
+the v2 writer is deployed; the reader contract above is the required final behavior.
+
 **The report is serialised straight to the file.** A busy exterior view's report runs to hundreds of
 megabytes — how many depends entirely on the load order and the view, since the report lists every
 source shape of every scene reference, and under `v1` repeated it under every plane — and it used to be built as one string and
