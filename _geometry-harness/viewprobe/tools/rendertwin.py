@@ -914,6 +914,56 @@ def selftest(tmp):
     check("...while one sentence printed with different counts is one kind",
           kind_of(state250) == kind_of(state251))
 
+    # The worklist's own spelling. viewprobe reads property names case-insensitively
+    # (_shared/Worklist.cs, PropertyNameCaseInsensitive), so a camelCase file renders; this tool must
+    # read the same file the same way, or refuse it BY NAME - never 0 shots and a crash later.
+    def wl_outcome(name, doc):
+        p = os.path.join(tmp, "wl-" + name + ".json")
+        with open(p, "w", encoding="utf-8") as f:
+            json.dump(doc, f)
+        try:
+            w = load_worklist(p)
+            return "read", w, [lb for _p, _c, _s, lb in shot_index(w)]
+        except Exception as e:  # noqa: BLE001 - the outcome under test is "refused, and why"
+            return "refused", None, "%s: %s" % (type(e).__name__, e)
+
+    three = [{"label": "one"}, {"label": "two"}, {"label": "three"}]
+    kind, wcamel, got_c = wl_outcome("camel", {"label": "x", "cells": [{"cell": "A", "shots": three}]})
+    check("W1 RED: a camelCase worklist (cells/shots/label) is read: 3 shots, labels in order",
+          kind == "read" and got_c == ["one", "two", "three"], json.dumps(got_c))
+    kind_p, _w, got_p = wl_outcome("pascal", {"Label": "x", "Cells": [{"Cell": "A", "Shots": [
+        {"Label": "one"}, {"Label": "two"}, {"Label": "three"}]}]})
+    check("W2 control: the PascalCase worklist reads the same 3 shots",
+          kind_p == "read" and got_p == ["one", "two", "three"], json.dumps(got_p))
+    try:
+        one = one_shot_worklist(wcamel, 0, 1)
+        one_ok = [s.get("Label") or s.get("label") for c in one["Cells"] for s in c["Shots"]] == ["two"]
+        one_d = json.dumps(one)[:120]
+    except Exception as e:  # noqa: BLE001
+        one_ok, one_d = False, "%s: %s" % (type(e).__name__, e)
+    check("W3 RED: the one-shot twin cut from a camelCase worklist holds that one shot", one_ok, one_d)
+    try:
+        shc, orderc = shuffle_worklist(wcamel, 7)
+        sh_ok = orderc is not None and sorted(
+            s.get("Label") or s.get("label") for c in shc["Cells"] for s in c["Shots"]) == ["one", "three", "two"]
+        sh_d = json.dumps(orderc)
+    except Exception as e:  # noqa: BLE001
+        sh_ok, sh_d = False, "%s: %s" % (type(e).__name__, e)
+    check("W4 RED: a camelCase worklist shuffles with every shot kept", sh_ok, sh_d)
+    kind_n, _w, why_n = wl_outcome("neither", {"label": "x", "scenes": [{"cell": "A", "shots": three}]})
+    check("W5 RED: a worklist with no cells list in any spelling is refused, naming 'Cells'",
+          kind_n == "refused" and "Cells" in why_n, str(why_n))
+    kind_s, _w, why_s = wl_outcome("noshots", {"cells": [{"cell": "A", "views": three}]})
+    check("W6 RED: a cell with no shots list in any spelling is refused, naming 'Shots' and the cell",
+          kind_s == "refused" and "Shots" in why_s and "A" in why_s, str(why_s))
+    kind_b, _w, why_b = wl_outcome("both", {"Cells": [{"Cell": "A", "Shots": three}],
+                                            "cells": [{"cell": "B", "shots": three}]})
+    check("W7 RED: a worklist spelling one key two ways is refused as ambiguous, naming both",
+          kind_b == "refused" and "Cells" in why_b and "cells" in why_b, str(why_b))
+    kind_z, _w, why_z = wl_outcome("zero", {"cells": [{"cell": "A", "shots": []}]})
+    check("W8 RED: a worklist with 0 shots is refused by name, never run",
+          kind_z == "refused" and "0 shots" in why_z, str(why_z))
+
     src = os.path.abspath(os.path.join(HERE, "..", "..", "_shared", "Worklist.cs"))
     got = shot_rows_from_source(src) if os.path.isfile(src) else None
     check("the shot record's properties are read from the C# source",

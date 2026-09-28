@@ -430,6 +430,28 @@ def selftest(tmp_root):
     check("RED: ...and a different value BESIDE a quoted path is still a difference",
           r12["parts"]["reports"]["status"] == DIFFERENT)
 
+    # --- the Runner's log header (scripts/runlog.py writes "$ argv" then "(exit N, T.Ts)") ----------
+    # Two identical renders logged by the Runner differ only in how long they took. The duration is
+    # not the answer; the exit code IS, and so is a stop trailer, so both stay compared.
+    runner = lambda code, secs, body: "$ C:\\bin\\viewprobe.exe C:\\w\\l.json\n(exit %s, %s)\n\n%s" % (
+        code, secs, body)
+    rt = compare(a, b, runner(0, "39.2s", con), runner(0, "38.1s", con_b), 0, 0, waive=W)
+    check("E1 RED: two Runner logs of one answer, differing only in the elapsed time, compare equal",
+          rt["equal"] and rt["parts"]["console"]["status"] == EQUAL,
+          json.dumps(rt["parts"]["console"])[:160])
+    rt2 = compare(a, b, runner(0, "39.2s", con), runner(3, "39.2s", con_b), 0, 0, waive=W)
+    check("E2: ...but a different exit code in that line is still a console difference",
+          rt2["parts"]["console"]["status"] == DIFFERENT)
+    rt3 = compare(a, b, runner(0, "39.2s", con + "   (1,732 shapes)\n"),
+                  runner(0, "38.1s", con_b + "   (1,731 shapes)\n"), 0, 0, waive=W)
+    check("E3: ...and a real difference in the body of two Runner logs is still reported",
+          rt3["parts"]["console"]["status"] == DIFFERENT and not rt3["equal"])
+    stop = ("$ C:\\bin\\viewprobe.exe C:\\w\\l.json\n(stopped at the deadline after 39.2s: launched "
+            "process tree terminated and confirmed gone (x); no completion)\n\n" + con_b)
+    rt4 = compare(a, b, runner(0, "39.2s", con), stop, 0, 0, waive=W)
+    check("E4: ...and a run the Runner STOPPED is not the same as one that exited",
+          rt4["parts"]["console"]["status"] == DIFFERENT)
+
     print("SELFTEST PASS" if not fails else "SELFTEST FAIL: " + ", ".join(fails))
     return 1 if fails else 0
 
