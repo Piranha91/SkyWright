@@ -15,6 +15,8 @@ using Mutagen.Bethesda.Skyrim;
 // MR_CANARY=1 plants one wrong expectation (C1's position, a passing control), which must fail. MR_FIXTURE_KEEP=<dir> keeps the plugins.
 static class MovedRefProof
 {
+    static string MovedRefSelfTestName(FormKey k) => MovedRefFixture.Navs.FirstOrDefault(kv => kv.Value == k).Key ?? k.ToString();
+
     const SkyrimRelease Rel = MovedRefFixture.Rel;
 
     sealed record FloorView(
@@ -129,6 +131,25 @@ static class MovedRefProof
             var li = CellOf(a, MovedRefFixture.I2)!;
             var (hasI, rI) = ReasonOf(li);
             Check("moved-ref/L-interior  an interior: no reason", hasI && rI is null, hasI ? $"reason '{rI}'" : "no LandUnreadableReason member");
+        }
+
+        // ---- core: navmesh records without geometry, and deleted ones that kept it (2026-09-28) ----
+        {
+            using var modX = SkyrimMod.CreateFromBinaryOverlay(paths[3], Rel);
+            var withDel = PlacementExtract.FromMod(modX, includeDeletions: true).FirstOrDefault(c => c.Cell == MovedRefFixture.E11);
+            var plain = PlacementExtract.FromMod(modX).FirstOrDefault(c => c.Cell == MovedRefFixture.E11);
+            string Dn(CellPlacements? c) => c is null ? "cell not returned"
+                : string.Join(",", (c.DeletedNavmeshes ?? Array.Empty<DeletedNavmesh>()).Select(d => $"{MovedRefSelfTestName(d.FormKey)}{(d.FlaggedDeleted ? "(flagged)" : "")}"));
+            Check("moved-ref/NV-X  a cell copy holding only a navmesh deletion: returned under includeDeletions, the deletion named and flagged",
+                  withDel?.DeletedNavmeshes is { Count: 1 } dx && dx[0].FormKey == MovedRefFixture.NVX && dx[0].FlaggedDeleted && withDel.Navmeshes.Count == 0, Dn(withDel));
+            Check("moved-ref/NV-X-default  and not returned without includeDeletions (a caller that does not ask sees the cells it saw)", plain is null, Dn(plain));
+            var a00 = CellOf(paths[1], MovedRefFixture.E00)!;
+            var dnA = (a00.DeletedNavmeshes ?? Array.Empty<DeletedNavmesh>()).Where(d => d.FlaggedDeleted).Select(d => MovedRefSelfTestName(d.FormKey)).OrderBy(x => x).ToList();
+            Check("moved-ref/NV-D  A's E00: NVD and NVR, deleted with no geometry, are named and flagged, and are not in Navmeshes",
+                  dnA.SequenceEqual(new[] { "NVD", "NVR" }) && !a00.Navmeshes.Any(n => n.FormKey == MovedRefFixture.NVD || n.FormKey == MovedRefFixture.NVR), Dn(a00));
+            string K(FormKey k) => a00.Navmeshes.FirstOrDefault(n => n.FormKey == k) is { } n ? $"deleted {n.Deleted}" : "absent";
+            Check("moved-ref/NV-K  A's NVK kept its geometry and is marked deleted; A's NVC is not (control)",
+                  K(MovedRefFixture.NVK) == "deleted True" && K(MovedRefFixture.NVC) == "deleted False", $"NVK {K(MovedRefFixture.NVK)}, NVC {K(MovedRefFixture.NVC)}");
         }
 
         // ---- FloorFeed ----

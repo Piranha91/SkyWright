@@ -123,6 +123,15 @@ internal static class MovedRefSelfTestVp
                       cwalk.Child.Select(kv => (kv.Key, (FormKey?)null, kv.Value)),
                       new Dictionary<FormKey, (FormKey? Cell, float X)> { [F.NVW] = (null, 1710) });
 
+        // The child footprint's removals: W as the child of W2. W's navmeshes by their last sighting: NVW, moved out of W into
+        // W2, is gone; NVD, NVK and NVX, deleted, are gone; NVI moved to an interior is gone.
+        var cwalk2 = new RouteStationMode.Walk(F.W2, new[] { F.W }, F.P);
+        cwalk2.PreRead(t.Paths[1], 1);
+        foreach (var path in t.Paths) cwalk2.Plugin(path);
+        t.CheckNavSet("R3-child2 the child worldspace's navmeshes: moved out of it and deleted are gone",
+                      cwalk2.Child.Select(kv => (kv.Key, (FormKey?)null, kv.Value)),
+                      new Dictionary<FormKey, (FormKey? Cell, float X)> { [F.NVM] = (null, 21000), [F.NVR] = (null, 1420), [F.NVC] = (null, 1510) });
+
         // ---- N1: the render's navmesh selection (NavmeshSelection.Observe), target E00 with E10 as a participant, every
         // cell of every plugin in load order as the render's walk hands them ----
         var sel = new NavmeshSelection(F.E00, new[] { F.E10 + "=cyan" }, Array.Empty<string>());
