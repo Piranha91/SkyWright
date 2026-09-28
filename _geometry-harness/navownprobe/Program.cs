@@ -32,7 +32,15 @@ using HousecarlCore.Progress;
 //
 // usage: navownprobe [--list N] [--plugin Name.esp] [--emit out.json] [--base emit.json] [--enable X.esp]
 //                    [--disable X.esp] [--order FILE] [--door-idx] [--reach-candidates] [--reach-json out.json]
-//                    [--reach-top N] [--reach-witness] [--flags]
+//                    [--reach-top N] [--reach-witness] [--flags] [--list-master-deletions]
+//
+//   An argument not listed here is refused by name, exit 2, before anything is read (NavownArgs.cs).
+//
+//   --list-master-deletions  also LIST the navmeshes a Bethesda master deletes (the DLCs delete Skyrim.esm navmeshes
+//                    they replace). By default they are only counted, on the line "deleted by a Bethesda master (the
+//                    shipped game; not findings)": the shipped game, not a clash between mods. With the flag they are
+//                    listed after the findings, each line labelled a shipped-game deletion; the findings, the count and
+//                    the emit are unchanged, and a mod's deletion is a finding either way. See README.md.
 //
 //   --order FILE     evaluate a CANDIDATE configuration (a CandidateFile: the loaded plugins in order and, optionally,
 //                    the mod folders in asset priority) instead of the profile's own. Mutually exclusive with
@@ -66,17 +74,12 @@ using var __run = RunLog.BeginProcess("navownprobe", args);
 // Known answers for which version of a moved or deleted reference this probe's walk keeps (_shared/MovedRefFixture.cs).
 if (args.Length >= 1 && args[0] == "--moved-ref-selftest") return NavownSelfTest.Run();
 
-string Instance = HarnessTarget.Instance;
-string GamePath = HarnessTarget.Game;
-string profileName = HarnessTarget.Profile;
-{
-    for (int i = 0; i < args.Length; i++)
-    {
-        if (args[i] == "--instance" && i + 1 < args.Length) Instance = args[i + 1];
-        else if (args[i] == "--game" && i + 1 < args.Length) GamePath = args[i + 1];
-        else if (args[i] == "--profile" && i + 1 < args.Length) profileName = args[i + 1];
-    }
-}
+// The command line (NavownArgs.cs): an argument it does not know is refused by name, before anything is read.
+var cli = NavownArgs.Parse(args);
+if (cli.Error is not null) { Console.Error.WriteLine(cli.Error); return 2; }
+string Instance = cli.Instance ?? HarnessTarget.Instance;
+string GamePath = cli.Game ?? HarnessTarget.Game;
+string profileName = cli.Profile ?? HarnessTarget.Profile;
 Instance = HarnessTarget.Require(Instance, "MO2 instance directory", "instance", "--instance");
 GamePath = HarnessTarget.Require(GamePath, "game directory", "game", "--game");
 profileName = HarnessTarget.Require(profileName, "MO2 profile name", "profile", "--profile");
@@ -85,36 +88,19 @@ string modsDir = Path.Combine(Instance, "mods");
 string overwriteDir = Path.Combine(Instance, "overwrite");
 string dataDir = Path.Combine(GamePath, "Data");
 
-bool reportDoorIdx = false;   // DOOR-IDX is retired; --door-idx brings it back
-bool reachCandidates = false;
-bool reachWitness = false;
-string? reachJsonPath = null;
-int reachTopN = 20;           // survivors exported per record per direction in --reach-json
-bool flagsOnly = false; string? stateSpec = null;
-int listN = 25;
-string? onlyPlugin = null;
-string? emitPath = null;
-string? basePath = null;
-string? orderFile = null;
-var enablePlugins = new List<string>();
-var disablePlugins = new List<string>();
-for (int i = 0; i < args.Length; i++)
-{
-    if (args[i] == "--flags") { flagsOnly = true; continue; }
-    if (args[i] == "--order" && i + 1 < args.Length) { orderFile = args[++i]; continue; }
-    if (args[i] == "--state" && i + 1 < args.Length) { stateSpec = args[++i]; continue; }
-    if (args[i] == "--list" && i + 1 < args.Length) listN = int.Parse(args[++i]);
-    else if (args[i] == "--plugin" && i + 1 < args.Length) onlyPlugin = args[++i];
-    else if (args[i] == "--emit" && i + 1 < args.Length) emitPath = args[++i];
-    else if (args[i] == "--base" && i + 1 < args.Length) basePath = args[++i];
-    else if (args[i] == "--enable" && i + 1 < args.Length) enablePlugins.Add(args[++i]);
-    else if (args[i] == "--disable" && i + 1 < args.Length) disablePlugins.Add(args[++i]);
-    else if (args[i] == "--door-idx") reportDoorIdx = true;
-    else if (args[i] == "--reach-candidates") reachCandidates = true;
-    else if (args[i] == "--reach-json" && i + 1 < args.Length) { reachCandidates = true; reachJsonPath = args[++i]; }
-    else if (args[i] == "--reach-top" && i + 1 < args.Length) reachTopN = int.Parse(args[++i]);
-    else if (args[i] == "--reach-witness") { reachCandidates = true; reachWitness = true; }
-}
+bool reportDoorIdx = cli.DoorIdx;
+bool reachCandidates = cli.ReachCandidates;
+bool reachWitness = cli.ReachWitness;
+string? reachJsonPath = cli.ReachJsonPath;
+int reachTopN = cli.ReachTopN;
+bool flagsOnly = cli.FlagsOnly; string? stateSpec = cli.StateSpec;
+int listN = cli.ListN;
+string? onlyPlugin = cli.OnlyPlugin;
+string? emitPath = cli.EmitPath;
+string? basePath = cli.BasePath;
+string? orderFile = cli.OrderFile;
+var enablePlugins = cli.Enable;
+var disablePlugins = cli.Disable;
 PopulationMode popMode;
 try { popMode = PopulationCli.Resolve("navownprobe", flagsOnly, stateSpec, stateSupported: false); }
 catch (ArgumentException ex) { Console.Error.WriteLine(ex.Message); return 2; }
@@ -813,7 +799,6 @@ static object? Num(float f) => float.IsNaN(f) ? null : float.IsPositiveInfinity(
 // ---------------------------------------------------------------------------------------
 // DELETED / EMPTIED — the hard break.
 // ---------------------------------------------------------------------------------------
-var broken = new List<string>();
 var deletedAtWinner = navVersions.DeletedAtWinner();
 if (WinStateDump.Asked)
     WinStateDump.Write("navownprobe-navdeleted", new
@@ -821,34 +806,11 @@ if (WinStateDump.Asked)
         deleted = deletedAtWinner.OrderBy(d => d.Key.ToString(), StringComparer.Ordinal)
                                  .Select(d => new { formKey = d.Key.ToString(), plugin = pluginKey[d.Value].FileName.String }).ToList(),
     });
-// A navmesh a Bethesda master deletes is the shipped game (the DLCs delete Skyrim.esm navmeshes they replace), not a
-// clash between mods: counted apart, never listed as a finding (2026-09-28).
-int vanillaDeleted = 0;
-bool VanillaDeletion(FormKey nav) => deletedAtWinner.TryGetValue(nav, out var d) && Vanilla.Contains(pluginKey[d].FileName.String);
-foreach (var (nav, provs) in navProviders)
-{
-    int winner = deletedAtWinner.TryGetValue(nav, out var deleter) ? deleter : provs[^1];
-    if (!Wanted(winner)) continue;
-    if (VanillaDeletion(nav)) { vanillaDeleted++; continue; }
-    if (deletedAtWinner.ContainsKey(nav))
-        broken.Add($"   DELETED  {nav} in {Cell(navVersions.Last[nav].Cell)} by {pluginKey[winner].FileName}{(navVersions.Last[nav].NoGeometry ? " (no geometry left)" : "")}");
-    else if (provs.Count > 1)
-    {
-        var w = navSize.GetValueOrDefault((nav, winner));
-        var first = navSize.GetValueOrDefault((nav, provs[0]));
-        if (w.T == 0 && first.T > 0)
-            broken.Add($"   EMPTIED  {nav} in {Cell(navCell.GetValueOrDefault(nav))} by {pluginKey[winner].FileName} ({first.T} tris -> 0)");
-    }
-}
-// A navmesh no plugin ever gave geometry to, whose last record carries none: nothing to walk on either.
-foreach (var (nav, deleter) in deletedAtWinner)
-    if (!navProviders.ContainsKey(nav) && Wanted(deleter) && VanillaDeletion(nav)) vanillaDeleted++;
-    else if (!navProviders.ContainsKey(nav) && Wanted(deleter))
-        broken.Add($"   DELETED  {nav} in {Cell(navVersions.Last[nav].Cell)} by {pluginKey[deleter].FileName} (no version with geometry in the order)");
-Console.WriteLine($"\n==== DELETED or EMPTIED navmesh (hard break) ====");
-Console.WriteLine($"   findings: {broken.Count:N0}");
-Console.WriteLine($"   deleted by a Bethesda master (the shipped game; not findings): {vanillaDeleted:N0}");
-foreach (var b in broken.Take(listN)) Console.WriteLine(b);
+// A navmesh a Bethesda master deletes is the shipped game, not a clash between mods: counted apart, never a finding
+// (2026-09-28); --list-master-deletions lists them after the findings, labelled (NavDeletions.cs).
+foreach (var line in NavDeletions.Report(navVersions, Wanted, p => Vanilla.Contains(pluginKey[p].FileName.String),
+                                         p => pluginKey[p].FileName.String, Cell, listN, cli.ListMasterDeletions))
+    Console.WriteLine(line);
 
 // ---------------------------------------------------------------------------------------
 // DANGLING LINKS — a navmesh index pointing at a triangle that the winning record does not have.
