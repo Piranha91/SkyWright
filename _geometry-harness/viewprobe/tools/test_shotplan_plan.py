@@ -1118,10 +1118,11 @@ def test_devbench_reads_a_worklist_in_either_spelling_or_refuses_by_name():
     r = run({"cells": [{"cell": "A", "Shots": lower["cells"][0]["shots"]}]})
     check("SP-W3 RED: a cell spelling Shots inside a camelCase file gives its shots, not 0",
           shots(r) == ["one", "two"], str(r)[:160])
-    r = run({"cells": [{"cell": "A", "views": []}]})
+    # Each refusal fixture carries a renderable shot elsewhere, so the 0-shots rule cannot answer for it.
+    r = run({"cells": [lower["cells"][0], {"cell": "B", "views": []}]})
     check("SP-W4 RED: a cell with no shots list is refused, naming 'shots' and the cell",
-          r[0] == "refused" and "shots" in str(r[2]).lower() and "A" in str(r[2]), str(r)[:160])
-    r = run({"cells": [{"cell": "A", "shots": []}], "Cells": [{"Cell": "B", "Shots": []}]})
+          r[0] == "refused" and "cell 2 (B) has no 'shots' list" in str(r[2]), str(r)[:160])
+    r = run({"cells": lower["cells"], "Cells": pascal["Cells"]})
     check("SP-W5 RED: one key spelled two ways is refused as ambiguous, naming both",
           r[0] == "refused" and "Cells" in str(r[2]) and "cells" in str(r[2]), str(r)[:160])
     r = run({"label": "x", "status": "refused", "cells": []})
