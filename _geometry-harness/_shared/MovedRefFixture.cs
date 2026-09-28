@@ -38,6 +38,7 @@ namespace HarnessShared;
 //   P3    E00 (320,300), base P     untouched                                            E00, a plane (control)
 //   NPC1  PlacedNpc N1, E00 (400,400)  A: base N2                                        E00, base N2
 //   NPC2  PlacedNpc N2, E10 (4600,400) A: deleted, no data                               gone
+//   NPC3  PlacedNpc N1, E50 (20780,300) A: same place, base cleared                      no base (N1 not placed by it)
 //   U1-3  (introduced by A in E00 at (500..520,500), base S)  B: U1 to E50; U2 deleted, no data; U3 to E00 (600,600)
 //   Q1    persistent in T at (20530,50) (grid 5,0)   untouched                           T (control, far)
 //
@@ -66,7 +67,7 @@ public static class MovedRefFixture
 
     public static readonly FormKey M1 = Mk(0x901), M2 = Mk(0x902), M3 = Mk(0x903), M4 = Mk(0x904), M5 = Mk(0x905), M6 = Mk(0x906),
         M7 = Mk(0x90E), D1 = Mk(0x907), D2 = Mk(0x908), D3 = Mk(0x909), D4 = Mk(0x90A), B0 = Mk(0x90B), C1 = Mk(0x90C), C2 = Mk(0x90D),
-        P1 = Mk(0x910), P2 = Mk(0x911), P3 = Mk(0x912), NPC1 = Mk(0x913), NPC2 = Mk(0x914), Q1 = Mk(0x920), L5 = Mk(0x921);
+        P1 = Mk(0x910), P2 = Mk(0x911), P3 = Mk(0x912), NPC1 = Mk(0x913), NPC2 = Mk(0x914), NPC3 = Mk(0x915), Q1 = Mk(0x920), L5 = Mk(0x921);
     public static readonly FormKey U1 = new(AKey, 0x950), U2 = new(AKey, 0x951), U3 = new(AKey, 0x952);
 
     /// <summary>Every reference the fixture places, by its table id.</summary>
@@ -74,7 +75,7 @@ public static class MovedRefFixture
     {
         ["M1"] = M1, ["M2"] = M2, ["M3"] = M3, ["M4"] = M4, ["M5"] = M5, ["M6"] = M6, ["M7"] = M7,
         ["D1"] = D1, ["D2"] = D2, ["D3"] = D3, ["D4"] = D4, ["B0"] = B0, ["C1"] = C1, ["C2"] = C2,
-        ["P1"] = P1, ["P2"] = P2, ["P3"] = P3, ["NPC1"] = NPC1, ["NPC2"] = NPC2, ["U1"] = U1, ["U2"] = U2, ["U3"] = U3, ["Q1"] = Q1, ["L5"] = L5,
+        ["P1"] = P1, ["P2"] = P2, ["P3"] = P3, ["NPC1"] = NPC1, ["NPC2"] = NPC2, ["NPC3"] = NPC3, ["U1"] = U1, ["U2"] = U2, ["U3"] = U3, ["Q1"] = Q1, ["L5"] = L5,
     };
 
     /// <summary>Hand-derived: the floor candidates of worldspace W whose position lies in the 3x3 around grid (0,0)
@@ -193,6 +194,7 @@ public static class MovedRefFixture
         e10.Temporary.Add(Npc(NPC2, N2, 4600, 400));
         e10.Landscape = LandOf(Land10, 0f);
         var e50 = Ext(E50, 5, 0); e50.Landscape = LandOf(Land50, 0f);
+        e50.Temporary.Add(Npc(NPC3, N1, 5 * 4096 + 300, 300));
         var em10 = Ext(Em10, -1, 0); em10.Landscape = LandOf(Landm10, 0f);
         var e20 = Ext(E20, 2, 0); e20.Landscape = LandOf(Land20, 0f); e20.Temporary.Add(Ref(L5, S, 2 * 4096 + 100, 100));
         m.Worldspaces.Add(World(W, top, e00, e10, e50, em10, e20));
@@ -219,6 +221,7 @@ public static class MovedRefFixture
             var c50 = Ext(E50, 5, 0);
             c50.Temporary.Add(Ref(M1, S, 5 * 4096 + 200, 300)); c50.Temporary.Add(Ref(M6, S, 5 * 4096 + 210, 300));
             c50.Temporary.Add(Ref(M7, S, 700, 700));                   // filed in E50's cell, standing in grid (0,0)
+            c50.Temporary.Add(new PlacedNpc(NPC3, Rel) { Placement = new Placement { Position = new P3Float(5 * 4096 + 300, 300, 0), Rotation = new P3Float(0, 0, 0) } });   // base cleared
             var cm10 = Ext(Em10, -1, 0); cm10.Landscape = LandOf(Landm10, 0f, withHeights: false);   // L4
             a.Worldspaces.Add(World(W, t, c00, c10, c50, cm10));
             var w2c = Ext(W2E00, 0, 0);
