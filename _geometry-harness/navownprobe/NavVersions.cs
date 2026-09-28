@@ -30,7 +30,7 @@ sealed class NavVersions
             if (l.Count == 0 || l[^1] != p) l.Add(p);
             Cell[nav.FormKey] = cp.Cell;
             Size[(nav.FormKey, p)] = (nav.Vertices.Count, nav.Triangles.Count, hash(nav));
-            Deleted[(nav.FormKey, p)] = nav.Deleted || deletedHere.Contains(nav.FormKey);
+            Deleted[(nav.FormKey, p)] = deletedHere.Contains(nav.FormKey);
             if (!CellPlugins.TryGetValue(cp.Cell, out var s)) CellPlugins[cp.Cell] = s = new SortedSet<int>();
             s.Add(p);
             Last[nav.FormKey] = (p, false, cp.Cell);
