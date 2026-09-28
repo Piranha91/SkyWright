@@ -183,17 +183,24 @@ foreach (var path in walk)
     ISkyrimModGetter mod;
     try { mod = fwalk.Open(path)!; }
     catch (PluginUnreadableException ex) { Console.Error.WriteLine(ex.Message); return 2; }
-    using (mod as IDisposable)
+    try
     {
-        foreach (var rec in mod.EnumerateMajorRecords())
+        using (mod as IDisposable)
         {
-            if (rec is IPlacedGetter pg) { if (pg.IsDeleted) enableFacts.NoteDeleted(pg.FormKey); continue; }
-            if (rec is IModeledGetter m && m.Model?.File is { } f && !string.IsNullOrWhiteSpace(f.GivenPath))
-                baseMesh[rec.FormKey] = (f.GivenPath, rec.GetType().Name.Replace("BinaryOverlay", ""));
+            foreach (var rec in mod.EnumerateMajorRecords())
+            {
+                if (rec is IPlacedGetter pg) { if (pg.IsDeleted) enableFacts.NoteDeleted(pg.FormKey); continue; }
+                if (rec is IModeledGetter m && m.Model?.File is { } f && !string.IsNullOrWhiteSpace(f.GivenPath))
+                    baseMesh[rec.FormKey] = (f.GivenPath, rec.GetType().Name.Replace("BinaryOverlay", ""));
+            }
+            foreach (var wrld in mod.Worldspaces.Records) worldName[wrld.FormKey] = wrld.EditorID ?? wrld.FormKey.ToString();
+            fwalk.Plugin(mod, path, cp => { foreach (var r in cp.Refs) enableFacts.Note(r); });
         }
-        foreach (var wrld in mod.Worldspaces.Records) worldName[wrld.FormKey] = wrld.EditorID ?? wrld.FormKey.ToString();
-        fwalk.Plugin(mod, path, cp => { foreach (var r in cp.Refs) enableFacts.Note(r); });
     }
+    // A plugin opens lazily: one whose groups fail while this walk reads them is refused, named (_shared/PluginOpen.cs).
+    catch (Exception ex) when (ex is not PluginUnreadableException)
+    { Console.Error.WriteLine(new PluginUnreadableException(path, "floorgapprobe's walk", ex, midWalk: true).Message); return 2; }
+    catch (PluginUnreadableException ex) { Console.Error.WriteLine(ex.Message); return 2; }
 }
 fwalk.Dump();
 var mergedMeta = fwalk.MergedMeta; var mergedLand = fwalk.MergedLand;

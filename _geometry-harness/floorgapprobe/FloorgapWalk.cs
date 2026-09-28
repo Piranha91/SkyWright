@@ -42,7 +42,10 @@ sealed class FloorgapWalk
     public ISkyrimModGetter? Open(string path) => PluginOpen.Open(path, Winning ? "floorgapprobe's --winning walk" : "floorgapprobe");
 
     /// <summary>One plugin's cells, in load order. <paramref name="perCell"/> runs first for every cell.</summary>
-    public void Plugin(ISkyrimModGetter mod, string path, Action<CellPlacements> perCell)
+    public void Plugin(ISkyrimModGetter mod, string path, Action<CellPlacements> perCell) =>
+        PluginOpen.Guard(path, Winning ? "floorgapprobe's --winning walk" : "floorgapprobe", () => Walk(mod, path, perCell));
+
+    void Walk(ISkyrimModGetter mod, string path, Action<CellPlacements> perCell)
     {
         foreach (var cp in LastSighting.Cells(mod))
         {

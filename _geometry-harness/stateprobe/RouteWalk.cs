@@ -45,14 +45,18 @@ sealed class RouteWalk
     public void Seed(string firstPath)
     {
         var m0 = PluginOpen.Open(firstPath, "stateprobe's route walk (grid pre-read)");
-        using (m0 as IDisposable) foreach (var cp in PlacementExtract.FromMod(m0)) LearnGrid(cp);
+        using (m0 as IDisposable)
+            PluginOpen.Guard(firstPath, "stateprobe's route walk (grid pre-read)", () => { foreach (var cp in PlacementExtract.FromMod(m0)) LearnGrid(cp); });
     }
 
     /// <summary>Open one plugin of the order, or throw PluginUnreadableException (refused, never skipped).</summary>
     public static ISkyrimModGetter? Open(string path) => PluginOpen.Open(path, "stateprobe's route walk");
 
     /// <summary>One plugin's cells, in load order.</summary>
-    public void Plugin(ISkyrimModGetter m)
+    public void Plugin(ISkyrimModGetter m) =>
+        PluginOpen.Guard(m.ModKey.FileName.String, "stateprobe's route walk", () => Walk(m));
+
+    void Walk(ISkyrimModGetter m)
     {
         foreach (var cp in LastSighting.Cells(m))
         {

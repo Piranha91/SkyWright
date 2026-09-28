@@ -133,17 +133,24 @@ if (bosOn)
         ISkyrimModGetter om;
         try { om = BosWalkOpen.Open(p)!; }
         catch (PluginUnreadableException ex) { Console.Error.WriteLine(ex.Message); return 2; }
-        using (om as IDisposable)
+        try
         {
-            bos.Plugin(om);
-            foreach (var rec in om.EnumerateMajorRecords())
+            using (om as IDisposable)
             {
-                bos.Record(rec);
-                if (rec is IModeledGetter mo && mo.Model?.File is { } mf && !string.IsNullOrWhiteSpace(mf.GivenPath))
-                    orderBaseMesh[rec.FormKey] = (mf.GivenPath, rec.GetType().Name.Replace("BinaryOverlay", ""));
+                bos.Plugin(om);
+                foreach (var rec in om.EnumerateMajorRecords())
+                {
+                    bos.Record(rec);
+                    if (rec is IModeledGetter mo && mo.Model?.File is { } mf && !string.IsNullOrWhiteSpace(mf.GivenPath))
+                        orderBaseMesh[rec.FormKey] = (mf.GivenPath, rec.GetType().Name.Replace("BinaryOverlay", ""));
+                }
+                foreach (var cp in PlacementExtract.FromMod(om)) bos.Cell(cp);
             }
-            foreach (var cp in PlacementExtract.FromMod(om)) bos.Cell(cp);
         }
+        // A plugin opens lazily: one whose groups fail while this walk reads them is refused, named (_shared/PluginOpen.cs).
+        catch (Exception ex) when (ex is not PluginUnreadableException)
+        { Console.Error.WriteLine(new PluginUnreadableException(p, "navprobe's swap-layer walk", ex, midWalk: true).Message); return 2; }
+        catch (PluginUnreadableException ex) { Console.Error.WriteLine(ex.Message); return 2; }
     }
     bos.Load(assets.LooseRoots);
     Console.WriteLine($"swap layer: {order.OrderedPaths.Count} plugins walked for its index, {orderBaseMesh.Count:N0} winning models  ({sw.Elapsed.TotalSeconds:0.0}s)");

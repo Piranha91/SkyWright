@@ -42,7 +42,10 @@ sealed class BlockWalk
 
     /// <summary>One plugin's cells, in load order. <paramref name="perCell"/> runs first for every cell (the caller's own
     /// per-cell work).</summary>
-    public void Plugin(ISkyrimModGetter m, string name, Action<CellPlacements> perCell)
+    public void Plugin(ISkyrimModGetter m, string name, Action<CellPlacements> perCell) =>
+        PluginOpen.Guard(name, "blockprobe's walk of the load order", () => Walk(m, name, perCell));
+
+    void Walk(ISkyrimModGetter m, string name, Action<CellPlacements> perCell)
     {
         foreach (var cp in LastSighting.Cells(m))
         {

@@ -175,27 +175,34 @@ foreach (var p in paths)
     ISkyrimModGetter m;
     try { m = BlockWalk.Open(p)!; }
     catch (PluginUnreadableException ex) { Console.Error.WriteLine(ex.Message); return 2; }
-    using (m as IDisposable)
+    try
     {
-        bos.Plugin(m);
-        string name = Path.GetFileName(p);
-        foreach (var rec in m.EnumerateMajorRecords())
+        using (m as IDisposable)
         {
-            bos.Record(rec);
-            if (rec is IPlacedGetter pg) { if (pg.IsDeleted) enableFacts.NoteDeleted(pg.FormKey); continue; }
-            if (rec is ICollisionLayerGetter coll)
-            { collByIndex[coll.Index] = (coll.EditorID, coll.Flags.HasFlag(CollisionLayer.Flag.NavmeshObstacle)); continue; }
-            if (rec is IModeledGetter mo && mo.Model?.File is { } f && !string.IsNullOrWhiteSpace(f.GivenPath))
-                baseMesh[rec.FormKey] = (f.GivenPath, rec.GetType().Name.Replace("BinaryOverlay", ""));
-            ActorBand.CollectRecord(rec, npcFacts, raceFacts);
-        }
+            bos.Plugin(m);
+            string name = Path.GetFileName(p);
+            foreach (var rec in m.EnumerateMajorRecords())
+            {
+                bos.Record(rec);
+                if (rec is IPlacedGetter pg) { if (pg.IsDeleted) enableFacts.NoteDeleted(pg.FormKey); continue; }
+                if (rec is ICollisionLayerGetter coll)
+                { collByIndex[coll.Index] = (coll.EditorID, coll.Flags.HasFlag(CollisionLayer.Flag.NavmeshObstacle)); continue; }
+                if (rec is IModeledGetter mo && mo.Model?.File is { } f && !string.IsNullOrWhiteSpace(f.GivenPath))
+                    baseMesh[rec.FormKey] = (f.GivenPath, rec.GetType().Name.Replace("BinaryOverlay", ""));
+                ActorBand.CollectRecord(rec, npcFacts, raceFacts);
+            }
 
-        walk.Plugin(m, name, cp =>
-        {
-            bos.Cell(cp);
-            foreach (var r in cp.Refs) enableFacts.Note(r);
-        });
+            walk.Plugin(m, name, cp =>
+            {
+                bos.Cell(cp);
+                foreach (var r in cp.Refs) enableFacts.Note(r);
+            });
+        }
     }
+    // A plugin opens lazily: one whose groups fail while this walk reads them is refused, named (_shared/PluginOpen.cs).
+    catch (Exception ex) when (ex is not PluginUnreadableException)
+    { Console.Error.WriteLine(new PluginUnreadableException(p, "blockprobe's walk of the load order", ex, midWalk: true).Message); return 2; }
+    catch (PluginUnreadableException ex) { Console.Error.WriteLine(ex.Message); return 2; }
 }
 Console.WriteLine($"winning state for those cells: {winRef.Count:N0} refs, {winNav.Count:N0} navmeshes, "
                 + $"{baseMesh.Count:N0} base records  ({sw.Elapsed.TotalSeconds:0.0}s)");
@@ -235,7 +242,14 @@ if (stateSpec is not null)
         ISkyrimModGetter m;
         try { m = BlockWalk.Open(paths[p])!; }
         catch (PluginUnreadableException ex) { Console.Error.WriteLine(ex.Message); return 2; }
-        using (m as IDisposable) stateIdx.Ingest(p, m);
+        try
+        {
+            using (m as IDisposable) stateIdx.Ingest(p, m);
+        }
+        // A plugin opens lazily: one whose groups fail while this walk reads them is refused, named (_shared/PluginOpen.cs).
+        catch (Exception ex) when (ex is not PluginUnreadableException)
+        { Console.Error.WriteLine(new PluginUnreadableException(paths[p], "blockprobe's --state index walk", ex, midWalk: true).Message); return 2; }
+        catch (PluginUnreadableException ex) { Console.Error.WriteLine(ex.Message); return 2; }
     }
     var sx = SwitchIndex.Build(stateIdx);
     sx.NameSwitches(stateIdx.RefEditorId);

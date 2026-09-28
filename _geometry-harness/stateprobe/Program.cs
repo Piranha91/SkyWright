@@ -228,11 +228,18 @@ if (routeOn)
         ISkyrimModGetter m;
         try { m = RouteWalk.Open(paths[p])!; }
         catch (PluginUnreadableException ex) { Console.Error.WriteLine(ex.Message); return 2; }
-        using (m as IDisposable)
+        try
         {
-            foreach (var rec in m.EnumerateMajorRecords()) ActorBand.CollectRecord(rec, npcFacts, raceFacts);
-            rwalk.Plugin(m);
+            using (m as IDisposable)
+            {
+                foreach (var rec in m.EnumerateMajorRecords()) ActorBand.CollectRecord(rec, npcFacts, raceFacts);
+                rwalk.Plugin(m);
+            }
         }
+        // A plugin opens lazily: one whose groups fail while this walk reads them is refused, named (_shared/PluginOpen.cs).
+        catch (Exception ex) when (ex is not PluginUnreadableException)
+        { Console.Error.WriteLine(new PluginUnreadableException(paths[p], "stateprobe's route walk", ex, midWalk: true).Message); return 2; }
+        catch (PluginUnreadableException ex) { Console.Error.WriteLine(ex.Message); return 2; }
     }
     rwalk.Dump();
     ActorBand.ResolveControllers(raceFacts, assets);
