@@ -69,6 +69,8 @@ sealed class BlockWalk
             targetCells = TargetCells.Keys.Select(k => k.ToString()).OrderBy(k => k, StringComparer.Ordinal).ToList(),
             floorGrids = FloorGrids.OrderBy(g => g.Wrld.ToString()).ThenBy(g => g.X).ThenBy(g => g.Y)
                                    .Select(g => new { worldspace = g.Wrld.ToString(), x = g.X, y = g.Y }).ToList(),
+            winNav = WinNav.OrderBy(n => n.Key.ToString(), StringComparer.Ordinal)
+                           .Select(n => WinStateDump.Nav(n.Value.Nav, n.Value.Cell, n.Value.Plugin)).ToList(),
             takenOut = _win.TakenOut.Select(k => k.ToString()).OrderBy(k => k, StringComparer.Ordinal).ToList(),
             winRef = WinRef.Values.OrderBy(r => r.FormKey.ToString(), StringComparer.Ordinal).Select(r => WinStateDump.Entry(r, WinRefCell[r.FormKey])).ToList(),
             floor = FloorRefsByWorld.Select(w => WinStateDump.Floor(w.Key, w.Value, Floor.LandOf(w.Key), Floor.UnreadableLand.Where(u => u.Ws == w.Key).Select(u => (u.X, u.Y)))).ToList(),

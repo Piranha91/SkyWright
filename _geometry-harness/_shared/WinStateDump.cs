@@ -37,6 +37,15 @@ public static class WinStateDump
         unreadableLand = unreadableLand?.OrderBy(g => g).Select(g => new { x = g.X, y = g.Y }).ToList(),
     };
 
+    /// <summary>One navmesh a walk holds: its key, the cell and plugin of the version held (when the walk knows them), and a
+    /// digest of that version's geometry (the first vertex's X, the vertex and triangle counts, and the sum of every
+    /// vertex coordinate to 0.1): enough to tell which plugin's version is held.</summary>
+    public static object Nav(NavmeshGeometry n, FormKey? cell, string? plugin) => new
+    {
+        formKey = n.FormKey.ToString(), cell = cell?.ToString(), plugin, x0 = n.Vertices.Count > 0 ? n.Vertices[0].X : (float?)null,
+        nverts = n.Vertices.Count, ntris = n.Triangles.Count, vsum = Math.Round(n.Vertices.Sum(v => (double)v.X + v.Y + v.Z), 1),
+    };
+
     static double Sum(float[,] h) { double s = 0; foreach (var v in h) s += v; return s; }
 
     /// <summary>Append one JSON line when asked; otherwise do nothing.</summary>

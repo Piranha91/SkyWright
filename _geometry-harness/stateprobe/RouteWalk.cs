@@ -89,6 +89,8 @@ sealed class RouteWalk
             wantedCells = WantedCells.Select(k => k.ToString()).OrderBy(k => k, StringComparer.Ordinal).ToList(),
             cellRefs = CellRefs.OrderBy(c => c.Key.ToString(), StringComparer.Ordinal)
                                .SelectMany(c => c.Value.Select(r => WinStateDump.Entry(r, c.Key))).ToList(),
+            winNav = WinNav.SelectMany(c => c.Value.Values.Select(n => (Cell: c.Key, Nav: n))).OrderBy(x => x.Nav.FormKey.ToString(), StringComparer.Ordinal)
+                           .Select(x => WinStateDump.Nav(x.Nav, x.Cell, null)).ToList(),
             floor = FloorRefsByWorld.Select(w => WinStateDump.Floor(w.Key, w.Value, Floor.LandOf(w.Key), Floor.UnreadableLand.Where(u => u.Ws == w.Key).Select(u => (u.X, u.Y)))).ToList(),
         });
     }

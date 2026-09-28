@@ -815,6 +815,12 @@ static object? Num(float f) => float.IsNaN(f) ? null : float.IsPositiveInfinity(
 // ---------------------------------------------------------------------------------------
 var broken = new List<string>();
 var deletedAtWinner = navVersions.DeletedAtWinner();
+if (WinStateDump.Asked)
+    WinStateDump.Write("navownprobe-navdeleted", new
+    {
+        deleted = deletedAtWinner.OrderBy(d => d.Key.ToString(), StringComparer.Ordinal)
+                                 .Select(d => new { formKey = d.Key.ToString(), plugin = pluginKey[d.Value].FileName.String }).ToList(),
+    });
 foreach (var (nav, provs) in navProviders)
 {
     int winner = deletedAtWinner.TryGetValue(nav, out var deleter) ? deleter : provs[^1];

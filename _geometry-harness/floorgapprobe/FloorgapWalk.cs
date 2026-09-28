@@ -76,6 +76,7 @@ sealed class FloorgapWalk
         {
             winning = Winning, wantCell = WantKey?.ToString() ?? WantCell,
             merged = MergedRefs.Values.OrderBy(r => r.FormKey.ToString(), StringComparer.Ordinal).Select(r => WinStateDump.Entry(r, WantKey)).ToList(),
+            mergedNavs = MergedNavs.Values.OrderBy(n => n.FormKey.ToString(), StringComparer.Ordinal).Select(n => WinStateDump.Nav(n, WantKey, null)).ToList(),
             mergedLand = MergedLand is { } ml ? new { h1616 = ml[16, 16] } : null,
             floor = RefsByWorld.Select(w => WinStateDump.Floor(w.Key, w.Value, Floor.LandOf(w.Key), Floor.UnreadableLand.Where(u => u.Ws == w.Key).Select(u => (u.X, u.Y)))).ToList(),
         });

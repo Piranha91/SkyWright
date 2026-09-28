@@ -552,6 +552,9 @@ static class RouteStationMode
                 bound = Bound.OrderBy(g => g).Select(g => new { x = g.X, y = g.Y }).ToList(),
                 prims = Prims.OrderBy(p => p.Key.ToString(), StringComparer.Ordinal)
                              .Select(p => new { formKey = p.Key.ToString(), present = p.Value is not null, x = p.Value?.Position.X, y = p.Value?.Position.Y }).ToList(),
+                navWin = NavWin.OrderBy(n => n.Key.ToString(), StringComparer.Ordinal)
+                               .Select(n => new { nav = HarnessShared.WinStateDump.Nav(n.Value.Nav, null, null), sqx = n.Value.Square?.X, sqy = n.Value.Square?.Y }).ToList(),
+                child = Child.Values.OrderBy(n => n.FormKey.ToString(), StringComparer.Ordinal).Select(n => HarnessShared.WinStateDump.Nav(n, null, null)).ToList(),
                 floor = HarnessShared.WinStateDump.Floor(_ws, RefsByGrid, LandByGrid, UnreadableLandWhy.Keys.Select(k => (k.Item1, k.Item2))),
             });
         }

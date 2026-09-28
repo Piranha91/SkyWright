@@ -1856,6 +1856,14 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot,
         { throw ViewProbe.PluginRead.Failed(path, walkIndex, order.OrderedPaths.Count, "the winning-state walk", ex); }
     }
     ViewProbe.StationFloorFiling.Finish(stationFloor, targetWorldspace, stationRefsByGrid, stationLandByGrid, stationUnreadableLand);
+    // HOUSECARL_WINSTATE_DUMP: the render's selected navmeshes after the walk, for an independent reader.
+    if (HarnessShared.WinStateDump.Asked)
+        HarnessShared.WinStateDump.Write("viewprobe-navsel", new
+        {
+            cells = navSelection.Cells.Keys.Select(k => k.ToString()).OrderBy(k => k, StringComparer.Ordinal).ToList(),
+            winNav = winNav.Values.OrderBy(n => n.FormKey.ToString(), StringComparer.Ordinal)
+                          .Select(n => HarnessShared.WinStateDump.Nav(n, navSelection.Provenance[n].Cell, navSelection.Provenance[n].Plugin)).ToList(),
+        });
     try
     {
         navSelection.Validate(ringRefs, winNav);
