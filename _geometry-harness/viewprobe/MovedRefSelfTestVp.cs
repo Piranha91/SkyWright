@@ -41,6 +41,14 @@ internal static class MovedRefSelfTestVp
             }
         sf.Finish();
         t.CheckFloor("V1", sf.Refs, sf.Land, sf.Unreadable, new[] { (0, 0), (1, 0), (-1, 0), (2, 0) });
+        // The station reader refuses a floor whose neighbourhood holds an unreadable LAND (grid 0,0 by L1), and builds one
+        // whose neighbourhood does not (grid 5,0: B's readable LAND).
+        var unreadable = (sf.Unreadable ?? new HashSet<(int X, int Y)>()).ToDictionary(g => (g.X, g.Y), g => "fixture");
+        var reader = new StationMode.EnvironmentReader(_ => Array.Empty<NavmeshGeometry>(), sf.Refs, sf.Land, _ => null, _ => true,
+                                                       _ => null, _ => null, F.W.ToString(), unreadable);
+        string Try((int, int) g) { try { reader.FieldFor(g); return "built"; } catch (ReadRefusal ex) { return "refused: " + ex.GetType().Name; } }
+        t.Check("V1-refuse the station reader refuses a floor over an unreadable LAND (grid 0,0)", Try((0, 0)).StartsWith("refused"), Try((0, 0)));
+        t.Check("V1-build and builds one whose neighbourhood's LAND is sound (grid 5,0; control)", Try((5, 0)) == "built", Try((5, 0)));
 
         // ---- V2: NPC references by base ----
         string Under(FormKey b) => tables.NpcBase.TryGetValue(b, out var per) ? string.Join(" ", per.Keys.Select(MovedRefSelfTest.Name).OrderBy(x => x)) : "";

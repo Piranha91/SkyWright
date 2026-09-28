@@ -20,7 +20,8 @@ static class MovedRefProof
     sealed record FloorView(
         Dictionary<FormKey, Dictionary<(int, int), Dictionary<FormKey, PlacedRef>>> Refs,
         Dictionary<FormKey, Dictionary<(int, int), float[,]>> Land,
-        HashSet<(FormKey Ws, int X, int Y)> UnreadableLand);
+        HashSet<(FormKey Ws, int X, int Y)> UnreadableLand,
+        Func<FormKey, (int X, int Y), List<string>>? UnreadableNear = null);
 
     /// <summary>The floor filing, driven the way a probe that files every exterior cell drives it: a FloorIndex over every
     /// cell of every plugin (LastSighting.Cells), in load order.</summary>
@@ -32,7 +33,7 @@ static class MovedRefProof
             using var mod = SkyrimMod.CreateFromBinaryOverlay(path, Rel);
             foreach (var cp in LastSighting.Cells(mod)) index.Observe(cp, Path.GetFileName(path));
         }
-        return new FloorView(index.RefsByWorld, index.LandByWorld, index.UnreadableLand.ToHashSet());
+        return new FloorView(index.RefsByWorld, index.LandByWorld, index.UnreadableLand.ToHashSet(), index.UnreadableNear);
     }
 
     static CellPlacements? CellOf(string path, FormKey cell)
@@ -170,6 +171,12 @@ static class MovedRefProof
               wLand.TryGetValue((5, 0), out var h50) && h50[16, 16] == MovedRefFixture.BHeight50 && !Unreadable(5, 0), $"{LandAt((5, 0))}; named {Unreadable(5, 0)}");
         Check("moved-ref/F-L4  a later LAND with no VHGT: no heights, named",
               !wLand.ContainsKey((-1, 0)) && Unreadable(-1, 0), $"{LandAt((-1, 0))}; named {Unreadable(-1, 0)}");
+        // What every floor consumer refuses or counts on: the unreadable grids inside a cell's 3x3 (added at Gate C).
+        var near00 = fv.UnreadableNear?.Invoke(MovedRefFixture.W, (0, 0)) ?? new List<string>();
+        var near50 = fv.UnreadableNear?.Invoke(MovedRefFixture.W, (5, 0)) ?? new List<string> { "no UnreadableNear" };
+        Check("moved-ref/F-near  the 3x3 of (0,0) names the unreadable grids (0,0) and (-1,0); the 3x3 of (5,0) names none",
+              near00.Count == 2 && near00.Any(s => s.StartsWith("grid 0,0")) && near00.Any(s => s.StartsWith("grid -1,0")) && near50.Count == 0,
+              $"(0,0): [{string.Join("; ", near00)}] (5,0): [{string.Join("; ", near50)}]");
         Check("moved-ref/F-L5  a later cell copy carrying ONLY a readable LAND: its heights",
               wLand.TryGetValue((2, 0), out var h20) && h20[16, 16] == MovedRefFixture.BHeight50 && !Unreadable(2, 0), $"{LandAt((2, 0))}; named {Unreadable(2, 0)}");
         _ = nbLand;
