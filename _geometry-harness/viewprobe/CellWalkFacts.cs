@@ -70,6 +70,8 @@ internal sealed class CellWalkFacts
     internal required string StationWorldspaceEditorId { get; set; }
     internal required Dictionary<(int X, int Y), Dictionary<FormKey, PlacedRef>> StationRefs { get; init; }
     internal required Dictionary<(int X, int Y), float[,]> StationLand { get; init; }
+    /// <summary>The station floor's grids whose last LAND gives no heights (FloorFeed.FloorIndex), with the reason.</summary>
+    internal Dictionary<(int X, int Y), string> StationUnreadableLand { get; init; } = new();
 
     internal required TerrainPatchFact[] TerrainPatches { get; set; }
     internal required TerrainLayerFact[] TerrainLayers { get; set; }
@@ -108,6 +110,7 @@ internal sealed class CellWalkFacts
             StationRefs = StationRefs.ToDictionary(x => x.Key,
                 x => x.Value.ToDictionary(y => y.Key, y => Copy(y.Value))),
             StationLand = StationLand.ToDictionary(x => x.Key, x => (float[,])x.Value.Clone()),
+            StationUnreadableLand = new(StationUnreadableLand),
             TerrainPatches = TerrainPatches.Select(x => new TerrainPatchFact(x.Diffuse, x.Triangles.ToArray())).ToArray(),
             TerrainLayers = TerrainLayers.Select(x => new TerrainLayerFact(x.Diffuse, x.Triangles.ToArray())).ToArray(),
             LandHeights = LandHeights.Select(x => new LandHeightFact(x.X, x.Y, (float[,])x.Heights.Clone())).ToArray(),

@@ -13,15 +13,18 @@ namespace ViewProbe;
 internal static class MovedRefSelfTestVp
 {
     // The walk's enumeration, as Program.cs's winning-state walk asks it.
-    static IEnumerable<CellPlacements> Cells(ISkyrimModGetter m) => PlacementExtract.FromMod(m, includeDeletions: true);
+    static IEnumerable<CellPlacements> Cells(ISkyrimModGetter m) => HarnessShared.LastSighting.Cells(m);
 
     // ---- the adapter for the --stations floor filing: the only part of this file that knows how it is called ----
     sealed class StationFloor
     {
+        readonly FloorFeed.FloorIndex? _index = StationFloorFiling.Begin(true, F.W, (0, 0), 4);
         public readonly Dictionary<(int, int), Dictionary<FormKey, PlacedRef>> Refs = new();
         public readonly Dictionary<(int, int), float[,]> Land = new();
-        public void Observe(CellPlacements cp) => StationFloorFiling.Observe(cp, true, F.W, (0, 0), 4, Refs, Land);
-        public ISet<(int X, int Y)>? Unreadable => null;
+        readonly Dictionary<(int, int), string> _unreadable = new();
+        public void Observe(CellPlacements cp) => _index!.Observe(cp);
+        public void Finish() => StationFloorFiling.Finish(_index, F.W, Refs, Land, _unreadable);
+        public ISet<(int X, int Y)>? Unreadable => _unreadable.Keys.ToHashSet();
     }
 
     internal static int Run() => MovedRefSelfTest.Run("viewprobe", t =>
@@ -36,6 +39,7 @@ internal static class MovedRefSelfTestVp
                 sf.Observe(cp);
                 RefWhere.Observe(cp, Path.GetFileName(path), tables, watch, new HashSet<FormKey>(), mod.ModKey);
             }
+        sf.Finish();
         t.CheckFloor("V1", sf.Refs, sf.Land, sf.Unreadable, new[] { (0, 0), (1, 0), (-1, 0), (2, 0) });
 
         // ---- V2: NPC references by base ----

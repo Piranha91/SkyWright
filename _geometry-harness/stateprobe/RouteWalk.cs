@@ -17,10 +17,17 @@ sealed class RouteWalk
     // first plugin's own neighbours are filed too.
     public readonly Dictionary<FormKey, (FormKey Wrld, int X, int Y)> CellGridOf = new();
     public readonly HashSet<(FormKey Wrld, int X, int Y)> FloorGrids = new();
-    public readonly Dictionary<FormKey, Dictionary<(int, int), Dictionary<FormKey, PlacedRef>>> FloorRefsByWorld = new();
-    public readonly Dictionary<FormKey, Dictionary<(int, int), float[,]>> FloorLandByWorld = new();
+    /// <summary>The floor filing (FloorFeed.FloorIndex): floor candidates by position inside <see cref="FloorGrids"/>.</summary>
+    public readonly FloorFeed.FloorIndex Floor;
+    public Dictionary<FormKey, Dictionary<(int, int), Dictionary<FormKey, PlacedRef>>> FloorRefsByWorld => Floor.RefsByWorld;
+    public Dictionary<FormKey, Dictionary<(int, int), float[,]>> FloorLandByWorld => Floor.LandByWorld;
+    public IEnumerable<(FormKey Ws, int X, int Y)> UnreadableLand => Floor.UnreadableLand;
 
-    public RouteWalk(HashSet<FormKey> wantedCells) { WantedCells = wantedCells; }
+    public RouteWalk(HashSet<FormKey> wantedCells)
+    {
+        WantedCells = wantedCells;
+        Floor = new FloorFeed.FloorIndex((ws, g) => FloorGrids.Contains((ws, g.X, g.Y)));
+    }
 
     void LearnGrid(CellPlacements cp)
     {
@@ -45,14 +52,10 @@ sealed class RouteWalk
     /// <summary>One plugin's cells, in load order.</summary>
     public void Plugin(ISkyrimModGetter m)
     {
-        foreach (var cp in PlacementExtract.FromMod(m))
+        foreach (var cp in LastSighting.Cells(m))
         {
             LearnGrid(cp);
-            if (!cp.Interior && cp.Grid is { } fg && FloorGrids.Contains((cp.Worldspace, fg.X, fg.Y)))
-            {
-                if (!FloorRefsByWorld.TryGetValue(cp.Worldspace, out var frg)) { FloorRefsByWorld[cp.Worldspace] = frg = new(); FloorLandByWorld[cp.Worldspace] = new(); }
-                FloorFeed.FileByGrid(cp, frg, FloorLandByWorld[cp.Worldspace]);
-            }
+            Floor.Observe(cp, m.ModKey.FileName.String);
             if (!WantedCells.Contains(cp.Cell)) continue;
             if (cp.Navmeshes.Count > 0)
             {
@@ -78,7 +81,7 @@ sealed class RouteWalk
             wantedCells = WantedCells.Select(k => k.ToString()).OrderBy(k => k, StringComparer.Ordinal).ToList(),
             cellRefs = CellRefs.OrderBy(c => c.Key.ToString(), StringComparer.Ordinal)
                                .SelectMany(c => c.Value.Select(r => WinStateDump.Entry(r, c.Key))).ToList(),
-            floor = FloorRefsByWorld.Select(w => WinStateDump.Floor(w.Key, w.Value, FloorLandByWorld[w.Key])).ToList(),
+            floor = FloorRefsByWorld.Select(w => WinStateDump.Floor(w.Key, w.Value, Floor.LandOf(w.Key), Floor.UnreadableLand.Where(u => u.Ws == w.Key).Select(u => (u.X, u.Y)))).ToList(),
         });
     }
 }

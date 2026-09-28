@@ -11,8 +11,11 @@ sealed class FloorgapWalk
     public readonly bool Winning;
     public readonly string? WantCell;
     public FormKey? WantKey;
-    public readonly Dictionary<FormKey, Dictionary<(int, int), Dictionary<FormKey, PlacedRef>>> RefsByWorld = new();
-    public readonly Dictionary<FormKey, Dictionary<(int, int), float[,]>> LandByWorld = new();
+    /// <summary>The floor filing (FloorFeed.FloorIndex) over every exterior cell.</summary>
+    public readonly FloorFeed.FloorIndex Floor = new();
+    public Dictionary<FormKey, Dictionary<(int, int), Dictionary<FormKey, PlacedRef>>> RefsByWorld => Floor.RefsByWorld;
+    public Dictionary<FormKey, Dictionary<(int, int), float[,]>> LandByWorld => Floor.LandByWorld;
+    public IEnumerable<(FormKey Ws, int X, int Y)> UnreadableLand => Floor.UnreadableLand;
     public readonly List<CellPlacements> Cells = new();
     // --winning: only the named cell is merged (refs and navmeshes by FormKey, a later plugin replacing an earlier one; the
     // meta from the first plugin that carries the cell, the LAND from the last that has one); the exterior neighbourhood is
@@ -41,15 +44,13 @@ sealed class FloorgapWalk
     /// <summary>One plugin's cells, in load order. <paramref name="perCell"/> runs first for every cell.</summary>
     public void Plugin(ISkyrimModGetter mod, string path, Action<CellPlacements> perCell)
     {
-        foreach (var cp in PlacementExtract.FromMod(mod))
+        foreach (var cp in LastSighting.Cells(mod))
         {
             perCell(cp);
-            if (!cp.Interior)
-            {
-                if (!RefsByWorld.TryGetValue(cp.Worldspace, out var rg)) { RefsByWorld[cp.Worldspace] = rg = new(); LandByWorld[cp.Worldspace] = new(); }
-                FloorFeed.FileByGrid(cp, rg, LandByWorld[cp.Worldspace]);
-            }
-            if (!Winning) { Cells.Add(cp); continue; }
+            Floor.Observe(cp, Path.GetFileName(path));
+            // The single-plugin modes sweep the plugin's cells with content, as before: an empty cell copy has nothing to
+            // measure.
+            if (!Winning) { if (cp.Refs.Count > 0 || cp.Navmeshes.Count > 0) Cells.Add(cp); continue; }
             bool isWanted = (WantKey is { } wk && cp.Cell == wk) || (WantCell is not null && string.Equals(cp.CellEditorId, WantCell, StringComparison.OrdinalIgnoreCase));
             if (!isWanted) continue;
             WantKey ??= cp.Cell;
@@ -70,7 +71,7 @@ sealed class FloorgapWalk
             winning = Winning, wantCell = WantKey?.ToString() ?? WantCell,
             merged = MergedRefs.Values.OrderBy(r => r.FormKey.ToString(), StringComparer.Ordinal).Select(r => WinStateDump.Entry(r, WantKey)).ToList(),
             mergedLand = MergedLand is { } ml ? new { h1616 = ml[16, 16] } : null,
-            floor = RefsByWorld.Select(w => WinStateDump.Floor(w.Key, w.Value, LandByWorld[w.Key])).ToList(),
+            floor = RefsByWorld.Select(w => WinStateDump.Floor(w.Key, w.Value, Floor.LandOf(w.Key), Floor.UnreadableLand.Where(u => u.Ws == w.Key).Select(u => (u.X, u.Y)))).ToList(),
         });
     }
 }

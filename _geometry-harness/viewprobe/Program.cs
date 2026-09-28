@@ -1283,6 +1283,7 @@ var worldChain = new Dictionary<string, (float? Default, string? Parent)>(String
 string stationWorldspaceEd = "";
 var stationRefsByGrid = new Dictionary<(int, int), Dictionary<FormKey, PlacedRef>>();
 var stationLandByGrid = new Dictionary<(int, int), float[,]>();
+var stationUnreadableLand = new Dictionary<(int, int), string>();   // grids whose last LAND gives no heights (FloorIndex)
 // How far out the cells' water and identity are harvested. One ring is all the renderer needs; a
 // station reaches up to the standoff cap plus a lateral from its primitive, which can leave the
 // target cell, so the mode widens it and the floor is filed one square wider still (FloorFeed
@@ -1517,7 +1518,7 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot,
     wsWater = null; wsDefaultWaterHeight = float.MaxValue;
     cellWaterTruth.Clear(); wsWaterTruth = null; wsDefaultWaterHeightTruth = float.MaxValue;
     cellAtGrid.Clear(); worldChain.Clear(); stationWorldspaceEd = "";
-    stationRefsByGrid.Clear(); stationLandByGrid.Clear();
+    stationRefsByGrid.Clear(); stationLandByGrid.Clear(); stationUnreadableLand.Clear();
     enableMemo.Clear();
     targetWorldspace = FormKey.Null; targetGrid = null;
     cellKey = null; cellLabel = cellTarget; interior = false;
@@ -1721,6 +1722,8 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot,
         "the winning state: every plugin, for the refs and navmeshes that win",
         order.OrderedPaths.Count, "plugins");
     ViewProbe.CellFactsRed.Walk(cellScene, prepass: false);
+    // The --stations floor (WalkSideTables.cs): a last-sighting filing over every cell of every plugin.
+    var stationFloor = ViewProbe.StationFloorFiling.Begin(stationsSpec is not null, targetWorldspace, targetGrid, StationFloorRadius);
     int walkIndex = -1;
     foreach (var path in order.OrderedPaths)
     {
@@ -1816,13 +1819,15 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot,
             }
 
             string plgName = m.ModKey.FileName.String;
-            // includeDeletions: a cell whose only content is a deletion must still reach the winning-ref walk (K6).
-            foreach (var cp in PlacementExtract.FromMod(m, includeDeletions: true))
+            // LastSighting.Cells: a cell whose only content is a deletion must still reach the winning-ref walk (K6), and
+            // one that carries only its LAND must reach the station floor. Every other table below sees exactly the cells
+            // it saw before (a cell with neither references, navmeshes nor deletions goes to the floor alone).
+            foreach (var cp in HarnessShared.LastSighting.Cells(m))
             {
-                navSelection.Observe(cp, plgName, navVersionPlugins, winNav, navByPlugin);
                 // The --stations floor neighbourhood (WalkSideTables.cs).
-                ViewProbe.StationFloorFiling.Observe(cp, stationsSpec is not null, targetWorldspace, targetGrid, StationFloorRadius,
-                                                     stationRefsByGrid, stationLandByGrid);
+                stationFloor?.Observe(cp, plgName);
+                if (cp.Refs.Count == 0 && cp.Navmeshes.Count == 0 && cp.DeletedRefs is not { Count: > 0 }) continue;
+                navSelection.Observe(cp, plgName, navVersionPlugins, winNav, navByPlugin);
                 if (bosFill) bosIdx!.NoteCell(cp.Cell, cp.Worldspace);
                 foreach (var r in cp.Refs)
                 {
@@ -1850,6 +1855,7 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot,
         catch (Exception ex) when (ViewProbe.PluginRead.Wraps(ex))
         { throw ViewProbe.PluginRead.Failed(path, walkIndex, order.OrderedPaths.Count, "the winning-state walk", ex); }
     }
+    ViewProbe.StationFloorFiling.Finish(stationFloor, targetWorldspace, stationRefsByGrid, stationLandByGrid, stationUnreadableLand);
     try
     {
         navSelection.Validate(ringRefs, winNav);
@@ -1899,6 +1905,7 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot,
         stationWorldspaceEd = f.StationWorldspaceEditorId;
         foreach (var x in f.StationRefs) stationRefsByGrid[x.Key] = x.Value;
         foreach (var x in f.StationLand) stationLandByGrid[x.Key] = x.Value;
+        foreach (var x in f.StationUnreadableLand) stationUnreadableLand[x.Key] = x.Value;
     }
     if (cellScene is not null && !retainedWalkHit)
     {
@@ -1936,6 +1943,7 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot,
             StationRefs = stationRefsByGrid.ToDictionary(x => x.Key,
                 x => x.Value.ToDictionary(y => y.Key, y => ViewProbe.CellWalkFacts.Copy(y.Value))),
             StationLand = stationLandByGrid.ToDictionary(x => x.Key, x => (float[,])x.Value.Clone()),
+            StationUnreadableLand = new(stationUnreadableLand),
             TerrainPatches = Array.Empty<ViewProbe.TerrainPatchFact>(),
             TerrainLayers = Array.Empty<ViewProbe.TerrainLayerFact>(),
             LandHeights = Array.Empty<ViewProbe.LandHeightFact>(),
@@ -2042,7 +2050,7 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot,
     if (winWalk.TakenOutCount is > 0 and var takenOut)
         Console.WriteLine($"   -{takenOut} ref(s) an earlier plugin placed in the loaded cells and a later plugin moved elsewhere: not drawn (the later plugin wins)");
     Console.WriteLine($"winning state: {winRef.Count:N0} refs, {winNav.Count:N0} navmeshes  ({sw.Elapsed.TotalSeconds:0.0}s)");
-    if (stationsSpec is not null) ViewProbe.StationFloorFiling.Dump(targetWorldspace, targetGrid, StationFloorRadius, stationRefsByGrid, stationLandByGrid);
+    if (stationsSpec is not null) ViewProbe.StationFloorFiling.Dump(targetWorldspace, targetGrid, StationFloorRadius, stationRefsByGrid, stationLandByGrid, stationUnreadableLand);
     if (winRefsDump is not null && (!dumpTerrain || interior))
     {
         ViewProbe.WinningRefsDump.Write(winRefsDump, cellTarget, cellKey!.Value, interior, targetWorldspace, targetGrid, ringRefs,
@@ -3278,6 +3286,7 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot,
                 Navmeshes = winNav.Values,
                 RefsByGrid = stationRefsByGrid,
                 LandByGrid = stationLandByGrid,
+                UnreadableLand = stationUnreadableLand,
                 Geometry = StationFloorGeometry,
                 Enabled = RefEnabled,
                 CellAt = g => cellAtGrid.TryGetValue(g, out var ci)

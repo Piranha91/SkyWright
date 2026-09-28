@@ -11,8 +11,11 @@ sealed class BlockWalk
     public readonly Dictionary<FormKey, CellPlacements> TargetCells;
     /// <summary>The 3x3 grid neighbourhood of every exterior target cell: where the floor under them is filed from.</summary>
     public readonly HashSet<(FormKey Wrld, int X, int Y)> FloorGrids = new();
-    public readonly Dictionary<FormKey, Dictionary<(int, int), Dictionary<FormKey, PlacedRef>>> FloorRefsByWorld = new();
-    public readonly Dictionary<FormKey, Dictionary<(int, int), float[,]>> FloorLandByWorld = new();
+    /// <summary>The floor filing (FloorFeed.FloorIndex): floor candidates by position inside <see cref="FloorGrids"/>.</summary>
+    public readonly FloorFeed.FloorIndex Floor;
+    public Dictionary<FormKey, Dictionary<(int, int), Dictionary<FormKey, PlacedRef>>> FloorRefsByWorld => Floor.RefsByWorld;
+    public Dictionary<FormKey, Dictionary<(int, int), float[,]>> FloorLandByWorld => Floor.LandByWorld;
+    public IEnumerable<(FormKey Ws, int X, int Y)> UnreadableLand => Floor.UnreadableLand;
     public readonly Dictionary<FormKey, PlacedRef> WinRef = new();                  // ref FormKey -> winning placement
     public readonly Dictionary<FormKey, FormKey> WinRefCell = new();                // ref FormKey -> winning cell
     // The LAST cell any plugin placed a tracked reference in. `WinRefCell` remembers the last TARGET cell it was in, so a
@@ -29,6 +32,7 @@ sealed class BlockWalk
         foreach (var tc in targetCells.Values)
             if (!tc.Interior && tc.Grid is { } tg)
                 for (int dx = -1; dx <= 1; dx++) for (int dy = -1; dy <= 1; dy++) FloorGrids.Add((tc.Worldspace, tg.X + dx, tg.Y + dy));
+        Floor = new FloorFeed.FloorIndex((ws, g) => FloorGrids.Contains((ws, g.X, g.Y)));
     }
 
     /// <summary>Open one plugin of the order, or null when it cannot be read.</summary>
@@ -41,14 +45,10 @@ sealed class BlockWalk
     /// per-cell work).</summary>
     public void Plugin(ISkyrimModGetter m, string name, Action<CellPlacements> perCell)
     {
-        foreach (var cp in PlacementExtract.FromMod(m))
+        foreach (var cp in LastSighting.Cells(m))
         {
             perCell(cp);
-            if (!cp.Interior && cp.Grid is { } fg && FloorGrids.Contains((cp.Worldspace, fg.X, fg.Y)))
-            {
-                if (!FloorRefsByWorld.TryGetValue(cp.Worldspace, out var frg)) { FloorRefsByWorld[cp.Worldspace] = frg = new(); FloorLandByWorld[cp.Worldspace] = new(); }
-                FloorFeed.FileByGrid(cp, frg, FloorLandByWorld[cp.Worldspace]);
-            }
+            Floor.Observe(cp, name);
             bool targetCell = TargetCells.ContainsKey(cp.Cell);
             foreach (var r in cp.Refs) if (targetCell || LastCellOf.ContainsKey(r.FormKey)) LastCellOf[r.FormKey] = cp.Cell;
             if (!targetCell) continue;
@@ -68,7 +68,7 @@ sealed class BlockWalk
             floorGrids = FloorGrids.OrderBy(g => g.Wrld.ToString()).ThenBy(g => g.X).ThenBy(g => g.Y)
                                    .Select(g => new { worldspace = g.Wrld.ToString(), x = g.X, y = g.Y }).ToList(),
             winRef = WinRef.Values.OrderBy(r => r.FormKey.ToString(), StringComparer.Ordinal).Select(r => WinStateDump.Entry(r, WinRefCell[r.FormKey])).ToList(),
-            floor = FloorRefsByWorld.Select(w => WinStateDump.Floor(w.Key, w.Value, FloorLandByWorld[w.Key])).ToList(),
+            floor = FloorRefsByWorld.Select(w => WinStateDump.Floor(w.Key, w.Value, Floor.LandOf(w.Key), Floor.UnreadableLand.Where(u => u.Ws == w.Key).Select(u => (u.X, u.Y)))).ToList(),
         });
     }
 }

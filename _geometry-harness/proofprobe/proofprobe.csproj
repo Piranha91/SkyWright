@@ -9,6 +9,7 @@
     <NoWarn>CA1416</NoWarn>
   </PropertyGroup>
   <ItemGroup>
+    <Compile Include="..\_shared\LastSighting.cs" Link="LastSighting.cs" />
     <ProjectReference Include="..\..\src\housecarl-core\housecarl-core.csproj" />
     <Compile Include="..\_shared\EnablePopulation.cs" Link="EnablePopulation.cs" />
     <Compile Include="..\_shared\EnableArms.cs" Link="EnableArms.cs" />

@@ -191,7 +191,7 @@ static class RouteStationMode
             g => walk.Cells.TryGetValue(g, out var c)
                 ? new GridCellFacts(c.Cell, input.Worldspace.ToString(), c.Water) : null,
             name => walk.WorldChain.TryGetValue(name, out var wc) ? new WorldFacts(wc.Default, wc.Parent) : null,
-            input.Worldspace.ToString());
+            input.Worldspace.ToString(), walk.UnreadableLandWhy);
         RouteEnv Env(float x, float y) { var (e, t) = reader.Read(x, y); return new RouteEnv(e, t); }
         sw.Restart();
         var result = RouteStations.Sample(area, Env);
@@ -422,8 +422,15 @@ static class RouteStationMode
         public readonly Dictionary<FormKey, List<(string Plugin, Vector3? Pos, int Flags, FormKey? Base)>> Versions = new();
         public readonly HashSet<FormKey> CityPlacedKeys = new();
         public readonly HashSet<FormKey> CityNavKeys = new();
-        public readonly Dictionary<(int, int), Dictionary<FormKey, PlacedRef>> RefsByGrid = new();
-        public readonly Dictionary<(int, int), float[,]> LandByGrid = new();
+        /// <summary>The floor filing (FloorFeed.FloorIndex): this worldspace, by position inside <see cref="Bound"/>, over
+        /// every cell of every plugin (a move to another worldspace or an interior takes the earlier filing out).</summary>
+        public readonly FloorFeed.FloorIndex Floor;
+        public Dictionary<(int, int), Dictionary<FormKey, PlacedRef>> RefsByGrid => Floor.RefsOf(_ws);
+        public Dictionary<(int, int), float[,]> LandByGrid => Floor.LandOf(_ws);
+        public IEnumerable<(FormKey Ws, int X, int Y)> UnreadableLand => Floor.UnreadableLand;
+        /// <summary>This worldspace's grids whose last LAND gives no heights, with the reason: the station reader refuses them.</summary>
+        public Dictionary<(int, int), string> UnreadableLandWhy =>
+            Floor.UnreadableLandWhy.Where(x => x.Key.Ws == _ws).ToDictionary(x => (x.Key.X, x.Key.Y), x => x.Value);
         public readonly Dictionary<(int, int), (string Cell, DetectorModel.WaterTuple Water)> Cells = new();
         public readonly Dictionary<string, (float? Default, string? Parent)> WorldChain = new(StringComparer.OrdinalIgnoreCase);
         public readonly Dictionary<FormKey, PlacedRef?> Prims = new();
@@ -431,7 +438,10 @@ static class RouteStationMode
         public readonly HashSet<(int X, int Y)> Bound = new();
 
         public Walk(FormKey ws, IEnumerable<FormKey> children, FormKey plane)
-        { _ws = ws; _children = new HashSet<FormKey>(children); _plane = plane; }
+        {
+            _ws = ws; _children = new HashSet<FormKey>(children); _plane = plane;
+            Floor = new FloorFeed.FloorIndex((w, g) => w == _ws && Bound.Contains(g));
+        }
 
         static IEnumerable<ICellGetter> CellsOf(IWorldspaceGetter ws)
         {
@@ -517,11 +527,12 @@ static class RouteStationMode
                         foreach (var nav in cp.Navmeshes) NavWin[nav.FormKey] = (nav, grid);
                         foreach (var r in cp.Refs)
                             if (r.Base is { } b && b == _plane) Prims[r.FormKey] = r.Deleted ? null : r;
-                        var inBound = cp.Refs.Where(r => Bound.Contains(FloorFeed.GridOf(r.Position))).ToArray();
-                        FloorFeed.FileByGrid(cp with { Refs = inBound, Land = grid is { } g2 && Bound.Contains(g2) ? cp.Land : null },
-                                             RefsByGrid, LandByGrid);
                     }
                 }
+            // The floor: every cell of the plugin, every worldspace and interior (LastSighting.Cells), in load order.
+            var fmod = PluginRead.Open(path, -1, 0, "--stations (route) floor pass");
+            using (fmod as IDisposable)
+                foreach (var fcp in LastSighting.Cells(fmod)) Floor.Observe(fcp, plugin);
         }
 
         /// <summary>HOUSECARL_WINSTATE_DUMP: the floor filing and the planes after the pass, for an independent reader.</summary>
@@ -534,7 +545,7 @@ static class RouteStationMode
                 bound = Bound.OrderBy(g => g).Select(g => new { x = g.X, y = g.Y }).ToList(),
                 prims = Prims.OrderBy(p => p.Key.ToString(), StringComparer.Ordinal)
                              .Select(p => new { formKey = p.Key.ToString(), present = p.Value is not null, x = p.Value?.Position.X, y = p.Value?.Position.Y }).ToList(),
-                floor = HarnessShared.WinStateDump.Floor(_ws, RefsByGrid, LandByGrid),
+                floor = HarnessShared.WinStateDump.Floor(_ws, RefsByGrid, LandByGrid, UnreadableLandWhy.Keys.Select(k => (k.Item1, k.Item2))),
             });
         }
 

@@ -11,6 +11,7 @@
     <ConcurrentGarbageCollection>false</ConcurrentGarbageCollection>
   </PropertyGroup>
   <ItemGroup>
+    <Compile Include="..\_shared\LastSighting.cs" Link="LastSighting.cs" />
     <ProjectReference Include="..\..\src\housecarl-core\housecarl-core.csproj" />
   </ItemGroup>
   <ItemGroup>

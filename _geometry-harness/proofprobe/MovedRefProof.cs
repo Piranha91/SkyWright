@@ -22,22 +22,17 @@ static class MovedRefProof
         Dictionary<FormKey, Dictionary<(int, int), float[,]>> Land,
         HashSet<(FormKey Ws, int X, int Y)> UnreadableLand);
 
-    /// <summary>The floor filing, driven the way a probe that files every exterior cell drives it.</summary>
+    /// <summary>The floor filing, driven the way a probe that files every exterior cell drives it: a FloorIndex over every
+    /// cell of every plugin (LastSighting.Cells), in load order.</summary>
     static FloorView FloorOf(IReadOnlyList<string> paths)
     {
-        var refs = new Dictionary<FormKey, Dictionary<(int, int), Dictionary<FormKey, PlacedRef>>>();
-        var land = new Dictionary<FormKey, Dictionary<(int, int), float[,]>>();
+        var index = new FloorFeed.FloorIndex();
         foreach (var path in paths)
         {
             using var mod = SkyrimMod.CreateFromBinaryOverlay(path, Rel);
-            foreach (var cp in PlacementExtract.FromMod(mod, includeDeletions: true))
-            {
-                if (cp.Interior) continue;
-                if (!refs.TryGetValue(cp.Worldspace, out var rg)) { refs[cp.Worldspace] = rg = new(); land[cp.Worldspace] = new(); }
-                FloorFeed.FileByGrid(cp, rg, land[cp.Worldspace]);
-            }
+            foreach (var cp in LastSighting.Cells(mod)) index.Observe(cp, Path.GetFileName(path));
         }
-        return new FloorView(refs, land, new HashSet<(FormKey, int, int)>());
+        return new FloorView(index.RefsByWorld, index.LandByWorld, index.UnreadableLand.ToHashSet());
     }
 
     static CellPlacements? CellOf(string path, FormKey cell)

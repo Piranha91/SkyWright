@@ -306,12 +306,14 @@ if (mode == "arms" || mode == "cut")
     // persistent cell holds the markers), so they are gathered over every cell before the field is built.
     var enableFacts = new EnableFactsIndex();
     foreach (var rec in mod.EnumerateMajorRecords()) if (rec is IPlacedGetter dpg && dpg.IsDeleted) enableFacts.NoteDeleted(dpg.FormKey);
-    var frg = new Dictionary<(int, int), Dictionary<FormKey, PlacedRef>>(); var flg = new Dictionary<(int, int), float[,]>();
-    foreach (var cp in PlacementExtract.FromMod(mod))
+    // The floor filing (FloorFeed.FloorIndex): the plugin's exterior cells of this cell's worldspace, by position.
+    var floorIndex = new FloorFeed.FloorIndex((ws, _) => ws == cell.Worldspace);
+    foreach (var cp in LastSighting.Cells(mod))
     {
         foreach (var r in cp.Refs) enableFacts.Note(r);
-        if (!cp.Interior && cp.Worldspace == cell.Worldspace) FloorFeed.FileByGrid(cp, frg, flg);
+        floorIndex.Observe(cp, plugin);
     }
+    var frg = floorIndex.RefsOf(cell.Worldspace); var flg = floorIndex.LandOf(cell.Worldspace);
     var pop = popMode == PopulationMode.Flags ? EnablePopulation.Flags(enableFacts) : EnablePopulation.LoadTime(enableFacts);
     FloorField floor;
     if (!cell.Interior && cell.Grid is { } fg)

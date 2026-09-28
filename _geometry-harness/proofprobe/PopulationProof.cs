@@ -383,7 +383,7 @@ static class PopulationProof
         // ---- the exterior grid filing must not prune on the flag -------------------------------------------------------
         {
             // A ref whose OWN flag is set but whose parent enables it: filed by grid, it must survive ingestion so the
-            // chain can put it back. Before Q27 FileByGrid dropped it during the walk and no resolver ever saw it.
+            // chain can put it back. Before Q27 the grid filing dropped it during the walk and no resolver ever saw it.
             var ext = new CellPlacements(M(0x830), "PopExt", false, M(0x840), (0, 0),
                 new List<PlacedRef>
                 {
@@ -392,10 +392,9 @@ static class PopulationProof
                     new(R(1), "PlacedObject", "COff", new Vec3(20, 20, 0), new Vec3(0, 0, 0), 1f, slabK, false,
                         InitiallyDisabled: false, Deleted: false, EnableParent: S(1)),
                 }, new List<NavmeshGeometry>(), null);
-            var byGrid = new Dictionary<(int, int), Dictionary<FormKey, PlacedRef>>();
-            var landByGrid = new Dictionary<(int, int), float[,]>();
-            FloorFeed.FileByGrid(ext, byGrid, landByGrid);
-            var (nb, _) = FloorFeed.Neighbourhood((0, 0), byGrid, landByGrid);
+            var floorIndex = new FloorFeed.FloorIndex();
+            floorIndex.Observe(ext);
+            var (nb, _) = floorIndex.NeighbourhoodOf(M(0x840), (0, 0));
             Check("floor/ingest: an initially-disabled reference whose PARENT enables it survives the exterior grid filing — the enable decision belongs to the population, not to ingestion",
                   nb.Any(r => r.FormKey == R(3)) && nb.Any(r => r.FormKey == R(1)), $"{nb.Count} refs filed");
             var extChain = FloorFeed.Build(nb, Geo, null, 0f, enabled: pop.Predicate);

@@ -13,25 +13,34 @@ internal static class StationFloorFiling
     /// one) — the LAND heightmaps with it, which is what stops a station on bare terrain being refused for want of a floor
     /// that is there. The worldspace's persistent cell has no grid of its own and its refs reach anywhere, so it is filed
     /// whole; a gridded cell is filed within reach of the target. Nothing here runs unless --stations asked for it.</summary>
-    internal static void Observe(CellPlacements cp, bool stationsAsked, FormKey targetWorldspace, (int X, int Y)? targetGrid, int radius,
-                                 Dictionary<(int, int), Dictionary<FormKey, PlacedRef>> refsByGrid, Dictionary<(int, int), float[,]> landByGrid)
+    /// <summary>The walk's station floor filing: every cell of every plugin is observed, and a floor candidate or a LAND
+    /// is filed when it stands in the target's worldspace within <paramref name="radius"/> grids of the target (by
+    /// position). Null when --stations was not asked for.</summary>
+    internal static FloorFeed.FloorIndex? Begin(bool stationsAsked, FormKey targetWorldspace, (int X, int Y)? targetGrid, int radius) =>
+        !stationsAsked ? null : new FloorFeed.FloorIndex((ws, g) => ws == targetWorldspace
+            && (targetGrid is not { } t || (Math.Abs(g.X - t.X) <= radius && Math.Abs(g.Y - t.Y) <= radius)));
+
+    /// <summary>After the walk: the target worldspace's filing into the maps the station modes and the retained walk read.</summary>
+    internal static void Finish(FloorFeed.FloorIndex? index, FormKey targetWorldspace,
+                                Dictionary<(int, int), Dictionary<FormKey, PlacedRef>> refsByGrid, Dictionary<(int, int), float[,]> landByGrid,
+                                Dictionary<(int, int), string> unreadableLand)
     {
-        if (stationsAsked && !cp.Interior && cp.Worldspace == targetWorldspace
-            && (cp.Grid is not { } cgS || targetGrid is not { } tgS
-                || (Math.Abs(cgS.X - tgS.X) <= radius
-                    && Math.Abs(cgS.Y - tgS.Y) <= radius)))
-            FloorFeed.FileByGrid(cp, refsByGrid, landByGrid);
+        if (index is null) return;
+        foreach (var (g, d) in index.RefsOf(targetWorldspace)) refsByGrid[g] = d;
+        foreach (var (g, h) in index.LandOf(targetWorldspace)) landByGrid[g] = h;
+        foreach (var (k, why) in index.UnreadableLandWhy) if (k.Ws == targetWorldspace) unreadableLand[(k.X, k.Y)] = why;
     }
 
     /// <summary>HOUSECARL_WINSTATE_DUMP: the station floor filing after the walk, for an independent reader.</summary>
     internal static void Dump(FormKey targetWorldspace, (int X, int Y)? targetGrid, int radius,
-                              Dictionary<(int, int), Dictionary<FormKey, PlacedRef>> refsByGrid, Dictionary<(int, int), float[,]> landByGrid)
+                              Dictionary<(int, int), Dictionary<FormKey, PlacedRef>> refsByGrid, Dictionary<(int, int), float[,]> landByGrid,
+                              Dictionary<(int, int), string>? unreadableLand = null)
     {
         if (!WinStateDump.Asked) return;
         WinStateDump.Write("viewprobe-stations", new
         {
             worldspace = targetWorldspace.ToString(), targetX = targetGrid?.X, targetY = targetGrid?.Y, radius,
-            floor = WinStateDump.Floor(targetWorldspace, refsByGrid, landByGrid),
+            floor = WinStateDump.Floor(targetWorldspace, refsByGrid, landByGrid, unreadableLand?.Keys.Select(k => (k.Item1, k.Item2))),
         });
     }
 }
@@ -76,4 +85,13 @@ internal static class RefWhere
                       if (Environment.GetEnvironmentVariable("VP_DOOR_DEBUG") == "1")
                           Console.WriteLine($"   [debug] door {r.FormKey} in cp: Cell={cp.Cell} Grid={(cp.Grid is { } gg ? $"{gg.X},{gg.Y}" : "null")} Interior={cp.Interior} Ws={cp.Worldspace} plugin={pluginKey}"); }
     }
+}
+
+/// <summary>A station floor over a grid whose last LAND gives no heights: refused, never read from an earlier plugin's
+/// heights or from none.</summary>
+internal sealed class FloorLandUnreadable : ReadRefusal
+{
+    internal FloorLandUnreadable(int gx, int gy, string why)
+        : base($"the station floor needs the LAND of grid square {gx},{gy}, which gives no heights ({why}). Refusing: an "
+             + "earlier plugin's heights, or none, would be read in its place.", null) { }
 }

@@ -78,28 +78,106 @@ internal static class FloorFeed
     /// <summary>The exterior grid cell a position falls in.</summary>
     public static (int X, int Y) GridOf(Vec3 p) => ((int)MathF.Floor(p.X / 4096f), (int)MathF.Floor(p.Y / 4096f));
 
-    /// <summary>File a cell's refs by the grid cell their POSITION falls in, into a per-worldspace map a neighbourhood
-    /// is later read from. A later plugin's ref of the same FormKey replaces an earlier one (call in load order).</summary>
-    public static void FileByGrid(CellPlacements cp, Dictionary<(int, int), Dictionary<FormKey, PlacedRef>> refsByGrid,
-                                  Dictionary<(int, int), float[,]> landByGrid)
+    /// <summary>
+    /// The floor filing under the last-sighting rule (_shared/LastSighting.cs): per worldspace, the references that can be
+    /// a floor filed by the grid cell their POSITION falls in, and the LAND by grid.
+    ///
+    /// Call <see cref="Observe"/> for EVERY cell of EVERY plugin in load order (LastSighting.Cells), interiors and other
+    /// worldspaces included. Each reference is held at most once, at its last sighting: a later sighting anywhere else
+    /// (another grid, cell, worldspace, an interior, a deletion with or without placement data, a record with no base)
+    /// takes the earlier filing out. A reference is filed when its last sighting is exterior, not deleted, has a base, and
+    /// its position's grid passes the caller's wantGrid (all grids when null) -- by POSITION, so a worldspace's persistent
+    /// refs, and a ref filed in a far cell's record but standing here, are filed where they stand. The ENABLE STATE is not
+    /// decided here (Q27): a ref whose own flag is set may still be there through an enable parent; the filtering happens
+    /// once, in Build, against the run's population.
+    ///
+    /// LAND: the last LAND record at a grid wins. A later cell copy with no LAND leaves the earlier heights; a later LAND
+    /// that gives no heights (CellPlacements.LandUnreadableReason) removes them and names the grid in UnreadableLandWhy,
+    /// which a caller refuses or counts on; a later readable LAND clears the name.
+    ///
+    /// RefsByWorld and LandByWorld are the maps Neighbourhood reads, kept current as cells are observed.
+    /// </summary>
+    public sealed class FloorIndex
     {
-        if (cp.Interior) return;
-        if (cp.Land is { } land && cp.Grid is { } g) landByGrid[g] = land;
-        foreach (var r in cp.Refs)
+        public readonly Dictionary<FormKey, Dictionary<(int, int), Dictionary<FormKey, PlacedRef>>> RefsByWorld = new();
+        public readonly Dictionary<FormKey, Dictionary<(int, int), float[,]>> LandByWorld = new();
+        /// <summary>Grids whose last LAND gives no heights, with the reason and the plugin.</summary>
+        public readonly Dictionary<(FormKey Ws, int X, int Y), string> UnreadableLandWhy = new();
+        public IEnumerable<(FormKey Ws, int X, int Y)> UnreadableLand => UnreadableLandWhy.Keys;
+        readonly Func<FormKey, (int X, int Y), bool>? _wantGrid;
+        readonly Dictionary<FormKey, (FormKey Ws, (int, int) Grid)> _where = new();
+
+        public FloorIndex(Func<FormKey, (int X, int Y), bool>? wantGrid = null) { _wantGrid = wantGrid; }
+
+        /// <summary>The maps of one worldspace, created empty (both together, as callers index one by the other's keys)
+        /// when nothing has been filed there.</summary>
+        public Dictionary<(int, int), Dictionary<FormKey, PlacedRef>> RefsOf(FormKey ws) { Ensure(ws); return RefsByWorld[ws]; }
+        public Dictionary<(int, int), float[,]> LandOf(FormKey ws) { Ensure(ws); return LandByWorld[ws]; }
+        void Ensure(FormKey ws)
         {
-            var key = GridOf(r.Position);
-            if (!refsByGrid.TryGetValue(key, out var d)) refsByGrid[key] = d = new Dictionary<FormKey, PlacedRef>();
-            // A later plugin that deletes the ref, or leaves it without a base, takes it out of the floor; one that moves
-            // it re-files it. The ENABLE STATE is NOT decided here (Q27): a ref whose own flag is set may still be there
-            // through an enable parent, and dropping it during ingest put it beyond the resolver's reach for good — the
-            // filtering happens once, in Build, against the run's population. The winning record is what stays in the map,
-            // so the flag population reads the same answer here as it always did.
-            if (r.Deleted || r.Base is null) { d.Remove(r.FormKey); continue; }
-            d[r.FormKey] = r;
+            if (!RefsByWorld.ContainsKey(ws)) RefsByWorld[ws] = new();
+            if (!LandByWorld.ContainsKey(ws)) LandByWorld[ws] = new();
         }
+
+        /// <summary>One cell of one plugin, in load order. <paramref name="plugin"/> only names an unreadable LAND.</summary>
+        public void Observe(CellPlacements cp, string? plugin = null)
+        {
+            foreach (var r in cp.Refs)
+            {
+                Remove(r.FormKey);
+                if (cp.Interior || cp.Worldspace.IsNull || r.Deleted || r.Base is null) continue;
+                var g = GridOf(r.Position);
+                if (_wantGrid is not null && !_wantGrid(cp.Worldspace, g)) continue;
+                var byGrid = RefsOf(cp.Worldspace);
+                if (!byGrid.TryGetValue(g, out var d)) byGrid[g] = d = new Dictionary<FormKey, PlacedRef>();
+                d[r.FormKey] = r;
+                _where[r.FormKey] = (cp.Worldspace, g);
+            }
+            if (cp.DeletedRefs is { Count: > 0 } deleted)
+                foreach (var d in deleted) Remove(d.FormKey);
+
+            if (cp.Interior || cp.Worldspace.IsNull || cp.Grid is not { } cg) return;
+            if (_wantGrid is not null && !_wantGrid(cp.Worldspace, cg)) return;
+            if (cp.LandUnreadableReason is { } why)
+            {
+                LandOf(cp.Worldspace).Remove(cg);
+                UnreadableLandWhy[(cp.Worldspace, cg.X, cg.Y)] = why + (plugin is null ? "" : $" ({plugin})");
+            }
+            else if (cp.Land is { } land)
+            {
+                LandOf(cp.Worldspace)[cg] = land;
+                UnreadableLandWhy.Remove((cp.Worldspace, cg.X, cg.Y));
+            }
+        }
+
+        void Remove(FormKey k)
+        {
+            if (!_where.Remove(k, out var at)) return;
+            if (RefsByWorld.TryGetValue(at.Ws, out var byGrid) && byGrid.TryGetValue(at.Grid, out var d))
+            {
+                d.Remove(k);
+                if (d.Count == 0) byGrid.Remove(at.Grid);
+            }
+        }
+
+        /// <summary>The unreadable-LAND grids inside the 3x3 around <paramref name="grid"/> of <paramref name="ws"/>, with
+        /// their reasons: what a caller refuses or counts on before it builds a field there.</summary>
+        public List<string> UnreadableNear(FormKey ws, (int X, int Y) grid)
+        {
+            var list = new List<string>();
+            for (int dx = -1; dx <= 1; dx++)
+                for (int dy = -1; dy <= 1; dy++)
+                    if (UnreadableLandWhy.TryGetValue((ws, grid.X + dx, grid.Y + dy), out var why))
+                        list.Add($"grid {grid.X + dx},{grid.Y + dy}: {why}");
+            return list;
+        }
+
+        /// <summary>The 3x3 neighbourhood of one worldspace (Neighbourhood over this index's maps).</summary>
+        public (List<PlacedRef> Refs, List<((int X, int Y) Grid, float[,] Heights)> Land) NeighbourhoodOf(FormKey ws, (int X, int Y) grid) =>
+            Neighbourhood(grid, RefsOf(ws), LandOf(ws));
     }
 
-    /// <summary>The 3×3 neighbourhood around an exterior cell, out of maps <see cref="FileByGrid"/> filled.</summary>
+    /// <summary>The 3×3 neighbourhood around an exterior cell, out of maps a <see cref="FloorIndex"/> keeps.</summary>
     public static (List<PlacedRef> Refs, List<((int X, int Y) Grid, float[,] Heights)> Land) Neighbourhood(
         (int X, int Y) grid, Dictionary<(int, int), Dictionary<FormKey, PlacedRef>> refsByGrid, Dictionary<(int, int), float[,]> landByGrid)
     {
