@@ -12,6 +12,10 @@ namespace HarnessShared;
 //   position inside a bound); a later sighting anywhere else takes the earlier version out, so a move leaves no copy at the
 //   old cell, grid or bucket.
 //
+// NAVMESHES follow the same rule (LastSightingNavSet): a navmesh's state is its last sighting; a sighting is a navmesh
+// with geometry (CellPlacements.Navmeshes) or a record that carries none (CellPlacements.DeletedNavmeshes), and a sighting
+// flagged deleted takes the navmesh out whether or not it kept its geometry (NavmeshGeometry.Deleted).
+//
 // A walk passes EVERY cell of EVERY plugin in load order (LastSighting.Cells), not only the cells its filter wants: a later
 // sighting in a cell the filter rejects is exactly what must remove the earlier version. viewprobe's WinningRefWalk
 // implements the same rule with the render's ring and persistent merge (viewprobe/WinningRefs.cs); FloorFeed.FloorIndex
@@ -19,7 +23,7 @@ namespace HarnessShared;
 public static class LastSighting
 {
     /// <summary>Every cell of one plugin a last-sighting walk must see: with the deletion-only cells (a later plugin's
-    /// deletion must take a reference out) and the cells with neither references nor navmeshes (a cell copy that carries
+    /// deletion must take a reference or a navmesh out) and the cells with neither references nor navmeshes (a cell copy that carries
     /// only its LAND must reach the floor filing).</summary>
     public static IEnumerable<CellPlacements> Cells(ISkyrimModGetter mod) =>
         PlacementExtract.FromMod(mod, includeEmpty: true, includeDeletions: true);
@@ -53,6 +57,42 @@ public sealed class LastSightingSet
     void Out(FormKey k)
     {
         if (Refs.Remove(k)) CellOf.Remove(k);
+        if (_everAdmitted.Contains(k)) TakenOut.Add(k);
+    }
+}
+
+/// <summary>The navmeshes a walk holds under the last-sighting rule, with the cell each last sighting stands in. The only
+/// mutator is <see cref="Observe"/>.</summary>
+public sealed class LastSightingNavSet
+{
+    /// <summary>navmesh -> its last sighting, for every navmesh whose last sighting the filter admitted.</summary>
+    public readonly Dictionary<FormKey, NavmeshGeometry> Navs = new();
+    /// <summary>navmesh -> the cell of that sighting.</summary>
+    public readonly Dictionary<FormKey, FormKey> CellOf = new();
+    readonly HashSet<FormKey> _everAdmitted = new();
+    /// <summary>Navmeshes some sighting admitted and a later sighting took out (moved elsewhere or deleted).</summary>
+    public readonly HashSet<FormKey> TakenOut = new();
+
+    /// <summary>One cell of one plugin, in load order: each navmesh in it is admitted or taken out afresh (a deleted one,
+    /// even with its geometry, is taken out); each record in it without geometry takes its navmesh out. Returns the keys
+    /// this cell touched, so a caller mirroring the set into its own table updates exactly those.</summary>
+    public IEnumerable<FormKey> Observe(CellPlacements cp, Func<CellPlacements, NavmeshGeometry, bool> admit)
+    {
+        var touched = new List<FormKey>(cp.Navmeshes.Count);
+        foreach (var n in cp.Navmeshes)
+        {
+            if (!n.Deleted && admit(cp, n)) { Navs[n.FormKey] = n; CellOf[n.FormKey] = cp.Cell; _everAdmitted.Add(n.FormKey); TakenOut.Remove(n.FormKey); }
+            else Out(n.FormKey);
+            touched.Add(n.FormKey);
+        }
+        if (cp.DeletedNavmeshes is { Count: > 0 } deleted)
+            foreach (var d in deleted) { Out(d.FormKey); touched.Add(d.FormKey); }
+        return touched;
+    }
+
+    void Out(FormKey k)
+    {
+        if (Navs.Remove(k)) CellOf.Remove(k);
         if (_everAdmitted.Contains(k)) TakenOut.Add(k);
     }
 }

@@ -9,7 +9,11 @@ using Mutagen.Bethesda.Skyrim;
 sealed class RouteWalk
 {
     public readonly HashSet<FormKey> WantedCells;
-    public readonly Dictionary<FormKey, Dictionary<FormKey, NavmeshGeometry>> WinNav = new();      // cell -> navmesh key -> geometry (winner)
+    /// <summary>cell -> navmesh key -> geometry: the wanted cells' navmeshes under the last-sighting rule (LastSightingNavSet),
+    /// each in the one cell of its last sighting, and in none when a later plugin moved it out or deleted it. Rebuilt from
+    /// the set after every plugin.</summary>
+    public readonly Dictionary<FormKey, Dictionary<FormKey, NavmeshGeometry>> WinNav = new();
+    readonly LastSightingNavSet _navs = new();
     /// <summary>The wanted cells' references under the last-sighting rule (_shared/LastSighting.cs): each reference in the
     /// one cell of its last sighting, and in none when a later plugin moved it out of the wanted cells or deleted it.
     /// Rebuilt from the set after every plugin.</summary>
@@ -64,12 +68,14 @@ sealed class RouteWalk
             Floor.Observe(cp, m.ModKey.FileName.String);
             bool wanted = WantedCells.Contains(cp.Cell);
             _held.Observe(cp, (_, _) => wanted);
-            if (!wanted) continue;
-            if (cp.Navmeshes.Count > 0)
-            {
-                if (!WinNav.TryGetValue(cp.Cell, out var d)) WinNav[cp.Cell] = d = new Dictionary<FormKey, NavmeshGeometry>();
-                foreach (var nav in cp.Navmeshes) d[nav.FormKey] = nav;
-            }
+            _navs.Observe(cp, (_, _) => wanted);
+        }
+        WinNav.Clear();
+        foreach (var (k, n) in _navs.Navs)
+        {
+            var cell = _navs.CellOf[k];
+            if (!WinNav.TryGetValue(cell, out var d)) WinNav[cell] = d = new Dictionary<FormKey, NavmeshGeometry>();
+            d[k] = n;
         }
         CellRefs.Clear();
         foreach (var (k, r) in _held.Refs)

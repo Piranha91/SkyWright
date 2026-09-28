@@ -19,17 +19,18 @@ sealed class FloorgapWalk
     public readonly List<CellPlacements> Cells = new();
     // --winning: only the named cell is merged. Its references under the last-sighting rule (_shared/LastSighting.cs): a
     // reference is held iff its last sighting stands in the wanted cell, so a later plugin that moves it out or deletes it
-    // takes it out. Navmeshes by FormKey, a later plugin replacing an earlier one; the meta from the first plugin that
+    // takes it out. The meta from the first plugin that
     // carries the cell; the LAND from the last that has one, and a last LAND that gives no heights is named
     // (MergedLandUnreadable), not replaced by an earlier one; a last LAND that declares no heights leaves none (no terrain
-    // there) and no name. A navmesh a later plugin DELETES outright is not removed here
-    // (blockprobe's walk has the same simplification; a follow-up).
+    // there) and no name. Its navmeshes under the same rule (LastSightingNavSet): a later plugin that moves one out or
+    // deletes it, with or without its geometry, takes it out.
     public CellPlacements? MergedMeta;
     public float[,]? MergedLand;
     public string? MergedLandUnreadable;
     readonly LastSightingSet _merged = new();
     public Dictionary<FormKey, PlacedRef> MergedRefs => _merged.Refs;
-    public readonly Dictionary<FormKey, NavmeshGeometry> MergedNavs = new();
+    readonly LastSightingNavSet _mergedNavs = new();
+    public Dictionary<FormKey, NavmeshGeometry> MergedNavs => _mergedNavs.Navs;
     public readonly List<string> PluginsWithCell = new();
 
     public FloorgapWalk(bool winning, string? wantCell)
@@ -57,13 +58,13 @@ sealed class FloorgapWalk
             if (!Winning) { if (cp.Refs.Count > 0 || cp.Navmeshes.Count > 0) Cells.Add(cp); continue; }
             bool isWanted = (WantKey is { } wk && cp.Cell == wk) || (WantCell is not null && string.Equals(cp.CellEditorId, WantCell, StringComparison.OrdinalIgnoreCase));
             _merged.Observe(cp, (_, _) => isWanted);
+            _mergedNavs.Observe(cp, (_, _) => isWanted);
             if (!isWanted) continue;
             WantKey ??= cp.Cell;
             MergedMeta ??= cp;
             if (cp.LandUnreadableReason is { } why) { MergedLand = null; MergedLandUnreadable = $"{why} ({Path.GetFileName(path)})"; }
             else if (cp.LandDeclaresNoHeights) { MergedLand = null; MergedLandUnreadable = null; }   // no terrain here (FloorIndex)
             else if (cp.Land is not null) { MergedLand = cp.Land; MergedLandUnreadable = null; }
-            foreach (var nv in cp.Navmeshes) MergedNavs[nv.FormKey] = nv;
             PluginsWithCell.Add(Path.GetFileName(path));
         }
     }

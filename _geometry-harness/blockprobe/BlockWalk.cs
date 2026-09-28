@@ -24,7 +24,13 @@ sealed class BlockWalk
     public Dictionary<FormKey, FormKey> WinRefCell => _win.CellOf;                  // ref FormKey -> winning cell
     /// <summary>References a target cell held until a later plugin moved them out or deleted them: not judged.</summary>
     public int TakenOutCount => _win.TakenOut.Count;
-    public readonly Dictionary<FormKey, (NavmeshGeometry Nav, string Plugin, FormKey Cell)> WinNav = new();
+    /// <summary>The target cells' navmeshes under the same rule (LastSightingNavSet): a navmesh is held iff its last
+    /// sighting stands in a target cell, with its geometry; moved out of those cells or deleted (with or without its
+    /// geometry), it is gone. With the plugin of that sighting and its cell.</summary>
+    readonly LastSightingNavSet _navs = new();
+    readonly Dictionary<FormKey, string> _navPlugin = new();
+    public Dictionary<FormKey, (NavmeshGeometry Nav, string Plugin, FormKey Cell)> WinNav =>
+        _navs.Navs.ToDictionary(kv => kv.Key, kv => (kv.Value, _navPlugin[kv.Key], _navs.CellOf[kv.Key]));
     public readonly Dictionary<FormKey, CellPlacements> CellMeta = new();
     public readonly Dictionary<FormKey, string> DefinedBy = new();     // ref -> the first plugin that placed it, for the {NAVCUT by …} line
 
@@ -53,10 +59,10 @@ sealed class BlockWalk
             Floor.Observe(cp, name);
             bool targetCell = TargetCells.ContainsKey(cp.Cell);
             _win.Observe(cp, (c, _) => targetCell);
+            foreach (var k in _navs.Observe(cp, (_, _) => targetCell)) if (_navs.Navs.ContainsKey(k)) _navPlugin[k] = name;
             if (!targetCell) continue;
             CellMeta[cp.Cell] = cp;
             foreach (var r in cp.Refs) DefinedBy.TryAdd(r.FormKey, name);
-            foreach (var nav in cp.Navmeshes) WinNav[nav.FormKey] = (nav, name, cp.Cell);
         }
     }
 
