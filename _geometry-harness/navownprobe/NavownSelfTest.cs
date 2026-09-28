@@ -23,6 +23,9 @@ static class NavownSelfTest
         t.Check("N1-D2 RefCellAnywhere: deleted in a copy holding only the deletion: no cell", !c.RefCellAnywhere.ContainsKey(F.D2), Cell(F.D2));
         t.Check("N1-M3 RefCellAnywhere: moved to an interior, that interior", Cell(F.M3) == F.I2.ToString(), Cell(F.M3));
         t.Check("N1-NPC4 RefCellAnywhere: a reference deleted WITH its data is placed nowhere", !c.RefCellAnywhere.ContainsKey(F.NPC4), Cell(F.NPC4));
+        var c10 = NeedsWitnessJoin.Build(t.Paths, new HashSet<FormKey> { F.E10 });
+        t.Check("N1-D3 a reference deleted WITH its data in a wanted cell is not a witness", !c10.Refs.ContainsKey(F.D3),
+                c10.Refs.TryGetValue(F.D3, out var w3) ? $"held, state '{w3.State}'" : "absent");
         var npcs = c.NpcPlacedAnywhere.Select(k => k == F.N1 ? "N1" : k == F.N2 ? "N2" : k.ToString()).OrderBy(x => x).ToList();
         t.Check("N1-NPC NpcPlacedAnywhere: N2 only (N1's one reference was re-based to N2; N2's other was deleted)",
                 npcs.SequenceEqual(new[] { "N2" }), string.Join(", ", npcs));
