@@ -2748,16 +2748,11 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot,
                             // filing instead. Widening it would decode a 7x7 block of LAND for a
                             // mode that draws nothing.
                             if (Math.Abs(gp.X - tg.X) > 1 || Math.Abs(gp.Y - tg.Y) > 1) continue;
-                            if (c.Landscape?.VertexHeightMap is not { } vh) continue;
-                            var grad = new sbyte[33, 33];
-                            try
-                            {
-                                for (int y = 0; y < 33; y++)
-                                    for (int x = 0; x < 33; x++)
-                                        grad[x, y] = vh.HeightMap[x, y];
-                            }
-                            // An unreadable heightmap is refused: skipping it drew the earlier plugin's heights.
-                            catch (Exception ex) { throw new ViewProbe.TerrainUnreadable(m2Name, gp.X, gp.Y, ex); }
+                            // One rule (TerrainLand.cs, the core's LandHeight.Classify): no LAND leaves the earlier
+                            // terrain; a LAND that declares no heights removes it, so nothing is drawn there (the engine
+                            // draws no ground); an unreadable one is refused (skipping it drew the earlier plugin's heights).
+                            if (ViewProbe.TerrainLand.Step(c.Landscape, m2Name, (gp.X, gp.Y), landWin, landLayers, landPromoted) is not { } lcT) continue;
+                            var grad = lcT.Gradients!;
                             // Base layer per quadrant (a non-alpha layer names the quadrant's ground
                             // texture; alpha layers blend on top and are out of scope for this pass).
                             var quad = new FormKey?[4];
@@ -2765,7 +2760,7 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot,
                             var promoted = new[] { -1, -1, -1, -1 };
                             try
                             {
-                                foreach (var layer in c.Landscape.Layers)
+                                foreach (var layer in c.Landscape!.Layers)
                                 {
                                     int qi = layer.Header is { } lh ? (int)lh.Quadrant : -1;
                                     var tex = layer.Header?.Texture.FormKeyNullable;
@@ -2801,7 +2796,7 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot,
                             // A texture layer that cannot be read changes paint, not ground: counted and named on the
                             // console and in the report (PluginRead.cs), and the layers read before it are kept.
                             catch (Exception ex) { ViewProbe.TerrainLayerFailures.Add(m2Name, gp.X, gp.Y, census.Count, ex, "the terrain walk"); }
-                            landWin[(gp.X, gp.Y)] = (vh.Offset, grad, quad);   // later plugin overwrites = wins
+                            landWin[(gp.X, gp.Y)] = (lcT.Offset, grad, quad);   // later plugin overwrites = wins
                             landLayers[(gp.X, gp.Y)] = census;
                             landPromoted[(gp.X, gp.Y)] = promoted;
                         }

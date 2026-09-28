@@ -52,6 +52,37 @@ internal static class MovedRefSelfTestVp
         t.Check("V1-declared and builds one whose only heightless grid DECLARES no heights (grid 2,1, over the declared 1,1: no terrain there, no refusal)",
                 Try((2, 1)) == "built", Try((2, 1)));
 
+        // ---- T1: the render's terrain walk, one cell copy's LAND at a time (TerrainLand.Step), over W in load order ----
+        var terrain = new Dictionary<(int X, int Y), float>();
+        var terrainLayers = new Dictionary<(int X, int Y), string>();
+        var refusedT = new Dictionary<(int X, int Y), string>();
+        foreach (var (_, mod, path) in t.Plugins())
+            foreach (var ws in mod.Worldspaces.Records)
+            {
+                if (ws.FormKey != F.W) continue;
+                foreach (var blk in ws.SubCells) foreach (var sub in blk.Items) foreach (var c in sub.Items)
+                {
+                    if (c.Grid?.Point is not { } gp) continue;
+                    var g = (gp.X, gp.Y);
+                    try
+                    {
+                        if (TerrainLand.Step(c.Landscape, Path.GetFileName(path), g, terrain, terrainLayers) is { } lc)
+                        { terrain[g] = lc.Offset; terrainLayers[g] = Path.GetFileName(path); }
+                    }
+                    catch (TerrainUnreadable) { refusedT[g] = Path.GetFileName(path); }
+                }
+            }
+        string TerrainAt((int, int) g) => (terrain.TryGetValue(g, out var o) ? $"offset {o:0} from {terrainLayers.GetValueOrDefault(g)}" : "no terrain")
+                                          + (refusedT.TryGetValue(g, out var rp) ? $"; refused ({rp})" : "");
+        t.Check("T1-declared a later LAND declaring no heights: the master's terrain removed from every map, nothing refused",
+                !terrain.ContainsKey((1, 1)) && !terrainLayers.ContainsKey((1, 1)) && !refusedT.ContainsKey((1, 1)), TerrainAt((1, 1)));
+        t.Check("T1-claimed a later LAND claiming heights with no VHGT is refused", refusedT.GetValueOrDefault((-1, 0)) == "MrA.esp", TerrainAt((-1, 0)));
+        t.Check("T1-L1 a later LAND whose heightmap cannot be read is refused", refusedT.GetValueOrDefault((0, 0)) == "MrL.esp", TerrainAt((0, 0)));
+        t.Check("T1-absent later cell copies with no LAND leave the master's terrain (control)",
+                terrain.TryGetValue((1, 0), out var o10) && o10 == 0f && terrainLayers.GetValueOrDefault((1, 0)) == "MrMaster.esm", TerrainAt((1, 0)));
+        t.Check("T1-readable a later readable LAND is taken (control)",
+                terrain.TryGetValue((5, 0), out var o50) && o50 == 20f && terrainLayers.GetValueOrDefault((5, 0)) == "MrB.esp", TerrainAt((5, 0)));
+
         // ---- V2: NPC references by base ----
         string Under(FormKey b) => tables.NpcBase.TryGetValue(b, out var per) ? string.Join(" ", per.Keys.Select(MovedRefSelfTest.Name).OrderBy(x => x)) : "";
         t.Check("V2  an NPC reference re-based N1 -> N2 is listed under N2 only", Under(F.N1) == "" && Under(F.N2) == "NPC1", $"N1 [{Under(F.N1)}] N2 [{Under(F.N2)}]");

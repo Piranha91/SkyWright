@@ -890,7 +890,13 @@ flag someone typed, which is why neither is allowed to be silent.
   with no warning. Now a plugin that will not open, or fails while a walk reads it, stops the run
   (exit 2) naming the plugin, its place in the order and the walk; so does a profile that lists an
   active plugin no file provides, and a LAND whose heightmap the render's terrain walk cannot read
-  (naming the grid square). The `--stations` floor takes its heights from the shared floor filing
+  (naming the grid square). The terrain walk and the shared floor filing classify each LAND by one
+  rule (`HousecarlCore.LandHeight.Classify`, via `TerrainLand.cs`): a LAND whose DATA flag says it
+  has heights and that gives none is unreadable (refused, named); a LAND whose flag does NOT say so
+  and that has no VHGT DECLARES no terrain, so the square's earlier terrain is removed and nothing is
+  drawn or filed there, since the game draws no ground over such a square and has no terrain
+  collision (manual lab playtest, 2026-09-27); a cell copy with no LAND leaves the earlier terrain.
+  The `--stations` floor takes its heights from the shared floor filing
   (`FloorFeed.FloorIndex`), where a LAND that gives no heights is named
   (`CellPlacements.LandUnreadableReason`) and a station floor over it is refused (exit 2). A heightmap
   Mutagen misreads WITHOUT an exception (a VHGT cut short in the middle of a plugin reads the bytes
