@@ -150,6 +150,24 @@ internal static class MovedRefSelfTestVp
                 !(selVer.TryGetValue("MrA.esp", out var av) && av.ContainsKey(F.NVK)),
                 selVer.TryGetValue("MrA.esp", out var av2) ? string.Join(",", av2.Keys.Select(MovedRefSelfTest.NavName).OrderBy(x => x)) : "none");
 
+        // N1-sub: --nav-version may substitute an earlier plugin's version of a navmesh that stood in a selected cell and that
+        // a later plugin deleted (the pair view's "as if this plugin won" asks the same of the same record): NVD's master
+        // version (x 1100) is accepted. A navmesh never in a selected cell (NVX, in E11) is refused.
+        string Sub(FormKey key)
+        {
+            var s2 = new NavmeshSelection(F.E00, Array.Empty<string>(), new[] { key + "=MrMaster.esm" });
+            var w2 = new Dictionary<FormKey, NavmeshGeometry>();
+            var v2 = new Dictionary<string, Dictionary<FormKey, NavmeshGeometry>>(StringComparer.OrdinalIgnoreCase);
+            var watch2 = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "MrMaster.esm" };
+            foreach (var (_, mod, path) in t.Plugins())
+                foreach (var cp in Cells(mod)) s2.Observe(cp, Path.GetFileName(path), watch2, w2, v2);
+            try { return s2.Substitute(w2, v2).TryGetValue(key, out var n) ? $"substituted x {n.Vertices[0].X:0}" : "absent"; }
+            catch (ArgumentException e) { return "refused: " + e.Message; }
+        }
+        t.Check("N1-sub --nav-version of a navmesh deleted at the winner, from a plugin whose version stood in the selected cell: accepted",
+                Sub(F.NVD) == "substituted x 1100", Sub(F.NVD));
+        t.Check("N1-sub-out --nav-version of a navmesh never in a selected cell: refused", Sub(F.NVX).StartsWith("refused"), Sub(F.NVX));
+
         // ---- B1: --emit-bats' per-cell navmeshes (BatEmit.WalkCells), worklist cells E00 and E11 ----
         var ident = new Dictionary<int, BatEmit.CellIdent>();
         var bnav = new Dictionary<int, HarnessShared.LastSightingNavSet> { [0] = new(), [1] = new() };
