@@ -122,6 +122,8 @@ Console.WriteLine();
 // Which base records can physically obstruct. XMarkers have no mesh and no collision; a dropped
 // coin is not a wall. Kept as data here rather than hard-coded judgement anywhere deeper.
 // Bethesda's own shipped content. A dangling link with no mod on either end is theirs and permanent.
+// Creation Club plugins (ccbgssse*.esl and the rest) are deliberately NOT in this set: their changes, including navmesh
+// deletions, are reported like any mod's (decided 2026-09-28).
 var Vanilla = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
 { "Skyrim.esm", "Update.esm", "Dawnguard.esm", "HearthFires.esm", "Dragonborn.esm", "SkyrimVR.esm", "_ResourcePack.esl" };
 
