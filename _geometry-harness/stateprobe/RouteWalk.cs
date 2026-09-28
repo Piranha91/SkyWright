@@ -10,7 +10,11 @@ sealed class RouteWalk
 {
     public readonly HashSet<FormKey> WantedCells;
     public readonly Dictionary<FormKey, Dictionary<FormKey, NavmeshGeometry>> WinNav = new();      // cell -> navmesh key -> geometry (winner)
+    /// <summary>The wanted cells' references under the last-sighting rule (_shared/LastSighting.cs): each reference in the
+    /// one cell of its last sighting, and in none when a later plugin moved it out of the wanted cells or deleted it.
+    /// Rebuilt from the set after every plugin.</summary>
     public readonly Dictionary<FormKey, List<PlacedRef>> CellRefs = new();
+    readonly LastSightingSet _held = new();
     // The floor under a wanted exterior cell reaches across its borders (Q24, 2026-09-05 — _shared/FloorFeed.cs): the 3×3
     // neighbourhood's refs and LAND are filed by worldspace and grid during the walk. A wanted cell's grid is learned from
     // the first plugin that defines it (Skyrim.esm for all but a mod's own cells), read ahead of the walk below so the
@@ -36,18 +40,16 @@ sealed class RouteWalk
         for (int dx = -1; dx <= 1; dx++) for (int dy = -1; dy <= 1; dy++) FloorGrids.Add((cp.Worldspace, g.X + dx, g.Y + dy));
     }
 
-    /// <summary>The first plugin read ahead, so its own neighbours are filed too.</summary>
+    /// <summary>The first plugin read ahead, so its own neighbours are filed too. Refused (PluginUnreadableException)
+    /// when it cannot be read.</summary>
     public void Seed(string firstPath)
     {
-        try { using var m0 = SkyrimMod.CreateFromBinaryOverlay(firstPath, SkyrimRelease.SkyrimSE); foreach (var cp in PlacementExtract.FromMod(m0)) LearnGrid(cp); }
-        catch { }
+        var m0 = PluginOpen.Open(firstPath, "stateprobe's route walk (grid pre-read)");
+        using (m0 as IDisposable) foreach (var cp in PlacementExtract.FromMod(m0)) LearnGrid(cp);
     }
 
-    /// <summary>Open one plugin of the order, or null when it cannot be read.</summary>
-    public static ISkyrimModGetter? Open(string path)
-    {
-        try { return SkyrimMod.CreateFromBinaryOverlay(path, SkyrimRelease.SkyrimSE); } catch { return null; }
-    }
+    /// <summary>Open one plugin of the order, or throw PluginUnreadableException (refused, never skipped).</summary>
+    public static ISkyrimModGetter? Open(string path) => PluginOpen.Open(path, "stateprobe's route walk");
 
     /// <summary>One plugin's cells, in load order.</summary>
     public void Plugin(ISkyrimModGetter m)
@@ -56,19 +58,21 @@ sealed class RouteWalk
         {
             LearnGrid(cp);
             Floor.Observe(cp, m.ModKey.FileName.String);
-            if (!WantedCells.Contains(cp.Cell)) continue;
+            bool wanted = WantedCells.Contains(cp.Cell);
+            _held.Observe(cp, (_, _) => wanted);
+            if (!wanted) continue;
             if (cp.Navmeshes.Count > 0)
             {
                 if (!WinNav.TryGetValue(cp.Cell, out var d)) WinNav[cp.Cell] = d = new Dictionary<FormKey, NavmeshGeometry>();
                 foreach (var nav in cp.Navmeshes) d[nav.FormKey] = nav;
             }
-            if (cp.Refs.Count > 0)
-            {
-                if (!CellRefs.TryGetValue(cp.Cell, out var l)) CellRefs[cp.Cell] = l = new List<PlacedRef>();
-                var seen = new HashSet<FormKey>(l.Select(r => r.FormKey));
-                l.RemoveAll(r => cp.Refs.Any(x => x.FormKey == r.FormKey));
-                l.AddRange(cp.Refs);
-            }
+        }
+        CellRefs.Clear();
+        foreach (var (k, r) in _held.Refs)
+        {
+            var cell = _held.CellOf[k];
+            if (!CellRefs.TryGetValue(cell, out var l)) CellRefs[cell] = l = new List<PlacedRef>();
+            l.Add(r);
         }
     }
 

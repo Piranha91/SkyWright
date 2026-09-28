@@ -219,11 +219,15 @@ if (routeOn)
     var cellGridOf = rwalk.CellGridOf;
     var floorRefsByWorld = rwalk.FloorRefsByWorld;
     var floorLandByWorld = rwalk.FloorLandByWorld;
-    if (paths.Count > 0 && !pluginKey[0].IsNull) rwalk.Seed(paths[0]);
+    // A plugin the first pass could not read is counted there (rule 6); this walk decides which version of a reference
+    // the route stands on, so it refuses one it cannot read rather than skip it (_shared/PluginOpen.cs).
+    try { if (paths.Count > 0) rwalk.Seed(paths[0]); }
+    catch (PluginUnreadableException ex) { Console.Error.WriteLine(ex.Message); return 2; }
     for (int p = 0; p < paths.Count; p++)
     {
-        if (pluginKey[p].IsNull) continue;
-        if (RouteWalk.Open(paths[p]) is not { } m) continue;
+        ISkyrimModGetter m;
+        try { m = RouteWalk.Open(paths[p])!; }
+        catch (PluginUnreadableException ex) { Console.Error.WriteLine(ex.Message); return 2; }
         using (m as IDisposable)
         {
             foreach (var rec in m.EnumerateMajorRecords()) ActorBand.CollectRecord(rec, npcFacts, raceFacts);
@@ -306,6 +310,12 @@ if (routeOn)
         var band = ActorBand.ForCell(crefs, npcFacts, raceFacts, fallbackTop, fallbackSrc, usePop.Predicate);
         if (!float.IsFinite(band.Top)) { why = $"UNJUDGEABLE actor band: {band.Source}"; fieldByCellState[(cell, key)] = null; return null; }
         FloorField floor;
+        if (cellGridOf.TryGetValue(cell, out var cgL) && rwalk.Floor.UnreadableNear(cgL.Wrld, (cgL.X, cgL.Y)) is { Count: > 0 } badLand)
+        {
+            why = $"UNJUDGEABLE floor: a LAND in the neighbourhood gives no heights ({string.Join("; ", badLand)})";
+            fieldByCellState[(cell, key)] = null;
+            return null;
+        }
         if (cellGridOf.TryGetValue(cell, out var cg) && floorRefsByWorld.TryGetValue(cg.Wrld, out var frw))
         {
             var (nbRefs, nbLand) = FloorFeed.Neighbourhood((cg.X, cg.Y), frw, floorLandByWorld[cg.Wrld]);
