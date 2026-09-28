@@ -1826,8 +1826,10 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot,
             {
                 // The --stations floor neighbourhood (WalkSideTables.cs).
                 stationFloor?.Observe(cp, plgName);
-                if (cp.Refs.Count == 0 && cp.Navmeshes.Count == 0 && cp.DeletedRefs is not { Count: > 0 }) continue;
+                // The navmesh selection sees every cell: a later sighting anywhere, a deletion-only copy included, can take
+                // a navmesh out of the winners (NavmeshSelection.Observe).
                 navSelection.Observe(cp, plgName, navVersionPlugins, winNav, navByPlugin);
+                if (cp.Refs.Count == 0 && cp.Navmeshes.Count == 0 && cp.DeletedRefs is not { Count: > 0 }) continue;
                 if (bosFill) bosIdx!.NoteCell(cp.Cell, cp.Worldspace);
                 foreach (var r in cp.Refs)
                 {

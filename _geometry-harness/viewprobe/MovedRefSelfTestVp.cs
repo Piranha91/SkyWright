@@ -143,14 +143,14 @@ internal static class MovedRefSelfTestVp
 
         // ---- B1: --emit-bats' per-cell navmeshes (BatEmit.WalkCells), worklist cells E00 and E11 ----
         var ident = new Dictionary<int, BatEmit.CellIdent>();
-        var bnav = new Dictionary<int, Dictionary<FormKey, NavmeshGeometry>> { [0] = new(), [1] = new() };
+        var bnav = new Dictionary<int, HarnessShared.LastSightingNavSet> { [0] = new(), [1] = new() };
         var wantedBat = new[] { F.E00.ToString(), F.E11.ToString() };
         foreach (var (_, mod, _) in t.Plugins()) BatEmit.WalkCells(mod, wantedBat, ident, bnav);
         t.CheckNavSet("B1  --emit-bats E00's navmeshes: moved out and deleted are gone; each at its last sighting",
-                      bnav[0].Select(kv => (kv.Key, (FormKey?)null, kv.Value)),
+                      bnav[0].Navs.Select(kv => (kv.Key, (FormKey?)null, kv.Value)),
                       new Dictionary<FormKey, (FormKey? Cell, float X)> { [F.NVR] = (null, 1420), [F.NVC] = (null, 1510) });
         t.CheckNavSet("B1-X --emit-bats E11's navmesh, deleted in a copy holding only the deletion, is gone",
-                      bnav[1].Select(kv => (kv.Key, (FormKey?)null, kv.Value)), new Dictionary<FormKey, (FormKey? Cell, float X)>());
+                      bnav[1].Navs.Select(kv => (kv.Key, (FormKey?)null, kv.Value)), new Dictionary<FormKey, (FormKey? Cell, float X)>());
         t.Check("B1-ident the cells' identity comes from the master (control)", ident.TryGetValue(0, out var i0) && i0.Key == F.E00
                 && ident.TryGetValue(1, out var i1) && i1.Key == F.E11, string.Join(",", ident.Select(kv => $"{kv.Key}:{kv.Value.Key}")));
     });

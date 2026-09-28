@@ -435,6 +435,7 @@ static class RouteStationMode
         public readonly Dictionary<string, (float? Default, string? Parent)> WorldChain = new(StringComparer.OrdinalIgnoreCase);
         public readonly Dictionary<FormKey, PlacedRef?> Prims = new();
         public readonly Dictionary<FormKey, NavmeshGeometry> Child = new();
+        readonly LastSightingNavSet _navW = new(), _navChild = new();
         public readonly HashSet<(int X, int Y)> Bound = new();
 
         public Walk(FormKey ws, IEnumerable<FormKey> children, FormKey plane)
@@ -495,12 +496,7 @@ static class RouteStationMode
                     if (isW && ws.EditorID is { Length: > 0 } ed) WsEditorId = ed;
                     foreach (var c in CellsOf(ws))
                     {
-                        if (isChild)
-                        {
-                            foreach (var n in c.NavigationMeshes) if (n.IsDeleted || n.Data is null) Child.Remove(n.FormKey);
-                            foreach (var nav in PlacementExtract.FromCell(c, ws.FormKey).Navmeshes) Child[nav.FormKey] = nav;
-                            continue;
-                        }
+                        if (isChild) continue;   // the child worldspaces' navmeshes: the floor pass below
                         (int X, int Y)? grid = c.Grid?.Point is { } gp ? (gp.X, gp.Y) : null;
                         if (grid is { } g && Bound.Contains(g))
                             Cells[g] = (c.FormKey.ToString(), new DetectorModel.WaterTuple(
@@ -520,10 +516,7 @@ static class RouteStationMode
                         {
                             if (!NavChain.TryGetValue(n.FormKey, out var ch)) NavChain[n.FormKey] = ch = new();
                             ch.Add(plugin);
-                            if (n.IsDeleted || n.Data is null) NavWin.Remove(n.FormKey);
                         }
-                        var cp = PlacementExtract.FromCell(c, ws.FormKey);
-                        foreach (var nav in cp.Navmeshes) NavWin[nav.FormKey] = (nav, grid);
                     }
                 }
             // The floor: every cell of the plugin, every worldspace and interior (LastSighting.Cells), in load order.
@@ -532,6 +525,13 @@ static class RouteStationMode
                 foreach (var fcp in LastSighting.Cells(fmod))
                 {
                     Floor.Observe(fcp, plugin);
+                    // The winning navmeshes of the worldspace and of its child worldspaces, under the last-sighting rule: a
+                    // later plugin that files one in another worldspace or an interior, or deletes it with or without its
+                    // geometry, takes it out.
+                    foreach (var k in _navW.Observe(fcp, (c, _) => c.Worldspace == _ws))
+                        if (_navW.Navs.TryGetValue(k, out var nw)) NavWin[k] = (nw, fcp.Grid); else NavWin.Remove(k);
+                    foreach (var k in _navChild.Observe(fcp, (c, _) => _children.Contains(c.Worldspace)))
+                        if (_navChild.Navs.TryGetValue(k, out var nc)) Child[k] = nc; else Child.Remove(k);
                     // The planes, under the last-sighting rule: a reference is a plane of this worldspace iff its last
                     // sighting is here with the plane-marker base; a later plugin that re-bases it, moves it to another
                     // worldspace or an interior, or deletes it takes it out.

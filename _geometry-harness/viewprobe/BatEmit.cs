@@ -53,17 +53,21 @@ static class BatEmit
     /// <summary>One plugin of the order: each worklist cell's identity and winning navmeshes. Held apart from
     /// <see cref="Run"/> so --moved-ref-selftest runs exactly this code.</summary>
     internal static void WalkCells(ISkyrimModGetter m, IReadOnlyList<string> wanted, Dictionary<int, CellIdent> ident,
-                                   Dictionary<int, Dictionary<FormKey, NavmeshGeometry>> nav)
+                                   Dictionary<int, HarnessShared.LastSightingNavSet> nav)
     {
-        foreach (var cp in PlacementExtract.FromMod(m))
+        // Every cell of the plugin (LastSighting.Cells): a navmesh's later sighting in another cell, or its deletion in a
+        // copy that holds nothing else, must reach the worklist cell's set.
+        foreach (var cp in HarnessShared.LastSighting.Cells(m))
             for (int ci = 0; ci < wanted.Count; ci++)
             {
-                if (!Matches(cp, wanted[ci])) continue;
-                // IDENTITY from the first plugin that defines the cell (the defining
-                // master), matching the render's own pre-pass; NAVMESH winner-takes-all,
-                // because the point of the clearance test is what the game will use.
-                ident.TryAdd(ci, new CellIdent(cp.Cell, cp.CellEditorId, cp.Interior, cp.Worldspace, cp.Grid));
-                foreach (var nm in cp.Navmeshes) nav[ci][nm.FormKey] = nm;
+                // NAVMESH under the last-sighting rule, because the point of the clearance test is what the game will
+                // use: a navmesh stands in the worklist cell iff its last sighting is there with its geometry.
+                bool here = Matches(cp, wanted[ci]);
+                nav[ci].Observe(cp, (_, _) => here);
+                // IDENTITY from the first plugin that defines the cell with content (the defining master), matching the
+                // render's own pre-pass.
+                if (here && (cp.Refs.Count > 0 || cp.Navmeshes.Count > 0))
+                    ident.TryAdd(ci, new CellIdent(cp.Cell, cp.CellEditorId, cp.Interior, cp.Worldspace, cp.Grid));
             }
     }
 
@@ -78,7 +82,7 @@ static class BatEmit
     {
         // ---- one walk: cell identity, worldspace names, winning navmesh per worklist cell -----
         var ident = new Dictionary<int, CellIdent>();
-        var nav = new Dictionary<int, Dictionary<FormKey, NavmeshGeometry>>();
+        var nav = new Dictionary<int, HarnessShared.LastSightingNavSet>();
         var wrldEditorId = new Dictionary<FormKey, string>();
         for (int ci = 0; ci < wl.Cells.Count; ci++) nav[ci] = new();
 
@@ -166,7 +170,7 @@ static class BatEmit
                 // required to land on the same floor. A failure is REPORTED, not silently fixed —
                 // the worklist is the author's statement of where to stand, and quietly moving the
                 // tester somewhere else would put the render and the game back out of agreement.
-                var clear = Clearance(nav[ci], ex, ey, fz);
+                var clear = Clearance(nav[ci].Navs, ex, ey, fz);
                 if (!clear.Ok) warnings.Add($"bat{n + 1} ({cellLabel} — {s.Label}): {clear.Why}");
 
                 var body = string.Join("\n", new[]

@@ -14,6 +14,9 @@ internal sealed class NavmeshSelection
     public Dictionary<FormKey, string> Overrides { get; } = new();
     public Dictionary<NavmeshGeometry, (FormKey Cell, string Plugin)> Provenance { get; } = new(ReferenceEqualityComparer.Instance);
     private readonly Dictionary<FormKey, CellPlacements> observed = new();
+    // The winners under the last-sighting rule (_shared/LastSighting.cs): a navmesh is a winner iff its last sighting stands
+    // in a selected cell with its geometry; moved out of them or deleted, with or without its geometry, it is not.
+    private readonly HarnessShared.LastSightingNavSet win = new();
     public FormKey Target { get; }
 
     internal OwnedGraph CopyGraph(IReadOnlyDictionary<FormKey, NavmeshGeometry> winners,
@@ -81,17 +84,21 @@ internal sealed class NavmeshSelection
         catch { throw new ArgumentException($"{option}: '{value}' is not a full FormKey (XXXXXX:Plugin.esp)."); }
     }
 
+    /// <summary>One cell of one plugin, in load order: EVERY cell, not only the selected ones, since a later sighting
+    /// elsewhere takes a navmesh out of the winners. <paramref name="winners"/> mirrors the rule's set.</summary>
     public void Observe(CellPlacements cp, string plugin, ISet<string> watched,
         Dictionary<FormKey, NavmeshGeometry> winners,
         Dictionary<string, Dictionary<FormKey, NavmeshGeometry>> versions)
     {
-        if (!Cells.ContainsKey(cp.Cell)) return;
-        observed[cp.Cell] = cp;
+        bool selected = Cells.ContainsKey(cp.Cell);
+        if (selected) observed[cp.Cell] = cp;
+        foreach (var k in win.Observe(cp, (c, _) => Cells.ContainsKey(c.Cell)))
+            if (win.Navs.TryGetValue(k, out var nav)) { winners[k] = nav; Provenance[nav] = (cp.Cell, plugin); }
+            else winners.Remove(k);
+        if (!selected || !watched.Contains(plugin)) return;
         foreach (var nav in cp.Navmeshes)
         {
-            winners[nav.FormKey] = nav;
-            Provenance[nav] = (cp.Cell, plugin);
-            if (!watched.Contains(plugin)) continue;
+            if (nav.Deleted) continue;   // a deletion is no version to substitute
             if (!versions.TryGetValue(plugin, out var own)) versions[plugin] = own = new();
             own[nav.FormKey] = nav;
         }
