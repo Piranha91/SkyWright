@@ -56,20 +56,22 @@ internal static class RefWhere
     /// <summary>One cell of one plugin, in load order.</summary>
     internal static void Observe(CellPlacements cp, string plgName, Tables t, HashSet<FormKey> shotNpcWatch, HashSet<FormKey> doorWatchKeys, ModKey pluginKey)
     {
-        // A later sighting undoes an earlier deletion; a deletion takes the ref out of every "where is it" table.
-        foreach (var r in cp.Refs) t.DeletedBy.Remove(r.FormKey);
+        // A later sighting undoes an earlier deletion; a deletion takes the ref out of every "where is it" table. A deletion
+        // is a sighting flagged deleted, whether it carries placement data (in Refs, Deleted) or not (DeletedRefs): one path.
+        void Gone(FormKey k)
+        {
+            t.DeletedBy[k] = plgName;
+            t.NpcRef.Remove(k);
+            t.Door.Remove(k);
+            foreach (var perRef in t.NpcBase.Values) perRef.Remove(k);
+        }
+        foreach (var r in cp.Refs) { if (r.Deleted) Gone(r.FormKey); else t.DeletedBy.Remove(r.FormKey); }
         if (cp.DeletedRefs is { Count: > 0 } deletedHere)
-            foreach (var d in deletedHere)
-            {
-                t.DeletedBy[d.FormKey] = plgName;
-                t.NpcRef.Remove(d.FormKey);
-                t.Door.Remove(d.FormKey);
-                foreach (var perRef in t.NpcBase.Values) perRef.Remove(d.FormKey);
-            }
+            foreach (var d in deletedHere) Gone(d.FormKey);
         if (shotNpcWatch.Count > 0)
             foreach (var r in cp.Refs)
             {
-                if (r.RecordType != "PlacedNpc") continue;
+                if (r.RecordType != "PlacedNpc" || r.Deleted) continue;
                 // The last sighting decides the base too: a later override that re-bases the reference takes it out of
                 // every other base's entry.
                 foreach (var (b, per) in t.NpcBase) if (r.Base is not { } rb || b != rb) per.Remove(r.FormKey);
@@ -83,7 +85,7 @@ internal static class RefWhere
             }
         if (doorWatchKeys.Count > 0)
             foreach (var r in cp.Refs)
-                if (doorWatchKeys.Contains(r.FormKey))
+                if (!r.Deleted && doorWatchKeys.Contains(r.FormKey))
                     { t.Door[r.FormKey] = (cp.Cell, cp.CellEditorId, r);     // later plugin wins
                       if (Environment.GetEnvironmentVariable("VP_DOOR_DEBUG") == "1")
                           Console.WriteLine($"   [debug] door {r.FormKey} in cp: Cell={cp.Cell} Grid={(cp.Grid is { } gg ? $"{gg.X},{gg.Y}" : "null")} Interior={cp.Interior} Ws={cp.Worldspace} plugin={pluginKey}"); }
