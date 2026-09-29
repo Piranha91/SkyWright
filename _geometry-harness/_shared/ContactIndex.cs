@@ -146,6 +146,9 @@ public sealed class BoxHash<T>
 public sealed class ContactIndex
 {
     public OverlapIndex Index { get; } = new();
+    /// <summary>Opt-in per-object trace (src/housecarl-core/ProbeTrace.cs). Null by default; attaching it never changes a verdict.
+    /// GATE B STUB: declared, not yet called at the exits.</summary>
+    public IProbeTraceSink? Trace { get; set; }
     readonly Func<FormKey, RefGeometry?> _geomOf;
     readonly Dictionary<FormKey, RefGeometry?> _geomCache = new();
     readonly Dictionary<(FormKey Key, int Snap), TriangleGrid?> _hostGrids = new();

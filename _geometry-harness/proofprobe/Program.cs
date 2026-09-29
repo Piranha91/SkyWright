@@ -2488,6 +2488,8 @@ Console.WriteLine("\nPROOF — placement contact (_shared/DetectorModel.cs + _sh
           Row(23) is { Verdict: ContactVerdict.Stranded }, R(23));
     Check("ct-synth: every row's geometry is the labelled OBND box on both sides",
           rows.All(r => r.Authoring is null || (r.Authoring.DepSrc == 'o' && r.Authoring.HostSrc == 'o')), "");
+    // Patch-miss packet: the per-object trace on this same order (ProbeTraceProof.cs).
+    ProbeTraceProof.Run(Check, cidx, closure, H, D, new FormKey(aKey, 0x901));
     Check("ct-synth: Table27 removed by A; Ref28, a pole X turned into a table WITHOUT moving it, is under Bowl27 -> RE-SUPPORTED by Ref28 (the winner's base, not the placement-setter's)",
           Row(27) is { Verdict: ContactVerdict.ReSupported } r27 && r27.Winner!.Against == H(28), R(27));
 
@@ -3582,6 +3584,7 @@ NifChainProof.Run(Check);
 NifBoundProof.Run(Check);
 OverlapGeometryProof.Run(Check);
 MeshIntersectionProof.Run(Check);
+OverlapVolumeProof.Run(Check);
 ContactEvidenceProof.Run(Check);
 MeshPipelineProof.Run(Check);
 SceneScopeProof.Run(Check);
