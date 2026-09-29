@@ -767,6 +767,8 @@ static class TexturedScene
         // AFTER the render and say which of them was found-and-unreadable rather than absent or
         // simply empty. A count cannot be re-read; these can.
         var noGeometry = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        // Where each of those is placed, so a hole the census names can be put on the map.
+        var noGeometryAt = new Dictionary<string, List<UnreadableAssets.Placement>>(StringComparer.OrdinalIgnoreCase);
         // The Base Object Swapper layer's paint: the swapped refs' meshes, tinted in `diff` (BosView.cs).
         var bosView = new BosViewState(bosMode);
         // The world state's paint: the refs the flip brought in and took out (StateView.cs).
@@ -886,6 +888,8 @@ static class TexturedScene
             if (built is null || built.Count == 0)
             {
                 missingMesh++; ro.Issue ??= "renderer produced no geometry"; noGeometry.Add(rel);
+                if (!noGeometryAt.TryGetValue(rel, out var atList)) noGeometryAt[rel] = atList = new();
+                atList.Add(new UnreadableAssets.Placement(r.RefKey.ToString(), r.Position, r.Scale));
                 if (source.Model is { } unrendered)
                     foreach (var shape in unrendered.Shapes)
                         ro.Parts.Add(new ShapeOcclusion { Name = shape.Name, Block = shape.BlockIndex,
@@ -2999,6 +3003,7 @@ static class TexturedScene
                                    : ""));
             }
             UnreadableAssets.PrintCensus();
+            UnreadableAssets.PrintNotDrawnByRule();
         }
 
         // Idempotent within a render: the report sink and the census both need the answer, and the
@@ -3007,7 +3012,7 @@ static class TexturedScene
         void ClassifyUnreadable()
             => UnreadableAssets.Classify(resolver,
                 graphicsCell is null ? textures.MissingTexturePaths.ToArray() : retainedMissingTexturePaths.ToArray(),
-                noGeometry, geometryInputIssues);
+                noGeometry, geometryInputIssues, noGeometryAt);
 
         if (interactive is not null)
         {

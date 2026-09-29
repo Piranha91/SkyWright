@@ -770,6 +770,7 @@ find* — each cover two very different situations, and the library gives them t
 |---|---|---|
 | **absent** — the resolver found it nowhere | a load order that does not contain the asset | counted, nothing more. Every campaign render has some. |
 | **present, valid, nothing to draw** — found, parsed, no render geometry | correct | counted, nothing more. Collision-only meshes are exactly this and healthy exteriors are full of them. |
+| **present, valid, not drawn by the renderer's rule** — found, parsed with drawable shapes, and every shape is one the rendering library skips by its own rule | lacks it **by design** | named under `meshes NOT DRAWN by the renderer's rule`, noted in the run record, and the run does **not** fail |
 | **present and unreadable** — found, and the read failed | **wrong**: something that should be there was silently dropped | named, and the run **exits 3** |
 
 The third used to be invisible: a mesh that would not parse became "no geometry", a texture that
@@ -789,6 +790,27 @@ finds zero drawable shapes does agree, so collision-only meshes — of which a h
 full — stay silent. `viewprobe --unreadable-asset-smoke <file>…` runs that decision over files you
 name and prints the verdict and the drawable-shape count for each, which is how the rule is tested
 against real meshes of all three kinds.
+
+**The renderer's own rule is asked the renderer's own way.** Before a disagreement is called one,
+the mesh is re-read with the library's reader (`nifly`) and put through the checks its per-shape
+build makes before it touches geometry, in the same order: the AppCulled bit, a missing shader
+property, no diffuse and no normal texture with no alpha property (the library's "likely
+physics/collision mesh" rule), and no vertices. Only when **every** shape is skipped by one of
+these does the mesh move to the not-drawn-by-rule class, each shape named with its shader block
+and the rule that skipped it. Skyrim's placed water (`BSWaterShaderProperty`, no texture set —
+`Water\Water2048x1024.nif`, a rain barrel's water) and its `EditorMarker` shapes (invisible chairs,
+critter markers) are this class; before 2026-09-29 each of them failed its whole view with exit 3.
+It is a statement about the library, not the game: the game draws a barrel's water, and the line
+says the picture lacks it. A mesh with any shape the rule would draw keeps the disagreement, so a
+torn read of a textured mesh still fails the run; so does a mesh the re-read cannot load. The
+planes report is unchanged by this class (its references still carry "renderer produced no
+geometry" and the view's coverage issue). `--unreadable-asset-smoke` prints the verdict `not drawn
+by the renderer's rule` with the per-shape reasons.
+
+**Where the hole is.** Under each unreadable mesh the census lists every placed reference that
+uses it — `at <FormKey>  x,y,z  r <radius>` — with the radius of the independent parse's render box
+at that placement's scale (`?` when no parse measured it). That is what lets `shotplan.py
+--allow-unreadable-assets` tell a hole beside the subject from one across the cell.
 
 **When the path is the cause, the entry says so.** A disagreement of exactly that shape — houseCARL
 parses it, the library draws nothing from it — is what an extracted path past the library reader's

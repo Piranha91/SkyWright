@@ -39,7 +39,13 @@ static class UnreadableAssets
     public const string OptOutEnv = "VP_ALLOW_UNREADABLE_ASSETS";
 
     /// <summary>One asset that was found and could not be read.</summary>
-    public sealed record Entry(string Kind, string Asset, string? ResolvedPath, string Reason);
+    public sealed record Entry(string Kind, string Asset, string? ResolvedPath, string Reason,
+                               IReadOnlyList<Placement>? At = null, float? ModelRadius = null);
+
+    /// <summary>One placed reference that uses a mesh the renderer drew nothing from: where the
+    /// picture has a hole. Printed under the census entry so a planner can tell a hole beside the
+    /// subject from one across the cell.</summary>
+    public sealed record Placement(string FormKey, Vec3 Position, float Scale);
 
     static readonly object Gate = new();
     static readonly List<Entry> Found = new();
@@ -106,8 +112,20 @@ static class UnreadableAssets
     /// <summary>Start a shot. Called once per shot, before anything is built for it.</summary>
     public static void BeginShot()
     {
-        lock (Gate) ThisShot.Clear();
+        lock (Gate) { ThisShot.Clear(); ThisShotByRule.Clear(); }
     }
+
+    /// <summary>This shot's meshes that the rendering library skips by its own rule (not failures;
+    /// see <see cref="RendererRule"/>). Kept apart from <see cref="ThisShot"/> so nothing about them
+    /// can reach the exit code.</summary>
+    static readonly Dictionary<string, Entry> ThisShotByRule = new(StringComparer.OrdinalIgnoreCase);
+
+    static void AddByRule(Entry e)
+    {
+        lock (Gate) ThisShotByRule[e.Asset] = e;
+    }
+
+    public static IReadOnlyList<Entry> ShotNotDrawnByRule { get { lock (Gate) return ThisShotByRule.Values.ToArray(); } }
 
     /// <summary>What this shot found, in the order it was found.</summary>
     public static IReadOnlyList<Entry> ShotEntries { get { lock (Gate) return ThisShot.Values.ToArray(); } }
@@ -120,8 +138,16 @@ static class UnreadableAssets
     public static void Classify(GameAssetResolver resolver,
                                 IEnumerable<string> missingTextures,
                                 IEnumerable<string> meshesWithNoGeometry,
-                                IReadOnlyDictionary<string, string>? meshReadErrors = null)
+                                IReadOnlyDictionary<string, string>? meshReadErrors = null,
+                                IReadOnlyDictionary<string, List<Placement>>? placements = null)
     {
+        void AddMesh(Entry e, float? radius)
+        {
+            List<Placement>? at = null;
+            placements?.TryGetValue(e.Asset, out at);
+            Add(e with { At = at?.ToArray(), ModelRadius = radius });
+        }
+
 
         foreach (var tex in missingTextures ?? Array.Empty<string>())
         {
@@ -148,14 +174,14 @@ static class UnreadableAssets
                 // opinion says, so this does not need - and must not wait for - a re-parse.
                 string? p0 = null;
                 try { p0 = resolver.ResolveAssetPath(rel); } catch (Exception) { }
-                Add(Record("mesh", rel, p0, thrown));
+                AddMesh(Record("mesh", rel, p0, thrown), null);
                 continue;
             }
             string? path;
             try { path = resolver.ResolveAssetPath(rel); }
             catch (Exception ex)
             {
-                Add(Record("mesh", rel, null, $"re-resolving it failed: {ex.GetType().Name}: {ex.Message}"));
+                AddMesh(Record("mesh", rel, null, $"re-resolving it failed: {ex.GetType().Name}: {ex.Message}"), null);
                 continue;
             }
             if (path is null) continue;                       // absent: not ours
@@ -163,11 +189,12 @@ static class UnreadableAssets
             try { bytes = File.ReadAllBytes(path); }
             catch (Exception ex)
             {
-                Add(Record("mesh", rel, path, $"found and could not be opened: {ex.GetType().Name}: {ex.Message}"));
+                AddMesh(Record("mesh", rel, path, $"found and could not be opened: {ex.GetType().Name}: {ex.Message}"), null);
                 continue;
             }
-            var verdict = ClassifyMesh(bytes);
-            if (verdict.Reason is not null) Add(Record("mesh", rel, path, verdict.Reason));
+            var verdict = ClassifyMesh(bytes, path);
+            if (verdict.Reason is not null) AddMesh(Record("mesh", rel, path, verdict.Reason), verdict.ModelRadius);
+            else if (verdict.NotDrawnByRule is not null) AddByRule(new Entry("mesh", rel, path, verdict.NotDrawnByRule));
             else if (Environment.GetEnvironmentVariable("VP_CV_VERBOSE") == "1")
                 Console.Error.WriteLine($"   [unreadable] dismissed '{rel}': the parse agrees there is "
                                       + $"nothing to draw ({verdict.DrawableShapes} drawable shape(s))");
@@ -193,9 +220,19 @@ static class UnreadableAssets
     /// dismiss any other transient failure inside the library. So the two answers have to AGREE:
     /// a mesh that parses with drawable shapes and that the renderer drew nothing from is an asset
     /// that was found and not drawn, whatever the reason.</summary>
-    public readonly record struct MeshVerdict(string? Reason, int DrawableShapes, string FailureKind);
+    /// <param name="NotDrawnByRule">Set, and <see cref="Reason"/> null, when the mesh has drawable
+    /// shapes but EVERY shape is one the rendering library declines to draw by its own documented
+    /// rule (see <see cref="RendererRule"/>). The picture is missing it by design, not by a failed
+    /// read, so it is named on the console and in the run record and never fails the run. The
+    /// planes report is left as it was: its references already say "renderer produced no
+    /// geometry".</param>
+    /// <param name="ModelRadius">Distance from the model origin to the farthest corner of the parsed
+    /// render box, when the parse succeeded: with a placement's scale, a sphere that holds the mesh
+    /// however it is rotated.</param>
+    public readonly record struct MeshVerdict(string? Reason, int DrawableShapes, string FailureKind,
+                                              string? NotDrawnByRule = null, float? ModelRadius = null);
 
-    public static MeshVerdict ClassifyMesh(byte[] bytes)
+    public static MeshVerdict ClassifyMesh(byte[] bytes, string? path = null)
     {
         // The policy entry point: shapes the file marks hidden are excluded, because the renderer
         // does not draw those either and a disagreement about them would be one this tool invented.
@@ -204,11 +241,83 @@ static class UnreadableAssets
             return new MeshVerdict($"found and could not be parsed ({measured.FailureKind}): {measured.Error}",
                                    0, measured.FailureKind.ToString());
         int drawable = measured.Model.Shapes.Count(sh => sh.TriangleCount > 0);
+        float? radius = null;
+        if (!measured.Model.Bounds.IsEmpty)
+        {
+            var (lo, hi) = (measured.Model.Bounds.Min, measured.Model.Bounds.Max);
+            float mx = MathF.Max(MathF.Abs(lo.X), MathF.Abs(hi.X)), my = MathF.Max(MathF.Abs(lo.Y), MathF.Abs(hi.Y)),
+                  mz = MathF.Max(MathF.Abs(lo.Z), MathF.Abs(hi.Z));
+            radius = MathF.Sqrt(mx * mx + my * my + mz * mz);
+        }
         if (drawable == 0) return new MeshVerdict(null, 0, "None");
-        return new MeshVerdict(
-            $"found, and it parses with {drawable} drawable shape(s), but the renderer produced no "
-            + "geometry from it - the read the renderer did and the read done here disagree",
-            drawable, "None");
+        const string disagree = "found, and it parses with {0} drawable shape(s), but the renderer produced no "
+                              + "geometry from it - the read the renderer did and the read done here disagree";
+        // THE SAME QUESTION THE RENDERER ASKED, with the renderer's own reader. Only an answer that
+        // every shape is one the library skips by rule turns the disagreement into "not drawn by
+        // design"; a file that cannot be re-read this way, or any shape the rule would draw, leaves
+        // the disagreement standing - so a torn read of a textured mesh still fails the run.
+        var rule = path is null ? null : RendererRule(path);
+        if (rule is { AnyDrawn: false, Shapes.Count: > 0 })
+            return new MeshVerdict(null, drawable, "None",
+                "the rendering library skips every shape of it by rule: "
+                + string.Join("; ", rule.Value.Shapes.Select(s => $"'{s.Name}' ({s.Shader}) {s.Skip}")));
+        return new MeshVerdict(string.Format(disagree, drawable)
+                               + (rule is { Error: { } err } ? $" (the renderer's own rule could not be re-read: {err})" : ""),
+                               drawable, "None", ModelRadius: radius);
+    }
+
+    /// <summary>One shape as the rendering library's shape builder sees it: <see cref="Skip"/> is
+    /// null when the library would build it, or the rule that makes it skip the shape.</summary>
+    public sealed record RuleShape(string Name, string Shader, string? Skip);
+
+    public readonly record struct RuleResult(IReadOnlyList<RuleShape> Shapes, bool AnyDrawn, string? Error);
+
+    /// <summary>MIRRORS the pre-geometry checks of the rendering library's per-shape build
+    /// (<c>NifMeshBuilder.BuildShape</c> in the pinned CharacterViewer.Rendering), with the same
+    /// <c>nifly</c> calls in the same order: a shape is skipped when its AppCulled bit is set, when
+    /// it has no shader property, when it binds no diffuse and no normal texture and carries no alpha
+    /// property (the library's "likely physics/collision mesh" rule), or when it has no vertices.
+    /// Skyrim's placed water (<c>BSWaterShaderProperty</c>, no texture set) and its editor-marker
+    /// shapes meet the third rule. This is a statement about the library, not about the game: the
+    /// game draws a rain barrel's water, and the entry says what the picture lacks.</summary>
+    public static RuleResult? RendererRule(string path)
+    {
+        try
+        {
+            using var nif = new nifly.NifFile();
+            int rc = nif.Load(path);
+            if (rc != 0) return new RuleResult(Array.Empty<RuleShape>(), false, $"nifly Load returned {rc}");
+            var header = nif.GetHeader();
+            using var shapes = nif.GetShapes();
+            var list = new List<RuleShape>();
+            for (int si = 0; si < shapes.Count; si++)
+            {
+                var shape = shapes[si];
+                string name = shape.name?.get() ?? "?";
+                string shader = "no shader";
+                string? skip = null;
+                var sref = shape.ShaderPropertyRef();
+                if (sref is not null && !sref.IsEmpty())
+                    shader = header.GetBlockById(sref.index)?.GetType().Name ?? "unknown shader";
+                if ((shape.flags & 1u) != 0) skip = "hidden (AppCulled flag)";
+                else if (sref is null || sref.IsEmpty()) skip = "no shader property";
+                else if (string.IsNullOrWhiteSpace(nif.GetTexturePathByIndex(shape, 0))
+                         && string.IsNullOrWhiteSpace(nif.GetTexturePathByIndex(shape, 1))
+                         && !shape.HasAlphaProperty())
+                    skip = "no diffuse or normal texture and no alpha property";
+                else
+                {
+                    using var verts = nif.GetVertsForShape(shape);
+                    if (verts is null || verts.Count == 0) skip = "no vertices";
+                }
+                list.Add(new RuleShape(name, shader, skip));
+            }
+            return new RuleResult(list, list.Any(s => s.Skip is null), null);
+        }
+        catch (Exception ex)
+        {
+            return new RuleResult(Array.Empty<RuleShape>(), false, $"{ex.GetType().Name}: {ex.Message}");
+        }
     }
 
     /// <summary><c>viewprobe --unreadable-asset-smoke &lt;file&gt;...</c>: the mesh decision, over
@@ -223,16 +332,17 @@ static class UnreadableAssets
             object row;
             try
             {
-                var v = ClassifyMesh(File.ReadAllBytes(path));
+                var v = ClassifyMesh(File.ReadAllBytes(path), path);
                 row = new
                 {
                     file = path,
                     bytes = new FileInfo(path).Length,
-                    verdict = v.Reason is null ? "nothing to draw" :
+                    verdict = v.NotDrawnByRule is not null ? "not drawn by the renderer's rule" :
+                              v.Reason is null ? "nothing to draw" :
                               v.DrawableShapes > 0 ? "found and not drawn" : "unreadable",
                     drawableShapes = v.DrawableShapes,
                     failureKind = v.FailureKind,
-                    reason = v.Reason,
+                    reason = v.Reason ?? v.NotDrawnByRule,
                 };
             }
             catch (Exception ex)
@@ -259,8 +369,32 @@ static class UnreadableAssets
                         + (opt is null ? $"; this run fails with exit {FailExitCode}"
                                        : $"; exit {FailExitCode} SUPPRESSED by {opt}"));
         foreach (var e in entries)
+        {
             Console.WriteLine($"      {e.Kind,-8} {e.Asset} — {e.Reason}"
                             + (e.ResolvedPath is null ? "" : $" [{e.ResolvedPath}]"));
+            // WHERE the hole is, one line per placed reference, in world units; `r` bounds the
+            // mesh at that placement's scale, or `?` when no parse measured it. A caller that
+            // cannot place the hole has to treat it as anywhere.
+            foreach (var a in e.At ?? Array.Empty<Placement>())
+                Console.WriteLine(FormattableString.Invariant(
+                    $"         at {a.FormKey}  {a.Position.X:0.0},{a.Position.Y:0.0},{a.Position.Z:0.0}  r ")
+                    + (e.ModelRadius is { } mr ? FormattableString.Invariant($"{mr * a.Scale:0.0}") : "?"));
+        }
+    }
+
+    /// <summary>The meshes the picture lacks by the rendering library's rule, printed only when
+    /// there are some, so a console without them is unchanged to the character. Printed whether
+    /// or not the unreadable census fires: the two are separate facts about the picture.</summary>
+    public static void PrintNotDrawnByRule()
+    {
+        var entries = ShotNotDrawnByRule;
+        if (entries.Count == 0) return;
+        Console.WriteLine($"   meshes NOT DRAWN by the renderer's rule: {entries.Count:N0}"
+                        + " — found and read; the picture lacks them by design, not by a failed read; the run does not fail");
+        foreach (var e in entries)
+            Console.WriteLine($"      {e.Kind,-8} {e.Asset} — {e.Reason}");
+        RunLog.Current?.Note($"meshes not drawn by the renderer's rule: {entries.Count} ("
+                             + string.Join(", ", entries.Select(e => e.Asset)) + ")");
     }
 
     /// <summary>The same facts for the report, or null when this shot found nothing.
