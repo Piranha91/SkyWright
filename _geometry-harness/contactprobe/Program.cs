@@ -77,6 +77,7 @@ contactprobe: placement contact and explicit render-surface pair review
   --overlap-json INPUT --json OUTPUT [--contact-evidence]
   --contact-budget-seconds N --pair-budget-seconds N --contact-max-pairs N
   --surface-tolerance N --mesh-max-triangle-pairs N
+  --volume OUTPUT (with --overlap-json): measured overlap volume per pair, render and collision separately
   --instance DIR --game DIR --profile NAME --order CANDIDATE.json
 Candidate Mods lists select asset priority. Surface/contact evidence is not a defect verdict.
 Other modes: --absolute or --labelled-mover PLUGIN; default is the moved-host pass.
@@ -106,7 +107,7 @@ bool bosOn = true;
 var enablePlugins = new List<string>();
 var disablePlugins = new List<string>();
 string? orderFile = null;
-string? traceOut = null, traceKeysPath = null;   // --trace FILE [--trace-keys FILE]: the per-object trace side file (default pass only)
+string? traceOut = null, traceKeysPath = null, volumeOut = null;   // --volume FILE: measured overlap volume (with --overlap-json)   // --trace FILE [--trace-keys FILE]: the per-object trace side file (default pass only)
 string NeedValue(int index, string flag)
 {
     if (index + 1 >= args.Length || args[index + 1].StartsWith("--", StringComparison.Ordinal))
@@ -145,6 +146,7 @@ try
         else if (flag == "--interior-only") interiorOnly = true;
         else if (flag == "--order") { orderFile = NeedValue(i, flag); i++; }
         else if (flag == "--trace") { traceOut = NeedValue(i, flag); i++; }
+        else if (flag == "--volume") { volumeOut = NeedValue(i, flag); i++; }
         else if (flag == "--trace-keys") { traceKeysPath = NeedValue(i, flag); i++; }
         else if (flag == "--enable") { enablePlugins.Add(NeedValue(i, flag)); i++; }
         else if (flag == "--disable") { disablePlugins.Add(NeedValue(i, flag)); i++; }
@@ -182,6 +184,7 @@ if (contactEvidence && overlapJson is null)
 }
 int selectedModes = (overlapJson is null ? 0 : 1) + (absolute ? 1 : 0) + (labelledMover is null ? 0 : 1);
 if (selectedModes > 1) { Console.Error.WriteLine("--overlap-json, --absolute and --labelled-mover select different modes; pass only one"); return 2; }
+if (volumeOut is not null && overlapJson is null) { Console.Error.WriteLine("--volume is valid only with --overlap-json INPUT"); return 2; }
 if (traceKeysPath is not null && traceOut is null) { Console.Error.WriteLine("--trace-keys requires --trace OUTPUT"); return 2; }
 if (traceOut is not null && selectedModes > 0) { Console.Error.WriteLine("--trace is valid only in the default moved-host pass"); return 2; }
 List<FormKey>? traceKeys = null;
@@ -423,9 +426,14 @@ if (overlapJson is not null)
 {
     try
     {
-        return OverlapPairReview.Run(overlapJson, jsonPath!, contactBudgetSeconds, pairBudgetSeconds,
+        int reviewRc = OverlapPairReview.Run(overlapJson, jsonPath!, contactBudgetSeconds, pairBudgetSeconds,
             contactMaxPairs, surfaceTolerance, meshMaxTrianglePairs, contactEvidence, assets, idx, cidx.Arms,
             cfg.Identity("load-time", cidx.State?.Name ?? "baseline"), idx.WinningGeometryPose, __run);
+        // --volume: a separate file after the unchanged pair review (patch-miss packet, GATE-A §5).
+        if (volumeOut is not null)
+            OverlapVolumeReview.Run(overlapJson, volumeOut, assets, idx, cidx.Arms,
+                cfg.Identity("load-time", cidx.State?.Name ?? "baseline"), idx.WinningGeometryPose);
+        return reviewRc;
     }
     catch (Exception ex)
     {
