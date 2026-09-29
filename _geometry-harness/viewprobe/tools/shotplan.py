@@ -324,8 +324,10 @@ CLEAR_ROW = re.compile(
 # position, and the mesh's bounding radius at that placement's scale, or `?` when unmeasured.
 UNREADABLE_HEAD = re.compile(r"^\s*assets FOUND but UNREADABLE: ([\d,]+)")
 NOT_DRAWN_HEAD = re.compile(r"^\s*meshes NOT DRAWN by the renderer's rule: ([\d,]+)")
-CENSUS_ENTRY = re.compile(r"^ {6}(mesh|texture|archive)\s+(.+?) (?:\u2014|\ufffd|-|\?) (.*)$")
-CENSUS_AT = re.compile(r"^ {9}at (\S{6}:\S+)\s+(-?[\d.]+),(-?[\d.]+),(-?[\d.]+)\s+r (\S+)\s*$")
+# A plugin name may hold spaces and a folder may hold " - ", so the asset ends at its extension and
+# the FormKey at its plugin extension.
+CENSUS_ENTRY = re.compile(r"^ {6}(mesh|texture|archive)\s+(.+?\.[A-Za-z0-9]{2,4}) (?:\u2014|\ufffd|-|\?) (.*)$")
+CENSUS_AT = re.compile(r"^ {9}at ([0-9A-Fa-f]{6}:.+?\.es[pml])\s+(-?[\d.]+),(-?[\d.]+),(-?[\d.]+)\s+r (\S+)\s*$")
 # viewprobe's own configuration fingerprint, printed for a candidate configuration (--order).
 CONFIG_FINGERPRINT = re.compile(r"capture input configuration:\s*([0-9a-fA-F]{16,64})")
 RAY_AXES = ("+x", "-x", "+y", "-y", "up", "down")

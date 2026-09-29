@@ -1203,6 +1203,18 @@ def test_a_hole_far_from_the_sightline_is_named_and_accepted():
           calls and all("--allow-unreadable-assets" in c for c in calls), f"{len(calls)} call(s)")
 
 
+def test_a_hole_named_with_spaces_is_still_placed():
+    """Real census lines: a plugin name with spaces, a folder with " - " in it."""
+    h = hole(0, -150, 110, 20, asset="meshes\Some Mod - Parts\hole.nif", fk="00AB02:Some Mod - Walls.esp")
+    code, out, doc = unread_check([h], "--allow-unreadable-assets")
+    rows = hole_rows(doc)
+    check("unreadable: the asset path is read whole", rows and rows[0]["asset"] == "meshes\Some Mod - Parts\hole.nif",
+          json.dumps(rows)[:160])
+    check("unreadable: the spaced FormKey is placed, so the hole is judged by distance",
+          rows and rows[0]["placements"] and rows[0]["placements"][0]["formkey"] == "00AB02:Some Mod - Walls.esp"
+          and rows[0]["verdict"] == "refused" and "margin" in rows[0]["why"], json.dumps(rows)[:220])
+
+
 def test_a_hole_on_the_sightline_is_refused():
     code, out, doc = unread_check([hole(0, -150, 110, 20)], "--allow-unreadable-assets")
     rows = hole_rows(doc)
@@ -1362,6 +1374,7 @@ ALL = [test_devbench_reads_a_worklist_in_either_spelling_or_refuses_by_name,
        test_a_later_candidate_cannot_inherit_an_earlier_identity,
        test_exit_3_still_stops_the_planner_without_the_flag,
        test_a_hole_far_from_the_sightline_is_named_and_accepted,
+       test_a_hole_named_with_spaces_is_still_placed,
        test_a_hole_on_the_sightline_is_refused,
        test_a_hole_beside_the_eye_is_refused,
        test_a_hole_that_cannot_be_placed_is_refused,
