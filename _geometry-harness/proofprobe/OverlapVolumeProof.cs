@@ -197,6 +197,17 @@ static class OverlapVolumeProof
             check("overlap-volume P1 canary: the same interval does NOT contain a 5 % wrong answer (a sweep that passes this is broken)", r.Status == "measured" && !canary, Say(r));
         }
 
+        // ---- V8: a solid against itself (found by the CLI known-answer case on a real barrel, 2026-09-28) ----
+        // A 45°-turned cube with itself: every boundary cell carries the SAME plane for both solids. The interval must
+        // contain vol(A) and both fractions must contain 1; clipping by the second, identical plane may not add a face.
+        {
+            var a = Place(Box(-50, -50, -50, 50, 50, 50), 0, 0, 0, Rad(45));
+            var r = MeshVolume.Measure(a, a, VolumeGeometry.Render);
+            check("overlap-volume V8: a turned cube measured against itself — the interval contains vol(A); A in B and B in A contain 1",
+                  r.Status == "measured" && r.VolumeA is { } va && r.Intersection!.Contains(va, 1e-6) && r.AInB!.Contains(1.0, 1e-12) && r.BInA!.Contains(1.0, 1e-12),
+                  Say(r));
+        }
+
         // ---- A1: four-setup attribution ----
         {
             var c = new VolumeInterval(80_000, 80_000); var z = new VolumeInterval(0, 0);
