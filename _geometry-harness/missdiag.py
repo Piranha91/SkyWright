@@ -27,6 +27,7 @@ REASONS = (
     "not modelled (judged, saw nothing)",
     "out of scope (not run)",
     "out of scope (not run; caught when run)",
+    "flagged, not joined",
     "out of scope (population)",
     "set aside by filter",
     "below threshold",
@@ -104,7 +105,9 @@ def assign_reason(ev):
       6. outcome never -> out of scope (population), detail = rule; set_aside -> set aside by filter, detail = rule;
          unjudgeable -> cannot tell, detail = rule; judged_below_threshold -> below threshold, detail = rule;
          judged_relation: emitted -> out of scope (not run; caught when run) when bundleConfiguration != 'ran', else
-         below threshold (admission); not emitted -> below threshold (admission: class);
+         flagged, not joined (a detection, not a miss; detail = trace 'notJoined': why the scorecard did not join it -
+         'not needs-both', 'lane outside the scorecard's reader scope' or 'join key mismatch'; 'not stated' if absent);
+         not emitted -> below threshold (admission: class);
          judged_no_relation / judged_relation_not_clash -> renderShowsDefect True -> not modelled (judged, saw
          nothing) with evidence 'render reading'; otherwise taste (no clash) with evidence 'check'.
     A render reading alone never yields taste. Any other trace outcome (absent, entered) raises: the caller must read it."""
@@ -140,7 +143,7 @@ def assign_reason(ev):
         if trace.get("emitted"):
             if bundle != "ran":
                 return out("out of scope (not run; caught when run)", rule, "check")
-            return out("below threshold", "admission: " + str(rule), "check")
+            return out("flagged, not joined", trace.get("notJoined") or "not stated", "check")
         return out("below threshold", "admission: class " + str(rule), "check")
     if outcome in ("judged_no_relation", "judged_relation_not_clash"):
         if ev.get("renderShowsDefect") is True:

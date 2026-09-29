@@ -158,6 +158,13 @@ def test_m2l_cannot_tell_not_rendered():
     assert r["reason"] == "cannot tell" and "not rendered" in r["detail"]
 
 
+def test_m2m_emitted_in_a_bundle_that_ran_is_flagged_not_joined():   # a detection, not a miss
+    r = M.assign_reason(_ev(trace={"outcome": "judged_relation", "rule": "Stranded", "emitted": True,
+                                   "notJoined": "join key mismatch"}))
+    assert r["reason"] == "flagged, not joined" and r["detail"] == "join key mismatch", r
+    assert "flagged, not joined" in M.REASONS
+
+
 # ---- M3: the table ----
 def test_m3_table_sums_and_splits():
     cl = [{"group": "G1", "edits": 7, "reason": "not modelled", "evidenceType": "render reading", "direct": False},
