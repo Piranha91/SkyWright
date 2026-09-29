@@ -382,6 +382,19 @@ static class UnreadableAssets
         }
     }
 
+    /// <summary>The PNG tEXt value (keyword <c>viewprobe-incomplete</c>) for a frame missing assets
+    /// that were found and could not be read, or null when this shot found none. It names every
+    /// asset and whether the run failed on them or an opt-out let it succeed.</summary>
+    public static string? FrameIncompleteText()
+    {
+        var entries = ShotEntries;
+        if (entries.Count == 0) return null;
+        var opt = OptOutSource;
+        return $"INCOMPLETE: {entries.Count} asset(s) found and unreadable are not drawn: "
+             + string.Join("; ", entries.Select(e => $"{e.Kind} {e.Asset}"))
+             + (opt is null ? $". The run failed with exit {FailExitCode}." : $". Exit {FailExitCode} suppressed by {opt}.");
+    }
+
     /// <summary>The meshes the picture lacks by the rendering library's rule, printed only when
     /// there are some, so a console without them is unchanged to the character. Printed whether
     /// or not the unreadable census fires: the two are separate facts about the picture.</summary>

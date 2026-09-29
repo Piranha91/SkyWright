@@ -3129,8 +3129,15 @@ static class TexturedScene
         }
 
         graphicsShot?.Checkpoint("before-encode");
+        // THE FRAME SAYS WHAT IT LACKS. Classified here, before the save, so a picture missing an
+        // asset that was found and could not be read carries the names inside the file - the
+        // console and the run record can be separated from a PNG, its own metadata cannot. Nothing
+        // is added to a frame that lacks nothing. Classify is idempotent within a render, so the
+        // census below re-reads the same answer.
+        ClassifyUnreadable();
         SaveFrame(pixels, sizeW, sizeH, capLines, colourCaptionLines, pngTextMeta, outPath,
-                  gridSpacing > 0f ? gridLabels : null, gridColour3, reportMode);
+                  gridSpacing > 0f ? gridLabels : null, gridColour3, reportMode,
+                  UnreadableAssets.FrameIncompleteText());
 
         shotResources.Dispose();
         graphicsCell?.EndShot();
@@ -3150,7 +3157,7 @@ static class TexturedScene
         IReadOnlyList<string> captionLines, IReadOnlyList<(string Text, Vector3 Color)> colourCaptionLines,
         string? pngTextMeta, string outPath,
         IReadOnlyList<(string Text, int X, int Y)>? pinnedLabels = null, Vector3 pinnedColor = default,
-        bool reportMode = false)
+        bool reportMode = false, string? incompleteMeta = null)
     {
         ViewProbe.RenderStages.Open(ViewProbe.RenderStages.Encode,
             "encoding the frame and writing it", 1, "frames");
@@ -3250,6 +3257,9 @@ static class TexturedScene
         if (pngTextMeta is { Length: > 0 })
             img.Metadata.GetPngMetadata().TextData.Add(
                 new SixLabors.ImageSharp.Formats.Png.Chunks.PngTextData("viewprobe", pngTextMeta, string.Empty, string.Empty));
+        if (incompleteMeta is { Length: > 0 })
+            img.Metadata.GetPngMetadata().TextData.Add(
+                new SixLabors.ImageSharp.Formats.Png.Chunks.PngTextData("viewprobe-incomplete", incompleteMeta, string.Empty, string.Empty));
         img.SaveAsPng(outPath);
         ViewProbe.RenderStages.Advance();
     }

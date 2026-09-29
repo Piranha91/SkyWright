@@ -807,6 +807,11 @@ planes report is unchanged by this class (its references still carry "renderer p
 geometry" and the view's coverage issue). `--unreadable-asset-smoke` prints the verdict `not drawn
 by the renderer's rule` with the per-shape reasons.
 
+**The frame names what it lacks.** A frame saved from a shot with assets found and unreadable
+carries a second PNG tEXt entry, `viewprobe-incomplete`, naming each of them and whether the run
+failed or an opt-out let it succeed, so the picture keeps the fact after it is separated from its
+console. A frame that lacks nothing gets no such entry. Interactive F12 captures do not carry it.
+
 **Where the hole is.** Under each unreadable mesh the census lists every placed reference that
 uses it — `at <FormKey>  x,y,z  r <radius>` — with the radius of the independent parse's render box
 at that placement's scale (`?` when no parse measured it). That is what lets `shotplan.py
@@ -3136,8 +3141,10 @@ between it and every eye-to-target segment — the depth probe cannot see what a
 would hide. A mesh with no listed placement, an unmeasured radius or a failed archive extraction
 cannot be placed and refuses the pose. An unreadable texture leaves its geometry drawn (white), so
 it is named, not judged. An accepted pose carries `incomplete` in its verification, the plan JSON
-and the worklist shot; the shot's label, which viewprobe draws as the frame's caption, starts
-`INCOMPLETE (not drawn: <file>, ...) -- `; and the render instruction carries the flag. Nothing is
+and the worklist shot; the shot's label, which becomes the rendered file's name, starts
+`INCOMPLETE (not drawn: <file>, ...) -- `; and the render instruction carries the flag. The frame
+itself says so too: viewprobe writes a PNG tEXt entry keyed `viewprobe-incomplete` naming every
+asset found and unreadable in that shot and whether exit 3 was suppressed. Nothing is
 drawn or claimed for a missing asset. An exit 0 whose census lists unreadable assets without this
 flag (an ambient `VP_ALLOW_UNREADABLE_ASSETS`) is refused. Meshes viewprobe reports as not drawn by
 the renderer's rule are listed as `notDrawnByRule` and never fail a pose.

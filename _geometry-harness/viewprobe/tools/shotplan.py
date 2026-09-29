@@ -2446,8 +2446,9 @@ def cmd_plan(args):
         mark = {"verified": "", "unverified": "UNVERIFIED -- ", "refused": "REFUSED -- "}[status]
         incomplete = (verification or {}).get("incomplete")
         if incomplete:
-            # ON THE FRAME: the label is the caption viewprobe draws, so the picture itself says
-            # what it lacks. The full list travels in the shot's `incomplete` block.
+            # The label becomes the rendered file's NAME (viewprobe does not draw it in the
+            # caption); the frame itself carries viewprobe's own `viewprobe-incomplete` PNG entry.
+            # The full list travels in the shot's `incomplete` block.
             names = [h["asset"].replace("\\", "/").rsplit("/", 1)[-1] for h in incomplete["assets"]]
             mark += "INCOMPLETE (not drawn: " + ", ".join(names) + ") -- "
         shot = {"label": mark + (args.label or "planned camera")
