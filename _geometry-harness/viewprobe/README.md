@@ -3111,6 +3111,37 @@ verification's scene verbatim rather than recomputing a second opinion about one
 A query that was never answered is not a pass: a silent `--nav-at` or `--inside-at` now refuses
 the point by name rather than filing it as a note.
 
+##### Subjects that do not write depth (`--subject-nodepth`)
+
+An effect plane, a light beam or an alpha card writes no depth, so the depth ray never stops on it
+and a `--subject` there reads UNPROVEN however clear the view is. `--subject-nodepth X,Y[,Z][=label]`
+places and frames it exactly as `--subject` does and changes only what the aimed ray may conclude:
+
+| depth hit `h` vs subject distance `d` | verdict |
+|---|---|
+| `h ≥ d − --sight-margin`, or no depth-writing hit at all | **framed** — in the delivered frame with nothing opaque before it |
+| `h < d − --sight-margin` | **blocked** |
+
+`framed` passes like `clear`, and says what it does not establish: the subject's own surface (the
+renderer draws effect shapes only with `--fx`), and any alpha-blended geometry in front of it. It is
+never reported as `clear` or `confirmed`.
+
+##### Planning through an unreadable asset (`--allow-unreadable-assets`)
+
+By default any viewprobe exit other than 0 stops the planner, exit 3 included. With
+`--allow-unreadable-assets` the planner passes the same flag to every viewprobe call, reads the
+census, and judges each hole against the pose being verified: every placement of an unreadable
+mesh must keep `--unreadable-margin` (default 128 u) between its bounding sphere and the eye, and
+between it and every eye-to-target segment — the depth probe cannot see what a mesh it never drew
+would hide. A mesh with no listed placement, an unmeasured radius or a failed archive extraction
+cannot be placed and refuses the pose. An unreadable texture leaves its geometry drawn (white), so
+it is named, not judged. An accepted pose carries `incomplete` in its verification, the plan JSON
+and the worklist shot; the shot's label, which viewprobe draws as the frame's caption, starts
+`INCOMPLETE (not drawn: <file>, ...) -- `; and the render instruction carries the flag. Nothing is
+drawn or claimed for a missing asset. An exit 0 whose census lists unreadable assets without this
+flag (an ambient `VP_ALLOW_UNREADABLE_ASSETS`) is refused. Meshes viewprobe reports as not drawn by
+the renderer's rule are listed as `notDrawnByRule` and never fail a pose.
+
 ##### Declared surface targets (`--surface`)
 
 `--subject` is a thing standing at its FEET, proved by a ray reaching AT LEAST as far as it.

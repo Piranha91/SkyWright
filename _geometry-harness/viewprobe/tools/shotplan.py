@@ -318,6 +318,14 @@ CLEAR_HEAD = re.compile(
 CLEAR_ROW = re.compile(
     r"^\s*([+-][xy]|up|down)\s+(?:([\d.]+) u\s+"
     r"((?:\S{6}:.+?\.es[pml])|(?:000000:TERRAIN))\s{2}(\S+)\s{2}at |-\s+nothing within )")
+# viewprobe's unreadable-asset census (UnreadableAssets.PrintCensus) and its not-drawn-by-rule block.
+# The separator between an asset and its reason is an em dash, which a redirected console may
+# transliterate; either spelling is read. A placement line follows its entry: FormKey, world
+# position, and the mesh's bounding radius at that placement's scale, or `?` when unmeasured.
+UNREADABLE_HEAD = re.compile(r"^\s*assets FOUND but UNREADABLE: ([\d,]+)")
+NOT_DRAWN_HEAD = re.compile(r"^\s*meshes NOT DRAWN by the renderer's rule: ([\d,]+)")
+CENSUS_ENTRY = re.compile(r"^ {6}(mesh|texture|archive)\s+(.+?) (?:\u2014|\ufffd|-|\?) (.*)$")
+CENSUS_AT = re.compile(r"^ {9}at (\S{6}:\S+)\s+(-?[\d.]+),(-?[\d.]+),(-?[\d.]+)\s+r (\S+)\s*$")
 # viewprobe's own configuration fingerprint, printed for a candidate configuration (--order).
 CONFIG_FINGERPRINT = re.compile(r"capture input configuration:\s*([0-9a-fA-F]{16,64})")
 RAY_AXES = ("+x", "-x", "+y", "-y", "up", "down")
@@ -348,9 +356,48 @@ class Probe:
         if self.rc != 0:
             tail = "\n".join(self.stdout.strip().splitlines()[-12:])
             raise SystemExit(f"viewprobe exited {self.rc} after {self.seconds:.0f}s.\n{tail}")
+        if self.census()["unreadable"] and "--allow-unreadable-assets" not in self.cmd:
+            # exit 0 with an unreadable census means the opt-out came from somewhere this planner
+            # did not put it -- VP_ALLOW_UNREADABLE_ASSETS in the environment. A hole the planner
+            # was never asked to reason about must not reach a verified pose unexamined.
+            raise SystemExit("viewprobe reported assets found and unreadable, and exited 0 because "
+                             "an opt-out it was not given here is in force (VP_ALLOW_UNREADABLE_ASSETS?). "
+                             "Pass --allow-unreadable-assets to plan through them, or unset it.")
         if self.echo:
             print(f"      ({self.seconds:.0f}s)", file=sys.stderr)
         return self
+
+    def census(self):
+        """{'unreadable': {asset: {...}}, 'notDrawn': {asset: {...}}} from the census blocks.
+
+        Each unreadable entry: kind, reason, and `at` -- the placements, each
+        {formkey, pos, r} with r None when the mesh was not measured. An entry with no `at` lines
+        is a hole this probe could not place (a texture, an archive extraction, or a mesh whose
+        references viewprobe did not list)."""
+        out = {"unreadable": {}, "notDrawn": {}}
+        block, cur = None, None
+        for ln in self.stdout.splitlines():
+            if UNREADABLE_HEAD.match(ln):
+                block, cur = "unreadable", None
+                continue
+            if NOT_DRAWN_HEAD.match(ln):
+                block, cur = "notDrawn", None
+                continue
+            if block is None:
+                continue
+            m = CENSUS_ENTRY.match(ln)
+            if m:
+                cur = out[block].setdefault(m[2], {"kind": m[1], "asset": m[2], "reason": m[3], "at": []})
+                continue
+            m = CENSUS_AT.match(ln)
+            if m and cur is not None:
+                r = None if m[5] == "?" else float(m[5])
+                row = {"formkey": m[1], "pos": (float(m[2]), float(m[3]), float(m[4])), "r": r}
+                if row not in cur["at"]:
+                    cur["at"].append(row)
+                continue
+            block, cur = None, None
+        return out
 
     def picks(self):
         """{(ix, iy): (x, y, z, dist) | None}. None means the ray found nothing to hit."""
@@ -647,12 +694,13 @@ def collect_subjects(args):
     """
     default_z = args.floor_z if args.floor_z is not None else 0.0
     out = [Subject(s, default_z) for s in list(args.subject) + subjects_from_game(args)]
+    out += [Subject(s, default_z, kind="nodepth") for s in (getattr(args, "subject_nodepth", None) or [])]
     extent = getattr(args, "surface_extent", 0.0)
     out += [Subject(s, default_z, kind="surface", extent=extent)
             for s in (getattr(args, "surface", None) or [])]
     if not out:
-        raise SystemExit("no subjects: give --subject X,Y[,Z][=label], --surface X,Y,Z[=label] "
-                         "and/or --subject-from-game FORMID[=label]")
+        raise SystemExit("no subjects: give --subject X,Y[,Z][=label], --surface X,Y,Z[=label], "
+                         "--subject-nodepth X,Y[,Z][=label] and/or --subject-from-game FORMID[=label]")
     n_surf = sum(1 for s in out if s.kind == "surface")
     cap = getattr(args, "surface_max", 8)
     if n_surf > cap:
@@ -751,10 +799,19 @@ class Runner:
     each call site.
     """
 
-    def __init__(self, cell, vp=None, passthrough=(), out=None, size=320, echo=True):
+    def __init__(self, cell, vp=None, passthrough=(), out=None, size=320, echo=True,
+                 allow_unreadable=False):
         self.base, self.cell = vp_command(vp), cell
         self.passthrough, self.out, self.size, self.echo = list(passthrough), out, size, echo
         self.renders, self.seconds = 0, 0.0
+        # Every asset any probe of this cell reported found-and-unreadable, and every mesh it
+        # reported not drawn by the renderer's rule. Accumulated, because a hole seen by one probe
+        # is a hole in every picture of the cell.
+        self.allow_unreadable = allow_unreadable
+        self.unreadable: dict = {}
+        self.not_drawn: dict = {}
+        if allow_unreadable and "--allow-unreadable-assets" not in self.passthrough:
+            self.passthrough.append("--allow-unreadable-assets")
         # NOTE: there is deliberately no run-wide `config_fingerprint` here. viewprobe's identity
         # belongs to the INVOCATION that printed it, and a Runner-level cache quietly lent one
         # render's identity to another: a candidate whose verification supplied a fingerprint, a
@@ -772,6 +829,11 @@ class Runner:
         p = Probe(cmd, echo=self.echo).run()
         self.renders += 1
         self.seconds += p.seconds
+        c = p.census()
+        for key, into in (("unreadable", self.unreadable), ("notDrawn", self.not_drawn)):
+            for asset, e in c[key].items():
+                have = into.setdefault(asset, {**e, "at": []})
+                have["at"] += [a for a in e["at"] if a not in have["at"]]
         m = CONFIG_FINGERPRINT.search(p.stdout)
         # THIS invocation's answer, every time -- including None, which is an answer.
         p.config_fingerprint = m[1] if m else None
@@ -1126,8 +1188,16 @@ def print_frame(fr):
 # candidates and their verdicts
 # --------------------------------------------------------------------------------------
 
+# Kinds that stand on the floor and are framed as a figure. A `nodepth` subject is placed and
+# framed exactly like a `space` one; only what its sightline can prove differs (verify_in_pose).
+STANDING = ("space", "nodepth")
+# The per-target verdicts that pass. `framed` is the nodepth verdict: in frame with nothing opaque
+# before it, and NO claim about the subject's own surface.
+PASSING = ("clear", "confirmed", "framed")
+
+
 class Subject:
-    """One thing the camera must see. Two KINDS, and the difference decides what proves it.
+    """One thing the camera must see. Three KINDS, and the difference decides what proves it.
 
     `space` (from `--subject`) is the original: a thing standing at its FEET, whose sightline is
     proved by a ray reaching AT LEAST as far as it. Geometry further out is fine -- the subject is
@@ -1139,11 +1209,17 @@ class Subject:
     where the source said, or the face is alpha-blended and the depth probe cannot see it. Reading
     "further than the target" as "clear" is correct for a space subject and wrong for a surface
     one, which is the whole reason the kind is carried rather than inferred.
+
+    `nodepth` (from `--subject-nodepth`) is a `space` subject that does not write depth itself --
+    an effect plane, a light beam, an alpha card. A depth ray cannot stop on it, so its sightline
+    proves only that nothing OPAQUE stands between the camera and it, and that it is in the
+    delivered frame. That is reported as `framed`, never as `clear` or `confirmed`: the subject's
+    own surface, and any alpha-blended thing in front of it, are not seen by this probe.
     """
 
     def __init__(self, spec, default_z, kind="space", extent=0.0):
         body, _, label = spec.partition("=")
-        flag = "--subject" if kind == "space" else "--surface"
+        flag = {"space": "--subject", "surface": "--surface", "nodepth": "--subject-nodepth"}[kind]
         try:
             parts = [float(v) for v in body.split(",")]
         except ValueError:
@@ -1205,7 +1281,7 @@ def resolve_floor(subjects, args):
     """
     if args.floor_z is not None:
         return float(args.floor_z)
-    standing = [s.z for s in subjects if s.kind == "space"]
+    standing = [s.z for s in subjects if s.kind in STANDING]
     if standing:
         return min(standing)
     raise SystemExit(
@@ -1225,7 +1301,7 @@ def resolve_aim(subjects, floor_z, args):
     """
     if args.aim:
         return tuple(float(v) for v in args.aim.split(","))
-    standing = [s for s in subjects if s.kind == "space"]
+    standing = [s for s in subjects if s.kind in STANDING]
     pool = standing or subjects
     cx = sum(s.x for s in pool) / len(pool)
     cy = sum(s.y for s in pool) / len(pool)
@@ -1784,6 +1860,68 @@ def target_pixels(eye, yaw, pitch, subjects, args, size):
     return rows, probe_fov
 
 
+def _seg_dist(p, a, b):
+    """Distance from point p to the segment a-b, in 3-D."""
+    ab = [b[i] - a[i] for i in range(3)]
+    ap = [p[i] - a[i] for i in range(3)]
+    L = sum(v * v for v in ab)
+    t = 0.0 if L <= 0 else max(0.0, min(1.0, sum(ap[i] * ab[i] for i in range(3)) / L))
+    return math.dist(p, [a[i] + t * ab[i] for i in range(3)])
+
+
+def hole_check(run, eye, points, args):
+    """Judge every asset the renderer could not draw against THIS pose.
+
+    The depth probe cannot see a mesh the renderer never drew, so a missing mesh between the eye
+    and a subject would read as clear. A pose is therefore accepted only when every unreadable
+    mesh's bounding sphere, at every placement viewprobe listed, keeps `--unreadable-margin` from
+    the eye and from each eye-to-target segment. A texture that would not decode leaves its
+    geometry drawn (white), so it cannot hide anything from the probe; it is named, not judged.
+    An archive failure, a mesh with no listed placement, or one whose radius was not measured
+    cannot be placed, and is refused rather than assumed far.
+    Returns (entries, refusals). Empty when the cell had no unreadable asset.
+    """
+    entries, refusals = [], []
+    margin = args.unreadable_margin
+    for asset, e in sorted(run.unreadable.items()):
+        row = {"asset": asset, "kind": e["kind"], "reason": e["reason"], "placements": []}
+        if e["kind"] == "texture":
+            row.update(verdict="named", why="the geometry is drawn with a white fallback texture, "
+                                            "so the depth probe is unaffected; the picture's colour is not")
+        elif not e["at"]:
+            row.update(verdict="refused", why="no placement was listed, so the hole cannot be "
+                                              "shown to be away from the sightline")
+        else:
+            worst = None
+            for a in e["at"]:
+                if a["r"] is None:
+                    worst = ("unmeasured", a)
+                    break
+                gap_eye = math.dist(a["pos"], eye) - a["r"]
+                gap_seg = min(_seg_dist(a["pos"], eye, pt) for pt in points) - a["r"]
+                gap = min(gap_eye, gap_seg)
+                row["placements"].append({"formkey": a["formkey"], "pos": list(a["pos"]), "r": a["r"],
+                                          "gapToEye": round(gap_eye, 1), "gapToSightline": round(gap_seg, 1)})
+                if worst is None or gap < worst[0]:
+                    worst = (gap, a)
+            if worst[0] == "unmeasured":
+                row.update(verdict="refused", why=f"{worst[1]['formkey']}: the mesh's radius was not "
+                                                  "measured, so the hole cannot be shown to be away "
+                                                  "from the sightline")
+            elif worst[0] < margin:
+                row.update(verdict="refused", why=(
+                    f"{worst[1]['formkey']} is {worst[0]:.0f} u from the eye or a sightline, inside the "
+                    f"{margin:.0f} u margin: the probe cannot see what the missing mesh would hide"))
+            else:
+                row.update(verdict="away", why=(
+                    f"every placement keeps at least {worst[0]:.0f} u from the eye and every sightline "
+                    f"(margin {margin:.0f} u); the picture lacks it, nothing is claimed about it"))
+        if row["verdict"] == "refused":
+            refusals.append(f"unreadable {asset}: {row['why']}")
+        entries.append(row)
+    return entries, refusals
+
+
 def verify_in_pose(run, cell, eye, yaw, pitch, subjects, args):
     """Probe the DELIVERED pose once, and judge every target in it.
 
@@ -1791,6 +1929,8 @@ def verify_in_pose(run, cell, eye, yaw, pitch, subjects, args):
 
       clear         a space subject: the first depth-writing geometry on its ray is at least as
                     far as the subject, so nothing stands between them
+      framed        a nodepth subject: no opaque geometry before it (a ray reaching past it, or
+                    no depth-writing hit at all) -- its own surface is NOT established
       confirmed     a surface target: the ray STOPPED at the declared point, within tolerance
       blocked       geometry substantially nearer than the target -- something is in the way
       not-surface   a surface target whose ray ran substantially PAST it. NOT a success: either
@@ -1800,7 +1940,9 @@ def verify_in_pose(run, cell, eye, yaw, pitch, subjects, args):
       off-probe     the target is outside the probe canvas even widened -- not judged
       behind        the target is behind the camera
 
-    The overall status is `verified` only when EVERY target is clear or confirmed.
+    The overall status is `verified` only when EVERY target is clear, confirmed or framed, and --
+    under --allow-unreadable-assets -- every asset the renderer could not draw is shown to be away
+    from the eye and from every sightline (see hole_check).
     """
     # Settle the pose FIRST. Everything below -- the projection, the flags, the distances, the
     # identity and the exported pose -- reads these numbers, so the ray that is projected is the
@@ -1843,7 +1985,12 @@ def verify_in_pose(run, cell, eye, yaw, pitch, subjects, args):
                 f"{args.verify_fov_max:.0f}) -- NOT judged"))
         else:
             hit = got.get(r_["pixel"])
-            if hit is None:
+            if r_["kind"] == "nodepth" and hit is None:
+                res.update(status="framed", hit=None, why=(
+                    "no depth-writing geometry anywhere on the ray, so nothing opaque stands "
+                    "before the subject. It does not write depth itself, so its own surface is "
+                    "NOT established, and alpha-blended geometry in front of it is not detected"))
+            elif hit is None:
                 res.update(status="unproven", hit=None, why=(
                     "the ray found no depth-writing geometry. An alpha-blended surface -- a "
                     "curtain, a banner, a waterfall -- reads exactly this way, so this is "
@@ -1865,6 +2012,17 @@ def verify_in_pose(run, cell, eye, yaw, pitch, subjects, args):
                         res.update(status="confirmed", why=(
                             f"the ray stopped at {hit[3]:.0f} u against a declared surface at "
                             f"{d:.0f} u (within {tol:.1f} u)"))
+                elif r_["kind"] == "nodepth":
+                    if hit[3] >= d - args.sight_margin:
+                        res.update(status="framed", why=(
+                            f"first opaque geometry {hit[3]:.0f} u along a {d:.0f} u ray, so nothing "
+                            "opaque stands before the subject. Its own surface is NOT established "
+                            "(it does not write depth), and alpha-blended geometry in front of it is "
+                            "not detected"))
+                    else:
+                        res.update(status="blocked", why=(
+                            f"geometry at {hit[3]:.0f} u, short of the {d:.0f} u subject "
+                            f"(at {hit[0]:.0f},{hit[1]:.0f},{hit[2]:.0f})"))
                 else:
                     if hit[3] >= d - args.sight_margin:
                         res.update(status="clear", why=(
@@ -1873,15 +2031,25 @@ def verify_in_pose(run, cell, eye, yaw, pitch, subjects, args):
                         res.update(status="blocked", why=(
                             f"geometry at {hit[3]:.0f} u, short of the {d:.0f} u subject "
                             f"(at {hit[0]:.0f},{hit[1]:.0f},{hit[2]:.0f})"))
-        if res["status"] not in ("clear", "confirmed"):
+        if res["status"] not in PASSING:
             bad.append(res["label"])
         if not res["inDeliveredFrame"] and res["status"] != "behind":
             bad.append(res["label"])
         results.append(res)
 
-    ok = not bad
+    holes, hole_refusals = hole_check(run, eye, [r_["point"] for r_ in rows], args)
+    ok = not bad and not hole_refusals
     scene = scene_identity(run, args, probe.config_fingerprint if probe is not None else None)
-    return {"status": "verified" if ok else "failed",
+    extra = {}
+    # Only when there is something to say, so a healthy verification is unchanged key for key.
+    if holes:
+        extra["incomplete"] = {"margin": args.unreadable_margin, "assets": holes,
+                               "note": "assets found and unreadable: the picture lacks them; a pose "
+                                       "is accepted only when each is away from the eye and every "
+                                       "sightline"}
+    if run.not_drawn:
+        extra["notDrawnByRule"] = sorted(run.not_drawn)
+    return {**{"status": "verified" if ok else "failed",
             "poseId": pose_identity(cell, eye, yaw, pitch, args.fov,
                                     getattr(args, "aspect", 1.0), run.size, subjects, args, scene),
             "scene": scene,
@@ -1890,7 +2058,8 @@ def verify_in_pose(run, cell, eye, yaw, pitch, subjects, args):
                      "aspect": round(getattr(args, "aspect", 1.0), 4), "probeFov": round(probe_fov, 2),
                      "probeSize": run.size},
             "targets": results,
-            "failed": sorted(set(bad))}
+            "failed": sorted(set(bad) | ({"unreadable-assets"} if hole_refusals else set()))},
+            **extra}
 
 
 def print_verification(v, indent="  "):
@@ -1899,7 +2068,7 @@ def print_verification(v, indent="  "):
           f"{v['pose']['probeSize']}px square canvas; the DELIVERED frame is "
           f"{v['pose']['fov']:.1f} deg vertical at aspect {v['pose']['aspect']:.3f}")
     for t in v["targets"]:
-        mark = {"clear": "CLEAR", "confirmed": "CONFIRMED", "blocked": "BLOCKED",
+        mark = {"clear": "CLEAR", "confirmed": "CONFIRMED", "framed": "FRAMED", "blocked": "BLOCKED",
                 "not-surface": "NOT-SURFACE", "unproven": "UNPROVEN",
                 "off-probe": "OFF-PROBE", "behind": "BEHIND"}[t["status"]]
         px = "-" if t["pixel"] is None else f"{t['pixel'][0]},{t['pixel'][1]}"
@@ -1909,6 +2078,10 @@ def print_verification(v, indent="  "):
             print(f"{indent}                   OFF-FRAME -- {fx} deg h / {fy} deg v is outside the "
                   f"DELIVERED frame. The sightline above is a separate question from containment;"
                   f" this target would not be in the picture")
+    for h in (v.get("incomplete") or {}).get("assets", []):
+        print(f"{indent}  UNREADABLE {h['verdict'].upper():<8} {h['kind']} {h['asset']}  {h['why']}")
+    if v.get("notDrawnByRule"):
+        print(f"{indent}  not drawn by the renderer's rule (not a failure): {', '.join(v['notDrawnByRule'])}")
     print(f"{indent}=> {'VERIFIED' if st == 'verified' else 'FAILED: ' + ', '.join(v['failed'])}")
 
 
@@ -2061,7 +2234,8 @@ def cmd_plan(args):
     cy = sum(s.y for s in subjects) / len(subjects)
     aim = resolve_aim(subjects, floor_z, args)
 
-    run = Runner(args.cell, args.vp, args.passthrough, args.out, args.size, not args.quiet)
+    run = Runner(args.cell, args.vp, args.passthrough, args.out, args.size, not args.quiet,
+                 allow_unreadable=args.allow_unreadable_assets)
 
     print(f"cell {args.cell}   floor z {floor_z:.0f}   probe eye z {floor_z + args.eye_height:.0f}")
     for s in subjects:
@@ -2231,7 +2405,10 @@ def cmd_plan(args):
         else:
             best["fail"] = list(best["fail"]) + [
                 f"verification: {t['label']} {t['status']} -- {t['why']}"
-                for t in verification["targets"] if t["status"] not in ("clear", "confirmed")]
+                for t in verification["targets"] if t["status"] not in PASSING] + [
+                f"verification: unreadable {h['asset']} -- {h['why']}"
+                for h in (verification.get("incomplete") or {}).get("assets", [])
+                if h["verdict"] == "refused"]
 
     print(f"\n=== chosen ({status.upper()}) ===")
     print(pose_block(best, args.fov, aspect=getattr(args, "aspect", None),
@@ -2265,6 +2442,12 @@ def cmd_plan(args):
               f"shot anyway, marked REFUSED.")
     elif args.worklist:
         mark = {"verified": "", "unverified": "UNVERIFIED -- ", "refused": "REFUSED -- "}[status]
+        incomplete = (verification or {}).get("incomplete")
+        if incomplete:
+            # ON THE FRAME: the label is the caption viewprobe draws, so the picture itself says
+            # what it lacks. The full list travels in the shot's `incomplete` block.
+            names = [h["asset"].replace("\\", "/").rsplit("/", 1)[-1] for h in incomplete["assets"]]
+            mark += "INCOMPLETE (not drawn: " + ", ".join(names) + ") -- "
         shot = {"label": mark + (args.label or "planned camera")
                          + f" -- {', '.join(s.label for s in subjects)}",
                 "eye": [round(best["eye"][0], 1), round(best["eye"][1], 1), round(best["eye"][2], 1)],
@@ -2290,6 +2473,8 @@ def cmd_plan(args):
             shot["aspect"] = round(float(args.aspect), 6)
         if doors:
             shot["doors"] = [d["formkey"] for d in doors]
+        if incomplete:
+            shot["incomplete"] = incomplete
         wl = {
             "label": args.label or f"shotplan -- {args.cell}",
             # The same three fields a REFUSED worklist carries, in the same place, so one read
@@ -2304,7 +2489,9 @@ def cmd_plan(args):
         with open(args.worklist, "w", encoding="utf-8") as f:
             json.dump(wl, f, indent=2)
         print(f"\nworklist -> {args.worklist}")
-        print("  render it:  viewprobe --worklist " + args.worklist)
+        print("  render it:  viewprobe --worklist " + args.worklist
+              + (" --allow-unreadable-assets   (the frame lacks the assets named above)"
+                 if (verification or {}).get("incomplete") else ""))
         print("  drive it :  shotplan.py devbench " + args.worklist)
 
     if args.dump:
@@ -2366,7 +2553,8 @@ def cmd_check(args):
     # Same canonicalisation as `plan`: judge, submit and export ONE pose.
     eye, yaw, pitch = canonical_pose(eye, yaw, pitch)
 
-    run = Runner(args.cell, args.vp, args.passthrough, args.out, args.size, not args.quiet)
+    run = Runner(args.cell, args.vp, args.passthrough, args.out, args.size, not args.quiet,
+                 allow_unreadable=args.allow_unreadable_assets)
     print(f"cell {args.cell}   camera {eye[0]:.1f},{eye[1]:.1f},{eye[2]:.1f}   floor z {floor_z:.0f}")
 
     # Same contract as `plan`: the pose that would be delivered is probed AS ITSELF, in one
@@ -2394,9 +2582,11 @@ def cmd_check(args):
           f"(aimed at {aim[0]:.0f},{aim[1]:.0f},{aim[2]:.0f}) ---")
     print_verification(ver)
     fails = [f"{t['label']}: {t['status']}" for t in ver["targets"]
-             if t["status"] not in ("clear", "confirmed")]
+             if t["status"] not in PASSING]
     fails += [f"{t['label']}: off-frame" for t in ver["targets"]
               if not t["inDeliveredFrame"] and t["status"] != "behind"]
+    fails += [f"unreadable {h['asset']}: {h['why']}"
+              for h in (ver.get("incomplete") or {}).get("assets", []) if h["verdict"] == "refused"]
 
     kind, msg = nav_verdict(nav, floor_z, args)
     skind, smsg = support_verdict(clear, eye, floor_z, args)
@@ -2665,6 +2855,19 @@ def add_common(p, need_subjects=True):
                    help="a thing that must be in frame, at its FEET. Repeatable. Feed RUNTIME "
                         "positions (DevBench inspect kind=refs) when the game is up -- an actor "
                         "is placed at its AI package anchor, not at its placement record")
+    p.add_argument("--subject-nodepth", action="append", default=[], metavar="X,Y[,Z][=label]",
+                   help="a subject that does not write depth (effect plane, light beam, alpha card), "
+                        "at its FEET, framed like --subject. Its verdict is FRAMED: in the delivered "
+                        "frame with nothing opaque before it -- its own surface is not established. "
+                        "Repeatable")
+    p.add_argument("--allow-unreadable-assets", action="store_true",
+                   help="plan through viewprobe's exit 3 (an asset found and unreadable): viewprobe "
+                        "is run with the same flag, every such asset is named, and a pose is refused "
+                        "unless each unreadable mesh is placed at least --unreadable-margin from the "
+                        "eye and from every sightline. The shot is labelled INCOMPLETE")
+    p.add_argument("--unreadable-margin", type=float, default=128.0,
+                   help="clearance, in units, required between an unreadable mesh's bounding sphere "
+                        "and the eye or any eye-to-target segment (default 128)")
     p.add_argument("--subject-from-game", action="append", default=[],
                    metavar="FORMID[=label]",
                    help="a subject whose position is read off the RUNNING game (DevBench inspect "

@@ -1130,6 +1130,186 @@ def test_devbench_reads_a_worklist_in_either_spelling_or_refuses_by_name():
           r[0] == "refused" and "0 shots" in str(r[2]), str(r)[:160])
 
 
+# --------------------------------------------------------------------------------------
+# 3. assets the renderer could not draw (--allow-unreadable-assets) and nodepth subjects
+# --------------------------------------------------------------------------------------
+#
+# The eye is EYE (0,-300,120) and the subject stands at the origin, aimed at z 100, so the one
+# sightline runs from (0,-300,120) to (0,0,100). A hole is declared as viewprobe's census states
+# it: a mesh, where each reference that uses it is placed, and its bounding radius there.
+
+def hole(x, y, z, r, kind="mesh", asset="meshes\\test\\hole.nif", fk="00AB01:Test.esp"):
+    return {"kind": kind, "asset": asset, "reason": "found, and it parses with 1 drawable shape(s), "
+            "but the renderer produced no geometry from it", "at": [[fk, x, y, z, r]]}
+
+
+def unread_check(holes, *flags, env=False, not_drawn=None):
+    scene = dict(room(PLINTH), unreadable=holes, unreadableEnvOptOut=env)
+    if not_drawn:
+        scene["notDrawnByRule"] = not_drawn
+    return check_cli(scene, "--subject", "0,0=s", *flags)
+
+
+def hole_rows(doc):
+    return (doc["verification"].get("incomplete") or {}).get("assets", [])
+
+
+def exit_message(argv, scene):
+    """The SystemExit text shotplan raised, which run_cli folds into exit code 1."""
+    fd, path = tempfile.mkstemp(suffix=".json")
+    os.close(fd)
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(scene, f)
+    os.environ["FAKE_VIEWPROBE_SCENE"] = path
+    try:
+        with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+            S.main(argv)
+        return ""
+    except SystemExit as e:
+        return str(e.code)
+    finally:
+        os.unlink(path)
+
+
+def test_exit_3_still_stops_the_planner_without_the_flag():
+    """The default is unchanged: viewprobe's exit 3 ends the plan, and the reason is printed."""
+    scene = dict(room(PLINTH), unreadable=[hole(700, 700, 0, 30)])
+    code, out = run_cli(["check", "TestCell", "--eye", EYE, "--vp", FAKE, "--quiet",
+                         "--floor-z", "0", "--subject", "0,0=s"], scene)
+    check("unreadable: without the flag exit 3 stops the plan", code != 0, f"exit {code}")
+    msg = exit_message(["check", "TestCell", "--eye", EYE, "--vp", FAKE, "--quiet",
+                        "--floor-z", "0", "--subject", "0,0=s"], scene)
+    check("unreadable: and says viewprobe exited 3", msg.startswith("viewprobe exited 3"), msg[:80])
+
+
+def test_a_hole_far_from_the_sightline_is_named_and_accepted():
+    d = tempfile.mkdtemp()
+    trace = os.path.join(d, "trace.txt")
+    os.environ["FAKE_VIEWPROBE_TRACE"] = trace
+    try:
+        code, out, doc = unread_check([hole(700, 700, 0, 30)], "--allow-unreadable-assets")
+    finally:
+        os.environ.pop("FAKE_VIEWPROBE_TRACE", None)
+    calls = [l for l in open(trace, encoding="utf-8").read().splitlines() if l.strip()]
+    rows = hole_rows(doc)
+    check("unreadable: a far hole is accepted", code == 0 and doc["status"] == "verified",
+          f"exit {code} {doc['status']}")
+    check("unreadable: it is named, with its verdict", len(rows) == 1 and rows[0]["verdict"] == "away"
+          and rows[0]["asset"] == "meshes\\test\\hole.nif", json.dumps(rows)[:160])
+    check("unreadable: the placement and its measured gaps are carried",
+          rows and rows[0]["placements"][0]["formkey"] == "00AB01:Test.esp"
+          and rows[0]["placements"][0]["gapToSightline"] > 128, json.dumps(rows)[:200])
+    check("unreadable: every viewprobe call carried the opt-out",
+          calls and all("--allow-unreadable-assets" in c for c in calls), f"{len(calls)} call(s)")
+
+
+def test_a_hole_on_the_sightline_is_refused():
+    code, out, doc = unread_check([hole(0, -150, 110, 20)], "--allow-unreadable-assets")
+    rows = hole_rows(doc)
+    check("unreadable: a hole across the sightline refuses the camera", code == 1, f"exit {code}")
+    check("unreadable: the target itself still reads clear -- the probe cannot see the hole",
+          status_of(doc, "s") == "clear", status_of(doc, "s"))
+    check("unreadable: the refusal names the hole", rows and rows[0]["verdict"] == "refused"
+          and "unreadable-assets" in doc["verification"]["failed"], json.dumps(rows)[:160])
+
+
+def test_a_hole_beside_the_eye_is_refused():
+    code, out, doc = unread_check([hole(60, -300, 120, 10)], "--allow-unreadable-assets")
+    rows = hole_rows(doc)
+    check("unreadable: a hole 50 u from the eye, off the sightline, refuses", code == 1
+          and rows and rows[0]["verdict"] == "refused", json.dumps(rows)[:160])
+    check("unreadable: its gap to the eye is what refused it",
+          rows and rows[0]["placements"][0]["gapToEye"] < 128, json.dumps(rows)[:200])
+
+
+def test_a_hole_that_cannot_be_placed_is_refused():
+    code, out, doc = unread_check([hole(700, 700, 0, None)], "--allow-unreadable-assets")
+    r1 = hole_rows(doc)
+    check("unreadable: an unmeasured radius is refused, not assumed small",
+          code == 1 and r1 and r1[0]["verdict"] == "refused" and "not measured" in r1[0]["why"],
+          json.dumps(r1)[:160])
+    arc = {"kind": "archive", "asset": "meshes\\test\\lost.nif", "reason": "extraction failed", "at": []}
+    code, out, doc = unread_check([arc], "--allow-unreadable-assets")
+    r2 = hole_rows(doc)
+    check("unreadable: a hole with no placement is refused, not assumed far",
+          code == 1 and r2 and r2[0]["verdict"] == "refused" and "no placement" in r2[0]["why"],
+          json.dumps(r2)[:160])
+
+
+def test_an_unreadable_texture_is_named_not_judged():
+    tex = {"kind": "texture", "asset": "textures\\test\\bad.dds", "reason": "found on disk and the "
+           "decoder would not read it", "at": []}
+    code, out, doc = unread_check([tex], "--allow-unreadable-assets")
+    rows = hole_rows(doc)
+    check("unreadable: a texture leaves its geometry drawn, so the camera is accepted",
+          code == 0 and rows and rows[0]["verdict"] == "named", json.dumps(rows)[:160])
+
+
+def test_an_ambient_opt_out_does_not_reach_a_verified_pose():
+    scene = dict(room(PLINTH), unreadable=[hole(700, 700, 0, 30)], unreadableEnvOptOut=True)
+    code, out = run_cli(["check", "TestCell", "--eye", EYE, "--vp", FAKE, "--quiet",
+                         "--floor-z", "0", "--subject", "0,0=s"], scene)
+    msg = exit_message(["check", "TestCell", "--eye", EYE, "--vp", FAKE, "--quiet",
+                        "--floor-z", "0", "--subject", "0,0=s"], scene)
+    check("unreadable: exit 0 from an opt-out the planner did not give is refused",
+          code != 0 and "VP_ALLOW_UNREADABLE_ASSETS" in msg, msg[:120])
+
+
+def test_not_drawn_by_rule_is_listed_and_never_fails():
+    code, out, doc = unread_check([], not_drawn=["meshes\\water\\water2048x1024.nif"])
+    check("not drawn by rule: the camera is accepted without any flag", code == 0, f"exit {code}")
+    check("not drawn by rule: the mesh is listed", doc["verification"].get("notDrawnByRule")
+          == ["meshes\\water\\water2048x1024.nif"], str(doc["verification"].get("notDrawnByRule")))
+    code, out, doc = unread_check([])
+    check("not drawn by rule: a clean scene's verification carries neither key",
+          "notDrawnByRule" not in doc["verification"] and "incomplete" not in doc["verification"],
+          ",".join(doc["verification"]))
+
+
+def test_an_incomplete_plan_labels_its_shot():
+    wl = os.path.join(tempfile.mkdtemp(), "wl.json")
+    jp = os.path.join(tempfile.mkdtemp(), "plan.json")
+    scene = dict(room(PLINTH), unreadable=[hole(760, 760, 0, 20)])
+    code, out = run_cli(["plan", "TestCell", "--subject", "0,0,0=target", "--vp", FAKE, "--quiet",
+                         "--json", jp, "--worklist", wl, "--allow-unreadable-assets"], scene)
+    doc = json.load(open(jp, encoding="utf-8"))
+    shot = json.load(open(wl, encoding="utf-8"))["cells"][0]["shots"][0]
+    check("incomplete plan: it verifies", code == 0 and doc["status"] == "verified",
+          f"exit {code} {doc['status']}")
+    check("incomplete plan: the frame's own label says what it lacks",
+          shot["label"].startswith("INCOMPLETE (not drawn: hole.nif) -- "), shot["label"])
+    check("incomplete plan: the shot carries the full list",
+          shot["incomplete"]["assets"][0]["asset"] == "meshes\\test\\hole.nif")
+    check("incomplete plan: the render instruction carries the opt-out",
+          "--worklist " + wl + " --allow-unreadable-assets" in out)
+
+
+def test_nodepth_subject_with_nothing_opaque_before_it_is_framed():
+    # An alpha plinth on a floorless scene: the ray to the subject meets nothing that writes depth.
+    scene = {"boxes": [PLINTH_ALPHA], "nav": [], "navSilent": [], "insideSilent": []}
+    code, out, doc = check_cli(scene, "--subject-nodepth", "0,0=lux")
+    t = [x for x in doc["verification"]["targets"] if x["label"] == "lux"][0]
+    check("nodepth: no depth hit reads FRAMED", t["status"] == "framed", t["status"])
+    check("nodepth: the reason disclaims the subject's own surface", "NOT established" in t["why"], t["why"])
+    code, out, doc = check_cli(scene, "--subject", "0,0=lux")
+    check("nodepth: the SAME scene as a plain --subject stays UNPROVEN",
+          status_of(doc, "lux") == "unproven", status_of(doc, "lux"))
+
+
+def test_nodepth_subject_behind_geometry_is_blocked():
+    screen = {"id": "000501:Test.esp", "edid": "Screen", "min": [-120, -210, 0], "max": [120, -150, 200]}
+    code, out, doc = check_cli(room(PLINTH, screen), "--subject-nodepth", "0,0=lux")
+    check("nodepth: a nearer opaque hit is BLOCKED", status_of(doc, "lux") == "blocked", status_of(doc, "lux"))
+    check("nodepth: and the camera is refused", code == 1, f"exit {code}")
+
+
+def test_nodepth_subject_in_the_open_is_framed_and_accepted():
+    code, out, doc = check_cli(room(PLINTH), "--subject-nodepth", "0,0=lux")
+    check("nodepth: a ray running past it reads FRAMED", status_of(doc, "lux") == "framed", status_of(doc, "lux"))
+    check("nodepth: and the camera is accepted", code == 0, f"exit {code}")
+    check("nodepth: it is framed as a standing subject", doc["subjects"][0]["kind"] == "nodepth")
+
+
 ALL = [test_devbench_reads_a_worklist_in_either_spelling_or_refuses_by_name,
        test_failed_verification_cannot_export_success,
        test_pose_identity_binds_the_result,
@@ -1179,7 +1359,19 @@ ALL = [test_devbench_reads_a_worklist_in_either_spelling_or_refuses_by_name,
        test_the_renderer_fingerprint_binds_when_viewprobe_prints_one,
        test_every_command_that_names_a_path_claims_it,
        test_the_planner_asks_the_renderer_for_its_configuration,
-       test_a_later_candidate_cannot_inherit_an_earlier_identity]
+       test_a_later_candidate_cannot_inherit_an_earlier_identity,
+       test_exit_3_still_stops_the_planner_without_the_flag,
+       test_a_hole_far_from_the_sightline_is_named_and_accepted,
+       test_a_hole_on_the_sightline_is_refused,
+       test_a_hole_beside_the_eye_is_refused,
+       test_a_hole_that_cannot_be_placed_is_refused,
+       test_an_unreadable_texture_is_named_not_judged,
+       test_an_ambient_opt_out_does_not_reach_a_verified_pose,
+       test_not_drawn_by_rule_is_listed_and_never_fails,
+       test_an_incomplete_plan_labels_its_shot,
+       test_nodepth_subject_with_nothing_opaque_before_it_is_framed,
+       test_nodepth_subject_behind_geometry_is_blocked,
+       test_nodepth_subject_in_the_open_is_framed_and_accepted]
 
 
 if __name__ == "__main__":

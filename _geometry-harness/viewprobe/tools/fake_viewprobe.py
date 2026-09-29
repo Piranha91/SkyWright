@@ -36,7 +36,13 @@ Scene JSON:
      "insideUnreadable": 0,          # physical refs whose mesh would not read, so never ruled out
      "insideCoverStyle": "mesh",     # "mesh" | "legacy" (the obnd arm) | "none" (older renderer)
      "configFingerprint": "<64 hex>",  # what viewprobe prints for a candidate configuration
-     "configFingerprintAsks": [1]}     # print it only on these 1-based ASKING invocations
+     "configFingerprintAsks": [1],     # print it only on these 1-based ASKING invocations
+     "unreadable": [{"kind": "mesh", "asset": "meshes\\x.nif", "reason": "...",
+                     "at": [["00ABCD:Test.esp", x, y, z, r]]}],   # r null = unmeasured
+                                     # viewprobe's unreadable census; exit 3 unless the call
+                                     # carries --allow-unreadable-assets (then SUPPRESSED, exit 0)
+     "unreadableEnvOptOut": false,   # exit 0 without the flag, as VP_ALLOW_UNREADABLE_ASSETS=1 would
+     "notDrawnByRule": ["meshes\\water.nif"]}   # the not-drawn-by-rule block; never fails
 """
 from __future__ import annotations
 
@@ -349,6 +355,29 @@ def main(argv):
                   f"[drawn]  base {b.get('type', 'Static')} 000002:Test.esp {b.get('edid', '-')}")
 
     print("   textured: 1 shapes (1 with a real diffuse)")
+    # The census in UnreadableAssets.PrintCensus's shape, with the separator a redirected .NET
+    # console actually delivers (" - "), and PrintNotDrawnByRule's block after it.
+    unread = scene.get("unreadable") or []
+    allowed = "--allow-unreadable-assets" in argv
+    env_opt = scene.get("unreadableEnvOptOut", False)
+    if unread:
+        tail = ("exit 3 SUPPRESSED by --allow-unreadable-assets" if allowed else
+                "exit 3 SUPPRESSED by VP_ALLOW_UNREADABLE_ASSETS=1 in the environment" if env_opt else
+                "this run fails with exit 3")
+        print(f"   assets FOUND but UNREADABLE: {len(unread)} - the picture is missing what they "
+              f"would have drawn; {tail}")
+        for e in unread:
+            print(f"      {e['kind']:<8} {e['asset']} - {e['reason']}")
+            for fk, x, y, z, r in e.get("at", []):
+                print(f"         at {fk}  {x:.1f},{y:.1f},{z:.1f}  r " + ("?" if r is None else f"{r:.1f}"))
+    nd = scene.get("notDrawnByRule") or []
+    if nd:
+        print(f"   meshes NOT DRAWN by the renderer's rule: {len(nd)} - found and read; the picture "
+              "lacks them by design, not by a failed read; the run does not fail")
+        for asset in nd:
+            print(f"      mesh     {asset} - the rendering library skips every shape of it by rule")
+    if unread and not allowed and not env_opt:
+        return 3
     return 0
 
 
