@@ -147,8 +147,16 @@ public sealed class ContactIndex
 {
     public OverlapIndex Index { get; } = new();
     /// <summary>Opt-in per-object trace (src/housecarl-core/ProbeTrace.cs). Null by default; attaching it never changes a verdict.
-    /// GATE B STUB: declared, not yet called at the exits.</summary>
+    /// Called at every exit of <see cref="MovedHosts"/>, <see cref="DependentSnaps"/>, <see cref="PhysicalWinners"/>,
+    /// <see cref="PhysicalWithout"/> and <see cref="Judge"/>; each counted exit emits under the coverage key it counts.</summary>
     public IProbeTraceSink? Trace { get; set; }
+
+    /// <summary>Whether the attached sink wants events for this key (false with no sink — the untraced path does no work).</summary>
+    bool Tw(FormKey key) => Trace is { } t && t.Wants(key);
+    void Te(FormKey key, string role, string outcome, string rule, FormKey other = default,
+            IReadOnlyDictionary<string, double>? values = null, string? detail = null)
+        => Trace!.Emit(new TraceEvent(key, role, outcome, rule, other, values, detail));
+    static Dictionary<string, double> Tv(string n1, double v1, string n2, double v2) => new() { [n1] = v1, [n2] = v2 };
     readonly Func<FormKey, RefGeometry?> _geomOf;
     readonly Dictionary<FormKey, RefGeometry?> _geomCache = new();
     readonly Dictionary<(FormKey Key, int Snap), TriangleGrid?> _hostGrids = new();
@@ -376,6 +384,7 @@ public sealed class ContactIndex
         {
             Snap prev, win; HostChange change; int mover; int prevIndex; bool viaParent = false; bool found = false;
             prev = default; win = default; change = default; mover = -1; prevIndex = -1;
+            string notFound = "NoQualifyingStep"; double moved = double.NaN;               // trace only: why found stays false
             // A deletion that stripped the placement leaves the history one snap short: the winning snap is the
             // last PLACED one, and the deleting plugin is the mover of a Removed host.
             // Q34: the removal is read from the record that WINS, not from the last plugin that ever deleted the
@@ -390,11 +399,11 @@ public sealed class ContactIndex
             else if (snaps.Count >= 2)
             {
                 win = snaps[^1]; prev = snaps[^2]; prevIndex = snaps.Count - 2; mover = win.Plugin; found = true;
-                if (prev.Deleted) found = false;                                          // it was not there before either
+                if (prev.Deleted) { found = false; notFound = "NotPresentBefore"; }       // it was not there before either
                 else if (win.Deleted || Index.IsDeletedNow(key) || !WinnerEnable(key).Enabled) change = HostChange.Removed;
                 else if (win.Space != prev.Space) change = HostChange.Relocated;
                 else if (PlacementHistory.Dist(prev.Pos, win.Pos) > MoveThreshold) change = HostChange.Moved;
-                else found = false;
+                else { found = false; notFound = "NotMovedOverThreshold"; moved = PlacementHistory.Dist(prev.Pos, win.Pos); }
             }
             // The second way a host leaves (R1): disabled at runtime through its parent chain by a plugin whose step
             // is later than any placement step of the host's own.
@@ -414,20 +423,29 @@ public sealed class ContactIndex
                     }
                 }
             }
-            if (!found) continue;
-            if (excludeMover?.Invoke(mover) == true) continue;
+            bool tw = Tw(key);
+            const string MH = TraceRole.MovedHost;
+            if (!found)
+            {
+                if (tw) Te(key, MH, TraceOutcome.Never, notFound, values: notFound == "NotMovedOverThreshold" ? Tv("move", moved, "limit", MoveThreshold) : null,
+                           detail: notFound == "NoQualifyingStep" ? $"{snaps.Count} placement snap(s); no later step moved, relocated or removed it" : null);
+                continue;
+            }
+            if (excludeMover?.Invoke(mover) == true) { if (tw) Te(key, MH, TraceOutcome.Never, "MoverExcluded", detail: $"mover plugin {mover}"); continue; }
             var prevBase = ArmBase(key, mover, closure);
             var winBase = WinnerBase(key);
-            if (prevBase.IsNull || !IsHostType(prevBase)) continue;
+            if (prevBase.IsNull) { if (tw) Te(key, MH, TraceOutcome.Never, "NoArmBase"); continue; }
+            if (!IsHostType(prevBase)) { if (tw) Te(key, MH, TraceOutcome.Never, "NotHostType", detail: $"base {prevBase}"); continue; }
             var armEn = ArmEnable(key, mover, closure);
-            if (!armEn.Resolved) { skips.HostEnableUnresolved++; continue; }
-            if (!armEn.Enabled) { skips.HostRuntimeDisabled++; continue; }          // it did not exist before either
+            if (!armEn.Resolved) { skips.HostEnableUnresolved++; if (tw) Te(key, MH, TraceOutcome.Unjudgeable, "EnableChainUnresolved"); continue; }
+            if (!armEn.Enabled) { skips.HostRuntimeDisabled++; if (tw) Te(key, MH, TraceOutcome.SetAside, "RuntimeDisabledInArm"); continue; }   // it did not exist before either
             var box = WorldBox(prevBase, prev);
-            if (box.IsEmpty) { skips.HostNoGeometry++; continue; }
-            if (GeomOf(prevBase) is not { CanHost: true }) { skips.HostNoCollision++; continue; }
+            if (box.IsEmpty) { skips.HostNoGeometry++; if (tw) Te(key, MH, TraceOutcome.Unjudgeable, "NoGeometry"); continue; }
+            if (GeomOf(prevBase) is not { CanHost: true }) { skips.HostNoCollision++; if (tw) Te(key, MH, TraceOutcome.SetAside, "NoSolidCollision"); continue; }
             float dim = MaxDim(box);
-            if (dim > MaxHostDim) { skips.HostVolume++; continue; }
-            if (dim < MinHostDim) { skips.HostTooSmall++; continue; }
+            if (dim > MaxHostDim) { skips.HostVolume++; if (tw) Te(key, MH, TraceOutcome.SetAside, "VolumeScale", values: Tv("maxDim", dim, "limit", MaxHostDim)); continue; }
+            if (dim < MinHostDim) { skips.HostTooSmall++; if (tw) Te(key, MH, TraceOutcome.SetAside, "TooSmallToHost", values: Tv("maxDim", dim, "limit", MinHostDim)); continue; }
+            if (tw) Te(key, MH, TraceOutcome.Entered, change.ToString(), detail: $"mover plugin {mover}{(viaParent ? ", through its enable parent" : "")}");
             list.Add(new MovedHost(key, prev, prevIndex, win, change, mover, prevBase, winBase, viaParent));
         }
         return list;
@@ -443,17 +461,29 @@ public sealed class ContactIndex
         var h = new BoxHash<(FormKey, int)>();
         foreach (var (key, snaps) in Index.History.Refs)
         {
+            // Trace: one role-level event per key, decided at the LAST snap (the snap the coverage counters count), with the
+            // number of snaps hashed in the detail — the authoring arm may still judge an earlier one.
+            bool tw = Tw(key);
+            int hashed = 0;
+            string lastOutcome = TraceOutcome.Entered, lastRule = "Hashed"; IReadOnlyDictionary<string, double>? lastValues = null;
             for (int i = 0; i < snaps.Count; i++)
             {
                 var s = snaps[i];
-                if (s.Deleted) continue;
+                bool last = i == snaps.Count - 1;
+                if (s.Deleted) { if (last) (lastOutcome, lastRule) = (TraceOutcome.Never, "DeletedSnap"); continue; }
                 var b = BaseAt(key, s.Plugin);
-                if (!IsDependentType(b)) continue;
+                if (!IsDependentType(b)) { if (last) (lastOutcome, lastRule) = (TraceOutcome.Never, "NotDependentType"); continue; }
                 var box = WorldBox(b, s);
-                if (box.IsEmpty) { if (i == snaps.Count - 1) skips.DepNoGeometry++; continue; }
-                if (MaxDim(box) > MaxDependentDim) { if (i == snaps.Count - 1) skips.DepVolume++; continue; }
+                if (box.IsEmpty) { if (last) { skips.DepNoGeometry++; (lastOutcome, lastRule) = (TraceOutcome.Unjudgeable, "NoGeometry"); } continue; }
+                if (MaxDim(box) > MaxDependentDim)
+                {
+                    if (last) { skips.DepVolume++; (lastOutcome, lastRule) = (TraceOutcome.SetAside, "OverDependentSize"); if (tw) lastValues = Tv("maxDim", MaxDim(box), "limit", MaxDependentDim); }
+                    continue;
+                }
                 h.Add(s.Space, box, (key, i));
+                hashed++;
             }
+            if (tw) Te(key, TraceRole.Dependent, lastOutcome, lastRule, values: lastValues, detail: $"{hashed} of {snaps.Count} snap(s) hashed");
         }
         return h;
     }
@@ -464,18 +494,21 @@ public sealed class ContactIndex
     public BoxHash<FormKey> PhysicalWinners(Func<Snap, bool>? inScope = null, ContactSkips? skips = null)
     {
         var h = new BoxHash<FormKey>();
+        const string W = TraceRole.WinnerArm;
         foreach (var (key, snaps) in Index.History.Refs)
         {
+            bool tw = Tw(key);
             var s = snaps[^1];
-            if (s.Deleted || Index.IsDeletedNow(key)) continue;
-            if (inScope is not null && !inScope(s)) continue;
+            if (s.Deleted || Index.IsDeletedNow(key)) { if (tw) Te(key, W, TraceOutcome.Never, "DeletedNow"); continue; }
+            if (inScope is not null && !inScope(s)) { if (tw) Te(key, W, TraceOutcome.Never, "OutOfScope"); continue; }
             var b = WinnerBase(key);
-            if (!IsPhysicalType(b) || GeomOf(b) is not { CanHost: true }) continue;
+            if (!IsPhysicalType(b) || GeomOf(b) is not { CanHost: true }) { if (tw) Te(key, W, TraceOutcome.Never, "NotPhysicalCanHost"); continue; }
             var en = WinnerEnable(key);
-            if (!en.Resolved) { if (skips is not null) skips.WinnerEnableUnresolved++; continue; }
-            if (!en.Enabled) { if (skips is not null) skips.WinnerRuntimeDisabled++; continue; }
+            if (!en.Resolved) { if (skips is not null) skips.WinnerEnableUnresolved++; if (tw) Te(key, W, TraceOutcome.Unjudgeable, "EnableChainUnresolved"); continue; }
+            if (!en.Enabled) { if (skips is not null) skips.WinnerRuntimeDisabled++; if (tw) Te(key, W, TraceOutcome.SetAside, "RuntimeDisabled"); continue; }
             var box = WorldBox(b, s);
-            if (box.IsEmpty) continue;
+            if (box.IsEmpty) { if (tw) Te(key, W, TraceOutcome.Never, "NoWinnerBox"); continue; }
+            if (tw) Te(key, W, TraceOutcome.Entered, "Hashed", detail: "winner arm");
             h.Add(s.Space, box, key);
         }
         return h;
@@ -500,20 +533,23 @@ public sealed class ContactIndex
     {
         var h = new BoxHash<FormKey>();
         snapIndex = new Dictionary<FormKey, int>();
+        const string W = TraceRole.WinnerArm; const string Arm = "arm without the labelled mover";
         foreach (var (key, snaps) in Index.History.Refs)
         {
+            bool tw = Tw(key);
             int i = AuthoringSnapIndex(snaps, mover, closure);
-            if (i < 0) continue;
+            if (i < 0) { if (tw) Te(key, W, TraceOutcome.Never, "IntroducedByMover", detail: Arm); continue; }
             var s = snaps[i];
-            if (s.Deleted) continue;
-            if (inScope is not null && !inScope(s)) continue;
+            if (s.Deleted) { if (tw) Te(key, W, TraceOutcome.Never, "DeletedSnap", detail: Arm); continue; }
+            if (inScope is not null && !inScope(s)) { if (tw) Te(key, W, TraceOutcome.Never, "OutOfScope", detail: Arm); continue; }
             var b = ArmBase(key, mover, closure);
-            if (b.IsNull || !IsPhysicalType(b) || GeomOf(b) is not { CanHost: true }) continue;
+            if (b.IsNull || !IsPhysicalType(b) || GeomOf(b) is not { CanHost: true }) { if (tw) Te(key, W, TraceOutcome.Never, "NotPhysicalCanHost", detail: Arm); continue; }
             var en = ArmEnable(key, mover, closure);
-            if (!en.Resolved) { if (skips is not null) skips.WinnerEnableUnresolved++; continue; }
-            if (!en.Enabled) { if (skips is not null) skips.WinnerRuntimeDisabled++; continue; }
+            if (!en.Resolved) { if (skips is not null) skips.WinnerEnableUnresolved++; if (tw) Te(key, W, TraceOutcome.Unjudgeable, "EnableChainUnresolved", detail: Arm); continue; }
+            if (!en.Enabled) { if (skips is not null) skips.WinnerRuntimeDisabled++; if (tw) Te(key, W, TraceOutcome.SetAside, "RuntimeDisabled", detail: Arm); continue; }
             var box = WorldBox(b, s);
-            if (box.IsEmpty) continue;
+            if (box.IsEmpty) { if (tw) Te(key, W, TraceOutcome.Never, "NoWinnerBox", detail: Arm); continue; }
+            if (tw) Te(key, W, TraceOutcome.Entered, "Hashed", detail: Arm);
             h.Add(s.Space, box, key);
             snapIndex[key] = i;
         }
@@ -597,24 +633,33 @@ public sealed class ContactIndex
         var hostScale = ScaleOf(hostBox);
         int hostPrevIndex = host.PrevIndex;
 
+        const string DR = TraceRole.Dependent;
         foreach (var ((depKey, si), depBox, _) in depSnaps.Near(host.Previous.Space, hostBox, Reach))
         {
-            if (depKey == host.Key) continue;
             var snaps = Index.History.Of(depKey)!;
+            bool tw = Tw(depKey);
+            bool lastSnap = si == snaps.Count - 1;
+            if (depKey == host.Key) { if (tw && lastSnap) Te(depKey, DR, TraceOutcome.Never, "SelfPair", host.Key); continue; }
             int ai = AuthoringSnapIndex(snaps, host.Mover, closure);
-            if (ai < 0) { if (si == snaps.Count - 1) skips.DepIntroducedByMover++; continue; }
-            if (ai != si) continue;                                              // this snap is not the authoring arm's
+            if (ai < 0) { if (lastSnap) { skips.DepIntroducedByMover++; if (tw) Te(depKey, DR, TraceOutcome.SetAside, "DepIntroducedByMover", host.Key); } continue; }
+            if (ai != si)                                                        // this snap is not the authoring arm's
+            {
+                // Trace: only when the authoring snap was never hashed (so no other event for this pair can follow).
+                if (tw && lastSnap && !HashedAsDependent(depKey, snaps, ai))
+                    Te(depKey, DR, TraceOutcome.Never, "NotAuthoringSnap", host.Key, detail: $"authoring snap {ai} was not hashed as a dependent");
+                continue;
+            }
             var depAuth = snaps[ai];
-            if (depAuth.Space != host.Previous.Space) { skips.DepOtherSpace++; continue; }
+            if (depAuth.Space != host.Previous.Space) { skips.DepOtherSpace++; if (tw) Te(depKey, DR, TraceOutcome.SetAside, "DepOtherSpace", host.Key); continue; }
             var depArmEn = ArmEnable(depKey, host.Mover, closure);
-            if (!depArmEn.Resolved) { skips.DepEnableUnresolved++; continue; }
-            if (!depArmEn.Enabled) { skips.DepAbsentInArm++; continue; }         // never there to rest on anything
+            if (!depArmEn.Resolved) { skips.DepEnableUnresolved++; if (tw) Te(depKey, DR, TraceOutcome.Unjudgeable, "DepEnableChainUnresolved", host.Key); continue; }
+            if (!depArmEn.Enabled) { skips.DepAbsentInArm++; if (tw) Te(depKey, DR, TraceOutcome.SetAside, "DepAbsentInArm", host.Key); continue; }   // never there to rest on anything
             var depBase = ArmBase(depKey, host.Mover, closure);
-            if (depBase.IsNull) { skips.DepIntroducedByMover++; continue; }
+            if (depBase.IsNull) { skips.DepIntroducedByMover++; if (tw) Te(depKey, DR, TraceOutcome.SetAside, "DepIntroducedByMover", host.Key, detail: "no base in the arm without the mover"); continue; }
             var depArmBox = WorldBox(depBase, depAuth);
             if (depArmBox.IsEmpty) depArmBox = depBox;
             float gap = SpatialOverlap.BoxDistance(depArmBox, hostBox);
-            if (gap > BoxBand) { skips.BoxesApart++; continue; }
+            if (gap > BoxBand) { skips.BoxesApart++; if (tw) Te(depKey, DR, TraceOutcome.SetAside, "BoxesApart", host.Key, Tv("gap", gap, "limit", BoxBand)); continue; }
 
             var depWin = snaps[^1];
             bool depDeletedNow = Index.IsDeletedNow(depKey);
@@ -650,6 +695,7 @@ public sealed class ContactIndex
                                      || (r0.Verdict == ContactVerdict.Unjudgeable && r0.Reason != ContactBlocker.WinnerArmMissing);
             if (settledWithoutWinner)
             {
+                if (tw) TraceJudged(depKey, host.Key, r0.Relation, r0.Verdict, r0.Reason, false, auth);
                 if (r0.Verdict != ContactVerdict.NoRelation || keepNoRelation)
                     rows.Add(new ContactRow(host, depKey, depAuth, depWin, depBase, depAuth.Plugin, seen, authorAfter, touched,
                                             ScaleOf(depArmBox), hostScale, motion, auth, null, f0, r0.Relation, r0.Verdict, r0.Reason, r0.Why));
@@ -671,11 +717,51 @@ public sealed class ContactIndex
                 WinnerAgainstExtent = win?.AgainstExtent ?? float.NaN,
             };
             var r = DetectorModel.PlacementContact(f, Epsilon, SupportCos, AttachCos);
+            if (tw) TraceJudged(depKey, host.Key, r.Relation, r.Verdict, r.Reason, nearMiss, auth);
             if (r.Verdict == ContactVerdict.NoRelation && !keepNoRelation && !nearMiss) continue;
             rows.Add(new ContactRow(host, depKey, depAuth, depWin, depBase, depAuth.Plugin, seen, authorAfter, touched,
                                     ScaleOf(depArmBox), hostScale, motion, auth, win, f, r.Relation, r.Verdict, r.Reason, r.Why));
         }
         return rows;
+    }
+
+    /// <summary>Trace a judged pair (GATE-A §2.1, §12 M2): a clash verdict is <c>judged_relation</c>; a correct non-clash
+    /// (MovedTogether, ReSupported, Removed) is <c>judged_relation_not_clash</c>; a near miss (no relation at ε, inside the
+    /// near band) is <c>judged_below_threshold / NearMiss</c> with the distance, ε and the margin; otherwise
+    /// <c>judged_no_relation</c>. Unjudgeable names its blocker.</summary>
+    void TraceJudged(FormKey dep, FormKey host, ContactRelation rel, ContactVerdict verdict, ContactBlocker reason, bool nearMiss, ArmContact? auth)
+    {
+        const string DR = TraceRole.Dependent;
+        string detail = $"{rel}/{verdict}";
+        switch (verdict)
+        {
+            case ContactVerdict.Unjudgeable:
+                Te(dep, DR, TraceOutcome.Unjudgeable, reason.ToString(), host, detail: detail); break;
+            case ContactVerdict.NoRelation when nearMiss && auth is { } ac:
+                double d = ac.Contact.FacingDistance;
+                Te(dep, DR, TraceOutcome.JudgedBelowThreshold, "NearMiss", host,
+                   new Dictionary<string, double> { ["distance"] = d, ["penetration"] = ac.Contact.EffectivePenetration, ["epsilon"] = Epsilon,
+                                                    ["margin"] = d - Epsilon, ["nearBand"] = NearBand }, detail); break;
+            case ContactVerdict.NoRelation:
+                Te(dep, DR, TraceOutcome.JudgedNoRelation, "NoRelation", host,
+                   auth is { } an ? Tv("distance", an.Contact.FacingDistance, "penetration", an.Contact.EffectivePenetration) : null,
+                   auth is null ? detail + " (no authoring contact within reach)" : detail); break;
+            case ContactVerdict.MovedTogether or ContactVerdict.ReSupported or ContactVerdict.Removed:
+                Te(dep, DR, TraceOutcome.JudgedRelationNotClash, verdict.ToString(), host, detail: detail); break;
+            default:
+                Te(dep, DR, TraceOutcome.JudgedRelation, verdict.ToString(), host, detail: detail); break;
+        }
+    }
+
+    /// <summary>Whether <see cref="DependentSnaps"/> hashed snap <paramref name="i"/> of this reference (the same predicate).</summary>
+    bool HashedAsDependent(FormKey key, IReadOnlyList<Snap> snaps, int i)
+    {
+        var s = snaps[i];
+        if (s.Deleted) return false;
+        var b = BaseAt(key, s.Plugin);
+        if (!IsDependentType(b)) return false;
+        var box = WorldBox(b, s);
+        return !box.IsEmpty && MaxDim(box) <= MaxDependentDim;
     }
 
     /// <summary>A closed box as twelve outward-facing triangles — the OBND fallback's soup, and the proof's stand-in for a

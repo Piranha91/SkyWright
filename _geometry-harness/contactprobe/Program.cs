@@ -80,6 +80,8 @@ contactprobe: placement contact and explicit render-surface pair review
   --instance DIR --game DIR --profile NAME --order CANDIDATE.json
 Candidate Mods lists select asset priority. Surface/contact evidence is not a defect verdict.
 Other modes: --absolute or --labelled-mover PLUGIN; default is the moved-host pass.
+Default pass only: --trace OUTPUT [--trace-keys KEYS.txt] writes the per-object trace (why each requested FormKey
+was or was not flagged; without a key list, counting mode checks the coverage counters). Output is otherwise unchanged.
 See contactprobe/Program.cs usage documentation for those modes. Help performs no load-order scan.
 """);
     return 0;
@@ -104,6 +106,7 @@ bool bosOn = true;
 var enablePlugins = new List<string>();
 var disablePlugins = new List<string>();
 string? orderFile = null;
+string? traceOut = null, traceKeysPath = null;   // --trace FILE [--trace-keys FILE]: the per-object trace side file (default pass only)
 string NeedValue(int index, string flag)
 {
     if (index + 1 >= args.Length || args[index + 1].StartsWith("--", StringComparison.Ordinal))
@@ -141,6 +144,8 @@ try
         else if (flag == "--vanilla-assets") vanillaAssets = true;
         else if (flag == "--interior-only") interiorOnly = true;
         else if (flag == "--order") { orderFile = NeedValue(i, flag); i++; }
+        else if (flag == "--trace") { traceOut = NeedValue(i, flag); i++; }
+        else if (flag == "--trace-keys") { traceKeysPath = NeedValue(i, flag); i++; }
         else if (flag == "--enable") { enablePlugins.Add(NeedValue(i, flag)); i++; }
         else if (flag == "--disable") { disablePlugins.Add(NeedValue(i, flag)); i++; }
         else if (flag == "--bos") { bosOn = BosHook.ParseFlag(NeedValue(i, flag)) ?? throw new ArgumentException("--bos takes on|off"); i++; }
@@ -177,8 +182,16 @@ if (contactEvidence && overlapJson is null)
 }
 int selectedModes = (overlapJson is null ? 0 : 1) + (absolute ? 1 : 0) + (labelledMover is null ? 0 : 1);
 if (selectedModes > 1) { Console.Error.WriteLine("--overlap-json, --absolute and --labelled-mover select different modes; pass only one"); return 2; }
+if (traceKeysPath is not null && traceOut is null) { Console.Error.WriteLine("--trace-keys requires --trace OUTPUT"); return 2; }
+if (traceOut is not null && selectedModes > 0) { Console.Error.WriteLine("--trace is valid only in the default moved-host pass"); return 2; }
+List<FormKey>? traceKeys = null;
+if (traceKeysPath is not null && File.Exists(traceKeysPath))
+{
+    try { traceKeys = ContactTraceWriter.ReadKeys(traceKeysPath); }
+    catch (ArgumentException ex) { Console.Error.WriteLine(ex.Message); return 2; }
+}
 foreach (var input in new[] { (Flag: "--overlap-json", Path: overlapJson), (Flag: "--base", Path: basePath),
-    (Flag: "--switch-map", Path: switchMapPath), (Flag: "--order", Path: orderFile) })
+    (Flag: "--switch-map", Path: switchMapPath), (Flag: "--order", Path: orderFile), (Flag: "--trace-keys", Path: traceKeysPath) })
     if (input.Path is not null && !File.Exists(input.Path))
     { Console.Error.WriteLine($"{input.Flag} input does not exist: {input.Path}"); return 2; }
 
@@ -627,6 +640,9 @@ if (absolute)
 // The differential pass — every moved host, every dependent within reach, two arms.
 // ---------------------------------------------------------------------------------------
 var skips = new ContactSkips();
+// --trace: attach the sink for the whole pass (keyed with --trace-keys, else counting mode); it never changes a verdict.
+ProbeTraceCollector? traceSink = traceOut is null ? null : new ProbeTraceCollector(traceKeys);
+cidx.Trace = traceSink;
 var hosts = cidx.MovedHosts(skips, closure);
 Console.WriteLine($"\n==== 1. PLUMBING ====");
 Console.WriteLine($"   hosts (physical, furniture-scale or larger, whose last placement step is a move, a relocation or a removal): {hosts.Count:N0}");
@@ -886,6 +902,21 @@ if (jsonPath is not null)
     });
     File.WriteAllText(jsonPath, JsonSerializer.Serialize(dump, new JsonSerializerOptions { WriteIndented = false, NumberHandling = System.Text.Json.Serialization.JsonNumberHandling.AllowNamedFloatingPointLiterals }));
     Console.WriteLine($"wrote {jsonPath}");
+}
+
+if (traceSink is not null)
+{
+    cidx.Trace = null;
+    var byPair = rel.GroupBy(r => (r.Dependent, r.Host.Key)).ToDictionary(g => g.Key, g => g.First());
+    (bool, string)? Admission(FormKey dep, FormKey host) => byPair.TryGetValue((dep, host), out var r)
+        ? (Fixed(r) && IsClass(r) && Pop(r) != DependencyPopulation.BethesdaFloor,
+           !IsClass(r) ? $"{r.Verdict} is not an emitted class (Stranded, Orphaned)" : !Fixed(r) ? $"motion {r.Motion} (only Fixed is emitted)"
+           : Pop(r) == DependencyPopulation.BethesdaFloor ? "Bethesda floor withheld" : "admitted")
+        : null;
+    ContactTraceWriter.Write(traceOut!, traceSink, traceKeysPath, traceKeys, cidx, skips,
+                             cfg.Identity("load-time", cidx.State?.Name ?? EnablePopulation.BaselineStateName), "moved-host differential",
+                             BaseLabel, Admission);
+    Console.WriteLine($"wrote trace ({(traceSink.CountOnly ? "counting mode" : $"{traceKeys!.Count:N0} key(s)")}) -> {traceOut}");
 }
 
 Console.WriteLine($"\nA Stranded / Orphaned row says the dependent touched its host in the order without the mover and touches nothing within ε now, both of them existing at runtime in their arm;");
