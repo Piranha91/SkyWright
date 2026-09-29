@@ -1151,7 +1151,9 @@ def unread_check(holes, *flags, env=False, not_drawn=None):
 
 
 def hole_rows(doc):
-    return (doc["verification"].get("incomplete") or {}).get("assets", [])
+    # A refused run leaves the path holding its claim stub, not a verification: that is a FAIL
+    # of the checks that read it, never a crash that hides which check it was.
+    return ((doc.get("verification") or {}).get("incomplete") or {}).get("assets", [])
 
 
 def exit_message(argv, scene):
@@ -1192,8 +1194,8 @@ def test_a_hole_far_from_the_sightline_is_named_and_accepted():
         os.environ.pop("FAKE_VIEWPROBE_TRACE", None)
     calls = [l for l in open(trace, encoding="utf-8").read().splitlines() if l.strip()]
     rows = hole_rows(doc)
-    check("unreadable: a far hole is accepted", code == 0 and doc["status"] == "verified",
-          f"exit {code} {doc['status']}")
+    check("unreadable: a far hole is accepted", code == 0 and doc.get("status") == "verified",
+          f"exit {code} {doc.get('status')}")
     check("unreadable: it is named, with its verdict", len(rows) == 1 and rows[0]["verdict"] == "away"
           and rows[0]["asset"] == "meshes\\test\\hole.nif", json.dumps(rows)[:160])
     check("unreadable: the placement and its measured gaps are carried",
@@ -1205,10 +1207,10 @@ def test_a_hole_far_from_the_sightline_is_named_and_accepted():
 
 def test_a_hole_named_with_spaces_is_still_placed():
     """Real census lines: a plugin name with spaces, a folder with " - " in it."""
-    h = hole(0, -150, 110, 20, asset="meshes\Some Mod - Parts\hole.nif", fk="00AB02:Some Mod - Walls.esp")
+    h = hole(0, -150, 110, 20, asset="meshes\\Some Mod - Parts\\hole.nif", fk="00AB02:Some Mod - Walls.esp")
     code, out, doc = unread_check([h], "--allow-unreadable-assets")
     rows = hole_rows(doc)
-    check("unreadable: the asset path is read whole", rows and rows[0]["asset"] == "meshes\Some Mod - Parts\hole.nif",
+    check("unreadable: the asset path is read whole", rows and rows[0]["asset"] == "meshes\\Some Mod - Parts\\hole.nif",
           json.dumps(rows)[:160])
     check("unreadable: the spaced FormKey is placed, so the hole is judged by distance",
           rows and rows[0]["placements"] and rows[0]["placements"][0]["formkey"] == "00AB02:Some Mod - Walls.esp"
