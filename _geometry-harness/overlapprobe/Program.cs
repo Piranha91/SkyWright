@@ -100,7 +100,8 @@ enters the placement history. A disposition states what the manifest resolved ab
 never asserts a reference is present, absent or separated in the game state, nor that a record for
 it does or does not exist -- those are read from an enumerated record row's own fields.
 Legacy mode: --responsible-pair PLUGIN_A PLUGIN_B with --geometry-manifest OUTPUT.
---motion swept [--motion-delta U]: a base refused as unsupported_pose whose motion the files settle is discovered
+--motion swept [--motion-delta U]: a base refused for its pose alone (unsupported_pose, or partial_geometry when every
+visible shape decoded and only the pose is refused) whose motion the files settle is discovered
 by a swept proxy (its sampled poses' boxes, each grown by its certified delta): an outer bound, labelled in the reason.
 See overlapprobe/Program.cs usage documentation. Help performs no load-order scan.
 """);
