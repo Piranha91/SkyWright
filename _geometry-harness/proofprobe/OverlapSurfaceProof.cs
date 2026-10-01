@@ -349,6 +349,20 @@ static class OverlapSurfaceProof
                     && fr.Contains(0.5, 1e-9) && !h.FullyBuried && h.Converged && Has(r.CrossingLength, 200), Say(r));
         });
 
+        // SC20 (commit review H1): a large plate (2,000 x 2,000, area 4,000,000) crossing a small closed cube (side 20,
+        // surface 2,400) centred (1,2,0): the plate's area inside is the 20 x 20 section, 400. The interval must hold 400
+        // and may read converged only within 1 % of the SMALLER of the two areas (24 u²). Rejects convergence judged
+        // against the measured surface's own area (40,000 u², wider than the whole cube), which reads converged with a
+        // lower bound of 0.
+        Case(check, "surface SC20: large plate in a small cube — buried 400, converged only within 1 % of the smaller area (24)", () =>
+        {
+            var r = MeshSurface.Measure(PlateZ(-1000, -1000, 1000, 1000, 3), null, Cube(1, 2, 0, 10), null, VolumeGeometry.Render);
+            var h = r.AInB;
+            bool ok = r.Status == "measured" && h is { Status: "measured", Inside: { } i } && i.Contains(400, 1e-6)
+                      && (h.Converged ? i.Width <= 24 + 1e-6 : (h.Reason ?? "").Contains("not converged")) && i.Lower > 0;
+            return (ok, Say(r));
+        });
+
         // ================= SC10-SC11: alpha and open meshes =================
         // SC10: the alpha-pair NIF (opaque quad at z = 7, alpha-tested quad at z = 17) against a cube of side 100 centred
         // (7,3,0): both quads cross it along a 100 x 100 square. L split opaque x opaque 400 and alpha_test x opaque 400,
