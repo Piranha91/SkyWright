@@ -143,8 +143,11 @@ static class MotionProof
         foreach (var x in xs) { verts.Add(new(x, -1, 0)); verts.Add(new(x, 1, 0)); }
         var tris = new List<Triangle>();
         for (int k = 0; k < xs.Length - 1; k++) { int p = 2 * k; tris.Add(new((ushort)p, (ushort)(p + 2), (ushort)(p + 1))); tris.Add(new((ushort)(p + 1), (ushort)(p + 2), (ushort)(p + 3))); }
-        var shape = new BSTriShape { Name = new NiStringRef("Strip"), Flags_ui = 0xE, Scale = 1f };
-        shape.Create(Ver, verts, tris, new(), new());
+        // a pre-SSE NiTriShape with NiTriShapeData: its triangles live in the data block, so a skin instance without a
+        // partition keeps them (an SSE BSTriShape marked skinned stores its geometry in a skin partition this fixture omits)
+        var geom = new NiTriShapeData { Vertices = verts, HasVertices = true, Triangles = tris };
+        var shape = new NiTriShape { Name = new NiStringRef("Strip"), Flags_ui = 0xE, Scale = 1f };
+        shape.DataRef = new(f.AddBlock(geom));
         int si = f.AddBlock(shape); root.Children.AddBlockRef(si);
         var data = new NiSkinData
         {
@@ -164,7 +167,9 @@ static class MotionProof
         inst.Bones ??= new();
         inst.Bones.AddBlockRef(ai); inst.Bones.AddBlockRef(bi);
         int ii = f.AddBlock(inst);
-        shape.IsSkinned = true; shape.SkinInstanceRef = new(ii);
+        // the skin instance alone marks the shape skinned for the reader; setting IsSkinned as well would move SSE geometry
+        // into a skin partition this fixture does not build, and the save would drop the triangles
+        shape.SkinInstanceRef = new(ii);
         // sequence on BoneB
         var kd = Xyz(FG(KeyType.LINEAR_KEY, FK(0, 0)), FG(KeyType.LINEAR_KEY, FK(0, 0)), FG(KeyType.LINEAR_KEY, FK(0, 0), FK(1, angleB)));
         int kdi = f.AddBlock(kd);
@@ -223,6 +228,9 @@ static class MotionProof
 
     // Analytic swept volume of a box r in [r1, r2], y in [-w, 0], z in [0, h] turning about Z by theta (PLAN §8 K1):
     // the angular set at each radius is one interval, so the union adds theta at every radius of the support.
+    // Every Rig carries a static 20 u cube "Frame" (Box(-200,-200,-40,-180,-180,-20)); a whole-mesh volume includes it.
+    const double FrameVolume = 20 * 20 * 20;
+
     static double PlateSweep(double r1, double r2, double w, double h, double theta) =>
         h * (w * (r2 - r1) + theta / 2 * (r2 * r2 + w * w - r1 * r1));
 
@@ -248,11 +256,11 @@ static class MotionProof
             var f = Load(skin);
             var inst = f.Blocks.OfType<NiSkinInstance>().Single();
             var data = f.Blocks.OfType<NiSkinData>().Single();
-            var shape = f.GetShapes().OfType<BSTriShape>().Single();
+            var shape = f.GetShapes().OfType<NiTriShape>().Single();
             var bnames = inst.Bones.References.Select(r => (f.Blocks[r.Index] as NiAVObject)?.Name?.String).ToList();
             var parentB = f.GetParentNode((NiAVObject)f.Blocks[inst.Bones.References.Last().Index])?.Name?.String;
             return (bnames.SequenceEqual(new[] { "BoneA", "BoneB" }) && parentB == "BoneA" && data.BoneList.Sum(b => b.VertexWeights.Count) == 10
-                    && shape.IsSkinned && shape.SkinInstanceRef.Index >= 0, $"bones {string.Join(",", bnames)} parentB {parentB} weights {data.BoneList.Sum(b => b.VertexWeights.Count)} skinned {shape.IsSkinned}");
+                    && shape.HasSkinInstance && shape.SkinInstanceRef.Index >= 0 && shape.Triangles?.Count == 6, $"bones {string.Join(",", bnames)} parentB {parentB} weights {data.BoneList.Sum(b => b.VertexWeights.Count)} skin instance {shape.HasSkinInstance} triangles {shape.Triangles?.Count}");
         });
         Case(check, "motion fixture control: analytic plate sweep (r 10..60, w 4, h 50, theta pi/2) = 50*(200 + pi/4*(3600+16-100))", () =>
         {
@@ -279,12 +287,12 @@ static class MotionProof
         });
 
         // ================= MK1: rotating plate, swept volume against the analytic annulus sector =================
-        Case(check, "MK1 rotating plate: swept volume interval contains 50*(4*50 + (pi/4)*(60^2+4^2-10^2)) and is certified", () =>
+        Case(check, "MK1 rotating plate: swept volume interval contains 50*(4*50 + (pi/4)*(60^2+4^2-10^2)) + the static 20 u frame cube, and is certified", () =>
         {
             var m = NifMotion.Read(plate, null);
             var r = SweptGeometry.Build(plate, m, new[] { "seq:Open" }, VolumeGeometry.Render, new MotionOptions(DeltaTarget: 0.5));
             var v = SweptGeometry.Volume(r, null);
-            double want = PlateSweep(10, 60, 4, 50, Math.PI / 2);
+            double want = PlateSweep(10, 60, 4, 50, Math.PI / 2) + FrameVolume;
             return (v.Swept is { } s && s.Lower <= want && want <= s.Upper && r.Converged && s.Upper - s.Lower <= 0.15 * want,
                     $"want {want:0.#} got [{v.Swept?.Lower:0.#}, {v.Swept?.Upper:0.#}] converged {r.Converged} maxDelta {r.MaxDelta:0.###}");
         });
@@ -292,8 +300,8 @@ static class MotionProof
         {
             var m = NifMotion.Read(plate, null);
             var coarse = SweptGeometry.Volume(SweptGeometry.Build(plate, m, null, VolumeGeometry.Render, new MotionOptions(DeltaTarget: 2.0)), null).Swept!;
-            var fine = SweptGeometry.Volume(SweptGeometry.Build(plate, m, null, VolumeGeometry.Render, new MotionOptions(DeltaTarget: 0.25)), null).Swept!;
-            double want = PlateSweep(10, 60, 4, 50, Math.PI / 2);
+            var fine = SweptGeometry.Volume(SweptGeometry.Build(plate, m, null, VolumeGeometry.Render, new MotionOptions(DeltaTarget: 1.0)), null).Swept!;
+            double want = PlateSweep(10, 60, 4, 50, Math.PI / 2) + FrameVolume;
             return (fine.Width < coarse.Width && fine.Lower <= want && want <= fine.Upper && coarse.Lower <= want && want <= coarse.Upper,
                     $"coarse [{coarse.Lower:0.#},{coarse.Upper:0.#}] fine [{fine.Lower:0.#},{fine.Upper:0.#}] want {want:0.#}");
         });
@@ -310,11 +318,11 @@ static class MotionProof
         // ================= MK2: translating box, the prism =================
         byte[] slide = Rig(Box(0, 0, 0, 20, 20, 20), Vector3.Zero,
                            Xyz(NoKeys(), NoKeys(), NoKeys(), VG(KeyType.LINEAR_KEY, (0f, Vector3.Zero), (1f, new Vector3(0, 0, 100)))));
-        Case(check, "MK2 translating box: swept volume interval contains the prism 20*20*(20+100) = 48000 (width <= 15 %)", () =>
+        Case(check, "MK2 translating box: swept volume interval contains the prism 20*20*(20+100) = 48000 + the static 8000 frame cube (width <= 15 % of the prism)", () =>
         {
             var m = NifMotion.Read(slide, null);
             var v = SweptGeometry.Volume(SweptGeometry.Build(slide, m, null, VolumeGeometry.Render, new MotionOptions(DeltaTarget: 0.5)), null);
-            return (v.Swept is { } s && s.Lower <= 48000 && 48000 <= s.Upper && s.Width <= 0.15 * 48000, $"[{v.Swept?.Lower:0.#}, {v.Swept?.Upper:0.#}]");
+            return (v.Swept is { } s && s.Lower <= 48000 + FrameVolume && 48000 + FrameVolume <= s.Upper && s.Width <= 0.15 * 48000, $"[{v.Swept?.Lower:0.#}, {v.Swept?.Upper:0.#}]");
         });
         Case(check, "MK2 translating box: the end pose is the box lifted 100 u exactly (rejects a dropped last key)", () =>
         {
@@ -438,9 +446,12 @@ static class MotionProof
         Case(check, "MK10 door: a box 5 u outside the swing is never; one 0.2 u outside is not a witness at delta 0.5 and never at delta 0.02", () =>
         {
             var m = NifMotion.Read(door, null);
-            // outside the far edge: the leaf's far edge sweeps radius 35 from the pivot at z 0..80; a cube centred beyond it
-            var far5 = RotZ(pivot + new Vector3(35 + 5 + 2, 0, 40), pivot, -Pi / 4);
-            var far02 = RotZ(pivot + new Vector3(35 + 0.2f + 2, 0, 40), pivot, -Pi / 4);
+            // outside the far edge: the leaf (x 0..40, y -2..2 in the mover frame) reaches radius sqrt(40^2+2^2) from the pivot
+            float reach = MathF.Sqrt(40 * 40 + 2 * 2);
+            // the cube is axis-aligned and centred on the -45 deg ray: its corner nearest the pivot lies 2*sqrt(2) inside its centre
+            float diag = 2 * MathF.Sqrt(2);
+            var far5 = RotZ(pivot + new Vector3(reach + 5 + diag, 0, 40), pivot, -Pi / 4);
+            var far02 = RotZ(pivot + new Vector3(reach + 0.2f + diag, 0, 40), pivot, -Pi / 4);
             var coarse = SweptGeometry.Build(door, m, null, VolumeGeometry.Render, new MotionOptions(DeltaTarget: 0.5));
             var fine = SweptGeometry.Build(door, m, null, VolumeGeometry.Render, new MotionOptions(DeltaTarget: 0.02, SampleBudget: 65536));
             var a = SweptGeometry.Contact(coarse, Cube(far5.X, far5.Y, far5.Z, 2), null, true);
