@@ -493,6 +493,17 @@ static class MotionProof
             var want = RotZ(pivot + new Vector3(40, 2, 80), pivot, Pi / 2);
             return (m.Status == "moving" && p.Status == "posed" && p.Soup!.Vertices.Any(v => NearV(v, want, 1e-3f)), $"{m.Status} {m.Reason} {p.Status} want {S(want)}");
         });
+        Case(check, "MK12 QUADRATIC quaternion keys refuse with reason naming the quaternion key type", () =>
+        {
+            var q = new NiTransformData
+            {
+                RotationType = KeyType.QUADRATIC_KEY, NumRotationKeys = 2,
+                QuaternionKeys = new List<QuatKey<Quaternion>> { new() { Time = 0, Value = Raw(Quaternion.Identity) }, new() { Time = 1, Value = Raw(Quaternion.CreateFromAxisAngle(Vector3.UnitZ, Pi / 2)) } },
+                Translations = NoVKeys(), Scales = NoKeys(),
+            };
+            var m = NifMotion.Read(Rig(leaf, pivot, q), null);
+            return (m.Status == "refused" && (m.Reason ?? "").Contains("quaternion key type QUADRATIC_KEY", StringComparison.Ordinal), $"{m.Status} {m.Reason}");
+        });
         Case(check, "MK12 an inactive direct controller refuses with reason 'controller inactive'", () =>
         {
             var b = Rig(leaf, pivot, Xyz(NoKeys(), NoKeys(), FG(KeyType.LINEAR_KEY, FK(0, 0), FK(1, 1))), direct: true, directActive: false);
