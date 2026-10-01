@@ -21,6 +21,7 @@ static class MotionProof
         check(name, r.ok, r.detail);
     }
     static readonly NiVersion Ver = new() { FileVersion = NiVersion.ToFile("20.2.0.7"), UserVersion = 12, StreamVersion = 100 };
+    static readonly NiVersion VerLE = new() { FileVersion = NiVersion.ToFile("20.2.0.7"), UserVersion = 12, StreamVersion = 83 };
     const float Pi = MathF.PI;
 
     // ---------------- geometry helpers ----------------
@@ -130,9 +131,9 @@ static class MotionProof
     /// <summary>A two-bone skinned strip: BoneA at the origin, BoneB child of BoneA at (20,0,0); vertices along x at 0..40
     /// (a thin quad strip), weights: x &lt;= 10 -> A; x = 30 -> A 0.5 / B 0.5; x = 40 -> B. Sequence "Open" turns BoneB
     /// by <paramref name="angleB"/> about Z (LINEAR) over 1 s.</summary>
-    static byte[] SkinRig(float angleB, Action<NifFile, NiNode>? extra = null)
+    static byte[] SkinRig(float angleB, Action<NifFile, NiNode>? extra = null, bool partitioned = false, bool ssePermuted = false)
     {
-        var f = new NifFile(); f.Create(Ver, withRootNode: true);
+        var f = new NifFile(); f.Create(partitioned ? VerLE : Ver, withRootNode: true);
         var root = f.GetRootNodes().First(); root.Flags_ui = 0xE;
         var a = new NiNode { Name = new NiStringRef("BoneA"), Flags_ui = 0xE, Scale = 1f, Rotation = Identity33() };
         var b = new NiNode { Name = new NiStringRef("BoneB"), Flags_ui = 0xE, Scale = 1f, Rotation = Identity33(), Translation = new(20, 0, 0) };
@@ -145,14 +146,27 @@ static class MotionProof
         for (int k = 0; k < xs.Length - 1; k++) { int p = 2 * k; tris.Add(new((ushort)p, (ushort)(p + 2), (ushort)(p + 1))); tris.Add(new((ushort)(p + 1), (ushort)(p + 2), (ushort)(p + 3))); }
         // a pre-SSE NiTriShape with NiTriShapeData: its triangles live in the data block, so a skin instance without a
         // partition keeps them (an SSE BSTriShape marked skinned stores its geometry in a skin partition this fixture omits)
-        var geom = new NiTriShapeData { Vertices = verts, HasVertices = true, Triangles = tris };
-        var shape = new NiTriShape { Name = new NiStringRef("Strip"), Flags_ui = 0xE, Scale = 1f };
-        shape.DataRef = new(f.AddBlock(geom));
+        INiShape shape;
+        BSTriShape? sseShape = null;
+        if (ssePermuted)
+        {
+            // an SSE BSTriShape: its skin partition (built by NiflySharp's UpdateSkinPartitions below) carries the geometry
+            sseShape = new BSTriShape { Name = new NiStringRef("Strip"), Flags_ui = 0xE, Scale = 1f };
+            sseShape.Create(Ver, verts, tris, new(), new());
+            shape = sseShape;
+        }
+        else
+        {
+            var geom = new NiTriShapeData { Vertices = verts, HasVertices = true, Triangles = tris };
+            var tri = new NiTriShape { Name = new NiStringRef("Strip"), Flags_ui = 0xE, Scale = 1f };
+            tri.DataRef = new(f.AddBlock(geom));
+            shape = tri;
+        }
         int si = f.AddBlock(shape); root.Children.AddBlockRef(si);
         var data = new NiSkinData
         {
             SkinTransform = new NiTransform { Rotation = Identity33(), Scale = 1, Translation = Vector3.Zero },
-            HasVertexWeights = true, NumBones = 2,
+            HasVertexWeights = !partitioned, NumBones = 2,
             BoneList = new List<BoneData>
             {
                 new() { SkinTransform = new NiTransform { Rotation = Identity33(), Scale = 1, Translation = Vector3.Zero },
@@ -169,7 +183,63 @@ static class MotionProof
         int ii = f.AddBlock(inst);
         // the skin instance alone marks the shape skinned for the reader; setting IsSkinned as well would move SSE geometry
         // into a skin partition this fixture does not build, and the save would drop the triangles
-        shape.SkinInstanceRef = new(ii);
+        if (shape is BSTriShape bt) bt.SkinInstanceRef = new(ii); else ((NiTriShape)shape).SkinInstanceRef = new(ii);
+        if (sseShape is not null)
+        {
+            // NiflySharp partitions the skin from the skin data (identity palette), then the palette is permuted to
+            // [BoneB, BoneA] and every vertex's partition-local indices written to match: the skin is unchanged, only its
+            // encoding. The skin data keeps its weights, so a wrong palette reading disagrees with it.
+            // one seed partition holding every triangle; UpdateSkinPartitions assigns triangles from the existing partitions
+            var seed = new SkinPartition
+            {
+                NumTriangles = (ushort)tris.Count, Triangles = tris.ToList(), TrianglesCopy = tris.ToList(), HasFaces = true, Bones = new(), VertexMap = new(),
+                VertexWeights = new(), BoneIndices = new(), Strips = new(), StripLengths = new(),
+            };
+            inst.SkinPartition = new(f.AddBlock(new NiSkinPartition { NumPartitions = 1, Partitions = new List<SkinPartition> { seed }, VertexData = new List<BSVertexDataSSE>() }));
+            sseShape.IsSkinned = true;
+            f.UpdateSkinPartitions(sseShape);
+            var sp = f.GetBlock<NiSkinPartition>(inst.SkinPartition);
+            var p0 = sp.Partitions[0];
+            if (p0.Bones.Count != 2 || p0.Bones[0] != 0 || p0.Bones[1] != 1) throw new InvalidOperationException("SSE fixture: unexpected palette " + string.Join(",", p0.Bones));
+            p0.Bones = new List<ushort> { 1, 0 };
+            sp.Partitions[0] = p0;
+            // the SSE vertex record carries up to four (partition-local index, weight) pairs; NiflySharp's partitioning
+            // leaves them empty here, so they are written from the skin data through the permuted palette (local = 1 - bone)
+            var perVertex = Enumerable.Range(0, verts.Count).Select(_ => new List<(byte, float)>()).ToArray();
+            for (int bone = 0; bone < data.BoneList.Count; bone++)
+                foreach (var vw in data.BoneList[bone].VertexWeights) perVertex[vw.Index].Add(((byte)(1 - bone), vw.Weight));
+            void Fill(List<BSVertexDataSSE>? list)
+            {
+                if (list is null) return;
+                for (int v = 0; v < list.Count; v++)
+                {
+                    var vd = list[v];
+                    for (int k = 0; k < 4; k++) { vd.BoneIndices[k] = k < perVertex[v].Count ? perVertex[v][k].Item1 : (byte)0; vd.BoneWeights[k] = (Half)(k < perVertex[v].Count ? perVertex[v][k].Item2 : 0f); }
+                    list[v] = vd;
+                }
+            }
+            Fill(sseShape.VertexDataSSE);
+            Fill(sp.VertexData);
+        }
+        if (partitioned)
+        {
+            // a pre-SSE (LE) skin: the skin data carries no vertex weights, two partitions carry them, each with the
+            // PERMUTED palette [BoneB, BoneA] (local 0 -> skin bone 1, local 1 -> skin bone 0). Partition 0: vertices 0-3
+            // (x 0, 10) on local 1 = BoneA. Partition 1: vertices 4-5 (x 30) local 0 / local 1 at 0.5 each, 6-7 (x 40) local 0.
+            for (int k = 0; k < 2; k++) { var bd = data.BoneList[k]; bd.VertexWeights = new(); bd.NumVertices = 0; data.BoneList[k] = bd; }
+            SkinPartition Part(ushort[] map, float[] w, byte[] bi, List<Triangle> t) => new()
+            {
+                NumVertices = (ushort)map.Length, NumTriangles = (ushort)t.Count, NumBones = 2, NumStrips = 0, NumWeightsPerVertex = 2,
+                Bones = new List<ushort> { 1, 0 }, HasVertexMap = true, VertexMap = map.ToList(), HasVertexWeights = true, VertexWeights = w.ToList(),
+                StripLengths = new(), HasFaces = true, Strips = new(), Triangles = t, HasBoneIndices = true, BoneIndices = bi.ToList(),
+            };
+            var p0 = Part(new ushort[] { 0, 1, 2, 3 }, new[] { 1f, 0, 1, 0, 1, 0, 1, 0 }, new byte[] { 1, 0, 1, 0, 1, 0, 1, 0 },
+                          new List<Triangle> { new(0, 2, 1), new(1, 2, 3) });
+            var p1 = Part(new ushort[] { 2, 3, 4, 5, 6, 7 }, new[] { 1f, 0, 1, 0, 0.5f, 0.5f, 0.5f, 0.5f, 1, 0, 1, 0 },
+                          new byte[] { 1, 0, 1, 0, 0, 1, 0, 1, 0, 1, 0, 1 }, new List<Triangle> { new(0, 2, 1), new(1, 2, 3), new(2, 4, 3), new(3, 4, 5) });
+            var part = new NiSkinPartition { NumPartitions = 2, Partitions = new List<SkinPartition> { p0, p1 } };
+            inst.SkinPartition = new(f.AddBlock(part));
+        }
         // sequence on BoneB
         var kd = Xyz(FG(KeyType.LINEAR_KEY, FK(0, 0)), FG(KeyType.LINEAR_KEY, FK(0, 0)), FG(KeyType.LINEAR_KEY, FK(0, 0), FK(1, angleB)));
         int kdi = f.AddBlock(kd);
@@ -407,6 +477,52 @@ static class MotionProof
             var mid = (new Vector3(30, 1, 0) + RotZ(new Vector3(30, 1, 0), new Vector3(20, 0, 0), Pi / 2)) / 2;   // (24.5, 5.5, 0)
             return (p.Status == "posed" && v.Any(x => NearV(x, tip, 1e-3f)) && v.Any(x => NearV(x, mid, 1e-3f)), $"{p.Status} want {S(tip)} {S(mid)}");
         });
+        // MK5c (added at Gate C): the partition palette maps a partition-local bone index to the skin bone. No lab mesh the
+        // reader skins has a permuted palette (gatec/partitions-census.jsonl), so this convention is protected here only.
+        Case(check, "motion fixture control (palette): the LE rig round-trips two partitions with palette [1, 0] and no skin-data weights", () =>
+        {
+            var n = Load(SkinRig(Pi / 2, partitioned: true));
+            var sp = n.Blocks.OfType<NiSkinPartition>().SingleOrDefault();
+            var sd = n.Blocks.OfType<NiSkinData>().Single();
+            bool ok = sp is not null && sp.Partitions.Count == 2 && sp.Partitions.All(x => x.Bones.SequenceEqual(new ushort[] { 1, 0 }) && x.BoneIndices.Count == x.NumVertices * 2)
+                      && sd.BoneList.All(x => (x.VertexWeights?.Count ?? 0) == 0);
+            return (ok, $"partitions {sp?.Partitions.Count} palettes {string.Join("|", sp?.Partitions.Select(x => string.Join(",", x.Bones)) ?? [])}");
+        });
+        Case(check, "MK5c skinning through a permuted partition palette: BoneB turned 90 deg -> (40,1) goes to (19,20), (30,1) to (24.5,5.5), (0,1) stays (rejects the local index read as the skin bone)", () =>
+        {
+            var b = SkinRig(Pi / 2, partitioned: true);
+            var m = NifMotion.Read(b, null);
+            var p = NifMotion.Pose(b, m, "seq:Open", 1f, VolumeGeometry.Render);
+            if (p.Soup is null) return (false, $"{m.Status} {m.Reason} {p.Status} {p.Reason}");
+            var v = p.Soup.Vertices;
+            var tip = RotZ(new Vector3(40, 1, 0), new Vector3(20, 0, 0), Pi / 2);
+            var mid = (new Vector3(30, 1, 0) + RotZ(new Vector3(30, 1, 0), new Vector3(20, 0, 0), Pi / 2)) / 2;
+            var root = new Vector3(0, 1, 0);
+            return (p.Status == "posed" && v.Any(x => NearV(x, tip, 1e-3f)) && v.Any(x => NearV(x, mid, 1e-3f)) && v.Any(x => NearV(x, root, 1e-3f)),
+                    $"{p.Status} {m.Skins.FirstOrDefault()?.Authority} want {S(tip)} {S(mid)} {S(root)}");
+        });
+        Case(check, "motion fixture control (SSE palette): the SSE rig round-trips one partition with palette [1, 0], its vertex data and the skin-data weights", () =>
+        {
+            var n = Load(SkinRig(Pi / 2, ssePermuted: true));
+            var sp = n.Blocks.OfType<NiSkinPartition>().SingleOrDefault();
+            var sh = n.GetShapes().OfType<BSTriShape>().SingleOrDefault();
+            bool ok = sp is not null && sp.Partitions.Count == 1 && sp.Partitions[0].Bones.SequenceEqual(new ushort[] { 1, 0 })
+                      && sh?.VertexDataSSE is { Count: 8 } && n.Blocks.OfType<NiSkinData>().Single().BoneList.All(x => (x.VertexWeights?.Count ?? 0) > 0);
+            return (ok, $"partitions {sp?.Partitions.Count} palette {string.Join(",", sp?.Partitions.FirstOrDefault().Bones ?? new())} sse vertices {sh?.VertexDataSSE?.Count}");
+        });
+        Case(check, "MK5d skinning through a permuted SSE partition palette: the partition agrees with the skin data and BoneB turned 90 deg -> (40,1) goes to (19,20), (0,1) stays (rejects the local index read as the skin bone)", () =>
+        {
+            var b = SkinRig(Pi / 2, ssePermuted: true);
+            var m = NifMotion.Read(b, null);
+            var p = NifMotion.Pose(b, m, "seq:Open", 1f, VolumeGeometry.Render);
+            var sk = m.Skins.FirstOrDefault();
+            if (p.Soup is null) return (false, $"{m.Status} {m.Reason} {p.Status} {p.Reason}");
+            var v = p.Soup.Vertices;
+            var tip = RotZ(new Vector3(40, 1, 0), new Vector3(20, 0, 0), Pi / 2);
+            var root = new Vector3(0, 1, 0);
+            return (p.Status == "posed" && sk?.Authority == "partition" && sk.WeightSourceDifference == 0 && v.Any(x => NearV(x, tip, 1e-3f)) && v.Any(x => NearV(x, root, 1e-3f)),
+                    $"{p.Status} {sk?.Authority} differing {sk?.WeightSourceDifference} want {S(tip)} {S(root)}");
+        });
         Case(check, "MK5 skinning: bind check — at the stored transforms the skinned strip equals its stored vertices (composite spread 0)", () =>
         {
             var m = NifMotion.Read(skin, null);
@@ -444,7 +560,9 @@ static class MotionProof
                     && (d.Label ?? "").Contains("trigger: not settled by the files", StringComparison.Ordinal) && vs.Intersection?.Upper == 0,
                     $"{d.Decision} {d.AnimationId}@{d.Time} label '{d.Label}' rest-overlap {vs.Intersection?.Upper}");
         });
-        Case(check, "MK10 door: a box 5 u outside the swing is never; one 0.2 u outside is not a witness at delta 0.5 and never at delta 0.02", () =>
+        // Gate C change (review): the 0.2 u box must be cannot_tell at the coarse delta (achieved delta above 0.2 u), not
+        // merely "not a witness" - a zero interval bound answers never there, and the old assertion could not see that.
+        Case(check, "MK10 door: a box 5 u outside the swing is never; one 0.2 u outside is cannot_tell at delta 0.5 (achieved delta > 0.2 u) and never at delta 0.02", () =>
         {
             var m = NifMotion.Read(door, null);
             // outside the far edge: the leaf (x 0..40, y -2..2 in the mover frame) reaches radius sqrt(40^2+2^2) from the pivot
@@ -458,7 +576,8 @@ static class MotionProof
             var a = SweptGeometry.Contact(coarse, Cube(far5.X, far5.Y, far5.Z, 2), null, true);
             var b = SweptGeometry.Contact(coarse, Cube(far02.X, far02.Y, far02.Z, 2), null, true);
             var c = SweptGeometry.Contact(fine, Cube(far02.X, far02.Y, far02.Z, 2), null, true);
-            return (a.Decision == "never" && b.Decision != "witness" && c.Decision == "never", $"5u {a.Decision}; 0.2u coarse {b.Decision} fine {c.Decision}");
+            return (a.Decision == "never" && coarse.MaxDelta > 0.2 && b.Decision == "cannot_tell" && c.Decision == "never",
+                    $"5u {a.Decision}; 0.2u coarse {b.Decision} (achieved delta {coarse.MaxDelta:0.###}) fine {c.Decision}");
         });
 
         // ================= MK12: refusals by name =================
@@ -521,7 +640,8 @@ static class MotionProof
         {
             var b = Rig(leaf, pivot, null, extra: (f, root) => { root.ExtraDataList ??= new(); root.ExtraDataList.AddBlockRef(f.AddBlock(new BSBehaviorGraphExtraData { BehaviourGraphFile = new NiStringRef(@"Fixture\Rig.hkx") })); root.NumExtraDataList = 1; });
             var m = NifMotion.Read(b, _ => null);
-            return (m.Status == "refused" && (m.Reason ?? "").Contains(@"Fixture\Rig.hkx", StringComparison.OrdinalIgnoreCase), $"{m.Status} {m.Reason}");
+            // Gate C change (S15k): the reason must name the missing file as missing, not merely mention the path
+            return (m.Status == "refused" && (m.Reason ?? "").Contains(@"behaviour graph file missing: meshes\Fixture\Rig.hkx", StringComparison.OrdinalIgnoreCase), $"{m.Status} {m.Reason}");
         });
         Case(check, "MK12 particles (F5): a particle-system shape refuses as a shape with reason 'particles'; the static rest of the mesh is not refused for it", () =>
         {
