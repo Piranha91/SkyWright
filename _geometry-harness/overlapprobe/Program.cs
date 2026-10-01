@@ -49,6 +49,12 @@ using HousecarlCore.Progress;
 //                     [--emit path] [--base emit.json] [--dump path] [--json path]
 //                     [--bos on|off] [--enable X.esp]* [--disable X.esp]* [--instance DIR] [--game DIR] [--profile NAME]
 //                     [--responsible-pair A.esp B.esp]* [--historical-pairs crosswalk.json] [--geometry-manifest output.json]
+//                     [--motion swept [--motion-delta U]]
+//   --motion swept  a base whose render geometry refuses as unsupported_pose but whose motion the files settle (NifMotion:
+//                   NIF sequences and controllers, behaviour-graph clips) is discovered by a swept proxy instead of being
+//                   unmeasurable: the boxes of its sampled poses, each grown by the sample's certified delta (default 0.5 u,
+//                   --motion-delta) — an outer bound, labelled "swept proxy" in the geometry reason. Pairs found this way
+//                   are candidates for contactprobe --motion swept, which decides witness / never / cannot_tell. Default off.
 //   POPULATION      (Q27, 2026-09-06) a candidate exists when its runtime enable state resolves ENABLED at load — the
 //                   XESP parent chain through EnableState (the R1 rule) — not when the winning snap's own
 //                   initially-disabled flag happens to be clear. The counterfactual arm the provenance rule rests on
@@ -94,6 +100,8 @@ enters the placement history. A disposition states what the manifest resolved ab
 never asserts a reference is present, absent or separated in the game state, nor that a record for
 it does or does not exist -- those are read from an enumerated record row's own fields.
 Legacy mode: --responsible-pair PLUGIN_A PLUGIN_B with --geometry-manifest OUTPUT.
+--motion swept [--motion-delta U]: a base refused as unsupported_pose whose motion the files settle is discovered
+by a swept proxy (its sampled poses' boxes, each grown by its certified delta): an outer bound, labelled in the reason.
 See overlapprobe/Program.cs usage documentation. Help performs no load-order scan.
 """);
     return 0;
@@ -109,6 +117,7 @@ string? stateSpec = null, switchMapPath = null;
 Func<FormKey, bool>? enabledOf = null;
 StateArm? stateArm = null;
 double surfaceTolerance = 1e-5;
+bool motionSwept = false; double motionDelta = 0.5;
 long maxTrianglePairs = 2_000_000;
 double pairSeconds = 120;
 string? emitPath = null;
@@ -153,6 +162,8 @@ try
         if (flag is "--depth" or "--frac" or "--maxdim")
             throw new ArgumentException("--depth, --frac and --maxdim are unsupported: actual-shape discovery has no box depth, fraction or size decision gates");
         if (flag == "--list") { if (!int.TryParse(NeedValue(i, flag), out listN)) throw new ArgumentException("--list requires an integer"); i++; }
+        else if (flag == "--motion") { if (NeedValue(i, flag) != "swept") throw new ArgumentException("--motion takes swept"); motionSwept = true; i++; }
+        else if (flag == "--motion-delta") { if (!double.TryParse(NeedValue(i, flag), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out motionDelta) || !(motionDelta > 0)) throw new ArgumentException("--motion-delta requires a positive number"); i++; }
         else if (flag == "--surface-tolerance") { if (!double.TryParse(NeedValue(i, flag), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out surfaceTolerance)) throw new ArgumentException("--surface-tolerance requires a number"); i++; }
         else if (flag == "--max-triangle-pairs") { if (!long.TryParse(NeedValue(i, flag), out maxTrianglePairs)) throw new ArgumentException("--max-triangle-pairs requires an integer"); i++; }
         else if (flag == "--pair-seconds") { if (!double.TryParse(NeedValue(i, flag), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out pairSeconds)) throw new ArgumentException("--pair-seconds requires a number"); i++; }
@@ -530,12 +541,43 @@ GeometryRead GeometryOf(FormKey baseKey)
         else
         {
             var measured = renderCache.Measure(bytes, includeTriangles: true);
+            if (motionSwept && measured.Status == NifRenderGeometryStatus.UnsupportedPose) measured = SweptProxy(bytes, measured);
             result = new(GeometryStatus(measured.Status), measured.Reason, full, pathAssetId, resolution, source, measured,
                          bytes.LongLength);
         }
     }
     geometryByPath[full] = result;
     return Finish(result);
+}
+
+// --motion swept: the outer bound of a moving mesh's swept region as a soup of closed boxes, one per sampled pose, each
+// grown by that sample's certified delta. A motion the files do not settle keeps the original unsupported_pose outcome.
+NifRenderGeometryOutcome SweptProxy(byte[] bytes, NifRenderGeometryOutcome original)
+{
+    byte[]? Read(string r)
+    {
+        try { var res = assets.ResolveForPlacement(r); return res.Sources.Count == 0 ? null : AssetResolver.ReadPlacementSource(res.Sources[0]).Bytes; }
+        catch (ArgumentException) { return null; }
+    }
+    var model = NifMotion.Read(bytes, Read);
+    if (model.Status != "moving") return original;
+    var region = SweptGeometry.Build(bytes, model, null, VolumeGeometry.Render, new MotionOptions(DeltaTarget: motionDelta), Read);
+    if (region.Status != "built") return original;
+    var v = new List<System.Numerics.Vector3>(); var idx = new List<int>();
+    var total = Aabb.Empty;
+    foreach (var smp in region.Samples)
+    {
+        var lo = smp.Soup.Vertices.Aggregate(new System.Numerics.Vector3(float.MaxValue), System.Numerics.Vector3.Min) - new System.Numerics.Vector3((float)smp.Delta);
+        var hi = smp.Soup.Vertices.Aggregate(new System.Numerics.Vector3(float.MinValue), System.Numerics.Vector3.Max) + new System.Numerics.Vector3((float)smp.Delta);
+        int b0 = v.Count;
+        for (int k = 0; k < 8; k++) v.Add(new((k & 1) == 0 ? lo.X : hi.X, (k & 2) == 0 ? lo.Y : hi.Y, (k & 4) == 0 ? lo.Z : hi.Z));
+        foreach (var t in new[] { 0,2,1, 1,2,3, 4,5,6, 5,7,6, 0,1,4, 1,5,4, 2,6,3, 3,6,7, 0,4,2, 2,4,6, 1,3,5, 3,7,5 }) idx.Add(b0 + t);
+        total = total.Add(lo).Add(hi);
+    }
+    string anims = string.Join(", ", region.Animations.Select(a => $"{a.Id} {a.Cycle}"));
+    return new NifRenderGeometryOutcome(NifRenderGeometryStatus.Measured,
+        $"swept proxy: {region.Samples.Count} sampled poses' boxes grown by their certified delta (max {region.MaxDelta:0.###} u, {(region.Converged ? "converged" : "not converged")}) over {anims}; an outer bound for discovery only",
+        total, new TriangleSoup(v.ToArray(), idx.ToArray()), original.Model, original.ContentSha256, original.CacheKey + "|swept:" + motionDelta.ToString(System.Globalization.CultureInfo.InvariantCulture));
 }
 
 (TriangleSoup? Soup, char Source, string? Reason) SurfaceGeometryOf(FormKey baseKey)

@@ -53,11 +53,19 @@ using HousecarlCore.Progress;
 //                          node or a behaviour graph refuses) or targeted (refuses only what the file shows moving the
 //                          shape: a skin, a switch node, a sequence's or controller's transform on its node chain, or a
 //                          behaviour graph; other controllers leave the stored pose standing)
+//   --motion MODE          with --surface or --volume: a pair member whose stored pose is not its live pose is measured
+//                          against its motion instead of refused (animated-object swept volume): swept (the moving
+//                          member's swept region over every animation the files can play: witness / never / cannot_tell,
+//                          labelled with the animation, cycle, base record type and "trigger: not settled by the files";
+//                          --volume adds the certified intersection with a closed partner) or pose:NAME (closed, open,
+//                          state:NAME, <animation>@start|@end). Default off: outputs unchanged.
+//   --motion-delta U       with --motion swept: target bound on how far the moving part moves between samples (default 0.5)
+//   --motion-budget N      with --motion swept: samples per animation before the region is reported not converged (4096)
 //
 // usage: contactprobe [--list N] [--eps U] [--reach U] [--json FILE] [--emit FILE] [--base EMIT] [--all-rows] [--interior-only]
 //                     [--absolute] [--labelled-mover X.esp] [--overlap-json FILE]
 //                     [--contact-evidence] [--contact-budget-seconds 1200] [--pair-budget-seconds 120] [--contact-max-pairs 128]
-//                     [--volume FILE] [--surface FILE [--live-pose blanket|targeted]]
+//                     [--volume FILE] [--surface FILE [--live-pose blanket|targeted]] [--motion off|swept|pose:NAME [--motion-delta U] [--motion-budget N]]
 //                     [--only A.esm,B.esm,...] [--vanilla-assets] [--bos on|off]
 //                     [--enable X.esp]* [--disable X.esp]* [--instance DIR] [--game DIR] [--profile NAME]
 //   POPULATION      the LOAD-TIME state, and it always has been (R1, 2026-09-03): a reference exists in an arm when its
@@ -90,6 +98,8 @@ contactprobe: placement contact and explicit render-surface pair review
   --volume OUTPUT (with --overlap-json): measured overlap volume per pair, render and collision separately
   --surface OUTPUT (with --overlap-json): crossing length, coplanar areas and buried area per pair, render and collision
     separately; --live-pose blanket|targeted chooses the live-pose rule (default blanket)
+  --motion off|swept|pose:NAME (with --surface/--volume): measure a moving member against its motion instead of refusing
+    it; --motion-delta U and --motion-budget N tune the swept sampling (default 0.5 u, 4096)
   --instance DIR --game DIR --profile NAME --order CANDIDATE.json
 Candidate Mods lists select asset priority. Surface/contact evidence is not a defect verdict.
 Other modes: --absolute or --labelled-mover PLUGIN; default is the moved-host pass.
@@ -120,7 +130,8 @@ var enablePlugins = new List<string>();
 var disablePlugins = new List<string>();
 string? orderFile = null;
 string? traceOut = null, traceKeysPath = null, volumeOut = null, surfaceOut = null;   // --surface FILE: measured surface contact (with --overlap-json)
-LivePosePolicy? livePose = null;   // --live-pose blanket|targeted (with --surface)
+LivePosePolicy? livePose = null;
+string? motionSpec = null; double? motionDelta = null; int? motionBudget = null;   // --live-pose blanket|targeted (with --surface)
    // --volume FILE: measured overlap volume (with --overlap-json)   // --trace FILE [--trace-keys FILE]: the per-object trace side file (default pass only)
 string NeedValue(int index, string flag)
 {
@@ -171,6 +182,9 @@ try
             };
             i++;
         }
+        else if (flag == "--motion") { motionSpec = NeedValue(i, flag); i++; }
+        else if (flag == "--motion-delta") { motionDelta = double.Parse(NeedValue(i, flag), System.Globalization.CultureInfo.InvariantCulture); i++; }
+        else if (flag == "--motion-budget") { motionBudget = int.Parse(NeedValue(i, flag), System.Globalization.CultureInfo.InvariantCulture); i++; }
         else if (flag == "--trace-keys") { traceKeysPath = NeedValue(i, flag); i++; }
         else if (flag == "--enable") { enablePlugins.Add(NeedValue(i, flag)); i++; }
         else if (flag == "--disable") { disablePlugins.Add(NeedValue(i, flag)); i++; }
@@ -212,6 +226,12 @@ if (volumeOut is not null && overlapJson is null) { Console.Error.WriteLine("--v
 if (surfaceOut is not null && overlapJson is null) { Console.Error.WriteLine("--surface is valid only with --overlap-json INPUT"); return 2; }
 if (livePose is not null && surfaceOut is null) { Console.Error.WriteLine("--live-pose is valid only with --surface OUTPUT"); return 2; }
 if (traceKeysPath is not null && traceOut is null) { Console.Error.WriteLine("--trace-keys requires --trace OUTPUT"); return 2; }
+MotionReview.Options? motionOptions;
+try { motionOptions = MotionReview.Parse(motionSpec, motionDelta, motionBudget); }
+catch (ArgumentException ex) { Console.Error.WriteLine(ex.Message); return 2; }
+if (motionSpec is not null && surfaceOut is null && volumeOut is null) { Console.Error.WriteLine("--motion is valid only with --surface or --volume OUTPUT"); return 2; }
+if ((motionDelta is not null || motionBudget is not null) && motionOptions?.Mode != "swept") { Console.Error.WriteLine("--motion-delta and --motion-budget are valid only with --motion swept"); return 2; }
+if (motionDelta is { } md && !(md > 0 && double.IsFinite(md)) || motionBudget is { } mb && mb < 2) { Console.Error.WriteLine("--motion-delta must be positive and finite; --motion-budget at least 2"); return 2; }
 if (traceOut is not null && selectedModes > 0) { Console.Error.WriteLine("--trace is valid only in the default moved-host pass"); return 2; }
 List<FormKey>? traceKeys = null;
 if (traceKeysPath is not null && File.Exists(traceKeysPath))
@@ -456,13 +476,14 @@ if (overlapJson is not null)
             contactMaxPairs, surfaceTolerance, meshMaxTrianglePairs, contactEvidence, assets, idx, cidx.Arms,
             cfg.Identity("load-time", cidx.State?.Name ?? "baseline"), idx.WinningGeometryPose, __run);
         // --volume: a separate file after the unchanged pair review (patch-miss packet, GATE-A §5).
+        var motionCache = motionOptions is null ? null : new MotionReview.Cache(assets, idx, motionOptions);
         if (volumeOut is not null)
             OverlapVolumeReview.Run(overlapJson, volumeOut, assets, idx, cidx.Arms,
-                cfg.Identity("load-time", cidx.State?.Name ?? "baseline"), idx.WinningGeometryPose);
+                cfg.Identity("load-time", cidx.State?.Name ?? "baseline"), idx.WinningGeometryPose, motionCache);
         // --surface: a separate file after the unchanged pair review and volume (patch-miss packet, session 6).
         if (surfaceOut is not null)
             OverlapSurfaceReview.Run(overlapJson, surfaceOut, livePose ?? LivePosePolicy.Blanket, assets, idx, cidx.Arms,
-                cfg.Identity("load-time", cidx.State?.Name ?? "baseline"), idx.WinningGeometryPose);
+                cfg.Identity("load-time", cidx.State?.Name ?? "baseline"), idx.WinningGeometryPose, motionCache);
         return reviewRc;
     }
     catch (Exception ex)

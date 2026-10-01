@@ -23,7 +23,7 @@ static class OverlapSurfaceReview
     };
 
     public static int Run(string inputPath, string outputPath, LivePosePolicy pose, AssetResolver assets, OverlapIndex index, EnableArms arms,
-                          ConfigurationIdentity configuration, Func<FormKey, Snap?> winningPose)
+                          ConfigurationIdentity configuration, Func<FormKey, Snap?> winningPose, MotionReview.Cache? motion = null)
     {
         var inputBytes = File.ReadAllBytes(inputPath);
         using var input = JsonDocument.Parse(inputBytes);
@@ -87,6 +87,14 @@ static class OverlapSurfaceReview
                 }
                 var sa = Surface(p.A, a, g);
                 var sb = Surface(p.B, b, g);
+                if ((sa.Status != "measured" || sb.Status != "measured") && motion is not null
+                    && MotionReview.Pair(motion, g, p.A, a.Bytes, a.Pose!.Value, p.B, b.Bytes, b.Pose!.Value,
+                                         bytes => { var s = MeshSurface.ModelSurface(bytes, g, pose); return s.Status == "measured" ? (s.Soup, s.Tags, null) : (null, null, s.Reason); },
+                                         volume: false) is { } mr)
+                {
+                    geoms.Add(mr);
+                    continue;
+                }
                 if (sa.Status != "measured" || sb.Status != "measured")
                 {
                     refused++;

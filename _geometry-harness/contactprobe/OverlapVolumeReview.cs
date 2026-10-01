@@ -15,7 +15,7 @@ static class OverlapVolumeReview
     sealed record Member(string Status, string? Reason, byte[]? Bytes, Snap? Pose, string? Base, string? Mesh);
 
     public static int Run(string inputPath, string outputPath, AssetResolver assets, OverlapIndex index, EnableArms arms,
-                          ConfigurationIdentity configuration, Func<FormKey, Snap?> winningPose)
+                          ConfigurationIdentity configuration, Func<FormKey, Snap?> winningPose, MotionReview.Cache? motion = null)
     {
         var inputBytes = File.ReadAllBytes(inputPath);
         using var input = JsonDocument.Parse(inputBytes);
@@ -75,6 +75,14 @@ static class OverlapVolumeReview
                 }
                 var sa = MeshVolume.ModelSolid(a.Bytes, g);
                 var sb = MeshVolume.ModelSolid(b.Bytes, g);
+                if ((sa.Status != "solid" || sb.Status != "solid") && motion is not null
+                    && MotionReview.Pair(motion, g, p.A, a.Bytes, a.Pose!.Value, p.B, b.Bytes, b.Pose!.Value,
+                                         bytes => { var s = MeshVolume.ModelSolid(bytes, g); return s.Status == "solid" ? (s.Soup, null, null) : (null, null, s.Reason); },
+                                         volume: true) is { } mr)
+                {
+                    geoms.Add(mr);
+                    continue;
+                }
                 if (sa.Status != "solid" || sb.Status != "solid")
                 {
                     refused++;
