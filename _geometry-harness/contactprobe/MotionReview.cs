@@ -126,10 +126,15 @@ static class MotionReview
             return new { geometry = gname, result = s, motion };
         }
         var region = cache.Region(mForm, mBytes, g);
+        if (region.Status != "built" && (region.Reason ?? "").EndsWith("no_solid_collision", StringComparison.Ordinal))
+            return new { geometry = gname, status = "refused", reason = $"{member}: no_solid_collision" };   // not a pose question
         if (region.Status != "built") return Refuse(member, region.Reason ?? "swept region refused");
         var placed = SweptGeometry.Place(region, mPose.Pos, mPose.Rot, mPose.Scale);
         bool partnerSolid = MeshVolume.Solid(partner).Status == "solid";
         var d = SweptGeometry.Contact(placed, partner, other.Tags, partnerSolid, cache.Options.Sweep);
+        if (d.Decision == "refused")
+            return new { geometry = gname, status = "refused", reason = d.Reason!.StartsWith("partner: ", StringComparison.Ordinal) ? $"{(movA ? "B" : "A")}: {d.Reason[9..]}" : $"{member}: {d.Reason}",
+                         motion = new { mode = "swept", policy = Policy, member, refusal = d.Reason } };
         SweptVolume? v = volume && partnerSolid && placed.Solid ? SweptGeometry.Volume(placed, partner) : null;
         return new
         {

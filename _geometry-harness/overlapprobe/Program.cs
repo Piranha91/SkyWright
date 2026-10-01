@@ -541,7 +541,7 @@ GeometryRead GeometryOf(FormKey baseKey)
         else
         {
             var measured = renderCache.Measure(bytes, includeTriangles: true);
-            if (motionSwept && measured.Status == NifRenderGeometryStatus.UnsupportedPose) measured = SweptProxy(bytes, measured);
+            if (motionSwept && measured.Status is NifRenderGeometryStatus.UnsupportedPose or NifRenderGeometryStatus.PartialGeometry) measured = SweptProxy(bytes, measured);
             result = new(GeometryStatus(measured.Status), measured.Reason, full, pathAssetId, resolution, source, measured,
                          bytes.LongLength);
         }
@@ -559,6 +559,10 @@ NifRenderGeometryOutcome SweptProxy(byte[] bytes, NifRenderGeometryOutcome origi
         try { var res = assets.ResolveForPlacement(r); return res.Sources.Count == 0 ? null : AssetResolver.ReadPlacementSource(res.Sources[0]).Bytes; }
         catch (ArgumentException) { return null; }
     }
+    // only a refusal caused by pose alone: every visible shape decoded completely, and at least one carries a pose issue
+    var visible = original.Model?.Shapes.Where(s => !s.Hidden).ToList();
+    if (visible is null || visible.Count == 0 || !visible.All(s => s.VerticesRead && s.TrianglesRead && s.InvalidTriangleCount == 0)
+        || !visible.Any(s => s.PoseIssue is not null)) return original;
     var model = NifMotion.Read(bytes, Read);
     if (model.Status != "moving") return original;
     var region = SweptGeometry.Build(bytes, model, null, VolumeGeometry.Render, new MotionOptions(DeltaTarget: motionDelta), Read);
