@@ -172,16 +172,25 @@ static class OverlapSurfaceProof
             return (seq.ControlledBlocks.Count == 1 && cb.NodeName?.ToString() == "Leaf" && cb.ControllerType?.ToString() == "NiTransformController"
                     && seq.CycleType == CycleType.CYCLE_CLAMP, $"{seq.ControlledBlocks.Count} {cb.NodeName} {cb.ControllerType} {seq.CycleType}");
         });
-        Case(check, "surface fixture control: the behaviour-graph rig carries BSBehaviorGraphExtraData and NO controller, so the existing rule sets no pose issue (the H1 gap in today's rule)", () =>
+        Case(check, "surface fixture control: the behaviour-graph rig carries BSBehaviorGraphExtraData and NO controller", () =>
+        {
+            var beh = new NifFile();
+            using (var ms = new MemoryStream(Rig(null, behaviour: @"Fixture\Rig.hkx"))) beh.Load(ms);
+            var bg = beh.Blocks.OfType<BSBehaviorGraphExtraData>().FirstOrDefault();
+            return (bg?.BehaviourGraphFile?.ToString() == @"Fixture\Rig.hkx" && !beh.Blocks.Any(b => b is NiTimeController),
+                    $"graph {bg?.BehaviourGraphFile}; controllers {beh.Blocks.Count(b => b is NiTimeController)}");
+        });
+        // SCB (review Q-R2): the DEFAULT rule refuses a file that references a behaviour graph: every visible shape carries
+        // the pose issue naming the graph, and the overlap reader does not call it measured. Rejects the stored pose read
+        // as the live pose when an animation source is visible in the file (before the fix: no pose issue, measured).
+        Case(check, "surface SCB: the default rule refuses a behaviour-graph file — every shape names 'behaviour graph 'Fixture\\Rig.hkx''", () =>
         {
             var bytes = Rig(null, behaviour: @"Fixture\Rig.hkx");
-            var beh = new NifFile();
-            using (var ms = new MemoryStream(bytes)) beh.Load(ms);
-            var bg = beh.Blocks.OfType<BSBehaviorGraphExtraData>().FirstOrDefault();
             var geo = NifGeometry.MeasureVisibleRender(bytes, includeTriangles: true);
-            return (bg?.BehaviourGraphFile?.ToString() == @"Fixture\Rig.hkx" && !beh.Blocks.Any(b => b is NiTimeController)
-                    && geo.Model is { } bm && bm.Shapes.Count == 2 && bm.Shapes.All(s => s.PoseIssue is null),
-                    $"{bg?.BehaviourGraphFile} {string.Join(" | ", geo.Model?.Shapes.Select(s => s.Name + ":" + s.PoseIssue) ?? [])}");
+            var ov = NifOverlapGeometry.Measure(bytes, includeTriangles: true);
+            return (geo.Model is { } bm && bm.Shapes.Count == 2 && bm.Shapes.All(s => (s.PoseIssue ?? "").Contains(@"behaviour graph 'Fixture\Rig.hkx'"))
+                    && ov.Status != NifRenderGeometryStatus.Measured && !ov.UsableForSurfaceIntersection,
+                    $"{string.Join(" | ", geo.Model?.Shapes.Select(s => s.Name + ":" + s.PoseIssue) ?? [])}; overlap {ov.Status}: {ov.Reason}");
         });
         Case(check, "surface fixture control: the skinned rig reads P as skinned", () =>
         {
