@@ -156,13 +156,18 @@ try
         {
             var m = NifMotion.Read(bytes, read, placement);
             var at = times ?? new List<float> { t ?? throw new ArgumentException("node needs --t or --times") };
+            string animId = anim ?? throw new ArgumentException("node needs --animation"), nodeName = node ?? throw new ArgumentException("node needs --node");
             var rows = at.Select(time =>
             {
-                var (r, s, tr) = NifMotion.NodeLocal(bytes, m, anim ?? throw new ArgumentException("node needs --animation"),
-                                                     node ?? throw new ArgumentException("node needs --node"), time, read);
+                var (r, s, tr) = NifMotion.NodeLocal(bytes, m, animId, nodeName, time, read);
                 return new { time, rotationRows = M(r), scale = s, translation = V(tr) };
-            }).ToList();
-            return Emit(new { verb, rel, animation = anim, node, samples = rows }, true);
+            });
+            // an animation or node the model does not have is a refusal naming what the model offers, not a crash
+            try { return Emit(new { verb, rel, animation = anim, node, samples = rows.ToList() }, true); }
+            catch (ArgumentException ex)
+            {
+                return Emit(new { verb, rel, status = "refused", reason = $"{ex.Message}; the model's animations: {string.Join(", ", m.Animations.Select(x => x.Id))} (or nifkeys:<node>)" }, false);
+            }
         }
         case "clip":
         {
