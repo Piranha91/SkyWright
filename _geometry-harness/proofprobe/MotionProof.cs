@@ -49,6 +49,8 @@ static class MotionProof
     }
     static NifFile Load(byte[] b) { var f = new NifFile(); using var ms = new MemoryStream(b); f.Load(ms); return f; }
     static Matrix33 Identity33() => new() { M11 = 1, M22 = 1, M33 = 1 };
+    /// <summary>A true quaternion in the field order NiflySharp holds a NIF key in (file w, x, y, z in X, Y, Z, W).</summary>
+    static Quaternion Raw(Quaternion q) => new(q.W, q.X, q.Y, q.Z);
 
     // ---------------- key helpers ----------------
     static Key<float> FK(float t, float v, float fw = 0, float bw = 0) => new() { Time = t, Value = v, Forward = fw, Backward = bw };
@@ -465,16 +467,19 @@ static class MotionProof
             var m = NifMotion.Read(b, null);
             return (m.Status == "refused" && (m.Reason ?? "").Contains("TBC_KEY", StringComparison.Ordinal), $"{m.Status} {m.Reason}");
         });
-        Case(check, "MK12 played quaternion keys refuse (D2: convention not measured on real data)", () =>
+        Case(check, "MK12 played LINEAR quaternion keys are supported (G1): Open@end turns the leaf +90 deg about Z (rejects the misread component order)", () =>
         {
             var q = new NiTransformData
             {
                 RotationType = KeyType.LINEAR_KEY, NumRotationKeys = 2,
-                QuaternionKeys = new List<QuatKey<Quaternion>> { new() { Time = 0, Value = Quaternion.Identity }, new() { Time = 1, Value = Quaternion.CreateFromAxisAngle(Vector3.UnitZ, 1) } },
+                QuaternionKeys = new List<QuatKey<Quaternion>> { new() { Time = 0, Value = Raw(Quaternion.Identity) }, new() { Time = 1, Value = Raw(Quaternion.CreateFromAxisAngle(Vector3.UnitZ, Pi / 2)) } },
                 Translations = NoVKeys(), Scales = NoKeys(),
             };
-            var m = NifMotion.Read(Rig(leaf, pivot, q), null);
-            return (m.Status == "refused" && (m.Reason ?? "").Contains("quaternion keys on a played NIF channel", StringComparison.Ordinal), $"{m.Status} {m.Reason}");
+            var b = Rig(leaf, pivot, q);
+            var m = NifMotion.Read(b, null);
+            var p = NifMotion.Pose(b, m, "seq:Open", 1f, VolumeGeometry.Render);
+            var want = RotZ(pivot + new Vector3(40, 2, 80), pivot, Pi / 2);
+            return (m.Status == "moving" && p.Status == "posed" && p.Soup!.Vertices.Any(v => NearV(v, want, 1e-3f)), $"{m.Status} {m.Reason} {p.Status} want {S(want)}");
         });
         Case(check, "MK12 an inactive direct controller refuses with reason 'controller inactive'", () =>
         {
@@ -516,12 +521,33 @@ static class MotionProof
             bool eq = Math.Abs(q.M11 - e.M11) < 1e-6 && Math.Abs(q.M12 - e.M12) < 1e-6 && Math.Abs(q.M21 - e.M21) < 1e-6 && Math.Abs(q.M22 - e.M22) < 1e-6;
             return (eq && RowsEqualTransposeOf(e, Cz(Math.PI / 2), 1e-6), $"q rows [{q.M11:0.###} {q.M12:0.###} | {q.M21:0.###} {q.M22:0.###}]");
         });
-        Case(check, "MF3b EvalQuaternion LINEAR: slerp halfway from identity to 90 deg about Z is 45 deg about +Z", () =>
+        Case(check, "MF3b EvalQuaternion LINEAR on keys as NiflySharp holds them: halfway from identity to 90 deg about Z is 45 deg about +Z", () =>
         {
-            var keys = new List<QuatKey<Quaternion>> { new() { Time = 0, Value = Quaternion.Identity }, new() { Time = 1, Value = Quaternion.CreateFromAxisAngle(Vector3.UnitZ, Pi / 2) } };
+            var keys = new List<QuatKey<Quaternion>> { new() { Time = 0, Value = Raw(Quaternion.Identity) }, new() { Time = 1, Value = Raw(Quaternion.CreateFromAxisAngle(Vector3.UnitZ, Pi / 2)) } };
             var q = NifMotionKeys.EvalQuaternion(keys, KeyType.LINEAR_KEY, 0.5f);
             var want = Quaternion.CreateFromAxisAngle(Vector3.UnitZ, Pi / 4);
             return (MathF.Abs(Quaternion.Dot(q, want)) > 1 - 1e-6 && q.Z * want.Z > 0, $"q ({q.X:0.####},{q.Y:0.####},{q.Z:0.####},{q.W:0.####})");
+        });
+
+        Case(check, "motion fixture control (G1): a saved quaternion key writes NiflySharp's X, Y, Z, W as the file's four floats in that order", () =>
+        {
+            var raw = new Quaternion(0.1f, 0.2f, 0.3f, 0.4f);
+            var q = new NiTransformData
+            {
+                RotationType = KeyType.LINEAR_KEY, NumRotationKeys = 1,
+                QuaternionKeys = new List<QuatKey<Quaternion>> { new() { Time = 0.5f, Value = raw } }, Translations = NoVKeys(), Scales = NoKeys(),
+            };
+            var bytes = Rig(leaf, pivot, q);
+            var pat = new byte[20];
+            BitConverter.GetBytes(0.5f).CopyTo(pat, 0); BitConverter.GetBytes(0.1f).CopyTo(pat, 4); BitConverter.GetBytes(0.2f).CopyTo(pat, 8);
+            BitConverter.GetBytes(0.3f).CopyTo(pat, 12); BitConverter.GetBytes(0.4f).CopyTo(pat, 16);
+            int at = bytes.AsSpan().IndexOf(pat);
+            return (at >= 0, $"time + (X, Y, Z, W) found at byte {at}");
+        });
+        Case(check, "MF3c FromNifly: NiflySharp (X=w, Y=x, Z=y, W=z) -> true (x, y, z, w) (rejects the field order taken as is)", () =>
+        {
+            var t = NifMotionKeys.FromNifly(new Quaternion(0.9f, 0.1f, 0.2f, 0.3f));
+            return (t.X == 0.1f && t.Y == 0.2f && t.Z == 0.3f && t.W == 0.9f, $"({t.X}, {t.Y}, {t.Z}, {t.W})");
         });
 
         // ================= Q3: the 1-DOF blend rule =================
