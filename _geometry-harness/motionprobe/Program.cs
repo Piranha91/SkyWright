@@ -94,10 +94,14 @@ else
     var a = assets;
     read = r =>
     {
-        var res = a.ResolveForPlacement(r);
-        if (res.Sources.Count == 0) return null;
-        var (bytes, _) = AssetResolver.ReadPlacementSource(res.Sources[0]);
-        return bytes;
+        try
+        {
+            var res = a.ResolveForPlacement(r);
+            if (res.Sources.Count == 0) return null;
+            var (bytes, _) = AssetResolver.ReadPlacementSource(res.Sources[0]);
+            return bytes;
+        }
+        catch (ArgumentException) { return null; }   // a path the resolver refuses is an absent asset here
     };
 }
 
