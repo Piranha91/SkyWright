@@ -10,6 +10,8 @@
 //   motionprobe ASSETS node REL --animation ID --node NAME (--t T | --times T1,T2,..)   a node's local transform
 //   motionprobe ASSETS clip REL.hkx                                  decoded clip, every frame of every track
 //   motionprobe ASSETS boundcheck REL.hkx [--samples N] [--split K]    every track's motion bound against dense samples
+//   motionprobe ASSETS deltacheck REL [--animation ID]... [--geometry G] [--delta U] [--samples N]   every swept interval's
+//                                                                    Delta against the mesh posed at N dense times inside it
 //   motionprobe ASSETS graph GRAPH.hkx                               behaviour-graph reading (path as a NIF names it)
 //   motionprobe ASSETS sweep REL [--animation ID]... [--geometry render|collision] [--delta U] [--budget N]
 //   ASSETS = --loose-root DIR | --instance DIR --profile P --game DIR --order CANDIDATE.json
@@ -201,6 +203,36 @@ try
                         }
                     }
             return Emit(new { verb, rel, tracks = c.TransformTracks, knots = knots.Count, intervals, checks, violations = bad.Count, worstAngleSlack = worstSlackA, first = bad.Take(5) }, bad.Count == 0);
+        }
+        case "deltacheck":
+        {
+            // For every interval between consecutive samples of the swept region, pose the mesh at N dense times inside it
+            // and require every vertex's displacement from its pose at the interval's start to be <= that interval's Delta.
+            var m = NifMotion.Read(bytes, read, placement);
+            var opts = new MotionOptions(DeltaTarget: delta ?? 0.5, SampleBudget: budget ?? 4096);
+            var r = SweptGeometry.Build(bytes, m, anims.Count > 0 ? anims : null, geometry, opts, read);
+            if (r.Status != "built") return Emit(new { verb, rel, r.Status, r.Reason }, false);
+            long intervals = 0, checks = 0; double worstSlack = double.MaxValue, worstRatio = 0; var bad = new List<object>();
+            for (int i = 0; i + 1 < r.Samples.Count; i++)
+            {
+                var a = r.Samples[i]; var b = r.Samples[i + 1];
+                if (a.AnimationId != b.AnimationId || b.Time <= a.Time) continue;
+                intervals++;
+                for (int j = 1; j <= samplesN; j++)
+                {
+                    float tt = a.Time + (b.Time - a.Time) * j / (samplesN + 1);
+                    var p = NifMotion.Pose(bytes, m, a.AnimationId, tt, geometry, read);
+                    if (p.Soup is null || p.Soup.Vertices.Length != a.Soup.Vertices.Length) return Emit(new { verb, rel, status = "error", reason = $"pose at {tt} differs in shape: {p.Reason}" }, false);
+                    double worst = 0;
+                    for (int v = 0; v < p.Soup.Vertices.Length; v++) worst = Math.Max(worst, Vector3.Distance(p.Soup.Vertices[v], a.Soup.Vertices[v]));
+                    checks += p.Soup.Vertices.Length;
+                    worstSlack = Math.Min(worstSlack, a.Delta - worst);
+                    if (a.Delta > 0) worstRatio = Math.Max(worstRatio, worst / a.Delta);
+                    if (worst > a.Delta) bad.Add(new { animation = a.AnimationId, t0 = a.Time, t1 = b.Time, t = tt, displacement = worst, a.Delta });
+                }
+            }
+            return Emit(new { verb, rel, geometry = geometry.ToString().ToLowerInvariant(), samples = r.Samples.Count, intervals, vertexTimeChecks = checks,
+                              worstSlack, worstDisplacementOverDelta = worstRatio, violations = bad.Count, first = bad.Take(5) }, bad.Count == 0);
         }
         case "sweep":
         {
