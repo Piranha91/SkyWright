@@ -44,10 +44,20 @@ using HousecarlCore.Progress;
 //   --overlap-json FILE    supplied overlap rows/pairs through the strict NIF render-surface narrow phase;
 //                          requires --json OUTPUT, which persists all attempted and budget-unrun rows
 //   --contact-evidence     with --overlap-json, enumerate the classified-contact support envelope for each supplied pair
+//   --volume FILE          with --overlap-json, the measured overlap volume of each pair (validated closed solids only)
+//   --surface FILE         with --overlap-json, how each pair's surfaces meet where the volume cannot be measured: the
+//                          crossing length (an interval), coplanar areas (same-facing = z-fighting, opposite-facing =
+//                          resting contact) and the area buried in the other member when it is a closed solid; render
+//                          triangles tagged by material (only opaque x opaque may decide), collision separately
+//   --live-pose MODE       with --surface: blanket (default; any controller on a shape's node chain, a skin, a switch
+//                          node or a behaviour graph refuses) or targeted (refuses only what the file shows moving the
+//                          shape: a skin, a switch node, a sequence's or controller's transform on its node chain, or a
+//                          behaviour graph; other controllers leave the stored pose standing)
 //
 // usage: contactprobe [--list N] [--eps U] [--reach U] [--json FILE] [--emit FILE] [--base EMIT] [--all-rows] [--interior-only]
 //                     [--absolute] [--labelled-mover X.esp] [--overlap-json FILE]
 //                     [--contact-evidence] [--contact-budget-seconds 1200] [--pair-budget-seconds 120] [--contact-max-pairs 128]
+//                     [--volume FILE] [--surface FILE [--live-pose blanket|targeted]]
 //                     [--only A.esm,B.esm,...] [--vanilla-assets] [--bos on|off]
 //                     [--enable X.esp]* [--disable X.esp]* [--instance DIR] [--game DIR] [--profile NAME]
 //   POPULATION      the LOAD-TIME state, and it always has been (R1, 2026-09-03): a reference exists in an arm when its
@@ -78,6 +88,8 @@ contactprobe: placement contact and explicit render-surface pair review
   --contact-budget-seconds N --pair-budget-seconds N --contact-max-pairs N
   --surface-tolerance N --mesh-max-triangle-pairs N
   --volume OUTPUT (with --overlap-json): measured overlap volume per pair, render and collision separately
+  --surface OUTPUT (with --overlap-json): crossing length, coplanar areas and buried area per pair, render and collision
+    separately; --live-pose blanket|targeted chooses the live-pose rule (default blanket)
   --instance DIR --game DIR --profile NAME --order CANDIDATE.json
 Candidate Mods lists select asset priority. Surface/contact evidence is not a defect verdict.
 Other modes: --absolute or --labelled-mover PLUGIN; default is the moved-host pass.
@@ -107,7 +119,9 @@ bool bosOn = true;
 var enablePlugins = new List<string>();
 var disablePlugins = new List<string>();
 string? orderFile = null;
-string? traceOut = null, traceKeysPath = null, volumeOut = null;   // --volume FILE: measured overlap volume (with --overlap-json)   // --trace FILE [--trace-keys FILE]: the per-object trace side file (default pass only)
+string? traceOut = null, traceKeysPath = null, volumeOut = null, surfaceOut = null;   // --surface FILE: measured surface contact (with --overlap-json)
+LivePosePolicy? livePose = null;   // --live-pose blanket|targeted (with --surface)
+   // --volume FILE: measured overlap volume (with --overlap-json)   // --trace FILE [--trace-keys FILE]: the per-object trace side file (default pass only)
 string NeedValue(int index, string flag)
 {
     if (index + 1 >= args.Length || args[index + 1].StartsWith("--", StringComparison.Ordinal))
@@ -147,6 +161,16 @@ try
         else if (flag == "--order") { orderFile = NeedValue(i, flag); i++; }
         else if (flag == "--trace") { traceOut = NeedValue(i, flag); i++; }
         else if (flag == "--volume") { volumeOut = NeedValue(i, flag); i++; }
+        else if (flag == "--surface") { surfaceOut = NeedValue(i, flag); i++; }
+        else if (flag == "--live-pose")
+        {
+            livePose = NeedValue(i, flag).ToLowerInvariant() switch
+            {
+                "blanket" => LivePosePolicy.Blanket, "targeted" => LivePosePolicy.Targeted,
+                _ => throw new ArgumentException("--live-pose takes blanket|targeted"),
+            };
+            i++;
+        }
         else if (flag == "--trace-keys") { traceKeysPath = NeedValue(i, flag); i++; }
         else if (flag == "--enable") { enablePlugins.Add(NeedValue(i, flag)); i++; }
         else if (flag == "--disable") { disablePlugins.Add(NeedValue(i, flag)); i++; }
@@ -185,6 +209,8 @@ if (contactEvidence && overlapJson is null)
 int selectedModes = (overlapJson is null ? 0 : 1) + (absolute ? 1 : 0) + (labelledMover is null ? 0 : 1);
 if (selectedModes > 1) { Console.Error.WriteLine("--overlap-json, --absolute and --labelled-mover select different modes; pass only one"); return 2; }
 if (volumeOut is not null && overlapJson is null) { Console.Error.WriteLine("--volume is valid only with --overlap-json INPUT"); return 2; }
+if (surfaceOut is not null && overlapJson is null) { Console.Error.WriteLine("--surface is valid only with --overlap-json INPUT"); return 2; }
+if (livePose is not null && surfaceOut is null) { Console.Error.WriteLine("--live-pose is valid only with --surface OUTPUT"); return 2; }
 if (traceKeysPath is not null && traceOut is null) { Console.Error.WriteLine("--trace-keys requires --trace OUTPUT"); return 2; }
 if (traceOut is not null && selectedModes > 0) { Console.Error.WriteLine("--trace is valid only in the default moved-host pass"); return 2; }
 List<FormKey>? traceKeys = null;
@@ -432,6 +458,10 @@ if (overlapJson is not null)
         // --volume: a separate file after the unchanged pair review (patch-miss packet, GATE-A §5).
         if (volumeOut is not null)
             OverlapVolumeReview.Run(overlapJson, volumeOut, assets, idx, cidx.Arms,
+                cfg.Identity("load-time", cidx.State?.Name ?? "baseline"), idx.WinningGeometryPose);
+        // --surface: a separate file after the unchanged pair review and volume (patch-miss packet, session 6).
+        if (surfaceOut is not null)
+            OverlapSurfaceReview.Run(overlapJson, surfaceOut, livePose ?? LivePosePolicy.Blanket, assets, idx, cidx.Arms,
                 cfg.Identity("load-time", cidx.State?.Name ?? "baseline"), idx.WinningGeometryPose);
         return reviewRc;
     }
