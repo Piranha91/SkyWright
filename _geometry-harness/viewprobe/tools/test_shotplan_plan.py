@@ -124,6 +124,27 @@ def check_cli(scene, *extra):
     return code, out, doc
 
 
+def eye_level_shots(wl):
+    """Shots a worklist offers as cameras. Since session 5 a refused plan may carry ONE shot, the
+    labelled top-down fallback (`status: fallback`); that is evidence about the geometry, never an
+    offered camera, so "no camera is published" means no shot other than a fallback."""
+    return [s for c in (wl.get("cells") or []) for s in (c.get("shots") or [])
+            if s.get("status") != "fallback"]
+
+
+def says_why_evidence(doc, cause):
+    """The file must say WHY no camera is offered: the base's claim stub ("did not finish"), or --
+    since the top-down fallback -- a refusal record of kind `evidence incomplete` naming THIS
+    cause, with the fallback shot's note naming it too. A refusal that dropped the cause is not
+    an explanation."""
+    if "did not finish" in doc.get("note", "") and "refusal" not in doc:
+        return True
+    ref = doc.get("refusal") or {}
+    notes = " ".join(s.get("note", "") for c in (doc.get("cells") or []) for s in (c.get("shots") or []))
+    return (ref.get("kind") == "evidence incomplete" and cause in (ref.get("causes") or [])
+            and cause in notes)
+
+
 def status_of(doc, label):
     for t in doc["verification"]["targets"]:
         if t["label"] == label:
@@ -163,9 +184,9 @@ def test_failed_verification_cannot_export_success():
           doc["chosen"]["preVerificationOk"] is True)
     check("R10 shape: the refusal reason reaches chosen.fail",
           any("verification:" in f for f in doc["chosen"]["fail"]))
-    check("R10 shape: the worklist path holds a refusal record, not a renderable shot",
+    check("R10 shape: the worklist path holds a refusal record, not an eye-level shot",
           json.load(open(wl, encoding="utf-8")).get("status") == "refused"
-          and json.load(open(wl, encoding="utf-8")).get("cells") == [])
+          and not eye_level_shots(json.load(open(wl, encoding="utf-8"))))
     check("R10 shape: the candidate walk is reported", len(doc["verifyAttempts"]) == 3,
           f"{len(doc['verifyAttempts'])} attempts")
     check("R10 shape: an exhausted search is not called a proof",
@@ -615,9 +636,10 @@ def test_incomplete_nomination_prevents_publication():
     """
     # Three ways the evidence can fall short, all of which must stop the artifact: a ref that could
     # not be read, a renderer that never stated its coverage, and the legacy comparison arm.
-    for label, key, value in (("unreadable ref", "insideUnreadable", 1),
-                              ("missing coverage statement", "insideCoverStyle", "none"),
-                              ("legacy comparison arm", "insideCoverStyle", "legacy")):
+    for label, key, value, cause in (
+            ("unreadable ref", "insideUnreadable", 1, "unreadable inside coverage"),
+            ("missing coverage statement", "insideCoverStyle", "none", "missing coverage statement"),
+            ("legacy comparison arm", "insideCoverStyle", "legacy", "legacy comparison arm")):
         wl2 = os.path.join(tempfile.mkdtemp(), "wl.json")
         sc2 = room(PLINTH)
         sc2[key] = value
@@ -625,8 +647,10 @@ def test_incomplete_nomination_prevents_publication():
                             "--quiet", "--worklist", wl2], sc2)
         doc2 = json.load(open(wl2, encoding="utf-8"))
         check(f"publication ({label}): refused and no camera published",
-              code2 != 0 and doc2.get("status") == "incomplete" and "cells" not in doc2,
+              code2 != 0 and doc2.get("status") in ("incomplete", "refused") and not eye_level_shots(doc2),
               f"exit {code2}, {json.dumps(doc2)[:80]}")
+        check(f"publication ({label}): and the file names its cause ({cause})",
+              says_why_evidence(doc2, cause), json.dumps(doc2.get("refusal") or doc2.get("note"))[:160])
 
     wl = os.path.join(tempfile.mkdtemp(), "wl.json")
     sc = room(PLINTH)
@@ -639,9 +663,10 @@ def test_incomplete_nomination_prevents_publication():
     # The gate is therefore the CONTENT: no camera, and the file says why.
     doc = json.load(open(wl, encoding="utf-8"))
     check("publication: the worklist carries no camera",
-          doc.get("status") == "incomplete" and "cells" not in doc, json.dumps(doc)[:120])
-    check("publication: and says the run that claimed it did not finish",
-          "did not finish" in doc.get("note", ""), doc.get("note", "")[:80])
+          doc.get("status") in ("incomplete", "refused") and not eye_level_shots(doc), json.dumps(doc)[:120])
+    check("publication: and says why: the claim stub, or a refusal naming unreadable inside coverage",
+          says_why_evidence(doc, "unreadable inside coverage"),
+          doc.get("note", "")[:80] or str(doc.get("refusal"))[:160])
 
 
 # --------------------------------------------------------------------------------------
@@ -809,7 +834,7 @@ def test_a_failed_rerun_cannot_leave_a_verified_artifact_behind():
     check("reuse: the second run refuses", b == 1, f"exit {b}")
     check("reuse: the worklist at that path NO LONGER claims verified",
           after_wl.get("status") == "refused", str(after_wl.get("status")))
-    check("reuse: and offers no renderable shot", after_wl.get("cells") == [])
+    check("reuse: and offers no eye-level shot", not eye_level_shots(after_wl))
     check("reuse: the json at that path is the second run's", after_jp["status"] == "refused")
     check("reuse: no earlier pose id survives at either path",
           after_wl.get("poseId") != first["cells"][0]["shots"][0]["poseId"])

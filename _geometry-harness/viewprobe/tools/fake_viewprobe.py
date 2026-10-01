@@ -23,7 +23,9 @@ Scene JSON:
                 "alpha": false,      # true = draws with depth writes OFF: the ray passes through
                 "physical": true,    # false = not offered by --inside-at
                 "meshUnreadable": false}],  # true = --inside-at reports no rays for it
-     "nav":  [{"min": [x,y], "max": [x,y], "z": 0.0, "name": "Test.esp tri"}],
+     "nav":  [{"min": [x,y], "max": [x,y], "z": 0.0, "name": "Test.esp tri",
+               "flags": 0}],            # flags 8 = 0x08 deleted: printed NOT DRAWN, as viewprobe does
+     "failOnCullAbove": false,       # exit 1 on any call carrying --cull-above (a failed fallback probe)
      "navSilent": [[x,y]],           # queried points that get NO nav-at line at all
      "insideSilent": [[x,y,z]],      # queried points that get NO inside-at line at all
      "clearSilent": [[x,y,z]],       # queried points that get NO clear-at line at all
@@ -90,7 +92,7 @@ def ray_box(eye, d, lo, hi):
     return t0 if t0 > 1e-6 else None
 
 
-def trace(scene, eye, d):
+def trace(scene, eye, d, cull=None):
     """(hit point, distance) for the first DEPTH-WRITING surface along the ray, or None.
 
     Alpha-blended boxes are skipped exactly as viewprobe's depth probe skips them -- that is the
@@ -99,6 +101,10 @@ def trace(scene, eye, d):
     best = None
     for b in scene.get("boxes", []):
         if b.get("alpha"):
+            continue
+        # --cull-above: viewprobe drops a STATIC triangle whose vertices all sit above the cut, so
+        # a box wholly above it is gone and a box spanning it stays whole (README "Dollhouse slice").
+        if cull is not None and b["min"][2] > cull:
             continue
         t = ray_box(eye, d, b["min"], b["max"])
         if t is not None and (best is None or t < best):
@@ -119,7 +125,7 @@ def parse_args(argv):
     out = {"pick": [], "nav_at": [], "inside_at": [], "refs_at": [], "clear_at": [],
            "clear_reach": 512.0,
            "eye": None, "yaw": 0.0, "pitch": 0.0, "fov": 65.0, "size": 320, "look": None,
-           "cell": None}
+           "cell": None, "cull": None}
     takes = {"--eye", "--yaw", "--pitch", "--fov", "--size", "--look", "--msaa", "--nav",
              "--out", "--instance", "--profile", "--game", "--order"}
     i = 0
@@ -141,6 +147,8 @@ def parse_args(argv):
             out[a[2:]] = tuple(float(v) for v in argv[i + 1].split(",")); i += 2
         elif a in ("--yaw", "--pitch", "--fov"):
             out[a[2:]] = float(argv[i + 1]); i += 2
+        elif a == "--cull-above":
+            out["cull"] = float(argv[i + 1]); i += 2
         elif a == "--size":
             out["size"] = int(argv[i + 1]); i += 2
         elif a in takes:
@@ -164,6 +172,9 @@ def main(argv):
         with open(trace_path, "a", encoding="utf-8") as fh:   # NOT `f` -- the camera axis
             fh.write(" ".join(argv) + "\n")
     a = parse_args(argv)
+    if a["cull"] is not None and scene.get("failOnCullAbove"):
+        print("fake_viewprobe: failing on --cull-above as the scene asks", file=sys.stderr)
+        return 1
     eye = a["eye"] or (0.0, 0.0, 0.0)
     yaw, pitch = a["yaw"], a["pitch"]
     if a["look"]:
@@ -207,7 +218,7 @@ def main(argv):
         d = tuple(f[k] + r[k] * nx * t + u[k] * ny * t for k in range(3))
         n = math.sqrt(sum(c * c for c in d))
         d = tuple(c / n for c in d)
-        got = trace(scene, eye, d)
+        got = trace(scene, eye, d, a["cull"])
         if got is None:
             print(f"   pick {ix},{iy}: background")
         else:
@@ -225,8 +236,10 @@ def main(argv):
                   if n["min"][0] <= x <= n["max"][0] and n["min"][1] <= y <= n["max"][1]]
         if levels:
             for k, n in enumerate(levels):
+                fl = int(n.get("flags", 0))
+                why = "NOT DRAWN: flagged deleted (0x08)" if fl & 0x08 else "drawn"
                 print(f"   nav-at {x},{y}: {n.get('name', 'Test.esm')} tri {100 + k} covers it, "
-                      f"z {n['z']:.1f}, flags 0x0 - drawn")
+                      f"z {n['z']:.1f}, flags 0x{fl:X} - {why}")
         else:
             near = None
             for n in scene.get("nav", []):

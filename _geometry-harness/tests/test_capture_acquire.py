@@ -578,6 +578,32 @@ def case_exported_command_keeps_the_aspect(root: Path, packet: Path, rid: str, r
               " | ".join(l.strip() for l in printed)[:300])
 
 
+# --------------------------------------------------------------------------------------
+# case 8 -- a refused plan that carries shotplan's top-down FALLBACK is still refused here
+# --------------------------------------------------------------------------------------
+
+def case_fallback_plan_is_refused(root: Path, packet: Path, rid: str, request: dict):
+    """shotplan now leaves a labelled top-down shot behind when every eye-level camera is refused.
+    That worklist holds a shot; this adapter must still publish nothing for the request."""
+    sha_src = request["source"]["sha256"]
+    void = {"floorZ": None, "boxes": [], "nav": [], "configFingerprint": FINGERPRINT}
+    proc, doc, out, _p = acquire(root, packet, rid, points_doc(rid, sha_src), void, tag="fallback")
+    plan = load(root / "receipts-fallback" / "shotplan-plan.json")
+    wl_path = root / "receipts-fallback" / "shotplan-worklist.json"
+    wl = load(wl_path) if wl_path.is_file() else {}
+    shots = [s for c in (wl.get("cells") or []) for s in (c.get("shots") or [])]
+    check("the planner refused and emitted its top-down fallback",
+          plan.get("status") == "refused" and plan.get("fallback") == "top-down"
+          and len(shots) == 1 and shots[0].get("status") == "fallback",
+          f"plan {plan.get('status')} fallback {plan.get('fallback')} shots {len(shots)}")
+    check("a fallback plan is refused by the acquisition gate",
+          proc.returncode != 0 and doc and doc["status"] == "refused"
+          and doc["refusal"]["code"] == "planner-not-verified",
+          f"exit {proc.returncode} code {(doc or {}).get('refusal', {}).get('code')}")
+    check("and no camera is published for the request",
+          doc is not None and "camera" not in doc and "poseId" not in doc, str(sorted((doc or {}).keys())))
+
+
 def main(argv):
     if len(argv) >= 2 and argv[0] == "--emit":
         root = Path(argv[1]).resolve()
@@ -610,6 +636,8 @@ def main(argv):
         case_publication_boundary(root, packet, rid, request)
         print("\n-- case 7: the exported capture command keeps its aspect (regression 2026-09-15)")
         case_exported_command_keeps_the_aspect(root, packet, rid, request)
+        print("\n-- case 8: a refused plan with a top-down fallback publishes nothing")
+        case_fallback_plan_is_refused(root, packet, rid, request)
 
     print()
     if FAILS:

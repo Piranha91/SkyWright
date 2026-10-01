@@ -1924,7 +1924,7 @@ def hole_check(run, eye, points, args):
     return entries, refusals
 
 
-def verify_in_pose(run, cell, eye, yaw, pitch, subjects, args):
+def verify_in_pose(run, cell, eye, yaw, pitch, subjects, args, extra=()):
     """Probe the DELIVERED pose once, and judge every target in it.
 
     Per-target status, and what each one means:
@@ -1963,12 +1963,16 @@ def verify_in_pose(run, cell, eye, yaw, pitch, subjects, args):
     picked = [r_ for r_ in rows if r_["pixel"] is not None]
     for r_ in picked:
         flags += ["--pick", f"{r_['pixel'][0]},{r_['pixel'][1]}"]
+    # `extra`: further flags for THIS render -- the top-down fallback's `--cull-above` and its
+    # `--nav-at` grid. Empty for every eye-level verification, which is therefore unchanged.
+    flags += [str(x) for x in extra]
     # The probe object, not just its picks: the verification's scene identity comes from THIS
     # render. When nothing was picked there is no render at all, and the identity is absent --
     # which is the honest answer, not an invitation to borrow the last one.
     probe = run.probe(*flags) if picked else None
     got = probe.picks() if probe is not None else {}
 
+    extra_flags = list(extra)
     results, bad = [], []
     for r_ in rows:
         d, tol = r_["dist"], surface_tolerance(r_["dist"], probe_fov, run.size, args)
@@ -2051,6 +2055,8 @@ def verify_in_pose(run, cell, eye, yaw, pitch, subjects, args):
                                        "sightline"}
     if run.not_drawn:
         extra["notDrawnByRule"] = sorted(run.not_drawn)
+    if extra_flags:
+        extra["_probe"] = probe   # the fallback reads its --nav-at answers; popped before export
     return {**{"status": "verified" if ok else "failed",
             "poseId": pose_identity(cell, eye, yaw, pitch, args.fov,
                                     getattr(args, "aspect", 1.0), run.size, subjects, args, scene),
@@ -2140,6 +2146,225 @@ def report_refusals(scored):
     print("  refused for:")
     for k, n in sorted(why.items(), key=lambda kv: -kv[1])[:8]:
         print(f"    {n:5d}  {k}")
+
+
+# --------------------------------------------------------------------------------------
+# the top-down fallback: what a refused plan leaves behind
+# --------------------------------------------------------------------------------------
+#
+# When every eye-level camera is refused -- at sightline + framing, at the placement test, or at
+# the final verification -- the planner still owes the caller a picture of the geometry, so that
+# whoever reads the refusal can see WHY rather than guess (Piranha, 2026-09-30). The refusal stays
+# the answer: exit 1, `status: refused`, the reasons recorded. What is added is ONE sliced top-down
+# shot of the subjects, labelled as a fallback and never offered as a camera: its status is
+# `fallback`, it carries no `feet`, and `devbench` refuses to drive it. `--no-fallback` restores the
+# refusal artifacts exactly as they were.
+
+FALLBACK_CUT_MARGIN = 64.0       # the cut sits this far above the tallest subject's top
+FALLBACK_NAV_TOL = 64            # viewprobe's own --nav-z default band
+FALLBACK_CONTEXT = 1024.0        # frame margin around the subjects' spread (512 u each side)
+FALLBACK_GRID_STEPS = 8          # the --nav-at grid is (STEPS + 1)^2 points across the frame
+# viewprobe's worklist validator accepts pitch -89..89 (_shared/Worklist.cs), so "straight down" is
+# 89 deg, north-up, with the eye set back 1 deg south so the axis still meets the subjects' floor
+# at their centroid. Measured: a pitch-90 fallback shot was refused by the renderer (2026-09-30).
+FALLBACK_PITCH = 89.0
+
+# Placement-evidence gaps, named. The phrases are inside_verdict's and support_verdict's own
+# sentences; a refusal record must say WHICH evidence was missing, not only that some was.
+EVIDENCE_CAUSES = (
+    ("could not be read at all", "unreadable inside coverage"),
+    ("NO mesh-coverage statement", "missing coverage statement"),
+    ("COMPARISON arm", "legacy comparison arm"),
+    ("selectable only by their record OBND", "record-box-only nomination"),
+    ("room-scale box", "room-scale mesh unreadable"),
+)
+
+
+def refusal_reasons(scored, top=8):
+    """The reasons `report_refusals` prints, as [reason, count] rows, most common first."""
+    why = {}
+    for v in scored:
+        for f in v["fail"]:
+            k = f.split(":", 1)[1].strip()[:70] if ":" in f else f[:70]
+            why[k] = why.get(k, 0) + 1
+    return [[k, n] for k, n in sorted(why.items(), key=lambda kv: -kv[1])[:top]]
+
+
+def evidence_causes(scored, verification=None):
+    """(kind, causes): `evidence incomplete` when any refused candidate was refused because the
+    evidence for it was missing (an untested eye, an unresolved floor, an unreadable asset near a
+    sightline) rather than because the geometry said no; `geometry` otherwise."""
+    causes = []
+
+    def add(c):
+        if c not in causes:
+            causes.append(c)
+    for v in scored:
+        if v.get("ok"):
+            continue
+        inside, support = v.get("inside"), v.get("support")
+        if inside in ("unresolved", "unknown") or support in ("unresolved", "unknown"):
+            text = " ".join(v.get("fail") or [])
+            named = [c for phrase, c in EVIDENCE_CAUSES if phrase in text]
+            for c in named:
+                add(c)
+            if inside == "unknown":
+                add("no --inside-at answer")
+            if support in ("unresolved", "unknown"):
+                add("floor support unresolved")
+            if not named and inside == "unresolved":
+                add("unresolved inside test")
+    for h in ((verification or {}).get("incomplete") or {}).get("assets", []):
+        if h.get("verdict") == "refused":
+            add("unreadable asset near the camera or a sightline")
+    return ("evidence incomplete" if causes else "geometry"), causes
+
+
+def refused_json(args, floor_z, aim, pose_id, scene, subjects, run):
+    """The --json body of a plan refused BEFORE the final check: the keys a refused plan's JSON
+    has where they exist (no candidate was chosen, so there is no `chosen` or `verification`)."""
+    return {"cell": args.cell, "floorZ": floor_z, "aim": aim, "status": "refused",
+            "poseId": pose_id, "scene": scene, "verification": None, "verifyAttempts": [],
+            "subjects": [{"label": s.label, "pos": s.pos(), "kind": s.kind, "extent": s.extent}
+                         for s in subjects],
+            "renders": run.renders, "seconds": round(run.seconds, 1)}
+
+
+def top_down_fallback(run, args, subjects, floor_z, stage, message, counts, scored,
+                      refused_pose_id=None, verification=None):
+    """Plan, probe and describe the sliced top-down shot for a refused plan.
+
+    Returns (worklist document, json additions, shot pose id). Writes nothing itself."""
+    kind, causes = evidence_causes(scored, verification)
+    cx = sum(s.x for s in subjects) / len(subjects)
+    cy = sum(s.y for s in subjects) / len(subjects)
+    spread = max(math.hypot(s.x - cx, s.y - cy) for s in subjects)
+    if args.fallback_cut is not None:
+        cut, basis = float(args.fallback_cut), "--fallback-cut"
+    else:
+        cut = max(s.z for s in subjects) + args.subject_height + FALLBACK_CUT_MARGIN
+        basis = (f"default: highest subject z + --subject-height {args.subject_height:g} + "
+                 f"{FALLBACK_CUT_MARGIN:g}")
+    width = max(args.fallback_extent, 2.0 * spread + FALLBACK_CONTEXT)
+    half_t = math.tan(math.radians(args.fov) / 2.0)
+    eye_z = floor_z + (width / 2.0) / half_t
+    if eye_z < cut + FALLBACK_CUT_MARGIN:
+        eye_z = cut + FALLBACK_CUT_MARGIN
+        width = 2.0 * (eye_z - floor_z) * half_t
+    back = (eye_z - floor_z) / math.tan(math.radians(FALLBACK_PITCH))
+    eye = (round(cx, 1), round(cy - back, 1), round(eye_z, 1))
+
+    # The --nav-at grid: where can anyone stand inside this frame, and is any of it on the
+    # subject's own storey? Only DRAWN triangles count -- the ones --nav-z keeps (flag 0x08 off).
+    pts = []
+    for i in range(FALLBACK_GRID_STEPS + 1):
+        for j in range(FALLBACK_GRID_STEPS + 1):
+            pts.append((round(cx - width / 2 + i * width / FALLBACK_GRID_STEPS),
+                        round(cy - width / 2 + j * width / FALLBACK_GRID_STEPS)))
+    for s in subjects:
+        pts.append((round(s.x), round(s.y)))
+    pts = list(dict.fromkeys(pts))
+    extra = ["--cull-above", f"{cut:g}"]
+    for x, y in pts:
+        extra += ["--nav-at", f"{x},{y}"]
+
+    print(f"\n=== FALLBACK: sliced top-down -- NOT an eye-level view (eye-level refused at "
+          f"{stage}) ===")
+    print(f"  refusal kind {kind}" + (f": {', '.join(causes)}" if causes else ""))
+    probe_rec, from_above, levels, ver = {"status": "ok"}, [], [], None
+    try:
+        ver = verify_in_pose(run, args.cell, eye, 0.0, FALLBACK_PITCH, subjects, args, extra=extra)
+    except SystemExit as e:
+        probe_rec = {"status": "failed", "why": str(e.code if e.code is not None else e).strip()}
+        print(f"  !! the fallback probe failed; the shot is written without a navmesh band: "
+              f"{probe_rec['why'][:200]}")
+    if ver is not None:
+        probe = ver.pop("_probe", None)
+        if probe is None:
+            probe_rec = {"status": "failed", "why": "no subject fell inside the probe canvas, so "
+                                                    "no probe render was made"}
+        else:
+            for line in probe.stdout.splitlines():
+                m = NAV_HIT.match(line)
+                if m and not int(m[6], 16) & 0x08:
+                    levels.append(float(m[5]))
+        from_above = [{"label": t["label"], "status": t["status"], "why": t["why"],
+                       "hit": t.get("hit")} for t in ver["targets"]]
+        scene = ver["scene"]
+        pose_id = ver["poseId"]
+    else:
+        scene = scene_identity(run, args)
+        pose_id = pose_identity(args.cell, eye, 0.0, FALLBACK_PITCH, args.fov, getattr(args, "aspect", 1.0),
+                                run.size, subjects, args, scene)
+    storeys = sorted(set(levels))
+    band = any(abs(z - floor_z) <= FALLBACK_NAV_TOL for z in storeys)
+    render_flags = (["--nav-z", f"{floor_z:g},{FALLBACK_NAV_TOL}"] if band else []) + ["--grid", "auto"]
+    rows, _ = target_pixels(eye, 0.0, FALLBACK_PITCH, subjects, args, run.size)
+    pixels = [{"label": r_["label"], "pixel": r_["pixel"], "inFrame": r_["in_frame"]} for r_ in rows]
+
+    half = max(args.subject_width, width / 50.0)
+    routes = []
+    for s in subjects:
+        ring = [[s.x - half, s.y - half, s.z], [s.x + half, s.y - half, s.z],
+                [s.x + half, s.y + half, s.z], [s.x - half, s.y + half, s.z],
+                [s.x - half, s.y - half, s.z]]
+        routes.append({"points": [[round(v, 2) for v in p] for p in ring], "color": "magenta",
+                       "label": f"subject {s.label}", "discs": False,
+                       "caption": f"SUBJECT {s.label} at {s.x:.0f},{s.y:.0f},{s.z:.0f} (ring)"})
+    band_text = (f"navmesh shown for z {floor_z:g} +-{FALLBACK_NAV_TOL} only" if band else
+                 f"no drawn navmesh within {FALLBACK_NAV_TOL} u of the subjects' floor z "
+                 f"{floor_z:.0f} in this frame; walkable storeys sampled: "
+                 + (", ".join(f"{z:.0f}" for z in storeys) if storeys else "none"))
+    note = (f"shotplan FALLBACK: every eye-level camera was refused at {stage} ({kind}"
+            + (f": {', '.join(causes)}" if causes else "") + f"). Sliced above z {cut:g} ({basis}); "
+            f"{band_text}. A picture of the geometry, not a player viewpoint: no feet.")
+    shot = {"label": (f"FALLBACK TOP-DOWN (eye-level refused at {stage}; not an eye-level view) -- "
+                      + ", ".join(s.label for s in subjects)),
+            "status": "fallback", "fallback": "top-down",
+            "viewpointKind": f"fallback top-down: eye-level refused at {stage}; not a player viewpoint",
+            "eye": list(eye), "yaw": 0, "pitch": FALLBACK_PITCH, "fov": args.fov, "floorZ": round(floor_z, 1),
+            "cullAbove": round(cut, 1), "cullAboveBasis": basis,
+            "nav": "wire" if band else "off", "routes": routes, "poseId": pose_id, "note": note}
+    if abs(float(getattr(args, "aspect", 1.0)) - 1.0) > 1e-6:
+        shot["aspect"] = round(float(args.aspect), 6)
+    refusal = {"stage": stage, "kind": kind, "causes": causes, "message": message.strip(),
+               "counts": counts, "reasons": refusal_reasons(scored),
+               "poseId": refused_pose_id, "verification": verification}
+    detail = {"cut": round(cut, 1), "cutBasis": basis, "extent": round(width, 1),
+              "eyeZ": eye[2], "band": ({"z": round(floor_z, 1), "tol": FALLBACK_NAV_TOL} if band else None),
+              "storeysSampled": storeys, "navAtPoints": len(pts), "subjectPixels": pixels,
+              "fromAbove": from_above, "probe": probe_rec}
+    wl = {"label": args.label or f"shotplan -- {args.cell}", "status": "refused",
+          "fallback": "top-down", "refusal": refusal, "renderFlags": render_flags,
+          "poseId": pose_id, "scene": scene, "eyeHeight": args.eye_height,
+          "cells": [{"cell": args.cell, "shots": [shot]}], "fallbackDetail": detail}
+    print(f"  eye {eye[0]:.1f}, {eye[1]:.1f}, {eye[2]:.1f}  pitch {FALLBACK_PITCH:g} (north-up)  frame {width:.0f} u at "
+          f"the floor  cut above z {cut:g} ({basis})")
+    print(f"  {band_text}")
+    for t in from_above:
+        print(f"  from above: {t['label']} {t['status']} -- {t['why']}")
+    print("  this shot is NOT a verified camera: status `fallback`, no feet; the plan is REFUSED")
+    adds = {"refusedAt": stage, "refusal": refusal, "fallback": "top-down", "fallbackDetail": detail,
+            "fallbackShot": shot, "renderFlags": render_flags}
+    return wl, adds, pose_id, scene
+
+
+def write_fallback(wl, adds, args, base_json=None):
+    """Write the fallback worklist and the JSON; print the render command. Returns exit 1."""
+    if args.worklist:
+        with open(args.worklist, "w", encoding="utf-8") as f:
+            json.dump(wl, f, indent=2, default=str)
+        print(f"\nworklist FALLBACK -> {args.worklist} (status refused; one top-down shot, "
+              f"labelled fallback)")
+        print("  render it:  viewprobe --worklist " + args.worklist + " "
+              + " ".join(wl["renderFlags"]) + "   (plus the planner's pass-through flags)")
+    if args.json:
+        doc = dict(base_json or {})
+        doc.update(adds)
+        with open(args.json, "w", encoding="utf-8") as f:
+            json.dump(doc, f, indent=2, default=str)
+        print(f"json     -> {args.json}")
+    return 1
 
 
 def aspect_spec_for(aspect, spec=None):
@@ -2279,8 +2504,15 @@ def cmd_plan(args):
     print(f"  {len(live)} survive sightline + framing; {len(stage1) - len(live)} refused")
     report_refusals(stage1)
     if not live:
-        raise SystemExit("\nNo camera survives sightline and framing. Widen --fov, raise "
-                         "--standoff-max, or check the subjects are where you think they are.")
+        msg = ("\nNo camera survives sightline and framing. Widen --fov, raise "
+               "--standoff-max, or check the subjects are where you think they are.")
+        if args.no_fallback:
+            raise SystemExit(msg)
+        print(msg)
+        wl, adds, pid, scene = top_down_fallback(
+            run, args, subjects, floor_z, "sightline+framing", msg,
+            {"candidates": len(stage1), "survivedSightline": 0}, stage1)
+        return write_fallback(wl, adds, args, refused_json(args, floor_z, aim, pid, scene, subjects, run))
 
     # Pass 3 -- one invocation carrying `--nav-at` AND `--inside-at` for the survivors, and
     # `--refs-at` around each subject for the doors. Batched here rather than with pass 1
@@ -2329,8 +2561,16 @@ def cmd_plan(args):
           f"{n_unsup} with no placed floor under the eye on its own storey)")
     report_refusals(scored)
     if not ok:
-        raise SystemExit("\nEvery sightline-clear camera sits off the storey or inside a ref. Raise "
-                         "--offmesh-tol / --storey-tol / --inside-cap only if you can say why.")
+        msg = ("\nEvery sightline-clear camera sits off the storey or inside a ref. Raise "
+               "--offmesh-tol / --storey-tol / --inside-cap only if you can say why.")
+        if args.no_fallback:
+            raise SystemExit(msg)
+        print(msg)
+        wl, adds, pid, scene = top_down_fallback(
+            run, args, subjects, floor_z, "placement", msg,
+            {"candidates": len(stage1), "survivedSightline": len(live),
+             "probed": len(scored), "survivedPlacement": 0}, scored)
+        return write_fallback(wl, adds, args, refused_json(args, floor_z, aim, pid, scene, subjects, run))
 
     print(f"\n--- top {min(args.top, len(ok))} ---")
     for v in ok[:args.top]:
@@ -2426,7 +2666,27 @@ def cmd_plan(args):
               "It is not a verified camera and nothing below says it is.")
     print_doors(doors, args)
 
-    if args.worklist and status == "refused" and not args.emit_refused:
+    # The final check refused every candidate it walked: the third refusal point. The fallback is
+    # computed here so the refused camera's own record (pose id, verification) is kept beside it.
+    fallback = None
+    if status == "refused" and not args.emit_refused and not args.no_fallback:
+        fallback = top_down_fallback(
+            run, args, subjects, floor_z, "verification",
+            f"no candidate verified in {len(attempts)} attempt(s); the final check refused: "
+            f"{', '.join(verification['failed'])}",
+            {"candidates": len(stage1), "survivedSightline": len(live),
+             "survivedPlacement": len(ok), "verifyAttempts": len(attempts)},
+            [best], refused_pose_id=pose_id, verification=verification)
+
+    if args.worklist and fallback is not None:
+        with open(args.worklist, "w", encoding="utf-8") as f:
+            json.dump(fallback[0], f, indent=2, default=str)
+        print(f"\nworklist FALLBACK -> {args.worklist} (the final check refused this camera -- "
+              f"{', '.join(verification['failed'])}; the file holds one top-down shot, labelled "
+              f"fallback, never a camera)")
+        print("  render it:  viewprobe --worklist " + args.worklist + " "
+              + " ".join(fallback[0]["renderFlags"]) + "   (plus the planner's pass-through flags)")
+    elif args.worklist and status == "refused" and not args.emit_refused:
         # No renderable shot -- but the path the caller named must not be left holding an earlier
         # run's verified worklist, so it gets a truthful, shot-less refusal record instead.
         with open(args.worklist, "w", encoding="utf-8") as f:
@@ -2508,7 +2768,7 @@ def cmd_plan(args):
 
     if args.json:
         with open(args.json, "w", encoding="utf-8") as f:
-            json.dump({"cell": args.cell, "floorZ": floor_z, "aim": aim,
+            doc = {"cell": args.cell, "floorZ": floor_z, "aim": aim,
                        # THE field to read. "verified" means the delivered pose was probed as
                        # itself and every target came back clear or confirmed; "refused" means it
                        # was probed and did not; "unverified" means --no-verify, so the final
@@ -2525,8 +2785,10 @@ def cmd_plan(args):
                        "feet": [best["eye"][0], best["eye"][1], floor_z], "doors": doors,
                        "chosen": {k: v for k, v in best.items() if k != "_target"},
                        "top": [{k: v for k, v in x.items() if k != "_target"} for x in ok[:args.top]],
-                       "renders": run.renders, "seconds": round(run.seconds, 1)}, f, indent=2,
-                      default=str)
+                       "renders": run.renders, "seconds": round(run.seconds, 1)}
+            if fallback is not None:
+                doc.update(fallback[1])
+            json.dump(doc, f, indent=2, default=str)
         print(f"json     -> {args.json}")
 
     print(f"\n{run.renders} viewprobe renders, {run.seconds:.0f}s of load walks.")
@@ -2764,6 +3026,11 @@ def cmd_devbench(args):
             n += 1
             if args.shot and n != args.shot:
                 continue
+            if shot.get("status") == "fallback" or shot.get("fallback"):
+                raise SystemExit(
+                    f"shot {n} is a shotplan top-down FALLBACK (status `fallback`): a picture of "
+                    f"the geometry around a REFUSED plan, not a player viewpoint. It has no "
+                    f"placement-tested feet, so there is nothing to drive.")
             eye = shot["eye"]
             yaw = shot.get("yaw")
             pitch = shot.get("pitch", 0) or 0
@@ -3033,6 +3300,16 @@ def main(argv=None):
                    help="skip the final check. The result is then a PROPOSAL with its verification "
                         "MISSING: status `unverified`, exit code 2, and the worklist label carries "
                         "UNVERIFIED. It never means the check passed")
+    p.add_argument("--no-fallback", action="store_true",
+                   help="when every eye-level camera is refused, write NO top-down fallback shot: "
+                        "the refusal artifacts exactly as before the fallback existed")
+    p.add_argument("--fallback-cut", type=float, default=None, metavar="Z",
+                   help="the fallback's --cull-above height (default: the highest subject's z + "
+                        "--subject-height + 64). A caller that knows the object's world-box top "
+                        "passes it here; the shot records which basis was used")
+    p.add_argument("--fallback-extent", type=float, default=2048.0,
+                   help="minimum width of the fallback frame at the subjects' floor (default 2048; "
+                        "it grows to the subjects' spread + 1024)")
     p.add_argument("--worklist", default=None, help="write the chosen shot as a viewprobe worklist")
     p.add_argument("--json", default=None, help="write the full result as JSON")
     p.add_argument("--dump", default=None,

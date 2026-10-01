@@ -3149,6 +3149,64 @@ drawn or claimed for a missing asset. An exit 0 whose census lists unreadable as
 flag (an ambient `VP_ALLOW_UNREADABLE_ASSETS`) is refused. Meshes viewprobe reports as not drawn by
 the renderer's rule are listed as `notDrawnByRule` and never fail a pose.
 
+##### When every eye-level camera is refused: the top-down fallback (`--no-fallback` to drop)
+
+A refusal used to leave nothing to look at: the claim stub at the first two refusal points
+(sightline + framing, placement) and a shot-less refused worklist at the third (the final
+verification). Whoever read the refusal then had to guess at the geometry. Since 2026-09-30 the
+planner emits, by default, ONE sliced top-down shot of the subjects instead. **The refusal is still
+the answer:** exit 1, `status: refused` in the worklist and the JSON, the base refusal message
+printed, and the reasons recorded. The shot is never offered as a camera.
+
+- **How it is marked.** The worklist carries `fallback: "top-down"` and a `refusal` record:
+  - `stage`: `sightline+framing` | `placement` | `verification`;
+  - `kind`: `geometry` or `evidence incomplete`. An evidence-incomplete refusal lists its `causes`,
+    for example `unreadable inside coverage`, `missing coverage statement`, `legacy comparison arm`,
+    `floor support unresolved` or `unreadable asset near the camera or a sightline`;
+  - `reasons`, as the console prints them, with counts;
+  - at the verification stage, the refused camera's own `poseId` and `verification`, verbatim.
+
+  The shot's `status` is `fallback`. Its label starts `FALLBACK TOP-DOWN (eye-level refused at
+  <stage>; not an eye-level view)`, and its `note` repeats the kind and causes. It has **no
+  `feet`**, and `shotplan.py devbench` refuses it by name: it is a picture of the geometry around
+  a refused plan, not a player viewpoint. The `--json` result adds `refusedAt`, `refusal`,
+  `fallback`, `fallbackDetail` and `renderFlags` to the refused plan's usual keys. A verified plan
+  carries none of them.
+- **The pose.** Yaw 0, pitch 89, north-up: viewprobe's worklist validator accepts -89..89. The eye
+  is set back 1° south, so the view axis meets the subjects' floor at their centroid. The frame is
+  `--fallback-extent` wide at the floor (default 2048 u), grown to the subjects' spread + 1024 u.
+  The eye height follows from `--fov`.
+- **The cut.** The shot's `cullAbove` defaults to the highest subject's z + `--subject-height`
+  + 64. `--fallback-cut Z` sets it absolutely; a caller that knows the object's world-box top
+  should pass it. `cullAboveBasis` records which was used. The usual `--cull-above` semantics
+  apply: statics wholly above the cut go, spanning statics stay, and terrain, navmesh, actors and
+  overlays are never sliced.
+- **The navmesh band.** One probe render at the fallback pose carries `--nav-at` on a 9 × 9 grid
+  over the frame, plus each subject's XY. Only drawn triangles count (flag 0x08 off: the ones
+  `--nav-z` keeps).
+  - If one lies within ±64 u of the subjects' floor, the render flags carry `--nav-z <floor>,64`
+    and the shot draws the overlay as `wire`. That band cannot hit `--nav-z`'s empty-band refusal.
+  - Otherwise the overlay is `off`, and `fallbackDetail.storeysSampled` lists the walkable heights
+    found in the frame. Another storey's band is never substituted, because the grid is ruled on
+    the `--nav-z` plane first and would then sit on the wrong storey.
+- **The grid and the subjects.**
+  - The render flags carry `--grid auto`, ruled on the subjects' floor.
+  - Each subject is ringed by a measured `routes[]` path at its own z (magenta, captioned
+    `SUBJECT <label> at x,y,z (ring)`).
+  - `fallbackDetail.subjectPixels` gives each subject's pixel in the delivered frame.
+  - Like any route, the ring is classified per run as visible / subterranean / behind geometry. In
+    the first real fallback render, the ring of a marker in an empty void, all four runs were
+    visible. How a ring under geometry below the cut looks is not yet observed.
+- **From above.** The same probe picks each subject's pixel through the cut, and
+  `fallbackDetail.fromAbove` records `clear` / `blocked` / `unproven` with the hit. This is
+  evidence about what covers the subject below the cut, not a verification. If the probe fails,
+  the shot is still written with the overlay off, and `fallbackDetail.probe` carries the failure.
+- **Rendering it.** The worklist cannot carry `--nav-z` or `--grid` per shot, so they are in its
+  top-level `renderFlags`, and the printed command includes them:
+  `viewprobe --worklist <wl> <renderFlags> <the planner's pass-through flags>`.
+- `--no-fallback` restores the refusal artifacts byte for byte. `--emit-refused` at the
+  verification stage keeps its own behaviour (the refused shot, labelled REFUSED, no fallback).
+
 ##### Declared surface targets (`--surface`)
 
 `--subject` is a thing standing at its FEET, proved by a ray reaching AT LEAST as far as it.
