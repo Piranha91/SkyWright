@@ -366,12 +366,15 @@ static class OverlapSurfaceProof
                     Say(r) + $" | volume {vol.Status} {vol.Reason}");
         });
         // SC11: an open quad crossing a closed cube: L measured, H(quad in cube) measured (100 x 100 = 10,000 of 40,000:
-        // fraction 0.25), H(cube in quad) refused naming the open member. Rejects refusing the pair because one side is open.
+        // fraction 0.25), converged to the 1 % target, H(cube in quad) refused naming the open member. Rejects refusing the
+        // pair because one side is open, and an inverted parity (the interval then holds 10,000 only by staying wide; the
+        // commit-gate sweep found the width unchecked).
         Case(check, "surface SC11: open quad vs closed cube — L 400, buried 10,000 (0.25), cube-in-quad refused as open", () =>
         {
             var r = MeshSurface.Measure(PlateZ(-100, -100, 100, 100, 7), null, Cube(7, 3, 0, 50), null, VolumeGeometry.Render);
-            return (r.Status == "measured" && Has(r.CrossingLength, 400) && r.AInB is { Status: "measured", Inside: { } i, Fraction: { } fr }
-                    && i.Contains(10000, 1e-6) && fr.Contains(0.25, 1e-9) && r.BInA is { Status: "refused", Reason: { } why } && why.Contains("open"), Say(r));
+            return (r.Status == "measured" && Has(r.CrossingLength, 400) && r.AInB is { Status: "measured", Inside: { } i, Fraction: { } fr, Converged: true }
+                    && i.Contains(10000, 1e-6) && i.Width <= 400 + 1e-6 && fr.Contains(0.25, 1e-9)
+                    && r.BInA is { Status: "refused", Reason: { } why } && why.Contains("open"), Say(r));
         });
 
         // ================= SC12: agreement with the existing predicate =================
