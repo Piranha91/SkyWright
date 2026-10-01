@@ -130,7 +130,7 @@ static class MotionProof
     /// <summary>A two-bone skinned strip: BoneA at the origin, BoneB child of BoneA at (20,0,0); vertices along x at 0..40
     /// (a thin quad strip), weights: x &lt;= 10 -> A; x = 30 -> A 0.5 / B 0.5; x = 40 -> B. Sequence "Open" turns BoneB
     /// by <paramref name="angleB"/> about Z (LINEAR) over 1 s.</summary>
-    static byte[] SkinRig(float angleB)
+    static byte[] SkinRig(float angleB, Action<NifFile, NiNode>? extra = null)
     {
         var f = new NifFile(); f.Create(Ver, withRootNode: true);
         var root = f.GetRootNodes().First(); root.Flags_ui = 0xE;
@@ -182,6 +182,7 @@ static class MotionProof
         mgr.ControllerSequences ??= new(); mgr.ControllerSequences.AddBlockRef(f.AddBlock(seq)); mgr.NumControllerSequences = 1;
         mgr.NextController = new(mtc);
         root.Controller = new(mgri);
+        extra?.Invoke(f, root);
         return Save(f, "skin rig");
     }
 
@@ -528,6 +529,50 @@ static class MotionProof
             var m = NifMotion.Read(b, null);
             var sp = m.Shapes.FirstOrDefault(x => x.Name == "Sparks");
             return (sp?.Refusal is { } why && why.Contains("particles", StringComparison.Ordinal) && m.Shapes.Where(x => x.Name != "Sparks").All(x => x.Refusal is null),
+                    $"{m.Status} {string.Join("; ", m.Shapes.Select(x => x.Name + ":" + (x.Refusal ?? x.Mover)))}");
+        });
+        // wind (Tree_Anim) and SMP physics: runtime motion the files declare outside any controller
+        static void FrameShader(NifFile f, bool treeAnim)
+        {
+            var frame = (BSTriShape)f.GetShapes().First(x => x.Name?.String == "Frame");
+            var flags = SkyrimShaderPropertyFlags2.ZBuffer_Write | (treeAnim ? SkyrimShaderPropertyFlags2.Tree_Anim : 0);
+            frame.ShaderPropertyRef = new NiBlockRef<BSShaderProperty>(f.AddBlock(new BSLightingShaderProperty { ShaderFlags_SSPF2 = flags }));
+        }
+        Case(check, "motion fixture control (wind): the Frame shape's lighting shader round-trips with and without Tree_Anim, and without it the mesh reads static", () =>
+        {
+            var on = Load(Rig(leaf, pivot, null, extra: (f, root) => FrameShader(f, true)));
+            var off = Rig(leaf, pivot, null, extra: (f, root) => FrameShader(f, false));
+            bool flagOn = on.GetShader(on.GetShapes().First(x => x.Name?.String == "Frame")) is BSLightingShaderProperty l1 && l1.ShaderFlags_SSPF2.HasFlag(SkyrimShaderPropertyFlags2.Tree_Anim);
+            var offNif = Load(off);
+            bool flagOff = offNif.GetShader(offNif.GetShapes().First(x => x.Name?.String == "Frame")) is BSLightingShaderProperty l0 && !l0.ShaderFlags_SSPF2.HasFlag(SkyrimShaderPropertyFlags2.Tree_Anim);
+            var m = NifMotion.Read(off, null);
+            return (flagOn && flagOff && m.Status == "static", $"on {flagOn} off {flagOff} {m.Status} {m.Reason}");
+        });
+        Case(check, "MK12 wind: a shape whose lighting shader carries Tree_Anim refuses with reason 'wind'; the other shape is not refused for it", () =>
+        {
+            var m = NifMotion.Read(Rig(leaf, pivot, null, extra: (f, root) => FrameShader(f, true)), null);
+            var fr = m.Shapes.FirstOrDefault(x => x.Name == "Frame");
+            return (m.Status == "refused" && fr?.Refusal is { } why && why.StartsWith("wind:", StringComparison.Ordinal) && why.Contains("Tree_Anim", StringComparison.Ordinal)
+                    && m.Shapes.Where(x => x.Name != "Frame").All(x => x.Refusal is null), $"{m.Status} {string.Join("; ", m.Shapes.Select(x => x.Name + ":" + (x.Refusal ?? x.Mover)))}");
+        });
+        static void SmpMarker(NifFile f, NiNode root)
+        {
+            root.ExtraDataList ??= new();
+            root.ExtraDataList.AddBlockRef(f.AddBlock(new NiStringExtraData { Name = new NiStringRef(NifMotion.SmpMarker), StringData = new NiStringRef(@"meshes\Fixture\physics.xml") }));
+            root.NumExtraDataList = (uint)root.ExtraDataList.Count;
+        }
+        Case(check, "motion fixture control (SMP): the marker round-trips on the skinned rig's root, and without it the rig reads as moving", () =>
+        {
+            var n = Load(SkinRig(Pi / 2, SmpMarker));
+            bool has = n.Blocks.OfType<NiStringExtraData>().Any(x => x.Name?.String == NifMotion.SmpMarker && x.StringData?.String == @"meshes\Fixture\physics.xml");
+            var m = NifMotion.Read(SkinRig(Pi / 2), null);
+            return (has && m.Status == "moving", $"marker {has} without: {m.Status} {m.Reason}");
+        });
+        Case(check, "MK12 SMP: the 'HDT Skinned Mesh Physics Object' marker refuses the skinned shape with reason 'SMP physics' naming the XML", () =>
+        {
+            var m = NifMotion.Read(SkinRig(Pi / 2, SmpMarker), null);
+            var st = m.Shapes.FirstOrDefault(x => x.Name == "Strip");
+            return (m.Status == "refused" && st?.Refusal is { } why && why.StartsWith("SMP physics:", StringComparison.Ordinal) && why.Contains("physics.xml", StringComparison.Ordinal),
                     $"{m.Status} {string.Join("; ", m.Shapes.Select(x => x.Name + ":" + (x.Refusal ?? x.Mover)))}");
         });
         Case(check, "MK12 a static mesh reads as static with no animation", () =>
