@@ -9,6 +9,7 @@
 //   motionprobe ASSETS pose REL (--animation ID --t T | --pose NAME) [--geometry render|collision] [--vertices]
 //   motionprobe ASSETS node REL --animation ID --node NAME (--t T | --times T1,T2,..)   a node's local transform
 //   motionprobe ASSETS clip REL.hkx                                  decoded clip, every frame of every track
+//   motionprobe ASSETS boundcheck REL.hkx [--samples N] [--split K]    every track's motion bound against dense samples
 //   motionprobe ASSETS graph GRAPH.hkx                               behaviour-graph reading (path as a NIF names it)
 //   motionprobe ASSETS sweep REL [--animation ID]... [--geometry render|collision] [--delta U] [--budget N]
 //   ASSETS = --loose-root DIR | --instance DIR --profile P --game DIR --order CANDIDATE.json
@@ -27,7 +28,7 @@ using var __run = RunLog.BeginProcess("motionprobe", args);
 string? loose = null, instance = null, profile = null, game = null, order = null, outPath = null, placementArg = null;
 string? anim = null, pose = null, node = null, geometryArg = null;
 var anims = new List<string>();
-float? t = null; List<float>? times = null; double? delta = null; int? budget = null; bool vertices = false;
+float? t = null; List<float>? times = null; double? delta = null; int? budget = null; int samplesN = 64, split = 4; bool vertices = false;
 var positional = new List<string>();
 for (int i = 0; i < args.Length; i++)
 {
@@ -50,6 +51,8 @@ for (int i = 0; i < args.Length; i++)
         case "--delta": delta = double.Parse(Need(), CultureInfo.InvariantCulture); break;
         case "--budget": budget = int.Parse(Need(), CultureInfo.InvariantCulture); break;
         case "--vertices": vertices = true; break;
+        case "--samples": samplesN = int.Parse(Need(), CultureInfo.InvariantCulture); break;
+        case "--split": split = int.Parse(Need(), CultureInfo.InvariantCulture); break;
         default:
             if (args[i].StartsWith("--")) { Console.Error.WriteLine("unknown option " + args[i]); return 2; }
             positional.Add(args[i]); break;
@@ -167,6 +170,33 @@ try
             }
             return Emit(new { verb, rel, c.Status, c.Duration, c.FrameDuration, c.Frames, c.Blocks, c.TransformTracks, c.FloatTracks,
                               c.OriginalSkeletonName, c.TrackToBone, c.RotationQuantizations, frames }, true);
+        }
+        case "boundcheck":
+        {
+            // For every track and every interval a sampler would use (consecutive knot times, each split in K), the
+            // certified Bound() must contain the actual change from t0 at N dense samples. Reports counts and violations.
+            var c = HavokAnimation.Decode(bytes);
+            if (c.Status != "decoded") return Emit(new { verb, rel, c.Status, c.Reason }, false);
+            var knots = c.KnotTimes();
+            long intervals = 0, checks = 0; var bad = new List<object>(); double worstSlackA = double.MaxValue;
+            for (int k = 0; k < c.TransformTracks; k++)
+                for (int i = 0; i + 1 < knots.Count; i++)
+                    for (int part = 0; part < split; part++)
+                    {
+                        float a = knots[i] + (knots[i + 1] - knots[i]) * part / split, b = knots[i] + (knots[i + 1] - knots[i]) * (part + 1) / split;
+                        var bound = c.Bound(k, a, b); var s0 = c.Sample(k, a);
+                        intervals++;
+                        for (int j = 0; j <= samplesN; j++)
+                        {
+                            float tt = a + (b - a) * j / samplesN; var s1 = c.Sample(k, tt); checks++;
+                            float dT = Vector3.Distance(s1.Translation, s0.Translation), dS = Vector3.Distance(s1.Scale, s0.Scale);
+                            float dA = HavokClip.AngleBetween(s1.Rotation, s0.Rotation);
+                            worstSlackA = Math.Min(worstSlackA, bound.Angle - dA);
+                            if (dT > bound.Translation || dA > bound.Angle || dS > bound.Scale)
+                                bad.Add(new { track = k, t0 = a, t1 = b, t = tt, dT, dA, dS, bound = new { bound.Translation, bound.Angle, bound.Scale } });
+                        }
+                    }
+            return Emit(new { verb, rel, tracks = c.TransformTracks, knots = knots.Count, intervals, checks, violations = bad.Count, worstAngleSlack = worstSlackA, first = bad.Take(5) }, bad.Count == 0);
         }
         case "sweep":
         {

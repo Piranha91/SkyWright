@@ -392,7 +392,8 @@ static class MotionProof
         {
             var m = NifMotion.Read(skin, null);
             var p = NifMotion.Pose(skin, m, "seq:Open", 1f, VolumeGeometry.Render);
-            var v = p.Soup!.Vertices;
+            if (p.Soup is null) return (false, $"{p.Status} {p.Reason}");
+            var v = p.Soup.Vertices;
             var tip = RotZ(new Vector3(40, 1, 0), new Vector3(20, 0, 0), Pi / 2);              // (19, 20, 0)
             var mid = (new Vector3(30, 1, 0) + RotZ(new Vector3(30, 1, 0), new Vector3(20, 0, 0), Pi / 2)) / 2;   // (24.5, 5.5, 0)
             return (p.Status == "posed" && v.Any(x => NearV(x, tip, 1e-3f)) && v.Any(x => NearV(x, mid, 1e-3f)), $"{p.Status} want {S(tip)} {S(mid)}");
@@ -548,6 +549,30 @@ static class MotionProof
         {
             var t = NifMotionKeys.FromNifly(new Quaternion(0.9f, 0.1f, 0.2f, 0.3f));
             return (t.X == 0.1f && t.Y == 0.2f && t.Z == 0.3f && t.W == 0.9f, $"({t.X}, {t.Y}, {t.Z}, {t.W})");
+        });
+
+        // ================= Gate C note C1: the rotation bound takes one sign =================
+        Case(check, "MC1a RotationBound: points on both sides of s0's hemisphere (dots 0.1 and -0.1 after aligning to the first) -> pi (rejects |dot| per point: 168.5 deg < the 180 deg blend)", () =>
+        {
+            var s0 = new Quaternion(1, 0, 0, 0);
+            var c1 = new Quaternion(0.1f, MathF.Sqrt(0.99f), 0, 0); var c2 = new Quaternion(-0.1f, MathF.Sqrt(0.99f), 0, 0);
+            float b = HavokClip.RotationBound(s0, new[] { c1, c2 });
+            var mid = Quaternion.Normalize(new Quaternion((c1.X + c2.X) / 2, (c1.Y + c2.Y) / 2, 0, 0));
+            float midAngle = 2 * MathF.Acos(MathF.Min(1, MathF.Abs(Quaternion.Dot(mid, s0))));
+            return (b >= midAngle - 1e-6f && b >= MathF.PI - 1e-6f, $"bound {b * 180 / MathF.PI:0.##} deg, blend midpoint {midAngle * 180 / MathF.PI:0.##} deg");
+        });
+        Case(check, "MC1b RotationBound: one-sided points -> the largest point angle (finite, contains every blend)", () =>
+        {
+            var s0 = Quaternion.Identity;
+            var c1 = Quaternion.CreateFromAxisAngle(Vector3.UnitZ, 0.4f); var c2 = Quaternion.CreateFromAxisAngle(Vector3.UnitX, 0.7f);
+            float b = HavokClip.RotationBound(Quaternion.Negate(s0), new[] { c1, c2 });       // s0 given with the opposite sign
+            bool all = Enumerable.Range(0, 21).All(k =>
+            {
+                float u = k / 20f;
+                var q = Quaternion.Normalize(new Quaternion((1 - u) * c1.X + u * c2.X, (1 - u) * c1.Y + u * c2.Y, (1 - u) * c1.Z + u * c2.Z, (1 - u) * c1.W + u * c2.W));
+                return 2 * MathF.Acos(MathF.Min(1, MathF.Abs(Quaternion.Dot(q, s0)))) <= b + 1e-6f;
+            });
+            return (all && b < MathF.PI && MathF.Abs(b - 0.7f) < 1e-4f, $"bound {b:0.#####} rad (largest point 0.7)");
         });
 
         // ================= Q3: the 1-DOF blend rule =================
