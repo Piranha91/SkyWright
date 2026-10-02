@@ -206,6 +206,26 @@ static partial class MotionProof
                         $"solid {r.Solid} 1 thread [{v1.Swept?.Lower:R}, {v1.Swept?.Upper:R}] cells {one.Cells} near {one.NearTests} tris {one.TriangleTests}; {many.ThreadsUsed} threads [{vn.Swept?.Lower:R}, {vn.Swept?.Upper:R}] cells {many.Cells} near {many.NearTests} tris {many.TriangleTests}; want [{want.Lower:R}, {want.Upper:R}]");
             });
         }
+        // MV3 (added at Gate C, review): a long thin diagonal sliver moving 2 u in x. Its triangles' bounding boxes cover a
+        // 100 u cube that their surface crosses only along the diagonal, so a near test that trusted a box overlap would
+        // call far more cells near than the exact test does. Interval and counts pinned from b0445359's Volume (the scratch
+        // mv3pin build against a b0445359 worktree, and the instrumented copy of its loop for the counts).
+        var sliver = new TriangleSoup(new[] { new Vector3(0, 0, 0), new Vector3(100, 100, 100), new Vector3(100, 100.5f, 100), new Vector3(0, 0.5f, 0) }, new[] { 0, 1, 2, 0, 2, 3 });
+        byte[] sliverRig = Rig(sliver, Vector3.Zero, Slide(new(2, 0, 0)));
+        foreach (var (cb, lo, hi, cells) in new[] { (20_000L, 0d, 4199.5742272820635, 19_993L), (200_000L, 0d, 2412.2837784706567, 199_993L) })
+        {
+            Case(check, $"MV3 near-test exactness: the moving diagonal sliver at MaxCells {cb:N0} gives b0445359's interval [{lo}, {hi:R}] and {cells:N0} cells / near tests, at 1 thread and at the default (rejects a near test that accepts a bounding-box overlap)", () =>
+            {
+                var m = NifMotion.Read(sliverRig, null);
+                var r = SweptGeometry.Build(sliverRig, m, null, VolumeGeometry.Render);
+                var one = new SweptVolumeRun { Threads = 1 }; var many = new SweptVolumeRun();
+                var v1 = SweptGeometry.Volume(r, null, new VolumeOptions(MaxCells: cb), run: one);
+                var vn = SweptGeometry.Volume(r, null, new VolumeOptions(MaxCells: cb), run: many);
+                bool ok = !r.Solid && v1.Swept is { } a && vn.Swept is { } b && a.Lower == lo && a.Upper == hi && b.Lower == lo && b.Upper == hi
+                          && one.Cells == cells && many.Cells == cells && one.NearTests == cells && many.NearTests == cells && one.TriangleTests == many.TriangleTests;
+                return (ok, $"solid {r.Solid} 1 thread [{v1.Swept?.Lower:R}, {v1.Swept?.Upper:R}] cells {one.Cells} near {one.NearTests}; {many.ThreadsUsed} threads [{vn.Swept?.Lower:R}, {vn.Swept?.Upper:R}] cells {many.Cells}");
+            });
+        }
         Case(check, "MV2 solid octree: the MK2 translating box's swept volume is the same interval and counts at 1 thread and at the default thread count (the parallel step also runs the solid path)", () =>
         {
             byte[] slideBox = Rig(Box(0, 0, 0, 20, 20, 20), Vector3.Zero, Xyz(NoKeys(), NoKeys(), NoKeys(), VG(KeyType.LINEAR_KEY, (0f, Vector3.Zero), (1f, new Vector3(0, 0, 100)))));
