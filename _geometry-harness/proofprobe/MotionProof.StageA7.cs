@@ -221,6 +221,23 @@ static partial class MotionProof
             var part = r.UncertifiedParts?.FirstOrDefault(x => x.Label == MeshReach.WindLabel);
             return (r.Status == "uncertified" && r.Labels.Contains(MeshReach.WindLabel) && part is not null && BoxIs(part.Box, 100, 0, 0, 110, 10, 10), SayA7(r));
         });
+        // R9b (found in the G1 run: FloraDeathBell01 is a switch mesh whose shapes also carry Tree_Anim; the motion reader
+        // reports the switch first, so the wind label was lost): a Tree_Anim shape under a switch node still makes the
+        // region uncertified with the wind label and the part's own box. Rejects a wind-swayed switch child read certified.
+        Case(check, "stageA7 R9b: Tree_Anim shape under a switch node — 'uncertified: wind amplitude', part box [0,10]x[0,10]x[0,300]", () =>
+        {
+            var f = new NifFile(); f.Create(Ver, withRootNode: true);
+            var root = f.GetRootNodes().First(); root.Flags_ui = 0xE;
+            var sw = new NiSwitchNode { Name = new NiStringRef("Sw"), Flags_ui = 0xE, Scale = 1f, Rotation = Identity33() };
+            root.Children.AddBlockRef(f.AddBlock(sw));
+            sw.Children.AddBlockRef(f.AddBlock(Shape("Short", Box(0, 0, 0, 10, 10, 10))));
+            sw.Children.AddBlockRef(f.AddBlock(Shape("Tall", Box(0, 0, 0, 10, 10, 300))));
+            WindShader(f, "Tall", treeAnim: true);
+            var r = MeshReach.OfModel(Save(f, "switch wind"), Origin, Origin, 1f);
+            var part = r.UncertifiedParts?.FirstOrDefault(x => x.Label == MeshReach.WindLabel);
+            return (r.Status == "uncertified" && r.Labels.Contains(MeshReach.WindLabel) && part is not null && BoxIs(part.Box, 0, 0, 0, 10, 10, 300)
+                    && BoxIs(r.Box, 0, 0, 0, 10, 10, 300), SayA7(r));
+        });
         // R10 (review note, wind margin): the margin printed beside a wind label is the gap from the wind PART's box to the
         // record's box [200,300]x[0,10]x[0,10]: 90. Rejects the margin measured from the reference position (200).
         Case(check, "stageA7 R10: wind margin = gap from the wind part's box to the record box = 90 (not 200 from the reference position)", () =>
