@@ -167,6 +167,14 @@ static class AnchorReachProof
             var n = MeshAnchor.TestPlaced(wall, null, O, O, 1f, Vector3.Zero, body);
             return (w.Decision == "clear" && n.Decision == "meets", $"with exclusion: {Say(w)} | without: {Say(n)}");
         });
+        // A13b (red-gate review): with the support exclusion active (x < -6), a solid entering the body IN FRONT of the face
+        // (a post at x [5,15]) still meets, and the detail names the exclusion. Rejects an exclusion that hides everything.
+        Case(check, "stageA7 A13b: exclusion active, a post in front of the support face — still meets, exclusion named", () =>
+        {
+            var post = Box(5, -5, 0, 15, 5, 200);
+            var r = MeshAnchor.TestPlaced(post, null, O, O, 1f, Vector3.Zero, body, new HalfSpace(new Vector3(1, 0, 0), -6f));
+            return (r.Decision == "meets" && r.Body == "meets" && (r.Reason ?? "").Contains("support"), Say(r));
+        });
         // A14: the A11 wall tagged alpha_test: its contact does not decide (session 6's material rule): undecided, naming
         // alpha_test. Rejects an alpha surface deciding a clash.
         Case(check, "stageA7 A14: alpha-tested wall in the body — undecided, naming alpha_test", () =>
