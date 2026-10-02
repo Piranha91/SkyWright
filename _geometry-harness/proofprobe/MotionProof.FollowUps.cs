@@ -54,6 +54,9 @@ static partial class MotionProof
         }
     }
 
+    // b0445359's SweptGeometry.Volume on the MV1 fixture (recorded at Gate B; see MV1)
+    static readonly (double Lower, double Upper) MV1Expected20k = (0, 165023.55337107647), MV1Expected200k = (0, 156681.9184578296);
+
     static readonly float[] FrameAlphas = { 0, 0, 0, 1, 0.5f, 0, 0, 0 };   // 8 box vertices: 2 above 0, largest 1
 
     /// <summary>A pre-SSE (stream 83) mesh: one NiTriShape "Bush" with NiTriShapeData, 4 vertices, alphas 0, 0.25, 0, 0.75.</summary>
@@ -171,6 +174,26 @@ static partial class MotionProof
             var m = NifMotion.Read(windRig, null);
             return (flag && m.Status == "refused" && (m.Reason ?? "").Contains("wind", StringComparison.Ordinal), $"flag {flag} motion {m.Status} {m.Reason}");
         });
+
+        // ======================= item 2: the non-solid octree's answer is unchanged by the cost fix (E2) =======================
+        // An open plate (two triangles) swinging 90 deg about Z: the region is not a closed solid, so the octree refines near
+        // its surface to the cell budget. The expected intervals are b0445359's own output for these exact inputs (a
+        // regression oracle, recorded at Gate B): a faster near test must give the same doubles.
+        var plateOpen = new TriangleSoup(new[] { new Vector3(10, 0, 0), new Vector3(60, 0, 0), new Vector3(60, 0, 50), new Vector3(10, 0, 50) }, new[] { 0, 1, 2, 0, 2, 3 });
+        byte[] swingOpen = Rig(plateOpen, Vector3.Zero, Xyz(FG(KeyType.LINEAR_KEY, FK(0, 0)), FG(KeyType.LINEAR_KEY, FK(0, 0)), FG(KeyType.LINEAR_KEY, FK(0, 0), FK(1, Pi / 2))));
+        foreach (long cellsBudget in new long[] { 20_000, 200_000 })
+        {
+            long cb = cellsBudget;
+            Case(check, $"MV1 non-solid octree identity: the open swinging plate at MaxCells {cb:N0} gives b0445359's interval exactly (rejects a near test that changes any cell's answer)", () =>
+            {
+                var m = NifMotion.Read(swingOpen, null);
+                var r = SweptGeometry.Build(swingOpen, m, null, VolumeGeometry.Render);
+                var v = SweptGeometry.Volume(r, null, new VolumeOptions(MaxCells: cb));
+                var want = cb == 20_000 ? MV1Expected20k : MV1Expected200k;
+                return (!r.Solid && v.Swept is { } s && s.Lower == want.Lower && s.Upper == want.Upper,
+                        $"solid {r.Solid} [{v.Swept?.Lower:R}, {v.Swept?.Upper:R}] want [{want.Lower:R}, {want.Upper:R}] {v.Reason}");
+            });
+        }
 
         // ======================= item 3: rest pose from the placement (E3) =======================
         byte[] door = Rig(leaf, pivot, Xyz(FG(KeyType.LINEAR_KEY, FK(0, 0)), FG(KeyType.LINEAR_KEY, FK(0, 0)), FG(KeyType.QUADRATIC_KEY, FK(0, 0), FK(1, -Pi / 2))),
