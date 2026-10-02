@@ -124,6 +124,45 @@ static partial class MotionProof
         return Save(f, "hinge rod");
     }
 
+    /// <summary>A hinge between an immovable anchor (plain body, node at (-10,0,0)) and a rod whose body is a bhkRigidBodyT
+    /// turned +90 degrees about Z (Havok quaternion (0,0,sin45,cos45), no translation). The rod's Pivot A (0,-10,0)/69.99 in its
+    /// body frame lies at model (10,0,0) when the frame's rotation is applied in the collision decoder's sense (the quaternion
+    /// rotates the point); the anchor's Pivot B (20,0,0)/69.99 lies at model (10,0,0) too. Applied transposed (the inverse
+    /// rotation) A would land at (-10,0,0).</summary>
+    static byte[] HingeRodT()
+    {
+        var f = new NifFile(); f.Create(Ver, withRootNode: true);
+        var root = f.GetRootNodes().First(); root.Flags_ui = 0xE;
+        var anchor = new NiNode { Name = new NiStringRef("Anchor"), Flags_ui = 0xE, Scale = 1f, Rotation = Identity33(), Translation = new(-10, 0, 0) };
+        var rod = new NiNode { Name = new NiStringRef("Rod"), Flags_ui = 0xE, Scale = 1f, Rotation = Identity33() };
+        root.Children.AddBlockRef(f.AddBlock(anchor)); root.Children.AddBlockRef(f.AddBlock(rod));
+        rod.Children.AddBlockRef(f.AddBlock(Shape("RodMesh", Box(0, -1, -1, 100, 1, 1))));
+        int ab = AddBody(f, anchor, ConvexBox(-1, -1, -1, 1, 1, 1), 0f, hkMotionType.MO_SYS_BOX_STABILIZED, SkyrimLayer.SKYL_STATIC);
+        int si = f.AddBlock(ConvexBox(-1, -1, -1, 1, 1, 1));
+        var rbT = new bhkRigidBodyT { Shape = new(si) };
+        var info = rbT.RigidBodyInfo_bRBCI2010;
+        info.Mass = 5f; info.MotionSystem = hkMotionType.MO_SYS_SPHERE_STABILIZED; info.QualityType = hkQualityType.MO_QUAL_MOVING;
+        float s45 = MathF.Sqrt(0.5f);
+        var q = info.Rotation; q.X = 0; q.Y = 0; q.Z = s45; q.W = s45; info.Rotation = q;
+        info.Translation = new Vector4(0, 0, 0, 0);
+        var ihf = info.HavokFilter; ihf.Layer_SL = SkyrimLayer.SKYL_CLUTTER; info.HavokFilter = ihf;
+        rbT.RigidBodyInfo_bRBCI2010 = info;
+        var hf = rbT.HavokFilter; hf.Layer_SL = SkyrimLayer.SKYL_CLUTTER; rbT.HavokFilter = hf;
+        int rbIdx = f.AddBlock(rbT);
+        int co = f.AddBlock(new bhkCollisionObject { Body = new(rbIdx), Target = new(f.Blocks.IndexOf(rod)) });
+        rod.CollisionObject = new(co);
+        var cons = new bhkLimitedHingeConstraint();
+        var c = cons.Constraint;
+        c.PivotA = new Vector4(0, -10 / HavokU, 0, 0); c.AxisA = new Vector4(0, 0, 1, 0); c.PerpAxisInA1 = new Vector4(1, 0, 0, 0); c.PerpAxisInA2 = new Vector4(0, 1, 0, 0);
+        c.PivotB = new Vector4(20 / HavokU, 0, 0, 0); c.AxisB = new Vector4(0, 0, 1, 0); c.PerpAxisInB1 = new Vector4(1, 0, 0, 0); c.PerpAxisInB2 = new Vector4(0, 1, 0, 0);
+        c.MinAngle = -0.5f; c.MaxAngle = 0.5f;
+        cons.Constraint = c;
+        var ci = cons.ConstraintInfo; ci.NumEntities = 2; ci.EntityA = new(rbIdx); ci.EntityB = new(ab); cons.ConstraintInfo = ci;
+        int consIdx = f.AddBlock(cons);
+        rbT.Constraints ??= new(); rbT.Constraints.AddBlockRef(consIdx); rbT.NumConstraints = 1;
+        return Save(f, "hinge rod T");
+    }
+
     /// <summary>root -> NiSwitchNode "Sw" -> child 0 shape "Short" box [0,10]^3; child 1 node "Mover" (a direct active
     /// NiTransformController sliding +100 in x over 1 s, CLAMP) -> shape "Part" box [0,10]^3. Optionally Tree_Anim on "Short".</summary>
     static byte[] SwitchMover(bool windOnShort)
@@ -303,6 +342,16 @@ static partial class MotionProof
                       && Vector3.Distance(Vector3.Normalize(c.AxisAModel), Vector3.UnitZ) < 1e-4f && c.MinAngle is { } lo && NearA7(lo, -Math.PI / 6, 1e-5)
                       && c.MaxAngle is { } hi && NearA7(hi, Math.PI / 6, 1e-5);
             return (ok, $"A {c.PivotAModel} B {c.PivotBModel} axis {c.AxisAModel} limits {c.MinAngle}..{c.MaxAngle} entities {c.BodyA}->{c.BodyB}");
+        });
+
+        // K-P8b (review note on K-P8: on the lab's T-body fish the frame and its transpose cannot be told apart): a T-body turned
+        // 90 degrees: pivot A at model (10,0,0), equal to B. Rejects the T frame's rotation applied transposed ((-10,0,0)) or not
+        // at all ((0,-10,0)).
+        Case(check, "reach-rules K-P8b: a bhkRigidBodyT turned 90° about Z places its pivot at model (10,0,0), meeting the anchor's", () =>
+        {
+            var c = PhysicsReach.Classify(HingeRodT()).Constraints.Single();
+            return (Vector3.Distance(c.PivotAModel, new Vector3(10, 0, 0)) < 1e-3f && Vector3.Distance(c.PivotBModel, new Vector3(10, 0, 0)) < 1e-3f,
+                    $"A {c.PivotAModel} B {c.PivotBModel}");
         });
 
         // ================= K-P9 / K-P10: the hinge envelope =================
