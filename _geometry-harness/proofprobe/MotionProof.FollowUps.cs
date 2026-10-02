@@ -267,7 +267,10 @@ static partial class MotionProof
         {
             var m = NifMotion.Read(door, null, new MotionPlacement("DOOR", false));
             var h = NifMotion.HeldPoses(m);
-            bool hasRest = h.Any(p => p.Rest && p.Name == "closed"), hasOpen = h.Any(p => p.Name == "open"), hasEnds = h.Any(p => p.Name == "seq:Open@end") && h.Any(p => p.Name == "seq:Close@end");
+            // (changed at implementation: the ends are checked by animation and time - a held pose that is both "open" and
+            // Open's end is listed once, under its named alias)
+            bool hasRest = h.Any(p => p.Rest && p.Name == "closed"), hasOpen = h.Any(p => p.Name == "open" && p.AnimationId == "seq:Open" && p.Time == 1),
+                 hasEnds = h.Any(p => p.AnimationId == "seq:Open" && p.Time == 1) && h.Any(p => p.AnimationId == "seq:Close" && p.Time == 1);
             bool noMid = h.All(p => p.Time <= 0 || p.Time >= 1);
             return (hasRest && hasOpen && hasEnds && noMid, string.Join(", ", h.Select(p => $"{p.Name}={p.AnimationId}@{p.Time}")));
         });
@@ -342,10 +345,29 @@ static partial class MotionProof
             var loopHeld = Both(PlaceMover(MoverA(CycleType.CYCLE_LOOP), default), PlaceMover(MoverBEnter(), BAt));
             return (loops.Decision == "cannot_tell" && loopHeld.Decision == "witness", $"{D(loops)} | {D(loopHeld)}");
         });
-        Case(check, "MB9 the pair budget is deterministic: budget 10 on MB5's coarse pair is cannot_tell naming the budget, never 'never'", () =>
+        // Changed at implementation (recorded in RESULT): the red-gate MB9 used MB5's coarse pair, which never needs an
+        // exact pair test, so a budget could not be seen there. MB2's pair needs exact tests to name its crossing; the
+        // budget k is half of what the unbudgeted run examines (review: a positive budget, not only 0).
+        Case(check, "MB9 the pair budget is deterministic: on MB2's pair, a positive budget k below the unbudgeted count gives cannot_tell naming the budget with <= k pairs examined; budget 0 examines none (rejects an ignored or zero-only budget)", () =>
         {
-            var d = Both(PlaceMover(MoverA(), default), PlaceMover(MoverBBeside(), BAt), budget: 10);
-            return (d.Decision == "cannot_tell" && (d.Reason ?? "").Contains("budget", StringComparison.Ordinal) && d.PairsExamined <= 10, D(d));
+            var a = PlaceMover(MoverA(), default); var b = PlaceMover(MoverBCross(), BAt);
+            var full = Both(a, b);
+            long k = full.PairsExamined / 2;
+            var cut = Both(a, b, budget: k);
+            var zero = Both(a, b, budget: 0);
+            return (full.PairsExamined > k && k >= 1 && cut.Decision == "cannot_tell" && (cut.Reason ?? "").Contains("budget", StringComparison.Ordinal) && cut.PairsExamined <= k
+                    && zero.Decision == "cannot_tell" && zero.PairsExamined == 0 && (zero.Reason ?? "").Contains("budget", StringComparison.Ordinal),
+                    $"unbudgeted {full.PairsExamined} ({full.Decision}); k {k}: {cut.Decision} examined {cut.PairsExamined} '{cut.Reason}'; 0: {zero.Decision} examined {zero.PairsExamined}");
+        });
+        Case(check, "MB10 the containment cap (added at implementation): MB5's fine pair is never with the default cap; with a cap k below the containment tests it makes, cannot_tell naming the containment budget with <= k tests, never 'never'", () =>
+        {
+            var a = PlaceMover(MoverA(), default, 0.1); var b = PlaceMover(MoverBBeside(), BAt, 0.1);
+            var full = Both(a, b, delta: 0.1);
+            long k = full.ContainmentTests / 2;
+            var cut = SweptGeometry.ContactBoth(a.Region, a.Held, b.Region, b.Held, null, new MotionOptions(DeltaTarget: 0.1), containmentBudget: k);
+            return (full.Decision == "never" && full.ContainmentTests > k && k >= 1 && cut.Decision == "cannot_tell"
+                    && (cut.Reason ?? "").Contains("containment budget", StringComparison.Ordinal) && cut.ContainmentTests <= k,
+                    $"unbudgeted {full.Decision} with {full.ContainmentTests} containment tests; cap {k}: {cut.Decision} after {cut.ContainmentTests} '{cut.Reason}'");
         });
         // coupling (link scope, F1)
         Case(check, "MCP1 coupling: both references name one activate parent (a common lever) -> named, with the lever", () =>

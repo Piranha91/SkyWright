@@ -29,6 +29,7 @@ static class MotionReview
 
     public sealed class Cache(AssetResolver assets, OverlapIndex index, Options options)
     {
+        public OverlapIndex Index => index;
         readonly Dictionary<string, MotionModel> models = new();
         readonly Dictionary<(string, VolumeGeometry), SweptRegion> regions = new();
         public Options Options => options;
@@ -80,7 +81,34 @@ static class MotionReview
                                                           motion = new { mode = cache.Options.Mode, policy = Policy, member, refusal = why } };
         if (!movA && !movB)
             return refA ? Refuse("A", ma.Reason ?? "refused") : Refuse("B", mb.Reason ?? "refused");
-        if (movA && movB) return Refuse("A", "both members move: a pair of moving members is not measured in v1");
+        if (movA && movB)
+        {
+            // E4 (follow-ups item 4): two moving members on independent clocks unless the files link them
+            if (cache.Options.Mode == "pose")
+                return Refuse("A", "both members move: --motion pose:NAME poses one moving member; use --motion swept for a pair of moving members");
+            var ra = cache.Region(formA, bytesA, g); var rb = cache.Region(formB, bytesB, g);
+            if (ra.Status != "built") return Refuse("A", ra.Reason ?? "swept region refused");
+            if (rb.Status != "built") return Refuse("B", rb.Reason ?? "swept region refused");
+            var pa = SweptGeometry.Place(ra, poseA.Pos, poseA.Rot, poseA.Scale); var pb = SweptGeometry.Place(rb, poseB.Pos, poseB.Rot, poseB.Scale);
+            var ha = SweptGeometry.HeldSoups(bytesA, ma, g, poseA.Pos, poseA.Rot, poseA.Scale, cache.Read);
+            var hb = SweptGeometry.HeldSoups(bytesB, mb, g, poseB.Pos, poseB.Rot, poseB.Scale, cache.Read);
+            string? coupling = FormKey.TryFactory(formA, out var ka) && FormKey.TryFactory(formB, out var kb) ? MotionPlacements.Coupling(cache.Index, ka, kb) : null;
+            var two = SweptGeometry.ContactBoth(pa, ha, pb, hb, coupling, cache.Options.Sweep);
+            if (two.Decision == "refused")
+                return new { geometry = gname, status = "refused", reason = two.Reason, motion = new { mode = "swept", policy = Policy, member = "both", refusal = two.Reason } };
+            return new
+            {
+                geometry = gname, status = "motion",
+                motion = new
+                {
+                    mode = "swept", policy = Policy, member = "both", decision = two.Decision, reason = two.Reason, delta = two.Width, converged = two.Converged,
+                    animationA = two.AnimationA, timeA = two.TimeA, poseA = two.PoseA, animationB = two.AnimationB, timeB = two.TimeB, poseB = two.PoseB,
+                    coupling = two.Coupling, label = two.Coupling is null ? SweptGeometry.IndependentClocks : "the files link the two references: " + two.Coupling,
+                    labelA = Labels(pa.Animations), labelB = Labels(pb.Animations), pairsExamined = two.PairsExamined,
+                    volume = (object?)null, volumeReason = volume ? "not measured: two moving members" : null,
+                },
+            };
+        }
         if (refA || refB) return refA ? Refuse("A", ma.Reason ?? "refused") : Refuse("B", mb.Reason ?? "refused");
         string member = movA ? "A" : "B";
         var (mForm, mBytes, mPose, mModel) = movA ? (formA, bytesA, poseA, ma) : (formB, bytesB, poseB, mb);

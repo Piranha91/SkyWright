@@ -230,6 +230,9 @@ public sealed class OverlapIndex
     public Dictionary<FormKey, PlacedPrimitiveInfo> RefPrimitive { get; } = new();
     /// <summary>Refs whose winning record carries ONAM (IsOpenByDefault), the motion reader's rest pose (follow-ups E3).</summary>
     public HashSet<FormKey> RefOpenByDefault { get; } = new();
+    /// <summary>ref -> its winning record's XLKR links and XAPR parents (absent when none): the two-mover coupling (E4).</summary>
+    public Dictionary<FormKey, IReadOnlyList<PlacedLink>> RefLinkedRefs { get; } = new();
+    public Dictionary<FormKey, IReadOnlyList<PlacedActivateParent>> RefActivateParents { get; } = new();
     /// <summary>ref -> its editor id, the last non-empty one in load order (an override that omits it keeps the earlier
     /// name). What the world-state census names a switch by.</summary>
     public Dictionary<FormKey, string> RefEditorId { get; } = new();
@@ -303,6 +306,8 @@ public sealed class OverlapIndex
         if (!string.IsNullOrWhiteSpace(r.EditorId)) RefEditorId[r.FormKey] = r.EditorId!;
         if (r.Primitive is { } pr) RefPrimitive[r.FormKey] = pr; else RefPrimitive.Remove(r.FormKey);
         if (r.OpenByDefault) RefOpenByDefault.Add(r.FormKey); else RefOpenByDefault.Remove(r.FormKey);
+        if (r.LinkedReferences is { Count: > 0 } links) RefLinkedRefs[r.FormKey] = links; else RefLinkedRefs.Remove(r.FormKey);
+        if (r.ActivateParents is { Count: > 0 } parents) RefActivateParents[r.FormKey] = parents; else RefActivateParents.Remove(r.FormKey);
         Deletions.Note(plugin, r.FormKey, r.Deleted, hasPlacement: true);
         var snap = new Snap(plugin, r.Position, cell, r.InitiallyDisabled, r.Deleted, worldspace, r.Rotation, r.Scale);
         if (History.Winning(r.FormKey) is { } prev && prev.SameAs(snap)

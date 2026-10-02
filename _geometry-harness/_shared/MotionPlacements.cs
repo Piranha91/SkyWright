@@ -12,7 +12,7 @@ namespace HarnessShared;
 //               common record (both name the same activate parent, or the same linked-reference target). Null when the
 //               files show none; a script can still couple them, and the motion result says so.
 //
-// STATUS: API frozen at the Gate B red gate; Of implemented (item 3), Coupling a stub until item 4.
+// STATUS: API frozen at the Gate B red gate; implemented.
 public static class MotionPlacements
 {
     /// <summary>The motion reader's placement context for a reference, or null when the index has no base for it.</summary>
@@ -48,5 +48,21 @@ public static class MotionPlacements
     /// <summary>The link the winning placed records show between two references, in words naming the subrecord and the
     /// record(s) involved; null when there is none in this scope.</summary>
     public static string? Coupling(OverlapIndex index, FormKey a, FormKey b)
-        => throw new NotImplementedException("MotionPlacements.Coupling (Gate B stub)");
+    {
+        var la = index.RefLinkedRefs.GetValueOrDefault(a)?.Select(l => l.Reference).ToHashSet() ?? new HashSet<FormKey>();
+        var lb = index.RefLinkedRefs.GetValueOrDefault(b)?.Select(l => l.Reference).ToHashSet() ?? new HashSet<FormKey>();
+        var pa = index.RefActivateParents.GetValueOrDefault(a)?.Select(p => p.Reference).ToHashSet() ?? new HashSet<FormKey>();
+        var pb = index.RefActivateParents.GetValueOrDefault(b)?.Select(p => p.Reference).ToHashSet() ?? new HashSet<FormKey>();
+        FormKey? Xesp(FormKey k) => index.EnableChanges.TryGetValue(k, out var ec) && ec.Count > 0 ? ec[^1].Parent : null;
+        var found = new List<string>();
+        if (la.Contains(b)) found.Add($"XLKR: {a} links {b}");
+        if (lb.Contains(a)) found.Add($"XLKR: {b} links {a}");
+        if (pa.Contains(b)) found.Add($"XAPR: {b} is an activate parent of {a}");
+        if (pb.Contains(a)) found.Add($"XAPR: {a} is an activate parent of {b}");
+        if (Xesp(a) == b) found.Add($"XESP: {b} is the enable parent of {a}");
+        if (Xesp(b) == a) found.Add($"XESP: {a} is the enable parent of {b}");
+        foreach (var p in pa.Intersect(pb).OrderBy(k => k.ToString())) found.Add($"XAPR: both name activate parent {p}");
+        foreach (var t in la.Intersect(lb).OrderBy(k => k.ToString())) found.Add($"XLKR: both link to {t}");
+        return found.Count == 0 ? null : string.Join("; ", found);
+    }
 }
