@@ -250,6 +250,15 @@ static partial class MotionProof
             var d = PhysicsReach.FirstContact(Box(0, 0, 50, 100, 100, 60), Spike(50, 50, 0, 5, 30));
             return (d is { } x && NearA7(x, 20, 1e-4), $"d {d}");
         });
+        // K-P2c (found by the Gate C sweep: K-P1's square plate is two triangles whose diagonal crosses the box's footprint, so
+        // the edge-edge family alone finds its contact): a box over ONE large triangle whose edges and corners all lie outside
+        // the box's footprint -> only the moving vertices cast down meet it: d = 50. Rejects that family dropped.
+        Case(check, "reach-rules K-P2c: box over a single large triangle (no support edge or corner under it) - d = 50 (moving vertices down)", () =>
+        {
+            var tri = new TriangleSoup(new[] { new Vector3(-300, -300, 0), new Vector3(300, -300, 0), new Vector3(0, 300, 0) }, new[] { 0, 1, 2 });
+            var d = PhysicsReach.FirstContact(Box(0, 0, 50, 10, 10, 60), tri);
+            return (d is { } x && NearA7(x, 50, 1e-4), $"d {d}");
+        });
         // K-P2b: two crossed triangular bars (lowest edge z 50 along X; top edge z 40 along Y) -> d = 10 (edge-edge only).
         Case(check, "reach-rules K-P2b: crossed bars — d = 10 (edge–edge contact; no vertex lies over the other bar)", () =>
         {
