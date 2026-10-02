@@ -96,6 +96,8 @@ contactprobe: placement contact and explicit render-surface pair review
   --contact-budget-seconds N --pair-budget-seconds N --contact-max-pairs N
   --surface-tolerance N --mesh-max-triangle-pairs N
   --volume OUTPUT (with --overlap-json): measured overlap volume per pair, render and collision separately
+  --anchor OUTPUT (with --overlap-json): member A is an anchor (marker, idle marker, placed actor, furniture entry), B a
+    partner: point, line and body readings of the actor at the anchor against B's opaque render surface, the body deciding
   --surface OUTPUT (with --overlap-json): crossing length, coplanar areas and buried area per pair, render and collision
     separately; --live-pose blanket|targeted chooses the live-pose rule (default blanket)
   --motion off|swept|pose:NAME (with --surface/--volume): measure a moving member against its motion instead of refusing
@@ -129,7 +131,7 @@ bool bosOn = true;
 var enablePlugins = new List<string>();
 var disablePlugins = new List<string>();
 string? orderFile = null;
-string? traceOut = null, traceKeysPath = null, volumeOut = null, surfaceOut = null;   // --surface FILE: measured surface contact (with --overlap-json)
+string? traceOut = null, traceKeysPath = null, volumeOut = null, surfaceOut = null, anchorOut = null;   // --surface FILE: measured surface contact (with --overlap-json); --anchor FILE: the anchor body test (G1 build list row 2)
 LivePosePolicy? livePose = null;
 string? motionSpec = null; double? motionDelta = null; int? motionBudget = null;   // --live-pose blanket|targeted (with --surface)
    // --volume FILE: measured overlap volume (with --overlap-json)   // --trace FILE [--trace-keys FILE]: the per-object trace side file (default pass only)
@@ -173,6 +175,7 @@ try
         else if (flag == "--trace") { traceOut = NeedValue(i, flag); i++; }
         else if (flag == "--volume") { volumeOut = NeedValue(i, flag); i++; }
         else if (flag == "--surface") { surfaceOut = NeedValue(i, flag); i++; }
+        else if (flag == "--anchor") { anchorOut = NeedValue(i, flag); i++; }
         else if (flag == "--live-pose")
         {
             livePose = NeedValue(i, flag).ToLowerInvariant() switch
@@ -224,6 +227,7 @@ int selectedModes = (overlapJson is null ? 0 : 1) + (absolute ? 1 : 0) + (labell
 if (selectedModes > 1) { Console.Error.WriteLine("--overlap-json, --absolute and --labelled-mover select different modes; pass only one"); return 2; }
 if (volumeOut is not null && overlapJson is null) { Console.Error.WriteLine("--volume is valid only with --overlap-json INPUT"); return 2; }
 if (surfaceOut is not null && overlapJson is null) { Console.Error.WriteLine("--surface is valid only with --overlap-json INPUT"); return 2; }
+if (anchorOut is not null && overlapJson is null) { Console.Error.WriteLine("--anchor is valid only with --overlap-json INPUT"); return 2; }
 if (livePose is not null && surfaceOut is null) { Console.Error.WriteLine("--live-pose is valid only with --surface OUTPUT"); return 2; }
 if (traceKeysPath is not null && traceOut is null) { Console.Error.WriteLine("--trace-keys requires --trace OUTPUT"); return 2; }
 MotionReview.Options? motionOptions;
@@ -493,6 +497,10 @@ if (overlapJson is not null)
         if (surfaceOut is not null)
             OverlapSurfaceReview.Run(overlapJson, surfaceOut, livePose ?? LivePosePolicy.Blanket, assets, idx, cidx.Arms,
                 cfg.Identity("load-time", cidx.State?.Name ?? "baseline"), idx.WinningGeometryPose, motionCache);
+        // --anchor: a separate file (G1 build list, Stage A, row 2): member A is the anchor, B the partner.
+        if (anchorOut is not null)
+            AnchorReview.Run(overlapJson, anchorOut, assets, idx, cidx.Arms,
+                cfg.Identity("load-time", cidx.State?.Name ?? "baseline"), idx.WinningGeometryPose);
         return reviewRc;
     }
     catch (Exception ex)

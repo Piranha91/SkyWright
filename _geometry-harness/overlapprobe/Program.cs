@@ -103,6 +103,11 @@ Legacy mode: --responsible-pair PLUGIN_A PLUGIN_B with --geometry-manifest OUTPU
 --motion swept [--motion-delta U]: a base refused for its pose alone (unsupported_pose, or partial_geometry when every
 visible shape decoded and only the pose is refused) whose motion the files settle is discovered
 by a swept proxy (its sampled poses' boxes, each grown by its certified delta): an outer bound, labelled in the reason.
+--reach: every enabled record without a render box gains "reach": a world box guaranteed to hold its geometry (stored
+pose, swept region, or a switch node's every child), "uncertified" with labels and per-part boxes where a wind-swayed
+shape or the particle model enters, "refused" with the reason otherwise (a model-less primitive refuses naming its
+collision layer until the layer's solidity is settled), "no_geometry" for a reference with neither model nor primitive.
+Default off: the manifest is unchanged without it.
 See overlapprobe/Program.cs usage documentation. Help performs no load-order scan.
 """);
     return 0;
@@ -119,6 +124,7 @@ Func<FormKey, bool>? enabledOf = null;
 StateArm? stateArm = null;
 double surfaceTolerance = 1e-5;
 bool motionSwept = false; double motionDelta = 0.5;
+bool reachOn = false;   // --reach (G1 build list, Stage A): a reach region for every record without a render box
 long maxTrianglePairs = 2_000_000;
 double pairSeconds = 120;
 string? emitPath = null;
@@ -164,6 +170,7 @@ try
             throw new ArgumentException("--depth, --frac and --maxdim are unsupported: actual-shape discovery has no box depth, fraction or size decision gates");
         if (flag == "--list") { if (!int.TryParse(NeedValue(i, flag), out listN)) throw new ArgumentException("--list requires an integer"); i++; }
         else if (flag == "--motion") { if (NeedValue(i, flag) != "swept") throw new ArgumentException("--motion takes swept"); motionSwept = true; i++; }
+        else if (flag == "--reach") reachOn = true;
         else if (flag == "--motion-delta") { if (!double.TryParse(NeedValue(i, flag), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out motionDelta) || !(motionDelta > 0)) throw new ArgumentException("--motion-delta requires a positive number"); i++; }
         else if (flag == "--surface-tolerance") { if (!double.TryParse(NeedValue(i, flag), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out surfaceTolerance)) throw new ArgumentException("--surface-tolerance requires a number"); i++; }
         else if (flag == "--max-triangle-pairs") { if (!long.TryParse(NeedValue(i, flag), out maxTrianglePairs)) throw new ArgumentException("--max-triangle-pairs requires an integer"); i++; }
@@ -583,6 +590,43 @@ NifRenderGeometryOutcome SweptProxy(byte[] bytes, NifRenderGeometryOutcome origi
     return new NifRenderGeometryOutcome(NifRenderGeometryStatus.Measured,
         $"swept proxy: {region.Samples.Count} sampled poses' boxes grown by their certified delta (max {region.MaxDelta:0.###} u, {(region.Converged ? "converged" : "not converged")}) over {anims}; an outer bound for discovery only",
         total, new TriangleSoup(v.ToArray(), idx.ToArray()), original.Model, original.ContentSha256, original.CacheKey + "|swept:" + motionDelta.ToString(System.Globalization.CultureInfo.InvariantCulture));
+}
+
+// --reach (G1 build list, Stage A): the reach region of a record that has no render box (MeshReach). The asset is the
+// one discovery resolved for the base; a model-less reference with a primitive refuses naming its collision layer (the
+// layer's solidity is not settled from the records yet); neither model nor primitive is no_geometry.
+object ReachOf(FormKey key, FormKey baseKey, Snap p)
+{
+    object Out(ReachRegion r) => new
+    {
+        status = r.Status, reason = r.Reason, policy = r.Policy, box = ReachBox(r.Box), labels = r.Labels,
+        parts = r.UncertifiedParts.Select(x => new { label = x.Label, box = ReachBox(x.Box) }).ToArray(),
+    };
+    static object? ReachBox(Aabb b) => b.IsEmpty ? null
+        : new { min = new[] { (double)b.Min.X, b.Min.Y, b.Min.Z }, max = new[] { (double)b.Max.X, b.Max.Y, b.Max.Z } };
+    byte[]? Read(string rel)
+    {
+        try { var res = assets.ResolveForPlacement(rel); return res.Sources.Count == 0 ? null : AssetResolver.ReadPlacementSource(res.Sources[0]).Bytes; }
+        catch (ArgumentException) { return null; }
+    }
+    var g = GeometryOf(baseKey);
+    if (g.Source is { } src)
+    {
+        var (bytes, err) = AssetResolver.ReadPlacementSource(src);
+        if (bytes is null) return Out(new ReachRegion("refused", "asset read failed: " + err, Aabb.Empty, MeshReach.PolicyVersion, Array.Empty<string>(), Array.Empty<ReachPart>()));
+        return Out(MeshReach.OfModel(bytes, p.Pos, p.Rot, p.Scale, Read, new ReachOptions(motionDelta)));
+    }
+    if (g.RelativePath is not null)
+        return Out(new ReachRegion("refused", $"{g.Status}: {g.Reason}", Aabb.Empty, MeshReach.PolicyVersion, Array.Empty<string>(), Array.Empty<ReachPart>()));
+    if (idx.RefPrimitive.TryGetValue(key, out var prim))
+    {
+        string layer = idx.RefCollisionLayer.TryGetValue(key, out var li)
+            ? (idx.CollisionLayersByIndex.TryGetValue(li, out var cl) ? cl.Edid ?? $"index {li}" : $"index {li} (no COLL record)")
+            : "none stated";
+        return Out(new ReachRegion("refused", $"primitive {prim.Type} (bounds {prim.Bounds.X} {prim.Bounds.Y} {prim.Bounds.Z}), collision layer {layer}: the layer's solidity is not settled",
+                                   Aabb.Empty, MeshReach.PolicyVersion, Array.Empty<string>(), Array.Empty<ReachPart>()));
+    }
+    return Out(new ReachRegion("no_geometry", "no model path and no primitive", Aabb.Empty, MeshReach.PolicyVersion, Array.Empty<string>(), Array.Empty<ReachPart>()));
 }
 
 (TriangleSoup? Soup, char Source, string? Reason) SurfaceGeometryOf(FormKey baseKey)
@@ -1018,6 +1062,7 @@ if (geometryManifestPath is not null)
     catch (Exception ex) { Console.Error.WriteLine($"--historical-pairs contains an invalid FormKey: {ex.Message}"); return 2; }
     var reviewByKey = new Dictionary<FormKey, ReviewRef>();
     var recordRows = new List<object>();
+    var reachRows = new List<(int Row, object Reach)>();
     // Which identities this loop actually enumerated. The accounting below reads it rather than
     // re-deriving the loop's own gates, so it can never claim a row the manifest does not hold.
     var emittedRecordKeys = new HashSet<FormKey>();
@@ -1102,6 +1147,7 @@ if (geometryManifestPath is not null)
                 }
             };
         emittedRecordKeys.Add(key);
+        int rowIndex = recordRows.Count;
         recordRows.Add(new
         {
             formid = key.ToString(),
@@ -1148,9 +1194,18 @@ if (geometryManifestPath is not null)
                 volume = reportedWorldBounds is { } vb ? Volume(vb) : (double?)null
             }
         });
+        if (reachOn && runtimePoseKnown && hasBase && reportedWorldBounds is null)
+            reachRows.Add((rowIndex, ReachOf(key, effectiveBase, p)));
     }
 
     var manifestJson = new JsonSerializerOptions { WriteIndented = true, NumberHandling = System.Text.Json.Serialization.JsonNumberHandling.AllowNamedFloatingPointLiterals };
+    // --reach: attach the reach object to the rows it was computed for (nothing else in a row changes)
+    foreach (var (rowAt, reachObj) in reachRows)
+    {
+        var node = JsonSerializer.SerializeToNode(recordRows[rowAt], recordRows[rowAt].GetType(), manifestJson)!.AsObject();
+        node["reach"] = JsonSerializer.SerializeToNode(reachObj, reachObj.GetType(), manifestJson);
+        recordRows[rowAt] = node;
+    }
     // E1 (follow-ups item 1): an asset with a visible Tree_Anim shape gains "wind" (NifWind.Json); nothing else changes
     object WithWind(object row, WindLabel? wind)
     {

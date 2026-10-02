@@ -35,6 +35,13 @@ using HousecarlCore.Progress;
 //   cell      one cell, per storey, with the per-triangle listing to a TSV.
 //   line      the calibration read: δ along a heading through a point (yaw, degrees, 0 = +Y, clockwise), every --every u
 //             for --span u each way — the same line corridorprobe width walks.
+//   reach     (G1 build list, Stage A, row 4) `reach <Cell> <subjects.json> --json OUT`: for each subject reference
+//             ({"subjects":[{"id":"FORMKEY"}]}), the exact 3D distance from its placed render geometry at the stored
+//             pose (its position when the mesh is unreadable, partial or has no model) to the nearest winning navmesh
+//             triangle of the cell not flagged Deleted (HousecarlCore.NavmeshReach), with its horizontal and vertical
+//             parts, the triangle, and the floor under that point (this probe's floor rule). A navmesh triangle is where
+//             NPCs path, not every place a player can stand. Interior: the cell's navmesh is the whole set. Exterior:
+//             only the cell's own navmesh is searched, so the distance is an upper bound and says so.
 //   points    the calibration against a walker: for each recorded position (feet), the navmesh and floor under it and
 //             feet − floor; a floor that is the physical one reads that difference near zero.
 //   --depth   how far below the navmesh a floor may lie (deeper is a drop: no floor); --reach how far above (the step
@@ -66,7 +73,7 @@ if (args.Length >= 1 && args[0] == "--moved-ref-selftest") return FloorgapSelfTe
 string Instance = HarnessTarget.Instance, GamePath = HarnessTarget.Game, profileName = HarnessTarget.Profile;
 string plugin = "Skyrim.esm";
 float depth = NavmeshFloor.DefaultMaxDepth, reach = NavmeshFloor.DefaultUpReach, split = NavmeshFloor.DefaultSplitAbove;
-string? tsvPath = null, trisPath = null, verdictsDir = null, orderFile = null;
+string? tsvPath = null, trisPath = null, verdictsDir = null, orderFile = null, jsonPath = null;
 bool ownOnly = false, winning = false, flagsOnly = false;
 int maxCells = int.MaxValue;
 Vec3? at = null; float heading = 0f, span = 384f, every = 16f;
@@ -85,6 +92,7 @@ for (int i = 0; i < args.Length; i++)
         case "--reach": reach = float.Parse(Next(), CultureInfo.InvariantCulture); break;
         case "--split": split = float.Parse(Next(), CultureInfo.InvariantCulture); break;
         case "--tsv": tsvPath = Next(); break;
+        case "--json": jsonPath = Next(); break;
         case "--tris": trisPath = Next(); break;
         case "--verdicts": verdictsDir = Next(); break;
         case "--own": ownOnly = true; break;
@@ -151,7 +159,7 @@ Console.WriteLine($"assets: {bsaCount} BSAs indexed ({sw.ElapsedMilliseconds} ms
 var walk = new List<string>();
 if (winning)
 {
-    if (mode == "sweep") { Console.Error.WriteLine("--winning is for cell, line and points (one cell resolved through the load order), not sweep"); return 2; }
+    if (mode == "sweep") { Console.Error.WriteLine("--winning is for cell, line, points and reach (one cell resolved through the load order), not sweep"); return 2; }
     walk.AddRange(cfg is not null ? cfg.OrderedPaths : Mo2LoadOrder.Build(profileDir, modsDir, dataDir, overwriteDir).OrderedPaths);
 }
 else
@@ -301,6 +309,68 @@ CellPlacements? FindCell(string id)
 }
 string Name(CellPlacements e) => e.CellEditorId ?? e.Cell.ToString();
 string World(CellPlacements e) => e.Interior ? "(interior)" : worldName.TryGetValue(e.Worldspace, out var n) ? n : e.Worldspace.ToString();
+
+// ================================================================================================ reach ====
+if (mode == "reach")
+{
+    if (positional.Count < 3 || jsonPath is null) { Console.Error.WriteLine("reach needs <Cell> <subjects.json> --json OUT"); return 2; }
+    var e = FindCell(positional[1]);
+    if (e is null) { Console.Error.WriteLine($"cell '{positional[1]}' not found"); return 2; }
+    using var sdoc = System.Text.Json.JsonDocument.Parse(File.ReadAllBytes(positional[2]));
+    var ids = sdoc.RootElement.GetProperty("subjects").EnumerateArray().Select(x => x.GetProperty("id").GetString()!).ToList();
+    var tris = new List<NavTriangle>();
+    foreach (var nv in e.Navmeshes)
+    {
+        if (nv.Deleted) continue;
+        for (int t = 0; t < nv.Triangles.Count; t++)
+        {
+            var tr = nv.Triangles[t];
+            if (tr.A < 0 || tr.B < 0 || tr.C < 0 || tr.A >= nv.Vertices.Count || tr.B >= nv.Vertices.Count || tr.C >= nv.Vertices.Count) continue;
+            Vector3 V3(Vec3 v) => new(v.X, v.Y, v.Z);
+            tris.Add(new NavTriangle(V3(nv.Vertices[tr.A]), V3(nv.Vertices[tr.B]), V3(nv.Vertices[tr.C]), (ushort)tr.Flags, nv.FormKey.ToString(), t));
+        }
+    }
+    var field = Field(e);
+    var byKey = e.Refs.ToDictionary(r => r.FormKey.ToString(), r => r, StringComparer.OrdinalIgnoreCase);
+    var rows = new List<object>();
+    foreach (var id in ids)
+    {
+        if (!byKey.TryGetValue(id, out var r)) { rows.Add(new { id, status = "refused", reason = "no winning placement of this reference in the cell" }); continue; }
+        TriangleSoup? world = null; string geometry = "position";
+        string? geometryNote = null;
+        if (r.Base is { } b && baseMesh.TryGetValue(b, out var bm))
+        {
+            var full = bm.Mesh.StartsWith("meshes", StringComparison.OrdinalIgnoreCase) ? bm.Mesh : Path.Combine("meshes", bm.Mesh);
+            var res = assets.ResolveForPlacement(full);
+            var bytes = res.Sources.Count == 0 ? null : AssetResolver.ReadPlacementSource(res.Sources[0]).Bytes;
+            var g = bytes is null ? null : NifGeometry.MeasureVisibleRender(bytes, includeTriangles: true);
+            if (g?.Model is { Soup: { TriangleCount: > 0 } soup } m && m.RenderComplete && m.Shapes.Where(x => !x.Hidden).All(x => x.PoseIssue is null))
+            { world = SpatialOverlap.TransformSoup(soup, r.Position, r.Rotation, r.Scale); geometry = "render (stored pose)"; }
+            else geometryNote = bytes is null ? "mesh unresolved: the position is used" : "render geometry partial or posed at runtime: the position is used";
+        }
+        else geometryNote = "no model: the position is used";
+        var d = world is not null ? NavmeshReach.FromSoup(world, tris) : NavmeshReach.FromPoint(new Vector3(r.Position.X, r.Position.Y, r.Position.Z), tris);
+        object? floor = null;
+        if (d.Status == "measured" && d.Triangle is { } ti && tris.FirstOrDefault(x => x.Index == ti && x.Navmesh == d.Navmesh) is var nt)
+        {
+            var c = (nt.A + nt.B + nt.C) / 3f;
+            var fr = field.Read(c.X, c.Y, c.Z, out _);
+            floor = new { at = "the nearest triangle's centroid", found = fr.Found, offset = fr.Found ? fr.Offset : (float?)null, reason = fr.Found ? null : fr.Reason.ToString() };
+        }
+        rows.Add(new { id, geometry, geometryNote, status = d.Status, reason = d.Reason, distance = d.Distance, horizontal = d.Horizontal, vertical = d.Vertical,
+                       navmesh = d.Navmesh, triangle = d.Triangle, floor });
+    }
+    var outDoc = new
+    {
+        schema = "housecarl.navmesh-distance/1", policy = NavmeshReach.PolicyVersion, cell = Name(e), interior = e.Interior,
+        scope = e.Interior ? "the cell's navmesh" : "the cell's own navmesh only: an upper bound (neighbouring cells not searched)",
+        note = "distance to the nearest winning navmesh triangle (where NPCs path), not every place a player can stand",
+        triangles = tris.Count, deletedSkipped = tris.Count(t => NavmeshReach.IsDeleted(t.Flags)), subjects = rows,
+    };
+    File.WriteAllText(jsonPath, System.Text.Json.JsonSerializer.Serialize(outDoc, new System.Text.Json.JsonSerializerOptions { WriteIndented = true }));
+    Console.WriteLine($"wrote navmesh distances: {rows.Count} subject(s), {tris.Count:N0} triangles -> {jsonPath}");
+    return 0;
+}
 
 // ================================================================================================ line / points ====
 if (mode is "line" or "points")
