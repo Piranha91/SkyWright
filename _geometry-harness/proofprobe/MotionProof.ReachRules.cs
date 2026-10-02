@@ -268,6 +268,33 @@ static partial class MotionProof
             return (d is { } x && NearA7(x, 10, 1e-4), $"d {d}");
         });
 
+        // ================= K-T: terrain (review note on Gate C: LAND is read as a support) =================
+        // A saddle quad (100 x 100 u, corners z 0 at (0,0),(100,100) and z 10 at (100,0),(0,100)) cut along each diagonal is two
+        // alternative supports (one Group). A 2 x 2 x 2 box at (49..51, 49..51, 20..22): cut 00-11 the surface under it peaks at
+        // 0.2 (d 19.8); cut 10-01 it peaks at 10 (d 10). The drop meets the earlier (d 10) and reports the range to 19.8; the
+        // prism reaches 0.2. Rejects one diagonal guessed, and a landing reported as determined when the file cannot settle it.
+        Case(check, "reach-rules K-T1: terrain cut both ways - d 10, DistanceMax 19.8, status dropped-range, prism z 0.2..22, landed z 10..12", () =>
+        {
+            var p = new[] { new Vector3(0, 0, 0), new Vector3(100, 0, 10), new Vector3(100, 100, 0), new Vector3(0, 100, 10) };
+            var cutA = new TriangleSoup(p, new[] { 0, 1, 2, 0, 2, 3 }); var cutB = new TriangleSoup(p, new[] { 0, 1, 3, 1, 2, 3 });
+            var r = PhysicsReach.Drop(Box(49, 49, 20, 51, 51, 22), AB(49, 49, 20, 51, 51, 22), 4,
+                new[] { new DropSupport("land", 1, true, false, cutA, Group: "land"), new DropSupport("land", 1, true, false, cutB, Group: "land") }, RRLayers);
+            return (r.Status == "dropped-range" && NearA7(r.Distance, 10, 1e-4) && NearA7(r.DistanceMax, 19.8, 1e-3)
+                    && BoxIs(r.Prism, 49, 49, 0.2f, 51, 51, 22, 0.01f) && BoxIs(r.Landed, 49, 49, 10, 51, 51, 12, 0.01f),
+                    $"{r.Status} d {r.Distance} max {r.DistanceMax} prism {ShowA7(r.Prism)} landed {ShowA7(r.Landed)}");
+        });
+        // K-T2: a flat heightmap (all 33 x 33 vertices at z 100, cell 0,0) under a column at (500,500): TerrainSupports gives two
+        // alternatives whose triangles lie at z 100 and cover the column; a box at z 150..160 drops d 50, a determined landing.
+        Case(check, "reach-rules K-T2: flat LAND patch -> two alternative supports at z 100 under the column; box drops d 50 (determined)", () =>
+        {
+            var h = new float[33, 33]; for (int i = 0; i < 33; i++) for (int j = 0; j < 33; j++) h[i, j] = 100;
+            var s = PhysicsReach.TerrainSupports("LAND 0,0", h, 0, 0, new Aabb(new Vec3(495, 495, float.NegativeInfinity), new Vec3(505, 505, 160), false), 13);
+            var r = PhysicsReach.Drop(Box(495, 495, 150, 505, 505, 160), AB(495, 495, 150, 505, 505, 160), 4, s,
+                new Dictionary<uint, CollisionLayerRule>(RRLayers) { [13] = new(13, "L_TERRAIN", false, false, new HashSet<uint> { 4 }), [4] = new(4, "L_CLUTTER", false, false, new HashSet<uint> { 1, 4, 12, 13 }) });
+            return (s.Count == 2 && s.All(x => x.Group == "LAND 0,0" && x.World.Vertices.All(v => v.Z == 100)) && r.Status == "dropped" && NearA7(r.Distance, 50, 1e-4),
+                    $"supports {s.Count} groups [{string.Join(",", s.Select(x => x.Group))}] -> {r.Status} d {r.Distance} max {r.DistanceMax}");
+        });
+
         // ================= K-P3 / K-P4 / K-P6: supports =================
         // K-P3: the only plate is above -> refused with the named reason; FirstContact null. Rejects an invented floor.
         Case(check, "reach-rules K-P3: nothing below (the only plate is above) — refused '" + PhysicsReach.NothingBelow + "'", () =>
