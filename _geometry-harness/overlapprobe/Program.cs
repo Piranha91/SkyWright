@@ -390,6 +390,7 @@ for (int p = 0; p < paths.Count; p++)
         }
         catch { }
         masterIdx[p] = mset;
+        if (reachRules?.Contains("physics") == true) idx.TrackLand = true;
         idx.Ingest(p, mod);
     }
     if ((p + 1) % 150 == 0) Console.WriteLine($"   ... {p + 1}/{paths.Count} plugins, {sw.Elapsed.TotalSeconds:0}s");
@@ -621,6 +622,7 @@ NifRenderGeometryOutcome SweptProxy(byte[] bytes, NifRenderGeometryOutcome origi
 // layer's solidity is not settled from the records yet); neither model nor primitive is no_geometry.
 // --reach-rules: per reference, how many state-disabled candidate supports lay under it (the state filter dropped them)
 var stateExcludedBelow = new Dictionary<FormKey, int>();
+var terrainUnread = new HashSet<FormKey>();   // --reach-rules: a column over a LAND grid whose heights are unreadable
 object ReachOf(FormKey key, FormKey baseKey, Snap p)
 {
     object Out(ReachRegion r) => reachRules is null ? new
@@ -633,7 +635,8 @@ object ReachOf(FormKey key, FormKey baseKey, Snap p)
         parts = r.UncertifiedParts.Select(x => new { label = x.Label, box = ReachBox(x.Box) }).ToArray(),
         drop = r.Drop is not { } d ? null : (object)new
         {
-            status = d.Status, distance = d.Distance, placed = ReachBox(d.Placed), landed = ReachBox(d.Landed), supportId = d.SupportId,
+            status = d.Status, distance = d.Distance, distanceMax = double.IsNaN(d.DistanceMax) ? (double?)null : d.DistanceMax,
+            placed = ReachBox(d.Placed), landed = ReachBox(d.Landed), supportId = d.SupportId,
             stateExcludedCandidates = stateExcludedBelow.GetValueOrDefault(key),
         },
     };
@@ -651,7 +654,7 @@ object ReachOf(FormKey key, FormKey baseKey, Snap p)
         if (bytes is null) return Out(new ReachRegion("refused", "asset read failed: " + err, Aabb.Empty, MeshReach.PolicyVersion, Array.Empty<string>(), Array.Empty<ReachPart>()));
         if (reachRules is null) return Out(MeshReach.OfModel(bytes, p.Pos, p.Rot, p.Scale, Read, new ReachOptions(motionDelta)));
         var region = MeshReach.OfModel(bytes, p.Pos, p.Rot, p.Scale, Read, new ReachOptions(motionDelta, Rules: RulesFor(key, baseKey, p)));
-        if (!p.Interior && region.Drop is not null)
+        if (!p.Interior && region.Drop is not null && terrainUnread.Contains(key))
             region = region with { Status = "uncertified", Labels = region.Labels.Append(PhysicsReach.TerrainNotReadLabel).ToList() };
         return Out(region);
     }
@@ -833,6 +836,14 @@ IEnumerable<DropSupport> SupportsUnder(FormKey self, Snap p, Aabb column)
         }
     }
     stateExcludedBelow[self] = excluded;
+    // outdoors the terrain is a support: each LAND grid of the 3x3 under the column, cut both ways (PhysicsReach.TerrainSupports)
+    if (!p.Interior)
+        foreach (var (ws, cx, cy) in cells)
+        {
+            if (idx.Land.TryGetValue((ws, cx, cy), out var heights))
+                found.AddRange(PhysicsReach.TerrainSupports($"LAND {ws} {cx},{cy}", heights, cx, cy, column, (uint)NiflySharp.Enums.SkyrimLayer.SKYL_TERRAIN));
+            else if (idx.LandUnreadable.ContainsKey((ws, cx, cy))) terrainUnread.Add(self);
+        }
     return found;
 }
 List<PoseConfirmation>? poseConfirmations = null;

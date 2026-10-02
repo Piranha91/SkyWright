@@ -226,6 +226,13 @@ public sealed class OverlapIndex
     /// <summary>COLL records as the reach rules' drop reads them, by INDEX under the winner: the TriggerVolume and Sensor
     /// flags and the records listed in CollidesWith (resolved to indices by <see cref="CollisionLayerRules"/>).</summary>
     public Dictionary<uint, (FormKey Key, string? Edid, bool TriggerVolume, bool Sensor, List<FormKey> CollidesWith)> CollisionLayerRecords { get; } = new();
+    /// <summary>Set before ingesting to keep each exterior grid's terrain under the winner (the reach rules' drop): the
+    /// decoded heights, or why a LAND that says it has heights gives none. A LAND that declares no heights removes the grid.
+    /// Off by default: nothing else reads it.</summary>
+    public bool TrackLand { get; set; }
+    public Dictionary<(FormKey Ws, int X, int Y), float[,]> Land { get; } = new();
+    public Dictionary<(FormKey Ws, int X, int Y), string> LandUnreadable { get; } = new();
+
     /// <summary>BOOK -> the Static its InventoryArt names (a placed Static of that base is book art: the reach rules read it
     /// closed). Under the winner.</summary>
     public Dictionary<FormKey, FormKey> BookInventoryArt { get; } = new();
@@ -321,6 +328,15 @@ public sealed class OverlapIndex
                                                     MathF.Abs(bnd.Second.Z - bnd.First.Z));
             }
         }
+        if (TrackLand)
+            foreach (var lc in PlacementExtract.FromMod(mod, includeEmpty: true))
+            {
+                if (lc.Interior || lc.Worldspace.IsNull || lc.Grid is not { } g) continue;
+                var gk = (lc.Worldspace, g.X, g.Y);
+                if (lc.LandUnreadableReason is { } why) { Land.Remove(gk); LandUnreadable[gk] = why; }
+                else if (lc.LandDeclaresNoHeights) { Land.Remove(gk); LandUnreadable.Remove(gk); }
+                else if (lc.Land is { } h) { Land[gk] = h; LandUnreadable.Remove(gk); }
+            }
         foreach (var cp in PlacementExtract.FromMod(mod))
         {
             CellName[cp.Cell] = (cp.CellEditorId, cp.Interior);
