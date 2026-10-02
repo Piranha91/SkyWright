@@ -160,6 +160,18 @@ static partial class MotionProof
             bool holds = !b.IsEmpty && b.Min.X <= -200 + 1e-3 && b.Min.Y <= -200 + 1e-3 && b.Min.Z <= -40 + 1e-3 && b.Max.X >= 110 - 1e-3 && b.Max.Y >= 10 - 1e-3 && b.Max.Z >= 10 - 1e-3;
             return (r.Status == "certified" && holds && b.Max.X <= 110 + o.MotionDelta + 1e-3, SayA7(r));
         });
+        // R2b (commit-gate review: R2 cannot see a dropped delta, because a pure translation keeps every pose between samples
+        // inside the samples' box). A box x [90,100], y [-1,1] turning about Z from -30 to +60 degrees (LINEAR): its far
+        // corners reach x = sqrt(100^2 + 1^2) = 100.005 at 0.573 degrees, BETWEEN samples. At --motion-delta 50 the samples
+        // are coarse (quarter turns of the span), so the samples alone reach about 99.3; only the certified delta carries the
+        // region past 100.005. Rejects the inner bound (samples without their delta) reported as certified.
+        Case(check, "stageA7 R2b: turning box, coarse delta 50 — region x max >= sqrt(10001) (samples alone fall short)", () =>
+        {
+            var data = Xyz(NoKeys(), NoKeys(), FG(KeyType.LINEAR_KEY, FK(0f, -30 * DegA7), FK(1f, 60 * DegA7)));
+            var r = MeshReach.OfModel(Rig(Box(90, -1, -1, 100, 1, 1), Vector3.Zero, data), Origin, Origin, 1f, null, new ReachOptions(MotionDelta: 50));
+            double want = Math.Sqrt(10001);
+            return (r.Status == "certified" && r.Box.Max.X >= want && r.Box.Max.X <= want + 51, SayA7(r) + $" (want x max >= {want:0.#####})");
+        });
         // R3: a switch node's region is the union of its children: z max 300 (the tall child). Rejects the first/active child
         // only (z max 10) and a switch refusal (the motion reader's) where only reach is asked.
         Case(check, "stageA7 R3: switch node — certified region = union of both children, [0,10]x[0,10]x[0,300]", () =>
