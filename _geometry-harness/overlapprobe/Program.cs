@@ -119,6 +119,9 @@ children swept, Tree_Anim shapes labelled. book: a BOOK base, or a Static a BOOK
 stored pose: the modelling rule). Reach rows gain "drop" {status, distance, placed, landed, supportId,
 stateExcludedCandidates}; the manifest gains "reachLoose" (the same region for each item-type reference: report only,
 dispositions unchanged).
+--pose-confirmations FILE (with --reach-rules): a JSON list of {modelPath, sha256, evidence}; a model whose animation the
+files cannot settle, whose path and exact bytes match an entry (an in-game screenshot compared with a render of its stored
+pose), is read at its stored pose, labelled "rest: stored pose (confirmed by in-game comparison)". No entry, no change.
 See overlapprobe/Program.cs usage documentation. Help performs no load-order scan.
 """);
     return 0;
@@ -137,6 +140,7 @@ double surfaceTolerance = 1e-5;
 bool motionSwept = false; double motionDelta = 0.5;
 bool reachOn = false;   // --reach (G1 build list, Stage A): a reach region for every record without a render box
 HashSet<string>? reachRules = null;   // --reach-rules physics,graph,switch,book (unbounded neighbour classes)
+string? poseConfirmationsPath = null;   // --pose-confirmations FILE (with --reach-rules)
 long maxTrianglePairs = 2_000_000;
 double pairSeconds = 120;
 string? emitPath = null;
@@ -183,6 +187,7 @@ try
         if (flag == "--list") { if (!int.TryParse(NeedValue(i, flag), out listN)) throw new ArgumentException("--list requires an integer"); i++; }
         else if (flag == "--motion") { if (NeedValue(i, flag) != "swept") throw new ArgumentException("--motion takes swept"); motionSwept = true; i++; }
         else if (flag == "--reach") reachOn = true;
+        else if (flag == "--pose-confirmations") { poseConfirmationsPath = NeedValue(i, flag); i++; }
         else if (flag == "--reach-rules")
         {
             reachRules = NeedValue(i, flag).Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).ToHashSet(StringComparer.OrdinalIgnoreCase);
@@ -830,15 +835,23 @@ IEnumerable<DropSupport> SupportsUnder(FormKey self, Snap p, Aabb column)
     stateExcludedBelow[self] = excluded;
     return found;
 }
+List<PoseConfirmation>? poseConfirmations = null;
 ReachRules? RulesFor(FormKey key, FormKey baseKey, Snap p)
 {
     if (reachRules is null) return null;
+    if (poseConfirmationsPath is not null && poseConfirmations is null)
+    {
+        using var doc = System.Text.Json.JsonDocument.Parse(File.ReadAllText(poseConfirmationsPath));
+        poseConfirmations = doc.RootElement.EnumerateArray()
+            .Select(e => new PoseConfirmation(e.GetProperty("modelPath").GetString()!, e.GetProperty("sha256").GetString()!, e.GetProperty("evidence").GetString()!)).ToList();
+    }
     reachLayers ??= idx.CollisionLayerRules();
     bookArtStatics ??= idx.BookInventoryArt.Values.ToHashSet();
     string? type = idx.BaseInfo.TryGetValue(baseKey, out var bi) ? bi.Type : null;
     bool book = reachRules.Contains("book") && (type == "Book" || (type == "Static" && bookArtStatics.Contains(baseKey)));
+    string? modelPath = GeometryOf(baseKey).RelativePath;
     return new ReachRules(reachRules.Contains("physics"), reachRules.Contains("graph"), reachRules.Contains("switch"), book, type,
-                          q => SupportsUnder(key, p, q), reachLayers);
+                          q => SupportsUnder(key, p, q), reachLayers, poseConfirmations, modelPath);
 }
 
 (PhysicalState State, string Detail) OverlapPredicate(FormKey laterKey, FormKey otherKey)
