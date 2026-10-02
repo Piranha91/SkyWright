@@ -192,16 +192,30 @@ static partial class MotionProof
         foreach (long cellsBudget in new long[] { 20_000, 200_000 })
         {
             long cb = cellsBudget;
-            Case(check, $"MV1 non-solid octree identity: the open swinging plate at MaxCells {cb:N0} gives b0445359's interval exactly (rejects a near test that changes any cell's answer)", () =>
+            Case(check, $"MV1 non-solid octree identity: the open swinging plate at MaxCells {cb:N0} gives b0445359's interval exactly, with the same cells and near tests at 1 thread and at the default thread count (rejects a near test that changes any cell's answer, and a parallel step that changes the order)", () =>
             {
                 var m = NifMotion.Read(swingOpen, null);
                 var r = SweptGeometry.Build(swingOpen, m, null, VolumeGeometry.Render);
-                var v = SweptGeometry.Volume(r, null, new VolumeOptions(MaxCells: cb));
+                var one = new SweptVolumeRun { Threads = 1 }; var many = new SweptVolumeRun();
+                var v1 = SweptGeometry.Volume(r, null, new VolumeOptions(MaxCells: cb), run: one);
+                var vn = SweptGeometry.Volume(r, null, new VolumeOptions(MaxCells: cb), run: many);
                 var want = cb == 20_000 ? MV1Expected20k : MV1Expected200k;
-                return (!r.Solid && v.Swept is { } s && s.Lower == want.Lower && s.Upper == want.Upper,
-                        $"solid {r.Solid} [{v.Swept?.Lower:R}, {v.Swept?.Upper:R}] want [{want.Lower:R}, {want.Upper:R}] {v.Reason}");
+                bool same = v1.Swept is { } a && vn.Swept is { } b && a.Lower == b.Lower && a.Upper == b.Upper && one.Cells == many.Cells && one.NearTests == many.NearTests
+                            && one.TriangleTests == many.TriangleTests;
+                return (!r.Solid && same && v1.Swept!.Lower == want.Lower && v1.Swept.Upper == want.Upper && one.Cells > 0 && one.NearTests == one.Cells,
+                        $"solid {r.Solid} 1 thread [{v1.Swept?.Lower:R}, {v1.Swept?.Upper:R}] cells {one.Cells} near {one.NearTests} tris {one.TriangleTests}; {many.ThreadsUsed} threads [{vn.Swept?.Lower:R}, {vn.Swept?.Upper:R}] cells {many.Cells} near {many.NearTests} tris {many.TriangleTests}; want [{want.Lower:R}, {want.Upper:R}]");
             });
         }
+        Case(check, "MV2 solid octree: the MK2 translating box's swept volume is the same interval and counts at 1 thread and at the default thread count (the parallel step also runs the solid path)", () =>
+        {
+            byte[] slideBox = Rig(Box(0, 0, 0, 20, 20, 20), Vector3.Zero, Xyz(NoKeys(), NoKeys(), NoKeys(), VG(KeyType.LINEAR_KEY, (0f, Vector3.Zero), (1f, new Vector3(0, 0, 100)))));
+            var m = NifMotion.Read(slideBox, null);
+            var r = SweptGeometry.Build(slideBox, m, null, VolumeGeometry.Render, new MotionOptions(DeltaTarget: 0.5));
+            var one = new SweptVolumeRun { Threads = 1 }; var many = new SweptVolumeRun();
+            var v1 = SweptGeometry.Volume(r, null, run: one); var vn = SweptGeometry.Volume(r, null, run: many);
+            return (r.Solid && v1.Swept is { } a && vn.Swept is { } b && a.Lower == b.Lower && a.Upper == b.Upper && one.Cells == many.Cells && a.Lower <= 56000 && 56000 <= a.Upper,
+                    $"solid {r.Solid} [{v1.Swept?.Lower:R}, {v1.Swept?.Upper:R}] / [{vn.Swept?.Lower:R}, {vn.Swept?.Upper:R}] cells {one.Cells}/{many.Cells}");
+        });
 
         // ======================= item 3: rest pose from the placement (E3) =======================
         byte[] door = Rig(leaf, pivot, Xyz(FG(KeyType.LINEAR_KEY, FK(0, 0)), FG(KeyType.LINEAR_KEY, FK(0, 0)), FG(KeyType.QUADRATIC_KEY, FK(0, 0), FK(1, -Pi / 2))),

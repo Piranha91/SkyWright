@@ -13,7 +13,11 @@
 //   motionprobe ASSETS deltacheck REL [--animation ID]... [--geometry G] [--delta U] [--samples N]   every swept interval's
 //                                                                    Delta against the mesh posed at N dense times inside it
 //   motionprobe ASSETS graph GRAPH.hkx                               behaviour-graph reading (path as a NIF names it)
-//   motionprobe ASSETS sweep REL [--animation ID]... [--geometry render|collision] [--delta U] [--budget N]
+//   motionprobe ASSETS sweep REL [--animation ID]... [--geometry render|collision] [--delta U] [--budget N] [--octree-threads N]
+//                                                                    (the volume octree's classification threads; default
+//                                                                    the processor count; the answer does not depend on it.
+//                                                                    stderr: "octree: cells N, near tests N, triangle tests N,
+//                                                                    threads T")
 //   ASSETS = --loose-root DIR | --instance DIR --profile P --game DIR --order CANDIDATE.json
 //   common: [--out FILE] [--placement BASETYPE[,open]]
 // exit: 0 printed, 1 the reading refused or failed (JSON says why), 2 usage.
@@ -31,6 +35,7 @@ string? loose = null, instance = null, profile = null, game = null, order = null
 string? anim = null, pose = null, node = null, geometryArg = null;
 var anims = new List<string>();
 float? t = null; List<float>? times = null; double? delta = null; int? budget = null; int samplesN = 64, split = 4; bool vertices = false;
+int octreeThreads = 0;
 var positional = new List<string>();
 for (int i = 0; i < args.Length; i++)
 {
@@ -55,6 +60,7 @@ for (int i = 0; i < args.Length; i++)
         case "--vertices": vertices = true; break;
         case "--samples": samplesN = int.Parse(Need(), CultureInfo.InvariantCulture); break;
         case "--split": split = int.Parse(Need(), CultureInfo.InvariantCulture); break;
+        case "--octree-threads": octreeThreads = int.Parse(Need(), CultureInfo.InvariantCulture); break;
         default:
             if (args[i].StartsWith("--")) { Console.Error.WriteLine("unknown option " + args[i]); return 2; }
             positional.Add(args[i]); break;
@@ -244,7 +250,14 @@ try
             var m = NifMotion.Read(bytes, read, placement);
             var opts = new MotionOptions(DeltaTarget: delta ?? 0.5, SampleBudget: budget ?? 4096);
             var r = SweptGeometry.Build(bytes, m, anims.Count > 0 ? anims : null, geometry, opts, read);
-            var v = r.Status == "built" ? SweptGeometry.Volume(r, null) : null;
+            var octree = new SweptVolumeRun { Threads = octreeThreads };
+            var v = r.Status == "built" ? SweptGeometry.Volume(r, null, run: octree) : null;
+            if (v is not null)
+            {
+                Console.Error.WriteLine($"octree: cells {octree.Cells}, near tests {octree.NearTests}, triangle tests {octree.TriangleTests}, threads {octree.ThreadsUsed}");
+                __run.Feature("octree_cells", octree.Cells, "cells", FeatureAt.Final).Feature("octree_near_tests", octree.NearTests, "tests", FeatureAt.Final)
+                     .Feature("octree_triangle_tests", octree.TriangleTests, "tests", FeatureAt.Final).Feature("octree_threads", octree.ThreadsUsed, "threads", FeatureAt.Final);
+            }
             return Emit(new { verb, rel, policy = SweptGeometry.PolicyVersion, r.Status, r.Reason, r.Geometry, r.MaxDelta, r.Converged, r.Solid,
                               animations = r.Animations, samples = r.Samples.Count,
                               outerBounds = Bounds(r.Samples.Count == 0 ? null : new TriangleSoup(r.Samples.SelectMany(x => x.Soup.Vertices).ToArray(), Array.Empty<int>())),
