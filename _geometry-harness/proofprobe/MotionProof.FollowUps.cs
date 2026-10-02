@@ -167,6 +167,14 @@ static partial class MotionProof
                              && !note.Contains("does not move", StringComparison.OrdinalIgnoreCase) && note.Contains("Tree_Anim", StringComparison.Ordinal);
             return (l is { Flag: "Tree_Anim" } && l.Shapes.Count == 1 && l.Note == note && factsOnly, $"{l?.Flag} {l?.Shapes.Count} '{l?.Note}'");
         });
+        Case(check, "MW10 contact-row note (G1): a collision-sourced dependent whose mesh has a Tree_Anim render shape carries no note; the same mesh render-sourced carries 'Tree_Anim' and '2 of 8 vertices' (rejects labelling regardless of geometry source)", () =>
+        {
+            var l = NifWind.Label(windRig);
+            var coll = NifWind.ContactNote(l, renderSourced: false);
+            var rend = NifWind.ContactNote(l, renderSourced: true);
+            return (l is not null && coll is null && rend is not null && rend.Contains("Tree_Anim", StringComparison.Ordinal) && rend.Contains("2 of 8 vertices", StringComparison.Ordinal),
+                    $"collision '{coll}' render '{rend}'");
+        });
         Case(check, "MW9 the motion reader and the wind reader agree on the flag (NifWind.IsTreeAnim on the Frame's shader; NifMotion refuses 'wind:')", () =>
         {
             var n = Load(windRig);

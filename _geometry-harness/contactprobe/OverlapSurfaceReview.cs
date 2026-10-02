@@ -30,6 +30,13 @@ static class OverlapSurfaceReview
         var pairs = OverlapPairReview.ReadPairs(input.RootElement);
         var members = new Dictionary<string, Member>();
         var surfaces = new Dictionary<(string, VolumeGeometry), TaggedSurface>();
+        var winds = new Dictionary<string, WindLabel?>();
+        WindLabel? WindOf(string formKey, Member m)
+        {
+            if (m.Bytes is null) return null;
+            if (!winds.TryGetValue(formKey, out var w)) winds[formKey] = w = NifWind.Label(m.Bytes);
+            return w;
+        }
 
         Member Load(string formKey)
         {
@@ -78,6 +85,8 @@ static class OverlapSurfaceReview
             foreach (var g in new[] { VolumeGeometry.Render, VolumeGeometry.Collision })
             {
                 string gname = g.ToString().ToLowerInvariant();
+                // E1: a render entry of a member with a visible Tree_Anim shape carries windA / windB (values unchanged)
+                void Add(object entry) => geoms.Add(g == VolumeGeometry.Render ? WindNotes.Attach(entry, WindOf(p.A, a), WindOf(p.B, b), Json) : entry);
                 if (a.Bytes is null || b.Bytes is null)
                 {
                     unavailable++;
@@ -92,20 +101,20 @@ static class OverlapSurfaceReview
                                          bytes => { var s = MeshSurface.ModelSurface(bytes, g, pose); return s.Status == "measured" ? (s.Soup, s.Tags, null) : (null, null, s.Reason); },
                                          volume: false) is { } mr)
                 {
-                    geoms.Add(mr);
+                    Add(mr);
                     continue;
                 }
                 if (sa.Status != "measured" || sb.Status != "measured")
                 {
                     refused++;
-                    geoms.Add(new { geometry = gname, status = "refused",
+                    Add(new { geometry = gname, status = "refused",
                                     reason = string.Join("; ", new[] { sa.Status != "measured" ? $"A: {sa.Reason}" : null, sb.Status != "measured" ? $"B: {sb.Reason}" : null }.Where(s => s is not null)) });
                     continue;
                 }
                 var pa = a.Pose!.Value; var pb = b.Pose!.Value;
                 var r = MeshSurface.MeasurePlaced(sa.Soup!, sa.Tags, pa.Pos, pa.Rot, pa.Scale, sb.Soup!, sb.Tags, pb.Pos, pb.Rot, pb.Scale, g);
                 if (r.Status == "measured") measured++; else if (r.Status == "incomplete") incomplete++; else refused++;
-                geoms.Add(r);
+                Add(r);
             }
             records.Add(new { pairKey = p.PairKey, a = p.A, b = p.B, baseA = a.Base, baseB = b.Base, meshA = a.Mesh, meshB = b.Mesh, geometries = geoms });
         }

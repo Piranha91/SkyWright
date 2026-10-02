@@ -21,6 +21,14 @@ static class OverlapVolumeReview
         using var input = JsonDocument.Parse(inputBytes);
         var pairs = OverlapPairReview.ReadPairs(input.RootElement);
         var cache = new Dictionary<string, Member>();
+        var winds = new Dictionary<string, WindLabel?>();
+        var json = new JsonSerializerOptions { WriteIndented = true };
+        WindLabel? WindOf(string formKey, Member m)
+        {
+            if (m.Bytes is null) return null;
+            if (!winds.TryGetValue(formKey, out var w)) winds[formKey] = w = NifWind.Label(m.Bytes);
+            return w;
+        }
 
         Member Load(string formKey)
         {
@@ -66,6 +74,8 @@ static class OverlapVolumeReview
             foreach (var g in new[] { VolumeGeometry.Render, VolumeGeometry.Collision })
             {
                 string gname = g.ToString().ToLowerInvariant();
+                // E1: a render entry of a member with a visible Tree_Anim shape carries windA / windB (values unchanged)
+                void Add(object entry) => geoms.Add(g == VolumeGeometry.Render ? WindNotes.Attach(entry, WindOf(p.A, a), WindOf(p.B, b), json) : entry);
                 if (a.Bytes is null || b.Bytes is null)
                 {
                     unavailable++;
@@ -80,20 +90,20 @@ static class OverlapVolumeReview
                                          bytes => { var s = MeshVolume.ModelSolid(bytes, g); return s.Status == "solid" ? (s.Soup, null, null) : (null, null, s.Reason); },
                                          volume: true) is { } mr)
                 {
-                    geoms.Add(mr);
+                    Add(mr);
                     continue;
                 }
                 if (sa.Status != "solid" || sb.Status != "solid")
                 {
                     refused++;
-                    geoms.Add(new { geometry = gname, status = "refused",
+                    Add(new { geometry = gname, status = "refused",
                                     reason = string.Join("; ", new[] { sa.Status != "solid" ? $"A: {sa.Reason}" : null, sb.Status != "solid" ? $"B: {sb.Reason}" : null }.Where(s => s is not null)) });
                     continue;
                 }
                 var pa = a.Pose!.Value; var pb = b.Pose!.Value;
                 var r = MeshVolume.MeasurePlaced(sa.Soup!, pa.Pos, pa.Rot, pa.Scale, sb.Soup!, pb.Pos, pb.Rot, pb.Scale, g);
                 if (r.Status == "measured") measured++; else refused++;
-                geoms.Add(new { geometry = gname, status = r.Status, reason = r.Reason, volumeA = r.VolumeA, volumeB = r.VolumeB,
+                Add(new { geometry = gname, status = r.Status, reason = r.Reason, volumeA = r.VolumeA, volumeB = r.VolumeB,
                                 intersection = r.Intersection, aInB = r.AInB, bInA = r.BInA, converged = r.Converged, cells = r.Cells, depth = r.Depth,
                                 policy = r.PolicyVersion });
             }
@@ -111,7 +121,7 @@ static class OverlapVolumeReview
         };
         var full = Path.GetFullPath(outputPath);
         Directory.CreateDirectory(Path.GetDirectoryName(full)!);
-        File.WriteAllText(full, JsonSerializer.Serialize(doc, new JsonSerializerOptions { WriteIndented = true }));
+        File.WriteAllText(full, JsonSerializer.Serialize(doc, json));
         Console.WriteLine($"--volume: {pairs.Count} pair(s): {measured} geometry measurement(s), {refused} refused, {unavailable} unavailable -> {full}");
         return 0;
     }

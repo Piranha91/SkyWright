@@ -290,6 +290,14 @@ const string Ussep = "Unofficial Skyrim Special Edition Patch.esp";
 // ---------------------------------------------------------------------------------------
 ContactIndex? cidx = null;
 var meshGeom = new Dictionary<string, RefGeometry?>(StringComparer.OrdinalIgnoreCase);
+// E1 (follow-ups item 1): the Tree_Anim shapes of each mesh read for contact geometry, for the dependent's wind note
+var meshWind = new Dictionary<string, WindLabel?>(StringComparer.OrdinalIgnoreCase);
+string? WindNoteOf(FormKey depBase)
+{
+    if (cidx!.GeomOf(depBase) is not { } g || !cidx.Index.BaseMesh.TryGetValue(depBase, out var rel)) return null;
+    var full = rel.StartsWith("meshes", StringComparison.OrdinalIgnoreCase) ? rel : Path.Combine("meshes", rel);
+    return NifWind.ContactNote(meshWind.GetValueOrDefault(full), g.DepSrc == 'r');
+}
 // --geom-report: one line per measured mesh — which soup each role got and why, every solid body's layer and motion.
 var geomLines = geomReport is null ? null : new List<string> { "mesh\thostSrc\tdepSrc\thostTris\tdepTris\trenderTris\tcollisionComplete\tphantomOnly\tbodies" };
 long meshesMeasured = 0, hostColl = 0, hostRender = 0, depColl = 0, depRender = 0, meshNoSoup = 0, obndFallback = 0, noGeometry = 0, phantomOnly = 0, incompleteCollision = 0;
@@ -307,6 +315,7 @@ RefGeometry? GeomOf(FormKey baseKey)
             if (res.Sources.Count > 0)
             {
                 var (bytes, _) = AssetResolver.ReadPlacementSource(res.Sources[0]);
+                if (bytes is not null) meshWind[full] = NifWind.Label(bytes);
                 if (bytes is not null && NifGeometry.Measure(bytes, includeTriangles: true) is { Model: { } m })
                 {
                     meshesMeasured++;
@@ -888,7 +897,7 @@ if (emitPath is not null)
         var (st, why) = ContactPhysical(r.Facts.WinnerMeasured, r.Facts.WinnerDistance, r.Facts.WinnerPenetration, r.Winner is { } w ? BaseLabel(cidx!.WinnerBase(w.Against)) : "(nothing)");
         conflicts.Add(new Conflict("CONTACT", PluginName(r.DepAuthor), PluginName(r.Host.Mover),
             $"{r.Verdict}: {BaseLabel(r.DepBase)} {r.Relation} on {BaseLabel(r.Host.PrevBase)} which {PluginName(r.Host.Mover)} {r.Host.Change}; nearest thing now {r.Facts.WinnerDistance:0.#}u  {r.Dependent} / {r.Host.Key} in {CellOf(r.DepAuthoring.Cell)}",
-            new List<ConflictRecord> { new(r.Dependent.ToString(), "placed-ref", CellOf(r.DepAuthoring.Cell), st, why) },
+            new List<ConflictRecord> { new(r.Dependent.ToString(), "placed-ref", CellOf(r.DepAuthoring.Cell), st, why, Wind: WindNoteOf(r.DepBase)) },
             new List<ConflictRecord> { new(r.Host.Key.ToString(), "placed-ref", null) }));
     }
     List<Predicate>? predicates = null;
@@ -944,7 +953,16 @@ if (jsonPath is not null)
 {
     var dir = Path.GetDirectoryName(Path.GetFullPath(jsonPath));
     if (!string.IsNullOrEmpty(dir)) Directory.CreateDirectory(dir);
-    var dump = rows.Where(r => r.Relation != ContactRelation.None || r.Facts.WinnerMeasured).Select(r => new
+    var dumpOptions = new JsonSerializerOptions { WriteIndented = false, NumberHandling = System.Text.Json.Serialization.JsonNumberHandling.AllowNamedFloatingPointLiterals };
+    // E1: a row whose dependent's contact geometry is its render fallback with a Tree_Anim shape gains "Wind" (no other change)
+    object WithWind(object row, FormKey depBase)
+    {
+        if (WindNoteOf(depBase) is not { } w) return row;
+        var node = JsonSerializer.SerializeToNode(row, row.GetType(), dumpOptions)!.AsObject();
+        node["Wind"] = w;
+        return node;
+    }
+    var dump = rows.Where(r => r.Relation != ContactRelation.None || r.Facts.WinnerMeasured).Select(r => WithWind(new
     {
         Dependent = r.Dependent.ToString(), DepBase = BaseLabel(r.DepBase), DepAuthor = PluginName(r.DepAuthor), DepScale = r.DepScale.ToString(), Motion = r.Motion.ToString(),
         Host = r.Host.Key.ToString(), HostBase = BaseLabel(r.Host.PrevBase), HostChange = r.Host.Change.ToString(), Mover = PluginName(r.Host.Mover), HostScale = r.HostScale.ToString(),
@@ -958,8 +976,8 @@ if (jsonPath is not null)
         WinnerAgainstExtent = r.Facts.WinnerAgainstExtent, WinnerAgainstMaxDim = r.Winner?.AgainstMaxDim,
         DependentDisabled = r.Facts.DependentDisabled, DependentDisabledViaParent = r.Facts.DependentDisabledViaParent, HostRemovedViaParent = r.Host.RemovedViaParent,
         AuthoringRawDistance = r.Authoring?.Contact.Distance, WinnerRawDistance = r.Winner?.RawDistance, WinnerRawAgainst = r.Winner is { } wr && !wr.RawAgainst.IsNull ? wr.RawAgainst.ToString() : null,
-    });
-    File.WriteAllText(jsonPath, JsonSerializer.Serialize(dump, new JsonSerializerOptions { WriteIndented = false, NumberHandling = System.Text.Json.Serialization.JsonNumberHandling.AllowNamedFloatingPointLiterals }));
+    }, r.DepBase));
+    File.WriteAllText(jsonPath, JsonSerializer.Serialize(dump, dumpOptions));
     Console.WriteLine($"wrote {jsonPath}");
 }
 

@@ -30,6 +30,9 @@ internal static class OverlapPairReview
         public MeshContactEvidence? ContactEvidence { get; set; }
         public object? GeometryA { get; set; }
         public object? GeometryB { get; set; }
+        /// <summary>E1: the member's mesh has a visible Tree_Anim shape (NifWind.Json); omitted otherwise.</summary>
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] public object? WindA { get; set; }
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] public object? WindB { get; set; }
         public double Seconds { get; set; }
     }
 
@@ -61,7 +64,7 @@ internal static class OverlapPairReview
         return result;
     }
 
-    sealed record Geometry(string Status, string? Reason, TriangleSoup? Soup, Aabb Box, object? Evidence);
+    sealed record Geometry(string Status, string? Reason, TriangleSoup? Soup, Aabb Box, object? Evidence, WindLabel? Wind = null);
 
     public static int Run(string inputPath, string outputPath, double budgetSeconds, double pairSeconds,
                           int maxPairs, double surfaceTolerance, long maxTrianglePairs, bool contactEvidence,
@@ -126,17 +129,18 @@ internal static class OverlapPairReview
             var (bytes, error) = AssetResolver.ReadPlacementSource(source);
             if (bytes is null) return new("unmeasurable", "asset read failed: " + error, null, Aabb.Empty, resolution);
             var decoded = cache.Measure(bytes, includeTriangles: true);
+            var wind = NifWind.Label(bytes);
             var evidence = new { formid = key.ToString(), baseFormid = basis.ToString(), relativePath = relative,
                 source, providers = resolution.Sources, resolution.Ambiguous, decoded.ContentSha256,
                 decoded.Status, decoded.Reason, decoded.CacheKey, pose = pose.Value };
             if (!decoded.UsableForSurfaceIntersection || decoded.Soup is not { TriangleCount: > 0 } soup)
-                return new("unmeasurable", decoded.Status + ": " + (decoded.Reason ?? "no complete render triangles"), null, Aabb.Empty, evidence);
+                return new("unmeasurable", decoded.Status + ": " + (decoded.Reason ?? "no complete render triangles"), null, Aabb.Empty, evidence, wind);
             var s = pose.Value;
             var world = SpatialOverlap.TransformSoup(soup, s.Pos, s.Rot, s.Scale);
             var worldBounds = SpatialOverlap.SoupBounds(world);
             if (worldBounds.IsEmpty || !SpatialOverlap.IsFinite(worldBounds))
-                return new("unmeasurable", "invalid_transform: placed render triangles have no finite bounds", null, Aabb.Empty, evidence);
-            return new("measured", null, world, worldBounds, evidence);
+                return new("unmeasurable", "invalid_transform: placed render triangles have no finite bounds", null, Aabb.Empty, evidence, wind);
+            return new("measured", null, world, worldBounds, evidence, wind);
         }
         Persist(false);
         run.Feature("pairs", rows.Count, "pairs").Stage("overlap-contact", "testing render surface pairs", rows.Count, "pairs");
@@ -151,6 +155,7 @@ internal static class OverlapPairReview
                 if (!FormKey.TryFactory(row.A, out var a) || !FormKey.TryFactory(row.B, out var b) || a.IsNull || b.IsNull || a == b)
                 { row.Status = "invalid_reference"; row.Reason = "two distinct full reference keys are required"; continue; }
                 var ga = Load(a); var gb = Load(b); row.GeometryA = ga.Evidence; row.GeometryB = gb.Evidence;
+                row.WindA = NifWind.Json(ga.Wind); row.WindB = NifWind.Json(gb.Wind);
                 if (ga.Status != "measured" || gb.Status != "measured")
                 { row.Status = ga.Status == "excluded" || gb.Status == "excluded" ? "excluded" : "unmeasurable"; row.Reason = $"A: {ga.Status}: {ga.Reason}; B: {gb.Status}: {gb.Reason}"; continue; }
                 var pa = winningPose(a)!.Value; var pb = winningPose(b)!.Value;

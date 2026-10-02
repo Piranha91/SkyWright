@@ -544,7 +544,7 @@ GeometryRead GeometryOf(FormKey baseKey)
             var measured = renderCache.Measure(bytes, includeTriangles: true);
             if (motionSwept && measured.Status is NifRenderGeometryStatus.UnsupportedPose or NifRenderGeometryStatus.PartialGeometry) measured = SweptProxy(bytes, measured);
             result = new(GeometryStatus(measured.Status), measured.Reason, full, pathAssetId, resolution, source, measured,
-                         bytes.LongLength);
+                         bytes.LongLength, NifWind.Label(bytes));
         }
     }
     geometryByPath[full] = result;
@@ -1150,7 +1150,17 @@ if (geometryManifestPath is not null)
         });
     }
 
-    var assetRows = geometryByPath.Values.OrderBy(g => g.RelativePath, StringComparer.OrdinalIgnoreCase).Select(g => new
+    var manifestJson = new JsonSerializerOptions { WriteIndented = true, NumberHandling = System.Text.Json.Serialization.JsonNumberHandling.AllowNamedFloatingPointLiterals };
+    // E1 (follow-ups item 1): an asset with a visible Tree_Anim shape gains "wind" (NifWind.Json); nothing else changes
+    object WithWind(object row, WindLabel? wind)
+    {
+        if (wind is null) return row;
+        var node = JsonSerializer.SerializeToNode(row, row.GetType(), manifestJson)!.AsObject();
+        node["wind"] = JsonSerializer.SerializeToNode(NifWind.Json(wind), manifestJson);
+        return node;
+    }
+    var assetGeoms = geometryByPath.Values.OrderBy(g => g.RelativePath, StringComparer.OrdinalIgnoreCase).ToList();
+    var assetRows = assetGeoms.Select(g => new
     {
         assetId = g.AssetId,
         relativePath = g.RelativePath,
@@ -1390,7 +1400,7 @@ if (geometryManifestPath is not null)
                 : "The scoped run resolves the full order, winner history, selected state and BOS layer before restricting candidates to the named responsible pair."
         },
         records = recordRows,
-        assets = assetRows,
+        assets = assetRows.Select((a, i) => WithWind(a, assetGeoms[i].Wind)).ToList(),
         pairs = pairRows,
         measurementAccounting = new
         {
@@ -1428,11 +1438,7 @@ if (geometryManifestPath is not null)
          .Feature("nif_cache_hits", manifest.workload.cacheHits, "lookups", FeatureAt.Final)
          .Feature("nif_cache_misses", manifest.workload.cacheMisses, "lookups", FeatureAt.Final);
     __run.Stage("manifest-artifact", "writing actual-shape manifest", 1, "artifacts");
-    File.WriteAllText(geometryManifestPath, JsonSerializer.Serialize(manifest, new JsonSerializerOptions
-    {
-        WriteIndented = true,
-        NumberHandling = System.Text.Json.Serialization.JsonNumberHandling.AllowNamedFloatingPointLiterals
-    }));
+    File.WriteAllText(geometryManifestPath, JsonSerializer.Serialize(manifest, manifestJson));
     __run.Advance().Artifact(geometryManifestPath);
     Console.WriteLine($"wrote geometry manifest: {recordRows.Count:N0} records, {pairRows.Count:N0} union pairs -> {geometryManifestPath}");
 }
@@ -1448,7 +1454,7 @@ static float Rate(long hit, long total) => total == 0 ? 0 : 100f * hit / total;
 
 sealed record GeometryRead(string Status, string? Reason, string? RelativePath, string? AssetId,
                            PlacementResolution? Resolution, PlacementSource? Source,
-                           NifRenderGeometryOutcome? Outcome, long? ByteCount = null);
+                           NifRenderGeometryOutcome? Outcome, long? ByteCount = null, WindLabel? Wind = null);
 sealed record ManifestBounds(double[] min, double[] max);
 sealed record ReviewRef(FormKey key, string Eligibility, string EligibilityReason,
                         string? GeometryStatus, string? GeometryReason, FormKey? Base, Snap Pose, Aabb? WorldBounds,
