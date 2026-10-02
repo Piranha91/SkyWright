@@ -447,7 +447,7 @@ static partial class MotionProof
             return (r.Status == "uncertified" && r.Labels.Contains(MeshReach.WindLabel) && part is not null && BoxIs(part.Box, 0, 0, 0, 10, 10, 10), ShowRR(r));
         });
 
-        // ================= K-C: pose confirmations (Piranha, animation parse failures) =================
+        // ================= K-C: pose confirmations (animation parse failures: an in-game comparison confirms the stored pose) =================
         // A model whose animation refuses (an inactive direct controller) is read at its stored pose when a confirmation names
         // its path AND the sha256 of its bytes: Part [0,10]^3 and Frame [-200,-180]x[-200,-180]x[-40,-20] -> box
         // [-200,10]x[-200,10]x[-40,10], labelled. Rejects a confirmation applied without one, and a stored pose unlabelled.
