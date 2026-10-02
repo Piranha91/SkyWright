@@ -245,9 +245,11 @@ static partial class MotionProof
         });
         // K-P2a: a slab (z 50..60, 100 x 100) over a spike whose apex is at z 30 inside the slab's footprint -> d = 20 (the spike's
         // vertex cast up onto the slab's bottom face). Rejects casting moving vertices down only (no contact found).
-        Case(check, "reach-rules K-P2a: slab over a spike (apex z 30) — d = 20 (support vertex up onto the moving face)", () =>
+        // (the spike stands off the slab's bottom diagonal x = y: at (50,50) the Gate C sweep found the edge-edge family meeting
+        // the apex through that diagonal, so the up-cast family went untested)
+        Case(check, "reach-rules K-P2a: slab over a spike (apex z 30, off the slab's diagonal) — d = 20 (support vertex up onto the moving face)", () =>
         {
-            var d = PhysicsReach.FirstContact(Box(0, 0, 50, 100, 100, 60), Spike(50, 50, 0, 5, 30));
+            var d = PhysicsReach.FirstContact(Box(0, 0, 50, 100, 100, 60), Spike(30, 60, 0, 5, 30));
             return (d is { } x && NearA7(x, 20, 1e-4), $"d {d}");
         });
         // K-P2c (found by the Gate C sweep: K-P1's square plate is two triangles whose diagonal crosses the box's footprint, so
