@@ -11,7 +11,7 @@ using NiflySharp.Structs;
 /// check the fixture against code that already exists and hold on the base; every other case is red until the motion
 /// code is implemented. The synthetic tier-1 key cases (MK3*) encode the conventions the decision record froze; the
 /// real-data cases that test those conventions independently run through motionprobe (run folder, motion_kat.py).</summary>
-static class MotionProof
+static partial class MotionProof
 {
     static void Case(Action<string, bool, string> check, string name, Func<(bool Ok, string Detail)> body)
     {

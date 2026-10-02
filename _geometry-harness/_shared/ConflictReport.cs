@@ -39,7 +39,10 @@ namespace HarnessShared;
 /// <param name="Physical">The class's physical half under the emitting arm (see the file comment). Null in an
 /// emit written before 2026-09-03; a reader treats null as Unmeasured and says so.</param>
 /// <param name="PhysicalDetail">The number the predicate was read from, in words. Never load-bearing.</param>
-public sealed record ConflictRecord(string FormKey, string Role, string? Label, PhysicalState? Physical = null, string? PhysicalDetail = null);
+/// <param name="Wind">The record's render geometry includes shapes with the Tree_Anim (wind) shader flag: the shapes and
+/// their vertex-alpha facts (<c>NifWind</c>). Null otherwise, and then omitted. Never load-bearing.</param>
+public sealed record ConflictRecord(string FormKey, string Role, string? Label, PhysicalState? Physical = null, string? PhysicalDetail = null,
+                                    string? Wind = null);
 
 /// <summary>One detected conflict between two plugins, with the records that carry it.</summary>
 /// <param name="Kind">CLOBBERED / DOOR-IDX / EDGE-IDX / SPLIT / OVERLAP / CONTACT — the detector's own class name.</param>
