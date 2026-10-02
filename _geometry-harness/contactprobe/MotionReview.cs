@@ -24,28 +24,8 @@ static class MotionReview
         throw new ArgumentException("--motion takes off|swept|pose:NAME");
     }
 
-    static readonly Dictionary<string, string> SigCache = new();
-
     /// <summary>The base record's signature (MSTT, DOOR, ACTI…) from Mutagen's registration, by the index's class name.</summary>
-    public static string Signature(string className)
-    {
-        lock (SigCache)
-        {
-            if (SigCache.TryGetValue(className, out var hit)) return hit;
-            string sig = className;
-            var t = typeof(Mutagen.Bethesda.Skyrim.SkyrimMod).Assembly.GetType("Mutagen.Bethesda.Skyrim." + className);
-            try
-            {
-                var reg = t?.GetProperty("StaticRegistration", BindingFlags.Public | BindingFlags.Static)?.GetValue(null);
-                var f = reg?.GetType().GetField("TriggeringRecordType", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance | BindingFlags.Static);
-                if (f?.GetValue(reg) is RecordType rt) sig = rt.ToString();
-                else if (t?.GetField("GrupRecordType", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static)?.GetValue(null) is RecordType g) sig = g.ToString();
-            }
-            catch { }
-            SigCache[className] = sig;
-            return sig;
-        }
-    }
+    public static string Signature(string className) => MotionPlacements.Signature(className);
 
     public sealed class Cache(AssetResolver assets, OverlapIndex index, Options options)
     {
@@ -68,9 +48,7 @@ static class MotionReview
         public MotionModel Model(string formKey, byte[] bytes)
         {
             if (models.TryGetValue(formKey, out var m)) return m;
-            MotionPlacement? placement = null;
-            if (FormKey.TryFactory(formKey, out var key) && index.RefBase.TryGetValue(key, out var basis) && index.BaseInfo.TryGetValue(basis, out var bi))
-                placement = new MotionPlacement(Signature(bi.Type), false);
+            var placement = FormKey.TryFactory(formKey, out var key) ? MotionPlacements.Of(index, key) : null;
             m = NifMotion.Read(bytes, Read, placement);
             models[formKey] = m;
             return m;
@@ -115,7 +93,8 @@ static class MotionReview
             var p = NifMotion.Pose(mBytes, mModel, cache.Options.PoseName!, g, cache.Read);
             if (p.Status != "posed") return Refuse(member, p.Reason ?? "pose refused");
             var posed = SpatialOverlap.TransformSoup(p.Soup!, mPose.Pos, mPose.Rot, mPose.Scale);
-            var pose = mModel.Poses.FirstOrDefault(x => x.Name == cache.Options.PoseName);
+            // found defect (follow-ups E3): "rest" names no pose; the rest pose is the one flagged Rest, as NifMotion.Pose resolves it
+            var pose = cache.Options.PoseName == "rest" ? mModel.Poses.FirstOrDefault(x => x.Rest) : mModel.Poses.FirstOrDefault(x => x.Name == cache.Options.PoseName);
             var motion = new { mode = "pose", policy = Policy, member, pose = cache.Options.PoseName, animation = p.AnimationId, time = p.Time, label = pose?.Label };
             if (volume)
             {

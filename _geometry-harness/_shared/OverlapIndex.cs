@@ -228,6 +228,8 @@ public sealed class OverlapIndex
     public HashSet<FormKey> PersistentCells { get; } = new();
     /// <summary>ref -> its XPRM primitive under the winner; absent when none. A navcut's obstacle is this box.</summary>
     public Dictionary<FormKey, PlacedPrimitiveInfo> RefPrimitive { get; } = new();
+    /// <summary>Refs whose winning record carries ONAM (IsOpenByDefault), the motion reader's rest pose (follow-ups E3).</summary>
+    public HashSet<FormKey> RefOpenByDefault { get; } = new();
     /// <summary>ref -> its editor id, the last non-empty one in load order (an override that omits it keeps the earlier
     /// name). What the world-state census names a switch by.</summary>
     public Dictionary<FormKey, string> RefEditorId { get; } = new();
@@ -300,6 +302,7 @@ public sealed class OverlapIndex
         if (r.CollisionLayerIndex is { } cl) RefCollisionLayer[r.FormKey] = cl; else RefCollisionLayer.Remove(r.FormKey);
         if (!string.IsNullOrWhiteSpace(r.EditorId)) RefEditorId[r.FormKey] = r.EditorId!;
         if (r.Primitive is { } pr) RefPrimitive[r.FormKey] = pr; else RefPrimitive.Remove(r.FormKey);
+        if (r.OpenByDefault) RefOpenByDefault.Add(r.FormKey); else RefOpenByDefault.Remove(r.FormKey);
         Deletions.Note(plugin, r.FormKey, r.Deleted, hasPlacement: true);
         var snap = new Snap(plugin, r.Position, cell, r.InitiallyDisabled, r.Deleted, worldspace, r.Rotation, r.Scale);
         if (History.Winning(r.FormKey) is { } prev && prev.SameAs(snap)
