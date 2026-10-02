@@ -275,6 +275,20 @@ public sealed class OverlapIndex
                 CollisionLayersByIndex[coll.Index] = (coll.FormKey, coll.EditorID, coll.Flags.HasFlag(CollisionLayer.Flag.NavmeshObstacle));
                 continue;
             }
+            // Armour carries its ground model per gender in WorldModel, not Model (G1 build list row 2, Gate A review Q6): the
+            // male path goes to BaseMesh (the female when only it is given), the female to BaseMeshFemale.
+            if (rec is IArmorGetter ar)
+            {
+                BaseInfo[ar.FormKey] = (rec.GetType().Name.Replace("BinaryOverlay", ""), ar.EditorID);
+                string? male = ar.WorldModel?.Male?.Model?.File is { } mf0 && !string.IsNullOrWhiteSpace(mf0.GivenPath) ? mf0.GivenPath : null;
+                string? female = ar.WorldModel?.Female?.Model?.File is { } ff0 && !string.IsNullOrWhiteSpace(ff0.GivenPath) ? ff0.GivenPath : null;
+                if ((male ?? female) is { } any) BaseMesh[ar.FormKey] = any; else BaseMesh.Remove(ar.FormKey);
+                if ((female ?? male) is { } anyF) BaseMeshFemale[ar.FormKey] = anyF; else BaseMeshFemale.Remove(ar.FormKey);
+                if ((ar.MajorRecordFlagsRaw & EnableState.IsMarkerFlag) != 0) BaseIsMarker.Add(ar.FormKey); else BaseIsMarker.Remove(ar.FormKey);
+                if (ar.ObjectBounds is { } ab)
+                    BaseObnd[ar.FormKey] = new Vec3(MathF.Abs(ab.Second.X - ab.First.X), MathF.Abs(ab.Second.Y - ab.First.Y), MathF.Abs(ab.Second.Z - ab.First.Z));
+                continue;
+            }
             if (rec is IModeledGetter mo && rec is ISkyrimMajorRecordGetter sm)
             {
                 BaseInfo[sm.FormKey] = (rec.GetType().Name.Replace("BinaryOverlay", ""), sm.EditorID);
