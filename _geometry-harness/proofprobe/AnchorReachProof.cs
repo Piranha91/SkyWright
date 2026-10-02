@@ -124,12 +124,15 @@ static class AnchorReachProof
             var r = MeshAnchor.TestPlaced(OpenTopBox(0, 0, 0, 20, 20, 20), null, O, O, 1f, new Vector3(10, 10, 10), body);
             return (r.Point == "undecided" && (r.PointReason ?? "").Contains("open"), Say(r));
         });
-        // A7: a solid with an inward-wound cavity component: the point refuses with the validator's reason. Rejects the
-        // cavity read as solid.
-        Case(check, "stageA7 A7: cavity component — point neither inside nor outside, the validator's reason kept", () =>
+        // A7 (corrected at the fit, PLAN-7 §13): a solid with an inward-wound cavity component [40,60]^3. An anchor IN the
+        // cavity (50,50,50) is undecided with the validator's reason — rejects the cavity read as solid ("inside"). An
+        // anchor in the shell's material (10,10,10), outside the cavity's box, is inside. (The red-gate version asserted
+        // "undecided" at (10,10,10), which is in solid material: that expectation was wrong.)
+        Case(check, "stageA7 A7: cavity component — anchor in the cavity undecided (validator's reason), anchor in the shell inside", () =>
         {
-            var r = MeshAnchor.TestPlaced(Cavity(), null, O, O, 1f, new Vector3(10, 10, 10), body);
-            return (r.Point == "undecided" && !string.IsNullOrEmpty(r.PointReason), Say(r));
+            var c = MeshAnchor.TestPlaced(Cavity(), null, O, O, 1f, new Vector3(50, 50, 50), body);
+            var m = MeshAnchor.TestPlaced(Cavity(), null, O, O, 1f, new Vector3(10, 10, 10), body);
+            return (c.Point == "undecided" && (c.PointReason ?? "").Contains("negatively_oriented") && m.Point == "inside", $"cavity: {Say(c)} | shell: {Say(m)}");
         });
         // A8: an open horizontal plate at z 80 over the anchor (origin): the line [58.4, 119.2] crosses at 80, exactly; the
         // body meets. Rejects a crossing missed because the mesh is open.
