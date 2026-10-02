@@ -108,6 +108,17 @@ pose, swept region, or a switch node's every child), "uncertified" with labels a
 shape or the particle model enters, "refused" with the reason otherwise (a model-less primitive refuses naming its
 collision layer until the layer's solidity is settled), "no_geometry" for a reference with neither model nor primitive.
 Default off: the manifest is unchanged without it.
+--reach-rules physics,graph,switch,book (with --reach): the modelling rules and readers that turn reach refusals into
+labelled regions; never certified. physics: a body the file pins (a constraint to a massless body) swings within the
+constraint's limits; a free body (mass > 0, simulated motion system, no pin) is dropped straight down, rigidly, from its
+placed pose to first contact with a support below (the modelling rule) - a support is a solid, non-movable body of a
+reference enabled in the state, on a layer the falling body's COLL record collides with, not a trigger volume or sensor;
+a Static base is assumed not to move (labelled). graph: binding member paths decide (playbackSpeed: no effect), the
+reference-pose generator, a missing sequence where the file has no transform source. switch: every switch child, animated
+children swept, Tree_Anim shapes labelled. book: a BOOK base, or a Static a BOOK names as InventoryArt, is read closed (its
+stored pose: the modelling rule). Reach rows gain "drop" {status, distance, placed, landed, supportId,
+stateExcludedCandidates}; the manifest gains "reachLoose" (the same region for each item-type reference: report only,
+dispositions unchanged).
 See overlapprobe/Program.cs usage documentation. Help performs no load-order scan.
 """);
     return 0;
@@ -125,6 +136,7 @@ StateArm? stateArm = null;
 double surfaceTolerance = 1e-5;
 bool motionSwept = false; double motionDelta = 0.5;
 bool reachOn = false;   // --reach (G1 build list, Stage A): a reach region for every record without a render box
+HashSet<string>? reachRules = null;   // --reach-rules physics,graph,switch,book (unbounded neighbour classes)
 long maxTrianglePairs = 2_000_000;
 double pairSeconds = 120;
 string? emitPath = null;
@@ -171,6 +183,13 @@ try
         if (flag == "--list") { if (!int.TryParse(NeedValue(i, flag), out listN)) throw new ArgumentException("--list requires an integer"); i++; }
         else if (flag == "--motion") { if (NeedValue(i, flag) != "swept") throw new ArgumentException("--motion takes swept"); motionSwept = true; i++; }
         else if (flag == "--reach") reachOn = true;
+        else if (flag == "--reach-rules")
+        {
+            reachRules = NeedValue(i, flag).Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).ToHashSet(StringComparer.OrdinalIgnoreCase);
+            if (reachRules.Count == 0 || reachRules.Any(x => x is not ("physics" or "graph" or "switch" or "book")))
+                throw new ArgumentException("--reach-rules takes physics,graph,switch,book");
+            i++;
+        }
         else if (flag == "--motion-delta") { if (!double.TryParse(NeedValue(i, flag), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out motionDelta) || !(motionDelta > 0)) throw new ArgumentException("--motion-delta requires a positive number"); i++; }
         else if (flag == "--surface-tolerance") { if (!double.TryParse(NeedValue(i, flag), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out surfaceTolerance)) throw new ArgumentException("--surface-tolerance requires a number"); i++; }
         else if (flag == "--max-triangle-pairs") { if (!long.TryParse(NeedValue(i, flag), out maxTrianglePairs)) throw new ArgumentException("--max-triangle-pairs requires an integer"); i++; }
@@ -595,12 +614,23 @@ NifRenderGeometryOutcome SweptProxy(byte[] bytes, NifRenderGeometryOutcome origi
 // --reach (G1 build list, Stage A): the reach region of a record that has no render box (MeshReach). The asset is the
 // one discovery resolved for the base; a model-less reference with a primitive refuses naming its collision layer (the
 // layer's solidity is not settled from the records yet); neither model nor primitive is no_geometry.
+// --reach-rules: per reference, how many state-disabled candidate supports lay under it (the state filter dropped them)
+var stateExcludedBelow = new Dictionary<FormKey, int>();
 object ReachOf(FormKey key, FormKey baseKey, Snap p)
 {
-    object Out(ReachRegion r) => new
+    object Out(ReachRegion r) => reachRules is null ? new
     {
         status = r.Status, reason = r.Reason, policy = r.Policy, box = ReachBox(r.Box), labels = r.Labels,
         parts = r.UncertifiedParts.Select(x => new { label = x.Label, box = ReachBox(x.Box) }).ToArray(),
+    } : new
+    {
+        status = r.Status, reason = r.Reason, policy = r.Policy, box = ReachBox(r.Box), labels = r.Labels,
+        parts = r.UncertifiedParts.Select(x => new { label = x.Label, box = ReachBox(x.Box) }).ToArray(),
+        drop = r.Drop is not { } d ? null : (object)new
+        {
+            status = d.Status, distance = d.Distance, placed = ReachBox(d.Placed), landed = ReachBox(d.Landed), supportId = d.SupportId,
+            stateExcludedCandidates = stateExcludedBelow.GetValueOrDefault(key),
+        },
     };
     static object? ReachBox(Aabb b) => b.IsEmpty ? null
         : new { min = new[] { (double)b.Min.X, b.Min.Y, b.Min.Z }, max = new[] { (double)b.Max.X, b.Max.Y, b.Max.Z } };
@@ -614,7 +644,11 @@ object ReachOf(FormKey key, FormKey baseKey, Snap p)
     {
         var (bytes, err) = AssetResolver.ReadPlacementSource(src);
         if (bytes is null) return Out(new ReachRegion("refused", "asset read failed: " + err, Aabb.Empty, MeshReach.PolicyVersion, Array.Empty<string>(), Array.Empty<ReachPart>()));
-        return Out(MeshReach.OfModel(bytes, p.Pos, p.Rot, p.Scale, Read, new ReachOptions(motionDelta)));
+        if (reachRules is null) return Out(MeshReach.OfModel(bytes, p.Pos, p.Rot, p.Scale, Read, new ReachOptions(motionDelta)));
+        var region = MeshReach.OfModel(bytes, p.Pos, p.Rot, p.Scale, Read, new ReachOptions(motionDelta, Rules: RulesFor(key, baseKey, p)));
+        if (!p.Interior && region.Drop is not null)
+            region = region with { Status = "uncertified", Labels = region.Labels.Append(PhysicsReach.TerrainNotReadLabel).ToList() };
+        return Out(region);
     }
     if (g.RelativePath is not null)
         return Out(new ReachRegion("refused", $"{g.Status}: {g.Reason}", Aabb.Empty, MeshReach.PolicyVersion, Array.Empty<string>(), Array.Empty<ReachPart>()));
@@ -710,6 +744,103 @@ bool BoundsInSceneScope(SurfaceOverlapCandidate candidate)
 // THE PHYSICAL PREDICATE of an OVERLAP row: the two winning strict render surfaces still intersect under this arm.
 // Bounds can reject only provable separation inside MeshIntersection; their depth, volume and dimensions never decide.
 EnableArms? resolvedArms = null;
+// --reach-rules: the drop's supports. Every reference of the cell (interior) or the 3x3 neighbourhood by position (exterior)
+// that is not deleted and is ENABLED IN THE EVALUATED STATE (the same population as the records: the state arm's enable
+// resolution, or the flag under --flags) and not BOS-unresolved; its model's bodies (frames, chain, placement) or a
+// primitive on a stated layer. Terrain is not read (the fall can only be longer; labelled outdoors).
+Dictionary<(FormKey Space, int X, int Y), List<(FormKey Key, Snap Pose, bool Enabled)>>? supportCells = null;
+var supportCache = new Dictionary<FormKey, IReadOnlyList<(DropSupport S, Aabb Box)>>();
+var bodyCache = new Dictionary<FormKey, IReadOnlyList<(uint Layer, bool Solid, bool Movable, bool Complete, TriangleSoup Model)>?>();
+Dictionary<uint, CollisionLayerRule>? reachLayers = null;
+HashSet<FormKey>? bookArtStatics = null;
+(FormKey, int, int) SupportCellOf(Snap p) => p.Interior ? (p.Cell, 0, 0) : (p.Worldspace, (int)MathF.Floor(p.Pos.X / 4096f), (int)MathF.Floor(p.Pos.Y / 4096f));
+// the state filter of the support population (one place, so a sabotage arm can switch it off)
+bool SupportEnabled(FormKey key, Snap p)
+{
+    if (popMode == PopulationMode.Flags) return !p.Disabled;
+    var e = resolvedArms!.Winner(key);
+    return e.Enabled && e.Resolved;
+}
+void BuildSupportCells()
+{
+    supportCells = new();
+    foreach (var (key, _) in idx.History.Refs)
+    {
+        var pose = idx.WinningGeometryPose(key);
+        if (pose is null) continue;
+        var sp = pose.Value;
+        if (sp.Deleted || idx.IsDeletedNow(key)) continue;
+        if (idx.BosSwaps.TryGetValue(key, out var bs) && (bs.Random || bs.PerSession || bs.PropertiesRandom || bs.Alternatives.Count != 1)) continue;
+        var ck = SupportCellOf(sp);
+        if (!supportCells.TryGetValue(ck, out var list)) supportCells[ck] = list = new();
+        list.Add((key, sp, SupportEnabled(key, sp)));
+    }
+}
+IReadOnlyList<(DropSupport S, Aabb Box)> PlacedSupports(FormKey k, Snap sp)
+{
+    if (supportCache.TryGetValue(k, out var hit)) return hit;
+    var result = new List<(DropSupport, Aabb)>();
+    if (idx.RefBase.TryGetValue(k, out var b))
+    {
+        var g = GeometryOf(b);
+        if (g.Source is { } src)
+        {
+            if (!bodyCache.TryGetValue(b, out var bodies))
+            {
+                var (bytes, _) = AssetResolver.ReadPlacementSource(src);
+                try { bodies = bytes is null ? null : PhysicsReach.ModelBodies(bytes); } catch (Exception) { bodies = null; }
+                bodyCache[b] = bodies;
+            }
+            if (bodies is not null)
+            {
+                bool movableBase = !(idx.BaseInfo.TryGetValue(b, out var bi) && bi.Type is "Static");
+                foreach (var s in PhysicsReach.PlaceSupports(k.ToString(), bodies, sp.Pos, sp.Rot, sp.Scale, movableBase))
+                    result.Add((s, SpatialOverlap.SoupBounds(s.World)));
+            }
+        }
+        else if (idx.RefPrimitive.TryGetValue(k, out var prim) && prim.Type == "Box" && idx.RefCollisionLayer.TryGetValue(k, out var li))
+        {
+            var (bv, bi2) = HavokCollision.BoxSoup(new System.Numerics.Vector3(prim.Bounds.X / 2, prim.Bounds.Y / 2, prim.Bounds.Z / 2));
+            var w = SpatialOverlap.TransformSoup(new TriangleSoup(bv.ToArray(), bi2.ToArray()), sp.Pos, sp.Rot, 1f);
+            result.Add((new DropSupport(k.ToString(), li, true, false, w), SpatialOverlap.SoupBounds(w)));
+        }
+    }
+    supportCache[k] = result;
+    return result;
+}
+IEnumerable<DropSupport> SupportsUnder(FormKey self, Snap p, Aabb column)
+{
+    if (supportCells is null) BuildSupportCells();
+    var (space, gx, gy) = SupportCellOf(p);
+    var cells = p.Interior ? new[] { (space, 0, 0) } : Enumerable.Range(-1, 3).SelectMany(dx => Enumerable.Range(-1, 3).Select(dy => (space, gx + dx, gy + dy))).ToArray();
+    var found = new List<DropSupport>(); int excluded = 0;
+    foreach (var c in cells)
+    {
+        if (!supportCells!.TryGetValue(c, out var list)) continue;
+        foreach (var (k, sp, enabled) in list)
+        {
+            if (k == self) continue;
+            foreach (var (s, box) in PlacedSupports(k, sp))
+            {
+                if (box.Max.X < column.Min.X || box.Min.X > column.Max.X || box.Max.Y < column.Min.Y || box.Min.Y > column.Max.Y || box.Min.Z > column.Max.Z) continue;
+                if (enabled) found.Add(s); else excluded++;
+            }
+        }
+    }
+    stateExcludedBelow[self] = excluded;
+    return found;
+}
+ReachRules? RulesFor(FormKey key, FormKey baseKey, Snap p)
+{
+    if (reachRules is null) return null;
+    reachLayers ??= idx.CollisionLayerRules();
+    bookArtStatics ??= idx.BookInventoryArt.Values.ToHashSet();
+    string? type = idx.BaseInfo.TryGetValue(baseKey, out var bi) ? bi.Type : null;
+    bool book = reachRules.Contains("book") && (type == "Book" || (type == "Static" && bookArtStatics.Contains(baseKey)));
+    return new ReachRules(reachRules.Contains("physics"), reachRules.Contains("graph"), reachRules.Contains("switch"), book, type,
+                          q => SupportsUnder(key, p, q), reachLayers);
+}
+
 (PhysicalState State, string Detail) OverlapPredicate(FormKey laterKey, FormKey otherKey)
 {
     var sl = idx.WinningGeometryPose(laterKey); var so = idx.WinningGeometryPose(otherKey);
@@ -1063,6 +1194,8 @@ if (geometryManifestPath is not null)
     var reviewByKey = new Dictionary<FormKey, ReviewRef>();
     var recordRows = new List<object>();
     var reachRows = new List<(int Row, object Reach)>();
+    var reachLooseRows = new List<object>();
+    var looseTypes = new HashSet<string>(StringComparer.Ordinal) { "Ingestible", "MiscItem", "Ingredient", "Book", "Armor", "Weapon", "SoulGem", "Scroll", "Ammunition", "Key" };
     // Which identities this loop actually enumerated. The accounting below reads it rather than
     // re-deriving the loop's own gates, so it can never claim a row the manifest does not hold.
     var emittedRecordKeys = new HashSet<FormKey>();
@@ -1196,6 +1329,11 @@ if (geometryManifestPath is not null)
         });
         if (reachOn && runtimePoseKnown && hasBase && reportedWorldBounds is null)
             reachRows.Add((rowIndex, ReachOf(key, effectiveBase, p)));
+        // --reach-rules: loose items (type_excluded item records) get the same region in a separate report; nothing in their
+        // record row changes
+        if (reachOn && reachRules is not null && runtimePoseKnown && hasBase && eligibility == "type_excluded"
+            && idx.BaseInfo.TryGetValue(effectiveBase, out var looseInfo) && looseTypes.Contains(looseInfo.Type))
+            reachLooseRows.Add(new { formid = key.ToString(), baseType = looseInfo.Type, reach = ReachOf(key, effectiveBase, p) });
     }
 
     var manifestJson = new JsonSerializerOptions { WriteIndented = true, NumberHandling = System.Text.Json.Serialization.JsonNumberHandling.AllowNamedFloatingPointLiterals };
@@ -1493,7 +1631,13 @@ if (geometryManifestPath is not null)
          .Feature("nif_cache_hits", manifest.workload.cacheHits, "lookups", FeatureAt.Final)
          .Feature("nif_cache_misses", manifest.workload.cacheMisses, "lookups", FeatureAt.Final);
     __run.Stage("manifest-artifact", "writing actual-shape manifest", 1, "artifacts");
-    File.WriteAllText(geometryManifestPath, JsonSerializer.Serialize(manifest, manifestJson));
+    if (reachRules is null) File.WriteAllText(geometryManifestPath, JsonSerializer.Serialize(manifest, manifestJson));
+    else
+    {
+        var withLoose = JsonSerializer.SerializeToNode(manifest, manifestJson)!.AsObject();
+        withLoose["reachLoose"] = JsonSerializer.SerializeToNode(reachLooseRows, manifestJson);
+        File.WriteAllText(geometryManifestPath, withLoose.ToJsonString(manifestJson));
+    }
     __run.Advance().Artifact(geometryManifestPath);
     Console.WriteLine($"wrote geometry manifest: {recordRows.Count:N0} records, {pairRows.Count:N0} union pairs -> {geometryManifestPath}");
 }

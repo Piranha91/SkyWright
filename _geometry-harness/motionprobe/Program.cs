@@ -13,6 +13,9 @@
 //   motionprobe ASSETS deltacheck REL [--animation ID]... [--geometry G] [--delta U] [--samples N]   every swept interval's
 //                                                                    Delta against the mesh posed at N dense times inside it
 //   motionprobe ASSETS graph GRAPH.hkx                               behaviour-graph reading (path as a NIF names it)
+//   motionprobe ASSETS physics REL                                   the Havok bodies (mass, motion system, layer, movable)
+//                                                                    and constraints (limits, pivots and axes in the model
+//                                                                    frame) and the kind: none|fixed|free|pinned|free-chain|mixed
 //   motionprobe ASSETS sweep REL [--animation ID]... [--geometry render|collision] [--delta U] [--budget N] [--octree-threads N]
 //                                                                    (the volume octree's classification threads; default
 //                                                                    the processor count; the answer does not depend on it.
@@ -20,6 +23,11 @@
 //                                                                    threads T")
 //   ASSETS = --loose-root DIR | --instance DIR --profile P --game DIR --order CANDIDATE.json
 //   common: [--out FILE] [--placement BASETYPE[,open]]
+//           [--rules graph,book,physics,switch]   read as the reach rules do (inspect, pose, node, sweep, graph):
+//                                                 graph = binding member paths decide, the reference-pose generator and a
+//                                                 missing sequence with no transform source are read; book = no animation
+//                                                 (the stored, closed pose); physics = a constraint does not refuse;
+//                                                 switch = every switch child read, Tree_Anim shapes as file geometry
 // exit: 0 printed, 1 the reading refused or failed (JSON says why), 2 usage.
 
 using System.Globalization;
@@ -32,7 +40,7 @@ using HousecarlCore.Progress;
 using var __run = RunLog.BeginProcess("motionprobe", args);
 
 string? loose = null, instance = null, profile = null, game = null, order = null, outPath = null, placementArg = null;
-string? anim = null, pose = null, node = null, geometryArg = null;
+string? anim = null, pose = null, node = null, geometryArg = null, rulesArg = null;
 var anims = new List<string>();
 float? t = null; List<float>? times = null; double? delta = null; int? budget = null; int samplesN = 64, split = 4; bool vertices = false;
 int octreeThreads = 0;
@@ -58,6 +66,7 @@ for (int i = 0; i < args.Length; i++)
         case "--delta": delta = double.Parse(Need(), CultureInfo.InvariantCulture); break;
         case "--budget": budget = int.Parse(Need(), CultureInfo.InvariantCulture); break;
         case "--vertices": vertices = true; break;
+        case "--rules": rulesArg = Need(); break;
         case "--samples": samplesN = int.Parse(Need(), CultureInfo.InvariantCulture); break;
         case "--split": split = int.Parse(Need(), CultureInfo.InvariantCulture); break;
         case "--octree-threads": octreeThreads = int.Parse(Need(), CultureInfo.InvariantCulture); break;
@@ -68,7 +77,7 @@ for (int i = 0; i < args.Length; i++)
 }
 if (positional.Count < 2 || (loose is null && (instance is null || profile is null || game is null || order is null)))
 {
-    Console.Error.WriteLine("usage: motionprobe (--loose-root DIR | --instance D --profile P --game D --order C) inspect|pose|node|clip|graph|sweep REL ...");
+    Console.Error.WriteLine("usage: motionprobe (--loose-root DIR | --instance D --profile P --game D --order C) inspect|pose|node|clip|graph|physics|sweep REL ...");
     return 2;
 }
 string verb = positional[0], rel = positional[1];
@@ -77,6 +86,17 @@ var geometry = (geometryArg ?? "render").ToLowerInvariant() switch
     "render" => VolumeGeometry.Render, "collision" => VolumeGeometry.Collision,
     _ => throw new ArgumentException("--geometry takes render|collision"),
 };
+MotionReadOptions? readOptions = null;
+GraphOptions? graphOptions = null;
+if (rulesArg is not null)
+{
+    var set = rulesArg.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).ToHashSet(StringComparer.OrdinalIgnoreCase);
+    var unknown = set.Where(x => x is not ("graph" or "book" or "physics" or "switch")).ToList();
+    if (unknown.Count > 0) { Console.Error.WriteLine("--rules takes graph,book,physics,switch; unknown: " + string.Join(",", unknown)); return 2; }
+    graphOptions = set.Contains("graph") ? new GraphOptions(true, true, true) : null;
+    readOptions = new MotionReadOptions(IgnorePhysics: set.Contains("physics"), IgnoreAnimation: set.Contains("book"),
+                                        SwitchUnion: set.Contains("switch"), WindAsStatic: set.Contains("switch"), Graph: graphOptions);
+}
 MotionPlacement? placement = null;
 if (placementArg is not null)
 {
@@ -137,21 +157,35 @@ try
     {
         // REL is the path as a NIF's BSBehaviorGraphExtraData names it (relative to meshes\); a meshes\ prefix is accepted
         var graphFile = rel.StartsWith("meshes\\", StringComparison.OrdinalIgnoreCase) ? rel[7..] : rel;
-        var g = HavokBehaviour.Resolve(graphFile, read);
+        var g = graphOptions is not null ? HavokBehaviour.Resolve(graphFile, read, graphOptions) : HavokBehaviour.Resolve(graphFile, read);
         return Emit(new { verb, rel, graph = g }, g.Status == "read");
     }
     var bytes = read(rel);
     if (bytes is null) return Emit(new { verb, rel, status = "refused", reason = "missing_asset: " + rel }, false);
     switch (verb)
     {
+        case "physics":
+        {
+            var ph = PhysicsReach.Classify(bytes);
+            return Emit(new
+            {
+                verb, rel, kind = ph.Kind, refusal = ph.Refusal,
+                bodies = ph.Bodies.Select(b => new { block = b.Block, node = b.Node, layer = b.Layer, layerName = b.LayerName, motion = b.MotionSystem, mass = b.Mass, movable = b.Movable }).ToArray(),
+                constraints = ph.Constraints.Select(c => new
+                {
+                    block = c.Block, @class = c.Class, bodyA = c.BodyA, bodyB = c.BodyB, minAngle = c.MinAngle, maxAngle = c.MaxAngle,
+                    pivotAModel = V(c.PivotAModel), pivotBModel = V(c.PivotBModel), axisAModel = V(c.AxisAModel), axisBModel = V(c.AxisBModel),
+                }).ToArray(),
+            }, ph.Kind != "refused");
+        }
         case "inspect":
         {
-            var m = NifMotion.Read(bytes, read, placement);
+            var m = NifMotion.Read(bytes, read, placement, readOptions);
             return Emit(new { verb, rel, policy = NifMotion.PolicyVersion, keys = NifMotionKeys.Convention, model = m }, m.Status != "refused");
         }
         case "pose":
         {
-            var m = NifMotion.Read(bytes, read, placement);
+            var m = NifMotion.Read(bytes, read, placement, readOptions);
             var p = pose is not null ? NifMotion.Pose(bytes, m, pose, geometry, read)
                   : NifMotion.Pose(bytes, m, anim ?? throw new ArgumentException("pose needs --animation and --t, or --pose"),
                                    t ?? throw new ArgumentException("pose needs --t"), geometry, read);
@@ -160,7 +194,7 @@ try
         }
         case "node":
         {
-            var m = NifMotion.Read(bytes, read, placement);
+            var m = NifMotion.Read(bytes, read, placement, readOptions);
             var at = times ?? new List<float> { t ?? throw new ArgumentException("node needs --t or --times") };
             string animId = anim ?? throw new ArgumentException("node needs --animation"), nodeName = node ?? throw new ArgumentException("node needs --node");
             var rows = at.Select(time =>
@@ -247,7 +281,7 @@ try
         }
         case "sweep":
         {
-            var m = NifMotion.Read(bytes, read, placement);
+            var m = NifMotion.Read(bytes, read, placement, readOptions);
             var opts = new MotionOptions(DeltaTarget: delta ?? 0.5, SampleBudget: budget ?? 4096);
             var r = SweptGeometry.Build(bytes, m, anims.Count > 0 ? anims : null, geometry, opts, read);
             var octree = new SweptVolumeRun { Threads = octreeThreads };

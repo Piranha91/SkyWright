@@ -70,7 +70,14 @@ static partial class MotionProof
     {
         var v = new List<Vector4>();
         for (int k = 0; k < 8; k++) v.Add(new Vector4(((k & 1) == 0 ? x0 : x1) / HavokU, ((k & 2) == 0 ? y0 : y1) / HavokU, ((k & 4) == 0 ? z0 : z1) / HavokU, 0));
-        return new bhkConvexVerticesShape { Vertices = v, NumVertices = 8, Normals = new(), NumNormals = 0 };
+        // the six face planes (nif.xml: exterior half spaces, w = -n.v): without them the decoder reads the vertices only and
+        // names the shape unread
+        var n = new List<Vector4>
+        {
+            new(1, 0, 0, -x1 / HavokU), new(-1, 0, 0, x0 / HavokU), new(0, 1, 0, -y1 / HavokU),
+            new(0, -1, 0, y0 / HavokU), new(0, 0, 1, -z1 / HavokU), new(0, 0, -1, z0 / HavokU),
+        };
+        return new bhkConvexVerticesShape { Vertices = v, NumVertices = 8, Normals = n, NumNormals = 6 };
     }
 
     /// <summary>A free item: root -> node "Item" -> render box [-5,5]^3 and a movable convex body of the same box (mass 5,
@@ -168,8 +175,8 @@ static partial class MotionProof
         {
             var g = NifGeometry.Measure(FreeItem(), includeTriangles: true);
             var b = g.Model?.CollisionBodies?.SingleOrDefault();
-            return (b is { Solid: true, Layer: "SKYL_CLUTTER", MotionSystem: "MO_SYS_SPHERE_STABILIZED" } && BoxIs(b.Bounds, -5, -5, -5, 5, 5, 5, 0.01f),
-                    $"{b?.Layer} {b?.MotionSystem} {b?.Solid} {(b is null ? "" : ShowA7(b.Bounds))}");
+            return (b is { Solid: true, Layer: "SKYL_CLUTTER", MotionSystem: "MO_SYS_SPHERE_STABILIZED" } && b.Unread.Count == 0 && BoxIs(b.Bounds, -5, -5, -5, 5, 5, 5, 0.01f),
+                    $"{b?.Layer} {b?.MotionSystem} {b?.Solid} unread [{(b is null ? "" : string.Join("; ", b.Unread))}] {(b is null ? "" : ShowA7(b.Bounds))}");
         });
         Case(check, "reach-rules fixture control: rules OFF, the switch mover refuses as today ('switch node … runtime state')", () =>
         {
@@ -259,6 +266,16 @@ static partial class MotionProof
             return (r.Status == "uncertified" && r.Labels.Contains(PhysicsReach.StaticAssumptionLabel) && !r.Labels.Contains(PhysicsReach.DropLabel)
                     && r.Drop is null && BoxIs(r.Box, -5, -5, -5, 5, 5, 5), ShowRR(r));
         });
+        // Q6 (review note on Gate C): the free item lands on a Static whose own file body is movable (a bowl): the drop row also
+        // carries the Static assumption, because the assumption decides where it lands. Rejects a landing on an assumed-static
+        // support reported without the assumption.
+        Case(check, "reach-rules Q6b: free item lands on an assumed-static support (z -100) — '" + PhysicsReach.DropLabel + "' and '" + PhysicsReach.StaticAssumptionLabel + "'", () =>
+        {
+            var r = MeshReach.OfModel(FreeItem(), Origin, Origin, 1f, null, RulesOn(physics: true, baseType: "MISC",
+                supports: new[] { new DropSupport("bowl", 1, true, false, Plate(500, -100), AssumedStatic: true) }));
+            return (r.Status == "uncertified" && r.Labels.Contains(PhysicsReach.DropLabel) && r.Labels.Contains(PhysicsReach.StaticAssumptionLabel)
+                    && r.Drop is { SupportId: "bowl" }, ShowRR(r));
+        });
         // Nothing below through the reach region: refused, the named reason. Rejects an infinite or invented region.
         Case(check, "reach-rules K-P3b: free item with no support — region refused '" + PhysicsReach.NothingBelow + "'", () =>
         {
@@ -312,7 +329,7 @@ static partial class MotionProof
                     && r.Drop is { } d && NearA7(d.Distance, 99, 1e-3), ShowRR(r));
         });
 
-        // ================= K-B1: books, closed pose (Piranha's rule, Q1) =================
+        // ================= K-B1: books, closed pose (modelling rule, Q1) =================
         // The two-bone skinned strip with an animation (bone B turns 90°): under BookArt the region is the stored (closed) skinned
         // pose — the strip's own box x 0..40, y -1..1, z 0 — labelled the rule; not the animation's sweep. Rejects the graph's or
         // sequence's clips used for a placed book.

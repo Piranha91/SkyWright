@@ -223,6 +223,20 @@ public sealed class OverlapIndex
     /// the record, its editor id, and whether it is flagged NavmeshObstacle. L_NAVCUT is index 49 in the base game
     /// (measured 2026-09-04). What the world-state census reads a navcut box by (WorldState.cs).</summary>
     public Dictionary<uint, (FormKey Key, string? Edid, bool NavmeshObstacle)> CollisionLayersByIndex { get; } = new();
+    /// <summary>COLL records as the reach rules' drop reads them, by INDEX under the winner: the TriggerVolume and Sensor
+    /// flags and the records listed in CollidesWith (resolved to indices by <see cref="CollisionLayerRules"/>).</summary>
+    public Dictionary<uint, (FormKey Key, string? Edid, bool TriggerVolume, bool Sensor, List<FormKey> CollidesWith)> CollisionLayerRecords { get; } = new();
+    /// <summary>BOOK -> the Static its InventoryArt names (a placed Static of that base is book art: the reach rules read it
+    /// closed). Under the winner.</summary>
+    public Dictionary<FormKey, FormKey> BookInventoryArt { get; } = new();
+
+    /// <summary>The COLL records as drop-rule layers: CollidesWith resolved from record keys to layer indices.</summary>
+    public Dictionary<uint, CollisionLayerRule> CollisionLayerRules()
+    {
+        var byKey = CollisionLayerRecords.ToDictionary(kv => kv.Value.Key, kv => kv.Key);
+        return CollisionLayerRecords.ToDictionary(kv => kv.Key, kv => new CollisionLayerRule(kv.Key, kv.Value.Edid, kv.Value.TriggerVolume, kv.Value.Sensor,
+            kv.Value.CollidesWith.Where(byKey.ContainsKey).Select(k => byKey[k]).ToHashSet()));
+    }
     /// <summary>ref -> its XTRI collision-layer index under the winner; absent when none.</summary>
     public Dictionary<FormKey, uint> RefCollisionLayer { get; } = new();
     /// <summary>The worldspace persistent cells (the top cell of each worldspace, no grid) — a marker placed persistent
@@ -273,6 +287,8 @@ public sealed class OverlapIndex
             if (rec is ICollisionLayerGetter coll)
             {
                 CollisionLayersByIndex[coll.Index] = (coll.FormKey, coll.EditorID, coll.Flags.HasFlag(CollisionLayer.Flag.NavmeshObstacle));
+                CollisionLayerRecords[coll.Index] = (coll.FormKey, coll.EditorID, coll.Flags.HasFlag(CollisionLayer.Flag.TriggerVolume),
+                                                     coll.Flags.HasFlag(CollisionLayer.Flag.Sensor), (coll.CollidesWith ?? []).Select(l => l.FormKey).ToList());
                 continue;
             }
             // Armour carries its ground model per gender in WorldModel, not Model (G1 build list row 2, Gate A review Q6): the
@@ -288,6 +304,10 @@ public sealed class OverlapIndex
                 if (ar.ObjectBounds is { } ab)
                     BaseObnd[ar.FormKey] = new Vec3(MathF.Abs(ab.Second.X - ab.First.X), MathF.Abs(ab.Second.Y - ab.First.Y), MathF.Abs(ab.Second.Z - ab.First.Z));
                 continue;
+            }
+            if (rec is IBookGetter bk)
+            {
+                if (!bk.InventoryArt.IsNull) BookInventoryArt[bk.FormKey] = bk.InventoryArt.FormKey; else BookInventoryArt.Remove(bk.FormKey);
             }
             if (rec is IModeledGetter mo && rec is ISkyrimMajorRecordGetter sm)
             {
