@@ -360,6 +360,38 @@ static partial class MotionProof
             return (r.Status == "uncertified" && r.Labels.Contains(MeshReach.WindLabel) && part is not null && BoxIs(part.Box, 0, 0, 0, 10, 10, 10), ShowRR(r));
         });
 
+        // ================= K-C: pose confirmations (Piranha, animation parse failures) =================
+        // A model whose animation refuses (an inactive direct controller) is read at its stored pose when a confirmation names
+        // its path AND the sha256 of its bytes: Part [0,10]^3 and Frame [-200,-180]x[-200,-180]x[-40,-20] -> box
+        // [-200,10]x[-200,10]x[-40,10], labelled. Rejects a confirmation applied without one, and a stored pose unlabelled.
+        byte[] inactive = Rig(Box(0, 0, 0, 10, 10, 10), Vector3.Zero, Slide(new(100, 0, 0)), direct: true, directActive: false);
+        string sha = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(inactive)).ToLowerInvariant();
+        Case(check, "reach-rules fixture control: the inactive-controller rig refuses under the rules with no confirmation", () =>
+        {
+            var r = MeshReach.OfModel(inactive, Origin, Origin, 1f, null, new ReachOptions(0.5, 4096, new ReachRules(ModelPath: @"meshes\fx\Rig.nif")));
+            return (r.Status == "refused" && (r.Reason ?? "").Contains("controller inactive", StringComparison.Ordinal), ShowRR(r));
+        });
+        Case(check, "reach-rules K-C1: a confirmation matching path and sha256 reads the stored pose [-200,10]x[-200,10]x[-40,10], '" + MeshReach.ConfirmedPoseLabel + "'", () =>
+        {
+            var conf = new[] { new PoseConfirmation(@"Meshes\FX\rig.nif", sha, "evidence/rig") };
+            var r = MeshReach.OfModel(inactive, Origin, Origin, 1f, null, new ReachOptions(0.5, 4096, new ReachRules(Confirmations: conf, ModelPath: @"meshes\fx\Rig.nif")));
+            return (r.Status == "uncertified" && r.Labels.Contains(MeshReach.ConfirmedPoseLabel) && BoxIs(r.Box, -200, -200, -40, 10, 10, 10), ShowRR(r));
+        });
+        // K-C2: the same path with a different sha256 (the file changed since the comparison) does not match: refused as before.
+        Case(check, "reach-rules K-C2: a confirmation for the same path but other bytes (sha256) does not match — still refused", () =>
+        {
+            var conf = new[] { new PoseConfirmation(@"meshes\fx\Rig.nif", new string('0', 64), "evidence/rig") };
+            var r = MeshReach.OfModel(inactive, Origin, Origin, 1f, null, new ReachOptions(0.5, 4096, new ReachRules(Confirmations: conf, ModelPath: @"meshes\fx\Rig.nif")));
+            return (r.Status == "refused" && !r.Labels.Contains(MeshReach.ConfirmedPoseLabel), ShowRR(r));
+        });
+        // K-C3: the right bytes under another path do not match either.
+        Case(check, "reach-rules K-C3: a confirmation with the right sha256 but another model path does not match — still refused", () =>
+        {
+            var conf = new[] { new PoseConfirmation(@"meshes\fx\Other.nif", sha, "evidence/rig") };
+            var r = MeshReach.OfModel(inactive, Origin, Origin, 1f, null, new ReachOptions(0.5, 4096, new ReachRules(Confirmations: conf, ModelPath: @"meshes\fx\Rig.nif")));
+            return (r.Status == "refused", ShowRR(r));
+        });
+
         // ================= K-G3: the binding policy =================
         // Member paths from HKX2 (hkbClipGenerator, hkbBlendingTransitionEffect, BSIsActiveModifier). Rejects refusing every binding
         // (crossbow 'Release' binds playbackSpeed) and ignoring every binding (an unknown member must refuse).
