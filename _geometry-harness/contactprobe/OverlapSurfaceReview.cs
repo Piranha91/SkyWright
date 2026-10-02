@@ -10,7 +10,7 @@ using Mutagen.Bethesda.Plugins;
 /// buried in the other where that other is a validated closed solid (<see cref="MeshSurface"/>). Render (every visible
 /// shape, tagged by material) and collision (solid bodies) are measured separately, never mixed. A member whose live pose
 /// is not established, or whose geometry cannot be read, refuses that geometry with its reason; nothing is estimated
-/// from bounds or a stored pose. --live-pose targeted applies the targeted live-pose rule (default: the existing rule).
+/// from bounds or a stored pose. The live-pose rule is LivePoseDefault.Policy (targeted) unless --live-pose names one.
 /// The file is separate from the pair review's --json and the --volume file, which are unchanged.</summary>
 static class OverlapSurfaceReview
 {

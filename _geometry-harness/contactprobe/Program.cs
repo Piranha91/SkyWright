@@ -99,7 +99,7 @@ contactprobe: placement contact and explicit render-surface pair review
   --anchor OUTPUT (with --overlap-json): member A is an anchor (marker, idle marker, placed actor, furniture entry), B a
     partner: point, line and body readings of the actor at the anchor against B's opaque render surface, the body deciding
   --surface OUTPUT (with --overlap-json): crossing length, coplanar areas and buried area per pair, render and collision
-    separately; --live-pose blanket|targeted chooses the live-pose rule (default blanket)
+    separately; --live-pose blanket|targeted chooses the live-pose rule (default targeted)
   --motion off|swept|pose:NAME (with --surface/--volume): measure a moving member against its motion instead of refusing
     it; --motion-delta U and --motion-budget N tune the swept sampling (default 0.5 u, 4096)
   --instance DIR --game DIR --profile NAME --order CANDIDATE.json
@@ -495,7 +495,7 @@ if (overlapJson is not null)
                 cfg.Identity("load-time", cidx.State?.Name ?? "baseline"), idx.WinningGeometryPose, motionCache);
         // --surface: a separate file after the unchanged pair review and volume (patch-miss packet, session 6).
         if (surfaceOut is not null)
-            OverlapSurfaceReview.Run(overlapJson, surfaceOut, livePose ?? LivePosePolicy.Blanket, assets, idx, cidx.Arms,
+            OverlapSurfaceReview.Run(overlapJson, surfaceOut, livePose ?? LivePoseDefault.Policy, assets, idx, cidx.Arms,
                 cfg.Identity("load-time", cidx.State?.Name ?? "baseline"), idx.WinningGeometryPose, motionCache);
         // --anchor: a separate file (G1 build list, Stage A, row 2): member A is the anchor, B the partner.
         if (anchorOut is not null)
