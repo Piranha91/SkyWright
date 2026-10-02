@@ -188,6 +188,23 @@ static class AnchorReachProof
             return (r.Decision == "undecided" && (r.Reason ?? "").Contains(SurfaceMaterial.AlphaTest), Say(r));
         });
 
+        // A15 (found at the commit gate on real data: a partner with a degenerate triangle gave a NaN clearance read as
+        // "clear"): a zero-area triangle (two coincident vertices) 10 u beside the anchor at body height still meets the body, and every clearance is
+        // finite. Rejects a NaN distance silently decided as clear.
+        Case(check, "stageA7 A15: a degenerate triangle (coincident vertices) 10 u from the axis — body meets, no NaN", () =>
+        {
+            var deg = new TriangleSoup(new[] { new Vector3(10, 0, 80), new Vector3(10, 0, 80), new Vector3(10, 0, 120) }, new[] { 0, 1, 2 });
+            var r = MeshAnchor.TestPlaced(deg, null, O, O, 1f, Vector3.Zero, body);
+            return (r.Body == "meets" && r.Decision == "meets" && (r.BodyClearance is null || double.IsFinite(r.BodyClearance.Value)), Say(r));
+        });
+        // N6: a point 30 u from a degenerate navmesh triangle (two coincident vertices) — distance 30, not NaN or a refusal.
+        Case(check, "stageA7 N6: degenerate navmesh triangle — distance 30, finite", () =>
+        {
+            var t = new NavTriangle(new Vector3(0, 0, 0), new Vector3(0, 0, 0), new Vector3(100, 0, 0), 0, "Nav", 5);
+            var d = NavmeshReach.FromPoint(new Vector3(50, 30, 0), new[] { t });
+            return (d.Status == "measured" && Near(d.Distance, 30, 1e-6), $"{d}");
+        });
+
         // ================= F: furniture entries (review F1) =================
         // F1: the NIF's one position; F2: at a reference (100,0,0) yaw 90 the entry (10,0,0) lands at (100,-10,0). Rejects
         // the furniture reference's origin used as the actor's position, and a dropped rotation ((110,0,0)).
