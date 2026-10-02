@@ -151,6 +151,7 @@ static class MotionReview
                 mode = "swept", policy = Policy, member, animations = region.Animations.Select(a => a.Id).ToArray(), label = Labels(region.Animations),
                 decision = d.Decision, reason = d.Reason, delta = d.Decision == "cannot_tell" ? d.Width : placed.MaxDelta, converged = d.Converged,
                 time = d.Time, witnessAnimation = d.AnimationId, crossingLower = d.WitnessCrossingLower, volumeLower = d.WitnessVolumeLower,
+                crossingByTags = d.WitnessCrossingByTags,
                 samples = placed.Samples.Count, partnerSolid,
                 volume = v is null ? null : new { v.Status, v.Reason, intersection = v.WithPartner, v.Converged },
             },
