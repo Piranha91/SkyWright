@@ -10,7 +10,7 @@ using NiflySharp.Structs;
 /// independent oracle written before the code (the chord of a rotated rectangle, printed in the red-gate record). Each
 /// case names the wrong answer it rejects. Cases marked "fixture control" check the fixture itself against code that
 /// already exists and hold on the base; every other case is red until <see cref="MeshSurface"/> is implemented.</summary>
-static class OverlapSurfaceProof
+static partial class OverlapSurfaceProof
 {
     const double Rel = 1e-6;
     static bool Near(double? v, double want, double rel = Rel) => v is { } x && Math.Abs(x - want) <= Math.Max(Math.Abs(want) * rel, 1e-6);

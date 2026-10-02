@@ -3601,6 +3601,10 @@ OrderProof.Run(Check);
 AdviceProof.Run(Check);
 PlaceProof.Run(Check);
 ProofProbe.ConfigurationProof.Run(Check);
+// G1 build list, Stage A (plan g1/PLAN-7.md): red until the stubs are implemented.
+MotionProof.RunStageA7(Check);
+AnchorReachProof.Run(Check);
+OverlapSurfaceProof.RunStageA7(Check);
 
 Console.WriteLine();
 Console.WriteLine($"==== {pass} passed, {fail} failed ====");

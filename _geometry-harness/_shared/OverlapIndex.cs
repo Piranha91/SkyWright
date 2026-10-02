@@ -159,6 +159,8 @@ public sealed class OverlapIndex
     /// <summary>base record -> its Mutagen type name and editor id, winner wins. Modeled records only.</summary>
     public Dictionary<FormKey, (string Type, string? Edid)> BaseInfo { get; } = new();
     public Dictionary<FormKey, string> BaseMesh { get; } = new();
+    /// <summary>An armour's FEMALE ground model where the record gives one (BaseMesh holds the male) — G1 build list row 2.</summary>
+    public Dictionary<FormKey, string> BaseMeshFemale { get; } = new();
     /// <summary>base record -> OBND extents (|second − first| per axis).</summary>
     public Dictionary<FormKey, Vec3> BaseObnd { get; } = new();
     /// <summary>The latest record/runtime pose for each reference, including rotation-only and scale-only overrides.
