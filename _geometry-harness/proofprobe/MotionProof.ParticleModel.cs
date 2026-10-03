@@ -11,13 +11,19 @@ using NiflySharp.Structs;
 /// / World Aligned; NiPSysCollider; BSPSysScaleModifier Scales; BSPSysLODModifier End Size; NiPSysGrowFadeModifier Base Scale;
 /// NiPSysData vertices). Expected values are analytic, stated beside each case, on the Stage A particle fixture (sphere emitter
 /// radius 5 on the root, Speed 20 +/- 5, Life Span 2 +/- 0.5, Initial Radius 1, planar gravity 10 along the root's -z):
-/// v T = 25 x 2.5 = 62.5; a T^2/2 = 10 x 2.5^2 / 2 = 31.25; quad corner r sqrt 2 = 1.41421356. Red on the stub (v1).</summary>
+/// v T = 25 x 2.5 = 62.5; a T^2/2 = 10 x 2.5^2 / 2 = 31.25; quad corner r sqrt 2 = 1.41421356. Red on the stub (v1).
+/// Part 3b round 2 (particle_model_v3, the Gamebryo SDK laws re-read from source: NiPSysGravityModifier `fStrength = m_fStrength *
+/// 1.6f`; NiPSysDragModifier `DRAG_MIN_SAMPLE_TIME 0.0333333f`; explicit Euler, position from the updated velocity): every expected
+/// value below that carried gravity 10 x T^2/2 = 31.25 now carries 1.6 x 10 x (T^2/2 + T dt/2) = 16 x 3.1666667 = 50.666667, and every
+/// drag decay k = Percentage /s is now Percentage / (1/30 s) = 15 /s for 0.5. The expectations were corrected with that evidence
+/// (they encoded the 1.0 factor and the per-second reading the source contradicts); the wrong answers each case rejects are unchanged.</summary>
 static partial class MotionProof
 {
     const double Sqrt2 = 1.4142135623730951;
     static readonly double IsoPM = 62.5 + Sqrt2;           // v T + r sqrt2
     static readonly double LatPM = 5 + IsoPM;              // emitter radius + iso
-    static readonly double AxPM = 5 + IsoPM + 31.25;       // + the planar gravity term
+    static readonly double AxG = 16 * (3.125 + 2.5 / 60);  // v3: 1.6 x 10 x (T^2/2 + T dt/2) = 50.666667
+    static readonly double AxPM = 5 + IsoPM + AxG;         // + the planar gravity term
 
     static byte[] ParticleVariant(Action<NifFile, NiParticleSystem, NiNode> mutate, string what)
     {
@@ -72,13 +78,13 @@ static partial class MotionProof
         // ================= K-PM1: planar gravity grows only its own axis =================
         // Force Type FORCE_PLANAR (0), Gravity Axis (0,0,-1) in the root's frame: x, y half = 5 + 62.5 + 1.41421 = 68.91421; z half = 68.91421
         // + 31.25 = 100.16421. Rejects gravity applied on every axis (x 100.16), gravity dropped (z 68.91) and the quad corner dropped (x 68.5).
-        Case(check, "pmodel K-PM1: planar gravity — x, y half 68.91421, z half 100.16421 (modelled, policy v2)", () =>
+        Case(check, "pmodel K-PM1: planar gravity — x, y half 68.91421, z half 119.58088 (modelled, policy v2)", () =>
         {
             var p = ParticleReach.BoundsFromModifiers(ParticleNif()).Single();
             return (p.Status == "modelled" && HalfIs(p.ModelBox, LatPM, LatPM, AxPM) && p.WorldReadingBox is null && NearA7(p.ParticleRadius, Sqrt2), ShowPB(p));
         });
         // ================= K-PM2: a spherical force has no axis =================
-        Case(check, "pmodel K-PM2: FORCE_SPHERICAL — every half 100.16421", () =>
+        Case(check, "pmodel K-PM2: FORCE_SPHERICAL — every half 119.58088", () =>
         {
             var b = ParticleVariant((f, ps, root) => { foreach (var g in f.Blocks.OfType<NiPSysGravityModifier>()) g.ForceType = ForceType.FORCE_SPHERICAL; }, "spherical gravity");
             var p = ParticleReach.BoundsFromModifiers(b).Single();
@@ -86,7 +92,7 @@ static partial class MotionProof
         });
         // ================= K-PM3: a collider can turn gravity's speed sideways =================
         // A spherical collider with bounce 0.5 (accepted, <= 1): the anisotropic bound no longer holds; every half 100.16421.
-        Case(check, "pmodel K-PM3: a collider (bounce 0.5) with planar gravity — every half 100.16421", () =>
+        Case(check, "pmodel K-PM3: a collider (bounce 0.5) with planar gravity — every half 119.58088", () =>
         {
             var b = ParticleVariant((f, ps, root) =>
             {
@@ -99,7 +105,7 @@ static partial class MotionProof
         // ================= K-PM4: the gravity axis is in the Gravity Object's frame =================
         // Gravity Object = a node turned a quarter about y: the axis lies along model x. x half 100.16421, y, z 68.91421. Rejects the
         // object's rotation ignored (z 100.16).
-        Case(check, "pmodel K-PM4: gravity object turned (local z -> model x), World Aligned false — x half 100.16421, y, z 68.91421", () =>
+        Case(check, "pmodel K-PM4: gravity object turned (local z -> model x), World Aligned false — x half 119.58088, y, z 68.91421", () =>
         {
             var b = ParticleVariant((f, ps, root) =>
             {
@@ -118,14 +124,14 @@ static partial class MotionProof
             int gi = TurnedNode(f, root);
             foreach (var g in f.Blocks.OfType<NiPSysGravityModifier>()) { g.GravityObject = new(gi); g.WorldAligned = true; }
         }, "world aligned gravity");
-        Case(check, "pmodel K-PM5: World Aligned true — object-frame box x 100.16421 AND world reading (box 68.91421, world growth z 31.25)", () =>
+        Case(check, "pmodel K-PM5: World Aligned true — object-frame box x 119.58088 AND world reading (box 68.91421, world growth z 50.66667)", () =>
         {
             var p = ParticleReach.BoundsFromModifiers(aligned).Single();
             return (p.Status == "modelled" && HalfIs(p.ModelBox, AxPM, LatPM, LatPM) && p.WorldReadingBox is { } w && HalfIs(w, LatPM, LatPM, LatPM)
-                    && NearA7(p.WorldGrow.X, 0) && NearA7(p.WorldGrow.Y, 0) && NearA7(p.WorldGrow.Z, 31.25), ShowPB(p));
+                    && NearA7(p.WorldGrow.X, 0) && NearA7(p.WorldGrow.Y, 0) && NearA7(p.WorldGrow.Z, AxG), ShowPB(p));
         });
         // K-PM5b: through MeshReach at the origin, unrotated, scale 1: the union of the two readings, x and z half 100.16421, y 68.91421.
-        Case(check, "pmodel K-PM5b: MeshReach, particles rule — the world-aligned fixture's region is the union of both readings (x, z 100.16421; y 68.91421)", () =>
+        Case(check, "pmodel K-PM5b: MeshReach, particles rule — the world-aligned fixture's region is the union of both readings (x, z 119.58088; y 68.91421)", () =>
         {
             var r = MeshReach.OfModel(aligned, Origin, Origin, 1f, null, new ReachOptions(0.5, 4096, new ReachRules(Particles: true)));
             return (r.Status == "uncertified" && HalfIs(r.Box, AxPM, LatPM, AxPM, 1e-2), ShowRR(r));
@@ -143,16 +149,16 @@ static partial class MotionProof
             }, "size terms");
             var p = ParticleReach.BoundsFromModifiers(b).Single();
             double r = 9 * Sqrt2;
-            return (p.Status == "modelled" && NearA7(p.ParticleRadius, r) && HalfIs(p.ModelBox, 5 + 62.5 + r, 5 + 62.5 + r, 5 + 62.5 + r + 31.25), ShowPB(p));
+            return (p.Status == "modelled" && NearA7(p.ParticleRadius, r) && HalfIs(p.ModelBox, 5 + 62.5 + r, 5 + 62.5 + r, 5 + 62.5 + r + AxG), ShowPB(p));
         });
         // ================= K-PM7: the particle system node's own scale =================
         // NiParticleSystem Scale 2: the growth doubles (the emitter sits on the root, unscaled): x half 5 + 2 x 63.91421 = 132.82843,
         // z half 5 + 2 x 95.16421 = 195.32843. Rejects the system node's scale ignored (x 68.91).
-        Case(check, "pmodel K-PM7: particle system node Scale 2 — x half 132.82843, z half 195.32843", () =>
+        Case(check, "pmodel K-PM7: particle system node Scale 2 — x half 132.82843, z half 234.16176", () =>
         {
             var b = ParticleVariant((f, ps, root) => ps.Scale = 2f, "scaled system");
             var p = ParticleReach.BoundsFromModifiers(b).Single();
-            return (p.Status == "modelled" && HalfIs(p.ModelBox, 5 + 2 * IsoPM, 5 + 2 * IsoPM, 5 + 2 * (IsoPM + 31.25)), ShowPB(p));
+            return (p.Status == "modelled" && HalfIs(p.ModelBox, 5 + 2 * IsoPM, 5 + 2 * IsoPM, 5 + 2 * (IsoPM + AxG)), ShowPB(p));
         });
         // ================= K-PM8: refusals by name =================
         Case(check, "pmodel K-PM8: FORCE_UNKNOWN refuses naming the gravity modifier and the force type", () =>
@@ -161,15 +167,16 @@ static partial class MotionProof
             var p = ParticleReach.BoundsFromModifiers(b).Single();
             return (p.Status == "refused" && (p.Reason ?? "").Contains("Gravity") && (p.Reason ?? "").Contains("FORCE_UNKNOWN"), ShowPB(p));
         });
-        Case(check, "pmodel K-PM8b: an unknown modifier (vortex) and turbulence 5 still refuse by name under v2", () =>
+        // round 2: turbulence is modelled under v3 (500 x Turbulence x Scale per axis: 2500 for 5): x half 68.91421 + 2500 x 3.1666667
+        Case(check, "pmodel K-PM8b: an unknown modifier (vortex) still refuses by name; turbulence 5 is modelled (v3: x half 7985.58088)", () =>
         {
             var v = ParticleReach.BoundsFromModifiers(ParticleNif(vortex: true)).Single();
             var t = ParticleReach.BoundsFromModifiers(ParticleNif(turbulence: 5f)).Single();
-            return (v.Status == "refused" && (v.Reason ?? "").Contains("NiPSysVortexFieldModifier") && t.Status == "refused" && (t.Reason ?? "").Contains("turbulence"),
+            return (v.Status == "refused" && (v.Reason ?? "").Contains("NiPSysVortexFieldModifier") && t.Status == "modelled" && NearA7(t.ModelBox.Max.X, LatPM + 2500 * (3.125 + 2.5 / 60), 1e-2),
                     $"{ShowPB(v)}; {ShowPB(t)}");
         });
         // ================= K-PM9: the reach rule uses v2 with its label; rules off is v1 =================
-        Case(check, "pmodel K-PM9: MeshReach, particles rule — cube + particles: label names the file's modifiers, box x, y 68.91421, z 100.16421", () =>
+        Case(check, "pmodel K-PM9: MeshReach, particles rule — cube + particles: label names the file's modifiers, box x, y 68.91421, z 119.58088", () =>
         {
             var r = MeshReach.OfModel(ParticleNif(withCube: true), Origin, Origin, 1f, null, new ReachOptions(0.5, 4096, new ReachRules(Particles: true)));
             return (r.Status == "uncertified" && r.Labels.Contains(MeshReach.ParticleModelLabel) && !r.Labels.Contains(MeshReach.ParticleLabel)
@@ -189,6 +196,7 @@ static partial class MotionProof
         // with Range unlimited (FLT_MAX), no collider, no spawn generation and a still Drag Object.
         // Fixture: drag 0.5 on x and y (root frame): phi1 = (1 - e^-1.25)/0.5 = 1.4269904, v phi1 = 35.674760; x, y half = 5 + 35.674760
         // + 1.4142136 = 42.088974; z keeps 100.16421 (no drag on z).
+        // round 2 (v3): k = Percentage / (1/30 s): 0.5 -> 15 /s; latD = 5 + 25 (1 - e^-37.5)/15 + 1.41421 = 8.08088
         static double Phi1(double k, double T) => (1 - Math.Exp(-k * T)) / k;
         static double Phi2(double k, double T) => T / k - (1 - Math.Exp(-k * T)) / (k * k);
         byte[] Drag(params (Vector3 Axis, float P, float Range)[] ds) => ParticleVariant((f, ps, root) =>
@@ -197,8 +205,8 @@ static partial class MotionProof
                 AddModifier(f, ps, new NiPSysDragModifier { Name = new NiStringRef("Drag"), DragObject = new(f.Blocks.IndexOf(root)), DragAxis = d.Axis,
                                                              Percentage = d.P, Range = d.Range, RangeFalloff = float.MaxValue });
         }, "drag");
-        double latD = 5 + 25 * Phi1(0.5, 2.5) + Sqrt2;
-        Case(check, "pmodel K-PD1: drag 0.5 on x and y — x, y half 42.088974, z 100.16421", () =>
+        double latD = 5 + 25 * Phi1(15, 2.5) + Sqrt2;
+        Case(check, "pmodel K-PD1: drag 0.5 on x and y — x, y half 8.08088, z 119.58088", () =>
         {
             var p = ParticleReach.BoundsFromModifiers(Drag((Vector3.UnitX, 0.5f, float.MaxValue), (Vector3.UnitY, 0.5f, float.MaxValue))).Single();
             return (p.Status == "modelled" && HalfIs(p.ModelBox, latD, latD, AxPM) && p.Assumptions.Any(a => a.Contains("per second")), ShowPB(p));
@@ -208,7 +216,7 @@ static partial class MotionProof
             var p = ParticleReach.BoundsFromModifiers(Drag((Vector3.UnitX, 0.5f, 100f), (Vector3.UnitY, 0.5f, 100f))).Single();
             return (p.Status == "modelled" && HalfIs(p.ModelBox, LatPM, LatPM, AxPM), ShowPB(p));
         });
-        Case(check, "pmodel K-PD3: a collider with drag — drag not used, every half 100.16421", () =>
+        Case(check, "pmodel K-PD3: a collider with drag — drag not used, every half 119.58088", () =>
         {
             var b = ParticleVariant((f, ps, root) =>
             {
@@ -231,7 +239,7 @@ static partial class MotionProof
             var p = ParticleReach.BoundsFromModifiers(Save(b, "spawn and drag")).Single();
             return (p.Status == "modelled" && NearA7(p.ModelBox.Max.X, 5 + 31 * 4.5 + Sqrt2), ShowPB(p));
         });
-        Case(check, "pmodel K-PD6: spherical gravity with drag on x only — x half 5 + 35.674760 + 1.41421 + 10 x 2.1460192 = 63.549167; y, z 100.16421", () =>
+        Case(check, "pmodel K-PD6: spherical gravity with drag on x only — x half 8.08088 + 16 x (0.1622222 + 0.0416667) = 11.34311; y, z 119.58088", () =>
         {
             var b = ParticleVariant((f, ps, root) =>
             {
@@ -239,9 +247,9 @@ static partial class MotionProof
                 AddModifier(f, ps, new NiPSysDragModifier { Name = new NiStringRef("Drag"), DragObject = new(f.Blocks.IndexOf(root)), DragAxis = Vector3.UnitX, Percentage = 0.5f, Range = float.MaxValue, RangeFalloff = float.MaxValue });
             }, "spherical and drag");
             var p = ParticleReach.BoundsFromModifiers(b).Single();
-            return (p.Status == "modelled" && HalfIs(p.ModelBox, latD + 10 * Phi2(0.5, 2.5), AxPM, AxPM), ShowPB(p));
+            return (p.Status == "modelled" && HalfIs(p.ModelBox, latD + 16 * (Phi2(15, 2.5) + 2.5 / 60), AxPM, AxPM), ShowPB(p));
         });
-        Case(check, "pmodel K-PD7: drag on the Drag Object's local z, the object turned (local z -> model x) — x half 42.088974, y 68.91421, z 100.16421", () =>
+        Case(check, "pmodel K-PD7: drag on the Drag Object's local z, the object turned (local z -> model x) — x half 8.08088, y 68.91421, z 119.58088", () =>
         {
             var b = ParticleVariant((f, ps, root) =>
             {
@@ -251,7 +259,7 @@ static partial class MotionProof
             var p = ParticleReach.BoundsFromModifiers(b).Single();
             return (p.Status == "modelled" && HalfIs(p.ModelBox, latD, LatPM, AxPM), ShowPB(p));
         });
-        Case(check, "pmodel K-PD8: the reach label names the per-second drag reading", () =>
-            (MeshReach.ParticleModelLabel.Contains("drag read per second"), MeshReach.ParticleModelLabel));
+        Case(check, "pmodel K-PD8: the reach label names the per-1/30 s drag reading (v3)", () =>
+            (MeshReach.ParticleModelLabel.Contains("drag per 1/30 s"), MeshReach.ParticleModelLabel));
     }
 }
