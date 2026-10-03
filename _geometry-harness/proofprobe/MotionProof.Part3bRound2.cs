@@ -211,6 +211,17 @@ static partial class MotionProof
                     && r.Labels.Any(l => l.StartsWith(MeshReach.SettledGravityLabelPrefix)), ShowRR(r));
         });
 
+        // S5: the same turned placement at scale 0.5: the gravity-free box scaled (x half 34.45711), grown for unshrunk world-space
+        // particles by the GRAVITY-FREE displacement (62.5 + 1.41421) x 0.5 = 31.95711 -> x half 66.41421; the gravity is composed in
+        // the world frame unscaled. Rejects the compensation with the full displacement (gravity included: x half 91.75).
+        Case(check, "r2 K-SF5: turned placement at scale 0.5 - x half 66.41421 (gravity-free scale compensation)", () =>
+        {
+            var r = MeshReach.OfModel(pn, Origin, new Vec3(MathF.PI / 4, 0, 0), 0.5f, null,
+                new ReachOptions(0.5, 4096, new ReachRules(Particles: true, ModelPath: "meshes\\t\\p.nif",
+                    Gravity: new[] { new SettledGravity("meshes/t/p.nif", sha, Array.Empty<string>(), true, "frames F1, F2") })));
+            return (r.Status == "uncertified" && NearA7(r.Box.Max.X, R2Lat / 2 + (62.5 + Sqrt2) / 2, 2e-2) && NearA7(-r.Box.Min.X, R2Lat / 2 + (62.5 + Sqrt2) / 2, 2e-2), ShowRR(r));
+        });
+
         // ================= SP: the support-plane term with F1's condition =================
         // P1: a thick body (closed box z -1000..-10, +-2000): its surface -10 under the whole footprint, solid below the region's bottom:
         // the region stops at the plane minus r: z min = -10 - 1.41421 = -11.41421; range from h = 5 (emitter bottom -5 to -10):
