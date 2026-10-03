@@ -154,6 +154,35 @@ static partial class MotionProof
             return (x.Count == 1 && x[0].IntegerData == 202, $"{x.Count} {x.FirstOrDefault()?.IntegerData}");
         });
 
+        // ---- the graph condition (B5b: Animated causal on one bow; a graph separates the bows from the 202 sword) ----
+        IReadOnlyList<SettleExemption> GraphList() => LoadSettle.Read("""[{"kind":"bsxFlags","value":"graph=present;clear=0x1","evidence":"lab"}]""");
+        // K-L14: graph + 202 rests; graph + 203 settles; no graph + 202 settles; unknown graph settles.
+        Case(check, "part3 K-L14: bsxFlags graph=present;clear=0x1 -> graph+202 rests; graph+203, no graph+202 and unknown settle", () =>
+        {
+            var a = LoadSettle.Decide(new SettleFacts(0u, null, true, 202u, true), GraphList());
+            var b = LoadSettle.Decide(new SettleFacts(0u, null, true, 203u, true), GraphList());
+            var c = LoadSettle.Decide(new SettleFacts(0u, null, true, 202u, false), GraphList());
+            var d = LoadSettle.Decide(new SettleFacts(0u, null, true, 202u, null), GraphList());
+            return (a.Status == "rests" && b.Status == "settles" && c.Status == "settles" && d.Status == "settles", $"{a} {b} {c} {d}");
+        });
+        byte[] FreeItemGraph(uint bsx, bool graph)
+        {
+            var f = Load(FreeItemBsx(bsx)); var root = f.GetRootNodes().First();
+            if (graph)
+            {
+                root.ExtraDataList.AddBlockRef(f.AddBlock(new BSBehaviorGraphExtraData { Name = new NiStringRef("BGED"), BehaviourGraphFile = new NiStringRef(@"Weapons\Lab\Lab.hkx") }));
+                root.NumExtraDataList = (uint)root.ExtraDataList.Count;
+            }
+            return Save(f, $"free item BSX {bsx} graph {graph}");
+        }
+        // K-L15: the reader reads the graph from the model: BSX 202 with a graph rests; BSX 202 without one settles (dropped d 95).
+        Case(check, "part3 K-L15: the model's graph is read: BSX 202 + graph rests (no drop); BSX 202, no graph, drops d 95", () =>
+        {
+            var a = MeshReach.OfModel(FreeItemGraph(202, true), Origin, Origin, 1f, null, FactsOn(GraphList()));
+            var b = MeshReach.OfModel(FreeItemGraph(202, false), Origin, Origin, 1f, null, FactsOn(GraphList()));
+            return (a.Labels.Contains(LoadSettle.RestsLabel) && a.Drop is null && b.Drop is { } d && NearA7(d.Distance, 95, 1e-3), ShowRR(a) + " | " + ShowRR(b));
+        });
+
         // fixture control: no decision (the list not given) is today's drop, with no settle label (holds on the base)
         Case(check, "part3 fixture control: with no settle decision the free item drops as before (d 95), no settle labels", () =>
         {
