@@ -71,8 +71,8 @@ static partial class MotionProof
             var t = PrimitiveSolidity.Read(tableJson);
             var r = PrimitiveSolidity.Decide(new PrimitiveFacts("000021:Skyrim.esm", "Static", null, new Vector3(10, 20, 5), new Vec3(100, 200, 300), new Vec3(0, 0, MathF.PI / 2)), t, "REFUSAL");
             bool box = Near3b(r.Box.Min.X, 80, 1e-2) && Near3b(r.Box.Max.X, 120, 1e-2) && Near3b(r.Box.Min.Y, 190, 1e-2) && Near3b(r.Box.Max.Y, 210, 1e-2) && Near3b(r.Box.Min.Z, 295, 1e-2) && Near3b(r.Box.Max.Z, 305, 1e-2);
-            string lab = string.Join(" | ", r.Labels);
-            return (r.Status == "certified" && box && lab.Contains("player") && lab.Contains("Q1") && !lab.Contains("items"), $"{r.Status} {B3b(r.Box)} [{lab}]");
+            string lab = r.Reason ?? "";   // certified: labels stay empty by contract; the basis is in the reason (corrected before green)
+            return (r.Status == "certified" && r.Labels.Count == 0 && box && lab.Contains("player") && lab.Contains("Q1") && !lab.Contains("items"), $"{r.Status} {B3b(r.Box)} [{lab}]");
         });
         // PS2: an acoustic space measured not solid: no_geometry even though COLL L_ACOUSTIC_SPACE lists the character controller.
         // Rejects "COLL decides".
