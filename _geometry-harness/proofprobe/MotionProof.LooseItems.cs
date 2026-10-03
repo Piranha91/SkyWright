@@ -158,6 +158,18 @@ static partial class MotionProof
             return (hc.ConvexPlanesMatchHull == 1 && hc.ConvexPlanesMismatch == 0 && hc.ConvexRadiusApplied == 1 && box7 && b.Complete,
                     $"matched {hc.ConvexPlanesMatchHull} mismatched {hc.ConvexPlanesMismatch} radiusApplied {hc.ConvexRadiusApplied} bounds {bb.Min.X:0.###},{bb.Min.Y:0.###},{bb.Min.Z:0.###}..{bb.Max.X:0.###},{bb.Max.Y:0.###},{bb.Max.Z:0.###}");
         });
+        // LI-K2: under the rest rule the radius item over a floor 100 u down drops 100 - 7 = 93 (the shell meets the floor); with
+        // physics alone (no rest) it drops 95 as before (the radius is opt-in). Rejects the radius ignored under rest, and the
+        // radius applied without it.
+        Case(check, "loose-items LI-K2: the radius-2 item over a floor 100 u down — rest on d 93; physics only d 95", () =>
+        {
+            var fl = new[] { new DropSupport("floor", 1, true, false, Plate(500, -100)) };
+            var on = MeshReach.OfModel(FreeItemRadius(2f, 2f), Origin, Origin, 1f, null, new ReachOptions(0.5, 65536, new ReachRules(Physics: true, BaseRecordType: "MISC",
+                Supports: _ => fl, Layers: RRLayers, Settle: new SettleDecision("settles", null), Rest: true)));
+            var off = MeshReach.OfModel(FreeItemRadius(2f, 2f), Origin, Origin, 1f, null, RulesOn(physics: true, baseType: "MISC", supports: fl));
+            return (on.Drop is { Status: "dropped" } d && NearA7(d.Distance, 93, 1e-3) && off.Drop is { Status: "dropped" } d2 && NearA7(d2.Distance, 95, 1e-3),
+                    ShowRR(on) + " | off " + ShowRR(off));
+        });
         // LI-K4: the decoder's default leaves the radius off (in-game calibrations read the core hull): collision bounds [-5,5],
         // ConvexRadiusApplied 0, while the planes are still checked (matched 1). Rejects the radius applied by default.
         Case(check, "loose-items LI-K4: default decode — radius not applied (bounds [-5,5]^3, applied 0), planes still checked (matched 1)", () =>
@@ -248,6 +260,17 @@ static partial class MotionProof
         {
             var r = MeshReach.OfModel(FreeItem(), Origin, Origin, 1f, null, RestOn(new SettleDecision("rests", exFlag), above));
             return (r.Status == "uncertified" && BoxIs(r.Box, -5, -5, -5, 5, 5, 5) && r.Drop is { Status: "floats" } && r.Labels.Contains(PhysicsReach.FloatsLabel), ShowRR(r));
+        });
+        // LI-R5 (Gate B review F2): a settling item over a floor 100 u down, rest on -> dropped d 95 with tilt margin
+        // m = sqrt(3 x 5^2) - 5 = 3.6603; region = prism plus the landed box grown by m sideways and 2m upward (bottom on the
+        // floor): x,y -8.6603..8.6603, z -100..max(5, -90 + 7.3205). Rejects no margin, and a margin pushed below the support.
+        Case(check, "loose-items LI-R5: a settling item over a floor, rest on — d 95, tilt margin 3.6603, region x ±8.6603, bottom -100, tilt label", () =>
+        {
+            var r = MeshReach.OfModel(FreeItem(), Origin, Origin, 1f, null, RestOn(new SettleDecision("settles", null), new[] { new DropSupport("floor", 1, true, false, Plate(500, -100)) }));
+            double m = Math.Sqrt(75) - 5;
+            return (r.Drop is { Status: "dropped" } d && NearA7(d.Distance, 95, 1e-3) && NearA7(d.TiltMargin, m, 1e-3) && NearA7(r.Box.Max.X, 5 + m, 1e-3)
+                    && NearA7(r.Box.Min.Y, -5 - m, 1e-3) && NearA7(r.Box.Min.Z, -100, 1e-3) && NearA7(r.Box.Max.Z, 5, 1e-3) && r.Labels.Contains(MeshReach.TiltLabel),
+                    ShowRR(r) + $" tilt {r.Drop?.TiltMargin:0.####}");
         });
         // LI-R4: enable timing unknown with nothing below -> the placed box (enabled after load, it rests there), drop "lost",
         // the lost and timing labels. Rejects one reading only.
