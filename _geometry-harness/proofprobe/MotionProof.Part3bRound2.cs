@@ -211,6 +211,32 @@ static partial class MotionProof
             return (NearA7(r.Box.Min.Z, -(R2Lat + 16 * R2Q), 1e-2) && r.Labels.Any(l => l.Contains("no surface under")), ShowRR(r));
         });
 
+        // ================= AP: a measured approximation beside the file bound =================
+        // AP1: an entry for these bytes with a model-frame box (-10..10, -10..10, 0..30) placed at (100, 0, 0) turned 90 deg about z: the
+        // part is the box carried by the placement, (90..110, -10..10, 0..30) (z turned: x and y spans swap, equal here), labelled, inside
+        // the region. Rejects the part dropped and the box left in the model frame (x -10..10).
+        // AP2: a different sha adds nothing. AP3: a box outside the file bound widens the region (z 0..500: the region reaches 500).
+        ReachRegion AP(string sh, float zTop) => MeshReach.OfModel(pn, new Vec3(100, 0, 0), new Vec3(0, 0, MathF.PI / 2), 1f, null,
+            new ReachOptions(0.5, 4096, new ReachRules(Particles: true, ModelPath: "meshes\\t\\p.nif",
+                Approximations: new[] { new MeasuredApproximation("meshes/t/p.nif", sh, new Aabb(new Vec3(-10, -10, 0), new Vec3(10, 10, zTop), false), "test box (2 views, 5 bursts, margin 30 %)") })));
+        Case(check, "r2 K-AP1: a measured approximation for these bytes is a labelled part carried by the placement, inside the region", () =>
+        {
+            var r = AP(sha, 30);
+            var part = r.UncertifiedParts.FirstOrDefault(x => x.Label.StartsWith("in-game approximation (beside the file bound): test box"));
+            return (r.Status == "uncertified" && part is not null && NearA7(part.Box.Min.X, 90, 1e-3) && NearA7(part.Box.Max.X, 110, 1e-3) && NearA7(part.Box.Max.Z, 30, 1e-3)
+                    && r.Labels.Any(l => l.Contains("test box")) && BoxContains3b(r.Box, new Vector3(110, 10, 30)), ShowRR(r));
+        });
+        Case(check, "r2 K-AP2: another sha adds no part", () =>
+        {
+            var r = AP(new string('1', 64), 30);
+            return (r.Status == "uncertified" && !r.UncertifiedParts.Any(x => x.Label.StartsWith("in-game approximation")), ShowRR(r));
+        });
+        Case(check, "r2 K-AP3: an approximation reaching outside the file bound widens the region (z max 500)", () =>
+        {
+            var r = AP(sha, 500);
+            return (NearA7(r.Box.Max.Z, 500, 1e-2), ShowRR(r));
+        });
+
         // ================= W: wiring the round-1 sweep could not see =================
         // W6: an emitter object translating x 0 -> 100: the region holds the emitter at x 100: x max = 105 + 63.91421 = 168.91421. Rejects
         // the emitter read at its first sampled pose only (x max 68.91).
