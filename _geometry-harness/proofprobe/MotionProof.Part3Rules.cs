@@ -40,7 +40,6 @@ static partial class MotionProof
         // The list as shipped beside overlapprobe (kinds and values; evidence text is not asserted).
         var settleList = LoadSettle.Read("""
             [{"kind":"refRecordFlag","value":"0x20000000","evidence":"lab"},
-             {"kind":"weaponAnimationType","value":"Bow","evidence":"lab"},
              {"kind":"enabledAfterLoad","value":"true","evidence":"lab"}]
             """);
         // K-L1: a reference flagged Don't Havok Settle rests (exemption refRecordFlag). Rejects ignoring the flag mask.
@@ -49,11 +48,12 @@ static partial class MotionProof
             var d = LoadSettle.Decide(new SettleFacts(0x20000000u | 0x400u, "Crossbow", true), settleList);
             return (d.Status == "rests" && d.Exemption?.Kind == "refRecordFlag", $"{d}");
         });
-        // K-L2: a WEAP of animation type Bow rests (exemption weaponAnimationType). Rejects matching another type.
-        Case(check, "part3 K-L2: WEAP animation type Bow -> rests, by the weaponAnimationType exemption", () =>
+        // K-L2: the weapon animation type is not a reader kind (B5c refuted it as the key: a graph model that is not a weapon rested,
+        // and the bows are covered by the graph condition). A list naming it is refused by name. Rejects the kind still interpreted.
+        Case(check, "part3 K-L2: a list naming weaponAnimationType is refused when read, naming the kind", () =>
         {
-            var d = LoadSettle.Decide(new SettleFacts(0x400u, "Bow", true), settleList);
-            return (d.Status == "rests" && d.Exemption?.Kind == "weaponAnimationType", $"{d}");
+            try { LoadSettle.Read("""[{"kind":"weaponAnimationType","value":"Bow","evidence":"x"}]"""); return (false, "read"); }
+            catch (ArgumentException e) { return (e.Message.Contains("unknown kind") && e.Message.Contains("weaponAnimationType"), e.Message); }
         });
         // K-L3: a Crossbow / a sword / a non-weapon, unflagged, enabled at load -> settles. Rejects exempting everything.
         Case(check, "part3 K-L3: Crossbow, OneHandSword and a non-weapon, unflagged and enabled at load -> settles", () =>
