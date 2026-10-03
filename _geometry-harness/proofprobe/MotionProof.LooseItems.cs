@@ -36,6 +36,23 @@ static partial class MotionProof
         return Save(f, "free item, tilted planes");
     }
 
+    /// <summary>A free item (render box [-5,5]^3) whose convex body is the box [-5,5]^3 with convex radius
+    /// <paramref name="radiusU"/> (Skyrim units) and its six planes stored <paramref name="planeOffsetU"/> outside the
+    /// vertices (Havok: the planes describe the radius shell when the offset equals the radius).</summary>
+    static byte[] FreeItemRadius(float radiusU, float planeOffsetU)
+    {
+        var f = new NifFile(); f.Create(Ver, withRootNode: true);
+        var root = f.GetRootNodes().First(); root.Flags_ui = 0xE;
+        var item = new NiNode { Name = new NiStringRef("Item"), Flags_ui = 0xE, Scale = 1f, Rotation = Identity33() };
+        root.Children.AddBlockRef(f.AddBlock(item));
+        item.Children.AddBlockRef(f.AddBlock(Shape("ItemMesh", Box(-5, -5, -5, 5, 5, 5))));
+        var s = ConvexBox(-5, -5, -5, 5, 5, 5);
+        s.Radius = radiusU / HavokU;
+        s.Normals = s.Normals.Select(n => new Vector4(n.X, n.Y, n.Z, n.W - planeOffsetU / HavokU)).ToList();
+        AddBody(f, item, s, 5f, hkMotionType.MO_SYS_SPHERE_STABILIZED, SkyrimLayer.SKYL_CLUTTER);
+        return Save(f, "free item, convex radius");
+    }
+
     static (int Tris, bool Closed, bool Outward) HullFacts(IReadOnlyList<Vector3> v, IReadOnlyList<int> idx, Vector3 inside)
     {
         var edges = new Dictionary<(int, int), int>();
@@ -126,6 +143,39 @@ static partial class MotionProof
             var hc = HavokCollision.Decode(Load(FreeItem()), true).Stats;
             var b = PhysicsReach.ModelBodies(FreeItem()).Single();
             return (hc.ConvexRebuiltFromVertices == 0 && b.Model.Indices.Length / 3 == 12, $"rebuilt {hc.ConvexRebuiltFromVertices} tris {b.Model.Indices.Length / 3}");
+        });
+
+        // ================= K: the convex radius (Gate B review F1) =================
+        // LI-K1: planes stored one radius (2 u) outside the vertices -> the planes match the hull's radius window (counted
+        // matched, none mismatched) and the solid is the box grown by the radius: collision bounds [-7,7]^3 on the axes.
+        // Rejects the radius ignored (bounds [-5,5]) and a shell plane read as a mismatch.
+        Case(check, "loose-items LI-K1: planes one radius (2 u) outside the vertices — matched 1, mismatched 0, radius applied 1, collision bounds [-7,7]^3", () =>
+        {
+            var hc = HavokCollision.Decode(Load(FreeItemRadius(2f, 2f)), true, convexRadius: true).Stats;
+            var b = PhysicsReach.ModelBodies(FreeItemRadius(2f, 2f), convexRadius: true).Single();
+            var bb = SpatialOverlap.SoupBounds(b.Model);
+            bool box7 = NearA7(bb.Min.X, -7, 1e-3) && NearA7(bb.Max.X, 7, 1e-3) && NearA7(bb.Min.Z, -7, 1e-3) && NearA7(bb.Max.Z, 7, 1e-3) && NearA7(bb.Max.Y, 7, 1e-3);
+            return (hc.ConvexPlanesMatchHull == 1 && hc.ConvexPlanesMismatch == 0 && hc.ConvexRadiusApplied == 1 && box7 && b.Complete,
+                    $"matched {hc.ConvexPlanesMatchHull} mismatched {hc.ConvexPlanesMismatch} radiusApplied {hc.ConvexRadiusApplied} bounds {bb.Min.X:0.###},{bb.Min.Y:0.###},{bb.Min.Z:0.###}..{bb.Max.X:0.###},{bb.Max.Y:0.###},{bb.Max.Z:0.###}");
+        });
+        // LI-K4: the decoder's default leaves the radius off (in-game calibrations read the core hull): collision bounds [-5,5],
+        // ConvexRadiusApplied 0, while the planes are still checked (matched 1). Rejects the radius applied by default.
+        Case(check, "loose-items LI-K4: default decode — radius not applied (bounds [-5,5]^3, applied 0), planes still checked (matched 1)", () =>
+        {
+            var hc = HavokCollision.Decode(Load(FreeItemRadius(2f, 2f)), true).Stats;
+            var bb = SpatialOverlap.SoupBounds(PhysicsReach.ModelBodies(FreeItemRadius(2f, 2f)).Single().Model);
+            return (hc.ConvexRadiusApplied == 0 && hc.ConvexPlanesMatchHull == 1 && NearA7(bb.Max.Z, 5, 1e-3) && NearA7(bb.Min.X, -5, 1e-3),
+                    $"applied {hc.ConvexRadiusApplied} matched {hc.ConvexPlanesMatchHull} bounds {bb.Min.X:0.###}..{bb.Max.Z:0.###}");
+        });
+        // LI-K3: planes stored 3 u INSIDE the vertices (the shield's shape: planes cutting through the hull) -> counted and named
+        // as a mismatch; the faces still come from the vertices plus radius (bounds [-7,7]). Rejects a silent pass.
+        Case(check, "loose-items LI-K3: planes 3 u inside the vertices — mismatched 1 and named, solid still the vertices + radius", () =>
+        {
+            var hc = HavokCollision.Decode(Load(FreeItemRadius(2f, -3f)), true, convexRadius: true).Stats;
+            var b = PhysicsReach.ModelBodies(FreeItemRadius(2f, -3f), convexRadius: true).Single();
+            var bb = SpatialOverlap.SoupBounds(b.Model);
+            return (hc.ConvexPlanesMismatch == 1 && hc.ConvexPlanesMatchHull == 0 && hc.ConvexPlanesMismatchShapes.Count == 1 && NearA7(bb.Max.Z, 7, 1e-3),
+                    $"matched {hc.ConvexPlanesMatchHull} mismatched {hc.ConvexPlanesMismatch} named [{string.Join("; ", hc.ConvexPlanesMismatchShapes)}] maxZ {bb.Max.Z:0.###}");
         });
 
         // ================= F: drops with the rebuilt body; a faceless body refused by name =================

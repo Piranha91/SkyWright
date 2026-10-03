@@ -77,7 +77,9 @@ static partial class MotionProof
             new(1, 0, 0, -x1 / HavokU), new(-1, 0, 0, x0 / HavokU), new(0, 1, 0, -y1 / HavokU),
             new(0, -1, 0, y0 / HavokU), new(0, 0, 1, -z1 / HavokU), new(0, 0, -1, z0 / HavokU),
         };
-        return new bhkConvexVerticesShape { Vertices = v, NumVertices = 8, Normals = n, NumNormals = 6 };
+        // Radius 0: the box IS the solid (NiflySharp's default convex radius is 0.05 Havok units, which the decoder now grows
+        // the hull by; these fixtures' analytic answers are for the exact box)
+        return new bhkConvexVerticesShape { Vertices = v, NumVertices = 8, Normals = n, NumNormals = 6, Radius = 0f };
     }
 
     /// <summary>A free item: root -> node "Item" -> render box [-5,5]^3 and a movable convex body of the same box (mass 5,
