@@ -153,6 +153,20 @@ static partial class MotionProof
             double lat = 5 + 25 * (1 - Math.Exp(-37.5)) / 15 + Sqrt2;
             return (off.Status == "modelled" && NearA7(off.ModelBox.Max.X, R2Lat) && on.Status == "modelled" && NearA7(on.ModelBox.Max.X, lat), $"{ShowPB(off)} || {ShowPB(on)}");
         });
+        // K5: a settled gravity with a modifier-active controller whose keys can switch it off stops no climb: z max = 5 + v T + r =
+        // 68.91421 (not the apex 37.66421). Rejects the controller ignored for the climb.
+        Case(check, "r2 K-V3K5: a switchable settled gravity - the climb is not capped by the apex, z max 68.91421", () =>
+        {
+            var b = ParticleVariant((f, ps, root) =>
+            {
+                var bd = new NiBoolData { Data = new KeyGroup<byte> { Interpolation = KeyType.CONST_KEY, Keys = new() { new Key<byte> { Time = 0, Value = 1 }, new Key<byte> { Time = 0.5f, Value = 0 } }, NumKeys = 2 } };
+                var bi = new NiBoolInterpolator { Value = true, Data = new(f.AddBlock(bd)) };
+                var c = new NiPSysModifierActiveCtlr { ModifierName = new NiStringRef("Gravity"), Interpolator = new(f.AddBlock(bi)), StartTime = 0, StopTime = 1, Frequency = 1, NextController = new(-1) };
+                c.Target = new(f.Blocks.IndexOf(ps)); ps.Controller = new(f.AddBlock(c));
+            }, "switchable gravity");
+            var p = ParticleReach.BoundsFromModifiers(b, null, _ => new Vector3(0, 0, -1)).Single();
+            return (p.Status == "modelled" && NearA7(p.ModelBox.Max.Z, R2Lat) && NearA7(p.ModelBox.Min.Z, -(R2Lat + 16 * R2Q)), ShowPB(p));
+        });
         // T1: turbulence 0.1, scale 1: A = 50 per axis: x half 68.91421 + 50 x 3.1666667 = 227.24755; z 119.58088 + 158.33333 = 277.91421.
         // Rejects the refusal (round 1), A = Turbulence x Scale (x 69.2) and turbulence on one axis only.
         Case(check, "r2 K-V3T1: turbulence 0.1 x 1 -> A 50 per axis: x half 227.24755, z half 277.91421", () =>
