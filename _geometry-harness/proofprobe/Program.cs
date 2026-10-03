@@ -3610,6 +3610,9 @@ MotionProof.RunSkinRule(Check);
 MotionProof.RunPart3Rules(Check);
 MotionProof.RunParticleModel(Check);
 MotionProof.RunLooseItems(Check);
+// Reach region Part 3b: refusals to verdicts (red until implemented).
+MotionProof.RunPart3bRules(Check);
+MotionProof.RunPart3bRound2(Check);
 AnchorReachProof.Run(Check);
 OverlapSurfaceProof.RunStageA7(Check);
 // G1 build list, Stage B (plan g1/PLAN-8.md): forced enable, primitive box, reachable band (red until implemented).

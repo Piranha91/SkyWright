@@ -137,6 +137,17 @@ pose), is read at its stored pose, labelled "rest: stored pose (confirmed by in-
 ({node: {T, R (9, rows), S}}, a confirmed non-stored pose such as a graph start state), "label", and "pose": {"clip": "<clip path>", "sweep": "loop" |
 [t0, t1], "label"} (a confirmed clip read alone from the model's behaviour graph and swept on those bytes; a clip the graph lacks
 refuses, naming it). No entry, no change.
+Part 3b keys (with --reach): clipnames (a behaviour clip resolves through its character's animation list by file name),
+transfer (a refused graph model whose graph files are byte-identical to a --pose-confirmations model's and whose stored locals
+on every graph-driven node equal that model's takes its confirmation), blend (state transitions and hkbBlenderGenerator children
+bounded by the blend envelope: the product of per-node 1-DOF intervals, else the chord bound), missingseq (a sequence generator
+naming a sequence absent from the NIF reads the stored pose and every sequence in the file), path (a NiPathInterpolator node within
+its path's control-polygon hull grown by its subtree radius), emitter (a moving particle emitter: swept origins grown by the particle
+offset box), gravity (--settled-gravity FILE: observed gravity frame and sign per model; with a scene, the support-plane term
+under its F1 condition), approx (--measured-approximations FILE: an in-game measured box per model, a labelled part beside the file
+bound), absent (--absent-models FILE: a model no
+active provider supplies, measured drawing nothing, is no_geometry). primitive with --primitive-solidity FILE: the measured
+(base, layer) table decides; without the file the earlier activator rule stands.
 See overlapprobe/Program.cs usage documentation. Help performs no load-order scan.
 """);
     return 0;
@@ -159,6 +170,10 @@ bool reachOn = false;   // --reach (G1 build list, Stage A): a reach region for 
 HashSet<string>? reachRules = null;   // --reach-rules physics,graph,switch,book (unbounded neighbour classes)
 string? poseConfirmationsPath = null;   // --pose-confirmations FILE (with --reach-rules)
 string? settleExemptionsPath = null;     // --settle-exemptions FILE (with --reach-rules physics; default: the shipped list beside the exe)
+string? primitiveSolidityPath = null;    // --primitive-solidity FILE (with --reach-rules primitive; Part 3b measured table)
+string? absentModelsPath = null;         // --absent-models FILE (with --reach-rules absent; Part 3b measurements)
+string? settledGravityPath = null;       // --settled-gravity FILE (with --reach-rules gravity; Part 3b observations)
+string? approximationsPath = null;       // --measured-approximations FILE (with --reach-rules approx; Part 3b round 2 measurements)
 long maxTrianglePairs = 2_000_000;
 double pairSeconds = 120;
 string? emitPath = null;
@@ -207,11 +222,16 @@ try
         else if (flag == "--reach") reachOn = true;
         else if (flag == "--pose-confirmations") { poseConfirmationsPath = NeedValue(i, flag); i++; }
         else if (flag == "--settle-exemptions") { settleExemptionsPath = NeedValue(i, flag); i++; }
+        else if (flag == "--primitive-solidity") { primitiveSolidityPath = NeedValue(i, flag); i++; }
+        else if (flag == "--absent-models") { absentModelsPath = NeedValue(i, flag); i++; }
+        else if (flag == "--settled-gravity") { settledGravityPath = NeedValue(i, flag); i++; }
+        else if (flag == "--measured-approximations") { approximationsPath = NeedValue(i, flag); i++; }
         else if (flag == "--reach-rules")
         {
             reachRules = NeedValue(i, flag).Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).ToHashSet(StringComparer.OrdinalIgnoreCase);
-            if (reachRules.Count == 0 || reachRules.Any(x => x is not ("physics" or "graph" or "switch" or "book" or "skin" or "particles" or "primitive" or "rest")))
-                throw new ArgumentException("--reach-rules takes physics,graph,switch,book,skin,particles,primitive,rest");
+            if (reachRules.Count == 0 || reachRules.Any(x => x is not ("physics" or "graph" or "switch" or "book" or "skin" or "particles" or "primitive" or "rest"
+                                                                      or "clipnames" or "transfer" or "blend" or "missingseq" or "path" or "emitter" or "gravity" or "absent" or "approx")))
+                throw new ArgumentException("--reach-rules takes physics,graph,switch,book,skin,particles,primitive,rest,clipnames,transfer,blend,missingseq,path,emitter,gravity,absent,approx");
             if (reachRules.Contains("rest") && !reachRules.Contains("physics"))
                 throw new ArgumentException("--reach-rules rest needs physics (it reads the drop and the load-settle rule)");
             i++;
@@ -694,7 +714,13 @@ object ReachOf(FormKey key, FormKey baseKey, Snap p)
         return Out(region);
     }
     if (g.RelativePath is not null)
-        return Out(new ReachRegion("refused", $"{g.Status}: {g.Reason}", Aabb.Empty, MeshReach.PolicyVersion, Array.Empty<string>(), Array.Empty<ReachPart>()));
+    {
+        string why = $"{g.Status}: {g.Reason}";
+        // Part 3b absent: a model no active provider supplies, measured in game to draw nothing, is no_geometry (with both facts)
+        if (reachRules?.Contains("absent") == true && g.Status == "missing_asset" && AbsentModels() is { } absent)
+            return Out(MeshReach.OfAbsentModel(g.RelativePath, absent, why));
+        return Out(new ReachRegion("refused", why, Aabb.Empty, MeshReach.PolicyVersion, Array.Empty<string>(), Array.Empty<ReachPart>()));
+    }
     if (idx.RefPrimitive.TryGetValue(key, out var prim))
     {
         string layer = idx.RefCollisionLayer.TryGetValue(key, out var li)
@@ -705,7 +731,15 @@ object ReachOf(FormKey key, FormKey baseKey, Snap p)
         {
             string? btype = idx.BaseInfo.TryGetValue(baseKey, out var pbi) ? pbi.Type : null;
             uint? li2 = idx.RefCollisionLayer.TryGetValue(key, out var lv) ? lv : null;
-            return Out(MeshReach.OfPrimitiveRule(btype, false, li2, primRefusal));   // reached only with no model path
+            var earlier = MeshReach.OfPrimitiveRule(btype, false, li2, primRefusal);   // reached only with no model path
+            if (earlier.Status != "refused" || PrimitiveTable() is not { } table) return Out(earlier);
+            // Part 3b: the measured (base, layer) table decides; XPRM bounds are full extents (station T and Q: the top sits at
+            // centre + bounds_z / 2); a scaled reference is not in the measurement
+            if (Math.Abs(p.Scale - 1f) > 1e-4f) return Out(new ReachRegion("refused", primRefusal + $"; reference scale {p.Scale} (primitives were measured at scale 1)", Aabb.Empty, MeshReach.PolicyVersion, Array.Empty<string>(), Array.Empty<ReachPart>()));
+            string? lname = li2 is null ? null : (idx.CollisionLayersByIndex.TryGetValue(li2.Value, out var cl2) ? cl2.Edid : null);
+            if (li2 is not null && lname is null) return Out(earlier);
+            var facts = new PrimitiveFacts(baseKey.ToString(), btype, lname, new System.Numerics.Vector3(prim.Bounds.X / 2, prim.Bounds.Y / 2, prim.Bounds.Z / 2), p.Pos, p.Rot);
+            return Out(PrimitiveSolidity.Decide(facts, table, primRefusal));
         }
         return Out(new ReachRegion("refused", primRefusal, Aabb.Empty, MeshReach.PolicyVersion, Array.Empty<string>(), Array.Empty<ReachPart>()));
     }
@@ -953,6 +987,39 @@ SettleFacts SettleFactsOf(FormKey key, FormKey baseKey)
     if (resolvedArms?.IsForced(key) == true) atLoad = false;   // --force-enable: enabled after load, by construction
     return new SettleFacts(flags, atLoad);   // the model's BSX is read by the reach reader
 }
+IReadOnlyList<PrimitiveMeasurement>? primitiveTable = null;
+IReadOnlyList<PrimitiveMeasurement>? PrimitiveTable()
+{
+    if (primitiveSolidityPath is null) return null;
+    return primitiveTable ??= PrimitiveSolidity.Read(File.ReadAllText(primitiveSolidityPath));
+}
+IReadOnlyList<AbsenceMeasurement>? absentModels = null;
+IReadOnlyList<AbsenceMeasurement>? AbsentModels()
+{
+    if (absentModelsPath is null) return null;
+    return absentModels ??= System.Text.Json.JsonSerializer.Deserialize<List<AbsenceMeasurement>>(File.ReadAllText(absentModelsPath),
+        new System.Text.Json.JsonSerializerOptions { PropertyNameCaseInsensitive = true }) ?? new List<AbsenceMeasurement>();
+}
+List<TransferSource>? transferSources = null;
+// Part 3b transfer: the confirmed models (--pose-confirmations, stored-pose entries) as transfer sources, their graph facts read
+// through this order (bytes must match the confirmation's sha256)
+List<TransferSource> TransferSources()
+{
+    if (transferSources is not null) return transferSources;
+    transferSources = new();
+    foreach (var c in poseConfirmations ?? new List<PoseConfirmation>())
+    {
+        if (c.Clip is not null || c.Locals is { Count: > 0 }) continue;
+        var full = (c.ModelPath.StartsWith("meshes", StringComparison.OrdinalIgnoreCase) ? c.ModelPath : Path.Combine("meshes", c.ModelPath)).Replace('/', '\\');
+        var src = assets.ResolveForPlacement(full).Sources.FirstOrDefault();
+        if (src is null || AssetResolver.ReadPlacementSource(src).Bytes is not { } b) continue;
+        if (!string.Equals(Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(b)), c.Sha256, StringComparison.OrdinalIgnoreCase)) continue;
+        byte[]? TRead(string r) { try { var res = assets.ResolveForPlacement(r); return res.Sources.Count == 0 ? null : AssetResolver.ReadPlacementSource(res.Sources[0]).Bytes; } catch (ArgumentException) { return null; } }
+        if (NifMotion.GraphFacts(b, TRead, new GraphOptions(true, true, true, ClipNames: reachRules!.Contains("clipnames"))) is { } f)
+            transferSources.Add(new TransferSource(c.ModelPath, f.Files, f.DrivenLocals, c.Label ?? MeshReach.ConfirmedPoseLabel));
+    }
+    return transferSources;
+}
 ReachRules? RulesFor(FormKey key, FormKey baseKey, Snap p)
 {
     if (reachRules is null) return null;
@@ -973,7 +1040,52 @@ ReachRules? RulesFor(FormKey key, FormKey baseKey, Snap p)
                           q => SupportsUnder(key, p, q), reachLayers, poseConfirmations, modelPath, Skin: reachRules.Contains("skin"),
                           Particles: reachRules.Contains("particles"),
                           SettleFacts: reachRules.Contains("physics") ? SettleFactsOf(key, baseKey) : null,
-                          SettleExemptions: reachRules.Contains("physics") ? settleExemptions : null, Rest: reachRules.Contains("rest"));
+                          SettleExemptions: reachRules.Contains("physics") ? settleExemptions : null, Rest: reachRules.Contains("rest"),
+                          ClipNames: reachRules.Contains("clipnames"), Blend: reachRules.Contains("blend"), MissingSequence: reachRules.Contains("missingseq"),
+                          PathHull: reachRules.Contains("path"), Emitter: reachRules.Contains("emitter"),
+                          Transfers: reachRules.Contains("transfer") ? TransferSources() : null,
+                          Gravity: reachRules.Contains("gravity") ? SettledGravities() : null,
+                          Approximations: reachRules.Contains("approx") ? MeasuredApproximations() : null);
+}
+// Part 3b round 2: --measured-approximations FILE, a JSON list of {modelPath, sha256, modelBox: {min: [3], max: [3]}, label, evidence}
+IReadOnlyList<MeasuredApproximation>? measuredApproximations = null;
+IReadOnlyList<MeasuredApproximation> MeasuredApproximations()
+{
+    if (measuredApproximations is not null) return measuredApproximations;
+    if (approximationsPath is null) return measuredApproximations = Array.Empty<MeasuredApproximation>();
+    using var doc = System.Text.Json.JsonDocument.Parse(File.ReadAllText(approximationsPath));
+    var list = new List<MeasuredApproximation>();
+    foreach (var e in doc.RootElement.EnumerateArray())
+    {
+        var mb = e.GetProperty("modelBox");
+        float[] lo = mb.GetProperty("min").EnumerateArray().Select(x => x.GetSingle()).ToArray(), hi = mb.GetProperty("max").EnumerateArray().Select(x => x.GetSingle()).ToArray();
+        string ev = e.GetProperty("evidence").GetString() ?? "";
+        if (ev.Length == 0) throw new ArgumentException("--measured-approximations: an entry without evidence");
+        list.Add(new MeasuredApproximation(e.GetProperty("modelPath").GetString()!, e.GetProperty("sha256").GetString()!,
+                                           new Aabb(new Vec3(lo[0], lo[1], lo[2]), new Vec3(hi[0], hi[1], hi[2]), false), e.GetProperty("label").GetString()! + " (" + ev + ")"));
+    }
+    return measuredApproximations = list;
+}
+// Part 3b round 2: --settled-gravity FILE, a JSON list of {modelPath, sha256, systems: [..] (empty = every system),
+// towardWorldNegativeZ: true, evidence}; an entry that does not say the particles fall toward world -z is refused (no other
+// direction is modelled)
+IReadOnlyList<SettledGravity>? settledGravities = null;
+IReadOnlyList<SettledGravity> SettledGravities()
+{
+    if (settledGravities is not null) return settledGravities;
+    if (settledGravityPath is null) return settledGravities = Array.Empty<SettledGravity>();
+    using var doc = System.Text.Json.JsonDocument.Parse(File.ReadAllText(settledGravityPath));
+    var list = new List<SettledGravity>();
+    foreach (var e in doc.RootElement.EnumerateArray())
+    {
+        bool down = e.GetProperty("towardWorldNegativeZ").GetBoolean();
+        if (!down) throw new ArgumentException("--settled-gravity: only towardWorldNegativeZ: true is modelled");
+        string ev = e.GetProperty("evidence").GetString() ?? "";
+        if (ev.Length == 0) throw new ArgumentException("--settled-gravity: an entry without evidence");
+        list.Add(new SettledGravity(e.GetProperty("modelPath").GetString()!, e.GetProperty("sha256").GetString()!,
+                                    e.TryGetProperty("systems", out var sy) ? sy.EnumerateArray().Select(x => x.GetString()!).ToList() : new List<string>(), true, ev));
+    }
+    return settledGravities = list;
 }
 
 (PhysicalState State, string Detail) OverlapPredicate(FormKey laterKey, FormKey otherKey)
