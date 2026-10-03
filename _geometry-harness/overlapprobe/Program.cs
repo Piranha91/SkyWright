@@ -116,7 +116,7 @@ reference enabled in the state, on a layer the falling body's COLL record collid
 a Static base is held (labelled: measured on one model in the lab). One load-settle rule decides the drop: an object drops
 only if the engine settles it when the cell loads, otherwise it rests at its placed pose until disturbed; the exemptions
 are data (--settle-exemptions FILE, default load-settle-exemptions.json beside the exe: a REFR record-flag mask, a WEAP
-animation type, or a reference a judged state enables after load, which holds the placed and dropped poses both). graph: binding member paths decide (playbackSpeed: no effect), the
+animation type, the model's BSX bits, or a reference a judged state enables after load, which holds the placed and dropped poses both). graph: binding member paths decide (playbackSpeed: no effect), the
 reference-pose generator, a missing sequence where the file has no transform source. switch: every switch child, animated
 children swept, Tree_Anim shapes labelled. book: a BOOK base, or a Static a BOOK names as InventoryArt, is read closed (its
 stored pose: the modelling rule). skin: weight sources that disagree only on vertices no
@@ -882,7 +882,7 @@ IReadOnlyList<SettleExemption>? settleExemptions = null;
 Dictionary<FormKey, EnableResolution> settleBaselineMemo = new();
 // the load-settle facts of one reference: its winning REFR flags, its base's WEAP animation type, and whether it is enabled
 // at load (false only when a judged state enables a reference the load-time reading has disabled)
-SettleDecision SettleOf(FormKey key, FormKey baseKey)
+SettleFacts SettleFactsOf(FormKey key, FormKey baseKey)
 {
     if (settleExemptions is null)
     {
@@ -898,7 +898,7 @@ SettleDecision SettleOf(FormKey key, FormKey baseKey)
         var b = EnableState.Resolve(key, ra.WinnerRawFacts, settleBaselineMemo);
         atLoad = b.Resolved && b.Enabled;
     }
-    return LoadSettle.Decide(new SettleFacts(flags, anim, atLoad), settleExemptions);
+    return new SettleFacts(flags, anim, atLoad);   // the model's BSX is read by the reach reader
 }
 ReachRules? RulesFor(FormKey key, FormKey baseKey, Snap p)
 {
@@ -918,7 +918,8 @@ ReachRules? RulesFor(FormKey key, FormKey baseKey, Snap p)
     return new ReachRules(reachRules.Contains("physics"), reachRules.Contains("graph"), reachRules.Contains("switch"), book, type,
                           q => SupportsUnder(key, p, q), reachLayers, poseConfirmations, modelPath, Skin: reachRules.Contains("skin"),
                           Particles: reachRules.Contains("particles"),
-                          Settle: reachRules.Contains("physics") ? SettleOf(key, baseKey) : null);
+                          SettleFacts: reachRules.Contains("physics") ? SettleFactsOf(key, baseKey) : null,
+                          SettleExemptions: reachRules.Contains("physics") ? settleExemptions : null);
 }
 
 (PhysicalState State, string Detail) OverlapPredicate(FormKey laterKey, FormKey otherKey)

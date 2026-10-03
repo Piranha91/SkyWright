@@ -1,8 +1,8 @@
 [
  {"kind": "refRecordFlag", "value": "0x20000000",
   "evidence": "Don't Havok Settle: a crossbow reference so flagged stayed at its placed pose at cell load while its unflagged twins fell; it moved when pushed (lab)"},
- {"kind": "weaponAnimationType", "value": "Bow",
-  "evidence": "four bow models stayed where placed at cell load and moved when pushed; a crossbow, a one-handed sword and an ingredient fell (lab)"},
+ {"kind": "bsxFlags", "value": "set=0x8;clear=0x1",
+  "evidence": "correlation measured on 7 models, cause not tested: the four with BSX Complex set and Animated clear (bows) stayed where placed at cell load and moved when pushed; a crossbow (Animated set), a one-handed sword and an ingredient (Complex clear) fell (lab)"},
  {"kind": "enabledAfterLoad", "value": "true",
   "evidence": "items enabled by console after the cell loaded stayed where placed, including a control that falls at load, and moved when pushed (lab); a state cannot say when its enable happened, so the reader holds both poses"}
 ]
