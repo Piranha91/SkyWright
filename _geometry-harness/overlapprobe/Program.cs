@@ -116,7 +116,7 @@ reference enabled in the state, on a layer the falling body's COLL record collid
 a Static base is held (labelled: measured on one model in the lab). One load-settle rule decides the drop: an object drops
 only if the engine settles it when the cell loads, otherwise it rests at its placed pose until disturbed; the exemptions
 are data (--settle-exemptions FILE, default load-settle-exemptions.json beside the exe: a REFR record-flag mask, a WEAP
-animation type, the model's BSX bits, or a reference a judged state enables after load, which holds the placed and dropped poses both). graph: binding member paths decide (playbackSpeed: no effect), the
+animation type, the model's BSX bits and behaviour graph, or a reference a judged state enables after load, which holds the placed and dropped poses both). graph: binding member paths decide (playbackSpeed: no effect), the
 reference-pose generator, a missing sequence where the file has no transform source. switch: every switch child, animated
 children swept, Tree_Anim shapes labelled. book: a BOOK base, or a Static a BOOK names as InventoryArt, is read closed (its
 stored pose: the modelling rule). skin: weight sources that disagree only on vertices no

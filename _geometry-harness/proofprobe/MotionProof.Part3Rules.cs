@@ -178,8 +178,16 @@ static partial class MotionProof
         // K-L15: the reader reads the graph from the model: BSX 202 with a graph rests; BSX 202 without one settles (dropped d 95).
         Case(check, "part3 K-L15: the model's graph is read: BSX 202 + graph rests (no drop); BSX 202, no graph, drops d 95", () =>
         {
-            var a = MeshReach.OfModel(FreeItemGraph(202, true), Origin, Origin, 1f, null, FactsOn(GraphList()));
-            var b = MeshReach.OfModel(FreeItemGraph(202, false), Origin, Origin, 1f, null, FactsOn(GraphList()));
+            // the fixture's graph file is not in the fixture, so its motion refuses; a stored-pose confirmation for these exact bytes
+            // stands in for the confirmed in-game look the lab's graph models have, and lets the physics rule decide
+            byte[] ga = FreeItemGraph(202, true), gb = FreeItemGraph(202, false);
+            ReachOptions Confirmed(byte[] nif) => new(0.5, 65536, FactsOn(GraphList()).Rules! with
+            {
+                Confirmations = new[] { new PoseConfirmation(@"meshes\lab\Graph.nif", Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(nif)).ToLowerInvariant(), "lab") },
+                ModelPath = @"meshes\lab\Graph.nif",
+            });
+            var a = MeshReach.OfModel(ga, Origin, Origin, 1f, null, Confirmed(ga));
+            var b = MeshReach.OfModel(gb, Origin, Origin, 1f, null, Confirmed(gb));
             return (a.Labels.Contains(LoadSettle.RestsLabel) && a.Drop is null && b.Drop is { } d && NearA7(d.Distance, 95, 1e-3), ShowRR(a) + " | " + ShowRR(b));
         });
 
