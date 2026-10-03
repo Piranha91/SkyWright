@@ -91,11 +91,12 @@ GraphOptions? graphOptions = null;
 if (rulesArg is not null)
 {
     var set = rulesArg.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).ToHashSet(StringComparer.OrdinalIgnoreCase);
-    var unknown = set.Where(x => x is not ("graph" or "book" or "physics" or "switch")).ToList();
-    if (unknown.Count > 0) { Console.Error.WriteLine("--rules takes graph,book,physics,switch; unknown: " + string.Join(",", unknown)); return 2; }
+    var unknown = set.Where(x => x is not ("graph" or "book" or "physics" or "switch" or "skin")).ToList();
+    if (unknown.Count > 0) { Console.Error.WriteLine("--rules takes graph,book,physics,switch,skin; unknown: " + string.Join(",", unknown)); return 2; }
     graphOptions = set.Contains("graph") ? new GraphOptions(true, true, true) : null;
     readOptions = new MotionReadOptions(IgnorePhysics: set.Contains("physics"), IgnoreAnimation: set.Contains("book"),
-                                        SwitchUnion: set.Contains("switch"), WindAsStatic: set.Contains("switch"), Graph: graphOptions);
+                                        SwitchUnion: set.Contains("switch"), WindAsStatic: set.Contains("switch"), Graph: graphOptions,
+                                        SkinUnion: set.Contains("skin"));
 }
 MotionPlacement? placement = null;
 if (placementArg is not null)

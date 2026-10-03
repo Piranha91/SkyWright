@@ -191,8 +191,8 @@ try
         else if (flag == "--reach-rules")
         {
             reachRules = NeedValue(i, flag).Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).ToHashSet(StringComparer.OrdinalIgnoreCase);
-            if (reachRules.Count == 0 || reachRules.Any(x => x is not ("physics" or "graph" or "switch" or "book")))
-                throw new ArgumentException("--reach-rules takes physics,graph,switch,book");
+            if (reachRules.Count == 0 || reachRules.Any(x => x is not ("physics" or "graph" or "switch" or "book" or "skin")))
+                throw new ArgumentException("--reach-rules takes physics,graph,switch,book,skin");
             i++;
         }
         else if (flag == "--motion-delta") { if (!double.TryParse(NeedValue(i, flag), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out motionDelta) || !(motionDelta > 0)) throw new ArgumentException("--motion-delta requires a positive number"); i++; }
@@ -862,7 +862,7 @@ ReachRules? RulesFor(FormKey key, FormKey baseKey, Snap p)
     bool book = reachRules.Contains("book") && (type == "Book" || (type == "Static" && bookArtStatics.Contains(baseKey)));
     string? modelPath = GeometryOf(baseKey).RelativePath;
     return new ReachRules(reachRules.Contains("physics"), reachRules.Contains("graph"), reachRules.Contains("switch"), book, type,
-                          q => SupportsUnder(key, p, q), reachLayers, poseConfirmations, modelPath);
+                          q => SupportsUnder(key, p, q), reachLayers, poseConfirmations, modelPath, Skin: reachRules.Contains("skin"));
 }
 
 (PhysicalState State, string Detail) OverlapPredicate(FormKey laterKey, FormKey otherKey)
