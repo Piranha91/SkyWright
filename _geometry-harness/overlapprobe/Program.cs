@@ -1002,7 +1002,29 @@ ReachRules? RulesFor(FormKey key, FormKey baseKey, Snap p)
                           SettleExemptions: reachRules.Contains("physics") ? settleExemptions : null,
                           ClipNames: reachRules.Contains("clipnames"), Blend: reachRules.Contains("blend"), MissingSequence: reachRules.Contains("missingseq"),
                           PathHull: reachRules.Contains("path"), Emitter: reachRules.Contains("emitter"),
-                          Transfers: reachRules.Contains("transfer") ? TransferSources() : null);
+                          Transfers: reachRules.Contains("transfer") ? TransferSources() : null,
+                          Gravity: reachRules.Contains("gravity") ? SettledGravities() : null);
+}
+// Part 3b round 2: --settled-gravity FILE, a JSON list of {modelPath, sha256, systems: [..] (empty = every system),
+// towardWorldNegativeZ: true, evidence}; an entry that does not say the particles fall toward world -z is refused (no other
+// direction is modelled)
+IReadOnlyList<SettledGravity>? settledGravities = null;
+IReadOnlyList<SettledGravity> SettledGravities()
+{
+    if (settledGravities is not null) return settledGravities;
+    if (settledGravityPath is null) return settledGravities = Array.Empty<SettledGravity>();
+    using var doc = System.Text.Json.JsonDocument.Parse(File.ReadAllText(settledGravityPath));
+    var list = new List<SettledGravity>();
+    foreach (var e in doc.RootElement.EnumerateArray())
+    {
+        bool down = e.GetProperty("towardWorldNegativeZ").GetBoolean();
+        if (!down) throw new ArgumentException("--settled-gravity: only towardWorldNegativeZ: true is modelled");
+        string ev = e.GetProperty("evidence").GetString() ?? "";
+        if (ev.Length == 0) throw new ArgumentException("--settled-gravity: an entry without evidence");
+        list.Add(new SettledGravity(e.GetProperty("modelPath").GetString()!, e.GetProperty("sha256").GetString()!,
+                                    e.TryGetProperty("systems", out var sy) ? sy.EnumerateArray().Select(x => x.GetString()!).ToList() : new List<string>(), true, ev));
+    }
+    return settledGravities = list;
 }
 
 (PhysicalState State, string Detail) OverlapPredicate(FormKey laterKey, FormKey otherKey)
