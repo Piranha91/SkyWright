@@ -96,17 +96,20 @@ static partial class MotionProof
 
     /// <summary>A static support whose collision is a bhkCompressedMeshShape: one square of half size <paramref name="half"/> at z 0
     /// (two big triangles, facing up) with mesh radius <paramref name="radiusU"/> (Skyrim units).</summary>
-    static byte[] SupportMeshPlate(float half, float radiusU)
+    static byte[] SupportMeshPlate(float half, float radiusU) => SupportMeshRect(half, half, radiusU);
+
+    /// <summary>As <see cref="SupportMeshPlate"/>, a rectangle of half sizes <paramref name="hx"/> x <paramref name="hy"/>.</summary>
+    static byte[] SupportMeshRect(float hx, float hy, float radiusU)
     {
         var f = new NifFile(); f.Create(Ver, withRootNode: true);
         var root = f.GetRootNodes().First(); root.Flags_ui = 0xE;
         var n = new NiNode { Name = new NiStringRef("Support"), Flags_ui = 0xE, Scale = 1f, Rotation = Identity33() };
         root.Children.AddBlockRef(f.AddBlock(n));
-        n.Children.AddBlockRef(f.AddBlock(Shape("SupportMesh", Box(-half, -half, -1, half, half, 0))));
-        float h = half / HavokU;
+        n.Children.AddBlockRef(f.AddBlock(Shape("SupportMesh", Box(-hx, -hy, -1, hx, hy, 0))));
+        float x = hx / HavokU, y = hy / HavokU;
         var data = new bhkCompressedMeshShapeData
         {
-            BigVerts = new() { new(-h, -h, 0, 0), new(h, -h, 0, 0), new(h, h, 0, 0), new(-h, h, 0, 0) },
+            BigVerts = new() { new(-x, -y, 0, 0), new(x, -y, 0, 0), new(x, y, 0, 0), new(-x, y, 0, 0) },
             BigTris = new() { new() { Triangle = new NiflySharp.Structs.Triangle(0, 1, 2) }, new() { Triangle = new NiflySharp.Structs.Triangle(0, 2, 3) } },
         };
         AddBody(f, n, new bhkCompressedMeshShape { Data = new NiBlockRef<bhkCompressedMeshShapeData>(f.AddBlock(data)), Radius = radiusU / HavokU }, 0f,
@@ -318,6 +321,17 @@ static partial class MotionProof
                                     .Append(new DropSupport("floor", 1, true, false, Plate(500, -100))).ToArray();
             var r = MeshReach.OfModel(FreeItem(), Origin, Origin, 1f, null, RulesOn(physics: true, baseType: "MISC", supports: plate));
             return (r.Drop is { Status: "touching", SupportId: "plate" }, ShowRR(r));
+        });
+        // LI-K13: a crossing seen only edge through face: a plank (a 200 x 2 u compressed-mesh strip at z -2, radius 0) passes through
+        // the free item's box ([-5,5]^3): no item vertex stands over the plank and no plank vertex is inside the item, but the plank's
+        // long edges pass through the item's side faces. Touching (0) on the plank, not a drop of 7. Rejects a crossing read by
+        // vertices alone.
+        Case(check, "loose-items LI-K13: a plank through the item (edges only) reads touching, not dropped 7", () =>
+        {
+            var plank = PhysicsReach.Supports("plank", SupportMeshRect(100f, 1f, 0f), new Vec3(0, 0, -2), new Vec3(0, 0, 0), 1f, movableBase: false)
+                                    .Append(new DropSupport("floor", 1, true, false, Plate(500, -100))).ToArray();
+            var r = MeshReach.OfModel(FreeItem(), Origin, Origin, 1f, null, RulesOn(physics: true, baseType: "MISC", supports: plank));
+            return (r.Drop is { Status: "touching", SupportId: "plank" }, ShowRR(r));
         });
         // LI-K10: the geometry reader every other consumer uses (route, floors, contact, overlap's collision column, state) keeps the
         // core: no radius of any kind (their calibrations; contact's in-game acceptance got worse with it, RESULT). Measured in Havok
