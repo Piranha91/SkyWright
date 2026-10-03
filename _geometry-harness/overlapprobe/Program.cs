@@ -848,7 +848,7 @@ IReadOnlyList<(DropSupport S, Aabb Box)> PlacedSupports(FormKey k, Snap sp)
             if (!bodyCache.TryGetValue(b, out var bodies))
             {
                 var (bytes, _) = AssetResolver.ReadPlacementSource(src);
-                try { bodies = bytes is null ? null : PhysicsReach.ModelBodies(bytes, convexRadius: reachRules?.Contains("rest") == true); } catch (Exception) { bodies = null; }
+                try { bodies = bytes is null ? null : PhysicsReach.ModelBodies(bytes); } catch (Exception) { bodies = null; }
                 bodyCache[b] = bodies;
             }
             if (bodies is not null)

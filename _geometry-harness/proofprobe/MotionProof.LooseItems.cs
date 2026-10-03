@@ -219,24 +219,25 @@ static partial class MotionProof
             return (hc.ConvexPlanesMatchHull == 1 && hc.ConvexPlanesMismatch == 0 && hc.ConvexRadiusApplied == 1 && box7 && b.Complete,
                     $"matched {hc.ConvexPlanesMatchHull} mismatched {hc.ConvexPlanesMismatch} radiusApplied {hc.ConvexRadiusApplied} bounds {bb.Min.X:0.###},{bb.Min.Y:0.###},{bb.Min.Z:0.###}..{bb.Max.X:0.###},{bb.Max.Y:0.###},{bb.Max.Z:0.###}");
         });
-        // LI-K2: under the rest rule the radius item over a floor 100 u down drops 100 - 7 = 93 (the shell meets the floor); with
-        // physics alone (no rest) it drops 95 as before (the radius is opt-in). Rejects the radius ignored under rest, and the
-        // radius applied without it.
-        Case(check, "loose-items LI-K2: the radius-2 item over a floor 100 u down — rest on d 93; physics only d 95", () =>
+        // LI-K2: under the rest rule the radius item over a floor 100 u down drops 100 - 7 = 93 (the shell meets the floor), and
+        // with physics alone it drops 93 too (2026-10-03 convex-radius-default: the physics drop reads the radius; was 95 while the
+        // radius was opt-in behind the rest rule). Rejects the radius ignored under either.
+        Case(check, "loose-items LI-K2: the radius-2 item over a floor 100 u down — rest on d 93; physics only d 93", () =>
         {
             var fl = new[] { new DropSupport("floor", 1, true, false, Plate(500, -100)) };
             var on = MeshReach.OfModel(FreeItemRadius(2f, 2f), Origin, Origin, 1f, null, new ReachOptions(0.5, 65536, new ReachRules(Physics: true, BaseRecordType: "MISC",
                 Supports: _ => fl, Layers: RRLayers, Settle: new SettleDecision("settles", null), Rest: true)));
             var off = MeshReach.OfModel(FreeItemRadius(2f, 2f), Origin, Origin, 1f, null, RulesOn(physics: true, baseType: "MISC", supports: fl));
-            return (on.Drop is { Status: "dropped" } d && NearA7(d.Distance, 93, 1e-3) && off.Drop is { Status: "dropped" } d2 && NearA7(d2.Distance, 95, 1e-3),
+            return (on.Drop is { Status: "dropped" } d && NearA7(d.Distance, 93, 1e-3) && off.Drop is { Status: "dropped" } d2 && NearA7(d2.Distance, 93, 1e-3),
                     ShowRR(on) + " | off " + ShowRR(off));
         });
-        // LI-K4: the decoder's default leaves the radius off (in-game calibrations read the core hull): collision bounds [-5,5],
-        // ConvexRadiusApplied 0, while the planes are still checked (matched 1). Rejects the radius applied by default.
+        // LI-K4: the decoder's default leaves the radius off (the NifGeometry reader's calibrations read the core hull): collision
+        // bounds [-5,5] with the radius off, ConvexRadiusApplied 0, while the planes are still checked (matched 1). Rejects the radius
+        // applied by the decoder's default. (PhysicsReach reads it by default since 2026-10-03: LI-K8.)
         Case(check, "loose-items LI-K4: default decode — radius not applied (bounds [-5,5]^3, applied 0), planes still checked (matched 1)", () =>
         {
             var hc = HavokCollision.Decode(Load(FreeItemRadius(2f, 2f)), true).Stats;
-            var bb = SpatialOverlap.SoupBounds(PhysicsReach.ModelBodies(FreeItemRadius(2f, 2f)).Single().Model);
+            var bb = SpatialOverlap.SoupBounds(PhysicsReach.ModelBodies(FreeItemRadius(2f, 2f), convexRadius: false).Single().Model);
             return (hc.ConvexRadiusApplied == 0 && hc.ConvexPlanesMatchHull == 1 && NearA7(bb.Max.Z, 5, 1e-3) && NearA7(bb.Min.X, -5, 1e-3),
                     $"applied {hc.ConvexRadiusApplied} matched {hc.ConvexPlanesMatchHull} bounds {bb.Min.X:0.###}..{bb.Max.Z:0.###}");
         });
