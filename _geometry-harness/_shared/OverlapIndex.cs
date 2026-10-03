@@ -249,7 +249,6 @@ public sealed class OverlapIndex
     /// <summary>ref -> its winning record's flags (the load-settle rule reads them).</summary>
     public Dictionary<FormKey, uint> RefRecordFlags { get; } = new();
     /// <summary>WEAP base -> its animation type by the record enum name (the load-settle rule reads it).</summary>
-    public Dictionary<FormKey, string> BaseWeaponAnimationType { get; } = new();
     /// <summary>The worldspace persistent cells (the top cell of each worldspace, no grid) — a marker placed persistent
     /// sits here whatever its coordinates, so a per-cell census labels it rather than reading it as a crowded cell.</summary>
     public HashSet<FormKey> PersistentCells { get; } = new();
@@ -322,7 +321,6 @@ public sealed class OverlapIndex
             }
             if (rec is IWeaponGetter wp)
             {
-                if (wp.Data is { } wd) BaseWeaponAnimationType[wp.FormKey] = wd.AnimationType.ToString(); else BaseWeaponAnimationType.Remove(wp.FormKey);
             }
             if (rec is IModeledGetter mo && rec is ISkyrimMajorRecordGetter sm)
             {

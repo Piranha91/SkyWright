@@ -45,7 +45,7 @@ static partial class MotionProof
         // K-L1: a reference flagged Don't Havok Settle rests (exemption refRecordFlag). Rejects ignoring the flag mask.
         Case(check, "part3 K-L1: REFR flag 0x20000000 -> rests, by the refRecordFlag exemption", () =>
         {
-            var d = LoadSettle.Decide(new SettleFacts(0x20000000u | 0x400u, "Crossbow", true), settleList);
+            var d = LoadSettle.Decide(new SettleFacts(0x20000000u | 0x400u, true), settleList);
             return (d.Status == "rests" && d.Exemption?.Kind == "refRecordFlag", $"{d}");
         });
         // K-L2: the weapon animation type is not a reader kind (B5c refuted it as the key: a graph model that is not a weapon rested,
@@ -55,32 +55,32 @@ static partial class MotionProof
             try { LoadSettle.Read("""[{"kind":"weaponAnimationType","value":"Bow","evidence":"x"}]"""); return (false, "read"); }
             catch (ArgumentException e) { return (e.Message.Contains("unknown kind") && e.Message.Contains("weaponAnimationType"), e.Message); }
         });
-        // K-L3: a Crossbow / a sword / a non-weapon, unflagged, enabled at load -> settles. Rejects exempting everything.
-        Case(check, "part3 K-L3: Crossbow, OneHandSword and a non-weapon, unflagged and enabled at load -> settles", () =>
+        // K-L3: unflagged references enabled at load -> settles. Rejects exempting everything.
+        Case(check, "part3 K-L3: unflagged references enabled at load settle (with and without other flag bits)", () =>
         {
-            var a = LoadSettle.Decide(new SettleFacts(0x400u, "Crossbow", true), settleList);
-            var b = LoadSettle.Decide(new SettleFacts(0u, "OneHandSword", true), settleList);
-            var c = LoadSettle.Decide(new SettleFacts(0u, null, true), settleList);
+            var a = LoadSettle.Decide(new SettleFacts(0x400u, true), settleList);
+            var b = LoadSettle.Decide(new SettleFacts(0u, true), settleList);
+            var c = LoadSettle.Decide(new SettleFacts(0u, true), settleList);
             return (a.Status == "settles" && b.Status == "settles" && c.Status == "settles" && a.Exemption is null, $"{a} {b} {c}");
         });
         // K-L4: disabled at load, enabled by the judged state -> timing-unknown (exemption enabledAfterLoad). Rejects a hold
         // (the enable may have come before the cell loaded) and a plain drop.
         Case(check, "part3 K-L4: enabled by the judged state, disabled at load -> timing-unknown, by the enabledAfterLoad exemption", () =>
         {
-            var d = LoadSettle.Decide(new SettleFacts(0u, "Crossbow", false), settleList);
+            var d = LoadSettle.Decide(new SettleFacts(0u, false), settleList);
             return (d.Status == "timing-unknown" && d.Exemption?.Kind == "enabledAfterLoad", $"{d}");
         });
         // K-L5: a property exemption outranks the timing one: a flagged reference enabled by the state still rests.
         Case(check, "part3 K-L5: a flagged reference enabled by the state rests (the property exemption first)", () =>
         {
-            var d = LoadSettle.Decide(new SettleFacts(0x20000000u, null, false), settleList);
+            var d = LoadSettle.Decide(new SettleFacts(0x20000000u, false), settleList);
             return (d.Status == "rests" && d.Exemption?.Kind == "refRecordFlag", $"{d}");
         });
         // K-L6: an empty list exempts nothing (the list is the only source of exemptions).
-        Case(check, "part3 K-L6: with no exemptions a Bow, a flagged and a state-enabled reference all settle", () =>
+        Case(check, "part3 K-L6: with no exemptions a flagged, state-enabled reference settles", () =>
         {
             var none = Array.Empty<SettleExemption>();
-            var a = LoadSettle.Decide(new SettleFacts(0x20000000u, "Bow", false), none);
+            var a = LoadSettle.Decide(new SettleFacts(0x20000000u, false), none);
             return (a.Status == "settles", $"{a}");
         });
         // K-L7: an unknown exemption kind fails loud.
@@ -119,10 +119,10 @@ static partial class MotionProof
         // K-L11: BSX 202 (Complex, not Animated) rests; 203 (Animated too) and 194 (no Complex) settle; no BSX settles.
         Case(check, "part3 K-L11: bsxFlags set=0x8;clear=0x1 -> 202 rests; 203, 194 and no BSX settle", () =>
         {
-            var a = LoadSettle.Decide(new SettleFacts(0u, null, true, 202u), BsxList());
-            var b = LoadSettle.Decide(new SettleFacts(0u, null, true, 203u), BsxList());
-            var c = LoadSettle.Decide(new SettleFacts(0u, null, true, 194u), BsxList());
-            var d = LoadSettle.Decide(new SettleFacts(0u, null, true, null), BsxList());
+            var a = LoadSettle.Decide(new SettleFacts(0u, true, 202u), BsxList());
+            var b = LoadSettle.Decide(new SettleFacts(0u, true, 203u), BsxList());
+            var c = LoadSettle.Decide(new SettleFacts(0u, true, 194u), BsxList());
+            var d = LoadSettle.Decide(new SettleFacts(0u, true, null), BsxList());
             return (a.Status == "rests" && a.Exemption?.Kind == "bsxFlags" && b.Status == "settles" && c.Status == "settles" && d.Status == "settles", $"{a} {b} {c} {d}");
         });
         byte[] FreeItemBsx(uint v)
@@ -134,7 +134,7 @@ static partial class MotionProof
         }
         ReachOptions FactsOn(IReadOnlyList<SettleExemption> l) => new(0.5, 65536, new ReachRules(Physics: true, BaseRecordType: "WEAP",
             Supports: _ => new[] { new DropSupport("floor", 1, true, false, Plate(500, -100)) }, Layers: RRLayers,
-            SettleFacts: new SettleFacts(0u, null, true), SettleExemptions: l));
+            SettleFacts: new SettleFacts(0u, true), SettleExemptions: l));
         // K-L12: the reader takes the BSX from the model: BSX 202 rests at its placed box, labelled, no drop.
         Case(check, "part3 K-L12: the model's own BSX 202 is read: rests where placed, labelled, no drop", () =>
         {
@@ -159,10 +159,10 @@ static partial class MotionProof
         // K-L14: graph + 202 rests; graph + 203 settles; no graph + 202 settles; unknown graph settles.
         Case(check, "part3 K-L14: bsxFlags graph=present;clear=0x1 -> graph+202 rests; graph+203, no graph+202 and unknown settle", () =>
         {
-            var a = LoadSettle.Decide(new SettleFacts(0u, null, true, 202u, true), GraphList());
-            var b = LoadSettle.Decide(new SettleFacts(0u, null, true, 203u, true), GraphList());
-            var c = LoadSettle.Decide(new SettleFacts(0u, null, true, 202u, false), GraphList());
-            var d = LoadSettle.Decide(new SettleFacts(0u, null, true, 202u, null), GraphList());
+            var a = LoadSettle.Decide(new SettleFacts(0u, true, 202u, true), GraphList());
+            var b = LoadSettle.Decide(new SettleFacts(0u, true, 203u, true), GraphList());
+            var c = LoadSettle.Decide(new SettleFacts(0u, true, 202u, false), GraphList());
+            var d = LoadSettle.Decide(new SettleFacts(0u, true, 202u, null), GraphList());
             return (a.Status == "rests" && b.Status == "settles" && c.Status == "settles" && d.Status == "settles", $"{a} {b} {c} {d}");
         });
         byte[] FreeItemGraph(uint bsx, bool graph)

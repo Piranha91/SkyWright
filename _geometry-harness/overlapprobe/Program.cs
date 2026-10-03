@@ -897,7 +897,7 @@ static IReadOnlyDictionary<string, PoseLocal>? ReadLocals(System.Text.Json.JsonE
 }
 IReadOnlyList<SettleExemption>? settleExemptions = null;
 Dictionary<FormKey, EnableResolution> settleBaselineMemo = new();
-// the load-settle facts of one reference: its winning REFR flags, its base's WEAP animation type, and whether it is enabled
+// the load-settle facts of one reference: its winning REFR flags and whether it is enabled
 // at load (false only when a judged state enables a reference the load-time reading has disabled)
 SettleFacts SettleFactsOf(FormKey key, FormKey baseKey)
 {
@@ -908,14 +908,13 @@ SettleFacts SettleFactsOf(FormKey key, FormKey baseKey)
         settleExemptions = LoadSettle.Read(File.ReadAllText(path));
     }
     uint flags = idx.RefRecordFlags.TryGetValue(key, out var fl) ? fl : 0u;
-    string? anim = idx.BaseWeaponAnimationType.TryGetValue(baseKey, out var at) ? at : null;
     bool atLoad = true;
     if (stateArm is { IsBaseline: false } && resolvedArms is { } ra)
     {
         var b = EnableState.Resolve(key, ra.WinnerRawFacts, settleBaselineMemo);
         atLoad = b.Resolved && b.Enabled;
     }
-    return new SettleFacts(flags, anim, atLoad);   // the model's BSX is read by the reach reader
+    return new SettleFacts(flags, atLoad);   // the model's BSX is read by the reach reader
 }
 ReachRules? RulesFor(FormKey key, FormKey baseKey, Snap p)
 {
