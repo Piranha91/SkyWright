@@ -34,6 +34,7 @@ REASONS = (
     "taste (no clash)",
     "cannot tell",
     "fixes an inter-mod clash",
+    "patch placement clips",
 )
 EVIDENCE_TYPES = ("mechanical", "check", "render reading")
 
@@ -98,8 +99,14 @@ def assign_reason(ev):
       checkRunnable (bool), bundleConfiguration ('ran' | 'skipped-user' | 'not in plan'),
       trace (dict outcome, rule, emitted | None), renderShowsDefect (True | False | None),
       fixAttribution (dict | None: check, unpatched (the clash in the order without the patch), attribution (must be
-      'needs both'), patched (the edit's outcome in the patched order, e.g. 'support restored' or 'item disabled')).
+      'needs both'), patched (the edit's outcome in the patched order, e.g. 'support restored' or 'item disabled')),
+      placementClip (dict | None: check, item, other (another mod's object), depth (u, > 0: the least move that clears the
+      crossing), pose (where the item was measured, e.g. its rest pose read in game), edit (what the patch's edit does,
+      e.g. 'restores support' or 'adds the item')).
     Returns dict(reason, detail, evidenceType, bundleConfiguration). Ordered rules, first that holds:
+      0a. placementClip given -> patch placement clips (evidence 'check'), detail = check: item clips other by depth u at
+          pose; edit: edit. It outranks a fix attribution (an edit that restores a support but leaves its item clipping).
+          A missing part or a depth that is not positive raises.
       0. fixAttribution given -> fixes an inter-mod clash (evidence 'check'), detail = check: unpatched; needs both;
          patched: outcome. An attribution other than 'needs both', or a missing part, raises (the caller must read it).
       1. likelyClass None -> cannot tell ('not rendered' if not rendered, else 'class undeterminable').
@@ -121,6 +128,14 @@ def assign_reason(ev):
     def out(reason, detail, evidence):
         return {"reason": reason, "detail": detail, "evidenceType": evidence, "bundleConfiguration": bundle}
 
+    clip = ev.get("placementClip")
+    if clip is not None:
+        missing = [k for k in ("check", "item", "other", "pose", "edit") if not clip.get(k)]
+        depth = clip.get("depth")
+        if missing or not isinstance(depth, (int, float)) or not depth > 0:
+            raise ValueError("assign_reason: placementClip needs check, item, other, pose, edit and a positive depth; got %r" % (clip,))
+        return out("patch placement clips", "%s: %s clips %s by %.2f u at %s; edit: %s"
+                   % (clip["check"], clip["item"], clip["other"], depth, clip["pose"], clip["edit"]), "check")
     fix = ev.get("fixAttribution")
     if fix is not None:
         missing = [k for k in ("check", "unpatched", "attribution", "patched") if not fix.get(k)]
