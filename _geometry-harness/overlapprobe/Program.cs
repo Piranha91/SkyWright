@@ -127,7 +127,8 @@ dispositions unchanged).
 --pose-confirmations FILE (with --reach-rules): a JSON list of {modelPath, sha256, evidence}; a model whose animation the
 files cannot settle, whose path and exact bytes match an entry (an in-game screenshot compared with a render of its stored
 pose), is read at its stored pose, labelled "rest: stored pose (confirmed by in-game comparison)". An entry may carry "locals"
-({node: {T, R (9, rows), S}}, a confirmed non-stored pose such as a graph start state) and "label". No entry, no change.
+({node: {T, R (9, rows), S}}, a confirmed non-stored pose such as a graph start state), "label", and "rest": "placed" (with physics: a free body of that
+model is held at its placed pose, measured to rest where placed at load). No entry, no change.
 See overlapprobe/Program.cs usage documentation. Help performs no load-order scan.
 """);
     return 0;
@@ -882,7 +883,8 @@ ReachRules? RulesFor(FormKey key, FormKey baseKey, Snap p)
         using var doc = System.Text.Json.JsonDocument.Parse(File.ReadAllText(poseConfirmationsPath));
         poseConfirmations = doc.RootElement.EnumerateArray()
             .Select(e => new PoseConfirmation(e.GetProperty("modelPath").GetString()!, e.GetProperty("sha256").GetString()!, e.GetProperty("evidence").GetString()!,
-                                              ReadLocals(e), e.TryGetProperty("label", out var lb) ? lb.GetString() : null)).ToList();
+                                              ReadLocals(e), e.TryGetProperty("label", out var lb) ? lb.GetString() : null,
+                                              e.TryGetProperty("rest", out var rs) ? rs.GetString() : null)).ToList();
     }
     reachLayers ??= idx.CollisionLayerRules();
     bookArtStatics ??= idx.BookInventoryArt.Values.ToHashSet();
