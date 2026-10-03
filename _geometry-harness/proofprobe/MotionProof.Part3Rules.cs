@@ -56,6 +56,30 @@ static partial class MotionProof
             return (r.Drop is { } d && NearA7(d.Distance, 95, 1e-3) && !r.Labels.Contains(PhysicsReach.SettleFlagLabel), ShowRR(r));
         });
 
+        // ================= rest confirmation (a model measured to rest where placed) =================
+        // K-R1: the free item 100 u over a floor, its model confirmed rest "placed" (path + these bytes) -> held: box [-5,5]^3, the
+        // rest label, no drop. Rejects dropping a confirmed model, and an unlabelled hold.
+        Case(check, "part3 K-R1: a free item whose model is confirmed to rest where placed is held, labelled, no drop", () =>
+        {
+            var nif = FreeItem();
+            var sha = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(nif)).ToLowerInvariant();
+            var conf = new[] { new PoseConfirmation(@"meshes\lab\Free.nif", sha, "lab", Rest: "placed") };
+            var o = new ReachOptions(0.5, 65536, new ReachRules(Physics: true, BaseRecordType: "WEAP", Supports: _ => new[] { new DropSupport("floor", 1, true, false, Plate(500, -100)) },
+                                                                  Layers: RRLayers, Confirmations: conf, ModelPath: @"meshes\lab\Free.nif"));
+            var r = MeshReach.OfModel(nif, Origin, Origin, 1f, null, o);
+            return (r.Status == "uncertified" && r.Labels.Contains(PhysicsReach.RestPlacedLabel) && !r.Labels.Contains(PhysicsReach.DropLabel)
+                    && r.Drop is null && BoxIs(r.Box, -5, -5, -5, 5, 5, 5), ShowRR(r));
+        });
+        // K-R2: the same confirmation with other bytes' sha -> no change: it drops 95 u. Rejects matching by path alone.
+        Case(check, "part3 K-R2: a rest confirmation for other bytes changes nothing (the item drops, d 95)", () =>
+        {
+            var conf = new[] { new PoseConfirmation(@"meshes\lab\Free.nif", new string('0', 64), "lab", Rest: "placed") };
+            var o = new ReachOptions(0.5, 65536, new ReachRules(Physics: true, BaseRecordType: "WEAP", Supports: _ => new[] { new DropSupport("floor", 1, true, false, Plate(500, -100)) },
+                                                                  Layers: RRLayers, Confirmations: conf, ModelPath: @"meshes\lab\Free.nif"));
+            var r = MeshReach.OfModel(FreeItem(), Origin, Origin, 1f, null, o);
+            return (r.Drop is { } d && NearA7(d.Distance, 95, 1e-3) && !r.Labels.Contains(PhysicsReach.RestPlacedLabel), ShowRR(r));
+        });
+
         // ================= canary =================
         Case(check, "part3 CANARY (must FAIL): a CollisionMarker box stating L_STATIC is not solid", () => (false, "the lab held an item on it"));
 
