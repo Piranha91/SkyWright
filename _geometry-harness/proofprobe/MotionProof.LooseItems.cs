@@ -333,6 +333,20 @@ static partial class MotionProof
             var r = MeshReach.OfModel(FreeItem(), Origin, Origin, 1f, null, RulesOn(physics: true, baseType: "MISC", supports: plank));
             return (r.Drop is { Status: "touching", SupportId: "plank" }, ShowRR(r));
         });
+        // LI-K14: no silent wrong answer when the crossing test misses a shell: a drop read with the radius that is LONGER than the
+        // same drop without it carries ShellCrossingLabel and the radius-off drop. Synthetic: a support whose radius soup sits at
+        // -100 while its core soup sits at -10 (a long radius drop over a short core one) labels "5 u"; a support whose core soup is
+        // its radius soup carries no label. Rejects the long reading passed through unlabelled, and a label on every drop.
+        Case(check, "loose-items LI-K14: a drop longer with the radius than without it carries the shell-crossing label and the core drop", () =>
+        {
+            var lying = new[] { new DropSupport("s", 1, true, false, Plate(500, -100), CoreWorld: Plate(500, -10)) };
+            var honest = new[] { new DropSupport("s", 1, true, false, Plate(500, -100), CoreWorld: Plate(500, -100)) };
+            var a = MeshReach.OfModel(FreeItem(), Origin, Origin, 1f, null, RulesOn(physics: true, baseType: "MISC", supports: lying));
+            var b = MeshReach.OfModel(FreeItem(), Origin, Origin, 1f, null, RulesOn(physics: true, baseType: "MISC", supports: honest));
+            bool la = a.Labels.Any(x => x.StartsWith(PhysicsReach.ShellCrossingLabel) && x.EndsWith("the drop is 5 u"));
+            bool lb = b.Labels.Any(x => x.StartsWith(PhysicsReach.ShellCrossingLabel));
+            return (la && !lb && a.Drop is { Status: "dropped" } d && NearA7(d.Distance, 95, 1e-3), "lying " + ShowRR(a) + " | honest " + ShowRR(b));
+        });
         // LI-K10: the geometry reader every other consumer uses (route, floors, contact, overlap's collision column, state) keeps the
         // core: no radius of any kind (their calibrations; contact's in-game acceptance got worse with it, RESULT). Measured in Havok
         // units (havokUnitScale 1). Rejects the radius leaking into NifGeometry by default.

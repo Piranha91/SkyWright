@@ -811,6 +811,7 @@ EnableArms? resolvedArms = null;
 Dictionary<(FormKey Space, int X, int Y), List<(FormKey Key, Snap Pose, bool Enabled)>>? supportCells = null;
 var supportCache = new Dictionary<FormKey, IReadOnlyList<(DropSupport S, Aabb Box)>>();
 var bodyCache = new Dictionary<FormKey, IReadOnlyList<(uint Layer, bool Solid, bool Movable, bool Complete, TriangleSoup Model)>?>();
+var coreBodyCache = new Dictionary<FormKey, IReadOnlyList<(uint Layer, bool Solid, bool Movable, bool Complete, TriangleSoup Model)>?>();   // the same, radius off (shell-crossing check)
 Dictionary<uint, CollisionLayerRule>? reachLayers = null;
 HashSet<FormKey>? bookArtStatics = null;
 (FormKey, int, int) SupportCellOf(Snap p) => p.Interior ? (p.Cell, 0, 0) : (p.Worldspace, (int)MathF.Floor(p.Pos.X / 4096f), (int)MathF.Floor(p.Pos.Y / 4096f));
@@ -850,11 +851,12 @@ IReadOnlyList<(DropSupport S, Aabb Box)> PlacedSupports(FormKey k, Snap sp)
                 var (bytes, _) = AssetResolver.ReadPlacementSource(src);
                 try { bodies = bytes is null ? null : PhysicsReach.ModelBodies(bytes); } catch (Exception) { bodies = null; }
                 bodyCache[b] = bodies;
+                try { coreBodyCache[b] = bytes is null ? null : PhysicsReach.ModelBodies(bytes, convexRadius: false); } catch (Exception) { coreBodyCache[b] = null; }
             }
             if (bodies is not null)
             {
                 bool movableBase = !(idx.BaseInfo.TryGetValue(b, out var bi) && bi.Type is "Static");
-                foreach (var s in PhysicsReach.PlaceSupports(k.ToString(), bodies, sp.Pos, sp.Rot, sp.Scale, movableBase))
+                foreach (var s in PhysicsReach.PlaceSupports(k.ToString(), bodies, sp.Pos, sp.Rot, sp.Scale, movableBase, coreBodyCache.GetValueOrDefault(b)))
                     result.Add((s, SpatialOverlap.SoupBounds(s.World)));
             }
         }
