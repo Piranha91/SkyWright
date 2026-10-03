@@ -113,7 +113,7 @@ labelled regions; never certified. physics: a body the file pins (a constraint t
 constraint's limits; a free body (mass > 0, simulated motion system, no pin) is dropped straight down, rigidly, from its
 placed pose to first contact with a support below (the modelling rule) - a support is a solid, non-movable body of a
 reference enabled in the state, on a layer the falling body's COLL record collides with, not a trigger volume or sensor;
-a Static base is assumed not to move (labelled). graph: binding member paths decide (playbackSpeed: no effect), the
+a Static base is held (labelled: measured on one model in the lab). graph: binding member paths decide (playbackSpeed: no effect), the
 reference-pose generator, a missing sequence where the file has no transform source. switch: every switch child, animated
 children swept, Tree_Anim shapes labelled. book: a BOOK base, or a Static a BOOK names as InventoryArt, is read closed (its
 stored pose: the modelling rule). skin: weight sources that disagree only on vertices no
