@@ -223,8 +223,8 @@ try
         {
             reachRules = NeedValue(i, flag).Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).ToHashSet(StringComparer.OrdinalIgnoreCase);
             if (reachRules.Count == 0 || reachRules.Any(x => x is not ("physics" or "graph" or "switch" or "book" or "skin" or "particles" or "primitive"
-                                                                      or "clipnames" or "transfer" or "blend" or "missingseq" or "path" or "emitter" or "gravity" or "absent")))
-                throw new ArgumentException("--reach-rules takes physics,graph,switch,book,skin,particles,primitive,clipnames,transfer,blend,missingseq,path,emitter,gravity,absent");
+                                                                      or "clipnames" or "transfer" or "blend" or "missingseq" or "path" or "emitter" or "gravity" or "absent" or "approx")))
+                throw new ArgumentException("--reach-rules takes physics,graph,switch,book,skin,particles,primitive,clipnames,transfer,blend,missingseq,path,emitter,gravity,absent,approx");
             i++;
         }
         else if (flag == "--motion-delta") { if (!double.TryParse(NeedValue(i, flag), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out motionDelta) || !(motionDelta > 0)) throw new ArgumentException("--motion-delta requires a positive number"); i++; }
