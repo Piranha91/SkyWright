@@ -153,6 +153,30 @@ static partial class MotionProof
             double lat = 5 + 25 * (1 - Math.Exp(-37.5)) / 15 + Sqrt2;
             return (off.Status == "modelled" && NearA7(off.ModelBox.Max.X, R2Lat) && on.Status == "modelled" && NearA7(on.ModelBox.Max.X, lat), $"{ShowPB(off)} || {ShowPB(on)}");
         });
+        // K6: the usual layout - the system's own controller holds a blend interpolator and the sequences hold the keys. A sequence keeping
+        // the drag on [1, 1]: used (x half 8.08088); a sequence that switches it off [1, 0]: not used (68.91421). Rejects the blend
+        // interpolator itself read as "can switch off" (68.91 for both).
+        byte[] DragSeq(byte[] keys) => ParticleVariant((f, ps, root) =>
+        {
+            AddModifier(f, ps, new NiPSysDragModifier { Name = new NiStringRef("DragX"), DragObject = new(f.Blocks.IndexOf(root)), DragAxis = Vector3.UnitX, Percentage = 0.5f, Range = float.MaxValue, RangeFalloff = float.MaxValue });
+            var c = new NiPSysModifierActiveCtlr { ModifierName = new NiStringRef("DragX"), Interpolator = new(f.AddBlock(new NiBlendBoolInterpolator())), StartTime = 0, StopTime = 1, Frequency = 1, NextController = new(-1) };
+            c.Target = new(f.Blocks.IndexOf(ps)); ps.Controller = new(f.AddBlock(c));
+            var bd = new NiBoolData { Data = new KeyGroup<byte> { Interpolation = KeyType.CONST_KEY, Keys = keys.Select((v, i) => new Key<byte> { Time = i * 0.5f, Value = v }).ToList(), NumKeys = (uint)keys.Length } };
+            int bi = f.AddBlock(new NiBoolTimelineInterpolator { Value = true, Data = new(f.AddBlock(bd)) });
+            var seq = new NiControllerSequence { Name = new NiStringRef("Idle"), CycleType = CycleType.CYCLE_CLAMP, StartTime = 0, StopTime = 1, Frequency = 1, Weight = 1 };
+            seq.ControlledBlocks = new List<ControlledBlock> { new() { NodeName = new NiStringRef("Sparks"), ControllerType = new NiStringRef("NiPSysModifierActiveCtlr"), ControllerID = new NiStringRef("DragX"), Interpolator = new(bi), Controller = new(-1) } };
+            seq.NumControlledBlocks = 1;
+            var mgr = new NiControllerManager(); int mgri = f.AddBlock(mgr);
+            mgr.ControllerSequences ??= new(); mgr.ControllerSequences.AddBlockRef(f.AddBlock(seq)); mgr.NumControllerSequences = 1;
+            root.Controller = new(mgri);
+        }, "drag active by sequence");
+        Case(check, "r2 K-V3K6: a blend interpolator defers to the sequences - kept on: drag used (x 8.08088); switched off: not used (68.91421)", () =>
+        {
+            var on = ParticleReach.BoundsFromModifiers(DragSeq(new byte[] { 1, 1 })).Single();
+            var off = ParticleReach.BoundsFromModifiers(DragSeq(new byte[] { 1, 0 })).Single();
+            double lat = 5 + 25 * (1 - Math.Exp(-37.5)) / 15 + Sqrt2;
+            return (on.Status == "modelled" && NearA7(on.ModelBox.Max.X, lat) && off.Status == "modelled" && NearA7(off.ModelBox.Max.X, R2Lat), $"{ShowPB(on)} || {ShowPB(off)}");
+        });
         // K5: a settled gravity with a modifier-active controller whose keys can switch it off stops no climb: z max = 5 + v T + r =
         // 68.91421 (not the apex 37.66421). Rejects the controller ignored for the climb.
         Case(check, "r2 K-V3K5: a switchable settled gravity - the climb is not capped by the apex, z max 68.91421", () =>
