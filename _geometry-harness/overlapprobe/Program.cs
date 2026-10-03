@@ -113,8 +113,10 @@ labelled regions; never certified. physics: a body the file pins (a constraint t
 constraint's limits; a free body (mass > 0, simulated motion system, no pin) is dropped straight down, rigidly, from its
 placed pose to first contact with a support below (the modelling rule) - a support is a solid, non-movable body of a
 reference enabled in the state, on a layer the falling body's COLL record collides with, not a trigger volume or sensor;
-a Static base is held (labelled: measured on one model in the lab); a reference flagged Don't Havok Settle is held at its
-placed pose (labelled from the record flag). graph: binding member paths decide (playbackSpeed: no effect), the
+a Static base is held (labelled: measured on one model in the lab). One load-settle rule decides the drop: an object drops
+only if the engine settles it when the cell loads, otherwise it rests at its placed pose until disturbed; the exemptions
+are data (--settle-exemptions FILE, default load-settle-exemptions.json beside the exe: a REFR record-flag mask, a WEAP
+animation type, or a reference a judged state enables after load, which holds the placed and dropped poses both). graph: binding member paths decide (playbackSpeed: no effect), the
 reference-pose generator, a missing sequence where the file has no transform source. switch: every switch child, animated
 children swept, Tree_Anim shapes labelled. book: a BOOK base, or a Static a BOOK names as InventoryArt, is read closed (its
 stored pose: the modelling rule). skin: weight sources that disagree only on vertices no
@@ -147,6 +149,7 @@ bool motionSwept = false; double motionDelta = 0.5;
 bool reachOn = false;   // --reach (G1 build list, Stage A): a reach region for every record without a render box
 HashSet<string>? reachRules = null;   // --reach-rules physics,graph,switch,book (unbounded neighbour classes)
 string? poseConfirmationsPath = null;   // --pose-confirmations FILE (with --reach-rules)
+string? settleExemptionsPath = null;     // --settle-exemptions FILE (with --reach-rules physics; default: the shipped list beside the exe)
 long maxTrianglePairs = 2_000_000;
 double pairSeconds = 120;
 string? emitPath = null;
@@ -194,6 +197,7 @@ try
         else if (flag == "--motion") { if (NeedValue(i, flag) != "swept") throw new ArgumentException("--motion takes swept"); motionSwept = true; i++; }
         else if (flag == "--reach") reachOn = true;
         else if (flag == "--pose-confirmations") { poseConfirmationsPath = NeedValue(i, flag); i++; }
+        else if (flag == "--settle-exemptions") { settleExemptionsPath = NeedValue(i, flag); i++; }
         else if (flag == "--reach-rules")
         {
             reachRules = NeedValue(i, flag).Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).ToHashSet(StringComparer.OrdinalIgnoreCase);
@@ -874,6 +878,28 @@ static IReadOnlyDictionary<string, PoseLocal>? ReadLocals(System.Text.Json.JsonE
     }
     return d;
 }
+IReadOnlyList<SettleExemption>? settleExemptions = null;
+Dictionary<FormKey, EnableResolution> settleBaselineMemo = new();
+// the load-settle facts of one reference: its winning REFR flags, its base's WEAP animation type, and whether it is enabled
+// at load (false only when a judged state enables a reference the load-time reading has disabled)
+SettleDecision SettleOf(FormKey key, FormKey baseKey)
+{
+    if (settleExemptions is null)
+    {
+        var path = settleExemptionsPath ?? Path.Combine(AppContext.BaseDirectory, "load-settle-exemptions.json");
+        if (!File.Exists(path)) throw new FileNotFoundException("--reach-rules physics: the load-settle exemption list is missing", path);
+        settleExemptions = LoadSettle.Read(File.ReadAllText(path));
+    }
+    uint flags = idx.RefRecordFlags.TryGetValue(key, out var fl) ? fl : 0u;
+    string? anim = idx.BaseWeaponAnimationType.TryGetValue(baseKey, out var at) ? at : null;
+    bool atLoad = true;
+    if (stateArm is { IsBaseline: false } && resolvedArms is { } ra)
+    {
+        var b = EnableState.Resolve(key, ra.WinnerRawFacts, settleBaselineMemo);
+        atLoad = b.Resolved && b.Enabled;
+    }
+    return LoadSettle.Decide(new SettleFacts(flags, anim, atLoad), settleExemptions);
+}
 ReachRules? RulesFor(FormKey key, FormKey baseKey, Snap p)
 {
     if (reachRules is null) return null;
@@ -892,7 +918,7 @@ ReachRules? RulesFor(FormKey key, FormKey baseKey, Snap p)
     return new ReachRules(reachRules.Contains("physics"), reachRules.Contains("graph"), reachRules.Contains("switch"), book, type,
                           q => SupportsUnder(key, p, q), reachLayers, poseConfirmations, modelPath, Skin: reachRules.Contains("skin"),
                           Particles: reachRules.Contains("particles"),
-                          HeldBySettleFlag: reachRules.Contains("physics") && idx.RefDontHavokSettle.Contains(key));
+                          Settle: reachRules.Contains("physics") ? SettleOf(key, baseKey) : null);
 }
 
 (PhysicalState State, string Detail) OverlapPredicate(FormKey laterKey, FormKey otherKey)
