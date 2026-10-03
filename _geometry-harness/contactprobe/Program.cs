@@ -122,6 +122,7 @@ int contactMaxPairs = 128;
 double surfaceTolerance = 1e-5;
 long meshMaxTrianglePairs = 2_000_000;
 string? stateSpec = null, switchMapPath = null;
+var forceEnable = new List<string>();   // --force-enable: singletons read as enabled after load (EnableArms.Force)
 float eps = 4f;            // touching: surfaces within ε and no vertex deeper than ε inside. A chosen number, stated.
 float reach = 128f;        // how far from a moved host a dependent is looked for (the records pass's contact-plausible radius).
 string? jsonPath = null, emitPath = null, basePath = null, overlapJson = null, labelledMover = null, geomReport = null;
@@ -193,6 +194,7 @@ try
         else if (flag == "--disable") { disablePlugins.Add(NeedValue(i, flag)); i++; }
         else if (flag == "--bos") { bosOn = BosHook.ParseFlag(NeedValue(i, flag)) ?? throw new ArgumentException("--bos takes on|off"); i++; }
         else if (flag == "--state") { stateSpec = NeedValue(i, flag); i++; }
+        else if (flag == "--force-enable") { forceEnable.AddRange(NeedValue(i, flag).Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)); i++; }
         // --flags is refused rather than added (Q27): contactprobe has resolved the enable chain since R1 (2026-09-03).
         else if (flag == "--flags")
         {
@@ -455,6 +457,20 @@ if (stateSpec is not null)
                     + "every arm's runtime enable state (R1) carries the flip");
 }
 
+if (forceEnable.Count > 0)
+{
+    var keys = new List<FormKey>();
+    foreach (var t in forceEnable)
+    {
+        if (!FormKey.TryFactory(t, out var fk)) { Console.Error.WriteLine($"--force-enable: '{t}' is not a FormKey (XXXXXX:Plugin.esp)"); return 2; }
+        keys.Add(fk);
+    }
+    var refused = cidx.Arms.Force(keys);
+    foreach (var (k, why) in refused) Console.Error.WriteLine($"--force-enable: {k} refused: {why}");
+    if (refused.Count > 0) return 2;
+    Console.WriteLine($"   force-enable: {cidx.Arms.Forced.Count} reference(s) {EnableArms.ForcedLabel}: {string.Join(", ", cidx.Arms.Forced)}");
+}
+
 string PluginName(int p) => p < 0 ? "(none)" : p == bosPlugin ? BosApplyReport.PseudoPluginName : pluginKey[p].FileName.String;
 bool IsVanilla(int p) => p >= 0 && Vanilla.Contains(PluginName(p));
 bool IsUssep(int p) => p >= 0 && string.Equals(PluginName(p), Ussep, StringComparison.OrdinalIgnoreCase);
@@ -619,7 +635,7 @@ if (labelledMover is not null)
     if (jsonPath is not null)
     {
         Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(jsonPath))!);
-        File.WriteAllText(jsonPath, JsonSerializer.Serialize(new { mover = labelledMover, eps, tested, movedFar, verticalOnly, rows = rowsOut }, new JsonSerializerOptions { WriteIndented = false, NumberHandling = System.Text.Json.Serialization.JsonNumberHandling.AllowNamedFloatingPointLiterals }));
+        File.WriteAllText(jsonPath, cidx.Arms.StampForced(JsonSerializer.Serialize(new { mover = labelledMover, eps, tested, movedFar, verticalOnly, rows = rowsOut }, new JsonSerializerOptions { WriteIndented = false, NumberHandling = System.Text.Json.Serialization.JsonNumberHandling.AllowNamedFloatingPointLiterals })));
         Console.WriteLine($"\nwrote {jsonPath}");
     }
     Console.WriteLine($"\n{GeometryLine()}");
@@ -985,7 +1001,7 @@ if (jsonPath is not null)
         DependentDisabled = r.Facts.DependentDisabled, DependentDisabledViaParent = r.Facts.DependentDisabledViaParent, HostRemovedViaParent = r.Host.RemovedViaParent,
         AuthoringRawDistance = r.Authoring?.Contact.Distance, WinnerRawDistance = r.Winner?.RawDistance, WinnerRawAgainst = r.Winner is { } wr && !wr.RawAgainst.IsNull ? wr.RawAgainst.ToString() : null,
     }, r.DepBase));
-    File.WriteAllText(jsonPath, JsonSerializer.Serialize(dump, dumpOptions));
+    File.WriteAllText(jsonPath, cidx.Arms.StampForced(JsonSerializer.Serialize(dump, dumpOptions)));
     Console.WriteLine($"wrote {jsonPath}");
 }
 

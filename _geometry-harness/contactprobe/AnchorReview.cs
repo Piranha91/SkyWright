@@ -135,7 +135,7 @@ static class AnchorReview
             configuration = new { configuration.Fingerprint, configuration.Source, configuration.Population, configuration.State },
             pairs = pairs.Count, decided, undecided, refused, records,
         };
-        File.WriteAllText(outputPath, JsonSerializer.Serialize(doc, Json));
+        File.WriteAllText(outputPath, arms.StampForced(JsonSerializer.Serialize(doc, Json)));
         Console.WriteLine($"wrote anchor review: {pairs.Count} pair(s), {decided} decided, {undecided} undecided, {refused} refused -> {outputPath}");
         return 0;
     }

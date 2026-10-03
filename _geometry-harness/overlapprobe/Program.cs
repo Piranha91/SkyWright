@@ -148,6 +148,8 @@ string GamePath = HarnessTarget.Game;
 string profileName = HarnessTarget.Profile;
 int listN = 25;
 string? stateSpec = null, switchMapPath = null;
+// --force-enable: initially-disabled singletons read as enabled after load (EnableArms.Force); refused by name otherwise.
+var forceEnable = new List<string>();
 // --state: the runtime enable state per reference under the arm (null = the winning flag, the default population).
 Func<FormKey, bool>? enabledOf = null;
 StateArm? stateArm = null;
@@ -245,6 +247,7 @@ try
         else if (flag == "--disable") { disablePlugins.Add(NeedValue(i, flag)); i++; }
         else if (flag == "--bos") { bosOn = BosHook.ParseFlag(NeedValue(i, flag)) ?? throw new ArgumentException("--bos takes on|off"); i++; }
         else if (flag == "--state") { stateSpec = NeedValue(i, flag); i++; }
+        else if (flag == "--force-enable") { forceEnable.AddRange(NeedValue(i, flag).Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)); i++; }
         else if (flag == "--switch-map") { switchMapPath = NeedValue(i, flag); i++; }
         else if (flag == "--flags") flagsOnly = true;
         else if (flag == "--instance") { Instance = NeedValue(i, flag); i++; }
@@ -945,6 +948,7 @@ SettleFacts SettleFactsOf(FormKey key, FormKey baseKey)
         var b = EnableState.Resolve(key, ra.WinnerRawFacts, settleBaselineMemo);
         atLoad = b.Resolved && b.Enabled;
     }
+    if (resolvedArms?.IsForced(key) == true) atLoad = false;   // --force-enable: enabled after load, by construction
     return new SettleFacts(flags, atLoad);   // the model's BSX is read by the reach reader
 }
 ReachRules? RulesFor(FormKey key, FormKey baseKey, Snap p)
@@ -1012,6 +1016,19 @@ ReachRules? RulesFor(FormKey key, FormKey baseKey, Snap p)
 // census as well, because a switch has to be looked up by name and its sets known.
 var arms = new EnableArms(idx);
 resolvedArms = arms;
+if (forceEnable.Count > 0)
+{
+    var keys = new List<FormKey>();
+    foreach (var t in forceEnable)
+    {
+        if (!FormKey.TryFactory(t, out var fk)) { Console.Error.WriteLine($"--force-enable: '{t}' is not a FormKey (XXXXXX:Plugin.esp)"); return 2; }
+        keys.Add(fk);
+    }
+    var refused = arms.Force(keys);
+    foreach (var (k, why) in refused) Console.Error.WriteLine($"--force-enable: {k} refused: {why}");
+    if (refused.Count > 0) return 2;
+    Console.WriteLine($"force-enable: {arms.Forced.Count} reference(s) {EnableArms.ForcedLabel}: {string.Join(", ", arms.Forced)}");
+}
 EnablePopulation pop;
 if (stateSpec is not null)
 {
@@ -1443,7 +1460,9 @@ if (geometryManifestPath is not null)
                 position = new[] { (double)p.Pos.X, (double)p.Pos.Y, (double)p.Pos.Z },
                 rotation = new[] { (double)p.Rot.X, (double)p.Rot.Y, (double)p.Rot.Z },
                 scale = (double)p.Scale, deletion = deleted,
-                resolvedEnable = new { enabled, resolved = enableResolved, population = pop.Identity, state = pop.StateName },
+                resolvedEnable = arms.IsForced(key)
+                    ? (object)new { enabled, resolved = enableResolved, population = pop.Identity, state = pop.StateName, forced = EnableArms.ForcedLabel }
+                    : new { enabled, resolved = enableResolved, population = pop.Identity, state = pop.StateName },
                 bos
             },
             eligibility = new { status = eligibility, reason = eligibilityReason },
@@ -1765,12 +1784,12 @@ if (geometryManifestPath is not null)
          .Feature("nif_cache_hits", manifest.workload.cacheHits, "lookups", FeatureAt.Final)
          .Feature("nif_cache_misses", manifest.workload.cacheMisses, "lookups", FeatureAt.Final);
     __run.Stage("manifest-artifact", "writing actual-shape manifest", 1, "artifacts");
-    if (reachRules is null) File.WriteAllText(geometryManifestPath, JsonSerializer.Serialize(manifest, manifestJson));
+    if (reachRules is null) File.WriteAllText(geometryManifestPath, arms.StampForced(JsonSerializer.Serialize(manifest, manifestJson)));
     else
     {
         var withLoose = JsonSerializer.SerializeToNode(manifest, manifestJson)!.AsObject();
         withLoose["reachLoose"] = JsonSerializer.SerializeToNode(reachLooseRows, manifestJson);
-        File.WriteAllText(geometryManifestPath, withLoose.ToJsonString(manifestJson));
+        File.WriteAllText(geometryManifestPath, arms.StampForced(withLoose.ToJsonString(manifestJson)));
     }
     __run.Advance().Artifact(geometryManifestPath);
     Console.WriteLine($"wrote geometry manifest: {recordRows.Count:N0} records, {pairRows.Count:N0} union pairs -> {geometryManifestPath}");

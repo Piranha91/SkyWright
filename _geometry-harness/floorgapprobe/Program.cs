@@ -75,6 +75,9 @@ string plugin = "Skyrim.esm";
 float depth = NavmeshFloor.DefaultMaxDepth, reach = NavmeshFloor.DefaultUpReach, split = NavmeshFloor.DefaultSplitAbove;
 string? tsvPath = null, trisPath = null, verdictsDir = null, orderFile = null, jsonPath = null;
 bool ownOnly = false, winning = false, flagsOnly = false;
+// reach mode, opt-in (G1 Stage B): --band LO,HI adds the distance to the navmesh swept up from +LO to +HI (a standing
+// body); --under adds the floor straight under the subject (this probe's floor rule, --depth / --reach window).
+float[]? band = null; bool under = false;
 int maxCells = int.MaxValue;
 Vec3? at = null; float heading = 0f, span = 384f, every = 16f;
 var positional = new List<string>();
@@ -93,6 +96,8 @@ for (int i = 0; i < args.Length; i++)
         case "--split": split = float.Parse(Next(), CultureInfo.InvariantCulture); break;
         case "--tsv": tsvPath = Next(); break;
         case "--json": jsonPath = Next(); break;
+        case "--band": { var b = Next().Split(','); band = new[] { F(b[0]), F(b[1]) }; if (!(band[1] > band[0])) { Console.Error.WriteLine("--band LO,HI needs HI > LO"); return 2; } break; }
+        case "--under": under = true; break;
         case "--tris": trisPath = Next(); break;
         case "--verdicts": verdictsDir = Next(); break;
         case "--own": ownOnly = true; break;
@@ -348,7 +353,9 @@ if (mode == "reach")
             { world = SpatialOverlap.TransformSoup(soup, r.Position, r.Rotation, r.Scale); geometry = "render (stored pose)"; }
             else geometryNote = bytes is null ? "mesh unresolved: the position is used" : "render geometry partial or posed at runtime: the position is used";
         }
-        else geometryNote = "no model: the position is used";
+        else if (r.Primitive is { } prim && NavmeshReach.PrimitiveBoxSoup(prim.Type, new Vector3(prim.Bounds.X, prim.Bounds.Y, prim.Bounds.Z)) is { } boxSoup)
+        { world = SpatialOverlap.TransformSoup(boxSoup, r.Position, r.Rotation, r.Scale); geometry = "primitive box"; }
+        else geometryNote = r.Primitive is { } pr2 ? $"primitive {pr2.Type} is not a box: the position is used" : "no model: the position is used";
         var d = world is not null ? NavmeshReach.FromSoup(world, tris) : NavmeshReach.FromPoint(new Vector3(r.Position.X, r.Position.Y, r.Position.Z), tris);
         object? floor = null;
         if (d.Status == "measured" && d.Triangle is { } ti && tris.FirstOrDefault(x => x.Index == ti && x.Navmesh == d.Navmesh) is var nt)
@@ -357,8 +364,25 @@ if (mode == "reach")
             var fr = field.Read(c.X, c.Y, c.Z, out _);
             floor = new { at = "the nearest triangle's centroid", found = fr.Found, offset = fr.Found ? fr.Offset : (float?)null, reason = fr.Found ? null : fr.Reason.ToString() };
         }
-        rows.Add(new { id, geometry, geometryNote, status = d.Status, reason = d.Reason, distance = d.Distance, horizontal = d.Horizontal, vertical = d.Vertical,
-                       navmesh = d.Navmesh, triangle = d.Triangle, floor });
+        if (band is null && !under)
+            rows.Add(new { id, geometry, geometryNote, status = d.Status, reason = d.Reason, distance = d.Distance, horizontal = d.Horizontal, vertical = d.Vertical,
+                           navmesh = d.Navmesh, triangle = d.Triangle, floor });
+        else
+        {
+            object? bandRow = null, underRow = null;
+            if (band is not null)
+            {
+                var bd = world is not null ? NavmeshReach.FromSoupBand(world, tris, band[0], band[1]) : NavmeshReach.FromPointBand(new Vector3(r.Position.X, r.Position.Y, r.Position.Z), tris, band[0], band[1]);
+                bandRow = new { lo = band[0], hi = band[1], status = bd.Status, reason = bd.Reason, distance = bd.Distance, horizontal = bd.Horizontal, vertical = bd.Vertical, navmesh = bd.Navmesh, triangle = bd.Triangle };
+            }
+            if (under)
+            {
+                var ur = field.Read(r.Position.X, r.Position.Y, r.Position.Z, out _);
+                underRow = new { at = "the subject's position", window = new { below = depth, above = reach }, found = ur.Found, offset = ur.Found ? ur.Offset : (float?)null, reason = ur.Found ? null : ur.Reason.ToString() };
+            }
+            rows.Add(new { id, geometry, geometryNote, status = d.Status, reason = d.Reason, distance = d.Distance, horizontal = d.Horizontal, vertical = d.Vertical,
+                           navmesh = d.Navmesh, triangle = d.Triangle, floor, band = bandRow, under = underRow });
+        }
     }
     var outDoc = new
     {

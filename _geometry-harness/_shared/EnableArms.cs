@@ -45,6 +45,34 @@ public sealed class EnableArms
 
     public void Clear() { _winner.Clear(); _winnerBaseline.Clear(); _arm.Clear(); }
 
+    // FORCED ENABLE (G1 build list, Stage B; `--force-enable`): an initially-disabled reference with no enable parent and
+    // no enable children — a singleton some quest or script enables at runtime, which no switch census can source — read
+    // as enabled in every arm where it is placed. The state machinery keeps its meaning: a switch member, an
+    // enable-parented reference or one already enabled is refused by name, never forced. Callers name every forced
+    // reference in their output (StampForced) and read it as enabled AFTER load (never a load-time body).
+    public const string ForcedLabel = "enabled by hand (its enabler is not sourced by the switch census)";
+    readonly HashSet<FormKey> _forced = new();
+    public IReadOnlyCollection<FormKey> Forced => _forced;
+    public bool IsForced(FormKey key) => _forced.Contains(key);
+
+    /// <summary>Force the listed references enabled. Returns one refusal per reference that is not a singleton
+    /// (nothing is forced when any refuses). Clears every memo.</summary>
+    public IReadOnlyList<(FormKey Key, string Reason)> Force(IEnumerable<FormKey> keys)
+        => Array.Empty<(FormKey, string)>();   // STUB (red gate): forces nothing, refuses nothing
+
+    HashSet<FormKey> CurrentParents()
+    {
+        var s = new HashSet<FormKey>();
+        foreach (var (_, changes) in _index.EnableChanges)
+            if (changes.Count > 0 && changes[^1].Parent is { } p) s.Add(p);
+        return s;
+    }
+
+    /// <summary>Adds <c>forcedEnabled</c> (every forced reference and the label) to a serialized JSON object; the text is
+    /// returned unchanged when nothing is forced, so default output stays byte-identical.</summary>
+    public string StampForced(string json) => json;   // STUB (red gate)
+
+
     /// <summary>Winner-arm references whose chain could not be read to the end — a parent nothing places, a parent a
     /// plugin deleted, or a cycle. The answer for those is EnableState's stated fallback rather than a measurement, so
     /// a caller that emits findings carries this into its coverage block and no clean verdict rests on it (Q27).
@@ -95,6 +123,12 @@ public sealed class EnableArms
     /// baseline is read from.</summary>
     public EnableFacts? WinnerRawFacts(FormKey k)
     {
+        var f = RawUnforced(k);
+        return f is { } v && _forced.Contains(k) ? v with { InitiallyDisabled = false } : f;
+    }
+
+    EnableFacts? RawUnforced(FormKey k)
+    {
         var s = _index.History.Winning(k);
         if (s is null || s.Value.Deleted || _index.IsDeletedNow(k)) return null;
         var (p, o) = EnableParentAt(k, int.MaxValue);
@@ -121,7 +155,7 @@ public sealed class EnableArms
             // be a deletion with no placement at all, or a restoration that repeated a position already in the history.
             if (i < 0 || snaps[i].Deleted || _index.IsDeletedWithout(k, mover, closure)) return null;
             var (p, o) = ArmEnableParent(k, mover, closure);
-            return new EnableFacts(snaps[i].Disabled, p, o);
+            return new EnableFacts(snaps[i].Disabled && !_forced.Contains(k), p, o);
         }
         // Under a state arm the flip applies in this arm too — a switch's baseline here is its state in the arm without
         // the mover, resolved from the raw facts.

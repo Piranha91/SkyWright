@@ -126,7 +126,7 @@ static class OverlapVolumeReview
         };
         var full = Path.GetFullPath(outputPath);
         Directory.CreateDirectory(Path.GetDirectoryName(full)!);
-        File.WriteAllText(full, JsonSerializer.Serialize(doc, json));
+        File.WriteAllText(full, arms.StampForced(JsonSerializer.Serialize(doc, json)));
         Console.WriteLine($"--volume: {pairs.Count} pair(s): {measured} geometry measurement(s), {refused} refused, {unavailable} unavailable -> {full}");
         return 0;
     }

@@ -137,7 +137,7 @@ static class OverlapSurfaceReview
         };
         var full = Path.GetFullPath(outputPath);
         Directory.CreateDirectory(Path.GetDirectoryName(full)!);
-        File.WriteAllText(full, JsonSerializer.Serialize(doc, Json));
+        File.WriteAllText(full, arms.StampForced(JsonSerializer.Serialize(doc, Json)));
         Console.WriteLine($"--surface: {pairs.Count} pair(s): {measured} geometry measurement(s), {incomplete} incomplete, {refused} refused, {unavailable} unavailable -> {full}");
         return 0;
     }
