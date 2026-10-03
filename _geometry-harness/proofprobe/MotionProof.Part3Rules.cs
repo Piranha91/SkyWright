@@ -114,6 +114,46 @@ static partial class MotionProof
             return (r.Drop is { } d && NearA7(d.Distance, 95, 1e-3) && r.Labels.Contains(LoadSettle.SettlesLabel)
                     && !r.Labels.Contains(LoadSettle.RestsLabel), ShowRR(r));
         });
+        // ---- the BSX exemption (B5: the one NIF field separating the four bows, 202, from the fallers, 203 and 194) ----
+        IReadOnlyList<SettleExemption> BsxList() => LoadSettle.Read("""[{"kind":"bsxFlags","value":"set=0x8;clear=0x1","evidence":"lab"}]""");
+        // K-L11: BSX 202 (Complex, not Animated) rests; 203 (Animated too) and 194 (no Complex) settle; no BSX settles.
+        Case(check, "part3 K-L11: bsxFlags set=0x8;clear=0x1 -> 202 rests; 203, 194 and no BSX settle", () =>
+        {
+            var a = LoadSettle.Decide(new SettleFacts(0u, null, true, 202u), BsxList());
+            var b = LoadSettle.Decide(new SettleFacts(0u, null, true, 203u), BsxList());
+            var c = LoadSettle.Decide(new SettleFacts(0u, null, true, 194u), BsxList());
+            var d = LoadSettle.Decide(new SettleFacts(0u, null, true, null), BsxList());
+            return (a.Status == "rests" && a.Exemption?.Kind == "bsxFlags" && b.Status == "settles" && c.Status == "settles" && d.Status == "settles", $"{a} {b} {c} {d}");
+        });
+        byte[] FreeItemBsx(uint v)
+        {
+            var f = Load(FreeItem()); var root = f.GetRootNodes().First();
+            root.ExtraDataList ??= new(); root.ExtraDataList.AddBlockRef(f.AddBlock(new BSXFlags { Name = new NiStringRef("BSX"), IntegerData = v }));
+            root.NumExtraDataList = (uint)root.ExtraDataList.Count;
+            return Save(f, $"free item with BSX {v}");
+        }
+        ReachOptions FactsOn(IReadOnlyList<SettleExemption> l) => new(0.5, 65536, new ReachRules(Physics: true, BaseRecordType: "WEAP",
+            Supports: _ => new[] { new DropSupport("floor", 1, true, false, Plate(500, -100)) }, Layers: RRLayers,
+            SettleFacts: new SettleFacts(0u, null, true), SettleExemptions: l));
+        // K-L12: the reader takes the BSX from the model: BSX 202 rests at its placed box, labelled, no drop.
+        Case(check, "part3 K-L12: the model's own BSX 202 is read: rests where placed, labelled, no drop", () =>
+        {
+            var r = MeshReach.OfModel(FreeItemBsx(202), Origin, Origin, 1f, null, FactsOn(BsxList()));
+            return (r.Labels.Contains(LoadSettle.RestsLabel) && r.Drop is null && BoxIs(r.Box, -5, -5, -5, 5, 5, 5), ShowRR(r));
+        });
+        // K-L13: the same with BSX 203 settles: dropped 95 u, labelled settles. Rejects reading "Complex" alone.
+        Case(check, "part3 K-L13: the model's own BSX 203 is read: settles, dropped (d 95)", () =>
+        {
+            var r = MeshReach.OfModel(FreeItemBsx(203), Origin, Origin, 1f, null, FactsOn(BsxList()));
+            return (r.Drop is { } d && NearA7(d.Distance, 95, 1e-3) && r.Labels.Contains(LoadSettle.SettlesLabel), ShowRR(r));
+        });
+        // fixture control: the fixture's BSX block round-trips (holds on the base)
+        Case(check, "part3 fixture control: the BSX fixture carries one BSXFlags block with the value given", () =>
+        {
+            var n = Load(FreeItemBsx(202)); var x = n.Blocks.OfType<BSXFlags>().ToList();
+            return (x.Count == 1 && x[0].IntegerData == 202, $"{x.Count} {x.FirstOrDefault()?.IntegerData}");
+        });
+
         // fixture control: no decision (the list not given) is today's drop, with no settle label (holds on the base)
         Case(check, "part3 fixture control: with no settle decision the free item drops as before (d 95), no settle labels", () =>
         {
