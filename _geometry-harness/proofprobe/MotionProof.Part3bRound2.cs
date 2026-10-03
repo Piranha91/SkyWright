@@ -252,6 +252,31 @@ static partial class MotionProof
             var r = MeshReach.OfModel(MovingParticleNif(false), Origin, Origin, 1f, null, new ReachOptions(0.5, 4096, new ReachRules(Particles: true, Emitter: true)));
             return (r.Status == "uncertified" && r.Box.Max.X >= 105 + R2Iso - 1e-2, ShowRR(r));
         });
+        // W8: a node a sequence drives with keys that hold its stored pose (translation (0,0,0) -> (0,0,0)) does not move: the particle
+        // system under it, its emitter object and its gravity object keep the still-frame model (planar gravity on z only): x half
+        // 68.91421, z half 119.58088. Rejects the block's presence alone making the frame move (gravity then on every axis: x 119.58).
+        Case(check, "r2 K-W8: a sequence that holds the stored pose does not make the frame move - x half 68.91421, z half 119.58088", () =>
+        {
+            var data = new NiTransformData { RotationType = KeyType.LINEAR_KEY, NumRotationKeys = 0, Translations = VG(KeyType.LINEAR_KEY, (0f, new Vector3(0, 0, 0)), (1f, new Vector3(0, 0, 0))), Scales = NoKeys() };
+            var nif = Rig(Box(-1, -1, -1, 1, 1, 1), Vector3.Zero, data, extra: (f, root) =>
+            {
+                var mover = f.Blocks.OfType<NiNode>().Single(n => n.Name?.String == "Mover");
+                int mi = f.Blocks.IndexOf(mover);
+                var psys = new NiParticleSystem { Name = new NiStringRef("Sparks"), Flags_ui = 0xE, Scale = 1f, Rotation = Identity33(), WorldSpace = true };
+                int pi = f.AddBlock(psys); mover.Children.AddBlockRef(pi);
+                psys.Data_NiBlockRef_NPSD = new(f.AddBlock(new NiPSysData { NumParticles = 0 }));
+                psys.Modifiers ??= new();
+                void Add(NiPSysModifier m) { m.Target = new(pi); m.Active = true; psys.Modifiers.AddBlockRef(f.AddBlock(m)); }
+                Add(new NiPSysAgeDeathModifier { Name = new NiStringRef("Age") });
+                Add(new NiPSysSphereEmitter { Name = new NiStringRef("Emitter"), Radius = 5f, Speed = 20f, SpeedVariation = 5f, LifeSpan = 2f, LifeSpanVariation = 0.5f, InitialRadius = 1f, EmitterObject = new(mi) });
+                Add(new NiPSysGravityModifier { Name = new NiStringRef("Gravity"), GravityAxis = new Vector3(0, 0, -1), Strength = 10f, TurbulenceScale = 1f, GravityObject = new(mi) });
+                Add(new NiPSysPositionModifier { Name = new NiStringRef("Position") });
+                psys.NumModifiers = (uint)psys.Modifiers.Count;
+            });
+            var r = MeshReach.OfModel(nif, Origin, Origin, 1f, null, new ReachOptions(0.5, 4096, new ReachRules(Particles: true, Emitter: true)));
+            var part = r.UncertifiedParts.FirstOrDefault(x => x.Label == MeshReach.ParticleModelLabel);
+            return (r.Status == "uncertified" && part is not null && HalfIs(part.Box, R2Lat, R2Lat, R2Lat + 16 * R2Q, 1e-2), ShowRR(r));
+        });
         // W4: a path node whose shape sits 48..52 u above it: the flat path hull (z 0) grown by the subtree radius |(2, 2, 52)| = 52.0769
         // reaches z 52.0769. Rejects the radius dropped (z max 0).
         Case(check, "r2 K-W4: path hull grown by the subtree radius - z max >= 52.0769", () =>
