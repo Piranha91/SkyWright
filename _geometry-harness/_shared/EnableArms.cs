@@ -58,7 +58,25 @@ public sealed class EnableArms
     /// <summary>Force the listed references enabled. Returns one refusal per reference that is not a singleton
     /// (nothing is forced when any refuses). Clears every memo.</summary>
     public IReadOnlyList<(FormKey Key, string Reason)> Force(IEnumerable<FormKey> keys)
-        => Array.Empty<(FormKey, string)>();   // STUB (red gate): forces nothing, refuses nothing
+    {
+        var list = keys.Distinct().ToList();
+        var refusals = new List<(FormKey, string)>();
+        HashSet<FormKey>? parents = null;
+        foreach (var k in list)
+        {
+            var raw = RawUnforced(k);
+            if (raw is null) { refusals.Add((k, "no winning placement in this order (absent or deleted)")); continue; }
+            if (raw.Value.Parent is not null) { refusals.Add((k, $"it has an enable parent ({raw.Value.Parent}): its state is the switch's, use --state")); continue; }
+            if (!raw.Value.InitiallyDisabled) { refusals.Add((k, "it is not initially disabled: already enabled at load")); continue; }
+            parents ??= CurrentParents();
+            if (parents.Contains(k)) { refusals.Add((k, "it is an enable parent (a switch): use --state")); continue; }
+        }
+        if (refusals.Count > 0) return refusals;
+        _forced.Clear();
+        foreach (var k in list) _forced.Add(k);
+        Clear();
+        return refusals;
+    }
 
     HashSet<FormKey> CurrentParents()
     {
@@ -70,8 +88,20 @@ public sealed class EnableArms
 
     /// <summary>Adds <c>forcedEnabled</c> (every forced reference and the label) to a serialized JSON object; the text is
     /// returned unchanged when nothing is forced, so default output stays byte-identical.</summary>
-    public string StampForced(string json) => json;   // STUB (red gate)
-
+    public string StampForced(string json)
+    {
+        if (_forced.Count == 0) return json;
+        var node = System.Text.Json.Nodes.JsonNode.Parse(json)!.AsObject();
+        var arr = new System.Text.Json.Nodes.JsonArray();
+        foreach (var k in _forced.Select(x => x.ToString()).OrderBy(x => x, StringComparer.Ordinal)) arr.Add(k);
+        node["forcedEnabled"] = new System.Text.Json.Nodes.JsonObject { ["label"] = ForcedLabel, ["references"] = arr };
+        bool indented = json.Contains('\n');
+        return node.ToJsonString(new System.Text.Json.JsonSerializerOptions
+        {
+            WriteIndented = indented,
+            NumberHandling = System.Text.Json.Serialization.JsonNumberHandling.AllowNamedFloatingPointLiterals,
+        });
+    }
 
     /// <summary>Winner-arm references whose chain could not be read to the end — a parent nothing places, a parent a
     /// plugin deleted, or a cycle. The answer for those is EnableState's stated fallback rather than a measurement, so
