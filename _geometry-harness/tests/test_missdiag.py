@@ -166,6 +166,27 @@ def test_m2m_emitted_in_a_bundle_that_ran_is_flagged_not_joined():   # a detecti
 
 
 # ---- M3: the table ----
+def test_m2n_fix_attribution_gives_fixes_an_inter_mod_clash():   # loose-item clashes: 2B8DCD (g1-0010) label only
+    fix = {"check": "loose-item support", "unpatched": "lost (no support below)", "attribution": "needs both",
+           "patched": "support restored"}
+    r = M.assign_reason(_ev(trace=None, fixAttribution=fix))
+    assert r["reason"] == "fixes an inter-mod clash" and r["evidenceType"] == "check"
+    assert r["detail"] == "loose-item support: lost (no support below); needs both; patched: support restored"
+
+
+def test_m2o_no_fix_attribution_keeps_todays_rules():
+    assert M.assign_reason(_ev(trace=None))["reason"] == "cannot tell"
+    assert M.assign_reason(_ev(trace=None, fixAttribution=None))["reason"] == "cannot tell"
+
+
+def test_m2p_fix_attribution_must_need_both():
+    try:
+        M.assign_reason(_ev(fixAttribution={"check": "x", "unpatched": "lost", "attribution": "not inter-mod", "patched": "y"}))
+    except ValueError:
+        return
+    raise AssertionError("an attribution other than 'needs both' was accepted")
+
+
 def test_m3_table_sums_and_splits():
     cl = [{"group": "G1", "edits": 7, "reason": "not modelled", "evidenceType": "render reading", "direct": False},
           {"group": "G1", "edits": 3, "reason": "set aside by filter", "evidenceType": "check", "direct": True},

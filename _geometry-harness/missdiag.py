@@ -33,6 +33,7 @@ REASONS = (
     "below threshold",
     "taste (no clash)",
     "cannot tell",
+    "fixes an inter-mod clash",
 )
 EVIDENCE_TYPES = ("mechanical", "check", "render reading")
 
@@ -95,8 +96,12 @@ def assign_reason(ev):
       rendered (bool), likelyClass (str|None; 'integration' is the taste class), classEvidence ('mechanical' |
       'check' | 'render reading' | None), check (str|None: the check modelling the class, None = no check),
       checkRunnable (bool), bundleConfiguration ('ran' | 'skipped-user' | 'not in plan'),
-      trace (dict outcome, rule, emitted | None), renderShowsDefect (True | False | None).
+      trace (dict outcome, rule, emitted | None), renderShowsDefect (True | False | None),
+      fixAttribution (dict | None: check, unpatched (the clash in the order without the patch), attribution (must be
+      'needs both'), patched (the edit's outcome in the patched order, e.g. 'support restored' or 'item disabled')).
     Returns dict(reason, detail, evidenceType, bundleConfiguration). Ordered rules, first that holds:
+      0. fixAttribution given -> fixes an inter-mod clash (evidence 'check'), detail = check: unpatched; needs both;
+         patched: outcome. An attribution other than 'needs both', or a missing part, raises (the caller must read it).
       1. likelyClass None -> cannot tell ('not rendered' if not rendered, else 'class undeterminable').
       2. likelyClass 'integration': classEvidence 'mechanical' -> taste (mechanical); else cannot tell (render reading only).
       3. check None -> not modelled (evidence = classEvidence).
@@ -116,6 +121,12 @@ def assign_reason(ev):
     def out(reason, detail, evidence):
         return {"reason": reason, "detail": detail, "evidenceType": evidence, "bundleConfiguration": bundle}
 
+    fix = ev.get("fixAttribution")
+    if fix is not None:
+        missing = [k for k in ("check", "unpatched", "attribution", "patched") if not fix.get(k)]
+        if missing or fix["attribution"] != "needs both":
+            raise ValueError("assign_reason: fixAttribution needs check, unpatched, attribution 'needs both' and patched; got %r" % (fix,))
+        return out("fixes an inter-mod clash", "%s: %s; needs both; patched: %s" % (fix["check"], fix["unpatched"], fix["patched"]), "check")
     likely = ev.get("likelyClass")
     if likely is None:
         return out("cannot tell", "class undeterminable" if ev.get("rendered") else "not rendered", ev.get("classEvidence"))
