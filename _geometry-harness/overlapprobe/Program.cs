@@ -687,7 +687,13 @@ object ReachOf(FormKey key, FormKey baseKey, Snap p)
         return Out(region);
     }
     if (g.RelativePath is not null)
-        return Out(new ReachRegion("refused", $"{g.Status}: {g.Reason}", Aabb.Empty, MeshReach.PolicyVersion, Array.Empty<string>(), Array.Empty<ReachPart>()));
+    {
+        string why = $"{g.Status}: {g.Reason}";
+        // Part 3b absent: a model no active provider supplies, measured in game to draw nothing, is no_geometry (with both facts)
+        if (reachRules?.Contains("absent") == true && g.Status == "missing_asset" && AbsentModels() is { } absent)
+            return Out(MeshReach.OfAbsentModel(g.RelativePath, absent, why));
+        return Out(new ReachRegion("refused", why, Aabb.Empty, MeshReach.PolicyVersion, Array.Empty<string>(), Array.Empty<ReachPart>()));
+    }
     if (idx.RefPrimitive.TryGetValue(key, out var prim))
     {
         string layer = idx.RefCollisionLayer.TryGetValue(key, out var li)
@@ -698,7 +704,15 @@ object ReachOf(FormKey key, FormKey baseKey, Snap p)
         {
             string? btype = idx.BaseInfo.TryGetValue(baseKey, out var pbi) ? pbi.Type : null;
             uint? li2 = idx.RefCollisionLayer.TryGetValue(key, out var lv) ? lv : null;
-            return Out(MeshReach.OfPrimitiveRule(btype, false, li2, primRefusal));   // reached only with no model path
+            var earlier = MeshReach.OfPrimitiveRule(btype, false, li2, primRefusal);   // reached only with no model path
+            if (earlier.Status != "refused" || PrimitiveTable() is not { } table) return Out(earlier);
+            // Part 3b: the measured (base, layer) table decides; XPRM bounds are full extents (station T and Q: the top sits at
+            // centre + bounds_z / 2); a scaled reference is not in the measurement
+            if (Math.Abs(p.Scale - 1f) > 1e-4f) return Out(new ReachRegion("refused", primRefusal + $"; reference scale {p.Scale} (primitives were measured at scale 1)", Aabb.Empty, MeshReach.PolicyVersion, Array.Empty<string>(), Array.Empty<ReachPart>()));
+            string? lname = li2 is null ? null : (idx.CollisionLayersByIndex.TryGetValue(li2.Value, out var cl2) ? cl2.Edid : null);
+            if (li2 is not null && lname is null) return Out(earlier);
+            var facts = new PrimitiveFacts(baseKey.ToString(), btype, lname, new System.Numerics.Vector3(prim.Bounds.X / 2, prim.Bounds.Y / 2, prim.Bounds.Z / 2), p.Pos, p.Rot);
+            return Out(PrimitiveSolidity.Decide(facts, table, primRefusal));
         }
         return Out(new ReachRegion("refused", primRefusal, Aabb.Empty, MeshReach.PolicyVersion, Array.Empty<string>(), Array.Empty<ReachPart>()));
     }
@@ -932,6 +946,39 @@ SettleFacts SettleFactsOf(FormKey key, FormKey baseKey)
     }
     return new SettleFacts(flags, atLoad);   // the model's BSX is read by the reach reader
 }
+IReadOnlyList<PrimitiveMeasurement>? primitiveTable = null;
+IReadOnlyList<PrimitiveMeasurement>? PrimitiveTable()
+{
+    if (primitiveSolidityPath is null) return null;
+    return primitiveTable ??= PrimitiveSolidity.Read(File.ReadAllText(primitiveSolidityPath));
+}
+IReadOnlyList<AbsenceMeasurement>? absentModels = null;
+IReadOnlyList<AbsenceMeasurement>? AbsentModels()
+{
+    if (absentModelsPath is null) return null;
+    return absentModels ??= System.Text.Json.JsonSerializer.Deserialize<List<AbsenceMeasurement>>(File.ReadAllText(absentModelsPath),
+        new System.Text.Json.JsonSerializerOptions { PropertyNameCaseInsensitive = true }) ?? new List<AbsenceMeasurement>();
+}
+List<TransferSource>? transferSources = null;
+// Part 3b transfer: the confirmed models (--pose-confirmations, stored-pose entries) as transfer sources, their graph facts read
+// through this order (bytes must match the confirmation's sha256)
+List<TransferSource> TransferSources()
+{
+    if (transferSources is not null) return transferSources;
+    transferSources = new();
+    foreach (var c in poseConfirmations ?? new List<PoseConfirmation>())
+    {
+        if (c.Clip is not null || c.Locals is { Count: > 0 }) continue;
+        var full = (c.ModelPath.StartsWith("meshes", StringComparison.OrdinalIgnoreCase) ? c.ModelPath : Path.Combine("meshes", c.ModelPath)).Replace('/', '\\');
+        var src = assets.ResolveForPlacement(full).Sources.FirstOrDefault();
+        if (src is null || AssetResolver.ReadPlacementSource(src).Bytes is not { } b) continue;
+        if (!string.Equals(Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(b)), c.Sha256, StringComparison.OrdinalIgnoreCase)) continue;
+        byte[]? TRead(string r) { try { var res = assets.ResolveForPlacement(r); return res.Sources.Count == 0 ? null : AssetResolver.ReadPlacementSource(res.Sources[0]).Bytes; } catch (ArgumentException) { return null; } }
+        if (NifMotion.GraphFacts(b, TRead, new GraphOptions(true, true, true, ClipNames: reachRules!.Contains("clipnames"))) is { } f)
+            transferSources.Add(new TransferSource(c.ModelPath, f.Files, f.DrivenLocals, c.Label ?? MeshReach.ConfirmedPoseLabel));
+    }
+    return transferSources;
+}
 ReachRules? RulesFor(FormKey key, FormKey baseKey, Snap p)
 {
     if (reachRules is null) return null;
@@ -954,7 +1001,8 @@ ReachRules? RulesFor(FormKey key, FormKey baseKey, Snap p)
                           SettleFacts: reachRules.Contains("physics") ? SettleFactsOf(key, baseKey) : null,
                           SettleExemptions: reachRules.Contains("physics") ? settleExemptions : null,
                           ClipNames: reachRules.Contains("clipnames"), Blend: reachRules.Contains("blend"), MissingSequence: reachRules.Contains("missingseq"),
-                          PathHull: reachRules.Contains("path"), Emitter: reachRules.Contains("emitter"));
+                          PathHull: reachRules.Contains("path"), Emitter: reachRules.Contains("emitter"),
+                          Transfers: reachRules.Contains("transfer") ? TransferSources() : null);
 }
 
 (PhysicalState State, string Detail) OverlapPredicate(FormKey laterKey, FormKey otherKey)
