@@ -222,6 +222,24 @@ static partial class MotionProof
             return (r.Status == "uncertified" && NearA7(r.Box.Max.X, R2Lat / 2 + (62.5 + Sqrt2) / 2, 2e-2) && NearA7(-r.Box.Min.X, R2Lat / 2 + (62.5 + Sqrt2) / 2, 2e-2), ShowRR(r));
         });
 
+        // S6: S5 with drag 0.5 on all three axes (k = 15 /s): the gravity-free growth per axis is 25 (1 - e^-37.5)/15 + 1.41421 = 3.08088,
+        // so the model box half is 8.08088, placed at scale 0.5 (x half 4.04044) and grown by 3.08088 x 0.5 = 1.54044: x half 5.58088.
+        // Rejects a compensation that ignores drag (v T + r: x half 36.0).
+        Case(check, "r2 K-SF6: S5 with drag on every axis - x half 5.58088 (the compensation uses the drag-reduced growth)", () =>
+        {
+            var b = ParticleVariant((f, ps, root) =>
+            {
+                foreach (var ax in new[] { Vector3.UnitX, Vector3.UnitY, Vector3.UnitZ })
+                    AddModifier(f, ps, new NiPSysDragModifier { Name = new NiStringRef("Drag"), DragObject = new(f.Blocks.IndexOf(root)), DragAxis = ax, Percentage = 0.5f, Range = float.MaxValue, RangeFalloff = float.MaxValue });
+            }, "drag xyz");
+            string sh6 = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(b)).ToLowerInvariant();
+            var r = MeshReach.OfModel(b, Origin, new Vec3(MathF.PI / 4, 0, 0), 0.5f, null,
+                new ReachOptions(0.5, 4096, new ReachRules(Particles: true, ModelPath: "meshes\\t\\p.nif",
+                    Gravity: new[] { new SettledGravity("meshes/t/p.nif", sh6, Array.Empty<string>(), true, "frames F1, F2") })));
+            double g = 25 * (1 - Math.Exp(-37.5)) / 15 + Sqrt2;
+            return (r.Status == "uncertified" && NearA7(r.Box.Max.X, (5 + g) / 2 + g / 2, 2e-2), ShowRR(r));
+        });
+
         // ================= SP: the support-plane term with F1's condition =================
         // P1: a thick body (closed box z -1000..-10, +-2000): its surface -10 under the whole footprint, solid below the region's bottom:
         // the region stops at the plane minus r: z min = -10 - 1.41421 = -11.41421; range from h = 5 (emitter bottom -5 to -10):
