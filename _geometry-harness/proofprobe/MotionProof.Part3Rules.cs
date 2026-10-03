@@ -29,6 +29,13 @@ static partial class MotionProof
 
     public static void RunPart3Rules(Action<string, bool, string> check)
     {
+        // ================= Static support label (measured in the lab, one model) =================
+        Case(check, "part3 K-S1: the Static-support label names the lab measurement, not an untested assumption", () =>
+        {
+            const string want = "not simulated: a Static base did not move in the lab (one model, crossbow: its loose twin fell and was pushed; beam model: no push acted)";
+            return (PhysicsReach.StaticAssumptionLabel == want && !PhysicsReach.StaticAssumptionLabel.Contains("untested"), PhysicsReach.StaticAssumptionLabel);
+        });
+
         // ================= canary =================
         Case(check, "part3 CANARY (must FAIL): a CollisionMarker box stating L_STATIC is not solid", () => (false, "the lab held an item on it"));
 
