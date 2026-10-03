@@ -132,6 +132,15 @@ pose), is read at its stored pose, labelled "rest: stored pose (confirmed by in-
 ({node: {T, R (9, rows), S}}, a confirmed non-stored pose such as a graph start state), "label", and "pose": {"clip": "<clip path>", "sweep": "loop" |
 [t0, t1], "label"} (a confirmed clip read alone from the model's behaviour graph and swept on those bytes; a clip the graph lacks
 refuses, naming it). No entry, no change.
+Part 3b keys (with --reach): clipnames (a behaviour clip resolves through its character's animation list by file name),
+transfer (a refused graph model whose graph files are byte-identical to a --pose-confirmations model's and whose stored locals
+on every graph-driven node equal that model's takes its confirmation), blend (state transitions and hkbBlenderGenerator children
+bounded by the blend envelope: the product of per-node 1-DOF intervals, else the chord bound), missingseq (a sequence generator
+naming a sequence absent from the NIF reads the stored pose and every sequence in the file), path (a NiPathInterpolator node within
+its path's control-polygon hull grown by its subtree radius), emitter (a moving particle emitter: swept origins grown by the particle
+offset box), gravity (--settled-gravity FILE: observed gravity frame and sign per model), absent (--absent-models FILE: a model no
+active provider supplies, measured drawing nothing, is no_geometry). primitive with --primitive-solidity FILE: the measured
+(base, layer) table decides; without the file the earlier activator rule stands.
 See overlapprobe/Program.cs usage documentation. Help performs no load-order scan.
 """);
     return 0;
@@ -152,6 +161,9 @@ bool reachOn = false;   // --reach (G1 build list, Stage A): a reach region for 
 HashSet<string>? reachRules = null;   // --reach-rules physics,graph,switch,book (unbounded neighbour classes)
 string? poseConfirmationsPath = null;   // --pose-confirmations FILE (with --reach-rules)
 string? settleExemptionsPath = null;     // --settle-exemptions FILE (with --reach-rules physics; default: the shipped list beside the exe)
+string? primitiveSolidityPath = null;    // --primitive-solidity FILE (with --reach-rules primitive; Part 3b measured table)
+string? absentModelsPath = null;         // --absent-models FILE (with --reach-rules absent; Part 3b measurements)
+string? settledGravityPath = null;       // --settled-gravity FILE (with --reach-rules gravity; Part 3b observations)
 long maxTrianglePairs = 2_000_000;
 double pairSeconds = 120;
 string? emitPath = null;
@@ -200,11 +212,15 @@ try
         else if (flag == "--reach") reachOn = true;
         else if (flag == "--pose-confirmations") { poseConfirmationsPath = NeedValue(i, flag); i++; }
         else if (flag == "--settle-exemptions") { settleExemptionsPath = NeedValue(i, flag); i++; }
+        else if (flag == "--primitive-solidity") { primitiveSolidityPath = NeedValue(i, flag); i++; }
+        else if (flag == "--absent-models") { absentModelsPath = NeedValue(i, flag); i++; }
+        else if (flag == "--settled-gravity") { settledGravityPath = NeedValue(i, flag); i++; }
         else if (flag == "--reach-rules")
         {
             reachRules = NeedValue(i, flag).Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).ToHashSet(StringComparer.OrdinalIgnoreCase);
-            if (reachRules.Count == 0 || reachRules.Any(x => x is not ("physics" or "graph" or "switch" or "book" or "skin" or "particles" or "primitive")))
-                throw new ArgumentException("--reach-rules takes physics,graph,switch,book,skin,particles,primitive");
+            if (reachRules.Count == 0 || reachRules.Any(x => x is not ("physics" or "graph" or "switch" or "book" or "skin" or "particles" or "primitive"
+                                                                      or "clipnames" or "transfer" or "blend" or "missingseq" or "path" or "emitter" or "gravity" or "absent")))
+                throw new ArgumentException("--reach-rules takes physics,graph,switch,book,skin,particles,primitive,clipnames,transfer,blend,missingseq,path,emitter,gravity,absent");
             i++;
         }
         else if (flag == "--motion-delta") { if (!double.TryParse(NeedValue(i, flag), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out motionDelta) || !(motionDelta > 0)) throw new ArgumentException("--motion-delta requires a positive number"); i++; }
@@ -936,7 +952,9 @@ ReachRules? RulesFor(FormKey key, FormKey baseKey, Snap p)
                           q => SupportsUnder(key, p, q), reachLayers, poseConfirmations, modelPath, Skin: reachRules.Contains("skin"),
                           Particles: reachRules.Contains("particles"),
                           SettleFacts: reachRules.Contains("physics") ? SettleFactsOf(key, baseKey) : null,
-                          SettleExemptions: reachRules.Contains("physics") ? settleExemptions : null);
+                          SettleExemptions: reachRules.Contains("physics") ? settleExemptions : null,
+                          ClipNames: reachRules.Contains("clipnames"), Blend: reachRules.Contains("blend"), MissingSequence: reachRules.Contains("missingseq"),
+                          PathHull: reachRules.Contains("path"), Emitter: reachRules.Contains("emitter"));
 }
 
 (PhysicalState State, string Detail) OverlapPredicate(FormKey laterKey, FormKey otherKey)
