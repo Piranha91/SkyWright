@@ -66,12 +66,14 @@ static partial class MotionProof
             var b = PhysicsReach.ModelBodies(FreeItem()).Single();
             return (b.Model.Indices.Length / 3 == 12 && b.Complete && b.Movable, $"tris {b.Model.Indices.Length / 3} complete {b.Complete}");
         });
-        // The tilted fixture reproduces the defect on the base: 8 vertices, no triangles, reported complete.
-        Case(check, "loose-items fixture control: the 10°-tilted-plane box decodes with 8 vertices and 0 triangles on the base decoder", () =>
+        // The tilted fixture carries the defect's input: 8 vertices, and the plane route drops all 6 stored planes. (Until the fit
+        // this control also asserted the base decoder's 0 triangles, which held on the base, red record e4ba295e; the rebuild
+        // makes that half false by design, so the control now pins the input that triggers the rebuild.)
+        Case(check, "loose-items fixture control: the 10°-tilted-plane box has 8 vertices and the plane route drops all 6 stored planes", () =>
         {
             var hc = HavokCollision.Decode(Load(FreeItemTiltedPlanes()), true).Stats;
             var b = PhysicsReach.ModelBodies(FreeItemTiltedPlanes()).Single();
-            return (b.Model.Vertices.Length == 8 && b.Model.Indices.Length == 0, $"verts {b.Model.Vertices.Length} tris {b.Model.Indices.Length / 3} dropped {hc.ConvexPlanesDropped}");
+            return (hc.ConvexVertices == 8 && hc.ConvexPlanesDropped == 6, $"verts {hc.ConvexVertices} dropped {hc.ConvexPlanesDropped} tris {b.Model.Indices.Length / 3}");
         });
 
         // ================= H: the hull from the vertices =================
