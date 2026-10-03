@@ -117,6 +117,20 @@ static partial class MotionProof
             var e = ParticleReach.BoundsFromModifiers(ParticleNifWithBlock("NiPSysEmitterCtlr")).Single();
             return (u.Status == "refused" && (u.Reason ?? "").Contains("NiPSysFieldMagnitudeCtlr") && e.Status == "modelled", $"{ShowPB(u)}; {ShowPB(e)}");
         });
+        // K3: render-only controllers in the system's chain (a shader colour controller, an alpha controller) change no position: the
+        // system is modelled as without them (z half 119.58088). Rejects them refused as unknown particle controllers (the barriers).
+        Case(check, "r2 K-V3K3: shader colour / alpha controllers in the system's chain are not particle parameters - modelled, z half 119.58088", () =>
+        {
+            var b = ParticleVariant((f, ps, root) =>
+            {
+                var c1 = new BSEffectShaderPropertyColorController { StartTime = 0, StopTime = 1, Frequency = 1, NextController = new(-1), Interpolator = new(-1) };
+                var c2 = new NiAlphaController { StartTime = 0, StopTime = 1, Frequency = 1, Interpolator = new(-1) };
+                int i1 = f.AddBlock(c1); c2.NextController = new(i1); int i2 = f.AddBlock(c2);
+                c1.Target = new(f.Blocks.IndexOf(ps)); c2.Target = new(f.Blocks.IndexOf(ps)); ps.Controller = new(i2);
+            }, "render-only controllers");
+            var p = ParticleReach.BoundsFromModifiers(b).Single();
+            return (p.Status == "modelled" && HalfIs(p.ModelBox, R2Lat, R2Lat, R2Lat + 16 * R2Q), ShowPB(p));
+        });
         // T1: turbulence 0.1, scale 1: A = 50 per axis: x half 68.91421 + 50 x 3.1666667 = 227.24755; z 119.58088 + 158.33333 = 277.91421.
         // Rejects the refusal (round 1), A = Turbulence x Scale (x 69.2) and turbulence on one axis only.
         Case(check, "r2 K-V3T1: turbulence 0.1 x 1 -> A 50 per axis: x half 227.24755, z half 277.91421", () =>
