@@ -65,6 +65,55 @@ static partial class MotionProof
         return Save(f, "free item, deep render");
     }
 
+    /// <summary>A free item (render box [-5,5]^3) whose movable body is a bhkBoxShape of half extents
+    /// <paramref name="halfU"/> with Havok radius <paramref name="radiusU"/> (Skyrim units; Havok's box surface is the box grown by
+    /// its radius).</summary>
+    static byte[] FreeItemBoxRadius(float halfU, float radiusU)
+    {
+        var f = new NifFile(); f.Create(Ver, withRootNode: true);
+        var root = f.GetRootNodes().First(); root.Flags_ui = 0xE;
+        var item = new NiNode { Name = new NiStringRef("Item"), Flags_ui = 0xE, Scale = 1f, Rotation = Identity33() };
+        root.Children.AddBlockRef(f.AddBlock(item));
+        item.Children.AddBlockRef(f.AddBlock(Shape("ItemMesh", Box(-5, -5, -5, 5, 5, 5))));
+        AddBody(f, item, new bhkBoxShape { Dimensions = new Vector3(halfU / HavokU), Radius = radiusU / HavokU }, 5f,
+                hkMotionType.MO_SYS_SPHERE_STABILIZED, SkyrimLayer.SKYL_CLUTTER);
+        return Save(f, "free item, box radius");
+    }
+
+    /// <summary>A static support whose collision is a bhkBoxShape of half extents (<paramref name="halfXY"/>, <paramref name="halfXY"/>,
+    /// <paramref name="halfZ"/>) centred at the origin with Havok radius <paramref name="radiusU"/> (Skyrim units).</summary>
+    static byte[] SupportBox(float halfXY, float halfZ, float radiusU)
+    {
+        var f = new NifFile(); f.Create(Ver, withRootNode: true);
+        var root = f.GetRootNodes().First(); root.Flags_ui = 0xE;
+        var n = new NiNode { Name = new NiStringRef("Support"), Flags_ui = 0xE, Scale = 1f, Rotation = Identity33() };
+        root.Children.AddBlockRef(f.AddBlock(n));
+        n.Children.AddBlockRef(f.AddBlock(Shape("SupportMesh", Box(-halfXY, -halfXY, -halfZ, halfXY, halfXY, halfZ))));
+        AddBody(f, n, new bhkBoxShape { Dimensions = new Vector3(halfXY / HavokU, halfXY / HavokU, halfZ / HavokU), Radius = radiusU / HavokU }, 0f,
+                hkMotionType.MO_SYS_SPHERE_STABILIZED, SkyrimLayer.SKYL_STATIC);
+        return Save(f, "support, box radius");
+    }
+
+    /// <summary>A static support whose collision is a bhkCompressedMeshShape: one square of half size <paramref name="half"/> at z 0
+    /// (two big triangles, facing up) with mesh radius <paramref name="radiusU"/> (Skyrim units).</summary>
+    static byte[] SupportMeshPlate(float half, float radiusU)
+    {
+        var f = new NifFile(); f.Create(Ver, withRootNode: true);
+        var root = f.GetRootNodes().First(); root.Flags_ui = 0xE;
+        var n = new NiNode { Name = new NiStringRef("Support"), Flags_ui = 0xE, Scale = 1f, Rotation = Identity33() };
+        root.Children.AddBlockRef(f.AddBlock(n));
+        n.Children.AddBlockRef(f.AddBlock(Shape("SupportMesh", Box(-half, -half, -1, half, half, 0))));
+        float h = half / HavokU;
+        var data = new bhkCompressedMeshShapeData
+        {
+            BigVerts = new() { new(-h, -h, 0, 0), new(h, -h, 0, 0), new(h, h, 0, 0), new(-h, h, 0, 0) },
+            BigTris = new() { new() { Triangle = new NiflySharp.Structs.Triangle(0, 1, 2) }, new() { Triangle = new NiflySharp.Structs.Triangle(0, 2, 3) } },
+        };
+        AddBody(f, n, new bhkCompressedMeshShape { Data = new NiBlockRef<bhkCompressedMeshShapeData>(f.AddBlock(data)), Radius = radiusU / HavokU }, 0f,
+                hkMotionType.MO_SYS_SPHERE_STABILIZED, SkyrimLayer.SKYL_STATIC);
+        return Save(f, "support, compressed-mesh plate with radius");
+    }
+
     static (int Tris, bool Closed, bool Outward) HullFacts(IReadOnlyList<Vector3> v, IReadOnlyList<int> idx, Vector3 inside)
     {
         var edges = new Dictionary<(int, int), int>();
@@ -200,6 +249,57 @@ static partial class MotionProof
             var bb = SpatialOverlap.SoupBounds(b.Model);
             return (hc.ConvexPlanesMismatch == 1 && hc.ConvexPlanesMatchHull == 0 && hc.ConvexPlanesMismatchShapes.Count == 1 && NearA7(bb.Max.Z, 7, 1e-3),
                     $"matched {hc.ConvexPlanesMatchHull} mismatched {hc.ConvexPlanesMismatch} named [{string.Join("; ", hc.ConvexPlanesMismatchShapes)}] maxZ {bb.Max.Z:0.###}");
+        });
+
+        // ================= K (radius default, 2026-10-03 convex-radius-default): every Havok radius, read by the physics drop =================
+        // LI-K6: a box shape's surface is the box grown by its radius (Havok's definition; the render-bottom census and the lab step,
+        // RESULT). The decoder with the radius on reads half 5 + radius 2 = [-7,7]^3; off [-5,5]^3. Rejects the box radius ignored.
+        Case(check, "loose-items LI-K6: box shape, half 5 u, radius 2 u - radius on [-7,7]^3, off [-5,5]^3", () =>
+        {
+            var on = SpatialOverlap.SoupBounds(PhysicsReach.ModelBodies(FreeItemBoxRadius(5f, 2f), convexRadius: true).Single().Model);
+            var off = SpatialOverlap.SoupBounds(PhysicsReach.ModelBodies(FreeItemBoxRadius(5f, 2f), convexRadius: false).Single().Model);
+            return (NearA7(on.Max.Z, 7, 1e-3) && NearA7(on.Min.X, -7, 1e-3) && NearA7(off.Max.Z, 5, 1e-3) && NearA7(off.Min.X, -5, 1e-3),
+                    $"on {on.Min.X:0.###}..{on.Max.Z:0.###} off {off.Min.X:0.###}..{off.Max.Z:0.###}");
+        });
+        // LI-K7: a compressed mesh's surface is its triangles grown by the mesh radius (lab: two salt piles and a resting control on
+        // compressed-mesh supports read 0.35 / 0.34 / 0.28 u above the core, RESULT). A plate at z 0 with radius 0.35 reads
+        // z -0.35..+0.35 with the radius on and 0 with it off. Rejects the mesh radius ignored.
+        Case(check, "loose-items LI-K7: compressed-mesh plate at z 0, radius 0.35 u - radius on z -0.35..+0.35, off z 0", () =>
+        {
+            var on = SpatialOverlap.SoupBounds(PhysicsReach.ModelBodies(SupportMeshPlate(100f, 0.35f), convexRadius: true).Single().Model);
+            var off = SpatialOverlap.SoupBounds(PhysicsReach.ModelBodies(SupportMeshPlate(100f, 0.35f), convexRadius: false).Single().Model);
+            return (NearA7(on.Max.Z, 0.35, 1e-3) && NearA7(on.Min.Z, -0.35, 1e-3) && NearA7(off.Max.Z, 0, 1e-3) && NearA7(off.Min.Z, 0, 1e-3),
+                    $"on z {on.Min.Z:0.####}..{on.Max.Z:0.####} off z {off.Min.Z:0.####}..{off.Max.Z:0.####}");
+        });
+        // LI-K8: the physics drop reads the radius without the rest rule too (the same engine drop; lab boots residual 2.37 -> 0.12,
+        // RESULT): the radius-2 convex item over a floor 100 u down drops 93 with physics alone. Rejects the radius kept behind the
+        // rest rule.
+        Case(check, "loose-items LI-K8: physics alone (no rest) - the radius-2 item over a floor 100 u down drops d 93", () =>
+        {
+            var r = MeshReach.OfModel(FreeItemRadius(2f, 2f), Origin, Origin, 1f, null, RulesOn(physics: true, baseType: "MISC",
+                supports: new[] { new DropSupport("floor", 1, true, false, Plate(500, -100)) }));
+            return (r.Drop is { Status: "dropped" } d && NearA7(d.Distance, 93, 1e-3), ShowRR(r));
+        });
+        // LI-K9: a support's radius is read by the drop's supports by default: the radius-0 free item ([-5,5]^3) at the origin over a
+        // box support (half 50 x 50 x 10, radius 7) centred 100 u down drops 100 - 5 - 10 - 7 = 78; over a compressed-mesh plate
+        // (radius 0.35) at z -100 it drops 95 - 0.35 = 94.65. Rejects a support read without its radius.
+        Case(check, "loose-items LI-K9: supports read their radius - box support (radius 7) d 78; mesh plate (radius 0.35) d 94.65", () =>
+        {
+            var box = PhysicsReach.Supports("box", SupportBox(50f, 10f, 7f), new Vec3(0, 0, -100), new Vec3(0, 0, 0), 1f, movableBase: false);
+            var mesh = PhysicsReach.Supports("mesh", SupportMeshPlate(500f, 0.35f), new Vec3(0, 0, -100), new Vec3(0, 0, 0), 1f, movableBase: false);
+            var rb = MeshReach.OfModel(FreeItem(), Origin, Origin, 1f, null, RulesOn(physics: true, baseType: "MISC", supports: box));
+            var rm = MeshReach.OfModel(FreeItem(), Origin, Origin, 1f, null, RulesOn(physics: true, baseType: "MISC", supports: mesh));
+            return (rb.Drop is { Status: "dropped" } a && NearA7(a.Distance, 78, 1e-3) && rm.Drop is { Status: "dropped" } b && NearA7(b.Distance, 94.65, 1e-3),
+                    "box " + ShowRR(rb) + " | mesh " + ShowRR(rm));
+        });
+        // LI-K10: the geometry reader every other consumer uses (route, floors, contact, overlap's collision column, state) keeps the
+        // core: no radius of any kind (their calibrations; contact's in-game acceptance got worse with it, RESULT). Measured in Havok
+        // units (havokUnitScale 1). Rejects the radius leaking into NifGeometry by default.
+        Case(check, "loose-items LI-K10: NifGeometry keeps the core - convex top 5, box top 5, mesh plate top 0", () =>
+        {
+            float Top(byte[] b) => SpatialOverlap.SoupBounds(NifGeometry.Measure(b, includeTriangles: true, havokUnitScale: HavokU).Model!.CollisionSoupFor(x => x.Solid)!).Max.Z;
+            float cv = Top(FreeItemRadius(2f, 2f)), bx = Top(FreeItemBoxRadius(5f, 2f)), ms = Top(SupportMeshPlate(100f, 0.35f));
+            return (NearA7(cv, 5, 1e-2) && NearA7(bx, 5, 1e-2) && NearA7(ms, 0, 1e-3), $"convex top {cv:0.###} box top {bx:0.###} mesh top {ms:0.####}");
         });
 
         // ================= F: drops with the rebuilt body; a faceless body refused by name =================
