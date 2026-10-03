@@ -187,6 +187,33 @@ def test_m2p_fix_attribution_must_need_both():
     raise AssertionError("an attribution other than 'needs both' was accepted")
 
 
+def _clip(**kw):
+    c = {"check": "loose-item clip at rest", "item": "item A", "other": "object B", "depth": 5.0,
+         "pose": "rest pose read in game", "edit": "restores support"}
+    c.update(kw)
+    return c
+
+
+def test_m2q_placement_clip_gives_patch_placement_clips():   # loose-item clashes round 2: a patch-placed item clips
+    r = M.assign_reason(_ev(trace=None, placementClip=_clip()))
+    assert r["reason"] == "patch placement clips" and r["evidenceType"] == "check"
+    assert r["detail"] == "loose-item clip at rest: item A clips object B by 5.00 u at rest pose read in game; edit: restores support"
+
+
+def test_m2r_placement_clip_outranks_fix_attribution():   # the edit restores a support but leaves its item clipping
+    fix = {"check": "loose-item support", "unpatched": "lost", "attribution": "needs both", "patched": "support restored"}
+    assert M.assign_reason(_ev(trace=None, fixAttribution=fix, placementClip=_clip()))["reason"] == "patch placement clips"
+
+
+def test_m2s_placement_clip_needs_every_part_and_a_depth():
+    for bad in (_clip(depth=0.0), _clip(depth=None), _clip(other=""), _clip(edit=None)):
+        try:
+            M.assign_reason(_ev(placementClip=bad))
+        except ValueError:
+            continue
+        raise AssertionError("an incomplete placement clip was accepted: %r" % (bad,))
+
+
 def test_m3_table_sums_and_splits():
     cl = [{"group": "G1", "edits": 7, "reason": "not modelled", "evidenceType": "render reading", "direct": False},
           {"group": "G1", "edits": 3, "reason": "set aside by filter", "evidenceType": "check", "direct": True},
