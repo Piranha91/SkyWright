@@ -180,5 +180,78 @@ static partial class MotionProof
             var r = MeshReach.OfModel(ParticleNif(withCube: true), Origin, Origin, 1f);
             return (r.Status == "uncertified" && r.Labels.Contains(MeshReach.ParticleLabel) && HalfIs(r.Box, 99.75, 99.75, 99.75), ShowRR(r));
         });
+        // ================= K-PD: drag, read per second (the weakest reading) =================
+        // NiPSysDragModifier (nif.xml: "a linear drag force"; Percentage "the amount of drag"; Drag Axis "the local direction of the
+        // force"; Range "the distance up to which particles are fully affected"). Read: the velocity component along the Drag Axis
+        // (carried by the Drag Object's model rotation) decays at k = Percentage per second. A per-update reading at f >= 1 Hz decays
+        // at -f ln(1 - p) >= p, so this reading is the weakest of the two. Along an axis with drag k: displacement <= v phi1 + a phi2,
+        // phi1 = (1 - e^-kT)/k, phi2 = T/k - (1 - e^-kT)/k^2 (k = 0: T and T^2/2). Used only on a model axis a drag axis lies along,
+        // with Range unlimited (FLT_MAX), no collider, no spawn generation and a still Drag Object.
+        // Fixture: drag 0.5 on x and y (root frame): phi1 = (1 - e^-1.25)/0.5 = 1.4269904, v phi1 = 35.674760; x, y half = 5 + 35.674760
+        // + 1.4142136 = 42.088974; z keeps 100.16421 (no drag on z).
+        static double Phi1(double k, double T) => (1 - Math.Exp(-k * T)) / k;
+        static double Phi2(double k, double T) => T / k - (1 - Math.Exp(-k * T)) / (k * k);
+        byte[] Drag(params (Vector3 Axis, float P, float Range)[] ds) => ParticleVariant((f, ps, root) =>
+        {
+            foreach (var d in ds)
+                AddModifier(f, ps, new NiPSysDragModifier { Name = new NiStringRef("Drag"), DragObject = new(f.Blocks.IndexOf(root)), DragAxis = d.Axis,
+                                                             Percentage = d.P, Range = d.Range, RangeFalloff = float.MaxValue });
+        }, "drag");
+        double latD = 5 + 25 * Phi1(0.5, 2.5) + Sqrt2;
+        Case(check, "pmodel K-PD1: drag 0.5 on x and y — x, y half 42.088974, z 100.16421", () =>
+        {
+            var p = ParticleReach.BoundsFromModifiers(Drag((Vector3.UnitX, 0.5f, float.MaxValue), (Vector3.UnitY, 0.5f, float.MaxValue))).Single();
+            return (p.Status == "modelled" && HalfIs(p.ModelBox, latD, latD, AxPM) && p.Assumptions.Any(a => a.Contains("per second")), ShowPB(p));
+        });
+        Case(check, "pmodel K-PD2: a finite Range (100) — drag not used: x, y 68.91421", () =>
+        {
+            var p = ParticleReach.BoundsFromModifiers(Drag((Vector3.UnitX, 0.5f, 100f), (Vector3.UnitY, 0.5f, 100f))).Single();
+            return (p.Status == "modelled" && HalfIs(p.ModelBox, LatPM, LatPM, AxPM), ShowPB(p));
+        });
+        Case(check, "pmodel K-PD3: a collider with drag — drag not used, every half 100.16421", () =>
+        {
+            var b = ParticleVariant((f, ps, root) =>
+            {
+                AddModifier(f, ps, new NiPSysDragModifier { Name = new NiStringRef("Drag"), DragObject = new(f.Blocks.IndexOf(root)), DragAxis = Vector3.UnitX, Percentage = 0.5f, Range = float.MaxValue, RangeFalloff = float.MaxValue });
+                int ci = f.AddBlock(new NiPSysSphericalCollider { Radius = 3f, Bounce = 0.5f, NextCollider = new(-1), SpawnModifier = new(-1), ColliderObject = new(f.Blocks.IndexOf(root)) });
+                AddModifier(f, ps, new NiPSysColliderManager { Name = new NiStringRef("Colliders"), Collider = new(ci) });
+            }, "drag and collider");
+            var p = ParticleReach.BoundsFromModifiers(b).Single();
+            return (p.Status == "modelled" && HalfIs(p.ModelBox, AxPM, AxPM, AxPM), ShowPB(p));
+        });
+        Case(check, "pmodel K-PD4: a drag axis off the model axes (1,1,0) — drag not used: x, y 68.91421", () =>
+        {
+            var p = ParticleReach.BoundsFromModifiers(Drag((new Vector3(1, 1, 0), 0.5f, float.MaxValue))).Single();
+            return (p.Status == "modelled" && HalfIs(p.ModelBox, LatPM, LatPM, AxPM), ShowPB(p));
+        });
+        Case(check, "pmodel K-PD5: two spawn generations with drag — drag not used: x half 5 + 31 x 4.5 + 1.41421 = 145.91421", () =>
+        {
+            var b = Load(ParticleNif(spawnGenerations: 2)); var ps = b.Blocks.OfType<NiParticleSystem>().Single();
+            AddModifier(b, ps, new NiPSysDragModifier { Name = new NiStringRef("Drag"), DragObject = new(b.Blocks.IndexOf(b.GetRootNodes().First())), DragAxis = Vector3.UnitX, Percentage = 0.5f, Range = float.MaxValue, RangeFalloff = float.MaxValue });
+            var p = ParticleReach.BoundsFromModifiers(Save(b, "spawn and drag")).Single();
+            return (p.Status == "modelled" && NearA7(p.ModelBox.Max.X, 5 + 31 * 4.5 + Sqrt2), ShowPB(p));
+        });
+        Case(check, "pmodel K-PD6: spherical gravity with drag on x only — x half 5 + 35.674760 + 1.41421 + 10 x 2.1460192 = 63.549167; y, z 100.16421", () =>
+        {
+            var b = ParticleVariant((f, ps, root) =>
+            {
+                foreach (var g in f.Blocks.OfType<NiPSysGravityModifier>()) g.ForceType = ForceType.FORCE_SPHERICAL;
+                AddModifier(f, ps, new NiPSysDragModifier { Name = new NiStringRef("Drag"), DragObject = new(f.Blocks.IndexOf(root)), DragAxis = Vector3.UnitX, Percentage = 0.5f, Range = float.MaxValue, RangeFalloff = float.MaxValue });
+            }, "spherical and drag");
+            var p = ParticleReach.BoundsFromModifiers(b).Single();
+            return (p.Status == "modelled" && HalfIs(p.ModelBox, latD + 10 * Phi2(0.5, 2.5), AxPM, AxPM), ShowPB(p));
+        });
+        Case(check, "pmodel K-PD7: drag on the Drag Object's local z, the object turned (local z -> model x) — x half 42.088974, y 68.91421, z 100.16421", () =>
+        {
+            var b = ParticleVariant((f, ps, root) =>
+            {
+                int gi = TurnedNode(f, root);
+                AddModifier(f, ps, new NiPSysDragModifier { Name = new NiStringRef("Drag"), DragObject = new(gi), DragAxis = Vector3.UnitZ, Percentage = 0.5f, Range = float.MaxValue, RangeFalloff = float.MaxValue });
+            }, "turned drag frame");
+            var p = ParticleReach.BoundsFromModifiers(b).Single();
+            return (p.Status == "modelled" && HalfIs(p.ModelBox, latD, LatPM, AxPM), ShowPB(p));
+        });
+        Case(check, "pmodel K-PD8: the reach label names the per-second drag reading", () =>
+            (MeshReach.ParticleModelLabel.Contains("drag read per second"), MeshReach.ParticleModelLabel));
     }
 }
