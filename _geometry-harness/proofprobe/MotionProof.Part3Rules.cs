@@ -36,6 +36,26 @@ static partial class MotionProof
             return (PhysicsReach.StaticAssumptionLabel == want && !PhysicsReach.StaticAssumptionLabel.Contains("untested"), PhysicsReach.StaticAssumptionLabel);
         });
 
+        // ================= Don't Havok Settle (record flag on the reference) =================
+        // K-D1: the free item 100 u over a floor, its reference flagged Don't Havok Settle -> held: box [-5,5]^3 (placed), the
+        // settle label, no drop. Rejects dropping a flagged reference, and an unlabelled hold.
+        Case(check, "part3 K-D1: a free item whose reference carries Don't Havok Settle is held at its placed pose, labelled, no drop", () =>
+        {
+            var o = new ReachOptions(0.5, 65536, new ReachRules(Physics: true, BaseRecordType: "MISC", Supports: _ => new[] { new DropSupport("floor", 1, true, false, Plate(500, -100)) },
+                                                                  Layers: RRLayers, HeldBySettleFlag: true));
+            var r = MeshReach.OfModel(FreeItem(), Origin, Origin, 1f, null, o);
+            return (r.Status == "uncertified" && r.Labels.Contains(PhysicsReach.SettleFlagLabel) && !r.Labels.Contains(PhysicsReach.DropLabel)
+                    && r.Drop is null && BoxIs(r.Box, -5, -5, -5, 5, 5, 5), ShowRR(r));
+        });
+        // fixture control: the same item and floor without the flag drops 95 u (today's reading; holds on the base)
+        Case(check, "part3 fixture control: the same free item without the flag drops to the floor (d 95)", () =>
+        {
+            var o = new ReachOptions(0.5, 65536, new ReachRules(Physics: true, BaseRecordType: "MISC", Supports: _ => new[] { new DropSupport("floor", 1, true, false, Plate(500, -100)) },
+                                                                  Layers: RRLayers));
+            var r = MeshReach.OfModel(FreeItem(), Origin, Origin, 1f, null, o);
+            return (r.Drop is { } d && NearA7(d.Distance, 95, 1e-3) && !r.Labels.Contains(PhysicsReach.SettleFlagLabel), ShowRR(r));
+        });
+
         // ================= canary =================
         Case(check, "part3 CANARY (must FAIL): a CollisionMarker box stating L_STATIC is not solid", () => (false, "the lab held an item on it"));
 
