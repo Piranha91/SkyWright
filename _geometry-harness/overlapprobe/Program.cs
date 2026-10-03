@@ -138,7 +138,9 @@ on every graph-driven node equal that model's takes its confirmation), blend (st
 bounded by the blend envelope: the product of per-node 1-DOF intervals, else the chord bound), missingseq (a sequence generator
 naming a sequence absent from the NIF reads the stored pose and every sequence in the file), path (a NiPathInterpolator node within
 its path's control-polygon hull grown by its subtree radius), emitter (a moving particle emitter: swept origins grown by the particle
-offset box), gravity (--settled-gravity FILE: observed gravity frame and sign per model), absent (--absent-models FILE: a model no
+offset box), gravity (--settled-gravity FILE: observed gravity frame and sign per model; with a scene, the support-plane term
+under its F1 condition), approx (--measured-approximations FILE: an in-game measured box per model, a labelled part beside the file
+bound), absent (--absent-models FILE: a model no
 active provider supplies, measured drawing nothing, is no_geometry). primitive with --primitive-solidity FILE: the measured
 (base, layer) table decides; without the file the earlier activator rule stands.
 See overlapprobe/Program.cs usage documentation. Help performs no load-order scan.
@@ -164,6 +166,7 @@ string? settleExemptionsPath = null;     // --settle-exemptions FILE (with --rea
 string? primitiveSolidityPath = null;    // --primitive-solidity FILE (with --reach-rules primitive; Part 3b measured table)
 string? absentModelsPath = null;         // --absent-models FILE (with --reach-rules absent; Part 3b measurements)
 string? settledGravityPath = null;       // --settled-gravity FILE (with --reach-rules gravity; Part 3b observations)
+string? approximationsPath = null;       // --measured-approximations FILE (with --reach-rules approx; Part 3b round 2 measurements)
 long maxTrianglePairs = 2_000_000;
 double pairSeconds = 120;
 string? emitPath = null;
@@ -215,6 +218,7 @@ try
         else if (flag == "--primitive-solidity") { primitiveSolidityPath = NeedValue(i, flag); i++; }
         else if (flag == "--absent-models") { absentModelsPath = NeedValue(i, flag); i++; }
         else if (flag == "--settled-gravity") { settledGravityPath = NeedValue(i, flag); i++; }
+        else if (flag == "--measured-approximations") { approximationsPath = NeedValue(i, flag); i++; }
         else if (flag == "--reach-rules")
         {
             reachRules = NeedValue(i, flag).Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).ToHashSet(StringComparer.OrdinalIgnoreCase);
@@ -1003,7 +1007,27 @@ ReachRules? RulesFor(FormKey key, FormKey baseKey, Snap p)
                           ClipNames: reachRules.Contains("clipnames"), Blend: reachRules.Contains("blend"), MissingSequence: reachRules.Contains("missingseq"),
                           PathHull: reachRules.Contains("path"), Emitter: reachRules.Contains("emitter"),
                           Transfers: reachRules.Contains("transfer") ? TransferSources() : null,
-                          Gravity: reachRules.Contains("gravity") ? SettledGravities() : null);
+                          Gravity: reachRules.Contains("gravity") ? SettledGravities() : null,
+                          Approximations: reachRules.Contains("approx") ? MeasuredApproximations() : null);
+}
+// Part 3b round 2: --measured-approximations FILE, a JSON list of {modelPath, sha256, modelBox: {min: [3], max: [3]}, label, evidence}
+IReadOnlyList<MeasuredApproximation>? measuredApproximations = null;
+IReadOnlyList<MeasuredApproximation> MeasuredApproximations()
+{
+    if (measuredApproximations is not null) return measuredApproximations;
+    if (approximationsPath is null) return measuredApproximations = Array.Empty<MeasuredApproximation>();
+    using var doc = System.Text.Json.JsonDocument.Parse(File.ReadAllText(approximationsPath));
+    var list = new List<MeasuredApproximation>();
+    foreach (var e in doc.RootElement.EnumerateArray())
+    {
+        var mb = e.GetProperty("modelBox");
+        float[] lo = mb.GetProperty("min").EnumerateArray().Select(x => x.GetSingle()).ToArray(), hi = mb.GetProperty("max").EnumerateArray().Select(x => x.GetSingle()).ToArray();
+        string ev = e.GetProperty("evidence").GetString() ?? "";
+        if (ev.Length == 0) throw new ArgumentException("--measured-approximations: an entry without evidence");
+        list.Add(new MeasuredApproximation(e.GetProperty("modelPath").GetString()!, e.GetProperty("sha256").GetString()!,
+                                           new Aabb(new Vec3(lo[0], lo[1], lo[2]), new Vec3(hi[0], hi[1], hi[2]), false), e.GetProperty("label").GetString()! + " (" + ev + ")"));
+    }
+    return measuredApproximations = list;
 }
 // Part 3b round 2: --settled-gravity FILE, a JSON list of {modelPath, sha256, systems: [..] (empty = every system),
 // towardWorldNegativeZ: true, evidence}; an entry that does not say the particles fall toward world -z is refused (no other
