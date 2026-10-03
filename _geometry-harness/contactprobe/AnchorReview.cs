@@ -40,6 +40,7 @@ static class AnchorReview
         var inputBytes = File.ReadAllBytes(inputPath);
         using var input = JsonDocument.Parse(inputBytes);
         var pairs = OverlapPairReview.ReadPairs(input.RootElement);
+        if (pairs.Any(p => p.ADz is not null || p.BDz is not null)) throw new InvalidDataException("--anchor does not read aPose/bPose (only --surface and --volume do)");
         var body = new BodyExtent(ActorBand.PhysicalStep, ActorBand.PhysicalControllerTop(ActorBand.ScaleOneHeight), RouteConnectivity.DefaultCapsuleRadius);
         var records = new List<object>();
         int decided = 0, undecided = 0, refused = 0;

@@ -81,6 +81,8 @@ static class OverlapSurfaceReview
         {
             var a = Load(p.A);
             var b = Load(p.B);
+            if (p.ADz is not null) a = a with { Pose = OverlapPairReview.Shift(a.Pose, p.ADz) };
+            if (p.BDz is not null) b = b with { Pose = OverlapPairReview.Shift(b.Pose, p.BDz) };
             var geoms = new List<object>();
             foreach (var g in new[] { VolumeGeometry.Render, VolumeGeometry.Collision })
             {
@@ -116,7 +118,10 @@ static class OverlapSurfaceReview
                 if (r.Status == "measured") measured++; else if (r.Status == "incomplete") incomplete++; else refused++;
                 Add(r);
             }
-            records.Add(new { pairKey = p.PairKey, a = p.A, b = p.B, baseA = a.Base, baseB = b.Base, meshA = a.Mesh, meshB = b.Mesh, geometries = geoms });
+            records.Add(p.ADz is null && p.BDz is null
+                ? new { pairKey = p.PairKey, a = p.A, b = p.B, baseA = a.Base, baseB = b.Base, meshA = a.Mesh, meshB = b.Mesh, geometries = geoms }
+                : (object)new { pairKey = p.PairKey, a = p.A, b = p.B, aPose = OverlapPairReview.PoseEcho(p.ADz), bPose = OverlapPairReview.PoseEcho(p.BDz),
+                                baseA = a.Base, baseB = b.Base, meshA = a.Mesh, meshB = b.Mesh, geometries = geoms });
         }
         var doc = new
         {

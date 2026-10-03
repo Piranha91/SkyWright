@@ -17,7 +17,17 @@ internal static class OverlapPairReview
         Converters = { new JsonStringEnumConverter() }
     };
 
-    internal sealed record InputPair(int InputIndex, string A, string B, string PairKey);
+    /// <summary>A supplied pair. <c>ADz</c>/<c>BDz</c>: a pair row's optional <c>aPose</c>/<c>bPose</c> <c>{"dz": d}</c> — the member
+    /// measured translated by d in z (a rest pose written from a drop, loose-item clashes); null = the placed pose. Read by
+    /// --surface and --volume, which echo the pose on the pair's record.</summary>
+    internal sealed record InputPair(int InputIndex, string A, string B, string PairKey, double? ADz = null, double? BDz = null);
+
+    /// <summary>The pose with its z moved by <paramref name="dz"/> (null: unchanged).</summary>
+    internal static Snap? Shift(Snap? pose, double? dz)
+        => pose is { } s && dz is { } d ? s with { Pos = new Vec3(s.Pos.X, s.Pos.Y, (float)(s.Pos.Z + d)) } : pose;
+
+    /// <summary>A pose object for the record echo ({dz}), or null.</summary>
+    internal static object? PoseEcho(double? dz) => dz is { } d ? new { dz = d } : null;
     internal sealed class PairResult(InputPair input)
     {
         public int InputIndex { get; } = input.InputIndex;
@@ -39,17 +49,25 @@ internal static class OverlapPairReview
     internal static List<InputPair> ReadPairs(JsonElement root)
     {
         var result = new List<InputPair>();
-        void Add(string? a, string? b)
+        void Add(string? a, string? b, double? adz = null, double? bdz = null)
         {
             a ??= ""; b ??= "";
             string key = string.CompareOrdinal(a, b) <= 0 ? a + "||" + b : b + "||" + a;
-            result.Add(new(result.Count, a, b, key));
+            result.Add(new(result.Count, a, b, key, adz, bdz));
+        }
+        static double? Dz(JsonElement row, string key)
+        {
+            if (!row.TryGetProperty(key, out var pose)) return null;
+            if (pose.ValueKind != JsonValueKind.Object || !pose.TryGetProperty("dz", out var dz) || dz.ValueKind != JsonValueKind.Number
+                || pose.EnumerateObject().Count() != 1 || !double.IsFinite(dz.GetDouble()))
+                throw new InvalidDataException($"pair '{key}' must be {{\"dz\": <finite number>}}");
+            return dz.GetDouble();
         }
         static string? Str(JsonElement row, string key) => row.TryGetProperty(key, out var v) && v.ValueKind == JsonValueKind.String ? v.GetString() : null;
         if (root.ValueKind == JsonValueKind.Array)
             foreach (var row in root.EnumerateArray()) Add(Str(row, "Later") ?? Str(row, "a"), Str(row, "Other") ?? Str(row, "b"));
         else if (root.TryGetProperty("pairs", out var pairs))
-            foreach (var row in pairs.EnumerateArray()) Add(Str(row, "a"), Str(row, "b"));
+            foreach (var row in pairs.EnumerateArray()) Add(Str(row, "a"), Str(row, "b"), Dz(row, "aPose"), Dz(row, "bPose"));
         else if (root.TryGetProperty("Conflicts", out var conflicts))
         {
             foreach (var c in conflicts.EnumerateArray())
@@ -75,7 +93,9 @@ internal static class OverlapPairReview
         var inputBytes = File.ReadAllBytes(inputPath);
         string inputSha256 = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(inputBytes)).ToLowerInvariant();
         using var input = JsonDocument.Parse(inputBytes);
-        var rows = ReadPairs(input.RootElement).Select(p => new PairResult(p)).ToList();
+        var inputPairs = ReadPairs(input.RootElement);
+        var rowPose = inputPairs.Select(p => p.ADz is not null || p.BDz is not null).ToArray();
+        var rows = inputPairs.Select(p => new PairResult(p)).ToList();
         var cache = new NifRenderGeometryCache();
         var clock = Stopwatch.StartNew();
         int attempts = 0;
@@ -154,6 +174,8 @@ internal static class OverlapPairReview
             {
                 if (!FormKey.TryFactory(row.A, out var a) || !FormKey.TryFactory(row.B, out var b) || a.IsNull || b.IsNull || a == b)
                 { row.Status = "invalid_reference"; row.Reason = "two distinct full reference keys are required"; continue; }
+                if (rowPose[row.InputIndex])
+                { row.Status = "excluded"; row.Reason = "the pair carries aPose/bPose, which only --surface and --volume read"; continue; }
                 var ga = Load(a); var gb = Load(b); row.GeometryA = ga.Evidence; row.GeometryB = gb.Evidence;
                 row.WindA = NifWind.Json(ga.Wind); row.WindB = NifWind.Json(gb.Wind);
                 if (ga.Status != "measured" || gb.Status != "measured")
