@@ -3606,6 +3606,8 @@ MotionProof.RunStageA7(Check);
 MotionProof.RunReachRules(Check);
 // Reach region Part 3: the skin rule (red until implemented).
 MotionProof.RunSkinRule(Check);
+// Reach region Part 3: particles, start-state pose confirmations, the primitive default (red until implemented).
+MotionProof.RunPart3Rules(Check);
 AnchorReachProof.Run(Check);
 OverlapSurfaceProof.RunStageA7(Check);
 
