@@ -177,11 +177,13 @@ static partial class MotionProof
             return (p.Status == "modelled" && p.Fold is not null && NearA7(b.Min.Z, -(R2Lat + 16 * R2Q)) && NearA7(b.Max.Z, 5 + 31.25 + Sqrt2)
                     && NearA7(b.Max.X, R2Lat) && NearA7(-b.Min.Y, R2Lat), ShowPB(p));
         });
-        // S2: a settled direction off the model axes does not fold (both readings kept): z half 119.58088, no fold.
-        Case(check, "r2 K-SF2: a settled direction off the model axes - no fold, z half 119.58088", () =>
+        // S2: a settled direction off the model axes: the model box WITHOUT the planar gravity (every half 68.91421) and a fold marked
+        // for world-frame composition (Axis -1; MeshReach composes it, K-SF4). Corrected after SF4: the first expectation (no fold, z
+        // half 119.58) encoded the silent drop SF4 rejects.
+        Case(check, "r2 K-SF2: a settled direction off the model axes - gravity-free box (every half 68.91421), fold for world composition", () =>
         {
             var p = ParticleReach.BoundsFromModifiers(ParticleNif(), null, _ => Vector3.Normalize(new Vector3(0.6f, 0, -0.8f))).Single();
-            return (p.Status == "modelled" && p.Fold is null && HalfIs(p.ModelBox, R2Lat, R2Lat, R2Lat + 16 * R2Q), ShowPB(p));
+            return (p.Status == "modelled" && p.Fold is { Axis: -1 } && HalfIs(p.ModelBox, R2Lat, R2Lat, R2Lat), ShowPB(p));
         });
         // S3: through MeshReach: an entry for these exact bytes settles it (label names the evidence); a different sha does not.
         byte[] pn = ParticleNif();
