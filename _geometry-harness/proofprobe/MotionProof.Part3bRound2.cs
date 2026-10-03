@@ -131,6 +131,28 @@ static partial class MotionProof
             var p = ParticleReach.BoundsFromModifiers(b).Single();
             return (p.Status == "modelled" && HalfIs(p.ModelBox, R2Lat, R2Lat, R2Lat + 16 * R2Q), ShowPB(p));
         });
+        // K4: drag 0.5 on x and y, each with a modifier-active controller. Keys [1, 0] (the drag can be switched off): the drag cannot be
+        // relied on, x half 68.91421. Keys [1, 1]: used, x half 8.08088. Rejects active controllers ignored (8.08 for the first).
+        byte[] DragWithActive(byte[] keys) => ParticleVariant((f, ps, root) =>
+        {
+            int prev = -1;
+            foreach (var (ax, nm) in new[] { (Vector3.UnitX, "DragX"), (Vector3.UnitY, "DragY") })
+            {
+                AddModifier(f, ps, new NiPSysDragModifier { Name = new NiStringRef(nm), DragObject = new(f.Blocks.IndexOf(root)), DragAxis = ax, Percentage = 0.5f, Range = float.MaxValue, RangeFalloff = float.MaxValue });
+                var bd = new NiBoolData { Data = new KeyGroup<byte> { Interpolation = KeyType.CONST_KEY, Keys = keys.Select((v, i) => new Key<byte> { Time = i * 0.5f, Value = v }).ToList(), NumKeys = (uint)keys.Length } };
+                var bi = new NiBoolInterpolator { Value = true, Data = new(f.AddBlock(bd)) };
+                var c = new NiPSysModifierActiveCtlr { ModifierName = new NiStringRef(nm), Interpolator = new(f.AddBlock(bi)), StartTime = 0, StopTime = 1, Frequency = 1, NextController = new(prev) };
+                c.Target = new(f.Blocks.IndexOf(ps)); prev = f.AddBlock(c);
+            }
+            ps.Controller = new(prev);
+        }, "drag with active controllers");
+        Case(check, "r2 K-V3K4: a drag a modifier-active controller can switch off is not used (x half 68.91421); always on, used (8.08088)", () =>
+        {
+            var off = ParticleReach.BoundsFromModifiers(DragWithActive(new byte[] { 1, 0 })).Single();
+            var on = ParticleReach.BoundsFromModifiers(DragWithActive(new byte[] { 1, 1 })).Single();
+            double lat = 5 + 25 * (1 - Math.Exp(-37.5)) / 15 + Sqrt2;
+            return (off.Status == "modelled" && NearA7(off.ModelBox.Max.X, R2Lat) && on.Status == "modelled" && NearA7(on.ModelBox.Max.X, lat), $"{ShowPB(off)} || {ShowPB(on)}");
+        });
         // T1: turbulence 0.1, scale 1: A = 50 per axis: x half 68.91421 + 50 x 3.1666667 = 227.24755; z 119.58088 + 158.33333 = 277.91421.
         // Rejects the refusal (round 1), A = Turbulence x Scale (x 69.2) and turbulence on one axis only.
         Case(check, "r2 K-V3T1: turbulence 0.1 x 1 -> A 50 per axis: x half 227.24755, z half 277.91421", () =>
