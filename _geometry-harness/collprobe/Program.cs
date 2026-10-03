@@ -52,6 +52,7 @@ var arch = ArchiveDiscovery.Discover(profileDir, modsDir, dataDir, overwriteDir,
 using var assets = AssetResolver.Build(overwriteDir, modsDir, dataDir, comp.EnabledMods, arch.Archives);
 Console.WriteLine($"assets: {arch.Archives.Count} BSAs indexed in {sw.ElapsedMilliseconds} ms");
 
+byte[]? lastBytes = null;   // the bytes Load last read (the convex census re-reads their blocks)
 NifGeometryOutcome? Load(string rel, out string physical)
 {
     physical = "";
@@ -62,6 +63,7 @@ NifGeometryOutcome? Load(string rel, out string physical)
     physical = src.LooseFilePath ?? src.ArchivePath ?? src.ProviderName;
     var (bytes, _) = AssetResolver.ReadPlacementSource(src);
     if (bytes is null) return null;
+    lastBytes = bytes;
     // Unit scale 1: everything collision comes back in HAVOK units, which is what the measurement needs.
     return NifGeometry.Measure(bytes, includeTriangles: true, havokUnitScale: 1f);
 }
@@ -185,6 +187,23 @@ var transformRowMeshes = new List<string>();
 var refChunkMeshes = new List<string>();
 
 void Bump(Dictionary<string, int> d, string k) { d.TryGetValue(k, out var n); d[k] = n + 1; }
+// convex census: each bhkConvexVerticesShape by whether its stored planes drop a face (the decoder rebuilds it from its
+// vertices) and whether it has a convex radius (read only when a caller opts in): a shape's decode changes by the rebuild,
+// by the radius alone, by both, or not at all
+int cvRebuiltRadius = 0, cvRebuiltOnly = 0, cvRadiusOnly = 0, cvNeither = 0, cvNoNormals = 0;
+void ConvexCensus(byte[] bytes)
+{
+    var nif = new NiflySharp.NifFile();
+    using (var ms = new MemoryStream(bytes, false)) if (nif.Load(ms) != 0) return;
+    foreach (var cv in nif.Blocks.OfType<NiflySharp.Blocks.bhkConvexVerticesShape>())
+    {
+        if (cv.Normals is not { Count: > 0 }) { cvNoNormals++; continue; }
+        var pts = (cv.Vertices ?? new()).Select(v => new Vector3(v.X, v.Y, v.Z)).ToList();
+        HavokCollision.ConvexHullFromPlanes(pts, cv.Normals, out int dropped);
+        bool r = cv.Radius > 0, d = dropped > 0;
+        if (d && r) cvRebuiltRadius++; else if (d) cvRebuiltOnly++; else if (r) cvRadiusOnly++; else cvNeither++;
+    }
+}
 var Wrappers = new[] { "bhkMoppBvTreeShape", "bhkListShape", "bhkConvexListShape", "bhkTransformShape", "bhkConvexTransformShape" };
 
 sw.Restart();
@@ -197,6 +216,7 @@ foreach (var (rel, info) in meshes.OrderBy(k => k.Key, StringComparer.OrdinalIgn
     if (o.Model is null) { unreadable++; Bump(unreadReasons, "unreadable: " + (o.Error ?? "?").Split(' ', 4)[0]); continue; }
     var m = o.Model;
     measured++;
+    if (lastBytes is not null) ConvexCensus(lastBytes);
     if (!phys.StartsWith(dataDir, StringComparison.OrdinalIgnoreCase)) nonVanillaSource++;
     versions.TryGetValue(m.StreamVersion, out var vn); versions[m.StreamVersion] = vn + 1;
 
@@ -212,6 +232,7 @@ foreach (var (rel, info) in meshes.OrderBy(k => k.Key, StringComparer.OrdinalIgn
     agg.ConvexPlaneSignMinus += s.ConvexPlaneSignMinus; agg.ConvexPlaneSignPlus += s.ConvexPlaneSignPlus; agg.ConvexPlaneSignNeither += s.ConvexPlaneSignNeither;
     agg.ConvexPlaneSignMinusRadius += s.ConvexPlaneSignMinusRadius; agg.ConvexVertices += s.ConvexVertices; agg.ConvexShapesWithDroppedPlanes += s.ConvexShapesWithDroppedPlanes;
     agg.Boxes += s.Boxes; agg.Spheres += s.Spheres; agg.Capsules += s.Capsules; agg.Cylinders += s.Cylinders;
+    agg.ConvexRebuiltFromVertices += s.ConvexRebuiltFromVertices; agg.ConvexPlanesMatchHull += s.ConvexPlanesMatchHull; agg.ConvexPlanesMismatch += s.ConvexPlanesMismatch;
     if (s.ChunksWithRotation > 0 && chunkRotMeshes.Count < 20) chunkRotMeshes.Add(rel);
     if (s.TransformTranslationInRow > 0 && transformRowMeshes.Count < 20) transformRowMeshes.Add(rel);
     if (s.ChunksReferencing > 0 && refChunkMeshes.Count < 20) refChunkMeshes.Add(rel);
@@ -292,6 +313,8 @@ Console.WriteLine($"   chunks with a non-identity rotation {agg.ChunksWithRotati
 Console.WriteLine($"   non-unit scale: compressed {agg.CompressedNonUnitScale:N0} (zero, ignored: {agg.CompressedZeroScale:N0})   mopp {agg.MoppNonUnitScale:N0}   packed {agg.PackedNonUnitScale:N0}");
 Console.WriteLine($"   transform shapes {agg.TransformShapes:N0}: translation in the last COLUMN {agg.TransformTranslationInColumn:N0}, last ROW {agg.TransformTranslationInRow:N0}, ambiguous {agg.TransformTranslationAmbiguous:N0}; rotated {agg.TransformRotated:N0}");
 Console.WriteLine($"   convex hulls {agg.ConvexShapes:N0} ({agg.ConvexVertices:N0} vertices; planes dropped {agg.ConvexPlanesDropped:N0} in {agg.ConvexShapesWithDroppedPlanes:N0} shapes, without normals {agg.ConvexWithoutNormals:N0}; stored w: minus {agg.ConvexPlaneSignMinus:N0} plus {agg.ConvexPlaneSignPlus:N0} minus-with-radius {agg.ConvexPlaneSignMinusRadius:N0} neither {agg.ConvexPlaneSignNeither:N0})   boxes {agg.Boxes:N0}   spheres {agg.Spheres:N0}   capsules {agg.Capsules:N0}   cylinders {agg.Cylinders:N0}");
+Console.WriteLine($"   convex decode: faces rebuilt from vertices {agg.ConvexRebuiltFromVertices:N0}; stored planes within the hull's radius window {agg.ConvexPlanesMatchHull:N0}, outside it {agg.ConvexPlanesMismatch:N0}");
+Console.WriteLine($"   convex census (distinct blocks per mesh read): rebuilt and with a radius {cvRebuiltRadius:N0}, rebuilt only {cvRebuiltOnly:N0}, radius only (changes only when the radius is read) {cvRadiusOnly:N0}, neither {cvNeither:N0}, no normals {cvNoNormals:N0}");
 Console.WriteLine($"\n   ---- compressed-mesh SELF-CHECK against the AABB each shape states ----");
 Console.WriteLine($"   max overshoot of the stated box : {aabbExcessMax:0.####} Havok units   (violations > 0.02: {aabbViolations:N0})");
 Console.WriteLine($"   min per-axis coverage of it     : {aabbCoverMin:0.###}");
