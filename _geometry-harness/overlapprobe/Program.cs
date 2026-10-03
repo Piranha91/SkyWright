@@ -108,7 +108,7 @@ pose, swept region, or a switch node's every child), "uncertified" with labels a
 shape or the particle model enters, "refused" with the reason otherwise (a model-less primitive refuses naming its
 collision layer until the layer's solidity is settled), "no_geometry" for a reference with neither model nor primitive.
 Default off: the manifest is unchanged without it.
---reach-rules physics,graph,switch,book,skin,particles,primitive (with --reach): the modelling rules and readers that turn reach refusals into
+--reach-rules physics,graph,switch,book,skin,particles,primitive,rest (with --reach): the modelling rules and readers that turn reach refusals into
 labelled regions; never certified. physics: a body the file pins (a constraint to a massless body) swings within the
 constraint's limits; a free body (mass > 0, simulated motion system, no pin) is dropped straight down, rigidly, from its
 placed pose to first contact with a support below (the modelling rule) - a support is a solid, non-movable body of a
@@ -123,7 +123,12 @@ stored pose: the modelling rule). skin: weight sources that disagree only on ver
 triangle draws do not refuse; drawn disagreements are posed under both sources (labelled, the renderer's source untested);
 a drawn vertex with no weight under one source still refuses. particles: a particle emitter or modifier-active controller
 does not make the emitter move (only transform blocks do). primitive: a box on a model-less activator with no collision layer
-stated is not solid (no_geometry, measured in the lab); stated layers and other bases keep the refusal. Reach rows gain "drop" {status, distance, placed, landed, supportId,
+stated is not solid (no_geometry, measured in the lab); stated layers and other bases keep the refusal. rest (needs physics):
+a settling body with no support below is an outcome, not a refusal - drop "lost" (no_geometry; enabled after load, the placed
+box with both readings), measured in the lab: the engine keeps such a body falling and returns it to its placed height every
+few seconds; an exempt body records the drop it would take as "rest-gap" (distance, support; not applied) or "floats" over
+nothing; a landed body's region is grown by its tilt margin (drop.tiltMargin); a render-boxed MoveableStatic with a free body
+carries its drop too (measured: they settle at load); carryable Lights join reachLoose. Reach rows gain "drop" {status, distance, placed, landed, supportId,
 stateExcludedCandidates}; the manifest gains "reachLoose" (the same region for each item-type reference: report only,
 dispositions unchanged).
 --pose-confirmations FILE (with --reach-rules): a JSON list of {modelPath, sha256, evidence}; a model whose animation the
@@ -203,8 +208,10 @@ try
         else if (flag == "--reach-rules")
         {
             reachRules = NeedValue(i, flag).Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).ToHashSet(StringComparer.OrdinalIgnoreCase);
-            if (reachRules.Count == 0 || reachRules.Any(x => x is not ("physics" or "graph" or "switch" or "book" or "skin" or "particles" or "primitive")))
-                throw new ArgumentException("--reach-rules takes physics,graph,switch,book,skin,particles,primitive");
+            if (reachRules.Count == 0 || reachRules.Any(x => x is not ("physics" or "graph" or "switch" or "book" or "skin" or "particles" or "primitive" or "rest")))
+                throw new ArgumentException("--reach-rules takes physics,graph,switch,book,skin,particles,primitive,rest");
+            if (reachRules.Contains("rest") && !reachRules.Contains("physics"))
+                throw new ArgumentException("--reach-rules rest needs physics (it reads the drop and the load-settle rule)");
             i++;
         }
         else if (flag == "--motion-delta") { if (!double.TryParse(NeedValue(i, flag), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out motionDelta) || !(motionDelta > 0)) throw new ArgumentException("--motion-delta requires a positive number"); i++; }
@@ -641,6 +648,18 @@ object ReachOf(FormKey key, FormKey baseKey, Snap p)
     {
         status = r.Status, reason = r.Reason, policy = r.Policy, box = ReachBox(r.Box), labels = r.Labels,
         parts = r.UncertifiedParts.Select(x => new { label = x.Label, box = ReachBox(x.Box) }).ToArray(),
+    } : reachRules.Contains("rest") ? new
+    {
+        status = r.Status, reason = r.Reason, policy = r.Policy, box = ReachBox(r.Box), labels = r.Labels,
+        parts = r.UncertifiedParts.Select(x => new { label = x.Label, box = ReachBox(x.Box) }).ToArray(),
+        drop = r.Drop is not { } rd ? null : (object)new
+        {
+            status = rd.Status, distance = double.IsNaN(rd.Distance) ? (double?)null : rd.Distance,
+            distanceMax = double.IsNaN(rd.DistanceMax) ? (double?)null : rd.DistanceMax,
+            tiltMargin = double.IsNaN(rd.TiltMargin) ? (double?)null : rd.TiltMargin,
+            placed = ReachBox(rd.Placed), landed = ReachBox(rd.Landed), supportId = rd.SupportId,
+            stateExcludedCandidates = stateExcludedBelow.GetValueOrDefault(key),
+        },
     } : new
     {
         status = r.Status, reason = r.Reason, policy = r.Policy, box = ReachBox(r.Box), labels = r.Labels,
@@ -687,6 +706,17 @@ object ReachOf(FormKey key, FormKey baseKey, Snap p)
         return Out(new ReachRegion("refused", primRefusal, Aabb.Empty, MeshReach.PolicyVersion, Array.Empty<string>(), Array.Empty<ReachPart>()));
     }
     return Out(new ReachRegion("no_geometry", "no model path and no primitive", Aabb.Empty, MeshReach.PolicyVersion, Array.Empty<string>(), Array.Empty<ReachPart>()));
+}
+
+// --reach-rules rest: whether a base's model has a free (unconstrained, movable) body, memoised per base
+var freeBodyMemo = new Dictionary<FormKey, bool>();
+bool HasFreeBody(FormKey baseKey)
+{
+    if (freeBodyMemo.TryGetValue(baseKey, out var known)) return known;
+    bool free = false;
+    if (GeometryOf(baseKey).Source is { } src && AssetResolver.ReadPlacementSource(src).Bytes is { } bytes)
+        try { free = PhysicsReach.Classify(bytes).Kind is "free" or "free-chain"; } catch (InvalidDataException) { free = false; }
+    return freeBodyMemo[baseKey] = free;
 }
 
 (TriangleSoup? Soup, char Source, string? Reason) SurfaceGeometryOf(FormKey baseKey)
@@ -814,7 +844,7 @@ IReadOnlyList<(DropSupport S, Aabb Box)> PlacedSupports(FormKey k, Snap sp)
             if (!bodyCache.TryGetValue(b, out var bodies))
             {
                 var (bytes, _) = AssetResolver.ReadPlacementSource(src);
-                try { bodies = bytes is null ? null : PhysicsReach.ModelBodies(bytes); } catch (Exception) { bodies = null; }
+                try { bodies = bytes is null ? null : PhysicsReach.ModelBodies(bytes, convexRadius: reachRules?.Contains("rest") == true); } catch (Exception) { bodies = null; }
                 bodyCache[b] = bodies;
             }
             if (bodies is not null)
@@ -936,7 +966,7 @@ ReachRules? RulesFor(FormKey key, FormKey baseKey, Snap p)
                           q => SupportsUnder(key, p, q), reachLayers, poseConfirmations, modelPath, Skin: reachRules.Contains("skin"),
                           Particles: reachRules.Contains("particles"),
                           SettleFacts: reachRules.Contains("physics") ? SettleFactsOf(key, baseKey) : null,
-                          SettleExemptions: reachRules.Contains("physics") ? settleExemptions : null);
+                          SettleExemptions: reachRules.Contains("physics") ? settleExemptions : null, Rest: reachRules.Contains("rest"));
 }
 
 (PhysicalState State, string Detail) OverlapPredicate(FormKey laterKey, FormKey otherKey)
@@ -1293,7 +1323,6 @@ if (geometryManifestPath is not null)
     var recordRows = new List<object>();
     var reachRows = new List<(int Row, object Reach)>();
     var reachLooseRows = new List<object>();
-    var looseTypes = new HashSet<string>(StringComparer.Ordinal) { "Ingestible", "MiscItem", "Ingredient", "Book", "Armor", "Weapon", "SoulGem", "Scroll", "Ammunition", "Key" };
     // Which identities this loop actually enumerated. The accounting below reads it rather than
     // re-deriving the loop's own gates, so it can never claim a row the manifest does not hold.
     var emittedRecordKeys = new HashSet<FormKey>();
@@ -1430,8 +1459,14 @@ if (geometryManifestPath is not null)
         // --reach-rules: loose items (type_excluded item records) get the same region in a separate report; nothing in their
         // record row changes
         if (reachOn && reachRules is not null && runtimePoseKnown && hasBase && eligibility == "type_excluded"
-            && idx.BaseInfo.TryGetValue(effectiveBase, out var looseInfo) && looseTypes.Contains(looseInfo.Type))
+            && idx.BaseInfo.TryGetValue(effectiveBase, out var looseInfo)
+            && LooseItems.IsLooseBase(looseInfo.Type, idx.LightCarryable.Contains(effectiveBase), reachRules.Contains("rest")))
             reachLooseRows.Add(new { formid = key.ToString(), baseType = looseInfo.Type, reach = ReachOf(key, effectiveBase, p) });
+        // --reach-rules rest: a render-boxed MoveableStatic whose model has a free body settles at load like a loose item (lab:
+        // three MoveableStatic clutter bodies, flags 0, settled at load), so its row carries its drop as well as its box
+        if (reachOn && reachRules?.Contains("rest") == true && runtimePoseKnown && hasBase && reportedWorldBounds is not null
+            && idx.BaseInfo.TryGetValue(effectiveBase, out var msInfo) && msInfo.Type == "MoveableStatic" && HasFreeBody(effectiveBase))
+            reachRows.Add((rowIndex, ReachOf(key, effectiveBase, p)));
     }
 
     var manifestJson = new JsonSerializerOptions { WriteIndented = true, NumberHandling = System.Text.Json.Serialization.JsonNumberHandling.AllowNamedFloatingPointLiterals };

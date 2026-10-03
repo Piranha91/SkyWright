@@ -158,6 +158,8 @@ public sealed class OverlapIndex
     public PlacementHistory History { get; } = new();
     /// <summary>base record -> its Mutagen type name and editor id, winner wins. Modeled records only.</summary>
     public Dictionary<FormKey, (string Type, string? Edid)> BaseInfo { get; } = new();
+    /// <summary>Light bases carrying the Can Be Carried flag (torches, lanterns): loose items under overlapprobe's rest rule.</summary>
+    public HashSet<FormKey> LightCarryable { get; } = new();
     public Dictionary<FormKey, string> BaseMesh { get; } = new();
     /// <summary>An armour's FEMALE ground model where the record gives one (BaseMesh holds the male) — G1 build list row 2.</summary>
     public Dictionary<FormKey, string> BaseMeshFemale { get; } = new();
@@ -318,6 +320,10 @@ public sealed class OverlapIndex
             if (rec is IBookGetter bk)
             {
                 if (!bk.InventoryArt.IsNull) BookInventoryArt[bk.FormKey] = bk.InventoryArt.FormKey; else BookInventoryArt.Remove(bk.FormKey);
+            }
+            if (rec is ILightGetter lg)
+            {
+                if (lg.Flags.HasFlag(Light.Flag.CanBeCarried)) LightCarryable.Add(lg.FormKey); else LightCarryable.Remove(lg.FormKey);
             }
             if (rec is IWeaponGetter wp)
             {
