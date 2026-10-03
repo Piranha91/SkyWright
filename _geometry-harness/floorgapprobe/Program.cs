@@ -42,6 +42,10 @@ using HousecarlCore.Progress;
 //             parts, the triangle, and the floor under that point (this probe's floor rule). A navmesh triangle is where
 //             NPCs path, not every place a player can stand. Interior: the cell's navmesh is the whole set. Exterior:
 //             only the cell's own navmesh is searched, so the distance is an upper bound and says so.
+//             A model-less subject with an XPRM Box (a trigger) is measured from its box at the reference's pose. Opt-in
+//             (G1 Stage B): --band LO,HI adds `band`, the exact distance to the navmesh swept straight up from +LO to +HI
+//             (where a standing body is; 0 when the subject meets it); --under adds `under`, the floor straight under the
+//             subject's position by this probe's floor rule (--depth below, --reach above). Without them nothing changes.
 //   points    the calibration against a walker: for each recorded position (feet), the navmesh and floor under it and
 //             feet − floor; a floor that is the physical one reads that difference near zero.
 //   --depth   how far below the navmesh a floor may lie (deeper is a drop: no floor); --reach how far above (the step
