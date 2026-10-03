@@ -147,6 +147,20 @@ static partial class MotionProof
             var v = p.Soup.Vertices;
             return (want.All(w => v.Any(x => NearV(x, w, 1e-3f))), $"want {string.Join(" ", want.Select(S))} found {string.Join(",", want.Select(w => v.Any(x => NearV(x, w, 1e-3f))))}");
         });
+        // Fixture control for K-S2's own check: a soup holding only one source's placements (NiSkinData only, or the partition
+        // only) must fail it, so K-S2 can tell the union from either source alone. Analytic soups; holds on the base.
+        Case(check, "skin-rule fixture control: K-S2's check rejects a one-source pose (NiSkinData only; partition only)", () =>
+        {
+            var both = new List<Vector3>(); var onlyA = new List<Vector3>(); var onlyB = new List<Vector3>();
+            foreach (var y in new[] { 1f, -1f })
+            {
+                var (a, b) = TwoSourcePlacement(new Vector3(30, y, 0), 0.8f, 0.2f, 0.5f, 0.5f);
+                both.Add(a); both.Add(b); onlyA.Add(a); onlyB.Add(b);
+            }
+            bool Holds(List<Vector3> soup) => both.All(w => soup.Any(x => NearV(x, w, 1e-3f)));
+            double sep = Vector3.Distance(both[0], both[1]);
+            return (Holds(both) && !Holds(onlyA) && !Holds(onlyB) && sep > 1, $"both {Holds(both)} A-only {Holds(onlyA)} B-only {Holds(onlyB)} A-B separation {sep:0.###} u");
+        });
         // The reach region with the skin rule: uncertified, labelled, and its box holds both placements of (30,±1,0) at t = 1.
         Case(check, "skin-rule K-S2b: drawn disagreement — reach region labelled '" + MeshReach.SkinUnionLabel + "' and holding both placements", () =>
         {
