@@ -108,7 +108,7 @@ pose, swept region, or a switch node's every child), "uncertified" with labels a
 shape or the particle model enters, "refused" with the reason otherwise (a model-less primitive refuses naming its
 collision layer until the layer's solidity is settled), "no_geometry" for a reference with neither model nor primitive.
 Default off: the manifest is unchanged without it.
---reach-rules physics,graph,switch,book,skin (with --reach): the modelling rules and readers that turn reach refusals into
+--reach-rules physics,graph,switch,book,skin,particles,primitive (with --reach): the modelling rules and readers that turn reach refusals into
 labelled regions; never certified. physics: a body the file pins (a constraint to a massless body) swings within the
 constraint's limits; a free body (mass > 0, simulated motion system, no pin) is dropped straight down, rigidly, from its
 placed pose to first contact with a support below (the modelling rule) - a support is a solid, non-movable body of a
@@ -118,12 +118,15 @@ reference-pose generator, a missing sequence where the file has no transform sou
 children swept, Tree_Anim shapes labelled. book: a BOOK base, or a Static a BOOK names as InventoryArt, is read closed (its
 stored pose: the modelling rule). skin: weight sources that disagree only on vertices no
 triangle draws do not refuse; drawn disagreements are posed under both sources (labelled, the renderer's source untested);
-a drawn vertex with no weight under one source still refuses. Reach rows gain "drop" {status, distance, placed, landed, supportId,
+a drawn vertex with no weight under one source still refuses. particles: a particle emitter or modifier-active controller
+does not make the emitter move (only transform blocks do). primitive: a box on a model-less activator with no collision layer
+stated is not solid (no_geometry, measured in the lab); stated layers and other bases keep the refusal. Reach rows gain "drop" {status, distance, placed, landed, supportId,
 stateExcludedCandidates}; the manifest gains "reachLoose" (the same region for each item-type reference: report only,
 dispositions unchanged).
 --pose-confirmations FILE (with --reach-rules): a JSON list of {modelPath, sha256, evidence}; a model whose animation the
 files cannot settle, whose path and exact bytes match an entry (an in-game screenshot compared with a render of its stored
-pose), is read at its stored pose, labelled "rest: stored pose (confirmed by in-game comparison)". No entry, no change.
+pose), is read at its stored pose, labelled "rest: stored pose (confirmed by in-game comparison)". An entry may carry "locals"
+({node: {T, R (9, rows), S}}, a confirmed non-stored pose such as a graph start state) and "label". No entry, no change.
 See overlapprobe/Program.cs usage documentation. Help performs no load-order scan.
 """);
     return 0;
@@ -193,8 +196,8 @@ try
         else if (flag == "--reach-rules")
         {
             reachRules = NeedValue(i, flag).Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).ToHashSet(StringComparer.OrdinalIgnoreCase);
-            if (reachRules.Count == 0 || reachRules.Any(x => x is not ("physics" or "graph" or "switch" or "book" or "skin")))
-                throw new ArgumentException("--reach-rules takes physics,graph,switch,book,skin");
+            if (reachRules.Count == 0 || reachRules.Any(x => x is not ("physics" or "graph" or "switch" or "book" or "skin" or "particles" or "primitive")))
+                throw new ArgumentException("--reach-rules takes physics,graph,switch,book,skin,particles,primitive");
             i++;
         }
         else if (flag == "--motion-delta") { if (!double.TryParse(NeedValue(i, flag), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out motionDelta) || !(motionDelta > 0)) throw new ArgumentException("--motion-delta requires a positive number"); i++; }
@@ -667,8 +670,14 @@ object ReachOf(FormKey key, FormKey baseKey, Snap p)
         string layer = idx.RefCollisionLayer.TryGetValue(key, out var li)
             ? (idx.CollisionLayersByIndex.TryGetValue(li, out var cl) ? cl.Edid ?? $"index {li}" : $"index {li} (no COLL record)")
             : "none stated";
-        return Out(new ReachRegion("refused", $"primitive {prim.Type} (bounds {prim.Bounds.X} {prim.Bounds.Y} {prim.Bounds.Z}), collision layer {layer}: the layer's solidity is not settled",
-                                   Aabb.Empty, MeshReach.PolicyVersion, Array.Empty<string>(), Array.Empty<ReachPart>()));
+        string primRefusal = $"primitive {prim.Type} (bounds {prim.Bounds.X} {prim.Bounds.Y} {prim.Bounds.Z}), collision layer {layer}: the layer's solidity is not settled";
+        if (reachRules?.Contains("primitive") == true)
+        {
+            string? btype = idx.BaseInfo.TryGetValue(baseKey, out var pbi) ? pbi.Type : null;
+            uint? li2 = idx.RefCollisionLayer.TryGetValue(key, out var lv) ? lv : null;
+            return Out(MeshReach.OfPrimitiveRule(btype, false, li2, primRefusal));   // reached only with no model path
+        }
+        return Out(new ReachRegion("refused", primRefusal, Aabb.Empty, MeshReach.PolicyVersion, Array.Empty<string>(), Array.Empty<ReachPart>()));
     }
     return Out(new ReachRegion("no_geometry", "no model path and no primitive", Aabb.Empty, MeshReach.PolicyVersion, Array.Empty<string>(), Array.Empty<ReachPart>()));
 }
@@ -849,6 +858,21 @@ IEnumerable<DropSupport> SupportsUnder(FormKey self, Snap p, Aabb column)
     return found;
 }
 List<PoseConfirmation>? poseConfirmations = null;
+// a confirmation's optional "locals": {node: {"T": [x,y,z], "R": [9 numbers, rows], "S": s}} - a confirmed non-stored pose as data
+static IReadOnlyDictionary<string, PoseLocal>? ReadLocals(System.Text.Json.JsonElement e)
+{
+    if (!e.TryGetProperty("locals", out var lo) || lo.ValueKind != System.Text.Json.JsonValueKind.Object) return null;
+    var d = new Dictionary<string, PoseLocal>(StringComparer.Ordinal);
+    foreach (var n in lo.EnumerateObject())
+    {
+        var t = n.Value.GetProperty("T").EnumerateArray().Select(x => (float)x.GetDouble()).ToArray();
+        var r = n.Value.GetProperty("R").EnumerateArray().Select(x => (float)x.GetDouble()).ToArray();
+        if (t.Length != 3 || r.Length != 9) throw new ArgumentException($"--pose-confirmations: locals '{n.Name}' needs T[3] and R[9]");
+        d[n.Name] = new PoseLocal(new System.Numerics.Vector3(t[0], t[1], t[2]),
+            new System.Numerics.Matrix4x4(r[0], r[1], r[2], 0, r[3], r[4], r[5], 0, r[6], r[7], r[8], 0, 0, 0, 0, 1), (float)n.Value.GetProperty("S").GetDouble());
+    }
+    return d;
+}
 ReachRules? RulesFor(FormKey key, FormKey baseKey, Snap p)
 {
     if (reachRules is null) return null;
@@ -856,7 +880,8 @@ ReachRules? RulesFor(FormKey key, FormKey baseKey, Snap p)
     {
         using var doc = System.Text.Json.JsonDocument.Parse(File.ReadAllText(poseConfirmationsPath));
         poseConfirmations = doc.RootElement.EnumerateArray()
-            .Select(e => new PoseConfirmation(e.GetProperty("modelPath").GetString()!, e.GetProperty("sha256").GetString()!, e.GetProperty("evidence").GetString()!)).ToList();
+            .Select(e => new PoseConfirmation(e.GetProperty("modelPath").GetString()!, e.GetProperty("sha256").GetString()!, e.GetProperty("evidence").GetString()!,
+                                              ReadLocals(e), e.TryGetProperty("label", out var lb) ? lb.GetString() : null)).ToList();
     }
     reachLayers ??= idx.CollisionLayerRules();
     bookArtStatics ??= idx.BookInventoryArt.Values.ToHashSet();
@@ -864,7 +889,8 @@ ReachRules? RulesFor(FormKey key, FormKey baseKey, Snap p)
     bool book = reachRules.Contains("book") && (type == "Book" || (type == "Static" && bookArtStatics.Contains(baseKey)));
     string? modelPath = GeometryOf(baseKey).RelativePath;
     return new ReachRules(reachRules.Contains("physics"), reachRules.Contains("graph"), reachRules.Contains("switch"), book, type,
-                          q => SupportsUnder(key, p, q), reachLayers, poseConfirmations, modelPath, Skin: reachRules.Contains("skin"));
+                          q => SupportsUnder(key, p, q), reachLayers, poseConfirmations, modelPath, Skin: reachRules.Contains("skin"),
+                          Particles: reachRules.Contains("particles"));
 }
 
 (PhysicalState State, string Detail) OverlapPredicate(FormKey laterKey, FormKey otherKey)
