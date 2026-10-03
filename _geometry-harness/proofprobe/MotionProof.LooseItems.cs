@@ -53,6 +53,18 @@ static partial class MotionProof
         return Save(f, "free item, convex radius");
     }
 
+    /// <summary>The free item with its render box reaching 3 u below its collision box ([-5,5]^2 x [-8,5]).</summary>
+    static byte[] FreeItemDeepRender()
+    {
+        var f = new NifFile(); f.Create(Ver, withRootNode: true);
+        var root = f.GetRootNodes().First(); root.Flags_ui = 0xE;
+        var item = new NiNode { Name = new NiStringRef("Item"), Flags_ui = 0xE, Scale = 1f, Rotation = Identity33() };
+        root.Children.AddBlockRef(f.AddBlock(item));
+        item.Children.AddBlockRef(f.AddBlock(Shape("ItemMesh", Box(-5, -5, -8, 5, 5, 5))));
+        AddBody(f, item, ConvexBox(-5, -5, -5, 5, 5, 5), 5f, hkMotionType.MO_SYS_SPHERE_STABILIZED, SkyrimLayer.SKYL_CLUTTER);
+        return Save(f, "free item, deep render");
+    }
+
     static (int Tris, bool Closed, bool Outward) HullFacts(IReadOnlyList<Vector3> v, IReadOnlyList<int> idx, Vector3 inside)
     {
         var edges = new Dictionary<(int, int), int>();
@@ -271,6 +283,17 @@ static partial class MotionProof
             return (r.Drop is { Status: "dropped" } d && NearA7(d.Distance, 95, 1e-3) && NearA7(d.TiltMargin, m, 1e-3) && NearA7(r.Box.Max.X, 5 + m, 1e-3)
                     && NearA7(r.Box.Min.Y, -5 - m, 1e-3) && NearA7(r.Box.Min.Z, -100, 1e-3) && NearA7(r.Box.Max.Z, 5, 1e-3) && r.Labels.Contains(MeshReach.TiltLabel),
                     ShowRR(r) + $" tilt {r.Drop?.TiltMargin:0.####}");
+        });
+        // LI-R6: the rest rule records how far the render mesh reaches below the moving collision at the placed pose: the free
+        // item's render and collision both bottom at -5 -> 0; the same item with its render box reaching 3 u lower -> 3.
+        // Rejects the field missing (null) and a depth read from the union box (always 0).
+        Case(check, "loose-items LI-R6: renderBelowCollision — 0 for the matching box, 3 for a render box 3 u deeper", () =>
+        {
+            var fl = new[] { new DropSupport("floor", 1, true, false, Plate(500, -100)) };
+            var a = MeshReach.OfModel(FreeItem(), Origin, Origin, 1f, null, RestOn(new SettleDecision("settles", null), fl));
+            var b = MeshReach.OfModel(FreeItemDeepRender(), Origin, Origin, 1f, null, RestOn(new SettleDecision("settles", null), fl));
+            return (a.Drop is { } da && NearA7(da.RenderBelowCollision, 0, 1e-3) && b.Drop is { } db && NearA7(db.RenderBelowCollision, 3, 1e-3),
+                    $"a {a.Drop?.RenderBelowCollision} b {b.Drop?.RenderBelowCollision}");
         });
         // LI-R4: enable timing unknown with nothing below -> the placed box (enabled after load, it rests there), drop "lost",
         // the lost and timing labels. Rejects one reading only.

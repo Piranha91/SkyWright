@@ -657,6 +657,7 @@ object ReachOf(FormKey key, FormKey baseKey, Snap p)
             status = rd.Status, distance = double.IsNaN(rd.Distance) ? (double?)null : rd.Distance,
             distanceMax = double.IsNaN(rd.DistanceMax) ? (double?)null : rd.DistanceMax,
             tiltMargin = double.IsNaN(rd.TiltMargin) ? (double?)null : rd.TiltMargin,
+            renderBelowCollision = double.IsNaN(rd.RenderBelowCollision) ? (double?)null : rd.RenderBelowCollision,
             placed = ReachBox(rd.Placed), landed = ReachBox(rd.Landed), supportId = rd.SupportId,
             stateExcludedCandidates = stateExcludedBelow.GetValueOrDefault(key),
         },
