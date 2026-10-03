@@ -196,6 +196,19 @@ static partial class MotionProof
                     && NearA7(o.Box.Max.Z, R2Lat + 16 * R2Q, 1e-2), $"{ShowRR(r)} || {ShowRR(o)}");
         });
 
+        // S4: a placement turned 45 deg about x (world -z off the model axes): the fold is composed in the world frame - the gravity-free
+        // box (every half 68.91421) placed (y, z half 97.45852), the world z top capped at the emitter's top (5 sqrt 2 = 7.07107) + the
+        // apex 32.66421 = 39.73528, the bottom lowered by 16 x 3.1666667: -148.12519. Rejects the fold silently dropped (z max 133.3, the
+        // turned symmetric box: the G1 pustules are all turned).
+        Case(check, "r2 K-SF4: a turned placement composes the fold in the world frame - z [-148.12519, 39.73528]", () =>
+        {
+            var r = MeshReach.OfModel(pn, Origin, new Vec3(MathF.PI / 4, 0, 0), 1f, null,
+                new ReachOptions(0.5, 4096, new ReachRules(Particles: true, ModelPath: "meshes\\t\\p.nif",
+                    Gravity: new[] { new SettledGravity("meshes/t/p.nif", sha, Array.Empty<string>(), true, "frames F1, F2") })));
+            return (r.Status == "uncertified" && NearA7(r.Box.Max.Z, 5 * Math.Sqrt(2) + 31.25 + Sqrt2, 2e-2) && NearA7(r.Box.Min.Z, -(R2Lat * Math.Sqrt(2) + 16 * R2Q), 2e-2)
+                    && r.Labels.Any(l => l.StartsWith(MeshReach.SettledGravityLabelPrefix)), ShowRR(r));
+        });
+
         // ================= SP: the support-plane term with F1's condition =================
         // P1: a thick body (closed box z -1000..-10, +-2000): its surface -10 under the whole footprint, solid below the region's bottom:
         // the region stops at the plane minus r: z min = -10 - 1.41421 = -11.41421; range from h = 5 (emitter bottom -5 to -10):
