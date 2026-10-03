@@ -36,24 +36,89 @@ static partial class MotionProof
             return (PhysicsReach.StaticAssumptionLabel == want && !PhysicsReach.StaticAssumptionLabel.Contains("untested"), PhysicsReach.StaticAssumptionLabel);
         });
 
-        // ================= Don't Havok Settle (record flag on the reference) =================
-        // K-D1: the free item 100 u over a floor, its reference flagged Don't Havok Settle -> held: box [-5,5]^3 (placed), the
-        // settle label, no drop. Rejects dropping a flagged reference, and an unlabelled hold.
-        Case(check, "part3 K-D1: a free item whose reference carries Don't Havok Settle is held at its placed pose, labelled, no drop", () =>
+        // ================= load settle: one rule, data-driven exemptions =================
+        // The list as shipped beside overlapprobe (kinds and values; evidence text is not asserted).
+        var settleList = LoadSettle.Read("""
+            [{"kind":"refRecordFlag","value":"0x20000000","evidence":"lab"},
+             {"kind":"weaponAnimationType","value":"Bow","evidence":"lab"},
+             {"kind":"enabledAfterLoad","value":"true","evidence":"lab"}]
+            """);
+        // K-L1: a reference flagged Don't Havok Settle rests (exemption refRecordFlag). Rejects ignoring the flag mask.
+        Case(check, "part3 K-L1: REFR flag 0x20000000 -> rests, by the refRecordFlag exemption", () =>
         {
-            var o = new ReachOptions(0.5, 65536, new ReachRules(Physics: true, BaseRecordType: "MISC", Supports: _ => new[] { new DropSupport("floor", 1, true, false, Plate(500, -100)) },
-                                                                  Layers: RRLayers, HeldBySettleFlag: true));
-            var r = MeshReach.OfModel(FreeItem(), Origin, Origin, 1f, null, o);
-            return (r.Status == "uncertified" && r.Labels.Contains(PhysicsReach.SettleFlagLabel) && !r.Labels.Contains(PhysicsReach.DropLabel)
+            var d = LoadSettle.Decide(new SettleFacts(0x20000000u | 0x400u, "Crossbow", true), settleList);
+            return (d.Status == "rests" && d.Exemption?.Kind == "refRecordFlag", $"{d}");
+        });
+        // K-L2: a WEAP of animation type Bow rests (exemption weaponAnimationType). Rejects matching another type.
+        Case(check, "part3 K-L2: WEAP animation type Bow -> rests, by the weaponAnimationType exemption", () =>
+        {
+            var d = LoadSettle.Decide(new SettleFacts(0x400u, "Bow", true), settleList);
+            return (d.Status == "rests" && d.Exemption?.Kind == "weaponAnimationType", $"{d}");
+        });
+        // K-L3: a Crossbow / a sword / a non-weapon, unflagged, enabled at load -> settles. Rejects exempting everything.
+        Case(check, "part3 K-L3: Crossbow, OneHandSword and a non-weapon, unflagged and enabled at load -> settles", () =>
+        {
+            var a = LoadSettle.Decide(new SettleFacts(0x400u, "Crossbow", true), settleList);
+            var b = LoadSettle.Decide(new SettleFacts(0u, "OneHandSword", true), settleList);
+            var c = LoadSettle.Decide(new SettleFacts(0u, null, true), settleList);
+            return (a.Status == "settles" && b.Status == "settles" && c.Status == "settles" && a.Exemption is null, $"{a} {b} {c}");
+        });
+        // K-L4: disabled at load, enabled by the judged state -> timing-unknown (exemption enabledAfterLoad). Rejects a hold
+        // (the enable may have come before the cell loaded) and a plain drop.
+        Case(check, "part3 K-L4: enabled by the judged state, disabled at load -> timing-unknown, by the enabledAfterLoad exemption", () =>
+        {
+            var d = LoadSettle.Decide(new SettleFacts(0u, "Crossbow", false), settleList);
+            return (d.Status == "timing-unknown" && d.Exemption?.Kind == "enabledAfterLoad", $"{d}");
+        });
+        // K-L5: a property exemption outranks the timing one: a flagged reference enabled by the state still rests.
+        Case(check, "part3 K-L5: a flagged reference enabled by the state rests (the property exemption first)", () =>
+        {
+            var d = LoadSettle.Decide(new SettleFacts(0x20000000u, null, false), settleList);
+            return (d.Status == "rests" && d.Exemption?.Kind == "refRecordFlag", $"{d}");
+        });
+        // K-L6: an empty list exempts nothing (the list is the only source of exemptions).
+        Case(check, "part3 K-L6: with no exemptions a Bow, a flagged and a state-enabled reference all settle", () =>
+        {
+            var none = Array.Empty<SettleExemption>();
+            var a = LoadSettle.Decide(new SettleFacts(0x20000000u, "Bow", false), none);
+            return (a.Status == "settles", $"{a}");
+        });
+        // K-L7: an unknown exemption kind fails loud.
+        Case(check, "part3 K-L7: an unknown exemption kind is refused when the list is read", () =>
+        {
+            try { LoadSettle.Read("""[{"kind":"weight","value":"5","evidence":"x"}]"""); return (false, "read"); }
+            catch (ArgumentException e) { return (e.Message.Contains("unknown kind"), e.Message); }
+        });
+        ReachOptions SettleOn(SettleDecision? d) => new(0.5, 65536, new ReachRules(Physics: true, BaseRecordType: "WEAP",
+            Supports: _ => new[] { new DropSupport("floor", 1, true, false, Plate(500, -100)) }, Layers: RRLayers, Settle: d));
+        var exFlag = settleList.First(e => e.Kind == "refRecordFlag");
+        var exTime = settleList.First(e => e.Kind == "enabledAfterLoad");
+        // K-L8: rests -> the placed box [-5,5]^3, the rests label, no drop. Rejects dropping an exempt item, an unlabelled hold.
+        Case(check, "part3 K-L8: a resting free item keeps its placed box, labelled rests where placed, no drop", () =>
+        {
+            var r = MeshReach.OfModel(FreeItem(), Origin, Origin, 1f, null, SettleOn(new SettleDecision("rests", exFlag)));
+            return (r.Status == "uncertified" && r.Labels.Contains(LoadSettle.RestsLabel) && !r.Labels.Contains(PhysicsReach.DropLabel)
                     && r.Drop is null && BoxIs(r.Box, -5, -5, -5, 5, 5, 5), ShowRR(r));
         });
-        // fixture control: the same item and floor without the flag drops 95 u (today's reading; holds on the base)
-        Case(check, "part3 fixture control: the same free item without the flag drops to the floor (d 95)", () =>
+        // K-L9: timing-unknown -> the prism from placed to landed (z -100..5), the drop recorded, the timing label.
+        Case(check, "part3 K-L9: timing-unknown holds the placed and dropped poses (prism z -100..5), labelled, drop recorded", () =>
         {
-            var o = new ReachOptions(0.5, 65536, new ReachRules(Physics: true, BaseRecordType: "MISC", Supports: _ => new[] { new DropSupport("floor", 1, true, false, Plate(500, -100)) },
-                                                                  Layers: RRLayers));
-            var r = MeshReach.OfModel(FreeItem(), Origin, Origin, 1f, null, o);
-            return (r.Drop is { } d && NearA7(d.Distance, 95, 1e-3) && !r.Labels.Contains(PhysicsReach.SettleFlagLabel), ShowRR(r));
+            var r = MeshReach.OfModel(FreeItem(), Origin, Origin, 1f, null, SettleOn(new SettleDecision("timing-unknown", exTime)));
+            return (r.Labels.Contains(LoadSettle.TimingUnknownLabel) && r.Drop is { } d && NearA7(d.Distance, 95, 1e-3)
+                    && BoxIs(r.Box, -5, -5, -100, 5, 5, 5, 0.01f), ShowRR(r));
+        });
+        // K-L10: settles -> the drop (d 95) labelled with what it was measured on. Rejects an unlabelled settled drop.
+        Case(check, "part3 K-L10: a settling free item drops (d 95) and carries the settles label", () =>
+        {
+            var r = MeshReach.OfModel(FreeItem(), Origin, Origin, 1f, null, SettleOn(new SettleDecision("settles", null)));
+            return (r.Drop is { } d && NearA7(d.Distance, 95, 1e-3) && r.Labels.Contains(LoadSettle.SettlesLabel)
+                    && !r.Labels.Contains(LoadSettle.RestsLabel), ShowRR(r));
+        });
+        // fixture control: no decision (the list not given) is today's drop, with no settle label (holds on the base)
+        Case(check, "part3 fixture control: with no settle decision the free item drops as before (d 95), no settle labels", () =>
+        {
+            var r = MeshReach.OfModel(FreeItem(), Origin, Origin, 1f, null, SettleOn(null));
+            return (r.Drop is { } d && NearA7(d.Distance, 95, 1e-3) && !r.Labels.Contains(LoadSettle.SettlesLabel) && !r.Labels.Contains(LoadSettle.RestsLabel), ShowRR(r));
         });
 
         // ================= canary =================
