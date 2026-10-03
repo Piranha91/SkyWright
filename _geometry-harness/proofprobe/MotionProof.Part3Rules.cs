@@ -233,7 +233,7 @@ static partial class MotionProof
         Case(check, "part3 K-PA3: MeshReach with the particles rule — the emitter-controller fixture is uncertified (particle model), not refused", () =>
         {
             var r = MeshReach.OfModel(emitterCtl, Origin, Origin, 1f, null, new ReachOptions(0.5, 4096, new ReachRules(Particles: true)));
-            return (r.Status == "uncertified" && r.Labels.Contains(MeshReach.ParticleLabel), ShowRR(r));
+            return (r.Status == "uncertified" && r.Labels.Contains(MeshReach.ParticleModelLabel), ShowRR(r));   // the rule reads particle_model_v2 (K-PM9)
         });
 
         // ================= K-C4: a confirmed start-state pose given as node locals =================
