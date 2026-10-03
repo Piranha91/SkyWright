@@ -246,6 +246,8 @@ public sealed class OverlapIndex
     }
     /// <summary>ref -> its XTRI collision-layer index under the winner; absent when none.</summary>
     public Dictionary<FormKey, uint> RefCollisionLayer { get; } = new();
+    /// <summary>refs whose winning record carries the Don't Havok Settle flag (REFR 0x20000000).</summary>
+    public HashSet<FormKey> RefDontHavokSettle { get; } = new();
     /// <summary>The worldspace persistent cells (the top cell of each worldspace, no grid) — a marker placed persistent
     /// sits here whatever its coordinates, so a per-cell census labels it rather than reading it as a crowded cell.</summary>
     public HashSet<FormKey> PersistentCells { get; } = new();
@@ -358,6 +360,7 @@ public sealed class OverlapIndex
         if (!string.IsNullOrWhiteSpace(r.EditorId)) RefEditorId[r.FormKey] = r.EditorId!;
         if (r.Primitive is { } pr) RefPrimitive[r.FormKey] = pr; else RefPrimitive.Remove(r.FormKey);
         if (r.OpenByDefault) RefOpenByDefault.Add(r.FormKey); else RefOpenByDefault.Remove(r.FormKey);
+        if (r.DontHavokSettle) RefDontHavokSettle.Add(r.FormKey); else RefDontHavokSettle.Remove(r.FormKey);
         if (r.LinkedReferences is { Count: > 0 } links) RefLinkedRefs[r.FormKey] = links; else RefLinkedRefs.Remove(r.FormKey);
         if (r.ActivateParents is { Count: > 0 } parents) RefActivateParents[r.FormKey] = parents; else RefActivateParents.Remove(r.FormKey);
         Deletions.Note(plugin, r.FormKey, r.Deleted, hasPlacement: true);
