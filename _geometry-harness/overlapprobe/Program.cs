@@ -108,7 +108,7 @@ pose, swept region, or a switch node's every child), "uncertified" with labels a
 shape or the particle model enters, "refused" with the reason otherwise (a model-less primitive refuses naming its
 collision layer until the layer's solidity is settled), "no_geometry" for a reference with neither model nor primitive.
 Default off: the manifest is unchanged without it.
---reach-rules physics,graph,switch,book (with --reach): the modelling rules and readers that turn reach refusals into
+--reach-rules physics,graph,switch,book,skin (with --reach): the modelling rules and readers that turn reach refusals into
 labelled regions; never certified. physics: a body the file pins (a constraint to a massless body) swings within the
 constraint's limits; a free body (mass > 0, simulated motion system, no pin) is dropped straight down, rigidly, from its
 placed pose to first contact with a support below (the modelling rule) - a support is a solid, non-movable body of a
@@ -116,7 +116,9 @@ reference enabled in the state, on a layer the falling body's COLL record collid
 a Static base is assumed not to move (labelled). graph: binding member paths decide (playbackSpeed: no effect), the
 reference-pose generator, a missing sequence where the file has no transform source. switch: every switch child, animated
 children swept, Tree_Anim shapes labelled. book: a BOOK base, or a Static a BOOK names as InventoryArt, is read closed (its
-stored pose: the modelling rule). Reach rows gain "drop" {status, distance, placed, landed, supportId,
+stored pose: the modelling rule). skin: weight sources that disagree only on vertices no
+triangle draws do not refuse; drawn disagreements are posed under both sources (labelled, the renderer's source untested);
+a drawn vertex with no weight under one source still refuses. Reach rows gain "drop" {status, distance, placed, landed, supportId,
 stateExcludedCandidates}; the manifest gains "reachLoose" (the same region for each item-type reference: report only,
 dispositions unchanged).
 --pose-confirmations FILE (with --reach-rules): a JSON list of {modelPath, sha256, evidence}; a model whose animation the
