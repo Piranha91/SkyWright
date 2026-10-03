@@ -863,6 +863,21 @@ IEnumerable<DropSupport> SupportsUnder(FormKey self, Snap p, Aabb column)
     return found;
 }
 List<PoseConfirmation>? poseConfirmations = null;
+// a confirmation's optional "pose": {"clip": "<Data-relative clip path>", "sweep": "loop" | [t0, t1], "label": "..."} - a confirmed
+// clip swept on the confirmed bytes ("loop": the clip's whole span)
+static (string? Clip, float[]? Sweep, string? Label) ReadPose(System.Text.Json.JsonElement e)
+{
+    if (!e.TryGetProperty("pose", out var po) || po.ValueKind != System.Text.Json.JsonValueKind.Object) return (null, null, null);
+    string clip = po.GetProperty("clip").GetString() ?? throw new ArgumentException("--pose-confirmations: pose.clip is empty");
+    float[]? sweep = null;
+    if (po.TryGetProperty("sweep", out var sw))
+    {
+        if (sw.ValueKind == System.Text.Json.JsonValueKind.Array) sweep = sw.EnumerateArray().Select(x => (float)x.GetDouble()).ToArray();
+        else if (sw.GetString() != "loop") throw new ArgumentException("--pose-confirmations: pose.sweep is \"loop\" or [t0, t1]");
+        if (sweep is { Length: not 2 }) throw new ArgumentException("--pose-confirmations: pose.sweep [t0, t1] needs two numbers");
+    }
+    return (clip, sweep, po.TryGetProperty("label", out var l) ? l.GetString() : null);
+}
 // a confirmation's optional "locals": {node: {"T": [x,y,z], "R": [9 numbers, rows], "S": s}} - a confirmed non-stored pose as data
 static IReadOnlyDictionary<string, PoseLocal>? ReadLocals(System.Text.Json.JsonElement e)
 {
@@ -908,7 +923,8 @@ ReachRules? RulesFor(FormKey key, FormKey baseKey, Snap p)
         using var doc = System.Text.Json.JsonDocument.Parse(File.ReadAllText(poseConfirmationsPath));
         poseConfirmations = doc.RootElement.EnumerateArray()
             .Select(e => new PoseConfirmation(e.GetProperty("modelPath").GetString()!, e.GetProperty("sha256").GetString()!, e.GetProperty("evidence").GetString()!,
-                                              ReadLocals(e), e.TryGetProperty("label", out var lb) ? lb.GetString() : null)).ToList();
+                                              ReadLocals(e), e.TryGetProperty("label", out var lb) ? lb.GetString() : (ReadPose(e).Label),
+                                              ReadPose(e).Clip, ReadPose(e).Sweep)).ToList();
     }
     reachLayers ??= idx.CollisionLayerRules();
     bookArtStatics ??= idx.BookInventoryArt.Values.ToHashSet();
