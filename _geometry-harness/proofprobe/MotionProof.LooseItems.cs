@@ -293,6 +293,32 @@ static partial class MotionProof
             return (rb.Drop is { Status: "dropped" } a && NearA7(a.Distance, 78, 1e-3) && rm.Drop is { Status: "dropped" } b && NearA7(b.Distance, 94.65, 1e-3),
                     "box " + ShowRR(rb) + " | mesh " + ShowRR(rm));
         });
+        // LI-K11: an item that starts inside a support's radius shell is touching it (the engine pushes it out; lab: the station (a)
+        // control lifted +0.283 u out of the table's shell), never read as falling through to a surface below. The radius-0 free item
+        // ([-5,5]^3) at the origin: over a box support (half 50 x 50 x 10, radius 7) centred at z -16 (core top -6, shell top +1);
+        // over a compressed-mesh plate (radius 0.35) at z -5.2 (shell top -4.85); each over a floor 100 u down. Both read touching
+        // on their support. Rejects a shell crossing at the placed pose read as a drop to the floor.
+        Case(check, "loose-items LI-K11: an item inside a support's shell reads touching it - box (6 u in) and mesh plate (0.15 u in)", () =>
+        {
+            var floor = new DropSupport("floor", 1, true, false, Plate(500, -100));
+            var box = PhysicsReach.Supports("box", SupportBox(50f, 10f, 7f), new Vec3(0, 0, -16), new Vec3(0, 0, 0), 1f, movableBase: false).Append(floor).ToArray();
+            var mesh = PhysicsReach.Supports("mesh", SupportMeshPlate(500f, 0.35f), new Vec3(0, 0, -5.2f), new Vec3(0, 0, 0), 1f, movableBase: false).Append(floor).ToArray();
+            var rb = MeshReach.OfModel(FreeItem(), Origin, Origin, 1f, null, RulesOn(physics: true, baseType: "MISC", supports: box));
+            var rm = MeshReach.OfModel(FreeItem(), Origin, Origin, 1f, null, RulesOn(physics: true, baseType: "MISC", supports: mesh));
+            return (rb.Drop is { Status: "touching", SupportId: "box" } && rm.Drop is { Status: "touching", SupportId: "mesh" }, "box " + ShowRR(rb) + " | mesh " + ShowRR(rm));
+        });
+        // LI-K12: a crossing the vertex test cannot see is still a contact: a small support (a 2 x 2 u compressed-mesh plate at z -2,
+        // radius 0) lies wholly inside the free item's box ([-5,5]^3): no item vertex stands over the plate, and the plate's own
+        // vertices are inside the item. That is touching (0), not a drop of 7 (the gap from the plate up to the item's top face). On
+        // real data the radius produced this shape of reading (a flour sack 0.02 u over a shelf read 4.35 u, digest/reach-digest.json).
+        // Rejects an interpenetration detected only by moving vertices over one support triangle.
+        Case(check, "loose-items LI-K12: a small support wholly inside the item reads touching, not dropped 7", () =>
+        {
+            var plate = PhysicsReach.Supports("plate", SupportMeshPlate(1f, 0f), new Vec3(0, 0, -2), new Vec3(0, 0, 0), 1f, movableBase: false)
+                                    .Append(new DropSupport("floor", 1, true, false, Plate(500, -100))).ToArray();
+            var r = MeshReach.OfModel(FreeItem(), Origin, Origin, 1f, null, RulesOn(physics: true, baseType: "MISC", supports: plate));
+            return (r.Drop is { Status: "touching", SupportId: "plate" }, ShowRR(r));
+        });
         // LI-K10: the geometry reader every other consumer uses (route, floors, contact, overlap's collision column, state) keeps the
         // core: no radius of any kind (their calibrations; contact's in-game acceptance got worse with it, RESULT). Measured in Havok
         // units (havokUnitScale 1). Rejects the radius leaking into NifGeometry by default.
