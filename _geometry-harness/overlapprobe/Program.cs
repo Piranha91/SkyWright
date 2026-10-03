@@ -129,7 +129,9 @@ dispositions unchanged).
 --pose-confirmations FILE (with --reach-rules): a JSON list of {modelPath, sha256, evidence}; a model whose animation the
 files cannot settle, whose path and exact bytes match an entry (an in-game screenshot compared with a render of its stored
 pose), is read at its stored pose, labelled "rest: stored pose (confirmed by in-game comparison)". An entry may carry "locals"
-({node: {T, R (9, rows), S}}, a confirmed non-stored pose such as a graph start state) and "label". No entry, no change.
+({node: {T, R (9, rows), S}}, a confirmed non-stored pose such as a graph start state), "label", and "pose": {"clip": "<clip path>", "sweep": "loop" |
+[t0, t1], "label"} (a confirmed clip read alone from the model's behaviour graph and swept on those bytes; a clip the graph lacks
+refuses, naming it). No entry, no change.
 See overlapprobe/Program.cs usage documentation. Help performs no load-order scan.
 """);
     return 0;
