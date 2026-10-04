@@ -42,6 +42,8 @@ using HousecarlCore.Progress;
 //             parts, the triangle, and the floor under that point (this probe's floor rule). A navmesh triangle is where
 //             NPCs path, not every place a player can stand. Interior: the cell's navmesh is the whole set. Exterior:
 //             only the cell's own navmesh is searched, so the distance is an upper bound and says so.
+//             A subject filed in its worldspace's persistent cell is looked up in the grid cell its position falls in
+//             (it stands there; no plugin files it in that cell), and its row says so in `placement`.
 //             A model-less subject with an XPRM Box (a trigger) is measured from its box at the reference's pose. Opt-in
 //             (G1 Stage B): --band LO,HI adds `band`, the exact distance to the navmesh swept straight up from +LO to +HI
 //             (where a standing body is; 0 when the subject meets it); --under adds `under`, the floor straight under the
@@ -341,10 +343,25 @@ if (mode == "reach")
     }
     var field = Field(e);
     var byKey = e.Refs.ToDictionary(r => r.FormKey.ToString(), r => r, StringComparer.OrdinalIgnoreCase);
+    // A reference filed in the worldspace's persistent cell stands in the grid cell its position falls in (FloorgapWalk).
+    var persistentHere = fwalk.PersistentStandingIn(e).Values.ToDictionary(r => r.FormKey.ToString(), r => r, StringComparer.OrdinalIgnoreCase);
     var rows = new List<object>();
     foreach (var id in ids)
     {
-        if (!byKey.TryGetValue(id, out var r)) { rows.Add(new { id, status = "refused", reason = "no winning placement of this reference in the cell" }); continue; }
+        string? placement = null;
+        if (!byKey.TryGetValue(id, out var r))
+        {
+            if (!persistentHere.TryGetValue(id, out r)) { rows.Add(new { id, status = "refused", reason = "no winning placement of this reference in the cell" }); continue; }
+            placement = "the worldspace's persistent cell; stands in this cell's grid by position";
+        }
+        // A row found through the persistent cell carries its placement; every other row is written exactly as before.
+        void AddRow(object row)
+        {
+            if (placement is null) { rows.Add(row); return; }
+            var node = System.Text.Json.JsonSerializer.SerializeToNode(row)!.AsObject();
+            node.Add("placement", placement);
+            rows.Add(node);
+        }
         TriangleSoup? world = null; string geometry = "position";
         string? geometryNote = null;
         if (r.Base is { } b && baseMesh.TryGetValue(b, out var bm))
@@ -369,7 +386,7 @@ if (mode == "reach")
             floor = new { at = "the nearest triangle's centroid", found = fr.Found, offset = fr.Found ? fr.Offset : (float?)null, reason = fr.Found ? null : fr.Reason.ToString() };
         }
         if (band is null && !under)
-            rows.Add(new { id, geometry, geometryNote, status = d.Status, reason = d.Reason, distance = d.Distance, horizontal = d.Horizontal, vertical = d.Vertical,
+            AddRow(new { id, geometry, geometryNote, status = d.Status, reason = d.Reason, distance = d.Distance, horizontal = d.Horizontal, vertical = d.Vertical,
                            navmesh = d.Navmesh, triangle = d.Triangle, floor });
         else
         {
@@ -384,7 +401,7 @@ if (mode == "reach")
                 var ur = field.Read(r.Position.X, r.Position.Y, r.Position.Z, out _);
                 underRow = new { at = "the subject's position", window = new { below = depth, above = reach }, found = ur.Found, offset = ur.Found ? ur.Offset : (float?)null, reason = ur.Found ? null : ur.Reason.ToString() };
             }
-            rows.Add(new { id, geometry, geometryNote, status = d.Status, reason = d.Reason, distance = d.Distance, horizontal = d.Horizontal, vertical = d.Vertical,
+            AddRow(new { id, geometry, geometryNote, status = d.Status, reason = d.Reason, distance = d.Distance, horizontal = d.Horizontal, vertical = d.Vertical,
                            navmesh = d.Navmesh, triangle = d.Triangle, floor, band = bandRow, under = underRow });
         }
     }

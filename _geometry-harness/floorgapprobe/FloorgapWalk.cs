@@ -32,6 +32,13 @@ sealed class FloorgapWalk
     readonly LastSightingNavSet _mergedNavs = new();
     public Dictionary<FormKey, NavmeshGeometry> MergedNavs => _mergedNavs.Navs;
     public readonly List<string> PluginsWithCell = new();
+    // A worldspace's PERSISTENT cell (its TopCell, read from the plugin structure, not from a grid: the record carries a
+    // grid too) holds references the engine keeps loaded wherever they stand. Their last sightings, kept apart from the
+    // merged cell: a later sighting in any grid cell takes one out (LastSightingSet), and PersistentStandingIn files them
+    // by position for reach. The merged cell and the floor filing are unchanged by it.
+    readonly HashSet<FormKey> _topCells = new();
+    readonly Dictionary<FormKey, FormKey> _topCellWorld = new();
+    readonly LastSightingSet _persistentTop = new();
 
     public FloorgapWalk(bool winning, string? wantCell)
     {
@@ -49,10 +56,13 @@ sealed class FloorgapWalk
 
     void Walk(ISkyrimModGetter mod, string path, Action<CellPlacements> perCell)
     {
+        foreach (var wrld in mod.Worldspaces.Records)
+            if (wrld.TopCell is { } top) { _topCells.Add(top.FormKey); _topCellWorld[top.FormKey] = wrld.FormKey; }
         foreach (var cp in LastSighting.Cells(mod))
         {
             perCell(cp);
             Floor.Observe(cp, Path.GetFileName(path));
+            _persistentTop.Observe(cp, (c, _) => _topCells.Contains(c.Cell));
             // The single-plugin modes sweep the plugin's cells with content, as before: an empty cell copy has nothing to
             // measure.
             if (!Winning) { if (cp.Refs.Count > 0 || cp.Navmeshes.Count > 0) Cells.Add(cp); continue; }
@@ -67,6 +77,20 @@ sealed class FloorgapWalk
             else if (cp.Land is not null) { MergedLand = cp.Land; MergedLandUnreadable = null; }
             PluginsWithCell.Add(Path.GetFileName(path));
         }
+    }
+
+    /// <summary>The references whose last sighting is in <paramref name="cell"/>'s worldspace's persistent cell and whose
+    /// position falls in <paramref name="cell"/>'s grid: they stand in that cell although no plugin files them there. Empty
+    /// for an interior, a cell with no grid, or the persistent cell itself.</summary>
+    public Dictionary<FormKey, PlacedRef> PersistentStandingIn(CellPlacements cell)
+    {
+        var result = new Dictionary<FormKey, PlacedRef>();
+        if (cell.Interior || cell.Grid is not { } g || _topCells.Contains(cell.Cell)) return result;
+        foreach (var (key, r) in _persistentTop.Refs)
+            if (_persistentTop.CellOf.TryGetValue(key, out var top) && _topCellWorld.TryGetValue(top, out var ws)
+                && ws == cell.Worldspace && FloorFeed.GridOf(r.Position) == g)
+                result[key] = r;
+        return result;
     }
 
     /// <summary>HOUSECARL_WINSTATE_DUMP: the merged cell and the floor filing, for an independent reader.</summary>
