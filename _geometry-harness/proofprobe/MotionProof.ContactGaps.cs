@@ -181,6 +181,19 @@ static partial class MotionProof
             var o3 = PairFrame.Origin(Cube(0, 0, 0, 5), FarOrigin, Zero3, 1f, Cube(20, 0, 0, 5), FarOrigin, Zero3, 1f);
             return (o1 == FarOrigin && o2 == Zero3 && o3 == Zero3, $"{o1} {o2} {o3}");
         });
+        // K-C5: the world arm is byte for byte the old reading: two 10 u cubes 5 u apart at city-scale coordinates (nothing collapses)
+        // serialise identically through MeasurePlaced and through Measure on TransformSoup (the pre-lane-3b code). Rejects recentring
+        // every pair (the always-recentred arm changes the envelope's rounding).
+        Case(check, "lane3b K-C5: a far pair that collapses nothing - MeasurePlaced equals the world-frame measure byte for byte", () =>
+        {
+            var o = new System.Text.Json.JsonSerializerOptions { NumberHandling = System.Text.Json.Serialization.JsonNumberHandling.AllowNamedFloatingPointLiterals };
+            var far = new Vec3(-68447.3f, 104265.1f, -8496.4f);
+            var ca = Cube(0, 0, 0, 5); var cb = Cube(7.3f, 1.1f, 0.4f, 5);
+            var placed = MeshSurface.MeasurePlaced(ca, null, far, new Vec3(0, 0, 0.3f), 1f, cb, null, far, new Vec3(0, 0, 0.3f), 1f, VolumeGeometry.Render);
+            var world = MeshSurface.Measure(SpatialOverlap.TransformSoup(ca, far, new Vec3(0, 0, 0.3f), 1f), null, SpatialOverlap.TransformSoup(cb, far, new Vec3(0, 0, 0.3f), 1f), null, VolumeGeometry.Render);
+            string a = System.Text.Json.JsonSerializer.Serialize(placed, o), b = System.Text.Json.JsonSerializer.Serialize(world, o);
+            return (a == b && placed.Status == "measured", a == b ? $"{placed.Status} L {placed.CrossingLength}" : "differs: " + a[..Math.Min(200, a.Length)] + " / " + b[..Math.Min(200, b.Length)]);
+        });
         // K-C4 (guard): a triangle with a repeated index in model space is still refused (it is not a placement artefact).
         Case(check, "lane3b K-C4 (guard): a repeated-index triangle in model space - still refused", () =>
         {

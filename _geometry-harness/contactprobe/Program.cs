@@ -61,6 +61,12 @@ using HousecarlCore.Progress;
 //                          state:NAME, <animation>@start|@end). Default off: outputs unchanged.
 //   --motion-delta U       with --motion swept: target bound on how far the moving part moves between samples (default 0.5)
 //   --motion-budget N      with --motion swept: samples per animation before the region is reported not converged (4096)
+//                          (lane 3b) --motion swept also applies to --anchor (the body against every sample of a moving partner:
+//                          witness / never / cannot_tell), and a member refused only for a NiPathInterpolator is measured as a tube
+//                          around its path (never / cannot_tell, never a witness). A pair whose world placement collapses a triangle
+//                          is measured in B's frame and labelled pairFrame; particle systems set aside from a render surface are
+//                          labelled particlesA / particlesB.
+//   --box-contact FILE     with --overlap-json: each input boxContact row's world boxes against the other member's render surface
 //
 // usage: contactprobe [--list N] [--eps U] [--reach U] [--json FILE] [--emit FILE] [--base EMIT] [--all-rows] [--interior-only]
 //                     [--absolute] [--labelled-mover X.esp] [--overlap-json FILE]
@@ -102,8 +108,11 @@ contactprobe: placement contact and explicit render-surface pair review
     partner: point, line and body readings of the actor at the anchor against B's opaque render surface, the body deciding
   --surface OUTPUT (with --overlap-json): crossing length, coplanar areas and buried area per pair, render and collision
     separately; --live-pose blanket|targeted chooses the live-pose rule (default targeted)
-  --motion off|swept|pose:NAME (with --surface/--volume): measure a moving member against its motion instead of refusing
-    it; --motion-delta U and --motion-budget N tune the swept sampling (default 0.5 u, 4096)
+  --motion off|swept|pose:NAME (with --surface/--volume; swept also with --anchor): measure a moving member against its motion
+    instead of refusing it (a NiPathInterpolator member: a tube around its path, never or cannot_tell); --motion-delta U and
+    --motion-budget N tune the swept sampling (default 0.5 u, 4096)
+  --box-contact OUTPUT (with --overlap-json): for each input boxContact row {pairKey, a, b, boxOwner A|B, boxes [{label, min,
+    max}]}, whether each world box meets the other member's render surface (opaque, and any material)
   --instance DIR --game DIR --profile NAME --order CANDIDATE.json
 Candidate Mods lists select asset priority. Surface/contact evidence is not a defect verdict.
 Other modes: --absolute or --labelled-mover PLUGIN; default is the moved-host pass.
@@ -135,6 +144,7 @@ bool radiusOn = true;   // --radius: read the Havok radius for the contact gap (
 var enablePlugins = new List<string>();
 var disablePlugins = new List<string>();
 string? orderFile = null;
+string? boxContactOut = null;   // --box-contact FILE (with --overlap-json): does a supplied world box meet a member's render surface (lane 3b)
 string? traceOut = null, traceKeysPath = null, volumeOut = null, surfaceOut = null, anchorOut = null;   // --surface FILE: measured surface contact (with --overlap-json); --anchor FILE: the anchor body test (G1 build list row 2)
 LivePosePolicy? livePose = null;
 string? motionSpec = null; double? motionDelta = null; int? motionBudget = null;   // --live-pose blanket|targeted (with --surface)
@@ -180,6 +190,7 @@ try
         else if (flag == "--volume") { volumeOut = NeedValue(i, flag); i++; }
         else if (flag == "--surface") { surfaceOut = NeedValue(i, flag); i++; }
         else if (flag == "--anchor") { anchorOut = NeedValue(i, flag); i++; }
+        else if (flag == "--box-contact") { boxContactOut = NeedValue(i, flag); i++; }
         else if (flag == "--live-pose")
         {
             livePose = NeedValue(i, flag).ToLowerInvariant() switch
@@ -234,12 +245,14 @@ if (selectedModes > 1) { Console.Error.WriteLine("--overlap-json, --absolute and
 if (volumeOut is not null && overlapJson is null) { Console.Error.WriteLine("--volume is valid only with --overlap-json INPUT"); return 2; }
 if (surfaceOut is not null && overlapJson is null) { Console.Error.WriteLine("--surface is valid only with --overlap-json INPUT"); return 2; }
 if (anchorOut is not null && overlapJson is null) { Console.Error.WriteLine("--anchor is valid only with --overlap-json INPUT"); return 2; }
+if (boxContactOut is not null && overlapJson is null) { Console.Error.WriteLine("--box-contact is valid only with --overlap-json INPUT"); return 2; }
 if (livePose is not null && surfaceOut is null) { Console.Error.WriteLine("--live-pose is valid only with --surface OUTPUT"); return 2; }
 if (traceKeysPath is not null && traceOut is null) { Console.Error.WriteLine("--trace-keys requires --trace OUTPUT"); return 2; }
 MotionReview.Options? motionOptions;
 try { motionOptions = MotionReview.Parse(motionSpec, motionDelta, motionBudget); }
 catch (ArgumentException ex) { Console.Error.WriteLine(ex.Message); return 2; }
-if (motionSpec is not null && surfaceOut is null && volumeOut is null) { Console.Error.WriteLine("--motion is valid only with --surface or --volume OUTPUT"); return 2; }
+if (motionSpec is not null && surfaceOut is null && volumeOut is null && anchorOut is null) { Console.Error.WriteLine("--motion is valid only with --surface, --volume or --anchor OUTPUT"); return 2; }
+if (anchorOut is not null && motionOptions is { Mode: not "swept" }) { Console.Error.WriteLine("--anchor takes --motion swept only (a body against every pose of a moving partner)"); return 2; }
 if ((motionDelta is not null || motionBudget is not null) && motionOptions?.Mode != "swept") { Console.Error.WriteLine("--motion-delta and --motion-budget are valid only with --motion swept"); return 2; }
 if (motionDelta is { } md && !(md > 0 && double.IsFinite(md)) || motionBudget is { } mb && mb < 2) { Console.Error.WriteLine("--motion-delta must be positive and finite; --motion-budget at least 2"); return 2; }
 if (traceOut is not null && selectedModes > 0) { Console.Error.WriteLine("--trace is valid only in the default moved-host pass"); return 2; }
@@ -535,6 +548,10 @@ if (overlapJson is not null)
         // --anchor: a separate file (G1 build list, Stage A, row 2): member A is the anchor, B the partner.
         if (anchorOut is not null)
             AnchorReview.Run(overlapJson, anchorOut, assets, idx, cidx.Arms,
+                cfg.Identity("load-time", cidx.State?.Name ?? "baseline"), idx.WinningGeometryPose, motionCache);
+        // --box-contact: a separate file (lane 3b): supplied world boxes (a particle region) against a member's render surface.
+        if (boxContactOut is not null)
+            BoxContactReview.Run(overlapJson, boxContactOut, assets, idx, cidx.Arms,
                 cfg.Identity("load-time", cidx.State?.Name ?? "baseline"), idx.WinningGeometryPose);
         return reviewRc;
     }

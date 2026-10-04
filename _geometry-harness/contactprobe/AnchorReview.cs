@@ -35,7 +35,7 @@ static class AnchorReview
     }
 
     public static int Run(string inputPath, string outputPath, AssetResolver assets, OverlapIndex index, EnableArms arms,
-                          ConfigurationIdentity configuration, Func<FormKey, Snap?> winningPose)
+                          ConfigurationIdentity configuration, Func<FormKey, Snap?> winningPose, MotionReview.Cache? motion = null)
     {
         var inputBytes = File.ReadAllBytes(inputPath);
         using var input = JsonDocument.Parse(inputBytes);
@@ -75,7 +75,19 @@ static class AnchorReview
             var (bBytes, bMesh, bWhy) = ReadBase(assets, index, baseB);
             if (bBytes is null) { refused++; records.Add(Rec(new { mesh = bMesh }, Array.Empty<object>(), "B: " + bWhy)); continue; }
             var surf = MeshSurface.ModelSurface(bBytes, VolumeGeometry.Render, LivePoseDefault.Policy);
-            if (surf.Status != "measured") { refused++; records.Add(Rec(new { mesh = bMesh }, Array.Empty<object>(), "B: " + surf.Reason)); continue; }
+            // lane 3b, gap b: with --motion swept, a partner refused for its live pose is tested over every sample of its swept region
+            SweptRegion? sweptB = null; string? motionLabel = null;
+            if (surf.Status != "measured" && motion is { Options.Mode: "swept" } && (surf.Reason ?? "").StartsWith("live pose:", StringComparison.Ordinal))
+            {
+                var mb = motion.Model(pr.B, bBytes);
+                if (mb.Status != "moving") { refused++; records.Add(Rec(new { mesh = bMesh }, Array.Empty<object>(), $"B: {surf.Reason}; motion: {mb.Status} {mb.Reason}")); continue; }
+                var region = motion.Region(pr.B, bBytes, VolumeGeometry.Render);
+                if (region.Status != "built") { refused++; records.Add(Rec(new { mesh = bMesh }, Array.Empty<object>(), $"B: live pose: {region.Reason}")); continue; }
+                var bp = pb!.Value;
+                sweptB = SweptGeometry.Place(region, bp.Pos, bp.Rot, bp.Scale);
+                motionLabel = string.Join("; ", region.Animations.Select(an => $"{an.Id} {an.Cycle} {an.Trigger}"));
+            }
+            else if (surf.Status != "measured") { refused++; records.Add(Rec(new { mesh = bMesh }, Array.Empty<object>(), "B: " + surf.Reason)); continue; }
 
             // the anchors: furniture entry positions, else the placement position
             var a = pa!.Value; var b = pb!.Value;
@@ -114,6 +126,20 @@ static class AnchorReview
             var results = new List<object>();
             foreach (var (at, kind, entry, ex) in anchors)
             {
+                if (sweptB is not null)
+                {
+                    var mr = AnchorMotion.TestSwept(sweptB, at, body, ex);
+                    if (mr.Decision is "cannot_tell" or "refused") undecided++; else decided++;
+                    results.Add(new
+                    {
+                        kind, at = new[] { (double)at.X, at.Y, at.Z },
+                        entry = entry is null ? null : new { entry.AnimationType, entry.EntryPoints, heading = entry.Heading },
+                        exclusion = ex is { } h2 ? new { normal = new[] { (double)h2.Normal.X, h2.Normal.Y, h2.Normal.Z }, offset = (double)h2.Offset } : null,
+                        motion = new { mode = "swept", policy = AnchorMotion.PolicyVersion + "|" + MotionReview.Policy, member = "B", label = motionLabel,
+                                       mr.Decision, mr.Reason, witnessAnimation = mr.AnimationId, time = mr.Time, mr.Margin, mr.Converged, mr.Samples },
+                    });
+                    continue;
+                }
                 var r = MeshAnchor.TestPlaced(surf.Soup!, surf.Tags, b.Pos, b.Rot, b.Scale, at, body, ex);
                 if (r.Decision == "undecided") undecided++; else decided++;
                 results.Add(new

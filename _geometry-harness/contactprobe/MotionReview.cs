@@ -55,6 +55,18 @@ static class MotionReview
             return m;
         }
 
+        readonly Dictionary<string, (MotionModel Model, PathTubeResult Tube)> paths = new();
+        /// <summary>Lane 3b, gap d: the model read with the path rule (path-driven nodes left to the tube) and its model-space tube.</summary>
+        public (MotionModel Model, PathTubeResult Tube) Path(string formKey, byte[] bytes)
+        {
+            if (paths.TryGetValue(formKey, out var p)) return p;
+            var placement = FormKey.TryFactory(formKey, out var key) ? MotionPlacements.Of(index, key) : null;
+            var m = NifMotion.Read(bytes, Read, placement, new MotionReadOptions(PathHull: true));
+            p = (m, NifMotion.PathTube(bytes, m, Read));
+            paths[formKey] = p;
+            return p;
+        }
+
         public SweptRegion Region(string formKey, byte[] bytes, VolumeGeometry g)
         {
             if (regions.TryGetValue((formKey, g), out var r)) return r;
@@ -79,6 +91,53 @@ static class MotionReview
         if (!movA && !movB && !refA && !refB) return null;
         object Refuse(string member, string why) => new { geometry = gname, status = "refused", reason = $"{member}: live pose: {why}",
                                                           motion = new { mode = cache.Options.Mode, policy = Policy, member, refusal = why } };
+        // lane 3b, gap d: a member refused only for a NiPathInterpolator is measured as a tube around its path (swept mode)
+        static bool PathRefusal(MotionModel m) => m.Status == "refused" && (m.Reason ?? "").Contains("NiPathInterpolator", StringComparison.Ordinal);
+        bool pathA = PathRefusal(ma), pathB = PathRefusal(mb);
+        if ((pathA || pathB) && cache.Options.Mode == "swept" && !(pathA && pathB))
+        {
+            bool otherStatic = pathA ? !movB && !refB : !movA && !refA;
+            string pm = pathA ? "A" : "B", po = pathA ? "B" : "A";
+            if (!otherStatic) return Refuse(pm, "a path-driven member against a member that moves too: not combined");
+            var (pBytes, pPose, pForm) = pathA ? (bytesA, poseA, formA) : (bytesB, poseB, formB);
+            var (sBytes, sPose) = pathA ? (bytesB, poseB) : (bytesA, poseA);
+            var (pModel, tube) = cache.Path(pForm, pBytes);
+            if (tube.Status != "built") return Refuse(pm, tube.Status == "none" ? "path rule found no path-driven node" : tube.Reason ?? "path tube refused");
+            var st = staticOf(sBytes);
+            if (st.Soup is null) return new { geometry = gname, status = "refused", reason = $"{po}: {st.Refusal}" };
+            var outside = NifMotion.OutsidePathSurface(pBytes, pModel, tube, g, cache.Read);
+            if (outside.Status == "refused" && outside.Reason == "no_solid_collision") return new { geometry = gname, status = "refused", reason = $"{pm}: no_solid_collision" };
+            if (outside.Status == "refused") return Refuse(pm, outside.Reason ?? "outside the path subtree refused");
+            var partnerW = SpatialOverlap.TransformSoup(st.Soup, sPose.Pos, sPose.Rot, sPose.Scale);
+            var placedTube = NifMotion.PlaceTube(tube, pPose.Pos, pPose.Rot, pPose.Scale);
+            var td = SweptGeometry.ContactTube(placedTube, partnerW, st.Tags);
+            if (td.Decision == "refused") return Refuse(pm, td.Reason ?? "path tube contact refused");
+            SurfaceContactResult? rest = null; Vec3 restFrame = new(0, 0, 0);
+            if (outside.Status == "measured")
+            {
+                (rest, restFrame) = pathA
+                    ? MeshSurface.MeasurePlacedFramed(outside.Soup!, outside.Tags, pPose.Pos, pPose.Rot, pPose.Scale, st.Soup, st.Tags, sPose.Pos, sPose.Rot, sPose.Scale, g)
+                    : MeshSurface.MeasurePlacedFramed(st.Soup, st.Tags, sPose.Pos, sPose.Rot, sPose.Scale, outside.Soup!, outside.Tags, pPose.Pos, pPose.Rot, pPose.Scale, g);
+            }
+            var restCross = rest is null ? null : MeshSurface.OpaqueCrossing(rest);
+            bool restBuried = rest is not null && ((rest.AInB?.Inside?.Lower ?? 0) > 0 || (rest.BInA?.Inside?.Lower ?? 0) > 0);
+            string decision = rest is not null && rest.Status != "measured" ? "cannot_tell"
+                            : rest is not null && (restCross is { Lower: > 0 } || restBuried) ? "witness"
+                            : td.Decision;
+            string? why = rest is not null && rest.Status != "measured" ? $"outside the path subtree: {rest.Status} {rest.Reason}"
+                        : decision == "witness" ? "a shape outside the path subtree crosses the partner at its stored pose" : td.Reason;
+            return ContactNotes.Attach(new
+            {
+                geometry = gname, status = "motion",
+                motion = new
+                {
+                    mode = "path-tube", policy = Policy, member = pm, decision, reason = why, tubeDecision = td.Decision, tubeReach = td.Decision == "cannot_tell" ? td.Width : (double?)null,
+                    tubePieces = placedTube.Pieces.Count, pathNodes = tube.PathNodes, labels = tube.Labels,
+                    label = "the path-driven subtree anywhere on its curve, any rotation: never or cannot_tell, never a witness",
+                    outside = outside.Status, outsideResult = rest,
+                },
+            }, ContactNotes.Options, ("pairFrame", ContactNotes.Frame(restFrame)));
+        }
         if (!movA && !movB)
             return refA ? Refuse("A", ma.Reason ?? "refused") : Refuse("B", mb.Reason ?? "refused");
         if (movA && movB)
@@ -89,14 +148,17 @@ static class MotionReview
             var ra = cache.Region(formA, bytesA, g); var rb = cache.Region(formB, bytesB, g);
             if (ra.Status != "built") return Refuse("A", ra.Reason ?? "swept region refused");
             if (rb.Status != "built") return Refuse("B", rb.Reason ?? "swept region refused");
-            var pa = SweptGeometry.Place(ra, poseA.Pos, poseA.Rot, poseA.Scale); var pb = SweptGeometry.Place(rb, poseB.Pos, poseB.Rot, poseB.Scale);
-            var ha = SweptGeometry.HeldSoups(bytesA, ma, g, poseA.Pos, poseA.Rot, poseA.Scale, cache.Read);
-            var hb = SweptGeometry.HeldSoups(bytesB, mb, g, poseB.Pos, poseB.Rot, poseB.Scale, cache.Read);
+            // lane 3b: a pair whose world placement collapses a triangle is measured in B's frame (PairFrame)
+            var fo = PairFrame.Origin(ra.Samples[0].Soup, poseA.Pos, poseA.Rot, poseA.Scale, rb.Samples[0].Soup, poseB.Pos, poseB.Rot, poseB.Scale);
+            var qa = PairFrame.Shift(poseA.Pos, fo); var qb = PairFrame.Shift(poseB.Pos, fo);
+            var pa = SweptGeometry.Place(ra, qa, poseA.Rot, poseA.Scale); var pb = SweptGeometry.Place(rb, qb, poseB.Rot, poseB.Scale);
+            var ha = SweptGeometry.HeldSoups(bytesA, ma, g, qa, poseA.Rot, poseA.Scale, cache.Read);
+            var hb = SweptGeometry.HeldSoups(bytesB, mb, g, qb, poseB.Rot, poseB.Scale, cache.Read);
             string? coupling = FormKey.TryFactory(formA, out var ka) && FormKey.TryFactory(formB, out var kb) ? MotionPlacements.Coupling(cache.Index, ka, kb) : null;
             var two = SweptGeometry.ContactBoth(pa, ha, pb, hb, coupling, cache.Options.Sweep);
             if (two.Decision == "refused")
                 return new { geometry = gname, status = "refused", reason = two.Reason, motion = new { mode = "swept", policy = Policy, member = "both", refusal = two.Reason } };
-            return new
+            return ContactNotes.Attach(new
             {
                 geometry = gname, status = "motion",
                 motion = new
@@ -107,7 +169,7 @@ static class MotionReview
                     labelA = Labels(pa.Animations), labelB = Labels(pb.Animations), pairsExamined = two.PairsExamined,
                     volume = (object?)null, volumeReason = volume ? "not measured: two moving members" : null,
                 },
-            };
+            }, ContactNotes.Options, ("pairFrame", ContactNotes.Frame(fo)));
         }
         if (refA || refB) return refA ? Refuse("A", ma.Reason ?? "refused") : Refuse("B", mb.Reason ?? "refused");
         string member = movA ? "A" : "B";
@@ -115,35 +177,46 @@ static class MotionReview
         var (oBytes, oPose) = movA ? (bytesB, poseB) : (bytesA, poseA);
         var other = staticOf(oBytes);
         if (other.Soup is null) return new { geometry = gname, status = "refused", reason = $"{(movA ? "B" : "A")}: {other.Refusal}" };
-        var partner = SpatialOverlap.TransformSoup(other.Soup, oPose.Pos, oPose.Rot, oPose.Scale);
         if (cache.Options.Mode == "pose")
         {
             var p = NifMotion.Pose(mBytes, mModel, cache.Options.PoseName!, g, cache.Read);
             if (p.Status != "posed") return Refuse(member, p.Reason ?? "pose refused");
-            var posed = SpatialOverlap.TransformSoup(p.Soup!, mPose.Pos, mPose.Rot, mPose.Scale);
+            // lane 3b: a pair whose world placement collapses a triangle is measured in the static member's frame (PairFrame)
+            var po = PairFrame.Origin(p.Soup!, mPose.Pos, mPose.Rot, mPose.Scale, other.Soup, oPose.Pos, oPose.Rot, oPose.Scale);
+            var posePartner = SpatialOverlap.TransformSoup(other.Soup, PairFrame.Shift(oPose.Pos, po), oPose.Rot, oPose.Scale);
+            var posed = SpatialOverlap.TransformSoup(p.Soup!, PairFrame.Shift(mPose.Pos, po), mPose.Rot, mPose.Scale);
             // found defect (follow-ups E3): "rest" names no pose; the rest pose is the one flagged Rest, as NifMotion.Pose resolves it
             var pose = cache.Options.PoseName == "rest" ? mModel.Poses.FirstOrDefault(x => x.Rest) : mModel.Poses.FirstOrDefault(x => x.Name == cache.Options.PoseName);
             var motion = new { mode = "pose", policy = Policy, member, pose = cache.Options.PoseName, animation = p.AnimationId, time = p.Time, label = pose?.Label };
             if (volume)
             {
-                var r = MeshVolume.Measure(posed, partner, g);
-                return new { geometry = gname, status = r.Status, reason = r.Reason, intersection = r.Intersection, aInB = r.AInB, bInA = r.BInA, converged = r.Converged, policy = r.PolicyVersion, motion };
+                var r = MeshVolume.Measure(posed, posePartner, g);
+                return ContactNotes.Attach(new { geometry = gname, status = r.Status, reason = r.Reason, intersection = r.Intersection, aInB = r.AInB, bInA = r.BInA, converged = r.Converged, policy = r.PolicyVersion, motion },
+                                           ContactNotes.Options, ("pairFrame", ContactNotes.Frame(po)));
             }
-            var s = movA ? MeshSurface.Measure(posed, p.Tags, partner, other.Tags, g) : MeshSurface.Measure(partner, other.Tags, posed, p.Tags, g);
-            return new { geometry = gname, result = s, motion };
+            var s = movA ? MeshSurface.Measure(posed, p.Tags, posePartner, other.Tags, g) : MeshSurface.Measure(posePartner, other.Tags, posed, p.Tags, g);
+            if (!PairFrame.IsWorld(po))
+            {
+                double[]? Back(double[]? v) => v is null ? null : [v[0] + po.X, v[1] + po.Y, v[2] + po.Z];
+                s = s with { EnvelopeMin = Back(s.EnvelopeMin), EnvelopeMax = Back(s.EnvelopeMax) };
+            }
+            return ContactNotes.Attach(new { geometry = gname, result = s, motion }, ContactNotes.Options, ("pairFrame", ContactNotes.Frame(po)));
         }
         var region = cache.Region(mForm, mBytes, g);
         if (region.Status != "built" && (region.Reason ?? "").EndsWith("no_solid_collision", StringComparison.Ordinal))
             return new { geometry = gname, status = "refused", reason = $"{member}: no_solid_collision" };   // not a pose question
         if (region.Status != "built") return Refuse(member, region.Reason ?? "swept region refused");
-        var placed = SweptGeometry.Place(region, mPose.Pos, mPose.Rot, mPose.Scale);
+        // lane 3b: a pair whose world placement collapses a triangle is measured in the static member's frame (PairFrame)
+        var so = PairFrame.Origin(region.Samples[0].Soup, mPose.Pos, mPose.Rot, mPose.Scale, other.Soup, oPose.Pos, oPose.Rot, oPose.Scale);
+        var partner = SpatialOverlap.TransformSoup(other.Soup, PairFrame.Shift(oPose.Pos, so), oPose.Rot, oPose.Scale);
+        var placed = SweptGeometry.Place(region, PairFrame.Shift(mPose.Pos, so), mPose.Rot, mPose.Scale);
         bool partnerSolid = MeshVolume.Solid(partner).Status == "solid";
         var d = SweptGeometry.Contact(placed, partner, other.Tags, partnerSolid, cache.Options.Sweep);
         if (d.Decision == "refused")
             return new { geometry = gname, status = "refused", reason = d.Reason!.StartsWith("partner: ", StringComparison.Ordinal) ? $"{(movA ? "B" : "A")}: {d.Reason[9..]}" : $"{member}: {d.Reason}",
                          motion = new { mode = "swept", policy = Policy, member, refusal = d.Reason } };
         SweptVolume? v = volume && partnerSolid && placed.Solid ? SweptGeometry.Volume(placed, partner) : null;
-        return new
+        return ContactNotes.Attach(new
         {
             geometry = gname, status = "motion",
             motion = new
@@ -155,6 +228,6 @@ static class MotionReview
                 samples = placed.Samples.Count, partnerSolid,
                 volume = v is null ? null : new { v.Status, v.Reason, intersection = v.WithPartner, v.Converged },
             },
-        };
+        }, ContactNotes.Options, ("pairFrame", ContactNotes.Frame(so)));
     }
 }

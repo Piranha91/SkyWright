@@ -103,11 +103,11 @@ static class OverlapVolumeReview
                     continue;
                 }
                 var pa = a.Pose!.Value; var pb = b.Pose!.Value;
-                var r = MeshVolume.MeasurePlaced(sa.Soup!, pa.Pos, pa.Rot, pa.Scale, sb.Soup!, pb.Pos, pb.Rot, pb.Scale, g);
+                var (r, frame) = MeshVolume.MeasurePlacedFramed(sa.Soup!, pa.Pos, pa.Rot, pa.Scale, sb.Soup!, pb.Pos, pb.Rot, pb.Scale, g);
                 if (r.Status == "measured") measured++; else refused++;
-                Add(new { geometry = gname, status = r.Status, reason = r.Reason, volumeA = r.VolumeA, volumeB = r.VolumeB,
+                Add(ContactNotes.Attach(new { geometry = gname, status = r.Status, reason = r.Reason, volumeA = r.VolumeA, volumeB = r.VolumeB,
                                 intersection = r.Intersection, aInB = r.AInB, bInA = r.BInA, converged = r.Converged, cells = r.Cells, depth = r.Depth,
-                                policy = r.PolicyVersion });
+                                policy = r.PolicyVersion }, json, ("pairFrame", ContactNotes.Frame(frame))));
             }
             records.Add(p.ADz is null && p.BDz is null
                 ? new { pairKey = p.PairKey, a = p.A, b = p.B, baseA = a.Base, baseB = b.Base, meshA = a.Mesh, meshB = b.Mesh, geometries = geoms }
