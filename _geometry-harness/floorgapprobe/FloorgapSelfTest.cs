@@ -56,6 +56,29 @@ static class FloorgapSelfTest
         t.CheckFloor("G2", walk.RefsByWorld.GetValueOrDefault(Fx.W), walk.LandByWorld.GetValueOrDefault(Fx.W),
                      MovedRefSelfTest.UnreadableLandOf(walk, Fx.W), new[] { (0, 0), (1, 0), (5, 0), (-1, 0), (2, 0), (1, 1) });
 
+        // G4 (reach in a grid cell): a reference whose last sighting is in its worldspace's PERSISTENT cell stands in the grid
+        // cell its position falls in, and reach looks it up there (PersistentStandingIn). Worked from the fixture table: M5's
+        // last sighting is A's persistent T at (1400,1400), grid (0,0) of W, so it stands in E00; Q1 is persistent in T at
+        // grid (5,0), so it does not; M7 stands at (700,700) but is filed in E50's cell, not a persistent cell, so it does not;
+        // W2E00 is grid (0,0) of the OTHER worldspace, so M5 does not stand in it. Called by reflection so this check builds
+        // (and fails) on a walk without the member.
+        string Standing(FloorgapWalk w, CellPlacements? cell)
+        {
+            var mi = typeof(FloorgapWalk).GetMethod("PersistentStandingIn", new[] { typeof(CellPlacements) });
+            if (mi is null) return "no PersistentStandingIn(CellPlacements) member";
+            if (cell is null) return "no merged cell";
+            if (mi.Invoke(w, new object[] { cell }) is not IEnumerable<KeyValuePair<FormKey, PlacedRef>> got) return "member returned no reference map";
+            return string.Join(";", got.OrderBy(kv => kv.Key.ToString(), StringComparer.Ordinal)
+                .Select(kv => $"{(kv.Key == Fx.M5 ? "M5" : kv.Key == Fx.Q1 ? "Q1" : kv.Key == Fx.M7 ? "M7" : kv.Key.ToString())} at {kv.Value.Position.X:0},{kv.Value.Position.Y:0}"));
+        }
+        var inE00 = Standing(walk, walk.MergedMeta);
+        t.Check("G4  persistent-cell references standing in E00 by position: M5 at 1400,1400 (not Q1, grid 5,0; not M7, filed in E50)",
+                inE00 == "M5 at 1400,1400", inE00);
+        var w2 = new FloorgapWalk(winning: true, wantCell: Fx.W2E00.ToString());
+        foreach (var path in t.Paths) { var m2 = w2.Open(path)!; using (m2 as IDisposable) w2.Plugin(m2, path, _ => { }); }
+        var inW2 = Standing(w2, w2.MergedMeta);
+        t.Check("G4-W persistent-cell references standing in W2E00 (the other worldspace's grid 0,0): none", inW2 == "", inW2);
+
         t.CheckRefusesUnreadable("P1 ", p => walk.Open(p));
         t.CheckRefusesMidWalk("P1-mid", p => { var w2 = new FloorgapWalk(true, Fx.E00.ToString()); var m = w2.Open(p)!; using (m as IDisposable) w2.Plugin(m, p, _ => { }); });
     });
