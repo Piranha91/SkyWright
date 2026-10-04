@@ -482,6 +482,29 @@ static partial class MotionProof
             var r = PhysicsReach.Drop(body, SpatialOverlap.SoupBounds(body), 4, sup, RRLayers);
             return (r.Status == "touching" && r.SupportId == "mesh", ShowDrop(r));
         });
+        // LI-K21 the shell-crossing guard reads only drops with nothing pushed off: the free item [-5,5]^3 clips a wall's shell sideways
+        // (shell x 4.5..28.5, z -62..42, as LI-K16b) whose core soup is given as a plate under the item at z -10, over a floor 100 u down.
+        // The item is pushed off the wall and falls 95 to the floor; the reduced reading (core on core) is 5. Pushed off, so no
+        // shell-crossing label: the pushed-off label instead. Rejects the guard firing on a drop lengthened by a push-off.
+        Case(check, "loose-items LI-K21: a pushed-off drop carries the pushed-off label, not the shell-crossing label", () =>
+        {
+            var sup = new[] { new DropSupport("wall", 1, true, false, ClosedBox(4.5f, -52, -62, 28.5f, 52, 42), CoreWorld: Plate(500, -10)),
+                              new DropSupport("floor", 1, true, false, Plate(500, -100), CoreWorld: Plate(500, -100)) };
+            var r = MeshReach.OfModel(FreeItem(), Origin, Origin, 1f, null, RulesOn(physics: true, baseType: "MISC", supports: sup));
+            bool shell = r.Labels.Any(x => x.StartsWith(PhysicsReach.ShellCrossingLabel)), pushed = r.Labels.Contains(PhysicsReach.PushedOffLabel);
+            return (!shell && pushed && r.Drop is { Status: "dropped", SupportId: "floor" } d && NearA7(d.Distance, 95, 1e-3), ShowRR(r));
+        });
+        // LI-K22 a downward push through a thin mesh slab is kept as read and flagged: a thin body (10 x 10 x 0.1, z -0.3..-0.2) lies in
+        // the lower half of a mesh plate's slab (radius 0.35, z -0.35..0.35). Out up is 0.65, out down 0.15: pushed down, it falls
+        // 99.7 to the floor below, flagged pushed off and down through a slab. Rejects the flag missing (the label would not be added).
+        Case(check, "loose-items LI-K22: a downward push through a thin mesh slab - dropped 99.7, flagged pushed off and down through a slab", () =>
+        {
+            var sup = PhysicsReach.Supports("mesh", SupportMeshPlate(50f, 0.35f), new Vec3(0, 0, 0), new Vec3(0, 0, 0), 1f, movableBase: false).Append(floor100).ToArray();
+            var body = ClosedBox(-5, -5, -0.3f, 5, 5, -0.2f);
+            var r = PhysicsReach.Drop(body, SpatialOverlap.SoupBounds(body), 4, sup, RRLayers);
+            return (r.Status == "dropped" && r.SupportId == "floor" && NearA7(r.Distance, 99.7, 1e-3) && r.PushedOff && r.DownThroughSlab,
+                    ShowDrop(r) + $" pushedOff {r.PushedOff} downThroughSlab {r.DownThroughSlab}");
+        });
         // LI-K10: the geometry reader every other consumer uses (route, floors, contact, overlap's collision column, state) keeps the
         // core: no radius of any kind (their calibrations; contact's in-game acceptance got worse with it, RESULT). Measured in Havok
         // units (havokUnitScale 1). Rejects the radius leaking into NifGeometry by default.
