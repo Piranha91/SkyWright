@@ -131,5 +131,80 @@ static class ContactEvidenceProof
               invalid.Status == "unknown" && invalid.Value is null && invalid.PartialValue is null
               && !string.IsNullOrWhiteSpace(invalid.Reason),
               $"status={invalid.Status} reason={invalid.Reason} partial={invalid.PartialValue is not null} final={invalid.Value is not null}");
+
+        RunContactShell(check);
+    }
+
+    /// <summary>CS-D: the decoder records each triangle's Havok radius on the core soup (contact shell recalibration, 2026-10-03) —
+    /// box, compressed mesh and convex vertices, in Skyrim units, carried through the body cut; and a decode that already GREW the
+    /// shape records 0, so no reader can count a radius twice. Expected radii are the fixtures' own (stated in Skyrim units).</summary>
+    static void RunContactShell(Action<string, bool, string> check)
+    {
+        static (bool Ok, string Detail) Radii(byte[] nif, float want)
+        {
+            var m = NifGeometry.Measure(nif, includeTriangles: true).Model;
+            var soup = m?.CollisionSoupFor(b => b.Solid);
+            var r = soup?.TriangleRadii;
+            bool ok = soup is { TriangleCount: > 0 } && r is not null && r.Length == soup.TriangleCount && r.All(x => MathF.Abs(x - want) <= 1e-3f);
+            return (ok, $"triangles={soup?.TriangleCount} radii={(r is null ? "null" : string.Join(",", r.Select(x => x.ToString("0.###")).Distinct()))}");
+        }
+        static (bool Ok, string Detail) GrownZero(byte[] nif)
+        {
+            var f = new NiflySharp.NifFile();
+            using var ms = new MemoryStream(nif, writable: false);
+            if (f.Load(ms) != 0) return (false, "fixture did not parse");
+            var bodies = HavokCollision.Decode(f, includeTriangles: true, convexRadius: true).Bodies.Where(b => b.Solid && b.Indices.Length > 0).ToList();
+            bool ok = bodies.Count > 0 && bodies.All(b => b.TriangleRadii is { } r && r.Length == b.Indices.Length / 3 && r.All(x => x == 0f));
+            return (ok, string.Join("; ", bodies.Select(b => $"{b.Indices.Length / 3} tris radii={(b.TriangleRadii is null ? "null" : string.Join(",", b.TriangleRadii.Distinct()))}")));
+        }
+        foreach (var (name, nif, want) in new[]
+        {
+            ("box shape, radius 2", MotionProof.CsSupportBox(50, 10, 2f), 2f),
+            ("compressed-mesh plate, radius 0.35", MotionProof.CsSupportMeshPlate(50, 0.35f), 0.35f),
+            ("convex vertices, radius 3.5", MotionProof.CsFreeItemRadius(3.5f), 3.5f),
+        })
+        {
+            var (ok, detail) = Radii(nif, want);
+            check($"CS-D core decode records the Havok radius per triangle: {name}", ok, detail);
+            var (gz, gd) = GrownZero(nif);
+            check($"CS-D grown decode records 0 (no double count): {name}", gz, gd);
+        }
+
+        // CS-Kscale: a placed reference's scale scales its radius with its geometry (the contact pass's broad-phase pad reads it)
+        {
+            var model = new TriangleSoup(new[] { new Vector3(0, 0, 0), new Vector3(1, 0, 0), new Vector3(0, 1, 0) }, new[] { 0, 1, 2 }, null, new[] { 1.5f });
+            var placed = SpatialOverlap.TransformSoup(model, new Vec3(0, 0, 0), new Vec3(0, 0, 0), 2f);
+            check("CS-Kscale reference scale 2 -> radius 1.5 reads 3.0",
+                  placed.TriangleRadii is { Length: 1 } pr && MathF.Abs(pr[0] - 3f) <= 1e-4f,
+                  $"radii={(placed.TriangleRadii is null ? "null" : string.Join(",", placed.TriangleRadii))}");
+        }
+
+        // CS-S: the gap between two shapes read with their radii grown (contactprobe --radius on reads the gap from these soups).
+        // A box item (half 8, radius 3.5) over a box support (top at z 32, radius 0.35) at core gap g: the grown faces are the core
+        // faces pushed out by each radius, so the shell gap is exactly max(0, g - 3.85) — pinned to 0.05 u, never "about 0" (Gate A
+        // review finding 2). The core surface distance stays g (guard; the facing gap is capped at the 8 u band, so the core check
+        // reads the plain distance).
+        static TriangleSoup Solid(byte[] nif, bool grown) =>
+            NifGeometry.Measure(nif, includeTriangles: true, collisionRadius: grown).Model!.CollisionSoupFor(b => b.Solid)!;
+        var support = MotionProof.CsSupportBox(100, 32, 0.35f);
+        var item = MotionProof.CsFreeItemBoxRadius(8, 3.5f);
+        foreach (var (id, g, want) in new[] { ("CS-S1", 3.85f, 0f), ("CS-S1", 5.85f, 2f), ("CS-S2", 9.85f, 6f) })
+        {
+            var at = new Vec3(0, 0, 32 + g + 8);
+            var shell = SpatialOverlap.Contact(SpatialOverlap.TransformSoup(Solid(item, true), at, new Vec3(0, 0, 0), 1f), Solid(support, true), 128f, 8f);
+            var core = SpatialOverlap.Contact(SpatialOverlap.TransformSoup(Solid(item, false), at, new Vec3(0, 0, 0), 1f), Solid(support, false), 128f, 8f);
+            check($"{id} box item over box support, core gap {g}, radii 3.5 + 0.35 -> grown gap {want}",
+                  MathF.Abs(shell.FacingDistance - want) <= 0.05f && MathF.Abs(core.Distance - g) <= 0.05f,
+                  $"grown facing={shell.FacingDistance:0.###} core distance={core.Distance:0.###}");
+        }
+        // CS-S3: a convex item (box hull half 5, convex radius 3.5) over a compressed-mesh plate (z 0, mesh radius 0.35), core gap 5.85
+        {
+            var convex = MotionProof.CsFreeItemRadius(3.5f);
+            var plate = MotionProof.CsSupportMeshPlate(100, 0.35f);
+            var at = new Vec3(0, 0, 5.85f + 5);
+            var shell = SpatialOverlap.Contact(SpatialOverlap.TransformSoup(Solid(convex, true), at, new Vec3(0, 0, 0), 1f), Solid(plate, true), 128f, 8f);
+            check("CS-S3 convex item over a compressed-mesh plate, core gap 5.85, radii 3.5 + 0.35 -> grown gap 2.00",
+                  MathF.Abs(shell.FacingDistance - 2f) <= 0.05f, $"grown facing={shell.FacingDistance:0.###}");
+        }
     }
 }

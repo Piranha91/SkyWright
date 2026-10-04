@@ -47,7 +47,8 @@ namespace HarnessShared;
 /// <paramref name="SolidBodies"/> carries each solid body's layer and motion system for the movable split;
 /// <paramref name="PhantomOnly"/> says the mesh has collision but none of it is solid (a trigger volume).</summary>
 public sealed record RefGeometry(Aabb Box, TriangleSoup HostSoup, TriangleSoup DepSoup, char HostSrc, char DepSrc, bool HostUsable,
-                                 IReadOnlyList<(string Layer, string MotionSystem)> SolidBodies, bool PhantomOnly)
+                                 IReadOnlyList<(string Layer, string MotionSystem)> SolidBodies, bool PhantomOnly,
+                                 TriangleSoup? HostShell = null, TriangleSoup? DepShell = null)
 {
     public bool HasGeometry => !Box.IsEmpty && (HostSrc != '-' || DepSrc != '-');
     public bool CanHost => HasGeometry && HostUsable && HostSoup.TriangleCount > 0;
@@ -192,6 +193,10 @@ public sealed class ContactIndex
     public float SupportCos { get; init; } = 0.866f;
     public float AttachCos { get; init; } = 0.5f;
     public float MoveThreshold { get; init; } = PlacementHistory.MoveThreshold;
+    /// <summary>Read the Havok radius for the gap the rule reads (contactprobe <c>--radius on</c>): the gap between the soups with every
+    /// radius grown (<see cref="RefGeometry.HostShell"/> / <see cref="RefGeometry.DepShell"/>); normal, depth and extent stay the core's.
+    /// SKELETON (Gate B red): not read yet.</summary>
+    public bool ReadRadius { get; init; }
 
     /// <param name="geomOf">geometry for a base record — the driver resolves meshes through the VFS, the proof builds
     /// box soups from OBND. Null (or Src '-') when there is none; cached here per base.</param>

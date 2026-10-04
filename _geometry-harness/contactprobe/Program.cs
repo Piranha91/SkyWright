@@ -75,6 +75,7 @@ using HousecarlCore.Progress;
 //   --state SPEC    the world-state arm (roadmap 4.11): <switch>[,<switch>…], stage:<quest>:<n> (with --switch-map), or
 //                   baseline — the runtime enable state every arm reads (R1) has those switches flipped, in the winner arm
 //                   and in the arm without the mover alike. Without it, the load-time state, as every run before 2026-09-04.
+//   --radius on|off the gap the rule reads is between the shapes grown by their Havok radii; normal and depth stay the core's (default on)
 //   --bos on|off    apply the Base Object Swapper layer (*_SWAP.ini) so every ref is judged by the base the game loads
 //                   (default on; _shared/BosHook.cs); off = the record bases
 //   --base EMIT     re-measure every record of that emit's rows under THIS order and carry the results in the emit as
@@ -129,6 +130,7 @@ string? jsonPath = null, emitPath = null, basePath = null, overlapJson = null, l
 bool allRows = false, absolute = false, vanillaAssets = false, interiorOnly = false, contactEvidence = false;
 HashSet<string>? only = null;
 bool bosOn = true;
+bool radiusOn = true;   // --radius: read the Havok radius for the contact gap (default on; off = the core reading as before)
 var enablePlugins = new List<string>();
 var disablePlugins = new List<string>();
 string? orderFile = null;
@@ -193,6 +195,7 @@ try
         else if (flag == "--enable") { enablePlugins.Add(NeedValue(i, flag)); i++; }
         else if (flag == "--disable") { disablePlugins.Add(NeedValue(i, flag)); i++; }
         else if (flag == "--bos") { bosOn = BosHook.ParseFlag(NeedValue(i, flag)) ?? throw new ArgumentException("--bos takes on|off"); i++; }
+        else if (flag == "--radius") { radiusOn = NeedValue(i, flag) switch { "on" => true, "off" => false, _ => throw new ArgumentException("--radius takes on|off") }; i++; }
         else if (flag == "--state") { stateSpec = NeedValue(i, flag); i++; }
         else if (flag == "--force-enable") { forceEnable.AddRange(NeedValue(i, flag).Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)); i++; }
         // --flags is refused rather than added (Q27): contactprobe has resolved the enable chain since R1 (2026-09-03).
@@ -394,7 +397,7 @@ RefGeometry? GeomOf(FormKey baseKey)
     }
     return g;
 }
-cidx = new ContactIndex(GeomOf) { Epsilon = eps, Reach = reach, NearBand = 2f * eps, BoxBand = 2f * eps + 2f };
+cidx = new ContactIndex(GeomOf) { Epsilon = eps, Reach = reach, NearBand = 2f * eps, BoxBand = 2f * eps + 2f, ReadRadius = radiusOn };
 var idx = cidx.Index;
 // --bos on (default): the Base Object Swapper reader replaces each reference's record base with the base the
 // game loads, and a moving override becomes a placement step under a pseudo-plugin after the last real one
