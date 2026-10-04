@@ -53,6 +53,10 @@ public sealed record RefGeometry(Aabb Box, TriangleSoup HostSoup, TriangleSoup D
     public bool HasGeometry => !Box.IsEmpty && (HostSrc != '-' || DepSrc != '-');
     public bool CanHost => HasGeometry && HostUsable && HostSoup.TriangleCount > 0;
     public bool CanDepend => HasGeometry && DepSoup.TriangleCount > 0;
+    /// <summary>The largest per-triangle Havok radius on each role's core soup (model units; 0 when none recorded) — how far the grown
+    /// surface can reach past the core, for the broad phase.</summary>
+    public float HostRadiusMax { get; } = HostSoup.TriangleRadii is { Length: > 0 } hr ? hr.Max() : 0f;
+    public float DepRadiusMax { get; } = DepSoup.TriangleRadii is { Length: > 0 } dr ? dr.Max() : 0f;
 }
 
 /// <summary>Why a host's placement changed under its last plugin: moved within its space, relocated to another, or
@@ -78,7 +82,12 @@ public sealed record MovedHost(FormKey Key, Snap Previous, int PrevIndex, Snap W
 /// face, 2026-09-03); the verdict never reads it.</summary>
 public sealed record ArmContact(SoupContact Contact, FormKey Against, char DepSrc, char HostSrc,
                                 float AgainstExtent = float.NaN, float AgainstMaxDim = float.NaN,
-                                float RawDistance = float.NaN, FormKey RawAgainst = default);
+                                float RawDistance = float.NaN, FormKey RawAgainst = default)
+{
+    /// <summary>The facing gap between the CORE surfaces, kept beside <see cref="SoupContact.FacingDistance"/> when that is read with
+    /// the Havok radius (<see cref="ContactIndex.ReadRadius"/>), so a row can say what the radius changed; equal to it otherwise.</summary>
+    public float CoreGap { get; init; } = float.NaN;
+}
 
 /// <summary>One (dependent, moved host) pair, judged. <paramref name="DepAuthor"/> is the plugin that set the dependent's
 /// placement in the arm without the mover; <paramref name="Seen"/> says that plugin is in the mover's master closure
@@ -195,8 +204,55 @@ public sealed class ContactIndex
     public float MoveThreshold { get; init; } = PlacementHistory.MoveThreshold;
     /// <summary>Read the Havok radius for the gap the rule reads (contactprobe <c>--radius on</c>): the gap between the soups with every
     /// radius grown (<see cref="RefGeometry.HostShell"/> / <see cref="RefGeometry.DepShell"/>); normal, depth and extent stay the core's.
-    /// SKELETON (Gate B red): not read yet.</summary>
+    /// The pair's broad phase widens by both shapes' largest radius (x scale) so a pair only the grown surfaces bring together is tested.
+    /// Chosen over reading everything on the grown soups (whose summed normal tilts and whose depth reads crossings at open faces) and
+    /// over a lower ε, by the in-game placement-contact acceptance set; ε is unchanged.</summary>
     public bool ReadRadius { get; init; }
+    float _maxHostRadiusW;                                                     // the largest host radius x scale hashed so far
+    float HostPadW(FormKey baseKey, Snap s)
+    {
+        if (!ReadRadius) return 0f;
+        float r = GeomOf(baseKey) is { } g ? g.HostRadiusMax * s.Scale : 0f;
+        if (r > _maxHostRadiusW) _maxHostRadiusW = r;
+        return r;
+    }
+    float DepPadW(FormKey baseKey, Snap s) => ReadRadius && GeomOf(baseKey) is { } g ? g.DepRadiusMax * s.Scale : 0f;
+    readonly Dictionary<(FormKey Key, int Snap), TriangleGrid?> _shellGrids = new();
+    readonly Dictionary<(FormKey Key, int Snap), TriangleSoup?> _shellDeps = new();
+
+    /// <summary>One pair measured: the core contact (normal, penetration, enclosed depth — the rule's reading), and with
+    /// <see cref="ReadRadius"/> its facing gap replaced by the gap between the grown soups. The core gap rides beside it.</summary>
+    (SoupContact Contact, float CoreGap) Measure(TriangleSoup soup, TriangleGrid grid, FormKey depKey, int depSnap, FormKey depBase, Snap depS,
+                                                 FormKey hostKey, int hostSnap, FormKey hostBase, Snap hostS)
+    {
+        var c = SpatialOverlap.Contact(soup, grid, Reach, NearBand);
+        if (!ReadRadius) return (c, c.FacingDistance);
+        var ss = ShellDep(depKey, depSnap, depBase, depS); var sg = ShellGrid(hostKey, hostSnap, hostBase, hostS);
+        var cs = ss is not null && sg is not null ? SpatialOverlap.Contact(ss, sg, Reach, NearBand) : c;
+        return (c with { FacingDistance = cs.FacingDistance }, c.FacingDistance);
+    }
+
+    TriangleGrid? ShellGrid(FormKey key, int snapIndex, FormKey baseKey, Snap s)
+    {
+        if (_shellGrids.TryGetValue((key, snapIndex), out var g)) return g;
+        var geom = GeomOf(baseKey);
+        TriangleGrid? grid = null;
+        if (geom is { CanHost: true })
+            grid = TriangleGrid.Build(SpatialOverlap.TransformSoup(geom.HostShell ?? geom.HostSoup, s.Pos, s.Rot, s.Scale));
+        if (_shellGrids.Count > 4096) _shellGrids.Clear();
+        return _shellGrids[(key, snapIndex)] = grid;
+    }
+
+    TriangleSoup? ShellDep(FormKey key, int snapIndex, FormKey baseKey, Snap s)
+    {
+        if (_shellDeps.TryGetValue((key, snapIndex), out var so)) return so;
+        var geom = GeomOf(baseKey);
+        TriangleSoup? soup = null;
+        if (geom is { CanDepend: true })
+            soup = SpatialOverlap.TransformSoup(geom.DepShell ?? geom.DepSoup, s.Pos, s.Rot, s.Scale);
+        if (_shellDeps.Count > 8192) _shellDeps.Clear();
+        return _shellDeps[(key, snapIndex)] = soup;
+    }
 
     /// <param name="geomOf">geometry for a base record — the driver resolves meshes through the VFS, the proof builds
     /// box soups from OBND. Null (or Src '-') when there is none; cached here per base.</param>
@@ -514,7 +570,7 @@ public sealed class ContactIndex
             var box = WorldBox(b, s);
             if (box.IsEmpty) { if (tw) Te(key, W, TraceOutcome.Never, "NoWinnerBox"); continue; }
             if (tw) Te(key, W, TraceOutcome.Entered, "Hashed", detail: "winner arm");
-            h.Add(s.Space, box, key);
+            h.Add(s.Space, box, key); HostPadW(b, s);
         }
         return h;
     }
@@ -555,7 +611,7 @@ public sealed class ContactIndex
             var box = WorldBox(b, s);
             if (box.IsEmpty) { if (tw) Te(key, W, TraceOutcome.Never, "NoWinnerBox", detail: Arm); continue; }
             if (tw) Te(key, W, TraceOutcome.Entered, "Hashed", detail: Arm);
-            h.Add(s.Space, box, key);
+            h.Add(s.Space, box, key); HostPadW(b, s);
             snapIndex[key] = i;
         }
         return h;
@@ -585,20 +641,22 @@ public sealed class ContactIndex
         var depGeom = GeomOf(depBase)!;
         ArmContact? best = null;
         float bestRaw = float.PositiveInfinity; FormKey rawAgainst = default;
-        foreach (var (nKey, nBox, _) in hash.Near(depSnap.Space, depBox, BoxBand))
+        float depPad = DepPadW(depBase, depSnap);
+        foreach (var (nKey, nBox, _) in hash.Near(depSnap.Space, depBox, BoxBand + depPad + (ReadRadius ? _maxHostRadiusW : 0f)))
         {
             if (nKey == depKey) continue;
             if (placementOf(nKey) is not { } np) continue;
             var nBase = baseOf(nKey, np.Snap.Plugin);
+            if (ReadRadius && SpatialOverlap.BoxDistance(depBox, nBox) > BoxBand + depPad + HostPadW(nBase, np.Snap)) continue;
             var grid = HostGrid(nKey, np.SnapIndex, nBase, np.Snap);
             if (grid is null) continue;
             neighboursTested++;
-            var c = SpatialOverlap.Contact(soup, grid, Reach, NearBand);
+            var (c, coreGap) = Measure(soup, grid, depKey, depSnapIndex, depBase, depSnap, nKey, np.SnapIndex, nBase, np.Snap);
             if (c.Distance < bestRaw) { bestRaw = c.Distance; rawAgainst = nKey; }
             if (best is not null && !Better(c, best.Contact)) continue;
             var hg = GeomOf(nBase)!;
             float extent = c.Normal.LengthSquared() > 1e-12f ? grid.ExtentAlong(Vector3.Normalize(c.Normal)) : MaxDim(nBox);
-            best = new ArmContact(c, nKey, depGeom.DepSrc, hg.HostSrc, extent, MaxDim(nBox));
+            best = new ArmContact(c, nKey, depGeom.DepSrc, hg.HostSrc, extent, MaxDim(nBox)) { CoreGap = coreGap };
         }
         return best is null ? null : best with { RawDistance = bestRaw, RawAgainst = rawAgainst };
     }
@@ -618,9 +676,9 @@ public sealed class ContactIndex
         var soup = DepSoup(depKey, depSnapIndex, depBase, depSnap);
         var grid = HostGrid(hostKey, hostSnapIndex, hostBase, hostSnap, anySurface);
         if (soup is null || grid is null) return null;
-        var c = SpatialOverlap.Contact(soup, grid, Reach, NearBand);
+        var (c, coreGap) = Measure(soup, grid, depKey, depSnapIndex, depBase, depSnap, hostKey, hostSnapIndex, hostBase, hostSnap);
         float extent = c.Normal.LengthSquared() > 1e-12f ? grid.ExtentAlong(Vector3.Normalize(c.Normal)) : float.NaN;
-        return new ArmContact(c, hostKey, GeomOf(depBase)!.DepSrc, GeomOf(hostBase)!.HostSrc, extent, RawDistance: c.Distance, RawAgainst: hostKey);
+        return new ArmContact(c, hostKey, GeomOf(depBase)!.DepSrc, GeomOf(hostBase)!.HostSrc, extent, RawDistance: c.Distance, RawAgainst: hostKey) { CoreGap = coreGap };
     }
 
     // ---- judge one host ------------------------------------------------------------------------------
@@ -664,7 +722,7 @@ public sealed class ContactIndex
             var depArmBox = WorldBox(depBase, depAuth);
             if (depArmBox.IsEmpty) depArmBox = depBox;
             float gap = SpatialOverlap.BoxDistance(depArmBox, hostBox);
-            if (gap > BoxBand) { skips.BoxesApart++; if (tw) Te(depKey, DR, TraceOutcome.SetAside, "BoxesApart", host.Key, Tv("gap", gap, "limit", BoxBand)); continue; }
+            if (gap > BoxBand + DepPadW(depBase, depAuth) + HostPadW(host.PrevBase, host.Previous)) { skips.BoxesApart++; if (tw) Te(depKey, DR, TraceOutcome.SetAside, "BoxesApart", host.Key, Tv("gap", gap, "limit", BoxBand)); continue; }
 
             var depWin = snaps[^1];
             bool depDeletedNow = Index.IsDeletedNow(depKey);

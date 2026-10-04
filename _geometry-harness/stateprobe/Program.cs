@@ -438,6 +438,7 @@ Console.WriteLine($"   same-author rows (the mod's own set against its own geome
 Console.WriteLine($"   contact verdicts: " + string.Join(", ", cls.Where(r => r.Kind == StateRowKind.Contact).GroupBy(r => $"{r.ContactVerdict} {(r.Arrives ? "(member arrives)" : "(host leaves)")}").OrderByDescending(g => g.Count()).Select(g => $"{g.Key} {g.Count():N0}")));
 Console.WriteLine($"   route verdicts: " + string.Join(", ", cls.Where(r => r.Kind == StateRowKind.Route).GroupBy(r => $"{r.Route}{(r.Navcut ? " navcut" : "")}").OrderByDescending(g => g.Count()).Select(g => $"{g.Key} {g.Count():N0}"))
                 + $"; counted: {tally.RouteAsked:N0} asked, NoLine {tally.RouteNoLine:N0}, Clipped {tally.RouteClipped:N0}, None {tally.RouteNone:N0}");
+Console.WriteLine("   contact geometry: the CORE collision surface (no Havok radius) — contactprobe reads the radius for its gap by default since 2026-10-03; this probe does not yet (follow-up)");
 Console.WriteLine($"   contact counted: hosts leaving {tally.HostsLeaving:N0}, arriving {tally.HostsArriving:N0}; dependents arriving {tally.DepsArriving:N0} (touching {tally.TouchingOnArrival:N0}, floating {tally.FloatingOnArrival:N0}), re-supported {tally.ReSupported:N0}, unmeasured {tally.ContactUnmeasured:N0}");
 Console.WriteLine($"   by trigger kind of the switch: (see switchprobe's map; a state is evaluated whatever its trigger)");
 

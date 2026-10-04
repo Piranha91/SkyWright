@@ -75,7 +75,8 @@ using HousecarlCore.Progress;
 //   --state SPEC    the world-state arm (roadmap 4.11): <switch>[,<switch>…], stage:<quest>:<n> (with --switch-map), or
 //                   baseline — the runtime enable state every arm reads (R1) has those switches flipped, in the winner arm
 //                   and in the arm without the mover alike. Without it, the load-time state, as every run before 2026-09-04.
-//   --radius on|off the gap the rule reads is between the shapes grown by their Havok radii; normal and depth stay the core's (default on)
+//   --radius on|off the gap the rule reads is between the shapes grown by their Havok radii; normal and depth stay the core's
+//                   (default on; rows gain AuthoringCoreGap / WinnerCoreGap); off = the core reading, byte-identical to before
 //   --bos on|off    apply the Base Object Swapper layer (*_SWAP.ini) so every ref is judged by the base the game loads
 //                   (default on; _shared/BosHook.cs); off = the record bases
 //   --base EMIT     re-measure every record of that emit's rows under THIS order and carry the results in the emit as
@@ -349,6 +350,21 @@ RefGeometry? GeomOf(FormKey baseKey)
                     // A host must be real collision: the engine rests nothing on a mesh without it, and the inside test
                     // needs a closed solid. A render fallback still serves as a DEPENDENT, labelled.
                     g = box.IsEmpty ? null : new RefGeometry(box, host, dep, hs, ds, HostUsable: hs == 'c', bodies, phantom);
+                    if (g is not null && radiusOn)
+                    {
+                        // --radius on: the same soups read again with every Havok radius grown (box, convex vertices, compressed mesh),
+                        // the same role choice; the rule reads its gap from these and everything else from the core above
+                        var gm = NifGeometry.Measure(bytes, includeTriangles: true, collisionRadius: true).Model;
+                        TriangleSoup? hsh = null, dsh = null;
+                        if (gm is not null)
+                        {
+                            var hcs = gm.CollisionSoupFor(b => b.Solid && CollisionLayers.IsActorSolid(b.Layer));
+                            var dcs = gm.CollisionSoupFor(b => b.Solid && b.Layer != "SKYL_NONCOLLIDABLE");
+                            if (hs == 'c' && gm.CollisionComplete && hcs is { TriangleCount: > 0 }) hsh = hcs;
+                            if (ds == 'c' && gm.CollisionComplete && dcs is { TriangleCount: > 0 }) dsh = dcs;
+                        }
+                        g = g with { HostShell = hsh, DepShell = dsh };
+                    }
                     if (geomLines is not null)
                     {
                         // The winding and closure audit per solid body: triangles whose normal points toward the body's
@@ -982,6 +998,15 @@ if (jsonPath is not null)
     if (!string.IsNullOrEmpty(dir)) Directory.CreateDirectory(dir);
     var dumpOptions = new JsonSerializerOptions { WriteIndented = false, NumberHandling = System.Text.Json.Serialization.JsonNumberHandling.AllowNamedFloatingPointLiterals };
     // E1: a row whose dependent's contact geometry is its render fallback with a Tree_Anim shape gains "Wind" (no other change)
+    // --radius on: each row also carries the core-surface gaps, so what the radius changed is on the row (no silent reading)
+    object WithCore(object row, ContactRow r)
+    {
+        if (!radiusOn) return row;
+        var node = JsonSerializer.SerializeToNode(row, row.GetType(), dumpOptions)!.AsObject();
+        node["AuthoringCoreGap"] = r.Authoring?.CoreGap;
+        node["WinnerCoreGap"] = r.Winner?.CoreGap;
+        return node;
+    }
     object WithWind(object row, FormKey depBase)
     {
         if (WindNoteOf(depBase) is not { } w) return row;
@@ -989,7 +1014,7 @@ if (jsonPath is not null)
         node["Wind"] = w;
         return node;
     }
-    var dump = rows.Where(r => r.Relation != ContactRelation.None || r.Facts.WinnerMeasured).Select(r => WithWind(new
+    var dump = rows.Where(r => r.Relation != ContactRelation.None || r.Facts.WinnerMeasured).Select(r => WithWind(WithCore(new
     {
         Dependent = r.Dependent.ToString(), DepBase = BaseLabel(r.DepBase), DepAuthor = PluginName(r.DepAuthor), DepScale = r.DepScale.ToString(), Motion = r.Motion.ToString(),
         Host = r.Host.Key.ToString(), HostBase = BaseLabel(r.Host.PrevBase), HostChange = r.Host.Change.ToString(), Mover = PluginName(r.Host.Mover), HostScale = r.HostScale.ToString(),
@@ -1003,7 +1028,7 @@ if (jsonPath is not null)
         WinnerAgainstExtent = r.Facts.WinnerAgainstExtent, WinnerAgainstMaxDim = r.Winner?.AgainstMaxDim,
         DependentDisabled = r.Facts.DependentDisabled, DependentDisabledViaParent = r.Facts.DependentDisabledViaParent, HostRemovedViaParent = r.Host.RemovedViaParent,
         AuthoringRawDistance = r.Authoring?.Contact.Distance, WinnerRawDistance = r.Winner?.RawDistance, WinnerRawAgainst = r.Winner is { } wr && !wr.RawAgainst.IsNull ? wr.RawAgainst.ToString() : null,
-    }, r.DepBase));
+    }, r), r.DepBase));
     File.WriteAllText(jsonPath, cidx.Arms.StampForced(JsonSerializer.Serialize(dump, dumpOptions)));
     Console.WriteLine($"wrote {jsonPath}");
 }
