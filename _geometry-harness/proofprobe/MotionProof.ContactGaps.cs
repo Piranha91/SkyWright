@@ -367,5 +367,35 @@ static partial class MotionProof
             var r = MeshSurfaceBox.BoxContact(Box(0, 0, 0, 10, 10, 10), tags, new Aabb(new Vec3(5, 5, 5), new Vec3(20, 20, 20), false));
             return (!r.OpaqueMeets && r.AnyMeets && r.Reason is null, $"{r}");
         });
+        // K-E6: a box on the door's 45 degree pose (around (42.4, 42.4), z 90..110): witness, at a time inside the swing. The stored
+        // (closed) pose, the panel along +x, does not meet it. Rejects the refusal and the stored-pose reading (false).
+        Case(check, "lane3b K-E6: box in a door's swing - witness (the closed pose does not meet it)", () =>
+        {
+            var region = DoorRegion(); var box = new Aabb(new Vec3(40, 40, 90), new Vec3(45, 45, 110), false);
+            var r = MeshSurfaceBox.BoxContactSwept(region, box);
+            var closed = MeshSurfaceBox.BoxContact(region.Samples[0].Soup, region.Samples[0].Tags, box);
+            return (r.Decision == "witness" && r.Time is > 0 and < 1 && !closed.OpaqueMeets, $"{r.Decision} {r.Reason} t {r.Time}; closed {closed}");
+        });
+        // K-E7: a box behind the hinge (-65..-55): never. Rejects cannot_tell by default.
+        Case(check, "lane3b K-E7: box behind the hinge - never", () =>
+        {
+            var r = MeshSurfaceBox.BoxContactSwept(DoorRegion(), new Aabb(new Vec3(-65, -65, 90), new Vec3(-55, -55, 110), false));
+            return (r.Decision == "never", $"{r.Decision} {r.Reason}");
+        });
+        // K-E8: a box about 3.9 u beyond the tip's arc at 45 degrees (73.5..74.5) with two samples only (budget 2): neither sample meets
+        // it, but their displacement bound (about 157 u) is larger than the gap - cannot_tell. Rejects never from the samples alone.
+        Case(check, "lane3b K-E8: box near the arc, two samples - cannot_tell", () =>
+        {
+            var r = MeshSurfaceBox.BoxContactSwept(DoorRegion(new MotionOptions(DeltaTarget: 0.5, SampleBudget: 2)),
+                                                   new Aabb(new Vec3(73.5f, 73.5f, 90), new Vec3(74.5f, 74.5f, 110), false));
+            return (r.Decision == "cannot_tell", $"{r.Decision} {r.Reason}");
+        });
+        // K-E9 (guard): the same box near the arc with dense sampling (default budget): never. Pins that K-E8's answer comes from the
+        // displacement bound, not from a box that the swing reaches.
+        Case(check, "lane3b K-E9 (guard): box near the arc, dense samples - never", () =>
+        {
+            var r = MeshSurfaceBox.BoxContactSwept(DoorRegion(), new Aabb(new Vec3(73.5f, 73.5f, 90), new Vec3(74.5f, 74.5f, 110), false));
+            return (r.Decision == "never", $"{r.Decision} {r.Reason}");
+        });
     }
 }
