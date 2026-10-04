@@ -255,6 +255,13 @@ static partial class MotionProof
             return (InTube(p, img) && p.Pieces.All(c => c.Radius >= 2 * BirdR - 1e-2) && !InTube(p, new Vector3(500, 0, 0)), $"image {S(img)}, radius {p.Pieces.Min(c => c.Radius):0.##}");
         });
 
+        // K-D9: a plate beside the first leg, 25 u off its axis (x 490..510, y 25..35, z 0), inside the bird's radius 52.08 but touching no
+        // axis: cannot_tell. Rejects reading the capsules without their radius (the axis alone is 25 u away: never).
+        Case(check, "lane3b K-D9: a plate 25 u beside the path, inside the radius - cannot_tell", () =>
+        {
+            var d = SweptGeometry.ContactTube(Tube(lPath), FlatQuad(490, 25, 510, 35, 0), null);
+            return (d.Decision == "cannot_tell", $"{d.Decision} {d.Reason}");
+        });
         // K-D7: a second path-driven node "Empty" with no shape under it, on a path through (500,0,0): no tube for it, so a plate on
         // that path but 300 u from the bird's L path reads never; and the bird's own tube is unchanged. Rejects a tube for a node that
         // moves nothing (the arm K-D3 holds the other branch: a node with a shape gets its tube).
