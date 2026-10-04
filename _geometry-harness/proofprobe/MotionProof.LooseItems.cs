@@ -468,13 +468,12 @@ static partial class MotionProof
             var r = PhysicsReach.Drop(pyr, SpatialOverlap.SoupBounds(pyr), 4, sup, RRLayers);
             return (r.Status == "dropped" && r.SupportId == "ridge" && NearA7(r.Distance, 5, 1e-3), ShowDrop(r));
         });
-        // EXPECTED RED: internal-edge rule withdrawn 2026-10-03; lab 4 question (the rule removed a hold the lab confirmed).
         // LI-K20 an internal mesh edge is not an edge of the surface: one compressed mesh (radius 0.35), a flat square floor at z 0 made of
         // two triangles whose shared edge runs along x = 0 (corners (0,-50), (50,0), (0,50), (-50,0)). A thin body x -0.05..0.05,
         // y -5..5, z 0.15..10.15 lies across that edge, sunk 0.2 into the slab's top. Each triangle's prism could push it out sideways
         // by 0.05 through the shared edge's rim, but that edge has a coplanar neighbour on the other side: the only real way out is up
         // by 0.2 (held) -> touching on the mesh. Rejects both prisms pushing it sideways and the body falling 100.15 to the floor below.
-        Case(check, "loose-items LI-K20 (EXPECTED RED, rule withdrawn; lab 4 question): a body across the internal edge of a flat two-triangle floor reads touching, not pushed sideways through it", () =>
+        Case(check, "loose-items LI-K20: a body across the internal edge of a flat two-triangle floor reads touching, not pushed sideways through it", () =>
         {
             var fv = new[] { new Vector3(0, -50, 0), new Vector3(50, 0, 0), new Vector3(0, 50, 0), new Vector3(-50, 0, 0) };
             var sup = PhysicsReach.Supports("mesh", SupportMesh(fv, new[] { 0, 1, 2, 0, 2, 3 }, 0.35f), new Vec3(0, 0, 0), new Vec3(0, 0, 0), 1f, movableBase: false)
@@ -482,6 +481,35 @@ static partial class MotionProof
             var body = ClosedBox(-0.05f, -5, 0.15f, 0.05f, 5, 10.15f);
             var r = PhysicsReach.Drop(body, SpatialOverlap.SoupBounds(body), 4, sup, RRLayers);
             return (r.Status == "touching" && r.SupportId == "mesh", ShowDrop(r));
+        });
+        // LI-K23 an internal edge whose two copies straddle a rounding boundary (reinstated rule, lab 4, 2026-10-04): as LI-K20, but the
+        // two triangles have vertices of their own and the shared edge sits at x 0.0004 in one and x 0.0006 in the other (2e-4 apart:
+        // the same edge to any tolerance of 1e-3, but on either side of a 1e-3 rounding step). The body across it is held (touching on
+        // the mesh). Rejects an edge match by rounded position keys, which reads the edge as a border and pushes the body sideways
+        // through it to the floor 100.15 below.
+        Case(check, "loose-items LI-K23: an internal edge whose copies straddle a rounding boundary is still internal - touching, not dropped 100.15", () =>
+        {
+            var fv = new[] { new Vector3(0.0004f, -50, 0), new Vector3(50, 0, 0), new Vector3(0.0004f, 50, 0),
+                             new Vector3(0.0006f, -50, 0), new Vector3(0.0006f, 50, 0), new Vector3(-50, 0, 0) };
+            var sup = PhysicsReach.Supports("mesh", SupportMesh(fv, new[] { 0, 1, 2, 3, 4, 5 }, 0.35f), new Vec3(0, 0, 0), new Vec3(0, 0, 0), 1f, movableBase: false)
+                                   .Append(floor100).ToArray();
+            var body = ClosedBox(-0.05f, -5, 0.15f, 0.05f, 5, 10.15f);
+            var r = PhysicsReach.Drop(body, SpatialOverlap.SoupBounds(body), 4, sup, RRLayers);
+            return (r.Status == "touching" && r.SupportId == "mesh", ShowDrop(r));
+        });
+        // LI-K24 a downward push out of a down-facing slab is lab-verified (lab 4 L4-1, 2026-10-04): flagged pushed off, not "down
+        // through a thin slab, unverified". A ceiling plate (mesh square half 50 at z 0 wound to face down, radius 0.35: slab z
+        // -0.35..0.35) over a body x,y -5..5, z -10..-0.2 whose top is 0.15 into the slab from below. Out down (along the slab's own
+        // normal) 0.15: pushed off, it falls 90 to the floor. Rejects the downward-slab flag on a down-facing slab.
+        Case(check, "loose-items LI-K24: a body pushed down out of a down-facing slab - dropped 90, pushed off, not flagged down through a slab", () =>
+        {
+            var cv = new[] { new Vector3(-50, -50, 0), new Vector3(50, -50, 0), new Vector3(50, 50, 0), new Vector3(-50, 50, 0) };
+            var sup = PhysicsReach.Supports("ceil", SupportMesh(cv, new[] { 0, 2, 1, 0, 3, 2 }, 0.35f), new Vec3(0, 0, 0), new Vec3(0, 0, 0), 1f, movableBase: false)
+                                   .Append(floor100).ToArray();
+            var body = ClosedBox(-5, -5, -10, 5, 5, -0.2f);
+            var r = PhysicsReach.Drop(body, SpatialOverlap.SoupBounds(body), 4, sup, RRLayers);
+            return (r.Status == "dropped" && r.SupportId == "floor" && NearA7(r.Distance, 90, 1e-3) && r.PushedOff && !r.DownThroughSlab,
+                    ShowDrop(r) + $" pushedOff {r.PushedOff} downThroughSlab {r.DownThroughSlab}");
         });
         // LI-K21 the shell-crossing guard reads only drops with nothing pushed off: the free item [-5,5]^3 clips a wall's shell sideways
         // (shell x 4.5..28.5, z -62..42, as LI-K16b) whose core soup is given as a plate under the item at z -10, over a floor 100 u down.
