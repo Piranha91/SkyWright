@@ -255,6 +255,24 @@ static partial class MotionProof
             return (InTube(p, img) && p.Pieces.All(c => c.Radius >= 2 * BirdR - 1e-2) && !InTube(p, new Vector3(500, 0, 0)), $"image {S(img)}, radius {p.Pieces.Min(c => c.Radius):0.##}");
         });
 
+        // K-D7: a second path-driven node "Empty" with no shape under it, on a path through (500,0,0): no tube for it, so a plate on
+        // that path but 300 u from the bird's L path reads never; and the bird's own tube is unchanged. Rejects a tube for a node that
+        // moves nothing (the arm K-D3 holds the other branch: a node with a shape gets its tube).
+        Case(check, "lane3b K-D7: a path node with no shape under it gets no tube - a plate on its path reads never", () =>
+        {
+            var f = Load(lPath); var root = f.GetRootNodes().First();
+            var empty = new NiNode { Name = new NiStringRef("Empty"), Flags_ui = 0xE, Scale = 1f, Rotation = Identity33() };
+            int ei = f.AddBlock(empty); root.Children.AddBlockRef(ei);
+            var g = new KeyGroup<Vector3> { Interpolation = KeyType.LINEAR_KEY, Keys = new() { new() { Time = 0, Value = new(500, 300, -300) }, new() { Time = 1, Value = new(500, 300, 300) } }, NumKeys = 2 };
+            var pi2 = new NiPathInterpolator { PathData = new(f.AddBlock(new NiPosData { Data = g })), PercentData = new(-1) };
+            var c2 = new NiTransformController { Interpolator = new(f.AddBlock(pi2)), StartTime = 0, StopTime = 1, Frequency = 1 };
+            c2.Flags.Active = true; c2.Target = new(ei); empty.Controller = new(f.AddBlock(c2));
+            var nif = Save(f, "path with an empty path node");
+            var t = Tube(nif);
+            var d = SweptGeometry.ContactTube(t, FlatQuad(490, 290, 510, 310, 0), null);
+            return (t.Status == "built" && d.Decision == "never" && t.PathNodes.SequenceEqual(new[] { "Bird" }), $"{t.Status} nodes {string.Join(",", t.PathNodes)} {d.Decision} {d.Reason}");
+        });
+
         // ================= (b) the anchor against a moving partner; blends of a particle-only node =================
         // K-B1: an anchor in the door's swing (45 degrees, 60 u out): witness. The stored (closed) pose leaves it clear by 31.4 u.
         // Rejects the refusal and the stored-pose reading (clear).
