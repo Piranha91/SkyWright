@@ -66,7 +66,9 @@ using HousecarlCore.Progress;
 //                          around its path (never / cannot_tell, never a witness). A pair whose world placement collapses a triangle
 //                          is measured in B's frame and labelled pairFrame; particle systems set aside from a render surface are
 //                          labelled particlesA / particlesB.
-//   --box-contact FILE     with --overlap-json: each input boxContact row's world boxes against the other member's render surface
+//   --box-contact FILE     with --overlap-json: each input boxContact row's world boxes against the other member's render surface;
+//                          with --motion swept a member refused for its live pose is tested through its swept region (witness / never /
+//                          cannot_tell per box; opaqueMeets true / false / null)
 //
 // usage: contactprobe [--list N] [--eps U] [--reach U] [--json FILE] [--emit FILE] [--base EMIT] [--all-rows] [--interior-only]
 //                     [--absolute] [--labelled-mover X.esp] [--overlap-json FILE]
@@ -112,7 +114,8 @@ contactprobe: placement contact and explicit render-surface pair review
     instead of refusing it (a NiPathInterpolator member: a tube around its path, never or cannot_tell); --motion-delta U and
     --motion-budget N tune the swept sampling (default 0.5 u, 4096)
   --box-contact OUTPUT (with --overlap-json): for each input boxContact row {pairKey, a, b, boxOwner A|B, boxes [{label, min,
-    max}]}, whether each world box meets the other member's render surface (opaque, and any material)
+    max}]}, whether each world box meets the other member's render surface (opaque, and any material); with --motion swept a
+    member refused for its live pose is tested through its swept region (witness / never / cannot_tell per box)
   --instance DIR --game DIR --profile NAME --order CANDIDATE.json
 Candidate Mods lists select asset priority. Surface/contact evidence is not a defect verdict.
 Other modes: --absolute or --labelled-mover PLUGIN; default is the moved-host pass.
@@ -251,7 +254,8 @@ if (traceKeysPath is not null && traceOut is null) { Console.Error.WriteLine("--
 MotionReview.Options? motionOptions;
 try { motionOptions = MotionReview.Parse(motionSpec, motionDelta, motionBudget); }
 catch (ArgumentException ex) { Console.Error.WriteLine(ex.Message); return 2; }
-if (motionSpec is not null && surfaceOut is null && volumeOut is null && anchorOut is null) { Console.Error.WriteLine("--motion is valid only with --surface, --volume or --anchor OUTPUT"); return 2; }
+if (motionSpec is not null && surfaceOut is null && volumeOut is null && anchorOut is null && boxContactOut is null) { Console.Error.WriteLine("--motion is valid only with --surface, --volume, --anchor or --box-contact OUTPUT"); return 2; }
+if (boxContactOut is not null && surfaceOut is null && volumeOut is null && anchorOut is null && motionOptions is { Mode: not "swept" }) { Console.Error.WriteLine("--box-contact takes --motion swept only (a box against every pose of a moving member)"); return 2; }
 if (anchorOut is not null && motionOptions is { Mode: not "swept" }) { Console.Error.WriteLine("--anchor takes --motion swept only (a body against every pose of a moving partner)"); return 2; }
 if ((motionDelta is not null || motionBudget is not null) && motionOptions?.Mode != "swept") { Console.Error.WriteLine("--motion-delta and --motion-budget are valid only with --motion swept"); return 2; }
 if (motionDelta is { } md && !(md > 0 && double.IsFinite(md)) || motionBudget is { } mb && mb < 2) { Console.Error.WriteLine("--motion-delta must be positive and finite; --motion-budget at least 2"); return 2; }
@@ -552,7 +556,7 @@ if (overlapJson is not null)
         // --box-contact: a separate file (lane 3b): supplied world boxes (a particle region) against a member's render surface.
         if (boxContactOut is not null)
             BoxContactReview.Run(overlapJson, boxContactOut, assets, idx, cidx.Arms,
-                cfg.Identity("load-time", cidx.State?.Name ?? "baseline"), idx.WinningGeometryPose);
+                cfg.Identity("load-time", cidx.State?.Name ?? "baseline"), idx.WinningGeometryPose, motionCache);
         return reviewRc;
     }
     catch (Exception ex)

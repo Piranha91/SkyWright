@@ -24,7 +24,7 @@ static class BoxContactReview
     static float Up(double v) { float f = (float)v; return f < v ? MathF.BitIncrement(f) : f; }
 
     public static int Run(string inputPath, string outputPath, AssetResolver assets, OverlapIndex index, EnableArms arms,
-                          ConfigurationIdentity configuration, Func<FormKey, Snap?> winningPose)
+                          ConfigurationIdentity configuration, Func<FormKey, Snap?> winningPose, MotionReview.Cache? motion = null)
     {
         var inputBytes = File.ReadAllBytes(inputPath);
         using var input = JsonDocument.Parse(inputBytes);
@@ -84,6 +84,32 @@ static class BoxContactReview
                         Box: new Aabb(new Vec3(Down(mn[0]), Down(mn[1]), Down(mn[2])), new Vec3(Up(mx[0]), Up(mx[1]), Up(mx[2])), false), Min: mn, Max: mx);
             }).ToList();
             var (surf, pose, mesh, why) = Surface(other);
+            // --motion swept: a member refused only because its live pose is not its stored pose is tested through its swept region
+            if (surf is null && motion is { Options.Mode: "swept" } && pose is { } mp && mesh is not null && (why ?? "").StartsWith("live pose: ", StringComparison.Ordinal))
+            {
+                var bytes = motion.Read(mesh);
+                var region = bytes is null ? null : motion.Region(other, bytes, VolumeGeometry.Render);
+                if (region is not { Status: "built" })
+                {
+                    refused++;
+                    records.Add(new { pairKey, a, b, boxOwner = owner, mesh, status = "refused",
+                                      reason = $"{otherName}: {why}; motion: {(region is null ? "the mesh could not be re-read" : region.Status + " " + region.Reason)}", boxes = Array.Empty<object>() });
+                    continue;
+                }
+                var placed = SweptGeometry.Place(region, mp.Pos, mp.Rot, mp.Scale);
+                var swept = boxes.Select(x =>
+                {
+                    var r = MeshSurfaceBox.BoxContactSwept(placed, x.Box);
+                    bool? op = r.Decision switch { "witness" => true, "never" => false, _ => null };
+                    return (object)new { x.Label, min = x.Min, max = x.Max, opaqueMeets = op, anyMeets = (bool?)null, reason = r.Reason,
+                                         motion = new { r.Decision, r.AnimationId, r.Time, r.Converged, r.Samples } };
+                }).ToList();
+                measured++;
+                records.Add(new { pairKey, a, b, boxOwner = owner, mesh, status = "measured", reason = (string?)null, particles = (IReadOnlyList<string>?)null,
+                                  motion = new { mode = "swept", policy = MeshSurfaceBox.MotionPolicyVersion + "|" + MotionReview.Policy, member = otherName, livePose = why },
+                                  boxes = swept });
+                continue;
+            }
             if (surf is null)
             {
                 refused++;
