@@ -497,6 +497,20 @@ static partial class MotionProof
             var r = PhysicsReach.Drop(body, SpatialOverlap.SoupBounds(body), 4, sup, RRLayers);
             return (r.Status == "touching" && r.SupportId == "mesh", ShowDrop(r));
         });
+        // LI-K25 an internal edge whose two copies sit in neighbouring 1e-3 grid cells: as LI-K23 with the shared edge at x 0.0009 in one
+        // triangle and x 0.0011 in the other (2e-4 apart, on either side of the cell boundary at 0.001; a rounded key would match these,
+        // LI-K23 rejects that). The body across it is held (touching on the mesh). Rejects an edge search confined to the end's own
+        // grid cell, which misses the copy and drops the body 100.15 to the floor.
+        Case(check, "loose-items LI-K25: an internal edge whose copies sit in neighbouring grid cells is still internal - touching, not dropped 100.15", () =>
+        {
+            var fv = new[] { new Vector3(0.0009f, -50, 0), new Vector3(50, 0, 0), new Vector3(0.0009f, 50, 0),
+                             new Vector3(0.0011f, -50, 0), new Vector3(0.0011f, 50, 0), new Vector3(-50, 0, 0) };
+            var sup = PhysicsReach.Supports("mesh", SupportMesh(fv, new[] { 0, 1, 2, 3, 4, 5 }, 0.35f), new Vec3(0, 0, 0), new Vec3(0, 0, 0), 1f, movableBase: false)
+                                   .Append(floor100).ToArray();
+            var body = ClosedBox(-0.05f, -5, 0.15f, 0.05f, 5, 10.15f);
+            var r = PhysicsReach.Drop(body, SpatialOverlap.SoupBounds(body), 4, sup, RRLayers);
+            return (r.Status == "touching" && r.SupportId == "mesh", ShowDrop(r));
+        });
         // LI-K24 a downward push out of a down-facing slab is lab-verified (lab 4 L4-1, 2026-10-04): flagged pushed off, not "down
         // through a thin slab, unverified". A ceiling plate (mesh square half 50 at z 0 wound to face down, radius 0.35: slab z
         // -0.35..0.35) over a body x,y -5..5, z -10..-0.2 whose top is 0.15 into the slab from below. Out down (along the slab's own
