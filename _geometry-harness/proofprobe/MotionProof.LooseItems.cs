@@ -468,6 +468,20 @@ static partial class MotionProof
             var r = PhysicsReach.Drop(pyr, SpatialOverlap.SoupBounds(pyr), 4, sup, RRLayers);
             return (r.Status == "dropped" && r.SupportId == "ridge" && NearA7(r.Distance, 5, 1e-3), ShowDrop(r));
         });
+        // LI-K20 an internal mesh edge is not an edge of the surface: one compressed mesh (radius 0.35), a flat square floor at z 0 made of
+        // two triangles whose shared edge runs along x = 0 (corners (0,-50), (50,0), (0,50), (-50,0)). A thin body x -0.05..0.05,
+        // y -5..5, z 0.15..10.15 lies across that edge, sunk 0.2 into the slab's top. Each triangle's prism could push it out sideways
+        // by 0.05 through the shared edge's rim, but that edge has a coplanar neighbour on the other side: the only real way out is up
+        // by 0.2 (held) -> touching on the mesh. Rejects both prisms pushing it sideways and the body falling 100.15 to the floor below.
+        Case(check, "loose-items LI-K20: a body across the internal edge of a flat two-triangle floor reads touching, not pushed sideways through it", () =>
+        {
+            var fv = new[] { new Vector3(0, -50, 0), new Vector3(50, 0, 0), new Vector3(0, 50, 0), new Vector3(-50, 0, 0) };
+            var sup = PhysicsReach.Supports("mesh", SupportMesh(fv, new[] { 0, 1, 2, 0, 2, 3 }, 0.35f), new Vec3(0, 0, 0), new Vec3(0, 0, 0), 1f, movableBase: false)
+                                   .Append(floor100).ToArray();
+            var body = ClosedBox(-0.05f, -5, 0.15f, 0.05f, 5, 10.15f);
+            var r = PhysicsReach.Drop(body, SpatialOverlap.SoupBounds(body), 4, sup, RRLayers);
+            return (r.Status == "touching" && r.SupportId == "mesh", ShowDrop(r));
+        });
         // LI-K10: the geometry reader every other consumer uses (route, floors, contact, overlap's collision column, state) keeps the
         // core: no radius of any kind (their calibrations; contact's in-game acceptance got worse with it, RESULT). Measured in Havok
         // units (havokUnitScale 1). Rejects the radius leaking into NifGeometry by default.
