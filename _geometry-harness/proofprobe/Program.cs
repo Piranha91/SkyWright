@@ -3617,6 +3617,8 @@ AnchorReachProof.Run(Check);
 OverlapSurfaceProof.RunStageA7(Check);
 // G1 build list, Stage B (plan g1/PLAN-8.md): forced enable, primitive box, reachable band (red until implemented).
 StageBProof.Run(Check);
+// Lane 3b (2026-10-04): contactprobe pair-measure gaps (red until implemented).
+MotionProof.RunContactGaps(Check);
 
 Console.WriteLine();
 Console.WriteLine($"==== {pass} passed, {fail} failed ====");
