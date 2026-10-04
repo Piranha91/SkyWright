@@ -96,36 +96,62 @@ static class MotionReview
         bool pathA = PathRefusal(ma), pathB = PathRefusal(mb);
         if ((pathA || pathB) && cache.Options.Mode == "swept" && !(pathA && pathB))
         {
-            bool otherStatic = pathA ? !movB && !refB : !movA && !refA;
+            bool otherMoves = pathA ? movB : movA, otherRefused = pathA ? refB : refA;
             string pm = pathA ? "A" : "B", po = pathA ? "B" : "A";
-            if (!otherStatic) return Refuse(pm, "a path-driven member against a member that moves too: not combined");
+            if (otherRefused) return Refuse(po, (pathA ? mb.Reason : ma.Reason) ?? "refused");
             var (pBytes, pPose, pForm) = pathA ? (bytesA, poseA, formA) : (bytesB, poseB, formB);
-            var (sBytes, sPose) = pathA ? (bytesB, poseB) : (bytesA, poseA);
+            var (sBytes, sPose, sForm) = pathA ? (bytesB, poseB, formB) : (bytesA, poseA, formA);
             var (pModel, tube) = cache.Path(pForm, pBytes);
             if (tube.Status != "built") return Refuse(pm, tube.Status == "none" ? "path rule found no path-driven node" : tube.Reason ?? "path tube refused");
-            var st = staticOf(sBytes);
-            if (st.Soup is null) return new { geometry = gname, status = "refused", reason = $"{po}: {st.Refusal}" };
             var outside = NifMotion.OutsidePathSurface(pBytes, pModel, tube, g, cache.Read);
             if (outside.Status == "refused" && outside.Reason == "no_solid_collision") return new { geometry = gname, status = "refused", reason = $"{pm}: no_solid_collision" };
             if (outside.Status == "refused") return Refuse(pm, outside.Reason ?? "outside the path subtree refused");
-            var partnerW = SpatialOverlap.TransformSoup(st.Soup, sPose.Pos, sPose.Rot, sPose.Scale);
             var placedTube = NifMotion.PlaceTube(tube, pPose.Pos, pPose.Rot, pPose.Scale);
-            var td = SweptGeometry.ContactTube(placedTube, partnerW, st.Tags);
-            if (td.Decision == "refused") return Refuse(pm, td.Reason ?? "path tube contact refused");
-            SurfaceContactResult? rest = null; Vec3 restFrame = new(0, 0, 0);
-            if (outside.Status == "measured")
+            SweptDecision td; object? rest = null; Vec3 restFrame = new(0, 0, 0);
+            string decision; string? why;
+            if (otherMoves)
             {
-                (rest, restFrame) = pathA
-                    ? MeshSurface.MeasurePlacedFramed(outside.Soup!, outside.Tags, pPose.Pos, pPose.Rot, pPose.Scale, st.Soup, st.Tags, sPose.Pos, sPose.Rot, sPose.Scale, g)
-                    : MeshSurface.MeasurePlacedFramed(st.Soup, st.Tags, sPose.Pos, sPose.Rot, sPose.Scale, outside.Soup!, outside.Tags, pPose.Pos, pPose.Rot, pPose.Scale, g);
+                // the partner moves too (lane 3b, real data: the wind-swayed banners): the tube against every sample of its swept region,
+                // and the path model's static rest against the partner's motion
+                var otherRegion = cache.Region(sForm, sBytes, g);
+                if (otherRegion.Status != "built") return Refuse(po, otherRegion.Reason ?? "swept region refused");
+                var placedOther = SweptGeometry.Place(otherRegion, sPose.Pos, sPose.Rot, sPose.Scale);
+                td = SweptGeometry.ContactTubeSwept(placedTube, placedOther);
+                if (td.Decision == "refused") return Refuse(pm, td.Reason ?? "path tube contact refused");
+                SweptDecision? rd = null;
+                if (outside.Status == "measured")
+                {
+                    var restW = SpatialOverlap.TransformSoup(outside.Soup!, pPose.Pos, pPose.Rot, pPose.Scale);
+                    rd = SweptGeometry.Contact(placedOther, restW, outside.Tags, MeshVolume.Solid(restW).Status == "solid", cache.Options.Sweep);
+                    rest = rd;
+                }
+                decision = rd is { Decision: "refused" or "cannot_tell" } ? "cannot_tell" : rd is { Decision: "witness" } ? "witness" : td.Decision;
+                why = rd is { Decision: "refused" or "cannot_tell" } ? $"outside the path subtree against the moving partner: {rd.Decision} {rd.Reason}"
+                    : decision == "witness" ? "a sampled pose of the partner crosses a shape outside the path subtree" : td.Reason;
             }
-            var restCross = rest is null ? null : MeshSurface.OpaqueCrossing(rest);
-            bool restBuried = rest is not null && ((rest.AInB?.Inside?.Lower ?? 0) > 0 || (rest.BInA?.Inside?.Lower ?? 0) > 0);
-            string decision = rest is not null && rest.Status != "measured" ? "cannot_tell"
-                            : rest is not null && (restCross is { Lower: > 0 } || restBuried) ? "witness"
-                            : td.Decision;
-            string? why = rest is not null && rest.Status != "measured" ? $"outside the path subtree: {rest.Status} {rest.Reason}"
-                        : decision == "witness" ? "a shape outside the path subtree crosses the partner at its stored pose" : td.Reason;
+            else
+            {
+                var st = staticOf(sBytes);
+                if (st.Soup is null) return new { geometry = gname, status = "refused", reason = $"{po}: {st.Refusal}" };
+                var partnerW = SpatialOverlap.TransformSoup(st.Soup, sPose.Pos, sPose.Rot, sPose.Scale);
+                td = SweptGeometry.ContactTube(placedTube, partnerW, st.Tags);
+                if (td.Decision == "refused") return Refuse(pm, td.Reason ?? "path tube contact refused");
+                SurfaceContactResult? sr = null;
+                if (outside.Status == "measured")
+                {
+                    (sr, restFrame) = pathA
+                        ? MeshSurface.MeasurePlacedFramed(outside.Soup!, outside.Tags, pPose.Pos, pPose.Rot, pPose.Scale, st.Soup, st.Tags, sPose.Pos, sPose.Rot, sPose.Scale, g)
+                        : MeshSurface.MeasurePlacedFramed(st.Soup, st.Tags, sPose.Pos, sPose.Rot, sPose.Scale, outside.Soup!, outside.Tags, pPose.Pos, pPose.Rot, pPose.Scale, g);
+                    rest = sr;
+                }
+                var restCross = sr is null ? null : MeshSurface.OpaqueCrossing(sr);
+                bool restBuried = sr is not null && ((sr.AInB?.Inside?.Lower ?? 0) > 0 || (sr.BInA?.Inside?.Lower ?? 0) > 0);
+                decision = sr is not null && sr.Status != "measured" ? "cannot_tell"
+                         : sr is not null && (restCross is { Lower: > 0 } || restBuried) ? "witness"
+                         : td.Decision;
+                why = sr is not null && sr.Status != "measured" ? $"outside the path subtree: {sr.Status} {sr.Reason}"
+                    : decision == "witness" ? "a shape outside the path subtree crosses the partner at its stored pose" : td.Reason;
+            }
             return ContactNotes.Attach(new
             {
                 geometry = gname, status = "motion",
@@ -134,7 +160,7 @@ static class MotionReview
                     mode = "path-tube", policy = Policy, member = pm, decision, reason = why, tubeDecision = td.Decision, tubeReach = td.Decision == "cannot_tell" ? td.Width : (double?)null,
                     tubePieces = placedTube.Pieces.Count, pathNodes = tube.PathNodes, labels = tube.Labels,
                     label = "the path-driven subtree anywhere on its curve, any rotation: never or cannot_tell, never a witness",
-                    outside = outside.Status, outsideResult = rest,
+                    partnerMoves = otherMoves, outside = outside.Status, outsideResult = rest,
                 },
             }, ContactNotes.Options, ("pairFrame", ContactNotes.Frame(restFrame)));
         }

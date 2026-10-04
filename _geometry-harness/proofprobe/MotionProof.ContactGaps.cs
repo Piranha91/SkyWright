@@ -273,6 +273,20 @@ static partial class MotionProof
             return (t.Status == "built" && d.Decision == "never" && t.PathNodes.SequenceEqual(new[] { "Bird" }), $"{t.Status} nodes {string.Join(",", t.PathNodes)} {d.Decision} {d.Reason}");
         });
 
+        // K-D8: the tube against a partner that moves too (the door's swept region). Placed with its hinge at (450, -50, -100) the door
+        // swings its panel (x 0..100, z 0..200 above the hinge) across the L path's first leg: cannot_tell. Placed at (500, 600, 0) every
+        // pose stays at least 500 u from the leg: never. Rejects the refusal a moving partner used to get, and reading the partner at its
+        // stored pose only (the closed door at (450,-50) lies 49 u from the leg, inside the radius, so that would read cannot_tell for both;
+        // the far placement checks the never branch).
+        Case(check, "lane3b K-D8: the tube against a moving partner - cannot_tell across the path, never far from it", () =>
+        {
+            var nif = DoorNif(); var region = SweptGeometry.Build(nif, NifMotion.Read(nif, null), null, VolumeGeometry.Render, new MotionOptions());
+            var t = NifMotion.PlaceTube(Tube(lPath), Zero3, Zero3, 1f);
+            var near = SweptGeometry.ContactTubeSwept(t, SweptGeometry.Place(region, new Vec3(450, -50, -100), Zero3, 1f));
+            var far = SweptGeometry.ContactTubeSwept(t, SweptGeometry.Place(region, new Vec3(500, 600, 0), Zero3, 1f));
+            return (near.Decision == "cannot_tell" && far.Decision == "never", $"near {near.Decision} {near.Reason}; far {far.Decision} {far.Reason}");
+        });
+
         // ================= (b) the anchor against a moving partner; blends of a particle-only node =================
         // K-B1: an anchor in the door's swing (45 degrees, 60 u out): witness. The stored (closed) pose leaves it clear by 31.4 u.
         // Rejects the refusal and the stored-pose reading (clear).
