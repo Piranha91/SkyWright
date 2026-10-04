@@ -412,17 +412,19 @@ static partial class MotionProof
         });
         // LI-K16 side clip, wall reaching below the floor: the item [-5,5]^3 clips a wall's 2 u shell sideways by 0.5 u (wall core
         // x 6.5..26.5, y +-50, z -200..+40; shell x 4.5..28.5, z -202..+42), floor 100 u down. The overlap pushes the item -x by 0.5
-        // (not held): the wall pair is left out and the item falls 95 to the floor. Rejects touching on the wall (every overlap held).
-        Case(check, "loose-items LI-K16: a side clip on a wall that reaches below the floor - dropped 95 on the floor, not touching the wall", () =>
+        // (not held): the wall pair is left out and the item falls 95 to the floor. Rejects dropped 63.269231 onto the wall (the item's
+        // bottom edge, from inside the shell, meets the diagonal of the wall's inner side face 63.27 u below: a shorter drop no label
+        // sees) and touching on the wall (every overlap held).
+        Case(check, "loose-items LI-K16: a side clip on a wall that reaches below the floor - dropped 95 on the floor, not 63.27 onto the wall", () =>
         {
             var sup = new[] { new DropSupport("wall", 1, true, false, ClosedBox(4.5f, -52, -202, 28.5f, 52, 42)), floor100 };
             var r = PhysicsReach.Drop(ClosedBox(-5, -5, -5, 5, 5, 5), AB(-5, -5, -5, 5, 5, 5), 4, sup, RRLayers);
             return (r.Status == "dropped" && r.SupportId == "floor" && NearA7(r.Distance, 95, 1e-3), ShowDrop(r));
         });
         // LI-K16b side clip, wall ending above the floor: as LI-K16 with the wall core z -60..+40 (shell z -62..+42). Dropped 95 on the
-        // floor. Rejects dropped 57 onto the wall (the exit cast from inside the shell to its underside, -5 - -62: a shorter drop no
-        // label sees) and touching on the wall.
-        Case(check, "loose-items LI-K16b: a side clip on a wall that ends above the floor - dropped 95 on the floor, not 57 to the wall's underside", () =>
+        // floor. Rejects touching on the wall (the item's bottom edge already meets the diagonal of the wall's inner side face at the
+        // placed pose) and dropped 57 onto the wall (the exit cast from inside the shell to its underside, -5 - -62).
+        Case(check, "loose-items LI-K16b: a side clip on a wall that ends above the floor - dropped 95 on the floor, not touching the wall", () =>
         {
             var sup = new[] { new DropSupport("wall", 1, true, false, ClosedBox(4.5f, -52, -62, 28.5f, 52, 42)), floor100 };
             var r = PhysicsReach.Drop(ClosedBox(-5, -5, -5, 5, 5, 5), AB(-5, -5, -5, 5, 5, 5), 4, sup, RRLayers);
