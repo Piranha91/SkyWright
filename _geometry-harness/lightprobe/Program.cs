@@ -241,6 +241,7 @@ foreach (var (cedid, ck) in scopeCells)
         {
             var x = on[o];
             if (!idx.BaseMesh.ContainsKey(x.Base)) continue;   // model-less (lights, markers): nothing to draw
+            if (!LightReach.BaseDrawn(idx.BaseIsMarker.Contains(x.Base))) continue;   // an Is-Marker base: never drawn
             var (m, why) = Model(x.Base);
             if (m is null || m.Soup is null)
             {
@@ -251,7 +252,7 @@ foreach (var (cedid, ck) in scopeCells)
             var world = SpatialOverlap.TransformSoup(m.Soup, x.Pose.Pos, x.Pose.Rot, x.Pose.Scale);
             parts.Add((world, m.Tags, o));
             bounds.Add((o, SpatialOverlap.SoupBounds(world), world, m.Tags, x.Pose, m.Soup));
-            foreach (var s in m.Shapes.Where(s => s.Drawn && s.ModelRadius > 0))
+            foreach (var s in m.Shapes.Where(s => s.Lit && s.ModelRadius > 0))
             {
                 var c = SpatialOverlap.TransformSoup(new TriangleSoup(new[] { s.ModelCenter }, Array.Empty<int>()), x.Pose.Pos, x.Pose.Rot, x.Pose.Scale).Vertices[0];
                 shapes.Add((o, s, c, s.ModelRadius * x.Pose.Scale));

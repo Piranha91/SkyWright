@@ -104,6 +104,15 @@ static class LightSelfTest
               () => MeshAnchor.TestPlaced(Box(Vector3.Zero, 50, inward: false), null, new Vec3(0, 0, 0), new Vec3(0, 0, 0), 1f, new Vector3(0, 0, 0),
                                           new BodyExtent(0, 10, 1)).Point == "inside");
 
+        // Geometry the engine does not light is not a lit shape (defect L1): editor markers are not drawn, and only the
+        // lighting shader takes point lights.
+        Check("unlit: a shape named EditorMarker is not drawn", "an editor marker counted as lit render geometry",
+              () => !LightReach.ShapeDrawn("EditorMarker", false, false, false) && LightReach.ShapeDrawn("CounterLeft01:0", false, false, false));
+        Check("unlit: an Is-Marker base (XMarker) is not drawn", "an XMarker reference counted as lit render geometry",
+              () => !LightReach.BaseDrawn(true) && LightReach.BaseDrawn(false));
+        Check("unlit: a drawn effect-shader shape is not lit; a lighting-shader shape is", "an effect shape counted as lit by a point light",
+              () => !LightReach.ShapeLit(true, false) && LightReach.ShapeLit(true, true) && !LightReach.ShapeLit(false, true));
+
         Console.WriteLine($"lightprobe self-test: {pass} passed, {fail} failed");
         return fail == 0 ? 0 : 1;
     }
