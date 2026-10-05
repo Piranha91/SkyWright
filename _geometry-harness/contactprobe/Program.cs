@@ -518,7 +518,7 @@ string MeshOf(FormKey baseKey) => idx.BaseMesh.TryGetValue(baseKey, out var m) ?
 string BaseLabel(FormKey baseKey) => $"{TypeOf(baseKey)} {EdidOf(baseKey)} <{MeshOf(baseKey)}>";
 static float Rate(long hit, long total) => total == 0 ? 0 : 100f * hit / total;
 string Src(ArmContact? a) => a is null ? "--" : $"{a.DepSrc}{a.HostSrc}";
-string Contact(ArmContact? a) => a is null ? "(none within band)" : $"facing {a.Contact.FacingDistance:0.#}u (raw {a.Contact.Distance:0.#}u) pen {a.Contact.EffectivePenetration:0.#}u{(a.Contact.HostClosed ? "" : " (open host)")} up {a.Contact.NormalUp:0.00}";
+string Contact(ArmContact? a) => a is null ? "(none within band)" : $"facing {a.Contact.FacingDistance:0.#}u (raw {a.Contact.Distance:0.#}u) pen {a.Contact.EffectivePenetration:0.#}u{(a.PreexistingDepth > 0f ? $" ({a.PreexistingDepth:0.#}u of it authored)" : "")}{(a.Contact.HostClosed ? "" : " (open host)")} up {a.Contact.NormalUp:0.00}";
 void WriteGeomReport()
 {
     if (geomReport is null || geomLines is null) return;
@@ -840,6 +840,11 @@ foreach (var v in new[] { ContactVerdict.Stranded, ContactVerdict.Orphaned, Cont
 }
 Console.WriteLine($"   ReSupported by what: host at its new place {rel.Count(r => r.Verdict == ContactVerdict.ReSupported && r.Facts.WinnerContactIsHost):N0}, another reference {rel.Count(r => r.Verdict == ContactVerdict.ReSupported && !r.Facts.WinnerContactIsHost):N0}; "
                 + $"Sunk into: the host {rel.Count(r => r.Verdict == ContactVerdict.Sunk && r.Facts.WinnerContactIsHost):N0}, something else {rel.Count(r => r.Verdict == ContactVerdict.Sunk && !r.Facts.WinnerContactIsHost):N0}");
+bool PreOnly(ContactRow r) => r.Verdict == ContactVerdict.ReSupported && r.Facts.WinnerPreexistingOnly;
+// The differential Sunk rule (closed-slabs lane, 2026-10-04): only depth beyond what the dependent already had in the same reference as
+// authored can sink a row. A row whose only contact is such an overlap is counted apart (Gate A review F1): the rest of it may float.
+Console.WriteLine($"   differential Sunk: {DetectorModel.PreexistingOnlyLabel} {rel.Count(PreOnly):N0} (Fixed {rel.Count(r => PreOnly(r) && Fixed(r)):N0}, Fixed mod-mover {rel.Count(r => PreOnly(r) && Fixed(r) && Pop(r) == DependencyPopulation.ModMover):N0}, interior {rel.Count(r => PreOnly(r) && Interior(r)):N0}) — inside the ReSupported count above, listed apart; "
+                + $"Sunk rows with part of the depth already authored {rel.Count(r => r.Verdict == ContactVerdict.Sunk && r.Facts.WinnerPreexistingPenetration > 0f):N0}; other ReSupported rows beside a pre-existing overlap {rel.Count(r => r.Verdict == ContactVerdict.ReSupported && !r.Facts.WinnerPreexistingOnly && r.Facts.WinnerPreexistingPenetration > 0f):N0}");
 bool OverCap(ContactRow r) => r.Winner is { } w && w.AgainstMaxDim > cidx.MaxHostDim;
 Console.WriteLine($"   the folds, over the relationship rows: R1 Unjudgeable / RuntimeDisabled {rel.Count(r => r.Reason == ContactBlocker.RuntimeDisabled):N0} (Fixed mod-mover {rel.Count(r => r.Reason == ContactBlocker.RuntimeDisabled && Fixed(r) && Pop(r) == DependencyPopulation.ModMover):N0}), "
                 + $"EnableChainUnresolved {rel.Count(r => r.Reason == ContactBlocker.EnableChainUnresolved):N0}; "
@@ -865,7 +870,7 @@ Console.WriteLine($"   the class (mod mover, Fixed, Stranded + Orphaned): {class
 
 void PrintRow(ContactRow r)
 {
-    Console.WriteLine($"      {r.Verdict,-12} {r.Relation,-9} {r.Motion,-7} {(Interior(r) ? "int" : "ext"),-3} rank {RankOf(r),6:0.#}u  dependent {BaseLabel(r.DepBase)} {r.Dependent}");
+    Console.WriteLine($"      {(PreOnly(r) ? DetectorModel.PreexistingOnlyLabel : r.Verdict.ToString()),-12} {r.Relation,-9} {r.Motion,-7} {(Interior(r) ? "int" : "ext"),-3} rank {RankOf(r),6:0.#}u  dependent {BaseLabel(r.DepBase)} {r.Dependent}");
     Console.WriteLine($"         host {BaseLabel(r.Host.PrevBase)} {r.Host.Key} {r.Host.Change} by {PluginName(r.Host.Mover)}{(r.Host.Change == HostChange.Moved ? $" ({PlacementHistory.Dist(r.Host.Previous.Pos, r.Host.Winner.Pos):0}u)" : "")} in {CellOf(r.DepAuthoring.Cell)}; dependent placed by {PluginName(r.DepAuthor)}"
                     + $" [{(r.Seen ? "seen" : "blind")}{(r.AuthorAfterMover ? ", author after mover" : "")}{(r.DepTouchedByMoverSide ? ", mover's side overrode it" : "")}]");
     Console.WriteLine($"         authoring {Contact(r.Authoring)} [{Src(r.Authoring)}]; winner {Contact(r.Winner)}{(r.Winner is { } w ? (w.Against == r.Host.Key ? " (the host)" : $" (against {BaseLabel(cidx!.WinnerBase(w.Against))})") : "")} [{Src(r.Winner)}]");
@@ -1047,6 +1052,8 @@ if (jsonPath is not null)
         WinnerMeasured = r.Facts.WinnerMeasured, WinnerDistance = r.Facts.WinnerDistance, WinnerPenetration = r.Facts.WinnerPenetration, WinnerContactIsHost = r.Facts.WinnerContactIsHost,
         WinnerAgainst = r.Winner?.Against.ToString(), WinnerSrc = Src(r.Winner),
         WinnerAgainstExtent = r.Facts.WinnerAgainstExtent, WinnerAgainstMaxDim = r.Winner?.AgainstMaxDim,
+        WinnerPreexistingPenetration = r.Facts.WinnerPreexistingPenetration, WinnerPreexistingOnly = r.Facts.WinnerPreexistingOnly,
+        Label = PreOnly(r) ? DetectorModel.PreexistingOnlyLabel : r.Verdict.ToString(),
         DependentDisabled = r.Facts.DependentDisabled, DependentDisabledViaParent = r.Facts.DependentDisabledViaParent, HostRemovedViaParent = r.Host.RemovedViaParent,
         AuthoringRawDistance = r.Authoring?.Contact.Distance, WinnerRawDistance = r.Winner?.RawDistance, WinnerRawAgainst = r.Winner is { } wr && !wr.RawAgainst.IsNull ? wr.RawAgainst.ToString() : null,
     }, r), r.DepBase));

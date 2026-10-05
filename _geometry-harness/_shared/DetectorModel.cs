@@ -804,6 +804,11 @@ public static class DetectorModel
     /// normal (the R4 fold, 2026-09-03); NaN when nothing was measured or the normal could not be read.</param>
     /// <param name="Motion">what physics would do with the dependent at cell load — rides on the facts for the caller's split;
     /// the verdict never reads it.</param>
+    /// <param name="WinnerPreexistingPenetration">the differential Sunk rule (closed-slabs lane, 2026-10-04): how deep the dependent
+    /// already sat in the same against-reference as authored, both at their authoring placements; only the depth beyond it can make
+    /// the row Sunk. 0 when not measured (callers that do not opt in read exactly as before).</param>
+    /// <param name="WinnerPreexistingOnly">the winner contact is such a pre-existing overlap and nothing else is within ε: the row
+    /// is ReSupported with <see cref="PreexistingOnlyLabel"/>.</param>
     public readonly record struct ContactFacts(
         bool DependentGeometry, bool HostGeometry, bool AuthoringMeasured,
         float AuthoringDistance, float AuthoringPenetration, float AuthoringNormalUp,
@@ -812,6 +817,10 @@ public static class DetectorModel
         DependentMotion Motion,
         bool DependentDisabledViaParent = false, bool DependentEnableUnresolved = false, float WinnerAgainstExtent = float.NaN,
         float WinnerPreexistingPenetration = 0f, bool WinnerPreexistingOnly = false);
+
+    /// <summary>The label a ReSupported row carries when its only contact under the winner is an overlap that already existed as
+    /// authored (Gate A review F1, 2026-10-04): counted apart from ReSupported in every report, never merged into it.</summary>
+    public const string PreexistingOnlyLabel = "ReSupported (pre-existing overlap only)";
 
     /// <summary>The placement-contact rule (frozen 2026-09-02 from the handoff of 2026-09-07). Piranha's two classes —
     /// apples left in the air when the table moves (stranded support), a sconce left on the old wall line when the
@@ -830,7 +839,9 @@ public static class DetectorModel
     /// <b>Unjudgeable / EnableChainUnresolved</b>; one disabled at runtime THROUGH its parent is <b>Unjudgeable /
     /// RuntimeDisabled</b> — absent, not a defect (the R1 fold: the game showed the rule five rows whose dependent, host or
     /// against-ref never existed at runtime). One the mover's side re-placed is <b>MovedTogether</b>, whatever its new
-    /// contact. One that now sits deeper than ε inside anything is <b>Sunk</b> — unless the depth exceeds the width of the
+    /// contact. One that now sits deeper than ε inside anything — counting only depth beyond what it already had in that same
+    /// reference as authored (the differential Sunk rule, 2026-10-04; a pre-existing overlap counts as contact, and a row whose
+    /// only contact is one reads <see cref="PreexistingOnlyLabel"/>) — is <b>Sunk</b> — unless the depth exceeds the width of the
     /// thing it is measured against along the contact normal, which no interior point of a closed object can do: that is
     /// <b>Unjudgeable / DepthExceedsObject</b>, a refused reading (the R4 fold: a bookcase "105 u inside" a 30 u jar). One
     /// that touches anything within ε — the host at its new place, or something else the room was rebuilt with, a whole
@@ -893,12 +904,19 @@ public static class DetectorModel
         if (!f.WinnerMeasured)
             return (relation, ContactVerdict.Unjudgeable, ContactBlocker.WinnerArmMissing, $"{rel}; the winner arm could not be measured");
 
-        if (f.WinnerPenetration > epsilon)
+        // The differential Sunk rule: only depth that was not already there as authored (the same reference, both at their
+        // authoring placements) can sink a row. R4 still reads the total depth, the physical reading.
+        float pre = f.WinnerPreexistingPenetration > 0f ? f.WinnerPreexistingPenetration : 0f;
+        string against = f.WinnerContactIsHost ? "the host at its new place" : "something else";
+        if (f.WinnerPenetration - pre > epsilon)
         {
             if (!float.IsNaN(f.WinnerAgainstExtent) && f.WinnerPenetration > f.WinnerAgainstExtent)
-                return (relation, ContactVerdict.Unjudgeable, ContactBlocker.DepthExceedsObject, $"{rel}; under the winner it reads {f.WinnerPenetration:0.#}u inside {(f.WinnerContactIsHost ? "the host at its new place" : "something else")} that is only {f.WinnerAgainstExtent:0.#}u across along the contact normal — no interior point of a closed object is that far from its surface; the reading is refused, not Sunk{motion}");
-            return (relation, ContactVerdict.Sunk, ContactBlocker.None, $"{rel}; under the winner it sits {f.WinnerPenetration:0.#}u inside {(f.WinnerContactIsHost ? "the host at its new place" : "something else")}{motion}");
+                return (relation, ContactVerdict.Unjudgeable, ContactBlocker.DepthExceedsObject, $"{rel}; under the winner it reads {f.WinnerPenetration:0.#}u inside {against} that is only {f.WinnerAgainstExtent:0.#}u across along the contact normal — no interior point of a closed object is that far from its surface; the reading is refused, not Sunk{motion}");
+            string authored = pre > 0f ? $", {pre:0.#}u of it already as authored ({f.WinnerPenetration - pre:0.#}u new)" : "";
+            return (relation, ContactVerdict.Sunk, ContactBlocker.None, $"{rel}; under the winner it sits {f.WinnerPenetration:0.#}u inside {against}{authored}{motion}");
         }
+        if (f.WinnerPreexistingOnly)
+            return (relation, ContactVerdict.ReSupported, ContactBlocker.None, $"{rel}; {PreexistingOnlyLabel}: under the winner the only thing within {epsilon:0.#}u is {against} it already overlapped as authored — {f.WinnerPenetration:0.#}u inside, {pre:0.#}u of it already as authored; the rest of it may float{motion}");
         if (f.WinnerDistance <= epsilon)
             return (relation, ContactVerdict.ReSupported, ContactBlocker.None, $"{rel}; under the winner it still touches {(f.WinnerContactIsHost ? "the host at its new place" : "another physical reference")} ({f.WinnerDistance:0.#}u) — the room was rebuilt around it");
         var verdict = relation == ContactRelation.Supported ? ContactVerdict.Stranded : ContactVerdict.Orphaned;

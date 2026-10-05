@@ -87,6 +87,9 @@ public sealed record ArmContact(SoupContact Contact, FormKey Against, char DepSr
     /// <summary>The facing gap between the CORE surfaces, kept beside <see cref="SoupContact.FacingDistance"/> when that is read with
     /// the Havok radius (<see cref="ContactIndex.ReadRadius"/>), so a row can say what the radius changed; equal to it otherwise.</summary>
     public float CoreGap { get; init; } = float.NaN;
+    /// <summary>The differential Sunk rule (opt-in, <see cref="ContactIndex.BestContact"/>): how deep the dependent already sat in
+    /// <see cref="ArmContact.Against"/> as authored (0 when not measured), and whether this contact is that pre-existing overlap
+    /// standing alone — nothing else within ε.</summary>
     public float PreexistingDepth { get; init; }
     public bool PreexistingOnly { get; init; }
 }
@@ -418,6 +421,19 @@ public sealed class ContactIndex
         return _hostGrids[(key, snapIndex)] = grid;
     }
 
+    /// <summary>A neighbour's host grid at its AUTHORING placement, for the differential Sunk rule. Keyed by base as well as snap: the
+    /// arm's base can differ from the winner's at the same snap (a base swap is not a position step), and the shared
+    /// <see cref="HostGrid"/> cache is keyed by snap only.</summary>
+    TriangleGrid? ArmGrid(FormKey key, int snapIndex, FormKey baseKey, Snap s)
+    {
+        if (_armGrids.TryGetValue((key, snapIndex, baseKey), out var g)) return g;
+        var geom = GeomOf(baseKey);
+        TriangleGrid? grid = geom is { CanHost: true } ? TriangleGrid.Build(SpatialOverlap.TransformSoup(geom.HostSoup, s.Pos, s.Rot, s.Scale)) : null;
+        if (_armGrids.Count > 1024) _armGrids.Clear();        // a bound, as for the other caches
+        return _armGrids[(key, snapIndex, baseKey)] = grid;
+    }
+    readonly Dictionary<(FormKey Key, int Snap, FormKey Base), TriangleGrid?> _armGrids = new();
+
     TriangleSoup? DepSoup(FormKey key, int snapIndex, FormKey baseKey, Snap s)
     {
         if (_depSoups.TryGetValue((key, snapIndex), out var so)) return so;
@@ -632,16 +648,23 @@ public sealed class ContactIndex
     /// is within the box band: the deepest penetration if any penetrates, else the least distance. Null when nothing is
     /// within the band, or the dependent has no soup. <paramref name="placementOf"/> gives each neighbour's snap in this
     /// arm; <paramref name="baseOf"/> its base then. The against-ref of the best contact is the one the reported depth
-    /// was measured against, and the arm carries how wide that ref is along the contact normal (R4).</summary>
+    /// was measured against, and the arm carries how wide that ref is along the contact normal (R4).
+    /// <para><paramref name="preexistingDepth"/> (the differential Sunk rule, opt-in; <see cref="Judge"/> passes it): for a neighbour
+    /// the dependent penetrates deeper than ε, how deep the dependent already sat in that same reference in the authoring arm
+    /// (0 when it did not exist there or did not overlap). Neighbours are then ranked by NEW depth (penetration minus that), so a
+    /// deep authored overlap cannot mask a shallower new one. A neighbour whose new depth is within ε is a PRE-EXISTING overlap:
+    /// it is chosen only when nothing else touches within ε, and the result then says so (<see cref="ArmContact.PreexistingOnly"/>).
+    /// Without the function the selection is exactly the one before the rule.</para></summary>
     public ArmContact? BestContact(FormKey depKey, int depSnapIndex, FormKey depBase, Snap depSnap, Aabb depBox,
                                    BoxHash<FormKey> hash, Func<FormKey, (Snap Snap, int SnapIndex)?> placementOf, Func<FormKey, int, FormKey> baseOf,
-                                   out int neighboursTested)
+                                   out int neighboursTested, Func<FormKey, float>? preexistingDepth = null)
     {
         neighboursTested = 0;
         var soup = DepSoup(depKey, depSnapIndex, depBase, depSnap);
         if (soup is null) return null;
         var depGeom = GeomOf(depBase)!;
-        ArmContact? best = null;
+        ArmContact? best = null; float bestRank = 0f;          // the best contact that is not a pre-existing overlap, ranked by new depth
+        ArmContact? bestPre = null;                            // the deepest pre-existing overlap
         float bestRaw = float.PositiveInfinity; FormKey rawAgainst = default;
         float depPad = DepPadW(depBase, depSnap);
         foreach (var (nKey, nBox, _) in hash.Near(depSnap.Space, depBox, BoxBand + depPad + (ReadRadius ? _maxHostRadiusW : 0f)))
@@ -655,18 +678,28 @@ public sealed class ContactIndex
             neighboursTested++;
             var (c, coreGap) = Measure(soup, grid, depKey, depSnapIndex, depBase, depSnap, nKey, np.SnapIndex, nBase, np.Snap);
             if (c.Distance < bestRaw) { bestRaw = c.Distance; rawAgainst = nKey; }
-            if (best is not null && !Better(c, best.Contact)) continue;
+            float pen = c.EffectivePenetration, pre = 0f;
+            if (preexistingDepth is not null && pen > Epsilon && preexistingDepth(nKey) is var pd && pd > 0f) pre = pd;
+            float rank = pen - pre;
+            bool isPre = pre > 0f && rank <= Epsilon;
+            if (isPre ? bestPre is not null && pen <= bestPre.Contact.EffectivePenetration
+                      : best is not null && !Better(rank, c.FacingDistance, bestRank, best.Contact.FacingDistance)) continue;
             var hg = GeomOf(nBase)!;
             float extent = c.Normal.LengthSquared() > 1e-12f ? grid.ExtentAlong(Vector3.Normalize(c.Normal)) : MaxDim(nBox);
-            best = new ArmContact(c, nKey, depGeom.DepSrc, hg.HostSrc, extent, MaxDim(nBox)) { CoreGap = coreGap };
+            var arm = new ArmContact(c, nKey, depGeom.DepSrc, hg.HostSrc, extent, MaxDim(nBox)) { CoreGap = coreGap, PreexistingDepth = pre, PreexistingOnly = isPre };
+            if (isPre) bestPre = arm; else { best = arm; bestRank = rank; }
         }
-        return best is null ? null : best with { RawDistance = bestRaw, RawAgainst = rawAgainst };
+        // A pre-existing overlap stands as the contact only when nothing new is touching or sinking.
+        bool bestTouches = best is not null && (bestRank > 0f || best.Contact.FacingDistance <= Epsilon);
+        var chosen = bestPre is not null && !bestTouches ? bestPre : best;
+        return chosen is null ? null : chosen with { RawDistance = bestRaw, RawAgainst = rawAgainst };
     }
 
-    static bool Better(SoupContact a, SoupContact b)
+    /// <summary>Depth first (new depth under the differential rule, raw penetration otherwise), then the facing gap.</summary>
+    static bool Better(float depthA, float facingA, float depthB, float facingB)
     {
-        if (a.EffectivePenetration > 0f || b.EffectivePenetration > 0f) return a.EffectivePenetration > b.EffectivePenetration;
-        return a.FacingDistance < b.FacingDistance;
+        if (depthA > 0f || depthB > 0f) return depthA > depthB;
+        return facingA < facingB;
     }
 
     /// <summary>One dependent against one host in one arm. <paramref name="anySurface"/>: let a render-only mesh stand as
@@ -770,8 +803,30 @@ public sealed class ContactIndex
             // The winner arm: the dependent where the winner leaves it, against everything physical near it.
             var winBase = WinnerBase(depKey);
             var winBox = WorldBox(winBase, depWin);
+            // The differential Sunk rule: how deep the dependent already sat in a neighbour as authored — both at their authoring
+            // placements in the arm without the host's mover (GATE-A §3.3, closed-slabs lane). The dependent's authoring soup is
+            // built once per row, and only when some neighbour penetrates deeper than ε.
+            TriangleSoup? depAuthSoup = null; bool depAuthBuilt = false;
+            float Preexisting(FormKey nKey)
+            {
+                if (!depAuthBuilt) { depAuthBuilt = true; depAuthSoup = depGeom is { CanDepend: true } ? SpatialOverlap.TransformSoup(depGeom.DepSoup, depAuth.Pos, depAuth.Rot, depAuth.Scale) : null; }
+                if (depAuthSoup is null) return 0f;
+                var ns = Index.History.Of(nKey);
+                if (ns is null || ns.Count == 0) return 0f;
+                int ni = AuthoringSnapIndex(ns, host.Mover, closure);
+                if (ni < 0) return 0f;                                           // the mover's side introduced it
+                var nAuth = ns[ni];
+                if (nAuth.Deleted || nAuth.Space != depAuth.Space) return 0f;
+                var nEn = ArmEnable(nKey, host.Mover, closure);
+                if (!nEn.Resolved || !nEn.Enabled) return 0f;                     // not there at runtime as authored
+                var nBase = ArmBase(nKey, host.Mover, closure);
+                if (nBase.IsNull) return 0f;
+                var grid = ArmGrid(nKey, ni, nBase, nAuth);
+                if (grid is null) return 0f;
+                return SpatialOverlap.Contact(depAuthSoup, grid, Reach, NearBand).EffectivePenetration;   // the core depth, as Measure reads it
+            }
             var win = winBox.IsEmpty ? null
-                    : BestContact(depKey, snaps.Count - 1, winBase, depWin, winBox, winners, WinnerPlacement, (k, _) => WinnerBase(k), out _);
+                    : BestContact(depKey, snaps.Count - 1, winBase, depWin, winBox, winners, WinnerPlacement, (k, _) => WinnerBase(k), out _, Preexisting);
             bool winMeasured = !winBox.IsEmpty;
             var f = f0 with
             {
@@ -780,6 +835,8 @@ public sealed class ContactIndex
                 WinnerPenetration = win?.Contact.EffectivePenetration ?? 0f,
                 WinnerContactIsHost = win is not null && win.Against == host.Key,
                 WinnerAgainstExtent = win?.AgainstExtent ?? float.NaN,
+                WinnerPreexistingPenetration = win?.PreexistingDepth ?? 0f,
+                WinnerPreexistingOnly = win?.PreexistingOnly ?? false,
             };
             var r = DetectorModel.PlacementContact(f, Epsilon, SupportCos, AttachCos);
             if (tw) TraceJudged(depKey, host.Key, r.Relation, r.Verdict, r.Reason, nearMiss, auth);
