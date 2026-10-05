@@ -465,7 +465,7 @@ def plugin_layers(name: str, view_mods, *, instance: str | None, profile: str | 
     sighting of a file name wins, names compare case-insensitively, only `.esp/.esm/.esl` at a folder's
     top level count, and an absent or unreadable folder is skipped.
 
-    The probes take the game folder from `HOUSECARL_GAME_PATH` or the harness config and ALWAYS walk its
+    The probes take the game folder from `HOUSECARL_GAME_PATH` (or the harness config, for its own instance) and ALWAYS walk its
     `Data`; a plan given no `--game` walks the other layers and says so in `gameWalked`, and one given no
     `--profile` cannot list the profile's folders at all (`profileNamed`). The caller states a hash only
     when the walk was whole enough to name the copy a probe would read.
