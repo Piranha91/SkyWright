@@ -15,9 +15,14 @@ public sealed class CacheBudget
     /// <summary>The automatic budget's share of the memory the runtime may use (physical, or the heap hard limit when one is set).</summary>
     public const double AutoFraction = 0.20;
 
-    /// <summary>The automatic budget for a process allowed <paramref name="availableBytes"/>: <see cref="AutoFraction"/> of it, never
-    /// below <see cref="MinimumBytes"/>.</summary>
-    public static long Auto(long availableBytes) => Math.Max(MinimumBytes, (long)(availableBytes * AutoFraction));
+    /// <summary>The automatic budget's ceiling. Set from one case's measurements (2026-10-05, the lab whole order, radius off and
+    /// on): host-grid misses barely changed between 3.2 GiB and 13 GB, and a larger budget bought no measured speed but cost
+    /// memory. A case whose misses rise between 3.2 GiB and a larger budget would move it. An explicit budget may exceed it.</summary>
+    public const long AutoCeilingBytes = 4L << 30;
+
+    /// <summary>The automatic budget for a process allowed <paramref name="availableBytes"/>: <see cref="AutoFraction"/> of it, at most
+    /// <see cref="AutoCeilingBytes"/>, never below <see cref="MinimumBytes"/>.</summary>
+    public static long Auto(long availableBytes) => Math.Max(MinimumBytes, Math.Min(AutoCeilingBytes, (long)(availableBytes * AutoFraction)));
     public static long Auto() => Auto(GC.GetGCMemoryInfo().TotalAvailableMemoryBytes);
     /// <summary>The automatic budget's share of the memory free now beyond the live data, applied at the fit check.</summary>
     public const double FreeFraction = 0.40;

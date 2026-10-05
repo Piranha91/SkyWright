@@ -74,6 +74,9 @@ static class CacheBudgetProof
 
         // T4: the automatic budget, the parser, and the fit check.
         long gib = 1L << 30;
+        Check("cache-budget T4e: auto never exceeds the 4 GiB ceiling - 20 % of 64 GiB would be 12.8 GiB",
+              CacheBudget.Auto(64 * gib) == 4 * gib && CacheBudget.AutoCeilingBytes == 4 * gib && CacheBudget.Auto(20 * gib) == 4 * gib,
+              $"64 GiB -> {CacheBudget.Auto(64 * gib)}, 20 GiB -> {CacheBudget.Auto(20 * gib)}");
         Check("cache-budget T4a: auto = 20 % of what the runtime may use, never below the 64 MiB minimum",
               CacheBudget.Auto(16 * gib) == (long)(16 * gib * 0.20) && CacheBudget.Auto(8 * gib) == (long)(8 * gib * 0.20)
            && CacheBudget.Auto(1L << 20) == CacheBudget.MinimumBytes && CacheBudget.MinimumBytes == 64L << 20,

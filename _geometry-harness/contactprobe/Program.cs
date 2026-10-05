@@ -87,7 +87,7 @@ using HousecarlCore.Progress;
 //                   (default on; rows gain AuthoringCoreGap / WinnerCoreGap); off = the core reading, byte-identical to before
 //   --cache-budget SIZE|auto  the byte budget the per-placement contact caches share (least-recently-used; e.g. 2G, 512M;
 //                   minimum 64M). auto (default) = the smaller of 20 % of the memory the runtime may use (physical, or the heap
-//                   hard limit) and 40 % of (memory free before the host loop - live data).
+//                   hard limit), 40 % of (memory free before the host loop - live data) and 4 GiB (an explicit size may exceed it).
 //                   Output does not depend on it; a smaller budget rebuilds evicted grids (slower, less memory)
 //   --bos on|off    apply the Base Object Swapper layer (*_SWAP.ini) so every ref is judged by the base the game loads
 //                   (default on; _shared/BosHook.cs); off = the record bases
@@ -907,11 +907,13 @@ string? FitCheck()
     if (cacheBudget is null)
     {
         // auto = min(share of what the runtime may use, share of what is free now beyond the live data), floored at the minimum
+        long byRuntime = (long)(GC.GetGCMemoryInfo().TotalAvailableMemoryBytes * CacheBudget.AutoFraction);
         long byFree = CacheBudget.AutoFromFree(f, live);
-        bool freeWins = byFree < cidx.Budget.Limit;
         cidx.Budget.LowerTo(byFree);
-        line += $" -> auto {cidx.Budget.Limit / 1e9:0.00} GB ({(freeWins ? $"{CacheBudget.FreeFraction:0.00} x (free now - live)" : $"{CacheBudget.AutoFraction:0.00} x runtime memory")} won"
-              + $"{(cidx.Budget.Limit == CacheBudget.MinimumBytes ? ", at the minimum" : "")})";
+        string won = byFree <= Math.Min(byRuntime, CacheBudget.AutoCeilingBytes) ? $"{CacheBudget.FreeFraction:0.00} x (free now - live)"
+                   : byRuntime <= CacheBudget.AutoCeilingBytes ? $"{CacheBudget.AutoFraction:0.00} x runtime memory"
+                   : $"the {CacheBudget.AutoCeilingBytes >> 30} GiB ceiling";
+        line += $" -> auto {cidx.Budget.Limit / 1e9:0.00} GB ({won} won{(cidx.Budget.Limit == CacheBudget.MinimumBytes ? ", at the minimum" : "")})";
     }
     else if ((long)(f * 0.9) - live < cidx.Budget.Limit)
         line += $" (warning: the --cache-budget exceeds the {((long)(f * 0.9) - live) / 1e9:0.00} GB that fits; kept as asked)";
