@@ -843,6 +843,14 @@ Console.WriteLine($"   ReSupported by what: host at its new place {rel.Count(r =
 // Stage 2 review F1 (depth parity): a reference whose authoring placement (the arm without the mover) is its winning placement, with the
 // same base — for such a dependent and against-ref the authored depth and the winner depth are the same measurement, so the new depth
 // must be 0 within float noise. Reported on each row; scored by closed-slabs/score_stage2.py.
+// Diagnostic (K-R3' attribution, 2026-10-04): a reference's placement snaps and its base changes, by plugin, when its base was ever
+// changed — the shape the (ref, snap) cache key could confuse before 6e9e397f. Null for a reference whose base never changed.
+object? BaseStory(FormKey k)
+{
+    if (!idx.BaseChanges.TryGetValue(k, out var bc) || bc.Count < 2) return null;
+    var hs = idx.History.Of(k);
+    return new { Snaps = hs?.Select(x => PluginName(x.Plugin)).ToList(), Bases = bc.Select(c => $"{PluginName(c.Plugin)}: {BaseLabel(c.Base)}").ToList() };
+}
 bool Unmoved(FormKey k, int mover)
 {
     var hs = idx.History.Of(k);
@@ -1068,6 +1076,7 @@ if (jsonPath is not null)
         Label = PreOnly(r) ? DetectorModel.PreexistingOnlyLabel : r.Verdict.ToString(),
         ParityUnmoved = r.Winner is { } wp && Unmoved(r.Dependent, r.Host.Mover) && Unmoved(wp.Against, r.Host.Mover),
         DeepNeighbours = r.Winner?.DeepNeighbours?.Select(d => new { Against = d.Against.ToString(), d.Depth, d.Authored }).ToList(),
+        DepBaseStory = BaseStory(r.Dependent), AgainstBaseStory = r.Winner is { } wb ? BaseStory(wb.Against) : null,
         DependentDisabled = r.Facts.DependentDisabled, DependentDisabledViaParent = r.Facts.DependentDisabledViaParent, HostRemovedViaParent = r.Host.RemovedViaParent,
         AuthoringRawDistance = r.Authoring?.Contact.Distance, WinnerRawDistance = r.Winner?.RawDistance, WinnerRawAgainst = r.Winner is { } wr && !wr.RawAgainst.IsNull ? wr.RawAgainst.ToString() : null,
     }, r), r.DepBase));
