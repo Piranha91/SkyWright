@@ -200,7 +200,7 @@ def floor_rule_applies(kind):
 DECIDING = ("C1", "C1b", "C2", "C3a")
 
 
-def verdict(action, classes_u, patched, doubling):
+def verdict(action, classes_u, patched, doubling, c4=()):
     made = [c for c, v in patched.items() if v.get("positiveP")]
     if made:
         return {"verdict": "patch light clash", "text": "the patched order shows " + ", ".join(sorted(made)), "roomDoubling": False}
@@ -294,7 +294,7 @@ def judge_record(key, action, arms, mods, p: Params):
                   and math.dist(l["pos"], lu["pos"]) < l["radius"] + lu["radius"]]
         if others and mine is not None:
             doubling = {"lights": len(others) + 1}
-    v = verdict(action, classes, patched, doubling if "DISABLE" in action else None)
+    v = verdict(action, classes, patched, doubling if "DISABLE" in action else None, printed.get("C4") or ())
     return {"key": key, "light": True, "own": own_name, "classes": classes, "patched": patched, "printed": printed, **v}
 
 

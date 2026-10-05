@@ -205,6 +205,31 @@ def test_judge_record_c2_own_mod_already_behind_is_not_the_pair():
     assert r["classes"]["C2"]["attribution"] == "not the pair" and r["verdict"] == "taste (no clash)"
 
 
+C4_NEEDS_BOTH = {"shape": ["000BBA:ModA.esp", 2], "countU": 12, "vanilla": {"positiveU": True, "attribution": "needs both"},
+                 "llf": {"positiveU": False, "attribution": "no clash in u"}, "disagree": True}
+
+
+def test_verdict_count_only_c4_needs_both_is_cannot_tell():
+    """rejects: taste while a shape is over the light limit only with both mods - C4 is count-only, so unsettled (Gate C review F1)"""
+    v = lc.verdict("DISABLE", {"C2": {"attribution": "no clash in u"}}, patched={}, doubling={"lights": 3}, c4=[C4_NEEDS_BOTH])
+    assert v["verdict"] == "cannot tell" and "C4" in v["text"] and "unsettled" in v["text"] and v.get("nextAction")
+    assert v["roomDoubling"] is False
+
+
+def test_verdict_c4_not_the_pair_stays_taste():
+    """rejects: every printed C4 row made unsettled - a shape already over the limit in one mod's own arrangement is not the pair"""
+    row = dict(C4_NEEDS_BOTH, vanilla={"positiveU": True, "attribution": "not the pair"}, llf={"positiveU": False, "attribution": "no clash in u"})
+    v = lc.verdict("DISABLE", {"C2": {"attribution": "no clash in u"}}, patched={}, doubling=None, c4=[row])
+    assert v["verdict"] == "taste (no clash)"
+
+
+def test_verdict_decided_fix_stands_over_unsettled_c4():
+    """rejects: a decided C2 fix demoted to cannot tell by an unsettled count"""
+    v = lc.verdict("DISABLE", {"C2": {"attribution": "needs both"}}, patched={}, doubling=None, c4=[C4_NEEDS_BOTH])
+    assert v["verdict"] == "fixes an inter-mod clash"
+
+
+
 if __name__ == "__main__":
     fails = 0
     for name, fn in sorted(globals().items()):
