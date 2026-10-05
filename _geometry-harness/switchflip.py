@@ -652,8 +652,9 @@ def cmd_launch(a) -> int:
             log(step="teardown_error", error=repr(e))
         if mo2_pid:
             try:
-                _ps(f"$p = Get-Process -Id {mo2_pid} -ErrorAction SilentlyContinue; "
-                    f"if ($p) {{ $p.CloseMainWindow() | Out-Null }}")
+                if mo2_pid in db._pids_of("ModOrganizer.exe"):      # it often exits by itself after the game
+                    _ps(f"$p = Get-Process -Id {mo2_pid} -ErrorAction SilentlyContinue; "
+                        f"if ($p) {{ $p.CloseMainWindow() | Out-Null }}; exit 0")
                 t0 = time.time()
                 while time.time() - t0 < 180 and mo2_pid in db._pids_of("ModOrganizer.exe"):
                     time.sleep(3)
