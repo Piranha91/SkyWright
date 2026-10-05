@@ -12,8 +12,8 @@ neither produces alone, and what the patch edit does about it. Classes (engine b
        (clutter between a light and its walls counts as leak).
   C3a  doubled fixture: one fixture within H of enabled lights from both mods.
   C4   per-shape limit (vanilla renderer: > 7 lights or > 4 shadow lights on one drawn shape; Light Limit Fix reading: > 7
-       portal-strict lights): COUNT ONLY, never decides (vanilla interiors exceed it in 7 of 40 calibration cells; whether
-       the engine shows it is an in-game question).
+       portal-strict lights): COUNT ONLY, never a clash by itself (whether the engine shows it is an in-game question). A
+       shape over the limit only with both mods is an undecided check: such an edit reads cannot tell, never taste.
 Attribution (four-setup): positive in u and in no single-mod or dependency-only arrangement where the light is present.
 Verdicts per edit: fixes an inter-mod clash / patch light clash / taste (no clash) / cannot tell (with the class and reason).
 A DISABLE that reads taste while both mods' lights reach each other says so ("both mods' lights enabled together: N lights,
@@ -210,9 +210,20 @@ def verdict(action, classes_u, patched, doubling, c4=()):
         return {"verdict": "fixes an inter-mod clash", "text": "the combination alone shows " + ", ".join(sorted(set(fixed))) + "; the edit removes it",
                 "roomDoubling": False}
     open_ = [(c, v) for c, v in classes_u.items() if c in DECIDING and v.get("attribution") == "not measured in u" and v.get("applies", True)]
-    if open_:
-        return {"verdict": "cannot tell", "text": "; ".join(f"{c} not measured in u ({v.get('label', 'no reading')})" for c, v in open_),
-                "roomDoubling": False}
+    # C4 is count-only (its engine behaviour is unsettled): a shape over the limit only with both mods, under either reading, is a
+    # check that has not decided, so the edit cannot read taste
+    unsettled = [r for r in c4 if any(r.get(k, {}).get("attribution") == "needs both" for k in ("vanilla", "llf"))]
+    if open_ or unsettled:
+        parts = [f"{c} not measured in u ({v.get('label', 'no reading')})" for c, v in open_]
+        if unsettled:
+            readings = sorted({k for r in unsettled for k in ("vanilla", "llf") if r.get(k, {}).get("attribution") == "needs both"})
+            parts.append(f"C4: over the light limit only with both mods ({len(unsettled)} shape(s), {'/'.join(readings)} reading); "
+                         "engine behaviour unsettled")
+        out = {"verdict": "cannot tell", "text": "; ".join(parts), "roomDoubling": False}
+        if unsettled:
+            out["nextAction"] = "lab station: per-shape light limit on " + ", ".join(f"{r['shape'][0]} shape {r['shape'][1]}" for r in unsettled[:3])
+            out["unsettled"] = ["C4"]
+        return out
     text = "every applicable class read no clash only the combination makes"
     if doubling:
         return {"verdict": "taste (no clash)", "roomDoubling": True,
@@ -315,7 +326,7 @@ def main(argv):
     f.add_argument("--edits", required=True, help="JSON list of {id, action, records}")
     f.add_argument("--out", required=True)
     f.add_argument("--host-radius", type=float, default=64.0)
-    f.add_argument("--leak-threshold", type=float, default=607.6)
+    f.add_argument("--leak-threshold", type=float, required=True, help="T_leak from the calibration (C2c prints only)")
     a = ap.parse_args(argv)
     with Run("lightclash", stage_source="single-stage"):
         arms = dict(x.split("=", 1) for x in a.arm)
