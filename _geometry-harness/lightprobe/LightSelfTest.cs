@@ -58,8 +58,11 @@ static class LightSelfTest
               () => Math.Abs(LightReach.Attenuation(0, 100) - 1) < 1e-12 && Math.Abs(LightReach.Attenuation(50, 100) - 0.75) < 1e-12
                     && LightReach.Attenuation(100, 100) == 0 && LightReach.Attenuation(150, 100) == 0);
 
-        Check("radius: the reference's XRDS wins over the base", "base radius only", () => LightReach.EffectiveRadius(280, 600f) == 600f);
-        Check("radius: no XRDS (null or 0) keeps the base", "an absent override read as radius 0", () => LightReach.EffectiveRadius(280, null) == 280f && LightReach.EffectiveRadius(512, 0f) == 512f);
+        // XRDS on a light reference is an offset added to the base radius (xEdit wbREFRRadiusToStr; reverse-engineered
+        // ExtraRadius.radiusModifier), not a replacement: vanilla stores negative values.
+        Check("radius: the reference's XRDS is added to the base", "XRDS read as a replacement radius", () => LightReach.EffectiveRadius(280, 320f) == 600f);
+        Check("radius: a negative XRDS shrinks the light", "a negative offset ignored (base kept)", () => Math.Abs(LightReach.EffectiveRadius(280, -145.96465f) - 134.03535f) < 1e-3);
+        Check("radius: no XRDS (null or 0) keeps the base", "an absent offset read as radius 0", () => LightReach.EffectiveRadius(280, null) == 280f && LightReach.EffectiveRadius(512, 0f) == 512f);
 
         // A room shell 1000 u wide (inward normals) owned by 1; a non-shadow light inside it and one outside it.
         var room = Box(Vector3.Zero, 500, inward: true);
