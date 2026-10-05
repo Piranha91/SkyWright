@@ -218,7 +218,9 @@ try
         else if (flag == "--cache-budget")
         {
             var v = NeedValue(i, flag);
-            cacheBudget = CacheBudget.Parse(v) ?? throw new ArgumentException("--cache-budget takes a size (e.g. 2G, 512M, bytes) or auto");
+            // "auto" is the default (null), so the fit check's free-memory term applies to it as well
+            cacheBudget = v.Trim().Equals("auto", StringComparison.OrdinalIgnoreCase) ? null
+                        : CacheBudget.Parse(v) ?? throw new ArgumentException("--cache-budget takes a size (e.g. 2G, 512M, bytes) or auto");
             if (cacheBudget < CacheBudget.MinimumBytes) throw new ArgumentException($"--cache-budget {v} is below the minimum {CacheBudget.MinimumBytes >> 20} MiB");
             i++;
         }
