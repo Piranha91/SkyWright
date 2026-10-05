@@ -7,17 +7,21 @@ neither produces alone, and what the patch edit does about it. Classes (engine b
        combination that fixture is gone or moved beyond H. C1b, the mirror: a fixture its own arrangement lights has no
        enabled light within H in the combination. A light with no fixture within H is a fill light: C1 does not apply.
   C2   wrong side of the surfaces: most first hits from the light (64 rays inside its radius) are BACK faces, attributed by
-       the four-setup rule. "void": no surface of either mod within its radius (it lights nothing). The leak magnitude
+       the four-setup rule, and only when at least 8 of the 64 rays hit (fewer: cannot tell, few hits). "void": no surface
+       of either mod within its radius (it lights nothing; decided by the leak sampler, not the rays). The leak magnitude
        (C2c) is printed, never decides: the calibration found 74.8 % of vanilla non-shadow lights above its frozen threshold
        (clutter between a light and its walls counts as leak).
   C3a  doubled fixture: one fixture within H of enabled lights from both mods.
   C4   per-shape limit (vanilla renderer: > 7 lights or > 4 shadow lights on one drawn shape; Light Limit Fix reading: > 7
        portal-strict lights): COUNT ONLY, never a clash by itself (whether the engine shows it is an in-game question). A
-       shape over the limit only with both mods is an undecided check: such an edit reads cannot tell, never taste.
+       shape over the limit only with both mods is an undecided check: such an edit reads cannot tell, never taste. The
+       deciding reading is Light Limit Fix's when the evaluated instance has it installed (lightprobe identity.llf), else the
+       vanilla one; both are printed. A light counts toward a shape only if its radius reaches the shape's placed box.
 Attribution (four-setup): positive in u and in no single-mod or dependency-only arrangement where the light is present.
 Verdicts per edit: fixes an inter-mod clash / patch light clash / taste (no clash) / cannot tell (with the class and reason).
 A DISABLE that reads taste while both mods' lights reach each other says so ("both mods' lights enabled together: N lights,
-brightness not judged").
+brightness not judged") and lists the light's nearest fixture, its distance against H = 48 / 64 / 96 and
+whether the combination moved or removed it (a fixture left behind is C1, a clash).
 
 usage: python lightclash.py --arm u=U.json --arm plusa=A.json --arm plusb=B.json --arm dep=D.json --arm p=P.json
                                  --mods A.esp B.esp --edits EDITS.json --out OUT.json [--host-radius 64]
@@ -42,6 +46,8 @@ FIXTURE = re.compile(r"candle|fire|brazier|lantern|chandelier|sconce|torch|heart
 NOT_FIXTURE = re.compile(r"firewood|firefly|fireflies", re.I)
 SINGLES = ("plusa", "plusb", "dep")
 VANILLA_LIMIT, VANILLA_SHADOW_LIMIT, STRICT_LIMIT = 7, 4, 7
+MIN_FACING_HITS = 8   # the back-face test decides only when at least this many of the 64 rays hit a surface
+HS_REPORTED = (48.0, 64.0, 96.0)   # the H values the room-doubling fixture listing reports against
 
 
 @dataclass(frozen=True)
@@ -141,6 +147,8 @@ def c2_facing(light):
     if light is None or not light.get("enabled") or "facing" not in light:
         return None
     f = light["facing"]
+    if f["front"] + f["back"] < MIN_FACING_HITS:
+        return False if is_void(light) else None   # void: lights nothing (decided); otherwise too few hits to decide
     if f["back"] > f["front"]:
         return True
     if light.get("incomplete"):
@@ -212,12 +220,11 @@ def verdict(action, classes_u, patched, doubling, c4=(), c4_decider="vanilla"):
     open_ = [(c, v) for c, v in classes_u.items() if c in DECIDING and v.get("attribution") == "not measured in u" and v.get("applies", True)]
     # C4 is count-only (its engine behaviour is unsettled): a shape over the limit only with both mods, under either reading, is a
     # check that has not decided, so the edit cannot read taste
-    unsettled = [r for r in c4 if any(r.get(k, {}).get("attribution") == "needs both" for k in ("vanilla", "llf"))]
+    unsettled = [r for r in c4 if r.get(c4_decider, {}).get("attribution") == "needs both"]
     if open_ or unsettled:
         parts = [f"{c} not measured in u ({v.get('label', 'no reading')})" for c, v in open_]
         if unsettled:
-            readings = sorted({k for r in unsettled for k in ("vanilla", "llf") if r.get(k, {}).get("attribution") == "needs both"})
-            parts.append(f"C4: over the light limit only with both mods ({len(unsettled)} shape(s), {'/'.join(readings)} reading); "
+            parts.append(f"C4: over the light limit only with both mods ({len(unsettled)} shape(s), {c4_decider} reading decides); "
                          "engine behaviour unsettled")
         out = {"verdict": "cannot tell", "text": "; ".join(parts), "roomDoubling": False}
         if unsettled:
@@ -234,13 +241,14 @@ def verdict(action, classes_u, patched, doubling, c4=(), c4_decider="vanilla"):
 # ---------------------------------------------------------------- the fold over lightprobe outputs
 
 def c4_decider(arms):
-    """The C4 reading that decides: Light Limit Fix's when the evaluated instance has it installed, else the vanilla renderer's."""
-    return "vanilla"
+    """The C4 reading that decides: Light Limit Fix's when the evaluated instance has it installed (lightprobe's identity.llf,
+    read through the order's virtual file system), else the vanilla renderer's. Both readings are always printed."""
+    return "llf" if (arms.get("u", {}).get("llf") or {}).get("installed") else "vanilla"
 
 
 def load_arm(path):
     d = json.load(open(path, encoding="utf-8"))
-    arr = {"refs": {}, "lights": {}, "shapes": {}, "cellOf": {}}
+    arr = {"refs": {}, "lights": {}, "shapes": {}, "cellOf": {}, "llf": (d.get("identity") or {}).get("llf")}
     for c in d["cells"]:
         for r in c["refs"]:
             arr["refs"][r["key"]] = r
@@ -277,9 +285,11 @@ def judge_record(key, action, arms, mods, p: Params):
             classes["C1"] = {"attribution": attribute({a: (v["positive"] if v else None) for a, v in c1.items()}), "detail": c1["u"]}
         # C2 (back-face majority), attributed; void label
         c2 = {a: c2_facing(arms[a]["lights"].get(key)) for a in ("u",) + SINGLES}
+        hits_u = lu["facing"]["front"] + lu["facing"]["back"] if "facing" in lu else None
         classes["C2"] = {"attribution": attribute(c2), "facing": lu.get("facing"),
                          "label": ("void: lights no surface of either mod" if is_void(lu) else
-                                   ("incomplete: " + ", ".join(lu["incomplete"]) if c2["u"] is None and lu.get("incomplete") else None))}
+                                   (f"few hits ({hits_u} of {lu['facing']['rays']} rays hit; {MIN_FACING_HITS} needed)" if hits_u is not None and hits_u < MIN_FACING_HITS else
+                                    ("incomplete: " + ", ".join(lu["incomplete"]) if c2["u"] is None and lu.get("incomplete") else None)))}
         # C3a: fixtures within H of the light in u
         for d, fx in _fixtures_near(u, lu["pos"], p.host_radius):
             vals = {a: c3a_doubled(fx, arms[a], mods, p)["positive"] if fx in arms[a]["refs"] else None for a in ("u",) + SINGLES}
@@ -310,8 +320,34 @@ def judge_record(key, action, arms, mods, p: Params):
                   and math.dist(l["pos"], lu["pos"]) < l["radius"] + lu["radius"]]
         if others and mine is not None:
             doubling = {"lights": len(others) + 1}
-    v = verdict(action, classes, patched, doubling if "DISABLE" in action else None, printed.get("C4") or ())
-    return {"key": key, "light": True, "own": own_name, "classes": classes, "patched": patched, "printed": printed, **v}
+    decider = c4_decider(arms)
+    v = verdict(action, classes, patched, doubling if "DISABLE" in action else None, printed.get("C4") or (), decider)
+    out = {"key": key, "light": True, "own": own_name, "classes": classes, "patched": patched, "printed": printed, "c4Decider": decider, **v}
+    if v.get("roomDoubling"):
+        out["doublingFixture"] = doubling_fixture(key, own, u, p)
+    return out
+
+
+def doubling_fixture(key, own, u, p: Params):
+    """For a room-doubling edit: the light's nearest fixture in its own arrangement, its distance against each reported H, and
+    whether the combination moved or removed it. leftBehind (at the fold's H) is exactly C1's positive case: a fixture within H
+    of the light in its own arrangement that, in the combination, is gone or no longer within H of the light."""
+    l_own = own["lights"].get(key)
+    if l_own is None:
+        return {"key": None, "label": "light absent from its own arrangement"}
+    near = sorted((math.dist(l_own["pos"], r["pos"]), r["key"]) for r in own["refs"].values() if _on(r) and is_fixture(r))
+    if not near:
+        return {"key": None, "label": "no fixture in its own arrangement"}
+    d, fk = near[0]
+    f_u, l_u = u["refs"].get(fk), u["lights"].get(key)
+    gone = f_u is None or not _on(f_u)
+    moved = (not gone) and math.dist(f_u["pos"], own["refs"][fk]["pos"]) > 1.0
+    d_u = None if gone or l_u is None else math.dist(f_u["pos"], l_u["pos"])
+    def left(h):
+        return d <= h and (gone or d_u is None or d_u > h)
+    return {"key": fk, "edid": own["refs"][fk].get("edid"), "dOwn": d, "dU": d_u,
+            "withinH": {f"{h:g}": d <= h for h in HS_REPORTED}, "movedInU": moved, "goneInU": gone,
+            "leftBehind": left(p.host_radius), "leftBehindByH": {f"{h:g}": left(h) for h in HS_REPORTED}}
 
 
 def fold(arm_paths, mods, edits, p: Params):

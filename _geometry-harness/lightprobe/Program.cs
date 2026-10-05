@@ -12,7 +12,7 @@
 // gets three readings: facing (front / back / no first hit over 64 rays inside its radius), leak (attenuated area lit
 // through an opaque surface, and the unblocked area beside it, per receiving reference), and point-in-solid against
 // every reference whose placed bounds contain the light (MeshAnchor's point reading). Every lit shape (drawn, lighting
-// shader; editor markers and Is-Marker bases are not drawn) a light's sphere reaches gets a row with the lights that reach it (count, shadow-casting, portal-strict). A reference whose
+// shader; editor markers and Is-Marker bases are not drawn) a light's radius reaches (its placed vertex box; the bound sphere count printed beside) gets a row with the lights that reach it (count, shadow-casting, portal-strict). A reference whose
 // model cannot be read is listed with its reason, and every light whose radius reaches its record bounds is labelled
 // incomplete. No decision is made here: attribution and verdicts are the caller's (the fold).
 // Base Object Swapper: not applied (stated in the output).
@@ -150,10 +150,24 @@ for (int p = 0; p < paths.Count; p++)
 }
 Console.WriteLine($"bases read: {baseType.Count:N0} ({lightBase.Count:N0} lights); {scopeRefs.Count:N0} refs in {scopeCells.Count} cell(s) ({sw.Elapsed.TotalSeconds:0.0}s)");
 
+// Light Limit Fix in the evaluated instance (decides which C4 reading the fold uses): the standalone SKSE plugin, or Community
+// Shaders with its Light Limit Fix feature, resolved through this order's virtual file system (enabled mods + game Data).
+object LlfDetect()
+{
+    string[] probes = { "SKSE/Plugins/LightLimitFix.dll", "SKSE/Plugins/CommunityShaders.dll", "Shaders/Features/LightLimitFix.ini" };
+    var hits = probes.Select(p => (p, h: assets.Resolve(p))).Where(x => x.h.Exists).Select(x => new { path = x.p, provider = x.h.Winner?.Source }).ToList();
+    bool standalone = hits.Any(h => h.path.EndsWith("LightLimitFix.dll", StringComparison.OrdinalIgnoreCase));
+    bool cs = hits.Any(h => h.path.EndsWith("CommunityShaders.dll", StringComparison.OrdinalIgnoreCase))
+              && hits.Any(h => h.path.EndsWith("LightLimitFix.ini", StringComparison.OrdinalIgnoreCase));
+    return new { installed = standalone || cs, how = standalone ? "SKSE/Plugins/LightLimitFix.dll" : cs ? "Community Shaders + Shaders/Features/LightLimitFix.ini" : "none of " + string.Join(", ", probes),
+                 found = hits };
+}
+var llf = LlfDetect();
+
 var jsonOpts = new JsonSerializerOptions { WriteIndented = true, PropertyNamingPolicy = JsonNamingPolicy.CamelCase, DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
                                            NumberHandling = JsonNumberHandling.AllowNamedFloatingPointLiterals };
 object Identity() => new { schema = "housecarl.light/1", policy = LightReach.PolicyVersion, bos = "off", pose = "stored pose (an animated shape is read where the file stores it)", population = "load-time", state = "baseline",
-                          configuration = cfg.Identity("load-time", "baseline").Short, plugins = pluginName };
+                          configuration = cfg.Identity("load-time", "baseline").Short, plugins = pluginName, llf };
 
 if (listInteriors)
 {
@@ -235,7 +249,7 @@ foreach (var (cedid, ck) in scopeCells)
         var parts = new List<(TriangleSoup, string[]?, int)>();
         var refused = new List<(FormKey Key, string Why, Vector3 At, float Reach)>();
         var bounds = new List<(int Owner, Aabb Box, TriangleSoup World, string[]? Tags, Snap Pose, TriangleSoup ModelSoup)>();
-        var shapes = new List<(int Owner, LightShape Shape, Vector3 Center, float Radius)>();
+        var shapes = new List<(int Owner, LightShape Shape, Vector3 Center, float Radius, Vector3[]? Box)>();
         var on = placed.Where(x => x.On).ToList();
         for (int o = 0; o < on.Count; o++)
         {
@@ -255,7 +269,14 @@ foreach (var (cedid, ck) in scopeCells)
             foreach (var s in m.Shapes.Where(s => s.Lit && s.ModelRadius > 0))
             {
                 var c = SpatialOverlap.TransformSoup(new TriangleSoup(new[] { s.ModelCenter }, Array.Empty<int>()), x.Pose.Pos, x.Pose.Rot, x.Pose.Scale).Vertices[0];
-                shapes.Add((o, s, c, s.ModelRadius * x.Pose.Scale));
+                Vector3[]? box = null;
+                if (s.BoxMin is Vector3 mn && s.BoxMax is Vector3 mx)
+                {
+                    var w = SpatialOverlap.TransformSoup(new TriangleSoup(new[] { mn, new Vector3(mx.X, mn.Y, mn.Z), new Vector3(mn.X, mx.Y, mn.Z), new Vector3(mn.X, mn.Y, mx.Z) },
+                                                                          Array.Empty<int>()), x.Pose.Pos, x.Pose.Rot, x.Pose.Scale).Vertices;
+                    box = new[] { w[0], w[1] - w[0], w[2] - w[0], w[3] - w[0] };
+                }
+                shapes.Add((o, s, c, s.ModelRadius * x.Pose.Scale, box));
             }
             if (m.Status == "partial") refused.Add((x.Key, "partial: " + string.Join("; ", m.Labels), new Vector3(x.Pose.Pos.X, x.Pose.Pos.Y, x.Pose.Pos.Z), 0f));
         }
@@ -291,9 +312,16 @@ foreach (var (cedid, ck) in scopeCells)
         }
         foreach (var s in shapes)
         {
-            var met = litLights.Where(l => LightReach.MeetsShape(new Vector3(l.Pose.Pos.X, l.Pose.Pos.Y, l.Pose.Pos.Z), (float)lightRow[l.Key]["radius"]!, s.Center, s.Radius)).ToList();
+            // assignment (sixth fold, rule a): a light counts toward a shape's limit only if its radius reaches the shape's placed
+            // box; the bound-sphere count is printed beside it. A shape with no vertex box falls back to the sphere, labelled.
+            var sphere = litLights.Where(l => LightReach.MeetsShape(new Vector3(l.Pose.Pos.X, l.Pose.Pos.Y, l.Pose.Pos.Z), (float)lightRow[l.Key]["radius"]!, s.Center, s.Radius)).ToList();
+            if (sphere.Count == 0) continue;
+            var met = s.Box is { } bx4
+                ? sphere.Where(l => LightReach.MeetsShapeBox(new Vector3(l.Pose.Pos.X, l.Pose.Pos.Y, l.Pose.Pos.Z), (float)lightRow[l.Key]["radius"]!, bx4[0], bx4[1], bx4[2], bx4[3])).ToList()
+                : sphere;
             if (met.Count == 0) continue;
             shapeRows.Add(new { @ref = on[s.Owner].Key.ToString(), shape = s.Shape.Index, name = s.Shape.Name, center = W(s.Center), radius = s.Radius, boundSource = s.Shape.BoundSource,
+                                assign = s.Box is null ? "sphere (no vertex box)" : "box", countSphere = sphere.Count,
                                 count = met.Count, shadow = met.Count(l => lightBase[l.Base].Shadow), strict = met.Count(l => lightBase[l.Base].Strict),
                                 lights = met.Select(l => l.Key.ToString()).ToList() });
         }
