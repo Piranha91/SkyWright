@@ -810,7 +810,8 @@ public static class DetectorModel
         bool DependentDeleted, bool DependentDisabled, bool DependentRePlacedByMoverSide,
         bool WinnerMeasured, float WinnerDistance, float WinnerPenetration, bool WinnerContactIsHost,
         DependentMotion Motion,
-        bool DependentDisabledViaParent = false, bool DependentEnableUnresolved = false, float WinnerAgainstExtent = float.NaN);
+        bool DependentDisabledViaParent = false, bool DependentEnableUnresolved = false, float WinnerAgainstExtent = float.NaN,
+        float WinnerPreexistingPenetration = 0f, bool WinnerPreexistingOnly = false);
 
     /// <summary>The placement-contact rule (frozen 2026-09-02 from the handoff of 2026-09-07). Piranha's two classes —
     /// apples left in the air when the table moves (stranded support), a sconce left on the old wall line when the

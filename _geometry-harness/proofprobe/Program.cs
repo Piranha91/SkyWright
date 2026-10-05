@@ -3589,6 +3589,7 @@ OverlapSurfaceProof.Run(Check);
 MotionProof.Run(Check);
 MotionProof.RunFollowUps(Check);
 ContactEvidenceProof.Run(Check);
+ContactDifferentialProof.Run(Check);
 MeshPipelineProof.Run(Check);
 SceneScopeProof.Run(Check);
 OcclusionGeometryProof.Run(Check);

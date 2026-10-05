@@ -87,6 +87,8 @@ public sealed record ArmContact(SoupContact Contact, FormKey Against, char DepSr
     /// <summary>The facing gap between the CORE surfaces, kept beside <see cref="SoupContact.FacingDistance"/> when that is read with
     /// the Havok radius (<see cref="ContactIndex.ReadRadius"/>), so a row can say what the radius changed; equal to it otherwise.</summary>
     public float CoreGap { get; init; } = float.NaN;
+    public float PreexistingDepth { get; init; }
+    public bool PreexistingOnly { get; init; }
 }
 
 /// <summary>One (dependent, moved host) pair, judged. <paramref name="DepAuthor"/> is the plugin that set the dependent's
