@@ -840,6 +840,18 @@ foreach (var v in new[] { ContactVerdict.Stranded, ContactVerdict.Orphaned, Cont
 }
 Console.WriteLine($"   ReSupported by what: host at its new place {rel.Count(r => r.Verdict == ContactVerdict.ReSupported && r.Facts.WinnerContactIsHost):N0}, another reference {rel.Count(r => r.Verdict == ContactVerdict.ReSupported && !r.Facts.WinnerContactIsHost):N0}; "
                 + $"Sunk into: the host {rel.Count(r => r.Verdict == ContactVerdict.Sunk && r.Facts.WinnerContactIsHost):N0}, something else {rel.Count(r => r.Verdict == ContactVerdict.Sunk && !r.Facts.WinnerContactIsHost):N0}");
+// Stage 2 review F1 (depth parity): a reference whose authoring placement (the arm without the mover) is its winning placement, with the
+// same base — for such a dependent and against-ref the authored depth and the winner depth are the same measurement, so the new depth
+// must be 0 within float noise. Reported on each row; scored by closed-slabs/score_stage2.py.
+bool Unmoved(FormKey k, int mover)
+{
+    var hs = idx.History.Of(k);
+    if (hs is null || hs.Count == 0) return false;
+    int ai = ContactIndex.AuthoringSnapIndex(hs, mover, closure);
+    if (ai < 0 || hs[ai].Deleted) return false;
+    var a = hs[ai]; var w = hs[^1];
+    return a.SameAs(w) && a.Rot.Equals(w.Rot) && a.Scale == w.Scale && cidx.ArmBase(k, mover, closure) == cidx.WinnerBase(k);
+}
 bool PreOnly(ContactRow r) => r.Verdict == ContactVerdict.ReSupported && r.Facts.WinnerPreexistingOnly;
 // The differential Sunk rule (closed-slabs lane, 2026-10-04): only depth beyond what the dependent already had in the same reference as
 // authored can sink a row. A row whose only contact is such an overlap is counted apart (Gate A review F1): the rest of it may float.
@@ -1054,6 +1066,7 @@ if (jsonPath is not null)
         WinnerAgainstExtent = r.Facts.WinnerAgainstExtent, WinnerAgainstMaxDim = r.Winner?.AgainstMaxDim,
         WinnerPreexistingPenetration = r.Facts.WinnerPreexistingPenetration, WinnerPreexistingOnly = r.Facts.WinnerPreexistingOnly,
         Label = PreOnly(r) ? DetectorModel.PreexistingOnlyLabel : r.Verdict.ToString(),
+        ParityUnmoved = r.Winner is { } wp && Unmoved(r.Dependent, r.Host.Mover) && Unmoved(wp.Against, r.Host.Mover),
         DependentDisabled = r.Facts.DependentDisabled, DependentDisabledViaParent = r.Facts.DependentDisabledViaParent, HostRemovedViaParent = r.Host.RemovedViaParent,
         AuthoringRawDistance = r.Authoring?.Contact.Distance, WinnerRawDistance = r.Winner?.RawDistance, WinnerRawAgainst = r.Winner is { } wr && !wr.RawAgainst.IsNull ? wr.RawAgainst.ToString() : null,
     }, r), r.DepBase));
