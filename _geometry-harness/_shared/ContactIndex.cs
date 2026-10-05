@@ -169,8 +169,12 @@ public sealed class ContactIndex
     static Dictionary<string, double> Tv(string n1, double v1, string n2, double v2) => new() { [n1] = v1, [n2] = v2 };
     readonly Func<FormKey, RefGeometry?> _geomOf;
     readonly Dictionary<FormKey, RefGeometry?> _geomCache = new();
-    readonly Dictionary<(FormKey Key, int Snap, FormKey Base), TriangleGrid?> _hostGrids = new();
-    readonly Dictionary<(FormKey Key, int Snap, FormKey Base), TriangleSoup?> _depSoups = new();
+    /// <summary>The byte budget the per-placement caches share (host grids, dependent soups, radius shells): least-recently-used,
+    /// evicted by bytes (_shared/PlacementCache.cs). Set at construction; the default takes the automatic share of the memory the
+    /// runtime may use. Replaces the entry-count bounds that let the host grids reach 11.6 GB on an exterior block (2026-10-05).</summary>
+    public CacheBudget Budget { get; }
+    readonly PlacementCache<TriangleGrid> _hostGrids;
+    readonly PlacementCache<TriangleSoup> _depSoups;
     /// <summary>The per-arm enable chain (_shared/EnableArms.cs — lifted out of this file in Q27 so the overlap pass's
     /// without-plugin arm resolves the same way, and shared by construction rather than by copy).</summary>
     public EnableArms Arms { get; }
@@ -217,8 +221,8 @@ public sealed class ContactIndex
         return r;
     }
     float DepPadW(FormKey baseKey, Snap s) => ReadRadius && GeomOf(baseKey) is { } g ? g.DepRadiusMax * s.Scale : 0f;
-    readonly Dictionary<(FormKey Key, int Snap, FormKey Base), TriangleGrid?> _shellGrids = new();
-    readonly Dictionary<(FormKey Key, int Snap, FormKey Base), TriangleSoup?> _shellDeps = new();
+    readonly PlacementCache<TriangleGrid> _shellGrids;
+    readonly PlacementCache<TriangleSoup> _shellDeps;
 
     /// <summary>One pair measured: the core contact (normal, penetration, enclosed depth — the rule's reading), and with
     /// <see cref="ReadRadius"/> its facing gap replaced by the gap between the grown soups. The core gap rides beside it.</summary>
@@ -239,7 +243,6 @@ public sealed class ContactIndex
         TriangleGrid? grid = null;
         if (geom is { CanHost: true })
             grid = TriangleGrid.Build(SpatialOverlap.TransformSoup(geom.HostShell ?? geom.HostSoup, s.Pos, s.Rot, s.Scale));
-        if (_shellGrids.Count > 4096) _shellGrids.Clear();
         return _shellGrids[(key, snapIndex, baseKey)] = grid;
     }
 
@@ -250,13 +253,32 @@ public sealed class ContactIndex
         TriangleSoup? soup = null;
         if (geom is { CanDepend: true })
             soup = SpatialOverlap.TransformSoup(geom.DepShell ?? geom.DepSoup, s.Pos, s.Rot, s.Scale);
-        if (_shellDeps.Count > 8192) _shellDeps.Clear();
         return _shellDeps[(key, snapIndex, baseKey)] = soup;
     }
 
     /// <param name="geomOf">geometry for a base record — the driver resolves meshes through the VFS, the proof builds
     /// box soups from OBND. Null (or Src '-') when there is none; cached here per base.</param>
-    public ContactIndex(Func<FormKey, RefGeometry?> geomOf) { _geomOf = geomOf; Arms = new EnableArms(Index); }
+    /// <param name="cacheBudgetBytes">the per-placement caches' shared byte budget; null takes <see cref="CacheBudget.Auto()"/>.</param>
+    public ContactIndex(Func<FormKey, RefGeometry?> geomOf, long? cacheBudgetBytes = null)
+    {
+        _geomOf = geomOf; Arms = new EnableArms(Index);
+        Budget = new CacheBudget(cacheBudgetBytes ?? CacheBudget.Auto());
+        _hostGrids = new(Budget, "hostGrids", g => g.ApproxBytes);
+        _depSoups = new(Budget, "depSoups", PlacementCache<TriangleSoup>.SoupBytes);
+        _shellGrids = new(Budget, "shellGrids", g => g.ApproxBytes);
+        _shellDeps = new(Budget, "shellDeps", PlacementCache<TriangleSoup>.SoupBytes);
+    }
+
+    /// <summary>Lookups that asked a (reference, snap) for a different base than the previous lookup there, per cache — only
+    /// counted with env HC_STALEBASE set (a diagnostic for comparing against the (reference, snap)-keyed build).</summary>
+    public IEnumerable<(string Cache, long Count, IReadOnlyList<(FormKey Key, int Snap, FormKey Was, FormKey Now)> Keys)> StaleBase()
+    {
+        var none = Array.Empty<(FormKey, int, FormKey, FormKey)>();
+        yield return ("hostGrids", _hostGrids.StaleBaseLookups, (IReadOnlyList<(FormKey, int, FormKey, FormKey)>?)_hostGrids.StaleBaseKeys ?? none);
+        yield return ("depSoups", _depSoups.StaleBaseLookups, (IReadOnlyList<(FormKey, int, FormKey, FormKey)>?)_depSoups.StaleBaseKeys ?? none);
+        yield return ("shellGrids", _shellGrids.StaleBaseLookups, (IReadOnlyList<(FormKey, int, FormKey, FormKey)>?)_shellGrids.StaleBaseKeys ?? none);
+        yield return ("shellDeps", _shellDeps.StaleBaseLookups, (IReadOnlyList<(FormKey, int, FormKey, FormKey)>?)_shellDeps.StaleBaseKeys ?? none);
+    }
 
     public RefGeometry? GeomOf(FormKey baseKey)
     {
@@ -412,7 +434,6 @@ public sealed class ContactIndex
         TriangleGrid? grid = null;
         if (geom is { CanHost: true } || (anySurface && geom is { HasGeometry: true } && geom.HostSoup.TriangleCount > 0))
             grid = TriangleGrid.Build(SpatialOverlap.TransformSoup(geom.HostSoup, s.Pos, s.Rot, s.Scale));
-        if (_hostGrids.Count > 4096) _hostGrids.Clear();      // a bound, not a policy: exterior worldspaces are large
         return _hostGrids[(key, snapIndex, baseKey)] = grid;
     }
 
@@ -423,7 +444,6 @@ public sealed class ContactIndex
         TriangleSoup? soup = null;
         if (geom is { CanDepend: true })
             soup = SpatialOverlap.TransformSoup(geom.DepSoup, s.Pos, s.Rot, s.Scale);
-        if (_depSoups.Count > 8192) _depSoups.Clear();
         return _depSoups[(key, snapIndex, baseKey)] = soup;
     }
 
