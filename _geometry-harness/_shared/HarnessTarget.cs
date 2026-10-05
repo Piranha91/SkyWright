@@ -21,20 +21,33 @@ using System.Text.Json;
 //       and is gitignored;
 //    4. nothing — Require() then fails LOUDLY, naming every way to set it.
 //
+//  EXCEPT the load order's identity. The MO2 instance is NEVER taken from the
+//  config file: a run that names no instance (its --instance flag, or
+//  HOUSECARL_MO2_INSTANCE set for that run) refuses with
+//  `instance-not-explicit` rather than read the config's instance by omission
+//  — on a maintainer's machine that is often the play install. The config's
+//  `game` and `profile` describe the config's OWN instance, so they are used
+//  only when the explicit instance is that instance (same path after
+//  normalising); for any other instance they are withheld and Require()
+//  refuses with `game-not-for-this-instance` / `profile-not-for-this-instance`.
+//  HOUSECARL_MO2_INSTANCE counts only when set for the run: a value equal to
+//  the one persisted at User or Machine level refuses with
+//  `instance-env-persistent`.
+//
 //  Unset reads back as "" rather than null so a probe can hold it in a
 //  plain string, let a flag overwrite it, and only then Require() it.
 // ======================================================================
 
 internal static class HarnessTarget
 {
-    /// <summary>MO2 instance directory — the one holding `profiles\`, `mods\` and `overwrite\`.</summary>
-    public static string Instance => Get("instance", "HOUSECARL_MO2_INSTANCE");
+    /// <summary>MO2 instance directory — the one holding `profiles\`, `mods\` and `overwrite\`. The environment only, never the config file (see the header).</summary>
+    public static string Instance => EnvInstance();
 
-    /// <summary>MO2 profile name inside that instance.</summary>
-    public static string Profile => Get("profile", "HOUSECARL_MO2_PROFILE");
+    /// <summary>MO2 profile name inside that instance. The config's value only for the config's own instance.</summary>
+    public static string Profile => GetForInstance("profile", "HOUSECARL_MO2_PROFILE");
 
-    /// <summary>Game install directory — the one holding `Data\`.</summary>
-    public static string Game => Get("game", "HOUSECARL_GAME_PATH");
+    /// <summary>Game install directory — the one holding `Data\`. The config's value only for the config's own instance.</summary>
+    public static string Game => GetForInstance("game", "HOUSECARL_GAME_PATH");
 
     /// <summary>Wabbajack/mod-manager download pool, for the probes that read archives.</summary>
     public static string DownloadPool => Get("downloadPool", "HOUSECARL_DOWNLOAD_POOL");
@@ -103,6 +116,47 @@ internal static class HarnessTarget
         if (!string.IsNullOrWhiteSpace(value)) return value;
 
         var env = EnvName(key);
+        // A game or profile withheld because NO instance was named is the instance's refusal, not its own: a probe
+        // that requires its game first must still say what is actually missing.
+        var noInstance = key == "instance" || (_withheld.TryGetValue(key, out var w) && w == NoneGiven);
+        if (noInstance)
+        {
+            if (_persistedInstance is { } pi)
+            {
+                // The variable is set, but it is the value stored at User/Machine level: every run on this machine
+                // inherits it, so it is a default by another name, not a choice made for this run.
+                Console.Error.WriteLine($"refused: instance-env-persistent — {EnvName("instance")} ({pi.Value}) is the value " +
+                                        $"persisted at {pi.Level} level, so it would act as a default for every run.");
+                Console.Error.WriteLine(key == "instance" && flag is not null
+                    ? $"  * pass {flag} <dir> on the command line"
+                    : "  * name the instance on the command line where the probe takes --instance");
+                Console.Error.WriteLine($"  * or set {EnvName("instance")} only for this run (a driver's child environment, or `$env:` in one shell)");
+                Environment.Exit(2);
+            }
+            // The named reason leads the line so a driver can match it; the config's instance is named so the reader
+            // sees exactly what was NOT read.
+            Console.Error.WriteLine("refused: instance-not-explicit — no MO2 instance directory given for this run.");
+            if (key == "instance" && flag is not null)
+                Console.Error.WriteLine($"  * pass {flag} <dir> on the command line");
+            Console.Error.WriteLine($"  * or set the {EnvName("instance")} environment variable for this run");
+            if (key != "instance")
+                Console.Error.WriteLine($"  * or name the {what} itself: {(flag is null ? "" : $"pass {flag} <value>, or ")}set {env}");
+            var cfgInstance = ConfigString("instance");
+            Console.Error.WriteLine(cfgInstance.Length > 0
+                ? $"  The harness config's \"instance\" ({cfgInstance}, in {SearchedDescription()}) is never used as a default."
+                : "  The harness config's \"instance\" is never used as a default.");
+            Environment.Exit(2);
+        }
+        if (_withheld.TryGetValue(key, out var forInstance))
+        {
+            Console.Error.WriteLine($"refused: {key}-not-for-this-instance — no {what} given for the instance {forInstance}.");
+            Console.Error.WriteLine($"  The harness config's \"{key}\" ({ConfigString(key)}) belongs to its own instance " +
+                                    $"({ConfigString("instance")}) and is not used for another one.");
+            if (flag is not null)
+                Console.Error.WriteLine($"  * pass {flag} <value> on the command line");
+            Console.Error.WriteLine($"  * or set the {env} environment variable for this run");
+            Environment.Exit(2);
+        }
         Console.Error.WriteLine($"No {what} configured. This harness compiles in no paths — set it by any of:");
         if (flag is not null)
             Console.Error.WriteLine($"  * pass {flag} <value> on the command line");
@@ -121,6 +175,107 @@ internal static class HarnessTarget
     static JsonElement? _config;
     static bool _configLoaded;
     static string _searched = "(not searched yet)";
+
+    static readonly System.Collections.Generic.Dictionary<string, string> _withheld = new();
+    const string NoneGiven = "(none given)";
+
+    static (string Value, string Level)? _persistedInstance;
+
+    /// <summary>
+    /// HOUSECARL_MO2_INSTANCE as an explicit choice: its process value, unless that value equals the one persisted at
+    /// User or Machine level (then "" and the reason is kept for <see cref="Require"/>). The test seam
+    /// HOUSECARL_HARNESS_TEST_PERSISTED_INSTANCE ("User=VALUE" or "Machine=VALUE") ADDS a persisted value without
+    /// touching the registry; it can only cause a refusal, never suppress one.
+    /// </summary>
+    static string EnvInstance()
+    {
+        var v = Env("HOUSECARL_MO2_INSTANCE");
+        if (v.Length == 0) return "";
+        foreach (var (level, persisted) in PersistedInstanceValues())
+            if (string.Equals(persisted.Trim(), v, StringComparison.OrdinalIgnoreCase))
+            {
+                _persistedInstance = (v, level);
+                return "";
+            }
+        return v;
+    }
+
+    static System.Collections.Generic.IEnumerable<(string Level, string Value)> PersistedInstanceValues()
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            foreach (var (level, target) in new[] { ("User", EnvironmentVariableTarget.User), ("Machine", EnvironmentVariableTarget.Machine) })
+            {
+                string? pv = null;
+                try { pv = Environment.GetEnvironmentVariable("HOUSECARL_MO2_INSTANCE", target); }
+                catch (Exception ex)
+                {
+                    Console.Error.WriteLine($"warning: could not read the {level}-level HOUSECARL_MO2_INSTANCE ({ex.GetType().Name}); " +
+                                            "the persisted-value check covers the other level only.");
+                }
+                if (!string.IsNullOrWhiteSpace(pv)) yield return (level, pv!);
+            }
+        }
+        var seam = Env("HOUSECARL_HARNESS_TEST_PERSISTED_INSTANCE");
+        var eq = seam.IndexOf('=');
+        if (eq > 0) yield return (seam[..eq], seam[(eq + 1)..]);
+    }
+
+    static string Env(string envVar)
+    {
+        var v = Environment.GetEnvironmentVariable(envVar);
+        return string.IsNullOrWhiteSpace(v) ? "" : v!.Trim();
+    }
+
+    static string ConfigString(string key)
+    {
+        LoadConfig();
+        if (_config is { } root && root.ValueKind == JsonValueKind.Object
+            && root.TryGetProperty(key, out var v) && v.ValueKind == JsonValueKind.String)
+            return (v.GetString() ?? "").Trim();
+        return "";
+    }
+
+    /// <summary>
+    /// The instance this run names explicitly: --instance on the command line (read here because the getters run
+    /// before the probe parses its own flags), else HOUSECARL_MO2_INSTANCE, else "".
+    /// </summary>
+    static string ExplicitInstance()
+    {
+        var argv = Environment.GetCommandLineArgs();
+        for (int i = 1; i < argv.Length; i++)
+        {
+            if (argv[i] == "--instance" && i + 1 < argv.Length) return argv[i + 1].Trim();
+            if (argv[i].StartsWith("--instance=", StringComparison.Ordinal)) return argv[i]["--instance=".Length..].Trim();
+        }
+        return EnvInstance();
+    }
+
+    static string NormalisePath(string p)
+    {
+        try { p = Path.GetFullPath(p.Trim()); } catch (Exception) { p = p.Trim(); }
+        return p.Replace('/', '\\').TrimEnd('\\');
+    }
+
+    /// <summary>
+    /// For a value that describes one instance (game, profile): the environment, else the config file's value but
+    /// only when the run's explicit instance is the config's instance. Otherwise "" with the key recorded as withheld,
+    /// so <see cref="Require"/> names why instead of printing the generic "not configured".
+    /// </summary>
+    static string GetForInstance(string key, string envVar)
+    {
+        var fromEnv = Env(envVar);
+        if (fromEnv.Length > 0) return fromEnv;
+        var fromConfig = ConfigString(key);
+        if (fromConfig.Length == 0) return "";
+        var cfgInstance = ConfigString("instance");
+        var explicitInstance = ExplicitInstance();
+        if (explicitInstance.Length > 0 && cfgInstance.Length > 0
+            && string.Equals(NormalisePath(explicitInstance), NormalisePath(cfgInstance), StringComparison.OrdinalIgnoreCase))
+            return fromConfig;
+        _withheld[key] = explicitInstance.Length > 0 ? explicitInstance : NoneGiven;
+        return "";
+    }
 
     static string Get(string key, string envVar)
     {
