@@ -333,7 +333,11 @@ $par = Get-CimInstance Win32_Process -Filter "ProcessId=$($pp.ParentProcessId)"
 
 
 def _ps(cmd: str) -> str:
-    r = subprocess.run(["powershell", "-NoProfile", "-Command", cmd], capture_output=True, text=True, timeout=120)
+    """Run a PowerShell script passed as -EncodedCommand (UTF-16LE base64), so no quoting layer can alter it."""
+    import base64
+    enc = base64.b64encode(cmd.encode("utf-16-le")).decode("ascii")
+    r = subprocess.run(["powershell", "-NoProfile", "-NonInteractive", "-EncodedCommand", enc], capture_output=True,
+                       text=True, timeout=120)
     if r.returncode != 0:
         raise RuntimeError(f"powershell failed: {r.stdout} {r.stderr}")
     return r.stdout
@@ -347,6 +351,7 @@ def launch_outside_job(shortcut: str) -> dict:
     the desktop. A process WMI creates is parented by WmiPrvSE and in no job of ours. The created process is checked
     (IsProcessInJob with no job handle = in ANY job); one that is in a job, or not WMI-parented, is terminated by the
     pid this call created and the launch is refused."""
+    shortcut = os.path.normpath(shortcut)
     s = json.loads(_ps("$s=(New-Object -ComObject WScript.Shell).CreateShortcut('%s'); "
                        "@{target=$s.TargetPath; args=$s.Arguments; cwd=$s.WorkingDirectory} | ConvertTo-Json -Compress"
                        % shortcut.replace("'", "''")))
@@ -367,9 +372,11 @@ def launch_outside_job(shortcut: str) -> dict:
     return rec
 
 
-def measured_configuration(db, a, arm: dict, eval_plan: dict | None, instance: str, profile: str) -> tuple[dict, list]:
-    """The configuration this launch runs, measured: plugin files hashed now. Bound: the arm's requested plugins (their
-    files hashed at the requested paths); standalone: the plugins the running game lists, resolved through MO2."""
+def measured_configuration(db, a, arm: dict, eval_plan: dict | None, instance: str, profile: str,
+                           loaded_names: list[str]) -> tuple[dict, list]:
+    """The configuration this launch ran, measured: plugin files hashed (after the window, so hashing never delays the
+    flip). Bound: the arm's requested plugins, hashed at the requested paths; standalone: the plugins the running game
+    listed right after arrival (`loaded_names`), resolved through the profile."""
     import evalrun
     limits = []
     if eval_plan is not None:
@@ -390,7 +397,7 @@ def measured_configuration(db, a, arm: dict, eval_plan: dict | None, instance: s
         roots = db._mod_roots(instance, db._modlist(db._modlist_path(prof)))
         data_dir = os.path.join(os.path.dirname(a.game_exe), "Data")
         plugins = []
-        for name in db.loaded_plugins():
+        for name in loaded_names:
             path = db._plugin_file(instance, name, roots, data_dir)
             plugins.append({"name": name, "path": path, "sha256": sha256_file(path) if path else None})
         cfg = {"schemaVersion": 1, "source": "standalone", "plugins": plugins, "providers": [], "overlays": [],
@@ -423,7 +430,7 @@ def cmd_launch(a) -> int:
     snap = folder / "profile-before"
     logf = open(folder / "log.jsonl", "a", encoding="utf-8", buffering=1)
     events: list[dict] = []
-    state = {"t_launch": None, "flip_start": None, "launchStarted": None}
+    state = {"t_launch": None, "flip_start": None, "loaded": None}
     receipt = {"schemaVersion": RECEIPT_SCHEMA, "condition": a.condition, "replicate": a.replicate,
                "binding": ({"planId": doc["binding"]["planId"], "checkId": doc["binding"]["checkId"],
                             "armId": arm.get("evalArmId")} if doc.get("binding") else None),
@@ -556,16 +563,15 @@ def cmd_launch(a) -> int:
         ok, hours = db.unpause(strict=False)
         db.protect_body(log=None, note="switchflip: the body is not the subject")
         log(step="arrived", cell=db.loaded(), unpause=ok)
-        cfg, limits = measured_configuration(db, a, arm, eval_plan, instance, profile)
-        receipt["configuration"] = cfg
+        state["loaded"] = db.loaded_plugins()
+        log(step="loaded_plugins", count=len(state["loaded"]))
         if eval_plan is not None:
-            want = sorted(p["name"].lower() for p in cfg["plugins"])
-            got = sorted(n.lower() for n in db.loaded_plugins())
+            earm = next(x for x in eval_plan["arms"] if x["armId"] == arm["evalArmId"])
+            want = sorted(str(p["name"]).lower() for p in (earm.get("requested") or {}).get("plugins") or [])
+            got = sorted(n.lower() for n in state["loaded"])
             if want != got:
                 raise RuntimeError("the running game's plugins differ from the arm's request: missing "
                                    f"{sorted(set(want) - set(got))[:8]}, extra {sorted(set(got) - set(want))[:8]}")
-            if any(p["sha256"] is None for p in cfg["plugins"]):
-                raise RuntimeError("a requested plugin file is missing on disk")
         if cond.get("settleSeconds"):
             db.video_mark(f"settle {cond['settleSeconds']}s")
             time.sleep(cond["settleSeconds"])
@@ -607,6 +613,14 @@ def cmd_launch(a) -> int:
                                                               for e in canary_events],
                                  "classification": O.classify(canary_events, t_c, 0.0)}
             log(step="canary", **receipt["canary"]["classification"])
+        if state.get("loaded") is not None:
+            try:
+                receipt["configuration"], _lim = measured_configuration(db, a, arm, eval_plan, instance, profile,
+                                                                        state["loaded"])
+                if any(p["sha256"] is None for p in receipt["configuration"]["plugins"]):
+                    receipt["configurationProblem"] = "a plugin file could not be found on disk to hash"
+            except Exception as e:
+                receipt["configurationProblem"] = repr(e)[:300]
         ev_path = folder / "events.jsonl"
         ev_path.write_text("".join(json.dumps({k: v for k, v in e.items() if k != "res"}, default=str) + "\n"
                                    for e in all_events), encoding="utf-8")
@@ -627,11 +641,15 @@ def cmd_launch(a) -> int:
         except Exception as e:
             log(step="teardown_error", error=repr(e))
         if mo2_pid:
-            _ps(f"$p = Get-Process -Id {mo2_pid} -ErrorAction SilentlyContinue; if ($p) {{ $p.CloseMainWindow() | Out-Null }}")
-            t0 = time.time()
-            while time.time() - t0 < 180 and mo2_pid in db._pids_of("ModOrganizer.exe"):
-                time.sleep(3)
-            log(step="mo2_closed", ok=mo2_pid not in db._pids_of("ModOrganizer.exe"))
+            try:
+                _ps(f"$p = Get-Process -Id {mo2_pid} -ErrorAction SilentlyContinue; "
+                    f"if ($p) {{ $p.CloseMainWindow() | Out-Null }}")
+                t0 = time.time()
+                while time.time() - t0 < 180 and mo2_pid in db._pids_of("ModOrganizer.exe"):
+                    time.sleep(3)
+                log(step="mo2_closed", ok=mo2_pid not in db._pids_of("ModOrganizer.exe"))
+            except Exception as e:
+                log(step="mo2_close_error", error=repr(e))
         try:
             log(step="unselect", res=db.select_profile(instance, restore=True))
         except Exception as e:
