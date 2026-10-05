@@ -376,6 +376,15 @@ run produces should land back in it.
    found by walking up from the running binary. Copy `harness.local.example.json` to start.
 4. nothing → exit 2, naming every way to set it.
 
+**The instance is never a default.** The config's `instance` is not used when a run names none: a
+probe given no `--instance` (and no `HOUSECARL_MO2_INSTANCE` for that run) exits 2 with
+`refused: instance-not-explicit`, before it reads anything. The config's `game` and `profile`
+belong to the config's own instance and are used only when the run's instance is that one (same
+path after normalising); for any other instance they are withheld and the probe refuses with
+`game-not-for-this-instance` / `profile-not-for-this-instance` unless the run names them itself.
+`HOUSECARL_MO2_INSTANCE` counts only when set for the run: a value equal to the one persisted at
+User or Machine level refuses with `instance-env-persistent`.
+
 **Keep the config outside this checkout.** A file naming your MO2 instance, profile and drive
 layout is a fact about your mod setup, not about the tool; `HOUSECARL_HARNESS_CONFIG` exists so it
 can live with that setup. `harness.local.json` beside the harness works too and is gitignored, but
