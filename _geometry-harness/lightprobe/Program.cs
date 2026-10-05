@@ -11,8 +11,8 @@
 // every enabled reference's render model is read (src/housecarl-core/LightReach.cs), placed, and each enabled light
 // gets three readings: facing (front / back / no first hit over 64 rays inside its radius), leak (attenuated area lit
 // through an opaque surface, and the unblocked area beside it, per receiving reference), and point-in-solid against
-// every reference whose placed bounds contain the light (MeshAnchor's point reading). Every drawn shape a light's
-// sphere reaches gets a row with the lights that reach it (count, shadow-casting, portal-strict). A reference whose
+// every reference whose placed bounds contain the light (MeshAnchor's point reading). Every lit shape (drawn, lighting
+// shader; editor markers and Is-Marker bases are not drawn) a light's sphere reaches gets a row with the lights that reach it (count, shadow-casting, portal-strict). A reference whose
 // model cannot be read is listed with its reason, and every light whose radius reaches its record bounds is labelled
 // incomplete. No decision is made here: attribution and verdicts are the caller's (the fold).
 // Base Object Swapper: not applied (stated in the output).
