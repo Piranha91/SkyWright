@@ -173,6 +173,38 @@ def test_verdict_add_that_leaks_in_p_is_a_patch_clash():
     assert v["verdict"] == "patch light clash" and "C2" in v["text"]
 
 
+def facing(front, back, none=0):
+    return {"rays": front + back + none, "front": front, "back": back, "none": none}
+
+
+def test_c2_facing_back_majority_and_void():
+    """rejects: a light mostly behind surfaces read as inside; an incomplete negative read as a negative; a void light read as lit"""
+    assert lc.c2_facing(light(LB, (0, 0, 0), leak=0.0, facing=facing(10, 40, 14))) is True
+    assert lc.c2_facing(light(LB, (0, 0, 0), leak=0.0, facing=facing(40, 10, 14))) is False
+    assert lc.c2_facing(light(LB, (0, 0, 0), leak=0.0, facing=facing(40, 10, 14), incomplete=["000555:ModA.esp"])) is None
+    assert lc.is_void(light(LB, (0, 0, 0), leak=0.0, lit=0.0, facing=facing(0, 0, 64))) is True
+    assert lc.is_void(light(LB, (0, 0, 0), leak=0.0, lit=5.0, facing=facing(3, 0, 61))) is False
+
+
+def arms_for_c2(back_u, back_b):
+    lu = light(LB, (0, 0, 0), leak=0.0, lit=1.0, facing=facing(10, 50) if back_u else facing(50, 10))
+    lb = light(LB, (0, 0, 0), leak=0.0, lit=1.0, facing=facing(10, 50) if back_b else facing(50, 10))
+    lp = light(LB, (0, 0, 0), enabled=False)
+    return {"u": arr([], [lu]), "plusb": arr([], [lb]), "plusa": arr([], []), "dep": arr([], []), "p": arr([], [lp])}
+
+
+def test_judge_record_c2_attributed_disable_fixes():
+    """rejects: a light that is behind the other mod's surfaces only in the combination read as taste when the patch disables it"""
+    r = lc.judge_record(LB, "DISABLE", arms_for_c2(True, False), MODS, P)
+    assert r["classes"]["C2"]["attribution"] == "needs both" and r["verdict"] == "fixes an inter-mod clash"
+
+
+def test_judge_record_c2_own_mod_already_behind_is_not_the_pair():
+    """rejects: a light already behind surfaces in its own mod's arrangement credited to the pair (no-attribution answer)"""
+    r = lc.judge_record(LB, "DISABLE", arms_for_c2(True, True), MODS, P)
+    assert r["classes"]["C2"]["attribution"] == "not the pair" and r["verdict"] == "taste (no clash)"
+
+
 if __name__ == "__main__":
     fails = 0
     for name, fn in sorted(globals().items()):
