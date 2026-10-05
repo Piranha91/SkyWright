@@ -116,6 +116,16 @@ static class LightSelfTest
         Check("unlit: a drawn effect-shader shape is not lit; a lighting-shader shape is", "an effect shape counted as lit by a point light",
               () => !LightReach.ShapeLit(true, false) && LightReach.ShapeLit(true, true) && !LightReach.ShapeLit(false, true));
 
+        // C4 assignment by the shape's box (sixth fold, rule a): a light whose sphere meets the shape's bound sphere but whose
+        // radius does not reach the shape's box takes no slot.
+        Check("box reach: a light 100 u beyond a box face, radius 99 / 101", "the bound sphere deciding the count",
+              () => !LightReach.MeetsShapeBox(new Vector3(200, 50, 50), 99, Vector3.Zero, new Vector3(100, 0, 0), new Vector3(0, 100, 0), new Vector3(0, 0, 100))
+                    && LightReach.MeetsShapeBox(new Vector3(200, 50, 50), 101, Vector3.Zero, new Vector3(100, 0, 0), new Vector3(0, 100, 0), new Vector3(0, 0, 100)));
+        Check("box reach: a rotated box (45 deg about Z) measured in its own frame", "an axis-aligned world box assumed (it would read 35 u)",
+              () => LightReach.MeetsShapeBox(new Vector3(0, 0, 0), 1, new Vector3(0, 0, 0), new Vector3(70.71068f, 70.71068f, 0), new Vector3(-70.71068f, 70.71068f, 0), new Vector3(0, 0, 100))
+                    && !LightReach.MeetsShapeBox(new Vector3(35.35534f, -35.35534f, 50), 49, new Vector3(0, 0, 0), new Vector3(70.71068f, 70.71068f, 0), new Vector3(-70.71068f, 70.71068f, 0), new Vector3(0, 0, 100))
+                    && LightReach.MeetsShapeBox(new Vector3(35.35534f, -35.35534f, 50), 51, new Vector3(0, 0, 0), new Vector3(70.71068f, 70.71068f, 0), new Vector3(-70.71068f, 70.71068f, 0), new Vector3(0, 0, 100)));
+
         Console.WriteLine($"lightprobe self-test: {pass} passed, {fail} failed");
         return fail == 0 ? 0 : 1;
     }

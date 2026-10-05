@@ -230,6 +230,51 @@ def test_verdict_decided_fix_stands_over_unsettled_c4():
 
 
 
+# ---- sixth fold (Piranha's 2026-10-05 rulings)
+
+def test_c4_decider_llf_when_installed():
+    """rejects: the vanilla reading deciding C4 in an instance with Light Limit Fix installed (rule b)"""
+    row = dict(C4_NEEDS_BOTH)   # vanilla needs both, LLF no clash in u
+    assert lc.verdict("DISABLE", {"C2": {"attribution": "no clash in u"}}, {}, None, c4=[row], c4_decider="llf")["verdict"] == "taste (no clash)"
+    assert lc.verdict("DISABLE", {"C2": {"attribution": "no clash in u"}}, {}, None, c4=[row], c4_decider="vanilla")["verdict"] == "cannot tell"
+    assert lc.c4_decider({"u": {"llf": {"installed": True, "how": "SKSE/Plugins/LightLimitFix.dll"}}}) == "llf"
+    assert lc.c4_decider({"u": {"llf": {"installed": False}}}) == "vanilla"
+
+
+def test_c2_few_hits_is_cannot_tell():
+    """rejects: the back-face test deciding on fewer than 8 of 64 hitting rays (rule c)"""
+    lu = light(LB, (0, 0, 0), leak=0.0, lit=1.0, facing=facing(0, 3, 61))
+    lb = light(LB, (0, 0, 0), leak=0.0, lit=1.0, facing=facing(50, 0, 14))
+    arms = {"u": arr([], [lu]), "plusb": arr([], [lb]), "plusa": arr([], []), "dep": arr([], []), "p": arr([], [light(LB, (0, 0, 0), enabled=False)])}
+    r = lc.judge_record(LB, "DISABLE", arms, MODS, P)
+    assert r["classes"]["C2"]["attribution"] == "not measured in u" and "few hits" in r["classes"]["C2"]["label"]
+    assert r["verdict"] == "cannot tell"
+
+
+def test_c2_few_hits_in_p_is_not_a_patch_clash():
+    """rejects: a patch-added light with 3 back hits and no front hits in p read as a patch light clash (rule c)"""
+    lp = light("000811:Patch.esp", (0, 0, 0), leak=0.0, lit=1.0, facing=facing(0, 3, 61))
+    arms = {"u": arr([], []), "plusa": arr([], []), "plusb": arr([], []), "dep": arr([], []), "p": arr([], [lp])}
+    r = lc.judge_record("000811:Patch.esp", "ADD", arms, MODS, P)
+    assert r["verdict"] != "patch light clash"
+
+
+def test_room_doubling_lists_the_nearest_fixture():
+    """rejects: a room-doubling taste without the light's nearest fixture, its distance against each H, and whether it moved (rule d)"""
+    sconce = "000400:Skyrim.esm"
+    la = light("000801:ModA.esp", (100, 0, 0), leak=0.0, lit=1.0, facing=facing(50, 0, 14))
+    lb = light(LB, (0, 0, 0), leak=0.0, lit=1.0, facing=facing(50, 0, 14))
+    fx = ref(sconce, "WallSconce01", (80, 0, 0))
+    arms = {"u": arr([fx], [la, lb]), "plusb": arr([fx], [lb]), "plusa": arr([fx], [la]), "dep": arr([fx], []),
+            "p": arr([fx], [la, light(LB, (0, 0, 0), enabled=False)])}
+    r = lc.judge_record(LB, "DISABLE", arms, MODS, P)
+    assert r["roomDoubling"] is True
+    f = r["doublingFixture"]
+    assert f["key"] == sconce and abs(f["dOwn"] - 80) < 1e-6 and f["withinH"] == {"48": False, "64": False, "96": True}
+    assert f["movedInU"] is False and f["goneInU"] is False and f["leftBehind"] is False
+
+
+
 if __name__ == "__main__":
     fails = 0
     for name, fn in sorted(globals().items()):

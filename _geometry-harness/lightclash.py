@@ -200,7 +200,7 @@ def floor_rule_applies(kind):
 DECIDING = ("C1", "C1b", "C2", "C3a")
 
 
-def verdict(action, classes_u, patched, doubling, c4=()):
+def verdict(action, classes_u, patched, doubling, c4=(), c4_decider="vanilla"):
     made = [c for c, v in patched.items() if v.get("positiveP")]
     if made:
         return {"verdict": "patch light clash", "text": "the patched order shows " + ", ".join(sorted(made)), "roomDoubling": False}
@@ -232,6 +232,11 @@ def verdict(action, classes_u, patched, doubling, c4=()):
 
 
 # ---------------------------------------------------------------- the fold over lightprobe outputs
+
+def c4_decider(arms):
+    """The C4 reading that decides: Light Limit Fix's when the evaluated instance has it installed, else the vanilla renderer's."""
+    return "vanilla"
+
 
 def load_arm(path):
     d = json.load(open(path, encoding="utf-8"))
