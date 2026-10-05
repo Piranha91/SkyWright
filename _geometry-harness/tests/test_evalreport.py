@@ -315,14 +315,16 @@ def required_missing(disp: dict) -> list[dict]:
 
 # ---------------------------------------------------------------------------- the compile steps
 
-def do_plan(bundle: Path, out: Path, exhaustive=False):
+def do_plan(bundle: Path, out: Path, exhaustive=False, declare_patches=()):
     args = ["plan", "--bundle", bundle, "--out", out] + (["--exhaustive"] if exhaustive else [])
+    for name in declare_patches:
+        args += ["--declare-patch", name]
     return evalreport(args)
 
 
-def compile_case(case: str, bundle: Path, out: Path, exhaustive=False):
+def compile_case(case: str, bundle: Path, out: Path, exhaustive=False, declare_patches=()):
     """plan + report + verify; returns (presentation, plan result, report result, verify result)."""
-    p = do_plan(bundle, out, exhaustive)
+    p = do_plan(bundle, out, exhaustive, declare_patches)
     if p.returncode != 0:
         print(p.stdout[-2000:]); print(p.stderr[-2000:])
     expect(p.returncode, 0, f"{case}: plan exits 0", "D1")
@@ -494,7 +496,8 @@ def assert_common(case: str, bundle: Path, out: Path, pres: dict, common: dict, 
 
     # determinism: a second plan into another directory
     out2 = out.parent / (out.name + "-again")
-    p2 = do_plan(bundle, out2, exhaustive=(st.get("mode") == "exhaustive"))
+    p2 = do_plan(bundle, out2, exhaustive=(st.get("mode") == "exhaustive"),
+                 declare_patches=st.get("declaredPatches") or ())   # the same declaration as the first plan
     pres2 = load(out2 / "presentation.json")
     check(p2.returncode == 0 and pres2 is not None, f"{case}: a second plan runs")
     if pres2:
@@ -732,6 +735,10 @@ def patch_direction_control(bundle: Path, variant: str, outcome: str = "contact-
               "both": {"baseline": base + [plugin("Other.esp")], "candidate-02-patchb": base + [plugin("Patch.esp")]}}[variant]
     for arm_id, plugins in orders.items():
         arms[arm_id]["requested"]["plugins"] = plugins
+    # Patch identity is declared, never inferred from membership (636ae180): a variant whose
+    # alternative changes a patch declares it in the plan's `patches` list, as a real plan does.
+    view.plan["patches"] = {"removes": ["Patch.esp"], "adds": ["Patch.esp"],
+                            "mixed": ["Other.esp", "Patch.esp"], "both": ["Other.esp", "Patch.esp"]}.get(variant, [])
     if variant == "adds":
         arms["candidate-02-patchb"]["kind"] = "supplied-combination"
         view.disposition["arms"]["candidate-02-patchb"]["kind"] = "supplied-combination"
@@ -831,7 +838,7 @@ def check_patch_direction(bundle: Path):
     plan, md, html = patch_direction_control(bundle, "none")
     reader = plan.get("reader") or {}
     expect(reader.get("suppliedPatches"), [], f"{label}/none: removing a target is not a patch")
-    check("No separate patch plugin was included in the comparison." in str(reader.get("scopeLine")),
+    check("No separate patch plugin was declared for this comparison." in str(reader.get("scopeLine")),
           f"{label}/none: the opening keeps the no-separate-patch wording (got {reader.get('scopeLine')!r})")
     # the title with no separate patch: followup_title_control
     expect(reader.get("verdict"), "Removing FixtureTarget.esp introduces a new defect in a check that ran.",
@@ -1084,7 +1091,7 @@ def followup_title_control(bundle: Path):
     mods = [str(m) for m in reader.get("comparisonMods") or []]
     check("patch review" not in str(reader.get("title")) and not any(m in str(reader.get("title")) for m in mods),
           f"{label}/none: no 'patch review' and no conflict partner in the title (mods {mods!r})")
-    check("No separate patch plugin was included in the comparison." in str(reader.get("scopeLine")),
+    check("No separate patch plugin was declared for this comparison." in str(reader.get("scopeLine")),
           f"{label}/none: the opening still says no separate patch was compared")
     plan, md, html = patch_direction_control(bundle, "removes")
     expect((plan.get("reader") or {}).get("title"), "FixtureTarget.esp with Patch.esp — patch review",
@@ -1123,6 +1130,7 @@ def followup_totals_control(bundle: Path, variant: str):
     patch["name"] = "Patch.esp"
     if variant == "patch":
         orders = {"baseline": base + [patch], "candidate-02-patchb": base}
+        view.plan["patches"] = ["Patch.esp"]      # declared, never inferred (636ae180)
     else:
         orders = {"baseline": base, "candidate-02-patchb": [p for p in base if p.get("name") != "FixtureTarget.esp"]}
     for arm_id, plugins in orders.items():
@@ -1862,7 +1870,9 @@ def case_r4(tmp, index, common):
         return
     bundle = Path(index[case]["bundle"])
     out = tmp / case
-    pres, p, r, v = compile_case(case, bundle, out)
+    # The fixture engine's plan predates the `patches` field; the patches its candidate arms add are declared at
+    # report time, the route evalreport documents for such plans (636ae180). Membership alone names no patch.
+    pres, p, r, v = compile_case(case, bundle, out, declare_patches=("PatchA.esp", "PatchB.esp"))
     if pres is None:
         return
 
