@@ -689,10 +689,16 @@ public sealed class ContactIndex
             var arm = new ArmContact(c, nKey, depGeom.DepSrc, hg.HostSrc, extent, MaxDim(nBox)) { CoreGap = coreGap, PreexistingDepth = pre, PreexistingOnly = isPre };
             if (isPre) bestPre = arm; else { best = arm; bestRank = rank; }
         }
-        // A pre-existing overlap stands as the contact only when nothing new is touching or sinking.
-        bool bestTouches = best is not null && (bestRank > 0f || best.Contact.FacingDistance <= Epsilon);
-        var chosen = bestPre is not null && !bestTouches ? bestPre : best;
+        var chosen = ChooseContact(best, bestRank, bestPre, Epsilon);
         return chosen is null ? null : chosen with { RawDistance = bestRaw, RawAgainst = rawAgainst };
+    }
+
+    /// <summary>The differential selection's last step: a pre-existing overlap (<paramref name="bestPre"/>) stands as the contact only
+    /// when the best other contact (<paramref name="best"/>, its new depth <paramref name="bestRank"/>) neither sinks nor touches.</summary>
+    public static ArmContact? ChooseContact(ArmContact? best, float bestRank, ArmContact? bestPre, float epsilon)
+    {
+        bool bestTouches = best is not null && (bestRank > 0f || best.Contact.FacingDistance <= epsilon);
+        return bestPre is not null && !bestTouches ? bestPre : best;
     }
 
     /// <summary>Depth first (new depth under the differential rule, raw penetration otherwise), then the facing gap.</summary>

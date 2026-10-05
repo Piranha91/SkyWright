@@ -46,6 +46,25 @@ static class ContactDifferentialProof
         Check("sd-facts: CONTROL — nothing inside it and nothing within ε -> STRANDED (the label never stands in for Stranded)",
               preOnlyStranded.Verdict == ContactVerdict.Stranded, $"{preOnlyStranded.Verdict}");
 
+        // ---- the selection's last step (H3 radius-off, 2026-10-04): a plain contact that only GRAZES (0 < depth <= ε) with a facing
+        // gap over ε does not touch by the rule (it reads Orphaned/Stranded), so it must not displace a pre-existing overlap. Real
+        // rows: 0735A2 (0.99 u deep, facing 7.5 u) dropped its authored 29.7 u overlap and read Orphaned.
+        {
+            var fk = new FormKey(new ModKey("SdSel", ModType.Plugin), 0x801); var pk = new FormKey(new ModKey("SdSel", ModType.Plugin), 0x802);
+            var graze = new ArmContact(new SoupContact(7.5f, 0f, System.Numerics.Vector3.UnitZ, 0, 0, 0, 0, EnclosedDepth: 0.99f, HostClosed: true, FacingDistance: 7.5f), fk, 'o', 'o');
+            var touch = new ArmContact(new SoupContact(0f, 0f, System.Numerics.Vector3.UnitZ, 1, 0, 0, 0, HostClosed: true, FacingDistance: 0f), fk, 'o', 'o');
+            var pre = new ArmContact(new SoupContact(0f, 0f, System.Numerics.Vector3.UnitZ, 1, 0, 0, 0, EnclosedDepth: 29.7f, HostClosed: true, FacingDistance: 0f), pk, 'o', 'o')
+                      { PreexistingDepth = 29.7f, PreexistingOnly = true };
+            var c1 = ContactIndex.ChooseContact(graze, 0.99f, pre, 4f);
+            var c2 = ContactIndex.ChooseContact(touch, 0f, pre, 4f);
+            var sink = new ArmContact(new SoupContact(0f, 0f, System.Numerics.Vector3.UnitZ, 1, 0, 0, 0, EnclosedDepth: 8f, HostClosed: true, FacingDistance: 0f), fk, 'o', 'o');
+            var c3 = ContactIndex.ChooseContact(sink, 8f, pre, 4f);
+            Check("sd-select: a plain contact 0.99 u deep with a 7.5 u facing gap does not touch by the rule -> the pre-existing overlap stands (labelled), not an Orphaned reading",
+                  c1 is { PreexistingOnly: true } && c1.Against == pk, $"chose {(c1 == pre ? "the pre-existing overlap" : c1 == graze ? "the grazing contact" : "?")}");
+            Check("sd-select: CONTROLS — a plain contact at facing 0 still wins over a pre-existing overlap; a new sink 8 u deep wins too",
+                  c2 == touch && c3 == sink, $"touch {(c2 == touch)}, sink {(c3 == sink)}");
+        }
+
         // ---- the synthetic order ----
         var root = Path.Combine(Path.GetTempPath(), "proofprobe-sd-" + Environment.ProcessId);
         Directory.CreateDirectory(root);
