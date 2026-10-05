@@ -117,6 +117,45 @@ static partial class MotionProof
         return Save(f, "support, compressed-mesh plate with radius");
     }
 
+    /// <summary>A static support whose collision is a bhkCompressedMeshShape of the given triangles (big vertices, Skyrim units) with
+    /// mesh radius <paramref name="radiusU"/> (Skyrim units). The render shape is the triangles' bounding box.</summary>
+    static byte[] SupportMesh(Vector3[] vertsU, int[] tris, float radiusU)
+    {
+        var f = new NifFile(); f.Create(Ver, withRootNode: true);
+        var root = f.GetRootNodes().First(); root.Flags_ui = 0xE;
+        var n = new NiNode { Name = new NiStringRef("Support"), Flags_ui = 0xE, Scale = 1f, Rotation = Identity33() };
+        root.Children.AddBlockRef(f.AddBlock(n));
+        n.Children.AddBlockRef(f.AddBlock(Shape("SupportMesh", Box(vertsU.Min(v => v.X), vertsU.Min(v => v.Y), vertsU.Min(v => v.Z),
+                                                                     vertsU.Max(v => v.X), vertsU.Max(v => v.Y), vertsU.Max(v => v.Z)))));
+        var data = new bhkCompressedMeshShapeData
+        {
+            BigVerts = vertsU.Select(v => new Vector4(v.X / HavokU, v.Y / HavokU, v.Z / HavokU, 0)).ToList(),
+            BigTris = new(),
+        };
+        for (int k = 0; k + 2 < tris.Length; k += 3)
+            data.BigTris.Add(new() { Triangle = new NiflySharp.Structs.Triangle((ushort)tris[k], (ushort)tris[k + 1], (ushort)tris[k + 2]) });
+        AddBody(f, n, new bhkCompressedMeshShape { Data = new NiBlockRef<bhkCompressedMeshShapeData>(f.AddBlock(data)), Radius = radiusU / HavokU }, 0f,
+                hkMotionType.MO_SYS_SPHERE_STABILIZED, SkyrimLayer.SKYL_STATIC);
+        return Save(f, "support, compressed mesh with radius");
+    }
+
+    /// <summary>The cube [-h,h]^3 (ClosedBox's vertices and winding) turned <paramref name="deg"/> about x (or about y), raised by
+    /// <paramref name="cz"/>, then the whole turned <paramref name="tiltXDeg"/> about x.</summary>
+    static TriangleSoup TurnedCube(float h, bool aboutX, double deg, double cz, double tiltXDeg)
+    {
+        double c = Math.Cos(deg * Math.PI / 180), s = Math.Sin(deg * Math.PI / 180);
+        double ct = Math.Cos(tiltXDeg * Math.PI / 180), st = Math.Sin(tiltXDeg * Math.PI / 180);
+        var cube = ClosedBox(-h, -h, -h, h, h, h);
+        var v = cube.Vertices.Select(p =>
+        {
+            double x = p.X, y = p.Y, z = p.Z;
+            var (qx, qy, qz) = aboutX ? (x, y * c - z * s, y * s + z * c) : (x * c + z * s, y, -x * s + z * c);
+            qz += cz;
+            return new Vector3((float)qx, (float)(qy * ct - qz * st), (float)(qy * st + qz * ct));
+        }).ToArray();
+        return new TriangleSoup(v, cube.Indices);
+    }
+
     static (int Tris, bool Closed, bool Outward) HullFacts(IReadOnlyList<Vector3> v, IReadOnlyList<int> idx, Vector3 inside)
     {
         var edges = new Dictionary<(int, int), int>();
@@ -346,6 +385,168 @@ static partial class MotionProof
             bool la = a.Labels.Any(x => x.StartsWith(PhysicsReach.ShellCrossingLabel) && x.EndsWith("the drop is 5 u"));
             bool lb = b.Labels.Any(x => x.StartsWith(PhysicsReach.ShellCrossingLabel));
             return (la && !lb && a.Drop is { Status: "dropped" } d && NearA7(d.Distance, 95, 1e-3), "lying " + ShowRR(a) + " | honest " + ShowRR(b));
+        });
+        // ================= K (drop crossing, 2026-10-03): a body that starts overlapping a support at the placed pose =================
+        // The overlap is resolved per convex component pair by its minimum translation: pushed up (n_z >= 0.5) is held (touching);
+        // pushed sideways or down, that pair is left out and the body falls past it. Mesh slabs are closed prisms (rims drawn) with
+        // the radius on. Expected values are analytic and were checked against the frozen independent model of this design (numpy,
+        // separating axes over face normals and edge x edge products; the lane's gb_expect.py), which gives the same numbers.
+        static string ShowDrop(DropResult r) => $"{r.Status} {r.Reason} d {r.Distance:0.######} support {r.SupportId}";
+        var floor100 = new DropSupport("floor", 1, true, false, Plate(500, -100));
+        // CANARY (wrong by construction; must stay RED before and after the fix): the LI-K15 item reads dropped 99 to the floor.
+        Case(check, "loose-items CANARY K15 (must FAIL): the item inside the box's shell reads dropped 99 to the floor", () =>
+        {
+            var sup = PhysicsReach.Supports("box", SupportBox(50f, 10f, 7f), new Vec3(0, 0, -14), new Vec3(0, 0, 0), 1f, movableBase: false).Append(floor100).ToArray();
+            var r = PhysicsReach.Drop(ClosedBox(-1, -1, -1, 1, 1, 1), AB(-1, -1, -1, 1, 1, 1), 4, sup, RRLayers);
+            return (r.Status == "dropped" && r.SupportId == "floor" && NearA7(r.Distance, 99, 1e-3), ShowDrop(r));
+        });
+        // LI-K15 containment: a radius-0 item [-1,1]^3 wholly inside a box support's 7 u shell (box half 50 x 50 x 10, radius 7,
+        // centre z -14: core top -4, shell z -31..+3), floor 100 u down. No surface crosses the item, so no crossing test sees it;
+        // the overlap pushes it up by 4 (held) -> touching on the box. Rejects dropped 30 (the exit cast from inside the shell to
+        // its underside, -1 - -31) and dropped 99 (to the floor).
+        Case(check, "loose-items LI-K15: an item wholly inside a box support's shell reads touching on the box, not dropped 30 to its underside", () =>
+        {
+            var sup = PhysicsReach.Supports("box", SupportBox(50f, 10f, 7f), new Vec3(0, 0, -14), new Vec3(0, 0, 0), 1f, movableBase: false).Append(floor100).ToArray();
+            var r = PhysicsReach.Drop(ClosedBox(-1, -1, -1, 1, 1, 1), AB(-1, -1, -1, 1, 1, 1), 4, sup, RRLayers);
+            return (r.Status == "touching" && r.SupportId == "box", ShowDrop(r));
+        });
+        // LI-K16 side clip, wall reaching below the floor: the item [-5,5]^3 clips a wall's 2 u shell sideways by 0.5 u (wall core
+        // x 6.5..26.5, y +-50, z -200..+40; shell x 4.5..28.5, z -202..+42), floor 100 u down. The overlap pushes the item -x by 0.5
+        // (not held): the wall pair is left out and the item falls 95 to the floor. Rejects dropped 63.269231 onto the wall (the item's
+        // bottom edge, from inside the shell, meets the diagonal of the wall's inner side face 63.27 u below: a shorter drop no label
+        // sees) and touching on the wall (every overlap held).
+        Case(check, "loose-items LI-K16: a side clip on a wall that reaches below the floor - dropped 95 on the floor, not 63.27 onto the wall", () =>
+        {
+            var sup = new[] { new DropSupport("wall", 1, true, false, ClosedBox(4.5f, -52, -202, 28.5f, 52, 42)), floor100 };
+            var r = PhysicsReach.Drop(ClosedBox(-5, -5, -5, 5, 5, 5), AB(-5, -5, -5, 5, 5, 5), 4, sup, RRLayers);
+            return (r.Status == "dropped" && r.SupportId == "floor" && NearA7(r.Distance, 95, 1e-3), ShowDrop(r));
+        });
+        // LI-K16b side clip, wall ending above the floor: as LI-K16 with the wall core z -60..+40 (shell z -62..+42). Dropped 95 on the
+        // floor. Rejects touching on the wall (the item's bottom edge already meets the diagonal of the wall's inner side face at the
+        // placed pose) and dropped 57 onto the wall (the exit cast from inside the shell to its underside, -5 - -62).
+        Case(check, "loose-items LI-K16b: a side clip on a wall that ends above the floor - dropped 95 on the floor, not touching the wall", () =>
+        {
+            var sup = new[] { new DropSupport("wall", 1, true, false, ClosedBox(4.5f, -52, -62, 28.5f, 52, 42)), floor100 };
+            var r = PhysicsReach.Drop(ClosedBox(-5, -5, -5, 5, 5, 5), AB(-5, -5, -5, 5, 5, 5), 4, sup, RRLayers);
+            return (r.Status == "dropped" && r.SupportId == "floor" && NearA7(r.Distance, 95, 1e-3), ShowDrop(r));
+        });
+        // LI-K17 separated only on an edge x edge axis: support = cube half 5 turned 45 deg about x (top edge along x at z 5*sqrt2);
+        // body = cube half 5 turned 45 deg about y, its bottom edge (along y) 2 u above the support's top edge; then both turned 40 deg
+        // about x. Their bounds meet and every face normal of either overlaps; only the edge x edge axis separates them (2 u along an
+        // axis 40 deg off vertical). Dropped 2 / cos 40 = 2.610815 on the support. Rejects touching (a face-normal-only overlap test
+        // reads an overlap and pushes it up: held).
+        Case(check, "loose-items LI-K17: two boxes separated only on an edge x edge axis - dropped 2.610815 (2 / cos 40), not touching", () =>
+        {
+            var body = TurnedCube(5, aboutX: false, 45, 10 * Math.Sqrt(2) + 2, 40);
+            var sup = new[] { new DropSupport("s", 1, true, false, TurnedCube(5, aboutX: true, 45, 0, 40)), floor100 };
+            var r = PhysicsReach.Drop(body, SpatialOverlap.SoupBounds(body), 4, sup, RRLayers);
+            return (r.Status == "dropped" && r.SupportId == "s" && NearA7(r.Distance, 2 / Math.Cos(40 * Math.PI / 180), 1e-3), ShowDrop(r));
+        });
+        // LI-K18 one mesh holding a floor and a wall (one compressed mesh, radius 0.35): a floor square half 100 at z 0 and a wall
+        // x 5.2, y +-50, z 0..100 (two triangles each). The item [-5,5]^3 centred z 15 (bottom 10 u above the floor core) clips the
+        // wall's slab (x 4.85..5.55) by 0.15. The wall's prisms push it -x (not held) and are left out; the floor's prisms do not
+        // overlap it: dropped 10 - 0.35 = 9.65 on the mesh. Rejects the mesh read as one convex component (its hull holds the item
+        // and pushes it down: nothing left below), and a cast that meets the wall slab from inside it.
+        Case(check, "loose-items LI-K18: one mesh, floor and wall - an item clipping the wall's slab 10 u up drops 9.65 onto the floor's shell", () =>
+        {
+            var mv = new[] { new Vector3(-100, -100, 0), new Vector3(100, -100, 0), new Vector3(100, 100, 0), new Vector3(-100, 100, 0),
+                             new Vector3(5.2f, -50, 0), new Vector3(5.2f, 50, 0), new Vector3(5.2f, 50, 100), new Vector3(5.2f, -50, 100) };
+            var sup = PhysicsReach.Supports("mesh", SupportMesh(mv, new[] { 0, 1, 2, 0, 2, 3, 4, 5, 6, 4, 6, 7 }, 0.35f), new Vec3(0, 0, 0), new Vec3(0, 0, 0), 1f, movableBase: false);
+            var r = PhysicsReach.Drop(ClosedBox(-5, -5, 10, 5, 5, 20), AB(-5, -5, 10, 5, 5, 20), 4, sup, RRLayers);
+            return (r.Status == "dropped" && r.SupportId == "mesh" && NearA7(r.Distance, 9.65, 1e-3), ShowDrop(r));
+        });
+        // LI-K19 a crease: one compressed mesh (radius 0.35) whose two faces meet at a ridge along y at z 0 and fall 45 deg to
+        // x = -50 and x = +50. A radius-0 square pyramid points down at the ridge: tip (0,0,5), base half 1 at z 15 (its edges run
+        // along x = +-y). The core drop is 5. With the slabs closed (rims drawn) the tip meets the rims at the ridge line: dropped 5.
+        // Rejects 5 + r / cos 45 = 5.494975: the tip falling through the gap between the two offset top faces onto a lower face.
+        Case(check, "loose-items LI-K19: a point over a mesh crease reads the core drop 5, not 5.494975 through the gap between offset faces", () =>
+        {
+            var rv = new[] { new Vector3(0, -50, 0), new Vector3(0, 50, 0), new Vector3(-50, 0, -50), new Vector3(50, 0, -50) };
+            var sup = PhysicsReach.Supports("ridge", SupportMesh(rv, new[] { 0, 1, 2, 0, 3, 1 }, 0.35f), new Vec3(0, 0, 0), new Vec3(0, 0, 0), 1f, movableBase: false);
+            var pyr = new TriangleSoup(new[] { new Vector3(0, 0, 5), new Vector3(1, 1, 15), new Vector3(-1, 1, 15), new Vector3(-1, -1, 15), new Vector3(1, -1, 15) },
+                                       new[] { 0, 2, 1, 0, 3, 2, 0, 4, 3, 0, 1, 4, 1, 3, 4, 1, 2, 3 });
+            var r = PhysicsReach.Drop(pyr, SpatialOverlap.SoupBounds(pyr), 4, sup, RRLayers);
+            return (r.Status == "dropped" && r.SupportId == "ridge" && NearA7(r.Distance, 5, 1e-3), ShowDrop(r));
+        });
+        // LI-K20 an internal mesh edge is not an edge of the surface: one compressed mesh (radius 0.35), a flat square floor at z 0 made of
+        // two triangles whose shared edge runs along x = 0 (corners (0,-50), (50,0), (0,50), (-50,0)). A thin body x -0.05..0.05,
+        // y -5..5, z 0.15..10.15 lies across that edge, sunk 0.2 into the slab's top. Each triangle's prism could push it out sideways
+        // by 0.05 through the shared edge's rim, but that edge has a coplanar neighbour on the other side: the only real way out is up
+        // by 0.2 (held) -> touching on the mesh. Rejects both prisms pushing it sideways and the body falling 100.15 to the floor below.
+        Case(check, "loose-items LI-K20: a body across the internal edge of a flat two-triangle floor reads touching, not pushed sideways through it", () =>
+        {
+            var fv = new[] { new Vector3(0, -50, 0), new Vector3(50, 0, 0), new Vector3(0, 50, 0), new Vector3(-50, 0, 0) };
+            var sup = PhysicsReach.Supports("mesh", SupportMesh(fv, new[] { 0, 1, 2, 0, 2, 3 }, 0.35f), new Vec3(0, 0, 0), new Vec3(0, 0, 0), 1f, movableBase: false)
+                                   .Append(floor100).ToArray();
+            var body = ClosedBox(-0.05f, -5, 0.15f, 0.05f, 5, 10.15f);
+            var r = PhysicsReach.Drop(body, SpatialOverlap.SoupBounds(body), 4, sup, RRLayers);
+            return (r.Status == "touching" && r.SupportId == "mesh", ShowDrop(r));
+        });
+        // LI-K23 an internal edge whose two copies straddle a rounding boundary (reinstated rule, lab 4, 2026-10-04): as LI-K20, but the
+        // two triangles have vertices of their own and the shared edge sits at x 0.0004 in one and x 0.0006 in the other (2e-4 apart:
+        // the same edge to any tolerance of 1e-3, but on either side of a 1e-3 rounding step). The body across it is held (touching on
+        // the mesh). Rejects an edge match by rounded position keys, which reads the edge as a border and pushes the body sideways
+        // through it to the floor 100.15 below.
+        Case(check, "loose-items LI-K23: an internal edge whose copies straddle a rounding boundary is still internal - touching, not dropped 100.15", () =>
+        {
+            var fv = new[] { new Vector3(0.0004f, -50, 0), new Vector3(50, 0, 0), new Vector3(0.0004f, 50, 0),
+                             new Vector3(0.0006f, -50, 0), new Vector3(0.0006f, 50, 0), new Vector3(-50, 0, 0) };
+            var sup = PhysicsReach.Supports("mesh", SupportMesh(fv, new[] { 0, 1, 2, 3, 4, 5 }, 0.35f), new Vec3(0, 0, 0), new Vec3(0, 0, 0), 1f, movableBase: false)
+                                   .Append(floor100).ToArray();
+            var body = ClosedBox(-0.05f, -5, 0.15f, 0.05f, 5, 10.15f);
+            var r = PhysicsReach.Drop(body, SpatialOverlap.SoupBounds(body), 4, sup, RRLayers);
+            return (r.Status == "touching" && r.SupportId == "mesh", ShowDrop(r));
+        });
+        // LI-K25 an internal edge whose two copies sit in neighbouring 1e-3 grid cells: as LI-K23 with the shared edge at x 0.0009 in one
+        // triangle and x 0.0011 in the other (2e-4 apart, on either side of the cell boundary at 0.001; a rounded key would match these,
+        // LI-K23 rejects that). The body across it is held (touching on the mesh). Rejects an edge search confined to the end's own
+        // grid cell, which misses the copy and drops the body 100.15 to the floor.
+        Case(check, "loose-items LI-K25: an internal edge whose copies sit in neighbouring grid cells is still internal - touching, not dropped 100.15", () =>
+        {
+            var fv = new[] { new Vector3(0.0009f, -50, 0), new Vector3(50, 0, 0), new Vector3(0.0009f, 50, 0),
+                             new Vector3(0.0011f, -50, 0), new Vector3(0.0011f, 50, 0), new Vector3(-50, 0, 0) };
+            var sup = PhysicsReach.Supports("mesh", SupportMesh(fv, new[] { 0, 1, 2, 3, 4, 5 }, 0.35f), new Vec3(0, 0, 0), new Vec3(0, 0, 0), 1f, movableBase: false)
+                                   .Append(floor100).ToArray();
+            var body = ClosedBox(-0.05f, -5, 0.15f, 0.05f, 5, 10.15f);
+            var r = PhysicsReach.Drop(body, SpatialOverlap.SoupBounds(body), 4, sup, RRLayers);
+            return (r.Status == "touching" && r.SupportId == "mesh", ShowDrop(r));
+        });
+        // LI-K24 a downward push out of a down-facing slab is lab-verified (lab 4 L4-1, 2026-10-04): flagged pushed off, not "down
+        // through a thin slab, unverified". A ceiling plate (mesh square half 50 at z 0 wound to face down, radius 0.35: slab z
+        // -0.35..0.35) over a body x,y -5..5, z -10..-0.2 whose top is 0.15 into the slab from below. Out down (along the slab's own
+        // normal) 0.15: pushed off, it falls 90 to the floor. Rejects the downward-slab flag on a down-facing slab.
+        Case(check, "loose-items LI-K24: a body pushed down out of a down-facing slab - dropped 90, pushed off, not flagged down through a slab", () =>
+        {
+            var cv = new[] { new Vector3(-50, -50, 0), new Vector3(50, -50, 0), new Vector3(50, 50, 0), new Vector3(-50, 50, 0) };
+            var sup = PhysicsReach.Supports("ceil", SupportMesh(cv, new[] { 0, 2, 1, 0, 3, 2 }, 0.35f), new Vec3(0, 0, 0), new Vec3(0, 0, 0), 1f, movableBase: false)
+                                   .Append(floor100).ToArray();
+            var body = ClosedBox(-5, -5, -10, 5, 5, -0.2f);
+            var r = PhysicsReach.Drop(body, SpatialOverlap.SoupBounds(body), 4, sup, RRLayers);
+            return (r.Status == "dropped" && r.SupportId == "floor" && NearA7(r.Distance, 90, 1e-3) && r.PushedOff && !r.DownThroughSlab,
+                    ShowDrop(r) + $" pushedOff {r.PushedOff} downThroughSlab {r.DownThroughSlab}");
+        });
+        // LI-K21 the shell-crossing guard reads only drops with nothing pushed off: the free item [-5,5]^3 clips a wall's shell sideways
+        // (shell x 4.5..28.5, z -62..42, as LI-K16b) whose core soup is given as a plate under the item at z -10, over a floor 100 u down.
+        // The item is pushed off the wall and falls 95 to the floor; the reduced reading (core on core) is 5. Pushed off, so no
+        // shell-crossing label: the pushed-off label instead. Rejects the guard firing on a drop lengthened by a push-off.
+        Case(check, "loose-items LI-K21: a pushed-off drop carries the pushed-off label, not the shell-crossing label", () =>
+        {
+            var sup = new[] { new DropSupport("wall", 1, true, false, ClosedBox(4.5f, -52, -62, 28.5f, 52, 42), CoreWorld: Plate(500, -10)),
+                              new DropSupport("floor", 1, true, false, Plate(500, -100), CoreWorld: Plate(500, -100)) };
+            var r = MeshReach.OfModel(FreeItem(), Origin, Origin, 1f, null, RulesOn(physics: true, baseType: "MISC", supports: sup));
+            bool shell = r.Labels.Any(x => x.StartsWith(PhysicsReach.ShellCrossingLabel)), pushed = r.Labels.Contains(PhysicsReach.PushedOffLabel);
+            return (!shell && pushed && r.Drop is { Status: "dropped", SupportId: "floor" } d && NearA7(d.Distance, 95, 1e-3), ShowRR(r));
+        });
+        // LI-K22 a downward push through a thin mesh slab is kept as read and flagged: a thin body (10 x 10 x 0.1, z -0.3..-0.2) lies in
+        // the lower half of a mesh plate's slab (radius 0.35, z -0.35..0.35). Out up is 0.65, out down 0.15: pushed down, it falls
+        // 99.7 to the floor below, flagged pushed off and down through a slab. Rejects the flag missing (the label would not be added).
+        Case(check, "loose-items LI-K22: a downward push through a thin mesh slab - dropped 99.7, flagged pushed off and down through a slab", () =>
+        {
+            var sup = PhysicsReach.Supports("mesh", SupportMeshPlate(50f, 0.35f), new Vec3(0, 0, 0), new Vec3(0, 0, 0), 1f, movableBase: false).Append(floor100).ToArray();
+            var body = ClosedBox(-5, -5, -0.3f, 5, 5, -0.2f);
+            var r = PhysicsReach.Drop(body, SpatialOverlap.SoupBounds(body), 4, sup, RRLayers);
+            return (r.Status == "dropped" && r.SupportId == "floor" && NearA7(r.Distance, 99.7, 1e-3) && r.PushedOff && r.DownThroughSlab,
+                    ShowDrop(r) + $" pushedOff {r.PushedOff} downThroughSlab {r.DownThroughSlab}");
         });
         // LI-K10: the geometry reader every other consumer uses (route, floors, contact, overlap's collision column, state) keeps the
         // core: no radius of any kind (their calibrations; contact's in-game acceptance got worse with it, RESULT). Measured in Havok
