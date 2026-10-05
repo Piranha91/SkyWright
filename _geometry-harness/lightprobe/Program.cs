@@ -7,7 +7,7 @@
 //
 // Per selected cell it writes every reference the winning order files there (base, type, editor id, model path, pose,
 // load-time enable state through the shared enable chain, deletion, responsible plugin) and, for each placed Light,
-// its base's radius / flags / fade / colour with the reference's own XRDS radius override applied. With --geometry,
+// its base's radius / flags / fade / colour with the reference's XRDS radius offset added. With --geometry,
 // every enabled reference's render model is read (src/housecarl-core/LightReach.cs), placed, and each enabled light
 // gets three readings: facing (front / back / no first hit over 64 rays inside its radius), leak (attenuated area lit
 // through an opaque surface, and the unblocked area beside it, per receiving reference), and point-in-solid against
