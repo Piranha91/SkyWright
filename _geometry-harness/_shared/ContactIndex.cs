@@ -697,7 +697,9 @@ public sealed class ContactIndex
     /// when the best other contact (<paramref name="best"/>, its new depth <paramref name="bestRank"/>) neither sinks nor touches.</summary>
     public static ArmContact? ChooseContact(ArmContact? best, float bestRank, ArmContact? bestPre, float epsilon)
     {
-        bool bestTouches = best is not null && (bestRank > 0f || best.Contact.FacingDistance <= epsilon);
+        // "Touches" exactly as the rule reads it: a new depth over ε (Sunk) or a facing gap within ε (ReSupported). A contact that only
+        // grazes (0 < depth <= ε) with a facing gap over ε reads Stranded/Orphaned, so it must not displace a pre-existing overlap.
+        bool bestTouches = best is not null && (bestRank > epsilon || best.Contact.FacingDistance <= epsilon);
         return bestPre is not null && !bestTouches ? bestPre : best;
     }
 
