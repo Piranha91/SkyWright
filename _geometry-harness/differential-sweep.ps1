@@ -38,15 +38,29 @@
 #          a comma-joined -Candidates list does NOT survive -File argument binding)
 #         -Probe names the detector to sweep with (default navownprobe); any probe that takes
 #         --enable and --emit and writes a ConflictFile works — overlapprobe for the overlap class.
+#         -Instance names the MO2 instance (required, or HOUSECARL_MO2_INSTANCE: the harness config's
+#         instance is never a default); -Game and -Profile are passed to the probe when given.
 param(
     [string]$OutDir = "$PSScriptRoot\_runs\sweep",
     [string]$Probe = 'navownprobe',
-    [Parameter(ValueFromRemainingArguments = $true)][string[]]$Candidates
+    [string]$Instance = '',
+    [string]$Game = '',
+    [string]$Profile = '',
+    [Parameter(Position = 0, ValueFromRemainingArguments = $true)][string[]]$Candidates
 )
 if (-not $Candidates -or $Candidates.Count -eq 0) {
     Write-Error 'usage: differential-sweep.ps1 [-OutDir dir] "<Plugin.esp>" ["<Plugin2.esp>" ...]'
     exit 2
 }
+
+if (-not $Instance -and -not $env:HOUSECARL_MO2_INSTANCE) {
+    Write-Error 'refused: instance-not-explicit - pass -Instance <MO2 instance dir> (or set HOUSECARL_MO2_INSTANCE for this run); the harness config''s instance is never a default'
+    exit 2
+}
+$target = @()
+if ($Instance) { $target += @('--instance', $Instance) }
+if ($Game) { $target += @('--game', $Game) }
+if ($Profile) { $target += @('--profile', $Profile) }
 
 $ErrorActionPreference = 'Stop'
 Import-Module (Join-Path (Split-Path -Parent $PSScriptRoot) 'scripts\RunLog.psm1') -Force
@@ -69,7 +83,7 @@ try {
     Set-HcStage -Run $run -Id 'base' -Title 'base detection' -Total 1 -Unit 'runs' -Weight 1.0
     Write-Host "== base detection with $Probe (no intervention)"
     $code = Invoke-HcChild -Run $run -Op $Probe -File 'dotnet' `
-                -Arguments @('run', '-c', 'Release', '--', '--emit', $base) `
+                -Arguments (@('run', '-c', 'Release', '--') + $target + @('--emit', $base)) `
                 -WorkingDirectory $navown -LogicalId 'base'
     if ($code -ne 0) { Deny-HcRun -Run $run -Reason "base detection exited $code" -ExitCode $code; exit $code }
     Step-HcProgress -Run $run
@@ -84,7 +98,7 @@ try {
         # -LogPath tees the child's output to the log AND to the console. The old `*> $log` kept
         # the operator staring at nothing for the ~50 s each candidate takes.
         $code = Invoke-HcChild -Run $run -Op $Probe -File 'dotnet' `
-                    -Arguments @('run', '-c', 'Release', '--', '--enable', $cand, '--base', $base, '--emit', $emit) `
+                    -Arguments (@('run', '-c', 'Release', '--') + $target + @('--enable', $cand, '--base', $base, '--emit', $emit)) `
                     -WorkingDirectory $navown -LogPath $log -LogicalId "candidate:$safe"
         if ($code -ne 0) {
             Add-HcTally -Run $run -Failed 1

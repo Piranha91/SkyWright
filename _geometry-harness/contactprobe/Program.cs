@@ -85,6 +85,10 @@ using HousecarlCore.Progress;
 //                   and in the arm without the mover alike. Without it, the load-time state, as every run before 2026-09-04.
 //   --radius on|off the gap the rule reads is between the shapes grown by their Havok radii; normal and depth stay the core's
 //                   (default on; rows gain AuthoringCoreGap / WinnerCoreGap); off = the core reading, byte-identical to before
+//   --cache-budget SIZE|auto  the byte budget the per-placement contact caches share (least-recently-used; e.g. 2G, 512M;
+//                   minimum 64M). auto (default) = the smaller of 20 % of the memory the runtime may use (physical, or the heap
+//                   hard limit), 40 % of (memory free before the host loop - live data) and 4 GiB (an explicit size may exceed it).
+//                   Output does not depend on it; a smaller budget rebuilds evicted grids (slower, less memory)
 //   --bos on|off    apply the Base Object Swapper layer (*_SWAP.ini) so every ref is judged by the base the game loads
 //                   (default on; _shared/BosHook.cs); off = the record bases
 //   --base EMIT     re-measure every record of that emit's rows under THIS order and carry the results in the emit as
@@ -143,6 +147,7 @@ string? jsonPath = null, emitPath = null, basePath = null, overlapJson = null, l
 bool allRows = false, absolute = false, vanillaAssets = false, interiorOnly = false, contactEvidence = false;
 HashSet<string>? only = null;
 bool bosOn = true;
+long? cacheBudget = null;   // --cache-budget: null = CacheBudget.Auto()
 bool radiusOn = true;   // --radius: read the Havok radius for the contact gap (default on; off = the core reading as before)
 var enablePlugins = new List<string>();
 var disablePlugins = new List<string>();
@@ -210,6 +215,15 @@ try
         else if (flag == "--enable") { enablePlugins.Add(NeedValue(i, flag)); i++; }
         else if (flag == "--disable") { disablePlugins.Add(NeedValue(i, flag)); i++; }
         else if (flag == "--bos") { bosOn = BosHook.ParseFlag(NeedValue(i, flag)) ?? throw new ArgumentException("--bos takes on|off"); i++; }
+        else if (flag == "--cache-budget")
+        {
+            var v = NeedValue(i, flag);
+            // "auto" is the default (null), so the fit check's free-memory term applies to it as well
+            cacheBudget = v.Trim().Equals("auto", StringComparison.OrdinalIgnoreCase) ? null
+                        : CacheBudget.Parse(v) ?? throw new ArgumentException("--cache-budget takes a size (e.g. 2G, 512M, bytes) or auto");
+            if (cacheBudget < CacheBudget.MinimumBytes) throw new ArgumentException($"--cache-budget {v} is below the minimum {CacheBudget.MinimumBytes >> 20} MiB");
+            i++;
+        }
         else if (flag == "--radius") { radiusOn = NeedValue(i, flag) switch { "on" => true, "off" => false, _ => throw new ArgumentException("--radius takes on|off") }; i++; }
         else if (flag == "--state") { stateSpec = NeedValue(i, flag); i++; }
         else if (flag == "--force-enable") { forceEnable.AddRange(NeedValue(i, flag).Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)); i++; }
@@ -430,7 +444,7 @@ RefGeometry? GeomOf(FormKey baseKey)
     }
     return g;
 }
-cidx = new ContactIndex(GeomOf) { Epsilon = eps, Reach = reach, NearBand = 2f * eps, BoxBand = 2f * eps + 2f, ReadRadius = radiusOn };
+cidx = new ContactIndex(GeomOf, cacheBudget) { Epsilon = eps, Reach = reach, NearBand = 2f * eps, BoxBand = 2f * eps + 2f, ReadRadius = radiusOn };
 var idx = cidx.Index;
 // --bos on (default): the Base Object Swapper reader replaces each reference's record base with the base the
 // game loads, and a moving override becomes a placement step under a pseudo-plugin after the last real one
@@ -794,6 +808,7 @@ Console.WriteLine($"   top movers: " + string.Join(", ", hosts.GroupBy(h => h.Mo
                     + $"; e.g. " + string.Join("; ", nameOnly.Take(6).Select(k => $"{BaseLabel(k)} {k}")));
 }
 var depHash = cidx.DependentSnaps(skips);
+if (FitCheck() is { } fitRefusal) { Console.Error.WriteLine("contactprobe: " + fitRefusal); return 2; }
 Func<Snap, bool>? winScope = null;
 var winHash = cidx.PhysicalWinners(winScope, skips);
 Console.WriteLine($"   dependents hashed: {depHash.Count:N0} undeleted snaps of clutter- and furniture-scale physical refs — the arm decides which exist at runtime ({skips.DepNoGeometry:N0} winning refs without geometry, {skips.DepVolume:N0} over {cidx.MaxDependentDim:0}u set aside)");
@@ -810,6 +825,20 @@ Console.WriteLine($"   pairs within the box band: {rows.Count + skips.BoxesApart
                 + $"{skips.DepIntroducedByMover:N0} dependents the mover introduced, {skips.DepOtherSpace:N0} in another space, "
                 + $"{skips.DepAbsentInArm:N0} dependents disabled at runtime in the arm without the mover (R1), {skips.DepEnableUnresolved:N0} with an unresolved chain  ({sw.Elapsed.TotalSeconds:0.0}s)");
 Console.WriteLine($"   {GeometryLine()}");
+Console.WriteLine($"   {cidx.Budget.Report()}");
+if (cidx.LargestHostGrid is { } lg)
+    Console.WriteLine($"   largest host grid: {lg.Key.Key} snap {lg.Key.Snap}, base {lg.Key.Base} {BaseLabel(lg.Key.Base)}, {lg.Triangles:N0} triangles, {lg.Bytes / 1e9:0.000} GB");
+if (Environment.GetEnvironmentVariable("HC_CACHEACCURACY") is not null)
+{
+    // Diagnostic: how close the counted bytes are to what dropping the caches frees (compacting full collections either side).
+    static long Live() { System.Runtime.GCSettings.LargeObjectHeapCompactionMode = System.Runtime.GCLargeObjectHeapCompactionMode.CompactOnce; GC.Collect(2, GCCollectionMode.Forced, true, true); GC.WaitForPendingFinalizers(); GC.Collect(2, GCCollectionMode.Forced, true, true); return GC.GetTotalMemory(false); }
+    long counted = cidx.Budget.Bytes, before = Live();
+    cidx.Budget.EvictAll();
+    long after = Live();
+    Console.WriteLine($"   [cacheaccuracy] counted {counted / 1e9:0.000} GB, freed by dropping the caches {(before - after) / 1e9:0.000} GB (live {before / 1e9:0.000} -> {after / 1e9:0.000} GB), counted/freed {(before > after ? (double)counted / (before - after) : double.NaN):0.000}");
+    GC.KeepAlive(rows);
+}
+StaleBaseReport();
 var mstt = idx.BaseInfo.Where(kv => kv.Value.Type == "MoveableStatic").Select(kv => cidx.GeomOf(kv.Key)).Where(g => g is not null).ToList();
 var motions = mstt.SelectMany(g => g!.SolidBodies.Select(b => b.MotionSystem == "" ? "(unread)" : b.MotionSystem)).GroupBy(x => x).OrderByDescending(g => g.Count()).ToList();
 Console.WriteLine($"   MoveableStatic bases with geometry: {mstt.Count:N0}; their solid bodies' motion systems: " + string.Join(", ", motions.Select(g => $"{g.Key} {g.Count():N0}"))
@@ -887,6 +916,45 @@ Console.WriteLine($"   by mover class x author class (class rows, Fixed): " + st
 var classRows = rel.Where(r => Fixed(r) && IsClass(r) && Pop(r) == DependencyPopulation.ModMover).ToList();
 Console.WriteLine($"   the class (mod mover, Fixed, Stranded + Orphaned): {classRows.Count:N0} — Seen {classRows.Count(r => r.Seen):N0} (the dependent was in the mover's editor) / Blind {classRows.Count(r => !r.Seen):N0}; "
                 + $"author after the mover {classRows.Count(r => r.AuthorAfterMover):N0}; mover's side overrode the dependent without moving it {classRows.Count(r => r.DepTouchedByMoverSide):N0}");
+
+// The fit check before the host loop fills the contact caches: one compacting full collection, the live heap, and the memory
+// free now. Refuses (exit 2) when the live data plus the minimum cache cannot fit; lowers an automatic budget to what fits.
+string? FitCheck()
+{
+    var t0 = sw.Elapsed.TotalSeconds;
+    System.Runtime.GCSettings.LargeObjectHeapCompactionMode = System.Runtime.GCLargeObjectHeapCompactionMode.CompactOnce;
+    GC.Collect(2, GCCollectionMode.Forced, blocking: true, compacting: true);
+    long live = GC.GetTotalMemory(false);
+    long? free = CacheBudget.AvailablePhysicalBytes();
+    string line = $"   memory before the host loop: live {live / 1e9:0.00} GB, free now {(free is { } f0 ? $"{f0 / 1e9:0.00} GB" : "unknown")}, contact cache budget {cidx.Budget.Limit / 1e9:0.00} GB";
+    if (free is not { } f) { Console.WriteLine(line + $" (fit check skipped: free memory unreadable)  ({sw.Elapsed.TotalSeconds - t0:0.0}s)"); return null; }
+    if (CacheBudget.FitRefusal(live, f, "--radius off lowers the need; a larger machine or freeing memory raises what fits") is { } refusal) return refusal;
+    if (cacheBudget is null)
+    {
+        // auto = min(share of what the runtime may use, share of what is free now beyond the live data), floored at the minimum
+        long byRuntime = (long)(GC.GetGCMemoryInfo().TotalAvailableMemoryBytes * CacheBudget.AutoFraction);
+        long byFree = CacheBudget.AutoFromFree(f, live);
+        cidx.Budget.LowerTo(byFree);
+        string won = byFree <= Math.Min(byRuntime, CacheBudget.AutoCeilingBytes) ? $"{CacheBudget.FreeFraction:0.00} x (free now - live)"
+                   : byRuntime <= CacheBudget.AutoCeilingBytes ? $"{CacheBudget.AutoFraction:0.00} x runtime memory"
+                   : $"the {CacheBudget.AutoCeilingBytes >> 30} GiB ceiling";
+        line += $" -> auto {cidx.Budget.Limit / 1e9:0.00} GB ({won} won{(cidx.Budget.Limit == CacheBudget.MinimumBytes ? ", at the minimum" : "")})";
+    }
+    else if ((long)(f * 0.9) - live < cidx.Budget.Limit)
+        line += $" (warning: the --cache-budget exceeds the {((long)(f * 0.9) - live) / 1e9:0.00} GB that fits; kept as asked)";
+    Console.WriteLine(line + $"  ({sw.Elapsed.TotalSeconds - t0:0.0}s)");
+    return null;
+}
+
+void StaleBaseReport()
+{
+    foreach (var (cache, count, keys) in cidx.StaleBase())
+        if (count > 0)
+        {
+            Console.WriteLine($"   [stalebase] {cache}: {count:N0} lookups asked a (ref, snap) for a different base than the last lookup");
+            foreach (var k in keys.Distinct().Take(200)) Console.WriteLine($"   [stalebase]   {cache} {k.Key} snap {k.Snap}: {k.Was} -> {k.Now}");
+        }
+}
 
 void PrintRow(ContactRow r)
 {

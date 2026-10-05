@@ -909,6 +909,14 @@ def compile_plan(bundle_dir: Path, verify: dict, settings: dict, pr: dict, bundl
                                           for arm_id, (added, removed) in arm_changes.items()
                                           if comparison_kinds.get(arm_id) == "unstated-difference"
                                           for n in added + removed})
+    # Declared patches changed by a MIXED arm (one that adds and removes at once). Such an arm
+    # evaluates no patch on its own, but the reader must not be told no patch was declared.
+    mixed_declared_patches = sorted({n
+                                     for arm_id, (added, removed) in arm_changes.items()
+                                     if comparison_kinds.get(arm_id) == "mixed"
+                                     for n in added + removed
+                                     if n.lower() in declared_patches and n.lower() not in plan_target_set
+                                     and n not in supplied})
 
     def repair_claimable(ids) -> bool:
         """Can a reduction across these arms be read as REPAIR the reader could install?
@@ -1671,6 +1679,14 @@ def compile_plan(bundle_dir: Path, verify: dict, settings: dict, pr: dict, bundl
                      f"differs, not as an evaluated patch."
                      if unstated_difference_plugins else "")
     patch_text = ", ".join(supplied) if supplied else "no separate patch plugin"
+    # One sentence for declared patches a mixed arm changes; number agreement is its only branch.
+    _mixed_setup = ("The tested setup changes" if sum(1 for k in comparison_kinds.values() if k == "mixed") == 1
+                    else "The tested setups change")
+    mixed_declared_text = ((f"{_mixed_setup} the declared patches {', '.join(mixed_declared_patches)} at once, "
+                            f"so none of them is evaluated on its own." if len(mixed_declared_patches) > 1 else
+                            f"{_mixed_setup} the declared patch {mixed_declared_patches[0]} together with another "
+                            f"plugin, so it is not evaluated on its own.")
+                           if mixed_declared_patches else "")
     patch_adds = any(n in supplied for added, _ in arm_changes.values() for n in added)
     patch_removes = any(n in supplied for _, removed in arm_changes.values() for n in removed)
     patch_how = ("added or removed for comparison" if patch_adds and patch_removes else
@@ -1679,9 +1695,13 @@ def compile_plan(bundle_dir: Path, verify: dict, settings: dict, pr: dict, bundl
     scope_line = (f"This report evaluates {', '.join(target_names) or 'the target mod'} within the measured load order. "
                   + (f"The main recorded conflicts involving the target are with {compared}. " if comparison_names else
                      "No comparison mod was identified by the recorded conflicts. ")
-                  + ((f"The patch evaluated is {patch_text}, {patch_how}." if len(supplied) == 1 else
-                      f"The patches evaluated are {patch_text}, {patch_how}.") if supplied else
-                     "No separate patch plugin was declared for this comparison.")
+                  + " ".join(x for x in (
+                      ((f"The patch evaluated is {patch_text}, {patch_how}." if len(supplied) == 1 else
+                        f"The patches evaluated are {patch_text}, {patch_how}.") if supplied else
+                       # never claim no patch was declared while a changed plugin is a declared patch
+                       "" if mixed_declared_patches else
+                       "No separate patch plugin was declared for this comparison."),
+                      mixed_declared_text) if x)
                   + unstated_text)
     for _a in arms_out:
         _a["comparisonKind"] = comparison_kinds.get(_a.get("armId"))

@@ -2455,6 +2455,26 @@ Console.WriteLine("\nPROOF — placement contact (_shared/DetectorModel.cs + _sh
     var depHash = cidx.DependentSnaps(skips);
     var winHash = cidx.PhysicalWinners(null, skips);
     var rows = hosts.SelectMany(h => cidx.Judge(h, depHash, winHash, closure, skips, keepNoRelation: true)).ToList();
+    {
+        // cache-budget T1: the same order judged with a 1-byte cache budget — every insert evicts every other entry, so each grid
+        // and soup is rebuilt whenever it is asked for again, mid-cell. The rows must be the same as with the default budget.
+        ContactIndex? lean = null;
+        lean = new ContactIndex(k => lean!.Index.ObndBox(k) is { IsEmpty: false } bx
+            ? new RefGeometry(bx, k == jarK ? Inverted(ContactIndex.BoxSoup(bx)) : ContactIndex.BoxSoup(bx), ContactIndex.BoxSoup(bx), 'o', 'o', HostUsable: true, Array.Empty<(string, string)>(), false) : null, 1);
+        for (int p = 0; p < paths.Length; p++) { using var mod = SkyrimMod.CreateFromBinaryOverlay(paths[p], release); lean.Index.Ingest(p, mod); }
+        var lSkips = new ContactSkips();
+        var lHosts = lean.MovedHosts(lSkips, closure);
+        var lDep = lean.DependentSnaps(lSkips); var lWin = lean.PhysicalWinners(null, lSkips);
+        var lRows = lHosts.SelectMany(h => lean.Judge(h, lDep, lWin, closure, lSkips, keepNoRelation: true)).ToList();
+        static string Arm(ArmContact? a) => a is null ? "-" : $"{a.Against} {a.Contact} {a.AgainstExtent} {a.RawDistance} {a.RawAgainst} {a.CoreGap}";
+        static string Sig(ContactRow r) => $"{r.Host.Key}|{r.Dependent}|{r.DepBase}|{r.Relation}|{r.Verdict}|{r.Reason}|{r.Why}|{Arm(r.Authoring)}|{Arm(r.Winner)}";
+        var sigA = rows.Select(Sig).ToList(); var sigB = lRows.Select(Sig).ToList();
+        int firstDiff = Enumerable.Range(0, Math.Min(sigA.Count, sigB.Count)).FirstOrDefault(i => sigA[i] != sigB[i], -1);
+        Check("cache-budget T1: ct-synth judged under a 1-byte cache budget (every entry evicted and rebuilt) gives the same rows as the default budget",
+              sigA.Count > 0 && sigA.SequenceEqual(sigB) && lean.Budget.Evictions("hostGrids") > 0 && lean.Budget.Evictions("depSoups") > 0
+           && lean.Budget.Misses("hostGrids") > cidx.Budget.Misses("hostGrids"),
+              $"rows {sigA.Count} vs {sigB.Count}, first difference at {firstDiff}{(firstDiff >= 0 ? $": {sigA[firstDiff]} || {sigB[firstDiff]}" : "")}; lean: {lean.Budget.Report()}; default: {cidx.Budget.Report()}");
+    }
     ContactRow? Row(int n) => rows.FirstOrDefault(r => r.Host.Key == H(n) && r.Dependent == D(n));
     string R(int n) => Row(n) is { } r ? $"{r.Relation} / {r.Verdict} / {r.Reason} [{r.Motion}, seen {r.Seen}, after {r.AuthorAfterMover}, touched {r.DepTouchedByMoverSide}]: {r.Why}" : "(no row)";
 
@@ -3585,6 +3605,7 @@ NifBoundProof.Run(Check);
 OverlapGeometryProof.Run(Check);
 MeshIntersectionProof.Run(Check);
 OverlapVolumeProof.Run(Check);
+CacheBudgetProof.Run(Check);
 OverlapSurfaceProof.Run(Check);
 MotionProof.Run(Check);
 MotionProof.RunFollowUps(Check);
