@@ -54,7 +54,7 @@ static class ContactDifferentialProof
         var aKey = new ModKey("SdA", ModType.Plugin);
         FormKey M(uint id) => new(mKey, id);
         FormKey A(uint id) => new(aKey, id);
-        var floorK = M(0x801); var crateK = M(0x802); var blockK = M(0x803); var cellK = M(0x810);
+        var floorK = M(0x801); var crateK = M(0x802); var blockK = M(0x803); var cellK = M(0x810); var shortK = M(0x804);
         FormKey H(int n) => M((uint)(0x900 + n));     // the floor host of case n
         FormKey D(int n) => M((uint)(0xA00 + n));     // the crate dependent of case n
         FormKey T(int n) => M((uint)(0xB00 + n));     // a block the master placed
@@ -93,6 +93,7 @@ static class ContactDifferentialProof
         master.Statics.Add(Stat(floorK, "SdFloor", 100, 100, 20));
         master.Statics.Add(Stat(crateK, "SdCrate", 20, 20, 40));
         master.Statics.Add(Stat(blockK, "SdBlock", 50, 50, 100));
+        master.Statics.Add(Stat(shortK, "SdCrateShort", 10, 10, 20));          // ±10: at the crate's z 20 it spans z 10..30, 10 u above the floor
         var mc = new Cell(cellK, release) { EditorID = "SdCell", Flags = Cell.Flag.IsInteriorCell };
         foreach (int n in new[] { 1, 2, 3, 4, 5, 6, 7, 8 })
         {
@@ -106,6 +107,8 @@ static class ContactDifferentialProof
         mc.Temporary.Add(Ref(T(6), blockK, 6060, 0, BlockZ, "SdBlock6"));        // SD-5b: 10 u as authored; the mover pushes it to 13 u
         mc.Temporary.Add(Ref(T(7), blockK, 7040, 0, BlockZ, "SdBlock7"));        // SD-6: 30 u as authored, untouched
         mc.Temporary.Add(Ref(T(8), blockK, 8060, 0, BlockZ, "SdBlock8"));        // SD-7: SD-1's arrangement, read without the opt-in
+        mc.Temporary.Add(Ref(H(9), floorK, 9000, 0, FloorZ, "SdFloor9"));       // F3: the mover swaps Crate9's base without moving it
+        mc.Temporary.Add(Ref(D(9), crateK, 9000, 0, CrateZ, "SdCrate9"));
         FileInterior(master, mc);
         var mPath = Write(master);
         using var mOv = SkyrimMod.CreateFromBinaryOverlay(mPath, release);
@@ -117,6 +120,8 @@ static class ContactDifferentialProof
         foreach (int n in new[] { 1, 3, 4, 5, 6, 7, 8 })
             ac.Temporary.Add(Ref(H(n), floorK, 1000f * n + 20, 0, FloorZ, $"SdFloor{n}"));
         ac.Temporary.Add(Ref(H(2), floorK, 2000, 0, FloorZ, "SdFloor2", disabled: true));
+        ac.Temporary.Add(Ref(H(9), floorK, 9020, 0, FloorZ, "SdFloor9"));                // F3: floor moved 20 u (crate still over it)
+        ac.Temporary.Add(Ref(D(9), shortK, 9000, 0, CrateZ, "SdCrate9"));                // F3: same placement, base swapped to the short crate
         ac.Temporary.Add(Ref(C(3), blockK, 3060, 0, BlockZ, "SdNewBlock3"));      // SD-3: introduced 10 u into the crate
         ac.Temporary.Add(Ref(T(4), blockK, 4060, 0, BlockZ, "SdBlock4"));        // SD-4: moved onto the crate, 10 u
         ac.Temporary.Add(Ref(T(5), blockK, 5040, 0, BlockZ, "SdBlock5"));        // SD-5a: 10 u -> 30 u
@@ -186,6 +191,17 @@ static class ContactDifferentialProof
         }
         Check("SD-8 (guard): Judge with the rule ON reads SD-1's twin case 8 the same way as SD-1 -> RESUPPORTED by the floor",
               Row(8) is { Verdict: ContactVerdict.ReSupported } r8 && r8.Facts.WinnerContactIsHost, R(8));
+
+        // F3 (stage 2 review, side discovery): the shared soup / grid caches are keyed by (reference, snap index), not base. A base
+        // swap with no position step adds no snap, so the authoring arm (arm base: the 40 u crate, resting on the floor) and the winner
+        // arm (winner base: the short crate, 10 u above the floor) ask for the dependent's soup under ONE key. The right winner reading
+        // is the short crate: nothing within ε, nearest about 10 u. The wrong one is the crate's soup reused: touching the floor.
+        {
+            var s9 = cidx.Index.History.Of(D(9))!;
+            Check("F3 (cache key): the mover swaps Crate9's base to a short crate WITHOUT moving it -> the winner arm reads the SHORT crate (about 10 u above the floor, not touching); the authoring arm the 40 u crate (resting)",
+                  Row(9) is { } r9 && r9.Facts.WinnerMeasured && MathF.Abs(r9.Facts.WinnerDistance - 10f) < 0.5f && r9.Relation == ContactRelation.Supported,
+                  $"snaps {s9.Count}, arm base {cidx.ArmBase(D(9), 1, closure).ID:X}, winner base {cidx.WinnerBase(D(9)).ID:X}: {R(9)}");
+        }
 
         try { Directory.Delete(root, true); } catch { }
     }
