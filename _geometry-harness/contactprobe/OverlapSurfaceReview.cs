@@ -116,8 +116,10 @@ static class OverlapSurfaceReview
                 var pa = a.Pose!.Value; var pb = b.Pose!.Value;
                 var (r, frame) = MeshSurface.MeasurePlacedFramed(sa.Soup!, sa.Tags, pa.Pos, pa.Rot, pa.Scale, sb.Soup!, sb.Tags, pb.Pos, pb.Rot, pb.Scale, g);
                 if (r.Status == "measured") measured++; else if (r.Status == "incomplete") incomplete++; else refused++;
-                // lane 3b: the pair frame when placement collapsed a triangle; the particle systems set aside from either render surface
-                Add(ContactNotes.Attach(r, Json, ("pairFrame", ContactNotes.Frame(frame)), ("particlesA", sa.Labels), ("particlesB", sb.Labels)));
+                // lane 3b: the pair frame when placement collapsed a triangle; the particle systems set aside from either render surface;
+                // Group 6 D2: render shapes read as empty (no vertices, no triangles)
+                Add(ContactNotes.Attach(r, Json, ("pairFrame", ContactNotes.Frame(frame)), ("particlesA", sa.Labels), ("particlesB", sb.Labels),
+                                        ("emptyShapesA", sa.EmptyShapes), ("emptyShapesB", sb.EmptyShapes)));
             }
             records.Add(p.ADz is null && p.BDz is null
                 ? new { pairKey = p.PairKey, a = p.A, b = p.B, baseA = a.Base, baseB = b.Base, meshA = a.Mesh, meshB = b.Mesh, geometries = geoms }

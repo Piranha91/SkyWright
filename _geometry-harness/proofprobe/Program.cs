@@ -3641,6 +3641,8 @@ OverlapSurfaceProof.RunStageA7(Check);
 StageBProof.Run(Check);
 // Lane 3b (2026-10-04): contactprobe pair-measure gaps (red until implemented).
 MotionProof.RunContactGaps(Check);
+// Pair-measure mesh defects (2026-10-05, Group 6 D1/D2): zero-area triangles skipped and counted; empty render shapes read.
+MotionProof.RunPairMeshDefects(Check);
 
 Console.WriteLine();
 Console.WriteLine($"==== {pass} passed, {fail} failed ====");
