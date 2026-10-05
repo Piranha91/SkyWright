@@ -255,15 +255,15 @@ static class AlphaSamplingProof
             return (r.Status == "measured" && Is(r.AlphaVisible, 0, 100), Say(r));
         });
 
-        // K3: the shader's UV transform (scale 2 / 1.5, offset 0.25 / 0.1) on the K1 texture at v = 0.3125. Expected from the oracle.
+        // K3: the shader's UV transform (scale 1.5 / 1.5, offset 0.25 / -0.15) on the K1 texture at v = 0.3125. Expected from the oracle.
         // Rejects the transform ignored (37.45 u).
         Case(check, "alpha K3: shader UV scale and offset — oracle length", () =>
         {
             var a = QuadA(); var b = WallY(31.25f);
-            var rule = Rule(us: 2, vs: 1.5f, uo: 0.25f, vo: 0.1f);
+            var rule = Rule(us: 1.5f, vs: 1.5f, uo: 0.25f, vo: -0.15f);
             double want = Oracle(100, AlongU(0.3125), k1Plane, rule, x => x > 128 / 255.0);
             var r = SurfaceVisibility.Measure(a, Tags(a, SurfaceMaterial.AlphaTest), Member(Tc(a, rule, UvA), k1Plane), b, Tags(b, SurfaceMaterial.Opaque), null);
-            return (r.Status == "measured" && Is(r.AlphaVisible, want, want, 2e-3) && Math.Abs(want - 12.5 * (3 - 1.0 / 255)) > 1, $"oracle {want}: " + Say(r));
+            return (r.Status == "measured" && want > 1 && Is(r.AlphaVisible, want, want, 2e-3) && Math.Abs(want - 12.5 * (3 - 1.0 / 255)) > 1, $"oracle {want}: " + Say(r));
         });
         // K4: UVs u = x / 50 (0..2): repeat shows the texture twice, clamp once (beyond u = 1 the edge column 7, alpha 0). Oracle both.
         Case(check, "alpha K4: repeat vs clamp beyond u = 1 — two oracle lengths", () =>
@@ -558,7 +558,7 @@ static class AlphaSamplingProof
                       && p2.Any(p => p.AlternateTexture && p.Provider == "FixtureMod") && p1.All(p => !p.AlternateTexture);
             return (ok, $"asked [{string.Join(", ", asked)}] p1 [{string.Join("; ", p1)}] p2 [{string.Join("; ", p2)}]");
         });
-        Case(check, "alpha K15c: Reader returns the VFS winner's bytes and provider (later mod wins over earlier)", () =>
+        Case(check, "alpha K15c: Reader returns the resolver's own VFS winner: bytes, provider, sha256", () =>
         {
             string root = Path.Combine(Path.GetTempPath(), "hc-alpha-k15c-" + Guid.NewGuid().ToString("N"));
             try
