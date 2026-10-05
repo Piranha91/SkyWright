@@ -35,7 +35,8 @@ string Instance = HarnessTarget.Instance, GamePath = HarnessTarget.Game, profile
 string? orderFile = null, jsonPath = null, cellsFile = null;
 var wantCells = new List<string>();
 bool geometry = false, listInteriors = false;
-long maxMb = 0;   // --max-mb: stop (exit 3) when the working set passes this many MB; 0 = no cap
+long maxMb = 0;   // --max-mb: stop (exit 3) when private bytes pass this many MB at a checkpoint; 0 = no cap
+long peakPrivate = 0;   // the largest private-bytes reading at a checkpoint (working set also counts mapped plugin files)
 for (int i = 0; i < args.Length; i++)
 {
     string a = args[i];
@@ -68,8 +69,10 @@ var sw = Stopwatch.StartNew();
 void Cap(string where)
 {
     if (maxMb <= 0) return;
-    long mb = Process.GetCurrentProcess().WorkingSet64 / 1048576;
-    if (mb > maxMb) { Console.Error.WriteLine($"memory cap: working set {mb} MB > --max-mb {maxMb} at {where}; stopped"); Environment.Exit(3); }
+    var pr = Process.GetCurrentProcess();
+    long priv = pr.PrivateMemorySize64 / 1048576, ws = pr.WorkingSet64 / 1048576;
+    peakPrivate = Math.Max(peakPrivate, priv);
+    if (priv > maxMb) { Console.Error.WriteLine($"memory cap: private bytes {priv} MB (working set {ws} MB) > --max-mb {maxMb} at {where}; stopped"); Environment.Exit(3); }
 }
 var cfg = HarnessOrderCli.Resolve(profileName, profileDir, modsDir, dataDir, overwriteDir, GamePath, orderFile, null, null);
 if (cfg.Refused) { Console.Error.WriteLine(cfg.RefusedReason); return 2; }
@@ -91,6 +94,10 @@ for (int p = 0; p < paths.Count; p++)
     Cap("plugin " + pluginName[p]);
 }
 var arms = new EnableArms(idx);
+// The plugin overlays are released; compact the heap so the working-set cap reads what is live, not what was committed.
+System.Runtime.GCSettings.LargeObjectHeapCompactionMode = System.Runtime.GCLargeObjectHeapCompactionMode.CompactOnce;
+GC.Collect(GC.MaxGeneration, GCCollectionMode.Forced, blocking: true, compacting: true);
+Cap("after indexing");
 Console.WriteLine($"indexed {idx.History.Count:N0} refs over {paths.Count} plugins ({sw.Elapsed.TotalSeconds:0.0}s)");
 
 // cells by editor id (interior only)
@@ -139,6 +146,7 @@ for (int p = 0; p < paths.Count; p++)
         }
         else lightBase.Remove(rec.FormKey);   // a later winner of another type
     }
+    Cap("bases " + Path.GetFileName(paths[p]));
 }
 Console.WriteLine($"bases read: {baseType.Count:N0} ({lightBase.Count:N0} lights); {scopeRefs.Count:N0} refs in {scopeCells.Count} cell(s) ({sw.Elapsed.TotalSeconds:0.0}s)");
 
@@ -157,7 +165,8 @@ if (listInteriors)
         return new { edid = c.Edid, cell = c.Cell.ToString(), refs = refs.Count, lights, lightsEnabled = en };
     }).OrderBy(x => x.edid, StringComparer.Ordinal).ToList();
     File.WriteAllText(jsonPath, JsonSerializer.Serialize(new { identity = Identity(), interiors = rows }, jsonOpts));
-    Console.WriteLine($"{rows.Count:N0} interior cells -> {jsonPath}; peak working set {Process.GetCurrentProcess().PeakWorkingSet64 / 1048576.0:N0} MB");
+    Cap("end");
+    Console.WriteLine($"{rows.Count:N0} interior cells -> {jsonPath}; peak working set {Process.GetCurrentProcess().PeakWorkingSet64 / 1048576.0:N0} MB; largest private bytes at a checkpoint {peakPrivate:N0} MB");
     return 0;
 }
 
@@ -293,7 +302,8 @@ foreach (var (cedid, ck) in scopeCells)
     Console.WriteLine($"{cedid}: {refRows.Count} refs, {lights.Count} lights ({lights.Count(l => l.On)} enabled), {shapeRows.Count} lit shapes ({sw.Elapsed.TotalSeconds:0.0}s)");
 }
 File.WriteAllText(jsonPath, JsonSerializer.Serialize(new { identity = Identity(), geometry, cells = cellsOut }, jsonOpts));
-Console.WriteLine($"-> {jsonPath}; peak working set {Process.GetCurrentProcess().PeakWorkingSet64 / 1048576.0:N0} MB");
+Cap("end");
+Console.WriteLine($"-> {jsonPath}; peak working set {Process.GetCurrentProcess().PeakWorkingSet64 / 1048576.0:N0} MB; largest private bytes at a checkpoint {peakPrivate:N0} MB");
 return 0;
 
 sealed record LightBase(uint Radius, string[] Flags, bool Shadow, bool Strict, bool OffByDefault, bool Spot, float Fade, int[] Color, float Fov);
