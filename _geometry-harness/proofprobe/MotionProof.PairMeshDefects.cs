@@ -85,12 +85,16 @@ static partial class MotionProof
         });
         // PM-4 (guard): a triangle with model-space area that world placement collapses, in a pair the pair frame cannot rescue (A at
         // FarOrigin, B at -FarOrigin: the frame origin is B's position and A still sits ~250,000 u out). Still refused, naming the
-        // collapse. Rejects skipping a placement-collapsed sliver as if it were a zero-area mesh triangle (it has real area).
+        // collapse. A also holds an ordinary triangle 50 u above, so skipping the collapsed sliver would leave a measurable member.
+        // Rejects skipping a placement-collapsed sliver as if it were a zero-area mesh triangle (it has real area).
         Case(check, "pair-mesh PM-4 (guard): a placement collapse the pair frame cannot undo - still refused", () =>
         {
             var neg = new Vec3(-FarOrigin.X, -FarOrigin.Y, -FarOrigin.Z);
-            var r = MeshSurface.MeasurePlaced(SliverA, null, FarOrigin, Zero3, 1f, QuadB, null, neg, Zero3, 1f, VolumeGeometry.Render);
-            return (r.Status == "refused" && (r.Reason ?? "").StartsWith("A: a_degenerate_triangle", StringComparison.Ordinal) && r.ZeroAreaSkipped is null,
+            var a = new TriangleSoup(SliverA.Vertices.Concat(new[] { new Vector3(0, 0, 50), new Vector3(10, 0, 50), new Vector3(0, 10, 50) }).ToArray(),
+                                     new[] { 0, 1, 2, 3, 4, 5 });
+            var r = MeshSurface.MeasurePlaced(a, null, FarOrigin, Zero3, 1f, QuadB, null, neg, Zero3, 1f, VolumeGeometry.Render);
+            return (r.Status == "refused" && (r.Reason ?? "").StartsWith("A: a_degenerate_triangle", StringComparison.Ordinal)
+                    && (r.Reason ?? "").Contains("model-space area") && r.ZeroAreaSkipped is null,
                     $"{r.Status} {r.Reason}");
         });
         // PM-5: a member whose every triangle has zero area is refused by name, not measured as empty. Rejects the bare refusal that
