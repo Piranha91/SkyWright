@@ -92,6 +92,9 @@ public sealed record ArmContact(SoupContact Contact, FormKey Against, char DepSr
     /// standing alone — nothing else within ε.</summary>
     public float PreexistingDepth { get; init; }
     public bool PreexistingOnly { get; init; }
+    /// <summary>Diagnostic only (never read by the selection or the rule): every neighbour the dependent penetrated deeper than ε,
+    /// with that depth and its measured authored depth — so a report can attribute a changed row to the differential rule.</summary>
+    public IReadOnlyList<(FormKey Against, float Depth, float Authored)>? DeepNeighbours { get; init; }
 }
 
 /// <summary>One (dependent, moved host) pair, judged. <paramref name="DepAuthor"/> is the plugin that set the dependent's
@@ -665,6 +668,7 @@ public sealed class ContactIndex
         var depGeom = GeomOf(depBase)!;
         ArmContact? best = null; float bestRank = 0f;          // the best contact that is not a pre-existing overlap, ranked by new depth
         ArmContact? bestPre = null;                            // the deepest pre-existing overlap
+        List<(FormKey, float, float)>? deep = null;            // diagnostic: every neighbour deeper than ε and its authored depth
         float bestRaw = float.PositiveInfinity; FormKey rawAgainst = default;
         float depPad = DepPadW(depBase, depSnap);
         foreach (var (nKey, nBox, _) in hash.Near(depSnap.Space, depBox, BoxBand + depPad + (ReadRadius ? _maxHostRadiusW : 0f)))
@@ -679,7 +683,9 @@ public sealed class ContactIndex
             var (c, coreGap) = Measure(soup, grid, depKey, depSnapIndex, depBase, depSnap, nKey, np.SnapIndex, nBase, np.Snap);
             if (c.Distance < bestRaw) { bestRaw = c.Distance; rawAgainst = nKey; }
             float pen = c.EffectivePenetration, pre = 0f;
-            if (preexistingDepth is not null && pen > Epsilon && preexistingDepth(nKey) is var pd && pd > 0f) pre = pd;
+            float pd = preexistingDepth is not null && pen > Epsilon ? preexistingDepth(nKey) : float.NaN;
+            if (pd > 0f) pre = pd;
+            if (!float.IsNaN(pd)) (deep ??= new()).Add((nKey, pen, pd));
             float rank = pen - pre;
             bool isPre = pre > 0f && rank <= Epsilon;
             if (isPre ? bestPre is not null && pen <= bestPre.Contact.EffectivePenetration
@@ -690,7 +696,7 @@ public sealed class ContactIndex
             if (isPre) bestPre = arm; else { best = arm; bestRank = rank; }
         }
         var chosen = ChooseContact(best, bestRank, bestPre, Epsilon);
-        return chosen is null ? null : chosen with { RawDistance = bestRaw, RawAgainst = rawAgainst };
+        return chosen is null ? null : chosen with { RawDistance = bestRaw, RawAgainst = rawAgainst, DeepNeighbours = deep };
     }
 
     /// <summary>The differential selection's last step: a pre-existing overlap (<paramref name="bestPre"/>) stands as the contact only

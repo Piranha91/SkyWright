@@ -1067,6 +1067,7 @@ if (jsonPath is not null)
         WinnerPreexistingPenetration = r.Facts.WinnerPreexistingPenetration, WinnerPreexistingOnly = r.Facts.WinnerPreexistingOnly,
         Label = PreOnly(r) ? DetectorModel.PreexistingOnlyLabel : r.Verdict.ToString(),
         ParityUnmoved = r.Winner is { } wp && Unmoved(r.Dependent, r.Host.Mover) && Unmoved(wp.Against, r.Host.Mover),
+        DeepNeighbours = r.Winner?.DeepNeighbours?.Select(d => new { Against = d.Against.ToString(), d.Depth, d.Authored }).ToList(),
         DependentDisabled = r.Facts.DependentDisabled, DependentDisabledViaParent = r.Facts.DependentDisabledViaParent, HostRemovedViaParent = r.Host.RemovedViaParent,
         AuthoringRawDistance = r.Authoring?.Contact.Distance, WinnerRawDistance = r.Winner?.RawDistance, WinnerRawAgainst = r.Winner is { } wr && !wr.RawAgainst.IsNull ? wr.RawAgainst.ToString() : null,
     }, r), r.DepBase));
