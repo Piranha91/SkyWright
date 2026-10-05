@@ -3619,6 +3619,8 @@ OverlapSurfaceProof.RunStageA7(Check);
 StageBProof.Run(Check);
 // Lane 3b (2026-10-04): contactprobe pair-measure gaps (red until implemented).
 MotionProof.RunContactGaps(Check);
+// Lane D (2026-10-04): texture alpha sampling along alpha-only crossings (red until implemented).
+AlphaSamplingProof.Run(Check);
 
 Console.WriteLine();
 Console.WriteLine($"==== {pass} passed, {fail} failed ====");
