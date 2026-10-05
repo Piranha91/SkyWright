@@ -702,6 +702,7 @@ def patch_direction_control(bundle: Path, variant: str, outcome: str = "contact-
       mixed    Other.esp is in the measured order; one alternative adds Patch.esp, another removes Other.esp
       listed   the alternative removes FixtureBase.esp, which the target's recorded conflicts already name
       both     Other.esp is in the measured order; the one alternative adds Patch.esp AND removes Other.esp
+      both-one as both, but only Patch.esp is declared a patch
 
     Returns (plan, report.md, report.html)."""
     spec = importlib.util.spec_from_file_location(f"evalreport_patch_direction_{variant}_{outcome}", EVALREPORT)
@@ -732,13 +733,15 @@ def patch_direction_control(bundle: Path, variant: str, outcome: str = "contact-
               "mixed": {"baseline": base + [plugin("Other.esp")],
                         "candidate-01-patcha": base + [plugin("Other.esp"), plugin("Patch.esp")],
                         "candidate-02-patchb": base},
-              "both": {"baseline": base + [plugin("Other.esp")], "candidate-02-patchb": base + [plugin("Patch.esp")]}}[variant]
+              "both": {"baseline": base + [plugin("Other.esp")], "candidate-02-patchb": base + [plugin("Patch.esp")]},
+              "both-one": {"baseline": base + [plugin("Other.esp")], "candidate-02-patchb": base + [plugin("Patch.esp")]}}[variant]
     for arm_id, plugins in orders.items():
         arms[arm_id]["requested"]["plugins"] = plugins
     # Patch identity is declared, never inferred from membership (636ae180): a variant whose
     # alternative changes a patch declares it in the plan's `patches` list, as a real plan does.
     view.plan["patches"] = {"removes": ["Patch.esp"], "adds": ["Patch.esp"],
-                            "mixed": ["Other.esp", "Patch.esp"], "both": ["Other.esp", "Patch.esp"]}.get(variant, [])
+                            "mixed": ["Other.esp", "Patch.esp"], "both": ["Other.esp", "Patch.esp"],
+                            "both-one": ["Patch.esp"]}.get(variant, [])
     if variant == "adds":
         arms["candidate-02-patchb"]["kind"] = "supplied-combination"
         view.disposition["arms"]["candidate-02-patchb"]["kind"] = "supplied-combination"
@@ -913,8 +916,18 @@ def check_patch_direction(bundle: Path):
     reader = plan.get("reader") or {}
     expect(reader.get("verdict"), "Adding Patch.esp and removing Other.esp introduces a new defect in a check that ran.",
            f"{label}/both: the Result names the addition and the removal")
-    check("The patches evaluated are Other.esp, Patch.esp, added or removed for comparison." in str(reader.get("scopeLine")),
-          f"{label}/both: the opening says the comparison adds or removes them (got {reader.get('scopeLine')!r})")
+    # One arm that adds and removes is "mixed": neither declared patch is evaluated on its own, and the opening
+    # says so and names them. It must never claim no patch was declared (ruling 2026-10-05, option 2).
+    check("The tested setup changes the declared patches Other.esp, Patch.esp at once, so none of them is evaluated on its own."
+          in str(reader.get("scopeLine")) and "No separate patch plugin" not in str(reader.get("scopeLine")),
+          f"{label}/both: the opening names the declared patches the setup changes at once (got {reader.get('scopeLine')!r})")
+    expect(reader.get("suppliedPatches"), [], f"{label}/both: a mixed arm evaluates no patch on its own")
+    # the same arm with only Patch.esp declared: Other.esp is an undeclared plugin that moves with it
+    plan, md, html = patch_direction_control(bundle, "both-one")
+    scope = str((plan.get("reader") or {}).get("scopeLine"))
+    check("The tested setup changes the declared patch Patch.esp together with another plugin, so it is not evaluated "
+          "on its own." in scope and "No separate patch plugin" not in scope and "Other.esp at once" not in scope,
+          f"{label}/both-one: one declared patch in a mixed arm is named alone (got {scope!r})")
     check("## Problems introduced by adding Patch.esp and removing Other.esp" in md and "supplied setup" not in md.lower(),
           f"{label}/both: the problems heading names both changes")
 
