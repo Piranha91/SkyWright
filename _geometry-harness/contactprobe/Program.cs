@@ -86,7 +86,8 @@ using HousecarlCore.Progress;
 //   --radius on|off the gap the rule reads is between the shapes grown by their Havok radii; normal and depth stay the core's
 //                   (default on; rows gain AuthoringCoreGap / WinnerCoreGap); off = the core reading, byte-identical to before
 //   --cache-budget SIZE|auto  the byte budget the per-placement contact caches share (least-recently-used; e.g. 2G, 512M;
-//                   minimum 64M). auto (default) = 20 % of the memory the runtime may use (physical, or the heap hard limit).
+//                   minimum 64M). auto (default) = the smaller of 20 % of the memory the runtime may use (physical, or the heap
+//                   hard limit) and 40 % of (memory free before the host loop - live data).
 //                   Output does not depend on it; a smaller budget rebuilds evicted grids (slower, less memory)
 //   --bos on|off    apply the Base Object Swapper layer (*_SWAP.ini) so every ref is judged by the base the game loads
 //                   (default on; _shared/BosHook.cs); off = the record bases
@@ -823,6 +824,18 @@ Console.WriteLine($"   pairs within the box band: {rows.Count + skips.BoxesApart
                 + $"{skips.DepAbsentInArm:N0} dependents disabled at runtime in the arm without the mover (R1), {skips.DepEnableUnresolved:N0} with an unresolved chain  ({sw.Elapsed.TotalSeconds:0.0}s)");
 Console.WriteLine($"   {GeometryLine()}");
 Console.WriteLine($"   {cidx.Budget.Report()}");
+if (cidx.LargestHostGrid is { } lg)
+    Console.WriteLine($"   largest host grid: {lg.Key.Key} snap {lg.Key.Snap}, base {lg.Key.Base} {BaseLabel(lg.Key.Base)}, {lg.Triangles:N0} triangles, {lg.Bytes / 1e9:0.000} GB");
+if (Environment.GetEnvironmentVariable("HC_CACHEACCURACY") is not null)
+{
+    // Diagnostic: how close the counted bytes are to what dropping the caches frees (compacting full collections either side).
+    static long Live() { System.Runtime.GCSettings.LargeObjectHeapCompactionMode = System.Runtime.GCLargeObjectHeapCompactionMode.CompactOnce; GC.Collect(2, GCCollectionMode.Forced, true, true); GC.WaitForPendingFinalizers(); GC.Collect(2, GCCollectionMode.Forced, true, true); return GC.GetTotalMemory(false); }
+    long counted = cidx.Budget.Bytes, before = Live();
+    cidx.Budget.EvictAll();
+    long after = Live();
+    Console.WriteLine($"   [cacheaccuracy] counted {counted / 1e9:0.000} GB, freed by dropping the caches {(before - after) / 1e9:0.000} GB (live {before / 1e9:0.000} -> {after / 1e9:0.000} GB), counted/freed {(before > after ? (double)counted / (before - after) : double.NaN):0.000}");
+    GC.KeepAlive(rows);
+}
 StaleBaseReport();
 var mstt = idx.BaseInfo.Where(kv => kv.Value.Type == "MoveableStatic").Select(kv => cidx.GeomOf(kv.Key)).Where(g => g is not null).ToList();
 var motions = mstt.SelectMany(g => g!.SolidBodies.Select(b => b.MotionSystem == "" ? "(unread)" : b.MotionSystem)).GroupBy(x => x).OrderByDescending(g => g.Count()).ToList();
@@ -889,12 +902,17 @@ string? FitCheck()
     string line = $"   memory before the host loop: live {live / 1e9:0.00} GB, free now {(free is { } f0 ? $"{f0 / 1e9:0.00} GB" : "unknown")}, contact cache budget {cidx.Budget.Limit / 1e9:0.00} GB";
     if (free is not { } f) { Console.WriteLine(line + $" (fit check skipped: free memory unreadable)  ({sw.Elapsed.TotalSeconds - t0:0.0}s)"); return null; }
     if (CacheBudget.FitRefusal(live, f, "--radius off lowers the need; a larger machine or freeing memory raises what fits") is { } refusal) return refusal;
-    long room = (long)(f * 0.9) - live;
-    if (room < cidx.Budget.Limit)
+    if (cacheBudget is null)
     {
-        if (cacheBudget is null) { cidx.Budget.LowerTo(room); line += $" -> lowered to {cidx.Budget.Limit / 1e9:0.00} GB to fit"; }
-        else line += $" (warning: the --cache-budget exceeds the {room / 1e9:0.00} GB that fits; kept as asked)";
+        // auto = min(share of what the runtime may use, share of what is free now beyond the live data), floored at the minimum
+        long byFree = CacheBudget.AutoFromFree(f, live);
+        bool freeWins = byFree < cidx.Budget.Limit;
+        cidx.Budget.LowerTo(byFree);
+        line += $" -> auto {cidx.Budget.Limit / 1e9:0.00} GB ({(freeWins ? $"{CacheBudget.FreeFraction:0.00} x (free now - live)" : $"{CacheBudget.AutoFraction:0.00} x runtime memory")} won"
+              + $"{(cidx.Budget.Limit == CacheBudget.MinimumBytes ? ", at the minimum" : "")})";
     }
+    else if ((long)(f * 0.9) - live < cidx.Budget.Limit)
+        line += $" (warning: the --cache-budget exceeds the {((long)(f * 0.9) - live) / 1e9:0.00} GB that fits; kept as asked)";
     Console.WriteLine(line + $"  ({sw.Elapsed.TotalSeconds - t0:0.0}s)");
     return null;
 }

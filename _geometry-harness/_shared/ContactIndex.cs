@@ -271,6 +271,9 @@ public sealed class ContactIndex
 
     /// <summary>Lookups that asked a (reference, snap) for a different base than the previous lookup there, per cache — only
     /// counted with env HC_STALEBASE set (a diagnostic for comparing against the (reference, snap)-keyed build).</summary>
+    /// <summary>The largest host grid built this run (reference, snap, base, bytes, triangles) — for the end-of-run report.</summary>
+    public ((FormKey Key, int Snap, FormKey Base) Key, long Bytes, int Triangles)? LargestHostGrid => _hostGrids.Largest;
+
     public IEnumerable<(string Cache, long Count, IReadOnlyList<(FormKey Key, int Snap, FormKey Was, FormKey Now)> Keys)> StaleBase()
     {
         var none = Array.Empty<(FormKey, int, FormKey, FormKey)>();

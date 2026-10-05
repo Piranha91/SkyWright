@@ -19,6 +19,10 @@ public sealed class CacheBudget
     /// below <see cref="MinimumBytes"/>.</summary>
     public static long Auto(long availableBytes) => Math.Max(MinimumBytes, (long)(availableBytes * AutoFraction));
     public static long Auto() => Auto(GC.GetGCMemoryInfo().TotalAvailableMemoryBytes);
+    /// <summary>The automatic budget's share of the memory free now beyond the live data, applied at the fit check.</summary>
+    public const double FreeFraction = 0.40;
+    /// <summary>The free-memory term of the automatic budget: <see cref="FreeFraction"/> x (free now − live), never below the minimum.</summary>
+    public static long AutoFromFree(long freeNowBytes, long liveBytes) => Math.Max(MinimumBytes, (long)((freeNowBytes - liveBytes) * FreeFraction));
 
     /// <summary>Parse "auto", a byte count, or a count with a K/M/G suffix (binary). Null when the text is none of those.</summary>
     public static long? Parse(string text)
@@ -86,14 +90,21 @@ public sealed class CacheBudget
     internal void Insert(Node n)
     {
         PushFront(n);
-        Bytes += n.Bytes; var s = _stats[n.Kind]; s[3] += n.Bytes; if (s[3] > s[4]) s[4] = s[3];
+        Bytes += n.Bytes; _stats[n.Kind][3] += n.Bytes;
         if (n.Bytes > Limit) OversizeInserts++;
         while (Bytes > Limit && _tail is { } t && t != n)
         {
             Unlink(t); t.Detach();
             Bytes -= t.Bytes; var ts = _stats[t.Kind]; ts[3] -= t.Bytes; ts[2]++;
         }
-        if (Bytes > PeakBytes) PeakBytes = Bytes;
+        if (Bytes > PeakBytes) PeakBytes = Bytes;                 // peaks after eviction: what the pool holds between inserts
+        var s = _stats[n.Kind]; if (s[3] > s[4]) s[4] = s[3];
+    }
+
+    /// <summary>Drop every entry (a diagnostic: the end-of-run accuracy check measures what the drop frees). Counters are kept.</summary>
+    public void EvictAll()
+    {
+        while (_tail is { } t) { Unlink(t); t.Detach(); Bytes -= t.Bytes; _stats[t.Kind][3] -= t.Bytes; }
     }
 
     internal void Remove(Node n) { Unlink(n); Bytes -= n.Bytes; _stats[n.Kind][3] -= n.Bytes; }
@@ -148,6 +159,8 @@ public sealed class PlacementCache<TValue> where TValue : class
     }
 
     public int Count => _map.Count;
+    /// <summary>The largest entry ever inserted: its key, bytes and triangle count (no reference to the value is kept).</summary>
+    public ((FormKey Key, int Snap, FormKey Base) Key, long Bytes, int Triangles)? Largest { get; private set; }
 
     public bool TryGetValue((FormKey Key, int Snap, FormKey Base) key, out TValue? value)
     {
@@ -169,6 +182,8 @@ public sealed class PlacementCache<TValue> where TValue : class
             var e = new Entry { K = key, Value = value, Owner = this, Kind = _kind,
                                 Bytes = CacheBudget.EntryOverhead + (value is null ? 0 : _bytesOf(value)) };
             _map[key] = e;
+            if (Largest is not { } lg || e.Bytes > lg.Bytes)
+                Largest = (key, e.Bytes, value switch { TriangleGrid g => g.TriangleCount, TriangleSoup so => so.TriangleCount, _ => 0 });
             _budget.Insert(e);
         }
     }

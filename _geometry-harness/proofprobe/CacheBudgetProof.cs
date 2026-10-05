@@ -78,6 +78,9 @@ static class CacheBudgetProof
               CacheBudget.Auto(16 * gib) == (long)(16 * gib * 0.20) && CacheBudget.Auto(8 * gib) == (long)(8 * gib * 0.20)
            && CacheBudget.Auto(1L << 20) == CacheBudget.MinimumBytes && CacheBudget.MinimumBytes == 64L << 20,
               $"16 GiB -> {CacheBudget.Auto(16 * gib)}, 8 GiB -> {CacheBudget.Auto(8 * gib)}, 1 MiB -> {CacheBudget.Auto(1L << 20)}");
+        Check("cache-budget T4d: the free-memory term is 40 % of (free now - live), never below the minimum",
+              CacheBudget.AutoFromFree(30 * gib, 2 * gib) == (long)(28 * gib * 0.40) && CacheBudget.AutoFromFree(2 * gib, 2 * gib) == CacheBudget.MinimumBytes,
+              $"30/2 GiB -> {CacheBudget.AutoFromFree(30 * gib, 2 * gib)}, 2/2 GiB -> {CacheBudget.AutoFromFree(2 * gib, 2 * gib)}");
         Check("cache-budget T4b: sizes parse with binary suffixes; nonsense does not",
               CacheBudget.Parse("2G") == 2 * gib && CacheBudget.Parse("512m") == 512L << 20 && CacheBudget.Parse("1048576") == 1L << 20
            && CacheBudget.Parse("1.5G") == (long)(1.5 * gib) && CacheBudget.Parse("lots") is null && CacheBudget.Parse("-1G") is null,
