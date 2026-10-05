@@ -173,6 +173,17 @@ def test_export_refuses_standalone_block():
         assert rc == S.EXIT_REFUSED_INPUT and doc is None
 
 
+# rejects: a launch job the shared Runner cannot run (a block that dies before its first launch)
+def test_launch_job_is_accepted_by_the_runner():
+    sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(HERE)), "scripts"))
+    from runlog import Runner
+    with tempfile.TemporaryDirectory() as d:
+        os.environ["HOUSECARL_RUNLOG_DIR"] = d
+        job = S.launch_job("R-1", [sys.executable, "-c", "pass"], GOOD["conditions"][0])
+        res = Runner("switchflip-launch-test", out_dir=Path(d) / "runner").run([job], echo=False)[0]
+        assert res.get("exitCode") == 0, res
+
+
 def main():
     tests = [(n, f) for n, f in sorted(globals().items()) if n.startswith("test_") and callable(f)]
     for n, f in tests:

@@ -205,6 +205,12 @@ def idle_gate(refuse_if, min_free_gb, log, tries=21, wait_s=30) -> dict | None:
 
 # ---------------------------------------------------------------------------------------------- batch --
 
+def launch_job(job_id: str, argv: list[str], cond: dict) -> dict:
+    """One launch as a Runner job; Runner features are {name: (value, unit)}."""
+    return {"id": job_id, "argv": argv, "features": {"calls": (len(cond.get("calls") or []), "calls"),
+                                                      "windowSeconds": (cond.get("windowSeconds"), "seconds")}}
+
+
 def cmd_batch(a) -> int:
     doc, plan_sha, problems = load_plan(a.plan)
     if problems:
@@ -276,8 +282,8 @@ def cmd_batch(a) -> int:
                         argv += ["--evalrun-plan", a.evalrun_plan]
                     runner = Runner("switchflip-launch", out_dir=out / "runner",
                                     deadline=time.perf_counter() + a.launch_minutes * 60)
-                    res = runner.run([{"id": f"{cid}-{rep}" + ("" if attempt == 0 else f"~{attempt + 1}"),
-                                       "argv": argv, "features": {"condition": cid}}])[0]
+                    res = runner.run([launch_job(f"{cid}-{rep}" + ("" if attempt == 0 else f"~{attempt + 1}"),
+                                                 argv, cond)])[0]
                     log({"step": "launch-exit", "folder": folder.name, "exitCode": res.get("exitCode"),
                          "stopped": res.get("stopped")})
                     rpath = folder / "receipt.json"
@@ -594,25 +600,29 @@ def cmd_launch(a) -> int:
         receipt["classification"] = cls
         log(step="classified", **cls)
         if (cond.get("canaryAfter") and state["flip_start"] and cls["outcome"] == "complete" and alive()):
-            # A detector check, never a mod finding: the known crash, through the same classifier.
-            canary_events, t_c = [], time.time()
-            events.clear()
-            db.video_mark("canary")
-            timed("call", "canary", lambda: db.post("console", {"action": "exec",
-                                                               "command": doc["canary"]["consoleCommand"]}, timeout=30))
-            t_end = time.time() + 30
-            while time.time() < t_end and alive():
-                timed("heartbeat", "realtime", lambda: db.ret("Utility", "GetCurrentRealTime", None, None,
-                                                              timeout_ms=1500))
-                time.sleep(1.0)
-            time.sleep(3.0)
-            alive()
-            canary_events = events + crash_logs(t_c)
-            receipt["canary"] = {"label": doc["canary"].get("label") or "detector check (a known crash)",
-                                 "flipStart": t_c, "events": [{k: v for k, v in e.items() if k != "res"}
-                                                              for e in canary_events],
-                                 "classification": O.classify(canary_events, t_c, 0.0)}
-            log(step="canary", **receipt["canary"]["classification"])
+            try:
+                # A detector check, never a mod finding: the known crash, through the same classifier.
+                canary_events, t_c = [], time.time()
+                events.clear()
+                db.video_mark("canary")
+                timed("call", "canary", lambda: db.post("console", {"action": "exec",
+                                                                   "command": doc["canary"]["consoleCommand"]}, timeout=30))
+                t_end = time.time() + 30
+                while time.time() < t_end and alive():
+                    timed("heartbeat", "realtime", lambda: db.ret("Utility", "GetCurrentRealTime", None, None,
+                                                                  timeout_ms=1500))
+                    time.sleep(1.0)
+                time.sleep(3.0)
+                alive()
+                canary_events = events + crash_logs(t_c)
+                receipt["canary"] = {"label": doc["canary"].get("label") or "detector check (a known crash)",
+                                     "flipStart": t_c, "events": [{k: v for k, v in e.items() if k != "res"}
+                                                                  for e in canary_events],
+                                     "classification": O.classify(canary_events, t_c, 0.0)}
+                log(step="canary", **receipt["canary"]["classification"])
+            except Exception as e:
+                receipt["canaryError"] = repr(e)[:300]
+                log(step="canary_error", error=repr(e))
         if state.get("loaded") is not None:
             try:
                 receipt["configuration"], _lim = measured_configuration(db, a, arm, eval_plan, instance, profile,
@@ -655,15 +665,18 @@ def cmd_launch(a) -> int:
         except Exception as e:
             log(step="unselect_error", error=repr(e))
         proof = {"running": db._exe_running(*db.MO2_EXES), "restored": []}
-        if snap.exists():
-            proof["mo2IniIdentical"] = (Path(instance, "ModOrganizer.ini").read_bytes()
-                                        == (snap / "ModOrganizer.ini").read_bytes())
+        try:
+            if (snap / "ModOrganizer.ini").exists():
+                proof["mo2IniIdentical"] = (Path(instance, "ModOrganizer.ini").read_bytes()
+                                            == (snap / "ModOrganizer.ini").read_bytes())
             for f in lists:
                 cur, ref = Path(instance, "profiles", profile, f), snap / f
-                if cur.read_bytes() != ref.read_bytes() and not proof["running"]:
+                if ref.exists() and cur.read_bytes() != ref.read_bytes() and not proof["running"]:
                     shutil.copy2(cur, folder / f"{f}.as-left")
                     shutil.copy2(ref, cur)
                     proof["restored"].append(f)
+        except Exception as e:
+            proof["error"] = repr(e)[:300]
         receipt["restoreProof"] = proof
         log(step="proof", **proof)
         try:
