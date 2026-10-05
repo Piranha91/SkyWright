@@ -3,7 +3,7 @@
 //
 // usage: lightprobe --self-test
 //        lightprobe [--instance DIR] [--game DIR] [--profile NAME] [--order FILE] --json OUT
-//                   (--cell EDID ... | --cells-file FILE | --list-interiors) [--geometry]
+//                   (--cell EDID ... | --cells-file FILE | --list-interiors) [--geometry] [--max-mb N]
 //
 // Per selected cell it writes every reference the winning order files there (base, type, editor id, model path, pose,
 // load-time enable state through the shared enable chain, deletion, responsible plugin) and, for each placed Light,
@@ -35,6 +35,7 @@ string Instance = HarnessTarget.Instance, GamePath = HarnessTarget.Game, profile
 string? orderFile = null, jsonPath = null, cellsFile = null;
 var wantCells = new List<string>();
 bool geometry = false, listInteriors = false;
+long maxMb = 0;   // --max-mb: stop (exit 3) when the working set passes this many MB; 0 = no cap
 for (int i = 0; i < args.Length; i++)
 {
     string a = args[i];
@@ -50,6 +51,7 @@ for (int i = 0; i < args.Length; i++)
         case "--cells-file": cellsFile = Next(); break;
         case "--geometry": geometry = true; break;
         case "--list-interiors": listInteriors = true; break;
+        case "--max-mb": maxMb = long.Parse(Next()); break;
         default: Console.Error.WriteLine($"unknown argument {a}"); return 2;
     }
 }
@@ -63,6 +65,12 @@ profileName = HarnessTarget.Require(profileName, "MO2 profile name", "profile", 
 string profileDir = Path.Combine(Instance, "profiles", profileName), modsDir = Path.Combine(Instance, "mods"),
        overwriteDir = Path.Combine(Instance, "overwrite"), dataDir = Path.Combine(GamePath, "Data");
 var sw = Stopwatch.StartNew();
+void Cap(string where)
+{
+    if (maxMb <= 0) return;
+    long mb = Process.GetCurrentProcess().WorkingSet64 / 1048576;
+    if (mb > maxMb) { Console.Error.WriteLine($"memory cap: working set {mb} MB > --max-mb {maxMb} at {where}; stopped"); Environment.Exit(3); }
+}
 var cfg = HarnessOrderCli.Resolve(profileName, profileDir, modsDir, dataDir, overwriteDir, GamePath, orderFile, null, null);
 if (cfg.Refused) { Console.Error.WriteLine(cfg.RefusedReason); return 2; }
 var paths = cfg.OrderedPaths;
@@ -80,6 +88,7 @@ for (int p = 0; p < paths.Count; p++)
     try { mod = SkyrimMod.CreateFromBinaryOverlay(paths[p], SkyrimRelease.SkyrimSE); }
     catch (Exception ex) { Console.Error.WriteLine($"{Path.GetFileName(paths[p])} unreadable: {ex.Message}"); return 2; }
     using (mod as IDisposable) { pluginName[p] = mod.ModKey.FileName.String; idx.Ingest(p, mod); }
+    Cap("plugin " + pluginName[p]);
 }
 var arms = new EnableArms(idx);
 Console.WriteLine($"indexed {idx.History.Count:N0} refs over {paths.Count} plugins ({sw.Elapsed.TotalSeconds:0.0}s)");
@@ -135,7 +144,7 @@ Console.WriteLine($"bases read: {baseType.Count:N0} ({lightBase.Count:N0} lights
 
 var jsonOpts = new JsonSerializerOptions { WriteIndented = true, PropertyNamingPolicy = JsonNamingPolicy.CamelCase, DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
                                            NumberHandling = JsonNumberHandling.AllowNamedFloatingPointLiterals };
-object Identity() => new { schema = "housecarl.light/1", policy = LightReach.PolicyVersion, bos = "off", population = "load-time", state = "baseline",
+object Identity() => new { schema = "housecarl.light/1", policy = LightReach.PolicyVersion, bos = "off", pose = "stored pose (an animated shape is read where the file stores it)", population = "load-time", state = "baseline",
                           configuration = cfg.Identity("load-time", "baseline").Short, plugins = pluginName };
 
 if (listInteriors)
@@ -148,7 +157,7 @@ if (listInteriors)
         return new { edid = c.Edid, cell = c.Cell.ToString(), refs = refs.Count, lights, lightsEnabled = en };
     }).OrderBy(x => x.edid, StringComparer.Ordinal).ToList();
     File.WriteAllText(jsonPath, JsonSerializer.Serialize(new { identity = Identity(), interiors = rows }, jsonOpts));
-    Console.WriteLine($"{rows.Count:N0} interior cells -> {jsonPath}");
+    Console.WriteLine($"{rows.Count:N0} interior cells -> {jsonPath}; peak working set {Process.GetCurrentProcess().PeakWorkingSet64 / 1048576.0:N0} MB");
     return 0;
 }
 
@@ -279,6 +288,7 @@ foreach (var (cedid, ck) in scopeCells)
                                 lights = met.Select(l => l.Key.ToString()).ToList() });
         }
     }
+    Cap("cell " + cedid);
     cellsOut.Add(new { edid = cedid, cell = ck.ToString(), refs = refRows, lights = lightRow.Values.ToList(), geometry = geom, shapes = shapeRows });
     Console.WriteLine($"{cedid}: {refRows.Count} refs, {lights.Count} lights ({lights.Count(l => l.On)} enabled), {shapeRows.Count} lit shapes ({sw.Elapsed.TotalSeconds:0.0}s)");
 }
