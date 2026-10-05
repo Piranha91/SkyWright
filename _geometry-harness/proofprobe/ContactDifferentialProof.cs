@@ -217,8 +217,8 @@ static class ContactDifferentialProof
         // is the short crate: nothing within ε, nearest about 10 u. The wrong one is the crate's soup reused: touching the floor.
         {
             var s9 = cidx.Index.History.Of(D(9))!;
-            Check("F3 (cache key): the mover swaps Crate9's base to a short crate WITHOUT moving it -> the winner arm reads the SHORT crate (about 10 u above the floor, not touching); the authoring arm the 40 u crate (resting)",
-                  Row(9) is { } r9 && r9.Facts.WinnerMeasured && MathF.Abs(r9.Facts.WinnerDistance - 10f) < 0.5f && r9.Relation == ContactRelation.Supported,
+            Check("F3 (cache key): the mover swaps Crate9's base to a short crate WITHOUT moving it -> the winner arm reads the SHORT crate (10 u above the floor: nothing within ε, STRANDED; facing pairs are read only within the near band, so the gap prints as the reach cap); the authoring arm the 40 u crate (resting)",
+                  Row(9) is { Verdict: ContactVerdict.Stranded } r9 && r9.Facts.WinnerMeasured && r9.Facts.WinnerDistance > cidx.Epsilon && r9.Relation == ContactRelation.Supported,
                   $"snaps {s9.Count}, arm base {cidx.ArmBase(D(9), 1, closure).ID:X}, winner base {cidx.WinnerBase(D(9)).ID:X}: {R(9)}");
         }
 
