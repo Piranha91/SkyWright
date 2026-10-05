@@ -382,6 +382,8 @@ probe given no `--instance` (and no `HOUSECARL_MO2_INSTANCE` for that run) exits
 belong to the config's own instance and are used only when the run's instance is that one (same
 path after normalising); for any other instance they are withheld and the probe refuses with
 `game-not-for-this-instance` / `profile-not-for-this-instance` unless the run names them itself.
+`HOUSECARL_MO2_INSTANCE` counts only when set for the run: a value equal to the one persisted at
+User or Machine level refuses with `instance-env-persistent`.
 
 **Keep the config outside this checkout.** A file naming your MO2 instance, profile and drive
 layout is a fact about your mod setup, not about the tool; `HOUSECARL_HARNESS_CONFIG` exists so it

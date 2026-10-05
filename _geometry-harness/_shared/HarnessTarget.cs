@@ -30,6 +30,9 @@ using System.Text.Json;
 //  only when the explicit instance is that instance (same path after
 //  normalising); for any other instance they are withheld and Require()
 //  refuses with `game-not-for-this-instance` / `profile-not-for-this-instance`.
+//  HOUSECARL_MO2_INSTANCE counts only when set for the run: a value equal to
+//  the one persisted at User or Machine level refuses with
+//  `instance-env-persistent`.
 //
 //  Unset reads back as "" rather than null so a probe can hold it in a
 //  plain string, let a flag overwrite it, and only then Require() it.
@@ -38,7 +41,7 @@ using System.Text.Json;
 internal static class HarnessTarget
 {
     /// <summary>MO2 instance directory — the one holding `profiles\`, `mods\` and `overwrite\`. The environment only, never the config file (see the header).</summary>
-    public static string Instance => Env("HOUSECARL_MO2_INSTANCE");
+    public static string Instance => EnvInstance();
 
     /// <summary>MO2 profile name inside that instance. The config's value only for the config's own instance.</summary>
     public static string Profile => GetForInstance("profile", "HOUSECARL_MO2_PROFILE");
@@ -118,6 +121,18 @@ internal static class HarnessTarget
         var noInstance = key == "instance" || (_withheld.TryGetValue(key, out var w) && w == NoneGiven);
         if (noInstance)
         {
+            if (_persistedInstance is { } pi)
+            {
+                // The variable is set, but it is the value stored at User/Machine level: every run on this machine
+                // inherits it, so it is a default by another name, not a choice made for this run.
+                Console.Error.WriteLine($"refused: instance-env-persistent — {EnvName("instance")} ({pi.Value}) is the value " +
+                                        $"persisted at {pi.Level} level, so it would act as a default for every run.");
+                Console.Error.WriteLine(key == "instance" && flag is not null
+                    ? $"  * pass {flag} <dir> on the command line"
+                    : "  * name the instance on the command line where the probe takes --instance");
+                Console.Error.WriteLine($"  * or set {EnvName("instance")} only for this run (a driver's child environment, or `$env:` in one shell)");
+                Environment.Exit(2);
+            }
             // The named reason leads the line so a driver can match it; the config's instance is named so the reader
             // sees exactly what was NOT read.
             Console.Error.WriteLine("refused: instance-not-explicit — no MO2 instance directory given for this run.");
@@ -164,6 +179,48 @@ internal static class HarnessTarget
     static readonly System.Collections.Generic.Dictionary<string, string> _withheld = new();
     const string NoneGiven = "(none given)";
 
+    static (string Value, string Level)? _persistedInstance;
+
+    /// <summary>
+    /// HOUSECARL_MO2_INSTANCE as an explicit choice: its process value, unless that value equals the one persisted at
+    /// User or Machine level (then "" and the reason is kept for <see cref="Require"/>). The test seam
+    /// HOUSECARL_HARNESS_TEST_PERSISTED_INSTANCE ("User=VALUE" or "Machine=VALUE") ADDS a persisted value without
+    /// touching the registry; it can only cause a refusal, never suppress one.
+    /// </summary>
+    static string EnvInstance()
+    {
+        var v = Env("HOUSECARL_MO2_INSTANCE");
+        if (v.Length == 0) return "";
+        foreach (var (level, persisted) in PersistedInstanceValues())
+            if (string.Equals(persisted.Trim(), v, StringComparison.OrdinalIgnoreCase))
+            {
+                _persistedInstance = (v, level);
+                return "";
+            }
+        return v;
+    }
+
+    static System.Collections.Generic.IEnumerable<(string Level, string Value)> PersistedInstanceValues()
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            foreach (var (level, target) in new[] { ("User", EnvironmentVariableTarget.User), ("Machine", EnvironmentVariableTarget.Machine) })
+            {
+                string? pv = null;
+                try { pv = Environment.GetEnvironmentVariable("HOUSECARL_MO2_INSTANCE", target); }
+                catch (Exception ex)
+                {
+                    Console.Error.WriteLine($"warning: could not read the {level}-level HOUSECARL_MO2_INSTANCE ({ex.GetType().Name}); " +
+                                            "the persisted-value check covers the other level only.");
+                }
+                if (!string.IsNullOrWhiteSpace(pv)) yield return (level, pv!);
+            }
+        }
+        var seam = Env("HOUSECARL_HARNESS_TEST_PERSISTED_INSTANCE");
+        var eq = seam.IndexOf('=');
+        if (eq > 0) yield return (seam[..eq], seam[(eq + 1)..]);
+    }
+
     static string Env(string envVar)
     {
         var v = Environment.GetEnvironmentVariable(envVar);
@@ -191,7 +248,7 @@ internal static class HarnessTarget
             if (argv[i] == "--instance" && i + 1 < argv.Length) return argv[i + 1].Trim();
             if (argv[i].StartsWith("--instance=", StringComparison.Ordinal)) return argv[i]["--instance=".Length..].Trim();
         }
-        return Env("HOUSECARL_MO2_INSTANCE");
+        return EnvInstance();
     }
 
     static string NormalisePath(string p)

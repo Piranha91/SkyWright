@@ -30,7 +30,8 @@ HERE = Path(__file__).resolve().parent
 HARNESS = HERE.parent
 FAILURES, PASSED = [], []
 
-REFUSALS = ("instance-not-explicit", "game-not-for-this-instance", "profile-not-for-this-instance")
+REFUSALS = ("instance-not-explicit", "instance-env-persistent", "game-not-for-this-instance",
+            "profile-not-for-this-instance")
 
 
 def check(ok: bool, label: str, detail: str = "") -> None:
@@ -44,7 +45,8 @@ def exe(name: str) -> Path:
 
 def run(probe: str, args: list[str], tmp: Path, env_extra: dict[str, str] | None = None) -> tuple[int, str]:
     env = {k: v for k, v in os.environ.items()
-           if k not in ("HOUSECARL_MO2_INSTANCE", "HOUSECARL_MO2_PROFILE", "HOUSECARL_GAME_PATH")}
+           if k not in ("HOUSECARL_MO2_INSTANCE", "HOUSECARL_MO2_PROFILE", "HOUSECARL_GAME_PATH",
+                        "HOUSECARL_HARNESS_TEST_PERSISTED_INSTANCE")}
     env["HOUSECARL_HARNESS_CONFIG"] = str(tmp / "harness.json")
     env["HOUSECARL_RUNLOG_DIR"] = str(tmp / "runlog")
     env.update(env_extra or {})
@@ -140,6 +142,30 @@ def main() -> int:
             check(code == 2 and refusals_in(out) == ["instance-not-explicit"],
                   f"K9 {probe}: game and profile named, instance not -> refused instance-not-explicit",
                   f"exit {code}\n{out[-1500:]}")
+
+        # K10 — HOUSECARL_MO2_INSTANCE counts only when set for THIS run. A value equal to the one persisted at User or
+        # Machine level is a default by another name: refused instance-env-persistent. The persisted value is faked
+        # through the HOUSECARL_HARNESS_TEST_PERSISTED_INSTANCE seam (it can only add a persisted value), so nothing is
+        # written to the registry. The tree before this rule accepted it.
+        run_env = {"HOUSECARL_MO2_INSTANCE": other_inst.as_posix(), "HOUSECARL_GAME_PATH": other_game.as_posix(),
+                   "HOUSECARL_MO2_PROFILE": "OtherProf"}
+        for level in ("User", "Machine"):
+            code, out = run("geoprobe", [], tmp, {**run_env,
+                                                  "HOUSECARL_HARNESS_TEST_PERSISTED_INSTANCE": f"{level}={other_inst.as_posix()}"})
+            check(code == 2 and refusals_in(out) == ["instance-env-persistent"] and "--instance" in out,
+                  f"K10 geoprobe: instance variable equals the {level}-level value -> refused instance-env-persistent",
+                  f"exit {code}\n{out[-1500:]}")
+        # K11 — the per-run handoff (evalrun's child_env) keeps working: a persisted value that differs from the run's.
+        code, out = run("geoprobe", [], tmp, {**run_env,
+                                              "HOUSECARL_HARNESS_TEST_PERSISTED_INSTANCE": f"User={cfg_inst.as_posix()}"})
+        check(not refusals_in(out), "K11 geoprobe: run value differs from the persisted one -> accepted, no refusal",
+              f"exit {code}\n{out[-1500:]}")
+        # K12 — --instance on the command line wins over a persisted variable: no refusal.
+        code, out = run("switchprobe", ["--instance", other_inst.as_posix(), "--game", other_game.as_posix(),
+                                        "--profile", "OtherProf"], tmp,
+                        {**run_env, "HOUSECARL_HARNESS_TEST_PERSISTED_INSTANCE": f"User={other_inst.as_posix()}"})
+        check(not refusals_in(out) and "load order:" in out,
+              "K12 switchprobe: --instance given, variable persisted -> flag used, no refusal", f"exit {code}\n{out[-1500:]}")
 
         # K8 — the config has no game at all and the explicit instance is the config's: nothing is withheld, so the
         # generic "not configured" guidance prints with no refusal reason (the rule changes nothing it does not own).
