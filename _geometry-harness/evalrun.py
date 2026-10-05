@@ -100,6 +100,11 @@ REJECTION_CAUSES = (
 ORDER_CONSUMING_KINDS = {"scopeprobe", "ordersweep-probe", "probe-emit", "probe-json"}
 
 TERMINAL_OK = ("completed", "reused")
+#: Plan row statuses that wait for imported evidence: `mcp-only` (an MCP tool's capture) and `live-import` (a live
+#: game driver's receipt, read by evallive.py). The run never measures either; only `import-results` completes one.
+IMPORT_ROW_STATUSES = ("mcp-only", "live-import")
+#: The plan row status of an opt-in check the caller did not ask for (`plan --opt-in`). Never blocking, always listed.
+NOT_OPTED_IN = "not-opted-in"
 CLAIMS = ("no-findings-in-completed-checks", "findings", "incomplete")
 ARM_KINDS = ("baseline", "candidate", "supplied-combination")
 PART_NAMES = (None, "arm", "reverse", "diff")
@@ -819,6 +824,17 @@ def cmd_plan(a) -> int:
                     selected.add(pre)
                     implied[pre] = f"implied-by:{cid}"
                     frontier.append(pre)
+    # An opt-in check (registry `optIn: true`) is planned only when the caller names it: the controller never
+    # launches the game, and a live check is something the caller asks for, not a default. Opting in makes it
+    # required for this run, so an evaluation that asked for it cannot finalize complete without it.
+    opted = set()
+    for tok in [t.strip() for t in ",".join(a.opt_in or []).split(",") if t.strip()]:
+        chk = next((c for c in reg.checks if c["id"] == tok), None)
+        if chk is None:
+            return refuse(f"--opt-in {tok!r}: the registry defines no such check")
+        if not chk.get("optIn"):
+            return refuse(f"--opt-in {tok!r}: that check is not opt-in (it is planned by default)")
+        opted.add(tok)
     excluded = {}
     for spec in (a.exclude or []):
         cid, _, reason = spec.partition("=")
@@ -889,7 +905,9 @@ def cmd_plan(a) -> int:
         base_status = None
         if applicability == "no":
             base_status = "not-applicable"
-        elif kind in ("unsupported", "mcp-only", "manual"):
+        elif check.get("optIn") and cid not in opted:
+            base_status = NOT_OPTED_IN
+        elif kind in ("unsupported", "mcp-only", "manual", "live-import"):
             base_status = kind
 
         per_arm = []
@@ -931,7 +949,8 @@ def cmd_plan(a) -> int:
 
         checks.append({
             "checkId": cid, "family": check.get("family"), "title": check.get("title"),
-            "required": bool(check.get("required")),
+            "required": bool(check.get("required")) or cid in opted,
+            **({"optIn": True, "optedIn": cid in opted} if check.get("optIn") else {}),
             "applicability": applicability, "applicabilityEvidence": evidence,
             "prerequisites": list(check.get("prerequisites") or []),
             "inputs": check.get("inputs") or {},
@@ -995,6 +1014,7 @@ def cmd_plan(a) -> int:
             "selectRaw": select_raw,
             "selectImplied": implied,
             "exclude": excluded,
+            **({"optIn": sorted(opted)} if opted else {}),
             "touched": touched,
             "note": "--select narrows what RUNS, never what is PLANNED: a check that was not selected "
                     "is skipped-user and stays visible, and a required one keeps the evaluation "
@@ -2256,8 +2276,8 @@ def execute(ex: Executor, parent) -> None:
             st = arm_row["status"]
             if already_done(check["checkId"], arm["armId"], None):
                 pre = reuse_blocked_by(ex, check, arm["armId"]) if st == "planned" and kind != "media" else None
-                if st == "mcp-only":
-                    # Only an import credits an mcp-only row, and it was admitted by `prereq_satisfied`: it stays
+                if st in IMPORT_ROW_STATUSES:
+                    # Only an import credits an mcp-only (or live-import) row, and it was admitted by `prereq_satisfied`: it stays
                     # credited only while that same gate still holds on this arm.
                     pre = prereq_satisfied(ex, check, arm["armId"])
                 if kind == "derived":
@@ -2265,7 +2285,7 @@ def execute(ex: Executor, parent) -> None:
                 elif pre:
                     ex.account(check, arm, f"blocked(prerequisite:{pre})", "blocked-prerequisite",
                                prereq_block_detail(ex, pre, arm["armId"])
-                               + ("" if st != "mcp-only" else
+                               + ("" if st not in IMPORT_ROW_STATUSES else
                                   ". The imported evidence stays under imports/ but is no longer credited; import it "
                                   "again once the prerequisite is settled on this arm"),
                                extra=superseded_import(ex, check, arm))
@@ -2292,7 +2312,11 @@ def execute(ex: Executor, parent) -> None:
                 ex.account(check, arm, "blocked(payload-missing)", "blocked-prerequisite",
                            "the supplied arm declares files that are not in the configuration: "
                            + ", ".join(arm["supplied"]["payloadMissing"]))
-            elif st == "mcp-only" and uncredited_import_still_blocked(ex, check, arm["armId"]):
+            elif st == NOT_OPTED_IN:
+                ex.account(check, arm, "skipped-user", None,
+                           "opt-in check, not requested (`plan --opt-in " + check["checkId"] + "`): it was not run "
+                           "and this evaluation says nothing about it")
+            elif st in IMPORT_ROW_STATUSES and uncredited_import_still_blocked(ex, check, arm["armId"]):
                 # An import this gate un-credited earlier stays blocked, by name, while its prerequisite still fails;
                 # once the prerequisite holds it is an ordinary mcp-only row again, waiting for a re-import.
                 pre = prereq_satisfied(ex, check, arm["armId"])
@@ -2301,7 +2325,7 @@ def execute(ex: Executor, parent) -> None:
                            + ". The imported evidence stays under imports/ but is no longer credited; import it "
                              "again once the prerequisite is settled on this arm",
                            extra=superseded_import(ex, check, arm))
-            elif st == "mcp-only" and uncredited_import_cause(ex, check, arm["armId"]):
+            elif st in IMPORT_ROW_STATUSES and uncredited_import_cause(ex, check, arm["armId"]):
                 # An import whose entry was invalidated or refused reuse (its inputs, or a prerequisite's evidence,
                 # changed) keeps THAT cause: flattening it to a plain mcp-only row would say no import was ever made.
                 was = uncredited_import_cause(ex, check, arm["armId"])
@@ -2314,6 +2338,10 @@ def execute(ex: Executor, parent) -> None:
                               f". A re-import is refused until {also} is settled on this arm as well: "
                               + prereq_block_detail(ex, also, arm["armId"])),
                            extra=superseded_import(ex, check, arm))
+            elif st == "live-import":
+                ex.account(check, arm, "live-import", None,
+                           "opted in and waiting for a live receipt: run switchflip.py for this arm, then "
+                           "`import-results --file` its export; the controller itself never launches the game")
             elif st in ("unsupported", "mcp-only"):
                 ex.account(check, arm, st, None, check.get("unsupportedReason") or
                            "the registry records no CLI adapter for this check")
@@ -2436,7 +2464,7 @@ def account_unplanned_sweep_part(ex: Executor, check: dict, arm: dict, st: str |
                   + ", ".join(arm["supplied"]["payloadMissing"]))
     else:
         status = ("not-applicable" if st == "not-applicable" else
-                  "skipped-user" if st in ("excluded", "skipped-user") else "unsupported")
+                  "skipped-user" if st in ("excluded", "skipped-user", NOT_OPTED_IN) else "unsupported")
         cause, detail = None, f"plan status {st}: this arm was not going to be measured"
     if (ex.ledger.entry(check["checkId"], aid, part) or {}).get("status") != status:
         ex.account(check, arm, status, cause, detail, part=part)
@@ -3912,6 +3940,11 @@ def _cmd_import_results(a, runlog: Run) -> int:
     arm = next((x for x in plan.get("arms", []) if x.get("armId") == aid), None)
     if check is None:
         return refuse(f"wrong-check: plan {plan['planId']} has no check {cid!r}")
+    if (check.get("adapter") or {}).get("kind") == "live-import":
+        # A live game driver's receipt: its own validator (evallive.py), which re-reads every launch.
+        import evallive
+        return evallive.import_live(sys.modules[__name__], a=a, runlog=runlog, run=run, src=src, plan=plan,
+                                    ledger=ledger, check=check, arm=arm, doc=doc, manifest_bytes=manifest_bytes)
     if (check.get("adapter") or {}).get("kind") != "mcp-only":
         return refuse(f"wrong-check: {cid} is {(check.get('adapter') or {}).get('kind')!r}, not mcp-only; "
                       "import-results cannot replace a runnable or unsupported detector")
@@ -4132,6 +4165,18 @@ def cmd_import_results(a) -> int:
 
 
 # ------------------------------------------------------------------------------ finalize (D7) --
+
+def runtime_observations_sentence(plan: dict, receipts: dict) -> str:
+    """What this run says about the engine at play time: nothing, unless an accepted live receipt is bound to it."""
+    live = sorted({r.get("checkId") for r in receipts.values()
+                   if (r.get("adapter") or {}).get("kind") == "live-import"
+                   and (r.get("validation") or {}).get("accepted")})
+    if not live:
+        return ("no runtime observation was supplied to this run: nothing here says what the engine did at play "
+                "time")
+    return ("accepted live receipts for " + ", ".join(live) + " say what the engine did in the conditions their "
+            "flip plans list, and nothing about any other condition")
+
 
 def cmd_finalize(a) -> int:
     run = Path(a.run)
@@ -4375,7 +4420,7 @@ def build_disposition(run: Path, plan: dict, ledger: Ledger, receipts: dict, *,
     unknown_app = []
     for check in plan["checks"]:
         cid = check["checkId"]
-        if check["applicability"] == "unknown":
+        if check["applicability"] == "unknown" and check.get("status") != NOT_OPTED_IN:
             unknown_app.append({"checkId": cid, "evidence": check["applicabilityEvidence"],
                                 "effect": "keeps evaluation.complete false"})
             # A-2: an unknown-applicability check is listed under BOTH unknownApplicability and
@@ -4506,8 +4551,8 @@ def build_disposition(run: Path, plan: dict, ledger: Ledger, receipts: dict, *,
                                                ("unsupported", "mcp-only", "manual", "media")}),
         "scopeUnmeasured": plan["scope"].get("unmeasured", []),
         "mediaUnassessed": "media is identified and assessed by `bundle --media`; see the bundle manifest",
-        "runtimeObservations": "no runtime observation was supplied to this run: nothing here says what the "
-                               "engine did at play time",
+        "runtimeObservations": runtime_observations_sentence(plan, receipts),
+        "notOptedIn": [c["checkId"] for c in plan["checks"] if c.get("status") == NOT_OPTED_IN],
     }
 
     discovery = {
@@ -5325,6 +5370,10 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--states", default="baseline")
     p.add_argument("--select", action="append", help="CHECK,... — narrows what RUNS, never what is PLANNED")
     p.add_argument("--exclude", action="append", metavar="CHECK=reason")
+    p.add_argument("--opt-in", action="append", metavar="CHECK[,CHECK...]",
+                   help="plan an opt-in check (registry optIn: true), such as the live runtime.state-switch-flip; "
+                        "opting in makes it required for this run. Not opted in, it is listed not-opted-in and "
+                        "never blocks")
     p.add_argument("--budget-minutes", type=float,
                    help="a wall-time DEADLINE per `run`/`resume` invocation, measured from when that "
                         "invocation opens its executor, after its plan/ledger/premise checks and before "

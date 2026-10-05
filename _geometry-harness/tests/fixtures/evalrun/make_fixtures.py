@@ -69,6 +69,10 @@ KEEP_Q43 = ["functional.quest-alias-split"]
 # its prerequisite settled and unsettled. Its own trim, so no other case's plan changes.
 KEEP_DERIVED = ["patch.discovery-installed", "patch.candidate-qualification"]
 
+# The live-import case only: the opt-in runtime switch check, so planning with and without it (and with and without
+# --opt-in) can be compared on otherwise identical inputs. Its own trim, so no other case's plan changes.
+KEEP_LIVE = ["runtime.state-switch-flip"]
+
 SCOPE = {
     "schemaVersion": 1, "probe": "scopeprobe", "generatedUtc": "2026-09-12T18:00:00Z",
     "complete": True, "walkFailures": [],
@@ -257,6 +261,8 @@ def main() -> int:
          "This trim adds " + ", ".join(KEEP_Q43) + " for the identity-binding case. ")
     trim(KEEP + KEEP_DERIVED, "fixture-check-registry-derived.json",
          "This trim adds " + ", ".join(KEEP_DERIVED) + " for the derived-prerequisite case. ")
+    trim(KEEP + KEEP_LIVE, "fixture-check-registry-live.json",
+         "This trim adds " + ", ".join(KEEP_LIVE) + " for the opt-in live-import case. ")
 
     # ---------------------------------------------------------------- cases
     cases = out_root / "cases"

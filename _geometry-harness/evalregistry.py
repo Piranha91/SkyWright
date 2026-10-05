@@ -59,6 +59,7 @@ ADAPTER_KINDS = frozenset({
     "media",             # supplied observations, admitted only with an identity (PLAN D8)
     "manual",            # a human decision, admissible only where manualDecisionAllowed is true
     "mcp-only",          # the capability exists, but only behind an MCP tool the controller cannot call
+    "live-import",       # a live game driver's receipt, imported and re-read by evallive.py; opt-in only
     "unsupported",       # no adapter and no MCP tool: an open limit, named
 })
 
@@ -73,7 +74,11 @@ RESULT_KINDS = frozenset({"detector", "catalogue", "discovery"})
 
 #: Adapter kinds that run no child, so there is no child output to read a result out of. Their
 #: `adapter.output` is null and A-6's rule does not reach them.
-KINDS_WITHOUT_OUTPUT = frozenset({"derived", "media", "mcp-only", "manual", "unsupported"})
+KINDS_WITHOUT_OUTPUT = frozenset({"derived", "media", "mcp-only", "manual", "unsupported", "live-import"})
+
+#: Kinds a check may only carry with `optIn: true`: the controller never launches the game, so a live check
+#: is something the caller asks for (`plan --opt-in`), never a default the evaluation silently waits on.
+KINDS_REQUIRING_OPT_IN = frozenset({"live-import"})
 
 #: Adapter kinds that DO run a child process. These must say whether the child takes the common
 #: target flags (PLAN amendment A-10(b)): a probe whose parser has no --instance finds the instance
@@ -345,6 +350,15 @@ def validate(registry):
 
         if not isinstance(check.get("manualDecisionAllowed"), bool):
             problems.append(f"{cid}: manualDecisionAllowed must be true or false")
+
+        opt_in = check.get("optIn", False)
+        if not isinstance(opt_in, bool):
+            problems.append(f"{cid}: optIn, when present, must be true or false")
+        elif opt_in and required:
+            problems.append(f"{cid}: an opt-in check cannot be required by default (required must be false; "
+                            "opting in makes it required for that run)")
+        if kind in KINDS_REQUIRING_OPT_IN and opt_in is not True:
+            problems.append(f"{cid}: adapter kind {kind} needs optIn: true (the controller never launches the game)")
 
         prereqs = check.get("prerequisites")
         if prereqs is None:
