@@ -809,6 +809,11 @@ public static class DetectorModel
     /// the row Sunk. 0 when not measured (callers that do not opt in read exactly as before).</param>
     /// <param name="WinnerPreexistingOnly">the winner contact is such a pre-existing overlap and nothing else is within ε: the row
     /// is ReSupported with <see cref="PreexistingOnlyLabel"/>.</param>
+    /// <summary>The decision model's coverage quantities, independent of a geometry implementation.
+    /// Raw geometry evidence and arithmetic uncertainty remain with the measuring caller.</summary>
+    public sealed record CoverageFacts(double ProjectedArea, double CoveredArea, double UncoveredArea,
+        double? MinGap, double? MaxGap, bool Complete, string? RefusalReason, string FullCoverReading, string? UncertaintyReason);
+
     public readonly record struct ContactFacts(
         bool DependentGeometry, bool HostGeometry, bool AuthoringMeasured,
         float AuthoringDistance, float AuthoringPenetration, float AuthoringNormalUp,
@@ -817,8 +822,8 @@ public static class DetectorModel
         DependentMotion Motion,
         bool DependentDisabledViaParent = false, bool DependentEnableUnresolved = false, float WinnerAgainstExtent = float.NaN,
         float WinnerPreexistingPenetration = 0f, bool WinnerPreexistingOnly = false,
-        HousecarlCore.DirectionalCoverageResult? WinnerCoverage = null,
-        HousecarlCore.DirectionalCoverageResult? WinnerAuthoredCoverage = null);
+        CoverageFacts? WinnerCoverage = null,
+        CoverageFacts? WinnerAuthoredCoverage = null);
 
     /// <summary>The label a ReSupported row carries when its only contact under the winner is an overlap that already existed as
     /// authored (Gate A review F1, 2026-10-04): counted apart from ReSupported in every report, never merged into it.</summary>

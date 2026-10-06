@@ -747,6 +747,10 @@ public sealed class ContactIndex
         return chosen is null ? null : chosen with { RawDistance = bestRaw, RawAgainst = rawAgainst, DeepNeighbours = deep, CoverageNeighbours = covers };
     }
 
+    static DetectorModel.CoverageFacts? CoverFacts(DirectionalCoverageResult? c) => c is null ? null
+        : new(c.ProjectedArea, c.CoveredArea, c.UncoveredArea, c.MinGap, c.MaxGap, c.Complete,
+            c.RefusalReason, c.FullCoverReading, c.UncertaintyReason);
+
     static bool WholeCover(DirectionalCoverageResult c) => c.Complete && c.ProjectedArea > 0
         && c.FullCoverReading == "nominal_whole_cover" && c.UncoveredArea == 0;
 
@@ -941,8 +945,8 @@ public sealed class ContactIndex
                 WinnerAgainstExtent = win?.AgainstExtent ?? float.NaN,
                 WinnerPreexistingPenetration = win?.PreexistingDepth ?? 0f,
                 WinnerPreexistingOnly = win?.PreexistingOnly ?? false,
-                WinnerCoverage = win?.Coverage,
-                WinnerAuthoredCoverage = win?.AuthoredCoverage,
+                WinnerCoverage = CoverFacts(win?.Coverage),
+                WinnerAuthoredCoverage = CoverFacts(win?.AuthoredCoverage),
             };
             var r = DetectorModel.PlacementContact(f, Epsilon, SupportCos, AttachCos);
             if (tw) TraceJudged(depKey, host.Key, r.Relation, r.Verdict, r.Reason, nearMiss, auth);
