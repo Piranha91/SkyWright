@@ -141,5 +141,34 @@ static class DirectionalCoverageProof
             upperExposed.Complete && Near(upperExposed.ProjectedArea, 16)
             && Near(upperExposed.CoveredArea, 8) && Near(upperExposed.UncoveredArea, 8)
             && upperExposed.FullCoverReading == "partial", Show(upperExposed));
+
+        var halfUpper = DirectionalCoverage.Measure(dependent,
+            TriangleGrid.Build(Rectangle(-3, -3, 0, 3, 4f - .000005f)), Vector3.UnitZ, 4);
+        check("SC-19: upper-band sensitivity cannot fill an absent half footprint",
+            halfUpper.Complete && Near(halfUpper.CoveredArea, 4) && Near(halfUpper.UncoveredArea, 4)
+            && halfUpper.FullCoverReading == "partial"
+            && halfUpper.UncertaintyReason == "gap_boundary_sensitivity", Show(halfUpper));
+
+        var sloping = Rectangle(-3, -3, 3, 3, 0);
+        sloping = new(sloping.Vertices.Select(v => new Vector3(v.X, v.Y, .5f * v.X)).ToArray(), sloping.Indices);
+        var acrossZero = DirectionalCoverage.Measure(dependent, TriangleGrid.Build(sloping), Vector3.UnitZ, 4);
+        check("SC-20: a gap crossing zero keeps the exposed side partial",
+            acrossZero.Complete && Near(acrossZero.CoveredArea, 4) && Near(acrossZero.UncoveredArea, 4)
+            && acrossZero.FullCoverReading == "partial"
+            && acrossZero.UncertaintyReason == "gap_boundary_sensitivity", Show(acrossZero));
+
+        var halfOutside = DirectionalCoverage.Measure(dependent,
+            TriangleGrid.Build(Rectangle(-3, -3, 0, 3, 4f + .000005f)), Vector3.UnitZ, 4);
+        check("SC-21: relaxed upper-band cover still leaves a fixed exposed half",
+            halfOutside.Complete && halfOutside.CoveredArea == 0 && Near(halfOutside.UncoveredArea, 8)
+            && halfOutside.FullCoverReading == "partial"
+            && halfOutside.UncertaintyReason == "gap_boundary_sensitivity", Show(halfOutside));
+
+        var halfZero = DirectionalCoverage.Measure(dependent,
+            TriangleGrid.Build(Rectangle(-3, -3, 0, 3, .000005f)), Vector3.UnitZ, 4);
+        check("SC-22: near-zero half footprint cannot become whole cover",
+            halfZero.Complete && halfZero.CoveredArea == 0 && Near(halfZero.UncoveredArea, 8)
+            && halfZero.FullCoverReading == "partial"
+            && halfZero.UncertaintyReason == "gap_boundary_sensitivity", Show(halfZero));
     }
 }
