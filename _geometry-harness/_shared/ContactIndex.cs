@@ -95,6 +95,7 @@ public sealed record ArmContact(SoupContact Contact, FormKey Against, char DepSr
     /// <summary>Separate, non-certified directional coverage evidence; never substituted for penetration.</summary>
     public DirectionalCoverageResult? Coverage { get; init; }
     public DirectionalCoverageResult? AuthoredCoverage { get; init; }
+    public bool CoverageInputsExactlyUnchanged { get; init; }
     public IReadOnlyList<CoverageNeighbour>? CoverageNeighbours { get; init; }
     /// <summary>Diagnostic only (never read by the selection or the rule): every neighbour the dependent penetrated deeper than ε,
     /// with that depth and its measured authored depth — so a report can attribute a changed row to the differential rule.</summary>
@@ -106,7 +107,108 @@ public sealed record ArmContact(SoupContact Contact, FormKey Against, char DepSr
 /// (the arrangement was in the mover's editor); <paramref name="AuthorAfterMover"/> says it loads after the mover
 /// (neither side could have seen the other). <paramref name="DepTouchedByMoverSide"/>: the mover's side carries an
 /// override of the dependent's record without having re-placed it — awareness evidence the rule does not fold.</summary>
-public sealed record CoverageNeighbour(FormKey Against, DirectionalCoverageResult Winner, DirectionalCoverageResult? Authored);
+public sealed record CoverageNeighbour(FormKey Against, DirectionalCoverageResult Winner, DirectionalCoverageResult? Authored)
+{ public CoverageInputComparison? InputComparison { get; init; } }
+
+// Insert after CoverageNeighbour in ContactIndex.cs. Geometry-bearing frames remain local, not serialized.
+public sealed record CoverageInputs(FormKey DependentBase, FormKey HostBase, char DependentSource, char HostSource,
+    Snap DependentPose, Snap HostPose, EnableResolution DependentEnable, EnableResolution HostEnable,
+    TriangleSoup? Dependent, TriangleGrid? Host, Vector3 Direction, float MaxGap, float FaceCos,
+    int MaxTrianglePairs = 2_000_000, int MaxPieces = 4096, double Tolerance = 1e-5);
+
+public sealed record AuthoredCoverageReading(DirectionalCoverageResult Result, CoverageInputs? Inputs = null,
+    string? KnownAbsence = null);
+
+public sealed record CoverageInputComparison(string Status, string? Reason, long ElementsCompared)
+{
+    public bool ExactlyEqual => Status == "identical";
+    public static CoverageInputComparison Unknown(string reason) => new("unknown", reason, 0);
+}
+
+/// <summary>Exact equality of the complete modeled inputs consumed by the directional measure. Never an area,
+/// gap, tolerance, source-hash or changed-history approximation. Equal geometry alone does not erase a work refusal.
+/// Host comparison enumerates ordered consumed triangle vertices through the readonly grid accessor.</summary>
+public static class CoverageInputComparisonReader
+{
+    // RED_GATE_METHOD_BEGIN
+    public static CoverageInputComparison CompareExact(CoverageInputs? winner, CoverageInputs? authored,
+        long maxElements = 2_000_000, CancellationToken cancellationToken = default)
+    {
+        CoverageInputComparison Different(string reason, long count = 0) => new("different", reason, count);
+        CoverageInputComparison Unknown(string reason, long count = 0) => new("unknown", reason, count);
+        if (cancellationToken.IsCancellationRequested) return Unknown("input_comparison_cancelled");
+        if (winner is null || authored is null) return Unknown("input_frame_missing");
+        if (winner.Dependent is null || authored.Dependent is null || winner.Host is null || authored.Host is null)
+            return Unknown("input_geometry_missing");
+        if (!winner.DependentEnable.Resolved || !winner.HostEnable.Resolved
+            || !authored.DependentEnable.Resolved || !authored.HostEnable.Resolved)
+            return Unknown("input_enable_unresolved");
+        if (!winner.DependentEnable.Enabled || !winner.HostEnable.Enabled
+            || !authored.DependentEnable.Enabled || !authored.HostEnable.Enabled)
+            return Different("input_known_runtime_absence");
+        if (!Finite(winner) || !Finite(authored)) return Unknown("input_parameters_nonfinite");
+        if (maxElements < 0) return Unknown("input_comparison_invalid_budget");
+        if (winner.DependentBase != authored.DependentBase || winner.HostBase != authored.HostBase)
+            return Different("input_base_changed");
+        if (winner.DependentSource != authored.DependentSource || winner.HostSource != authored.HostSource)
+            return Different("input_role_source_changed");
+        if (!Pose(winner.DependentPose, authored.DependentPose) || !Pose(winner.HostPose, authored.HostPose))
+            return Different("input_pose_changed");
+        if (winner.DependentEnable != authored.DependentEnable || winner.HostEnable != authored.HostEnable)
+            return Different("input_enable_changed");
+        if (!V(winner.Direction, authored.Direction) || !F(winner.MaxGap, authored.MaxGap)
+            || !F(winner.FaceCos, authored.FaceCos) || !D(winner.Tolerance, authored.Tolerance)
+            || winner.MaxTrianglePairs != authored.MaxTrianglePairs || winner.MaxPieces != authored.MaxPieces)
+            return Different("input_measurement_parameters_changed");
+        var a = winner.Dependent; var b = authored.Dependent;
+        if (a.Indices.Length % 3 != 0 || b.Indices.Length % 3 != 0) return Unknown("input_indices_invalid");
+        if (a.Vertices.Length != b.Vertices.Length || a.Indices.Length != b.Indices.Length
+            || winner.Host.TriangleCount != authored.Host.TriangleCount)
+            return Different("input_geometry_count_changed");
+        long required = (long)a.Vertices.Length + a.Indices.Length + 3L * winner.Host.TriangleCount;
+        if (required > maxElements) return Unknown("input_comparison_element_budget");
+        long compared = 0;
+        for (int i = 0; i < a.Vertices.Length; i++)
+        {
+            if (cancellationToken.IsCancellationRequested) return Unknown("input_comparison_cancelled", compared);
+            if (!Finite(a.Vertices[i]) || !Finite(b.Vertices[i])) return Unknown("input_geometry_nonfinite", compared);
+            compared++;
+            if (!V(a.Vertices[i], b.Vertices[i])) return Different("input_dependent_vertices_changed", compared);
+        }
+        for (int i = 0; i < a.Indices.Length; i++)
+        {
+            if (cancellationToken.IsCancellationRequested) return Unknown("input_comparison_cancelled", compared);
+            if ((uint)a.Indices[i] >= (uint)a.Vertices.Length || (uint)b.Indices[i] >= (uint)b.Vertices.Length)
+                return Unknown("input_indices_invalid", compared);
+            compared++;
+            if (a.Indices[i] != b.Indices[i]) return Different("input_dependent_indices_changed", compared);
+        }
+        for (int i = 0; i < winner.Host.TriangleCount; i++)
+        {
+            if (cancellationToken.IsCancellationRequested) return Unknown("input_comparison_cancelled", compared);
+            var x = winner.Host.GetTriangle(i); var y = authored.Host.GetTriangle(i);
+            if (!Finite(x.A) || !Finite(x.B) || !Finite(x.C) || !Finite(y.A) || !Finite(y.B) || !Finite(y.C))
+                return Unknown("input_geometry_nonfinite", compared);
+            compared += 3;
+            if (!V(x.A, y.A) || !V(x.B, y.B) || !V(x.C, y.C)) return Different("input_host_triangles_changed", compared);
+        }
+        return new("identical", null, compared);
+    }
+    // RED_GATE_METHOD_END
+
+    static bool F(float a, float b) => BitConverter.SingleToInt32Bits(a) == BitConverter.SingleToInt32Bits(b);
+    static bool D(double a, double b) => BitConverter.DoubleToInt64Bits(a) == BitConverter.DoubleToInt64Bits(b);
+    static bool V(Vector3 a, Vector3 b) => F(a.X,b.X) && F(a.Y,b.Y) && F(a.Z,b.Z);
+    static bool V(Vec3 a, Vec3 b) => F(a.X,b.X) && F(a.Y,b.Y) && F(a.Z,b.Z);
+    static bool Finite(Vector3 v) => float.IsFinite(v.X) && float.IsFinite(v.Y) && float.IsFinite(v.Z);
+    static bool Finite(Vec3 v) => float.IsFinite(v.X) && float.IsFinite(v.Y) && float.IsFinite(v.Z);
+    static bool Pose(Snap a, Snap b) => a.Cell == b.Cell && a.Worldspace == b.Worldspace && a.Disabled == b.Disabled
+        && a.Deleted == b.Deleted && V(a.Pos,b.Pos) && V(a.Rot,b.Rot) && F(a.Scale,b.Scale);
+    static bool Finite(CoverageInputs f) => Finite(f.Direction) && Finite(f.DependentPose.Pos) && Finite(f.DependentPose.Rot)
+        && Finite(f.HostPose.Pos) && Finite(f.HostPose.Rot) && float.IsFinite(f.DependentPose.Scale)
+        && float.IsFinite(f.HostPose.Scale) && float.IsFinite(f.MaxGap) && float.IsFinite(f.FaceCos) && double.IsFinite(f.Tolerance);
+}
+
 
 public sealed record ContactRow(MovedHost Host, FormKey Dependent, Snap DepAuthoring, Snap DepWinner, FormKey DepBase, int DepAuthor,
                                 bool Seen, bool AuthorAfterMover, bool DepTouchedByMoverSide,
@@ -690,7 +792,8 @@ public sealed class ContactIndex
     public ArmContact? BestContact(FormKey depKey, int depSnapIndex, FormKey depBase, Snap depSnap, Aabb depBox,
                                    BoxHash<FormKey> hash, Func<FormKey, (Snap Snap, int SnapIndex)?> placementOf, Func<FormKey, int, FormKey> baseOf,
                                    out int neighboursTested, Func<FormKey, float>? preexistingDepth = null,
-                                   Func<FormKey, DirectionalCoverageResult, DirectionalCoverageResult>? authoredCoverage = null)
+                                   Func<FormKey, DirectionalCoverageResult, CoverageInputs, AuthoredCoverageReading>? authoredCoverage = null,
+                                   bool coverageMaySelect = true)
     {
         neighboursTested = 0;
         var soup = DepSoup(depKey, depSnapIndex, depBase, depSnap);
@@ -726,24 +829,40 @@ public sealed class ContactIndex
             var arm = new ArmContact(c, nKey, depGeom.DepSrc, hg.HostSrc, extent, MaxDim(nBox)) { CoreGap = coreGap, PreexistingDepth = pre, PreexistingOnly = isPre };
             if (readCover && PlausibleShallowCover(depBox, grid, Epsilon, SupportCos))
             {
-                var cover = DirectionalCoverage.Measure(soup, grid, Vector3.UnitZ, Epsilon, SupportCos);
-                DirectionalCoverageResult? authored = null;
+                var input = new CoverageInputs(depBase, nBase, depGeom.DepSrc, hg.HostSrc,
+                    depSnap, np.Snap, WinnerEnable(depKey), WinnerEnable(nKey), soup, grid, Vector3.UnitZ, Epsilon, SupportCos);
+                var cover = DirectionalCoverage.Measure(soup, grid, input.Direction, input.MaxGap, input.FaceCos,
+                    input.MaxTrianglePairs, input.MaxPieces, input.Tolerance);
+                AuthoredCoverageReading? reading = null;
                 if (WholeCover(cover) || !cover.Complete || cover.FullCoverReading == "numerically_uncertain")
-                    authored = authoredCoverage!(nKey, cover);
-                (covers ??= new()).Add(new(nKey, cover, authored));
-                var witness = arm with { Coverage = cover, AuthoredCoverage = authored };
-                bool uncertain = !cover.Complete || cover.FullCoverReading == "numerically_uncertain"
-                    || authored is { Complete: false } || authored?.FullCoverReading == "numerically_uncertain";
-                if (uncertain) incompleteCover ??= witness;
-                else if (WholeCover(cover) && authored is not null && !WholeCover(authored)
-                    && (bestCover is null || cover.MaxGap > bestCover.Coverage!.MaxGap)) bestCover = witness;
+                    reading = authoredCoverage!(nKey, cover, input);
+                var authored = reading?.Result;
+                CoverageInputComparison? comparison = null;
+                if (reading is not null)
+                    comparison = !cover.Complete ? CoverageInputComparison.Unknown("winner_coverage_incomplete: " + cover.RefusalReason)
+                        : !reading.Result.Complete ? CoverageInputComparison.Unknown("authored_coverage_incomplete: " + reading.Result.RefusalReason)
+                        : reading.KnownAbsence is not null ? new("different", reading.KnownAbsence, 0)
+                        : CoverageInputComparisonReader.CompareExact(input, reading.Inputs);
+                bool unchanged = cover.Complete && authored is { Complete: true } && comparison?.ExactlyEqual == true;
+                (covers ??= new()).Add(new(nKey, cover, authored) { InputComparison = comparison });
+                var witness = arm with { Coverage = cover, AuthoredCoverage = authored, CoverageInputsExactlyUnchanged = unchanged };
+                // Exact complete input identity proves no differential change. Positive remainders and absolute
+                // uncertainty stay in the raw readings; incomplete/missing work is never forgiven by this flag.
+                if (!unchanged)
+                {
+                    bool uncertain = !cover.Complete || cover.FullCoverReading == "numerically_uncertain"
+                        || authored is { Complete: false } || authored?.FullCoverReading == "numerically_uncertain";
+                    if (uncertain) incompleteCover ??= witness;
+                    else if (WholeCover(cover) && authored is not null && !WholeCover(authored)
+                        && (bestCover is null || cover.MaxGap > bestCover.Coverage!.MaxGap)) bestCover = witness;
+                }
             }
             if (isPre ? bestPre is not null && pen <= bestPre.Contact.EffectivePenetration
                       : best is not null && !Better(rank, c.FacingDistance, bestRank, best.Contact.FacingDistance)) continue;
             if (isPre) bestPre = arm; else { best = arm; bestRank = rank; }
         }
         var chosen = best is not null && bestRank > Epsilon ? best
-                   : bestCover ?? incompleteCover ?? ChooseContact(best, bestRank, bestPre, Epsilon);
+                   : (coverageMaySelect ? bestCover ?? incompleteCover : null) ?? ChooseContact(best, bestRank, bestPre, Epsilon);
         return chosen is null ? null : chosen with { RawDistance = bestRaw, RawAgainst = rawAgainst, DeepNeighbours = deep, CoverageNeighbours = covers };
     }
 
@@ -906,35 +1025,40 @@ public sealed class ContactIndex
                 if (grid is null) return 0f;
                 return SpatialOverlap.Contact(depAuthSoup, grid, Reach, NearBand).EffectivePenetration;   // the core depth, as Measure reads it
             }
-            DirectionalCoverageResult AuthoredCover(FormKey nKey, DirectionalCoverageResult winner)
+            AuthoredCoverageReading AuthoredCover(FormKey nKey, DirectionalCoverageResult winner, CoverageInputs winnerInput)
             {
-                DirectionalCoverageResult Absent() => new(winner.ProjectedArea, 0, winner.ProjectedArea,
-                    null, null, true, null, 0, "partial", 0, 0);
-                DirectionalCoverageResult Unknown(string reason) => new(winner.ProjectedArea, 0, winner.ProjectedArea,
-                    null, null, false, reason, winner.ProjectedArea, "incomplete", 0, 0);
+                AuthoredCoverageReading Absent(string reason) => new(new(winner.ProjectedArea, 0, winner.ProjectedArea,
+                    null, null, true, null, 0, "partial", 0, 0), KnownAbsence: reason);
+                AuthoredCoverageReading Unknown(string reason) => new(new(winner.ProjectedArea, 0, winner.ProjectedArea,
+                    null, null, false, reason, winner.ProjectedArea, "incomplete", 0, 0));
                 var ns = Index.History.Of(nKey);
-                if (ns is null || ns.Count == 0) return Absent();
+                if (ns is null || ns.Count == 0) return Absent("authored_reference_known_absent");
                 int ni = AuthoringSnapIndex(ns, host.Mover, closure);
-                if (ni < 0) return Absent();
+                if (ni < 0) return Absent("authored_reference_introduced_by_mover");
                 var nAuth = ns[ni];
-                if (nAuth.Deleted || nAuth.Space != depAuth.Space) return Absent();
+                if (nAuth.Deleted || nAuth.Space != depAuth.Space) return Absent("authored_reference_deleted_or_other_space");
                 var en = ArmEnable(nKey, host.Mover, closure);
                 if (!en.Resolved) return Unknown("authored_enable_unresolved");
-                if (!en.Enabled) return Absent();
+                if (!en.Enabled) return Absent("authored_reference_runtime_absent");
                 var nBase = ArmBase(nKey, host.Mover, closure);
                 if (nBase.IsNull) return Unknown("authored_base_missing");
                 var geom = GeomOf(nBase);
                 if (geom is null || !geom.HasGeometry) return Unknown("authored_host_geometry_missing");
-                if (!geom.CanHost) return Unknown("authored_host_surface_unavailable"); // No-host also represents incomplete collision decoding.
+                if (!geom.CanHost) return Unknown("authored_host_surface_unavailable");
                 if (!depAuthBuilt) { depAuthBuilt = true; depAuthSoup = depGeom is { CanDepend: true }
                     ? SpatialOverlap.TransformSoup(depGeom.DepSoup, depAuth.Pos, depAuth.Rot, depAuth.Scale) : null; }
                 if (depAuthSoup is null) return Unknown("authored_dependent_geometry_missing");
                 var grid = ArmGrid(nKey, ni, nBase, nAuth);
-                return grid is null ? Unknown("authored_host_grid_missing")
-                    : DirectionalCoverage.Measure(depAuthSoup, grid, Vector3.UnitZ, Epsilon, SupportCos);
+                if (grid is null) return Unknown("authored_host_grid_missing");
+                var input = new CoverageInputs(depBase, nBase, depGeom!.DepSrc, geom.HostSrc, depAuth, nAuth,
+                    depArmEn, en, depAuthSoup, grid, winnerInput.Direction, winnerInput.MaxGap, winnerInput.FaceCos,
+                    winnerInput.MaxTrianglePairs, winnerInput.MaxPieces, winnerInput.Tolerance);
+                return new(DirectionalCoverage.Measure(depAuthSoup, grid, input.Direction, input.MaxGap, input.FaceCos,
+                    input.MaxTrianglePairs, input.MaxPieces, input.Tolerance), input);
             }
             var win = winBox.IsEmpty ? null
-                    : BestContact(depKey, snaps.Count - 1, winBase, depWin, winBox, winners, WinnerPlacement, (k, _) => WinnerBase(k), out _, Preexisting, ReadRadius ? AuthoredCover : null);
+                    : BestContact(depKey, snaps.Count - 1, winBase, depWin, winBox, winners, WinnerPlacement, (k, _) => WinnerBase(k), out _, Preexisting, ReadRadius ? AuthoredCover : null,
+                        coverageMaySelect: r0.Verdict == ContactVerdict.Unjudgeable && r0.Reason == ContactBlocker.WinnerArmMissing);
             bool winMeasured = !winBox.IsEmpty;
             var f = f0 with
             {
@@ -947,6 +1071,7 @@ public sealed class ContactIndex
                 WinnerPreexistingOnly = win?.PreexistingOnly ?? false,
                 WinnerCoverage = CoverFacts(win?.Coverage),
                 WinnerAuthoredCoverage = CoverFacts(win?.AuthoredCoverage),
+                WinnerCoverageInputsExactlyUnchanged = win?.CoverageInputsExactlyUnchanged ?? false,
             };
             var r = DetectorModel.PlacementContact(f, Epsilon, SupportCos, AttachCos);
             if (tw) TraceJudged(depKey, host.Key, r.Relation, r.Verdict, r.Reason, nearMiss, auth);

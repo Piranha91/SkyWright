@@ -1126,7 +1126,8 @@ if (jsonPath is not null)
                 AreaBasis = "sum of dependent triangle projections, including multiplicity; union of host coverage per dependent triangle",
                 CoordinateAndGapTolerance = 1e-5, HostFaceMinimumUpCosine = cidx.SupportCos,
                 MaximumGap = eps, ThinExtentMaximum = eps,
-                Neighbours = neighbours.Select(c => new { Against = c.Against.ToString(), c.Winner, c.Authored }).ToList(),
+                SelectedDecisionInputs = new { r.Facts.WinnerCoverage, r.Facts.WinnerAuthoredCoverage, r.Facts.WinnerCoverageInputsExactlyUnchanged },
+                Neighbours = neighbours.Select(c => new { Against = c.Against.ToString(), c.Winner, c.Authored, c.InputComparison }).ToList(),
             }, dumpOptions);
         return node;
     }

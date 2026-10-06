@@ -823,7 +823,8 @@ public static class DetectorModel
         bool DependentDisabledViaParent = false, bool DependentEnableUnresolved = false, float WinnerAgainstExtent = float.NaN,
         float WinnerPreexistingPenetration = 0f, bool WinnerPreexistingOnly = false,
         CoverageFacts? WinnerCoverage = null,
-        CoverageFacts? WinnerAuthoredCoverage = null);
+        CoverageFacts? WinnerAuthoredCoverage = null,
+        bool WinnerCoverageInputsExactlyUnchanged = false);
 
     /// <summary>The label a ReSupported row carries when its only contact under the winner is an overlap that already existed as
     /// authored (Gate A review F1, 2026-10-04): counted apart from ReSupported in every report, never merged into it.</summary>
@@ -922,7 +923,8 @@ public static class DetectorModel
             string authored = pre > 0f ? $", {pre:0.#}u of it already as authored ({f.WinnerPenetration - pre:0.#}u new)" : "";
             return (relation, ContactVerdict.Sunk, ContactBlocker.None, $"{rel}; under the winner it sits {f.WinnerPenetration:0.#}u inside {against}{authored}{motion}");
         }
-        if (f.WinnerCoverage is { } cover)
+        if (f.WinnerCoverage is { } cover && !(f.WinnerCoverageInputsExactlyUnchanged
+            && cover.Complete && f.WinnerAuthoredCoverage is { Complete: true }))
         {
             var authored = f.WinnerAuthoredCoverage;
             if (!cover.Complete || cover.FullCoverReading == "numerically_uncertain" || authored is null

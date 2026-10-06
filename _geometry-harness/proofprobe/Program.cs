@@ -3613,6 +3613,7 @@ ContactEvidenceProof.Run(Check);
 ContactDifferentialProof.Run(Check);
 DirectionalCoverageProof.Run(Check);
 ShallowCoverageProof.Run(Check);
+CoverageSelectionProof.Run(Check);
 MeshPipelineProof.Run(Check);
 SceneScopeProof.Run(Check);
 OcclusionGeometryProof.Run(Check);
