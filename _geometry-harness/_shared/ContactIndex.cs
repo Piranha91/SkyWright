@@ -92,6 +92,10 @@ public sealed record ArmContact(SoupContact Contact, FormKey Against, char DepSr
     /// standing alone — nothing else within ε.</summary>
     public float PreexistingDepth { get; init; }
     public bool PreexistingOnly { get; init; }
+    /// <summary>Separate, non-certified directional coverage evidence; never substituted for penetration.</summary>
+    public DirectionalCoverageResult? Coverage { get; init; }
+    public DirectionalCoverageResult? AuthoredCoverage { get; init; }
+    public IReadOnlyList<CoverageNeighbour>? CoverageNeighbours { get; init; }
     /// <summary>Diagnostic only (never read by the selection or the rule): every neighbour the dependent penetrated deeper than ε,
     /// with that depth and its measured authored depth — so a report can attribute a changed row to the differential rule.</summary>
     public IReadOnlyList<(FormKey Against, float Depth, float Authored)>? DeepNeighbours { get; init; }
@@ -102,6 +106,8 @@ public sealed record ArmContact(SoupContact Contact, FormKey Against, char DepSr
 /// (the arrangement was in the mover's editor); <paramref name="AuthorAfterMover"/> says it loads after the mover
 /// (neither side could have seen the other). <paramref name="DepTouchedByMoverSide"/>: the mover's side carries an
 /// override of the dependent's record without having re-placed it — awareness evidence the rule does not fold.</summary>
+public sealed record CoverageNeighbour(FormKey Against, DirectionalCoverageResult Winner, DirectionalCoverageResult? Authored);
+
 public sealed record ContactRow(MovedHost Host, FormKey Dependent, Snap DepAuthoring, Snap DepWinner, FormKey DepBase, int DepAuthor,
                                 bool Seen, bool AuthorAfterMover, bool DepTouchedByMoverSide,
                                 OverlapScale DepScale, OverlapScale HostScale, DependentMotion Motion,
@@ -683,7 +689,8 @@ public sealed class ContactIndex
     /// Without the function the selection is exactly the one before the rule.</para></summary>
     public ArmContact? BestContact(FormKey depKey, int depSnapIndex, FormKey depBase, Snap depSnap, Aabb depBox,
                                    BoxHash<FormKey> hash, Func<FormKey, (Snap Snap, int SnapIndex)?> placementOf, Func<FormKey, int, FormKey> baseOf,
-                                   out int neighboursTested, Func<FormKey, float>? preexistingDepth = null)
+                                   out int neighboursTested, Func<FormKey, float>? preexistingDepth = null,
+                                   Func<FormKey, DirectionalCoverageResult, DirectionalCoverageResult>? authoredCoverage = null)
     {
         neighboursTested = 0;
         var soup = DepSoup(depKey, depSnapIndex, depBase, depSnap);
@@ -692,6 +699,9 @@ public sealed class ContactIndex
         ArmContact? best = null; float bestRank = 0f;          // the best contact that is not a pre-existing overlap, ranked by new depth
         ArmContact? bestPre = null;                            // the deepest pre-existing overlap
         List<(FormKey, float, float)>? deep = null;            // diagnostic: every neighbour deeper than ε and its authored depth
+        ArmContact? bestCover = null, incompleteCover = null;
+        List<CoverageNeighbour>? covers = null;
+        bool readCover = ReadRadius && preexistingDepth is not null && authoredCoverage is not null && depBox.Size.Z <= Epsilon;
         float bestRaw = float.PositiveInfinity; FormKey rawAgainst = default;
         float depPad = DepPadW(depBase, depSnap);
         foreach (var (nKey, nBox, _) in hash.Near(depSnap.Space, depBox, BoxBand + depPad + (ReadRadius ? _maxHostRadiusW : 0f)))
@@ -711,15 +721,45 @@ public sealed class ContactIndex
             if (!float.IsNaN(pd)) (deep ??= new()).Add((nKey, pen, pd));
             float rank = pen - pre;
             bool isPre = pre > 0f && rank <= Epsilon;
-            if (isPre ? bestPre is not null && pen <= bestPre.Contact.EffectivePenetration
-                      : best is not null && !Better(rank, c.FacingDistance, bestRank, best.Contact.FacingDistance)) continue;
             var hg = GeomOf(nBase)!;
             float extent = c.Normal.LengthSquared() > 1e-12f ? grid.ExtentAlong(Vector3.Normalize(c.Normal)) : MaxDim(nBox);
             var arm = new ArmContact(c, nKey, depGeom.DepSrc, hg.HostSrc, extent, MaxDim(nBox)) { CoreGap = coreGap, PreexistingDepth = pre, PreexistingOnly = isPre };
+            if (readCover && PlausibleShallowCover(depBox, grid, Epsilon, SupportCos))
+            {
+                var cover = DirectionalCoverage.Measure(soup, grid, Vector3.UnitZ, Epsilon, SupportCos);
+                DirectionalCoverageResult? authored = null;
+                if (WholeCover(cover) || !cover.Complete || cover.FullCoverReading == "numerically_uncertain")
+                    authored = authoredCoverage!(nKey, cover);
+                (covers ??= new()).Add(new(nKey, cover, authored));
+                var witness = arm with { Coverage = cover, AuthoredCoverage = authored };
+                bool uncertain = !cover.Complete || cover.FullCoverReading == "numerically_uncertain"
+                    || authored is { Complete: false } || authored?.FullCoverReading == "numerically_uncertain";
+                if (uncertain) incompleteCover ??= witness;
+                else if (WholeCover(cover) && authored is not null && !WholeCover(authored)
+                    && (bestCover is null || cover.MaxGap > bestCover.Coverage!.MaxGap)) bestCover = witness;
+            }
+            if (isPre ? bestPre is not null && pen <= bestPre.Contact.EffectivePenetration
+                      : best is not null && !Better(rank, c.FacingDistance, bestRank, best.Contact.FacingDistance)) continue;
             if (isPre) bestPre = arm; else { best = arm; bestRank = rank; }
         }
-        var chosen = ChooseContact(best, bestRank, bestPre, Epsilon);
-        return chosen is null ? null : chosen with { RawDistance = bestRaw, RawAgainst = rawAgainst, DeepNeighbours = deep };
+        var chosen = best is not null && bestRank > Epsilon ? best
+                   : bestCover ?? incompleteCover ?? ChooseContact(best, bestRank, bestPre, Epsilon);
+        return chosen is null ? null : chosen with { RawDistance = bestRaw, RawAgainst = rawAgainst, DeepNeighbours = deep, CoverageNeighbours = covers };
+    }
+
+    static bool WholeCover(DirectionalCoverageResult c) => c.Complete && c.ProjectedArea > 0
+        && c.FullCoverReading == "nominal_whole_cover" && c.UncoveredArea == 0;
+
+    static bool PlausibleShallowCover(Aabb dep, TriangleGrid host, float gap, float faceCos)
+    {
+        for (int i = 0; i < host.TriangleCount; i++)
+        {
+            if (host.UnitNormal(i).Z < faceCos) continue;
+            var b = host.BoundsOf(i);
+            if (b.Max.X < dep.Min.X || b.Min.X > dep.Max.X || b.Max.Y < dep.Min.Y || b.Min.Y > dep.Max.Y) continue;
+            if (b.Max.Z > dep.Min.Z && b.Min.Z <= dep.Max.Z + gap) return true;
+        }
+        return false;
     }
 
     /// <summary>The differential selection's last step: a pre-existing overlap (<paramref name="bestPre"/>) stands as the contact only
@@ -862,8 +902,35 @@ public sealed class ContactIndex
                 if (grid is null) return 0f;
                 return SpatialOverlap.Contact(depAuthSoup, grid, Reach, NearBand).EffectivePenetration;   // the core depth, as Measure reads it
             }
+            DirectionalCoverageResult AuthoredCover(FormKey nKey, DirectionalCoverageResult winner)
+            {
+                DirectionalCoverageResult Absent() => new(winner.ProjectedArea, 0, winner.ProjectedArea,
+                    null, null, true, null, 0, "partial", 0, 0);
+                DirectionalCoverageResult Unknown(string reason) => new(winner.ProjectedArea, 0, winner.ProjectedArea,
+                    null, null, false, reason, winner.ProjectedArea, "incomplete", 0, 0);
+                var ns = Index.History.Of(nKey);
+                if (ns is null || ns.Count == 0) return Absent();
+                int ni = AuthoringSnapIndex(ns, host.Mover, closure);
+                if (ni < 0) return Absent();
+                var nAuth = ns[ni];
+                if (nAuth.Deleted || nAuth.Space != depAuth.Space) return Absent();
+                var en = ArmEnable(nKey, host.Mover, closure);
+                if (!en.Resolved) return Unknown("authored_enable_unresolved");
+                if (!en.Enabled) return Absent();
+                var nBase = ArmBase(nKey, host.Mover, closure);
+                if (nBase.IsNull) return Unknown("authored_base_missing");
+                var geom = GeomOf(nBase);
+                if (geom is null || !geom.HasGeometry) return Unknown("authored_host_geometry_missing");
+                if (!geom.CanHost) return Unknown("authored_host_surface_unavailable"); // No-host also represents incomplete collision decoding.
+                if (!depAuthBuilt) { depAuthBuilt = true; depAuthSoup = depGeom is { CanDepend: true }
+                    ? SpatialOverlap.TransformSoup(depGeom.DepSoup, depAuth.Pos, depAuth.Rot, depAuth.Scale) : null; }
+                if (depAuthSoup is null) return Unknown("authored_dependent_geometry_missing");
+                var grid = ArmGrid(nKey, ni, nBase, nAuth);
+                return grid is null ? Unknown("authored_host_grid_missing")
+                    : DirectionalCoverage.Measure(depAuthSoup, grid, Vector3.UnitZ, Epsilon, SupportCos);
+            }
             var win = winBox.IsEmpty ? null
-                    : BestContact(depKey, snaps.Count - 1, winBase, depWin, winBox, winners, WinnerPlacement, (k, _) => WinnerBase(k), out _, Preexisting);
+                    : BestContact(depKey, snaps.Count - 1, winBase, depWin, winBox, winners, WinnerPlacement, (k, _) => WinnerBase(k), out _, Preexisting, ReadRadius ? AuthoredCover : null);
             bool winMeasured = !winBox.IsEmpty;
             var f = f0 with
             {
@@ -874,6 +941,8 @@ public sealed class ContactIndex
                 WinnerAgainstExtent = win?.AgainstExtent ?? float.NaN,
                 WinnerPreexistingPenetration = win?.PreexistingDepth ?? 0f,
                 WinnerPreexistingOnly = win?.PreexistingOnly ?? false,
+                WinnerCoverage = win?.Coverage,
+                WinnerAuthoredCoverage = win?.AuthoredCoverage,
             };
             var r = DetectorModel.PlacementContact(f, Epsilon, SupportCos, AttachCos);
             if (tw) TraceJudged(depKey, host.Key, r.Relation, r.Verdict, r.Reason, nearMiss, auth);

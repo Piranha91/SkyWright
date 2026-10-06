@@ -816,7 +816,9 @@ public static class DetectorModel
         bool WinnerMeasured, float WinnerDistance, float WinnerPenetration, bool WinnerContactIsHost,
         DependentMotion Motion,
         bool DependentDisabledViaParent = false, bool DependentEnableUnresolved = false, float WinnerAgainstExtent = float.NaN,
-        float WinnerPreexistingPenetration = 0f, bool WinnerPreexistingOnly = false);
+        float WinnerPreexistingPenetration = 0f, bool WinnerPreexistingOnly = false,
+        HousecarlCore.DirectionalCoverageResult? WinnerCoverage = null,
+        HousecarlCore.DirectionalCoverageResult? WinnerAuthoredCoverage = null);
 
     /// <summary>The label a ReSupported row carries when its only contact under the winner is an overlap that already existed as
     /// authored (Gate A review F1, 2026-10-04): counted apart from ReSupported in every report, never merged into it.</summary>
@@ -914,6 +916,18 @@ public static class DetectorModel
                 return (relation, ContactVerdict.Unjudgeable, ContactBlocker.DepthExceedsObject, $"{rel}; under the winner it reads {f.WinnerPenetration:0.#}u inside {against} that is only {f.WinnerAgainstExtent:0.#}u across along the contact normal — no interior point of a closed object is that far from its surface; the reading is refused, not Sunk{motion}");
             string authored = pre > 0f ? $", {pre:0.#}u of it already as authored ({f.WinnerPenetration - pre:0.#}u new)" : "";
             return (relation, ContactVerdict.Sunk, ContactBlocker.None, $"{rel}; under the winner it sits {f.WinnerPenetration:0.#}u inside {against}{authored}{motion}");
+        }
+        if (f.WinnerCoverage is { } cover)
+        {
+            var authored = f.WinnerAuthoredCoverage;
+            if (!cover.Complete || cover.FullCoverReading == "numerically_uncertain" || authored is null
+                || !authored.Complete || authored.FullCoverReading == "numerically_uncertain")
+                return (relation, ContactVerdict.Unjudgeable, ContactBlocker.ShallowCoverageIncomplete,
+                    $"{rel}; plausible shallow coverage against {against} is incomplete or numerically uncertain: winner {cover.RefusalReason ?? cover.UncertaintyReason ?? cover.FullCoverReading}, authored {authored?.RefusalReason ?? authored?.UncertaintyReason ?? authored?.FullCoverReading ?? "missing"}; no clear-scene or burial claim{motion}");
+            if (cover.ProjectedArea > 0 && cover.FullCoverReading == "nominal_whole_cover" && cover.UncoveredArea == 0
+                && authored.FullCoverReading != "nominal_whole_cover")
+                return (relation, ContactVerdict.Sunk, ContactBlocker.None,
+                    $"{rel}; the thin dependent has newly whole projected surface coverage by upward core faces of {against}, {cover.MinGap:0.###}–{cover.MaxGap:0.###}u above it (authored covered fraction {(authored.ProjectedArea > 0 ? authored.CoveredArea / authored.ProjectedArea : 0):0.####}); approximate polygon geometry, not certified visibility or volume; core penetration remains {f.WinnerPenetration:0.###}u{motion}");
         }
         if (f.WinnerPreexistingOnly)
             return (relation, ContactVerdict.ReSupported, ContactBlocker.None, $"{rel}; {PreexistingOnlyLabel}: under the winner the only thing within {epsilon:0.#}u is {against} it already overlapped as authored — {f.WinnerPenetration:0.#}u inside, {pre:0.#}u of it already as authored; the rest of it may float{motion}");
@@ -1630,7 +1644,7 @@ public enum ContactVerdict { NoRelation, Stranded, Orphaned, Sunk, ReSupported, 
 /// <summary>Why a contact pair could not be called. The last three are the 2026-09-03 folds: a dependent absent at
 /// runtime through its enable parent (R1), a chain the order cannot follow (R1), and a penetration deeper than the
 /// against-object is wide (R4) — each counted, never cleared, never a finding.</summary>
-public enum ContactBlocker { None, NoDependentGeometry, NoHostGeometry, AuthoringArmMissing, WinnerArmMissing, RuntimeDisabled, EnableChainUnresolved, DepthExceedsObject }
+public enum ContactBlocker { None, NoDependentGeometry, NoHostGeometry, AuthoringArmMissing, WinnerArmMissing, RuntimeDisabled, EnableChainUnresolved, DepthExceedsObject, ShallowCoverageIncomplete }
 
 /// <summary>What physics does with a dependent at cell load. Fixed floats where it was left; Movable falls or is shoved
 /// (4.7 Part C). Unknown: nothing known about the base or its bodies.</summary>

@@ -1119,6 +1119,15 @@ if (jsonPath is not null)
         var node = JsonSerializer.SerializeToNode(row, row.GetType(), dumpOptions)!.AsObject();
         node["AuthoringCoreGap"] = r.Authoring?.CoreGap;
         node["WinnerCoreGap"] = r.Winner?.CoreGap;
+        if (r.Winner?.CoverageNeighbours is { Count: > 0 } neighbours)
+            node["ShallowCoverage"] = JsonSerializer.SerializeToNode(new
+            {
+                Direction = "+Z", Method = "floating-point polygon union", Certified = false,
+                AreaBasis = "sum of dependent triangle projections, including multiplicity; union of host coverage per dependent triangle",
+                CoordinateAndGapTolerance = 1e-5, HostFaceMinimumUpCosine = cidx.SupportCos,
+                MaximumGap = eps, ThinExtentMaximum = eps,
+                Neighbours = neighbours.Select(c => new { Against = c.Against.ToString(), c.Winner, c.Authored }).ToList(),
+            }, dumpOptions);
         return node;
     }
     object WithWind(object row, FormKey depBase)

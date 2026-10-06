@@ -3611,6 +3611,8 @@ MotionProof.Run(Check);
 MotionProof.RunFollowUps(Check);
 ContactEvidenceProof.Run(Check);
 ContactDifferentialProof.Run(Check);
+DirectionalCoverageProof.Run(Check);
+ShallowCoverageProof.Run(Check);
 MeshPipelineProof.Run(Check);
 SceneScopeProof.Run(Check);
 OcclusionGeometryProof.Run(Check);
