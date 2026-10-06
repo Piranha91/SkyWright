@@ -4,7 +4,8 @@ using HousecarlCore;
 /// <summary>Known answers for the surface crossing envelope (2026-10-05, task surface-envelope-offset): EnvelopeMin / EnvelopeMax
 /// must bound the crossing curve itself. The interior-segment endpoints were formed from a triangle vertex that is off the
 /// intersection line, so the envelope sat up to a triangle's size away from the curve while the summed lengths stayed right. Each
-/// case names the wrong answer it rejects. Red at the test commit except the case marked guard.</summary>
+/// case names the wrong answer it rejects. EO-1..EO-5 were red at the test commit; EO-7..EO-9 (added with the fix, red on the
+/// pre-fix code by the sweep canary) cover ends carried by B, by one member each, and by a vertex in the other plane.</summary>
 static partial class MotionProof
 {
     static TriangleSoup EoTris(params Vector3[][] tris)
@@ -63,6 +64,29 @@ static partial class MotionProof
             var r = MeshSurface.MeasurePlaced(EoObliqueA(), null, FarOrigin, Zero3, 1f, EoObliqueB(), null, FarOrigin, Zero3, 1f, VolumeGeometry.Render);
             double ox = FarOrigin.X, oy = FarOrigin.Y, oz = FarOrigin.Z;
             return EoCase(r, 100 * Math.Sqrt(1.5), new[] { ox, oy + 20, oz + 10 }, new[] { ox + 100, oy + 70, oz + 60 }, 0.05);
+        });
+        // EO-7: EO-2 with the members swapped, so B (the quad) carries both ends of every segment and the line is measured from a
+        // wall vertex (-10, 31.25, -10). Envelope (0, 31.25, 0)..(100, 31.25, 0). Rejects ends taken from A's cut alone (x -10..110)
+        // and the off-curve z = -10.
+        Case(check, "envelope EO-7: WallY(31.25) x QuadA (swapped) - B carries the ends, envelope (0,31.25,0)..(100,31.25,0)", () =>
+            EoCase(MeshSurface.Measure(EoWallY(31.25f), null, EoQuadA(), null, VolumeGeometry.Render), 100,
+                   new double[] { 0, 31.25, 0 }, new double[] { 100, 31.25, 0 }, 1e-4));
+        // EO-8: one end from each member. QuadA x a wall in y = 31.25 over x 50..150: the low end is the wall's (x 50), the high end
+        // the quad's (x 100). Envelope (50, 31.25, 0)..(100, 31.25, 0), length 50. Rejects either end taken from the wrong member.
+        Case(check, "envelope EO-8: QuadA x a wall over x 50..150 - one end from each, envelope (50,31.25,0)..(100,31.25,0)", () =>
+        {
+            var wall = EoTris(new[] { EoV(50, 31.25f, -10), EoV(150, 31.25f, -10), EoV(150, 31.25f, 10) }, new[] { EoV(50, 31.25f, -10), EoV(150, 31.25f, 10), EoV(50, 31.25f, 10) });
+            return EoCase(MeshSurface.Measure(EoQuadA(), null, wall, null, VolumeGeometry.Render), 50,
+                          new double[] { 50, 31.25, 0 }, new double[] { 100, 31.25, 0 }, 1e-4);
+        });
+        // EO-9: an end at a vertex lying in the other plane. A = the vertical triangle (100,0,-50), (100,0,50), (5,0,0) in y = 0, its
+        // third vertex on the floor: the crossing runs (5, 0, 0)..(100, 0, 0), length 95. Rejects the off-curve z = -50 from the first
+        // vertex and a vertex-in-plane end replaced by another vertex.
+        Case(check, "envelope EO-9: a vertex in the other plane carries an end - envelope (5,0,0)..(100,0,0)", () =>
+        {
+            var a = EoTris(new[] { EoV(100, 0, -50), EoV(100, 0, 50), EoV(5, 0, 0) });
+            return EoCase(MeshSurface.Measure(a, null, EoFloor(), null, VolumeGeometry.Render), 95,
+                          new double[] { 5, 0, 0 }, new double[] { 100, 0, 0 }, 1e-4);
         });
         // EO-6 (guard): an edge-lying crossing already reports points on its edge. The plate's shared edge lies in the floor; the
         // crossing is (0, 50, 0)..(100, 50, 0) from the edge pass alone (no interior segment).
