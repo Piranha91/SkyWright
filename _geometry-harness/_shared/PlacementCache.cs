@@ -29,6 +29,48 @@ public sealed class CacheBudget
     /// <summary>The free-memory term of the automatic budget: <see cref="FreeFraction"/> x (free now − live), never below the minimum.</summary>
     public static long AutoFromFree(long freeNowBytes, long liveBytes) => Math.Max(MinimumBytes, (long)((freeNowBytes - liveBytes) * FreeFraction));
 
+    /// <summary>The automatic selection and its actual input readings. CurrentManagedBytes is not committed heap or
+    /// process memory; the native reader labels it as current uncollected managed bytes, without forcing a collection.</summary>
+    public sealed record AutomaticSelection(long RuntimeAvailableBytes, long? AvailablePhysicalBytes,
+        long CurrentManagedBytes, string ManagedMeasurement, long RuntimeTermBytes, long? FreeTermBytes,
+        long? SelectedBytes, string WinningTerm, string? Refusal)
+    {
+        public long RequireBytes() => SelectedBytes ?? throw new AutomaticBudgetUnavailableException(this);
+        public string Describe()
+            => $"runtime available {RuntimeAvailableBytes} bytes; free physical {AvailablePhysicalBytes?.ToString() ?? "unavailable"} bytes; "
+             + $"{ManagedMeasurement} {CurrentManagedBytes} bytes; selected {SelectedBytes?.ToString() ?? "unavailable"} bytes "
+             + $"({WinningTerm}{(SelectedBytes == MinimumBytes ? ", at the 64 MiB minimum" : "")})";
+    }
+
+    /// <summary>A named memory refusal, retained with the readings that could not select an automatic budget.</summary>
+    public sealed class AutomaticBudgetUnavailableException : InvalidOperationException
+    {
+        public AutomaticSelection Selection { get; }
+        public AutomaticBudgetUnavailableException(AutomaticSelection selection)
+            : base(selection.Refusal ?? "memory: automatic contact cache selection unavailable") => Selection = selection;
+    }
+
+    /// <summary>Pure automatic selection: the existing runtime/floor/ceiling term and free-minus-managed term.
+    /// An unavailable physical reading refuses; it never silently substitutes the runtime term.</summary>
+    public static AutomaticSelection SelectAutomatic(long runtimeAvailableBytes, long? availablePhysicalBytes,
+        long currentManagedBytes, string managedMeasurement = "current uncollected managed bytes")
+    {
+        long runtimeTerm = Auto(runtimeAvailableBytes);
+        if (availablePhysicalBytes is not { } free)
+            return new(runtimeAvailableBytes, null, currentManagedBytes, managedMeasurement, runtimeTerm, null,
+                null, "unavailable", "memory: available physical memory unavailable; automatic contact cache selection refused (GlobalMemoryStatusEx reading required)");
+        long freeTerm = AutoFromFree(free, currentManagedBytes);
+        long selected = Math.Min(runtimeTerm, freeTerm);
+        string winner = freeTerm <= runtimeTerm ? "free-now-minus-managed"
+            : (long)(runtimeAvailableBytes * AutoFraction) <= AutoCeilingBytes ? "runtime" : "ceiling";
+        return new(runtimeAvailableBytes, free, currentManagedBytes, managedMeasurement, runtimeTerm, freeTerm,
+            selected, winner, null);
+    }
+
+    /// <summary>Cheap current readings, with no forced collection. A failed native physical-memory read remains named.</summary>
+    public static AutomaticSelection ReadAutomatic()
+        => SelectAutomatic(GC.GetGCMemoryInfo().TotalAvailableMemoryBytes, AvailablePhysicalBytes(), GC.GetTotalMemory(false));
+
     /// <summary>Parse "auto", a byte count, or a count with a K/M/G suffix (binary). Null when the text is none of those.</summary>
     public static long? Parse(string text)
     {

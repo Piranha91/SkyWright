@@ -444,7 +444,8 @@ RefGeometry? GeomOf(FormKey baseKey)
     }
     return g;
 }
-cidx = new ContactIndex(GeomOf, cacheBudget) { Epsilon = eps, Reach = reach, NearBand = 2f * eps, BoxBand = 2f * eps + 2f, ReadRadius = radiusOn };
+try { cidx = new ContactIndex(GeomOf, cacheBudget) { Epsilon = eps, Reach = reach, NearBand = 2f * eps, BoxBand = 2f * eps + 2f, ReadRadius = radiusOn }; }
+catch (CacheBudget.AutomaticBudgetUnavailableException ex) { Console.Error.WriteLine(ex.Message + "; " + ex.Selection.Describe()); return 2; }
 var idx = cidx.Index;
 // --bos on (default): the Base Object Swapper reader replaces each reference's record base with the base the
 // game loads, and a moving override becomes a placement step under a pseudo-plugin after the last real one
@@ -927,18 +928,23 @@ string? FitCheck()
     long live = GC.GetTotalMemory(false);
     long? free = CacheBudget.AvailablePhysicalBytes();
     string line = $"   memory before the host loop: live {live / 1e9:0.00} GB, free now {(free is { } f0 ? $"{f0 / 1e9:0.00} GB" : "unknown")}, contact cache budget {cidx.Budget.Limit / 1e9:0.00} GB";
-    if (free is not { } f) { Console.WriteLine(line + $" (fit check skipped: free memory unreadable)  ({sw.Elapsed.TotalSeconds - t0:0.0}s)"); return null; }
+    if (free is not { } f)
+    {
+        if (cacheBudget is null)
+        {
+            var unavailable = CacheBudget.SelectAutomatic(GC.GetGCMemoryInfo().TotalAvailableMemoryBytes, null, live,
+                "managed bytes after compacting full collection");
+            return unavailable.Refusal + "; " + unavailable.Describe();
+        }
+        Console.WriteLine(line + $" (fit check skipped: free memory unreadable)  ({sw.Elapsed.TotalSeconds - t0:0.0}s)");
+        return null;
+    }
     if (CacheBudget.FitRefusal(live, f, "--radius off lowers the need; a larger machine or freeing memory raises what fits") is { } refusal) return refusal;
     if (cacheBudget is null)
     {
-        // auto = min(share of what the runtime may use, share of what is free now beyond the live data), floored at the minimum
-        long byRuntime = (long)(GC.GetGCMemoryInfo().TotalAvailableMemoryBytes * CacheBudget.AutoFraction);
-        long byFree = CacheBudget.AutoFromFree(f, live);
-        cidx.Budget.LowerTo(byFree);
-        string won = byFree <= Math.Min(byRuntime, CacheBudget.AutoCeilingBytes) ? $"{CacheBudget.FreeFraction:0.00} x (free now - live)"
-                   : byRuntime <= CacheBudget.AutoCeilingBytes ? $"{CacheBudget.AutoFraction:0.00} x runtime memory"
-                   : $"the {CacheBudget.AutoCeilingBytes >> 30} GiB ceiling";
-        line += $" -> auto {cidx.Budget.Limit / 1e9:0.00} GB ({won} won{(cidx.Budget.Limit == CacheBudget.MinimumBytes ? ", at the minimum" : "")})";
+        cidx.RefreshAutomaticBudget(() => CacheBudget.SelectAutomatic(
+            GC.GetGCMemoryInfo().TotalAvailableMemoryBytes, f, live, "managed bytes after compacting full collection"));
+        line += " -> " + cidx.AutomaticBudgetReport();
     }
     else if ((long)(f * 0.9) - live < cidx.Budget.Limit)
         line += $" (warning: the --cache-budget exceeds the {((long)(f * 0.9) - live) / 1e9:0.00} GB that fits; kept as asked)";

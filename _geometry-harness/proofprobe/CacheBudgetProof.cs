@@ -99,5 +99,79 @@ static class CacheBudgetProof
               refusal is not null && refusal.Contains("10.00 GiB") && refusal.Contains("8.00 GiB") && refusal.Contains("--radius off")
            && CacheBudget.FitRefusal(1 * gib, 16 * gib, "") is null,
               refusal ?? "(no refusal)");
+
+        // T5: literal known readings through the pure selector AND the constructor/refresh seams.
+        var freeWins = CacheBudget.SelectAutomatic(64 * gib, 3 * gib, 2 * gib);
+        var runtimeWins = CacheBudget.SelectAutomatic(8 * gib, 30 * gib, 2 * gib);
+        var ceilingWins = CacheBudget.SelectAutomatic(64 * gib, 30 * gib, 2 * gib);
+        var floorWins = CacheBudget.SelectAutomatic(64 * gib, 1L << 20, 2L << 20);
+        var unavailable = CacheBudget.SelectAutomatic(64 * gib, null, 2 * gib);
+        long freeExpected = (long)(gib * 0.40), runtimeExpected = (long)(8 * gib * 0.20);
+        Check("cache-budget T5a: the free term wins with literal runtime 64/free 3/managed 2 GiB readings",
+              freeWins.SelectedBytes == freeExpected && freeWins.WinningTerm == "free-now-minus-managed"
+           && freeWins.RuntimeAvailableBytes == 64 * gib && freeWins.AvailablePhysicalBytes == 3 * gib
+           && freeWins.CurrentManagedBytes == 2 * gib && freeWins.ManagedMeasurement == "current uncollected managed bytes",
+              freeWins.Describe());
+        Check("cache-budget T5b: the runtime term wins with runtime 8/free 30/managed 2 GiB readings",
+              runtimeWins.SelectedBytes == runtimeExpected && runtimeWins.WinningTerm == "runtime", runtimeWins.Describe());
+        Check("cache-budget T5c: abundant runtime/free memory selects the existing 4 GiB ceiling",
+              ceilingWins.SelectedBytes == 4 * gib && ceilingWins.WinningTerm == "ceiling", ceilingWins.Describe());
+        Check("cache-budget T5d: free below managed selects the existing 64 MiB floor",
+              floorWins.SelectedBytes == 64L << 20 && floorWins.WinningTerm == "free-now-minus-managed", floorWins.Describe());
+        Check("cache-budget T5e: an unavailable physical reading carries a named refusal, never a runtime-only result",
+              unavailable.SelectedBytes is null && unavailable.FreeTermBytes is null && unavailable.AvailablePhysicalBytes is null
+           && unavailable.Refusal is not null && unavailable.Refusal.StartsWith("memory: available physical memory unavailable"),
+              unavailable.Refusal ?? "(no refusal)");
+
+        int constructorReads = 0;
+        var automatic = new ContactIndex(G, automaticSelection: () => { constructorReads++; return freeWins; });
+        var automaticContact = automatic.PairContact(dep, 0, bowl, bowlOnTall, host, 0, tallT, hostAt);
+        Check("cache-budget T5f: default construction uses the injected free-wins selection and keeps the real pair answer",
+              constructorReads == 1 && automatic.Budget.Limit == freeExpected
+           && automatic.AutomaticBudgetSelection == freeWins && automatic.EffectiveAutomaticBudgetSelection == freeWins
+           && automaticContact is not null && viaTallFresh is not null && automaticContact.Contact == viaTallFresh.Contact,
+              automatic.AutomaticBudgetReport());
+        bool constructorRefused = false;
+        try { _ = new ContactIndex(G, automaticSelection: () => unavailable); }
+        catch (CacheBudget.AutomaticBudgetUnavailableException ex)
+        { constructorRefused = ex.Selection == unavailable && ex.Message == unavailable.Refusal; }
+        Check("cache-budget T5g: default construction refuses the injected unavailable reading by name",
+              constructorRefused, unavailable.Refusal ?? "(no refusal)");
+
+        var refreshing = new ContactIndex(G, automaticSelection: () => ceilingWins);
+        bool lowered = refreshing.RefreshAutomaticBudget(() => freeWins);
+        Check("cache-budget T5h: automatic refresh lowers the actual pool and records the limiting reading",
+              lowered && refreshing.Budget.Limit == freeExpected && refreshing.AutomaticBudgetSelection == freeWins
+           && refreshing.EffectiveAutomaticBudgetSelection == freeWins, refreshing.AutomaticBudgetReport());
+        bool raised = refreshing.RefreshAutomaticBudget(() => ceilingWins);
+        Check("cache-budget T5i: a later larger reading never raises the pool; the earlier limit remains identified",
+              !raised && refreshing.Budget.Limit == freeExpected && refreshing.AutomaticBudgetSelection == ceilingWins
+           && refreshing.EffectiveAutomaticBudgetSelection == freeWins
+           && refreshing.AutomaticBudgetReport().Contains("retained earlier limit"), refreshing.AutomaticBudgetReport());
+        bool refreshRefused = false;
+        try { refreshing.RefreshAutomaticBudget(() => unavailable); }
+        catch (CacheBudget.AutomaticBudgetUnavailableException ex)
+        { refreshRefused = ex.Selection == unavailable && ex.Message == unavailable.Refusal; }
+        Check("cache-budget T5j: unavailable refresh refuses and does not overwrite the successful limit or provenance",
+              refreshRefused && refreshing.Budget.Limit == freeExpected && refreshing.AutomaticBudgetSelection == ceilingWins
+           && refreshing.EffectiveAutomaticBudgetSelection == freeWins,
+              $"limit {refreshing.Budget.Limit}; latest [{refreshing.AutomaticBudgetSelection?.Describe()}]; effective [{refreshing.EffectiveAutomaticBudgetSelection?.Describe()}]");
+
+        int explicitReads = 0;
+        CacheBudget.AutomaticSelection ForbiddenRead() { explicitReads++; throw new InvalidOperationException("explicit budget invoked an automatic reader"); }
+        ContactIndex? explicitSmall = null, explicitLarge = null;
+        bool explicitKept = false; string explicitError = "";
+        try
+        {
+            explicitSmall = new ContactIndex(G, 1, ForbiddenRead);
+            explicitLarge = new ContactIndex(G, long.MaxValue, ForbiddenRead);
+            explicitKept = !explicitSmall.RefreshAutomaticBudget() && !explicitLarge.RefreshAutomaticBudget()
+                && !explicitSmall.RefreshAutomaticBudget(ForbiddenRead) && !explicitLarge.RefreshAutomaticBudget(ForbiddenRead);
+        }
+        catch (InvalidOperationException ex) { explicitError = ex.Message; }
+        Check("cache-budget T5k: explicit 1/long.MaxValue remain exact; constructor and refresh never call automatic readers",
+              explicitKept && explicitReads == 0 && explicitSmall?.Budget.Limit == 1 && explicitLarge?.Budget.Limit == long.MaxValue
+           && explicitSmall?.AutomaticBudgetSelection is null && explicitLarge?.AutomaticBudgetSelection is null,
+              $"reader calls {explicitReads}, limits {explicitSmall?.Budget.Limit}/{explicitLarge?.Budget.Limit}; {explicitError}");
     }
 }

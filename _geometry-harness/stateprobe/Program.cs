@@ -137,7 +137,8 @@ RefGeometry? GeomOf(FormKey baseKey)
     }
     return g;
 }
-cidx = new ContactIndex(GeomOf);
+try { cidx = new ContactIndex(GeomOf); }
+catch (CacheBudget.AutomaticBudgetUnavailableException ex) { Console.Error.WriteLine(ex.Message + "; " + ex.Selection.Describe()); return 2; }
 var idx = cidx.Index;
 
 // ---------------------------------------------------------------------------------------
@@ -392,6 +393,10 @@ else Console.WriteLine("route oracle: off (--route on to measure the route half)
 // ---------------------------------------------------------------------------------------
 sw.Restart();
 var ev = new StateEvaluator(cidx, sx) { Route = oracle };
+// The evaluator constructor prepares the winning geometry; refresh after that work, before evaluating any arm.
+try { cidx.RefreshAutomaticBudget(); }
+catch (CacheBudget.AutomaticBudgetUnavailableException ex) { Console.Error.WriteLine(ex.Message + "; " + ex.Selection.Describe()); return 2; }
+Console.WriteLine("   memory after state geometry preparation: " + cidx.AutomaticBudgetReport());
 Console.WriteLine($"evaluator: {ev.Boxed:N0} refs boxed (meshes measured {meshesMeasured:N0}, OBND fallback {obndFallback:N0}, no geometry {noGeometry:N0}; markers set aside {ev.BoxedMarkers:N0}, effect volumes kept out of the overlap role {ev.BoxedFxVolumes:N0})  ({sw.Elapsed.TotalSeconds:0.0}s)");
 sw.Restart();
 var tally = new StateTally();

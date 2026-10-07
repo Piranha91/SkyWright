@@ -286,8 +286,8 @@ public sealed class ContactIndex
     readonly Func<FormKey, RefGeometry?> _geomOf;
     readonly Dictionary<FormKey, RefGeometry?> _geomCache = new();
     /// <summary>The byte budget the per-placement caches share (host grids, dependent soups, radius shells): least-recently-used,
-    /// evicted by bytes (_shared/PlacementCache.cs). Set at construction; the default takes the automatic share of the memory the
-    /// runtime may use. Replaces the entry-count bounds that let the host grids reach 11.6 GB on an exterior block (2026-10-05).</summary>
+    /// evicted by bytes (_shared/PlacementCache.cs). Automatic selection reads runtime, free physical and current managed
+    /// memory; a preparation checkpoint may lower it. Explicit limits stay exact. Replaces the former entry-count bounds.</summary>
     public CacheBudget Budget { get; }
     readonly PlacementCache<TriangleGrid> _hostGrids;
     readonly PlacementCache<TriangleSoup> _depSoups;
@@ -372,18 +372,62 @@ public sealed class ContactIndex
         return _shellDeps[(key, snapIndex, baseKey)] = soup;
     }
 
+    readonly bool _automaticBudget;
+    readonly Func<CacheBudget.AutomaticSelection> _readAutomaticBudget;
+    /// <summary>The latest successful automatic reading; null for an explicitly sized index.</summary>
+    public CacheBudget.AutomaticSelection? AutomaticBudgetSelection { get; private set; }
+    /// <summary>The reading that established the effective limit, which a later refresh may not raise.</summary>
+    public CacheBudget.AutomaticSelection? EffectiveAutomaticBudgetSelection { get; private set; }
+
     /// <param name="geomOf">geometry for a base record — the driver resolves meshes through the VFS, the proof builds
     /// box soups from OBND. Null (or Src '-') when there is none; cached here per base.</param>
-    /// <param name="cacheBudgetBytes">the per-placement caches' shared byte budget; null takes <see cref="CacheBudget.Auto()"/>.</param>
-    public ContactIndex(Func<FormKey, RefGeometry?> geomOf, long? cacheBudgetBytes = null)
+    /// <param name="cacheBudgetBytes">the per-placement caches' shared byte budget; null selects from current runtime,
+    /// physical and uncollected managed readings. Explicit budgets are kept exactly, including synthetic tiny budgets.</param>
+    /// <param name="automaticSelection">optional reading seam for deterministic known answers; never called for an explicit budget.</param>
+    public ContactIndex(Func<FormKey, RefGeometry?> geomOf, long? cacheBudgetBytes = null,
+        Func<CacheBudget.AutomaticSelection>? automaticSelection = null)
     {
         _geomOf = geomOf; Arms = new EnableArms(Index);
-        Budget = new CacheBudget(cacheBudgetBytes ?? CacheBudget.Auto());
+        _automaticBudget = cacheBudgetBytes is null;
+        _readAutomaticBudget = automaticSelection ?? CacheBudget.ReadAutomatic;
+        long limit;
+        if (cacheBudgetBytes is { } explicitBytes) limit = explicitBytes;
+        else
+        {
+            var selection = _readAutomaticBudget();
+            limit = selection.RequireBytes();
+            AutomaticBudgetSelection = EffectiveAutomaticBudgetSelection = selection;
+        }
+        Budget = new CacheBudget(limit);
         _hostGrids = new(Budget, "hostGrids", g => g.ApproxBytes);
         _depSoups = new(Budget, "depSoups", PlacementCache<TriangleSoup>.SoupBytes);
         _shellGrids = new(Budget, "shellGrids", g => g.ApproxBytes);
         _shellDeps = new(Budget, "shellDeps", PlacementCache<TriangleSoup>.SoupBytes);
         _armGrids = new(Budget, "armGrids", g => g.ApproxBytes);
+    }
+
+    /// <summary>Refresh automatic selection after preparation, lowering only. Explicit indexes do not invoke either
+    /// reading delegate. An unavailable reading refuses without replacing the last successful selection or limit.</summary>
+    public bool RefreshAutomaticBudget(Func<CacheBudget.AutomaticSelection>? readSelection = null)
+    {
+        if (!_automaticBudget) return false;
+        var selection = (readSelection ?? _readAutomaticBudget)();
+        long selected = selection.RequireBytes();
+        long before = Budget.Limit;
+        Budget.LowerTo(selected);
+        AutomaticBudgetSelection = selection;
+        if (Budget.Limit < before) EffectiveAutomaticBudgetSelection = selection;
+        return Budget.Limit < before;
+    }
+
+    /// <summary>Latest inputs and the effective limit; explicitly names a smaller limit retained from an earlier reading.</summary>
+    public string AutomaticBudgetReport()
+    {
+        if (AutomaticBudgetSelection is not { } latest) return $"explicit contact cache {Budget.Limit} bytes (kept as asked)";
+        string report = $"auto contact cache {Budget.Limit} bytes; latest [{latest.Describe()}]";
+        if (Budget.Limit < latest.RequireBytes() && EffectiveAutomaticBudgetSelection is { } earlier)
+            report += $"; retained earlier limit [{earlier.Describe()}]";
+        return report;
     }
 
     /// <summary>Lookups that asked a (reference, snap) for a different base than the previous lookup there, per cache — only
