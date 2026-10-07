@@ -39,11 +39,17 @@ static class CacheBudgetProof
         // T3: bytes counted. One pair = one host grid + one dependent soup, each with the entry overhead.
         var one = new ContactIndex(G, long.MaxValue);
         one.PairContact(dep, 0, bowl, bowlOnTall, host, 0, tallT, hostAt);
-        long gridBytes = TriangleGrid.Build(SpatialOverlap.TransformSoup(geo[tallT].HostSoup, hostAt.Pos, hostAt.Rot, hostAt.Scale)).ApproxBytes;
+        var gridSoup = SpatialOverlap.TransformSoup(geo[tallT].HostSoup, hostAt.Pos, hostAt.Rot, hostAt.Scale);
+        var countedGrid = TriangleGrid.BuildAdaptive(gridSoup);
+        long gridBytes = countedGrid.ApproxBytes;
+        long fixedBytes = TriangleGrid.Build(gridSoup).ApproxBytes;
         long soupBytes = PlacementCache<TriangleSoup>.SoupBytes(SpatialOverlap.TransformSoup(geo[bowl].DepSoup, bowlOnTall.Pos, bowlOnTall.Rot, bowlOnTall.Scale));
         long expect = 2 * CacheBudget.EntryOverhead + gridBytes + soupBytes;
         Check("cache-budget T3a: the pool's bytes after one pair are the grid's ApproxBytes + the soup's bytes + two entry overheads",
-              gridBytes > 0 && soupBytes > 0 && one.Budget.Bytes == expect && one.Budget.PeakBytes == expect,
+              gridBytes > 0 && soupBytes > 0 && countedGrid.Sizing is { GroupingPower: 0, TargetMet: true }
+           && countedGrid.Sizing.LegacyOmittedIds.Length == 0 && countedGrid.Sizing.OverflowIds.Length == 0
+           && gridBytes == fixedBytes + 256 // Approximate sizing-record/empty-array charge, with no query-buffer branch.
+           && one.Budget.Bytes == expect && one.Budget.PeakBytes == expect,
               $"pool {one.Budget.Bytes}, expected {expect} (grid {gridBytes}, soup {soupBytes})");
 
         // T3b: the bound holds — a budget of about three entries, forty placements looked up twice; never over the limit after an
