@@ -3649,6 +3649,10 @@ MotionProof.RunPairMeshDefects(Check);
 // Surface crossing envelope on the curve (2026-10-05): interior-segment endpoints lie on the intersection line.
 MotionProof.RunEnvelopeOffset(Check);
 MotionProof.RunSampleTopology(Check);
+// Lane D (2026-10-04): texture alpha sampling along alpha-only crossings (red until implemented).
+AlphaSamplingProof.Run(Check);
+// Lane 2 (2026-10-07): the contactprobe wiring of the visible crossing (placed measure, lazy source, alternates).
+AlphaSamplingProof.RunWiring(Check);
 
 Console.WriteLine();
 Console.WriteLine($"==== {pass} passed, {fail} failed ====");

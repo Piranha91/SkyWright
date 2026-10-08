@@ -82,7 +82,8 @@ static class MotionReview
     /// <summary>The motion record for one pair and geometry, or null when neither member moves (the caller keeps its own
     /// result). <paramref name="staticOf"/> gives a member's static model-space geometry (surface or solid) or a refusal.</summary>
     public static object? Pair(Cache cache, VolumeGeometry g, string formA, byte[] bytesA, Snap poseA, string formB, byte[] bytesB, Snap poseB,
-                               Func<byte[], (TriangleSoup? Soup, string[]? Tags, string? Refusal)> staticOf, bool volume)
+                               Func<byte[], (TriangleSoup? Soup, string[]? Tags, string? Refusal)> staticOf, bool volume,
+                               AlphaVisibility? alpha = null)
     {
         string gname = g.ToString().ToLowerInvariant();
         var ma = cache.Model(formA, bytesA); var mb = cache.Model(formB, bytesB);
@@ -200,7 +201,7 @@ static class MotionReview
         if (refA || refB) return refA ? Refuse("A", ma.Reason ?? "refused") : Refuse("B", mb.Reason ?? "refused");
         string member = movA ? "A" : "B";
         var (mForm, mBytes, mPose, mModel) = movA ? (formA, bytesA, poseA, ma) : (formB, bytesB, poseB, mb);
-        var (oBytes, oPose) = movA ? (bytesB, poseB) : (bytesA, poseA);
+        var (oBytes, oPose, oForm) = movA ? (bytesB, poseB, formB) : (bytesA, poseA, formA);
         var other = staticOf(oBytes);
         if (other.Soup is null) return new { geometry = gname, status = "refused", reason = $"{(movA ? "B" : "A")}: {other.Refusal}" };
         if (cache.Options.Mode == "pose")
@@ -221,12 +222,24 @@ static class MotionReview
                                            ContactNotes.Options, ("pairFrame", ContactNotes.Frame(po)));
             }
             var s = movA ? MeshSurface.Measure(posed, p.Tags, posePartner, other.Tags, g) : MeshSurface.Measure(posePartner, other.Tags, posed, p.Tags, g);
+            // --alpha-visibility: the visible part of an alpha crossing at the pose (the moving member's texture coordinates are its
+            // static soup's; a posed soup with another triangle count refuses)
+            object? poseVisibility = null;
+            if (alpha is not null && g == VolumeGeometry.Render && AlphaVisibility.HasAlphaCrossing(s.CrossingLengthByTags))
+            {
+                var mAlpha = alpha.MovingSource(mForm, mBytes)(); var oAlpha = alpha.Source(oForm, oBytes, other.Soup)();
+                SurfaceVisibilityResult pv = mAlpha?.Texcoords.Triangles is { } tc && tc.Count != posed.TriangleCount
+                    ? new("refused", $"{member}: the posed soup has {posed.TriangleCount} triangles, the texture coordinates {tc.Count}", s, null, null, null, false, Array.Empty<string>())
+                    : movA ? SurfaceVisibility.Measure(posed, p.Tags, mAlpha, posePartner, other.Tags, oAlpha, alpha.Options)
+                           : SurfaceVisibility.Measure(posePartner, other.Tags, oAlpha, posed, p.Tags, mAlpha, alpha.Options);
+                poseVisibility = alpha.Block(pv, formA, formB);
+            }
             if (!PairFrame.IsWorld(po))
             {
                 double[]? Back(double[]? v) => v is null ? null : [v[0] + po.X, v[1] + po.Y, v[2] + po.Z];
                 s = s with { EnvelopeMin = Back(s.EnvelopeMin), EnvelopeMax = Back(s.EnvelopeMax) };
             }
-            return ContactNotes.Attach(new { geometry = gname, result = s, motion }, ContactNotes.Options, ("pairFrame", ContactNotes.Frame(po)));
+            return ContactNotes.Attach(new { geometry = gname, result = s, motion }, ContactNotes.Options, ("pairFrame", ContactNotes.Frame(po)), ("visibility", poseVisibility));
         }
         var region = cache.Region(mForm, mBytes, g);
         if (region.Status != "built" && (region.Reason ?? "").EndsWith("no_solid_collision", StringComparison.Ordinal))
@@ -242,6 +255,16 @@ static class MotionReview
             return new { geometry = gname, status = "refused", reason = d.Reason!.StartsWith("partner: ", StringComparison.Ordinal) ? $"{(movA ? "B" : "A")}: {d.Reason[9..]}" : $"{member}: {d.Reason}",
                          motion = new { mode = "swept", policy = Policy, member, refusal = d.Reason } };
         SweptVolume? v = volume && partnerSolid && placed.Solid ? SweptGeometry.Volume(placed, partner) : null;
+        // --alpha-visibility: a witness whose crossing is not opaque x opaque is re-read for its visible part at every unclear sample
+        object? visibleMotion = null;
+        if (alpha is not null && !volume && g == VolumeGeometry.Render && d.Decision == "witness"
+            && !(d.WitnessCrossingByTags?.GetValueOrDefault(SurfaceMaterial.Pair(SurfaceMaterial.Opaque, SurfaceMaterial.Opaque)) > 0)
+            && AlphaVisibility.HasAlphaCrossing(d.WitnessCrossingByTags))
+        {
+            var vd = SweptGeometry.ContactVisible(placed, alpha.MovingSource(mForm, mBytes)(), partner, other.Tags, alpha.Source(oForm, oBytes, other.Soup)(),
+                                                  partnerSolid, alpha.Options);
+            visibleMotion = alpha.MotionBlock(vd, mForm, oForm);
+        }
         return ContactNotes.Attach(new
         {
             geometry = gname, status = "motion",
@@ -254,6 +277,6 @@ static class MotionReview
                 samples = placed.Samples.Count, partnerSolid,
                 volume = v is null ? null : new { v.Status, v.Reason, intersection = v.WithPartner, v.Converged },
             },
-        }, ContactNotes.Options, ("pairFrame", ContactNotes.Frame(so)));
+        }, ContactNotes.Options, ("pairFrame", ContactNotes.Frame(so)), ("visibleMotion", visibleMotion));
     }
 }

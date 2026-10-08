@@ -49,4 +49,9 @@
     <Compile Include="..\_shared\StateArm.cs" Link="StateArm.cs" />
     <Compile Include="..\overlapprobe\SceneCapture.cs" Link="SceneCapture.cs" />
   </ItemGroup>
+  <ItemGroup>
+    <!-- Lane D (Stage D alpha sampling): DDS decode for the texture reader. Pfim 0.11.4, MIT (https://github.com/nickbabcock/Pfim). -->
+    <Compile Include="..\_shared\TextureAlpha.cs" Link="TextureAlpha.cs" />
+    <PackageReference Include="Pfim" Version="0.11.4" />
+  </ItemGroup>
 </Project>

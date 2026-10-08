@@ -23,7 +23,8 @@ static class OverlapSurfaceReview
     };
 
     public static int Run(string inputPath, string outputPath, LivePosePolicy pose, AssetResolver assets, OverlapIndex index, EnableArms arms,
-                          ConfigurationIdentity configuration, Func<FormKey, Snap?> winningPose, MotionReview.Cache? motion = null)
+                          ConfigurationIdentity configuration, Func<FormKey, Snap?> winningPose, MotionReview.Cache? motion = null,
+                          AlphaVisibility? alpha = null)
     {
         var inputBytes = File.ReadAllBytes(inputPath);
         using var input = JsonDocument.Parse(inputBytes);
@@ -101,7 +102,7 @@ static class OverlapSurfaceReview
                 if ((sa.Status != "measured" || sb.Status != "measured") && motion is not null
                     && MotionReview.Pair(motion, g, p.A, a.Bytes, a.Pose!.Value, p.B, b.Bytes, b.Pose!.Value,
                                          bytes => { var s = MeshSurface.ModelSurface(bytes, g, pose); return s.Status == "measured" ? (s.Soup, s.Tags, null) : (null, null, s.Reason); },
-                                         volume: false) is { } mr)
+                                         volume: false, alpha: alpha) is { } mr)
                 {
                     Add(mr);
                     continue;
@@ -114,12 +115,21 @@ static class OverlapSurfaceReview
                     continue;
                 }
                 var pa = a.Pose!.Value; var pb = b.Pose!.Value;
-                var (r, frame) = MeshSurface.MeasurePlacedFramed(sa.Soup!, sa.Tags, pa.Pos, pa.Rot, pa.Scale, sb.Soup!, sb.Tags, pb.Pos, pb.Rot, pb.Scale, g);
+                SurfaceContactResult r; Vec3 frame; object? visibility = null;
+                if (alpha is not null && g == VolumeGeometry.Render)
+                {
+                    // --alpha-visibility: the same measure with its crossing pieces; textures are read only for a piece on an alpha triangle
+                    var (v, f) = SurfaceVisibility.MeasurePlaced(sa.Soup!, sa.Tags, alpha.Source(p.A, a.Bytes, sa.Soup!), pa.Pos, pa.Rot, pa.Scale,
+                                                                 sb.Soup!, sb.Tags, alpha.Source(p.B, b.Bytes, sb.Soup!), pb.Pos, pb.Rot, pb.Scale, alpha.Options);
+                    (r, frame) = (v.Contact!, f);
+                    if (AlphaVisibility.HasAlphaCrossing(r.CrossingLengthByTags)) visibility = alpha.Block(v, p.A, p.B);
+                }
+                else (r, frame) = MeshSurface.MeasurePlacedFramed(sa.Soup!, sa.Tags, pa.Pos, pa.Rot, pa.Scale, sb.Soup!, sb.Tags, pb.Pos, pb.Rot, pb.Scale, g);
                 if (r.Status == "measured") measured++; else if (r.Status == "incomplete") incomplete++; else refused++;
                 // lane 3b: the pair frame when placement collapsed a triangle; the particle systems set aside from either render surface;
                 // Group 6 D2: render shapes read as empty (no vertices, no triangles)
                 Add(ContactNotes.Attach(r, Json, ("pairFrame", ContactNotes.Frame(frame)), ("particlesA", sa.Labels), ("particlesB", sb.Labels),
-                                        ("emptyShapesA", sa.EmptyShapes), ("emptyShapesB", sb.EmptyShapes)));
+                                        ("emptyShapesA", sa.EmptyShapes), ("emptyShapesB", sb.EmptyShapes), ("visibility", visibility)));
             }
             records.Add(p.ADz is null && p.BDz is null
                 ? new { pairKey = p.PairKey, a = p.A, b = p.B, baseA = a.Base, baseB = b.Base, meshA = a.Mesh, meshB = b.Mesh, geometries = geoms }
