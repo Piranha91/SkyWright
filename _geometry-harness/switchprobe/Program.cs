@@ -40,6 +40,10 @@ using HousecarlCore.Progress;
 //   --switch     one switch in full: its sets, member by member, and its triggers
 //   --json       the census and the trigger map (switches[], jointFlips[]) — what --switch-map on the other probes reads
 //   --show-script NAME   print the decompiled source of one script from the VFS (to read what a bound script does)
+//   --targets K1,K2|@FILE   for named references (switches or not, disabled singletons included): the load-time enable
+//                state and whether anything in the order can change it later (_shared/TargetTriggers.cs); one line each
+//   --targets-json FILE   the --targets reading in full; --pex-scan on|off (default on): its GetFormFromFile script scan
+//   --extra-plugin P.esp  load this plugin file after the order (a test fixture); repeatable
 
 using var __run = RunLog.BeginProcess("switchprobe", args);
 
@@ -66,6 +70,7 @@ bool triggers = true;
 var cellFilters = new List<string>(); var switchFilters = new List<string>(); var showScripts = new List<string>();
 var enablePlugins = new List<string>(); var disablePlugins = new List<string>();
 string? orderFile = null;
+string? targetsArg = null, targetsJson = null; bool pexScan = true; var extraPlugins = new List<string>();
 for (int i = 0; i < args.Length; i++)
 {
     if (args[i] == "--list" && i + 1 < args.Length) listN = int.Parse(args[++i]);
@@ -77,7 +82,13 @@ for (int i = 0; i < args.Length; i++)
     else if (args[i] == "--order" && i + 1 < args.Length) orderFile = args[++i];
     else if (args[i] == "--enable" && i + 1 < args.Length) enablePlugins.Add(args[++i]);
     else if (args[i] == "--disable" && i + 1 < args.Length) disablePlugins.Add(args[++i]);
+    else if (args[i] == "--targets" && i + 1 < args.Length) targetsArg = args[++i];
+    else if (args[i] == "--targets-json" && i + 1 < args.Length) targetsJson = args[++i];
+    else if (args[i] == "--pex-scan" && i + 1 < args.Length) pexScan = args[++i].ToLowerInvariant() switch { "on" => true, "off" => false, _ => throw new ArgumentException("--pex-scan takes on|off") };
+    else if (args[i] == "--extra-plugin" && i + 1 < args.Length) extraPlugins.Add(args[++i]);
 }
+if (targetsJson is not null && targetsArg is null) { Console.Error.WriteLine("--targets-json needs --targets"); return 2; }
+foreach (var x in extraPlugins) if (!File.Exists(x)) { Console.Error.WriteLine($"--extra-plugin {x}: no such file"); return 2; }
 
 var sw = Stopwatch.StartNew();
 // WHAT THIS RUN EVALUATES, decided in one place (_shared/HarnessOrderCli.cs): the real profile, a --enable/--disable
@@ -87,7 +98,7 @@ var sw = Stopwatch.StartNew();
 var cfg = HarnessOrderCli.Resolve(profileName, profileDir, modsDir, dataDir, overwriteDir, GamePath,
                                   orderFile, enablePlugins, disablePlugins);
 if (cfg.Refused) { Console.Error.WriteLine(cfg.RefusedReason); return 2; }
-var paths = cfg.OrderedPaths;
+IReadOnlyList<string> paths = extraPlugins.Count == 0 ? cfg.OrderedPaths : cfg.OrderedPaths.Concat(extraPlugins).ToList();
 Console.WriteLine($"load order: {paths.Count} plugins ({sw.ElapsedMilliseconds} ms)\n");
 HarnessOrderCli.Print(cfg);
 
@@ -514,6 +525,17 @@ if (jsonPath is not null)
     };
     File.WriteAllText(jsonPath, JsonSerializer.Serialize(doc, new JsonSerializerOptions { WriteIndented = false }));
     Console.WriteLine($"\nwrote {jsonPath}");
+}
+
+// ---------------------------------------------------------------------------------------
+// --targets: named references, singletons included (_shared/TargetTriggers.cs).
+// ---------------------------------------------------------------------------------------
+if (targetsArg is not null)
+{
+    Console.WriteLine($"\n==== --targets: load-time enable state and enablers of {targetsArg} ====");
+    using var tassets = AssetResolver.Build(overwriteDir, modsDir, dataDir, cfg.EnabledMods, cfg.Archives.Archives);
+    TargetTriggers.Run(paths, tassets.Capture(), TargetTriggers.ParseTargets(targetsArg), pexScan, targetsJson,
+                       new { instance = Instance, profile = profileName, order = orderFile, extraPlugins });
 }
 
 Console.WriteLine();

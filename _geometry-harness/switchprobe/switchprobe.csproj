@@ -29,5 +29,6 @@
     <Compile Include="..\_shared\CellBoundaryIndex.cs" Link="CellBoundaryIndex.cs" />
     <Compile Include="..\_shared\WorldState.cs" Link="WorldState.cs" />
     <Compile Include="..\_shared\StateArm.cs" Link="StateArm.cs" />
+    <Compile Include="..\_shared\TargetTriggers.cs" Link="TargetTriggers.cs" />
   </ItemGroup>
 </Project>
