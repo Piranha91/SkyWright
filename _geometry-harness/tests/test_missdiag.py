@@ -214,6 +214,43 @@ def test_m2s_placement_clip_needs_every_part_and_a_depth():
         raise AssertionError("an incomplete placement clip was accepted: %r" % (bad,))
 
 
+# An anchor body that meets another mod's object at the patched placement: the body reading is 'meets' with no
+# clearance, so there is no depth. The fixture reproduces a transfer-test row (a moved plane marker whose anchor body
+# meets a tower mesh), labels neutral; the decide passes it as below.
+G_ROW_MEET = {"check": "pair measure at the patched placement (anchor body)", "item": "00083C",
+              "other": "tower ruin (005E7F)", "depth": 0.0, "relation": "meets",
+              "pose": "its patched placement, p-base", "edit": "moves the object"}
+
+
+def test_m5a_anchor_body_meet_row_is_worded_as_a_meet():
+    r = M.assign_reason(_ev(trace=None, placementClip=G_ROW_MEET))
+    assert r["reason"] == "patch placement clips" and r["evidenceType"] == "check", repr(r)
+    assert r["detail"] == ("pair measure at the patched placement (anchor body): 00083C meets tower ruin (005E7F) "
+                           "at its patched placement, p-base (a meet: depth 0); edit: moves the object"), repr(r["detail"])
+
+
+def test_m5b_synthetic_meet_without_depth_is_a_meet_not_a_crossing():
+    r = M.assign_reason(_ev(trace=None, placementClip=_clip(relation="meets", depth=None)))
+    assert r["reason"] == "patch placement clips", repr(r)
+    assert " meets object B " in r["detail"] and "(a meet: depth 0)" in r["detail"], repr(r["detail"])
+    assert " clips " not in r["detail"] and " by " not in r["detail"], repr(r["detail"])
+
+
+def test_m5c_positive_depth_crossing_keeps_todays_wording():
+    for c in (_clip(), _clip(relation="crosses")):
+        r = M.assign_reason(_ev(trace=None, placementClip=c))
+        assert r["detail"] == "loose-item clip at rest: item A clips object B by 5.00 u at rest pose read in game; edit: restores support", repr(r["detail"])
+
+
+def test_m5d_a_meet_with_a_depth_or_an_unknown_relation_raises():
+    for bad in (_clip(relation="meets"), _clip(relation="meets", depth=0.5), _clip(relation="touches", depth=0.0)):
+        try:
+            M.assign_reason(_ev(placementClip=bad))
+        except ValueError:
+            continue
+        raise AssertionError("a meet with a depth, or an unknown relation, was accepted: %r" % (bad,))
+
+
 def test_m3_table_sums_and_splits():
     cl = [{"group": "G1", "edits": 7, "reason": "not modelled", "evidenceType": "render reading", "direct": False},
           {"group": "G1", "edits": 3, "reason": "set aside by filter", "evidenceType": "check", "direct": True},
