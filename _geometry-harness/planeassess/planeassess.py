@@ -1,0 +1,823 @@
+#!/usr/bin/env python3
+"""Occlusion assessment for plane patches: a repeatable driver for any patch that edits occlusion planes.
+
+A plane patch adds, moves, resizes, disables or restores placed occlusion primitives (XPRM: Box, PortalBox).
+A plane hides geometry but draws none, so the question per plane edit is whether the edited plane hides,
+or stops hiding, content that another mod placed. This driver answers it in steps; the steps here read
+records only (no renders, no game):
+
+    planeassess.py selftest                                  # known answers for the frustum and the rule's shapes
+    planeassess.py patch --group G.json --out DIR            # step 1: every plane edit, classed, with its prior owner
+    planeassess.py stations --group G.json --work DIR        # station sampling through the deployed viewprobe
+    planeassess.py scope --group G.json --out DIR            # step 2: the gazes where an edited plane is in view
+
+A group definition (JSON, kept with the run, never in this tree) names the two load orders (u: without the
+patch, p: with it, last plugin wins), each plugin's file, the patch plugin, the worldspaces with their station
+files, and optionally the expected edit list to reconcile against. Its schema is `group_schema()` below.
+
+The frustum test and its known answers come from the first offline occlusion assessment (route stations,
+80 degree horizontal field, 16:9, near 15 u, reach 4,096 u). The plugin reader is an independent reader written
+from the file format. The rule's shape classes mirror viewprobe's ShapeOcclusion.Shadow and
+HarnessShared.PortalBoxOrientation; a refusal here is a scope-time prediction that the render confirms.
+"""
+from __future__ import annotations
+
+import argparse
+import hashlib
+import json
+import math
+import os
+import struct
+import subprocess
+import sys
+import time
+import zlib
+from collections import Counter, defaultdict
+from pathlib import Path
+
+HERE = Path(__file__).resolve().parent
+sys.path.insert(0, str(HERE.parent))
+import runlog  # noqa: E402
+
+HFOV, ASPECT, NEAR, REACH = 80.0, 16.0 / 9.0, 15.0, 4096.0
+PRIM_KIND = {1: "Box", 3: "PortalBox"}
+PLANE_MARKER = "000017:Skyrim.esm"
+PLAYER = "000014:Skyrim.esm"
+POS_EPS, ROT_EPS = 1e-4, 1e-5
+
+
+def sha(path):
+    return hashlib.sha256(Path(path).read_bytes()).hexdigest()
+
+
+# ------------------------------------------------------------------ plugin reader (placed references only)
+FLAG_DELETED, FLAG_PERSISTENT, FLAG_INITIALLY_DISABLED, FLAG_COMPRESSED = 0x20, 0x400, 0x800, 0x40000
+PLACED_TYPES = (b"REFR", b"ACHR", b"PARW", b"PBAR", b"PBEA", b"PCON", b"PFLA", b"PGRE", b"PHZD", b"PMIS")
+
+
+def _u32(b, o=0):
+    return struct.unpack_from("<I", b, o)[0]
+
+
+class Plugin:
+    """Reads TES4 masters and every placed record with the fields an occlusion question needs: base, position and
+    rotation (radians), scale, XPRM (half bounds, colour, type), XESP (enable parent), XOCP, XTEL, header flags."""
+
+    def __init__(self, path):
+        self.path = str(path)
+        with open(path, "rb") as fh:
+            self.buf = fh.read()
+        self.sha256 = hashlib.sha256(self.buf).hexdigest()
+        self.name = os.path.basename(path)
+        self.masters, self.header_flags = [], 0
+        b = self.buf
+        if b[0:4] != b"TES4":
+            raise ValueError("%s is not a Bethesda plugin" % path)
+        size = _u32(b, 4)
+        self.header_flags = _u32(b, 8)
+        body, o = b[24:24 + size], 0
+        while o + 6 <= len(body):
+            sig, ln = body[o:o + 4], struct.unpack_from("<H", body, o + 4)[0]
+            if sig == b"MAST":
+                self.masters.append(body[o + 6:o + 6 + ln].rstrip(b"\x00").decode("cp1252", "replace"))
+            o += 6 + ln
+        self.tes4_end = 24 + size
+
+    def formkey(self, formid):
+        idx, local = formid >> 24, formid & 0xFFFFFF
+        return "%06X:%s" % (local, self.masters[idx] if idx < len(self.masters) else self.name)
+
+    def placed(self):
+        yield from self._walk(self.tes4_end, len(self.buf), None, None)
+
+    def _walk(self, start, end, cell, world):
+        b, o = self.buf, start
+        while o + 24 <= end:
+            sig, size = b[o:o + 4], _u32(b, o + 4)
+            if sig == b"GRUP":
+                gtype, label = struct.unpack_from("<i", b, o + 12)[0], _u32(b, o + 8)
+                yield from self._walk(o + 24, o + size, label if gtype in (6, 7, 8, 9) else cell,
+                                      label if gtype == 1 else world)
+                o += size
+                continue
+            flags, formid = _u32(b, o + 8), _u32(b, o + 12)
+            if sig == b"CELL":
+                cell = formid
+            elif sig in PLACED_TYPES:
+                body = b[o + 24:o + 24 + size]
+                if flags & FLAG_COMPRESSED:
+                    body = zlib.decompress(body[4:])
+                yield self._placed(sig, formid, flags, body, cell, world)
+            o += 24 + size
+
+    def _placed(self, sig, formid, flags, body, cell, world):
+        out = {"formKey": self.formkey(formid), "sig": sig.decode("ascii"), "flagsRaw": flags,
+               "deleted": bool(flags & FLAG_DELETED), "initiallyDisabled": bool(flags & FLAG_INITIALLY_DISABLED),
+               "base": None, "pos": None, "rot": None, "scale": 1.0, "prim": None, "enableParent": None,
+               "occlusionPlane": None, "teleport": None,
+               "cell": self.formkey(cell) if cell is not None else None,
+               "worldspace": self.formkey(world) if world is not None else None}
+        o, big = 0, None
+        while o + 6 <= len(body):
+            sub, ln = body[o:o + 4], struct.unpack_from("<H", body, o + 4)[0]
+            if sub == b"XXXX":
+                big = _u32(body, o + 6)
+                o += 6 + ln
+                continue
+            if big is not None:
+                ln, big = big, None
+            data = body[o + 6:o + 6 + ln]
+            if sub == b"NAME" and len(data) >= 4:
+                out["base"] = self.formkey(_u32(data))
+            elif sub == b"DATA" and len(data) >= 24:
+                v = struct.unpack_from("<6f", data, 0)
+                out["pos"], out["rot"] = list(v[:3]), list(v[3:])
+            elif sub == b"XSCL" and len(data) >= 4:
+                out["scale"] = struct.unpack_from("<f", data, 0)[0]
+            elif sub == b"XPRM" and len(data) >= 32:
+                out["prim"] = {"bounds": list(struct.unpack_from("<3f", data, 0)),
+                               "colour": list(struct.unpack_from("<3f", data, 12)),
+                               "unknown": struct.unpack_from("<f", data, 24)[0], "typeRaw": _u32(data, 28)}
+            elif sub == b"XESP" and len(data) >= 8:
+                out["enableParent"] = {"ref": self.formkey(_u32(data)), "flagsRaw": _u32(data, 4)}
+            elif sub == b"XTEL" and len(data) >= 4:
+                out["teleport"] = self.formkey(_u32(data))
+            elif sub == b"XOCP":
+                out["occlusionPlane"] = data.hex()
+            o += 6 + ln
+        return out
+
+
+def is_plane(row):
+    return row["prim"] is not None or row["base"] == PLANE_MARKER
+
+
+def kind_of(row):
+    return PRIM_KIND.get(row["prim"]["typeRaw"], "type%d" % row["prim"]["typeRaw"]) if row and row.get("prim") else None
+
+
+def disabled(row):
+    """Disabled or deleted at load: the scorecard's DISABLE idiom (deleted, initially disabled, or enable parent =
+    the player with the opposite flag)."""
+    ep = row.get("enableParent") or {}
+    return bool(row["deleted"] or row["initiallyDisabled"] or (ep.get("ref") == PLAYER and ep.get("flagsRaw", 0) & 1))
+
+
+def active(row):
+    return row is not None and not disabled(row) and row["pos"] is not None and row.get("prim") is not None
+
+
+# ------------------------------------------------------------------ edit kinds (one edit = record x kind)
+def _rot_differs(a, b):
+    return any(abs((y - x + math.pi) % (2 * math.pi) - math.pi) > ROT_EPS for x, y in zip(a, b))
+
+
+def edit_kinds(u, p):
+    """The scorecard's edit kinds for a patch version p over the unpatched winner u (None when no plugin in the
+    unpatched order defines the record). A DISABLE absorbs the idiom's position, rotation and parent changes."""
+    if u is None:
+        return ["ADD"]
+    if disabled(p) and not disabled(u):
+        return ["DISABLE"]
+    out = []
+    if disabled(u) and not disabled(p):
+        out.append("ENABLE")
+    if u["pos"] and p["pos"] and max(abs(x - y) for x, y in zip(u["pos"], p["pos"])) > POS_EPS:
+        out.append("MOVE")
+    if u["rot"] and p["rot"] and _rot_differs(u["rot"], p["rot"]):
+        out.append("ROTATE")
+    if abs((u["scale"] or 1.0) - (p["scale"] or 1.0)) > 1e-6:
+        out.append("SCALE")
+    if u["base"] != p["base"]:
+        out.append("BASE")
+    up, pp = u.get("prim") or {}, p.get("prim") or {}
+    if up.get("bounds") and pp.get("bounds") and max(abs(x - y) for x, y in zip(up["bounds"], pp["bounds"])) > POS_EPS:
+        out.append("BOUNDS")
+    if up.get("typeRaw") != pp.get("typeRaw") or up.get("colour") != pp.get("colour") or up.get("unknown") != pp.get("unknown"):
+        out.append("FIELD:Primitive")
+    if u.get("enableParent") != p.get("enableParent") and "ENABLE" not in out:
+        out.append("ENABLE-PARENT")
+    if (u["flagsRaw"] ^ p["flagsRaw"]) & ~(FLAG_DELETED | FLAG_INITIALLY_DISABLED | FLAG_COMPRESSED) & 0xFFFF:
+        out.append("RECORD-FLAGS")
+    if u.get("occlusionPlane") != p.get("occlusionPlane"):
+        out.append("FIELD:OcclusionPlane")
+    if u.get("teleport") != p.get("teleport"):
+        out.append("FIELD:Teleport")
+    return out
+
+
+def same_version(a, b):
+    """Two versions place the same plane the same way (geometry, kind, enable state)."""
+    if a is None or b is None:
+        return a is b
+    return not edit_kinds(a, b) and disabled(a) == disabled(b)
+
+
+def shape_differs(a, b):
+    """The plane the engine would cull with differs: enable state, primitive type, position, rotation, scale or
+    bounds. Colour, XOCP links and a disabled record's parent are not a difference in what is culled."""
+    if not active(a) and not active(b):
+        return False
+    if active(a) != active(b):
+        return True
+    return bool(set(edit_kinds(a, b)) & {"MOVE", "ROTATE", "SCALE", "BOUNDS"}) or kind_of(a) != kind_of(b)
+
+
+# ------------------------------------------------------------------ geometry (row-vector, System.Numerics layout)
+def _rx(a):
+    c, s = math.cos(a), math.sin(a)
+    return [[1, 0, 0], [0, c, s], [0, -s, c]]
+
+
+def _ry(a):
+    c, s = math.cos(a), math.sin(a)
+    return [[c, 0, -s], [0, 1, 0], [s, 0, c]]
+
+
+def _rz(a):
+    c, s = math.cos(a), math.sin(a)
+    return [[c, s, 0], [-s, c, 0], [0, 0, 1]]
+
+
+def _mm(a, b):
+    return [[sum(a[i][k] * b[k][j] for k in range(3)) for j in range(3)] for i in range(3)]
+
+
+def refr_rotation(rx, ry, rz):
+    """Rz(-z) * Ry(-y) * Rx(-x) for v * M: rows are the reference's local axes in world space."""
+    return _mm(_mm(_rz(-rz), _ry(-ry)), _rx(-rx))
+
+
+def _vm(v, m):
+    return [v[0] * m[0][j] + v[1] * m[1][j] + v[2] * m[2][j] for j in range(3)]
+
+
+def _add(a, b):
+    return [a[0] + b[0], a[1] + b[1], a[2] + b[2]]
+
+
+def _sub(a, b):
+    return [a[0] - b[0], a[1] - b[1], a[2] - b[2]]
+
+
+def _dot(a, b):
+    return a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
+
+
+def _cross(a, b):
+    return [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]]
+
+
+def _scale(a, s):
+    return [a[0] * s, a[1] * s, a[2] * s]
+
+
+def _norm(a):
+    return math.sqrt(_dot(a, a))
+
+
+def shape(row):
+    """{kind, pos, rot, half} for an active plane version; half extents = XPRM bounds (stored half) x scale."""
+    return {"kind": kind_of(row), "pos": row["pos"], "rot": row["rot"],
+            "half": [b * (row["scale"] or 1.0) for b in row["prim"]["bounds"]]}
+
+
+def shape_polys(s):
+    r = refr_rotation(*s["rot"])
+    hx, hy, hz = s["half"]
+    if s["kind"] == "PortalBox":
+        return [[_add(_vm(q, r), s["pos"]) for q in ([-hx, 0, -hz], [hx, 0, -hz], [hx, 0, hz], [-hx, 0, hz])]]
+    cs = [_add(_vm([hx if i & 1 else -hx, hy if i & 2 else -hy, hz if i & 4 else -hz], r), s["pos"]) for i in range(8)]
+    rings = [[0, 4, 6, 2], [1, 3, 7, 5], [0, 1, 5, 4], [2, 6, 7, 3], [0, 2, 3, 1], [4, 5, 7, 6]]
+    return [[cs[i] for i in ring] for ring in rings]
+
+
+def eye_inside_box(s, eye):
+    r, d = refr_rotation(*s["rot"]), _sub(eye, s["pos"])
+    return all(abs(_dot(d, r[i])) <= s["half"][i] for i in range(3))
+
+
+def frustum(bearing_deg):
+    b = math.radians(bearing_deg)
+    f = [math.sin(b), math.cos(b), 0.0]
+    rt = _cross(f, [0, 0, 1.0])
+    rt = _scale(rt, 1 / _norm(rt))
+    up = _cross(rt, f)
+    th = math.tan(math.radians(HFOV) / 2)
+    tv = th / ASPECT
+    return [(f, -NEAR), (_sub(_scale(f, th), rt), 0.0), (_add(_scale(f, th), rt), 0.0),
+            (_sub(_scale(f, tv), up), 0.0), (_add(_scale(f, tv), up), 0.0)]
+
+
+def _clip(poly, eye, planes):
+    cur = list(poly)
+    for a, b in planes:
+        if not cur:
+            break
+        nxt = []
+        for i in range(len(cur)):
+            s, e = cur[i], cur[(i + 1) % len(cur)]
+            gs, ge = _dot(a, _sub(s, eye)) + b, _dot(a, _sub(e, eye)) + b
+            if gs >= 0:
+                nxt.append(s)
+            if (gs >= 0) != (ge >= 0):
+                nxt.append(_add(s, _scale(_sub(e, s), gs / (gs - ge))))
+        cur = nxt
+    return cur
+
+
+def point_poly_dist(p, poly):
+    """Exact distance from p to a planar convex polygon in 3D."""
+    if len(poly) < 3:
+        return min(_norm(_sub(p, q)) for q in poly) if poly else math.inf
+    n, k = _cross(_sub(poly[1], poly[0]), _sub(poly[2], poly[0])), 2
+    while _norm(n) < 1e-9 and k + 1 < len(poly):
+        k += 1
+        n = _cross(_sub(poly[1], poly[0]), _sub(poly[k], poly[0]))
+    best = math.inf
+    if _norm(n) >= 1e-9:
+        n = _scale(n, 1 / _norm(n))
+        dpl = _dot(_sub(p, poly[0]), n)
+        proj, sgn, inside = _sub(p, _scale(n, dpl)), 0, True
+        for i in range(len(poly)):
+            a, b = poly[i], poly[(i + 1) % len(poly)]
+            c = _dot(_cross(_sub(b, a), _sub(proj, a)), n)
+            if abs(c) < 1e-9:
+                continue
+            sg = 1 if c > 0 else -1
+            if sgn == 0:
+                sgn = sg
+            elif sg != sgn:
+                inside = False
+                break
+        if inside:
+            best = abs(dpl)
+    for i in range(len(poly)):
+        a, b = poly[i], poly[(i + 1) % len(poly)]
+        ab = _sub(b, a)
+        t = 0.0 if _dot(ab, ab) == 0 else max(0.0, min(1.0, _dot(_sub(p, a), ab) / _dot(ab, ab)))
+        best = min(best, _norm(_sub(p, _add(a, _scale(ab, t)))))
+    return best
+
+
+def in_view(s, eye, bearing):
+    """(in view within reach, nearest distance of the in-frustum part or None)."""
+    if s["kind"] == "Box" and eye_inside_box(s, eye):
+        return True, 0.0
+    planes, best = frustum(bearing), math.inf
+    for poly in shape_polys(s):
+        c = _clip(poly, eye, planes)
+        if c:
+            best = min(best, point_poly_dist(eye, c))
+    return best <= REACH, (None if best == math.inf else round(best, 2))
+
+
+def rule_issue(s, eye, rule):
+    """None when the occlusion rule predicts this shape from this eye, else the refusal reason (viewprobe's
+    ShapeOcclusion.Shadow and PortalBoxOrientation.Check, read for scoping)."""
+    r, tol = refr_rotation(*s["rot"]), rule["maximumAbsNormalZ"]
+    if s["kind"] not in ("Box", "PortalBox"):
+        return "not a Box or PortalBox primitive"
+    full = shape_polys(s)
+    eye_d = min(point_poly_dist(eye, poly) for poly in full)
+    if s["kind"] == "Box":
+        if not rule.get("boxSilhouette"):
+            return "Box face behavior unassessed (rule has no Box silhouette)"
+        if max(abs(r[0][2]), abs(r[1][2])) > tol:
+            return "box not upright"
+        if eye_inside_box(s, eye):
+            return "eye inside the box"
+        if eye_d <= rule["minimumEyeDistance"]:
+            return "near-eye"
+        return None
+    n = r[1]
+    if abs(n[2]) > tol:
+        if not rule.get("horizontalPortalBoxNormalDownEyeAbove"):
+            return "PortalBox tilted"
+        if not (abs(n[0]) <= tol and abs(n[1]) <= tol):
+            return "PortalBox tilted"
+        if n[2] > 0:
+            return "horizontal PortalBox normal up (+Z)"
+        if not (eye[2] - s["pos"][2] > 0):
+            return "horizontal PortalBox seen from below"
+    if eye_d <= rule["minimumEyeDistance"]:
+        return "near-eye"
+    return None
+
+
+def geometry_selftest(verbose=True):
+    """Known answers for the frustum test (each rejects one wrong reading) and the rule's shape classes."""
+    fails = []
+
+    def chk(name, got, want):
+        if got != want:
+            fails.append("%s: got %s want %s" % (name, got, want))
+        if verbose:
+            print("  %-66s %s" % (name, "ok" if got == want else "FAIL (got %s, want %s)" % (got, want)))
+    y = _vm([0, 1, 0], refr_rotation(0, 0, 0.8))
+    chk("local +Y under yaw z is (sin z, cos z, 0)", all(abs(a - b) < 1e-12 for a, b in zip(y, [math.sin(0.8), math.cos(0.8), 0])), True)
+    eye = [0.0, 0.0, 120.5]
+    P = lambda pos, half, rot=(0, 0, 0), kind="PortalBox": {"kind": kind, "pos": pos, "half": half, "rot": list(rot)}
+    chk("K1 PortalBox 1,000 u ahead is in view", in_view(P([0, 1000, 120], [300, 1, 200]), eye, 0)[0], True)
+    chk("K2 PortalBox 1,000 u behind is not in view", in_view(P([0, -1000, 120], [300, 1, 200]), eye, 0)[0], False)
+    chk("K3 PortalBox 5,000 u ahead is not in view (reach)", in_view(P([0, 5000, 120], [300, 1, 200]), eye, 0)[0], False)
+    chk("K4 centre 60 deg off-axis, wide panel's edge inside: in view", in_view(P([1732, 1000, 120], [1500, 1, 200]), eye, 0)[0], True)
+    chk("K4b same centre, narrow panel: not in view", in_view(P([1732, 1000, 120], [100, 1, 200]), eye, 0)[0], False)
+    chk("K5 Box centre 4,600 u ahead, near face 4,100: not in view", in_view(P([0, 4600, 120], [300, 500, 200], kind="Box"), eye, 0)[0], False)
+    chk("K5b Box centre 4,400 u ahead, near face 3,900: in view", in_view(P([0, 4400, 120], [300, 500, 200], kind="Box"), eye, 0)[0], True)
+    chk("K6 panel 900-1,100 u above the eye at 1,000 u: not in view", in_view(P([0, 1000, 1120], [300, 1, 100]), eye, 0)[0], False)
+    chk("K7 panel 1,000 u east, bearing 90: in view", in_view(P([1000, 0, 120], [1, 300, 200]), eye, 90)[0], True)
+    chk("K7b same panel, bearing 270: not in view", in_view(P([1000, 0, 120], [1, 300, 200]), eye, 270)[0], False)
+    chk("K8 eye inside a Box: in view", in_view(P([0, 0, 120], [300, 300, 300], kind="Box"), eye, 0)[0], True)
+    rule = {"maximumAbsNormalZ": 0.001, "minimumEyeDistance": 42, "boxSilhouette": True,
+            "horizontalPortalBoxNormalDownEyeAbove": True}
+    chk("R1 upright PortalBox: predicted", rule_issue(P([0, 1000, 120], [300, 1, 200]), eye, rule), None)
+    chk("R2 PortalBox tilted 30 deg about X: refused", rule_issue(P([0, 1000, 120], [300, 1, 200], (math.radians(30), 0, 0)), eye, rule), "PortalBox tilted")
+    # local +Y -> world -Z needs rx = +90 deg in this layout (row 1 of Rx(-x) is (0, cos x, -sin x))
+    chk("R3 horizontal PortalBox normal down, eye above: predicted", rule_issue(P([0, 1000, 0], [300, 1, 200], (math.pi / 2, 0, 0)), eye, rule), None)
+    chk("R4 horizontal PortalBox normal up: refused", rule_issue(P([0, 1000, 0], [300, 1, 200], (-math.pi / 2, 0, 0)), eye, rule), "horizontal PortalBox normal up (+Z)")
+    chk("R5 horizontal PortalBox normal down, eye below: refused", rule_issue(P([0, 1000, 500], [300, 1, 200], (math.pi / 2, 0, 0)), eye, rule), "horizontal PortalBox seen from below")
+    chk("R6 upright Box: predicted", rule_issue(P([0, 1000, 120], [300, 300, 300], kind="Box"), eye, rule), None)
+    chk("R7 Box rolled 10 deg: refused", rule_issue(P([0, 1000, 120], [300, 300, 300], (0, math.radians(10), 0), kind="Box"), eye, rule), "box not upright")
+    chk("R8 Box with the rule's Box silhouette off: refused", rule_issue(P([0, 1000, 120], [300, 300, 300], kind="Box"), eye, dict(rule, boxSilhouette=False)),
+        "Box face behavior unassessed (rule has no Box silhouette)")
+    chk("R9 PortalBox 30 u from the eye: near-eye", rule_issue(P([0, 30, 120], [300, 1, 200]), eye, rule), "near-eye")
+    if verbose:
+        print("SELFTEST", "PASS" if not fails else "FAIL %d" % len(fails))
+    return fails
+
+
+# ------------------------------------------------------------------ group definition
+def group_schema():
+    return {"name": "label", "orders": {"u": "order JSON (Plugins, last wins)", "p": "order JSON"},
+            "pluginFiles": {"<plugin name>": "path"}, "patch": "<patch plugin name>",
+            "rule": "occlusion rule JSON (the one renders will use)",
+            "worldspaces": {"<worldspace formKey>": {"name": "label", "setting": "city|wilderness",
+                                                    "stations": "stations-<W>.json (accepted stations, gazes)",
+                                                    "stationCell": "cell formKey for --stations",
+                                                    "stationSpec": "{route spec}"}},
+            "expectedEdits": "optional JSON list of {formKey, kind, target?}"}
+
+
+def load_group(path):
+    g = json.loads(Path(path).read_text(encoding="utf-8"))
+    base = Path(path).resolve().parent
+
+    def rel(p):
+        q = Path(p)
+        return q if q.is_absolute() else base / q
+    g["_base"] = base
+    g["_rel"] = rel
+    for arm in ("u", "p"):
+        g["orders"][arm] = rel(g["orders"][arm])
+    return g
+
+
+def order_plugins(g, arm):
+    return json.loads(Path(g["orders"][arm]).read_text(encoding="utf-8"))["Plugins"]
+
+
+# ------------------------------------------------------------------ step 1: the patch's plane edits
+def read_versions(g):
+    """formKey -> {plugin: row} for every placed plane in every plugin of the p order, plus plugin hashes."""
+    versions, hashes = defaultdict(dict), {}
+    for name in order_plugins(g, "p"):
+        pl = Plugin(g["_rel"](g["pluginFiles"][name]))
+        hashes[name] = pl.sha256
+        for row in pl.placed():
+            if is_plane(row):
+                versions[row["formKey"]][name] = row
+    return versions, hashes
+
+
+def winner(vers, order):
+    w = None
+    for name in order:
+        if name in vers:
+            w = (name, vers[name])
+    return w
+
+
+def classify(u, p, b_versions):
+    """Record class: new / disabled / re-enabled / restored to another plugin's version / moved-or-resized /
+    unchanged (an identity forward)."""
+    if u is None:
+        return "new"
+    if disabled(p) and not disabled(u):
+        return "disabled"
+    if disabled(u) and not disabled(p):
+        return "re-enabled"
+    if disabled(u) and disabled(p):
+        return "disabled in both"
+    for name, row in b_versions:
+        if same_version(row, p) and not same_version(u, p):
+            return "restored to %s's version" % name
+    return "moved-or-resized" if edit_kinds(u, p) else "unchanged"
+
+
+def patch_step(g, out):
+    with runlog.Run("planeassess-patch", stage_source="single-stage") as run:
+        run.input("orderU", str(g["orders"]["u"]))
+        run.input("orderP", str(g["orders"]["p"]))
+        versions, hashes = read_versions(g)
+        uo, po, patch = order_plugins(g, "u"), order_plugins(g, "p"), g["patch"]
+        assert po[-1] == patch and po[:-1] == uo, "the p order must be the u order plus the patch, last"
+        rows, edits = [], []
+        for fk, vers in sorted(versions.items()):
+            if patch not in vers:
+                continue
+            p = vers[patch]
+            uw = winner(vers, uo)
+            u = uw[1] if uw else None
+            others = [(n, r) for n, r in vers.items() if n not in (patch, uw[0] if uw else None)]
+            kinds = edit_kinds(u, p)
+            ws = p["worldspace"] or (u or {}).get("worldspace")
+            row = {"formKey": fk, "worldspace": ws, "cell": p["cell"], "kind": kind_of(p) or kind_of(u),
+                   "class": classify(u, p, others), "edits": kinds,
+                   "priorOwner": uw[0] if uw else None, "definedBy": fk.split(":", 1)[1],
+                   "equalsVersionOf": [n for n, r2 in others if same_version(r2, p)],
+                   "activeU": active(u), "activeP": active(p), "p": p, "u": u}
+            if u and p["pos"] and u["pos"]:
+                row["moved_u"] = round(math.dist(u["pos"], p["pos"]), 2)
+            rows.append(row)
+            edits += [{"formKey": fk, "kind": k, "worldspace": ws, "class": row["class"], "priorOwner": row["priorOwner"],
+                       "definedBy": row["definedBy"]} for k in kinds]
+        doc = {"schema": "planeassess/patch/1", "group": g["name"], "pluginSha256": hashes,
+               "orders": {a: {"path": str(g["orders"][a]), "sha256": sha(g["orders"][a])} for a in ("u", "p")},
+               "counts": {"planeRecords": len(rows), "edits": len(edits),
+                          "byWorldspaceClass": _count(rows, lambda r: (r["worldspace"], r["class"])),
+                          "byWorldspaceEditKind": _count(edits, lambda e: (e["worldspace"], e["kind"])),
+                          "byPriorOwnerEditKind": _count(edits, lambda e: (e["priorOwner"] or "-", e["kind"]))},
+               "records": rows, "edits": edits}
+        if g.get("expectedEdits"):
+            doc["reconciliation"] = reconcile(edits, json.loads(Path(g["_rel"](g["expectedEdits"])).read_text(encoding="utf-8")))
+        Path(out).mkdir(parents=True, exist_ok=True)
+        dest = Path(out) / "patch.json"
+        dest.write_text(json.dumps(doc, indent=1), encoding="utf-8")
+        run.artifact(str(dest))
+        run.feature("planeRecords", len(rows), "records")
+        print(json.dumps(doc["counts"], indent=1))
+        if "reconciliation" in doc:
+            print(json.dumps({k: v for k, v in doc["reconciliation"].items() if k != "detail"}, indent=1))
+        return doc
+
+
+def _count(xs, key):
+    c = Counter(key(x) for x in xs)
+    return {" | ".join(str(p) for p in k): n for k, n in sorted(c.items(), key=lambda kv: str(kv[0]))}
+
+
+def reconcile(edits, expected):
+    have = Counter((e["formKey"], e["kind"]) for e in edits)
+    want = Counter((e["formKey"], e["kind"]) for e in expected)
+    target = Counter((e["formKey"], e["kind"]) for e in expected if e.get("target", True))
+    missing, extra = want - have, have - want
+    return {"driverEdits": sum(have.values()), "expectedEdits": sum(want.values()), "targetEdits": sum(target.values()),
+            "matched": sum((have & want).values()), "targetMatched": sum((have & target).values()),
+            "missingFromDriver": sum(missing.values()), "extraInDriver": sum(extra.values()),
+            "detail": {"missingFromDriver": sorted("%s %s" % k for k in missing),
+                       "extraInDriver": sorted("%s %s" % k for k in extra)}}
+
+
+# ------------------------------------------------------------------ station sampling (deployed viewprobe)
+def busy_processes(exempt=()):
+    """Heavy processes running now, by image name (a command line that merely mentions one does not count);
+    an exempt executable path is ignored."""
+    import csv
+    import io
+    out = subprocess.run(["powershell", "-NoProfile", "-Command",
+                          "Get-CimInstance Win32_Process | Select-Object Name,ExecutablePath | ConvertTo-Csv -NoTypeInformation"],
+                         capture_output=True, text=True, errors="replace").stdout
+    heavy = {"viewprobe.exe", "skyrimse.exe", "skyrimvr.exe", "modorganizer.exe", "overlapprobe.exe", "contactprobe.exe",
+             "floorgapprobe.exe", "lightprobe.exe", "obs64.exe"}
+    ex = {e.lower().replace("/", "\\") for e in exempt}
+    return ["%s %s" % (r["Name"], r.get("ExecutablePath") or "") for r in csv.DictReader(io.StringIO(out))
+            if (r.get("Name") or "").lower() in heavy and (r.get("ExecutablePath") or "").lower() not in ex]
+
+
+def stations_step(g, viewprobe, work, copy_to, instance, game, only=None, exempt=(), locks=()):
+    exe = Path(viewprobe)
+    for lk in locks:
+        assert not Path(lk).exists(), "refusing: %s exists" % lk
+    busy = busy_processes(exempt)
+    assert not busy, "refusing: busy machine: %s" % busy
+    jobs, outs = [], []
+    profile = json.loads(Path(g["orders"]["u"]).read_text(encoding="utf-8")).get("BaseProfile") or "Manual"
+    for wk, w in g["worldspaces"].items():
+        if only and w["name"] not in only:
+            continue
+        out = Path(work) / w["name"]
+        out.mkdir(parents=True, exist_ok=True)
+        wl = out / ("%s.worklist.json" % w["name"])
+        label = "%s-route-%s" % (g["name"], w["name"])
+        wl.write_text(json.dumps({"label": label, "cells": [{"cell": w["stationCell"], "shots": [
+            {"label": label, "eye": [0, 0, 0], "look": [0, 1, 0], "fov": HFOV, "nav": "off", "occlusion": "off"}]}]},
+            indent=1), encoding="utf-8")
+        spec = out / "spec-route.json"
+        spec.write_text(json.dumps(w["stationSpec"], indent=1), encoding="utf-8")
+        argv = [str(exe), str(wl), "--stations", str(spec), "--stations-out", str(out / "route.poses.json"),
+                "--instance", instance, "--profile", profile, "--game", game, "--order", str(g["orders"]["u"])]
+        jobs.append({"id": "%s-stations-%s" % (g["name"], w["name"]), "argv": argv, "cwd": str(out)})
+        outs.append((w["name"], out))
+    summary = {"viewprobeDll": sha(exe.parent / "viewprobe.dll"), "coreDll": sha(exe.parent / "housecarl-core.dll"),
+               "orderU": str(g["orders"]["u"]), "orderSha256": sha(g["orders"]["u"]), "profile": profile, "runs": []}
+    t0 = time.time()
+    res = runlog.Runner("planeassess-stations", out_dir=str(Path(work) / "logs")).run(jobs)
+    summary["wallSeconds"] = round(time.time() - t0, 1)
+    for (name, out), r in zip(outs, res):
+        row = {"worldspace": name, "exitCode": r.get("exitCode"), "seconds": r.get("seconds"), "files": {}}
+        dst = Path(copy_to) / name
+        dst.mkdir(parents=True, exist_ok=True)
+        for f in sorted(out.iterdir()):
+            if f.is_file():
+                row["files"][f.name] = {"bytes": f.stat().st_size, "sha256": sha(f)}
+                if not f.name.startswith("navdump-") and f.stat().st_size <= (200 << 20):
+                    (dst / f.name).write_bytes(f.read_bytes())
+        summary["runs"].append(row)
+    Path(copy_to).mkdir(parents=True, exist_ok=True)
+    (Path(copy_to) / "stations-summary.json").write_text(json.dumps(summary, indent=1), encoding="utf-8")
+    print(json.dumps(summary, indent=1)[:3000])
+    return 0 if all(r["exitCode"] == 0 for r in summary["runs"]) else 1
+
+
+# ------------------------------------------------------------------ step 2: scope
+def scope_step(g, out, patch_doc=None):
+    fails = geometry_selftest(verbose=False)
+    assert not fails, "geometry known answers fail: %s" % fails
+    rule = json.loads(Path(g["_rel"](g["rule"])).read_text(encoding="utf-8"))
+    with runlog.Run("planeassess-scope", stage_source="counted") as run:
+        versions, _ = read_versions(g)
+        uo, po = order_plugins(g, "u"), order_plugins(g, "p")
+        arms = {"u": {}, "p": {}}
+        for fk, vers in versions.items():
+            for arm, order in (("u", uo), ("p", po)):
+                w = winner(vers, order)
+                if w:
+                    arms[arm][fk] = w[1]
+        differ = sorted(fk for fk in set(arms["u"]) | set(arms["p"]) if shape_differs(arms["u"].get(fk), arms["p"].get(fk)))
+        patch_doc = patch_doc or json.loads((Path(out) / "patch.json").read_text(encoding="utf-8"))
+        prec = {r["formKey"]: r for r in patch_doc["records"]}
+        assert set(differ) <= set(prec), "u/p differences outside the patch: %s" % sorted(set(differ) - set(prec))[:5]
+        gazes_total = 0
+        per_ws, kept, edit_seen = {}, [], defaultdict(lambda: {"gazes": 0, "decidable": 0, "refusals": Counter(),
+                                                                 "stations": set(), "nearest": None})
+        run.stage("gazes", "scoping station gazes")
+        for wk, w in g["worldspaces"].items():
+            st = json.loads(Path(g["_rel"](w["stations"])).read_text(encoding="utf-8"))["stations"]
+            acc = [s for s in st if s.get("accepted")]
+            shapes = {arm: [(fk, shape(r)) for fk, r in arms[arm].items() if r["worldspace"] == wk and active(r)]
+                      for arm in ("u", "p")}
+            dset = {fk for fk in differ if (arms["u"].get(fk) or arms["p"].get(fk))["worldspace"] == wk}
+            stat = {"setting": w.get("setting"), "acceptedStations": len(acc), "gazes": 0, "eligibleStations": 0,
+                    "eligibleGazes": 0, "keptGazes": 0, "keptDecidableGazes": 0, "keptStations": 0,
+                    "differingPlanes": len(dset)}
+            for s in acc:
+                eye = [s["x"], s["y"], s["eyeZ"]]
+                near = {arm: [(fk, sh) for fk, sh in shapes[arm]
+                              if math.hypot(sh["pos"][0] - eye[0], sh["pos"][1] - eye[1]) <= REACH + max(sh["half"]) * math.sqrt(3)]
+                        for arm in ("u", "p")}
+                for fk in dset:
+                    for arm in ("u", "p"):
+                        r = arms[arm].get(fk)
+                        if active(r):
+                            d = math.hypot(r["pos"][0] - eye[0], r["pos"][1] - eye[1])
+                            e = edit_seen[fk]
+                            e["nearest"] = d if e["nearest"] is None else min(e["nearest"], d)
+                st_elig = st_kept = False
+                for gz in s["gazes"]:
+                    stat["gazes"] += 1
+                    gazes_total += 1
+                    run.advance()
+                    seen = {arm: {fk: in_view(sh, eye, gz["bearingDeg"]) for fk, sh in near[arm]} for arm in ("u", "p")}
+                    seen = {arm: {fk: v[1] for fk, v in d.items() if v[0]} for arm, d in seen.items()}
+                    if seen["u"] or seen["p"]:
+                        stat["eligibleGazes"] += 1
+                        st_elig = True
+                    dview = sorted((set(seen["u"]) | set(seen["p"])) & dset)
+                    if not dview:
+                        continue
+                    stat["keptGazes"] += 1
+                    st_kept = True
+                    planes = []
+                    for fk in dview:
+                        issues = {}
+                        for arm in ("u", "p"):
+                            if fk in seen[arm]:
+                                issues[arm] = rule_issue(shape(arms[arm][fk]), eye, rule)
+                        refused = sorted({v for v in issues.values() if v})
+                        e = edit_seen[fk]
+                        e["gazes"] += 1
+                        e["stations"].add(s["id"])
+                        if refused:
+                            e["refusals"].update(refused)
+                        else:
+                            e["decidable"] += 1
+                        planes.append({"formKey": fk, "distanceU": seen["u"].get(fk), "distanceP": seen["p"].get(fk),
+                                       "ruleIssue": issues, "decidable": not refused})
+                    if any(pl["decidable"] for pl in planes):
+                        stat["keptDecidableGazes"] += 1
+                    kept.append({"worldspace": w["name"], "setting": w.get("setting"), "stationId": s["id"],
+                                 "family": s.get("family"), "eye": eye, "gaze": gz["kind"], "bearingDeg": gz["bearingDeg"],
+                                 "planesInViewU": len(seen["u"]), "planesInViewP": len(seen["p"]), "differingInView": planes})
+                stat["eligibleStations"] += st_elig
+                stat["keptStations"] += st_kept
+            per_ws[w["name"]] = stat
+        rows = []
+        for fk, r in sorted(prec.items()):
+            e = edit_seen.get(fk) or {"gazes": 0, "decidable": 0, "refusals": Counter(), "stations": set(), "nearest": None}
+            if fk not in differ:
+                reason = "no change to the culling shape (colour, XOCP links or a disabled record's parent only)"
+            elif not (r["activeU"] or r["activeP"]):
+                reason = "inactive in both arms (disabled or deleted in u and in p)"
+            elif r["worldspace"] not in g["worldspaces"]:
+                reason = "no station set for its worldspace (%s)" % r["worldspace"]
+            elif e["gazes"] == 0:
+                reason = "no accepted station gaze sees it within %d u" % REACH
+            elif e["decidable"] == 0:
+                reason = "rule refuses the shape at every gaze that sees it: " + ", ".join(
+                    "%s (%d)" % kv for kv in sorted(e["refusals"].items()))
+            else:
+                reason = None
+            rows.append({"formKey": fk, "worldspace": g["worldspaces"].get(r["worldspace"], {}).get("name", r["worldspace"]),
+                         "kind": r["kind"], "class": r["class"], "edits": r["edits"], "priorOwner": r["priorOwner"],
+                         "keptGazesSeeing": e["gazes"], "decidableGazes": e["decidable"], "stationsSeeing": len(e["stations"]),
+                         "refusals": dict(e["refusals"]),
+                         "nearestStationPlanarU": None if e["nearest"] is None else round(e["nearest"], 1),
+                         "inCeiling": reason is None, "outsideReason": reason})
+        edits = [{"formKey": r["formKey"], "kind": k, "worldspace": r["worldspace"], "inCeiling": r["inCeiling"],
+                  "outsideReason": r["outsideReason"], "keptGazesSeeing": r["keptGazesSeeing"]} for r in rows for k in r["edits"]]
+        doc = {"schema": "planeassess/scope/1", "group": g["name"],
+               "reading": {"frustum": "level, %g deg horizontal, 16:9, near %g u" % (HFOV, NEAR), "reach": REACH,
+                           "kept": "a gaze is kept when a plane whose u and p versions differ is in view in either arm",
+                           "decidable": "every in-view version of the plane is predicted by the rule from that eye",
+                           "rule": str(g["_rel"](g["rule"])), "ruleSha256": sha(g["_rel"](g["rule"]))},
+               "perWorldspace": per_ws, "differingPlanes": len(differ),
+               "ceiling": {"planeRecords": sum(r["inCeiling"] for r in rows), "planeRecordsTotal": len(rows),
+                           "edits": sum(e["inCeiling"] for e in edits), "editsTotal": len(edits),
+                           "seenAtKeptGaze": sum(1 for r in rows if r["keptGazesSeeing"] > 0)},
+               "outsideByReason": _count([r for r in rows if not r["inCeiling"]], lambda r: (r["outsideReason"].split(":")[0],)),
+               "planes": rows, "editRows": edits, "keptGazes": kept}
+        if g.get("expectedEdits"):
+            exp = json.loads(Path(g["_rel"](g["expectedEdits"])).read_text(encoding="utf-8"))
+            tk = {(e["formKey"], e["kind"]) for e in exp if e.get("target", True)}
+            tf = {fk for fk, _ in tk}
+            tw = defaultdict(lambda: {"keptGazes": 0, "keptDecidableGazes": 0, "keptStations": set()})
+            for k in kept:
+                if any(pl["formKey"] in tf for pl in k["differingInView"]):
+                    tw[k["worldspace"]]["keptGazes"] += 1
+                    tw[k["worldspace"]]["keptStations"].add(k["stationId"])
+                if any(pl["formKey"] in tf and pl["decidable"] for pl in k["differingInView"]):
+                    tw[k["worldspace"]]["keptDecidableGazes"] += 1
+            te = [e for e in edits if (e["formKey"], e["kind"]) in tk]
+            doc["target"] = {"edits": len(tk), "editsFound": len(te), "ceilingEdits": sum(e["inCeiling"] for e in te),
+                             "perWorldspace": {w: {"keptGazes": v["keptGazes"], "keptDecidableGazes": v["keptDecidableGazes"],
+                                                   "keptStations": len(v["keptStations"])}
+                                               for w, v in tw.items()},
+                             "outsideByReason": _count([e for e in te if not e["inCeiling"]],
+                                                       lambda e: (e["outsideReason"].split(":")[0],))}
+        dest = Path(out) / "scope.json"
+        dest.write_text(json.dumps(doc, indent=1), encoding="utf-8")
+        run.artifact(str(dest))
+        run.feature("gazes", gazes_total, "gazes")
+        print(json.dumps({k: doc[k] for k in ("perWorldspace", "differingPlanes", "ceiling", "outsideByReason", "target")
+                          if k in doc}, indent=1))
+        return doc
+
+
+def main(argv=None):
+    ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
+    sub = ap.add_subparsers(dest="cmd", required=True)
+    sub.add_parser("selftest", help="known answers for the frustum test and the rule's shape classes")
+    a = sub.add_parser("patch", help="step 1: classify every plane edit the patch carries")
+    a.add_argument("--group", required=True, help="group definition JSON")
+    a.add_argument("--out", required=True, help="output folder for patch.json")
+    a = sub.add_parser("scope", help="step 2: the station gazes where an edited plane is in view")
+    a.add_argument("--group", required=True, help="group definition JSON")
+    a.add_argument("--out", required=True, help="folder holding patch.json; scope.json is written here")
+    a = sub.add_parser("stations", help="sample route stations per worldspace with the deployed viewprobe")
+    a.add_argument("--group", required=True, help="group definition JSON")
+    a.add_argument("--viewprobe", required=True, help="deployed viewprobe.exe (never rebuilt)")
+    a.add_argument("--work", required=True, help="viewprobe output folder (large files stay here)")
+    a.add_argument("--copy-to", required=True, help="folder that receives the compact outputs")
+    a.add_argument("--instance", required=True, help="MO2 instance folder (read only)")
+    a.add_argument("--game", required=True, help="game folder")
+    a.add_argument("--only", action="append", help="worldspace label to sample (repeat); default all")
+    a.add_argument("--exempt", action="append", default=[], help="process path that does not count as busy (repeat)")
+    a.add_argument("--lock", action="append", default=[], help="lock file whose presence refuses the run (repeat)")
+    args = ap.parse_args(argv)
+    if args.cmd == "selftest":
+        with runlog.Run("planeassess-selftest", stage_source="single-stage"):
+            return 1 if geometry_selftest() else 0
+    g = load_group(args.group)
+    if args.cmd == "patch":
+        patch_step(g, args.out)
+        return 0
+    if args.cmd == "scope":
+        scope_step(g, args.out)
+        return 0
+    return stations_step(g, args.viewprobe, args.work, args.copy_to, args.instance, args.game, args.only,
+                         args.exempt, args.lock)
+
+
+if __name__ == "__main__":
+    sys.exit(main())
