@@ -98,6 +98,26 @@ class Geometry(unittest.TestCase):
         self.assertEqual(pa.geometry_selftest(verbose=False), [])
 
 
+class Unrendered(unittest.TestCase):
+    def test_no_culling_change_is_set_aside_from_the_records(self):
+        v = pa.unrendered_verdict("no change to the culling shape viewprobe reads (colour, XOCP or a disabled record's parent only)", "Box")
+        self.assertEqual((v["verdict"], v["reason"]), ("set aside", "no change to what is culled (records)"))
+
+    def test_tilted_refusal_reads_tilted(self):
+        v = pa.unrendered_verdict("rule refuses the shape at every gaze that sees it: PortalBox tilted (12)", "PortalBox")
+        self.assertEqual((v["verdict"], v["reason"]), ("cannot tell", "rule refuses a tilted plane"))
+
+
+class OutOfMemory(unittest.TestCase):
+    def test_heap_cap_refusal_is_found_in_the_log(self):
+        with tempfile.TemporaryDirectory() as d:
+            f = Path(d) / "x.log"
+            f.write_text("rendering\nOut of memory.\n", encoding="utf-8")
+            self.assertTrue(pa.out_of_memory(f))
+            f.write_text("rendering\ndone\n", encoding="utf-8")
+            self.assertFalse(pa.out_of_memory(f))
+
+
 class Reader(unittest.TestCase):
     def test_reads_a_placed_primitive_in_a_worldspace(self):
         def sub(sig, data):
