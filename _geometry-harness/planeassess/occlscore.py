@@ -202,3 +202,23 @@ def hidden_anywhere(report):
             if c.get("predictedCulled") and v.get("Assessed") and v.get("VisiblePixels", 0) > 0:
                 out.add("%s|%s" % (c.get("subject"), c.get("shape")))
     return out
+
+
+def _norm_asset(a):
+    a = (a or "").replace("/", "\\").lower()
+    return a[len("meshes\\"):] if a.startswith("meshes\\") else a
+
+
+def unreadable(report, planes):
+    """The report's unreadable assets (viewprobe exits 3 when it names any) and, per plane of `planes`, those among the
+    plane's own candidate rows (the shapes the plane relates to at this view): ({plane: [asset, ...]}, [asset, ...])."""
+    d = report if isinstance(report, dict) else load_report(report)
+    assets = [a.get("asset") for a in ((d.get("unreadableAssets") or {}).get("assets") or []) if a.get("asset")]
+    bad = {_norm_asset(a): a for a in assets}
+    under = {}
+    for pl, candidates in _rows(d):
+        if pl["formKey"] not in planes:
+            continue
+        hit = {bad[_norm_asset(c.get("mesh"))] for c in candidates if _norm_asset(c.get("mesh")) in bad}
+        under[pl["formKey"]] = sorted(hit)
+    return under, sorted(set(assets))

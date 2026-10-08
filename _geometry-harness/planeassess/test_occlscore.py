@@ -61,6 +61,16 @@ class Scorer(unittest.TestCase):
             {"formKey": "000801:B.esp", "candidates": [cand("2:A.esp", True, 100, "in", assessed=False)]}]}
         self.assertEqual(S.vis_status(d, {"1:A.esp", "2:A.esp"}, {"000800:B.esp"}), {"assessedVisible": 1})
 
+    def test_unreadable_assets_under_a_plane(self):
+        d = {"schema": "occlusion-view-research-v1",
+             "unreadableAssets": {"assets": [{"kind": "mesh", "asset": "meshes\\Water\\W.nif"},
+                                             {"kind": "mesh", "asset": "meshes\\Far\\F.nif"}]},
+             "planes": [{"formKey": "000800:B.esp", "candidates": [dict(cand("1:A.esp", False, 0, None), mesh="Water/W.nif")]},
+                        {"formKey": "000801:B.esp", "candidates": [dict(cand("2:A.esp", False, 0, None), mesh="x.nif")]}]}
+        under, every = S.unreadable(d, {"000800:B.esp", "000801:B.esp"})
+        self.assertEqual(under, {"000800:B.esp": ["meshes\\Water\\W.nif"], "000801:B.esp": []})
+        self.assertEqual(every, ["meshes\\Far\\F.nif", "meshes\\Water\\W.nif"])
+
     def test_owner_split(self):
         d = report([cand("1:A.esp", True, 100, "in"), cand("2:Base.esm", True, 100, "in")])
         s = S.score_report(d, {"1:A.esp"}, reader=reader)["000800:B.esp"]

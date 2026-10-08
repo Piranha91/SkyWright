@@ -1099,6 +1099,7 @@ def report_facts(d, planes, city):
     cen = S.census(d, city, planes)
     entries = {pl["formKey"]: {k: v for k, v in pl.items() if k != "candidates"} for pl, _ in S.rows_by_plane(d)
                if pl["formKey"] in planes}
+    under, _ = S.unreadable(d, planes)
     out = {}
     for fk in planes:
         sc = sv.get(fk)
@@ -1108,7 +1109,7 @@ def report_facts(d, planes, city):
                    "score": None if sc is None else {"cityInBandPx": sum(x["inBandPx"] for x in shapes if x["owner"] == "A"),
                                                      "otherInBandPx": sum(x["inBandPx"] for x in shapes if x["owner"] != "A")},
                    "shapes": shapes, "census": cen.get(fk), "visStatus": S.vis_status(d, city, {fk}),
-                   "refusal": S.refusal(d, fk)}
+                   "refusal": S.refusal(d, fk), "unreadableUnder": under.get(fk, [])}
     return out, sorted(S.hidden_anywhere(d))
 
 
@@ -1148,7 +1149,8 @@ def score_step(g, arm, shots_file, render_out, scores_out):
                     for f in facts.values())
         row = {"label": s["label"], "arm": arm, "gaze": key, "basis": s.get("basis", "route"), "worldspace": s["worldspace"],
                "report": str(rep) if zipped else str(rep) + ".gz", "reportSha256": hashlib.sha256(raw).hexdigest(), "reportBytes": len(raw),
-               "masksKept": hides, "planes": facts, "hiddenAnywhere": anywhere}
+               "masksKept": hides, "planes": facts, "hiddenAnywhere": anywhere,
+               "unreadableAssets": S.unreadable(d, set())[1]}
         if not zipped:
             with gzip.open(str(rep) + ".gz", "wb", compresslevel=6) as fh:
                 fh.write(raw)
@@ -1206,7 +1208,7 @@ def verdicts_step(g, out, scores_root):
             row = json.loads((Path(scores_root) / arm / name).read_text(encoding="utf-8"))
             for fk, facts in row["planes"].items():
                 views[fk].append(dict(facts, gaze=row["gaze"], arm=arm, basis=row.get("basis", "route"),
-                                      hiddenAnywhere=row.get("hiddenAnywhere")))
+                                      hiddenAnywhere=row.get("hiddenAnywhere"), unreadableAssets=row.get("unreadableAssets") or []))
     rows = []
     for fk, r in sorted(rec.items()):
         ver = lambda x: None if x is None else {"position": x["pos"], "active": active(x)}

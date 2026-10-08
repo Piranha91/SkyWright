@@ -38,7 +38,9 @@ Rules (the task's Gate A section 2.5 with Piranha's D3 and D6 and the reviewer's
   6. taste (no clash): everything else; a plane that hid only non-mod content is kept in the machine record (shown False).
 Ownership is never collapsed into a total: the plane's owner comes from the records (`winners`), the content's owner
 from each shape (`owner`: "A" = the content mod's placed records), and every rule above reads shapes, not sums.
-A view without a per-shape list is decided on its totals (one pseudo-shape per owner); the basis then says
+A view where an unreadable mesh (viewprobe names it and exits 3) sits among this plane's candidate rows is unusable, like a
+rule refusal; with no usable view left the edit is cannot tell: unreadable mesh under the plane (Gate A 2.5). An unreadable
+asset elsewhere in a view is noted beside the verdict only. A view without a per-shape list is decided on its totals (one pseudo-shape per owner); the basis then says
 "totals only" and counts those views. `visStatus` is scoped to the content rows under this plane (occlscore.vis_status filters by plane), not the whole view.
 Every verdict states its basis: "taste (no clash): nothing hidden at N route views", "fixes an inter-mod clash at the N
 route views where it hid"; prior in-game poses are counted and named apart. `unjudgedShare` is the share of content rows
@@ -89,6 +91,8 @@ def _gate(edit, v):
         return "not run"
     if v.get("refusal"):
         return "refused: " + v["refusal"]
+    if v.get("unreadableUnder"):
+        return "unreadable: " + ", ".join(v["unreadableUnder"])
     return None
 
 
@@ -116,6 +120,22 @@ def _count(gz):
 
 
 def decide(edit, views):
+    """The verdict (see the module rules) with the unreadable assets stated beside it: a view where an unreadable mesh
+    sits among this plane's candidate rows is unusable and named; an unreadable asset elsewhere in a view is noted only."""
+    out = _decide(edit, views)
+    under = sorted({(v["gaze"], v["arm"], a) for v in views for a in (v.get("unreadableUnder") or [])})
+    if under and out["verdict"] != "cannot tell" or (under and not out["reason"].startswith("unreadable")):
+        gz = sorted({g for g, _, _ in under})
+        out["also"].append("%d view%s unusable: unreadable mesh under the plane (%s)"
+                           % (len(gz), "" if len(gz) == 1 else "s", ", ".join(sorted({a for _, _, a in under}))))
+    elsewhere = sorted({v["gaze"] for v in views if (v.get("unreadableAssets") or []) and not v.get("unreadableUnder")})
+    if elsewhere:
+        out["also"].append("unreadable asset elsewhere in %d view%s, noted only"
+                           % (len(elsewhere), "" if len(elsewhere) == 1 else "s"))
+    return out
+
+
+def _decide(edit, views):
     gazes = {}
     for v in views:
         gazes.setdefault(v["gaze"], {})[v["arm"]] = v
@@ -133,8 +153,11 @@ def decide(edit, views):
         usable.append(arms)
     if not usable:
         tilted = any(any(t in r for t in TILT_REFUSALS) for r in refusals)
+        rule = [r for r in refusals if r.startswith("refused: ")]
+        unread = [r for r in refusals if r.startswith("unreadable: ")]
         reason = "rule refuses a tilted plane" if tilted else (
-            "rule refuses the shape: " + refusals[0][len("refused: "):] if refusals else "no view")
+            "rule refuses the shape: " + rule[0][len("refused: "):] if rule else (
+                "unreadable mesh under the plane: " + unread[0][len("unreadable: "):] if unread else "no view"))
         return _out(edit, "cannot tell", reason, gazes, [])
     where = _where(*_count(usable))
     winner_u = (edit.get("winners") or {}).get("u")
