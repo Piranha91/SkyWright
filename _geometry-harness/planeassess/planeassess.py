@@ -872,7 +872,7 @@ def _proc_mem_mib(pid):
 
 def render_step(g, arm, shots_file, out, viewprobe, instance, game, caps, need_free_mib, lock, pause,
                 no_reuse=False, chunk=9, exempt=(), probe_commit_mib=None, fallback_chunk=3, memory_mode="full",
-                constrained_need_mib=None, constrained_heap_mib=None):
+                constrained_need_mib=None, constrained_heap_mib=None, constrained_chunk=1):
     """Render the listed gazes in one arm, one viewprobe process per chunk (same cell, at most `chunk` shots), one
     process at a time. Before each chunk: the PAUSE file stops the block, free RAM must be at least `need_free_mib`,
     no other heavy process may run. During it: the campaign caps (process commit, system floor, graphics used) stop
@@ -925,9 +925,10 @@ def render_step(g, arm, shots_file, out, viewprobe, instance, game, caps, need_f
                 print("refusing: this view needs about %d MiB of free memory (%s mode) and %d MiB is free."
                       % (need or constrained_need_mib or need_free_mib, mode, free.free_mib), flush=True)
                 break
-            if mode == "constrained" and len(todo) > 1:
-                chunks[n + 1:n + 1] = [[s] for s in todo[1:]]
-                todo = todo[:1]
+            if mode == "constrained" and len(todo) > constrained_chunk:
+                rest = todo[constrained_chunk:]
+                chunks[n + 1:n + 1] = [rest[i:i + constrained_chunk] for i in range(0, len(rest), constrained_chunk)]
+                todo = todo[:constrained_chunk]
             tag = "%s-%s-%s-%s-%d" % (g["name"], arm, todo[0]["worldspace"], todo[0]["cell"].replace(":", "_"),
                                       int(time.time()))
             dest = out / tag
@@ -941,7 +942,7 @@ def render_step(g, arm, shots_file, out, viewprobe, instance, game, caps, need_f
             argv = [str(exe), str(wl), "--instance", instance, "--profile", profile, "--game", game, "--order", str(order),
                     "--planes-report", "--occlusion-rule", str(g["_rel"](g["rule"])), "--size", "1200", "--msaa", "0",
                     "--visibility-budget", "4096", "--out", str(dest)] + (["--no-reuse-cell"] if no_reuse else [])
-            peak = {"commitMiB": 0.0, "workingSetMiB": 0.0}
+            peak = {"commitMiB": 0.0, "workingSetMiB": 0.0, "graphicsUsedMiB": 0.0}
             caps_obs = cap_observer(lambda pid: _proc_mem_mib(pid)[0], caps[0], system_reader=read_system_free,
                                     system_available_floor_mib=caps[1], graphics_reader=read_graphics_free,
                                     graphics_used_cap_mib=caps[2])
@@ -952,6 +953,9 @@ def render_step(g, arm, shots_file, out, viewprobe, instance, game, caps, need_f
                     if c is not None:
                         peak["commitMiB"] = max(peak["commitMiB"], c)
                         peak["workingSetMiB"] = max(peak["workingSetMiB"], w)
+                    gr = read_graphics_free()
+                    if gr.ok and gr.total_mib is not None and gr.free_mib is not None:
+                        peak["graphicsUsedMiB"] = max(peak["graphicsUsedMiB"], gr.total_mib - gr.free_mib)
                 return caps_obs(ev)
             t0 = time.time()
             env = {"DOTNET_GCHeapHardLimit": hex(int(constrained_heap_mib) << 20)} if mode == "constrained" and constrained_heap_mib else {}
@@ -961,6 +965,7 @@ def render_step(g, arm, shots_file, out, viewprobe, instance, game, caps, need_f
             row = {"chunk": tag, "shots": [s["label"] for s in todo], "exitCode": res.get("exitCode"),
                    "stopped": res.get("stopped"), "seconds": secs, "secondsPerShot": round(secs / len(todo), 1),
                    "peakCommitMiB": round(peak["commitMiB"]), "peakWorkingSetMiB": round(peak["workingSetMiB"]),
+                   "peakGraphicsUsedMiBWholeGpu": round(peak["graphicsUsedMiB"]),
                    "freeAtStartMiB": round(free.free_mib), "memoryMode": mode, "heapLimitMiB": constrained_heap_mib if env else None,
                    **ident, "at": time.strftime("%H:%M:%S")}
             with ledger.open("a", encoding="utf-8") as fh:
@@ -1156,6 +1161,7 @@ def main(argv=None):
                    help="full, constrained (one shot per process, capped heap) or auto (picked from free memory)")
     a.add_argument("--constrained-need-mib", type=float, help="free RAM the constrained mode needs before a shot")
     a.add_argument("--constrained-heap-mib", type=float, help="managed heap cap per process in the constrained mode")
+    a.add_argument("--constrained-chunk", type=int, default=1, help="shots per process in the constrained mode (default 1)")
     a.add_argument("--exempt", action="append", default=[], help="process path that does not count as busy (repeat)")
     a = sub.add_parser("score", help="step 4: score rendered reports of one arm, then gzip them and thin their masks")
     a.add_argument("--group", required=True, help="group definition JSON")
@@ -1195,7 +1201,7 @@ def main(argv=None):
         n = render_step(g, args.arm, args.shots, args.render_out, args.viewprobe, args.instance, args.game, caps,
                         args.need_free_mib, args.heavy_lock, args.pause, args.no_reuse_cell, args.chunk, args.exempt,
                         args.probe_commit_mib, args.fallback_chunk, args.memory_mode, args.constrained_need_mib,
-                        args.constrained_heap_mib)
+                        args.constrained_heap_mib, args.constrained_chunk)
         print("rendered", n)
         return 0
     return stations_step(g, args.viewprobe, args.work, args.copy_to, args.instance, args.game, args.only,
