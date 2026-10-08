@@ -905,6 +905,7 @@ def render_step(g, arm, shots_file, out, viewprobe, instance, game, caps, need_f
     Path(lock).write_text(json.dumps({"pid": os.getpid(), "purpose": "planeassess render %s %s" % (g["name"], arm),
                                       "at": time.strftime("%Y-%m-%d %H:%M:%S %Z")}), encoding="utf-8")
     ledger, done, failed = out / "ledger.jsonl", 0, []
+    oom, retries, force_full = [], [], set()
     try:
         n = -1
         while n + 1 < len(chunks):
@@ -918,7 +919,9 @@ def render_step(g, arm, shots_file, out, viewprobe, instance, game, caps, need_f
                 print("refusing chunk %d: busy %s, free memory unread %s" % (n, busy, free.reason))
                 break
             mode = memory_mode
-            if mode == "auto":
+            if id(todo) in force_full:
+                mode = "full"
+            elif mode == "auto":
                 mode = "full" if free.free_mib >= need_free_mib else "constrained"
             need = need_free_mib if mode == "full" else constrained_need_mib
             if need is None or free.free_mib < need:
@@ -972,6 +975,26 @@ def render_step(g, arm, shots_file, out, viewprobe, instance, game, caps, need_f
                 fh.write(json.dumps(row) + "\n")
             print(json.dumps(row), flush=True)
             done += len(todo)
+            logs = sorted((out / "logs").glob("*%s*" % tag), key=lambda f: f.stat().st_mtime)
+            # a heap-cap refusal in auto mode is retried once; a retry that refuses again is recorded, not retried
+            if env and memory_mode == "auto" and res.get("exitCode") not in (0, 3) and logs and out_of_memory(logs[-1]) \
+                    and not any(x.get("_retry") for x in todo):
+                retry_full = read_system_free().free_mib >= need_free_mib
+                again = [todo] if retry_full else [todo[i:i + 3] for i in range(0, len(todo), 3)]
+                for c in again:
+                    c_marked = [dict(x, _retry="heap-cap Out of memory in %s; retried %s" % (
+                        tag, "uncapped" if retry_full else "capped at 3 shots")) for x in c]
+                    retries.append((c_marked, retry_full))
+                oom.append(tag)
+                done -= len(todo)
+                with ledger.open("a", encoding="utf-8") as fh:
+                    fh.write(json.dumps({"chunk": tag, "event": "heap-cap Out of memory", "retry": "uncapped" if retry_full
+                                         else "capped at 3 shots", "at": time.strftime("%H:%M:%S")}) + "\n")
+                chunks[n + 1:n + 1] = [c for c, _ in retries[-len(again):]]
+                for c, full_ok in retries[-len(again):]:
+                    if full_ok:
+                        force_full.add(id(c))
+                continue
             if res.get("stopped") or res.get("exitCode") not in (0, 3):
                 failed.append(tag)
                 print("chunk %s: stopped %s, exit %s; recorded, continuing" % (tag, res.get("stopped"), res.get("exitCode")),
@@ -991,7 +1014,8 @@ def render_step(g, arm, shots_file, out, viewprobe, instance, game, caps, need_f
                           % (peak["commitMiB"], probe_commit_mib, ws, len(rest), fallback_chunk), flush=True)
     finally:
         Path(lock).unlink(missing_ok=True)
-    print("chunks %d, stopped or failed %d: %s" % (len(chunks), len(failed), failed), flush=True)
+    print("chunks %d, stopped or failed %d: %s; heap-cap Out of memory %d: %s" % (len(chunks), len(failed), failed,
+                                                                                  len(oom), oom), flush=True)
     return done
 
 
@@ -1070,6 +1094,32 @@ def score_step(g, arm, shots_file, render_out, scores_out):
     return done
 
 
+def unrendered_verdict(why, kind, box_label=None):
+    """The verdict of a plane record no rendered gaze sees, from the scope step's named reason: a change viewprobe does
+    not read for culling is decided from the records (set aside: no change to what is culled); a rule refusal of a tilted
+    shape reads 'rule refuses a tilted plane'; anything else stays cannot tell with its reason."""
+    why = why or "no rendered view"
+    if why.startswith("no change to the culling shape"):
+        return {"verdict": "set aside", "reason": "no change to what is culled (records)",
+                "statement": "set aside: no change to what is culled (%s)" % why.split("(", 1)[1].rstrip(")"),
+                "shown": True, "basis": None, "unjudgedShare": None, "boxLabel": box_label if kind == "Box" else None, "also": []}
+    if why.startswith("rule refuses the shape at every gaze"):
+        refs = why.split(": ", 1)[1]
+        why = "rule refuses a tilted plane" if ("tilted" in refs or "not upright" in refs) else "rule refuses the shape: " + refs
+    return {"verdict": "cannot tell", "reason": why, "statement": "cannot tell: " + why, "shown": True, "basis": None,
+            "unjudgedShare": None, "boxLabel": box_label if kind == "Box" else None, "also": []}
+
+
+def out_of_memory(log_path):
+    """A heap-cap refusal in a run's log: viewprobe's "Out of memory." or a .NET OutOfMemoryException (a capped heap
+    refused while reading plugins, seen 2026-10-08 at a 512 MiB cap)."""
+    try:
+        t = Path(log_path).read_text(encoding="utf-8", errors="replace")
+        return "Out of memory." in t or "OutOfMemoryException" in t
+    except OSError:
+        return False
+
+
 # ------------------------------------------------------------------ step 5: a verdict per plane edit
 def verdicts_step(g, out, scores_root):
     """Decide every plane record the patch carries from the arm score files (<scores_root>/u, /p): one entry per record
@@ -1098,12 +1148,7 @@ def verdicts_step(g, out, scores_root):
         if vs:
             d = V.decide(edit, vs)
         else:   # never rendered: the scope step's named reason (a refused shape, no station, no change)
-            why = scope_why.get(fk) or "no rendered view"
-            if why.startswith("rule refuses the shape at every gaze"):
-                refs = why.split(": ", 1)[1]
-                why = "rule refuses a tilted plane" if ("tilted" in refs or "not upright" in refs) else "rule refuses the shape: " + refs
-            d = {"verdict": "cannot tell", "reason": why, "statement": "cannot tell: " + why, "shown": True, "basis": None,
-                 "unjudgedShare": None, "boxLabel": V.BOX_LABEL if r["kind"] == "Box" else None, "also": []}
+            d = unrendered_verdict(scope_why.get(fk), r["kind"], V.BOX_LABEL)
         rows.append({"formKey": fk, "worldspace": r["worldspace"], "kind": r["kind"], "class": r["class"], "edits": r["edits"],
                      "priorOwner": r["priorOwner"], **d, "gazes": sorted({v["gaze"] for v in vs})})
     doc = {"schema": "planeassess/planes/1", "group": g["name"], "gazesBothArms": len(both),

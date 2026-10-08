@@ -114,6 +114,9 @@ class OutOfMemory(unittest.TestCase):
             f = Path(d) / "x.log"
             f.write_text("rendering\nOut of memory.\n", encoding="utf-8")
             self.assertTrue(pa.out_of_memory(f))
+            f.write_text("System.OutOfMemoryException: Exception of type 'System.OutOfMemoryException' was thrown.",
+                         encoding="utf-8")
+            self.assertTrue(pa.out_of_memory(f))
             f.write_text("rendering\ndone\n", encoding="utf-8")
             self.assertFalse(pa.out_of_memory(f))
 
