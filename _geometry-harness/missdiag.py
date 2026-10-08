@@ -15,6 +15,7 @@ Frozen rules, in brief:
 - representatives: the lowest formKey (ordinal); a cluster of 10 or more edits adds the highest.
 - rendering: per group, clusters in descending edit count until >= 80 % of the group's category-5 edits are covered.
 - reason procedure: assign_reason's docstring.
+- a record no built manifest holds enabled: absence_blocker's docstring (checks the load-time enable state first).
 """
 
 import json
@@ -178,12 +179,30 @@ def assign_reason(ev):
     raise ValueError("assign_reason: trace outcome %r has no rule here; the caller must read it" % (outcome,))
 
 
+LOAD_ENABLE = ("enabled", "disabled", None)
+
+
 def absence_blocker(states, load_enable=None):
     """One blocker sentence for a record that no built manifest holds enabled, or None when one does.
-    states: {manifest key: 'enabled' | 'absent' (in that manifest, not enabled) | 'not in manifest'}."""
+    states: {manifest key: 'enabled' | 'absent' (in that manifest, not enabled) | 'not in manifest'}.
+    load_enable: the record's load-time enable state in the unpatched order, read from the records (winning flag and
+    enable chain): 'enabled', 'disabled', or None when not read. It is checked before any reason is named, because a
+    manifest scoped to the responsible pair leaves out an enabled reference whose responsible plugin is outside the pair:
+      'enabled'  -> outside the responsible-pair manifest (enabled at load; not measured against the pair)
+      'disabled' -> not enabled in any built manifest: disabled at load
+      None       -> absent from every built manifest; the load-time enable state was not read
+    Any other value raises."""
+    if load_enable not in LOAD_ENABLE:
+        raise ValueError("absence_blocker: load_enable must be 'enabled', 'disabled' or None; got %r" % (load_enable,))
     if any(v == "enabled" for v in states.values()):
         return None
-    return "not enabled in any built manifest (" + "/".join(sorted(states)) + ")"
+    where = "/".join(sorted(states))
+    if load_enable == "enabled":
+        return ("outside the responsible-pair manifest (%s): a reference enabled at load, not measured against the pair"
+                % where)
+    if load_enable == "disabled":
+        return "not enabled in any built manifest (%s): disabled at load" % where
+    return "absent from every built manifest (%s); its load-time enable state was not read" % where
 
 
 def miss_table(clusters):
