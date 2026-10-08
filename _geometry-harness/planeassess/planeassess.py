@@ -1072,6 +1072,8 @@ def verdicts_step(g, out, scores_root):
     Only edited planes are scored in the block, so `missed` (unedited planes) is not computed here."""
     import verdict as V
     rec = {r["formKey"]: r for r in json.loads((Path(out) / "patch.json").read_text(encoding="utf-8"))["records"]}
+    scope_why = {r["formKey"]: r["outsideReason"] for r in
+                 json.loads((Path(out) / "scope.json").read_text(encoding="utf-8"))["planes"] if r.get("outsideReason")}
     owners = g["owners"]
     views = defaultdict(list)
     have = {arm: {f.name for f in (Path(scores_root) / arm).glob("*.json")} for arm in ("u", "p")}
@@ -1088,9 +1090,15 @@ def verdicts_step(g, out, scores_root):
         edit = {"formKey": fk, "class": r["class"], "edits": r["edits"], "kind": r["kind"], "owners": owners,
                 "winners": {"u": r["priorOwner"], "p": owners["patch"]}, "versions": {"u": ver(r["u"]), "p": ver(r["p"])}}
         vs = views.get(fk, [])
-        d = V.decide(edit, vs) if vs else {"verdict": "cannot tell", "reason": "no rendered view", "statement":
-                                           "cannot tell: no rendered view", "shown": True, "basis": None,
-                                           "unjudgedShare": None, "boxLabel": None, "also": []}
+        if vs:
+            d = V.decide(edit, vs)
+        else:   # never rendered: the scope step's named reason (a refused shape, no station, no change)
+            why = scope_why.get(fk) or "no rendered view"
+            if why.startswith("rule refuses the shape at every gaze"):
+                refs = why.split(": ", 1)[1]
+                why = "rule refuses a tilted plane" if ("tilted" in refs or "not upright" in refs) else "rule refuses the shape: " + refs
+            d = {"verdict": "cannot tell", "reason": why, "statement": "cannot tell: " + why, "shown": True, "basis": None,
+                 "unjudgedShare": None, "boxLabel": V.BOX_LABEL if r["kind"] == "Box" else None, "also": []}
         rows.append({"formKey": fk, "worldspace": r["worldspace"], "kind": r["kind"], "class": r["class"], "edits": r["edits"],
                      "priorOwner": r["priorOwner"], **d, "gazes": sorted({v["gaze"] for v in vs})})
     doc = {"schema": "planeassess/planes/1", "group": g["name"], "gazesBothArms": len(both),
