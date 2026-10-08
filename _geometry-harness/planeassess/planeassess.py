@@ -898,7 +898,7 @@ def render_step(g, arm, shots_file, out, viewprobe, instance, game, caps, need_f
         raise SystemExit("refusing: %s exists" % lock)
     Path(lock).write_text(json.dumps({"pid": os.getpid(), "purpose": "planeassess render %s %s" % (g["name"], arm),
                                       "at": time.strftime("%Y-%m-%d %H:%M:%S %Z")}), encoding="utf-8")
-    ledger, done = out / "ledger.jsonl", 0
+    ledger, done, failed = out / "ledger.jsonl", 0, []
     try:
         n = -1
         while n + 1 < len(chunks):
@@ -948,9 +948,10 @@ def render_step(g, arm, shots_file, out, viewprobe, instance, game, caps, need_f
                 fh.write(json.dumps(row) + "\n")
             print(json.dumps(row), flush=True)
             done += len(todo)
-            if res.get("stopped"):
-                print("stopped by %s; ending the block" % res.get("stopped"))
-                break
+            if res.get("stopped") or res.get("exitCode") not in (0, 3):
+                failed.append(tag)
+                print("chunk %s: stopped %s, exit %s; recorded, continuing" % (tag, res.get("stopped"), res.get("exitCode")),
+                      flush=True)
             ws = todo[0]["worldspace"]
             if probe_commit_mib and ws not in probed and len(todo) > fallback_chunk:
                 probed.add(ws)
@@ -966,6 +967,7 @@ def render_step(g, arm, shots_file, out, viewprobe, instance, game, caps, need_f
                           % (peak["commitMiB"], probe_commit_mib, ws, len(rest), fallback_chunk), flush=True)
     finally:
         Path(lock).unlink(missing_ok=True)
+    print("chunks %d, stopped or failed %d: %s" % (len(chunks), len(failed), failed), flush=True)
     return done
 
 

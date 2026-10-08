@@ -151,3 +151,31 @@ def vis_status(report, city_keys, planes):
             else:
                 c["assessedZero"] += 1
     return dict(c)
+
+
+# viewprobe's plane-level rule refusals (ShapeOcclusion.Shadow, PortalBoxOrientation): the hidden-content test refused
+RULE_REFUSALS = ("engine rule unconfigured", "Box face behavior unassessed", "invalid plane bounds or scale",
+                 "box orientation outside the supplied rule's evidence scope",
+                 "no box view shadow", "near-eye behavior unassessed", "degenerate plane or camera",
+                 "plane orientation outside the supplied rule's evidence scope",
+                 "horizontal PortalBox with its normal up", "horizontal PortalBox seen from below")
+
+
+def refusal(report, plane):
+    """The rule's refusal for one plane at this view: the rule-refusal text when every candidate row of the plane is
+    `unassessed: ...` and at least one names a rule refusal (rows the renderer cannot judge carry their own shape-level
+    reasons beside it), else None (no rows, or some row's relation was assessed)."""
+    d = report if isinstance(report, dict) else load_report(report)
+    for pl, candidates in rows_by_plane(d):
+        if pl["formKey"] != plane:
+            continue
+        texts = set()
+        for c in candidates:
+            rel = str(c.get("relation") or "")
+            if not rel.startswith("unassessed: "):
+                return None
+            t = rel[len("unassessed: "):]
+            if any(t.startswith(r) for r in RULE_REFUSALS):
+                texts.add(t)
+        return sorted(texts)[0] if texts else None
+    return None
