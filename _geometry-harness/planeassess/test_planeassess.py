@@ -1,6 +1,8 @@
 """Known answers for planeassess's records steps: edit kinds, record classes, the shape difference and the
 geometry self-test. python -B -m pytest scripts/planeassess/test_planeassess.py (or run it directly)."""
 import copy
+import json
+import os
 import math
 import struct
 import sys
@@ -144,6 +146,54 @@ class Reader(unittest.TestCase):
                          ("000800:Patch.esp", "000017:Skyrim.esm", "00003C:Skyrim.esm", "00ABCD:Skyrim.esm"))
         self.assertEqual((pa.kind_of(r), r["prim"]["bounds"], r["pos"]), ("PortalBox", [10.0, 1.0, 20.0], [1.0, 2.0, 3.0]))
 
+
+
+class Resume(unittest.TestCase):
+    IDENT = {"viewprobeDll": "v1", "coreDll": "c1", "rule": "r1", "order": "o1", "arm": "u"}
+
+    def _out(self, d, rows, reports):
+        out = Path(d)
+        with (out / "ledger.jsonl").open("w", encoding="utf-8") as fh:
+            for r in rows:
+                fh.write(json.dumps(r) + "\n")
+        for chunk, key, gz in reports:
+            (out / chunk).mkdir(exist_ok=True)
+            (out / chunk / ("cell-c1s1-%s-fp-planes.json%s" % (key, ".gz" if gz else ""))).write_text("{}", encoding="utf-8")
+        return out
+
+    def test_finished_shots_with_the_same_identity_are_skipped(self):
+        with tempfile.TemporaryDirectory() as d:
+            out = self._out(d, [dict(self.IDENT, chunk="c1", shots=["G-A-1", "G-A-2"], exitCode=0, stopped=None),
+                                dict(self.IDENT, chunk="c2", shots=["G-B-1"], exitCode=3, stopped=None)],
+                            [("c1", "G_A_1", True), ("c1", "G_A_2", False), ("c2", "G_B_1", False)])
+            self.assertEqual(pa.done_shots(out, self.IDENT), {"G-A-1", "G-A-2", "G-B-1"})
+
+    def test_partial_or_foreign_chunks_are_rendered_again(self):
+        with tempfile.TemporaryDirectory() as d:
+            out = self._out(d, [dict(self.IDENT, chunk="c1", shots=["G-A-1", "G-A-2"], exitCode=0, stopped=None),
+                                dict(self.IDENT, chunk="c2", shots=["G-B-1"], exitCode=None, stopped="deadline"),
+                                dict(self.IDENT, chunk="c3", shots=["G-C-1"], exitCode=0, stopped=None, viewprobeDll="v0"),
+                                {"chunk": "c1", "event": "heap-cap Out of memory"}],
+                            [("c1", "G_A_1", True), ("c2", "G_B_1", False), ("c3", "G_C_1", False)])
+            self.assertEqual(pa.done_shots(out, self.IDENT), {"G-A-1"})   # G-A-2's report is missing
+
+
+class Lock(unittest.TestCase):
+    def test_stale_lock_is_named_with_its_pid(self):
+        with tempfile.TemporaryDirectory() as d:
+            lk = Path(d) / "HEAVY-LOCK"
+            lk.write_text(json.dumps({"pid": 999999991, "purpose": "x"}), encoding="utf-8")
+            msg = pa.lock_problem(lk)
+            self.assertIn("999999991", msg)
+            self.assertIn("stale", msg)
+            self.assertIn("by hand", msg)
+
+    def test_live_lock_and_no_lock(self):
+        with tempfile.TemporaryDirectory() as d:
+            lk = Path(d) / "HEAVY-LOCK"
+            self.assertIsNone(pa.lock_problem(lk))
+            lk.write_text(json.dumps({"pid": os.getpid(), "purpose": "x"}), encoding="utf-8")
+            self.assertIn("held by running pid %d" % os.getpid(), pa.lock_problem(lk))
 
 if __name__ == "__main__":
     unittest.main()
