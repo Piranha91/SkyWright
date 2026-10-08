@@ -163,6 +163,11 @@ public sealed class OverlapIndex
     public Dictionary<FormKey, string> BaseMesh { get; } = new();
     /// <summary>An armour's FEMALE ground model where the record gives one (BaseMesh holds the male) — G1 build list row 2.</summary>
     public Dictionary<FormKey, string> BaseMeshFemale { get; } = new();
+    /// <summary>base record -> its model's alternate textures (MODL alternate texture entries: 3D shape name, 3D index, texture set),
+    /// winner wins; absent when the winning record has none. Read by the visible-crossing measure (texture alpha).</summary>
+    public Dictionary<FormKey, List<(string Name, int Index, FormKey TextureSet)>> BaseAlternateTextures { get; } = new();
+    /// <summary>texture set (TXST) -> its diffuse path as given, winner wins (null when the winning record names none).</summary>
+    public Dictionary<FormKey, string?> TextureSetDiffuse { get; } = new();
     /// <summary>base record -> OBND extents (|second − first| per axis).</summary>
     public Dictionary<FormKey, Vec3> BaseObnd { get; } = new();
     /// <summary>The latest record/runtime pose for each reference, including rotation-only and scale-only overrides.
@@ -287,12 +292,19 @@ public sealed class OverlapIndex
     public bool IsDeletedWithout(FormKey key, int mover, IReadOnlyList<HashSet<int>> closure)
         => Deletions.Without(key, mover, closure);
 
+    void NoteAlternates(FormKey key, IReadOnlyList<IAlternateTextureGetter>? alternates)
+    {
+        if (alternates is not { Count: > 0 }) { BaseAlternateTextures.Remove(key); return; }
+        BaseAlternateTextures[key] = alternates.Select(a => (a.Name ?? "", a.Index, a.NewTexture.FormKey)).ToList();
+    }
+
     /// <summary>Read one plugin, in load order: placements into the history and winning base-record names/meshes.</summary>
     public void Ingest(int plugin, ISkyrimModGetter mod)
     {
         foreach (var rec in mod.EnumerateMajorRecords())
         {
             Bos?.Note(rec);
+            if (rec is ITextureSetGetter txst) { TextureSetDiffuse[txst.FormKey] = txst.Diffuse?.GivenPath is { Length: > 0 } dp ? dp : null; continue; }
             // Every placed record states whether it is deleted, whether or not it kept its placement — that is what
             // makes a later restoration expressible at all (Q34).
             if (rec is IPlacedGetter pg) { Deletions.Note(plugin, pg.FormKey, pg.IsDeleted, pg.Placement is not null); continue; }
@@ -311,6 +323,7 @@ public sealed class OverlapIndex
                 string? male = ar.WorldModel?.Male?.Model?.File is { } mf0 && !string.IsNullOrWhiteSpace(mf0.GivenPath) ? mf0.GivenPath : null;
                 string? female = ar.WorldModel?.Female?.Model?.File is { } ff0 && !string.IsNullOrWhiteSpace(ff0.GivenPath) ? ff0.GivenPath : null;
                 if ((male ?? female) is { } any) BaseMesh[ar.FormKey] = any; else BaseMesh.Remove(ar.FormKey);
+                NoteAlternates(ar.FormKey, male is not null ? ar.WorldModel?.Male?.Model?.AlternateTextures : ar.WorldModel?.Female?.Model?.AlternateTextures);
                 if ((female ?? male) is { } anyF) BaseMeshFemale[ar.FormKey] = anyF; else BaseMeshFemale.Remove(ar.FormKey);
                 if ((ar.MajorRecordFlagsRaw & EnableState.IsMarkerFlag) != 0) BaseIsMarker.Add(ar.FormKey); else BaseIsMarker.Remove(ar.FormKey);
                 if (ar.ObjectBounds is { } ab)
@@ -333,6 +346,7 @@ public sealed class OverlapIndex
                 BaseInfo[sm.FormKey] = (rec.GetType().Name.Replace("BinaryOverlay", ""), sm.EditorID);
                 if (mo.Model?.File is { } mf && !string.IsNullOrWhiteSpace(mf.GivenPath)) BaseMesh[sm.FormKey] = mf.GivenPath;
                 else BaseMesh.Remove(sm.FormKey);
+                NoteAlternates(sm.FormKey, mo.Model?.AlternateTextures);
                 if ((sm.MajorRecordFlagsRaw & EnableState.IsMarkerFlag) != 0) BaseIsMarker.Add(sm.FormKey); else BaseIsMarker.Remove(sm.FormKey);
                 if (rec is IObjectBoundedGetter ob && ob.ObjectBounds is { } bnd)
                     BaseObnd[sm.FormKey] = new Vec3(MathF.Abs(bnd.Second.X - bnd.First.X),

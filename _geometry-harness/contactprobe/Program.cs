@@ -49,6 +49,10 @@ using HousecarlCore.Progress;
 //                          crossing length (an interval), coplanar areas (same-facing = z-fighting, opposite-facing =
 //                          resting contact) and the area buried in the other member when it is a closed solid; render
 //                          triangles tagged by material (only opaque x opaque may decide), collision separately
+//   --alpha-visibility     with --surface: a render pair whose crossing lies on an alpha-tested / alpha-blended triangle gains a
+//                          visibility block: the part of the crossing curve through drawn texels of both members (texture alpha,
+//                          mip 0, bilinear; VFS winner textures, base-record alternate texture sets applied), and a swept witness
+//                          whose crossing is not opaque x opaque gains visibleMotion; without the flag the file is unchanged
 //   --live-pose MODE       with --surface: blanket (default; any controller on a shape's node chain, a skin, a switch
 //                          node or a behaviour graph refuses) or targeted (refuses only what the file shows moving the
 //                          shape: a skin, a switch node, a sequence's or controller's transform on its node chain, or a
@@ -73,7 +77,7 @@ using HousecarlCore.Progress;
 // usage: contactprobe [--list N] [--eps U] [--reach U] [--json FILE] [--emit FILE] [--base EMIT] [--all-rows] [--interior-only]
 //                     [--absolute] [--labelled-mover X.esp] [--overlap-json FILE]
 //                     [--contact-evidence] [--contact-budget-seconds 1200] [--pair-budget-seconds 120] [--contact-max-pairs 128]
-//                     [--volume FILE] [--surface FILE [--live-pose blanket|targeted]] [--motion off|swept|pose:NAME [--motion-delta U] [--motion-budget N]]
+//                     [--volume FILE] [--surface FILE [--live-pose blanket|targeted] [--alpha-visibility]] [--motion off|swept|pose:NAME [--motion-delta U] [--motion-budget N]]
 //                     [--only A.esm,B.esm,...] [--vanilla-assets] [--bos on|off]
 //                     [--enable X.esp]* [--disable X.esp]* [--instance DIR] [--game DIR] [--profile NAME]
 //   POPULATION      the LOAD-TIME state, and it always has been (R1, 2026-09-03): a reference exists in an arm when its
@@ -113,7 +117,8 @@ contactprobe: placement contact and explicit render-surface pair review
   --anchor OUTPUT (with --overlap-json): member A is an anchor (marker, idle marker, placed actor, furniture entry), B a
     partner: point, line and body readings of the actor at the anchor against B's opaque render surface, the body deciding
   --surface OUTPUT (with --overlap-json): crossing length, coplanar areas and buried area per pair, render and collision
-    separately; --live-pose blanket|targeted chooses the live-pose rule (default targeted)
+    separately; --live-pose blanket|targeted chooses the live-pose rule (default targeted); --alpha-visibility adds the visible
+    part of an alpha crossing (texture alpha along the crossing curve) to each such render pair
   --motion off|swept|pose:NAME (with --surface/--volume; swept also with --anchor): measure a moving member against its motion
     instead of refusing it (a NiPathInterpolator member: a tube around its path, never or cannot_tell); --motion-delta U and
     --motion-budget N tune the swept sampling (default 0.5 u, 4096)
@@ -155,6 +160,7 @@ string? orderFile = null;
 string? boxContactOut = null;   // --box-contact FILE (with --overlap-json): does a supplied world box meet a member's render surface (lane 3b)
 string? traceOut = null, traceKeysPath = null, volumeOut = null, surfaceOut = null, anchorOut = null;   // --surface FILE: measured surface contact (with --overlap-json); --anchor FILE: the anchor body test (G1 build list row 2)
 LivePosePolicy? livePose = null;
+bool alphaVisibility = false;   // --alpha-visibility (with --surface): texture alpha along alpha crossings (Stage D)
 string? motionSpec = null; double? motionDelta = null; int? motionBudget = null;   // --live-pose blanket|targeted (with --surface)
    // --volume FILE: measured overlap volume (with --overlap-json)   // --trace FILE [--trace-keys FILE]: the per-object trace side file (default pass only)
 string NeedValue(int index, string flag)
@@ -208,6 +214,7 @@ try
             };
             i++;
         }
+        else if (flag == "--alpha-visibility") alphaVisibility = true;
         else if (flag == "--motion") { motionSpec = NeedValue(i, flag); i++; }
         else if (flag == "--motion-delta") { motionDelta = double.Parse(NeedValue(i, flag), System.Globalization.CultureInfo.InvariantCulture); i++; }
         else if (flag == "--motion-budget") { motionBudget = int.Parse(NeedValue(i, flag), System.Globalization.CultureInfo.InvariantCulture); i++; }
@@ -264,6 +271,7 @@ if (surfaceOut is not null && overlapJson is null) { Console.Error.WriteLine("--
 if (anchorOut is not null && overlapJson is null) { Console.Error.WriteLine("--anchor is valid only with --overlap-json INPUT"); return 2; }
 if (boxContactOut is not null && overlapJson is null) { Console.Error.WriteLine("--box-contact is valid only with --overlap-json INPUT"); return 2; }
 if (livePose is not null && surfaceOut is null) { Console.Error.WriteLine("--live-pose is valid only with --surface OUTPUT"); return 2; }
+if (alphaVisibility && surfaceOut is null) { Console.Error.WriteLine("--alpha-visibility is valid only with --surface OUTPUT"); return 2; }
 if (traceKeysPath is not null && traceOut is null) { Console.Error.WriteLine("--trace-keys requires --trace OUTPUT"); return 2; }
 MotionReview.Options? motionOptions;
 try { motionOptions = MotionReview.Parse(motionSpec, motionDelta, motionBudget); }
@@ -563,7 +571,8 @@ if (overlapJson is not null)
         // --surface: a separate file after the unchanged pair review and volume (patch-miss packet, session 6).
         if (surfaceOut is not null)
             OverlapSurfaceReview.Run(overlapJson, surfaceOut, livePose ?? LivePoseDefault.Policy, assets, idx, cidx.Arms,
-                cfg.Identity("load-time", cidx.State?.Name ?? "baseline"), idx.WinningGeometryPose, motionCache);
+                cfg.Identity("load-time", cidx.State?.Name ?? "baseline"), idx.WinningGeometryPose, motionCache,
+                alphaVisibility ? new AlphaVisibility(assets, idx) : null);
         // --anchor: a separate file (G1 build list, Stage A, row 2): member A is the anchor, B the partner.
         if (anchorOut is not null)
             AnchorReview.Run(overlapJson, anchorOut, assets, idx, cidx.Arms,

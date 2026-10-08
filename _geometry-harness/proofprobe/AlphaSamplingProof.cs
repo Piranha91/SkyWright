@@ -12,7 +12,7 @@ using NiflySharp.Structs;
 /// (<see cref="Oracle"/>: bilinear alpha by its definition at 400,000 midpoints — a different method from the per-cell root solving
 /// the code uses). Each case names the wrong answer it rejects. "Fixture control" cases hold on the base; every other case is red until
 /// SurfaceVisibility / SurfaceTexcoords / TextureAlpha / SweptGeometry.ContactVisible are implemented.</summary>
-static class AlphaSamplingProof
+static partial class AlphaSamplingProof
 {
     const double Tol = 1e-6;
     static bool Near(double? v, double want, double tol = Tol) => v is { } x && Math.Abs(x - want) <= Math.Max(Math.Abs(want) * tol, tol);
