@@ -354,6 +354,11 @@ def test_o6_plane_records_are_recognised():
     assert not M.is_plane_record("0ABCDE:Some.esp", None)
 
 
+def test_o7_occlusion_does_not_fix_is_a_measured_reason():
+    r = M.assign_reason(_occ("does not fix", "does not fix: still hides 400 px of the content mod's content (u 100 px) at 1 route view"))
+    assert (r["reason"], r["evidenceType"]) == ("does not fix", "check") and "does not fix" in M.REASONS, r
+
+
 def main():
     tests = [(n, f) for n, f in sorted(globals().items()) if n.startswith("test_") and callable(f)]
     for n, f in tests:
