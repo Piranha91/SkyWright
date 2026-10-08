@@ -788,6 +788,151 @@ def scope_step(g, out, patch_doc=None):
         return doc
 
 
+# ------------------------------------------------------------------ step 3: render the kept gazes
+def shots_step(g, out, per_worldspace=None, include=(), only=None):
+    """The render list: every kept gaze where a target plane is decidable (or, with `per_worldspace`, the N such gazes
+    of each worldspace's busiest cell, for a timed sample), plus any `include`d `station:gazeKind`. Cells come from
+    each station set's route.poses.json."""
+    scope = json.loads((Path(out) / "scope.json").read_text(encoding="utf-8"))
+    tf = None
+    if g.get("expectedEdits"):
+        tf = {e["formKey"] for e in json.loads(Path(g["_rel"](g["expectedEdits"])).read_text(encoding="utf-8"))
+              if e.get("target", True)}
+    cells = {}
+    for w in g["worldspaces"].values():
+        poses = json.loads((Path(g["_rel"](w["stations"])).parent / "route.poses.json").read_text(encoding="utf-8"))["poses"]
+        cells.update({p["stationId"]: p["cell"] for p in poses if p.get("accepted")})
+    rows = []
+    for k in scope["keptGazes"]:
+        tag = "%s:%s" % (k["stationId"], k["gaze"])
+        good = any(pl["decidable"] and (tf is None or pl["formKey"] in tf) for pl in k["differingInView"])
+        if (only and k["worldspace"] not in only) or not (good or tag in include):
+            continue
+        b, eye = math.radians(k["bearingDeg"]), k["eye"]
+        rows.append({"label": "%s-%s-%s" % (g["name"], k["stationId"].replace(":", "_"), k["gaze"]),
+                     "worldspace": k["worldspace"], "stationId": k["stationId"], "gaze": k["gaze"],
+                     "bearingDeg": k["bearingDeg"], "eye": eye,
+                     "look": [eye[0] + 1000 * math.sin(b), eye[1] + 1000 * math.cos(b), eye[2]],
+                     "cell": cells[k["stationId"]], "included": tag in include,
+                     "planes": [pl["formKey"] for pl in k["differingInView"]]})
+    if per_worldspace:
+        pick = []
+        for w in sorted({r["worldspace"] for r in rows}):
+            rw = [r for r in rows if r["worldspace"] == w and not r["included"]]
+            top = Counter(r["cell"] for r in rw).most_common(1)
+            pick += [r for r in rw if top and r["cell"] == top[0][0]][:per_worldspace]
+        rows = pick + [r for r in rows if r["included"]]
+    dest = Path(out) / "shots.json"
+    dest.write_text(json.dumps({"group": g["name"], "shots": rows}, indent=1), encoding="utf-8")
+    print("shots", len(rows), dict(Counter(r["worldspace"] for r in rows)))
+    return rows
+
+
+def _proc_mem_mib(pid):
+    """(private commit, peak working set) MiB of one Windows process, or (None, None)."""
+    import ctypes
+
+    class C(ctypes.Structure):
+        _fields_ = [("cb", ctypes.c_ulong), ("PageFaultCount", ctypes.c_ulong), ("PeakWorkingSetSize", ctypes.c_size_t),
+                    ("WorkingSetSize", ctypes.c_size_t), ("a", ctypes.c_size_t), ("b", ctypes.c_size_t),
+                    ("c", ctypes.c_size_t), ("d", ctypes.c_size_t), ("PagefileUsage", ctypes.c_size_t),
+                    ("PeakPagefileUsage", ctypes.c_size_t), ("PrivateUsage", ctypes.c_size_t)]
+    if not isinstance(pid, int) or os.name != "nt":
+        return None, None
+    h = ctypes.windll.kernel32.OpenProcess(0x1000, False, pid)
+    if not h:
+        return None, None
+    try:
+        c = C()
+        c.cb = ctypes.sizeof(c)
+        if not ctypes.windll.psapi.GetProcessMemoryInfo(h, ctypes.byref(c), c.cb):
+            return None, None
+        return c.PrivateUsage / 1048576.0, c.PeakWorkingSetSize / 1048576.0
+    finally:
+        ctypes.windll.kernel32.CloseHandle(h)
+
+
+def render_step(g, arm, shots_file, out, viewprobe, instance, game, caps, need_free_mib, lock, pause,
+                no_reuse=False, chunk=9, exempt=()):
+    """Render the listed gazes in one arm, one viewprobe process per chunk (same cell, at most `chunk` shots), one
+    process at a time. Before each chunk: the PAUSE file stops the block, free RAM must be at least `need_free_mib`,
+    no other heavy process may run. During it: the campaign caps (process commit, system floor, graphics used) stop
+    the process tree. Writes ledger.jsonl with per-chunk wall time, peak commit and peak working set."""
+    tools = Path(__file__).resolve().parents[2] / "_geometry-harness" / "viewprobe" / "tools"
+    sys.path.insert(0, str(tools))
+    from renderbatch import cap_observer
+    from renderlimit import read_graphics_free, read_system_free
+    shots = json.loads(Path(shots_file).read_text(encoding="utf-8"))["shots"]
+    order = g["orders"][arm]
+    profile = json.loads(Path(order).read_text(encoding="utf-8")).get("BaseProfile") or "Manual"
+    exe = Path(viewprobe)
+    ident = {"viewprobeDll": sha(exe.parent / "viewprobe.dll"), "coreDll": sha(exe.parent / "housecarl-core.dll"),
+             "rule": sha(g["_rel"](g["rule"])), "order": sha(order), "arm": arm, "reuseCell": not no_reuse}
+    out = Path(out)
+    out.mkdir(parents=True, exist_ok=True)
+    groups = defaultdict(list)
+    for s in shots:
+        groups[(s["worldspace"], s["cell"])].append(s)
+    chunks = [v[i:i + chunk] for v in groups.values() for i in range(0, len(v), chunk)]
+    if Path(lock).exists():
+        raise SystemExit("refusing: %s exists" % lock)
+    Path(lock).write_text(json.dumps({"pid": os.getpid(), "purpose": "planeassess render %s %s" % (g["name"], arm),
+                                      "at": time.strftime("%Y-%m-%d %H:%M:%S %Z")}), encoding="utf-8")
+    ledger, done = out / "ledger.jsonl", 0
+    try:
+        for n, todo in enumerate(chunks):
+            if Path(pause).exists():
+                print("PAUSE file present; stopping before chunk %d" % n)
+                break
+            busy, free = busy_processes(exempt), read_system_free()
+            if busy or not free.ok or free.free_mib < need_free_mib:
+                print("refusing chunk %d: busy %s, free %s MiB, need %d" % (n, busy, free.free_mib, need_free_mib))
+                break
+            tag = "%s-%s-%s-%s-%d" % (g["name"], arm, todo[0]["worldspace"], todo[0]["cell"].replace(":", "_"),
+                                      int(time.time()))
+            dest = out / tag
+            dest.mkdir(parents=True, exist_ok=False)
+            wl = out / (tag + ".worklist.json")
+            wl.write_text(json.dumps({"label": tag, "cells": [{"cell": todo[0]["cell"], "shots": [{
+                "label": s["label"], "eye": s["eye"], "look": s["look"], "fov": HFOV, "nav": "off", "occlusion": "off",
+                "control": False, "viewpointKind": "nominated-player",
+                "viewpointEvidence": "route station %s gaze %s bearing %.2f" % (s["stationId"], s["gaze"], s["bearingDeg"])}
+                for s in todo]}]}, indent=1), encoding="utf-8")
+            argv = [str(exe), str(wl), "--instance", instance, "--profile", profile, "--game", game, "--order", str(order),
+                    "--planes-report", "--occlusion-rule", str(g["_rel"](g["rule"])), "--size", "1200", "--msaa", "0",
+                    "--visibility-budget", "4096", "--out", str(dest)] + (["--no-reuse-cell"] if no_reuse else [])
+            peak = {"commitMiB": 0.0, "workingSetMiB": 0.0}
+            caps_obs = cap_observer(lambda pid: _proc_mem_mib(pid)[0], caps[0], system_reader=read_system_free,
+                                    system_available_floor_mib=caps[1], graphics_reader=read_graphics_free,
+                                    graphics_used_cap_mib=caps[2])
+
+            def observe(ev, peak=peak, caps_obs=caps_obs):
+                if ev.get("kind") == "sample":
+                    c, w = _proc_mem_mib(ev.get("ownedPid"))
+                    if c is not None:
+                        peak["commitMiB"] = max(peak["commitMiB"], c)
+                        peak["workingSetMiB"] = max(peak["workingSetMiB"], w)
+                return caps_obs(ev)
+            t0 = time.time()
+            res = runlog.Runner("planeassess-render", out_dir=str(out / "logs")).run(
+                [{"id": tag, "argv": argv, "cwd": str(out)}], echo=False, observer=observe, poll_seconds=1.0)[0]
+            secs = round(time.time() - t0, 1)
+            row = {"chunk": tag, "shots": [s["label"] for s in todo], "exitCode": res.get("exitCode"),
+                   "stopped": res.get("stopped"), "seconds": secs, "secondsPerShot": round(secs / len(todo), 1),
+                   "peakCommitMiB": round(peak["commitMiB"]), "peakWorkingSetMiB": round(peak["workingSetMiB"]),
+                   "freeAtStartMiB": round(free.free_mib), **ident, "at": time.strftime("%H:%M:%S")}
+            with ledger.open("a", encoding="utf-8") as fh:
+                fh.write(json.dumps(row) + "\n")
+            print(json.dumps(row), flush=True)
+            done += len(todo)
+            if res.get("stopped"):
+                print("stopped by %s; ending the block" % res.get("stopped"))
+                break
+    finally:
+        Path(lock).unlink(missing_ok=True)
+    return done
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -808,6 +953,27 @@ def main(argv=None):
     a.add_argument("--only", action="append", help="worldspace label to sample (repeat); default all")
     a.add_argument("--exempt", action="append", default=[], help="process path that does not count as busy (repeat)")
     a.add_argument("--lock", action="append", default=[], help="lock file whose presence refuses the run (repeat)")
+    a = sub.add_parser("shots", help="step 3a: the render list of kept gazes for a group")
+    a.add_argument("--group", required=True, help="group definition JSON")
+    a.add_argument("--out", required=True, help="folder holding scope.json; shots.json is written here")
+    a.add_argument("--per-worldspace", type=int, help="timed sample: N gazes from each worldspace's busiest cell")
+    a.add_argument("--include", action="append", default=[], help="station:gazeKind to add (repeat)")
+    a.add_argument("--worldspace", action="append", help="limit to this worldspace label (repeat)")
+    a = sub.add_parser("render", help="step 3b: render a shots list in one arm, one viewprobe process at a time")
+    a.add_argument("--group", required=True, help="group definition JSON")
+    a.add_argument("--arm", required=True, choices=["u", "p"], help="u: without the patch; p: with it")
+    a.add_argument("--shots", required=True, help="shots.json from the shots step")
+    a.add_argument("--render-out", required=True, help="output folder for reports, worklists and the ledger")
+    a.add_argument("--viewprobe", required=True, help="deployed viewprobe.exe (never rebuilt)")
+    a.add_argument("--instance", required=True, help="MO2 instance folder (read only)")
+    a.add_argument("--game", required=True, help="game folder")
+    a.add_argument("--caps", required=True, help="process commit, system floor, graphics used caps in MiB, comma separated")
+    a.add_argument("--need-free-mib", required=True, type=float, help="free RAM required before each chunk")
+    a.add_argument("--heavy-lock", required=True, help="lock file held for the block; refuses if present")
+    a.add_argument("--pause", required=True, help="PAUSE file: present means no new chunk starts")
+    a.add_argument("--no-reuse-cell", action="store_true", help="each shot builds its own scene (viewprobe reuses by default)")
+    a.add_argument("--chunk", type=int, default=9, help="shots per viewprobe process (default 9)")
+    a.add_argument("--exempt", action="append", default=[], help="process path that does not count as busy (repeat)")
     args = ap.parse_args(argv)
     if args.cmd == "selftest":
         with runlog.Run("planeassess-selftest", stage_source="single-stage"):
@@ -818,6 +984,16 @@ def main(argv=None):
         return 0
     if args.cmd == "scope":
         scope_step(g, args.out)
+        return 0
+    if args.cmd == "shots":
+        with runlog.Run("planeassess-shots", stage_source="single-stage"):
+            shots_step(g, args.out, args.per_worldspace, set(args.include), args.worldspace)
+        return 0
+    if args.cmd == "render":
+        caps = [float(x) for x in args.caps.split(",")]
+        n = render_step(g, args.arm, args.shots, args.render_out, args.viewprobe, args.instance, args.game, caps,
+                        args.need_free_mib, args.heavy_lock, args.pause, args.no_reuse_cell, args.chunk, args.exempt)
+        print("rendered", n)
         return 0
     return stations_step(g, args.viewprobe, args.work, args.copy_to, args.instance, args.game, args.only,
                          args.exempt, args.lock)
