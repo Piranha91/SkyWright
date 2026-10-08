@@ -871,13 +871,18 @@ def _proc_mem_mib(pid):
 
 
 def render_step(g, arm, shots_file, out, viewprobe, instance, game, caps, need_free_mib, lock, pause,
-                no_reuse=False, chunk=9, exempt=(), probe_commit_mib=None, fallback_chunk=3):
+                no_reuse=False, chunk=9, exempt=(), probe_commit_mib=None, fallback_chunk=3, memory_mode="full",
+                constrained_need_mib=None, constrained_heap_mib=None):
     """Render the listed gazes in one arm, one viewprobe process per chunk (same cell, at most `chunk` shots), one
     process at a time. Before each chunk: the PAUSE file stops the block, free RAM must be at least `need_free_mib`,
     no other heavy process may run. During it: the campaign caps (process commit, system floor, graphics used) stop
     the process tree. Writes ledger.jsonl with per-chunk wall time, peak commit and peak working set. With
     `probe_commit_mib`: when a worldspace's first full chunk peaks above it, that worldspace's remaining shots are
-    re-chunked to `fallback_chunk` shots per process."""
+    re-chunked to `fallback_chunk` shots per process.
+    Memory mode (the probe-memory-budget convention: same results, full speed when memory allows, chosen from free
+    memory): `full` needs `need_free_mib` free before a chunk; `constrained` renders one shot per process with the managed
+    heap capped at `constrained_heap_mib` and needs `constrained_need_mib`; `auto` takes full when it fits, else
+    constrained, else refuses in one sentence naming the memory needed."""
     tools = Path(__file__).resolve().parents[2] / "_geometry-harness" / "viewprobe" / "tools"
     sys.path.insert(0, str(tools))
     from renderbatch import cap_observer
@@ -909,9 +914,20 @@ def render_step(g, arm, shots_file, out, viewprobe, instance, game, caps, need_f
                 print("PAUSE file present; stopping before chunk %d" % n)
                 break
             busy, free = busy_processes(exempt), read_system_free()
-            if busy or not free.ok or free.free_mib < need_free_mib:
-                print("refusing chunk %d: busy %s, free %s MiB, need %d" % (n, busy, free.free_mib, need_free_mib))
+            if busy or not free.ok:
+                print("refusing chunk %d: busy %s, free memory unread %s" % (n, busy, free.reason))
                 break
+            mode = memory_mode
+            if mode == "auto":
+                mode = "full" if free.free_mib >= need_free_mib else "constrained"
+            need = need_free_mib if mode == "full" else constrained_need_mib
+            if need is None or free.free_mib < need:
+                print("refusing: this view needs about %d MiB of free memory (%s mode) and %d MiB is free."
+                      % (need or constrained_need_mib or need_free_mib, mode, free.free_mib), flush=True)
+                break
+            if mode == "constrained" and len(todo) > 1:
+                chunks[n + 1:n + 1] = [[s] for s in todo[1:]]
+                todo = todo[:1]
             tag = "%s-%s-%s-%s-%d" % (g["name"], arm, todo[0]["worldspace"], todo[0]["cell"].replace(":", "_"),
                                       int(time.time()))
             dest = out / tag
@@ -938,13 +954,15 @@ def render_step(g, arm, shots_file, out, viewprobe, instance, game, caps, need_f
                         peak["workingSetMiB"] = max(peak["workingSetMiB"], w)
                 return caps_obs(ev)
             t0 = time.time()
+            env = {"DOTNET_GCHeapHardLimit": hex(int(constrained_heap_mib) << 20)} if mode == "constrained" and constrained_heap_mib else {}
             res = runlog.Runner("planeassess-render", out_dir=str(out / "logs")).run(
-                [{"id": tag, "argv": argv, "cwd": str(out)}], echo=False, observer=observe, poll_seconds=1.0)[0]
+                [{"id": tag, "argv": argv, "cwd": str(out), "env": env}], echo=False, observer=observe, poll_seconds=1.0)[0]
             secs = round(time.time() - t0, 1)
             row = {"chunk": tag, "shots": [s["label"] for s in todo], "exitCode": res.get("exitCode"),
                    "stopped": res.get("stopped"), "seconds": secs, "secondsPerShot": round(secs / len(todo), 1),
                    "peakCommitMiB": round(peak["commitMiB"]), "peakWorkingSetMiB": round(peak["workingSetMiB"]),
-                   "freeAtStartMiB": round(free.free_mib), **ident, "at": time.strftime("%H:%M:%S")}
+                   "freeAtStartMiB": round(free.free_mib), "memoryMode": mode, "heapLimitMiB": constrained_heap_mib if env else None,
+                   **ident, "at": time.strftime("%H:%M:%S")}
             with ledger.open("a", encoding="utf-8") as fh:
                 fh.write(json.dumps(row) + "\n")
             print(json.dumps(row), flush=True)
@@ -1126,6 +1144,10 @@ def main(argv=None):
     a.add_argument("--chunk", type=int, default=9, help="shots per viewprobe process (default 9)")
     a.add_argument("--probe-commit-mib", type=float, help="re-chunk a worldspace whose first full chunk peaks above this")
     a.add_argument("--fallback-chunk", type=int, default=3, help="shots per process after a probe-commit crossing (default 3)")
+    a.add_argument("--memory-mode", choices=["full", "constrained", "auto"], default="full",
+                   help="full, constrained (one shot per process, capped heap) or auto (picked from free memory)")
+    a.add_argument("--constrained-need-mib", type=float, help="free RAM the constrained mode needs before a shot")
+    a.add_argument("--constrained-heap-mib", type=float, help="managed heap cap per process in the constrained mode")
     a.add_argument("--exempt", action="append", default=[], help="process path that does not count as busy (repeat)")
     a = sub.add_parser("score", help="step 4: score rendered reports of one arm, then gzip them and thin their masks")
     a.add_argument("--group", required=True, help="group definition JSON")
@@ -1164,7 +1186,8 @@ def main(argv=None):
         caps = [float(x) for x in args.caps.split(",")]
         n = render_step(g, args.arm, args.shots, args.render_out, args.viewprobe, args.instance, args.game, caps,
                         args.need_free_mib, args.heavy_lock, args.pause, args.no_reuse_cell, args.chunk, args.exempt,
-                        args.probe_commit_mib, args.fallback_chunk)
+                        args.probe_commit_mib, args.fallback_chunk, args.memory_mode, args.constrained_need_mib,
+                        args.constrained_heap_mib)
         print("rendered", n)
         return 0
     return stations_step(g, args.viewprobe, args.work, args.copy_to, args.instance, args.game, args.only,
