@@ -870,6 +870,68 @@ def _proc_mem_mib(pid):
         ctypes.windll.kernel32.CloseHandle(h)
 
 
+RESUME_KEYS = ("viewprobeDll", "coreDll", "rule", "order", "arm")
+
+
+def done_shots(out, ident):
+    """Shots a previous run of this render already finished: a ledger row with exit 0 or 3 (3 = unreadable assets named,
+    normal), not stopped, under the same renderer identity, rule, order and arm (`RESUME_KEYS`), whose report (raw or
+    gzipped) is in that row's chunk folder. The memory mode is not part of the key: reports are equal across modes."""
+    f = Path(out) / "ledger.jsonl"
+    done = set()
+    if not f.exists():
+        return done
+    for line in f.read_text(encoding="utf-8").splitlines():
+        if not line.strip():
+            continue
+        r = json.loads(line)
+        if "shots" not in r or r.get("stopped") or r.get("exitCode") not in (0, 3):
+            continue
+        if any(r.get(k) != ident.get(k) for k in RESUME_KEYS):
+            continue
+        d = Path(out) / r["chunk"]
+        for label in r["shots"]:
+            key = label.replace("-", "_")
+            if any(d.glob("*-%s-fp-planes.json" % key)) or any(d.glob("*-%s-fp-planes.json.gz" % key)):
+                done.add(label)
+    return done
+
+
+def _alive(pid):
+    if not isinstance(pid, int) or pid <= 0:
+        return False
+    if os.name == "nt":
+        import ctypes
+        h = ctypes.windll.kernel32.OpenProcess(0x1000, False, pid)
+        if not h:
+            return False
+        code = ctypes.c_ulong()
+        ok = ctypes.windll.kernel32.GetExitCodeProcess(h, ctypes.byref(code))
+        ctypes.windll.kernel32.CloseHandle(h)
+        return bool(ok) and code.value == 259          # STILL_ACTIVE
+    try:
+        os.kill(pid, 0)
+        return True
+    except OSError:
+        return False
+
+
+def lock_problem(lock):
+    """None when the lock file is absent; else one sentence: held by a running pid, or stale (its pid is gone) with
+    removal left to a person."""
+    lk = Path(lock)
+    if not lk.exists():
+        return None
+    try:
+        pid = json.loads(lk.read_text(encoding="utf-8")).get("pid")
+    except (ValueError, OSError):
+        pid = None
+    if _alive(pid):
+        return "refusing: %s is held by running pid %d." % (lk, pid)
+    return ("refusing: %s is stale (pid %s is no longer running); remove it by hand once you have checked no render is "
+            "running, then rerun." % (lk, pid))
+
+
 def render_step(g, arm, shots_file, out, viewprobe, instance, game, caps, need_free_mib, lock, pause,
                 no_reuse=False, chunk=9, exempt=(), probe_commit_mib=None, fallback_chunk=3, memory_mode="full",
                 constrained_need_mib=None, constrained_heap_mib=None, constrained_chunk=1):
@@ -895,13 +957,19 @@ def render_step(g, arm, shots_file, out, viewprobe, instance, game, caps, need_f
              "rule": sha(g["_rel"](g["rule"])), "order": sha(order), "arm": arm, "reuseCell": not no_reuse}
     out = Path(out)
     out.mkdir(parents=True, exist_ok=True)
+    finished = done_shots(out, ident)
+    skipped = [s for s in shots if s["label"] in finished]
+    shots = [s for s in shots if s["label"] not in finished]
+    print("resume: skipped %d shots already rendered under this identity; %d to render" % (len(skipped), len(shots)),
+          flush=True)
     groups = defaultdict(list)
     for s in shots:
         groups[(s["worldspace"], s["cell"])].append(s)
     chunks = [v[i:i + chunk] for v in groups.values() for i in range(0, len(v), chunk)]
     probed = set()
-    if Path(lock).exists():
-        raise SystemExit("refusing: %s exists" % lock)
+    problem = lock_problem(lock)
+    if problem:
+        raise SystemExit(problem)
     Path(lock).write_text(json.dumps({"pid": os.getpid(), "purpose": "planeassess render %s %s" % (g["name"], arm),
                                       "at": time.strftime("%Y-%m-%d %H:%M:%S %Z")}), encoding="utf-8")
     ledger, done, failed = out / "ledger.jsonl", 0, []
