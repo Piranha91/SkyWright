@@ -645,6 +645,17 @@ def stations_step(g, viewprobe, work, copy_to, instance, game, only=None, exempt
 
 
 # ------------------------------------------------------------------ step 2: scope
+POSE = "prior in-game pose"
+
+
+def pose_station(ps):
+    """An engine-confirmed pose from an earlier in-game run as a one-gaze pseudo-station (level gaze from eye to look)."""
+    e, k = ps["eye"], ps["look"]
+    bearing = math.degrees(math.atan2(k[0] - e[0], k[1] - e[1])) % 360.0
+    return {"id": ps["label"], "family": POSE, "x": e[0], "y": e[1], "eyeZ": e[2], "accepted": True,
+            "gazes": [{"kind": "pose", "bearingDeg": bearing}], "cell": ps["cell"], "look": k, "source": ps["source"]}
+
+
 def scope_step(g, out, patch_doc=None):
     fails = geometry_selftest(verbose=False)
     assert not fails, "geometry known answers fail: %s" % fails
@@ -669,13 +680,15 @@ def scope_step(g, out, patch_doc=None):
         for wk, w in g["worldspaces"].items():
             st = json.loads(Path(g["_rel"](w["stations"])).read_text(encoding="utf-8"))["stations"]
             acc = [s for s in st if s.get("accepted")]
+            poses = [pose_station(ps) for ps in g.get("addedPoses", []) if ps["worldspace"] == wk]
             shapes = {arm: [(fk, shape(r)) for fk, r in arms[arm].items() if r["worldspace"] == wk and active(r)]
                       for arm in ("u", "p")}
             dset = {fk for fk in differ if (arms["u"].get(fk) or arms["p"].get(fk))["worldspace"] == wk}
             stat = {"setting": w.get("setting"), "acceptedStations": len(acc), "gazes": 0, "eligibleStations": 0,
                     "eligibleGazes": 0, "keptGazes": 0, "keptDecidableGazes": 0, "keptStations": 0,
-                    "differingPlanes": len(dset)}
-            for s in acc:
+                    "differingPlanes": len(dset), "addedPoses": len(poses), "addedPosesKept": 0}
+            for s in acc + poses:
+                is_pose = s.get("family") == POSE
                 eye = [s["x"], s["y"], s["eyeZ"]]
                 near = {arm: [(fk, sh) for fk, sh in shapes[arm]
                               if math.hypot(sh["pos"][0] - eye[0], sh["pos"][1] - eye[1]) <= REACH + max(sh["half"]) * math.sqrt(3)]
@@ -689,19 +702,19 @@ def scope_step(g, out, patch_doc=None):
                             e["nearest"] = d if e["nearest"] is None else min(e["nearest"], d)
                 st_elig = st_kept = False
                 for gz in s["gazes"]:
-                    stat["gazes"] += 1
+                    stat["gazes"] += 0 if is_pose else 1
                     gazes_total += 1
                     run.advance()
                     seen = {arm: {fk: in_view(sh, eye, gz["bearingDeg"]) for fk, sh in near[arm]} for arm in ("u", "p")}
                     seen = {arm: {fk: v[1] for fk, v in d.items() if v[0]} for arm, d in seen.items()}
-                    if seen["u"] or seen["p"]:
+                    if (seen["u"] or seen["p"]) and not is_pose:
                         stat["eligibleGazes"] += 1
                         st_elig = True
                     dview = sorted((set(seen["u"]) | set(seen["p"])) & dset)
                     if not dview:
                         continue
-                    stat["keptGazes"] += 1
-                    st_kept = True
+                    stat["addedPosesKept" if is_pose else "keptGazes"] += 1
+                    st_kept = not is_pose
                     planes = []
                     for fk in dview:
                         issues = {}
@@ -718,12 +731,14 @@ def scope_step(g, out, patch_doc=None):
                             e["decidable"] += 1
                         planes.append({"formKey": fk, "distanceU": seen["u"].get(fk), "distanceP": seen["p"].get(fk),
                                        "ruleIssue": issues, "decidable": not refused})
-                    if any(pl["decidable"] for pl in planes):
+                    if any(pl["decidable"] for pl in planes) and not is_pose:
                         stat["keptDecidableGazes"] += 1
                     kept.append({"worldspace": w["name"], "setting": w.get("setting"), "stationId": s["id"],
                                  "family": s.get("family"), "eye": eye, "gaze": gz["kind"], "bearingDeg": gz["bearingDeg"],
-                                 "planesInViewU": len(seen["u"]), "planesInViewP": len(seen["p"]), "differingInView": planes})
-                stat["eligibleStations"] += st_elig
+                                 "planesInViewU": len(seen["u"]), "planesInViewP": len(seen["p"]), "differingInView": planes,
+                                 "basis": POSE if is_pose else "route",
+                                 **({"cell": s["cell"], "look": s["look"], "source": s["source"]} if is_pose else {})})
+                stat["eligibleStations"] += st_elig and not is_pose
                 stat["keptStations"] += st_kept
             per_ws[w["name"]] = stat
         rows = []
@@ -765,16 +780,17 @@ def scope_step(g, out, patch_doc=None):
             exp = json.loads(Path(g["_rel"](g["expectedEdits"])).read_text(encoding="utf-8"))
             tk = {(e["formKey"], e["kind"]) for e in exp if e.get("target", True)}
             tf = {fk for fk, _ in tk}
-            tw = defaultdict(lambda: {"keptGazes": 0, "keptDecidableGazes": 0, "keptStations": set()})
+            tw = defaultdict(lambda: {"keptGazes": 0, "keptDecidableGazes": 0, "keptDecidablePoses": 0, "keptStations": set()})
             for k in kept:
-                if any(pl["formKey"] in tf for pl in k["differingInView"]):
+                if any(pl["formKey"] in tf for pl in k["differingInView"]) and k.get("basis", "route") == "route":
                     tw[k["worldspace"]]["keptGazes"] += 1
                     tw[k["worldspace"]]["keptStations"].add(k["stationId"])
                 if any(pl["formKey"] in tf and pl["decidable"] for pl in k["differingInView"]):
-                    tw[k["worldspace"]]["keptDecidableGazes"] += 1
+                    tw[k["worldspace"]]["keptDecidableGazes" if k.get("basis", "route") == "route" else "keptDecidablePoses"] += 1
             te = [e for e in edits if (e["formKey"], e["kind"]) in tk]
             doc["target"] = {"edits": len(tk), "editsFound": len(te), "ceilingEdits": sum(e["inCeiling"] for e in te),
                              "perWorldspace": {w: {"keptGazes": v["keptGazes"], "keptDecidableGazes": v["keptDecidableGazes"],
+                                                   "keptDecidablePoses": v["keptDecidablePoses"],
                                                    "keptStations": len(v["keptStations"])}
                                                for w, v in tw.items()},
                              "outsideByReason": _count([e for e in te if not e["inCeiling"]],
@@ -809,11 +825,12 @@ def shots_step(g, out, per_worldspace=None, include=(), only=None):
         if (only and k["worldspace"] not in only) or not (good or tag in include):
             continue
         b, eye = math.radians(k["bearingDeg"]), k["eye"]
+        look = k.get("look") or [eye[0] + 1000 * math.sin(b), eye[1] + 1000 * math.cos(b), eye[2]]
         rows.append({"label": "%s-%s-%s" % (g["name"], k["stationId"].replace(":", "_"), k["gaze"]),
                      "worldspace": k["worldspace"], "stationId": k["stationId"], "gaze": k["gaze"],
                      "bearingDeg": k["bearingDeg"], "eye": eye,
-                     "look": [eye[0] + 1000 * math.sin(b), eye[1] + 1000 * math.cos(b), eye[2]],
-                     "cell": cells[k["stationId"]], "included": tag in include,
+                     "look": look, "basis": k.get("basis", "route"),
+                     "cell": k.get("cell") or cells[k["stationId"]], "included": tag in include,
                      "planes": [pl["formKey"] for pl in k["differingInView"]]})
     if per_worldspace:
         pick = []
@@ -853,11 +870,13 @@ def _proc_mem_mib(pid):
 
 
 def render_step(g, arm, shots_file, out, viewprobe, instance, game, caps, need_free_mib, lock, pause,
-                no_reuse=False, chunk=9, exempt=()):
+                no_reuse=False, chunk=9, exempt=(), probe_commit_mib=None, fallback_chunk=3):
     """Render the listed gazes in one arm, one viewprobe process per chunk (same cell, at most `chunk` shots), one
     process at a time. Before each chunk: the PAUSE file stops the block, free RAM must be at least `need_free_mib`,
     no other heavy process may run. During it: the campaign caps (process commit, system floor, graphics used) stop
-    the process tree. Writes ledger.jsonl with per-chunk wall time, peak commit and peak working set."""
+    the process tree. Writes ledger.jsonl with per-chunk wall time, peak commit and peak working set. With
+    `probe_commit_mib`: when a worldspace's first full chunk peaks above it, that worldspace's remaining shots are
+    re-chunked to `fallback_chunk` shots per process."""
     tools = Path(__file__).resolve().parents[2] / "_geometry-harness" / "viewprobe" / "tools"
     sys.path.insert(0, str(tools))
     from renderbatch import cap_observer
@@ -874,13 +893,17 @@ def render_step(g, arm, shots_file, out, viewprobe, instance, game, caps, need_f
     for s in shots:
         groups[(s["worldspace"], s["cell"])].append(s)
     chunks = [v[i:i + chunk] for v in groups.values() for i in range(0, len(v), chunk)]
+    probed = set()
     if Path(lock).exists():
         raise SystemExit("refusing: %s exists" % lock)
     Path(lock).write_text(json.dumps({"pid": os.getpid(), "purpose": "planeassess render %s %s" % (g["name"], arm),
                                       "at": time.strftime("%Y-%m-%d %H:%M:%S %Z")}), encoding="utf-8")
     ledger, done = out / "ledger.jsonl", 0
     try:
-        for n, todo in enumerate(chunks):
+        n = -1
+        while n + 1 < len(chunks):
+            n += 1
+            todo = chunks[n]
             if Path(pause).exists():
                 print("PAUSE file present; stopping before chunk %d" % n)
                 break
@@ -928,6 +951,19 @@ def render_step(g, arm, shots_file, out, viewprobe, instance, game, caps, need_f
             if res.get("stopped"):
                 print("stopped by %s; ending the block" % res.get("stopped"))
                 break
+            ws = todo[0]["worldspace"]
+            if probe_commit_mib and ws not in probed and len(todo) > fallback_chunk:
+                probed.add(ws)
+                if peak["commitMiB"] > probe_commit_mib:
+                    rest = [s for c in chunks[n + 1:] if c[0]["worldspace"] == ws for s in c]
+                    others = [c for c in chunks[n + 1:] if c[0]["worldspace"] != ws]
+                    regroup = defaultdict(list)
+                    for s in rest:
+                        regroup[s["cell"]].append(s)
+                    small = [v[i:i + fallback_chunk] for v in regroup.values() for i in range(0, len(v), fallback_chunk)]
+                    chunks = chunks[:n + 1] + small + others
+                    print("peak commit %d MiB > %d in %s: remaining %d shots re-chunked by %d"
+                          % (peak["commitMiB"], probe_commit_mib, ws, len(rest), fallback_chunk), flush=True)
     finally:
         Path(lock).unlink(missing_ok=True)
     return done
@@ -973,6 +1009,8 @@ def main(argv=None):
     a.add_argument("--pause", required=True, help="PAUSE file: present means no new chunk starts")
     a.add_argument("--no-reuse-cell", action="store_true", help="each shot builds its own scene (viewprobe reuses by default)")
     a.add_argument("--chunk", type=int, default=9, help="shots per viewprobe process (default 9)")
+    a.add_argument("--probe-commit-mib", type=float, help="re-chunk a worldspace whose first full chunk peaks above this")
+    a.add_argument("--fallback-chunk", type=int, default=3, help="shots per process after a probe-commit crossing (default 3)")
     a.add_argument("--exempt", action="append", default=[], help="process path that does not count as busy (repeat)")
     args = ap.parse_args(argv)
     if args.cmd == "selftest":
@@ -992,7 +1030,8 @@ def main(argv=None):
     if args.cmd == "render":
         caps = [float(x) for x in args.caps.split(",")]
         n = render_step(g, args.arm, args.shots, args.render_out, args.viewprobe, args.instance, args.game, caps,
-                        args.need_free_mib, args.heavy_lock, args.pause, args.no_reuse_cell, args.chunk, args.exempt)
+                        args.need_free_mib, args.heavy_lock, args.pause, args.no_reuse_cell, args.chunk, args.exempt,
+                        args.probe_commit_mib, args.fallback_chunk)
         print("rendered", n)
         return 0
     return stations_step(g, args.viewprobe, args.work, args.copy_to, args.instance, args.game, args.only,
