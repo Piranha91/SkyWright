@@ -215,7 +215,10 @@ def same_version(a, b):
 
 def shape_differs(a, b):
     """The plane the engine would cull with differs: enable state, primitive type, position, rotation, scale or
-    bounds. Colour, XOCP links and a disabled record's parent are not a difference in what is culled."""
+    bounds. Colour, the XOCP subrecord and a disabled record's parent are not a difference for this instrument:
+    XOCP (Mutagen's OcclusionPlane, a Bounding: width, height, position, rotation) is a CK-era copy of the primitive's
+    half bounds that goes stale when a plane is resized, and viewprobe never reads it (header of
+    _geometry-harness/viewprobe/OcclusionPlanes.cs). Whether the engine reads XOCP is not tested here."""
     if not active(a) and not active(b):
         return False
     if active(a) != active(b):
@@ -277,9 +280,10 @@ def _norm(a):
 
 
 def shape(row):
-    """{kind, pos, rot, half} for an active plane version; half extents = XPRM bounds (stored half) x scale."""
+    """{kind, pos, rot, half} for an active plane version. XPRM bounds are FULL extents about the reference's
+    position; half = bounds x 0.5 x scale, as viewprobe's PlaneGeometry does (OcclusionPlanes.cs, `Bounds * 0.5f`)."""
     return {"kind": kind_of(row), "pos": row["pos"], "rot": row["rot"],
-            "half": [b * (row["scale"] or 1.0) for b in row["prim"]["bounds"]]}
+            "half": [b * 0.5 * (row["scale"] or 1.0) for b in row["prim"]["bounds"]]}
 
 
 def shape_polys(s):
@@ -726,7 +730,7 @@ def scope_step(g, out, patch_doc=None):
         for fk, r in sorted(prec.items()):
             e = edit_seen.get(fk) or {"gazes": 0, "decidable": 0, "refusals": Counter(), "stations": set(), "nearest": None}
             if fk not in differ:
-                reason = "no change to the culling shape (colour, XOCP links or a disabled record's parent only)"
+                reason = "no change to the culling shape viewprobe reads (colour, XOCP or a disabled record's parent only)"
             elif not (r["activeU"] or r["activeP"]):
                 reason = "inactive in both arms (disabled or deleted in u and in p)"
             elif r["worldspace"] not in g["worldspaces"]:

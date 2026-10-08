@@ -90,6 +90,10 @@ class ShapeDiffers(unittest.TestCase):
 
 
 class Geometry(unittest.TestCase):
+    def test_xprm_bounds_are_full_extents(self):
+        # viewprobe's PlaneGeometry halves XPRM bounds; reading them as half extents doubles every plane
+        self.assertEqual(pa.shape(row(scale=2.0))["half"], [100.0, 1.0, 50.0])
+
     def test_selftest_passes(self):
         self.assertEqual(pa.geometry_selftest(verbose=False), [])
 
