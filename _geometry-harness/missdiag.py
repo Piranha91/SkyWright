@@ -178,6 +178,14 @@ def assign_reason(ev):
     raise ValueError("assign_reason: trace outcome %r has no rule here; the caller must read it" % (outcome,))
 
 
+def absence_blocker(states, load_enable=None):
+    """One blocker sentence for a record that no built manifest holds enabled, or None when one does.
+    states: {manifest key: 'enabled' | 'absent' (in that manifest, not enabled) | 'not in manifest'}."""
+    if any(v == "enabled" for v in states.values()):
+        return None
+    return "not enabled in any built manifest (" + "/".join(sorted(states)) + ")"
+
+
 def miss_table(clusters):
     """clusters: dicts with group, edits, reason, evidenceType, direct (bool: the reason rests on this cluster's own
     trace for every member, not on a representative's render). Returns rows (reason, evidenceType, directEdits,

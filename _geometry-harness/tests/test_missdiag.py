@@ -224,6 +224,55 @@ def test_m3_table_sums_and_splits():
     assert nm["directEdits"] == 5 and nm["inheritedEdits"] == 7 and nm["edits"] == 12
 
 
+# ---- M4: a record no built manifest holds enabled (Group 6 follow-up F-E2) ----
+# Known answers from the enable-path lane's repro (2026-10-04, RESULT section 6): three vanilla references the patch
+# disables are enabled at load in the unpatched order but outside its responsible-pair manifest; the Lux dust beam and the
+# vanilla light are disabled at load. FormKeys are labels only.
+OUTSIDE = {"u-base": "not in manifest", "p-base": "absent"}
+
+
+def _outside_not_disabled(fk):
+    b = M.absence_blocker(OUTSIDE, "enabled")
+    assert b is not None and b.startswith("outside the responsible-pair manifest"), "%s: %r" % (fk, b)
+    assert "not enabled in any built manifest" not in b and "disabled" not in b, "%s read as disabled: %r" % (fk, b)
+
+
+def test_m4a_vanilla_doorway_enabled_at_load_is_not_disabled():   # 0DFE8F:Skyrim.esm, FarmInt2Doorway03
+    _outside_not_disabled("0DFE8F")
+
+
+def test_m4b_vanilla_end02_enabled_at_load_is_not_disabled():   # 0DFED6:Skyrim.esm, FarmInt2End02
+    _outside_not_disabled("0DFED6")
+
+
+def test_m4c_vanilla_end01_enabled_at_load_is_not_disabled():   # 0DFED7:Skyrim.esm, FarmInt2End01
+    _outside_not_disabled("0DFED7")
+
+
+def test_m4d_disabled_singleton_reads_disabled_at_load():   # 62B31F:Lux.esp, a dust beam disabled at load
+    b = M.absence_blocker({"u-base": "absent", "p-base": "absent"}, "disabled")
+    assert b is not None and b.startswith("not enabled in any built manifest") and "disabled at load" in b, repr(b)
+
+
+def test_m4e_unread_enable_state_is_not_called_disabled():
+    b = M.absence_blocker(OUTSIDE, None)
+    assert b is not None and "not read" in b, repr(b)
+    assert "not enabled in any built manifest" not in b and "disabled" not in b, repr(b)
+
+
+def test_m4f_enabled_in_a_manifest_has_no_absence_blocker():
+    assert M.absence_blocker({"u-base": "enabled", "p-base": "absent"}, None) is None
+    assert M.absence_blocker({"u-base": "enabled"}, "disabled") is None
+
+
+def test_m4g_unknown_enable_state_value_raises():
+    try:
+        M.absence_blocker(OUTSIDE, "maybe")
+    except ValueError:
+        return
+    raise AssertionError("an unknown load-time enable state was accepted")
+
+
 def main():
     tests = [(n, f) for n, f in sorted(globals().items()) if n.startswith("test_") and callable(f)]
     for n, f in tests:
