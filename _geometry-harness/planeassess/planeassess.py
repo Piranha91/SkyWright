@@ -1047,6 +1047,43 @@ def score_step(g, arm, shots_file, render_out, scores_out):
     return done
 
 
+# ------------------------------------------------------------------ step 5: a verdict per plane edit
+def verdicts_step(g, out, scores_root):
+    """Decide every plane record the patch carries from the arm score files (<scores_root>/u, /p): one entry per record
+    with its edits, verdict, statement, basis, unjudged share, Box label and the gazes behind it -> <out>/planes.json.
+    Only edited planes are scored in the block, so `missed` (unedited planes) is not computed here."""
+    import verdict as V
+    rec = {r["formKey"]: r for r in json.loads((Path(out) / "patch.json").read_text(encoding="utf-8"))["records"]}
+    owners = g["owners"]
+    views = defaultdict(list)
+    have = {arm: {f.name for f in (Path(scores_root) / arm).glob("*.json")} for arm in ("u", "p")}
+    both = have["u"] & have["p"]          # a gaze counts only when both arms are scored: a missing arm is not "absent"
+    for arm in ("u", "p"):
+        for name in sorted(both):
+            row = json.loads((Path(scores_root) / arm / name).read_text(encoding="utf-8"))
+            for fk, facts in row["planes"].items():
+                views[fk].append(dict(facts, gaze=row["gaze"], arm=arm, basis=row.get("basis", "route"),
+                                      hiddenAnywhere=row.get("hiddenAnywhere")))
+    rows = []
+    for fk, r in sorted(rec.items()):
+        ver = lambda x: None if x is None else {"position": x["pos"], "active": active(x)}
+        edit = {"formKey": fk, "class": r["class"], "edits": r["edits"], "kind": r["kind"], "owners": owners,
+                "winners": {"u": r["priorOwner"], "p": owners["patch"]}, "versions": {"u": ver(r["u"]), "p": ver(r["p"])}}
+        vs = views.get(fk, [])
+        d = V.decide(edit, vs) if vs else {"verdict": "cannot tell", "reason": "no rendered view", "statement":
+                                           "cannot tell: no rendered view", "shown": True, "basis": None,
+                                           "unjudgedShare": None, "boxLabel": None, "also": []}
+        rows.append({"formKey": fk, "worldspace": r["worldspace"], "kind": r["kind"], "class": r["class"], "edits": r["edits"],
+                     "priorOwner": r["priorOwner"], **d, "gazes": sorted({v["gaze"] for v in vs})})
+    doc = {"schema": "planeassess/planes/1", "group": g["name"], "gazesBothArms": len(both),
+           "gazesOneArmOnly": len((have["u"] | have["p"]) - both), "records": rows,
+           "byVerdict": _count(rows, lambda x: (x["verdict"],)),
+           "editsByVerdict": _count([(x["verdict"], k) for x in rows for k in x["edits"]], lambda t: (t[0],))}
+    (Path(out) / "planes.json").write_text(json.dumps(doc, indent=1), encoding="utf-8")
+    print(json.dumps({k: doc[k] for k in ("byVerdict", "editsByVerdict")}, indent=1))
+    return doc
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -1096,6 +1133,10 @@ def main(argv=None):
     a.add_argument("--shots", required=True, help="shots.json the arm was rendered from")
     a.add_argument("--render-out", required=True, help="the render step's output folder")
     a.add_argument("--scores-out", required=True, help="folder for one score file per shot")
+    a = sub.add_parser("verdicts", help="step 5: a verdict per plane edit from the arms' score files")
+    a.add_argument("--group", required=True, help="group definition JSON")
+    a.add_argument("--out", required=True, help="folder holding patch.json; planes.json is written here")
+    a.add_argument("--scores", required=True, help="folder holding the u and p score folders")
     args = ap.parse_args(argv)
     if args.cmd == "selftest":
         with runlog.Run("planeassess-selftest", stage_source="single-stage"):
@@ -1106,6 +1147,10 @@ def main(argv=None):
         return 0
     if args.cmd == "scope":
         scope_step(g, args.out)
+        return 0
+    if args.cmd == "verdicts":
+        with runlog.Run("planeassess-verdicts", stage_source="single-stage"):
+            verdicts_step(g, args.out, args.scores)
         return 0
     if args.cmd == "score":
         with runlog.Run("planeassess-score", stage_source="single-stage"):

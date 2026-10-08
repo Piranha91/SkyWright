@@ -310,6 +310,50 @@ def test_m4g_unknown_enable_state_value_raises():
     raise AssertionError("an unknown load-time enable state was accepted")
 
 
+# ---- occlusion planes: a plane cluster's reason comes from the occlusion assessment (planeassess), never from contact,
+# floor or anchor rules (plane-assessment Gate C, fold integration)
+def _occ(verdict, statement, **kw):
+    return {"occlusion": dict({"verdict": verdict, "statement": statement, "check": "occlusion (planeassess)"}, **kw),
+            "bundleConfiguration": "ran"}
+
+
+def test_o1_occlusion_fix_is_a_fix():
+    r = M.assign_reason(_occ("fixes an inter-mod clash", "fixes an inter-mod clash at the 9 route views where it hid"))
+    assert (r["reason"], r["evidenceType"]) == ("fixes an inter-mod clash", "check"), r
+    assert r["detail"] == "occlusion (planeassess): fixes an inter-mod clash at the 9 route views where it hid", r
+
+
+def test_o2_occlusion_patch_hides_has_its_own_reason():
+    r = M.assign_reason(_occ("patch placement hides", "patch placement hides content at 1 route view"))
+    assert r["reason"] == "patch placement hides" and "patch placement hides" in M.REASONS, r
+
+
+def test_o3_occlusion_set_aside_and_taste_and_cannot_tell():
+    assert M.assign_reason(_occ("set aside", "set aside: disabled; nothing hidden at 3 route views"))["reason"] == "set aside by filter"
+    assert M.assign_reason(_occ("taste (no clash)", "taste (no clash): nothing hidden at 2 route views"))["reason"] == "taste (no clash)"
+    r = M.assign_reason(_occ("cannot tell", "cannot tell: rule refuses a tilted plane"))
+    assert (r["reason"], r["evidenceType"]) == ("cannot tell", "check"), r
+
+
+def test_o4_occlusion_detail_carries_share_and_box_label():
+    r = M.assign_reason(_occ("taste (no clash)", "taste (no clash): nothing hidden at 2 route views", unjudgedShare=0.4512,
+                             boxLabel="Box verdict: the Box silhouette rule rests on one in-game station"))
+    assert r["detail"].endswith("; unjudged share 0.4512; Box verdict: the Box silhouette rule rests on one in-game station"), r
+
+
+def test_o5_occlusion_unknown_verdict_raises():
+    try:
+        M.assign_reason(_occ("fixed", "x"))
+    except ValueError:
+        return
+    raise AssertionError("an unknown occlusion verdict must raise")
+
+
+def test_o6_plane_records_are_recognised():
+    assert M.is_plane_record("000017:Skyrim.esm", None) and M.is_plane_record("0ABCDE:Some.esp", {"bounds": [1, 2, 3]})
+    assert not M.is_plane_record("0ABCDE:Some.esp", None)
+
+
 def main():
     tests = [(n, f) for n, f in sorted(globals().items()) if n.startswith("test_") and callable(f)]
     for n, f in tests:
