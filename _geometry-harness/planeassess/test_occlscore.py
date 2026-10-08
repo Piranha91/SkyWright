@@ -55,6 +55,12 @@ class Scorer(unittest.TestCase):
         self.assertEqual(S.score_view(d, reader=reader)["000800:B.esp"]["inBandPx"], 0)
         self.assertEqual(S.vis_status(d, {"1:A.esp"}, {"000800:B.esp"}), {"notAssessed": 1})
 
+    def test_visibility_status_is_scoped_to_the_plane(self):
+        d = {"schema": "occlusion-view-research-v1", "planes": [
+            {"formKey": "000800:B.esp", "candidates": [cand("1:A.esp", True, 100, "in")]},
+            {"formKey": "000801:B.esp", "candidates": [cand("2:A.esp", True, 100, "in", assessed=False)]}]}
+        self.assertEqual(S.vis_status(d, {"1:A.esp", "2:A.esp"}, {"000800:B.esp"}), {"assessedVisible": 1})
+
     def test_owner_split(self):
         d = report([cand("1:A.esp", True, 100, "in"), cand("2:Base.esm", True, 100, "in")])
         s = S.score_report(d, {"1:A.esp"}, reader=reader)["000800:B.esp"]
