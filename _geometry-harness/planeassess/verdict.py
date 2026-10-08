@@ -36,19 +36,125 @@ route views where it hid"; prior in-game poses are counted and named apart. `unj
 under the plane that were unassessed (shapes the renderer cannot judge), over the usable views: reported beside the
 verdict, never a reason for cannot tell (D3). A Box edit carries BOX_LABEL (D6).
 
-Gate C state: NOT implemented yet. `decide` answers `cannot tell: not implemented` and `missed` lists nothing.
+`missed` lists planes the patch does not edit that hide the content mod's content in u (reported apart, no verdict).
 """
 from __future__ import annotations
 
 VERDICTS = ("fixes an inter-mod clash", "patch placement hides", "taste (no clash)", "set aside", "cannot tell")
 BOX_LABEL = "Box verdict: the Box silhouette rule rests on one in-game station"
-NOT_IMPLEMENTED = {"verdict": "cannot tell", "reason": "not implemented", "statement": "cannot tell: not implemented",
-                   "shown": True, "basis": None, "unjudgedShare": None, "boxLabel": None}
+AUDIT_TOLERANCE = 1.0          # u: the report's plane position against the arm's winning record
+TILT_REFUSALS = ("plane orientation outside", "box orientation outside")
+
+
+def _px(v, owner=None):
+    s = (v or {}).get("score") or {}
+    if owner == "A":
+        return s.get("cityInBandPx", 0)
+    if owner == "other":
+        return s.get("otherInBandPx", 0)
+    return s.get("cityInBandPx", 0) + s.get("otherInBandPx", 0)
+
+
+def _dist(a, b):
+    return sum((x - y) ** 2 for x, y in zip(a, b)) ** 0.5
+
+
+def _where(n_route, n_pose):
+    out = "%d route view%s" % (n_route, "" if n_route == 1 else "s")
+    if n_pose:
+        out += " and %d prior in-game pose%s" % (n_pose, "" if n_pose == 1 else "s")
+    return out
+
+
+def _gate(edit, v):
+    """Why one arm's view cannot be used: 'audit', 'not run', 'refused: <text>', or None."""
+    if v is None or v.get("plane") is None:
+        return None
+    ver = (edit.get("versions") or {}).get(v["arm"])
+    pos = v["plane"].get("position")
+    if ver is None or not ver.get("active") or pos is None or _dist(pos, ver["position"]) > AUDIT_TOLERANCE:
+        return "audit"
+    vs = v.get("visStatus") or {}
+    if vs.get("notAssessed", 0) or vs.get("noVisibility", 0):
+        return "not run"
+    if v.get("refusal"):
+        return "refused: " + v["refusal"]
+    return None
 
 
 def decide(edit, views):
-    return dict(NOT_IMPLEMENTED)
+    gazes = {}
+    for v in views:
+        gazes.setdefault(v["gaze"], {})[v["arm"]] = v
+    usable, refusals = [], []
+    for g, arms in sorted(gazes.items()):
+        issues = [i for i in (_gate(edit, arms.get(a)) for a in ("u", "p")) if i]
+        if "audit" in issues:
+            return _out(edit, "cannot tell", "position audit fails: the render drew the plane away from its winning position",
+                        gazes, [])
+        if "not run" in issues:
+            return _out(edit, "cannot tell", "visibility test did not run", gazes, [])
+        if issues:
+            refusals += issues
+            continue
+        usable.append(arms)
+    if not usable:
+        tilted = any(any(t in r for t in TILT_REFUSALS) for r in refusals)
+        reason = "rule refuses a tilted plane" if tilted else (
+            "rule refuses the shape: " + refusals[0][len("refused: "):] if refusals else "no view")
+        return _out(edit, "cannot tell", reason, gazes, [])
+    route = sum(1 for a in usable if (a.get("u") or a.get("p"))["basis"] == "route")
+    pose = len(usable) - route
+    where = _where(route, pose)
+    winner_u = (edit.get("winners") or {}).get("u")
+    own_a = winner_u in edit["owners"]["A"]
+    hides_more = [a for a in usable if _px(a.get("p")) > _px(a.get("u"))]
+    if hides_more:
+        return _out(edit, "patch placement hides", "the patch's plane hides content the unpatched order showed", gazes, usable,
+                    "patch placement hides content at %s" % _where(
+                        sum(1 for a in hides_more if (a.get("u") or a.get("p"))["basis"] == "route"),
+                        sum(1 for a in hides_more if (a.get("u") or a.get("p"))["basis"] != "route")))
+    hid_any = any(_px(a.get("u")) > 0 for a in usable)
+    if own_a:
+        st = "taste (no clash): the content mod's own plane, at %s" % where if hid_any else \
+            "taste (no clash): nothing hidden at %s" % where
+        return _out(edit, "taste (no clash)", "the content mod's own plane", gazes, usable, st)
+    hid_a = [a for a in usable if _px(a.get("u"), "A") > 0]
+    if hid_a:
+        still = [a for a in hid_a if _px(a.get("p"), "A") > 0]
+        if still:
+            return _out(edit, "cannot tell", "still hides the content mod's content", gazes, usable)
+        n_route = sum(1 for a in hid_a if (a.get("u") or a.get("p"))["basis"] == "route")
+        return _out(edit, "fixes an inter-mod clash", "the content mod's content hidden in u is drawn with the patch",
+                    gazes, usable, "fixes an inter-mod clash at the %s where it hid" % _where(n_route, len(hid_a) - n_route))
+    disable = edit.get("class") == "disabled" or "DISABLE" in (edit.get("edits") or [])
+    if disable and not hid_any:
+        return _out(edit, "set aside", "a disable of a plane that hid nothing", gazes, usable,
+                    "set aside: disabled; nothing hidden at %s" % where)
+    if hid_any:
+        return _out(edit, "taste (no clash)", "hid only non-mod content (machine record)", gazes, usable,
+                    "taste (no clash): hid only non-mod content at %s" % where, shown=False)
+    return _out(edit, "taste (no clash)", "nothing hidden", gazes, usable, "taste (no clash): nothing hidden at %s" % where)
+
+
+def _out(edit, verdict, reason, gazes, usable, statement=None, shown=True):
+    route = sum(1 for a in usable if (a.get("u") or a.get("p"))["basis"] == "route")
+    un = tot = 0
+    for a in usable:
+        for v in a.values():
+            c = (v.get("census") or {}).get("cityShapes") or {}
+            un += c.get("unassessed", 0)
+            tot += sum(c.values())
+    return {"verdict": verdict, "reason": reason, "statement": statement or "%s: %s" % (verdict, reason), "shown": shown,
+            "basis": {"gazes": len(gazes), "assessed": len(usable), "route": route, "prior in-game pose": len(usable) - route},
+            "unjudgedShare": round(un / tot, 4) if tot else None,
+            "boxLabel": BOX_LABEL if edit.get("kind") == "Box" else None}
 
 
 def missed(views, edited):
-    return []
+    out = []
+    for v in views:
+        fk = (v.get("plane") or {}).get("formKey")
+        if fk and fk not in edited and v["arm"] == "u" and _px(v, "A") > 0 and fk not in out:
+            out.append(fk)
+    return out

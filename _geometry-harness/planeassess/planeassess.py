@@ -38,6 +38,7 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE.parent))
 import runlog  # noqa: E402
+sys.path.insert(0, str(HERE))
 
 HFOV, ASPECT, NEAR, REACH = 80.0, 16.0 / 9.0, 15.0, 4096.0
 PRIM_KIND = {1: "Box", 3: "PortalBox"}
@@ -971,6 +972,62 @@ def render_step(g, arm, shots_file, out, viewprobe, instance, game, caps, need_f
     return done
 
 
+# ------------------------------------------------------------------ step 4: score the rendered chunks
+def view_facts(d, plane, city):
+    """What the verdict reads from one report for one plane: the report's plane entry, hidden px by owner, census,
+    visibility status and the rule's refusal."""
+    import occlscore as S
+    sc = S.score_report(d, city).get(plane)
+    entry = next(({k: v for k, v in pl.items() if k != "candidates"} for pl, _ in S.rows_by_plane(d)
+                  if pl["formKey"] == plane), None)
+    return {"plane": entry,
+            "score": None if sc is None else {"cityInBandPx": sc["cityInBandPx"], "otherInBandPx": sc["otherInBandPx"]},
+            "census": S.census(d, city, {plane}).get(plane), "visStatus": S.vis_status(d, city, {plane}),
+            "refusal": S.refusal(d, plane)}
+
+
+def score_step(g, arm, shots_file, render_out, scores_out):
+    """Score every rendered, not yet scored report of one arm: per shot, the facts of each edited plane in view, written
+    to <scores_out>/<label>.json. Then the report is gzipped (raw deleted) and its evidence masks are kept only when an
+    edited plane hides content there (G5's retention rule, widened to any owner)."""
+    import gzip
+    import shutil
+    import occlscore as S
+    city = set()
+    for name in g["owners"]["A"]:
+        city |= {r["formKey"] for r in Plugin(g["_rel"](g["pluginFiles"][name])).placed()}
+    shots = {s["label"].replace("-", "_"): s for s in json.loads(Path(shots_file).read_text(encoding="utf-8"))["shots"]}
+    out = Path(scores_out)
+    out.mkdir(parents=True, exist_ok=True)
+    done = 0
+    for rep in sorted(Path(render_out).glob("*/*-fp-planes.json")):
+        key = next((k for k in shots if rep.name.endswith("-%s-fp-planes.json" % k)), None)
+        if key is None:
+            continue
+        s = shots[key]
+        dest = out / (s["label"] + ".json")
+        if dest.exists():
+            continue
+        raw = rep.read_bytes()
+        d = json.loads(raw.decode("utf-8"))
+        facts = {fk: view_facts(d, fk, city) for fk in s["planes"]}
+        hides = any(((f["score"] or {}).get("cityInBandPx", 0) + (f["score"] or {}).get("otherInBandPx", 0)) > 0
+                    for f in facts.values())
+        row = {"label": s["label"], "arm": arm, "gaze": key, "basis": s.get("basis", "route"), "worldspace": s["worldspace"],
+               "report": str(rep) + ".gz", "reportSha256": hashlib.sha256(raw).hexdigest(), "reportBytes": len(raw),
+               "masksKept": hides, "planes": facts}
+        dest.write_text(json.dumps(row), encoding="utf-8")
+        with gzip.open(str(rep) + ".gz", "wb", compresslevel=6) as fh:
+            fh.write(raw)
+        rep.unlink()
+        ev = rep.with_name(rep.name.replace("-fp-planes.json", "-fp-audit-evidence"))
+        if not hides and ev.is_dir():
+            shutil.rmtree(ev)
+        done += 1
+        print("scored", s["label"], "hides" if hides else "clean", flush=True)
+    return done
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -1014,6 +1071,12 @@ def main(argv=None):
     a.add_argument("--probe-commit-mib", type=float, help="re-chunk a worldspace whose first full chunk peaks above this")
     a.add_argument("--fallback-chunk", type=int, default=3, help="shots per process after a probe-commit crossing (default 3)")
     a.add_argument("--exempt", action="append", default=[], help="process path that does not count as busy (repeat)")
+    a = sub.add_parser("score", help="step 4: score rendered reports of one arm, then gzip them and thin their masks")
+    a.add_argument("--group", required=True, help="group definition JSON")
+    a.add_argument("--arm", required=True, choices=["u", "p"], help="u: without the patch; p: with it")
+    a.add_argument("--shots", required=True, help="shots.json the arm was rendered from")
+    a.add_argument("--render-out", required=True, help="the render step's output folder")
+    a.add_argument("--scores-out", required=True, help="folder for one score file per shot")
     args = ap.parse_args(argv)
     if args.cmd == "selftest":
         with runlog.Run("planeassess-selftest", stage_source="single-stage"):
@@ -1024,6 +1087,10 @@ def main(argv=None):
         return 0
     if args.cmd == "scope":
         scope_step(g, args.out)
+        return 0
+    if args.cmd == "score":
+        with runlog.Run("planeassess-score", stage_source="single-stage"):
+            print("scored", score_step(g, args.arm, args.shots, args.render_out, args.scores_out))
         return 0
     if args.cmd == "shots":
         with runlog.Run("planeassess-shots", stage_source="single-stage"):
