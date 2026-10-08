@@ -352,13 +352,18 @@ public sealed class ContactIndex
         return (c with { FacingDistance = cs.FacingDistance }, c.FacingDistance);
     }
 
+    /// <summary>The bucket-storage target for one host grid: half the contact cache budget, never below 64 MiB. With memory
+    /// to spare a grid keeps the fixed 32-unit cells (the fastest query path); only under a tight budget is a large mesh's
+    /// grid coarsened, which saves memory and can cost query time. Coarsening changes storage, never an answer.</summary>
+    public long GridBucketTarget => Math.Max(64L << 20, Budget.Limit / 2);
+
     TriangleGrid? ShellGrid(FormKey key, int snapIndex, FormKey baseKey, Snap s)
     {
         if (_shellGrids.TryGetValue((key, snapIndex, baseKey), out var g)) return g;
         var geom = GeomOf(baseKey);
         TriangleGrid? grid = null;
         if (geom is { CanHost: true })
-            grid = TriangleGrid.BuildAdaptive(SpatialOverlap.TransformSoup(geom.HostShell ?? geom.HostSoup, s.Pos, s.Rot, s.Scale));
+            grid = TriangleGrid.BuildAdaptive(SpatialOverlap.TransformSoup(geom.HostShell ?? geom.HostSoup, s.Pos, s.Rot, s.Scale), targetBucketApproxBytes: GridBucketTarget);
         return _shellGrids[(key, snapIndex, baseKey)] = grid;
     }
 
@@ -597,7 +602,7 @@ public sealed class ContactIndex
         var geom = GeomOf(baseKey);
         TriangleGrid? grid = null;
         if (geom is { CanHost: true } || (anySurface && geom is { HasGeometry: true } && geom.HostSoup.TriangleCount > 0))
-            grid = TriangleGrid.BuildAdaptive(SpatialOverlap.TransformSoup(geom.HostSoup, s.Pos, s.Rot, s.Scale));
+            grid = TriangleGrid.BuildAdaptive(SpatialOverlap.TransformSoup(geom.HostSoup, s.Pos, s.Rot, s.Scale), targetBucketApproxBytes: GridBucketTarget);
         return _hostGrids[(key, snapIndex, baseKey)] = grid;
     }
 
@@ -608,7 +613,7 @@ public sealed class ContactIndex
     {
         if (_armGrids.TryGetValue((key, snapIndex, baseKey), out var g)) return g;
         var geom = GeomOf(baseKey);
-        TriangleGrid? grid = geom is { CanHost: true } ? TriangleGrid.BuildAdaptive(SpatialOverlap.TransformSoup(geom.HostSoup, s.Pos, s.Rot, s.Scale)) : null;
+        TriangleGrid? grid = geom is { CanHost: true } ? TriangleGrid.BuildAdaptive(SpatialOverlap.TransformSoup(geom.HostSoup, s.Pos, s.Rot, s.Scale), targetBucketApproxBytes: GridBucketTarget) : null;
         return _armGrids[(key, snapIndex, baseKey)] = grid;
     }
     readonly PlacementCache<TriangleGrid> _armGrids;

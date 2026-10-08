@@ -52,6 +52,13 @@ static class CacheBudgetProof
            && one.Budget.Bytes == expect && one.Budget.PeakBytes == expect,
               $"pool {one.Budget.Bytes}, expected {expect} (grid {gridBytes}, soup {soupBytes})");
 
+        long gib = 1L << 30;
+        long ceilingTarget = new ContactIndex(G, 4 * gib).GridBucketTarget, cappedTarget = new ContactIndex(G, (long)(1.6 * gib)).GridBucketTarget;
+        long floorTarget = new ContactIndex(G, CacheBudget.MinimumBytes).GridBucketTarget;
+        Check("cache-budget T3d: a host grid keeps fixed cells up to half the cache budget (2 GiB at the 4 GiB ceiling), coarsened only under a tight budget, never targeted below 64 MiB",
+              ceilingTarget == 2 * gib && cappedTarget == (long)(1.6 * gib) / 2 && floorTarget == 64L << 20,
+              $"ceiling {ceilingTarget}, 1.6 GiB budget {cappedTarget}, minimum budget {floorTarget}");
+
         // T3b: the bound holds — a budget of about three entries, forty placements looked up twice; never over the limit after an
         // insert (no entry here is larger than the limit), evictions happen, and every answer equals the unbounded index's.
         long limit = 3 * (gridBytes + CacheBudget.EntryOverhead);
@@ -79,7 +86,6 @@ static class CacheBudgetProof
               tiny.Budget.Report());
 
         // T4: the automatic budget, the parser, and the fit check.
-        long gib = 1L << 30;
         Check("cache-budget T4e: auto never exceeds the 4 GiB ceiling - 20 % of 64 GiB would be 12.8 GiB",
               CacheBudget.Auto(64 * gib) == 4 * gib && CacheBudget.AutoCeilingBytes == 4 * gib && CacheBudget.Auto(20 * gib) == 4 * gib,
               $"64 GiB -> {CacheBudget.Auto(64 * gib)}, 20 GiB -> {CacheBudget.Auto(20 * gib)}");
