@@ -29,6 +29,13 @@ BAND = (262, 938)            # [lo, hi) rows of a 1200-square render
 NATIVE_PER_RASTER = 10.24
 
 
+def _rows(d):
+    """rows_by_plane(d), joined once per report and cached on it: every reader below walks the same rows."""
+    if "_planeRows" not in d:
+        d["_planeRows"] = [(pl, list(c)) for pl, c in rows_by_plane(d)]
+    return d["_planeRows"]
+
+
 def load_report(path):
     p = Path(path)
     raw = gzip.decompress(p.read_bytes()) if p.suffix == ".gz" else p.read_bytes()
@@ -47,11 +54,14 @@ def green_in_rows(mask_path, band=BAND, reader=None):
     return int((a[lo:hi, :, 1] > 0).sum())
 
 
-def score_view(report, band=BAND, reader=None):
-    """Per plane: in-band visible predicted-culled pixels, with the report's whole-raster figure beside it."""
+def score_view(report, band=BAND, reader=None, planes=None):
+    """Per plane: in-band visible predicted-culled pixels, with the report's whole-raster figure beside it.
+    `planes` limits the work to those planes (each plane's figures are independent of the others)."""
     d = report if isinstance(report, dict) else load_report(report)
     out = {}
-    for pl, candidates in rows_by_plane(d):
+    for pl, candidates in _rows(d):
+        if planes is not None and pl["formKey"] not in planes:
+            continue
         in_band = raster = 0
         shapes = []
         for c in candidates:
@@ -75,13 +85,13 @@ def score_view(report, band=BAND, reader=None):
     return out
 
 
-def score_report(report, city_keys, reader=None):
+def score_report(report, city_keys, reader=None, planes=None):
     """score_view split by owner: shapes whose subject is in `city_keys` (the content mod's placed records)
     against all others. Field names are the sealed ones."""
     d = report if isinstance(report, dict) else load_report(report)
-    sc = score_view(d, reader=reader)
+    sc = score_view(d, reader=reader, planes=planes)
     pos = {}
-    for pl, candidates in rows_by_plane(d):
+    for pl, candidates in _rows(d):
         for c in candidates:
             if c.get("refPosition") is not None:
                 pos.setdefault(c.get("subject"), c.get("refPosition"))
@@ -109,7 +119,7 @@ def census(report, city_keys, planes=None):
     """Per plane: the content mod's candidate rows as predicted-culled / unassessed / predicted-drawn."""
     d = report if isinstance(report, dict) else load_report(report)
     per = {}
-    for pl, candidates in rows_by_plane(d):
+    for pl, candidates in _rows(d):
         if planes is not None and pl["formKey"] not in planes:
             continue
         rows = [c for c in candidates if c.get("subject") in city_keys]
@@ -135,7 +145,7 @@ def vis_status(report, city_keys, planes):
     means the score could not see that content: the view cannot be called clean for that plane."""
     d = report if isinstance(report, dict) else load_report(report)
     c = Counter()
-    for pl, candidates in rows_by_plane(d):
+    for pl, candidates in _rows(d):
         if pl["formKey"] not in planes:
             continue
         for x in candidates:
@@ -166,7 +176,7 @@ def refusal(report, plane):
     `unassessed: ...` and at least one names a rule refusal (rows the renderer cannot judge carry their own shape-level
     reasons beside it), else None (no rows, or some row's relation was assessed)."""
     d = report if isinstance(report, dict) else load_report(report)
-    for pl, candidates in rows_by_plane(d):
+    for pl, candidates in _rows(d):
         if pl["formKey"] != plane:
             continue
         texts = set()
@@ -179,3 +189,16 @@ def refusal(report, plane):
                 texts.add(t)
         return sorted(texts)[0] if texts else None
     return None
+
+
+def hidden_anywhere(report):
+    """Every shape some plane culls while the unculled scene shows it (Assessed, VisiblePixels > 0), as
+    "subject|shape". Read from the report alone (no masks): what is already hidden at this view."""
+    d = report if isinstance(report, dict) else load_report(report)
+    out = set()
+    for pl, candidates in _rows(d):
+        for c in candidates:
+            v = c.get("visibility") or {}
+            if c.get("predictedCulled") and v.get("Assessed") and v.get("VisiblePixels", 0) > 0:
+                out.add("%s|%s" % (c.get("subject"), c.get("shape")))
+    return out

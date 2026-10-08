@@ -973,17 +973,28 @@ def render_step(g, arm, shots_file, out, viewprobe, instance, game, caps, need_f
 
 
 # ------------------------------------------------------------------ step 4: score the rendered chunks
-def view_facts(d, plane, city):
-    """What the verdict reads from one report for one plane: the report's plane entry, hidden px by owner, census,
-    visibility status and the rule's refusal."""
+def report_facts(d, planes, city):
+    """What the verdict reads from one report, per plane of `planes`: the report's plane entry, hidden px by owner,
+    every hidden shape with its owner (A = the content mod's records), census and visibility status of the content rows
+    under that plane, and the rule's refusal; plus, once per report, every shape hidden by any plane ("subject|shape").
+    Masks are read for the listed planes only."""
     import occlscore as S
-    sc = S.score_report(d, city).get(plane)
-    entry = next(({k: v for k, v in pl.items() if k != "candidates"} for pl, _ in S.rows_by_plane(d)
-                  if pl["formKey"] == plane), None)
-    return {"plane": entry,
-            "score": None if sc is None else {"cityInBandPx": sc["cityInBandPx"], "otherInBandPx": sc["otherInBandPx"]},
-            "census": S.census(d, city, {plane}).get(plane), "visStatus": S.vis_status(d, city, {plane}),
-            "refusal": S.refusal(d, plane)}
+    planes = set(planes)
+    sv = S.score_view(d, planes=planes)
+    cen = S.census(d, city, planes)
+    entries = {pl["formKey"]: {k: v for k, v in pl.items() if k != "candidates"} for pl, _ in S.rows_by_plane(d)
+               if pl["formKey"] in planes}
+    out = {}
+    for fk in planes:
+        sc = sv.get(fk)
+        shapes = None if sc is None else [{"subject": x["subject"], "shape": x["shape"], "inBandPx": x["inBandPx"],
+                                           "owner": "A" if x["subject"] in city else "other"} for x in sc["shapes"]]
+        out[fk] = {"plane": entries.get(fk),
+                   "score": None if sc is None else {"cityInBandPx": sum(x["inBandPx"] for x in shapes if x["owner"] == "A"),
+                                                     "otherInBandPx": sum(x["inBandPx"] for x in shapes if x["owner"] != "A")},
+                   "shapes": shapes, "census": cen.get(fk), "visStatus": S.vis_status(d, city, {fk}),
+                   "refusal": S.refusal(d, fk)}
+    return out, sorted(S.hidden_anywhere(d))
 
 
 def score_step(g, arm, shots_file, render_out, scores_out):
@@ -1000,27 +1011,35 @@ def score_step(g, arm, shots_file, render_out, scores_out):
     out = Path(scores_out)
     out.mkdir(parents=True, exist_ok=True)
     done = 0
-    for rep in sorted(Path(render_out).glob("*/*-fp-planes.json")):
-        key = next((k for k in shots if rep.name.endswith("-%s-fp-planes.json" % k)), None)
+    reps = sorted(Path(render_out).glob("*/*-fp-planes.json")) + sorted(Path(render_out).glob("*/*-fp-planes.json.gz"))
+    for rep in reps:
+        zipped = rep.suffix == ".gz"
+        name = rep.name[:-3] if zipped else rep.name
+        key = next((k for k in shots if name.endswith("-%s-fp-planes.json" % k)), None)
         if key is None:
             continue
         s = shots[key]
         dest = out / (s["label"] + ".json")
         if dest.exists():
             continue
-        raw = rep.read_bytes()
+        raw = gzip.decompress(rep.read_bytes()) if zipped else rep.read_bytes()
         d = json.loads(raw.decode("utf-8"))
-        facts = {fk: view_facts(d, fk, city) for fk in s["planes"]}
+        try:
+            facts, anywhere = report_facts(d, s["planes"], city)
+        except FileNotFoundError as ex:      # a mask already thinned away: name it, never guess
+            print("cannot score %s: %s" % (s["label"], ex), flush=True)
+            continue
         hides = any(((f["score"] or {}).get("cityInBandPx", 0) + (f["score"] or {}).get("otherInBandPx", 0)) > 0
                     for f in facts.values())
         row = {"label": s["label"], "arm": arm, "gaze": key, "basis": s.get("basis", "route"), "worldspace": s["worldspace"],
-               "report": str(rep) + ".gz", "reportSha256": hashlib.sha256(raw).hexdigest(), "reportBytes": len(raw),
-               "masksKept": hides, "planes": facts}
-        dest.write_text(json.dumps(row), encoding="utf-8")
-        with gzip.open(str(rep) + ".gz", "wb", compresslevel=6) as fh:
-            fh.write(raw)
-        rep.unlink()
-        ev = rep.with_name(rep.name.replace("-fp-planes.json", "-fp-audit-evidence"))
+               "report": str(rep) if zipped else str(rep) + ".gz", "reportSha256": hashlib.sha256(raw).hexdigest(), "reportBytes": len(raw),
+               "masksKept": hides, "planes": facts, "hiddenAnywhere": anywhere}
+        if not zipped:
+            with gzip.open(str(rep) + ".gz", "wb", compresslevel=6) as fh:
+                fh.write(raw)
+            rep.unlink()
+        dest.write_text(json.dumps(row), encoding="utf-8")      # after the gzip: a stop never leaves a scored raw
+        ev = rep.with_name(name.replace("-fp-planes.json", "-fp-audit-evidence"))
         if not hides and ev.is_dir():
             shutil.rmtree(ev)
         done += 1
