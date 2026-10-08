@@ -97,7 +97,7 @@ public sealed record ArmContact(SoupContact Contact, FormKey Against, char DepSr
     public DirectionalCoverageResult? AuthoredCoverage { get; init; }
     public bool CoverageInputsExactlyUnchanged { get; init; }
     public IReadOnlyList<CoverageNeighbour>? CoverageNeighbours { get; init; }
-    /// <summary>Diagnostic only (never read by the selection or the rule): every neighbour the dependent penetrated deeper than Îµ,
+    /// <summary>Diagnostic only (never read by the selection or the rule): every neighbour the dependent penetrated deeper than ε,
     /// with that depth and its measured authored depth — so a report can attribute a changed row to the differential rule.</summary>
     public IReadOnlyList<(FormKey Against, float Depth, float Authored)>? DeepNeighbours { get; init; }
 }
@@ -313,11 +313,11 @@ public sealed class ContactIndex
     public float MaxDependentDim { get; init; } = 256f;
     public float Epsilon { get; init; } = 4f;
     /// <summary>A pair further apart than ε as authored has no relationship at ε — but one within the NEAR band still
-    /// gets its winner arm measured, so the report can re-judge every row at a larger Îµ (sensitivity) from stored
-    /// facts rather than a re-run. Twice Îµ by default.</summary>
+    /// gets its winner arm measured, so the report can re-judge every row at a larger ε (sensitivity) from stored
+    /// facts rather than a re-run. Twice ε by default.</summary>
     public float NearBand { get; init; } = 8f;
     /// <summary>The largest box gap that still gets a surface test — the near band plus a little, so a pair the rule
-    /// could call touching at any Îµ under test is never rejected by the box lower bound.</summary>
+    /// could call touching at any ε under test is never rejected by the box lower bound.</summary>
     public float BoxBand { get; init; } = 10f;
     public float SupportCos { get; init; } = 0.866f;
     public float AttachCos { get; init; } = 0.5f;
@@ -326,7 +326,7 @@ public sealed class ContactIndex
     /// radius grown (<see cref="RefGeometry.HostShell"/> / <see cref="RefGeometry.DepShell"/>); normal, depth and extent stay the core's.
     /// The pair's broad phase widens by both shapes' largest radius (x scale) so a pair only the grown surfaces bring together is tested.
     /// Chosen over reading everything on the grown soups (whose summed normal tilts and whose depth reads crossings at open faces) and
-    /// over a lower Îµ, by the in-game placement-contact acceptance set; Îµ is unchanged.</summary>
+    /// over a lower ε, by the in-game placement-contact acceptance set; ε is unchanged.</summary>
     public bool ReadRadius { get; init; }
     float _maxHostRadiusW;                                                     // the largest host radius x scale hashed so far
     float HostPadW(FormKey baseKey, Snap s)
@@ -828,10 +828,10 @@ public sealed class ContactIndex
     /// arm; <paramref name="baseOf"/> its base then. The against-ref of the best contact is the one the reported depth
     /// was measured against, and the arm carries how wide that ref is along the contact normal (R4).
     /// <para><paramref name="preexistingDepth"/> (the differential Sunk rule, opt-in; <see cref="Judge"/> passes it): for a neighbour
-    /// the dependent penetrates deeper than Îµ, how deep the dependent already sat in that same reference in the authoring arm
+    /// the dependent penetrates deeper than ε, how deep the dependent already sat in that same reference in the authoring arm
     /// (0 when it did not exist there or did not overlap). Neighbours are then ranked by NEW depth (penetration minus that), so a
-    /// deep authored overlap cannot mask a shallower new one. A neighbour whose new depth is within Îµ is a PRE-EXISTING overlap:
-    /// it is chosen only when nothing else touches within Îµ, and the result then says so (<see cref="ArmContact.PreexistingOnly"/>).
+    /// deep authored overlap cannot mask a shallower new one. A neighbour whose new depth is within ε is a PRE-EXISTING overlap:
+    /// it is chosen only when nothing else touches within ε, and the result then says so (<see cref="ArmContact.PreexistingOnly"/>).
     /// Without the function the selection is exactly the one before the rule.</para></summary>
     public ArmContact? BestContact(FormKey depKey, int depSnapIndex, FormKey depBase, Snap depSnap, Aabb depBox,
                                    BoxHash<FormKey> hash, Func<FormKey, (Snap Snap, int SnapIndex)?> placementOf, Func<FormKey, int, FormKey> baseOf,
@@ -845,7 +845,7 @@ public sealed class ContactIndex
         var depGeom = GeomOf(depBase)!;
         ArmContact? best = null; float bestRank = 0f;          // the best contact that is not a pre-existing overlap, ranked by new depth
         ArmContact? bestPre = null;                            // the deepest pre-existing overlap
-        List<(FormKey, float, float)>? deep = null;            // diagnostic: every neighbour deeper than Îµ and its authored depth
+        List<(FormKey, float, float)>? deep = null;            // diagnostic: every neighbour deeper than ε and its authored depth
         ArmContact? bestCover = null, incompleteCover = null;
         List<CoverageNeighbour>? covers = null;
         bool readCover = ReadRadius && preexistingDepth is not null && authoredCoverage is not null && depBox.Size.Z <= Epsilon;
@@ -933,8 +933,8 @@ public sealed class ContactIndex
     /// when the best other contact (<paramref name="best"/>, its new depth <paramref name="bestRank"/>) neither sinks nor touches.</summary>
     public static ArmContact? ChooseContact(ArmContact? best, float bestRank, ArmContact? bestPre, float epsilon)
     {
-        // "Touches" exactly as the rule reads it: a new depth over Îµ (Sunk) or a facing gap within Îµ (ReSupported). A contact that only
-        // grazes (0 < depth <= Îµ) with a facing gap over Îµ reads Stranded/Orphaned, so it must not displace a pre-existing overlap.
+        // "Touches" exactly as the rule reads it: a new depth over ε (Sunk) or a facing gap within ε (ReSupported). A contact that only
+        // grazes (0 < depth <= ε) with a facing gap over ε reads Stranded/Orphaned, so it must not displace a pre-existing overlap.
         bool bestTouches = best is not null && (bestRank > epsilon || best.Contact.FacingDistance <= epsilon);
         return bestPre is not null && !bestTouches ? bestPre : best;
     }
@@ -1026,7 +1026,7 @@ public sealed class ContactIndex
                 DependentDisabledViaParent: depWinEn.ViaParent, DependentEnableUnresolved: !depWinEn.Resolved);
             var r0 = DetectorModel.PlacementContact(f0, Epsilon, SupportCos, AttachCos);
             // A near miss — no relationship at ε, but within the near band — still gets its winner arm measured, so a
-            // re-judgement at a larger Îµ has the facts it needs (the report's sensitivity table).
+            // re-judgement at a larger ε has the facts it needs (the report's sensitivity table).
             bool nearMiss = r0.Verdict == ContactVerdict.NoRelation && auth is { } ac
                          && ac.Contact.FacingDistance <= NearBand && ac.Contact.EffectivePenetration <= NearBand && !float.IsNaN(ac.Contact.NormalUp);
             // A re-placed dependent (MovedTogether) keeps its verdict whatever the winner arm says, but the winner arm is
@@ -1049,7 +1049,7 @@ public sealed class ContactIndex
             var winBox = WorldBox(winBase, depWin);
             // The differential Sunk rule: how deep the dependent already sat in a neighbour as authored — both at their authoring
             // placements in the arm without the host's mover (GATE-A §3.3, closed-slabs lane). The dependent's authoring soup is
-            // built once per row, and only when some neighbour penetrates deeper than Îµ.
+            // built once per row, and only when some neighbour penetrates deeper than ε.
             TriangleSoup? depAuthSoup = null; bool depAuthBuilt = false;
             float Preexisting(FormKey nKey)
             {
@@ -1127,8 +1127,8 @@ public sealed class ContactIndex
     }
 
     /// <summary>Trace a judged pair (GATE-A §2.1, §12 M2): a clash verdict is <c>judged_relation</c>; a correct non-clash
-    /// (MovedTogether, ReSupported, Removed) is <c>judged_relation_not_clash</c>; a near miss (no relation at Îµ, inside the
-    /// near band) is <c>judged_below_threshold / NearMiss</c> with the distance, Îµ and the margin; otherwise
+    /// (MovedTogether, ReSupported, Removed) is <c>judged_relation_not_clash</c>; a near miss (no relation at ε, inside the
+    /// near band) is <c>judged_below_threshold / NearMiss</c> with the distance, ε and the margin; otherwise
     /// <c>judged_no_relation</c>. Unjudgeable names its blocker.</summary>
     void TraceJudged(FormKey dep, FormKey host, ContactRelation rel, ContactVerdict verdict, ContactBlocker reason, bool nearMiss, ArmContact? auth)
     {
