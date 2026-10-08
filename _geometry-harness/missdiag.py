@@ -37,9 +37,11 @@ REASONS = (
     "fixes an inter-mod clash",
     "patch placement clips",
     "patch placement hides",
+    "does not fix",
 )
 PLANE_MARKER = "000017:Skyrim.esm"
-OCCLUSION_REASONS = {"fixes an inter-mod clash": "fixes an inter-mod clash", "patch placement hides": "patch placement hides",
+OCCLUSION_REASONS = {"fixes an inter-mod clash": "fixes an inter-mod clash", "does not fix": "does not fix",
+                     "patch placement hides": "patch placement hides",
                      "taste (no clash)": "taste (no clash)", "set aside": "set aside by filter", "cannot tell": "cannot tell"}
 EVIDENCE_TYPES = ("mechanical", "check", "render reading")
 

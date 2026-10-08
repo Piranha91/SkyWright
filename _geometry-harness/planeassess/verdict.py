@@ -30,14 +30,16 @@ Rules (the task's Gate A section 2.5 with Piranha's D3 and D6 and the reviewer's
   3. taste (no clash): the plane's u winner is the content mod (A's own plane), whatever it hid (G5's reading).
   4. fixes an inter-mod clash: the u winner is the plane mod (B's override wins, which covers B re-enabling it), it hid
      content-mod shapes at some usable gaze, and at every such gaze the p version hides none of those shapes.
-     If it still hides some of them in p -> cannot tell: still hides the content mod's content.
+     If it still hides some of them in p -> does not fix: a measured outcome (the clash stays or grows), stated with
+     the px of those shapes in u and p; never cannot tell.
      A base-game u winner (neither mod touched it) hiding the content mod's content is the content mod's own matter:
      taste (no clash), "corrects the content mod against the base game", kept in the machine record (shown False).
   5. set aside: the edit is a disable of a plane-mod or base-game plane that hid nothing in u at every usable gaze.
   6. taste (no clash): everything else; a plane that hid only non-mod content is kept in the machine record (shown False).
 Ownership is never collapsed into a total: the plane's owner comes from the records (`winners`), the content's owner
 from each shape (`owner`: "A" = the content mod's placed records), and every rule above reads shapes, not sums.
-`visStatus` is scoped to the content rows under this plane (occlscore.vis_status filters by plane), not the whole view.
+A view without a per-shape list is decided on its totals (one pseudo-shape per owner); the basis then says
+"totals only" and counts those views. `visStatus` is scoped to the content rows under this plane (occlscore.vis_status filters by plane), not the whole view.
 Every verdict states its basis: "taste (no clash): nothing hidden at N route views", "fixes an inter-mod clash at the N
 route views where it hid"; prior in-game poses are counted and named apart. `unjudgedShare` is the share of content rows
 under the plane that were unassessed (shapes the renderer cannot judge), over the usable views: reported beside the
@@ -47,7 +49,8 @@ verdict, never a reason for cannot tell (D3). A Box edit carries BOX_LABEL (D6).
 """
 from __future__ import annotations
 
-VERDICTS = ("fixes an inter-mod clash", "patch placement hides", "taste (no clash)", "set aside", "cannot tell")
+VERDICTS = ("fixes an inter-mod clash", "does not fix", "patch placement hides", "taste (no clash)", "set aside",
+            "cannot tell")
 BOX_LABEL = "Box verdict: the Box silhouette rule rests on one in-game station"
 AUDIT_TOLERANCE = 1.0          # u: the report's plane position against the arm's winning record
 TILT_REFUSALS = ("plane orientation outside", "box orientation outside")
@@ -170,8 +173,11 @@ def decide(edit, views):
         return _out(edit, "taste (no clash)", "the content mod's own plane", gazes, usable, st)
     if hid_a and own_b:
         if still_a:
-            return _out(edit, "cannot tell", "still hides the content mod's content", gazes, usable,
-                        also=[fix_note] if fix_note else [])
+            pu = sum(px for a in still_a for k, (px, o) in _hidden(a.get("u"), "A").items() if k in _hidden(a.get("p"), "A"))
+            pp = sum(px for a in still_a for k, (px, o) in _hidden(a.get("p"), "A").items() if k in _hidden(a.get("u"), "A"))
+            return _out(edit, "does not fix", "still hides the content mod's content", gazes, usable,
+                        "does not fix: still hides %d px of the content mod's content (u %d px) at the %s"
+                        % (pp, pu, _where(*_count(still_a))), also=[fix_note] if fix_note else [])
         return _out(edit, "fixes an inter-mod clash", "the content mod's content hidden in u is drawn with the patch",
                     gazes, usable, "fixes an inter-mod clash at the %s where it hid" % _where(*_count(hid_a)))
     if hid_a and base:
@@ -194,6 +200,8 @@ def decide(edit, views):
 
 def _out(edit, verdict, reason, gazes, usable, statement=None, shown=True, also=None):
     route = sum(1 for a in usable if (a.get("u") or a.get("p"))["basis"] == "route")
+    totals = sum(1 for a in usable for v in a.values() if v.get("shapes") is None and v.get("score") is not None)
+    shaped = sum(1 for a in usable for v in a.values() if v.get("shapes") is not None)
     un = tot = 0
     for a in usable:
         for v in a.values():
@@ -201,7 +209,9 @@ def _out(edit, verdict, reason, gazes, usable, statement=None, shown=True, also=
             un += c.get("unassessed", 0)
             tot += sum(c.values())
     return {"verdict": verdict, "reason": reason, "statement": statement or "%s: %s" % (verdict, reason), "shown": shown,
-            "basis": {"gazes": len(gazes), "assessed": len(usable), "route": route, "prior in-game pose": len(usable) - route},
+            "basis": {"gazes": len(gazes), "assessed": len(usable), "route": route, "prior in-game pose": len(usable) - route,
+                      "shapes": "per shape" if not totals else ("totals only" if not shaped else "totals at %d views" % totals),
+                      "viewsOnTotals": totals},
             "unjudgedShare": round(un / tot, 4) if tot else None,
             "boxLabel": BOX_LABEL if edit.get("kind") == "Box" else None, "also": [x for x in (also or []) if x]}
 
