@@ -36,7 +36,11 @@ REASONS = (
     "cannot tell",
     "fixes an inter-mod clash",
     "patch placement clips",
+    "patch placement hides",
 )
+PLANE_MARKER = "000017:Skyrim.esm"
+OCCLUSION_REASONS = {"fixes an inter-mod clash": "fixes an inter-mod clash", "patch placement hides": "patch placement hides",
+                     "taste (no clash)": "taste (no clash)", "set aside": "set aside by filter", "cannot tell": "cannot tell"}
 EVIDENCE_TYPES = ("mechanical", "check", "render reading")
 
 
@@ -105,7 +109,12 @@ def assign_reason(ev):
       crossing), pose (where the item was measured, e.g. its rest pose read in game), edit (what the patch's edit does,
       e.g. 'restores support' or 'adds the item'), relation ('crosses', the default, or 'meets': an anchor body that
       meets the other object, read with no clearance, so depth is 0 or None)).
+      occlusion (dict | None: an occlusion plane cluster's verdict from the occlusion assessment, scripts/planeassess:
+      verdict, statement, check, unjudgedShare?, boxLabel?).
     Returns dict(reason, detail, evidenceType, bundleConfiguration). Ordered rules, first that holds:
+      00. occlusion given -> the assessment's verdict (set aside -> set aside by filter), evidence 'check', detail =
+          check: statement[; unjudged share S][; Box label]. A plane is judged by what it hides, never by contact, floor
+          or anchor rules. An unknown verdict or a missing part raises.
       0a. placementClip given -> patch placement clips (evidence 'check'), detail = check: item clips other by depth u at
           pose; edit: edit. A meet is worded check: item meets other at pose (a meet: depth 0); edit: edit. It outranks a
           fix attribution (an edit that restores a support but leaves its item clipping). A missing part, a crossing
@@ -130,6 +139,17 @@ def assign_reason(ev):
 
     def out(reason, detail, evidence):
         return {"reason": reason, "detail": detail, "evidenceType": evidence, "bundleConfiguration": bundle}
+
+    occ = ev.get("occlusion")
+    if occ is not None:
+        if occ.get("verdict") not in OCCLUSION_REASONS or not occ.get("statement") or not occ.get("check"):
+            raise ValueError("occlusion evidence needs a known verdict, a statement and a check: %r" % (occ,))
+        detail = "%s: %s" % (occ["check"], occ["statement"])
+        if occ.get("unjudgedShare") is not None:
+            detail += "; unjudged share %s" % occ["unjudgedShare"]
+        if occ.get("boxLabel"):
+            detail += "; " + occ["boxLabel"]
+        return out(OCCLUSION_REASONS[occ["verdict"]], detail, "check")
 
     clip = ev.get("placementClip")
     if clip is not None:
@@ -186,6 +206,12 @@ def assign_reason(ev):
 
 
 LOAD_ENABLE = ("enabled", "disabled", None)
+
+
+def is_plane_record(base, primitive):
+    """An occlusion plane: placed from the plane marker base, or carrying a placed primitive (XPRM). Such a record is
+    routed to the occlusion assessment."""
+    return base == PLANE_MARKER or primitive is not None
 
 
 def absence_blocker(states, load_enable=None):
