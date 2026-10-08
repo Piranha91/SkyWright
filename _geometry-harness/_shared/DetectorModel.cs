@@ -1506,7 +1506,7 @@ public static class DetectorModel
 }
 
 /// <summary>Who a plugin is, for the truth rule. Bethesda and USSEP are filenames; Generated is the fixed filenames
-/// <c>tool-output-awareness</c> lists; WaterMod is a rule over the plugin's records (see CellBoundaryIndex); Other is
+/// the retired <c>tool-output-awareness</c> skill listed; WaterMod is a rule over the plugin's records (see CellBoundaryIndex); Other is
 /// everything else.</summary>
 public enum PluginKind { Bethesda, Ussep, Generated, WaterMod, Other }
 

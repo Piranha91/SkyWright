@@ -30,7 +30,7 @@ public static class PluginKinds
     static readonly HashSet<string> Bethesda = new(StringComparer.OrdinalIgnoreCase)
     { "Skyrim.esm", "Update.esm", "Dawnguard.esm", "HearthFires.esm", "Dragonborn.esm", "SkyrimVR.esm", "_ResourcePack.esl" };
     public const string Ussep = "Unofficial Skyrim Special Edition Patch.esp";
-    /// <summary>The fixed filenames <c>tool-output-awareness</c> lists (patchprobe carries the same set). A Synthesis
+    /// <summary>The fixed filenames the retired <c>tool-output-awareness</c> skill listed (patchprobe carries the same set). A Synthesis
     /// output folder's other plugins are named by its pipeline and are NOT caught by name — a stated limit.</summary>
     static readonly HashSet<string> Generated = new(StringComparer.OrdinalIgnoreCase)
     { "DynDOLOD.esm", "DynDOLOD.esp", "Occlusion.esp", "PGPatcher.esp", "PG_1.esp", "Synthesis.esp", "Requiem for the Indifferent.esp", "TexGen_Output.esp" };

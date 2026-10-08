@@ -6,7 +6,7 @@ using HousecarlCore.Progress;
 // The 862 → 398 base / 242 CC / 222 third-party split classifies by the SOURCE plugin and asserts
 // the Bethesda buckets are intrinsic ("shipped that way"). That was plausible, not measured — the
 // same one-end blindness the dangling-LINK split was built to fix. This measures it: run the same
-// check_errors sweep over a BARE order (base masters + Creation Club only, in their real
+// housecarl_check errors sweep over a BARE order (base masters + Creation Club only, in their real
 // loadorder.txt positions) and compare per-plugin dangling counts with the full 490-plugin run.
 //
 //   identical counts  -> the bucket is intrinsic; "74% floor" is measured, not assumed

@@ -121,10 +121,10 @@
       "evidence": {
         "strength": "record-fact",
         "claim": null,
-        "limits": "No CLI adapter. The capability is the MCP tool housecarl_check_errors, which the controller cannot call: it is served by the in-process MCP server, not by a harness binary. The check therefore stays unsupported for the runner and keeps the evaluation incomplete until a human runs the tool and files a decision, which this check does not admit."
+        "limits": "No CLI adapter. The capability is the MCP tool housecarl_check (errors family), which the controller cannot call: it is served by the in-process MCP server, not by a harness binary. The check therefore stays unsupported for the runner and keeps the evaluation incomplete until a human runs the tool and files a decision, which this check does not admit."
       },
       "manualDecisionAllowed": false,
-      "unsupportedReason": "housecarl_check_errors is an MCP tool with no command-line entry point; evalrun composes processes, not MCP verbs."
+      "unsupportedReason": "housecarl_check is an MCP tool with no command-line entry point; evalrun composes processes, not MCP verbs."
     },
     {
       "id": "loadability.missing-assets",
@@ -187,10 +187,10 @@
       "evidence": {
         "strength": "record-fact",
         "claim": null,
-        "limits": "No CLI adapter. The capability is housecarl_cross_plugin_query plus housecarl_diff_record, read under the merge rules the world-edit-compatibility skill states (Skyrim is not uniformly winner-takes-all, and diffing runtime-merged subrecords reports noise as findings). orderprobe measures CONTENTION — how many records a pair contests — which is not the same question and never substitutes for it."
+        "limits": "No CLI adapter. The capability is housecarl_records (aggregate, delta and tree forms), read under the merge rules the world-edit-compatibility skill states (Skyrim is not uniformly winner-takes-all, and diffing runtime-merged subrecords reports noise as findings). orderprobe measures CONTENTION — how many records a pair contests — which is not the same question and never substitutes for it."
       },
       "manualDecisionAllowed": false,
-      "unsupportedReason": "housecarl_cross_plugin_query and housecarl_diff_record are MCP tools with no command-line entry point."
+      "unsupportedReason": "housecarl_records is an MCP tool with no command-line entry point."
     },
     {
       "id": "records.cell-attributes",
@@ -266,10 +266,10 @@
       "evidence": {
         "strength": "record-fact",
         "claim": null,
-        "limits": "No CLI adapter. housecarl_validate_dialogue validates the dialogue graph; the FLST / LCTN / SMQN membership rules are read with the record tools under the skill's merge semantics. driftprobe's SPLIT class (functional.quest-alias-split) covers alias geometry, not registration data."
+        "limits": "No CLI adapter. housecarl_check findings=[\"dialogue\"] validates the dialogue graph and housecarl_records project.form=info_order reads the merged line order; the FLST / LCTN / SMQN membership rules are read with the record tools under the skill's merge semantics. driftprobe's SPLIT class (functional.quest-alias-split) covers alias geometry, not registration data."
       },
       "manualDecisionAllowed": false,
-      "unsupportedReason": "housecarl_validate_dialogue and the record query tools are MCP tools with no command-line entry point."
+      "unsupportedReason": "housecarl_check and housecarl_records are MCP tools with no command-line entry point."
     },
     {
       "id": "geometry.navmesh-ownership",

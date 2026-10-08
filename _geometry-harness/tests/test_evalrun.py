@@ -5134,7 +5134,7 @@ def initialize(name) -> dict:
 
 def tools_call(n: int, text: str = "") -> dict:
     return {"jsonrpc": "2.0", "id": n, "method": "tools/call",
-            "params": {"name": "housecarl_read_plugin_file", "arguments": {"path": "FixtureTarget.esp",
+            "params": {"name": "housecarl_records", "arguments": {"path": "FixtureTarget.esp",
                                                                           "note": text}}}
 
 
