@@ -932,11 +932,11 @@ string? FitCheck()
     {
         if (cacheBudget is null)
         {
-            var unavailable = CacheBudget.SelectAutomatic(GC.GetGCMemoryInfo().TotalAvailableMemoryBytes, null, live,
-                "managed bytes after compacting full collection");
-            return unavailable.Refusal + "; " + unavailable.Describe();
+            cidx.RefreshAutomaticBudget(() => CacheBudget.SelectAutomatic(
+                GC.GetGCMemoryInfo().TotalAvailableMemoryBytes, null, live, "managed bytes after compacting full collection"));
+            line += " -> " + cidx.AutomaticBudgetReport();
         }
-        Console.WriteLine(line + $" (fit check skipped: free memory unreadable)  ({sw.Elapsed.TotalSeconds - t0:0.0}s)");
+        Console.WriteLine(line + $" (fit check skipped: free memory unreadable on this platform)  ({sw.Elapsed.TotalSeconds - t0:0.0}s)");
         return null;
     }
     if (CacheBudget.FitRefusal(live, f, "--radius off lowers the need; a larger machine or freeing memory raises what fits") is { } refusal) return refusal;

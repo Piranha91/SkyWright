@@ -105,7 +105,7 @@ static class CacheBudgetProof
         var runtimeWins = CacheBudget.SelectAutomatic(8 * gib, 30 * gib, 2 * gib);
         var ceilingWins = CacheBudget.SelectAutomatic(64 * gib, 30 * gib, 2 * gib);
         var floorWins = CacheBudget.SelectAutomatic(64 * gib, 1L << 20, 2L << 20);
-        var unavailable = CacheBudget.SelectAutomatic(64 * gib, null, 2 * gib);
+        var unavailable = CacheBudget.SelectAutomatic(8 * gib, null, 2 * gib);
         long freeExpected = (long)(gib * 0.40), runtimeExpected = (long)(8 * gib * 0.20);
         Check("cache-budget T5a: the free term wins with literal runtime 64/free 3/managed 2 GiB readings",
               freeWins.SelectedBytes == freeExpected && freeWins.WinningTerm == "free-now-minus-managed"
@@ -118,10 +118,17 @@ static class CacheBudgetProof
               ceilingWins.SelectedBytes == 4 * gib && ceilingWins.WinningTerm == "ceiling", ceilingWins.Describe());
         Check("cache-budget T5d: free below managed selects the existing 64 MiB floor",
               floorWins.SelectedBytes == 64L << 20 && floorWins.WinningTerm == "free-now-minus-managed", floorWins.Describe());
-        Check("cache-budget T5e: an unavailable physical reading carries a named refusal, never a runtime-only result",
-              unavailable.SelectedBytes is null && unavailable.FreeTermBytes is null && unavailable.AvailablePhysicalBytes is null
-           && unavailable.Refusal is not null && unavailable.Refusal.StartsWith("memory: available physical memory unavailable"),
-              unavailable.Refusal ?? "(no refusal)");
+        Check("cache-budget T5e: an unreadable physical reading selects the runtime term and names the missing free term",
+              unavailable.SelectedBytes == runtimeExpected && unavailable.FreeTermBytes is null && unavailable.AvailablePhysicalBytes is null
+           && unavailable.Refusal is null && unavailable.WinningTerm.StartsWith("runtime; free physical memory unreadable")
+           && unavailable.Describe().Contains("free physical unavailable"),
+              unavailable.Describe());
+        Check("cache-budget T5l: MemAvailable is read from /proc/meminfo text in bytes; absent or malformed lines read as unavailable",
+              CacheBudget.ParseMemAvailable("MemTotal:       16315664 kB\nMemFree:         1048576 kB\nMemAvailable:    8388608 kB\n") == 8L << 30
+           && CacheBudget.ParseMemAvailable("MemTotal: 16315664 kB\nMemFree: 1048576 kB\n") is null
+           && CacheBudget.ParseMemAvailable("MemAvailable: lots kB\n") is null
+           && CacheBudget.ParseMemAvailable("MemAvailable: 8388608 MB\n") is null,
+              $"{CacheBudget.ParseMemAvailable("MemAvailable:    8388608 kB")}");
 
         int constructorReads = 0;
         var automatic = new ContactIndex(G, automaticSelection: () => { constructorReads++; return freeWins; });
@@ -131,12 +138,11 @@ static class CacheBudgetProof
            && automatic.AutomaticBudgetSelection == freeWins && automatic.EffectiveAutomaticBudgetSelection == freeWins
            && automaticContact is not null && viaTallFresh is not null && automaticContact.Contact == viaTallFresh.Contact,
               automatic.AutomaticBudgetReport());
-        bool constructorRefused = false;
-        try { _ = new ContactIndex(G, automaticSelection: () => unavailable); }
-        catch (CacheBudget.AutomaticBudgetUnavailableException ex)
-        { constructorRefused = ex.Selection == unavailable && ex.Message == unavailable.Refusal; }
-        Check("cache-budget T5g: default construction refuses the injected unavailable reading by name",
-              constructorRefused, unavailable.Refusal ?? "(no refusal)");
+        var runtimeOnly = new ContactIndex(G, automaticSelection: () => unavailable);
+        Check("cache-budget T5g: default construction with an unreadable physical reading runs on the runtime term and reports it",
+              runtimeOnly.Budget.Limit == runtimeExpected && runtimeOnly.AutomaticBudgetSelection == unavailable
+           && runtimeOnly.AutomaticBudgetReport().Contains("free physical memory unreadable"),
+              runtimeOnly.AutomaticBudgetReport());
 
         var refreshing = new ContactIndex(G, automaticSelection: () => ceilingWins);
         bool lowered = refreshing.RefreshAutomaticBudget(() => freeWins);
@@ -148,12 +154,9 @@ static class CacheBudgetProof
               !raised && refreshing.Budget.Limit == freeExpected && refreshing.AutomaticBudgetSelection == ceilingWins
            && refreshing.EffectiveAutomaticBudgetSelection == freeWins
            && refreshing.AutomaticBudgetReport().Contains("retained earlier limit"), refreshing.AutomaticBudgetReport());
-        bool refreshRefused = false;
-        try { refreshing.RefreshAutomaticBudget(() => unavailable); }
-        catch (CacheBudget.AutomaticBudgetUnavailableException ex)
-        { refreshRefused = ex.Selection == unavailable && ex.Message == unavailable.Refusal; }
-        Check("cache-budget T5j: unavailable refresh refuses and does not overwrite the successful limit or provenance",
-              refreshRefused && refreshing.Budget.Limit == freeExpected && refreshing.AutomaticBudgetSelection == ceilingWins
+        bool refreshLowered = refreshing.RefreshAutomaticBudget(() => unavailable);
+        Check("cache-budget T5j: a larger runtime-only refresh never raises the pool; the earlier free-term limit remains identified",
+              !refreshLowered && refreshing.Budget.Limit == freeExpected && refreshing.AutomaticBudgetSelection == unavailable
            && refreshing.EffectiveAutomaticBudgetSelection == freeWins,
               $"limit {refreshing.Budget.Limit}; latest [{refreshing.AutomaticBudgetSelection?.Describe()}]; effective [{refreshing.EffectiveAutomaticBudgetSelection?.Describe()}]");
 

@@ -51,18 +51,19 @@ public sealed class CacheBudget
     }
 
     /// <summary>Pure automatic selection: the existing runtime/floor/ceiling term and free-minus-managed term.
-    /// An unavailable physical reading refuses; it never silently substitutes the runtime term.</summary>
+    /// When free physical memory cannot be read on this platform, the runtime term alone is selected and the winning
+    /// term says so (Describe prints it), so the reduced selection is named in the probe's output, never silent.</summary>
     public static AutomaticSelection SelectAutomatic(long runtimeAvailableBytes, long? availablePhysicalBytes,
         long currentManagedBytes, string managedMeasurement = "current uncollected managed bytes")
     {
         long runtimeTerm = Auto(runtimeAvailableBytes);
+        string runtimeWinner = (long)(runtimeAvailableBytes * AutoFraction) <= AutoCeilingBytes ? "runtime" : "ceiling";
         if (availablePhysicalBytes is not { } free)
             return new(runtimeAvailableBytes, null, currentManagedBytes, managedMeasurement, runtimeTerm, null,
-                null, "unavailable", "memory: available physical memory unavailable; automatic contact cache selection refused (GlobalMemoryStatusEx reading required)");
+                runtimeTerm, runtimeWinner + "; free physical memory unreadable on this platform, free term not applied", null);
         long freeTerm = AutoFromFree(free, currentManagedBytes);
         long selected = Math.Min(runtimeTerm, freeTerm);
-        string winner = freeTerm <= runtimeTerm ? "free-now-minus-managed"
-            : (long)(runtimeAvailableBytes * AutoFraction) <= AutoCeilingBytes ? "runtime" : "ceiling";
+        string winner = freeTerm <= runtimeTerm ? "free-now-minus-managed" : runtimeWinner;
         return new(runtimeAvailableBytes, free, currentManagedBytes, managedMeasurement, runtimeTerm, freeTerm,
             selected, winner, null);
     }
@@ -83,12 +84,35 @@ public sealed class CacheBudget
             ? (long)(v * mul) : null;
     }
 
-    /// <summary>Physical memory free on the machine right now (GlobalMemoryStatusEx ullAvailPhys). Windows only; null elsewhere or on failure.</summary>
+    /// <summary>Physical memory free on the machine right now: GlobalMemoryStatusEx ullAvailPhys on Windows, MemAvailable
+    /// from /proc/meminfo on Linux. Null on other platforms or when the reading fails.</summary>
     public static long? AvailablePhysicalBytes()
     {
-        if (!OperatingSystem.IsWindows()) return null;
-        var m = new MemStatus { Length = (uint)System.Runtime.InteropServices.Marshal.SizeOf<MemStatus>() };
-        return GlobalMemoryStatusEx(ref m) ? (long)m.AvailPhys : null;
+        if (OperatingSystem.IsWindows())
+        {
+            var m = new MemStatus { Length = (uint)System.Runtime.InteropServices.Marshal.SizeOf<MemStatus>() };
+            return GlobalMemoryStatusEx(ref m) ? (long)m.AvailPhys : null;
+        }
+        if (OperatingSystem.IsLinux())
+        {
+            try { return ParseMemAvailable(File.ReadAllText("/proc/meminfo")); }
+            catch (IOException) { return null; }
+            catch (UnauthorizedAccessException) { return null; }
+        }
+        return null;
+    }
+
+    /// <summary>The MemAvailable line of a /proc/meminfo text, in bytes (the file reports kB). Null when absent or malformed.</summary>
+    public static long? ParseMemAvailable(string meminfo)
+    {
+        foreach (var line in meminfo.Split('\n'))
+        {
+            if (!line.StartsWith("MemAvailable:", StringComparison.Ordinal)) continue;
+            var parts = line["MemAvailable:".Length..].Split(' ', StringSplitOptions.RemoveEmptyEntries);
+            return parts.Length == 2 && parts[1] == "kB" && long.TryParse(parts[0], System.Globalization.NumberStyles.None,
+                System.Globalization.CultureInfo.InvariantCulture, out var kb) ? kb * 1024 : null;
+        }
+        return null;
     }
     [System.Runtime.InteropServices.StructLayout(System.Runtime.InteropServices.LayoutKind.Sequential)]
     struct MemStatus { public uint Length, MemoryLoad; public ulong TotalPhys, AvailPhys, TotalPageFile, AvailPageFile, TotalVirtual, AvailVirtual, AvailExtendedVirtual; }
