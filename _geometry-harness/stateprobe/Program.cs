@@ -1,3 +1,5 @@
+// HousecarlCore now has its own PluginUnreadableException (upstream 2.0); this probe means the harness one.
+using PluginUnreadableException = HarnessShared.PluginUnreadableException;
 using System.Diagnostics;
 using System.Numerics;
 using System.Text.Json;
