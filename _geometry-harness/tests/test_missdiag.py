@@ -359,6 +359,81 @@ def test_o7_occlusion_does_not_fix_is_a_measured_reason():
     assert (r["reason"], r["evidenceType"]) == ("does not fix", "check") and "does not fix" in M.REASONS, r
 
 
+# ---- S: the group table's summary leads with the prediction, then coverage, then validation against the patch ----
+def _summary_doc(prediction=None):
+    """Six patch edits on six records, one cluster each (ids g1-0001.. in formKey order), one miss reason apiece, plus
+    one edit with no evidence (unassigned)."""
+    fks = ["00000%d:Patch.esp" % i for i in range(1, 8)]
+    edits = [E("G1", fk, "MOVE") for fk in fks]
+    records = {"G1|" + fk: {"base": "base%d" % i, "cell": "cell%d" % i, "trace": []} for i, fk in enumerate(fks)}
+    ev = {
+        "g1-0001": {"fixAttribution": {"check": "contact", "unpatched": "item floats", "attribution": "needs both",
+                                       "patched": "support restored"}, "bundleConfiguration": "ran", "direct": True},
+        "g1-0002": {"likelyClass": "lighting", "classEvidence": "mechanical", "check": None, "rendered": True,
+                    "bundleConfiguration": "ran", "direct": True},
+        "g1-0003": {"likelyClass": "contact", "classEvidence": "check", "check": "contact", "checkRunnable": False,
+                    "whyNotRunnable": "needs the running game", "bundleConfiguration": "ran", "direct": True},
+        "g1-0004": {"likelyClass": "contact", "classEvidence": "check", "check": "contact", "checkRunnable": True,
+                    "trace": {"outcome": "judged_no_relation", "rule": "no support relation"}, "renderShowsDefect": None,
+                    "bundleConfiguration": "ran", "direct": True},
+        "g1-0005": {"likelyClass": "contact", "classEvidence": "check", "check": "contact", "checkRunnable": True,
+                    "trace": {"outcome": "set_aside", "rule": "decorative clutter"}, "bundleConfiguration": "ran",
+                    "direct": True},
+        "g1-0006": {"placementClip": {"check": "contact", "item": "a crate", "other": "a wall of the other mod",
+                                      "depth": 4.0, "pose": "rest pose", "edit": "adds the item"},
+                    "bundleConfiguration": "ran", "direct": True},
+    }
+    doc = {"edits": edits, "records": records, "evidence": ev}
+    if prediction is not None:
+        doc["prediction"] = prediction
+    return doc
+
+
+def test_s1_summary_leads_with_prediction_then_coverage_then_validation():
+    s = M.run(_summary_doc()).get("summary")
+    assert s is not None, "run() writes no summary: the group table has no prediction-first reading"
+    assert [x.get("id") for x in s.get("sections") or []] == ["prediction", "coverage", "validation"], s
+
+
+def test_s2_missing_prediction_is_said_not_silent():
+    s = M.run(_summary_doc()).get("summary") or {}
+    pred = next((x for x in s.get("sections") or [] if x.get("id") == "prediction"), None)
+    assert pred is not None and pred.get("status") == "not-supplied" and str(pred.get("missingFact") or "").strip(), pred
+
+
+def test_s3_blind_spots_carry_their_why():
+    s = M.run(_summary_doc()).get("summary") or {}
+    val = next((x for x in s.get("sections") or [] if x.get("id") == "validation"), {})
+    spots = val.get("blindSpots") or []
+    assert sorted(b.get("reason") for b in spots) == ["not modelled", "out of scope (not run)"], spots
+    assert all(str(b.get("why") or "").strip() for b in spots), spots
+    assert any("needs the running game" in b["why"] for b in spots), spots
+
+
+def test_s4_hits_taste_and_patch_problems_are_not_blind_spots():
+    s = M.run(_summary_doc()).get("summary") or {}
+    val = next((x for x in s.get("sections") or [] if x.get("id") == "validation"), {})
+    assert val.get("hits") == 1 and val.get("tasteOrSetAside") == 2 and val.get("patchProblems") == 1, val
+    cov = next((x for x in s.get("sections") or [] if x.get("id") == "coverage"), {})
+    assert cov.get("unassignedEdits") == 1, cov
+
+
+def test_s5_open_comes_from_the_prediction():
+    pred = {"mods": ["ModA.esp", "ModB.esp"],
+            "clashes": [{"kind": "contact", "inGame": "an object left floating", "needsBoth": 28, "actedOnByPatch": 25}]}
+    s = M.run(_summary_doc(pred)).get("summary") or {}
+    sec = {x.get("id"): x for x in s.get("sections") or []}
+    p, val = sec.get("prediction") or {}, sec.get("validation") or {}
+    assert p.get("status") == "found" and [c.get("needsBoth") for c in p.get("clashes") or []] == [28], p
+    assert val.get("open") == 3, val
+
+
+def test_s6_open_without_a_prediction_is_said():
+    s = M.run(_summary_doc()).get("summary") or {}
+    val = next((x for x in s.get("sections") or [] if x.get("id") == "validation"), {})
+    assert val.get("open") is None and any(str(x).strip() for x in val.get("missingFacts") or []), val
+
+
 def main():
     tests = [(n, f) for n, f in sorted(globals().items()) if n.startswith("test_") and callable(f)]
     for n, f in tests:
