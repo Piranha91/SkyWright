@@ -77,8 +77,9 @@ class Scorer(unittest.TestCase):
         d = {"schema": "occlusion-view-research-v1", "planes": [{"formKey": "000800:B.esp", "candidates": [refused, shapeless]}]}
         self.assertEqual(S.refusal(d, "000800:B.esp"), "plane orientation outside the supplied rule's evidence scope")
         assessed = dict(cand("3:A.esp", False, 0, None), relation="Outside")
-        d["planes"][0]["candidates"].append(assessed)
-        self.assertIsNone(S.refusal(d, "000800:B.esp"))
+        d2 = {"schema": "occlusion-view-research-v1",       # a fresh report: occlscore caches joined rows per report
+              "planes": [{"formKey": "000800:B.esp", "candidates": [refused, shapeless, assessed]}]}
+        self.assertIsNone(S.refusal(d2, "000800:B.esp"))
 
     def test_owner_split(self):
         d = report([cand("1:A.esp", True, 100, "in"), cand("2:Base.esm", True, 100, "in")])
