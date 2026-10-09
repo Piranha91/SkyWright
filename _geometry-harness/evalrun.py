@@ -81,6 +81,36 @@ EXIT_REFUSED_RESULT = 3
 # and rejecting a receipt that exited 0 with a valid output because of it is a false negative.
 REFUSED_RE = re.compile(r"^.{0,40}?(REFUSED|MISSING MASTER)", re.M)
 
+#: How much of conflictdiff's refusal a diff receipt quotes; its longest (no configuration) is 392 characters.
+REFUSAL_QUOTE_CHARS = 600
+
+
+def conflictdiff_refusal(log_text: str) -> str | None:
+    """conflictdiff's reason for not comparing two emits, as one paragraph, from its job log (None if none found).
+    Its forms: the configuration gate's indented lines ending `REFUSED.` (exit 3); the population/state gate's `! ...`
+    line and its indented continuation lines (exit 3); a usage or read error on stderr (exit 2), which the job log
+    keeps after `---- stderr ----`."""
+    text = log_text or ""
+    out, _, err = text.partition("\n---- stderr ----\n")
+    lines = out.splitlines()
+    ends = [i for i, ln in enumerate(lines) if ln.rstrip().endswith("REFUSED.") and ln[:1].isspace()]
+    if ends:
+        i = ends[-1]
+        start = i
+        while start > 0 and lines[start - 1][:1].isspace() and lines[start - 1].strip():
+            start -= 1
+        return " ".join(ln.strip() for ln in lines[start:i + 1])
+    for i, ln in enumerate(lines):
+        if ln.strip().startswith("!"):
+            indent = len(ln) - len(ln.lstrip())
+            block = [ln.strip()]
+            for nxt in lines[i + 1:]:
+                if not nxt.strip() or nxt.strip().startswith("!") or len(nxt) - len(nxt.lstrip()) <= indent:
+                    break
+                block.append(nxt.strip())
+            return " ".join(block)
+    return next((ln.strip() for ln in err.splitlines() if ln.strip()), None)
+
 # A shareable report package carries identities, never payloads. Anything with one of these
 # suffixes is referred to by name and hash and is never copied into a bundle.
 BINARY_SUFFIXES = {".esp", ".esm", ".esl", ".bsa", ".ba2", ".nif", ".dds", ".hkx", ".wav",
@@ -3297,10 +3327,10 @@ def split_sweep_receipts(ex: Executor, check: dict, arm: dict, probe: str, inv: 
     elif drec.get("exitCode") not in (0, None):
         # conflictdiff exits 3 when it refuses a comparison (populations, states or configurations differ) and 2 on a
         # usage or read error, before any verdict: its own refusal line is the cause, not a missing verdict (R2 M-3)
-        said = next((ln.strip() for ln in text_of(diff_log).splitlines() if ln.strip().startswith("!")), None)
+        said = conflictdiff_refusal(text_of(diff_log))
         rejections.append({"cause": "exit-nonzero",
                            "detail": f"exit code {drec.get('exitCode')}: conflictdiff did not compare these emits"
-                                     + (f" - it said {said[:300]!r}" if said else "")})
+                                     + (f" - it said {said[:REFUSAL_QUOTE_CHARS]!r}" if said else "")})
     elif not diff_log.exists() or not drec.get("emitWritten"):
         rejections.append({"cause": "output-missing", "detail": rel_to(run, diff_log)})
     elif row is None:
