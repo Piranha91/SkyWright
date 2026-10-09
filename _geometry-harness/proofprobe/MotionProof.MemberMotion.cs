@@ -546,6 +546,16 @@ static partial class MotionProof
             One("K-M8", HingeChain(), null, MemberMotion.OriginSwing);
             return (ok, string.Join(" | ", parts));
         });
+        Case(check, "K-M15 discovery region (Gate C review ruling): a member whose region does not converge in its budget is refused naming 'motion region did not converge in budget (width N u)'; a converged clip-only member is built (rejects a km-wide unconverged proxy replacing a record's reach row)", () =>
+        {
+            var (nif, read) = KM1();
+            var m = MemberMotion.Read(nif, read, Mstt);
+            var d = MemberMotion.DiscoveryRegion(nif, m, VolumeGeometry.Render, new MemberSweep(0.5, 64), read);
+            var n12 = KM12(); var m12 = MemberMotion.Read(n12, null, Mstt);
+            var c = MemberMotion.DiscoveryRegion(n12, m12, VolumeGeometry.Render, new MemberSweep(), null);
+            return (d.Status == "refused" && (d.Reason ?? "").Contains("motion region did not converge in budget (width ") && c.Status == "built" && c.Converged,
+                    $"K-M1 at 64: {d.Status} {d.Reason} conv {d.Converged} | K-M12: {c.Status} conv {c.Converged}");
+        });
         Case(check, "K-M13b regression guard (holds on the base): a clip-only region's samples carry no origin, and a serialised sample has no Origin key (rejects Origin written for clip samples, which changes default output)", () =>
         {
             var nif = KM12();
