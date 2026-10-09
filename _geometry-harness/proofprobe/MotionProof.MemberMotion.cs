@@ -317,10 +317,10 @@ static partial class MotionProof
             return (m.Status == "moving" && m.Mechanisms.Any(x => x.Kind == MemberMotion.KindBlend) && m.TransitionSeconds is { } s && Math.Abs(s - 0.25) < 1e-6, ShowMM(m));
         });
         // ================= K-M2 / K-M4: tightness and one weight for every node =================
-        Case(check, "K-M2 partner 1.0..1.6 u outside the union over (tA, tB, w): never (rejects a chord-box-only reader: cannot_tell)", () =>
+        Case(check, "K-M2 partner 1.0..1.6 u outside the union over (tA, tB, w), budget 65536: never (rejects a chord-box-only reader: cannot_tell)", () =>
         {
             var (nif, read) = KM1(0.05f, "KM2");
-            var d = DecideAt(nif, read, Mstt, Cube(KM2P2.X, KM2P2.Y, 0, 0.5f));
+            var d = DecideAt(nif, read, Mstt, Cube(KM2P2.X, KM2P2.Y, 0, 0.5f), new MemberSweep(0.5, 65536));
             return (d.Decision == "never", ShowMD(d));
         });
         Case(check, "K-M4 partner at the (58 deg, x 19) corner, reached only with a different weight per node: never (rejects per-node w: a false witness)", () =>
@@ -486,7 +486,10 @@ static partial class MotionProof
                     $"a {ShowMD(a)} grid {Grid(pa)} | b {ShowMD(b)} grid {Grid(pb)}");
         });
         // ================= K-M13: every grown sample inside the reach box =================
-        Case(check, "K-M13 every grown sample lies inside the reach box (K-M1, K-M6 blender, K-M7 rod, K-M8 chain), and the samples include blend / swing origins (rejects a sampler inconsistent with the reach reader)", () =>
+        // Every sampled pose is a real pose, so it lies inside any sound outer bound of the poses. The samples grown by their deltas
+        // and the reach box are two outer bounds, which need not nest (the hinge box is certified to within delta; a region that
+        // does not converge carries large deltas), so the grown samples are not held to the box.
+        Case(check, "K-M13 every sampled pose lies inside the reach box (K-M1, K-M6 blender, K-M7 rod, K-M8 chain), and the samples include blend / swing origins (rejects a sampler inconsistent with the reach reader)", () =>
         {
             var parts = new List<string>(); bool ok = true;
             void One(string name, byte[] nif, Func<string, byte[]?>? read, string origin)
@@ -496,11 +499,7 @@ static partial class MotionProof
                 var (box, _, why) = MemberMotion.Box(nif, m, V0, V0, 1f, new MemberSweep(), read);
                 int outside = 0;
                 foreach (var s in reg.Samples)
-                {
-                    var b = SpatialOverlap.SoupBounds(s.Soup);
-                    var g = new Aabb(new Vec3(b.Min.X - (float)s.Delta, b.Min.Y - (float)s.Delta, b.Min.Z - (float)s.Delta), new Vec3(b.Max.X + (float)s.Delta, b.Max.Y + (float)s.Delta, b.Max.Z + (float)s.Delta), false);
-                    if (!Contains(box, g)) outside++;
-                }
+                    if (!Contains(box, SpatialOverlap.SoupBounds(s.Soup))) outside++;
                 bool has = reg.Samples.Any(s => s.Origin == origin);
                 ok &= reg.Status == "built" && why is null && outside == 0 && has;
                 parts.Add($"{name}: {reg.Status} {reg.Reason} {reg.Samples.Count} samples, {outside} outside, {origin} {has}, box {ShowA7(box)} {why}");
