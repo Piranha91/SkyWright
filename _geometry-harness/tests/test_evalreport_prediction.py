@@ -120,7 +120,7 @@ def make_bundle(root: Path, arms, results, targets, patches=(), missing=(), unju
     return root
 
 
-def compile_and_render(arms, results, targets, **kw):
+def compile_and_render(arms, results, targets, want_index=False, **kw):
     """The real compiler and the real templates: (plan, report.md, report.html)."""
     pr = json.loads(PRIORITIES.read_text(encoding="utf-8"))
     conc, page = pr.get("concise") or {}, pr.get("page") or {}
@@ -135,6 +135,8 @@ def compile_and_render(arms, results, targets, **kw):
         plan = R.compile_plan(bdir, {"bundle": {"complete": True}}, settings, pr, str(bdir))
         view = R.effective_view(plan, settings["rowsPerGroup"], settings["figuresPerFinding"], pr, "normal")
         out = R.render_all(plan, view, Path(td) / "out", "")
+    if want_index:
+        return plan, out["report.md"], out["report.html"], out["evidence-index.md"]
     return plan, out["report.md"], out["report.html"]
 
 
@@ -245,6 +247,16 @@ def already_present_and_mod_partner_bundle():
     partner = [row("CONTACT", USSEP, MOD_A, f"000F02:{MOD_A}")]
     results = {(CONTACT, "baseline"): already + partner, (CONTACT, "dependency-only"): already}
     return compile_and_render(arms, results, [MOD_A])
+
+
+def coded_reason_bundle():
+    """One mod added; nothing between mods; the probe could not judge some objects for a reason it gives only as a
+    code -- one the skill names in words (NoGeometry) and one it does not (ZqxOddCode)."""
+    arms = [arm("baseline", [BASE, OTHER, MOD_A], kind="baseline"), arm("dependency-only", [BASE, OTHER])]
+    results = {(CONTACT, "baseline"): [], (CONTACT, "dependency-only"): []}
+    unjudgeable = [{"armId": "baseline", "checkId": CONTACT, "judged": 40, "population": 49,
+                    "unjudgeable": {"NoGeometry": 5, "ZqxOddCode": 4}}]
+    return compile_and_render(arms, results, [MOD_A], want_index=True, unjudgeable=unjudgeable)
 
 
 def base_game_only_bundle():
@@ -405,7 +417,34 @@ def main():
               and USSEP in text)
         return ok, f"items {[(i.get('mods'), i.get('count'), i.get('attribution'), i.get('attributionMod')) for i in items]}"
 
+    # 8. a probe's reason code reaches the reader as words, never as the code (the code stays in the evidence index)
+    def unmapped_code_not_on_page():
+        plan, md, html, index = coded_reason_bundle()
+        cov = section_text(md, headings(plan).get("coverage") or "\0")
+        spaced = "zqx odd code"
+        ok = (bool(cov) and "ZqxOddCode" not in md and spaced not in md.lower() and "ZqxOddCode" not in html
+              and spaced not in html.lower() and "ZqxOddCode" in index and re.search(r"\b4\b", cov)
+              and "no geometry" in cov.lower() and "NoGeometry" not in md)
+        return ok, f"coverage on the page: {cov.strip()[:220]!r}"
+
+    # 9. a coverage line about a check that also feeds the prediction names the setup that lacks the result
+    def missing_names_its_setup():
+        plan, md, html = get("four", four_setup_unpatched)
+        cov = section_text(md, headings(plan).get("coverage") or "\0")
+        line = next((ln for ln in cov.splitlines() if "Landscape height changes" in ln), "")
+        ok = "removes ModA.esp" in line and "removes ModB.esp" in line
+        return ok, f"coverage line: {line!r}"
+
+    # 10. the opening scope sentence does not name the base game as a conflict partner
+    def scope_line_no_base_game():
+        plan, md, html = get("basegame", base_game_only_bundle)
+        s = str(reader(plan).get("scopeLine") or "")
+        return BASE not in s, f"scope line {s!r}"
+
     for name, fn in [
+            ("plain-language/unmapped-reason-code-never-reaches-the-page", unmapped_code_not_on_page),
+            ("none-found-without-coverage/missing-result-names-the-setup-that-lacks-it", missing_names_its_setup),
+            ("base-game-in-prediction/scope-line-does-not-name-the-base-game", scope_line_no_base_game),
             ("base-game-in-prediction/already-present-without-the-mod-is-set-aside", already_present_set_aside),
             ("prediction-missing/non-target-mod-partner-is-admitted-and-attributed", mod_partner_admitted),
             ("prediction-missing/four-setup-report-opens-with-prediction-coverage-validation", prediction_leads_four_setup),
