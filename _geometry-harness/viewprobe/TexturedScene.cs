@@ -1798,7 +1798,8 @@ static class TexturedScene
         // hands it each frame's.
         Action<OpenTK.Mathematics.Matrix4, OpenTK.Mathematics.Matrix4>? wireOverlay = null;
 
-        byte[] Draw(float[]? depthOut = null, bool singleSample = false)
+        // readColour false: the colour buffer is not read back (the depth-measurement mode's measurement draws never use it).
+        byte[] Draw(float[]? depthOut = null, bool singleSample = false, bool readColour = true)
         {
             GL.BindFramebuffer(FramebufferTarget.Framebuffer, singleSample ? fbo : drawFbo);
             GL.Viewport(0, 0, sizeW, sizeH);
@@ -1819,9 +1820,9 @@ static class TexturedScene
                                    BlitFramebufferFilter.Nearest);
             }
             GL.Finish();
-            var px = new byte[sizeW * sizeH * 4];
+            var px = readColour ? new byte[sizeW * sizeH * 4] : Array.Empty<byte>();
             GL.BindFramebuffer(FramebufferTarget.Framebuffer, fbo);
-            GL.ReadPixels(0, 0, sizeW, sizeH, PixelFormat.Rgba, PixelType.UnsignedByte, px);
+            if (readColour) GL.ReadPixels(0, 0, sizeW, sizeH, PixelFormat.Rgba, PixelType.UnsignedByte, px);
             if (depthOut is not null)
                 GL.ReadPixels(0, 0, sizeW, sizeH, PixelFormat.DepthComponent, PixelType.Float, depthOut);
             return px;
@@ -2081,7 +2082,7 @@ static class TexturedScene
             if (interactive is null)
             {
                 var plainDepth = new float[sizeW * sizeH];
-                Draw(plainDepth, singleSample: true);
+                Draw(plainDepth, singleSample: true, readColour: depthMeasurement is null);
                 string DepthHash(float[] depth) => ViewProbe.MaskEvidence.DepthHash(depth);
                 occl.SceneDepthHash = DepthHash(plainDepth);
                 graphicsShot?.SceneDepth(occl.SceneDepthHash);   // G3 RED, measurement only
@@ -2113,7 +2114,7 @@ static class TexturedScene
                     {
                         var isolated = part.Meshes.ToHashSet();
                         foreach (var m in allMeshes) m.IsRendering = savedVisibility[m] && isolated.Contains(m);
-                        Draw(ownDepth, singleSample: true);
+                        Draw(ownDepth, singleSample: true, readColour: depthMeasurement is null);
                         occl.VisibilityDraws++;
                         part.IsolatedDepthHash = DepthHash(ownDepth);
                         var measured = ShapeVisibility.Compare(ownDepth, plainDepth);
