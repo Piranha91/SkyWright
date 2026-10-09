@@ -30,9 +30,11 @@ static class MotionReview
     public sealed class Cache(AssetResolver assets, OverlapIndex index, Options options)
     {
         public OverlapIndex Index => index;
-        readonly Dictionary<string, MotionModel> models = new();
+        readonly Dictionary<string, MemberModel> models = new();
         readonly Dictionary<(string, VolumeGeometry), SweptRegion> regions = new();
         public Options Options => options;
+        /// <summary>The shared reader's sweep (the --motion-delta target and the --motion-budget evaluations).</summary>
+        public MemberSweep Sweep => new(options.Sweep.DeltaTarget, options.Sweep.SampleBudget);
 
         public byte[]? Read(string rel)
         {
@@ -46,11 +48,12 @@ static class MotionReview
             catch (ArgumentException) { return null; }
         }
 
-        public MotionModel Model(string formKey, byte[] bytes)
+        /// <summary>The member read once under the shared rules (MemberMotion: lane M), with its placing base's record type.</summary>
+        public MemberModel Model(string formKey, byte[] bytes)
         {
             if (models.TryGetValue(formKey, out var m)) return m;
             var placement = FormKey.TryFactory(formKey, out var key) ? MotionPlacements.Of(index, key) : null;
-            m = NifMotion.Read(bytes, Read, placement);
+            m = MemberMotion.Read(bytes, Read, placement);
             models[formKey] = m;
             return m;
         }
@@ -70,14 +73,76 @@ static class MotionReview
         public SweptRegion Region(string formKey, byte[] bytes, VolumeGeometry g)
         {
             if (regions.TryGetValue((formKey, g), out var r)) return r;
-            var m = Model(formKey, bytes);
-            r = SweptGeometry.Build(bytes, m, null, g, options.Sweep, Read);
+            // a clip-only member's region is exactly SweptGeometry.Build's (MemberMotion.Region keeps it)
+            r = MemberMotion.Region(bytes, Model(formKey, bytes), g, Sweep, Read);
             regions[(formKey, g)] = r;
             return r;
         }
     }
 
     static string Labels(IEnumerable<MotionAnimation> anims) => string.Join("; ", anims.Select(a => $"{a.Id} {a.Cycle} {a.Trigger}"));
+
+    /// <summary>Lane M: a moving member whose region holds more than clips (blends, a blender, a reference pose, a pinned hinge, a
+    /// closed book), decided against the static member by the shared loop (MemberMotion.Decide) with the swept contact's per-pose
+    /// test. The record names the witness's origin and what it means for a player (P1, P2), the evaluations spent and, for a
+    /// cannot_tell, the width left and whether the budget ran out.</summary>
+    static object Decided(Cache cache, VolumeGeometry g, string gname, string member, bool movA, string mForm, byte[] mBytes, Snap mPose, MemberModel mModel,
+                          string oForm, byte[] oBytes, Snap oPose, (TriangleSoup? Soup, string[]? Tags, string? Refusal) other, bool volume, AlphaVisibility? alpha)
+    {
+        string policy = Policy + "|" + MemberMotion.PolicyVersion;
+        object Refuse(string why) => new { geometry = gname, status = "refused", reason = $"{member}: live pose: {why}", motion = new { mode = "swept", policy, member, refusal = why } };
+        var stored = NifMotion.Pose(mBytes, mModel.Motion, "stored", 0f, g, cache.Read);
+        if (stored.Status != "posed" && (stored.Reason ?? "").EndsWith("no_solid_collision", StringComparison.Ordinal))
+            return new { geometry = gname, status = "refused", reason = $"{member}: no_solid_collision" };
+        if (stored.Status != "posed") return Refuse(stored.Reason ?? "the stored pose could not be read");
+        // lane 3b: a pair whose world placement collapses a triangle is measured in the static member's frame (PairFrame)
+        var so = PairFrame.Origin(stored.Soup!, mPose.Pos, mPose.Rot, mPose.Scale, other.Soup!, oPose.Pos, oPose.Rot, oPose.Scale);
+        var partner = SpatialOverlap.TransformSoup(other.Soup!, PairFrame.Shift(oPose.Pos, so), oPose.Rot, oPose.Scale);
+        bool partnerSolid = MeshVolume.Solid(partner).Status == "solid";
+        var capture = new MemberCapture();
+        var (pred, pwhy) = MemberPredicates.Contact(partner, other.Tags, partnerSolid, g, capture);
+        if (pred is null)
+            return new { geometry = gname, status = "refused", reason = pwhy!.StartsWith("partner: ", StringComparison.Ordinal) ? $"{(movA ? "B" : "A")}: {pwhy[9..]}" : $"{member}: {pwhy}",
+                         motion = new { mode = "swept", policy, member, refusal = pwhy } };
+        var at = PairFrame.Shift(mPose.Pos, so);
+        var d = MemberMotion.Decide(mBytes, mModel, g, at, mPose.Rot, mPose.Scale, cache.Sweep, pred, cache.Read);
+        if (d.Decision == "refused") return Refuse(d.Reason ?? "refused");
+        // the swept volume and the visible part of an alpha crossing are measured over the member's region, as for a clip-only member
+        SweptRegion? placed = null;
+        SweptRegion? Placed()
+        {
+            if (placed is not null) return placed;
+            var region = cache.Region(mForm, mBytes, g);
+            return placed = region.Status == "built" ? SweptGeometry.Place(region, at, mPose.Rot, mPose.Scale) : null;
+        }
+        SweptVolume? v = volume && partnerSolid && Placed() is { Solid: true } pr ? SweptGeometry.Volume(pr, partner) : null;
+        object? visibleMotion = null;
+        if (alpha is not null && !volume && g == VolumeGeometry.Render && d.Decision == "witness"
+            && !(capture.CrossingByTags?.GetValueOrDefault(SurfaceMaterial.Pair(SurfaceMaterial.Opaque, SurfaceMaterial.Opaque)) > 0)
+            && AlphaVisibility.HasAlphaCrossing(capture.CrossingByTags) && Placed() is { } pv)
+        {
+            var vd = SweptGeometry.ContactVisible(pv, alpha.MovingSource(mForm, mBytes)(), partner, other.Tags, alpha.Source(oForm, oBytes, other.Soup!)(),
+                                                  partnerSolid, alpha.Options);
+            visibleMotion = alpha.MotionBlock(vd, mForm, oForm);
+        }
+        // P2: a swing witness's meaning from the partner's solid status (its collision layer against the body's is not read)
+        string? meaning = d.Origin == MemberMotion.OriginSwing ? MemberMotion.SwingMeaning(MemberMotion.HasSolidCollision(oBytes)) + " (from the partner's solid collision; the layer filter is not read)" : null;
+        return ContactNotes.Attach(new
+        {
+            geometry = gname, status = "motion",
+            motion = new
+            {
+                mode = "swept", policy, member, animations = mModel.Motion.Animations.Select(a => a.Id).ToArray(),
+                mechanisms = mModel.Mechanisms.Select(x => x.Kind).ToArray(), label = string.Join("; ", mModel.Labels),
+                decision = d.Decision, reason = d.Reason, origin = d.Origin, witnessLabel = d.Label, meaning, note = d.Note,
+                delta = d.Width, converged = d.Converged, evaluations = d.Evaluations, budget = cache.Sweep.Budget,
+                time = d.Time, witnessAnimation = d.AnimationId, animationB = d.AnimationB, timeB = d.TimeB, weights = d.Weights, angles = d.Angles,
+                crossingLower = d.Decision == "witness" ? capture.CrossingLower : null, volumeLower = d.Decision == "witness" ? capture.VolumeLower : null,
+                crossingByTags = d.Decision == "witness" ? capture.CrossingByTags : null, partnerSolid,
+                volume = v is null ? null : new { v.Status, v.Reason, intersection = v.WithPartner, v.Converged },
+            },
+        }, ContactNotes.Options, ("pairFrame", ContactNotes.Frame(so)), ("visibleMotion", visibleMotion));
+    }
 
     /// <summary>The motion record for one pair and geometry, or null when neither member moves (the caller keeps its own
     /// result). <paramref name="staticOf"/> gives a member's static model-space geometry (surface or solid) or a refusal.</summary>
@@ -93,7 +158,7 @@ static class MotionReview
         object Refuse(string member, string why) => new { geometry = gname, status = "refused", reason = $"{member}: live pose: {why}",
                                                           motion = new { mode = cache.Options.Mode, policy = Policy, member, refusal = why } };
         // lane 3b, gap d: a member refused only for a NiPathInterpolator is measured as a tube around its path (swept mode)
-        static bool PathRefusal(MotionModel m) => m.Status == "refused" && (m.Reason ?? "").Contains("NiPathInterpolator", StringComparison.Ordinal);
+        static bool PathRefusal(MemberModel m) => m.Status == "refused" && (m.Reason ?? "").Contains("NiPathInterpolator", StringComparison.Ordinal);
         bool pathA = PathRefusal(ma), pathB = PathRefusal(mb);
         if ((pathA || pathB) && cache.Options.Mode == "swept" && !(pathA && pathB))
         {
@@ -179,8 +244,8 @@ static class MotionReview
             var fo = PairFrame.Origin(ra.Samples[0].Soup, poseA.Pos, poseA.Rot, poseA.Scale, rb.Samples[0].Soup, poseB.Pos, poseB.Rot, poseB.Scale);
             var qa = PairFrame.Shift(poseA.Pos, fo); var qb = PairFrame.Shift(poseB.Pos, fo);
             var pa = SweptGeometry.Place(ra, qa, poseA.Rot, poseA.Scale); var pb = SweptGeometry.Place(rb, qb, poseB.Rot, poseB.Scale);
-            var ha = SweptGeometry.HeldSoups(bytesA, ma, g, qa, poseA.Rot, poseA.Scale, cache.Read);
-            var hb = SweptGeometry.HeldSoups(bytesB, mb, g, qb, poseB.Rot, poseB.Scale, cache.Read);
+            var ha = SweptGeometry.HeldSoups(bytesA, ma.Motion, g, qa, poseA.Rot, poseA.Scale, cache.Read);
+            var hb = SweptGeometry.HeldSoups(bytesB, mb.Motion, g, qb, poseB.Rot, poseB.Scale, cache.Read);
             string? coupling = FormKey.TryFactory(formA, out var ka) && FormKey.TryFactory(formB, out var kb) ? MotionPlacements.Coupling(cache.Index, ka, kb) : null;
             var two = SweptGeometry.ContactBoth(pa, ha, pb, hb, coupling, cache.Options.Sweep);
             if (two.Decision == "refused")
@@ -206,14 +271,14 @@ static class MotionReview
         if (other.Soup is null) return new { geometry = gname, status = "refused", reason = $"{(movA ? "B" : "A")}: {other.Refusal}" };
         if (cache.Options.Mode == "pose")
         {
-            var p = NifMotion.Pose(mBytes, mModel, cache.Options.PoseName!, g, cache.Read);
+            var p = NifMotion.Pose(mBytes, mModel.Motion, cache.Options.PoseName!, g, cache.Read);
             if (p.Status != "posed") return Refuse(member, p.Reason ?? "pose refused");
             // lane 3b: a pair whose world placement collapses a triangle is measured in the static member's frame (PairFrame)
             var po = PairFrame.Origin(p.Soup!, mPose.Pos, mPose.Rot, mPose.Scale, other.Soup, oPose.Pos, oPose.Rot, oPose.Scale);
             var posePartner = SpatialOverlap.TransformSoup(other.Soup, PairFrame.Shift(oPose.Pos, po), oPose.Rot, oPose.Scale);
             var posed = SpatialOverlap.TransformSoup(p.Soup!, PairFrame.Shift(mPose.Pos, po), mPose.Rot, mPose.Scale);
             // found defect (follow-ups E3): "rest" names no pose; the rest pose is the one flagged Rest, as NifMotion.Pose resolves it
-            var pose = cache.Options.PoseName == "rest" ? mModel.Poses.FirstOrDefault(x => x.Rest) : mModel.Poses.FirstOrDefault(x => x.Name == cache.Options.PoseName);
+            var pose = cache.Options.PoseName == "rest" ? mModel.Motion.Poses.FirstOrDefault(x => x.Rest) : mModel.Motion.Poses.FirstOrDefault(x => x.Name == cache.Options.PoseName);
             var motion = new { mode = "pose", policy = Policy, member, pose = cache.Options.PoseName, animation = p.AnimationId, time = p.Time, label = pose?.Label };
             if (volume)
             {
@@ -241,6 +306,9 @@ static class MotionReview
             }
             return ContactNotes.Attach(new { geometry = gname, result = s, motion }, ContactNotes.Options, ("pairFrame", ContactNotes.Frame(po)), ("visibility", poseVisibility));
         }
+        // lane M: a member with a mechanism beyond clips (blend, blender, reference pose, hinge, book) is decided by the shared loop
+        if (!MemberMotion.IsClipOnly(mBytes, mModel, cache.Read))
+            return Decided(cache, g, gname, member, movA, mForm, mBytes, mPose, mModel, oForm, oBytes, oPose, other, volume, alpha);
         var region = cache.Region(mForm, mBytes, g);
         if (region.Status != "built" && (region.Reason ?? "").EndsWith("no_solid_collision", StringComparison.Ordinal))
             return new { geometry = gname, status = "refused", reason = $"{member}: no_solid_collision" };   // not a pose question

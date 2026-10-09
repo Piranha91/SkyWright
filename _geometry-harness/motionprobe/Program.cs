@@ -23,11 +23,13 @@
 //                                                                    threads T")
 //   ASSETS = --loose-root DIR | --instance DIR --profile P --game DIR --order CANDIDATE.json
 //   common: [--out FILE] [--placement BASETYPE[,open]]
-//           [--rules graph,book,physics,switch]   read as the reach rules do (inspect, pose, node, sweep, graph):
+//           [--rules graph,book,physics,switch,blend,member]   read as the reach rules do (inspect, pose, node, sweep, graph):
 //                                                 graph = binding member paths decide, the reference-pose generator and a
 //                                                 missing sequence with no transform source are read; book = no animation
 //                                                 (the stored, closed pose); physics = a constraint does not refuse;
-//                                                 switch = every switch child read, Tree_Anim shapes as file geometry
+//                                                 switch = every switch child read, Tree_Anim shapes as file geometry;
+//                                                 blend = graph blends accepted (the reach rule); member = inspect reads through
+//                                                 the shared member reader (MemberMotion: status, mechanisms, transition)
 // exit: 0 printed, 1 the reading refused or failed (JSON says why), 2 usage.
 
 using System.Globalization;
@@ -41,6 +43,7 @@ using var __run = RunLog.BeginProcess("motionprobe", args);
 
 string? loose = null, instance = null, profile = null, game = null, order = null, outPath = null, placementArg = null;
 string? anim = null, pose = null, node = null, geometryArg = null, rulesArg = null;
+bool member = false;
 var anims = new List<string>();
 float? t = null; List<float>? times = null; double? delta = null; int? budget = null; int samplesN = 64, split = 4; bool vertices = false;
 int octreeThreads = 0;
@@ -91,9 +94,10 @@ GraphOptions? graphOptions = null;
 if (rulesArg is not null)
 {
     var set = rulesArg.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).ToHashSet(StringComparer.OrdinalIgnoreCase);
-    var unknown = set.Where(x => x is not ("graph" or "book" or "physics" or "switch" or "skin")).ToList();
-    if (unknown.Count > 0) { Console.Error.WriteLine("--rules takes graph,book,physics,switch,skin; unknown: " + string.Join(",", unknown)); return 2; }
-    graphOptions = set.Contains("graph") ? new GraphOptions(true, true, true) : null;
+    var unknown = set.Where(x => x is not ("graph" or "book" or "physics" or "switch" or "skin" or "blend" or "member")).ToList();
+    if (unknown.Count > 0) { Console.Error.WriteLine("--rules takes graph,book,physics,switch,skin,blend,member; unknown: " + string.Join(",", unknown)); return 2; }
+    member = set.Contains("member");
+    graphOptions = set.Contains("graph") ? new GraphOptions(true, true, true, Blend: set.Contains("blend")) : set.Contains("blend") ? new GraphOptions(Blend: true) : null;
     readOptions = new MotionReadOptions(IgnorePhysics: set.Contains("physics"), IgnoreAnimation: set.Contains("book"),
                                         SwitchUnion: set.Contains("switch"), WindAsStatic: set.Contains("switch"), Graph: graphOptions,
                                         SkinUnion: set.Contains("skin"));
@@ -178,6 +182,14 @@ try
                     pivotAModel = V(c.PivotAModel), pivotBModel = V(c.PivotBModel), axisAModel = V(c.AxisAModel), axisBModel = V(c.AxisBModel),
                 }).ToArray(),
             }, ph.Kind != "refused");
+        }
+        case "inspect" when member:
+        {
+            // lane M: the shared member reader (MemberRules.Shared); the motion model it read beside its status and mechanisms
+            var mm = MemberMotion.Read(bytes, read, placement);
+            return Emit(new { verb, rel, policy = MemberMotion.PolicyVersion, keys = NifMotionKeys.Convention,
+                              model = new { mm.Status, mm.Reason, mm.Motion.Tier, mm.Motion.Animations, mm.Mechanisms, mm.Labels, mm.TransitionSeconds, mm.TransitionNote,
+                                            MotionStatus = mm.Motion.Status, MotionReason = mm.Motion.Reason } }, mm.Status != "refused");
         }
         case "inspect":
         {

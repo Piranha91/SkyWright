@@ -88,12 +88,36 @@ static class BoxContactReview
             if (surf is null && motion is { Options.Mode: "swept" } && pose is { } mp && mesh is not null && (why ?? "").StartsWith("live pose: ", StringComparison.Ordinal))
             {
                 var bytes = motion.Read(mesh);
+                // lane M: a member with a mechanism beyond clips is decided per box by the shared loop
+                if (bytes is not null && motion.Model(other, bytes) is { Status: "moving" } member && !MemberMotion.IsClipOnly(bytes, member, motion.Read))
+                {
+                    var decided = boxes.Select(x =>
+                    {
+                        var cap = new MemberCapture();
+                        var md = MemberMotion.Decide(bytes, member, VolumeGeometry.Render, mp.Pos, mp.Rot, mp.Scale, motion.Sweep, MemberPredicates.Box(x.Box, cap), motion.Read);
+                        string dec = cap.Refusal is not null ? "refused" : md.Decision;
+                        bool? op = dec switch { "witness" => true, "never" => false, _ => null };
+                        return (object)new { x.Label, min = x.Min, max = x.Max, opaqueMeets = op, anyMeets = (bool?)null, reason = cap.Refusal ?? md.Reason,
+                                             motion = new { decision = dec, origin = md.Origin, witnessLabel = md.Label, note = md.Note, animationId = md.AnimationId, md.Time,
+                                                            animationB = md.AnimationB, timeB = md.TimeB, weights = md.Weights, angles = md.Angles, width = md.Width,
+                                                            converged = md.Converged, evaluations = md.Evaluations, budget = motion.Sweep.Budget } };
+                    }).ToList();
+                    measured++;
+                    records.Add(new { pairKey, a, b, boxOwner = owner, mesh, status = "measured", reason = (string?)null, particles = (IReadOnlyList<string>?)null,
+                                      motion = new { mode = "swept", policy = MeshSurfaceBox.MotionPolicyVersion + "|" + MotionReview.Policy + "|" + MemberMotion.PolicyVersion, member = otherName,
+                                                     label = string.Join("; ", member.Labels), mechanisms = member.Mechanisms.Select(m => m.Kind).ToArray() },
+                                      boxes = decided });
+                    continue;
+                }
                 var region = bytes is null ? null : motion.Region(other, bytes, VolumeGeometry.Render);
                 if (region is not { Status: "built" })
                 {
                     refused++;
-                    records.Add(new { pairKey, a, b, boxOwner = owner, mesh, status = "refused",
-                                      reason = $"{otherName}: {why}; motion: {(region is null ? "the mesh could not be re-read" : region.Status + " " + region.Reason)}", boxes = Array.Empty<object>() });
+                    // lane M: a member reading that refuses for its own reason (not the stored-pose reading's) is named alone
+                    string reason = region is { Status: "refused" } && why != "live pose: " + region.Reason
+                        ? $"{otherName}: live pose: {region.Reason}"
+                        : $"{otherName}: {why}; motion: {(region is null ? "the mesh could not be re-read" : region.Status + " " + region.Reason)}";
+                    records.Add(new { pairKey, a, b, boxOwner = owner, mesh, status = "refused", reason, boxes = Array.Empty<object>() });
                     continue;
                 }
                 var placed = SweptGeometry.Place(region, mp.Pos, mp.Rot, mp.Scale);

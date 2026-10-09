@@ -638,9 +638,10 @@ NifRenderGeometryOutcome SweptProxy(byte[] bytes, NifRenderGeometryOutcome origi
     var visible = original.Model?.Shapes.Where(s => !s.Hidden).ToList();
     if (visible is null || visible.Count == 0 || !visible.All(s => s.VerticesRead && s.TrianglesRead && s.InvalidTriangleCount == 0)
         || !visible.Any(s => s.PoseIssue is not null)) return original;
-    var model = NifMotion.Read(bytes, Read);
+    // lane M: the shared reader (a clip-only member's region is exactly SweptGeometry.Build's; the base record is not known here)
+    var model = MemberMotion.Read(bytes, Read, null);
     if (model.Status != "moving") return original;
-    var region = SweptGeometry.Build(bytes, model, null, VolumeGeometry.Render, new MotionOptions(DeltaTarget: motionDelta), Read);
+    var region = MemberMotion.Region(bytes, model, VolumeGeometry.Render, new MemberSweep(DeltaTarget: motionDelta), Read);
     if (region.Status != "built") return original;
     var v = new List<System.Numerics.Vector3>(); var idx = new List<int>();
     var total = Aabb.Empty;

@@ -76,16 +76,28 @@ static class AnchorReview
             if (bBytes is null) { refused++; records.Add(Rec(new { mesh = bMesh }, Array.Empty<object>(), "B: " + bWhy)); continue; }
             var surf = MeshSurface.ModelSurface(bBytes, VolumeGeometry.Render, LivePoseDefault.Policy);
             // lane 3b, gap b: with --motion swept, a partner refused for its live pose is tested over every sample of its swept region
-            SweptRegion? sweptB = null; string? motionLabel = null;
+            SweptRegion? sweptB = null; string? motionLabel = null; MemberModel? memberB = null;
             if (surf.Status != "measured" && motion is { Options.Mode: "swept" } && (surf.Reason ?? "").StartsWith("live pose:", StringComparison.Ordinal))
             {
                 var mb = motion.Model(pr.B, bBytes);
-                if (mb.Status != "moving") { refused++; records.Add(Rec(new { mesh = bMesh }, Array.Empty<object>(), $"B: {surf.Reason}; motion: {mb.Status} {mb.Reason}")); continue; }
-                var region = motion.Region(pr.B, bBytes, VolumeGeometry.Render);
-                if (region.Status != "built") { refused++; records.Add(Rec(new { mesh = bMesh }, Array.Empty<object>(), $"B: live pose: {region.Reason}")); continue; }
-                var bp = pb!.Value;
-                sweptB = SweptGeometry.Place(region, bp.Pos, bp.Rot, bp.Scale);
-                motionLabel = string.Join("; ", region.Animations.Select(an => $"{an.Id} {an.Cycle} {an.Trigger}"));
+                if (mb.Status != "moving")
+                {
+                    // lane M: a member reading that refuses for its own reason (not the stored-pose reading's) is named alone
+                    refused++;
+                    records.Add(Rec(new { mesh = bMesh }, Array.Empty<object>(), mb.Status == "refused" && surf.Reason != "live pose: " + mb.Reason
+                        ? $"B: live pose: {mb.Reason}" : $"B: {surf.Reason}; motion: {mb.Status} {mb.Reason}"));
+                    continue;
+                }
+                // lane M: a member with a mechanism beyond clips is decided per anchor by the shared loop (below)
+                if (!MemberMotion.IsClipOnly(bBytes, mb, motion.Read)) memberB = mb;
+                else
+                {
+                    var region = motion.Region(pr.B, bBytes, VolumeGeometry.Render);
+                    if (region.Status != "built") { refused++; records.Add(Rec(new { mesh = bMesh }, Array.Empty<object>(), $"B: live pose: {region.Reason}")); continue; }
+                    var bp = pb!.Value;
+                    sweptB = SweptGeometry.Place(region, bp.Pos, bp.Rot, bp.Scale);
+                    motionLabel = string.Join("; ", region.Animations.Select(an => $"{an.Id} {an.Cycle} {an.Trigger}"));
+                }
             }
             else if (surf.Status != "measured") { refused++; records.Add(Rec(new { mesh = bMesh }, Array.Empty<object>(), "B: " + surf.Reason)); continue; }
 
@@ -126,6 +138,25 @@ static class AnchorReview
             var results = new List<object>();
             foreach (var (at, kind, entry, ex) in anchors)
             {
+                if (memberB is not null)
+                {
+                    var bp = pb!.Value; var cap = new MemberCapture();
+                    var md = MemberMotion.Decide(bBytes, memberB, VolumeGeometry.Render, bp.Pos, bp.Rot, bp.Scale, motion!.Sweep, MemberPredicates.Anchor(at, body, ex, cap), motion.Read);
+                    if (md.Decision is "cannot_tell" or "refused") undecided++; else decided++;
+                    results.Add(new
+                    {
+                        kind, at = new[] { (double)at.X, at.Y, at.Z },
+                        entry = entry is null ? null : new { entry.AnimationType, entry.EntryPoints, heading = entry.Heading },
+                        exclusion = ex is { } h3 ? new { normal = new[] { (double)h3.Normal.X, h3.Normal.Y, h3.Normal.Z }, offset = (double)h3.Offset } : null,
+                        motion = new { mode = "swept", policy = AnchorMotion.PolicyVersion + "|" + MotionReview.Policy + "|" + MemberMotion.PolicyVersion, member = "B",
+                                       label = string.Join("; ", memberB.Labels), mechanisms = memberB.Mechanisms.Select(x => x.Kind).ToArray(),
+                                       decision = md.Decision, reason = md.Decision == "witness" ? cap.WitnessReason : md.Reason, origin = md.Origin, witnessLabel = md.Label,
+                                       note = md.Note, witnessAnimation = md.AnimationId, time = md.Time, animationB = md.AnimationB, timeB = md.TimeB, weights = md.Weights,
+                                       angles = md.Angles, margin = md.Decision == "never" ? cap.MinMargin : md.Decision == "cannot_tell" ? md.Width : (double?)null,
+                                       converged = md.Converged, evaluations = md.Evaluations, budget = motion.Sweep.Budget },
+                    });
+                    continue;
+                }
                 if (sweptB is not null)
                 {
                     var mr = AnchorMotion.TestSwept(sweptB, at, body, ex);
