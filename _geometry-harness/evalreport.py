@@ -936,11 +936,15 @@ def build_prediction(ctx: dict) -> dict:
         return titles.get(str(check_id)) or ctx["checkTitle"](check_id)
 
     def reason_words(code):
-        # a probe's reason code (`NoGeometry`) in words (`no geometry`), unless the skill names it
-        known = (words.get("unjudgeableWords") or {}).get(str(code))
+        # a probe's reason in the skill's words; a reason already written in words passes through; a code the skill
+        # does not name gets one generic phrase, never the code (the code stays in the evidence index)
+        code = str(code or "").strip()
+        known = (words.get("unjudgeableWords") or {}).get(code)
         if known:
             return known
-        return re.sub(r"(?<=[a-z0-9])(?=[A-Z])", " ", str(code)).lower()
+        if " " in code:
+            return code
+        return words["unjudgeableUnnamed"]
     items = []
     for g in groups.values():
         g["title"] = title_of(g["checkId"])
@@ -989,25 +993,41 @@ def build_prediction(ctx: dict) -> dict:
     by_status = collections.OrderedDict()
     for m in ctx["missing"]:
         if m.get("armId") in relevant_arms:
-            by_status.setdefault(str(m.get("status")), set()).add(str(m.get("checkId")))
-    for status, ids in by_status.items():
+            by_status.setdefault(str(m.get("status")), collections.OrderedDict()).setdefault(
+                str(m.get("checkId")), []).append(m.get("armId"))
+    labels = ctx["armLabels"]
+    all_relevant = len(relevant_arms)
+    for status, by_check in by_status.items():
         reason = ctx["missingReason"](status, "has no accepted result")
-        lines.append({"reason": bind(reasons["missing"], {"reason": reason}), "count": len(ids),
-                      "unit": "check" if len(ids) == 1 else "checks",
-                      "subject": "; ".join(sorted(title_of(i) for i in ids))})
+        subjects = []
+        for check_id, arms_ in sorted(by_check.items(), key=lambda kv: title_of(kv[0])):
+            setups = sorted({a for a in arms_ if a})
+            where = ("" if len(setups) >= all_relevant else
+                     " (for " + "; ".join(labels.get(a, "a tested setup") for a in setups) + ")")
+            subjects.append(title_of(check_id) + where)
+        lines.append({"reason": bind(reasons["missing"], {"reason": reason}), "count": len(by_check),
+                      "unit": "check" if len(by_check) == 1 else "checks", "subject": "; ".join(subjects)})
     unjudged = collections.OrderedDict()
     for u in (ctx["unassessed"].get("unjudgeablePopulations") or []):
         if u.get("armId") != p_arm:
             continue
         uj = u.get("unjudgeable")
-        title = title_of(u.get("checkId"))
-        for k, v in (uj.items() if isinstance(uj, dict) else [("reason not stated", uj)]):
+        per = unjudged.setdefault(title_of(u.get("checkId")), collections.Counter())
+        for k, v in (uj.items() if isinstance(uj, dict) else [("", uj)]):
             if isinstance(v, (int, float)) and not isinstance(v, bool) and v > 0:
-                key = (title, reason_words(k))
-                unjudged[key] = unjudged.get(key, 0) + v
-    for (title, reason), n in unjudged.items():
-        lines.append({"reason": bind(reasons["unjudgeable"], {"reason": reason}), "count": n,
-                      "unit": "item" if n == 1 else "items", "subject": title})
+                per[reason_words(k)] += v
+    for title, per in unjudged.items():
+        if not per:
+            continue
+        top = per.most_common()
+        shown = top[:3]
+        rest = len(top) - len(shown)
+        detail = "; ".join(f"{r} {fmt_n(n)}" for r, n in shown)
+        if rest:
+            detail += "; " + bind(reasons["unjudgeableMore"], {"count": rest})
+        total_n = sum(per.values())
+        lines.append({"reason": reasons["unjudgeable"], "count": total_n,
+                      "unit": "item" if total_n == 1 else "items", "subject": f"{title}: {detail}"})
     not_sep = sum(g["count"] for g in items if g["attribution"] == "not-separable")
     if not_sep:
         lines.append({"reason": reasons["notSeparable"], "count": not_sep,
@@ -1950,7 +1970,10 @@ def compile_plan(bundle_dir: Path, verify: dict, settings: dict, pr: dict, bundl
         for name in pair:
             if name.lower() not in target_set and name not in supplied:
                 comparison_weight[name] += max(1, int(f.get("rowsTotal") or 0))
-    comparison_names = [n for n, _ in sorted(comparison_weight.items(), key=lambda x: (-x[1], x[0].lower()))]
+    # a difference with the base game is set aside, never a conflict partner named in the opening
+    base_game_partners = [n for n in comparison_weight if is_base_game(n, reader_data.get("prediction") or {})]
+    comparison_names = [n for n, _ in sorted(comparison_weight.items(), key=lambda x: (-x[1], x[0].lower()))
+                        if n not in base_game_partners]
     reader_scope_names = target_set | {x.lower() for x in supplied}
     for f in findings:
         c = f.get("counts") or {}
@@ -1977,7 +2000,9 @@ def compile_plan(bundle_dir: Path, verify: dict, settings: dict, pr: dict, bundl
                  "added to the measured load order for comparison")
     scope_line = (f"This report evaluates {', '.join(target_names) or 'the target mod'} within the measured load order. "
                   + (f"The main recorded conflicts involving the target are with {compared}. " if comparison_names else
-                     "No comparison mod was identified by the recorded conflicts. ")
+                     ("The recorded conflicts involving the target are with the base game only; they are set aside "
+                      "below, as differences rather than clashes between mods. " if base_game_partners else
+                      "No comparison mod was identified by the recorded conflicts. "))
                   + " ".join(x for x in (
                       ((f"The patch evaluated is {patch_text}, {patch_how}." if len(supplied) == 1 else
                         f"The patches evaluated are {patch_text}, {patch_how}.") if supplied else
@@ -2257,7 +2282,7 @@ def compile_plan(bundle_dir: Path, verify: dict, settings: dict, pr: dict, bundl
         "findings": findings, "armOrders": arm_orders, "armIds": arm_ids, "targets": target_names,
         "declared": declared_patches, "comparisonKinds": comparison_kinds, "armChanges": arm_changes,
         "missing": missing, "unassessed": un, "checkTitles": check_titles, "missingReason": missing_reason,
-        "checkTitle": b.check_title,
+        "checkTitle": b.check_title, "armLabels": arm_labels,
         "familyTitle": lambda x: (b.families.get(x) or {}).get("title") or str(x),
         "oldVerdict": verdict, "limitations": limitations, "words": reader_data["prediction"],
         "inGame": reader_data.get("inGame") or {}, "kindPhrases": reader_data.get("kindPhrases") or {}})
