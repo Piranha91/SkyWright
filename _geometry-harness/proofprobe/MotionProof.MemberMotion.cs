@@ -339,6 +339,17 @@ static partial class MotionProof
             var near = DecideAt(nif, read, Mstt, Cube(50, 0, 0, 1.5f)); var far = DecideAt(nif, read, Mstt, Cube(-50, 0, 0, 1.5f));
             return (near.Decision == "witness" && near.Origin == MemberMotion.OriginBlend && far.Decision == "never", $"short: {ShowMD(near)} | long: {ShowMD(far)}");
         });
+        // Gate C fix (disclosed in RESULT.md): the reader takes each local through its rotation matrix, so K-M3's stored sign never
+        // reaches the blend and its +-85 deg poses (product > 0 once read) cannot see a missing alignment; +-100 deg poses read with a
+        // negative product, so only an aligned blend passes through 180 deg.
+        Case(check, "K-M3c still poses at +100 and -100 deg about one axis (product < 0 as read): the aligned blend's short arc passes through 180 deg: partner there witness origin blend; partner at 0 deg (the unaligned arc) never (rejects no sign alignment)", () =>
+        {
+            var nif = ChainNif(@"Lab\KM3c.hkx", new[] { ("Part", "N1", Cube(50, 0, 0, 1), false) },
+                               new[] { ("SeqA", new[] { new FxKeys("N1", 100, 100) }, CycleType.CYCLE_CLAMP), ("SeqB", new[] { new FxKeys("N1", -100, -100) }, CycleType.CYCLE_CLAMP) });
+            var read = Files(GraphFiles("KM3c", new[] { new FxState("A", "sequence", new[] { "SeqA" }), new FxState("B", "sequence", new[] { "SeqB" }) }));
+            var far = DecideAt(nif, read, Mstt, Cube(-50, 0, 0, 1.5f)); var near = DecideAt(nif, read, Mstt, Cube(50, 0, 0, 1.5f));
+            return (far.Decision == "witness" && far.Origin == MemberMotion.OriginBlend && near.Decision == "never", $"180 deg: {ShowMD(far)} | 0 deg: {ShowMD(near)}");
+        });
         Case(check, "K-M3b still poses at +90 and -90 deg about one axis (quaternion product within float noise of 0): partners on both arcs (0 and 180 deg) are blend witnesses (Gate C review: the engine's own float product can take either sign; rejects a sign fixed from our arithmetic: never on one arc)", () =>
         {
             var nif = ChainNif(@"Lab\KM3b.hkx", new[] { ("Part", "N1", Cube(50, 0, 0, 1), false) },
