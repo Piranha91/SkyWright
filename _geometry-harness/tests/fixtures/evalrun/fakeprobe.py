@@ -60,6 +60,8 @@ import time
 from pathlib import Path
 
 SCHEMA = 1
+# overlapprobe's emits carry a measurement policy; conflictdiff refuses overlap repair credit without one (3c9432e3)
+FIXTURE_OVERLAP_POLICY = "fixture-overlap-v1"
 DEFAULT_UNKNOWN = {
     "installerChoices": "not modelled: MO2 keeps no per-mod record of the FOMOD options taken; the installed files are the evidence",
     "gameBuild": "not read: the executable version and SKSE/plugin set are not part of a records run",
@@ -555,6 +557,10 @@ def main(probe: str, argv=None) -> int:
         cfg["Fingerprint"] = fingerprint(cfg["Plugins"], cfg["Providers"], cfg["Overlays"], cfg["Population"], cfg["State"])
     if behaviour != "no-configuration":
         doc["Configuration"] = cfg
+    # an entry's `measurementPolicy` overrides the default; None leaves the field out, as an emit before 3c9432e3 did
+    policy = entry.get("measurementPolicy", FIXTURE_OVERLAP_POLICY if probe == "overlapprobe" else None)
+    if policy is not None:
+        doc["MeasurementPolicy"] = policy
     doc["PopulationIdentity"] = f"{doc['Population']} / state {doc['State']}"
 
     text = json.dumps(doc, indent=1)
