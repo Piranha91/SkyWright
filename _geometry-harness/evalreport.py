@@ -1004,6 +1004,7 @@ def build_prediction(ctx: dict) -> dict:
             # a missing comparison part is the comparison with the measured order, not the setup's own result
             def place(a, part):
                 label = labels.get(a, "a tested setup")
+                label = label[:1].lower() + label[1:]                 # it follows "for" / "of" mid-sentence
                 return (f"the comparison of {label} with the measured load order" if part in ("diff", "reverse")
                         else label)
             setups = sorted({(a, part) for a, part in arms_ if a}, key=lambda x: (str(x[0]), str(x[1])))
@@ -1028,7 +1029,8 @@ def build_prediction(ctx: dict) -> dict:
         top = per.most_common()
         shown = top[:3]
         rest = len(top) - len(shown)
-        detail = "; ".join(f"{r} {fmt_n(n)}" for r, n in shown)
+        # the line's own count is the total; a single reason does not repeat it
+        detail = "; ".join(r if len(top) == 1 else f"{r} {fmt_n(n)}" for r, n in shown)
         if rest:
             detail += "; " + bind(reasons["unjudgeableMore"], {"count": rest})
         total_n = sum(per.values())
@@ -1048,8 +1050,13 @@ def build_prediction(ctx: dict) -> dict:
         lines.append({"reason": reasons["statesNotExplored"], "count": len(un["statesNotExplored"]),
                       "subject": ", ".join(map(str, un["statesNotExplored"]))})
     if un.get("scopeUnmeasured"):
+        # the controller's extent ids in the skill's words; an id it does not name gets one generic phrase (the ids
+        # stay in the evidence index)
+        extent_words = words.get("extentWords") or {}
+        areas = list(dict.fromkeys(extent_words.get(str(x.get("extent"))) or words["extentUnnamed"]
+                                   for x in un["scopeUnmeasured"] if isinstance(x, dict)))
         lines.append({"reason": reasons["scopeUnmeasured"], "count": len(un["scopeUnmeasured"]),
-                      "subject": "; ".join(str(s.get("extent")) for s in un["scopeUnmeasured"] if isinstance(s, dict))})
+                      "subject": "; ".join(areas)})
     if un.get("familiesUnsupportedOrManual"):
         lines.append({"reason": reasons["familiesUnsupported"], "count": len(un["familiesUnsupportedOrManual"]),
                       "subject": ", ".join(ctx["familyTitle"](x) for x in un["familiesUnsupportedOrManual"])})
