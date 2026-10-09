@@ -994,16 +994,22 @@ def build_prediction(ctx: dict) -> dict:
     for m in ctx["missing"]:
         if m.get("armId") in relevant_arms:
             by_status.setdefault(str(m.get("status")), collections.OrderedDict()).setdefault(
-                str(m.get("checkId")), []).append(m.get("armId"))
+                str(m.get("checkId")), []).append((m.get("armId"), m.get("part")))
     labels = ctx["armLabels"]
     all_relevant = len(relevant_arms)
     for status, by_check in by_status.items():
         reason = ctx["missingReason"](status, "has no accepted result")
         subjects = []
         for check_id, arms_ in sorted(by_check.items(), key=lambda kv: title_of(kv[0])):
-            setups = sorted({a for a in arms_ if a})
-            where = ("" if len(setups) >= all_relevant else
-                     " (for " + "; ".join(labels.get(a, "a tested setup") for a in setups) + ")")
+            # a missing comparison part is the comparison with the measured order, not the setup's own result
+            def place(a, part):
+                label = labels.get(a, "a tested setup")
+                return (f"the comparison of {label} with the measured load order" if part in ("diff", "reverse")
+                        else label)
+            setups = sorted({(a, part) for a, part in arms_ if a}, key=lambda x: (str(x[0]), str(x[1])))
+            where = ("" if len({a for a, _ in setups}) >= all_relevant and all(pt not in ("diff", "reverse")
+                                                                                for _, pt in setups) else
+                     " (for " + "; ".join(place(a, part) for a, part in setups) + ")")
             subjects.append(title_of(check_id) + where)
         lines.append({"reason": bind(reasons["missing"], {"reason": reason}), "count": len(by_check),
                       "unit": "check" if len(by_check) == 1 else "checks", "subject": "; ".join(subjects)})
