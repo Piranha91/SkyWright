@@ -266,6 +266,90 @@ def test_p4_powershell_failure_still_exit_2():
         assert code == 2 and "REFUSED" in out, (rc, so, code, out)
 
 
+# ---- a probe actually running, not a command line that names one (task 2026-10-09-tooling-follow-ups item 1) -------
+# The command-line rule matched a probe's name anywhere in any process's command line, so a shell that hashed, listed or
+# edited a probe's file read as "a probe running". The 2026-10-09 review's live run listed two bash.exe that way. A probe
+# is running when a process IS its executable, or a dotnet host's program argument is its dll.
+
+# M1 -- rejects: a shell (not the caller's ancestor) that hashes a probe's dll listed as a probe running
+def test_m1_shell_hashing_a_probe_dll_is_not_a_probe():
+    v = M.decide(snap({"name": "bash.exe", "pid": 120, "ppid": 1,
+                       "cmd": '"C:\\Program Files\\Git\\bin\\bash.exe" -c "sha256sum '
+                              'S:/Dev/houseCARL/_geometry-harness/switchprobe/bin/Release/net9.0/switchprobe.dll"'}),
+                 exists=no_lock)
+    assert v["idle"], v
+
+
+# M2 -- rejects: a PowerShell that names a probe's exe in a script argument listed as a probe running
+def test_m2_powershell_naming_a_probe_exe_is_not_a_probe():
+    v = M.decide(snap({"name": "powershell.exe", "pid": 121, "ppid": 1,
+                       "cmd": "powershell -NoProfile -Command Get-FileHash X:\\h\\contactprobe\\bin\\contactprobe.exe"}),
+                 exists=no_lock)
+    assert v["idle"], v
+
+
+# M3 -- rejects: an editor holding a file in a probe's source folder listed as a probe running
+def test_m3_editor_on_a_probe_source_file_is_not_a_probe():
+    v = M.decide(snap({"name": "Code.exe", "pid": 122, "ppid": 1,
+                       "cmd": '"C:\\Users\\u\\AppData\\Local\\Programs\\Microsoft VS Code\\Code.exe" '
+                              'S:\\Dev\\houseCARL\\_geometry-harness\\viewprobe\\Program.cs'}),
+                 exists=no_lock)
+    assert v["idle"], v
+
+
+# M4 -- rejects: a dotnet host running another program whose ARGUMENTS name a probe listed as a probe running
+def test_m4_dotnet_host_of_another_dll_naming_a_probe_is_not_a_probe():
+    v = M.decide(snap({"name": "dotnet.exe", "pid": 123, "ppid": 1,
+                       "cmd": "dotnet S:\\x\\housecarl-runlog.dll history --op contactprobe"}),
+                 exists=no_lock)
+    assert v["idle"], v
+
+
+# M5 -- rejects: passing a probe executable whose command line could not be read (CIM gives null for some processes)
+def test_m5_probe_exe_with_unreadable_command_line_still_blocks():
+    v = M.decide(snap({"name": "overlapprobe.exe", "pid": 124, "ppid": 1, "cmd": ""}), exists=no_lock)
+    assert not v["idle"] and "overlapprobe" in v["reasons"][0], v
+
+
+# Q1..Q6 -- kept: every way a probe actually runs still blocks
+def test_q1_dotnet_exec_with_options_still_blocks():
+    v = M.decide(snap({"name": "dotnet.exe", "pid": 130, "ppid": 1,
+                       "cmd": "dotnet exec --runtimeconfig X:\\h\\overlapprobe.runtimeconfig.json "
+                              "X:\\h\\overlapprobe\\bin\\overlapprobe.dll --order o.json"}), exists=no_lock)
+    assert not v["idle"] and "overlapprobe" in v["reasons"][0], v
+
+
+def test_q2_dotnet_quoted_path_with_spaces_still_blocks():
+    v = M.decide(snap({"name": "dotnet.exe", "pid": 131, "ppid": 1,
+                       "cmd": '"C:\\Program Files\\dotnet\\dotnet.exe" "S:\\my dir\\contactprobe\\bin\\contactprobe.dll" '
+                              "--pairs a"}), exists=no_lock)
+    assert not v["idle"] and "contactprobe" in v["reasons"][0], v
+
+
+def test_q3_listed_probe_apphost_by_path_still_blocks():
+    v = M.decide(snap({"name": "ContactProbe.EXE", "pid": 132, "ppid": 1,
+                       "cmd": '"X:\\h\\contactprobe\\bin\\ContactProbe.EXE" --pairs a'}), exists=no_lock)
+    assert not v["idle"] and "contactprobe" in v["reasons"][0].lower(), v
+
+
+def test_q4_unlisted_probe_dll_under_dotnet_still_blocks():
+    v = M.decide(snap({"name": "dotnet.exe", "pid": 133, "ppid": 1, "cmd": "dotnet D:\\x\\newthingprobe.dll --json o"}),
+                 exists=no_lock)
+    assert not v["idle"] and "newthingprobe" in v["reasons"][0], v
+
+
+def test_q5_conflictdiff_exe_by_name_still_blocks():
+    v = M.decide(snap({"name": "conflictdiff.exe", "pid": 134, "ppid": 1, "cmd": "conflictdiff.exe a.json b.json"}),
+                 exists=no_lock)
+    assert not v["idle"] and "conflictdiff" in v["reasons"][0], v
+
+
+def test_q6_dotnet_run_of_a_probe_project_still_blocks_as_a_build():
+    v = M.decide(snap({"name": "dotnet.exe", "pid": 135, "ppid": 1,
+                       "cmd": "dotnet run --project _geometry-harness/contactprobe -c Release"}), exists=no_lock)
+    assert not v["idle"], v
+
+
 def main():
     tests =[(n, f) for n, f in sorted(globals().items()) if n.startswith("test_") and callable(f)]
     for n, f in tests:
