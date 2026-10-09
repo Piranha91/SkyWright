@@ -599,6 +599,12 @@ def assert_common(case: str, bundle: Path, out: Path, pres: dict, common: dict, 
     return md, index
 
 
+def headline(reader) -> str | None:
+    """The comparison sentence (a patch or alternative setup against the measured order). The reader's verdict leads
+    with the prediction; this sentence follows it as the validation headline, in the same words as before."""
+    return ((reader or {}).get("validation") or {}).get("headline")
+
+
 def finding_where(pres, **kv):
     out = []
     for f in pres.get("findings") or []:
@@ -664,7 +670,13 @@ def check_stylesheet_escaping():
              "reader": {"title": markup, "scopeLine": "", "verdict": "", "limitations": [],
                         "context": {"evaluatedAt": None, "statesExamined": [], "statesNotExamined": []},
                         "locationOrder": {"heading": "", "intro": "", "empty": ""},
-                        "sectionHeadings": {"regressions": "Problems introduced", "changes": "What changed"},
+                        "sectionHeadings": {"regressions": "Problems introduced", "changes": "What changed",
+                                            "prediction": "Prediction", "coverage": "Coverage",
+                                            "validation": "Validation"},
+                        "prediction": {"verdict": markup, "items": [], "noneFoundBasis": None, "missingFacts": [],
+                                       "record": [], "predictionArm": "baseline"},
+                        "coverage": {"lines": [], "notes": [], "setAsideLine": None},
+                        "validation": {"status": "no-patch", "sentence": "", "other": ""},
                         "checkTitles": {}, "checkExplanations": {}, "comparisonSummary": [],
                         "missingSummary": [], "nullSummary": [], "catalogueSummary": [], "otherLimits": []}}
     try:
@@ -803,7 +815,7 @@ def check_patch_direction(bundle: Path):
     check("The patch evaluated is Patch.esp, included in the measured load order and removed for comparison."
           in str(reader.get("scopeLine")) and "No separate patch plugin" not in str(reader.get("scopeLine")),
           f"{label}/removes: the opening names the patch and says the comparison removes it (got {reader.get('scopeLine')!r})")
-    expect(reader.get("verdict"), "Removing Patch.esp introduces a new defect in a check that ran.",
+    expect(headline(reader), "Removing Patch.esp introduces a new defect in a check that ran.",
            f"{label}/removes: the Result says the defect comes with removing the patch")
     check(regression_plain(plan, "candidate-02-patchb").startswith("Removing Patch.esp introduced 2 new problems"),
           f"{label}/removes: the finding sentence names the removal (got {regression_plain(plan, 'candidate-02-patchb')!r})")
@@ -826,7 +838,7 @@ def check_patch_direction(bundle: Path):
     check("The patch evaluated is Patch.esp, added to the measured load order for comparison." in str(reader.get("scopeLine"))
           and "removed for comparison" not in str(reader.get("scopeLine")),
           f"{label}/adds: the opening names the patch and says the comparison adds it (got {reader.get('scopeLine')!r})")
-    expect(reader.get("verdict"), "Adding Patch.esp introduces a new defect in a check that ran.",
+    expect(headline(reader), "Adding Patch.esp introduces a new defect in a check that ran.",
            f"{label}/adds: the Result says the defect comes with adding the patch")
     check(regression_plain(plan, "candidate-02-patchb").startswith("Adding Patch.esp introduced 2 new problems"),
           f"{label}/adds: the finding sentence names the addition (got {regression_plain(plan, 'candidate-02-patchb')!r})")
@@ -844,7 +856,7 @@ def check_patch_direction(bundle: Path):
     check("No separate patch plugin was declared for this comparison." in str(reader.get("scopeLine")),
           f"{label}/none: the opening keeps the no-separate-patch wording (got {reader.get('scopeLine')!r})")
     # the title with no separate patch: followup_title_control
-    expect(reader.get("verdict"), "Removing FixtureTarget.esp introduces a new defect in a check that ran.",
+    expect(headline(reader), "Removing FixtureTarget.esp introduces a new defect in a check that ran.",
            f"{label}/none: the Result names the removal even when no patch is involved")
     check("supplied setup" not in md.lower() and "This setup also loads" not in md,
           f"{label}/none: a removal arm is not the supplied setup, and no omitted patch is claimed")
@@ -856,7 +868,7 @@ def check_patch_direction(bundle: Path):
     expect(reader.get("title"), "FixtureTarget.esp with Other.esp, Patch.esp — patch review", f"{label}/mixed: title")
     check("The patches evaluated are Other.esp, Patch.esp, added or removed for comparison." in str(reader.get("scopeLine")),
           f"{label}/mixed: the opening says the comparisons add or remove them (got {reader.get('scopeLine')!r})")
-    expect(reader.get("verdict"), "A tested alternative setup introduces a new defect in a check that ran.",
+    expect(headline(reader), "A tested alternative setup introduces a new defect in a check that ran.",
            f"{label}/mixed: arms that change different things share no single subject, and one removes a plugin")
     check(regression_plain(plan, "candidate-01-patcha").startswith("Adding Patch.esp introduced")
           and regression_plain(plan, "candidate-02-patchb").startswith("Removing Other.esp introduced"),
@@ -881,7 +893,7 @@ def check_patch_direction(bundle: Path):
     for variant in ("adds", "removes"):
         subject = subjects[variant]
         plan, md, html = patch_direction_control(bundle, variant, "overlap-regression")
-        verdict = str((plan.get("reader") or {}).get("verdict") or "")
+        verdict = str(headline(plan.get("reader")) or "")
         check(verdict.startswith(f"{subject} introduces 1 new overlap candidate for visual review."),
               f"{label}/{variant}/overlap-regression: the overlap-only Result names the change (got {verdict!r})")
         got = plain_of(plan, "candidate-02-patchb", ("regression",), "geometry.object-overlap")
@@ -890,7 +902,7 @@ def check_patch_direction(bundle: Path):
         check("supplied setup" not in md.lower() and "supplied setup" not in html.lower(),
               f"{label}/{variant}/overlap-regression: no supplied-setup wording in report.md or report.html")
         plan, md, html = patch_direction_control(bundle, variant, "overlap-reduction")
-        verdict = str((plan.get("reader") or {}).get("verdict") or "")
+        verdict = str(headline(plan.get("reader")) or "")
         check(verdict.startswith(f"{subject} reduces the number of overlap candidates reported by the checks that ran."),
               f"{label}/{variant}/overlap-reduction: the overlap-only Result names the change (got {verdict!r})")
         got = plain_of(plan, "candidate-02-patchb", ("repaired", "reclassified"), "geometry.object-overlap")
@@ -903,18 +915,18 @@ def check_patch_direction(bundle: Path):
     for variant in ("adds", "removes", "mixed"):
         subject = subjects[variant]
         plan, md, html = patch_direction_control(bundle, variant, "contact-repair")
-        expect((plan.get("reader") or {}).get("verdict"),
+        expect(headline(plan.get("reader")),
                f"{subject} resolves some measured conflicts and no new defect was reported by the checks that ran.",
                f"{label}/{variant}/contact-repair: the repaired-only Result names the change")
         plan, md, html = patch_direction_control(bundle, variant, "contact-regression-repair")
-        expect((plan.get("reader") or {}).get("verdict"),
+        expect(headline(plan.get("reader")),
                f"{subject} resolves some measured conflicts, but it also introduces a new defect in a check that ran.",
                f"{label}/{variant}/contact-regression-repair: the regression-plus-repair Result names the change")
 
     # (h) one arm that adds one plugin and removes another names both changes
     plan, md, html = patch_direction_control(bundle, "both")
     reader = plan.get("reader") or {}
-    expect(reader.get("verdict"), "Adding Patch.esp and removing Other.esp introduces a new defect in a check that ran.",
+    expect(headline(reader), "Adding Patch.esp and removing Other.esp introduces a new defect in a check that ran.",
            f"{label}/both: the Result names the addition and the removal")
     # One arm that adds and removes is "mixed": neither declared patch is evaluated on its own, and the opening
     # says so and names them. It must never claim no patch was declared (ruling 2026-10-05, option 2).
@@ -1939,18 +1951,18 @@ def case_r4(tmp, index, common):
             module.Bundle = original_bundle
 
     reduction_control = overlap_wording_control(False)
-    reduction_verdict = str((reduction_control.get("reader") or {}).get("verdict") or "").lower()
+    reduction_verdict = str(headline(reduction_control.get("reader")) or "").lower()
     check("reduces the number of overlap candidates" in reduction_verdict and "resolves some measured conflicts" not in reduction_verdict,
           f"{case}: compile_plan keeps an overlap-only reduction as candidates rather than a repair verdict")
     regression_control = overlap_wording_control(True)
-    regression_verdict = str((regression_control.get("reader") or {}).get("verdict") or "").lower()
+    regression_verdict = str(headline(regression_control.get("reader")) or "").lower()
     check("introduces 1 new overlap candidate" in regression_verdict and "new defect" not in regression_verdict,
           f"{case}: compile_plan keeps an overlap-only regression as a candidate rather than a defect verdict")
     policy_control = overlap_wording_control(False, policy_marker=True)
     policy_overlap = [f for f in policy_control.get("findings") or []
                       if f.get("checkId") == "geometry.object-overlap"
                       and f.get("kind") in ("repaired", "reclassified")]
-    check((policy_control.get("reader") or {}).get("verdict") == "POLICY OVERLAP VERDICT."
+    check(headline(policy_control.get("reader")) == "POLICY OVERLAP VERDICT."
           and any(str(f.get("readerPlain") or "").startswith("POLICY OVERLAP REDUCTION") for f in policy_overlap),
           f"{case}: compile_plan selects overlap reader wording from report-priorities policy")
     check_patch_direction(bundle)
@@ -2014,7 +2026,9 @@ def case_r4(tmp, index, common):
                          and f.get("checkId") != "geometry.object-overlap" and f.get("readerRelevant")
                          and int((f.get("counts") or {}).get("readerRepaired") or 0)]
     if overlap_reductions and not confirmed_repairs:
-        check("overlap candidates" in reader_verdict.lower() and "resolves some measured conflicts" not in reader_verdict.lower(),
+        reader_headline = str(headline(pres.get("reader")) or "")
+        check("overlap candidates" in reader_headline.lower() and "resolves some measured conflicts" not in reader_headline.lower()
+              and "resolves some measured conflicts" not in reader_verdict.lower(),
               f"{case}: overlap-candidate reductions do not become a repair claim in reader.verdict")
     check(rg["plainContainsNumber"] in [int(x) for x in re.findall(r"\b\d+\b", str(f1.get("plain") or ""))],
           f"{case}: F-001's sentence carries the bound number 1")
@@ -2301,6 +2315,7 @@ def case_r8(tmp, index, common) -> None:
         r.setdefault("indexOrigin", "captured for another evaluation and reused here")
     shown = {"imports": got, "findings": [], "groups": [], "media": [], "evidence": [], "omissions": [],
              "chapters": [], "presentationId": "P", "generatedUtc": "now", "layout": "normal",
+             "reader": {"prediction": {"record": [], "predictionArm": "baseline"}},
              "source": {"planId": "PLAN", "bundleDir": ".", "manifestSha256": "", "dispositionSha256": "",
                         "ledgerSha256": ""},
              "scope": {"targets": [], "registryVersion": "", "planCreatedUtc": "", "runStartedUtc": "",

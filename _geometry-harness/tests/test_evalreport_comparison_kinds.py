@@ -183,7 +183,9 @@ def run_compiler(arms, repaired_on=None, created_on=None, patches=None, declared
         plan = R.compile_plan(bdir, {"bundle": {"complete": True}}, settings, pr, str(bdir))
     scope = plan.get("scope") or {}
     kinds = {a["armId"]: a.get("comparisonKind") for a in scope.get("arms") or []}
-    verdict = ((plan.get("reader") or {}).get("verdict")
+    # The comparison sentence these cells guard is the validation headline: the reader's verdict leads with the
+    # prediction (what adding the mods will break) and the patch comparison follows as its answer key.
+    verdict = ((((plan.get("reader") or {}).get("validation") or {}).get("headline"))
                or (plan.get("result") or {}).get("verdict") or "")
     if not verdict:
         blob = json.dumps(plan)
