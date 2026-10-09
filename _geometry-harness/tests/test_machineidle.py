@@ -271,21 +271,31 @@ def test_p4_powershell_failure_still_exit_2():
 # edited a probe's file read as "a probe running". The 2026-10-09 review's live run listed two bash.exe that way. A probe
 # is running when a process IS its executable, or a dotnet host's program argument is its dll.
 
-# M1 -- rejects: a shell (not the caller's ancestor) that hashes a probe's dll listed as a probe running
-def test_m1_shell_hashing_a_probe_dll_is_not_a_probe():
+SHELL_WORDS = "a shell or script naming a probe (may be a batch driver)"
+
+
+# M1 -- kept conservative (Gate A+B ruling): a shell that is not the caller's ancestor and names a probe may be a batch
+# driver between two probe children, so it still blocks; rejects calling it "a probe running"
+def test_m1_shell_naming_a_probe_blocks_as_a_shell_not_a_probe():
     v = M.decide(snap({"name": "bash.exe", "pid": 120, "ppid": 1,
                        "cmd": '"C:\\Program Files\\Git\\bin\\bash.exe" -c "sha256sum '
                               'S:/Dev/houseCARL/_geometry-harness/switchprobe/bin/Release/net9.0/switchprobe.dll"'}),
                  exists=no_lock)
-    assert v["idle"], v
+    assert not v["idle"] and SHELL_WORDS in v["reasons"][0] and "switchprobe" in v["reasons"][0], v
+    assert "a probe running" not in v["reasons"][0], v
 
 
-# M2 -- rejects: a PowerShell that names a probe's exe in a script argument listed as a probe running
-def test_m2_powershell_naming_a_probe_exe_is_not_a_probe():
-    v = M.decide(snap({"name": "powershell.exe", "pid": 121, "ppid": 1,
-                       "cmd": "powershell -NoProfile -Command Get-FileHash X:\\h\\contactprobe\\bin\\contactprobe.exe"}),
-                 exists=no_lock)
-    assert v["idle"], v
+# M2 -- kept conservative: the same for PowerShell (and every listed shell or interpreter)
+def test_m2_shells_and_interpreters_naming_a_probe_block_as_shells():
+    for name, cmd in (("powershell.exe", "powershell -NoProfile -Command Get-FileHash X:\\h\\contactprobe\\bin\\contactprobe.exe"),
+                      ("pwsh.exe", "pwsh -File drive.ps1 -Probe overlapprobe"),
+                      ("cmd.exe", "cmd /c for %p in (a b) do contactprobe.exe %p"),
+                      ("sh.exe", "sh -c 'viewprobe.exe --x'"),
+                      ("python.exe", "python ordersweep.py --select contactprobe"),
+                      ("node.exe", "node drive.js navprobe")):
+        v = M.decide(snap({"name": name, "pid": 121, "ppid": 1, "cmd": cmd}), exists=no_lock)
+        assert not v["idle"] and SHELL_WORDS in v["reasons"][0], (name, v)
+        assert "a probe running" not in v["reasons"][0], (name, v)
 
 
 # M3 -- rejects: an editor holding a file in a probe's source folder listed as a probe running
