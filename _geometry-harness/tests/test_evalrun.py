@@ -6185,9 +6185,57 @@ def case_44(tmp):
         check(st_ok in CREDITED, f"{case}/tamper: the untouched reuse keeps its credit (got {st_ok!r})")
 
 
+def case_45(tmp):
+    """Gate A review B1 (2026-10-09). conflictdiff refuses repair credit across overlapprobe emits that do not carry
+    one shared measurement policy (3c9432e3). One candidate's fake overlapprobe omits the policy while the baseline's
+    carries it: that arm's overlap diff is rejected(exit-nonzero) on conflictdiff's exit 3, the diff log carries the
+    refusal, and the arm's order evaluation is blocked on the overlap check. The same arm's navownprobe diff and the
+    baseline's overlap arm stay accepted (the refusal is this pair's)."""
+    case = "case-45-overlap-policy-refused"
+    nav, ovl, oe_id = "geometry.navmesh-ownership", "geometry.object-overlap", "patch.order-evaluation"
+    h = SweepInProc(tmp, case)
+    run = tmp / case
+    pl = h.plan(run, ["--select", f"navownprobe,overlapprobe,{oe_id}"])
+    if pl is None:
+        return
+    cand = first_candidate(pl)
+    cid, stem = cand["armId"], Path(cand["candidateFile"]).stem
+    arms = (load(h.scen) or {}).get("arms", {}).get("overlapprobe", {})
+    entry = dict(arms.get(stem) or arms.get("*") or {"behaviour": "ok"})
+    entry["measurementPolicy"] = None
+    scen = h.scenario_with(tmp / f"{case}.scenario.json", "overlapprobe", stem, entry)
+    expect(h.inproc(["run", "--run", run], scenario=scen), 0, f"{case}: premise - the run exits 0")
+    inv = last_sweep(run)
+    rec = {}
+    for ln in text_lines(inv / "jobs.jsonl"):
+        if json.loads(ln)["job"] == f"diff-overlapprobe-{stem}":
+            rec = json.loads(ln)
+    check(rec.get("outcome") == "ran" and rec.get("exitCode") == 3,
+          f"{case}: conflictdiff ran the overlap diff and exited 3 ({rec.get('outcome')}, {rec.get('exitCode')})")
+    log = "\n".join(text_lines(inv / "logs" / f"diff-overlapprobe-{stem}.txt"))
+    refusal = [ln.strip() for ln in log.splitlines() if "measurement polic" in ln]
+    check(any("REFUSED" in ln for ln in refusal),
+          f"{case}: the diff log carries conflictdiff's measurement-policy refusal ({refusal})")
+    rc = load(run / "receipts" / f"{ovl}__{cid}__diff.json") or {}
+    causes = [x.get("cause") for x in (rc.get("validation") or {}).get("rejections") or []]
+    check((rc.get("validation") or {}).get("accepted") is False and "exit-nonzero" in causes,
+          f"{case}: the overlap diff receipt is rejected for its exit code (causes {causes})")
+    led = ledger_entries(load(run / "ledger.json") or {})
+    expect(execution_of(led.get(f"{ovl}__{cid}__diff")), "rejected(exit-nonzero)",
+           f"{case}: the overlap diff's ledger status")
+    expect(execution_of(led.get(f"{oe_id}__{cid}")), f"blocked(prerequisite:{ovl})",
+           f"{case}: the arm's order evaluation is blocked on the overlap check")
+    expect(execution_of(led.get(f"{nav}__{cid}__diff")), "completed",
+           f"{case}: control - the same arm's navownprobe diff is accepted")
+    rb = load(run / "receipts" / f"{ovl}__baseline__arm.json") or {}
+    check((rb.get("validation") or {}).get("accepted") is True,
+          f"{case}: control - the baseline's overlap arm is accepted")
+
+
 CASES["case-42"] = case_42
 CASES["case-43"] = case_43
 CASES["case-44"] = case_44
+CASES["case-45"] = case_45
 
 
 def main() -> int:
