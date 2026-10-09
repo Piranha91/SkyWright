@@ -113,6 +113,11 @@ if (args.Length >= 1 && args[0] == "--cell-scene-selftest")
 // instance, no game and no GL context.
 if (args.Length >= 1 && args[0] == "--depth-measurement-selftest")
     return ViewProbe.DepthMeasurement.SelfTest();
+// Known answers for --occlusion-query on this machine's GPU (OcclusionQuerySelfTest.cs): the sampled-depth conversion
+// against ReadPixels over every depth value a full-range fill reaches, and the query's counts against the CPU compare on
+// synthetic depth with ties, uncovered pixels and hidden pixels. Needs a GL context, no MO2 instance and no game.
+if (args.Length >= 1 && args[0] == "--occlusion-query-selftest")
+    return ViewProbe.OcclusionQuerySelfTest.Run();
 // Known answers for which placed references the winning state admits, and where (WinningRefs.cs), on
 // Mutagen-written synthetic plugins. Needs no MO2 instance, no game and no GL context.
 if (args.Length >= 1 && args[0] == "--winning-refs-selftest")
@@ -292,6 +297,8 @@ bool planesReport = false;
 // --depth-measurement: a --planes-report run without the appearance work (DepthMeasurement.cs); --keep-all-masks
 // keeps every evidence mask under it.
 bool depthMeasurement = false, keepAllMasks = false;
+// --occlusion-query: with --depth-measurement, count each shape's pixels on the GPU (OcclusionQuery.cs).
+bool occlusionQuery = false;
 int visibilityBudget = ViewProbe.OcclusionState.DefaultVisibilityBudget;
 float planesReach = 256f;
 // TROUBLESHOOTING OVERLAY. --conflicts <emit.json> reads a detector's emitted ConflictFile and
@@ -755,6 +762,7 @@ for (int i = argStart; i < args.Length; i++)
     else if (args[i] == "--planes-report") { planesReport = true; textured = true; }
     else if (args[i] == ViewProbe.DepthMeasurement.Flag) depthMeasurement = true;
     else if (args[i] == ViewProbe.DepthMeasurement.KeepAllMasksFlag) keepAllMasks = true;
+    else if (args[i] == ViewProbe.OcclusionQueryPass.Flag) occlusionQuery = true;
     // The deliberate opt-out from failing on an asset that was found and could not be read. It is
     // also honoured as an environment variable so an existing caller can pass it through without
     // its command line changing - and whenever either of them is what suppressed the exit code, the
@@ -1074,6 +1082,8 @@ if (guiLaunch && worklist is not null && !interactiveMode && batchProgress is nu
 }
 if (keepAllMasks && !depthMeasurement)
 { Console.Error.WriteLine("--keep-all-masks only means anything with --depth-measurement, since without it every mask is already written; add --depth-measurement or drop it."); return 1; }
+if (occlusionQuery && !depthMeasurement)
+{ Console.Error.WriteLine("--occlusion-query only applies with --depth-measurement, whose isolated draws it counts; add --depth-measurement or drop the flag."); return 1; }
 if (depthMeasurement && !planesReport)
 { Console.Error.WriteLine("--depth-measurement only applies to a --planes-report run; add --planes-report or drop the flag."); return 1; }
 if (depthMeasurement && stationsSpec is not null)
@@ -4613,7 +4623,7 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot,
                    IReadOnlyList<System.Numerics.Vector3>? diffs = null)
         {
             reportRenderPath = outFile;
-            shotDepthMeasurement = depthMeasurement ? new ViewProbe.DepthMeasurement { KeepAllMasks = keepAllMasks } : null;
+            shotDepthMeasurement = depthMeasurement ? new ViewProbe.DepthMeasurement { KeepAllMasks = keepAllMasks, OcclusionQuery = occlusionQuery } : null;
             int rendered = ViewProbe.TexturedScene.RenderToPng(
                    scene, assets, dataDir, modFolders, overwriteDir,
                    (eyePos.Value, lookPos.Value, fov), g, r, terrainPatches, terrainLayers, navMode, navColor,

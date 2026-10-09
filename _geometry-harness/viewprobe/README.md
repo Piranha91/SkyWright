@@ -2250,6 +2250,32 @@ What a reader of the output sees differently, and must allow for:
 - `tools/planes_report_rows.py`'s `masked_rows_text` skips rows whose mask is null, so it skips invisible shapes in
   this mode; `rows_by_plane` does not.
 
+#### `--occlusion-query`: count the isolated draws on the GPU
+
+`--occlusion-query` (only with `--depth-measurement`) keeps every isolated draw as it is and replaces the read-back,
+hash and CPU compare of shapes that turn out to have no visible pixel. After each isolated draw the shape's depth is
+copied into a texture (the scene depth is copied once per view), and a full-screen pass evaluates
+`ShapeVisibility.Compare`'s per-pixel rule on the GPU (`mine == 1` is skipped; covered pixels, and visible pixels where
+`mine <= scene`), with one `SamplesPassed` occlusion query per count (`OcclusionQuery.cs`). One triangle covers each
+pixel once and the pass writes nothing, so a passed sample is a pixel. A shape with visible pixels (or every shape
+under `--keep-all-masks`) is still read back, hashed, compared on the CPU and masked as before, and the view is refused
+if the CPU and the query disagree on its counts. The draw budget, the draw indices and the mask names do not change.
+
+What changes in the report: for a shape the query finds invisible, `RasterPixels`, `VisiblePixels` (0) and
+`HiddenPixels` come from the query and `isolatedDepthSha256` is **null** (not computed). `appearance.measurementMode`
+gains an `occlusionQuery` block saying so, with the per-view conversion check (`pixels`, `mismatches`) and how many
+shapes were queried and checked on the CPU. Readers of `isolatedDepthSha256`: `tools/renderequiv.py` digests it, so
+it differs between a run with the flag and one without by design (compare such runs with a comparator that knows the
+rule); `tools/test_planes_report_rows.py` lists the key; the mask cache keys on it, but only for shapes it writes a mask
+for, which are all hashed. `scripts/planeassess` does not read it.
+
+GL does not state that sampling a depth texture gives the same float as `ReadPixels`, so it is measured: every view
+compares the sampled scene depth with the read-back scene depth bit for bit and refuses on any difference, and
+`--occlusion-query-selftest` (needs a GL context, no instance) checks the conversion over a full-range depth fill
+(printing how many of the 2^24 values it reached), the query's counts against the CPU compare on synthetic depth with
+ties, uncovered, hidden and visible pixels, and that the pass puts back every binding it changes. Refused without
+`--depth-measurement`.
+
 ---
 
 ## Camera stations for occlusion primitives (`--stations`)

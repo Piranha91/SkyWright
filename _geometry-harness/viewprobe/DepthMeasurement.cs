@@ -19,6 +19,21 @@ public sealed class DepthMeasurement
 
     public bool KeepAllMasks { get; init; }
 
+    /// <summary>--occlusion-query: shapes are counted on the GPU (OcclusionQuery.cs); only shapes with visible pixels,
+    /// or every shape under --keep-all-masks, are read back, hashed and compared on the CPU as well.</summary>
+    public bool OcclusionQuery { get; init; }
+
+    /// <summary>The per-view conversion check (sampled scene depth against ReadPixels, bit for bit).</summary>
+    public int ConversionPixels { get; set; }
+    public int ConversionMismatches { get; set; }
+    /// <summary>Shapes counted by the query, and of those the ones read back and checked on the CPU.</summary>
+    public int QueriedShapes { get; set; }
+    public int CpuCheckedShapes { get; set; }
+
+    /// <summary>Whether a shape the query counted is also read back, hashed and compared on the CPU.</summary>
+    public static bool ReadsBack(DepthMeasurement? mode, int queriedVisiblePixels) =>
+        mode is null || !mode.OcclusionQuery || mode.KeepAllMasks || queriedVisiblePixels > 0;
+
     /// <summary>Alpha-tested diffuses this shot kept: game path to the resolved file's size in bytes (0 when unresolved).</summary>
     public SortedDictionary<string, long> KeptDiffuse { get; } = new(StringComparer.OrdinalIgnoreCase);
 
@@ -38,13 +53,28 @@ public sealed class DepthMeasurement
         KeptDiffuse[gamePath] = bytes;
     }
 
-    public object ReportEntry() => new
-    {
-        name = Name,
-        masks = KeepAllMasks ? "all" : "visible-only",
-        keptDiffuse = "alpha-tested shapes only",
-        alphaTestedDiffuse = new { textures = KeptDiffuse.Count, fileBytes = KeptDiffuse.Values.Sum() },
-    };
+    public object ReportEntry() => OcclusionQuery
+        ? new
+        {
+            name = Name,
+            masks = KeepAllMasks ? "all" : "visible-only",
+            keptDiffuse = "alpha-tested shapes only",
+            alphaTestedDiffuse = new { textures = KeptDiffuse.Count, fileBytes = KeptDiffuse.Values.Sum() },
+            occlusionQuery = new
+            {
+                isolatedDepthHashed = KeepAllMasks ? "all shapes" : "shapes with visible pixels only; isolatedDepthSha256 is null for the others",
+                counts = "RasterPixels and VisiblePixels counted on the GPU for every shape; checked against the CPU compare wherever the depth is read back",
+                conversionCheck = new { pixels = ConversionPixels, mismatches = ConversionMismatches },
+                shapes = new { queried = QueriedShapes, cpuChecked = CpuCheckedShapes },
+            },
+        }
+        : new
+        {
+            name = Name,
+            masks = KeepAllMasks ? "all" : "visible-only",
+            keptDiffuse = "alpha-tested shapes only",
+            alphaTestedDiffuse = new { textures = KeptDiffuse.Count, fileBytes = KeptDiffuse.Values.Sum() },
+        };
 
     /// <summary>The report's `appearance` block under the mode; it carries the mode's identity (`measurementMode`).</summary>
     public object Appearance() => new
@@ -77,6 +107,13 @@ public sealed class DepthMeasurement
         Check("mode: no mask for an invisible shape", WritesMask(mode, 0), false);
         Check("mode: a mask for a visible shape", WritesMask(mode, 1), true);
         Check("mode with --keep-all-masks: a mask for an invisible shape", WritesMask(all, 0), true);
+        var query = new DepthMeasurement { OcclusionQuery = true };
+        var queryAll = new DepthMeasurement { OcclusionQuery = true, KeepAllMasks = true };
+        Check("default path: every shape read back", ReadsBack(null, 0), true);
+        Check("mode without the query: every shape read back", ReadsBack(mode, 0), true);
+        Check("query: a shape the query finds invisible is not read back", ReadsBack(query, 0), false);
+        Check("query: a shape the query finds visible is read back", ReadsBack(query, 1), true);
+        Check("query with --keep-all-masks: every shape read back", ReadsBack(queryAll, 0), true);
         Console.WriteLine($"depth-measurement selftest: {n} cases, {failed} failed");
         return failed == 0 ? 0 : 1;
     }

@@ -251,6 +251,7 @@ static class TexturedScene
         { raw.Add(("framebuffer", fbo)); raw.Add(("texture", color)); raw.Add(("renderbuffer", depth)); raw.Add(("framebuffer", msFbo)); raw.Add(("renderbuffer", msColor)); raw.Add(("renderbuffer", msDepth)); }
         internal void TrackOverlay(int program, int vao, int vbo)
         { raw.Add(("program", program)); raw.Add(("vertex-array", vao)); raw.Add(("buffer", vbo)); }
+        internal void Track(string kind, int handle) => raw.Add((kind, handle));
         public void Dispose()
         {
             if (disposed) return; disposed = true; List<Exception> failures = [];
@@ -286,6 +287,7 @@ static class TexturedScene
                     else if (kind == "program" && GL.IsProgram(handle)) GL.DeleteProgram(handle);
                     else if (kind == "vertex-array" && GL.IsVertexArray(handle)) GL.DeleteVertexArray(handle);
                     else if (kind == "buffer" && GL.IsBuffer(handle)) GL.DeleteBuffer(handle);
+                    else if (kind == "query" && GL.IsQuery(handle)) GL.DeleteQuery(handle);
                 }
                 catch (Exception ex) { failures.Add(ex); }
             }
@@ -2092,6 +2094,20 @@ static class TexturedScene
                 Directory.CreateDirectory(evidenceDir);
                 occl.SceneDepthPath = Path.Combine(evidenceDir, "scene-depth-f32.bin");
                 File.WriteAllBytes(occl.SceneDepthPath, System.Runtime.InteropServices.MemoryMarshal.AsBytes(plainDepth.AsSpan()).ToArray());
+                // --occlusion-query: the shapes are counted on the GPU (OcclusionQuery.cs). The scene depth is copied once,
+                // and its sampled values are checked bit for bit against the ReadPixels floats above before any count is used.
+                ViewProbe.OcclusionQueryPass? query = null;
+                if (depthMeasurement is { OcclusionQuery: true })
+                {
+                    query = new ViewProbe.OcclusionQueryPass(sizeW, sizeH, shotResources.Track);
+                    query.CopySceneDepth(fbo);
+                    var (convPixels, convMismatches) = query.ConversionCheck(plainDepth);
+                    depthMeasurement.ConversionPixels = convPixels;
+                    depthMeasurement.ConversionMismatches = convMismatches;
+                    if (convMismatches > 0)
+                        throw new InvalidOperationException($"the occlusion query's sampled scene depth differs from the read-back depth "
+                            + $"in {convMismatches} of {convPixels} pixels, so its counts would not be the CPU compare's; refusing this view (run without {ViewProbe.OcclusionQueryPass.Flag}).");
+                }
                 // The isolation universe is what the renderer draws, not the shot's own list: with a retained scene
                 // (--reuse-cell) the static meshes live in the renderer but never in `meshes`, and a shape measured
                 // against them is measured against the whole scene (Gate B6, W-G3-1). On the per-shot path the
@@ -2114,10 +2130,36 @@ static class TexturedScene
                     {
                         var isolated = part.Meshes.ToHashSet();
                         foreach (var m in allMeshes) m.IsRendering = savedVisibility[m] && isolated.Contains(m);
-                        Draw(ownDepth, singleSample: true, readColour: depthMeasurement is null);
+                        Draw(query is null ? ownDepth : null, singleSample: true, readColour: depthMeasurement is null);
                         occl.VisibilityDraws++;
+                        (int Raster, int Visible)? counted = null;
+                        if (query is not null)
+                        {
+                            counted = query.Count(fbo);
+                            depthMeasurement!.QueriedShapes++;
+                            if (!DepthMeasurement.ReadsBack(depthMeasurement, counted.Value.Visible))
+                            {
+                                // No visible pixel: no read-back, no hash, no mask (the report says so in measurementMode).
+                                part.IsolatedDepthHash = null;
+                                var queried = new ShapeVisibility(counted.Value.Raster, 0, counted.Value.Raster, null);
+                                graphicsShot?.IsolationDraw(occl.VisibilityDraws, isolated, renderer, null,
+                                    queried.RasterPixels, queried.VisiblePixels, queried.HiddenPixels);   // G3 RED, measurement only
+                                return queried;
+                            }
+                            GL.BindFramebuffer(FramebufferTarget.Framebuffer, fbo);
+                            GL.ReadPixels(0, 0, sizeW, sizeH, PixelFormat.DepthComponent, PixelType.Float, ownDepth);
+                        }
                         part.IsolatedDepthHash = DepthHash(ownDepth);
                         var measured = ShapeVisibility.Compare(ownDepth, plainDepth);
+                        if (counted is { } c)
+                        {
+                            depthMeasurement!.CpuCheckedShapes++;
+                            if (measured.Issue is not null || measured.RasterPixels != c.Raster || measured.VisiblePixels != c.Visible)
+                                throw new InvalidOperationException($"the occlusion query and the CPU depth compare disagree on shape block {part.Block} "
+                                    + $"(visibility draw {occl.VisibilityDraws}): query raster/visible {c.Raster}/{c.Visible}, CPU "
+                                    + $"{measured.RasterPixels}/{measured.VisiblePixels}{(measured.Issue is null ? "" : " (" + measured.Issue + ")")}; "
+                                    + $"refusing this view (run without {ViewProbe.OcclusionQueryPass.Flag}).");
+                        }
                         graphicsShot?.IsolationDraw(occl.VisibilityDraws, isolated, renderer, part.IsolatedDepthHash,
                             measured.RasterPixels, measured.VisiblePixels, measured.HiddenPixels);   // G3 RED, measurement only
                         // --depth-measurement: no picture for a shape with no visible pixel; the scorer opens none.
