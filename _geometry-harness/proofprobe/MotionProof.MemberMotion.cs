@@ -339,6 +339,14 @@ static partial class MotionProof
             var near = DecideAt(nif, read, Mstt, Cube(50, 0, 0, 1.5f)); var far = DecideAt(nif, read, Mstt, Cube(-50, 0, 0, 1.5f));
             return (near.Decision == "witness" && near.Origin == MemberMotion.OriginBlend && far.Decision == "never", $"short: {ShowMD(near)} | long: {ShowMD(far)}");
         });
+        Case(check, "K-M3b still poses at +90 and -90 deg about one axis (quaternion product within float noise of 0): partners on both arcs (0 and 180 deg) are blend witnesses (Gate C review: the engine's own float product can take either sign; rejects a sign fixed from our arithmetic: never on one arc)", () =>
+        {
+            var nif = ChainNif(@"Lab\KM3b.hkx", new[] { ("Part", "N1", Cube(50, 0, 0, 1), false) },
+                               new[] { ("SeqA", new[] { new FxKeys("N1", 90, 90) }, CycleType.CYCLE_CLAMP), ("SeqB", new[] { new FxKeys("N1", -90, -90) }, CycleType.CYCLE_CLAMP) });
+            var read = Files(GraphFiles("KM3b", new[] { new FxState("A", "sequence", new[] { "SeqA" }), new FxState("B", "sequence", new[] { "SeqB" }) }));
+            var a = DecideAt(nif, read, Mstt, Cube(50, 0, 0, 1.5f)); var b = DecideAt(nif, read, Mstt, Cube(-50, 0, 0, 1.5f));
+            return (a.Decision == "witness" && a.Origin == MemberMotion.OriginBlend && b.Decision == "witness" && b.Origin == MemberMotion.OriginBlend, $"0 deg: {ShowMD(a)} | 180 deg: {ShowMD(b)}");
+        });
         // ================= K-M5: the forge's shape =================
         Case(check, "K-M5 opaque lid + alpha glow on a two-node chain: moving; an opaque partner on the lid's sweep is a witness; a partner crossing only the glow's blend pose is a witness noted alpha-only (rejects the whole-model refusal; the glow dropped)", () =>
         {
