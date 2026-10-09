@@ -110,8 +110,128 @@ def test_own_process_and_ancestors_not_counted():
     assert v["idle"], v
 
 
+# ---- unavailable snapshots (task 2026-10-06-machineidle-unavailable-snapshot) -----------------------------------
+# The snapshot runs PowerShell CIM. A CIM failure is a NONTERMINATING error: PowerShell still exits 0 and prints JSON in
+# which the unread values became 0 / an empty list. The unchanged reader turned that into "free physical memory 0 MB is
+# below the floor" (exit 3), or, with only the process list missing, into IDLE. A snapshot that could not be read must
+# refuse by name with the documented exit 2 before any decision. These drive main() end to end with the PowerShell
+# call replaced, except U5, which runs the real PowerShell with an unreadable class.
+
+import contextlib  # noqa: E402
+import io  # noqa: E402
+import json  # noqa: E402
+import subprocess  # noqa: E402
+import tempfile  # noqa: E402
+
+ACCESS_DENIED = ("Get-CimInstance : Access denied \r\nAt line:1 char:4\r\n"
+                 "    + CategoryInfo          : PermissionDenied: (root\\cimv2:Win32_OperatingSystem:String) "
+                 "[Get-CimInstance], CimException\r\n"
+                 "    + FullyQualifiedErrorId : HRESULT 0x80041003,Microsoft.Management.Infrastructure.CimCmdlets."
+                 "GetCimInstanceCommand\r\n")
+PROCS = [{"Name": "System", "ProcessId": 4, "ParentProcessId": 0, "CommandLine": None, "WorkingSetSize": 1},
+         {"Name": "explorer.exe", "ProcessId": 10, "ParentProcessId": 1, "CommandLine": "C:\\Windows\\explorer.exe",
+          "WorkingSetSize": 2 ** 27}]
+
+
+def run_main(stdout, returncode=0, stderr="", argv=()):
+    """main() with the PowerShell call answered by (returncode, stdout, stderr); returns (exit, printed text)."""
+    real_run, seen = M.subprocess.run, []
+
+    def fake(cmd, **kw):
+        seen.append(cmd)
+        return subprocess.CompletedProcess(cmd, returncode, stdout, stderr)
+    M.subprocess.run = fake
+    out = io.StringIO()
+    try:
+        with tempfile.TemporaryDirectory() as tmp:
+            os.environ["HOUSECARL_RUNLOG_DIR"] = tmp
+            with contextlib.redirect_stdout(out):
+                code = M.main(list(argv))
+    finally:
+        M.subprocess.run = real_run
+        os.environ.pop("HOUSECARL_RUNLOG_DIR", None)
+    assert seen and seen[0][0] == "powershell", seen
+    return code, out.getvalue()
+
+
+def ps_json(free_kb, procs):
+    doc = {"processes": procs}
+    if free_kb is not ...:
+        doc["freeKB"] = free_kb
+    return json.dumps(doc)
+
+
+# U1 -- rejects: the retained failure (access denied, exit 0, zeros) reported as low memory, exit 3
+def test_u1_access_denied_zero_snapshot_refused_as_unavailable():
+    code, out = run_main(ps_json(0, []), stderr=ACCESS_DENIED)
+    assert code == 2, (code, out)
+    assert "unavailable" in out.lower() and "below" not in out, out
+    assert "Access denied" in out, out
+
+
+# U2 -- rejects: the memory reading alone failing (processes read) reported as low memory, exit 3
+def test_u2_memory_unread_refused_as_unavailable():
+    code, out = run_main(ps_json(0, PROCS), stderr=ACCESS_DENIED)
+    assert code == 2 and "unavailable" in out.lower() and "below" not in out, (code, out)
+
+
+# U3 -- rejects: the process list failing (memory read) passed as IDLE, exit 0
+def test_u3_process_list_unread_refused_as_unavailable():
+    code, out = run_main(ps_json(40 * 2 ** 20, []), stderr=ACCESS_DENIED.replace("Win32_OperatingSystem", "Win32_Process"))
+    assert code == 2 and "unavailable" in out.lower() and "IDLE" not in out.replace("NOT IDLE", ""), (code, out)
+
+
+# U4 -- rejects: a snapshot with no memory field at all reported as low memory
+def test_u4_memory_field_missing_refused_as_unavailable():
+    code, out = run_main(ps_json(..., PROCS))
+    assert code == 2 and "unavailable" in out.lower() and "below" not in out, (code, out)
+
+
+# U5 -- rejects: the REAL PowerShell's nonterminating CIM error (an unreadable class) reported as low memory, exit 3.
+# One light CIM query; the class name is the only change to the shipped script.
+def test_u5_real_powershell_nonterminating_error_refused_as_unavailable():
+    assert "Win32_OperatingSystem" in M.PS_SNAPSHOT, M.PS_SNAPSHOT
+    real_script = M.PS_SNAPSHOT
+    M.PS_SNAPSHOT = real_script.replace("Win32_OperatingSystem", "Win32_NoSuchClassMachineIdleTest")
+    out = io.StringIO()
+    try:
+        with tempfile.TemporaryDirectory() as tmp:
+            os.environ["HOUSECARL_RUNLOG_DIR"] = tmp
+            with contextlib.redirect_stdout(out):
+                code = M.main([])
+    finally:
+        M.PS_SNAPSHOT = real_script
+        os.environ.pop("HOUSECARL_RUNLOG_DIR", None)
+    text = out.getvalue()
+    assert code == 2 and "unavailable" in text.lower() and "below" not in text, (code, text)
+
+
+# P1..P4 -- kept: a readable snapshot still decides exactly as before; a failed PowerShell still refuses with exit 2
+def test_p1_readable_low_memory_still_exit_3():
+    code, out = run_main(ps_json(15 * 2 ** 20, PROCS))
+    assert code == 3 and "below 16 GB" in out, (code, out)
+
+
+def test_p2_readable_dotnet_hosted_probe_still_exit_3():
+    procs = PROCS + [{"Name": "dotnet.exe", "ProcessId": 77, "ParentProcessId": 1, "WorkingSetSize": 2 ** 28,
+                      "CommandLine": "dotnet X:\\h\\contactprobe\\bin\\contactprobe.dll --pairs a"}]
+    code, out = run_main(ps_json(40 * 2 ** 20, procs))
+    assert code == 3 and "by command line" in out and "contactprobe" in out, (code, out)
+
+
+def test_p3_readable_quiet_machine_still_idle():
+    code, out = run_main(ps_json(40 * 2 ** 20, PROCS))
+    assert code == 0 and out.startswith("IDLE"), (code, out)
+
+
+def test_p4_powershell_failure_still_exit_2():
+    for rc, so in ((1, ""), (0, ""), (0, "not json")):
+        code, out = run_main(so, returncode=rc, stderr=ACCESS_DENIED)
+        assert code == 2 and "REFUSED" in out, (rc, so, code, out)
+
+
 def main():
-    tests = [(n, f) for n, f in sorted(globals().items()) if n.startswith("test_") and callable(f)]
+    tests =[(n, f) for n, f in sorted(globals().items()) if n.startswith("test_") and callable(f)]
     for n, f in tests:
         check(n, f)
     print(f"\n{len(PASSED)} passed, {len(FAILURES)} failed")
