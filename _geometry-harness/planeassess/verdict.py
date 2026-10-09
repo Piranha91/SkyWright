@@ -38,7 +38,8 @@ Rules (the task's Gate A section 2.5 with Piranha's D3 and D6 and the reviewer's
   6. taste (no clash): everything else; a plane that hid only non-mod content is kept in the machine record (shown False).
 Ownership is never collapsed into a total: the plane's owner comes from the records (`winners`), the content's owner
 from each shape (`owner`: "A" = the content mod's placed records), and every rule above reads shapes, not sums.
-A view where an unreadable mesh (viewprobe names it and exits 3) sits among this plane's candidate rows is unusable, like a
+An eye-independent refusal (orientation, normal up, Box unassessed, invalid bounds) seen at any view of a version holds at
+every view of that version, also where no row shows it (all rows shape-level unassessed). A view where an unreadable mesh (viewprobe names it and exits 3) sits among this plane's candidate rows is unusable, like a
 rule refusal; with no usable view left the edit is cannot tell: unreadable mesh under the plane (Gate A 2.5). An unreadable
 asset elsewhere in a view is noted beside the verdict only. A view without a per-shape list is decided on its totals (one pseudo-shape per owner); the basis then says
 "totals only" and counts those views. `visStatus` is scoped to the content rows under this plane (occlscore.vis_status filters by plane), not the whole view.
@@ -56,6 +57,9 @@ VERDICTS = ("fixes an inter-mod clash", "does not fix", "patch placement hides",
 BOX_LABEL = "Box verdict: the Box silhouette rule rests on one in-game station"
 AUDIT_TOLERANCE = 1.0          # u: the report's plane position against the arm's winning record
 TILT_REFUSALS = ("plane orientation outside", "box orientation outside")
+# refusals that do not depend on the eye: shown at one view of a version, they hold at every view of it
+EYE_INDEPENDENT = ("plane orientation outside", "box orientation outside", "horizontal PortalBox with its normal up",
+                   "Box face behavior unassessed", "invalid plane bounds", "engine rule unconfigured")
 
 
 def _px(v, owner=None):
@@ -137,6 +141,13 @@ def decide(edit, views):
 
 def _decide(edit, views):
     gazes = {}
+    held = {}      # arm -> an eye-independent refusal seen at some view of that arm's version
+    for v in views:
+        r = v.get("refusal") or ""
+        if v.get("plane") is not None and any(r.startswith(t) for t in EYE_INDEPENDENT):
+            held.setdefault(v["arm"], r)
+    views = [dict(v, refusal=held[v["arm"]]) if v["arm"] in held and v.get("plane") is not None and not v.get("refusal")
+             else v for v in views]
     for v in views:
         gazes.setdefault(v["gaze"], {})[v["arm"]] = v
     usable, refusals = [], []
