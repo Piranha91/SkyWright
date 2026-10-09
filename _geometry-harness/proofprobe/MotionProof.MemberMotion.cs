@@ -304,10 +304,12 @@ static partial class MotionProof
             var d = DecideAt(nif, read, Mstt, Cube(KM1P1b.X, KM1P1b.Y, 0, 1.5f));
             return (d.Decision == "witness" && d.Origin == MemberMotion.OriginBlend, ShowMD(d));
         });
-        Case(check, "K-M1c w = 0.3 partner with a 4-evaluation budget and a 1000 u initial target: witness or cannot_tell, never 'never' (rejects an under-bound w cell certified clear)", () =>
+        // Gate C fix (disclosed in RESULT.md): at Gate B this case ran with a 4-evaluation budget, which this loop spends on the clip
+        // cells before any blend cell, so no under-bound blend cell could be certified; it runs with the default budget.
+        Case(check, "K-M1c w = 0.3 partner with the default budget and a 1000 u initial target: witness or cannot_tell, never 'never' (rejects an under-bound w cell certified clear)", () =>
         {
             var (nif, read) = KM1();
-            var d = DecideAt(nif, read, Mstt, Cube(KM1P1b.X, KM1P1b.Y, 0, 1.5f), new MemberSweep(1000, 4));
+            var d = DecideAt(nif, read, Mstt, Cube(KM1P1b.X, KM1P1b.Y, 0, 1.5f), new MemberSweep(1000, 4096));
             return (d.Decision is "witness" or "cannot_tell", ShowMD(d));
         });
         Case(check, "K-M1 model: moving, the 'two or more animated nodes' refusal gone, mechanisms clip + blend, transition 0.25 s read from the file", () =>
@@ -430,10 +432,14 @@ static partial class MotionProof
             var d = DecideAt(nif, null, Mstt, Cube(67.55f, 67.0f, 0, 1f));
             return (d.Decision == "witness" && d.Origin == MemberMotion.OriginSwing && d.Angles is { Count: 2 }, ShowMD(d));
         });
-        Case(check, "K-M8b the same partner with a 3-evaluation budget: witness or cannot_tell, never 'never' (rejects a Lipschitz bound without the pivot-to-pivot terms certifying a cell clear)", () =>
+        // Gate C fix (disclosed in RESULT.md): at Gate B this case used K-M8's partner at a limit corner, which this loop poses exactly,
+        // and a 3-evaluation budget; it now uses a partner reached only inside the limits, with the default budget.
+        Case(check, "K-M8b a partner at the limb tip with both hinges at +28 deg, inside the limits and more than the under-bound's reach (52 u) from the stored pose: witness or cannot_tell, never 'never' (rejects a Lipschitz bound without the pivot-to-pivot terms certifying a cell clear)", () =>
         {
             var nif = HingeChain();
-            var d = DecideAt(nif, null, Mstt, Cube(67.55f, 67.0f, 0, 1f), new MemberSweep(1000, 3));
+            var tip = Vector3.Transform(new Vector3(50, 0, 0) + Vector3.Transform(new Vector3(50, 0, 0), Quaternion.CreateFromAxisAngle(Vector3.UnitZ, 28 * Pi / 180)),
+                                        Quaternion.CreateFromAxisAngle(Vector3.UnitZ, 28 * Pi / 180));
+            var d = DecideAt(nif, null, Mstt, Cube(tip.X, tip.Y, 0, 2f), new MemberSweep(1000, 4096));
             return (d.Decision is "witness" or "cannot_tell", ShowMD(d));
         });
         // ================= K-M9: books =================
