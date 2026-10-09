@@ -412,6 +412,17 @@ static partial class MotionProof
             (MemberMotion.SwingMeaning(true) == "can rest against when disturbed" && MemberMotion.SwingMeaning(false).Contains("visible clip")
              && MemberMotion.Read(HingeRod(0f, -30, 45), null, Mstt).Mechanisms.Any(x => x.Kind == MemberMotion.KindHinge),
              $"{MemberMotion.SwingMeaning(true)} / {MemberMotion.SwingMeaning(false)} / {ShowMM(MemberMotion.Read(HingeRod(0f, -30, 45), null, Mstt))}"));
+        Case(check, "K-M7c pinned rod whose hinged node also carries an active transform controller (the rabbits' shape): refused naming 'pinned body's node is also animated' (Gate B review decision 1: rejects a region that takes the hinge or the controller alone)", () =>
+        {
+            var f = Load(HingeRod(0f, -30, 45));
+            var rod = f.Blocks.OfType<NiNode>().Single(n => n.Name?.String == "Rod");
+            int ri = f.Blocks.IndexOf(rod);
+            var ctl = new NiTransformController { Interpolator = new(f.AddBlock(new NiTransformInterpolator { Data = new(f.AddBlock(KeyData(new FxKeys("Rod", 0, 15)))) })),
+                                                  StartTime = 0, StopTime = 1, Frequency = 1 };
+            ctl.Flags.Active = true; ctl.Target = new(ri); rod.Controller = new(f.AddBlock(ctl));
+            var m = MemberMotion.Read(Save(f, "animated hinge rod"), null, Mstt);
+            return (m.Status == "refused" && (m.Reason ?? "").Contains("pinned body's node is also animated"), ShowMM(m));
+        });
         // ================= K-M8: two hinges =================
         Case(check, "K-M8 two-hinge chain: a partner at the limb tip reached only with both hinges at +30 deg: witness origin swing (rejects the child turned about its stored pivot: never)", () =>
         {
