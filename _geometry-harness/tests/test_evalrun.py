@@ -4960,11 +4960,27 @@ def case_40(tmp):
     """Review R2 M-3. A diff that conflictdiff refuses before any verdict (exit 3: the two emits describe different
     populations, states or configurations) is rejected for its exit code with conflictdiff's own refusal line, and its
     receipt carries exit 3 - not rejected(schema-unsupported) "no verdict line". The same run's baseline arm stays
-    accepted (the refusal is this pair's, not a blanket rejection)."""
+    accepted (the refusal is this pair's, not a blanket rejection).
+
+    Task 2026-10-09-tooling-follow-ups item 5: the rejection carries conflictdiff's REASON for every refusal form it
+    prints, not only a line starting with "!". Each tag names the words of its form the receipt must quote: the
+    population/state gate prints "! ..." lines; the configuration gate prints indented lines ending "REFUSED." (the
+    measurement-policy form is case-45's); an emit conflictdiff cannot read exits 2 with the reader's message on
+    stderr, which the job log keeps under "---- stderr ----"."""
     case = "case-40-diff-refused-by-conflictdiff"
     nav = "geometry.navmesh-ownership"
     h = SweepInProc(tmp, case)
-    for tag, entry in (("wrong-state", {"behaviour": "wrong-state"}),):
+    forms = {"wrong-state": ("different populations or in different world states", "questions"),
+             "wrong-probe": ("DIFFERENT probes", "REFUSED"),
+             "no-configuration": ("which configuration produced it", "REFUSED"),
+             "no-population": ("do not say which population or world state produced them",),
+             "unreadable": ("could not be converted", "$.Instance")}
+    codes = {"unreadable": 2}
+    for tag, entry in (("wrong-state", {"behaviour": "wrong-state"}),
+                       ("wrong-probe", {"behaviour": "wrong-probe-name", "probeName": "otherprobe"}),
+                       ("no-configuration", {"behaviour": "no-configuration"}),
+                       ("no-population", {"behaviour": "ok", "population": None}),
+                       ("unreadable", {"behaviour": "ok", "emitFields": {"Instance": 5}})):
         run = tmp / f"{case}-{tag}"
         pl = h.plan(run, ["--select", "navownprobe"])
         if pl is None:
@@ -4978,17 +4994,20 @@ def case_40(tmp):
         for ln in text_lines(inv / "jobs.jsonl"):
             if json.loads(ln)["job"] == f"diff-navownprobe-{stem}":
                 rec = json.loads(ln)
-        check(rec.get("outcome") == "ran" and rec.get("exitCode") == 3,
-              f"{case}/{tag}: premise - conflictdiff ran and exited 3 ({rec.get('outcome')}, {rec.get('exitCode')})")
+        check(rec.get("outcome") == "ran" and rec.get("exitCode") == codes.get(tag, 3),
+              f"{case}/{tag}: premise - conflictdiff ran and exited {codes.get(tag, 3)} ({rec.get('outcome')}, {rec.get('exitCode')})")
         rc = load(run / "receipts" / f"{nav}__{cid}__diff.json") or {}
         causes = [x.get("cause") for x in (rc.get("validation") or {}).get("rejections") or []]
         details = " ".join(str(x.get("detail")) for x in (rc.get("validation") or {}).get("rejections") or [])
         check((rc.get("validation") or {}).get("accepted") is False, f"{case}/{tag}: the refused diff is not accepted")
-        expect(rc.get("exitCode"), 3, f"{case}/{tag}: the diff receipt carries conflictdiff's exit code")
+        expect(rc.get("exitCode"), codes.get(tag, 3), f"{case}/{tag}: the diff receipt carries conflictdiff's exit code")
         check("exit-nonzero" in causes and "schema-unsupported" not in causes,
               f"{case}/{tag}: the diff is rejected for its exit code, not for a missing verdict line (causes {causes})")
-        check("!" in details or "exit code 3" in details,
+        check("!" in details or f"exit code {codes.get(tag, 3)}" in details,
               f"{case}/{tag}: the rejection quotes conflictdiff's refusal or its exit ({details[:200]})")
+        missing = [w for w in forms[tag] if w not in details]
+        check(not missing, f"{case}/{tag}: the rejection carries conflictdiff's reason, missing {missing} "
+                           f"({details[:400]})")
         rb = load(run / "receipts" / f"{nav}__baseline__arm.json") or {}
         check((rb.get("validation") or {}).get("accepted") is True,
               f"{case}/{tag}: premise - the baseline arm is still accepted")
@@ -6233,6 +6252,12 @@ def case_45(tmp):
     causes = [x.get("cause") for x in (rc.get("validation") or {}).get("rejections") or []]
     check((rc.get("validation") or {}).get("accepted") is False and "exit-nonzero" in causes,
           f"{case}: the overlap diff receipt is rejected for its exit code (causes {causes})")
+    # task 2026-10-09-tooling-follow-ups item 5: the receipt itself carries the reason, not only the diff log
+    details = " ".join(str(x.get("detail")) for x in (rc.get("validation") or {}).get("rejections") or [])
+    missing = [w for w in ("measurement policy: base 'fixture-overlap-v1', changed 'unknown'",
+                           "cannot establish repair credit", "REFUSED") if w not in details]
+    check(not missing, f"{case}: the overlap diff rejection carries conflictdiff's measurement-policy refusal, "
+                       f"missing {missing} ({details[:400]})")
     led = ledger_entries(load(run / "ledger.json") or {})
     expect(execution_of(led.get(f"{ovl}__{cid}__diff")), "rejected(exit-nonzero)",
            f"{case}: the overlap diff's ledger status")

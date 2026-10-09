@@ -562,6 +562,8 @@ def main(probe: str, argv=None) -> int:
     if policy is not None:
         doc["MeasurementPolicy"] = policy
     doc["PopulationIdentity"] = f"{doc['Population']} / state {doc['State']}"
+    # an entry's `emitFields` overwrite top-level emit fields as written (e.g. a mistyped field conflictdiff cannot read)
+    doc.update(entry.get("emitFields") or {})
 
     text = json.dumps(doc, indent=1)
     emit.parent.mkdir(parents=True, exist_ok=True)
