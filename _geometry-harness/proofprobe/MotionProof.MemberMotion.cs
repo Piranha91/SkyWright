@@ -278,7 +278,7 @@ static partial class MotionProof
         Case(check, "K-M5 fixture control: the shape materials read 'Lid' opaque and 'Glow' alpha_blend (the existing material reader)", () =>
         {
             var mats = MeshVolume.ShapeMaterials(KM5().Nif);
-            return (mats is { Count: 2 } && mats[0].Class == SurfaceMaterial.Opaque && mats[1].Class == SurfaceMaterial.AlphaBlend,
+            return (mats is { Count: 2 } && mats.Single(x => x.Name == "Lid").Class == SurfaceMaterial.Opaque && mats.Single(x => x.Name == "Glow").Class == SurfaceMaterial.AlphaBlend,
                     string.Join(", ", (mats ?? new()).Select(x => $"{x.Name}:{x.Class}")));
         });
         Case(check, "K-M7/K-M8/K-M9 fixture control: the hinge fixtures classify (rod, offset rod and two-hinge chain pinned; rod with a movable anchor free-chain) and the existing hinge envelope reads the offset rod's 50 deg reach", () =>
