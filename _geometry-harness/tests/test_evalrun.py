@@ -4972,7 +4972,8 @@ def case_40(tmp):
     h = SweepInProc(tmp, case)
     forms = {"wrong-state": ("different populations or in different world states", "questions"),
              "wrong-probe": ("DIFFERENT probes", "REFUSED"),
-             "no-configuration": ("which configuration produced it", "REFUSED"),
+             # the longest gate refusal (392 characters): its closing "REFUSED." must survive the receipt's bound
+             "no-configuration": ("which configuration produced it", "Re-emit with the current probe. REFUSED."),
              "no-population": ("do not say which population or world state produced them",),
              "unreadable": ("could not be converted", "$.Instance")}
     codes = {"unreadable": 2}
