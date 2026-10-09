@@ -195,5 +195,62 @@ class Lock(unittest.TestCase):
             lk.write_text(json.dumps({"pid": os.getpid(), "purpose": "x"}), encoding="utf-8")
             self.assertIn("held by running pid %d" % os.getpid(), pa.lock_problem(lk))
 
+class DepthMeasurement(unittest.TestCase):
+    """render --depth-measurement: the flag reaches viewprobe, the identity names it only when on, default and mode
+    renders never resume each other, an old renderer is refused before the block, and a report that does not record
+    the mode is caught."""
+    OLD = ("import sys\nsys.stderr.write(\"viewprobe does not recognise '--depth-measurement'. Either this build has "
+           "no such flag, or it is a flag whose VALUE is missing.\\n\")\nsys.exit(2)\n")
+    NEW = ("import sys\nsys.stderr.write(\"--depth-measurement only applies to a --planes-report run; add "
+           "--planes-report or drop the flag.\\n\")\nsys.exit(1)\n")
+
+    def _argv(self, on):
+        return pa.chunk_argv("vp.exe", "wl.json", "inst", "prof", "game", "order.json", "rule.json", "dest", False, on)
+
+    def test_flag_reaches_the_renderer_only_when_asked(self):
+        self.assertIn("--depth-measurement", self._argv(True))
+        self.assertNotIn("--depth-measurement", self._argv(False))
+        self.assertEqual([x for x in self._argv(True) if x != "--depth-measurement"], self._argv(False))
+
+    def test_identity_names_the_mode_only_when_on(self):
+        base = dict(Resume.IDENT)
+        self.assertEqual(pa.with_mode(base, False), base)
+        self.assertEqual(pa.with_mode(base, True), dict(base, measurementMode="depth-measurement"))
+        self.assertIn("measurementMode", pa.RESUME_KEYS)
+
+    def test_default_and_mode_renders_never_resume_each_other(self):
+        default, mode = dict(Resume.IDENT), pa.with_mode(dict(Resume.IDENT), True)
+        with tempfile.TemporaryDirectory() as d:
+            out = Resume._out(self, d, [dict(default, chunk="c1", shots=["G-A-1"], exitCode=0, stopped=None),
+                                        dict(mode, chunk="c2", shots=["G-B-1"], exitCode=0, stopped=None)],
+                              [("c1", "G_A_1", False), ("c2", "G_B_1", False)])
+            self.assertEqual(pa.done_shots(out, default), {"G-A-1"})
+            self.assertEqual(pa.done_shots(out, mode), {"G-B-1"})
+
+    def _fake(self, d, body):
+        f = Path(d) / "fake_vp.py"
+        f.write_text(body, encoding="utf-8")
+        return [sys.executable, str(f)]
+
+    def test_an_old_renderer_is_refused_before_the_block(self):
+        with tempfile.TemporaryDirectory() as d:
+            msg = pa.depth_measurement_problem(self._fake(d, self.OLD))
+            self.assertIsNotNone(msg)
+            self.assertIn("does not accept --depth-measurement", msg)
+
+    def test_a_renderer_with_the_flag_passes_the_preflight(self):
+        with tempfile.TemporaryDirectory() as d:
+            self.assertIsNone(pa.depth_measurement_problem(self._fake(d, self.NEW)))
+
+    def test_a_report_that_does_not_record_the_mode_is_caught(self):
+        with tempfile.TemporaryDirectory() as d:
+            ok, bad = Path(d) / "ok-fp-planes.json", Path(d) / "bad-fp-planes.json"
+            ok.write_text(json.dumps({"appearance": {"mode": "depth-measurement",
+                                                     "measurementMode": {"name": "depth-measurement"}}}), encoding="utf-8")
+            bad.write_text(json.dumps({"appearance": {"status": "unassessed"}}), encoding="utf-8")
+            self.assertTrue(pa.report_records_mode(ok))
+            self.assertFalse(pa.report_records_mode(bad))
+
+
 if __name__ == "__main__":
     unittest.main()
