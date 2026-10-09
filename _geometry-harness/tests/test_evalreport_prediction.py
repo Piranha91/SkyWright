@@ -60,7 +60,8 @@ def row(kind, a, b, form_key, label=None):
             "Necessary": [{"FormKey": form_key, "Label": label or f"object {form_key[:6]}", "Physical": "Holds"}]}
 
 
-def make_bundle(root: Path, arms, results, targets, patches=(), missing=(), unjudgeable=(), order=None):
+def make_bundle(root: Path, arms, results, targets, patches=(), missing=(), unjudgeable=(), order=None,
+                scope_unmeasured=()):
     """results: {(checkId, armId): [conflict rows]} -- an empty list is a completed check with no finding.
     missing: [(checkId, armId, status)]. unjudgeable: disposition unassessed.unjudgeablePopulations rows.
     order: {armId: {probe: perProbe counts}} -- the controller's order evaluation of that arm against the baseline."""
@@ -106,7 +107,7 @@ def make_bundle(root: Path, arms, results, targets, patches=(), missing=(), unju
                            "missing": [{"checkId": c, "armId": a, "part": "arm", "status": s, "cause": s,
                                         "required": True, "family": c.split(".")[0]} for c, a, s in missing]},
             "arms": arms_disp, "importedEvidence": [],
-            "unassessed": {"unjudgeablePopulations": list(unjudgeable)}}
+            "unassessed": {"unjudgeablePopulations": list(unjudgeable), "scopeUnmeasured": list(scope_unmeasured)}}
     registry = {"registryVersion": 1, "checks": [{"id": c, "family": c.split(".")[0], "title": c,
                                                    "adapter": {"exe": PROBE[c]}} for c in checks]}
     (root / "plan.json").write_text(json.dumps(plan), encoding="utf-8")
@@ -257,6 +258,18 @@ def coded_reason_bundle():
     unjudgeable = [{"armId": "baseline", "checkId": CONTACT, "judged": 40, "population": 49,
                     "unjudgeable": {"NoGeometry": 5, "ZqxOddCode": 4}}]
     return compile_and_render(arms, results, [MOD_A], want_index=True, unjudgeable=unjudgeable)
+
+
+def area_bundle():
+    """One mod added; one cannot-tell reason with one count; two areas the controller did not measure -- one the skill
+    names in words (script-placement) and one it does not (zqx-odd-extent)."""
+    arms = [arm("baseline", [BASE, OTHER, MOD_A], kind="baseline"), arm("dependency-only", [BASE, OTHER])]
+    results = {(CONTACT, "baseline"): [], (CONTACT, "dependency-only"): []}
+    unjudgeable = [{"armId": "baseline", "checkId": CONTACT, "judged": 40, "population": 47,
+                    "unjudgeable": {"NoGeometry": 7}}]
+    return compile_and_render(arms, results, [MOD_A], want_index=True, unjudgeable=unjudgeable,
+                              scope_unmeasured=[{"extent": "script-placement", "why": "not run"},
+                                                {"extent": "zqx-odd-extent", "why": "not run"}])
 
 
 def base_game_only_bundle():
@@ -441,7 +454,28 @@ def main():
         s = str(reader(plan).get("scopeLine") or "")
         return BASE not in s, f"scope line {s!r}"
 
+    # 11. an unmeasured area reaches the reader as words, never as the controller's id (the id stays in the index)
+    def extent_ids_not_on_page():
+        plan, md, html, index = area_bundle()
+        cov = section_text(md, headings(plan).get("coverage") or "\0")
+        ok = (bool(cov) and "script-placement" not in md and "zqx-odd-extent" not in md
+              and "script-placement" not in html and "zqx-odd-extent" not in html
+              and "scripts" in cov.lower() and "script-placement" in index and "zqx-odd-extent" in index)
+        return ok, f"coverage on the page: {cov.strip()[:300]!r}"
+
+    # 12. a coverage line states its count once, and a setup name after "for" reads as part of the sentence
+    def count_once_setup_lowercase():
+        plan, md, html, index = area_bundle()
+        cov = section_text(md, headings(plan).get("coverage") or "\0")
+        line = next((ln for ln in cov.splitlines() if "Could not be judged" in ln), "")
+        plan4, md4, _ = get("four", four_setup_unpatched)
+        cov4 = section_text(md4, headings(plan4).get("coverage") or "\0")
+        ok = (line.count("7") == 1 and "for tested alternative setup" in cov4 and "for Tested" not in cov4)
+        return ok, f"line {line!r}; setup wording in four-setup coverage: {'for Tested' in cov4}"
+
     for name, fn in [
+            ("plain-language/unmeasured-area-id-never-reaches-the-page", extent_ids_not_on_page),
+            ("plain-language/count-once-and-setup-name-in-sentence-case", count_once_setup_lowercase),
             ("plain-language/unmapped-reason-code-never-reaches-the-page", unmapped_code_not_on_page),
             ("none-found-without-coverage/missing-result-names-the-setup-that-lacks-it", missing_names_its_setup),
             ("base-game-in-prediction/scope-line-does-not-name-the-base-game", scope_line_no_base_game),
