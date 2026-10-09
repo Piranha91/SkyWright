@@ -38,7 +38,8 @@ Rules (the task's Gate A section 2.5 with Piranha's D3 and D6 and the reviewer's
   6. taste (no clash): everything else; a plane that hid only non-mod content is kept in the machine record (shown False).
 Ownership is never collapsed into a total: the plane's owner comes from the records (`winners`), the content's owner
 from each shape (`owner`: "A" = the content mod's placed records), and every rule above reads shapes, not sums.
-An eye-independent refusal (orientation, normal up, Box unassessed, invalid bounds) seen at any view of a version holds at
+A view whose arm has an active version that the render's report does not list is unusable and named (no evidence). An
+eye-independent refusal (orientation, normal up, Box unassessed, invalid bounds) seen at any view of a version holds at
 every view of that version, also where no row shows it (all rows shape-level unassessed). A view where an unreadable mesh (viewprobe names it and exits 3) sits among this plane's candidate rows is unusable, like a
 rule refusal; with no usable view left the edit is cannot tell: unreadable mesh under the plane (Gate A 2.5). An unreadable
 asset elsewhere in a view is noted beside the verdict only. A view without a per-shape list is decided on its totals (one pseudo-shape per owner); the basis then says
@@ -84,9 +85,11 @@ def _where(n_route, n_pose):
 
 def _gate(edit, v):
     """Why one arm's view cannot be used: 'audit', 'not run', 'refused: <text>', or None."""
+    ver = (edit.get("versions") or {}).get(v["arm"]) if v is not None else None
     if v is None or v.get("plane") is None:
+        if v is not None and ver is not None and ver.get("active"):
+            return "absent: the render does not list the active version"
         return None
-    ver = (edit.get("versions") or {}).get(v["arm"])
     pos = v["plane"].get("position")
     if ver is None or not ver.get("active") or pos is None or _dist(pos, ver["position"]) > AUDIT_TOLERANCE:
         return "audit"
@@ -132,6 +135,11 @@ def decide(edit, views):
         gz = sorted({g for g, _, _ in under})
         out["also"].append("%d view%s unusable: unreadable mesh under the plane (%s)"
                            % (len(gz), "" if len(gz) == 1 else "s", ", ".join(sorted({a for _, _, a in under}))))
+    missing = sorted({v["gaze"] for v in views if v.get("plane") is None
+                      and ((edit.get("versions") or {}).get(v["arm"]) or {}).get("active")})
+    if missing and out["verdict"] != "cannot tell":
+        out["also"].append("%d view%s unusable: the active version is not in the render's planes"
+                           % (len(missing), "" if len(missing) == 1 else "s"))
     elsewhere = sorted({v["gaze"] for v in views if (v.get("unreadableAssets") or []) and not v.get("unreadableUnder")})
     if elsewhere:
         out["also"].append("unreadable asset elsewhere in %d view%s, noted only"
@@ -165,10 +173,12 @@ def _decide(edit, views):
     if not usable:
         tilted = any(any(t in r for t in TILT_REFUSALS) for r in refusals)
         rule = [r for r in refusals if r.startswith("refused: ")]
+        absent = [r for r in refusals if r.startswith("absent: ")]
         unread = [r for r in refusals if r.startswith("unreadable: ")]
         reason = "rule refuses a tilted plane" if tilted else (
             "rule refuses the shape: " + rule[0][len("refused: "):] if rule else (
-                "unreadable mesh under the plane: " + unread[0][len("unreadable: "):] if unread else "no view"))
+                "unreadable mesh under the plane: " + unread[0][len("unreadable: "):] if unread else (
+                    "the render does not list the plane at any view" if absent else "no view")))
         return _out(edit, "cannot tell", reason, gazes, [])
     where = _where(*_count(usable))
     winner_u = (edit.get("winners") or {}).get("u")
