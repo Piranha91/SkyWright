@@ -641,8 +641,11 @@ NifRenderGeometryOutcome SweptProxy(byte[] bytes, NifRenderGeometryOutcome origi
     // lane M: the shared reader (a clip-only member's region is exactly SweptGeometry.Build's; the base record is not known here)
     var model = MemberMotion.Read(bytes, Read, null);
     if (model.Status != "moving") return original;
-    var region = MemberMotion.Region(bytes, model, VolumeGeometry.Render, new MemberSweep(DeltaTarget: motionDelta), Read);
-    if (region.Status != "built") return original;
+    // review ruling (Gate C): only a region that converged in its budget is a proxy; otherwise today's refusal stands, named
+    var region = MemberMotion.DiscoveryRegion(bytes, model, VolumeGeometry.Render, new MemberSweep(DeltaTarget: motionDelta), Read);
+    if (region.Status != "built")
+        return region.Reason is { } why && why.StartsWith("motion region did not converge", StringComparison.Ordinal)
+            ? original with { Reason = $"{original.Reason}; {why}" } : original;
     var v = new List<System.Numerics.Vector3>(); var idx = new List<int>();
     var total = Aabb.Empty;
     foreach (var smp in region.Samples)
