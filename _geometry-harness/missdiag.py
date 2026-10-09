@@ -18,6 +18,7 @@ Frozen rules, in brief:
 - a record no built manifest holds enabled: absence_blocker's docstring (checks the load-time enable state first).
 """
 
+import collections
 import json
 import os
 import sys
@@ -252,10 +253,75 @@ def miss_table(clusters):
     return [rows[k] for k in sorted(rows, key=lambda k: (str(k[0]), str(k[1])))]
 
 
+HIT_REASONS = ("fixes an inter-mod clash",)
+NOT_JOINED_REASONS = ("flagged, not joined",)
+BLIND_SPOT_REASONS = ("not modelled", "not modelled (judged, saw nothing)", "out of scope (not run)",
+                      "out of scope (not run; caught when run)", "out of scope (population)", "below threshold",
+                      "cannot tell")
+TASTE_REASONS = ("taste (no clash)", "set aside by filter")
+PATCH_PROBLEM_REASONS = ("patch placement clips", "patch placement hides", "does not fix")
+NO_PREDICTION = ("This table was given no prediction (the clashes between the two mods in the order without the patch), "
+                 "so it cannot say what adding the mods breaks; pass the scorecard's needs-both counts as `prediction`.")
+NO_OPEN = ("Without a prediction this table cannot count clashes the patch leaves (open) or false alarms; it covers "
+           "only what the patch's own edits do.")
+
+
+def summarise(clusters, unassigned_edits, prediction=None):
+    """The group table read in the report order: the prediction first (what adding the two mods breaks), then
+    coverage (what could not be judged), then validation against the patch (hits, blind spots with why, taste or set
+    aside, the patch's own problems, open). prediction: {"mods": [A, B], "clashes": [{"kind", "inGame"?, "needsBoth",
+    "actedOnByPatch", "falseAlarms"?}], "coverage"?: [{"reason", "count"}]}, from the scorecard; absent, the summary
+    says so rather than inventing one. Every edit count comes from the assigned clusters."""
+    assigned = [c for c in clusters if c.get("reason")]
+
+    def edits_of(reasons):
+        return sum(c["edits"] for c in assigned if c["reason"] in reasons)
+
+    if prediction:
+        clashes = [dict(c) for c in prediction.get("clashes") or []]
+        pred = {"id": "prediction", "status": "found" if any(int(c.get("needsBoth") or 0) for c in clashes) else "none-found",
+                "mods": list(prediction.get("mods") or []), "clashes": clashes,
+                "total": sum(int(c.get("needsBoth") or 0) for c in clashes)}
+    else:
+        pred = {"id": "prediction", "status": "not-supplied", "missingFact": NO_PREDICTION, "clashes": []}
+    cannot = collections.Counter()
+    for c in assigned:
+        if c["reason"] == "cannot tell":
+            cannot[str(c.get("detail") or "reason not stated")] += c["edits"]
+    cov = {"id": "coverage", "unassignedEdits": unassigned_edits,
+           "cannotTell": [{"why": k, "edits": n} for k, n in sorted(cannot.items())],
+           "predictionCoverage": list((prediction or {}).get("coverage") or [])}
+    blind = collections.OrderedDict()
+    for c in sorted(assigned, key=lambda c: (c["reason"], str(c.get("detail")))):
+        if c["reason"] not in BLIND_SPOT_REASONS:
+            continue
+        b = blind.setdefault(c["reason"], {"reason": c["reason"], "edits": 0, "details": []})
+        b["edits"] += c["edits"]
+        if c.get("detail") and c["detail"] not in b["details"]:
+            b["details"].append(str(c["detail"]))
+    spots = []
+    for b in blind.values():
+        b["why"] = b["reason"] + (": " + "; ".join(b["details"]) if b["details"] else "")
+        spots.append(b)
+    if prediction:
+        open_ = sum(max(0, int(c.get("needsBoth") or 0) - int(c.get("actedOnByPatch") or 0)) for c in pred["clashes"])
+        false_alarms = sum(int(c.get("falseAlarms") or 0) for c in pred["clashes"]) if any(
+            "falseAlarms" in c for c in pred["clashes"]) else None
+        missing = []
+    else:
+        open_, false_alarms, missing = None, None, [NO_OPEN]
+    val = {"id": "validation", "hits": edits_of(HIT_REASONS), "detectedNotJoined": edits_of(NOT_JOINED_REASONS),
+           "blindSpots": spots, "tasteOrSetAside": edits_of(TASTE_REASONS),
+           "patchProblems": edits_of(PATCH_PROBLEM_REASONS), "open": open_, "falseAlarms": false_alarms,
+           "missingFacts": missing}
+    return {"sections": [pred, cov, val]}
+
+
 def run(doc):
     """INPUT: {"edits": [...], "records": {"GROUP|FORMKEY": {"base", "cell", "trace": [[check, outcome, rule], ...]}},
-    "evidence": {clusterId: assign_reason's input plus "direct": bool}}. A cluster without evidence is counted as
-    unassigned and is never given a reason."""
+    "evidence": {clusterId: assign_reason's input plus "direct": bool}, "prediction"?: summarise's prediction}. A
+    cluster without evidence is counted as unassigned and is never given a reason. The output's `summary` reads the
+    table prediction first, then coverage, then validation against the patch."""
     recs = doc.get("records", {})
 
     def key(s):
@@ -274,8 +340,10 @@ def run(doc):
             c.update(assign_reason(ev[c["id"]]))
             c["direct"] = bool(ev[c["id"]].get("direct"))
             assigned.append(c)
+    unassigned = sum(c["edits"] for c in clusters if c["id"] not in ev)
     return {"schema": SCHEMA, "edits": len(doc["edits"]), "clusters": clusters, "renderCoverage": cov,
-            "table": miss_table(assigned), "unassignedEdits": sum(c["edits"] for c in clusters if c["id"] not in ev)}
+            "summary": summarise(clusters, unassigned, doc.get("prediction")),
+            "table": miss_table(assigned), "unassignedEdits": unassigned}
 
 
 def _runlog():
