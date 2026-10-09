@@ -2370,6 +2370,7 @@ def main() -> int:
         check_direction_inference()
         check_stylesheet_escaping()
         print("=== fixtures ===")
+        print(MF.T.diff_exe_identity())
         t0 = time.time()
         try:
             only = None

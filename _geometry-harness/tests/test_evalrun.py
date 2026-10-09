@@ -3936,6 +3936,19 @@ class SweepInProc:
         return path
 
 
+def diff_exe_identity() -> str:
+    """The conflictdiff build a run compared with: path, sha256 and mtime of the exe and of its dll (the code)."""
+    out = []
+    for p in (DIFF_EXE, DIFF_EXE.with_suffix(".dll")):
+        if p.exists():
+            sha = hashlib.sha256(p.read_bytes()).hexdigest()
+            when = time.strftime("%Y-%m-%d %H:%M:%S %z", time.localtime(p.stat().st_mtime))
+            out.append(f"  conflictdiff: {p}  sha256 {sha}  mtime {when}")
+        else:
+            out.append(f"  conflictdiff: {p}  (absent)")
+    return "\n".join(out)
+
+
 def first_candidate(plan: dict) -> dict:
     return next((a for a in (plan or {}).get("arms") or [] if a.get("kind") == "candidate"), {})
 
@@ -6258,6 +6271,7 @@ def main() -> int:
         print(f"  FAIL  conflictdiff is not built at {DIFF_EXE} - build it (dotnet build -c Release) or set "
               f"HOUSECARL_EVALRUN_TEST_HARNESS to a tree that has it. The real diff is not optional here.")
         return 1
+    print(diff_exe_identity())
     ran = 0
     try:
         for name, fn in CASES.items():
