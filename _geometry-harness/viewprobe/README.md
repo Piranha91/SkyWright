@@ -2222,6 +2222,34 @@ visibility decision are not operational guidance. Historical investigation belon
 project's research corpus. The current bounded engine model, calibration and release acceptance
 remain pending; passing geometry or renderer fixtures alone does not establish them.
 
+#### `--depth-measurement`: the same measurement without the appearance work
+
+`--depth-measurement` (with `--planes-report`, non-interactive) keeps the measurement and drops the work that only
+serves the picture. Both depth buffers the report is read from (the whole scene, and each assessed shape drawn alone)
+depend on exactly one texture input: the diffuse alpha of a shape drawn with the alpha test, which `basic.frag`
+discards below its threshold. So under the flag a static shape's diffuse is loaded only when the shape is alpha-tested
+(`DepthMeasurement.KeepsDiffuse`, keyed on the same NIF flag that sets `GlMesh.UseAlphaTest`). Normal maps, the terrain
+base textures, the terrain paint layers (roads; they are blended decals and write no depth), the water's noise map
+and the snow coverings' textures are not loaded or built. Placed NPCs (`--npc`) keep their own textures; the flag does
+not touch their loading. An evidence mask is written only for a shape with `VisiblePixels > 0`, which are the only
+masks the scorer opens; the other shapes' `visibilityMask` is null. `--keep-all-masks` writes every mask as before.
+`scene-depth-f32.bin`, every `isolatedDepthSha256` and every count are unchanged. The report's `appearance` block
+says `mode: "depth-measurement"` and carries `measurementMode` (mask rule, and the number and file bytes of the
+alpha-tested diffuses kept); `replayArgs` carries the flag.
+
+Refused with one sentence each: without `--planes-report`, in the interactive window (including a launch from
+Explorer), with `--stations`, and `--keep-all-masks` without the flag. `--depth-measurement-selftest` gives the
+known answers for the keep rule and the mask rule.
+
+What a reader of the output sees differently, and must allow for:
+- **The frame** (`image`, `-fp.png`) is lit without textures except the alpha-tested diffuses, with no roads. It is a
+  picture of the geometry, not of the game's appearance: never score it or compare its pixels with a default-path frame.
+- **The masks.** A tool that counts the masks in an evidence folder, lists the folder, compares mask sets between two
+  runs, or opens a mask by name for a shape that may have no visible pixel needs `--keep-all-masks` output (or a
+  default run). Readers that open masks only for visible shapes, or OR their green channel, are unaffected.
+- `tools/planes_report_rows.py`'s `masked_rows_text` skips rows whose mask is null, so it skips invisible shapes in
+  this mode; `rows_by_plane` does not.
+
 ---
 
 ## Camera stations for occlusion primitives (`--stations`)

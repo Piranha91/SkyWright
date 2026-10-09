@@ -105,6 +105,8 @@ if (args.Length >= 3 && args[0] == "--report-sink-kill-arm")
 // The --reuse-cell lease's three promises - one set of shared objects per cell, a new set for the
 // next cell, and nothing at all once the cell is done - over objects built in the test, so a check
 // can hold the lifetime itself. Needs no MO2 instance, no game and no GL context.
+if (args.Length >= 1 && args[0] == "--depth-measurement-selftest")
+    return ViewProbe.DepthMeasurement.SelfTest();
 if (args.Length >= 1 && args[0] == "--planes-report-selftest")
     return ViewProbe.PlanesReportCandidatesSelfTest.Run();
 if (args.Length >= 1 && args[0] == "--cell-scene-selftest")
@@ -285,6 +287,9 @@ bool configIdentity = false;
 string stateView = "on";
 string occlusionMode = "off";
 bool planesReport = false;
+// --depth-measurement: a --planes-report run without the appearance work (DepthMeasurement.cs); --keep-all-masks
+// keeps every evidence mask under it.
+bool depthMeasurement = false, keepAllMasks = false;
 int visibilityBudget = ViewProbe.OcclusionState.DefaultVisibilityBudget;
 float planesReach = 256f;
 // TROUBLESHOOTING OVERLAY. --conflicts <emit.json> reads a detector's emitted ConflictFile and
@@ -746,6 +751,8 @@ for (int i = argStart; i < args.Length; i++)
     else if (args[i] == "--planes") { showPlanes = true; textured = true; }
     else if (args[i] == "--occlusion" && i + 1 < args.Length) { occlusionMode = args[++i].ToLowerInvariant(); textured = true; }
     else if (args[i] == "--planes-report") { planesReport = true; textured = true; }
+    else if (args[i] == ViewProbe.DepthMeasurement.Flag) depthMeasurement = true;
+    else if (args[i] == ViewProbe.DepthMeasurement.KeepAllMasksFlag) keepAllMasks = true;
     // The deliberate opt-out from failing on an asset that was found and could not be read. It is
     // also honoured as an environment variable so an existing caller can pass it through without
     // its command line changing - and whenever either of them is what suppressed the exit code, the
@@ -1063,6 +1070,14 @@ if (guiLaunch && worklist is not null && !interactiveMode && batchProgress is nu
                     + "Ctrl+PageUp/PageDown steps the cells.");
     Console.WriteLine("(run it from a shell without --interactive to render every shot to a PNG instead.)");
 }
+if (keepAllMasks && !depthMeasurement)
+{ Console.Error.WriteLine("--keep-all-masks only means anything with --depth-measurement, since without it every mask is already written; add --depth-measurement or drop it."); return 1; }
+if (depthMeasurement && !planesReport)
+{ Console.Error.WriteLine("--depth-measurement only applies to a --planes-report run; add --planes-report or drop the flag."); return 1; }
+if (depthMeasurement && stationsSpec is not null)
+{ Console.Error.WriteLine("--depth-measurement does nothing in --stations mode, which renders no planes report; drop the flag."); return 1; }
+if (depthMeasurement && interactiveMode)
+{ Console.Error.WriteLine("--depth-measurement is refused in the interactive window, which draws the textured scene for a person; render the planes report without --interactive."); return 1; }
 // Set when the fly-through's Ctrl+PageUp/PageDown asks for a different cell: the window cannot
 // build one, so it closes and leaves the request here for the run loop to act on.
 (int Cell, int Shot)? pendingSwitch = null;
@@ -4380,6 +4395,7 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot,
         // lattice is the answer; "none within N u" is an answer too, and the interesting one.
         Action<ViewProbe.OcclusionState>? planeReportSink = null;
         string? reportRenderPath = null;
+        ViewProbe.DepthMeasurement? shotDepthMeasurement = null;   // this shot's --depth-measurement state; the report reads it
         if (planesReport)
         {
             var collGeo = new Dictionary<string, TriangleSoup?>(StringComparer.OrdinalIgnoreCase);
@@ -4536,7 +4552,7 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot,
                     ruleSha256 = ViewProbe.ShapeCullPolicy.Sha256, ruleConfiguration = ViewProbe.ShapeCullPolicy.Configuration,
                     inputSha256 = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(inputJson))),
                     inputIdentityScope = "record files, source mesh bytes, effective scene placements, planes, camera, state and visibility budget; texture/material assets not yet fingerprinted",
-                    appearance = new { status = "unassessed", reasonCode = "appearance_inputs_not_fingerprinted",
+                    appearance = shotDepthMeasurement?.Appearance() ?? (object)new { status = "unassessed", reasonCode = "appearance_inputs_not_fingerprinted",
                         reason = "Texture/material inputs and renderer fallbacks are not qualified; geometry visibility is not a claim of matching game appearance." },
                     plugins, assemblies = new[] { typeof(ViewProbe.ShapeOcclusion).Assembly.Location, typeof(SphereBound).Assembly.Location,
                         typeof(CharacterViewer.Rendering.GlMesh).Assembly.Location }
@@ -4595,6 +4611,7 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot,
                    IReadOnlyList<System.Numerics.Vector3>? diffs = null)
         {
             reportRenderPath = outFile;
+            shotDepthMeasurement = depthMeasurement ? new ViewProbe.DepthMeasurement { KeepAllMasks = keepAllMasks } : null;
             int rendered = ViewProbe.TexturedScene.RenderToPng(
                    scene, assets, dataDir, modFolders, overwriteDir,
                    (eyePos.Value, lookPos.Value, fov), g, r, terrainPatches, terrainLayers, navMode, navColor,
@@ -4606,7 +4623,7 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot,
                    refSurfaceOpacity: refSurfaceOpacity,
                    depthDumpPath: depthDump, sizeHeight: canvasH, cellScene: cellScene,
                    graphicsReuseRed: graphicsReuseRed, graphicsCell: graphicsCell,
-                   preparedIdentity: preparedKey);
+                   preparedIdentity: preparedKey, depthMeasurement: shotDepthMeasurement);
             if (collectArtifacts) completedArtifacts.AddClosed(outFile, "frame");
             return rendered;
         }

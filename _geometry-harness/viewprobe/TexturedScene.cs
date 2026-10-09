@@ -513,7 +513,8 @@ static class TexturedScene
         MeshReadHooks? meshReadHooks = null,            // RED instrumentation only; null is the production path
         GraphicsReuseRed? graphicsReuseRed = null,      // private graphics-lifetime RED; null is the production path
         GraphicsCell? graphicsCell = null,              // opt-in retained GL owner; null preserves the per-shot path
-        string? preparedIdentity = null)                // retained CPU-walk identity; required with graphicsCell
+        string? preparedIdentity = null,                // retained CPU-walk identity; required with graphicsCell
+        DepthMeasurement? depthMeasurement = null)      // --depth-measurement: only alpha-tested diffuses load (DepthMeasurement.cs)
     {
         // THE CANVAS IS TWO NUMBERS, NOT ONE. It used to be `size` on both axes, and the camera's
         // fov went to the projection at aspect 1 -- so a pose planned for a 16:9 deliverable was
@@ -587,7 +588,8 @@ static class TexturedScene
         if (graphicsCell is not null && string.IsNullOrWhiteSpace(preparedIdentity))
             throw new InvalidOperationException("retained graphics requires the prepared-cell identity");
         string staticKey = graphicsCell is null ? "unretained" : StaticInputKey(preparedIdentity!, refs,
-            terrainPatches, terrainLayers, coveringsByBase, keepFx, fxStatic, cullAbove, refSurface, refSurfaceOpacity);
+            terrainPatches, terrainLayers, coveringsByBase, keepFx, fxStatic, cullAbove, refSurface, refSurfaceOpacity)
+            + (depthMeasurement is null ? "" : "|" + DepthMeasurement.Name);   // a retained scene never crosses modes
         // Measurement only (Gate B4, G2 RED): per-component digests of the key's inputs; inert without a RED session.
         if (graphicsCell is not null)
             graphicsShot?.StaticKeyInputs(staticKey, preparedIdentity!, refs, terrainPatches, terrainLayers, coveringsByBase,
@@ -673,6 +675,17 @@ static class TexturedScene
 
         int staticWhite = graphicsCell?.InstallTextures.WhiteTexture ?? textures.WhiteTexture;
 
+        // A static shape's diffuse. Under --depth-measurement it is loaded only when the shape is alpha-tested: the
+        // alpha test's discard is the one way a texture reaches the depth buffers (DepthMeasurement.cs).
+        int MeasuredDiffuse(string category, string gamePath, bool hasAlphaTest)
+        {
+            if (depthMeasurement is null) return LoadObservedTexture(category, gamePath);
+            if (!DepthMeasurement.KeepsDiffuse(hasAlphaTest)) return staticWhite;
+            int handle = LoadObservedTexture(category, gamePath);
+            depthMeasurement.NoteKept(gamePath, cache.ResolveAssetPath(gamePath));
+            return handle;
+        }
+
         // A 1x1 orange diffuse for the highlighted ref — the same signal color the flat mode uses.
         int CreateOrange()
         {
@@ -699,6 +712,7 @@ static class TexturedScene
         int MatoTexture(string? modelPath)
         {
             if (modelPath is not { Length: > 0 }) return staticWhite;
+            if (depthMeasurement is not null) return staticWhite;   // a covering shell never writes depth
             if (matoTexCache.TryGetValue(modelPath, out var cached)) return cached;
             int handle = staticWhite;
             var mrel = modelPath.StartsWith("meshes", StringComparison.OrdinalIgnoreCase)
@@ -1067,7 +1081,7 @@ static class TexturedScene
                     // survives only where it pokes past the silhouette. (Was a flat orange
                     // repaint, which deleted every scale cue — Piranha, 2026-08-28.)
                     string? hd = b.TexturePaths.TryGetValue(0, out var hdp) ? hdp : null;
-                    mesh.DiffuseTexture = hd is { Length: > 0 } ? LoadObservedTexture("static-ref-diffuse", hd) : staticWhite;
+                    mesh.DiffuseTexture = hd is { Length: > 0 } ? MeasuredDiffuse("static-ref-diffuse", hd, b.HasAlphaTest) : staticWhite;
                     if (mesh.DiffuseTexture != staticWhite) texturedShapes++;
 
                     // Inflate from the shape's own centroid, NOT along stored normals — this
@@ -1122,7 +1136,7 @@ static class TexturedScene
                     // Markers are shown (only on --markers) as what they are: an editor overlay,
                     // not world geometry — their own texture at half strength over the scene.
                     string? md = b.TexturePaths.TryGetValue(0, out var mdp) ? mdp : null;
-                    mesh.DiffuseTexture = md is { Length: > 0 } ? LoadObservedTexture("static-ref-marker", md) : orange;
+                    mesh.DiffuseTexture = md is { Length: > 0 } ? MeasuredDiffuse("static-ref-marker", md, b.HasAlphaTest) : orange;
                     mesh.HasAlphaBlend = true;
                     mesh.MaterialAlpha = 0.5f;
                     mesh.DepthWrite = false;
@@ -1131,9 +1145,9 @@ static class TexturedScene
                 {
                     string? diffuse = b.TexturePaths.TryGetValue(0, out var d) ? d : null;
                     string? normal = b.TexturePaths.TryGetValue(1, out var nrm) ? nrm : null;
-                    mesh.DiffuseTexture = diffuse is { Length: > 0 } ? LoadObservedTexture("static-ref-diffuse", diffuse) : staticWhite;
+                    mesh.DiffuseTexture = diffuse is { Length: > 0 } ? MeasuredDiffuse("static-ref-diffuse", diffuse, b.HasAlphaTest) : staticWhite;
                     if (mesh.DiffuseTexture != staticWhite) texturedShapes++;
-                    if (normal is { Length: > 0 })
+                    if (normal is { Length: > 0 } && depthMeasurement is null)   // lighting only; never depth
                     {
                         int h = LoadObservedTexture("static-ref-normal", normal);
                         if (h != staticWhite) { mesh.NormalTexture = h; mesh.HasNormalMap = true; }
@@ -1333,7 +1347,8 @@ static class TexturedScene
         foreach (var (texPath, patchTris) in terrainPatches)
         {
             if (patchTris.Count == 0) continue;
-            int texHandle = texPath.Length > 0 ? LoadObservedTexture("static-terrain-diffuse", texPath) : staticWhite;
+            // Terrain has no alpha test, so its texture never reaches depth.
+            int texHandle = texPath.Length > 0 && depthMeasurement is null ? LoadObservedTexture("static-terrain-diffuse", texPath) : staticWhite;
             bool textured = texPath.Length > 0 && texHandle != staticWhite;
             if (textured) terrainTexturedPatches++; else terrainFallbackPatches++;
 
@@ -1411,8 +1426,12 @@ static class TexturedScene
         string? layerOnly = Environment.GetEnvironmentVariable("VP_LAYER_ONLY");
         bool layerSolid = Environment.GetEnvironmentVariable("VP_LAYER_SOLID") == "1";
         int layerMeshes = 0;
+        // Paint layers are blended decals that never write depth: the depth-measurement mode does not build them.
+        if (depthMeasurement is not null && terrainLayers.Count > 0)
+            Console.WriteLine($"   terrain paint: {terrainLayers.Count} layer(s) not drawn (--depth-measurement; they write no depth)");
         foreach (var (texPath, layerTris) in terrainLayers)
         {
+            if (depthMeasurement is not null) break;
             if (layerTris.Count == 0) continue;
             if (layerOnly is { Length: > 0 } && !texPath.Contains(layerOnly, StringComparison.OrdinalIgnoreCase)) continue;
             int texHandle = LoadObservedTexture("static-terrain-layer", texPath);
@@ -1497,7 +1516,8 @@ static class TexturedScene
             // The alpha at zero depth. 1 = opaque everywhere, matching the engine's opaque draw.
             float shoreAlpha = float.TryParse(Environment.GetEnvironmentVariable("VP_WATER_SHALLOW_ALPHA"),
                                               out var sa) ? Math.Clamp(sa, 0f, 1f) : 1f;
-            int texHandle = wpl.NoiseTexture is { Length: > 0 } wtx ? LoadObservedTexture("dynamic-water-normal", wtx) : 0;
+            int texHandle = wpl.NoiseTexture is { Length: > 0 } wtx && depthMeasurement is null
+                ? LoadObservedTexture("dynamic-water-normal", wtx) : 0;   // a normal map; never depth
             bool hasNoise = texHandle != 0 && texHandle != textures.WhiteTexture;
 
             int side = WaterGrid + 1;
@@ -2099,6 +2119,8 @@ static class TexturedScene
                         var measured = ShapeVisibility.Compare(ownDepth, plainDepth);
                         graphicsShot?.IsolationDraw(occl.VisibilityDraws, isolated, renderer, part.IsolatedDepthHash,
                             measured.RasterPixels, measured.VisiblePixels, measured.HiddenPixels);   // G3 RED, measurement only
+                        // --depth-measurement: no picture for a shape with no visible pixel; the scorer opens none.
+                        if (!DepthMeasurement.WritesMask(depthMeasurement, measured.VisiblePixels)) return measured;
                         var mask = ViewProbe.MaskEvidence.BuildMask(ownDepth, plainDepth);
                         part.VisibilityMask = Path.Combine(evidenceDir, $"shape-{occl.VisibilityDraws:D4}-block-{part.Block}.png");
                         // Keyed on the hash of the buffer the mask was just built from, which this
@@ -2959,6 +2981,10 @@ static class TexturedScene
         {
         Console.WriteLine($"   textured: {shapes:N0} shapes ({texturedShapes:N0} with a real diffuse), {missingMesh:N0} refs without a resolvable mesh"
                             + $"; {sizeW}x{sizeH}, {(samples >= 2 ? samples + "x msaa" : "no msaa")}");
+            if (depthMeasurement is not null)
+                Console.WriteLine($"   depth-measurement: {depthMeasurement.KeptDiffuse.Count:N0} alpha-tested diffuse(s) loaded "
+                                + $"({depthMeasurement.KeptDiffuse.Values.Sum():N0} file bytes); every other texture not loaded; masks "
+                                + (depthMeasurement.KeepAllMasks ? "for every assessed shape" : "only for shapes with visible pixels"));
             if (cullAbove is { } cz2)
             {
                 meshReadHooks?.ObserveCull?.Invoke(cullTrisDropped, cullShapesDropped);
