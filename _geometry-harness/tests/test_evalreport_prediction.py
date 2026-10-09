@@ -231,6 +231,22 @@ def none_found_bundle():
     return compile_and_render(arms, results, [MOD_A], unjudgeable=unjudgeable, missing=missing)
 
 
+USSEP = "Unofficial Skyrim Special Edition Patch.esp"
+OTHER2 = "SecondMod.esp"
+
+
+def already_present_and_mod_partner_bundle():
+    """One mod added to an order that holds two other mods and the Unofficial Patch. A clash between the two other
+    mods is present with and without the evaluated mod (already present); a clash between the evaluated mod and the
+    Unofficial Patch appears only with it (a clash between mods, from the evaluated mod)."""
+    arms = [arm("baseline", [BASE, USSEP, OTHER, OTHER2, MOD_A], kind="baseline"),
+            arm("dependency-only", [BASE, USSEP, OTHER, OTHER2])]
+    already = [row("CONTACT", OTHER, OTHER2, f"000F01:{OTHER2}")]
+    partner = [row("CONTACT", USSEP, MOD_A, f"000F02:{MOD_A}")]
+    results = {(CONTACT, "baseline"): already + partner, (CONTACT, "dependency-only"): already}
+    return compile_and_render(arms, results, [MOD_A])
+
+
 def base_game_only_bundle():
     """One mod whose only measured difference is against the base game, and no other setup measured."""
     arms = [arm("baseline", [BASE, MOD_A], kind="baseline")]
@@ -367,7 +383,31 @@ def main():
         ok = bool(p.get("verdict")) and opening.startswith(p["verdict"]) and reader(plan).get("verdict") == p["verdict"]
         return ok, f"opening narration {opening[:100]!r}"
 
+    # 6. a clash already present without the evaluated mod is set aside, never predicted
+    def already_present_set_aside():
+        plan, md, html = get("already", already_present_and_mod_partner_bundle)
+        p = reader(plan).get("prediction") or {}
+        text = section_text(md, headings(plan).get("prediction") or "\0")
+        items = p.get("items") or []
+        ok = ((p.get("setAside") or {}).get("alreadyPresent") == 1 and bool(text) and OTHER2 not in text
+              and not any(OTHER2 in (i.get("mods") or []) for i in items))
+        return ok, f"setAside {p.get('setAside')}; prediction names {OTHER2}: {OTHER2 in text}"
+
+    # 7. a non-target mod (not the base game) on one side is a clash between mods, attributed to the evaluated mod
+    def mod_partner_admitted():
+        plan, md, html = get("already", already_present_and_mod_partner_bundle)
+        p = reader(plan).get("prediction") or {}
+        items = p.get("items") or []
+        hit = [i for i in items if sorted(i.get("mods") or []) == sorted([MOD_A, USSEP])]
+        text = section_text(md, headings(plan).get("prediction") or "\0")
+        ok = (p.get("status") == "found" and len(items) == 1 and len(hit) == 1 and hit[0].get("count") == 1
+              and hit[0].get("attribution") == "single-mod" and hit[0].get("attributionMod") == MOD_A
+              and USSEP in text)
+        return ok, f"items {[(i.get('mods'), i.get('count'), i.get('attribution'), i.get('attributionMod')) for i in items]}"
+
     for name, fn in [
+            ("base-game-in-prediction/already-present-without-the-mod-is-set-aside", already_present_set_aside),
+            ("prediction-missing/non-target-mod-partner-is-admitted-and-attributed", mod_partner_admitted),
             ("prediction-missing/four-setup-report-opens-with-prediction-coverage-validation", prediction_leads_four_setup),
             ("prediction-missing/needs-both-single-mod-and-not-separable-attribution", four_setup_attribution),
             ("prediction-missing/each-kind-says-what-it-looks-like-in-game", four_setup_in_game_words),
