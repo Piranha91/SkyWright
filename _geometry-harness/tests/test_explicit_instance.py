@@ -24,6 +24,7 @@ import subprocess
 import sys
 import tempfile
 import json
+import re
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
@@ -124,6 +125,31 @@ def main() -> int:
                                                "HOUSECARL_MO2_PROFILE": "OtherProf"})
         check(not refusals_in(out), "K5 geoprobe: instance, game, profile all in the environment -> no refusal",
               f"exit {code}\n{out[-1500:]}")
+
+        # K13 — the explicit, empty instance of K5 is a valid empty census: no switches. switchprobe must finish with
+        # exit 0, zero switches, deepest chain 0, its closing lines and a complete --json, with the trigger map on
+        # (the default) and off. The unchanged tree threw InvalidOperationException ("Sequence contains no elements")
+        # from Max over the empty switch list after printing the load order (task 2026-10-07-switchprobe-empty-census).
+        for trig in ("on", "off"):
+            emit = tmp / f"census-{trig}.json"
+            code, out = run("switchprobe", ["--instance", other_inst.as_posix(), "--game", other_game.as_posix(),
+                                            "--profile", "OtherProf", "--triggers", trig, "--json", str(emit)], tmp)
+            doc = None
+            if emit.exists():
+                try:
+                    doc = json.loads(emit.read_text(encoding="utf-8"))
+                except ValueError:
+                    doc = None
+            check(code == 0 and "Unhandled exception" not in out and "load order: 0 plugins" in out
+                  and re.search(r"switches\s+:\s+0\b", out) is not None and "deepest chain 0;" in out
+                  and "Nothing here is verified in game." in out and re.search(r"elapsed [\d.]+s", out) is not None,
+                  f"K13 switchprobe --triggers {trig}: empty census -> exit 0, zero switches, deepest chain 0, complete output",
+                  f"exit {code}\n{out[-2500:]}")
+            check(doc is not None and doc["summary"]["switches"] == 0 and doc["switches"] == []
+                  and doc["jointFlips"] == [] and doc["plugins"] == 0
+                  and ((doc["summary"]["triggers"] is None) == (trig == "off")),
+                  f"K13 switchprobe --triggers {trig}: empty census -> complete --json with zero switches",
+                  f"json {'missing' if not emit.exists() else 'unreadable' if doc is None else json.dumps(doc)[:800]}")
 
         # K7 — a probe that requires its GAME before its instance (corridorprobe) and is given neither: the refusal
         # still names the missing instance, not the game. The unchanged tree read the config's game folder.
