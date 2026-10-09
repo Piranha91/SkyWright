@@ -182,6 +182,8 @@ def refusal(report, plane):
         texts = set()
         for c in candidates:
             rel = str(c.get("relation") or "")
+            if not rel:
+                continue                # a row with no relation (no shape, a ref-level issue) says nothing either way
             if not rel.startswith("unassessed: "):
                 return None
             t = rel[len("unassessed: "):]
