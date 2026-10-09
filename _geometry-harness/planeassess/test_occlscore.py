@@ -71,6 +71,15 @@ class Scorer(unittest.TestCase):
         self.assertEqual(under, {"000800:B.esp": ["meshes\\Water\\W.nif"], "000801:B.esp": []})
         self.assertEqual(every, ["meshes\\Far\\F.nif", "meshes\\Water\\W.nif"])
 
+    def test_refusal_ignores_rows_without_a_relation(self):
+        refused = dict(cand("1:A.esp", False, 0, None), relation="unassessed: plane orientation outside the supplied rule's evidence scope")
+        shapeless = dict(cand("2:A.esp", False, 0, None), relation=None)
+        d = {"schema": "occlusion-view-research-v1", "planes": [{"formKey": "000800:B.esp", "candidates": [refused, shapeless]}]}
+        self.assertEqual(S.refusal(d, "000800:B.esp"), "plane orientation outside the supplied rule's evidence scope")
+        assessed = dict(cand("3:A.esp", False, 0, None), relation="Outside")
+        d["planes"][0]["candidates"].append(assessed)
+        self.assertIsNone(S.refusal(d, "000800:B.esp"))
+
     def test_owner_split(self):
         d = report([cand("1:A.esp", True, 100, "in"), cand("2:Base.esm", True, 100, "in")])
         s = S.score_report(d, {"1:A.esp"}, reader=reader)["000800:B.esp"]
