@@ -1895,6 +1895,15 @@ def case_r4(tmp, index, common):
         return
     bundle = Path(index[case]["bundle"])
     out = tmp / case
+    # Premise of every overlap check below: conflictdiff compared the fixture's overlapprobe emits. It refuses
+    # overlap emits that do not carry one shared measurement policy (3c9432e3), so a fixture emit without one
+    # leaves nothing for the repair checks to read.
+    diff_logs = sorted(bundle.glob("sweep/*/logs/diff-overlapprobe-*.txt"))
+    refused = [f"{p.name}: {line.strip()}" for p in diff_logs for line in text(p).splitlines()
+               if "REFUSED" in line or line.startswith("(exit ") and not line.startswith("(exit 0,")]
+    check(len(diff_logs) == 3 and not refused,
+          f"{case}: premise - conflictdiff compared each candidate's overlapprobe emits "
+          f"({len(diff_logs)} diff logs; refusals {refused})")
     # The fixture engine's plan predates the `patches` field; the patches its candidate arms add are declared at
     # report time, the route evalreport documents for such plans (636ae180). Membership alone names no patch.
     pres, p, r, v = compile_case(case, bundle, out, declare_patches=("PatchA.esp", "PatchB.esp"))
