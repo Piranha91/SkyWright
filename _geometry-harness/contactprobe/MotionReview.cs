@@ -58,6 +58,16 @@ static class MotionReview
             return m;
         }
 
+        /// <summary>Lane M: true when the shared reader refuses the member for a reason of its own, one the default motion reading
+        /// (what the stored-pose refusal and earlier records name) does not give; such a record names the shared reader's reason alone.</summary>
+        public bool OwnRefusal(string formKey, byte[] bytes)
+        {
+            var m = Model(formKey, bytes);
+            if (m.Status != "refused") return false;
+            var placement = FormKey.TryFactory(formKey, out var key) ? MotionPlacements.Of(index, key) : null;
+            return NifMotion.Read(bytes, Read, placement).Reason != m.Reason;
+        }
+
         readonly Dictionary<string, (MotionModel Model, PathTubeResult Tube)> paths = new();
         /// <summary>Lane 3b, gap d: the model read with the path rule (path-driven nodes left to the tube) and its model-space tube.</summary>
         public (MotionModel Model, PathTubeResult Tube) Path(string formKey, byte[] bytes)

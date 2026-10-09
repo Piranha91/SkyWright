@@ -114,7 +114,7 @@ static class BoxContactReview
                 {
                     refused++;
                     // lane M: a member reading that refuses for its own reason (not the stored-pose reading's) is named alone
-                    string reason = region is { Status: "refused" } && why != "live pose: " + region.Reason
+                    string reason = region is { Status: "refused" } && bytes is not null && motion.OwnRefusal(other, bytes)
                         ? $"{otherName}: live pose: {region.Reason}"
                         : $"{otherName}: {why}; motion: {(region is null ? "the mesh could not be re-read" : region.Status + " " + region.Reason)}";
                     records.Add(new { pairKey, a, b, boxOwner = owner, mesh, status = "refused", reason, boxes = Array.Empty<object>() });

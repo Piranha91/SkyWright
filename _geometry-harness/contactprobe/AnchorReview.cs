@@ -84,7 +84,7 @@ static class AnchorReview
                 {
                     // lane M: a member reading that refuses for its own reason (not the stored-pose reading's) is named alone
                     refused++;
-                    records.Add(Rec(new { mesh = bMesh }, Array.Empty<object>(), mb.Status == "refused" && surf.Reason != "live pose: " + mb.Reason
+                    records.Add(Rec(new { mesh = bMesh }, Array.Empty<object>(), motion.OwnRefusal(pr.B, bBytes)
                         ? $"B: live pose: {mb.Reason}" : $"B: {surf.Reason}; motion: {mb.Status} {mb.Reason}"));
                     continue;
                 }
