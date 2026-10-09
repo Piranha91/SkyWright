@@ -374,6 +374,24 @@ static partial class MotionProof
             var m = MemberMotion.Read(nif, read, Mstt);
             return (m.Status == "refused" && (m.Reason ?? "").Contains("subtracts its last child"), ShowMM(m));
         });
+        // ================= kept refusals (GATE-A §6) =================
+        Case(check, "K-M14 kept refusal: a graph holding an hkbBoneWeightArray refuses by name ('hkbBoneWeightArray') (rejects per-bone weights read as one w)", () =>
+        {
+            var nif = ChainNif(@"Lab\KM14w.hkx", new[] { ("Part", "N2", Cube(50, 0, 0, 1), false) },
+                               new[] { ("SeqA", new[] { TurnA }, CycleType.CYCLE_CLAMP), ("SeqB", new[] { SlideB }, CycleType.CYCLE_CLAMP) });
+            var read = Files(GraphFiles("KM14w", new[] { new FxState("A", "sequence", new[] { "SeqA" }), new FxState("B", "sequence", new[] { "SeqB" }) }, boneWeights: true));
+            var m = MemberMotion.Read(nif, read, Mstt);
+            return (m.Status == "refused" && (m.Reason ?? "").Contains("hkbBoneWeightArray"), ShowMM(m));
+        });
+        Case(check, "K-M14 kept refusal: a transition effect other than hkbBlendingTransitionEffect refuses by name ('hkbGeneratorTransitionEffect') (rejects an unread transition read as a blend)", () =>
+        {
+            var nif = ChainNif(@"Lab\KM14t.hkx", new[] { ("Part", "N2", Cube(50, 0, 0, 1), false) },
+                               new[] { ("SeqA", new[] { TurnA }, CycleType.CYCLE_CLAMP), ("SeqB", new[] { SlideB }, CycleType.CYCLE_CLAMP) });
+            var read = Files(GraphFiles("KM14t", new[] { new FxState("A", "sequence", new[] { "SeqA" }), new FxState("B", "sequence", new[] { "SeqB" }) },
+                                        transitionClass: "hkbGeneratorTransitionEffect"));
+            var m = MemberMotion.Read(nif, read, Mstt);
+            return (m.Status == "refused" && (m.Reason ?? "").Contains("hkbGeneratorTransitionEffect"), ShowMM(m));
+        });
         // ================= K-M7 / K-M7b: pinned single hinge =================
         Case(check, "K-M7 pinned rod, limits [-30, +45], stored 0: partners at +40 and -40 deg witness origin swing; at +55 and -55 never (rejects one sense only)", () =>
         {
