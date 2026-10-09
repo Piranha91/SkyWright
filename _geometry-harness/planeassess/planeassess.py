@@ -870,7 +870,43 @@ def _proc_mem_mib(pid):
         ctypes.windll.kernel32.CloseHandle(h)
 
 
-RESUME_KEYS = ("viewprobeDll", "coreDll", "rule", "order", "arm")
+RESUME_KEYS = ("viewprobeDll", "coreDll", "rule", "order", "arm", "measurementMode")
+DEPTH_FLAG, DEPTH_MODE = "--depth-measurement", "depth-measurement"
+
+
+def with_mode(ident, depth_measurement):
+    """The render identity, naming viewprobe's depth-measurement mode only when it is on: a ledger row without the
+    key reads as None, so default renders resume exactly as before and the two modes never resume each other."""
+    return dict(ident, measurementMode=DEPTH_MODE) if depth_measurement else dict(ident)
+
+
+def chunk_argv(exe, wl, instance, profile, game, order, rule, dest, no_reuse=False, depth_measurement=False):
+    """viewprobe's argv for one chunk."""
+    return ([str(exe), str(wl), "--instance", instance, "--profile", profile, "--game", game, "--order", str(order),
+             "--planes-report", "--occlusion-rule", str(rule), "--size", "1200", "--msaa", "0",
+             "--visibility-budget", "4096", "--out", str(dest)] + (["--no-reuse-cell"] if no_reuse else [])
+            + ([DEPTH_FLAG] if depth_measurement else []))
+
+
+def depth_measurement_problem(argv_prefix, cell="000000:Skyrim.esm", args=()):
+    """None when this viewprobe accepts --depth-measurement; else one sentence. Asked with a cell and the chunk's own
+    instance arguments and no --planes-report: a build with the flag refuses with its own sentence (exit 1), a build
+    without it exits 2 naming the flag as unknown."""
+    r = subprocess.run(list(argv_prefix) + [cell, DEPTH_FLAG] + list(args), capture_output=True, text=True,
+                       errors="replace", timeout=600)
+    if r.returncode == 2 and "does not recognise '%s'" % DEPTH_FLAG in (r.stdout + r.stderr):
+        return ("refusing: %s does not accept --depth-measurement (an older viewprobe build); use a build that has it "
+                "or drop the flag." % " ".join(map(str, argv_prefix)))
+    return None
+
+
+def report_records_mode(path):
+    """Whether a planes report (raw or gzipped) records the depth-measurement mode in its appearance block."""
+    import gzip
+    p = Path(path)
+    raw = p.read_bytes()
+    d = json.loads(gzip.decompress(raw) if p.suffix == ".gz" else raw)
+    return ((d.get("appearance") or {}).get("measurementMode") or {}).get("name") == DEPTH_MODE
 
 
 def done_shots(out, ident):
@@ -934,7 +970,7 @@ def lock_problem(lock):
 
 def render_step(g, arm, shots_file, out, viewprobe, instance, game, caps, need_free_mib, lock, pause,
                 no_reuse=False, chunk=9, exempt=(), probe_commit_mib=None, fallback_chunk=3, memory_mode="full",
-                constrained_need_mib=None, constrained_heap_mib=None, constrained_chunk=1):
+                constrained_need_mib=None, constrained_heap_mib=None, constrained_chunk=1, depth_measurement=False):
     """Render the listed gazes in one arm, one viewprobe process per chunk (same cell, at most `chunk` shots), one
     process at a time. Before each chunk: the PAUSE file stops the block, free RAM must be at least `need_free_mib`,
     no other heavy process may run. During it: the campaign caps (process commit, system floor, graphics used) stop
@@ -953,8 +989,9 @@ def render_step(g, arm, shots_file, out, viewprobe, instance, game, caps, need_f
     order = g["orders"][arm]
     profile = json.loads(Path(order).read_text(encoding="utf-8")).get("BaseProfile") or "Manual"
     exe = Path(viewprobe)
-    ident = {"viewprobeDll": sha(exe.parent / "viewprobe.dll"), "coreDll": sha(exe.parent / "housecarl-core.dll"),
-             "rule": sha(g["_rel"](g["rule"])), "order": sha(order), "arm": arm, "reuseCell": not no_reuse}
+    ident = with_mode({"viewprobeDll": sha(exe.parent / "viewprobe.dll"), "coreDll": sha(exe.parent / "housecarl-core.dll"),
+                       "rule": sha(g["_rel"](g["rule"])), "order": sha(order), "arm": arm, "reuseCell": not no_reuse},
+                      depth_measurement)
     out = Path(out)
     out.mkdir(parents=True, exist_ok=True)
     finished = done_shots(out, ident)
@@ -968,6 +1005,9 @@ def render_step(g, arm, shots_file, out, viewprobe, instance, game, caps, need_f
     chunks = [v[i:i + chunk] for v in groups.values() for i in range(0, len(v), chunk)]
     probed = set()
     problem = lock_problem(lock)
+    if not problem and depth_measurement and chunks:
+        problem = depth_measurement_problem([exe], chunks[0][0]["cell"],
+                                            ["--instance", instance, "--profile", profile, "--game", game, "--order", str(order)])
     if problem:
         raise SystemExit(problem)
     Path(lock).write_text(json.dumps({"pid": os.getpid(), "purpose": "planeassess render %s %s" % (g["name"], arm),
@@ -1010,9 +1050,8 @@ def render_step(g, arm, shots_file, out, viewprobe, instance, game, caps, need_f
                 "control": False, "viewpointKind": "nominated-player",
                 "viewpointEvidence": "route station %s gaze %s bearing %.2f" % (s["stationId"], s["gaze"], s["bearingDeg"])}
                 for s in todo]}]}, indent=1), encoding="utf-8")
-            argv = [str(exe), str(wl), "--instance", instance, "--profile", profile, "--game", game, "--order", str(order),
-                    "--planes-report", "--occlusion-rule", str(g["_rel"](g["rule"])), "--size", "1200", "--msaa", "0",
-                    "--visibility-budget", "4096", "--out", str(dest)] + (["--no-reuse-cell"] if no_reuse else [])
+            argv = chunk_argv(exe, wl, instance, profile, game, order, g["_rel"](g["rule"]), dest, no_reuse,
+                              depth_measurement)
             peak = {"commitMiB": 0.0, "workingSetMiB": 0.0, "graphicsUsedMiB": 0.0}
             caps_obs = cap_observer(lambda pid: _proc_mem_mib(pid)[0], caps[0], system_reader=read_system_free,
                                     system_available_floor_mib=caps[1], graphics_reader=read_graphics_free,
@@ -1063,6 +1102,13 @@ def render_step(g, arm, shots_file, out, viewprobe, instance, game, caps, need_f
                     if full_ok:
                         force_full.add(id(c))
                 continue
+            if depth_measurement and res.get("exitCode") in (0, 3):
+                unmarked = [r for r in sorted(dest.glob("*-fp-planes.json")) if not report_records_mode(r)]
+                if unmarked:
+                    print("refusing further chunks: %s does not record the depth-measurement mode although it was asked "
+                          "for; the renderer ignored the flag." % unmarked[0], flush=True)
+                    failed.append(tag)
+                    break
             if res.get("stopped") or res.get("exitCode") not in (0, 3):
                 failed.append(tag)
                 print("chunk %s: stopped %s, exit %s; recorded, continuing" % (tag, res.get("stopped"), res.get("exitCode")),
@@ -1082,8 +1128,8 @@ def render_step(g, arm, shots_file, out, viewprobe, instance, game, caps, need_f
                           % (peak["commitMiB"], probe_commit_mib, ws, len(rest), fallback_chunk), flush=True)
     finally:
         Path(lock).unlink(missing_ok=True)
-    print("chunks %d, stopped or failed %d: %s; heap-cap Out of memory %d: %s" % (len(chunks), len(failed), failed,
-                                                                                  len(oom), oom), flush=True)
+    print("chunks %d, stopped or failed %d: %s; heap-cap Out of memory %d: %s; measurement mode %s"
+          % (len(chunks), len(failed), failed, len(oom), oom, DEPTH_MODE if depth_measurement else "default"), flush=True)
     return done
 
 
@@ -1278,6 +1324,8 @@ def main(argv=None):
     a.add_argument("--constrained-heap-mib", type=float, help="managed heap cap per process in the constrained mode")
     a.add_argument("--constrained-chunk", type=int, default=1, help="shots per process in the constrained mode (default 1)")
     a.add_argument("--exempt", action="append", default=[], help="process path that does not count as busy (repeat)")
+    a.add_argument("--depth-measurement", action="store_true",
+                   help="pass viewprobe --depth-measurement (same measurement, no appearance work); off by default")
     a = sub.add_parser("score", help="step 4: score rendered reports of one arm, then gzip them and thin their masks")
     a.add_argument("--group", required=True, help="group definition JSON")
     a.add_argument("--arm", required=True, choices=["u", "p"], help="u: without the patch; p: with it")
@@ -1316,7 +1364,7 @@ def main(argv=None):
         n = render_step(g, args.arm, args.shots, args.render_out, args.viewprobe, args.instance, args.game, caps,
                         args.need_free_mib, args.heavy_lock, args.pause, args.no_reuse_cell, args.chunk, args.exempt,
                         args.probe_commit_mib, args.fallback_chunk, args.memory_mode, args.constrained_need_mib,
-                        args.constrained_heap_mib, args.constrained_chunk)
+                        args.constrained_heap_mib, args.constrained_chunk, args.depth_measurement)
         print("rendered", n)
         return 0
     return stations_step(g, args.viewprobe, args.work, args.copy_to, args.instance, args.game, args.only,
