@@ -7,7 +7,10 @@ Exit codes: 0 idle; 3 not idle (the reasons are printed and written); 2 usage or
 
 Why it exists. A launch or a timing on a busy machine confounds what it measures, and an idle check that
 matches process NAMES misses the commonest heavy job here: a probe run as `dotnet <probe>.dll`, whose
-process name is `dotnet`. So probes are found by COMMAND LINE. The game, Mod Organizer, the recorder and
+process name is `dotnet`. So a probe is found by its process name, or by a dotnet host's PROGRAM argument
+being its dll; a shell or script interpreter whose command line names a probe also blocks, as a possible batch
+driver between two probe children. Any other process whose command line merely names a probe (an editor, a
+dotnet host of another program) does not. The game, Mod Organizer, the recorder and
 the build servers are found by process NAME only: an idle IDE language server carries "msbuild" in its
 command line, and matching that would refuse every launch on a machine with the editor open.
 
@@ -28,13 +31,36 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE.parent / "scripts"))
 
-#: Probe executables, matched as whole words anywhere in a command line (case-insensitive). Any other
-#: `<name>probe.exe|.dll` is matched by PROBE_FILE_RE as well, so a new probe is not silently missed.
+#: Probe names: a process named one, a dotnet host whose program is `<name>.dll`, or (for shells) a whole word in the
+#: command line. Any other `<word>probe` counts too (PROBE_FILE_RE for shells), so a new probe is not silently missed.
 PROBES = ("contactprobe", "overlapprobe", "proofprobe", "floorgapprobe", "motionprobe", "viewprobe",
           "stateprobe", "crossprobe", "conflictdiff", "switchprobe", "scopeprobe", "navprobe", "seamprobe",
           "waterprobe", "geoprobe", "placeprobe", "floorprobe", "corridorprobe", "driftprobe")
 PROBE_WORD_RE = re.compile(r"(?<![\w-])(" + "|".join(PROBES) + r")(?![\w-])", re.I)
 PROBE_FILE_RE = re.compile(r"(?<![\w-])(\w+probe)\.(exe|dll)\b", re.I)
+#: Shells and script interpreters: one whose command line names a probe may be a batch driver between two probe
+#: children, so it still blocks, under its own wording. Every other process must BE a probe (name or dotnet program).
+SHELLS = {"bash", "sh", "cmd", "powershell", "pwsh", "python", "pythonw", "py", "node"}
+#: dotnet host options that take a value, skipped to find the program argument (`dotnet [exec] [opts] app.dll`).
+DOTNET_VALUE_OPTS = {"--runtimeconfig", "--depsfile", "--additionalprobingpath", "--additional-deps",
+                     "--fx-version", "--roll-forward"}
+
+
+def is_probe_name(stem: str) -> bool:
+    """A listed probe or any `<word>probe` (case-insensitive)."""
+    s = stem.lower()
+    return s in PROBES or re.fullmatch(r"\w+probe", s) is not None
+
+
+def dotnet_program(cmd: str) -> str:
+    """The basename of a dotnet host's program argument, lower-cased ('' if none): after `exec` and value options."""
+    toks = [a or b for a, b in _TOKEN_RE.findall(cmd or "")][1:]
+    i = 0
+    if i < len(toks) and toks[i].lower() == "exec":
+        i += 1
+    while i < len(toks) and toks[i].startswith("-"):
+        i += 2 if toks[i].lower() in DOTNET_VALUE_OPTS else 1
+    return re.split(r"[\\/]", toks[i])[-1].lower() if i < len(toks) else ""
 
 #: Matched on the process NAME only (case-insensitive, with or without `.exe`).
 BLOCKING_NAMES = {
@@ -118,11 +144,16 @@ def decide(snap: dict, *, min_free_gb: float = DEFAULT_MIN_FREE_GB, refuse_if=()
         name, cmd = p.get("name") or "", p.get("cmd") or ""
         why = None
         base = _base(name)
+        prog = dotnet_program(cmd) if base == "dotnet" else ""
         if base in BLOCKING_NAMES:
             why = f"{BLOCKING_NAMES[base]} running ({name}, by process name)"
-        elif PROBE_WORD_RE.search(cmd) or PROBE_FILE_RE.search(cmd):
+        elif is_probe_name(base):
+            why = f"a probe running ({base}, by process name)"
+        elif prog.endswith(".dll") and is_probe_name(prog[:-4]):
+            why = f"a probe running ({prog[:-4]}, by command line, process {name})"
+        elif base in SHELLS and (PROBE_WORD_RE.search(cmd) or PROBE_FILE_RE.search(cmd)):
             m = PROBE_WORD_RE.search(cmd) or PROBE_FILE_RE.search(cmd)
-            why = f"a probe running ({m.group(1)}, by command line, process {name})"
+            why = f"a shell or script naming a probe (may be a batch driver) ({m.group(1)}, process {name})"
         elif base == "dotnet" and dotnet_first_arg(cmd) in DOTNET_BUILD_ARGS:
             why = f"a build running (dotnet build host, by command line)"
         if why:
