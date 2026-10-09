@@ -4,7 +4,14 @@
    default font at other metrics. `css` is this repo's own report.css, read from the templates folder beside
    this template; it is never bundle data. Every value below comes from the bundle and stays escaped. #}
 <!doctype html><html><head><meta charset="utf-8"><title>{{ p.reader.title }}</title><style>{{ css|safe }}</style></head><body class="{{ p.layout }}"><main>
-<h1>{{ p.reader.title }}</h1><p>{{ p.reader.scopeLine }}</p><section class="claim"><h2>Result</h2><p><strong>{{ p.reader.verdict }}</strong></p><ul>{% for x in p.reader.limitations %}<li>{{ x }}</li>{% endfor %}</ul></section>
+<h1>{{ p.reader.title }}</h1><p>{{ p.reader.scopeLine }}</p>
+{% set pred = p.reader.prediction %}{% set cov = p.reader.coverage %}{% set val = p.reader.validation %}
+<section class="claim"><h2>{{ p.reader.sectionHeadings.prediction }}</h2><p><strong>{{ pred.verdict }}</strong></p>
+{% if pred["items"] %}<ul>{% for g in pred["items"] %}<li><strong>{{ g.title }}:</strong> {{ g.plain }} {{ g.inGameText }}{% for fid in g.findingIds[:1] %} <a href="evidence-index.html#{{ fid }}">Full evidence</a>.{% endfor %}</li>{% endfor %}</ul>{% endif %}
+{% if pred.noneFoundBasis %}<p>{{ pred.noneFoundBasis }}</p>{% endif %}{% for item in pred.missingFacts %}<p>{{ item }}</p>{% endfor %}</section>
+<section><h2>{{ p.reader.sectionHeadings.coverage }}</h2><ul>{% for line in cov.lines %}<li><strong>{{ line.reason }}:</strong> {{ line.count|n }}{% if line.get("unit") %} {{ line.unit }}{% endif %}{% if line.subject %} — {{ line.subject }}{% endif %}.</li>{% else %}<li>No check on the setup with the evaluated mods reported anything it could not judge.</li>{% endfor %}{% for item in cov.notes %}<li>{{ item }}</li>{% endfor %}</ul>
+{% if cov.setAsideLine %}<p>{{ cov.setAsideLine }} <a href="evidence-index.html#prediction-record">Prediction record</a>.</p>{% endif %}</section>
+<section><h2>{{ p.reader.sectionHeadings.validation }}</h2>{% if val.status == "no-patch" %}<p>{{ val.sentence }}</p><p>{{ val.other }}</p>{% else %}<p>{{ val.headline }}</p><ul>{% for s in val.sentences %}<li>{{ s }}</li>{% endfor %}</ul>{% for s in val.missingFacts %}<p>{{ s }}</p>{% endfor %}{% endif %}</section>
 <p>Evaluation record: {{ p.reader.context.evaluatedAt or "date not supplied" }}. States examined: {{ p.reader.context.statesExamined|join(", ") or "none named" }}. Additional states not examined: {{ p.reader.context.statesNotExamined|join(", ") or "none named" }}.</p>
 <h2>Setups compared</h2><ul>{% for a in p.scope.arms %}<li><strong>{{ a.displayLabel }}</strong>{% if a.pluginsAdded %}: adds {{ a.pluginsAdded|join(", ") }}{% endif %}{% if a.pluginsRemoved %}{{ "; " if a.pluginsAdded else ": " }}removes {{ a.pluginsRemoved|join(", ") }}{% endif %}{% if a.get("setupOrdinal") %} ({{ a.get("setupOrdinal") }}){% endif %}. {{ a.readerLimits|join(" ") }}</li>{% endfor %}</ul>
 <h2>{{ p.reader.locationOrder.heading or "Load order for these locations" }}</h2><p>{{ p.reader.locationOrder.intro or "Plugins tied to the places discussed below, in measured order." }}</p>

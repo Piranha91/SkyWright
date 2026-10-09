@@ -2,14 +2,49 @@
 
 {{ p.reader.scopeLine }}
 
-Evaluation record: {{ p.reader.context.evaluatedAt or "date not supplied" }}. States examined: {{ p.reader.context.statesExamined|join(", ") or "none named" }}. Additional states not examined: {{ p.reader.context.statesNotExamined|join(", ") or "none named" }}.
+{% set pred = p.reader.prediction %}{% set cov = p.reader.coverage %}{% set val = p.reader.validation %}
+## {{ p.reader.sectionHeadings.prediction }}
 
-## Result
+> **{{ pred.verdict }}**
 
-> **{{ p.reader.verdict }}**
+{% for g in pred["items"] %}- **{{ g.title }}:** {{ g.plain }} {{ g.inGameText }}{% for fid in g.findingIds[:1] %} [Full evidence](evidence-index.md#{{ fid }}).{% endfor %}
 
-{% for item in p.reader.limitations %}- {{ item }}
 {% endfor %}
+{% if pred.noneFoundBasis %}{{ pred.noneFoundBasis }}
+
+{% endif %}
+{% for item in pred.missingFacts %}{{ item }}
+
+{% endfor %}
+
+## {{ p.reader.sectionHeadings.coverage }}
+
+{% for line in cov.lines %}- **{{ line.reason }}:** {{ line.count|n }}{% if line.get("unit") %} {{ line.unit }}{% endif %}{% if line.subject %} — {{ line.subject }}{% endif %}.
+{% else %}- No check on the setup with the evaluated mods reported anything it could not judge.
+{% endfor %}
+{% for item in cov.notes %}- {{ item }}
+{% endfor %}
+{% if cov.setAsideLine %}
+
+{{ cov.setAsideLine }} [Prediction record](evidence-index.md#prediction-record).
+{% endif %}
+
+## {{ p.reader.sectionHeadings.validation }}
+
+{% if val.status == "no-patch" %}{{ val.sentence }}
+
+{{ val.other }}
+{% else %}{{ val.headline }}
+
+{% for s in val.sentences %}- {{ s }}
+{% endfor %}
+
+{% for s in val.missingFacts %}{{ s }}
+
+{% endfor %}
+{% endif %}
+
+Evaluation record: {{ p.reader.context.evaluatedAt or "date not supplied" }}. States examined: {{ p.reader.context.statesExamined|join(", ") or "none named" }}. Additional states not examined: {{ p.reader.context.statesNotExamined|join(", ") or "none named" }}.
 
 ## Setups compared
 

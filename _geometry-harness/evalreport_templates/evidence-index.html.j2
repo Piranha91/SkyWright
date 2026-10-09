@@ -34,6 +34,14 @@
 {% endfor %}
 </ul>
 
+<h2 id="prediction-record">Prediction record ({{ p.reader.prediction.record|length }})</h2>
+
+<p>Every record on the setup the prediction reads ({{ p.reader.prediction.predictionArm }}), with whether it counts as a clash between mods (<code>admitted</code>) or why it is set aside, and how an admitted one is attributed.</p>
+<ul>
+{% for r in p.reader.prediction.record %}<li>{{ r.checkId }} {{ r.kind }} {{ r.A }} x {{ r.B }} <code>{{ r.formKey|txt }}</code>: {{ r.admission }}{% if r.get("attribution") %}, {{ r.attribution }}{% if r.get("attributionMod") %} ({{ r.attributionMod }}){% endif %}{% endif %}{% if r.findingId %} — <a href="#{{ r.findingId }}">{{ r.findingId }}</a>{% endif %}</li>
+{% endfor %}
+</ul>
+
 <h2 id="imported-evidence">Imported evidence ({{ (p.imports.rows if p.imports else [])|length }})</h2>
 
 {% if p.imports and p.imports.rows %}

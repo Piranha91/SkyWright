@@ -23,6 +23,14 @@ Complete in every mode: every finding with all of its rows, every evidence file 
 {% for f in p.findings if f.kind == "missing" %}- [{{ f.id }}](#{{ f.id }}): {{ f.plain }}
 {% endfor %}
 
+<a id="prediction-record"></a>
+## Prediction record ({{ p.reader.prediction.record|length }})
+
+Every record on the setup the prediction reads ({{ p.reader.prediction.predictionArm }}), with whether it counts as a clash between mods (`admitted`) or why it is set aside, and how an admitted one is attributed.
+
+{% for r in p.reader.prediction.record %}- {{ r.checkId }} {{ r.kind }} {{ r.A }} x {{ r.B }} `{{ r.formKey|txt }}`: {{ r.admission }}{% if r.get("attribution") %}, {{ r.attribution }}{% if r.get("attributionMod") %} ({{ r.attributionMod }}){% endif %}{% endif %}{% if r.findingId %} — [{{ r.findingId }}](#{{ r.findingId }}){% endif %}
+{% endfor %}
+
 <a id="imported-evidence"></a>
 ## Imported evidence ({{ (p.imports.rows if p.imports else [])|length }})
 

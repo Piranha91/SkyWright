@@ -790,6 +790,289 @@ def imported_evidence(b: Bundle) -> dict:
     return {"source": source if rows or isinstance(listed, list) else None, "rows": rows}
 
 
+def is_base_game(name: str, words: dict) -> bool:
+    """A Bethesda file: the listed base-game files, or a Creation Club plugin (`cc*.esm/esp/esl`)."""
+    n = str(name or "").lower()
+    listed = {str(x).lower() for x in words.get("baseGamePlugins") or []}
+    prefix = str(words.get("baseGamePrefix") or "").lower()
+    return n in listed or bool(prefix and n.startswith(prefix) and n.endswith((".esm", ".esp", ".esl")))
+
+
+def build_prediction(ctx: dict) -> dict:
+    """The prediction, coverage and validation blocks a report leads with.
+
+    ctx: findings (planned, with allRows), armOrders {armId: [plugin]}, armIds (setups-compared order), targets
+    [name], declared (lower-case declared patches), comparisonKinds, armChanges {armId: (added, removed)}, missing,
+    unassessed, checkTitles, missingReason (fn), oldVerdict, limitations, words (report-priorities reader.prediction),
+    inGame (reader.inGame), kindPhrases.
+
+    The prediction setup P is the one with the evaluated mods and no patch: the arm that removes a declared patch when
+    one does, else the baseline. W has none of the evaluated mods; S(m) has only m. A row is keyed
+    (check, Kind, A, B, FormKey); presence is read from each setup's own conflict file (part `arm` or none)."""
+    words, findings = ctx["words"], ctx["findings"]
+    lower = lambda xs: {str(x).lower() for x in xs if x}                          # noqa: E731
+    target_lower = lower(ctx["targets"])
+    orders = ctx["armOrders"]
+    kinds = ctx["comparisonKinds"]
+    changes = ctx["armChanges"]
+    declared = ctx["declared"]
+
+    # --- which setup is P, and which (if any) carries the patch
+    patched_arm, p_arm, patch_names = None, "baseline", []
+    comparisons = []
+    for arm_id in ctx["armIds"]:
+        if kinds.get(arm_id) != "patch-comparison":
+            continue
+        added, removed = changes.get(arm_id) or ([], [])
+        if removed and not added:
+            comparisons.append({"withPatch": "baseline", "withoutPatch": arm_id, "patches": list(removed)})
+        elif added and not removed:
+            comparisons.append({"withPatch": arm_id, "withoutPatch": "baseline", "patches": list(added)})
+    if comparisons:
+        main = max(comparisons, key=lambda c: len(c["patches"]))
+        p_arm, patched_arm, patch_names = main["withoutPatch"], main["withPatch"], main["patches"]
+    p_set = lower(orders.get(p_arm) or [])
+    p_targets = [t for t in ctx["targets"] if str(t).lower() in p_set]
+    pt_lower = lower(p_targets)
+
+    def arm_with(plugins_lower):
+        for arm_id in ctx["armIds"]:
+            if arm_id != p_arm and lower(orders.get(arm_id) or []) == plugins_lower:
+                return arm_id
+        return None
+    w_arm = arm_with(p_set - pt_lower) if p_targets else None
+    s_arms = {t: arm_with(p_set - (pt_lower - {str(t).lower()})) for t in p_targets} if len(p_targets) > 1 else {}
+
+    # --- per (check, arm): measured rows, measured with no conflict file, or nothing
+    rows_by, prefixes, measured, count_only = {}, {}, set(), {}
+    for f in findings:
+        if f.get("part") not in ("arm", None):
+            continue
+        key = (f.get("checkId"), f.get("armId"))
+        if f.get("kind") == "null":
+            measured.add(key)
+        elif f.get("kind") == "finding":
+            measured.add(key)
+            c = f.get("counts") or {}
+            if not (c.get("A") and c.get("B")):
+                count_only[key] = count_only.get(key, 0) + int(c.get("findings") or 0)
+                continue
+            for r in f.get("allRows") or f.get("rows") or []:
+                # one entry per reported row (a record can carry several conflicts); presence elsewhere is read on
+                # the record and its pair, the first five parts of the key
+                rk = (f.get("checkId"), str(c.get("groupKind") or ""), str(c.get("A")), str(c.get("B")), r.get("formKey"),
+                      str(r.get("summary") or ""))
+                rows_by.setdefault(key, {})[rk] = {"finding": f, "row": r,
+                                                   "history": f.get("readerEvidenceReason") == "context-only-kind"}
+                prefixes.setdefault(key, set()).add(rk[:5])
+
+    def present(arm_id, rk):
+        return arm_id is not None and tuple(rk[:5]) in (prefixes.get((rk[0], arm_id)) or set())
+
+    def admission(rk, history):
+        a, b = rk[2], rk[3]
+        if history:
+            return "history"
+        if a.lower() == b.lower():
+            return "sameMod"
+        if present(w_arm, rk):
+            return "alreadyPresent"
+        if is_base_game(a, words) or is_base_game(b, words):
+            return "baseGame"
+        if not ({a.lower(), b.lower()} & pt_lower):
+            return "notInvolving"
+        return "admitted"
+
+    def attribution(rk):
+        sides = [x for x in (rk[2], rk[3]) if x.lower() in pt_lower]
+        if len(p_targets) <= 1:
+            return "single-mod", (sides[0] if sides else None), None
+        unmeasured = [t for t in p_targets if s_arms.get(t) is None or (rk[0], s_arms[t]) not in measured]
+        if unmeasured:
+            if all(s_arms.get(t) is None for t in p_targets):
+                why = words["notSeparableWhy"]["noSingleSetups"]
+            else:
+                why = bind(words["notSeparableWhy"]["notMeasured"], {"mod": unmeasured[0]})
+            return "not-separable", None, why
+        alone = [t for t in p_targets if present(s_arms[t], rk)]
+        if alone:
+            return "single-mod", alone[0], None
+        return "needs-both", None, None
+
+    record, set_aside = [], collections.Counter()
+    groups = collections.OrderedDict()
+    p_rows = {}
+    for (check_id, arm_id), rs in rows_by.items():
+        if arm_id == p_arm:
+            p_rows.update(rs)
+    for rk in sorted(p_rows, key=lambda k: tuple(str(x) for x in k)):
+        hit = p_rows[rk]
+        adm = admission(rk, hit["history"])
+        entry = {"checkId": rk[0], "kind": rk[1], "A": rk[2], "B": rk[3], "formKey": rk[4], "summary": rk[5],
+                 "admission": adm,
+                 "findingId": hit["finding"].get("id")}
+        if adm != "admitted":
+            set_aside[adm] += 1
+            record.append(entry)
+            continue
+        attr, attr_mod, why = attribution(rk)
+        entry.update({"attribution": attr, "attributionMod": attr_mod})
+        record.append(entry)
+        mods = sorted([rk[2], rk[3]], key=str.lower)
+        gk = (rk[0], rk[1], tuple(mods), attr, attr_mod, why)
+        g = groups.setdefault(gk, {"checkId": rk[0], "kind": rk[1], "mods": mods, "count": 0, "attribution": attr,
+                                   "attributionMod": attr_mod, "attributionWhy": why, "findingIds": [], "examples": []})
+        g["count"] += 1
+        fid = hit["finding"].get("id")
+        if fid and fid not in g["findingIds"]:
+            g["findingIds"].append(fid)
+        label = hit["row"].get("label")
+        if label and len(g["examples"]) < 2 and label not in g["examples"]:
+            g["examples"].append(label)
+
+    titles, in_game, phrases = ctx["checkTitles"], ctx["inGame"], ctx["kindPhrases"]
+
+    def title_of(check_id):
+        return titles.get(str(check_id)) or ctx["checkTitle"](check_id)
+
+    def reason_words(code):
+        # a probe's reason code (`NoGeometry`) in words (`no geometry`), unless the skill names it
+        known = (words.get("unjudgeableWords") or {}).get(str(code))
+        if known:
+            return known
+        return re.sub(r"(?<=[a-z0-9])(?=[A-Z])", " ", str(code)).lower()
+    items = []
+    for g in groups.values():
+        g["title"] = title_of(g["checkId"])
+        g["inGame"] = in_game.get(f"{g['checkId']}|{g['kind']}") or in_game.get(g["checkId"])
+        ph = phrases.get(g["kind"]) or {}
+        noun = (ph.get("unitSingular") if g["count"] == 1 else ph.get("unitPlural")) or ("clash" if g["count"] == 1 else "clashes")
+        attr_text = bind(words["attribution"][g["attribution"]], {"mod": g["attributionMod"], "why": g["attributionWhy"] or ""})
+        g["plain"] = (f"{fmt_n(g['count'])} {noun} between {g['mods'][0]} and {g['mods'][1]}. "
+                      + attr_text + (f" {ph['readerQualification']}" if ph.get("readerQualification") else ""))
+        g["inGameText"] = (f"In game: {g['inGame']}." if g["inGame"] else words["inGameMissing"])
+        items.append(g)
+    items.sort(key=lambda g: (-g["count"], g["checkId"], g["mods"]))
+
+    subject_mods = p_targets or list(ctx["targets"])
+    subject = (" and ".join([", ".join(subject_mods[:-1]), subject_mods[-1]]) + " together"
+               if len(subject_mods) > 1 else (subject_mods[0] if subject_mods else "the evaluated mod"))
+    total = sum(g["count"] for g in items)
+    checks_on_p = sorted({c for (c, a) in measured if a == p_arm})
+    if items:
+        verdict = bind(words["verdictFound"], {"subject": subject, "count": total,
+                                               "inconsistencyNoun": words["inconsistencySingular" if total == 1 else "inconsistencyPlural"]})
+    else:
+        verdict = bind(words["verdictNone"], {"subject": subject})
+    missing_facts = []
+    if not p_targets:
+        missing_facts.append(words["noModInSetup"])
+    elif len(p_targets) > 1 and all(v is None for v in s_arms.values()) and not items:
+        missing_facts.append(bind(words["attribution"]["not-separable"], {"why": words["notSeparableWhy"]["noSingleSetups"]}))
+    aside = {"baseGame": set_aside["baseGame"], "sameMod": set_aside["sameMod"],
+             "alreadyPresent": set_aside["alreadyPresent"], "history": set_aside["history"],
+             "notInvolving": set_aside["notInvolving"]}
+    prediction = {"subject": subject, "mods": subject_mods, "predictionArm": p_arm, "withoutArm": w_arm,
+                  "singleArms": s_arms, "verdict": verdict, "status": "found" if items else "none-found",
+                  "items": items, "total": total, "missingFacts": list(dict.fromkeys(missing_facts)),
+                  "setAside": aside,
+                  "setAsideLine": bind(words["setAsideLine"], aside) if sum(aside.values()) else None,
+                  "noneFoundBasis": None if items else bind(words["noneFoundBasis"], {
+                      "checks": len(checks_on_p), "checkNoun": "check" if len(checks_on_p) == 1 else "checks",
+                      "subject": subject}),
+                  "record": record}
+
+    # --- coverage: what the checks could not judge, by named reason and count
+    reasons = words["coverageReasons"]
+    lines = []
+    relevant_arms = {p_arm, patched_arm, w_arm, *s_arms.values()} - {None}
+    by_status = collections.OrderedDict()
+    for m in ctx["missing"]:
+        if m.get("armId") in relevant_arms:
+            by_status.setdefault(str(m.get("status")), set()).add(str(m.get("checkId")))
+    for status, ids in by_status.items():
+        reason = ctx["missingReason"](status, "has no accepted result")
+        lines.append({"reason": bind(reasons["missing"], {"reason": reason}), "count": len(ids),
+                      "unit": "check" if len(ids) == 1 else "checks",
+                      "subject": "; ".join(sorted(title_of(i) for i in ids))})
+    unjudged = collections.OrderedDict()
+    for u in (ctx["unassessed"].get("unjudgeablePopulations") or []):
+        if u.get("armId") != p_arm:
+            continue
+        uj = u.get("unjudgeable")
+        title = title_of(u.get("checkId"))
+        for k, v in (uj.items() if isinstance(uj, dict) else [("reason not stated", uj)]):
+            if isinstance(v, (int, float)) and not isinstance(v, bool) and v > 0:
+                key = (title, reason_words(k))
+                unjudged[key] = unjudged.get(key, 0) + v
+    for (title, reason), n in unjudged.items():
+        lines.append({"reason": bind(reasons["unjudgeable"], {"reason": reason}), "count": n,
+                      "unit": "item" if n == 1 else "items", "subject": title})
+    not_sep = sum(g["count"] for g in items if g["attribution"] == "not-separable")
+    if not_sep:
+        lines.append({"reason": reasons["notSeparable"], "count": not_sep,
+                      "subject": "; ".join(sorted({title_of(g["checkId"]) for g in items
+                                                   if g["attribution"] == "not-separable"}))})
+    co = {c: n for (c, a), n in count_only.items() if a == p_arm}
+    if co:
+        lines.append({"reason": reasons["countOnly"], "count": sum(co.values()),
+                      "subject": "; ".join(sorted(title_of(c) for c in co))})
+    un = ctx["unassessed"]
+    if un.get("statesNotExplored"):
+        lines.append({"reason": reasons["statesNotExplored"], "count": len(un["statesNotExplored"]),
+                      "subject": ", ".join(map(str, un["statesNotExplored"]))})
+    if un.get("scopeUnmeasured"):
+        lines.append({"reason": reasons["scopeUnmeasured"], "count": len(un["scopeUnmeasured"]),
+                      "subject": "; ".join(str(s.get("extent")) for s in un["scopeUnmeasured"] if isinstance(s, dict))})
+    if un.get("familiesUnsupportedOrManual"):
+        lines.append({"reason": reasons["familiesUnsupported"], "count": len(un["familiesUnsupportedOrManual"]),
+                      "subject": ", ".join(ctx["familyTitle"](x) for x in un["familiesUnsupportedOrManual"])})
+    coverage = {"lines": lines, "notes": list(ctx["limitations"]), "setAsideLine": prediction["setAsideLine"],
+                "checksOnPrediction": len(checks_on_p)}
+
+    # --- validation against the patch
+    if patched_arm is None:
+        validation = {"status": "no-patch", "headline": ctx["oldVerdict"], "patches": [],
+                      "sentence": words["validationNone"],
+                      "other": bind(words["validationOtherSetups"], {"headline": ctx["oldVerdict"]}),
+                      "hits": None, "open": None, "falseAlarms": None, "patchProblems": None, "blindSpots": [],
+                      "missingFacts": []}
+    else:
+        patch = ", ".join(patch_names)
+        admitted = [e for e in record if e["admission"] == "admitted"]
+        keyof = lambda e: (e["checkId"], e["kind"], e["A"], e["B"], e["formKey"])          # noqa: E731
+        not_measured = [e for e in admitted if (e["checkId"], patched_arm) not in measured]
+        judged = [e for e in admitted if (e["checkId"], patched_arm) in measured]
+        hits = [e for e in judged if not present(patched_arm, keyof(e))]
+        open_ = [e for e in judged if present(patched_arm, keyof(e))]
+        problems = []
+        patched_rows = {k: v for (c, a), rs in rows_by.items() if a == patched_arm for k, v in rs.items()}
+        for rk, hit in patched_rows.items():
+            if present(p_arm, rk) or hit["history"] or rk[2].lower() == rk[3].lower():
+                continue
+            if is_base_game(rk[2], words) or is_base_game(rk[3], words):
+                continue
+            if (rk[0], p_arm) in measured:
+                problems.append(rk)
+        spots = collections.Counter(e["admission"] for e in record if e["admission"] != "admitted"
+                                    and (e["checkId"], patched_arm) in measured and not present(patched_arm, keyof(e)))
+        blind = [{"admission": k, "count": n, "why": words["blindSpotWhy"][k]} for k, n in sorted(spots.items())]
+        sentences = [bind(words["validationHits"], {"patch": patch, "count": len(hits)}),
+                     bind(words["validationOpen"], {"patch": patch, "count": len(open_)}),
+                     bind(words["validationPatchProblems"], {"patch": patch, "count": len(problems)})]
+        sentences += [bind(words["validationBlindSpot"], {"patch": patch, "count": s["count"], "why": s["why"]}) for s in blind]
+        if not_measured:
+            sentences.append(bind(words["validationNotMeasured"], {"patch": patch, "count": len(not_measured)}))
+        validation = {"status": "compared", "headline": ctx["oldVerdict"], "patches": patch_names,
+                      "withPatchArm": patched_arm, "withoutPatchArm": p_arm,
+                      "hits": len(hits), "open": len(open_), "falseAlarms": None, "patchProblems": len(problems),
+                      "notMeasured": len(not_measured), "blindSpots": blind, "sentences": sentences,
+                      "otherComparisons": [c for c in comparisons if c["withPatch"] != patched_arm or c["withoutPatch"] != p_arm],
+                      "missingFacts": list(words["validationMissingFacts"])}
+    headings = {k: bind(v, {"subject": subject}) for k, v in words["headings"].items()}
+    return {"prediction": prediction, "coverage": coverage, "validation": validation, "headings": headings}
+
+
 def compile_plan(bundle_dir: Path, verify: dict, settings: dict, pr: dict, bundle_dir_as_given: str,
                  location_scopes: dict | None = None) -> dict:
     b = Bundle(bundle_dir)
@@ -1967,6 +2250,23 @@ def compile_plan(bundle_dir: Path, verify: dict, settings: dict, pr: dict, bundl
               "context": {"evaluatedAt": disp.get("createdUtc") or b.manifest.get("createdUtc"),
                           "statesExamined": (b.plan.get("states") or {}).get("selected") or [],
                           "statesNotExamined": (b.plan.get("states") or {}).get("notExplored") or []}}
+    # The report leads with the prediction (what adding the evaluated mods will break), then coverage, then the patch
+    # as the answer key. The comparison sentence above keeps its words as the validation headline; the reader's
+    # verdict -- and so the reel's opening -- is the prediction.
+    lead = build_prediction({
+        "findings": findings, "armOrders": arm_orders, "armIds": arm_ids, "targets": target_names,
+        "declared": declared_patches, "comparisonKinds": comparison_kinds, "armChanges": arm_changes,
+        "missing": missing, "unassessed": un, "checkTitles": check_titles, "missingReason": missing_reason,
+        "checkTitle": b.check_title,
+        "familyTitle": lambda x: (b.families.get(x) or {}).get("title") or str(x),
+        "oldVerdict": verdict, "limitations": limitations, "words": reader_data["prediction"],
+        "inGame": reader_data.get("inGame") or {}, "kindPhrases": reader_data.get("kindPhrases") or {}})
+    verdict = lead["prediction"]["verdict"]
+    reader["verdict"] = verdict
+    reader["prediction"] = lead["prediction"]
+    reader["coverage"] = lead["coverage"]
+    reader["validation"] = lead["validation"]
+    reader["sectionHeadings"].update(lead["headings"])
     # the `missing` chapter names every required missing check id, one caption per status group
     missing_by_status: dict = collections.OrderedDict()
     for m in missing:
@@ -2489,6 +2789,9 @@ def load_presentation(path: Path):
     if (not isinstance(plan.get("reader"), dict) or "sectionHeadings" not in plan["reader"]
             or any(isinstance(a, dict) and "readerLabel" not in a for a in (plan.get("scope") or {}).get("arms") or [])):
         return None, "presentation-needs-replan: run evalreport plan again to add the modder-facing summary"
+    if not all(isinstance(plan["reader"].get(k), dict) for k in ("prediction", "coverage", "validation")):
+        return None, ("presentation-needs-replan: run evalreport plan again so the report leads with what adding "
+                      "the mods will break")
     if not isinstance(plan.get("imports"), dict):
         # a plan made before imported evidence was described cannot say whether a result was measured for this
         # evaluation, and a report that stays silent about that would read as if it had been
