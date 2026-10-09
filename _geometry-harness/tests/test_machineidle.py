@@ -206,6 +206,42 @@ def test_u5_real_powershell_nonterminating_error_refused_as_unavailable():
     assert code == 2 and "unavailable" in text.lower() and "below" not in text, (code, text)
 
 
+# U6 -- rejects: an unreadable snapshot leaving no --json (a stale idle.json from an earlier run survived), and a
+# refusal that does not say which reading failed
+def test_u6_unavailable_record_written_and_reading_named():
+    with tempfile.TemporaryDirectory() as tmp:
+        out_json = os.path.join(tmp, "idle.json")
+        with open(out_json, "w", encoding="utf-8") as f:
+            json.dump({"idle": True, "freeMB": 40000}, f)  # a stale verdict from an earlier run
+        code, out = run_main(ps_json(40 * 2 ** 20, []), argv=["--json", out_json])
+        with open(out_json, encoding="utf-8") as f:
+            doc = json.load(f)
+    assert code == 2 and "process list" in out, (code, out)
+    assert doc["idle"] is False and "process list" in doc["unavailable"] and doc["freeMB"] is None, doc
+    code, out = run_main(ps_json(0, PROCS), stderr=ACCESS_DENIED)
+    assert code == 2 and "free physical memory" in out and "Access denied" in out, (code, out)
+
+
+# U7 -- rejects: switchflip's per-launch gate reading an unreadable snapshot as idle. It calls check(), which now
+# raises; the gate must stop (raise), never return an idle verdict.
+def test_u7_switchflip_gate_never_idle_on_unavailable_snapshot():
+    import switchflip  # noqa: E402  (imports this module as `machineidle`)
+    real_run, real_sleep = switchflip.machineidle.subprocess.run, switchflip.time.sleep
+    switchflip.machineidle.subprocess.run = lambda cmd, **kw: subprocess.CompletedProcess(
+        cmd, 0, ps_json(0, []), ACCESS_DENIED)
+    switchflip.time.sleep = lambda s: None
+    logged = []
+    try:
+        try:
+            v = switchflip.idle_gate([], 16.0, logged.append, tries=2, wait_s=0)
+        except M.SnapshotUnavailable as ex:
+            v = ex
+    finally:
+        switchflip.machineidle.subprocess.run, switchflip.time.sleep = real_run, real_sleep
+    assert isinstance(v, M.SnapshotUnavailable), v
+    assert not any(e.get("idle") for e in logged), logged
+
+
 # P1..P4 -- kept: a readable snapshot still decides exactly as before; a failed PowerShell still refuses with exit 2
 def test_p1_readable_low_memory_still_exit_3():
     code, out = run_main(ps_json(15 * 2 ** 20, PROCS))

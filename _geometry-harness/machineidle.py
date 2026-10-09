@@ -2,7 +2,8 @@
 
     python machineidle.py [--min-free-gb 16] [--refuse-if LOCK ...] [--json OUT]
 
-Exit codes: 0 idle; 3 not idle (the reasons are printed and written); 2 usage or the snapshot could not be read.
+Exit codes: 0 idle; 3 not idle (the reasons are printed and written); 2 usage or the snapshot could not be read
+(a reading missing or unreadable is named and, with --json, written as {"idle": false, "unavailable": ...}).
 
 Why it exists. A launch or a timing on a busy machine confounds what it measures, and an idle check that
 matches process NAMES misses the commonest heavy job here: a probe run as `dotnet <probe>.dll`, whose
@@ -56,22 +57,38 @@ def dotnet_first_arg(cmd: str) -> str:
 
 DEFAULT_MIN_FREE_GB = 16.0
 
+#: Stop on the first error: a CIM failure is otherwise non-terminating, and the unread values arrive as 0 and [].
 PS_SNAPSHOT = (
+    "$ErrorActionPreference='Stop'; "
     "$o=Get-CimInstance Win32_OperatingSystem; "
     "$p=Get-CimInstance Win32_Process | Select-Object Name,ProcessId,ParentProcessId,CommandLine,WorkingSetSize; "
     "[pscustomobject]@{freeKB=[int64]$o.FreePhysicalMemory; processes=@($p)} | ConvertTo-Json -Depth 3 -Compress")
 
 
+class SnapshotUnavailable(RuntimeError):
+    """A reading the decision needs could not be taken. Missing data is not zero load."""
+
+
 def snapshot() -> dict:
     r = subprocess.run(["powershell", "-NoProfile", "-Command", PS_SNAPSHOT], capture_output=True, text=True,
                        encoding="utf-8", errors="replace", timeout=120)
+    err = (r.stderr or "").strip().splitlines()
+    why = f" ({err[0].strip()[:200]})" if err else ""
     if r.returncode != 0 or not r.stdout.strip():
-        raise RuntimeError(f"process snapshot failed (exit {r.returncode}): {r.stderr.strip()[:300]}")
-    doc = json.loads(r.stdout)
+        raise SnapshotUnavailable(f"process snapshot failed (exit {r.returncode}){why}")
+    try:
+        doc = json.loads(r.stdout)
+    except ValueError as ex:
+        raise SnapshotUnavailable(f"process snapshot unreadable ({ex}){why}") from None
+    free_kb = doc.get("freeKB") if isinstance(doc, dict) else None
+    if isinstance(free_kb, bool) or not isinstance(free_kb, int) or free_kb <= 0:
+        raise SnapshotUnavailable(f"free physical memory reading unavailable (freeKB {free_kb!r}){why}")
+    if not isinstance(doc.get("processes"), list) or not doc["processes"]:
+        raise SnapshotUnavailable(f"process list reading unavailable (no processes returned){why}")
     procs = [{"name": p.get("Name") or "", "pid": p.get("ProcessId"), "ppid": p.get("ParentProcessId"),
               "cmd": p.get("CommandLine") or "", "wsMB": round((p.get("WorkingSetSize") or 0) / 2**20)}
              for p in doc.get("processes") or []]
-    return {"freeMB": round(int(doc.get("freeKB") or 0) / 1024), "processes": procs, "self": os.getpid()}
+    return {"freeMB": round(free_kb / 1024), "processes": procs, "self": os.getpid()}
 
 
 def _ancestors(procs: list[dict], pid) -> set:
@@ -141,8 +158,15 @@ def main(argv=None) -> int:
         try:
             v = check(min_free_gb=a.min_free_gb, refuse_if=a.refuse_if)
         except Exception as ex:
-            print(f"REFUSED: {ex}")
-            run.refuse(f"snapshot failed: {ex}", 2)
+            reason = f"snapshot unavailable: {ex}"
+            print(f"REFUSED: {reason}")
+            if a.json:
+                Path(a.json).write_text(json.dumps({"idle": False, "unavailable": reason, "reasons": [reason],
+                                                    "freeMB": None, "processCount": None, "blocking": [],
+                                                    "minFreeGB": a.min_free_gb, "locksChecked": a.refuse_if},
+                                                   indent=1), encoding="utf-8")
+                run.artifact(a.json)
+            run.refuse(reason, 2)
             return 2
         run.advance()
         if a.json:
