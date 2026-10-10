@@ -92,9 +92,12 @@ class ShapeDiffers(unittest.TestCase):
 
 
 class Geometry(unittest.TestCase):
-    def test_xprm_bounds_are_full_extents(self):
-        # viewprobe's PlaneGeometry halves XPRM bounds; reading them as half extents doubles every plane
-        self.assertEqual(pa.shape(row(scale=2.0))["half"], [100.0, 1.0, 50.0])
+    def test_xprm_raw_bytes_are_half_extents(self):
+        # raw XPRM floats are half extents (Mutagen reads them x2 as full bounds; viewprobe halves those back)
+        half = [120.0, 1.0, 40.0]
+        prim = dict(row()["prim"], bounds=list(struct.unpack("<3f", struct.pack("<3f", *half))))
+        self.assertEqual(pa.shape(row(prim=prim))["half"], half)
+        self.assertEqual(pa.shape(row(prim=prim, scale=2.0))["half"], [240.0, 2.0, 80.0])
 
     def test_selftest_passes(self):
         self.assertEqual(pa.geometry_selftest(verbose=False), [])
