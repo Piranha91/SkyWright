@@ -62,12 +62,14 @@ def row(kind, a, b, form_key, label=None):
 
 
 def make_bundle(root: Path, arms, results, targets, patches=(), missing=(), unjudgeable=(), order=None,
-                scope_unmeasured=(), count_only=None, cells=(), plan_id="pred00000000"):
+                scope_unmeasured=(), count_only=None, cells=(), plan_id="pred00000000", tool_builds=None):
     """results: {(checkId, armId): [conflict rows]} -- an empty list is a completed check with no finding.
     missing: [(checkId, armId, status)]. unjudgeable: disposition unassessed.unjudgeablePopulations rows.
     order: {armId: {probe: perProbe counts}} -- the controller's order evaluation of that arm against the baseline.
     count_only: {(checkId, armId): n} -- a check that reported n findings with no conflict rows (no `Conflicts`).
-    cells: the first target's placed cells [{worldspace, x, y}] -- the locations every setup's load-order list covers."""
+    cells: the first target's placed cells [{worldspace, x, y}] -- the locations every setup's load-order list covers.
+    tool_builds: {(checkId, armId): dllSha256} -- the probe build a receipt records; every other receipt records one
+    shared build."""
     root.mkdir(parents=True, exist_ok=True)
     (root / "receipts").mkdir(exist_ok=True)
     (root / "evidence").mkdir(exist_ok=True)
@@ -88,7 +90,9 @@ def make_bundle(root: Path, arms, results, targets, patches=(), missing=(), unju
         receipt = {"receiptId": rid, "checkId": check_id, "armId": arm_id, "part": "arm", "schemaVersion": 1,
                    "exitCode": 0, "validation": {"accepted": True, "identityLimits": []},
                    "result": {"detector": "finding" if rows else "null", "findings": len(rows),
-                              "coverage": [{"Population": check_id, "Judged": 40, "Unjudgeable": {}}]}}
+                              "coverage": [{"Population": check_id, "Judged": 40, "Unjudgeable": {}}]},
+                   "consumed": {"tool": {"exe": PROBE[check_id], "dllSha256": (tool_builds or {}).get(
+                       (check_id, arm_id), "d" * 64), "coreDllSha256": "c" * 64}}}
         emit = {"Population": "placed references", "State": "baseline", "Conflicts": rows,
                 "Coverage": [{"Population": check_id, "Judged": 40, "Unjudgeable": {}}]}
         (root / "receipts" / f"{rid}.json").write_text(json.dumps(receipt), encoding="utf-8")
@@ -350,7 +354,8 @@ def patched_with_sibling(variant="same"):
     variant `same`: the sibling's setup with both mods is the patched bundle's setup without the patch, plugin for
     plugin and hash for hash, and measured the same rows there. `foreign`: the sibling's ModA has other bytes, so no
     sibling setup is the one without the patch. `disagrees`: same plugins, but on that setup the sibling measured
-    only two of the three clashes."""
+    only two of the three clashes. `build`: same plugins and rows, but the sibling ran the check with another probe
+    build on that setup."""
     patched = [row("CONTACT", MOD_B, MOD_A, "000803:" + MOD_A), row("CONTACT", PATCH, MOD_A, f"000E01:{PATCH}")]
     results = {(CONTACT, "baseline"): patched, (CONTACT, "without-patch"): UNPATCHED_ROWS}
     shas = {MOD_A: "a" * 64} if variant == "foreign" else None
@@ -362,7 +367,9 @@ def patched_with_sibling(variant="same"):
     s_results = {(CONTACT, "baseline"): s_base, (CONTACT, "dependency-only"): [],
                  (CONTACT, "plus-a"): [row("CONTACT", BASE, MOD_A, f"000A01:{MOD_A}")], (CONTACT, "plus-b"): []}
     return compile_and_render(PATCHED_ARMS, results, [MOD_A, MOD_B], want_index=True, patches=[PATCH],
-                              sibling=(s_arms, s_results, [MOD_A, MOD_B], {"plan_id": "sibl00000000"}))
+                              sibling=(s_arms, s_results, [MOD_A, MOD_B], {
+                                  "plan_id": "sibl00000000",
+                                  "tool_builds": {(CONTACT, "baseline"): "e" * 64} if variant == "build" else None}))
 
 
 def html_section(html, heading):
@@ -641,8 +648,8 @@ def main():
             return ok, f"raised {type(ex).__name__}: {ex}"
         return False, "a sibling with no setup matching the one without the patch was accepted"
 
-    def sibling_disagreement_unseparated():
-        plan, md, html, index = patched_with_sibling("disagrees")
+    def sibling_disagreement_unseparated(variant="disagrees"):
+        plan, md, html, index = patched_with_sibling(variant)
         p = reader(plan).get("prediction") or {}
         words = (priorities().get("reader") or {}).get("prediction") or {}
         why = (words.get("notSeparableWhy") or {}).get("siblingDisagrees")
@@ -685,6 +692,8 @@ def main():
             ("sibling-bundle/patched-report-attributes-from-the-unpatched-evaluation", sibling_attributes),
             ("sibling-bundle/a-sibling-without-the-setup-is-refused", sibling_foreign_refused),
             ("sibling-bundle/a-check-measured-differently-stays-unseparated", sibling_disagreement_unseparated),
+            ("sibling-bundle/a-check-run-by-another-probe-build-stays-unseparated",
+             lambda: sibling_disagreement_unseparated("build")),
             ("sibling-bundle/plan-takes-the-sibling-bundle-option", sibling_cli_flag),
             ("plain-language/the-measured-load-order-takes-its-article", measured_load_order_article),
             ("page-budget/a-shared-list-of-locations-is-printed-once", shared_scope_printed_once),
