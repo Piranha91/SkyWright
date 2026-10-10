@@ -281,10 +281,10 @@ def _norm(a):
 
 
 def shape(row):
-    """{kind, pos, rot, half} for an active plane version. XPRM bounds are FULL extents about the reference's
-    position; half = bounds x 0.5 x scale, as viewprobe's PlaneGeometry does (OcclusionPlanes.cs, `Bounds * 0.5f`)."""
+    """{kind, pos, rot, half} for an active plane version. The raw XPRM floats are HALF extents: Mutagen reads them x2
+    (PlacedPrimitive.cs, FillBinaryBoundsCustom) and viewprobe halves Mutagen's bounds back (`Bounds * 0.5f`)."""
     return {"kind": kind_of(row), "pos": row["pos"], "rot": row["rot"],
-            "half": [b * 0.5 * (row["scale"] or 1.0) for b in row["prim"]["bounds"]]}
+            "half": [b * (row["scale"] or 1.0) for b in row["prim"]["bounds"]]}
 
 
 def shape_polys(s):
