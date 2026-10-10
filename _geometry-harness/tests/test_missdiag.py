@@ -434,8 +434,77 @@ def test_s6_open_without_a_prediction_is_said():
     assert val.get("open") is None and any(str(x).strip() for x in val.get("missingFacts") or []), val
 
 
+# ---- P: a tracked producer of the prediction block, from a scorecard group's needs-both counts ----
+def _scorecard_row(group="G9"):
+    """One group row in the scorecard's shape: the two mods and, per lane, the rows on the unpatched order, how many
+    need both mods, and how many of those the patch acts on."""
+    return {"group": group, "modA": "ModA.esp", "modB": "ModB.esp",
+            "findingsByLane": {"contact": {"rows": 40, "needsBoth": 28, "needsBothActedOn": 25, "preFixBuild": True},
+                               "record": {"rows": 9, "needsBoth": 5, "needsBothActedOn": 2,
+                                          "unit": "distinct (FormKey, field path)"},
+                               "seam": {"rows": 3, "needsBoth": 0, "needsBothActedOn": 0}}}
+
+
+def test_p1_prediction_from_a_scorecard_group_row():
+    p = M.prediction_from_scorecard(_scorecard_row())
+    assert p.get("mods") == ["ModA.esp", "ModB.esp"], p
+    got = [(c.get("kind"), c.get("needsBoth"), c.get("actedOnByPatch")) for c in p.get("clashes") or []]
+    assert got == [("contact", 28, 25), ("record", 5, 2), ("seam", 0, 0)], got
+    rec = next(c for c in p["clashes"] if c["kind"] == "record")
+    assert rec.get("unit") == "distinct (FormKey, field path)", rec
+    s = M.run(_summary_doc(p)).get("summary") or {}
+    sec = {x.get("id"): x for x in s.get("sections") or []}
+    assert sec["prediction"].get("status") == "found" and sec["prediction"].get("total") == 33, sec["prediction"]
+    assert sec["validation"].get("open") == 6, sec["validation"]
+
+
+def test_p2_a_row_without_needs_both_counts_is_refused():
+    for bad, field in (({k: v for k, v in _scorecard_row().items() if k != "findingsByLane"}, "findingsByLane"),
+                       ({**_scorecard_row(), "findingsByLane": {"contact": {"rows": 4}}}, "needsBoth"),
+                       ({k: v for k, v in _scorecard_row().items() if k != "modB"}, "modB")):
+        try:
+            M.prediction_from_scorecard(bad)
+        except ValueError as e:
+            assert field in str(e) and str(e).strip().endswith("."), str(e)
+            continue
+        raise AssertionError(f"a row without {field} gave a prediction instead of a refusal")
+
+
+def _cli(tmp, doc, scorecard, *flags):
+    import json
+    inp, out, sc = (os.path.join(tmp, n) for n in ("in.json", "out.json", "scorecard.json"))
+    with open(inp, "w", encoding="utf-8") as f:
+        json.dump(doc, f)
+    with open(sc, "w", encoding="utf-8") as f:
+        json.dump(scorecard, f)
+    os.environ["HOUSECARL_RUNLOG_DIR"] = os.path.join(tmp, "runlog")
+    code = M.main(["missdiag.py", inp, out] + [sc if x == "{sc}" else x for x in flags])
+    res = None
+    if os.path.exists(out):
+        with open(out, encoding="utf-8") as f:
+            res = json.load(f)
+    return code, res
+
+
+def test_p3_command_line_reads_the_prediction_from_a_scorecard():
+    import tempfile
+    sc = {"groups": [_scorecard_row("G8"), _scorecard_row("G9")]}
+    with tempfile.TemporaryDirectory() as tmp:
+        code, res = _cli(tmp, _summary_doc(), sc, "--scorecard", "{sc}", "--group", "G9")
+        assert code == 0 and res is not None, code
+        pred = next(x for x in res["summary"]["sections"] if x["id"] == "prediction")
+        assert pred.get("status") == "found" and pred.get("total") == 33, pred
+    with tempfile.TemporaryDirectory() as tmp:
+        code, res = _cli(tmp, _summary_doc(), sc, "--scorecard", "{sc}", "--group", "G7")
+        assert code == 2 and res is None, (code, res)
+    with tempfile.TemporaryDirectory() as tmp:
+        own = M.prediction_from_scorecard(_scorecard_row())
+        code, res = _cli(tmp, _summary_doc(own), sc, "--scorecard", "{sc}", "--group", "G9")
+        assert code == 2 and res is None, (code, res)
+
+
 def main():
-    tests = [(n, f) for n, f in sorted(globals().items()) if n.startswith("test_") and callable(f)]
+    tests =[(n, f) for n, f in sorted(globals().items()) if n.startswith("test_") and callable(f)]
     for n, f in tests:
         check(n, f)
     print(f"\n{len(PASSED)} passed, {len(FAILURES)} failed")
