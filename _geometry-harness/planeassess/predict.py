@@ -292,10 +292,11 @@ def answer_key(finding, p_facts, p_active, p_edits, evidence=None):
                 per[gaze] = ("refused", want, set())
                 continue
             still, maybe = set(), set()
-            for opl in pf["planes"].values():
+            for ofk, opl in pf["planes"].items():
                 for r in opl.get("rows", []):
                     k = _key(r)
-                    if k in want:
+                    # a plane other than the predicted one that already hid the shape in u is its own finding
+                    if k in want and (ofk == plane or ofk not in v["cullers"].get(k, [])):
                         if r["inBandLo"] > 0:
                             still.add(k)
                         elif r["inBandHi"] > 0:
