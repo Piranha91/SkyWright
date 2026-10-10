@@ -151,6 +151,17 @@ class Reader(unittest.TestCase):
 
 
 
+class FinishedChunks(unittest.TestCase):
+    def test_a_chunk_without_a_finished_ledger_row_is_not_read(self):
+        with tempfile.TemporaryDirectory() as d:
+            for c in ("c1", "c2", "c3"):
+                (Path(d) / c).mkdir()
+            (Path(d) / "ledger.jsonl").write_text(
+                json.dumps({"chunk": "c1", "shots": ["a"], "exitCode": 0, "stopped": None}) + "\n" +
+                json.dumps({"chunk": "c2", "shots": ["b"], "exitCode": None, "stopped": "cap"}) + "\n", encoding="utf-8")
+            self.assertEqual(pa.finished_chunks(d), {"c1"})
+
+
 class Resume(unittest.TestCase):
     IDENT = {"viewprobeDll": "v1", "coreDll": "c1", "rule": "r1", "order": "o1", "arm": "u"}
 
