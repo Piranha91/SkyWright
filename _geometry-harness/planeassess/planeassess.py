@@ -1319,6 +1319,108 @@ def verdicts_step(g, out, scores_root):
     return doc
 
 
+# ------------------------------------------------------------------ predictive mode (predict.py)
+def _arm_order(g, arm, order_file=None):
+    if order_file:
+        return json.loads(Path(order_file).read_text(encoding="utf-8"))["Plugins"]
+    return order_plugins(g, arm)
+
+
+def rescore_step(g, arm, renders, out, order_file=None, gzip_raw=False):
+    """Every plane of every planes report under `renders` (raw or gzipped) -> <out>/<view label>.json (predict.rescore_view
+    with the arm's plane winners and the mods' drawn content). A view already re-scored is skipped. With `gzip_raw`, a raw
+    report is gzipped after its facts are written; masks are never deleted here."""
+    import gzip
+    import predict as X
+    own = X.record_owners(g, _arm_order(g, arm, order_file))
+    own_u = X.record_owners(g, order_plugins(g, "u")) if arm != "u" else own
+    out = Path(out)
+    out.mkdir(parents=True, exist_ok=True)
+    reps = []
+    for r in renders:
+        reps += sorted(Path(r).glob("*/*-fp-planes.json")) + sorted(Path(r).glob("*/*-fp-planes.json.gz"))
+    done, seen = 0, set()
+    for rep in reps:
+        zipped = rep.suffix == ".gz"
+        raw = gzip.decompress(rep.read_bytes()) if zipped else rep.read_bytes()
+        d = json.loads(raw.decode("utf-8"))
+        label = d.get("viewLabel")
+        dest = out / ("%s.json" % label)
+        if label in seen or dest.exists():
+            seen.add(label)
+            continue
+        seen.add(label)
+        facts = X.rescore_view(d, own["winner"], own_u["content"], own["mods"])
+        facts.update({"arm": arm, "report": str(rep) + ("" if zipped else ".gz" if gzip_raw else ""),
+                      "reportSha256": hashlib.sha256(raw).hexdigest(),
+                      "basis": POSE if str(label).endswith("-pose") else "route"})
+        if gzip_raw and not zipped:
+            with gzip.open(str(rep) + ".gz", "wb", compresslevel=6) as fh:
+                fh.write(raw)
+            rep.unlink()
+        dest.write_text(json.dumps(facts), encoding="utf-8")
+        done += 1
+        print("rescored", label, flush=True)
+    return done
+
+
+def _load_facts(dirs):
+    out = {}
+    for dd in dirs or []:
+        for f in sorted(Path(dd).glob("*.json")):
+            x = json.loads(f.read_text(encoding="utf-8"))
+            out.setdefault(x.get("label") or f.stem, x)
+    return out
+
+
+def predict_step(g, facts_dirs, direction, out, without_dirs=None):
+    """Predicted findings for one direction (F: the content mod A is added; R: the plane mod B is added) from u facts,
+    with the render without the new mod where its override of a master plane needs it."""
+    import predict as X
+    own = X.record_owners(g, order_plugins(g, "u"))
+    facts = _load_facts(facts_dirs)
+    without = _load_facts(without_dirs) if without_dirs else None
+    new = "A" if direction == "F" else "B"
+    views = [{"gaze": k, "basis": v.get("basis", "route"), "facts": v} for k, v in sorted(facts.items())]
+    fs = X.findings(views, direction, own["overridesMaster"][new] if direction == "R" else (), without)
+    doc = {"schema": "planeassess/predict/1", "group": g["name"], "direction": direction, "newMod": g["owners"][new],
+           "views": len(views), "findings": fs,
+           "byClassStatus": _count(fs, lambda f: (f["class"], f["status"]))}
+    Path(out).write_text(json.dumps(doc, indent=1), encoding="utf-8")
+    print(json.dumps(doc["byClassStatus"], indent=1))
+    return doc
+
+
+def answerkey_step(g, findings_file, p_dirs, patch_json, out, evidence_file=None):
+    """Each shown finding read against the patched order (p facts where rendered, the patch's records elsewhere), and the
+    patch's edits to planes the content mod does not own that no shown finding explains (blind spots)."""
+    import predict as X
+    doc = json.loads(Path(findings_file).read_text(encoding="utf-8"))
+    p_own = X.record_owners(g, order_plugins(g, "p"))
+    pfacts = _load_facts(p_dirs)
+    recs = json.loads(Path(patch_json).read_text(encoding="utf-8"))["records"]
+    edits = {r["formKey"]: r["edits"] for r in recs}
+    evidence = json.loads(Path(evidence_file).read_text(encoding="utf-8")) if evidence_file else {}
+    rows = []
+    for f in doc["findings"]:
+        if f["class"] != "shown" or f["status"] not in ("will hide", "possible only: straddles the band, mask thinned"):
+            continue
+        k = X.answer_key(f, {gz: pfacts.get(gz) for gz in f["views"]}, p_active=p_own["active"], p_edits=edits,
+                         evidence=evidence)
+        rows.append({"plane": f["plane"], "status": f["status"], "statement": f["statement"],
+                     "patchEdits": edits.get(f["plane"], []), **k})
+    a_names = g["owners"]["A"]
+    non_a = {r["formKey"]: r["edits"] for r in recs if r.get("priorOwner") and r["priorOwner"] not in a_names
+             and set(r["edits"]) & set(X.SHAPE_KINDS)}
+    shown = {f["plane"] for f in doc["findings"] if f["class"] == "shown"}
+    out_doc = {"schema": "planeassess/answerkey/1", "group": g["name"], "direction": doc["direction"], "rows": rows,
+               "byOutcome": _count(rows, lambda r: (r["outcome"],)),
+               "unexplainedEdits": X.blind_spots(non_a, shown, evidence)}
+    Path(out).write_text(json.dumps(out_doc, indent=1), encoding="utf-8")
+    print(json.dumps(out_doc["byOutcome"], indent=1))
+    return out_doc
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -1382,7 +1484,37 @@ def main(argv=None):
     a.add_argument("--group", required=True, help="group definition JSON")
     a.add_argument("--out", required=True, help="folder holding patch.json; planes.json is written here")
     a.add_argument("--scores", required=True, help="folder holding the u and p score folders")
+    a = sub.add_parser("rescore", help="predictive: every plane of every planes report in render folders -> per-view facts")
+    a.add_argument("--group", required=True, help="group definition JSON")
+    a.add_argument("--arm", required=True, help="u, p, or a label for --order (e.g. plusa)")
+    a.add_argument("--order", help="order JSON for an arm other than u and p")
+    a.add_argument("--renders", required=True, action="append", help="render output folder (repeat)")
+    a.add_argument("--out", required=True, help="folder for one facts file per view")
+    a.add_argument("--gzip", action="store_true", help="gzip each raw report after its facts are written (masks kept)")
+    a = sub.add_parser("predict", help="predictive: findings for a mod being added, from u facts")
+    a.add_argument("--group", required=True, help="group definition JSON")
+    a.add_argument("--facts", required=True, action="append", help="u facts folder (repeat)")
+    a.add_argument("--direction", required=True, choices=["F", "R"], help="F: the content mod is added; R: the plane mod")
+    a.add_argument("--without", action="append", help="facts folder of the order without the new mod (repeat)")
+    a.add_argument("--out", required=True, help="findings JSON")
+    a = sub.add_parser("answerkey", help="predictive: the shown findings read against an existing patch")
+    a.add_argument("--group", required=True, help="group definition JSON")
+    a.add_argument("--findings", required=True, help="findings JSON from predict")
+    a.add_argument("--p-facts", action="append", default=[], help="p facts folder (repeat)")
+    a.add_argument("--patch-json", required=True, help="patch.json from the patch step")
+    a.add_argument("--evidence", help="JSON {plane formKey: evidence text} (engine observations, outside lists)")
+    a.add_argument("--out", required=True, help="answer-key JSON")
     args = ap.parse_args(argv)
+    if args.cmd in ("rescore", "predict", "answerkey"):
+        g = load_group(args.group)
+        with runlog.Run("planeassess-" + args.cmd, stage_source="single-stage"):
+            if args.cmd == "rescore":
+                print("rescored", rescore_step(g, args.arm, args.renders, args.out, args.order, args.gzip))
+            elif args.cmd == "predict":
+                predict_step(g, args.facts, args.direction, args.out, args.without)
+            else:
+                answerkey_step(g, args.findings, args.p_facts, args.patch_json, args.out, args.evidence)
+        return 0
     if args.cmd == "selftest":
         with runlog.Run("planeassess-selftest", stage_source="single-stage"):
             return 1 if geometry_selftest() else 0

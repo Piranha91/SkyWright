@@ -169,7 +169,8 @@ class AnswerKey(unittest.TestCase):
                          "false alarm")
 
     def test_resolution_is_read_shape_by_shape(self):
-        # p hides a different shape with the same px: still open, never a hit by equal or smaller totals (sabotage S9)
+        # read shape by shape (sabotage S9): p hiding a different shape with the same px leaves the predicted shape drawn
+        # (hit); p hiding the predicted shape with fewer px leaves it hidden (open), however the totals compare
         p = {"g1": views(("g1", {P: ("B", [("9:New.esp", "A", 30, 30, None)], None)}))[0]["facts"]}
         self.assertEqual(X.answer_key(self.finding(), p, {P}, {P: ["MOVE"]})["outcome"], "hit")
         p = {"g1": views(("g1", {P: ("B", [("1:New.esp", "A", 5, 5, None)], None)}))[0]["facts"]}
