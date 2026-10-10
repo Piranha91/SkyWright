@@ -32,10 +32,12 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 import os as _os_settings, tempfile as _tf_settings  # noqa: E402
-# The evaluation tools read the saved evaluation settings; these known answers use the built-in defaults, never
-# the user's own file (a path nothing writes).
-_os_settings.environ["HOUSECARL_EVAL_SETTINGS"] = str(Path(_tf_settings.gettempdir()) / "hc-tests-no-eval-settings"
-                                                   / "houseCARL.evaluation.json")
+# The evaluation tools read the saved evaluation settings. These known answers build their bundles with evalrun and
+# judge the load-time state, so they run on a private Standard-depth file, never the user's own (Deep is covered by
+# test_stategen.py).
+_settings_file = Path(_tf_settings.mkdtemp(prefix="hc-evalreport-settings-")) / "houseCARL.evaluation.json"
+_settings_file.write_text('{"schemaVersion": 1, "evaluation": {"depth": "standard"}}', encoding="utf-8")
+_os_settings.environ["HOUSECARL_EVAL_SETTINGS"] = str(_settings_file)
 HARNESS = HERE.parent
 FIXT = HERE / "fixtures" / "evalreport"
 EXPECTED = FIXT / "expected"

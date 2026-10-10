@@ -419,6 +419,9 @@ def generate(root: Path, only: str | None = None) -> dict:
         print(f"  evalrun under test: {T.EVALRUN}")
     os.environ.setdefault("HOUSECARL_RUNLOG_DIR", str(root / "runlog"))
     os.environ["PYTHONIOENCODING"] = "utf-8"
+    # These bundles are load-time fixtures: plan them at Standard depth explicitly, whatever the evaluation's default
+    # depth or the user's saved settings say.
+    T.pin_standard_settings(root)
     T.use_conflictdiff(root)                  # a no-op when the calling suite already chose this run's conflictdiff
     if not T.DIFF_EXE.exists():
         raise SystemExit(f"conflictdiff is not built at {T.DIFF_EXE} - build it or set "
