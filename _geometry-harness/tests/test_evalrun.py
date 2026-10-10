@@ -6277,6 +6277,120 @@ CASES["case-44"] = case_44
 CASES["case-45"] = case_45
 
 
+def _suite_copy(root: Path) -> Path:
+    """A minimal checkout copy: this suite plus conflictdiff's project and every compile input its csproj links.
+    Returns the copy's `_geometry-harness`."""
+    import xml.etree.ElementTree as ET
+    h = root / "_geometry-harness"
+    (h / "tests").mkdir(parents=True)
+    shutil.copy2(Path(__file__).resolve(), h / "tests" / "test_evalrun.py")
+    proj, dst = HARNESS / "conflictdiff", h / "conflictdiff"
+    dst.mkdir()
+    for f in [proj / "conflictdiff.csproj"] + sorted(proj.glob("*.cs")):
+        shutil.copy2(f, dst / f.name)
+    for item in ET.parse(proj / "conflictdiff.csproj").getroot().iter("Compile"):
+        rel = item.get("Include").replace("\\", "/")
+        out = (dst / rel).resolve()
+        out.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2((proj / rel).resolve(), out)
+    if (HARNESS.parent / "nuget.config").exists():
+        shutil.copy2(HARNESS.parent / "nuget.config", root / "nuget.config")
+    return h
+
+
+def case_46(tmp):
+    """Lane C (2026-10-10, task 2026-10-09-evalreport-r4-overlap-fixture-failures, decision B2). The suite never
+    tests a conflictdiff older than its own source. In a copy of the checkout with a planted stale conflictdiff on
+    the harness path: with no HOUSECARL_EVALRUN_TEST_HARNESS the suite builds conflictdiff from the copy's source
+    for this run and says so, never the plant; an explicit HOUSECARL_EVALRUN_TEST_HARNESS is honoured and labelled
+    as explicit; and when the build fails the suite refuses in one sentence instead of falling back to the plant."""
+    import re
+    from datetime import datetime
+    case = "case-46-suite-builds-conflictdiff"
+    root = tmp / case
+    h = _suite_copy(root / "checkout")
+    exe_name = "conflictdiff.exe" if os.name == "nt" else "conflictdiff"
+    planted = h / "conflictdiff" / "bin" / "Release" / "net9.0"
+    planted.mkdir(parents=True)
+    for f in (exe_name, "conflictdiff.dll"):
+        (planted / f).write_bytes(b"planted stale conflictdiff\n")
+        os.utime(planted / f, (946684800, 946684800))                        # 2000-01-01, older than any source
+    plant_sha = hashlib.sha256(b"planted stale conflictdiff\n").hexdigest()
+    sources = [p for p in (root / "checkout").rglob("*") if p.suffix in (".cs", ".csproj") and "bin" not in p.parts]
+    newest_source = max(p.stat().st_mtime for p in sources)
+    csproj = h / "conflictdiff" / "conflictdiff.csproj"
+    # The suite's own main(), run from the copy; only fixture generation is stubbed (it is not what is under test).
+    stub = root / "stub-fixtures"
+    stub.mkdir()
+    (stub / "make_fixtures.py").write_text("import sys\nsys.exit(0)\n", encoding="utf-8")
+    driver = root / "driver.py"
+    driver.write_text("import sys\nfrom pathlib import Path\nsys.path.insert(0, sys.argv[1])\n"
+                      "import test_evalrun as T\nT.FIXT = Path(sys.argv[2])\n"
+                      "sys.argv = ['test_evalrun.py', 'zz-no-such-case']\nraise SystemExit(T.main())\n",
+                      encoding="utf-8")
+
+    def suite(explicit: Path | None):
+        env = {k: v for k, v in os.environ.items() if k != "HOUSECARL_EVALRUN_TEST_HARNESS"}
+        if explicit is not None:
+            env["HOUSECARL_EVALRUN_TEST_HARNESS"] = str(explicit)
+        env["PYTHONIOENCODING"] = "utf-8"
+        r = subprocess.run([sys.executable, str(driver), str(h / "tests"), str(stub)], capture_output=True,
+                           text=True, encoding="utf-8", errors="replace", env=env, timeout=900)
+        out = r.stdout + r.stderr
+        rows = {}
+        for line in out.splitlines():
+            m = re.match(r"\s*conflictdiff: (.+?)  sha256 ([0-9a-f]{64})  mtime (.+)$", line)
+            if m:
+                rows[Path(m.group(1)).name.lower()] = (Path(m.group(1)), m.group(2), m.group(3).strip())
+        return r.returncode, out, rows
+
+    # 1. No explicit harness: this run's own build from the copy's source, labelled, never the plant.
+    code, out, rows = suite(None)
+    exe, dll = rows.get(exe_name), rows.get("conflictdiff.dll")
+    check("no case matches" in out,
+          f"{case}: premise - with no explicit harness the suite reached its cases (exit {code})"
+          + ("" if "no case matches" in out else f": {out[-400:]!r}"))
+    check(exe is not None and exe[0] != planted / exe_name and exe[1] != plant_sha,
+          f"{case}: with no explicit harness the suite does not use the stale conflictdiff on the harness path "
+          f"(header names {exe[0] if exe else None})")
+    check(exe is not None and planted not in exe[0].parents and h not in exe[0].parents,
+          f"{case}: the conflictdiff used was built outside the checkout's bin folders ({exe[0] if exe else None})")
+    when = None
+    if dll:
+        try:
+            when = datetime.strptime(dll[2], "%Y-%m-%d %H:%M:%S %z").timestamp()
+        except ValueError:
+            when = None
+    check(when is not None and when >= int(newest_source),
+          f"{case}: the conflictdiff used is not older than its newest compile input "
+          f"({dll[2] if dll else None} vs source {datetime.fromtimestamp(newest_source)})")
+    check(f"conflictdiff source: built from {csproj}" in out,
+          f"{case}: the header says conflictdiff was built from this checkout's {csproj}")
+
+    # 2. An explicit harness is honoured as given (reproducing an old run) and labelled as such.
+    code, out, rows = suite(h)
+    exe = rows.get(exe_name)
+    check(exe is not None and exe[0] == planted / exe_name and exe[1] == plant_sha,
+          f"{case}: an explicit HOUSECARL_EVALRUN_TEST_HARNESS is used as given (header names "
+          f"{exe[0] if exe else None})")
+    check(f"conflictdiff source: explicit harness HOUSECARL_EVALRUN_TEST_HARNESS={h}" in out,
+          f"{case}: the header labels the explicit harness and says it was not built from this checkout")
+
+    # 3. The build fails: one-sentence refusal, no fallback to the plant, no case runs.
+    prog = h / "conflictdiff" / "Program.cs"
+    prog.write_text(prog.read_text(encoding="utf-8") + "\nthis line is not C#\n", encoding="utf-8")
+    code, out, rows = suite(None)
+    refusals = [ln for ln in out.splitlines() if "conflictdiff did not build" in ln]
+    check(code == 1, f"{case}: a failed conflictdiff build fails the suite (exit {code})")
+    check(len(refusals) == 1,
+          f"{case}: a failed build is refused in one sentence naming conflictdiff's build ({refusals or out[-400:]!r})"[:600])
+    check(exe_name not in rows and "no case matches" not in out,
+          f"{case}: after a failed build the suite neither falls back to the planted conflictdiff nor runs a case")
+
+
+CASES["case-46"] = case_46
+
+
 def main() -> int:
     want = sys.argv[1] if len(sys.argv) > 1 else ""
     tmp = Path(tempfile.mkdtemp(prefix="hc-evalrun-test-"))
