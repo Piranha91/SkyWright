@@ -91,6 +91,11 @@ def sha(p):
     return hashlib.sha256(Path(p).read_bytes()).hexdigest()
 
 
+def launched(rc) -> bool:
+    """Whether a receipt records a launched child: receipts store the argv as `argvShape`, never as `argv`."""
+    return bool(rc.get("argvShape"))
+
+
 def plan_check(pl, cid):
     return next((c for c in pl["checks"] if c["checkId"] == cid), None)
 
@@ -173,6 +178,7 @@ def imp(run, manifest):
 
 def main():
     tmp = Path(tempfile.mkdtemp(prefix="evallive-"))
+    T.pin_standard_settings(tmp)
     try:
         try:
             T.use_conflictdiff(tmp)
@@ -218,7 +224,12 @@ def main():
         check(rows and all(e["status"] == "skipped-user" for e in rows),
               "K14: the ledger accounts it skipped-user (opt-in, not requested)")
         rcs = [load(p) for p in (live / "receipts").glob(f"{CID}*.json")]
-        check(all(not rc.get("argv") for rc in rcs), "K14: no child process was launched for it")
+        check(bool(rcs) and not any(launched(rc) for rc in rcs),
+              "K14: no child process was launched for it (no receipt records an argvShape)")
+        planted = dict(rcs[0]) if rcs else {}
+        planted["argvShape"] = ["<abs>/stateprobe.exe", "--emit", "<RUN>/outputs/planted.json"]
+        check(launched(planted) and not planted.get("argv"),
+              "K14 (planted launch): a receipt recording a launch is read as one, where the old argv read saw none")
 
         # K15: opted in without a receipt keeps the evaluation incomplete ---------------------------------------
         opt = tmp / "opted"

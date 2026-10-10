@@ -6430,9 +6430,20 @@ def case_46(tmp):
 CASES["case-46"] = case_46
 
 
+def pin_standard_settings(tmp: Path) -> None:
+    """These known answers judge the load-time state: point every child at a private Standard-depth settings file,
+    so the evaluation's Deep default and the user's own settings file never reach them (tests/test_stategen.py
+    covers Deep)."""
+    f = tmp / "evaluation-settings" / "houseCARL.evaluation.json"
+    f.parent.mkdir(parents=True, exist_ok=True)
+    f.write_text(json.dumps({"schemaVersion": 1, "evaluation": {"depth": "standard"}}), encoding="utf-8")
+    os.environ["HOUSECARL_EVAL_SETTINGS"] = str(f)
+
+
 def main() -> int:
     want = sys.argv[1] if len(sys.argv) > 1 else ""
     tmp = Path(tempfile.mkdtemp(prefix="hc-evalrun-test-"))
+    pin_standard_settings(tmp)
     # Every path-bearing fixture is generated into this run's own directory: the plugin files a receipt
     # hashes, the scope that names them, the candidates and the scenarios, and the registry trim derived
     # from the shipped registry. Nothing under the checkout is written, so the suite leaves no tracked

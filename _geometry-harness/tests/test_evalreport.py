@@ -31,6 +31,11 @@ import time
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
+import os as _os_settings, tempfile as _tf_settings  # noqa: E402
+# The evaluation tools read the saved evaluation settings; these known answers use the built-in defaults, never
+# the user's own file (a path nothing writes).
+_os_settings.environ["HOUSECARL_EVAL_SETTINGS"] = str(Path(_tf_settings.gettempdir()) / "hc-tests-no-eval-settings"
+                                                   / "houseCARL.evaluation.json")
 HARNESS = HERE.parent
 FIXT = HERE / "fixtures" / "evalreport"
 EXPECTED = FIXT / "expected"

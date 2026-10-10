@@ -11,6 +11,11 @@ import unittest
 from unittest.mock import Mock, patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+import os as _os_settings, tempfile as _tf_settings  # noqa: E402
+# The evaluation tools read the saved evaluation settings; these known answers use the built-in defaults, never
+# the user's own file (a path nothing writes).
+_os_settings.environ["HOUSECARL_EVAL_SETTINGS"] = str(Path(_tf_settings.gettempdir()) / "hc-tests-no-eval-settings"
+                                                   / "houseCARL.evaluation.json")
 import evalspeech
 
 
