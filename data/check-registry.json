@@ -727,6 +727,7 @@
           "{emit}"
         ],
         "statesFlag": "--state",
+        "statesFileFlag": "--states-file",
         "reverse": false,
         "output": "conflict-file",
         "commonFlags": true
@@ -734,7 +735,7 @@
       "evidence": {
         "strength": "calibrated-inference",
         "claim": "STATE CONDITIONAL",
-        "limits": "Only the states the plan SELECTED are evaluated; every other state the census named is unexplored and listed as such (PLAN D7's `unassessed`). STATE-OVERLAP is explicitly unmeasured and withheld until strict placed render triangles are available in this evaluator; diagnostic boxes cannot establish overlap findings. State contact and route roles remain available under their separate geometry contracts. The changed measurement identity refuses comparison against legacy box-based state emits. stateprobe has no --base, so there is no reverse arm and no physical differential credit for a state row. The Bethesda floor is withheld."
+        "limits": "A Standard plan evaluates only the states it selected (none beyond the load-time state by default); a Deep plan evaluates every state stategen.py generates from each arm's own census (every switch alone and every quest stage's joint flip, handed over as --states-file), and lists what the generator could not express (a looping or unresolved chain, an ambiguous stage member, disabled singletons, player-parented references, unreadable plugins, and combinations beyond one stage) under `unassessed`. STATE-OVERLAP is explicitly unmeasured and withheld until strict placed render triangles are available in this evaluator; diagnostic boxes cannot establish overlap findings. State contact and route roles remain available under their separate geometry contracts. The changed measurement identity refuses comparison against legacy box-based state emits. stateprobe has no --base, so there is no reverse arm and no physical differential credit for a state row. The Bethesda floor is withheld."
       },
       "manualDecisionAllowed": false
     },

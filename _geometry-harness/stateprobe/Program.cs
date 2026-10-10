@@ -19,9 +19,10 @@ using HousecarlCore.Progress;
 // index, meshes through the VFS (contactprobe's geometry resolver), the winning navmesh and actor band per cell for
 // the route oracle (blockprobe's obstacle step), the tallies, the listings, --json and --emit.
 //
-// usage: stateprobe [--state SPEC]* [--all] [--cell CELL]* [--switch-map FILE] [--list N] [--json FILE] [--emit FILE]
+// usage: stateprobe [--state SPEC]* [--states-file F] [--all] [--cell CELL]* [--switch-map FILE] [--list N] [--json FILE] [--emit FILE]
 //                   [--route on|off] [--enable X.esp]* [--disable X.esp]* [--instance DIR] [--game DIR] [--profile NAME]
 //   --state SPEC     a state to evaluate: <switch>[,<switch>…] by editor id or FormKey, or stage:<quest>:<n> (needs --switch-map)
+//   --states-file F  one --state SPEC per line (the Deep evaluation's list); every line is parsed as --state is
 //   --all            every switch alone, plus every joint flip in --switch-map when given
 //   --cell CELL      every switch with a set member in the cell (editor id prefix or FormKey) — the per-contested-cell mode
 //   --switch-map     switchprobe --json output: the joint flips
@@ -68,6 +69,14 @@ for (int i = 0; i < args.Length; i++)
     else if (args[i] == "--emit" && i + 1 < args.Length) emitPath = args[++i];
     else if (args[i] == "--switch-map" && i + 1 < args.Length) mapPath = args[++i];
     else if (args[i] == "--state" && i + 1 < args.Length) stateSpecs.Add(args[++i]);
+    else if (args[i] == "--states-file" && i + 1 < args.Length)
+    {
+        // One --state SPEC per line (a Deep evaluation's list does not fit a command line); blank lines skipped.
+        var sf = args[++i];
+        if (!File.Exists(sf)) { Console.Error.WriteLine($"--states-file {sf}: no such file"); return 2; }
+        foreach (var line in File.ReadAllLines(sf)) if (line.Trim() is { Length: > 0 } s) stateSpecs.Add(s);
+        if (stateSpecs.Count == 0) { Console.Error.WriteLine($"--states-file {sf}: the file names no state"); return 2; }
+    }
     else if (args[i] == "--cell" && i + 1 < args.Length) cellFilters.Add(args[++i]);
     else if (args[i] == "--all") all = true;
     else if (args[i] == "--route" && i + 1 < args.Length) routeOn = args[++i].ToLowerInvariant() switch { "on" => true, "off" => false, _ => throw new ArgumentException("--route takes on|off") };

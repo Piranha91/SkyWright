@@ -59,6 +59,8 @@ from runlog import Run, Runner  # noqa: E402
 
 sys.path.insert(0, str(HERE))
 import evalregistry  # noqa: E402
+import evalsettings  # noqa: E402
+import stategen  # noqa: E402
 
 #: Schema 2 is the evidence-chain schema: the plan freezes a per-arm REQUESTED identity, receipts record
 #: their comparison inputs, and finalize/bundle/verify walk the receipt-to-evidence chain. A schema-1
@@ -135,6 +137,7 @@ TERMINAL_OK = ("completed", "reused")
 IMPORT_ROW_STATUSES = ("mcp-only", "live-import")
 #: The plan row status of an opt-in check the caller did not ask for (`plan --opt-in`). Never blocking, always listed.
 NOT_OPTED_IN = "not-opted-in"
+LIVE_CHECK_ID = "runtime.state-switch-flip"
 CLAIMS = ("no-findings-in-completed-checks", "findings", "incomplete")
 ARM_KINDS = ("baseline", "candidate", "supplied-combination")
 PART_NAMES = (None, "arm", "reverse", "diff")
@@ -670,6 +673,23 @@ def cmd_plan(a) -> int:
     except Exception as ex:  # a bad registry is a refused input, never a narrowed checklist
         return refuse(str(ex))
 
+    # The saved evaluation settings (evalsettings.py): a flag beats the file, the file beats the built-in default.
+    # The effective values are frozen into the plan; `run`/`resume` read the plan, never the file.
+    flags = {}
+    if a.depth:
+        flags["evaluation.depth"] = a.depth
+    if a.no_reverse:
+        flags["evaluation.reverseComparison"] = False
+    if a.budget_minutes is not None:
+        flags["evaluation.budgetMinutes"] = a.budget_minutes
+    try:
+        settings = evalsettings.load(a.settings, flags)
+    except evalsettings.SettingsError as ex:
+        return refuse(str(ex))
+    a.no_reverse = settings.value("evaluation.reverseComparison") is False
+    a.budget_minutes = settings.value("evaluation.budgetMinutes")
+    live_choice = settings.value("evaluation.liveSwitchCheck")
+
     scope = load_json(scope_path) if scope_path else None
     if scope_path and scope is None:
         return refuse(f"--scope {scope_path}: not readable as JSON. Applicability would be unknown "
@@ -731,7 +751,14 @@ def cmd_plan(a) -> int:
                        "sha256": o.get("sha256", o.get("Sha256"))}
                       for o in (cfg.get("overlays", cfg.get("Overlays", [])) or [])]
 
-    states = [s.strip() for s in (a.states or "baseline").split(",") if s.strip()] or ["baseline"]
+    # Standard judges the load-time state only; Deep judges every switched state each arm's own census yields
+    # (stategen.py, at run time, because the census runs inside the evaluation); --states names states by hand.
+    if a.states is not None:
+        states = [s.strip() for s in a.states.split(",") if s.strip()] or ["baseline"]
+        depth = "explicit"
+    else:
+        states = ["baseline"]
+        depth = settings.value("evaluation.depth")
 
     arms = []
 
@@ -865,6 +892,12 @@ def cmd_plan(a) -> int:
         if not chk.get("optIn"):
             return refuse(f"--opt-in {tok!r}: that check is not opt-in (it is planned by default)")
         opted.add(tok)
+    opt_in_source = {c: "flag" for c in opted}
+    if live_choice == "always":
+        live = next((c for c in reg.checks if c["id"] == LIVE_CHECK_ID and c.get("optIn")), None)
+        if live is not None and LIVE_CHECK_ID not in opted:
+            opted.add(LIVE_CHECK_ID)
+            opt_in_source[LIVE_CHECK_ID] = "settings: evaluation.liveSwitchCheck always"
     excluded = {}
     for spec in (a.exclude or []):
         cid, _, reason = spec.partition("=")
@@ -992,6 +1025,7 @@ def cmd_plan(a) -> int:
             "status": base_status,
         })
 
+    census_checks = sorted(c["checkId"] for c in checks if (c["inputs"] or {}).get("states") == "selected")
     states_not_explored = []
     for c in checks:
         if (c["inputs"] or {}).get("states") == "all":
@@ -1012,6 +1046,8 @@ def cmd_plan(a) -> int:
             "evalregistry.py": sha256_file(HERE / "evalregistry.py"),
             "ordersweep.py": sha256_file(HERE / "ordersweep.py"),
             "runlog.py": sha256_file(HERE.parent / "scripts" / "runlog.py"),
+            "stategen.py": sha256_file(HERE / "stategen.py"),
+            "evalsettings.py": sha256_file(HERE / "evalsettings.py"),
         },
         "targets": (scope or {}).get("targets", []),
         "scope": {"path": str(scope_path) if scope_path else None, "sha256": scope_sha,
@@ -1027,7 +1063,13 @@ def cmd_plan(a) -> int:
                           "overlays": scope_overlays},
         "candidatesDir": str(cdir),
         "arms": arms,
-        "states": {"selected": states, "notExplored": states_not_explored},
+        "states": {"selected": states, "depth": depth, "notExplored": states_not_explored,
+                   **({"fromCensus": {"generator": "stategen.py", "sha256": sha256_file(HERE / "stategen.py"),
+                                      "checks": census_checks,
+                                      "note": "each arm's states are generated at run time from that arm's own "
+                                              "accepted state.switch-census output; the list, its hash and what it "
+                                              "could not express are recorded beside the check's output"}}
+                      if depth == "deep" else {})},
         "checks": checks,
         "options": options,
         "ordersweepProbes": sorted(set(ordersweep_probes)),
@@ -1044,7 +1086,8 @@ def cmd_plan(a) -> int:
             "selectRaw": select_raw,
             "selectImplied": implied,
             "exclude": excluded,
-            **({"optIn": sorted(opted)} if opted else {}),
+            **({"optIn": sorted(opted), "optInSource": opt_in_source} if opted else {}),
+            "settings": settings.record(),
             "touched": touched,
             "note": "--select narrows what RUNS, never what is PLANNED: a check that was not selected "
                     "is skipped-user and stays visible, and a required one keeps the evaluation "
@@ -1069,7 +1112,12 @@ def cmd_plan(a) -> int:
     write_json(run / "ledger.json", ledger)
     (run / "journal.jsonl").touch()
 
-    print(f"plan {plan['planId']}: {len(checks)} checks, {len(arms)} arms, states {','.join(states)}")
+    print(f"plan {plan['planId']}: {len(checks)} checks, {len(arms)} arms, states {','.join(states)}, depth {depth}")
+    for s in settings.sentences():
+        print(s)
+    if live_choice == "ask" and LIVE_CHECK_ID not in opted:
+        print("The live switch check is set to ask each evaluation and was not opted in "
+              "(`--opt-in " + LIVE_CHECK_ID + "` opts in).")
     for c in checks:
         if c["status"] != "planned":
             print(f"   {c['checkId']:38} {c['status']}")
@@ -2606,7 +2654,13 @@ def run_generic(ex: Executor, check: dict, arm: dict) -> None:
         return
 
     states = states_for(check, ex.plan)
-    if (check.get("inputs") or {}).get("states") == "selected" and not states:
+    states_file = None
+    if (check.get("inputs") or {}).get("states") == "selected" and ex.plan["states"].get("depth") == "deep":
+        deep = deep_states(ex, check, arm)
+        if deep is None:
+            return
+        states_file = deep
+    elif (check.get("inputs") or {}).get("states") == "selected" and not states:
         ex.account(check, arm, "skipped-user", None,
                    "this check evaluates a world state other than the baseline, and the plan's "
                    "--states selected none: " + ", ".join(ex.plan["states"]["selected"])
@@ -2691,7 +2745,9 @@ def run_generic(ex: Executor, check: dict, arm: dict) -> None:
         i += 1
 
     flag = adapter.get("statesFlag")
-    if states and flag:
+    if states_file is not None:
+        args += [adapter["statesFileFlag"], str(states_file["path"])]
+    elif states and flag:
         for st in states:
             args += [flag, str(st)]
 
@@ -2746,7 +2802,68 @@ def run_generic(ex: Executor, check: dict, arm: dict) -> None:
         if named is not None:
             outputs = [named]
 
-    ex.run_child(check, arm, None, argv, outputs, states=states)
+    ex.run_child(check, arm, None, argv, outputs,
+                 states=states_file["record"] if states_file is not None else states)
+
+
+def deep_states(ex: "Executor", check: dict, arm: dict) -> dict | None:
+    """A Deep plan's states for this check on this arm: stategen.py over the arm's OWN accepted census, written beside
+    the check's output as <arm>.states.json (the list, the not-explored rows, the census and generator hashes) and
+    <arm>.states.txt (one spec per line, handed to the probe). None when the check was accounted here instead: no
+    accepted census, a registry row without a states-file flag, or a census with no state to judge."""
+    cid = "state.switch-census"
+    e = ex.ledger.entry(cid, arm["armId"], None)
+    r = load_json(ex.run / "receipts" / f"{cid}__{arm['armId']}.json")
+    census = None
+    if e and e.get("status") in TERMINAL_OK and r and r["validation"]["accepted"]:
+        outs = r.get("outputs") or []
+        census = ex.run / outs[0]["path"] if outs and outs[0].get("path") else None
+    if census is None or not census.exists():
+        ex.account(check, arm, "blocked(no-switch-map)", None,
+                   "this plan is Deep, and there is no accepted state.switch-census receipt on this arm, so there "
+                   "is no census to generate its states from")
+        return None
+    if not (check.get("adapter") or {}).get("statesFileFlag"):
+        ex.account(check, arm, "blocked(no-states-file-flag)", None,
+                   "this plan is Deep, and the registry gives this check no statesFileFlag, so its probe cannot be "
+                   "handed the census's states")
+        return None
+    try:
+        doc = stategen.generate_file(census)
+    except (OSError, ValueError) as ex_:
+        ex.account(check, arm, "blocked(census-unreadable)", None,
+                   f"this plan is Deep, and this arm's census could not be read to generate its states ({ex_})")
+        return None
+    out_dir = ex.run / "outputs" / check["checkId"]
+    out_dir.mkdir(parents=True, exist_ok=True)
+    jpath, tpath = out_dir / f"{arm['armId']}.states.json", out_dir / f"{arm['armId']}.states.txt"
+    jpath.write_text(stategen.dumps(doc), encoding="utf-8")
+    tpath.write_text(stategen.specs_text(doc), encoding="utf-8")
+    record = {"depth": "deep", "count": len(doc["states"]),
+              "file": tpath.relative_to(ex.run).as_posix(), "sha256": sha256_file(tpath),
+              "document": jpath.relative_to(ex.run).as_posix(), "documentSha256": sha256_file(jpath),
+              "censusSha256": (doc.get("census") or {}).get("sha256"),
+              "generatorSha256": (doc.get("generator") or {}).get("sha256"),
+              "notExplored": len(doc["notExplored"])}
+    if not doc["states"]:
+        ex.account(check, arm, "not-applicable", None,
+                   "the census found no switch on this arm that can be flipped, so there is no switched state to "
+                   f"judge (the states document {record['document']} lists what was not explored)")
+        return None
+    return {"path": tpath, "record": record}
+
+
+def generated_not_explored(run: Path, plan: dict) -> list[dict]:
+    """Every arm's generated not-explored rows (a Deep plan), with the arm and check named."""
+    rows = []
+    if (plan.get("states") or {}).get("depth") != "deep":
+        return rows
+    for cid in (plan["states"].get("fromCensus") or {}).get("checks") or []:
+        for arm in plan["arms"]:
+            doc = load_json(run / "outputs" / cid / f"{arm['armId']}.states.json")
+            for r in (doc or {}).get("notExplored") or []:
+                rows.append({"checkId": cid, "armId": arm["armId"], **r})
+    return rows
 
 
 def candidate_stale(arm: dict, memo: "HashMemo | None" = None) -> str | None:
@@ -4569,7 +4686,7 @@ def build_disposition(run: Path, plan: dict, ledger: Ledger, receipts: dict, *,
         arms[arm["armId"]] = entry
 
     unassessed = {
-        "statesNotExplored": plan["states"]["notExplored"],
+        "statesNotExplored": plan["states"]["notExplored"] + generated_not_explored(run, plan),
         "candidatesHeldBack": plan["budgets"]["candidatesHeldBack"],
         "unjudgeablePopulations": [
             {"checkId": r["checkId"], "armId": r["armId"], "population": c.get("Population", c.get("population")),
@@ -5397,7 +5514,13 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--alt", action="append", help="evaluate only these candidate files (repeatable)")
     p.add_argument("--supplied", action="append",
                    help="PLUGIN[,PLUGIN...]=candidate-NN.json - an ESP-only supplied-combination arm")
-    p.add_argument("--states", default="baseline")
+    p.add_argument("--states", default=None,
+                   help="name the states by hand (baseline[,NAME...]); overrides the depth")
+    p.add_argument("--depth", choices=("standard", "deep"),
+                   help="standard: the load-time state only; deep: every switched state each arm's census yields "
+                        "(default: the saved settings, else deep)")
+    p.add_argument("--settings", metavar="FILE",
+                   help="the evaluation settings file (default: evalsettings.py's resolution order)")
     p.add_argument("--select", action="append", help="CHECK,... — narrows what RUNS, never what is PLANNED")
     p.add_argument("--exclude", action="append", metavar="CHECK=reason")
     p.add_argument("--opt-in", action="append", metavar="CHECK[,CHECK...]",
