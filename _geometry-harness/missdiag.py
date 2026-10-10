@@ -5,8 +5,8 @@ bases, cells and probe-trace outcomes gathered by the caller. Output: clusters, 
 table (reason x edit count, split by evidence type and by direct vs inherited counts).
 
 The API and the rules were frozen at Gate B (GATE-A §4 and §12, GATE-B §2); tests/test_missdiag.py is their known-answer
-suite. Command line: `python missdiag.py INPUT.json OUTPUT.json` (see run()); each run is recorded through
-scripts/runlog.py.
+suite. Command line: `python missdiag.py INPUT.json OUTPUT.json [--scorecard SCORECARD.json --group G]` (see run()
+and main()); each run is recorded through scripts/runlog.py.
 
 Frozen rules, in brief:
 - record action: a record's category-5 spatial kinds, sorted and joined with '+'.
@@ -317,6 +317,34 @@ def summarise(clusters, unassigned_edits, prediction=None):
     return {"sections": [pred, cov, val]}
 
 
+PRE_FIX_NOTE = "counted from a probe build made before a later fix to that probe"
+
+
+def prediction_from_scorecard(row):
+    """The prediction block from one scorecard group row: `modA`, `modB` and `findingsByLane` {lane: {needsBoth,
+    needsBothActedOn, unit?, note?, preFixBuild?}} -- the needs-both counts on the order without the patch and how many
+    of them the patch acts on. Lanes keep the row's order and a zero lane is kept, so "none found" differs from "not
+    supplied". A row without one of those fields raises ValueError with one sentence naming it."""
+    for field in ("modA", "modB", "findingsByLane"):
+        if not row.get(field):
+            raise ValueError(f"The scorecard row has no {field}, so no prediction can be read from it.")
+    clashes = []
+    for lane, x in row["findingsByLane"].items():
+        if not isinstance(x, dict) or not isinstance(x.get("needsBoth"), int) or not isinstance(x.get("needsBothActedOn"), int):
+            raise ValueError(f"The scorecard lane {lane} has no needsBoth and needsBothActedOn counts, so no prediction "
+                             f"can be read from it.")
+        c = {"kind": lane, "needsBoth": x["needsBoth"], "actedOnByPatch": x["needsBothActedOn"]}
+        if x.get("unit"):
+            c["unit"] = x["unit"]
+        notes = [str(x["note"])] if x.get("note") else []
+        if x.get("preFixBuild"):
+            notes.append(PRE_FIX_NOTE)
+        if notes:
+            c["note"] = "; ".join(notes)
+        clashes.append(c)
+    return {"mods": [row["modA"], row["modB"]], "clashes": clashes}
+
+
 def run(doc):
     """INPUT: {"edits": [...], "records": {"GROUP|FORMKEY": {"base", "cell", "trace": [[check, outcome, rule], ...]}},
     "evidence": {clusterId: assign_reason's input plus "direct": bool}, "prediction"?: summarise's prediction}. A
@@ -359,14 +387,45 @@ def _runlog():
 
 
 def main(argv):
-    if len(argv) != 3:
-        print("usage: missdiag.py INPUT.json OUTPUT.json", file=sys.stderr)
+    """missdiag.py INPUT.json OUTPUT.json [--scorecard SCORECARD.json --group G]: with --scorecard, the prediction
+    block is read from that file's group row (prediction_from_scorecard); an absent group, or an INPUT that already
+    carries a prediction, exits 2 and writes nothing."""
+    args = list(argv[1:])
+    opts = {}
+    for flag in ("--scorecard", "--group"):
+        if flag in args:
+            i = args.index(flag)
+            if i + 1 >= len(args):
+                print(f"missdiag: {flag} needs a value.", file=sys.stderr)
+                return 2
+            opts[flag] = args[i + 1]
+            del args[i:i + 2]
+    if len(args) != 2 or (("--scorecard" in opts) != ("--group" in opts)):
+        print("usage: missdiag.py INPUT.json OUTPUT.json [--scorecard SCORECARD.json --group G]", file=sys.stderr)
         return 2
+    with open(args[0], encoding="utf-8") as f:
+        doc = json.load(f)
+    if "--scorecard" in opts:
+        if doc.get("prediction") is not None:
+            print("missdiag: the input already carries a prediction, so a second one from the scorecard is refused.",
+                  file=sys.stderr)
+            return 2
+        with open(opts["--scorecard"], encoding="utf-8") as f:
+            sc = json.load(f)
+        row = next((g for g in sc.get("groups") or [] if g.get("group") == opts["--group"]), None)
+        if row is None:
+            print(f"missdiag: the scorecard has no group {opts['--group']}, so no prediction was read.", file=sys.stderr)
+            return 2
+        try:
+            doc["prediction"] = prediction_from_scorecard(row)
+        except ValueError as e:
+            print(f"missdiag: {e}", file=sys.stderr)
+            return 2
+    argv = [argv[0]] + args
     rl = _runlog()
     # No child process: the run is one Run lifecycle (scripts/runlog.py), not a Runner.
     with (rl.Run("missdiag", mode="table") if rl is not None else _Null()):
-        with open(argv[1], encoding="utf-8") as f:
-            res = run(json.load(f))
+        res = run(doc)
         with open(argv[2], "w", encoding="utf-8") as f:
             json.dump(res, f, indent=1)
         print("missdiag: %d edits, %d clusters, %d unassigned edits -> %s"
