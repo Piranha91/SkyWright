@@ -38,7 +38,7 @@ The single-mod setups this prediction reads were measured in a separate bundle: 
 
 {% for role, arm in sib.roles.items() %}- {{ role }}: `{{ arm|txt }}`
 {% endfor %}
-{% for c in sib.checks %}- `{{ c.checkId }}`: {% if c.joined %}joined{% else %}not joined — {{ c.why }}{% endif %}
+{% for c in sib.checks %}- `{{ c.checkId }}`: {{ "joined" if c.joined else "not joined — " ~ c.why }}
 {% endfor %}
 {% endif %}
 
@@ -47,7 +47,7 @@ The single-mod setups this prediction reads were measured in a separate bundle: 
 
 Results of the checks that are not clashes between two different mods, so the report's detail list leaves them out: the reason, the setup and the pair.
 
-{% for f in p.detailAside %}- [{{ f.id }}](#{{ f.id }}) `{{ f.checkId }}` on {{ f.readerArmLabel }}: {{ (p.reader.prediction.get("detailAsideWords") or {}).get(f.readerDetailAside, f.readerDetailAside) }}{% if f.counts.get("A") %} ({{ f.counts.get("A") }} x {{ f.counts.get("B") }}){% endif %}. {{ f.readerPlain }}{% if f.get("readerProvenance") %} {{ f.readerProvenance }}{% endif %}
+{% for f in p.detailAside %}- [{{ f.id }}](#{{ f.id }}) `{{ f.checkId }}` on {{ f.readerArmLabel }}: {{ (p.reader.prediction.get("detailAsideWords") or {}).get(f.readerDetailAside, f.readerDetailAside) }}{% if f.counts.get("A") %} ({{ f.counts.get("A") }} x {{ f.counts.get("B") }}){% endif %}. {{ f.readerPlain }}{{ (" " ~ f.readerProvenance) if f.get("readerProvenance") else "" }}
 {% else %}Nothing was set aside.
 {% endfor %}
 

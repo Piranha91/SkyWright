@@ -10,7 +10,9 @@
 {% for g in pred["items"] %}- **{{ g.title }}:** {{ g.plain }} {{ g.inGameText }}{% for fid in g.findingIds[:1] %} [Full evidence](evidence-index.md#{{ fid }}).{% endfor %}
 
 {% endfor %}
-{% if pred.get("siblingSource") %}{{ pred.siblingSource }}
+{% if pred.get("siblingSource") %}
+
+{{ pred.siblingSource }}
 
 {% endif %}{% if pred.noneFoundBasis %}{{ pred.noneFoundBasis }}
 
