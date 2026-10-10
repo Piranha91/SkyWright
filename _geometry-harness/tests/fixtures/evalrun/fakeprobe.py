@@ -10,7 +10,10 @@ probes accept (`--order FILE --emit FILE [--base FILE] [--json FILE] [--out DIR]
                                               "predicates": {"<FormKey>": "Gone"}, ... } } } }
 
 The emit stem is the `--emit` filename without `.json` — `baseline`, `candidate-01-reorder`, and for
-ordersweep's reverse arm `candidate-01-reorder.reverse`. `"*"` is the fallback entry for a probe.
+ordersweep's reverse arm `candidate-01-reorder.reverse`; a probe given `--json` and no `--emit` (switchprobe) is
+keyed on the `--json` filename's stem, which evalrun names after the arm. `"*"` is the fallback entry for a probe.
+A probe given `--states-file FILE` (stateprobe under a Deep plan) prints each spec it read and reports the number
+of specs as its coverage's Judged count, so a test can see what was evaluated.
 
 What is REAL here and not faked:
   - the file shape is ConflictReport.cs's (`Conflicts[{Kind, A, B, Summary, Necessary[...]}]`, `Coverage`,
@@ -412,7 +415,7 @@ def parse(argv):
     while i < len(argv):
         t = argv[i]
         if t in ("--order", "--emit", "--base", "--json", "--out", "--instance", "--profile", "--game",
-                 "--state", "--target", "--mod", "--page") and i + 1 < len(argv):
+                 "--state", "--target", "--mod", "--page", "--states-file", "--switch-map") and i + 1 < len(argv):
             if t == "--target":
                 a["target"].append(argv[i + 1])
             else:
@@ -436,6 +439,8 @@ def main(probe: str, argv=None) -> int:
 
     emit = Path(a["emit"]) if a.get("emit") else None
     stem = emit.name[:-5] if emit and emit.name.endswith(".json") else (emit.stem if emit else "-")
+    if emit is None and a.get("json"):
+        stem = Path(a["json"]).stem
     arms = (scen.get("arms") or {}).get(probe, {})
     entry = arms.get(stem) or arms.get("*") or {}
     behaviour = entry.get("behaviour", "ok")
@@ -537,6 +542,11 @@ def main(probe: str, argv=None) -> int:
     if coverage is None:
         coverage = [{"Population": entry.get("coveragePopulation", "fixture population"),
                      "Judged": int(entry.get("judged", 42)), "Unjudgeable": {}}]
+    if a.get("states-file"):
+        specs = [s.strip() for s in Path(a["states-file"]).read_text(encoding="utf-8").splitlines() if s.strip()]
+        for s in specs:
+            print(f"fakeprobe {probe}: state {s}")
+        coverage = [{"Population": "world states (fixture)", "Judged": len(specs), "Unjudgeable": {}}]
 
     doc = {
         "Probe": entry.get("probeName", probe) if behaviour == "wrong-probe-name" else probe,
