@@ -657,7 +657,10 @@ NifRenderGeometryOutcome SweptProxy(byte[] bytes, NifRenderGeometryOutcome origi
         foreach (var t in new[] { 0,2,1, 1,2,3, 4,5,6, 5,7,6, 0,1,4, 1,5,4, 2,6,3, 3,6,7, 0,4,2, 2,4,6, 1,3,5, 3,7,5 }) idx.Add(b0 + t);
         total = total.Add(lo).Add(hi);
     }
-    string anims = string.Join(", ", region.Animations.Select(a => $"{a.Id} {a.Cycle}"));
+    // lane K: a pinned body whose controllers are left out is swept over its hinge swing, not over those controllers
+    string anims = model.Labels.Contains(MemberMotion.AnimatedPinnedLabel)
+        ? "the hinge swing (the stored pose and every angle within the file's limits); " + MemberMotion.AnimatedPinnedLabel
+        : string.Join(", ", region.Animations.Select(a => $"{a.Id} {a.Cycle}"));
     return new NifRenderGeometryOutcome(NifRenderGeometryStatus.Measured,
         $"swept proxy: {region.Samples.Count} sampled poses' boxes grown by their certified delta (max {region.MaxDelta:0.###} u, {(region.Converged ? "converged" : "not converged")}) over {anims}; an outer bound for discovery only",
         total, new TriangleSoup(v.ToArray(), idx.ToArray()), original.Model, original.ContentSha256, original.CacheKey + "|swept:" + motionDelta.ToString(System.Globalization.CultureInfo.InvariantCulture));
