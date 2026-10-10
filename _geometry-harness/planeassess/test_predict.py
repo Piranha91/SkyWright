@@ -176,6 +176,16 @@ class AnswerKey(unittest.TestCase):
         p = {"g1": views(("g1", {P: ("B", [("1:New.esp", "A", 5, 5, None)], None)}))[0]["facts"]}
         self.assertEqual(X.answer_key(self.finding(), p, {P}, {P: ["MOVE"]})["outcome"], "open: cannot tell offline")
 
+    def test_a_second_plane_that_already_hid_the_shape_does_not_keep_the_clash_open(self):
+        # the shape was hidden in u by the predicted plane and by another plane; with the patch only the other remains:
+        # the predicted clash is resolved (hit), the other plane's hiding is its own finding
+        f = self.finding(cullers=[P, "000900:New.esp"])
+        p = {"g1": views(("g1", {"000900:New.esp": ("A", [("1:New.esp", "A", 30, 30, None)], None)}))[0]["facts"]}
+        self.assertEqual(X.answer_key(f, p, {"000900:New.esp"}, {P: ["DISABLE"]})["outcome"], "hit")
+        # a plane that did not hide it in u (a patch-added plane) keeps it hidden: not resolved
+        p = {"g1": views(("g1", {"000990:Patch.esp": ("base", [("1:New.esp", "A", 30, 30, None)], None)}))[0]["facts"]}
+        self.assertEqual(X.answer_key(f, p, {"000990:Patch.esp"}, {P: ["DISABLE"]})["outcome"], "open: cannot tell offline")
+
     def test_moved_without_a_p_render_or_refused_in_p(self):
         self.assertEqual(X.answer_key(self.finding(), {"g1": None}, {P}, {P: ["MOVE"]})["outcome"],
                          "resolution needs a p render")
