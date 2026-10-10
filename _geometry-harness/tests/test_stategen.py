@@ -138,12 +138,13 @@ def g2():
     cen = census_g1()
     t1, t2 = stategen.dumps(stategen.generate(cen)), stategen.dumps(stategen.generate(json.loads(json.dumps(cen))))
     check(t1 == t2, "G2: the same census gives identical bytes")
+    h = "000809:FixtureTarget.esp"
     cen2 = census_g1()
-    cen2["switches"] = [s for s in cen2["switches"] if s.get("key") != F2]
-    cen2["summary"]["switches"] -= 1
+    cen2["switches"].append(sw(h, "H_Marker"))
+    cen2["summary"]["switches"] += 1
     s1 = set(stategen.specs_text(stategen.generate(cen)).splitlines())
     s2 = set(stategen.specs_text(stategen.generate(cen2)).splitlines())
-    check(s1 - s2 == {F2} and not (s2 - s1),
+    check(s2 - s1 == {h} and not (s1 - s2),
           f"G2: censuses differing by one switch give lists differing by exactly it ({sorted(s1 ^ s2)})")
 
 
@@ -354,7 +355,7 @@ def d4(ctl: Ctl):
         return
     ctl.run_all(run, scen)
     row = ledger_status(run, CG, CAND_ARM) or {}
-    detail = json.dumps(row)
+    detail = ((receipt(run, CG, CAND_ARM) or {}).get("result") or {}).get("note") or ""
     check(row.get("status") == "not-applicable" and "no switch" in detail,
           f"D4: an arm whose census has no switch is accounted 'no state to judge' ({row.get('status')})")
     check(not (receipt(run, CG, CAND_ARM) or {}).get("argv"), "D4: no stateprobe is launched for it")
