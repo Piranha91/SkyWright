@@ -31,6 +31,8 @@ import wave
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE.parent / "scripts"))
 from runlog import Run  # noqa: E402
+sys.path.insert(0, str(HERE))
+import evalsettings  # noqa: E402
 
 ENGINES = ("kokoro", "qwen3", "voxcpm2")
 
@@ -326,6 +328,10 @@ def write_wave(path, samples, rate):
 
 
 def prepare(args, run, loader=load_engine):
+    try:
+        apply_settings(args)
+    except evalsettings.SettingsError as exc:
+        raise Refused(str(exc)) from None
     out = Path(args.out).resolve()
     if out.exists():
         raise Refused(f"output already exists; select a fresh --out directory: {out}")
@@ -435,20 +441,40 @@ def parser():
     source.add_argument("--text-file", help="UTF-8 sample script; synthesized verbatim")
     source.add_argument("--storyboard", help="reviewed evalreel scene packet; narration preserved verbatim")
     source.add_argument("--verify", metavar="MANIFEST", help="verify sources, local model bytes, scene bindings and WAVs without loading a model")
-    p.add_argument("--engine", choices=ENGINES, default="kokoro", help="default: kokoro; no automatic fallback")
+    p.add_argument("--engine", choices=ENGINES, default=None,
+                   help="default: the saved evaluation settings' engine, else kokoro; no automatic fallback")
     p.add_argument("--model-dir", help="already downloaded local model with config and weights")
     p.add_argument("--model-revision", help="immutable repository commit hash for those local weights")
     p.add_argument("--voice", help="Kokoro voice (default: bm_george), or required Qwen CustomVoice speaker")
     p.add_argument("--style", help="VoxCPM2 voice description, or optional Qwen 1.7B delivery instruction")
     p.add_argument("--speed", type=float, help="Kokoro speed multiplier only; default 1")
     p.add_argument("--seed", type=int, default=42, help="seed reset per scene (default 42)")
-    p.add_argument("--device", default="cpu", help="cpu (default), cuda or cuda:N; no automatic fallback")
+    p.add_argument("--device", default=None,
+                   help="cpu (default, or the saved evaluation settings' device), cuda or cuda:N; no automatic fallback")
     p.add_argument("--out", help="new output directory; existing directories are refused")
     return p
 
 
+def apply_settings(args) -> None:
+    """A flag first, then the saved evaluation settings (evalsettings.py), then this tool's defaults."""
+    s = evalsettings.tool_defaults(["video.narration.engine", "video.narration.voice", "video.narration.device",
+                                    "video.narration.modelDir", "video.narration.modelRevision"])
+    for attr, key, fallback in (("engine", "video.narration.engine", "kokoro"),
+                                ("voice", "video.narration.voice", None),
+                                ("device", "video.narration.device", "cpu"),
+                                ("model_dir", "video.narration.modelDir", None),
+                                ("model_revision", "video.narration.modelRevision", None)):
+        if getattr(args, attr) is None:
+            setattr(args, attr, s[key] if s[key] is not None else fallback)
+
+
 def main(argv=None):
     args = parser().parse_args(argv)
+    try:
+        apply_settings(args)
+    except evalsettings.SettingsError as exc:
+        print(f"narration-refused: {exc}", file=sys.stderr)
+        return 2
     with Run("evalspeech", mode="verify" if args.verify else "prepare", stage_source="counted") as run:
         try:
             if args.verify:

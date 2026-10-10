@@ -45,6 +45,8 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE.parent / "scripts"))
 from runlog import Run  # noqa: E402
+sys.path.insert(0, str(HERE))
+import evalsettings  # noqa: E402
 
 try:
     import jinja2
@@ -2800,8 +2802,21 @@ def cmd_plan(a) -> int:
     pr = load_priorities()
     bundle = Path(a.bundle)
     out = Path(a.out)
+    # A flag first, then the saved evaluation settings (evalsettings.py), then the skill's data.
+    try:
+        s = evalsettings.tool_defaults(["report.mode", "report.maxPages", "report.rowsPerGroup",
+                                        "report.figuresPerFinding"])
+    except evalsettings.SettingsError as ex:
+        print(f"REFUSED: {ex}", file=sys.stderr)
+        return EXIT_REFUSED_INPUT
     if getattr(a, "exhaustive", False):
         a.mode = "exhaustive"
+    if a.mode is None:
+        a.mode = s["report.mode"] or "concise"
+    for attr, key in (("max_pages", "report.maxPages"), ("rows_per_group", "report.rowsPerGroup"),
+                      ("figures_per_finding", "report.figuresPerFinding")):
+        if getattr(a, attr) is None and s[key] is not None:
+            setattr(a, attr, int(s[key]))
     with Run("evalreport-plan", stage_source="counted") as r:
         r.stage("verify-bundle", total=1, unit="bundles")
         if not (bundle / "manifest.json").exists():
@@ -2976,6 +2991,12 @@ def load_presentation(path: Path):
 
 
 def cmd_report(a) -> int:
+    try:
+        if not a.no_print and evalsettings.tool_defaults(["report.pdf"])["report.pdf"] == "off":
+            a.no_print = "settings"
+    except evalsettings.SettingsError as ex:
+        print(f"REFUSED: {ex}", file=sys.stderr)
+        return EXIT_REFUSED_INPUT
     pr = load_priorities()
     ppath = Path(a.presentation)
     out = Path(a.out)
@@ -3007,7 +3028,7 @@ def cmd_report(a) -> int:
         r.feature("findings", len(plan["findings"]), "findings")
         r.feature("media", len(assessed_ids), "media")
         media_rows = copy_media(plan, bundle_dir, out)
-        browser, version, why = (None, "", "printing disabled by --no-print") if a.no_print else resolve_browser()
+        browser, version, why = (None, "", "printing turned off in the evaluation settings (report.pdf off)" if a.no_print == "settings" else "printing disabled by --no-print") if a.no_print else resolve_browser()
         print_info = {"browser": str(browser) if browser else None, "version": version or None, "pages": None,
                       "maxPages": settings.get("maxPages"), "status": "not-rendered", "reason": why or None,
                       "ladder": [], "rootCount": None, "kept": None}
@@ -3449,7 +3470,8 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("plan", help="verify the bundle and compile the presentation plan")
     p.add_argument("--bundle", required=True)
     p.add_argument("--out", required=True)
-    p.add_argument("--mode", choices=("concise", "exhaustive"), default="concise")
+    p.add_argument("--mode", choices=("concise", "exhaustive"), default=None,
+                   help="default: the saved evaluation settings' report.mode, else concise")
     p.add_argument("--exhaustive", action="store_true", help="list every row; no page limit (same as --mode exhaustive)")
     p.add_argument("--max-pages", type=int, default=None)
     p.add_argument("--rows-per-group", type=int, default=None)

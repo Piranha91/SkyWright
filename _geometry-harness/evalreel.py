@@ -47,6 +47,8 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE.parent / "scripts"))
 from runlog import Run  # noqa: E402
+sys.path.insert(0, str(HERE))
+import evalsettings  # noqa: E402
 from report_scenes import capture_requests
 
 EXIT_OK, EXIT_NOT_RENDERED, EXIT_REFUSED = 0, 1, 2
@@ -98,10 +100,10 @@ def load_json(p: Path):
 
 
 # ---------------------------------------------------------------------------------------------- ffmpeg
-def ffmpeg_find(explicit: str | None = None) -> dict | None:
+def ffmpeg_find(explicit: str | None = None, explicit_how: str = "--ffmpeg") -> dict | None:
     """D6's resolution order (the DevBench harness's `ffmpeg_find` order, restated here rather than imported
     from the skill script): the flag, HOUSECARL_FFMPEG, DBH_FFMPEG, PATH, then the bundled copies."""
-    for cand, how in ((explicit, "--ffmpeg"), (os.environ.get("HOUSECARL_FFMPEG"), "HOUSECARL_FFMPEG"),
+    for cand, how in ((explicit, explicit_how), (os.environ.get("HOUSECARL_FFMPEG"), "HOUSECARL_FFMPEG"),
                       (os.environ.get("DBH_FFMPEG"), "DBH_FFMPEG")):
         if cand and os.path.isfile(cand):
             return {"exe": os.path.abspath(cand), "how": how}
@@ -659,6 +661,16 @@ def apply_storyboard_answers(pres: dict, path: Path) -> str | None:
 
 
 def cmd_render(a) -> int:
+    # A flag first, then the saved evaluation settings (evalsettings.py), then the plan's own settings.
+    try:
+        s = evalsettings.load()
+    except evalsettings.SettingsError as ex:
+        print(f"REFUSED: {ex}", file=sys.stderr)
+        return EXIT_REFUSED
+    if a.max_seconds is None and s.value("video.maxSeconds") is not None:
+        a.max_seconds = float(s.value("video.maxSeconds"))
+    if a.ffmpeg is None and s.options["video.ffmpeg"]["source"] == "file":
+        a.ffmpeg, a.ffmpeg_how = s.value("video.ffmpeg"), f"the evaluation settings ({s.path})"
     out = Path(a.out).resolve()
     if not (os.environ.get("HOUSECARL_RUNLOG_DIR") or "").strip():
         os.environ["HOUSECARL_RUNLOG_DIR"] = str(out / "runlog")
@@ -688,7 +700,7 @@ def render_reel(a, run) -> int:
     out.mkdir(parents=True, exist_ok=True)
     if not (os.environ.get("HOUSECARL_RUNLOG_DIR") or "").strip():
         os.environ["HOUSECARL_RUNLOG_DIR"] = str((out / "runlog").resolve())
-    found = ffmpeg_find(a.ffmpeg)
+    found = ffmpeg_find(a.ffmpeg, getattr(a, "ffmpeg_how", "--ffmpeg"))
     if not found:
         return refuse("ffmpeg-missing: no ffmpeg via --ffmpeg, HOUSECARL_FFMPEG, DBH_FFMPEG, PATH or a bundled copy "
                       "(ShareX, winget Gyan.FFmpeg, Program Files\\ffmpeg)", out)
