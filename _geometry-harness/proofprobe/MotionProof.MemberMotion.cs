@@ -134,6 +134,50 @@ static partial class MotionProof
         return (nif, Files(GraphFiles(name, new[] { new FxState("Blend", "blender", children, subtract) })));
     }
 
+    /// <summary>K-M16 (lane N, fixed blender weights): K-M6's chain with one blender state over SeqA (N1 0 -> 60 deg) and SeqB (N2 x
+    /// 20 -> 0) carrying the stated weights, flags and bindings. With weights (1, 0) the engine's pose is SeqA's alone, which never
+    /// reaches K-M1's w = 0.5 pose (radius 60 at 30 deg; SeqA keeps radius 50); over the weight simplex it does.</summary>
+    static (byte[] Nif, Func<string, byte[]?> Read) KM16(string name, FxBlender blender)
+    {
+        var nif = ChainNif($@"Lab\{name}.hkx", new[] { ("Part", "N2", Cube(50, 0, 0, 1), false) },
+                           new[] { ("SeqA", new[] { TurnA }, CycleType.CYCLE_CLAMP), ("SeqB", new[] { SlideB }, CycleType.CYCLE_CLAMP) });
+        return (nif, Files(GraphFiles(name, new[] { new FxState("Blend", "blender", new[] { "SeqA", "SeqB" }) }, blender: blender)));
+    }
+
+    /// <summary>K-M16b: two states, X a blender over SeqC (N1 0 -> -40 deg) and SeqB (N2 x 20 -> 0) with the stated weights, Y plays
+    /// SeqA (N1 0 -> 60 deg). The transition X|Y reaches K-M1's w = 0.5 pose only through SeqB: with weights (0, 1) the transition is
+    /// SeqB|SeqA (the pose is in it); with (1, 0) it is SeqC|SeqA, which turns N1 only and keeps radius 50, 10 u inside the pose.</summary>
+    static (byte[] Nif, Func<string, byte[]?> Read) KM16b(string name, FxBlender blender)
+    {
+        var nif = ChainNif($@"Lab\{name}.hkx", new[] { ("Part", "N2", Cube(50, 0, 0, 1), false) },
+                           new[] { ("SeqA", new[] { TurnA }, CycleType.CYCLE_CLAMP), ("SeqB", new[] { SlideB }, CycleType.CYCLE_CLAMP),
+                                   ("SeqC", new[] { new FxKeys("N1", 0, -40) }, CycleType.CYCLE_CLAMP) });
+        return (nif, Files(GraphFiles(name, new[] { new FxState("X", "blender", new[] { "SeqC", "SeqB" }), new FxState("Y", "sequence", new[] { "SeqA" }) },
+                                      blender: blender)));
+    }
+
+    /// <summary>K-M19 (lane N, where the split is spent): two states turning N1 about Z from the same start, A 0 -> 20 deg and B 0 ->
+    /// 80 deg; "Part" cube half 1 at (50,0,0) in N2. Every blend pose (nlerp or slerp) turns Part by an angle in [0, 80] deg at radius
+    /// 50. At the family's lower corner (both clocks 0, w = 0) B carries weight 0 and both poses coincide, so a sensitivity measured
+    /// there reads B's clock and the weight as moving nothing.</summary>
+    static (byte[] Nif, Func<string, byte[]?> Read) KM19()
+    {
+        var nif = ChainNif(@"Lab\KM19.hkx", new[] { ("Part", "N2", Cube(50, 0, 0, 1), false) },
+                           new[] { ("SeqA", new[] { new FxKeys("N1", 0, 20) }, CycleType.CYCLE_CLAMP), ("SeqB", new[] { new FxKeys("N1", 0, 80) }, CycleType.CYCLE_CLAMP) });
+        return (nif, Files(GraphFiles("KM19", new[] { new FxState("A", "sequence", new[] { "SeqA" }), new FxState("B", "sequence", new[] { "SeqB" }) })));
+    }
+
+    /// <summary>K-M20 (lane N, the wheel's shape): state S turns N1 0 -> 160 deg about Z, state I holds N1 at -20 deg over its whole
+    /// clock (a clip that moves nothing). Near S's end the two rotations are near half a turn apart (quaternion product near 0), so the
+    /// transition's cells there carry sign branches and keep the any-rotation bound until S's clock is narrow; I's clock never lifts
+    /// it. Both branches together sweep Part (cube half 1 at (50,0,0) in N2) round the whole circle of radius 50 in the plane z = 0.</summary>
+    static (byte[] Nif, Func<string, byte[]?> Read) KM20()
+    {
+        var nif = ChainNif(@"Lab\KM20.hkx", new[] { ("Part", "N2", Cube(50, 0, 0, 1), false) },
+                           new[] { ("SeqS", new[] { new FxKeys("N1", 0, 160) }, CycleType.CYCLE_CLAMP), ("SeqI", new[] { new FxKeys("N1", -20, -20) }, CycleType.CYCLE_CLAMP) });
+        return (nif, Files(GraphFiles("KM20", new[] { new FxState("S", "sequence", new[] { "SeqS" }), new FxState("I", "sequence", new[] { "SeqI" }) })));
+    }
+
     /// <summary>K-M10: "Part" (cube half 1 at (50,0,0) in N1, N1 stored at identity); one state, an hkbReferencePoseGenerator; the
     /// skeleton's reference pose turns N1 +90 deg about Z.</summary>
     static (byte[] Nif, Func<string, byte[]?> Read) KM10()
@@ -394,6 +438,87 @@ static partial class MotionProof
             var (nif, read) = KM6("KM6bs", new[] { "SeqA", "SeqB" }, subtract: true);
             var m = MemberMotion.Read(nif, read, Mstt);
             return (m.Status == "refused" && (m.Reason ?? "").Contains("subtracts its last child"), ShowMM(m));
+        });
+        // ================= K-M16..K-M18: fixed blender weights (lane N) =================
+        // Flags (hkbBlenderGenerator BlenderFlags, hkxcmd / HKX2 class tables): 4 FLAG_SMOOTH_GENERATOR_WEIGHTS, 8
+        // FLAG_DONT_DEACTIVATE_CHILDREN_WITH_ZERO_WEIGHTS (the wheel's), 16 FLAG_PARAMETRIC_BLEND.
+        Case(check, "K-M16 fixture control: the blender words resolve as written through the production packfile reader (weights 1, 0 at +64, worldFromModelWeight 1 at +68, flags 8 at +90; a child binding on 'weight' and a blender binding on 'blendParameter' each listed in their binding set at +16)", () =>
+        {
+            var (_, read) = KM16("KM16fc", new FxBlender(new[] { 1f, 0f }, 8, BoundChildren: new[] { 1 }, BlenderBinding: "blendParameter"));
+            var p = HavokPackfile.Read(read(@"meshes\Lab\KM16fcBeh.hkx")!);
+            var g = p.OfClass("hkbBlenderGenerator").Single();
+            var kids = p.PointerArray(g, 96).Select(k => k!.Value).ToList();
+            var w = kids.Select(k => p.Single(k, 64)).ToArray(); var wfm = kids.Select(k => p.Single(k, 68)).ToArray();
+            short flags = p.Int16(g, 90);
+            string? Path(HavokObject o) => p.Pointer(o, 16) is { } set ? p.StructStrings(set, 16, 40, 1)[0] : null;
+            return (w.SequenceEqual(new[] { 1f, 0f }) && wfm.All(x => x == 1f) && flags == 8 && Path(kids[0]) is null && Path(kids[1]) == "weight" && Path(g) == "blendParameter",
+                    $"weights [{string.Join(",", w)}] wfm [{string.Join(",", wfm)}] flags {flags} bindings child0 {Path(kids[0])} child1 {Path(kids[1])} blender {Path(g)}");
+        });
+        Case(check, "K-M16 fixed one-hot weights (1, 0), no binding, flags 8 (the wheel's words): partner at K-M1's w = 0.5 pose never; the model names the fixed weights read from the file (rejects the weights not read: a blender witness over the simplex)", () =>
+        {
+            var (nif, read) = KM16("KM16", new FxBlender(new[] { 1f, 0f }, 8));
+            var m = MemberMotion.Read(nif, read, Mstt);
+            var d = MemberMotion.Decide(nif, m, VolumeGeometry.Render, V0, V0, 1f, new MemberSweep(), Touch(Cube(KM1P1.X, KM1P1.Y, 0, 1.5f)), read);
+            return (m.Status == "moving" && d.Decision == "never" && m.Mechanisms.Any(x => x.Kind == MemberMotion.KindBlender && x.Label.Contains("fixed weights")), $"{ShowMM(m)} [{string.Join(" | ", m.Mechanisms.Select(x => x.Label))}] | {ShowMD(d)}");
+        });
+        Case(check, "K-M16b the weights pick the child (two states, X a blender over SeqC and SeqB, Y plays SeqA): weights (1, 0) -> partner at K-M1's w = 0.5 pose never; weights (0, 1) -> witness origin blend (rejects the weights not read: the nested weight simplex read for both, the same answer for both; the children's order reversed: the answers swapped)", () =>
+        {
+            var p = Cube(KM1P1.X, KM1P1.Y, 0, 1.5f);
+            var (n10, r10) = KM16b("KM16b10", new FxBlender(new[] { 1f, 0f }, 8));
+            var (n01, r01) = KM16b("KM16b01", new FxBlender(new[] { 0f, 1f }, 8));
+            var d10 = DecideAt(n10, r10, Mstt, p); var d01 = DecideAt(n01, r01, Mstt, p);
+            return (d10.Decision == "never" && d01.Decision == "witness" && d01.Origin == MemberMotion.OriginBlend, $"(1,0): {ShowMD(d10)} | (0,1): {ShowMD(d01)}");
+        });
+        Case(check, "K-M17 regression guard (holds on the base): weights (1, 0) with the second child's weight bound to a graph variable keep the simplex: partner at the w = 0.5 pose witness origin blend (rejects a bound weight read as its stored constant: never)", () =>
+        {
+            var (nif, read) = KM16("KM17", new FxBlender(new[] { 1f, 0f }, 8, BoundChildren: new[] { 1 }));
+            var d = DecideAt(nif, read, Mstt, Cube(KM1P1.X, KM1P1.Y, 0, 1.5f));
+            return (d.Decision == "witness" && d.Origin == MemberMotion.OriginBlend, ShowMD(d));
+        });
+        Case(check, "K-M17b regression guard (holds on the base): weights (1, 0) with a variable binding on the blender itself (member path 'children:1/weight') keep the simplex: witness origin blend (rejects only the children's own binding sets read: never)", () =>
+        {
+            var (nif, read) = KM16("KM17b", new FxBlender(new[] { 1f, 0f }, 8, BlenderBinding: "children:1/weight"));
+            var d = DecideAt(nif, read, Mstt, Cube(KM1P1.X, KM1P1.Y, 0, 1.5f));
+            return (d.Decision == "witness" && d.Origin == MemberMotion.OriginBlend, ShowMD(d));
+        });
+        Case(check, "K-M17c regression guard (holds on the base): weights (1, 0) under FLAG_PARAMETRIC_BLEND (16; the weights are positions on the blend parameter's axis) keep the simplex: witness origin blend (rejects the parametric flag ignored: never)", () =>
+        {
+            var (nif, read) = KM16("KM17c", new FxBlender(new[] { 1f, 0f }, 16 | 8));
+            var d = DecideAt(nif, read, Mstt, Cube(KM1P1.X, KM1P1.Y, 0, 1.5f));
+            return (d.Decision == "witness" && d.Origin == MemberMotion.OriginBlend, ShowMD(d));
+        });
+        Case(check, "K-M17d regression guard (holds on the base): weights (1, 0) under FLAG_SMOOTH_GENERATOR_WEIGHTS (4; the weights move toward their values over time) keep the simplex: witness origin blend (rejects the smoothing flag ignored: never)", () =>
+        {
+            var (nif, read) = KM16("KM17d", new FxBlender(new[] { 1f, 0f }, 4 | 8));
+            var d = DecideAt(nif, read, Mstt, Cube(KM1P1.X, KM1P1.Y, 0, 1.5f));
+            return (d.Decision == "witness" && d.Origin == MemberMotion.OriginBlend, ShowMD(d));
+        });
+        Case(check, "K-M17e regression guard (holds on the base): weights (1, 0) with referencePoseWeightThreshold 0.5 (the reference pose may be mixed in) keep the simplex: witness origin blend (rejects the threshold ignored: never)", () =>
+        {
+            var (nif, read) = KM16("KM17e", new FxBlender(new[] { 1f, 0f }, 8, Threshold: 0.5f));
+            var d = DecideAt(nif, read, Mstt, Cube(KM1P1.X, KM1P1.Y, 0, 1.5f));
+            return (d.Decision == "witness" && d.Origin == MemberMotion.OriginBlend, ShowMD(d));
+        });
+        Case(check, "K-M18 regression guard (holds on the base): constant weights that are not one-hot (1, 1) keep the simplex: partner at K-M1's w = 0.3 pose witness origin blend (rejects constants narrowed to their normalised point, which the files do not establish: never)", () =>
+        {
+            var (nif, read) = KM16("KM18", new FxBlender(new[] { 1f, 1f }, 8));
+            var d = DecideAt(nif, read, Mstt, Cube(KM1P1b.X, KM1P1b.Y, 0, 1.5f));
+            return (d.Decision == "witness" && d.Origin == MemberMotion.OriginBlend, ShowMD(d));
+        });
+        // ================= K-M19 / K-M20: where the split is spent (lane N) =================
+        Case(check, "K-M19 two turns from one start (A 0 -> 20 deg, B 0 -> 80 deg): partner at 100 deg on Part's circle, 20 deg beyond every blend pose, default budget: never (rejects a split order whose sensitivities are measured at the family's lower corner, where B carries weight 0: the slerp family's B clock and weight are never split, cannot_tell with the budget exhausted)", () =>
+        {
+            var (nif, read) = KM19();
+            var p = Polar(100, 50);
+            var d = DecideAt(nif, read, Mstt, Cube(p.X, p.Y, 0, 1.5f));
+            return (d.Decision == "never", ShowMD(d));
+        });
+        Case(check, "K-M20 a turn ending near half a turn from a held pose (S 0 -> 160 deg, I held at -20 deg): partner 10 u above Part's circle, default budget: never (rejects a split of capped cells that spends evaluations on a clock that moves nothing: cannot_tell with the budget exhausted)", () =>
+        {
+            var (nif, read) = KM20();
+            var p = Polar(70, 50);
+            var d = DecideAt(nif, read, Mstt, Cube(p.X, p.Y, 10, 1.5f));
+            return (d.Decision == "never", ShowMD(d));
         });
         // ================= kept refusals (GATE-A §6) =================
         Case(check, "K-M14 kept refusal: a graph holding an hkbBoneWeightArray refuses by name ('hkbBoneWeightArray') (rejects per-bone weights read as one w)", () =>

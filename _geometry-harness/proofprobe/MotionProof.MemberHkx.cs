@@ -123,12 +123,20 @@ static partial class MotionProof
     /// or a blender over sequence generators.</summary>
     internal sealed record FxState(string Name, string Kind, string[] Sequences, bool SubtractLastChild = false);
 
+    /// <summary>A blender's own words for lane N (fixed blender weights): each child's weight (+64; worldFromModelWeight +68 is
+    /// written 1 for every child, as on the sharpening wheel), the blender's flags (int16 at +90), the children whose weight is bound
+    /// to a graph variable (a variable binding set on the child, member path "weight"), and a binding on the blender itself
+    /// (<paramref name="BlenderBinding"/> names its member path) and referencePoseWeightThreshold (+72). Offsets and the flag
+    /// values: HKX2 / hkxcmd class tables.</summary>
+    internal sealed record FxBlender(float[] Weights, short Flags = 0, int[]? BoundChildren = null, string? BlenderBinding = null,
+                                     float Threshold = 0f);
+
     /// <summary>The files a NIF naming <c>Lab\{name}.hkx</c> reads: project, character, behaviour and (with bones) skeleton, keyed by
     /// their Data-relative paths. Every graph carries a transition effect (duration <paramref name="duration"/>) as its class list;
     /// <paramref name="boneWeights"/> adds an hkbBoneWeightArray object.</summary>
     internal static Dictionary<string, byte[]> GraphFiles(string name, IReadOnlyList<FxState> states, float duration = 0.25f,
                                                          (string Bone, Quaternion R, Vector3 T)[]? skeleton = null, bool boneWeights = false,
-                                                         string transitionClass = "hkbBlendingTransitionEffect")
+                                                         string transitionClass = "hkbBlendingTransitionEffect", FxBlender? blender = null)
     {
         var files = new Dictionary<string, byte[]>(StringComparer.OrdinalIgnoreCase);
         var pj = new Hkx(); int p = pj.Add("hkbProjectStringData", 64); pj.StrArray(p, 48, $"{name}Char.hkx");
@@ -152,8 +160,27 @@ static partial class MotionProof
             else
             {
                 gen = bh.Add("hkbBlenderGenerator", 112); bh.Str(gen, 56, "Blend" + i).I8(gen, 92, (sbyte)(s.SubtractLastChild ? 1 : 0));
-                var kids = s.Sequences.Select(q => { int k = bh.Add("hkbBlenderGeneratorChild", 80); bh.Ptr(k, 48, Seq(q)).F32(k, 64, 1f); return k; }).ToArray();
-                bh.PtrArray(gen, 96, kids);
+                if (blender is null)
+                {
+                    var kids = s.Sequences.Select(q => { int k = bh.Add("hkbBlenderGeneratorChild", 80); bh.Ptr(k, 48, Seq(q)).F32(k, 64, 1f); return k; }).ToArray();
+                    bh.PtrArray(gen, 96, kids);
+                }
+                else
+                {
+                    // lane N: the blender's stated weights, flags and bindings (every blender state of the fixture takes them)
+                    int g0 = gen;
+                    bh.I8(g0, 90, unchecked((sbyte)(blender.Flags & 0xFF))).I8(g0, 91, unchecked((sbyte)(blender.Flags >> 8)));
+                    bh.F32(g0, 72, blender.Threshold);
+                    var kids = s.Sequences.Select((q, ci) =>
+                    {
+                        int k = bh.Add("hkbBlenderGeneratorChild", 80);
+                        bh.Ptr(k, 48, Seq(q)).F32(k, 64, blender.Weights[ci]).F32(k, 68, 1f);
+                        if (blender.BoundChildren?.Contains(ci) == true) bh.Ptr(k, 16, BindingSet(bh, "weight"));
+                        return k;
+                    }).ToArray();
+                    bh.PtrArray(g0, 96, kids);
+                    if (blender.BlenderBinding is { } path) bh.Ptr(g0, 16, BindingSet(bh, path));
+                }
             }
             int info = bh.Add("hkbStateMachineStateInfo", 112);
             bh.Ptr(info, 88, gen).Str(info, 96, s.Name).I32(info, 104, i);
@@ -181,6 +208,15 @@ static partial class MotionProof
             files[$@"meshes\Lab\{name}Skel.hkx"] = sk.Save();
         }
         return files;
+    }
+
+    /// <summary>An hkbVariableBindingSet with one binding (member path <paramref name="memberPath"/>, variable 0): bindings hkArray at
+    /// +16, hkbVariableBindingSetBinding stride 40, memberPath at 0, variableIndex at 28 (the layout HavokBehaviour reads).</summary>
+    static int BindingSet(Hkx bh, string memberPath)
+    {
+        int set = bh.Add("hkbVariableBindingSet", 40);
+        bh.StructArray(set, 16, 40, 1, new byte[40], (0, 0, memberPath));
+        return set;
     }
 
     // ---------------- NIF chains ----------------
