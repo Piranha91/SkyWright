@@ -213,6 +213,35 @@ static partial class MotionProof
         return Save(f, "hinge rod offset");
     }
 
+    /// <summary>K-M7c: HingeRod(0, -30, 45) with an active NiTransformController on the body node "Rod" turning it 0 -> 90 deg about +Z.</summary>
+    static byte[] AnimatedHingeRod()
+    {
+        var f = Load(HingeRod(0f, -30, 45));
+        var rod = f.Blocks.OfType<NiNode>().Single(n => n.Name?.String == "Rod");
+        int ri = f.Blocks.IndexOf(rod);
+        var ctl = new NiTransformController { Interpolator = new(f.AddBlock(new NiTransformInterpolator { Data = new(f.AddBlock(KeyData(new FxKeys("Rod", 0, 90)))) })),
+                                              StartTime = 0, StopTime = 1, Frequency = 1 };
+        ctl.Flags.Active = true; ctl.Target = new(ri); rod.Controller = new(f.AddBlock(ctl));
+        return Save(f, "animated hinge rod");
+    }
+
+    /// <summary>K-M7d: HingeRod(0, -30, 45) with a NiControllerManager on the root whose one sequence turns "Rod" 0 -> 90 deg.</summary>
+    static byte[] SequencedHingeRod()
+    {
+        var f = Load(HingeRod(0f, -30, 45));
+        var root = f.GetRootNodes().First();
+        var mtc = new NiMultiTargetTransformController(); int mtcIndex = f.AddBlock(mtc);
+        var mgr = new NiControllerManager(); int mgrIndex = f.AddBlock(mgr);
+        var seq = new NiControllerSequence { Name = new NiStringRef("Swing"), CycleType = CycleType.CYCLE_CLAMP, StartTime = 0, StopTime = 1, Frequency = 1, Weight = 1 };
+        seq.ControlledBlocks = new List<ControlledBlock> { new() { NodeName = new NiStringRef("Rod"), ControllerType = new NiStringRef("NiTransformController"),
+            Interpolator = new(f.AddBlock(new NiTransformInterpolator { Data = new(f.AddBlock(KeyData(new FxKeys("Rod", 0, 90)))) })), Controller = new(mtcIndex) } };
+        seq.NumControlledBlocks = 1;
+        mgr.ControllerSequences ??= new(); mgr.ControllerSequences.AddBlockRef(f.AddBlock(seq)); mgr.NumControllerSequences = 1;
+        mgr.NextController = new(mtcIndex);
+        root.Controller = new(mgrIndex);
+        return Save(f, "sequenced hinge rod");
+    }
+
     /// <summary>K-M8: an immovable anchor at the origin; "Upper" (render and movable body [0,50]x[-1,1]x[-1,1]) on a limited hinge
     /// about +Z through the origin, limits +-30 deg; "Lower" ([50,100]x[-1,1]x[-1,1]) on a limited hinge about +Z through (50,0,0) to
     /// Upper, +-30 deg. All nodes at identity under the root. Tip at both +30 deg: R30((50,0,0) + R30(50,0,0)) = (68.3, 68.3, 0).</summary>
@@ -558,15 +587,21 @@ static partial class MotionProof
             (MemberMotion.SwingMeaning(true) == "can rest against when disturbed" && MemberMotion.SwingMeaning(false).Contains("visible clip")
              && MemberMotion.Read(HingeRod(0f, -30, 45), null, Mstt).Mechanisms.Any(x => x.Kind == MemberMotion.KindHinge),
              $"{MemberMotion.SwingMeaning(true)} / {MemberMotion.SwingMeaning(false)} / {ShowMM(MemberMotion.Read(HingeRod(0f, -30, 45), null, Mstt))}"));
-        Case(check, "K-M7c pinned rod whose hinged node also carries an active transform controller (the rabbits' shape): refused naming 'pinned body's node is also animated' (Gate B review decision 1: rejects a region that takes the hinge or the controller alone)", () =>
+        // lane K (2026-10-10, Piranha's decision 6): inverted from Gate B review decision 1's refusal after the in-game reading
+        Case(check, "K-M7c pinned rod (limits [-30, +45]) whose body node also carries an active NiTransformController turning it 0 -> 90 deg (the rabbits' shape): the hinge swing alone, labelled with the in-game reading's limit: partner at +40 deg witness origin swing; at +70 deg (the controller's sweep only) never; mechanisms hinge without clip (rejects the named refusal kept; the controller's sweep added to or taken instead of the swing; the limit label dropped)", () =>
         {
-            var f = Load(HingeRod(0f, -30, 45));
-            var rod = f.Blocks.OfType<NiNode>().Single(n => n.Name?.String == "Rod");
-            int ri = f.Blocks.IndexOf(rod);
-            var ctl = new NiTransformController { Interpolator = new(f.AddBlock(new NiTransformInterpolator { Data = new(f.AddBlock(KeyData(new FxKeys("Rod", 0, 15)))) })),
-                                                  StartTime = 0, StopTime = 1, Frequency = 1 };
-            ctl.Flags.Active = true; ctl.Target = new(ri); rod.Controller = new(f.AddBlock(ctl));
-            var m = MemberMotion.Read(Save(f, "animated hinge rod"), null, Mstt);
+            var nif = AnimatedHingeRod();
+            var m = MemberMotion.Read(nif, null, Mstt);
+            MemberDecision At(double deg) { var p = Polar(deg, 80); return DecideAt(nif, null, Mstt, Cube(p.X, p.Y, 0, 2f)); }
+            var a = At(40); var c = At(70);
+            bool label = m.Labels.Any(l => l.Contains("moved nothing when the 3D was created in view") && l.Contains("whether it ever runs is not established"));
+            return (m.Status != "refused" && m.Mechanisms.Any(x => x.Kind == MemberMotion.KindHinge) && !m.Mechanisms.Any(x => x.Kind == MemberMotion.KindClip) && label
+                    && a.Decision == "witness" && a.Origin == MemberMotion.OriginSwing && c.Decision == "never",
+                    $"{ShowMM(m)} labels=[{string.Join(" | ", m.Labels)}] | +40 {ShowMD(a)} | +70 {ShowMD(c)}");
+        });
+        Case(check, "K-M7d regression guard (holds on the base): the same rod driven by a NiControllerSequence (not measured in game) stays refused naming 'pinned body's node is also animated' (rejects the rule widened past the NiTransformController the reading measured)", () =>
+        {
+            var m = MemberMotion.Read(SequencedHingeRod(), null, Mstt);
             return (m.Status == "refused" && (m.Reason ?? "").Contains("pinned body's node is also animated"), ShowMM(m));
         });
         // ================= K-M8: two hinges =================
