@@ -1,0 +1,174 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Evaluation settings</title>
+<style>
+:root { --bg:#f7f7f5; --card:#ffffff; --ink:#1d1d1b; --muted:#5f5f5a; --line:#deded8; --accent:#2f5d8a; --warn:#8a4b12; --chosen:#e8f0f8; }
+@media (prefers-color-scheme: dark) { :root { --bg:#191a1c; --card:#222327; --ink:#ececea; --muted:#a6a6a0; --line:#3a3b40; --accent:#8bb6e0; --warn:#e0a35f; --chosen:#25303b; } }
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+body { margin:0; background:var(--bg); color:var(--ink); font:15px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; }
+main { max-width: 860px; margin: 0 auto; padding: 24px 16px 96px; overflow-wrap: anywhere; }
+code { word-break: break-all; }
+html, body { overflow-x: hidden; }
+h1 { font-size: 22px; margin: 0 0 4px; }
+.lede { color: var(--muted); margin: 0 0 20px; }
+section { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 14px 16px; margin: 0 0 14px; }
+section h2 { font-size: 16px; margin: 0 0 8px; }
+.row { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 260px); gap: 6px 16px; padding: 10px 0; border-top: 1px solid var(--line); align-items: start; }
+.row:first-of-type { border-top: 0; }
+.row.chosen { background: linear-gradient(90deg, var(--chosen), transparent 70%); }
+.label { font-weight: 600; }
+.help, .why { color: var(--muted); font-size: 13px; margin-top: 2px; }
+.why b { font-weight: 600; color: var(--ink); }
+.tag { display: inline-block; font-size: 11px; padding: 1px 6px; border-radius: 8px; border: 1px solid var(--line); color: var(--muted); margin-left: 6px; font-weight: 400; }
+.tag.new { border-color: var(--warn); color: var(--warn); }
+select, input[type=text], input[type=number] { width: 100%; padding: 6px 8px; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); color: var(--ink); font: inherit; }
+details > summary { cursor: pointer; color: var(--accent); margin-top: 6px; }
+.readout { color: var(--muted); font-size: 13px; }
+footer { position: fixed; left: 0; right: 0; bottom: 0; background: var(--card); border-top: 1px solid var(--line); }
+footer .in { max-width: 860px; margin: 0 auto; padding: 10px 16px; display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+button { font: inherit; padding: 8px 18px; border-radius: 6px; border: 1px solid var(--accent); background: var(--accent); color: var(--card); cursor: pointer; }
+button.secondary { background: transparent; color: var(--accent); }
+#status { color: var(--muted); font-size: 13px; flex: 1 1 240px; }
+#status.err { color: var(--warn); }
+pre { white-space: pre-wrap; word-break: break-all; background: var(--bg); border: 1px solid var(--line); padding: 8px; border-radius: 6px; font-size: 12px; }
+@media (max-width: 600px) { .row { grid-template-columns: 1fr; } }
+</style>
+</head>
+<body>
+<main>
+  <h1>Worldspace evaluation settings</h1>
+  <p class="lede">Each choice is set to a default with its reason. Change what you want and press Save. Every later
+  evaluation reads these choices without showing this page; reopen it with <code>evalsettings.py window</code>.
+  Saved to <code>{{FILE}}</code>.</p>
+  <div id="form"></div>
+  <section id="models-note" hidden><p class="help">Model choices are instructions the evaluation skill reads and passes
+  when it delegates work; nothing in code can enforce which model does it. "Same as the session" uses the model of
+  the session you run the evaluation in.</p></section>
+  <section id="fallback" hidden><h2>Saving without the server</h2><p class="help">This page was opened as a file, so
+  it cannot save. Paste this command in a terminal from the houseCARL checkout:</p><pre id="cmd"></pre></section>
+</main>
+<footer><div class="in"><button id="save">Save</button><button id="cancel" class="secondary">Close without saving</button><span id="status"></span></div></footer>
+<script id="hc-eval-settings" type="application/json">/*HC_SETTINGS*/null</script>
+<script>
+(function () {
+  "use strict";
+  var B = JSON.parse(document.getElementById("hc-eval-settings").textContent || "null") || {options: [], effective: {}, chosen: [], newOptions: []};
+  var opts = B.options, eff = Object.assign({}, B.effective), chosen = {}, dirty = {};
+  (B.chosen || []).forEach(function (k) { chosen[k] = true; });
+  var form = document.getElementById("form"), status = document.getElementById("status");
+  var sections = {}, rows = {};
+  function txt(v, o) { return v === null || v === undefined ? "" : String(v); }
+  function shown(o) {
+    if (!o.when) return true;
+    return Object.keys(o.when).every(function (k) { return o.when[k].indexOf(eff[k]) >= 0; });
+  }
+  function control(o) {
+    var el, v = eff[o.key];
+    if (o.type === "enum" || o.type === "bool") {
+      el = document.createElement("select");
+      var choices = o.type === "bool" ? [true, false] : o.allowed.slice();
+      if (o.default === null) { var d = document.createElement("option"); d.value = "__default"; d.textContent = "default (" + (o.defaultText || "tool default") + ")"; el.appendChild(d); }
+      choices.forEach(function (c) { var op = document.createElement("option"); op.value = JSON.stringify(c); op.textContent = o.type === "bool" ? (c ? "on" : "off") : c; el.appendChild(op); });
+      el.value = v === null ? "__default" : JSON.stringify(v);
+      el.addEventListener("change", function () { set(o, el.value === "__default" ? null : JSON.parse(el.value)); });
+    } else if (o.type === "model") {
+      el = document.createElement("input"); el.type = "text"; el.value = txt(v);
+      el.placeholder = o.allowOff ? "off, session, or a model name" : "session, or a model name";
+      el.addEventListener("change", function () { set(o, el.value.trim() || null); });
+    } else {
+      el = document.createElement("input");
+      el.type = (o.type === "int" || o.type === "number") ? "number" : "text";
+      if (o.type === "number") el.step = "any";
+      el.value = txt(v); el.placeholder = o.defaultText || "";
+      el.addEventListener("change", function () {
+        var t = el.value.trim();
+        set(o, t === "" ? null : (el.type === "number" ? Number(t) : t));
+      });
+    }
+    el.setAttribute("aria-label", o.label);
+    return el;
+  }
+  function set(o, v) { eff[o.key] = v === null ? o.default : v; chosen[o.key] = true; dirty[o.key] = v; refresh(); }
+  function build() {
+    opts.forEach(function (o) {
+      var sec = sections[o.section];
+      if (!sec) {
+        sec = document.createElement("section"); var h = document.createElement("h2"); h.textContent = o.section; sec.appendChild(h);
+        var more = document.createElement("details"); var s = document.createElement("summary"); s.textContent = "More"; more.appendChild(s);
+        sec._more = more; form.appendChild(sec); sections[o.section] = sec;
+      }
+      var row = document.createElement("div"); row.className = "row";
+      var left = document.createElement("div");
+      var l = document.createElement("div"); l.className = "label"; l.textContent = o.label;
+      if ((B.newOptions || []).indexOf(o.key) >= 0) { var t = document.createElement("span"); t.className = "tag new"; t.textContent = "new"; l.appendChild(t); }
+      var tg = document.createElement("span"); tg.className = "tag"; l.appendChild(tg); row._tag = tg;
+      var help = document.createElement("div"); help.className = "help"; help.textContent = o.help;
+      var why = document.createElement("div"); why.className = "why"; why.innerHTML = "<b>Default:</b> "; why.appendChild(document.createTextNode(o.reason + (o.cost && o.cost !== "-" ? " Cost: " + o.cost : "")));
+      left.appendChild(l); left.appendChild(help); left.appendChild(why);
+      row.appendChild(left); row.appendChild(control(o));
+      (o.more ? sec._more : sec).appendChild(row);
+      rows[o.key] = row;
+    });
+    Object.keys(sections).forEach(function (k) { var s = sections[k]; if (s._more.children.length > 1) s.appendChild(s._more); });
+    var vid = sections["Video"];
+    if (vid) { var r = document.createElement("p"); r.className = "readout"; r.textContent = "Found on this machine: ffmpeg " + (B.ffmpeg || "not found") + "; browser for the PDF " + (B.browser || "not found") + "."; vid.insertBefore(r, vid.children[1]); }
+    var mn = document.getElementById("models-note"); if (sections["Models"]) { mn.hidden = false; sections["Models"].appendChild(mn.firstElementChild); mn.remove(); }
+  }
+  function refresh() {
+    opts.forEach(function (o) {
+      var row = rows[o.key]; row.hidden = !shown(o);
+      row.classList.toggle("chosen", !!chosen[o.key]);
+      row._tag.textContent = chosen[o.key] ? "your choice" : "default";
+    });
+    Object.keys(sections).forEach(function (k) {
+      var s = sections[k], rs = s.querySelectorAll(".row");
+      var any = Array.prototype.some.call(rs, function (r) { return !r.hidden; });
+      s.hidden = !any;
+      var moreRows = s._more.querySelectorAll(".row");
+      s._more.hidden = !Array.prototype.some.call(moreRows, function (r) { return !r.hidden; });
+    });
+    if (!B.saveUrl) {
+      var parts = Object.keys(chosen).filter(function (k) { return k in dirty || (B.chosen || []).indexOf(k) >= 0; }).map(function (k) {
+        var v = k in dirty ? dirty[k] : eff[k]; return k + "=" + (v === null ? "null" : (typeof v === "string" && /\s/.test(v) ? '"' + v + '"' : String(v)));
+      });
+      document.getElementById("cmd").textContent = "python _geometry-harness/evalsettings.py set " + (parts.join(" ") || "evaluation.depth=" + eff["evaluation.depth"]);
+    }
+  }
+  function payload() {
+    var out = {};
+    Object.keys(chosen).forEach(function (k) {
+      var v = k in dirty ? dirty[k] : eff[k];
+      if (v === null || v === undefined) return;
+      var p = k.split("."), cur = out;
+      for (var i = 0; i < p.length - 1; i++) { cur[p[i]] = cur[p[i]] || {}; cur = cur[p[i]]; }
+      cur[p[p.length - 1]] = v;
+    });
+    return out;
+  }
+  var finished = false;
+  document.getElementById("save").addEventListener("click", function () {
+    if (!B.saveUrl) { status.textContent = "Opened as a file: use the command below to save."; return; }
+    fetch(B.saveUrl, {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify({token: B.token, settings: payload()})})
+      .then(function (r) { return r.json().then(function (j) { return [r.status, j]; }); })
+      .then(function (x) {
+        if (x[0] === 200) { finished = true; status.className = ""; status.textContent = "Saved to " + x[1].file + ". You can close this tab."; document.getElementById("save").disabled = true; }
+        else { status.className = "err"; status.textContent = x[1].error || "Not saved."; }
+      }).catch(function () { status.className = "err"; status.textContent = "The settings server is no longer running; nothing was saved."; });
+  });
+  function closeBeacon() {
+    if (finished || !B.closeUrl) return; finished = true;
+    var body = JSON.stringify({token: B.token});
+    if (navigator.sendBeacon) navigator.sendBeacon(B.closeUrl, body); else fetch(B.closeUrl, {method: "POST", body: body, keepalive: true});
+  }
+  document.getElementById("cancel").addEventListener("click", function () { closeBeacon(); status.textContent = "Closed without saving; the built-in defaults apply until you save."; });
+  window.addEventListener("pagehide", closeBeacon);
+  build(); refresh();
+  if (!B.saveUrl) { document.getElementById("fallback").hidden = false; }
+})();
+</script>
+</body>
+</html>
