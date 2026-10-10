@@ -31,11 +31,13 @@ FIXT = HERE / "fixtures" / "evalrun"          # tracked: the generator, the fake
 EXPECTED = FIXT / "expected"
 GEN = FIXT / "_generated"                     # generated per run; never tracked (set in main())
 EVALRUN = HARNESS / "evalrun.py"
-# conflictdiff.exe must exist somewhere: the checkout's own harness when it is built, else the tree named by
-# HOUSECARL_EVALRUN_TEST_HARNESS (a worktree borrowing the main checkout's Release binaries). Never a silent
-# skip - a missing binary fails the run and says so.
+# conflictdiff is built from this checkout's source into the run's temp folder once per run (use_conflictdiff), so
+# a stale binary is never tested; HOUSECARL_EVALRUN_TEST_HARNESS names a tree to use as given instead (reproducing
+# an old run). Never a silent skip - a failed build or a missing binary fails the run and says so.
+DIFF_NAME = "conflictdiff.exe" if os.name == "nt" else "conflictdiff"
 REAL_HARNESS = Path(os.environ.get("HOUSECARL_EVALRUN_TEST_HARNESS", HARNESS))
-DIFF_EXE = REAL_HARNESS / "conflictdiff" / "bin" / "Release" / "net9.0" / ("conflictdiff.exe" if os.name == "nt" else "conflictdiff")
+DIFF_EXE = REAL_HARNESS / "conflictdiff" / "bin" / "Release" / "net9.0" / DIFF_NAME
+DIFF_SOURCE: str | None = None                # set by use_conflictdiff(): where this run's conflictdiff came from
 
 PROBES = ["navownprobe", "overlapprobe", "contactprobe", "bosprobe", "switchprobe", "stateprobe",
           "scopeprobe", "adviceprobe", "patchprobe", "driftprobe", "seamprobe", "waterprobe",
@@ -3936,6 +3938,43 @@ class SweepInProc:
         return path
 
 
+def use_conflictdiff(tmp: Path) -> None:
+    """Choose this run's conflictdiff, once: the tree HOUSECARL_EVALRUN_TEST_HARNESS names, used as given, or else a
+    build of this checkout's conflictdiff into `tmp`. The build's output folder starts empty, so a failed build
+    cannot leave an older binary to be tested. Raises SystemExit with one sentence when the build fails."""
+    global REAL_HARNESS, DIFF_EXE, DIFF_SOURCE
+    if DIFF_SOURCE is not None:
+        return
+    explicit = os.environ.get("HOUSECARL_EVALRUN_TEST_HARNESS")
+    if explicit:
+        REAL_HARNESS = Path(explicit)
+        DIFF_EXE = REAL_HARNESS / "conflictdiff" / "bin" / "Release" / "net9.0" / DIFF_NAME
+        DIFF_SOURCE = (f"  conflictdiff source: explicit harness HOUSECARL_EVALRUN_TEST_HARNESS={explicit} "
+                       f"(not rebuilt from this checkout's source)")
+        return
+    csproj = HARNESS / "conflictdiff" / "conflictdiff.csproj"
+    build = Path(tmp) / "conflictdiff-build"
+    harness = build / "harness"
+    out = harness / "conflictdiff" / "bin" / "Release" / "net9.0"
+    cmd = ["dotnet", "build", str(csproj), "-c", "Release", "--nologo", "--disable-build-servers",
+           "--artifacts-path", str(build / "artifacts"), "-o", str(out)]
+    try:
+        r = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=600)
+        why = None if r.returncode == 0 else f"dotnet exit {r.returncode}"
+        log = r.stdout + r.stderr
+    except FileNotFoundError:
+        why, log = "dotnet not found", ""
+    if why is None and not ((out / DIFF_NAME).exists() and (out / "conflictdiff.dll").exists()):
+        why = f"dotnet exit 0 but no conflictdiff in {out}"
+    if why:
+        tail = "\n".join(log.strip().splitlines()[-15:])
+        raise SystemExit((tail + "\n" if tail else "") +
+                         f"  FAIL  conflictdiff did not build from {csproj} ({why}); the suite will not test an "
+                         f"older binary - fix the build or set HOUSECARL_EVALRUN_TEST_HARNESS to the tree to test.")
+    REAL_HARNESS, DIFF_EXE = harness, out / DIFF_NAME
+    DIFF_SOURCE = f"  conflictdiff source: built from {csproj} into {out} for this run"
+
+
 def diff_exe_identity() -> str:
     """The conflictdiff build a run compared with: path, sha256 and mtime of the exe and of its dll (the code)."""
     out = []
@@ -6407,10 +6446,18 @@ def main() -> int:
         return 1
     os.environ.setdefault("HOUSECARL_RUNLOG_DIR", str(tmp / "runlog"))
     os.environ["PYTHONIOENCODING"] = "utf-8"
+    try:
+        use_conflictdiff(tmp)
+    except SystemExit as ex:
+        print(ex)
+        shutil.rmtree(tmp, ignore_errors=True)
+        return 1
     if not DIFF_EXE.exists():
         print(f"  FAIL  conflictdiff is not built at {DIFF_EXE} - build it (dotnet build -c Release) or set "
               f"HOUSECARL_EVALRUN_TEST_HARNESS to a tree that has it. The real diff is not optional here.")
+        shutil.rmtree(tmp, ignore_errors=True)
         return 1
+    print(DIFF_SOURCE)
     print(diff_exe_identity())
     ran = 0
     try:

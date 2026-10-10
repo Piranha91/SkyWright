@@ -18,7 +18,8 @@ Cases (EXPECTED.md section 1):
   R7 import-origin                one mcp-only check imported on four arms: fresh, reused, a pre-origin receipt,
                                   and one blocked by its prerequisite after the fact
 
-Needs conflictdiff.exe: the checkout's own harness when built, else HOUSECARL_EVALRUN_TEST_HARNESS.
+Builds conflictdiff from this checkout's source into the output folder (test_evalrun.use_conflictdiff), unless
+HOUSECARL_EVALRUN_TEST_HARNESS names a tree to use as given.
 """
 from __future__ import annotations
 
@@ -418,6 +419,7 @@ def generate(root: Path, only: str | None = None) -> dict:
         print(f"  evalrun under test: {T.EVALRUN}")
     os.environ.setdefault("HOUSECARL_RUNLOG_DIR", str(root / "runlog"))
     os.environ["PYTHONIOENCODING"] = "utf-8"
+    T.use_conflictdiff(root)                  # a no-op when the calling suite already chose this run's conflictdiff
     if not T.DIFF_EXE.exists():
         raise SystemExit(f"conflictdiff is not built at {T.DIFF_EXE} - build it or set "
                          f"HOUSECARL_EVALRUN_TEST_HARNESS to a tree that has it.")
@@ -446,6 +448,8 @@ def main() -> int:
     a = ap.parse_args()
     generate(Path(a.out), a.only)
     print(f"fixtures written under {a.out}")
+    print(T.DIFF_SOURCE)
+    print(T.diff_exe_identity())
     return 0
 
 

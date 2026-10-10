@@ -7,7 +7,8 @@ fake probes): K14 the default is unchanged when the check is not opted in; K15 o
 evaluation incomplete; K13 an import is refused for each named wrong input and accepted only when its launches re-read
 to a settled reading. Synthetic launch receipts only; a recorded lab receipt is replayed outside the tracked tree.
 
-conflictdiff.exe must exist: this checkout's Release build, or the tree named by HOUSECARL_EVALRUN_TEST_HARNESS.
+conflictdiff is built from this checkout's source once per run (test_evalrun.use_conflictdiff), or taken as given
+from the tree named by HOUSECARL_EVALRUN_TEST_HARNESS; a failed build fails the run.
 """
 from __future__ import annotations
 
@@ -26,7 +27,6 @@ HERE = Path(__file__).resolve().parent
 HARNESS = HERE.parent
 FIXT = HERE / "fixtures" / "evalrun"
 EVALRUN = HARNESS / "evalrun.py"
-REAL_HARNESS = Path(os.environ.get("HOUSECARL_EVALRUN_TEST_HARNESS", HARNESS))
 PROBES = ["navownprobe", "overlapprobe", "contactprobe", "bosprobe", "switchprobe", "stateprobe",
           "scopeprobe", "adviceprobe", "patchprobe", "driftprobe", "seamprobe", "waterprobe",
           "blockprobe", "depprobe", "fomodprobe", "poolprobe"]
@@ -36,6 +36,8 @@ CASE = "case-01-geometry-and-quest"
 sys.path.insert(0, str(HARNESS))
 sys.path.insert(0, str(HARNESS.parent / "scripts"))
 import evalrun as E  # noqa: E402  (pure helpers only: configuration_fingerprint)
+sys.path.insert(0, str(HERE))
+import test_evalrun as T  # noqa: E402  (use_conflictdiff: this run's conflictdiff)
 
 FAILURES, PASSED = [], []
 
@@ -63,7 +65,7 @@ def probe_cmds():
 def plan(gen, run, registry, extra=()):
     d = gen / "cases" / CASE
     r = ev(["plan", "--registry", gen / "registry" / registry, "--scope", d / "scope.json",
-            "--candidates", d / "candidates", "--out", run, "--harness", REAL_HARNESS] + probe_cmds() + list(extra),
+            "--candidates", d / "candidates", "--out", run, "--harness", T.REAL_HARNESS] + probe_cmds() + list(extra),
            d / "scenario.json")
     if r.returncode:
         print(r.stdout[-2000:], r.stderr[-2000:])
@@ -172,6 +174,14 @@ def imp(run, manifest):
 def main():
     tmp = Path(tempfile.mkdtemp(prefix="evallive-"))
     try:
+        try:
+            T.use_conflictdiff(tmp)
+        except SystemExit as ex:
+            print(ex)
+            check(False, "conflictdiff built for this run")
+            return 1
+        print(T.DIFF_SOURCE)
+        print(T.diff_exe_identity())
         gen = tmp / "gen"
         g = subprocess.run([sys.executable, str(FIXT / "make_fixtures.py"), "--out", str(gen)],
                            capture_output=True, text=True)

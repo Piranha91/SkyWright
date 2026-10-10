@@ -10,8 +10,9 @@ asserted comes from `fixtures/evalreport/expected/*.json`, written from PLAN.md'
 acceptance table BEFORE the compiler existed. Where the code and the oracle disagree the oracle is not edited
 to match: the test fails and the disagreement is reported with both values and the rule.
 
-A missing compiler, a missing conflictdiff.exe or a missing browser is a FAILURE that names the file - never
-a skip.
+conflictdiff is built from this checkout's source once per run (HOUSECARL_EVALRUN_TEST_HARNESS names a tree to
+use as given instead). A missing compiler, a conflictdiff that does not build or a missing browser is a FAILURE
+that names the file - never a skip.
 """
 from __future__ import annotations
 
@@ -2385,6 +2386,13 @@ def main() -> int:
         check_direction_inference()
         check_stylesheet_escaping()
         print("=== fixtures ===")
+        try:
+            MF.T.use_conflictdiff(tmp)
+        except SystemExit as ex:
+            print(ex)
+            FAILURES.append("conflictdiff did not build")
+            return 1
+        print(MF.T.DIFF_SOURCE)
         print(MF.T.diff_exe_identity())
         t0 = time.time()
         try:
