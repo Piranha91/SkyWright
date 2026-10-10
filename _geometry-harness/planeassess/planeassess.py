@@ -1357,7 +1357,10 @@ def rescore_step(g, arm, renders, out, order_file=None, gzip_raw=False):
     done, seen = 0, set()
     for rep in reps:
         zipped = rep.suffix == ".gz"
-        raw = gzip.decompress(rep.read_bytes()) if zipped else rep.read_bytes()
+        try:
+            raw = gzip.decompress(rep.read_bytes()) if zipped else rep.read_bytes()
+        except FileNotFoundError:        # another rescore of the same folder gzipped it meanwhile; its .gz is read next time
+            continue
         d = json.loads(raw.decode("utf-8"))
         label = d.get("viewLabel")
         dest = out / ("%s.json" % label)
@@ -1372,7 +1375,7 @@ def rescore_step(g, arm, renders, out, order_file=None, gzip_raw=False):
         if gzip_raw and not zipped:
             with gzip.open(str(rep) + ".gz", "wb", compresslevel=6) as fh:
                 fh.write(raw)
-            rep.unlink()
+            rep.unlink(missing_ok=True)
         dest.write_text(json.dumps(facts), encoding="utf-8")
         done += 1
         print("rescored", label, flush=True)
