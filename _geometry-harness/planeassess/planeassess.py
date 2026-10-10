@@ -1326,6 +1326,20 @@ def _arm_order(g, arm, order_file=None):
     return order_plugins(g, arm)
 
 
+def finished_chunks(render_out):
+    """Chunk folders a render ledger records as finished (exit 0 or 3, not stopped); with no ledger, every folder (a
+    copied or hand-made render folder). A chunk still rendering has no row yet, so its reports are never read half-written."""
+    f = Path(render_out) / "ledger.jsonl"
+    if not f.exists():
+        return {d.name for d in Path(render_out).iterdir() if d.is_dir()}
+    out = set()
+    for line in f.read_text(encoding="utf-8").splitlines():
+        r = json.loads(line) if line.strip() else {}
+        if "shots" in r and not r.get("stopped") and r.get("exitCode") in (0, 3):
+            out.add(r["chunk"])
+    return out
+
+
 def rescore_step(g, arm, renders, out, order_file=None, gzip_raw=False):
     """Every plane of every planes report under `renders` (raw or gzipped) -> <out>/<view label>.json (predict.rescore_view
     with the arm's plane winners and the mods' drawn content). A view already re-scored is skipped. With `gzip_raw`, a raw
@@ -1339,6 +1353,7 @@ def rescore_step(g, arm, renders, out, order_file=None, gzip_raw=False):
     reps = []
     for r in renders:
         reps += sorted(Path(r).glob("*/*-fp-planes.json")) + sorted(Path(r).glob("*/*-fp-planes.json.gz"))
+    reps = [p for p in reps if p.parent.name in finished_chunks(p.parent.parent)]
     done, seen = 0, set()
     for rep in reps:
         zipped = rep.suffix == ".gz"
