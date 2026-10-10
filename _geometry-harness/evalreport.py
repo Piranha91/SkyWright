@@ -798,6 +798,10 @@ def is_base_game(name: str, words: dict) -> bool:
     return n in listed or bool(prefix and n.startswith(prefix) and n.endswith((".esm", ".esp", ".esl")))
 
 
+class InputRefused(Exception):
+    """An input the compiler will not use, with the one-sentence reason; `plan` exits 2 with it."""
+
+
 def build_prediction(ctx: dict) -> dict:
     """The prediction, coverage and validation blocks a report leads with.
 
@@ -845,28 +849,94 @@ def build_prediction(ctx: dict) -> dict:
 
     # --- per (check, arm): measured rows, measured with no conflict file, or nothing
     rows_by, prefixes, measured, count_only = {}, {}, set(), {}
-    for f in findings:
-        if f.get("part") not in ("arm", None):
-            continue
-        key = (f.get("checkId"), f.get("armId"))
-        if f.get("kind") == "null":
-            measured.add(key)
-        elif f.get("kind") == "finding":
-            measured.add(key)
-            c = f.get("counts") or {}
-            if not (c.get("A") and c.get("B")):
-                count_only[key] = count_only.get(key, 0) + int(c.get("findings") or 0)
+
+    def collect(fs, prefix=""):
+        for f in fs:
+            if f.get("part") not in ("arm", None):
                 continue
-            for r in f.get("allRows") or f.get("rows") or []:
-                # one entry per reported row (a record can carry several conflicts); presence elsewhere is read on
-                # the record and its pair, the first five parts of the key
-                rk = (f.get("checkId"), str(c.get("groupKind") or ""), str(c.get("A")), str(c.get("B")), r.get("formKey"),
-                      str(r.get("summary") or ""))
-                rows_by.setdefault(key, {})[rk] = {"finding": f, "row": r,
-                                                   "history": f.get("readerEvidenceReason") == "context-only-kind"}
-                prefixes.setdefault(key, set()).add(rk[:5])
+            key = (f.get("checkId"), prefix + str(f.get("armId")))
+            if f.get("kind") == "null":
+                measured.add(key)
+            elif f.get("kind") == "finding":
+                measured.add(key)
+                c = f.get("counts") or {}
+                if not (c.get("A") and c.get("B")):
+                    count_only[key] = count_only.get(key, 0) + int(c.get("findings") or 0)
+                    continue
+                for r in f.get("allRows") or f.get("rows") or []:
+                    # one entry per reported row (a record can carry several conflicts); presence elsewhere is read
+                    # on the record and its pair, the first five parts of the key
+                    rk = (f.get("checkId"), str(c.get("groupKind") or ""), str(c.get("A")), str(c.get("B")),
+                          r.get("formKey"), str(r.get("summary") or ""))
+                    rows_by.setdefault(key, {})[rk] = {"finding": f, "row": r,
+                                                       "history": f.get("readerEvidenceReason") == "context-only-kind"}
+                    prefixes.setdefault(key, set()).add(rk[:5])
+    collect(findings)
+
+    # --- the sibling: a separate evaluation of the same order without the patch, whose single-mod setups stand in
+    #     for the ones this bundle lacks. Strict by design: its setup must be this bundle's P plugin for plugin,
+    #     hash for hash, and a check is used only where both ran the same adapter and probe build and measured the
+    #     same rows on that shared setup. Otherwise nothing is joined (refusal) or the check stays unseparated.
+    sibling, sib_ok, sibling_record = ctx.get("sibling"), {}, None
+    if sibling is not None and p_targets:
+        main_b, sib_b = ctx["mainBundle"], sibling["bundle"]
+
+        def ident(bundle, arm_id):
+            a = next((x for x in bundle.plan.get("arms") or [] if x.get("armId") == arm_id), {}) or {}
+            req = a.get("requested") or {}
+            plugs = tuple((str(x.get("name")), str(x.get("sha256") or "")) for x in req.get("plugins") or [])
+            states = tuple(req.get("states") or (a.get("expected") or {}).get("states") or [])
+            return plugs, req.get("population"), states
+
+        p_plugs, p_pop, p_states = ident(main_b, p_arm)
+        sib_idents = {x.get("armId"): ident(sib_b, x.get("armId")) for x in sib_b.plan.get("arms") or []}
+        anchor = next((a for a, v in sib_idents.items() if v == (p_plugs, p_pop, p_states)), None)
+        if anchor is None:
+            raise InputRefused("sibling-foreign: the sibling bundle has no setup with the same plugins, in the same "
+                               "order and with the same bytes, as the setup without the patch, so nothing was joined.")
+        collect(sibling["findings"], "sibling:")
+
+        def sib_role(drop_lower):
+            want = (tuple(x for x in p_plugs if x[0].lower() not in drop_lower), p_pop, p_states)
+            return next((a for a, v in sib_idents.items() if v == want), None)
+        roles = {}
+        if w_arm is None:
+            w_sib = sib_role(pt_lower)
+            if w_sib:
+                w_arm = roles["without the evaluated mods"] = "sibling:" + w_sib
+        for t in list(s_arms):
+            if s_arms[t] is None:
+                s_sib = sib_role(pt_lower - {str(t).lower()})
+                if s_sib:
+                    s_arms[t] = roles[f"only {t}"] = "sibling:" + s_sib
+
+        def receipt_tool(bundle, check_id, arm_id):
+            rc = bundle.receipt_by_key.get((check_id, arm_id, "arm")) or bundle.receipt_by_key.get((check_id, arm_id, None))
+            t = ((rc or {}).get("consumed") or {}).get("tool") or {}
+            return t.get("dllSha256"), t.get("coreDllSha256")
+
+        checks_record = []
+        for check_id in sorted({c for c, _ in measured if c}):
+            why = None
+            if (main_b.checks.get(check_id) or {}).get("adapter") != (sib_b.checks.get(check_id) or {}).get("adapter"):
+                why = "the two evaluations ran this check with different adapters"
+            elif (check_id, p_arm) not in measured or (check_id, "sibling:" + anchor) not in measured:
+                why = "one of the two evaluations did not measure this check on the shared setup"
+            else:
+                mt, st = receipt_tool(main_b, check_id, p_arm), receipt_tool(sib_b, check_id, anchor)
+                if mt[0] and st[0] and mt != st:
+                    why = "the two evaluations ran this check with different probe builds"
+                elif (prefixes.get((check_id, p_arm)) or set()) != (prefixes.get((check_id, "sibling:" + anchor)) or set()):
+                    why = "the two evaluations measured different results for this check on the shared setup"
+            sib_ok[check_id] = why is None
+            checks_record.append({"checkId": check_id, "joined": why is None, "why": why})
+        sibling_record = {"pathAsGiven": sibling.get("pathAsGiven"), "planId": sibling.get("planId"),
+                          "manifestSha256": sibling.get("manifestSha256"), "anchorArm": anchor,
+                          "roles": {k: v.split(":", 1)[1] for k, v in roles.items()}, "checks": checks_record}
 
     def present(arm_id, rk):
+        if arm_id is not None and str(arm_id).startswith("sibling:") and not sib_ok.get(rk[0]):
+            return False                       # a sibling check that does not match on the shared setup is unused
         return arm_id is not None and tuple(rk[:5]) in (prefixes.get((rk[0], arm_id)) or set())
 
     def admission(rk, history):
@@ -887,6 +957,8 @@ def build_prediction(ctx: dict) -> dict:
         sides = [x for x in (rk[2], rk[3]) if x.lower() in pt_lower]
         if len(p_targets) <= 1:
             return "single-mod", (sides[0] if sides else None), None
+        if any(str(s_arms.get(t)).startswith("sibling:") for t in p_targets) and not sib_ok.get(rk[0]):
+            return "not-separable", None, words["notSeparableWhy"]["siblingDisagrees"]
         unmeasured = [t for t in p_targets if s_arms.get(t) is None or (rk[0], s_arms[t]) not in measured]
         if unmeasured:
             if all(s_arms.get(t) is None for t in p_targets):
@@ -984,7 +1056,9 @@ def build_prediction(ctx: dict) -> dict:
                   "noneFoundBasis": None if items else bind(words["noneFoundBasis"], {
                       "checks": len(checks_on_p), "checkNoun": "check" if len(checks_on_p) == 1 else "checks",
                       "subject": subject}),
-                  "record": record}
+                  "record": record, "detailAsideWords": words.get("detailAside") or {},
+                  "sibling": sibling_record,
+                  "siblingSource": words.get("siblingSource") if sibling_record and sibling_record["roles"] else None}
 
     # --- coverage: what the checks could not judge, by named reason and count
     reasons = words["coverageReasons"]
@@ -1003,8 +1077,9 @@ def build_prediction(ctx: dict) -> dict:
         for check_id, arms_ in sorted(by_check.items(), key=lambda kv: title_of(kv[0])):
             # a missing comparison part is the comparison with the measured order, not the setup's own result
             def place(a, part):
-                label = labels.get(a, "a tested setup")
-                label = label[:1].lower() + label[1:]                 # it follows "for" / "of" mid-sentence
+                label = labels.get(a)
+                # it follows "for" / "of" mid-sentence: lower-cased, with its article
+                label = ("the " + label[:1].lower() + label[1:]) if label else "a tested setup"
                 return (f"the comparison of {label} with the measured load order" if part in ("diff", "reverse")
                         else label)
             setups = sorted({(a, part) for a, part in arms_ if a}, key=lambda x: (str(x[0]), str(x[1])))
@@ -1107,8 +1182,18 @@ def build_prediction(ctx: dict) -> dict:
 
 
 def compile_plan(bundle_dir: Path, verify: dict, settings: dict, pr: dict, bundle_dir_as_given: str,
-                 location_scopes: dict | None = None) -> dict:
+                 location_scopes: dict | None = None, sibling_dir: Path | None = None,
+                 sibling_as_given: str | None = None) -> dict:
+    """sibling_dir: a verified bundle of the same order without the patch; its single-mod setups stand in for the ones
+    this bundle lacks (build_prediction's join). Raises InputRefused when it cannot be joined at all."""
     b = Bundle(bundle_dir)
+    sibling = None
+    if sibling_dir is not None:
+        sib_plan = compile_plan(Path(sibling_dir), verify, settings, pr, str(sibling_dir))
+        sibling = {"bundle": Bundle(Path(sibling_dir)), "findings": sib_plan.get("findings") or [],
+                   "planId": Bundle(Path(sibling_dir)).plan.get("planId"),
+                   "manifestSha256": sha256_file(Path(sibling_dir) / "manifest.json"),
+                   "pathAsGiven": sibling_as_given or str(sibling_dir)}
     disp = b.disposition
     ev = disp.get("evaluation") or {}
     arms_disp = disp.get("arms") or {}
@@ -1875,6 +1960,13 @@ def compile_plan(bundle_dir: Path, verify: dict, settings: dict, pr: dict, bundl
                                  + ("this change" if words else "no plugin change"))
             a["readerLabel"] = f"{a['displayLabel']} ({words + '; ' if words else ''}{a['setupOrdinal']})"
     arm_labels = {a["armId"]: a["readerLabel"] for a in arms_out}
+    # a list of locations several setups share is printed once, at the first setup that has it; later ones point at it
+    first_with = {}
+    for a in arms_out:
+        locs = tuple(a["locationPluginScope"].get("locations") or [])
+        a["locationPluginScope"]["sameAs"] = first_with.get(locs) if locs else None
+        if locs:
+            first_with.setdefault(locs, a["readerLabel"])
     for f in findings:
         f["readerArmLabel"] = arm_labels.get(f.get("armId"), "Measured setup")
         c = f.get("counts") or {}
@@ -1992,7 +2084,23 @@ def compile_plan(bundle_dir: Path, verify: dict, settings: dict, pr: dict, bundl
         c = f.get("counts") or {}
         pair = {str(x).lower() for x in (c.get("A"), c.get("B")) if x}
         f["readerRelevant"] = bool(f.get("readerRelevant", True)) and (not pair or bool(pair & reader_scope_names))
-    compared = ", ".join(comparison_names) if comparison_names else "the measured load order"
+    # The detail list shows only clashes between two different mods. A result within one mod, against the base game,
+    # or naming no pair at all (a count only) is set aside to the evidence index with its reason; readerRelevant is
+    # unchanged, so the verdict, the opening and the reel read what they read before.
+    aside_counts = collections.Counter()
+    for f in findings:
+        if f.get("kind") != "finding":
+            continue
+        c = f.get("counts") or {}
+        a_, b_ = c.get("A"), c.get("B")
+        aside = ("countOnly" if not (a_ and b_) else "sameMod" if str(a_).lower() == str(b_).lower() else
+                 "baseGame" if (is_base_game(a_, reader_data.get("prediction") or {})
+                                or is_base_game(b_, reader_data.get("prediction") or {})) else None)
+        f["readerDetail"] = aside is None
+        f["readerDetailAside"] = aside
+        if aside and f.get("readerRelevant"):
+            aside_counts[aside] += 1
+    compared =", ".join(comparison_names) if comparison_names else "the measured load order"
     unstated_text = (f" One tested setup differs by {', '.join(unstated_difference_plugins)}, "
                      f"which is not declared as a patch; it is reported as a plugin that "
                      f"differs, not as an evaluated patch."
@@ -2298,13 +2406,21 @@ def compile_plan(bundle_dir: Path, verify: dict, settings: dict, pr: dict, bundl
         "checkTitle": b.check_title, "armLabels": arm_labels,
         "familyTitle": lambda x: (b.families.get(x) or {}).get("title") or str(x),
         "oldVerdict": verdict, "limitations": limitations, "words": reader_data["prediction"],
-        "inGame": reader_data.get("inGame") or {}, "kindPhrases": reader_data.get("kindPhrases") or {}})
+        "inGame": reader_data.get("inGame") or {}, "kindPhrases": reader_data.get("kindPhrases") or {},
+        "mainBundle": b, "sibling": sibling})
     verdict = lead["prediction"]["verdict"]
     reader["verdict"] = verdict
     reader["prediction"] = lead["prediction"]
     reader["coverage"] = lead["coverage"]
     reader["validation"] = lead["validation"]
     reader["sectionHeadings"].update(lead["headings"])
+    pw = reader_data.get("prediction") or {}
+    aside_total = sum(aside_counts.values())
+    reader["detailAsideLine"] = (bind(pw["detailAsideLine"], {
+        "count": fmt_n(aside_total), "resultNoun": "result" if aside_total == 1 else "results",
+        "parts": "; ".join(f"{fmt_n(aside_counts[k])} {pw['detailAside'][k]}"
+                           for k in ("baseGame", "sameMod", "countOnly") if aside_counts.get(k))})
+                                 if aside_total else None)
     # the `missing` chapter names every required missing check id, one caption per status group
     missing_by_status: dict = collections.OrderedDict()
     for m in missing:
@@ -2582,8 +2698,12 @@ def effective_view(plan: dict, rows_per_group: int, figures_per_finding: int, pr
         missing_rows.append(row)
     # section 3, compact: per check, per (arm, part) block with its groups
     blocks = collections.OrderedDict()
+    detail_aside = []
     for f in findings:
         if f["kind"] != "finding" or not f.get("readerRelevant"):
+            continue
+        if f.get("readerDetail") is False:                  # not a clash between two mods: the evidence index lists it
+            detail_aside.append(f)
             continue
         cb = blocks.setdefault(f["checkId"], {"checkId": f["checkId"], "title": f.get("title"),
                                               "check": (plan["scope"].get("checks") or {}).get(f["checkId"]) or {},
@@ -2604,6 +2724,7 @@ def effective_view(plan: dict, rows_per_group: int, figures_per_finding: int, pr
     view = dict(plan)
     view["missingRows"] = missing_rows
     view["findingBlocks"] = finding_blocks
+    view["detailAside"] = detail_aside
     view["unjudgeable"] = [f for f in findings if f["kind"] == "unassessed" and f.get("area") == "unjudgeable"]
     view["unassessedOther"] = [f for f in findings if f["kind"] == "unassessed" and f.get("area") not in ("unjudgeable", "media")]
     view["findings"] = findings
@@ -2754,7 +2875,23 @@ def cmd_plan(a) -> int:
                     "reel": {k: (pr.get("reel") or {}).get(k) for k in ("maxSeconds", "fps", "width", "height")}}
         if a.mode == "exhaustive":
             settings["maxPages"] = None
-        plan = compile_plan(bundle, verify, settings, pr, str(a.bundle), location_scopes)
+        sibling = Path(a.sibling_bundle) if getattr(a, "sibling_bundle", None) else None
+        if sibling is not None:
+            sman = load_json(sibling / "manifest.json")
+            if not isinstance(sman, dict) or sman.get("bundleSchema") != BUNDLE_SCHEMA:
+                return refuse(r, f"sibling-unreadable: {sibling / 'manifest.json'} is not a schema-{BUNDLE_SCHEMA} bundle "
+                                 f"manifest, so nothing was joined.")
+            sdir = out / "sibling-verify"
+            sdir.mkdir(parents=True, exist_ok=True)
+            sverify, _, serr = run_verify_bundle(sibling, sdir, a.verify_copy)
+            if sverify is None or not (sverify.get("bundle") or {}).get("complete"):
+                return refuse(r, f"sibling-refused: verify-bundle did not find the sibling bundle complete "
+                                 f"({serr or 'see sibling-verify/verify.json'}), so nothing was joined.")
+        try:
+            plan = compile_plan(bundle, verify, settings, pr, str(a.bundle), location_scopes,
+                                sibling_dir=sibling, sibling_as_given=getattr(a, "sibling_bundle", None))
+        except InputRefused as ex:
+            return refuse(r, str(ex))
         for arm_id, doc in location_scopes.items():
             dest = out / "evidence" / f"location-scope-{arm_id}.json"
             write_json(dest, doc)
@@ -3321,6 +3458,9 @@ def build_parser() -> argparse.ArgumentParser:
                    help="verify a temporary copy of the bundle so the bundle directory itself is never written to")
     p.add_argument("--location-scope", action="append", default=[], metavar="ARM=FILE",
                    help="bind a scopeprobe location-contributor document to an arm; repeat for multiple arms")
+    p.add_argument("--sibling-bundle", default=None, metavar="DIR",
+                   help="a bundle of the same order without the patch; its single-mod setups attribute this report's "
+                        "prediction when its setup matches this bundle's setup without the patch plugin for plugin")
     p.add_argument("--declare-patch", action="append", default=[], metavar="PLUGIN",
                    help="declare a plugin as a patch under evaluation; repeat for several. Patch "
                         "identity is never inferred from plugin membership, so an arm that differs "

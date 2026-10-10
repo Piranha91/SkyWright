@@ -10,7 +10,9 @@
 {% for g in pred["items"] %}- **{{ g.title }}:** {{ g.plain }} {{ g.inGameText }}{% for fid in g.findingIds[:1] %} [Full evidence](evidence-index.md#{{ fid }}).{% endfor %}
 
 {% endfor %}
-{% if pred.noneFoundBasis %}{{ pred.noneFoundBasis }}
+{% if pred.get("siblingSource") %}{{ pred.siblingSource }}
+
+{% endif %}{% if pred.noneFoundBasis %}{{ pred.noneFoundBasis }}
 
 {% endif %}
 {% for item in pred.missingFacts %}{{ item }}
@@ -63,12 +65,13 @@ Evaluation record: {{ p.reader.context.evaluatedAt or "date not supplied" }}. St
 {% else %}{{ p.reader.locationOrder.empty or "No evidenced plugin was identified." }}
 {% endfor %}
 
-Scope:
+{% if a.locationPluginScope.get("sameAs") %}{{ p.reader.locationOrder.sameScope or "Scope: the same locations as listed for" }} **{{ a.locationPluginScope.sameAs }}**.
+{% else %}Scope:
 
 ```text
 {{ (a.locationPluginScope.locations|join("; ") or "no CELL or worldspace location was supplied")|wordwrap(90, break_long_words=false, break_on_hyphens=false) }}
 ```
-
+{% endif %}
 Coverage: {{ "all contributors to the listed locations identified" if a.locationPluginScope.complete else "incomplete — " ~ a.locationPluginScope.missingInput }}
 
 {% endfor %}
@@ -102,6 +105,9 @@ Coverage: {{ "all contributors to the listed locations identified" if a.location
 
 *Evidence image.* [Image provenance](evidence-index.md#{{ m.id }}).
 {% endif %}{% endfor %}{% endfor %}{% endfor %}{% endfor %}
+{% if p.reader.get("detailAsideLine") %}
+{{ p.reader.detailAsideLine }} [Set aside from this list](evidence-index.md#detail-set-aside).
+{% endif %}
 
 ## {{ p.reader.sectionHeadings.changes }}
 

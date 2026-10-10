@@ -592,7 +592,7 @@ def main():
         line = next((ln for ln in cov.splitlines() if "Could not be judged" in ln), "")
         plan4, md4, _ = get("four", four_setup_unpatched)
         cov4 = section_text(md4, headings(plan4).get("coverage") or "\0")
-        ok = (line.count("7") == 1 and "for tested alternative setup" in cov4 and "for Tested" not in cov4)
+        ok = (line.count("7") == 1 and "for the tested alternative setup" in cov4 and "for Tested" not in cov4)
         return ok, f"line {line!r}; setup wording in four-setup coverage: {'for Tested' in cov4}"
 
     # 13. the detail list shows only clashes between two mods; the rest is in the evidence index with its reason

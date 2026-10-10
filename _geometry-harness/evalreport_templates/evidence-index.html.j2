@@ -41,6 +41,14 @@
 {% for r in p.reader.prediction.record %}<li>{{ r.checkId }} {{ r.kind }} {{ r.A }} x {{ r.B }} <code>{{ r.formKey|txt }}</code>: {{ r.admission }}{% if r.get("attribution") %}, {{ r.attribution }}{% if r.get("attributionMod") %} ({{ r.attributionMod }}){% endif %}{% endif %}{% if r.findingId %} — <a href="#{{ r.findingId }}">{{ r.findingId }}</a>{% endif %}</li>
 {% endfor %}
 </ul>
+{% set sib = p.reader.prediction.get("sibling") %}{% if sib %}
+<h2 id="sibling-evaluation">Sibling evaluation</h2>
+<p>The single-mod setups this prediction reads were measured in a separate bundle: <code>{{ sib.pathAsGiven }}</code>, plan <code>{{ sib.planId }}</code>, manifest sha256 <code>{{ sib.manifestSha256 }}</code>. Its setup <code>{{ sib.anchorArm }}</code> has the same plugins, in the same order and with the same bytes, as <code>{{ p.reader.prediction.predictionArm }}</code>.</p>
+<ul>{% for role, arm in sib.roles.items() %}<li>{{ role }}: <code>{{ arm }}</code></li>{% endfor %}{% for c in sib.checks %}<li><code>{{ c.checkId }}</code>: {% if c.joined %}joined{% else %}not joined — {{ c.why }}{% endif %}</li>{% endfor %}</ul>
+{% endif %}
+<h2 id="detail-set-aside">Set aside from the detail list ({{ p.detailAside|length }})</h2>
+<p>Results of the checks that are not clashes between two different mods, so the report's detail list leaves them out: the reason, the setup and the pair.</p>
+<ul>{% for f in p.detailAside %}<li><a href="#{{ f.id }}">{{ f.id }}</a> <code>{{ f.checkId }}</code> on {{ f.readerArmLabel }}: {{ (p.reader.prediction.get("detailAsideWords") or {}).get(f.readerDetailAside, f.readerDetailAside) }}{% if f.counts.get("A") %} ({{ f.counts.get("A") }} x {{ f.counts.get("B") }}){% endif %}. {{ f.readerPlain }}{% if f.get("readerProvenance") %} {{ f.readerProvenance }}{% endif %}</li>{% else %}<li>Nothing was set aside.</li>{% endfor %}</ul>
 
 <h2 id="imported-evidence">Imported evidence ({{ (p.imports.rows if p.imports else [])|length }})</h2>
 
