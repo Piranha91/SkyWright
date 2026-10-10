@@ -1409,7 +1409,8 @@ def check_missing_setup_naming(bundle: Path):
 IMPORT_ORIGIN_CASE = "R7-import-origin"
 
 
-def import_origin_view(bundle: Path, drop_disposition_list: bool, strip_receipts: bool, same_evaluation=None):
+def import_origin_view(bundle: Path, drop_disposition_list: bool, strip_receipts: bool, same_evaluation=None,
+                       with_index=False):
     """The same bundle read with less (or differently declared) origin information, compiled in memory (the
     patch-direction control's method).
 
@@ -1473,6 +1474,8 @@ def import_origin_view(bundle: Path, drop_disposition_list: bool, strip_receipts
                                   settings["layout"])
     md = module.env(False).get_template("report.md.j2").render(p=shown, css="")
     html = module.env(True).get_template("report.html.j2").render(p=shown, css="")
+    if with_index:
+        return plan, md, html, module.env(False).get_template("evidence-index.md.j2").render(p=shown, css="")
     return plan, md, html
 
 
@@ -1577,10 +1580,18 @@ def import_origin_control(tmp: Path, index: dict):
           and "reused" not in fresh_line.lower(),
           f"{label}: a fresh result carries no reuse or unknown-origin qualification, and the controller's `reused` "
           f"ledger status never reaches the reader (got {fresh_line!r})")
-    check(normalise(reused_sentence) in normalise(md) and normalise(unknown_sentence) in normalise(md),
-          f"{label}: report.md carries both qualifications")
-    check(html_escape(reused_sentence) in html and html_escape(unknown_sentence) in html,
-          f"{label}: report.html carries both qualifications")
+    # Re-baselined 2026-10-09 (lane P, D1 accepted): the reused result reports a count with no pair of mods, so it
+    # leaves the report's detail list for the evidence index's set-aside list, and its qualification travels with it
+    # (said beside the result, where the result is printed). The legacy result's line is a no-finding line and stays.
+    check(normalise(unknown_sentence) in normalise(md), f"{label}: report.md carries the unknown-origin qualification")
+    check(html_escape(unknown_sentence) in html, f"{label}: report.html carries the unknown-origin qualification")
+    reused_ids = [f.get("id") for f in pres.get("findings") or [] if f.get("kind") == "finding"
+                  and f.get("checkId") == check_id and f.get("armId") == reused_arm]
+    aside_lines = [ln for ln in idx.splitlines() if ln.startswith("- [") and any(f"[{i}]" in ln for i in reused_ids)
+                   and "naming no pair of mods" in ln]
+    check(bool(reused_ids) and any(normalise(reused_sentence) in normalise(ln) for ln in aside_lines),
+          f"{label}: the reused result's set-aside line in evidence-index.md carries its qualification "
+          f"(ids {reused_ids}, lines {aside_lines[:1]!r})")
     check("fresh" not in normalise(legacy_line).lower() and legacy_arm not in md,
           f"{label}: the legacy result is never called fresh and no setup id leaks into the report")
     for token in (fixture["reusedFrom"]["planId"], fixture["reusedFrom"]["resultSha256"],
@@ -1594,7 +1605,8 @@ def import_origin_control(tmp: Path, index: dict):
     same_words = ("This result was not measured for this setup: it was reused from another setup in this evaluation "
                   "whose tested configuration is the same, and that source was stated by whoever supplied it rather "
                   "than re-checked here.")
-    same_plan, same_md, same_html = import_origin_view(bundle, False, False, same_evaluation=reused_arm)
+    same_plan, same_md, same_html, same_idx = import_origin_view(bundle, False, False, same_evaluation=reused_arm,
+                                                                 with_index=True)
     same_lines = all_reader_lines(same_plan)
     same_line = next((x for x in same_lines if arm_labels[reused_arm] in x and import_title in x), "")
     check(same_words.rstrip(".") in same_line,
@@ -1602,8 +1614,10 @@ def import_origin_control(tmp: Path, index: dict):
           f"this evaluation (got {same_line!r})")
     check(reused_sentence.rstrip(".") not in same_line,
           f"{label}/within: and no longer claims it came from an earlier evaluation (got {same_line!r})")
-    check(normalise(same_words) in normalise(same_md) and html_escape(same_words) in same_html,
-          f"{label}/within: both report formats carry it")
+    # re-baselined 2026-10-09 (lane P, D1): the count-only reused result is listed in the evidence index's set-aside
+    # list, and its qualification with it
+    check(normalise(same_words) in normalise(same_idx) and normalise(same_words) not in normalise(same_md),
+          f"{label}/within: the evidence index's set-aside line carries it, beside the result")
     # against the SAME in-memory path with only the declaration changed (comparing an in-memory plan with the
     # on-disk compile would compare two different code paths, which differ by one evidence row for the report itself)
     base_view, _, _ = import_origin_view(bundle, False, False)
@@ -1641,15 +1655,16 @@ def import_origin_control(tmp: Path, index: dict):
           f"{label}: its evidence-index sentence keeps the prerequisite's own check id")
 
     # ---- an older bundle: no disposition list, the same origins derived from the receipts
-    derived, derived_md, _ = import_origin_view(bundle, drop_disposition_list=True, strip_receipts=False)
+    derived, derived_md, _, derived_idx = import_origin_view(bundle, drop_disposition_list=True,
+                                                             strip_receipts=False, with_index=True)
     derived_rows = {r.get("armId"): r.get("origin") for r in ((derived.get("imports") or {}).get("rows") or [])}
     expect([(derived.get("imports") or {}).get("source"),
             [derived_rows.get(a) for a in (fresh_arm, reused_arm, legacy_arm)]],
            ["receipts", ["fresh", "reused", "unknown"]],
            f"{label}: a bundle whose disposition lists no imports derives the same origins from its receipts")
-    check(normalise(reused_sentence) in normalise(derived_md)
+    check(normalise(reused_sentence) in normalise(derived_idx)
           and normalise(unknown_sentence) in normalise(derived_md),
-          f"{label}: that older bundle's report carries the same qualifications")
+          f"{label}: that older bundle's report and index carry the same qualifications, each where its result is")
 
     # ---- no measured count moves because of any of it
     stripped, stripped_md, _ = import_origin_view(bundle, drop_disposition_list=True, strip_receipts=True)
@@ -2322,7 +2337,7 @@ def case_r8(tmp, index, common) -> None:
         r.setdefault("findingIds", [])
         r.setdefault("receiptEvidenceId", None)
         r.setdefault("indexOrigin", "captured for another evaluation and reused here")
-    shown = {"imports": got, "findings": [], "groups": [], "media": [], "evidence": [], "omissions": [],
+    shown = {"imports": got, "findings": [], "detailAside": [], "groups": [], "media": [], "evidence": [], "omissions": [],
              "chapters": [], "presentationId": "P", "generatedUtc": "now", "layout": "normal",
              "reader": {"prediction": {"record": [], "predictionArm": "baseline"}},
              "source": {"planId": "PLAN", "bundleDir": ".", "manifestSha256": "", "dispositionSha256": "",
