@@ -62,6 +62,7 @@ internal static class WinningRefsSelfTest
                          Dictionary<FormKey, FormKey> CellOf)
     {
         public HashSet<FormKey>? TakenOut { get; set; }
+        public int? EdgeAdded { get; set; }
     }
 
     static void Body(string root)
@@ -117,7 +118,18 @@ internal static class WinningRefsSelfTest
         // ---- THE MASTER -----------------------------------------------------------------------------------------
         //   E00: R1 R5 R6 R7 R12 R13        E10: R2 R8        E55: R9        T (persistent): R3 R10 R11        I1: R4
         var master = new SkyrimMod(mKey, Rel);
-        master.Statics.Add(new Static(stat, Rel) { EditorID = "WrStatic", Model = new Model { File = "Meshes\\wr\\static.nif" } });
+        static ObjectBounds Obnd(short x0, short y0, short z0, short x1, short y1, short z1) =>
+            new() { First = new P3Int16(x0, y0, z0), Second = new P3Int16(x1, y1, z1) };
+        master.Statics.Add(new Static(stat, Rel) { EditorID = "WrStatic", Model = new Model { File = "Meshes\\wr\\static.nif" },
+                                                   ObjectBounds = Obnd(-10, -10, 0, 10, 10, 20) });
+        // The ring edge (E cases): three more modelled bases, their OBNDs the only thing that differs.
+        var statBig = M(0x802); var statHuge = M(0x803); var statPole = M(0x804);
+        master.Statics.Add(new Static(statBig, Rel) { EditorID = "WrBig", Model = new Model { File = "Meshes\\wr\\big.nif" },
+                                                      ObjectBounds = Obnd(-3000, -100, 0, 3000, 100, 500) });
+        master.Statics.Add(new Static(statHuge, Rel) { EditorID = "WrHuge", Model = new Model { File = "Meshes\\wr\\huge.nif" },
+                                                       ObjectBounds = Obnd(-6000, -100, 0, 6000, 100, 500) });
+        master.Statics.Add(new Static(statPole, Rel) { EditorID = "WrPole", Model = new Model { File = "Meshes\\wr\\pole.nif" },
+                                                       ObjectBounds = Obnd(-100, -100, 0, 100, 100, 6000) });
         var mTop = new Cell(topK, Rel) { Flags = default };
         mTop.Persistent.Add(Ref(R(3), stat, 200, 200));                     // inside (0,0)
         mTop.Persistent.Add(Ref(R(10), stat, 300, 300));                    // inside (0,0)
@@ -137,9 +149,29 @@ internal static class WinningRefsSelfTest
         mE10.Temporary.Add(Ref(R(29), stat, 4220, 110));                    // X deletes it in a copy of E10 holding nothing else
         var mE55 = Ext(e55, 5, 5); mE55.Temporary.Add(Ref(R(9), stat, 5 * 4096 + 100, 5 * 4096 + 100));
         var mE50 = Ext(e50, 5, 0);
+        // ---- THE RING EDGE (target E00 (0,0): the 3x3 spans [-4096, 8192) on each axis) ------------------------------
+        //   E20 (2,0), two cells out: R40 big, enters; R41 small, does not; R43 pole tipped toward the ring (rot Y +90),
+        //   enters; R44 tipped away (rot Y -90), does not; R45 upright, does not; R47 big, A moves it to E50; R49 big, A
+        //   deletes it; R50 big at scale 2, enters only because of the scale.   E30 (3,0): R42 huge, enters from 3 out.
+        //   T: R46 persistent big at a position two cells out, enters.   E50: R48 big, A moves it into E20.
+        var e20 = M(0x845); var e30 = M(0x846);
+        static PlacedObject Rot(PlacedObject r, float rx, float ry, float rz) { r.Placement!.Rotation = new P3Float(rx, ry, rz); return r; }
+        static PlacedObject Scaled(PlacedObject r, float s) { r.Scale = s; return r; }
+        var mE20 = Ext(e20, 2, 0);
+        mE20.Temporary.Add(Ref(R(40), statBig, 9192, 100));
+        mE20.Temporary.Add(Ref(R(41), stat, 9192, 200));
+        mE20.Temporary.Add(Rot(Ref(R(43), statPole, 9500, 300), 0, MathF.PI / 2, 0));
+        mE20.Temporary.Add(Rot(Ref(R(44), statPole, 9500, 400), 0, -MathF.PI / 2, 0));
+        mE20.Temporary.Add(Ref(R(45), statPole, 9500, 500));
+        mE20.Temporary.Add(Ref(R(47), statBig, 9192, 700));
+        mE20.Temporary.Add(Ref(R(49), statBig, 9192, 900));
+        mE20.Temporary.Add(Scaled(Ref(R(50), statBig, 11692, 1000), 2f));
+        var mE30 = Ext(e30, 3, 0); mE30.Temporary.Add(Ref(R(42), statHuge, 12800, 100));
+        mTop.Persistent.Add(Ref(R(46), statBig, 9192, 600));
+        mE50.Temporary.Add(Ref(R(48), statBig, 5 * 4096 + 100, 800));
         // A second CELL record at the target's own grid (0,0) in the same worldspace.
         var mE00b = Ext(M(0x844), 0, 0); mE00b.Temporary.Add(Ref(R(28), stat, 200, 300));
-        master.Worldspaces.Add(World(wKey, mTop, mE00, mE10, mE50, mE55, mE00b));
+        master.Worldspaces.Add(World(wKey, mTop, mE00, mE10, mE50, mE55, mE00b, mE20, mE30));
         var mI1 = Int(i1); mI1.Temporary.Add(Ref(R(4), stat, 400, 0)); FileInterior(master, mI1);
         var mI2 = Int(i2); FileInterior(master, mI2);
         var mPath = Write(master);
@@ -167,12 +199,17 @@ internal static class WinningRefsSelfTest
             c00.Temporary.Add(DeletedRef(R(30)));                           // R30: deleted here, placed again far away by B
             var c10 = Ext(e10, 1, 0); c10.Temporary.Add(Ref(R(7), stat, 4400, 200)); c10.Temporary.Add(Ref(R(17), stat, 4500, 200));
             var c50 = Ext(e50, 5, 0); c50.Temporary.Add(Ref(R(1), stat, 5 * 4096 + 200, 300)); c50.Temporary.Add(Ref(R(5), stat, 5 * 4096 + 210, 300));
+            c50.Temporary.Add(Ref(R(47), statBig, 5 * 4096 + 300, 700));    // E5a: out of the edge to five cells out
+            var c20 = Ext(e20, 2, 0);
+            c20.Temporary.Add(Ref(R(48), statBig, 9192, 800));               // E5b: from five cells out into the edge
+            c20.Temporary.Add(DeletedRef(R(49)));                            // E7: deleted, no placement data
             var c55 = Ext(e55, 5, 5); c55.Temporary.Add(Ref(R(3), stat, 5 * 4096 + 300, 5 * 4096 + 300));
-            a.Worldspaces.Add(World(wKey, top, c00, c10, c50, c55));
+            a.Worldspaces.Add(World(wKey, top, c00, c10, c50, c55, c20));
             var w2t = new Cell(w2Top, Rel) { Flags = default };
             w2t.Persistent.Add(Ref(R(15), stat, 400, 400)); w2t.Persistent.Add(Ref(R(16), stat, 170, 100));
             var w2c = Ext(w2e00, 0, 0); w2c.Temporary.Add(Ref(R(14), stat, 160, 100));
-            a.Worldspaces.Add(World(w2Key, w2t, w2c));
+            var w2c20 = Ext(M(0x864), 2, 0); w2c20.Temporary.Add(Ref(R(51), statBig, 9192, 100));   // E8: another world
+            a.Worldspaces.Add(World(w2Key, w2t, w2c, w2c20));
             var ci2 = Int(i2); ci2.Temporary.Add(Ref(R(4), stat, 450, 50)); FileInterior(a, ci2);
         }
         // ---- B: R5 moves back into E00, at a third position ---------------------------------------------------------
@@ -194,11 +231,28 @@ internal static class WinningRefsSelfTest
 
         var pa = Write(a, mOv); var pb = Write(b, mOv); var px = Write(x, mOv); var py = Write(y, mOv);
 
+        // The ring-edge admission (lane V, 2026-10-10). Read by name, so this file compiles against the walk before it,
+        // where every E case then fails as "no edge merge in this build". The interface the fix must provide:
+        //   void TrackEdge(FormKey targetWorldspace, (int X, int Y) targetGrid, bool ringRefs)   -- before the walk
+        //   int  MergeEdge(Func<PlacedRef, (Vec3 Min, Vec3 Max)?> localBounds)                    -- after MergePersistent
+        // localBounds is the reference's box in its own frame (the base's OBND here, as Program.cs's baseObnd); MergeEdge
+        // places it (scale, SpatialOverlap.RefrRotation, position) and admits it when it enters the 3x3.
+        var edgeBounds = new Dictionary<FormKey, (Vec3 Min, Vec3 Max)>();
+        foreach (var s in mOv.Statics)
+            if (s.ObjectBounds is { } ob)
+                edgeBounds[s.FormKey] = (new Vec3(ob.First.X, ob.First.Y, ob.First.Z), new Vec3(ob.Second.X, ob.Second.Y, ob.Second.Z));
+        Func<PlacedRef, (Vec3 Min, Vec3 Max)?> localBounds = r => r.Base is { } bk && edgeBounds.TryGetValue(bk, out var bb) ? bb : null;
+        var flags = System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Public;
+        var trackEdge = typeof(WinningRefWalk).GetMethod("TrackEdge", flags);
+        var mergeEdge = typeof(WinningRefWalk).GetMethod("MergeEdge", flags);
+        bool edgeBuilt = trackEdge is not null && mergeEdge is not null;
+
         Walked Walk(FormKey cell, bool interior, (int, int)? grid, params string[] order) => WalkR(cell, interior, grid, true, order);
         Walked WalkR(FormKey cell, bool interior, (int, int)? grid, bool ringRefs, params string[] order)
         {
             var w = new Walked(new(), new(), new());
             var walk = new WinningRefWalk(w.WinRef, w.Persistent, w.CellOf);
+            if (edgeBuilt && !interior && grid is { } tg0) trackEdge!.Invoke(walk, new object[] { wKey, tg0, ringRefs });
             foreach (var path in order)
             {
                 using var mod = SkyrimMod.CreateFromBinaryOverlay(path, Rel);
@@ -209,6 +263,7 @@ internal static class WinningRefsSelfTest
                 }
             }
             if (!interior && grid is { } g) walk.MergePersistent(wKey, g, ringRefs);
+            if (edgeBuilt && !interior && grid is not null) w.EdgeAdded = (int)mergeEdge!.Invoke(walk, new object[] { localBounds })!;
             // Read by name: the count and its keys belong to the fix, and this file must compile against the walk
             // before it (where the case then fails as "no taken-out keys").
             w.TakenOut = walk.GetType().GetMethod("TakenOutKeys", System.Reflection.BindingFlags.Instance
@@ -301,5 +356,37 @@ internal static class WinningRefsSelfTest
               && !noRing.WinRef.ContainsKey(R(12)) && !perm.WinRef.ContainsKey(R(12))
               && (main.TakenOut is null || !main.TakenOut.Contains(R(12))),
               Where(main, R(12)) + (main.TakenOut?.Contains(R(12)) == true ? "; IN the taken-out set" : ""));
+
+        // ---- THE RING EDGE (lane V): a reference the game loads two cells out whose bounds enter the 3x3 is drawn ----
+        // The admissions (E1 E3a E4 E5b E9 E10) need the edge merge and fail without it; the exclusions (E1b E2 E3b E5a
+        // E6 E7 E8) hold on a build without it and guard the merge against admitting too much.
+        string Edge(string d) => edgeBuilt ? d : "no edge merge in this build (TrackEdge/MergeEdge absent); " + d;
+        Check("E1  two cells out, bounds enter the 3x3: admitted at its position, in its cell (R40)",
+              edgeBuilt && At(main, R(40), 9192, 100, e20), Edge(Where(main, R(40))));
+        Check("E1b two cells out, bounds do not enter: not admitted (R41)",
+              !main.WinRef.ContainsKey(R(41)), Edge(Where(main, R(41))));
+        Check("E2  three cells out, bounds enter: not admitted, beyond the loaded grid (R42)",
+              !main.WinRef.ContainsKey(R(42)), Edge(Where(main, R(42))));
+        Check("E3a rotated about Y toward the ring (+90 deg): enters by the engine's rotation, admitted (R43)",
+              edgeBuilt && At(main, R(43), 9500, 300, e20), Edge(Where(main, R(43))));
+        Check("E3b the same pole rotated away (-90 deg), and upright: not admitted (R44, R45)",
+              !main.WinRef.ContainsKey(R(44)) && !main.WinRef.ContainsKey(R(45)),
+              Edge(Where(main, R(44)) + " | " + Where(main, R(45))));
+        Check("E4  persistent, positioned two cells out, bounds enter: admitted in the persistent cell (R46)",
+              edgeBuilt && At(main, R(46), 9192, 600, topK), Edge(Where(main, R(46))));
+        Check("E5a moved by a later plugin from the edge to five cells out: not admitted (R47)",
+              !main.WinRef.ContainsKey(R(47)), Edge(Where(main, R(47))));
+        Check("E5b moved by a later plugin into the edge: admitted at the later position and cell (R48)",
+              edgeBuilt && At(main, R(48), 9192, 800, e20), Edge(Where(main, R(48))));
+        Check("E6  ringRefs off: nothing admitted from the edge (R40)",
+              !noRing.WinRef.ContainsKey(R(40)), Edge(Where(noRing, R(40))));
+        Check("E7  deleted by a later plugin with no placement data: not admitted (R49)",
+              !main.WinRef.ContainsKey(R(49)) && !main.CellOf.ContainsKey(R(49)), Edge(Where(main, R(49))));
+        Check("E8  same grid two cells out in another worldspace: not admitted (R51)",
+              !main.WinRef.ContainsKey(R(51)), Edge(Where(main, R(51))));
+        Check("E9  scale counts: enters only at its scale of 2, admitted (R50)",
+              edgeBuilt && At(main, R(50), 11692, 1000, e20), Edge(Where(main, R(50))));
+        Check("E10 the merge's count names exactly the admitted edge references (R40 R43 R46 R48 R50 = 5)",
+              edgeBuilt && main.EdgeAdded == 5, Edge($"count {main.EdgeAdded?.ToString() ?? "none"}"));
     }
 }
