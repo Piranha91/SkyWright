@@ -120,10 +120,12 @@ internal static class WinningRefsSelfTest
         var master = new SkyrimMod(mKey, Rel);
         static ObjectBounds Obnd(short x0, short y0, short z0, short x1, short y1, short z1) =>
             new() { First = new P3Int16(x0, y0, z0), Second = new P3Int16(x1, y1, z1) };
-        master.Statics.Add(new Static(stat, Rel) { EditorID = "WrStatic", Model = new Model { File = "Meshes\\wr\\static.nif" },
-                                                   ObjectBounds = Obnd(-10, -10, 0, 10, 10, 20) });
-        // The ring edge (E cases): three more modelled bases, their OBNDs the only thing that differs.
-        var statBig = M(0x802); var statHuge = M(0x803); var statPole = M(0x804);
+        master.Statics.Add(new Static(stat, Rel) { EditorID = "WrStatic", Model = new Model { File = "Meshes\\wr\\static.nif" } });
+        // The ring edge (E cases): four more modelled bases, their OBNDs the only thing that differs. WrStatic keeps no
+        // OBND, so the earlier cases' references (R23 and R25 stand on the 3x3's high edges) are never edge candidates.
+        var statBig = M(0x802); var statHuge = M(0x803); var statPole = M(0x804); var statSmall = M(0x805);
+        master.Statics.Add(new Static(statSmall, Rel) { EditorID = "WrSmall", Model = new Model { File = "Meshes\\wr\\small.nif" },
+                                                        ObjectBounds = Obnd(-10, -10, 0, 10, 10, 20) });
         master.Statics.Add(new Static(statBig, Rel) { EditorID = "WrBig", Model = new Model { File = "Meshes\\wr\\big.nif" },
                                                       ObjectBounds = Obnd(-3000, -100, 0, 3000, 100, 500) });
         master.Statics.Add(new Static(statHuge, Rel) { EditorID = "WrHuge", Model = new Model { File = "Meshes\\wr\\huge.nif" },
@@ -159,7 +161,7 @@ internal static class WinningRefsSelfTest
         static PlacedObject Scaled(PlacedObject r, float s) { r.Scale = s; return r; }
         var mE20 = Ext(e20, 2, 0);
         mE20.Temporary.Add(Ref(R(40), statBig, 9192, 100));
-        mE20.Temporary.Add(Ref(R(41), stat, 9192, 200));
+        mE20.Temporary.Add(Ref(R(41), statSmall, 9192, 200));
         mE20.Temporary.Add(Rot(Ref(R(43), statPole, 9500, 300), 0, MathF.PI / 2, 0));
         mE20.Temporary.Add(Rot(Ref(R(44), statPole, 9500, 400), 0, -MathF.PI / 2, 0));
         mE20.Temporary.Add(Ref(R(45), statPole, 9500, 500));
