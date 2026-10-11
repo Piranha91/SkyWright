@@ -143,6 +143,29 @@ A successful save or size check alone does not establish clean pixels.
   highlight, and the "implicated door is NOT in the rendered cell(s)" message fires only for doors
   beyond the whole loaded set. `--no-ring-refs` returns to target-cell-only refs (cheaper — a
   dense ring can be ~8× the shapes). Interiors have no ring.
+- **Ring edge** (with ring refs, exteriors only, 2026-10-10): a reference anchored more than one and at most
+  `EdgeRadius` = 2 cells out joins the scene when its placed bounds reach into the 3×3. For a drawable base the bounds
+  are its OBND; for an occlusion plane, its XPRM primitive. They are placed by scale, the engine's rotation
+  (`SpatialOverlap.RefrRotation`) and position. Anchoring follows the ring rule: a temporary reference by its cell's
+  grid, a persistent one by its position, the last sighting in load order deciding. An admitted reference then takes
+  exactly the ring path: BOS, the enable chain, state arms, the plane set, drawing and every count. A large mesh
+  anchored two cells away, such as the Windhelm bridge west of the docks, used to be absent while the content behind
+  it was drawn, so a plane was blamed for hiding what the bridge hides.
+  - **Why the 3×3 is enough.** The verdicts concern content inside the 3×3 seen from an eye inside it. A square is
+    convex, so the segment from the eye to that content lies inside the 3×3. Anything that can come between them
+    therefore has geometry inside the 3×3. Admitting every loaded reference whose bounds enter the 3×3 admits every
+    possible occluder; a reference whose bounds do not enter cannot change a verdict. This is also why terrain and
+    water need not widen.
+  - **The ±2 grid is an inference, not a reading.** It is the engine's `uGridsToLoad` default of 5. The setting is
+    unset in the lab INIs, and `Utility.GetINIInt("uGridsToLoad:General")` returned 0 in game. Nothing beyond ±2 is
+    admitted, the large-reference grid (`uLargeRefLODGridSize`) included: an order whose winning worldspace record
+    carries no large-reference list gives no basis for it. The console line `+N reference(s) anchored two cells
+    out …`, the planes report's `sceneScope` (`edgeRadius`, `edgeRadiusBasis: "inferred"`, `edgeAdmitted`,
+    `edgePlanesAdmitted`) and its coverage line all say so.
+  - **Deliberately unchanged at 3×3:** `--stations` floor filing, `--nav-cell`, terrain and water. Those answer
+    questions about the cells' own ground.
+  - **Limits:** OBND is the record's stored bounds, not the mesh's; a drawable base without an OBND is not admitted.
+  - **Tests:** `--winning-refs-selftest` cases E1–E10.
 - **Navmesh diff spheres** (`--compare` only, on by default): small shaded VIOLET spheres at the
   navmesh vertex positions one plugin's version has and the other's does not, drawn in every panel
   that contains them, always visible. `--no-nav-diff` drops them.

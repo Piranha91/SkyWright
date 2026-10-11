@@ -1273,6 +1273,8 @@ var bosIdx = bosMode != "off" ? new BosFormIndex() : null;
 var bosLight = new List<(ModKey Key, bool Light)>();
 var refCellOf = new Dictionary<FormKey, FormKey>();
 var winWalk = new ViewProbe.WinningRefWalk(winRef, persistentWin, refCellOf);
+// The ring edge (WinningRefs.cs): references the game loads two cells out whose bounds enter the 3x3, per shot.
+int edgeAdmittedCount = 0, edgePlanesAdmittedCount = 0;
 BosLayer? bosLayer = null;
 IReadOnlyList<BosIniFile>? discoveredBosInis = null;
 var baseIsMarker = new HashSet<FormKey>();
@@ -1747,6 +1749,8 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot,
 
     // The BOS form index fills on the FIRST walk only (a worklist re-walks per cell; the index does not change).
     bosFill = bosIdx is not null && bosIdx.RecordsSeen == 0;
+    // The ring edge is measured from the target found above (WinningRefs.cs TrackEdge); interiors have none.
+    if (!interior && targetGrid is { } edgeGrid) winWalk.TrackEdge(targetWorldspace, edgeGrid, ringRefs);
     ViewProbe.RenderStages.Open(ViewProbe.RenderStages.RecordWalk,
         "the winning state: every plugin, for the refs and navmeshes that win",
         order.OrderedPaths.Count, "plugins");
@@ -1910,6 +1914,7 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot,
         foreach (var x in f.WinningRefs) winRef[x.Key] = x.Value;
         foreach (var x in f.PersistentRefs) persistentWin[x.Key] = x.Value;
         winWalk.Reset(f.TakenOut);
+        if (!f.Interior && f.TargetGrid is { } edgeGridR) { winWalk.TrackEdge(f.TargetWorldspace, edgeGridR, ringRefs); winWalk.RestoreEdge(f.EdgeRefs); }
         foreach (var x in f.DisabledFlags) refDisabledFlag.Add(x);
         foreach (var x in f.EnableParents) refEnableParent[x.Key] = x.Value;
         foreach (var x in f.RefEditorIds) refEditorIdAll[x.Key] = x.Value;
@@ -1957,6 +1962,7 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot,
             TargetWorldspace = targetWorldspace, TargetGrid = targetGrid,
             WinningRefs = winRef.ToDictionary(x => x.Key, x => ViewProbe.CellWalkFacts.Copy(x.Value)),
             TakenOut = winWalk.TakenOutSnapshot(),
+            EdgeRefs = winWalk.EdgeSnapshot().ToDictionary(x => x.Key, x => (ViewProbe.CellWalkFacts.Copy(x.Value.Ref), x.Value.Cell)),
             DeletedBy = new(refDeletedBy),
             PersistentRefs = persistentWin.ToDictionary(x => x.Key,
                 x => (x.Value.Ws, ViewProbe.CellWalkFacts.Copy(x.Value.Ref))),
@@ -1988,6 +1994,27 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot,
             LandHeights = Array.Empty<ViewProbe.LandHeightFact>(),
         };
     }
+    // THE RING EDGE (WinningRefs.cs): admitted here, after the walk and its retained capture and before anything that
+    // reads the winning state - the BOS overlay, the state arm, the persistent merge, planes, drawing and every count -
+    // so an admitted reference takes exactly the path a ring reference takes. Its box in its own frame: the base's OBND
+    // for a drawable base (a model, not an is-marker base); an occlusion plane's XPRM primitive (full extents, centred).
+    edgeAdmittedCount = edgePlanesAdmittedCount = 0;
+    if (!interior && targetGrid is not null)
+    {
+        (Vec3 Min, Vec3 Max)? EdgeLocalBounds(PlacedRef r)
+        {
+            if (r.Base is not { } bk) return null;
+            if (bk == planeMarkerKey)
+                return r.Primitive is { } pr
+                    ? (new Vec3(-pr.Bounds.X / 2f, -pr.Bounds.Y / 2f, -pr.Bounds.Z / 2f), new Vec3(pr.Bounds.X / 2f, pr.Bounds.Y / 2f, pr.Bounds.Z / 2f))
+                    : null;
+            if (!baseMesh.ContainsKey(bk) || baseIsMarker.Contains(bk)) return null;
+            return baseObnd.TryGetValue(bk, out var ob) ? ob : null;
+        }
+        edgeAdmittedCount = winWalk.MergeEdge(EdgeLocalBounds);   // ring-edge: admit
+        edgePlanesAdmittedCount = winWalk.EdgeAdmittedKeys.Count(k => winRef[k].Base is { } eb && eb == planeMarkerKey);
+    }
+
     if (bosIdx is not null && bosLayer is null)
     {
         if (bosFill) bosIdx.SetLoadOrder(bosLight);
@@ -2083,6 +2110,9 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot,
         int addedPersist = winWalk.MergePersistent(targetWorldspace, tgp, ringRefs);
         if (addedPersist > 0)
             Console.WriteLine($"   +{addedPersist} persistent worldspace ref(s) inside the rendered {(ringR > 0 ? "3x3 cells'" : "cell's")} bounds (doors live here)");
+        if (edgeAdmittedCount > 0)
+            Console.WriteLine($"   +{edgeAdmittedCount} reference(s) anchored two cells out whose bounds enter the loaded 3x3 ({edgePlanesAdmittedCount} occlusion plane(s); "
+                            + $"game grid ±{ViewProbe.WinningRefWalk.EdgeRadius}, inferred: uGridsToLoad is unset in the INIs)");
     }
     // A reference an earlier plugin placed in the loaded cells and a later plugin filed elsewhere is not drawn (the
     // invariant in WinningRefs.cs). Said only when it happened, so a console with no such move reads as before.
@@ -4557,6 +4587,19 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot,
                         position = new[] {p.Position.X,p.Position.Y,p.Position.Z}, bounds = new[] {p.Bounds.X,p.Bounds.Y,p.Bounds.Z} }).ToArray(),
                     assets = os.Refs.Select(r => new { mesh = r.Ref.MeshRelPath, sha256 = r.AssetHash,
                         issue = r.Issue }).Distinct().ToArray() });
+                // The scene's scope, said where a reader of the verdicts looks (V1, lane V 2026-10-10): the ±2 game grid
+                // the ring edge is drawn to is the engine default by inference, not a reading.
+                if (!interior && ringRefs)
+                    os.SceneIssues.Add($"scene drawn to the game's loaded grid ±{ViewProbe.WinningRefWalk.EdgeRadius} by inference "
+                                     + "(uGridsToLoad unset in the INIs, not read in game): references anchored further out are not drawn");
+                var sceneScope = interior ? null : new
+                {
+                    rule = ringRefs ? "target cell, its ±1 ring, and references anchored up to edgeRadius cells out whose placed bounds enter the 3x3"
+                                    : "target cell only (--no-ring-refs)",
+                    edgeRadius = ringRefs ? ViewProbe.WinningRefWalk.EdgeRadius : 0,
+                    edgeRadiusBasis = "inferred",
+                    edgeAdmitted = edgeAdmittedCount, edgePlanesAdmitted = edgePlanesAdmittedCount,
+                };
                 var doc = new
                 {
                     schema = ViewProbe.PlanesReportCandidates.Schema, status = "research; supplied rule scope does not certify general engine behavior",
@@ -4577,7 +4620,7 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot,
                     viewpoint = shotSpec?.ViewpointKind ?? "diagnostic; reachability not established",
                     control = shotSpec?.Control ?? false,
                     viewpointEvidence = shotSpec?.ViewpointEvidence, viewLabel = shotSpec?.Label,
-                    image = reportRenderPath, replayArgs = shotReplay, coverageIssues = os.SceneIssues,
+                    image = reportRenderPath, replayArgs = shotReplay, coverageIssues = os.SceneIssues, sceneScope,
                     population = new { recordRefs = winRef.Count, sceneRefs = os.Refs.Count,
                         sourceShapes = os.Refs.Sum(r => r.Parts.Count), noModel, fxSkipped, markerSkipped,
                         unsupportedRefs = os.Refs.Count(r => r.Issue is not null),
