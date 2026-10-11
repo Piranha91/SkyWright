@@ -1,10 +1,10 @@
-// Known answers for the reach region's memory (task 2026-10-08-overlapprobe-memory-g2, lane M 2026-10-11). On Group 2 one reach
-// call retained every posed sample of a mesh whose clips never converge (16 clips x 4,096 samples x 60,045 vertices) and the
-// process died at a 20-24 GiB cap. R1/R1b: the reach of a non-converging rig of about 20,000 vertices completes in a child
+// Known answers for the reach region's memory (task 2026-10-08-overlapprobe-memory-g2, lane M 2026-10-11). A reach call
+// kept every posed sample of a mesh whose many large clips never converge within the sample budget, and the process ran out
+// of memory under its heap cap. R1/R1b: the reach of a non-converging rig of about 20,000 vertices completes in a child
 // process under a 512 MiB managed-heap cap with the uncapped box, and the uncapped child's peak private bytes stay under 1 GiB
 // (red while reach keeps every sample). R2: the reach box equals the per-sample bounds of SweptGeometry.Build + Place grown by
 // their deltas, bit for bit (green; guards the change). R3: on a converging rig with three clips, the whole sweep equals the
-// clips swept one at a time (the per-clip reference used for Group 2's 18DC2E row; green on the base).
+// clips swept one at a time (the per-clip reference a field check relies on; green on the base).
 using System.Diagnostics;
 using System.Numerics;
 using HousecarlCore;
@@ -164,7 +164,7 @@ static partial class MotionProof
                     });
 
         // R3: a converging three-clip rig: the whole sweep equals the clips swept one at a time, sample for sample, and the reach box
-        // equals the union of the per-clip oracle boxes (the decomposition Group 2's 18DC2E reference relies on)
+        // equals the union of the per-clip oracle boxes (the per-clip decomposition a field reference relies on)
         var three = MultiClipRig(Grid(5), new Vector3(2, 1, 0),
         [
             ("Spin", Xyz(NoKeys(), NoKeys(), FG(KeyType.LINEAR_KEY, FK(0, 0), FK(1, Pi / 2)))),
