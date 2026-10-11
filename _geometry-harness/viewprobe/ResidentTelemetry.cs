@@ -45,6 +45,14 @@ internal static class ResidentTelemetry
                 budgetBytes = resident?.BudgetBytes,
                 rendersSinceRepoll = resident is null ? null : ReadCounter(resident),
                 counterField = resident is null ? null : CounterField is null ? "absent" : "_rendersSinceRepoll",
+                // Process memory at cell end (lane V, 2026-10-10): the managed heap as the last GC left it, the GC's
+                // peak-free total, the GC's commit, and the OS's private bytes and peak working set.
+                managedHeapBytes = GC.GetGCMemoryInfo().HeapSizeBytes,
+                managedCommittedBytes = GC.GetGCMemoryInfo().TotalCommittedBytes,
+                gcTotalMemoryBytes = GC.GetTotalMemory(false),
+                gcHeapHardLimitBytes = GC.GetGCMemoryInfo().TotalAvailableMemoryBytes,
+                privateBytes = System.Diagnostics.Process.GetCurrentProcess().PrivateMemorySize64,
+                peakWorkingSetBytes = System.Diagnostics.Process.GetCurrentProcess().PeakWorkingSet64,
                 writtenUtc = DateTimeOffset.UtcNow,
             };
             File.AppendAllText(OutputPath, System.Text.Json.JsonSerializer.Serialize(record) + "\n",
