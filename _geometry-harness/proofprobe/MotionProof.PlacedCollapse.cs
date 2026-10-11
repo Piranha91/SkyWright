@@ -84,8 +84,10 @@ static partial class MotionProof
 
         // PC-2: the window's own placement (scale 0.18, z-rotation 1.5707964, A 677 u above B's origin as in the Group 6 repro), with a
         // sliver thin in model z (height 2^-16 at z = 5). B is the image of A's model plane x = 65.5 through A's placement, written in B's
-        // model coordinates (double, cast once). Measured centred on the geometry: crossing 0.18 * 0.95 * 2^-16 within 0.1 %. Rejects the refusal and
-        // dropping the sliver (crossing 0); also rejects a frame that loses A's scale (crossing 0.95 * 2^-16).
+        // model coordinates (double, cast once). Measured centred on the geometry: crossing 0.18 * 0.95 * 2^-16 within 1 % (the placed
+        // sliver's height, 2.7e-6 u, is about 90 float steps at its frame coordinates, so the represented sliver differs from the ideal by
+        // up to about 1 %; first run 2.6053e-6 against 2.6093e-6). Rejects the refusal and dropping the sliver (crossing 0); also rejects a
+        // frame that loses A's scale (crossing 0.95 * 2^-16).
         Case(check, "placed-collapse PC-2: the window's pose (0.18, Rz 90 deg, 677 u up) - measured, crossing 0.18*0.95*2^-16", () =>
         {
             var posB = new Vec3(1773.9773f, -95.17011f, 46.33487f); var posA = new Vec3(1680.8007f, -116.84483f, 723.40308f);
@@ -103,7 +105,7 @@ static partial class MotionProof
             if (PcPrecondition(a, posA, rotA, sA, b, posB, Zero3, 1f, c) is { } bad) return (false, bad);
             var (r, o) = MeshSurface.MeasurePlacedFramed(a, null, posA, rotA, sA, b, null, posB, Zero3, 1f, VolumeGeometry.Render);
             double want = 0.18 * PcCrossing;
-            return (r.Status == "measured" && r.CrossingLength is { } L && PcNear(L.Lower, want, 1e-3 * want) && PcNear(L.Upper, want, 1e-3 * want)
+            return (r.Status == "measured" && r.CrossingLength is { } L && PcNear(L.Lower, want, 1e-2 * want) && PcNear(L.Upper, want, 1e-2 * want)
                     && r.ZeroAreaSkipped is null && o == c,
                     $"{r.Status} {r.Reason} L {r.CrossingLength} (want {want:G6}) frame {o} (want {c})");
         });
