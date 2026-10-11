@@ -68,7 +68,7 @@ using HousecarlCore.Progress;
 //                          (lane 3b) --motion swept also applies to --anchor (the body against every sample of a moving partner:
 //                          witness / never / cannot_tell), and a member refused only for a NiPathInterpolator is measured as a tube
 //                          around its path (never / cannot_tell, never a witness). A pair whose world placement collapses a triangle
-//                          is measured in B's frame and labelled pairFrame; particle systems set aside from a render surface are
+//                          is measured centred on B, on the geometry or on A (pairFrame); particle systems set aside from a render surface are
 //                          labelled particlesA / particlesB.
 //   --box-contact FILE     with --overlap-json: each input boxContact row's world boxes against the other member's render surface;
 //                          with --motion swept a member refused for its live pose is tested through its swept region (witness / never /

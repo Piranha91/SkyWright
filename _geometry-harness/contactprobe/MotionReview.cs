@@ -250,7 +250,7 @@ static class MotionReview
             var ra = cache.Region(formA, bytesA, g); var rb = cache.Region(formB, bytesB, g);
             if (ra.Status != "built") return Refuse("A", ra.Reason ?? "swept region refused");
             if (rb.Status != "built") return Refuse("B", rb.Reason ?? "swept region refused");
-            // lane 3b: a pair whose world placement collapses a triangle is measured in B's frame (PairFrame)
+            // lane 3b: a pair whose world placement collapses a triangle is measured in a shifted frame (PairFrame: B, the geometry centre or A)
             var fo = PairFrame.Origin(ra.Samples[0].Soup, poseA.Pos, poseA.Rot, poseA.Scale, rb.Samples[0].Soup, poseB.Pos, poseB.Rot, poseB.Scale);
             var qa = PairFrame.Shift(poseA.Pos, fo); var qb = PairFrame.Shift(poseB.Pos, fo);
             var pa = SweptGeometry.Place(ra, qa, poseA.Rot, poseA.Scale); var pb = SweptGeometry.Place(rb, qb, poseB.Rot, poseB.Scale);
