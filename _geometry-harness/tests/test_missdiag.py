@@ -251,6 +251,21 @@ def test_m5d_a_meet_with_a_depth_or_an_unknown_relation_raises():
         raise AssertionError("a meet with a depth, or an unknown relation, was accepted: %r" % (bad,))
 
 
+def test_m6a_placement_clip_without_the_unpatched_comparison_raises():   # a verdict blaming the patch needs it
+    for bad in (_clip(), _clip(unpatched=""), _clip(unpatched=None)):
+        try:
+            M.assign_reason(_ev(placementClip=bad))
+        except ValueError:
+            continue
+        raise AssertionError("a placement clip without the unpatched comparison was accepted: %r" % (bad,))
+
+
+def test_m6b_placement_clip_detail_states_the_unpatched_comparison():
+    r = M.assign_reason(_ev(trace=None, placementClip=_clip(unpatched="absent (the record is not placed unpatched)")))
+    assert r["reason"] == "patch placement clips", repr(r)
+    assert r["detail"].endswith("; edit: restores support; unpatched: absent (the record is not placed unpatched)"), repr(r["detail"])
+
+
 def test_m3_table_sums_and_splits():
     cl = [{"group": "G1", "edits": 7, "reason": "not modelled", "evidenceType": "render reading", "direct": False},
           {"group": "G1", "edits": 3, "reason": "set aside by filter", "evidenceType": "check", "direct": True},
