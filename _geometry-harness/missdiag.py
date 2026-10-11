@@ -111,7 +111,9 @@ def assign_reason(ev):
       placementClip (dict | None: check, item, other (another mod's object), depth (u, > 0: the least move that clears the
       crossing), pose (where the item was measured, e.g. its rest pose read in game), edit (what the patch's edit does,
       e.g. 'restores support' or 'adds the item'), relation ('crosses', the default, or 'meets': an anchor body that
-      meets the other object, read with no clearance, so depth is 0 or None)).
+      meets the other object, read with no clearance, so depth is 0 or None), unpatched (how the crossing compares with the
+      unpatched placement: the fold blames the patch only for a crossing absent there, e.g. 'absent (the record is not placed
+      unpatched, u-base)'; a crossing present unpatched is inherited, never a placement clip)).
       occlusion (dict | None: an occlusion plane cluster's verdict from the occlusion assessment, scripts/planeassess:
       verdict, statement, check, unjudgedShare?, boxLabel?).
     Returns dict(reason, detail, evidenceType, bundleConfiguration). Ordered rules, first that holds:
@@ -119,9 +121,11 @@ def assign_reason(ev):
           check: statement[; unjudged share S][; Box label]. A plane is judged by what it hides, never by contact, floor
           or anchor rules. An unknown verdict or a missing part raises.
       0a. placementClip given -> patch placement clips (evidence 'check'), detail = check: item clips other by depth u at
-          pose; edit: edit. A meet is worded check: item meets other at pose (a meet: depth 0); edit: edit. It outranks a
+          pose; edit: edit; unpatched: unpatched. A meet is worded check: item meets other at pose (a meet: depth 0); edit:
+          edit; unpatched: unpatched. It outranks a
           fix attribution (an edit that restores a support but leaves its item clipping). A missing part, a crossing
-          whose depth is not positive, a meet with a nonzero depth or another relation raises.
+          whose depth is not positive, a meet with a nonzero depth or another relation raises; so does a clip without the
+          unpatched comparison.
       0. fixAttribution given -> fixes an inter-mod clash (evidence 'check'), detail = check: unpatched; needs both;
          patched: outcome. An attribution other than 'needs both', or a missing part, raises (the caller must read it).
       1. likelyClass None -> cannot tell ('not rendered' if not rendered, else 'class undeterminable').
@@ -156,16 +160,16 @@ def assign_reason(ev):
 
     clip = ev.get("placementClip")
     if clip is not None:
-        missing = [k for k in ("check", "item", "other", "pose", "edit") if not clip.get(k)]
+        missing = [k for k in ("check", "item", "other", "pose", "edit", "unpatched") if not clip.get(k)]
         depth, relation = clip.get("depth"), clip.get("relation", "crosses")
         if not missing and relation == "meets" and (depth is None or depth == 0):
-            return out("patch placement clips", "%s: %s meets %s at %s (a meet: depth 0); edit: %s"
-                       % (clip["check"], clip["item"], clip["other"], clip["pose"], clip["edit"]), "check")
+            return out("patch placement clips", "%s: %s meets %s at %s (a meet: depth 0); edit: %s; unpatched: %s"
+                       % (clip["check"], clip["item"], clip["other"], clip["pose"], clip["edit"], clip["unpatched"]), "check")
         if missing or relation != "crosses" or not isinstance(depth, (int, float)) or not depth > 0:
-            raise ValueError("assign_reason: placementClip needs check, item, other, pose, edit and either a crossing with a "
+            raise ValueError("assign_reason: placementClip needs check, item, other, pose, edit, unpatched and either a crossing with a "
                              "positive depth or a meet with depth 0; got %r" % (clip,))
-        return out("patch placement clips", "%s: %s clips %s by %.2f u at %s; edit: %s"
-                   % (clip["check"], clip["item"], clip["other"], depth, clip["pose"], clip["edit"]), "check")
+        return out("patch placement clips", "%s: %s clips %s by %.2f u at %s; edit: %s; unpatched: %s"
+                   % (clip["check"], clip["item"], clip["other"], depth, clip["pose"], clip["edit"], clip["unpatched"]), "check")
     fix = ev.get("fixAttribution")
     if fix is not None:
         missing = [k for k in ("check", "unpatched", "attribution", "patched") if not fix.get(k)]

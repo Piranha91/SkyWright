@@ -194,19 +194,23 @@ def _clip(**kw):
     return c
 
 
+def _uclip(**kw):   # a complete clip: lane F requires the unpatched comparison (test_m6a / test_m6b)
+    return _clip(**dict({"unpatched": "absent (the record is not placed unpatched)"}, **kw))
+
+
 def test_m2q_placement_clip_gives_patch_placement_clips():   # loose-item clashes round 2: a patch-placed item clips
-    r = M.assign_reason(_ev(trace=None, placementClip=_clip()))
+    r = M.assign_reason(_ev(trace=None, placementClip=_uclip()))
     assert r["reason"] == "patch placement clips" and r["evidenceType"] == "check"
-    assert r["detail"] == "loose-item clip at rest: item A clips object B by 5.00 u at rest pose read in game; edit: restores support"
+    assert r["detail"] == "loose-item clip at rest: item A clips object B by 5.00 u at rest pose read in game; edit: restores support; unpatched: absent (the record is not placed unpatched)"
 
 
 def test_m2r_placement_clip_outranks_fix_attribution():   # the edit restores a support but leaves its item clipping
     fix = {"check": "loose-item support", "unpatched": "lost", "attribution": "needs both", "patched": "support restored"}
-    assert M.assign_reason(_ev(trace=None, fixAttribution=fix, placementClip=_clip()))["reason"] == "patch placement clips"
+    assert M.assign_reason(_ev(trace=None, fixAttribution=fix, placementClip=_uclip()))["reason"] == "patch placement clips"
 
 
 def test_m2s_placement_clip_needs_every_part_and_a_depth():
-    for bad in (_clip(depth=0.0), _clip(depth=None), _clip(other=""), _clip(edit=None)):
+    for bad in (_uclip(depth=0.0), _uclip(depth=None), _uclip(other=""), _uclip(edit=None)):
         try:
             M.assign_reason(_ev(placementClip=bad))
         except ValueError:
@@ -219,31 +223,31 @@ def test_m2s_placement_clip_needs_every_part_and_a_depth():
 # meets a tower mesh), labels neutral; the decide passes it as below.
 G_ROW_MEET = {"check": "pair measure at the patched placement (anchor body)", "item": "00083C",
               "other": "tower ruin (005E7F)", "depth": 0.0, "relation": "meets",
-              "pose": "its patched placement, p-base", "edit": "moves the object"}
+              "pose": "its patched placement, p-base", "edit": "moves the object", "unpatched": "absent (the record is not placed unpatched)"}
 
 
 def test_m5a_anchor_body_meet_row_is_worded_as_a_meet():
     r = M.assign_reason(_ev(trace=None, placementClip=G_ROW_MEET))
     assert r["reason"] == "patch placement clips" and r["evidenceType"] == "check", repr(r)
     assert r["detail"] == ("pair measure at the patched placement (anchor body): 00083C meets tower ruin (005E7F) "
-                           "at its patched placement, p-base (a meet: depth 0); edit: moves the object"), repr(r["detail"])
+                           "at its patched placement, p-base (a meet: depth 0); edit: moves the object; unpatched: absent (the record is not placed unpatched)"), repr(r["detail"])
 
 
 def test_m5b_synthetic_meet_without_depth_is_a_meet_not_a_crossing():
-    r = M.assign_reason(_ev(trace=None, placementClip=_clip(relation="meets", depth=None)))
+    r = M.assign_reason(_ev(trace=None, placementClip=_uclip(relation="meets", depth=None)))
     assert r["reason"] == "patch placement clips", repr(r)
     assert " meets object B " in r["detail"] and "(a meet: depth 0)" in r["detail"], repr(r["detail"])
     assert " clips " not in r["detail"] and " by " not in r["detail"], repr(r["detail"])
 
 
 def test_m5c_positive_depth_crossing_keeps_todays_wording():
-    for c in (_clip(), _clip(relation="crosses")):
+    for c in (_uclip(), _uclip(relation="crosses")):
         r = M.assign_reason(_ev(trace=None, placementClip=c))
-        assert r["detail"] == "loose-item clip at rest: item A clips object B by 5.00 u at rest pose read in game; edit: restores support", repr(r["detail"])
+        assert r["detail"] == "loose-item clip at rest: item A clips object B by 5.00 u at rest pose read in game; edit: restores support; unpatched: absent (the record is not placed unpatched)", repr(r["detail"])
 
 
 def test_m5d_a_meet_with_a_depth_or_an_unknown_relation_raises():
-    for bad in (_clip(relation="meets"), _clip(relation="meets", depth=0.5), _clip(relation="touches", depth=0.0)):
+    for bad in (_uclip(relation="meets"), _uclip(relation="meets", depth=0.5), _uclip(relation="touches", depth=0.0)):
         try:
             M.assign_reason(_ev(placementClip=bad))
         except ValueError:
@@ -395,7 +399,8 @@ def _summary_doc(prediction=None):
                     "trace": {"outcome": "set_aside", "rule": "decorative clutter"}, "bundleConfiguration": "ran",
                     "direct": True},
         "g1-0006": {"placementClip": {"check": "contact", "item": "a crate", "other": "a wall of the other mod",
-                                      "depth": 4.0, "pose": "rest pose", "edit": "adds the item"},
+                                      "depth": 4.0, "pose": "rest pose", "edit": "adds the item",
+                                      "unpatched": "absent (the record is not placed unpatched)"},
                     "bundleConfiguration": "ran", "direct": True},
     }
     doc = {"edits": edits, "records": records, "evidence": ev}
