@@ -3646,6 +3646,8 @@ StageBProof.Run(Check);
 MotionProof.RunContactGaps(Check);
 // Pair-measure mesh defects (2026-10-05, Group 6 D1/D2): zero-area triangles skipped and counted; empty render shapes read.
 MotionProof.RunPairMeshDefects(Check);
+// Placed degenerate triangles (2026-10-10, lane D): a sliver that placement collapses centred on B is measured centred on A.
+MotionProof.RunPlacedCollapse(Check);
 // Surface crossing envelope on the curve (2026-10-05): interior-segment endpoints lie on the intersection line.
 MotionProof.RunEnvelopeOffset(Check);
 MotionProof.RunSampleTopology(Check);

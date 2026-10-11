@@ -83,18 +83,20 @@ static partial class MotionProof
             return (r.Status == "measured" && by is not null && by.Count == 1 && by.TryGetValue(SurfaceMaterial.Pair(SurfaceMaterial.AlphaTest, SurfaceMaterial.Opaque), out var l) && Math.Abs(l - 50) < 0.01,
                     $"{r.Status} {r.Reason} {(by is null ? "-" : string.Join(", ", by.Select(kv => $"{kv.Key}={kv.Value:0.###}")))}");
         });
-        // PM-4 (guard): a triangle with model-space area that world placement collapses, in a pair the pair frame cannot rescue (A at
-        // FarOrigin, B at -FarOrigin: the frame origin is B's position and A still sits ~250,000 u out). Still refused, naming the
-        // collapse. A also holds an ordinary triangle 50 u above, so skipping the collapsed sliver would leave a measurable member.
-        // Rejects skipping a placement-collapsed sliver as if it were a zero-area mesh triangle (it has real area).
-        Case(check, "pair-mesh PM-4 (guard): a placement collapse the pair frame cannot undo - still refused", () =>
+        // PM-4: a triangle with model-space area that placement collapses in every frame the rule tries (A at FarOrigin, B at
+        // -FarOrigin, ~250,000 u apart, and each member holds a sliver: centred on B, A's collapses; centred on A, B's does; lane D
+        // 2026-10-10 moved the old fixture, which the frame centred on A undoes, to PC-5). Still refused, naming the collapse and that
+        // centring on either member does not undo it. A also holds an ordinary triangle 50 u above, so skipping the collapsed sliver
+        // would leave a measurable member. Rejects skipping a placement-collapsed sliver as if it were a zero-area mesh triangle (it
+        // has real area), measuring in a frame that collapses the other member (B: b_degenerate_triangle), and the reason without the
+        // clause (red at the lane D test commit for the clause only).
+        Case(check, "pair-mesh PM-4: a placement collapse no centred frame undoes - refused, naming it", () =>
         {
-            var neg = new Vec3(-FarOrigin.X, -FarOrigin.Y, -FarOrigin.Z);
-            var a = new TriangleSoup(SliverA.Vertices.Concat(new[] { new Vector3(0, 0, 50), new Vector3(10, 0, 50), new Vector3(0, 10, 50) }).ToArray(),
-                                     new[] { 0, 1, 2, 3, 4, 5 });
-            var r = MeshSurface.MeasurePlaced(a, null, FarOrigin, Zero3, 1f, QuadB, null, neg, Zero3, 1f, VolumeGeometry.Render);
+            var (a, b, neg) = Pm4Pair();
+            var r = MeshSurface.MeasurePlaced(a, null, FarOrigin, Zero3, 1f, b, null, neg, Zero3, 1f, VolumeGeometry.Render);
             return (r.Status == "refused" && (r.Reason ?? "").StartsWith("A: a_degenerate_triangle", StringComparison.Ordinal)
-                    && (r.Reason ?? "").Contains("model-space area") && r.ZeroAreaSkipped is null,
+                    && (r.Reason ?? "").Contains("model-space area") && (r.Reason ?? "").Contains("centring the pair on either member does not undo it")
+                    && r.ZeroAreaSkipped is null,
                     $"{r.Status} {r.Reason}");
         });
         // PM-5: a member whose every triangle has zero area is refused by name, not measured as empty. Rejects the bare refusal that
