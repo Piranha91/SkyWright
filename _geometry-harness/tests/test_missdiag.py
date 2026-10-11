@@ -270,6 +270,35 @@ def test_m6b_placement_clip_detail_states_the_unpatched_comparison():
     assert r["detail"].endswith("; edit: restores support; unpatched: absent (the record is not placed unpatched)"), repr(r["detail"])
 
 
+def _unresolved(**kw):
+    u = {"check": "pair measure (render box)", "unpatched": "item A x object B crossing in u-base (41.07 u)",
+         "attribution": "needs both", "patched": "still crossing at p-base (42.47 u); the patch moves the object"}
+    u.update(kw)
+    return u
+
+
+def test_m7a_unresolved_clash_gives_does_not_fix():   # needs both, and the patched row still crosses
+    r = M.assign_reason(_ev(trace=None, unresolvedClash=_unresolved()))
+    assert r["reason"] == "does not fix" and r["evidenceType"] == "check", repr(r)
+    assert r["detail"] == ("pair measure (render box): item A x object B crossing in u-base (41.07 u); needs both; "
+                           "patched: still crossing at p-base (42.47 u); the patch moves the object"), repr(r["detail"])
+
+
+def test_m7b_unresolved_clash_needs_both_and_every_part():
+    for bad in (_unresolved(attribution="single mod"), _unresolved(patched=""), _unresolved(unpatched=None)):
+        try:
+            M.assign_reason(_ev(unresolvedClash=bad))
+        except ValueError:
+            continue
+        raise AssertionError("an incomplete or not-needs-both unresolved clash was accepted: %r" % (bad,))
+
+
+def test_m7c_placement_clip_outranks_unresolved_clash_which_outranks_a_fix():
+    fix = {"check": "pair measure", "unpatched": "x", "attribution": "needs both", "patched": "no crossing"}
+    assert M.assign_reason(_ev(trace=None, unresolvedClash=_unresolved(), placementClip=_uclip()))["reason"] == "patch placement clips"
+    assert M.assign_reason(_ev(trace=None, unresolvedClash=_unresolved(), fixAttribution=fix))["reason"] == "does not fix"
+
+
 def test_m3_table_sums_and_splits():
     cl = [{"group": "G1", "edits": 7, "reason": "not modelled", "evidenceType": "render reading", "direct": False},
           {"group": "G1", "edits": 3, "reason": "set aside by filter", "evidenceType": "check", "direct": True},
