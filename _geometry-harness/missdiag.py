@@ -114,6 +114,9 @@ def assign_reason(ev):
       meets the other object, read with no clearance, so depth is 0 or None), unpatched (how the crossing compares with the
       unpatched placement: the fold blames the patch only for a crossing absent there, e.g. 'absent (the record is not placed
       unpatched, u-base)'; a crossing present unpatched is inherited, never a placement clip)).
+      unresolvedClash (dict | None: check, unpatched (the clash in the order without the patch, with its reading),
+      attribution (must be 'needs both'), patched (what the patched order still shows, with its reading)): an inter-mod
+      clash the patch's edited record still has at the patched placement.
       occlusion (dict | None: an occlusion plane cluster's verdict from the occlusion assessment, scripts/planeassess:
       verdict, statement, check, unjudgedShare?, boxLabel?).
     Returns dict(reason, detail, evidenceType, bundleConfiguration). Ordered rules, first that holds:
@@ -126,6 +129,9 @@ def assign_reason(ev):
           fix attribution (an edit that restores a support but leaves its item clipping). A missing part, a crossing
           whose depth is not positive, a meet with a nonzero depth or another relation raises; so does a clip without the
           unpatched comparison.
+      0b. unresolvedClash given -> does not fix (evidence 'check'), detail = check: unpatched; needs both; patched: patched.
+          It outranks a fix attribution (one edit fixes a clash but leaves another) and is outranked by a placement clip.
+          An attribution other than 'needs both', or a missing part, raises.
       0. fixAttribution given -> fixes an inter-mod clash (evidence 'check'), detail = check: unpatched; needs both;
          patched: outcome. An attribution other than 'needs both', or a missing part, raises (the caller must read it).
       1. likelyClass None -> cannot tell ('not rendered' if not rendered, else 'class undeterminable').
@@ -170,6 +176,12 @@ def assign_reason(ev):
                              "positive depth or a meet with depth 0; got %r" % (clip,))
         return out("patch placement clips", "%s: %s clips %s by %.2f u at %s; edit: %s; unpatched: %s"
                    % (clip["check"], clip["item"], clip["other"], depth, clip["pose"], clip["edit"], clip["unpatched"]), "check")
+    unres = ev.get("unresolvedClash")
+    if unres is not None:
+        missing = [k for k in ("check", "unpatched", "attribution", "patched") if not unres.get(k)]
+        if missing or unres["attribution"] != "needs both":
+            raise ValueError("assign_reason: unresolvedClash needs check, unpatched, attribution 'needs both' and patched; got %r" % (unres,))
+        return out("does not fix", "%s: %s; needs both; patched: %s" % (unres["check"], unres["unpatched"], unres["patched"]), "check")
     fix = ev.get("fixAttribution")
     if fix is not None:
         missing = [k for k in ("check", "unpatched", "attribution", "patched") if not fix.get(k)]
