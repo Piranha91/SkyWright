@@ -28,6 +28,9 @@ using HousecarlCore.Progress;
 //
 // usage: proofprobe
 
+// lane M (2026-10-11): the reach-memory child process (MotionProof.ReachMemory.cs), run by R1/R1b under a heap cap
+if (args.Length > 0 && args[0] == "--reach-memory-child") return MotionProof.ReachMemoryChild(args);
+
 using var __run = RunLog.BeginProcess("proofprobe", args);
 
 int pass = 0, fail = 0;
@@ -3653,6 +3656,8 @@ MotionProof.RunEnvelopeOffset(Check);
 MotionProof.RunSampleTopology(Check);
 // Lane M (2026-10-09): the shared reader of members under motion, K-M1..K-M13 (red until implemented).
 MotionProof.RunMemberMotion(Check);
+// Lane M (2026-10-11): reach memory on non-converging clips (R1/R1b red until reach stops retaining samples), R2/R3 guards.
+MotionProof.RunReachMemory(Check);
 // Lane D (2026-10-04): texture alpha sampling along alpha-only crossings (red until implemented).
 AlphaSamplingProof.Run(Check);
 // Lane 2 (2026-10-07): the contactprobe wiring of the visible crossing (placed measure, lazy source, alternates).
