@@ -209,6 +209,24 @@ class Lock(unittest.TestCase):
             lk.write_text(json.dumps({"pid": os.getpid(), "purpose": "x"}), encoding="utf-8")
             self.assertIn("held by running pid %d" % os.getpid(), pa.lock_problem(lk))
 
+    def test_take_lock_is_atomic_and_never_overwrites(self):
+        with tempfile.TemporaryDirectory() as d:
+            lk = Path(d) / "HEAVY-LOCK"
+            pa.take_lock(lk, {"pid": os.getpid(), "purpose": "first"})
+            with self.assertRaises(SystemExit) as cm:
+                pa.take_lock(lk, {"pid": os.getpid(), "purpose": "second"})
+            self.assertIn("held by running pid %d" % os.getpid(), str(cm.exception))
+            self.assertEqual(json.loads(lk.read_text(encoding="utf-8"))["purpose"], "first")
+            lk.write_text(json.dumps({"pid": 999999991}), encoding="utf-8")
+            with self.assertRaises(SystemExit) as cm:
+                pa.take_lock(lk, {"pid": os.getpid(), "purpose": "third"})
+            self.assertIn("stale", str(cm.exception))
+            self.assertEqual(json.loads(lk.read_text(encoding="utf-8"))["pid"], 999999991)
+
+    def test_max_hours_is_opt_in(self):
+        import inspect
+        self.assertIsNone(inspect.signature(pa.render_step).parameters["max_hours"].default)
+
 class DepthMeasurement(unittest.TestCase):
     """render --depth-measurement: the flag reaches viewprobe, the identity names it only when on, default and mode
     renders never resume each other, an old renderer is refused before the block, and a report that does not record

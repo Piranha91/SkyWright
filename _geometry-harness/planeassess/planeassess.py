@@ -999,10 +999,21 @@ def lock_problem(lock):
             "running, then rerun." % (lk, pid))
 
 
+def take_lock(lock, content):
+    """Create the lock file atomically with `content`; an existing one (even one that appeared after the check) is
+    refused with lock_problem's sentence and left untouched."""
+    try:
+        fd = os.open(str(lock), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+    except FileExistsError:
+        raise SystemExit(lock_problem(lock) or "refusing: %s appeared while starting." % lock) from None
+    with os.fdopen(fd, "w", encoding="utf-8") as fh:
+        fh.write(json.dumps(content))
+
+
 def render_step(g, arm, shots_file, out, viewprobe, instance, game, caps, need_free_mib, lock, pause,
                 no_reuse=False, chunk=9, exempt=(), probe_commit_mib=None, fallback_chunk=3, memory_mode="full",
                 constrained_need_mib=None, constrained_heap_mib=None, constrained_chunk=1, depth_measurement=False,
-                occlusion_query=False):
+                occlusion_query=False, max_hours=None):
     """Render the listed gazes in one arm, one viewprobe process per chunk (same cell, at most `chunk` shots), one
     process at a time. Before each chunk: the PAUSE file stops the block, free RAM must be at least `need_free_mib`,
     no other heavy process may run. During it: the campaign caps (process commit, system floor, graphics used) stop
@@ -1012,7 +1023,9 @@ def render_step(g, arm, shots_file, out, viewprobe, instance, game, caps, need_f
     Memory mode (the probe-memory-budget convention: same results, full speed when memory allows, chosen from free
     memory): `full` needs `need_free_mib` free before a chunk; `constrained` renders one shot per process with the managed
     heap capped at `constrained_heap_mib` and needs `constrained_need_mib`; `auto` takes full when it fits, else
-    constrained, else refuses in one sentence naming the memory needed."""
+    constrained, else refuses in one sentence naming the memory needed.
+    The lock is created atomically (a start racing another refuses rather than overwriting). With `max_hours` the block
+    holds it at most that long: a running chunk's process tree is stopped at the limit and no chunk starts after it."""
     tools = Path(__file__).resolve().parents[2] / "_geometry-harness" / "viewprobe" / "tools"
     sys.path.insert(0, str(tools))
     from renderbatch import cap_observer
@@ -1045,8 +1058,12 @@ def render_step(g, arm, shots_file, out, viewprobe, instance, game, caps, need_f
                                           ["--instance", instance, "--profile", profile, "--game", game, "--order", str(order)])
     if problem:
         raise SystemExit(problem)
-    Path(lock).write_text(json.dumps({"pid": os.getpid(), "purpose": "planeassess render %s %s" % (g["name"], arm),
-                                      "at": time.strftime("%Y-%m-%d %H:%M:%S %Z")}), encoding="utf-8")
+    content = {"pid": os.getpid(), "purpose": "planeassess render %s %s" % (g["name"], arm),
+               "at": time.strftime("%Y-%m-%d %H:%M:%S %Z")}
+    if max_hours is not None:
+        content.update(maxMinutes=max_hours * 60, deadlineEpoch=time.time() + max_hours * 3600)
+    take_lock(lock, content)
+    block_deadline = time.perf_counter() + max_hours * 3600 if max_hours is not None else None
     ledger, done, failed = out / "ledger.jsonl", 0, []
     oom, retries, force_full = [], [], set()
     try:
@@ -1056,6 +1073,9 @@ def render_step(g, arm, shots_file, out, viewprobe, instance, game, caps, need_f
             todo = chunks[n]
             if Path(pause).exists():
                 print("PAUSE file present; stopping before chunk %d" % n)
+                break
+            if block_deadline is not None and time.perf_counter() >= block_deadline:
+                print("the block's maximum of %g h has passed; stopping before chunk %d" % (max_hours, n), flush=True)
                 break
             busy, free = busy_processes(exempt), read_system_free()
             if busy or not free.ok:
@@ -1104,7 +1124,7 @@ def render_step(g, arm, shots_file, out, viewprobe, instance, game, caps, need_f
                 return caps_obs(ev)
             t0 = time.time()
             env = {"DOTNET_GCHeapHardLimit": hex(int(constrained_heap_mib) << 20)} if mode == "constrained" and constrained_heap_mib else {}
-            res = runlog.Runner("planeassess-render", out_dir=str(out / "logs")).run(
+            res = runlog.Runner("planeassess-render", out_dir=str(out / "logs"), deadline=block_deadline).run(
                 [{"id": tag, "argv": argv, "cwd": str(out), "env": env}], echo=False, observer=observe, poll_seconds=1.0)[0]
             secs = round(time.time() - t0, 1)
             row = {"chunk": tag, "shots": [s["label"] for s in todo], "exitCode": res.get("exitCode"),
@@ -1477,6 +1497,8 @@ def main(argv=None):
     a.add_argument("--need-free-mib", required=True, type=float, help="free RAM required before each chunk")
     a.add_argument("--heavy-lock", required=True, help="lock file held for the block; refuses if present")
     a.add_argument("--pause", required=True, help="PAUSE file: present means no new chunk starts")
+    a.add_argument("--max-hours", type=float, help="hold the heavy lock at most this long: stop the running chunk and "
+                   "start no other after it (default: no limit)")
     a.add_argument("--no-reuse-cell", action="store_true", help="each shot builds its own scene (viewprobe reuses by default)")
     a.add_argument("--chunk", type=int, default=9, help="shots per viewprobe process (default 9)")
     a.add_argument("--probe-commit-mib", type=float, help="re-chunk a worldspace whose first full chunk peaks above this")
@@ -1560,7 +1582,8 @@ def main(argv=None):
         n = render_step(g, args.arm, args.shots, args.render_out, args.viewprobe, args.instance, args.game, caps,
                         args.need_free_mib, args.heavy_lock, args.pause, args.no_reuse_cell, args.chunk, args.exempt,
                         args.probe_commit_mib, args.fallback_chunk, args.memory_mode, args.constrained_need_mib,
-                        args.constrained_heap_mib, args.constrained_chunk, args.depth_measurement, args.occlusion_query)
+                        args.constrained_heap_mib, args.constrained_chunk, args.depth_measurement, args.occlusion_query,
+                        args.max_hours)
         print("rendered", n)
         return 0
     return stations_step(g, args.viewprobe, args.work, args.copy_to, args.instance, args.game, args.only,
