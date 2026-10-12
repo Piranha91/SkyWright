@@ -33,6 +33,8 @@ internal sealed class CellWalkFacts
     internal HashSet<FormKey> TakenOut { get; init; } = new();
     /// <summary>The ring-edge references the walk tracked (WinningRefs.cs), admitted per shot by MergeEdge.</summary>
     internal Dictionary<FormKey, (PlacedRef Ref, FormKey Cell)> EdgeRefs { get; init; } = new();
+    /// <summary>The large-reference walk state (WinningRefs.cs LargeSnapshot), admitted per shot by MergeLarge.</summary>
+    internal object? LargeState { get; init; }
     /// <summary>References whose last sighting is a deletion with no placement data, and the deleting plugin.</summary>
     internal Dictionary<FormKey, string> DeletedBy { get; init; } = new();
     internal required HashSet<FormKey> DisabledFlags { get; init; }
@@ -90,6 +92,7 @@ internal sealed class CellWalkFacts
             PersistentRefs = PersistentRefs.ToDictionary(x => x.Key, x => (x.Value.Ws, Copy(x.Value.Ref))),
             TakenOut = TakenOut.ToHashSet(),
             EdgeRefs = EdgeRefs.ToDictionary(x => x.Key, x => (Copy(x.Value.Ref), x.Value.Cell)),
+            LargeState = LargeState,   // never mutated: RestoreLarge copies out of it
             DeletedBy = new(DeletedBy),
             DisabledFlags = DisabledFlags.ToHashSet(), EnableParents = new(EnableParents),
             RefEditorIds = new(RefEditorIds), RefCells = new(RefCells),

@@ -157,15 +157,37 @@ A successful save or size check alone does not establish clean pixels.
     possible occluder; a reference whose bounds do not enter cannot change a verdict. This is also why terrain and
     water need not widen.
   - **The ±2 grid is an inference, not a reading.** It is the engine's `uGridsToLoad` default of 5. The setting is
-    unset in the lab INIs, and `Utility.GetINIInt("uGridsToLoad:General")` returned 0 in game. Nothing beyond ±2 is
-    admitted, the large-reference grid (`uLargeRefLODGridSize`) included: an order whose winning worldspace record
-    carries no large-reference list gives no basis for it. The console line `+N reference(s) anchored two cells
-    out …`, the planes report's `sceneScope` (`edgeRadius`, `edgeRadiusBasis: "inferred"`, `edgeAdmitted`,
-    `edgePlanesAdmitted`) and its coverage line all say so.
+    unset in the lab INIs, and `Utility.GetINIInt("uGridsToLoad:General")` returned 0 in game (that call cannot read
+    `u` settings). Beyond ±2 only listed large references are admitted (next item). The console line `+N
+    reference(s) anchored two cells out …`, the planes report's `sceneScope` (`edgeRadius`, `edgeRadiusBasis:
+    "inferred"`, `edgeAdmitted`, `edgePlanesAdmitted`) and its coverage line all say so.
   - **Deliberately unchanged at 3×3:** `--stations` floor filing, `--nav-cell`, terrain and water. Those answer
     questions about the cells' own ground.
   - **Limits:** OBND is the record's stored bounds, not the mesh's; a drawable base without an OBND is not admitted.
   - **Tests:** `--winning-refs-selftest` cases E1–E10.
+- **Large references** (with ring refs, exteriors only, 2026-10-11): the game 3D-loads the references a worldspace's
+  large-reference lists (WRLD `RNAM`) name out to `(uLargeRefLODGridSize − 1) / 2` = 5 cells (11 in the lab INIs).
+  A reference anchored 3–5 cells out joins the scene by the ring edge's own test (its placed box enters the 3×3; the
+  same `EntersSquare` serves both merges) when the selected list names it, and then takes the same ring path.
+  - **Which list.** A root worldspace (Tamriel) uses the **union of every plugin's list**: a city or eFPS plugin that
+    overrides the WRLD record copies it without `RNAM`, and the game still loads the base list's references. A child
+    worldspace (a record with a `Parent`, the walled cities) uses its own lists' union, or none, by
+    `--large-refs-child union|none` (default `union`). The parent's list never applies inside a child: it names only
+    parent references.
+  - **Basis: measured in game.** Tamriel at one station: listed references 3D-loaded at rings 3–5 and none at 6–7,
+    although the winning Tamriel record lists nothing. Both city worldspaces: the city's own listed references loaded
+    beyond ring 2, the parent list not in memory. A later plugin's list can name an earlier plugin's reference, so
+    every reference anchored 3–5 out is tracked by the last-sighting rule and the list filter runs after the walk.
+  - **Occlusion primitives on a list are admitted by record**: their in-game activity at rings 3–5 has not been read.
+  - **The report:** `sceneScope` gains `largeRadius` (5), `largeRadiusBasis`, `largeList` (`union`/`none`),
+    `largeListBasis`, `largeListed`, `largeAdmitted`, `largePlanesAdmitted` and `largePrimitives: "by record"`; the
+    console prints `+N large reference(s) anchored 3-5 cells out …` when any is admitted.
+  - **Scene-scope limit: content beyond the 3×3 is not modelled for any ring.** A listed reference whose box misses
+    the 3×3 is not drawn even when it stands in the view (distant mountains): the game draws it, this render does not.
+    It cannot hide content inside the 3×3 (the convexity argument above), but a plane cannot be credited with hiding
+    it either. On the G4/G5 predictive views such references reach the view wedge at about 4,078 of 4,556 views (a
+    mean of 83 per view); admitting them would also need terrain and LOD beyond the 3×3.
+  - **Tests:** `--winning-refs-selftest` cases L1–L12.
 - **Navmesh diff spheres** (`--compare` only, on by default): small shaded VIOLET spheres at the
   navmesh vertex positions one plugin's version has and the other's does not, drawn in every panel
   that contains them, always visible. `--no-nav-diff` drops them.

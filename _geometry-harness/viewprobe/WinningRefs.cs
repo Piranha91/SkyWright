@@ -51,6 +51,28 @@ internal sealed class WinningRefWalk
     readonly Dictionary<FormKey, (PlacedRef Ref, FormKey Cell)> _edge = new();
     readonly List<FormKey> _edgeAdmitted = new();
 
+    // LARGE REFERENCES (lane H1, 2026-10-11). The game 3D-loads the references a worldspace's large-reference lists (WRLD
+    // RNAM) name out to (uLargeRefLODGridSize - 1) / 2 cells: 11 in the lab INI, so 5. MEASURED in game: Tamriel at one
+    // station (lane G: listed references 3D-loaded at rings 3-5, none at 6-7, although the winning Tamriel WRLD lists
+    // nothing) and both city worldspaces (lane L: the city's own Skyrim.esm-listed references loaded beyond ring 2, the
+    // parent Tamriel list not in memory). A reference anchored 2 < d <= LargeRadius out joins the scene, by the ring
+    // edge's own box test, when the SELECTED list names it:
+    //   a root worldspace: the union of every plugin's list (RootUsesUnion; the winning WRLD override of a city or eFPS
+    //     mod carries no list, and the game still loads the base list's references);
+    //   a child worldspace (one with a Parent): its own lists' union, or none, by --large-refs-child (default union).
+    // Every reference anchored 2 < d <= LargeRadius is tracked by the last-sighting rule (_far), because a LATER plugin's
+    // list can name an earlier plugin's reference (Dawnguard's lists name Skyrim.esm references); the list filter runs
+    // in MergeLarge, after the walk. Occlusion primitives on a list are admitted BY RECORD: their in-game activity at
+    // rings 3-5 has not been read (LargePrimitivesByRecord). Content beyond the 3x3 is not modelled for any ring: a large
+    // reference whose box misses the 3x3 is not drawn even when it would be in the view (a scene-scope limit, README).
+    internal const int LargeRadius = 5;
+    internal const bool RootUsesUnion = true;
+    internal const bool LargePrimitivesByRecord = true;
+    internal const bool LargeModelsByRecord = true;
+    readonly Dictionary<FormKey, (PlacedRef Ref, FormKey Cell)> _far = new();
+    LargeReferenceLists _lists = new();
+    readonly List<FormKey> _largeAdmitted = new();
+
     internal WinningRefWalk(Dictionary<FormKey, PlacedRef> winRef,
                             Dictionary<FormKey, (FormKey Ws, PlacedRef Ref)> persistentWin,
                             Dictionary<FormKey, FormKey> refCellOf)
@@ -101,6 +123,9 @@ internal sealed class WinningRefWalk
 
             if (!admit && IsEdge(cp, r)) _edge[r.FormKey] = (r, cp.Cell);
             else _edge.Remove(r.FormKey);
+
+            if (!admit && IsFar(cp, r)) _far[r.FormKey] = (r, cp.Cell);
+            else _far.Remove(r.FormKey);
         }
         // A deleted sighting with no placement data: the game does not load the reference, so no earlier version stays.
         // It is a deletion, not a move, so it leaves the taken-out set as well.
@@ -112,6 +137,7 @@ internal sealed class WinningRefWalk
                 _persistentWin.Remove(d.FormKey);
                 _refCellOf.Remove(d.FormKey);
                 _edge.Remove(d.FormKey);
+                _far.Remove(d.FormKey);
             }
     }
 
@@ -119,6 +145,7 @@ internal sealed class WinningRefWalk
     internal void TrackEdge(FormKey targetWorldspace, (int X, int Y) targetGrid, bool ringRefs)
     {
         _edge.Clear(); _edgeAdmitted.Clear();
+        _far.Clear(); _largeAdmitted.Clear(); _lists = new();
         bool on = ringRefs && !targetWorldspace.IsNull;
         _edgeWs = on ? targetWorldspace : FormKey.Null;
         _edgeGrid = on ? targetGrid : null;
@@ -142,21 +169,10 @@ internal sealed class WinningRefWalk
     {
         _edgeAdmitted.Clear();
         if (_edgeGrid is not { } g) return 0;
-        float x0 = (g.X - 1) * 4096f, y0 = (g.Y - 1) * 4096f, x1 = (g.X + 2) * 4096f, y1 = (g.Y + 2) * 4096f;
         foreach (var (k, (r, cell)) in _edge.OrderBy(x => x.Key.ToString(), StringComparer.Ordinal))
         {
             if (_winRef.ContainsKey(k) || localBounds(r) is not { } b) continue;
-            var rot = SpatialOverlap.RefrRotation(r.Rotation);
-            var pos = new System.Numerics.Vector3(r.Position.X, r.Position.Y, r.Position.Z);
-            float mx0 = float.MaxValue, my0 = float.MaxValue, mx1 = float.MinValue, my1 = float.MinValue;
-            for (int i = 0; i < 8; i++)
-            {
-                var c = new System.Numerics.Vector3((i & 1) == 0 ? b.Min.X : b.Max.X, (i & 2) == 0 ? b.Min.Y : b.Max.Y,
-                                                    (i & 4) == 0 ? b.Min.Z : b.Max.Z);
-                var w = System.Numerics.Vector3.Transform(c * r.Scale, rot) + pos;
-                mx0 = MathF.Min(mx0, w.X); my0 = MathF.Min(my0, w.Y); mx1 = MathF.Max(mx1, w.X); my1 = MathF.Max(my1, w.Y);
-            }
-            if (mx0 < x1 && mx1 > x0 && my0 < y1 && my1 > y0)
+            if (EntersSquare(r, b, g))
             {
                 _winRef[k] = r; _refCellOf[k] = cell; _takenOut.Remove(k); _edgeAdmitted.Add(k);
             }
@@ -165,6 +181,91 @@ internal sealed class WinningRefWalk
     }
 
     internal IReadOnlyList<FormKey> EdgeAdmittedKeys => _edgeAdmitted;
+
+    // Anchored beyond the ring edge and within the large-reference grid (the same anchor rule as IsEdge).
+    bool IsFar(CellPlacements cp, PlacedRef r)
+    {
+        if (_edgeGrid is not { } g || cp.Interior || cp.Worldspace != _edgeWs) return false;
+        (int X, int Y) a = r.Persistent || cp.Grid is not { } cg
+            ? ((int)MathF.Floor(r.Position.X / 4096f), (int)MathF.Floor(r.Position.Y / 4096f))
+            : (cg.X, cg.Y);
+        int d = Math.Max(Math.Abs(a.X - g.X), Math.Abs(a.Y - g.Y));
+        return d > EdgeRadius && d <= LargeRadius;
+    }
+
+    /// <summary>One plugin, in load order, before its cells: its record of the tracked worldspace, if it carries one, and
+    /// that record's large-reference list.</summary>
+    internal void ObserveLarge(Mutagen.Bethesda.Skyrim.ISkyrimModGetter mod)
+    {
+        if (_edgeWs.IsNull) return;
+        foreach (var ws in mod.Worldspaces.Records)
+        {
+            if (ws.FormKey != _edgeWs) continue;
+            var listed = ws.LargeReferences.SelectMany(g => g.References).Select(x => x.Reference.FormKey).Where(k => !k.IsNull);
+            var parent = ws.Parent?.Worldspace.FormKey ?? FormKey.Null;
+            _lists.Observe(mod.ModKey.FileName.String, listed, !parent.IsNull);
+        }
+    }
+
+    /// <summary>After MergeEdge: admit every tracked reference anchored 2 &lt; d &lt;= LargeRadius that the selected
+    /// large-reference list names and whose placed box (localBounds, as MergeEdge) overlaps the 3x3 square in XY. Returns
+    /// how many were admitted (LargeAdmittedKeys names them).</summary>
+    internal int MergeLarge(Func<PlacedRef, (Vec3 Min, Vec3 Max)?> localBounds, bool childUnion)
+    {
+        _largeAdmitted.Clear();
+        if (_edgeGrid is not { } g) return 0;
+        var selected = _lists.Selected(childUnion, RootUsesUnion);
+        foreach (var (k, (r, cell)) in _far.OrderBy(x => x.Key.ToString(), StringComparer.Ordinal))
+        {
+            if (_winRef.ContainsKey(k)) continue;
+            bool listed = selected.Contains(k);
+            if (!listed) continue;
+            bool primitive = r.Primitive is not null;
+            if (primitive ? !LargePrimitivesByRecord : !LargeModelsByRecord) continue;
+            if (localBounds(r) is not { } b || !EntersSquare(r, b, g)) continue;
+            _winRef[k] = r; _refCellOf[k] = cell; _takenOut.Remove(k); _largeAdmitted.Add(k);
+        }
+        return _largeAdmitted.Count;
+    }
+
+    // The placed box (scale, the engine's rotation, position) overlaps the 3x3 square around g in XY. The ONE box test of
+    // both merges (MergeEdge, MergeLarge), so a convention fixed here holds for both (lane V's yaw-only arm edits it).
+    static bool EntersSquare(PlacedRef r, (Vec3 Min, Vec3 Max) b, (int X, int Y) g)
+    {
+        float x0 = (g.X - 1) * 4096f, y0 = (g.Y - 1) * 4096f, x1 = (g.X + 2) * 4096f, y1 = (g.Y + 2) * 4096f;
+        var rot = SpatialOverlap.RefrRotation(r.Rotation);
+        var pos = new System.Numerics.Vector3(r.Position.X, r.Position.Y, r.Position.Z);
+        float mx0 = float.MaxValue, my0 = float.MaxValue, mx1 = float.MinValue, my1 = float.MinValue;
+        for (int i = 0; i < 8; i++)
+        {
+            var c = new System.Numerics.Vector3((i & 1) == 0 ? b.Min.X : b.Max.X, (i & 2) == 0 ? b.Min.Y : b.Max.Y,
+                                                (i & 4) == 0 ? b.Min.Z : b.Max.Z);
+            var w = System.Numerics.Vector3.Transform(c * r.Scale, rot) + pos;
+            mx0 = MathF.Min(mx0, w.X); my0 = MathF.Min(my0, w.Y); mx1 = MathF.Max(mx1, w.X); my1 = MathF.Max(my1, w.Y);
+        }
+        return mx0 < x1 && mx1 > x0 && my0 < y1 && my1 > y0;
+    }
+
+    internal IReadOnlyList<FormKey> LargeAdmittedKeys => _largeAdmitted;
+    /// <summary>The tracked worldspace is a child (its winning record has a Parent).</summary>
+    internal bool LargeIsChild => _lists.IsChild;
+    /// <summary>How many references the selected list names.</summary>
+    internal int LargeListed(bool childUnion) => _lists.Selected(childUnion, RootUsesUnion).Count;
+
+    /// <summary>The far set and the lists, for the retained cell walk (CellWalkFacts) to carry to the next shot.</summary>
+    internal object LargeSnapshot() => new LargeState(
+        _far.ToDictionary(x => x.Key, x => (CellWalkFacts.Copy(x.Value.Ref), x.Value.Cell)), _lists.Clone());
+
+    /// <summary>A retained walk: put back what LargeSnapshot carried (after TrackEdge has set the target).</summary>
+    internal void RestoreLarge(object snapshot)
+    {
+        var s = (LargeState)snapshot;
+        _far.Clear();
+        foreach (var (k, v) in s.Far) _far[k] = (CellWalkFacts.Copy(v.Ref), v.Cell);
+        _lists = s.Lists.Clone();
+    }
+
+    sealed record LargeState(Dictionary<FormKey, (PlacedRef Ref, FormKey Cell)> Far, LargeReferenceLists Lists);
 
     /// <summary>The tracked edge set, for the retained cell walk (CellWalkFacts) to carry to the next shot.</summary>
     internal Dictionary<FormKey, (PlacedRef Ref, FormKey Cell)> EdgeSnapshot() => new(_edge);
@@ -193,6 +294,7 @@ internal sealed class WinningRefWalk
         _takenOut.Clear();
         _everAdmitted.Clear();
         _edge.Clear(); _edgeAdmitted.Clear(); _edgeWs = FormKey.Null; _edgeGrid = null;
+        _far.Clear(); _largeAdmitted.Clear(); _lists = new();
         if (retained is not null) _takenOut.UnionWith(retained);
     }
 

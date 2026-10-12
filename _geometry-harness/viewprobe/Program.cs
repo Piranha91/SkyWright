@@ -385,6 +385,9 @@ bool drawCoverings = true;
 // layer for the cell under examination, same scoping as the cell outline. --no-ring-refs goes
 // back to target-cell-only refs (the old, cheaper behaviour). Interiors have no ring.
 bool ringRefs = true;
+// --large-refs-child union|none: which large-reference list a CHILD worldspace (a city) uses (WinningRefs.cs). union,
+// the default, is what lane L read in game: the city's own listed references loaded beyond ring 2.
+bool largeChildUnion = true;
 // --winning-refs-dump FILE [--cells LIST] [--dump-terrain]: write the walk's winning state per target cell as one JSON line
 // and draw nothing (WinningRefsDump.cs).
 string? winRefsDump = null, dumpCellsFile = null;
@@ -637,6 +640,12 @@ for (int i = argStart; i < args.Length; i++)
     else if (args[i] == "--find-ltex" && i + 1 < args.Length) findLtex = args[++i];
     else if (args[i] == "--no-cell-outline") cellOutline = false;
     else if (args[i] == "--no-ring-refs") ringRefs = false;
+    else if (args[i] == "--large-refs-child" && i + 1 < args.Length)
+    {
+        var v = args[++i];
+        if (v is not ("union" or "none")) { Console.Error.WriteLine($"--large-refs-child takes union or none, not '{v}'."); return 2; }
+        largeChildUnion = v == "union";
+    }
     else if (args[i] == "--winning-refs-dump" && i + 1 < args.Length) winRefsDump = args[++i];
     else if (args[i] == "--cells" && i + 1 < args.Length) dumpCellsFile = args[++i];
     else if (args[i] == "--dump-terrain") dumpTerrain = true;
@@ -1275,6 +1284,9 @@ var refCellOf = new Dictionary<FormKey, FormKey>();
 var winWalk = new ViewProbe.WinningRefWalk(winRef, persistentWin, refCellOf);
 // The ring edge (WinningRefs.cs): references the game loads two cells out whose bounds enter the 3x3, per shot.
 int edgeAdmittedCount = 0, edgePlanesAdmittedCount = 0;
+// Large references (WinningRefs.cs): listed references anchored 3-5 cells out whose bounds enter the 3x3, per shot.
+int largeAdmittedCount = 0, largePlanesAdmittedCount = 0, largeListedCount = 0;
+bool largeIsChild = false;
 BosLayer? bosLayer = null;
 IReadOnlyList<BosIniFile>? discoveredBosInis = null;
 var baseIsMarker = new HashSet<FormKey>();
@@ -1769,6 +1781,8 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot,
         {
         using (m as IDisposable)
         {
+            // The target worldspace's large-reference list in this plugin, before its cells (WinningRefs.cs).
+            winWalk.ObserveLarge(m);
             if (bosFill) bosLight.Add((m.ModKey, m.IsSmallMaster || m.ModKey.Type == ModType.Light));
             foreach (var rec in m.EnumerateMajorRecords())
             {
@@ -1914,7 +1928,7 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot,
         foreach (var x in f.WinningRefs) winRef[x.Key] = x.Value;
         foreach (var x in f.PersistentRefs) persistentWin[x.Key] = x.Value;
         winWalk.Reset(f.TakenOut);
-        if (!f.Interior && f.TargetGrid is { } edgeGridR) { winWalk.TrackEdge(f.TargetWorldspace, edgeGridR, ringRefs); winWalk.RestoreEdge(f.EdgeRefs); }
+        if (!f.Interior && f.TargetGrid is { } edgeGridR) { winWalk.TrackEdge(f.TargetWorldspace, edgeGridR, ringRefs); winWalk.RestoreEdge(f.EdgeRefs); if (f.LargeState is { } ls) winWalk.RestoreLarge(ls); }
         foreach (var x in f.DisabledFlags) refDisabledFlag.Add(x);
         foreach (var x in f.EnableParents) refEnableParent[x.Key] = x.Value;
         foreach (var x in f.RefEditorIds) refEditorIdAll[x.Key] = x.Value;
@@ -1963,6 +1977,7 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot,
             WinningRefs = winRef.ToDictionary(x => x.Key, x => ViewProbe.CellWalkFacts.Copy(x.Value)),
             TakenOut = winWalk.TakenOutSnapshot(),
             EdgeRefs = winWalk.EdgeSnapshot().ToDictionary(x => x.Key, x => (ViewProbe.CellWalkFacts.Copy(x.Value.Ref), x.Value.Cell)),
+            LargeState = winWalk.LargeSnapshot(),
             DeletedBy = new(refDeletedBy),
             PersistentRefs = persistentWin.ToDictionary(x => x.Key,
                 x => (x.Value.Ws, ViewProbe.CellWalkFacts.Copy(x.Value.Ref))),
@@ -1999,6 +2014,7 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot,
     // so an admitted reference takes exactly the path a ring reference takes. Its box in its own frame: the base's OBND
     // for a drawable base (a model, not an is-marker base); an occlusion plane's XPRM primitive (full extents, centred).
     edgeAdmittedCount = edgePlanesAdmittedCount = 0;
+    largeAdmittedCount = largePlanesAdmittedCount = largeListedCount = 0; largeIsChild = false;
     if (!interior && targetGrid is not null)
     {
         (Vec3 Min, Vec3 Max)? EdgeLocalBounds(PlacedRef r)
@@ -2013,6 +2029,10 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot,
         }
         edgeAdmittedCount = winWalk.MergeEdge(EdgeLocalBounds);   // ring-edge: admit
         edgePlanesAdmittedCount = winWalk.EdgeAdmittedKeys.Count(k => winRef[k].Base is { } eb && eb == planeMarkerKey);
+        // Large references: the same box test, three to five cells out, for references the selected list names.
+        largeAdmittedCount = winWalk.MergeLarge(EdgeLocalBounds, largeChildUnion);
+        largePlanesAdmittedCount = winWalk.LargeAdmittedKeys.Count(k => winRef[k].Base is { } lb && lb == planeMarkerKey);
+        largeListedCount = winWalk.LargeListed(largeChildUnion); largeIsChild = winWalk.LargeIsChild;
     }
 
     if (bosIdx is not null && bosLayer is null)
@@ -2113,6 +2133,10 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot,
         if (edgeAdmittedCount > 0)
             Console.WriteLine($"   +{edgeAdmittedCount} reference(s) anchored two cells out whose bounds enter the loaded 3x3 ({edgePlanesAdmittedCount} occlusion plane(s); "
                             + $"game grid ±{ViewProbe.WinningRefWalk.EdgeRadius}, inferred: uGridsToLoad is unset in the INIs)");
+        if (largeAdmittedCount > 0)
+            Console.WriteLine($"   +{largeAdmittedCount} large reference(s) anchored 3-{ViewProbe.WinningRefWalk.LargeRadius} cells out whose bounds enter the loaded 3x3 "
+                            + $"({largePlanesAdmittedCount} occlusion primitive(s), by record; list: {(largeIsChild ? (largeChildUnion ? "child worldspace, its own lists' union" : "child worldspace, none") : "union of every plugin's list")}, "
+                            + $"{largeListedCount:N0} listed)");
     }
     // A reference an earlier plugin placed in the loaded cells and a later plugin filed elsewhere is not drawn (the
     // invariant in WinningRefs.cs). Said only when it happened, so a console with no such move reads as before.
@@ -4591,7 +4615,8 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot,
                 // the ring edge is drawn to is the engine default by inference, not a reading.
                 if (!interior && ringRefs)
                     os.SceneIssues.Add($"scene drawn to the game's loaded grid ±{ViewProbe.WinningRefWalk.EdgeRadius} by inference "
-                                     + "(uGridsToLoad unset in the INIs, not read in game): references anchored further out are not drawn");
+                                     + "(uGridsToLoad unset in the INIs, not read in game); large references the worldspace's lists name are drawn to "
+                                     + $"±{ViewProbe.WinningRefWalk.LargeRadius} when their bounds enter the 3x3 (measured in game); content beyond the 3x3 is not drawn");
                 var sceneScope = interior ? null : new
                 {
                     rule = ringRefs ? "target cell, its ±1 ring, and references anchored up to edgeRadius cells out whose placed bounds enter the 3x3"
@@ -4599,6 +4624,12 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot,
                     edgeRadius = ringRefs ? ViewProbe.WinningRefWalk.EdgeRadius : 0,
                     edgeRadiusBasis = "inferred",
                     edgeAdmitted = edgeAdmittedCount, edgePlanesAdmitted = edgePlanesAdmittedCount,
+                    largeRadius = ringRefs ? ViewProbe.WinningRefWalk.LargeRadius : 0,
+                    largeRadiusBasis = "measured in game: Tamriel (one station) and both city worldspaces",
+                    largeList = largeIsChild && !largeChildUnion ? "none" : "union",
+                    largeListBasis = largeIsChild ? "child worldspace: its own lists (--large-refs-child)" : "root worldspace: every plugin's list",
+                    largeListed = largeListedCount, largeAdmitted = largeAdmittedCount, largePlanesAdmitted = largePlanesAdmittedCount,
+                    largePrimitives = "by record",
                 };
                 var doc = new
                 {
