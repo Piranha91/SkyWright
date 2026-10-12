@@ -390,5 +390,232 @@ internal static class WinningRefsSelfTest
               edgeBuilt && At(main, R(50), 11692, 1000, e20), Edge(Where(main, R(50))));
         Check("E10 the merge's count names exactly the admitted edge references (R40 R43 R46 R48 R50 = 5)",
               edgeBuilt && main.EdgeAdded == 5, Edge($"count {main.EdgeAdded?.ToString() ?? "none"}"));
+
+        LargeCases(root, Write);
+    }
+
+    // ---- LARGE REFERENCES (lane H1, 2026-10-11): rings 3-5 by the worldspace's large-reference lists ------------------
+    // The game 3D-loads large references out to (uLargeRefLODGridSize - 1) / 2 = 5 cells (lane G, in game). A reference
+    // anchored 3-5 cells out joins the scene when its worldspace's selected list names it and its placed box enters the
+    // 3x3. The list is the union of every plugin's RNAM list for a root worldspace; a child worldspace (one with a
+    // Parent) takes its own lists' union or none, by a switch. Own fixture and own worldspaces, so every E case and its
+    // count are untouched. Read by name, so this file compiles against the walk before the fix, where every admission
+    // fails as "no large merge in this build". The interface the fix must provide:
+    //   const int LargeRadius                                                        -- 5
+    //   void ObserveLarge(ISkyrimModGetter mod)                -- per plugin, in load order, after TrackEdge, before its cells
+    //   int  MergeLarge(Func<PlacedRef, (Vec3 Min, Vec3 Max)?> localBounds, bool childUnion)   -- after MergeEdge
+    //   IReadOnlyList<FormKey> LargeAdmittedKeys
+    //   object LargeSnapshot() / void RestoreLarge(object snapshot)                 -- the retained walk
+    // localBounds is the render's EdgeLocalBounds shape: an XPRM primitive's box is +-Bounds/2, else the base's OBND.
+    sealed record LargeRaw(Dictionary<FormKey, PlacedRef> WinRef, Dictionary<FormKey, (FormKey Ws, PlacedRef Ref)> Persistent,
+                           Dictionary<FormKey, FormKey> CellOf, object? Edge, object? Large);
+
+    static void LargeCases(string root, Func<SkyrimMod, ISkyrimModGetter[], string> write)
+    {
+        var lKey = new ModKey("WrLMaster", ModType.Master);
+        FormKey L(uint id) => new(lKey, id);
+        FormKey Q(int n) => L((uint)(0xA00 + n));
+        var huge = L(0x801); var giant = L(0x802); var colossal = L(0x803); var small = L(0x804); var planeBase = L(0x805);
+        var wl = L(0x830); var wlTop = L(0x831); var wc = L(0x870); var wcTop = L(0x871); var wl2 = L(0x880);
+        var l00 = L(0x840); var l30 = L(0x841); var l40 = L(0x842); var l50 = L(0x843); var l60 = L(0x844); var l70 = L(0x845);
+        var c00 = L(0x872); var c30 = L(0x873); var w2c30 = L(0x881);
+        static ObjectBounds Ob(short hx) => new() { First = new P3Int16((short)-hx, -100, 0), Second = new P3Int16(hx, 100, 500) };
+        static Cell Ext(FormKey key, int x, int y) => new(key, Rel) { Flags = default, Grid = new CellGrid { Point = new P2Int(x, y) } };
+        static PlacedObject Ref(FormKey key, FormKey baseKey, float x, float y)
+        {
+            var r = new PlacedObject(key, Rel) { Placement = new Placement { Position = new P3Float(x, y, 0), Rotation = new P3Float(0, 0, 0) } };
+            r.Base.SetTo(baseKey);
+            return r;
+        }
+        static Worldspace World(FormKey wk, Cell? top, params Cell[] exteriors)
+        {
+            var ws = new Worldspace(wk, Rel);
+            if (top is not null) ws.TopCell = top;
+            if (exteriors.Length > 0)
+            {
+                var blk = new WorldspaceBlock { BlockNumberX = 0, BlockNumberY = 0, GroupType = GroupTypeEnum.ExteriorCellBlock };
+                var sub = new WorldspaceSubBlock { BlockNumberX = 0, BlockNumberY = 0, GroupType = GroupTypeEnum.ExteriorCellSubBlock };
+                foreach (var c in exteriors) sub.Items.Add(c);
+                blk.Items.Add(sub); ws.SubCells.Add(blk);
+            }
+            return ws;
+        }
+        // One RNAM row per reference, filed at the reference's own grid (the engine's own layout: the census found the
+        // entry cell equal to the holding cell for all but 5-6 of 34,464 vanilla entries).
+        static void List(Worldspace ws, params (FormKey Ref, short X, short Y)[] entries)
+        {
+            foreach (var (rk, x, y) in entries)
+            {
+                var row = new WorldspaceGridReference { GridPosition = new P2Int16(x, y) };
+                var e = new WorldspaceReference { Position = new P2Int16(x, y) };
+                e.Reference.SetTo(rk);
+                row.References.Add(e);
+                ws.LargeReferences.Add(row);
+            }
+        }
+        const float C3 = 3 * 4096 + 100, C4 = 4 * 4096 + 100, C5 = 5 * 4096 + 100, C6 = 6 * 4096 + 100, C7 = 7 * 4096 + 100;
+
+        // ---- THE LARGE MASTER: worldspace WL (root), its child WC (Parent WL), and WL2 (another root) ----------------
+        //   WL target L00 (0,0); the 3x3 spans [-4096, 8192). Boxes: huge +-6000, giant +-14000, colossal +-20000, small +-10.
+        //   L30 (3,0): Q1 huge listed; Q4 huge unlisted; Q6 huge listed only by A; Q7 huge listed, A moves it to L70;
+        //              Q8 huge listed, A deletes it; Q9 huge listed only in WL2's list; Q12 an XPRM box +-6000 listed.
+        //   L40 (4,0): Q5 small listed.   L50 (5,0): Q2 giant listed.   L60 (6,0): Q3 colossal listed.
+        //   WL persistent cell: Q13 giant positioned at (4,0), listed.
+        //   WC C30 (3,0): Q10 huge listed by WC; Q11 huge listed only by WL.
+        var lm = new SkyrimMod(lKey, Rel);
+        lm.Statics.Add(new Static(huge, Rel) { EditorID = "WrLHuge", Model = new Model { File = "Meshes\\wr\\lhuge.nif" }, ObjectBounds = Ob(6000) });
+        lm.Statics.Add(new Static(giant, Rel) { EditorID = "WrLGiant", Model = new Model { File = "Meshes\\wr\\lgiant.nif" }, ObjectBounds = Ob(14000) });
+        lm.Statics.Add(new Static(colossal, Rel) { EditorID = "WrLColossal", Model = new Model { File = "Meshes\\wr\\lcolossal.nif" }, ObjectBounds = Ob(20000) });
+        lm.Statics.Add(new Static(small, Rel) { EditorID = "WrLSmall", Model = new Model { File = "Meshes\\wr\\lsmall.nif" },
+                                                ObjectBounds = new() { First = new P3Int16(-10, -10, 0), Second = new P3Int16(10, 10, 20) } });
+        lm.Statics.Add(new Static(planeBase, Rel) { EditorID = "WrLPlaneBase" });
+        var mTopL = new Cell(wlTop, Rel) { Flags = default };
+        mTopL.Persistent.Add(Ref(Q(13), giant, C4, 1100));
+        var m00 = Ext(l00, 0, 0); m00.Temporary.Add(Ref(Q(20), huge, 100, 100));
+        var m30 = Ext(l30, 3, 0);
+        foreach (var (n, y) in new[] { (1, 100f), (4, 400f), (6, 600f), (7, 700f), (8, 800f), (9, 900f) }) m30.Temporary.Add(Ref(Q(n), huge, C3, y));
+        var prim = Ref(Q(12), planeBase, C3, 1000);
+        prim.Primitive = new PlacedPrimitive { Bounds = new P3Float(12000, 200, 1000), Type = PlacedPrimitive.TypeEnum.Box };
+        m30.Temporary.Add(prim);
+        var m40 = Ext(l40, 4, 0); m40.Temporary.Add(Ref(Q(5), small, C4, 500));
+        var m50 = Ext(l50, 5, 0); m50.Temporary.Add(Ref(Q(2), giant, C5, 200));
+        var m60 = Ext(l60, 6, 0); m60.Temporary.Add(Ref(Q(3), colossal, C6, 300));
+        var m70 = Ext(l70, 7, 0);
+        var wlM = World(wl, mTopL, m00, m30, m40, m50, m60, m70);
+        List(wlM, (Q(1), 3, 0), (Q(2), 5, 0), (Q(3), 6, 0), (Q(5), 4, 0), (Q(7), 3, 0), (Q(8), 3, 0), (Q(12), 3, 0), (Q(13), 4, 0),
+             (Q(11), 3, 0));
+        lm.Worldspaces.Add(wlM);
+        var mc00 = Ext(c00, 0, 0); mc00.Temporary.Add(Ref(Q(21), huge, 100, 100));
+        var mc30 = Ext(c30, 3, 0); mc30.Temporary.Add(Ref(Q(10), huge, C3, 100)); mc30.Temporary.Add(Ref(Q(11), huge, C3, 200));
+        var wcM = World(wc, new Cell(wcTop, Rel) { Flags = default }, mc00, mc30);
+        wcM.Parent = new WorldspaceParent { Flags = WorldspaceParent.Flag.UseLodData };
+        wcM.Parent.Worldspace.SetTo(wl);
+        List(wcM, (Q(10), 3, 0));
+        lm.Worldspaces.Add(wcM);
+        var w2M = World(wl2, null, Ext(w2c30, 3, 0));
+        List(w2M, (Q(9), 3, 0));
+        lm.Worldspaces.Add(w2M);
+        var lmPath = write(lm, Array.Empty<ISkyrimModGetter>());
+        using var lmOv = SkyrimMod.CreateFromBinaryOverlay(lmPath, Rel);
+
+        // ---- LA: Q6 listed by A's override of WL (and the master's entries repeated, as the CK writes a whole list);
+        //      Q7 moved to L70; Q8 deleted.   LB: an override of WL that carries no list (the winning record lists nothing).
+        var la = new SkyrimMod(new ModKey("WrLA", ModType.Plugin), Rel);
+        {
+            var c30a = Ext(l30, 3, 0); c30a.Temporary.Add(new PlacedObject(Q(8), Rel) { IsDeleted = true });
+            var c70a = Ext(l70, 7, 0); c70a.Temporary.Add(Ref(Q(7), huge, C7, 700));
+            var wa = World(wl, null, c30a, c70a);
+            List(wa, (Q(1), 3, 0), (Q(6), 3, 0));
+            la.Worldspaces.Add(wa);
+        }
+        var lb = new SkyrimMod(new ModKey("WrLB", ModType.Plugin), Rel);
+        lb.Worldspaces.Add(World(wl, null));
+        var laPath = write(la, new ISkyrimModGetter[] { lmOv });
+        var lbPath = write(lb, new ISkyrimModGetter[] { lmOv });
+
+        var flags = System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Public;
+        var t = typeof(WinningRefWalk);
+        var trackEdge = t.GetMethod("TrackEdge", flags);
+        var mergeEdge = t.GetMethod("MergeEdge", flags);
+        var observeLarge = t.GetMethod("ObserveLarge", flags);
+        var mergeLarge = t.GetMethod("MergeLarge", flags);
+        var largeKeys = t.GetProperty("LargeAdmittedKeys", flags);
+        var largeSnap = t.GetMethod("LargeSnapshot", flags);
+        var largeRestore = t.GetMethod("RestoreLarge", flags);
+        var edgeSnap = t.GetMethod("EdgeSnapshot", flags);
+        var edgeRestore = t.GetMethod("RestoreEdge", flags);
+        var radiusField = t.GetField("LargeRadius", System.Reflection.BindingFlags.Static | System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Public);
+        bool built = trackEdge is not null && mergeEdge is not null && observeLarge is not null && mergeLarge is not null && largeKeys is not null;
+        string B(string d) => built ? d : "no large merge in this build (ObserveLarge/MergeLarge absent); " + d;
+
+        var boxes = new Dictionary<FormKey, (Vec3 Min, Vec3 Max)>();
+        foreach (var s in lmOv.Statics)
+            if (s.ObjectBounds is { } ob)
+                boxes[s.FormKey] = (new Vec3(ob.First.X, ob.First.Y, ob.First.Z), new Vec3(ob.Second.X, ob.Second.Y, ob.Second.Z));
+        Func<PlacedRef, (Vec3 Min, Vec3 Max)?> localBounds = r =>
+            r.Primitive is { } pr ? (new Vec3(-pr.Bounds.X / 2f, -pr.Bounds.Y / 2f, -pr.Bounds.Z / 2f), new Vec3(pr.Bounds.X / 2f, pr.Bounds.Y / 2f, pr.Bounds.Z / 2f))
+            : r.Base is { } bk && boxes.TryGetValue(bk, out var bb) ? bb : null;
+
+        // One walk as the render runs it. snapshot: also return the raw state and both snapshots for a retained replay.
+        (Walked W, int? Added, HashSet<FormKey> Keys, LargeRaw? Snap) WalkL(FormKey ws, FormKey cell, (int, int) grid, bool childUnion,
+                                                                          params string[] order)
+        {
+            var w = new Walked(new(), new(), new());
+            var walk = new WinningRefWalk(w.WinRef, w.Persistent, w.CellOf);
+            if (built) trackEdge!.Invoke(walk, new object[] { ws, grid, true });
+            foreach (var path in order)
+            {
+                using var mod = SkyrimMod.CreateFromBinaryOverlay(path, Rel);
+                if (built) observeLarge!.Invoke(walk, new object[] { mod });
+                foreach (var cp in PlacementExtract.FromMod(mod, includeDeletions: true))
+                {
+                    var (isTarget, inRing) = WinningRefWalk.Classify(cp, cell, false, true, ws, grid);
+                    walk.Observe(cp, isTarget, inRing);
+                }
+            }
+            if (!built) return (w, null, new(), null);
+            var raw = new LargeRaw(new(w.WinRef), new(w.Persistent), new(w.CellOf), edgeSnap?.Invoke(walk, null), largeSnap?.Invoke(walk, null));
+            walk.MergePersistent(ws, grid, true);
+            mergeEdge!.Invoke(walk, new object[] { localBounds });
+            int added = (int)mergeLarge!.Invoke(walk, new object[] { localBounds, childUnion })!;
+            var keys = ((IEnumerable<FormKey>)largeKeys!.GetValue(walk)!).ToHashSet();
+            return (w, added, keys, raw);
+        }
+        static string Pos(PlacedRef? r) => r is null ? "absent" : $"at {r.Position.X:0},{r.Position.Y:0}";
+        static bool In(Walked w, FormKey k, float x, float y, FormKey cell) =>
+            w.WinRef.TryGetValue(k, out var r) && MathF.Abs(r.Position.X - x) < 0.01f && MathF.Abs(r.Position.Y - y) < 0.01f
+            && w.CellOf.TryGetValue(k, out var c) && c == cell;
+        static string At(Walked w, FormKey k) => Pos(w.WinRef.GetValueOrDefault(k)) + (w.CellOf.TryGetValue(k, out var c) ? $" cell {c}" : " no cell");
+
+        Console.WriteLine("winning-refs-selftest: large references (rings 3-5, by the worldspace's large-reference lists)");
+        var main = WalkL(wl, l00, (0, 0), true, lmPath, laPath, lbPath);
+        var mw = main.W;
+        Check("L1  listed, three cells out, box enters the 3x3: admitted at its position, in its cell (Q1)",
+              built && In(mw, Q(1), C3, 100, l30), B(At(mw, Q(1))));
+        Check("L1b listed, persistent, positioned four cells out, box enters: admitted in the persistent cell (Q13)",
+              built && In(mw, Q(13), C4, 1100, wlTop), B(At(mw, Q(13))));
+        Check("L2  listed, five cells out, box enters: admitted (Q2)", built && In(mw, Q(2), C5, 200, l50), B(At(mw, Q(2))));
+        Check("L3  listed, six cells out, box enters: not admitted, beyond the large-reference grid (Q3)",
+              !mw.WinRef.ContainsKey(Q(3)), B(At(mw, Q(3))));
+        Check("L4  NOT listed, three cells out, box enters: not admitted (Q4)", !mw.WinRef.ContainsKey(Q(4)), B(At(mw, Q(4))));
+        Check("L5  listed, four cells out, box does not enter: not admitted (Q5)", !mw.WinRef.ContainsKey(Q(5)), B(At(mw, Q(5))));
+        Check("L6  listed only by a LATER plugin's list (union), placed by the master: admitted (Q6)",
+              built && In(mw, Q(6), C3, 600, l30), B(At(mw, Q(6))));
+        Check("L7a listed, a later plugin moves it seven cells out: not admitted (Q7)", !mw.WinRef.ContainsKey(Q(7)), B(At(mw, Q(7))));
+        Check("L7b listed, a later plugin deletes it with no placement data: not admitted (Q8)",
+              !mw.WinRef.ContainsKey(Q(8)) && !mw.CellOf.ContainsKey(Q(8)), B(At(mw, Q(8))));
+        Check("L8  listed only in ANOTHER worldspace's list: not admitted (Q9)", !mw.WinRef.ContainsKey(Q(9)), B(At(mw, Q(9))));
+        Check("L11 a listed XPRM primitive three cells out, its box +-Bounds/2 enters: admitted (Q12)",
+              built && In(mw, Q(12), C3, 1000, l30), B(At(mw, Q(12))));
+        var want = new HashSet<FormKey> { Q(1), Q(2), Q(6), Q(12), Q(13) };
+        Check("L12 the large merge names exactly the admitted references (Q1 Q2 Q6 Q12 Q13 = 5); LargeRadius is 5",
+              built && main.Added == 5 && main.Keys.SetEquals(want) && radiusField?.GetRawConstantValue() is int rr && rr == 5,
+              B($"count {main.Added?.ToString() ?? "none"}; keys [{string.Join(", ", main.Keys.Select(k => k.ToString()).OrderBy(x => x))}]; "
+                + $"LargeRadius {radiusField?.GetRawConstantValue()?.ToString() ?? "absent"}"));
+        // L9: the retained walk (CellWalkFacts) replays a chunk's later shots from the raw walk and the snapshots.
+        bool replayOk = false; string replay = "no snapshot";
+        if (built && main.Snap is { Edge: { } es, Large: { } ls } snap && largeRestore is not null && edgeRestore is not null)
+        {
+            var w2 = new Walked(new(snap.WinRef), new(snap.Persistent), new(snap.CellOf));
+            var walk2 = new WinningRefWalk(w2.WinRef, w2.Persistent, w2.CellOf);
+            trackEdge!.Invoke(walk2, new object[] { wl, (0, 0), true });
+            edgeRestore.Invoke(walk2, new[] { es });
+            largeRestore.Invoke(walk2, new[] { ls });
+            walk2.MergePersistent(wl, (0, 0), true);
+            mergeEdge!.Invoke(walk2, new object[] { localBounds });
+            int n2 = (int)mergeLarge!.Invoke(walk2, new object[] { localBounds, true })!;
+            var k2 = ((IEnumerable<FormKey>)largeKeys!.GetValue(walk2)!).ToHashSet();
+            replayOk = n2 == main.Added && k2.SetEquals(main.Keys) && k2.Count > 0;
+            replay = $"replayed {n2} [{string.Join(", ", k2.Select(k => k.ToString()).OrderBy(x => x))}]";
+        }
+        Check("L9  a retained second shot (raw walk + snapshots) admits the same large set as the first", built && replayOk, B(replay));
+        var child = WalkL(wc, c00, (0, 0), true, lmPath, laPath, lbPath);
+        var childNone = WalkL(wc, c00, (0, 0), false, lmPath, laPath, lbPath);
+        Check("L10a child worldspace, switch union: its own listed reference is admitted (Q10)",
+              built && In(child.W, Q(10), C3, 100, c30), B(At(child.W, Q(10))));
+        Check("L10b child worldspace, switch none: nothing large is admitted (Q10)",
+              !childNone.W.WinRef.ContainsKey(Q(10)) && (!built || childNone.Added == 0), B(At(childNone.W, Q(10)) + $"; count {childNone.Added?.ToString() ?? "none"}"));
+        Check("L10c child worldspace: a reference listed only by the PARENT's list is not admitted (Q11)",
+              !child.W.WinRef.ContainsKey(Q(11)), B(At(child.W, Q(11))));
     }
 }
