@@ -3637,6 +3637,8 @@ MotionProof.RunSkinRule(Check);
 // Reach region Part 3: particles, start-state pose confirmations, the primitive default (red until implemented).
 MotionProof.RunPart3Rules(Check);
 MotionProof.RunParticleModel(Check);
+// Lane B item 4 (2026-10-13): a planar bomb pushes along its own axis (Gamebryo 2.3 NiPSysBombModifier::Update; red until implemented).
+MotionProof.RunBombAxis(Check);
 MotionProof.RunLooseItems(Check);
 // Reach region Part 3b: refusals to verdicts (red until implemented).
 MotionProof.RunPart3bRules(Check);
