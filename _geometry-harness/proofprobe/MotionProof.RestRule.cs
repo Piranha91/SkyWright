@@ -192,6 +192,15 @@ static partial class MotionProof
             var r = PhysicsReach.Drop(body, placed, 4, new[] { Loose(LooseRole.Holds, -10, "loose", "g"), Loose(LooseRole.Holds, -7, "loose", "g"), floor }, RRLayers);
             return (r.Status == "dropped-range" && NearA7(r.Distance, 2, 1e-3) && NearA7(r.DistanceMax, 5, 1e-3), ShowD(r));
         });
+        // RR-L5 a loose box that holds but that the body is pushed off sideways at placement (it clips the box's side by 0.5 u): that loose
+        // box is not read as a support (two movable bodies separate; how is not read): the body drops 95 to the floor, not pushed off.
+        // Rejects a refusal (or a bound) taken from a loose neighbour as if it were fixed.
+        Case(check, "rest-rule RR-L5: a loose box the body is pushed off at placement is not a support - dropped 95, not pushed off", () =>
+        {
+            var side = new DropSupport("loose", 4, true, true, ClosedBox(4.5f, -52, -62, 28.5f, 52, 42), Loose: LooseRole.Holds);
+            var r = PhysicsReach.Drop(body, placed, 4, new[] { side, floor }, RRLayers);
+            return (r.Status == "dropped" && !r.PushedOff && r.SupportId == "floor" && NearA7(r.Distance, 95, 1e-3), ShowD(r));
+        });
         // RR-L4 guard: a movable body with no loose reading is no support (the rule off): dropped 95. Rejects a change to the rule-off path.
         Case(check, "rest-rule RR-L4: a movable body with no loose reading is no support - dropped 95 (rule off unchanged)", () =>
         {

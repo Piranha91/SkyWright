@@ -697,6 +697,11 @@ object ReachOf(FormKey key, FormKey baseKey, Snap p)
             stateExcludedCandidates = stateExcludedBelow.GetValueOrDefault(key),
             lowerBound = rd.LowerBound, push = rd.Push == PushCause.None ? null : rd.Push.ToString(), pushDepth = Num(rd.PushDepth),
             pushUpDepth = Num(rd.PushUpDepth), movesOnLoad = rd.MovesOnLoad, shellCore = Num(rd.ShellCore),
+            mount = rd.Mount is not { Pose: { } mp } mt ? null : (object)new
+            {
+                node = mt.Node, trigger = mt.Trigger, pos = new[] { (double)mp.Position.X, mp.Position.Y, mp.Position.Z },
+                rotRad = new[] { (double)mp.Rotation.X, mp.Rotation.Y, mp.Rotation.Z },
+            },
         },
     } : new
     {
@@ -725,7 +730,7 @@ object ReachOf(FormKey key, FormKey baseKey, Snap p)
         var (bytes, err) = AssetResolver.ReadPlacementSource(src);
         if (bytes is null) return Out(new ReachRegion("refused", "asset read failed: " + err, Aabb.Empty, MeshReach.PolicyVersion, Array.Empty<string>(), Array.Empty<ReachPart>()));
         if (reachRules is null) return Out(MeshReach.OfModel(bytes, p.Pos, p.Rot, p.Scale, Read, new ReachOptions(motionDelta)));
-        var region = MeshReach.OfModel(bytes, p.Pos, p.Rot, p.Scale, Read, new ReachOptions(motionDelta, Rules: RulesFor(key, baseKey, p)));
+        var region = RegionOf(key, baseKey, p, bytes);
         if (!p.Interior && region.Drop is not null && terrainUnread.Contains(key))
             region = region with { Status = "uncertified", Labels = region.Labels.Append(PhysicsReach.TerrainNotReadLabel).ToList() };
         return Out(region);
@@ -860,6 +865,9 @@ EnableArms? resolvedArms = null;
 // resolution, or the flag under --flags) and not BOS-unresolved; its model's bodies (frames, chain, placement) or a
 // primitive on a stated layer. Terrain is not read (the fall can only be longer; labelled outdoors).
 Dictionary<(FormKey Space, int X, int Y), List<(FormKey Key, Snap Pose, bool Enabled)>>? supportCells = null;
+var regionMemo = new Dictionary<FormKey, ReachRegion>();
+Dictionary<FormKey, (FormKey Act, FormKey Trig)>? rackStarting = null;
+LooseReadings<FormKey>? loosePass = null;
 var supportCache = new Dictionary<FormKey, IReadOnlyList<(DropSupport S, Aabb Box)>>();
 var bodyCache = new Dictionary<FormKey, IReadOnlyList<(uint Layer, bool Solid, bool Movable, bool Complete, TriangleSoup Model)>?>();
 var coreBodyCache = new Dictionary<FormKey, IReadOnlyList<(uint Layer, bool Solid, bool Movable, bool Complete, TriangleSoup Model)>?>();   // the same, radius off (shell-crossing check)
@@ -921,12 +929,14 @@ IReadOnlyList<(DropSupport S, Aabb Box)> PlacedSupports(FormKey k, Snap sp)
     supportCache[k] = result;
     return result;
 }
+static TriangleSoup Raise(TriangleSoup t, float h) => new(t.Vertices.Select(v => v + new System.Numerics.Vector3(0, 0, h)).ToArray(), t.Indices);
 IEnumerable<DropSupport> SupportsUnder(FormKey self, Snap p, Aabb column)
 {
     if (supportCells is null) BuildSupportCells();
     var (space, gx, gy) = SupportCellOf(p);
     var cells = p.Interior ? new[] { (space, 0, 0) } : Enumerable.Range(-1, 3).SelectMany(dx => Enumerable.Range(-1, 3).Select(dy => (space, gx + dx, gy + dy))).ToArray();
     var found = new List<DropSupport>(); int excluded = 0;
+    float selfBottom = PlacedSupports(self, p).Select(x => x.Box.Min.Z).DefaultIfEmpty(column.Max.Z).Min();
     foreach (var c in cells)
     {
         if (!supportCells!.TryGetValue(c, out var list)) continue;
@@ -936,7 +946,31 @@ IEnumerable<DropSupport> SupportsUnder(FormKey self, Snap p, Aabb column)
             foreach (var (s, box) in PlacedSupports(k, sp))
             {
                 if (box.Max.X < column.Min.X || box.Min.X > column.Max.X || box.Max.Y < column.Min.Y || box.Min.Y > column.Max.Y || box.Min.Z > column.Max.Z) continue;
-                if (enabled) found.Add(s); else excluded++;
+                if (!enabled) { excluded++; continue; }
+                // rest rule part 3, lowest first: only a loose body whose placed bottom lies below this body's can support it (a strict
+                // order: two loose bodies cannot each be the other's support)
+                if (!s.Movable || reachRules?.Contains("rest") != true || box.Min.Z >= selfBottom) { found.Add(s); continue; }
+                // rest rule part 3: a loose body is a support when its own reading holds it; a lifted one also raised by its upward push
+                var role = LooseRoleOf(k, sp);
+                // the loose support's other readings (one group, so the body's landing is the range between them): a lifted body is
+                // pushed up by up to its upward push and may turn as it is (its region reaches its tilt margin below its placed bottom,
+                // part 1 KH-T; labr2: ingot 2B9EA9 turned 53 degrees under 2B9EA8); a body that may stay or drop (dropped-range from 0)
+                // may be as low as its longest reading
+                var alts = new List<float>();
+                if (role == LooseRole.Holds && regionMemo.TryGetValue(k, out var lr) && lr.Drop is { } ld)
+                {
+                    if (ld.Status == "lifted" && ld.PushUpDepth > 0) alts.Add((float)ld.PushUpDepth);
+                    if (ld.Status == "lifted" && ld.TiltMargin > 0) alts.Add(-(float)ld.TiltMargin);
+                    if (ld.Status == "dropped-range" && ld.DistanceMax > 0) alts.Add(-(float)ld.DistanceMax);
+                }
+                if (alts.Count == 0) found.Add(s with { Loose = role });
+                else
+                {
+                    var g = "loose " + k;
+                    found.Add(s with { Loose = role, Group = g });
+                    foreach (var h in alts)
+                        found.Add(s with { Loose = role, Group = g, World = Raise(s.World, h), CoreWorld = s.CoreWorld is null ? null : Raise(s.CoreWorld, h) });
+                }
             }
         }
     }
@@ -1037,6 +1071,76 @@ List<TransferSource> TransferSources()
     }
     return transferSources;
 }
+// rest rule (2026-10-13): one region per reference, shared by its own row and by the loose-support pass over the bodies above it
+ReachRegion RegionOf(FormKey key, FormKey baseKey, Snap p, byte[] bytes)
+{
+    if (regionMemo.TryGetValue(key, out var hit)) return hit;
+    byte[]? ReadAsset(string rel)
+    {
+        try { var res = assets.ResolveForPlacement(rel); return res.Sources.Count == 0 ? null : AssetResolver.ReadPlacementSource(res.Sources[0]).Bytes; }
+        catch (ArgumentException) { return null; }
+    }
+    var r = MeshReach.OfModel(bytes, p.Pos, p.Rot, p.Scale, ReadAsset, new ReachOptions(motionDelta, Rules: RulesFor(key, baseKey, p)));
+    return regionMemo[key] = r;
+}
+// rest rule part 3: a loose body's role as a support, read once, lowest first by recursion (LooseReadings reports a cycle)
+LooseRole LooseRoleOf(FormKey k, Snap sp)
+{
+    loosePass ??= new LooseReadings<FormKey>((key, _) =>
+    {
+        var pose = idx.WinningGeometryPose(key);
+        if (pose is null || !idx.RefBase.TryGetValue(key, out var b) || GeometryOf(b).Source is not { } src) return LooseRole.Moves;
+        var (bytes, _) = AssetResolver.ReadPlacementSource(src);
+        if (bytes is null) return LooseRole.Moves;
+        var r = RegionOf(key, b, pose.Value, bytes);
+        if (r.Status == "refused") return LooseRole.Moves;
+        // held where placed, or possibly so (a range from 0: its other readings are added as alternatives)
+        return r.Drop?.Status is "touching" or "lifted" or "mounted" or "rest-gap" or "floats"
+               || (r.Drop is { Status: "dropped-range" } dr && dr.Distance <= 1e-3) ? LooseRole.Holds : LooseRole.Moves;
+    });
+    return loosePass.Role(k);
+}
+// rest rule part 2: a weapon rack's starting item (the default linked ref of a WeaponRackActivateSCRIPT activator) and its trigger
+RackMountReading? RackFor(FormKey key, Snap p)
+{
+    if (rackStarting is null)
+    {
+        rackStarting = new();
+        foreach (var (k, links) in idx.RefLinkedRefs)
+        {
+            if (!idx.RefBase.TryGetValue(k, out var ab) || !idx.RackActivators.TryGetValue(ab, out var info)) continue;
+            var trig = info.Objects.TryGetValue("WRackTrigger", out var wk) ? links.FirstOrDefault(l => l.Keyword == wk).Reference : FormKey.Null;
+            foreach (var l in links) if (l.Keyword is null) rackStarting[l.Reference] = (k, trig);
+        }
+    }
+    if (!rackStarting.TryGetValue(key, out var chain)) return null;
+    var act = chain.Act; var info2 = idx.RackActivators[idx.RefBase[act]];
+    RackMountReading Refused(string why) => new("refused", $"{RackMount.RefusedReason} ({why})", null, null, chain.Trig.IsNull ? null : chain.Trig.ToString());
+    if (idx.RefScripts.TryGetValue(act, out var own) && own.Any(x => string.Equals(x, RackMount.ActivatorScript, StringComparison.OrdinalIgnoreCase)))
+        return Refused($"the activator reference {act} carries its own script properties, which are not read");
+    var ap = idx.WinningGeometryPose(act);
+    bool actOn = ap is { } a0 && !a0.Deleted && !idx.IsDeletedNow(act) && SupportEnabled(act, a0);
+    var tp = chain.Trig.IsNull ? null : idx.WinningGeometryPose(chain.Trig);
+    bool trigPresent = tp is { } t0 && !t0.Deleted && !idx.IsDeletedNow(chain.Trig);
+    bool trigOn = trigPresent && SupportEnabled(chain.Trig, tp!.Value);
+    var names = info2.Objects.GroupBy(kv => kv.Value).ToDictionary(g => g.Key, g => g.Select(kv => kv.Key).ToList());
+    var kws = new HashSet<string>(StringComparer.Ordinal);
+    if (idx.RefBase.TryGetValue(key, out var ib) && idx.BaseKeywords.TryGetValue(ib, out var fks))
+        foreach (var fk in fks) if (names.TryGetValue(fk, out var ns)) foreach (var n in ns) kws.Add(n);
+    string? itype = idx.BaseInfo.TryGetValue(ib, out var bi2) ? bi2.Type : null;
+    string kind = itype == "Weapon" ? "weapon" : itype == "Armor" && kws.Contains("ArmorShield") ? "shield" : "other";
+    bool sameCell = idx.RefCell.TryGetValue(key, out var ic) && idx.RefCell.TryGetValue(act, out var ac) && ic.Cell == ac.Cell;
+    var facts = new RackFacts(info2.Script, info2.RackType ?? 1, info2.CoaPatch ?? false, actOn, trigPresent, trigOn, SupportEnabled(key, p), sameCell, kind, kws);
+    byte[]? trigNif = null;
+    if (trigPresent && idx.RefBase.TryGetValue(chain.Trig, out var tb) && GeometryOf(tb).Source is { } tsrc) trigNif = AssetResolver.ReadPlacementSource(tsrc).Bytes;
+    try
+    {
+        var rd = RackMount.Decide(facts, node => trigNif is null ? throw new InvalidOperationException("the trigger's model could not be read")
+                                                            : RackMount.NodePose(trigNif, node, tp!.Value.Pos, tp.Value.Rot, tp.Value.Scale));
+        return rd with { Trigger = chain.Trig.ToString() };
+    }
+    catch (Exception ex) when (ex is InvalidOperationException or InvalidDataException) { return Refused(ex.Message); }
+}
 ReachRules? RulesFor(FormKey key, FormKey baseKey, Snap p)
 {
     if (reachRules is null) return null;
@@ -1062,7 +1166,8 @@ ReachRules? RulesFor(FormKey key, FormKey baseKey, Snap p)
                           PathHull: reachRules.Contains("path"), Emitter: reachRules.Contains("emitter"),
                           Transfers: reachRules.Contains("transfer") ? TransferSources() : null,
                           Gravity: reachRules.Contains("gravity") ? SettledGravities() : null,
-                          Approximations: reachRules.Contains("approx") ? MeasuredApproximations() : null);
+                          Approximations: reachRules.Contains("approx") ? MeasuredApproximations() : null,
+                          Rack: reachRules.Contains("rest") ? RackFor(key, p) : null);
 }
 // Part 3b round 2: --measured-approximations FILE, a JSON list of {modelPath, sha256, modelBox: {min: [3], max: [3]}, label, evidence}
 IReadOnlyList<MeasuredApproximation>? measuredApproximations = null;

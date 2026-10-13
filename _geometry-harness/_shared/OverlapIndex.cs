@@ -1,6 +1,7 @@
 using System.Numerics;
 using HousecarlCore;
 using Mutagen.Bethesda.Plugins;
+using Mutagen.Bethesda.Plugins.Aspects;
 using Mutagen.Bethesda.Skyrim;
 
 namespace HarnessShared;
@@ -300,6 +301,12 @@ public sealed class OverlapIndex
     /// <summary>ref -> its winning record's XLKR links and XAPR parents (absent when none): the two-mover coupling (E4).</summary>
     public Dictionary<FormKey, IReadOnlyList<PlacedLink>> RefLinkedRefs { get; } = new();
     public Dictionary<FormKey, IReadOnlyList<PlacedActivateParent>> RefActivateParents { get; } = new();
+    /// <summary>Rest rule part 2: ref -> the script names its own VMAD attaches (absent when none).</summary>
+    public Dictionary<FormKey, IReadOnlyList<string>> RefScripts { get; } = new();
+    /// <summary>Rest rule part 2: weapon and armour base -> its keywords (winning record).</summary>
+    public Dictionary<FormKey, IReadOnlyList<FormKey>> BaseKeywords { get; } = new();
+    /// <summary>Rest rule part 2: activator base carrying the weapon rack script -> the script's properties (winning record).</summary>
+    public Dictionary<FormKey, RackScriptInfo> RackActivators { get; } = new();
     /// <summary>ref -> its editor id, the last non-empty one in load order (an override that omits it keeps the earlier
     /// name). What the world-state census names a switch by.</summary>
     public Dictionary<FormKey, string> RefEditorId { get; } = new();
@@ -348,6 +355,25 @@ public sealed class OverlapIndex
                 CollisionLayerRecords[coll.Index] = (coll.FormKey, coll.EditorID, coll.Flags.HasFlag(CollisionLayer.Flag.TriggerVolume),
                                                      coll.Flags.HasFlag(CollisionLayer.Flag.Sensor), (coll.CollidesWith ?? []).Select(l => l.FormKey).ToList());
                 continue;
+            }
+            // rest rule part 2: item keywords (weapons, armour) and the weapon rack script's properties on activator bases
+            if ((rec is IWeaponGetter || rec is IArmorGetter) && rec is IKeywordedGetter<IKeywordGetter> kwr && rec is ISkyrimMajorRecordGetter kmr)
+                BaseKeywords[kmr.FormKey] = kwr.Keywords is { } kws ? kws.Select(k => k.FormKey).Where(k => !k.IsNull).ToArray() : Array.Empty<FormKey>();
+            if (rec is IActivatorGetter actr)
+            {
+                var sc = actr.VirtualMachineAdapter?.Scripts.FirstOrDefault(x => string.Equals(x.Name, RackMount.ActivatorScript, StringComparison.OrdinalIgnoreCase));
+                if (sc is null) RackActivators.Remove(actr.FormKey);
+                else
+                {
+                    int? rt = null; bool? coa = null; var objs = new Dictionary<string, FormKey>(StringComparer.OrdinalIgnoreCase);
+                    foreach (var pr in sc.Properties)
+                    {
+                        if (pr is IScriptIntPropertyGetter ip && string.Equals(pr.Name, "RackType", StringComparison.OrdinalIgnoreCase)) rt = ip.Data;
+                        else if (pr is IScriptBoolPropertyGetter bp && string.Equals(pr.Name, "Patch14COARacks", StringComparison.OrdinalIgnoreCase)) coa = bp.Data;
+                        else if (pr is IScriptObjectPropertyGetter op && !op.Object.FormKey.IsNull) objs[pr.Name] = op.Object.FormKey;
+                    }
+                    RackActivators[actr.FormKey] = new RackScriptInfo(sc.Name, rt, coa, objs);
+                }
             }
             // Armour carries its ground model per gender in WorldModel, not Model (G1 build list row 2, Gate A review Q6): the
             // male path goes to BaseMesh (the female when only it is given), the female to BaseMeshFemale.
@@ -421,6 +447,7 @@ public sealed class OverlapIndex
         RefRecordFlags[r.FormKey] = r.RecordFlags;
         if (r.LinkedReferences is { Count: > 0 } links) RefLinkedRefs[r.FormKey] = links; else RefLinkedRefs.Remove(r.FormKey);
         if (r.ActivateParents is { Count: > 0 } parents) RefActivateParents[r.FormKey] = parents; else RefActivateParents.Remove(r.FormKey);
+        if (r.Scripts is { Count: > 0 } scripts) RefScripts[r.FormKey] = scripts; else RefScripts.Remove(r.FormKey);
         Deletions.Note(plugin, r.FormKey, r.Deleted, hasPlacement: true);
         var snap = new Snap(plugin, r.Position, cell, r.InitiallyDisabled, r.Deleted, worldspace, r.Rotation, r.Scale);
         if (History.Winning(r.FormKey) is { } prev && prev.SameAs(snap)
@@ -783,3 +810,7 @@ public sealed class OverlapIndex
                               counterfactualStatus, counterfactualReason);
     }
 }
+
+/// <summary>Rest rule part 2: the weapon rack script on an activator base - its name, RackType and Patch14COARacks when set (null: the
+/// script's default, 1 and false), and its object properties by name (keywords such as WeaponTypeBow, WRackTrigger, ArmorShield).</summary>
+public sealed record RackScriptInfo(string Script, int? RackType, bool? CoaPatch, IReadOnlyDictionary<string, FormKey> Objects);
