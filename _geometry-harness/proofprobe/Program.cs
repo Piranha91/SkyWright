@@ -3655,6 +3655,8 @@ MotionProof.RunPairMeshDefects(Check);
 MotionProof.RunPlacedCollapse(Check);
 // Lane B item 2 (2026-10-13): the actual-shape relation skips zero-area-in-model triangles and uses the pair frame (red until implemented).
 MotionProof.RunActualShape(Check);
+// Day lane 1 item 2 (2026-10-13): contact evidence takes the relation's zero-area skip and pair frame (red until implemented).
+MotionProof.RunContactEvidencePlaced(Check);
 // Surface crossing envelope on the curve (2026-10-05): interior-segment endpoints lie on the intersection line.
 MotionProof.RunEnvelopeOffset(Check);
 MotionProof.RunSampleTopology(Check);
