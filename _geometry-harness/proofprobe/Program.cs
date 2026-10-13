@@ -3640,6 +3640,8 @@ MotionProof.RunParticleModel(Check);
 // Lane B item 4 (2026-10-13): a planar bomb pushes along its own axis (Gamebryo 2.3 NiPSysBombModifier::Update; red until implemented).
 MotionProof.RunBombAxis(Check);
 MotionProof.RunLooseItems(Check);
+// Drop-crossing lane 2 (2026-10-13): pushed-off, up-facing and impaled drops refused by name, no labels (red until implemented).
+MotionProof.RunDropRefusal(Check);
 // Reach region Part 3b: refusals to verdicts (red until implemented).
 MotionProof.RunPart3bRules(Check);
 MotionProof.RunPart3bRound2(Check);
