@@ -108,8 +108,8 @@ def _parts(r, emit=EMIT_THRESHOLD):
 
 def part_distance(pos, r, emit=EMIT_THRESHOLD):
     """Distance from a point to the reference's nearest emitting part (None when it has none)."""
-    ds = [_box_distance(pos, e["box"]) for e in _parts(r, emit)]
-    return min(ds) if ds else None
+    n = _nearest_part(pos, r, emit)
+    return None if n is None else n[0]
 
 
 def _nearest_part(pos, r, emit=EMIT_THRESHOLD):

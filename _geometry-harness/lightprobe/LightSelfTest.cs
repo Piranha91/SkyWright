@@ -79,7 +79,9 @@ static class LightSelfTest
               () => E(@"clutter\woodfires\fireplacewood01burning.nif") is { Status: "read" } m
                     && m.Parts.Count(p => p.Kind == "self-lit effect") == 3 && m.Parts.All(p => p.Kind != "emissive")
                     && m.Parts.Where(p => p.Kind == "particle emitter").Select(p => Centre(p.Min, p.Max)).OrderBy(c => c.Z).ToList() is { Count: 2 } pe
-                    && Near(pe[0], new Vector3(0, 0, 8.0f), 0.2f) && Near(pe[1], new Vector3(0, 0, 37.5f), 0.2f));
+                    && Near(pe[0], new Vector3(0, 0, 8.0f), 0.2f) && Near(pe[1], new Vector3(0, 0, 37.5f), 0.2f)
+                    // the emitter extent, not the reach region (the reach box grows by the particles' travel, about 60 u and 190 u here)
+                    && m.Parts.Where(p => p.Kind == "particle emitter").All(p => (p.Max - p.Min).Length() < 80));
         Check("emitters: a cobweb (effect shader with Effect_Lighting) has none", "a lit ambient effect read as a light source",
               () => E(@"effects\fxcobwebcorner01.nif") is { Status: "read" } m && m.Parts.Count == 0);
         Check("emitters: the torch's two ember emitters sit at its head (y 32-34)", "particle emitters missing or at the model origin",

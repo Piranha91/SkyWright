@@ -432,6 +432,10 @@ def test_k10_co_movement_supports_but_never_creates():
     r = lc.c1_orphan(LBX, own, own, P, dep=dep)
     assert r.get("host") == C1 and r.get("coMoved") is True, f"K10: the host co-moved, got {r}"
     assert X1 in (r.get("coMovedNotHost") or []), f"K10: the co-moved non-emitter is reported, not hosted, got {r}"
+    # a light whose only co-moved neighbour has no emitting part stays free-standing (co-movement never creates a host)
+    own2 = arr([prop1], [light(LBX, (100, 0, 60))])
+    r2 = lc.c1_orphan(LBX, own2, own2, P, dep=arr([prop0], [light(LBX, (0, 0, 60))]))
+    assert r2.get("host") is None and r2["applies"] is False and X1 in (r2.get("coMovedNotHost") or []), f"K10: got {r2}"
 
 
 def test_k11_unreadable_model_in_range_leaves_the_host_unknown():
