@@ -49,4 +49,34 @@ public sealed partial class MovedRefSelfTest
         }
     }
 
+    /// <summary>The floor REACH (FloorFeed.FloorReach) on FloorReachFixture: <paramref name="walk"/> runs the probe's own
+    /// floor walk over the fixture's plugins, in load order, and returns its FloorIndex. Each case of the fixture's table
+    /// is its own line, so a sabotage arm names the case it must turn red (FR1..FR11, FRC).</summary>
+    internal void CheckReach(string prefix, Func<IReadOnlyList<string>, FloorFeed.FloorIndex> walk, bool child = true)
+    {
+        var paths = FloorReachFixture.Write(Path.Combine(Root, "reach"));
+        var index = walk(paths);
+        var r00 = index.NeighbourhoodOf(FloorReachFixture.R, (0, 0)).Refs.Select(r => r.FormKey).ToList();
+        var rc00 = index.NeighbourhoodOf(FloorReachFixture.RC, (0, 0)).Refs.Select(r => r.FormKey).ToList();
+        int N(List<FormKey> l, FormKey k) => l.Count(x => x == k);
+        string Show(List<FormKey> l) => string.Join(" ", l.Select(FloorReachFixture.Name).OrderBy(x => x, StringComparer.Ordinal));
+        var F = (Func<string, FormKey>)(n => FloorReachFixture.Refs[n]);
+        void Once(string id, string what) => Check($"{prefix}-{id}  {what}: present once", N(r00, F(what.Split(' ')[0])) == 1, Show(r00));
+        void Absent(string id, string what) => Check($"{prefix}-{id}  {what}: absent", N(r00, F(what.Split(' ')[0])) == 0, Show(r00));
+        Once("FR1", "F1 anchored at ring 2, box enters the 3x3");
+        Absent("FR2", "F2 anchored at ring 2, box misses the 3x3");
+        Once("FR3", "F3 listed, anchored at ring 4, enters");
+        Absent("FR4", "F4 unlisted, anchored at ring 4, enters");
+        Absent("FR5", "F5 listed, anchored at ring 6, enters");
+        Absent("FR6", "F6 moved by a later plugin to ring 7");
+        Absent("FR7", "F7 deleted by a later plugin, no placement data");
+        Once("FR8", "F8 held at ring 2, standing inside the 3x3 (filed by position too)");
+        Once("FR9", "F9 a box that enters only with its X rotation");
+        Once("FR10", "F10 listed by a later plugin's list only (the union)");
+        Once("FR11", "F11 held at ring 2, standing at ring 3 (anchored by its cell)");
+        Check($"{prefix}-FR-all  R (0,0): exactly the expected set, each once",
+              r00.Count == FloorReachFixture.ExpectedR00.Count && r00.ToHashSet().SetEquals(FloorReachFixture.ExpectedR00), Show(r00));
+        if (child) Check($"{prefix}-FRC  child worldspace RC (0,0): G0 and its own list's G2, not the parent's G1",
+              rc00.Count == FloorReachFixture.ExpectedRC00.Count && rc00.ToHashSet().SetEquals(FloorReachFixture.ExpectedRC00), Show(rc00));
+    }
 }

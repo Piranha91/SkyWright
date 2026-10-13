@@ -15,6 +15,7 @@
     <Compile Include="..\_shared\MovedRefFixture.cs" Link="MovedRefFixture.cs" />
     <Compile Include="..\_shared\MovedRefSelfTest.cs" Link="MovedRefSelfTest.cs" />
     <Compile Include="..\_shared\MovedRefFloorCheck.cs" Link="MovedRefFloorCheck.cs" />
+    <Compile Include="..\_shared\FloorReachFixture.cs" Link="FloorReachFixture.cs" />
     <Compile Include="..\_shared\HarnessTarget.cs" Link="HarnessTarget.cs" />
     <Compile Include="..\_shared\CollisionLayers.cs" Link="CollisionLayers.cs" />
     <Compile Include="..\_shared\ActorBand.cs" Link="ActorBand.cs" />

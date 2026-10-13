@@ -17,6 +17,7 @@
     <Compile Include="..\_shared\MovedRefFixture.cs" Link="MovedRefFixture.cs" />
     <Compile Include="..\_shared\MovedRefSelfTest.cs" Link="MovedRefSelfTest.cs" />
     <Compile Include="..\_shared\MovedRefFloorCheck.cs" Link="MovedRefFloorCheck.cs" />
+    <Compile Include="..\_shared\FloorReachFixture.cs" Link="FloorReachFixture.cs" />
     <Using Include="System.IO" />
     <ProjectReference Include="..\..\src\housecarl-core\housecarl-core.csproj" />
     <!-- CharacterViewer.Rendering lives in a SEPARATE repo. This was an absolute drive path, which

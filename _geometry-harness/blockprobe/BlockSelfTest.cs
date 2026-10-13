@@ -58,6 +58,20 @@ static class BlockSelfTest
         t.CheckFloor("B2", walk.FloorRefsByWorld.GetValueOrDefault(F.W), walk.FloorLandByWorld.GetValueOrDefault(F.W),
                      MovedRefSelfTest.UnreadableLandOf(walk, F.W), new[] { (0, 0), (1, 0), (-1, 0), (2, 0), (1, 1) });
 
+        // The floor reach (FloorFeed.FloorReach) on its own fixture, through BlockWalk with the centre cells as targets.
+        t.CheckReach("B-R", paths =>
+        {
+            var tg = new Dictionary<FormKey, CellPlacements>();
+            using (var r0 = SkyrimMod.CreateFromBinaryOverlay(paths[0], FloorReachFixture.Rel))
+                foreach (var cp in PlacementExtract.FromMod(r0))
+                    if (cp.Cell == FloorReachFixture.R00 || cp.Cell == FloorReachFixture.RC00) tg[cp.Cell] = cp;
+            t.Check("B-R precondition: the reach fixture's target cells are R00 and RC00", tg.Count == 2, string.Join(", ", tg.Keys));
+            var w = new BlockWalk(tg);
+            foreach (var p in paths)
+                if (BlockWalk.Open(p) is { } m) { using (m as IDisposable) w.Plugin(m, Path.GetFileName(p), _ => { }); }
+            return w.Floor;
+        });
+
         // A plugin that cannot be read is refused, not skipped (P1).
         t.CheckRefusesUnreadable("P1 ", p => BlockWalk.Open(p));
         t.CheckRefusesMidWalk("P1-mid", p => { var m = BlockWalk.Open(p)!; using (m as IDisposable) new BlockWalk(targets).Plugin(m, Path.GetFileName(p), _ => { }); });

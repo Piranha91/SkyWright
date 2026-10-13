@@ -48,6 +48,16 @@ static class RouteSelfTest
         t.CheckFloor("S2", walk.FloorRefsByWorld.GetValueOrDefault(F.W), walk.FloorLandByWorld.GetValueOrDefault(F.W),
                      MovedRefSelfTest.UnreadableLandOf(walk, F.W), new[] { (0, 0), (1, 0), (-1, 0), (2, 0), (1, 1) });
 
+        // The floor reach (FloorFeed.FloorReach) on its own fixture, through RouteWalk with the centre cells wanted.
+        t.CheckReach("S-R", paths =>
+        {
+            var w = new RouteWalk(new HashSet<FormKey> { FloorReachFixture.R00, FloorReachFixture.RC00 });
+            w.Seed(paths[0]);
+            foreach (var p in paths)
+                if (RouteWalk.Open(p) is { } m) { using (m as IDisposable) w.Plugin(m); }
+            return w.Floor;
+        });
+
         t.CheckRefusesUnreadable("P1 open", p => RouteWalk.Open(p));
         t.CheckRefusesUnreadable("P1 seed", p => { walk.Seed(p); return null; });
         t.CheckRefusesMidWalk("P1-mid walk", p => { var m = RouteWalk.Open(p)!; using (m as IDisposable) new RouteWalk(new HashSet<FormKey> { F.E00 }).Plugin(m); });

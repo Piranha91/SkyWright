@@ -56,6 +56,15 @@ static class FloorgapSelfTest
         t.CheckFloor("G2", walk.RefsByWorld.GetValueOrDefault(Fx.W), walk.LandByWorld.GetValueOrDefault(Fx.W),
                      MovedRefSelfTest.UnreadableLandOf(walk, Fx.W), new[] { (0, 0), (1, 0), (5, 0), (-1, 0), (2, 0), (1, 1) });
 
+        // The floor reach (FloorFeed.FloorReach) on its own fixture, through FloorgapWalk (every exterior cell filed).
+        t.CheckReach("G-R", paths =>
+        {
+            var w = new FloorgapWalk(winning: true, wantCell: FloorReachFixture.R00.ToString());
+            foreach (var p in paths)
+                if (w.Open(p) is { } m) { using (m as IDisposable) w.Plugin(m, p, _ => { }); }
+            return w.Floor;
+        });
+
         // G4 (reach in a grid cell): a reference whose last sighting is in its worldspace's PERSISTENT cell stands in the grid
         // cell its position falls in, and reach looks it up there (PersistentStandingIn). Worked from the fixture table: M5's
         // last sighting is A's persistent T at (1400,1400), grid (0,0) of W, so it stands in E00; Q1 is persistent in T at

@@ -107,6 +107,16 @@ internal static class MovedRefSelfTestVp
         t.Check("R2  the planes: P3 only (P1 re-based to a static, P2 moved to another worldspace)",
                 prims.SequenceEqual(new[] { "P3" }), string.Join(", ", prims));
 
+        // ---- the floor reach (FloorFeed.FloorReach) on its own fixture: the route mode's worldspace pass over R, its bound
+        // the centre's 3x3 (the route mode files only its own worldspace, so the child case is the other probes') ----
+        t.CheckReach("V-R", paths =>
+        {
+            var rw = new RouteStationMode.Walk(FloorReachFixture.R, Array.Empty<FormKey>(), FloorReachFixture.Small);
+            for (int dx = -1; dx <= 1; dx++) for (int dy = -1; dy <= 1; dy++) rw.Bound.Add((dx, dy));
+            foreach (var p in paths) rw.Plugin(p);
+            return rw.Floor;
+        }, child: false);
+
         // ---- R3: the route mode's winning navmeshes of W, under the last-sighting rule (the fixture's NAVM table): NVM stands
         // in E50 (square 5,0); NVR is B's restoration; NVC A's override; the deleted (NVD, NVK, NVX) and the moved out of W
         // (NVI to an interior, NVW to W2) are gone ----
