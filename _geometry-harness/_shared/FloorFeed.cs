@@ -29,6 +29,13 @@ using Mutagen.Bethesda.Plugins;
 //  The Base Object Swapper layer is not applied to floor candidates: the
 //  floor is the authored floor against the authored navmesh, and a swap
 //  changes obstacles far more often than floors (stated, not hidden).
+//
+//  A known limit: candidates are filed by position within the 3×3, so a
+//  reference anchored outside it whose bounds reach into the square (a
+//  large mountain or cliff two cells out, say) is not a floor candidate.
+//  A rule admitting such references by their placed bounds was built and
+//  measured, and changed no verdict on the groups measured; it is not
+//  merged, and its patch is kept in the local run record.
 // ======================================================================
 
 internal static class FloorFeed
