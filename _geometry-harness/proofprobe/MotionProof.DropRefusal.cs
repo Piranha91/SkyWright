@@ -82,8 +82,8 @@ static partial class MotionProof
                     && r.Drop is { LowerBound: false, MovesOnLoad: false, Push: PushCause.UpFacingDown } d && Nan(d.Distance)
                     && NearA7(d.PushDepth, 4.85, 1e-3) && NearA7(d.PushUpDepth, 5.85, 1e-3), Show(r));
         });
-        // L2-6 blocker 2: the plate at z 0.1 (slab -0.25..0.45): out down 5.25 (>= ImpaleMinDepth 5), out up 5.45 (ratio 1.038 <=
-        // ImpaleTieRatio 1.25): an impalement. Refused with no drop or bound, the two depths given. Rejects a tie resolved silently.
+        // L2-6 blocker 2: the plate at z 0.1 (slab -0.25..0.45): out down 5.25 (a downward push >= ImpaleMinDepth 5), out up 5.45
+        // (ratio 1.038 <= ImpaleTieRatio 1.25): an impalement. Refused with no drop or bound, the two depths given. Rejects a tie resolved silently.
         Case(check, "drop-refusal L2-6: an impalement (5.25 down / 5.45 up) - refused, no drop or bound, cause Impaled", () =>
         {
             var r = MeshReach.OfModel(FreeItem(), Origin, Origin, 1f, null, Settles(PlateAt(0.1f)));
@@ -110,6 +110,17 @@ static partial class MotionProof
             var b = PhysicsReach.Drop(body, SpatialOverlap.SoupBounds(body), 4, PlateAt(1.35f), RRLayers);
             return (a.Causes.HasFlag(PushCause.Impaled) && NearA7(a.PushDepth, 9.5, 1e-3) && NearA7(a.PushUpDepth, 11.2, 1e-3)
                     && b.Causes == PushCause.UpFacingDown && NearA7(b.PushDepth, 9.0, 1e-3) && NearA7(b.PushUpDepth, 11.7, 1e-3), "z 0.85 " + ShowD(a) + " | z 1.35 " + ShowD(b));
+        });
+        // L2-12 a deep side push near an upward tie is not an impalement (lab 4: the knife L4-3, 6.8 u sideways against 7.5 u up, and the
+        // flour L4-4b, 6.4 against 6.7, left sideways as read): the item [-5,5]^3 clips a closed wall x -0.5..30, z -62..1 by 5.5 in x;
+        // out -x 5.5, out up 6.0 (ratio 1.09). Cause HullSide only, depths not recorded. Rejects an impalement test that ignores the
+        // push direction.
+        Case(check, "drop-refusal L2-12: a deep side push near an upward tie (5.5 side / 6.0 up) - HullSide, not Impaled", () =>
+        {
+            var body = ClosedBox(-5, -5, -5, 5, 5, 5);
+            var sup = new[] { new DropSupport("wall", 1, true, false, ClosedBox(-0.5f, -52, -62, 30, 52, 1)), floor };
+            var r = PhysicsReach.Drop(body, SpatialOverlap.SoupBounds(body), 4, sup, RRLayers);
+            return (r.PushedOff && r.Causes == PushCause.HullSide, ShowD(r));
         });
         // L2-9 a held item is not refused: the item's bottom 0.15 into an up-facing plate's slab top (plate z -5.2, slab -5.55..-4.85):
         // pushed up, held, touching on the plate, region not refused, cause None. Rejects over-refusal of held bodies.
