@@ -111,6 +111,24 @@ static partial class MotionProof
             return (a.Causes.HasFlag(PushCause.Impaled) && NearA7(a.PushDepth, 9.5, 1e-3) && NearA7(a.PushUpDepth, 11.2, 1e-3)
                     && b.Causes == PushCause.UpFacingDown && NearA7(b.PushDepth, 9.0, 1e-3) && NearA7(b.PushUpDepth, 11.7, 1e-3), "z 0.85 " + ShowD(a) + " | z 1.35 " + ShowD(b));
         });
+        // L2-13 the ceiling bound covers grazes only (the one ceiling station, lab 4 L4-1, was a 0.074 u graze): a down-facing mesh plate
+        // (radius 0.35) at z 4.7 (slab 4.35..5.05) takes the item's top (5) down 0.65 (< CeilingGrazeDepth 0.7): bound; at z 4.6 (slab
+        // 4.25..4.95) down 0.75 (deeper than a graze): refused unverified, the reader's drop 95 not a bound. Rejects the bound read for
+        // every ceiling push, and the graze line read the wrong way.
+        Case(check, "drop-refusal L2-13: ceiling push either side of CeilingGrazeDepth - 0.65 bound, 0.75 unverified (drop 95 both)", () =>
+        {
+            ReachRegion At(float z)
+            {
+                var cv = new[] { new Vector3(-50, -50, z), new Vector3(50, -50, z), new Vector3(50, 50, z), new Vector3(-50, 50, z) };
+                var sup = PhysicsReach.Supports("ceil", SupportMesh(cv, new[] { 0, 2, 1, 0, 3, 2 }, 0.35f), new Vec3(0, 0, 0), new Vec3(0, 0, 0), 1f, movableBase: false)
+                                      .Append(floor).ToArray();
+                return MeshReach.OfModel(FreeItem(), Origin, Origin, 1f, null, Settles(sup));
+            }
+            var a = At(4.7f); var b = At(4.6f);
+            bool okA = a.Status == "refused" && (a.Reason ?? "").StartsWith(PhysicsReach.PushedOffReason) && a.Drop is { LowerBound: true, Push: PushCause.SlabCeiling } da && NearA7(da.Distance, 95, 1e-3);
+            bool okB = b.Status == "refused" && (b.Reason ?? "").StartsWith(PhysicsReach.PushedOffUnverifiedReason) && b.Drop is { LowerBound: false, Push: PushCause.SlabCeiling } db && NearA7(db.Distance, 95, 1e-3);
+            return (okA && okB && PhysicsReach.CeilingGrazeDepth == 0.7, "z 4.7 " + Show(a) + " | z 4.6 " + Show(b));
+        });
         // L2-12 a deep side push near an upward tie is not an impalement (lab 4: the knife L4-3, 6.8 u sideways against 7.5 u up, and the
         // flour L4-4b, 6.4 against 6.7, left sideways as read): the item [-5,5]^3 clips a closed wall x -0.5..30, z -62..1 by 5.5 in x;
         // out -x 5.5, out up 6.0 (ratio 1.09). Cause HullSide only, depths not recorded. Rejects an impalement test that ignores the
