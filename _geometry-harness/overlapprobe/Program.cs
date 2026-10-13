@@ -695,6 +695,8 @@ object ReachOf(FormKey key, FormKey baseKey, Snap p)
             renderBelowCollision = double.IsNaN(rd.RenderBelowCollision) ? (double?)null : rd.RenderBelowCollision,
             placed = ReachBox(rd.Placed), landed = ReachBox(rd.Landed), supportId = rd.SupportId,
             stateExcludedCandidates = stateExcludedBelow.GetValueOrDefault(key),
+            lowerBound = rd.LowerBound, push = rd.Push == PushCause.None ? null : rd.Push.ToString(), pushDepth = Num(rd.PushDepth),
+            pushUpDepth = Num(rd.PushUpDepth), movesOnLoad = rd.MovesOnLoad, shellCore = Num(rd.ShellCore),
         },
     } : new
     {
@@ -702,11 +704,14 @@ object ReachOf(FormKey key, FormKey baseKey, Snap p)
         parts = r.UncertifiedParts.Select(x => new { label = x.Label, box = ReachBox(x.Box) }).ToArray(),
         drop = r.Drop is not { } d ? null : (object)new
         {
-            status = d.Status, distance = d.Distance, distanceMax = double.IsNaN(d.DistanceMax) ? (double?)null : d.DistanceMax,
+            status = d.Status, distance = Num(d.Distance), distanceMax = double.IsNaN(d.DistanceMax) ? (double?)null : d.DistanceMax,
             placed = ReachBox(d.Placed), landed = ReachBox(d.Landed), supportId = d.SupportId,
             stateExcludedCandidates = stateExcludedBelow.GetValueOrDefault(key),
+            lowerBound = d.LowerBound, push = d.Push == PushCause.None ? null : d.Push.ToString(), pushDepth = Num(d.PushDepth),
+            pushUpDepth = Num(d.PushUpDepth), movesOnLoad = d.MovesOnLoad, shellCore = Num(d.ShellCore),
         },
     };
+    static double? Num(double x) => double.IsNaN(x) ? null : x;
     static object? ReachBox(Aabb b) => b.IsEmpty ? null
         : new { min = new[] { (double)b.Min.X, b.Min.Y, b.Min.Z }, max = new[] { (double)b.Max.X, b.Max.Y, b.Max.Z } };
     byte[]? Read(string rel)

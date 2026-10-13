@@ -373,17 +373,18 @@ static partial class MotionProof
             return (r.Drop is { Status: "touching", SupportId: "plank" }, ShowRR(r));
         });
         // LI-K14: no silent wrong answer when the crossing test misses a shell: a drop read with the radius that is LONGER than the
-        // same drop without it carries ShellCrossingLabel and the radius-off drop. Synthetic: a support whose radius soup sits at
-        // -100 while its core soup sits at -10 (a long radius drop over a short core one) labels "5 u"; a support whose core soup is
-        // its radius soup carries no label. Rejects the long reading passed through unlabelled, and a label on every drop.
-        Case(check, "loose-items LI-K14: a drop longer with the radius than without it carries the shell-crossing label and the core drop", () =>
+        // same drop without it is refused by name with the radius-off drop (lane 2, 2026-10-13: was a label). Synthetic: a support whose
+        // radius soup sits at -100 while its core soup sits at -10 (a long radius drop over a short core one) is refused with the reduced
+        // drop 5; a support whose core soup is its radius soup is not refused. Rejects the long reading passed through, a label, and a
+        // refusal on every drop.
+        Case(check, "loose-items LI-K14: a drop longer with the radius than without it is refused (shell crossing) with the core drop", () =>
         {
             var lying = new[] { new DropSupport("s", 1, true, false, Plate(500, -100), CoreWorld: Plate(500, -10)) };
             var honest = new[] { new DropSupport("s", 1, true, false, Plate(500, -100), CoreWorld: Plate(500, -100)) };
             var a = MeshReach.OfModel(FreeItem(), Origin, Origin, 1f, null, RulesOn(physics: true, baseType: "MISC", supports: lying));
             var b = MeshReach.OfModel(FreeItem(), Origin, Origin, 1f, null, RulesOn(physics: true, baseType: "MISC", supports: honest));
-            bool la = a.Labels.Any(x => x.StartsWith(PhysicsReach.ShellCrossingLabel) && x.EndsWith("the drop is 5 u"));
-            bool lb = b.Labels.Any(x => x.StartsWith(PhysicsReach.ShellCrossingLabel));
+            bool la = a.Status == "refused" && (a.Reason ?? "").StartsWith(PhysicsReach.ShellCrossingReason) && a.Drop is { } ad && NearA7(ad.ShellCore, 5, 1e-3);
+            bool lb = b.Status == "refused" || a.Labels.Concat(b.Labels).Any(x => x.StartsWith(PhysicsReach.ShellCrossingLabel));
             return (la && !lb && a.Drop is { Status: "dropped" } d && NearA7(d.Distance, 95, 1e-3), "lying " + ShowRR(a) + " | honest " + ShowRR(b));
         });
         // ================= K (drop crossing, 2026-10-03): a body that starts overlapping a support at the placed pose =================
@@ -527,14 +528,16 @@ static partial class MotionProof
         });
         // LI-K21 the shell-crossing guard reads only drops with nothing pushed off: the free item [-5,5]^3 clips a wall's shell sideways
         // (shell x 4.5..28.5, z -62..42, as LI-K16b) whose core soup is given as a plate under the item at z -10, over a floor 100 u down.
-        // The item is pushed off the wall and falls 95 to the floor; the reduced reading (core on core) is 5. Pushed off, so no
-        // shell-crossing label: the pushed-off label instead. Rejects the guard firing on a drop lengthened by a push-off.
-        Case(check, "loose-items LI-K21: a pushed-off drop carries the pushed-off label, not the shell-crossing label", () =>
+        // The item is pushed off the wall and falls 95 to the floor; the reduced reading (core on core) is 5. Pushed off, so it is refused
+        // as pushed off (lane 2, 2026-10-13: was the pushed-off label), not as a shell crossing, and carries no label. Rejects the guard
+        // firing on a drop lengthened by a push-off.
+        Case(check, "loose-items LI-K21: a pushed-off drop is refused as pushed off, not as a shell crossing, with no label", () =>
         {
             var sup = new[] { new DropSupport("wall", 1, true, false, ClosedBox(4.5f, -52, -62, 28.5f, 52, 42), CoreWorld: Plate(500, -10)),
                               new DropSupport("floor", 1, true, false, Plate(500, -100), CoreWorld: Plate(500, -100)) };
             var r = MeshReach.OfModel(FreeItem(), Origin, Origin, 1f, null, RulesOn(physics: true, baseType: "MISC", supports: sup));
-            bool shell = r.Labels.Any(x => x.StartsWith(PhysicsReach.ShellCrossingLabel)), pushed = r.Labels.Contains(PhysicsReach.PushedOffLabel);
+            bool shell = r.Labels.Any(x => x.StartsWith(PhysicsReach.ShellCrossingLabel)) || (r.Reason ?? "").StartsWith(PhysicsReach.ShellCrossingReason);
+            bool pushed = r.Status == "refused" && (r.Reason ?? "").StartsWith(PhysicsReach.PushedOffReason) && !r.Labels.Contains(PhysicsReach.PushedOffLabel);
             return (!shell && pushed && r.Drop is { Status: "dropped", SupportId: "floor" } d && NearA7(d.Distance, 95, 1e-3), ShowRR(r));
         });
         // LI-K22 a downward push through a thin mesh slab is kept as read and flagged: a thin body (10 x 10 x 0.1, z -0.3..-0.2) lies in
