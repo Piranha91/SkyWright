@@ -12,7 +12,8 @@ static class NavownSelfTest
     {
         // ---- N1: the witness census ----
         var c = NeedsWitnessJoin.Build(t.Paths, new HashSet<FormKey> { F.E00 });
-        var expect = new[] { F.M6, F.C1, F.C2, F.P1, F.P3, F.NPC1, F.U3 }.Select(MovedRefSelfTest.Name).OrderBy(x => x).ToList();
+        // M5 is persistent in T and stands at (1400,1400), in grid (0,0): a witness of E00 by position (NW-P2).
+        var expect = new[] { F.M5, F.M6, F.C1, F.C2, F.P1, F.P3, F.NPC1, F.U3 }.Select(MovedRefSelfTest.Name).OrderBy(x => x).ToList();
         var got = c.Refs.Keys.Select(MovedRefSelfTest.Name).OrderBy(x => x).ToList();
         t.Check("N1  witnesses in E00: exactly the references whose last sighting is there",
                 got.SequenceEqual(expect), $"got [{string.Join(", ", got)}] expected [{string.Join(", ", expect)}]");
@@ -26,6 +27,22 @@ static class NavownSelfTest
         var c10 = NeedsWitnessJoin.Build(t.Paths, new HashSet<FormKey> { F.E10 });
         t.Check("N1-D3 a reference deleted WITH its data in a wanted cell is not a witness", !c10.Refs.ContainsKey(F.D3),
                 c10.Refs.TryGetValue(F.D3, out var w3) ? $"held, state '{w3.State}'" : "absent");
+        // ---- NW-P: a reference held in the worldspace's persistent cell (T, XCLC 0,0) is a witness where it stands, as
+        // viewprobe merges persistent references by position, never at T's grid ----
+        string HeldIn(NeedsWitnessJoin.Census cs, FormKey k) => cs.Refs.TryGetValue(k, out var w) ? w.Cell.ToString() : "absent";
+        var c50 = NeedsWitnessJoin.Build(t.Paths, new HashSet<FormKey> { F.E50 });
+        t.Check("NW-P1 a persistent reference standing in grid (5,0) is a witness of E50, filed under E50",
+                c50.Refs.TryGetValue(F.Q1, out var q1) && q1.Cell == F.E50, $"Q1 {HeldIn(c50, F.Q1)}");
+        t.Check("NW-P2 a persistent reference standing in grid (0,0) is a witness of E00, filed under E00",
+                c.Refs.TryGetValue(F.M5, out var m5) && m5.Cell == F.E00, $"M5 {HeldIn(c, F.M5)}");
+        var cT = NeedsWitnessJoin.Build(t.Paths, new HashSet<FormKey> { F.T });
+        var inT = cT.Refs.Values.Where(r => r.Cell == F.T).Select(r => MovedRefSelfTest.Name(r.Key)).OrderBy(x => x).ToList();
+        t.Check("NW-P3 nothing is filed under the persistent cell itself, even when it is wanted", inT.Count == 0,
+                $"filed under T: [{string.Join(", ", inT)}]");
+        t.Check("NW-P4 RefCellAnywhere: a persistent reference's cell is the gridded cell it stands in", Cell(F.Q1) == F.E50.ToString(),
+                $"Q1 {Cell(F.Q1)}");
+        t.Check("NW-C  control: a temporary reference whose last sighting is E50 is filed under E50",
+                c50.Refs.TryGetValue(F.M1, out var m1) && m1.Cell == F.E50, $"M1 {HeldIn(c50, F.M1)}");
         var npcs = c.NpcPlacedAnywhere.Select(k => k == F.N1 ? "N1" : k == F.N2 ? "N2" : k.ToString()).OrderBy(x => x).ToList();
         t.Check("N1-NPC NpcPlacedAnywhere: N2 only (N1's one reference was re-based to N2; N2's other was deleted)",
                 npcs.SequenceEqual(new[] { "N2" }), string.Join(", ", npcs));
