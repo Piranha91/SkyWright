@@ -189,8 +189,8 @@ internal static class OverlapPairReview
                 row.ActualShape = SurfaceQueryOutcome.QueryPlaced(ga.Soup!, ga.Placed, gb.Soup!, gb.Placed, surfaceTolerance,
                     maxTrianglePairs, TimeSpan.FromSeconds(secondsLeft), cancel.Token);
                 if (contactEvidence)
-                    row.ContactEvidence = MeshIntersection.MeasureContactEvidence(
-                        ga.Soup!, gb.Soup!, surfaceTolerance, maxTrianglePairs, cancel.Token);
+                    row.ContactEvidence = MeshIntersection.MeasureContactEvidencePlaced(
+                        ga.Soup!, ga.Placed?.Member, gb.Soup!, gb.Placed?.Member, surfaceTolerance, maxTrianglePairs, cancel.Token);
                 row.Status = row.ActualShape.Intersects is null ? "unknown" : "measured";
                 row.Reason = row.ActualShape.Reason;
             }

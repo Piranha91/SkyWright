@@ -84,7 +84,11 @@ public sealed record SurfaceQueryOutcome(string Status, string? Reason, string S
     public int[]? ZeroAreaSkipped { get; init; }
 
     /// <summary>One member as placed: its model soup and pose, from which <paramref name="world"/> soups are made.</summary>
-    public readonly record struct Placed(TriangleSoup Model, Vec3 Pos, Vec3 Rot, float Scale);
+    public readonly record struct Placed(TriangleSoup Model, Vec3 Pos, Vec3 Rot, float Scale)
+    {
+        /// <summary>The same member as core's PairFrame.Member.</summary>
+        public PairFrame.Member Member => new(Model, Pos, Rot, Scale);
+    }
 
     /// <summary>The query on two placed members, by --surface's rule (MeshSurface.MeasurePlaced): a pair with no zero-area triangle
     /// where placed is the world-soup query, unchanged. Otherwise a triangle with zero area in its own model has nothing to cross and
@@ -95,56 +99,11 @@ public sealed record SurfaceQueryOutcome(string Status, string? Reason, string S
     public static SurfaceQueryOutcome QueryPlaced(TriangleSoup worldA, Placed? a, TriangleSoup worldB, Placed? b, double tolerance,
                                                   long maxTrianglePairs, TimeSpan pairTimeout, CancellationToken cancellationToken = default)
     {
-        if (a is not { } pa || b is not { } pb || pa.Model is null || pb.Model is null
-            || pa.Model.TriangleCount != worldA.TriangleCount || pb.Model.TriangleCount != worldB.TriangleCount
-            || (!AnyZeroArea(worldA) && !AnyZeroArea(worldB)))
-            return Query(worldA, worldB, tolerance, maxTrianglePairs, pairTimeout, cancellationToken);
-        var o = PairFrame.Origin(pa.Model, pa.Pos, pa.Rot, pa.Scale, pb.Model, pb.Pos, pb.Rot, pb.Scale);
-        bool world = PairFrame.IsWorld(o);
-        var fa = world ? worldA : SpatialOverlap.TransformSoup(pa.Model, PairFrame.Shift(pa.Pos, o), pa.Rot, pa.Scale);
-        var fb = world ? worldB : SpatialOverlap.TransformSoup(pb.Model, PairFrame.Shift(pb.Pos, o), pb.Rot, pb.Scale);
-        double[]? frame = world ? null : new double[] { o.X, o.Y, o.Z };
-        var (sa, na, whyA) = SkipZeroArea(pa.Model, fa, "a");
-        var (sb, nb, whyB) = SkipZeroArea(pb.Model, fb, "b");
-        int[]? skipped = na + nb == 0 ? null : new[] { na, nb };
-        if ((whyA ?? whyB) is { } why)
-            return new SurfaceQueryOutcome("unknown", why, "unknown", "unknown", null, 0) { Frame = frame, ZeroAreaSkipped = skipped };
-        return Query(sa, sb, tolerance, maxTrianglePairs, pairTimeout, cancellationToken) with { Frame = frame, ZeroAreaSkipped = skipped };
-    }
-
-    static bool AnyZeroArea(TriangleSoup s)
-    {
-        for (int t = 0; t < s.TriangleCount; t++) if (PairFrame.ZeroArea(s, t)) return true;
-        return false;
-    }
-
-    // MeshSurface.SkipZeroArea's rule, without tags: zero area in the model -> left out; model area but zero where placed -> refuse.
-    static (TriangleSoup Soup, int Skipped, string? Refusal) SkipZeroArea(TriangleSoup model, TriangleSoup placed, string label)
-    {
-        int n = placed.TriangleCount;
-        var skip = new bool[n];
-        int skipped = 0, collapsed = 0;
-        for (int t = 0; t < n; t++)
-        {
-            if (PairFrame.ZeroArea(model, t)) { skip[t] = true; skipped++; }
-            else if (PairFrame.ZeroArea(placed, t)) collapsed++;
-        }
-        if (collapsed > 0)
-            return (placed, 0, $"{label}_degenerate_triangle: {collapsed} triangle(s) with model-space area have zero area where placed; centring the pair on either member or on the geometry does not undo it");
-        if (skipped == 0) return (placed, 0, null);
-        if (skipped == n) return (placed, 0, $"{label}_degenerate_triangle: every triangle has zero area ({skipped} in the model)");
-        var idx = new int[(n - skipped) * 3];
-        var mats = placed.TriangleMaterials is null ? null : new string?[n - skipped];
-        var radii = placed.TriangleRadii is null ? null : new float[n - skipped];
-        for (int t = 0, k = 0; t < n; t++)
-        {
-            if (skip[t]) continue;
-            idx[3 * k] = placed.Indices[3 * t]; idx[3 * k + 1] = placed.Indices[3 * t + 1]; idx[3 * k + 2] = placed.Indices[3 * t + 2];
-            if (mats is not null) mats[k] = placed.TriangleMaterials![t];
-            if (radii is not null) radii[k] = placed.TriangleRadii![t];
-            k++;
-        }
-        return (new TriangleSoup(placed.Vertices, idx, mats, radii), skipped, null);
+        var p = PairFrame.PreparePlaced(worldA, a?.Member, worldB, b?.Member);
+        if (p is null) return Query(worldA, worldB, tolerance, maxTrianglePairs, pairTimeout, cancellationToken);
+        if (p.Refusal is { } why)
+            return new SurfaceQueryOutcome("unknown", why, "unknown", "unknown", null, 0) { Frame = p.Frame, ZeroAreaSkipped = p.ZeroAreaSkipped };
+        return Query(p.A, p.B, tolerance, maxTrianglePairs, pairTimeout, cancellationToken) with { Frame = p.Frame, ZeroAreaSkipped = p.ZeroAreaSkipped };
     }
 
     public static SurfaceQueryOutcome Query(TriangleSoup a, TriangleSoup b, double tolerance, long maxTrianglePairs,

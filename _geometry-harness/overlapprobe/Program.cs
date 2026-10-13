@@ -1727,7 +1727,7 @@ if (geometryManifestPath is not null)
         if (a?.WorldSoup is not { TriangleCount: > 0 } sa || b?.WorldSoup is not { TriangleCount: > 0 } sb)
             return new("unknown", "a nominated endpoint has no complete placed render triangles", null, null, 0, MeshIntersection.ContactEvidencePolicyVersion);
         using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(pairSeconds));
-        return MeshIntersection.MeasureContactEvidence(sa, sb, surfaceTolerance, maxTrianglePairs, deadline.Token);
+        return MeshIntersection.MeasureContactEvidencePlaced(sa, a.Placed?.Member, sb, b.Placed?.Member, surfaceTolerance, maxTrianglePairs, deadline.Token);
     }
 
     var pairRows = new List<ManifestPair>();
