@@ -99,6 +99,16 @@ static class NeedsWitnessJoin
         // A deletion, with or without placement data, takes a reference out of both.
         var held = new LastSightingSet();
         var anywhere = new LastSightingSet();
+        // A reference held in a worldspace's persistent cell stands where its position says, whatever that cell's XCLC grid
+        // (0,0 in the shipped worldspaces): it is filed under the gridded cell at its position, as viewprobe merges persistent
+        // references by position. A position with no gridded cell files it nowhere.
+        var (persistentWorld, gridCell) = WorldGrid(paths);
+        FormKey FiledIn(FormKey cell, Vec3 pos)
+        {
+            if (!persistentWorld.TryGetValue(cell, out var wrld)) return cell;
+            var key = (wrld, (int)Math.Floor(pos.X / 4096.0), (int)Math.Floor(pos.Y / 4096.0));
+            return gridCell.TryGetValue(key, out var gc) ? gc : FormKey.Null;
+        }
         for (int p = 0; p < paths.Count; p++)
         {
             ISkyrimModGetter mod;
@@ -111,8 +121,7 @@ static class NeedsWitnessJoin
                 // deletes it takes it out of the census, of the whole-order cell table and of the placed-NPC set.
                 foreach (var cp in LastSighting.Cells(mod))
                 {
-                    bool wanted = wantedCells.Contains(cp.Cell);
-                    held.Observe(cp, (_, r) => wanted && !r.Deleted);
+                    held.Observe(cp, (_, r) => !r.Deleted && wantedCells.Contains(FiledIn(cp.Cell, r.Position)));
                     anywhere.Observe(cp, (_, r) => !r.Deleted);
                     if (cp.DeletedRefs is { Count: > 0 } gone)
                         foreach (var d in gone) { c.Refs.Remove(d.FormKey); c.EnableFacts.NoteDeleted(d.FormKey); }
@@ -133,7 +142,7 @@ static class NeedsWitnessJoin
                         var prev = c.Refs.GetValueOrDefault(r.FormKey);
                         var touchers = prev?.Touchers ?? new List<int>();
                         if (touchers.Count == 0 || touchers[^1] != p) touchers.Add(p);
-                        c.Refs[r.FormKey] = new WitnessRef(r.FormKey, r.RecordType, r.EditorId, r.Base, r.Position, cp.Cell,
+                        c.Refs[r.FormKey] = new WitnessRef(r.FormKey, r.RecordType, r.EditorId, r.Base, r.Position, FiledIn(cp.Cell, r.Position),
                                                            state, touchers, prev?.Links ?? new List<FormKey>());
                     }
                 }
@@ -159,7 +168,11 @@ static class NeedsWitnessJoin
             }
         }
         // The whole-order cell table, and the NPC bases placed somewhere: both from the last sightings that are not deletions.
-        foreach (var (k, cell) in anywhere.CellOf) c.RefCellAnywhere[k] = cell;
+        foreach (var (k, cell) in anywhere.CellOf)
+        {
+            var at = FiledIn(cell, anywhere.Refs[k].Position);
+            c.RefCellAnywhere[k] = at.IsNull ? cell : at;
+        }
         foreach (var r in anywhere.Refs.Values)
             if (r.RecordType.Contains("PlacedNpc", StringComparison.Ordinal) && r.Base is { } bk) c.NpcPlacedAnywhere.Add(bk);
         foreach (var (k, r) in c.Refs)
@@ -202,6 +215,30 @@ static class NeedsWitnessJoin
                 c.Refs[key] = wr with { State = state };
             }
         return c;
+    }
+
+    /// <summary>Every worldspace's persistent cell (-> its worldspace) and every gridded exterior cell by (worldspace, X, Y), over
+    /// the whole order; the first cell record seen at a grid names it.</summary>
+    static (Dictionary<FormKey, FormKey> PersistentWorld, Dictionary<(FormKey, int, int), FormKey> GridCell) WorldGrid(IReadOnlyList<string> paths)
+    {
+        var persistent = new Dictionary<FormKey, FormKey>();
+        var grid = new Dictionary<(FormKey, int, int), FormKey>();
+        foreach (var path in paths)
+        {
+            ISkyrimModGetter mod;
+            try { mod = SkyrimMod.CreateFromBinaryOverlay(path, SkyrimRelease.SkyrimSE); }
+            catch { continue; }   // counted by Build's own pass
+            using (mod as IDisposable)
+                foreach (var wrld in mod.Worldspaces.Records)
+                {
+                    if (wrld.TopCell is { } top) persistent[top.FormKey] = wrld.FormKey;
+                    foreach (var block in wrld.SubCells)
+                        foreach (var sub in block.Items)
+                            foreach (var cell in sub.Items)
+                                if (cell.Grid is { } g) grid.TryAdd((wrld.FormKey, g.Point.X, g.Point.Y), cell.FormKey);
+                }
+        }
+        return (persistent, grid);
     }
 
     /// <summary>HOUSECARL_WINSTATE_DUMP: the census's witnesses, its whole-order cell table and the NPC bases it calls
