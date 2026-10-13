@@ -58,6 +58,34 @@ static class BlockSelfTest
         t.CheckFloor("B2", walk.FloorRefsByWorld.GetValueOrDefault(F.W), walk.FloorLandByWorld.GetValueOrDefault(F.W),
                      MovedRefSelfTest.UnreadableLandOf(walk, F.W), new[] { (0, 0), (1, 0), (-1, 0), (2, 0), (1, 1) });
 
+        // ---- BN: the navcut boxes measured against target E10's navmesh (NavcutReach.ForCell), by where they stand. Synthetic
+        // references (an XPRM box of half extent h, layer 49 = L_NAVCUT unless stated), filed as the floor filing files them:
+        // by the grid their position is in. E10 is grid (1,0), x 4096..8192, y 0..4096. ----
+        static PlacedRef Box(uint id, float x, float y, float h, uint layer = 49, bool persistent = false) =>
+            new(new FormKey(F.MasterKey, id), "PlacedObject", null, new Vec3(x, y, 0), new Vec3(0, 0, 0), 1f, F.S, persistent, false, false,
+                Primitive: new PlacedPrimitiveInfo("Box", new Vec3(2 * h, 2 * h, 2 * h)), CollisionLayerIndex: layer);
+        var e10 = new CellPlacements(F.E10, null, false, F.W, (1, 0), Array.Empty<PlacedRef>(), Array.Empty<NavmeshGeometry>());
+        var nHeld = Box(0xA01, 5000, 100, 100);                    // held in E10, standing in it
+        var nPersist = Box(0xA02, 6000, 300, 100, persistent: true); // held in the persistent cell, standing in grid (1,0)
+        var nAcross = Box(0xA03, 4000, 200, 300);                  // standing in grid (0,0); its box spans x 3700..4300
+        var nInside = Box(0xA04, 2000, 200, 100);                  // standing in grid (0,0), wholly inside it
+        var nOther = Box(0xA05, 5500, 500, 100, layer: 7);         // in grid (1,0), not a navcut layer
+        var nGrids = new Dictionary<(int, int), Dictionary<FormKey, PlacedRef>>
+        {
+            [(1, 0)] = new[] { nHeld, nPersist, nOther }.ToDictionary(r => r.FormKey),
+            [(0, 0)] = new[] { nAcross, nInside }.ToDictionary(r => r.FormKey),
+        };
+        var nPicked = NavcutReach.ForCell(e10, new[] { nHeld }, nGrids, r => r.CollisionLayerIndex == 49);
+        string NShow() => string.Join(", ", nPicked.Select(r => $"{r.FormKey.ID:X3}"));
+        t.Check("BN-1 a navcut box held in the persistent cell and standing in E10's square is measured for E10",
+                nPicked.Any(r => r.FormKey == nPersist.FormKey), NShow());
+        t.Check("BN-2 a navcut box held in a neighbour whose box reaches across the border into E10 is measured for E10",
+                nPicked.Any(r => r.FormKey == nAcross.FormKey), NShow());
+        t.Check("BN-3 control: a navcut box held in E10 is measured, once", nPicked.Count(r => r.FormKey == nHeld.FormKey) == 1, NShow());
+        t.Check("BN-4 control: a box on another collision layer is never measured", nPicked.All(r => r.FormKey != nOther.FormKey), NShow());
+        t.Check("BN-5 control: a navcut box wholly inside the neighbour's square is not measured for E10",
+                nPicked.All(r => r.FormKey != nInside.FormKey), NShow());
+
         // The floor reach (FloorFeed.FloorReach) on its own fixture, through BlockWalk with the centre cells as targets.
         t.CheckReach("B-R", paths =>
         {

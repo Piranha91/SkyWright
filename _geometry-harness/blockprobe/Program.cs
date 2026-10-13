@@ -282,16 +282,29 @@ Func<FormKey, bool>? enabledOf = pop.Predicate;
 // The NAVCUT boxes standing in the target's cells — any plugin's — measured on the run's own population since Q27
 // (before then, only under --state). A navcut is a placed reference whose XTRI names a COLL record flagged
 // NavmeshObstacle; its obstacle is its XPRM box at its transform.
+// Which boxes can cut a target cell's navmesh is NavcutReach.ForCell's (NavcutReach.cs).
 var navcutsByCell = new Dictionary<FormKey, List<FormKey>>();
-foreach (var (fk, r) in winRef)
+var navcutRef = new Dictionary<FormKey, PlacedRef>();
+bool IsNavcut(PlacedRef r) => r.CollisionLayerIndex is { } cl && collByIndex.TryGetValue(cl, out var layer) && layer.NavmeshObstacle;
+var heldByCell = winRef.Values.GroupBy(r => winRefCell[r.FormKey]).ToDictionary(g => g.Key, g => g.ToList());
+// Cells in the order their first held navcut appears in the walk, then the rest in target order: the order the pass and its
+// listing have always used.
+var walkOrder = winRef.Keys.Select((k, i) => (k, i)).ToDictionary(x => x.k, x => x.i);
+var pickedByCell = new List<(FormKey Cell, List<PlacedRef> Refs, int First)>();
+foreach (var (cellKey, tc) in targetCells)
 {
-    if (r.Deleted || r.Primitive is null) continue;
-    if (r.CollisionLayerIndex is not { } cl || !collByIndex.TryGetValue(cl, out var layer) || !layer.NavmeshObstacle) continue;
-    var cell = winRefCell[fk];
-    if (!navcutsByCell.TryGetValue(cell, out var nl)) navcutsByCell[cell] = nl = new List<FormKey>();
-    nl.Add(fk);
+    var grids = tc.Interior || tc.Worldspace.IsNull ? null : walk.FloorRefsByWorld.GetValueOrDefault(tc.Worldspace);
+    var picked = NavcutReach.ForCell(tc, heldByCell.TryGetValue(cellKey, out var hl) ? hl : new List<PlacedRef>(), grids, IsNavcut);
+    if (picked.Count == 0) continue;
+    int first = picked.Where(r => winRefCell.TryGetValue(r.FormKey, out var c) && c == cellKey).Select(r => walkOrder[r.FormKey]).DefaultIfEmpty(int.MaxValue).Min();
+    pickedByCell.Add((cellKey, picked, first));
 }
-bool NavcutPresent(FormKey k) => enabledOf is null ? !winRef[k].InitiallyDisabled : enabledOf(k);
+foreach (var (cellKey, picked, _) in pickedByCell.OrderBy(x => x.First))
+{
+    navcutsByCell[cellKey] = picked.Select(r => r.FormKey).ToList();
+    foreach (var r in picked) navcutRef[r.FormKey] = r;
+}
+bool NavcutPresent(FormKey k) => enabledOf is null ? !navcutRef[k].InitiallyDisabled : enabledOf(k);
 Console.WriteLine($"   {navcutsByCell.Values.Sum(l => l.Count):N0} navcut boxes stand in the target's cells "
                 + $"({navcutsByCell.Values.Sum(l => l.Count(NavcutPresent)):N0} present in this population; listed with {{NAVCUT}}"
                 + ")");
@@ -591,7 +604,7 @@ foreach (var (cellKey, tcell) in targetCells)
         foreach (var nk in navcuts)
         {
             if (!NavcutPresent(nk)) { navcutSkippedDisabled++; continue; }
-            var wr = winRef[nk];
+            var wr = navcutRef[nk];
             var w = (Pos: wr.Position, Rot: wr.Rotation, Scale: wr.Scale);
             var prim = wr.Primitive!.Value;
             var model = NavcutGeometry.ModelBox(prim);
