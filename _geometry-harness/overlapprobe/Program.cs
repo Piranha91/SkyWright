@@ -99,7 +99,8 @@ declares no record, because a placement-less record (a deletion typically strips
 enters the placement history. A disposition states what the manifest resolved about a placement; it
 never asserts a reference is present, absent or separated in the game state, nor that a record for
 it does or does not exist -- those are read from an enumerated record row's own fields.
-Legacy mode: --responsible-pair PLUGIN_A PLUGIN_B with --geometry-manifest OUTPUT.
+Legacy mode: --responsible-pair PLUGIN_A PLUGIN_B with --geometry-manifest OUTPUT. --scene-cell does not apply in this mode:
+the manifest reads every reference of the responsible pairs, whatever its cell (a note on stderr says so when it is given).
 --motion swept [--motion-delta U]: a base refused for its pose alone (unsupported_pose, or partial_geometry when every
 visible shape decoded and only the pose is refused) whose motion the files settle is discovered
 by a swept proxy (its sampled poses' boxes, each grown by its certified delta): an outer bound, labelled in the reason.
@@ -294,6 +295,10 @@ if (geometryManifestPath is not null && responsiblePairNames.Count == 0 && !scen
     return 2;
 }
 if (sceneCapture && geometryManifestPath is null) { Console.Error.WriteLine("--scene-id requires --geometry-manifest OUTPUT"); return 2; }
+// --scene-cell bounds a scene capture only; without --scene-id it changes nothing, and the run says so (2026-10-13; whether it
+// should narrow a --responsible-pair manifest is an open product choice).
+if (!sceneCapture && explicitSceneCells.Count > 0)
+    Console.Error.WriteLine($"note: --scene-cell is applied only in scene capture (--scene-id); without it the {explicitSceneCells.Count} cell(s) given are ignored and every reference of the responsible pairs is read, whatever its cell");
 if (sceneCapture && candidatePluginNames.Count == 0 && candidateModNames.Count == 0 && sceneScopeFromPaths.Count == 0 && explicitSceneCells.Count == 0)
 {
     Console.Error.WriteLine("scene capture requires at least one --candidate-plugin, --candidate-mod, --scene-scope-from or --scene-cell; an implicit whole-order scene is refused");
