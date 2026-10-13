@@ -51,6 +51,9 @@ static class StationMode
         /// <summary>Grids whose last LAND gives no heights (FloorFeed.FloorIndex), with the reason: a station floor over
         /// one of them is refused, never read from an earlier plugin's heights or from none.</summary>
         public IReadOnlyDictionary<(int, int), string>? UnreadableLand { get; init; }
+        /// <summary>The floor reach of the target worldspace (FloorFeed.FloorReach): references beyond the 3x3 whose box
+        /// enters it. Null: none admitted.</summary>
+        public FloorFeed.FloorReach? Reach { get; init; }
         public required FloorFeed.GeometryOf Geometry { get; init; }
         public required Func<FormKey, bool> Enabled { get; init; }
         public required Func<(int X, int Y), GridCellFacts?> CellAt { get; init; }
@@ -152,7 +155,7 @@ static class StationMode
         // modes hand it this cell's navmeshes, as they always read them.
         var reader = new EnvironmentReader(_ => input.Navmeshes, input.RefsByGrid, input.LandByGrid,
                                            input.Geometry, input.Enabled, input.CellAt, input.WorldAt,
-                                           input.Worldspace, input.UnreadableLand);
+                                           input.Worldspace, input.UnreadableLand, input.Reach);
         var fields = reader.Fields;
         FloorField FieldFor((int X, int Y) g) => reader.FieldFor(g);
         StationEnvironment Environment(float x, float y) => reader.Read(x, y).Env;
@@ -367,6 +370,7 @@ static class StationMode
                        float navZ, string outPath)
     {
         var (refs, _) = FloorFeed.Neighbourhood(grid, input.RefsByGrid, input.LandByGrid);
+        input.Reach?.Admit(grid, refs);   // the same candidates FieldFor offers (FloorFeed.FloorReach)
         var surfaces = new List<object>();
         var candidates = new List<object>();
         float lo = navZ - NavmeshFloor.DefaultMaxDepth, hi = navZ + NavmeshFloor.DefaultUpReach;
@@ -497,13 +501,15 @@ static class StationMode
                                  Dictionary<(int, int), float[,]> landByGrid, FloorFeed.GeometryOf geometry,
                                  Func<FormKey, bool> enabled, Func<(int X, int Y), GridCellFacts?> cellAt,
                                  Func<string, WorldFacts?> worldAt, string worldspace,
-                                 IReadOnlyDictionary<(int, int), string>? unreadableLand = null)
+                                 IReadOnlyDictionary<(int, int), string>? unreadableLand = null,
+                                 FloorFeed.FloorReach? reach = null)
         {
             _navsNear = navsNear; _refs = refsByGrid; _land = landByGrid; _geometry = geometry;
             _enabled = enabled; _cellAt = cellAt; _worldAt = worldAt; _worldspace = worldspace;
-            _unreadableLand = unreadableLand;
+            _unreadableLand = unreadableLand; _reach = reach;
         }
         readonly IReadOnlyDictionary<(int, int), string>? _unreadableLand;
+        readonly FloorFeed.FloorReach? _reach;
 
         /// <summary>The floor field per grid square, built once and kept: FloorFeed reads the 3x3
         /// neighbourhood, because a floor mesh placed in the next cell reaches under this one.</summary>
@@ -516,6 +522,7 @@ static class StationMode
                         if (_unreadableLand.TryGetValue((g.X + dx, g.Y + dy), out var why))
                             throw new FloorLandUnreadable(g.X + dx, g.Y + dy, why);
             var (refs, land) = FloorFeed.Neighbourhood(g, _refs, _land);
+            _reach?.Admit(g, refs);   // the reach beyond the 3x3 (FloorFeed.FloorReach)
             f = FloorFeed.Build(refs, _geometry, land, enabled: _enabled);
             Fields[g] = f;
             return f;

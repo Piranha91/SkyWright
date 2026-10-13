@@ -9,5 +9,7 @@ static class BosOpenSelfTest
         t.Check("control: a readable plugin opens" + (t.Canary ? " [CANARY: expectation planted wrong]" : ""),
                 (BosWalkOpen.Open(t.Paths[0]) is not null) != t.Canary, t.Paths[0]);
         t.CheckRefusesUnreadable("P1 ", p => BosWalkOpen.Open(p));
+        // The floor reach (FloorFeed.FloorReach) through the run's own single-plugin filing (FloorFeed.FileOnePlugin).
+        t.CheckReachOne("C-R", p => { using var m = Mutagen.Bethesda.Skyrim.SkyrimMod.CreateFromBinaryOverlay(p, FloorReachFixture.Rel); return FloorFeed.FileOnePlugin(m); });
     });
 }

@@ -161,8 +161,10 @@ A successful save or size check alone does not establish clean pixels.
     `u` settings). Beyond ±2 only listed large references are admitted (next item). The console line `+N
     reference(s) anchored two cells out …`, the planes report's `sceneScope` (`edgeRadius`, `edgeRadiusBasis:
     "inferred"`, `edgeAdmitted`, `edgePlanesAdmitted`) and its coverage line all say so.
-  - **Deliberately unchanged at 3×3:** `--stations` floor filing, `--nav-cell`, terrain and water. Those answer
-    questions about the cells' own ground.
+  - **Deliberately unchanged at 3×3:** `--nav-cell`, terrain and water. Those answer questions about the cells' own
+    ground. The `--stations` and route-station floors take the same ring (and the large references below) through
+    `FloorFeed`'s reach: a reference beyond the 3×3 is a floor candidate when its placed box enters it (the rule lives
+    in `_shared/RingReach.cs`, shared with this merge).
   - **Limits:** OBND is the record's stored bounds, not the mesh's; a drawable base without an OBND is not admitted.
   - **Tests:** `--winning-refs-selftest` cases E1–E10.
 - **Large references** (with ring refs, exteriors only, 2026-10-11): the game 3D-loads the references a worldspace's
@@ -979,7 +981,11 @@ flag someone typed, which is why neither is allowed to be silent.
   collision (manual lab playtest, 2026-09-27); a cell copy with no LAND leaves the earlier terrain.
   The `--stations` floor takes its heights from the shared floor filing
   (`FloorFeed.FloorIndex`), where a LAND that gives no heights is named
-  (`CellPlacements.LandUnreadableReason`) and a station floor over it is refused (exit 2). A heightmap
+  (`CellPlacements.LandUnreadableReason`) and a station floor over it is refused (exit 2). Its floor
+  candidates are the 3×3 by position plus the filing's reach (`FloorFeed.FloorReach`): references
+  anchored two cells out, and listed large references three to five out (the scene's own lists and
+  box test, `_shared/RingReach.cs`), each admitted when its placed OBND box enters the 3×3. Whether a
+  large reference has actor collision at rings 3–5 is not read in game. A heightmap
   Mutagen misreads WITHOUT an exception (a VHGT cut short in the middle of a plugin reads the bytes
   that follow) is not seen there.
   A terrain texture layer that cannot be read changes paint, not ground, so it is not refused: it is
@@ -2655,7 +2661,8 @@ worldspace; one run samples one worldspace.
   cell of every plugin (`_shared/LastSighting.cs`, `FloorFeed.FloorIndex`): a reference a later
   plugin moves out of the bound, to another worldspace or an interior, re-bases or deletes is not
   kept at its earlier place, and a station floor over a grid whose last LAND gives no heights is
-  refused (exit 2) rather than read from an earlier plugin's heights.
+  refused (exit 2) rather than read from an earlier plugin's heights. The floor's candidates include
+  the same reach as `--stations` (references beyond the 3×3 whose placed box enters it; see above).
   Cross-cell links are traversed inside the loaded set; `ExternalLinks` counts only links that
   leave it.
 - **Walkable.** A triangle is a node when it is not deleted (0x08) and its vertices are in range

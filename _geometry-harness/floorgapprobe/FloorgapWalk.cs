@@ -56,6 +56,7 @@ sealed class FloorgapWalk
 
     void Walk(ISkyrimModGetter mod, string path, Action<CellPlacements> perCell)
     {
+        Floor.ObserveMod(mod);   // the floor reach's lists and base boxes, before the plugin's cells (FloorFeed)
         foreach (var wrld in mod.Worldspaces.Records)
             if (wrld.TopCell is { } top) { _topCells.Add(top.FormKey); _topCellWorld[top.FormKey] = wrld.FormKey; }
         foreach (var cp in LastSighting.Cells(mod))

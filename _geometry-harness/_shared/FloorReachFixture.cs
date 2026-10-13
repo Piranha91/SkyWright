@@ -6,7 +6,7 @@ using SkCell = Mutagen.Bethesda.Skyrim.Cell;
 
 namespace HarnessShared;
 
-// THE FLOOR-REACH FIXTURE (lane F, 2026-10-12): a small synthetic load order for FloorFeed's reach (RingReach,
+// THE FLOOR-REACH FIXTURE: a small synthetic load order for FloorFeed's reach (RingReach,
 // FloorFeed.FloorReach), read through each floor probe's own walk by --moved-ref-selftest (MovedRefFloorCheck.CheckReach).
 // Test-only; no game data. Every expectation is a literal worked out by hand from the table below.
 //
@@ -53,6 +53,9 @@ public static class FloorReachFixture
 
     /// <summary>Hand-derived: grid (0,0)'s neighbourhood in R, the 3x3 by position plus the reach, each exactly once.</summary>
     public static readonly IReadOnlySet<FormKey> ExpectedR00 = new HashSet<FormKey> { F0, F1, F3, F8, F9, F10, F11 };
+    /// <summary>Hand-derived: grid (0,0)'s neighbourhood in R when the master is read alone (the single-plugin probes):
+    /// F6 is not moved and F7 not deleted there, and F10 is listed only by RrA.</summary>
+    public static readonly IReadOnlySet<FormKey> ExpectedR00MasterOnly = new HashSet<FormKey> { F0, F1, F3, F6, F7, F8, F9, F11 };
     /// <summary>Hand-derived: grid (0,0)'s neighbourhood in RC.</summary>
     public static readonly IReadOnlySet<FormKey> ExpectedRC00 = new HashSet<FormKey> { G0, G2 };
 

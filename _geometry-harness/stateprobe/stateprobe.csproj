@@ -17,6 +17,8 @@
     <Compile Include="..\_shared\MovedRefFloorCheck.cs" Link="MovedRefFloorCheck.cs" />
     <Compile Include="..\_shared\FloorReachFixture.cs" Link="FloorReachFixture.cs" />
     <Compile Include="..\_shared\FloorFeed.cs" Link="FloorFeed.cs" />
+    <Compile Include="..\_shared\RingReach.cs" Link="RingReach.cs" />
+    <Compile Include="..\_shared\LargeReferenceLists.cs" Link="LargeReferenceLists.cs" />
     <Compile Include="..\_shared\WinStateDump.cs" Link="WinStateDump.cs" />
     <ProjectReference Include="..\..\src\housecarl-core\housecarl-core.csproj" />
     <Compile Include="..\_shared\EnablePopulation.cs" Link="EnablePopulation.cs" />

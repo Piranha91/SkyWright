@@ -99,20 +99,15 @@ Console.WriteLine($"vanilla base records with a mesh: {baseMesh.Count:N0}  ({sw.
 // the sweep below streams them again). The floor candidates are the record's own placements — the swap layer is not
 // applied to floors; the obstacles keep their BOS-resolved bases.
 sw.Restart();
-// The floor filing (FloorFeed.FloorIndex, every exterior cell of the one plugin).
-var floorIndex = new FloorFeed.FloorIndex();
-var floorRefsByWorld = floorIndex.RefsByWorld;
-var floorLandByWorld = floorIndex.LandByWorld;
 // The population (Q27): the enable facts of Skyrim.esm's OWN placements — the same source the sweep judges, so the
 // vanilla floor stays vanilla. A parent chain crosses cells (Tamriel's persistent cell holds 888 vanilla switches), so
 // the facts are collected over every cell before any of them is read.
 var enableFacts = new EnableFactsIndex();
 foreach (var rec in mod.EnumerateMajorRecords()) if (rec is IPlacedGetter dpg && dpg.IsDeleted) enableFacts.NoteDeleted(dpg.FormKey);
-foreach (var cp in LastSighting.Cells(mod))
-{
-    foreach (var r in cp.Refs) enableFacts.Note(r);
-    floorIndex.Observe(cp, mod.ModKey.FileName.String);
-}
+// The floor filing (FloorFeed.FileOnePlugin: the reach's lists and base boxes, then every exterior cell of the one plugin).
+var floorIndex = FloorFeed.FileOnePlugin(mod, perCell: cp => { foreach (var r in cp.Refs) enableFacts.Note(r); });
+var floorRefsByWorld = floorIndex.RefsByWorld;
+var floorLandByWorld = floorIndex.LandByWorld;
 Console.WriteLine($"floor candidates filed by grid: {floorRefsByWorld.Values.Sum(w => w.Values.Sum(d => d.Count)):N0} exterior refs, {floorLandByWorld.Values.Sum(w => w.Count):N0} LAND records in {floorRefsByWorld.Count} worldspaces  ({sw.Elapsed.TotalSeconds:0.0}s)");
 var floorTally = new FloorFeed.Tally();
 long floorLandUnjudged = 0;
@@ -364,7 +359,7 @@ foreach (var cp in PlacementExtract.FromMod(mod))
     FloorField floor;
     if (!cp.Interior && cp.Grid is { } floorGrid && floorRefsByWorld.TryGetValue(cp.Worldspace, out var frw))
     {
-        var (nbRefs, nbLand) = FloorFeed.Neighbourhood(floorGrid, frw, floorLandByWorld[cp.Worldspace]);
+        var (nbRefs, nbLand) = floorIndex.NeighbourhoodOf(cp.Worldspace, floorGrid);   // the 3x3 by position plus the reach (FloorFeed)
         floor = FloorFeed.Build(nbRefs, FloorGeometry, nbLand, enabled: enabledOf);
     }
     else floor = FloorFeed.Build(cp.Refs, FloorGeometry, null, enabled: enabledOf);

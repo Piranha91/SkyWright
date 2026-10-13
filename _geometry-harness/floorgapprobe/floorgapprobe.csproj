@@ -21,6 +21,8 @@
     <Compile Include="..\_shared\ActorBand.cs" Link="ActorBand.cs" />
     <Compile Include="..\_shared\DetectorModel.cs" Link="DetectorModel.cs" />
     <Compile Include="..\_shared\FloorFeed.cs" Link="FloorFeed.cs" />
+    <Compile Include="..\_shared\RingReach.cs" Link="RingReach.cs" />
+    <Compile Include="..\_shared\LargeReferenceLists.cs" Link="LargeReferenceLists.cs" />
     <Compile Include="..\_shared\WinStateDump.cs" Link="WinStateDump.cs" />
     <Compile Include="..\_shared\SyntheticOrder.cs" Link="SyntheticOrder.cs" />
     <Compile Include="..\_shared\HarnessOrderCli.cs" Link="HarnessOrderCli.cs" />

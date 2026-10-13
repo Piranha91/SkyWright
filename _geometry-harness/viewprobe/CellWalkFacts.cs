@@ -76,6 +76,8 @@ internal sealed class CellWalkFacts
     internal required Dictionary<(int X, int Y), float[,]> StationLand { get; init; }
     /// <summary>The station floor's grids whose last LAND gives no heights (FloorFeed.FloorIndex), with the reason.</summary>
     internal Dictionary<(int X, int Y), string> StationUnreadableLand { get; init; } = new();
+    /// <summary>The station floor's reach (FloorFeed.FloorReach): its filing is not changed after the walk.</summary>
+    internal FloorFeed.FloorReach? StationReach { get; init; }
 
     internal required TerrainPatchFact[] TerrainPatches { get; set; }
     internal required TerrainLayerFact[] TerrainLayers { get; set; }
@@ -117,6 +119,7 @@ internal sealed class CellWalkFacts
                 x => x.Value.ToDictionary(y => y.Key, y => Copy(y.Value))),
             StationLand = StationLand.ToDictionary(x => x.Key, x => (float[,])x.Value.Clone()),
             StationUnreadableLand = new(StationUnreadableLand),
+            StationReach = StationReach,   // shared: its filing is not changed after the walk
             TerrainPatches = TerrainPatches.Select(x => new TerrainPatchFact(x.Diffuse, x.Triangles.ToArray())).ToArray(),
             TerrainLayers = TerrainLayers.Select(x => new TerrainLayerFact(x.Diffuse, x.Triangles.ToArray())).ToArray(),
             LandHeights = LandHeights.Select(x => new LandHeightFact(x.X, x.Y, (float[,])x.Heights.Clone())).ToArray(),

@@ -43,6 +43,8 @@
          the SAME code proofprobe's cases are on, rather than a restatement of it. -->
     <Compile Include="..\_shared\ActorBand.cs" Link="ActorBand.cs" />
     <Compile Include="..\_shared\FloorFeed.cs" Link="FloorFeed.cs" />
+    <Compile Include="..\_shared\RingReach.cs" Link="RingReach.cs" />
+    <Compile Include="..\_shared\LargeReferenceLists.cs" Link="LargeReferenceLists.cs" />
     <Compile Include="..\_shared\WinStateDump.cs" Link="WinStateDump.cs" />
     <Compile Include="..\_shared\StationRule.cs" Link="StationRule.cs" />
     <Compile Include="..\_shared\PortalBoxOrientation.cs" Link="PortalBoxOrientation.cs" />

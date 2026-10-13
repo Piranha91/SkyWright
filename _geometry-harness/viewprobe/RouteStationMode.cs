@@ -191,7 +191,7 @@ static class RouteStationMode
             g => walk.Cells.TryGetValue(g, out var c)
                 ? new GridCellFacts(c.Cell, input.Worldspace.ToString(), c.Water) : null,
             name => walk.WorldChain.TryGetValue(name, out var wc) ? new WorldFacts(wc.Default, wc.Parent) : null,
-            input.Worldspace.ToString(), walk.UnreadableLandWhy);
+            input.Worldspace.ToString(), walk.UnreadableLandWhy, walk.Floor.ReachOf(input.Worldspace));
         RouteEnv Env(float x, float y) { var (e, t) = reader.Read(x, y); return new RouteEnv(e, t); }
         sw.Restart();
         var result = RouteStations.Sample(area, Env);
@@ -522,6 +522,8 @@ static class RouteStationMode
             // The floor: every cell of the plugin, every worldspace and interior (LastSighting.Cells), in load order.
             var fmod = PluginRead.Open(path, -1, 0, "--stations (route) floor pass");
             using (fmod as IDisposable)
+            {
+                Floor.ObserveMod(fmod);   // the floor reach's lists and base boxes, before the plugin's cells (FloorFeed)
                 foreach (var fcp in LastSighting.Cells(fmod))
                 {
                     Floor.Observe(fcp, plugin);
@@ -540,6 +542,7 @@ static class RouteStationMode
                         else Prims.Remove(r.FormKey);
                     if (fcp.DeletedRefs is { Count: > 0 } gone) foreach (var d in gone) Prims.Remove(d.FormKey);
                 }
+            }
         }
 
         /// <summary>HOUSECARL_WINSTATE_DUMP: the floor filing and the planes after the pass, for an independent reader.</summary>

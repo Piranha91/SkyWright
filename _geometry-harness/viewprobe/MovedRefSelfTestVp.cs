@@ -116,6 +116,20 @@ internal static class MovedRefSelfTestVp
             foreach (var p in paths) rw.Plugin(p);
             return rw.Floor;
         }, child: false);
+        // ... and the --stations floor filing (StationFloorFiling.Begin, radius 4 as Program.cs's StationFloorRadius), fed the
+        // way Program.cs's walk feeds it: the lists and base boxes from the plugin's records, then its cells.
+        t.CheckReach("V-S", paths =>
+        {
+            var idx = StationFloorFiling.Begin(true, FloorReachFixture.R, (0, 0), 4)!;
+            foreach (var p in paths)
+            {
+                using var mod = SkyrimMod.CreateFromBinaryOverlay(p, FloorReachFixture.Rel);
+                idx.ObserveLists(mod);
+                foreach (var rec in mod.EnumerateMajorRecords()) idx.NoteBase(rec);
+                foreach (var cp in Cells(mod)) idx.Observe(cp, Path.GetFileName(p));
+            }
+            return idx;
+        }, child: false);
 
         // ---- R3: the route mode's winning navmeshes of W, under the last-sighting rule (the fixture's NAVM table): NVM stands
         // in E50 (square 5,0); NVR is B's restoration; NVC A's override; the deleted (NVD, NVK, NVX) and the moved out of W

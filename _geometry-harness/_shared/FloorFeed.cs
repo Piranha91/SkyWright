@@ -4,6 +4,7 @@ using System.Numerics;
 using HarnessShared;
 using HousecarlCore;
 using Mutagen.Bethesda.Plugins;
+using Mutagen.Bethesda.Skyrim;
 
 // ======================================================================
 //  FloorFeed — one cell's FloorField, built the way every probe builds it.
@@ -30,16 +31,25 @@ using Mutagen.Bethesda.Plugins;
 //  floor is the authored floor against the authored navmesh, and a swap
 //  changes obstacles far more often than floors (stated, not hidden).
 //
-//  A known limit: candidates are filed by position within the 3×3, so a
-//  reference anchored outside it whose bounds reach into the square (a
-//  large mountain or cliff two cells out, say) is not a floor candidate.
-//  A rule admitting such references by their placed bounds was built and
-//  measured, and changed no verdict on the groups measured; it is not
-//  merged, and its patch is kept in the local run record.
+//  Reach: the game loads more than the 3x3 (RingReach): every reference anchored up to two cells out, and the large
+//  references a worldspace's lists name out to five. A large mesh anchored two cells away (a mountain or cliff) can lay
+//  an actor-solid floor over a square, which a filing by position alone never offers. FloorIndex therefore also keeps
+//  those references (FloorReach), and NeighbourhoodOf admits each one whose placed OBND box enters the 3x3, by
+//  viewprobe's own test (RingReach.EntersSquare). A base with no usable OBND is not admitted from beyond the 3x3.
+//  Whether a large reference at rings 3-5 has actor collision in game is NOT read (ReachLarge); the by-position filing
+//  above is unchanged.
 // ======================================================================
 
 internal static class FloorFeed
 {
+    /// <summary>Reach admission of references anchored at ring 2 (RingReach.EdgeRadius).</summary>
+    internal const bool ReachRing2 = true;
+    /// <summary>Reach admission of listed large references anchored at rings 3 to RingReach.LargeRadius. Admitted by
+    /// record: their actor collision where they enter the 3x3 is not read in game.</summary>
+    internal const bool ReachLarge = true;
+    /// <summary>A child worldspace takes its own lists' union (viewprobe's default --large-refs-child union).</summary>
+    internal const bool ReachChildUnion = true;
+
     /// <summary>The caller's geometry lookup: a ref's actor-solid soup and its model-space box, or null when the ref has
     /// no usable solid (no model, no actor-solid body, unreadable).</summary>
     public delegate (Aabb Box, TriangleSoup Soup)? GeometryOf(PlacedRef r);
@@ -82,6 +92,23 @@ internal static class FloorFeed
         return MeshColumnIndex.Build(w, soup.Indices);
     }
 
+    /// <summary>One plugin's floor filing, the way the single-plugin probes (navprobe, corridorprobe) build it: the reach's
+    /// lists and base boxes first (FloorIndex.ObserveMod), then every cell in order (LastSighting.Cells), each handed to
+    /// <paramref name="perCell"/> before it is filed. <paramref name="name"/> names an unreadable LAND (the plugin's file
+    /// name when null). Their --moved-ref-selftest runs this same function on FloorReachFixture.</summary>
+    public static FloorIndex FileOnePlugin(ISkyrimModGetter mod, Func<FormKey, (int X, int Y), bool>? wantGrid = null,
+                                           Action<CellPlacements>? perCell = null, string? name = null)
+    {
+        var index = new FloorIndex(wantGrid);
+        index.ObserveMod(mod);
+        foreach (var cp in LastSighting.Cells(mod))
+        {
+            perCell?.Invoke(cp);
+            index.Observe(cp, name ?? mod.ModKey.FileName.String);
+        }
+        return index;
+    }
+
     /// <summary>The exterior grid cell a position falls in.</summary>
     public static (int X, int Y) GridOf(Vec3 p) => ((int)MathF.Floor(p.X / 4096f), (int)MathF.Floor(p.Y / 4096f));
 
@@ -115,8 +142,63 @@ internal static class FloorFeed
         public IEnumerable<(FormKey Ws, int X, int Y)> UnreadableLand => UnreadableLandWhy.Keys;
         readonly Func<FormKey, (int X, int Y), bool>? _wantGrid;
         readonly Dictionary<FormKey, (FormKey Ws, (int, int) Grid)> _where = new();
+        // Reach (the header): per worldspace, the references by anchor, the lists, and the bases' OBND boxes.
+        readonly Func<FormKey, (int X, int Y), bool>? _wantAnchor;
+        readonly Dictionary<FormKey, FloorReach> _reach = new();
+        readonly Dictionary<FormKey, (FormKey Ws, (int, int) Anchor)> _reachWhere = new();
+        readonly Dictionary<FormKey, (Vec3 Min, Vec3 Max)> _bounds = new();
 
-        public FloorIndex(Func<FormKey, (int X, int Y), bool>? wantGrid = null) { _wantGrid = wantGrid; }
+        /// <summary><paramref name="wantGrid"/> filters the by-position filing (all grids when null). The reach set keeps a
+        /// reference whose anchor lies within RingReach.LargeRadius of a grid wantGrid takes (every anchor when wantGrid is
+        /// null), unless <paramref name="wantAnchor"/> says otherwise.</summary>
+        public FloorIndex(Func<FormKey, (int X, int Y), bool>? wantGrid = null, Func<FormKey, (int X, int Y), bool>? wantAnchor = null)
+        {
+            _wantGrid = wantGrid;
+            if (wantAnchor is not null) _wantAnchor = wantAnchor;
+            else if (wantGrid is not null)
+                _wantAnchor = (ws, a) =>
+                {
+                    for (int dx = -RingReach.LargeRadius; dx <= RingReach.LargeRadius; dx++)
+                        for (int dy = -RingReach.LargeRadius; dy <= RingReach.LargeRadius; dy++)
+                            if (wantGrid(ws, (a.X + dx, a.Y + dy))) return true;
+                    return false;
+                };
+        }
+
+        FloorReach ReachFor(FormKey ws)
+        {
+            if (!_reach.TryGetValue(ws, out var fr)) _reach[ws] = fr = new FloorReach(_bounds);
+            return fr;
+        }
+
+        /// <summary>The reach of one worldspace: what NeighbourhoodOf admits from (created empty when nothing is filed).</summary>
+        public FloorReach ReachOf(FormKey ws) => ReachFor(ws);
+
+        /// <summary>One plugin, in load order, BEFORE its cells: its worldspace records' large-reference lists.</summary>
+        public void ObserveLists(ISkyrimModGetter mod)
+        {
+            foreach (var ws in mod.Worldspaces.Records) ReachFor(ws.FormKey).Lists.Observe(mod.ModKey.FileName.String, ws);
+        }
+
+        /// <summary>One base record, in load order: its OBND box as the record states it (the last one wins; a record that
+        /// states none takes an earlier box out), the box reach admission tests.</summary>
+        public void NoteBase(Mutagen.Bethesda.Plugins.Records.IMajorRecordGetter rec)
+        {
+            if (rec is not IObjectBoundedGetter ob) return;
+            if (ob.ObjectBounds is { } bnd)
+                _bounds[rec.FormKey] = (
+                    new Vec3(Math.Min(bnd.First.X, bnd.Second.X), Math.Min(bnd.First.Y, bnd.Second.Y), Math.Min(bnd.First.Z, bnd.Second.Z)),
+                    new Vec3(Math.Max(bnd.First.X, bnd.Second.X), Math.Max(bnd.First.Y, bnd.Second.Y), Math.Max(bnd.First.Z, bnd.Second.Z)));
+            else _bounds.Remove(rec.FormKey);
+        }
+
+        /// <summary>One plugin's lists and base boxes (ObserveLists, NoteBase over every record), for a walk that does not
+        /// already enumerate the plugin's records. Call BEFORE the plugin's cells.</summary>
+        public void ObserveMod(ISkyrimModGetter mod)
+        {
+            ObserveLists(mod);
+            foreach (var rec in mod.EnumerateMajorRecords()) NoteBase(rec);
+        }
 
         /// <summary>The maps of one worldspace, created empty (both together, as callers index one by the other's keys)
         /// when nothing has been filed there.</summary>
@@ -134,7 +216,14 @@ internal static class FloorFeed
             foreach (var r in cp.Refs)
             {
                 Remove(r.FormKey);
+                RemoveReach(r.FormKey);
                 if (cp.Interior || cp.Worldspace.IsNull || r.Deleted || r.Base is null) continue;
+                var anchor = RingReach.AnchorOf(cp, r);
+                if (_wantAnchor is null || _wantAnchor(cp.Worldspace, anchor))
+                {
+                    ReachFor(cp.Worldspace).File(anchor, r);
+                    _reachWhere[r.FormKey] = (cp.Worldspace, anchor);
+                }
                 var g = GridOf(r.Position);
                 if (_wantGrid is not null && !_wantGrid(cp.Worldspace, g)) continue;
                 var byGrid = RefsOf(cp.Worldspace);
@@ -143,7 +232,7 @@ internal static class FloorFeed
                 _where[r.FormKey] = (cp.Worldspace, g);
             }
             if (cp.DeletedRefs is { Count: > 0 } deleted)
-                foreach (var d in deleted) Remove(d.FormKey);
+                foreach (var d in deleted) { Remove(d.FormKey); RemoveReach(d.FormKey); }
 
             if (cp.Interior || cp.Worldspace.IsNull || cp.Grid is not { } cg) return;
             if (_wantGrid is not null && !_wantGrid(cp.Worldspace, cg)) return;
@@ -174,6 +263,11 @@ internal static class FloorFeed
             }
         }
 
+        void RemoveReach(FormKey k)
+        {
+            if (_reachWhere.Remove(k, out var at) && _reach.TryGetValue(at.Ws, out var fr)) fr.Unfile(at.Anchor, k);
+        }
+
         /// <summary>The unreadable-LAND grids inside the 3x3 around <paramref name="grid"/> of <paramref name="ws"/>, with
         /// their reasons: what a caller refuses or counts on before it builds a field there.</summary>
         public List<string> UnreadableNear(FormKey ws, (int X, int Y) grid)
@@ -186,9 +280,86 @@ internal static class FloorFeed
             return list;
         }
 
-        /// <summary>The 3x3 neighbourhood of one worldspace (Neighbourhood over this index's maps).</summary>
-        public (List<PlacedRef> Refs, List<((int X, int Y) Grid, float[,] Heights)> Land) NeighbourhoodOf(FormKey ws, (int X, int Y) grid) =>
-            Neighbourhood(grid, RefsOf(ws), LandOf(ws));
+        /// <summary>The 3x3 neighbourhood of one worldspace (Neighbourhood over this index's maps), plus what its reach
+        /// admits (FloorReach.Admit).</summary>
+        public (List<PlacedRef> Refs, List<((int X, int Y) Grid, float[,] Heights)> Land) NeighbourhoodOf(FormKey ws, (int X, int Y) grid)
+        {
+            var nb = Neighbourhood(grid, RefsOf(ws), LandOf(ws));
+            ReachOf(ws).Admit(grid, nb.Refs);
+            return nb;
+        }
+    }
+
+    /// <summary>
+    /// One worldspace's REACH (the header): every reference whose last sighting is exterior here, not deleted and with a
+    /// base, filed by its anchor (RingReach.AnchorOf), the worldspace's large-reference lists, and the bases' OBND boxes
+    /// (shared by the index). <see cref="Admit"/> adds to a 3x3 neighbourhood each reference not already in it that is
+    /// anchored within ring 2 (ReachRing2: ring 2, and the rare reference held in the 3x3 but standing outside it), or at
+    /// rings 3..LargeRadius and named by the selected list (ReachLarge), whose placed box enters the 3x3
+    /// (RingReach.EntersSquare). A base with no usable OBND is not admitted (viewprobe's rule); FloorFeed.Build then
+    /// decides whether the admitted reference has an actor-solid surface at all. Owned collections only, no callbacks:
+    /// viewprobe's retained cell walk carries it as it is (its filing is not changed after the walk; Admit only counts).
+    /// </summary>
+    public sealed class FloorReach
+    {
+        readonly Dictionary<(int, int), Dictionary<FormKey, PlacedRef>> _byAnchor = new();
+        readonly Dictionary<FormKey, (Vec3 Min, Vec3 Max)> _bounds;
+        internal readonly LargeReferenceLists Lists = new();
+        /// <summary>How many references Admit added, by kind, over every call.</summary>
+        public int AdmittedRing2, AdmittedLarge;
+
+        internal FloorReach(Dictionary<FormKey, (Vec3 Min, Vec3 Max)> bounds) { _bounds = bounds; }
+
+        internal void File((int, int) anchor, PlacedRef r)
+        {
+            if (!_byAnchor.TryGetValue(anchor, out var d)) _byAnchor[anchor] = d = new Dictionary<FormKey, PlacedRef>();
+            d[r.FormKey] = r;
+        }
+
+        internal void Unfile((int, int) anchor, FormKey k)
+        {
+            if (_byAnchor.TryGetValue(anchor, out var d) && d.Remove(k) && d.Count == 0) _byAnchor.Remove(anchor);
+        }
+
+        /// <summary>The references filed at an anchor (for a reader and the self-test).</summary>
+        public IReadOnlyCollection<PlacedRef> At((int X, int Y) anchor) =>
+            _byAnchor.TryGetValue(anchor, out var d) ? d.Values : Array.Empty<PlacedRef>();
+
+        /// <summary>The OBND box of a base, as the walk last saw it, or null.</summary>
+        public (Vec3 Min, Vec3 Max)? BoundsOf(FormKey baseKey) => _bounds.TryGetValue(baseKey, out var b) ? b : null;
+
+        /// <summary>Add to <paramref name="refs"/> (the 3x3 neighbourhood of <paramref name="g"/> by position) what the reach
+        /// admits, in a stable order. Returns how many were added.</summary>
+        public int Admit((int X, int Y) g, List<PlacedRef> refs)
+        {
+            var have = new HashSet<FormKey>();
+            foreach (var r in refs) have.Add(r.FormKey);
+            var listed = Lists.Selected(ReachChildUnion, RingReach.RootUsesUnion);
+            var add = new List<(PlacedRef Ref, bool Large)>();
+            for (int dx = -RingReach.LargeRadius; dx <= RingReach.LargeRadius; dx++)
+                for (int dy = -RingReach.LargeRadius; dy <= RingReach.LargeRadius; dy++)
+                {
+                    var a = (g.X + dx, g.Y + dy);
+                    int ring = RingReach.Ring(a, g);
+                    bool large = ring > RingReach.EdgeRadius;
+                    if (large ? !ReachLarge : !ReachRing2) continue;
+                    if (!_byAnchor.TryGetValue(a, out var d)) continue;
+                    foreach (var (k, r) in d)
+                    {
+                        if (have.Contains(k)) continue;
+                        if (large && !listed.Contains(k)) continue;
+                        if (r.Base is not { } bk || !_bounds.TryGetValue(bk, out var box)) continue;
+                        if (!RingReach.EntersSquare(r, box, g)) continue;
+                        add.Add((r, large)); have.Add(k);
+                    }
+                }
+            foreach (var (r, large) in add.OrderBy(x => x.Ref.FormKey.ToString(), StringComparer.Ordinal))
+            {
+                refs.Add(r);
+                if (large) AdmittedLarge++; else AdmittedRing2++;
+            }
+            return add.Count;
+        }
     }
 
     /// <summary>The 3×3 neighbourhood around an exterior cell, out of maps a <see cref="FloorIndex"/> keeps.</summary>

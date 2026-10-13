@@ -1327,6 +1327,7 @@ string stationWorldspaceEd = "";
 var stationRefsByGrid = new Dictionary<(int, int), Dictionary<FormKey, PlacedRef>>();
 var stationLandByGrid = new Dictionary<(int, int), float[,]>();
 var stationUnreadableLand = new Dictionary<(int, int), string>();   // grids whose last LAND gives no heights (FloorIndex)
+FloorFeed.FloorReach? stationReach = null;   // the station floor's reach beyond the 3x3 (FloorFeed.FloorReach)
 // How far out the cells' water and identity are harvested. One ring is all the renderer needs; a
 // station reaches up to the standoff cap plus a lateral from its primitive, which can leave the
 // target cell, so the mode widens it and the floor is filed one square wider still (FloorFeed
@@ -1561,7 +1562,7 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot,
     wsWater = null; wsDefaultWaterHeight = float.MaxValue;
     cellWaterTruth.Clear(); wsWaterTruth = null; wsDefaultWaterHeightTruth = float.MaxValue;
     cellAtGrid.Clear(); worldChain.Clear(); stationWorldspaceEd = "";
-    stationRefsByGrid.Clear(); stationLandByGrid.Clear(); stationUnreadableLand.Clear();
+    stationRefsByGrid.Clear(); stationLandByGrid.Clear(); stationUnreadableLand.Clear(); stationReach = null;
     enableMemo.Clear();
     targetWorldspace = FormKey.Null; targetGrid = null;
     cellKey = null; cellLabel = cellTarget; interior = false;
@@ -1783,10 +1784,12 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot,
         {
             // The target worldspace's large-reference list in this plugin, before its cells (WinningRefs.cs).
             winWalk.ObserveLarge(m);
+            stationFloor?.ObserveLists(m);   // and the station floor's (FloorFeed reach), from the same records
             if (bosFill) bosLight.Add((m.ModKey, m.IsSmallMaster || m.ModKey.Type == ModType.Light));
             foreach (var rec in m.EnumerateMajorRecords())
             {
                 if (bosFill) bosIdx!.Note(rec);
+                stationFloor?.NoteBase(rec);   // the station floor reach's base boxes (FloorFeed)
                 // Landscape texture chain: LTEX -> TXST -> diffuse path, winner-takes-all in load
                 // order, so terrain quadrants can be drawn with their real winning textures.
                 if (rec is ILandscapeTextureGetter lt)
@@ -1905,6 +1908,7 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot,
         { throw ViewProbe.PluginRead.Failed(path, walkIndex, order.OrderedPaths.Count, "the winning-state walk", ex); }
     }
     ViewProbe.StationFloorFiling.Finish(stationFloor, targetWorldspace, stationRefsByGrid, stationLandByGrid, stationUnreadableLand);
+    stationReach = stationFloor?.ReachOf(targetWorldspace);
     // HOUSECARL_WINSTATE_DUMP: the render's selected navmeshes after the walk, for an independent reader.
     if (HarnessShared.WinStateDump.Asked)
         HarnessShared.WinStateDump.Write("viewprobe-navsel", new
@@ -1964,6 +1968,7 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot,
         foreach (var x in f.StationRefs) stationRefsByGrid[x.Key] = x.Value;
         foreach (var x in f.StationLand) stationLandByGrid[x.Key] = x.Value;
         foreach (var x in f.StationUnreadableLand) stationUnreadableLand[x.Key] = x.Value;
+        stationReach = f.StationReach;
     }
     if (cellScene is not null && !retainedWalkHit)
     {
@@ -2004,6 +2009,7 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot,
                 x => x.Value.ToDictionary(y => y.Key, y => ViewProbe.CellWalkFacts.Copy(y.Value))),
             StationLand = stationLandByGrid.ToDictionary(x => x.Key, x => (float[,])x.Value.Clone()),
             StationUnreadableLand = new(stationUnreadableLand),
+            StationReach = stationReach,
             TerrainPatches = Array.Empty<ViewProbe.TerrainPatchFact>(),
             TerrainLayers = Array.Empty<ViewProbe.TerrainLayerFact>(),
             LandHeights = Array.Empty<ViewProbe.LandHeightFact>(),
@@ -3375,6 +3381,7 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot,
                 RefsByGrid = stationRefsByGrid,
                 LandByGrid = stationLandByGrid,
                 UnreadableLand = stationUnreadableLand,
+                Reach = stationReach,
                 Geometry = StationFloorGeometry,
                 Enabled = RefEnabled,
                 CellAt = g => cellAtGrid.TryGetValue(g, out var ci)

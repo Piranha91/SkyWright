@@ -79,4 +79,33 @@ public sealed partial class MovedRefSelfTest
         if (child) Check($"{prefix}-FRC  child worldspace RC (0,0): G0 and its own list's G2, not the parent's G1",
               rc00.Count == FloorReachFixture.ExpectedRC00.Count && rc00.ToHashSet().SetEquals(FloorReachFixture.ExpectedRC00), Show(rc00));
     }
+
+    /// <summary>The floor REACH of a single-plugin probe (navprobe, corridorprobe: FloorFeed.FileOnePlugin) on
+    /// FloorReachFixture's master alone: <paramref name="file"/> files the master the way the probe's run does and returns
+    /// its FloorIndex. Cases FR1-1..FR11-1 and FR-all-1.</summary>
+    internal void CheckReachOne(string prefix, Func<string, FloorFeed.FloorIndex> file)
+    {
+        var paths = FloorReachFixture.Write(Path.Combine(Root, "reach-one"));
+        var index = file(paths[0]);
+        var r00 = index.NeighbourhoodOf(FloorReachFixture.R, (0, 0)).Refs.Select(r => r.FormKey).ToList();
+        string Show(List<FormKey> l) => string.Join(" ", l.Select(FloorReachFixture.Name).OrderBy(x => x, StringComparer.Ordinal));
+        void Case(string id, string what, bool present)
+        {
+            var k = FloorReachFixture.Refs[what.Split(' ')[0]];
+            Check($"{prefix}-{id}  {what}: {(present ? "present once" : "absent")}", r00.Count(x => x == k) == (present ? 1 : 0), Show(r00));
+        }
+        Case("FR1-1", "F1 anchored at ring 2, box enters the 3x3", true);
+        Case("FR2-1", "F2 anchored at ring 2, box misses the 3x3", false);
+        Case("FR3-1", "F3 listed, anchored at ring 4, enters", true);
+        Case("FR4-1", "F4 unlisted, anchored at ring 4, enters", false);
+        Case("FR5-1", "F5 listed, anchored at ring 6, enters", false);
+        Case("FR6-1", "F6 at ring 2 in the master (not moved there)", true);
+        Case("FR7-1", "F7 at ring 2 in the master (not deleted there)", true);
+        Case("FR8-1", "F8 held at ring 2, standing inside the 3x3", true);
+        Case("FR9-1", "F9 a box that enters only with its X rotation", true);
+        Case("FR10-1", "F10 listed only by a later plugin, which is not read", false);
+        Case("FR11-1", "F11 held at ring 2, standing at ring 3", true);
+        Check($"{prefix}-FR-all-1  R (0,0), the master alone: exactly the expected set, each once",
+              r00.Count == FloorReachFixture.ExpectedR00MasterOnly.Count && r00.ToHashSet().SetEquals(FloorReachFixture.ExpectedR00MasterOnly), Show(r00));
+    }
 }

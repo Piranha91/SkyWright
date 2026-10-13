@@ -337,7 +337,7 @@ if (routeOn)
         }
         if (cellGridOf.TryGetValue(cell, out var cg) && floorRefsByWorld.TryGetValue(cg.Wrld, out var frw))
         {
-            var (nbRefs, nbLand) = FloorFeed.Neighbourhood((cg.X, cg.Y), frw, floorLandByWorld[cg.Wrld]);
+            var (nbRefs, nbLand) = rwalk.Floor.NeighbourhoodOf(cg.Wrld, (cg.X, cg.Y));   // the 3x3 by position plus the reach (FloorFeed)
             floor = FloorFeed.Build(nbRefs, FloorGeometry, nbLand, enabled: usePop.Predicate);
         }
         else floor = FloorFeed.Build(crefs, FloorGeometry, null, enabled: usePop.Predicate);

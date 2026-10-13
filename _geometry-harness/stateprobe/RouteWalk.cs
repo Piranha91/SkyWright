@@ -62,6 +62,7 @@ sealed class RouteWalk
 
     void Walk(ISkyrimModGetter m)
     {
+        Floor.ObserveMod(m);   // the floor reach's lists and base boxes, before the plugin's cells (FloorFeed)
         foreach (var cp in LastSighting.Cells(m))
         {
             LearnGrid(cp);

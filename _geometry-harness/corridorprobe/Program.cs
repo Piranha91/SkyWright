@@ -318,12 +318,9 @@ if (mode == "arms" || mode == "cut")
     var enableFacts = new EnableFactsIndex();
     foreach (var rec in mod.EnumerateMajorRecords()) if (rec is IPlacedGetter dpg && dpg.IsDeleted) enableFacts.NoteDeleted(dpg.FormKey);
     // The floor filing (FloorFeed.FloorIndex): the plugin's exterior cells of this cell's worldspace, by position.
-    var floorIndex = new FloorFeed.FloorIndex((ws, _) => ws == cell.Worldspace);
-    foreach (var cp in LastSighting.Cells(mod))
-    {
-        foreach (var r in cp.Refs) enableFacts.Note(r);
-        floorIndex.Observe(cp, plugin);
-    }
+    // (FloorFeed.FileOnePlugin: the reach's lists and base boxes, then every cell.)
+    var floorIndex = FloorFeed.FileOnePlugin(mod, (ws, _) => ws == cell.Worldspace,
+                                             cp => { foreach (var r in cp.Refs) enableFacts.Note(r); }, plugin);
     var frg = floorIndex.RefsOf(cell.Worldspace); var flg = floorIndex.LandOf(cell.Worldspace);
     var pop = popMode == PopulationMode.Flags ? EnablePopulation.Flags(enableFacts) : EnablePopulation.LoadTime(enableFacts);
     FloorField floor;
@@ -333,7 +330,7 @@ if (mode == "arms" || mode == "cut")
     { Console.Error.WriteLine($"{cellId}: REFUSED — its floor needs a LAND that gives no heights ({string.Join("; ", badLand)})"); return 2; }
     if (!cell.Interior && cell.Grid is { } fg)
     {
-        var (nbRefs, nbLand) = FloorFeed.Neighbourhood(fg, frg, flg);
+        var (nbRefs, nbLand) = floorIndex.NeighbourhoodOf(cell.Worldspace, fg);   // the 3x3 by position plus the reach (FloorFeed)
         floor = FloorFeed.Build(nbRefs, FloorGeometry, nbLand, enabled: pop.Predicate);
     }
     else floor = FloorFeed.Build(cell.Refs, FloorGeometry, null, enabled: pop.Predicate);

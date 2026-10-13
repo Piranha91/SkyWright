@@ -52,6 +52,7 @@ sealed class BlockWalk
 
     void Walk(ISkyrimModGetter m, string name, Action<CellPlacements> perCell)
     {
+        Floor.ObserveMod(m);   // the floor reach's lists and base boxes, before the plugin's cells (FloorFeed)
         foreach (var cp in LastSighting.Cells(m))
         {
             perCell(cp);

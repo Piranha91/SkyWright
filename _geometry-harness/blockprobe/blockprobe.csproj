@@ -26,6 +26,8 @@
     <Compile Include="..\_shared\DependencyIndex.cs" Link="DependencyIndex.cs" />
     <Compile Include="..\_shared\BosHook.cs" Link="BosHook.cs" />
     <Compile Include="..\_shared\FloorFeed.cs" Link="FloorFeed.cs" />
+    <Compile Include="..\_shared\RingReach.cs" Link="RingReach.cs" />
+    <Compile Include="..\_shared\LargeReferenceLists.cs" Link="LargeReferenceLists.cs" />
     <Compile Include="..\_shared\WinStateDump.cs" Link="WinStateDump.cs" />
     <Compile Include="..\_shared\SyntheticOrder.cs" Link="SyntheticOrder.cs" />
     <Compile Include="..\_shared\HarnessOrderCli.cs" Link="HarnessOrderCli.cs" />

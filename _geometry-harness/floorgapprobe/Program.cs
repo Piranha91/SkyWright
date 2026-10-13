@@ -296,7 +296,7 @@ FloorField Field(CellPlacements cp)
     if (cp.Interior || ownOnly || cp.Grid is not { } g || !refsByWorld.TryGetValue(cp.Worldspace, out var rg))
         return FloorFeed.Build(cp.Refs, FloorGeometry, cp.Land is { } own && cp.Grid is { } og ? new[] { (og, own) } : null, 0f, depth, reach,
                                pop.Predicate);
-    var (nbRefs, nbLand) = FloorFeed.Neighbourhood(g, rg, landByWorld[cp.Worldspace]);
+    var (nbRefs, nbLand) = fwalk.Floor.NeighbourhoodOf(cp.Worldspace, g);   // the 3x3 by position plus the reach (FloorFeed)
     return FloorFeed.Build(nbRefs, FloorGeometry, nbLand, 0f, depth, reach, pop.Predicate);
 }
 

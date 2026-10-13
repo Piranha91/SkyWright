@@ -376,7 +376,7 @@ FloorField FloorFor(FormKey cellKey, List<PlacedRef>? own)
     FloorField built;
     if (cellMeta.TryGetValue(cellKey, out var meta) && !meta.Interior && meta.Grid is { } g && floorRefsByWorld.TryGetValue(meta.Worldspace, out var frw))
     {
-        var (nbRefs, nbLand) = FloorFeed.Neighbourhood(g, frw, floorLandByWorld[meta.Worldspace]);
+        var (nbRefs, nbLand) = walk.Floor.NeighbourhoodOf(meta.Worldspace, g);   // the 3x3 by position plus the reach (FloorFeed)
         built = FloorFeed.Build(nbRefs, FloorGeometry, nbLand, enabled: enabledOf);
     }
     else built = FloorFeed.Build(own ?? new List<PlacedRef>(), FloorGeometry, null, enabled: enabledOf);

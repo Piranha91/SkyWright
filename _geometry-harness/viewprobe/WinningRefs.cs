@@ -1,3 +1,4 @@
+using HarnessShared;
 using HousecarlCore;
 using Mutagen.Bethesda.Plugins;
 
@@ -43,7 +44,7 @@ internal sealed class WinningRefWalk
     // therefore convex, so the segment between them lies inside it too; anything that can come between them has geometry
     // inside the 3x3. References beyond EdgeRadius are not admitted, the large-reference grid (uLargeRefLODGridSize)
     // included: the winning WRLD records of the lab orders carry no large-reference list and its effect is unmeasured.
-    internal const int EdgeRadius = 2;
+    internal const int EdgeRadius = RingReach.EdgeRadius;   // the shared ring rule (_shared/RingReach.cs)
     FormKey _edgeWs = FormKey.Null;
     (int X, int Y)? _edgeGrid;
     // Last sighting of each reference anchored 1 < d <= EdgeRadius from the target (temporary: its cell's grid;
@@ -65,8 +66,8 @@ internal sealed class WinningRefWalk
     // in MergeLarge, after the walk. Occlusion primitives on a list are admitted BY RECORD: their in-game activity at
     // rings 3-5 has not been read (LargePrimitivesByRecord). Content beyond the 3x3 is not modelled for any ring: a large
     // reference whose box misses the 3x3 is not drawn even when it would be in the view (a scene-scope limit, README).
-    internal const int LargeRadius = 5;
-    internal const bool RootUsesUnion = true;
+    internal const int LargeRadius = RingReach.LargeRadius;
+    internal const bool RootUsesUnion = RingReach.RootUsesUnion;
     internal const bool LargePrimitivesByRecord = true;
     internal const bool LargeModelsByRecord = true;
     readonly Dictionary<FormKey, (PlacedRef Ref, FormKey Cell)> _far = new();
@@ -154,10 +155,7 @@ internal sealed class WinningRefWalk
     bool IsEdge(CellPlacements cp, PlacedRef r)
     {
         if (_edgeGrid is not { } g || cp.Interior || cp.Worldspace != _edgeWs) return false;
-        (int X, int Y) a = r.Persistent || cp.Grid is not { } cg
-            ? ((int)MathF.Floor(r.Position.X / 4096f), (int)MathF.Floor(r.Position.Y / 4096f))
-            : (cg.X, cg.Y);
-        int d = Math.Max(Math.Abs(a.X - g.X), Math.Abs(a.Y - g.Y));
+        int d = RingReach.Ring(RingReach.AnchorOf(cp, r), g);
         return d > 1 && d <= EdgeRadius;
     }
 
@@ -186,10 +184,7 @@ internal sealed class WinningRefWalk
     bool IsFar(CellPlacements cp, PlacedRef r)
     {
         if (_edgeGrid is not { } g || cp.Interior || cp.Worldspace != _edgeWs) return false;
-        (int X, int Y) a = r.Persistent || cp.Grid is not { } cg
-            ? ((int)MathF.Floor(r.Position.X / 4096f), (int)MathF.Floor(r.Position.Y / 4096f))
-            : (cg.X, cg.Y);
-        int d = Math.Max(Math.Abs(a.X - g.X), Math.Abs(a.Y - g.Y));
+        int d = RingReach.Ring(RingReach.AnchorOf(cp, r), g);
         return d > EdgeRadius && d <= LargeRadius;
     }
 
@@ -201,9 +196,7 @@ internal sealed class WinningRefWalk
         foreach (var ws in mod.Worldspaces.Records)
         {
             if (ws.FormKey != _edgeWs) continue;
-            var listed = ws.LargeReferences.SelectMany(g => g.References).Select(x => x.Reference.FormKey).Where(k => !k.IsNull);
-            var parent = ws.Parent?.Worldspace.FormKey ?? FormKey.Null;
-            _lists.Observe(mod.ModKey.FileName.String, listed, !parent.IsNull);
+            _lists.Observe(mod.ModKey.FileName.String, ws);
         }
     }
 
@@ -228,23 +221,9 @@ internal sealed class WinningRefWalk
         return _largeAdmitted.Count;
     }
 
-    // The placed box (scale, the engine's rotation, position) overlaps the 3x3 square around g in XY. The ONE box test of
-    // both merges (MergeEdge, MergeLarge), so a convention fixed here holds for both (lane V's yaw-only arm edits it).
-    static bool EntersSquare(PlacedRef r, (Vec3 Min, Vec3 Max) b, (int X, int Y) g)
-    {
-        float x0 = (g.X - 1) * 4096f, y0 = (g.Y - 1) * 4096f, x1 = (g.X + 2) * 4096f, y1 = (g.Y + 2) * 4096f;
-        var rot = SpatialOverlap.RefrRotation(r.Rotation);
-        var pos = new System.Numerics.Vector3(r.Position.X, r.Position.Y, r.Position.Z);
-        float mx0 = float.MaxValue, my0 = float.MaxValue, mx1 = float.MinValue, my1 = float.MinValue;
-        for (int i = 0; i < 8; i++)
-        {
-            var c = new System.Numerics.Vector3((i & 1) == 0 ? b.Min.X : b.Max.X, (i & 2) == 0 ? b.Min.Y : b.Max.Y,
-                                                (i & 4) == 0 ? b.Min.Z : b.Max.Z);
-            var w = System.Numerics.Vector3.Transform(c * r.Scale, rot) + pos;
-            mx0 = MathF.Min(mx0, w.X); my0 = MathF.Min(my0, w.Y); mx1 = MathF.Max(mx1, w.X); my1 = MathF.Max(my1, w.Y);
-        }
-        return mx0 < x1 && mx1 > x0 && my0 < y1 && my1 > y0;
-    }
+    // The placed box overlaps the 3x3 square around g in XY: the ONE box test of both merges and of FloorFeed's reach
+    // (_shared/RingReach.cs), so a convention fixed there holds for all of them (lane V's yaw-only arm edits it).
+    static bool EntersSquare(PlacedRef r, (Vec3 Min, Vec3 Max) b, (int X, int Y) g) => RingReach.EntersSquare(r, b, g);
 
     internal IReadOnlyList<FormKey> LargeAdmittedKeys => _largeAdmitted;
     /// <summary>The tracked worldspace is a child (its winning record has a Parent).</summary>
