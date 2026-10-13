@@ -1,7 +1,7 @@
 // lightprobe — the placed lights of selected interior cells, as a load order resolves them, and what each does to the
 // render surfaces around it (light-clash measure, lane L 2026-10-04).
 //
-// usage: lightprobe --self-test
+// usage: lightprobe --self-test [--meshes-from GAME_DATA]   (reader cases on vanilla meshes run only with --meshes-from)
 //        lightprobe [--instance DIR] [--game DIR] [--profile NAME] [--order FILE] --json OUT
 //                   (--cell EDID ... | --cells-file FILE | --list-interiors) [--geometry] [--max-mb N]
 //
@@ -29,7 +29,7 @@ using Mutagen.Bethesda.Plugins;
 using Mutagen.Bethesda.Skyrim;
 
 using var __run = RunLog.BeginProcess("lightprobe", args);
-if (args.Length >= 1 && args[0] == "--self-test") return LightSelfTest.Run();
+if (args.Length >= 1 && args[0] == "--self-test") return LightSelfTest.Run(args);
 
 string Instance = HarnessTarget.Instance, GamePath = HarnessTarget.Game, profileName = HarnessTarget.Profile;
 string? orderFile = null, jsonPath = null, cellsFile = null;

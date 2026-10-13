@@ -77,7 +77,28 @@ def _fixtures_near(arr, pos, h):
     return sorted(out)
 
 
-def c1_orphan(light_key, own, u, p: Params):
+# ---- the structural fixture rule (lane A, 2026-10-13): STUBS at the red commit. Each keeps today's name-rule behaviour so the known
+# answers in tests/test_lightclash.py fail on their own assertions; the rule replaces them (runs/2026-10-13-light-fixtures/GATE-A.md).
+
+def part_distance(pos, r):
+    """STUB: today's measure, the distance to the reference's origin."""
+    return math.dist(pos, r["pos"])
+
+
+def emitting_near(arr, pos, h):
+    """STUB: today's fixture set (the name rule), by origin distance."""
+    return _fixtures_near(arr, pos, h)
+
+
+def host_of(light_key, arr, h):
+    """STUB: today's host (the nearest name-rule fixture by origin), or none."""
+    l = arr["lights"].get(light_key) or arr["refs"].get(light_key)
+    near = _fixtures_near(arr, l["pos"], h)
+    return {"host": near[0][1] if near else None, "how": "name" if near else None, "dist": near[0][0] if near else None,
+            "label": None if near else "fill light (no fixture within H)"}
+
+
+def c1_orphan(light_key, own, u, p: Params, dep=None):
     l_own = own["lights"].get(light_key)
     if l_own is None or not l_own.get("enabled"):
         return {"applies": False, "positive": False, "label": "not lit in its own arrangement"}

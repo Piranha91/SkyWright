@@ -275,6 +275,221 @@ def test_room_doubling_lists_the_nearest_fixture():
 
 
 
+# ---------------------------------------------------------------- the structural fixture rule (lane A, 2026-10-13)
+# Known answers K1-K16 (runs/2026-10-13-light-fixtures/GATE-A.md section 3, GATE-B.md). A host is a placed object with an emitting part
+# within H of the light, measured to that part's placed box (lightprobe's `emitters`); a LIGH with its own model hosts itself; inventory
+# items never host; an unreadable model in range leaves the host unknown. No name or editor-ID test. Each docstring names the wrong
+# answer it rejects.
+
+def eref(key, pos, parts=(), typ="Static", edid="Prop01", mesh="props/prop01.nif", status="read", obnd=None, enabled=True):
+    """A reference with lightprobe's emitter fields. parts: (kind, centre, half-size or (hx, hy, hz)); each becomes an axis-aligned
+    placed box [origin, edgeX, edgeY, edgeZ]."""
+    r = ref(key, edid, pos, enabled=enabled, typ=typ, mesh=mesh)
+    em = []
+    for i, (kind, c, h) in enumerate(parts):
+        hx, hy, hz = (h, h, h) if isinstance(h, (int, float)) else h
+        em.append({"part": f"part{i}", "kind": kind, "box": [[c[0] - hx, c[1] - hy, c[2] - hz], [2 * hx, 0, 0], [0, 2 * hy, 0], [0, 0, 2 * hz]]})
+    if em:
+        r["emitters"] = em
+    if status != "read":
+        r["emitterStatus"] = status
+    if obnd is not None:
+        r["obnd"] = list(obnd)
+    return r
+
+
+T1, C1, W1, X1, F1 = "000A01:Skyrim.esm", "000A02:Skyrim.esm", "000A03:Skyrim.esm", "000A04:Skyrim.esm", "000A05:Skyrim.esm"
+LBX = "000B01:ModB.esp"
+
+
+def _host(refs, lpos, extra_lights=()):
+    a = arr(refs, [light(LBX, lpos)] + list(extra_lights))
+    return lc.host_of(LBX, a, 64.0)
+
+
+def test_k1_candle_on_a_table_host_is_the_candle():
+    """rejects: no host found because the candle's name matches no pattern (the name rule's fill light); the table chosen by its bounds"""
+    table = eref(T1, (0, 0, 0), edid="Prop10", mesh="props/prop10.nif", obnd=(120, 80, 70))
+    candle = eref(C1, (0, 0, 70), [("emissive", (0, 0, 80), 2)], edid="Prop11", mesh="props/prop11.nif")
+    h = _host([table, candle], (0, 0, 90))
+    assert h["host"] == C1, f"K1: host should be the candle (emitting part 8 u away), got {h}"
+    assert h["how"] == "emissive", f"K1: host kind should be emissive, got {h}"
+
+
+def test_k1b_vanilla_named_candle_control():
+    """rejects: a regression on the case both rules agree on (control)"""
+    table = eref(T1, (0, 0, 0), edid="CommonTableRound01", mesh="clutter/common/commontableround01.nif")
+    candle = eref(C1, (0, 0, 70), [("emissive", (0, 0, 80), 2)], edid="CandleHornTable01", mesh="clutter/candles/candlehorntable01.nif")
+    assert _host([table, candle], (0, 0, 90))["host"] == C1
+
+
+def test_k2_sconce_on_a_wall():
+    """rejects: the wall shell (no emitter near the light) taken as the host"""
+    wall = eref(W1, (0, 0, 0), [("emissive", (-131, 0, 494), (2, 40, 40))], edid="FarmInt2End01", mesh="architecture/farmhouse/interior/farmint2end01.nif")
+    sconce = eref(C1, (0, 100, 100), [("emissive", (0, 100, 90), 2)], edid="CandleHornWall01", mesh="clutter/candles/candlehornwall01.nif")
+    assert _host([wall, sconce], (0, 100, 70))["host"] == C1
+
+
+def test_k3_room_shell_without_an_emitter_near_is_free_standing():
+    """rejects: a shell enclosing the light read as its host because the light is inside its bounds"""
+    shell = eref(W1, (0, 0, 0), [("emissive", (300, 0, 300), 20)], edid="FarmInt2End01", obnd=(800, 600, 600))
+    h = _host([shell], (0, 0, 100))
+    assert h["host"] is None, f"K3: expected free-standing, got {h}"
+
+
+def test_k3b_non_emitting_window_is_not_a_host():
+    """rejects: a window mesh with no emission taken as a fixture because its name says window"""
+    shell = eref(W1, (0, 0, 0), [("emissive", (300, 0, 300), 20)], edid="FarmInt2End01")
+    window = eref(X1, (30, 0, 100), edid="Lux_FarmhouseWindow", mesh="architecture/farmhouse/interior/lux_farmhousewindow.nif")
+    h = _host([shell, window], (0, 0, 100))
+    assert h["host"] is None, f"K3b: a non-emitting window is not a host, got {h}"
+
+
+def test_k3c_shell_window_glow_part_hosts():
+    """rejects: the shell's own glow-map window part ignored because the shell's name matches nothing"""
+    shell = eref(W1, (0, 0, 0), [("emissive", (0, 0, 100), (40, 2, 40))], edid="FarmIntLHEnd01")
+    h = _host([shell], (0, 5, 100))
+    assert h["host"] == W1, f"K3c: the shell hosts by its window part (3 u), got {h}"
+
+
+def test_k4_light_with_its_own_model_hosts_itself():
+    """rejects: a LIGH carrying a model hosted by a nearby candle (the name rule skips Light references)"""
+    lt = light(LBX, (0, 0, 0))
+    lref = ref(LBX, "Torch01Shadow", (0, 0, 0), typ="Light", mesh="Weapons\\Torch\\torch.nif")
+    candle = eref(C1, (20, 0, 0), [("emissive", (20, 0, 5), 2)], edid="CandleHornTable01")
+    a = {"refs": {LBX: lref, C1: candle}, "lights": {LBX: lt}, "shapes": {}}
+    h = lc.host_of(LBX, a, 64.0)
+    assert h["host"] == LBX and h["how"] == "own model", f"K4: the light's own model hosts it, got {h}"
+    r = lc.c1_orphan(LBX, a, a, P)
+    assert r["applies"] is False and "own model" in (r.get("label") or ""), f"K4: C1 does not apply to a self-hosted light, got {r}"
+
+
+def test_k5_fire_salts_never_host():
+    """rejects: an emitting inventory item (Ingredient) taken as a host; the name rule's 'fire' match"""
+    salts = eref(F1, (10, 0, 0), [("emissive", (10, 0, 2), 3)], typ="Ingredient", edid="FireSalts", mesh="clutter/ingredients/firesaltpile.nif")
+    h = _host([salts], (0, 0, 0))
+    assert h["host"] is None, f"K5: an inventory item never hosts, got {h}"
+
+
+def test_k5b_resist_fire_never_hosts():
+    """rejects: a non-emitting potion taken as a fixture because its editor ID contains 'fire'"""
+    potion = eref(F1, (10, 0, 0), typ="Ingestible", edid="ResistFire25", mesh="clutter/potions/potionresistfire50.nif")
+    h = _host([potion], (0, 0, 0))
+    assert h["host"] is None, f"K5b: got {h}"
+
+
+def test_k12_non_item_emitters_are_never_excluded():
+    """rejects: the item exclusion widened to Flora / Furniture / Activator / MoveableStatic / Static (review finding 2)"""
+    for typ, edid in (("Flora", "DeathBell01"), ("Furniture", "EnchantingWorkbench"), ("Activator", "Prop20"),
+                      ("MoveableStatic", "Prop21"), ("Static", "Prop22")):
+        e = eref(F1, (10, 0, 0), [("emissive", (10, 0, 0), 3)], typ=typ, edid=edid)
+        h = _host([e], (0, 0, 0))
+        assert h["host"] == F1, f"K12: an emitting {typ} hosts, got {h}"
+
+
+def test_k6_bounds_and_origin_do_not_count():
+    """rejects: hosting by the candle's origin (10 u) when its emitting part is 70 u away"""
+    table = eref(T1, (0, 0, 0), edid="CommonTableRound01", obnd=(120, 80, 70))
+    candle = eref(C1, (0, 0, 40), [("emissive", (0, 0, 102), 2)], edid="CandleHornTable01")
+    h = _host([table, candle], (0, 0, 30))
+    assert h["host"] is None, f"K6: emitting part 70 u away at H 64, expected free-standing, got {h}"
+
+
+def test_k7_particle_only_fire_fx_hosts():
+    """rejects: a self-lit particle emitter ignored (no lighting-shader part, neutral name)"""
+    fx = eref(X1, (0, 0, 0), [("particle emitter", (0, 0, 10), 4)], typ="MoveableStatic", edid="Prop30", mesh="effects/prop30.nif")
+    h = _host([fx], (0, 0, 20))
+    assert h["host"] == X1 and h["how"] == "particle emitter", f"K7: got {h}"
+
+
+def test_k8_lit_effect_fx_is_not_a_host_control():
+    """rejects: a cobweb (effect shader lit by scene lights; the reader gives it no emitting part) taken as a host (control)"""
+    web = eref(X1, (0, 0, 0), typ="Static", edid="FXcobwebCorner01", mesh="effects/fxcobwebcorner01.nif")
+    assert _host([web], (0, 0, 10))["host"] is None
+
+
+def test_k9_host_found_on_the_own_arm_and_left_behind():
+    """rejects: the host looked up in the combination (where it is gone), so the light reads as free-standing"""
+    candle = eref(C1, (0, 0, 40), [("emissive", (0, 0, 50), 2)], edid="Prop11")
+    own = arr([candle], [light(LBX, (0, 0, 60))])
+    u = arr([], [light(LBX, (0, 0, 60))])
+    r = lc.c1_orphan(LBX, own, u, P)
+    assert r["applies"] and r["positive"] is True and r.get("host") == C1, f"K9: got {r}"
+
+
+def test_k10_co_movement_supports_but_never_creates():
+    """rejects: co-movement ignored; a co-moved object without an emitter made the host"""
+    candle0 = eref(C1, (0, 0, 40), [("emissive", (0, 0, 50), 2)], edid="Prop11")
+    prop0 = eref(X1, (0, 30, 0), edid="Prop12")
+    dep = arr([candle0, prop0], [light(LBX, (0, 0, 60))])
+    candle1 = eref(C1, (100, 0, 40), [("emissive", (100, 0, 50), 2)], edid="Prop11")
+    prop1 = eref(X1, (100, 30, 0), edid="Prop12")
+    own = arr([candle1, prop1], [light(LBX, (100, 0, 60))])
+    r = lc.c1_orphan(LBX, own, own, P, dep=dep)
+    assert r.get("host") == C1 and r.get("coMoved") is True, f"K10: the host co-moved, got {r}"
+    assert X1 in (r.get("coMovedNotHost") or []), f"K10: the co-moved non-emitter is reported, not hosted, got {r}"
+
+
+def test_k11_unreadable_model_in_range_leaves_the_host_unknown():
+    """rejects: an unreadable model next to the light read as 'no emitter', so the light is free-standing and the edit taste"""
+    blob = eref(X1, (0, 0, 20), typ="Static", edid="Prop40", status="refused: render_unreadable", obnd=(40, 40, 40))
+    h = _host([blob], (0, 0, 40))
+    assert h["host"] is None and (h.get("label") or "").startswith("host unknown"), f"K11: got {h}"
+    own = arr([blob], [light(LBX, (0, 0, 40))])
+    r = lc.c1_orphan(LBX, own, own, P)
+    assert r["positive"] is None, f"K11: C1 is not measured when the host is unknown, got {r}"
+
+
+def test_k13_part_distance_is_to_the_placed_box():
+    """rejects: distance measured to the reference's origin rather than its placed emitting part (0 inside, oriented box)"""
+    r = eref(C1, (0, 0, 0), [("emissive", (0, 0, 100), 10)])
+    d0, d1 = lc.part_distance((0, 0, 100), r), lc.part_distance((0, 0, 130), r)
+    assert d0 == 0.0 and abs(d1 - 20.0) < 1e-9, f"K13: inside 0 and 20 u above the box, got {d0}, {d1}"
+    rot = {"key": C1, "pos": [0, 0, 0], "emitters": [{"part": "p", "kind": "emissive",
+           "box": [[0, 0, 0], [70.71068, 70.71068, 0], [-70.71068, 70.71068, 0], [0, 0, 100]]}]}
+    d2 = lc.part_distance((35.35534, -35.35534, 50), rot)
+    assert abs(d2 - 50.0) < 1e-3, f"K13: a 45-degree box measured in its own frame is 50 u away, got {d2}"
+
+
+def test_k14_arm_without_emitters_is_refused():
+    """rejects: an arm from a lightprobe without the emitter reading folded as if no light had a host"""
+    import json, tempfile, os
+    d = {"identity": {"policy": "light_reach_v4|winding-normal front"}, "cells": []}
+    fd, path = tempfile.mkstemp(suffix=".json")
+    os.close(fd)
+    with open(path, "w") as fh:
+        json.dump(d, fh)
+    try:
+        refused = False
+        try:
+            lc.load_arm(path)
+        except (SystemExit, ValueError):
+            refused = True
+        assert refused, "K14: an arm whose policy lacks the emitter reading must be refused"
+    finally:
+        os.unlink(path)
+
+
+def test_k15_room_doubling_fixture_is_the_nearest_emitting_ref():
+    """rejects: the doubling listing's fixture chosen by name and origin, missing a neutral-named emitter 29 u away"""
+    lb = light(LBX, (0, 0, 0), leak=0.0, lit=1.0, facing=facing(50, 0, 14))
+    la = light("000801:ModA.esp", (100, 0, 0), leak=0.0, lit=1.0, facing=facing(50, 0, 14))
+    fx = eref(C1, (30, 0, -20), [("emissive", (30, 0, 0), 1)], edid="Prop50")
+    arms = {"u": arr([fx], [la, lb]), "plusb": arr([fx], [lb]), "plusa": arr([fx], [la]), "dep": arr([fx], []),
+            "p": arr([fx], [la, light(LBX, (0, 0, 0), enabled=False)])}
+    r = lc.judge_record(LBX, "DISABLE", arms, MODS, P)
+    f = r.get("doublingFixture") or {}
+    assert f.get("key") == C1 and abs((f.get("dOwn") or 0) - 29.0) < 1e-6, f"K15: got {f}"
+
+
+def test_k16_emitting_refs_near_by_part():
+    """rejects: the C1b / C3a fixture set chosen by name (a neutral-named emitter missed, a named non-emitter kept)"""
+    a = arr([eref(C1, (0, 0, 0), [("emissive", (0, 0, 10), 2)], edid="Prop60"), eref(X1, (5, 0, 0), edid="CandleHornTable01")],
+            [light(LBX, (0, 0, 20))])
+    near = [k for _, k in lc.emitting_near(a, (0, 0, 20), 64.0)]
+    assert near == [C1], f"K16: got {near}"
+
+
 if __name__ == "__main__":
     fails = 0
     for name, fn in sorted(globals().items()):

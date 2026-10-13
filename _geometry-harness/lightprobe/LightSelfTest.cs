@@ -48,8 +48,53 @@ static class LightSelfTest
         return true;
     }
 
-    public static int Run()
+    static byte[] Vanilla(string data, string rel)
     {
+        foreach (var bsa in new[] { "Skyrim - Meshes0.bsa", "Skyrim - Meshes1.bsa" })
+            if (AssetResolver.TryReadArchiveEntry(Path.Combine(data, bsa), "meshes\\" + rel) is { } b) return b;
+        throw new FileNotFoundException("not in the vanilla mesh archives: " + rel);
+    }
+
+    static Vector3 Centre(Vector3 mn, Vector3 mx) => (mn + mx) / 2;
+    static bool Near(Vector3 a, Vector3 b, float tol) => Vector3.Distance(a, b) <= tol;
+
+    /// <summary>Known answers on vanilla meshes, read from the game's archives (values from runs/2026-10-13-light-fixtures/gate-a).</summary>
+    static void EmitterReaderCases(string data)
+    {
+        EmitterModel E(string rel) => LightReach.ReadEmitters(Vanilla(data, rel));
+        Check("emitters: a horn candle has one emissive part (value 0.498) at its flame", "a candle with no emitting part",
+              () => E(@"clutter\candles\candlehorntable01.nif") is { Status: "read" } m && m.Parts.Count == 1 && m.Parts[0].Kind == "emissive"
+                    && Math.Abs((m.Parts[0].Value ?? 0) - 0.498) < 0.001 && Near(Centre(m.Parts[0].Min, m.Parts[0].Max), new Vector3(0, 0, 9.8f), 0.5f));
+        Check("emitters: a table has none (Own_Emit set, emissive black)", "Own_Emit alone read as emitting",
+              () => E(@"clutter\common\commontableround01.nif") is { Status: "read" } m && m.Parts.Count == 0);
+        Check("emitters: a Fire Salts pile reads one emissive part (the fold, not the reader, excludes items)", "the reader deciding by record type",
+              () => E(@"clutter\ingredients\firesaltpile.nif") is { Status: "read" } m && m.Parts.Count == 1 && m.Parts[0].Kind == "emissive");
+        Check("emitters: a Resist Fire potion has none (emissive black)", "a dark potion read as emitting",
+              () => E(@"clutter\potions\potionresistfire50.nif") is { Status: "read" } m && m.Parts.Count == 0);
+        Check("emitters: a farmhouse shell emits only at its glow-map window part", "the whole shell, or no part, read as emitting",
+              () => E(@"architecture\farmhouse\interior\farmint2end01.nif") is { Status: "read" } m && m.Parts.Count == 1
+                    && Math.Abs((m.Parts[0].Value ?? 0) - 3) < 1e-6 && Near(Centre(m.Parts[0].Min, m.Parts[0].Max), new Vector3(-131, 0, 494), 1f));
+        Check("emitters: a burning fireplace emits from its flames, glow and two particle emitters (8 u and 37.5 u up), not its wood",
+              "unlit wood counted; particle emitters at their reach box; flames missed",
+              () => E(@"clutter\woodfires\fireplacewood01burning.nif") is { Status: "read" } m
+                    && m.Parts.Count(p => p.Kind == "self-lit effect") == 3 && m.Parts.All(p => p.Kind != "emissive")
+                    && m.Parts.Where(p => p.Kind == "particle emitter").Select(p => Centre(p.Min, p.Max)).OrderBy(c => c.Z).ToList() is { Count: 2 } pe
+                    && Near(pe[0], new Vector3(0, 0, 8.0f), 0.2f) && Near(pe[1], new Vector3(0, 0, 37.5f), 0.2f));
+        Check("emitters: a cobweb (effect shader with Effect_Lighting) has none", "a lit ambient effect read as a light source",
+              () => E(@"effects\fxcobwebcorner01.nif") is { Status: "read" } m && m.Parts.Count == 0);
+        Check("emitters: the torch's two ember emitters sit at its head (y 32-34)", "particle emitters missing or at the model origin",
+              () => E(@"weapons\torch\torch.nif") is { Status: "read" } m
+                    && m.Parts.Where(p => p.Kind == "particle emitter").Select(p => Centre(p.Min, p.Max)).OrderBy(c => c.Y).ToList() is { Count: 2 } pe
+                    && Near(pe[0], new Vector3(0, 32.5f, 1.0f), 0.2f) && Near(pe[1], new Vector3(0, 33.4f, 0.3f), 0.2f));
+        Check("particle emitters: a mesh emitter the reach model refuses (it moves) still has a stored-pose extent", "a whole-system refusal on reach grounds",
+              () => ParticleReach.EmitterExtents(Vanilla(data, @"furniture\alchemyworkbench.nif")) is var es
+                    && es.Any(e => e.SystemName == "PArray_OuterArmsSparks" && e.Refusal is null && !e.Box.IsEmpty && e.Moving));
+    }
+
+    public static int Run(string[] args)
+    {
+        string? meshesFrom = null;
+        for (int i = 1; i < args.Length; i++) if (args[i] == "--meshes-from" && i + 1 < args.Length) meshesFrom = args[++i];
         pass = fail = 0;
         Console.WriteLine($"lightprobe self-test — {LightReach.PolicyVersion}");
         Check("fixture: the outward box faces out", "a fixture whose winding is wrong (every facing case below would invert)", OutwardIsOutward);
@@ -125,6 +170,24 @@ static class LightSelfTest
               () => LightReach.MeetsShapeBox(new Vector3(0, 0, 0), 1, new Vector3(0, 0, 0), new Vector3(70.71068f, 70.71068f, 0), new Vector3(-70.71068f, 70.71068f, 0), new Vector3(0, 0, 100))
                     && !LightReach.MeetsShapeBox(new Vector3(35.35534f, -35.35534f, 50), 49, new Vector3(0, 0, 0), new Vector3(70.71068f, 70.71068f, 0), new Vector3(-70.71068f, 70.71068f, 0), new Vector3(0, 0, 100))
                     && LightReach.MeetsShapeBox(new Vector3(35.35534f, -35.35534f, 50), 51, new Vector3(0, 0, 0), new Vector3(70.71068f, 70.71068f, 0), new Vector3(-70.71068f, 70.71068f, 0), new Vector3(0, 0, 100)));
+
+        // ---- emitting parts (lane A, 2026-10-13; runs/2026-10-13-light-fixtures/GATE-A.md section 3) ----
+        // Placement: an emitting part's model-frame box is placed exactly as lightprobe places a lit shape's box (TransformSoup of the corner
+        // and the three edge ends), so the fold measures in the same frame the light positions are in.
+        Check("emitters: a part box is placed by the reference's turned pose", "an unplaced or translated-only box (the rotation dropped)", () =>
+        {
+            var mn = new Vector3(-10, -5, 0); var mx = new Vector3(10, 5, 30);
+            var pos = new Vec3(1000, -200, 50); var rot = new Vec3(0.3f, -0.2f, 1.2f); float sc = 1.5f;
+            var w = SpatialOverlap.TransformSoup(new TriangleSoup(new[] { mn, new Vector3(mx.X, mn.Y, mn.Z), new Vector3(mn.X, mx.Y, mn.Z), new Vector3(mn.X, mn.Y, mx.Z) },
+                                                                  Array.Empty<int>()), pos, rot, sc).Vertices;
+            var (o, ex, ey, ez) = LightReach.PlaceBox(mn, mx, pos, rot, sc);
+            static bool Near(Vector3 a, Vector3 b) => Vector3.Distance(a, b) < 1e-3f;
+            return Near(o, w[0]) && Near(ex, w[1] - w[0]) && Near(ey, w[2] - w[0]) && Near(ez, w[3] - w[0]);
+        });
+        if (meshesFrom is null)
+            Console.WriteLine("NOT RUN  emitter reader cases on vanilla meshes (they need --meshes-from GAME_DATA, the folder holding Skyrim - Meshes0/1.bsa)");
+        else
+            EmitterReaderCases(meshesFrom);
 
         Console.WriteLine($"lightprobe self-test: {pass} passed, {fail} failed");
         return fail == 0 ? 0 : 1;
