@@ -347,7 +347,7 @@ static partial class MotionProof
             var mesh = PhysicsReach.Supports("mesh", SupportMeshPlate(500f, 0.35f), new Vec3(0, 0, -5.2f), new Vec3(0, 0, 0), 1f, movableBase: false).Append(floor).ToArray();
             var rb = MeshReach.OfModel(FreeItem(), Origin, Origin, 1f, null, RulesOn(physics: true, baseType: "MISC", supports: box));
             var rm = MeshReach.OfModel(FreeItem(), Origin, Origin, 1f, null, RulesOn(physics: true, baseType: "MISC", supports: mesh));
-            return (rb.Drop is { Status: "touching", SupportId: "box" } && rm.Drop is { Status: "touching", SupportId: "mesh" }, "box " + ShowRR(rb) + " | mesh " + ShowRR(rm));
+            return (rb.Drop is { Status: "lifted", SupportId: "box" } && rm.Drop is { Status: "lifted", SupportId: "mesh" }, "box " + ShowRR(rb) + " | mesh " + ShowRR(rm));
         });
         // LI-K12: a crossing the vertex test cannot see is still a contact: a small support (a 2 x 2 u compressed-mesh plate at z -2,
         // radius 0) lies wholly inside the free item's box ([-5,5]^3): no item vertex stands over the plate, and the plate's own
@@ -359,7 +359,7 @@ static partial class MotionProof
             var plate = PhysicsReach.Supports("plate", SupportMeshPlate(1f, 0f), new Vec3(0, 0, -2), new Vec3(0, 0, 0), 1f, movableBase: false)
                                     .Append(new DropSupport("floor", 1, true, false, Plate(500, -100))).ToArray();
             var r = MeshReach.OfModel(FreeItem(), Origin, Origin, 1f, null, RulesOn(physics: true, baseType: "MISC", supports: plate));
-            return (r.Drop is { Status: "touching", SupportId: "plate" }, ShowRR(r));
+            return (r.Drop is { Status: "lifted", SupportId: "plate" }, ShowRR(r));
         });
         // LI-K13: a crossing seen only edge through face: a plank (a 200 x 2 u compressed-mesh strip at z -2, radius 0) passes through
         // the free item's box ([-5,5]^3): no item vertex stands over the plank and no plank vertex is inside the item, but the plank's
@@ -370,7 +370,7 @@ static partial class MotionProof
             var plank = PhysicsReach.Supports("plank", SupportMeshRect(100f, 1f, 0f), new Vec3(0, 0, -2), new Vec3(0, 0, 0), 1f, movableBase: false)
                                     .Append(new DropSupport("floor", 1, true, false, Plate(500, -100))).ToArray();
             var r = MeshReach.OfModel(FreeItem(), Origin, Origin, 1f, null, RulesOn(physics: true, baseType: "MISC", supports: plank));
-            return (r.Drop is { Status: "touching", SupportId: "plank" }, ShowRR(r));
+            return (r.Drop is { Status: "lifted", SupportId: "plank" }, ShowRR(r));
         });
         // LI-K14: no silent wrong answer when the crossing test misses a shell: a drop read with the radius that is LONGER than the
         // same drop without it is refused by name with the radius-off drop (lane 2, 2026-10-13: was a label). Synthetic: a support whose
@@ -409,7 +409,7 @@ static partial class MotionProof
         {
             var sup = PhysicsReach.Supports("box", SupportBox(50f, 10f, 7f), new Vec3(0, 0, -14), new Vec3(0, 0, 0), 1f, movableBase: false).Append(floor100).ToArray();
             var r = PhysicsReach.Drop(ClosedBox(-1, -1, -1, 1, 1, 1), AB(-1, -1, -1, 1, 1, 1), 4, sup, RRLayers);
-            return (r.Status == "touching" && r.SupportId == "box", ShowDrop(r));
+            return (r.Status == "lifted" && r.SupportId == "box", ShowDrop(r));
         });
         // LI-K16 side clip, wall reaching below the floor: the item [-5,5]^3 clips a wall's 2 u shell sideways by 0.5 u (wall core
         // x 6.5..26.5, y +-50, z -200..+40; shell x 4.5..28.5, z -202..+42), floor 100 u down. The overlap pushes the item -x by 0.5
@@ -481,7 +481,7 @@ static partial class MotionProof
                                    .Append(floor100).ToArray();
             var body = ClosedBox(-0.05f, -5, 0.15f, 0.05f, 5, 10.15f);
             var r = PhysicsReach.Drop(body, SpatialOverlap.SoupBounds(body), 4, sup, RRLayers);
-            return (r.Status == "touching" && r.SupportId == "mesh", ShowDrop(r));
+            return (r.Status == "lifted" && r.SupportId == "mesh", ShowDrop(r));
         });
         // LI-K23 an internal edge whose two copies straddle a rounding boundary (reinstated rule, lab 4, 2026-10-04): as LI-K20, but the
         // two triangles have vertices of their own and the shared edge sits at x 0.0004 in one and x 0.0006 in the other (2e-4 apart:
@@ -496,7 +496,7 @@ static partial class MotionProof
                                    .Append(floor100).ToArray();
             var body = ClosedBox(-0.05f, -5, 0.15f, 0.05f, 5, 10.15f);
             var r = PhysicsReach.Drop(body, SpatialOverlap.SoupBounds(body), 4, sup, RRLayers);
-            return (r.Status == "touching" && r.SupportId == "mesh", ShowDrop(r));
+            return (r.Status == "lifted" && r.SupportId == "mesh", ShowDrop(r));
         });
         // LI-K25 an internal edge whose two copies sit in neighbouring 1e-3 grid cells: as LI-K23 with the shared edge at x 0.0009 in one
         // triangle and x 0.0011 in the other (2e-4 apart, on either side of the cell boundary at 0.001; a rounded key would match these,
@@ -510,7 +510,7 @@ static partial class MotionProof
                                    .Append(floor100).ToArray();
             var body = ClosedBox(-0.05f, -5, 0.15f, 0.05f, 5, 10.15f);
             var r = PhysicsReach.Drop(body, SpatialOverlap.SoupBounds(body), 4, sup, RRLayers);
-            return (r.Status == "touching" && r.SupportId == "mesh", ShowDrop(r));
+            return (r.Status == "lifted" && r.SupportId == "mesh", ShowDrop(r));
         });
         // LI-K24 a downward push out of a down-facing slab is lab-verified (lab 4 L4-1, 2026-10-04): flagged pushed off, not "down
         // through a thin slab, unverified". A ceiling plate (mesh square half 50 at z 0 wound to face down, radius 0.35: slab z

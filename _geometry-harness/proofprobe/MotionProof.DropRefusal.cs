@@ -78,9 +78,10 @@ static partial class MotionProof
         Case(check, "drop-refusal L2-5: an up-facing surface past the item's middle - refused, no drop or bound, push 4.85 down / 5.85 up", () =>
         {
             var r = MeshReach.OfModel(FreeItem(), Origin, Origin, 1f, null, Settles(PlateAt(0.5f)));
-            return (r.Status == "refused" && (r.Reason ?? "").StartsWith(PhysicsReach.UpFacingDownReason) && !Pushed(r)
-                    && r.Drop is { LowerBound: false, MovesOnLoad: false, Push: PushCause.UpFacingDown } d && Nan(d.Distance)
-                    && NearA7(d.PushDepth, 4.85, 1e-3) && NearA7(d.PushUpDepth, 5.85, 1e-3), Show(r));
+            // corrected 2026-10-13 (rest rule part 5, lab 5 "down verified"): a single-component body over an open plate, landing on
+            // another reference, is pushed down through it: the bound applies (was: refused, direction not read).
+            return (r.Status == "refused" && (r.Reason ?? "").StartsWith(PhysicsReach.PushedOffReason) && !Pushed(r)
+                    && r.Drop is { LowerBound: true, MovesOnLoad: true, Push: PushCause.UpFacingDown, SupportId: "floor" } d && NearA7(d.Distance, 95, 1e-3), Show(r));
         });
         // L2-6 blocker 2: the plate at z 0.1 (slab -0.25..0.45): out down 5.25 (a downward push >= ImpaleMinDepth 5), out up 5.45
         // (ratio 1.038 <= ImpaleTieRatio 1.25): an impalement. Refused with no drop or bound, the two depths given. Rejects a tie resolved silently.
@@ -145,7 +146,7 @@ static partial class MotionProof
         Case(check, "drop-refusal L2-9: a held item (pushed up) - touching on the plate, not refused, no cause", () =>
         {
             var r = MeshReach.OfModel(FreeItem(), Origin, Origin, 1f, null, Settles(PlateAt(-5.2f)));
-            return (r.Status != "refused" && r.Drop is { Status: "touching", SupportId: "plate", Push: PushCause.None, LowerBound: false }, Show(r));
+            return (r.Status != "refused" && r.Drop is { Status: "lifted", SupportId: "plate", Push: PushCause.None, LowerBound: false }, Show(r));
         });
         // L2-10 a plain drop with no overlap is unchanged: the item over a floor 100 u down, settling: dropped 95, not refused, no cause,
         // no bound mark. Rejects over-refusal of plain drops.

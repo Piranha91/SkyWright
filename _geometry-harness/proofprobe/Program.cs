@@ -3642,6 +3642,8 @@ MotionProof.RunBombAxis(Check);
 MotionProof.RunLooseItems(Check);
 // Drop-crossing lane 2 (2026-10-13): pushed-off, up-facing and impaled drops refused by name, no labels (red until implemented).
 MotionProof.RunDropRefusal(Check);
+// Rest rule implementation (2026-10-13): lifted, rack mounting, loose supports, lab 5 direction (red until implemented).
+MotionProof.RunRestRule(Check);
 // Reach region Part 3b: refusals to verdicts (red until implemented).
 MotionProof.RunPart3bRules(Check);
 MotionProof.RunPart3bRound2(Check);
