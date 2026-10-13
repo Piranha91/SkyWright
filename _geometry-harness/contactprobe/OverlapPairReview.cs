@@ -82,7 +82,8 @@ internal static class OverlapPairReview
         return result;
     }
 
-    sealed record Geometry(string Status, string? Reason, TriangleSoup? Soup, Aabb Box, object? Evidence, WindLabel? Wind = null);
+    sealed record Geometry(string Status, string? Reason, TriangleSoup? Soup, Aabb Box, object? Evidence, WindLabel? Wind = null,
+                           SurfaceQueryOutcome.Placed? Placed = null);
 
     public static int Run(string inputPath, string outputPath, double budgetSeconds, double pairSeconds,
                           int maxPairs, double surfaceTolerance, long maxTrianglePairs, bool contactEvidence,
@@ -160,7 +161,7 @@ internal static class OverlapPairReview
             var worldBounds = SpatialOverlap.SoupBounds(world);
             if (worldBounds.IsEmpty || !SpatialOverlap.IsFinite(worldBounds))
                 return new("unmeasurable", "invalid_transform: placed render triangles have no finite bounds", null, Aabb.Empty, evidence, wind);
-            return new("measured", null, world, worldBounds, evidence, wind);
+            return new("measured", null, world, worldBounds, evidence, wind, new SurfaceQueryOutcome.Placed(soup, s.Pos, s.Rot, s.Scale));
         }
         Persist(false);
         run.Feature("pairs", rows.Count, "pairs").Stage("overlap-contact", "testing render surface pairs", rows.Count, "pairs");
@@ -185,7 +186,7 @@ internal static class OverlapPairReview
                 double secondsLeft = Math.Min(pairSeconds - timer.Elapsed.TotalSeconds, budgetSeconds - clock.Elapsed.TotalSeconds);
                 if (secondsLeft <= 0) throw new OperationCanceledException("budget expired during geometry preparation");
                 using var cancel = new CancellationTokenSource(TimeSpan.FromSeconds(secondsLeft));
-                row.ActualShape = SurfaceQueryOutcome.Query(ga.Soup!, gb.Soup!, surfaceTolerance,
+                row.ActualShape = SurfaceQueryOutcome.QueryPlaced(ga.Soup!, ga.Placed, gb.Soup!, gb.Placed, surfaceTolerance,
                     maxTrianglePairs, TimeSpan.FromSeconds(secondsLeft), cancel.Token);
                 if (contactEvidence)
                     row.ContactEvidence = MeshIntersection.MeasureContactEvidence(

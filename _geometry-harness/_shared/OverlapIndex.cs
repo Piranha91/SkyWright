@@ -64,7 +64,11 @@ public sealed record OverlapRow(OverlapHit Hit, OverlapCandidate LaterRef, Overl
 /// <summary>One actual placed render surface eligible for symmetric mesh intersection. The bounds enclose
 /// <paramref name="WorldSoup"/> and are used only for conservative indexing/rejection.</summary>
 public readonly record struct SurfaceOverlapCandidate(FormKey Key, Snap Win, FormKey Base, Aabb WorldBounds,
-                                                       TriangleSoup WorldSoup, char Src);
+                                                       TriangleSoup WorldSoup, char Src, TriangleSoup? Model = null)
+{
+    /// <summary>The member as placed, for SurfaceQueryOutcome.QueryPlaced; null without its model.</summary>
+    public SurfaceQueryOutcome.Placed? Placed => Model is null ? null : new(Model, Win.Pos, Win.Rot, Win.Scale);
+}
 
 /// <summary>The stable subset of the core mesh result consumed by probes and serialized evidence.</summary>
 public sealed record SurfaceQueryOutcome(string Status, string? Reason, string SurfaceRelation, string Containment,
@@ -82,10 +86,66 @@ public sealed record SurfaceQueryOutcome(string Status, string? Reason, string S
     /// <summary>One member as placed: its model soup and pose, from which <paramref name="world"/> soups are made.</summary>
     public readonly record struct Placed(TriangleSoup Model, Vec3 Pos, Vec3 Rot, float Scale);
 
-    /// <summary>The query on two placed members (STUB at the red commit: the world-soup query, unchanged).</summary>
+    /// <summary>The query on two placed members, by --surface's rule (MeshSurface.MeasurePlaced): a pair with no zero-area triangle
+    /// where placed is the world-soup query, unchanged. Otherwise a triangle with zero area in its own model has nothing to cross and
+    /// is left out (counted in ZeroAreaSkipped), and a pair whose world placement collapses a triangle with model area is queried in
+    /// the pair frame (PairFrame.Origin; Frame is set); the pair refuses, naming the collapse, only when no frame keeps every such
+    /// triangle. Containment and the relation do not change under the shared translation. <paramref name="worldA"/> and
+    /// <paramref name="worldB"/> are the members' models placed at their poses; a member given without its model keeps the world query.</summary>
     public static SurfaceQueryOutcome QueryPlaced(TriangleSoup worldA, Placed? a, TriangleSoup worldB, Placed? b, double tolerance,
                                                   long maxTrianglePairs, TimeSpan pairTimeout, CancellationToken cancellationToken = default)
-        => Query(worldA, worldB, tolerance, maxTrianglePairs, pairTimeout, cancellationToken);
+    {
+        if (a is not { } pa || b is not { } pb || pa.Model is null || pb.Model is null
+            || pa.Model.TriangleCount != worldA.TriangleCount || pb.Model.TriangleCount != worldB.TriangleCount
+            || (!AnyZeroArea(worldA) && !AnyZeroArea(worldB)))
+            return Query(worldA, worldB, tolerance, maxTrianglePairs, pairTimeout, cancellationToken);
+        var o = PairFrame.Origin(pa.Model, pa.Pos, pa.Rot, pa.Scale, pb.Model, pb.Pos, pb.Rot, pb.Scale);
+        bool world = PairFrame.IsWorld(o);
+        var fa = world ? worldA : SpatialOverlap.TransformSoup(pa.Model, PairFrame.Shift(pa.Pos, o), pa.Rot, pa.Scale);
+        var fb = world ? worldB : SpatialOverlap.TransformSoup(pb.Model, PairFrame.Shift(pb.Pos, o), pb.Rot, pb.Scale);
+        double[]? frame = world ? null : new double[] { o.X, o.Y, o.Z };
+        var (sa, na, whyA) = SkipZeroArea(pa.Model, fa, "a");
+        var (sb, nb, whyB) = SkipZeroArea(pb.Model, fb, "b");
+        int[]? skipped = na + nb == 0 ? null : new[] { na, nb };
+        if ((whyA ?? whyB) is { } why)
+            return new SurfaceQueryOutcome("unknown", why, "unknown", "unknown", null, 0) { Frame = frame, ZeroAreaSkipped = skipped };
+        return Query(sa, sb, tolerance, maxTrianglePairs, pairTimeout, cancellationToken) with { Frame = frame, ZeroAreaSkipped = skipped };
+    }
+
+    static bool AnyZeroArea(TriangleSoup s)
+    {
+        for (int t = 0; t < s.TriangleCount; t++) if (PairFrame.ZeroArea(s, t)) return true;
+        return false;
+    }
+
+    // MeshSurface.SkipZeroArea's rule, without tags: zero area in the model -> left out; model area but zero where placed -> refuse.
+    static (TriangleSoup Soup, int Skipped, string? Refusal) SkipZeroArea(TriangleSoup model, TriangleSoup placed, string label)
+    {
+        int n = placed.TriangleCount;
+        var skip = new bool[n];
+        int skipped = 0, collapsed = 0;
+        for (int t = 0; t < n; t++)
+        {
+            if (PairFrame.ZeroArea(model, t)) { skip[t] = true; skipped++; }
+            else if (PairFrame.ZeroArea(placed, t)) collapsed++;
+        }
+        if (collapsed > 0)
+            return (placed, 0, $"{label}_degenerate_triangle: {collapsed} triangle(s) with model-space area have zero area where placed; centring the pair on either member or on the geometry does not undo it");
+        if (skipped == 0) return (placed, 0, null);
+        if (skipped == n) return (placed, 0, $"{label}_degenerate_triangle: every triangle has zero area ({skipped} in the model)");
+        var idx = new int[(n - skipped) * 3];
+        var mats = placed.TriangleMaterials is null ? null : new string?[n - skipped];
+        var radii = placed.TriangleRadii is null ? null : new float[n - skipped];
+        for (int t = 0, k = 0; t < n; t++)
+        {
+            if (skip[t]) continue;
+            idx[3 * k] = placed.Indices[3 * t]; idx[3 * k + 1] = placed.Indices[3 * t + 1]; idx[3 * k + 2] = placed.Indices[3 * t + 2];
+            if (mats is not null) mats[k] = placed.TriangleMaterials![t];
+            if (radii is not null) radii[k] = placed.TriangleRadii![t];
+            k++;
+        }
+        return (new TriangleSoup(placed.Vertices, idx, mats, radii), skipped, null);
+    }
 
     public static SurfaceQueryOutcome Query(TriangleSoup a, TriangleSoup b, double tolerance, long maxTrianglePairs,
                                             TimeSpan pairTimeout, CancellationToken cancellationToken = default)
@@ -510,7 +570,7 @@ public sealed class OverlapIndex
             var world = SpatialOverlap.TransformSoup(model, s.Pos, s.Rot, s.Scale);
             var bounds = SpatialOverlap.SoupBounds(world);
             if (bounds.IsEmpty || !SpatialOverlap.IsFinite(bounds)) { skips.InvalidTransform++; continue; }
-            list.Add(new(key, s, bk, bounds, world, src));
+            list.Add(new(key, s, bk, bounds, world, src, model));
         }
         return list;
     }
@@ -542,7 +602,7 @@ public sealed class OverlapIndex
                         || (double)a.WorldBounds.Min.Z - b.WorldBounds.Max.Z > tolerance) continue;
                     if (includeResponsiblePair is not null && !includeResponsiblePair(a.Win.Plugin, b.Win.Plugin)) continue;
                     sweep.PairsChecked++;
-                    var query = SurfaceQueryOutcome.Query(a.WorldSoup, b.WorldSoup, tolerance, maxTrianglePairs, timeout, cancellationToken);
+                    var query = SurfaceQueryOutcome.QueryPlaced(a.WorldSoup, a.Placed, b.WorldSoup, b.Placed, tolerance, maxTrianglePairs, timeout, cancellationToken);
                     bool intersects = query.Intersects == true;
                     bool unknown = query.Unknown;
 
@@ -618,7 +678,8 @@ public sealed class OverlapIndex
             if (model is { TriangleCount: > 0 })
             {
                 var world = SpatialOverlap.TransformSoup(model, previous!.Value.Pos, previous.Value.Rot, previous.Value.Scale);
-                counterfactual = SurfaceQueryOutcome.Query(world, other.WorldSoup, tolerance, maxTrianglePairs,
+                counterfactual = SurfaceQueryOutcome.QueryPlaced(world, new(model, previous.Value.Pos, previous.Value.Rot, previous.Value.Scale),
+                    other.WorldSoup, other.Placed, tolerance, maxTrianglePairs,
                     pairTimeout ?? TimeSpan.FromSeconds(120), cancellationToken);
                 counterfactualStatus = counterfactual.Unknown ? "unknown" : "measured";
                 counterfactualReason = counterfactual.Reason;

@@ -1117,7 +1117,8 @@ IReadOnlyList<SettledGravity> SettledGravities()
         return (PhysicalState.Unmeasured, "a ref's strict decoded render geometry is unavailable");
     var worldL = SpatialOverlap.TransformSoup(modelL, sl.Value.Pos, sl.Value.Rot, sl.Value.Scale);
     var worldO = SpatialOverlap.TransformSoup(modelO, so.Value.Pos, so.Value.Rot, so.Value.Scale);
-    var q = SurfaceQueryOutcome.Query(worldL, worldO, surfaceTolerance, maxTrianglePairs, TimeSpan.FromSeconds(pairSeconds));
+    var q = SurfaceQueryOutcome.QueryPlaced(worldL, new(modelL, sl.Value.Pos, sl.Value.Rot, sl.Value.Scale),
+        worldO, new(modelO, so.Value.Pos, so.Value.Rot, so.Value.Scale), surfaceTolerance, maxTrianglePairs, TimeSpan.FromSeconds(pairSeconds));
     if (q.Intersects == true)
         return (PhysicalState.Holds, $"actual render surfaces: {q.SurfaceRelation}; containment {q.Containment}; {q.TrianglePairsTested:N0} triangle pairs [{srcL}{srcO}]");
     if (q.Intersects == false)
@@ -1527,7 +1528,8 @@ if (geometryManifestPath is not null)
             : null;
         reviewByKey[key] = new ReviewRef(key, eligibility, eligibilityReason, reportedGeometryStatus,
                                          reportedGeometryReason, hasBase ? effectiveBase : null, p, reportedWorldBounds,
-                                         runtimePoseKnown && worldGeometryKnown ? worldSoup : null);
+                                         runtimePoseKnown && worldGeometryKnown ? worldSoup : null,
+                                         runtimePoseKnown && worldGeometryKnown ? geometry!.Outcome!.Soup : null);
 
         idx.Touchers.TryGetValue(key, out var touchers);
         string winner = touchers is { Count: > 0 } ? PluginName(touchers[^1]) : PluginName(p.Plugin);
@@ -1698,7 +1700,7 @@ if (geometryManifestPath is not null)
         else if (a.WorldSoup is not { TriangleCount: > 0 } sa || b.WorldSoup is not { TriangleCount: > 0 } sb)
             result = new("unknown", "at least one reference has no complete placed render triangles", "unknown", "unknown", null, 0);
         else
-            result = SurfaceQueryOutcome.Query(sa, sb, surfaceTolerance, maxTrianglePairs, TimeSpan.FromSeconds(pairSeconds));
+            result = SurfaceQueryOutcome.QueryPlaced(sa, a.Placed, sb, b.Placed, surfaceTolerance, maxTrianglePairs, TimeSpan.FromSeconds(pairSeconds));
         return directQueryByKey[key] = result;
     }
     static ManifestStatus Discovery(SurfaceQueryOutcome q) => q.Intersects switch
@@ -1708,7 +1710,7 @@ if (geometryManifestPath is not null)
         _ => new("actual_surface_unknown", q.Reason ?? "mesh predicate returned unknown")
     };
     static ManifestActualShape ShapeWire(SurfaceQueryOutcome q) =>
-        new(q.Status, q.Reason, q.SurfaceRelation, q.Containment, q.Intersects, q.TrianglePairsTested);
+        new(q.Status, q.Reason, q.SurfaceRelation, q.Containment, q.Intersects, q.TrianglePairsTested) { frame = q.Frame, zeroAreaSkipped = q.ZeroAreaSkipped };
     var narrowByKey = rows.ToDictionary(r => PairWire(r.Hit.A.Key, r.Hit.B.Key), r => new ManifestNarrowVerdict(
         "measured", r.Origin?.ToString().ToLowerInvariant(), r.Sight.ToString().ToLowerInvariant(), r.Why,
         r.CounterfactualStatus, r.CounterfactualReason), StringComparer.Ordinal);
@@ -1931,7 +1933,11 @@ sealed record GeometryRead(string Status, string? Reason, string? RelativePath, 
 sealed record ManifestBounds(double[] min, double[] max);
 sealed record ReviewRef(FormKey key, string Eligibility, string EligibilityReason,
                         string? GeometryStatus, string? GeometryReason, FormKey? Base, Snap Pose, Aabb? WorldBounds,
-                        TriangleSoup? WorldSoup);
+                        TriangleSoup? WorldSoup, TriangleSoup? ModelSoup = null)
+{
+    /// <summary>The member as placed, for SurfaceQueryOutcome.QueryPlaced; null without its model.</summary>
+    public SurfaceQueryOutcome.Placed? Placed => ModelSoup is null ? null : new(ModelSoup, Pose.Pos, Pose.Rot, Pose.Scale);
+}
 sealed record ManifestStatus(string status, string? reason);
 sealed record ManifestBoxMeasure(string geometryStatus, string? reason, double[]? dimensions, double? volume);
 sealed record ManifestZRelation(string relation, double signedIntersection, double gap);
@@ -1940,7 +1946,15 @@ sealed record ManifestMeasurements(string status, string? reason,
     double? intersectionVolume, double? xyIntersectionArea, double? overlapFractionSmaller,
     string? overlapFractionReason, ManifestZRelation? zRelation);
 sealed record ManifestActualShape(string status, string? reason, string surfaceRelation, string containment,
-                                  bool? intersects, long trianglePairsTested);
+                                  bool? intersects, long trianglePairsTested)
+{
+    /// <summary>The pair frame's origin when world placement collapsed a triangle; written only then.</summary>
+    [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    public double[]? frame { get; init; }
+    /// <summary>Zero-area-in-model triangles left out, [a, b]; written only when any were.</summary>
+    [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    public int[]? zeroAreaSkipped { get; init; }
+}
 sealed record ManifestNarrowVerdict(string status, string? origin, string? sight, string reason,
                                     string? counterfactualStatus, string? counterfactualReason);
 sealed record ManifestPair(string pairKey, string conflictIoRowIdentity, string a, string b,
