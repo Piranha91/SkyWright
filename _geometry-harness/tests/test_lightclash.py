@@ -16,6 +16,14 @@ def ref(key, edid, pos, enabled=True, typ="Static", mesh=None, responsible=None)
             "mesh": mesh, "responsible": responsible or key.split(":")[1]}
 
 
+def fixture(key, edid, pos, **kw):
+    """A fixture as lightprobe now writes one: a reference with an emitting part (a point box at its origin, so every distance the
+    tests measured to the origin is unchanged). Fixture correction 2026-10-13: the name rule needed only a name."""
+    r = ref(key, edid, pos, **kw)
+    r["emitters"] = [{"part": "flame", "kind": "emissive", "value": 0.5, "box": [list(pos), [0, 0, 0], [0, 0, 0], [0, 0, 0]]}]
+    return r
+
+
 def light(key, pos, enabled=True, radius=280, shadow=False, strict=True, leak=None, lit=0.0, facing=None, incomplete=None, edid="SomeLight"):
     row = {"key": key, "edid": edid, "pos": list(pos), "enabled": enabled, "radius": radius, "shadow": shadow, "strict": strict}
     if enabled and leak is not None:
@@ -40,25 +48,18 @@ CANDLE = "000100:Skyrim.esm"
 LB = "000900:ModB.esp"
 
 
-def test_fixture_patterns_match_and_skip():
-    """rejects: every Static read as a fixture; a candle not read as one"""
-    assert lc.is_fixture({"edid": "CandleHornTable01", "mesh": "clutter/candles/candlehorntable01.nif"})
-    assert lc.is_fixture({"edid": "FireplaceWood01Burning", "mesh": None})
-    assert not lc.is_fixture({"edid": "Barrel02Static", "mesh": "clutter/barrels/barrel02.nif"})
-
-
 def test_c1_orphan_when_other_mod_moves_the_host():
     """rejects: no clash when the fixture a light was placed for is moved 500 u away by the other mod"""
-    own = arr([ref(CANDLE, "CandleHornTable01", (40, 0, 0))], [light(LB, (0, 0, 0))])
-    u = arr([ref(CANDLE, "CandleHornTable01", (500, 0, 0), responsible=A)], [light(LB, (0, 0, 0))])
+    own = arr([fixture(CANDLE, "CandleHornTable01", (40, 0, 0))], [light(LB, (0, 0, 0))])
+    u = arr([fixture(CANDLE, "CandleHornTable01", (500, 0, 0), responsible=A)], [light(LB, (0, 0, 0))])
     r = lc.c1_orphan(LB, own, u, P)
     assert r["applies"] and r["positive"] and r["host"] == CANDLE
 
 
 def test_c1_fill_light_not_an_orphan():
     """rejects: every light without a fixture nearby is an orphan"""
-    own = arr([ref(CANDLE, "CandleHornTable01", (400, 0, 0))], [light(LB, (0, 0, 0))])
-    u = arr([ref(CANDLE, "CandleHornTable01", (400, 0, 0))], [light(LB, (0, 0, 0))])
+    own = arr([fixture(CANDLE, "CandleHornTable01", (400, 0, 0))], [light(LB, (0, 0, 0))])
+    u = arr([fixture(CANDLE, "CandleHornTable01", (400, 0, 0))], [light(LB, (0, 0, 0))])
     r = lc.c1_orphan(LB, own, u, P)
     assert r["applies"] is False and r["positive"] is False
 
@@ -66,17 +67,17 @@ def test_c1_fill_light_not_an_orphan():
 def test_c1b_unlit_fixture():
     """rejects: a fixture whose only light the other mod disabled read as still lit"""
     LA = "000800:ModA.esp"
-    own = arr([ref("000200:ModA.esp", "CandleHornTable01", (0, 0, 0))], [light(LA, (10, 0, 0))])
-    u = arr([ref("000200:ModA.esp", "CandleHornTable01", (0, 0, 0))], [light(LA, (10, 0, 0), enabled=False)])
+    own = arr([fixture("000200:ModA.esp", "CandleHornTable01", (0, 0, 0))], [light(LA, (10, 0, 0))])
+    u = arr([fixture("000200:ModA.esp", "CandleHornTable01", (0, 0, 0))], [light(LA, (10, 0, 0), enabled=False)])
     r = lc.c1b_unlit("000200:ModA.esp", own, u, P)
     assert r["applies"] and r["positive"]
 
 
 def test_c3a_doubled_needs_two_mods():
     """rejects: two lights of the SAME mod on one candle counted as doubled"""
-    u2 = arr([ref(CANDLE, "CandleHornTable01", (0, 0, 0))], [light("000801:ModA.esp", (10, 0, 0)), light(LB, (0, 10, 0))])
+    u2 = arr([fixture(CANDLE, "CandleHornTable01", (0, 0, 0))], [light("000801:ModA.esp", (10, 0, 0)), light(LB, (0, 10, 0))])
     assert lc.c3a_doubled(CANDLE, u2, MODS, P)["positive"] is True
-    same = arr([ref(CANDLE, "CandleHornTable01", (0, 0, 0))], [light("000901:ModB.esp", (10, 0, 0)), light(LB, (0, 10, 0))])
+    same = arr([fixture(CANDLE, "CandleHornTable01", (0, 0, 0))], [light("000901:ModB.esp", (10, 0, 0)), light(LB, (0, 10, 0))])
     assert lc.c3a_doubled(CANDLE, same, MODS, P)["positive"] is False
 
 
@@ -264,7 +265,7 @@ def test_room_doubling_lists_the_nearest_fixture():
     sconce = "000400:Skyrim.esm"
     la = light("000801:ModA.esp", (100, 0, 0), leak=0.0, lit=1.0, facing=facing(50, 0, 14))
     lb = light(LB, (0, 0, 0), leak=0.0, lit=1.0, facing=facing(50, 0, 14))
-    fx = ref(sconce, "WallSconce01", (80, 0, 0))
+    fx = fixture(sconce, "WallSconce01", (80, 0, 0))
     arms = {"u": arr([fx], [la, lb]), "plusb": arr([fx], [lb]), "plusa": arr([fx], [la]), "dep": arr([fx], []),
             "p": arr([fx], [la, light(LB, (0, 0, 0), enabled=False)])}
     r = lc.judge_record(LB, "DISABLE", arms, MODS, P)
@@ -288,7 +289,10 @@ def eref(key, pos, parts=(), typ="Static", edid="Prop01", mesh="props/prop01.nif
     em = []
     for i, (kind, c, h) in enumerate(parts):
         hx, hy, hz = (h, h, h) if isinstance(h, (int, float)) else h
-        em.append({"part": f"part{i}", "kind": kind, "box": [[c[0] - hx, c[1] - hy, c[2] - hz], [2 * hx, 0, 0], [0, 2 * hy, 0], [0, 0, 2 * hz]]})
+        part = {"part": f"part{i}", "kind": kind, "box": [[c[0] - hx, c[1] - hy, c[2] - hz], [2 * hx, 0, 0], [0, 2 * hy, 0], [0, 0, 2 * hz]]}
+        if kind == "emissive":
+            part["value"] = 0.5   # lightprobe writes the emissive value with every emissive part
+        em.append(part)
     if em:
         r["emitters"] = em
     if status != "read":
@@ -445,7 +449,7 @@ def test_k13_part_distance_is_to_the_placed_box():
     r = eref(C1, (0, 0, 0), [("emissive", (0, 0, 100), 10)])
     d0, d1 = lc.part_distance((0, 0, 100), r), lc.part_distance((0, 0, 130), r)
     assert d0 == 0.0 and abs(d1 - 20.0) < 1e-9, f"K13: inside 0 and 20 u above the box, got {d0}, {d1}"
-    rot = {"key": C1, "pos": [0, 0, 0], "emitters": [{"part": "p", "kind": "emissive",
+    rot = {"key": C1, "pos": [0, 0, 0], "emitters": [{"part": "p", "kind": "emissive", "value": 0.5,
            "box": [[0, 0, 0], [70.71068, 70.71068, 0], [-70.71068, 70.71068, 0], [0, 0, 100]]}]}
     d2 = lc.part_distance((35.35534, -35.35534, 50), rot)
     assert abs(d2 - 50.0) < 1e-3, f"K13: a 45-degree box measured in its own frame is 50 u away, got {d2}"
@@ -488,6 +492,16 @@ def test_k16_emitting_refs_near_by_part():
             [light(LBX, (0, 0, 20))])
     near = [k for _, k in lc.emitting_near(a, (0, 0, 20), 64.0)]
     assert near == [C1], f"K16: got {near}"
+
+
+def test_k17_emissive_value_below_threshold_does_not_emit():
+    """rejects: any emissive part counted regardless of its value (Own_Emit is set on nearly every shape; the value decides).
+    Added at Gate C as the target of sabotage arm S14."""
+    dim = eref(C1, (10, 0, 0), [("emissive", (10, 0, 0), 3)], edid="Prop70")
+    dim["emitters"][0]["value"] = 0.01
+    assert _host([dim], (0, 0, 0))["host"] is None
+    dim["emitters"][0]["value"] = 0.02
+    assert _host([dim], (0, 0, 0))["host"] == C1
 
 
 if __name__ == "__main__":

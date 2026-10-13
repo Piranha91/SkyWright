@@ -15,6 +15,8 @@
 // shader; editor markers and Is-Marker bases are not drawn) a light's radius reaches (its placed vertex box; the bound sphere count printed beside) gets a row with the lights that reach it (count, shadow-casting, portal-strict). A reference whose
 // model cannot be read is listed with its reason, and every light whose radius reaches its record bounds is labelled
 // incomplete. No decision is made here: attribution and verdicts are the caller's (the fold).
+// Emitting parts (lane A 2026-10-13, with --geometry): every enabled, drawn reference with a model carries `emitters` (its placed
+// emissive / self-lit effect / particle emitter boxes, LightReach.ReadEmitters) or `emitterStatus` when its mesh could not be read for them.
 // Base Object Swapper: not applied (stated in the output).
 // --list-interiors: every interior cell of the order with its placed-light count (the calibration sample frame).
 
@@ -202,6 +204,20 @@ var modelCache = new Dictionary<string, (LightModel? Model, string? Why)>(String
     }
     catch (Exception ex) { return modelCache[mesh] = (null, "read threw: " + ex.Message); }
 }
+// emitting parts (lane A, 2026-10-13): read per mesh, separately from the render model (a particle-only mesh still has emitters)
+var emitterCache = new Dictionary<string, EmitterModel>(StringComparer.OrdinalIgnoreCase);
+EmitterModel? Emitters(FormKey b)
+{
+    if (!idx.BaseMesh.TryGetValue(b, out var mesh)) return null;
+    if (emitterCache.TryGetValue(mesh, out var hit)) return hit;
+    var rel = mesh.StartsWith("meshes", StringComparison.OrdinalIgnoreCase) ? mesh : Path.Combine("meshes", mesh);
+    var res = assets.ResolveForPlacement(rel);
+    if (res.Sources.Count == 0) return emitterCache[mesh] = new EmitterModel("refused", "missing_asset: " + rel, Array.Empty<EmittingPart>());
+    var (bytes, err) = AssetResolver.ReadPlacementSource(res.Sources[0]);
+    if (bytes is null) return emitterCache[mesh] = new EmitterModel("refused", "asset read failed: " + err, Array.Empty<EmittingPart>());
+    try { return emitterCache[mesh] = LightReach.ReadEmitters(bytes); }
+    catch (Exception ex) { return emitterCache[mesh] = new EmitterModel("refused", "read threw: " + ex.Message, Array.Empty<EmittingPart>()); }
+}
 static double[] V(Vec3 v) => new double[] { v.X, v.Y, v.Z };
 static double[] W(Vector3 v) => new double[] { v.X, v.Y, v.Z };
 
@@ -222,7 +238,19 @@ foreach (var (cedid, ck) in scopeCells)
         bool deleted = idx.IsDeletedNow(r) || pose.Value.Deleted;
         bool on = !deleted && en.Resolved && en.Enabled;
         var (bt, bed) = baseType.GetValueOrDefault(b, ("?", null));
+        List<object>? emitters = null; string? emitterStatus = null;
+        if (geometry && on && LightReach.BaseDrawn(idx.BaseIsMarker.Contains(b)) && Emitters(b) is { } em)
+        {
+            if (em.Status != "read") emitterStatus = em.Status + ": " + em.Reason;
+            else if (em.Parts.Count > 0)
+                emitters = em.Parts.Select(pt =>
+                {
+                    var (o, ex, ey, ez) = LightReach.PlaceBox(pt.Min, pt.Max, pose.Value.Pos, pose.Value.Rot, pose.Value.Scale);
+                    return (object)new { part = pt.Part, kind = pt.Kind, value = pt.Value, box = new[] { W(o), W(ex), W(ey), W(ez) } };
+                }).ToList();
+        }
         refRows.Add(new { key = r.ToString(), @base = b.IsNull ? null : b.ToString(), type = bt, edid = bed, mesh = idx.BaseMesh.GetValueOrDefault(b),
+                          emitters, emitterStatus,
                           pos = V(pose.Value.Pos), rot = V(pose.Value.Rot), scale = pose.Value.Scale, enabled = en.Enabled, resolved = en.Resolved, viaParent = en.ViaParent,
                           deleted, responsible = pose.Value.Plugin >= 0 && pose.Value.Plugin < pluginName.Length ? pluginName[pose.Value.Plugin] : null,
                           obnd = idx.BaseObnd.TryGetValue(b, out var ob) ? V(ob) : null });
