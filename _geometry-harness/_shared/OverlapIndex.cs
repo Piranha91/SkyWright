@@ -72,6 +72,21 @@ public sealed record SurfaceQueryOutcome(string Status, string? Reason, string S
 {
     public bool Unknown => Intersects is null || Status == "unknown" || SurfaceRelation == "unknown";
 
+    /// <summary>The origin both members were shifted by when world placement collapsed a triangle (PairFrame); null in the world frame.</summary>
+    [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    public double[]? Frame { get; init; }
+    /// <summary>Zero-area-in-model triangles left out of the query, [A, B]; null when none were.</summary>
+    [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    public int[]? ZeroAreaSkipped { get; init; }
+
+    /// <summary>One member as placed: its model soup and pose, from which <paramref name="world"/> soups are made.</summary>
+    public readonly record struct Placed(TriangleSoup Model, Vec3 Pos, Vec3 Rot, float Scale);
+
+    /// <summary>The query on two placed members (STUB at the red commit: the world-soup query, unchanged).</summary>
+    public static SurfaceQueryOutcome QueryPlaced(TriangleSoup worldA, Placed? a, TriangleSoup worldB, Placed? b, double tolerance,
+                                                  long maxTrianglePairs, TimeSpan pairTimeout, CancellationToken cancellationToken = default)
+        => Query(worldA, worldB, tolerance, maxTrianglePairs, pairTimeout, cancellationToken);
+
     public static SurfaceQueryOutcome Query(TriangleSoup a, TriangleSoup b, double tolerance, long maxTrianglePairs,
                                             TimeSpan pairTimeout, CancellationToken cancellationToken = default)
     {
