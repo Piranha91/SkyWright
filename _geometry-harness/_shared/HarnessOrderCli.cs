@@ -358,8 +358,8 @@ public static class HarnessOrderCli
     /// loads. The out-of-view block exists for one job only — supplying a plugin that nothing else provides, the
     /// what-if of switching on a plugin whose only copy sits in a switched-off folder. A plugin resolved there loads
     /// its records and none of its assets, which is why the caller records it in Limits. (SyntheticOrder ranked that
-    /// block above Data until 2026-09-11; on the SE conflict lab that silently fed 21 Creation Club plugins' different
-    /// bytes to every <c>--enable</c> arm. Its header carries the measurement.)</para></summary>
+    /// block above Data until 2026-09-11; on a profile whose Creation Club plugins also sit, with different bytes, in a
+    /// switched-off folder, that silently fed every <c>--enable</c> arm the other copies. Its header says how.)</para></summary>
     static Dictionary<string, string> BuildLayerMap(
         Mo2Composition comp, IReadOnlyList<string> viewMods, string modsDir, string dataDir, string overwriteDir)
     {

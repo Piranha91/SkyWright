@@ -978,8 +978,8 @@ foreach (var g in dangleStruct.Where(d => ModTouched(d.Rec, d.RecRole) || ModTou
 // ---------------------------------------------------------------------------------------
 // Is this base record big enough to obstruct anything?
 // ---------------------------------------------------------------------------------------
-// The first run counted every Static, and Lux alone contributed 9,443 "obstructing" references —
-// candles and light fixtures. Type is necessary and nowhere near sufficient. Measured geometry per
+// Counting every Static floods the result with candles and light fixtures, which a lighting mod
+// places by the thousand. Type is necessary and nowhere near sufficient. Measured geometry per
 // the standing rule (OBND is not ground truth); OBND only when no mesh resolves, and counted so the
 // fallback's share is visible rather than blended in.
 float MinFootprint = 96f, MinHeight = 64f;

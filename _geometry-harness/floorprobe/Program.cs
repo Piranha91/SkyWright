@@ -35,7 +35,7 @@ string? Resolve(string name)
 {
     var p = Path.Combine(dataDir, name);
     if (File.Exists(p)) return p;
-    // CC content is installed as a mod folder in this instance; any folder holding the file works,
+    // An instance can install CC content as a mod folder; any folder holding the file works,
     // because the file is the same plugin wherever MO2 mounts it from.
     foreach (var dir in Directory.EnumerateDirectories(modsDir))
     {

@@ -30,6 +30,8 @@ using HousecarlCore.Progress;
 
 // lane M (2026-10-11): the reach-memory child process (MotionProof.ReachMemory.cs), run by R1/R1b under a heap cap
 if (args.Length > 0 && args[0] == "--reach-memory-child") return MotionProof.ReachMemoryChild(args);
+// 2026-10-14 (task 2026-10-11-swept-build-retains-samples): the discovery-proxy memory child process, run by P2/P4 under a heap cap
+if (args.Length > 0 && args[0] == "--proxy-memory-child") return MotionProof.ProxyMemoryChild(args);
 
 using var __run = RunLog.BeginProcess("proofprobe", args);
 
@@ -145,8 +147,8 @@ Console.WriteLine("   Five corrections, one case each. No game data, no archives
 // ---------------------------------------------------------------------------------------
 // Rule 4 — a step whose visibility flag does not hold was NEVER OFFERED.
 // ---------------------------------------------------------------------------------------
-// The real case: this load order took OCW, so every ICOW option was never shown, and reading them
-// as "not selected" produced 13 findings for a mod that is not installed.
+// The case: an installer that offers a patch set only when a mod it depends on is chosen; with that
+// mod not chosen, reading its options as "not selected" produces findings for a mod that is not installed.
 {
     var xml = Fomod(Steps(
         Step("main", Group("g", "SelectExactlyOne",
@@ -3669,6 +3671,8 @@ MotionProof.RunSampleTopology(Check);
 MotionProof.RunMemberMotion(Check);
 // Lane M (2026-10-11): reach memory on non-converging clips (R1/R1b red until reach stops retaining samples), R2/R3 guards.
 MotionProof.RunReachMemory(Check);
+// 2026-10-14: discovery-proxy memory (P2/P4 red until the proxy stops retaining samples), P6 guards the proxy bit for bit.
+MotionProof.RunProxyMemory(Check);
 // Lane D (2026-10-04): texture alpha sampling along alpha-only crossings (red until implemented).
 AlphaSamplingProof.Run(Check);
 // Lane 2 (2026-10-07): the contactprobe wiring of the visible crossing (placed measure, lazy source, alternates).
