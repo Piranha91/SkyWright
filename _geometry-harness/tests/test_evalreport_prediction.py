@@ -42,7 +42,8 @@ CONTACT = "geometry.placement-contact"
 SEAMS = "environment.land-seams"
 WATER = "environment.water-boundaries"
 RECORDS = "records.contested-fields"
-PROBE = {CONTACT: "contactprobe", SEAMS: "seamprobe", WATER: "waterprobe", RECORDS: None}
+CELLATTR = "records.cell-attributes"
+PROBE = {CONTACT: "contactprobe", SEAMS: "seamprobe", WATER: "waterprobe", RECORDS: None, CELLATTR: None}
 MOD_A, MOD_B = "ModA.esp", "ModB.esp"
 OTHER = "OtherMod.esp"                       # a mod already in the order, not evaluated
 PATCH = "ModA - ModB patch.esp"
@@ -455,6 +456,17 @@ def record_rows_bundle():
                (CONTACT, "plus-b"): []}
     return compile_and_render(four_arms(), results, [MOD_A, MOD_B], want_index=True, count_only=count_only,
                               enrichment=enr)
+
+
+def record_repeat_bundle():
+    """Two record checks report the same two lost edits (a cell's fields are in both populations)."""
+    nb = [lost_row(MOD_A, MOD_B, f"00070{i}:{BASE}", "Music", f"a{i}", f"b{i}", "v") for i in (1, 2)]
+    enr = {}
+    for c in (RECORDS, CELLATTR):
+        enr.update({(c, "baseline"): nb, (c, "dependency-only"): [], (c, "plus-a"): [], (c, "plus-b"): []})
+    count_only = {k: max(1, len(v)) for k, v in enr.items()}
+    results = {(CONTACT, a): [] for a in ("baseline", "dependency-only", "plus-a", "plus-b")}
+    return compile_and_render(four_arms(), results, [MOD_A, MOD_B], count_only=count_only, enrichment=enr)
 
 
 def record_validation_bundle():
@@ -966,7 +978,15 @@ def main():
               and len(n.get("missing") or []) == 1 and bool(n.get("derivedFrom")))
         return ok, f"reader.names keys {sorted(n)}"
 
+    # 39. a lost edit two record checks both report is one relationship (found on Group 1 at Gate C)
+    def record_repeat_counted_once():
+        plan, md, html = record_repeat_bundle()
+        p = reader(plan).get("prediction") or {}
+        ok = p.get("total") == 2 and (p.get("setAside") or {}).get("repeat") == 2
+        return ok, f"total {p.get('total')}; setAside {p.get('setAside')}"
+
     for name, fn in [
+            ("record-rows/a-lost-edit-two-checks-report-is-counted-once", record_repeat_counted_once),
             ("admission-everywhere/verdict-counts-needs-both-only", verdict_needs_both_only),
             ("admission-everywhere/single-mod-clash-under-its-own-heading", single_mod_own_heading),
             ("admission-everywhere/single-mod-aside-switch-sets-it-aside-with-its-reason", single_mod_aside),

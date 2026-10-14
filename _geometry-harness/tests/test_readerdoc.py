@@ -269,6 +269,26 @@ def case_31_mod_name_sources_are_recorded():
     assert man["mods"][B] == "ModB", man["mods"]
 
 
+def case_33_record_fields_the_patch_sets_are_not_counted_as_fixed():
+    """Gate C (Q5): a lost record field the patch sets is the patch's choice; the install rule weighs what it fixes."""
+    p = plan(hits=4, open_=0)
+    rec_rows = [{"formKey": f"00070{i}:Skyrim.esm", "label": "Cell Hall", "summary": f"Cell Hall: Music{i}"}
+                for i in (1, 2)]
+    p["findings"].append({"id": "F-3", "allRows": rec_rows})
+    p["reader"]["prediction"]["items"].insert(1, {
+        "checkId": "records.contested-fields", "kind": "LOST-EDIT", "mods": [A, B], "count": 2, "relationships": 2,
+        "objects": 2, "attribution": "needs-both", "attributionMod": None, "findingIds": ["F-3"], "title": "Fields"})
+    p["reader"]["prediction"]["record"] += [{"checkId": "records.contested-fields", "kind": "LOST-EDIT", "A": A, "B": B,
+                                             "formKey": r["formKey"], "summary": r["summary"], "admission": "admitted",
+                                             "attribution": "needs-both", "attributionMod": None} for r in rec_rows]
+    p["reader"]["validation"]["byItem"].insert(1, {"hits": 1, "open": 1, "notMeasured": 0})
+    md, s_, _ = build(p)
+    assert WORDS["install"]["all"] in s_, s_
+    lead = WORDS["patchSetsFields"].split("{")[0]
+    assert lead in section(md, H["patch"]), section(md, H["patch"])
+    assert "sets 1 " in section(md, H["patch"]), section(md, H["patch"])
+
+
 def main():
     for name, fn in sorted(((k, v) for k, v in globals().items() if k.startswith("case_")),
                            key=lambda kv: int(kv[0].split("_")[1])):

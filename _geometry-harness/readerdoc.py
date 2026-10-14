@@ -201,13 +201,16 @@ def build(plan: dict, rd: dict, mod_names: dict, names: dict | None, order: dict
         install = bind(ins["patchProblems"], count=ER.fmt_n(val["patchProblems"]),
                        noun="problem" if int(val["patchProblems"]) == 1 else "problems")
     else:
+        # A lost record field the patch sets is its choice, not a fix (which value is right is taste): the install
+        # rule weighs only the problems a patch can fix; the record fields get their own sentence.
         by = val["byItem"]
-        hits = sum(by[i]["hits"] for i, _ in both)
-        total = sum(int(it.get("count") or 0) for _, it in both)
-        left = sum(by[i]["open"] + by[i]["notMeasured"] for i, _ in both)
-        if both and hits == total and left == 0:
+        fixable = [(i, it) for i, it in both if it.get("kind") != "LOST-EDIT"]
+        hits = sum(by[i]["hits"] for i, _ in fixable)
+        total = sum(int(it.get("count") or 0) for _, it in fixable)
+        left = sum(by[i]["open"] + by[i]["notMeasured"] for i, _ in fixable)
+        if fixable and hits == total and left == 0:
             install = ins["all"]
-        elif not both:
+        elif not fixable:
             install = ins["noPatch"] if not has_patch else bind(ins["some"], hits=0, total=0, left=0)
         else:
             install = bind(ins["some"], hits=ER.fmt_n(hits), total=ER.fmt_n(total), left=ER.fmt_n(left))
@@ -243,10 +246,16 @@ def build(plan: dict, rd: dict, mod_names: dict, names: dict | None, order: dict
         sents = []
         if d_both:
             fixed = [bind(rd["patchFixesItem"], n=ER.fmt_n(d["n"]), units=plural(d["unit"], d["n"]))
-                     for (i, _), d in zip(both, d_both)
-                     if val["byItem"][i]["open"] == 0 and val["byItem"][i]["notMeasured"] == 0]
+                     for (i, it), d in zip(both, d_both) if it.get("kind") != "LOST-EDIT"
+                     and val["byItem"][i]["open"] == 0 and val["byItem"][i]["notMeasured"] == 0]
             if fixed:
                 sents.append(bind(rd["patchFixes"], phrase=join_words(fixed)))
+            rec = [(i, it) for i, it in both if it.get("kind") == "LOST-EDIT"]
+            if rec:
+                sets = sum(val["byItem"][i]["hits"] for i, _ in rec)
+                n_rec = sum(int(it.get("count") or 0) for _, it in rec)
+                sents.append(bind(rd["patchSetsFields"], sets=ER.fmt_n(sets), total=ER.fmt_n(n_rec),
+                                  left=ER.fmt_n(n_rec - sets)))
         for (i, it), d in zip(alone, d_alone):
             if val["byItem"][i]["open"]:
                 am = it.get("attributionMod")
