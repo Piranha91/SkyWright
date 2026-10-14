@@ -12,8 +12,10 @@
 //        selectprobe --selftest                                           synthetic plugins with known answers
 //
 //   --newcomer PATH     a mod folder (its plugins, loose files and BSAs) or a plugin file; repeat for several files
-//                       of one newcomer. A newcomer already in the order is taken out of it first, with everything
-//                       that masters it, and the output lists what left.
+//                       of one newcomer, or for further folders of one mod (the first folder gives the plugins, the
+//                       others only assets). An enabled folder of the order that ships a losing copy of a newcomer
+//                       plugin is taken as a further folder automatically. A newcomer already in the order is taken
+//                       out of it first, with everything that masters it, and the output lists what left.
 //   --batch FILE        JSON lines {"id": "...", "newcomer": ["PATH", ...]}; one <id>.json per line in --out. A line
 //                       whose <id>.json already exists is skipped (resume). A refusal is written as the line's result.
 //   --no-reverse-links  do not read installed plugins' form links (the noted reverseFormLinks becomes null; faster).

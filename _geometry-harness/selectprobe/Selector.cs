@@ -10,6 +10,7 @@ sealed class NewcomerSpec
 {
     public string Id = "";
     public string? FolderPath;                          // null: plugin files were named
+    public List<string> Companions = new();             // further folders of the same mod: assets only
     public List<string> PluginPaths = new();
     public List<SelNamed> Packaged = new();
     public string? Refused;                              // set: nothing else is meaningful
@@ -79,9 +80,11 @@ sealed class Selector
 
     void PrepareInner(NewcomerSpec s, IReadOnlyList<string> paths)
     {
-        if (paths.Count == 1 && Directory.Exists(paths[0]))
+        if (paths.Count >= 1 && paths.All(Directory.Exists))
         {
             s.FolderPath = Path.GetFullPath(paths[0]);
+            // further folders named on the command line: companions, read for assets only
+            foreach (var extra in paths.Skip(1)) s.Companions.Add(Path.GetFullPath(extra).TrimEnd('\\', '/'));
             var all = Directory.EnumerateFiles(s.FolderPath).Where(IsPlugin).OrderBy(f => f, StringComparer.OrdinalIgnoreCase).ToList();
             if (all.Count == 0) { s.Refused = $"the newcomer folder '{s.FolderPath}' holds no plugin; an asset-only mod has no records to select with yet."; return; }
             var inFolder = new HashSet<string>(all.Select(Path.GetFileName)!, StringComparer.OrdinalIgnoreCase);
@@ -120,14 +123,26 @@ sealed class Selector
 
         var names = new HashSet<string>(s.PluginPaths.Select(Path.GetFileName)!, StringComparer.OrdinalIgnoreCase);
 
+        // companions found in the order: an ENABLED folder that ships a losing copy of a newcomer plugin is the same mod
+        // spread over two folders (a main folder under a bug-fix or update folder); MO2 merges both into one view
+        if (s.FolderPath is not null)
+            foreach (var m in _cfg.EnabledMods)
+            {
+                var dir = Path.GetFullPath(Path.Combine(_modsDir, m)).TrimEnd('\\', '/');
+                if (dir.Equals(s.FolderPath.TrimEnd('\\', '/'), StringComparison.OrdinalIgnoreCase) || s.Companions.Contains(dir, StringComparer.OrdinalIgnoreCase)) continue;
+                if (names.Any(n => File.Exists(Path.Combine(dir, n)))) s.Companions.Add(dir);
+            }
+        s.Companions.Sort(StringComparer.OrdinalIgnoreCase);
+
         // its assets
         var assets = new HashSet<string>(StringComparer.Ordinal);
         if (s.FolderPath is not null)
         {
             foreach (var a in AssetPaths.Loose(s.FolderPath)) { assets.Add(a); s.Loose++; }
+            foreach (var c in s.Companions) foreach (var a in AssetPaths.Loose(c)) { if (assets.Add(a)) s.Loose++; }
             // its archives: those at its folder root named for its plugins, and any archive the order loads with one of
             // its plugins from another folder (a mod split over a main folder and an update folder)
-            var arcs = AssetPaths.ArchivesFor(s.FolderPath, names)
+            var arcs = AssetPaths.ArchivesFor(s.FolderPath, names).Concat(s.Companions.SelectMany(c => AssetPaths.ArchivesFor(c, names)))
                 .Concat(_cfg.Archives.Archives.Where(x => names.Contains(x.OwningPlugin)).Select(x => x.Path))
                 .Select(Path.GetFullPath).Distinct(StringComparer.OrdinalIgnoreCase).OrderBy(x => x, StringComparer.OrdinalIgnoreCase).ToList();
             foreach (var arc in arcs)
@@ -246,6 +261,7 @@ sealed class Selector
     public Selection Select(NewcomerSpec s)
     {
         var facts = s.Facts!;
+        _newcomerDirs = s.FolderPath is null ? new() : new List<string> { s.FolderPath.TrimEnd('\\', '/') }.Concat(s.Companions).ToList();
         var newcomerNames = facts.Plugins;
         var newcomerFolder = s.FolderPath;
 
@@ -331,7 +347,7 @@ sealed class Selector
 
         var narrowed = _cfg.NarrowedTo(order.Select(p => p.Path).ToList(), $"the newcomer and the {removed.Count} plugin(s) leaving with it are taken out");
         var identity = narrowed.Identity("newcomer-selection", "load-time");
-        var newcomer = new SelNewcomer(newcomerFolder,
+        var newcomer = new SelNewcomer(newcomerFolder, s.Companions,
             s.PluginPaths.Select(p => _newcomerPlugin[p]).Select(fp => new SelNewcomerPlugin(fp.Name, fp.Path, ConfigurationIdentity.Sha256File(fp.Path), fp.Masters, fp.NewRecords, fp.Overrides)).ToList(),
             s.Packaged, facts.Fp.Keys.Count, facts.Fp.Interior.Count, facts.Fp.Exterior.Count, facts.Assets.Count, s.Loose, s.InArchives,
             s.ArchivesRead, facts.Fp.ScriptCarriers, s.RuntimeFiles.Take(50).ToList(), s.ScriptFiles);
@@ -345,9 +361,12 @@ sealed class Selector
             null);
     }
 
+    List<string> _newcomerDirs = new();
+
+    /// <summary>Whether a provider is the newcomer's own folder or one of its companions.</summary>
     bool IsNewcomerFolder(string providerName, string? newcomerFolder)
-        => newcomerFolder is not null && providerName != "overwrite"
-        && Path.GetFullPath(Path.Combine(_modsDir, providerName)).TrimEnd('\\', '/').Equals(newcomerFolder.TrimEnd('\\', '/'), StringComparison.OrdinalIgnoreCase);
+        => providerName != "overwrite"
+        && _newcomerDirs.Contains(Path.GetFullPath(Path.Combine(_modsDir, providerName)).TrimEnd('\\', '/'), StringComparer.OrdinalIgnoreCase);
 
     /// <summary>The wanted paths an installed plugin's folder provides: its loose files, and the archives that load with
     /// a plugin of that folder still in the order. Nothing from the newcomer's own folder.</summary>

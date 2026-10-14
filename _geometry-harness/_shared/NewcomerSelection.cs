@@ -188,7 +188,7 @@ public sealed record SelExcluded(string Plugin, string? Folder, string Reason, S
 public sealed record SelNamed(string Plugin, string Why);
 public sealed record SelAssetOnly(string Folder, int Assets, IReadOnlyList<string> Examples);
 public sealed record SelNewcomerPlugin(string Name, string Path, string Sha256, IReadOnlyList<string> Masters, int NewRecords, int Overrides);
-public sealed record SelNewcomer(string? Folder, IReadOnlyList<SelNewcomerPlugin> Plugins, IReadOnlyList<SelNamed> PackagedPatches,
+public sealed record SelNewcomer(string? Folder, IReadOnlyList<string> CompanionFolders, IReadOnlyList<SelNewcomerPlugin> Plugins, IReadOnlyList<SelNamed> PackagedPatches,
                                  int Records, int InteriorCells, int ExteriorCells, int Assets, int LooseAssets, int ArchiveAssets,
                                  IReadOnlyList<string> Archives, int ScriptCarriers, IReadOnlyList<string> RuntimeLayerFiles, int ScriptFiles);
 public sealed record SelOrder(string Source, string Identity, int Plugins, IReadOnlyList<SelNamed> Removed);
