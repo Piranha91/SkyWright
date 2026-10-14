@@ -17,8 +17,9 @@
 //   --batch FILE        JSON lines {"id": "...", "newcomer": ["PATH", ...]}; one <id>.json per line in --out. A line
 //                       whose <id>.json already exists is skipped (resume). A refusal is written as the line's result.
 //   --no-reverse-links  do not read installed plugins' form links (the noted reverseFormLinks becomes null; faster).
+//   --stop-file PATH    batch only: before each newcomer, if PATH exists, stop there (exit 3); a rerun resumes.
 //
-// Exit codes: 0 selection written (batch: every line has a result), 2 refused, 1 crashed. Read-only on the instance.
+// Exit codes: 0 selection written (batch: every line has a result), 2 refused, 3 stopped by --stop-file, 1 crashed. Read-only on the instance.
 
 using System.Diagnostics;
 using System.Runtime.InteropServices;
@@ -32,7 +33,7 @@ if (args.Contains("--selftest")) return SelfTest.Run();
 using var __run = RunLog.BeginProcess("selectprobe", args);
 
 string instance = HarnessTarget.Instance, game = HarnessTarget.Game, profile = HarnessTarget.Profile;
-string? orderFile = null, batchFile = null;
+string? orderFile = null, batchFile = null, stopFile = null;
 string outDir = Path.Combine(Directory.GetCurrentDirectory(), "selectprobe-out");
 var newcomer = new List<string>();
 bool reverseLinks = true;
@@ -46,6 +47,7 @@ for (int i = 0; i < args.Length; i++)
     else if (args[i] == "--batch" && i + 1 < args.Length) batchFile = args[++i];
     else if (args[i] == "--out" && i + 1 < args.Length) outDir = args[++i];
     else if (args[i] == "--no-reverse-links") reverseLinks = false;
+    else if (args[i] == "--stop-file" && i + 1 < args.Length) stopFile = args[++i];
     else { Console.Error.WriteLine($"unknown option '{args[i]}'. See the header of selectprobe/Program.cs for the flag list."); return 2; }
 }
 if ((newcomer.Count == 0) == (batchFile is null))
@@ -57,7 +59,7 @@ profile = HarnessTarget.Require(profile, "MO2 profile name", "profile", "--profi
 
 return Probe.Run(instance, profile, game, orderFile, outDir, reverseLinks,
                  batchFile is null ? new List<(string, List<string>)> { ("selection", newcomer) } : Probe.ReadBatch(batchFile),
-                 batchFile is not null, __run);
+                 batchFile is not null, __run, stopFile: stopFile);
 
 static class Probe
 {
@@ -76,7 +78,7 @@ static class Probe
     }
 
     public static int Run(string instance, string profile, string game, string? orderFile, string outDir, bool reverseLinks,
-                          List<(string Id, List<string> Paths)> jobs, bool batch, Run? run, TextWriter? log = null)
+                          List<(string Id, List<string> Paths)> jobs, bool batch, Run? run, TextWriter? log = null, string? stopFile = null)
     {
         log ??= Console.Out;
         var wall = Stopwatch.StartNew();
@@ -120,8 +122,15 @@ static class Probe
 
         run?.Stage("select", "selecting", specs.Count, "newcomers");
         int refused = 0, done = 0;
+        bool stopped = false;
         foreach (var s in specs)
         {
+            if (batch && stopFile is not null && File.Exists(stopFile))
+            {
+                stopped = true;
+                log.WriteLine($"stopped: '{stopFile}' exists; {specs.Count - done} newcomer(s) left for a rerun to resume");
+                break;
+            }
             var t = Stopwatch.StartNew();
             object result;
             int candidates = -1;
@@ -158,7 +167,7 @@ static class Probe
         var summary = new Dictionary<string, object?>
         {
             ["source"] = cfg.Source, ["plugins"] = cfg.OrderedPaths.Count, ["newcomers"] = jobs.Count, ["selectedThisRun"] = done,
-            ["refused"] = refused, ["wallSeconds"] = Math.Round(wall.Elapsed.TotalSeconds, 2), ["resolveSeconds"] = Math.Round(resolveSeconds, 2),
+            ["refused"] = refused, ["stopped"] = stopped, ["wallSeconds"] = Math.Round(wall.Elapsed.TotalSeconds, 2), ["resolveSeconds"] = Math.Round(resolveSeconds, 2),
             ["footprintSeconds"] = Math.Round(sel.FootprintSeconds, 2), ["assetIndexSeconds"] = Math.Round(sel.AssetSeconds, 2),
             ["footprintsRead"] = sel.FootprintsRead, ["wantedAssetPaths"] = wanted.Count, ["reverseLinks"] = reverseLinks,
             ["bytesRead"] = io0 is null ? null : Cost.ReadBytes() - io0,
@@ -167,7 +176,7 @@ static class Probe
         File.WriteAllText(Path.Combine(outDir, batch ? "batch-summary.json" : "cost.json"), JsonSerializer.Serialize(summary, SelectionRule.Json));
         log.WriteLine($"done: {done} selected ({refused} refused) in {wall.Elapsed.TotalSeconds:0.0}s; read {Gb(summary["bytesRead"])}; peak private {Gb(mem.PeakPrivate)}, peak working set {Gb(mem.PeakWorkingSet)}");
         run?.Tally(ok: done - refused, failed: refused);
-        return !batch && refused > 0 ? 2 : 0;
+        return stopped ? 3 : !batch && refused > 0 ? 2 : 0;
     }
 
     static string Gb(object? b) => b is long l ? $"{l / 1073741824.0:0.00} GiB" : "unknown";
