@@ -36,6 +36,8 @@ NUM = re.compile(r"^-?\d+(?:\.\d+)?(?:[eE][-+]?\d+)?$")
 
 REASON_NOT_READ = "a field the capture did not read"
 REASON_DEPTH = "a field not read at the same depth by every plugin"
+REASON_TRUNCATED = "a field the read's expansion was cut off before"
+TRUNCATED = "\u2026"
 REASON_UNKNOWN = "a field the schema does not name"
 REASON_FAILED = "the record read failed for one plugin"
 MERGED = "merged at runtime, not compared"
@@ -56,6 +58,7 @@ class Scope:
         self.records = _jsonl(ref_dir / "records.jsonl")
         self.structs = _jsonl(ref_dir / "structs.jsonl")
         self.poly = _jsonl(ref_dir / "polymorphic.jsonl")
+        self.arms = _jsonl(ref_dir / "arms.jsonl")
         self.data = json.loads(Path(scope_file).read_text(encoding="utf-8"))
         self.file_bk = set(self.data.get("fileBookkeeping") or [])
         self.struct_bk = set(self.data.get("structBookkeeping") or [])
@@ -69,7 +72,7 @@ class Scope:
             return self.records[name]
         if name in self.structs:
             return self.structs[name]
-        return self.poly.get(name)
+        return self.poly.get(name) or self.arms.get(name)
 
     def is_record(self, name) -> bool:
         if not name:
@@ -138,6 +141,8 @@ class Scope:
         if top in self.merged.get(rtype, ()):
             return "merged"
         for i, seg in enumerate(segs):
+            if i == 0 and rtype in self.poly:
+                t = self._merged_type(rtype)
             f = next((x for x in (t or {}).get("fields") or [] if x["n"] == seg), None)
             if f is None:
                 return "unknown"
@@ -149,10 +154,25 @@ class Scope:
             if ref and self.contains_record(ref):
                 return "child-record"
             if i + 1 < len(segs):
-                t = self._type(ref) if ref else None
+                t = self._merged_type(ref) if ref else None
                 if t is None:
                     return "unknown"
         return "compared"
+
+    def _merged_type(self, name):
+        """A struct, or a polymorphic base with its arms' fields (a condition's Data names the arm's own fields)."""
+        t = self._type(name)
+        if t is None or name not in self.poly:
+            return t
+        fields = list(t.get("fields") or [])
+        seen = {f["n"] for f in fields}
+        arms = list(self.poly[name].get("arms") or []) + [a for a, t in self.arms.items() if t.get("base") == name]
+        for a in dict.fromkeys(arms):
+            for f in (self._type(a) or {}).get("fields") or []:
+                if f["n"] not in seen:
+                    seen.add(f["n"])
+                    fields.append(f)
+        return {"name": name, "fields": fields}
 
 
 def load_scope(ref_dir: Path | None = None, scope_file: Path | None = None) -> Scope:
@@ -245,13 +265,16 @@ def _norm(v: str) -> str:
 
 def _keyed(fields: dict) -> dict[str, tuple]:
     """Stripped field path -> the multiset of its normalised leaf values (list order and summary lines ignored)."""
-    paths = list(fields)
+    parents = set()
+    for p in fields:
+        for i, ch in enumerate(p):
+            if ch in ".[" and i:
+                parents.add(p[:i])
     out = collections.defaultdict(list)
-    for p in paths:
-        v = fields[p]
+    for p, v in fields.items():
         if LIST_SUMMARY.match(str(v).strip()):
             continue
-        if any(q != p and (q.startswith(p + ".") or q.startswith(p + "[")) for q in paths):
+        if p in parents:
             continue  # a struct's or list's own summary line; its leaves are compared
         out[INDEX.sub("", p)].append(_norm(v))
     return {k: tuple(sorted(v)) for k, v in out.items()}
@@ -263,6 +286,45 @@ def _show(vals) -> str:
 
 def _norm_path(p: str) -> str:
     return str(p).replace("\\", "/").lower()
+
+
+class _View:
+    """One plugin's reads of one record. A read covers a top-level field when it selected it, or selected nothing and
+    was not cut off before it (a text dump prints every top-level field, absent ones included, so a read cut off at its line limit
+    covers every name it printed in full, that is every name but the one it was cut off in). A field is taken from the narrowest covering read."""
+
+    def __init__(self, reads):
+        self.reads = reads
+        self._k = {}
+        self.cut = {}
+        for r in reads:
+            f = r["fields"]
+            if TRUNCATED in f:
+                tops = [k.split(".")[0].split("[")[0] for k in f if k != TRUNCATED]
+                self.cut[id(r)] = (tops[-1] if tops else "", set(tops))
+        self.keys = set()
+        for r in reads:
+            self.keys |= {k for k in self.keyed(r) if not k.startswith(TRUNCATED)}
+
+    def keyed(self, r):
+        if id(r) not in self._k:
+            self._k[id(r)] = _keyed({k: v for k, v in r["fields"].items() if k != TRUNCATED})
+        return self._k[id(r)]
+
+    def covers(self, r, top) -> bool:
+        if r.get("selection"):
+            return top in set(r["selection"]) and id(r) not in self.cut
+        if id(r) in self.cut:
+            last, seen = self.cut[id(r)]
+            return top in seen and top != last
+        return True
+
+    def read_for(self, top):
+        ok = [r for r in self.reads if self.covers(r, top)]
+        return min(ok, key=lambda r: (0 if r.get("selection") else 1)) if ok else None
+
+    def truncated_at(self, top) -> bool:
+        return any(id(r) in self.cut and not self.covers(r, top) for r in self.reads)
 
 
 def rows_for_setup(reads: list[dict], plugins: list[dict], scope: Scope) -> dict:
@@ -281,19 +343,20 @@ def rows_for_setup(reads: list[dict], plugins: list[dict], scope: Scope) -> dict
         return cov.setdefault(rtype, {"Population": f"contested {rtype} records", "Judged": 0,
                                       "Unjudgeable": collections.Counter(), "SetAside": collections.Counter()})
     for fk in sorted(by_fk):
-        chain = sorted(by_fk[fk], key=lambda x: x[0])
-        rtype = next((r.get("type") for _, _, r in chain if r.get("type")), "unknown")
+        per = collections.OrderedDict()
+        for i, name, r in sorted(by_fk[fk], key=lambda x: x[0]):
+            per.setdefault((i, name), []).append(r)
+        chain = [(i, name, rs) for (i, name), rs in per.items()]
+        rtype = next((r.get("type") for _, _, rs in chain for r in rs if r.get("type")), "unknown")
         c = line(rtype)
         if len(chain) < 2:
             continue
-        if any(r["status"] != "ok" for _, _, r in chain):
+        if any(r["status"] != "ok" for _, _, rs in chain for r in rs):
             c["Unjudgeable"][REASON_FAILED] += 1
             continue
         c["Judged"] += 1
-        keyed = [_keyed(r["fields"]) for _, _, r in chain]
-        sels = [set(r["selection"]) if r.get("selection") else None for _, _, r in chain]
-        same_depth = len({r.get("depth") for _, _, r in chain}) == 1
-        keys = sorted(set().union(*[set(k) for k in keyed]))
+        views = [_View(rs) for _, _, rs in chain]
+        keys = sorted(set().union(*[set(v.keys) for v in views]))
         for key in keys:
             cls = scope.classify(rtype, key)
             if cls in ("identity", "bookkeeping", "child-record"):
@@ -305,20 +368,23 @@ def rows_for_setup(reads: list[dict], plugins: list[dict], scope: Scope) -> dict
                 c["Unjudgeable"][REASON_UNKNOWN] += 1
                 continue
             top = key.split(".")[0]
-            if any(s is not None and top not in s for s in sels):
-                c["Unjudgeable"][REASON_NOT_READ] += 1
+            picked = [v.read_for(top) for v in views]
+            if any(x is None for x in picked):
+                c["Unjudgeable"][REASON_TRUNCATED if any(v.truncated_at(top) for v in views) else REASON_NOT_READ] += 1
                 continue
-            if not same_depth and any(key not in k for k in keyed):
+            got = [v.keyed(x) for v, x in zip(views, picked)]
+            if len({x.get("depth") for x in picked}) > 1 and any(key not in g for g in got):
                 c["Unjudgeable"][REASON_DEPTH] += 1
                 continue
-            vals = [k.get(key, ()) for k in keyed]
+            vals = [g.get(key, ()) for g in got]
             win_i = len(chain) - 1
             for i in range(1, win_i):
                 if vals[i] != vals[i - 1] and vals[win_i] != vals[i]:
-                    reads_ = [{"batch": chain[j][2]["batch"], "id": chain[j][2]["id"], "plugin": chain[j][1]}
+                    reads_ = [{"batch": picked[j]["batch"], "id": picked[j]["id"], "plugin": chain[j][1]}
                               for j in (i - 1, i, win_i)]
                     a, b = chain[i][1], chain[win_i][1]
-                    eid = next((r.get("editorId") for _, _, r in chain if r.get("editorId") not in (None, "", "<none>")), None)
+                    eid = next((r.get("editorId") for _, _, rs in chain for r in rs
+                                if r.get("editorId") not in (None, "", "<none>")), None)
                     conflicts.append({
                         "Kind": "LOST-EDIT", "A": a, "B": b, "Field": key,
                         "Summary": f"{rtype} {eid or fk}: {key} - {a}'s value lost to {b}'s",

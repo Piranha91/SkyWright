@@ -251,6 +251,30 @@ def case_21_a_defining_plugin_overridden_is_not_a_lost_edit():
     assert conflicts(emit) == [], conflicts(emit)
 
 
+def case_23_a_cut_off_deep_read_and_a_narrow_read_of_one_plugin_combine():
+    """Found on Group 1's transcripts after Gate B: each cell is read twice per plugin, once deep (cut off at the
+    server's line limit) and once for named fields. A field is taken from the read that covers it."""
+    deep = {"FormKey": "000D74:Skyrim.esm", "Location": "02008A:Skyrim.esm", "Music": "000001:Skyrim.esm",
+            "Persistent": "[list: 40 item(s)]", "Persistent[0].Version2": "0", "…": "(expansion truncated)"}
+    fk = "000D74:Skyrim.esm"
+    batches = [("deep", [(BASE, fk, "Cell", None, deep, None, 3), (A, fk, "Cell", None, dict(deep, Location="0A0001:ModA.esp"), None, 3),
+                         (B, fk, "Cell", None, dict(deep, Location="0B0001:ModB.esp"), None, 3)]),
+               ("narrow", [(BASE, fk, "Cell", None, {"FormKey": fk, "Regions": "[list: 0 item(s)]"}, ["Regions"], 2),
+                           (A, fk, "Cell", None, {"FormKey": fk, "Regions": "[list: 0 item(s)]"}, ["Regions"], 2),
+                           (B, fk, "Cell", None, {"FormKey": fk, "Regions": "[list: 0 item(s)]"}, ["Regions"], 2)])]
+    with tempfile.TemporaryDirectory() as td:
+        emit, _ = rows_of(batches, Path(td))
+    got = [(c["A"], c["B"], c["Field"]) for c in conflicts(emit)]
+    assert got == [(A, B, "Location")], got
+    assert not any("depth" in k for k in unjudged(emit)), unjudged(emit)
+
+
+def case_25_a_polymorphic_field_is_found_on_its_arms():
+    sc = RR.load_scope()
+    got = sc.classify("DialogResponses", "Conditions[0].Data.Function")
+    assert got == "compared", got
+
+
 def main():
     for name, fn in sorted(((k, v) for k, v in globals().items() if k.startswith("case_")),
                            key=lambda kv: int(kv[0].split("_")[1])):
