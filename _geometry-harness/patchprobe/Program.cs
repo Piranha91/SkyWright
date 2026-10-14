@@ -465,19 +465,9 @@ else if (wantPairs.Count > 0)
 }
 else
 {
-    // Default: the pairs the other probes actually flagged in this load order.
-    Console.WriteLine("\n──────── the pairs this session's detectors flagged ────────");
-    var flagged = new (string A, string B)[]
-    {
-        ("BluePalaceTerrace.esp", "BetterQuestObjectives.esp"),
-        ("Grand Solitude - Pilgrim patch.esp", "Unofficial Skyrim Special Edition Patch.esp"),
-        ("middenexpandedSSE.esp", "JKs College of Winterhold - OCW Patch.esp"),
-        ("The Great City of Winterhold v4.esp", "JKs College of Winterhold - OCW Patch.esp"),
-        ("Unofficial Skyrim Special Edition Patch.esp", "SurWR.esp"),
-        ("Unofficial Skyrim Special Edition Patch.esp", "WindhelmSSE.esp"),
-        ("middenexpandedSSE.esp", "The Great City of Winterhold v4.esp"),
-    };
-    foreach (var (a, b) in flagged) Report(a, b);
+    // No pair was asked for: answer none rather than guess, say how to ask, then run the cross-list survey.
+    Console.WriteLine("\n──────── pairs ────────");
+    Console.WriteLine("   no pair asked: pass --pair A.esp B.esp, or --verify FILE (a detector's --emit output), for a per-pair answer");
 
     // ---------------------------------------------------------------------------------------
     // Cross-list patches, filtered to the ones that would actually apply.
