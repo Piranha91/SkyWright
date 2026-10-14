@@ -199,11 +199,24 @@ public sealed class EmptySpaceSearch
         return n.ModKey != fixture.ModKey || _isBethesdaFile(n.ModKey.FileName);
     }
 
+    /// <summary>The mover changed this anchor: it is absent or placed elsewhere under the winner than in the order without the mover's side,
+    /// AND the mover is the plugin whose step decides its state under the winner (its last placement step, its winning deletion, or the
+    /// latest step on its enable chain; MovedHosts' rule). The arm without a master also drops every plugin that masters it, so the
+    /// difference alone would blame a master (USSEP) for what a downstream mod did.</summary>
     bool Changed(FormKey a, int mover)
     {
         if (Place(a, mover) is not { } pa) return false;
-        if (Place(a, -1) is not { } pw) return true;
-        return pw.Snap.Space != pa.Snap.Space || PlacementHistory.Dist(pa.Snap.Pos, pw.Snap.Pos) > C.MoveThreshold;
+        bool differs = Place(a, -1) is not { } pw || pw.Snap.Space != pa.Snap.Space || PlacementHistory.Dist(pa.Snap.Pos, pw.Snap.Pos) > C.MoveThreshold;
+        return differs && Responsible(a) == mover;
+    }
+
+    int Responsible(FormKey a)
+    {
+        var snaps = C.Index.History.Of(a);
+        int r = snaps is { Count: >= 2 } ? snaps[^1].Plugin : -1;
+        int del = C.Index.Deletions.WinningDeleter(a); if (del > r) r = del;
+        int cm = C.ChainMover(a); if (cm > r) r = cm;
+        return r;
     }
 
     // ---- weapon racks ----------------------------------------------------------------------------------------------------
