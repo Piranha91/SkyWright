@@ -1715,7 +1715,8 @@ public enum DependentMotion { Fixed, Movable, Unknown }
 /// <summary>What <see cref="DetectorModel.EmptySpace"/> makes of one fixture against one mover. LeftInEmptySpace is the class;
 /// the rest are counted beside it, never findings: Absent (not there in one arm), Falls (a loose body: the rest rule's class),
 /// Refused (by name), NoRelation (nothing the mover changed held it), FloatsAsShipped (the absolute floor), FloorPopulation
-/// (Bethesda or USSEP on both sides, rule 12), Grounded (a floor or wall holds it under the winner and the mover's side did not re-place
+/// (Bethesda or USSEP on both sides, rule 12), MoverOnBaseGame (a mod's removal leaves a base-game fixture that no other mod
+/// placed or kept: one mod's own defect, not a clash between two mods), Grounded (a floor or wall holds it under the winner and the mover's side did not re-place
 /// it, so it cannot be the class; the order without the mover is not walked for it), RePlacedGrounded / RePlacedStillEmpty (the
 /// mover's side moved it), ReGrounded (another floor or wall holds it now; read only when the order without the mover was walked).</summary>
-public enum EmptySpaceVerdict { Absent, Falls, Refused, NoRelation, FloatsAsShipped, FloorPopulation, Grounded, RePlacedGrounded, RePlacedStillEmpty, ReGrounded, LeftInEmptySpace }
+public enum EmptySpaceVerdict { Absent, Falls, Refused, NoRelation, FloatsAsShipped, FloorPopulation, MoverOnBaseGame, Grounded, RePlacedGrounded, RePlacedStillEmpty, ReGrounded, LeftInEmptySpace }

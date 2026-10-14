@@ -101,7 +101,7 @@ static class EmptySpaceProof
         master.Statics.Add(Stat(markB, "EsMarker", 8, 8, 16, marker: true));
         master.Activators.Add(new Mutagen.Bethesda.Skyrim.Activator(vActB, release) { EditorID = "EsVanillaActivator", Model = new Model { File = "meshes\\es\\va.nif" }, ObjectBounds = Ob(20, 20, 80) });
         var mc = new Cell(cellK, release) { EditorID = "EsCell", Flags = Cell.Flag.IsInteriorCell };
-        int[] floored = { 2000, 2002, 2004, 2006, 2008, 2010, 2012, 2014, 2016, 2018, 2020, 2022, 2024, 2026, 2028, 2030, 2032, 2036, 2040, 2042, 2044, 2056 };
+        int[] floored = { 2000, 2002, 2004, 2006, 2008, 2010, 2012, 2014, 2016, 2018, 2020, 2022, 2024, 2026, 2028, 2030, 2032, 2036, 2040, 2042, 2044, 2056, 2058, 2060 };
         foreach (int n in floored) mc.Temporary.Add(Ref(R(n), floorB, X0(n), 0, -10, $"EsFloor{n}", parent: n == 2002 ? R(2002, 1) : null));
         mc.Temporary.Add(Ref(R(2002, 1), markB, X0(2002) + 300, 0, 8, "EsParent2002"));                      // the floor's enable parent
         mc.Temporary.Add(Ref(R(2016, 1), wallB, X0(2016) + 28, 0, 100, "EsWall2016"));                       // touches the rack's +x face
@@ -110,6 +110,8 @@ static class EmptySpaceProof
         mc.Temporary.Add(Ref(R(2044, 1), wallB, X0(2044) + 108, 0, 100, "EsWall2044"));
         mc.Temporary.Add(Ref(R(2036, 1), vActB, X0(2036) + 40, 0, 40, "EsVanillaActivator2036"));            // a vanilla activator touching the rack
         mc.Temporary.Add(Ref(R(2024, 1), vActB, X0(2024), 0, 40, "EsVanillaRack2024"));                      // a vanilla fixture on the floor
+        mc.Temporary.Add(Ref(R(2058, 1), vActB, X0(2058), 0, 40, "EsVanillaRack2058"));                      // a vanilla fixture no mod touches
+        mc.Temporary.Add(Ref(R(2060, 1), vActB, X0(2060), 0, 40, "EsVanillaRack2060"));                      // a vanilla fixture S re-places
         mc.Temporary.Add(Ref(R(2040, 1), markB, X0(2040) + 300, 0, 8, "EsSwitch2040", disabled: true));     // a switch, off at load
         mc.Temporary.Add(Ref(R(2042, 1), wallB, X0(2042) + 136, 0, 100, "EsWall2042"));                      // touches the own floor's +x edge
         FileInterior(master, mc);
@@ -159,6 +161,7 @@ static class EmptySpaceProof
             sc.Temporary.Add(Ref(F(n, 1), ownFloorB, X0(n), 0, 10, $"EsOwnFloor{n}"));
             Rack(n, z: 60);
         }
+        sc.Temporary.Add(Ref(R(2060, 1), vActB, X0(2060) + 2, 0, 40, "EsVanillaRack2060"));                   // S moves the vanilla fixture 2 u
         FileInterior(s, sc);
         var sPath = Write(root, s, mOv);
         using var sOv = SkyrimMod.CreateFromBinaryOverlay(sPath, release);
@@ -166,7 +169,7 @@ static class EmptySpaceProof
         // ---- D: the mover ----
         var d = new SkyrimMod(dKey, release);
         var dc = new Cell(cellK, release) { Flags = Cell.Flag.IsInteriorCell };
-        foreach (int n in new[] { 2000, 2008, 2010, 2012, 2014, 2016, 2018, 2020, 2022, 2026, 2028, 2030, 2032, 2036, 2040, 2044 })
+        foreach (int n in new[] { 2000, 2008, 2010, 2012, 2014, 2016, 2018, 2020, 2022, 2026, 2028, 2030, 2032, 2036, 2040, 2044, 2058, 2060 })
             dc.Temporary.Add(Ref(R(n), floorB, X0(n), 0, -10, $"EsFloor{n}", disabled: true));
         dc.Temporary.Add(Ref(R(2002, 1), markB, X0(2002) + 300, 0, 8, "EsParent2002", disabled: true));     // removes the floor through its parent
         dc.Temporary.Add(Ref(R(2004), floorB, X0(2004), 0, -10, "EsFloor2004", deleted: true));
@@ -310,6 +313,11 @@ static class EmptySpaceProof
         Check("ES-2056: an upstream plugin stepped on the floor, a plugin that masters it disables the floor -> LEFT IN EMPTY SPACE against the disabler only; the upstream plugin is not blamed",
               r2056.Verdict == EmptySpaceVerdict.LeftInEmptySpace && r2056up.Verdict != EmptySpaceVerdict.LeftInEmptySpace,
               $"{Show(r2056)} | upstream: {Show(r2056up)}");
+        var r2058 = J(R(2058, 1)); var r2060 = J(R(2060, 1));
+        Check("ES-2058: the mover removes the floor under a base-game fixture no other mod touches -> the mover's own defect on the base game, counted apart, not the class",
+              r2058.Verdict == EmptySpaceVerdict.MoverOnBaseGame, Show(r2058));
+        Check("ES-2060: the same, but the mod S re-placed the base-game fixture -> LEFT IN EMPTY SPACE (S's placement against the mover's removal)",
+              r2060.Verdict == EmptySpaceVerdict.LeftInEmptySpace, Show(r2060));
         var (pst, pwhy) = es.Predicate(F(2000)); var (gst, _) = es.Predicate(F(2016));
         Check("ES-predicate (--base): a fixture still in empty space under this order reads Holds; a re-grounded one Gone",
               pst == PhysicalState.Holds && gst == PhysicalState.Gone, $"{pst}: {pwhy}; 2016 {gst}");
