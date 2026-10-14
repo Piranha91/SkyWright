@@ -33,12 +33,17 @@ if (args.Length > 0 && args[0] == "--reach-memory-child") return MotionProof.Rea
 
 using var __run = RunLog.BeginProcess("proofprobe", args);
 
-int pass = 0, fail = 0;
+int pass = 0, fail = 0, canariesRed = 0;
 var failures = new List<string>();
 
+// A case named "(must FAIL)" is a canary: it is planted wrong, so its failing is expected and does not fail the run,
+// while a canary that PASSES does (the harness could not see a wrong answer). Any other failing case fails the run.
 void Check(string name, bool ok, string detail)
 {
-    if (ok) { pass++; Console.WriteLine($"   PASS  {name,-56} {detail}"); }
+    bool canary = name.Contains("(must FAIL)", StringComparison.Ordinal);
+    if (ok && !canary) { pass++; Console.WriteLine($"   PASS  {name,-56} {detail}"); }
+    else if (!ok && canary) { canariesRed++; Console.WriteLine($"   FAIL  {name,-56} {detail}   [canary: red as designed]"); }
+    else if (ok) { fail++; failures.Add(name); Console.WriteLine($"   FAIL  canary PASSED: {name,-56} {detail}   [a canary must fail]"); }
     else { fail++; failures.Add(name); Console.WriteLine($"   FAIL  {name,-56} {detail}"); }
 }
 
@@ -3674,6 +3679,6 @@ AlphaSamplingProof.Run(Check);
 AlphaSamplingProof.RunWiring(Check);
 
 Console.WriteLine();
-Console.WriteLine($"==== {pass} passed, {fail} failed ====");
+Console.WriteLine($"==== {pass} passed, {fail} failed, {canariesRed} canaries red as designed ====");
 if (fail > 0) Console.WriteLine("   failed: " + string.Join(", ", failures));
 return fail == 0 ? 0 : 1;
