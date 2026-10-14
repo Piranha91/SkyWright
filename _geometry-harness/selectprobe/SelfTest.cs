@@ -222,6 +222,16 @@ static class SelfTest
         Check("every installed plugin is accounted for once", cands.Count + excl.Count + deps.Count + unread.Count + removed.Count == order.Length,
               $"{cands.Count} + {excl.Count} + {deps.Count} + {unread.Count} + {removed.Count} vs {order.Length}");
 
+        // ---- a newcomer plugin with no records (a dummy or an empty ESL) is selected, not crashed on ----------------
+        var emptyDir = Path.Combine(root, "EmptyNewcomer"); Directory.CreateDirectory(emptyDir);
+        new SkyrimMod(new ModKey("Empty", ModType.Plugin), Rel).BeginWrite.ToPath(Path.Combine(emptyDir, "Empty.esp")).WithNoLoadOrder().Write();
+        var outE = Path.Combine(root, "out-empty");
+        int rcE;
+        try { rcE = Probe.Run(instance, "P", game, null, outE, true, new() { ("selection", new List<string> { emptyDir }) }, false, null, TextWriter.Null); }
+        catch (Exception ex) { rcE = -1; Console.WriteLine($"      (threw {ex.GetType().Name}: {ex.Message})"); }
+        Check("a newcomer plugin with no records is selected (exit 0, 0 candidates)", rcE == 0
+              && JsonNode.Parse(File.ReadAllText(Path.Combine(outE, "selection.json")))!["candidates"]!.AsArray().Count == 0, $"exit {rcE}");
+
         // ---- refusal -------------------------------------------------------------------------------------------
         var outR = Path.Combine(root, "out-refusal");
         rc = Probe.Run(instance, "P", game, null, outR, true, new() { ("selection", new List<string> { Path.Combine(mods, "Orphan") }) }, false, null, TextWriter.Null);
