@@ -275,6 +275,19 @@ def case_25_a_polymorphic_field_is_found_on_its_arms():
     assert got == "compared", got
 
 
+def case_27_a_worldspace_persistent_cell_is_a_container():
+    """Found reconciling with session 1 (C3): a persistent cell's Grid differs between mods and means nothing in game."""
+    wrld = {"FormKey": "00003C:Skyrim.esm", "TopCell": "[Cell]", "TopCell.FormKey": "000D74:Skyrim.esm"}
+    cell = {"FormKey": "000D74:Skyrim.esm", "Grid": "[CellGrid]", "Grid.Flags": "1", "Grid.Point": "0,0"}
+    batches = [("w", [(BASE, "00003C:Skyrim.esm", "Worldspace", None, wrld, None, 3)])] + three(
+        "000D74:Skyrim.esm", cell, dict(cell, **{"Grid.Flags": "2"}), dict(cell, **{"Grid.Flags": "3"}), rtype="Cell")
+    with tempfile.TemporaryDirectory() as td:
+        emit, _ = rows_of(batches, Path(td))
+    assert conflicts(emit) == [], conflicts(emit)
+    aside = {k: v for c in emit.get("Coverage") or [] for k, v in (c.get("SetAside") or {}).items()}
+    assert any("container" in k for k in aside), aside
+
+
 def main():
     for name, fn in sorted(((k, v) for k, v in globals().items() if k.startswith("case_")),
                            key=lambda kv: int(kv[0].split("_")[1])):

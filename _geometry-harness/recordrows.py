@@ -41,6 +41,7 @@ TRUNCATED = "\u2026"
 REASON_UNKNOWN = "a field the schema does not name"
 REASON_FAILED = "the record read failed for one plugin"
 MERGED = "merged at runtime, not compared"
+CONTAINER = "a worldspace's persistent cell, a container whose own fields are not compared"
 
 
 def sha256(p: Path) -> str:
@@ -284,6 +285,13 @@ def _show(vals) -> str:
     return "; ".join(vals) if vals else "(absent)"
 
 
+def _show_field(val) -> str:
+    """A field's value for the record: its own value, or `leaf=value` for each leaf of a struct or list."""
+    if len(val) == 1 and "." not in val[0][0]:
+        return _show(val[0][1])
+    return "; ".join(f"{k.split('.', 1)[1] if '.' in k else k}={_show(v)}" for k, v in val)
+
+
 def _norm_path(p: str) -> str:
     return str(p).replace("\\", "/").lower()
 
@@ -338,6 +346,10 @@ def rows_for_setup(reads: list[dict], plugins: list[dict], scope: Scope) -> dict
         by_fk[r["formKey"]].append((hit[0], hit[1], r))
     conflicts = []
     cov = collections.OrderedDict()
+    # A worldspace's persistent cell (the one its TopCell names) holds the worldspace's persistent references; its
+    # own fields (a grid of 0,0 and flags) describe no place, so it is a container and is not compared.
+    containers = {r["fields"].get("TopCell.FormKey") for r in reads
+                  if r.get("type") == "Worldspace" and r.get("status") == "ok"} - {None}
 
     def line(rtype):
         return cov.setdefault(rtype, {"Population": f"contested {rtype} records", "Judged": 0,
@@ -354,9 +366,15 @@ def rows_for_setup(reads: list[dict], plugins: list[dict], scope: Scope) -> dict
         if any(r["status"] != "ok" for _, _, rs in chain for r in rs):
             c["Unjudgeable"][REASON_FAILED] += 1
             continue
+        if fk in containers:
+            c["SetAside"][CONTAINER] += 1
+            continue
         c["Judged"] += 1
         views = [_View(rs) for _, _, rs in chain]
         keys = sorted(set().union(*[set(v.keys) for v in views]))
+        # The unit is one top-level field of the record, as the schema names it: a struct or list is one field whose
+        # value is all of its compared leaves (the accepted scorecard's unit, 2026-09-28).
+        by_top = collections.OrderedDict()
         for key in keys:
             cls = scope.classify(rtype, key)
             if cls in ("identity", "bookkeeping", "child-record"):
@@ -367,16 +385,17 @@ def rows_for_setup(reads: list[dict], plugins: list[dict], scope: Scope) -> dict
             if cls == "unknown":
                 c["Unjudgeable"][REASON_UNKNOWN] += 1
                 continue
-            top = key.split(".")[0]
+            by_top.setdefault(key.split(".")[0], []).append(key)
+        for top, leaves in by_top.items():
             picked = [v.read_for(top) for v in views]
             if any(x is None for x in picked):
                 c["Unjudgeable"][REASON_TRUNCATED if any(v.truncated_at(top) for v in views) else REASON_NOT_READ] += 1
                 continue
             got = [v.keyed(x) for v, x in zip(views, picked)]
-            if len({x.get("depth") for x in picked}) > 1 and any(key not in g for g in got):
+            if len({x.get("depth") for x in picked}) > 1 and any(k not in g for k in leaves for g in got):
                 c["Unjudgeable"][REASON_DEPTH] += 1
                 continue
-            vals = [g.get(key, ()) for g in got]
+            vals = [tuple((k, g.get(k, ())) for k in leaves) for g in got]
             win_i = len(chain) - 1
             for i in range(1, win_i):
                 if vals[i] != vals[i - 1] and vals[win_i] != vals[i]:
@@ -386,11 +405,11 @@ def rows_for_setup(reads: list[dict], plugins: list[dict], scope: Scope) -> dict
                     eid = next((r.get("editorId") for _, _, rs in chain for r in rs
                                 if r.get("editorId") not in (None, "", "<none>")), None)
                     conflicts.append({
-                        "Kind": "LOST-EDIT", "A": a, "B": b, "Field": key,
-                        "Summary": f"{rtype} {eid or fk}: {key} - {a}'s value lost to {b}'s",
+                        "Kind": "LOST-EDIT", "A": a, "B": b, "Field": top,
+                        "Summary": f"{rtype} {eid or fk}: {top} - {a}'s value lost to {b}'s",
                         "Necessary": [{"FormKey": fk, "Label": f"{rtype} {eid or fk}",
-                                       "Values": {"lost": _show(vals[i]), "winner": _show(vals[win_i]),
-                                                  "overridden": _show(vals[i - 1])},
+                                       "Values": {"lost": _show_field(vals[i]), "winner": _show_field(vals[win_i]),
+                                                  "overridden": _show_field(vals[i - 1])},
                                        "Reads": reads_}]})
     coverage = [{"Population": v["Population"], "Judged": v["Judged"],
                  "Unjudgeable": dict(v["Unjudgeable"]), "SetAside": dict(v["SetAside"])} for v in cov.values()]

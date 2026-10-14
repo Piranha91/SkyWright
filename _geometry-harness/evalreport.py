@@ -1020,6 +1020,7 @@ def build_prediction(ctx: dict) -> dict:
         return "needs-both", None, None
 
     record, set_aside = [], collections.Counter()
+    lost_seen = set()
     groups = collections.OrderedDict()
     multi = len(p_targets) > 1
     single_mode = ctx.get("singleMod") or words.get("singleModDefault") or "show"
@@ -1035,10 +1036,19 @@ def build_prediction(ctx: dict) -> dict:
                  "admission": adm,
                  "findingId": hit["finding"].get("id")}
         if rk[0] in sib_only:
+            # its finding lives in the sibling's plan, not this one: named, never linked as if it were here
             entry["source"] = "sibling"
+            entry["siblingFindingId"] = entry.pop("findingId")
+            entry["findingId"] = None
         if hit["row"].get("field") is not None:
             entry["field"] = hit["row"]["field"]
             entry["values"] = hit["row"].get("values")
+            # Two record checks read overlapping populations (a cell's fields are in both the contested-fields and
+            # the cell-attributes check): the same lost edit is one relationship, counted under the first check.
+            same = (rk[2].lower(), rk[3].lower(), rk[4], entry["field"])
+            if adm == "admitted" and same in lost_seen:
+                adm = entry["admission"] = "repeat"
+            lost_seen.add(same)
         if adm != "admitted":
             set_aside[adm] += 1
             record.append(entry)
@@ -1059,7 +1069,7 @@ def build_prediction(ctx: dict) -> dict:
                                    "_subjects": set()})
         g["count"] += 1
         g["_subjects"].add(rk[4] if rk[4] is not None else ("row", rk[5]))
-        fid = hit["finding"].get("id")
+        fid = hit["finding"].get("id") if rk[0] not in sib_only else None
         if fid and fid not in g["findingIds"]:
             g["findingIds"].append(fid)
         label = hit["row"].get("label")
@@ -1130,7 +1140,8 @@ def build_prediction(ctx: dict) -> dict:
         missing_facts.append(bind(words["attribution"]["not-separable"], {"why": words["notSeparableWhy"]["noSingleSetups"]}))
     aside = {"baseGame": set_aside["baseGame"], "sameMod": set_aside["sameMod"],
              "alreadyPresent": set_aside["alreadyPresent"], "history": set_aside["history"],
-             "notInvolving": set_aside["notInvolving"], "singleMod": set_aside["singleMod"]}
+             "notInvolving": set_aside["notInvolving"], "singleMod": set_aside["singleMod"],
+             "repeat": set_aside["repeat"]}
     prediction = {"subject": subject, "mods": subject_mods, "predictionArm": p_arm, "withoutArm": w_arm,
                   "singleArms": s_arms, "verdict": verdict, "status": "found" if items else "none-found",
                   "items": items, "total": total, "counts": counts, "headlineUnit": unit,
@@ -1257,6 +1268,9 @@ def build_prediction(ctx: dict) -> dict:
         hits = [e for e in judged if (acted_on(e) if e["kind"] == "LOST-EDIT" else not present(patched_arm, keyof(e)))]
         hit_ids = {id(e) for e in hits}
         open_ = [e for e in judged if id(e) not in hit_ids]
+        judged_ids = {id(x) for x in judged}
+        for e in admitted:
+            e["withPatch"] = ("resolved" if id(e) in hit_ids else "left" if id(e) in judged_ids else "not-measured")
         problems, choices = [], 0
         for rk, hit in patched_rows.items():
             if rk[1] == "LOST-EDIT" and rk[3].lower() in patch_lower:
@@ -1268,7 +1282,7 @@ def build_prediction(ctx: dict) -> dict:
                 continue
             if (rk[0], p_of(rk[0])) in measured:
                 problems.append(rk)
-        spots = collections.Counter(e["admission"] for e in record if e["admission"] != "admitted"
+        spots = collections.Counter(e["admission"] for e in record if e["admission"] not in ("admitted", "repeat")
                                     and (e["checkId"], patched_arm) in measured and not present(patched_arm, keyof(e)))
         blind = [{"admission": k, "count": n, "why": words["blindSpotWhy"][k]} for k, n in sorted(spots.items())]
         sentences = [bind(words["validationHits"], {"patch": patch, "count": len(hits)}),

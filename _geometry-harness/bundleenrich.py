@@ -248,34 +248,50 @@ def enrich_names(d: Path, reader_cmd: str, mod_names: dict, reader_env: dict | N
     reader = Reader(reader_cmd, env)
     found, bases = {}, {}
     try:
-        def read(x, wanted, fields):
-            r = reader.call("tools/call", {"name": "housecarl_records", "arguments": {
-                "formids": sorted(wanted), "source": x["path"], "format": "json", "limit": max(500, len(wanted)),
-                "project": {"form": "fields", "fields": fields}}})
-            text = "".join(c.get("text", "") for c in ((r.get("result") or {}).get("content") or []))
-            body = json.loads(text) if text.strip().startswith("{") else {}
-            src = str(body.get("source") or "")
-            if "active in the load order" in src.lower() and "not active" not in src.lower():
-                raise Refused(f"the reader answered {x['name']} from its active load order ({src}), not from the file "
-                              f"at {x['path']}; start it on an instance in which no plugin of this setup is active")
-            return body.get("records") or []
+        def read(x, wanted, fields, chunk=100):
+            out = []
+            wanted = sorted(wanted)
+            for i in range(0, len(wanted), chunk):
+                part = wanted[i:i + chunk]
+                r = reader.call("tools/call", {"name": "housecarl_records", "arguments": {
+                    "formids": part, "source": x["path"], "format": "json", "limit": len(part),
+                    "max_chars": 4000000, "project": {"form": "fields", "fields": fields}}})
+                text = "".join(c.get("text", "") for c in ((r.get("result") or {}).get("content") or []))
+                body = json.loads(text) if text.strip().startswith("{") else {}
+                src = str(body.get("source") or "")
+                if not body or body.get("ok") is False:
+                    raise Refused(f"the reader could not read {x['name']}: {str(body.get('error') or text)[:300]}")
+                if "active in the load order" in src.lower() and "not active" not in src.lower():
+                    raise Refused(f"the reader answered {x['name']} from its active load order ({src}), not from the "
+                                  f"file at {x['path']}; start it on an instance in which no plugin of this setup is active")
+                if body.get("truncated") or body.get("spilled") or len(body.get("records") or []) != len(part):
+                    raise Refused(f"the reader's answer for {x['name']} was cut short ({len(body.get('records') or [])} of "
+                                  f"{len(part)} records), so its names are not used")
+                out += body.get("records") or []
+            return out
         targets_fk = sorted(fks | set(cells))
+        def keep(rec, x):
+            """A later plugin's version wins, field by field, where it has a value (load order)."""
+            if rec.get("error") or not rec.get("formid"):
+                return None                     # this plugin has no version of the record
+            fl = {f.get("path"): f.get("value") for f in rec.get("fields") or [] if f.get("value") is not None}
+            prev = found.get(rec["formid"]) or {}
+            found[rec["formid"]] = {"type": rec.get("type") or prev.get("type"),
+                                    "editorId": rec.get("editorid") or prev.get("editorId"),
+                                    "name": fl.get("Name") or prev.get("name"),
+                                    "from": x["name"] if fl.get("Name") else prev.get("from")}
+            return fl
         for x in order:
             for rec in read(x, targets_fk, ["Name", "Base"]):
-                fl = {f.get("path"): f.get("value") for f in rec.get("fields") or []}
-                if rec.get("formid"):
-                    found[rec["formid"]] = {"type": rec.get("type"), "editorId": rec.get("editorid"),
-                                            "name": fl.get("Name"), "from": x["name"]}
-                    if fl.get("Base") and FK.match(str(fl["Base"])):
-                        bases[rec["formid"]] = fl["Base"]
+                fl = keep(rec, x)
+                if fl and fl.get("Base") and FK.match(str(fl["Base"])):
+                    bases[rec["formid"]] = fl["Base"]
         base_fks = sorted(set(bases.values()))
         if base_fks:
             for x in [p for p in plugins if str(p.get("name")).lower() in
                       {b.split(":", 1)[1].lower() for b in base_fks} | {t.lower() for t in targets}]:
                 for rec in read(x, base_fks, ["Name"]):
-                    fl = {f.get("path"): f.get("value") for f in rec.get("fields") or []}
-                    found[rec["formid"]] = {"type": rec.get("type"), "editorId": rec.get("editorid"),
-                                            "name": fl.get("Name"), "from": x["name"]}
+                    keep(rec, x)
     finally:
         reader.close()
         tmp.cleanup()
