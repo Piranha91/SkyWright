@@ -14,7 +14,8 @@ whose type is, or transitively contains, another major record is a child record 
 identity field is not compared; file bookkeeping, group bookkeeping and runtime-merged fields are named in skill data
 (.claude/skills/world-edit-compatibility/references/record-field-scope.json) by their schema names. A field the
 capture did not read, a field the schema does not know and a record whose read failed are unjudged with the reason,
-never treated as equal. Lists are compared as multisets; numbers at four decimals with -0 equal to 0.
+never treated as equal, and listed (`Unjudged`: the record, field, reason and the plugins whose versions were compared).
+Generated bookkeeping (a worldspace's LargeReferences) is named in the same skill data and not compared. Lists are compared as multisets; numbers at four decimals with -0 equal to 0.
 """
 from __future__ import annotations
 
@@ -65,6 +66,8 @@ class Scope:
         self.file_bk = set(self.data.get("fileBookkeeping") or [])
         self.struct_bk = set(self.data.get("structBookkeeping") or [])
         self.group_bk = {k: set(v) for k, v in (self.data.get("groupBookkeeping") or {}).items()}
+        self.generated = {k: set(v) for k, v in (self.data.get("generatedBookkeeping") or {}).items()
+                          if isinstance(v, list)}
         self.merged = {k: set(v) for k, v in (self.data.get("runtimeMerged") or {}).items()}
         self.merged_records = set(self.data.get("runtimeMergedRecords") or [])
         self.angles = set(self.data.get("anglesRadians") or [])
@@ -119,7 +122,8 @@ class Scope:
         for n in sorted(self.struct_bk):
             if n not in struct_fields:
                 out.append(f"structBookkeeping names {n}, which no struct in the schema has")
-        for kind, table in (("groupBookkeeping", self.group_bk), ("runtimeMerged", self.merged)):
+        for kind, table in (("groupBookkeeping", self.group_bk), ("generatedBookkeeping", self.generated),
+                            ("runtimeMerged", self.merged)):
             for rtype, names in sorted(table.items()):
                 r = self.records.get(rtype)
                 if r is None:
@@ -142,7 +146,7 @@ class Scope:
         if t is None:
             return "unknown"
         top = segs[0]
-        if top in self.file_bk or top in self.group_bk.get(rtype, ()):
+        if top in self.file_bk or top in self.group_bk.get(rtype, ()) or top in self.generated.get(rtype, ()):
             return "bookkeeping"
         if top in self.merged.get(rtype, ()):
             return "merged"
@@ -376,7 +380,7 @@ def rows_for_setup(reads: list[dict], plugins: list[dict], scope: Scope, contain
         if hit is None:
             continue
         by_fk[r["formKey"]].append((hit[0], hit[1], r))
-    conflicts = []
+    conflicts, unjudged = [], []
     cov = collections.OrderedDict()
     # A worldspace's persistent cell (the one its TopCell names) holds the worldspace's persistent references; its
     # own fields (a grid of 0,0 and flags) describe no place, so it is a container and is not compared.
@@ -395,8 +399,15 @@ def rows_for_setup(reads: list[dict], plugins: list[dict], scope: Scope, contain
         c = line(rtype)
         if len(chain) < 2:
             continue
+        names = [name for _, name, _ in chain]
+
+        def unjudge(field, reason):
+            # counted on the coverage line and listed with the plugins whose versions were compared, so a report can
+            # say how many unjudged fields lie on records two given mods both change
+            c["Unjudgeable"][reason] += 1
+            unjudged.append({"FormKey": fk, "Type": rtype, "Field": field, "Reason": reason, "Plugins": names})
         if any(r["status"] != "ok" for _, _, rs in chain for r in rs):
-            c["Unjudgeable"][REASON_FAILED] += 1
+            unjudge(None, REASON_FAILED)
             continue
         if fk in containers:
             c["SetAside"][CONTAINER] += 1
@@ -415,17 +426,17 @@ def rows_for_setup(reads: list[dict], plugins: list[dict], scope: Scope, contain
                 c["SetAside"][MERGED] += 1
                 continue
             if cls == "unknown":
-                c["Unjudgeable"][REASON_UNKNOWN] += 1
+                unjudge(key, REASON_UNKNOWN)
                 continue
             by_top.setdefault(key.split(".")[0], []).append(key)
         for top, leaves in by_top.items():
             picked = [v.read_for(top) for v in views]
             if any(x is None for x in picked):
-                c["Unjudgeable"][REASON_TRUNCATED if any(v.truncated_at(top) for v in views) else REASON_NOT_READ] += 1
+                unjudge(top, REASON_TRUNCATED if any(v.truncated_at(top) for v in views) else REASON_NOT_READ)
                 continue
             got = [v.keyed(x) for v, x in zip(views, picked)]
             if len({x.get("depth") for x in picked}) > 1 and any(k not in g for k in leaves for g in got):
-                c["Unjudgeable"][REASON_DEPTH] += 1
+                unjudge(top, REASON_DEPTH)
                 continue
             vals = [tuple((k, g.get(k, ())) for k in leaves) for g in got]
             win_i = len(chain) - 1
@@ -447,7 +458,8 @@ def rows_for_setup(reads: list[dict], plugins: list[dict], scope: Scope, contain
                                        "Reads": reads_}]})
     coverage = [{"Population": v["Population"], "Judged": v["Judged"],
                  "Unjudgeable": dict(v["Unjudgeable"]), "SetAside": dict(v["SetAside"])} for v in cov.values()]
-    return {"Population": "contested records", "State": "baseline", "Conflicts": conflicts, "Coverage": coverage}
+    return {"Population": "contested records", "State": "baseline", "Conflicts": conflicts, "Coverage": coverage,
+            "Unjudged": unjudged}
 
 
 def derive(request: Path, response: Path, configuration: dict, scope: Scope, rel: dict | None = None,

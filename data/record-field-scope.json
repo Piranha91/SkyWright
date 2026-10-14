@@ -14,6 +14,10 @@
     "DefaultObjectManager": ["Objects"],
     "IdleAnimation": ["RelatedIdles"]
   },
+  "generatedBookkeeping": {
+    "about": "Generated bookkeeping, not authored game data, and not compared: a worldspace's LargeReferences is the list of large references by grid cell that the editing tools generate from the placed references (ruled not compared at the 4.24 phase-1 Gate C review, 2026-10-14; session 1's scorecard left it out with the worldspace container).",
+    "Worldspace": ["LargeReferences"]
+  },
   "runtimeMergedRecords": ["NavigationMeshInfoMap"],
   "anglesRadians": ["Placement.Rotation"]
 }
