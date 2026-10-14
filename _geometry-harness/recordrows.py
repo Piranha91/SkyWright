@@ -335,8 +335,17 @@ class _View:
         return any(id(r) in self.cut and not self.covers(r, top) for r in self.reads)
 
 
-def rows_for_setup(reads: list[dict], plugins: list[dict], scope: Scope) -> dict:
-    """The conflict-file emit for one setup: `plugins` in load order, each {name, path}."""
+TOPCELL = re.compile(r"TopCell\.FormKey = ([0-9A-Fa-f]{6}:[^\\\"]+?\.es[mpl])")
+
+
+def persistent_cells(response: Path) -> set[str]:
+    """Every persistent cell a worldspace read in this capture names as its TopCell (one pass over the raw bytes)."""
+    return set(TOPCELL.findall(Path(response).read_text(encoding="utf-8")))
+
+
+def rows_for_setup(reads: list[dict], plugins: list[dict], scope: Scope, containers: set | None = None) -> dict:
+    """The conflict-file emit for one setup: `plugins` in load order, each {name, path}. `containers`: persistent cells
+    known from other captures of the same evaluation (a capture that read no worldspace cannot name them)."""
     order = {_norm_path(p.get("path")): (i, p["name"]) for i, p in enumerate(plugins) if p.get("path")}
     by_fk = collections.defaultdict(list)
     for r in reads:
@@ -348,8 +357,8 @@ def rows_for_setup(reads: list[dict], plugins: list[dict], scope: Scope) -> dict
     cov = collections.OrderedDict()
     # A worldspace's persistent cell (the one its TopCell names) holds the worldspace's persistent references; its
     # own fields (a grid of 0,0 and flags) describe no place, so it is a container and is not compared.
-    containers = {r["fields"].get("TopCell.FormKey") for r in reads
-                  if r.get("type") == "Worldspace" and r.get("status") == "ok"} - {None}
+    containers = ({r["fields"].get("TopCell.FormKey") for r in reads
+                   if r.get("type") == "Worldspace" and r.get("status") == "ok"} - {None}) | set(containers or ())
 
     def line(rtype):
         return cov.setdefault(rtype, {"Population": f"contested {rtype} records", "Judged": 0,
@@ -416,11 +425,12 @@ def rows_for_setup(reads: list[dict], plugins: list[dict], scope: Scope) -> dict
     return {"Population": "contested records", "State": "baseline", "Conflicts": conflicts, "Coverage": coverage}
 
 
-def derive(request: Path, response: Path, configuration: dict, scope: Scope, rel: dict | None = None) -> dict:
+def derive(request: Path, response: Path, configuration: dict, scope: Scope, rel: dict | None = None,
+           containers: set | None = None) -> dict:
     """rows_for_setup over one import's transcripts, citing the bytes it read: `rel` maps each file to the path a
     reader of the output finds it at (inside the bundle)."""
     parsed = parse_transcript(Path(request), Path(response))
-    emit = rows_for_setup(parsed["reads"], list(configuration.get("plugins") or []), scope)
+    emit = rows_for_setup(parsed["reads"], list(configuration.get("plugins") or []), scope, containers)
     rel = rel or {}
     emit["derivedFrom"] = [{"path": str(rel.get(p, p)).replace("\\", "/"), "sha256": sha256(p), "role": role}
                            for role, p in (("request", Path(request)), ("response", Path(response)))]

@@ -97,7 +97,7 @@ def enrich_record_rows(d: Path) -> dict:
         raise Refused("the record field scope names fields the schema does not have: " + "; ".join(probs))
     registry = _load(d / (manifest.get("registry") or "registry/check-registry.json")) or {}
     family = {c.get("id"): c.get("family") for c in registry.get("checks") or [] if isinstance(c, dict)}
-    outputs = []
+    outputs, todo = [], []
     for rp in sorted((d / "receipts").glob("*.json")):
         rc = _load(rp) or {}
         if (rc.get("adapter") or {}).get("kind") != "mcp-import" or not (rc.get("validation") or {}).get("accepted"):
@@ -118,8 +118,14 @@ def enrich_record_rows(d: Path) -> dict:
             continue                                       # the import already carries its rows
         req, resp = d / "evidence" / by_role["request"], d / "evidence" / by_role["response"]
         cfg = ((rc.get("consumed") or {}).get("configuration")) or doc.get("configuration") or {}
+        todo.append((rc, by_role, req, resp, cfg))
+    # persistent cells are named by worldspace reads, which only some captures hold: gathered from all of them first
+    containers = set()
+    for _, _, _, resp, _ in todo:
+        containers |= RR.persistent_cells(resp)
+    for rc, by_role, req, resp, cfg in todo:
         emit = RR.derive(req, resp, cfg, scope, rel={req: f"evidence/{by_role['request']}",
-                                                     resp: f"evidence/{by_role['response']}"})
+                                                     resp: f"evidence/{by_role['response']}"}, containers=containers)
         rel = f"enrichment/record-rows/{rc['checkId']}__{rc['armId']}.json"
         _write(d / rel, emit)
         outputs.append(_row(rel, d, "record-rows", checkId=rc["checkId"], armId=rc["armId"],
