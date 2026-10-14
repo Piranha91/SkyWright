@@ -644,14 +644,27 @@ class Bundle:
         return rows
 
     def output_emit_path(self, check_id: str, arm_id: str, part: str | None) -> str | None:
+        """The file a check's rows are read from: an import's `rows` output (copied as `NN-rows.json`), else rows
+        derived after measurement from that import's transcripts (a `record-rows` enrichment), else the first JSON
+        output the receipt recorded."""
         rc = self.receipt_by_key.get((check_id, arm_id, part))
         if not rc:
             return None
         rid = rc["receiptId"]
-        for e in self.evidence:
-            if e.get("kind") == "emit" and e.get("recordedBy") == rid and str(e.get("path", "")).endswith(".json"):
-                return e["path"]
-        return None
+        emits = [e["path"] for e in self.evidence if e.get("kind") == "emit" and e.get("recordedBy") == rid
+                 and str(e.get("path", "")).endswith(".json")]
+        rows = [x for x in emits if x.endswith("-rows.json")]
+        if rows:
+            return rows[0]
+        if part in (None, "arm"):
+            for e in self.evidence:
+                if (e.get("kind") == "enrichment" and e.get("enrichment") == "record-rows"
+                        and e.get("checkId") == check_id and e.get("armId") == arm_id):
+                    return e["path"]
+        return emits[0] if emits else None
+
+    def enrichment(self) -> list[dict]:
+        return [e for e in self.evidence if e.get("kind") == "enrichment"]
 
     def diff_log_path(self, check_id: str, arm_id: str) -> str | None:
         rc = self.receipt_by_key.get((check_id, arm_id, "diff"))
@@ -687,7 +700,9 @@ def conflict_rows(conflict: dict, evidence_id: str | None) -> list[dict]:
             continue
         rows.append({"formKey": n.get("FormKey"), "label": n.get("Label"), "summary": conflict.get("Summary"),
                      "physical": n.get("Physical"), "physicalDetail": n.get("PhysicalDetail"),
-                     "evidenceId": evidence_id})
+                     "evidenceId": evidence_id,
+                     **({"field": conflict.get("Field"), "values": n.get("Values"), "reads": n.get("Reads")}
+                        if conflict.get("Kind") == "LOST-EDIT" else {})})
     if not rows:
         rows.append({"formKey": None, "label": None, "summary": conflict.get("Summary"), "physical": None,
                      "physicalDetail": None, "evidenceId": evidence_id})
@@ -862,6 +877,8 @@ def build_prediction(ctx: dict) -> dict:
             elif f.get("kind") == "finding":
                 measured.add(key)
                 c = f.get("counts") or {}
+                if c.get("derivedRows") == 0:
+                    continue
                 if not (c.get("A") and c.get("B")):
                     count_only[key] = count_only.get(key, 0) + int(c.get("findings") or 0)
                     continue
@@ -880,6 +897,7 @@ def build_prediction(ctx: dict) -> dict:
     #     hash for hash, and a check is used only where both ran the same adapter and probe build and measured the
     #     same rows on that shared setup. Otherwise nothing is joined (refusal) or the check stays unseparated.
     sibling, sib_ok, sibling_record = ctx.get("sibling"), {}, None
+    sib_only, anchor = set(), None
     if sibling is not None and p_targets:
         main_b, sib_b = ctx["mainBundle"], sibling["bundle"]
 
@@ -917,11 +935,31 @@ def build_prediction(ctx: dict) -> dict:
             t = ((rc or {}).get("consumed") or {}).get("tool") or {}
             return t.get("dllSha256"), t.get("coreDllSha256")
 
+        def receipt_config(bundle, check_id, arm_id):
+            rc = bundle.receipt_by_key.get((check_id, arm_id, "arm")) or bundle.receipt_by_key.get((check_id, arm_id, None))
+            cfg = ((rc or {}).get("consumed") or {}).get("configuration") or {}
+            plugs = cfg.get("plugins")
+            return None if not isinstance(plugs, list) else tuple(
+                (str(x.get("name")), str(x.get("sha256") or "")) for x in plugs if isinstance(x, dict))
+
         checks_record = []
         for check_id in sorted({c for c, _ in measured if c}):
-            why = None
+            why, how = None, None
             if (main_b.checks.get(check_id) or {}).get("adapter") != (sib_b.checks.get(check_id) or {}).get("adapter"):
                 why = "the two evaluations ran this check with different adapters"
+            elif (check_id, p_arm) not in measured and (check_id, "sibling:" + anchor) in measured:
+                # Only the sibling measured it on the shared setup: its rows stand in for this bundle's, and only when
+                # the configuration its own receipt records is this setup's, plugin for plugin, in order, byte for byte.
+                got = receipt_config(sib_b, check_id, anchor)
+                if got is None:
+                    why = ("the evaluation without the patch records no configuration for this check on the shared "
+                           "setup, so its result is not used")
+                elif got != p_plugs:
+                    why = ("the evaluation without the patch measured this check on a configuration that differs from "
+                           "this setup's (plugins, order or bytes), so its result is not used")
+                else:
+                    how = "from-sibling-only"
+                    sib_only.add(check_id)
             elif (check_id, p_arm) not in measured or (check_id, "sibling:" + anchor) not in measured:
                 why = "one of the two evaluations did not measure this check on the shared setup"
             else:
@@ -931,14 +969,22 @@ def build_prediction(ctx: dict) -> dict:
                 elif (prefixes.get((check_id, p_arm)) or set()) != (prefixes.get((check_id, "sibling:" + anchor)) or set()):
                     why = "the two evaluations measured different results for this check on the shared setup"
             sib_ok[check_id] = why is None
-            checks_record.append({"checkId": check_id, "joined": why is None, "why": why})
+            checks_record.append({"checkId": check_id, "joined": why is None, "why": why,
+                                  **({"how": how} if how else {})})
         sibling_record = {"pathAsGiven": sibling.get("pathAsGiven"), "planId": sibling.get("planId"),
                           "manifestSha256": sibling.get("manifestSha256"), "anchorArm": anchor,
                           "roles": {k: v.split(":", 1)[1] for k, v in roles.items()}, "checks": checks_record}
 
+    def p_of(check_id):
+        """The setup a check's prediction rows come from: this bundle's P, or the sibling's identical setup when only
+        the sibling measured the check there."""
+        return "sibling:" + anchor if check_id in sib_only else p_arm
+
     def present(arm_id, rk):
         if arm_id is not None and str(arm_id).startswith("sibling:") and not sib_ok.get(rk[0]):
             return False                       # a sibling check that does not match on the shared setup is unused
+        if arm_id == p_arm:
+            arm_id = p_of(rk[0])
         return arm_id is not None and tuple(rk[:5]) in (prefixes.get((rk[0], arm_id)) or set())
 
     def admission(rk, history):
@@ -980,7 +1026,7 @@ def build_prediction(ctx: dict) -> dict:
     unit = ctx.get("headlineUnit") or words.get("headlineUnit") or "relationships"
     p_rows = {}
     for (check_id, arm_id), rs in rows_by.items():
-        if arm_id == p_arm:
+        if arm_id == p_of(check_id):
             p_rows.update(rs)
     for rk in sorted(p_rows, key=lambda k: tuple(str(x) for x in k)):
         hit = p_rows[rk]
@@ -988,6 +1034,11 @@ def build_prediction(ctx: dict) -> dict:
         entry = {"checkId": rk[0], "kind": rk[1], "A": rk[2], "B": rk[3], "formKey": rk[4], "summary": rk[5],
                  "admission": adm,
                  "findingId": hit["finding"].get("id")}
+        if rk[0] in sib_only:
+            entry["source"] = "sibling"
+        if hit["row"].get("field") is not None:
+            entry["field"] = hit["row"]["field"]
+            entry["values"] = hit["row"].get("values")
         if adm != "admitted":
             set_aside[adm] += 1
             record.append(entry)
@@ -1063,7 +1114,7 @@ def build_prediction(ctx: dict) -> dict:
     counted = by_attr["needs-both"] if multi else items
     total = n_of(counted, unit)
     unseparated = counts["notSeparable"][unit] if multi else 0
-    checks_on_p = sorted({c for (c, a) in measured if a == p_arm})
+    checks_on_p = sorted({c for (c, a) in measured if a == p_of(c)})
     nouns = (words.get("headlineUnits") or {}).get(unit) or [words["inconsistencySingular"], words["inconsistencyPlural"]]
     if total:
         verdict = bind(words["verdictFound"], {"subject": subject, "count": total,
@@ -1185,16 +1236,37 @@ def build_prediction(ctx: dict) -> dict:
         keyof = lambda e: (e["checkId"], e["kind"], e["A"], e["B"], e["formKey"])          # noqa: E731
         not_measured = [e for e in admitted if (e["checkId"], patched_arm) not in measured]
         judged = [e for e in admitted if (e["checkId"], patched_arm) in measured]
-        hits = [e for e in judged if not present(patched_arm, keyof(e))]
-        open_ = [e for e in judged if present(patched_arm, keyof(e))]
-        problems = []
         patched_rows = {k: v for (c, a), rs in rows_by.items() if a == patched_arm for k, v in rs.items()}
+        patch_lower = {str(x).lower() for x in patch_names}
+        # A lost edit (record lane) is not judged by presence: with the patch loaded last the same plugin's change can
+        # still be lost, to the patch. It is acted on when, with the patch, the field's winner is the patch and its
+        # value differs from the winning value without it; otherwise it is left. A lost edit whose winner is the
+        # patch is the patch's choice, never a problem the patch causes.
+        lost_w = collections.defaultdict(list)
         for rk, hit in patched_rows.items():
+            if rk[1] == "LOST-EDIT":
+                lost_w[(rk[0], rk[4], hit["row"].get("field"))].append(hit["row"] | {"winnerPlugin": rk[3]})
+
+        def acted_on(e):
+            rows_w = lost_w.get((e["checkId"], e["formKey"], e.get("field")))
+            if not rows_w:
+                return True                    # no plugin's change to the field is lost with the patch
+            w = rows_w[0]
+            return (str(w["winnerPlugin"]).lower() in patch_lower
+                    and (w.get("values") or {}).get("winner") != (e.get("values") or {}).get("winner"))
+        hits = [e for e in judged if (acted_on(e) if e["kind"] == "LOST-EDIT" else not present(patched_arm, keyof(e)))]
+        hit_ids = {id(e) for e in hits}
+        open_ = [e for e in judged if id(e) not in hit_ids]
+        problems, choices = [], 0
+        for rk, hit in patched_rows.items():
+            if rk[1] == "LOST-EDIT" and rk[3].lower() in patch_lower:
+                choices += 1
+                continue
             if present(p_arm, rk) or hit["history"] or rk[2].lower() == rk[3].lower():
                 continue
             if is_base_game(rk[2], words) or is_base_game(rk[3], words):
                 continue
-            if (rk[0], p_arm) in measured:
+            if (rk[0], p_of(rk[0])) in measured:
                 problems.append(rk)
         spots = collections.Counter(e["admission"] for e in record if e["admission"] != "admitted"
                                     and (e["checkId"], patched_arm) in measured and not present(patched_arm, keyof(e)))
@@ -1218,6 +1290,7 @@ def build_prediction(ctx: dict) -> dict:
         validation = {"status": "compared", "headline": ctx["oldVerdict"], "patches": patch_names,
                       "withPatchArm": patched_arm, "withoutPatchArm": p_arm, "byItem": by_item,
                       "hits": len(hits), "open": len(open_), "falseAlarms": None, "patchProblems": len(problems),
+                      "patchChoices": choices,
                       "notMeasured": len(not_measured), "blindSpots": blind, "sentences": sentences,
                       "otherComparisons": [c for c in comparisons if c["withPatch"] != patched_arm or c["withoutPatch"] != p_arm],
                       "missingFacts": list(words["validationMissingFacts"])}
@@ -1627,6 +1700,16 @@ def compile_plan(bundle_dir: Path, verify: dict, settings: dict, pr: dict, bundl
         emit_path = b.output_emit_path(check_id, arm_id, part)
         emit = b.emit(emit_path) if emit_path else None
         conflicts = emit.get("Conflicts") if isinstance(emit, dict) else None
+        if isinstance(conflicts, list) and not conflicts and r.get("findings"):
+            # rows derived from a counted result that hold no row of their own: measured, nothing between mods
+            f = add({"id": None, "kind": "finding", "priority": 3, "checkId": check_id, "family": b.check_family(check_id),
+                     "armId": arm_id, "part": part, "title": b.check_title(check_id), "strength": r.get("strength"),
+                     "verdict": verdict, "plain": bind(templates.get("finding-count", ""), {
+                         "findings": r.get("findings"), "armId": arm_id, "strength": r.get("strength")}),
+                     "counts": {"findings": r.get("findings"), "derivedRows": 0}, "evidenceIds": base_eids, "rows": []})
+            f["readerRelevant"] = False
+            f["readerEvidenceReason"] = "derived-rows-none"
+            continue
         if not isinstance(conflicts, list):
             f = add({"id": None, "kind": "finding", "priority": 3, "checkId": check_id, "family": b.check_family(check_id),
                  "armId": arm_id, "part": part, "title": b.check_title(check_id), "strength": r.get("strength"),
@@ -2480,6 +2563,15 @@ def compile_plan(bundle_dir: Path, verify: dict, settings: dict, pr: dict, bundl
         reader["comparisonMods"] = alone_mods
     reader["verdict"] = verdict
     reader["prediction"] = lead["prediction"]
+    # Evidence derived after measurement (bundle standard §8, enrichment): listed in the evidence index with what
+    # it was derived from; names reach the plan so a reader's page needs no side input.
+    reader["enrichment"] = [{k: e.get(k) for k in ("path", "sha256", "enrichment", "checkId", "armId", "derivedFrom")}
+                            for e in b.enrichment()]
+    reader["enrichmentLine"] = reader_data.get("enrichmentLine") if reader["enrichment"] else None
+    names_row = next((e for e in b.enrichment() if e.get("enrichment") == "names"), None)
+    names_doc = load_json(bundle_dir / names_row["path"]) if names_row else None
+    reader["names"] = ({k: names_doc.get(k) for k in ("places", "objects", "mods", "missing", "derivedFrom")}
+                       if isinstance(names_doc, dict) else None)
     reader["coverage"] = lead["coverage"]
     reader["validation"] = lead["validation"]
     reader["sectionHeadings"].update(lead["headings"])

@@ -42,6 +42,16 @@ The single-mod setups this prediction reads were measured in a separate bundle: 
 {% endfor %}
 {% endif %}
 
+{% if p.reader.get("enrichment") %}
+<a id="derived-after-measurement"></a>
+## Derived after measurement ({{ p.reader.enrichment|length }})
+
+{{ p.reader.enrichmentLine }}
+
+{% for e in p.reader.enrichment %}- `{{ e.path|txt }}` ({{ e.enrichment }}{% if e.checkId %}, `{{ e.checkId }}` on {{ e.armId }}{% endif %}), sha256 `{{ e.sha256|txt }}`; derived from {% for d in e.derivedFrom or [] %}`{{ d.path|txt }}` (`{{ d.sha256|txt }}`){{ ", " if not loop.last else "" }}{% else %}nothing recorded{% endfor %}
+{% endfor %}
+{% endif %}
+
 <a id="detail-set-aside"></a>
 ## Set aside from the detail list ({{ p.detailAside|length }})
 

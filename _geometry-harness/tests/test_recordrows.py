@@ -103,7 +103,7 @@ def rows_of(batches, tmp, order=ORDER):
 
 
 def three(fk, base, a, b, rtype="PlacedObject", sel_b=None):
-    return [("b1", [(BASE, fk, rtype, None, base, None, 3), (A, fk, rtype, None, a, None, 3),
+    return [(f"b-{fk[:6]}", [(BASE, fk, rtype, None, base, None, 3), (A, fk, rtype, None, a, None, 3),
                     (B, fk, rtype, None, b, sel_b, 3)])]
 
 
