@@ -25,8 +25,9 @@
 #     the sweep at that candidate instead of being compared. Re-emit the base with the current probe.
 # The precedence fix that shipped with it also changes what a sweep on a lab-style profile measures: SyntheticOrder
 # used to rank switched-off mod folders above the game's Data folder, so a plugin present in both was read from the
-# folder on every --enable arm and from Data on the base arm. On the SE conflict lab that was 21 Creation Club
-# plugins' worth of different bytes inside each comparison, and it scored one row as GONE+NEW on a null intervention.
+# folder on every --enable arm and from Data on the base arm. On a profile whose Creation Club plugins also sit in a
+# switched-off folder with different bytes, that put their difference inside each comparison, and it scored a row as
+# GONE+NEW on a null intervention.
 #
 # PROGRESS (roadmap 4.16): one run for the sweep, one stage, one child run per candidate, so a
 # sweep of twenty candidates says which one it is on and roughly how long is left instead of

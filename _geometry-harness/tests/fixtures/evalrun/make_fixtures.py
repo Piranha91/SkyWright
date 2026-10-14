@@ -407,10 +407,20 @@ def main() -> int:
     arms = arms_ok(stems)
     arms["adviceprobe"] = {"*": {"behaviour": "ok", "modId": "999001",
                                  "warnings": ["the stored page copy is older than the catalogue snapshot"]}}
+    # patchprobe's --json hit list (schema 1): a patch in another list that masters the fixture target, bytes f00d...
     arms["patchprobe"] = {"*": {"behaviour": "ok",
-                                "json": {"probe": "patchprobe", "plugins": 4,
-                                         "rows": [{"name": "CommunityPatch.esp", "sha256": "f00d" + "0" * 60,
-                                                   "installed": False}]}}}
+                                "json": {"schemaVersion": 1, "probe": "patchprobe", "mode": "pair", "complete": True,
+                                         "sourcesSearched": [{"kind": "instance", "path": "fixture://other-list",
+                                                              "name": "OtherList"}],
+                                         "sourcesNotSearched": [],
+                                         "counts": {"judged": 4, "unjudgeable": 0, "hits": 1, "masterPairs": 1},
+                                         "hits": [{"file": "CommunityPatch.esp", "kind": "other-list",
+                                                   "where": {"instance": "OtherList", "mod": "Community Patch"},
+                                                   "sha256": "f00d" + "0" * 60, "bytes": 1024, "hashSource": "file",
+                                                   "masters": ["FixtureBase.esp", "FixtureTarget.esp"],
+                                                   "detail": {"pair": ["FixtureBase.esp", "FixtureTarget.esp"],
+                                                              "state": "OtherListPresent"}}],
+                                         "unjudgeableItems": []}}}
     case_dir("case-10-discovery-media",
              {"candidate-00-baseline.json": base, "candidate-01-reorder.json": reorder}, {"arms": arms})
 

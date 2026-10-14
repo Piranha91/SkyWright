@@ -81,9 +81,6 @@
    "functional.linked-dependencies"
   ],
   "discovery": {
-   "candidateQualifications": [
-    "unqualified"
-   ],
    "sourcesNotSearchedPresent": true
   },
   "mediaEvidenceStrength": "supplied-media",
@@ -114,7 +111,6 @@
  },
  "verifyBundleExit": 0,
  "notes": [
-  "D7: qualification 'qualified' only for a plugin whose hash is in an evaluated arm, else 'unqualified'.",
   "D8: an item whose fingerprint equals an accepted receipt's fingerprint on that arm is evidence with strength supplied-media; anything else is unassessedMedia with the reason and is not evidence.",
   "D8 (media item schema 2): the accepted item is copied to media/<sha256[:12]>-<basename> and its row carries every item field plus id, sha256, bytes; a rejected item is unassessed by ONE closed reason (here fingerprint-mismatch), never a free sentence alone.",
   "A-3: an arm's comparison set is its OWN configuration (accepted receipts with part null or arm). A baseline-order picture declared for the candidate arm with the baseline fingerprint is fingerprint-mismatch even though the candidate's reverse receipt consumed that order.",

@@ -137,7 +137,7 @@
   "rule": "A-9 (V's finding 1): a control file missing from the run is a bundle refusal by name, never a path that drops out of manifest.required because nothing was copied under it. Measured on the first build: STATUS.md deleted, bundle exit 0, 20 required paths without it, verify complete: true."
  },
  "q42DemoBundle": {
-  "path": "S:/Dev/houseCARL/_claude/runs/2026-09-12-evaluation-controller/demo/run/bundle",
+  "path": null,
   "env": "HOUSECARL_EVALRUN_DEMO_BUNDLE",
   "copiedFirst": true,
   "whyCopied": "verify-bundle WRITES verify.json into the directory it verifies, so the original Q42 artifact is never verified in place",
@@ -145,6 +145,6 @@
   "defectKind": "schema-unsupported",
   "completeIsFalse": true,
   "rule": "A-1: Q42's demo bundle is the integration input for the schema refusal \u2014 a bundleSchema 1 bundle is refused by name, never silently certified",
-  "unavailableNote": "the demo run is untracked and lives only in the main checkout. When the path is absent the case prints a NOTE and the same rule stays covered by verifyBundle.cases[schema-unsupported], which builds a bundleSchema 1 manifest from this run's own healthy bundle."
+  "unavailableNote": "the demo run is private and untracked; this arm runs only when the environment variable names a bundleSchema 1 bundle. When it is unset or absent the case prints a NOTE and the same rule stays covered by verifyBundle.cases[schema-unsupported], which builds a bundleSchema 1 manifest from this run's own healthy bundle."
  }
 }

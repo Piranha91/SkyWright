@@ -647,28 +647,17 @@ NifRenderGeometryOutcome SweptProxy(byte[] bytes, NifRenderGeometryOutcome origi
     var model = MemberMotion.Read(bytes, Read, null);
     if (model.Status != "moving") return original;
     // review ruling (Gate C): only a region that converged in its budget is a proxy; otherwise today's refusal stands, named
-    var region = MemberMotion.DiscoveryRegion(bytes, model, VolumeGeometry.Render, new MemberSweep(DeltaTarget: motionDelta), Read);
+    var region = MemberMotion.DiscoveryProxy(bytes, model, VolumeGeometry.Render, new MemberSweep(DeltaTarget: motionDelta), Read);
     if (region.Status != "built")
         return region.Reason is { } why && why.StartsWith("motion region did not converge", StringComparison.Ordinal)
             ? original with { Reason = $"{original.Reason}; {why}" } : original;
-    var v = new List<System.Numerics.Vector3>(); var idx = new List<int>();
-    var total = Aabb.Empty;
-    foreach (var smp in region.Samples)
-    {
-        var lo = smp.Soup.Vertices.Aggregate(new System.Numerics.Vector3(float.MaxValue), System.Numerics.Vector3.Min) - new System.Numerics.Vector3((float)smp.Delta);
-        var hi = smp.Soup.Vertices.Aggregate(new System.Numerics.Vector3(float.MinValue), System.Numerics.Vector3.Max) + new System.Numerics.Vector3((float)smp.Delta);
-        int b0 = v.Count;
-        for (int k = 0; k < 8; k++) v.Add(new((k & 1) == 0 ? lo.X : hi.X, (k & 2) == 0 ? lo.Y : hi.Y, (k & 4) == 0 ? lo.Z : hi.Z));
-        foreach (var t in new[] { 0,2,1, 1,2,3, 4,5,6, 5,7,6, 0,1,4, 1,5,4, 2,6,3, 3,6,7, 0,4,2, 2,4,6, 1,3,5, 3,7,5 }) idx.Add(b0 + t);
-        total = total.Add(lo).Add(hi);
-    }
     // lane K: a pinned body whose controllers are left out is swept over its hinge swing, not over those controllers
     string anims = model.Labels.Contains(MemberMotion.AnimatedPinnedLabel)
         ? "the hinge swing (the stored pose and every angle within the file's limits); " + MemberMotion.AnimatedPinnedLabel
         : string.Join(", ", region.Animations.Select(a => $"{a.Id} {a.Cycle}"));
     return new NifRenderGeometryOutcome(NifRenderGeometryStatus.Measured,
-        $"swept proxy: {region.Samples.Count} sampled poses' boxes grown by their certified delta (max {region.MaxDelta:0.###} u, {(region.Converged ? "converged" : "not converged")}) over {anims}; an outer bound for discovery only",
-        total, new TriangleSoup(v.ToArray(), idx.ToArray()), original.Model, original.ContentSha256, original.CacheKey + "|swept:" + motionDelta.ToString(System.Globalization.CultureInfo.InvariantCulture));
+        $"swept proxy: {region.SampleCount} sampled poses' boxes grown by their certified delta (max {region.MaxDelta:0.###} u, {(region.Converged ? "converged" : "not converged")}) over {anims}; an outer bound for discovery only",
+        region.Box, region.Soup!, original.Model, original.ContentSha256, original.CacheKey + "|swept:" + motionDelta.ToString(System.Globalization.CultureInfo.InvariantCulture));
 }
 
 // --reach (G1 build list, Stage A): the reach region of a record that has no render box (MeshReach). The asset is the

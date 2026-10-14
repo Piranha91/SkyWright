@@ -931,19 +931,19 @@
           "{pair}"
         ],
         "reverse": false,
-        "output": "text",
+        "output": "json",
         "result": {
           "kind": "discovery",
-          "findings": "regex:(?P<n>[\\d,]+) distinct master pairs",
-          "judged": "regex:indexed (?P<n>[\\d,]+) plugins",
-          "unjudgeable": "regex:indexed [\\d,]+ plugins \\((?P<n>[\\d,]+) unreadable\\)"
+          "findings": "counts.hits",
+          "judged": "counts.judged",
+          "unjudgeable": "counts.unjudgeable"
         },
         "commonFlags": false
       },
       "evidence": {
         "strength": "record-fact",
         "claim": "FOMOD / POOL / PATCH COVERAGE",
-        "limits": "patchprobe has no --json: its output is the console log, which the receipt hashes as text. It runs per ARM because A-10(g) derives its --pair arguments from the arm itself -- the plugin pairs whose relative order flips between the baseline and that candidate -- so a baseline-only run would leave patch.candidate-qualification, which runs on every arm, blocked for want of an input on every candidate. patchprobe itself reads the machine's installed plugins and takes no --order; only the pairs it is asked about change per arm. It searches the configured roots only; roots not configured are sources not searched and are listed as such. A hit is a candidate, never a verified repair."
+        "limits": "patchprobe writes its hit list with --json (schema 1, _shared/DiscoveryHits.cs): every plugin that masters an asked pair, with the sha256 of its file, and each download matched only by name with no hash and the reason. patch.candidate-qualification reads it. It runs per ARM because A-10(g) derives its --pair arguments from the arm itself -- the plugin pairs whose relative order flips between the baseline and that candidate -- so a baseline-only run would leave patch.candidate-qualification, which runs on every arm, blocked for want of an input on every candidate. patchprobe itself reads the machine's installed plugins and takes no --order; only the pairs it is asked about change per arm. It searches the configured roots only; roots not configured are sources not searched and are listed as such. A hit is a candidate, never a verified repair."
       },
       "manualDecisionAllowed": false
     },
@@ -968,19 +968,19 @@
         "exe": "fomodprobe",
         "args": [],
         "reverse": false,
-        "output": "text",
+        "output": "json",
         "result": {
           "kind": "discovery",
-          "findings": "regex:DISTINCT patches behind the ABSENT findings: (?P<n>[\\d,]+)",
-          "judged": "regex:\\.\\.\\.whose ModuleConfig parsed : (?P<n>[\\d,]+)",
-          "unjudgeable": "regex:\\.\\.\\.whose ModuleConfig parsed : [\\d,]+\\s+\\((?P<n>[\\d,]+) unreadable"
+          "findings": "counts.hits",
+          "judged": "counts.judged",
+          "unjudgeable": "counts.unjudgeable"
         },
         "commonFlags": false
       },
       "evidence": {
         "strength": "record-fact",
         "claim": "FOMOD / POOL / PATCH COVERAGE",
-        "limits": "fomodprobe has neither --order nor --json: it reads the instance's own installers and prints them, so it runs on the baseline profile only and its receipt hashes the log. Optional, because an unchosen installer option is a lead, not a defect in the evaluated order. Requires the download pool and 7z paths from the harness config; absent, it refuses."
+        "limits": "fomodprobe has no --order: it reads the instance's own installers, so it runs on the baseline profile only. With --json it writes its hit list (schema 1): one hit per plugin an unselected option delivers, with the sha256 of that archive entry, its condition plugins and its tier. Optional, because an unchosen installer option is a lead, not a defect in the evaluated order. Requires the download pool and 7z paths from the harness config; absent, it refuses."
       },
       "manualDecisionAllowed": false
     },
@@ -1005,20 +1005,19 @@
         "exe": "poolprobe",
         "args": [],
         "reverse": false,
-        "output": "text",
+        "output": "json",
         "result": {
           "kind": "discovery",
-          "findings": "regex:\\.\\.\\.and PATCH-SHAPED \\(masters more than vanilla \\+ USSEP\\) : (?P<n>[\\d,]+)",
-          "judged": "regex:pool holds (?P<n>[\\d,]+) archives",
-          "unjudgeable": null,
-          "note": "poolprobe prints no count of archives it could not open; a failed extraction is reported per archive with its reason and never totalled, so the spec is null rather than a number read off something else."
+          "findings": "counts.hits",
+          "judged": "counts.judged",
+          "unjudgeable": "counts.unjudgeable"
         },
         "commonFlags": false
       },
       "evidence": {
         "strength": "record-fact",
         "claim": "FOMOD / POOL / PATCH COVERAGE",
-        "limits": "poolprobe has neither --order nor --json: baseline profile only, receipt hashes the log. A downloadable hit remains UNQUALIFIED until its actual payload has been evaluated in an arm (patch.candidate-qualification)."
+        "limits": "poolprobe has no --order: baseline profile only. With --json it writes its hit list (schema 1): each patch-shaped plugin in a never-installed archive, one hit per archive version, with the sha256 of the extracted bytes. A downloadable hit remains UNQUALIFIED until its actual payload has been evaluated in an arm (patch.candidate-qualification)."
       },
       "manualDecisionAllowed": false
     },
