@@ -6602,10 +6602,10 @@ def rehash_manifest_row(bundle: Path, rel: str) -> None:
     (bundle / "manifest.json").write_text(json.dumps(m, indent=2), encoding="utf-8")
 
 
-def case_49(tmp):
+def case_61(tmp):
     """C1 (4.24 phase 1): `enrich --kind record-rows` derives rows from the bundle's own import transcripts, every row
     citing the bytes it came from; it changes no disposition, claim or count, and verify-bundle checks all of that."""
-    case = "case-49-enrich-record-rows"
+    case = "case-61-enrich-record-rows"
     bundle, plan, cid, arm, names = recorded_bundle(tmp, case)
     disp_before = (bundle / "disposition.json").read_bytes()
     b1 = tmp / f"{case}-b1"
@@ -6662,10 +6662,10 @@ def case_49(tmp):
            f"{case}: a count changed beside an enrichment fails verification", "C1")
 
 
-def case_51(tmp):
+def case_63(tmp):
     """C1 (4.24 phase 1): `enrich --kind names` reads only plugin files whose bytes equal the bundle's recorded hash,
     refusing by name otherwise, and records the source of every name (a stand-in reader answers the record reads)."""
-    case = "case-51-enrich-names"
+    case = "case-63-enrich-names"
     bundle, plan, cid, arm, names = recorded_bundle(tmp, case)
     fake = FIXT / "fake_records_mcp.py"
     reader_cmd = f"{sys.executable} {fake}"
@@ -6706,10 +6706,10 @@ def case_51(tmp):
     check(sha_of(target) == hashlib.sha256(original).hexdigest(), f"{case}: the plugin was restored by content")
 
 
-def case_53(tmp):
+def case_65(tmp):
     """4.24 phase 1: an import may carry a third output, `rows`, in the conflict-file shape; rows naming a plugin that
     is not in the arm are refused; an accepted rows output travels in the bundle."""
-    case = "case-53-import-rows-output"
+    case = "case-65-import-rows-output"
     c = "case-01-geometry-and-quest"
     run = tmp / f"{case}-run"
     expect(do_plan(run, c).returncode, 0, f"{case}: plan exit", "setup")
@@ -6752,9 +6752,9 @@ def case_53(tmp):
     expect(evalrun(["verify-bundle", bundle]).returncode, 0, f"{case}: verify-bundle", "§4.8")
 
 
-CASES["case-49"] = case_49
-CASES["case-51"] = case_51
-CASES["case-53"] = case_53
+CASES["case-61"] = case_61
+CASES["case-63"] = case_63
+CASES["case-65"] = case_65
 
 
 def pin_standard_settings(tmp: Path) -> None:
