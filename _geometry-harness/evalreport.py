@@ -1091,18 +1091,22 @@ def build_prediction(ctx: dict) -> dict:
         if " " in code:
             return code
         return words["unjudgeableUnnamed"]
-    items = []
+    items, subjects_of = [], {}
     for g in groups.values():
         g["title"] = title_of(g["checkId"])
         g["inGame"] = in_game.get(f"{g['checkId']}|{g['kind']}") or in_game.get(g["checkId"])
         ph = phrases.get(g["kind"]) or {}
         noun = (ph.get("unitSingular") if g["count"] == 1 else ph.get("unitPlural")) or ("clash" if g["count"] == 1 else "clashes")
         attr_text = bind(words["attribution"][g["attribution"]], {"mod": g["attributionMod"], "why": g["attributionWhy"] or ""})
-        g["plain"] = (f"{fmt_n(g['count'])} {noun} between {g['mods'][0]} and {g['mods'][1]}. "
+        subjects_of[id(g)] = g.pop("_subjects")
+        g["relationships"] = g["count"]
+        g["objects"] = len(subjects_of[id(g)])
+        # a kind whose rows are fields of a record (a path, not a thing) also says how many records they are on
+        on = (f", on {fmt_n(g['objects'])} {ph['objectsSingular'] if g['objects'] == 1 else ph['objectsPlural']},"
+              if ph.get("objectsPlural") else "")
+        g["plain"] = (f"{fmt_n(g['count'])} {noun}{on} between {g['mods'][0]} and {g['mods'][1]}. "
                       + attr_text + (f" {ph['readerQualification']}" if ph.get("readerQualification") else ""))
         g["inGameText"] = (f"In game: {g['inGame']}." if g["inGame"] else words["inGameMissing"])
-        g["relationships"] = g["count"]
-        g["objects"] = len(g.pop("_subjects"))
         g["shownAs"] = ("pair" if not multi or g["attribution"] == "needs-both" else
                         "alone" if g["attribution"] == "single-mod" else "unseparated")
         items.append(g)
@@ -1115,24 +1119,47 @@ def build_prediction(ctx: dict) -> dict:
                if len(subject_mods) > 1 else (subject_mods[0] if subject_mods else "the evaluated mod"))
     # The number counts what needs both evaluated mods (with one evaluated mod, every admitted clash is its own).
     # A clash one mod has with a third mod on its own is shown under its own heading or set aside, never counted
-    # here; a clash whose cause could not be separated is stated in one clause with its count.
-    def n_of(gs, u):
-        return sum(g["relationships"] if u == "relationships" else g["objects"] for g in gs)
+    # here; a clash whose cause could not be separated is stated in one clause with its count. Each kind of clash
+    # (a check and its kind) is stated in its own unit and never summed with another (Gate C round 1): objects and
+    # record fields are different things. A kind whose rows are fields counts records in the verdict (skill data
+    # `verdictKinds`); its field count stays in its item's line.
+    vk = words["verdictKinds"]
+
+    def per_kind(gs):
+        out = collections.OrderedDict()
+        for g in gs:
+            e = out.setdefault((g["checkId"], g["kind"]), {"checkId": g["checkId"], "kind": g["kind"],
+                                                           "relationships": 0, "_s": set()})
+            e["relationships"] += g["relationships"]
+            e["_s"] |= subjects_of[id(g)]
+        return [{**{k: v for k, v in e.items() if k != "_s"}, "objects": len(e["_s"])} for e in out.values()]
+
+    def stated(entries):
+        out = []
+        for e in entries:
+            w = vk.get(f"{e['checkId']}|{e['kind']}") or vk.get(e["checkId"]) or vk["default"]
+            u = w.get("unit") or unit
+            n = e[u]
+            nouns = w.get(u) or vk["default"][u]
+            out.append({**e, "unit": u, "count": n, "phrase": f"{fmt_n(n)} " + bind(nouns[0] if n == 1 else nouns[1],
+                                                                                   {"title": title_of(e["checkId"])})})
+        return sorted(out, key=lambda e: (-e["count"], e["checkId"], e["kind"]))
+
+    def listed(parts):
+        return parts[0] if len(parts) == 1 else "; ".join(parts[:-1]) + "; and " + parts[-1]
     by_attr = {k: [g for g in items if g["attribution"] == k] for k in ("needs-both", "single-mod", "not-separable")}
-    counts = {key: {"relationships": n_of(by_attr[a], "relationships"), "objects": n_of(by_attr[a], "objects")}
+    counts = {key: per_kind(by_attr[a])
               for key, a in (("needsBoth", "needs-both"), ("singleMod", "single-mod"), ("notSeparable", "not-separable"))}
     counted = by_attr["needs-both"] if multi else items
-    total = n_of(counted, unit)
-    unseparated = counts["notSeparable"][unit] if multi else 0
+    verdict_counts = stated(per_kind(counted))
+    unseparated = stated(counts["notSeparable"]) if multi else []
     checks_on_p = sorted({c for (c, a) in measured if a == p_of(c)})
-    nouns = (words.get("headlineUnits") or {}).get(unit) or [words["inconsistencySingular"], words["inconsistencyPlural"]]
-    if total:
-        verdict = bind(words["verdictFound"], {"subject": subject, "count": total,
-                                               "inconsistencyNoun": nouns[0] if total == 1 else nouns[1]})
+    if verdict_counts:
+        verdict = bind(words["verdictFound"], {"subject": subject, "kinds": listed([e["phrase"] for e in verdict_counts])})
     else:
         verdict = bind(words["verdictNone"], {"subject": subject})
     if unseparated:
-        verdict += " " + bind(words["verdictNotSeparable"], {"count": unseparated})
+        verdict += " " + bind(words["verdictNotSeparable"], {"kinds": listed([e["phrase"] for e in unseparated])})
     missing_facts = []
     if not p_targets:
         missing_facts.append(words["noModInSetup"])
@@ -1144,7 +1171,7 @@ def build_prediction(ctx: dict) -> dict:
              "repeat": set_aside["repeat"]}
     prediction = {"subject": subject, "mods": subject_mods, "predictionArm": p_arm, "withoutArm": w_arm,
                   "singleArms": s_arms, "verdict": verdict, "status": "found" if items else "none-found",
-                  "items": items, "total": total, "counts": counts, "headlineUnit": unit,
+                  "items": items, "verdictCounts": verdict_counts, "counts": counts, "headlineUnit": unit,
                   "singleModMode": single_mode, "singleModHeading": words.get("singleModHeading"),
                   "missingFacts": list(dict.fromkeys(missing_facts)),
                   "setAside": aside,
