@@ -288,6 +288,16 @@ def case_27_a_worldspace_persistent_cell_is_a_container():
     assert any("container" in k for k in aside), aside
 
 
+def case_29_a_rotation_a_full_turn_apart_is_the_same_rotation():
+    """Found reconciling Group 6 with session 1 (C3): a patch wrote -0.6104 as 5.6728 radians."""
+    base_ = ref(**{"Placement.Rotation": "-0.6104,-0.148,6.2094"})
+    a = ref(**{"Placement.Rotation": "0.5,-0.148,6.2094"})
+    b = ref(**{"Placement.Rotation": "0.5000001,6.1351853,-0.0737853"})
+    with tempfile.TemporaryDirectory() as td:
+        emit, _ = rows_of(three("000801:Skyrim.esm", base_, a, b), Path(td))
+    assert conflicts(emit) == [], conflicts(emit)
+
+
 def main():
     for name, fn in sorted(((k, v) for k, v in globals().items() if k.startswith("case_")),
                            key=lambda kv: int(kv[0].split("_")[1])):

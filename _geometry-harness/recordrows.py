@@ -22,6 +22,7 @@ import argparse
 import collections
 import hashlib
 import json
+import math
 import re
 import sys
 from pathlib import Path
@@ -66,6 +67,7 @@ class Scope:
         self.group_bk = {k: set(v) for k, v in (self.data.get("groupBookkeeping") or {}).items()}
         self.merged = {k: set(v) for k, v in (self.data.get("runtimeMerged") or {}).items()}
         self.merged_records = set(self.data.get("runtimeMergedRecords") or [])
+        self.angles = set(self.data.get("anglesRadians") or [])
         self._contains = {}
 
     def _type(self, name):
@@ -127,6 +129,9 @@ class Scope:
                 out += [f"{kind} names {rtype}.{n}, which the schema does not have" for n in sorted(names - have)]
         out += [f"runtimeMergedRecords names {n}, which the schema does not have"
                 for n in sorted(self.merged_records - set(self.records))]
+        for a in sorted(self.angles):
+            if not any(self.classify(t, a) == "compared" for t in self.records):
+                out.append(f"anglesRadians names {a}, which is a compared field of no record type in the schema")
         return out
 
     def classify(self, rtype: str, path: str) -> str:
@@ -264,7 +269,22 @@ def _norm(v: str) -> str:
     return v
 
 
-def _keyed(fields: dict) -> dict[str, tuple]:
+TWO_PI = 2 * math.pi
+
+
+def _angle(v: str) -> str:
+    """Radians compared modulo a full turn: -0.6104 and 5.6728 are one rotation."""
+    out = []
+    for p in str(v).split(","):
+        try:
+            x = round(float(p) % TWO_PI, 4)
+        except ValueError:
+            return _norm(v)
+        out.append("0" if x == 0 or abs(x - round(TWO_PI, 4)) < 1e-4 else f"{x:.4f}".rstrip("0").rstrip("."))
+    return ",".join(out)
+
+
+def _keyed(fields: dict, angles=frozenset()) -> dict[str, tuple]:
     """Stripped field path -> the multiset of its normalised leaf values (list order and summary lines ignored)."""
     parents = set()
     for p in fields:
@@ -277,7 +297,8 @@ def _keyed(fields: dict) -> dict[str, tuple]:
             continue
         if p in parents:
             continue  # a struct's or list's own summary line; its leaves are compared
-        out[INDEX.sub("", p)].append(_norm(v))
+        k = INDEX.sub("", p)
+        out[k].append(_angle(v) if k in angles else _norm(v))
     return {k: tuple(sorted(v)) for k, v in out.items()}
 
 
@@ -301,8 +322,9 @@ class _View:
     was not cut off before it (a text dump prints every top-level field, absent ones included, so a read cut off at its line limit
     covers every name it printed in full, that is every name but the one it was cut off in). A field is taken from the narrowest covering read."""
 
-    def __init__(self, reads):
+    def __init__(self, reads, angles=frozenset()):
         self.reads = reads
+        self.angles = angles
         self._k = {}
         self.cut = {}
         for r in reads:
@@ -316,7 +338,7 @@ class _View:
 
     def keyed(self, r):
         if id(r) not in self._k:
-            self._k[id(r)] = _keyed({k: v for k, v in r["fields"].items() if k != TRUNCATED})
+            self._k[id(r)] = _keyed({k: v for k, v in r["fields"].items() if k != TRUNCATED}, self.angles)
         return self._k[id(r)]
 
     def covers(self, r, top) -> bool:
@@ -379,7 +401,7 @@ def rows_for_setup(reads: list[dict], plugins: list[dict], scope: Scope, contain
             c["SetAside"][CONTAINER] += 1
             continue
         c["Judged"] += 1
-        views = [_View(rs) for _, _, rs in chain]
+        views = [_View(rs, scope.angles) for _, _, rs in chain]
         keys = sorted(set().union(*[set(v.keys) for v in views]))
         # The unit is one top-level field of the record, as the schema names it: a struct or list is one field whose
         # value is all of its compared leaves (the accepted scorecard's unit, 2026-09-28).
@@ -416,7 +438,9 @@ def rows_for_setup(reads: list[dict], plugins: list[dict], scope: Scope, contain
                     conflicts.append({
                         "Kind": "LOST-EDIT", "A": a, "B": b, "Field": top,
                         "Summary": f"{rtype} {eid or fk}: {top} - {a}'s value lost to {b}'s",
-                        "Necessary": [{"FormKey": fk, "Label": f"{rtype} {eid or fk}",
+                        # a cell is a place and is labelled by its editor ID, as placed-object rows label theirs;
+                        # any other record names no place
+                        "Necessary": [{"FormKey": fk, "Label": (eid if rtype == "Cell" and eid else None),
                                        "Values": {"lost": _show_field(vals[i]), "winner": _show_field(vals[win_i]),
                                                   "overridden": _show_field(vals[i - 1])},
                                        "Reads": reads_}]})
