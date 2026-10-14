@@ -565,6 +565,7 @@ def test_empty_space_row_reaches_contactprobe_with_the_flag():
     --empty-space (the mode is off by default inside the probe; the row is what turns it on for users) and an emit."""
     argv, run = _controller_argv("geometry.fixture-empty-space")
     assert argv[0] == "contactprobe", argv
+    assert "--empty-space" in argv, argv
     i = argv.index("--empty-space")
     assert argv[i + 1].replace("\\", "/").endswith("outputs/geometry.fixture-empty-space/baseline.empty-space.json"), argv[i + 1]
     assert "--emit" in argv and "--order" in argv, argv
