@@ -279,7 +279,7 @@ SHELL_WORDS = "a shell or script naming a probe (may be a batch driver)"
 def test_m1_shell_naming_a_probe_blocks_as_a_shell_not_a_probe():
     v = M.decide(snap({"name": "bash.exe", "pid": 120, "ppid": 1,
                        "cmd": '"C:\\Program Files\\Git\\bin\\bash.exe" -c "sha256sum '
-                              'S:/Dev/houseCARL/_geometry-harness/switchprobe/bin/Release/net9.0/switchprobe.dll"'}),
+                              'X:/h/switchprobe/bin/Release/net9.0/switchprobe.dll"'}),
                  exists=no_lock)
     assert not v["idle"] and SHELL_WORDS in v["reasons"][0] and "switchprobe" in v["reasons"][0], v
     assert "a probe running" not in v["reasons"][0], v
