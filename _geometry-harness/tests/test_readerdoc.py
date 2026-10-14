@@ -143,6 +143,8 @@ def case_11_no_patch_and_old_plan():
         build(plan(by_item=False))
     except RD.Refused as ex:
         assert "byItem" in str(ex), ex
+    except Exception as ex:  # noqa: BLE001
+        raise AssertionError(f"not refused by name: {ex!r}")
     else:
         raise AssertionError("a plan without validation.byItem was not refused")
 
