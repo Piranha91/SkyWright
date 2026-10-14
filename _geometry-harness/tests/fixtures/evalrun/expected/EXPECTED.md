@@ -408,9 +408,6 @@ one whose fingerprint is `"deadbeefdeadbeef…"`.
 
 **Expected disposition / bundle** (D7, D8):
 
-- `discovery.candidates[0].qualification == "unqualified"` — D7: "candidates with provenance and `qualification:
-  qualified` only for a plugin whose hash is in an evaluated arm, else `unqualified`"; the packet: "a downloadable hit
-  remains unqualified until its actual payload has the needed evidence."
 - `discovery.sourcesNotSearched` is present (a list, possibly empty but the field exists) — D7: "sources searched …,
   sources not searched".
 - The matching media item is bundle evidence with `strength == "supplied-media"` — D8: "an item whose fingerprint

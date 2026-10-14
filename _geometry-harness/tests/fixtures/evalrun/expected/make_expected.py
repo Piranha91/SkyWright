@@ -326,13 +326,12 @@ cases.append(case(
     {"complete": False, "claim": "incomplete",
      "missingIncludes": NEVER_COMPLETE, "missingExcludes": [],
      "unknownApplicability": ["functional.linked-dependencies"],
-     "discovery": {"candidateQualifications": ["unqualified"], "sourcesNotSearchedPresent": True},
+     "discovery": {"sourcesNotSearchedPresent": True},
      "mediaEvidenceStrength": "supplied-media",
      "unassessedMediaIncludes": ["old-shot.png"],
      "unassessedMediaExcludes": ["matched-shot.png"]},
     verify=0,
-    notes=["D7: qualification 'qualified' only for a plugin whose hash is in an evaluated arm, else 'unqualified'.",
-           "D8: an item whose fingerprint equals an accepted receipt's fingerprint on that arm is evidence with "
+    notes=["D8: an item whose fingerprint equals an accepted receipt's fingerprint on that arm is evidence with "
            "strength supplied-media; anything else is unassessedMedia with the reason and is not evidence."]))
 
 # ---------------------------------------------------------------- 11
