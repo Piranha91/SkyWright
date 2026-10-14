@@ -232,6 +232,33 @@ static class SelfTest
         Check("a newcomer plugin with no records is selected (exit 0, 0 candidates)", rcE == 0
               && JsonNode.Parse(File.ReadAllText(Path.Combine(outE, "selection.json")))!["candidates"]!.AsArray().Count == 0, $"exit {rcE}");
 
+        // ---- a main .esp that masters its own .esm and an outside plugin is the mod, not a packaged patch ---------
+        // Split.esm (root) <- Split.esp (masters Split.esm and Lib.esp) <- "Split - Lib patch.esp" (masters Split.esp
+        // and Lib.esp). The patch is packaged; Split.esp is mastered by a plugin in its own folder, so it is the mod.
+        var splitDir = Path.Combine(root, "Split"); Directory.CreateDirectory(splitDir);
+        var smKey = new ModKey("Split", ModType.Master);
+        var sm = new SkyrimMod(smKey, Rel); sm.MiscItems.Add(new MiscItem(new FormKey(smKey, 0x800), Rel) { EditorID = "SplitMisc" });
+        var smPath = Path.Combine(splitDir, "Split.esm"); sm.BeginWrite.ToPath(smPath).WithNoLoadOrder().Write();
+        using var smOv = SkyrimMod.CreateFromBinaryOverlay(smPath, Rel);
+        var spKey = new ModKey("Split", ModType.Plugin);
+        var sp = new SkyrimMod(spKey, Rel);
+        sp.MiscItems.Add(new MiscItem(new FormKey(smKey, 0x800), Rel) { EditorID = "SplitMisc_byEsp" });
+        sp.MiscItems.Add(new MiscItem(lm1, Rel) { EditorID = "LibMisc_bySplit" });
+        sp.MiscItems.Add(new MiscItem(new FormKey(spKey, 0x801), Rel) { EditorID = "SplitEspMisc" });
+        var spPath = Path.Combine(splitDir, "Split.esp"); sp.BeginWrite.ToPath(spPath).WithLoadOrder(smOv, libOv).Write();
+        using var spOv = SkyrimMod.CreateFromBinaryOverlay(spPath, Rel);
+        var spp = new SkyrimMod(new ModKey("Split - Lib patch", ModType.Plugin), Rel);
+        spp.MiscItems.Add(new MiscItem(new FormKey(spKey, 0x801), Rel) { EditorID = "SplitEspMisc_patched" });
+        spp.MiscItems.Add(new MiscItem(lm1, Rel) { EditorID = "LibMisc_bySplitPatch" });
+        spp.BeginWrite.ToPath(Path.Combine(splitDir, "Split - Lib patch.esp")).WithLoadOrder(smOv, spOv, libOv).Write();
+        var outS = Path.Combine(root, "out-split");
+        Probe.Run(instance, "P", game, null, outS, true, new() { ("selection", new List<string> { splitDir }) }, false, null, TextWriter.Null);
+        var sj = JsonNode.Parse(File.ReadAllText(Path.Combine(outS, "selection.json")))!;
+        var sNames = sj["newcomer"]?["plugins"]?.AsArray().Select(x => (string)x!["name"]!).OrderBy(x => x).ToList() ?? new List<string>();
+        var sPk = sj["newcomer"]?["packagedPatches"]?.AsArray().Select(x => (string)x!["plugin"]!).ToList() ?? new List<string>();
+        Check("a main .esp mastering its .esm and an outside plugin is a newcomer plugin", sNames.SequenceEqual(new[] { "Split.esm", "Split.esp" }), string.Join(", ", sNames));
+        Check(".. while the patch mastering it and the outside plugin is packaged", sPk.SequenceEqual(new[] { "Split - Lib patch.esp" }), string.Join(", ", sPk));
+
         // ---- refusal -------------------------------------------------------------------------------------------
         var outR = Path.Combine(root, "out-refusal");
         rc = Probe.Run(instance, "P", game, null, outR, true, new() { ("selection", new List<string> { Path.Combine(mods, "Orphan") }) }, false, null, TextWriter.Null);
