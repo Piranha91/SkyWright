@@ -6671,14 +6671,15 @@ def case_51(tmp):
     reader_cmd = f"{sys.executable} {fake}"
     b1 = tmp / f"{case}-b1"
     shutil.copytree(bundle, b1)
+    target_name = (plan.get("targets") or [{}])[0].get("name")
     r = evalrun(["enrich", "--bundle", b1, "--kind", "names", "--reader-cmd", reader_cmd,
-                 "--mod-name", f"{names[1]}=Declared Name"])
+                 "--mod-name", f"{target_name}=Declared Name"])
     expect(r.returncode, 0, f"{case}: names enrich exit ({r.stderr.strip()[-200:]})", "C1")
     row = next(iter(manifest_rows(b1, "names")), None)
     check(row is not None, f"{case}: a names enrichment row is in the manifest")
     doc = load(b1 / row["path"]) if row else {}
     mods = (doc or {}).get("mods") or {}
-    expect((mods.get(names[1]) or {}).get("source"), "declared", f"{case}: a declared mod name says so", "Q6")
+    expect((mods.get(target_name) or {}).get("source"), "declared", f"{case}: a declared mod name says so", "Q6")
     check(all((m or {}).get("source") in ("declared", "nexus-catalogue", "plugin-name") for m in mods.values()),
           f"{case}: every mod name has an offline source ({mods})")
     src = (doc or {}).get("derivedFrom") or []
@@ -6688,7 +6689,9 @@ def case_51(tmp):
     check(bool(capture), f"{case}: the record reads' request and response travel with the names")
     expect(evalrun(["verify-bundle", b1]).returncode, 0, f"{case}: the enriched copy verifies", "C1")
     # a plugin whose bytes on disk differ from the recorded hash: refused before any read, naming the plugin
-    target = next(Path(p["path"]) for p in arm["requested"]["plugins"] if p.get("path") and Path(p["path"]).is_file())
+    # an evaluated mod's file: the names enrichment always reads the evaluated mods
+    target = next(Path(p["path"]) for p in arm["requested"]["plugins"]
+                  if p.get("name") == target_name and p.get("path") and Path(p["path"]).is_file())
     original = target.read_bytes()
     b2 = tmp / f"{case}-b2"
     shutil.copytree(bundle, b2)
