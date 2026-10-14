@@ -145,8 +145,8 @@ Console.WriteLine("   Five corrections, one case each. No game data, no archives
 // ---------------------------------------------------------------------------------------
 // Rule 4 — a step whose visibility flag does not hold was NEVER OFFERED.
 // ---------------------------------------------------------------------------------------
-// The real case: this load order took OCW, so every ICOW option was never shown, and reading them
-// as "not selected" produced 13 findings for a mod that is not installed.
+// The case: an installer that offers a patch set only when a mod it depends on is chosen; with that
+// mod not chosen, reading its options as "not selected" produces findings for a mod that is not installed.
 {
     var xml = Fomod(Steps(
         Step("main", Group("g", "SelectExactlyOne",

@@ -156,12 +156,11 @@ public static class SyntheticOrder
     /// provides — the what-if of switching on a plugin whose only copy sits in a folder that is off.
     /// A plugin Data already provides is served by Data, because that is the copy the game loads;
     /// MO2 puts nothing from a switched-off folder into the game's view.</para>
-    /// <para>It sat ABOVE Data until 2026-09-11, and that was a defect with measured consequences. On
-    /// the SE conflict lab's profile, 21 Creation Club plugins exist both in the game's Data folder and
-    /// in a switched-off "Creation Club Content" mod folder, with DIFFERENT bytes —
-    /// ccbgssse018-shadowrend.esl is 299,516 B in Data and 253,552 B in the folder. The baseline arm
+    /// <para>It sat ABOVE Data until 2026-09-11, and that was a defect with measured consequences. A
+    /// profile can hold Creation Club plugins both in the game's Data folder and in a switched-off mod
+    /// folder of CC content, with DIFFERENT bytes (another release of the same plugin). The baseline arm
     /// (<see cref="Mo2LoadOrder.Build"/>) read Data; every <c>--enable</c> arm read the folder. So every
-    /// differential run on that profile was comparing two configurations that differed in 21 plugins'
+    /// differential run on such a profile was comparing two configurations that differed in those plugins'
     /// content as well as in the plugin under test, and nothing said so. The configuration identity
     /// (roadmap 4.20) is what surfaced it, on its first real run.</para>
     /// <para>Public because orderprobe resolves the SAME baseline this builds: a divergent copy of the precedence

@@ -235,8 +235,8 @@ public static class ConfigurationProof
             // --- THE PRECEDENCE THE 2026-09-11 LAB FINDING WAS ABOUT ---
             // A plugin the game's Data folder provides AND a switched-off mod folder also provides must resolve to
             // DATA, on every arm. It did not until 2026-09-11: SyntheticOrder ranked the disabled folders above Data,
-            // so the baseline read one copy and every --enable arm read the other, and on the SE lab that was 21
-            // Creation Club plugins' worth of different bytes inside what was reported as one differential.
+            // so the baseline read one copy and every --enable arm read the other, and on a profile with Creation Club
+            // plugins in both places that put their different bytes inside what was reported as one differential.
             var synArm = R(null, enable: new[] { "Off.esp" });
             var candArm = R(Candidate("prec", new[] { "Base.esm", "Shared.esp", "Both.esp", "Parent.esp", "Child.esp" }, new[] { "ModB", "ModA", "ModC" }));
             ConfigPlugin Of(ResolvedConfiguration c, string n) => c.Plugins.First(p => string.Equals(p.Name, n, StringComparison.OrdinalIgnoreCase));

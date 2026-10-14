@@ -5,7 +5,7 @@ using HousecarlCore.Progress;
 
 // DOWNLOADS NEVER INSTALLED — the patches you already own and have never unpacked.
 //
-// The shared download pool holds 14,062 archives. patchprobe can only see the ones somebody
+// A shared download pool can hold thousands of archives. patchprobe can only see the ones somebody
 // installed somewhere, because its index is built from plugins on disk; for the rest it falls back
 // to matching a .meta file's mod NAME, which surfaces candidates and cannot confirm one. A name is
 // a guess. A master list is a fact.
@@ -53,10 +53,9 @@ var Ubiquitous = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
     "SkyrimVR.esm", "Unofficial Skyrim Special Edition Patch.esp",
 };
 
-// Creation Club plugins belong in the same bucket for this instance, which has the whole CC
-// catalogue active. Without this the ranking is led by CC compatibility megapatches declaring
-// 38 masters apiece — RAEQuestRequirements.esp, CBBE 3BA CC Beasts.esp — which score highest on
-// master count while saying nothing about the mods this project is actually reconciling.
+// Creation Club plugins belong in the same bucket: an order with many CC plugins active would
+// otherwise rank first the CC compatibility patches that declare dozens of CC masters apiece,
+// which score highest on master count while saying nothing about the mods being reconciled.
 static bool IsCreationClub(string m) => m.StartsWith("cc", StringComparison.OrdinalIgnoreCase)
                                      && m.Length > 6
                                      && (m.EndsWith(".esl", StringComparison.OrdinalIgnoreCase)

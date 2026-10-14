@@ -472,7 +472,7 @@ else
     // ---------------------------------------------------------------------------------------
     // Cross-list patches, filtered to the ones that would actually apply.
     // ---------------------------------------------------------------------------------------
-    // The unfiltered version of this list was 6,417 plugins and unreadable, because most of them
+    // Unfiltered, this list runs to thousands of plugins and is unreadable, because most of them
     // patch mods the target list does not have. A patch is only
     // installable if EVERY master it declares is present and active here — that is a hard,
     // checkable property of the file, not a heuristic, and it turns the list into "patches that
@@ -505,8 +505,8 @@ else
     var applicable = missing.Where(m => m.Best.Absent.Length == 0).ToList();
     var nearMiss = missing.Where(m => m.Best.Absent.Length == 1).ToList();
 
-    // Applicability alone still let 2,123 through, and reading them showed why: CBBE.esp,
-    // Wyrmstooth.esp, KS Hairdo's.esp, High Poly Head.esm. Those are MODS, and a mod whose only
+    // Applicability alone still lets through body, hair, quest and head mods whose only masters are
+    // vanilla. Those are MODS, and a mod whose only
     // masters are vanilla is trivially "applicable" while answering a question nobody asked. What
     // makes a plugin a PATCH is that it masters something a mod author had to opt into — so the
     // filter is: at least one master outside the set nearly everything declares.

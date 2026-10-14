@@ -12,8 +12,8 @@ using HousecarlCore.Progress;
 // someone unpacked somewhere.
 //
 // The blind spot is worth closing because compatibility patches are overwhelmingly delivered this
-// way. One example from this load order: Lux - Via (patch hub) ships 54 optional patches in one
-// FOMOD, each a single ESP for a specific other mod.
+// way: a patch hub can ship dozens of optional patches in one FOMOD, each a single ESP for a
+// specific other mod.
 //
 // ⚠️ THE PART THAT MAKES THIS EXACT. A FOMOD does not just list options — it declares what each
 // option is FOR:
@@ -34,7 +34,7 @@ using HousecarlCore.Progress;
 // ModConfig5.0.xsd. Anything the parse does not recognise is COUNTED as unjudgeable rather than
 // silently treated as absent.
 //
-// ARCHIVE GROUNDING. Reading is done by the 7-Zip command line (7-Zip 24.09 on this machine),
+// ARCHIVE GROUNDING. Reading is done by the 7-Zip command line,
 // whose surface was checked against its own usage output rather than assumed:
 //     7z l -slt -ba -sccUTF-8 <archive>        technical listing, one "Path = ..." per entry
 //     7z e -so -bso0 -bse0 <archive> <entry>   that entry's bytes on stdout, nothing else
@@ -156,11 +156,10 @@ foreach (var modDir in Directory.EnumerateDirectories(modsDir))
 // ⚠️ THE CORRECTION THAT SHAPES THE VERDICTS. Asking "is this option's file in THIS mod folder"
 // gets the wrong answer whenever the file arrived some other way, and here it does constantly:
 //   - MO2 installs one archive into several mod folders, each taking a different subset, so an
-//     option not taken in folder A was taken in folder B from the same archive (131 folders here
-//     share an installationFile with another).
-//   - This load order has a folder literally called "Lux - Patch Hub - Manual Installation" that
-//     holds those same patch ESPs, put there by hand.
-// The first run reported 48 "never selected" options for Lux that are sitting on disk right now.
+//     option not taken in folder A was taken in folder B from the same archive (many folders in a
+//     large instance share an installationFile with another).
+//   - A user can copy a hub's patch ESPs into a hand-made mod folder of their own.
+// Asked per folder, both read as "never selected" options whose files are on disk.
 // So the question is asked of the whole instance, and the answer splits three ways: the file is
 // absent entirely, or it is present but not active, or it is active and there is nothing to say.
 // Every mod folder is scanned, disabled ones included — a disabled folder is exactly where an
