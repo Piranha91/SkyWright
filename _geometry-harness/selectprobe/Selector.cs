@@ -92,12 +92,16 @@ sealed class Selector
             // roots: plugins that master nothing in the folder; their outside masters are what the mod requires
             var roots = masters.Where(kv => !kv.Value.Any(inFolder.Contains)).Select(kv => kv.Key).ToHashSet(StringComparer.OrdinalIgnoreCase);
             var required = new HashSet<string>(roots.SelectMany(r => masters[r]).Where(m => !inFolder.Contains(m)), StringComparer.OrdinalIgnoreCase);
+            // a plugin another plugin of the folder masters is part of the mod (a main .esp under its own .esm, which
+            // the folder's own patches master), whatever outside plugins it masters itself
+            var masteredInFolder = new HashSet<string>(masters.SelectMany(kv => kv.Value.Where(m => inFolder.Contains(m) && !m.Equals(kv.Key, StringComparison.OrdinalIgnoreCase))),
+                                                       StringComparer.OrdinalIgnoreCase);
             var keep = new List<string>();
             foreach (var f in all)
             {
                 var n = Path.GetFileName(f)!;
                 var outside = masters[n].Where(m => !inFolder.Contains(m) && !_base.Contains(m) && !required.Contains(m)).ToList();
-                if (!roots.Contains(n) && outside.Count > 0)
+                if (!roots.Contains(n) && !masteredInFolder.Contains(n) && outside.Count > 0)
                     s.Packaged.Add(new SelNamed(n, "a patch packaged in the newcomer's folder: it masters " + string.Join(", ", outside)
                                                 + " outside the folder; set aside, never evidence"));
                 else keep.Add(f);
