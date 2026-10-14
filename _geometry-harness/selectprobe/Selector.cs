@@ -141,7 +141,12 @@ sealed class Selector
         if (s.FolderPath is not null)
         {
             foreach (var a in AssetPaths.Loose(s.FolderPath)) { assets.Add(a); s.Loose++; }
-            foreach (var arc in AssetPaths.ArchivesFor(s.FolderPath, names))
+            // its archives: those at its folder root named for its plugins, and any archive the order loads with one of
+            // its plugins from another folder (a mod split over a main folder and an update folder)
+            var arcs = AssetPaths.ArchivesFor(s.FolderPath, names)
+                .Concat(_cfg.Archives.Archives.Where(x => names.Contains(x.OwningPlugin)).Select(x => x.Path))
+                .Select(Path.GetFullPath).Distinct(StringComparer.OrdinalIgnoreCase).OrderBy(x => x, StringComparer.OrdinalIgnoreCase).ToList();
+            foreach (var arc in arcs)
             {
                 try { foreach (var a in AssetPaths.Archive(arc)) { assets.Add(a); s.InArchives++; } s.ArchivesRead.Add(Path.GetFileName(arc)); }
                 catch (Exception ex) { s.Refused = $"the newcomer's archive '{Path.GetFileName(arc)}' could not be read — {Footprint.Concise(ex)}."; return; }
