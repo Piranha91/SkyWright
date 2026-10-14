@@ -102,7 +102,7 @@ static class Probe
         if (batch && todo.Count < jobs.Count) log.WriteLine($"resume: {jobs.Count - todo.Count} of {jobs.Count} already have a result and are skipped");
 
         // the newcomers first, so the asset index knows every path it is asked about
-        run?.Stage("newcomers", "reading the newcomers", todo.Count, "newcomers");
+        run?.Stage("newcomers", "choosing the newcomers' plugins and reading their asset paths", todo.Count, "newcomers");
         var specs = new List<NewcomerSpec>();
         var prepTimes = new Dictionary<string, double>();
         foreach (var (id, paths) in todo)
@@ -112,7 +112,7 @@ static class Probe
             prepTimes[id] = t.Elapsed.TotalSeconds;
             run?.Advance();
         }
-        var wanted = new HashSet<string>(specs.Where(s => s.Facts is not null).SelectMany(s => s.Facts!.Assets), StringComparer.Ordinal);
+        var wanted = new HashSet<string>(specs.Where(s => s.Assets is not null).SelectMany(s => s.Assets!), StringComparer.Ordinal);
 
         run?.Stage("index", "reading the installed plugins once", cfg.OrderedPaths.Count, "plugins");
         sel.IndexRecords(i => run?.Progress(i));
@@ -139,6 +139,9 @@ static class Probe
             string? refusal = null;
             try
             {
+                var tr = Stopwatch.StartNew();
+                sel.LoadRecords(s);
+                prepTimes[s.Id] += tr.Elapsed.TotalSeconds;
                 if (s.Refused is not null) throw new RefusalException(s.Refused);
                 var r = sel.Select(s);
                 candidates = r.Candidates.Count;
@@ -155,6 +158,7 @@ static class Probe
                 };
             }
             catch (RefusalException ex) { refused++; refusal = ex.Message; result = new { tool = "selectprobe", refused = ex.Message, newcomer = s.Id }; }
+            finally { sel.Release(s); }
             var file = Path.Combine(outDir, (batch ? Safe(s.Id) : "selection") + ".json");
             var tmp = file + ".tmp";
             File.WriteAllText(tmp, JsonSerializer.Serialize(result, SelectionRule.Json));

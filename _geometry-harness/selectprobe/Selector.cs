@@ -14,6 +14,7 @@ sealed class NewcomerSpec
     public List<SelNamed> Packaged = new();
     public string? Refused;                              // set: nothing else is meaningful
     public NewcomerFacts? Facts;
+    public HashSet<string>? Assets;                     // read up front: the asset index is built for every newcomer's paths
     public List<string> ArchivesRead = new();
     public int Loose, InArchives;
     public List<string> RuntimeFiles = new();
@@ -117,24 +118,7 @@ sealed class Selector
         }
         if (s.PluginPaths.Count == 0) { s.Refused = "every plugin in the newcomer folder is a packaged patch; there is no newcomer plugin left."; return; }
 
-        // read the newcomer itself (with display info and its outgoing links)
         var names = new HashSet<string>(s.PluginPaths.Select(Path.GetFileName)!, StringComparer.OrdinalIgnoreCase);
-        var union = new Footprint { Name = string.Join("+", names), Path = s.FolderPath ?? s.PluginPaths[0] };
-        union.Info = new(); union.CellNames = new(StringComparer.Ordinal); union.Links = new();
-        var nonBaseMasters = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        foreach (var p in s.PluginPaths)
-        {
-            var fp = Footprint.Read(p, _dataDir, links: true, info: true);
-            if (fp.Error is not null) { s.Refused = $"newcomer plugin '{fp.Name}' {fp.Error}."; return; }
-            union.Keys.UnionWith(fp.Keys); union.Containers.UnionWith(fp.Containers); union.Interior.UnionWith(fp.Interior);
-            union.Exterior.UnionWith(fp.Exterior); union.PlacedBases.UnionWith(fp.PlacedBases); union.Links.UnionWith(fp.Links!);
-            foreach (var kv in fp.Info!) union.Info.TryAdd(kv.Key, kv.Value);
-            foreach (var kv in fp.CellNames!) union.CellNames.TryAdd(kv.Key, kv.Value);
-            union.NewRecords += fp.NewRecords; union.Overrides += fp.Overrides; union.ScriptCarriers += fp.ScriptCarriers;
-            foreach (var m in fp.Masters) if (!_base.Contains(m) && !names.Contains(m)) nonBaseMasters.Add(m);
-            _newcomerPlugin[p] = fp;
-        }
-        union.Masters = nonBaseMasters.ToList();
 
         // its assets
         var assets = new HashSet<string>(StringComparer.Ordinal);
@@ -161,7 +145,41 @@ sealed class Selector
             s.RuntimeFiles.Sort(StringComparer.OrdinalIgnoreCase);
         }
         s.ScriptFiles = assets.Count(a => a.EndsWith(".pex", StringComparison.Ordinal));
-        s.Facts = new NewcomerFacts(union, assets, nonBaseMasters, names, s.FolderPath);
+        s.Assets = assets;
+    }
+
+    /// <summary>Read the newcomer's records, just before its selection: a batch holds one newcomer's records at a time,
+    /// so its memory is the order index plus one newcomer, however many newcomers it carries.</summary>
+    public void LoadRecords(NewcomerSpec s)
+    {
+        if (s.Refused is not null) return;
+        // read the newcomer itself (with display info and its outgoing links)
+        var names = new HashSet<string>(s.PluginPaths.Select(Path.GetFileName)!, StringComparer.OrdinalIgnoreCase);
+        var union = new Footprint { Name = string.Join("+", names), Path = s.FolderPath ?? s.PluginPaths[0] };
+        union.Info = new(); union.CellNames = new(StringComparer.Ordinal); union.Links = new();
+        var nonBaseMasters = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var p in s.PluginPaths)
+        {
+            var fp = Footprint.Read(p, _dataDir, links: true, info: true);
+            if (fp.Error is not null) { s.Refused = $"newcomer plugin '{fp.Name}' {fp.Error}."; return; }
+            union.Keys.UnionWith(fp.Keys); union.Containers.UnionWith(fp.Containers); union.Interior.UnionWith(fp.Interior);
+            union.Exterior.UnionWith(fp.Exterior); union.PlacedBases.UnionWith(fp.PlacedBases); union.Links.UnionWith(fp.Links!);
+            foreach (var kv in fp.Info!) union.Info.TryAdd(kv.Key, kv.Value);
+            foreach (var kv in fp.CellNames!) union.CellNames.TryAdd(kv.Key, kv.Value);
+            union.NewRecords += fp.NewRecords; union.Overrides += fp.Overrides; union.ScriptCarriers += fp.ScriptCarriers;
+            foreach (var m in fp.Masters) if (!_base.Contains(m) && !names.Contains(m)) nonBaseMasters.Add(m);
+            _newcomerPlugin[p] = fp;
+        }
+        union.Masters = nonBaseMasters.ToList();
+
+        s.Facts = new NewcomerFacts(union, s.Assets!, nonBaseMasters, names, s.FolderPath);
+    }
+
+    /// <summary>Drop a selected newcomer's records.</summary>
+    public void Release(NewcomerSpec s)
+    {
+        s.Facts = null;
+        foreach (var p in s.PluginPaths) _newcomerPlugin.Remove(p);
     }
 
     readonly Dictionary<string, Footprint> _newcomerPlugin = new(StringComparer.OrdinalIgnoreCase);
