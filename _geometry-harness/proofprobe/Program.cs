@@ -2446,6 +2446,21 @@ Console.WriteLine("\nPROOF — placement contact (_shared/DetectorModel.cs + _sh
           hosts.Count == 35 && skips.HostTooSmall == 4 && Host(16) is null && Host(17) is { Change: HostChange.Moved } && Host(12) is { Change: HostChange.Removed } && Host(13) is { Change: HostChange.Relocated }
        && Host(1) is { Change: HostChange.Moved, Mover: Ai } && Host(23) is not null && Host(36) is null && skips.HostRuntimeDisabled == 1 && Host(61) is null,
           $"{hosts.Count} hosts (runtime-disabled {skips.HostRuntimeDisabled}, too small {skips.HostTooSmall}): " + string.Join(" ", hosts.OrderBy(h => h.Key.ID).Select(h => $"{h.Key.ID - 0x900}:{h.Change}")));
+    // The moved-host threshold at exact equality: Table16 moved exactly 10 u (16000 -> 16010). A move must EXCEED the
+    // threshold, so at threshold 10 it is not a moved host; just under (9.5) it is. Same order, a second index each time.
+    MovedHost? HostAtThreshold(float threshold, int n)
+    {
+        ContactIndex? t = null;
+        t = new ContactIndex(k => t!.Index.ObndBox(k) is { IsEmpty: false } bx
+            ? new RefGeometry(bx, ContactIndex.BoxSoup(bx), ContactIndex.BoxSoup(bx), 'o', 'o', HostUsable: true, Array.Empty<(string, string)>(), false) : null)
+            { MoveThreshold = threshold };
+        for (int p = 0; p < paths.Length; p++) { using var mod = SkyrimMod.CreateFromBinaryOverlay(paths[p], release); t.Index.Ingest(p, mod); }
+        return t.MovedHosts(new ContactSkips(), closure).FirstOrDefault(h => h.Key == H(n));
+    }
+    Check("ct-synth: a host moved exactly the threshold (Table16, 10 u, threshold 10) is not a moved host",
+          HostAtThreshold(10f, 16) is null, HostAtThreshold(10f, 16) is { } h16a ? $"{h16a.Change}" : "(no host)");
+    Check("ct-synth: control - the same table with the threshold just under its move (9.5) is a moved host",
+          HostAtThreshold(9.5f, 16) is { Change: HostChange.Moved }, HostAtThreshold(9.5f, 16) is { } h16b ? $"{h16b.Change}" : "(no host)");
     Check("ct-synth: a base swap is read at the right snap — Table18's previous base is the short table, its winning base the tall one",
           Host(18) is { } h18 && h18.PrevBase == tableK && h18.WinBase == tallK, Host(18) is { } x ? $"{x.PrevBase} -> {x.WinBase}" : "(no host)");
     Check("ct-synth R1: Table30, never re-placed, leaves the world when A disables its enable parent -> REMOVED via the parent, mover A, previous snap the master's",

@@ -153,6 +153,7 @@ static class StateProof
         c1.Temporary.Add(Ref(R(21), tableK, 7000, 0, 0, "T7"));
         c1.Temporary.Add(Ref(R(22), bowlK, 7500, 0, TableTop + BowlHalf, "B7f", parent: S(7)));
         c1.Temporary.Add(Ref(R(23), bowlK, 7000, 300, TableTop + BowlHalf, "B7s", parent: S(7)));
+        c1.Temporary.Add(Ref(R(35), bowlK, 7060, 0, TableTop + BowlHalf - 10, "B7k", parent: S(7)));     // arrives sunk 10 u into T7
         c1.Temporary.Add(Ref(R(24), tableK, 7000, 300, 0, "T7m"));
         // M8 (disabled): on-set N8 navcut + S8 a plain table; M9 (enabled): on-set N9 navcut.
         c1.Temporary.Add(Ref(S(8), markerK, 8000, 0, 0, "M8", disabled: true));
@@ -239,6 +240,14 @@ static class StateProof
               StateArm.Parse("M1", sx).Flips.SequenceEqual(new[] { S(1) }) && StateArm.Parse("M1,M2", sx).Flips.Count == 2 && StateArm.Parse("baseline", sx).IsBaseline
            && Throws(() => StateArm.Parse("NoSuchMarker", sx)) && Throws(() => StateArm.Parse("M1,NoSuchMarker", sx)) && StateArm.Parse(S(2).ToString(), sx).Flips[0] == S(2), "");
         var map = new SwitchMap(); map.Stages["Q:10"] = new List<string> { "M1", "M2" };
+        var mapPath = Path.Combine(root, "switch-map.json");
+        File.WriteAllText(mapPath, "{\"switches\":[{\"key\":\"" + S(1) + "\",\"trigger\":{\"status\":\"Triggered\",\"kind\":\"quest stage\"}},"
+            + "{\"key\":\"" + S(2) + "\",\"trigger\":null}],\"jointFlips\":[{\"stage\":\"Q:10\",\"switches\":[\"M1\",\"M2\"]}]}");
+        var readMap = SwitchMap.Read(mapPath);
+        Check("arm/map: SwitchMap.Read takes each switch's trigger status and kind and each stage's joint flip from switchprobe's JSON",
+              readMap.TriggerOf(S(1)) == ("Triggered", "quest stage") && readMap.TriggerOf(S(2)).Status == "(no map)"
+           && readMap.StageFlips("Q:10") is { Count: 2 } && StateArm.Parse("stage:Q:10", sx, readMap).Flips.Count == 2,
+              $"{readMap.TriggerOf(S(1))} / {readMap.TriggerOf(S(2))} / {readMap.StageFlips("Q:10")?.Count}");
         Check("arm/parse: stage:<quest>:<n> reads the switch map's joint flip; without a map it is refused",
               StateArm.Parse("stage:Q:10", sx, map).Flips.Count == 2 && Throws(() => StateArm.Parse("stage:Q:10", sx)) && Throws(() => StateArm.Parse("stage:Q:99", sx, map)), "");
         var armM1 = StateArm.Parse("M1", sx);
@@ -316,9 +325,13 @@ static class StateProof
         var t7 = new StateTally();
         var rowsM7 = ev.Evaluate(StateArm.Parse("M7", sx), Van, Us, t7);
         Check("class/contact: M7's arriving bowls — B7 lands on T7 (touching, counted), B7f lands on nothing (floating, counted, no row), B7s lands over the table P moved away — Stranded on arrival, a row",
-              t7.DepsArriving == 3 && t7.TouchingOnArrival == 1 && t7.FloatingOnArrival == 2
-           && rowsM7.Count(r => r.Kind == StateRowKind.Contact) == 1 && rowsM7.Single(r => r.Kind == StateRowKind.Contact) is { ContactVerdict: ContactVerdict.Stranded, Member: var b7s, Other: var t7m, Arrives: true } && b7s == R(23) && t7m == R(24),
+              t7.DepsArriving == 4 && t7.TouchingOnArrival == 1 && t7.FloatingOnArrival == 2
+           && rowsM7.Count(r => r.Kind == StateRowKind.Contact && r.ContactVerdict == ContactVerdict.Stranded) == 1 && rowsM7.Single(r => r.Kind == StateRowKind.Contact && r.ContactVerdict == ContactVerdict.Stranded) is { Member: var b7s, Other: var t7m, Arrives: true } && b7s == R(23) && t7m == R(24),
               $"arriving {t7.DepsArriving} touching {t7.TouchingOnArrival} floating {t7.FloatingOnArrival}; " + string.Join("; ", rowsM7.Select(r => $"{r.Kind} {r.Verdict} {r.ContactVerdict} {idx.RefEditorId.GetValueOrDefault(r.Member)}")));
+        Check("class/contact: M7's B7k arrives sunk 10 u into T7 - one Sunk row, StateConditional, against T7",
+              rowsM7.Count(r => r.Kind == StateRowKind.Contact && r.ContactVerdict == ContactVerdict.Sunk) == 1
+           && rowsM7.Single(r => r.Kind == StateRowKind.Contact && r.ContactVerdict == ContactVerdict.Sunk) is { Verdict: StateVerdict.StateConditional, Member: var b7k, Other: var t7k, Penetration: > 9f and < 11f } && b7k == R(35) && t7k == R(21),
+              string.Join("; ", rowsM7.Select(r => $"{r.Kind} {r.ContactVerdict} {idx.RefEditorId.GetValueOrDefault(r.Member)} pen {r.Penetration:0.#}")));
         var t8 = new StateTally();
         var rowsM8 = ev.Evaluate(StateArm.Parse("M8", sx), Van, Us, t8);
         var rowsM9 = ev.Evaluate(StateArm.Parse("M9", sx), Van, Us, t8);

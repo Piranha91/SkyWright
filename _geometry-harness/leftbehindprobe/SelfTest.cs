@@ -263,6 +263,18 @@ public static class SelfTest
              new Fx().PortalPanel().Place(0, W1, WallA, new Vector3(1913, 2108, 100)).Place(0, W1b, WallB, new Vector3(2163, 2108, 100))
                      .Place(2, W1, WallA, new Vector3(1913, 2108, 100), disabled: true),
              PanelClass.Partial, PartnerCause.Disabled);
+        // LB13 at its own lost share: a share EQUAL to tauLost is LEFT-BEHIND (the threshold is inclusive), not PARTIAL.
+        try
+        {
+            var (b13, c13) = new Fx().PortalPanel().Place(0, W1, WallA, new Vector3(1913, 2108, 100)).Place(0, W1b, WallB, new Vector3(2163, 2108, 100))
+                                     .Place(2, W1, WallA, new Vector3(1913, 2108, 100), disabled: true).Build();
+            var v13 = LeftBehindRule.Run(b13, c13, PanelPlugin, Thresholds.Proposed).Single(x => x.Panel.Key == P);
+            var atEdge = Thresholds.Proposed with { TauLost = v13.LostShare };
+            var e13 = LeftBehindRule.Run(b13, c13, PanelPlugin, atEdge).Single(x => x.Panel.Key == P);
+            Check("LB13e a lost share exactly at tauLost is LEFT-BEHIND, not PARTIAL", e13.Class == PanelClass.LeftBehind,
+                  $"{e13.Class}; lost {e13.LostShare} at tauLost {atEdge.TauLost}");
+        }
+        catch (Exception ex) { Check("LB13e a lost share exactly at tauLost is LEFT-BEHIND, not PARTIAL", false, $"threw {ex.GetType().Name}: {ex.Message}"); }
         Case("LB14 a Box inside a closed solid (backed by inside, not distance), solid disabled",
              new Fx().BoxPanel(new Vector3(2048, 2048, 500), new Vector3(200, 200, 200)).Place(0, W1, Big, new Vector3(2048, 2048, 500))
                      .Place(2, W1, Big, new Vector3(2048, 2048, 500), disabled: true),
