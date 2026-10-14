@@ -101,7 +101,9 @@ def build(tmp, cen=None, **kw):
 
 
 def group(doc, gid):
-    return next(g for g in doc["arms"][0]["groups"] if g["id"] == gid)
+    hits = [g for g in doc["arms"][0]["groups"] if g["id"] == gid]
+    assert len(hits) == 1, f"group {gid} not found once; groups: {[g['id'] for g in doc['arms'][0]['groups']]}"
+    return hits[0]
 
 
 def calls(g):
@@ -112,6 +114,8 @@ def test_g2_two_branch_function_gives_two_groups_in_source_order():
     # rejects: the two branches flattened into one sequence (CampParent disabled and enabled in one launch)
     with tempfile.TemporaryDirectory() as tmp:
         _, doc = build(tmp)
+        setup = [g["id"] for g in doc["arms"][0]["groups"] if g["function"] == "Setup"]
+        assert setup == ["TownScript.Setup#1", "TownScript.Setup#2"], setup
         g1, g2 = group(doc, "TownScript.Setup#1"), group(doc, "TownScript.Setup#2")
         assert calls(g1) == [("000A01:Target.esp", "enabled"), ("000A02:Target.esp", "disabled"),
                              ("000A03:Target.esp", "enabled")], calls(g1)
