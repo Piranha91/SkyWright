@@ -48,7 +48,11 @@ def call_vp_command(vp=None, root=None):
     """vp_command with its output captured. Returns (cmd, stdout, stderr)."""
     out, err = io.StringIO(), io.StringIO()
     with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
-        cmd = S.vp_command(vp) if root is None else S.vp_command(vp, root=root)
+        try:
+            cmd = S.vp_command(vp) if root is None else S.vp_command(vp, root=root)
+        except SystemExit as e:                  # a refusal: no command, its sentence on stderr
+            cmd = None
+            err.write(str(e.code))
     return cmd, out.getvalue(), err.getvalue()
 
 
@@ -104,14 +108,14 @@ def test_built_exe_is_preferred():
         check("...silently, because nothing was given up", out == "" and err == "", repr(out + err))
 
 
-def test_no_executable_falls_back_and_says_so():
+def test_no_executable_refuses_and_says_so():
+    """`dotnet run -c Release` builds into bin/Release, which is the production viewprobe, so the
+    planner never builds: it refuses and names --vp (2026-10-13 incident)."""
     with tempfile.TemporaryDirectory() as tmp:
         root, _, _ = fabricate(tmp, exe=False)
         cmd, out, err = call_vp_command(None, root=root)
-        check("with no built executable the command is dotnet run",
-              cmd[:2] == ["dotnet", "run"], repr(cmd))
-        check("...against the root it was asked about", root in cmd, repr(cmd))
-        check("...and the fallback is announced", err.strip() != "", repr(err))
+        check("with no built executable nothing is run, and nothing is built", cmd is None, repr(cmd))
+        check("...the refusal names --vp", "--vp" in err, repr(err))
         check("...naming the executable it looked for", "viewprobe.exe" in err, repr(err))
         check("...on stderr, never on the stdout a caller parses", out == "", repr(out))
 
@@ -121,8 +125,9 @@ def stale_case(which, filename):
     with tempfile.TemporaryDirectory() as tmp:
         root, _, files = fabricate(tmp, newer=which)
         cmd, out, err = call_vp_command(None, root=root)
-        check("a %s source newer than the executable is not silently used" % which,
-              cmd[:2] == ["dotnet", "run"], repr(cmd[:2]))
+        check("a %s source newer than the executable is refused, not rebuilt" % which,
+              cmd is None, repr(cmd))
+        check("...naming --vp", "--vp" in err, repr(err))
         check("...and the reason names %s" % filename, filename in err, repr(err))
         check("...on stderr", out == "", repr(out))
 
@@ -145,7 +150,7 @@ def test_the_fallback_says_what_it_could_not_check():
     with tempfile.TemporaryDirectory() as tmp:
         root, _, _ = fabricate(tmp, exe=False)
         _cmd, _out, err = call_vp_command(None, root=root)
-        check("the fallback line names the repository it could not check",
+        check("the refusal names the repository it could not check",
               "repositor" in err.lower(), repr(err))
 
 
@@ -202,13 +207,13 @@ def test_this_checkout_default():
         print("       and it said: %s" % err.strip().splitlines()[0])
     check("the notice never touches stdout", out == "", repr(out))
     if stale:
-        check("a checkout whose sources are newer than its build falls back",
-              cmd[:2] == ["dotnet", "run"], repr(cmd[:2]))
+        check("a checkout whose sources are newer than its build refuses",
+              cmd is None, repr(cmd))
         check("...naming the source that is newer",
               os.path.basename(src or "") in err, repr(err[:160]))
     else:
         check("the default command is not a dotnet build check",
-              cmd[:2] != ["dotnet", "run"], repr(cmd))
+              cmd and cmd[:2] != ["dotnet", "run"], repr(cmd))
         check("the default command is the built executable",
               cmd and os.path.normcase(cmd[0]) == os.path.normcase(built), repr(cmd[:1]))
         check("...with nothing printed, because nothing was given up", err == "", repr(err))
@@ -219,11 +224,14 @@ def test_cell_is_still_the_first_argument_viewprobe_sees():
     LITERALLY, whatever the base command is."""
     with tempfile.TemporaryDirectory() as tmp:
         root, exe, _ = fabricate(tmp)
+        saved, S.VIEWPROBE_DIR = S.VIEWPROBE_DIR, root     # the Runner resolves the default root
         try:
             r = S.Runner("SomeCell", vp=None, out=None, size=320, echo=False)
         except TypeError as e:
             check("a Runner can be built with no --vp", False, str(e)[:80])
             return
+        finally:
+            S.VIEWPROBE_DIR = saved
         base = r.base
         check("the base command ends where the cell begins",
               base and (base[-1] == "--" or os.path.basename(base[-1]).lower() == "viewprobe.exe"),
@@ -237,7 +245,7 @@ def test_cell_is_still_the_first_argument_viewprobe_sees():
 def main():
     for fn in (test_explicit_vp_is_unchanged,
                test_built_exe_is_preferred,
-               test_no_executable_falls_back_and_says_so,
+               test_no_executable_refuses_and_says_so,
                test_stale_against_the_probe_itself,
                test_stale_against_the_shared_sources,
                test_stale_against_the_core_library,

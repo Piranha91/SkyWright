@@ -3382,12 +3382,14 @@ walkable level sits 288 u above it is under another floor, not in the room. `--s
 **Which viewprobe it launches.** `--vp` always wins: give it any command that takes viewprobe's
 arguments. With no `--vp` the planner prefers the **built executable** under
 `bin/Release/*/viewprobe.exe`, because a planning pass makes many invocations and `dotnet run`
-pays a build check for each one. It falls back to `dotnet run` — and says so on stderr with the
-reason — when there is no built executable, or when a source file is newer than it. That staleness
+pays a build check for each one. It **refuses** — with the reason on stderr and a pointer to
+`--vp` — when there is no built executable, or when a source file is newer than it. It never falls
+back to `dotnet run -c Release`, because that builds into `bin/Release`, which is the production
+viewprobe. That staleness
 question covers every project in this repository the executable is built from (the probe, the
 shared harness sources, the core library); build output under `bin/` is not a source. The rendering
 library is a project reference into another repository, so nothing here can tell whether the
-executable predates a change in it, and the fallback line says so rather than leaving it assumed.
+executable predates a change in it, and the refusal says so rather than leaving it assumed.
 The notice goes to stderr, where the per-invocation echo already goes, so a caller parsing stdout
 is unaffected.
 

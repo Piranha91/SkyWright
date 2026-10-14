@@ -768,18 +768,13 @@ def viewprobe_exe(root: str | None = None) -> tuple[str | None, str]:
     return exe, "the built viewprobe.exe is newer than every source in this repository it is built from"
 
 
-def _to_stderr(line: str) -> None:
-    print(line, file=sys.stderr)
-
-
-def vp_command(vp: str | None = None, root: str | None = None, say=None) -> list[str]:
+def vp_command(vp: str | None = None, root: str | None = None) -> list[str]:
     """The command every probe invocation is built on.
 
-    An explicit --vp always wins. Otherwise the built executable is preferred - `dotnet run` costs
-    a build check per invocation, and the planner makes many - and the fallback to `dotnet run` is
-    announced with its reason, because that build check is exactly what is being given up. The
-    notice goes to stderr, where the per-invocation echo already goes, so a caller parsing stdout
-    (the configuration fingerprint line) sees nothing new.
+    An explicit --vp always wins. Otherwise only a current built executable is used. A missing or
+    stale one is refused with its reason, never rebuilt: `dotnet run -c Release` builds into
+    bin/Release, which is the production viewprobe (2026-10-13 incident). The refusal goes to
+    stderr, so a caller parsing stdout (the configuration fingerprint line) sees nothing new.
     """
     if vp:
         return shlex.split(vp)
@@ -787,9 +782,9 @@ def vp_command(vp: str | None = None, root: str | None = None, say=None) -> list
     exe, why = viewprobe_exe(root)
     if exe:
         return [exe]
-    (say or _to_stderr)("viewprobe: %s, so this falls back to `dotnet run`, which builds it first "
-                        "(%s)." % (why, LIBRARY_NOTE))
-    return ["dotnet", "run", "--project", root, "-c", "Release", "--no-launch-profile", "--"]
+    raise SystemExit("viewprobe: %s, and shotplan will not build it because bin/Release is the "
+                     "production viewprobe; pass --vp with a viewprobe built elsewhere (%s)."
+                     % (why, LIBRARY_NOTE))
 
 
 class Runner:
@@ -3231,9 +3226,9 @@ def add_common(p, need_subjects=True):
     p.add_argument("--out", default=None, help="where probe PNGs go")
     p.add_argument("--vp", default=None,
                    help="the viewprobe command. Anything that takes viewprobe's args, e.g. a "
-                        "wrapper script. Default: the built bin/Release viewprobe.exe, falling "
-                        "back to `dotnet run` — with the reason printed — when there is none or a "
-                        "source in this repository is newer than it")
+                        "wrapper script. Default: the built bin/Release viewprobe.exe; shotplan "
+                        "refuses, with the reason, when there is none or a source in this "
+                        "repository is newer than it, because it never builds the production copy")
     p.add_argument("--quiet", action="store_true", help="do not echo each invocation")
     p.add_argument("--no-bind-scene", action="store_true",
                    help="do not ask the renderer for its configuration identity on the "
