@@ -62,6 +62,7 @@ public sealed class Footprint
     {
         var fp = new Footprint { Name = System.IO.Path.GetFileName(path), Path = path };
         if (info) { fp.Info = new(); fp.CellNames = new(StringComparer.Ordinal); }
+        if (links) fp.Links = new();                                                    // empty, not null, for a plugin with no records
         ISkyrimModGetter mod;
         try { mod = LoadOrderResolver.OpenOverlay(path, dataDir); }
         catch (Exception ex) { fp.Error = $"would not open — {Concise(ex)}"; return fp; }
@@ -80,7 +81,6 @@ public sealed class Footprint
                 if (rec is IHaveVirtualMachineAdapterGetter vm && vm.VirtualMachineAdapter is not null) fp.ScriptCarriers++;
                 if (links)
                 {
-                    fp.Links ??= new();
                     foreach (var l in rec.EnumerateFormLinks()) if (!l.FormKey.IsNull && l.FormKey != k) fp.Links.Add(l.FormKey);
                 }
                 if (info) fp.Info![k] = (rec.GetType().Name.Replace("BinaryOverlay", ""), string.IsNullOrEmpty(rec.EditorID) ? null : rec.EditorID);

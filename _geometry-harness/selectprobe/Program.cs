@@ -125,7 +125,7 @@ static class Probe
         log.WriteLine($"index: {sel.FootprintsRead} plugin footprint(s) in {sel.FootprintSeconds:0.0}s; asset index over {wanted.Count:N0} wanted path(s) in {sel.AssetSeconds:0.0}s");
 
         run?.Stage("select", "selecting", specs.Count, "newcomers");
-        int refused = 0, done = 0;
+        int refused = 0, done = 0, crashed = 0;
         bool stopped = false;
         foreach (var s in specs)
         {
@@ -160,6 +160,12 @@ static class Probe
                 };
             }
             catch (RefusalException ex) { refused++; refusal = ex.Message; result = new { tool = "selectprobe", refused = ex.Message, newcomer = s.Id }; }
+            catch (Exception ex) when (batch)
+            {
+                // one newcomer's failure is that newcomer's result, never the end of the batch: written, counted apart
+                crashed++; refusal = $"CRASHED — {ex.GetType().Name}: {ex.Message}";
+                result = new { tool = "selectprobe", crashed = $"{ex.GetType().Name}: {ex.Message}", newcomer = s.Id };
+            }
             finally { sel.Release(s); }
             var file = Path.Combine(outDir, (batch ? Safe(s.Id) : "selection") + ".json");
             var tmp = file + ".tmp";
@@ -175,7 +181,7 @@ static class Probe
         var summary = new Dictionary<string, object?>
         {
             ["source"] = cfg.Source, ["plugins"] = cfg.OrderedPaths.Count, ["newcomers"] = jobs.Count, ["selectedThisRun"] = done,
-            ["refused"] = refused, ["stopped"] = stopped, ["wallSeconds"] = Math.Round(wall.Elapsed.TotalSeconds, 2), ["resolveSeconds"] = Math.Round(resolveSeconds, 2),
+            ["refused"] = refused, ["crashed"] = crashed, ["stopped"] = stopped, ["wallSeconds"] = Math.Round(wall.Elapsed.TotalSeconds, 2), ["resolveSeconds"] = Math.Round(resolveSeconds, 2),
             ["footprintSeconds"] = Math.Round(sel.FootprintSeconds, 2), ["assetIndexSeconds"] = Math.Round(sel.AssetSeconds, 2),
             ["footprintsRead"] = sel.FootprintsRead, ["wantedAssetPaths"] = wanted.Count, ["reverseLinks"] = reverseLinks,
             ["bytesRead"] = io0 is null ? null : Cost.ReadBytes() - io0,
@@ -184,7 +190,7 @@ static class Probe
         File.WriteAllText(Path.Combine(outDir, batch ? "batch-summary.json" : "cost.json"), JsonSerializer.Serialize(summary, SelectionRule.Json));
         log.WriteLine($"done: {done} selected ({refused} refused) in {wall.Elapsed.TotalSeconds:0.0}s; read {Gb(summary["bytesRead"])}; peak private {Gb(mem.PeakPrivate)}, peak working set {Gb(mem.PeakWorkingSet)}");
         run?.Tally(ok: done - refused, failed: refused);
-        return stopped ? 3 : !batch && refused > 0 ? 2 : 0;
+        return stopped ? 3 : crashed > 0 ? 1 : !batch && refused > 0 ? 2 : 0;
     }
 
     static string Gb(object? b) => b is long l ? $"{l / 1073741824.0:0.00} GiB" : "unknown";
