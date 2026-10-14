@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using HarnessShared;
 using Mutagen.Bethesda.Plugins;
 using Mutagen.Bethesda.Skyrim;
 using HousecarlCore.Progress;
@@ -22,7 +23,11 @@ using HousecarlCore.Progress;
 //     7z x -o<dir> <archive> <entry>               that entry to disk, keeping its filename
 // The filename has to survive extraction because Mutagen derives a plugin's ModKey from it.
 //
-// usage: poolprobe [--list N] [--jobs N] [--max N]
+// usage: poolprobe [--list N] [--jobs N] [--max N] [--json PATH]
+//
+// --json PATH writes the hit list (schema 1, ../_shared/DiscoveryHits.cs): every patch-shaped plugin that would
+// install now or is one master short, one hit per archive version, each with the sha256 of the bytes extracted
+// from that archive (hashed before the scratch copy is deleted).
 
 // Nothing is compiled in — see ../_shared/HarnessTarget.cs. Search roots are a drive layout,
 // the most machine-specific thing a probe can carry.
@@ -37,12 +42,18 @@ string SevenZip = HarnessTarget.Require(HarnessTarget.SevenZip, "path to 7z.exe"
 int listN = 40;
 int jobs = Math.Max(2, Environment.ProcessorCount - 2);
 int max = int.MaxValue;
+string? jsonPath = null;
+bool jsonMalformed = false;
 for (int i = 0; i < args.Length; i++)
 {
     if (args[i] == "--list" && i + 1 < args.Length) listN = int.Parse(args[++i]);
     else if (args[i] == "--jobs" && i + 1 < args.Length) jobs = int.Parse(args[++i]);
     else if (args[i] == "--max" && i + 1 < args.Length) max = int.Parse(args[++i]);
+    else if (args[i] == "--json" && i + 1 < args.Length && !args[i + 1].StartsWith("--")) jsonPath = args[++i];
+    else if (args[i] == "--json") jsonMalformed = true;
 }
+if (jsonMalformed) { Console.Error.WriteLine("--json needs a file path: pass --json PATH."); return 2; }
+var hitList = jsonPath is null ? null : new DiscoveryHits("poolprobe", "pool");
 if (!File.Exists(SevenZip)) { Console.Error.WriteLine($"7-Zip not found at {SevenZip}"); return 1; }
 
 // USSEP is not vanilla, but nearly everything masters it, so declaring it says as little about a
@@ -112,7 +123,7 @@ __run.Feature("roots", roots.Count, "roots").Stage("walk", "walking the download
 foreach (var root in roots)
 {
     __run.Advance();
-    if (!Directory.Exists(root)) continue;
+    if (!Directory.Exists(root)) { hitList?.NotSearched("root", root, "the search root does not exist"); continue; }
     // A recursive enumeration throws partway through on the first unreadable directory and loses
     // everything found so far, so the walk is manual with a per-directory catch.
     var stack = new Stack<(string Dir, int Depth)>();
@@ -127,6 +138,7 @@ foreach (var root in roots)
                 var mods = Path.Combine(Path.GetDirectoryName(ini)!, "mods");
                 if (!Directory.Exists(mods)) continue;
                 instances++;
+                hitList?.Searched("instance", Path.GetDirectoryName(ini)!, Path.GetFileName(Path.GetDirectoryName(ini)!));
                 foreach (var modDir in Directory.EnumerateDirectories(mods))
                 {
                     var meta = Path.Combine(modDir, "meta.ini");
@@ -167,6 +179,7 @@ var pool = Directory.EnumerateFiles(Pool)
     .ToList();
 var never = pool.Where(f => !everInstalled.Contains(Path.GetFileName(f))).Take(max).ToList();
 Console.WriteLine($"   pool holds {pool.Count:N0} archives; {never.Count:N0} of them were never installed anywhere");
+hitList?.Searched("download-pool", Pool, "every never-installed archive's plugins extracted and read");
 
 // ---------------------------------------------------------------------------------------
 // 4. Look inside
@@ -279,7 +292,12 @@ Parallel.ForEach(never, new ParallelOptions { MaxDegreeOfParallelism = jobs }, a
 
             var absent = masters.Where(x => !active.Contains(x)).Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
             var real = masters.Where(x => !Ubiquitous.Contains(x) && !IsCreationClub(x)).ToArray();
-            local.Add(new Hit(Path.GetFileName(arc), Path.GetFileName(onDisk), masters, absent, real));
+            // Hashed HERE, while the extracted copy exists: the finally below deletes it.
+            Hashed? hash = null;
+            string? hashWhy = null;
+            if (hitList is not null) hash = DiscoveryHits.HashFile(onDisk, out hashWhy);
+            local.Add(new Hit(Path.GetFileName(arc), Path.GetFileName(onDisk), masters, absent, real,
+                              Path.GetRelativePath(dir, onDisk), hash, hashWhy));
         }
     }
     finally { try { if (Directory.Exists(dir)) Directory.Delete(dir, true); } catch { } }
@@ -335,6 +353,13 @@ var distinct = patches.GroupBy(h => h.Plugin, StringComparer.OrdinalIgnoreCase)
                       .ThenBy(g => g.Key).ToList();
 Console.WriteLine($"   ...which are {distinct.Count:N0} DISTINCT plugins (the rest are other versions of the same download)");
 
+if (hitList is not null)
+    foreach (var h in patches.Concat(nearMiss))
+        hitList.Hit(h.Plugin, "pool-archive", new() { ["archive"] = h.Archive, ["entry"] = h.Entry, ["path"] = Path.Combine(Pool, h.Archive) },
+                    h.Hash, "archive-entry", h.Masters,
+                    new() { ["absentMasters"] = h.Absent, ["realMasters"] = h.RealMasters, ["applicable"] = h.Absent.Length == 0 },
+                    h.HashWhy, ioFailure: h.Hash is null);
+
 foreach (var g in distinct.Take(listN))
 {
     var h = g.OrderByDescending(x => x.Archive, StringComparer.Ordinal).First();
@@ -348,6 +373,12 @@ foreach (var g in nearMiss.GroupBy(h => h.Absent[0], StringComparer.OrdinalIgnor
                           .OrderByDescending(g => g.Count()).Take(listN))
     Console.WriteLine($"   {g.Count(),4} downloaded patches wait on   {g.Key}    e.g. {g.First().Plugin}");
 
+if (hitList is not null)
+{
+    foreach (var a in unlistableArchives) hitList.Unjudgeable(a, "7-Zip could not list the archive");
+    foreach (var w in whyUnreadable) hitList.Unjudgeable($"{w.Value} plugin(s)", w.Key);
+    hitList.Write(jsonPath!, never.Count, unreadable + pluginsUnreadable);
+}
 Console.WriteLine($"\nelapsed {sw.Elapsed.TotalSeconds:0.0}s");
 return 0;
 
@@ -387,4 +418,7 @@ string Run7z(string arguments, string? _, out bool ok)
     catch { return ""; }
 }
 
-record Hit(string Archive, string Plugin, string[] Masters, string[] Absent, string[] RealMasters);
+/// <param name="Entry">The plugin's path inside the archive.</param>
+/// <param name="Hash">The extracted copy's sha256 when a hit list was asked for, else null.</param>
+record Hit(string Archive, string Plugin, string[] Masters, string[] Absent, string[] RealMasters,
+           string Entry, Hashed? Hash, string? HashWhy);

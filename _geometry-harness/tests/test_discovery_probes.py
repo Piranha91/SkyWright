@@ -238,7 +238,10 @@ def main() -> int:
         out.mkdir()
 
         # ---- patchprobe --pair
-        r, _ = run(exes["patchprobe"], ["--pair", "A.esp", "B.esp", "--json", out / "patch.json"], m, "patchprobe --pair")
+        run(exes["patchprobe"], ["--pair", "A.esp", "B.esp"], m, "patchprobe --pair, warm-up (start-up cost, not timed)")
+        _, plain = run(exes["patchprobe"], ["--pair", "A.esp", "B.esp"], m, "patchprobe --pair, no --json (cost baseline)")
+        r, secs = run(exes["patchprobe"], ["--pair", "A.esp", "B.esp", "--json", out / "patch.json"], m, "patchprobe --pair")
+        print(f"    patchprobe wall with --json {secs:.2f}s, without {plain:.2f}s (one run each, scratch machine)")
         check(r.returncode == 0, f"patchprobe --pair exits 0 (got {r.returncode})")
         check("MO2 instances found: 2" in r.stdout, "patchprobe found exactly the two scratch instances")
         doc = common_shape(load(out / "patch.json"), "patchprobe", "patchprobe --pair")
@@ -270,7 +273,10 @@ def main() -> int:
               f"patchprobe refuses --json with --verify in one sentence (exit {r.returncode})")
 
         # ---- poolprobe
-        r, _ = run(exes["poolprobe"], ["--json", out / "pool.json"], m, "poolprobe")
+        run(exes["poolprobe"], [], m, "poolprobe, warm-up (start-up cost, not timed)")
+        _, plain = run(exes["poolprobe"], [], m, "poolprobe, no --json (cost baseline)")
+        r, secs = run(exes["poolprobe"], ["--json", out / "pool.json"], m, "poolprobe")
+        print(f"    poolprobe wall with --json {secs:.2f}s, without {plain:.2f}s (one run each, scratch machine)")
         check(r.returncode == 0, f"poolprobe exits 0 (got {r.returncode})")
         check("2 MO2 instances scanned" in r.stdout, "poolprobe scanned exactly the two scratch instances")
         doc = common_shape(load(out / "pool.json"), "poolprobe", "poolprobe")
