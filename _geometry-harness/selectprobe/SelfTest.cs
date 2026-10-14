@@ -232,6 +232,14 @@ static class SelfTest
         Check("a newcomer plugin with no records is selected (exit 0, 0 candidates)", rcE == 0
               && JsonNode.Parse(File.ReadAllText(Path.Combine(outE, "selection.json")))!["candidates"]!.AsArray().Count == 0, $"exit {rcE}");
 
+        // ---- one newcomer's failure never ends a batch: every line gets a result --------------------------------
+        var outEB = Path.Combine(root, "out-empty-batch");
+        int rcEB;
+        try { rcEB = Probe.Run(instance, "P", game, null, outEB, true, new() { ("empty", new List<string> { emptyDir }), ("zz-b13", new List<string> { Path.Combine(mods, "B13") }) }, true, null, TextWriter.Null); }
+        catch (Exception ex) { rcEB = -1; Console.WriteLine($"      (batch threw {ex.GetType().Name}: {ex.Message})"); }
+        Check("a batch writes a result for every newcomer, the one after a failing newcomer included",
+              rcEB >= 0 && File.Exists(Path.Combine(outEB, "empty.json")) && File.Exists(Path.Combine(outEB, "zz-b13.json")), $"exit {rcEB}");
+
         // ---- a main .esp that masters its own .esm and an outside plugin is the mod, not a packaged patch ---------
         // Split.esm (root) <- Split.esp (masters Split.esm and Lib.esp) <- "Split - Lib patch.esp" (masters Split.esp
         // and Lib.esp). The patch is packaged; Split.esp is mastered by a plugin in its own folder, so it is the mod.
