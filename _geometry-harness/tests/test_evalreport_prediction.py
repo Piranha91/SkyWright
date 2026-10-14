@@ -21,6 +21,7 @@ Exit 0 all pass, 1 a cell failed.
 """
 from __future__ import annotations
 
+import html as _html
 import json
 import re
 import sys
@@ -1075,8 +1076,9 @@ def main():
         subj = str(lines[0].get("subject") or "") if len(lines) == 1 else ""
         ok = (bool(reason) and bool(both_t) and len(lines) == 1 and lines[0].get("count") == 5
               and lines[0].get("unit") == "fields" and TRUNC in subj and NOT_READ in subj
-              and R.bind(both_t, {"count": 3}) in subj and subj in cov and subj in html)
-        return ok, f"skill reason {reason!r}; lines {lines}"
+              and R.bind(both_t, {"count": 3}) in subj and subj in cov and subj in _html.unescape(html))
+        return ok, (f"skill reason {reason!r}; lines {lines}; on report.md {bool(subj) and subj in cov}; "
+                    f"on report.html {bool(subj) and subj in _html.unescape(html)}")
 
     # 45. a third-mod record group is listed once per pair, not once per setup; the rest go to the evidence index
     def third_mod_group_once_per_pair():

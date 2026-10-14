@@ -1234,6 +1234,34 @@ def build_prediction(ctx: dict) -> dict:
         total_n = sum(per.values())
         lines.append({"reason": reasons["unjudgeable"], "count": total_n,
                       "unit": "item" if total_n == 1 else "items", "subject": f"{title}: {detail}"})
+    # The fields a check left unjudged on P, as its rows file lists them (a record-rows enrichment's `Unjudged`):
+    # counted with why, and how many lie on records both evaluated mods change, where a clash between them could
+    # hide (Gate C round 1, M1).
+    def emit_unjudged(check_id):
+        arm_id, bundle = p_of(check_id), ctx.get("mainBundle")
+        if str(arm_id).startswith("sibling:"):
+            arm_id, bundle = arm_id.split(":", 1)[1], (sibling or {}).get("bundle")
+        if bundle is None:
+            return None
+        path = bundle.output_emit_path(check_id, arm_id, "arm") or bundle.output_emit_path(check_id, arm_id, None)
+        emit = bundle.emit(path) if path else None
+        ul = emit.get("Unjudged") if isinstance(emit, dict) else None
+        return ul if isinstance(ul, list) else None
+    for check_id in checks_on_p:
+        ul = [u for u in emit_unjudged(check_id) or [] if isinstance(u, dict)]
+        fields = [u for u in ul if u.get("Field")]
+        if not ul:
+            continue
+        per = collections.Counter(reason_words(u.get("Reason")) for u in fields)
+        parts = [f"{r} {fmt_n(n)}" for r, n in per.most_common()]
+        if len(ul) > len(fields):
+            parts.append(bind(words["recordsUnreadable"], {"count": fmt_n(len(ul) - len(fields))}))
+        if multi:
+            both = sum(1 for u in fields if pt_lower <= {str(x).lower() for x in u.get("Plugins") or []})
+            parts.append(bind(words["fieldsUnjudgedBoth"], {"count": fmt_n(both)}))
+        lines.append({"reason": reasons["fieldsUnjudged"], "count": len(fields),
+                      "unit": "field" if len(fields) == 1 else "fields",
+                      "subject": f"{title_of(check_id)}: " + "; ".join(parts)})
     not_sep = sum(g["count"] for g in items if g["attribution"] == "not-separable")
     if not_sep:
         lines.append({"reason": reasons["notSeparable"], "count": not_sep,
