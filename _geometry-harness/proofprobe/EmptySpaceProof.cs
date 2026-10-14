@@ -79,6 +79,8 @@ static class EmptySpaceProof
         var dKey = new ModKey("EsD", ModType.Plugin);
         var xKey = new ModKey("EsX", ModType.Plugin);
         var uKey = new ModKey("EsUssep", ModType.Plugin);
+        var upKey = new ModKey("EsUp", ModType.Plugin);       // 2056: an upstream plugin that also stepped on the floor
+        var d2Key = new ModKey("EsD2", ModType.Plugin);       // 2056: the mover, which masters EsUp
         FormKey M(uint id) => new(mKey, id); FormKey S(uint id) => new(sKey, id); FormKey D(uint id) => new(dKey, id);
         var cellK = M(0x810);
         // bases: the room's floor (256 x 256 x 20), wall (16 x 256 x 200), a 48 u slab, a marker; the mod's rack (an Activator), its
@@ -99,7 +101,7 @@ static class EmptySpaceProof
         master.Statics.Add(Stat(markB, "EsMarker", 8, 8, 16, marker: true));
         master.Activators.Add(new Mutagen.Bethesda.Skyrim.Activator(vActB, release) { EditorID = "EsVanillaActivator", Model = new Model { File = "meshes\\es\\va.nif" }, ObjectBounds = Ob(20, 20, 80) });
         var mc = new Cell(cellK, release) { EditorID = "EsCell", Flags = Cell.Flag.IsInteriorCell };
-        int[] floored = { 2000, 2002, 2004, 2006, 2008, 2010, 2012, 2014, 2016, 2018, 2020, 2022, 2024, 2026, 2028, 2030, 2032, 2036, 2040, 2042, 2044 };
+        int[] floored = { 2000, 2002, 2004, 2006, 2008, 2010, 2012, 2014, 2016, 2018, 2020, 2022, 2024, 2026, 2028, 2030, 2032, 2036, 2040, 2042, 2044, 2056 };
         foreach (int n in floored) mc.Temporary.Add(Ref(R(n), floorB, X0(n), 0, -10, $"EsFloor{n}", parent: n == 2002 ? R(2002, 1) : null));
         mc.Temporary.Add(Ref(R(2002, 1), markB, X0(2002) + 300, 0, 8, "EsParent2002"));                      // the floor's enable parent
         mc.Temporary.Add(Ref(R(2016, 1), wallB, X0(2016) + 28, 0, 100, "EsWall2016"));                       // touches the rack's +x face
@@ -134,7 +136,7 @@ static class EmptySpaceProof
         s.Weapons.Add(sword);
         var sc = new Cell(cellK, release) { Flags = Cell.Flag.IsInteriorCell };
         void Rack(int n, float dx = 0, float z = 40, int k = 0, FormKey? parent = null) => sc.Temporary.Add(Ref(F(n, k), rackB, X0(n) + dx, 0, z, $"EsRack{n}_{k}", parent: parent));
-        foreach (int n in new[] { 2000, 2002, 2004, 2006, 2016, 2018, 2022, 2028, 2036 }) Rack(n);
+        foreach (int n in new[] { 2000, 2002, 2004, 2006, 2016, 2018, 2022, 2028, 2036, 2056 }) Rack(n);
         Rack(2008); Rack(2008, 40, k: 1);                                                   // two racks side by side, touching
         Rack(2020, z: 140);                                                                 // 100 u above the floor as shipped
         foreach (int n in new[] { 2030, 2044 }) { Rack(n, 0); Rack(n, 40, k: 1); Rack(n, 80, k: 2); }   // a chain; the third touches the wall
@@ -191,11 +193,27 @@ static class EmptySpaceProof
         uc.Temporary.Add(Ref(R(2024), floorB, X0(2024), 0, -10, "EsFloor2024", disabled: true));
         FileInterior(u, uc);
         var uPath = Write(root, u, mOv);
+        using var uOv = SkyrimMod.CreateFromBinaryOverlay(uPath, release);
+
+        // ---- 2056: EsUp nudges the floor 20 u (a placement step of its own) and places a marker; EsD2 (masters EsUp) disables the floor ----
+        var up = new SkyrimMod(upKey, release);
+        var upc = new Cell(cellK, release) { Flags = Cell.Flag.IsInteriorCell };
+        upc.Temporary.Add(Ref(R(2056), floorB, X0(2056) + 20, 0, -10, "EsFloor2056"));
+        upc.Temporary.Add(Ref(new FormKey(upKey, 0x801), markB, X0(2056) + 300, 0, 8, "EsUpMarker"));
+        FileInterior(up, upc);
+        var upPath = Write(root, up, mOv);
+        using var upOv = SkyrimMod.CreateFromBinaryOverlay(upPath, release);
+        var d2 = new SkyrimMod(d2Key, release);
+        var d2c = new Cell(cellK, release) { Flags = Cell.Flag.IsInteriorCell };
+        d2c.Temporary.Add(Ref(R(2056), floorB, X0(2056) + 20, 0, -10, "EsFloor2056", disabled: true));
+        d2c.Temporary.Add(Ref(new FormKey(upKey, 0x801), markB, X0(2056) + 300, 0, 8, "EsUpMarker"));   // so EsD2 masters EsUp
+        FileInterior(d2, d2c);
+        var d2Path = Write(root, d2, mOv, upOv);
 
         ContactIndex? cidx = null;
         cidx = new ContactIndex(k => cidx!.Index.ObndBox(k) is { IsEmpty: false } bx
             ? new RefGeometry(bx, ContactIndex.BoxSoup(bx), ContactIndex.BoxSoup(bx), 'o', 'o', HostUsable: true, Array.Empty<(string, string)>(), false) : null);
-        var paths = new[] { mPath, sPath, dPath, xPath, uPath };
+        var paths = new[] { mPath, sPath, dPath, xPath, uPath, upPath, d2Path };
         var keys = new ModKey[paths.Length];
         var masterIdx = new HashSet<int>[paths.Length];
         for (int p = 0; p < paths.Length; p++)
@@ -288,6 +306,10 @@ static class EmptySpaceProof
         Check("ES-candidates: every case's fixture is paired with its mover by the host census (contactprobe's path)",
               new[] { 2000, 2002, 2004, 2006, 2008, 2012, 2016, 2018, 2022, 2026, 2028, 2036 }.All(n => cands.Contains((F(n), Dm))) && cands.Contains((R(2024, 1), Um)),
               $"{cands.Count} pairs");
+        var r2056up = es.Judge(F(2056), 5); var r2056 = es.Judge(F(2056), 6);
+        Check("ES-2056: an upstream plugin stepped on the floor, a plugin that masters it disables the floor -> LEFT IN EMPTY SPACE against the disabler only; the upstream plugin is not blamed",
+              r2056.Verdict == EmptySpaceVerdict.LeftInEmptySpace && r2056up.Verdict != EmptySpaceVerdict.LeftInEmptySpace,
+              $"{Show(r2056)} | upstream: {Show(r2056up)}");
         var (pst, pwhy) = es.Predicate(F(2000)); var (gst, _) = es.Predicate(F(2016));
         Check("ES-predicate (--base): a fixture still in empty space under this order reads Holds; a re-grounded one Gone",
               pst == PhysicalState.Holds && gst == PhysicalState.Gone, $"{pst}: {pwhy}; 2016 {gst}");
