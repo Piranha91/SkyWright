@@ -221,9 +221,60 @@ public static class SelectionRule
     /// selecting kinds met (empty: B is left out).</summary>
     public static (SelEvidence Ev, SelNoted Noted, List<string> Kinds) Judge(NewcomerFacts n, InstalledFacts b)
     {
-        // RED STUB: the rule is not written yet; every installed plugin is left out with nothing noted.
-        var none = Array.Empty<string>();
-        return (new SelEvidence(0, none, 0, none, 0, none, 0, none, 0, 0, none), new SelNoted(0, 0, none, 0, null), new List<string>());
+        var N = n.Fp; var B = b.Fp;
+        // records
+        var shared = new HashSet<FormKey>(N.Keys); shared.IntersectWith(B.Keys);
+        var containers = shared.Where(k => N.Containers.Contains(k) || B.Containers.Contains(k)).ToList();
+        var recs = shared.Where(k => !N.Containers.Contains(k) && !B.Containers.Contains(k)).OrderBy(k => k.ToString()).ToList();
+        // cells
+        var cellsI = N.Interior.Where(B.Interior.Contains).OrderBy(s => s, StringComparer.Ordinal).ToList();
+        var cellsE = N.Exterior.Where(B.Exterior.Contains).OrderBy(c => c.Ws.ToString()).ThenBy(c => c.X).ThenBy(c => c.Y).ToList();
+        // neighbours (ring 1, then ring 2 noted), never a cell N itself has
+        var ring1 = new HashSet<(FormKey, int, int)>(); var ring2 = new HashSet<(FormKey, int, int)>();
+        foreach (var (ws, x, y) in N.Exterior)
+            for (int dx = -2; dx <= 2; dx++)
+                for (int dy = -2; dy <= 2; dy++)
+                {
+                    var c = (ws, x + dx, y + dy);
+                    if (N.Exterior.Contains(c)) continue;
+                    if (Math.Abs(dx) <= 1 && Math.Abs(dy) <= 1) ring1.Add(c); else ring2.Add(c);
+                }
+        ring2.ExceptWith(ring1);
+        var nb = B.Exterior.Where(ring1.Contains).OrderBy(c => c.Ws.ToString()).ThenBy(c => c.X).ThenBy(c => c.Y).ToList();
+        int nb2 = B.Exterior.Count(ring2.Contains);
+        // assets
+        var assets = n.Assets.Where(b.Assets.Contains).OrderBy(s => s, StringComparer.Ordinal).ToList();
+        // placement-base links, outside the shared records
+        var outLinks = N.PlacedBases.Where(k => B.Keys.Contains(k) && !shared.Contains(k)).OrderBy(k => k.ToString()).ToList();
+        var inLinks = B.PlacedBases.Where(k => N.Keys.Contains(k) && !shared.Contains(k)).OrderBy(k => k.ToString()).ToList();
+        // noted: masters and general form links
+        var sib = n.NonBaseMasters.Where(b.NonBaseMasters.Contains).OrderBy(s => s, StringComparer.OrdinalIgnoreCase).ToList();
+        int links = N.Links is null ? 0 : N.Links.Count(k => B.Keys.Contains(k) && !shared.Contains(k) && !N.PlacedBases.Contains(k));
+        int? rev = B.Links is null ? null : B.Links.Count(k => N.Keys.Contains(k) && !shared.Contains(k) && !B.PlacedBases.Contains(k));
+
+        string Rec(FormKey k) => N.Info is not null && N.Info.TryGetValue(k, out var i) ? $"{k} {i.Type}{(i.Edid is null ? "" : " " + i.Edid)}" : k.ToString();
+        string Ext((FormKey Ws, int X, int Y) c)
+        {
+            var key = Footprint.ExtKey(c.Ws, c.X, c.Y);
+            return N.CellNames is not null && N.CellNames.TryGetValue(key, out var nm) ? $"{nm} {key}" : key;
+        }
+        string Int(string fk) => N.CellNames is not null && N.CellNames.TryGetValue(fk, out var nm) ? $"{nm} {fk}" : fk;
+
+        var cellEx = cellsI.Select(Int).Concat(cellsE.Select(Ext)).Take(Ex).ToList();
+        var ev = new SelEvidence(recs.Count, recs.Take(Ex).Select(Rec).ToList(),
+                                 cellsI.Count + cellsE.Count, cellEx,
+                                 nb.Count, nb.Take(Ex).Select(Ext).ToList(),
+                                 assets.Count, assets.Take(Ex).ToList(),
+                                 outLinks.Count, inLinks.Count,
+                                 outLinks.Select(k => "newcomer places " + k).Concat(inLinks.Select(k => "they place " + Rec(k))).Take(Ex).ToList());
+        var noted = new SelNoted(containers.Count, nb2, sib, links, rev);
+        var kinds = new List<string>();
+        if (ev.Records > 0) kinds.Add("records");
+        if (ev.Cells > 0) kinds.Add("cells");
+        if (ev.Neighbours > 0) kinds.Add("neighbours");
+        if (ev.Assets > 0) kinds.Add("assets");
+        if (ev.NewcomerPlacesTheirBase + ev.TheyPlaceNewcomerBase > 0) kinds.Add("baseLinks");
+        return (ev, noted, kinds);
     }
 
     public static string ExcludedReason(SelNoted noted)
