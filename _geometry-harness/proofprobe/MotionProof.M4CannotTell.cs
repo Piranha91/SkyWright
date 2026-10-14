@@ -110,14 +110,15 @@ static partial class MotionProof
             return (s.Status == "measured" && s.Soup?.TriangleCount == 24 && nd == 12 && op == 12 && aligned,
                     $"{s.Status} tris {s.Soup?.TriangleCount} not_drawn {nd} opaque {op} texcoords {tc.Status} {tc.Reason}");
         });
-        // 4022: box contact ignores not-drawn triangles: a box touching only the marker meets nothing. Rejects anyMeets on a marker.
+        // 4022: box contact ignores not-drawn triangles: a box straddling only the marker's face at x = 15 meets nothing. Rejects anyMeets
+        // on a marker (the first version sat inside the marker cube touching no face, and passed on the base: corrected at Gate B).
         Case(check, "m4 4022: a box touching only the EditorMarker shape - neither opaque nor any", () =>
         {
             var s = MeshSurface.ModelSurface(M4Mesh(("Frame", -10, false), ("EditorMarker", 10, true)), VolumeGeometry.Render);
-            var b = MeshSurfaceBox.BoxContact(s.Soup!, s.Tags, M4Box(8, -2, -2, 12, 2, 2));
+            var b = MeshSurfaceBox.BoxContact(s.Soup!, s.Tags, M4Box(13, -2, -2, 17, 2, 2));
             return (!b.OpaqueMeets && !b.AnyMeets && b.Reason is null, $"{b}");
         });
-        // 4024: an actor standing inside a marker-only mesh is clear, not undecided. Rejects "only non-opaque surfaces in the body".
+        // 4024: an actor standing inside a marker-only mesh is clear. Rejects the base's "meets: the body lies inside a closed component".
         Case(check, "m4 4024: an anchor body inside an EditorMarker-only mesh - clear", () =>
         {
             var nif = ChainNif(null, new[] { ("EditorMarker", "N1", Box(-50, -50, 0, 50, 50, 200), true) }, Array.Empty<(string, FxKeys[], CycleType)>());
