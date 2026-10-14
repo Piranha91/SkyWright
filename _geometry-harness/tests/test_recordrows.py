@@ -313,6 +313,41 @@ def case_29_a_rotation_a_full_turn_apart_is_the_same_rotation():
     assert conflicts(emit) == [], conflicts(emit)
 
 
+def case_31_a_worldspace_large_references_list_is_not_compared():
+    """Ruled at Gate C round 1: a worldspace's LargeReferences is generated bookkeeping, not authored game data."""
+    sc = RR.load_scope()
+    named = (json.loads(SCOPE_FILE.read_text(encoding="utf-8")).get("generatedBookkeeping") or {}).get("Worldspace")
+    assert named and "LargeReferences" in named, f"the field scope does not name Worldspace.LargeReferences: {named}"
+    got = sc.classify("Worldspace", "LargeReferences[0].Position")
+    assert got == "bookkeeping", got
+    w = {"FormKey": "00003C:Skyrim.esm", "LargeReferences": "[list: 1 item(s)]", "LargeReferences[0].Position": "1,1"}
+    batches = three("00003C:Skyrim.esm", w, dict(w, **{"LargeReferences[0].Position": "2,2"}),
+                    dict(w, **{"LargeReferences": "[list: 0 item(s)]"}), rtype="Worldspace")
+    with tempfile.TemporaryDirectory() as td:
+        emit, _ = rows_of(batches, Path(td))
+    assert conflicts(emit) == [], conflicts(emit)
+
+
+def case_33_every_unjudged_field_is_listed_with_its_record_and_plugins():
+    """Gate C round 1 (M1): a field left unjudged is counted, and listed with its record, reason and the plugins whose
+    versions of the record were compared, so a report can say how many could hide a clash between two mods."""
+    with tempfile.TemporaryDirectory() as td:
+        emit, _ = rows_of(three("000801:Skyrim.esm", ref(), ref(LocationReference="0A0001:ModA.esp"),
+                                {"FormKey": "000801:Skyrim.esm", "Placement": "[Placement]",
+                                 "Placement.Position": "10,20,30"}, sel_b=["Placement"]), Path(td))
+    listed = emit.get("Unjudged")
+    assert isinstance(listed, list), f"the emit lists no unjudged fields: keys {sorted(emit)}"
+    hit = [u for u in listed if u.get("Field") == "LocationReference"]
+    assert len(hit) == 1 and hit[0].get("FormKey") == "000801:Skyrim.esm" and "not read" in str(hit[0].get("Reason")) \
+        and hit[0].get("Plugins") == [BASE, A, B], listed
+    assert len(listed) == sum(unjudged(emit).values()), (len(listed), unjudged(emit))
+    with tempfile.TemporaryDirectory() as td:
+        emit2, _ = rows_of(three("000801:Skyrim.esm", ref(), ref(LocationReference="0A0001:ModA.esp"),
+                                 "error: the plugin could not be read"), Path(td))
+    failed = emit2.get("Unjudged") or []
+    assert len(failed) == 1 and failed[0].get("Field") is None and "read failed" in str(failed[0].get("Reason")), failed
+
+
 def main():
     for name, fn in sorted(((k, v) for k, v in globals().items() if k.startswith("case_")),
                            key=lambda kv: int(kv[0].split("_")[1])):

@@ -78,7 +78,7 @@ def lost_row(a, b, form_key, field, lost, winner, overridden, label=None):
 
 def make_bundle(root: Path, arms, results, targets, patches=(), missing=(), unjudgeable=(), order=None,
                 scope_unmeasured=(), count_only=None, cells=(), plan_id="pred00000000", tool_builds=None,
-                enrichment=None, receipt_configs=None, names=None):
+                enrichment=None, receipt_configs=None, names=None, enrichment_unjudged=None):
     """results: {(checkId, armId): [conflict rows]} -- an empty list is a completed check with no finding.
     missing: [(checkId, armId, status)]. unjudgeable: disposition unassessed.unjudgeablePopulations rows.
     order: {armId: {probe: perProbe counts}} -- the controller's order evaluation of that arm against the baseline.
@@ -90,7 +90,9 @@ def make_bundle(root: Path, arms, results, targets, patches=(), missing=(), unju
     written as `enrichment/record-rows/<check>__<arm>.json` with a manifest row of kind `enrichment`.
     receipt_configs: {(checkId, armId): [plugin rows]} -- the configuration a receipt records it consumed; every other
     receipt records its arm's requested plugins.
-    names: a names enrichment document, written as `enrichment/names/names.json`."""
+    names: a names enrichment document, written as `enrichment/names/names.json`.
+    enrichment_unjudged: {(checkId, armId): [{FormKey, Field, Reason, Plugins}]} -- the fields that enrichment left
+    unjudged, written as its `Unjudged` list and counted in its coverage line."""
     root.mkdir(parents=True, exist_ok=True)
     arm_plugins = {a["armId"]: a["requested"]["plugins"] for a in arms}
 
@@ -150,8 +152,14 @@ def make_bundle(root: Path, arms, results, targets, patches=(), missing=(), unju
         rel = f"enrichment/record-rows/{check_id}__{arm_id}.json"
         (root / rel).parent.mkdir(parents=True, exist_ok=True)
         src = f"evidence/{check_id}__{arm_id}__arm.json"
+        uj = list((enrichment_unjudged or {}).get((check_id, arm_id)) or [])
+        uj_counts = {}
+        for u in uj:
+            uj_counts[u["Reason"]] = uj_counts.get(u["Reason"], 0) + 1
         (root / rel).write_text(json.dumps({"Population": "contested records", "State": "baseline", "Conflicts": rows,
-                                            "Coverage": [{"Population": check_id, "Judged": 40, "Unjudgeable": {}}],
+                                            "Coverage": [{"Population": check_id, "Judged": 40,
+                                                          "Unjudgeable": uj_counts}],
+                                            **({"Unjudged": uj} if uj else {}),
                                             "derivedFrom": [{"path": src, "sha256": "1" * 64}]}), encoding="utf-8")
         evidence.append({"id": f"e{n:015x}", "kind": "enrichment", "enrichment": "record-rows", "path": rel,
                          "sha256": "2" * 64, "checkId": check_id, "armId": arm_id,
@@ -526,6 +534,47 @@ def names_bundle():
     return compile_and_render(four_arms(), results, [MOD_A, MOD_B], names=NAMES_DOC)
 
 
+def mixed_kinds_bundle(settings_extra=None):
+    """The four setups; two kinds of clash need both mods: four contact rows on three objects (one object loses two
+    supports) and seven record fields on two records (ModA's change lost to ModB). Every sum across the two kinds
+    (4 + 7, 4 + 2, 3 + 2, 3 + 7) is a number no single kind has."""
+    contact = [row("CONTACT", MOD_B, MOD_A, f"00080{i}:{MOD_A}") for i in (1, 2, 3)]
+    contact.append(dict(row("CONTACT", MOD_B, MOD_A, f"000801:{MOD_A}"),
+                        Summary=f"CONTACT between {MOD_B} and {MOD_A}, second support"))
+    fields = [("000701", f) for f in ("Name", "Music", "Location", "Owner")] + [
+        ("000702", f) for f in ("Name", "Music", "Location")]
+    lost = [lost_row(MOD_A, MOD_B, f"{fk}:{BASE}", fld, "a", "b", "v") for fk, fld in fields]
+    enr = {(RECORDS, "baseline"): lost, (RECORDS, "dependency-only"): [], (RECORDS, "plus-a"): [],
+           (RECORDS, "plus-b"): []}
+    results = {(CONTACT, "baseline"): contact, (CONTACT, "dependency-only"): [], (CONTACT, "plus-a"): [],
+               (CONTACT, "plus-b"): []}
+    return compile_and_render(four_arms(), results, [MOD_A, MOD_B], settings_extra=settings_extra,
+                              count_only={k: max(1, len(v)) for k, v in enr.items()}, enrichment=enr)
+
+
+TRUNC = "a field the read's expansion was cut off before"
+NOT_READ = "a field the capture did not read"
+
+
+def unjudged_fields_bundle():
+    """record_rows_bundle's setups and rows, with fields the enrichment left unjudged: on the setup with both mods,
+    three fields of a record both evaluated mods change (cut-off read) and two of a record only ModA changes (not
+    read); on the setup with ModA alone, one more (not on the prediction setup, so not counted)."""
+    nb = [lost_row(MOD_A, MOD_B, f"00070{i}:{BASE}", "LocationReference", f"a{i}", f"b{i}", "v") for i in (1, 2)]
+    enr = {(RECORDS, "baseline"): nb, (RECORDS, "dependency-only"): [], (RECORDS, "plus-a"): [],
+           (RECORDS, "plus-b"): []}
+    both = [{"FormKey": f"018A5A:{BASE}", "Type": "Location", "Field": f, "Reason": TRUNC,
+             "Plugins": [BASE, MOD_A, MOD_B]} for f in ("Music", "Name", "ParentLocation")]
+    one = [{"FormKey": f"000711:{BASE}", "Type": "Cell", "Field": f, "Reason": NOT_READ,
+            "Plugins": [BASE, OTHER, MOD_A]} for f in ("Regions", "Water")]
+    other_setup = [{"FormKey": f"000712:{BASE}", "Type": "Cell", "Field": "Water", "Reason": NOT_READ,
+                    "Plugins": [BASE, MOD_A]}]
+    results = {(CONTACT, a): [] for a in ("baseline", "dependency-only", "plus-a", "plus-b")}
+    return compile_and_render(four_arms(), results, [MOD_A, MOD_B], count_only={k: max(1, len(v)) for k, v in enr.items()},
+                              enrichment=enr, enrichment_unjudged={(RECORDS, "baseline"): both + one,
+                                                                   (RECORDS, "plus-a"): other_setup})
+
+
 def html_section(html, heading):
     """report.html text under `<h2>heading</h2>` up to the next `<h2`; '' when the heading is absent."""
     m = re.search(r"<h2[^>]*>\s*" + re.escape(heading) + r"\s*</h2>(.*?)(?=<h2|\Z)", html, re.S)
@@ -852,18 +901,30 @@ def main():
     pw = (priorities().get("reader") or {}).get("prediction") or {}
 
     # 17. the verdict counts what needs both mods; single-mod and unseparated clashes are outside the number
+    def per_kind(lst):
+        """A per-kind count list as (checkId, relationships, objects); anything else (a sum) as itself."""
+        if not isinstance(lst, list):
+            return lst
+        return [(x.get("checkId"), x.get("relationships"), x.get("objects")) for x in lst]
+
+    def verdict_counts(p):
+        return [(x.get("checkId"), x.get("unit"), x.get("count")) for x in p.get("verdictCounts") or []]
+
     def verdict_needs_both_only():
         plan, md, html = get("four", four_setup_unpatched)
         p = reader(plan).get("prediction") or {}
         v = str(p.get("verdict") or "")
         counts = p.get("counts") or {}
-        clause = pw.get("verdictNotSeparable")
-        ok = (p.get("total") == 3 and re.search(r"\b3\b", v) is not None and re.search(r"\b5\b", v) is None
-              and (counts.get("needsBoth") or {}).get("relationships") == 3
-              and (counts.get("singleMod") or {}).get("relationships") == 1
-              and (counts.get("notSeparable") or {}).get("relationships") == 1
-              and bool(clause) and R.bind(clause, {"count": 1}) in v)
-        return ok, f"total {p.get('total')}; counts {counts}; verdict {v!r}; skill clause {clause!r}"
+        clause = str(pw.get("verdictNotSeparable") or "")
+        head = clause.split("{")[0]
+        ok = ("total" not in p and verdict_counts(p) == [(CONTACT, "relationships", 3)]
+              and re.search(r"\b3\b", v) is not None and re.search(r"\b5\b", v) is None
+              and per_kind(counts.get("needsBoth")) == [(CONTACT, 3, 3)]
+              and per_kind(counts.get("singleMod")) == [(CONTACT, 1, 1)]
+              and per_kind(counts.get("notSeparable")) == [(SEAMS, 1, 1)]
+              and bool(head) and head in v and re.search(r"\b1\b", v[v.find(head):]) is not None)
+        return ok, (f"total {p.get('total')}; verdict counts {verdict_counts(p)}; counts "
+                    f"{ {k: per_kind(c) for k, c in counts.items()} }; verdict {v!r}")
 
     # 19. a single-mod clash is shown under its own heading, after the pair's
     def single_mod_own_heading():
@@ -894,7 +955,8 @@ def main():
         plan, md, html = get("already", already_present_and_mod_partner_bundle)
         p = reader(plan).get("prediction") or {}
         v = str(p.get("verdict") or "")
-        return p.get("total") == 1 and re.search(r"\b1\b", v) is not None, f"total {p.get('total')}; verdict {v!r}"
+        return (verdict_counts(p) == [(CONTACT, "relationships", 1)] and re.search(r"\b1\b", v) is not None,
+                f"verdict counts {verdict_counts(p)}; verdict {v!r}")
 
     # 25. the scope line names the evaluated pair, not the third mod with the most rows
     def scope_line_names_pair():
@@ -914,7 +976,7 @@ def main():
         it = next((i for i in p.get("items") or [] if i.get("attribution") == "needs-both"), {})
         v = str(p.get("verdict") or "")
         ok = (it.get("relationships") == 4 and it.get("objects") == 3 and p.get("headlineUnit") == "relationships"
-              and p.get("total") == 4 and re.search(r"\b4\b", v) is not None)
+              and verdict_counts(p) == [(CONTACT, "relationships", 4)] and re.search(r"\b4\b", v) is not None)
         return ok, (f"item {({k: it.get(k) for k in ('count', 'relationships', 'objects')})}; "
                     f"unit {p.get('headlineUnit')!r}; verdict {v!r}")
 
@@ -922,8 +984,9 @@ def main():
         plan, md, html = two_units_bundle({"headlineUnit": "objects"})
         p = reader(plan).get("prediction") or {}
         v = str(p.get("verdict") or "")
-        ok = p.get("headlineUnit") == "objects" and p.get("total") == 3 and re.search(r"\b3\b", v) is not None
-        return ok, f"unit {p.get('headlineUnit')!r}; total {p.get('total')}; verdict {v!r}"
+        ok = (p.get("headlineUnit") == "objects" and verdict_counts(p) == [(CONTACT, "objects", 3)]
+              and re.search(r"\b3\b", v) is not None)
+        return ok, f"unit {p.get('headlineUnit')!r}; verdict counts {verdict_counts(p)}; verdict {v!r}"
 
     # 29. record rows derived after measurement are read as the check's rows; the index says they were derived
     def record_rows_read():
@@ -982,11 +1045,65 @@ def main():
     def record_repeat_counted_once():
         plan, md, html = record_repeat_bundle()
         p = reader(plan).get("prediction") or {}
-        ok = p.get("total") == 2 and (p.get("setAside") or {}).get("repeat") == 2
-        return ok, f"total {p.get('total')}; setAside {p.get('setAside')}"
+        rel = sum(x[1] for x in per_kind(p["counts"]["needsBoth"])) if isinstance(
+            (p.get("counts") or {}).get("needsBoth"), list) else None
+        ok = rel == 2 and (p.get("setAside") or {}).get("repeat") == 2
+        return ok, f"needs-both lost edits {rel}; setAside {p.get('setAside')}"
+
+    # 41. each kind of clash is stated in its own unit and two kinds are never summed (Gate C round 1, H1)
+    def kinds_never_summed(settings_extra=None, contact_n=4):
+        plan, md, html = mixed_kinds_bundle(settings_extra)
+        p = reader(plan).get("prediction") or {}
+        v = str(p.get("verdict") or "")
+        nums = {int(x) for x in re.findall(r"\b\d+\b", v)}
+        unit = (settings_extra or {}).get("headlineUnit", "relationships")
+        sec = section_text(md, headings(plan).get("prediction") or "\0")
+        ok = ("total" not in p
+              and verdict_counts(p) == [(CONTACT, unit, contact_n), (RECORDS, "objects", 2)]
+              and {contact_n, 2} <= nums and not nums & {11, 6, 5, 10, 7}
+              and re.search(r"\b7 record fields\b", sec) is not None and re.search(r"\b7 record fields\b", html) is not None)
+        return ok, f"verdict counts {verdict_counts(p)}; numbers in the verdict {sorted(nums)}; verdict {v!r}"
+
+    # 43. the fields a record check left unjudged are counted on the page with why, and how many could hide a clash
+    #     between the evaluated mods (Gate C round 1, M1)
+    def unjudged_fields_counted():
+        plan, md, html = unjudged_fields_bundle()
+        reason = (pw.get("coverageReasons") or {}).get("fieldsUnjudged")
+        both_t = pw.get("fieldsUnjudgedBoth")
+        lines = [ln for ln in (reader(plan).get("coverage") or {}).get("lines") or [] if reason and ln.get("reason") == reason]
+        cov = section_text(md, headings(plan).get("coverage") or "\0")
+        subj = str(lines[0].get("subject") or "") if len(lines) == 1 else ""
+        ok = (bool(reason) and bool(both_t) and len(lines) == 1 and lines[0].get("count") == 5
+              and lines[0].get("unit") == "fields" and TRUNC in subj and NOT_READ in subj
+              and R.bind(both_t, {"count": 3}) in subj and subj in cov and subj in html)
+        return ok, f"skill reason {reason!r}; lines {lines}"
+
+    # 45. a third-mod record group is listed once per pair, not once per setup; the rest go to the evidence index
+    def third_mod_group_once_per_pair():
+        plan, md, html, index = record_rows_bundle()
+        words = pw.get("detailAside") or {}
+        sec = section_text(md, detail_heading)
+        pair_lines = [ln for ln in sec.splitlines() if f"between {OTHER} and {MOD_A}" in ln]
+        groups = [f for f in plan.get("findings") or [] if f.get("kind") == "finding" and f.get("checkId") == RECORDS
+                  and {(f.get("counts") or {}).get("A"), (f.get("counts") or {}).get("B")} == {OTHER, MOD_A}]
+        shown = [f for f in groups if f.get("readerDetail")]
+        aside = [f for f in groups if f.get("readerDetail") is False]
+        line = str(reader(plan).get("detailOnceLine") or "")
+        ok = (len(groups) == 2 and len(shown) == 1 and shown[0].get("armId") == "baseline" and len(aside) == 1
+              and aside[0].get("readerDetailAside") == "samePair" and len(pair_lines) == 1
+              and bool(line) and line in sec and re.search(r"\b1\b", line) is not None
+              and bool(words.get("samePair")) and words["samePair"] in index_section(index, "detail-set-aside")
+              and aside[0]["id"] in index_section(index, "detail-set-aside"))
+        return ok, (f"groups {[(f.get('armId'), f.get('readerDetail'), f.get('readerDetailAside')) for f in groups]}; "
+                    f"lines on the page {len(pair_lines)}; once-line {line!r}")
 
     for name, fn in [
             ("record-rows/a-lost-edit-two-checks-report-is-counted-once", record_repeat_counted_once),
+            ("verdict-units/each-kind-in-its-own-unit-never-summed", kinds_never_summed),
+            ("verdict-units/each-kind-in-its-own-unit-never-summed-objects",
+             lambda: kinds_never_summed({"headlineUnit": "objects"}, 3)),
+            ("coverage/unjudged-record-fields-counted-with-why", unjudged_fields_counted),
+            ("detail-list/a-third-mod-record-group-is-listed-once-per-pair", third_mod_group_once_per_pair),
             ("admission-everywhere/verdict-counts-needs-both-only", verdict_needs_both_only),
             ("admission-everywhere/single-mod-clash-under-its-own-heading", single_mod_own_heading),
             ("admission-everywhere/single-mod-aside-switch-sets-it-aside-with-its-reason", single_mod_aside),
