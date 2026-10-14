@@ -18,8 +18,8 @@ Optional inputs, each recorded with its sha256 in reader-manifest.json:
   --mod-name PLUGIN=NAME  the mod's ordinary name, overriding the plan's (default without either: the plugin name
                           without its extension)
   --names FILE            {"places": {editorId: name}, "objects": {editorId: name}, "source": ...}, overriding the
-                          plan's names; a place or object neither names is printed by editor name (place) or kind
-                          word (object) and listed under `namesMissing`
+                          plan's names; a place neither names is counted, never printed by its editor name, an object
+                          gets its kind word, and both are listed under `namesMissing`
   --order FILE            {"forced": true|false, "first": PLUGIN}; absent, the page says order was not checked
 
 Writes reader.md, reader.html, reader.pdf (unless --no-print), summary.txt (the short answer, for a session
@@ -127,7 +127,7 @@ def build(plan: dict, rd: dict, mod_names: dict, names: dict | None, order: dict
     missing_names = {"places": set(), "objects": set()}
     units_t, phrases, kind_words = rd["units"], rd["problemPhrases"], rd["kindWords"]
 
-    def describe(i, it):
+    def describe(i, it, limit=None):
         k = (it["checkId"], it["kind"], tuple(it["mods"]), it["attribution"], it.get("attributionMod"))
         keys = {(e["formKey"], e["summary"]) for e in record if e.get("admission") == "admitted" and item_key(e) == k}
         rows = [r for fid in it.get("findingIds") or [] for r in (findings.get(fid) or {}).get("allRows") or []
@@ -139,16 +139,17 @@ def build(plan: dict, rd: dict, mod_names: dict, names: dict | None, order: dict
         noun = ((rd.get("relationshipUnits") or {}).get(it["checkId"]) or (rd.get("relationshipUnits") or {}).get("default")
                 if unit == "relationships" else None) or units_t.get(it["checkId"]) or units_t["default"]
         per_place = collections.Counter()
+        unnamed = set()
         objects = collections.Counter()
         causes = collections.Counter()
         for fk, r in subjects.items():
             pl = clean_place(r.get("label"))
             if pl:
                 if pl in places_map:
-                    pl = places_map[pl]
+                    per_place[places_map[pl]] += 1
                 else:
                     missing_names["places"].add(pl)
-                per_place[pl] += 1
+                    unnamed.add(pl)
             m = SUMMARY_RE.match(str(r.get("summary") or ""))
             if m:
                 kind, eid = m.group(1), m.group(2)
@@ -170,7 +171,15 @@ def build(plan: dict, rd: dict, mod_names: dict, names: dict | None, order: dict
                 causes[who] += 1
         phrase = bind(phrases.get(it["checkId"]) or phrases["default"], n=ER.fmt_n(n), units=plural(noun, n),
                       title=it.get("title") or it["checkId"])
-        places_txt = join_words([f"{p} ({c})" if len(per_place) > 1 else p for p, c in per_place.most_common()])
+        # a place with no in-game name is counted, never printed by its editor name; a list may be capped
+        shown_pl = per_place.most_common(limit) if limit else per_place.most_common()
+        parts = [f"{p} ({c})" if len(per_place) > 1 else p for p, c in shown_pl]
+        more = len(per_place) - len(shown_pl)
+        if more:
+            parts.append(bind(rd["placesMore"], n=ER.fmt_n(more), places=plural(rd["placeWord"], more)))
+        if unnamed:
+            parts.append(bind(rd["placesUnnamed"], n=ER.fmt_n(len(unnamed)), places=plural(rd["placeWord"], len(unnamed))))
+        places_txt = join_words(parts)
         obj_txt = join_words([f"{ER.fmt_n(c)} {plural(w, c)}" for w, c in objects.most_common()])
         return {"index": i, "phrase": phrase, "n": n, "unit": noun, "places": places_txt, "perPlace": dict(per_place),
                 "objects": obj_txt, "causes": dict(causes), "rows": len(rows), "distinct": len(subjects),
@@ -181,7 +190,7 @@ def build(plan: dict, rd: dict, mod_names: dict, names: dict | None, order: dict
     alone = [(i, it) for i, it in enumerate(items) if it.get("attribution") == "single-mod"]
     other = [(i, it) for i, it in enumerate(items) if it.get("attribution") not in ("needs-both", "single-mod")]
     d_both = [describe(i, it) for i, it in both]
-    d_alone = [describe(i, it) for i, it in alone]
+    d_alone = [describe(i, it, rd.get("aloneMaxPlaces") or 3) for i, it in alone]
 
     title = bind(rd["title"] if has_patch else rd["titleNoPatch"], modA=mod_a, modB=mod_b)
     h = rd["headings"]

@@ -289,6 +289,14 @@ def case_33_record_fields_the_patch_sets_are_not_counted_as_fixed():
     assert "sets 1 " in section(md, H["patch"]), section(md, H["patch"])
 
 
+def case_35_a_place_with_no_in_game_name_is_counted_not_printed():
+    """Gate C lint: Group 6's page printed editor names such as BlackreachSpiderLair02 for unnamed places."""
+    md, _, man = build(plan(), names={"places": {"PlaceOne": "First Hall"}, "objects": {}})
+    probs = section(md, H["problems"])
+    assert "PlaceTwo" not in probs and "1 place with no in-game name" in probs, probs
+    assert "PlaceTwo" in man["namesMissing"]["places"], man["namesMissing"]
+
+
 def main():
     for name, fn in sorted(((k, v) for k, v in globals().items() if k.startswith("case_")),
                            key=lambda kv: int(kv[0].split("_")[1])):
