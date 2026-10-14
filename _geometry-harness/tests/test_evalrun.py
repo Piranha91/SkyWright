@@ -438,6 +438,14 @@ def case_07(tmp):
     blk = arm_block(disp, "candidate-03-combined")
     check("espOnly" in json.dumps(blk) or "not staged" in json.dumps(load(run / "plan.json") or {}),
           f"{case}: the supplied-combination arm carries its ESP-only limit (D3)")
+    # The detectors that feed evaluation.findings: the combined arm's new navmesh defect is a finding on its diff part
+    # and on its order evaluation; patch A alone creates none, so both of its parts are no-finding.
+    led = ledger_entries(load(run / "ledger.json") or {})
+    for key, want in [("geometry.navmesh-ownership__candidate-03-combined__diff", "finding"),
+                      ("geometry.navmesh-ownership__candidate-01-patcha__diff", "no-finding"),
+                      ("patch.order-evaluation__candidate-03-combined", "finding"),
+                      ("patch.order-evaluation__candidate-01-patcha", "no-finding")]:
+        expect((led.get(key) or {}).get("detector"), want, f"{case}: ledger detector of {key}")
 
 
 def case_08(tmp):
@@ -6428,6 +6436,82 @@ def case_46(tmp):
 
 
 CASES["case-46"] = case_46
+
+
+def _evalrun_module(name):
+    import importlib.util
+    spec = importlib.util.spec_from_file_location(name, EVALRUN)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def case_47(tmp):
+    """The headline claim on a COMPLETE evaluation, which no fixture run reaches (every one is incomplete): one
+    required check on one arm, completed, with detector `finding` gives `findings`; with `no-finding` it gives
+    `no-findings-in-completed-checks`. In-process through `build_disposition` on a minimal plan."""
+    case = "case-47-complete-claim"
+    mod = _evalrun_module("evalrun_case47")
+    run = tmp / case
+    run.mkdir(parents=True, exist_ok=True)
+    plan = {"planId": "p47", "registry": {"registryVersion": "t"}, "explicitDecisions": [],
+            "states": {"notExplored": []}, "budgets": {"candidatesHeldBack": []}, "scope": {"unmeasured": []},
+            "checks": [{"checkId": "geometry.x", "applicability": "yes", "applicabilityEvidence": "", "required": True,
+                        "family": "geometry", "arms": [{"armId": "baseline"}], "adapter": {"kind": "probe-json"}}],
+            "arms": [{"armId": "baseline", "kind": "baseline", "candidateFile": None, "loadedInGameNote": ""}]}
+    for detector, want in [("finding", "findings"), ("no-finding", "no-findings-in-completed-checks")]:
+        (run / "ledger.json").write_text(json.dumps({"planId": "p47", "entries": {"geometry.x__baseline": {
+            "checkId": "geometry.x", "armId": "baseline", "part": None, "status": "completed",
+            "detector": detector}}}), encoding="utf-8")
+        disp = mod.build_disposition(run, plan, mod.Ledger(run, plan), {"geometry.x__baseline": {
+            "result": {"findings": 1}, "validation": {"accepted": True}}})
+        ev = disp["evaluation"]
+        expect(ev["complete"], True, f"{case}/{detector}: the evaluation is complete")
+        expect(ev["claim"], want, f"{case}/{detector}: the claim")
+
+
+def case_49(tmp):
+    """Three receipt refusals no fixture run reaches, in-process on the Validator: an emit with no Coverage is
+    `coverage-missing`; a second emit of the same arm that consumed one plugin at a different hash is
+    `mixed-snapshot`; an emit whose configuration states another population than the arm's is
+    `population-mismatch`."""
+    case = "case-49-receipt-refusals"
+    mod = _evalrun_module("evalrun_case49")
+    run = tmp / case
+    run.mkdir(parents=True, exist_ok=True)
+    h1, h2 = "1" * 64, "2" * 64
+    arm = {"armId": "candidate-01", "kind": "candidate", "candidateFile": "",
+           "requested": {"plugins": [{"name": "A.esp", "hashSource": "unstated"}], "overlays": []},
+           "expected": {"population": "fixture population", "states": ["baseline"]}}
+    plan = {"arms": [arm]}
+
+    def identity(sha, population="fixture population"):
+        plugins = [{"name": "A.esp", "path": None, "sha256": sha}]
+        return {"plugins": plugins, "providers": [], "overlays": [], "population": population, "state": "baseline",
+                "source": "", "schemaVersion": None,
+                "fingerprint": mod.configuration_fingerprint(plugins, [], [], population, "baseline")}
+
+    v = mod.Validator(run, plan)
+    first = [r["cause"] for r in v._identity_checks(identity(h1), arm, {}, {})]
+    expect(first, [], f"{case}: the first emit of the arm is accepted")
+    second = [r["cause"] for r in v._identity_checks(identity(h2), arm, {}, {})]
+    check("mixed-snapshot" in second, f"{case}: a second emit consuming A.esp at another hash is mixed-snapshot (got {second})")
+
+    v = mod.Validator(run, plan)
+    other = [r["cause"] for r in v._identity_checks(identity(h1, population="another population"), arm, {}, {})]
+    check("population-mismatch" in other, f"{case}: an emit judging another population is population-mismatch (got {other})")
+
+    emit = run / "no-coverage.json"
+    emit.write_text(json.dumps({"Probe": "navownprobe", "Conflicts": []}), encoding="utf-8")
+    res = mod.Validator(run, plan).validate(check={"checkId": "geometry.x"}, arm=arm, part=None,
+                                            adapter={"kind": "probe-json", "exe": "navownprobe"}, exit_code=0,
+                                            log_text="", outputs=[emit], pre_hashes={}, started=None)
+    causes = [r["cause"] for r in res.get("rejections") or []]
+    check("coverage-missing" in causes, f"{case}: an emit with no Coverage is coverage-missing (got {causes})")
+
+
+CASES["case-47"] = case_47
+CASES["case-49"] = case_49
 
 
 def pin_standard_settings(tmp: Path) -> None:

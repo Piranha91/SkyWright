@@ -1357,6 +1357,48 @@ def missing_setup_control(bundle: Path):
     return plan, md, html
 
 
+def check_no_findings_headline(bundle: Path):
+    """The reader's verdict for a COMPLETE evaluation whose claim is `no-findings-in-completed-checks`, which no
+    fixture bundle carries (every one is incomplete). Built in memory from R4's bundle with the measured load order
+    only, nothing missing and no findings. The wrong answer is the sentence for a result with no claim behind it."""
+    label = "R4/no-findings-headline"
+    spec = importlib.util.spec_from_file_location("evalreport_no_findings", EVALREPORT)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    view = module.Bundle(bundle)
+    view.disposition = copy.deepcopy(view.disposition)
+    view.plan = copy.deepcopy(view.plan)
+    wanted = {"baseline"}
+    view.disposition["arms"] = {k: v for k, v in view.disposition["arms"].items() if k in wanted}
+    view.plan["arms"] = [a for a in view.plan.get("arms") or [] if a.get("armId") in wanted]
+    evaluation = view.disposition["evaluation"]
+    evaluation["missing"], evaluation["findings"] = [], []
+    for key in ("completedNullChecks", "completedCatalogues"):
+        evaluation[key] = [row for row in evaluation.get(key) or [] if row.get("armId") in wanted]
+    evaluation["complete"], evaluation["claim"] = True, "no-findings-in-completed-checks"
+    priorities = module.load_json(module.PRIORITIES)
+    concise = priorities.get("concise") or {}
+    page = priorities.get("page") or {}
+    settings = {"mode": "concise", "layout": concise.get("layout", "normal"), "maxPages": 8,
+                "page": {"size": page.get("size", "A4"), "marginMm": page.get("marginMm", 16),
+                         "baseFontPt": page.get("baseFontPt", 10.5)},
+                "rowsPerGroup": concise.get("rowsPerGroup", 3),
+                "figuresPerFinding": concise.get("figuresPerFinding", 1),
+                "reel": priorities.get("reel") or {}}
+    original_bundle = module.Bundle
+    try:
+        module.Bundle = lambda _: view
+        plan = module.compile_plan(bundle, {"bundle": {"complete": True},
+                                            "evaluation": {"complete": True, "claim": "no-findings-in-completed-checks"}},
+                                   settings, priorities, str(bundle))
+    finally:
+        module.Bundle = original_bundle
+    reader = plan.get("reader") or {}
+    verdict = str(headline(reader) or reader.get("verdict") or "")
+    expect(verdict, "The completed checks found no problem in what they examined.",
+           f"{label}: a complete evaluation with no findings says so, in the claim's own words")
+
+
 def check_missing_setup_naming(bundle: Path):
     """Known answers for "What still needs checking" (the retained 2026-09-17 defect): the disposition's missing
     list is per arm, so every not-supplied line names the setup it is missing ON. A check supplied on one setup
@@ -2000,6 +2042,7 @@ def case_r4(tmp, index, common):
     check_patch_direction(bundle)
     check_alternative_identity(bundle)
     check_missing_setup_naming(bundle)
+    check_no_findings_headline(bundle)
     followup_title_control(bundle)
     followup_totals_wording_control(bundle)
     followup_identical_label_control(bundle)

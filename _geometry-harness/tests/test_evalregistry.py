@@ -408,6 +408,28 @@ def test_yes_and_no_carry_evidence():
     assert always["applicability"] == "yes", always
 
 
+def test_the_masters_trigger_follows_the_declared_masters():
+    """Dangling references, contested fields and installed-patch discovery apply only to a target that declares
+    masters: none declared answers no, two declared answers yes."""
+    registry = load_registry()
+    scope = complete_scope()
+    scope["targets"][0]["footprint"]["masters"] = []
+    none = R.applicability(registry, scope)
+    scope["targets"][0]["footprint"]["masters"] = ["Skyrim.esm", "Update.esm"]
+    two = R.applicability(registry, scope)
+    for cid in ("loadability.dangling-references", "records.contested-fields", "patch.discovery-installed"):
+        assert none[cid]["applicability"] == "no", (cid, none[cid])
+        assert two[cid]["applicability"] == "yes", (cid, two[cid])
+
+
+def test_the_navmesh_trigger_answers_no_on_zero_navmeshes():
+    scope = complete_scope()
+    scope["targets"][0]["footprint"]["placed"]["navm"] = 0
+    scope["targets"][0]["footprint"]["recordTypes"].pop("NAVM")
+    verdict, evidence = R._evaluate({"navmesh": True}, scope)
+    assert verdict == "no", (verdict, evidence)
+
+
 def test_no_is_quoted_from_the_counters():
     registry = load_registry()
     scope = complete_scope()
