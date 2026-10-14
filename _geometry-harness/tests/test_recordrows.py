@@ -207,11 +207,12 @@ def case_13_a_field_the_capture_did_not_read_is_unjudged_not_equal():
 
 
 def case_15_list_order_and_float_noise_are_not_changes():
-    base = ref(**{"LinkedReferences": "[list: 2 item(s)]", "LinkedReferences[0].Reference": "000001:Skyrim.esm",
-                  "LinkedReferences[1].Reference": "000002:Skyrim.esm"})
-    a = ref(**{"LinkedReferences": "[list: 2 item(s)]", "LinkedReferences[0].Reference": "000002:Skyrim.esm",
-               "LinkedReferences[1].Reference": "000001:Skyrim.esm", "Placement.Position": "-0,20.00001,30"})
-    b = dict(a, **{"Placement.Position": "0,20,30.000004"})
+    # ModA adds a second linked reference; ModB carries both in the other order: the same change, not a lost one
+    base = ref(**{"LinkedReferences": "[list: 1 item(s)]", "LinkedReferences[0].Reference": "000001:Skyrim.esm"})
+    a = ref(**{"LinkedReferences": "[list: 2 item(s)]", "LinkedReferences[0].Reference": "000001:Skyrim.esm",
+               "LinkedReferences[1].Reference": "000002:Skyrim.esm", "Placement.Position": "-0,20.00001,30"})
+    b = dict(a, **{"LinkedReferences[0].Reference": "000002:Skyrim.esm",
+                   "LinkedReferences[1].Reference": "000001:Skyrim.esm", "Placement.Position": "0,20,30.000004"})
     with tempfile.TemporaryDirectory() as td:
         emit, _ = rows_of(three("000801:Skyrim.esm", base, a, b), Path(td))
     assert conflicts(emit) == [], conflicts(emit)
@@ -255,9 +256,12 @@ def case_23_a_cut_off_deep_read_and_a_narrow_read_of_one_plugin_combine():
     """Found on Group 1's transcripts after Gate B: each cell is read twice per plugin, once deep (cut off at the
     server's line limit) and once for named fields. A field is taken from the read that covers it."""
     deep = {"FormKey": "000D74:Skyrim.esm", "Location": "02008A:Skyrim.esm", "Music": "000001:Skyrim.esm",
-            "Persistent": "[list: 40 item(s)]", "Persistent[0].Version2": "0", "…": "(expansion truncated)"}
+            "Name": "Hall", "Persistent": "[list: 40 item(s)]", "Persistent[0].Version2": "0",
+            "…": "(expansion truncated)"}
+    # ModA's deep read is cut off before Name: its Name is unknown, not absent
+    a_deep = {k: v for k, v in dict(deep, Location="0A0001:ModA.esp").items() if k != "Name"}
     fk = "000D74:Skyrim.esm"
-    batches = [("deep", [(BASE, fk, "Cell", None, deep, None, 3), (A, fk, "Cell", None, dict(deep, Location="0A0001:ModA.esp"), None, 3),
+    batches = [("deep", [(BASE, fk, "Cell", None, deep, None, 3), (A, fk, "Cell", None, a_deep, None, 3),
                          (B, fk, "Cell", None, dict(deep, Location="0B0001:ModB.esp"), None, 3)]),
                ("narrow", [(BASE, fk, "Cell", None, {"FormKey": fk, "Regions": "[list: 0 item(s)]"}, ["Regions"], 2),
                            (A, fk, "Cell", None, {"FormKey": fk, "Regions": "[list: 0 item(s)]"}, ["Regions"], 2),
