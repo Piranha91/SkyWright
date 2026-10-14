@@ -1146,7 +1146,7 @@ def build_prediction(ctx: dict) -> dict:
                       "sentence": words["validationNone"],
                       "other": bind(words["validationOtherSetups"], {"headline": ctx["oldVerdict"]}),
                       "hits": None, "open": None, "falseAlarms": None, "patchProblems": None, "blindSpots": [],
-                      "missingFacts": []}
+                      "byItem": [], "missingFacts": []}
     else:
         patch = ", ".join(patch_names)
         admitted = [e for e in record if e["admission"] == "admitted"]
@@ -1173,8 +1173,18 @@ def build_prediction(ctx: dict) -> dict:
         sentences += [bind(words["validationBlindSpot"], {"patch": patch, "count": s["count"], "why": s["why"]}) for s in blind]
         if not_measured:
             sentences.append(bind(words["validationNotMeasured"], {"patch": patch, "count": len(not_measured)}))
+        # the same counts per prediction item, in the items' order, so a reader can be told which items the patch fixes
+        def item_of(e):
+            return (e["checkId"], e["kind"], tuple(sorted([e["A"], e["B"]], key=str.lower)),
+                    e.get("attribution"), e.get("attributionMod"))
+        by_item = []
+        for g in prediction["items"]:
+            k = (g["checkId"], g["kind"], tuple(g["mods"]), g["attribution"], g["attributionMod"])
+            by_item.append({"hits": sum(1 for e in hits if item_of(e) == k),
+                            "open": sum(1 for e in open_ if item_of(e) == k),
+                            "notMeasured": sum(1 for e in not_measured if item_of(e) == k)})
         validation = {"status": "compared", "headline": ctx["oldVerdict"], "patches": patch_names,
-                      "withPatchArm": patched_arm, "withoutPatchArm": p_arm,
+                      "withPatchArm": patched_arm, "withoutPatchArm": p_arm, "byItem": by_item,
                       "hits": len(hits), "open": len(open_), "falseAlarms": None, "patchProblems": len(problems),
                       "notMeasured": len(not_measured), "blindSpots": blind, "sentences": sentences,
                       "otherComparisons": [c for c in comparisons if c["withPatch"] != patched_arm or c["withoutPatch"] != p_arm],
