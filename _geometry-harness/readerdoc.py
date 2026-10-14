@@ -2,18 +2,24 @@
 
   python _geometry-harness/readerdoc.py --presentation OUT/presentation.json --out DIR
       [--mod-name PLUGIN=NAME ...] [--names NAMES.json] [--order ORDER.json]
-      [--single-mod show|aside] [--index-link PATH] [--no-print]
+      [--single-mod show|aside] [--headline-unit objects|relationships] [--index-link PATH] [--no-print]
 
 The plan (`evalreport plan`) owns every join and count; this renders it. Only prediction items the plan attributes
 to both evaluated mods together (`needs-both`) are listed as problems. Clashes one evaluated mod has with a third
 mod on its own are shown under their own heading (or set aside with --single-mod aside); every other result stays
 in the evidence index and is counted in one sentence. All wording is the reporting skill's `readerDoc` block.
 
+Names come from the plan (`reader.names`, which the compiler copies from the bundle's names enrichment) unless
+overridden; the manifest says which (`namesSource`) and where each mod's name came from (`modNameSources`).
+The object and relationship counts are the compiler's (`items[].objects`, `items[].relationships`); a plan without
+them, or whose object count disagrees with its own rows, is refused. The single-mod mode defaults to the plan's.
+
 Optional inputs, each recorded with its sha256 in reader-manifest.json:
-  --mod-name PLUGIN=NAME  the mod's ordinary name (default: the plugin name without its extension)
-  --names FILE            {"places": {editorId: name}, "objects": {editorId: name}, "source": ...}; a place or object
-                          it does not name is printed by editor name (place) or kind word (object) and listed
-                          under `namesMissing`
+  --mod-name PLUGIN=NAME  the mod's ordinary name, overriding the plan's (default without either: the plugin name
+                          without its extension)
+  --names FILE            {"places": {editorId: name}, "objects": {editorId: name}, "source": ...}, overriding the
+                          plan's names; a place or object neither names is printed by editor name (place) or kind
+                          word (object) and listed under `namesMissing`
   --order FILE            {"forced": true|false, "first": PLUGIN}; absent, the page says order was not checked
 
 Writes reader.md, reader.html, reader.pdf (unless --no-print), summary.txt (the short answer, for a session
@@ -73,8 +79,18 @@ def item_key(e):
             e.get("attributionMod"))
 
 
-def build(plan: dict, rd: dict, mod_names: dict, names: dict | None, order: dict | None, single_mod: str,
-          index_link: str | None) -> tuple[str, str, dict]:
+def plan_names(reader: dict) -> tuple[dict | None, dict]:
+    """The plan's names in the shape the page reads ({places: {id: name}, objects: {id: name}}) and its mod names."""
+    pn = reader.get("names")
+    if not isinstance(pn, dict):
+        return None, {}
+    flat = {k: {i: (v.get("name") if isinstance(v, dict) else v) for i, v in (pn.get(k) or {}).items()
+                if (v.get("name") if isinstance(v, dict) else v)} for k in ("places", "objects")}
+    return flat, {m: v for m, v in (pn.get("mods") or {}).items() if isinstance(v, dict) and v.get("name")}
+
+
+def build(plan: dict, rd: dict, mod_names: dict, names: dict | None, order: dict | None, single_mod: str | None,
+          index_link: str | None, unit: str | None = None) -> tuple[str, str, dict]:
     reader = plan.get("reader") or {}
     pred = reader.get("prediction")
     val = reader.get("validation") or {}
@@ -83,7 +99,23 @@ def build(plan: dict, rd: dict, mod_names: dict, names: dict | None, order: dict
     mods = list(pred.get("mods") or [])
     if len(mods) != 2:
         raise Refused(f"the reader's document needs exactly two evaluated mods; the plan names {len(mods)}")
-    disp = {m: mod_names.get(m) or re.sub(r"\.(esp|esm|esl)$", "", m, flags=re.I) for m in mods}
+    if any(not isinstance(it.get("objects"), int) or not isinstance(it.get("relationships"), int)
+           for it in pred.get("items") or []):
+        raise Refused("the plan predates per-item object and relationship counts; recompile it with evalreport plan")
+    single_mod = single_mod or pred.get("singleModMode") or "show"
+    unit = unit or rd.get("headlineUnit") or "objects"
+    p_names, p_mods = plan_names(reader)
+    names_source = "override" if names is not None else ("plan" if p_names is not None else "none")
+    if names is None:
+        names = p_names
+    disp, mod_sources = {}, {}
+    for m in mods:
+        if mod_names.get(m):
+            disp[m], mod_sources[m] = mod_names[m], "override"
+        elif m in p_mods:
+            disp[m], mod_sources[m] = p_mods[m]["name"], p_mods[m].get("source") or "plan"
+        else:
+            disp[m], mod_sources[m] = re.sub(r"\.(esp|esm|esl)$", "", m, flags=re.I), "plugin-name"
     mod_a, mod_b = disp[mods[0]], disp[mods[1]]
     has_patch = val.get("status") == "compared"
     if has_patch and not isinstance(val.get("byItem"), list):
@@ -103,8 +135,9 @@ def build(plan: dict, rd: dict, mod_names: dict, names: dict | None, order: dict
         subjects = collections.OrderedDict()
         for r in rows:
             subjects.setdefault(r["formKey"], r)
-        n = len(subjects) or int(it.get("count") or 0)
-        unit = units_t.get(it["checkId"]) or units_t["default"]
+        n = len(subjects) or int(it.get("objects") or 0)
+        noun = ((rd.get("relationshipUnits") or {}).get(it["checkId"]) or (rd.get("relationshipUnits") or {}).get("default")
+                if unit == "relationships" else None) or units_t.get(it["checkId"]) or units_t["default"]
         per_place = collections.Counter()
         objects = collections.Counter()
         causes = collections.Counter()
@@ -125,16 +158,21 @@ def build(plan: dict, rd: dict, mod_names: dict, names: dict | None, order: dict
                 else:
                     missing_names["objects"].add(eid)
                     objects[tuple(kind_words.get(kind) or kind_words["default"])] += 1
+        if len(subjects) and int(it.get("objects")) != len(subjects):
+            raise Refused(f"the plan counts {it.get('objects')} objects for {it['checkId']} but its rows name "
+                          f"{len(subjects)}; recompile it with evalreport plan")
+        if unit == "relationships":
+            n = int(it.get("relationships"))
         for fk, r in subjects.items():
             whos = {mm.group(1) for rr in rows if rr["formKey"] == fk
                     for mm in [CAUSE_RE.search(str(rr.get("summary") or ""))] if mm}
             for who in whos:
                 causes[who] += 1
-        phrase = bind(phrases.get(it["checkId"]) or phrases["default"], n=ER.fmt_n(n), units=plural(unit, n),
+        phrase = bind(phrases.get(it["checkId"]) or phrases["default"], n=ER.fmt_n(n), units=plural(noun, n),
                       title=it.get("title") or it["checkId"])
         places_txt = join_words([f"{p} ({c})" if len(per_place) > 1 else p for p, c in per_place.most_common()])
         obj_txt = join_words([f"{ER.fmt_n(c)} {plural(w, c)}" for w, c in objects.most_common()])
-        return {"index": i, "phrase": phrase, "n": n, "unit": unit, "places": places_txt, "perPlace": dict(per_place),
+        return {"index": i, "phrase": phrase, "n": n, "unit": noun, "places": places_txt, "perPlace": dict(per_place),
                 "objects": obj_txt, "causes": dict(causes), "rows": len(rows), "distinct": len(subjects),
                 "planCount": it.get("count")}
 
@@ -262,8 +300,10 @@ def build(plan: dict, rd: dict, mod_names: dict, names: dict | None, order: dict
                               "rows": d["rows"], "distinct": d["distinct"], "perPlace": d["perPlace"],
                               "causes": d["causes"], "byItem": (val.get("byItem") or [None] * len(items))[i]}
                              for (i, it), d in zip(both, d_both)],
-                "singleMod": [{"checkId": it["checkId"], "attributionMod": it.get("attributionMod"),
-                               "planCount": it.get("count"), "shown": single_mod == "show"} for i, it in alone],
+                "singleModItems": [{"checkId": it["checkId"], "attributionMod": it.get("attributionMod"),
+                                    "planCount": it.get("count"), "shown": single_mod == "show"} for i, it in alone],
+                "singleModMode": single_mod, "headlineUnit": unit, "namesSource": names_source,
+                "modNameSources": mod_sources,
                 "otherAttribution": [{"checkId": it["checkId"], "attribution": it.get("attribution"),
                                       "planCount": it.get("count")} for i, it in other],
                 "setAsideCounted": aside_n, "setAsideByReason": pred.get("setAside"),
@@ -310,7 +350,10 @@ def main(argv=None) -> int:
     ap.add_argument("--mod-name", action="append", default=[], help="PLUGIN=NAME, the mod's ordinary name")
     ap.add_argument("--names", help="in-game names for places and objects (JSON)")
     ap.add_argument("--order", help="forced/free load-order fact (JSON)")
-    ap.add_argument("--single-mod", choices=("show", "aside"), default="show")
+    ap.add_argument("--single-mod", choices=("show", "aside"), default=None,
+                    help="override the plan's single-mod mode")
+    ap.add_argument("--headline-unit", choices=("objects", "relationships"), default=None,
+                    help="override the reporting skill's readerDoc headlineUnit")
     ap.add_argument("--index-link", help="relative link to the technical record (the evidence index)")
     ap.add_argument("--no-print", action="store_true")
     a = ap.parse_args(argv)
@@ -340,7 +383,8 @@ def main(argv=None) -> int:
         if a.order and not isinstance(order, dict):
             return refuse(f"--order {a.order} is absent or not JSON")
         try:
-            text, summary, man = build(plan, rd, mod_names, names, order, a.single_mod, a.index_link)
+            text, summary, man = build(plan, rd, mod_names, names, order, a.single_mod, a.index_link,
+                                       a.headline_unit)
         except Refused as ex:
             return refuse(str(ex))
         out.mkdir(parents=True, exist_ok=True)
@@ -367,7 +411,7 @@ def main(argv=None) -> int:
                                "modNames": mod_names},
                     "generator": {"readerdoc.py": sha(Path(__file__)), "report-priorities.json": sha(ER.PRIORITIES),
                                   "report.css": sha(ER.TEMPLATES / "report.css")},
-                    "print": prn, "singleMod": a.single_mod})
+                    "print": prn})
         ER.write_json(out / "reader-manifest.json", man)
         r.feature("admitted", len(man["admitted"]), "items")
         r.feature("pages", prn.get("pages") or 0, "pages")

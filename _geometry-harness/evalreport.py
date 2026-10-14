@@ -975,6 +975,9 @@ def build_prediction(ctx: dict) -> dict:
 
     record, set_aside = [], collections.Counter()
     groups = collections.OrderedDict()
+    multi = len(p_targets) > 1
+    single_mode = ctx.get("singleMod") or words.get("singleModDefault") or "show"
+    unit = ctx.get("headlineUnit") or words.get("headlineUnit") or "relationships"
     p_rows = {}
     for (check_id, arm_id), rs in rows_by.items():
         if arm_id == p_arm:
@@ -991,12 +994,20 @@ def build_prediction(ctx: dict) -> dict:
             continue
         attr, attr_mod, why = attribution(rk)
         entry.update({"attribution": attr, "attributionMod": attr_mod})
+        if attr == "single-mod" and multi and single_mode == "aside":
+            # a clash one evaluated mod has with a third mod on its own: set aside by the switch (Piranha's R1)
+            entry["admission"] = "singleMod"
+            set_aside["singleMod"] += 1
+            record.append(entry)
+            continue
         record.append(entry)
         mods = sorted([rk[2], rk[3]], key=str.lower)
         gk = (rk[0], rk[1], tuple(mods), attr, attr_mod, why)
         g = groups.setdefault(gk, {"checkId": rk[0], "kind": rk[1], "mods": mods, "count": 0, "attribution": attr,
-                                   "attributionMod": attr_mod, "attributionWhy": why, "findingIds": [], "examples": []})
+                                   "attributionMod": attr_mod, "attributionWhy": why, "findingIds": [], "examples": [],
+                                   "_subjects": set()})
         g["count"] += 1
+        g["_subjects"].add(rk[4] if rk[4] is not None else ("row", rk[5]))
         fid = hit["finding"].get("id")
         if fid and fid not in g["findingIds"]:
             g["findingIds"].append(fid)
@@ -1029,19 +1040,38 @@ def build_prediction(ctx: dict) -> dict:
         g["plain"] = (f"{fmt_n(g['count'])} {noun} between {g['mods'][0]} and {g['mods'][1]}. "
                       + attr_text + (f" {ph['readerQualification']}" if ph.get("readerQualification") else ""))
         g["inGameText"] = (f"In game: {g['inGame']}." if g["inGame"] else words["inGameMissing"])
+        g["relationships"] = g["count"]
+        g["objects"] = len(g.pop("_subjects"))
+        g["shownAs"] = ("pair" if not multi or g["attribution"] == "needs-both" else
+                        "alone" if g["attribution"] == "single-mod" else "unseparated")
         items.append(g)
-    items.sort(key=lambda g: (-g["count"], g["checkId"], g["mods"]))
+    # the pair's clashes first, then the ones that could not be separated, then those of one mod alone (own heading)
+    shown_rank = {"pair": 0, "unseparated": 1, "alone": 2}
+    items.sort(key=lambda g: (shown_rank[g["shownAs"]], -g["count"], g["checkId"], g["mods"]))
 
     subject_mods = p_targets or list(ctx["targets"])
     subject = (" and ".join([", ".join(subject_mods[:-1]), subject_mods[-1]]) + " together"
                if len(subject_mods) > 1 else (subject_mods[0] if subject_mods else "the evaluated mod"))
-    total = sum(g["count"] for g in items)
+    # The number counts what needs both evaluated mods (with one evaluated mod, every admitted clash is its own).
+    # A clash one mod has with a third mod on its own is shown under its own heading or set aside, never counted
+    # here; a clash whose cause could not be separated is stated in one clause with its count.
+    def n_of(gs, u):
+        return sum(g["relationships"] if u == "relationships" else g["objects"] for g in gs)
+    by_attr = {k: [g for g in items if g["attribution"] == k] for k in ("needs-both", "single-mod", "not-separable")}
+    counts = {key: {"relationships": n_of(by_attr[a], "relationships"), "objects": n_of(by_attr[a], "objects")}
+              for key, a in (("needsBoth", "needs-both"), ("singleMod", "single-mod"), ("notSeparable", "not-separable"))}
+    counted = by_attr["needs-both"] if multi else items
+    total = n_of(counted, unit)
+    unseparated = counts["notSeparable"][unit] if multi else 0
     checks_on_p = sorted({c for (c, a) in measured if a == p_arm})
-    if items:
+    nouns = (words.get("headlineUnits") or {}).get(unit) or [words["inconsistencySingular"], words["inconsistencyPlural"]]
+    if total:
         verdict = bind(words["verdictFound"], {"subject": subject, "count": total,
-                                               "inconsistencyNoun": words["inconsistencySingular" if total == 1 else "inconsistencyPlural"]})
+                                               "inconsistencyNoun": nouns[0] if total == 1 else nouns[1]})
     else:
         verdict = bind(words["verdictNone"], {"subject": subject})
+    if unseparated:
+        verdict += " " + bind(words["verdictNotSeparable"], {"count": unseparated})
     missing_facts = []
     if not p_targets:
         missing_facts.append(words["noModInSetup"])
@@ -1049,10 +1079,12 @@ def build_prediction(ctx: dict) -> dict:
         missing_facts.append(bind(words["attribution"]["not-separable"], {"why": words["notSeparableWhy"]["noSingleSetups"]}))
     aside = {"baseGame": set_aside["baseGame"], "sameMod": set_aside["sameMod"],
              "alreadyPresent": set_aside["alreadyPresent"], "history": set_aside["history"],
-             "notInvolving": set_aside["notInvolving"]}
+             "notInvolving": set_aside["notInvolving"], "singleMod": set_aside["singleMod"]}
     prediction = {"subject": subject, "mods": subject_mods, "predictionArm": p_arm, "withoutArm": w_arm,
                   "singleArms": s_arms, "verdict": verdict, "status": "found" if items else "none-found",
-                  "items": items, "total": total, "missingFacts": list(dict.fromkeys(missing_facts)),
+                  "items": items, "total": total, "counts": counts, "headlineUnit": unit,
+                  "singleModMode": single_mode, "singleModHeading": words.get("singleModHeading"),
+                  "missingFacts": list(dict.fromkeys(missing_facts)),
                   "setAside": aside,
                   "setAsideLine": bind(words["setAsideLine"], aside) if sum(aside.values()) else None,
                   "noneFoundBasis": None if items else bind(words["noneFoundBasis"], {
@@ -2131,7 +2163,8 @@ def compile_plan(bundle_dir: Path, verify: dict, settings: dict, pr: dict, bundl
     patch_how = ("added or removed for comparison" if patch_adds and patch_removes else
                  "included in the measured load order and removed for comparison" if patch_removes else
                  "added to the measured load order for comparison")
-    scope_line = (f"This report evaluates {', '.join(target_names) or 'the target mod'} within the measured load order. "
+    scope_head = f"This report evaluates {', '.join(target_names) or 'the target mod'} within the measured load order. "
+    scope_line = (scope_head
                   + (f"The main recorded conflicts involving the target are with {compared}. " if comparison_names else
                      ("The recorded conflicts involving the target are with the base game only; they are set aside "
                       "below, as differences rather than clashes between mods. " if base_game_partners else
@@ -2140,6 +2173,13 @@ def compile_plan(bundle_dir: Path, verify: dict, settings: dict, pr: dict, bundl
                       ((f"The patch evaluated is {patch_text}, {patch_how}." if len(supplied) == 1 else
                         f"The patches evaluated are {patch_text}, {patch_how}.") if supplied else
                        # never claim no patch was declared while a changed plugin is a declared patch
+                       "" if mixed_declared_patches else
+                       "No separate patch plugin was declared for this comparison."),
+                      mixed_declared_text) if x)
+                  + unstated_text)
+    scope_tail = (" ".join(x for x in (
+                      ((f"The patch evaluated is {patch_text}, {patch_how}." if len(supplied) == 1 else
+                        f"The patches evaluated are {patch_text}, {patch_how}.") if supplied else
                        "" if mixed_declared_patches else
                        "No separate patch plugin was declared for this comparison."),
                       mixed_declared_text) if x)
@@ -2419,8 +2459,25 @@ def compile_plan(bundle_dir: Path, verify: dict, settings: dict, pr: dict, bundl
         "familyTitle": lambda x: (b.families.get(x) or {}).get("title") or str(x),
         "oldVerdict": verdict, "limitations": limitations, "words": reader_data["prediction"],
         "inGame": reader_data.get("inGame") or {}, "kindPhrases": reader_data.get("kindPhrases") or {},
-        "mainBundle": b, "sibling": sibling})
+        "mainBundle": b, "sibling": sibling,
+        "singleMod": settings.get("singleMod"), "headlineUnit": settings.get("headlineUnit")})
     verdict = lead["prediction"]["verdict"]
+    # The scope line names the evaluated pair when the counted clashes need both of them, never the third mod with
+    # the most rows; the third mods of single-mod clashes shown are named after it.
+    pred_ = lead["prediction"]
+    sw = reader_data.get("scopeWords") or {}
+    if len(pred_["mods"]) > 1 and any(i["attribution"] == "needs-both" for i in pred_["items"]):
+        pair = list(pred_["mods"])
+        alone_mods = []
+        for i in pred_["items"]:
+            if i.get("shownAs") == "alone":
+                alone_mods += [m for m in i["mods"] if m.lower() not in {x.lower() for x in pair} and m not in alone_mods]
+        partner = bind(sw["pair"], {"modA": pair[0], "modB": " and ".join(pair[1:])}) + (
+            " " + bind(sw["alone"], {"mods": ", ".join(alone_mods)}) if alone_mods and sw.get("alone") else "")
+        scope_line = scope_head + partner + " " + scope_tail
+        reader["scopeLine"] = scope_line
+        reader["scopePair"] = pair
+        reader["comparisonMods"] = alone_mods
     reader["verdict"] = verdict
     reader["prediction"] = lead["prediction"]
     reader["coverage"] = lead["coverage"]
@@ -2897,7 +2954,8 @@ def cmd_plan(a) -> int:
                     "declaredPatches": list(a.declare_patch or []),
                     "rowsPerGroup": (a.rows_per_group if a.rows_per_group is not None else conc.get("rowsPerGroup", 3)),
                     "figuresPerFinding": (a.figures_per_finding if a.figures_per_finding is not None else conc.get("figuresPerFinding", 1)),
-                    "reel": {k: (pr.get("reel") or {}).get(k) for k in ("maxSeconds", "fps", "width", "height")}}
+                    "reel": {k: (pr.get("reel") or {}).get(k) for k in ("maxSeconds", "fps", "width", "height")},
+                    "singleMod": a.single_mod, "headlineUnit": a.headline_unit}
         if a.mode == "exhaustive":
             settings["maxPages"] = None
         sibling = Path(a.sibling_bundle) if getattr(a, "sibling_bundle", None) else None
@@ -3490,6 +3548,13 @@ def build_parser() -> argparse.ArgumentParser:
                    help="verify a temporary copy of the bundle so the bundle directory itself is never written to")
     p.add_argument("--location-scope", action="append", default=[], metavar="ARM=FILE",
                    help="bind a scopeprobe location-contributor document to an arm; repeat for multiple arms")
+    p.add_argument("--single-mod", choices=("show", "aside"), default=None,
+                   help="a clash one evaluated mod has with a third mod on its own: shown under its own heading (show) "
+                        "or set aside with a count (aside); never counted in the verdict. Default: the reporting "
+                        "skill's singleModDefault")
+    p.add_argument("--headline-unit", choices=("relationships", "objects"), default=None,
+                   help="what the verdict counts: the check's relationships (rows) or the objects they name. Default: "
+                        "the reporting skill's headlineUnit")
     p.add_argument("--sibling-bundle", default=None, metavar="DIR",
                    help="a bundle of the same order without the patch; its single-mod setups attribute this report's "
                         "prediction when its setup matches this bundle's setup without the patch plugin for plugin")
