@@ -969,7 +969,27 @@ public static class DetectorModel
     /// counted apart; else LEFT IN EMPTY SPACE.</summary>
     public static (EmptySpaceVerdict Verdict, string Why) EmptySpace(EmptySpaceFacts f)
     {
-        return (EmptySpaceVerdict.NoRelation, "the rule is not built yet");
+        string cap = $"its assembly passes {f.MaxMembers} references without reaching a floor or wall";
+        if (!f.Interior) return (EmptySpaceVerdict.Refused, "exterior: the land under it is not read");
+        if (!f.ExistsWinner) return (EmptySpaceVerdict.Absent, "not present under the winner (deleted, or disabled at runtime)");
+        if (!f.ExistsAuthoring) return (EmptySpaceVerdict.Absent, "not present in the order without the mover's side");
+        if (f.Motion == DependentMotion.Unknown && !f.Held) return (EmptySpaceVerdict.Refused, "what physics does with it at load is unknown (no record type or bodies read)");
+        if (!f.Held) return (EmptySpaceVerdict.Falls, "a loose body that is neither mounted nor resting on a fixed reference: it falls at load (the rest rule's class)");
+        if (f.AuthoringOverCap) return (EmptySpaceVerdict.Refused, $"in the order without the mover {cap}: not read");
+        if (!f.AuthoringGrounded)
+        {
+            if (f.WinnerOverCap) return (EmptySpaceVerdict.Refused, $"under the winner {cap}: not read");
+            return f.WinnerGrounded ? (EmptySpaceVerdict.NoRelation, "no floor or wall held it in the order without the mover either")
+                                    : (EmptySpaceVerdict.FloatsAsShipped, "no floor or wall holds it in either order: it floats as shipped (the absolute floor, not a clash)");
+        }
+        if (!f.AuthoringAnchorChangedByMover) return (EmptySpaceVerdict.NoRelation, "the floors and walls that held it are not ones the mover removed or moved");
+        if (f.WinnerOverCap) return (EmptySpaceVerdict.Refused, $"under the winner {cap}: not read");
+        if (f.RePlacedByMoverSide)
+            return f.WinnerGrounded ? (EmptySpaceVerdict.RePlacedGrounded, "the mover's side re-placed it, and it stands on or against a floor or wall there")
+                                    : (EmptySpaceVerdict.RePlacedStillEmpty, "the mover's side re-placed it, and nothing it touches reaches a floor or wall there");
+        if (f.WinnerGrounded) return (EmptySpaceVerdict.ReGrounded, "the mover removed or moved what held it, and another floor or wall holds it now");
+        if (f.BethesdaFloor) return (EmptySpaceVerdict.FloorPopulation, "left in empty space, with Bethesda or USSEP files on both sides (counted apart)");
+        return (EmptySpaceVerdict.LeftInEmptySpace, "the mover removed or moved the floor or wall it stood on or against, and nothing it touches reaches a floor or wall now");
     }
 
     /// <summary>What physics does with a dependent at cell load — the split 4.7 Part C made necessary: a movable
