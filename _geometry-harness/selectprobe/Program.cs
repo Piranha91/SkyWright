@@ -17,7 +17,8 @@
 //   --batch FILE        JSON lines {"id": "...", "newcomer": ["PATH", ...]}; one <id>.json per line in --out. A line
 //                       whose <id>.json already exists is skipped (resume). A refusal is written as the line's result.
 //   --no-reverse-links  do not read installed plugins' form links (the noted reverseFormLinks becomes null; faster).
-//   --stop-file PATH    batch only: before each newcomer, if PATH exists, stop there (exit 3); a rerun resumes.
+//   --stop-file PATH    batch only, repeatable: before each newcomer, if any PATH exists, stop there (exit 3); a rerun
+//                       resumes.
 //
 // Exit codes: 0 selection written (batch: every line has a result), 2 refused, 3 stopped by --stop-file, 1 crashed. Read-only on the instance.
 
@@ -33,7 +34,8 @@ if (args.Length > 0 && args[0] == "--selftest") return SelfTest.Run();
 using var __run = RunLog.BeginProcess("selectprobe", args);
 
 string instance = HarnessTarget.Instance, game = HarnessTarget.Game, profile = HarnessTarget.Profile;
-string? orderFile = null, batchFile = null, stopFile = null;
+string? orderFile = null, batchFile = null;
+var stopFiles = new List<string>();
 string outDir = Path.Combine(Directory.GetCurrentDirectory(), "selectprobe-out");
 var newcomer = new List<string>();
 bool reverseLinks = true;
@@ -47,7 +49,7 @@ for (int i = 0; i < args.Length; i++)
     else if (args[i] == "--batch" && i + 1 < args.Length) batchFile = args[++i];
     else if (args[i] == "--out" && i + 1 < args.Length) outDir = args[++i];
     else if (args[i] == "--no-reverse-links") reverseLinks = false;
-    else if (args[i] == "--stop-file" && i + 1 < args.Length) stopFile = args[++i];
+    else if (args[i] == "--stop-file" && i + 1 < args.Length) stopFiles.Add(args[++i]);
     else { Console.Error.WriteLine($"unknown option '{args[i]}'. See the header of selectprobe/Program.cs for the flag list."); return 2; }
 }
 if ((newcomer.Count == 0) == (batchFile is null))
@@ -59,7 +61,7 @@ profile = HarnessTarget.Require(profile, "MO2 profile name", "profile", "--profi
 
 return Probe.Run(instance, profile, game, orderFile, outDir, reverseLinks,
                  batchFile is null ? new List<(string, List<string>)> { ("selection", newcomer) } : Probe.ReadBatch(batchFile),
-                 batchFile is not null, __run, stopFile: stopFile);
+                 batchFile is not null, __run, stopFiles: stopFiles);
 
 static class Probe
 {
@@ -78,7 +80,7 @@ static class Probe
     }
 
     public static int Run(string instance, string profile, string game, string? orderFile, string outDir, bool reverseLinks,
-                          List<(string Id, List<string> Paths)> jobs, bool batch, Run? run, TextWriter? log = null, string? stopFile = null)
+                          List<(string Id, List<string> Paths)> jobs, bool batch, Run? run, TextWriter? log = null, IReadOnlyList<string>? stopFiles = null)
     {
         log ??= Console.Out;
         var wall = Stopwatch.StartNew();
@@ -125,7 +127,7 @@ static class Probe
         bool stopped = false;
         foreach (var s in specs)
         {
-            if (batch && stopFile is not null && File.Exists(stopFile))
+            if (batch && stopFiles?.FirstOrDefault(File.Exists) is { } stopFile)
             {
                 stopped = true;
                 log.WriteLine($"stopped: '{stopFile}' exists; {specs.Count - done} newcomer(s) left for a rerun to resume");

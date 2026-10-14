@@ -235,11 +235,11 @@ static class SelfTest
         var outStop = Path.Combine(root, "out-stop"); var stop = Path.Combine(root, "STOP");
         File.WriteAllText(stop, "stop");
         rc = Probe.Run(instance, "P", game, null, outStop, true,
-                       new() { ("n", new List<string> { nDir }), ("b13", new List<string> { Path.Combine(mods, "B13") }) }, true, null, TextWriter.Null, stop);
+                       new() { ("n", new List<string> { nDir }), ("b13", new List<string> { Path.Combine(mods, "B13") }) }, true, null, TextWriter.Null, new[] { Path.Combine(root, "NOT-THERE"), stop });
         Check("a stop file halts the batch (exit 3, no result written)", rc == 3 && !File.Exists(Path.Combine(outStop, "n.json")), $"exit {rc}");
         File.Delete(stop);
         rc = Probe.Run(instance, "P", game, null, outStop, true,
-                       new() { ("n", new List<string> { nDir }), ("b13", new List<string> { Path.Combine(mods, "B13") }) }, true, null, TextWriter.Null, stop);
+                       new() { ("n", new List<string> { nDir }), ("b13", new List<string> { Path.Combine(mods, "B13") }) }, true, null, TextWriter.Null, new[] { Path.Combine(root, "NOT-THERE"), stop });
         Check("the rerun resumes and finishes", rc == 0 && File.Exists(Path.Combine(outStop, "n.json")) && File.Exists(Path.Combine(outStop, "b13.json")), $"exit {rc}");
         Check("batch resume leaves an existing result untouched", File.GetLastWriteTimeUtc(Path.Combine(outBatch, "n.json")) == new DateTime(2020, 1, 1), "n.json not rewritten");
     }
