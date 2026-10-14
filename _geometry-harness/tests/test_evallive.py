@@ -309,6 +309,77 @@ def main():
               "K13: finalize carries the live finding")
         check("accepted live receipts" in str((dfin.get("unassessed") or {}).get("runtimeObservations")),
               "K13: finalize no longer says no runtime observation was supplied")
+
+        # K26/K28: the arm's own accepted census answers the live check (switchflip_scope) --------------------
+        def case_with(name, switches):
+            d = tmp / name
+            shutil.copytree(gen / "cases" / CASE, d)
+            sc = load(d / "scope.json")
+            for t in sc["targets"]:
+                t["footprint"]["placed"]["cells"] = [{"cell": "00A001:FixtureTarget.esp", "kind": "interior"}]
+            (d / "scope.json").write_text(json.dumps(sc, indent=1), encoding="utf-8")
+            scen_ = load(d / "scenario.json")
+            if scen_.get("scopeFrom"):
+                scen_["scopeFrom"] = str(d / "scope.json")
+            scen_["arms"]["switchprobe"] = {"*": {"behaviour": "ok", "judged": 42, "switches": switches,
+                                                  "triggers": {"triggered": 2, "boundUnread": 1, "unknown": 0}}}
+            (d / "scenario.json").write_text(json.dumps(scen_, indent=1), encoding="utf-8")
+            return d
+
+        def base_switch(key, status, cell="00B002:FixtureBase.esp"):
+            return {"key": key, "edid": key, "owner": "FixtureBase.esp", "cellKey": cell,
+                    "onSet": [{"key": "000111:FixtureBase.esp", "placer": "FixtureBase.esp",
+                               "attacher": "FixtureBase.esp", "cellKey": cell}], "offSet": [],
+                    "trigger": {"status": status, "kind": "quest stage", "by": []}}
+
+        def plan_run(d, run):
+            r = ev(["plan", "--registry", gen / "registry" / "fixture-check-registry-live.json",
+                    "--scope", d / "scope.json", "--candidates", d / "candidates", "--out", run,
+                    "--harness", T.REAL_HARNESS, "--opt-in", CID] + probe_cmds(), d / "scenario.json")
+            if r.returncode:
+                print(r.stdout[-2000:], r.stderr[-2000:])
+            ev(["run", "--run", run], d / "scenario.json")
+            ev(["finalize", "--run", run], d / "scenario.json")
+            return r.returncode
+
+        vanilla = [base_switch("000A01:FixtureBase.esp", "Triggered"), base_switch("000A02:FixtureBase.esp", "Triggered"),
+                   base_switch("000A03:FixtureBase.esp", "BoundUnread")]
+        na_case, na_run = case_with("case-na", vanilla), tmp / "run-na"
+        check(plan_run(na_case, na_run) == 0, "K26: plan with --opt-in on a census whose driven switches touch no target")
+        led = load(na_run / "ledger.json")["entries"]
+        rows = [e for e in led.values() if e["checkId"] == CID]
+        check(bool(rows) and all(e["status"] == "not-applicable" for e in rows),
+              "K26: every opted-in arm is accounted not-applicable from its own census"
+              + ("" if rows and all(e["status"] == "not-applicable" for e in rows)
+                 else f" -- got {[e['status'] for e in rows]}"))
+        rcs = [load(p) for p in (na_run / "receipts").glob(f"{CID}__*.json")]
+        check(bool(rcs) and all(((rc.get("switchScope") or {}).get("census") or {}).get("sha256") for rc in rcs)
+              and all("nothing to flip" in str((rc.get("result") or {}).get("note")) for rc in rcs),
+              "K26: each receipt records the census it read and says why")
+        dna = disposition(na_run).get("evaluation") or {}
+        check(not any(m.get("checkId") == CID for m in dna.get("missing") or []),
+              "K26: finalize counts the not-applicable rows as answered (the opted-in check is not missing)")
+
+        ctl_case, ctl_run = case_with("case-open", vanilla + [base_switch("000A0C:FixtureBase.esp", "BoundUnread",
+                                                                         cell="00A001:FixtureTarget.esp")]), tmp / "run-open"
+        check(plan_run(ctl_case, ctl_run) == 0, "K26 control: plan with a bound switch in a target's cell")
+        led2 = load(ctl_run / "ledger.json")["entries"]
+        rows2 = [e for e in led2.values() if e["checkId"] == CID]
+        check(bool(rows2) and all(e["status"] == "live-import" for e in rows2),
+              "K26 control: a script-driven switch in a target's cell keeps every arm waiting for a live receipt")
+        dctl = disposition(ctl_run).get("evaluation") or {}
+        check(any(m.get("checkId") == CID for m in dctl.get("missing") or []),
+              "K26 control: and finalize still names the check missing")
+
+        pl_na = load(na_run / "plan.json")
+        arm_na = next(a for a in pl_na["arms"] if a["armId"] in [x["armId"] for x in plan_check(pl_na, CID)["arms"]
+                                                                if x["status"] == "live-import"])
+        r28 = imp(na_run, make_import(k / "na", pl_na, arm_na, ["crash", "crash"]))
+        out28 = r28.stdout + r28.stderr
+        check(r28.returncode == 2 and "not applicable on arm" in out28,
+              "K28: an import for an arm the census answered not-applicable is refused by name"
+              + ("" if r28.returncode == 2 and "not applicable on arm" in out28
+                 else f" -- got {r28.returncode}: {out28.strip()[-300:]}"))
     except Exception:
         traceback.print_exc()
         FAILURES.append("exception")

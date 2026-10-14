@@ -374,7 +374,8 @@ def default_json(probe: str, entry: dict, scen: dict, order_name: str) -> dict:
                 "instance": scen.get("instance", "fixture://evalrun"), "profile": order_name,
                 "plugins": n, "unreadable": list(entry.get("unreadable", [])),
                 "summary": {"switches": len(rows), "children": 2 * len(rows), "descendants": 2 * len(rows),
-                            "onSet": len(rows), "offSet": 0, "chained": 0, "cycles": 0, "playerParentRefs": 0},
+                            "onSet": len(rows), "offSet": 0, "chained": 0, "cycles": 0, "playerParentRefs": 0,
+                            **({"triggers": entry["triggers"]} if "triggers" in entry else {})},
                 "perPlugin": [], "switches": rows, "jointFlips": []}
     if probe == "bosprobe":
         return {"profile": order_name, "plugins": n, "inis": list(entry.get("inis", [])),
