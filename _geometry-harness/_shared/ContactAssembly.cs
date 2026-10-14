@@ -453,12 +453,15 @@ public sealed class EmptySpaceSearch
                 _winMemo[fixture] = wm = (w, h, o, motion);
             }
             win = wm.W; held = wm.Held; own = wm.Own;
-            if (held is not null) auth = Walk(fixture, mover, stopAtAnchor: false, MinAnchorDim);
         }
         bool replaced = pw is { } pr && (pr.Snap.Plugin == mover || (pr.Snap.Plugin < _closure.Count && _closure[pr.Snap.Plugin].Contains(mover)));
+        // the authoring walk is the costly one; a fixture grounded under the winner and not re-placed by the mover's side cannot be the
+        // class whatever it finds, so it is not walked (DetectorModel.EmptySpace reads that as Grounded)
+        bool readAuth = held is not null && pa is not null && !(win.Grounded && !win.OverCap && !replaced);
+        if (readAuth) auth = Walk(fixture, mover, stopAtAnchor: false, MinAnchorDim);
         var facts = new DetectorModel.EmptySpaceFacts(interior, pw is not null, pa is not null, motion, held is not null,
             win.OverCap, auth.OverCap, win.Grounded, auth.Grounded, auth.ChangedAnchors.Count > 0,
-            replaced, IsBethesdaOrUssep(mover) && IsBethesdaOrUssep(placer), MaxMembers);
+            replaced, IsBethesdaOrUssep(mover) && IsBethesdaOrUssep(placer), MaxMembers, AuthoringRead: readAuth || held is null);
         var (v, why) = DetectorModel.EmptySpace(facts);
         float nearest = float.PositiveInfinity; bool? g128 = null, g256 = null;
         if (v is EmptySpaceVerdict.LeftInEmptySpace or EmptySpaceVerdict.RePlacedStillEmpty or EmptySpaceVerdict.FloorPopulation)

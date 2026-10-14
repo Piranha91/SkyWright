@@ -40,6 +40,9 @@ static class EmptySpaceProof
               E(f with { RePlacedByMoverSide = true }).V == EmptySpaceVerdict.RePlacedStillEmpty && E(f with { RePlacedByMoverSide = true, WinnerGrounded = true }).V == EmptySpaceVerdict.RePlacedGrounded, "");
         Check("ES-facts: grounded now -> re-grounded", E(f with { WinnerGrounded = true }).V == EmptySpaceVerdict.ReGrounded, "");
         Check("ES-facts: Bethesda or USSEP on both sides -> the floor population", E(f with { BethesdaFloor = true }).V == EmptySpaceVerdict.FloorPopulation, "");
+        Check("ES-facts: grounded under the winner, not re-placed, the order without the mover not walked -> Grounded (not the class)",
+              E(f with { AuthoringRead = false, WinnerGrounded = true }).V == EmptySpaceVerdict.Grounded
+           && E(f with { AuthoringRead = false, WinnerGrounded = false }).V == EmptySpaceVerdict.Refused, "");
         Check("ES-facts: over the cap in either arm -> refused by name",
               E(f with { AuthoringOverCap = true }).V == EmptySpaceVerdict.Refused && E(f with { WinnerOverCap = true }).V == EmptySpaceVerdict.Refused, "");
     }
@@ -244,9 +247,9 @@ static class EmptySpaceProof
         var r2014 = J(F(2014));
         Check("ES-2014: an item alone on the floor, the floor disabled -> Falls (context, the rest rule's class)", r2014.Verdict == EmptySpaceVerdict.Falls, Show(r2014));
         var r2016 = J(F(2016));
-        Check("ES-2016: a wall still touches the rack after its floor goes -> RE-GROUNDED", r2016.Verdict == EmptySpaceVerdict.ReGrounded, Show(r2016));
+        Check("ES-2016: a wall still touches the rack after its floor goes -> GROUNDED (not walked further: it cannot be the class)", r2016.Verdict == EmptySpaceVerdict.Grounded, Show(r2016));
         var r2018 = J(F(2018));
-        Check("ES-2018: the mover lays its own new floor under the rack -> RE-GROUNDED (the mover's floor is the room's)", r2018.Verdict == EmptySpaceVerdict.ReGrounded, Show(r2018));
+        Check("ES-2018: the mover lays its own new floor under the rack -> GROUNDED (the mover's floor is the room's)", r2018.Verdict == EmptySpaceVerdict.Grounded, Show(r2018));
         var r2020 = J(F(2020));
         Check("ES-2020: a rack 100 u above the floor as shipped -> FLOATS AS SHIPPED (the absolute floor), never the class", r2020.Verdict == EmptySpaceVerdict.FloatsAsShipped, Show(r2020));
         var r2022 = J(F(2022));
@@ -257,13 +260,14 @@ static class EmptySpaceProof
         Check("ES-2026 (condition 2a): the rack stands on its own mod's floor; the room's floor under it goes -> LEFT IN EMPTY SPACE, own support named (the own floor)",
               r2026.Verdict == EmptySpaceVerdict.LeftInEmptySpace && r2026.OwnSupport.SequenceEqual(new[] { F(2026, 1) }), Show(r2026));
         var r2042 = J(F(2042));
-        Check("ES-2042 (condition 2b): the rack on its own floor; the mover removes one wall while the room's floor stands -> RE-GROUNDED through the room's floor, own support named",
-              r2042.Verdict == EmptySpaceVerdict.ReGrounded && r2042.OwnSupport.SequenceEqual(new[] { F(2042, 1) }) && r2042.Authoring.ChangedAnchors.Contains(R(2042, 1)), Show(r2042));
+        Check("ES-2042 (condition 2b): the rack on its own floor; the mover removes one wall while the room's floor stands -> GROUNDED through the room's floor (the own floor is a member, the room's floor the anchor), own support named",
+              r2042.Verdict == EmptySpaceVerdict.Grounded && r2042.OwnSupport.SequenceEqual(new[] { F(2042, 1) }) && r2042.Winner.Members == 2
+           && r2042.Winner.Anchors.Any(a => a.Key == R(2042)), Show(r2042));
         var r2028 = J(F(2028));
         Check("ES-2028: the only thing left touching the rack is a 48 u slab of the room -> LEFT IN EMPTY SPACE (under the anchor size)", r2028.Verdict == EmptySpaceVerdict.LeftInEmptySpace, Show(r2028));
         var r2030 = J(F(2030)); var r2044 = J(F(2044));
-        Check("ES-2030: three racks in a chain, the third touching a wall; the floor goes -> the first RE-GROUNDED through two neighbours",
-              r2030.Verdict == EmptySpaceVerdict.ReGrounded, Show(r2030));
+        Check("ES-2030: three racks in a chain, the third touching a wall; the floor goes -> the first GROUNDED through two neighbours",
+              r2030.Verdict == EmptySpaceVerdict.Grounded && r2030.Winner.Members == 3, Show(r2030));
         Check("ES-2044: the same chain with the wall removed too -> the first LEFT IN EMPTY SPACE (assembly 3)", r2044.Verdict == EmptySpaceVerdict.LeftInEmptySpace && r2044.Winner.Members == 3, Show(r2044));
         var capped = new EmptySpaceSearch(cidx, closure, Name, (_, _) => true, IsMasterFile, Floor) { MaxMembers = 3 };
         var r2032 = capped.Judge(F(2032), Dm);

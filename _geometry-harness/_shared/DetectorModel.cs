@@ -954,10 +954,13 @@ public static class DetectorModel
     /// elsewhere there: the mover's side removed or moved it.</param>
     /// <param name="RePlacedByMoverSide">the fixture's winning placement was set by the mover or a plugin downstream of it.</param>
     /// <param name="BethesdaFloor">the mover and the fixture's placer are both Bethesda or USSEP files.</param>
+    /// <param name="AuthoringRead">the order without the mover was walked. The search skips that walk when the winner arm is grounded
+    /// and the mover's side did not re-place the fixture: no answer of the authoring arm can make such a fixture the class, and that
+    /// walk is the costly one.</param>
     public readonly record struct EmptySpaceFacts(
         bool Interior, bool ExistsWinner, bool ExistsAuthoring, DependentMotion Motion, bool Held,
         bool WinnerOverCap, bool AuthoringOverCap, bool WinnerGrounded, bool AuthoringGrounded, bool AuthoringAnchorChangedByMover,
-        bool RePlacedByMoverSide, bool BethesdaFloor, int MaxMembers = 256);
+        bool RePlacedByMoverSide, bool BethesdaFloor, int MaxMembers = 256, bool AuthoringRead = true);
 
     /// <summary>LEFT IN EMPTY SPACE (2026-10-14): a fixture that stood in a room in the order without the mover, and whose assembly
     /// reaches no floor or wall under the winner because the mover removed or moved what it stood on or against. The sibling of
@@ -975,6 +978,10 @@ public static class DetectorModel
         if (!f.ExistsAuthoring) return (EmptySpaceVerdict.Absent, "not present in the order without the mover's side");
         if (f.Motion == DependentMotion.Unknown && !f.Held) return (EmptySpaceVerdict.Refused, "what physics does with it at load is unknown (no record type or bodies read)");
         if (!f.Held) return (EmptySpaceVerdict.Falls, "a loose body that is neither mounted nor resting on a fixed reference: it falls at load (the rest rule's class)");
+        if (!f.AuthoringRead)
+            return f.WinnerGrounded && !f.WinnerOverCap && !f.RePlacedByMoverSide
+                ? (EmptySpaceVerdict.Grounded, "a floor or wall holds it under the winner (the order without the mover was not walked: nothing there can make it the class)")
+                : (EmptySpaceVerdict.Refused, "the order without the mover was not walked, and the winner arm alone cannot decide it");
         if (f.AuthoringOverCap) return (EmptySpaceVerdict.Refused, $"in the order without the mover {cap}: not read");
         if (!f.AuthoringGrounded)
         {
@@ -1708,6 +1715,7 @@ public enum DependentMotion { Fixed, Movable, Unknown }
 /// <summary>What <see cref="DetectorModel.EmptySpace"/> makes of one fixture against one mover. LeftInEmptySpace is the class;
 /// the rest are counted beside it, never findings: Absent (not there in one arm), Falls (a loose body: the rest rule's class),
 /// Refused (by name), NoRelation (nothing the mover changed held it), FloatsAsShipped (the absolute floor), FloorPopulation
-/// (Bethesda or USSEP on both sides, rule 12), RePlacedGrounded / RePlacedStillEmpty (the mover's side moved it), ReGrounded
-/// (another floor or wall holds it now).</summary>
-public enum EmptySpaceVerdict { Absent, Falls, Refused, NoRelation, FloatsAsShipped, FloorPopulation, RePlacedGrounded, RePlacedStillEmpty, ReGrounded, LeftInEmptySpace }
+/// (Bethesda or USSEP on both sides, rule 12), Grounded (a floor or wall holds it under the winner and the mover's side did not re-place
+/// it, so it cannot be the class; the order without the mover is not walked for it), RePlacedGrounded / RePlacedStillEmpty (the
+/// mover's side moved it), ReGrounded (another floor or wall holds it now; read only when the order without the mover was walked).</summary>
+public enum EmptySpaceVerdict { Absent, Falls, Refused, NoRelation, FloatsAsShipped, FloorPopulation, Grounded, RePlacedGrounded, RePlacedStillEmpty, ReGrounded, LeftInEmptySpace }
