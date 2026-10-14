@@ -6431,6 +6431,92 @@ def case_46(tmp):
 CASES["case-46"] = case_46
 
 
+def case_47(tmp):
+    """Defect D-1 (task 2026-10-14-evalrun-qualification-by-hash, test-hardening row B7). In-process through
+    `run_derived`: a supplied plugin is `qualified` only when the sha256 its arm's request records equals the
+    sha256 of a plugin an ACCEPTED receipt consumed; the file name is a label. Each scenario is its own run."""
+    import importlib.util
+    case = "case-47-qualification-by-hash"
+    spec = importlib.util.spec_from_file_location("evalrun_case47", EVALRUN)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    h_old, h_new, h_x = "a1" * 32, "b2" * 32, "c3" * 32
+
+    class Stub:
+        def __init__(self, run, arms):
+            self.run, self.plan, self.calls, self.extra = run, {"arms": arms, "checks": []}, [], None
+
+        def account(self, check, arm, status, cause, detail, **kw):
+            self.calls.append(status)
+
+        def finish(self, *a, extra=None, **kw):
+            self.extra = extra
+
+    def supplied(aid, files, requested):
+        return {"armId": aid, "kind": "supplied-combination", "supplied": {"declaredFiles": files},
+                "requested": {"plugins": requested}}
+
+    def req(name, sha):
+        row = {"name": name, "sha256": sha, "path": None, "hashSource": "instance:mod" if sha else "unstated"}
+        if not sha:
+            row["unstatedReason"] = "no --instance was given, so the plan cannot resolve " + name
+        return row
+
+    def receipt(rid, aid, accepted, plugins):
+        return {"receiptId": rid, "armId": aid, "validation": {"accepted": accepted},
+                "consumed": {"configuration": {"plugins": [{"name": n, "sha256": s} for n, s in plugins]}}}
+
+    base_arm = {"armId": "baseline", "kind": "baseline"}
+    base_ok = receipt("r-base", "baseline", True, [("Skyrim.esm", "00" * 32), ("Patch.esp", h_old)])
+    scenarios = [
+        # B7: same name as the baseline's plugin, different bytes, own arm's receipts all rejected
+        ("differs", supplied("supplied-01-newer", ["Patch.esp"], [req("Patch.esp", h_new)]),
+         [base_ok, receipt("r-s1", "supplied-01-newer", False, [("Patch.esp", h_new)])],
+         "unqualified", h_new[:12]),
+        # its own bytes were consumed by its own accepted receipt
+        ("own-bytes-accepted", supplied("supplied-01-newer", ["Patch.esp"], [req("Patch.esp", h_new)]),
+         [base_ok, receipt("r-s1", "supplied-01-newer", True, [("Patch.esp", h_new)])],
+         "qualified", h_new[:12]),
+        # the same bytes the baseline's accepted receipt consumed
+        ("same-bytes", supplied("supplied-01-same", ["Patch.esp"], [req("Patch.esp", h_old)]),
+         [base_ok, receipt("r-s1", "supplied-01-same", False, [("Patch.esp", h_old)])],
+         "qualified", h_old[:12]),
+        # a file only its own arm consumed, and every receipt of that arm rejected
+        ("own-arm-rejected", supplied("supplied-01-only", ["NewPatch.esp"], [req("NewPatch.esp", h_x)]),
+         [base_ok, receipt("r-s1", "supplied-01-only", False, [("NewPatch.esp", h_x)])],
+         "unqualified", h_x[:12]),
+        # the request records no hash for it: never qualified by default
+        ("no-recorded-hash", supplied("supplied-01-unstated", ["Patch.esp"], [req("Patch.esp", None)]),
+         [base_ok], "unqualified", "no content hash"),
+        # the request does not list the declared file at all
+        ("not-in-request", supplied("supplied-01-absent", ["Patch.esp"], [req("Other.esp", h_x)]),
+         [base_ok], "unqualified", "no content hash"),
+    ]
+    check_def = {"checkId": "patch.candidate-qualification", "adapter": {"kind": "derived",
+                                                                         "derives": "candidate-qualification"}}
+    for tag, arm, receipts, want, why_has in scenarios:
+        run = tmp / case / tag
+        (run / "receipts").mkdir(parents=True)
+        for r in receipts:
+            (run / "receipts" / f"{r['receiptId']}.json").write_text(json.dumps(r), encoding="utf-8")
+        (run / "candidates").mkdir()
+        (run / "candidates" / "candidates.json").write_text(
+            json.dumps({"Candidates": [{"File": "candidate-00-baseline.json"}]}), encoding="utf-8")
+        stub = Stub(run, [base_arm, arm])
+        mod.run_derived(stub, check_def, base_arm)
+        rows = ((stub.extra or {}).get("derived") or {}).get("candidates")
+        got = [(r.get("file"), r.get("armId"), r.get("qualification")) for r in rows or []]
+        expect(got, [(arm["supplied"]["declaredFiles"][0], arm["armId"], want),
+                     ("candidate-00-baseline.json", None, "catalogued")],
+               f"{case}/{tag}: exact rows (file, arm, qualification)", "D7 / B7")
+        why = next((r.get("why") or "" for r in rows or [] if r.get("armId") == arm["armId"]), "")
+        check(why_has in why and "sha256" in why,
+              f"{case}/{tag}: the why names what was compared ({why_has!r} in {why!r})")
+
+
+CASES["case-47"] = case_47
+
+
 def pin_standard_settings(tmp: Path) -> None:
     """These known answers judge the load-time state: point every child at a private Standard-depth settings file,
     so the evaluation's Deep default and the user's own settings file never reach them (tests/test_stategen.py
