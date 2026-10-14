@@ -651,10 +651,15 @@ def case_10(tmp):
     for k in o["disposition"].get("mediaRowCarries") or []:
         check(k in row, f"{case}: the media row carries {k} (D8, media item schema 2)")
     check((run / "bundle" / row.get("path", "missing")).exists(), f"{case}: the media copy is on disk (D8)")
+    # This case's registry trim omits patch.candidate-qualification, so it qualifies nothing: case 47 covers
+    # qualification. What the case does show, exactly: no qualification check planned and no candidate rows.
     disp = load(run / "disposition.json") or {}
-    quals = [q for q in json.dumps(field(disp, "discovery", default={})).split('"') if q in ("qualified", "unqualified")]
-    check("qualified" not in quals or "unqualified" in quals,
-          f"{case}: a catalogue hit in no evaluated arm is unqualified (D7)")
+    plan = load(run / "plan.json") or {}
+    check(len(plan.get("checks") or []) > 0, f"{case}: plan.json was read and lists its checks")
+    expect([c["checkId"] for c in plan.get("checks") or [] if c["checkId"] == "patch.candidate-qualification"], [],
+           f"{case}: the trim plans no candidate-qualification derivation")
+    expect(field(disp, "discovery", default={}).get("candidates"), [],
+           f"{case}: discovery.candidates is empty (no qualification ran)")
 
 
 def case_11(tmp):
