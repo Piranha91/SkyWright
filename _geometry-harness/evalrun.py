@@ -3640,23 +3640,48 @@ def run_derived(ex: Executor, check: dict, arm: dict) -> None:
     elif adapter.get("derives") == "candidate-qualification" or cid.endswith("candidate-qualification"):
         if blocked():
             return
-        evaluated: dict[str, str] = {}
+        # Qualification compares BYTES: the sha256 each accepted receipt consumed, keyed by hash. The name
+        # only labels the row and, in the why, names a same-named plugin whose bytes differ.
+        consumed_by: dict[str, set[str]] = {}
+        by_name: dict[str, set[str]] = {}
         for r in receipts.values():
             if r["validation"]["accepted"]:
                 for p in (r.get("consumed", {}).get("configuration", {}) or {}).get("plugins", []) or []:
-                    if p.get("name") and p.get("sha256"):
-                        evaluated[str(p["name"]).lower()] = p["sha256"]
+                    sha = str(p.get("sha256") or "").lower()
+                    if is_sha256(sha):
+                        consumed_by.setdefault(sha, set()).add(str(r.get("armId")))
+                        if p.get("name"):
+                            by_name.setdefault(Path(str(p["name"])).name.lower(), set()).add(sha)
         derived_from = [r["receiptId"] for r in receipts.values() if r["validation"]["accepted"]]
         manifest = load_json(ex.run / "candidates" / "candidates.json") or {}
         rows = []
         for arm2 in ex.plan["arms"]:
+            # The supplied file's hash is the one this arm's frozen request recorded, never a fresh read.
+            recorded = {Path(str(p.get("name"))).name.lower(): p
+                        for p in (arm2.get("requested") or {}).get("plugins") or [] if p.get("name")}
             for name in arm2.get("supplied", {}).get("declaredFiles", []) or []:
                 key = Path(name).name.lower()
-                rows.append({"file": Path(name).name, "armId": arm2["armId"],
-                             "qualification": "qualified" if key in evaluated else "unqualified",
-                             "why": ("its content hash is in an evaluated arm" if key in evaluated
-                                     else "no evaluated arm consumed a plugin with this name: a "
-                                          "downloadable hit stays a lead until its payload is measured")})
+                req = recorded.get(key)
+                sha = str((req or {}).get("sha256") or "").lower()
+                sha = sha if is_sha256(sha) else None
+                qualified = sha is not None and sha in consumed_by
+                if sha is None:
+                    why = (f"this arm's request records no content hash (sha256) for {Path(name).name} ("
+                           + ((req or {}).get("unstatedReason") or "the request does not list it")
+                           + "), so its bytes cannot be compared with any evaluated arm's: a downloadable "
+                             "hit stays a lead until its payload is measured")
+                elif qualified:
+                    why = (f"its sha256 {sha[:12]}… (from this arm's request) equals a plugin an accepted "
+                           f"receipt consumed on {', '.join(sorted(consumed_by.get(sha) or ["no arm"]))}")
+                else:
+                    same_name = sorted(by_name.get(key, set()) - {sha})
+                    why = (f"its sha256 {sha[:12]}… (from this arm's request) matches no plugin any accepted "
+                           f"receipt consumed"
+                           + (f"; an accepted receipt consumed a different {Path(name).name} (sha256 "
+                              + ", ".join(s[:12] + "…" for s in same_name) + ")" if same_name else "")
+                           + ": a downloadable hit stays a lead until its payload is measured")
+                rows.append({"file": Path(name).name, "armId": arm2["armId"], "sha256": sha,
+                             "qualification": "qualified" if qualified else "unqualified", "why": why})
         for c in (manifest.get("Candidates") or []) if isinstance(manifest, dict) else []:
             f = Path(str(c.get("File", ""))).name
             if f:
