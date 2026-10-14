@@ -953,14 +953,17 @@ public static class DetectorModel
     /// <param name="AuthoringAnchorChangedByMover">an anchor the authoring assembly touches is absent from the winner arm, or placed
     /// elsewhere there: the mover's side removed or moved it.</param>
     /// <param name="RePlacedByMoverSide">the fixture's winning placement was set by the mover or a plugin downstream of it.</param>
-    /// <param name="BethesdaFloor">the mover and the fixture's placer are both Bethesda or USSEP files.</param>
+    /// <param name="BethesdaFloor">the mover and the fixture's side (the plugin whose step last set its placement, base or enable state)
+    /// are both Bethesda or USSEP files.</param>
+    /// <param name="FixtureSideIsBase">the fixture's side is a Bethesda or USSEP file while the mover is a mod: no second mod placed or kept
+    /// the fixture, so its being left is the mover's own defect, not a clash between two mods.</param>
     /// <param name="AuthoringRead">the order without the mover was walked. The search skips that walk when the winner arm is grounded
     /// and the mover's side did not re-place the fixture: no answer of the authoring arm can make such a fixture the class, and that
     /// walk is the costly one.</param>
     public readonly record struct EmptySpaceFacts(
         bool Interior, bool ExistsWinner, bool ExistsAuthoring, DependentMotion Motion, bool Held,
         bool WinnerOverCap, bool AuthoringOverCap, bool WinnerGrounded, bool AuthoringGrounded, bool AuthoringAnchorChangedByMover,
-        bool RePlacedByMoverSide, bool BethesdaFloor, int MaxMembers = 256, bool AuthoringRead = true);
+        bool RePlacedByMoverSide, bool BethesdaFloor, int MaxMembers = 256, bool AuthoringRead = true, bool FixtureSideIsBase = false);
 
     /// <summary>LEFT IN EMPTY SPACE (2026-10-14): a fixture that stood in a room in the order without the mover, and whose assembly
     /// reaches no floor or wall under the winner because the mover removed or moved what it stood on or against. The sibling of
@@ -996,6 +999,7 @@ public static class DetectorModel
                                     : (EmptySpaceVerdict.RePlacedStillEmpty, "the mover's side re-placed it, and nothing it touches reaches a floor or wall there");
         if (f.WinnerGrounded) return (EmptySpaceVerdict.ReGrounded, "the mover removed or moved what held it, and another floor or wall holds it now");
         if (f.BethesdaFloor) return (EmptySpaceVerdict.FloorPopulation, "left in empty space, with Bethesda or USSEP files on both sides (counted apart)");
+        if (f.FixtureSideIsBase) return (EmptySpaceVerdict.MoverOnBaseGame, "left in empty space by the mover's own removal under a base-game fixture no other mod placed or kept: one mod's defect, not a clash between two mods (counted apart)");
         return (EmptySpaceVerdict.LeftInEmptySpace, "the mover removed or moved the floor or wall it stood on or against, and nothing it touches reaches a floor or wall now");
     }
 

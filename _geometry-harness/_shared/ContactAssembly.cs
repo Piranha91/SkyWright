@@ -210,6 +210,16 @@ public sealed class EmptySpaceSearch
         return differs && Responsible(a) == mover;
     }
 
+    /// <summary>The fixture's side: the plugin whose step last set its winning placement, its base, or its enable state (a mod that only
+    /// re-enables a base-game reference another mod disabled makes it that mod's).</summary>
+    int SideOf(FormKey f, int placement)
+    {
+        int r = placement;
+        if (C.Index.BaseChanges.TryGetValue(f, out var bc) && bc.Count > 0 && bc[^1].Plugin > r) r = bc[^1].Plugin;
+        if (C.Index.EnableChanges.TryGetValue(f, out var ec) && ec.Count > 0 && ec[^1].Plugin > r) r = ec[^1].Plugin;
+        return r;
+    }
+
     int Responsible(FormKey a)
     {
         var snaps = C.Index.History.Of(a);
@@ -451,7 +461,7 @@ public sealed class EmptySpaceSearch
         bool interior = any?.Snap.Interior ?? true;
         FormKey baseKey = any?.Base ?? FormKey.Null;
         var motion = any is { } a0 ? C.MotionOf(a0.Base) : DependentMotion.Unknown;
-        int placer = pw?.Snap.Plugin ?? -1;
+        int placer = pw is null ? -1 : SideOf(fixture, pw.Value.Snap.Plugin);
         FormKey cell = any?.Snap.Cell ?? FormKey.Null;
 
         EmptySpaceArmReading win = EmptySpaceArmReading.Missing, auth = EmptySpaceArmReading.Missing;
@@ -474,7 +484,8 @@ public sealed class EmptySpaceSearch
         if (readAuth) auth = Walk(fixture, mover, stopAtAnchor: false, MinAnchorDim);
         var facts = new DetectorModel.EmptySpaceFacts(interior, pw is not null, pa is not null, motion, held is not null,
             win.OverCap, auth.OverCap, win.Grounded, auth.Grounded, auth.ChangedAnchors.Count > 0,
-            replaced, IsBethesdaOrUssep(mover) && IsBethesdaOrUssep(placer), MaxMembers, AuthoringRead: readAuth || held is null);
+            replaced, IsBethesdaOrUssep(mover) && IsBethesdaOrUssep(placer), MaxMembers, AuthoringRead: readAuth || held is null,
+            FixtureSideIsBase: !IsBethesdaOrUssep(mover) && IsBethesdaOrUssep(placer));
         var (v, why) = DetectorModel.EmptySpace(facts);
         float nearest = float.PositiveInfinity; bool? g128 = null, g256 = null;
         if (v is EmptySpaceVerdict.LeftInEmptySpace or EmptySpaceVerdict.RePlacedStillEmpty or EmptySpaceVerdict.FloorPopulation)
