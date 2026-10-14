@@ -61,6 +61,7 @@ sys.path.insert(0, str(HERE))
 import evalregistry  # noqa: E402
 import evalsettings  # noqa: E402
 import stategen  # noqa: E402
+import switchflip_scope  # noqa: E402
 
 #: Schema 2 is the evidence-chain schema: the plan freezes a per-arm REQUESTED identity, receipts record
 #: their comparison inputs, and finalize/bundle/verify walk the receipt-to-evidence chain. A schema-1
@@ -2417,9 +2418,16 @@ def execute(ex: Executor, parent) -> None:
                               + prereq_block_detail(ex, also, arm["armId"])),
                            extra=superseded_import(ex, check, arm))
             elif st == "live-import":
-                ex.account(check, arm, "live-import", None,
-                           "opted in and waiting for a live receipt: run switchflip.py for this arm, then "
-                           "`import-results --file` its export; the controller itself never launches the game")
+                scope_read = live_switch_scope(ex.run, ex.plan, ex.ledger, arm["armId"])                     if check["checkId"] == LIVE_CHECK_ID else None
+                if scope_read and scope_read["status"] == "not-applicable":
+                    # the arm's own accepted census answers it: nothing a script drives touches a target
+                    ex.account(check, arm, "not-applicable", None, switchflip_scope.sentence(scope_read),
+                               extra={"switchScope": live_switch_scope_record(scope_read)})
+                else:
+                    ex.account(check, arm, "live-import", None,
+                               "opted in and waiting for a live receipt: run switchflip.py for this arm, then "
+                               "`import-results --file` its export; the controller itself never launches the game"
+                               + ("" if not scope_read else f" ({switchflip_scope.sentence(scope_read)})"))
             elif st in ("unsupported", "mcp-only"):
                 ex.account(check, arm, st, None, check.get("unsupportedReason") or
                            "the registry records no CLI adapter for this check")
@@ -2959,6 +2967,33 @@ def reuse_blocked_by(ex: Executor, check: dict, arm_id: str) -> str | None:
     (typically on the baseline's answer, before the arm's own prerequisite was measured). Such an entry is
     blocked, not reused: reuse must not keep what the prerequisite gate would refuse to launch."""
     return next((p for p in check.get("prerequisites") or [] if decided_on_arm(ex, p, arm_id)), None)
+
+
+def live_switch_scope(run: Path, plan: dict, ledger, arm_id: str) -> dict | None:
+    """switchflip_scope's reading of one arm for the live switch check: its ACCEPTED state.switch-census output against
+    the plan's scope. None when there is no accepted census output or either document cannot be read (the row then
+    stays open: unknown never becomes not-applicable)."""
+    e = ledger.entry("state.switch-census", arm_id, None)
+    r = load_json(run / "receipts" / f"state.switch-census__{arm_id}.json")
+    if not (e and e.get("status") in TERMINAL_OK and r and (r.get("validation") or {}).get("accepted")):
+        return None
+    outs = r.get("outputs") or []
+    if not outs or not outs[0].get("path"):
+        return None
+    cpath = run / outs[0]["path"]
+    census = load_json(cpath)
+    scope = load_json(Path(plan["scope"]["path"])) if (plan.get("scope") or {}).get("path") else None
+    if not isinstance(census, dict) or not isinstance(scope, dict):
+        return None
+    res = switchflip_scope.population(census, scope)
+    res["census"] = {"path": outs[0]["path"], "sha256": sha256_file(cpath)}
+    return res
+
+
+def live_switch_scope_record(res: dict) -> dict:
+    """What a not-applicable receipt records: the census it read, the counts and the rule's module."""
+    return {"census": res["census"], "counts": res["counts"], "status": res["status"],
+            "rule": "switchflip_scope.population"}
 
 
 def prereq_satisfied(ex: Executor, check: dict, arm_id: str) -> str | None:
