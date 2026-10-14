@@ -390,6 +390,14 @@ def default_json(probe: str, entry: dict, scen: dict, order_name: str) -> dict:
             doc = json.loads(Path(scope_path).read_text(encoding="utf-8"))
             doc["generatedUtc"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
             return doc
+    if probe in ("patchprobe", "poolprobe", "fomodprobe"):
+        # The discovery probes' --json hit list (schema 1, _shared/DiscoveryHits.cs); the registry reads counts.*.
+        hits = list(entry.get("hits", []))
+        return {"schemaVersion": 1, "probe": probe, "mode": "fixture", "complete": True,
+                "sourcesSearched": [{"kind": "instance", "path": "fixture://evalrun", "name": "fixture"}],
+                "sourcesNotSearched": [], "counts": {"judged": n, "unjudgeable": int(entry.get("unreadableCount", 0)),
+                                                     "hits": len(hits)},
+                "hits": hits, "unjudgeableItems": [], "detail": {}}
     return {"probe": probe, "plugins": n, "rows": list(entry.get("rows", []))}
 
 
