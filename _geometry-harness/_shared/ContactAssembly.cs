@@ -53,7 +53,7 @@ public sealed class EmptySpaceSearch
     public float AnchorReport { get; init; } = 512f;
     /// <summary>Candidates: dependent-scale references (as STRANDED's dependents) within this of a moved host's previous box.</summary>
     public float Reach => C.Reach;
-    public long TouchTests, SurfacesBuilt, ExteriorHostsSkipped;
+    public long TouchTests, SurfacesBuilt, ExteriorHostsSkipped, WalksRun, WalksReused;
 
     Dictionary<FormKey, (FormKey Act, FormKey Trig)>? _rackItem;
     Dictionary<FormKey, List<FormKey>>? _trigItems;
@@ -278,6 +278,12 @@ public sealed class EmptySpaceSearch
     public EmptySpaceArmReading Walk(FormKey fixture, int mover, bool stopAtAnchor, float minAnchorDim)
     {
         if (Place(fixture, mover) is null) return EmptySpaceArmReading.Missing;
+        // Grounded, over-cap and "touches an anchor the mover changed" are properties of the connected assembly, not of where the walk
+        // starts (touch and the mount link are symmetric; the anchor test reads only the fixture's own plugin), so one walk answers
+        // for every member it visited under the same side, arm, anchor size and stopping rule.
+        var ck = (mover, minAnchorDim, fixture.ModKey, stopAtAnchor, fixture);
+        if (_walkMemo.TryGetValue(ck, out var hit)) { WalksReused++; return hit; }
+        WalksRun++;
         var members = new List<FormKey> { fixture };
         var inSet = new HashSet<FormKey> { fixture };
         var anchors = new List<(FormKey, FormKey, float, char)>();
@@ -314,7 +320,11 @@ public sealed class EmptySpaceSearch
             queue.Enqueue(n); return true;
         }
         EmptySpaceArmReading Reading(bool grounded, bool over)
-            => new(true, grounded, over, members.Count, members.Take(8).ToList(), anchors, changed);
+        {
+            var r = new EmptySpaceArmReading(true, grounded, over, members.Count, members.Take(8).ToList(), anchors, changed);
+            foreach (var m in inSet) _walkMemo[(mover, minAnchorDim, fixture.ModKey, stopAtAnchor, m)] = r;
+            return r;
+        }
     }
 
     /// <summary>Why the fixture stays where the winner places it, or null when it is a loose body that falls. Also returns the Fixed
@@ -417,7 +427,8 @@ public sealed class EmptySpaceSearch
     readonly Dictionary<FormKey, (EmptySpaceArmReading W, string? Held, List<FormKey> Own, DependentMotion Motion)> _winMemo = new();
 
     /// <summary>Forget the winner readings (after a state change).</summary>
-    public void ClearMemo() => _winMemo.Clear();
+    public void ClearMemo() { _winMemo.Clear(); _walkMemo.Clear(); }
+    readonly Dictionary<(int Mover, float MinDim, ModKey Side, bool Stop, FormKey Member), EmptySpaceArmReading> _walkMemo = new();
 
     public EmptySpaceRow Judge(FormKey fixture, int mover, string? state = null, bool sensitivity = true)
     {

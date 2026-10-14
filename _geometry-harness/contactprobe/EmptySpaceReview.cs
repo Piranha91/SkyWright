@@ -21,14 +21,16 @@ static class EmptySpaceReview
                         + $"the fixture's own plugin defines (a Bethesda master's always count); touch within ε {cidx.Epsilon:0.#}u on the core surfaces (collision, else render, labelled)");
         var rows = new List<EmptySpaceRow>();
         long absent = 0, noRelation = 0;
+        long seen = 0;
         foreach (var (f, m) in search.CandidatesNear(hosts))
         {
+            if (++seen % 5000 == 0) Console.WriteLine($"   ... {seen:N0} pairs, {rows.Count:N0} rows, touch tests {search.TouchTests:N0}, {sw.Elapsed.TotalSeconds:0}s");
             var r = search.Judge(f, m);
             if (r.Verdict == EmptySpaceVerdict.Absent) { absent++; continue; }
             if (r.Verdict == EmptySpaceVerdict.NoRelation) noRelation++;
             rows.Add(r);
         }
-        Console.WriteLine($"   pairs judged: {rows.Count + absent:N0} (absent in an arm {absent:N0}, not listed); touch tests {search.TouchTests:N0}, surfaces built {search.SurfacesBuilt:N0}; exterior hosts not searched (the land is not read) {search.ExteriorHostsSkipped:N0}  ({sw.Elapsed.TotalSeconds:0.0}s)");
+        Console.WriteLine($"   pairs judged: {rows.Count + absent:N0} (absent in an arm {absent:N0}, not listed); touch tests {search.TouchTests:N0}, surfaces built {search.SurfacesBuilt:N0}, walks {search.WalksRun:N0} (reused {search.WalksReused:N0}); exterior hosts not searched (the land is not read) {search.ExteriorHostsSkipped:N0}  ({sw.Elapsed.TotalSeconds:0.0}s)");
         foreach (var g in rows.GroupBy(r => r.Verdict).OrderBy(g => g.Key))
             Console.WriteLine($"      {g.Key,-20} {g.Count(),8:N0}   distinct fixtures {g.Select(r => r.Fixture).Distinct().Count(),7:N0}");
         var cls = rows.Where(r => r.Verdict == EmptySpaceVerdict.LeftInEmptySpace).ToList();
