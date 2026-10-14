@@ -1231,8 +1231,9 @@ def case_14(tmp):
 
     # A-1's integration input: Q42's own demo bundle, verified on a COPY (verify writes verify.json)
     q = o["q42DemoBundle"]
-    src = Path(os.environ.get(q["env"], q["path"]))
-    if src.is_dir():
+    named = os.environ.get(q["env"]) or q.get("path")
+    src = Path(named) if named else None
+    if src is not None and src.is_dir():
         cp = tmp / "q42-demo-bundle-copy"
         shutil.copytree(src, cp)
         (cp / "verify.json").unlink(missing_ok=True)
@@ -1242,8 +1243,8 @@ def case_14(tmp):
         check(q["defectKind"] in blob,
               f"{case}: the Q42 bundle is refused as {q['defectKind']} by name (A-1)")
     else:
-        print(f"  NOTE  {case}: {src} is absent (the Q42 demo run is untracked and lives only in the main "
-              f"checkout), so A-1's refusal is covered here only by the synthetic bundleSchema 1 copy above.")
+        print(f"  NOTE  {case}: no demo bundle ({q['env']} {'names ' + str(src) + ', which is absent' if src else 'is unset'}), "
+              f"so A-1's refusal is covered here only by the synthetic bundleSchema 1 copy above.")
 
 
 def case_15(tmp):
