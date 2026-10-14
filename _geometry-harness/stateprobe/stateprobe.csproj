@@ -34,6 +34,7 @@
     <Compile Include="..\_shared\DeletionHistory.cs" Link="DeletionHistory.cs" />
     <Compile Include="..\_shared\OverlapIndex.cs" Link="OverlapIndex.cs" />
     <Compile Include="..\_shared\ContactIndex.cs" Link="ContactIndex.cs" />
+    <Compile Include="..\_shared\ContactAssembly.cs" Link="ContactAssembly.cs" />
     <Compile Include="..\_shared\PlacementCache.cs" Link="PlacementCache.cs" />
     <Compile Include="..\_shared\BosHook.cs" Link="BosHook.cs" />
     <Compile Include="..\_shared\DependencyIndex.cs" Link="DependencyIndex.cs" />

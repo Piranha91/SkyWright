@@ -399,6 +399,46 @@
       "manualDecisionAllowed": false
     },
     {
+      "id": "geometry.fixture-empty-space",
+      "family": "geometry",
+      "title": "Fixtures left hanging in empty space after another mod removed the room around them",
+      "required": true,
+      "applicability": {
+        "trigger": {
+          "placed": true
+        },
+        "note": "The population is placed fixtures and the floors and walls they stand on or against; nothing filed under a cell means no room to remove."
+      },
+      "prerequisites": [
+        "loadability.masters-and-order"
+      ],
+      "inputs": {
+        "arms": "all",
+        "states": "baseline"
+      },
+      "adapter": {
+        "kind": "probe-emit",
+        "exe": "contactprobe",
+        "args": [
+          "--order",
+          "{order}",
+          "--empty-space",
+          "{out}/{arm}.empty-space.json",
+          "--emit",
+          "{emit}"
+        ],
+        "reverse": false,
+        "output": "conflict-file",
+        "commonFlags": true
+      },
+      "evidence": {
+        "strength": "calibrated-inference",
+        "claim": "LEFT IN EMPTY SPACE",
+        "limits": "Interiors only (the land is not read). A fixture is left in empty space when everything it touches, followed from piece to piece (and the items its weapon racks mount), reached a floor or wall that a later plugin removed or moved, and reaches none under the winner. A floor or wall is a Static with solid collision at least 64 u across that the fixture's own plugin does not define (a Bethesda master's always count); that gate is a stated parameter, not measured in game. The weapon-rack case was seen in game (the 2026-10-13 lab block: racks and swords hanging in the void another mod's disable left); no row of this check has been confirmed in game by itself. Loose items that are not held fall instead and are the rest rule's business. Fixtures that exist only after a quest flips their switch are judged by state.conditional-geometry's empty-space pass. The Bethesda floor is withheld."
+      },
+      "manualDecisionAllowed": false
+    },
+    {
       "id": "geometry.declared-dependencies",
       "family": "geometry",
       "title": "Declared host edges (XESP / XLKR / XAPR) over the movement census",
@@ -724,7 +764,9 @@
           "--switch-map",
           "{switchMap}",
           "--emit",
-          "{emit}"
+          "{emit}",
+          "--empty-space",
+          "{out}/{arm}.empty-space.json"
         ],
         "statesFlag": "--state",
         "statesFileFlag": "--states-file",
@@ -735,7 +777,7 @@
       "evidence": {
         "strength": "calibrated-inference",
         "claim": "STATE CONDITIONAL",
-        "limits": "A Standard plan evaluates only the states it selected (none beyond the load-time state by default); a Deep plan evaluates every state stategen.py generates from each arm's own census (every switch alone and every quest stage's joint flip, handed over as --states-file), and lists what the generator could not express (a looping or unresolved chain, an ambiguous stage member, disabled singletons, player-parented references, unreadable plugins, and combinations beyond one stage) under `unassessed`. STATE-OVERLAP is explicitly unmeasured and withheld until strict placed render triangles are available in this evaluator; diagnostic boxes cannot establish overlap findings. State contact and route roles remain available under their separate geometry contracts. The changed measurement identity refuses comparison against legacy box-based state emits. stateprobe has no --base, so there is no reverse arm and no physical differential credit for a state row. The Bethesda floor is withheld."
+        "limits": "A Standard plan evaluates only the states it selected (none beyond the load-time state by default); a Deep plan evaluates every state stategen.py generates from each arm's own census (every switch alone and every quest stage's joint flip, handed over as --states-file), and lists what the generator could not express (a looping or unresolved chain, an ambiguous stage member, disabled singletons, player-parented references, unreadable plugins, and combinations beyond one stage) under `unassessed`. STATE-OVERLAP is explicitly unmeasured and withheld until strict placed render triangles are available in this evaluator; diagnostic boxes cannot establish overlap findings. State contact and route roles remain available under their separate geometry contracts. The changed measurement identity refuses comparison against legacy box-based state emits. Each state also reads LEFT IN EMPTY SPACE for the fixtures it brings in (--empty-space; STATE-EMPTY rows; interiors only), so a fixture that exists only after its quest flips a switch is judged where it appears. stateprobe has no --base, so there is no reverse arm and no physical differential credit for a state row. The Bethesda floor is withheld."
       },
       "manualDecisionAllowed": false
     },

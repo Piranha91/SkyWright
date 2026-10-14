@@ -944,6 +944,34 @@ public static class DetectorModel
         return (relation, verdict, ContactBlocker.None, $"{rel}; under the winner it touches nothing within {epsilon:0.#}u (nearest {f.WinnerDistance:0.#}u){motion}");
     }
 
+    /// <summary>One fixture against one mover, as the empty-space search (<c>_shared/ContactAssembly.cs</c>) hands it to the rule.
+    /// An ASSEMBLY is the fixture plus everything it touches within ε, transitively, and the items its weapon racks mount; an ANCHOR is a
+    /// floor or wall (<c>EmptySpaceSearch.IsAnchor</c>), which ends the walk. GROUNDED means the assembly touches an anchor. The
+    /// AUTHORING arm is the order without the mover's side, the WINNER arm the order as loaded; the R1 enable state per arm.</summary>
+    /// <param name="Held">the fixture stays where the winner places it at load: Fixed by its record type or NIF, mounted by a weapon
+    /// rack, or a loose body resting on a Fixed reference. A loose body that is not held falls (the rest rule's class).</param>
+    /// <param name="AuthoringAnchorChangedByMover">an anchor the authoring assembly touches is absent from the winner arm, or placed
+    /// elsewhere there: the mover's side removed or moved it.</param>
+    /// <param name="RePlacedByMoverSide">the fixture's winning placement was set by the mover or a plugin downstream of it.</param>
+    /// <param name="BethesdaFloor">the mover and the fixture's placer are both Bethesda or USSEP files.</param>
+    public readonly record struct EmptySpaceFacts(
+        bool Interior, bool ExistsWinner, bool ExistsAuthoring, DependentMotion Motion, bool Held,
+        bool WinnerOverCap, bool AuthoringOverCap, bool WinnerGrounded, bool AuthoringGrounded, bool AuthoringAnchorChangedByMover,
+        bool RePlacedByMoverSide, bool BethesdaFloor, int MaxMembers = 256);
+
+    /// <summary>LEFT IN EMPTY SPACE (2026-10-14): a fixture that stood in a room in the order without the mover, and whose assembly
+    /// reaches no floor or wall under the winner because the mover removed or moved what it stood on or against. The sibling of
+    /// STRANDED: Stranded reads one dependent against one host and calls a fixture held when anything touches it; this rule follows
+    /// what touches it, so a rack holding a rack holding a sword in the void is still in the void. Order: exterior refused (the land is
+    /// not read); absent in an arm; unknown motion refused; a loose body that is not held falls; an assembly over the cap refused in the
+    /// arm that needs it; ungrounded as authored → floats as shipped (ungrounded now too) or no relation; no anchor the mover changed →
+    /// no relation; re-placed by the mover's side → grounded or still in empty space; grounded now → re-grounded; Bethesda floor →
+    /// counted apart; else LEFT IN EMPTY SPACE.</summary>
+    public static (EmptySpaceVerdict Verdict, string Why) EmptySpace(EmptySpaceFacts f)
+    {
+        return (EmptySpaceVerdict.NoRelation, "the rule is not built yet");
+    }
+
     /// <summary>What physics does with a dependent at cell load — the split 4.7 Part C made necessary: a movable
     /// CLUTTER urn was shoved aside, so a movable dependent left in the air FALLS rather than floats, and its
     /// player-visible defect is "apples on the floor", self-healing in the common case. Item records (MISC, INGR, ALCH,
@@ -1656,3 +1684,10 @@ public enum ContactBlocker { None, NoDependentGeometry, NoHostGeometry, Authorin
 /// <summary>What physics does with a dependent at cell load. Fixed floats where it was left; Movable falls or is shoved
 /// (4.7 Part C). Unknown: nothing known about the base or its bodies.</summary>
 public enum DependentMotion { Fixed, Movable, Unknown }
+
+/// <summary>What <see cref="DetectorModel.EmptySpace"/> makes of one fixture against one mover. LeftInEmptySpace is the class;
+/// the rest are counted beside it, never findings: Absent (not there in one arm), Falls (a loose body: the rest rule's class),
+/// Refused (by name), NoRelation (nothing the mover changed held it), FloatsAsShipped (the absolute floor), FloorPopulation
+/// (Bethesda or USSEP on both sides, rule 12), RePlacedGrounded / RePlacedStillEmpty (the mover's side moved it), ReGrounded
+/// (another floor or wall holds it now).</summary>
+public enum EmptySpaceVerdict { Absent, Falls, Refused, NoRelation, FloatsAsShipped, FloorPopulation, RePlacedGrounded, RePlacedStillEmpty, ReGrounded, LeftInEmptySpace }
