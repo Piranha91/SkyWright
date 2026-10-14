@@ -28,7 +28,7 @@ using HarnessShared;
 using HousecarlCore;
 using HousecarlCore.Progress;
 
-if (args.Contains("--selftest")) return SelfTest.Run();
+if (args.Length > 0 && args[0] == "--selftest") return SelfTest.Run();
 
 using var __run = RunLog.BeginProcess("selectprobe", args);
 
