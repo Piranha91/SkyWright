@@ -146,6 +146,13 @@ static class SelfTest
         // an unreadable plugin, and an asset-only folder
         Directory.CreateDirectory(Path.Combine(mods, "Bad")); File.WriteAllText(Path.Combine(mods, "Bad", "Bad.esp"), "this is not a plugin");
         Directory.CreateDirectory(Path.Combine(mods, "TexPack", "meshes", "n")); File.WriteAllText(Path.Combine(mods, "TexPack", "meshes", "n", "shared.nif"), "tex");
+        // the newcomer spread over two enabled folders: NewcomerMain ships a losing copy of N.esp and a loose mesh only
+        // it has; B15 provides that mesh too, so B15 is a candidate only if NewcomerMain counts as part of the newcomer
+        Directory.CreateDirectory(Path.Combine(mods, "NewcomerMain", "meshes", "n"));
+        File.Copy(nPath, Path.Combine(mods, "NewcomerMain", "N.esp"));
+        File.WriteAllText(Path.Combine(mods, "NewcomerMain", "meshes", "n", "main.nif"), "main");
+        var b15 = M("B15"); b15.MiscItems.Add(new MiscItem(K(b15, 0x800), Rel) { EditorID = "B15Misc" }); Write(b15, "B15");
+        Directory.CreateDirectory(Path.Combine(mods, "B15", "meshes", "n")); File.WriteAllText(Path.Combine(mods, "B15", "meshes", "n", "main.nif"), "b15");
         // a newcomer mastering a plugin no order loads (written against a temporary Missing.esp, then deleted)
         var missKey = new ModKey("Missing", ModType.Plugin);
         var miss = new SkyrimMod(missKey, Rel); miss.MiscItems.Add(new MiscItem(new FormKey(missKey, 0x800), Rel));
@@ -157,8 +164,8 @@ static class SelfTest
         }
 
         var order = new[] { "Base.esm", "Lib.esp", "N.esp", "N - Bpk patch.esp", "Dep.esp", "Dep2.esp", "B1.esp", "B2.esp", "B3.esp", "B4.esp",
-                            "B5.esp", "B6.esp", "B7.esp", "B8.esp", "B9.esp", "B10.esp", "B11.esp", "B12.esp", "B13.esp", "B14.esp", "Bpk.esp", "Bad.esp" };
-        var folders = new[] { "Newcomer", "Lib", "Dep", "Dep2", "B1", "B2", "B3", "B4", "B5", "B6", "B7", "B8", "B9", "B10", "B11", "B12", "B13", "B14", "Bpk", "Bad", "TexPack" };
+                            "B5.esp", "B6.esp", "B7.esp", "B8.esp", "B9.esp", "B10.esp", "B11.esp", "B12.esp", "B13.esp", "B14.esp", "Bpk.esp", "Bad.esp", "B15.esp" };
+        var folders = new[] { "Newcomer", "NewcomerMain", "Lib", "Dep", "Dep2", "B1", "B2", "B3", "B4", "B5", "B6", "B7", "B8", "B9", "B10", "B11", "B12", "B13", "B14", "Bpk", "Bad", "TexPack", "B15" };
         File.WriteAllLines(Path.Combine(profileDir, "modlist.txt"), new[] { "# generated" }.Concat(folders.Select(f => "+" + f)).Append("-Orphan"));
         File.WriteAllLines(Path.Combine(profileDir, "loadorder.txt"), new[] { "# generated" }.Concat(order));
         File.WriteAllLines(Path.Combine(profileDir, "plugins.txt"), new[] { "# generated" }.Concat(order.Select(o => "*" + o)));
@@ -192,7 +199,10 @@ static class SelfTest
         Check("B13 nothing in common -> left out", Why("B13.esp") == "nothing in common", Why("B13.esp"));
         Check("Bpk: the packaged patch does not vote", Why("Bpk.esp") == "nothing in common", Why("Bpk.esp"));
         Check("Base.esm -> left out as base game", Why("Base.esm").StartsWith("base game"), Why("Base.esm"));
-        Check("exactly the eight expected candidates", cands.Keys.OrderBy(x => x).SequenceEqual(new[] { "B1.esp", "B2.esp", "B3.esp", "B4.esp", "B5.esp", "B7.esp", "B8.esp", "B9.esp" }),
+        Check("B15 shares a path with the newcomer's second folder -> assets", Kinds("B15.esp") == "assets", Kinds("B15.esp"));
+        var companions = j["newcomer"]!["companionFolders"]?.AsArray().Select(x => (string)x!).ToList() ?? new List<string>();
+        Check("the second folder is the newcomer's companion", companions.Count == 1 && companions[0].EndsWith("NewcomerMain"), string.Join(", ", companions));
+        Check("exactly the nine expected candidates", cands.Keys.OrderBy(x => x).SequenceEqual(new[] { "B1.esp", "B15.esp", "B2.esp", "B3.esp", "B4.esp", "B5.esp", "B7.esp", "B8.esp", "B9.esp" }),
               string.Join(", ", cands.Keys.OrderBy(x => x)));
         var deps = j["dependencies"]!.AsArray().Select(d => (string)d!["plugin"]!).ToList();
         Check("dependencies = Lib.esp", deps.SequenceEqual(new[] { "Lib.esp" }), string.Join(", ", deps));
@@ -202,7 +212,7 @@ static class SelfTest
         Check("packaged patches = N - Bpk patch.esp", packaged.SequenceEqual(new[] { "N - Bpk patch.esp" }), string.Join(", ", packaged));
         var nplug = j["newcomer"]!["plugins"]!.AsArray().Select(d => (string)d!["name"]!).ToList();
         Check("newcomer plugins = N.esp only", nplug.SequenceEqual(new[] { "N.esp" }), string.Join(", ", nplug));
-        Check("newcomer assets = 2 (root file and fomod/ are not assets)", (int)j["newcomer"]!["assets"]! == 2, j["newcomer"]!["assets"]!.ToJsonString());
+        Check("newcomer assets = 3 (two folders; root file and fomod/ are not assets)", (int)j["newcomer"]!["assets"]! == 3, j["newcomer"]!["assets"]!.ToJsonString());
         var unread = j["unreadable"]!.AsArray().Select(d => (string)d!["plugin"]!).ToList();
         Check("Bad.esp named unreadable; result incomplete", unread.SequenceEqual(new[] { "Bad.esp" }) && (bool)j["incomplete"]!, $"{string.Join(", ", unread)}; incomplete {j["incomplete"]}");
         var assetOnly = j["assetOnlyFolders"]!.AsArray().Select(d => (string)d!["folder"]!).ToList();
