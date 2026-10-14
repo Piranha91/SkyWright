@@ -245,7 +245,7 @@
    "detailContains": ["Supplied Patch A", "Supplied Patch A copy"]
   },
   "rule": "D2: hashes equal but the path different after normalisation (separators, case) is ACCEPTED with an identityLimits row {plugin, recordedSha256, plannedPath, emitPath, detail} saying the emit read an identical copy elsewhere — loud in the receipt, not a rejection, because the binding is to content.",
-  "rulingApplied": "A-5 / finding F3 (coordinator, 2026-09-12): that sentence had no firing-direction coverage — the two fixture folders carry DIFFERENT bytes by design, so deleting the whole branch left case 16 green. The lab's real shape is identical bytes in two folders (the combo patch at modlist lines 58 and 72), which is exactly this arm.",
+  "rulingApplied": "A-5 / finding F3 (coordinator, 2026-09-12): that sentence had no firing-direction coverage — the two fixture folders carry DIFFERENT bytes by design, so deleting the whole branch left case 16 green. The real shape seen in an instance is identical bytes in two folders (one combo patch installed twice), which is exactly this arm.",
   "whyNotAMismatch": "the wrong-copy step above is the same damage with different bytes and is a rejection. The pair is what shows the rule turning on content rather than on the path."
  },
 
