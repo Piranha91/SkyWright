@@ -297,6 +297,17 @@ def case_29_a_rotation_a_full_turn_apart_is_the_same_rotation():
     base_ = ref(**{"Placement.Rotation": "-0.6104,-0.148,6.2094"})
     a = ref(**{"Placement.Rotation": "0.5,-0.148,6.2094"})
     b = ref(**{"Placement.Rotation": "0.5000001,6.1351853,-0.0737853"})
+    # and the Group 6 case: -1.7884 stored by a patch as 4.4947, a ten-thousandth of a radian off a full turn
+    with tempfile.TemporaryDirectory() as td:
+        emit2, _ = rows_of(three("000802:Skyrim.esm", ref(**{"Placement.Rotation": "0.5,-0.148,6.2094"}),
+                                 ref(**{"Placement.Rotation": "-1.7884,-0.148,6.2094",
+                                                                     "LocationReference": "0A0001:ModA.esp"}),
+                                 ref(**{"Placement.Rotation": "4.4947,-0.148,6.2094",
+                                        "LocationReference": "0B0001:ModB.esp"})), Path(td))
+    assert [c["Field"] for c in conflicts(emit2)] == ["LocationReference"], conflicts(emit2)
+    base_ = ref(**{"Placement.Rotation": "-0.6104,-0.148,6.2094"})
+    a = ref(**{"Placement.Rotation": "0.5,-0.148,6.2094"})
+    b = ref(**{"Placement.Rotation": "0.5000001,6.1351853,-0.0737853"})
     with tempfile.TemporaryDirectory() as td:
         emit, _ = rows_of(three("000801:Skyrim.esm", base_, a, b), Path(td))
     assert conflicts(emit) == [], conflicts(emit)

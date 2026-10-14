@@ -273,14 +273,15 @@ TWO_PI = 2 * math.pi
 
 
 def _angle(v: str) -> str:
-    """Radians compared modulo a full turn: -0.6104 and 5.6728 are one rotation."""
+    """Radians compared modulo a full turn (-0.6104 and 5.6728 are one rotation), at three decimals: a patch that
+    stores -1.7884 as 4.4947 (one ten-thousandth of a radian off a full turn) has not turned anything."""
     out = []
     for p in str(v).split(","):
         try:
-            x = round(float(p) % TWO_PI, 4)
+            x = round(float(p) % TWO_PI, 3)
         except ValueError:
             return _norm(v)
-        out.append("0" if x == 0 or abs(x - round(TWO_PI, 4)) < 1e-4 else f"{x:.4f}".rstrip("0").rstrip("."))
+        out.append("0" if x == 0 or abs(x - round(TWO_PI, 3)) < 1e-3 else f"{x:.3f}".rstrip("0").rstrip("."))
     return ",".join(out)
 
 
