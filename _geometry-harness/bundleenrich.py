@@ -137,7 +137,9 @@ class Reader:
     """One MCP server process spoken to over stdio, every message kept for the transcript."""
 
     def __init__(self, cmd: str, env: dict):
-        self.p = subprocess.Popen(shlex.split(cmd, posix=os.name != "nt"), stdin=subprocess.PIPE,
+        argv = [t[1:-1] if len(t) > 1 and t[0] == t[-1] == '"' else t
+                for t in shlex.split(cmd, posix=os.name != "nt")]
+        self.p = subprocess.Popen(argv, stdin=subprocess.PIPE,
                                   stdout=subprocess.PIPE, text=True, encoding="utf-8", env={**os.environ, **env})
         self.req, self.resp, self.n = [], [], 0
         self.call("initialize", {"protocolVersion": "2025-06-18", "capabilities": {},
@@ -167,6 +169,23 @@ class Reader:
             self.p.wait(timeout=30)
         except (OSError, subprocess.TimeoutExpired):
             self.p.kill()
+
+
+def private_instance(root: Path) -> dict:
+    """An instance with one header-only plugin active and nothing else, so every record read by absolute path is an
+    off-order read of the file at that path (never the instance's active copy of a same-named plugin). Returns the
+    reader's environment."""
+    import struct
+    for sub in ("data", "Data", "mods", "profile"):
+        (root / sub).mkdir(parents=True, exist_ok=True)
+    hedr = b"HEDR" + struct.pack("<H", 12) + struct.pack("<fiI", 1.71, 0, 0x800)
+    (root / "Data" / "PrivateInstanceAnchor.esp").write_bytes(
+        b"TES4" + struct.pack("<IIIIHH", len(hedr), 0, 0, 0, 44, 0) + hedr)
+    (root / "profile" / "plugins.txt").write_text("*PrivateInstanceAnchor.esp" + chr(10), encoding="utf-8")
+    (root / "profile" / "loadorder.txt").write_text("PrivateInstanceAnchor.esp" + chr(10), encoding="utf-8")
+    (root / "profile" / "modlist.txt").write_text("", encoding="utf-8")
+    return {"HOUSECARL_DATA_DIR": str(root / "data"), "HouseCarl__DataDir": str(root / "Data"),
+            "HouseCarl__ModsDir": str(root / "mods"), "HouseCarl__ProfileDir": str(root / "profile")}
 
 
 def _catalogue_name(nexus_id) -> tuple[str | None, dict | None]:
@@ -223,7 +242,10 @@ def enrich_names(d: Path, reader_cmd: str, mod_names: dict, reader_env: dict | N
             raise Refused(f"{x.get('name')} is not on disk at the path the plan records ({x.get('path')})")
         if sha(path) != str(x.get("sha256") or "").lower():
             raise Refused(f"{x.get('name')} at {path} does not hash to the sha256 the plan records, so it is not read")
-    reader = Reader(reader_cmd, reader_env or {})
+    import tempfile
+    tmp = tempfile.TemporaryDirectory(prefix="enrich-names-")
+    env = reader_env or private_instance(Path(tmp.name))
+    reader = Reader(reader_cmd, env)
     found, bases = {}, {}
     try:
         def read(x, wanted, fields):
@@ -256,6 +278,7 @@ def enrich_names(d: Path, reader_cmd: str, mod_names: dict, reader_env: dict | N
                                             "name": fl.get("Name"), "from": x["name"]}
     finally:
         reader.close()
+        tmp.cleanup()
     places, objects, missing = {}, {}, []
     for fk, editor in cells.items():
         r = found.get(fk) or {}
