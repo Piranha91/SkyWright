@@ -109,4 +109,45 @@ public static class SwitchFixture
                 (InstructionOpcode.CALLMETHOD, new[] { PexWriter.Id("Disable"), PexWriter.Id("::Gate_var"), PexWriter.Id("::NoneVar"), PexWriter.Int(0) })) });
         return new Written(new[] { mPath, qPath, rPath }, mods);
     }
+
+    // THE COPIED-RULES ADDITION (copied-rules task, 2026-10-15): one more plugin after the three above, written by its own
+    // method so their bytes do not change. SwCr.esp (masters SwMaster.esm) places markers M6-M8 in SC1, each the XESP
+    // parent of one child, and quest SwCrQ whose aliases Door, Gate7, Gate8 are forced to M6, M7, M8. Its script SwCrScript
+    // has Fragment_0 at stage 10: Alias_Door.TryToEnable(), Alias_Gate7.EnableLinkChain(), Alias_Gate8.TryToDisableNoWait().
+    public static readonly ModKey CrKey = new("SwCr", ModType.Plugin);
+    public static readonly FormKey M6 = new(CrKey, 0x906), M7 = new(CrKey, 0x907), M8 = new(CrKey, 0x908),
+        F6 = new(CrKey, 0x916), F7 = new(CrKey, 0x917), F8 = new(CrKey, 0x918), CrQ = new(CrKey, 0x800);
+    public const string CrScript = "SwCrScript";
+
+    /// <summary>Write SwCr.esp into <paramref name="dir"/> (which must already hold SwMaster.esm from <see cref="Write"/>)
+    /// and its script under dir\mods\SwCr\Scripts. Returns the plugin's path.</summary>
+    public static string WriteCopiedRules(string dir)
+    {
+        using var mOv = SkyrimMod.CreateFromBinaryOverlay(Path.Combine(dir, MasterKey.FileName.String), Rel);
+        var cm = new SkyrimMod(CrKey, Rel);
+        var c = Cell();
+        foreach (var (k, ch, x, e) in new[] { (M6, F6, 700f, "SwGate6"), (M7, F7, 800f, "SwGate7"), (M8, F8, 900f, "SwGate8") })
+        { c.Temporary.Add(Ref(k, Marker, x, e)); c.Temporary.Add(Ref(ch, Thing, x + 10, parent: k)); }
+        MovedRefFixture.FileInterior(cm, c);
+        var quest = new Quest(CrQ, Rel) { EditorID = "SwCrQ" };
+        foreach (var (id, name, fk) in new[] { (0u, "Door", M6), (1u, "Gate7", M7), (2u, "Gate8", M8) })
+            quest.Aliases.Add(new QuestAlias { ID = id, Name = name, ForcedReference = new FormLinkNullable<IPlacedGetter>(fk) });
+        var qa = new QuestAdapter { FileName = CrScript };
+        qa.Scripts.Add(new ScriptEntry { Name = CrScript });
+        qa.Fragments.Add(new QuestScriptFragment { Stage = 10, StageIndex = 0, ScriptName = CrScript, FragmentName = "Fragment_0" });
+        quest.VirtualMachineAdapter = qa;
+        cm.Quests.Add(quest);
+        var path = Path.Combine(dir, cm.ModKey.FileName.String);
+        cm.BeginWrite.ToPath(path).WithLoadOrder(mOv).Write();
+
+        var scripts = Path.Combine(dir, "mods", CrKey.Name, "Scripts");
+        Directory.CreateDirectory(scripts);
+        var none = new[] { ("None", "::NoneVar") };
+        static (InstructionOpcode, PexObjectVariableData[]) Call(string name, string obj) => (InstructionOpcode.CALLMETHOD, new[] { PexWriter.Id(name), PexWriter.Id(obj), PexWriter.Id("::NoneVar"), PexWriter.Int(0) });
+        PexWriter.WritePex(Path.Combine(scripts, CrScript + ".pex"), CrScript, "Quest",
+            new[] { PexWriter.AutoObj("Alias_Door", "ReferenceAlias"), PexWriter.AutoObj("Alias_Gate7", "ReferenceAlias"), PexWriter.AutoObj("Alias_Gate8", "ReferenceAlias") },
+            new[] { PexWriter.Function("Fragment_0", none,
+                Call("TryToEnable", "::Alias_Door_var"), Call("EnableLinkChain", "::Alias_Gate7_var"), Call("TryToDisableNoWait", "::Alias_Gate8_var")) });
+        return path;
+    }
 }

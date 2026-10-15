@@ -45,5 +45,6 @@
     <Compile Include="..\_shared\StationGround.cs" Link="StationGround.cs" />
     <Compile Include="..\_shared\StationLookup.cs" Link="StationLookup.cs" />
     <Compile Include="..\_shared\CellBoundaryIndex.cs" Link="CellBoundaryIndex.cs" />
+    <Compile Include="..\_shared\BaseGamePlugins.cs" Link="BaseGamePlugins.cs" />
   </ItemGroup>
 </Project>

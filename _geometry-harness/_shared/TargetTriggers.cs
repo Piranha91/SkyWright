@@ -28,8 +28,8 @@ namespace HarnessShared;
 //   R7  every .pex in the view that names GetFormFromFile, decompiled; a target's plugin name with its file-local id is a lead
 //   R8  residual classes, listed never cleared: console, SKSE DLLs in the view, runtime-filled quest aliases naming a target's
 //       base or location ref type, scripts that walk references (GetNthRef / Find*ReferenceOfType)
-// A bound script is decompiled with core's PapyrusDecompiler; its calls are classified by TargetScriptCalls (switchprobe's
-// ScriptCalls rules with the call name kept, plus EnableLinkChain / DisableLinkChain and TryToEnable / TryToDisable).
+// A bound script is decompiled with core's PapyrusDecompiler; its calls are read by ScriptFlipCalls (_shared, shared with
+// switchprobe): the flips (Enable / Disable, TryToEnable / TryToDisable, their NoWait forms) and EnableLinkChain / DisableLinkChain.
 // Engine fact used: Papyrus Enable / Disable on an enable-parented reference is inert, so a node with a parent changes state
 // only through its parent.
 //
@@ -220,10 +220,10 @@ public static class TargetTriggers
             if (b.Script.Length == 0) { row.Status = "BOUND, NO SCRIPT"; classified.Add(row); continue; }
             var (src, failed, why) = Decompile(b.Script);
             if (src is null) { row.Status = "UNREAD"; row.Why = why; classified.Add(row); continue; }
-            var calls = TargetScriptCalls.Parse(src).CallsOn(b.Property).ToList();
+            var calls = ScriptFlipCalls.Parse(src).CallsOn(b.Property).ToList();
             row.Calls = calls.Select(c => $"{c.Function}: {c.Text}").ToList();
-            row.Enables = calls.Any(c => c.Call is "enable" or "enablenowait" or "trytoenable" or "trytoenablenowait");
-            row.Disables = calls.Any(c => c.Call is "disable" or "disablenowait" or "trytodisable" or "trytodisablenowait");
+            row.Enables = calls.Any(c => ScriptFlipCalls.Enables(c.Call));
+            row.Disables = calls.Any(c => ScriptFlipCalls.Disables(c.Call));
             row.EnablesLinkChain = calls.Any(c => c.Call == "enablelinkchain");
             row.DisablesLinkChain = calls.Any(c => c.Call == "disablelinkchain");
             if (b.Via.Contains("FormList")) row.Status = "BOUND, LIST NOT DECODED";
@@ -425,70 +425,5 @@ public static class TargetTriggers
         public List<int>? Stages;
         public bool Enables, Disables, EnablesLinkChain, DisablesLinkChain;
         public object ToJson() => new { record = B.Record.ToString(), kind = B.Kind, script = B.Script, property = B.Property, target = B.Switch.ToString(), via = B.Via, alias = B.AliasName, status = Status, why = Why, calls = Calls, stages = Stages };
-    }
-}
-
-/// <summary>switchprobe's ScriptCalls rules with the call name kept as a group and the call set extended by
-/// EnableLinkChain / DisableLinkChain and ReferenceAlias.TryToEnable / TryToDisable (NoWait).</summary>
-public sealed class TargetScriptCalls
-{
-    public readonly List<(string Function, string Object, string Call, string Text)> Calls = new();
-    const string Names = "TryToEnableNoWait|TryToDisableNoWait|TryToEnable|TryToDisable|EnableLinkChain|DisableLinkChain|EnableNoWait|DisableNoWait|Enable|Disable";
-    static readonly Regex Header = new(@"^\s*(?:[\w\[\]:]+\s+)?(?:Function|Event)\s+([\w:]+)\s*\(", RegexOptions.Compiled | RegexOptions.IgnoreCase);
-    static readonly Regex End = new(@"^\s*End(?:Function|Event)\b", RegexOptions.Compiled | RegexOptions.IgnoreCase);
-    static readonly Regex Call = new(@"(?<![\w.])(?:Self\.)?(?<obj>[A-Za-z_]\w*)(?:\[[^\]]*\])?(?:\.(?:GetReference|GetRef)\(\))?\.(?<call>" + Names + @")\s*\(", RegexOptions.Compiled | RegexOptions.IgnoreCase);
-    static readonly Regex LinkedCall = new(@"(?<![\w.])(?:Self\.)?GetLinkedRef\([^)]*\)\.(?<call>" + Names + @")\s*\(", RegexOptions.Compiled | RegexOptions.IgnoreCase);
-    static readonly Regex SelfCallRx = new(@"(?<![\w.])(?:Self\.)?(?<call>" + Names + @")\s*\(", RegexOptions.Compiled | RegexOptions.IgnoreCase);
-    static readonly Regex Alias = new(@"^\s*(?:[\w\[\]:]+\s+)?(?<local>[A-Za-z_]\w*)\s*=\s*(?<src>[A-Za-z_]\w*)(?:\[[^\]]*\])?\s*$", RegexOptions.Compiled | RegexOptions.IgnoreCase);
-    static readonly Regex Raw = new(@"^\s*;\s+CallMethod\s+(?<call>" + Names + @")\s+(?<obj>\S+)", RegexOptions.Compiled | RegexOptions.IgnoreCase);
-
-    public static TargetScriptCalls Parse(string source)
-    {
-        var sc = new TargetScriptCalls();
-        string fn = "(top)";
-        var alias = new Dictionary<string, HashSet<string>>(StringComparer.OrdinalIgnoreCase);
-        IEnumerable<string> Resolve(string obj)
-        {
-            var frontier = new List<string> { obj };
-            for (int hop = 0; hop < 3; hop++)
-            {
-                var next = new List<string>();
-                foreach (var o in frontier)
-                    if (alias.TryGetValue(o, out var srcs)) foreach (var src in srcs) if (!string.Equals(src, o, StringComparison.OrdinalIgnoreCase)) next.Add(src);
-                if (next.Count == 0) break;
-                frontier = next;
-            }
-            return frontier.Distinct(StringComparer.OrdinalIgnoreCase);
-        }
-        foreach (var raw in source.Split('\n'))
-        {
-            var line = raw.TrimEnd('\r');
-            var h = Header.Match(line);
-            if (h.Success) { fn = h.Groups[1].Value; alias.Clear(); continue; }
-            if (End.IsMatch(line)) { fn = "(top)"; alias.Clear(); continue; }
-            int semi = line.IndexOf(';');
-            var code = semi >= 0 && !line.TrimStart().StartsWith(";") ? line[..semi] : line;
-            var a = Alias.Match(code);
-            if (a.Success && !a.Groups["src"].Value.Equals("None", StringComparison.OrdinalIgnoreCase))
-            {
-                if (!alias.TryGetValue(a.Groups["local"].Value, out var set)) alias[a.Groups["local"].Value] = set = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-                set.Add(a.Groups["src"].Value);
-            }
-            bool any = false;
-            foreach (Match m in Call.Matches(code))
-            { foreach (var obj in Resolve(m.Groups["obj"].Value)) sc.Calls.Add((fn, obj, m.Groups["call"].Value.ToLowerInvariant(), m.Value.Trim())); any = true; }
-            foreach (Match m in LinkedCall.Matches(code))
-            { sc.Calls.Add((fn, "GetLinkedRef", m.Groups["call"].Value.ToLowerInvariant(), m.Value.Trim())); any = true; }
-            var r = Raw.Match(line);
-            if (r.Success) sc.Calls.Add((fn, r.Groups["obj"].Value.Trim(':'), r.Groups["call"].Value.ToLowerInvariant(), "raw bytecode " + r.Value.Trim().TrimStart(';').Trim()));
-            if (!any && SelfCallRx.Match(code) is { Success: true } sm) sc.Calls.Add((fn, "Self", sm.Groups["call"].Value.ToLowerInvariant(), "Self." + sm.Groups["call"].Value + "()"));
-        }
-        return sc;
-    }
-
-    public IEnumerable<(string Function, string Call, string Text)> CallsOn(string property)
-    {
-        foreach (var (fn, obj, call, text) in Calls)
-            if (string.Equals(obj, property, StringComparison.OrdinalIgnoreCase)) yield return (fn, call, text);
     }
 }

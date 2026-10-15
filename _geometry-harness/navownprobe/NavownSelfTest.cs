@@ -179,7 +179,7 @@ static class NavownSelfTest
             var o6 = Order(6);
             var clob = ClobberFindings.Find(o6.Versions.Providers, o6.Closure, o6.Versions.Size, _ => true);
             ClobberPopulation PopOf((FormKey Nav, int Loser, int Winner, int LoserT, int WinnerT, bool Material) c)
-                => ClobberFindings.Population(o6.Names[c.Loser], o6.Names[c.Winner], ClobberFindings.Vanilla);
+                => ClobberFindings.Population(o6.Names[c.Loser], o6.Names[c.Winner], BaseGamePlugins.Names);
             string Row((FormKey Nav, int Loser, int Winner, int LoserT, int WinnerT, bool Material) c)
                 => $"{NvName(c.Nav)} {o6.Names[c.Loser]}->{o6.Names[c.Winner]}";
 
@@ -200,8 +200,8 @@ static class NavownSelfTest
                     pops.SequenceEqual(new[] { "NFWD:ModOnMod", "NMOD:ModOnMod", "NNEAR:ModOnMod", "NUS:UssepDiscarded", "NVAN:BethesdaFloor" }),
                     string.Join(", ", pops));
             t.Check("PD-N2 file names match whatever their letter case: dawnguard.esm x HEARTHFIRES.ESM is the floor; a lower-case USSEP loser is USSEP's",
-                    ClobberFindings.Population("dawnguard.esm", "HEARTHFIRES.ESM", ClobberFindings.Vanilla) == ClobberPopulation.BethesdaFloor
-                    && ClobberFindings.Population("unofficial skyrim special edition patch.esp", "NvB.esp", ClobberFindings.Vanilla) == ClobberPopulation.UssepDiscarded,
+                    ClobberFindings.Population("dawnguard.esm", "HEARTHFIRES.ESM", BaseGamePlugins.Names) == ClobberPopulation.BethesdaFloor
+                    && ClobberFindings.Population("unofficial skyrim special edition patch.esp", "NvB.esp", BaseGamePlugins.Names) == ClobberPopulation.UssepDiscarded,
                     "");
 
             // PD-N3: the physical predicate.
@@ -260,7 +260,7 @@ static class NavownSelfTest
             // PD-N6: a dangle with only vanilla-named plugins on both ends is the floor, withheld; the rest are findings.
             bool Touched(FormKey rec, string role) => DanglingLinks.ModTouched(
                 role == "navmesh" ? o6.Versions.Providers.GetValueOrDefault(rec) : l6.RefOverriders.GetValueOrDefault(rec),
-                i => ClobberFindings.Vanilla.Contains(o6.Names[i]));
+                i => BaseGamePlugins.Names.Contains(o6.Names[i]));
             var emitted = f6.Rows.Where(r => DanglingLinks.IsFinding(Touched(r.Rec, r.RecRole), Touched(r.Other, r.OtherRole)))
                                  .Select(r => $"{r.Kind} {Id(r.Rec)}").OrderBy(x => x).ToList();
             t.Check("PD-N6 emitted dangles: all but VF->VT (Dawnguard.esm on both ends)",

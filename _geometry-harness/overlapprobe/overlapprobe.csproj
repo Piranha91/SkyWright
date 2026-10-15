@@ -19,6 +19,10 @@
     <Compile Include="..\_shared\HarnessTarget.cs" Link="HarnessTarget.cs" />
     <Compile Include="..\_shared\ConflictReport.cs" Link="ConflictReport.cs" />
     <Compile Include="..\_shared\DetectorModel.cs" Link="DetectorModel.cs" />
+    <Compile Include="..\_shared\ProbeSelfTest.cs" Link="ProbeSelfTest.cs" />
+    <Compile Include="..\_shared\MovedRefFixture.cs" Link="MovedRefFixture.cs" />
+    <Compile Include="..\_shared\BaseGameFixture.cs" Link="BaseGameFixture.cs" />
+    <Compile Include="..\_shared\BaseGamePlugins.cs" Link="BaseGamePlugins.cs" />
     <Compile Include="..\_shared\SyntheticOrder.cs" Link="SyntheticOrder.cs" />
     <Compile Include="..\_shared\HarnessOrderCli.cs" Link="HarnessOrderCli.cs" />
     <Compile Include="..\_shared\Configuration.cs" Link="Configuration.cs" />
