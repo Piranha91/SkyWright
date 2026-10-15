@@ -33,5 +33,13 @@ static class BlockRouteSelfTest
         t.Check("PD3-K-F2 the target's cells are I1 and I2, and Rm's winning cell is I2",
                 targets.Count == 2 && walk.WinRefCell.TryGetValue(F.Rm, out var rc) && rc == F.I2,
                 walk.WinRefCell.TryGetValue(F.Rm, out var rc2) ? rc2.ToString() : "absent");
+
+        // Which of the target's references are judged in which cell (RefAdmission.Winning).
+        string Judged(FormKey k, FormKey cell) => RefAdmission.Winning(k, cell, walk.WinRef, walk.WinRefCell) is { } r ? $"at {r.Position.X:0},{r.Position.Y:0}" : "not judged";
+        t.Check("PD3-K-1 Rm, moved to I2 by BkMover, is not judged in I1, the cell it left",
+                Judged(F.Rm, F.I1) == "not judged", Judged(F.Rm, F.I1));
+        t.Check("PD3-K-1b Rm is judged in I2 at its winning place; Dr, Ms and Sx in I1 at theirs",
+                Judged(F.Rm, F.I2) == "at 0,400" && Judged(F.Dr, F.I1) == "at -400,0" && Judged(F.Ms, F.I1) == "at 0,0" && Judged(F.Sx, F.I1) == "at 400,0",
+                $"{Judged(F.Rm, F.I2)} / {Judged(F.Dr, F.I1)} / {Judged(F.Ms, F.I1)} / {Judged(F.Sx, F.I1)}");
     });
 }

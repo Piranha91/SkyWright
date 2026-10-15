@@ -459,9 +459,7 @@ foreach (var (cellKey, tcell) in targetCells)
     {
         // Test the WINNING placement — if a later patch moved or removed this reference,
         // the target's own copy is not what the game uses.
-        if (!winRef.TryGetValue(tref.FormKey, out var r)) { skipped++; continue; }
-        if (winRefCell.TryGetValue(tref.FormKey, out var wc) && wc != cellKey) { skipped++; continue; }
-        if (r.Deleted) { skipped++; continue; }
+        if (RefAdmission.Winning(tref.FormKey, cellKey, winRef, winRefCell) is not { } r) { skipped++; continue; }
         // The Base Object Swapper layer: the base and transform the game LOADS for this reference (the record's own under
         // --bos off).
         var eff = bos.Effective(r, cellKey, bosRep);
