@@ -164,12 +164,9 @@ Console.WriteLine($"\nindexed {idx.Placements:N0} placements over {idx.History.C
 Console.WriteLine($"   plugins that could not be read (contribute nothing, counted per rule 6): {unreadable.Count:N0}"
                 + (unreadable.Count > 0 ? "  — " + string.Join(", ", unreadable) : ""));
 
-var Vanilla = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
-{ "Skyrim.esm", "Update.esm", "Dawnguard.esm", "HearthFires.esm", "Dragonborn.esm", "SkyrimVR.esm", "_ResourcePack.esl" };
-const string Ussep = "Unofficial Skyrim Special Edition Patch.esp";
 string PluginName(int p) => p < 0 ? "(none)" : p == bosPlugin ? BosApplyReport.PseudoPluginName : pluginKey[p].FileName.String;
-bool IsVanilla(int p) => p >= 0 && Vanilla.Contains(PluginName(p));
-bool IsUssep(int p) => p >= 0 && string.Equals(PluginName(p), Ussep, StringComparison.OrdinalIgnoreCase);
+bool IsVanilla(int p) => p >= 0 && BaseGamePlugins.IsBaseGame(PluginName(p));   // _shared/BaseGamePlugins.cs
+bool IsUssep(int p) => p >= 0 && BaseGamePlugins.IsUssep(PluginName(p));
 string ClassOf(int p) => IsVanilla(p) ? "Bethesda" : IsUssep(p) ? "USSEP" : "mod";
 string CellOf(FormKey c) => idx.CellName.TryGetValue(c, out var v) ? (v.Edid ?? c.ToString()) + (v.Interior ? " (int)" : " (ext)") : c.ToString();
 string RefLabel(FormKey k)
