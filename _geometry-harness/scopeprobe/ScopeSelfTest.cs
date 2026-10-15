@@ -20,14 +20,18 @@ static class ScopeSelfTest
         t.Check("PD2-F0 the fixtures write: MovedRefFixture, the broken MrA copy, the door plugin",
                 mr.All(File.Exists) && File.Exists(broken) && File.Exists(door), string.Join(", ", mr.Append(broken).Append(door).Select(Path.GetFileName)));
 
-        FootprintLists WalkOf(params (string Name, string Path)[] targets)
+        // The configuration holds the targets and MrMaster.esm, the master MrA.esp and the broken copy name: a walk
+        // checks a target's masters against the configuration, so a case about something else loads them.
+        var master = mr.Single(p => Path.GetFileName(p) == "MrMaster.esm");
+        FootprintLists WalkIn(IEnumerable<(string Name, string Path)> others, params (string Name, string Path)[] targets)
         {
-            var byName = targets.Where(x => x.Path != "").ToDictionary(x => x.Name, x => Plugin(x.Name, x.Path), StringComparer.OrdinalIgnoreCase);
+            var byName = targets.Concat(others).Where(x => x.Path != "").ToDictionary(x => x.Name, x => Plugin(x.Name, x.Path), StringComparer.OrdinalIgnoreCase);
             var o = new FootprintLists();
             foreach (var (name, _) in targets)
                 TargetFootprint.Walk(name, byName, byName.Count, "self-test", new Dictionary<string, string>(), t.Root, t.Root, 50, o);
             return o;
         }
+        FootprintLists WalkOf(params (string Name, string Path)[] targets) => WalkIn(new[] { ("MrMaster.esm", master) }, targets);
 
         // PD2-S1: completeness and the exit code.
         var good = WalkOf(("MrA.esp", mrA));
@@ -45,9 +49,26 @@ static class ScopeSelfTest
         // PD2-S2: a target holding a record that cannot be read.
         var bad = WalkOf(("MrA.esp", broken));
         t.Check("PD2-S2 the broken MrA: no footprint, one walk failure naming MrA.esp, incomplete",
-                bad.Summaries.Count == 0 && bad.WalkFailures.Count == 1 && bad.WalkFailures[0].StartsWith("'MrA.esp' ")
+                bad.Summaries.Count == 0 && bad.WalkFailures.Count == 1 && bad.WalkFailures[0].StartsWith("'MrA.esp' could not be walked for its placements")
                 && !ScopeOutcome.Complete(bad.WalkFailures.Count, bad.Summaries.Count, 1),
                 string.Join(" | ", bad.WalkFailures) + $"; unreadable records {bad.UnreadableRecords.Count}");
+
+        // SS-1: a target whose master the configuration does not load. The game will not start on it, and records that
+        // override the master's cannot be told from new ones, so the footprint is not measured: one walk failure naming
+        // the target and the missing master, no footprint, the scope incomplete (exit 1).
+        var orphan = WalkIn(Array.Empty<(string, string)>(), ("MrA.esp", mrA));
+        t.Check("SS-1 MrA.esp without MrMaster.esm: one walk failure naming MrA.esp and MrMaster.esm, no footprint, incomplete",
+                orphan.Summaries.Count == 0 && orphan.WalkFailures.Count == 1 && orphan.WalkFailures[0].StartsWith("'MrA.esp' ")
+                && orphan.WalkFailures[0].Contains("'MrMaster.esm'")
+                && !ScopeOutcome.Complete(orphan.WalkFailures.Count, orphan.Summaries.Count, 1)
+                && ScopeOutcome.ExitCode(ScopeOutcome.Complete(orphan.WalkFailures.Count, orphan.Summaries.Count, 1)) == 1,
+                $"summaries {orphan.Summaries.Count}; " + string.Join(" | ", orphan.WalkFailures));
+        var withMaster = WalkIn(new[] { ("MrMaster.esm", master) }, ("MrA.esp", mrA));
+        t.Check("SS-1 control: MrA.esp with MrMaster.esm loaded (not a target): footprint measured, no walk failure",
+                withMaster.Summaries.Count == 1 && withMaster.WalkFailures.Count == 0, string.Join(" | ", withMaster.WalkFailures));
+        var masterOnly = WalkIn(Array.Empty<(string, string)>(), ("MrMaster.esm", master));
+        t.Check("SS-1 control: a master-less target (MrMaster.esm) alone: footprint measured, no walk failure",
+                masterOnly.Summaries.Count == 1 && masterOnly.WalkFailures.Count == 0, string.Join(" | ", masterOnly.WalkFailures));
 
         // PD2-S3: a refused configuration writes the REFUSED line and exits 2.
         var err = new StringWriter();
@@ -107,3 +128,4 @@ static class ScopeDoorFixture
         return path;
     }
 }
+

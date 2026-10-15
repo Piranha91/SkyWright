@@ -1,6 +1,7 @@
 using HarnessShared;
 using Mutagen.Bethesda.Plugins;
 using Mutagen.Bethesda.Skyrim;
+using Noggog;
 using F = HarnessShared.WaterFixture;
 
 // waterprobe --self-test: _shared/CellBoundaryFixture.cs WaterFixture written (PD_FIXTURE_KEEP keeps it for a probe run),
@@ -56,7 +57,45 @@ static class WaterSelfTest
         t.Check("PD2-W3 under WfFix: the seam rows naming C10 still read Holds (C10 still reverted)",
                 preds.Where(x => x.Kind == "WATER-SEAM").All(x => x.Physical == PhysicalState.Holds) && preds.Count(x => x.Kind == "WATER-SEAM") == rows.Count,
                 string.Join(", ", preds.Where(x => x.Kind == "WATER-SEAM").Select(x => $"{x.FormKey} {x.Physical}")));
+
+        HeightlessWinner(t);
     });
+
+    /// <summary>SS-2 (water side): Skyrim.esm with one watered cell (0,0) at height 100 over flat land at 0, and Hole.esp
+    /// overriding that cell's LAND with one that declares no heights (no VHGT, DATA flag clear). The winner's ground is
+    /// not Skyrim's: its visible share is not measured from Skyrim's heights.</summary>
+    static void HeightlessWinner(ProbeSelfTest t)
+    {
+        var dir = Path.Combine(t.Root, "ss2-hole"); Directory.CreateDirectory(dir);
+        var rel = SkyrimRelease.SkyrimSE;
+        var sky = new ModKey("Skyrim", ModType.Master); var hole = new ModKey("Hole", ModType.Plugin);
+        FormKey W = new(sky, 0x800), Top = new(sky, 0x801), C = new(sky, 0x900), L = new(sky, 0xA00);
+        SkyrimMod Mod(ModKey k, Landscape land)
+        {
+            var m = new SkyrimMod(k, rel);
+            var ws = new Worldspace(W, rel) { EditorID = "HoleWorld" };
+            ws.TopCell = new Cell(Top, rel) { Flags = default };
+            var cell = new Cell(C, rel) { EditorID = "H00", Flags = Cell.Flag.HasWater, Grid = new CellGrid { Point = new P2Int(0, 0) }, WaterHeight = 100f, Landscape = land };
+            var blk = new WorldspaceBlock { BlockNumberX = 0, BlockNumberY = 0, GroupType = GroupTypeEnum.ExteriorCellBlock };
+            var sub = new WorldspaceSubBlock { BlockNumberX = 0, BlockNumberY = 0, GroupType = GroupTypeEnum.ExteriorCellSubBlock };
+            sub.Items.Add(cell); blk.Items.Add(sub); ws.SubCells.Add(blk); m.Worldspaces.Add(ws);
+            return m;
+        }
+        var skyPath = Path.Combine(dir, "Skyrim.esm");
+        Mod(sky, new Landscape(L, rel) { VertexHeightMap = new LandscapeVertexHeightMap { Offset = 0f, HeightMap = new Array2d<sbyte>(new sbyte[33, 33]) } })
+            .BeginWrite.ToPath(skyPath).WithLoadOrder(Array.Empty<ISkyrimModGetter>()).Write();
+        var holePath = Path.Combine(dir, "Hole.esp");
+        using (var skyOv = SkyrimMod.CreateFromBinaryOverlay(skyPath, rel))
+            Mod(hole, new Landscape(L, rel)).BeginWrite.ToPath(holePath).WithLoadOrder(new[] { skyOv }).Write();
+        var (idx, _, byKey) = Judge(new List<string> { skyPath, holePath });
+        var row = byKey.TryGetValue(C, out var r) ? r : null;
+        var cell = idx.Cells[C];
+        var winnerNone = cell.GetType().GetProperty("LandWinnerDeclaresNone")?.GetValue(cell) as bool?;
+        t.Check("SS-2 water: Hole.esp's heightless LAND wins: the winner's visible share is not measured from Skyrim's heights",
+                row is not null && row.J.VisWin is null && row.J.VisTruth is not null && winnerNone == true,
+                row is null ? "no row" : $"visWin {row.J.VisWin?.ToString() ?? "null"}, visTruth {row.J.VisTruth?.ToString() ?? "null"}, "
+                + $"LandWinnerDeclaresNone {winnerNone?.ToString() ?? "no member"}");
+    }
 
     static string Name(FormKey k)
     {

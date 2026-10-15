@@ -35,6 +35,32 @@ static class SeamSelfTest
         t.Check("PD2-E5 S40|S50 at exactly eps (8 u) is measured and not a seam",
                 atEps is { Verdict: LandSeamVerdict.None } && atEps.MaxDelta == 8f, atEps is null ? "absent" : $"{atEps.Verdict} {atEps.MaxDelta}");
 
+        // SS-2: SeamA's S80 is a LAND override that declares no heights (no VHGT, DATA flag clear). The engine draws no
+        // ground there (LandHeight.LandKind.DeclaresNone), so Skyrim's heights are not the winner's: the index counts the
+        // statement, the cell's winner declares none, and its two edges (S70|S80, S80|S90) are counted as not measurable,
+        // not measured against Skyrim's heights. New members are read by name so this file compiles before they exist.
+        var (idxA, closureA, landCellsA) = Index(w.Order.ToList());
+        var s80 = idxA.Cells[F.C(8, 0)];
+        int? Member(object o, string name) => o.GetType().GetProperty(name)?.GetValue(o) is { } v ? Convert.ToInt32(v) : null;
+        var declared = Member(s80, "LandDeclaresNone");
+        var winnerNone = s80.GetType().GetProperty("LandWinnerDeclaresNone")?.GetValue(s80) as bool?;
+        var indexTotal = Member(idxA, "LandDeclaresNoneProvisions");
+        t.Check("SS-2 S80: SeamA's heightless LAND is counted (1 provision), the cell's winner declares no heights, index total 1",
+                declared == 1 && winnerNone == true && indexTotal == 1,
+                $"LandDeclaresNone {declared?.ToString() ?? "no member"}, LandWinnerDeclaresNone {winnerNone?.ToString() ?? "no member"}, "
+                + $"index {indexTotal?.ToString() ?? "no member"}; unreadable {s80.LandUnreadable}, statements {s80.Land.Count}");
+        var touching = pairs1.Where(p => Key(p) is "S70|S80" or "S80|S90").Select(p => $"{Key(p)} {p.Verdict} {p.MaxDelta}").ToList();
+        t.Check("SS-2 S70|S80 and S80|S90 are not measured against Skyrim's heights (no pair row)",
+                touching.Count == 0, string.Join(", ", touching));
+        object measured = SeamFindings.MeasurePairs(idxA, landCellsA, closureA, Eps, p => idxA.KindOf(p));
+        int? heightless = measured.GetType().GetField("Item3")?.GetValue(measured) is { } hv ? Convert.ToInt32(hv) : null;
+        t.Check("SS-2 the pass counts those two edges as not measurable: heightless 2",
+                heightless == 2, heightless?.ToString() ?? "no third element");
+        var s40 = idxA.Cells[F.C(4, 0)];
+        t.Check("SS-2 control: S40 (heights restated by SeamA) declares none 0, its winner has heights",
+                Member(s40, "LandDeclaresNone") == 0 && s40.GetType().GetProperty("LandWinnerDeclaresNone")?.GetValue(s40) as bool? == false,
+                $"{Member(s40, "LandDeclaresNone")?.ToString() ?? "no member"}");
+
         // Arm 2 re-measures arm 1's rows, shaped as the emit writes them (necessary = the later cell, alternative = the other).
         var baseRows = cls.Select(p => new Conflict("LAND-SEAM", "other", "later", Key(p),
             new List<ConflictRecord> { new(p.LaterCell.Key.ToString(), "cell", null) },
@@ -67,6 +93,13 @@ static class SeamSelfTest
     /// <summary>The order read as seamprobe's pass 1 reads it, then its pass 2 (SeamFindings.MeasurePairs).</summary>
     static List<Pair> Measure(List<string> paths)
     {
+        var (idx, closure, landCells) = Index(paths);
+        return SeamFindings.MeasurePairs(idx, landCells, closure, Eps, p => idx.KindOf(p)).Pairs;
+    }
+
+    /// <summary>The order read as seamprobe's pass 1 reads it: the index, the master closure, the LAND cells.</summary>
+    static (CellBoundaryIndex Idx, IReadOnlyList<HashSet<int>> Closure, List<CellInfo> LandCells) Index(List<string> paths)
+    {
         var idx = new CellBoundaryIndex();
         var keys = new ModKey[paths.Count];
         var masterIdx = new HashSet<int>[paths.Count];
@@ -80,6 +113,6 @@ static class SeamSelfTest
         }
         var closure = DetectorModel.MasterClosure(masterIdx);
         var landCells = idx.Cells.Values.Where(c => !c.Interior && c.GX != int.MinValue && c.Land.Count > 0).ToList();
-        return SeamFindings.MeasurePairs(idx, landCells, closure, Eps, p => idx.KindOf(p)).Pairs;
+        return (idx, closure, landCells);
     }
 }
