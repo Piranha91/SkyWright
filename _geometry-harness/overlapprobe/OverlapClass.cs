@@ -24,4 +24,10 @@ static class OverlapClass
         var inherited = provenanceRows.Where(r => r.Origin == OverlapOrigin.Inherited).ToList();
         return new(provenanceUnknown, provenanceRows, cls, floorRows, knowing, inherited);
     }
+
+    /// <summary>The candidate filter on the responsible plugin: a scene capture excludes nothing; a responsible-pair run
+    /// excludes every plugin outside its pairs; the default excludes the core masters (vanilla-vs-mod pairs are declared
+    /// anyway, so hashing them would only add same-source pairs).</summary>
+    public static bool ExcludeResponsible(bool sceneCapture, bool scoped, bool inScope, bool isCoreMaster)
+        => sceneCapture ? false : scoped ? !inScope : isCoreMaster;
 }

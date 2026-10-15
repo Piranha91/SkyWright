@@ -66,7 +66,8 @@ static class OverlapClassSelfTest
 
         var arms = new EnableArms(idx);
         var pop = EnablePopulation.Of(arms.WinnerRawFacts, EnablePopulation.BaselineStateName);
-        var candidates = idx.SurfaceCandidates(Geometry, Obstructing, p => BaseGamePlugins.IsCoreMaster(Name(p)), out var skips, pop.Predicate);
+        var candidates = idx.SurfaceCandidates(Geometry, Obstructing,
+            p => OverlapClass.ExcludeResponsible(false, false, false, BaseGamePlugins.IsCoreMaster(Name(p))), out var skips, pop.Predicate);
         candidates = candidates.Where(c =>
         {
             if (!arms.Winner(c.Key).Resolved) { skips.EnableStateUnresolved++; return false; }
@@ -139,5 +140,17 @@ static class OverlapClassSelfTest
         P("PD4-O-P4f", flags, F.K, PhysicalState.Gone, "a ref is initially disabled under this order");
         P("PD4-O-P8f", flags, F.U, PhysicalState.Gone, "actual render surfaces are separated");
         P("PD4-O-Pc ", capped, F.A2, PhysicalState.Unmeasured, "triangle_pair_budget_exhausted");
+
+        // OV2c: overlapprobe/OverlapClass.ExcludeResponsible, the whole truth table (scene, scoped, in scope, core master).
+        var table = new List<string>();
+        foreach (bool scene in new[] { false, true }) foreach (bool scoped in new[] { false, true })
+            foreach (bool inScope in new[] { false, true }) foreach (bool core in new[] { false, true })
+            {
+                bool want = !scene && (scoped ? !inScope : core);
+                if (OverlapClass.ExcludeResponsible(scene, scoped, inScope, core) != want) table.Add($"{scene}/{scoped}/{inScope}/{core}");
+            }
+        t.Check("PD4-O-X  candidate filter: a scene excludes nothing; a responsible-pair run excludes outside its scope; default excludes the core masters",
+                table.Count == 0 && pl.Candidates.All(c => !BaseGamePlugins.IsCoreMaster(pl.Name(c.Win.Plugin))) && pl.Skips.ExcludedResponsible == 1,
+                table.Count == 0 ? "16 of 16" : "wrong at " + string.Join(", ", table));
     }
 }

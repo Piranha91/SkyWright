@@ -1241,7 +1241,7 @@ if (stateSpec is not null)
 else pop = popMode == PopulationMode.Flags ? EnablePopulation.Flags() : EnablePopulation.Of(arms.WinnerRawFacts, EnablePopulation.BaselineStateName);
 // Null in flags mode: Candidates then reads the winning snap's own flag, exactly as it always did.
 enabledOf = pop.Predicate;
-bool ExcludeResponsible(int p) => sceneCapture ? false : responsiblePairs.Count > 0 ? !scopedResponsiblePlugins.Contains(p) : IsBaseGame(p);
+bool ExcludeResponsible(int p) => OverlapClass.ExcludeResponsible(sceneCapture, responsiblePairs.Count > 0, scopedResponsiblePlugins.Contains(p), IsBaseGame(p));
 long candidateGeometryLookups = 0;
 __run.Stage("render-geometry", "preparing strict render geometry and candidates", total: null, unit: "geometry lookups");
 (TriangleSoup? Soup, char Source, string? Reason) CandidateGeometryOf(FormKey baseKey)
