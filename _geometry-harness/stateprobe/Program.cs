@@ -111,51 +111,8 @@ HarnessOrderCli.Print(cfg);
 // dependent's, the render soup as a labelled fallback, OBND as the last resort.
 // ---------------------------------------------------------------------------------------
 ContactIndex? cidx = null;
-var meshGeom = new Dictionary<string, RefGeometry?>(StringComparer.OrdinalIgnoreCase);
-long meshesMeasured = 0, obndFallback = 0, noGeometry = 0;
-RefGeometry? GeomOf(FormKey baseKey)
-{
-    RefGeometry? g = null;
-    if (cidx!.Index.BaseMesh.TryGetValue(baseKey, out var rel))
-    {
-        var full = rel.StartsWith("meshes", StringComparison.OrdinalIgnoreCase) ? rel : Path.Combine("meshes", rel);
-        if (!meshGeom.TryGetValue(full, out g))
-        {
-            g = null;
-            var res = assets.ResolveForPlacement(full);
-            if (res.Sources.Count > 0)
-            {
-                var (bytes, _) = AssetResolver.ReadPlacementSource(res.Sources[0]);
-                if (bytes is not null && NifGeometry.Measure(bytes, includeTriangles: true) is { Model: { } m })
-                {
-                    meshesMeasured++;
-                    var hc = m.CollisionSoupFor(b => b.Solid && CollisionLayers.IsActorSolid(b.Layer));
-                    var dc = m.CollisionSoupFor(b => b.Solid && b.Layer != "SKYL_NONCOLLIDABLE");
-                    TriangleSoup host, dep; char hs, ds;
-                    if (m.CollisionComplete && hc is { TriangleCount: > 0 }) { host = hc; hs = 'c'; }
-                    else if (m.Soup is { TriangleCount: > 0 }) { host = m.Soup; hs = 'r'; }
-                    else { host = TriangleSoup.Empty; hs = '-'; }
-                    if (m.CollisionComplete && dc is { TriangleCount: > 0 }) { dep = dc; ds = 'c'; }
-                    else if (m.Soup is { TriangleCount: > 0 }) { dep = m.Soup; ds = 'r'; }
-                    else { dep = TriangleSoup.Empty; ds = '-'; }
-                    var box = SpatialOverlap.SoupBounds(host).Union(SpatialOverlap.SoupBounds(dep));
-                    var bodies = m.CollisionBodies?.Where(b => b.Solid).Select(b => (b.Layer, b.MotionSystem)).ToList() ?? new List<(string, string)>();
-                    bool phantom = m.HasCollision && !m.HasSolidCollision;
-                    g = box.IsEmpty ? null : new RefGeometry(box, host, dep, hs, ds, HostUsable: hs == 'c', bodies, phantom);
-                }
-            }
-            meshGeom[full] = g;
-        }
-    }
-    if (g is null)
-    {
-        var ob = cidx.Index.ObndBox(baseKey);
-        if (!ob.IsEmpty) { obndFallback++; g = new RefGeometry(ob, ContactIndex.BoxSoup(ob), ContactIndex.BoxSoup(ob), 'o', 'o', HostUsable: false, Array.Empty<(string, string)>(), false); }
-        else noGeometry++;
-    }
-    return g;
-}
-try { cidx = new ContactIndex(GeomOf); }
+var geo = new StateGeometry(full => assets.ResolveForPlacement(full) is { Sources.Count: > 0 } res ? AssetResolver.ReadPlacementSource(res.Sources[0]).Bytes : null);   // stateprobe/StateGeometry.cs
+try { cidx = new ContactIndex(geo.Of); geo.Contact = cidx; }
 catch (CacheBudget.AutomaticBudgetUnavailableException ex) { Console.Error.WriteLine(ex.Message + "; " + ex.Selection.Describe()); return 2; }
 var idx = cidx.Index;
 
@@ -432,7 +389,7 @@ var ev = new StateEvaluator(cidx, sx) { Route = oracle };
 try { cidx.RefreshAutomaticBudget(); }
 catch (CacheBudget.AutomaticBudgetUnavailableException ex) { Console.Error.WriteLine(ex.Message + "; " + ex.Selection.Describe()); return 2; }
 Console.WriteLine("   memory after state geometry preparation: " + cidx.AutomaticBudgetReport());
-Console.WriteLine($"evaluator: {ev.Boxed:N0} refs boxed (meshes measured {meshesMeasured:N0}, OBND fallback {obndFallback:N0}, no geometry {noGeometry:N0}; markers set aside {ev.BoxedMarkers:N0}, effect volumes kept out of the overlap role {ev.BoxedFxVolumes:N0})  ({sw.Elapsed.TotalSeconds:0.0}s)");
+Console.WriteLine($"evaluator: {ev.Boxed:N0} refs boxed (meshes measured {geo.MeshesMeasured:N0}, OBND fallback {geo.ObndFallback:N0}, no geometry {geo.NoGeometry:N0}; markers set aside {ev.BoxedMarkers:N0}, effect volumes kept out of the overlap role {ev.BoxedFxVolumes:N0})  ({sw.Elapsed.TotalSeconds:0.0}s)");
 sw.Restart();
 var tally = new StateTally();
 var rows = new List<StateRow>();
