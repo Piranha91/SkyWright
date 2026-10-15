@@ -101,19 +101,23 @@ static class EmptySpaceProof
         master.Statics.Add(Stat(markB, "EsMarker", 8, 8, 16, marker: true));
         master.Activators.Add(new Mutagen.Bethesda.Skyrim.Activator(vActB, release) { EditorID = "EsVanillaActivator", Model = new Model { File = "meshes\\es\\va.nif" }, ObjectBounds = Ob(20, 20, 80) });
         var mc = new Cell(cellK, release) { EditorID = "EsCell", Flags = Cell.Flag.IsInteriorCell };
-        int[] floored = { 2000, 2002, 2004, 2006, 2008, 2010, 2012, 2014, 2016, 2018, 2020, 2022, 2024, 2026, 2028, 2030, 2032, 2036, 2040, 2042, 2044, 2056, 2058, 2060 };
+        int[] floored = { 2000, 2002, 2004, 2006, 2008, 2010, 2012, 2014, 2016, 2018, 2020, 2022, 2024, 2026, 2028, 2030, 2032, 2036, 2040, 2042, 2044, 2056, 2058, 2060, 2062 };
         foreach (int n in floored) mc.Temporary.Add(Ref(R(n), floorB, X0(n), 0, -10, $"EsFloor{n}", parent: n == 2002 ? R(2002, 1) : null));
         mc.Temporary.Add(Ref(R(2002, 1), markB, X0(2002) + 300, 0, 8, "EsParent2002"));                      // the floor's enable parent
-        mc.Temporary.Add(Ref(R(2016, 1), wallB, X0(2016) + 28, 0, 100, "EsWall2016"));                       // touches the rack's +x face
+        mc.Temporary.Add(Ref(R(2016, 1), wallB, X0(2016) + 136, 0, 100, "EsWall2016"));                      // at the floor's +x edge, the rack's +x face
+        mc.Temporary.Add(Ref(R(2016, 2), floorB, X0(2016) + 272, 0, -10, "EsFloorB2016"));                    // an unaffected floor beyond the wall
+        mc.Temporary.Add(Ref(R(2062, 1), wallB, X0(2062) + 136, 0, 100, "EsStrayWall2062"));                  // a wall D leaves standing alone
         mc.Temporary.Add(Ref(R(2028, 1), slabB, X0(2028) + 44, 0, 5, "EsSlab2028"));                         // a 48 u slab the rack touches
-        mc.Temporary.Add(Ref(R(2030, 1), wallB, X0(2030) + 108, 0, 100, "EsWall2030"));                      // touches the third rack only
-        mc.Temporary.Add(Ref(R(2044, 1), wallB, X0(2044) + 108, 0, 100, "EsWall2044"));
+        mc.Temporary.Add(Ref(R(2030, 1), wallB, X0(2030) + 136, 0, 100, "EsWall2030"));                      // touches the third rack only
+        mc.Temporary.Add(Ref(R(2030, 2), floorB, X0(2030) + 272, 0, -10, "EsFloorB2030"));                    // an unaffected floor beyond it
+        mc.Temporary.Add(Ref(R(2044, 1), wallB, X0(2044) + 136, 0, 100, "EsWall2044"));
         mc.Temporary.Add(Ref(R(2036, 1), vActB, X0(2036) + 40, 0, 40, "EsVanillaActivator2036"));            // a vanilla activator touching the rack
         mc.Temporary.Add(Ref(R(2024, 1), vActB, X0(2024), 0, 40, "EsVanillaRack2024"));                      // a vanilla fixture on the floor
         mc.Temporary.Add(Ref(R(2058, 1), vActB, X0(2058), 0, 40, "EsVanillaRack2058"));                      // a vanilla fixture no mod touches
         mc.Temporary.Add(Ref(R(2060, 1), vActB, X0(2060), 0, 40, "EsVanillaRack2060"));                      // a vanilla fixture S re-places
         mc.Temporary.Add(Ref(R(2040, 1), markB, X0(2040) + 300, 0, 8, "EsSwitch2040", disabled: true));     // a switch, off at load
         mc.Temporary.Add(Ref(R(2042, 1), wallB, X0(2042) + 136, 0, 100, "EsWall2042"));                      // touches the own floor's +x edge
+        mc.Temporary.Add(Ref(R(2042, 2), wallB, X0(2042) - 136, 0, 100, "EsWallB2042"));                     // the room's other wall, unaffected
         FileInterior(master, mc);
         var mPath = Write(root, master);
         using var mOv = SkyrimMod.CreateFromBinaryOverlay(mPath, release);
@@ -138,10 +142,11 @@ static class EmptySpaceProof
         s.Weapons.Add(sword);
         var sc = new Cell(cellK, release) { Flags = Cell.Flag.IsInteriorCell };
         void Rack(int n, float dx = 0, float z = 40, int k = 0, FormKey? parent = null) => sc.Temporary.Add(Ref(F(n, k), rackB, X0(n) + dx, 0, z, $"EsRack{n}_{k}", parent: parent));
-        foreach (int n in new[] { 2000, 2002, 2004, 2006, 2016, 2018, 2022, 2028, 2036, 2056 }) Rack(n);
+        foreach (int n in new[] { 2000, 2002, 2004, 2006, 2018, 2022, 2028, 2036, 2056 }) Rack(n);
+        Rack(2016, 108); Rack(2062, 108);                                                   // against the wall at the floor's edge
         Rack(2008); Rack(2008, 40, k: 1);                                                   // two racks side by side, touching
         Rack(2020, z: 140);                                                                 // 100 u above the floor as shipped
-        foreach (int n in new[] { 2030, 2044 }) { Rack(n, 0); Rack(n, 40, k: 1); Rack(n, 80, k: 2); }   // a chain; the third touches the wall
+        foreach (int n in new[] { 2030, 2044 }) { Rack(n, 28); Rack(n, 68, k: 1); Rack(n, 108, k: 2); }   // a chain; the third touches the wall
         for (int k = 0; k < 5; k++) Rack(2032, 40 * k, k: k);                                 // five in a chain (the cap proof reads it at 3)
         Rack(2040, parent: R(2040, 1));                                                     // enabled only when the switch flips
         // 2010: the weapon-rack chain on the floor; the sword 30 u above the trigger's top, touching nothing but the mount link
@@ -169,14 +174,14 @@ static class EmptySpaceProof
         // ---- D: the mover ----
         var d = new SkyrimMod(dKey, release);
         var dc = new Cell(cellK, release) { Flags = Cell.Flag.IsInteriorCell };
-        foreach (int n in new[] { 2000, 2008, 2010, 2012, 2014, 2016, 2018, 2020, 2022, 2026, 2028, 2030, 2032, 2036, 2040, 2044, 2058, 2060 })
+        foreach (int n in new[] { 2000, 2008, 2010, 2012, 2014, 2016, 2018, 2020, 2022, 2026, 2028, 2030, 2032, 2036, 2040, 2044, 2058, 2060, 2062 })
             dc.Temporary.Add(Ref(R(n), floorB, X0(n), 0, -10, $"EsFloor{n}", disabled: true));
         dc.Temporary.Add(Ref(R(2002, 1), markB, X0(2002) + 300, 0, 8, "EsParent2002", disabled: true));     // removes the floor through its parent
         dc.Temporary.Add(Ref(R(2004), floorB, X0(2004), 0, -10, "EsFloor2004", deleted: true));
         dc.Temporary.Add(Ref(R(2006), floorB, X0(2006), 0, -3000, "EsFloor2006"));                          // moved far below
         dc.Temporary.Add(Ref(Dn(2018), floorB, X0(2018), 0, -10, "EsNewFloor2018"));                        // the mover's own new floor
         dc.Temporary.Add(Ref(Dn(2022), floorB, X0(2022) + 500, 0, -10, "EsNewFloor2022"));                  // the mover's floor elsewhere
-        dc.Temporary.Add(Ref(R(2044, 1), wallB, X0(2044) + 108, 0, 100, "EsWall2044", disabled: true));     // and the wall
+        dc.Temporary.Add(Ref(R(2044, 1), wallB, X0(2044) + 136, 0, 100, "EsWall2044", disabled: true));     // and the wall
         dc.Temporary.Add(Ref(R(2042, 1), wallB, X0(2042) + 136, 0, 100, "EsWall2042", disabled: true));     // only the wall
         FileInterior(d, dc);
         var dPath = Write(root, d, mOv);
@@ -268,7 +273,15 @@ static class EmptySpaceProof
         var r2014 = J(F(2014));
         Check("ES-2014: an item alone on the floor, the floor disabled -> Falls (context, the rest rule's class)", r2014.Verdict == EmptySpaceVerdict.Falls, Show(r2014));
         var r2016 = J(F(2016));
-        Check("ES-2016: a wall still touches the rack after its floor goes -> GROUNDED (not walked further: it cannot be the class)", r2016.Verdict == EmptySpaceVerdict.Grounded, Show(r2016));
+        Check("ES-2016: the rack's floor goes; the wall it touches lost that floor too but stands on an unaffected floor -> GROUNDED through the wall",
+              r2016.Verdict == EmptySpaceVerdict.Grounded, Show(r2016));
+        var r2062 = J(F(2062));
+        Check("ES-2062 (Q-B2): the rack's floor goes; the wall it touches is a stray piece D left standing alone -> LEFT IN EMPTY SPACE, the wall walked as a member",
+              r2062.Verdict == EmptySpaceVerdict.LeftInEmptySpace && r2062.Winner.Members == 2, Show(r2062));
+        var bound0 = new EmptySpaceSearch(cidx, closure, Name, (_, _) => true, IsMasterFile, Floor) { MaxAnchorWalk = 0 };
+        var r2064 = bound0.Judge(F(2016), Dm);
+        Check("ES-2064 (Q-B2): ES-2016 read with the anchor walk bounded at 0 suspect pieces -> refused by name, not grounded and not the class",
+              r2064.Verdict == EmptySpaceVerdict.Refused && r2064.Why.Contains("removals"), Show(r2064));
         var r2018 = J(F(2018));
         Check("ES-2018: the mover lays its own new floor under the rack -> GROUNDED (the mover's floor is the room's)", r2018.Verdict == EmptySpaceVerdict.Grounded, Show(r2018));
         var r2020 = J(F(2020));
@@ -287,7 +300,7 @@ static class EmptySpaceProof
         var r2028 = J(F(2028));
         Check("ES-2028: the only thing left touching the rack is a 48 u slab of the room -> LEFT IN EMPTY SPACE (under the anchor size)", r2028.Verdict == EmptySpaceVerdict.LeftInEmptySpace, Show(r2028));
         var r2030 = J(F(2030)); var r2044 = J(F(2044));
-        Check("ES-2030: three racks in a chain, the third touching a wall; the floor goes -> the first GROUNDED through two neighbours",
+        Check("ES-2030: three racks in a chain, the third touching a wall that stands on an unaffected floor; their floor goes -> the first GROUNDED through two neighbours",
               r2030.Verdict == EmptySpaceVerdict.Grounded && r2030.Winner.Members == 3, Show(r2030));
         Check("ES-2044: the same chain with the wall removed too -> the first LEFT IN EMPTY SPACE (assembly 3)", r2044.Verdict == EmptySpaceVerdict.LeftInEmptySpace && r2044.Winner.Members == 3, Show(r2044));
         var capped = new EmptySpaceSearch(cidx, closure, Name, (_, _) => true, IsMasterFile, Floor) { MaxMembers = 3 };

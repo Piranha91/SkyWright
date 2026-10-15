@@ -51,6 +51,9 @@ public sealed class EmptySpaceSearch
     public float MinAnchorDim { get; init; } = 64f;
     /// <summary>How far the diagnostic nearest-anchor distance looks.</summary>
     public float AnchorReport { get; init; } = 512f;
+    /// <summary>How many suspect floor or wall pieces (each touched a piece the mover changed) an anchor's grounding may cross before the
+    /// reading is refused by name (Q-B2).</summary>
+    public int MaxAnchorWalk { get; init; } = 64;
     /// <summary>Candidates: dependent-scale references (as STRANDED's dependents) within this of a moved host's previous box.</summary>
     public float Reach => C.Reach;
     public long TouchTests, SurfacesBuilt, ExteriorHostsSkipped, WalksRun, WalksReused;
