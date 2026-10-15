@@ -22,6 +22,7 @@
     <Compile Include="..\_shared\ProbeSelfTest.cs" Link="ProbeSelfTest.cs" />
     <Compile Include="..\_shared\MovedRefFixture.cs" Link="MovedRefFixture.cs" />
     <Compile Include="..\_shared\BaseGameFixture.cs" Link="BaseGameFixture.cs" />
+    <Compile Include="..\_shared\OverlapClassFixture.cs" Link="OverlapClassFixture.cs" />
     <Compile Include="..\_shared\BaseGamePlugins.cs" Link="BaseGamePlugins.cs" />
     <Compile Include="..\_shared\SyntheticOrder.cs" Link="SyntheticOrder.cs" />
     <Compile Include="..\_shared\HarnessOrderCli.cs" Link="HarnessOrderCli.cs" />

@@ -30,5 +30,8 @@ static class OverlapSelfTest
         var masters = po.ModHeader.MasterReferences.Select(r => r.Master.FileName.String).ToList();
         t.Check("FF-F0 the fixture writes CrPatch.esp mastering Skyrim.esm, CrA.esp and CrB.esp, and nothing else",
                 masters.SequenceEqual(new[] { "Skyrim.esm", "CrA.esp", "CrB.esp" }), string.Join(", ", masters));
+
+        // Slice 4: the class split, the provenance-unknown count and the physical predicate (_shared/OverlapClassFixture.cs).
+        OverlapClassSelfTest.Run(t);
     });
 }

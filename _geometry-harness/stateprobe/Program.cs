@@ -41,6 +41,8 @@ using HousecarlCore.Progress;
 using var __run = RunLog.BeginProcess("stateprobe", args);
 // Known answers for which version of a moved or deleted reference this probe's walk keeps (_shared/MovedRefFixture.cs).
 if (args.Length >= 1 && args[0] == "--moved-ref-selftest") return RouteSelfTest.Run();
+// Known answers for the class, emit and route-obstacle decisions over a synthetic order (_shared/StateFixture.cs).
+if (args.Length >= 1 && args[0] == "--self-test") return StateSelfTest.Run();
 const string StateMeasurementPolicy = "state-contact-route-v1|state-overlap-unmeasured-v1";
 
 string Instance = HarnessTarget.Instance;
