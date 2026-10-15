@@ -121,11 +121,7 @@ Console.WriteLine();
 
 // Which base records can physically obstruct. XMarkers have no mesh and no collision; a dropped
 // coin is not a wall. Kept as data here rather than hard-coded judgement anywhere deeper.
-// Bethesda's own shipped content. A dangling link with no mod on either end is theirs and permanent.
-// Creation Club plugins (ccbgssse*.esl and the rest) are deliberately NOT in this set: their changes, including navmesh
-// deletions, are reported like any mod's (decided 2026-09-28).
-var Vanilla = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
-{ "Skyrim.esm", "Update.esm", "Dawnguard.esm", "HearthFires.esm", "Dragonborn.esm", "SkyrimVR.esm", "_ResourcePack.esl" };
+var Vanilla = ClobberFindings.Vanilla;   // Bethesda's own shipped content (ClobberFindings.cs)
 
 var Obstructing = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
 { "Static", "MoveableStatic", "Tree", "Furniture", "Door", "Container", "Activator", "Flora" };
@@ -153,22 +149,19 @@ var baseType = new Dictionary<FormKey, string>();
 var baseMesh = new Dictionary<FormKey, string>();
 var baseObnd = new Dictionary<FormKey, Vec3>();     // labelled fallback only
 // Winner-takes-all, written in load order so the last write IS the winning state.
-var navTriCount = new Dictionary<FormKey, int>();
-var navDoorTris = new Dictionary<FormKey, (int Tri, FormKey Door)[]>();
-var navEdgeLinks = new Dictionary<FormKey, (FormKey Mesh, int Tri)[]>();
-// Winner-takes-all like the rest, but the PLUGIN is kept too: a dangling door link is a
-// disagreement between whoever last wrote the link and whoever last wrote the navmesh, and naming
-// both is what lets the patch verifier look the pair up.
-var doorNavLink = new Dictionary<FormKey, (FormKey Nav, int Tri, int Plugin)>();   // placed door -> its navmesh link
-var refExists = new HashSet<FormKey>();
-var refOverriders = new Dictionary<FormKey, List<int>>();   // placed ref -> every plugin that touches it
-var refGone = new HashSet<FormKey>();
+var links = new DanglingLinks();              // the winning link state and the dangling-link checks (DanglingLinks.cs)
+var navTriCount = links.TriCount;
+var navDoorTris = links.DoorTris;
+var navEdgeLinks = links.EdgeLinks;
+var doorNavLink = links.DoorNavLink;
+var refExists = links.RefExists;
+var refOverriders = links.RefOverriders;
+var refGone = links.RefGone;
 
 // Rule 6, applied to the plumbing: a plugin this loop cannot read contributes nothing, and that
 // must be COUNTED, not swallowed. The review found both detectors dropping unreadable plugins with
 // a bare catch{continue} and no output saying so.
 var unreadablePlugins = new List<string>();
-long permanentlyDisabledDoors = 0;
 __run.Feature("plugins", paths.Count, "plugins").Stage("scan", "reading plugins", paths.Count, "plugins");
 
 
@@ -198,39 +191,11 @@ for (int p = 0; p < paths.Count; p++)
             if (rec is INavigationMeshGetter nm)
             {
                 if (nm.IsDeleted) deletedHere.Add(nm.FormKey);
-                if (nm.Data is { } nd)
-                {
-                    navTriCount[nm.FormKey] = nd.Triangles.Count;
-                    navDoorTris[nm.FormKey] = nd.DoorTriangles.Select(d => ((int)d.TriangleBeforeDoor, d.Door.FormKey)).ToArray();
-                    navEdgeLinks[nm.FormKey] = nd.EdgeLinks.Select(e => (e.Mesh.FormKey, (int)e.TriangleIndex)).ToArray();
-                }
+                links.NoteNavmesh(nm);
             }
             else if (rec is IPlacedObjectGetter po)
             {
-                if (po.IsDeleted) { refGone.Add(po.FormKey); refExists.Remove(po.FormKey); }
-                else { refExists.Add(po.FormKey); refGone.Remove(po.FormKey); }
-                // Every plugin that touches this door, not just the last. A dangling DOOR-* finding
-                // names only one party, so there is no master PAIR for the patch verifier to look
-                // up — but "who else already overrides this exact record" is answerable right here,
-                // and it is the same question a fix would have to answer.
-                if (!refOverriders.TryGetValue(po.FormKey, out var ov)) refOverriders[po.FormKey] = ov = new List<int>();
-                if (ov.Count == 0 || ov[^1] != p) ov.Add(p);
-                // WINNER-TAKES-ALL INCLUDES REMOVAL (2026-08-27, caught writing a field card): a
-                // later override that DROPS NavigationDoorLink must erase the entry, or the vanilla
-                // link goes stale in the model — door 0177FB read as a dangling link when its
-                // winning override had removed the link entirely. Same for a door a city overhaul
-                // permanently disables (enable-parent = the player ref with opposite-state, the
-                // standard disable idiom): no NPC can ever use it, so its link belongs to no check.
-                bool permanentlyDisabled = po.EnableParent is { } ep
-                    && ep.Reference.FormKey.ID == 0x14
-                    && ep.Flags.HasFlag(EnableParent.Flag.SetEnableStateToOppositeOfParent);
-                if (po.NavigationDoorLink is { } dl && !dl.NavMesh.IsNull && !permanentlyDisabled)
-                    doorNavLink[po.FormKey] = (dl.NavMesh.FormKey, dl.TeleportMarkerTriangle, p);
-                else
-                {
-                    doorNavLink.Remove(po.FormKey);
-                    if (permanentlyDisabled) permanentlyDisabledDoors++;
-                }
+                links.NotePlaced(po, p);
             }
             else if (rec is IModeledGetter mo && rec is ISkyrimMajorRecordGetter sm)
             {
@@ -248,7 +213,7 @@ for (int p = 0; p < paths.Count; p++)
             cellName[cp.Cell] = (cp.CellEditorId, cp.Interior);
             cellSpace[cp.Cell] = (cp.Worldspace, cp.Grid?.X ?? int.MinValue, cp.Grid?.Y ?? int.MinValue, cp.Interior);
 
-            navVersions.Note(cp, p, deletedHere, NavGeomHash);
+            navVersions.Note(cp, p, deletedHere, ClobberFindings.GeomHash);
 
             foreach (var r in cp.Refs) enableFacts.Note(r);
             uncutPop.Note(cp, p, mod.ModKey);
@@ -290,40 +255,19 @@ bool Wanted(int p) => onlyPlugin is null || string.Equals(pluginKey[p].FileName,
 // "no declared dependency", never "cannot have seen".
 // The decision itself is DetectorModel.FindClobber — proven by construction in proofprobe, so
 // this loop only feeds it providers, the closure, and the per-provider geometry triple.
-var clobber = new List<(FormKey Nav, int Loser, int Winner, int LoserT, int WinnerT, bool Material)>();
-foreach (var (nav, provs) in navProviders)
-{
-    var hit = DetectorModel.FindClobber(
-        provs,
-        (w, l) => masterClosure[w].Contains(l),
-        pi => navSize.GetValueOrDefault((nav, pi)),
-        (l, w) => Wanted(l) || Wanted(w));
-    if (hit is not { } h) continue;
-    clobber.Add((nav, h.Loser, h.Winner,
-                 navSize.GetValueOrDefault((nav, h.Loser)).T,
-                 navSize.GetValueOrDefault((nav, h.Winner)).T, h.Material));
-}
+var clobber = ClobberFindings.Find(navProviders, masterClosure, navSize, Wanted);   // ClobberFindings.cs
 
 // Rule 12, finally applied to CLOBBERED itself. The count carried an unmeasured floor for two
 // sessions: Dawnguard × HearthFires is Bethesda re-cutting Bethesda — permanent, shipped that way,
 // and exactly the class-A population the dangling-link split already names. USSEP-as-loser is kept
 // as its own line (a mod discarding USSEP's navmesh fixes IS a finding, but it is a different
 // conversation from mod-on-mod, because nearly nothing masters USSEP on purpose).
-const string Ussep = "Unofficial Skyrim Special Edition Patch.esp";
+ClobberPopulation ClobberPop((FormKey Nav, int Loser, int Winner, int LoserT, int WinnerT, bool Material) c) =>
+    ClobberFindings.Population(pluginKey[c.Loser].FileName.String, pluginKey[c.Winner].FileName.String, Vanilla);
 string ClobberClass((FormKey Nav, int Loser, int Winner, int LoserT, int WinnerT, bool Material) c) =>
-    DetectorModel.ClassifyClobber(
-        Vanilla.Contains(pluginKey[c.Loser].FileName.String),
-        Vanilla.Contains(pluginKey[c.Winner].FileName.String),
-        string.Equals(pluginKey[c.Loser].FileName.String, Ussep, StringComparison.OrdinalIgnoreCase)) switch
-    {
-        ClobberPopulation.BethesdaFloor => "A. Bethesda-on-Bethesda (permanent FLOOR)",
-        ClobberPopulation.UssepDiscarded => "B. USSEP's work discarded by a mod",
-        _ => "C. mod-on-mod",
-    };
-bool ClobberFloor((FormKey Nav, int Loser, int Winner, int LoserT, int WinnerT, bool Material) c) =>
-    ClobberClass(c).StartsWith("A.");
+    ClobberFindings.ClassLabel(ClobberPop(c));
 
-var clobberFindings = clobber.Where(c => c.Material && !ClobberFloor(c)).ToList();
+var clobberFindings = clobber.Where(c => ClobberFindings.IsFinding(c.Material, ClobberPop(c))).ToList();
 Console.WriteLine($"\n==== CLOBBERED: one mod's navmesh work silently discarded by another ====");
 Console.WriteLine($"   navmesh records affected : {clobber.Count:N0}"
                 + $"   ({clobber.Count(c => c.Material):N0} where the geometry actually differs)");
@@ -352,8 +296,8 @@ foreach (var g in clobber.Where(c => c.Material)
 }
 
 // The reach pass's constants, shared with the clobber predicate below.
-const float ReachClearance = 120f;   // the oracle's measured resolution: closer reads reachable
-const float ReachSpacing = 64f;      // sampling bound — a loss beyond clearance+spacing cannot be missed
+const float ReachClearance = ClobberFindings.ReachClearance;
+const float ReachSpacing = ClobberFindings.ReachSpacing;
 const float WellClear = 240f;        // 2x resolution: what a probe-worthy candidate must exceed
 
 // Full geometry for exactly the (record, plugin) pairs a pass names: the main pass keeps counts and hashes only, because
@@ -384,61 +328,14 @@ static (List<System.Numerics.Vector3> V, List<(int A, int B, int C, int Flags)> 
     => (g.Vertices.Select(v => new System.Numerics.Vector3(v.X, v.Y, v.Z)).ToList(),
         g.Triangles.Select(t => ((int)t.A, (int)t.B, (int)t.C, t.Flags)).ToList());
 
-// THE PHYSICAL PREDICATE of a CLOBBERED row (2026-09-03; handoff 2026-09-12): victim-only ground remains — some point of
-// the loser's mesh lies farther than the reach clearance from the winner's, whoever the winner is under the arm being
-// read. This is the class's physical half on its own: "the winner declares no dependency on the loser" is the provenance
-// half, and a sham patch that masters both and forwards the winner's navmesh unchanged flips only that. Not used: the
-// content-hash Material test (symmetric — a true merge also differs from the loser), the neighbour-navmesh rescue and the
-// witness join (the reach pass's refinements). A row whose loser is within clearance everywhere reads Gone in its own
-// base arm: a declared-dependency clobber with no loss this instrument can see. The credit rule counts that apart.
+// THE PHYSICAL PREDICATE of a CLOBBERED row: ClobberFindings.Predicate (ClobberFindings.cs).
 (PhysicalState State, string Detail) ClobberPredicate(FormKey nav, int loser, int winner, Dictionary<(FormKey Nav, int Plugin), NavmeshGeometry> geom)
-{
-    if (loser == winner) return (PhysicalState.Gone, "the loser's own version is the winning one");
-    if (!geom.TryGetValue((nav, loser), out var lg) || !geom.TryGetValue((nav, winner), out var wg))
-        return (PhysicalState.Unmeasured, "a version's geometry could not be read");
-    var L = Mesh(lg); var W = Mesh(wg);
-    var victim = DetectorModel.CoverageLoss(L.V, L.T, W.V, W.T, ReachClearance, ReachSpacing);
-    return victim.Count > 0
-        ? (PhysicalState.Holds, $"victim-only ground: {victim.Count} sample(s) of the loser's mesh farther than {ReachClearance:0}u from the winner's ({pluginKey[winner].FileName})")
-        : (PhysicalState.Gone, $"no point of the loser's mesh is farther than {ReachClearance:0}u from the winner's ({pluginKey[winner].FileName})");
-}
+    => ClobberFindings.Predicate(nav, loser, winner, geom, $"{pluginKey[winner].FileName}");
 
 // The physical predicate of a dangling-link row: the same exact check the finding came from, re-asked of the winning
 // state under this arm. Exact, no geometry: the index still exceeds the winning count (or still points into a navmesh the
 // winning state lacks), or it does not.
-(PhysicalState State, string Detail) DanglePredicate(string kind, FormKey rec, FormKey other)
-{
-    switch (kind)
-    {
-        case "DOOR-TRI":
-            if (!navTriCount.TryGetValue(rec, out var dtCount)) return (PhysicalState.Gone, "the navmesh is not in the winning state");
-            return navDoorTris.TryGetValue(rec, out var dtris) && dtris.Any(t => t.Door == other && t.Tri >= dtCount)
-                ? (PhysicalState.Holds, $"the door triangle index still exceeds the winning count ({dtCount})")
-                : (PhysicalState.Gone, "the door triangle entry is gone or within the winning count");
-        case "DOOR-GONE":
-            return navDoorTris.TryGetValue(rec, out var dgTris) && dgTris.Any(t => t.Door == other) && refGone.Contains(other)
-                ? (PhysicalState.Holds, "the navmesh still links a door deleted in the winning state")
-                : (PhysicalState.Gone, "the door entry is gone, or the door exists again");
-        case "DOOR-NAV":
-            return doorNavLink.TryGetValue(rec, out var dn) && dn.Nav == other && !navTriCount.ContainsKey(other)
-                ? (PhysicalState.Holds, "the door still links a navmesh the winning state lacks")
-                : (PhysicalState.Gone, "the door's link was removed or re-pointed, or the navmesh is provided now");
-        case "DOOR-IDX":
-            return doorNavLink.TryGetValue(rec, out var di) && di.Nav == other && navTriCount.TryGetValue(other, out var diCount) && di.Tri >= diCount
-                ? (PhysicalState.Holds, $"the door's triangle index still exceeds the winning count ({diCount})")
-                : (PhysicalState.Gone, "the door's link is within the winning count, removed or re-pointed");
-        case "EDGE-NAV":
-            return navEdgeLinks.TryGetValue(rec, out var en) && en.Any(x => x.Mesh == other) && !navTriCount.ContainsKey(other)
-                ? (PhysicalState.Holds, "the edge link still points into a navmesh the winning state lacks")
-                : (PhysicalState.Gone, "the edge link is gone, or the target navmesh is provided now");
-        case "EDGE-IDX":
-            return navEdgeLinks.TryGetValue(rec, out var ei) && navTriCount.TryGetValue(other, out var eiCount) && ei.Any(x => x.Mesh == other && x.Tri >= eiCount)
-                ? (PhysicalState.Holds, $"the edge link's triangle index still exceeds the target's winning count ({eiCount})")
-                : (PhysicalState.Gone, "the edge link is within the target's winning count, or gone");
-        default:
-            return (PhysicalState.Unmeasured, $"no physical predicate is defined for kind {kind}");
-    }
-}
+(PhysicalState State, string Detail) DanglePredicate(string kind, FormKey rec, FormKey other) => links.Predicate(kind, rec, other);
 var coverageExtra = new List<CoverageLine>();
 
 // ---------------------------------------------------------------------------------------
@@ -827,88 +724,12 @@ foreach (var line in NavDeletions.Report(navVersions, Wanted, p => Vanilla.Conta
 //   navmesh DoorTriangle -> a triangle index in ITSELF, plus a door reference that must still exist
 //   placed door          -> a navmesh and a triangle index in it
 //   navmesh EdgeLink     -> ANOTHER navmesh and a triangle index in that one (cross-cell pathing)
-var dangling = new List<string>();
-// The same findings, structurally, for --emit. Plugin indices are -1 where the detector genuinely
-// cannot name a second party (a link into a navmesh that is simply absent names no culprit).
-var dangleStruct = new List<(string Kind, FormKey Rec, string RecRole, FormKey Other, string OtherRole, int PluginA, int PluginB, string Summary)>();
-int doorTriChecked = 0, doorLinkChecked = 0, edgeChecked = 0;
-int doorIdxSuppressed = 0;
 int NavOwner(FormKey nav) => navProviders.TryGetValue(nav, out var pr) && pr.Count > 0 ? pr[^1] : -1;
-
-foreach (var (nav, tris) in navDoorTris)
-{
-    if (!navTriCount.TryGetValue(nav, out var count)) continue;
-    foreach (var (tri, door) in tris)
-    {
-        doorTriChecked++;
-        if (tri >= count)
-        {
-            dangling.Add($"   DOOR-TRI   navmesh {nav} in {Cell(navCell.GetValueOrDefault(nav))} points at triangle {tri} of {count}");
-            dangleStruct.Add(("DOOR-TRI", nav, "navmesh", door, "door", NavOwner(nav), -1,
-                              $"navmesh {nav} in {Cell(navCell.GetValueOrDefault(nav))} points at triangle {tri} of {count}"));
-        }
-        else if (!door.IsNull && refGone.Contains(door))
-        {
-            dangling.Add($"   DOOR-GONE  navmesh {nav} in {Cell(navCell.GetValueOrDefault(nav))} links door {door}, which is DELETED in the winning state");
-            dangleStruct.Add(("DOOR-GONE", nav, "navmesh", door, "door", NavOwner(nav), -1,
-                              $"navmesh {nav} in {Cell(navCell.GetValueOrDefault(nav))} links door {door}, deleted in the winning state"));
-        }
-    }
-}
-
-foreach (var (door, link) in doorNavLink)
-{
-    doorLinkChecked++;
-    if (!navTriCount.TryGetValue(link.Nav, out var count))
-    {
-        dangling.Add($"   DOOR-NAV   door {door} links navmesh {link.Nav}, which is not in the winning state");
-        dangleStruct.Add(("DOOR-NAV", door, "door", link.Nav, "navmesh", link.Plugin, -1,
-                          $"door {door} links navmesh {link.Nav}, which is not in the winning state"));
-    }
-    else if (link.Tri >= count)
-    {
-        // RETIRED as a finding — field-tested and not player-visible. A door is described by THREE
-        // independent structures, and this check reads only the first:
-        //   1. the door reference's own navigation door link   (what this check validates)
-        //   2. the navmesh's own list of the doors beside it
-        //   3. the coarse routing index's linked-door list
-        // Plus a runtime closed-door array this harness does not model at all. Structures 2 and 3
-        // are what the engine walks, and they can be perfectly healthy while 1 dangles — the
-        // observed failure is not an index that drifted by a few, but a link naming an unrelated
-        // navmesh far away whose winning version carries no door entries at all. Traversal through
-        // doors with this defect was confirmed working in BOTH directions in game, against a
-        // control door carrying the identical defect. Independently: the large majority of these
-        // links in a normal load order are Bethesda's own, and the most thorough bug-fix project
-        // in the ecosystem edits hundreds of navmesh records while leaving every one of them
-        // alone. Do not re-derive this; a re-scoped successor must show 2 and 3 failing too.
-        doorIdxSuppressed++;
-        if (reportDoorIdx)
-        {
-            dangling.Add($"   DOOR-IDX   door {door} in {Cell(navCell.GetValueOrDefault(link.Nav))} points at triangle {link.Tri} of {count}");
-            dangleStruct.Add(("DOOR-IDX", door, "door", link.Nav, "navmesh", link.Plugin, NavOwner(link.Nav),
-                              $"door {door} in {Cell(navCell.GetValueOrDefault(link.Nav))} points at triangle {link.Tri} of {count}"));
-        }
-    }
-}
-
-foreach (var (nav, links) in navEdgeLinks)
-    foreach (var (mesh, tri) in links)
-    {
-        if (mesh.IsNull) continue;
-        edgeChecked++;
-        if (!navTriCount.TryGetValue(mesh, out var count))
-        {
-            dangling.Add($"   EDGE-NAV   navmesh {nav} in {Cell(navCell.GetValueOrDefault(nav))} edge-links {mesh}, which is not in the winning state");
-            dangleStruct.Add(("EDGE-NAV", nav, "navmesh", mesh, "navmesh", NavOwner(nav), -1,
-                              $"navmesh {nav} in {Cell(navCell.GetValueOrDefault(nav))} edge-links {mesh}, which is not in the winning state"));
-        }
-        else if (tri >= count)
-        {
-            dangling.Add($"   EDGE-IDX   navmesh {nav} in {Cell(navCell.GetValueOrDefault(nav))} edge-links {mesh} triangle {tri} of {count}");
-            dangleStruct.Add(("EDGE-IDX", nav, "navmesh", mesh, "navmesh", NavOwner(nav), NavOwner(mesh),
-                              $"navmesh {nav} in {Cell(navCell.GetValueOrDefault(nav))} edge-links {mesh} triangle {tri} of {count}"));
-        }
-    }
+var found = links.Find(NavOwner, nav => Cell(navCell.GetValueOrDefault(nav)), reportDoorIdx);
+var dangling = found.Lines;
+var dangleStruct = found.Rows;
+int doorTriChecked = found.DoorTriChecked, doorLinkChecked = found.DoorLinkChecked, edgeChecked = found.EdgeChecked;
+int doorIdxSuppressed = found.DoorIdxSuppressed;
 
 // Who, in this load order, already overrides the record carrying the bad index? A dangling link
 // names one party, so the patch verifier has no master pair to look up; this is the record-level
@@ -926,7 +747,7 @@ Console.WriteLine();
 Console.WriteLine($"==== DANGLING NAVMESH LINKS (exact; no thresholds) ====");
 Console.WriteLine($"   checked: {doorTriChecked:N0} navmesh door triangles, {doorLinkChecked:N0} door->navmesh links, {edgeChecked:N0} edge links");
 Console.WriteLine($"   (doors whose winning override removed the link or permanently disabled them are out of scope;");
-Console.WriteLine($"    {permanentlyDisabledDoors:N0} permanently-disabled door overrides seen — counted per rule 6)");
+Console.WriteLine($"    {links.PermanentlyDisabledDoors:N0} permanently-disabled door overrides seen — counted per rule 6)");
 Console.WriteLine($"   findings: {dangling.Count:N0}");
 if (doorIdxSuppressed > 0 || reportDoorIdx)
 {
@@ -950,7 +771,7 @@ foreach (var d in dangling.Take(listN)) Console.WriteLine(d);
 bool ModTouched(FormKey rec, string role)
 {
     var l = role == "navmesh" ? navProviders.GetValueOrDefault(rec) : refOverriders.GetValueOrDefault(rec);
-    return l is not null && l.Any(i => !Vanilla.Contains(pluginKey[i].FileName.String));
+    return DanglingLinks.ModTouched(l, i => Vanilla.Contains(pluginKey[i].FileName.String));
 }
 
 Console.WriteLine();
@@ -1084,7 +905,7 @@ if (emitPath is not null)
     }
 
     int floorDangles = dangleStruct.Count(d => !ModTouched(d.Rec, d.RecRole) && !ModTouched(d.Other, d.OtherRole));
-    foreach (var d in dangleStruct.Where(d => ModTouched(d.Rec, d.RecRole) || ModTouched(d.Other, d.OtherRole)))
+    foreach (var d in dangleStruct.Where(d => DanglingLinks.IsFinding(ModTouched(d.Rec, d.RecRole), ModTouched(d.Other, d.OtherRole))))
     {
         // A fix has to override the record carrying the bad index. The other end is context: a
         // patch that only re-states the target navmesh has not repaired the pointer into it.
@@ -1159,7 +980,7 @@ if (emitPath is not null)
             new Dictionary<string, long> { ["GeometryUnreadable"] = predicateTally.GetValueOrDefault(PhysicalState.Unmeasured) }, null,
             $"Holds {predicateTally.GetValueOrDefault(PhysicalState.Holds):N0}, Gone {predicateTally.GetValueOrDefault(PhysicalState.Gone):N0} (a Gone row: a declared-dependency clobber with no coverage loss beyond {ReachClearance:0}u)"),
         new("dangling-link checks", doorTriChecked + doorLinkChecked + edgeChecked, new Dictionary<string, long>(),
-            new Dictionary<string, long> { ["PermanentlyDisabledDoor"] = permanentlyDisabledDoors, ["DoorIdxRetired"] = doorIdxSuppressed, ["FloorDangles"] = floorDangles }),
+            new Dictionary<string, long> { ["PermanentlyDisabledDoor"] = links.PermanentlyDisabledDoors, ["DoorIdxRetired"] = doorIdxSuppressed, ["FloorDangles"] = floorDangles }),
         // The physical population this run judged, with the chains it could not read to the end counted as
         // unjudgeable — conflictdiff's coverage test must be able to see that share rise (Q27).
         new("obstructing refs (UNCUT population)", cellNewRefs.Values.Sum(b => b.Count),
@@ -1181,22 +1002,3 @@ if (emitPath is not null)
 
 Console.WriteLine($"\nelapsed {sw.Elapsed.TotalSeconds:0.0}s");
 return 0;
-
-// FNV-1a over every vertex component, triangle index and flag, in record order. Not cryptographic
-// and does not need to be: it only has to make "byte-identical forward" and "re-cut" distinguishable.
-static int NavGeomHash(NavmeshGeometry nav)
-{
-    unchecked
-    {
-        int h = (int)2166136261;
-        void Mix(int v) => h = (h ^ v) * 16777619;
-        foreach (var v in nav.Vertices)
-        {
-            Mix(BitConverter.SingleToInt32Bits(v.X));
-            Mix(BitConverter.SingleToInt32Bits(v.Y));
-            Mix(BitConverter.SingleToInt32Bits(v.Z));
-        }
-        foreach (var t in nav.Triangles) { Mix(t.A); Mix(t.B); Mix(t.C); Mix(t.Flags); }
-        return h;
-    }
-}

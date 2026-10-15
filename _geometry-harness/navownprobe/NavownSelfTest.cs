@@ -144,5 +144,129 @@ static class NavownSelfTest
         var counted = uncut.Counted.Where(x => x.Plugin == 1).Select(x => $"{MovedRefSelfTest.Name(x.Ref)}@{(x.Cell == F.E00 ? "E00" : x.Cell.ToString())}/{x.Plugin}").OrderBy(x => x).ToList();
         t.Check("N2  UNCUT counts A's introductions still standing and still obstructing: U3 only (U1 moved out, U2 deleted by B, U4 re-based to a marker, U5 base cleared)",
                 counted.SequenceEqual(new[] { "U3@E00/1" }), string.Join(", ", counted));
+
+        // ---- PD: the clobber and dangling-link fixture (NavownFixture.cs), written beside the moved-reference one ----
+        var nvPaths = NavownFixture.Write(Path.Combine(t.Root, "navown"));
+        var nvMods = nvPaths.Select(p => Mutagen.Bethesda.Skyrim.SkyrimMod.CreateFromBinaryOverlay(p, NavownFixture.Rel)).ToList();
+        try
+        {
+            string Masters(int i) => string.Join(",", nvMods[i].ModHeader.MasterReferences.Select(r => r.Master.FileName.String));
+            t.Check("PD-F0 the fixture writes its seven plugins in order",
+                    nvPaths.Select(Path.GetFileName).SequenceEqual(NavownFixture.Order), string.Join(", ", nvPaths.Select(Path.GetFileName)));
+            t.Check("PD-F0 NvB masters only NvMaster.esm (so NvA's re-cuts are undeclared)", Masters(5) == "NvMaster.esm", Masters(5));
+            t.Check("PD-F0 NvFix masters NvA.esp and NvB.esp", Masters(6).Contains("NvA.esp") && Masters(6).Contains("NvB.esp"), Masters(6));
+
+            // The walk's inputs for the first n plugins, read as navownprobe's main walk reads them.
+            (string[] Names, HashSet<int>[] Closure, NavVersions Versions, Dictionary<(FormKey, int), NavmeshGeometry> Geom) Order(int n)
+            {
+                var names = nvMods.Take(n).Select(mo => mo.ModKey.FileName.String).ToArray();
+                var direct = new HashSet<int>[n];
+                var versions = new NavVersions();
+                var geom = new Dictionary<(FormKey, int), NavmeshGeometry>();
+                for (int i = 0; i < n; i++)
+                {
+                    var ms = nvMods[i].ModHeader.MasterReferences.Select(r => r.Master.FileName.String).ToHashSet(StringComparer.OrdinalIgnoreCase);
+                    direct[i] = Enumerable.Range(0, i).Where(q => ms.Contains(names[q])).ToHashSet();
+                    var deletedHere = nvMods[i].EnumerateMajorRecords<Mutagen.Bethesda.Skyrim.INavigationMeshGetter>().Where(x => x.IsDeleted).Select(x => x.FormKey).ToHashSet();
+                    foreach (var cp in UncutPopulation.Cells(nvMods[i])) versions.Note(cp, i, deletedHere, ClobberFindings.GeomHash);
+                    foreach (var cp in PlacementExtract.FromMod(nvMods[i]))
+                        foreach (var nav in cp.Navmeshes) geom[(nav.FormKey, i)] = nav;
+                }
+                return (names, DetectorModel.MasterClosure(direct), versions, geom);
+            }
+            string NvName(FormKey k) => k == NavownFixture.NMOD ? "NMOD" : k == NavownFixture.NFWD ? "NFWD" : k == NavownFixture.NNEAR ? "NNEAR"
+                                      : k == NavownFixture.NUS ? "NUS" : k == NavownFixture.NVAN ? "NVAN" : k.ToString();
+            var o6 = Order(6);
+            var clob = ClobberFindings.Find(o6.Versions.Providers, o6.Closure, o6.Versions.Size, _ => true);
+            ClobberPopulation PopOf((FormKey Nav, int Loser, int Winner, int LoserT, int WinnerT, bool Material) c)
+                => ClobberFindings.Population(o6.Names[c.Loser], o6.Names[c.Winner], ClobberFindings.Vanilla);
+            string Row((FormKey Nav, int Loser, int Winner, int LoserT, int WinnerT, bool Material) c)
+                => $"{NvName(c.Nav)} {o6.Names[c.Loser]}->{o6.Names[c.Winner]}";
+
+            // PD-N1: the findings are the material clobbers outside the Bethesda floor.
+            var findings = clob.Where(c => ClobberFindings.IsFinding(c.Material, PopOf(c))).Select(Row).OrderBy(x => x).ToList();
+            t.Check("PD-N1 clobber findings: NMOD and NNEAR (NvA->NvB) and NUS (USSEP->NvB); NVAN (class A) and NFWD (not material) withheld",
+                    findings.SequenceEqual(new[] { "NMOD NvA.esp->NvB.esp", "NNEAR NvA.esp->NvB.esp", "NUS Unofficial Skyrim Special Edition Patch.esp->NvB.esp" }),
+                    string.Join(" | ", findings));
+            var all = clob.Select(c => $"{Row(c)} material={c.Material}").OrderBy(x => x).ToList();
+            t.Check("PD-N1 the clobber walk itself finds all five chains, NFWD not material",
+                    all.SequenceEqual(new[] { "NFWD NvA.esp->NvB.esp material=False", "NMOD NvA.esp->NvB.esp material=True",
+                                              "NNEAR NvA.esp->NvB.esp material=True", "NUS Unofficial Skyrim Special Edition Patch.esp->NvB.esp material=True",
+                                              "NVAN Dawnguard.esm->HearthFires.esm material=True" }), string.Join(" | ", all));
+
+            // PD-N2: the population by file name.
+            var pops = clob.Select(c => $"{NvName(c.Nav)}:{PopOf(c)}").OrderBy(x => x).ToList();
+            t.Check("PD-N2 populations: NUS UssepDiscarded, NVAN BethesdaFloor, NMOD/NNEAR/NFWD ModOnMod",
+                    pops.SequenceEqual(new[] { "NFWD:ModOnMod", "NMOD:ModOnMod", "NNEAR:ModOnMod", "NUS:UssepDiscarded", "NVAN:BethesdaFloor" }),
+                    string.Join(", ", pops));
+            t.Check("PD-N2 file names match whatever their letter case: dawnguard.esm x HEARTHFIRES.ESM is the floor; a lower-case USSEP loser is USSEP's",
+                    ClobberFindings.Population("dawnguard.esm", "HEARTHFIRES.ESM", ClobberFindings.Vanilla) == ClobberPopulation.BethesdaFloor
+                    && ClobberFindings.Population("unofficial skyrim special edition patch.esp", "NvB.esp", ClobberFindings.Vanilla) == ClobberPopulation.UssepDiscarded,
+                    "");
+
+            // PD-N3: the physical predicate.
+            var holdMod = ClobberFindings.Predicate(NavownFixture.NMOD, 4, 5, o6.Geom, "NvB.esp");
+            var near = ClobberFindings.Predicate(NavownFixture.NNEAR, 4, 5, o6.Geom, "NvB.esp");
+            var same = ClobberFindings.Predicate(NavownFixture.NMOD, 4, 4, o6.Geom, "NvA.esp");
+            var missing = ClobberFindings.Predicate(NavownFixture.NMOD, 4, 5, new Dictionary<(FormKey, int), NavmeshGeometry>(), "NvB.esp");
+            var o7 = Order(7);
+            var fixedMod = ClobberFindings.Predicate(NavownFixture.NMOD, 4, 6, o7.Geom, "NvFix.esp");
+            t.Check("PD-N3 NMOD: NvA's island about 2,500 u from NvB's ground is victim-only ground: Holds", holdMod.State == PhysicalState.Holds, holdMod.Detail);
+            t.Check("PD-N3 NNEAR: every NvA point within 50 u of NvB's ground: Gone", near.State == PhysicalState.Gone, near.Detail);
+            t.Check("PD-N3 loser == winner: the loser's own version wins: Gone", same.State == PhysicalState.Gone, same.Detail);
+            t.Check("PD-N3 a version's geometry unread: Unmeasured", missing.State == PhysicalState.Unmeasured, missing.Detail);
+            t.Check("PD-N3 under NvFix, which restores the island: Gone", fixedMod.State == PhysicalState.Gone, fixedMod.Detail);
+
+            // The dangling-link state for the first n plugins, noted in record order as the main walk notes it.
+            DanglingLinks Links(int n)
+            {
+                var l = new DanglingLinks();
+                for (int i = 0; i < n; i++)
+                    foreach (var rec in nvMods[i].EnumerateMajorRecords())
+                        if (rec is Mutagen.Bethesda.Skyrim.INavigationMeshGetter nm) l.NoteNavmesh(nm);
+                        else if (rec is Mutagen.Bethesda.Skyrim.IPlacedObjectGetter po) l.NotePlaced(po, i);
+                return l;
+            }
+            string Id(FormKey k) => k == NavownFixture.NE ? "NE" : k == NavownFixture.NE2 ? "NE2" : k == NavownFixture.ND ? "ND" : k == NavownFixture.NG ? "NG"
+                                  : k == NavownFixture.NX ? "NX" : k == NavownFixture.DR3 ? "DR3" : k == NavownFixture.DR4 ? "DR4" : k == NavownFixture.VF ? "VF" : k.ToString();
+            int Owner(NavVersions v, FormKey nav) => v.Providers.TryGetValue(nav, out var pr) && pr.Count > 0 ? pr[^1] : -1;
+            var l6 = Links(6);
+            var f6 = l6.Find(k => Owner(o6.Versions, k), _ => "IC", reportDoorIdx: false);
+            var kinds = f6.Rows.Select(r => $"{r.Kind} {Id(r.Rec)}").OrderBy(x => x).ToList();
+
+            // PD-N4: the walk, at the triangle count.
+            t.Check("PD-N4 dangles: DOOR-TRI ND, DOOR-GONE NG, DOOR-NAV DR3, EDGE-IDX NE and VF (index = count), EDGE-NAV NX; NE2 (count - 1) is not one",
+                    kinds.SequenceEqual(new[] { "DOOR-GONE NG", "DOOR-NAV DR3", "DOOR-TRI ND", "EDGE-IDX NE", "EDGE-IDX VF", "EDGE-NAV NX" }),
+                    string.Join(", ", kinds));
+            var f6i = l6.Find(k => Owner(o6.Versions, k), _ => "IC", reportDoorIdx: true);
+            t.Check("PD-N4 DOOR-IDX is retired: counted once, listed only with --door-idx",
+                    f6.DoorIdxSuppressed == 1 && !f6.Rows.Any(r => r.Kind == "DOOR-IDX")
+                    && f6i.Rows.Count(r => r.Kind == "DOOR-IDX" && r.Rec == NavownFixture.DR4) == 1,
+                    $"suppressed {f6.DoorIdxSuppressed}; with the flag {f6i.Rows.Count(r => r.Kind == "DOOR-IDX")}");
+
+            // PD-N5: the predicate, re-asked of a winning state.
+            var l7 = Links(7);
+            var neBase = l6.Predicate("EDGE-IDX", NavownFixture.NE, NavownFixture.NT);
+            var ne2 = l6.Predicate("EDGE-IDX", NavownFixture.NE2, NavownFixture.NT);
+            var neFix = l7.Predicate("EDGE-IDX", NavownFixture.NE, NavownFixture.NT);
+            var ndBase = l6.Predicate("DOOR-TRI", NavownFixture.ND, NavownFixture.DR1);
+            var ndFix = l7.Predicate("DOOR-TRI", NavownFixture.ND, NavownFixture.DR1);
+            t.Check("PD-N5 EDGE-IDX at exactly the target's count: Holds", neBase.State == PhysicalState.Holds, neBase.Detail);
+            t.Check("PD-N5 EDGE-IDX at count - 1: Gone", ne2.State == PhysicalState.Gone, ne2.Detail);
+            t.Check("PD-N5 EDGE-IDX under NvFix, which gives NT a third triangle: Gone", neFix.State == PhysicalState.Gone, neFix.Detail);
+            t.Check("PD-N5 DOOR-TRI at exactly its own count: Holds, with and without NvFix",
+                    ndBase.State == PhysicalState.Holds && ndFix.State == PhysicalState.Holds, $"{ndBase.Detail} / {ndFix.Detail}");
+
+            // PD-N6: a dangle with only vanilla-named plugins on both ends is the floor, withheld; the rest are findings.
+            bool Touched(FormKey rec, string role) => DanglingLinks.ModTouched(
+                role == "navmesh" ? o6.Versions.Providers.GetValueOrDefault(rec) : l6.RefOverriders.GetValueOrDefault(rec),
+                i => ClobberFindings.Vanilla.Contains(o6.Names[i]));
+            var emitted = f6.Rows.Where(r => DanglingLinks.IsFinding(Touched(r.Rec, r.RecRole), Touched(r.Other, r.OtherRole)))
+                                 .Select(r => $"{r.Kind} {Id(r.Rec)}").OrderBy(x => x).ToList();
+            t.Check("PD-N6 emitted dangles: all but VF->VT (Dawnguard.esm on both ends)",
+                    emitted.SequenceEqual(new[] { "DOOR-GONE NG", "DOOR-NAV DR3", "DOOR-TRI ND", "EDGE-IDX NE", "EDGE-NAV NX" }),
+                    string.Join(", ", emitted));
+        }
+        finally { foreach (var mo in nvMods) (mo as IDisposable)?.Dispose(); }
     });
 }
