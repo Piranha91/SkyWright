@@ -898,6 +898,28 @@ def main():
         return ok, (f"{first!r} in report.md {sec.count(first)} time(s), report.html {hsec.count(first)}; "
                     f"sameScope words {words.get('sameScope')!r}")
 
+    # 47. a long list of locations is printed up to the skill's bound, with the rest counted and in the evidence index
+    #     (Gate C round 1, H2: Group 6's footprint list alone took about seven pages, before this task too)
+    def long_location_list_bounded():
+        cells = [{"worldspace": "Tamriel", "x": x, "y": y} for x in range(-20, -10) for y in (24, 25, 26)]
+        both = [row("CONTACT", MOD_B, MOD_A, f"00080{i}:{MOD_A}") for i in (1, 2)]
+        results = {(CONTACT, "baseline"): both, (CONTACT, "dependency-only"): [], (CONTACT, "plus-a"): [],
+                   (CONTACT, "plus-b"): []}
+        plan, md, html, index = compile_and_render(four_arms(), results, [MOD_A, MOD_B], want_index=True, cells=cells)
+        words = (priorities().get("reader") or {}).get("locationOrder") or {}
+        k, more_t = words.get("maxLocations"), words.get("moreLocations")
+        lo = words.get("heading") or "Load order for these locations"
+        sec, hsec = section_text(md, lo), html_section(html, lo)
+        labels = [f"Tamriel ({c['x']}, {c['y']})" for c in cells]
+        if not (isinstance(k, int) and 0 < k < len(labels) and more_t):
+            return False, f"skill data names no bound below {len(labels)}: maxLocations {k!r}, moreLocations {more_t!r}"
+        more = R.bind(more_t, {"count": len(labels) - k})
+        flat = " ".join(sec.split())
+        ok = (all(x in flat for x in labels[:k]) and not any(x in flat or x in hsec for x in labels[k:])
+              and more in flat and more in " ".join(hsec.split()) and all(x in index for x in labels))
+        return ok, (f"printed {sum(1 for x in labels if x in flat)} of {len(labels)} (bound {k}); "
+                    f"more-line on the page {more in flat}; all in the index {all(x in index for x in labels)}")
+
     # ---- 4.24 phase 1: the admission rule everywhere (cells 17-37)
     pw = (priorities().get("reader") or {}).get("prediction") or {}
 
@@ -1138,6 +1160,7 @@ def main():
             ("sibling-bundle/plan-takes-the-sibling-bundle-option", sibling_cli_flag),
             ("plain-language/the-measured-load-order-takes-its-article", measured_load_order_article),
             ("page-budget/a-shared-list-of-locations-is-printed-once", shared_scope_printed_once),
+            ("page-budget/a-long-list-of-locations-is-bounded-and-the-rest-counted", long_location_list_bounded),
             ("plain-language/unmeasured-area-id-never-reaches-the-page", extent_ids_not_on_page),
             ("plain-language/count-once-and-setup-name-in-sentence-case", count_once_setup_lowercase),
             ("plain-language/unmapped-reason-code-never-reaches-the-page", unmapped_code_not_on_page),
