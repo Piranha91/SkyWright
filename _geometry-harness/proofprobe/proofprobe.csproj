@@ -50,6 +50,7 @@
     <Compile Include="..\_shared\WorldState.cs" Link="WorldState.cs" />
     <Compile Include="..\_shared\StateClass.cs" Link="StateClass.cs" />
     <Compile Include="..\_shared\StateArm.cs" Link="StateArm.cs" />
+    <Compile Include="..\_shared\StateFieldKey.cs" Link="StateFieldKey.cs" />
     <Compile Include="..\overlapprobe\SceneCapture.cs" Link="SceneCapture.cs" />
   </ItemGroup>
   <ItemGroup>

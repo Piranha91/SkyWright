@@ -316,7 +316,9 @@ if (routeOn)
     // piece or a taller actor, so a cell's field is keyed on (cell, state). The navmesh and its graph do not depend on the
     // state and stay keyed on the cell alone. Rebuilding for every state would be waste — a state's population differs
     // from the baseline's only on the references the flip changes — so the baseline field is reused unless the arm moves
-    // one of the cell's own floor candidates or placed actors, which is a memoised lookup rather than a rebuild.
+    // one of the cell's own references (the band's actors) or one of its floor candidates (for an exterior cell the 3x3
+    // and the reach, not the cell alone): StateFieldKey.For, over a neighbourhood memoised per cell.
+    var nbByCell = new Dictionary<FormKey, (List<PlacedRef> Refs, List<((int X, int Y) Grid, float[,] Heights)> Land)>();
     (Aabb Box, TriangleSoup Soup)? FloorGeometry(PlacedRef r)
     {
         if (r.Base is not { } b || !idx.BaseMesh.TryGetValue(b, out var rel)) return null;
@@ -337,11 +339,17 @@ if (routeOn)
         why = "";
         var pop = PopOfArm(arm);
         var crefs = cellRefs.TryGetValue(cell, out var cr) ? cr : new List<PlacedRef>();
-        // Does this state differ from the baseline anywhere in the cell's own references? If not, its field IS the
+        // An exterior cell's floor comes from its 3x3 and the reach, not from its own references alone.
+        (List<PlacedRef> Refs, List<((int X, int Y) Grid, float[,] Heights)> Land)? nb = null;
+        if (cellGridOf.TryGetValue(cell, out var cg) && floorRefsByWorld.ContainsKey(cg.Wrld))
+        {
+            if (!nbByCell.TryGetValue(cell, out var got0))
+                nbByCell[cell] = got0 = rwalk.Floor.NeighbourhoodOf(cg.Wrld, (cg.X, cg.Y));   // the 3x3 by position plus the reach (FloorFeed)
+            nb = got0;
+        }
+        // Does this state differ from the baseline anywhere the field is built from? If not, its field IS the
         // baseline's, and the key collapses.
-        string key = arm.IsBaseline ? EnablePopulation.BaselineStateName : arm.Name;
-        if (!arm.IsBaseline && !crefs.Any(r => pop.Enabled(r.FormKey) != baselinePop.Enabled(r.FormKey)))
-            key = EnablePopulation.BaselineStateName;
+        string key = StateFieldKey.For(arm, crefs, nb?.Refs, pop, baselinePop);
         var usePop = key == EnablePopulation.BaselineStateName ? baselinePop : pop;
         if (fieldByCellState.TryGetValue((cell, key), out var got)) return got;
         var band = ActorBand.ForCell(crefs, npcFacts, raceFacts, fallbackTop, fallbackSrc, usePop.Predicate);
@@ -353,11 +361,7 @@ if (routeOn)
             fieldByCellState[(cell, key)] = null;
             return null;
         }
-        if (cellGridOf.TryGetValue(cell, out var cg) && floorRefsByWorld.TryGetValue(cg.Wrld, out var frw))
-        {
-            var (nbRefs, nbLand) = rwalk.Floor.NeighbourhoodOf(cg.Wrld, (cg.X, cg.Y));   // the 3x3 by position plus the reach (FloorFeed)
-            floor = FloorFeed.Build(nbRefs, FloorGeometry, nbLand, enabled: usePop.Predicate);
-        }
+        if (nb is { } n) floor = FloorFeed.Build(n.Refs, FloorGeometry, n.Land, enabled: usePop.Predicate);
         else floor = FloorFeed.Build(crefs, FloorGeometry, null, enabled: usePop.Predicate);
         var made = (ActorBand.PhysicalControllerTop(band.Top), floor);
         fieldByCellState[(cell, key)] = made;
