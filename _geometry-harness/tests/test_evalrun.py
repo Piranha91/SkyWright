@@ -18,6 +18,7 @@ import hashlib
 import json
 import os
 import shutil
+import struct
 import subprocess
 import sys
 import tempfile
@@ -6914,6 +6915,118 @@ def case_51(tmp):
 
 CASES["case-49"] = case_49
 CASES["case-51"] = case_51
+
+
+def _fixture_sub(sig: bytes, data: bytes) -> bytes:
+    return sig + struct.pack("<H", len(data)) + data
+
+
+def _fixture_rec(sig: bytes, fid: int, body: bytes, flags: int = 0) -> bytes:
+    return sig + struct.pack("<IIIIHH", len(body), flags, fid, 0, 44, 0) + body
+
+
+def _fixture_grup(label: bytes, gtype: int, content: bytes) -> bytes:
+    return b"GRUP" + struct.pack("<I", 24 + len(content)) + label + struct.pack("<iHHI", gtype, 0, 0, 0) + content
+
+
+def _fixture_plugin(records: int, tree: bytes) -> bytes:
+    """A hand-written SSE plugin: a TES4 header with no masters, then the given group tree."""
+    hedr = _fixture_sub(b"HEDR", struct.pack("<fiI", 1.71, records, 0x900)) + _fixture_sub(b"CNAM", b"fixture\0")
+    return _fixture_rec(b"TES4", 0, hedr) + tree
+
+
+def _fixture_instance(root: Path, plugin_name: str, data: bytes) -> list:
+    """A scratch MO2 instance (profile P, one mod folder holding the plugin, an empty game Data folder); returns the
+    probe flags that name it, so no real instance is read."""
+    inst = root / "inst"
+    (inst / "profiles" / "P").mkdir(parents=True, exist_ok=True)
+    (inst / "mods" / "Fixture").mkdir(parents=True, exist_ok=True)
+    (inst / "overwrite").mkdir(exist_ok=True)
+    (root / "game" / "Data").mkdir(parents=True, exist_ok=True)
+    (inst / "ModOrganizer.ini").write_text("[General]\nselected_profile=@ByteArray(P)\n", encoding="utf-8")
+    (inst / "mods" / "Fixture" / plugin_name).write_bytes(data)
+    (inst / "profiles" / "P" / "plugins.txt").write_text(f"*{plugin_name}\n", encoding="utf-8")
+    (inst / "profiles" / "P" / "loadorder.txt").write_text(f"{plugin_name}\n", encoding="utf-8")
+    (inst / "profiles" / "P" / "modlist.txt").write_text("+Fixture\n", encoding="utf-8")
+    return ["--instance", str(inst), "--game", str(root / "game"), "--profile", "P"]
+
+
+def _build_probe(tmp: Path, probe: str):
+    """`probe` built from this checkout into an empty folder under `tmp`: (exe, None), or (None, one sentence why not).
+    Never an older binary."""
+    out = Path(tmp) / "probe-build" / probe
+    exe = out / (f"{probe}.exe" if os.name == "nt" else probe)
+    if exe.exists():
+        return exe, None
+    csproj = HARNESS / probe / f"{probe}.csproj"
+    r = subprocess.run(["dotnet", "build", str(csproj), "-c", "Release", "--nologo", "--disable-build-servers",
+                        "--artifacts-path", str(Path(tmp) / "probe-build" / "artifacts" / probe), "-o", str(out)],
+                       capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=900)
+    if r.returncode != 0 or not exe.exists():
+        tail = "\n".join((r.stdout + r.stderr).strip().splitlines()[-8:])
+        return None, f"{probe} did not build from {csproj} (exit {r.returncode}): {tail}"
+    return exe, None
+
+
+def _run_fixture_probe(exe: Path, args: list, root: Path):
+    env = dict(os.environ, HOUSECARL_RUNLOG_DIR=str(root / "runlog"))
+    env.pop("HOUSECARL_HARNESS_CONFIG", None)
+    return subprocess.run([str(exe)] + [str(a) for a in args], capture_output=True, text=True, encoding="utf-8",
+                          errors="replace", env=env, timeout=600)
+
+
+def case_71(tmp):
+    """Defect D-2 (task 2026-10-14-depprobe-judged-count-includes-unjudgeable). A REAL depprobe run, built from this
+    checkout, on a hand-written plugin whose one declared edge is withheld (its enable parent is the player, 0x14):
+    every edge is Unjudgeable. Its JSON, read through the shipped registry's `geometry.declared-dependencies`
+    adapter by the Validator, must be refused `extraction-failed` with a coverage line whose Judged and Unjudgeable
+    are disjoint (0 and 1): zero findings there is zero assessed edges, not a measured null."""
+    case = "case-71-depprobe-all-unjudgeable"
+    root = tmp / case
+    root.mkdir(parents=True, exist_ok=True)
+    exe, why = _build_probe(tmp, "depprobe")
+    check(exe is not None, f"{case}: depprobe built from this checkout" + (f" - {why}" if why else ""))
+    if exe is None:
+        return
+    cell = _fixture_rec(b"CELL", 0x800, _fixture_sub(b"EDID", b"DepCell\0") + _fixture_sub(b"DATA", struct.pack("<H", 1)))
+    refr = _fixture_rec(b"REFR", 0x801, _fixture_sub(b"EDID", b"DepRef\0") + _fixture_sub(b"NAME", struct.pack("<I", 0x802))
+                        + _fixture_sub(b"XESP", struct.pack("<IB3x", 0x14, 0))
+                        + _fixture_sub(b"DATA", struct.pack("<6f", 0, 0, 0, 0, 0, 0)))
+    tree = _fixture_grup(b"CELL", 0, _fixture_grup(struct.pack("<i", 0), 2, _fixture_grup(struct.pack("<i", 0), 3,
+                         cell + _fixture_grup(struct.pack("<I", 0x800), 6, _fixture_grup(struct.pack("<I", 0x800), 9, refr)))))
+    flags = _fixture_instance(root, "DepFixture.esp", _fixture_plugin(2, tree))
+    out = root / "depprobe.json"
+    r = _run_fixture_probe(exe, flags + ["--json", out], root)
+    expect(r.returncode, 0, f"{case}: depprobe exit")
+    doc = load(out) or {}
+    # The fixture's own preconditions: one edge, withheld because its host is the player.
+    expect((doc.get("edges"), (doc.get("verdicts") or {}).get("Unjudgeable"),
+            (doc.get("unjudgeable") or {}).get("HostIsPlayer")), (1, 1, 1),
+           f"{case}: precondition - one declared edge, Unjudgeable, blocker HostIsPlayer")
+
+    registry = load(HARNESS.parent / ".claude" / "skills" / "world-edit-compatibility" / "references"
+                    / "check-registry.json") or {}
+    reg_check = next((c for c in registry.get("checks") or [] if c.get("id") == "geometry.declared-dependencies"), None)
+    check(reg_check is not None, f"{case}: the shipped registry has geometry.declared-dependencies")
+    if reg_check is None:
+        return
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("evalrun_case71", EVALRUN)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    arm = {"armId": "baseline", "kind": "baseline"}
+    res = mod.Validator(root, {"arms": [arm]}).validate(
+        check={"checkId": "geometry.declared-dependencies"}, arm=arm, part=None, adapter=reg_check["adapter"],
+        exit_code=0, log_text=r.stdout, outputs=[out], pre_hashes={}, started=None)
+    causes = [x["cause"] for x in res.get("rejections") or []]
+    check("extraction-failed" in causes,
+          f"{case}: an order whose every edge is Unjudgeable is refused extraction-failed (got {causes})")
+    cov = (res.get("coverage") or [{}])[0]
+    expect((cov.get("Judged"), sum((cov.get("Unjudgeable") or {}).values())), (0, 1),
+           f"{case}: the coverage line's Judged and Unjudgeable are disjoint")
+
+
+CASES["case-71"] = case_71
 
 
 def pin_standard_settings(tmp: Path) -> None:
