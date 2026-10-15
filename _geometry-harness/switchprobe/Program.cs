@@ -46,6 +46,8 @@ using HousecarlCore.Progress;
 //   --extra-plugin P.esp  load this plugin file after the order (a test fixture); repeatable
 
 using var __run = RunLog.BeginProcess("switchprobe", args);
+// Known answers for the trigger map over a synthetic order (_shared/SwitchFixture.cs).
+if (args.Length >= 1 && args[0] == "--self-test") return SwitchSelfTest.Run();
 
 string Instance = HarnessTarget.Instance;
 string GamePath = HarnessTarget.Game;

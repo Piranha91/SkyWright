@@ -55,6 +55,8 @@ using HousecarlCore.Progress;
 using var __run = RunLog.BeginProcess("blockprobe", args);
 // Known answers for which version of a moved or deleted reference this probe's walk keeps (_shared/MovedRefFixture.cs).
 if (args.Length >= 1 && args[0] == "--moved-ref-selftest") return BlockSelfTest.Run();
+// Known answers for the per-reference decisions over a synthetic two-room order (_shared/BlockFixture.cs).
+if (args.Length >= 1 && args[0] == "--self-test") return BlockRouteSelfTest.Run();
 
 string Instance = HarnessTarget.Require(HarnessTarget.Instance, "MO2 instance directory", "instance");
 string GamePath = HarnessTarget.Require(HarnessTarget.Game, "game directory", "game");

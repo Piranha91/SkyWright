@@ -63,6 +63,8 @@ using HousecarlCore.Progress;
 using var __run = RunLog.BeginProcess("driftprobe", args);
 // Known answers for which version of a moved or deleted reference this probe's walk keeps (_shared/MovedRefFixture.cs).
 if (args.Length >= 1 && args[0] == "--moved-ref-selftest") return DriftSelfTest.Run();
+// Known answers for CHECK 2 (the alias-split decisions) over a synthetic quest order (_shared/DriftFixture.cs).
+if (args.Length >= 1 && args[0] == "--self-test") return DriftQuestSelfTest.Run();
 
 string Instance = HarnessTarget.Instance;
 string GamePath = HarnessTarget.Game;
