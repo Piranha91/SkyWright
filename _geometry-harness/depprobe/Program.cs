@@ -60,6 +60,8 @@ using HousecarlCore.Progress;
 // Nothing is compiled in — see _shared/HarnessTarget.cs. Flags win over the environment and over
 // harness.local.json; Require() runs AFTER them.
 using var __run = RunLog.BeginProcess("depprobe", args);
+// Known answers for the by-name population split over a synthetic order (_shared/BaseGameFixture.cs).
+if (args.Length >= 1 && args[0] == "--self-test") return DepSelfTest.Run();
 
 string Instance = HarnessTarget.Instance;
 string GamePath = HarnessTarget.Game;

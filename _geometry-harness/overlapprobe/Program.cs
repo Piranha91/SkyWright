@@ -154,6 +154,8 @@ See overlapprobe/Program.cs usage documentation. Help performs no load-order sca
     return 0;
 }
 using var __run = RunLog.BeginProcess("overlapprobe", args);
+// Known answers for the by-name population split over a synthetic order (_shared/BaseGameFixture.cs).
+if (args.Length >= 1 && args[0] == "--self-test") return OverlapSelfTest.Run();
 
 string Instance = HarnessTarget.Instance;
 string GamePath = HarnessTarget.Game;

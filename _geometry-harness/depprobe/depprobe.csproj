@@ -21,6 +21,9 @@
     <Compile Include="..\_shared\HarnessOrderCli.cs" Link="HarnessOrderCli.cs" />
     <Compile Include="..\_shared\Configuration.cs" Link="Configuration.cs" />
     <Compile Include="..\_shared\DetectorModel.cs" Link="DetectorModel.cs" />
+    <Compile Include="..\_shared\ProbeSelfTest.cs" Link="ProbeSelfTest.cs" />
+    <Compile Include="..\_shared\MovedRefFixture.cs" Link="MovedRefFixture.cs" />
+    <Compile Include="..\_shared\BaseGameFixture.cs" Link="BaseGameFixture.cs" />
     <Compile Include="..\_shared\PlacementHistory.cs" Link="PlacementHistory.cs" />
     <Compile Include="..\_shared\DeletionHistory.cs" Link="DeletionHistory.cs" />
     <Compile Include="..\_shared\OverlapIndex.cs" Link="OverlapIndex.cs" />
