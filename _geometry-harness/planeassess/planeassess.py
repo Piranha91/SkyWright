@@ -381,6 +381,7 @@ def rule_issue(s, eye, rule):
     """None when the occlusion rule predicts this shape from this eye, else the refusal reason (viewprobe's
     ShapeOcclusion.Shadow and PortalBoxOrientation.Check, read for scoping)."""
     r, tol = refr_rotation(*s["rot"]), rule["maximumAbsNormalZ"]
+    utol = rule.get("uprightMaximumAbsNormalZ", tol)          # the upright class's own tolerance; absent: the old one
     if s["kind"] not in ("Box", "PortalBox"):
         return "not a Box or PortalBox primitive"
     full = shape_polys(s)
@@ -388,7 +389,7 @@ def rule_issue(s, eye, rule):
     if s["kind"] == "Box":
         if not rule.get("boxSilhouette"):
             return "Box face behavior unassessed (rule has no Box silhouette)"
-        if max(abs(r[0][2]), abs(r[1][2])) > tol:
+        if max(abs(r[0][2]), abs(r[1][2])) > utol:
             return "box not upright"
         if eye_inside_box(s, eye):
             return "eye inside the box"
@@ -396,7 +397,7 @@ def rule_issue(s, eye, rule):
             return "near-eye"
         return None
     n = r[1]
-    if abs(n[2]) > tol:
+    if abs(n[2]) > utol:
         if not rule.get("horizontalPortalBoxNormalDownEyeAbove"):
             return "PortalBox tilted"
         if not (abs(n[0]) <= tol and abs(n[1]) <= tol):
