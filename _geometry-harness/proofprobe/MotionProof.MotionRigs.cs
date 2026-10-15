@@ -183,5 +183,21 @@ static partial class MotionProof
             var a = SweptGeometry.ContactTube(placed, sa, ta); var b = SweptGeometry.ContactTube(placed, sb, tb);
             return (a.Decision == "never" && b.Decision == "cannot_tell", $"marker {a.Decision} {a.Reason} | renamed {b.Decision} {b.Reason}");
         });
+        // MR-10: two movers. A = fixture R; B = a 10 u cube at (60,0,0) sliding x 0..1 (CLAMP). A's marker (plane y = 0) passes
+        // through B's cube for slide 35..66; A's Frame stays about 450 u away. Rejects the two-mover never test reading A's marker.
+        Case(check, "MR-10 two movers: A's marker-only crossing is never; renamed marker not never", () =>
+        {
+            var bNif = ChainNif(null, new[] { ("Body", "N2", Cube(60, 0, 0, 5), false) }, new[] { ("Nudge", new[] { new FxKeys("N1", X0: 0, X1: 1) }, CycleType.CYCLE_CLAMP) });
+            SweptPairDecision Both(byte[] aNif)
+            {
+                var ma = NifMotion.Read(aNif, null); var mb = NifMotion.Read(bNif, null);
+                var ra = MrRegion(aNif); var rb = MrRegion(bNif);
+                var ha = SweptGeometry.HeldSoups(aNif, ma, VolumeGeometry.Render, MrZ, MrZ, 1f);
+                var hb = SweptGeometry.HeldSoups(bNif, mb, VolumeGeometry.Render, MrZ, MrZ, 1f);
+                return SweptGeometry.ContactBoth(ra, ha, rb, hb, null);
+            }
+            var a = Both(MrRigR(MrMarker)); var b = Both(MrRigR(MrRenamed));
+            return (a.Decision == "never" && b.Decision != "never", $"marker {a.Decision} {a.Reason} | renamed {b.Decision} {b.Reason}");
+        });
     }
 }
