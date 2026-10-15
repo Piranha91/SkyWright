@@ -645,6 +645,15 @@ def main():
               and bool(src) and src in text and "sibl00000000" in index and "sibl00000000" not in md)
         return ok, f"items {items}; source sentence {src[:120]!r} on the page: {bool(src) and src in text}"
 
+    def validation_by_item():
+        plan, md, html, index = patched_with_sibling("same")
+        p = reader(plan).get("prediction") or {}
+        val = reader(plan).get("validation") or {}
+        by = val.get("byItem")
+        ok = (isinstance(by, list) and len(by) == len(p.get("items") or [])
+              and by == [{"hits": 2, "open": 1, "notMeasured": 0}])
+        return ok, f"validation.byItem {by!r} for items {[(i.get('checkId'), i.get('count')) for i in p.get('items') or []]}"
+
     def sibling_foreign_refused():
         try:
             patched_with_sibling("foreign")
@@ -695,6 +704,7 @@ def main():
             ("detail-list/set-aside-results-are-in-the-evidence-index-with-why", detail_set_aside_in_index),
             ("detail-list/already-present-pair-is-not-listed", detail_already_present_not_listed),
             ("sibling-bundle/patched-report-attributes-from-the-unpatched-evaluation", sibling_attributes),
+            ("prediction-after-patch-tally/validation-counts-per-prediction-item", validation_by_item),
             ("sibling-bundle/a-sibling-without-the-setup-is-refused", sibling_foreign_refused),
             ("sibling-bundle/a-check-measured-differently-stays-unseparated", sibling_disagreement_unseparated),
             ("sibling-bundle/a-check-run-by-another-probe-build-stays-unseparated",

@@ -31,7 +31,11 @@ using HousecarlCore.Progress;
 // patch. --verify closes that gap by reading the candidate's RECORDS and checking them against the
 // exact FormKeys a detector emitted with --emit. See ../_shared/ConflictReport.cs.
 //
-// usage: patchprobe [--pair A.esp B.esp] [--verify conflicts.json] [--list N] [--roots "C:\a;D:\b"]
+// usage: patchprobe [--pair A.esp B.esp] [--verify conflicts.json] [--list N] [--roots "C:\a;D:\b"] [--json PATH]
+//
+// --json PATH writes the hit list (schema 1, ../_shared/DiscoveryHits.cs) beside the printed answer: every plugin
+// that masters an asked pair, every cross-list patch the survey reports, each with the sha256 of its file, and each
+// download matched by name with no hash and the reason. --verify's answer stays text, so --json with --verify refuses.
 
 // Nothing is compiled in — see ../_shared/HarnessTarget.cs. --roots overrides the sweep list;
 // Require runs after the flag loop so passing it never trips the check.
@@ -43,6 +47,8 @@ string target = HarnessTarget.Instance;
 var wantPairs = new List<(string A, string B)>();
 int listN = 30;
 var verifyFiles = new List<string>();
+string? jsonPath = null;
+bool jsonMalformed = false;
 
 for (int i = 0; i < args.Length; i++)
 {
@@ -50,7 +56,16 @@ for (int i = 0; i < args.Length; i++)
     else if (args[i] == "--list" && i + 1 < args.Length) listN = int.Parse(args[++i]);
     else if (args[i] == "--roots" && i + 1 < args.Length) { roots = args[++i].Split(';').ToList(); }
     else if (args[i] == "--verify" && i + 1 < args.Length) verifyFiles.Add(args[++i]);
+    else if (args[i] == "--json" && i + 1 < args.Length && !args[i + 1].StartsWith("--")) jsonPath = args[++i];
+    else if (args[i] == "--json") jsonMalformed = true;
 }
+if (jsonMalformed) { Console.Error.WriteLine("--json needs a file path: pass --json PATH."); return 2; }
+if (jsonPath is not null && verifyFiles.Count > 0)
+{
+    Console.Error.WriteLine("--json is not written in --verify mode (its record-coverage answer is text only): drop --json or --verify.");
+    return 2;
+}
+var hits = jsonPath is null ? null : new DiscoveryHits("patchprobe", wantPairs.Count > 0 ? "pair" : "survey");
 roots = HarnessTarget.RequireRoots(roots, "--roots");
 downloadPool = HarnessTarget.Require(downloadPool, "download pool directory", "downloadPool");
 target = HarnessTarget.Require(target, "MO2 instance directory", "instance");
@@ -63,7 +78,7 @@ var sw = Stopwatch.StartNew();
 var instances = new List<Instance>();
 foreach (var root in roots)
 {
-    if (!Directory.Exists(root)) continue;
+    if (!Directory.Exists(root)) { hits?.NotSearched("root", root, "the search root does not exist"); continue; }
     // A recursive enumeration THROWS partway through on the first unreadable directory (a drive
     // root has System Volume Information), losing every result found so far. Walk it manually so
     // one denied folder costs that folder and nothing else.
@@ -146,6 +161,7 @@ foreach (var root in roots)
 static string Norm(string d) => Path.TrimEndingDirectorySeparator(Path.GetFullPath(d));
 var targetInst = instances.FirstOrDefault(i => string.Equals(Norm(i.Dir), Norm(target), StringComparison.OrdinalIgnoreCase));
 Console.WriteLine($"MO2 instances found: {instances.Count}");
+foreach (var inst in instances) hits?.Searched("instance", inst.Dir, inst.Name);
 foreach (var inst in instances)
     Console.WriteLine($"   {(inst == targetInst ? "TARGET " : "       ")}{inst.Name,-28} profile '{inst.Profile}'  {inst.Active.Count,5} active plugins");
 if (targetInst is null) { Console.Error.WriteLine("target instance not found."); return 1; }
@@ -243,6 +259,19 @@ if (Directory.Exists(downloadPool))
     }
 }
 Console.WriteLine($"download pool: {poolNames.Count:N0} archives with metadata at {downloadPool}");
+if (Directory.Exists(downloadPool)) hits?.Searched("download-pool", downloadPool, "archive names from .meta files; no archive opened");
+else hits?.NotSearched("download-pool", downloadPool, "the download pool directory does not exist");
+
+void FileHit(Found f, string kind, Dictionary<string, object?> detail)
+{
+    var hash = DiscoveryHits.HashFile(f.FullPath, out var why);
+    hits!.Hit(f.Plugin, kind, new() { ["instance"] = f.Instance, ["mod"] = f.Mod, ["path"] = f.FullPath },
+              hash, "file", f.Masters, detail, why, ioFailure: hash is null);
+}
+static string KindOf(Where w) => w switch
+{
+    Where.Active => "active", Where.Installed => "installed", _ => "other-list",
+};
 
 // ---------------------------------------------------------------------------------------
 // 4. Answer
@@ -268,7 +297,12 @@ void Report(string a, string b)
         {
             var best = g.OrderBy(x => (int)x.State).First();
             Console.WriteLine($"    [{best.State,-16}] {g.Key}");
-            foreach (var f in g.OrderBy(x => x.Instance)) Console.WriteLine($"          {f.Instance,-26} mod '{f.Mod}'  ({f.State})");
+            foreach (var f in g.OrderBy(x => x.Instance))
+            {
+                Console.WriteLine($"          {f.Instance,-26} mod '{f.Mod}'  ({f.State})");
+                if (hits is not null)
+                    FileHit(f, KindOf(f.State), new() { ["pair"] = new[] { a, b }, ["state"] = f.State.ToString() });
+            }
         }
     }
 
@@ -285,7 +319,13 @@ void Report(string a, string b)
     // Uninstalled candidates, by name.
     string sa = Stem(a), sb = Stem(b);
     var cand = poolNames.Where(p => Mentions(p, sa) && Mentions(p, sb)).Take(6).ToList();
-    foreach (var c in cand) Console.WriteLine($"    [DOWNLOAD (name)] {c.File}    (mod page: {c.ModName})");
+    foreach (var c in cand)
+    {
+        Console.WriteLine($"    [DOWNLOAD (name)] {c.File}    (mod page: {c.ModName})");
+        hits?.Hit(c.File, "download-name", new() { ["archive"] = c.File, ["modName"] = c.ModName }, null, "", null,
+                  new() { ["pair"] = new[] { a, b } },
+                  "matched by archive name only; patchprobe does not open archives (poolprobe reads their plugins)");
+    }
 }
 
 // ---------------------------------------------------------------------------------------
@@ -465,24 +505,14 @@ else if (wantPairs.Count > 0)
 }
 else
 {
-    // Default: the pairs the other probes actually flagged in this load order.
-    Console.WriteLine("\n──────── the pairs this session's detectors flagged ────────");
-    var flagged = new (string A, string B)[]
-    {
-        ("BluePalaceTerrace.esp", "BetterQuestObjectives.esp"),
-        ("Grand Solitude - Pilgrim patch.esp", "Unofficial Skyrim Special Edition Patch.esp"),
-        ("middenexpandedSSE.esp", "JKs College of Winterhold - OCW Patch.esp"),
-        ("The Great City of Winterhold v4.esp", "JKs College of Winterhold - OCW Patch.esp"),
-        ("Unofficial Skyrim Special Edition Patch.esp", "SurWR.esp"),
-        ("Unofficial Skyrim Special Edition Patch.esp", "WindhelmSSE.esp"),
-        ("middenexpandedSSE.esp", "The Great City of Winterhold v4.esp"),
-    };
-    foreach (var (a, b) in flagged) Report(a, b);
+    // No pair was asked for: answer none rather than guess, say how to ask, then run the cross-list survey.
+    Console.WriteLine("\n──────── pairs ────────");
+    Console.WriteLine("   no pair asked: pass --pair A.esp B.esp, or --verify FILE (a detector's --emit output), for a per-pair answer");
 
     // ---------------------------------------------------------------------------------------
     // Cross-list patches, filtered to the ones that would actually apply.
     // ---------------------------------------------------------------------------------------
-    // The unfiltered version of this list was 6,417 plugins and unreadable, because most of them
+    // Unfiltered, this list runs to thousands of plugins and is unreadable, because most of them
     // patch mods the target list does not have. A patch is only
     // installable if EVERY master it declares is present and active here — that is a hard,
     // checkable property of the file, not a heuristic, and it turns the list into "patches that
@@ -515,8 +545,8 @@ else
     var applicable = missing.Where(m => m.Best.Absent.Length == 0).ToList();
     var nearMiss = missing.Where(m => m.Best.Absent.Length == 1).ToList();
 
-    // Applicability alone still let 2,123 through, and reading them showed why: CBBE.esp,
-    // Wyrmstooth.esp, KS Hairdo's.esp, High Poly Head.esm. Those are MODS, and a mod whose only
+    // Applicability alone still lets through body, hair, quest and head mods whose only masters are
+    // vanilla. Those are MODS, and a mod whose only
     // masters are vanilla is trivially "applicable" while answering a question nobody asked. What
     // makes a plugin a PATCH is that it masters something a mod author had to opt into — so the
     // filter is: at least one master outside the set nearly everything declares.
@@ -532,6 +562,12 @@ else
 
     Console.WriteLine($"\n   ---- APPLICABLE PATCHES, most-corroborated first ----");
     Console.WriteLine($"   (the list count is the signal: N curated lists shipped this patch and {targetInst.Name} does not)");
+    if (hits is not null)
+        foreach (var m in patches.Concat(nearMiss.Where(n => PatchShaped(n.Best.F) && !Generated.Contains(n.Plugin))))
+            FileHit(m.Best.F, "other-list", new()
+            {
+                ["lists"] = m.Lists, ["absentMasters"] = m.Best.Absent, ["applicable"] = m.Best.Absent.Length == 0,
+            });
     foreach (var m in patches.OrderByDescending(m => m.Lists.Count).ThenBy(m => m.Plugin).Take(listN))
         Console.WriteLine($"   {m.Lists.Count,2} lists  {m.Plugin}"
                         + $"\n           masters: {string.Join(", ", m.Best.F.Masters.Where(x => !Ubiquitous.Contains(x)))}"
@@ -543,6 +579,11 @@ else
         Console.WriteLine($"   {g.Count(),4} patches wait on   {g.Key}    e.g. {g.First().Plugin}");
 }
 
+if (hits is not null)
+{
+    hits.Detail("masterPairs", byPair.Count);
+    hits.Write(jsonPath!, scanned, unreadable);
+}
 Console.WriteLine($"\nelapsed {sw.Elapsed.TotalSeconds:0.0}s");
 return 0;
 

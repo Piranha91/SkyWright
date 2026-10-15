@@ -58,6 +58,37 @@ progress=pathlib.Path(sys.argv[1]); output=pathlib.Path(sys.argv[2]); progress.m
 (progress/'c1s1.json').write_text(json.dumps({'status':'complete'}))
 '''
 
+# A retained worklist as viewprobe's rendertwin writes it: upper-case keys, one cell, four shots, a top-level default.
+RETAINED_WORKLIST = {"Label": "rendertwin equivalence", "Cells": [{"Cell": "SolitudeTempleOfTheDivines", "Shots": [
+    {"Label": "1 a look aim, no cut", "Eye": [1394.0, 1205.0, 3400.0], "Look": [1394.0, 1206.0, 1424.0],
+     "Fov": 65.0, "Nav": "off", "ViewpointKind": "diagnostic", "Control": False},
+    {"Label": "1 a yaw aim, cut low", "Eye": [1434.0, 1165.0, 3410.0], "Yaw": 135.0, "Pitch": 12.0, "Fov": 80.0,
+     "Aspect": 1.7777778, "CullAbove": 1624.0, "Nav": "off", "FloorZ": 3280.0, "ViewpointKind": "control",
+     "ViewpointEvidence": "the second row of the coverage table", "Control": True},
+    {"Label": "1 turned around, cut high, planes on", "Eye": [1334.0, 1235.0, 3380.0], "Yaw": 300.0, "Pitch": -8.0,
+     "Fov": 50.0, "CullAbove": 2024.0, "Nav": "wire", "Planes": True, "ViewpointKind": "diagnostic", "Control": False},
+    {"Label": "1 inherits everything, after the cuts", "Eye": [1399.0, 1200.0, 3400.0],
+     "Look": [1394.0, 1206.0, 1424.0]}]}], "EyeHeight": 120.0}
+
+
+def campaign_views(root):
+    """Eight one-shot, one-cell worklists, as a sweep writes them, and their identities. They share one top-level
+    default and one cell default so that the composite's carry-over of common options is actually exercised."""
+    folder = root / 'campaign-sources'; folder.mkdir()
+    views = []
+    for ordinal in range(1, 9):
+        label = f"v-view-{ordinal}"
+        doc = {"label": label, "eyeHeight": 120.0, "cells": [{"cell": "SyntheticExterior", "cullAbove": 4000.0, "shots": [{
+            "label": label, "eye": [1000.0 + 37.5 * ordinal, 2000.0 - 11.25 * ordinal, -500.0],
+            "look": [1250.0, 2100.0 + ordinal, -900.0], "fov": 80.0, "nav": "off", "occlusion": "off",
+            "control": False, "viewpointKind": "nominated-player",
+            "viewpointEvidence": f"pose rule k={ordinal / 8:.3f} side={1 if ordinal % 2 else -1}"}]}]}
+        path = folder / f"{label}.worklist.json"; path.write_text(json.dumps(doc, indent=1))
+        views.append({"ordinal": ordinal, "label": label,
+                      "identity": {"path": str(path.resolve()), "sha256": rb.sha256(path)}})
+    return {"views": views}
+
+
 def main():
     table = rb.load_key_table()
     check(len([x for x in table['options'] if not x.get('operational')]) == 201,
@@ -114,8 +145,7 @@ def main():
         doc=rb.selection(worklist,ready,[(0,1),(0,2)])
         check(doc['selected']==[{'cell':0,'shot':1},{'cell':0,'shot':2}],
               "selection retains original coordinates without renumbering")
-        retained=Path(r'C:/Users/Piranha/AppData/Local/Temp/hc-rt-s4/wl-a.json')
-        retained_data=json.loads(retained.read_text())
+        retained_data=RETAINED_WORKLIST
         lowercase=root/'retained-lowercase.json'
         lowercase.write_text(json.dumps({'label':retained_data.get('Label'),'cells':[
             {**{k:v for k,v in c.items() if k not in ('Cell','Shots')},'cell':c['Cell'],
@@ -123,9 +153,8 @@ def main():
                       for s in c['Shots']]} for c in retained_data['Cells']]}))
         try: _,retained_rows=rb.worklist_shape(lowercase); retained_lower=bool(retained_rows)
         except (OSError,ValueError,KeyError,TypeError): retained_lower=False
-        check(retained_lower,"real retained lowercase cells/shots/label worklist is accepted")
-        memory_ready=HERE.parents[2]/'_claude/runs/2026-09-21-render-throughput-stage4/evidence/memory-campaign-readiness.json'
-        memory=json.loads(memory_ready.read_text()); sources=[]
+        check(retained_lower,"a retained worklist rewritten to lowercase cells/shots/label is accepted")
+        memory=campaign_views(root); sources=[]
         for view in memory['views']:
             sources.append({'path':view['identity']['path'],'sha256':view['identity']['sha256'],
                 'outputStem':view['label'],'scratchDirectory':f"source-{view['ordinal']:03d}",

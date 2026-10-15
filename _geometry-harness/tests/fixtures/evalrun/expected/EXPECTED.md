@@ -408,9 +408,6 @@ one whose fingerprint is `"deadbeefdeadbeef…"`.
 
 **Expected disposition / bundle** (D7, D8):
 
-- `discovery.candidates[0].qualification == "unqualified"` — D7: "candidates with provenance and `qualification:
-  qualified` only for a plugin whose hash is in an evaluated arm, else `unqualified`"; the packet: "a downloadable hit
-  remains unqualified until its actual payload has the needed evidence."
 - `discovery.sourcesNotSearched` is present (a list, possibly empty but the field exists) — D7: "sources searched …,
   sources not searched".
 - The matching media item is bundle evidence with `strength == "supplied-media"` — D8: "an item whose fingerprint
@@ -677,8 +674,8 @@ no folder under `instance/mods` (layer 2: an absent folder is skipped, not an er
 a `…_separator` line (both skipped by the parser), and then `-Supplied Patch A` above `-Supplied Patch B` — two
 disabled folders that provide the SAME filename with DIFFERENT bytes. So the name resolves at layer 5, and
 `Supplied Patch A` wins **because of the modlist's line order**, which a directory walk would match only by
-accident. That is the lab's own shape (`JKs College of Winterhold - OCW Patch.esp`, modlist lines 58 and 72) in
-miniature, with the bytes deliberately different so the copy that was read is visible in the hash.
+accident. That is a real instance's shape (one patch filename provided by two mod folders) in miniature, with the
+bytes deliberately different so the copy that was read is visible in the hash.
 
 ### What the plan must say
 
@@ -764,7 +761,7 @@ bytes on disk; only the presence of a key differs, which is the only way a truth
 **A-5 (finding F3) — the identical-copy limit, fired.** D2 accepts an emit whose hash matches at a different path
 and records an `identityLimits` row instead of rejecting. Nothing in case 16 made that branch fire: its two
 folders carry different bytes by design, so the verifier could delete the branch and the case stayed green — while
-the lab's real shape is identical bytes in two folders (the combo patch at modlist lines 58 and 72). A run-level
+the real shape seen in an instance is identical bytes in two folders (one combo patch installed twice). A run-level
 arm on a copy of the tree adds `Supplied Patch A copy` with bytes identical to A's, listed below A so A still
 wins, and points a `wrong-copy` damage at it: the sweep arm receipt is **accepted**, `validation.identityLimits`
 has exactly one row for `FixtureSupplied.esp` whose `recordedSha256` is sha(A), whose `plannedPath` ends in
