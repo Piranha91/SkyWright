@@ -260,28 +260,12 @@ foreach (var d in idx.DuplicateGridPoints().OrderBy(d => WsName(d.Grid.Ws)).Then
 // ---------------------------------------------------------------------------------------
 // Seams — every edge-adjacent pair, truth arm against winner arm.
 // ---------------------------------------------------------------------------------------
-var seams = new List<SeamRow>();
-foreach (var a in ext)
-{
-    if (a.Dup) continue;
-    foreach (var (dx, dy) in new[] { (1, 0), (0, 1) })
-    {
-        var bc = idx.Single(a.Cell.Worldspace, a.Cell.GX + dx, a.Cell.GY + dy);
-        if (bc is null || !byKey.TryGetValue(bc.Key, out var b)) continue;
-        if (a.Verdict == WaterVerdict.Unjudgeable || b.Verdict == WaterVerdict.Unjudgeable) continue;
-        var (sv, why) = DetectorModel.WaterSeam(a.RTruth, b.RTruth, a.RWin, b.RWin, a.Verdict, b.Verdict, eps);
-        if (sv == WaterSeamVerdict.None) continue;
-        // The physical half under this arm: the two resolved surfaces still differ.
-        var phys = DetectorModel.WaterJoined(a.RWin, b.RWin, eps) ? PhysicalState.Gone : PhysicalState.Holds;
-        string detail = $"winner {Res(a.RWin)} | {Res(b.RWin)}";
-        seams.Add(new SeamRow(a, b, dx == 1 ? "E" : "N", sv, why, phys, detail));
-    }
-}
+var seams = WaterFindings.Seams(ext, idx, byKey, eps, Res);
 Console.WriteLine($"\n==== WATER SEAMS — edge-adjacent pairs, truth arm vs winner arm (eps {eps:0.##} u) ====");
 foreach (var g in seams.GroupBy(s => s.Verdict).OrderBy(g => g.Key))
     Console.WriteLine($"   {g.Key,-10} {g.Count(),6:N0}   " + string.Join(", ", g.GroupBy(s => DetectorModel.ClassifyWaterPopulation(s.A.Verdict != WaterVerdict.Forwarded ? s.A.WinnerKind : s.B.WinnerKind)).OrderBy(x => x.Key).Select(x => $"{x.Key} {x.Count():N0}")));
 Console.WriteLine($"   the floor: {seams.Count(s => s.Verdict == WaterSeamVerdict.Inherited):N0} pair(s) apart in both arms (Bethesda ships them); {seams.Count(s => s.Verdict == WaterSeamVerdict.Joined):N0} joined by a later plugin (a fixer's shape)");
-var seamRows = seams.Where(s => s.Verdict == WaterSeamVerdict.Seam).OrderBy(s => Rank(s.A.Cell)).ThenBy(s => Rank(s.B.Cell)).ToList();
+var seamRows = WaterFindings.SeamRows(seams).OrderBy(s => Rank(s.A.Cell)).ThenBy(s => Rank(s.B.Cell)).ToList();
 foreach (var s in seamRows.Take(listN))
     Console.WriteLine($"   SEAM {CellLabel(s.A.Cell)} {s.Dir} {CellLabel(s.B.Cell)}: {s.Why}\n"
                     + $"        A {s.A.Verdict} won by {PluginName(s.A.Cell.Winner)}; B {s.B.Verdict} won by {PluginName(s.B.Cell.Winner)}");
@@ -294,7 +278,7 @@ double Rank(CellInfo c)
 // ---------------------------------------------------------------------------------------
 // Missing-water candidates, and the same-defect control.
 // ---------------------------------------------------------------------------------------
-var missing = ext.Where(r => r.Missing).OrderBy(r => Rank(r.Cell)).ToList();
+var missing = WaterFindings.Missing(ext).OrderBy(r => Rank(r.Cell)).ToList();
 var control = ext.Where(r => r.RTruth.Has && r.VisTruth is { } v && v < minVisible).ToList();
 Console.WriteLine($"\n==== MISSING-WATER CANDIDATES: {missing.Count:N0} (exterior; the truth's surface shows over ≥{minVisible:P0} of the cell, the winner's does not) ====");
 Console.WriteLine($"   the same-defect control: {control.Count:N0} cell(s) whose TRUTH surface is already under the ground everywhere (Bethesda ships them; never a candidate) — "
@@ -323,8 +307,7 @@ if (emitPath is not null)
             new List<ConflictRecord> { new(r.Cell.Key.ToString(), "cell", CellLabel(r.Cell), r.Physical, r.MissingWhy) }));
     foreach (var s in seamRows)
     {
-        var attributed = s.A.Verdict != WaterVerdict.Forwarded ? s.A : s.B;
-        var other = ReferenceEquals(attributed, s.A) ? s.B : s.A;
+        var (attributed, other) = WaterFindings.Attribute(s);
         conflicts.Add(new Conflict("WATER-SEAM", PluginName(other.Cell.Winner), PluginName(attributed.Cell.Winner),
             $"{CellLabel(s.A.Cell)} {s.Dir} {CellLabel(s.B.Cell)}: {s.Why}",
             new List<ConflictRecord> { new(attributed.Cell.Key.ToString(), "cell", CellLabel(attributed.Cell), s.Physical, s.Detail) },
@@ -334,29 +317,7 @@ if (emitPath is not null)
     if (basePath is not null)
     {
         var baseFile = ConflictIo.Read(basePath);
-        predicates = new List<Predicate>();
-        foreach (var c in baseFile.Conflicts)
-        {
-            string? other = c.Alternative is { Count: > 0 } alt ? alt[0].FormKey : null;
-            foreach (var rec in c.Necessary)
-            {
-                if (!FormKey.TryFactory(rec.FormKey, out var fk) || !byKey.TryGetValue(fk, out var r))
-                { predicates.Add(new Predicate(c.Kind, c.A, c.B, rec.FormKey, other, PhysicalState.Unmeasured, "the cell is not in this order")); continue; }
-                if (c.Kind == "WATER-MISSING")
-                {
-                    // The predicate under THIS arm: the winner's surface is invisible (or absent) where the base row's truth showed water.
-                    var (_, ph, why) = DetectorModel.MissingWater(r.Verdict == WaterVerdict.Forwarded ? WaterVerdict.Altered : r.Verdict, r.RTruth.Has, r.VisTruth, r.RWin.Has, r.VisWin, minVisible);
-                    if (r.Verdict == WaterVerdict.Forwarded) ph = r.RWin.Has && (r.VisWin is null || r.VisWin >= minVisible) ? PhysicalState.Gone : r.VisWin is null ? PhysicalState.Unmeasured : PhysicalState.Holds;
-                    predicates.Add(new Predicate(c.Kind, c.A, c.B, rec.FormKey, other, ph, why));
-                }
-                else if (c.Kind == "WATER-SEAM" && other is not null && FormKey.TryFactory(other, out var ok) && byKey.TryGetValue(ok, out var o))
-                {
-                    var ph = DetectorModel.WaterJoined(r.RWin, o.RWin, eps) ? PhysicalState.Gone : PhysicalState.Holds;
-                    predicates.Add(new Predicate(c.Kind, c.A, c.B, rec.FormKey, other, ph, $"winner {Res(r.RWin)} | {Res(o.RWin)}"));
-                }
-                else predicates.Add(new Predicate(c.Kind, c.A, c.B, rec.FormKey, other, PhysicalState.Unmeasured, "not a water row"));
-            }
-        }
+        predicates = WaterFindings.Predicates(baseFile.Conflicts, byKey, minVisible, eps, Res);
         Console.WriteLine($"\n   --base {Path.GetFileName(basePath)}: {predicates.Count:N0} base-row predicate(s) re-measured under this order — "
                         + string.Join(", ", predicates.GroupBy(p => p.Physical).OrderBy(g => g.Key).Select(g => $"{g.Key} {g.Count():N0}")));
     }
