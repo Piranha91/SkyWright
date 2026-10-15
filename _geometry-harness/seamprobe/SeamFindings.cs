@@ -6,13 +6,18 @@ using Mutagen.Bethesda.Plugins;
 // pairs are measured and which are the Bethesda floor, which pairs are the class, and how a --base row is re-measured.
 static class SeamFindings
 {
+    /// <summary>The exterior grid cells with a LAND statement: heights, or one that declares none.</summary>
+    public static List<CellInfo> LandCells(CellBoundaryIndex idx)
+        => idx.Cells.Values.Where(c => !c.Interior && c.GX != int.MinValue && c.HasLandStatement).ToList();
+
     /// <summary>Pass 2: every edge-adjacent pair (east and north of each LAND cell), skipping cells at a duplicate grid
-    /// point, with both-winners-Bethesda marked.</summary>
-    public static (List<Pair> Pairs, int DupSkipped) MeasurePairs(CellBoundaryIndex idx, List<CellInfo> landCells,
+    /// point, with both-winners-Bethesda marked. A pair where either winner's LAND declares no heights has no ground to
+    /// meet: it is counted (Heightless), not measured against the earlier heights.</summary>
+    public static (List<Pair> Pairs, int DupSkipped, int Heightless) MeasurePairs(CellBoundaryIndex idx, List<CellInfo> landCells,
         IReadOnlyList<HashSet<int>> closure, float eps, Func<int, PluginKind> kind)
     {
         var pairs = new List<Pair>();
-        int dupSkipped = 0;
+        int dupSkipped = 0, heightless = 0;
         var dupGrid = new HashSet<(FormKey, int, int)>(idx.DuplicateGridPoints().Select(d => d.Grid));
         foreach (var a in landCells)
         {
@@ -20,14 +25,15 @@ static class SeamFindings
             foreach (var (dx, dy, ea) in new[] { (1, 0, CellEdge.East), (0, 1, CellEdge.North) })
             {
                 var b = idx.Single(a.Worldspace, a.GX + dx, a.GY + dy);
-                if (b is null) continue;
+                if (b is null || !b.HasLandStatement) continue;
+                if (a.LandWinnerDeclaresNone || b.LandWinnerDeclaresNone) { heightless++; continue; }
                 var m = CellBoundaryIndex.MeasurePair(a, b, ea, closure, eps);
                 if (m is null) continue;
                 bool bothBethesda = kind(a.Land[^1].Plugin) == PluginKind.Bethesda && kind(b.Land[^1].Plugin) == PluginKind.Bethesda;
                 pairs.Add(new Pair(m, dx == 1 ? "E" : "N", a.Land[^1].Plugin, b.Land[^1].Plugin, bothBethesda));
             }
         }
-        return (pairs, dupSkipped);
+        return (pairs, dupSkipped, heightless);
     }
 
     /// <summary>The class: mod-involved pairs whose shared edge mismatches by more than eps.</summary>

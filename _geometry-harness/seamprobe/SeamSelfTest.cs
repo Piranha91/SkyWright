@@ -112,7 +112,6 @@ static class SeamSelfTest
             idx.Ingest(p, mod, land: true);
         }
         var closure = DetectorModel.MasterClosure(masterIdx);
-        var landCells = idx.Cells.Values.Where(c => !c.Interior && c.GX != int.MinValue && c.Land.Count > 0).ToList();
-        return (idx, closure, landCells);
+        return (idx, closure, SeamFindings.LandCells(idx));
     }
 }

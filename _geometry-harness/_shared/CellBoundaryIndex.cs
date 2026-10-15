@@ -105,8 +105,17 @@ public sealed class CellInfo
     public int Winner { get; set; } = -1;
     public List<WaterSnap> Water { get; } = new(1);
     public List<LandSnap> Land { get; } = new(1);
-    /// <summary>Providers whose LAND could not be decoded (a truncated record); counted, never guessed at.</summary>
+    /// <summary>Providers whose LAND could not be decoded (a truncated record, or a VHGT missing although the DATA flag
+    /// says it has heights); counted, never guessed at.</summary>
     public int LandUnreadable { get; set; }
+    /// <summary>Providers whose LAND declares no heights (<see cref="LandHeight.LandKind.DeclaresNone"/>: no VHGT, DATA
+    /// flag clear). The engine draws no ground on such a square; counted, never folded into the heights history.</summary>
+    public int LandDeclaresNone { get; set; }
+    /// <summary>The last LAND statement for this cell declares no heights, so <see cref="Land"/>'s last entry is NOT the
+    /// winner's ground: the winner has none, and a rule reading heights must not measure against the earlier ones.</summary>
+    public bool LandWinnerDeclaresNone { get; set; }
+    /// <summary>Some LAND statement for this cell exists: heights, or one that declares none.</summary>
+    public bool HasLandStatement => Land.Count > 0 || LandDeclaresNone > 0;
 }
 
 public sealed class CellBoundaryIndex
@@ -130,6 +139,8 @@ public sealed class CellBoundaryIndex
     public long WaterSnaps { get; private set; }
     public long LandSnaps { get; private set; }
     public long CellProvisions { get; private set; }
+    /// <summary>LAND provisions, over all cells, that declare no heights (<see cref="CellInfo.LandDeclaresNone"/>).</summary>
+    public long LandDeclaresNoneProvisions { get; private set; }
 
     public string PluginName(int p) => p >= 0 && _pluginName.TryGetValue(p, out var n) ? n : "(none)";
 
@@ -239,9 +250,15 @@ public sealed class CellBoundaryIndex
         if (!land || info.Interior) return;
         ILandscapeGetter? ls;
         try { ls = c.Landscape; } catch { info.LandUnreadable++; return; }
-        if (ls?.VertexHeightMap is not { } vh) return;
-        var grad = LandHeight.Gradients(vh);
-        if (grad is null) { info.LandUnreadable++; return; }
+        if (ls is null) return;   // no LAND in this provision: the earlier statement stands
+        // The one rule every terrain reader uses (LandHeight.Classify): heights, declares none, or unreadable. Each is a
+        // state the reader can see; none is dropped.
+        var lc = LandHeight.Classify(ls);
+        if (lc.Kind == LandHeight.LandKind.DeclaresNone)
+        { info.LandDeclaresNone++; info.LandWinnerDeclaresNone = true; LandDeclaresNoneProvisions++; return; }
+        if (lc.Kind != LandHeight.LandKind.Heights) { info.LandUnreadable++; return; }
+        info.LandWinnerDeclaresNone = false;
+        var grad = lc.Gradients!;
         var quad = new string?[4];
         try
         {
@@ -253,7 +270,7 @@ public sealed class CellBoundaryIndex
             }
         }
         catch { }
-        var snap = new LandSnap(p, vh.Offset, grad, quad);
+        var snap = new LandSnap(p, lc.Offset, grad, quad);
         if (info.Land.Count == 0 || !info.Land[^1].SameHeightsAs(snap) || !info.Land[^1].SameTexturesAs(snap))
         { info.Land.Add(snap); LandSnaps++; }
     }
@@ -361,9 +378,10 @@ public sealed class CellBoundaryIndex
         {
             // The winning LAND under each arm: the truth arm's is the last Bethesda/USSEP LAND, the winner's the last.
             var landTruth = c.Land.LastOrDefault(l => kindOf(l.Plugin) is PluginKind.Bethesda or PluginKind.Ussep) ?? c.Land[0];
-            var landWin = c.Land[^1];
+            // A winner whose LAND declares no heights has no ground here: its share is not measured from earlier heights.
+            var landWin = c.LandWinnerDeclaresNone ? null : c.Land[^1];
             if (rTruth.Has && rTruth.Z is { } zt) visTruth = VisibleShare(landTruth.Heights, zt);
-            if (rWin.Has && rWin.Z is { } zw) visWin = VisibleShare(landWin.Heights, zw);
+            if (landWin is not null && rWin.Has && rWin.Z is { } zw) visWin = VisibleShare(landWin.Heights, zw);
         }
         var (missing, physical, missingWhy) = DetectorModel.MissingWater(verdict, rTruth.Has, visTruth, rWin.Has, visWin, minVisible);
         return new CellWaterJudgement(c, first, truth, truthPlugin, wm, winner, wKind, authorTruth, dup, verdict, blocker, why,
@@ -377,10 +395,11 @@ public sealed class CellBoundaryIndex
         LandSeamVerdict Verdict, SeamOrigin? Origin, SeamSight? Sight, string Why, bool TextureSeam, string TexWhy);
 
     /// <summary>Measure the pair (A, B) where B is A's neighbour across <paramref name="edgeOfA"/> (East: B = A + (1,0);
-    /// North: B = A + (0,1)). Null when either side has no LAND.</summary>
+    /// North: B = A + (0,1)). Null when either side has no LAND with heights, or its winning LAND declares none (no ground
+    /// to meet: the earlier heights are not the winner's, so the pair is not measured against them).</summary>
     public static LandPairMeasure? MeasurePair(CellInfo a, CellInfo b, CellEdge edgeOfA, IReadOnlyList<HashSet<int>> closure, float eps)
     {
-        if (a.Land.Count == 0 || b.Land.Count == 0) return null;
+        if (a.Land.Count == 0 || b.Land.Count == 0 || a.LandWinnerDeclaresNone || b.LandWinnerDeclaresNone) return null;
         var edgeOfB = edgeOfA switch { CellEdge.East => CellEdge.West, CellEdge.North => CellEdge.South, CellEdge.West => CellEdge.East, _ => CellEdge.North };
         var wa = a.Land[^1]; var wb = b.Land[^1];
         int later = Math.Max(wa.Plugin, wb.Plugin);
