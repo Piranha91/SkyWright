@@ -2492,11 +2492,33 @@ def compile_plan(bundle_dir: Path, verify: dict, settings: dict, pr: dict, bundl
         note_sentences = [sentences(n) for n in import_notes]
         common = set(note_sentences[0]).intersection(*(set(x) for x in note_sentences[1:]))             if len(note_sentences) > 1 else set(note_sentences[0])
         shared = " ".join(x for x in note_sentences[0] if x in common)
+
+        # Many notes can share no whole sentence when each names its own setup and file in the sentence that says
+        # what the evidence is ("REUSED evidence, not freshly measured: captured ... arm X; ..."); the clause they
+        # all share still reaches the page, once (Gate C round 1: Group 6's sixteen notes took two pages).
+        def clauses(text):
+            return [x.strip() for x in re.split(r"(?<=[.!?;:])\s+", text.strip()) if x.strip()]
+        note_clauses = [clauses(n) for n in import_notes]
+        common_c = set(note_clauses[0]).intersection(*(set(x) for x in note_clauses[1:]))
+        # a shared clause of fewer than four words ("Rows:", a file name) says nothing on its own
+        shared_c = " ".join(re.sub(r"[;:]$", ".", x) for x in note_clauses[0] if x in common_c and len(x.split()) >= 4)
         if len(import_notes) > 1 and len(shared) >= 40:
             other_limits.append(
                 "The imported results in this report carry a note from the tool that produced "
                 "them: " + shared + " Each import's own note, including the figures that "
                 "differ between them, is in the evidence index.")
+        elif len(import_notes) > 3:
+            # a note's opening clause says what the evidence is; one at least half of them open with (say, half
+            # reused and half freshly measured) is stated with its count
+            seen_c = collections.Counter(cs[0] for cs in note_clauses if cs)
+            half = [x for x in dict.fromkeys(cs[0] for cs in note_clauses if cs)
+                    if x not in common_c and len(x.split()) >= 4 and seen_c[x] * 2 >= len(import_notes)]
+            other_limits.append(
+                f"The {fmt_n(len(import_notes))} imported results in this report carry notes from the tool that "
+                "produced them, which differ from one import to another" +
+                (f"; every one of them says: {shared_c}" if shared_c else ".") +
+                "".join(f" {fmt_n(seen_c[x])} of them say: {re.sub(r'[;:]$', '.', x)}" for x in half) +
+                " Each note in full is in the evidence index.")
         else:
             for note in import_notes:
                 other_limits.append("The imported results in this report carry a note from the "

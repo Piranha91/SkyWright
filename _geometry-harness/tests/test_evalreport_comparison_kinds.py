@@ -418,6 +418,18 @@ def main(argv=None):
          len(lim11) == 1 and REUSED in lim11[0] and "evidence index" in lim11[0] and "5" in lim11[0],
          f"{len(lim11)} reader bullet(s) for five notes sharing one clause: {[x[:140] for x in lim11]}")
 
+    # ... and when half of them open by saying the evidence was reused and half that it was freshly measured, each
+    # opening reaches the page with its count (Group 6's patched evaluation)
+    FRESH = "FRESHLY MEASURED for plan q1 arm baseline"
+    notes12 = {a["armId"]: ((f"{REUSED}: captured for pilot plan p{n}; envelope e{n}." if n % 2 else
+                             f"{FRESH}: raw capture {n} by agent M, not reused evidence.") + f" Wording {n}.")
+               for n, a in enumerate(many_arms[:4])}
+    _k12, _v12, _t12, plan12 = run_compiler(many_arms[:4], patches=[PATCH], import_note=notes12)
+    lim12 = [x for x in (plan12.get("reader") or {}).get("otherLimits") or [] if "note" in x and "import" in x]
+    cell("many-notes-of-two-kinds-state-each-opening-with-its-count",
+         len(lim12) == 1 and f"2 of them say: {REUSED}." in lim12[0] and f"2 of them say: {FRESH}." in lim12[0],
+         f"{len(lim12)} reader bullet(s): {[x[:240] for x in lim12]}")
+
     # ... and it must appear ONCE, not once per import, and never invented when absent.
     _k9, _v9, _t9, plan9 = run_compiler(
         [arm("baseline", DEPS + TARGETS, kind="baseline"),
