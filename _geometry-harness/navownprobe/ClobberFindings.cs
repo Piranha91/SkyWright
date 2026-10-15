@@ -8,12 +8,6 @@ using Mutagen.Bethesda.Plugins;
 // can hold them to known answers (task 2026-10-14-probe-toplevel-decisions-testable).
 static class ClobberFindings
 {
-    // Bethesda's own shipped content. A dangling link with no mod on either end is theirs and permanent.
-    // Creation Club plugins (ccbgssse*.esl and the rest) are deliberately NOT in this set: their changes, including navmesh
-    // deletions, are reported like any mod's (decided 2026-09-28).
-    public static readonly HashSet<string> Vanilla = new(StringComparer.OrdinalIgnoreCase)
-    { "Skyrim.esm", "Update.esm", "Dawnguard.esm", "HearthFires.esm", "Dragonborn.esm", "SkyrimVR.esm", "_ResourcePack.esl" };
-    public const string Ussep = "Unofficial Skyrim Special Edition Patch.esp";
     public const float ReachClearance = 120f;   // the oracle's measured resolution: closer reads reachable
     public const float ReachSpacing = 64f;      // sampling bound — a loss beyond clearance+spacing cannot be missed
 
@@ -39,11 +33,13 @@ static class ClobberFindings
     }
 
     /// <summary>Rule 12 on CLOBBERED: the population of a clobber by its two plugins' file names.</summary>
-    public static ClobberPopulation Population(string loser, string winner, ISet<string> vanilla)
+    /// <remarks>Bethesda's own shipped content is <see cref="BaseGamePlugins.Names"/>. Creation Club plugins are deliberately NOT
+    /// in it: their changes, including navmesh deletions, are reported like any mod's (decided 2026-09-28).</remarks>
+    public static ClobberPopulation Population(string loser, string winner, IReadOnlySet<string> vanilla)
         => DetectorModel.ClassifyClobber(
             vanilla.Contains(loser),
             vanilla.Contains(winner),
-            string.Equals(loser, Ussep, StringComparison.OrdinalIgnoreCase));
+            BaseGamePlugins.IsUssep(loser));
 
     public static string ClassLabel(ClobberPopulation p) => p switch
     {

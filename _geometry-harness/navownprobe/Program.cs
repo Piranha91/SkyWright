@@ -121,7 +121,7 @@ Console.WriteLine();
 
 // Which base records can physically obstruct. XMarkers have no mesh and no collision; a dropped
 // coin is not a wall. Kept as data here rather than hard-coded judgement anywhere deeper.
-var Vanilla = ClobberFindings.Vanilla;   // Bethesda's own shipped content (ClobberFindings.cs)
+var Vanilla = BaseGamePlugins.Names;   // Bethesda's own shipped content (_shared/BaseGamePlugins.cs)
 
 var Obstructing = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
 { "Static", "MoveableStatic", "Tree", "Furniture", "Door", "Container", "Activator", "Flora" };
