@@ -62,8 +62,9 @@ public sealed class ScriptFlipCalls
             var h = Header.Match(line);
             if (h.Success) { fn = h.Groups[1].Value; alias.Clear(); continue; }
             if (End.IsMatch(line)) { fn = "(top)"; alias.Clear(); continue; }
+            // Code is the text before the first ';'; a whole-line comment is no code at all. Raw reads the uncut line.
             int semi = line.IndexOf(';');
-            var code = semi >= 0 && !line.TrimStart().StartsWith(";") ? line[..semi] : line;
+            var code = semi >= 0 ? line[..semi] : line;
             var a = Alias.Match(code);
             if (a.Success && !a.Groups["src"].Value.Equals("None", StringComparison.OrdinalIgnoreCase))
             {
