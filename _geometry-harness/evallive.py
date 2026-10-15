@@ -100,6 +100,11 @@ def import_live(E, *, a, runlog, run: Path, src: Path, plan: dict, ledger, check
         hint = (" (not opted in: plan again with --opt-in " + cid + ")") if row_status == E.NOT_OPTED_IN else ""
         return E.refuse(f"wrong-check: the plan records {cid} as {row_status!r} on arm {aid}, not live-import, so it "
                         f"is not waiting for a live receipt{hint}")
+    # the arm's own accepted census may already answer the check: nothing a script drives touches a target
+    scope_read = E.live_switch_scope(run, plan, ledger, aid) if cid == E.LIVE_CHECK_ID else None
+    if scope_read and scope_read["status"] == "not-applicable":
+        return E.refuse(f"wrong-check: {cid} is not applicable on arm {aid}: {E.switchflip_scope.sentence(scope_read)}. "
+                        "An import completes a check the run left open; it never overrides the census's answer")
     key = E.Ledger.key(cid, aid, None)
     if (ledger.entry(cid, aid, None) or {}).get("status") in E.TERMINAL_OK:
         return E.refuse(f"duplicate-receipt: {key} already has accepted evidence")

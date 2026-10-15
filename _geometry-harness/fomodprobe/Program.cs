@@ -41,7 +41,12 @@ using HousecarlCore.Progress;
 // No third-party archive library is involved, so there is no library surface to get wrong. RAR,
 // 7z and ZIP all work through the same call.
 //
-// usage: fomodprobe [--list N] [--mod Name] [--jobs N]
+// usage: fomodprobe [--list N] [--mod Name] [--jobs N] [--json PATH]
+//
+// --json PATH writes the hit list (schema 1, ../_shared/DiscoveryHits.cs): one hit per plugin an unselected option
+// in the WRONG-VARIANT, ABSENT or INACTIVE tier delivers, with the sha256 of that archive entry (extracted with
+// `7z e -so`, the same call that reads ModuleConfig.xml), its condition plugins and its tier; a NO-PLUGIN option is a
+// hit with no hash and the reason. The added extraction time is reported.
 
 using var __run = RunLog.BeginProcess("fomodprobe", args);
 
@@ -53,12 +58,18 @@ string SevenZip = HarnessTarget.Require(HarnessTarget.SevenZip, "path to 7z.exe"
 int listN = 40;
 string? onlyMod = null;
 int jobs = Math.Max(2, Environment.ProcessorCount - 2);
+string? jsonPath = null;
+bool jsonMalformed = false;
 for (int i = 0; i < args.Length; i++)
 {
     if (args[i] == "--list" && i + 1 < args.Length) listN = int.Parse(args[++i]);
     else if (args[i] == "--mod" && i + 1 < args.Length) onlyMod = args[++i];
     else if (args[i] == "--jobs" && i + 1 < args.Length) jobs = int.Parse(args[++i]);
+    else if (args[i] == "--json" && i + 1 < args.Length && !args[i + 1].StartsWith("--")) jsonPath = args[++i];
+    else if (args[i] == "--json") jsonMalformed = true;
 }
+if (jsonMalformed) { Console.Error.WriteLine("--json needs a file path: pass --json PATH."); return 2; }
+var hitList = jsonPath is null ? null : new DiscoveryHits("fomodprobe", "fomod");
 
 if (!File.Exists(SevenZip)) { Console.Error.WriteLine($"7-Zip not found at {SevenZip}"); return 1; }
 
@@ -181,6 +192,11 @@ Console.WriteLine($"   {pluginHome.Count:N0} distinct plugin files exist somewhe
 
 Console.WriteLine($"   {targets.Count:N0} enabled mods whose source archive is on disk");
 Console.WriteLine($"   not examined: {noMeta:N0} without meta.ini, {noInstallFile:N0} with no installationFile, {archiveGone:N0} whose archive is gone");
+hitList?.Searched("instance", Instance, Path.GetFileName(Path.TrimEndingDirectorySeparator(Instance)));
+hitList?.Searched("download-pool", Pool, "the source archive of every enabled mod installed from it");
+if (noMeta > 0) hitList?.Unjudgeable($"{noMeta} enabled mod(s)", "no meta.ini, so the source archive is unknown");
+if (noInstallFile > 0) hitList?.Unjudgeable($"{noInstallFile} enabled mod(s)", "meta.ini names no installationFile");
+if (archiveGone > 0) hitList?.Unjudgeable($"{archiveGone} enabled mod(s)", "the source archive is no longer in the pool");
 
 // ---------------------------------------------------------------------------------------
 // 3. Read each archive
@@ -263,6 +279,62 @@ foreach (var r in trusted)
         else wanted.Add((r, o, hits, "INACTIVE", string.Join(", ", homes.Take(3))));
     }
 
+if (hitList is not null)
+{
+    // One hit per (archive, option, plugin entry): MO2 installs one archive into several folders, which repeats
+    // the same option once per folder, and the bytes are the archive's either way.
+    var hashTimer = Stopwatch.StartNew();
+    int extracted = 0;
+    var seenHit = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+    foreach (var (m, o, condHits, verdict, where) in wanted)
+    {
+        var detail = new Dictionary<string, object?>
+        {
+            ["verdict"] = verdict, ["conditions"] = o.Conditions, ["activeConditions"] = condHits, ["mod"] = m.Mod,
+            ["option"] = o.Name, ["step"] = o.Step, ["group"] = o.Group, ["onDiskIn"] = where,
+        };
+        var archiveName = Path.GetFileName(m.Archive);
+        var plugins = o.Files.Where(IsPlugin).ToList();
+        if (plugins.Count == 0)
+        {
+            if (seenHit.Add($"{archiveName}|{o.Name}|"))
+                hitList.Hit(o.Name, "fomod-option", new() { ["archive"] = archiveName, ["path"] = m.Archive }, null, "",
+                            null, detail, "the option delivers no plugin, so there are no plugin bytes to hash");
+            continue;
+        }
+        foreach (var plugin in plugins)
+        {
+            var entries = m.Entries.Where(e => string.Equals(Path.GetFileName(e.Replace('/', '\\').TrimEnd('\\')), plugin,
+                                                             StringComparison.OrdinalIgnoreCase)).ToList();
+            if (entries.Count == 0)
+            {
+                if (seenHit.Add($"{archiveName}|{o.Name}|{plugin}"))
+                    hitList.Hit(plugin, "fomod-option", new() { ["archive"] = archiveName, ["path"] = m.Archive }, null, "",
+                                null, detail, $"no entry named {plugin} in the archive listing, so its bytes were not read");
+                continue;
+            }
+            foreach (var entry in entries)
+            {
+                if (!seenHit.Add($"{archiveName}|{o.Name}|{entry}")) continue;
+                var bytes = Run7z($"e -so -bso0 -bse0 \"{m.Archive}\" \"{entry}\"", out var ok);
+                extracted++;
+                var d = new Dictionary<string, object?>(detail) { ["ambiguousEntry"] = entries.Count > 1 };
+                var w = new Dictionary<string, object?> { ["archive"] = archiveName, ["entry"] = entry, ["path"] = m.Archive };
+                if (ok && bytes.Length > 0)
+                    hitList.Hit(plugin, "fomod-option", w, DiscoveryHits.HashBytes(bytes), "archive-entry", null, d);
+                else
+                    hitList.Hit(plugin, "fomod-option", w, null, "", null, d,
+                                $"7-Zip could not extract {entry} from {archiveName}", ioFailure: true);
+            }
+        }
+    }
+    hitList.Detail("hashExtraction", new Dictionary<string, object?>
+    {
+        ["plugins"] = extracted, ["seconds"] = Math.Round(hashTimer.Elapsed.TotalSeconds, 3),
+    });
+    Console.WriteLine($"   hash extraction: {extracted} plugin(s) read from their archives in {hashTimer.Elapsed.TotalSeconds:0.000}s");
+}
+
 Console.WriteLine();
 Console.WriteLine($"==== NOT SELECTED, and the FOMOD's OWN condition names a plugin active here ====");
 Console.WriteLine($"   WRONG-VARIANT  an exclusive group where the option that WAS taken does not match");
@@ -318,6 +390,7 @@ Console.WriteLine($"   Listed by mod only, because reading anything into an unco
 foreach (var g in silent.GroupBy(s => s.M.Mod).OrderByDescending(g => g.Count()).Take(listN))
     Console.WriteLine($"   {g.Count(),4} options   {g.Key}");
 
+hitList?.Write(jsonPath!, parsed.Count, fomods.Count - parsed.Count);
 Console.WriteLine($"\nelapsed {sw.Elapsed.TotalSeconds:0.0}s");
 return 0;
 
@@ -344,6 +417,7 @@ ModResult Examine(string mod, string modDir, string archive)
         if (line.StartsWith("Path = ", StringComparison.Ordinal))
             paths.Add(line[7..].TrimEnd('\r'));
 
+    r.Entries.AddRange(paths);
     var config = paths.FirstOrDefault(p => Norm(p).EndsWith("\\fomod\\moduleconfig.xml", StringComparison.Ordinal)
                                         || Norm(p) == "fomod\\moduleconfig.xml");
     if (config is null) return r;
@@ -460,4 +534,6 @@ sealed class ModResult(string mod, string archive)
     /// <summary>Options in steps the installer never showed, because the branch they belong to was not taken.</summary>
     public int OptionsNotOffered { get; set; }
     public List<FomodOption> Options { get; } = new();
+    /// <summary>Every entry path in the archive's listing, so an option's plugin can be found and hashed.</summary>
+    public List<string> Entries { get; } = new();
 }

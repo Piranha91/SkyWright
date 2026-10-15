@@ -6757,6 +6757,165 @@ CASES["case-63"] = case_63
 CASES["case-65"] = case_65
 
 
+def case_49(tmp):
+    """Task 2026-10-14-discovery-hits-get-no-qualification-row. In-process through `run_derived`: every relevant
+    hit in an accepted patchprobe / poolprobe / fomodprobe `--json` output becomes one qualification row under D-1's
+    sha256 rule. Relevant = its masters, its FOMOD conditions or the pair it was found for name a plan target or a
+    plugin of a plan pair (direct names only: a hit that masters only a DEPENDENT of a target is counted, not rowed).
+    Every other hit is counted per probe with the reason. A missing, changed, text-only or unknown-schema output
+    makes the derivation inconclusive and names the receipt."""
+    import importlib.util
+    case = "case-49-discovery-hit-rows"
+    spec = importlib.util.spec_from_file_location("evalrun_case49", EVALRUN)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    h_old, h_new, h_pool, h_cond, h_tr, h_un = ("a1" * 32, "b2" * 32, "c3" * 32, "d4" * 32, "e5" * 32, "f6" * 32)
+
+    class Stub:
+        def __init__(self, run, plan):
+            self.run, self.plan, self.calls, self.extra, self.v = run, plan, [], None, None
+
+        def account(self, check, arm, status, cause, detail, **kw):
+            self.calls.append(status)
+
+        def finish(self, *a, extra=None, **kw):
+            self.extra, self.v = extra, (a[10] if len(a) > 10 else None)
+
+    base = {"armId": "baseline", "kind": "baseline", "plugins": ["Skyrim.esm", "Target.esp", "Other.esp"]}
+    cand = {"armId": "candidate-01-flip", "kind": "candidate", "plugins": ["Skyrim.esm", "Other.esp", "Target.esp"]}
+    disc_checks = [{"checkId": "patch.discovery-installed", "status": "planned",
+                    "adapter": {"kind": "patchprobe", "exe": "patchprobe"}},
+                   {"checkId": "patch.discovery-pool", "status": "planned",
+                    "adapter": {"kind": "patchprobe", "exe": "poolprobe"}},
+                   {"checkId": "patch.discovery-fomod", "status": "planned",
+                    "adapter": {"kind": "patchprobe", "exe": "fomodprobe"}}]
+
+    def hit(file, kind, sha, masters, **detail):
+        h = {"file": file, "kind": kind, "where": {}, "sha256": sha, "bytes": 10 if sha else None,
+             "hashSource": "file" if sha else None, "masters": masters, "detail": detail}
+        if not sha:
+            h["unhashedReason"] = "matched by archive name only; patchprobe does not open archives"
+        return h
+
+    def doc(probe, hits, schema=1):
+        return {"schemaVersion": schema, "probe": probe, "mode": "x", "complete": True, "sourcesSearched": [],
+                "sourcesNotSearched": [], "counts": {"judged": 3, "unjudgeable": 0, "hits": len(hits)},
+                "hits": hits, "unjudgeableItems": []}
+
+    outputs = {
+        "patchprobe": doc("patchprobe", [
+            hit("Fix.esp", "installed", h_old, ["Target.esp", "Other.esp"], pair=["Other.esp", "Target.esp"]),
+            hit("Fix.esp", "other-list", h_new, ["Target.esp"], pair=["Other.esp", "Target.esp"]),
+            hit("Named Fix.7z", "download-name", None, [], pair=["Other.esp", "Target.esp"])]),
+        "poolprobe": doc("poolprobe", [
+            hit("PoolFix.esp", "pool-archive", h_pool, ["Other.esp", "Skyrim.esm"]),
+            hit("Transitive.esp", "pool-archive", h_tr, ["Middle.esp"]),     # Middle.esp masters Target.esp
+            hit("Unrelated.esp", "pool-archive", h_un, ["Zed.esp"])]),
+        "fomodprobe": doc("fomodprobe", [
+            hit("CondFix.esp", "fomod-option", h_cond, [], conditions=["Target.esp"], verdict="ABSENT")]),
+    }
+    exe_check = {c["adapter"]["exe"]: c["checkId"] for c in disc_checks}
+    check_def = {"checkId": "patch.candidate-qualification",
+                 "adapter": {"kind": "derived", "derives": "candidate-qualification"}}
+
+    def setup(tag, damage=None, drop=None):
+        run = tmp / case / tag
+        (run / "receipts").mkdir(parents=True)
+        (run / "outputs").mkdir()
+        (run / "candidates").mkdir()
+        (run / "candidates" / "candidates.json").write_text(json.dumps({"Candidates": []}), encoding="utf-8")
+        recs = [{"receiptId": "r-base", "armId": "baseline", "checkId": "loadability.masters-and-order",
+                 "validation": {"accepted": True}, "adapter": {"kind": "scopeprobe", "exe": "scopeprobe"},
+                 "consumed": {"configuration": {"plugins": [{"name": "Target.esp", "sha256": "00" * 32},
+                                                            {"name": "Fix.esp", "sha256": h_old}]}}}]
+        for exe, d in outputs.items():
+            if exe == drop:
+                continue
+            rid = f"{exe_check[exe]}__baseline"
+            rel = f"outputs/{exe}.json"
+            body = d
+            if damage == ("schema", exe):
+                body = {**d, "schemaVersion": 2}
+            (run / rel).write_text(json.dumps(body), encoding="utf-8")
+            row = {"path": rel, "sha256": mod.sha256_file(run / rel)}
+            if damage == ("changed", exe):
+                (run / rel).write_text(json.dumps({**d, "hits": []}), encoding="utf-8")
+            if damage == ("missing", exe):
+                (run / rel).unlink()
+            outs = [] if damage == ("text", exe) else [row]
+            recs.append({"receiptId": rid, "armId": "baseline", "checkId": exe_check[exe],
+                         "validation": {"accepted": True}, "adapter": {"kind": "patchprobe", "exe": exe},
+                         "outputs": outs, "consumed": {}})
+        for r in recs:
+            (run / "receipts" / f"{r['receiptId']}.json").write_text(json.dumps(r), encoding="utf-8")
+        plan = {"arms": [base, cand], "checks": disc_checks, "targets": [{"name": "Target.esp"}]}
+        stub = Stub(run, plan)
+        mod.run_derived(stub, check_def, base)
+        return stub, ((stub.extra or {}).get("derived") or {})
+
+    stub, payload = setup("all-accepted")
+    rows = [(r.get("file"), r.get("source"), r.get("qualification")) for r in payload.get("candidates") or []
+            if r.get("source")]
+    expect(sorted(rows), sorted([("Fix.esp", "patchprobe:installed", "qualified"),
+                                 ("Fix.esp", "patchprobe:other-list", "unqualified"),
+                                 ("Named Fix.7z", "patchprobe:download-name", "unqualified"),
+                                 ("PoolFix.esp", "poolprobe:pool-archive", "unqualified"),
+                                 ("CondFix.esp", "fomodprobe:fomod-option", "unqualified")]),
+           f"{case}: exactly the relevant hits are rows, each qualified by its sha256", "D-1 / Gate A answer 1")
+    by = {(r.get("file"), r.get("source")): r for r in payload.get("candidates") or []}
+    why = (by.get(("Fix.esp", "patchprobe:installed")) or {}).get("why") or ""
+    check(h_old[:12] in why and "baseline" in why, f"{case}: the qualified hit's why names its hash and arm ({why!r})")
+    why = (by.get(("Named Fix.7z", "patchprobe:download-name")) or {}).get("why") or ""
+    check("archive name only" in why, f"{case}: an unhashed hit's why carries the probe's reason ({why!r})")
+    check(("CondFix.esp", "fomodprobe:fomod-option") in by,
+          f"{case}: a hit relevant only through its FOMOD condition is a row")
+    nr = payload.get("notRelevant") or {}
+    expect((nr.get("poolprobe") or {}).get("count"), 2,
+           f"{case}: the transitive-only and the unrelated pool hits are counted, not rowed", "Gate A answer 1")
+    check(bool((nr.get("poolprobe") or {}).get("why")), f"{case}: the uncounted hits carry their reason")
+    check(("Transitive.esp", "poolprobe:pool-archive") not in by and ("Unrelated.esp", "poolprobe:pool-archive") not in by,
+          f"{case}: neither the transitive-only nor the unrelated hit is a row")
+    expect((stub.v or {}).get("detector"), "no-finding", f"{case}: every output read, so the derivation is settled")
+
+    for tag, damage in [("changed", ("changed", "poolprobe")), ("missing", ("missing", "fomodprobe")),
+                        ("schema", ("schema", "patchprobe")), ("text", ("text", "poolprobe"))]:
+        stub, payload = setup(tag, damage=damage)
+        rid = f"{exe_check[damage[1]]}__baseline"
+        expect((stub.v or {}).get("detector"), "inconclusive", f"{case}/{tag}: the derivation is inconclusive")
+        said = " ".join(payload.get("inconclusive") or [])
+        check(rid in said, f"{case}/{tag}: the inconclusive sentence names receipt {rid} ({said[:200]!r})")
+
+    stub, payload = setup("pool-not-run", drop="poolprobe")
+    said = " ".join(payload.get("notSearched") or [])
+    check("patch.discovery-pool" in said, f"{case}: a planned discovery check with no accepted receipt is named "
+                                          f"as not searched ({said[:200]!r})")
+
+
+def case_51(tmp):
+    """The held red arm of task 2026-10-14-discovery-hits-get-no-qualification-row, end to end: case 10's fixture
+    on the trim that includes patch.discovery-installed and the derivation. The fake patchprobe writes the --json hit
+    list; the catalogue hit CommunityPatch.esp (masters the fixture target, bytes f00d..., in no arm) is exactly one
+    row, unqualified, its why naming its hash."""
+    case = "case-51-discovery-end-to-end"
+    run = tmp / case
+    expect(do_plan(run, "case-10-discovery-media", registry="fixture-check-registry-derived.json").returncode, 0,
+           f"{case}: plan exit")
+    _, _, _, scen = case_paths("case-10-discovery-media")
+    expect(evalrun(["run", "--run", run], scen).returncode, 0, f"{case}: run exit")
+    expect(evalrun(["finalize", "--run", run], scen).returncode, 0, f"{case}: finalize exit")
+    disp = load(run / "disposition.json") or {}
+    rows = [r for r in (field(disp, "discovery", default={}).get("candidates") or [])
+            if r.get("file") == "CommunityPatch.esp"]
+    expect([r.get("qualification") for r in rows], ["unqualified"],
+           f"{case}: CommunityPatch.esp is one row, unqualified", "D7")
+    check(bool(rows) and ("f00d" + "0" * 8) in (rows[0].get("why") or ""),
+          f"{case}: its why names the hash compared ({(rows[0].get('why') if rows else None)!r})")
+
+
+CASES["case-49"] = case_49
+CASES["case-51"] = case_51
+
+
 def pin_standard_settings(tmp: Path) -> None:
     """These known answers judge the load-time state: point every child at a private Standard-depth settings file,
     so the evaluation's Deep default and the user's own settings file never reach them (tests/test_stategen.py

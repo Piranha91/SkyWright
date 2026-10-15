@@ -61,6 +61,7 @@ sys.path.insert(0, str(HERE))
 import evalregistry  # noqa: E402
 import evalsettings  # noqa: E402
 import stategen  # noqa: E402
+import switchflip_scope  # noqa: E402
 
 #: Schema 2 is the evidence-chain schema: the plan freezes a per-arm REQUESTED identity, receipts record
 #: their comparison inputs, and finalize/bundle/verify walk the receipt-to-evidence chain. A schema-1
@@ -2417,9 +2418,16 @@ def execute(ex: Executor, parent) -> None:
                               + prereq_block_detail(ex, also, arm["armId"])),
                            extra=superseded_import(ex, check, arm))
             elif st == "live-import":
-                ex.account(check, arm, "live-import", None,
-                           "opted in and waiting for a live receipt: run switchflip.py for this arm, then "
-                           "`import-results --file` its export; the controller itself never launches the game")
+                scope_read = live_switch_scope(ex.run, ex.plan, ex.ledger, arm["armId"])                     if check["checkId"] == LIVE_CHECK_ID else None
+                if scope_read and scope_read["status"] == "not-applicable":
+                    # the arm's own accepted census answers it: nothing a script drives touches a target
+                    ex.account(check, arm, "not-applicable", None, switchflip_scope.sentence(scope_read),
+                               extra={"switchScope": live_switch_scope_record(scope_read)})
+                else:
+                    ex.account(check, arm, "live-import", None,
+                               "opted in and waiting for a live receipt: run switchflip.py for this arm, then "
+                               "`import-results --file` its export; the controller itself never launches the game"
+                               + ("" if not scope_read else f" ({switchflip_scope.sentence(scope_read)})"))
             elif st in ("unsupported", "mcp-only"):
                 ex.account(check, arm, st, None, check.get("unsupportedReason") or
                            "the registry records no CLI adapter for this check")
@@ -2959,6 +2967,33 @@ def reuse_blocked_by(ex: Executor, check: dict, arm_id: str) -> str | None:
     (typically on the baseline's answer, before the arm's own prerequisite was measured). Such an entry is
     blocked, not reused: reuse must not keep what the prerequisite gate would refuse to launch."""
     return next((p for p in check.get("prerequisites") or [] if decided_on_arm(ex, p, arm_id)), None)
+
+
+def live_switch_scope(run: Path, plan: dict, ledger, arm_id: str) -> dict | None:
+    """switchflip_scope's reading of one arm for the live switch check: its ACCEPTED state.switch-census output against
+    the plan's scope. None when there is no accepted census output or either document cannot be read (the row then
+    stays open: unknown never becomes not-applicable)."""
+    e = ledger.entry("state.switch-census", arm_id, None)
+    r = load_json(run / "receipts" / f"state.switch-census__{arm_id}.json")
+    if not (e and e.get("status") in TERMINAL_OK and r and (r.get("validation") or {}).get("accepted")):
+        return None
+    outs = r.get("outputs") or []
+    if not outs or not outs[0].get("path"):
+        return None
+    cpath = run / outs[0]["path"]
+    census = load_json(cpath)
+    scope = load_json(Path(plan["scope"]["path"])) if (plan.get("scope") or {}).get("path") else None
+    if not isinstance(census, dict) or not isinstance(scope, dict):
+        return None
+    res = switchflip_scope.population(census, scope)
+    res["census"] = {"path": outs[0]["path"], "sha256": sha256_file(cpath)}
+    return res
+
+
+def live_switch_scope_record(res: dict) -> dict:
+    """What a not-applicable receipt records: the census it read, the counts and the rule's module."""
+    return {"census": res["census"], "counts": res["counts"], "status": res["status"],
+            "rule": "switchflip_scope.population"}
 
 
 def prereq_satisfied(ex: Executor, check: dict, arm_id: str) -> str | None:
@@ -3556,6 +3591,105 @@ def order_classification(run: Path, arm: dict, rows: list[dict]) -> dict:
                                     "numbers stand"}
 
 
+#: The discovery probes whose `--json` hit list (schema 1, `_shared/DiscoveryHits.cs`) qualification reads.
+DISCOVERY_EXES = ("patchprobe", "poolprobe", "fomodprobe")
+
+
+def discovery_receipt_ids(ex, receipts: dict) -> list[str]:
+    return [r["receiptId"] for r in receipts.values()
+            if r["validation"]["accepted"] and (r.get("adapter") or {}).get("exe") in DISCOVERY_EXES]
+
+
+def relevant_plugins(ex) -> set[str]:
+    """What makes a discovered patch about THIS evaluation: a plan target, or a plugin of a pair the plan moves."""
+    names = {str(t.get("name")).lower() for t in (ex.plan.get("targets") or []) if isinstance(t, dict) and t.get("name")}
+    for pair in all_plan_pairs(ex):
+        names |= {str(x).lower() for x in pair}
+    return names
+
+
+def discovery_hit_rows(ex, receipts: dict, consumed_by: dict, by_name: dict):
+    """(rows, notRelevant, inconclusive sentences, not-searched sentences) from the accepted discovery receipts.
+
+    A hit is RELEVANT when its own masters, its FOMOD condition plugins or the pair it was found for name a plan
+    target or a plan pair's plugin. Direct names only: a hit that masters only a dependent of a target is counted with
+    the reason, because the hit list carries each hit's own masters, not its masters' masters. A hit is `qualified`
+    only when its sha256 equals a plugin an accepted receipt consumed (D-1). The output file is read only after its
+    sha256 matches the one the receipt recorded."""
+    relevant = relevant_plugins(ex)
+    rows, seen, unreadable, not_searched = [], {}, [], []
+    not_relevant: dict[str, dict] = {}
+    for r in sorted(receipts.values(), key=lambda x: str(x.get("receiptId"))):
+        exe = (r.get("adapter") or {}).get("exe")
+        if exe not in DISCOVERY_EXES or not r["validation"]["accepted"]:
+            continue
+        rid = r.get("receiptId")
+        outs = r.get("outputs") or []
+        out = outs[0] if outs else {}
+        if not out.get("path"):
+            unreadable.append(f"receipt {rid} ({exe}) records no output file, so its hits cannot be read (a text-only "
+                              f"receipt from before the --json hit list)")
+            continue
+        f = ex.run / out["path"]
+        if not f.exists():
+            unreadable.append(f"receipt {rid} ({exe}) names {out['path']}, which is missing")
+            continue
+        if sha256_file(f) != out.get("sha256"):
+            unreadable.append(f"receipt {rid} ({exe}): {out['path']} has changed since the receipt recorded its sha256")
+            continue
+        doc = load_json(f)
+        if not isinstance(doc, dict) or doc.get("schemaVersion") != 1 or not isinstance(doc.get("hits"), list):
+            unreadable.append(f"receipt {rid} ({exe}): {out['path']} is not a schema-1 hit list")
+            continue
+        for h in doc["hits"]:
+            if not isinstance(h, dict) or not h.get("file"):
+                continue
+            detail = h.get("detail") or {}
+            names = {str(x).lower() for x in (h.get("masters") or [])}
+            names |= {str(x).lower() for x in (detail.get("conditions") or [])}
+            names |= {str(x).lower() for x in (detail.get("pair") or [])}
+            if not names & relevant:
+                nr = not_relevant.setdefault(exe, {"count": 0, "why": (
+                    "its masters, FOMOD conditions and pair name no plan target and no plugin of a plan pair (its own "
+                    "masters only: a hit that masters just a dependent of a target is counted here)")})
+                nr["count"] += 1
+                continue
+            hsha = str(h.get("sha256") or "").lower()
+            hsha = hsha if is_sha256(hsha) else None
+            source = f"{exe}:{h.get('kind')}"
+            key = (str(h["file"]).lower(), hsha, source)
+            if key in seen:
+                seen[key]["foundOn"] = sorted(set(seen[key]["foundOn"]) | {str(r.get("armId"))})
+                continue
+            hit_ok = hsha is not None and hsha in consumed_by
+            if hsha is None:
+                why = (f"the {exe} hit records no content hash ({h.get('unhashedReason') or 'no reason given'}), so "
+                       f"its bytes cannot be compared with any evaluated arm's: a downloadable hit stays a lead "
+                       f"until its payload is measured")
+            elif hit_ok:
+                why = (f"its sha256 {hsha[:12]}… (from {exe}'s hit list) equals a plugin an accepted receipt "
+                       f"consumed on {', '.join(sorted(consumed_by.get(hsha) or ['no arm']))}")
+            else:
+                same_name = sorted(by_name.get(Path(str(h['file'])).name.lower(), set()) - {hsha})
+                why = (f"its sha256 {hsha[:12]}… (from {exe}'s hit list) matches no plugin any accepted receipt "
+                       f"consumed"
+                       + (f"; an accepted receipt consumed a different {h['file']} (sha256 "
+                          + ", ".join(s[:12] + "…" for s in same_name) + ")" if same_name else "")
+                       + ": a downloadable hit stays a lead until its payload is measured")
+            row = {"file": str(h["file"]), "armId": None, "source": source, "foundOn": [str(r.get("armId"))],
+                   "sha256": hsha, "qualification": "qualified" if hit_ok else "unqualified", "why": why}
+            seen[key] = row
+            rows.append(row)
+    accepted_checks = {r.get("checkId") for r in receipts.values()
+                       if r["validation"]["accepted"] and (r.get("adapter") or {}).get("exe") in DISCOVERY_EXES}
+    for c in ex.plan.get("checks") or []:
+        exe = (c.get("adapter") or {}).get("exe")
+        if exe in DISCOVERY_EXES and c.get("checkId") not in accepted_checks:
+            not_searched.append(f"{c.get('checkId')} ({exe}): no accepted receipt (plan status "
+                                f"{c.get('status') or 'unknown'}), so the patches it would find are not stated")
+    return rows, not_relevant, unreadable, not_searched
+
+
 def run_derived(ex: Executor, check: dict, arm: dict) -> None:
     """A derived check computes from other receipts; it runs no child and invents no measurement."""
     adapter = check["adapter"]
@@ -3687,9 +3821,18 @@ def run_derived(ex: Executor, check: dict, arm: dict) -> None:
             if f:
                 rows.append({"file": f, "armId": None, "qualification": "catalogued",
                              "why": "a candidate-order file, not a supplied patch payload"})
-        payload = {"candidates": rows}
+        # Every discovered patch: each relevant hit in an accepted discovery probe's --json hit list is one row,
+        # qualified by the same rule. A hit list that cannot be read as written makes the answer inconclusive.
+        hit_rows, not_relevant, unreadable, not_searched = discovery_hit_rows(ex, receipts, consumed_by, by_name)
+        rows += hit_rows
+        derived_from += [rid for rid in discovery_receipt_ids(ex, receipts) if rid not in derived_from]
+        payload = {"candidates": rows, "notRelevant": not_relevant, "notSearched": not_searched}
         findings = 0
         detector = "no-finding"
+        if unreadable:
+            payload["inconclusive"] = unreadable
+            detector = "inconclusive"
+            findings = None
 
     else:
         ex.account(check, arm, "unsupported", None,
@@ -4750,7 +4893,11 @@ def build_disposition(run: Path, plan: dict, ledger: Ledger, receipts: dict, *,
                                    if (r.get("adapter") or {}).get("kind") in ("adviceprobe", "patchprobe")
                                    and r["validation"]["accepted"]} - {None}),
         "sourcesNotSearched": ["the Nexus network API (this runner never fetches; advice is read offline "
-                               "from the catalogue snapshot)"],
+                               "from the catalogue snapshot)"]
+                              + next(((r.get("derived") or {}).get("notSearched") or []
+                                      for r in receipts.values() if (r.get("derived") or {}).get("candidates")), []),
+        "notRelevant": next(((r.get("derived") or {}).get("notRelevant") or {}
+                             for r in receipts.values() if (r.get("derived") or {}).get("candidates")), {}),
         "candidates": next((r.get("derived", {}).get("candidates", [])
                             for r in receipts.values() if (r.get("derived") or {}).get("candidates")), []),
         "advice": [{"checkId": r["checkId"], "armId": r["armId"],
