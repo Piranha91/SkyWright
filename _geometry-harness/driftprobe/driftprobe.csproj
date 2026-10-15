@@ -13,6 +13,8 @@
     <Compile Include="..\_shared\LastSighting.cs" Link="LastSighting.cs" />
     <Compile Include="..\_shared\MovedRefFixture.cs" Link="MovedRefFixture.cs" />
     <Compile Include="..\_shared\MovedRefSelfTest.cs" Link="MovedRefSelfTest.cs" />
+    <Compile Include="..\_shared\ProbeSelfTest.cs" Link="ProbeSelfTest.cs" />
+    <Compile Include="..\_shared\DriftFixture.cs" Link="DriftFixture.cs" />
     <ProjectReference Include="..\..\src\housecarl-core\housecarl-core.csproj" />
     <Compile Include="..\_shared\StateArm.cs" Link="StateArm.cs" />
     <Compile Include="..\_shared\EnableArms.cs" Link="EnableArms.cs" />

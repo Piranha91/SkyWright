@@ -55,6 +55,8 @@ using HousecarlCore.Progress;
 using var __run = RunLog.BeginProcess("blockprobe", args);
 // Known answers for which version of a moved or deleted reference this probe's walk keeps (_shared/MovedRefFixture.cs).
 if (args.Length >= 1 && args[0] == "--moved-ref-selftest") return BlockSelfTest.Run();
+// Known answers for the per-reference decisions over a synthetic two-room order (_shared/BlockFixture.cs).
+if (args.Length >= 1 && args[0] == "--self-test") return BlockRouteSelfTest.Run();
 
 string Instance = HarnessTarget.Require(HarnessTarget.Instance, "MO2 instance directory", "instance");
 string GamePath = HarnessTarget.Require(HarnessTarget.Game, "game directory", "game");
@@ -457,9 +459,7 @@ foreach (var (cellKey, tcell) in targetCells)
     {
         // Test the WINNING placement — if a later patch moved or removed this reference,
         // the target's own copy is not what the game uses.
-        if (!winRef.TryGetValue(tref.FormKey, out var r)) { skipped++; continue; }
-        if (winRefCell.TryGetValue(tref.FormKey, out var wc) && wc != cellKey) { skipped++; continue; }
-        if (r.Deleted) { skipped++; continue; }
+        if (RefAdmission.Winning(tref.FormKey, cellKey, winRef, winRefCell) is not { } r) { skipped++; continue; }
         // The Base Object Swapper layer: the base and transform the game LOADS for this reference (the record's own under
         // --bos off).
         var eff = bos.Effective(r, cellKey, bosRep);
@@ -540,8 +540,9 @@ foreach (var (cellKey, tcell) in targetCells)
         // A MoveableStatic is pushed aside, not a blocker (Part C's urn) — set aside the same way, counted.
         if (nCross > 0 && columns is not null)
         {
-            if (bm.Type == "Door") { routeDoors++; }
-            else if (bm.Type == "MoveableStatic") { routeMovable++; }
+            var aside = RefAdmission.RouteSetAside(bm.Type);
+            if (aside == RefAdmission.SetAside.Door) { routeDoors++; }
+            else if (aside == RefAdmission.SetAside.Movable) { routeMovable++; }
             else
             {
                 routeMeasured++;

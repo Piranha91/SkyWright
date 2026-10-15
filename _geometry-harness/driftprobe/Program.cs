@@ -63,6 +63,8 @@ using HousecarlCore.Progress;
 using var __run = RunLog.BeginProcess("driftprobe", args);
 // Known answers for which version of a moved or deleted reference this probe's walk keeps (_shared/MovedRefFixture.cs).
 if (args.Length >= 1 && args[0] == "--moved-ref-selftest") return DriftSelfTest.Run();
+// Known answers for CHECK 2 (the alias-split decisions) over a synthetic quest order (_shared/DriftFixture.cs).
+if (args.Length >= 1 && args[0] == "--self-test") return DriftQuestSelfTest.Run();
 
 string Instance = HarnessTarget.Instance;
 string GamePath = HarnessTarget.Game;
@@ -173,6 +175,9 @@ long placements = 0, questRecords = 0;
 // silently skipped.
 var unreadablePlugins = new List<string>();
 __run.Feature("plugins", paths.Count, "plugins").Stage("scan", "reading plugins", paths.Count, "plugins");
+// The per-plugin walk (DriftIndex.cs) fills the tables above.
+var index = new DriftIndex(pluginKey, masterIdx, bos, aliasTargets, refBase, npcPlaced, baseName, cellName, refArm, refEz, quests, scenes,
+                           packageTargets, packFacts, npcPackages, npcTemplated, narrativeQuests, narrativeCount, recordCensus, cellEdits);
 
 
 for (int p = 0; p < paths.Count; p++)
@@ -184,100 +189,8 @@ for (int p = 0; p < paths.Count; p++)
 
     using (mod as IDisposable)
     {
-        pluginKey[p] = mod.ModKey;
-        bos.Plugin(mod);
-        var mset = new HashSet<int>();
-        try
-        {
-            var names = mod.ModHeader.MasterReferences.Select(m => m.Master).ToHashSet();
-            for (int q = 0; q < p; q++) if (names.Contains(pluginKey[q])) mset.Add(q);
-        }
-        catch { /* an unreadable header means we cannot claim what it saw; leave the set empty */ }
-        masterIdx[p] = mset;
-
-        foreach (var cp in AliasTargets.Cells(mod))
-        {
-            cellName[cp.Cell] = (cp.CellEditorId, cp.Interior);
-            bos.Cell(cp, withRefs: false);
-            foreach (var r in cp.Refs)
-            {
-                placements++;
-                bos.Placed(r);
-                refArm[r.FormKey] = r.RecordType;
-                if (r.EncounterZone is { } rez) refEz[r.FormKey] = rez; else refEz.Remove(r.FormKey);
-                if (!cellEdits.TryGetValue(p, out var ce)) cellEdits[p] = ce = new Dictionary<FormKey, int>();
-                ce[cp.Cell] = ce.GetValueOrDefault(cp.Cell) + 1;
-                // Record only a plugin that actually CHANGED something. An override that leaves the
-                // placement alone is not a step in the story and would swamp the history. Rotation and scale ride
-                // along (not part of SameAs — a rotation-only override is still no step) so the BOS hook's
-                // "rotation/scale-only" tally compares an override against the record's values, not against zero.
-                aliasTargets.Placed(p, cp, r);
-
-                if (r.Base is { } bk)
-                {
-                    refBase[r.FormKey] = bk;
-                    if (r.RecordType.Contains("PlacedNpc", StringComparison.Ordinal))
-                    {
-                        if (!npcPlaced.TryGetValue(bk, out var l)) npcPlaced[bk] = l = new List<FormKey>(1);
-                        if (!l.Contains(r.FormKey)) l.Add(r.FormKey);
-                    }
-                }
-            }
-        }
-
-        void Narrative(FormKey? quest)
-        {
-            narrativeCount[p]++;
-            if (quest is { } qk && !qk.IsNull)
-            {
-                if (!narrativeQuests.TryGetValue(p, out var nq)) narrativeQuests[p] = nq = new HashSet<FormKey>();
-                nq.Add(qk);
-            }
-        }
-        foreach (var rec in mod.EnumerateMajorRecords())
-        {
-            bos.Record(rec);
-            aliasTargets.Record(p, rec);
-            // The census counts every record the plugin carries, by Mutagen type name — the "all
-            // 19 records: 13 REFR, 3 ACHR, 2 CELL, 1 WRLD" evidence line, read instead of recited.
-            var census = recordCensus.TryGetValue(p, out var cd) ? cd : recordCensus[p] = new Dictionary<string, int>();
-            Bump(census, rec.GetType().Name.Replace("BinaryOverlay", ""));
-
-            if (rec is IQuestGetter q) { quests[q.FormKey] = QuestInfo.From(q, p); questRecords++; Narrative(q.FormKey); }
-            else if (rec is ISceneGetter sc)
-            {
-                scenes[sc.FormKey] = (sc.Quest.FormKeyNullable ?? FormKey.Null,
-                                      sc.Actors.Select(a => (int)a.ID).Distinct().ToArray());
-                Narrative(sc.Quest.FormKeyNullable);
-            }
-            // A topic points UP at its quest; INFO lines carry no quest of their own, but the
-            // plugin holding them must also carry their parent DIAL, so the quest attribution
-            // rides on the topic and the INFO still counts as narrative work.
-            else if (rec is IDialogTopicGetter dt) Narrative(dt.Quest.FormKeyNullable);
-            else if (rec is IDialogResponsesGetter) Narrative(null);
-            else if (rec is IPackageGetter pk)
-            {
-                // A package's data bag is keyed by slot; the arms that matter are the TARGET ones,
-                // and of those only the alias arm names a thing this analysis can follow.
-                var t = pk.Data.Values.OfType<IPackageDataTargetGetter>()
-                          .Select(d => d.Target).OfType<IPackageTargetAliasGetter>()
-                          .Select(x => x.Alias).Distinct().ToArray();
-                if (t.Length > 0) packageTargets[pk.FormKey] = t;
-                packFacts[pk.FormKey] = PackFacts.From(pk);      // winner wins: later plugins overwrite
-            }
-            else if (rec is INpcGetter npc)
-            {
-                baseName[npc.FormKey] = ("Npc", npc.EditorID);
-                npcPackages[npc.FormKey] = npc.Packages.Select(x => x.FormKey).ToArray();
-                // A templated actor's package list is its TEMPLATE's, and this probe does not walk
-                // the template chain — such an actor is unassessable, counted rather than guessed.
-                if (!npc.Template.IsNull && npc.Configuration.TemplateFlags.HasFlag(NpcConfiguration.TemplateFlag.AIPackages))
-                    npcTemplated.Add(npc.FormKey);
-                else npcTemplated.Remove(npc.FormKey);
-            }
-            else if (rec is IModeledGetter && rec is ISkyrimMajorRecordGetter sm)
-                baseName[sm.FormKey] = (rec.GetType().Name.Replace("BinaryOverlay", ""), sm.EditorID);
-        }
+        var (addedPlacements, addedQuestRecords) = index.Plugin(p, mod);
+        placements += addedPlacements; questRecords += addedQuestRecords;
     }
     if ((p + 1) % 150 == 0) Console.WriteLine($"   ... {p + 1}/{paths.Count} plugins, {placements:N0} placements, {sw.Elapsed.TotalSeconds:0}s");
 }
@@ -310,48 +223,18 @@ Console.WriteLine();
 // _shared/DetectorModel.cs and is owned by proofprobe cases.
 var masterClosure = DetectorModel.MasterClosure(masterIdx);
 
+// Where an actor can stand, for the reach filter (AliasSplits.cs, ActorReach).
+var reach = new ActorReach(packFacts, history.Winning, refBase, npcPackages, npcTemplated);
+
 // WHERE A PACKAGE PUTS AN ACTOR, resolved against the winning order. Everything here is
 // I/O — looking anchors up and measuring to them; the DECISION on what the numbers mean is
 // DetectorModel.ClassifyReach, which proofprobe owns.
-DetectorModel.PackageAnchor? AnchorOf(FormKey packageKey, Snap at)
-{
-    if (!packFacts.TryGetValue(packageKey, out var f)) return null;
-    if (f.Locations.Count == 0)
-        return new DetectorModel.PackageAnchor(false, false, false, null, 0, f.Scheduled, f.ScheduleMinutes);
-
-    bool allAtPlacement = true, anyUnresolved = false;
-    float? worst = null;
-    uint reach = 0;
-    foreach (var (arm, radius, link) in f.Locations)
-    {
-        if (arm == PackFacts.EditorArm || arm == PackFacts.SelfArm) { reach = Math.Max(reach, radius); continue; }
-        allAtPlacement = false;
-        // Only a placed reference has a position this order can read. A cell, a keyword, an
-        // object type, an alias and the player all resolve at run time or not at all.
-        if (arm != PackFacts.RefArm || link.IsNull || Winning(link) is not { } w || w.Cell != at.Cell)
-        { anyUnresolved = true; continue; }
-        // HORIZONTAL distance. A package radius bounds where an actor wanders on the floor; the
-        // anchor for a temple's sandbox sits 328u above the priests' heads, and counting that gap
-        // put Rorlund 8u outside a radius he is 404u inside of.
-        float d = DistXY(w.Pos, at.Pos);
-        if (d > radius) worst = MathF.Max(worst ?? 0f, d);
-        else reach = Math.Max(reach, (uint)MathF.Ceiling(d + radius));
-    }
-    return new DetectorModel.PackageAnchor(true, allAtPlacement, anyUnresolved, worst, reach,
-                                           f.Scheduled, f.ScheduleMinutes);
-}
+DetectorModel.PackageAnchor? AnchorOf(FormKey packageKey, Snap at) => reach.AnchorOf(packageKey, at);
 
 // An alias resolves to a placed reference; only an ACTOR carries packages. Anything else — a
 // marker, a container, a door — stays exactly where it was placed, so its placement predicts its
 // position perfectly and its reach is zero.
-(ReachVerdict Verdict, uint Radius, string Why) ReachOf(FormKey refKey, Snap at, bool byCoverage = false)
-{
-    var baseKey = refBase.GetValueOrDefault(refKey);
-    if (!npcPackages.TryGetValue(baseKey, out var pkgs))
-        return (ReachVerdict.PlacementBound, 0, "not an actor: it stays where it is placed");
-    return DetectorModel.ClassifyReach(pkgs.Select(k => AnchorOf(k, at)).ToArray(),
-                                       npcTemplated.Contains(baseKey), byCoverage);
-}
+(ReachVerdict Verdict, uint Radius, string Why) ReachOf(FormKey refKey, Snap at, bool byCoverage = false) => reach.ReachOf(refKey, at, byCoverage);
 
 // --actor: the records behind one actor's reach, printed as they were read. This exists because
 // the filter below is a claim about package data, and a claim about package data should be
@@ -424,14 +307,7 @@ Snap? Winning(FormKey refKey) => history.Winning(refKey);
 // constantly, and reading that as "anchored to something that is gone" buries every real finding.
 // Matched on the raw id, not a FormKey: a plugin with an unusual master list renders the same
 // 0x14 against its OWN ModKey, and Bethesda reserves the low ids so nothing else can claim it.
-static bool IsPlayerRef(FormKey k) => k.ID == 0x14;
-
-FormKey? AliasRef(AliasInfo a)
-{
-    if (a.Forced is { } f) return IsPlayerRef(f) ? null : f;
-    if (a.UniqueNpc is { } n && npcPlaced.TryGetValue(n, out var l) && l.Count == 1) return l[0];
-    return null;
-}
+FormKey? AliasRef(AliasInfo a) => AliasStated.AliasRef(a, npcPlaced);
 string CellOf(FormKey c) => cellName.TryGetValue(c, out var v) ? (v.Edid ?? c.ToString()) + (v.Interior ? " (int)" : "") : c.ToString();
 string NameOf(FormKey refKey)
 {
@@ -496,31 +372,7 @@ if (bosOn)
 //
 // A pair backed by either is a claim about authored intent. A pair backed by neither is kept,
 // but reported apart and below, because it may be nothing.
-var statedPairs = new Dictionary<FormKey, HashSet<(int, int)>>();   // quest -> unordered alias pairs
-
-static (int, int) Pair(int a, int b) => a <= b ? (a, b) : (b, a);
-
-void AddStated(FormKey quest, int a, int b)
-{
-    if (a == b) return;
-    if (!statedPairs.TryGetValue(quest, out var set)) statedPairs[quest] = set = new HashSet<(int, int)>();
-    set.Add(Pair(a, b));
-}
-
-foreach (var sc in scenes.Values)
-{
-    if (sc.Quest.IsNull || sc.Actors.Length < 2) continue;
-    for (int i = 0; i < sc.Actors.Length; i++)
-        for (int j = i + 1; j < sc.Actors.Length; j++)
-            AddStated(sc.Quest, sc.Actors[i], sc.Actors[j]);
-}
-
-foreach (var q in quests.Values)
-    foreach (var a in q.Aliases)
-        foreach (var pk in a.Packages)
-            if (packageTargets.TryGetValue(pk, out var targets))
-                foreach (var t in targets)
-                    AddStated(q.Key, a.Id, t);
+var statedPairs = AliasStated.Of(scenes, quests, packageTargets);   // quest -> unordered alias pairs (AliasSplits.cs)
 
 int statedTotal = statedPairs.Values.Sum(v => v.Count);
 Console.WriteLine();
@@ -572,134 +424,32 @@ foreach (var b in broken.Take(listN)) Console.WriteLine(b);
 // no guess about which of the two is "the marker".
 // Rule 6: the aliases this check CANNOT judge, counted by reason instead of silently skipped.
 // Non-positional arms (FindMatchingRef*, Location, flags-only, the player ref) are out of scope by
-// design; the other three reasons are genuine blind spots and belong in the output.
-// (The counters accumulate only meaningfully on the first FindSplits call — the sensitivity sweep
-// below re-runs the check at other thresholds after they are printed.)
-long skipNonPositional = 0, skipMultiPlacement = 0, skipNoAuthoringView = 0, skipNoWinning = 0;
-// The emit's Coverage needs the population the split test JUDGED, not the rows it found; these two are
-// the counts the console never had to print, so they are declared here beside the skips they pair with.
-long aliasesResolved = 0, pairsJudged = 0;
-// The reach filter's own unjudgeable count, by reason — the pairs CHECK 2 used to report on a
-// metric the field test disqualified. Counted, named, never quietly dropped.
-var reachDropped = new Dictionary<string, int>();
-long reachOverlap = 0;
-// "Governing" has two honest readings and the records do not settle which is right: the
-// HIGHEST-PRIORITY package that positions the actor, or the one SCHEDULED for most of the day.
-// They disagree, so the disagreement is counted rather than buried under whichever was picked.
-long reachReadingDisagrees = 0;
-
-// CHECK 2 as a function of the "together" threshold, so the sweep below can re-ask the question
+// design; the other three reasons are genuine blind spots and belong in the output. The reach
+// filter's drops are counted by reason, and where the two readings of "governing" (the
+// HIGHEST-PRIORITY package or the one SCHEDULED for most of the day) disagree, that is counted too.
+// CHECK 2 is a function of the "together" threshold, so the sweep below can re-ask the question
 // at other settings over the same indexed data. The review showed the shortlist is threshold-
 // sensitive and non-monotonic (no-patch count 7 / 4 / 8 at 300 / 600 / 1200), which no single
-// number reveals.
-List<Split> FindSplits(float nearU)
-{
-var split = new List<Split>();
-foreach (var q in quests.Values)
-{
-    var resolved = new List<(AliasInfo A, FormKey Ref, Snap Then, Snap Now)>();
-    foreach (var a in q.Aliases)
-    {
-        if (AliasRef(a) is not { } rk)
-        {
-            if (a.UniqueNpc is { } n0 && npcPlaced.TryGetValue(n0, out var l0) && l0.Count > 1) skipMultiPlacement++;
-            else skipNonPositional++;
-            continue;
-        }
-        if (AsSeenBy(rk, q.Plugin) is not { } then) { skipNoAuthoringView++; continue; }
-        if (Winning(rk) is not { } now) { skipNoWinning++; continue; }
-        resolved.Add((a, rk, then, now));
-    }
-    aliasesResolved += resolved.Count;
-
-    for (int i = 0; i < resolved.Count; i++)
-        for (int j = i + 1; j < resolved.Count; j++)
-        {
-            var (a1, r1, t1, n1) = resolved[i];
-            var (a2, r2, t2, n2) = resolved[j];
-            if (r1 == r2) continue;
-            // Counted here, where the pair is actually compared: the emit's Coverage must say how many
-            // pairs the split test JUDGED, not how many came out split. Zero findings over a judged
-            // population and zero findings because nothing was judged are different answers.
-            pairsJudged++;
-            bool togetherThen = t1.Cell == t2.Cell;
-            float was = togetherThen ? Dist(t1.Pos, t2.Pos) : float.PositiveInfinity;
-            bool apartNow = n1.Cell != n2.Cell;
-            float isNow = apartNow ? float.PositiveInfinity : Dist(n1.Pos, n2.Pos);
-            // The split decision is DetectorModel.CameApart — proven by construction in proofprobe:
-            // together = same cell within nearU; split = different cells now, or drawn apart past
-            // max(nearU, 3× the authored distance). A pair that moved TOGETHER is fine.
-            if (!DetectorModel.CameApart(togetherThen, was, !apartNow, isNow, nearU)) continue;
-
-            // THE REACH FILTER (2026-08-31). CameApart is a statement about two AUTHORED
-            // placements; the field test showed that only predicts runtime distance when each
-            // actor's own packages keep it at its placement. Ask that first, and where the answer
-            // is yes, ask the question the placements can then answer: are the two reachable
-            // areas disjoint? Anything else is not a weaker finding, it is not a finding.
-            if (reachFilter)
-            {
-                var reach1 = ReachOf(r1, n1);
-                var reach2 = ReachOf(r2, n2);
-                bool boundByPriority = reach1.Verdict == ReachVerdict.PlacementBound
-                                    && reach2.Verdict == ReachVerdict.PlacementBound;
-                var cov1 = ReachOf(r1, n1, byCoverage: true);
-                var cov2 = ReachOf(r2, n2, byCoverage: true);
-                bool boundByCoverage = cov1.Verdict == ReachVerdict.PlacementBound
-                                    && cov2.Verdict == ReachVerdict.PlacementBound;
-                if (boundByPriority != boundByCoverage) reachReadingDisagrees++;
-                if (reach1.Verdict != ReachVerdict.PlacementBound) { Bump(reachDropped, reach1.Verdict.ToString()); continue; }
-                if (reach2.Verdict != ReachVerdict.PlacementBound) { Bump(reachDropped, reach2.Verdict.ToString()); continue; }
-                if (!DetectorModel.BubblesDisjoint(isNow, reach1.Radius, reach2.Radius)) { reachOverlap++; continue; }
-            }
-
-            bool objTarget = q.Objectives.Any(o => o.TargetAliasIds.Contains(a1.Id) || o.TargetAliasIds.Contains(a2.Id));
-            bool stated = statedPairs.TryGetValue(q.Key, out var sp) && sp.Contains(Pair(a1.Id, a2.Id));
-            int moverPlugin = n1.Plugin != t1.Plugin ? n1.Plugin : n2.Plugin;
-            bool patched = PatchExists(q.Plugin, moverPlugin);
-            string movers = string.Join("+", new[] { n1, n2 }
-                .Where(s => s.Plugin != t1.Plugin && s.Plugin != t2.Plugin)
-                .Select(s => PluginName(s.Plugin)).Distinct());
-            var moverList = new[] { n1, n2 }
-                .Where(s => s.Plugin != t1.Plugin && s.Plugin != t2.Plugin)
-                .Select(s => PluginName(s.Plugin)).Distinct().ToArray();
-            var moverIdxList = new[] { n1, n2 }
-                .Where(s => s.Plugin != t1.Plugin && s.Plugin != t2.Plugin)
-                .Select(s => s.Plugin).Distinct().ToArray();
-            // The cells intent classification judges the mover's work against: where the pair was
-            // authored (FIRST — its interior flag is the scope-mismatch input) plus wherever the
-            // pair stands now.
-            var affectedCells = new[] { t1.Cell, n1.Cell, n2.Cell }.Distinct().ToArray();
-            split.Add(new Split(q.Label, PluginName(q.Plugin), a1.Name, a2.Name,
-                                NameOf(r1), NameOf(r2), CellOf(t1.Cell), CellOf(n1.Cell), CellOf(n2.Cell),
-                                was, isNow, apartNow, movers, objTarget, stated, patched,
-                                q.Objectives.Where(o => o.TargetAliasIds.Contains(a1.Id) || o.TargetAliasIds.Contains(a2.Id))
-                                            .Select(o => o.Text).FirstOrDefault(t => !string.IsNullOrWhiteSpace(t)),
-                                new[] { (Key: r1, Moved: n1.Plugin != t1.Plugin), (Key: r2, Moved: n2.Plugin != t2.Plugin) }
-                                    .Where(x => x.Moved).Select(x => x.Key).ToArray(),
-                                new[] { r1, r2 }, q.Key, moverList, moverIdxList, affectedCells));
-        }
-}
-return split;
-}
-
-var split = FindSplits(near);
+// number reveals. Each call returns its own counts; the console and the emit print this call's.
+var splits = new AliasSplits(quests, npcPlaced, statedPairs, reachFilter, reach, AliasRef, AsSeenBy, Winning, PatchExists, PluginName, NameOf, CellOf);
+var (split, splitCoverage) = splits.Find(near);
 
 Console.WriteLine();
 Console.WriteLine($"==== CHECK 2: a quest's own aliases came apart (were within {near:0}u, same cell) ====");
 Console.WriteLine($"   ---- aliases the check could not judge (counted, not cleared) ----");
-Console.WriteLine($"   non-positional arm (runtime-resolved, location, flags-only, player) : {skipNonPositional:N0}");
-Console.WriteLine($"   UniqueActor with several placements (no single answer)              : {skipMultiPlacement:N0}");
-Console.WriteLine($"   no authoring-view position (quest plugin + closure contributed none): {skipNoAuthoringView:N0}");
-Console.WriteLine($"   no winning placement at all                                         : {skipNoWinning:N0}");
+Console.WriteLine($"   non-positional arm (runtime-resolved, location, flags-only, player) : {splitCoverage.SkipNonPositional:N0}");
+Console.WriteLine($"   UniqueActor with several placements (no single answer)              : {splitCoverage.SkipMultiPlacement:N0}");
+Console.WriteLine($"   no authoring-view position (quest plugin + closure contributed none): {splitCoverage.SkipNoAuthoringView:N0}");
+Console.WriteLine($"   no winning placement at all                                         : {splitCoverage.SkipNoWinning:N0}");
 if (reachFilter)
 {
     Console.WriteLine($"   ---- pairs the REACH filter removed (2026-08-31; --no-reach to see them) ----");
     Console.WriteLine($"   the placement does not predict where the actor stands:");
-    foreach (var kv in reachDropped.OrderByDescending(k => k.Value))
+    foreach (var kv in splitCoverage.ReachDropped.OrderByDescending(k => k.Value))
         Console.WriteLine($"      {kv.Key,-28} : {kv.Value:N0}");
-    if (reachDropped.Count == 0) Console.WriteLine("      (none)");
-    Console.WriteLine($"   both actors bound, but their reachable areas still OVERLAP             : {reachOverlap:N0}");
-    Console.WriteLine($"   pairs where the two readings of \"governing\" DISAGREE                    : {reachReadingDisagrees:N0}"
+    if (splitCoverage.ReachDropped.Count == 0) Console.WriteLine("      (none)");
+    Console.WriteLine($"   both actors bound, but their reachable areas still OVERLAP             : {splitCoverage.ReachOverlap:N0}");
+    Console.WriteLine($"   pairs where the two readings of \"governing\" DISAGREE                    : {splitCoverage.ReachReadingDisagrees:N0}"
                     + "   <- highest-priority vs most-of-the-day; --actor <name> shows both");
 }
 else Console.WriteLine("   ---- REACH filter OFF (--no-reach): pairs below are raw placement distance ----");
@@ -840,7 +590,7 @@ if (split.Count > 0)
 // exactly one setting is an artifact of the knob and says so here instead of in a headline.
 {
     var settings = new[] { near / 2f, near, near * 2f };
-    var perSetting = settings.Select(v => FindSplits(v)
+    var perSetting = settings.Select(v => splits.Find(v).Split
             .Where(s => s.Stated && !s.Patched)
             .ToDictionary(s => (s.Quest, s.Alias1, s.Alias2), s => s)).ToArray();
 
@@ -902,13 +652,8 @@ if (generic)
 if (emitPath is not null)
 {
     var conflicts = new List<Conflict>();
-    foreach (var s in split.Where(s => s.Stated))
+    foreach (var (s, necessary) in AliasSplits.Emitted(split))
     {
-        // A repair has to reconcile the PLACEMENT that changed. Re-pointing the quest's alias is the
-        // other legitimate fix and is reported as an alternative rather than scored, because a patch
-        // that overrides the quest may well be doing something unrelated to this pair.
-        var necessary = s.MovedRefs.Select(k => new ConflictRecord(k.ToString(), "moved-ref", s.CellThen)).ToList();
-        if (necessary.Count == 0) continue;                       // nothing identifiable moved; not judgeable
         var alternative = new List<ConflictRecord> { new(s.QuestKey.ToString(), "quest", s.Quest) };
 
         foreach (var mover in s.MoverList.DefaultIfEmpty(""))
@@ -923,34 +668,16 @@ if (emitPath is not null)
     // 2026-09-12 handoff). Without it an empty Conflicts list is indistinguishable from a run that judged nothing,
     // and a consumer has to guess which it was — the reading the evaluation controller refuses as coverage-missing.
     // Every number here is one the console already prints; nothing new is computed.
-    var coverage = new List<CoverageLine>
-    {
+    List<CoverageLine> coverage =
+    [
         new("plugins", paths.Count - unreadablePlugins.Count,
             new Dictionary<string, long> { ["UnreadablePlugin"] = unreadablePlugins.Count }),
         new("winning quests with stated alias pairs", statedPairs.Count, null, null,
             $"{statedTotal:N0} stated alias pair(s), from {scenes.Count:N0} winning scene(s) and "
           + $"{packageTargets.Count:N0} package(s) with an alias target"),
-        new("quest aliases (positional resolution)", aliasesResolved,
-            new Dictionary<string, long>
-            {
-                ["NonPositionalArm"] = skipNonPositional,
-                ["MultiPlacementUniqueActor"] = skipMultiPlacement,
-                ["NoAuthoringView"] = skipNoAuthoringView,
-                ["NoWinningPlacement"] = skipNoWinning,
-            }),
-        new("alias pairs (split test)", pairsJudged,
-            null,
-            reachFilter
-                ? new Dictionary<string, long>
-                {
-                    ["ReachFilterDropped"] = reachDropped.Values.Sum(),
-                    ["ReachAreasStillOverlap"] = reachOverlap,
-                    ["GoverningReadingsDisagree"] = reachReadingDisagrees,
-                }
-                : null,
-            reachFilter ? $"reach filter on; {split.Count:N0} pair(s) split, {split.Count(s => s.Stated):N0} of them stated"
-                        : $"--no-reach: raw placement distance; {split.Count:N0} pair(s) split, {split.Count(s => s.Stated):N0} of them stated"),
-    };
+        // The split test's two lines are the reported threshold's call alone (AliasSplits.cs), never the sweep's.
+        .. splitCoverage.Lines(reachFilter, split),
+    ];
 
     ConflictIo.Write(emitPath, new ConflictFile("driftprobe", Instance,
         DateTime.UtcNow.ToString("yyyy-MM-dd HH:mm:ssZ"), conflicts, coverage,
@@ -974,17 +701,6 @@ static string Excerpt(string s, int max)
     s = s.Replace("\\r", " ").Replace("\\n", " ").Replace("\\t", " ");
     s = System.Text.RegularExpressions.Regex.Replace(s, @"\s+", " ").Trim();
     return s.Length <= max ? s : s[..max] + "…";
-}
-static float DistXY(Vec3 a, Vec3 b)
-{
-    float dx = a.X - b.X, dy = a.Y - b.Y;
-    return MathF.Sqrt(dx * dx + dy * dy);
-}
-
-static float Dist(Vec3 a, Vec3 b)
-{
-    float dx = a.X - b.X, dy = a.Y - b.Y, dz = a.Z - b.Z;
-    return MathF.Sqrt(dx * dx + dy * dy + dz * dz);
 }
 
 record Split(string Quest, string QuestPlugin, string? Alias1, string? Alias2, string Name1, string Name2,

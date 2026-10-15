@@ -6,39 +6,11 @@ using NiflySharp;
 using NiflySharp.Blocks;
 using NiflySharp.Enums;
 using NiflySharp.Structs;
+using static HarnessShared.NifBoxFixture;
 
+// The NIF writer (NewFile, Save, Load, Attach) is _shared/NifBoxFixture.cs.
 static class MaterialScaleProof
 {
-    static NifFile NewFile()
-    {
-        var f = new NifFile();
-        f.Create(new NiVersion { FileVersion = NiVersion.ToFile("20.2.0.7"), UserVersion = 12, StreamVersion = 100 }, withRootNode: true);
-        return f;
-    }
-    static byte[] Save(NifFile f)
-    {
-        using var s = new MemoryStream();
-        if (f.Save(s) != 0) throw new InvalidOperationException("material/controller fixture failed to save");
-        return s.ToArray();
-    }
-    static NifFile Load(byte[] bytes)
-    {
-        var f = new NifFile();
-        if (f.Load(new MemoryStream(bytes)) != 0) throw new InvalidOperationException("material/controller fixture failed to load");
-        return f;
-    }
-    static void Attach(NifFile f, bhkShape shape, bool phantom = false)
-    {
-        bhkWorldObject body = phantom ? new bhkSimpleShapePhantom() : new bhkRigidBody();
-        body.Shape = new NiBlockRef<bhkShape>(f.AddBlock(shape));
-        bhkNiCollisionObject col = phantom ? new bhkSPCollisionObject() : new bhkCollisionObject();
-        col.Body = new NiBlockRef<bhkWorldObject>(f.AddBlock(body));
-        var root = f.GetRootNodes().First();
-        // Each body gets its own attached child so the body-filter proof also verifies material re-indexing.
-        var node = new NiNode { Scale = 1f };
-        node.CollisionObject = new NiBlockRef<NiCollisionObject>(f.AddBlock(col));
-        root.Children.AddBlockRef(f.AddBlock(node));
-    }
     static HavokMaterial Mat(uint value) => new() { Material_SHM = (SkyrimHavokMaterial)value };
     public static void Run(Action<string, bool, string> check)
     {

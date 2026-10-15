@@ -30,5 +30,9 @@
     <Compile Include="..\_shared\WorldState.cs" Link="WorldState.cs" />
     <Compile Include="..\_shared\StateArm.cs" Link="StateArm.cs" />
     <Compile Include="..\_shared\TargetTriggers.cs" Link="TargetTriggers.cs" />
+    <Compile Include="..\_shared\ProbeSelfTest.cs" Link="ProbeSelfTest.cs" />
+    <Compile Include="..\_shared\SwitchFixture.cs" Link="SwitchFixture.cs" />
+    <Compile Include="..\_shared\MovedRefFixture.cs" Link="MovedRefFixture.cs" />
+    <Compile Include="..\..\src\housecarl-mcp-tests\PexWriter.cs" Link="PexWriter.cs" />
   </ItemGroup>
 </Project>

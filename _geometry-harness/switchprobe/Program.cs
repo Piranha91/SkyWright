@@ -46,6 +46,8 @@ using HousecarlCore.Progress;
 //   --extra-plugin P.esp  load this plugin file after the order (a test fixture); repeatable
 
 using var __run = RunLog.BeginProcess("switchprobe", args);
+// Known answers for the trigger map over a synthetic order (_shared/SwitchFixture.cs).
+if (args.Length >= 1 && args[0] == "--self-test") return SwitchSelfTest.Run();
 
 string Instance = HarnessTarget.Instance;
 string GamePath = HarnessTarget.Game;
@@ -296,150 +298,18 @@ if (triggers)
     var questEdid = new Dictionary<FormKey, string?>();
     var recordEdid = new Dictionary<FormKey, string?>();
     var recordKind = new Dictionary<FormKey, string>();
-    for (int p = 0; p < paths.Count; p++)
-    {
-        if (pluginKey[p].IsNull) continue;
-        ISkyrimModGetter mod;
-        try { mod = SkyrimMod.CreateFromBinaryOverlay(paths[p], SkyrimRelease.SkyrimSE); } catch { continue; }
-        using (mod as IDisposable)
-        {
-            foreach (var rec in mod.EnumerateMajorRecords())
-            {
-                if (rec is not IHaveVirtualMachineAdapterGetter have || have.VirtualMachineAdapter is not { } vmad) continue;
-                var found = new List<Binding>();
-                string kind = rec switch
-                {
-                    IQuestGetter => "quest", ISceneGetter => "scene", IPlacedGetter => "ref", IPackageGetter => "package",
-                    IPerkGetter => "perk", IDialogResponsesGetter => "dialogue", _ => rec.GetType().Name.Replace("BinaryOverlay", "").ToLowerInvariant(),
-                };
-                void Prop(IScriptEntryGetter entry, IScriptPropertyGetter prop, string via)
-                {
-                    if (prop is IScriptObjectPropertyGetter op)
-                    {
-                        var fk = op.Object.FormKeyNullable;
-                        if (fk is { } k && sx.Switches.ContainsKey(k)) found.Add(new Binding(rec.FormKey, kind, entry.Name ?? "", prop.Name ?? "", k, via, null));
-                        else if (op.Alias >= 0 && rec is IQuestGetter qq2)
-                        {
-                            var al = qq2.Aliases.FirstOrDefault(a => a.ID == (uint)op.Alias);
-                            if (al?.ForcedReference?.FormKeyNullable is { } fr && sx.Switches.ContainsKey(fr))
-                                found.Add(new Binding(rec.FormKey, kind, entry.Name ?? "", prop.Name ?? "", fr, via + " (alias-bound property)", al.Name));
-                        }
-                    }
-                    else if (prop is IScriptObjectListPropertyGetter lp)
-                        foreach (var o in lp.Objects)
-                            if (o.Object.FormKeyNullable is { } k2 && sx.Switches.ContainsKey(k2)) found.Add(new Binding(rec.FormKey, kind, entry.Name ?? "", prop.Name ?? "", k2, via + " (list)", null));
-                }
-                foreach (var entry in vmad.Scripts) foreach (var prop in entry.Properties) Prop(entry, prop, "script");
-                if (vmad is IQuestAdapterGetter qa)
-                {
-                    foreach (var fr in qa.Fragments)
-                        if (!string.IsNullOrEmpty(fr.FragmentName)) questFragmentStage[(rec.FormKey, fr.FragmentName!)] = fr.Stage;
-                    foreach (var al in qa.Aliases)
-                        foreach (var entry in al.Scripts) foreach (var prop in entry.Properties) Prop(entry, prop, "alias script");
-                }
-                if (rec is IQuestGetter q)
-                {
-                    questEdid[q.FormKey] = q.EditorID;
-                    foreach (var al in q.Aliases)
-                    {
-                        if (!string.IsNullOrEmpty(al.Name)) questAliasName[(q.FormKey, (int)al.ID)] = al.Name!;
-                        if (al.ForcedReference?.FormKeyNullable is { } fr && sx.Switches.ContainsKey(fr))
-                        {
-                            // The alias route: every script on the quest can reach the marker as Alias_<name>; the alias's own
-                            // scripts as GetReference() / GetRef() on Self. Recorded once per (quest, alias).
-                            string aliasProp = "Alias_" + al.Name;
-                            foreach (var entry in vmad.Scripts) found.Add(new Binding(rec.FormKey, kind, entry.Name ?? "", aliasProp, fr, "forced-reference alias", al.Name));
-                            if (vmad is IQuestAdapterGetter qa2)
-                                foreach (var fa in qa2.Aliases)
-                                    if (fa.Property?.Alias == al.ID) foreach (var entry in fa.Scripts) found.Add(new Binding(rec.FormKey, kind, entry.Name ?? "", "Self", fr, "forced-reference alias script", al.Name));
-                        }
-                    }
-                }
-                // A script on the switch ITSELF: Self.Enable() / Disable() with no property at all.
-                if (rec is IPlacedGetter && sx.Switches.ContainsKey(rec.FormKey))
-                    foreach (var entry in vmad.Scripts) found.Add(new Binding(rec.FormKey, kind, entry.Name ?? "", "Self", rec.FormKey, "script on the switch itself", null));
-                // The linked-ref route: a scripted reference whose script calls GetLinkedRef().Enable() flips the switch it
-                // links to (XLKR) — the HearthFires room-finish idiom. The keyword filter, if any, is not read.
-                if (rec is IPlacedObjectGetter po)
-                    foreach (var l in po.LinkedReferences)
-                        if (l.Reference.FormKeyNullable is { } lk && sx.Switches.ContainsKey(lk))
-                            foreach (var entry in vmad.Scripts) found.Add(new Binding(rec.FormKey, kind, entry.Name ?? "", "GetLinkedRef", lk, "linked reference of the scripted ref", null));
-                recordEdid[rec.FormKey] = (rec as IMajorRecordGetter)?.EditorID;
-                recordKind[rec.FormKey] = kind;
-                if (found.Count > 0) recordBindings[rec.FormKey] = found; else recordBindings.Remove(rec.FormKey);
-            }
-        }
-        if ((p + 1) % 150 == 0) Console.WriteLine($"   ... bindings: {p + 1}/{paths.Count} plugins, {recordBindings.Count:N0} records, {sw.Elapsed.TotalSeconds:0}s");
-    }
-    foreach (var (rk, bl) in recordBindings)
-    {
-        recordsWithBindings++;
-        foreach (var b in bl) { if (!bindings.TryGetValue(b.Switch, out var l)) bindings[b.Switch] = l = new List<Binding>(); l.Add(b); }
-    }
+    recordsWithBindings += TriggerMap.Bindings(paths, pluginKey, sx, sw, recordBindings, questFragmentStage, questAliasName, questEdid, recordEdid, recordKind, bindings);
     Console.WriteLine($"   bindings: {bindings.Values.Sum(l => l.Count):N0} on {recordsWithBindings:N0} records name {bindings.Count:N0} of {switches.Count:N0} switches  ({sw.Elapsed.TotalSeconds:0.0}s)");
 
     // 4b. decompile each bound script once; find the calls.
     var scripts = bindings.Values.SelectMany(l => l).Select(b => b.Script).Where(s => s.Length > 0).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
     var source = new Dictionary<string, ScriptCalls?>(StringComparer.OrdinalIgnoreCase);
     var unreadWhy = new Dictionary<string, int>();
-    foreach (var name in scripts)
-    {
-        var rel = $@"Scripts\{name.Replace(':', '\\')}.pex";
-        var res = av.ResolveForPlacement(rel);
-        if (res.Sources.Count == 0) { source[name] = null; pexUnreadable++; unreadWhy["pex not in the VFS"] = unreadWhy.GetValueOrDefault("pex not in the VFS") + 1; continue; }
-        PexFile? pex = null;
-        try
-        {
-            var src = res.Sources[0];
-            if (src.LooseFilePath is not null) pex = PexFile.CreateFromFile(src.LooseFilePath, GameCategory.Skyrim);
-            else if (src.ArchivePath is not null && AssetResolver.TryReadArchiveEntry(src.ArchivePath, src.EntryPath) is { } bytes)
-            { using var ms = new MemoryStream(bytes); pex = PexFile.CreateFromStream(ms, GameCategory.Skyrim); }
-        }
-        catch { pex = null; }
-        if (pex is null) { source[name] = null; pexUnreadable++; unreadWhy["pex unreadable"] = unreadWhy.GetValueOrDefault("pex unreadable") + 1; continue; }
-        PapyrusDecompiler.Result dec;
-        try { dec = PapyrusDecompiler.DecompileFile(pex); }
-        catch { source[name] = null; pexDecompileFailed++; unreadWhy["decompiler threw"] = unreadWhy.GetValueOrDefault("decompiler threw") + 1; continue; }
-        scriptsDecompiled++;
-        if (dec.FunctionsFailed > 0) pexDecompileFailed++;
-        source[name] = ScriptCalls.Parse(dec.Source, dec.FunctionsFailed);
-    }
+    TriggerMap.Decompile(av, scripts, source, unreadWhy, ref pexUnreadable, ref pexDecompileFailed, ref scriptsDecompiled);
     Console.WriteLine($"   scripts bound: {scripts.Count:N0}; decompiled {scriptsDecompiled:N0}; pex missing or unreadable {pexUnreadable:N0} ({string.Join(", ", unreadWhy.Select(kv => $"{kv.Key} {kv.Value}"))}); with a function the decompiler refused {pexDecompileFailed:N0}  ({sw.Elapsed.TotalSeconds:0.0}s)");
 
     // 4c. per switch: Triggered / BoundUnread / Unknown, with the kind and the callers.
-    foreach (var s in switches)
-    {
-        if (!bindings.TryGetValue(s.Key, out var bl)) { triggerStatus[s.Key] = ("Unknown", "no binding", new List<string>()); continue; }
-        var by = new List<string>(); var kinds = new List<string>();
-        foreach (var b in bl)
-        {
-            if (!source.TryGetValue(b.Script, out var sc) || sc is null) continue;
-            foreach (var call in sc.CallsOn(b.Property))
-            {
-                string where;
-                if (b.Kind == "quest" && questFragmentStage.TryGetValue((b.Record, call.Function), out var stage))
-                {
-                    where = $"quest {recordEdid.GetValueOrDefault(b.Record) ?? b.Record.ToString()} stage {stage} ({b.Script}.{call.Function}: {call.Text})";
-                    kinds.Add("quest stage");
-                    string jk = $"{recordEdid.GetValueOrDefault(b.Record) ?? b.Record.ToString()}:{stage}";
-                    if (!jointFlips.TryGetValue(jk, out var js)) jointFlips[jk] = js = new HashSet<FormKey>();
-                    js.Add(s.Key);
-                }
-                else
-                {
-                    where = $"{b.Kind} {recordEdid.GetValueOrDefault(b.Record) ?? b.Record.ToString()} ({b.Script}.{call.Function}: {call.Text}{(b.Via.Contains("alias") ? $"; via alias {b.AliasName}" : "")})";
-                    kinds.Add(b.Kind == "ref" ? $"ref event {call.Function}" : b.Kind == "scene" ? "scene" : b.Kind);
-                }
-                if (!by.Contains(where)) by.Add(where);
-            }
-        }
-        if (by.Count > 0) triggerStatus[s.Key] = ("Triggered", string.Join("+", kinds.Distinct().OrderBy(k => k)), by);
-        else
-        {
-            bool anyRead = bl.Any(b => source.TryGetValue(b.Script, out var sc) && sc is not null);
-            triggerStatus[s.Key] = ("BoundUnread", anyRead ? "bound, no Enable/Disable call found on the property" : "bound, the script could not be read", bl.Select(b => $"{b.Kind} {recordEdid.GetValueOrDefault(b.Record) ?? b.Record.ToString()} {b.Script}.{b.Property} [{b.Via}]").Distinct().ToList());
-        }
-    }
+    TriggerMap.Status(switches, bindings, source, questFragmentStage, recordEdid, jointFlips, triggerStatus);
     int nT = triggerStatus.Count(kv => kv.Value.Status == "Triggered"), nB = triggerStatus.Count(kv => kv.Value.Status == "BoundUnread"), nU = triggerStatus.Count(kv => kv.Value.Status == "Unknown");
     Console.WriteLine($"\n   TRIGGERED {nT:N0} ({Rate(nT, switches.Count):0.0}%)   BOUND BUT UNREAD {nB:N0} ({Rate(nB, switches.Count):0.0}%)   UNKNOWN {nU:N0} ({Rate(nU, switches.Count):0.0}%)   of {switches.Count:N0} switches");
     Console.WriteLine($"   vanilla-owned: " + string.Join("   ", new[] { "Triggered", "BoundUnread", "Unknown" }.Select(st => $"{st} {switches.Count(s => IsVanilla(s.Owner) && triggerStatus[s.Key].Status == st):N0}")) + $"   of {switches.Count(s => IsVanilla(s.Owner)):N0}");
