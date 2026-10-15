@@ -34,6 +34,7 @@
     <Compile Include="..\_shared\ActorBand.cs" Link="ActorBand.cs" />
     <Compile Include="..\_shared\WorldState.cs" Link="WorldState.cs" />
     <Compile Include="..\_shared\StateArm.cs" Link="StateArm.cs" />
+    <Compile Include="..\_shared\BaseGamePlugins.cs" Link="BaseGamePlugins.cs" />
   </ItemGroup>
   <ItemGroup>
     <!-- The alpha-visibility option (Stage D alpha sampling): the texture reader and its DDS decoder. Pfim 0.11.4, MIT (https://github.com/nickbabcock/Pfim). -->

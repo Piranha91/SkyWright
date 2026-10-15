@@ -340,9 +340,7 @@ Console.WriteLine($"load order: {paths.Count} plugins; meshes from {(vanillaAsse
 HarnessOrderCli.Print(cfg);
 Console.WriteLine();
 
-var Vanilla = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
-{ "Skyrim.esm", "Update.esm", "Dawnguard.esm", "HearthFires.esm", "Dragonborn.esm", "SkyrimVR.esm", "_ResourcePack.esl" };
-const string Ussep = "Unofficial Skyrim Special Edition Patch.esp";
+var Vanilla = BaseGamePlugins.Names;
 
 // ---------------------------------------------------------------------------------------
 // Geometry — measured NIFs through the VFS; the soup per role chosen and LABELLED; OBND box as the fallback.
@@ -580,7 +578,7 @@ if (forceEnable.Count > 0)
 
 string PluginName(int p) => p < 0 ? "(none)" : p == bosPlugin ? BosApplyReport.PseudoPluginName : pluginKey[p].FileName.String;
 bool IsVanilla(int p) => p >= 0 && Vanilla.Contains(PluginName(p));
-bool IsUssep(int p) => p >= 0 && string.Equals(PluginName(p), Ussep, StringComparison.OrdinalIgnoreCase);
+bool IsUssep(int p) => p >= 0 && BaseGamePlugins.IsUssep(PluginName(p));
 string ClassOf(int p) => IsVanilla(p) ? "Bethesda" : IsUssep(p) ? "USSEP" : "mod";
 string CellOf(FormKey c) => idx.CellName.TryGetValue(c, out var v) ? (v.Edid ?? c.ToString()) + (v.Interior ? " (int)" : " (ext)") : c.ToString();
 string TypeOf(FormKey baseKey) => idx.BaseInfo.TryGetValue(baseKey, out var bi) ? bi.Type : "?";
