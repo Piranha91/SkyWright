@@ -3668,6 +3668,8 @@ MotionProof.RunLooseItems(Check);
 MotionProof.RunDropRefusal(Check);
 // Rest rule implementation (2026-10-13): lifted, rack mounting, loose supports, lab 5 direction (red until implemented).
 MotionProof.RunRestRule(Check);
+// Reach reader keeps a refused loose item's drop (2026-10-14; red until implemented).
+MotionProof.RunReachDrop(Check);
 // Reach region Part 3b: refusals to verdicts (red until implemented).
 MotionProof.RunPart3bRules(Check);
 MotionProof.RunPart3bRound2(Check);
