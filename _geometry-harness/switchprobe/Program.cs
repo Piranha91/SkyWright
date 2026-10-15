@@ -305,28 +305,7 @@ if (triggers)
     var scripts = bindings.Values.SelectMany(l => l).Select(b => b.Script).Where(s => s.Length > 0).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
     var source = new Dictionary<string, ScriptCalls?>(StringComparer.OrdinalIgnoreCase);
     var unreadWhy = new Dictionary<string, int>();
-    foreach (var name in scripts)
-    {
-        var rel = $@"Scripts\{name.Replace(':', '\\')}.pex";
-        var res = av.ResolveForPlacement(rel);
-        if (res.Sources.Count == 0) { source[name] = null; pexUnreadable++; unreadWhy["pex not in the VFS"] = unreadWhy.GetValueOrDefault("pex not in the VFS") + 1; continue; }
-        PexFile? pex = null;
-        try
-        {
-            var src = res.Sources[0];
-            if (src.LooseFilePath is not null) pex = PexFile.CreateFromFile(src.LooseFilePath, GameCategory.Skyrim);
-            else if (src.ArchivePath is not null && AssetResolver.TryReadArchiveEntry(src.ArchivePath, src.EntryPath) is { } bytes)
-            { using var ms = new MemoryStream(bytes); pex = PexFile.CreateFromStream(ms, GameCategory.Skyrim); }
-        }
-        catch { pex = null; }
-        if (pex is null) { source[name] = null; pexUnreadable++; unreadWhy["pex unreadable"] = unreadWhy.GetValueOrDefault("pex unreadable") + 1; continue; }
-        PapyrusDecompiler.Result dec;
-        try { dec = PapyrusDecompiler.DecompileFile(pex); }
-        catch { source[name] = null; pexDecompileFailed++; unreadWhy["decompiler threw"] = unreadWhy.GetValueOrDefault("decompiler threw") + 1; continue; }
-        scriptsDecompiled++;
-        if (dec.FunctionsFailed > 0) pexDecompileFailed++;
-        source[name] = ScriptCalls.Parse(dec.Source, dec.FunctionsFailed);
-    }
+    TriggerMap.Decompile(av, scripts, source, unreadWhy, ref pexUnreadable, ref pexDecompileFailed, ref scriptsDecompiled);
     Console.WriteLine($"   scripts bound: {scripts.Count:N0}; decompiled {scriptsDecompiled:N0}; pex missing or unreadable {pexUnreadable:N0} ({string.Join(", ", unreadWhy.Select(kv => $"{kv.Key} {kv.Value}"))}); with a function the decompiler refused {pexDecompileFailed:N0}  ({sw.Elapsed.TotalSeconds:0.0}s)");
 
     // 4c. per switch: Triggered / BoundUnread / Unknown, with the kind and the callers.

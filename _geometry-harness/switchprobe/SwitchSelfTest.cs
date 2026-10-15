@@ -55,5 +55,19 @@ static class SwitchSelfTest
                 B(F.M3) == "ref SwScriptedS SwMissing.Target [script]" && B(F.M4) == "ref SwScriptedT SwRefScript.Gate [script]", $"{B(F.M3)} / {B(F.M4)}");
         t.Check("PD3-S-B0c the quest's fragment Fragment_0 is stage 10",
                 questFragmentStage.TryGetValue((F.Q, "Fragment_0"), out var st) && st == 10, string.Join(", ", questFragmentStage.Select(kv => $"{kv.Key.Fragment}={kv.Value}")));
+
+        // 4b: each bound script through the VFS of the fixture's mod folders (TriggerMap.Decompile).
+        foreach (var d in new[] { "overwrite", "data" }) Directory.CreateDirectory(Path.Combine(t.Root, d));
+        using var assets = AssetResolver.Build(Path.Combine(t.Root, "overwrite"), w.ModsDir, Path.Combine(t.Root, "data"),
+                                               new[] { F.RefKey.Name, F.QuestKey.Name, F.MasterKey.Name }, Array.Empty<ActiveArchive>());
+        var scripts = bindings.Values.SelectMany(l => l).Select(b => b.Script).Where(s => s.Length > 0).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+        var source = new Dictionary<string, ScriptCalls?>(StringComparer.OrdinalIgnoreCase);
+        var unreadWhy = new Dictionary<string, int>();
+        int pexUnreadable = 0, pexDecompileFailed = 0, scriptsDecompiled = 0;
+        TriggerMap.Decompile(assets.Capture(), scripts, source, unreadWhy, ref pexUnreadable, ref pexDecompileFailed, ref scriptsDecompiled);
+        t.Check("PD3-S-P0 three scripts bound: two decompiled, SwMissing not in the VFS (null), no function refused",
+                scripts.Count == 3 && scriptsDecompiled == 2 && pexUnreadable == 1 && pexDecompileFailed == 0
+                && unreadWhy.GetValueOrDefault("pex not in the VFS") == 1 && source.TryGetValue(F.MissingScript, out var miss) && miss is null,
+                $"bound {scripts.Count}, decompiled {scriptsDecompiled}, unreadable {pexUnreadable} ({string.Join(", ", unreadWhy.Select(kv => $"{kv.Key} {kv.Value}"))}), refused {pexDecompileFailed}");
     });
 }
