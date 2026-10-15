@@ -144,5 +144,18 @@ static class NavownSelfTest
         var counted = uncut.Counted.Where(x => x.Plugin == 1).Select(x => $"{MovedRefSelfTest.Name(x.Ref)}@{(x.Cell == F.E00 ? "E00" : x.Cell.ToString())}/{x.Plugin}").OrderBy(x => x).ToList();
         t.Check("N2  UNCUT counts A's introductions still standing and still obstructing: U3 only (U1 moved out, U2 deleted by B, U4 re-based to a marker, U5 base cleared)",
                 counted.SequenceEqual(new[] { "U3@E00/1" }), string.Join(", ", counted));
+
+        // ---- PD: the clobber and dangling-link fixture (NavownFixture.cs), written beside the moved-reference one ----
+        var nvPaths = NavownFixture.Write(Path.Combine(t.Root, "navown"));
+        var nvMods = nvPaths.Select(p => Mutagen.Bethesda.Skyrim.SkyrimMod.CreateFromBinaryOverlay(p, NavownFixture.Rel)).ToList();
+        try
+        {
+            string Masters(int i) => string.Join(",", nvMods[i].ModHeader.MasterReferences.Select(r => r.Master.FileName.String));
+            t.Check("PD-F0 the fixture writes its seven plugins in order",
+                    nvPaths.Select(Path.GetFileName).SequenceEqual(NavownFixture.Order), string.Join(", ", nvPaths.Select(Path.GetFileName)));
+            t.Check("PD-F0 NvB masters only NvMaster.esm (so NvA's re-cuts are undeclared)", Masters(5) == "NvMaster.esm", Masters(5));
+            t.Check("PD-F0 NvFix masters NvA.esp and NvB.esp", Masters(6).Contains("NvA.esp") && Masters(6).Contains("NvB.esp"), Masters(6));
+        }
+        finally { foreach (var mo in nvMods) (mo as IDisposable)?.Dispose(); }
     });
 }
