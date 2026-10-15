@@ -348,8 +348,7 @@ if (routeOn)
             var b = cidx!.WinnerBase(key);
             if (b.IsNull || !idx.BaseMesh.TryGetValue(b, out var rel)) { why = "no mesh"; routeNoGeo++; return null; }
             string type = idx.BaseInfo.TryGetValue(b, out var bi) ? bi.Type : "?";
-            if (type == "Door") { why = "a Door: passable by design, set aside"; routeSetAside++; return null; }
-            if (type == "MoveableStatic") { why = "a MoveableStatic: pushed aside, set aside"; routeSetAside++; return null; }
+            if (RouteObstacle.SetAside(type, out var asideWhy)) { why = asideWhy; routeSetAside++; return null; }   // stateprobe/RouteObstacle.cs
             var g = Obstacle(rel);
             if (g.Soup is null || g.Box.IsEmpty) { why = $"no actor-solid geometry ({g.Source})"; routeNoGeo++; return null; }
             model = g.Box; soup = g.Soup;
@@ -359,15 +358,7 @@ if (routeOn)
         var columns = MeshColumnIndex.Build(verts, soup.Indices, triangleMaterials: soup.TriangleMaterials);
         // The cheap test first, as blockprobe does: does the solid enter an actor column over any walkable triangle?
         var q = SpatialOverlap.GrowDown(world, field.Top);
-        bool crosses = false;
-        foreach (var t in ni.Index.Query(q))
-        {
-            if ((t.Flags & 0x08) != 0) continue;
-            var nav = ni.Index.NavAt(t.NavIndex); var tri = nav.Triangles[t.TriangleIndex];
-            var pa = nav.Vertices[tri.A]; var pb = nav.Vertices[tri.B]; var pc = nav.Vertices[tri.C];
-            int x = columns.CountSurfaceCrossings(new Vector3(pa.X, pa.Y, pa.Z), new Vector3(pb.X, pb.Y, pb.Z), new Vector3(pc.X, pc.Y, pc.Z), ActorBand.StepHeight, field.Top, 12f, 1f, 0.5f, stopAfter: 1);
-            if (x > 0) { crosses = true; break; }
-        }
+        bool crosses = RouteObstacle.EntersActorColumn(ni.Index, columns, q, field.Top);
         if (!crosses) { why = "never enters an actor column over walkable ground"; routeNoCross++; return RouteCutVerdict.None; }
         if (ni.Graph is null) { ni.Graph = NavGraph.Build(ni.Index).Nodes; navIndex[w.Cell] = ni; }
         var facts = RouteConnectivity.Measure(ni.Index, columns, world, 256f, 16f, ActorBand.PhysicalStep, field.Top, Ladder, graph: ni.Graph, floorAt: field.Floor.FloorAt, isStairsMaterial: DetectorModel.IsStairsMaterial);
