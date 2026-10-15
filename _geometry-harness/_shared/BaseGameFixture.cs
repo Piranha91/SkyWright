@@ -141,4 +141,29 @@ public static class BaseGameFixture
         }
         return new Written(ov, mods, dep);
     }
+
+    // THE PATCH ADDITION (F5, 2026-10-15): CrPatch.esp after the ov order, written by its own method so no other byte changes.
+    // It masters CrA and CrB (and Skyrim.esm) through one new reference P1 at (8000,0,0) in C1 whose base CrPatchThing has no
+    // model, linked (XLKR) to A1 and B1; so it is a patch of the pair A1 x B1 and places nothing that renders.
+    public static readonly ModKey PatchKey = new("CrPatch", ModType.Plugin);
+    public static readonly FormKey PatchThing = new(PatchKey, 0x801), P1 = new(PatchKey, 0x901);
+
+    /// <summary>Write CrPatch.esp into dir\ov (which must already hold the ov order from <see cref="Write"/>). Returns its path.</summary>
+    public static string WritePatch(string dir)
+    {
+        var ov = Path.Combine(dir, "ov");
+        using var skOv = SkyrimMod.CreateFromBinaryOverlay(Path.Combine(ov, SkyrimKey.FileName.String), Rel);
+        using var aOv = SkyrimMod.CreateFromBinaryOverlay(Path.Combine(ov, AKey.FileName.String), Rel);
+        using var bOv = SkyrimMod.CreateFromBinaryOverlay(Path.Combine(ov, BKey.FileName.String), Rel);
+        var m = new SkyrimMod(PatchKey, Rel);
+        m.Statics.Add(new Static(PatchThing, Rel) { EditorID = "CrPatchThing" });
+        var c = Cell(C1, "CrCell");
+        var p1 = Ref(P1, PatchThing, 8000, 0, 0);
+        foreach (var target in new[] { A1, B1 }) { var l = new LinkedReferences(); l.Reference.SetTo(target); p1.LinkedReferences.Add(l); }
+        c.Temporary.Add(p1);
+        MovedRefFixture.FileInterior(m, c);
+        var path = Path.Combine(ov, PatchKey.FileName.String);
+        m.BeginWrite.ToPath(path).WithLoadOrder(skOv, aOv, bOv).Write();
+        return path;
+    }
 }
