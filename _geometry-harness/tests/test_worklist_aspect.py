@@ -129,9 +129,15 @@ def shot(label, **over):
 
 
 def run_vp(path: Path):
-    """Hand the real binary a worklist. Validation precedes the load walk, so this is cheap."""
+    """Hand the real binary a worklist. Validation precedes the load walk, so this is cheap. The probes refuse a run
+    that names no MO2 instance (`instance-not-explicit`), so the run names an empty synthetic one beside the worklist:
+    validation never reads it, and a shot that passes validation then fails to find its cell, as before."""
+    inst, game = path.parent / "synthetic-instance", path.parent / "synthetic-game"
+    inst.mkdir(exist_ok=True)
+    (game / "Data").mkdir(parents=True, exist_ok=True)
+    env = dict(os.environ, HOUSECARL_MO2_INSTANCE=str(inst), HOUSECARL_GAME_PATH=str(game), HOUSECARL_MO2_PROFILE="Default")
     p = subprocess.run([str(VP), str(path)], capture_output=True, text=True,
-                       encoding="utf-8", errors="replace", timeout=180)
+                       encoding="utf-8", errors="replace", timeout=180, env=env)
     return p.returncode, (p.stdout or "") + (p.stderr or "")
 
 

@@ -109,6 +109,19 @@ static class MeshPipelineProof
             check("surface pipeline: missing earlier geometry cannot manufacture introduced provenance",
                 unknown.CounterfactualStatus == "unknown" && unknown.Origin is null,
                 $"{unknown}");
+            // Sight on the live class path: the later plugin (2) does not master the other reference's plugin (1), so
+            // it could not have seen it (Blind); with 1 in its closure it could (Seen).
+            check("surface pipeline: the other reference's plugin outside the later plugin's masters reads Blind",
+                row.Sight == OverlapSight.Blind, $"{row}");
+            var seenRow = history.JudgeSurface(hits[0], [new(), new() { 0 }, new() { 0, 1 }], HistoryGeometry);
+            check("surface pipeline: the other reference's plugin inside the later plugin's masters reads Seen",
+                seenRow.Sight == OverlapSight.Seen, $"{seenRow}");
+            // Inherited on the live class path: the previous base already crossed the other reference.
+            (TriangleSoup? Soup, char Src, string? Reason) PreviousCrossing(FormKey key) =>
+                key == PreviousBase ? (Crossing, 'N', null) : HistoryGeometry(key);
+            var inherited = history.JudgeSurface(hits[0], Closure, PreviousCrossing);
+            check("surface pipeline: a previous base that already crossed the other reference reads Inherited",
+                inherited.CounterfactualStatus == "measured" && inherited.Origin == OverlapOrigin.Inherited, $"{inherited}");
         }
 
         var bad = Index(Crossing, 1, out var knownGeometry);
