@@ -462,7 +462,7 @@ else Console.WriteLine("   BOS: off — record bases (--bos on to apply the *_SW
 string PluginName(int p) => p == bosPlugin ? BosApplyReport.PseudoPluginName : pluginKey[p].FileName.String;
 bool IsVanilla(int p) => BaseGamePlugins.IsBaseGame(PluginName(p));   // _shared/BaseGamePlugins.cs
 bool IsUssep(int p) => BaseGamePlugins.IsUssep(PluginName(p));
-bool IsBaseGame(int p) => PluginName(p) is "Skyrim.esm" or "Update.esm";
+bool IsBaseGame(int p) => BaseGamePlugins.IsCoreMaster(PluginName(p));   // ignoring case, as the file name on disk may differ
 string CellOf(FormKey c) => idx.CellName.TryGetValue(c, out var v) ? (v.Edid ?? c.ToString()) + (v.Interior ? " (int)" : " (ext)") : c.ToString();
 string TypeOf(FormKey baseKey) => idx.BaseInfo.TryGetValue(baseKey, out var bi) ? bi.Type : "?";
 string MeshOf(FormKey baseKey) => idx.BaseMesh.TryGetValue(baseKey, out var m) ? m : "";
