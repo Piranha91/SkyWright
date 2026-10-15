@@ -16,6 +16,7 @@ static class EmptySpaceReview
                           ConfigurationIdentity identity, int listN, Stopwatch sw)
     {
         var search = new EmptySpaceSearch(cidx, closure, pluginName, nodeCheck, isBethesdaFile, isFloorPlugin);
+        int moverIndex(string name) { for (int p = 0; p < closure.Count; p++) if (string.Equals(pluginName(p), name, StringComparison.OrdinalIgnoreCase)) return p; return -1; }
         Console.WriteLine($"\n==== EMPTY SPACE — fixtures whose assembly reached a floor or wall a mover removed or moved ====");
         Console.WriteLine($"   anchors: Static (or Fixed MoveableStatic) with solid collision, at least {search.MinAnchorDim:0}u across, not a marker, not a reference "
                         + $"the fixture's own plugin defines (a Bethesda master's always count); touch within ε {cidx.Epsilon:0.#}u on the core surfaces (collision, else render, labelled)");
@@ -39,7 +40,7 @@ static class EmptySpaceReview
             Console.WriteLine($"   {g.Count(),6:N0}  {g.Key.Item1} removed or moved what fixtures of {g.Key.Item2} stood on");
         foreach (var r in cls.OrderBy(r => r.Cell.ToString()).ThenBy(r => r.Fixture.ToString()).Take(listN))
             Console.WriteLine($"   {r.Fixture} {baseLabel(r.Base)} ({r.HeldBy}) in {cellOf(r.Cell)}: assembly {r.Winner.Members}, mover {pluginName(r.Mover)}, "
-                            + $"changed anchors {string.Join(" ", r.Authoring.ChangedAnchors.Take(3))}; at 128u {r.GroundedAt128}, 256u {r.GroundedAt256}");
+                            + $"changed anchors {string.Join(" ", r.Authoring.ChangedAnchors.Take(3))}; grounded at 32u {r.GroundedAt32}, 128u {r.GroundedAt128}, 256u {r.GroundedAt256}");
 
         var opts = new JsonSerializerOptions { WriteIndented = false, NumberHandling = System.Text.Json.Serialization.JsonNumberHandling.AllowNamedFloatingPointLiterals };
         var dir = Path.GetDirectoryName(Path.GetFullPath(outPath));
@@ -66,7 +67,7 @@ static class EmptySpaceReview
                     foreach (var rec in c.Necessary)
                     {
                         if (c.Kind != EmptySpaceOutput.Kind) { predicates.Add(new Predicate(c.Kind, c.A, c.B, rec.FormKey, other, PhysicalState.Unmeasured, "not an empty-space row")); continue; }
-                        var (st, why) = search.Predicate(FormKey.Factory(rec.FormKey));
+                        var (st, why) = search.Predicate(FormKey.Factory(rec.FormKey), moverIndex(c.B));
                         predicates.Add(new Predicate(c.Kind, c.A, c.B, rec.FormKey, other, st, why));
                     }
                 }

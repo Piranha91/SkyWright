@@ -20,7 +20,8 @@ namespace HarnessShared;
 /// <summary>One arm's reading of a fixture's assembly. <paramref name="Anchors"/>: the anchors it touches (key, base, largest
 /// world dimension, surface source c/r/o); <paramref name="ChangedAnchors"/>: those absent or moved under the winner (authoring arm).</summary>
 public sealed record EmptySpaceArmReading(bool Exists, bool Grounded, bool OverCap, int Members, IReadOnlyList<FormKey> FirstMembers,
-    IReadOnlyList<(FormKey Key, FormKey Base, float Dim, char Src)> Anchors, IReadOnlyList<FormKey> ChangedAnchors)
+    IReadOnlyList<(FormKey Key, FormKey Base, float Dim, char Src)> Anchors, IReadOnlyList<FormKey> ChangedAnchors, bool AnchorUndecided = false,
+    int UnsoundAnchors = 0)
 {
     public static readonly EmptySpaceArmReading Missing = new(false, false, false, 0, Array.Empty<FormKey>(),
         Array.Empty<(FormKey, FormKey, float, char)>(), Array.Empty<FormKey>());
@@ -35,7 +36,7 @@ public sealed record EmptySpaceArmReading(bool Exists, bool Grounded, bool OverC
 public sealed record EmptySpaceRow(FormKey Fixture, FormKey Base, int Mover, int Placer, FormKey Cell, bool Interior, string? State,
     DependentMotion Motion, string HeldBy, IReadOnlyList<FormKey> OwnSupport,
     EmptySpaceArmReading Winner, EmptySpaceArmReading Authoring, float NearestAnchor, bool? GroundedAt128, bool? GroundedAt256,
-    DetectorModel.EmptySpaceFacts Facts, EmptySpaceVerdict Verdict, string Why);
+    DetectorModel.EmptySpaceFacts Facts, EmptySpaceVerdict Verdict, string Why, bool? GroundedAt32 = null);
 
 public sealed class EmptySpaceSearch
 {
@@ -206,6 +207,52 @@ public sealed class EmptySpaceSearch
     /// AND the mover is the plugin whose step decides its state under the winner (its last placement step, its winning deletion, or the
     /// latest step on its enable chain; MovedHosts' rule). The arm without a master also drops every plugin that masters it, so the
     /// difference alone would blame a master (USSEP) for what a downstream mod did.</summary>
+    // ---- is a floor or wall itself still the room? (Q-B2) ---------------------------------------------------------------
+
+    public enum AnchorSoundness { Sound, Unsound, Undecided }
+    readonly Dictionary<(int Mover, float MinDim, ModKey Side, FormKey Anchor), AnchorSoundness> _soundMemo = new();
+
+    /// <summary>SUSPECT for mover D: in the order without D's side the anchor touches an anchor D changed. An anchor D's side brought in
+    /// (absent without it) is never suspect.</summary>
+    bool Suspect(FormKey a, int mover, FormKey fixture, float minDim)
+    {
+        if (Place(a, mover) is not { } pa) return false;
+        foreach (var (n, pn) in Near(a, pa, mover, Eps + 0.5f))
+            if (IsAnchor(n, pn, fixture, minDim) && Changed(n, mover) && Touch(a, pa, n, pn).Touch) return true;
+        return false;
+    }
+
+    /// <summary>The same grounding rule applied to a floor or wall: an anchor grounds when it is not suspect, or when its anchor
+    /// component under the winner (anchor-to-anchor touches) reaches an anchor that is not; Unsound when the component holds suspect
+    /// pieces only; Undecided past <see cref="MaxAnchorWalk"/> suspect pieces. One answer for the whole component it walked.</summary>
+    public AnchorSoundness Soundness(FormKey a, FormKey fixture, int mover, float minDim)
+    {
+        if (mover < 0) return AnchorSoundness.Sound;                         // no mover named: the anchor is the room
+        var key = (mover, minDim, fixture.ModKey, a);
+        if (_soundMemo.TryGetValue(key, out var hit)) return hit;
+        if (!Suspect(a, mover, fixture, minDim)) return _soundMemo[key] = AnchorSoundness.Sound;
+        var seen = new HashSet<FormKey> { a };
+        var queue = new Queue<FormKey>(); queue.Enqueue(a);
+        AnchorSoundness result = AnchorSoundness.Unsound;
+        if (seen.Count > MaxAnchorWalk) result = AnchorSoundness.Undecided;
+        else
+            while (queue.Count > 0 && result == AnchorSoundness.Unsound)
+            {
+                var x = queue.Dequeue();
+                if (Place(x, -1) is not { } px) continue;
+                foreach (var (n, pn) in Near(x, px, -1, Eps + 0.5f))
+                {
+                    if (seen.Contains(n) || !IsAnchor(n, pn, fixture, minDim) || !Touch(x, px, n, pn).Touch) continue;
+                    if (!Suspect(n, mover, fixture, minDim)) { _soundMemo[(mover, minDim, fixture.ModKey, n)] = AnchorSoundness.Sound; result = AnchorSoundness.Sound; break; }
+                    seen.Add(n);
+                    if (seen.Count > MaxAnchorWalk) { result = AnchorSoundness.Undecided; break; }
+                    queue.Enqueue(n);
+                }
+            }
+        foreach (var s in seen) _soundMemo[(mover, minDim, fixture.ModKey, s)] = result;
+        return result;
+    }
+
     bool Changed(FormKey a, int mover)
     {
         if (Place(a, mover) is not { } pa) return false;
@@ -301,13 +348,16 @@ public sealed class EmptySpaceSearch
 
     /// <summary>One arm's assembly walk from <paramref name="fixture"/>. <paramref name="stopAtAnchor"/>: stop at the first anchor (the
     /// winner arm's question); otherwise walk on until an anchor <paramref name="mover"/>'s side changed is met, or the walk ends.</summary>
-    public EmptySpaceArmReading Walk(FormKey fixture, int mover, bool stopAtAnchor, float minAnchorDim)
+    /// <param name="soundFor">the winner arm's walk (mover &lt; 0) reads each anchor's soundness against this mover: an unsound anchor is
+    /// walked through as a member, an undecided one is noted (Q-B2). Ignored in the order without a mover.</param>
+    public EmptySpaceArmReading Walk(FormKey fixture, int mover, bool stopAtAnchor, float minAnchorDim, int soundFor = -1)
     {
         if (Place(fixture, mover) is null) return EmptySpaceArmReading.Missing;
+        if (mover >= 0) soundFor = -1;
         // Grounded, over-cap and "touches an anchor the mover changed" are properties of the connected assembly, not of where the walk
         // starts (touch and the mount link are symmetric; the anchor test reads only the fixture's own plugin), so one walk answers
         // for every member it visited under the same side, arm, anchor size and stopping rule.
-        var ck = (mover, minAnchorDim, fixture.ModKey, stopAtAnchor, fixture);
+        var ck = (mover, minAnchorDim, fixture.ModKey, stopAtAnchor, soundFor, fixture);
         if (_walkMemo.TryGetValue(ck, out var hit)) { WalksReused++; return hit; }
         WalksRun++;
         var members = new List<FormKey> { fixture };
@@ -315,6 +365,7 @@ public sealed class EmptySpaceSearch
         var anchors = new List<(FormKey, FormKey, float, char)>();
         var anchorSeen = new HashSet<FormKey>();
         var changed = new List<FormKey>();
+        bool undecided = false; int unsound = 0;
         var queue = new Queue<FormKey>(); queue.Enqueue(fixture);
         while (queue.Count > 0)
         {
@@ -324,6 +375,14 @@ public sealed class EmptySpaceSearch
             {
                 if (inSet.Contains(n) || anchorSeen.Contains(n)) continue;
                 if (!Touch(m, pm, n, pn).Touch) continue;
+                if (IsAnchor(n, pn, fixture, minAnchorDim) && soundFor >= 0 && Soundness(n, fixture, soundFor, minAnchorDim) is var sd && sd != AnchorSoundness.Sound)
+                {
+                    // a floor or wall that is itself left by the mover: part of what floats, walked through; undecided: noted
+                    if (sd == AnchorSoundness.Undecided) { undecided = true; anchorSeen.Add(n); continue; }
+                    unsound++;
+                    if (!Add(n)) return Reading(anchors.Count > 0, true);
+                    continue;
+                }
                 if (IsAnchor(n, pn, fixture, minAnchorDim))
                 {
                     anchorSeen.Add(n);
@@ -347,8 +406,8 @@ public sealed class EmptySpaceSearch
         }
         EmptySpaceArmReading Reading(bool grounded, bool over)
         {
-            var r = new EmptySpaceArmReading(true, grounded, over, members.Count, members.Take(8).ToList(), anchors, changed);
-            foreach (var m in inSet) _walkMemo[(mover, minAnchorDim, fixture.ModKey, stopAtAnchor, m)] = r;
+            var r = new EmptySpaceArmReading(true, grounded, over, members.Count, members.Take(8).ToList(), anchors, changed, undecided && !grounded, unsound);
+            foreach (var m in inSet) _walkMemo[(mover, minAnchorDim, fixture.ModKey, stopAtAnchor, soundFor, m)] = r;
             return r;
         }
     }
@@ -450,11 +509,11 @@ public sealed class EmptySpaceSearch
 
     // ---- one judgement ---------------------------------------------------------------------------------------------------
 
-    readonly Dictionary<FormKey, (EmptySpaceArmReading W, string? Held, List<FormKey> Own, DependentMotion Motion)> _winMemo = new();
+    readonly Dictionary<(FormKey, int), (EmptySpaceArmReading W, string? Held, List<FormKey> Own, DependentMotion Motion)> _winMemo = new();
 
     /// <summary>Forget the winner readings (after a state change).</summary>
-    public void ClearMemo() { _winMemo.Clear(); _walkMemo.Clear(); }
-    readonly Dictionary<(int Mover, float MinDim, ModKey Side, bool Stop, FormKey Member), EmptySpaceArmReading> _walkMemo = new();
+    public void ClearMemo() { _winMemo.Clear(); _walkMemo.Clear(); _soundMemo.Clear(); }
+    readonly Dictionary<(int Mover, float MinDim, ModKey Side, bool Stop, int SoundFor, FormKey Member), EmptySpaceArmReading> _walkMemo = new();
 
     public EmptySpaceRow Judge(FormKey fixture, int mover, string? state = null, bool sensitivity = true)
     {
@@ -471,12 +530,12 @@ public sealed class EmptySpaceSearch
         string? held = null; var own = new List<FormKey>();
         if (interior && pw is { } pwv && pa is not null)
         {
-            if (!_winMemo.TryGetValue(fixture, out var wm))
+            if (!_winMemo.TryGetValue((fixture, mover), out var wm))
             {
                 var (h, o) = Held(fixture, pwv);
                 var w = h is null ? new EmptySpaceArmReading(true, false, false, 1, new[] { fixture }, Array.Empty<(FormKey, FormKey, float, char)>(), Array.Empty<FormKey>())
-                                  : Walk(fixture, -1, stopAtAnchor: true, MinAnchorDim);
-                _winMemo[fixture] = wm = (w, h, o, motion);
+                                  : Walk(fixture, -1, stopAtAnchor: true, MinAnchorDim, soundFor: mover);
+                _winMemo[(fixture, mover)] = wm = (w, h, o, motion);
             }
             win = wm.W; held = wm.Held; own = wm.Own;
         }
@@ -488,18 +547,19 @@ public sealed class EmptySpaceSearch
         var facts = new DetectorModel.EmptySpaceFacts(interior, pw is not null, pa is not null, motion, held is not null,
             win.OverCap, auth.OverCap, win.Grounded, auth.Grounded, auth.ChangedAnchors.Count > 0,
             replaced, IsBethesdaOrUssep(mover) && IsBethesdaOrUssep(placer), MaxMembers, AuthoringRead: readAuth || held is null,
-            FixtureSideIsBase: !IsBethesdaOrUssep(mover) && IsBethesdaOrUssep(placer));
+            FixtureSideIsBase: !IsBethesdaOrUssep(mover) && IsBethesdaOrUssep(placer), WinnerAnchorUndecided: win.AnchorUndecided, MaxAnchorWalk: MaxAnchorWalk);
         var (v, why) = DetectorModel.EmptySpace(facts);
-        float nearest = float.PositiveInfinity; bool? g128 = null, g256 = null;
+        float nearest = float.PositiveInfinity; bool? g128 = null, g256 = null, g32 = null;
         if (v is EmptySpaceVerdict.LeftInEmptySpace or EmptySpaceVerdict.RePlacedStillEmpty or EmptySpaceVerdict.FloorPopulation)
             nearest = NearestAnchor(win, fixture);
         if (sensitivity && v is EmptySpaceVerdict.LeftInEmptySpace or EmptySpaceVerdict.ReGrounded or EmptySpaceVerdict.RePlacedGrounded or EmptySpaceVerdict.RePlacedStillEmpty)
         {
-            g128 = Walk(fixture, -1, true, 128f).Grounded;
-            g256 = Walk(fixture, -1, true, 256f).Grounded;
+            g128 = Walk(fixture, -1, true, 128f, mover).Grounded;
+            g256 = Walk(fixture, -1, true, 256f, mover).Grounded;
+            g32 = Walk(fixture, -1, true, 32f, mover).Grounded;     // the informative direction for a class row (Q-B3)
         }
         return new EmptySpaceRow(fixture, baseKey, mover, placer, cell, interior, state, motion, held ?? "falls", own,
-            win, auth, nearest, g128, g256, facts, v, why);
+            win, auth, nearest, g128, g256, facts, v, why, g32);
     }
 
     /// <summary>One world state's pass (stateprobe --empty-space): the state is set on the ContactIndex arms, every interior candidate
@@ -526,14 +586,15 @@ public sealed class EmptySpaceSearch
 
     /// <summary>The physical half for an emit row under THIS order (contactprobe --base): Holds when the fixture is present, held and
     /// its assembly reaches no floor or wall; Gone when it is absent, falls or is grounded; Unmeasured when exterior or over the cap.</summary>
-    public (PhysicalState State, string Detail) Predicate(FormKey fixture)
+    public (PhysicalState State, string Detail) Predicate(FormKey fixture, int mover = -1)
     {
         if (Place(fixture, -1) is not { } pw) return (PhysicalState.Gone, "not present under this order");
         if (!pw.Snap.Interior) return (PhysicalState.Unmeasured, "exterior: the land under it is not read");
         var (h, _) = Held(fixture, pw);
         if (h is null) return (PhysicalState.Gone, "a loose body that falls at load under this order");
-        var w = Walk(fixture, -1, true, MinAnchorDim);
+        var w = Walk(fixture, -1, true, MinAnchorDim, mover);
         if (w.OverCap) return (PhysicalState.Unmeasured, $"its assembly passes {MaxMembers} references: not read");
+        if (w.AnchorUndecided) return (PhysicalState.Unmeasured, $"the floor or wall it reaches is itself among the mover's removals past {MaxAnchorWalk} pieces: not read");
         return w.Grounded ? (PhysicalState.Gone, $"its assembly reaches a floor or wall ({w.Anchors[0].Key})")
                           : (PhysicalState.Holds, $"its assembly of {w.Members} reaches no floor or wall");
     }
@@ -551,7 +612,7 @@ public static class EmptySpaceOutput
     {
         object Arm(EmptySpaceArmReading a) => new
         {
-            a.Exists, a.Grounded, a.OverCap, a.Members, FirstMembers = a.FirstMembers.Select(k => k.ToString()).ToList(),
+            a.Exists, a.Grounded, a.OverCap, a.AnchorUndecided, a.UnsoundAnchors, a.Members, FirstMembers = a.FirstMembers.Select(k => k.ToString()).ToList(),
             Anchors = a.Anchors.Take(4).Select(x => new { Key = x.Key.ToString(), Base = baseLabel(x.Base), x.Dim, Src = x.Src.ToString() }).ToList(),
             ChangedAnchors = a.ChangedAnchors.Select(k => k.ToString()).ToList(),
         };
@@ -563,7 +624,7 @@ public static class EmptySpaceOutput
             Verdict = r.Verdict.ToString(), r.Why,
             Winner = Arm(r.Winner), Authoring = Arm(r.Authoring),
             NearestAnchor = float.IsPositiveInfinity(r.NearestAnchor) ? (float?)null : r.NearestAnchor,
-            r.GroundedAt128, r.GroundedAt256,
+            r.GroundedAt128, r.GroundedAt256, r.GroundedAt32,
         };
     }
 

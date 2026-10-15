@@ -957,13 +957,16 @@ public static class DetectorModel
     /// are both Bethesda or USSEP files.</param>
     /// <param name="FixtureSideIsBase">the fixture's side is a Bethesda or USSEP file while the mover is a mod: no second mod placed or kept
     /// the fixture, so its being left is the mover's own defect, not a clash between two mods.</param>
+    /// <param name="WinnerAnchorUndecided">under the winner the assembly reaches no sound floor or wall, but reaches one whose own grounding
+    /// passed <paramref name="MaxAnchorWalk"/> suspect pieces (Q-B2: an anchor grounds only if it is itself still part of the room).</param>
     /// <param name="AuthoringRead">the order without the mover was walked. The search skips that walk when the winner arm is grounded
     /// and the mover's side did not re-place the fixture: no answer of the authoring arm can make such a fixture the class, and that
     /// walk is the costly one.</param>
     public readonly record struct EmptySpaceFacts(
         bool Interior, bool ExistsWinner, bool ExistsAuthoring, DependentMotion Motion, bool Held,
         bool WinnerOverCap, bool AuthoringOverCap, bool WinnerGrounded, bool AuthoringGrounded, bool AuthoringAnchorChangedByMover,
-        bool RePlacedByMoverSide, bool BethesdaFloor, int MaxMembers = 256, bool AuthoringRead = true, bool FixtureSideIsBase = false);
+        bool RePlacedByMoverSide, bool BethesdaFloor, int MaxMembers = 256, bool AuthoringRead = true, bool FixtureSideIsBase = false,
+        bool WinnerAnchorUndecided = false, int MaxAnchorWalk = 64);
 
     /// <summary>LEFT IN EMPTY SPACE (2026-10-14): a fixture that stood in a room in the order without the mover, and whose assembly
     /// reaches no floor or wall under the winner because the mover removed or moved what it stood on or against. The sibling of
@@ -981,6 +984,8 @@ public static class DetectorModel
         if (!f.ExistsAuthoring) return (EmptySpaceVerdict.Absent, "not present in the order without the mover's side");
         if (f.Motion == DependentMotion.Unknown && !f.Held) return (EmptySpaceVerdict.Refused, "what physics does with it at load is unknown (no record type or bodies read)");
         if (!f.Held) return (EmptySpaceVerdict.Falls, "a loose body that is neither mounted nor resting on a fixed reference: it falls at load (the rest rule's class)");
+        if (!f.WinnerGrounded && f.WinnerAnchorUndecided)
+            return (EmptySpaceVerdict.Refused, $"the floor or wall its assembly reaches is itself among the mover's removals past {f.MaxAnchorWalk} pieces: not read");
         if (!f.AuthoringRead)
             return f.WinnerGrounded && !f.WinnerOverCap && !f.RePlacedByMoverSide
                 ? (EmptySpaceVerdict.Grounded, "a floor or wall holds it under the winner (the order without the mover was not walked: nothing there can make it the class)")
