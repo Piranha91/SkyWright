@@ -43,6 +43,12 @@ static class DriftQuestSelfTest
         t.Check("PD3-D-R2 an actor with no packages: NoPackages", Reach(F.R3) == "NoPackages 0", Reach(F.R3));
         t.Check("PD3-D-R3 actors kept near their editor location: PlacementBound at the package radius (600, 100)",
                 Reach(F.R5) == "PlacementBound 600" && Reach(F.R7) == "PlacementBound 100", $"{Reach(F.R5)} / {Reach(F.R7)}");
+
+        // The pairs the quest states (AliasStated): its four scenes' actor pairs, and nothing else.
+        var stated = AliasStated.Of(x.Scenes, x.Quests, x.PackageTargets);
+        string Stated() => string.Join(" ", stated.SelectMany(kv => kv.Value.OrderBy(v => v).Select(v => $"{v.Item1}+{v.Item2}")));
+        t.Check("PD3-D-S0 the stated pairs are exactly 1+2, 3+4, 5+6 and 7+8 (the scenes); 1+10 is not stated",
+                stated.Count == 1 && stated[F.Q].SetEquals(new[] { (1, 2), (3, 4), (5, 6), (7, 8) }), Stated());
     });
 
     /// <summary>Pass 1 of a real run over <paramref name="order"/>: the tables Program.cs declares, filled by DriftIndex.</summary>

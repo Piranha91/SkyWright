@@ -379,31 +379,9 @@ if (bosOn)
 //
 // A pair backed by either is a claim about authored intent. A pair backed by neither is kept,
 // but reported apart and below, because it may be nothing.
-var statedPairs = new Dictionary<FormKey, HashSet<(int, int)>>();   // quest -> unordered alias pairs
+var statedPairs = AliasStated.Of(scenes, quests, packageTargets);   // quest -> unordered alias pairs (AliasSplits.cs)
 
-static (int, int) Pair(int a, int b) => a <= b ? (a, b) : (b, a);
-
-void AddStated(FormKey quest, int a, int b)
-{
-    if (a == b) return;
-    if (!statedPairs.TryGetValue(quest, out var set)) statedPairs[quest] = set = new HashSet<(int, int)>();
-    set.Add(Pair(a, b));
-}
-
-foreach (var sc in scenes.Values)
-{
-    if (sc.Quest.IsNull || sc.Actors.Length < 2) continue;
-    for (int i = 0; i < sc.Actors.Length; i++)
-        for (int j = i + 1; j < sc.Actors.Length; j++)
-            AddStated(sc.Quest, sc.Actors[i], sc.Actors[j]);
-}
-
-foreach (var q in quests.Values)
-    foreach (var a in q.Aliases)
-        foreach (var pk in a.Packages)
-            if (packageTargets.TryGetValue(pk, out var targets))
-                foreach (var t in targets)
-                    AddStated(q.Key, a.Id, t);
+static (int, int) Pair(int a, int b) => AliasStated.Pair(a, b);
 
 int statedTotal = statedPairs.Values.Sum(v => v.Count);
 Console.WriteLine();

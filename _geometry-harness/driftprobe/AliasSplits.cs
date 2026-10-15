@@ -62,3 +62,41 @@ sealed class ActorReach
         return MathF.Sqrt(dx * dx + dy * dy);
     }
 }
+
+
+/// <summary>The alias pairs a quest STATES belong together: two actors of one of its scenes, or an alias whose package
+/// targets another alias. Every other pair is proximity only.</summary>
+static class AliasStated
+{
+    /// <summary>An unordered alias pair.</summary>
+    public static (int, int) Pair(int a, int b) => a <= b ? (a, b) : (b, a);
+
+    public static Dictionary<FormKey, HashSet<(int, int)>> Of(Dictionary<FormKey, (FormKey Quest, int[] Actors)> scenes,
+                                                             Dictionary<FormKey, QuestInfo> quests, Dictionary<FormKey, int[]> packageTargets)
+    {
+        var statedPairs = new Dictionary<FormKey, HashSet<(int, int)>>();   // quest -> unordered alias pairs
+
+        void AddStated(FormKey quest, int a, int b)
+        {
+            if (a == b) return;
+            if (!statedPairs.TryGetValue(quest, out var set)) statedPairs[quest] = set = new HashSet<(int, int)>();
+            set.Add(Pair(a, b));
+        }
+
+        foreach (var sc in scenes.Values)
+        {
+            if (sc.Quest.IsNull || sc.Actors.Length < 2) continue;
+            for (int i = 0; i < sc.Actors.Length; i++)
+                for (int j = i + 1; j < sc.Actors.Length; j++)
+                    AddStated(sc.Quest, sc.Actors[i], sc.Actors[j]);
+        }
+
+        foreach (var q in quests.Values)
+            foreach (var a in q.Aliases)
+                foreach (var pk in a.Packages)
+                    if (packageTargets.TryGetValue(pk, out var targets))
+                        foreach (var t in targets)
+                            AddStated(q.Key, a.Id, t);
+        return statedPairs;
+    }
+}
