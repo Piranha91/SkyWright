@@ -123,7 +123,7 @@ static class StateSelfTest
                 Rows(all.Where(r => r.Kind == StateRowKind.Route)) == Want($"Route StateConditional {F.W1}/- ModOnMod", $"Route StateResolved {F.W2}/- ModOnMod", $"Route StateConditional {F.W3}/- ModRefUnderVanillaSet"),
                 Rows(all.Where(r => r.Kind == StateRowKind.Route)));
         t.Check("PD4-S-F5 W3, a Bethesda obstacle under a Bethesda switch, reads ModRefUnderVanillaSet (today's behaviour; task 2026-10-15-stateprobe-vanilla-population)",
-                all.Single(r => r.Member == F.W3).Population == StatePopulation.ModRefUnderVanillaSet, all.Single(r => r.Member == F.W3).Population.ToString());
+                all.SingleOrDefault(r => r.Member == F.W3)?.Population == StatePopulation.ModRefUnderVanillaSet, all.SingleOrDefault(r => r.Member == F.W3)?.Population.ToString() ?? "no W3 row");
 
         // ST4 and ST1: stateprobe/StateFindings.cs over every state's rows.
         var split = StateFindings.Of(all);
