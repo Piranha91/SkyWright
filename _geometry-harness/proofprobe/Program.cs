@@ -3616,6 +3616,7 @@ MotionProof.Run(Check);
 MotionProof.RunFollowUps(Check);
 ContactEvidenceProof.Run(Check);
 ContactDifferentialProof.Run(Check);
+EmptySpaceProof.Run(Check);
 DirectionalCoverageProof.Run(Check);
 ShallowCoverageProof.Run(Check);
 CoverageSelectionProof.Run(Check);

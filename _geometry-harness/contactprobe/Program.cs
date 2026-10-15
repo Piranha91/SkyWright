@@ -41,6 +41,10 @@ using HousecarlCore.Progress;
 //                          floating / sunk — the absolute floor the charter predicted is large
 //   --labelled-mover X.esp every ref X moved, contact BEFORE X vs AFTER X — USSEP's placement fixes as a
 //                          labelled positive set for the primitive (no game, no judgement)
+//   --empty-space FILE     LEFT IN EMPTY SPACE (2026-10-14): every dependent-scale fixture within reach of a moved host, against that
+//                          host's mover: its assembly (what it touches within ε, transitively, and the items its racks mount) reached a
+//                          floor or wall the mover removed or moved, and reaches none under the winner (DetectorModel.EmptySpace,
+//                          _shared/ContactAssembly.cs); --emit writes the class as EMPTY-SPACE rows, --base re-measures an emit's rows
 //   --overlap-json FILE    supplied overlap rows/pairs through the strict NIF render-surface narrow phase;
 //                          requires --json OUTPUT, which persists all attempted and budget-unrun rows
 //   --contact-evidence     with --overlap-json, enumerate the classified-contact support envelope for each supplied pair
@@ -127,7 +131,8 @@ contactprobe: placement contact and explicit render-surface pair review
     member refused for its live pose is tested through its swept region (witness / never / cannot_tell per box)
   --instance DIR --game DIR --profile NAME --order CANDIDATE.json
 Candidate Mods lists select asset priority. Surface/contact evidence is not a defect verdict.
-Other modes: --absolute or --labelled-mover PLUGIN; default is the moved-host pass.
+Other modes: --absolute, --labelled-mover PLUGIN, or --empty-space OUTPUT (fixtures a mover left in empty space: their
+  assembly reaches no floor or wall; --emit writes that class as EMPTY-SPACE rows); default is the moved-host pass.
 Default pass only: --trace OUTPUT [--trace-keys KEYS.txt] writes the per-object trace (why each requested FormKey
 was or was not flagged; without a key list, counting mode checks the coverage counters). Output is otherwise unchanged.
 See contactprobe/Program.cs usage documentation for those modes. Help performs no load-order scan.
@@ -158,6 +163,7 @@ var enablePlugins = new List<string>();
 var disablePlugins = new List<string>();
 string? orderFile = null;
 string? boxContactOut = null;   // --box-contact FILE (with --overlap-json): does a supplied world box meet a member's render surface (lane 3b)
+string? emptySpaceOut = null;   // --empty-space FILE: the LEFT IN EMPTY SPACE pass (_shared/ContactAssembly.cs), its own mode
 string? traceOut = null, traceKeysPath = null, volumeOut = null, surfaceOut = null, anchorOut = null;   // --surface FILE: measured surface contact (with --overlap-json); --anchor FILE: the anchor body test (G1 build list row 2)
 LivePosePolicy? livePose = null;
 bool alphaVisibility = false;   // --alpha-visibility (with --surface): texture alpha along alpha crossings (Stage D)
@@ -201,6 +207,7 @@ try
         else if (flag == "--interior-only") interiorOnly = true;
         else if (flag == "--order") { orderFile = NeedValue(i, flag); i++; }
         else if (flag == "--trace") { traceOut = NeedValue(i, flag); i++; }
+        else if (flag == "--empty-space") { emptySpaceOut = NeedValue(i, flag); i++; }
         else if (flag == "--volume") { volumeOut = NeedValue(i, flag); i++; }
         else if (flag == "--surface") { surfaceOut = NeedValue(i, flag); i++; }
         else if (flag == "--anchor") { anchorOut = NeedValue(i, flag); i++; }
@@ -264,8 +271,8 @@ if (contactEvidence && overlapJson is null)
     Console.Error.WriteLine("--contact-evidence is valid only with --overlap-json FILE.");
     return 2;
 }
-int selectedModes = (overlapJson is null ? 0 : 1) + (absolute ? 1 : 0) + (labelledMover is null ? 0 : 1);
-if (selectedModes > 1) { Console.Error.WriteLine("--overlap-json, --absolute and --labelled-mover select different modes; pass only one"); return 2; }
+int selectedModes = (overlapJson is null ? 0 : 1) + (absolute ? 1 : 0) + (labelledMover is null ? 0 : 1) + (emptySpaceOut is null ? 0 : 1);
+if (selectedModes > 1) { Console.Error.WriteLine("--overlap-json, --absolute, --labelled-mover and --empty-space select different modes; pass only one"); return 2; }
 if (volumeOut is not null && overlapJson is null) { Console.Error.WriteLine("--volume is valid only with --overlap-json INPUT"); return 2; }
 if (surfaceOut is not null && overlapJson is null) { Console.Error.WriteLine("--surface is valid only with --overlap-json INPUT"); return 2; }
 if (anchorOut is not null && overlapJson is null) { Console.Error.WriteLine("--anchor is valid only with --overlap-json INPUT"); return 2; }
@@ -817,6 +824,10 @@ Console.WriteLine($"   top movers: " + string.Join(", ", hosts.GroupBy(h => h.Mo
     Console.WriteLine($"      name only, by type: " + string.Join(", ", nameOnly.GroupBy(k => TypeOf(k)).OrderByDescending(g => g.Count()).Take(8).Select(g => $"{g.Key} {g.Count():N0}"))
                     + $"; e.g. " + string.Join("; ", nameOnly.Take(6).Select(k => $"{BaseLabel(k)} {k}")));
 }
+if (emptySpaceOut is not null)
+    return EmptySpaceReview.Run(cidx, closure, hosts, PluginName, BaseLabel, CellOf, p => IsVanilla(p) || IsUssep(p), f => Vanilla.Contains(f),
+                                EmptySpaceOutput.NodeCheck(idx, assets), emptySpaceOut, emitPath, basePath, Instance, paths.Count - unreadable.Count, unreadable.Count,
+                                cfg.Identity("load-time", cidx.State?.Name ?? EnablePopulation.BaselineStateName), listN, sw);
 var depHash = cidx.DependentSnaps(skips);
 if (FitCheck() is { } fitRefusal) { Console.Error.WriteLine("contactprobe: " + fitRefusal); return 2; }
 Func<Snap, bool>? winScope = null;

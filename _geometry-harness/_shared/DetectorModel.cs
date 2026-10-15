@@ -944,6 +944,70 @@ public static class DetectorModel
         return (relation, verdict, ContactBlocker.None, $"{rel}; under the winner it touches nothing within {epsilon:0.#}u (nearest {f.WinnerDistance:0.#}u){motion}");
     }
 
+    /// <summary>One fixture against one mover, as the empty-space search (<c>_shared/ContactAssembly.cs</c>) hands it to the rule.
+    /// An ASSEMBLY is the fixture plus everything it touches within ε, transitively, and the items its weapon racks mount; an ANCHOR is a
+    /// floor or wall (<c>EmptySpaceSearch.IsAnchor</c>), which ends the walk. GROUNDED means the assembly touches an anchor. The
+    /// AUTHORING arm is the order without the mover's side, the WINNER arm the order as loaded; the R1 enable state per arm.</summary>
+    /// <param name="Held">the fixture stays where the winner places it at load: Fixed by its record type or NIF, mounted by a weapon
+    /// rack, or a loose body resting on a Fixed reference. A loose body that is not held falls (the rest rule's class).</param>
+    /// <param name="AuthoringAnchorChangedByMover">an anchor the authoring assembly touches is absent from the winner arm, or placed
+    /// elsewhere there: the mover's side removed or moved it.</param>
+    /// <param name="RePlacedByMoverSide">the fixture's winning placement was set by the mover or a plugin downstream of it.</param>
+    /// <param name="BethesdaFloor">the mover and the fixture's side (the plugin whose step last set its placement, base or enable state)
+    /// are both Bethesda or USSEP files.</param>
+    /// <param name="FixtureSideIsBase">the fixture's side is a Bethesda or USSEP file while the mover is a mod: no second mod placed or kept
+    /// the fixture, so its being left is the mover's own defect, not a clash between two mods.</param>
+    /// <param name="WinnerAnchorUndecided">under the winner the assembly reaches no sound floor or wall, but reaches one whose own grounding
+    /// passed <paramref name="MaxAnchorWalk"/> suspect pieces (Q-B2: an anchor grounds only if it is itself still part of the room).</param>
+    /// <param name="AuthoringRead">the order without the mover was walked. The search skips that walk when the winner arm is grounded
+    /// and the mover's side did not re-place the fixture: no answer of the authoring arm can make such a fixture the class, and that
+    /// walk is the costly one.</param>
+    public readonly record struct EmptySpaceFacts(
+        bool Interior, bool ExistsWinner, bool ExistsAuthoring, DependentMotion Motion, bool Held,
+        bool WinnerOverCap, bool AuthoringOverCap, bool WinnerGrounded, bool AuthoringGrounded, bool AuthoringAnchorChangedByMover,
+        bool RePlacedByMoverSide, bool BethesdaFloor, int MaxMembers = 256, bool AuthoringRead = true, bool FixtureSideIsBase = false,
+        bool WinnerAnchorUndecided = false, int MaxAnchorWalk = 64);
+
+    /// <summary>LEFT IN EMPTY SPACE (2026-10-14): a fixture that stood in a room in the order without the mover, and whose assembly
+    /// reaches no floor or wall under the winner because the mover removed or moved what it stood on or against. The sibling of
+    /// STRANDED: Stranded reads one dependent against one host and calls a fixture held when anything touches it; this rule follows
+    /// what touches it, so a rack holding a rack holding a sword in the void is still in the void. Order: exterior refused (the land is
+    /// not read); absent in an arm; unknown motion refused; a loose body that is not held falls; an assembly over the cap refused in the
+    /// arm that needs it; ungrounded as authored → floats as shipped (ungrounded now too) or no relation; no anchor the mover changed →
+    /// no relation; re-placed by the mover's side → grounded or still in empty space; grounded now → re-grounded; Bethesda floor →
+    /// counted apart; else LEFT IN EMPTY SPACE.</summary>
+    public static (EmptySpaceVerdict Verdict, string Why) EmptySpace(EmptySpaceFacts f)
+    {
+        string cap = $"its assembly passes {f.MaxMembers} references without reaching a floor or wall";
+        if (!f.Interior) return (EmptySpaceVerdict.Refused, "exterior: the land under it is not read");
+        if (!f.ExistsWinner) return (EmptySpaceVerdict.Absent, "not present under the winner (deleted, or disabled at runtime)");
+        if (!f.ExistsAuthoring) return (EmptySpaceVerdict.Absent, "not present in the order without the mover's side");
+        if (f.Motion == DependentMotion.Unknown && !f.Held) return (EmptySpaceVerdict.Refused, "what physics does with it at load is unknown (no record type or bodies read)");
+        if (!f.Held) return (EmptySpaceVerdict.Falls, "a loose body that is neither mounted nor resting on a fixed reference: it falls at load (the rest rule's class)");
+        if (!f.WinnerGrounded && f.WinnerAnchorUndecided)
+            return (EmptySpaceVerdict.Refused, $"the floor or wall its assembly reaches is itself among the mover's removals past {f.MaxAnchorWalk} pieces: not read");
+        if (!f.AuthoringRead)
+            return f.WinnerGrounded && !f.WinnerOverCap && !f.RePlacedByMoverSide
+                ? (EmptySpaceVerdict.Grounded, "a floor or wall holds it under the winner (the order without the mover was not walked: nothing there can make it the class)")
+                : (EmptySpaceVerdict.Refused, "the order without the mover was not walked, and the winner arm alone cannot decide it");
+        if (f.AuthoringOverCap) return (EmptySpaceVerdict.Refused, $"in the order without the mover {cap}: not read");
+        if (!f.AuthoringGrounded)
+        {
+            if (f.WinnerOverCap) return (EmptySpaceVerdict.Refused, $"under the winner {cap}: not read");
+            return f.WinnerGrounded ? (EmptySpaceVerdict.NoRelation, "no floor or wall held it in the order without the mover either")
+                                    : (EmptySpaceVerdict.FloatsAsShipped, "no floor or wall holds it in either order: it floats as shipped (the absolute floor, not a clash)");
+        }
+        if (!f.AuthoringAnchorChangedByMover) return (EmptySpaceVerdict.NoRelation, "the floors and walls that held it are not ones the mover removed or moved");
+        if (f.WinnerOverCap) return (EmptySpaceVerdict.Refused, $"under the winner {cap}: not read");
+        if (f.RePlacedByMoverSide)
+            return f.WinnerGrounded ? (EmptySpaceVerdict.RePlacedGrounded, "the mover's side re-placed it, and it stands on or against a floor or wall there")
+                                    : (EmptySpaceVerdict.RePlacedStillEmpty, "the mover's side re-placed it, and nothing it touches reaches a floor or wall there");
+        if (f.WinnerGrounded) return (EmptySpaceVerdict.ReGrounded, "the mover removed or moved what held it, and another floor or wall holds it now");
+        if (f.BethesdaFloor) return (EmptySpaceVerdict.FloorPopulation, "left in empty space, with Bethesda or USSEP files on both sides (counted apart)");
+        if (f.FixtureSideIsBase) return (EmptySpaceVerdict.MoverOnBaseGame, "left in empty space by the mover's own removal under a base-game fixture no other mod placed or kept: one mod's defect, not a clash between two mods (counted apart)");
+        return (EmptySpaceVerdict.LeftInEmptySpace, "the mover removed or moved the floor or wall it stood on or against, and nothing it touches reaches a floor or wall now");
+    }
+
     /// <summary>What physics does with a dependent at cell load — the split 4.7 Part C made necessary: a movable
     /// CLUTTER urn was shoved aside, so a movable dependent left in the air FALLS rather than floats, and its
     /// player-visible defect is "apples on the floor", self-healing in the common case. Item records (MISC, INGR, ALCH,
@@ -1656,3 +1720,12 @@ public enum ContactBlocker { None, NoDependentGeometry, NoHostGeometry, Authorin
 /// <summary>What physics does with a dependent at cell load. Fixed floats where it was left; Movable falls or is shoved
 /// (4.7 Part C). Unknown: nothing known about the base or its bodies.</summary>
 public enum DependentMotion { Fixed, Movable, Unknown }
+
+/// <summary>What <see cref="DetectorModel.EmptySpace"/> makes of one fixture against one mover. LeftInEmptySpace is the class;
+/// the rest are counted beside it, never findings: Absent (not there in one arm), Falls (a loose body: the rest rule's class),
+/// Refused (by name), NoRelation (nothing the mover changed held it), FloatsAsShipped (the absolute floor), FloorPopulation
+/// (Bethesda or USSEP on both sides, rule 12), MoverOnBaseGame (a mod's removal leaves a base-game fixture that no other mod
+/// placed or kept: one mod's own defect, not a clash between two mods), Grounded (a floor or wall holds it under the winner and the mover's side did not re-place
+/// it, so it cannot be the class; the order without the mover is not walked for it), RePlacedGrounded / RePlacedStillEmpty (the
+/// mover's side moved it), ReGrounded (another floor or wall holds it now; read only when the order without the mover was walked).</summary>
+public enum EmptySpaceVerdict { Absent, Falls, Refused, NoRelation, FloatsAsShipped, FloorPopulation, MoverOnBaseGame, Grounded, RePlacedGrounded, RePlacedStillEmpty, ReGrounded, LeftInEmptySpace }

@@ -524,6 +524,63 @@ def test_missing_trigger_is_unknown_not_yes():
     assert answer["applicability"] == "unknown", answer
 
 
+# ------------------------------------------------------------------ the shipped rows reach the probe (2026-10-14)
+
+def _controller_argv(check_id, depth="standard", states=("baseline",)):
+    """The argv evalrun's run_generic hands run_child for one shipped registry row on one arm, with a stand-in executor:
+    the controller's own placeholder filling, states handling and flag appending, nothing re-implemented here."""
+    import importlib.util
+    import types
+    from pathlib import Path
+    spec = importlib.util.spec_from_file_location("evalrun_es_argv", os.path.join(HARNESS, "evalrun.py"))
+    E = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(E)
+    check_row = dict(R.check_by_id(load_registry(), check_id), checkId=check_id)   # a plan row carries the id as checkId
+    run = Path(tempfile.mkdtemp(prefix="es-argv-"))
+    arm = {"armId": "baseline", "kind": "baseline", "candidatePath": str(run / "candidate.json"), "candidateFile": "candidate.json"}
+    (run / "receipts").mkdir()
+    (run / "outputs").mkdir()
+    (run / "outputs" / "census.json").write_text("{}", encoding="utf-8")
+    (run / "receipts" / "state.switch-census__baseline.json").write_text(
+        json.dumps({"validation": {"accepted": True}, "outputs": [{"path": "outputs/census.json"}]}), encoding="utf-8")
+    got = {}
+    ex = types.SimpleNamespace(
+        plan={"states": {"selected": list(states), "depth": depth}, "targets": [], "arms": [arm]},
+        run=run, harness=Path(HARNESS), opts={},
+        ledger=types.SimpleNamespace(entry=lambda *a: {"status": "completed"}),
+        exe_argv=lambda adapter: [adapter.get("exe") or "?"],
+        common_flags=lambda: ["--instance", "I", "--profile", "P", "--game", "G"],
+        account=lambda *a, **k: got.setdefault("accounted", a),
+        run_child=lambda c, a, part, argv, outputs, states=None: got.setdefault("argv", argv))
+    states_txt = run / "baseline.states.txt"
+    states_txt.write_text("040E79:Fixture.esp\n", encoding="utf-8")
+    E.deep_states = lambda ex_, c_, a_: {"path": states_txt, "record": ["040E79:Fixture.esp"]}
+    E.run_generic(ex, check_row, arm)
+    assert "argv" in got, f"{check_id}: the controller launched nothing (accounted {got.get('accounted')})"
+    return got["argv"], run
+
+
+def test_empty_space_row_reaches_contactprobe_with_the_flag():
+    """Gate A review condition 3: the shipped geometry.fixture-empty-space row makes the controller launch contactprobe with
+    --empty-space (the mode is off by default inside the probe; the row is what turns it on for users) and an emit."""
+    argv, run = _controller_argv("geometry.fixture-empty-space")
+    assert argv[0] == "contactprobe", argv
+    assert "--empty-space" in argv, argv
+    i = argv.index("--empty-space")
+    assert argv[i + 1].replace("\\", "/").endswith("outputs/geometry.fixture-empty-space/baseline.empty-space.json"), argv[i + 1]
+    assert "--emit" in argv and "--order" in argv, argv
+
+
+def test_deep_state_row_reaches_stateprobe_with_the_flag_and_the_states():
+    """Gate A review condition 1/3: at Deep, state.conditional-geometry launches stateprobe with --empty-space AND the census's
+    states file, so a fixture that exists only once its switch flips is judged in that state."""
+    argv, run = _controller_argv("state.conditional-geometry", depth="deep", states=("baseline", "040E79:Fixture.esp"))
+    assert argv[0] == "stateprobe", argv
+    assert "--empty-space" in argv, argv
+    assert "--states-file" in argv and argv[argv.index("--states-file") + 1].endswith("baseline.states.txt"), argv
+    assert "--switch-map" in argv, argv
+
+
 # ------------------------------------------------------------------ a real scopeprobe file, if present
 
 def test_scopeprobe_shape_round_trips():
