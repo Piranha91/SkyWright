@@ -13,9 +13,13 @@ namespace HarnessShared;
 //               each kind, the sum over the items B shares with N of 1 / (the number of installed plugins sharing that
 //               item with N the same way). An item only B shares scores 1; one forty plugins share scores 1/40. The
 //               newcomer itself is never counted; plugins that leave the order with it are not either.
-//   ranking     candidates are ordered by Score (higher first, then plugin name). controlRank is the newcomer-blind
-//               control R-0: B's own record count, then its cell count, then its name. It uses nothing about the
-//               newcomer, so a ranking that beats it is using the pair, not a prior on large mods.
+//   ranking     R-A, chosen on development data only (4.26 v2 Gate B; run 2b954f2b, dev/fit/fit.json): the number of
+//               selecting kinds met (form links one more kind; this number is Score), then shared cells, shared
+//               records, shared assets, base links, form links (out + in), then plugin name. The family it was chosen
+//               from (a log-count sum, a specificity sum, a fitted logistic score) and the threshold {1, 2, 4} are in the
+//               run folder. controlRank is the newcomer-blind control R-0: B's own record count, then its cell count,
+//               then its name. It uses nothing about the newcomer, so a ranking that beats it is using the pair, not a
+//               prior on large mods.
 
 public sealed record SelEvidenceV2(int Records, IReadOnlyList<string> RecordExamples, int Cells, IReadOnlyList<string> CellExamples,
                                    int Neighbours, IReadOnlyList<string> NeighbourExamples, int Assets, IReadOnlyList<string> AssetExamples,
@@ -49,7 +53,7 @@ public static class SelectionRuleV2
     public const int LinkMin = 1;
     public static readonly string[] SelectingKinds = { "records", "cells", "neighbours", "assets", "baseLinks", "formLinks" };
     public static readonly string[] NotedKinds = { "containerRecords", "ring2Cells", "sharedMasters" };
-    public const string Ranking = "score = sum of log(1 + count) over records, cells, neighbours, assets, base links, form links out, form links in (higher first), then plugin name";
+    public const string Ranking = "R-A: selecting kinds met (score; form links count as one kind), then shared cells, shared records, shared assets, base links, form links (out + in), then plugin name";
     public const string ControlRanking = "R-0, newcomer-blind: the installed plugin's own record count (more first), then its cell count, then plugin name";
 
     /// <summary>The shared items per kind, with the same definitions as <see cref="SelectionRule.Judge"/>.</summary>
@@ -135,9 +139,8 @@ public static class SelectionRuleV2
 
     public static bool LinksSelect(Dictionary<string, double> f) => f["flOut"] + f["flIn"] >= LinkMin;
 
-    public static double Score(Dictionary<string, double> f)
-        => Math.Log(1 + f["rec"]) + Math.Log(1 + f["cell"]) + Math.Log(1 + f["nb"]) + Math.Log(1 + f["ast"])
-         + Math.Log(1 + f["bl"]) + Math.Log(1 + f["flOut"]) + Math.Log(1 + f["flIn"]);
+    /// <summary>R-A's first key: the number of selecting kinds met.</summary>
+    public static double Score(IReadOnlyList<string> kinds) => kinds.Count;
 
     /// <summary>Order the candidates by score and assign the control rank R-0; the order never drops anything.</summary>
     public static List<SelCandidateV2> Rank(List<(string Plugin, string? Folder, List<string> Kinds, SelEvidenceV2 Ev, Dictionary<string, double> F, SelNoted Noted)> picked)
@@ -145,8 +148,10 @@ public static class SelectionRuleV2
         var control = picked.OrderByDescending(p => p.F["bRecords"]).ThenByDescending(p => p.F["bCells"])
                             .ThenBy(p => p.Plugin, StringComparer.OrdinalIgnoreCase)
                             .Select((p, i) => (p.Plugin, i + 1)).ToDictionary(x => x.Plugin, x => x.Item2, StringComparer.OrdinalIgnoreCase);
-        return picked.Select(p => (p, s: Score(p.F)))
-                     .OrderByDescending(x => x.s).ThenBy(x => x.p.Plugin, StringComparer.OrdinalIgnoreCase)
+        return picked.Select(p => (p, s: Score(p.Kinds)))
+                     .OrderByDescending(x => x.s).ThenByDescending(x => x.p.F["cell"]).ThenByDescending(x => x.p.F["rec"])
+                     .ThenByDescending(x => x.p.F["ast"]).ThenByDescending(x => x.p.F["bl"]).ThenByDescending(x => x.p.F["flOut"] + x.p.F["flIn"])
+                     .ThenBy(x => x.p.Plugin, StringComparer.OrdinalIgnoreCase)
                      .Select((x, i) => new SelCandidateV2(x.p.Plugin, x.p.Folder, i + 1, control[x.p.Plugin], Math.Round(x.s, 9), x.p.Kinds, x.p.Ev,
                                                           x.p.F.ToDictionary(kv => kv.Key, kv => Math.Round(kv.Value, 9)), x.p.Noted))
                      .ToList();
