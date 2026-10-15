@@ -343,9 +343,13 @@ static class SelfTest
         SkyrimMod M(string name) => new(new ModKey(name, ModType.Plugin), Rel);
         var i1 = new FormKey(new ModKey("Base", ModType.Master), 0x810);
         foreach (var nm in new[] { "B16", "B17" }) { var m = M(nm); m.MiscItems.Add(new MiscItem(i1, Rel) { EditorID = "Misc810_by" + nm }); Write(m, nm, baseOv); }
+        // B18 meets two kinds and no cell: it overrides s1, the base N places (baseLinks), and ships N's mesh path (assets).
+        // R-A ranks it above B4 (one kind, one cell); an order that skipped the kinds count would put B4 first.
+        var b18 = M("B18"); b18.Statics.Add(new Static(new FormKey(new ModKey("Base", ModType.Master), 0x800), Rel) { EditorID = "Stat800_byB18" }); Write(b18, "B18", baseOv);
+        Directory.CreateDirectory(Path.Combine(mods, "B18", "meshes", "n")); File.WriteAllText(Path.Combine(mods, "B18", "meshes", "n", "shared.nif"), "b18");
         var p2 = Path.Combine(instance, "profiles", "P2"); Directory.CreateDirectory(p2);
-        var order2 = order.Concat(new[] { "B16.esp", "B17.esp" }).ToArray();
-        File.WriteAllLines(Path.Combine(p2, "modlist.txt"), new[] { "# generated" }.Concat(folders.Concat(new[] { "B16", "B17" }).Select(f => "+" + f)).Append("-Orphan"));
+        var order2 = order.Concat(new[] { "B16.esp", "B17.esp", "B18.esp" }).ToArray();
+        File.WriteAllLines(Path.Combine(p2, "modlist.txt"), new[] { "# generated" }.Concat(folders.Concat(new[] { "B16", "B17", "B18" }).Select(f => "+" + f)).Append("-Orphan"));
         File.WriteAllLines(Path.Combine(p2, "loadorder.txt"), new[] { "# generated" }.Concat(order2));
         File.WriteAllLines(Path.Combine(p2, "plugins.txt"), new[] { "# generated" }.Concat(order2.Select(o => "*" + o)));
         var outM = Path.Combine(root, "out-v2-p2");
@@ -355,6 +359,9 @@ static class SelfTest
         Check("v2 multiplicity: B1's one shared record, 3 carriers -> specRec 1/3", F("B1.esp", "rec") == 1 && Math.Abs(F("B1.esp", "specRec") - 1.0 / 3) < 1e-9,
               $"rec {F("B1.esp", "rec")}, specRec {F("B1.esp", "specRec")}");
         Check("v2 multiplicity: B16 likewise (the newcomer is never counted)", Math.Abs(F("B16.esp", "specRec") - 1.0 / 3) < 1e-9, $"specRec {F("B16.esp", "specRec")}");
+        var o2 = jm["candidates"]!.AsArray().Select(c => (string)c!["plugin"]!).ToList();
+        Check("v2 R-A: kinds met come first (B18, two kinds and no cell, above B4, one kind and a cell)",
+              o2.IndexOf("B18.esp") >= 0 && o2.IndexOf("B4.esp") >= 0 && o2.IndexOf("B18.esp") < o2.IndexOf("B4.esp"), string.Join(" > ", o2));
 
         // both = the two single runs
         var outBoth = Path.Combine(root, "out-both");
