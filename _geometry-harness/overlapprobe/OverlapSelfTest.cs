@@ -11,5 +11,17 @@ static class OverlapSelfTest
         t.Check("CR-F0 the fixture writes Skyrim.esm, Dawnguard.esm, CrMod.esp, CrA.esp, CrB.esp and the render box",
                 w.Overlap.Count == 5 && w.Overlap.All(File.Exists) && File.Exists(Path.Combine(w.OverlapMods, F.SkyrimKey.Name, "meshes", F.MeshRel)),
                 string.Join(", ", w.Overlap.Select(Path.GetFileName)));
+
+        // The names the population split and the candidate filter read (_shared/BaseGamePlugins.cs).
+        var seven = new[] { "Skyrim.esm", "Update.esm", "Dawnguard.esm", "HearthFires.esm", "Dragonborn.esm", "SkyrimVR.esm", "_ResourcePack.esl" };
+        var spelled = seven.SelectMany(n => new[] { n, n.ToLowerInvariant(), n.ToUpperInvariant() }).ToList();
+        t.Check("CR-N1 the seven base-game names are base game in any case; a Creation Club plugin and USSEP are not",
+                spelled.All(BaseGamePlugins.IsBaseGame) && BaseGamePlugins.Names.Count == 7
+                && !BaseGamePlugins.IsBaseGame("ccbgssse001-fish.esm") && !BaseGamePlugins.IsBaseGame(BaseGamePlugins.Ussep)
+                && BaseGamePlugins.IsUssep("unofficial skyrim special edition patch.esp"),
+                string.Join(", ", spelled.Where(n => !BaseGamePlugins.IsBaseGame(n))));
+        t.Check("CR-N2 the core masters are Skyrim.esm and Update.esm in any case, and nothing else",
+                BaseGamePlugins.IsCoreMaster("skyrim.esm") && BaseGamePlugins.IsCoreMaster("UPDATE.ESM") && BaseGamePlugins.IsCoreMaster("Skyrim.esm")
+                && !BaseGamePlugins.IsCoreMaster("Dawnguard.esm") && !BaseGamePlugins.IsCoreMaster("Skyrim.esp"), "");
     });
 }

@@ -402,9 +402,6 @@ using var assets = AssetResolver.Build(overwriteDir, modsDir, dataDir, cfg.Enabl
 Console.WriteLine($"load order: {paths.Count} plugins\n");
 HarnessOrderCli.Print(cfg);
 
-var Vanilla = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
-{ "Skyrim.esm", "Update.esm", "Dawnguard.esm", "HearthFires.esm", "Dragonborn.esm", "SkyrimVR.esm", "_ResourcePack.esl" };
-const string Ussep = "Unofficial Skyrim Special Edition Patch.esp";
 var Obstructing = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
 { "Static", "MoveableStatic", "Tree", "Furniture", "Door", "Container", "Activator", "Flora" };
 
@@ -463,8 +460,8 @@ if (bosOn)
 else Console.WriteLine("   BOS: off — record bases (--bos on to apply the *_SWAP.ini layer)");
 
 string PluginName(int p) => p == bosPlugin ? BosApplyReport.PseudoPluginName : pluginKey[p].FileName.String;
-bool IsVanilla(int p) => Vanilla.Contains(PluginName(p));
-bool IsUssep(int p) => string.Equals(PluginName(p), Ussep, StringComparison.OrdinalIgnoreCase);
+bool IsVanilla(int p) => BaseGamePlugins.IsBaseGame(PluginName(p));   // _shared/BaseGamePlugins.cs
+bool IsUssep(int p) => BaseGamePlugins.IsUssep(PluginName(p));
 bool IsBaseGame(int p) => PluginName(p) is "Skyrim.esm" or "Update.esm";
 string CellOf(FormKey c) => idx.CellName.TryGetValue(c, out var v) ? (v.Edid ?? c.ToString()) + (v.Interior ? " (int)" : " (ext)") : c.ToString();
 string TypeOf(FormKey baseKey) => idx.BaseInfo.TryGetValue(baseKey, out var bi) ? bi.Type : "?";
