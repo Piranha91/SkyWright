@@ -13,11 +13,13 @@ namespace HarnessShared;
 // plugins carry Bethesda's file names, so a probe's by-name population split has rows to decide. Test-only; written with
 // Mutagen, the render box with NiflySharp. Two orders, each in its own folder:
 //
-// ov\  (overlapprobe): Skyrim.esm, Dawnguard.esm, CrMod.esp, CrA.esp, CrB.esp; every plugin but Skyrim.esm masters only it.
+// ov\  (overlapprobe): Skyrim.esm, Dawnguard.esm, HearthFires.esm, CrMod.esp, CrA.esp, CrB.esp; every plugin but Skyrim.esm
+//   masters only it.
 //   One interior cell C1 in Skyrim.esm; one STAT base CrBox whose model is a closed render box, half extent 50 u
 //   (mods\Skyrim\meshes\cr\box.nif, loose). Each pair is offset (50, 30, 20); clusters stand 2,000 u apart.
 //     Skyrim.esm   V1 (0,0,0), V2 (50,30,20), V3 (2000,0,0), V4 (4000,0,0)
 //     Dawnguard    D1 (2050,30,20)       CrMod  M1 (4050,30,20)
+//     HearthFires  E1 (2110,60,40): it meets D1 and not V3, a DLC-on-DLC pair neither declares
 //     CrA          A1 (6000,0,0)         CrB    B1 (6050,30,20)
 // dep\ (depprobe): Skyrim.esm, Dawnguard.esm, CrMod.esp, Unofficial Skyrim Special Edition Patch.esp, each mastering only
 //   Skyrim.esm. One interior cell C2 in Skyrim.esm; STAT base DpThing. Hosts H1-H3 at x 0, 1000, 2000; dependents A1-A3
@@ -26,13 +28,15 @@ namespace HarnessShared;
 public static class BaseGameFixture
 {
     public const SkyrimRelease Rel = SkyrimRelease.SkyrimSE;
-    public static readonly ModKey SkyrimKey = new("Skyrim", ModType.Master), DawnguardKey = new("Dawnguard", ModType.Master);
+    public static readonly ModKey SkyrimKey = new("Skyrim", ModType.Master), DawnguardKey = new("Dawnguard", ModType.Master),
+        HearthFiresKey = new("HearthFires", ModType.Master);
     public static readonly ModKey ModKeyM = new("CrMod", ModType.Plugin), AKey = new("CrA", ModType.Plugin), BKey = new("CrB", ModType.Plugin);
     public static readonly ModKey UssepKey = new("Unofficial Skyrim Special Edition Patch", ModType.Plugin);
     static FormKey Sk(uint id) => new(SkyrimKey, id);
     public static readonly FormKey Box = Sk(0x801), Thing = Sk(0x802), C1 = Sk(0x810), C2 = Sk(0x811);
     public static readonly FormKey V1 = Sk(0x901), V2 = Sk(0x902), V3 = Sk(0x903), V4 = Sk(0x904);
-    public static readonly FormKey D1 = new(DawnguardKey, 0x901), M1 = new(ModKeyM, 0x901), A1 = new(AKey, 0x901), B1 = new(BKey, 0x901);
+    public static readonly FormKey D1 = new(DawnguardKey, 0x901), M1 = new(ModKeyM, 0x901), A1 = new(AKey, 0x901), B1 = new(BKey, 0x901),
+        E1 = new(HearthFiresKey, 0x901);
     public static readonly FormKey H1 = Sk(0xA01), H2 = Sk(0xA02), H3 = Sk(0xA03), Dep1 = Sk(0xA11), Dep2 = Sk(0xA12), Dep3 = Sk(0xA13);
     public const string MeshRel = "cr\\box.nif";
     public const float Half = 50f;
@@ -99,11 +103,12 @@ public static class BaseGameFixture
         var ov = new List<string> { skPath };
         using (var skOv = SkyrimMod.CreateFromBinaryOverlay(skPath, Rel))
         {
-            foreach (var (key, refKey, x) in new[] { (DawnguardKey, D1, 2050f), (ModKeyM, M1, 4050f), (AKey, A1, 6000f), (BKey, B1, 6050f) })
+            foreach (var (key, refKey, x, y, z) in new[] { (DawnguardKey, D1, 2050f, 30f, 20f), (HearthFiresKey, E1, 2110f, 60f, 40f),
+                                                          (ModKeyM, M1, 4050f, 30f, 20f), (AKey, A1, 6000f, 0f, 0f), (BKey, B1, 6050f, 30f, 20f) })
             {
                 var m = new SkyrimMod(key, Rel);
                 var c = Cell(C1, "CrCell");
-                c.Temporary.Add(Ref(refKey, Box, x, refKey == A1 ? 0 : 30, refKey == A1 ? 0 : 20));
+                c.Temporary.Add(Ref(refKey, Box, x, y, z));
                 MovedRefFixture.FileInterior(m, c);
                 ov.Add(Save("ov", m, skOv));
             }
