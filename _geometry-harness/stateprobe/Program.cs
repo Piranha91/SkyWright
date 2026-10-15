@@ -463,9 +463,10 @@ if (emptySpaceOut is not null)
     Console.WriteLine($"wrote {esRows.Count:N0} empty-space rows -> {emptySpaceOut}");
 }
 
-var cls = rows.Where(r => r.Verdict == StateVerdict.StateConditional && !r.SameSet && !r.SameAuthor).ToList();
-var resolved = rows.Where(r => r.Verdict == StateVerdict.StateResolved && !r.SameSet && !r.SameAuthor).ToList();
-var ownFloor = rows.Where(r => r.Verdict == StateVerdict.StateConditional && !r.SameSet && r.SameAuthor).ToList();
+var split = StateFindings.Of(rows);   // stateprobe/StateFindings.cs
+var cls = split.Class;
+var resolved = split.Resolved;
+var ownFloor = split.OwnFloor;
 string TriggerOf(FormKey k) => map?.TriggerOf(k).Status ?? "(no map)";
 Console.WriteLine($"\n==== THE CLASS — StateConditional rows: {cls.Count:N0} (apart: {rows.Count(r => r.Verdict == StateVerdict.StateConditional && r.SameSet):N0} same-set pairs, {ownFloor.Count:N0} same-author — the set against its own author's geometry); StateResolved: {resolved.Count:N0} ====");
 Console.WriteLine($"   by the switch's trigger (switchprobe's map): " + string.Join(", ", cls.GroupBy(r => TriggerOf(r.Switch)).OrderByDescending(g => g.Count()).Select(g => $"{g.Key} {g.Count():N0} rows / {g.Select(r => r.Switch).Distinct().Count():N0} switches"))
@@ -551,7 +552,7 @@ if (emitPath is not null)
     // record (a patch re-parents, moves or removes it); the other side the alternative. The kind carries the state so a
     // row in one state never collides with the same pair in another (ConflictIo.RowIdentity keys on kind + records).
     var conflicts = new List<Conflict>();
-    foreach (var r in cls.Where(r => r.Population != StatePopulation.BethesdaFloor))
+    foreach (var r in StateFindings.Emitted(cls))
         conflicts.Add(new Conflict($"STATE-{r.Kind.ToString().ToUpperInvariant()}@{r.State}@{TriggerOf(r.Switch)}", PluginName(r.MemberResponsible), r.Other is null ? PluginName(r.SwitchOwner) : PluginName(r.OtherResponsible),
             $"{r.Kind} {r.Verdict} under {sx.Switches[r.Switch].Label} ({PluginName(r.SwitchOwner)}): {RefLabel(r.Member)} {(r.Arrives ? "arrives" : "leaves")} — {r.Why} in {CellOf(r.Cell)}",
             new List<ConflictRecord> { new(r.Member.ToString(), "placed-ref", CellOf(r.Cell), r.Physical, r.PhysicalDetail) },

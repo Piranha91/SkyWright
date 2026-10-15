@@ -88,5 +88,16 @@ static class StateSelfTest
                 Rows(all.Where(r => r.Kind == StateRowKind.Route)));
         t.Check("PD4-S-F5 W3, a Bethesda obstacle under a Bethesda switch, reads ModRefUnderVanillaSet (today's behaviour; task 2026-10-15-stateprobe-vanilla-population)",
                 all.Single(r => r.Member == F.W3).Population == StatePopulation.ModRefUnderVanillaSet, all.Single(r => r.Member == F.W3).Population.ToString());
+
+        // ST4 and ST1: stateprobe/StateFindings.cs over every state's rows.
+        var split = StateFindings.Of(all);
+        t.Check("PD4-S-K  the class is exactly C1, C2, W1 and W3; resolved exactly W2; own floor exactly C4; the C3 rows in none",
+                string.Join(" ", split.Class.Select(r => r.Member.ToString()).OrderBy(x => x)) == string.Join(" ", new[] { F.C1, F.C2, F.W1, F.W3 }.Select(k => k.ToString()).OrderBy(x => x))
+                && split.Resolved.Select(r => r.Member).SequenceEqual(new[] { F.W2 }) && split.OwnFloor.Select(r => r.Member).SequenceEqual(new[] { F.C4 }),
+                $"class {Rows(split.Class)} | resolved {Rows(split.Resolved)} | own floor {Rows(split.OwnFloor)}");
+        var emitted = StateFindings.Emitted(split.Class).ToList();
+        t.Check("PD4-S-E  the emit carries C1, W1 and W3; C2 (Bethesda floor) is withheld",
+                string.Join(" ", emitted.Select(r => r.Member.ToString()).OrderBy(x => x)) == string.Join(" ", new[] { F.C1, F.W1, F.W3 }.Select(k => k.ToString()).OrderBy(x => x)),
+                Rows(emitted));
     });
 }
