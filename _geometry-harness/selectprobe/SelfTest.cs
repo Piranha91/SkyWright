@@ -367,6 +367,21 @@ static class SelfTest
         Probe.Run(instance, "P", game, null, outVB, true, new() { ("n", new List<string> { nDir }), ("b13", new List<string> { Path.Combine(mods, "B13") }) }, true, null, TextWriter.Null, rule: "both");
         Check("both batch: n.v2.json equals the v2 single run", File.Exists(Path.Combine(outVB, "n.v2.json"))
               && SameButCost(Path.Combine(outV, "selection.json"), Path.Combine(outVB, "n.v2.json")), "minus cost");
+
+        // ---- the frozen v2 order (chosen on development data, run 2b954f2b, dev/fit/fit.json: R-A, link threshold 1).
+        // R-A: selecting kinds met (form links one more kind), then shared cells, records, assets, base links, form links
+        // (out + in), then the name. By hand: B2 and B3 meet records + cells (cells 1, records 1; name decides); B4 cells;
+        // B1 records; B15 and B7 assets; B8 and B9 base links; B12 and B14 form links; B5 neighbours only, which no
+        // tie-break counts, so last.
+        var v2order = j["candidates"]!.AsArray().Select(c => (string)c!["plugin"]!).ToList();
+        Check("v2 frozen order R-A on the fixture", v2order.SequenceEqual(new[] { "B2.esp", "B3.esp", "B4.esp", "B1.esp", "B15.esp", "B7.esp", "B8.esp", "B9.esp", "B12.esp", "B14.esp", "B5.esp" }),
+              string.Join(" > ", v2order));
+        Check("v2 order differs from the control R-0 on the fixture", !v2order.SequenceEqual(r0), "v2 vs R-0");
+        Check("v2 rule names the frozen ranking and link threshold 1", ((string?)j["rule"]?["ranking"] ?? "").StartsWith("R-A") && (int?)j["rule"]?["linkMin"] == 1,
+              $"{j["rule"]?["ranking"]}; linkMin {j["rule"]?["linkMin"]}");
+        var ex2 = j["excluded"]!.AsArray().ToDictionary(c => (string)c!["plugin"]!, c => (string)c!["reason"]!, StringComparer.OrdinalIgnoreCase);
+        Check("v2: B6 (ring 2 only) and B13 (nothing) stay left out", ex2.TryGetValue("B6.esp", out var w6) && w6.Contains("ring-2") && ex2.TryGetValue("B13.esp", out var w13) && w13 == "nothing in common",
+              $"{ex2.GetValueOrDefault("B6.esp")}; {ex2.GetValueOrDefault("B13.esp")}");
     }
 
     static bool SameButCost(string a, string b)
