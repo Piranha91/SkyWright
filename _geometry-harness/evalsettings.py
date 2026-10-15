@@ -7,6 +7,7 @@
     python evalsettings.py set KEY=VALUE [KEY=VALUE ...]
     python evalsettings.py defaults --out FILE
     python evalsettings.py validate FILE
+    python evalsettings.py route KEY
 
 Every command takes `--settings FILE`. The file is `houseCARL.evaluation.json`, found by `--settings`, then
 HOUSECARL_EVAL_SETTINGS, then HOUSECARL_DATA_DIR, then %LOCALAPPDATA%/houseCARL (elsewhere XDG_STATE_HOME/housecarl or
@@ -21,7 +22,10 @@ A bad file is refused (exit 2) and never replaced: a silent fall-back could drop
 
 Precedence for each option: a command-line flag (the evaluation tool's own) > an environment variable where one already
 exists (HOUSECARL_FFMPEG) > the file > the built-in default. `show --json` prints each value with its source.
-Model choices are instructions the skill reads and passes when it delegates; nothing in code can enforce them.
+
+A model choice (`models.*`) is `session`, `off` where allowed, or a full model ID that has an agent in the plugin's
+`agents/` folder; that folder is the one list of accepted IDs. A short name such as `haiku` is refused: the host
+resolves it to different models. `route KEY` prints the agent to start (Claude Code only; elsewhere it refuses).
 """
 from __future__ import annotations
 
@@ -30,7 +34,6 @@ import hashlib
 import html
 import json
 import os
-import re
 import secrets
 import subprocess
 import sys
@@ -52,7 +55,34 @@ FILE_NAME = "houseCARL.evaluation.json"
 TEMPLATE = HERE / "evalsettings_window.html"
 DEFAULT_TIMEOUT_S = 3600.0
 EXIT_OK, EXIT_REFUSED = 0, 2
-MODEL_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._\-\[\]]{0,63}$")
+PLUGIN_DIR = HERE.parent / "plugin"
+
+
+def _model_agents(folder: Path) -> dict[str, str]:
+    """{full model ID: agent name} from the shipped agent definitions' frontmatter."""
+    out = {}
+    for f in sorted(folder.glob("*.md")) if folder.is_dir() else []:
+        lines = f.read_text(encoding="utf-8").splitlines()
+        if not lines or lines[0].strip() != "---":
+            continue
+        head = {}
+        for line in lines[1:]:
+            if line.strip() == "---":
+                break
+            k, sep, v = line.partition(":")
+            if sep:
+                head[k.strip()] = v.strip()
+        if head.get("model") and head.get("name"):
+            out[head["model"]] = head["name"]
+    return out
+
+
+def _plugin_name() -> str:
+    """The plugin's name, which the host puts before an agent's name (`housecarl:model-...`)."""
+    return str(json.loads((PLUGIN_DIR / ".claude-plugin" / "plugin.json").read_text(encoding="utf-8"))["name"])
+
+
+MODEL_AGENTS = _model_agents(PLUGIN_DIR / "agents")
 
 # The option table: the window, validation, `show` and `defaults` all read this one list. `default` None means the
 # evaluation tool's own default (named in `defaultText`); `when` shows the option only under another option's value.
@@ -169,7 +199,7 @@ OPTIONS: list[dict] = [
      "when": {"video.make": ["ask", "always"]}},
     # -- models -------------------------------------------------------------------------------------------------
     {"key": "models.recordChecks", "type": "model", "default": "session", "section": "Models",
-     "label": "Record and asset checks", "help": "The model a delegated record/asset check runs on.",
+     "label": "Record and asset checks", "help": "The model a delegated record/asset check runs on, through the plugin's agent for it.",
      "reason": "Same as the session.", "cost": "Not measured."},
     {"key": "models.imageReview", "type": "model", "default": "session", "section": "Models",
      "label": "Blind image review of video scenes", "help": "Needs an image-capable model, in a fresh agent.",
@@ -241,6 +271,16 @@ def _leaves(obj, prefix=""):
             yield key, v
 
 
+def model_choices(o: dict) -> list[str]:
+    """The values a `models.*` option accepts: session, off where allowed, and each ID with a shipped agent."""
+    return ["session"] + (["off"] if o.get("allowOff") else []) + list(MODEL_AGENTS)
+
+
+def _choices_text(o: dict) -> str:
+    c = model_choices(o)
+    return ", ".join(c[:-1]) + " or " + c[-1] if len(c) > 1 else c[0]
+
+
 def check_value(key: str, value, where: str) -> None:
     o = BY_KEY.get(key)
     if o is None:
@@ -263,12 +303,15 @@ def check_value(key: str, value, where: str) -> None:
     elif t in ("path", "string"):
         ok = isinstance(value, str) and value.strip() != ""
     elif t == "model":
-        ok = isinstance(value, str) and (value == "session" or (value == "off" and o.get("allowOff"))
-                                         or bool(MODEL_RE.match(value)))
+        ok = isinstance(value, str)
+        if ok and value not in model_choices(o):
+            why = ("a short name the host can resolve to an older model" if not value.startswith("claude-")
+                   else "which has no houseCARL agent to run it")
+            raise SettingsError(f"{where} sets `{key}` to `{value}`, {why}: set it to {_choices_text(o)}, or reopen "
+                                f"the window.")
     if not ok:
         want = {"bool": "true or false", "int": "a whole number above zero", "number": "a number above zero",
-                "path": "a path", "string": "a non-empty text", "model": "session, a model name"
-                + (" or off" if o.get("allowOff") else "")}[t]
+                "path": "a path", "string": "a non-empty text", "model": _choices_text(o)}[t]
         raise SettingsError(f"{where} sets `{key}` to `{json.dumps(value)}`, which is not {want}: fix that value or "
                             f"reopen the window.")
 
@@ -475,7 +518,9 @@ def page_html(resolved: Resolved, token: str | None, save_url: str | None, close
     block = {"token": token, "saveUrl": save_url, "closeUrl": close_url, "file": str(resolved.path),
              "values": {k: v for k, v in (merge_chosen(None, chosen)).items()},
              "chosen": sorted(chosen), "newOptions": resolved.new_options,
-             "effective": resolved.values(), "options": OPTIONS, "browser": detect_browser(),
+             "effective": resolved.values(),
+             "options": [dict(o, allowed=model_choices(o)) if o["type"] == "model" else o for o in OPTIONS],
+             "browser": detect_browser(),
              "ffmpeg": detect_ffmpeg()}
     text = TEMPLATE.read_text(encoding="utf-8")
     data = json.dumps(block, ensure_ascii=False).replace("</", "<\\/")
@@ -691,6 +736,30 @@ def cmd_validate(a, run) -> int:
     return EXIT_OK
 
 
+def cmd_route(a, run) -> int:
+    o = BY_KEY.get(a.key)
+    if o is None or o["type"] != "model":
+        raise SettingsError(f"`{a.key}` is not a model setting: route one of "
+                            f"{', '.join(x['key'] for x in OPTIONS if x['type'] == 'model')}.")
+    r = load(a.settings)
+    v = r.options[a.key]
+    out = {"key": a.key, "value": v["value"], "source": v["source"]}
+    if v["value"] == "off":
+        out["use"] = "off"
+    elif v["value"] == "session":
+        out.update(use="session", agent="general-purpose")
+    else:
+        # Only Claude Code starts an agent on a named model; it marks its commands' environment with CLAUDECODE=1.
+        if os.environ.get("CLAUDECODE") != "1":
+            raise SettingsError(f"`{a.key}` names {v['value']}, but only Claude Code can start an agent on a named "
+                                f"model and this command is not running under it: set `{a.key}` to session, or run "
+                                f"the evaluation in Claude Code.")
+        out.update(use="agent", agent=f"{_plugin_name()}:{MODEL_AGENTS[v['value']]}")
+    run.note(f"{a.key} -> {out['use']}")
+    print(json.dumps(out))
+    return EXIT_OK
+
+
 def build_parser() -> argparse.ArgumentParser:
     ap = argparse.ArgumentParser(prog="evalsettings", description=__doc__.split("\n\n")[0])
     ap.add_argument("--settings", help="the settings file to use (first in the resolution order)")
@@ -718,6 +787,9 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("validate")
     p.add_argument("file")
     p.set_defaults(fn=cmd_validate)
+    p = sub.add_parser("route")
+    p.add_argument("key", help="a models.* setting")
+    p.set_defaults(fn=cmd_route)
     return ap
 
 
