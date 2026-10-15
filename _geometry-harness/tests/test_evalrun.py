@@ -18,6 +18,7 @@ import hashlib
 import json
 import os
 import shutil
+import struct
 import subprocess
 import sys
 import tempfile
@@ -6755,6 +6756,237 @@ def case_65(tmp):
 CASES["case-61"] = case_61
 CASES["case-63"] = case_63
 CASES["case-65"] = case_65
+
+
+def _fixture_sub(sig: bytes, data: bytes) -> bytes:
+    return sig + struct.pack("<H", len(data)) + data
+
+
+def _fixture_rec(sig: bytes, fid: int, body: bytes, flags: int = 0) -> bytes:
+    return sig + struct.pack("<IIIIHH", len(body), flags, fid, 0, 44, 0) + body
+
+
+def _fixture_grup(label: bytes, gtype: int, content: bytes) -> bytes:
+    return b"GRUP" + struct.pack("<I", 24 + len(content)) + label + struct.pack("<iHHI", gtype, 0, 0, 0) + content
+
+
+def _fixture_plugin(records: int, tree: bytes) -> bytes:
+    """A hand-written SSE plugin: a TES4 header with no masters, then the given group tree."""
+    hedr = _fixture_sub(b"HEDR", struct.pack("<fiI", 1.71, records, 0x900)) + _fixture_sub(b"CNAM", b"fixture\0")
+    return _fixture_rec(b"TES4", 0, hedr) + tree
+
+
+def _fixture_instance(root: Path, plugin_name: str, data: bytes) -> list:
+    """A scratch MO2 instance (profile P, one mod folder holding the plugin, an empty game Data folder); returns the
+    probe flags that name it, so no real instance is read."""
+    inst = root / "inst"
+    (inst / "profiles" / "P").mkdir(parents=True, exist_ok=True)
+    (inst / "mods" / "Fixture").mkdir(parents=True, exist_ok=True)
+    (inst / "overwrite").mkdir(exist_ok=True)
+    (root / "game" / "Data").mkdir(parents=True, exist_ok=True)
+    (inst / "ModOrganizer.ini").write_text("[General]\nselected_profile=@ByteArray(P)\n", encoding="utf-8")
+    (inst / "mods" / "Fixture" / plugin_name).write_bytes(data)
+    (inst / "profiles" / "P" / "plugins.txt").write_text(f"*{plugin_name}\n", encoding="utf-8")
+    (inst / "profiles" / "P" / "loadorder.txt").write_text(f"{plugin_name}\n", encoding="utf-8")
+    (inst / "profiles" / "P" / "modlist.txt").write_text("+Fixture\n", encoding="utf-8")
+    return ["--instance", str(inst), "--game", str(root / "game"), "--profile", "P"]
+
+
+def _build_probe(tmp: Path, probe: str):
+    """`probe` built from this checkout into an empty folder under `tmp`: (exe, None), or (None, one sentence why not).
+    Never an older binary."""
+    out = Path(tmp) / "probe-build" / probe
+    exe = out / (f"{probe}.exe" if os.name == "nt" else probe)
+    if exe.exists():
+        return exe, None
+    csproj = HARNESS / probe / f"{probe}.csproj"
+    r = subprocess.run(["dotnet", "build", str(csproj), "-c", "Release", "--nologo", "--disable-build-servers",
+                        "--artifacts-path", str(Path(tmp) / "probe-build" / "artifacts" / probe), "-o", str(out)],
+                       capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=900)
+    if r.returncode != 0 or not exe.exists():
+        tail = "\n".join((r.stdout + r.stderr).strip().splitlines()[-8:])
+        return None, f"{probe} did not build from {csproj} (exit {r.returncode}): {tail}"
+    return exe, None
+
+
+def _run_fixture_probe(exe: Path, args: list, root: Path):
+    env = dict(os.environ, HOUSECARL_RUNLOG_DIR=str(root / "runlog"))
+    env.pop("HOUSECARL_HARNESS_CONFIG", None)
+    return subprocess.run([str(exe)] + [str(a) for a in args], capture_output=True, text=True, encoding="utf-8",
+                          errors="replace", env=env, timeout=600)
+
+
+def _land_world_plugin(land_body: bytes, land_flags: int = 0) -> bytes:
+    """One worldspace (0x800), one exterior cell at grid 0,0 (0x801), one LAND (0x802) with the given body and flags:
+    the D-3 measurement's fixture (runs/2026-10-14-d2-d3-fixes/experiment/plugbytes.py)."""
+    fid = lambda n: struct.pack("<I", n)  # noqa: E731
+    wrld = _fixture_rec(b"WRLD", 0x800, _fixture_sub(b"EDID", b"FixtureWorld\0"))
+    cell = _fixture_rec(b"CELL", 0x801, _fixture_sub(b"EDID", b"FixtureCell\0") + _fixture_sub(b"DATA", struct.pack("<H", 0))
+                        + _fixture_sub(b"XCLC", struct.pack("<iiI", 0, 0, 0)))
+    land = _fixture_rec(b"LAND", 0x802, land_body, land_flags)
+    xy = struct.pack("<hh", 0, 0)
+    tree = _fixture_grup(b"WRLD", 0, wrld + _fixture_grup(fid(0x800), 1, _fixture_grup(xy, 4, _fixture_grup(xy, 5,
+                         cell + _fixture_grup(fid(0x801), 6, _fixture_grup(fid(0x801), 9, land))))))
+    return _fixture_plugin(3, tree)
+
+
+COMPRESSED = 0x40000
+
+
+def _land_record_overrun() -> bytes:
+    """The well-formed LAND fixture with the LAND's record length raised past the end of its group."""
+    good = _land_world_plugin(_fixture_sub(b"DATA", struct.pack("<I", 0)))
+    i = good.rfind(b"LAND")
+    return good[:i + 4] + struct.pack("<I", struct.unpack_from("<I", good, i + 4)[0] + 40) + good[i + 8:]
+
+
+def _corrupt_kinds() -> dict:
+    """Each corruption kind: (plugin bytes, signature and FormKey of the record that cannot be read)."""
+    import zlib
+    return {
+        # the compressed flag over bytes that are not zlib
+        "land-badzlib": (_land_world_plugin(struct.pack("<I", 64) + b"not zlib at all, just bytes", COMPRESSED),
+                         "LAND", "000802:CorruptLand.esp"),
+        # compressed, valid zlib, inflating to a cut subrecord header
+        "land-zlib-trunc": (_land_world_plugin(struct.pack("<I", 3) + zlib.compress(b"DAT"), COMPRESSED),
+                            "LAND", "000802:CorruptLand.esp"),
+        # FURTHER KINDS (case-82); each crashed fork head 747ea2f6 (runs/2026-10-14-scopeprobe-crash/explore-747ea2f6.log).
+        # an uncompressed LAND whose body is a cut subrecord header
+        "land-plain-trunc": (_land_world_plugin(b"DAT"), "LAND", "000802:CorruptLand.esp"),
+        # compressed, valid zlib, but the declared inflated size is larger than what inflates
+        "land-zlib-short": (_land_world_plugin(struct.pack("<I", 64) + zlib.compress(_fixture_sub(b"DATA", struct.pack("<I", 0))),
+                                               COMPRESSED), "LAND", "000802:CorruptLand.esp"),
+        # a LAND whose record length runs past the end of its group
+        "land-record-overrun": (_land_record_overrun(), "LAND", "000802:CorruptLand.esp"),
+        # not a LAND, and not nested in a worldspace: one top-level STAT with the compressed flag over bytes that are not zlib
+        "stat-badzlib": (_fixture_plugin(1, _fixture_grup(b"STAT", 0, _fixture_rec(
+            b"STAT", 0x800, struct.pack("<I", 64) + b"not zlib at all, just bytes", COMPRESSED))),
+                         "STAT", "000800:CorruptLand.esp"),
+    }
+
+
+def _scope_on(tmp: Path, case: str, kind: str, data: bytes):
+    """scopeprobe, built from this checkout, run on one hand-written plugin: (exe built?, result, scope doc)."""
+    root = tmp / case / kind
+    root.mkdir(parents=True, exist_ok=True)
+    exe, why = _build_probe(tmp, "scopeprobe")
+    check(exe is not None, f"{case}/{kind}: scopeprobe built from this checkout" + (f" - {why}" if why else ""))
+    if exe is None:
+        return None, None
+    flags = _fixture_instance(root, "CorruptLand.esp", data)
+    out = root / "scope.json"
+    r = _run_fixture_probe(exe, flags + ["--target", "CorruptLand.esp", "--json", out], root)
+    return r, load(out)
+
+
+def _assert_refuses_record(case: str, kind: str, r, doc, sig: str, form_key: str):
+    """An unreadable record: an incomplete scope written, that record named, one sentence, exit 1, no crash."""
+    check("Unhandled exception" not in (r.stderr or ""),
+          f"{case}/{kind}: no unhandled .NET exception (stderr tail {(r.stderr or '').strip()[-160:]!r})")
+    expect(r.returncode, 1, f"{case}/{kind}: scopeprobe exit (1 = written but incomplete)")
+    check(doc is not None, f"{case}/{kind}: scope.json is written")
+    doc = doc or {}
+    expect(doc.get("complete"), False, f"{case}/{kind}: the scope is incomplete")
+    named = [u for u in doc.get("unreadableRecords") or []
+             if u.get("formKey") == form_key and u.get("signature") == sig]
+    check(len(named) == 1, f"{case}/{kind}: unreadableRecords names {sig} {form_key} once "
+                           f"(got {doc.get('unreadableRecords')!r})")
+    fails = [f for f in doc.get("walkFailures") or [] if form_key in f]
+    check(len(fails) == 1 and "\n" not in fails[0] and fails[0].startswith("'CorruptLand.esp' "),
+          f"{case}/{kind}: one walk-failure sentence names the record (got {doc.get('walkFailures')!r})")
+    check(not doc.get("targets"), f"{case}/{kind}: no footprint is reported for the unread target")
+    check(any(form_key in ln and "WALK FAILURE" in ln for ln in (r.stdout or "").splitlines()),
+          f"{case}/{kind}: the console states the walk failure")
+
+
+def case_81(tmp):
+    """Task 2026-10-14-scopeprobe-crashes-on-corrupt-record. A REAL scopeprobe, built from this checkout, on a
+    hand-written plugin whose one LAND carries the compressed flag over bytes that are not zlib, and on one whose zlib
+    inflates to a cut subrecord header. On fork head 747ea2f6 both exit with an unhandled .NET exception and write no
+    scope.json. Required: an incomplete scope, the LAND named, one sentence, exit 1. A well-formed LAND is the control."""
+    case = "case-81-scopeprobe-corrupt-compressed-land"
+    r, doc = _scope_on(tmp, case, "control-good-land", _land_world_plugin(_fixture_sub(b"DATA", struct.pack("<I", 0))))
+    if r is None:
+        return
+    placed = (((doc or {}).get("targets") or [{}])[0].get("footprint") or {}).get("placed") or {}
+    expect((r.returncode, (doc or {}).get("complete"), placed.get("land")), (0, True, 1),
+           f"{case}/control-good-land: precondition - a well-formed LAND reads whole (exit, complete, land)")
+    kinds = _corrupt_kinds()
+    for kind in ("land-badzlib", "land-zlib-trunc"):
+        data, sig, fk = kinds[kind]
+        r, doc = _scope_on(tmp, case, kind, data)
+        _assert_refuses_record(case, kind, r, doc, sig, fk)
+
+
+def case_82(tmp):
+    """The same task, further corruption kinds than compression on a LAND (the task asks for at least one): each must
+    refuse the same way. Which kinds crash on 747ea2f6 is measured in runs/2026-10-14-scopeprobe-crash."""
+    case = "case-82-scopeprobe-corrupt-other-kinds"
+    kinds = _corrupt_kinds()
+    for kind in [k for k in kinds if k not in ("land-badzlib", "land-zlib-trunc")]:
+        data, sig, fk = kinds[kind]
+        r, doc = _scope_on(tmp, case, kind, data)
+        if r is None:
+            return
+        _assert_refuses_record(case, kind, r, doc, sig, fk)
+
+
+def case_83(tmp):
+    """The same task, end to end: on the scope scopeprobe writes for an unreadable LAND, the shipped registry answers
+    unknown - never no - for every check whose trigger reads the scope (an `always` trigger reads nothing and stays
+    yes), and the controller's Validator does not accept scopeprobe's receipt as a measured footprint. On the control's
+    whole scope the land trigger answers yes, so the unknown is the corruption's, not the fixture's."""
+    case = "case-83-scopeprobe-corrupt-land-registry"
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("evalregistry_case83", HARNESS / "evalregistry.py")
+    reg_mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(reg_mod)
+    registry = load(HARNESS.parent / ".claude" / "skills" / "world-edit-compatibility" / "references"
+                    / "check-registry.json") or {}
+    checks = registry.get("checks") or []
+    check(len(checks) > 0, f"{case}: the shipped registry has checks")
+
+    r, good = _scope_on(tmp, case, "control-good-land", _land_world_plugin(_fixture_sub(b"DATA", struct.pack("<I", 0))))
+    if r is None:
+        return
+    seams = reg_mod.applicability(registry, good or {}).get("environment.land-seams") or {}
+    expect(seams.get("applicability"), "yes", f"{case}/control-good-land: environment.land-seams on the whole scope")
+
+    data, sig, fk = _corrupt_kinds()["land-badzlib"]
+    r, doc = _scope_on(tmp, case, "land-badzlib", data)
+    check(doc is not None, f"{case}/land-badzlib: scope.json is written (exit {r.returncode})")
+    if doc is None:
+        return
+    answers = reg_mod.applicability(registry, doc)
+    always = {c.get("id") for c in checks if ((c.get("applicability") or {}).get("trigger") or {}) == {"always": True}}
+    wrong = {cid: a.get("applicability") for cid, a in answers.items()
+             if a.get("applicability") != ("yes" if cid in always else "unknown")}
+    expect(wrong, {}, f"{case}/land-badzlib: every scope-reading trigger answers unknown, each always-trigger yes "
+                      f"({len(answers) - len(always)} unknown expected, {len(always)} yes)")
+    expect(sorted(cid for cid, a in answers.items() if a.get("applicability") == "no"), [],
+           f"{case}/land-badzlib: no check answers no")
+
+    reg_check = next((c for c in checks if (c.get("adapter") or {}).get("kind") == "scopeprobe"), None)
+    check(reg_check is not None, f"{case}: the shipped registry has a scopeprobe check")
+    if reg_check is None:
+        return
+    spec = importlib.util.spec_from_file_location("evalrun_case83", EVALRUN)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    arm = {"armId": "baseline", "kind": "baseline"}
+    res = mod.Validator(tmp / case, {"arms": [arm]}).validate(
+        check={"checkId": reg_check["id"]}, arm=arm, part=None, adapter=reg_check["adapter"],
+        exit_code=r.returncode, log_text=r.stdout + "\n---- stderr ----\n" + r.stderr,
+        outputs=[tmp / case / "land-badzlib" / "scope.json"], pre_hashes={}, started=None)
+    causes = [x["cause"] for x in res.get("rejections") or []]
+    expect((res.get("accepted"), res.get("detector"), res.get("findings")), (False, "inconclusive", None),
+           f"{case}/land-badzlib: the scopeprobe receipt is not a measured footprint (accepted, detector, findings; "
+           f"causes {causes})")
+
+
+CASES["case-81"] = case_81
+CASES["case-82"] = case_82
+CASES["case-83"] = case_83
 
 
 def case_49(tmp):
