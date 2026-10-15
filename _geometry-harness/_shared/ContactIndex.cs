@@ -449,6 +449,18 @@ public sealed class ContactIndex
         yield return ("shellDeps", _shellDeps.StaleBaseLookups, (IReadOnlyList<(FormKey, int, FormKey, FormKey)>?)_shellDeps.StaleBaseKeys ?? none);
     }
 
+    /// <summary>The geometry memo: bases memoised, and the bytes of the distinct soups it holds (the HC_MEMSTAGES diagnostic).</summary>
+    public (int Bases, long SoupBytes) GeometryMemo()
+    {
+        var seen = new HashSet<TriangleSoup>(ReferenceEqualityComparer.Instance);
+        long bytes = 0;
+        foreach (var g in _geomCache.Values)
+            if (g is not null)
+                foreach (var so in new[] { g.HostSoup, g.DepSoup, g.HostShell, g.DepShell })
+                    if (so is not null && seen.Add(so)) bytes += PlacementCache<TriangleSoup>.SoupBytes(so);
+        return (_geomCache.Count, bytes);
+    }
+
     public RefGeometry? GeomOf(FormKey baseKey)
     {
         if (_geomCache.TryGetValue(baseKey, out var g)) return g;

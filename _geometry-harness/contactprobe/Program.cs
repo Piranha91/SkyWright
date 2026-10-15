@@ -808,6 +808,7 @@ var skips = new ContactSkips();
 // --trace: attach the sink for the whole pass (keyed with --trace-keys, else counting mode); it never changes a verdict.
 ProbeTraceCollector? traceSink = traceOut is null ? null : new ProbeTraceCollector(traceKeys);
 cidx.Trace = traceSink;
+MemStages.Print("index", cidx, 0, 0);
 var hosts = cidx.MovedHosts(skips, closure);
 Console.WriteLine($"\n==== 1. PLUMBING ====");
 Console.WriteLine($"   hosts (physical, furniture-scale or larger, whose last placement step is a move, a relocation or a removal): {hosts.Count:N0}");
@@ -831,9 +832,11 @@ if (emptySpaceOut is not null)
                                 EmptySpaceOutput.NodeCheck(idx, assets), emptySpaceOut, emitPath, basePath, Instance, paths.Count - unreadable.Count, unreadable.Count,
                                 cfg.Identity("load-time", cidx.State?.Name ?? EnablePopulation.BaselineStateName), listN, sw);
 var depHash = cidx.DependentSnaps(skips);
+MemStages.Print("dependents hashed", cidx, 0, 0);
 if (FitCheck() is { } fitRefusal) { Console.Error.WriteLine("contactprobe: " + fitRefusal); return 2; }
 Func<Snap, bool>? winScope = null;
 var winHash = cidx.PhysicalWinners(winScope, skips);
+MemStages.Print("winner arm hashed", cidx, 0, 0);
 Console.WriteLine($"   dependents hashed: {depHash.Count:N0} undeleted snaps of clutter- and furniture-scale physical refs — the arm decides which exist at runtime ({skips.DepNoGeometry:N0} winning refs without geometry, {skips.DepVolume:N0} over {cidx.MaxDependentDim:0}u set aside)");
 Console.WriteLine($"   winner arm: {winHash.Count:N0} physical refs placed, undeleted and enabled at runtime under the winner, any size (R3); left out: {skips.WinnerRuntimeDisabled:N0} disabled at runtime (R1), {skips.WinnerEnableUnresolved:N0} with an unresolved chain  ({sw.Elapsed.TotalSeconds:0.0}s)");
 
@@ -843,6 +846,7 @@ foreach (var h in hosts.OrderBy(h => h.Previous.Space.ToString()).ThenBy(h => h.
 {
     rows.AddRange(cidx.Judge(h, depHash, winHash, closure, skips, keepNoRelation: allRows));
     if (++done % 2000 == 0) Console.WriteLine($"   ... {done:N0}/{hosts.Count:N0} hosts, {rows.Count:N0} rows, {sw.Elapsed.TotalSeconds:0}s");
+    if (done % 500 == 0) MemStages.Print("host loop", cidx, rows.Count, done);
 }
 Console.WriteLine($"   pairs within the box band: {rows.Count + skips.BoxesApart:N0} tested; set aside: {skips.BoxesApart:N0} boxes further apart than {cidx.BoxBand:0}u, "
                 + $"{skips.DepIntroducedByMover:N0} dependents the mover introduced, {skips.DepOtherSpace:N0} in another space, "
@@ -1186,5 +1190,6 @@ Console.WriteLine($"Limits: ε {eps:0.#}u and the 30° bands are chosen numbers;
 Console.WriteLine($"        terrain is not a reference (exterior rows are split out); the arm without the mover steps back ONE placement; a render-soup row ('r') is labelled, a box row ('o') is a box;");
 Console.WriteLine($"        runtime existence is the enable chain as the records state it (R1) — a script that enables or disables a reference is invisible here; a marker is the Is-Marker flag (R2).");
 WriteGeomReport();
+MemStages.Print("end", cidx, rows.Count, done);
 Console.WriteLine($"elapsed {sw.Elapsed.TotalSeconds:0.0}s");
 return 0;

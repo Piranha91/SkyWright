@@ -191,6 +191,8 @@ public sealed class CacheBudget
     public long Hits(string name) => _stats[_names.IndexOf(name)][0];
     public long Misses(string name) => _stats[_names.IndexOf(name)][1];
     public long Evictions(string name) => _stats[_names.IndexOf(name)][2];
+    /// <summary>Bytes each cache holds now, by name (the HC_MEMSTAGES diagnostic).</summary>
+    public IEnumerable<(string Name, long Bytes)> BytesNow() => _names.Select((n, i) => (n, _stats[i][3]));
 
     /// <summary>One line: the budget, the pool's peak, and per cache hits / misses / evictions / peak bytes.</summary>
     public string Report()
