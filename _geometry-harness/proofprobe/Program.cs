@@ -2500,6 +2500,36 @@ Console.WriteLine("\nPROOF — placement contact (_shared/DetectorModel.cs + _sh
            && lean.Budget.Misses("hostGrids") > cidx.Budget.Misses("hostGrids"),
               $"rows {sigA.Count} vs {sigB.Count}, first difference at {firstDiff}{(firstDiff >= 0 ? $": {sigA[firstDiff]} || {sigB[firstDiff]}" : "")}; lean: {lean.Budget.Report()}; default: {cidx.Budget.Report()}");
     }
+    {
+        // CM-1 (suite 151, contactprobe default-pass memory): ct-synth judged by an index that keeps no geometry (a summary per
+        // base; every soup asked of the delegate again, as contactprobe's mesh store decodes an evicted mesh again) under a
+        // 1-byte cache budget, against the memoising index at the default budget, with and without the radius reading. The
+        // delegate builds new soups on every call. The rows must be the same, field by field as T1 reads them.
+        (List<string> Sig, long Calls) JudgeWith(bool memoise, long? budget, bool radius)
+        {
+            ContactIndex? ix = null; long calls = 0;
+            ix = new ContactIndex(k => { calls++; return ix!.Index.ObndBox(k) is { IsEmpty: false } bx
+                ? new RefGeometry(bx, k == jarK ? Inverted(ContactIndex.BoxSoup(bx)) : ContactIndex.BoxSoup(bx), ContactIndex.BoxSoup(bx), 'o', 'o', HostUsable: true, Array.Empty<(string, string)>(), false) : null; },
+                budget, memoiseGeometry: memoise) { ReadRadius = radius };
+            for (int p = 0; p < paths.Length; p++) { using var mod = SkyrimMod.CreateFromBinaryOverlay(paths[p], release); ix.Index.Ingest(p, mod); }
+            var sk = new ContactSkips();
+            var hs = ix.MovedHosts(sk, closure);
+            var dh = ix.DependentSnaps(sk); var wh = ix.PhysicalWinners(null, sk);
+            static string Arm(ArmContact? a) => a is null ? "-" : $"{a.Against} {a.Contact} {a.AgainstExtent} {a.AgainstMaxDim} {a.RawDistance} {a.RawAgainst} {a.CoreGap} {a.PreexistingDepth} {a.PreexistingOnly}";
+            var sig = hs.SelectMany(h => ix.Judge(h, dh, wh, closure, sk, keepNoRelation: true))
+                        .Select(r => $"{r.Host.Key}|{r.Dependent}|{r.DepBase}|{r.Motion}|{r.Relation}|{r.Verdict}|{r.Reason}|{r.Why}|{r.Facts}|{Arm(r.Authoring)}|{Arm(r.Winner)}").ToList();
+            return (sig, calls);
+        }
+        foreach (bool radius in new[] { false, true })
+        {
+            var (memo, memoCalls) = JudgeWith(memoise: true, budget: long.MaxValue, radius);
+            var (lean, leanCalls) = JudgeWith(memoise: false, budget: 1, radius);
+            int diff = Enumerable.Range(0, Math.Min(memo.Count, lean.Count)).FirstOrDefault(i => memo[i] != lean[i], -1);
+            Check($"CM-1 ct-synth judged by an index that keeps no geometry, every soup asked for again under a 1-byte budget, gives the memoising index's rows (radius {(radius ? "on" : "off")})",
+                  memo.Count > 0 && memo.SequenceEqual(lean) && leanCalls > memoCalls,
+                  $"rows {memo.Count} vs {lean.Count}, first difference at {diff}{(diff >= 0 ? $": {memo[diff]} || {lean[diff]}" : "")}; geometry asked {memoCalls} (memoised) vs {leanCalls} times");
+        }
+    }
     ContactRow? Row(int n) => rows.FirstOrDefault(r => r.Host.Key == H(n) && r.Dependent == D(n));
     string R(int n) => Row(n) is { } r ? $"{r.Relation} / {r.Verdict} / {r.Reason} [{r.Motion}, seen {r.Seen}, after {r.AuthorAfterMover}, touched {r.DepTouchedByMoverSide}]: {r.Why}" : "(no row)";
 
@@ -3647,6 +3677,7 @@ OverlapGeometryProof.Run(Check);
 MeshIntersectionProof.Run(Check);
 OverlapVolumeProof.Run(Check);
 CacheBudgetProof.Run(Check);
+GeometryRetentionProof.Run(Check);
 OverlapSurfaceProof.Run(Check);
 MotionProof.Run(Check);
 MotionProof.RunFollowUps(Check);
