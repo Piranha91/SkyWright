@@ -364,12 +364,17 @@ long meshesMeasured = 0, hostColl = 0, hostRender = 0, depColl = 0, depRender = 
 // per base, and a mesh evicted from the budget is decoded again from the same bytes. The run's mesh counters, the wind labels and
 // --geom-report lines are written on a mesh's first decode only. The other modes memoise every base's geometry, as before.
 bool boundedGeometry = selectedModes == 0;
+// One archive reader per archive for the default pass (housecarl-core ArchiveReadScope.cs): each archive's table is read once in the
+// pass, not on every mesh read; disposed when the program ends (try/finally through using). The other modes read as before.
+using var archiveScope = boundedGeometry ? new ArchiveReadScope() : null;
 long readAlloc = 0, decodeAlloc = 0, readCount = 0, readBytes = 0;   // HC_MEMSTAGES counters
 byte[]? ReadMesh(string full)
 {
     long a0 = MemStages.On ? GC.GetAllocatedBytesForCurrentThread() : 0;
     var res = assets.ResolveForPlacement(full);
-    var b = res.Sources.Count > 0 ? AssetResolver.ReadPlacementSource(res.Sources[0]).Bytes : null;
+    var b = res.Sources.Count == 0 ? null
+          : archiveScope is not null ? archiveScope.ReadPlacementSource(res.Sources[0]).Bytes
+          : AssetResolver.ReadPlacementSource(res.Sources[0]).Bytes;
     if (MemStages.On)
     {
         long ra = GC.GetAllocatedBytesForCurrentThread() - a0;
@@ -842,7 +847,7 @@ ProbeTraceCollector? traceSink = traceOut is null ? null : new ProbeTraceCollect
 cidx.Trace = traceSink;
 MemStages.Print("index", cidx, 0, 0);
 if (MemStages.On) cidx.StageProbe = (stage, refs) => { if (refs % 100_000 == 0) MemStages.Print($"{stage}, {refs:N0} refs", cidx, 0, 0); else MemStages.Light($"{stage}, {refs:N0} refs"); };
-MemStages.Extra = () => $"mesh reads {readCount:N0} ({readBytes / 1e9:0.000} GB of files, {readAlloc / 1e9:0.000} GB allocated), decodes allocated {decodeAlloc / 1e9:0.000} GB, process total allocated {GC.GetTotalAllocatedBytes() / 1e9:0.000} GB";
+MemStages.Extra = () => $"archive tables read {archiveScope?.TablesRead ?? 0:N0}; mesh reads {readCount:N0} ({readBytes / 1e9:0.000} GB of files, {readAlloc / 1e9:0.000} GB allocated), decodes allocated {decodeAlloc / 1e9:0.000} GB, process total allocated {GC.GetTotalAllocatedBytes() / 1e9:0.000} GB";
 var hosts = cidx.MovedHosts(skips, closure);
 Console.WriteLine($"\n==== 1. PLUMBING ====");
 Console.WriteLine($"   hosts (physical, furniture-scale or larger, whose last placement step is a move, a relocation or a removal): {hosts.Count:N0}");
