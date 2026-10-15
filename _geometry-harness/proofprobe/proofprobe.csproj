@@ -47,6 +47,7 @@
     <Compile Include="..\_shared\ContactAssembly.cs" Link="ContactAssembly.cs" />
     <Compile Include="..\_shared\PlacementCache.cs" Link="PlacementCache.cs" />
     <Compile Include="..\_shared\CellBoundaryIndex.cs" Link="CellBoundaryIndex.cs" />
+    <Compile Include="..\_shared\BaseGamePlugins.cs" Link="BaseGamePlugins.cs" />
     <Compile Include="..\_shared\CellBoundaryFixture.cs" Link="CellBoundaryFixture.cs" />
     <Compile Include="..\_shared\NifBoxFixture.cs" Link="NifBoxFixture.cs" />
     <Compile Include="..\_shared\WorldState.cs" Link="WorldState.cs" />

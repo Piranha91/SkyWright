@@ -27,6 +27,7 @@
     <Compile Include="..\_shared\BosHook.cs" Link="BosHook.cs" />
     <Compile Include="..\_shared\DependencyIndex.cs" Link="DependencyIndex.cs" />
     <Compile Include="..\_shared\CellBoundaryIndex.cs" Link="CellBoundaryIndex.cs" />
+    <Compile Include="..\_shared\BaseGamePlugins.cs" Link="BaseGamePlugins.cs" />
     <Compile Include="..\_shared\WorldState.cs" Link="WorldState.cs" />
     <Compile Include="..\_shared\StateArm.cs" Link="StateArm.cs" />
     <Compile Include="..\_shared\TargetTriggers.cs" Link="TargetTriggers.cs" />

@@ -39,6 +39,7 @@
     <Compile Include="..\_shared\BosHook.cs" Link="BosHook.cs" />
     <Compile Include="..\_shared\DependencyIndex.cs" Link="DependencyIndex.cs" />
     <Compile Include="..\_shared\CellBoundaryIndex.cs" Link="CellBoundaryIndex.cs" />
+    <Compile Include="..\_shared\BaseGamePlugins.cs" Link="BaseGamePlugins.cs" />
     <Compile Include="..\_shared\CollisionLayers.cs" Link="CollisionLayers.cs" />
     <Compile Include="..\_shared\ActorBand.cs" Link="ActorBand.cs" />
     <Compile Include="..\_shared\ConflictReport.cs" Link="ConflictReport.cs" />

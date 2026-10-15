@@ -40,6 +40,7 @@
     <Compile Include="..\_shared\PlacementCache.cs" Link="PlacementCache.cs" />
     <Compile Include="..\_shared\WorldState.cs" Link="WorldState.cs" />
     <Compile Include="..\_shared\CellBoundaryIndex.cs" Link="CellBoundaryIndex.cs" />
+    <Compile Include="..\_shared\BaseGamePlugins.cs" Link="BaseGamePlugins.cs" />
     <Compile Include="..\_shared\StateArm.cs" Link="StateArm.cs" />
     <Compile Include="..\_shared\EnablePopulation.cs" Link="EnablePopulation.cs" />
     <Compile Include="..\_shared\EnableArms.cs" Link="EnableArms.cs" />

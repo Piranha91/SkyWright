@@ -25,18 +25,17 @@ namespace HarnessShared;
 
 public static class PluginKinds
 {
-    /// <summary>The seven base-game files the other probes already treat as Bethesda, plus Creation Club
-    /// (`cc*.es*`) — Bethesda-on-Bethesda is a population of its own (rule 12), reported apart.</summary>
-    static readonly HashSet<string> Bethesda = new(StringComparer.OrdinalIgnoreCase)
-    { "Skyrim.esm", "Update.esm", "Dawnguard.esm", "HearthFires.esm", "Dragonborn.esm", "SkyrimVR.esm", "_ResourcePack.esl" };
-    public const string Ussep = "Unofficial Skyrim Special Edition Patch.esp";
+    /// <summary>The unofficial patch's file name (<see cref="BaseGamePlugins.Ussep"/>).</summary>
+    public const string Ussep = BaseGamePlugins.Ussep;
     /// <summary>The fixed filenames the retired <c>tool-output-awareness</c> skill listed (patchprobe carries the same set). A Synthesis
     /// output folder's other plugins are named by its pipeline and are NOT caught by name — a stated limit.</summary>
     static readonly HashSet<string> Generated = new(StringComparer.OrdinalIgnoreCase)
     { "DynDOLOD.esm", "DynDOLOD.esp", "Occlusion.esp", "PGPatcher.esp", "PG_1.esp", "Synthesis.esp", "Requiem for the Indifferent.esp", "TexGen_Output.esp" };
 
-    public static bool IsBethesda(string fileName) => Bethesda.Contains(fileName) || fileName.StartsWith("cc", StringComparison.OrdinalIgnoreCase) && IsPluginName(fileName);
-    public static bool IsUssep(string fileName) => string.Equals(fileName, Ussep, StringComparison.OrdinalIgnoreCase);
+    /// <summary>The base-game files (<see cref="BaseGamePlugins"/>) plus Creation Club (`cc*.es*`): Bethesda-on-Bethesda is a
+    /// population of its own (rule 12), reported apart.</summary>
+    public static bool IsBethesda(string fileName) => BaseGamePlugins.IsBaseGame(fileName) || fileName.StartsWith("cc", StringComparison.OrdinalIgnoreCase) && IsPluginName(fileName);
+    public static bool IsUssep(string fileName) => BaseGamePlugins.IsUssep(fileName);
     public static bool IsGenerated(string fileName) => Generated.Contains(fileName);
     static bool IsPluginName(string f) => f.EndsWith(".esm", StringComparison.OrdinalIgnoreCase) || f.EndsWith(".esp", StringComparison.OrdinalIgnoreCase) || f.EndsWith(".esl", StringComparison.OrdinalIgnoreCase);
 
