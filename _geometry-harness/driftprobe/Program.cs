@@ -175,6 +175,9 @@ long placements = 0, questRecords = 0;
 // silently skipped.
 var unreadablePlugins = new List<string>();
 __run.Feature("plugins", paths.Count, "plugins").Stage("scan", "reading plugins", paths.Count, "plugins");
+// The per-plugin walk (DriftIndex.cs) fills the tables above.
+var index = new DriftIndex(pluginKey, masterIdx, bos, aliasTargets, refBase, npcPlaced, baseName, cellName, refArm, refEz, quests, scenes,
+                           packageTargets, packFacts, npcPackages, npcTemplated, narrativeQuests, narrativeCount, recordCensus, cellEdits);
 
 
 for (int p = 0; p < paths.Count; p++)
@@ -186,100 +189,8 @@ for (int p = 0; p < paths.Count; p++)
 
     using (mod as IDisposable)
     {
-        pluginKey[p] = mod.ModKey;
-        bos.Plugin(mod);
-        var mset = new HashSet<int>();
-        try
-        {
-            var names = mod.ModHeader.MasterReferences.Select(m => m.Master).ToHashSet();
-            for (int q = 0; q < p; q++) if (names.Contains(pluginKey[q])) mset.Add(q);
-        }
-        catch { /* an unreadable header means we cannot claim what it saw; leave the set empty */ }
-        masterIdx[p] = mset;
-
-        foreach (var cp in AliasTargets.Cells(mod))
-        {
-            cellName[cp.Cell] = (cp.CellEditorId, cp.Interior);
-            bos.Cell(cp, withRefs: false);
-            foreach (var r in cp.Refs)
-            {
-                placements++;
-                bos.Placed(r);
-                refArm[r.FormKey] = r.RecordType;
-                if (r.EncounterZone is { } rez) refEz[r.FormKey] = rez; else refEz.Remove(r.FormKey);
-                if (!cellEdits.TryGetValue(p, out var ce)) cellEdits[p] = ce = new Dictionary<FormKey, int>();
-                ce[cp.Cell] = ce.GetValueOrDefault(cp.Cell) + 1;
-                // Record only a plugin that actually CHANGED something. An override that leaves the
-                // placement alone is not a step in the story and would swamp the history. Rotation and scale ride
-                // along (not part of SameAs — a rotation-only override is still no step) so the BOS hook's
-                // "rotation/scale-only" tally compares an override against the record's values, not against zero.
-                aliasTargets.Placed(p, cp, r);
-
-                if (r.Base is { } bk)
-                {
-                    refBase[r.FormKey] = bk;
-                    if (r.RecordType.Contains("PlacedNpc", StringComparison.Ordinal))
-                    {
-                        if (!npcPlaced.TryGetValue(bk, out var l)) npcPlaced[bk] = l = new List<FormKey>(1);
-                        if (!l.Contains(r.FormKey)) l.Add(r.FormKey);
-                    }
-                }
-            }
-        }
-
-        void Narrative(FormKey? quest)
-        {
-            narrativeCount[p]++;
-            if (quest is { } qk && !qk.IsNull)
-            {
-                if (!narrativeQuests.TryGetValue(p, out var nq)) narrativeQuests[p] = nq = new HashSet<FormKey>();
-                nq.Add(qk);
-            }
-        }
-        foreach (var rec in mod.EnumerateMajorRecords())
-        {
-            bos.Record(rec);
-            aliasTargets.Record(p, rec);
-            // The census counts every record the plugin carries, by Mutagen type name — the "all
-            // 19 records: 13 REFR, 3 ACHR, 2 CELL, 1 WRLD" evidence line, read instead of recited.
-            var census = recordCensus.TryGetValue(p, out var cd) ? cd : recordCensus[p] = new Dictionary<string, int>();
-            Bump(census, rec.GetType().Name.Replace("BinaryOverlay", ""));
-
-            if (rec is IQuestGetter q) { quests[q.FormKey] = QuestInfo.From(q, p); questRecords++; Narrative(q.FormKey); }
-            else if (rec is ISceneGetter sc)
-            {
-                scenes[sc.FormKey] = (sc.Quest.FormKeyNullable ?? FormKey.Null,
-                                      sc.Actors.Select(a => (int)a.ID).Distinct().ToArray());
-                Narrative(sc.Quest.FormKeyNullable);
-            }
-            // A topic points UP at its quest; INFO lines carry no quest of their own, but the
-            // plugin holding them must also carry their parent DIAL, so the quest attribution
-            // rides on the topic and the INFO still counts as narrative work.
-            else if (rec is IDialogTopicGetter dt) Narrative(dt.Quest.FormKeyNullable);
-            else if (rec is IDialogResponsesGetter) Narrative(null);
-            else if (rec is IPackageGetter pk)
-            {
-                // A package's data bag is keyed by slot; the arms that matter are the TARGET ones,
-                // and of those only the alias arm names a thing this analysis can follow.
-                var t = pk.Data.Values.OfType<IPackageDataTargetGetter>()
-                          .Select(d => d.Target).OfType<IPackageTargetAliasGetter>()
-                          .Select(x => x.Alias).Distinct().ToArray();
-                if (t.Length > 0) packageTargets[pk.FormKey] = t;
-                packFacts[pk.FormKey] = PackFacts.From(pk);      // winner wins: later plugins overwrite
-            }
-            else if (rec is INpcGetter npc)
-            {
-                baseName[npc.FormKey] = ("Npc", npc.EditorID);
-                npcPackages[npc.FormKey] = npc.Packages.Select(x => x.FormKey).ToArray();
-                // A templated actor's package list is its TEMPLATE's, and this probe does not walk
-                // the template chain — such an actor is unassessable, counted rather than guessed.
-                if (!npc.Template.IsNull && npc.Configuration.TemplateFlags.HasFlag(NpcConfiguration.TemplateFlag.AIPackages))
-                    npcTemplated.Add(npc.FormKey);
-                else npcTemplated.Remove(npc.FormKey);
-            }
-            else if (rec is IModeledGetter && rec is ISkyrimMajorRecordGetter sm)
-                baseName[sm.FormKey] = (rec.GetType().Name.Replace("BinaryOverlay", ""), sm.EditorID);
-        }
+        var (addedPlacements, addedQuestRecords) = index.Plugin(p, mod);
+        placements += addedPlacements; questRecords += addedQuestRecords;
     }
     if ((p + 1) % 150 == 0) Console.WriteLine($"   ... {p + 1}/{paths.Count} plugins, {placements:N0} placements, {sw.Elapsed.TotalSeconds:0}s");
 }
