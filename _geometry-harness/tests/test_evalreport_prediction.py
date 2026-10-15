@@ -1080,24 +1080,28 @@ def main():
         return ok, (f"skill reason {reason!r}; lines {lines}; on report.md {bool(subj) and subj in cov}; "
                     f"on report.html {bool(subj) and subj in _html.unescape(html)}")
 
-    # 45. a third-mod record group is listed once per pair, not once per setup; the rest go to the evidence index
-    def third_mod_group_once_per_pair():
+    # 45. a record group between one evaluated mod and another mod is not in the detail list (Gate C round 1, H2:
+    #     listed once per pair the reports still broke the page limit); the evidence index lists it with why, and
+    #     the page counts it in one sentence
+    def single_mod_record_groups_to_index():
         plan, md, html, index = record_rows_bundle()
         words = pw.get("detailAside") or {}
         sec = section_text(md, detail_heading)
         pair_lines = [ln for ln in sec.splitlines() if f"between {OTHER} and {MOD_A}" in ln]
         groups = [f for f in plan.get("findings") or [] if f.get("kind") == "finding" and f.get("checkId") == RECORDS
                   and {(f.get("counts") or {}).get("A"), (f.get("counts") or {}).get("B")} == {OTHER, MOD_A}]
-        shown = [f for f in groups if f.get("readerDetail")]
-        aside = [f for f in groups if f.get("readerDetail") is False]
-        line = str(reader(plan).get("detailOnceLine") or "")
-        ok = (len(groups) == 2 and len(shown) == 1 and shown[0].get("armId") == "baseline" and len(aside) == 1
-              and aside[0].get("readerDetailAside") == "samePair" and len(pair_lines) == 1
-              and bool(line) and line in sec and re.search(r"\b1\b", line) is not None
-              and bool(words.get("samePair")) and words["samePair"] in index_section(index, "detail-set-aside")
-              and aside[0]["id"] in index_section(index, "detail-set-aside"))
+        pair_kept = [f for f in plan.get("findings") or [] if f.get("kind") == "finding" and f.get("readerDetail")
+                     and {(f.get("counts") or {}).get("A"), (f.get("counts") or {}).get("B")} == {MOD_A, MOD_B}]
+        line = str(reader(plan).get("detailSingleModLine") or "")
+        aside_sec = index_section(index, "detail-set-aside")
+        ok = (len(groups) == 2 and all(f.get("readerDetail") is False and f.get("readerDetailAside") == "singleMod"
+                                       for f in groups)
+              and not pair_lines and bool(pair_kept) and f"between {MOD_A} and {MOD_B}" in sec
+              and bool(line) and line in sec and re.search(r"\b2\b", line) is not None
+              and bool(words.get("singleMod")) and words["singleMod"] in aside_sec
+              and all(f["id"] in aside_sec for f in groups))
         return ok, (f"groups {[(f.get('armId'), f.get('readerDetail'), f.get('readerDetailAside')) for f in groups]}; "
-                    f"lines on the page {len(pair_lines)}; once-line {line!r}")
+                    f"lines on the page {len(pair_lines)}; single-mod line {line!r}")
 
     for name, fn in [
             ("record-rows/a-lost-edit-two-checks-report-is-counted-once", record_repeat_counted_once),
@@ -1105,7 +1109,7 @@ def main():
             ("verdict-units/each-kind-in-its-own-unit-never-summed-objects",
              lambda: kinds_never_summed({"headlineUnit": "objects"}, 3)),
             ("coverage/unjudged-record-fields-counted-with-why", unjudged_fields_counted),
-            ("detail-list/a-third-mod-record-group-is-listed-once-per-pair", third_mod_group_once_per_pair),
+            ("detail-list/a-single-mod-record-group-goes-to-the-evidence-index", single_mod_record_groups_to_index),
             ("admission-everywhere/verdict-counts-needs-both-only", verdict_needs_both_only),
             ("admission-everywhere/single-mod-clash-under-its-own-heading", single_mod_own_heading),
             ("admission-everywhere/single-mod-aside-switch-sets-it-aside-with-its-reason", single_mod_aside),

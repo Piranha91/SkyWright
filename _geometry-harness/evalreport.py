@@ -2296,26 +2296,23 @@ def compile_plan(bundle_dir: Path, verify: dict, settings: dict, pr: dict, bundl
         f["readerDetailAside"] = aside
         if aside and f.get("readerRelevant"):
             aside_counts[aside] += 1
-    # A record group between one evaluated mod and a third mod is listed once per pair, at the first setup that has
-    # it (Gate C round 1, H2); the same pair's group on another setup goes to the evidence index (`samePair`), counted
-    # in one sentence. A clash between the evaluated mods, or with a declared patch, stays listed per setup.
+    # A record group between one evaluated mod and a mod that is neither evaluated nor a declared patch is not listed
+    # in the detail list (Gate C round 1, H2: listing each such pair once per setup, then once per pair, still broke
+    # the page limit). It goes to the evidence index (`singleMod`), counted in one sentence; the prediction lists
+    # those clashes under their own heading. Clashes between the evaluated mods, or with a patch, stay listed.
     supplied_lower = {str(x).lower() for x in supplied}
-    first_of_pair, once_count = {}, 0
-    for f in sorted((f for f in findings if f.get("kind") == "finding" and f.get("readerDetail")
-                     and f.get("readerRelevant") and f.get("family") == "records"),
-                    key=lambda f: (arm_sort_key(f.get("armId") or "", kinds), PART_ORDER.get(f.get("part"), 9))):
+    single_mod_count = 0
+    for f in findings:
+        if not (f.get("kind") == "finding" and f.get("readerDetail") and f.get("family") == "records"):
+            continue
         c = f.get("counts") or {}
-        pair = frozenset(str(x).lower() for x in (c.get("A"), c.get("B")))
+        pair = {str(x).lower() for x in (c.get("A"), c.get("B"))}
         if len(pair & target_set) != 1 or pair & supplied_lower:
             continue
-        key = (f.get("checkId"), c.get("groupKind"), pair)
-        if key not in first_of_pair:
-            first_of_pair[key] = f
-            continue
         f["readerDetail"] = False
-        f["readerDetailAside"] = "samePair"
-        f["readerDetailListedAs"] = first_of_pair[key].get("id")
-        once_count += 1
+        f["readerDetailAside"] = "singleMod"
+        if f.get("readerRelevant"):
+            single_mod_count += 1
     compared =", ".join(comparison_names) if comparison_names else "the measured load order"
     unstated_text = (f" One tested setup differs by {', '.join(unstated_difference_plugins)}, "
                      f"which is not declared as a patch; it is reported as a plugin that "
@@ -2671,10 +2668,9 @@ def compile_plan(bundle_dir: Path, verify: dict, settings: dict, pr: dict, bundl
         "parts": "; ".join(f"{fmt_n(aside_counts[k])} {pw['detailAside'][k]}"
                            for k in ("baseGame", "sameMod", "countOnly") if aside_counts.get(k))})
                                  if aside_total else None)
-    reader["detailOnceLine"] = (bind(pw["detailOnceLine"], {"count": fmt_n(once_count),
-                                                            "resultNoun": "result" if once_count == 1 else "results",
-                                                            "verb": "is" if once_count == 1 else "are"})
-                                if once_count else None)
+    reader["detailSingleModLine"] = (bind(pw["detailSingleModLine"], {
+        "count": fmt_n(single_mod_count), "resultNoun": "result" if single_mod_count == 1 else "results",
+        "verb": "is" if single_mod_count == 1 else "are"}) if single_mod_count else None)
     # the `missing` chapter names every required missing check id, one caption per status group
     missing_by_status: dict = collections.OrderedDict()
     for m in missing:
