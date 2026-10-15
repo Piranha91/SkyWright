@@ -1,10 +1,15 @@
+using System.Buffers.Binary;
 using System.Diagnostics;
 using System.Reflection;
+using System.Text;
 using System.Text.Json;
 using HarnessShared;
 using HousecarlCore;
 using HousecarlCore.Progress;
 using Mutagen.Bethesda.Plugins;
+using Mutagen.Bethesda.Plugins.Binary.Headers;
+using Mutagen.Bethesda.Plugins.Binary.Translations;
+using Mutagen.Bethesda.Plugins.Meta;
 using Mutagen.Bethesda.Plugins.Records;
 using Mutagen.Bethesda.Skyrim;
 
@@ -47,6 +52,11 @@ using Mutagen.Bethesda.Skyrim;
 //                   load would be a footprint of a game that cannot start.
 //   --json FILE     where scope.json goes. Without it the summary is printed and nothing is written.
 //   --assets N      how many model paths to list (default 50; the count is always complete).
+//
+//   unreadableRecords
+//                 a target holding a record Mutagen cannot read is not measured: the record is named here (plugin,
+//                 FormKey, signature, why, and whether the file's bytes located it or it is the record being read),
+//                 a walk failure says so in one sentence, and the scope is incomplete. Never an unhandled exception.
 //
 // EXIT CODES: 0 complete, 1 written but incomplete (walk failures named in the file and on the console), 2 refused.
 
@@ -122,6 +132,7 @@ foreach (var v in cfg.Providers) providerKind[v.Name] = v.Kind;
 // Pass 1 — each target's own footprint.
 // ------------------------------------------------------------------------------------------------------------
 var walkFailures = new List<string>();
+var unreadableRecords = new List<object>();          // records a target holds that cannot be read, each named
 var targetJson = new List<object>();
 var summaries = new List<TargetSummary>();
 var targetPlacedReports = new List<PlacedReport>();
@@ -148,6 +159,7 @@ foreach (var wanted in targetNames)
         continue;
     }
 
+    IMajorRecordGetter? current = null;   // the record being read, named when a read fails and the bytes name none
     try
     {
         var self = mod.ModKey;
@@ -160,6 +172,7 @@ foreach (var wanted in targetNames)
 
         foreach (var rec in mod.EnumerateMajorRecords())
         {
+            current = rec;
             records++;
             var (sig, cls, resolved) = SignatureOf(rec.GetType());
             if (!resolved) signatureUnresolved++;
@@ -240,6 +253,28 @@ foreach (var wanted in targetNames)
                 nexusIdNote = providerNote,
             },
         });
+    }
+    catch (Exception ex)
+    {
+        // A record Mutagen cannot read. The footprint is not measured, the record is named, and the run goes on to
+        // write an incomplete scope (exit 1), so every trigger over it reads unknown rather than the probe crashing.
+        var bad = FrameCheck.Unreadable(plugin.Path, mod.ModKey);
+        string how = "frame";
+        if (bad.Count == 0)
+        {
+            how = "in-progress";
+            bad.Add(current is null
+                ? new BadRecord(null, "?", "the read failed before the first record was reached")
+                : new BadRecord(current.FormKey.ToString(), SignatureOf(current.GetType()).Sig,
+                                "the read of this record, or of a record nested in it, failed"));
+        }
+        foreach (var b in bad)
+            unreadableRecords.Add(new { plugin = plugin.Name, formKey = b.FormKey, signature = b.Signature,
+                                        reason = b.Reason, located = how });
+        string names = string.Join(", ", bad.Take(5).Select(b => $"{b.Signature} {b.FormKey ?? "(no FormID)"}"))
+                     + (bad.Count > 5 ? $" and {bad.Count - 5} more" : "");
+        walkFailures.Add($"'{wanted}' has a record that cannot be read ({names}: {Concise(ex).TrimEnd('.')}); its footprint was "
+                       + "not measured, so no trigger reads it");
     }
     finally { (mod as IDisposable)?.Dispose(); }
 }
@@ -526,6 +561,7 @@ var scope = new
     generatedUtc = DateTime.UtcNow.ToString("o"),
     complete,
     walkFailures,
+    unreadableRecords,
     targets = targetJson,
     locationContributors,
     expansion = new
@@ -765,4 +801,109 @@ sealed class PlacedWalk
     }
 
     string Name(FormKey ws) => ws.IsNull ? "" : (_worldspaceNames.TryGetValue(ws, out var n) ? n : ws.ToString());
+}
+
+/// <summary>One record of a plugin that cannot be read: its FormKey (null when its header is not reached), signature and why.</summary>
+sealed record BadRecord(string? FormKey, string Signature, string Reason);
+
+// The records of one plugin whose bytes Mutagen's framing cannot read: a compressed body that will not inflate,
+// subrecords that do not fit the body, a record or group running past its container. It reads the file's own bytes
+// through Mutagen's frames, so it names a record whatever its type, and is run only after a read has already failed.
+static class FrameCheck
+{
+    public static List<BadRecord> Unreadable(string path, ModKey self)
+    {
+        var found = new List<BadRecord>();
+        var meta = GameConstants.SkyrimSE;
+        byte[] bytes;
+        try { bytes = File.ReadAllBytes(path); }
+        catch (Exception ex) { found.Add(new BadRecord(null, "?", "the file could not be read: " + First(ex))); return found; }
+        var all = new Noggog.ReadOnlyMemorySlice<byte>(bytes);
+        var masters = new List<ModKey>();
+        long pos;
+        try
+        {
+            var header = new MajorRecordFrame(meta, all);
+            foreach (var sub in RecordSpanExtensions.EnumerateSubrecords(header.Content, meta, 0))
+                if (sub.RecordType.Type == "MAST")
+                    masters.Add(ModKey.FromFileName(Encoding.Latin1.GetString(sub.Content.Span).TrimEnd('\0')));
+            pos = header.TotalLength;
+        }
+        catch (Exception ex) { found.Add(new BadRecord(null, "TES4", "the file header cannot be framed: " + First(ex))); return found; }
+        while (pos < bytes.Length)
+        {
+            long n = Group(meta, all, pos, bytes.Length, masters, self, found);
+            if (n <= 0) break;
+            pos += n;
+        }
+        return found;
+    }
+
+    // One group at `pos` inside [.., limit): its records checked, its subgroups walked. Returns its length, or 0 when
+    // its own header cannot be framed, in which case the bytes after it cannot be located and the walk says so.
+    static long Group(GameConstants meta, Noggog.ReadOnlyMemorySlice<byte> all, long pos, long limit, List<ModKey> masters,
+                      ModKey self, List<BadRecord> found)
+    {
+        long total, head;
+        try
+        {
+            var g = new GroupFrame(meta, all.Slice(checked((int)pos), checked((int)(limit - pos))));
+            total = g.TotalLength;
+            head = g.HeaderLength;
+            if (total < head || pos + total > limit)
+                throw new InvalidDataException($"its length {total} runs past its container's end at byte {limit}");
+        }
+        catch (Exception ex) { found.Add(new BadRecord(null, "GRUP", $"the group at byte {pos} cannot be framed: {First(ex)}")); return 0; }
+        long end = pos + total, p = pos + head;
+        while (p < end)
+        {
+            var here = all.Slice(checked((int)p), checked((int)(end - p)));
+            string sig = here.Length >= 4 ? Encoding.Latin1.GetString(here.Span.Slice(0, 4)) : "?";
+            if (sig == "GRUP")
+            {
+                long n = Group(meta, all, p, end, masters, self, found);
+                if (n <= 0) return total;            // the rest of this group cannot be located; its container still can
+                p += n;
+                continue;
+            }
+            MajorRecordFrame rec;
+            try
+            {
+                rec = new MajorRecordFrame(meta, here);
+                if (p + rec.TotalLength > end)
+                    throw new InvalidDataException($"its length {rec.TotalLength} runs past its group's end at byte {end}");
+            }
+            catch (Exception ex)
+            {
+                // The FormID sits at bytes 12..15 of a major record header; name it when the header itself is there.
+                string? id = here.Length >= 24
+                    ? FormKeyOf(BinaryPrimitives.ReadUInt32LittleEndian(here.Span.Slice(12, 4)), masters, self).ToString()
+                    : null;
+                found.Add(new BadRecord(id, sig, $"the record at byte {p} cannot be framed: {First(ex)}"));
+                return total;
+            }
+            var key = FormKeyOf(rec.FormID.Raw, masters, self);
+            try
+            {
+                var body = rec.IsCompressed ? rec.Decompress(out _).Content : rec.Content;
+                foreach (var _ in RecordSpanExtensions.EnumerateSubrecords(body, meta, 0)) { }
+            }
+            catch (Exception ex)
+            {
+                found.Add(new BadRecord(key.ToString(), rec.RecordType.Type,
+                    (rec.IsCompressed ? "its compressed body cannot be read: " : "its subrecords cannot be read: ") + First(ex)));
+            }
+            p += rec.TotalLength;
+        }
+        return total;
+    }
+
+    // A raw FormID through the file's own master list: index past the masters is the file itself.
+    static FormKey FormKeyOf(uint raw, List<ModKey> masters, ModKey self)
+    {
+        int index = (int)(raw >> 24);
+        return new FormKey(index < masters.Count ? masters[index] : self, raw & 0xFFFFFF);
+    }
+
+    static string First(Exception ex) => ex.Message.Split('\n')[0].Trim();
 }
