@@ -108,7 +108,7 @@ public sealed class EmptySpaceSearch
         return b.IsNull ? null : new Placed(s, i, b);
     }
 
-    bool Physical(FormKey b) => !C.IsMarker(b) && C.IsPhysicalType(b) && C.GeomOf(b) is { HasGeometry: true };
+    bool Physical(FormKey b) => !C.IsMarker(b) && C.IsPhysicalType(b) && C.Summary(b) is { HasGeometry: true };
 
     (TriangleSoup Soup, TriangleGrid Grid, char Src)? Surface(FormKey key, Placed p)
     {
@@ -197,7 +197,7 @@ public sealed class EmptySpaceSearch
     {
         string type = C.Index.BaseInfo.TryGetValue(pn.Base, out var bi) ? bi.Type : "?";
         if (type != "Static" && !(type == "MoveableStatic" && C.MotionOf(pn.Base) == DependentMotion.Fixed)) return false;
-        if (C.IsMarker(pn.Base) || C.GeomOf(pn.Base) is not { CanHost: true }) return false;
+        if (C.IsMarker(pn.Base) || C.Summary(pn.Base) is not { CanHost: true }) return false;
         if (MaxDim(C.WorldBox(pn.Base, pn.Snap)) < minDim) return false;
         // the fixture's own plugin's references are part of what it brought, never the room it stands in
         return n.ModKey != fixture.ModKey || _isBethesdaFile(n.ModKey.FileName);

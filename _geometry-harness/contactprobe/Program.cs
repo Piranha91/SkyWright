@@ -93,7 +93,8 @@ using HousecarlCore.Progress;
 //                   and in the arm without the mover alike. Without it, the load-time state, as every run before 2026-09-04.
 //   --radius on|off the gap the rule reads is between the shapes grown by their Havok radii; normal and depth stay the core's
 //                   (default on; rows gain AuthoringCoreGap / WinnerCoreGap); off = the core reading, byte-identical to before
-//   --cache-budget SIZE|auto  the byte budget the per-placement contact caches share (least-recently-used; e.g. 2G, 512M;
+//   --cache-budget SIZE|auto  the byte budget the per-placement contact caches share, and in the default pass the decoded meshes
+//                   too (least-recently-used; an evicted mesh is decoded again from the same bytes; e.g. 2G, 512M;
 //                   minimum 64M). auto (default) = the smaller of 20 % of the memory the runtime may use (physical, or the heap
 //                   hard limit), 40 % of (memory free before the host loop - live data) and 4 GiB (an explicit size may exceed it).
 //                   Output does not depend on it; a smaller budget rebuilds evicted grids (slower, less memory)
@@ -347,12 +348,11 @@ const string Ussep = "Unofficial Skyrim Special Edition Patch.esp";
 // Geometry — measured NIFs through the VFS; the soup per role chosen and LABELLED; OBND box as the fallback.
 // ---------------------------------------------------------------------------------------
 ContactIndex? cidx = null;
-var meshGeom = new Dictionary<string, RefGeometry?>(StringComparer.OrdinalIgnoreCase);
 // E1 (follow-ups item 1): the Tree_Anim shapes of each mesh read for contact geometry, for the dependent's wind note
 var meshWind = new Dictionary<string, WindLabel?>(StringComparer.OrdinalIgnoreCase);
 string? WindNoteOf(FormKey depBase)
 {
-    if (cidx!.GeomOf(depBase) is not { } g || !cidx.Index.BaseMesh.TryGetValue(depBase, out var rel)) return null;
+    if (cidx!.Summary(depBase) is not { } g || !cidx.Index.BaseMesh.TryGetValue(depBase, out var rel)) return null;
     var full = rel.StartsWith("meshes", StringComparison.OrdinalIgnoreCase) ? rel : Path.Combine("meshes", rel);
     return NifWind.ContactNote(meshWind.GetValueOrDefault(full), g.DepSrc == 'r');
 }
@@ -360,109 +360,119 @@ string? WindNoteOf(FormKey depBase)
 var geomLines = geomReport is null ? null : new List<string> { "mesh\thostSrc\tdepSrc\thostTris\tdepTris\trenderTris\tcollisionComplete\tphantomOnly\tbodies" };
 long meshesMeasured = 0, hostColl = 0, hostRender = 0, depColl = 0, depRender = 0, meshNoSoup = 0, obndFallback = 0, noGeometry = 0, phantomOnly = 0, incompleteCollision = 0;
 
+// The default pass keeps no decoded mesh beyond the shared contact cache budget (MeshGeometryReader.cs): ContactIndex keeps a summary
+// per base, and a mesh evicted from the budget is decoded again from the same bytes. The run's mesh counters, the wind labels and
+// --geom-report lines are written on a mesh's first decode only. The other modes memoise every base's geometry, as before.
+bool boundedGeometry = selectedModes == 0;
+byte[]? ReadMesh(string full)
+{
+    var res = assets.ResolveForPlacement(full);
+    return res.Sources.Count > 0 ? AssetResolver.ReadPlacementSource(res.Sources[0]).Bytes : null;
+}
+RefGeometry? DecodeMesh(string full, byte[] bytes, bool first)
+{
+    RefGeometry? g = null;
+    if (first) meshWind[full] = NifWind.Label(bytes);
+    if (NifGeometry.Measure(bytes, includeTriangles: true) is { Model: { } m })
+    {
+        if (first) meshesMeasured++;
+        if (first && !m.CollisionComplete) incompleteCollision++;
+        // The HOST surface: the solid bodies on the layers an actor (and a dropped item) meets — a canopy
+        // leaves, a trunk stays. The DEPENDENT solid: every solid body but NONCOLLIDABLE (an item's WEAPON
+        // or CLUTTER body is its shape). Either falls back to the render soup, labelled 'r'.
+        var hc = m.CollisionSoupFor(b => b.Solid && CollisionLayers.IsActorSolid(b.Layer));
+        var dc = m.CollisionSoupFor(b => b.Solid && b.Layer != "SKYL_NONCOLLIDABLE");
+        TriangleSoup host, dep; char hs, ds;
+        if (m.CollisionComplete && hc is { TriangleCount: > 0 }) { host = hc; hs = 'c'; if (first) hostColl++; }
+        else if (m.Soup is { TriangleCount: > 0 }) { host = m.Soup; hs = 'r'; if (first) hostRender++; }
+        else { host = TriangleSoup.Empty; hs = '-'; }
+        if (m.CollisionComplete && dc is { TriangleCount: > 0 }) { dep = dc; ds = 'c'; if (first) depColl++; }
+        else if (m.Soup is { TriangleCount: > 0 }) { dep = m.Soup; ds = 'r'; if (first) depRender++; }
+        else { dep = TriangleSoup.Empty; ds = '-'; }
+        var box = SpatialOverlap.SoupBounds(host).Union(SpatialOverlap.SoupBounds(dep));
+        var bodies = m.CollisionBodies?.Where(b => b.Solid).Select(b => (b.Layer, b.MotionSystem)).ToList() ?? new List<(string, string)>();
+        bool phantom = m.HasCollision && !m.HasSolidCollision;
+        if (first && phantom) phantomOnly++;
+        if (first && box.IsEmpty) meshNoSoup++;
+        // A host must be real collision: the engine rests nothing on a mesh without it, and the inside test
+        // needs a closed solid. A render fallback still serves as a DEPENDENT, labelled.
+        g = box.IsEmpty ? null : new RefGeometry(box, host, dep, hs, ds, HostUsable: hs == 'c', bodies, phantom);
+        if (g is not null && radiusOn)
+        {
+            // --radius on: the same soups read again with every Havok radius grown (box, convex vertices, compressed mesh),
+            // the same role choice; the rule reads its gap from these and everything else from the core above
+            var gm = NifGeometry.Measure(bytes, includeTriangles: true, collisionRadius: true).Model;
+            TriangleSoup? hsh = null, dsh = null;
+            if (gm is not null)
+            {
+                var hcs = gm.CollisionSoupFor(b => b.Solid && CollisionLayers.IsActorSolid(b.Layer));
+                var dcs = gm.CollisionSoupFor(b => b.Solid && b.Layer != "SKYL_NONCOLLIDABLE");
+                if (hs == 'c' && gm.CollisionComplete && hcs is { TriangleCount: > 0 }) hsh = hcs;
+                if (ds == 'c' && gm.CollisionComplete && dcs is { TriangleCount: > 0 }) dsh = dcs;
+            }
+            g = g with { HostShell = hsh, DepShell = dsh };
+        }
+        if (first && geomLines is not null)
+        {
+            // The winding and closure audit per solid body: triangles whose normal points toward the body's
+            // own vertex centroid (inward, for a convex body), and edges not shared by exactly two triangles
+            // (an open shell). The inside test needs closed and outward; this says how often it has them.
+            var audit = new List<string>();
+            foreach (var b in m.CollisionBodies ?? Array.Empty<CollisionBodyInfo>())
+            {
+                string tag = $"{b.Layer}/{(b.Solid ? "solid" : "phantom")}/{(b.MotionSystem == "" ? "?" : b.MotionSystem)}/{string.Join("+", b.ShapeTypes.Where(t => t.StartsWith("bhk") && t.Contains("Shape")).Select(t => t.Replace("bhk", "").Replace("Shape", "")))}/{b.IndexCount / 3}tri{(b.Unread.Count > 0 ? "/UNREAD" : "")}";
+                if (b.IndexCount >= 3 && m.CollisionSoup is { } cs)
+                {
+                    var cen = System.Numerics.Vector3.Zero; int nv = 0;
+                    var vset = new HashSet<int>();
+                    for (int k = b.IndexStart; k < b.IndexStart + b.IndexCount; k++) if (vset.Add(cs.Indices[k])) { cen += cs.Vertices[cs.Indices[k]]; nv++; }
+                    if (nv > 0) cen /= nv;
+                    int inward = 0, tris = 0;
+                    var edges = new Dictionary<(int, int), int>();
+                    for (int k = b.IndexStart; k + 2 < b.IndexStart + b.IndexCount; k += 3)
+                    {
+                        int i0 = cs.Indices[k], i1 = cs.Indices[k + 1], i2 = cs.Indices[k + 2];
+                        var p0 = cs.Vertices[i0]; var p1 = cs.Vertices[i1]; var p2 = cs.Vertices[i2];
+                        var n = System.Numerics.Vector3.Cross(p1 - p0, p2 - p0);
+                        if (n.LengthSquared() < 1e-9f) continue;
+                        tris++;
+                        if (System.Numerics.Vector3.Dot(n, (p0 + p1 + p2) / 3f - cen) < 0) inward++;
+                        foreach (var (a, bb) in new[] { (i0, i1), (i1, i2), (i2, i0) })
+                        { var e = a < bb ? (a, bb) : (bb, a); edges[e] = edges.GetValueOrDefault(e) + 1; }
+                    }
+                    int open = edges.Count(e => e.Value != 2);
+                    tag += $"/inward{inward}of{tris}/openEdges{open}of{edges.Count}";
+                }
+                audit.Add(tag);
+            }
+            geomLines.Add($"{full}\t{hs}\t{ds}\t{host.TriangleCount}\t{dep.TriangleCount}\t{m.Soup?.TriangleCount ?? 0}\t{m.CollisionComplete}\t{phantom}\t{string.Join(" ", audit)}");
+        }
+    }
+    return g;
+}
+var meshReader = new MeshGeometryReader(ReadMesh, DecodeMesh);
+var basesCounted = new HashSet<FormKey>();   // the OBND and no-geometry counters count a base once, however often it is asked for
 RefGeometry? GeomOf(FormKey baseKey)
 {
     RefGeometry? g = null;
     if (cidx!.Index.BaseMesh.TryGetValue(baseKey, out var rel))
     {
         var full = rel.StartsWith("meshes", StringComparison.OrdinalIgnoreCase) ? rel : Path.Combine("meshes", rel);
-        if (!meshGeom.TryGetValue(full, out g))
-        {
-            g = null;
-            var res = assets.ResolveForPlacement(full);
-            if (res.Sources.Count > 0)
-            {
-                var (bytes, _) = AssetResolver.ReadPlacementSource(res.Sources[0]);
-                if (bytes is not null) meshWind[full] = NifWind.Label(bytes);
-                if (bytes is not null && NifGeometry.Measure(bytes, includeTriangles: true) is { Model: { } m })
-                {
-                    meshesMeasured++;
-                    if (!m.CollisionComplete) incompleteCollision++;
-                    // The HOST surface: the solid bodies on the layers an actor (and a dropped item) meets — a canopy
-                    // leaves, a trunk stays. The DEPENDENT solid: every solid body but NONCOLLIDABLE (an item's WEAPON
-                    // or CLUTTER body is its shape). Either falls back to the render soup, labelled 'r'.
-                    var hc = m.CollisionSoupFor(b => b.Solid && CollisionLayers.IsActorSolid(b.Layer));
-                    var dc = m.CollisionSoupFor(b => b.Solid && b.Layer != "SKYL_NONCOLLIDABLE");
-                    TriangleSoup host, dep; char hs, ds;
-                    if (m.CollisionComplete && hc is { TriangleCount: > 0 }) { host = hc; hs = 'c'; hostColl++; }
-                    else if (m.Soup is { TriangleCount: > 0 }) { host = m.Soup; hs = 'r'; hostRender++; }
-                    else { host = TriangleSoup.Empty; hs = '-'; }
-                    if (m.CollisionComplete && dc is { TriangleCount: > 0 }) { dep = dc; ds = 'c'; depColl++; }
-                    else if (m.Soup is { TriangleCount: > 0 }) { dep = m.Soup; ds = 'r'; depRender++; }
-                    else { dep = TriangleSoup.Empty; ds = '-'; }
-                    var box = SpatialOverlap.SoupBounds(host).Union(SpatialOverlap.SoupBounds(dep));
-                    var bodies = m.CollisionBodies?.Where(b => b.Solid).Select(b => (b.Layer, b.MotionSystem)).ToList() ?? new List<(string, string)>();
-                    bool phantom = m.HasCollision && !m.HasSolidCollision;
-                    if (phantom) phantomOnly++;
-                    if (box.IsEmpty) meshNoSoup++;
-                    // A host must be real collision: the engine rests nothing on a mesh without it, and the inside test
-                    // needs a closed solid. A render fallback still serves as a DEPENDENT, labelled.
-                    g = box.IsEmpty ? null : new RefGeometry(box, host, dep, hs, ds, HostUsable: hs == 'c', bodies, phantom);
-                    if (g is not null && radiusOn)
-                    {
-                        // --radius on: the same soups read again with every Havok radius grown (box, convex vertices, compressed mesh),
-                        // the same role choice; the rule reads its gap from these and everything else from the core above
-                        var gm = NifGeometry.Measure(bytes, includeTriangles: true, collisionRadius: true).Model;
-                        TriangleSoup? hsh = null, dsh = null;
-                        if (gm is not null)
-                        {
-                            var hcs = gm.CollisionSoupFor(b => b.Solid && CollisionLayers.IsActorSolid(b.Layer));
-                            var dcs = gm.CollisionSoupFor(b => b.Solid && b.Layer != "SKYL_NONCOLLIDABLE");
-                            if (hs == 'c' && gm.CollisionComplete && hcs is { TriangleCount: > 0 }) hsh = hcs;
-                            if (ds == 'c' && gm.CollisionComplete && dcs is { TriangleCount: > 0 }) dsh = dcs;
-                        }
-                        g = g with { HostShell = hsh, DepShell = dsh };
-                    }
-                    if (geomLines is not null)
-                    {
-                        // The winding and closure audit per solid body: triangles whose normal points toward the body's
-                        // own vertex centroid (inward, for a convex body), and edges not shared by exactly two triangles
-                        // (an open shell). The inside test needs closed and outward; this says how often it has them.
-                        var audit = new List<string>();
-                        foreach (var b in m.CollisionBodies ?? Array.Empty<CollisionBodyInfo>())
-                        {
-                            string tag = $"{b.Layer}/{(b.Solid ? "solid" : "phantom")}/{(b.MotionSystem == "" ? "?" : b.MotionSystem)}/{string.Join("+", b.ShapeTypes.Where(t => t.StartsWith("bhk") && t.Contains("Shape")).Select(t => t.Replace("bhk", "").Replace("Shape", "")))}/{b.IndexCount / 3}tri{(b.Unread.Count > 0 ? "/UNREAD" : "")}";
-                            if (b.IndexCount >= 3 && m.CollisionSoup is { } cs)
-                            {
-                                var cen = System.Numerics.Vector3.Zero; int nv = 0;
-                                var vset = new HashSet<int>();
-                                for (int k = b.IndexStart; k < b.IndexStart + b.IndexCount; k++) if (vset.Add(cs.Indices[k])) { cen += cs.Vertices[cs.Indices[k]]; nv++; }
-                                if (nv > 0) cen /= nv;
-                                int inward = 0, tris = 0;
-                                var edges = new Dictionary<(int, int), int>();
-                                for (int k = b.IndexStart; k + 2 < b.IndexStart + b.IndexCount; k += 3)
-                                {
-                                    int i0 = cs.Indices[k], i1 = cs.Indices[k + 1], i2 = cs.Indices[k + 2];
-                                    var p0 = cs.Vertices[i0]; var p1 = cs.Vertices[i1]; var p2 = cs.Vertices[i2];
-                                    var n = System.Numerics.Vector3.Cross(p1 - p0, p2 - p0);
-                                    if (n.LengthSquared() < 1e-9f) continue;
-                                    tris++;
-                                    if (System.Numerics.Vector3.Dot(n, (p0 + p1 + p2) / 3f - cen) < 0) inward++;
-                                    foreach (var (a, bb) in new[] { (i0, i1), (i1, i2), (i2, i0) })
-                                    { var e = a < bb ? (a, bb) : (bb, a); edges[e] = edges.GetValueOrDefault(e) + 1; }
-                                }
-                                int open = edges.Count(e => e.Value != 2);
-                                tag += $"/inward{inward}of{tris}/openEdges{open}of{edges.Count}";
-                            }
-                            audit.Add(tag);
-                        }
-                        geomLines.Add($"{full}\t{hs}\t{ds}\t{host.TriangleCount}\t{dep.TriangleCount}\t{m.Soup?.TriangleCount ?? 0}\t{m.CollisionComplete}\t{phantom}\t{string.Join(" ", audit)}");
-                    }
-                }
-            }
-            meshGeom[full] = g;
-        }
+        try { g = meshReader.Get(full); }
+        catch (MeshChangedOnDiskException ex) { Console.Error.WriteLine("contactprobe: " + ex.Message); Environment.Exit(2); }
     }
     if (g is null)
     {
         var ob = cidx.Index.ObndBox(baseKey);
-        if (!ob.IsEmpty) { obndFallback++; g = new RefGeometry(ob, ContactIndex.BoxSoup(ob), ContactIndex.BoxSoup(ob), 'o', 'o', HostUsable: false, Array.Empty<(string, string)>(), false); }
-        else noGeometry++;
+        bool firstAsk = basesCounted.Add(baseKey);
+        if (!ob.IsEmpty) { if (firstAsk) obndFallback++; g = new RefGeometry(ob, ContactIndex.BoxSoup(ob), ContactIndex.BoxSoup(ob), 'o', 'o', HostUsable: false, Array.Empty<(string, string)>(), false); }
+        else if (firstAsk) noGeometry++;
     }
     return g;
 }
-try { cidx = new ContactIndex(GeomOf, cacheBudget) { Epsilon = eps, Reach = reach, NearBand = 2f * eps, BoxBand = 2f * eps + 2f, ReadRadius = radiusOn }; }
+try { cidx = new ContactIndex(GeomOf, cacheBudget, memoiseGeometry: !boundedGeometry) { Epsilon = eps, Reach = reach, NearBand = 2f * eps, BoxBand = 2f * eps + 2f, ReadRadius = radiusOn }; }
 catch (CacheBudget.AutomaticBudgetUnavailableException ex) { Console.Error.WriteLine(ex.Message + "; " + ex.Selection.Describe()); return 2; }
+meshReader.Attach(cidx.Budget);
 var idx = cidx.Index;
 // --bos on (default): the Base Object Swapper reader replaces each reference's record base with the base the
 // game loads, and a moving override becomes a placement step under a pseudo-plugin after the last real one
@@ -853,6 +863,7 @@ Console.WriteLine($"   pairs within the box band: {rows.Count + skips.BoxesApart
                 + $"{skips.DepAbsentInArm:N0} dependents disabled at runtime in the arm without the mover (R1), {skips.DepEnableUnresolved:N0} with an unresolved chain  ({sw.Elapsed.TotalSeconds:0.0}s)");
 Console.WriteLine($"   {GeometryLine()}");
 Console.WriteLine($"   {cidx.Budget.Report()}");
+if (boundedGeometry) Console.WriteLine($"   decoded meshes: {meshReader.Decodes - meshReader.Redecodes:N0} first decodes, {meshReader.Redecodes:N0} decoded again after eviction from the budget");
 if (cidx.LargestHostGrid is { } lg)
     Console.WriteLine($"   largest host grid: {lg.Key.Key} snap {lg.Key.Snap}, base {lg.Key.Base} {BaseLabel(lg.Key.Base)}, {lg.Triangles:N0} triangles, {lg.Bytes / 1e9:0.000} GB");
 if (Environment.GetEnvironmentVariable("HC_CACHEACCURACY") is not null)
@@ -866,7 +877,7 @@ if (Environment.GetEnvironmentVariable("HC_CACHEACCURACY") is not null)
     GC.KeepAlive(rows);
 }
 StaleBaseReport();
-var mstt = idx.BaseInfo.Where(kv => kv.Value.Type == "MoveableStatic").Select(kv => cidx.GeomOf(kv.Key)).Where(g => g is not null).ToList();
+var mstt = idx.BaseInfo.Where(kv => kv.Value.Type == "MoveableStatic").Select(kv => cidx.Summary(kv.Key)).Where(g => g is not null).ToList();
 var motions = mstt.SelectMany(g => g!.SolidBodies.Select(b => b.MotionSystem == "" ? "(unread)" : b.MotionSystem)).GroupBy(x => x).OrderByDescending(g => g.Count()).ToList();
 Console.WriteLine($"   MoveableStatic bases with geometry: {mstt.Count:N0}; their solid bodies' motion systems: " + string.Join(", ", motions.Select(g => $"{g.Key} {g.Count():N0}"))
                 + $"; classified movable {idx.BaseInfo.Count(kv => kv.Value.Type == "MoveableStatic" && cidx.MotionOf(kv.Key) == DependentMotion.Movable):N0}, fixed {idx.BaseInfo.Count(kv => kv.Value.Type == "MoveableStatic" && cidx.MotionOf(kv.Key) == DependentMotion.Fixed):N0}");

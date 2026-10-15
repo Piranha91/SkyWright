@@ -38,7 +38,7 @@ static class ContactCredit
         if (!en.Resolved) return (PhysicalState.Unmeasured, "the dependent's enable chain cannot be followed in this order");
         if (!en.Enabled) return (PhysicalState.Gone, "the dependent is disabled at runtime under this order — nothing floats");
         var b = cidx.WinnerBase(dep);
-        if (cidx.GeomOf(b) is not { CanDepend: true }) return (PhysicalState.Unmeasured, "the dependent has no solid to test under this order");
+        if (cidx.Summary(b) is not { CanDepend: true }) return (PhysicalState.Unmeasured, "the dependent has no solid to test under this order");
         var box = cidx.WorldBox(b, win);
         if (box.IsEmpty) return (PhysicalState.Unmeasured, "the dependent has no geometry under this order");
         var c = cidx.BestContact(dep, snaps.Count - 1, b, win, box, winHash, cidx.WinnerPlacement, (k, _) => cidx.WinnerBase(k), out _);
