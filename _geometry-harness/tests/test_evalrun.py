@@ -2630,6 +2630,91 @@ sys.exit(0 if complete else 1)
 '''
 
 
+def scope_exe_20(tmp: Path) -> tuple[Path, str]:
+    """The scopeprobe case 20 runs: HOUSECARL_EVALRUN_TEST_HARNESS's build as given, or a build of this checkout's
+    scopeprobe into an empty folder under `tmp` (a failed build cannot leave an older binary to be tested)."""
+    name = "scopeprobe.exe" if os.name == "nt" else "scopeprobe"
+    explicit = os.environ.get("HOUSECARL_EVALRUN_TEST_HARNESS")
+    if explicit:
+        return Path(explicit) / "scopeprobe" / "bin" / "Release" / "net9.0" / name, f"explicit harness {explicit}"
+    csproj = HARNESS / "scopeprobe" / "scopeprobe.csproj"
+    build = Path(tmp) / "scopeprobe-build"
+    out = build / "out"
+    cmd = ["dotnet", "build", str(csproj), "-c", "Release", "--nologo", "--disable-build-servers",
+           "--artifacts-path", str(build / "artifacts"), "-o", str(out)]
+    try:
+        r = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=600)
+        why = None if r.returncode == 0 else f"dotnet exit {r.returncode}"
+    except FileNotFoundError:
+        why = "dotnet not found"
+    if why is None and not (out / name).exists():
+        why = f"dotnet exit 0 but no {name} in {out}"
+    return out / name, (f"built from {csproj}" if why is None else f"NOT BUILT ({why})")
+
+
+def scope_contract_20(tmp: Path, case: str) -> None:
+    """The part of scopeprobe's contract the controller reads, held to the real probe on scopeprobe's own fixture
+    (--self-test with PD_FIXTURE_KEEP writes MovedRefFixture): a complete scope exits 0; a named target the
+    resolved configuration lacks is a walk failure starting with evalrun's Validator.SCOPE_ABSENT_TARGET for that
+    name, and exits 1; a refused configuration exits 2 with REFUSED on stderr and no scope.json."""
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("evalrun_case20", EVALRUN)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    absent_prefix = mod.Validator.SCOPE_ABSENT_TARGET
+    exe, source = scope_exe_20(tmp)
+    print(f"  scopeprobe for the contract: {exe} ({source})")
+    if not exe.exists():
+        check(False, f"{case}: scopeprobe contract: the real scopeprobe is available ({source})")
+        return
+    root = Path(tmp) / "scope-contract-20"
+    keep = root / "fixture"
+    env = dict(os.environ, PD_FIXTURE_KEEP=str(keep), PYTHONIOENCODING="utf-8")
+    st = subprocess.run([str(exe), "--self-test"], capture_output=True, text=True, encoding="utf-8",
+                        errors="replace", env=env, timeout=300)
+    mr = keep / "mr"
+    names = ["MrMaster.esm", "MrA.esp", "MrB.esp", "MrX.esp", "MrL.esp"]
+    if not all((mr / n).exists() for n in names):
+        check(False, f"{case}: scopeprobe contract: the fixture is written (--self-test exit {st.returncode})")
+        return
+    inst, game = root / "instance", root / "game"
+    prof = inst / "profiles" / "P"
+    prof.mkdir(parents=True)
+    (inst / "overwrite").mkdir()
+    (game / "Data").mkdir(parents=True)
+    for n in names:
+        (inst / "mods" / Path(n).stem).mkdir(parents=True)
+        shutil.copyfile(mr / n, inst / "mods" / Path(n).stem / n)
+    (prof / "plugins.txt").write_text("".join("*" + n + "\n" for n in names), encoding="utf-8")
+    (prof / "loadorder.txt").write_text("".join(n + "\n" for n in names), encoding="utf-8")
+    (prof / "modlist.txt").write_text("".join("+" + Path(n).stem + "\n" for n in reversed(names)), encoding="utf-8")
+    base = [str(exe), "--instance", str(inst), "--game", str(game), "--profile", "P"]
+
+    def scope(args, out):
+        r = subprocess.run(base + args + ["--json", str(out)], capture_output=True, text=True, encoding="utf-8",
+                           errors="replace", timeout=300)
+        return r, (load(out) if out.exists() else None)
+
+    r, doc = scope(["--target", "MrA.esp"], root / "complete.json")
+    expect(r.returncode, 0, f"{case}: scopeprobe contract: every named target measured exits 0 (complete)", "D4")
+    check(isinstance(doc, dict) and doc.get("complete") is True and not doc.get("walkFailures"),
+          f"{case}: scopeprobe contract: the complete scope says complete with no walk failure")
+
+    r, doc = scope(["--target", "MrA.esp", "--target", "FixtureAbsent.esp"], root / "absent.json")
+    expect(r.returncode, 1, f"{case}: scopeprobe contract: an absent named target exits 1 (incomplete)", "D4")
+    fails = [str(f) for f in ((doc or {}).get("walkFailures") or [])]
+    want = absent_prefix.format(name="FixtureAbsent.esp")
+    check(len(fails) == 1 and fails[0].startswith(want),
+          f"{case}: scopeprobe contract: the absent target's walk failure starts with the controller's "
+          f"SCOPE_ABSENT_TARGET ({want!r}; got {fails[:1]!r})")
+
+    out = root / "refused.json"
+    r, doc = scope(["--order", str(root / "no-such-order.json"), "--enable", "MrA.esp", "--target", "MrA.esp"], out)
+    expect(r.returncode, 2, f"{case}: scopeprobe contract: a refused configuration exits 2", "D4")
+    check(r.stderr.startswith("REFUSED: ") and not out.exists(),
+          f"{case}: scopeprobe contract: a refused configuration says REFUSED on stderr and writes no scope.json")
+
+
 def case_20(tmp):
     """Defect iii: loadability.masters-and-order on an add/remove arm. A target the arm's own frozen request
     does not load is a legal omission - the order's loadability is measured and accepted, the omitted
@@ -2694,12 +2779,9 @@ def case_20(tmp):
     fake = d / "scopeprobe_fake.py"
     fake.write_text(SCOPE_FAKE_20, encoding="utf-8")
 
-    # The wording the controller relies on is scopeprobe's own; if the probe rewords it this goes RED here.
-    prog = (HARNESS / "scopeprobe" / "Program.cs").read_text(encoding="utf-8")
-    check("$\"'{wanted}' is not in the resolved configuration (" in prog,
-          f"{case}: scopeprobe/Program.cs still words an absent target as the controller reads it")
-    check("return complete ? 0 : 1;" in prog and "return 2;" in prog,
-          f"{case}: scopeprobe/Program.cs exit contract is still 0 complete / 1 incomplete / 2 refused")
+    # The wording and the exit contract the controller relies on are scopeprobe's own, checked against the REAL
+    # scopeprobe's behaviour (scope_contract_20), wherever in its sources they live: RED if either drifts.
+    scope_contract_20(tmp, case)
 
     run = tmp / case
     reg = "fixture-check-registry-derived.json"
