@@ -21,6 +21,9 @@
 //   --no-reverse-links  do not read installed plugins' form links (the noted reverseFormLinks becomes null; faster).
 //   --stop-file PATH    batch only, repeatable: before each newcomer, if any PATH exists, stop there (exit 3); a rerun
 //                       resumes.
+//   --rule v1|v2|both   which selection rule (default v2). v1 is the 4.26 part-1 rule, its output unchanged (schema 1);
+//                       v2 adds form links and a ranking score (schema 2, _shared/NewcomerSelectionV2.cs). both writes
+//                       <id>.v1.json and <id>.v2.json (single run: selection.v1.json, selection.v2.json) from one index.
 //
 // Exit codes: 0 selection written (batch: every line has a result), 2 refused, 3 stopped by --stop-file, 1 crashed. Read-only on the instance.
 
@@ -41,6 +44,7 @@ var stopFiles = new List<string>();
 string outDir = Path.Combine(Directory.GetCurrentDirectory(), "selectprobe-out");
 var newcomer = new List<string>();
 bool reverseLinks = true;
+string rule = "v2";
 for (int i = 0; i < args.Length; i++)
 {
     if (args[i] == "--newcomer" && i + 1 < args.Length) newcomer.Add(args[++i]);
@@ -52,8 +56,10 @@ for (int i = 0; i < args.Length; i++)
     else if (args[i] == "--out" && i + 1 < args.Length) outDir = args[++i];
     else if (args[i] == "--no-reverse-links") reverseLinks = false;
     else if (args[i] == "--stop-file" && i + 1 < args.Length) stopFiles.Add(args[++i]);
+    else if (args[i] == "--rule" && i + 1 < args.Length) rule = args[++i];
     else { Console.Error.WriteLine($"unknown option '{args[i]}'. See the header of selectprobe/Program.cs for the flag list."); return 2; }
 }
+if (rule is not ("v1" or "v2" or "both")) { Console.Error.WriteLine($"--rule takes v1, v2 or both, not '{rule}'."); return 2; }
 if ((newcomer.Count == 0) == (batchFile is null))
 { Console.Error.WriteLine("Name the newcomer with --newcomer, or many with --batch FILE — exactly one of the two."); return 2; }
 
@@ -63,7 +69,7 @@ profile = HarnessTarget.Require(profile, "MO2 profile name", "profile", "--profi
 
 return Probe.Run(instance, profile, game, orderFile, outDir, reverseLinks,
                  batchFile is null ? new List<(string, List<string>)> { ("selection", newcomer) } : Probe.ReadBatch(batchFile),
-                 batchFile is not null, __run, stopFiles: stopFiles);
+                 batchFile is not null, __run, stopFiles: stopFiles, rule: rule);
 
 static class Probe
 {
@@ -82,7 +88,8 @@ static class Probe
     }
 
     public static int Run(string instance, string profile, string game, string? orderFile, string outDir, bool reverseLinks,
-                          List<(string Id, List<string> Paths)> jobs, bool batch, Run? run, TextWriter? log = null, IReadOnlyList<string>? stopFiles = null)
+                          List<(string Id, List<string> Paths)> jobs, bool batch, Run? run, TextWriter? log = null, IReadOnlyList<string>? stopFiles = null,
+                          string rule = "v1")
     {
         log ??= Console.Out;
         var wall = Stopwatch.StartNew();
@@ -100,7 +107,8 @@ static class Probe
         var sel = new Selector(cfg, modsDir, dataDir, overwriteDir, reverseLinks);
 
         // resume: a line whose result exists is done
-        var todo = jobs.Where(j => !batch || !File.Exists(Path.Combine(outDir, Safe(j.Id) + ".json"))).ToList();
+        var suffixes = rule == "both" ? new[] { ".v1", ".v2" } : new[] { "" };
+        var todo = jobs.Where(j => !batch || !suffixes.All(x => File.Exists(Path.Combine(outDir, Safe(j.Id) + x + ".json")))).ToList();
         if (batch && todo.Count < jobs.Count) log.WriteLine($"resume: {jobs.Count - todo.Count} of {jobs.Count} already have a result and are skipped");
 
         // the newcomers first, so the asset index knows every path it is asked about
@@ -136,7 +144,7 @@ static class Probe
                 break;
             }
             var t = Stopwatch.StartNew();
-            object result;
+            var results = new List<(string Suffix, object Result)>();
             int candidates = -1;
             string? refusal = null;
             try
@@ -145,32 +153,45 @@ static class Probe
                 sel.LoadRecords(s);
                 prepTimes[s.Id] += tr.Elapsed.TotalSeconds;
                 if (s.Refused is not null) throw new RefusalException(s.Refused);
-                var r = sel.Select(s);
-                candidates = r.Candidates.Count;
-                result = r with
+                Dictionary<string, object?> CostOf(double sel) => new()
                 {
-                    Cost = new Dictionary<string, object?>
-                    {
-                        ["newcomerReadSeconds"] = Math.Round(prepTimes[s.Id], 3),
-                        ["selectSeconds"] = Math.Round(t.Elapsed.TotalSeconds, 3),
-                        ["sharedResolveSeconds"] = Math.Round(resolveSeconds, 3),
-                        ["sharedIndexSeconds"] = Math.Round(indexSeconds, 3),
-                        ["sharedIndexNewcomers"] = specs.Count,
-                    },
+                    ["newcomerReadSeconds"] = Math.Round(prepTimes[s.Id], 3),
+                    ["selectSeconds"] = Math.Round(sel, 3),
+                    ["sharedResolveSeconds"] = Math.Round(resolveSeconds, 3),
+                    ["sharedIndexSeconds"] = Math.Round(indexSeconds, 3),
+                    ["sharedIndexNewcomers"] = specs.Count,
                 };
+                if (rule is "v1" or "both")
+                {
+                    var t1 = Stopwatch.StartNew();
+                    var r = sel.Select(s);
+                    candidates = r.Candidates.Count;
+                    results.Add((rule == "both" ? ".v1" : "", r with { Cost = CostOf(rule == "both" ? t1.Elapsed.TotalSeconds : t.Elapsed.TotalSeconds) }));
+                }
+                if (rule is "v2" or "both")
+                {
+                    var t2 = Stopwatch.StartNew();
+                    var r2 = sel.SelectV2(s);
+                    candidates = r2.Candidates.Count;
+                    results.Add((rule == "both" ? ".v2" : "", r2 with { Cost = CostOf(rule == "both" ? t2.Elapsed.TotalSeconds : t.Elapsed.TotalSeconds) }));
+                }
             }
-            catch (RefusalException ex) { refused++; refusal = ex.Message; result = new { tool = "selectprobe", refused = ex.Message, newcomer = s.Id }; }
+            catch (RefusalException ex) { refused++; refusal = ex.Message; results.Clear(); foreach (var x in suffixes) results.Add((x, new { tool = "selectprobe", refused = ex.Message, newcomer = s.Id })); }
             catch (Exception ex) when (batch)
             {
                 // one newcomer's failure is that newcomer's result, never the end of the batch: written, counted apart
                 crashed++; refusal = $"CRASHED — {ex.GetType().Name}: {ex.Message}";
-                result = new { tool = "selectprobe", crashed = $"{ex.GetType().Name}: {ex.Message}", newcomer = s.Id };
+                results.Clear();
+                foreach (var x in suffixes) results.Add((x, new { tool = "selectprobe", crashed = $"{ex.GetType().Name}: {ex.Message}", newcomer = s.Id }));
             }
             finally { sel.Release(s); }
-            var file = Path.Combine(outDir, (batch ? Safe(s.Id) : "selection") + ".json");
-            var tmp = file + ".tmp";
-            File.WriteAllText(tmp, JsonSerializer.Serialize(result, SelectionRule.Json));
-            File.Move(tmp, file, overwrite: true);
+            foreach (var (suffix, result) in results)
+            {
+                var file = Path.Combine(outDir, (batch ? Safe(s.Id) : "selection") + suffix + ".json");
+                var tmp = file + ".tmp";
+                File.WriteAllText(tmp, JsonSerializer.Serialize(result, SelectionRule.Json));
+                File.Move(tmp, file, overwrite: true);
+            }
             done++;
             run?.Advance();
             log.WriteLine(candidates >= 0 ? $"   {s.Id}: {candidates} candidate(s) — {t.Elapsed.TotalSeconds:0.00}s"
@@ -183,7 +204,7 @@ static class Probe
             ["source"] = cfg.Source, ["plugins"] = cfg.OrderedPaths.Count, ["newcomers"] = jobs.Count, ["selectedThisRun"] = done,
             ["refused"] = refused, ["crashed"] = crashed, ["stopped"] = stopped, ["wallSeconds"] = Math.Round(wall.Elapsed.TotalSeconds, 2), ["resolveSeconds"] = Math.Round(resolveSeconds, 2),
             ["footprintSeconds"] = Math.Round(sel.FootprintSeconds, 2), ["assetIndexSeconds"] = Math.Round(sel.AssetSeconds, 2),
-            ["footprintsRead"] = sel.FootprintsRead, ["wantedAssetPaths"] = wanted.Count, ["reverseLinks"] = reverseLinks,
+            ["footprintsRead"] = sel.FootprintsRead, ["wantedAssetPaths"] = wanted.Count, ["reverseLinks"] = reverseLinks, ["rule"] = rule,
             ["bytesRead"] = io0 is null ? null : Cost.ReadBytes() - io0,
             ["peakWorkingSetBytes"] = mem.PeakWorkingSet, ["peakPrivateBytes"] = mem.PeakPrivate,
         };

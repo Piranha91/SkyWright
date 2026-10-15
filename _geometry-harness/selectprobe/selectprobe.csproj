@@ -15,5 +15,6 @@
     <Compile Include="..\_shared\SyntheticOrder.cs" Link="SyntheticOrder.cs" />
     <Compile Include="..\_shared\HarnessOrderCli.cs" Link="HarnessOrderCli.cs" />
     <Compile Include="..\_shared\NewcomerSelection.cs" Link="NewcomerSelection.cs" />
+    <Compile Include="..\_shared\NewcomerSelectionV2.cs" Link="NewcomerSelectionV2.cs" />
   </ItemGroup>
 </Project>
