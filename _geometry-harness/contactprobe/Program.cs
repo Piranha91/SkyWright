@@ -465,10 +465,12 @@ RefGeometry? DecodeMesh(string full, byte[] bytes, bool first)
     }
     return g;
 }
-// HC_MEMSTAGES: a decode that allocates over 256 MB is named, with its bytes and triangles (diagnostic only).
+// HC_MEMSTAGES: a mesh file over 4 MB is named before its decode, and a decode that allocates over 256 MB after it (diagnostic only).
 RefGeometry? DecodeMeshTraced(string full, byte[] bytes, bool first)
 {
     if (!MemStages.On) return DecodeMesh(full, bytes, first);
+    if (bytes.Length > 4 << 20 || Environment.GetEnvironmentVariable("HC_MEMSTAGES") == "every-decode")
+        Console.WriteLine($"   [memstages] decoding {full}: {bytes.Length:N0} file bytes (first {first}), private {System.Diagnostics.Process.GetCurrentProcess().PrivateMemorySize64 / 1e9:0.000} GB");
     long a0 = GC.GetAllocatedBytesForCurrentThread(); var t0 = sw.Elapsed.TotalSeconds;
     var g = DecodeMesh(full, bytes, first);
     long a = GC.GetAllocatedBytesForCurrentThread() - a0;
