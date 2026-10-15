@@ -1357,13 +1357,14 @@ __run.ReviseTotal(sweep.PairsChecked, "the bounds sweep established the exact nu
 // A published, ACTIVE patch mastering both sides is the community saying "these two are known to
 // meet" — the pair is a LABELLED conflict, and its residual overlaps are what the patch did not
 // reconcile. A pair with hits and NO reconciler anywhere in the order is the real shortlist.
+// A patch is a plugin of the order: the BOS pseudo-plugin after them (--bos on) masters every plugin and patches nothing.
 var patchMemo = new Dictionary<(int, int), bool>();
 bool Reconciled(int a, int b)
 {
     var k = a <= b ? (a, b) : (b, a);
     if (patchMemo.TryGetValue(k, out var hit)) return hit;
     bool found = false;
-    for (int p = 0; p < masterIdx.Length && !found; p++)
+    for (int p = 0; p < paths.Count && !found; p++)
         if (p != a && p != b && masterIdx[p].Contains(a) && masterIdx[p].Contains(b)) found = true;
     return patchMemo[k] = found;
 }
