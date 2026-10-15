@@ -318,10 +318,10 @@ def case_31_a_worldspace_large_references_list_is_not_compared():
     sc = RR.load_scope()
     named = (json.loads(SCOPE_FILE.read_text(encoding="utf-8")).get("generatedBookkeeping") or {}).get("Worldspace")
     assert named and "LargeReferences" in named, f"the field scope does not name Worldspace.LargeReferences: {named}"
-    got = sc.classify("Worldspace", "LargeReferences[0].Position")
+    got = sc.classify("Worldspace", "LargeReferences[0].GridPosition")
     assert got == "bookkeeping", got
-    w = {"FormKey": "00003C:Skyrim.esm", "LargeReferences": "[list: 1 item(s)]", "LargeReferences[0].Position": "1,1"}
-    batches = three("00003C:Skyrim.esm", w, dict(w, **{"LargeReferences[0].Position": "2,2"}),
+    w = {"FormKey": "00003C:Skyrim.esm", "LargeReferences": "[list: 1 item(s)]", "LargeReferences[0].GridPosition": "1,1"}
+    batches = three("00003C:Skyrim.esm", w, dict(w, **{"LargeReferences[0].GridPosition": "2,2"}),
                     dict(w, **{"LargeReferences": "[list: 0 item(s)]"}), rtype="Worldspace")
     with tempfile.TemporaryDirectory() as td:
         emit, _ = rows_of(batches, Path(td))
