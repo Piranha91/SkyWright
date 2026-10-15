@@ -2549,6 +2549,21 @@ Console.WriteLine("\nPROOF — placement contact (_shared/DetectorModel.cs + _sh
     Check("ct-synth R1: Table36 followed a switch disabled from birth -> no host, no row for Bowl36", Host(36) is null && Row(36) is null, R(36));
     Check("ct-synth R2: the flagged sit-chair on Table35 is not a dependent (no row); the name-only stand on Table37 is one -> STRANDED",
           Row(35) is null && Row(37) is { Verdict: ContactVerdict.Stranded }, $"35: {R(35)} | 37: {R(37)}");
+    // PD-C3: contactprobe's --base predicate (ContactCredit.Predicate, compiled in from contactprobe/) re-measured over this
+    // order's winner arm, against answers worked out from the table above.
+    {
+        string Lbl(FormKey k) => k.ToString();
+        var pBowl1 = ContactCredit.Predicate(cidx, winHash, D(1), 4f, Lbl);
+        var pBowl5 = ContactCredit.Predicate(cidx, winHash, D(5), 4f, Lbl);
+        var pBowl6 = ContactCredit.Predicate(cidx, winHash, D(6), 4f, Lbl);
+        var pBowl31 = ContactCredit.Predicate(cidx, winHash, D(31), 4f, Lbl);
+        var pNone = ContactCredit.Predicate(cidx, winHash, D(0xFF), 4f, Lbl);
+        Check("PD-C3 Bowl1 left floating by Table1's move: Holds", pBowl1.State == PhysicalState.Holds, pBowl1.Detail);
+        Check("PD-C3 Bowl5 re-supported: it touches something, Gone", pBowl5.State == PhysicalState.Gone, pBowl5.Detail);
+        Check("PD-C3 Bowl6 deleted by A: nothing floats, Gone", pBowl6.State == PhysicalState.Gone, pBowl6.Detail);
+        Check("PD-C3 Bowl31 disabled at runtime through Switch31: nothing floats, Gone", pBowl31.State == PhysicalState.Gone, pBowl31.Detail);
+        Check("PD-C3 a dependent this order never places: Unmeasured", pNone.State == PhysicalState.Unmeasured, pNone.Detail);
+    }
     Check("ct-synth R3: Table60 moved from under Bowl60, which also rests on a 5,200 u shell -> RE-SUPPORTED by the shell (over the moved-host cap), and the row says how big it is",
           Row(60) is { Verdict: ContactVerdict.ReSupported } r60 && r60.Winner!.Against == H(61) && r60.Winner.AgainstMaxDim > cidx.MaxHostDim && !r60.Facts.WinnerContactIsHost, R(60));
     Check("ct-synth: the winner contact carries the least RAW surface distance in the population and to what — 0 u to the shell under Bowl60, 5 u to the jar beside Case40 (reported, never judged)",

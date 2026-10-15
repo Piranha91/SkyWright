@@ -140,6 +140,8 @@ See contactprobe/Program.cs usage documentation for those modes. Help performs n
     return 0;
 }
 using var __run = RunLog.BeginProcess("contactprobe", args);
+// Known answers for the emit's class and the physical predicate (ContactSelfTest.cs, over ContactCredit.cs).
+if (args.Length >= 1 && args[0] == "--self-test") return ContactSelfTest.Run();
 
 string Instance = HarnessTarget.Instance;
 string GamePath = HarnessTarget.Game;
@@ -1038,35 +1040,10 @@ foreach (var e in new[] { eps / 2, eps, eps * 2 })
     Console.WriteLine($"   ε {e,4:0.#}u  relationships {nRel,8:N0}   class {nCls,7:N0}   Sunk {nSunk,6:N0}   ReSupported {nRe,7:N0}{(e > eps ? "   (rows first in contact beyond the near band are not here — a re-run with --eps would find them)" : "")}");
 }
 
-// THE PHYSICAL PREDICATE of a CONTACT row (2026-09-03; handoff 2026-09-12): the dependent still touches nothing within ε
-// under the arm being read — the class's own winner-arm test with the provenance half ("the mover's side did not re-place
-// it") taken off. A sham on the mover's side that nudges the dependent 1 u reads MovedTogether and leaves the class; the
-// dependent still floats. A dependent deleted or disabled at runtime under the arm is Gone (nothing floats); one whose
-// geometry or enable chain cannot be read is Unmeasured.
+// THE PHYSICAL PREDICATE of a CONTACT row: ContactCredit.Physical and ContactCredit.Predicate (ContactCredit.cs).
 (PhysicalState State, string Detail) ContactPhysical(bool measured, float dist, float pen, string against)
-{
-    if (!measured) return (PhysicalState.Unmeasured, "the winner arm was not measured");
-    if (pen > eps) return (PhysicalState.Gone, $"sunk {pen:0.#}u into {against}");
-    if (dist <= eps) return (PhysicalState.Gone, $"touches {against} at {dist:0.#}u");
-    return (PhysicalState.Holds, $"touches nothing within {eps:0.#}u (nearest {dist:0.#}u)");
-}
-(PhysicalState State, string Detail) ContactPredicate(FormKey dep)
-{
-    var snaps = idx.History.Of(dep);
-    if (snaps is null || snaps.Count == 0) return (PhysicalState.Unmeasured, "the dependent is not placed in this order");
-    var win = snaps[^1];
-    if (win.Deleted || idx.IsDeletedNow(dep)) return (PhysicalState.Gone, "the dependent is deleted under this order — nothing floats");
-    var en = cidx!.WinnerEnable(dep);
-    if (!en.Resolved) return (PhysicalState.Unmeasured, "the dependent's enable chain cannot be followed in this order");
-    if (!en.Enabled) return (PhysicalState.Gone, "the dependent is disabled at runtime under this order — nothing floats");
-    var b = cidx.WinnerBase(dep);
-    if (cidx.GeomOf(b) is not { CanDepend: true }) return (PhysicalState.Unmeasured, "the dependent has no solid to test under this order");
-    var box = cidx.WorldBox(b, win);
-    if (box.IsEmpty) return (PhysicalState.Unmeasured, "the dependent has no geometry under this order");
-    var c = cidx.BestContact(dep, snaps.Count - 1, b, win, box, winHash, cidx.WinnerPlacement, (k, _) => cidx.WinnerBase(k), out _);
-    if (c is null) return (PhysicalState.Holds, $"touches nothing within {cidx.BoxBand:0.#}u of its box");
-    return ContactPhysical(true, c.Contact.FacingDistance, c.Contact.EffectivePenetration, BaseLabel(cidx.WinnerBase(c.Against)));
-}
+    => ContactCredit.Physical(measured, dist, pen, eps, against);
+(PhysicalState State, string Detail) ContactPredicate(FormKey dep) => ContactCredit.Predicate(cidx!, winHash, dep, eps, BaseLabel);
 
 // --emit: the class only — Fixed Stranded + Orphaned with a mod or USSEP mover, the Bethesda floor withheld. The
 // dependent is the necessary record (a patch re-places or deletes it); moving the host back is the alternative. Every
@@ -1075,7 +1052,7 @@ foreach (var e in new[] { eps / 2, eps, eps * 2 })
 if (emitPath is not null)
 {
     var conflicts = new List<Conflict>();
-    foreach (var r in rel.Where(r => Fixed(r) && IsClass(r) && Pop(r) != DependencyPopulation.BethesdaFloor))
+    foreach (var r in rel.Where(r => ContactCredit.Emitted(r.Motion, r.Verdict, Pop(r))))
     {
         var (st, why) = ContactPhysical(r.Facts.WinnerMeasured, r.Facts.WinnerDistance, r.Facts.WinnerPenetration, r.Winner is { } w ? BaseLabel(cidx!.WinnerBase(w.Against)) : "(nothing)");
         conflicts.Add(new Conflict("CONTACT", PluginName(r.DepAuthor), PluginName(r.Host.Mover),

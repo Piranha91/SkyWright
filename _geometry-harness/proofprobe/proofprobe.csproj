@@ -44,6 +44,7 @@
     <Compile Include="..\_shared\OverlapIndex.cs" Link="OverlapIndex.cs" />
     <Compile Include="..\_shared\MotionPlacements.cs" Link="MotionPlacements.cs" />
     <Compile Include="..\_shared\ContactIndex.cs" Link="ContactIndex.cs" />
+    <Compile Include="..\contactprobe\ContactCredit.cs" Link="ContactCredit.cs" />
     <Compile Include="..\_shared\ContactAssembly.cs" Link="ContactAssembly.cs" />
     <Compile Include="..\_shared\PlacementCache.cs" Link="PlacementCache.cs" />
     <Compile Include="..\_shared\CellBoundaryIndex.cs" Link="CellBoundaryIndex.cs" />
