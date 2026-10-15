@@ -107,5 +107,62 @@ static class SwitchSelfTest
                 self.SelfCall && self.CallsOn("Self").Any(c => c.Function == "OnActivate"), string.Join(", ", self.Calls));
         t.Check("PD3-S-C8 Gate.EnableLinkChain() is not a call (today's call names; the copied-rules task owns the difference)",
                 Calls("Function F()\n    Gate.EnableLinkChain()\nEndFunction\n", "Gate") == "", Calls("Function F()\n    Gate.EnableLinkChain()\nEndFunction\n", "Gate"));
+
+        CopiedRules(t, Calls);
     });
+
+    // The copied-rules task (2026-10-15): the call rules over text (CR-T), then the order with SwCr.esp added (CR-S).
+    static void CopiedRules(ProbeSelfTest t, Func<string, string, string> calls)
+    {
+        string Fn(string body) => "Function F()\n" + body + "\nEndFunction\n";
+        t.Check("CR-T1 a whole-line comment '; Gate.Enable()' is not a call on Gate",
+                calls(Fn("    ; Gate.Enable()"), "Gate") == "", calls(Fn("    ; Gate.Enable()"), "Gate"));
+        // The Raw rule's own form; it keeps the object as written less its colons (Gate_var). The decompiler's dump prints
+        // "id:"-prefixed arguments, which this rule does not read (a finding of the copied-rules task, not changed here).
+        t.Check("CR-T2 a raw bytecode line ';   CallMethod Enable ::Gate_var' is still read (object Gate_var) after the comment rule",
+                calls(Fn("    ;   CallMethod Enable ::Gate_var ::NoneVar 0"), "Gate_var").StartsWith("F:raw bytecode"), calls(Fn("    ;   CallMethod Enable ::Gate_var ::NoneVar 0"), "Gate_var"));
+        t.Check("CR-T3 Alias_Door.TryToEnable() is a flip on Alias_Door (ReferenceAlias.TryToEnable enables the alias's reference)",
+                calls(Fn("    Alias_Door.TryToEnable()"), "Alias_Door") == "F:Alias_Door.TryToEnable(", calls(Fn("    Alias_Door.TryToEnable()"), "Alias_Door"));
+
+        var w = F.Write(Path.Combine(t.Root, "cr"));
+        var cr = F.WriteCopiedRules(Path.Combine(t.Root, "cr"));
+        var order = w.Order.Append(cr).ToList();
+        var idx = new OverlapIndex();
+        for (int p = 0; p < order.Count; p++)
+            using (var mod = SkyrimMod.CreateFromBinaryOverlay(order[p], F.Rel)) idx.Ingest(p, mod);
+        var sx = SwitchIndex.Build(idx);
+        var pluginKey = order.Select(p => Mutagen.Bethesda.Plugins.ModKey.FromFileName(Path.GetFileName(p))).ToArray();
+        var recordBindings = new Dictionary<Mutagen.Bethesda.Plugins.FormKey, List<Binding>>();
+        var questFragmentStage = new Dictionary<(Mutagen.Bethesda.Plugins.FormKey Quest, string Fragment), int>();
+        var recordEdid = new Dictionary<Mutagen.Bethesda.Plugins.FormKey, string?>();
+        var bindings = new Dictionary<Mutagen.Bethesda.Plugins.FormKey, List<Binding>>();
+        TriggerMap.Bindings(order, pluginKey, sx, System.Diagnostics.Stopwatch.StartNew(), recordBindings, questFragmentStage,
+                            new(), new(), recordEdid, new(), bindings);
+        t.Check("CR-S0 the census holds eight switches; M6-M8 are bound through SwCrQ's forced aliases",
+                sx.Switches.Count == 8 && new[] { F.M6, F.M7, F.M8 }.All(k => bindings.TryGetValue(k, out var l) && l.Any(b => b.Via == "forced-reference alias")),
+                $"{sx.Switches.Count} switches; M6 {(bindings.TryGetValue(F.M6, out var b6) ? string.Join("; ", b6.Select(b => $"{b.Script}.{b.Property}")) : "(none)")}");
+        foreach (var d in new[] { "overwrite", "data" }) Directory.CreateDirectory(Path.Combine(t.Root, "cr", d));
+        using var assets = AssetResolver.Build(Path.Combine(t.Root, "cr", "overwrite"), w.ModsDir, Path.Combine(t.Root, "cr", "data"),
+                                               new[] { F.CrKey.Name, F.RefKey.Name, F.QuestKey.Name, F.MasterKey.Name }, Array.Empty<ActiveArchive>());
+        var scripts = bindings.Values.SelectMany(l => l).Select(b => b.Script).Where(s => s.Length > 0).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+        var source = new Dictionary<string, ScriptCalls?>(StringComparer.OrdinalIgnoreCase);
+        int u = 0, df = 0, dc = 0;
+        TriggerMap.Decompile(assets.Capture(), scripts, source, new(), ref u, ref df, ref dc);
+        var jointFlips = new Dictionary<string, HashSet<Mutagen.Bethesda.Plugins.FormKey>>(StringComparer.OrdinalIgnoreCase);
+        var status = new Dictionary<Mutagen.Bethesda.Plugins.FormKey, (string Status, string Kind, List<string> By)>();
+        TriggerMap.Status(sx.Switches.Values.ToList(), bindings, source, questFragmentStage, recordEdid, jointFlips, status);
+        string S(Mutagen.Bethesda.Plugins.FormKey k) => status.TryGetValue(k, out var v) ? $"{v.Status} | {v.Kind} | {string.Join(" / ", v.By)}" : "(none)";
+        t.Check("CR-S1 M6 is Triggered by quest SwCrQ at stage 10: Alias_Door.TryToEnable()",
+                status[F.M6].Status == "Triggered" && status[F.M6].Kind == "quest stage"
+                && status[F.M6].By.SequenceEqual(new[] { "quest SwCrQ stage 10 (SwCrScript.Fragment_0: Alias_Door.TryToEnable()" }), S(F.M6));
+        t.Check("CR-S2 M8 is Triggered by quest SwCrQ at stage 10: Alias_Gate8.TryToDisableNoWait()",
+                status[F.M8].Status == "Triggered" && status[F.M8].Kind == "quest stage"
+                && status[F.M8].By.SequenceEqual(new[] { "quest SwCrQ stage 10 (SwCrScript.Fragment_0: Alias_Gate8.TryToDisableNoWait()" }), S(F.M8));
+        t.Check("CR-S3 M7 stays BoundUnread: EnableLinkChain flips M7's linked chain, not M7",
+                status[F.M7].Status == "BoundUnread" && status[F.M7].Kind == "bound, no Enable/Disable call found on the property", S(F.M7));
+        t.Check("CR-S4 the joint flips are SwQ:10 -> {M1} and SwCrQ:10 -> {M6, M8}",
+                jointFlips.Count == 2 && jointFlips.TryGetValue("SwQ:10", out var j1) && j1.SetEquals(new[] { F.M1 })
+                && jointFlips.TryGetValue("SwCrQ:10", out var j2) && j2.SetEquals(new[] { F.M6, F.M8 }),
+                string.Join(", ", jointFlips.Select(kv => $"{kv.Key} {kv.Value.Count}")));
+    }
 }
