@@ -402,6 +402,22 @@ def main(argv=None):
          f"a sentence every note shares must reach the page even when it sits after the "
          f"figures that differ: {TRAILER in (lim10[0] if lim10 else '')}")
 
+    # Many imports whose notes share no whole sentence (each names its own setup and file in the sentence that says the
+    # evidence was reused) must still yield ONE reader bullet: Group 6's sixteen such notes took most of two pages
+    # (4.24 phase 1, Gate C round 1). The clause they all share reaches the page; every note is in the index.
+    REUSED = "REUSED evidence, not freshly measured"
+    many_arms = [arm("baseline", DEPS + TARGETS, kind="baseline")] + [
+        arm(f"alt-{i}", DEPS + TARGETS + [PATCH] + ([UNRELATED] if i % 2 else [])) for i in range(1, 5)]
+    notes11 = {a["armId"]: (f"{REUSED}: captured 2026-01-0{n + 1} for pilot plan p{n} arm {a['armId']}; retained "
+                            f"envelope e{n}/result.json sha256 {n:012d}. Check-specific wording {n % 2}.")
+               for n, a in enumerate(many_arms)}
+    _k11, _v11, _t11, plan11 = run_compiler(many_arms, patches=[PATCH], import_note=notes11)
+    assert len((plan11.get("imports") or {}).get("notes") or []) == 5, "the fixture must carry five distinct notes"
+    lim11 = [x for x in (plan11.get("reader") or {}).get("otherLimits") or [] if "note" in x and "import" in x]
+    cell("many-notes-sharing-only-a-clause-appear-once",
+         len(lim11) == 1 and REUSED in lim11[0] and "evidence index" in lim11[0] and "5" in lim11[0],
+         f"{len(lim11)} reader bullet(s) for five notes sharing one clause: {[x[:140] for x in lim11]}")
+
     # ... and it must appear ONCE, not once per import, and never invented when absent.
     _k9, _v9, _t9, plan9 = run_compiler(
         [arm("baseline", DEPS + TARGETS, kind="baseline"),
