@@ -96,7 +96,7 @@ using HousecarlCore.Progress;
 //   --cache-budget SIZE|auto  the byte budget the per-placement contact caches share, and in the default pass the decoded meshes
 //                   too (least-recently-used; an evicted mesh is decoded again from the same bytes; e.g. 2G, 512M;
 //                   minimum 64M). auto (default) = the smaller of 20 % of the memory the runtime may use (physical, or the heap
-//                   hard limit), 40 % of (memory free before the host loop - live data) and 4 GiB (an explicit size may exceed it).
+//                   hard limit), 40 % of (memory free before the host loop - live data) and 1 GiB (an explicit size may exceed it).
 //                   Output does not depend on it; a smaller budget rebuilds evicted grids (slower, less memory)
 //   --bos on|off    apply the Base Object Swapper layer (*_SWAP.ini) so every ref is judged by the base the game loads
 //                   (default on; _shared/BosHook.cs); off = the record bases
