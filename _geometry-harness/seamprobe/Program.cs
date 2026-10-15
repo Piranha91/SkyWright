@@ -168,22 +168,7 @@ foreach (var g in landChangers.Take(listN)) Console.WriteLine($"   {g.Count(),6}
 // ---------------------------------------------------------------------------------------
 // Pass 2 — every edge-adjacent pair.
 // ---------------------------------------------------------------------------------------
-var pairs = new List<Pair>();
-int dupSkipped = 0;
-var dupGrid = new HashSet<(FormKey, int, int)>(idx.DuplicateGridPoints().Select(d => d.Grid));
-foreach (var a in landCells)
-{
-    if (dupGrid.Contains((a.Worldspace, a.GX, a.GY))) { dupSkipped++; continue; }
-    foreach (var (dx, dy, ea) in new[] { (1, 0, CellEdge.East), (0, 1, CellEdge.North) })
-    {
-        var b = idx.Single(a.Worldspace, a.GX + dx, a.GY + dy);
-        if (b is null) continue;
-        var m = CellBoundaryIndex.MeasurePair(a, b, ea, closure, eps);
-        if (m is null) continue;
-        bool bothBethesda = Kind(a.Land[^1].Plugin) == PluginKind.Bethesda && Kind(b.Land[^1].Plugin) == PluginKind.Bethesda;
-        pairs.Add(new Pair(m, dx == 1 ? "E" : "N", a.Land[^1].Plugin, b.Land[^1].Plugin, bothBethesda));
-    }
-}
+var (pairs, dupSkipped) = SeamFindings.MeasurePairs(idx, landCells, closure, eps, Kind);
 Console.WriteLine($"\nmeasured {pairs.Count:N0} edge-adjacent pairs ({dupSkipped:N0} cells at duplicate grid points skipped)  ({sw.Elapsed.TotalSeconds:0.0}s)");
 
 // ---------------------------------------------------------------------------------------
@@ -209,7 +194,7 @@ Console.WriteLine($"\n==== POPULATION SPLIT (rule 12, by the later winner) ===="
 foreach (var g in pairs.GroupBy(p => DetectorModel.ClassifyLandSeamPopulation(Kind(p.Later))).OrderBy(g => g.Key))
     Console.WriteLine($"   {g.Key,-14} {Dist(g)}");
 
-var cls = pairs.Where(p => !p.BothBethesda && p.Verdict == LandSeamVerdict.Seam).ToList();
+var cls = SeamFindings.Class(pairs);
 Console.WriteLine($"\n==== THE CLASS — mod-involved pairs whose shared edge mismatches by more than {eps:0.#} u: {cls.Count:N0} ====");
 foreach (var g in cls.GroupBy(p => (p.Origin, p.Sight)).OrderBy(g => g.Key))
     Console.WriteLine($"   {g.Key.Origin}/{g.Key.Sight,-6} {Dist(g)}");
@@ -264,19 +249,7 @@ if (emitPath is not null)
     if (basePath is not null)
     {
         var baseFile = ConflictIo.Read(basePath);
-        var byPair = new Dictionary<string, Pair>();
-        foreach (var p in pairs) { byPair[$"{p.A.Key}|{p.B.Key}"] = p; byPair[$"{p.B.Key}|{p.A.Key}"] = p; }
-        predicates = new List<Predicate>();
-        foreach (var c in baseFile.Conflicts)
-        {
-            string? other = c.Alternative is { Count: > 0 } alt ? alt[0].FormKey : null;
-            foreach (var rec in c.Necessary)
-            {
-                if (c.Kind != "LAND-SEAM" || other is null || !byPair.TryGetValue($"{rec.FormKey}|{other}", out var p))
-                { predicates.Add(new Predicate(c.Kind, c.A, c.B, rec.FormKey, other, PhysicalState.Unmeasured, c.Kind != "LAND-SEAM" ? "not a land-seam row" : "the pair is not measured in this order")); continue; }
-                predicates.Add(new Predicate(c.Kind, c.A, c.B, rec.FormKey, other, p.MaxDelta > eps ? PhysicalState.Holds : PhysicalState.Gone, $"the shared edge mismatches by {p.MaxDelta:0} u under this arm"));
-            }
-        }
+        predicates = SeamFindings.Predicates(baseFile.Conflicts, pairs, eps);
         Console.WriteLine($"\n   --base {Path.GetFileName(basePath)}: {predicates.Count:N0} base-row predicate(s) re-measured under this order — "
                         + string.Join(", ", predicates.GroupBy(p => p.Physical).OrderBy(g => g.Key).Select(g => $"{g.Key} {g.Count():N0}")));
     }
