@@ -47,7 +47,7 @@ static partial class MotionProof
         // Rejects a point or line test and a box-shaped body (the corner case below).
         Case(check, "m4 4004: radius decides - 1 u outside clear, 1 u inside meets, a box at the bottom corner diagonal clear", () =>
         {
-            float mid = top / 2;
+            float mid = (body.Bottom + body.Top) / 2;   // the body spans Bottom..Top above the anchor (corrected at Gate C: was top / 2, below the axis)
             bool outside = AnchorBodyBox.Meets(Vector3.Zero, body, M4Box(r + 1, -5, mid - 5, r + 20, 5, mid + 5));
             bool inside = AnchorBodyBox.Meets(Vector3.Zero, body, M4Box(r - 1, -5, mid - 5, r + 20, 5, mid + 5));
             // beside the axis at the capsule's lower end, diagonally 0.8 r out on each of x and y (distance 1.13 r): clear for a

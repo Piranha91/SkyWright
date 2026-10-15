@@ -134,6 +134,13 @@ static class BoxContactReview
                                   boxes = swept });
                 continue;
             }
+            if (surf is null && why == "unmeasurable: winning base has no model path" && BoxContactActor.Boxes(other, pose, index, boxes.Select(x => (x.Label, x.Box, x.Min, x.Max))) is { } bodyRows)
+            {
+                measured++;
+                records.Add(new { pairKey, a, b, boxOwner = owner, mesh, status = "measured", reason = (string?)null, particles = (IReadOnlyList<string>?)null,
+                                  actorBody = BoxContactActor.Note, boxes = bodyRows });
+                continue;
+            }
             if (surf is null)
             {
                 refused++;
