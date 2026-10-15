@@ -424,53 +424,32 @@ foreach (var b in broken.Take(listN)) Console.WriteLine(b);
 // no guess about which of the two is "the marker".
 // Rule 6: the aliases this check CANNOT judge, counted by reason instead of silently skipped.
 // Non-positional arms (FindMatchingRef*, Location, flags-only, the player ref) are out of scope by
-// design; the other three reasons are genuine blind spots and belong in the output.
-// (The counters accumulate only meaningfully on the first FindSplits call — the sensitivity sweep
-// below re-runs the check at other thresholds after they are printed.)
-long skipNonPositional = 0, skipMultiPlacement = 0, skipNoAuthoringView = 0, skipNoWinning = 0;
-// The emit's Coverage needs the population the split test JUDGED, not the rows it found; these two are
-// the counts the console never had to print, so they are declared here beside the skips they pair with.
-long aliasesResolved = 0, pairsJudged = 0;
-// The reach filter's own unjudgeable count, by reason — the pairs CHECK 2 used to report on a
-// metric the field test disqualified. Counted, named, never quietly dropped.
-var splits = new AliasSplits(quests, npcPlaced, statedPairs, reachFilter, reach, AliasRef, AsSeenBy, Winning, PatchExists, PluginName, NameOf, CellOf);
-var reachDropped = splits.reachDropped;
-long reachOverlap = 0;
-// "Governing" has two honest readings and the records do not settle which is right: the
-// HIGHEST-PRIORITY package that positions the actor, or the one SCHEDULED for most of the day.
-// They disagree, so the disagreement is counted rather than buried under whichever was picked.
-long reachReadingDisagrees = 0;
-
-// CHECK 2 as a function of the "together" threshold, so the sweep below can re-ask the question
+// design; the other three reasons are genuine blind spots and belong in the output. The reach
+// filter's drops are counted by reason, and where the two readings of "governing" (the
+// HIGHEST-PRIORITY package or the one SCHEDULED for most of the day) disagree, that is counted too.
+// CHECK 2 is a function of the "together" threshold, so the sweep below can re-ask the question
 // at other settings over the same indexed data. The review showed the shortlist is threshold-
 // sensitive and non-monotonic (no-patch count 7 / 4 / 8 at 300 / 600 / 1200), which no single
-// number reveals.
-List<Split> FindSplits(float nearU)
-{
-var found = splits.Find(nearU);
-skipNonPositional = splits.skipNonPositional; skipMultiPlacement = splits.skipMultiPlacement; skipNoAuthoringView = splits.skipNoAuthoringView; skipNoWinning = splits.skipNoWinning;
-aliasesResolved = splits.aliasesResolved; pairsJudged = splits.pairsJudged; reachOverlap = splits.reachOverlap; reachReadingDisagrees = splits.reachReadingDisagrees;
-return found;
-}
-
-var split = FindSplits(near);
+// number reveals. Each call returns its own counts; the console and the emit print this call's.
+var splits = new AliasSplits(quests, npcPlaced, statedPairs, reachFilter, reach, AliasRef, AsSeenBy, Winning, PatchExists, PluginName, NameOf, CellOf);
+var (split, splitCoverage) = splits.Find(near);
 
 Console.WriteLine();
 Console.WriteLine($"==== CHECK 2: a quest's own aliases came apart (were within {near:0}u, same cell) ====");
 Console.WriteLine($"   ---- aliases the check could not judge (counted, not cleared) ----");
-Console.WriteLine($"   non-positional arm (runtime-resolved, location, flags-only, player) : {skipNonPositional:N0}");
-Console.WriteLine($"   UniqueActor with several placements (no single answer)              : {skipMultiPlacement:N0}");
-Console.WriteLine($"   no authoring-view position (quest plugin + closure contributed none): {skipNoAuthoringView:N0}");
-Console.WriteLine($"   no winning placement at all                                         : {skipNoWinning:N0}");
+Console.WriteLine($"   non-positional arm (runtime-resolved, location, flags-only, player) : {splitCoverage.SkipNonPositional:N0}");
+Console.WriteLine($"   UniqueActor with several placements (no single answer)              : {splitCoverage.SkipMultiPlacement:N0}");
+Console.WriteLine($"   no authoring-view position (quest plugin + closure contributed none): {splitCoverage.SkipNoAuthoringView:N0}");
+Console.WriteLine($"   no winning placement at all                                         : {splitCoverage.SkipNoWinning:N0}");
 if (reachFilter)
 {
     Console.WriteLine($"   ---- pairs the REACH filter removed (2026-08-31; --no-reach to see them) ----");
     Console.WriteLine($"   the placement does not predict where the actor stands:");
-    foreach (var kv in reachDropped.OrderByDescending(k => k.Value))
+    foreach (var kv in splitCoverage.ReachDropped.OrderByDescending(k => k.Value))
         Console.WriteLine($"      {kv.Key,-28} : {kv.Value:N0}");
-    if (reachDropped.Count == 0) Console.WriteLine("      (none)");
-    Console.WriteLine($"   both actors bound, but their reachable areas still OVERLAP             : {reachOverlap:N0}");
-    Console.WriteLine($"   pairs where the two readings of \"governing\" DISAGREE                    : {reachReadingDisagrees:N0}"
+    if (splitCoverage.ReachDropped.Count == 0) Console.WriteLine("      (none)");
+    Console.WriteLine($"   both actors bound, but their reachable areas still OVERLAP             : {splitCoverage.ReachOverlap:N0}");
+    Console.WriteLine($"   pairs where the two readings of \"governing\" DISAGREE                    : {splitCoverage.ReachReadingDisagrees:N0}"
                     + "   <- highest-priority vs most-of-the-day; --actor <name> shows both");
 }
 else Console.WriteLine("   ---- REACH filter OFF (--no-reach): pairs below are raw placement distance ----");
@@ -611,7 +590,7 @@ if (split.Count > 0)
 // exactly one setting is an artifact of the knob and says so here instead of in a headline.
 {
     var settings = new[] { near / 2f, near, near * 2f };
-    var perSetting = settings.Select(v => FindSplits(v)
+    var perSetting = settings.Select(v => splits.Find(v).Split
             .Where(s => s.Stated && !s.Patched)
             .ToDictionary(s => (s.Quest, s.Alias1, s.Alias2), s => s)).ToArray();
 
@@ -689,34 +668,16 @@ if (emitPath is not null)
     // 2026-09-12 handoff). Without it an empty Conflicts list is indistinguishable from a run that judged nothing,
     // and a consumer has to guess which it was — the reading the evaluation controller refuses as coverage-missing.
     // Every number here is one the console already prints; nothing new is computed.
-    var coverage = new List<CoverageLine>
-    {
+    List<CoverageLine> coverage =
+    [
         new("plugins", paths.Count - unreadablePlugins.Count,
             new Dictionary<string, long> { ["UnreadablePlugin"] = unreadablePlugins.Count }),
         new("winning quests with stated alias pairs", statedPairs.Count, null, null,
             $"{statedTotal:N0} stated alias pair(s), from {scenes.Count:N0} winning scene(s) and "
           + $"{packageTargets.Count:N0} package(s) with an alias target"),
-        new("quest aliases (positional resolution)", aliasesResolved,
-            new Dictionary<string, long>
-            {
-                ["NonPositionalArm"] = skipNonPositional,
-                ["MultiPlacementUniqueActor"] = skipMultiPlacement,
-                ["NoAuthoringView"] = skipNoAuthoringView,
-                ["NoWinningPlacement"] = skipNoWinning,
-            }),
-        new("alias pairs (split test)", pairsJudged,
-            null,
-            reachFilter
-                ? new Dictionary<string, long>
-                {
-                    ["ReachFilterDropped"] = reachDropped.Values.Sum(),
-                    ["ReachAreasStillOverlap"] = reachOverlap,
-                    ["GoverningReadingsDisagree"] = reachReadingDisagrees,
-                }
-                : null,
-            reachFilter ? $"reach filter on; {split.Count:N0} pair(s) split, {split.Count(s => s.Stated):N0} of them stated"
-                        : $"--no-reach: raw placement distance; {split.Count:N0} pair(s) split, {split.Count(s => s.Stated):N0} of them stated"),
-    };
+        // The split test's two lines are the reported threshold's call alone (AliasSplits.cs), never the sweep's.
+        .. splitCoverage.Lines(reachFilter, split),
+    ];
 
     ConflictIo.Write(emitPath, new ConflictFile("driftprobe", Instance,
         DateTime.UtcNow.ToString("yyyy-MM-dd HH:mm:ssZ"), conflicts, coverage,

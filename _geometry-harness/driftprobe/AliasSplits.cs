@@ -111,19 +111,13 @@ static class AliasStated
 }
 /// <summary>CHECK 2's split test over every winning quest: each alias resolved to its authoring view and its winning
 /// placement (counted when it cannot be), each pair judged by DetectorModel.CameApart, then the reach filter, then stated
-/// and patched. The counters accumulate over every call, as Program.cs's did.</summary>
+/// and patched. Each call returns its own coverage counts; nothing carries from one threshold to the next.</summary>
 sealed class AliasSplits
 {
     readonly Dictionary<FormKey, QuestInfo> quests; readonly Dictionary<FormKey, List<FormKey>> npcPlaced;
     readonly Dictionary<FormKey, HashSet<(int, int)>> statedPairs; readonly bool reachFilter; readonly ActorReach reach;
     readonly Func<AliasInfo, FormKey?> aliasRef; readonly Func<FormKey, int, Snap?> asSeenBy; readonly Func<FormKey, Snap?> winning;
     readonly Func<int, int, bool> patchExists; readonly Func<int, string> pluginName; readonly Func<FormKey, string> nameOf, cellOf;
-
-    public long skipNonPositional = 0, skipMultiPlacement = 0, skipNoAuthoringView = 0, skipNoWinning = 0;
-    public long aliasesResolved = 0, pairsJudged = 0;
-    public readonly Dictionary<string, int> reachDropped = new();
-    public long reachOverlap = 0;
-    public long reachReadingDisagrees = 0;
 
     public AliasSplits(Dictionary<FormKey, QuestInfo> quests, Dictionary<FormKey, List<FormKey>> npcPlaced,
                        Dictionary<FormKey, HashSet<(int, int)>> statedPairs, bool reachFilter, ActorReach reach,
@@ -161,10 +155,14 @@ sealed class AliasSplits
         }
     }
 
-    /// <summary>The pairs that came apart at the "together" threshold <paramref name="nearU"/>.</summary>
-    public List<Split> Find(float nearU)
+    /// <summary>The pairs that came apart at the "together" threshold <paramref name="nearU"/>, and what this call judged
+    /// and could not.</summary>
+    public (List<Split> Split, SplitCoverage Coverage) Find(float nearU)
     {
         var split = new List<Split>();
+        long skipNonPositional = 0, skipMultiPlacement = 0, skipNoAuthoringView = 0, skipNoWinning = 0;
+        long aliasesResolved = 0, pairsJudged = 0, reachOverlap = 0, reachReadingDisagrees = 0;
+        var reachDropped = new Dictionary<string, int>();
         foreach (var q in quests.Values)
         {
             var resolved = new List<(AliasInfo A, FormKey Ref, Snap Then, Snap Now)>();
@@ -249,7 +247,8 @@ sealed class AliasSplits
                                         new[] { r1, r2 }, q.Key, moverList, moverIdxList, affectedCells));
                 }
         }
-        return split;
+        return (split, new SplitCoverage(aliasesResolved, pairsJudged, skipNonPositional, skipMultiPlacement, skipNoAuthoringView,
+                                         skipNoWinning, reachDropped, reachOverlap, reachReadingDisagrees));
     }
 
     static float Dist(Vec3 a, Vec3 b)
@@ -257,4 +256,35 @@ sealed class AliasSplits
         float dx = a.X - b.X, dy = a.Y - b.Y, dz = a.Z - b.Z;
         return MathF.Sqrt(dx * dx + dy * dy + dz * dz);
     }
+}
+
+/// <summary>What one split-test call judged and could not: the counts the console prints and the emit's two Coverage lines.</summary>
+sealed record SplitCoverage(long AliasesResolved, long PairsJudged, long SkipNonPositional, long SkipMultiPlacement,
+                            long SkipNoAuthoringView, long SkipNoWinning, IReadOnlyDictionary<string, int> ReachDropped,
+                            long ReachOverlap, long ReachReadingDisagrees)
+{
+    /// <summary>The emit's "quest aliases" and "alias pairs" lines for this call, whose splits are <paramref name="split"/>.</summary>
+    public CoverageLine[] Lines(bool reachFilter, List<Split> split) => new CoverageLine[]
+    {
+        new("quest aliases (positional resolution)", AliasesResolved,
+            new Dictionary<string, long>
+            {
+                ["NonPositionalArm"] = SkipNonPositional,
+                ["MultiPlacementUniqueActor"] = SkipMultiPlacement,
+                ["NoAuthoringView"] = SkipNoAuthoringView,
+                ["NoWinningPlacement"] = SkipNoWinning,
+            }),
+        new("alias pairs (split test)", PairsJudged,
+            null,
+            reachFilter
+                ? new Dictionary<string, long>
+                {
+                    ["ReachFilterDropped"] = ReachDropped.Values.Sum(),
+                    ["ReachAreasStillOverlap"] = ReachOverlap,
+                    ["GoverningReadingsDisagree"] = ReachReadingDisagrees,
+                }
+                : null,
+            reachFilter ? $"reach filter on; {split.Count:N0} pair(s) split, {split.Count(s => s.Stated):N0} of them stated"
+                        : $"--no-reach: raw placement distance; {split.Count:N0} pair(s) split, {split.Count(s => s.Stated):N0} of them stated"),
+    };
 }

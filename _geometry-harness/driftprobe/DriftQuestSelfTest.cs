@@ -56,36 +56,60 @@ static class DriftQuestSelfTest
         AliasSplits Splitter() => new(x.Quests, x.NpcPlaced, stated, true, reach, a => AliasStated.AliasRef(a, x.NpcPlaced),
                                       (k, p) => x.History.AsSeenBy(k, p, closure), x.History.Winning, (_, _) => false,
                                       p => x.PluginKey[p].FileName.String, k => k.ToString(), c => c.ToString());
-        var sp = Splitter();
-        var found = sp.Find(600f);
+        var (found, sp) = Splitter().Find(600f);
         string Pairs(IEnumerable<Split> s) => string.Join(" ", s.Select(v => $"{v.Alias1}+{v.Alias2}{(v.Stated ? "(stated)" : "")}[{string.Join(",", v.MovedRefs.Select(r => r.ID.ToString("X")))}]"));
         Split? Of(string a1, string a2) => found.FirstOrDefault(v => v.Alias1 == a1 && v.Alias2 == a2);
         t.Check("PD3-D-A pair A (1+2): R1 left for another cell; split, stated, the moved record R1 only",
                 Of("Alias1", "Alias2") is { Stated: true, DifferentCell: true } a && a.MovedRefs.SequenceEqual(new[] { F.R1 }), Pairs(found));
         t.Check("PD3-D-B pair B (3+4): R3 has no packages; dropped by the reach filter (NoPackages 1)",
-                Of("Alias3", "Alias4") is null && sp.reachDropped.GetValueOrDefault("NoPackages") == 1 && sp.reachDropped.Count == 1,
-                $"{Pairs(found)}; dropped {string.Join(", ", sp.reachDropped.Select(kv => $"{kv.Key} {kv.Value}"))}");
+                Of("Alias3", "Alias4") is null && sp.ReachDropped.GetValueOrDefault("NoPackages") == 1 && sp.ReachDropped.Count == 1,
+                $"{Pairs(found)}; dropped {string.Join(", ", sp.ReachDropped.Select(kv => $"{kv.Key} {kv.Value}"))}");
         t.Check("PD3-D-C pair C (5+6): 900 u apart, reach 600 + 600 still overlaps; not split, overlap 1",
-                Of("Alias5", "Alias6") is null && sp.reachOverlap == 1, $"{Pairs(found)}; overlap {sp.reachOverlap}");
+                Of("Alias5", "Alias6") is null && sp.ReachOverlap == 1, $"{Pairs(found)}; overlap {sp.ReachOverlap}");
         t.Check("PD3-D-D pair D (7+8): 900 u apart, reach 100 + 100 is disjoint; split, stated, the moved record R7 only",
                 Of("Alias7", "Alias8") is { Stated: true, DifferentCell: false } d && d.MovedRefs.SequenceEqual(new[] { F.R7 }), Pairs(found));
         t.Check("PD3-D-E pair E (1+10): split but not stated", Of("Alias1", "Alias10") is { Stated: false }, Pairs(found));
         t.Check("PD3-D-N exactly three pairs split (A, D, E)", found.Count == 3, Pairs(found));
         t.Check("PD3-D-V skips: NoAuthoringView 1 (alias 9), NonPositional 1 (alias 11), MultiPlacement 1 (alias 12), NoWinning 0; 9 aliases resolved, 36 pairs judged",
-                sp.skipNoAuthoringView == 1 && sp.skipNonPositional == 1 && sp.skipMultiPlacement == 1 && sp.skipNoWinning == 0
-                && sp.aliasesResolved == 9 && sp.pairsJudged == 36,
-                $"noView {sp.skipNoAuthoringView}, nonPos {sp.skipNonPositional}, multi {sp.skipMultiPlacement}, noWin {sp.skipNoWinning}, resolved {sp.aliasesResolved}, judged {sp.pairsJudged}");
+                sp.SkipNoAuthoringView == 1 && sp.SkipNonPositional == 1 && sp.SkipMultiPlacement == 1 && sp.SkipNoWinning == 0
+                && sp.AliasesResolved == 9 && sp.PairsJudged == 36,
+                $"noView {sp.SkipNoAuthoringView}, nonPos {sp.SkipNonPositional}, multi {sp.SkipMultiPlacement}, noWin {sp.SkipNoWinning}, resolved {sp.AliasesResolved}, judged {sp.PairsJudged}");
 
         // DC: a run asks the split test at 600 u, then the sensitivity sweep asks it again at 300, 600 and 1200 u, and the emit
         // is written after the sweep. The coverage it writes must be the 600 u call's alone, not a sum over the four calls.
         var run = Splitter();
-        run.Find(600f);
-        foreach (var v in new[] { 300f, 600f, 1200f }) run.Find(v);
+        var (mainSplit, main) = run.Find(600f);
+        var sweep = new[] { 300f, 600f, 1200f }.Select(v => run.Find(v).Coverage).ToArray();
         t.Check("DC-221 after the sweep, the coverage the emit reads is the 600 u call's: 9 aliases resolved, 36 pairs judged, skips 1/1/1/0, NoPackages 1, overlap 1",
-                run.aliasesResolved == 9 && run.pairsJudged == 36 && run.skipNoAuthoringView == 1 && run.skipNonPositional == 1
-                && run.skipMultiPlacement == 1 && run.skipNoWinning == 0 && run.reachDropped.Values.Sum() == 1 && run.reachOverlap == 1,
-                $"resolved {run.aliasesResolved}, judged {run.pairsJudged}, noView {run.skipNoAuthoringView}, nonPos {run.skipNonPositional}, "
-              + $"multi {run.skipMultiPlacement}, noWin {run.skipNoWinning}, dropped {run.reachDropped.Values.Sum()}, overlap {run.reachOverlap}");
+                main.AliasesResolved == 9 && main.PairsJudged == 36 && main.SkipNoAuthoringView == 1 && main.SkipNonPositional == 1
+                && main.SkipMultiPlacement == 1 && main.SkipNoWinning == 0 && main.ReachDropped.Values.Sum() == 1 && main.ReachOverlap == 1,
+                $"resolved {main.AliasesResolved}, judged {main.PairsJudged}, noView {main.SkipNoAuthoringView}, nonPos {main.SkipNonPositional}, "
+              + $"multi {main.SkipMultiPlacement}, noWin {main.SkipNoWinning}, dropped {main.ReachDropped.Values.Sum()}, overlap {main.ReachOverlap}");
+
+        // The two Coverage lines the emit writes for that call (SplitCoverage.Lines, which Program.cs's emit calls).
+        var lines = main.Lines(true, mainSplit);
+        string Line(CoverageLine c) => $"{c.Population}: {c.Judged}"
+            + (c.Unjudgeable is { } u ? " unjudgeable " + string.Join(",", u.Select(kv => $"{kv.Key} {kv.Value}")) : "")
+            + (c.SetAside is { } a ? " set aside " + string.Join(",", a.Select(kv => $"{kv.Key} {kv.Value}")) : "") + $" ({c.Note})";
+        t.Check("DC-222 the emit's lines: quest aliases judged 9 (NonPositional 1, MultiPlacement 1, NoAuthoringView 1, NoWinning 0); "
+              + "alias pairs judged 36 (ReachFilterDropped 1, overlap 1, readings disagree 0; 3 split, 2 stated)",
+                lines.Length == 2 && lines[0].Population == "quest aliases (positional resolution)" && lines[0].Judged == 9
+                && lines[0].Unjudgeable!["NonPositionalArm"] == 1 && lines[0].Unjudgeable!["MultiPlacementUniqueActor"] == 1
+                && lines[0].Unjudgeable!["NoAuthoringView"] == 1 && lines[0].Unjudgeable!["NoWinningPlacement"] == 0
+                && lines[1].Population == "alias pairs (split test)" && lines[1].Judged == 36 && lines[1].Unjudgeable is null
+                && lines[1].SetAside!["ReachFilterDropped"] == 1 && lines[1].SetAside!["ReachAreasStillOverlap"] == 1
+                && lines[1].SetAside!["GoverningReadingsDisagree"] == 0 && lines[1].Note == "reach filter on; 3 pair(s) split, 2 of them stated",
+                string.Join(" | ", lines.Select(Line)));
+
+        // Each sweep call counts its own population: the aliases and pairs do not depend on the threshold, and the four calls'
+        // own counts add up to what the emit printed before this fix (36 aliases, 144 pairs, 4 per skip, 5 dropped, 3 overlap).
+        var all = sweep.Prepend(main).ToArray();
+        t.Check("DC-223 every sweep call judges 9 aliases and 36 pairs; the four calls sum to the old emit's 36 / 144 / 4 / 5 / 3",
+                sweep.All(c => c.AliasesResolved == 9 && c.PairsJudged == 36 && c.SkipNonPositional == 1)
+                && all.Sum(c => c.AliasesResolved) == 36 && all.Sum(c => c.PairsJudged) == 144 && all.Sum(c => c.SkipNoAuthoringView) == 4
+                && all.Sum(c => c.ReachDropped.Values.Sum()) == 5 && all.Sum(c => c.ReachOverlap) == 3,
+                string.Join(" ; ", new[] { 600f, 300f, 600f, 1200f }.Zip(all, (v, c) =>
+                    $"{v:0}u: {c.AliasesResolved}/{c.PairsJudged}, dropped {c.ReachDropped.Values.Sum()}, overlap {c.ReachOverlap}")));
 
         // What --emit writes (AliasSplits.Emitted): the stated splits A and D, each with its moved record; E is proximity only.
         var emitted = AliasSplits.Emitted(found).ToList();
@@ -100,7 +124,7 @@ static class DriftQuestSelfTest
         var reachF = new ActorReach(xf.PackFacts, xf.History.Winning, xf.RefBase, xf.NpcPackages, xf.NpcTemplated);
         var fixedSplits = new AliasSplits(xf.Quests, xf.NpcPlaced, AliasStated.Of(xf.Scenes, xf.Quests, xf.PackageTargets), true, reachF,
                                           a => AliasStated.AliasRef(a, xf.NpcPlaced), (k, p) => xf.History.AsSeenBy(k, p, closureF), xf.History.Winning,
-                                          (_, _) => false, p => xf.PluginKey[p].FileName.String, k => k.ToString(), c => c.ToString()).Find(600f);
+                                          (_, _) => false, p => xf.PluginKey[p].FileName.String, k => k.ToString(), c => c.ToString()).Find(600f).Split;
         t.Check("PD3-D-F with DfFix loaded, no pair is split", fixedSplits.Count == 0, Pairs(fixedSplits));
     });
 
