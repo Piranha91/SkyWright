@@ -1198,36 +1198,8 @@ IReadOnlyList<SettledGravity> SettledGravities()
     return settledGravities = list;
 }
 
-(PhysicalState State, string Detail) OverlapPredicate(FormKey laterKey, FormKey otherKey)
-{
-    var sl = idx.WinningGeometryPose(laterKey); var so = idx.WinningGeometryPose(otherKey);
-    if (sl is null || so is null) return (PhysicalState.Unmeasured, "a ref is not placed in this order");
-    if (sl.Value.Deleted || idx.IsDeletedNow(laterKey) || so.Value.Deleted || idx.IsDeletedNow(otherKey)) return (PhysicalState.Gone, "a ref is deleted under this order");
-    if (popMode != PopulationMode.Flags)
-    {
-        var el = resolvedArms!.Winner(laterKey); var eo = resolvedArms.Winner(otherKey);
-        if (!el.Resolved || !eo.Resolved) return (PhysicalState.Unmeasured, "a ref's enable-parent chain is unresolved");
-        if (!el.Enabled || !eo.Enabled) return (PhysicalState.Gone, "a ref is disabled at runtime under this state");
-    }
-    else if (sl.Value.Disabled || so.Value.Disabled) return (PhysicalState.Gone, "a ref is initially disabled under this order");
-    if ((idx.BosSwaps.TryGetValue(laterKey, out var bosLater) && (bosLater.Random || bosLater.PerSession || bosLater.PropertiesRandom || bosLater.Alternatives.Count != 1))
-     || (idx.BosSwaps.TryGetValue(otherKey, out var bosOther) && (bosOther.Random || bosOther.PerSession || bosOther.PropertiesRandom || bosOther.Alternatives.Count != 1)))
-        return (PhysicalState.Unmeasured, "a ref has more than one possible BOS runtime outcome");
-    if (sl.Value.Space != so.Value.Space) return (PhysicalState.Gone, "the refs are no longer in the same space");
-    if (!idx.RefBase.TryGetValue(laterKey, out var bl) || !idx.RefBase.TryGetValue(otherKey, out var bo)) return (PhysicalState.Unmeasured, "a ref has no base record");
-    var (modelL, srcL, whyL) = SurfaceGeometryOf(bl); var (modelO, srcO, whyO) = SurfaceGeometryOf(bo);
-    if (modelL is not { TriangleCount: > 0 } || modelO is not { TriangleCount: > 0 })
-        return (PhysicalState.Unmeasured, "a ref's strict decoded render geometry is unavailable");
-    var worldL = SpatialOverlap.TransformSoup(modelL, sl.Value.Pos, sl.Value.Rot, sl.Value.Scale);
-    var worldO = SpatialOverlap.TransformSoup(modelO, so.Value.Pos, so.Value.Rot, so.Value.Scale);
-    var q = SurfaceQueryOutcome.QueryPlaced(worldL, new(modelL, sl.Value.Pos, sl.Value.Rot, sl.Value.Scale),
-        worldO, new(modelO, so.Value.Pos, so.Value.Rot, so.Value.Scale), surfaceTolerance, maxTrianglePairs, TimeSpan.FromSeconds(pairSeconds));
-    if (q.Intersects == true)
-        return (PhysicalState.Holds, $"actual render surfaces: {q.SurfaceRelation}; containment {q.Containment}; {q.TrianglePairsTested:N0} triangle pairs [{srcL}{srcO}]");
-    if (q.Intersects == false)
-        return (PhysicalState.Gone, $"actual render surfaces are separated; containment {q.Containment}; {q.TrianglePairsTested:N0} triangle pairs [{srcL}{srcO}]");
-    return (PhysicalState.Unmeasured, q.Reason ?? whyL ?? whyO ?? "actual render-surface query is unknown");
-}
+(PhysicalState State, string Detail) OverlapPredicate(FormKey laterKey, FormKey otherKey)   // overlapprobe/OverlapCredit.cs
+    => new OverlapCredit(idx, popMode, resolvedArms, SurfaceGeometryOf, surfaceTolerance, maxTrianglePairs, pairSeconds).Predicate(laterKey, otherKey);
 
 // ---------------------------------------------------------------------------------------
 // Pass 3 — candidates, placed triangle soups, conservative bounds sweep, actual-shape pairs.
@@ -1269,7 +1241,7 @@ if (stateSpec is not null)
 else pop = popMode == PopulationMode.Flags ? EnablePopulation.Flags() : EnablePopulation.Of(arms.WinnerRawFacts, EnablePopulation.BaselineStateName);
 // Null in flags mode: Candidates then reads the winning snap's own flag, exactly as it always did.
 enabledOf = pop.Predicate;
-bool ExcludeResponsible(int p) => sceneCapture ? false : responsiblePairs.Count > 0 ? !scopedResponsiblePlugins.Contains(p) : IsBaseGame(p);
+bool ExcludeResponsible(int p) => OverlapClass.ExcludeResponsible(sceneCapture, responsiblePairs.Count > 0, scopedResponsiblePlugins.Contains(p), IsBaseGame(p));
 long candidateGeometryLookups = 0;
 __run.Stage("render-geometry", "preparing strict render geometry and candidates", total: null, unit: "geometry lookups");
 (TriangleSoup? Soup, char Source, string? Reason) CandidateGeometryOf(FormKey baseKey)
@@ -1391,8 +1363,9 @@ foreach (var h in sweep.CrossHits)
         maxTrianglePairs, TimeSpan.FromSeconds(pairSeconds), popMode == PopulationMode.Flags ? null : arms));
     __run.Advance();
 }
-var provenanceUnknown = rows.Where(r => r.CounterfactualStatus == "unknown").ToList();
-var provenanceRows = rows.Where(r => r.CounterfactualStatus != "unknown").ToList();
+var split = OverlapClass.Of(rows, PopOf);   // overlapprobe/OverlapClass.cs
+var provenanceUnknown = split.ProvenanceUnknown;
+var provenanceRows = split.Provenance;
 int seenRows = rows.Count(r => r.Sight == OverlapSight.Seen);
 Console.WriteLine($"\n==== PROVENANCE — actual surface with vs without the later plugin ({rows.Count:N0} intersections) ====");
 Console.WriteLine($"   Seen rows {seenRows:N0}; declared intersections {sweep.CrossDeclaredIntersects:N0}; counterfactual unknown {provenanceUnknown.Count:N0}");
@@ -1400,9 +1373,8 @@ Console.WriteLine($"   Seen rows {seenRows:N0}; declared intersections {sweep.Cr
 string Verdict(SurfaceOverlapRow r) => $"{r.Origin} + {r.Sight}";
 var introduced = provenanceRows.Where(r => r.Origin == OverlapOrigin.Introduced).ToList();
 Console.WriteLine($"   Introduced {introduced.Count:N0} of {provenanceRows.Count:N0} assessed; Blind {introduced.Count(r => r.Sight == OverlapSight.Blind):N0}");
-var cls = provenanceRows.Where(r => r.Origin == OverlapOrigin.Introduced && r.Sight == OverlapSight.Blind
-    && PopOf(r.Hit) != OverlapPopulation.BethesdaFloor).ToList();
-var floorRows = provenanceRows.Where(r => PopOf(r.Hit) == OverlapPopulation.BethesdaFloor).ToList();
+var cls = split.Class;
+var floorRows = split.Floor;
 
 (string, string) PairKey(SurfaceOverlapRow r)
 {
@@ -1427,8 +1399,8 @@ Console.WriteLine($"\n   ---- first {listN} by canonical reference identity; rel
 foreach (var r in cls.OrderBy(r => r.Hit.A.Key.ToString(), StringComparer.Ordinal).ThenBy(r => r.Hit.B.Key.ToString(), StringComparer.Ordinal).Take(listN))
     Console.WriteLine("   " + Describe(r));
 
-var knowing = provenanceRows.Where(r => r.Origin == OverlapOrigin.Introduced && r.Sight == OverlapSight.Seen).ToList();
-var inherited = provenanceRows.Where(r => r.Origin == OverlapOrigin.Inherited).ToList();
+var knowing = split.Knowing;
+var inherited = split.Inherited;
 Console.WriteLine($"\nintroduced + seen intersections: {knowing.Count:N0}; inherited: {inherited.Count:N0}; Bethesda same-responsible relationships: {floorRows.Count:N0}");
 foreach (var r in floorRows.OrderBy(r => r.Hit.A.Key.ToString(), StringComparer.Ordinal).Take(listN))
     Console.WriteLine($"   {Verdict(r),-22} {Describe(r)}");

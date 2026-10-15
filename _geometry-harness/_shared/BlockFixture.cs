@@ -48,19 +48,26 @@ public static class BlockFixture
     /// <summary>A flat grid navmesh in an interior cell: n x n squares of <paramref name="step"/> from <paramref name="from"/>,
     /// each split into two triangles, every shared edge linked.</summary>
     static NavigationMesh Grid(FormKey key, FormKey cell, int n = 20, float step = 64f, float from = -640f)
+        => Grid(key, cell, n, n, step, from, from);
+
+    /// <summary>A flat grid navmesh in an interior cell: <paramref name="nx"/> x <paramref name="ny"/> squares of
+    /// <paramref name="step"/> from (<paramref name="fromX"/>, <paramref name="fromY"/>), each split into two triangles,
+    /// every shared edge linked. A triangle whose centroid <paramref name="deleted"/> picks carries the Deleted flag (0x08).</summary>
+    public static NavigationMesh Grid(FormKey key, FormKey cell, int nx, int ny, float step, float fromX, float fromY,
+                                      Func<float, float, bool>? deleted = null)
     {
         var d = new NavigationMeshData
         {
             NavmeshVersion = 12, CrcHash = 0xA5E9A03C,
             Parent = new CellNavmeshParent { Parent = new FormLink<ICellGetter>(cell) },
-            Min = new P3Float(from, from, 0), Max = new P3Float(from + n * step, from + n * step, 0),
+            Min = new P3Float(fromX, fromY, 0), Max = new P3Float(fromX + nx * step, fromY + ny * step, 0),
         };
-        for (int j = 0; j <= n; j++)
-            for (int i = 0; i <= n; i++) d.Vertices.Add(new P3Float(from + i * step, from + j * step, 0));
-        short V(int i, int j) => (short)(j * (n + 1) + i);
+        for (int j = 0; j <= ny; j++)
+            for (int i = 0; i <= nx; i++) d.Vertices.Add(new P3Float(fromX + i * step, fromY + j * step, 0));
+        short V(int i, int j) => (short)(j * (nx + 1) + i);
         var tris = new List<(short A, short B, short C)>();
-        for (int j = 0; j < n; j++)
-            for (int i = 0; i < n; i++)
+        for (int j = 0; j < ny; j++)
+            for (int i = 0; i < nx; i++)
             {
                 tris.Add((V(i, j), V(i + 1, j), V(i + 1, j + 1)));
                 tris.Add((V(i, j), V(i + 1, j + 1), V(i, j + 1)));
@@ -74,11 +81,17 @@ public static class BlockFixture
         for (int t = 0; t < tris.Count; t++)
         {
             var (a, b, c) = tris[t];
-            d.Triangles.Add(new NavmeshTriangle
+            var tri = new NavmeshTriangle
             {
                 Vertices = new P3Int16(a, b, c),
                 EdgeLink_0_1 = Other(t, a, b), EdgeLink_1_2 = Other(t, b, c), EdgeLink_2_0 = Other(t, c, a),
-            });
+            };
+            if (deleted is not null)
+            {
+                float cx = (d.Vertices[a].X + d.Vertices[b].X + d.Vertices[c].X) / 3f, cy = (d.Vertices[a].Y + d.Vertices[b].Y + d.Vertices[c].Y) / 3f;
+                if (deleted(cx, cy)) tri.Flags |= NavmeshTriangle.Flag.Deleted;
+            }
+            d.Triangles.Add(tri);
         }
         return new NavigationMesh(key, Rel) { Data = d };
     }

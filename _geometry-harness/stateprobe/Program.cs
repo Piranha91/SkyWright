@@ -41,6 +41,8 @@ using HousecarlCore.Progress;
 using var __run = RunLog.BeginProcess("stateprobe", args);
 // Known answers for which version of a moved or deleted reference this probe's walk keeps (_shared/MovedRefFixture.cs).
 if (args.Length >= 1 && args[0] == "--moved-ref-selftest") return RouteSelfTest.Run();
+// Known answers for the class, emit and route-obstacle decisions over a synthetic order (_shared/StateFixture.cs).
+if (args.Length >= 1 && args[0] == "--self-test") return StateSelfTest.Run();
 const string StateMeasurementPolicy = "state-contact-route-v1|state-overlap-unmeasured-v1";
 
 string Instance = HarnessTarget.Instance;
@@ -109,51 +111,8 @@ HarnessOrderCli.Print(cfg);
 // dependent's, the render soup as a labelled fallback, OBND as the last resort.
 // ---------------------------------------------------------------------------------------
 ContactIndex? cidx = null;
-var meshGeom = new Dictionary<string, RefGeometry?>(StringComparer.OrdinalIgnoreCase);
-long meshesMeasured = 0, obndFallback = 0, noGeometry = 0;
-RefGeometry? GeomOf(FormKey baseKey)
-{
-    RefGeometry? g = null;
-    if (cidx!.Index.BaseMesh.TryGetValue(baseKey, out var rel))
-    {
-        var full = rel.StartsWith("meshes", StringComparison.OrdinalIgnoreCase) ? rel : Path.Combine("meshes", rel);
-        if (!meshGeom.TryGetValue(full, out g))
-        {
-            g = null;
-            var res = assets.ResolveForPlacement(full);
-            if (res.Sources.Count > 0)
-            {
-                var (bytes, _) = AssetResolver.ReadPlacementSource(res.Sources[0]);
-                if (bytes is not null && NifGeometry.Measure(bytes, includeTriangles: true) is { Model: { } m })
-                {
-                    meshesMeasured++;
-                    var hc = m.CollisionSoupFor(b => b.Solid && CollisionLayers.IsActorSolid(b.Layer));
-                    var dc = m.CollisionSoupFor(b => b.Solid && b.Layer != "SKYL_NONCOLLIDABLE");
-                    TriangleSoup host, dep; char hs, ds;
-                    if (m.CollisionComplete && hc is { TriangleCount: > 0 }) { host = hc; hs = 'c'; }
-                    else if (m.Soup is { TriangleCount: > 0 }) { host = m.Soup; hs = 'r'; }
-                    else { host = TriangleSoup.Empty; hs = '-'; }
-                    if (m.CollisionComplete && dc is { TriangleCount: > 0 }) { dep = dc; ds = 'c'; }
-                    else if (m.Soup is { TriangleCount: > 0 }) { dep = m.Soup; ds = 'r'; }
-                    else { dep = TriangleSoup.Empty; ds = '-'; }
-                    var box = SpatialOverlap.SoupBounds(host).Union(SpatialOverlap.SoupBounds(dep));
-                    var bodies = m.CollisionBodies?.Where(b => b.Solid).Select(b => (b.Layer, b.MotionSystem)).ToList() ?? new List<(string, string)>();
-                    bool phantom = m.HasCollision && !m.HasSolidCollision;
-                    g = box.IsEmpty ? null : new RefGeometry(box, host, dep, hs, ds, HostUsable: hs == 'c', bodies, phantom);
-                }
-            }
-            meshGeom[full] = g;
-        }
-    }
-    if (g is null)
-    {
-        var ob = cidx.Index.ObndBox(baseKey);
-        if (!ob.IsEmpty) { obndFallback++; g = new RefGeometry(ob, ContactIndex.BoxSoup(ob), ContactIndex.BoxSoup(ob), 'o', 'o', HostUsable: false, Array.Empty<(string, string)>(), false); }
-        else noGeometry++;
-    }
-    return g;
-}
-try { cidx = new ContactIndex(GeomOf); }
+var geo = new StateGeometry(full => assets.ResolveForPlacement(full) is { Sources.Count: > 0 } res ? AssetResolver.ReadPlacementSource(res.Sources[0]).Bytes : null);   // stateprobe/StateGeometry.cs
+try { cidx = new ContactIndex(geo.Of); geo.Contact = cidx; }
 catch (CacheBudget.AutomaticBudgetUnavailableException ex) { Console.Error.WriteLine(ex.Message + "; " + ex.Selection.Describe()); return 2; }
 var idx = cidx.Index;
 
@@ -389,8 +348,7 @@ if (routeOn)
             var b = cidx!.WinnerBase(key);
             if (b.IsNull || !idx.BaseMesh.TryGetValue(b, out var rel)) { why = "no mesh"; routeNoGeo++; return null; }
             string type = idx.BaseInfo.TryGetValue(b, out var bi) ? bi.Type : "?";
-            if (type == "Door") { why = "a Door: passable by design, set aside"; routeSetAside++; return null; }
-            if (type == "MoveableStatic") { why = "a MoveableStatic: pushed aside, set aside"; routeSetAside++; return null; }
+            if (RouteObstacle.SetAside(type, out var asideWhy)) { why = asideWhy; routeSetAside++; return null; }   // stateprobe/RouteObstacle.cs
             var g = Obstacle(rel);
             if (g.Soup is null || g.Box.IsEmpty) { why = $"no actor-solid geometry ({g.Source})"; routeNoGeo++; return null; }
             model = g.Box; soup = g.Soup;
@@ -400,15 +358,7 @@ if (routeOn)
         var columns = MeshColumnIndex.Build(verts, soup.Indices, triangleMaterials: soup.TriangleMaterials);
         // The cheap test first, as blockprobe does: does the solid enter an actor column over any walkable triangle?
         var q = SpatialOverlap.GrowDown(world, field.Top);
-        bool crosses = false;
-        foreach (var t in ni.Index.Query(q))
-        {
-            if ((t.Flags & 0x08) != 0) continue;
-            var nav = ni.Index.NavAt(t.NavIndex); var tri = nav.Triangles[t.TriangleIndex];
-            var pa = nav.Vertices[tri.A]; var pb = nav.Vertices[tri.B]; var pc = nav.Vertices[tri.C];
-            int x = columns.CountSurfaceCrossings(new Vector3(pa.X, pa.Y, pa.Z), new Vector3(pb.X, pb.Y, pb.Z), new Vector3(pc.X, pc.Y, pc.Z), ActorBand.StepHeight, field.Top, 12f, 1f, 0.5f, stopAfter: 1);
-            if (x > 0) { crosses = true; break; }
-        }
+        bool crosses = RouteObstacle.EntersActorColumn(ni.Index, columns, q, field.Top);
         if (!crosses) { why = "never enters an actor column over walkable ground"; routeNoCross++; return RouteCutVerdict.None; }
         if (ni.Graph is null) { ni.Graph = NavGraph.Build(ni.Index).Nodes; navIndex[w.Cell] = ni; }
         var facts = RouteConnectivity.Measure(ni.Index, columns, world, 256f, 16f, ActorBand.PhysicalStep, field.Top, Ladder, graph: ni.Graph, floorAt: field.Floor.FloorAt, isStairsMaterial: DetectorModel.IsStairsMaterial);
@@ -430,7 +380,7 @@ var ev = new StateEvaluator(cidx, sx) { Route = oracle };
 try { cidx.RefreshAutomaticBudget(); }
 catch (CacheBudget.AutomaticBudgetUnavailableException ex) { Console.Error.WriteLine(ex.Message + "; " + ex.Selection.Describe()); return 2; }
 Console.WriteLine("   memory after state geometry preparation: " + cidx.AutomaticBudgetReport());
-Console.WriteLine($"evaluator: {ev.Boxed:N0} refs boxed (meshes measured {meshesMeasured:N0}, OBND fallback {obndFallback:N0}, no geometry {noGeometry:N0}; markers set aside {ev.BoxedMarkers:N0}, effect volumes kept out of the overlap role {ev.BoxedFxVolumes:N0})  ({sw.Elapsed.TotalSeconds:0.0}s)");
+Console.WriteLine($"evaluator: {ev.Boxed:N0} refs boxed (meshes measured {geo.MeshesMeasured:N0}, OBND fallback {geo.ObndFallback:N0}, no geometry {geo.NoGeometry:N0}; markers set aside {ev.BoxedMarkers:N0}, effect volumes kept out of the overlap role {ev.BoxedFxVolumes:N0})  ({sw.Elapsed.TotalSeconds:0.0}s)");
 sw.Restart();
 var tally = new StateTally();
 var rows = new List<StateRow>();
@@ -504,9 +454,10 @@ if (emptySpaceOut is not null)
     Console.WriteLine($"wrote {esRows.Count:N0} empty-space rows -> {emptySpaceOut}");
 }
 
-var cls = rows.Where(r => r.Verdict == StateVerdict.StateConditional && !r.SameSet && !r.SameAuthor).ToList();
-var resolved = rows.Where(r => r.Verdict == StateVerdict.StateResolved && !r.SameSet && !r.SameAuthor).ToList();
-var ownFloor = rows.Where(r => r.Verdict == StateVerdict.StateConditional && !r.SameSet && r.SameAuthor).ToList();
+var split = StateFindings.Of(rows);   // stateprobe/StateFindings.cs
+var cls = split.Class;
+var resolved = split.Resolved;
+var ownFloor = split.OwnFloor;
 string TriggerOf(FormKey k) => map?.TriggerOf(k).Status ?? "(no map)";
 Console.WriteLine($"\n==== THE CLASS — StateConditional rows: {cls.Count:N0} (apart: {rows.Count(r => r.Verdict == StateVerdict.StateConditional && r.SameSet):N0} same-set pairs, {ownFloor.Count:N0} same-author — the set against its own author's geometry); StateResolved: {resolved.Count:N0} ====");
 Console.WriteLine($"   by the switch's trigger (switchprobe's map): " + string.Join(", ", cls.GroupBy(r => TriggerOf(r.Switch)).OrderByDescending(g => g.Count()).Select(g => $"{g.Key} {g.Count():N0} rows / {g.Select(r => r.Switch).Distinct().Count():N0} switches"))
@@ -592,7 +543,7 @@ if (emitPath is not null)
     // record (a patch re-parents, moves or removes it); the other side the alternative. The kind carries the state so a
     // row in one state never collides with the same pair in another (ConflictIo.RowIdentity keys on kind + records).
     var conflicts = new List<Conflict>();
-    foreach (var r in cls.Where(r => r.Population != StatePopulation.BethesdaFloor))
+    foreach (var r in StateFindings.Emitted(cls))
         conflicts.Add(new Conflict($"STATE-{r.Kind.ToString().ToUpperInvariant()}@{r.State}@{TriggerOf(r.Switch)}", PluginName(r.MemberResponsible), r.Other is null ? PluginName(r.SwitchOwner) : PluginName(r.OtherResponsible),
             $"{r.Kind} {r.Verdict} under {sx.Switches[r.Switch].Label} ({PluginName(r.SwitchOwner)}): {RefLabel(r.Member)} {(r.Arrives ? "arrives" : "leaves")} — {r.Why} in {CellOf(r.Cell)}",
             new List<ConflictRecord> { new(r.Member.ToString(), "placed-ref", CellOf(r.Cell), r.Physical, r.PhysicalDetail) },
