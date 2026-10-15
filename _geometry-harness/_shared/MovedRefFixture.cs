@@ -175,7 +175,7 @@ public static class MovedRefFixture
         return h;
     }
 
-    static void FileInterior(SkyrimMod mod, SkCell cell)
+    public static void FileInterior(SkyrimMod mod, SkCell cell)
     {
         uint id = cell.FormKey.ID;
         int blockN = (int)(id % 10), subN = (int)((id / 10) % 10);
