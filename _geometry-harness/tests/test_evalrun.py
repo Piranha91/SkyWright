@@ -6978,10 +6978,15 @@ def case_83(tmp):
         check={"checkId": reg_check["id"]}, arm=arm, part=None, adapter=reg_check["adapter"],
         exit_code=r.returncode, log_text=r.stdout + "\n---- stderr ----\n" + r.stderr,
         outputs=[tmp / case / "land-badzlib" / "scope.json"], pre_hashes={}, started=None)
+    # A rejected receipt gets no detector at all (Validator.validate sets one only when accepted): stricter than an
+    # accepted "inconclusive", and never "no-finding".
     causes = [x["cause"] for x in res.get("rejections") or []]
-    expect((res.get("accepted"), res.get("detector"), res.get("findings")), (False, "inconclusive", None),
+    expect((res.get("accepted"), res.get("detector"), res.get("findings")), (False, None, None),
            f"{case}/land-badzlib: the scopeprobe receipt is not a measured footprint (accepted, detector, findings; "
            f"causes {causes})")
+    detail = next((x.get("detail") or "" for x in res.get("rejections") or [] if x.get("cause") == "exit-nonzero"), "")
+    check(fk in detail and "cannot be read" in detail,
+          f"{case}/land-badzlib: the exit-nonzero rejection quotes the walk failure naming {fk} ({detail[:240]!r})")
 
 
 CASES["case-81"] = case_81
