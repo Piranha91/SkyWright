@@ -105,8 +105,8 @@ static class TriggerMap
     }
 
     /// <summary>4b. Each bound script resolved through the VFS and decompiled once, its Enable/Disable calls parsed
-    /// (ScriptCalls); a script that cannot be read maps to null, counted by reason.</summary>
-    public static void Decompile(AssetResolver.AssetView av, List<string> scripts, Dictionary<string, ScriptCalls?> source,
+    /// (ScriptFlipCalls); a script that cannot be read maps to null, counted by reason.</summary>
+    public static void Decompile(AssetResolver.AssetView av, List<string> scripts, Dictionary<string, ScriptFlipCalls?> source,
                                  Dictionary<string, int> unreadWhy, ref int pexUnreadable, ref int pexDecompileFailed, ref int scriptsDecompiled)
     {
         foreach (var name in scripts)
@@ -129,14 +129,14 @@ static class TriggerMap
             catch { source[name] = null; pexDecompileFailed++; unreadWhy["decompiler threw"] = unreadWhy.GetValueOrDefault("decompiler threw") + 1; continue; }
             scriptsDecompiled++;
             if (dec.FunctionsFailed > 0) pexDecompileFailed++;
-            source[name] = ScriptCalls.Parse(dec.Source, dec.FunctionsFailed);
+            source[name] = ScriptFlipCalls.Parse(dec.Source, dec.FunctionsFailed);
         }
     }
 
     /// <summary>4c. Per switch: Triggered when a bound script calls Enable/Disable on the bound property (a quest fragment's
     /// call names its stage, and the stage is a joint flip), BoundUnread with the reason when it does not or cannot be read,
     /// Unknown when nothing binds it.</summary>
-    public static void Status(List<SwitchInfo> switches, Dictionary<FormKey, List<Binding>> bindings, Dictionary<string, ScriptCalls?> source,
+    public static void Status(List<SwitchInfo> switches, Dictionary<FormKey, List<Binding>> bindings, Dictionary<string, ScriptFlipCalls?> source,
                               Dictionary<(FormKey Quest, string Fragment), int> questFragmentStage, Dictionary<FormKey, string?> recordEdid,
                               Dictionary<string, HashSet<FormKey>> jointFlips,
                               Dictionary<FormKey, (string Status, string Kind, List<string> By)> triggerStatus)
@@ -148,7 +148,7 @@ static class TriggerMap
             foreach (var b in bl)
             {
                 if (!source.TryGetValue(b.Script, out var sc) || sc is null) continue;
-                foreach (var call in sc.CallsOn(b.Property))
+                foreach (var call in sc.FlipsOn(b.Property))   // a flip of the property; a link-chain call flips its chain, not it
                 {
                     string where;
                     if (b.Kind == "quest" && questFragmentStage.TryGetValue((b.Record, call.Function), out var stage))

@@ -303,7 +303,7 @@ if (triggers)
 
     // 4b. decompile each bound script once; find the calls.
     var scripts = bindings.Values.SelectMany(l => l).Select(b => b.Script).Where(s => s.Length > 0).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
-    var source = new Dictionary<string, ScriptCalls?>(StringComparer.OrdinalIgnoreCase);
+    var source = new Dictionary<string, ScriptFlipCalls?>(StringComparer.OrdinalIgnoreCase);
     var unreadWhy = new Dictionary<string, int>();
     TriggerMap.Decompile(av, scripts, source, unreadWhy, ref pexUnreadable, ref pexDecompileFailed, ref scriptsDecompiled);
     Console.WriteLine($"   scripts bound: {scripts.Count:N0}; decompiled {scriptsDecompiled:N0}; pex missing or unreadable {pexUnreadable:N0} ({string.Join(", ", unreadWhy.Select(kv => $"{kv.Key} {kv.Value}"))}); with a function the decompiler refused {pexDecompileFailed:N0}  ({sw.Elapsed.TotalSeconds:0.0}s)");
@@ -419,78 +419,3 @@ static string Short(string s, int n) => s.Length <= n ? s : s[..(n - 3)] + "..."
 
 /// <summary>One script property (or alias route) on one record that names a switch.</summary>
 sealed record Binding(FormKey Record, string Kind, string Script, string Property, FormKey Switch, string Via, string? AliasName);
-
-/// <summary>The Enable / Disable calls found in one decompiled script, per function, with the object they were called on.</summary>
-sealed class ScriptCalls
-{
-    public readonly List<(string Function, string Object, string Text)> Calls = new();
-    public int FailedFunctions;
-    public bool SelfCall;
-
-    static readonly Regex Header = new(@"^\s*(?:[\w\[\]:]+\s+)?(?:Function|Event)\s+([\w:]+)\s*\(", RegexOptions.Compiled | RegexOptions.IgnoreCase);
-    static readonly Regex End = new(@"^\s*End(?:Function|Event)\b", RegexOptions.Compiled | RegexOptions.IgnoreCase);
-    // <obj>.Enable( — the object token before the dot, an index on it allowed (a list property: EnableList[i].Enable());
-    // Self.<prop>.Enable( gives the property; the alias form gives Alias_X. Measured on the HearthFires house script
-    // (2026-09-04): the indexed form is how every list-bound marker is flipped.
-    static readonly Regex Call = new(@"(?<![\w.])(?:Self\.)?(?<obj>[A-Za-z_]\w*)(?:\[[^\]]*\])?(?:\.(?:GetReference|GetRef)\(\))?\.(?<call>Enable|Disable|EnableNoWait|DisableNoWait)\s*\(", RegexOptions.Compiled | RegexOptions.IgnoreCase);
-    // GetLinkedRef().Enable( on Self — the scripted reference flips the reference it links to.
-    static readonly Regex LinkedCall = new(@"(?<![\w.])(?:Self\.)?GetLinkedRef\([^)]*\)\.(?<call>Enable|Disable|EnableNoWait|DisableNoWait)\s*\(", RegexOptions.Compiled | RegexOptions.IgnoreCase);
-    static readonly Regex SelfCallRx = new(@"(?<![\w.])(?:Self\.)?(?<call>Enable|Disable|EnableNoWait|DisableNoWait)\s*\(", RegexOptions.Compiled | RegexOptions.IgnoreCase);
-    // A local that aliases a property (or an element of a list property): `objectreference x = Prop[i]`, `x = Prop`.
-    static readonly Regex Alias = new(@"^\s*(?:[\w\[\]:]+\s+)?(?<local>[A-Za-z_]\w*)\s*=\s*(?<src>[A-Za-z_]\w*)(?:\[[^\]]*\])?\s*$", RegexOptions.Compiled | RegexOptions.IgnoreCase);
-    // A function the decompiler refused prints its raw bytecode: CALLMETHOD <name> <object> ...
-    static readonly Regex Raw = new(@"^\s*;\s+CallMethod\s+(?<call>Enable|Disable|EnableNoWait|DisableNoWait)\s+(?<obj>\S+)", RegexOptions.Compiled | RegexOptions.IgnoreCase);
-
-    public static ScriptCalls Parse(string source, int failed)
-    {
-        var sc = new ScriptCalls { FailedFunctions = failed };
-        string fn = "(top)";
-        // Per function: local -> every property it is assigned from (an if-chain assigns one local from several list
-        // properties, and the call after it reaches all of them); chains resolved at lookup, three deep.
-        var alias = new Dictionary<string, HashSet<string>>(StringComparer.OrdinalIgnoreCase);
-        IEnumerable<string> Resolve(string obj)
-        {
-            var frontier = new List<string> { obj };
-            for (int hop = 0; hop < 3; hop++)
-            {
-                var next = new List<string>();
-                foreach (var o in frontier)
-                    if (alias.TryGetValue(o, out var srcs)) foreach (var src in srcs) if (!string.Equals(src, o, StringComparison.OrdinalIgnoreCase)) next.Add(src);
-                if (next.Count == 0) break;
-                frontier = next;
-            }
-            return frontier.Distinct(StringComparer.OrdinalIgnoreCase);
-        }
-        foreach (var raw in source.Split('\n'))
-        {
-            var line = raw.TrimEnd('\r');
-            var h = Header.Match(line);
-            if (h.Success) { fn = h.Groups[1].Value; alias.Clear(); continue; }
-            if (End.IsMatch(line)) { fn = "(top)"; alias.Clear(); continue; }
-            int semi = line.IndexOf(';');
-            var code = semi >= 0 && !line.TrimStart().StartsWith(";") ? line[..semi] : line;
-            var a = Alias.Match(code);
-            if (a.Success && !a.Groups["src"].Value.Equals("None", StringComparison.OrdinalIgnoreCase))
-            {
-                if (!alias.TryGetValue(a.Groups["local"].Value, out var set)) alias[a.Groups["local"].Value] = set = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-                set.Add(a.Groups["src"].Value);
-            }
-            bool any = false;
-            foreach (Match m in Call.Matches(code))
-            { foreach (var obj in Resolve(m.Groups["obj"].Value)) sc.Calls.Add((fn, obj, m.Value.Trim())); any = true; }
-            foreach (Match m in LinkedCall.Matches(code))
-            { sc.Calls.Add((fn, "GetLinkedRef", m.Value.Trim())); any = true; }
-            var r = Raw.Match(line);
-            if (r.Success) sc.Calls.Add((fn, r.Groups["obj"].Value.Trim(':'), "raw bytecode " + r.Value.Trim().TrimStart(';').Trim()));
-            if (!any && SelfCallRx.IsMatch(code)) { sc.Calls.Add((fn, "Self", "Self." + SelfCallRx.Match(code).Groups["call"].Value + "()")); sc.SelfCall = true; }
-        }
-        return sc;
-    }
-
-    /// <summary>The calls made on one bound property (case-insensitive), or on Self when the property is "Self".</summary>
-    public IEnumerable<(string Function, string Text)> CallsOn(string property)
-    {
-        foreach (var (fn, obj, text) in Calls)
-            if (string.Equals(obj, property, StringComparison.OrdinalIgnoreCase)) yield return (fn, text);
-    }
-}

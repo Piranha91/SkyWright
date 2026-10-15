@@ -32,9 +32,9 @@ static class SwitchSelfTest
         var qs = Decompiled(F.QuestKey, F.QuestScript);
         var rs = Decompiled(F.RefKey, F.RefScript);
         t.Check("PD3-S-F2 SwQScript decompiles with Gate1.Enable() in Fragment_0",
-                ScriptCalls.Parse(qs, 0).CallsOn("Gate1").Any(c => c.Function == "Fragment_0"), qs.Replace("\r", "").Replace("\n", " | "));
+                ScriptFlipCalls.Parse(qs, 0).FlipsOn("Gate1").Any(c => c.Function == "Fragment_0"), qs.Replace("\r", "").Replace("\n", " | "));
         t.Check("PD3-S-F3 SwRefScript decompiles with Gate.Disable() in OnActivate",
-                ScriptCalls.Parse(rs, 0).CallsOn("Gate").Any(c => c.Function == "OnActivate"), rs.Replace("\r", "").Replace("\n", " | "));
+                ScriptFlipCalls.Parse(rs, 0).FlipsOn("Gate").Any(c => c.Function == "OnActivate"), rs.Replace("\r", "").Replace("\n", " | "));
 
         // 4a: the bindings (TriggerMap.Bindings), over the order as pass 1 read it.
         var pluginKey = w.Order.Select(p => Mutagen.Bethesda.Plugins.ModKey.FromFileName(Path.GetFileName(p))).ToArray();
@@ -61,7 +61,7 @@ static class SwitchSelfTest
         using var assets = AssetResolver.Build(Path.Combine(t.Root, "overwrite"), w.ModsDir, Path.Combine(t.Root, "data"),
                                                new[] { F.RefKey.Name, F.QuestKey.Name, F.MasterKey.Name }, Array.Empty<ActiveArchive>());
         var scripts = bindings.Values.SelectMany(l => l).Select(b => b.Script).Where(s => s.Length > 0).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
-        var source = new Dictionary<string, ScriptCalls?>(StringComparer.OrdinalIgnoreCase);
+        var source = new Dictionary<string, ScriptFlipCalls?>(StringComparer.OrdinalIgnoreCase);
         var unreadWhy = new Dictionary<string, int>();
         int pexUnreadable = 0, pexDecompileFailed = 0, scriptsDecompiled = 0;
         TriggerMap.Decompile(assets.Capture(), scripts, source, unreadWhy, ref pexUnreadable, ref pexDecompileFailed, ref scriptsDecompiled);
@@ -88,8 +88,8 @@ static class SwitchSelfTest
                 status[F.M4].Status == "Triggered" && status[F.M4].Kind == "ref event OnActivate", S(F.M4));
         t.Check("PD3-S-U M5 is Unknown: nothing binds it", status[F.M5].Status == "Unknown" && status[F.M5].Kind == "no binding", S(F.M5));
 
-        // SW2: ScriptCalls, unchanged in Program.cs, over decompiled-source text.
-        string Calls(string src, string prop) => string.Join(", ", ScriptCalls.Parse(src, 0).CallsOn(prop).Select(c => $"{c.Function}:{c.Text}"));
+        // SW2: the call rules (_shared/ScriptFlipCalls.cs, FlipsOn as the trigger map reads them), over decompiled-source text.
+        string Calls(string src, string prop) => string.Join(", ", ScriptFlipCalls.Parse(src, 0).FlipsOn(prop).Select(c => $"{c.Function}:{c.Text}"));
         t.Check("PD3-S-C1 Gate.Enable() in Fragment_0 is a call on Gate in Fragment_0",
                 Calls("Function Fragment_0()\n    Gate.Enable()\nEndFunction\n", "Gate") == "Fragment_0:Gate.Enable(", Calls("Function Fragment_0()\n    Gate.Enable()\nEndFunction\n", "Gate"));
         t.Check("PD3-S-C2 EnableList[i].Enable() is a call on EnableList (a list-bound marker)",
@@ -102,10 +102,10 @@ static class SwitchSelfTest
                 Calls("Function F()\n    Alias_Door.GetReference().Enable()\nEndFunction\n", "Alias_Door").StartsWith("F:"), Calls("Function F()\n    Alias_Door.GetReference().Enable()\nEndFunction\n", "Alias_Door"));
         t.Check("PD3-S-C6 GetLinkedRef().Enable() is a call on GetLinkedRef",
                 Calls("Event OnActivate()\n    GetLinkedRef().Enable()\nEndEvent\n", "GetLinkedRef").StartsWith("OnActivate:"), Calls("Event OnActivate()\n    GetLinkedRef().Enable()\nEndEvent\n", "GetLinkedRef"));
-        var self = ScriptCalls.Parse("Event OnActivate()\n    Enable()\nEndEvent\n", 0);
+        var self = ScriptFlipCalls.Parse("Event OnActivate()\n    Enable()\nEndEvent\n", 0);
         t.Check("PD3-S-C7 a bare Enable() is a call on Self and sets SelfCall",
-                self.SelfCall && self.CallsOn("Self").Any(c => c.Function == "OnActivate"), string.Join(", ", self.Calls));
-        t.Check("PD3-S-C8 Gate.EnableLinkChain() is not a call (today's call names; the copied-rules task owns the difference)",
+                self.SelfCall && self.FlipsOn("Self").Any(c => c.Function == "OnActivate"), string.Join(", ", self.Calls));
+        t.Check("PD3-S-C8 Gate.EnableLinkChain() is not a flip of Gate (it flips Gate's linked chain, not Gate)",
                 Calls("Function F()\n    Gate.EnableLinkChain()\nEndFunction\n", "Gate") == "", Calls("Function F()\n    Gate.EnableLinkChain()\nEndFunction\n", "Gate"));
 
         CopiedRules(t, Calls);
@@ -123,6 +123,15 @@ static class SwitchSelfTest
                 calls(Fn("    ;   CallMethod Enable ::Gate_var ::NoneVar 0"), "Gate_var").StartsWith("F:raw bytecode"), calls(Fn("    ;   CallMethod Enable ::Gate_var ::NoneVar 0"), "Gate_var"));
         t.Check("CR-T3 Alias_Door.TryToEnable() is a flip on Alias_Door (ReferenceAlias.TryToEnable enables the alias's reference)",
                 calls(Fn("    Alias_Door.TryToEnable()"), "Alias_Door") == "F:Alias_Door.TryToEnable(", calls(Fn("    Alias_Door.TryToEnable()"), "Alias_Door"));
+        var lc = ScriptFlipCalls.Parse(Fn("    Gate.EnableLinkChain()"));
+        t.Check("CR-T4 Gate.EnableLinkChain() is a call on Gate named enablelinkchain, and not a flip",
+                lc.CallsOn("Gate").Select(c => c.Call).SequenceEqual(new[] { "enablelinkchain" }) && !lc.FlipsOn("Gate").Any(),
+                string.Join(", ", lc.Calls));
+        var bareTry = ScriptFlipCalls.Parse(Fn("    TryToEnable()"));
+        var bareChain = ScriptFlipCalls.Parse(Fn("    EnableLinkChain()"));
+        t.Check("CR-T5 a bare TryToEnable() is a Self flip; a bare EnableLinkChain() is a Self call that sets no SelfCall",
+                bareTry.SelfCall && bareTry.FlipsOn("Self").Any() && !bareChain.SelfCall && bareChain.CallsOn("Self").Any() && !bareChain.FlipsOn("Self").Any(),
+                $"{string.Join(", ", bareTry.Calls)} / {string.Join(", ", bareChain.Calls)}");
 
         var w = F.Write(Path.Combine(t.Root, "cr"));
         var cr = F.WriteCopiedRules(Path.Combine(t.Root, "cr"));
@@ -145,7 +154,7 @@ static class SwitchSelfTest
         using var assets = AssetResolver.Build(Path.Combine(t.Root, "cr", "overwrite"), w.ModsDir, Path.Combine(t.Root, "cr", "data"),
                                                new[] { F.CrKey.Name, F.RefKey.Name, F.QuestKey.Name, F.MasterKey.Name }, Array.Empty<ActiveArchive>());
         var scripts = bindings.Values.SelectMany(l => l).Select(b => b.Script).Where(s => s.Length > 0).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
-        var source = new Dictionary<string, ScriptCalls?>(StringComparer.OrdinalIgnoreCase);
+        var source = new Dictionary<string, ScriptFlipCalls?>(StringComparer.OrdinalIgnoreCase);
         int u = 0, df = 0, dc = 0;
         TriggerMap.Decompile(assets.Capture(), scripts, source, new(), ref u, ref df, ref dc);
         var jointFlips = new Dictionary<string, HashSet<Mutagen.Bethesda.Plugins.FormKey>>(StringComparer.OrdinalIgnoreCase);
