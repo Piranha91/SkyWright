@@ -76,6 +76,17 @@ static class DriftQuestSelfTest
                 && sp.aliasesResolved == 9 && sp.pairsJudged == 36,
                 $"noView {sp.skipNoAuthoringView}, nonPos {sp.skipNonPositional}, multi {sp.skipMultiPlacement}, noWin {sp.skipNoWinning}, resolved {sp.aliasesResolved}, judged {sp.pairsJudged}");
 
+        // DC: a run asks the split test at 600 u, then the sensitivity sweep asks it again at 300, 600 and 1200 u, and the emit
+        // is written after the sweep. The coverage it writes must be the 600 u call's alone, not a sum over the four calls.
+        var run = Splitter();
+        run.Find(600f);
+        foreach (var v in new[] { 300f, 600f, 1200f }) run.Find(v);
+        t.Check("DC-221 after the sweep, the coverage the emit reads is the 600 u call's: 9 aliases resolved, 36 pairs judged, skips 1/1/1/0, NoPackages 1, overlap 1",
+                run.aliasesResolved == 9 && run.pairsJudged == 36 && run.skipNoAuthoringView == 1 && run.skipNonPositional == 1
+                && run.skipMultiPlacement == 1 && run.skipNoWinning == 0 && run.reachDropped.Values.Sum() == 1 && run.reachOverlap == 1,
+                $"resolved {run.aliasesResolved}, judged {run.pairsJudged}, noView {run.skipNoAuthoringView}, nonPos {run.skipNonPositional}, "
+              + $"multi {run.skipMultiPlacement}, noWin {run.skipNoWinning}, dropped {run.reachDropped.Values.Sum()}, overlap {run.reachOverlap}");
+
         // What --emit writes (AliasSplits.Emitted): the stated splits A and D, each with its moved record; E is proximity only.
         var emitted = AliasSplits.Emitted(found).ToList();
         string Emits() => string.Join(" ", emitted.Select(e => $"{e.s.Alias1}+{e.s.Alias2}[{string.Join(",", e.necessary.Select(n => n.FormKey))}]"));
