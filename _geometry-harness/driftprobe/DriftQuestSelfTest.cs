@@ -76,6 +76,13 @@ static class DriftQuestSelfTest
                 && sp.aliasesResolved == 9 && sp.pairsJudged == 36,
                 $"noView {sp.skipNoAuthoringView}, nonPos {sp.skipNonPositional}, multi {sp.skipMultiPlacement}, noWin {sp.skipNoWinning}, resolved {sp.aliasesResolved}, judged {sp.pairsJudged}");
 
+        // What --emit writes (AliasSplits.Emitted): the stated splits A and D, each with its moved record; E is proximity only.
+        var emitted = AliasSplits.Emitted(found).ToList();
+        string Emits() => string.Join(" ", emitted.Select(e => $"{e.s.Alias1}+{e.s.Alias2}[{string.Join(",", e.necessary.Select(n => n.FormKey))}]"));
+        t.Check("PD3-D-M --emit writes exactly A (necessary R1) and D (necessary R7); E, not stated, is not written",
+                emitted.Count == 2 && emitted[0].s.Alias1 == "Alias1" && emitted[0].s.Alias2 == "Alias2" && emitted[0].necessary.Single().FormKey == F.R1.ToString()
+                && emitted[1].s.Alias1 == "Alias7" && emitted[1].necessary.Single().FormKey == F.R7.ToString(), Emits());
+
         // The fixed order (DfFix puts R1 and R7 back): nothing splits.
         var xf = new Walked(w.Order.Append(w.Fix).ToList());
         var closureF = DetectorModel.MasterClosure(xf.MasterIdx);

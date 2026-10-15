@@ -673,13 +673,8 @@ if (generic)
 if (emitPath is not null)
 {
     var conflicts = new List<Conflict>();
-    foreach (var s in split.Where(s => s.Stated))
+    foreach (var (s, necessary) in AliasSplits.Emitted(split))
     {
-        // A repair has to reconcile the PLACEMENT that changed. Re-pointing the quest's alias is the
-        // other legitimate fix and is reported as an alternative rather than scored, because a patch
-        // that overrides the quest may well be doing something unrelated to this pair.
-        var necessary = s.MovedRefs.Select(k => new ConflictRecord(k.ToString(), "moved-ref", s.CellThen)).ToList();
-        if (necessary.Count == 0) continue;                       // nothing identifiable moved; not judgeable
         var alternative = new List<ConflictRecord> { new(s.QuestKey.ToString(), "quest", s.Quest) };
 
         foreach (var mover in s.MoverList.DefaultIfEmpty(""))

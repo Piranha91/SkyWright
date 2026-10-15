@@ -146,6 +146,21 @@ sealed class AliasSplits
     static (int, int) Pair(int a, int b) => AliasStated.Pair(a, b);
     static void Bump(Dictionary<string, int> d, string k) => d[k] = d.GetValueOrDefault(k) + 1;
 
+    /// <summary>The splits --emit writes: stated ones only, each with the records a repair has to touch (the moved references);
+    /// a stated split with nothing identifiable moved is not judgeable and not written.</summary>
+    public static IEnumerable<(Split s, List<ConflictRecord> necessary)> Emitted(List<Split> split)
+    {
+        foreach (var s in split.Where(s => s.Stated))
+        {
+            // A repair has to reconcile the PLACEMENT that changed. Re-pointing the quest's alias is the
+            // other legitimate fix and is reported as an alternative rather than scored, because a patch
+            // that overrides the quest may well be doing something unrelated to this pair.
+            var necessary = s.MovedRefs.Select(k => new ConflictRecord(k.ToString(), "moved-ref", s.CellThen)).ToList();
+            if (necessary.Count == 0) continue;                       // nothing identifiable moved; not judgeable
+            yield return (s, necessary);
+        }
+    }
+
     /// <summary>The pairs that came apart at the "together" threshold <paramref name="nearU"/>.</summary>
     public List<Split> Find(float nearU)
     {
