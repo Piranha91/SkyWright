@@ -12,7 +12,7 @@ static class SeamFindings
 
     /// <summary>Pass 2: every edge-adjacent pair (east and north of each LAND cell), skipping cells at a duplicate grid
     /// point, with both-winners-Bethesda marked. A pair where either winner's LAND declares no heights has no ground to
-    /// meet: it is counted (Heightless), not measured against the earlier heights.</summary>
+    /// meet: MeasurePair refuses it, and it is counted here (Heightless).</summary>
     public static (List<Pair> Pairs, int DupSkipped, int Heightless) MeasurePairs(CellBoundaryIndex idx, List<CellInfo> landCells,
         IReadOnlyList<HashSet<int>> closure, float eps, Func<int, PluginKind> kind)
     {
@@ -26,9 +26,8 @@ static class SeamFindings
             {
                 var b = idx.Single(a.Worldspace, a.GX + dx, a.GY + dy);
                 if (b is null || !b.HasLandStatement) continue;
-                if (a.LandWinnerDeclaresNone || b.LandWinnerDeclaresNone) { heightless++; continue; }
                 var m = CellBoundaryIndex.MeasurePair(a, b, ea, closure, eps);
-                if (m is null) continue;
+                if (m is null) { if (a.LandWinnerDeclaresNone || b.LandWinnerDeclaresNone) heightless++; continue; }
                 bool bothBethesda = kind(a.Land[^1].Plugin) == PluginKind.Bethesda && kind(b.Land[^1].Plugin) == PluginKind.Bethesda;
                 pairs.Add(new Pair(m, dx == 1 ? "E" : "N", a.Land[^1].Plugin, b.Land[^1].Plugin, bothBethesda));
             }
