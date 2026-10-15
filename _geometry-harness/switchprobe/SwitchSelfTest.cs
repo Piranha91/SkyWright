@@ -109,7 +109,79 @@ static class SwitchSelfTest
                 Calls("Function F()\n    Gate.EnableLinkChain()\nEndFunction\n", "Gate") == "", Calls("Function F()\n    Gate.EnableLinkChain()\nEndFunction\n", "Gate"));
 
         CopiedRules(t, Calls);
+        RawDump(t);
     });
+
+    // F4 (2026-10-15): a function the decompiler refuses keeps its calls only in the raw bytecode dump the decompiler prints.
+    // The order with SwRaw.esp added (FF-S), and the dump itself (FF-T).
+    static void RawDump(ProbeSelfTest t)
+    {
+        string Fn(string body) => "Function F()\n" + body + "\nEndFunction\n";
+        var dir = Path.Combine(t.Root, "raw");
+        var w = F.Write(dir);
+        var raw = F.WriteRawDump(dir);
+        var dec = PapyrusDecompiler.DecompileFile(PexFile.CreateFromFile(Path.Combine(w.ModsDir, F.RawKey.Name, "Scripts", F.RawScript + ".pex"), GameCategory.Skyrim));
+        t.Check("FF-T0 SwRawScript's Fragment_0 is refused by the decompiler and printed as raw bytecode",
+                dec.FunctionsFailed == 1 && dec.Source.Contains("DECOMPILE FAILED"), dec.Source.Replace("\r", "").Replace("\n", " | "));
+        var sc = ScriptFlipCalls.Parse(dec.Source, dec.FunctionsFailed);
+        t.Check("FF-T1 the dump's TryToEnable on ::Alias_Door9_var is a flip of property Alias_Door9 in Fragment_0",
+                sc.FlipsOn("Alias_Door9").Count(c => c.Function == "Fragment_0" && c.Text.StartsWith("raw bytecode ")) == 1, string.Join(", ", sc.Calls));
+        t.Check("FF-T2 the dump's EnableLinkChain on ::Alias_Gate10_var is a call on Alias_Gate10 named enablelinkchain, and not a flip",
+                sc.CallsOn("Alias_Gate10").Select(c => c.Call).SequenceEqual(new[] { "enablelinkchain" }) && !sc.FlipsOn("Alias_Gate10").Any(),
+                string.Join(", ", sc.Calls));
+
+        // The dump line as the decompiler writes it, read back by the same class: every argument kind, and the names.
+        var dumpArgs = new PexObjectVariableData[] { new() { VariableType = VariableType.Identifier, StringValue = "Disable" },
+            new() { VariableType = VariableType.Identifier, StringValue = "::Gate_var" }, new() { VariableType = VariableType.String, StringValue = "a b" },
+            new() { VariableType = VariableType.Integer, IntValue = -3 }, new() { VariableType = VariableType.Float, FloatValue = 1.5f },
+            new() { VariableType = VariableType.Bool, BoolValue = true }, new() { VariableType = VariableType.Null } };
+        var dumpLine = PapyrusDecompiler.RawDump.Line(InstructionOpcode.CALLMETHOD, dumpArgs);
+        bool read = PapyrusDecompiler.RawDump.TryRead("        " + dumpLine, out var rop, out var rargs);
+        var viaSelf = ScriptFlipCalls.Parse(Fn("    " + PapyrusDecompiler.RawDump.Line(InstructionOpcode.CALLMETHOD,
+            new PexObjectVariableData[] { new() { VariableType = VariableType.Identifier, StringValue = "Enable" }, new() { VariableType = VariableType.Identifier, StringValue = "self" } })));
+        t.Check("FF-T3 a dump line reads back to its opcode and arguments; ::Gate_var is Gate, self is Self; a plain comment is no dump line",
+                read && rop == InstructionOpcode.CALLMETHOD && rargs.SequenceEqual(dumpArgs.Select(PapyrusDecompiler.RawDump.Arg))
+                && PapyrusDecompiler.RawDump.Name(rargs[0]) == "Disable" && PapyrusDecompiler.RawDump.Name(rargs[2]) == "a b"
+                && PapyrusDecompiler.RawDump.Identifier(rargs[2]) is null && PapyrusDecompiler.RawDump.SourceName(PapyrusDecompiler.RawDump.Identifier(rargs[1])!) == "Gate"
+                && ScriptFlipCalls.Parse(Fn("    " + dumpLine)).FlipsOn("Gate").Count() == 1 && viaSelf.FlipsOn("Self").Count() == 1
+                && !PapyrusDecompiler.RawDump.TryRead("    ; CALLMETHODS the gate", out _, out _) && !PapyrusDecompiler.RawDump.TryRead("    ; 5 id:Enable", out _, out _),
+                $"{dumpLine} -> {read} {rop} [{string.Join(" | ", rargs)}]; self: {string.Join(", ", viaSelf.Calls)}");
+
+        var order = w.Order.Append(raw).ToList();
+        var idx = new OverlapIndex();
+        for (int p = 0; p < order.Count; p++)
+            using (var mod = SkyrimMod.CreateFromBinaryOverlay(order[p], F.Rel)) idx.Ingest(p, mod);
+        var sx = SwitchIndex.Build(idx);
+        var pluginKey = order.Select(p => Mutagen.Bethesda.Plugins.ModKey.FromFileName(Path.GetFileName(p))).ToArray();
+        var questFragmentStage = new Dictionary<(Mutagen.Bethesda.Plugins.FormKey Quest, string Fragment), int>();
+        var recordEdid = new Dictionary<Mutagen.Bethesda.Plugins.FormKey, string?>();
+        var bindings = new Dictionary<Mutagen.Bethesda.Plugins.FormKey, List<Binding>>();
+        TriggerMap.Bindings(order, pluginKey, sx, System.Diagnostics.Stopwatch.StartNew(), new(), questFragmentStage,
+                            new(), new(), recordEdid, new(), bindings);
+        foreach (var d in new[] { "overwrite", "data" }) Directory.CreateDirectory(Path.Combine(dir, d));
+        using var assets = AssetResolver.Build(Path.Combine(dir, "overwrite"), w.ModsDir, Path.Combine(dir, "data"),
+                                               new[] { F.RawKey.Name, F.RefKey.Name, F.QuestKey.Name, F.MasterKey.Name }, Array.Empty<ActiveArchive>());
+        var scripts = bindings.Values.SelectMany(l => l).Select(b => b.Script).Where(s => s.Length > 0).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+        var source = new Dictionary<string, ScriptFlipCalls?>(StringComparer.OrdinalIgnoreCase);
+        int u = 0, df = 0, dc = 0;
+        TriggerMap.Decompile(assets.Capture(), scripts, source, new(), ref u, ref df, ref dc);
+        var jointFlips = new Dictionary<string, HashSet<Mutagen.Bethesda.Plugins.FormKey>>(StringComparer.OrdinalIgnoreCase);
+        var status = new Dictionary<Mutagen.Bethesda.Plugins.FormKey, (string Status, string Kind, List<string> By)>();
+        TriggerMap.Status(sx.Switches.Values.ToList(), bindings, source, questFragmentStage, recordEdid, jointFlips, status);
+        string S(Mutagen.Bethesda.Plugins.FormKey k) => status.TryGetValue(k, out var v) ? $"{v.Status} | {v.Kind} | {string.Join(" / ", v.By)}" : "(none)";
+        t.Check("FF-S0 the census holds seven switches; M9 and M10 are bound through SwRawQ's forced aliases; one script refused a function",
+                sx.Switches.Count == 7 && df == 1 && new[] { F.M9, F.M10 }.All(k => bindings.TryGetValue(k, out var l) && l.Any(b => b.Via == "forced-reference alias")),
+                $"{sx.Switches.Count} switches, {df} refused; M9 {(bindings.TryGetValue(F.M9, out var b9) ? string.Join("; ", b9.Select(b => $"{b.Script}.{b.Property}")) : "(none)")}");
+        t.Check("FF-S1 M9 is Triggered by quest SwRawQ at stage 10 from the raw bytecode of SwRawScript.Fragment_0",
+                status[F.M9].Status == "Triggered" && status[F.M9].Kind == "quest stage"
+                && status[F.M9].By.Count == 1 && status[F.M9].By[0].StartsWith("quest SwRawQ stage 10 (SwRawScript.Fragment_0: raw bytecode "), S(F.M9));
+        t.Check("FF-S2 M10 stays BoundUnread: EnableLinkChain flips M10's linked chain, not M10",
+                status[F.M10].Status == "BoundUnread" && status[F.M10].Kind == "bound, no Enable/Disable call found on the property", S(F.M10));
+        t.Check("FF-S3 the joint flips are SwQ:10 -> {M1} and SwRawQ:10 -> {M9}",
+                jointFlips.Count == 2 && jointFlips.TryGetValue("SwQ:10", out var j1) && j1.SetEquals(new[] { F.M1 })
+                && jointFlips.TryGetValue("SwRawQ:10", out var j2) && j2.SetEquals(new[] { F.M9 }),
+                string.Join(", ", jointFlips.Select(kv => $"{kv.Key} {kv.Value.Count}")));
+    }
 
     // The copied-rules task (2026-10-15): the call rules over text (CR-T), then the order with SwCr.esp added (CR-S).
     static void CopiedRules(ProbeSelfTest t, Func<string, string, string> calls)
@@ -117,10 +189,11 @@ static class SwitchSelfTest
         string Fn(string body) => "Function F()\n" + body + "\nEndFunction\n";
         t.Check("CR-T1 a whole-line comment '; Gate.Enable()' is not a call on Gate",
                 calls(Fn("    ; Gate.Enable()"), "Gate") == "", calls(Fn("    ; Gate.Enable()"), "Gate"));
-        // The Raw rule's own form; it keeps the object as written less its colons (Gate_var). The decompiler's dump prints
-        // "id:"-prefixed arguments, which this rule does not read (a finding of the copied-rules task, not changed here).
-        t.Check("CR-T2 a raw bytecode line ';   CallMethod Enable ::Gate_var' is still read (object Gate_var) after the comment rule",
-                calls(Fn("    ;   CallMethod Enable ::Gate_var ::NoneVar 0"), "Gate_var").StartsWith("F:raw bytecode"), calls(Fn("    ;   CallMethod Enable ::Gate_var ::NoneVar 0"), "Gate_var"));
+        // The old Raw rule's own form, which the decompiler never writes (F4): the dump is read as PapyrusDecompiler.RawDump
+        // writes it, so this comment is no call (FF-T1..T3 hold the real form).
+        var oldForm = ScriptFlipCalls.Parse(Fn("    ;   CallMethod Enable ::Gate_var ::NoneVar 0"));
+        t.Check("CR-T2 a comment ';   CallMethod Enable ::Gate_var' (not the decompiler's dump form) is no call",
+                oldForm.Calls.Count == 0, string.Join(", ", oldForm.Calls));
         t.Check("CR-T3 Alias_Door.TryToEnable() is a flip on Alias_Door (ReferenceAlias.TryToEnable enables the alias's reference)",
                 calls(Fn("    Alias_Door.TryToEnable()"), "Alias_Door") == "F:Alias_Door.TryToEnable(", calls(Fn("    Alias_Door.TryToEnable()"), "Alias_Door"));
         var lc = ScriptFlipCalls.Parse(Fn("    Gate.EnableLinkChain()"));

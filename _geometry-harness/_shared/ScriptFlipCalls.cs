@@ -1,4 +1,6 @@
 using System.Text.RegularExpressions;
+using HousecarlCore;
+using Mutagen.Bethesda.Pex;
 
 namespace HarnessShared;
 
@@ -11,7 +13,8 @@ namespace HarnessShared;
 // The object is the token before the dot (an index on it allowed: EnableList[i].Enable()); Self.<prop> gives the property;
 // Alias_X.GetReference().Enable() gives Alias_X; a local assigned from a property resolves to it, three deep; a bare call
 // is on Self; GetLinkedRef().Enable() is on GetLinkedRef. A function the decompiler refused prints its raw bytecode as
-// comment lines; the Raw rule reads "; CallMethod <name> <object>" from them.
+// comment lines (PapyrusDecompiler.RawDump); a CALLMETHOD line there is read back by the same class, its object named as the
+// source names it (an auto property's ::X_var is X). A temp the dump calls on is not followed back to its source.
 public sealed class ScriptFlipCalls
 {
     public readonly List<(string Function, string Object, string Call, string Text)> Calls = new();
@@ -35,7 +38,6 @@ public sealed class ScriptFlipCalls
     static readonly Regex SelfCallRx = new(@"(?<![\w.])(?:Self\.)?(?<call>" + Names + @")\s*\(", RegexOptions.Compiled | RegexOptions.IgnoreCase);
     // A local that aliases a property (or an element of a list property): `objectreference x = Prop[i]`, `x = Prop`.
     static readonly Regex Alias = new(@"^\s*(?:[\w\[\]:]+\s+)?(?<local>[A-Za-z_]\w*)\s*=\s*(?<src>[A-Za-z_]\w*)(?:\[[^\]]*\])?\s*$", RegexOptions.Compiled | RegexOptions.IgnoreCase);
-    static readonly Regex Raw = new(@"^\s*;\s+CallMethod\s+(?<call>" + Names + @")\s+(?<obj>\S+)", RegexOptions.Compiled | RegexOptions.IgnoreCase);
 
     public static ScriptFlipCalls Parse(string source, int failed = 0)
     {
@@ -76,8 +78,10 @@ public sealed class ScriptFlipCalls
             { foreach (var obj in Resolve(m.Groups["obj"].Value)) sc.Calls.Add((fn, obj, m.Groups["call"].Value.ToLowerInvariant(), m.Value.Trim())); any = true; }
             foreach (Match m in LinkedCall.Matches(code))
             { sc.Calls.Add((fn, "GetLinkedRef", m.Groups["call"].Value.ToLowerInvariant(), m.Value.Trim())); any = true; }
-            var r = Raw.Match(line);
-            if (r.Success) sc.Calls.Add((fn, r.Groups["obj"].Value.Trim(':'), r.Groups["call"].Value.ToLowerInvariant(), "raw bytecode " + r.Value.Trim().TrimStart(';').Trim()));
+            if (PapyrusDecompiler.RawDump.TryRead(line, out var op, out var args) && op == InstructionOpcode.CALLMETHOD && args.Count >= 2
+                && PapyrusDecompiler.RawDump.Name(args[0]) is { } name && (Flip.Contains(name) || LinkChain.Contains(name))
+                && PapyrusDecompiler.RawDump.Identifier(args[1]) is { } target)
+                sc.Calls.Add((fn, PapyrusDecompiler.RawDump.SourceName(target), name.ToLowerInvariant(), "raw bytecode " + line.Trim().TrimStart(';').Trim()));
             if (!any && SelfCallRx.Match(code) is { Success: true } sm)
             {
                 var call = sm.Groups["call"].Value.ToLowerInvariant();

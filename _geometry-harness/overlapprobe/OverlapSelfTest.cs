@@ -23,5 +23,12 @@ static class OverlapSelfTest
         t.Check("CR-N2 the core masters are Skyrim.esm and Update.esm in any case, and nothing else",
                 BaseGamePlugins.IsCoreMaster("skyrim.esm") && BaseGamePlugins.IsCoreMaster("UPDATE.ESM") && BaseGamePlugins.IsCoreMaster("Skyrim.esm")
                 && !BaseGamePlugins.IsCoreMaster("Dawnguard.esm") && !BaseGamePlugins.IsCoreMaster("Skyrim.esp"), "");
+
+        // F5: the patch the console's "[patched, residual]" mark needs; the marks themselves come from probe runs.
+        var patch = F.WritePatch(t.Root);
+        using var po = Mutagen.Bethesda.Skyrim.SkyrimMod.CreateFromBinaryOverlay(patch, F.Rel);
+        var masters = po.ModHeader.MasterReferences.Select(r => r.Master.FileName.String).ToList();
+        t.Check("FF-F0 the fixture writes CrPatch.esp mastering Skyrim.esm, CrA.esp and CrB.esp, and nothing else",
+                masters.SequenceEqual(new[] { "Skyrim.esm", "CrA.esp", "CrB.esp" }), string.Join(", ", masters));
     });
 }
