@@ -49,6 +49,41 @@ static class DriftQuestSelfTest
         string Stated() => string.Join(" ", stated.SelectMany(kv => kv.Value.OrderBy(v => v).Select(v => $"{v.Item1}+{v.Item2}")));
         t.Check("PD3-D-S0 the stated pairs are exactly 1+2, 3+4, 5+6 and 7+8 (the scenes); 1+10 is not stated",
                 stated.Count == 1 && stated[F.Q].SetEquals(new[] { (1, 2), (3, 4), (5, 6), (7, 8) }), Stated());
+
+        // The split test at 600 u (AliasSplits.Find), reach filter on. PatchExists is a stub (no patch): the fixture has none,
+        // and Patched decides nothing these cases read.
+        var closure = DetectorModel.MasterClosure(x.MasterIdx);
+        AliasSplits Splitter() => new(x.Quests, x.NpcPlaced, stated, true, reach, a => AliasStated.AliasRef(a, x.NpcPlaced),
+                                      (k, p) => x.History.AsSeenBy(k, p, closure), x.History.Winning, (_, _) => false,
+                                      p => x.PluginKey[p].FileName.String, k => k.ToString(), c => c.ToString());
+        var sp = Splitter();
+        var found = sp.Find(600f);
+        string Pairs(IEnumerable<Split> s) => string.Join(" ", s.Select(v => $"{v.Alias1}+{v.Alias2}{(v.Stated ? "(stated)" : "")}[{string.Join(",", v.MovedRefs.Select(r => r.ID.ToString("X")))}]"));
+        Split? Of(string a1, string a2) => found.FirstOrDefault(v => v.Alias1 == a1 && v.Alias2 == a2);
+        t.Check("PD3-D-A pair A (1+2): R1 left for another cell; split, stated, the moved record R1 only",
+                Of("Alias1", "Alias2") is { Stated: true, DifferentCell: true } a && a.MovedRefs.SequenceEqual(new[] { F.R1 }), Pairs(found));
+        t.Check("PD3-D-B pair B (3+4): R3 has no packages; dropped by the reach filter (NoPackages 1)",
+                Of("Alias3", "Alias4") is null && sp.reachDropped.GetValueOrDefault("NoPackages") == 1 && sp.reachDropped.Count == 1,
+                $"{Pairs(found)}; dropped {string.Join(", ", sp.reachDropped.Select(kv => $"{kv.Key} {kv.Value}"))}");
+        t.Check("PD3-D-C pair C (5+6): 900 u apart, reach 600 + 600 still overlaps; not split, overlap 1",
+                Of("Alias5", "Alias6") is null && sp.reachOverlap == 1, $"{Pairs(found)}; overlap {sp.reachOverlap}");
+        t.Check("PD3-D-D pair D (7+8): 900 u apart, reach 100 + 100 is disjoint; split, stated, the moved record R7 only",
+                Of("Alias7", "Alias8") is { Stated: true, DifferentCell: false } d && d.MovedRefs.SequenceEqual(new[] { F.R7 }), Pairs(found));
+        t.Check("PD3-D-E pair E (1+10): split but not stated", Of("Alias1", "Alias10") is { Stated: false }, Pairs(found));
+        t.Check("PD3-D-N exactly three pairs split (A, D, E)", found.Count == 3, Pairs(found));
+        t.Check("PD3-D-V skips: NoAuthoringView 1 (alias 9), NonPositional 1 (alias 11), MultiPlacement 1 (alias 12), NoWinning 0; 9 aliases resolved, 36 pairs judged",
+                sp.skipNoAuthoringView == 1 && sp.skipNonPositional == 1 && sp.skipMultiPlacement == 1 && sp.skipNoWinning == 0
+                && sp.aliasesResolved == 9 && sp.pairsJudged == 36,
+                $"noView {sp.skipNoAuthoringView}, nonPos {sp.skipNonPositional}, multi {sp.skipMultiPlacement}, noWin {sp.skipNoWinning}, resolved {sp.aliasesResolved}, judged {sp.pairsJudged}");
+
+        // The fixed order (DfFix puts R1 and R7 back): nothing splits.
+        var xf = new Walked(w.Order.Append(w.Fix).ToList());
+        var closureF = DetectorModel.MasterClosure(xf.MasterIdx);
+        var reachF = new ActorReach(xf.PackFacts, xf.History.Winning, xf.RefBase, xf.NpcPackages, xf.NpcTemplated);
+        var fixedSplits = new AliasSplits(xf.Quests, xf.NpcPlaced, AliasStated.Of(xf.Scenes, xf.Quests, xf.PackageTargets), true, reachF,
+                                          a => AliasStated.AliasRef(a, xf.NpcPlaced), (k, p) => xf.History.AsSeenBy(k, p, closureF), xf.History.Winning,
+                                          (_, _) => false, p => xf.PluginKey[p].FileName.String, k => k.ToString(), c => c.ToString()).Find(600f);
+        t.Check("PD3-D-F with DfFix loaded, no pair is split", fixedSplits.Count == 0, Pairs(fixedSplits));
     });
 
     /// <summary>Pass 1 of a real run over <paramref name="order"/>: the tables Program.cs declares, filled by DriftIndex.</summary>

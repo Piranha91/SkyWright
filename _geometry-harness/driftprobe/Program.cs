@@ -307,14 +307,7 @@ Snap? Winning(FormKey refKey) => history.Winning(refKey);
 // constantly, and reading that as "anchored to something that is gone" buries every real finding.
 // Matched on the raw id, not a FormKey: a plugin with an unusual master list renders the same
 // 0x14 against its OWN ModKey, and Bethesda reserves the low ids so nothing else can claim it.
-static bool IsPlayerRef(FormKey k) => k.ID == 0x14;
-
-FormKey? AliasRef(AliasInfo a)
-{
-    if (a.Forced is { } f) return IsPlayerRef(f) ? null : f;
-    if (a.UniqueNpc is { } n && npcPlaced.TryGetValue(n, out var l) && l.Count == 1) return l[0];
-    return null;
-}
+FormKey? AliasRef(AliasInfo a) => AliasStated.AliasRef(a, npcPlaced);
 string CellOf(FormKey c) => cellName.TryGetValue(c, out var v) ? (v.Edid ?? c.ToString()) + (v.Interior ? " (int)" : "") : c.ToString();
 string NameOf(FormKey refKey)
 {
@@ -381,8 +374,6 @@ if (bosOn)
 // but reported apart and below, because it may be nothing.
 var statedPairs = AliasStated.Of(scenes, quests, packageTargets);   // quest -> unordered alias pairs (AliasSplits.cs)
 
-static (int, int) Pair(int a, int b) => AliasStated.Pair(a, b);
-
 int statedTotal = statedPairs.Values.Sum(v => v.Count);
 Console.WriteLine();
 Console.WriteLine($"stated relationships: {scenes.Count:N0} winning scenes, {packageTargets.Count:N0} packages with an alias target");
@@ -442,7 +433,8 @@ long skipNonPositional = 0, skipMultiPlacement = 0, skipNoAuthoringView = 0, ski
 long aliasesResolved = 0, pairsJudged = 0;
 // The reach filter's own unjudgeable count, by reason — the pairs CHECK 2 used to report on a
 // metric the field test disqualified. Counted, named, never quietly dropped.
-var reachDropped = new Dictionary<string, int>();
+var splits = new AliasSplits(quests, npcPlaced, statedPairs, reachFilter, reach, AliasRef, AsSeenBy, Winning, PatchExists, PluginName, NameOf, CellOf);
+var reachDropped = splits.reachDropped;
 long reachOverlap = 0;
 // "Governing" has two honest readings and the records do not settle which is right: the
 // HIGHEST-PRIORITY package that positions the actor, or the one SCHEDULED for most of the day.
@@ -455,92 +447,10 @@ long reachReadingDisagrees = 0;
 // number reveals.
 List<Split> FindSplits(float nearU)
 {
-var split = new List<Split>();
-foreach (var q in quests.Values)
-{
-    var resolved = new List<(AliasInfo A, FormKey Ref, Snap Then, Snap Now)>();
-    foreach (var a in q.Aliases)
-    {
-        if (AliasRef(a) is not { } rk)
-        {
-            if (a.UniqueNpc is { } n0 && npcPlaced.TryGetValue(n0, out var l0) && l0.Count > 1) skipMultiPlacement++;
-            else skipNonPositional++;
-            continue;
-        }
-        if (AsSeenBy(rk, q.Plugin) is not { } then) { skipNoAuthoringView++; continue; }
-        if (Winning(rk) is not { } now) { skipNoWinning++; continue; }
-        resolved.Add((a, rk, then, now));
-    }
-    aliasesResolved += resolved.Count;
-
-    for (int i = 0; i < resolved.Count; i++)
-        for (int j = i + 1; j < resolved.Count; j++)
-        {
-            var (a1, r1, t1, n1) = resolved[i];
-            var (a2, r2, t2, n2) = resolved[j];
-            if (r1 == r2) continue;
-            // Counted here, where the pair is actually compared: the emit's Coverage must say how many
-            // pairs the split test JUDGED, not how many came out split. Zero findings over a judged
-            // population and zero findings because nothing was judged are different answers.
-            pairsJudged++;
-            bool togetherThen = t1.Cell == t2.Cell;
-            float was = togetherThen ? Dist(t1.Pos, t2.Pos) : float.PositiveInfinity;
-            bool apartNow = n1.Cell != n2.Cell;
-            float isNow = apartNow ? float.PositiveInfinity : Dist(n1.Pos, n2.Pos);
-            // The split decision is DetectorModel.CameApart — proven by construction in proofprobe:
-            // together = same cell within nearU; split = different cells now, or drawn apart past
-            // max(nearU, 3× the authored distance). A pair that moved TOGETHER is fine.
-            if (!DetectorModel.CameApart(togetherThen, was, !apartNow, isNow, nearU)) continue;
-
-            // THE REACH FILTER (2026-08-31). CameApart is a statement about two AUTHORED
-            // placements; the field test showed that only predicts runtime distance when each
-            // actor's own packages keep it at its placement. Ask that first, and where the answer
-            // is yes, ask the question the placements can then answer: are the two reachable
-            // areas disjoint? Anything else is not a weaker finding, it is not a finding.
-            if (reachFilter)
-            {
-                var reach1 = ReachOf(r1, n1);
-                var reach2 = ReachOf(r2, n2);
-                bool boundByPriority = reach1.Verdict == ReachVerdict.PlacementBound
-                                    && reach2.Verdict == ReachVerdict.PlacementBound;
-                var cov1 = ReachOf(r1, n1, byCoverage: true);
-                var cov2 = ReachOf(r2, n2, byCoverage: true);
-                bool boundByCoverage = cov1.Verdict == ReachVerdict.PlacementBound
-                                    && cov2.Verdict == ReachVerdict.PlacementBound;
-                if (boundByPriority != boundByCoverage) reachReadingDisagrees++;
-                if (reach1.Verdict != ReachVerdict.PlacementBound) { Bump(reachDropped, reach1.Verdict.ToString()); continue; }
-                if (reach2.Verdict != ReachVerdict.PlacementBound) { Bump(reachDropped, reach2.Verdict.ToString()); continue; }
-                if (!DetectorModel.BubblesDisjoint(isNow, reach1.Radius, reach2.Radius)) { reachOverlap++; continue; }
-            }
-
-            bool objTarget = q.Objectives.Any(o => o.TargetAliasIds.Contains(a1.Id) || o.TargetAliasIds.Contains(a2.Id));
-            bool stated = statedPairs.TryGetValue(q.Key, out var sp) && sp.Contains(Pair(a1.Id, a2.Id));
-            int moverPlugin = n1.Plugin != t1.Plugin ? n1.Plugin : n2.Plugin;
-            bool patched = PatchExists(q.Plugin, moverPlugin);
-            string movers = string.Join("+", new[] { n1, n2 }
-                .Where(s => s.Plugin != t1.Plugin && s.Plugin != t2.Plugin)
-                .Select(s => PluginName(s.Plugin)).Distinct());
-            var moverList = new[] { n1, n2 }
-                .Where(s => s.Plugin != t1.Plugin && s.Plugin != t2.Plugin)
-                .Select(s => PluginName(s.Plugin)).Distinct().ToArray();
-            var moverIdxList = new[] { n1, n2 }
-                .Where(s => s.Plugin != t1.Plugin && s.Plugin != t2.Plugin)
-                .Select(s => s.Plugin).Distinct().ToArray();
-            // The cells intent classification judges the mover's work against: where the pair was
-            // authored (FIRST — its interior flag is the scope-mismatch input) plus wherever the
-            // pair stands now.
-            var affectedCells = new[] { t1.Cell, n1.Cell, n2.Cell }.Distinct().ToArray();
-            split.Add(new Split(q.Label, PluginName(q.Plugin), a1.Name, a2.Name,
-                                NameOf(r1), NameOf(r2), CellOf(t1.Cell), CellOf(n1.Cell), CellOf(n2.Cell),
-                                was, isNow, apartNow, movers, objTarget, stated, patched,
-                                q.Objectives.Where(o => o.TargetAliasIds.Contains(a1.Id) || o.TargetAliasIds.Contains(a2.Id))
-                                            .Select(o => o.Text).FirstOrDefault(t => !string.IsNullOrWhiteSpace(t)),
-                                new[] { (Key: r1, Moved: n1.Plugin != t1.Plugin), (Key: r2, Moved: n2.Plugin != t2.Plugin) }
-                                    .Where(x => x.Moved).Select(x => x.Key).ToArray(),
-                                new[] { r1, r2 }, q.Key, moverList, moverIdxList, affectedCells));
-        }
-}
-return split;
+var found = splits.Find(nearU);
+skipNonPositional = splits.skipNonPositional; skipMultiPlacement = splits.skipMultiPlacement; skipNoAuthoringView = splits.skipNoAuthoringView; skipNoWinning = splits.skipNoWinning;
+aliasesResolved = splits.aliasesResolved; pairsJudged = splits.pairsJudged; reachOverlap = splits.reachOverlap; reachReadingDisagrees = splits.reachReadingDisagrees;
+return found;
 }
 
 var split = FindSplits(near);
@@ -835,12 +745,6 @@ static string Excerpt(string s, int max)
     s = s.Replace("\\r", " ").Replace("\\n", " ").Replace("\\t", " ");
     s = System.Text.RegularExpressions.Regex.Replace(s, @"\s+", " ").Trim();
     return s.Length <= max ? s : s[..max] + "…";
-}
-
-static float Dist(Vec3 a, Vec3 b)
-{
-    float dx = a.X - b.X, dy = a.Y - b.Y, dz = a.Z - b.Z;
-    return MathF.Sqrt(dx * dx + dy * dy + dz * dz);
 }
 
 record Split(string Quest, string QuestPlugin, string? Alias1, string? Alias2, string Name1, string Name2,
