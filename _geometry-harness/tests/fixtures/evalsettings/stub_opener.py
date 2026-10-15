@@ -6,6 +6,7 @@ It appends one JSON line per call to STUB_OPENER_LOG and acts as the page would,
   none   do nothing (a forgotten tab: the server must stop on its own timeout)
   probe  POST without the token, POST an invalid body with the token, try the server's port on a non-loopback
          address of this machine, then send the close beacon; every answer is logged
+  alias  log each model field's offered values, POST a Save with models.imageReview=haiku, then the close beacon
 
 The page contract it relies on: the page carries
   <script id="hc-eval-settings" type="application/json">{"token", "saveUrl", "closeUrl", "values"}</script>
@@ -88,6 +89,13 @@ def main() -> int:
                         log["otherConnect"] = s.connect_ex((ip, parsed.port))
                     finally:
                         s.close()
+                log["close"] = post(close, {"token": token})
+            elif mode == "alias":
+                log["modelAllowed"] = {o["key"]: o.get("allowed") for o in blk.get("options") or []
+                                       if o.get("type") == "model"}
+                values = json.loads(json.dumps(blk.get("values") or {}))
+                values.setdefault("models", {})["imageReview"] = "haiku"
+                log["aliasSave"] = post(save, {"token": token, "settings": values})
                 log["close"] = post(close, {"token": token})
         return 0
     finally:

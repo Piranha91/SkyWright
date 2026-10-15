@@ -7,13 +7,17 @@ Each test uses its own empty HOUSECARL_EVAL_SETTINGS location and the stub opene
 test reads the user's own settings file. 1 a fresh user gets the window once; 2 a saved choice is honoured by
 `evalrun plan`; 3 flag > environment > file > built-in default; 4 a missing file with --no-window; 5 refusals of a bad
 file; 6 closing without Save; 7 the server is loopback-only and checks the token and the body; 8 a later save does
-not change a frozen plan. Light: fake probes only, the state checks only.
+not change a frozen plan; 9 a model choice is session, off where allowed, or an ID with a shipped agent (a short
+name such as `haiku` is refused); 10 `route` names that agent, and refuses outside Claude Code; 11 the shipped agent
+files name full IDs and are the accepted list; 12 the window offers only those and refuses a short name. Light: fake
+probes only, the state checks only.
 """
 from __future__ import annotations
 
 import hashlib
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -257,11 +261,139 @@ def t8(root):
     check(sha(run / "plan.json") == plan_sha, "8: the plan is unchanged")
 
 
+AGENTS = HARNESS.parent / "plugin" / "agents"
+SHORT_NAMES = ("haiku", "sonnet", "opus", "fable")
+MODEL_KEYS = ("models.recordChecks", "models.imageReview", "models.flipPlan", "models.rewriteExplanations")
+
+
+def shipped_agents() -> dict:
+    """{model ID: agent name} read here, independently of evalsettings.py, from each file's frontmatter."""
+    out = {}
+    for f in sorted(AGENTS.glob("*.md")):
+        lines = f.read_text(encoding="utf-8").splitlines()
+        end = lines.index("---", 1)
+        head = dict(x.split(": ", 1) for x in lines[1:end] if ": " in x)
+        out[head["model"]] = {"name": head["name"], "stem": f.stem, "keys": set(head),
+                              "headLines": lines[1:end]}
+    return out
+
+
+def t9(root):
+    b = Box(root, "t9")
+    ids = sorted(shipped_agents())
+    check(len(ids) >= 3, f"9: the plugin ships agents to route to ({ids})")
+    for v in ("session", *ids):
+        r = b.es("set", f"models.imageReview={v}")
+        check(r.returncode == 0, f"9: `{v}` is accepted ({(r.stdout + r.stderr)[-200:]!r})")
+    r = b.es("set", "models.rewriteExplanations=off")
+    check(r.returncode == 0, "9: off is accepted where allowed")
+    r = b.es("set", "models.imageReview=off")
+    check(r.returncode == 2 and "cannot be turned off" in r.stderr and "VALUE one of session" in r.stderr
+          and "off" not in r.stderr.split("one of")[-1],
+          "9: off is refused where not allowed, and not offered")
+    before = sha(b.file)
+    for v in SHORT_NAMES:
+        r = b.es("set", f"models.imageReview={v}")
+        out = r.stdout + r.stderr
+        check(r.returncode == 2 and "a short name the host can resolve to an older model" in out
+              and all(i in out for i in ids) and out.strip().count("\n") == 0,
+              f"9: the short name `{v}` is refused in one sentence listing the accepted IDs ({out.strip()!r})")
+    r = b.es("set", "models.imageReview=claude-haiku-4-5")
+    out = r.stdout + r.stderr
+    check(r.returncode == 2 and "has no houseCARL agent to run it" in out,
+          f"9: a full ID with no shipped agent is refused ({out.strip()!r})")
+    check(sha(b.file) == before, "9: a refused set leaves the file unchanged")
+    doc = load(b.file)
+    doc["models"]["imageReview"] = "haiku"
+    b.file.write_text(json.dumps(doc), encoding="utf-8")
+    for cmd in (("validate", b.file), ("show",), ("route", "models.imageReview")):
+        r = b.es(*cmd)
+        out = r.stdout + r.stderr
+        check(r.returncode == 2 and str(b.file) in out and "short name" in out,
+              f"9: a saved short name makes `{cmd[0]}` refuse, naming the file")
+    rp = subprocess.run([sys.executable, str(HARNESS / "evalreport.py"), "plan", "--bundle", str(b.dir / "nobundle"),
+                         "--out", str(b.dir / "report")], capture_output=True, text=True, env=b.env, timeout=120)
+    check(rp.returncode != 0 and "short name" in rp.stderr,
+          f"9: a saved short name makes evalreport refuse at its settings load ({rp.stderr.strip()[-200:]!r})")
+    fix = rp.stderr.split("run `", 1)[-1].split("`", 1)[0].replace("VALUE", ids[0])
+    check(fix == f"evalsettings.py set models.imageReview={ids[0]}", f"9: the refusal names the one-step fix ({fix!r})")
+    r = b.es(*fix.split()[1:])
+    v = b.es("validate", b.file)
+    check(r.returncode == 0 and v.returncode == 0 and load(b.file)["models"]["imageReview"] == ids[0],
+          f"9: that one `set` repairs the refused file ({(r.stdout + r.stderr).strip()[-200:]!r})")
+
+
+def t10(root):
+    b = Box(root, "t10")
+    agents = shipped_agents()
+    cc = {"CLAUDECODE": "1"}
+    for key, mid in zip(MODEL_KEYS, sorted(agents) * 2):
+        b.es("set", f"{key}={mid}")
+        r = b.es("route", key, extra_env=cc)
+        try:
+            j = json.loads(r.stdout)
+        except ValueError:
+            j = {}
+        check(r.returncode == 0 and j.get("use") == "agent" and j.get("value") == mid
+              and j.get("agent") == f"housecarl:{agents[mid]['name']}",
+              f"10: {key}={mid} routes to housecarl:{agents[mid]['name']} ({r.stdout.strip()!r})")
+        env = {k: v for k, v in b.env.items() if k != "CLAUDECODE"}
+        rn = subprocess.run([sys.executable, str(EVALSETTINGS), "route", key], capture_output=True, text=True, env=env)
+        check(rn.returncode == 2 and "only Claude Code can start an agent on a named model" in rn.stderr
+              and not rn.stdout.strip(),
+              f"10: {key}={mid} outside Claude Code is refused, printing no agent ({rn.stderr.strip()!r})")
+    b.es("set", "models.flipPlan=session", "models.rewriteExplanations=off")
+    env = {k: v for k, v in b.env.items() if k != "CLAUDECODE"}
+    rs = subprocess.run([sys.executable, str(EVALSETTINGS), "route", "models.flipPlan"], capture_output=True, text=True,
+                        env=env)
+    check(rs.returncode == 0 and json.loads(rs.stdout or "{}").get("agent") == "general-purpose",
+          "10: session routes to general-purpose on any host")
+    ro = b.es("route", "models.rewriteExplanations", extra_env=cc)
+    check(ro.returncode == 0 and json.loads(ro.stdout or "{}").get("use") == "off", "10: off routes to no agent")
+    rk = b.es("route", "evaluation.depth", extra_env=cc)
+    check(rk.returncode == 2 and "is not a model setting" in rk.stderr, "10: a key that is not a model is refused")
+
+
+def t11(root):
+    agents = shipped_agents()
+    check(bool(agents), "11: plugin/agents holds agent definitions")
+    for mid, a in agents.items():
+        check(mid.startswith("claude-") and mid not in SHORT_NAMES, f"11: {a['stem']} names a full model ID ({mid})")
+        check(a["name"] == a["stem"] == f"model-{mid}", f"11: {a['stem']}: file, name and model agree")
+        check("tools" not in a["keys"], f"11: {a['stem']} has no tools line, so it keeps the host's tools")
+    b = Box(root, "t11")
+    r = b.es("show", "--json")
+    check(r.returncode == 0, "11: show runs")
+    page = b.dir / "page.html"
+    b.es("window", "--page-only", page)
+    m = re.search(r'<script id="hc-eval-settings" type="application/json">(.*?)</script>', page.read_text("utf-8"),
+                  re.S)
+    blk = json.loads(m.group(1)) if m else {}
+    offered = {o["key"]: o.get("allowed") for o in blk.get("options", []) if o.get("type") == "model"}
+    check(offered.get("models.imageReview") == ["session", *agents]
+          and offered.get("models.rewriteExplanations") == ["session", "off", *agents],
+          f"11: the accepted list is exactly the shipped agents' models ({offered.get('models.imageReview')})")
+
+
+def t12(root):
+    b = Box(root, "t12")
+    agents = shipped_agents()
+    b.ensure(mode="alias")
+    c = (b.calls() or [{}])[0]
+    allowed = c.get("modelAllowed") or {}
+    check(set(allowed) == set(MODEL_KEYS), f"12: the window shows each model field ({sorted(allowed)})")
+    check(all(set(v or []) == {"session", *agents} | ({"off"} if k == "models.rewriteExplanations" else set())
+              and not set(v or []) & set(SHORT_NAMES) for k, v in allowed.items()),
+          "12: each model field offers exactly session (off where allowed) and the shipped IDs, no short name")
+    check(c.get("aliasSave") == 400 and not b.file.exists(), "12: a Save carrying a short name is refused; nothing written")
+
+
 def main() -> int:
     root = Path(tempfile.mkdtemp(prefix="evalsettings-"))
     os.environ["HOUSECARL_EVAL_SETTINGS"] = str(root / "no-settings" / NAME)
     try:
-        for label, fn in (("1", t1), ("2", t2), ("3", t3), ("4", t4), ("5", t5), ("6", t6), ("7", t7), ("8", t8)):
+        for label, fn in (("1", t1), ("2", t2), ("3", t3), ("4", t4), ("5", t5), ("6", t6), ("7", t7), ("8", t8),
+                         ("9", t9), ("10", t10), ("11", t11), ("12", t12)):
             guarded(label, lambda fn=fn: fn(root))
     finally:
         shutil.rmtree(root, ignore_errors=True)
