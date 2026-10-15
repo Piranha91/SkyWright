@@ -365,6 +365,9 @@ sealed class Selector
             null);
     }
 
+    /// <summary>Rule v2 (scaffold: not yet implemented; returns the v1 selection).</summary>
+    public Selection SelectV2(NewcomerSpec s) => Select(s);
+
     List<string> _newcomerDirs = new();
 
     /// <summary>Whether a provider is the newcomer's own folder or one of its companions.</summary>
