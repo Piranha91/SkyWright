@@ -127,9 +127,12 @@ for (int p = 0; p < paths.Count; p++)
     if ((p + 1) % 150 == 0) Console.WriteLine($"   ... {p + 1}/{paths.Count} plugins, {idx.LandSnaps:N0} LAND snaps, {sw.Elapsed.TotalSeconds:0}s");
 }
 var closure = DetectorModel.MasterClosure(masterIdx);
-var landCells = idx.Cells.Values.Where(c => !c.Interior && c.GX != int.MinValue && c.Land.Count > 0).ToList();
+var landCells = SeamFindings.LandCells(idx);
+int heightlessCells = landCells.Count(c => c.LandWinnerDeclaresNone);
 Console.WriteLine($"indexed {landCells.Count:N0} exterior cells with a LAND over {idx.LandSnaps:N0} distinct statements; "
                 + $"{landCells.Sum(c => c.LandUnreadable):N0} unreadable LAND provision(s)  ({sw.Elapsed.TotalSeconds:0.0}s)");
+Console.WriteLine($"   LAND provisions declaring no heights: {idx.LandDeclaresNoneProvisions:N0}; cells whose winning LAND declares none "
+                + $"(no ground; their edges are not measured): {heightlessCells:N0}");
 Console.WriteLine($"   plugins that could not be read (contribute nothing, counted per rule 6): {unreadable.Count:N0}" + (unreadable.Count > 0 ? "  — " + string.Join(", ", unreadable) : ""));
 
 PluginKind Kind(int p) => idx.KindOf(p);
@@ -168,8 +171,9 @@ foreach (var g in landChangers.Take(listN)) Console.WriteLine($"   {g.Count(),6}
 // ---------------------------------------------------------------------------------------
 // Pass 2 — every edge-adjacent pair.
 // ---------------------------------------------------------------------------------------
-var (pairs, dupSkipped) = SeamFindings.MeasurePairs(idx, landCells, closure, eps, Kind);
-Console.WriteLine($"\nmeasured {pairs.Count:N0} edge-adjacent pairs ({dupSkipped:N0} cells at duplicate grid points skipped)  ({sw.Elapsed.TotalSeconds:0.0}s)");
+var (pairs, dupSkipped, heightlessPairs) = SeamFindings.MeasurePairs(idx, landCells, closure, eps, Kind);
+Console.WriteLine($"\nmeasured {pairs.Count:N0} edge-adjacent pairs ({dupSkipped:N0} cells at duplicate grid points skipped; "
+                + $"{heightlessPairs:N0} pairs not measurable, a winning LAND declaring no heights)  ({sw.Elapsed.TotalSeconds:0.0}s)");
 
 // ---------------------------------------------------------------------------------------
 // The floor, then the class.
@@ -256,8 +260,8 @@ if (emitPath is not null)
     var coverage = new List<CoverageLine>
     {
         new("plugins", paths.Count - unreadable.Count, new Dictionary<string, long> { ["UnreadablePlugin"] = unreadable.Count }),
-        new("exterior cells with a LAND", landCells.Count, new Dictionary<string, long> { ["UnreadableLand"] = landCells.Sum(c => c.LandUnreadable) }, new Dictionary<string, long> { ["DuplicateGridPoint"] = dupSkipped }),
-        new("edge-adjacent pairs", pairs.Count(p => p.Verdict != LandSeamVerdict.Unjudgeable), new Dictionary<string, long> { ["Undecodable"] = pairs.Count(p => p.Verdict == LandSeamVerdict.Unjudgeable) },
+        new("exterior cells with a LAND", landCells.Count - heightlessCells, new Dictionary<string, long> { ["UnreadableLand"] = landCells.Sum(c => c.LandUnreadable), ["DeclaresNoHeights"] = heightlessCells }, new Dictionary<string, long> { ["DuplicateGridPoint"] = dupSkipped }),
+        new("edge-adjacent pairs", pairs.Count(p => p.Verdict != LandSeamVerdict.Unjudgeable), new Dictionary<string, long> { ["Undecodable"] = pairs.Count(p => p.Verdict == LandSeamVerdict.Unjudgeable), ["DeclaresNoHeights"] = heightlessPairs },
             new Dictionary<string, long> { ["BethesdaFloor"] = pairs.Count(p => p.BothBethesda) }, $"class {cls.Count:N0} at eps {eps:0.#}"),
     };
     // LAND heightmaps carry no placed references, so no enable population applies; said rather than left null.

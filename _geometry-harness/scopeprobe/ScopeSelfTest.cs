@@ -20,14 +20,18 @@ static class ScopeSelfTest
         t.Check("PD2-F0 the fixtures write: MovedRefFixture, the broken MrA copy, the door plugin",
                 mr.All(File.Exists) && File.Exists(broken) && File.Exists(door), string.Join(", ", mr.Append(broken).Append(door).Select(Path.GetFileName)));
 
-        FootprintLists WalkOf(params (string Name, string Path)[] targets)
+        // The configuration holds the targets and MrMaster.esm, the master MrA.esp and the broken copy name: a walk
+        // checks a target's masters against the configuration, so a case about something else loads them.
+        var master = mr.Single(p => Path.GetFileName(p) == "MrMaster.esm");
+        FootprintLists WalkIn(IEnumerable<(string Name, string Path)> others, params (string Name, string Path)[] targets)
         {
-            var byName = targets.Where(x => x.Path != "").ToDictionary(x => x.Name, x => Plugin(x.Name, x.Path), StringComparer.OrdinalIgnoreCase);
+            var byName = targets.Concat(others).Where(x => x.Path != "").ToDictionary(x => x.Name, x => Plugin(x.Name, x.Path), StringComparer.OrdinalIgnoreCase);
             var o = new FootprintLists();
             foreach (var (name, _) in targets)
                 TargetFootprint.Walk(name, byName, byName.Count, "self-test", new Dictionary<string, string>(), t.Root, t.Root, 50, o);
             return o;
         }
+        FootprintLists WalkOf(params (string Name, string Path)[] targets) => WalkIn(new[] { ("MrMaster.esm", master) }, targets);
 
         // PD2-S1: completeness and the exit code.
         var good = WalkOf(("MrA.esp", mrA));
@@ -45,9 +49,42 @@ static class ScopeSelfTest
         // PD2-S2: a target holding a record that cannot be read.
         var bad = WalkOf(("MrA.esp", broken));
         t.Check("PD2-S2 the broken MrA: no footprint, one walk failure naming MrA.esp, incomplete",
-                bad.Summaries.Count == 0 && bad.WalkFailures.Count == 1 && bad.WalkFailures[0].StartsWith("'MrA.esp' ")
+                bad.Summaries.Count == 0 && bad.WalkFailures.Count == 1 && bad.WalkFailures[0].StartsWith("'MrA.esp' could not be walked for its placements")
                 && !ScopeOutcome.Complete(bad.WalkFailures.Count, bad.Summaries.Count, 1),
                 string.Join(" | ", bad.WalkFailures) + $"; unreadable records {bad.UnreadableRecords.Count}");
+
+        // SS-1: a target whose master the configuration does not load. The game will not start on it, and records that
+        // override the master's cannot be told from new ones, so the footprint is not measured: one walk failure naming
+        // the target and the missing master, no footprint, the scope incomplete (exit 1).
+        var orphan = WalkIn(Array.Empty<(string, string)>(), ("MrA.esp", mrA));
+        t.Check("SS-1 MrA.esp without MrMaster.esm: one walk failure naming MrA.esp and MrMaster.esm, no footprint, incomplete",
+                orphan.Summaries.Count == 0 && orphan.WalkFailures.Count == 1 && orphan.WalkFailures[0].StartsWith("'MrA.esp' ")
+                && orphan.WalkFailures[0].Contains("'MrMaster.esm'")
+                && !ScopeOutcome.Complete(orphan.WalkFailures.Count, orphan.Summaries.Count, 1)
+                && ScopeOutcome.ExitCode(ScopeOutcome.Complete(orphan.WalkFailures.Count, orphan.Summaries.Count, 1)) == 1,
+                $"summaries {orphan.Summaries.Count}; " + string.Join(" | ", orphan.WalkFailures));
+        var withMaster = WalkIn(new[] { ("MrMaster.esm", master) }, ("MrA.esp", mrA));
+        t.Check("SS-1 control: MrA.esp with MrMaster.esm loaded (not a target): footprint measured, no walk failure",
+                withMaster.Summaries.Count == 1 && withMaster.WalkFailures.Count == 0, string.Join(" | ", withMaster.WalkFailures));
+        var masterOnly = WalkIn(Array.Empty<(string, string)>(), ("MrMaster.esm", master));
+        t.Check("SS-1 control: a master-less target (MrMaster.esm) alone: footprint measured, no walk failure",
+                masterOnly.Summaries.Count == 1 && masterOnly.WalkFailures.Count == 0, string.Join(" | ", masterOnly.WalkFailures));
+
+        // SS-4: a target holding a record whose body cannot be read: SdBad.esp's one STAT, marked compressed, with a body
+        // that does not inflate. The open succeeds (the overlay frames groups and headers only); the read of that record
+        // fails inside the record walk, so the unreadable-record catch names it (FrameCheck locates it by its bytes).
+        var badBody = ScopeBadRecordFixture.Write(Path.Combine(t.Root, "badbody"));
+        var bb = WalkOf(("SdBad.esp", badBody));
+        string Rows(FootprintLists o) => string.Join(" | ", o.UnreadableRecords.Select(x => System.Text.Json.JsonSerializer.Serialize(x)));
+        bool namesStat = bb.UnreadableRecords.Count == 1 && Rows(bb).Contains("\"signature\":\"STAT\"")
+                         && Rows(bb).Contains(ScopeBadRecordFixture.Bad.ToString()) && Rows(bb).Contains("\"located\":\"frame\"");
+        t.Check("SS-4 the unreadable STAT: one walk failure 'has a record that cannot be read' naming it, no footprint, incomplete",
+                bb.Summaries.Count == 0 && bb.WalkFailures.Count == 1
+                && bb.WalkFailures[0].StartsWith("'SdBad.esp' has a record that cannot be read (STAT ")
+                && !ScopeOutcome.Complete(bb.WalkFailures.Count, bb.Summaries.Count, 1),
+                string.Join(" | ", bb.WalkFailures));
+        t.Check("SS-4 the unreadable record is listed once: STAT, its FormKey, located by the file's frames",
+                namesStat, Rows(bb));
 
         // PD2-S3: a refused configuration writes the REFUSED line and exits 2.
         var err = new StringWriter();
@@ -104,6 +141,38 @@ static class ScopeDoorFixture
         sub.Cells.Add(cell); block.SubBlocks.Add(sub); mod.Cells.Records.Add(block);
         var path = Path.Combine(dir, Key.FileName.String);
         mod.BeginWrite.ToPath(path).WithLoadOrder(Array.Empty<ISkyrimModGetter>()).Write();
+        return path;
+    }
+}
+
+/// <summary>SdBad.esp: one STAT record whose header says compressed and whose body is not a zlib stream, so reading the
+/// record fails while the file still opens.</summary>
+static class ScopeBadRecordFixture
+{
+    public static readonly ModKey Key = new("SdBad", ModType.Plugin);
+    public static readonly FormKey Bad = new(Key, 0x800);
+
+    public static string Write(string dir)
+    {
+        Directory.CreateDirectory(dir);
+        var mod = new SkyrimMod(Key, SkyrimRelease.SkyrimSE);
+        mod.Statics.Add(new Static(Bad, SkyrimRelease.SkyrimSE) { EditorID = "SdBadStatic", Model = new Model { File = "Meshes/sd/bad.nif" } });
+        var path = Path.Combine(dir, Key.FileName.String);
+        mod.BeginWrite.ToPath(path).WithLoadOrder(Array.Empty<ISkyrimModGetter>()).Write();
+        var b = File.ReadAllBytes(path);
+        // The STAT group's header is 24 bytes: "GRUP", size, label "STAT", ...; its first record follows.
+        int g = -1;
+        for (int i = 0; i + 12 <= b.Length; i++)
+            if (b[i] == 'G' && b[i + 1] == 'R' && b[i + 2] == 'U' && b[i + 3] == 'P' && System.Text.Encoding.ASCII.GetString(b, i + 8, 4) == "STAT") { g = i; break; }
+        if (g < 0) throw new InvalidDataException("SdBad.esp: no STAT group was written");
+        int r = g + 24;
+        if (System.Text.Encoding.ASCII.GetString(b, r, 4) != "STAT") throw new InvalidDataException("SdBad.esp: the STAT group does not start with a STAT record");
+        int size = BitConverter.ToInt32(b, r + 4);
+        if (size < 8) throw new InvalidDataException($"SdBad.esp: the STAT body is {size} bytes, too short to stand in for a compressed one");
+        BitConverter.GetBytes(BitConverter.ToUInt32(b, r + 8) | 0x00040000u).CopyTo(b, r + 8);   // the Compressed flag
+        BitConverter.GetBytes(256u).CopyTo(b, r + 24);                                          // claimed inflated size
+        for (int i = r + 28; i < r + 24 + size; i++) b[i] = 0xFF;                               // not a zlib stream
+        File.WriteAllBytes(path, b);
         return path;
     }
 }

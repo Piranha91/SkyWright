@@ -120,6 +120,8 @@ int exteriorCells = idx.Cells.Values.Count(c => !c.Interior && c.GX != int.MinVa
 int interiorCells = idx.Cells.Values.Count(c => c.Interior);
 Console.WriteLine($"indexed {idx.Cells.Count:N0} cells ({exteriorCells:N0} exterior grid cells, {interiorCells:N0} interiors) over {idx.CellProvisions:N0} provisions; "
                 + $"{idx.WaterSnaps:N0} water snaps, {idx.LandSnaps:N0} LAND snaps, {idx.Worlds.Count} worldspaces  ({sw.Elapsed.TotalSeconds:0.0}s)");
+Console.WriteLine($"   LAND provisions declaring no heights: {idx.LandDeclaresNoneProvisions:N0}; cells whose winning LAND declares none (no ground, "
+                + $"so the winner's visible share is not measured): {idx.Cells.Values.Count(c => c.LandWinnerDeclaresNone):N0}");
 Console.WriteLine($"   plugins that could not be read (contribute nothing, counted per rule 6): {unreadable.Count:N0}" + (unreadable.Count > 0 ? "  — " + string.Join(", ", unreadable) : ""));
 
 PluginKind Kind(int p) => idx.KindOf(p, waterModCells);
@@ -327,7 +329,7 @@ if (emitPath is not null)
         new("exterior cells with water", watered.Count(r => r.Verdict != WaterVerdict.Unjudgeable),
             watered.Where(r => r.Verdict == WaterVerdict.Unjudgeable).GroupBy(r => r.Blocker.ToString()).ToDictionary(g => g.Key, g => (long)g.Count()),
             new Dictionary<string, long> { ["Interior"] = interiorW.Count },
-            $"same-defect control {control.Count:N0} (truth surface under the ground); no LAND to measure {ext.Count(r => r.Physical == PhysicalState.Unmeasured && r.Verdict is not (WaterVerdict.Forwarded or WaterVerdict.Unjudgeable)):N0}"),
+            $"same-defect control {control.Count:N0} (truth surface under the ground); no LAND to measure {ext.Count(r => r.Physical == PhysicalState.Unmeasured && r.Verdict is not (WaterVerdict.Forwarded or WaterVerdict.Unjudgeable)):N0}; winning LAND declares no heights {ext.Count(r => r.Cell.LandWinnerDeclaresNone):N0}"),
         new("edge-adjacent pairs", seams.Count + 0, new Dictionary<string, long>(), null,
             $"seam {seamRows.Count:N0}; inherited {seams.Count(s => s.Verdict == WaterSeamVerdict.Inherited):N0}; joined {seams.Count(s => s.Verdict == WaterSeamVerdict.Joined):N0} (pairs with no disagreement in either arm are not listed)"),
     };
