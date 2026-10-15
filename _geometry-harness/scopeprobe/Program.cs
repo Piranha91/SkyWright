@@ -112,15 +112,7 @@ string dataDir = Path.Combine(GamePath, "Data");
 var sw = Stopwatch.StartNew();
 var cfg = HarnessOrderCli.Resolve(profileName, profileDir, modsDir, dataDir, overwriteDir, GamePath,
                                   orderFile, enablePlugins, disablePlugins);
-if (cfg.Refused)
-{
-    // The word REFUSED is what the controller's receipt validator looks for in the log (PLAN D4's `refused` and
-    // `illegal-configuration` causes), so it is printed here whether or not the reason happens to carry it.
-    Console.Error.WriteLine("REFUSED: " + cfg.RefusedReason);
-    Console.Error.WriteLine("no scope.json was written: a footprint measured in an order the engine would not load "
-                          + "describes a game that cannot start.");
-    return 2;
-}
+if (cfg.Refused) return ScopeOutcome.Refuse(cfg.RefusedReason);
 HarnessOrderCli.Print(cfg);
 
 var identity = cfg.Identity("load-time", "baseline");
@@ -132,153 +124,20 @@ foreach (var v in cfg.Providers) providerKind[v.Name] = v.Kind;
 // ------------------------------------------------------------------------------------------------------------
 // Pass 1 — each target's own footprint.
 // ------------------------------------------------------------------------------------------------------------
-var walkFailures = new List<string>();
-var unreadableRecords = new List<object>();          // records a target holds that cannot be read, each named
-var targetJson = new List<object>();
-var summaries = new List<TargetSummary>();
-var targetPlacedReports = new List<PlacedReport>();
-var destinationDoors = new HashSet<FormKey>();          // teleport destinations, resolved in pass 2
-var perTargetDoors = new List<(string Target, List<(FormKey From, FormKey To)> Links)>();
+var lists = new FootprintLists();
+var walkFailures = lists.WalkFailures;
+var unreadableRecords = lists.UnreadableRecords;          // records a target holds that cannot be read, each named
+var targetJson = lists.TargetJson;
+var summaries = lists.Summaries;
+var targetPlacedReports = lists.TargetPlacedReports;
+var destinationDoors = lists.DestinationDoors;          // teleport destinations, resolved in pass 2
+var perTargetDoors = lists.PerTargetDoors;
 
 __run.Feature("targets", targetNames.Count, "targets")
      .Stage("footprint", "walking targets", targetNames.Count, "targets");
 
 foreach (var wanted in targetNames)
-{
-    if (!byName.TryGetValue(wanted, out var plugin))
-    {
-        walkFailures.Add($"'{wanted}' is not in the resolved configuration ({cfg.Plugins.Count} plugins, {cfg.Source}); "
-                       + "its footprint was not measured, so nothing below describes it");
-        continue;
-    }
-
-    ISkyrimModGetter mod;
-    try { mod = LoadOrderResolver.OpenOverlay(plugin.Path, dataDir); }
-    catch (Exception ex)
-    {
-        walkFailures.Add($"'{wanted}' could not be opened — {Concise(ex)}; its footprint was not measured");
-        continue;
-    }
-
-    IMajorRecordGetter? current = null;   // the record being read, named when a read fails and the bytes name none
-    try
-    {
-        var self = mod.ModKey;
-        var types = new SortedDictionary<string, long[]>(StringComparer.Ordinal);   // sig -> [new, override]
-        var classNames = new Dictionary<string, string>(StringComparer.Ordinal);
-        var linksByMaster = new SortedDictionary<string, long>(StringComparer.OrdinalIgnoreCase);
-        var assetPaths = new List<string>();
-        long assetCount = 0, scriptCarriers = 0, records = 0;
-        int signatureUnresolved = 0;
-
-        foreach (var rec in mod.EnumerateMajorRecords())
-        {
-            current = rec;
-            records++;
-            var (sig, cls, resolved) = SignatureOf(rec.GetType());
-            if (!resolved) signatureUnresolved++;
-            if (!types.TryGetValue(sig, out var counts)) types[sig] = counts = new long[2];
-            counts[rec.FormKey.ModKey == self ? 0 : 1]++;
-            classNames[sig] = cls;
-
-            if (rec is IHaveVirtualMachineAdapterGetter { VirtualMachineAdapter: not null }) scriptCarriers++;
-            if (rec is IModeledGetter { Model: { } model } && model.File.ToString() is { Length: > 0 } path)
-            {
-                assetCount++;
-                if (assetPaths.Count < assetsListed) assetPaths.Add(path);
-            }
-            foreach (var link in rec.EnumerateFormLinks())
-            {
-                if (link.FormKey.IsNull) continue;
-                var master = link.FormKey.ModKey.FileName.String;
-                linksByMaster[master] = linksByMaster.TryGetValue(master, out var n) ? n + 1 : 1;
-            }
-        }
-
-        // The group walk PlaceIndex makes, over this one plugin: what it FILES, and where.
-        var placed = new PlacedWalk();
-        var doors = new List<(FormKey From, FormKey To)>();
-        try { placed.Walk(mod, doors); }
-        catch (Exception ex)
-        {
-            walkFailures.Add($"'{wanted}' could not be walked for its placements — {Concise(ex)}; its placement "
-                           + "footprint is not reported, so no placement trigger reads it");
-            continue;
-        }
-        foreach (var d in doors) destinationDoors.Add(d.To);
-        perTargetDoors.Add((plugin.Name, doors));
-
-        int nexusId = 0;
-        string? providerNote = null;
-        providerKind.TryGetValue(plugin.Provider, out var kind);
-        if (kind == "mod")
-        {
-            var meta = Mo2ModMeta.Read(Path.Combine(modsDir, plugin.Provider, "meta.ini"));
-            if (meta is null) providerNote = "the provider mod folder has no readable meta.ini";
-            else if (meta.ModId <= 0) providerNote = "the provider mod folder's meta.ini records no Nexus mod id";
-            else nexusId = meta.ModId;
-        }
-        else providerNote = $"the provider is '{plugin.Provider}' ({kind ?? "unknown kind"}), not a mod folder, "
-                          + "so there is no meta.ini to read a Nexus id from";
-
-        var report = placed.Report();
-        targetPlacedReports.Add(report);
-        summaries.Add(new TargetSummary(
-            plugin.Name, plugin.Sha256, plugin.Provider, kind ?? "unknown", records, types.Count,
-            plugin.Masters.Count, scriptCarriers, assetCount, nexusId > 0 ? nexusId : null,
-            report.Total, report.Interior, report.Exterior, report.Persistent, report.Navmesh, report.Land,
-            report.Cells.Count, report.ExteriorCells, report.Worldspaces.Count));
-
-        targetJson.Add(new
-        {
-            name = plugin.Name,
-            sha256 = plugin.Sha256,
-            bytes = plugin.Bytes,
-            provider = plugin.Provider,
-            providerKind = kind ?? "unknown",
-            masterFlag = plugin.MasterFlag,
-            lightFlag = plugin.LightFlag,
-            footprint = new
-            {
-                records,
-                recordTypes = types.ToDictionary(
-                    t => t.Key,
-                    t => (object)new { @new = t.Value[0], @override = t.Value[1], className = classNames[t.Key] }),
-                signatureUnresolved,
-                placed = report.ToJson(),
-                linksByMaster,
-                masters = plugin.Masters,
-                scripts = new { carriers = scriptCarriers },
-                assets = new { modelPaths = assetCount, listed = assetPaths },
-                nexusId = nexusId > 0 ? nexusId : (int?)null,
-                nexusIdNote = providerNote,
-            },
-        });
-    }
-    catch (Exception ex)
-    {
-        // A record Mutagen cannot read. The footprint is not measured, the record is named, and the run goes on to
-        // write an incomplete scope (exit 1), so every trigger over it reads unknown rather than the probe crashing.
-        var bad = FrameCheck.Unreadable(plugin.Path, mod.ModKey);
-        string how = "frame";
-        if (bad.Count == 0)
-        {
-            how = "in-progress";
-            bad.Add(current is null
-                ? new BadRecord(null, "?", "the read failed before the first record was reached")
-                : new BadRecord(current.FormKey.ToString(), SignatureOf(current.GetType()).Sig,
-                                "the read of this record, or of a record nested in it, failed"));
-        }
-        foreach (var b in bad)
-            unreadableRecords.Add(new { plugin = plugin.Name, formKey = b.FormKey, signature = b.Signature,
-                                        reason = b.Reason, located = how });
-        string names = string.Join(", ", bad.Take(5).Select(b => $"{b.Signature} {b.FormKey ?? "(no FormID)"}"))
-                     + (bad.Count > 5 ? $" and {bad.Count - 5} more" : "");
-        walkFailures.Add($"'{wanted}' has a record that cannot be read ({names}: {Concise(ex).TrimEnd('.')}); its footprint was "
-                       + "not measured, so no trigger reads it");
-    }
-    finally { (mod as IDisposable)?.Dispose(); }
-}
+    TargetFootprint.Walk(wanted, byName, cfg.Plugins.Count, cfg.Source, providerKind, dataDir, modsDir, assetsListed, lists);
 
 // ------------------------------------------------------------------------------------------------------------
 // Pass 2 — expansion: where the targets reach outside their own cells.
@@ -293,29 +152,14 @@ if (destinationDoors.Count > 0)
     try { places = PlaceIndex.Build(cfg.OrderedPaths, dataDir, destinationDoors); }
     catch (Exception ex)
     {
-        walkFailures.Add($"the winning-order place walk failed — {Concise(ex)}; no door destination was resolved, "
+        walkFailures.Add($"the winning-order place walk failed — {TargetFootprint.Concise(ex)}; no door destination was resolved, "
                        + "so the destination cells are missing rather than empty");
     }
 }
 if (places is not null)
     foreach (var f in places.WalkFailures) walkFailures.Add("door-destination walk: " + f);
 
-var expansions = new List<object>();
-long doorsResolved = 0, doorsUnresolved = 0;
-foreach (var (target, doors) in perTargetDoors)
-{
-    var resolved = new List<object>();
-    int unresolved = 0;
-    foreach (var (from, to) in doors)
-    {
-        var place = places?.PlaceOf(to);
-        if (place is null) { unresolved++; continue; }
-        resolved.Add(new { door = from.ToString(), destinationDoor = to.ToString(), cell = place });
-    }
-    doorsResolved += resolved.Count;
-    doorsUnresolved += unresolved;
-    expansions.Add(new { target, doors = doors.Count, doorDestinations = resolved, unresolved });
-}
+var (expansions, doorsResolved, doorsUnresolved) = ScopeOutcome.Doors(perTargetDoors, to => places?.PlaceOf(to));
 
 // Four-neighbour expansion of every touched exterior cell, over all targets together: the neighbours a change can
 // reach across a cell boundary. Cells the targets already touch are not repeated.
@@ -330,7 +174,7 @@ foreach (var (ws, x, y) in touched)
         if (!touched.Contains((ws, x + dx, y + dy)) && seenNeighbour.Add((ws, x + dx, y + dy)))
             neighbours.Add(new { worldspace = ws, x = x + dx, y = y + dy });
 
-bool complete = walkFailures.Count == 0 && summaries.Count == targetNames.Count;
+bool complete = ScopeOutcome.Complete(walkFailures.Count, summaries.Count, targetNames.Count);
 
 // The small load-order slice for the exact cells/grid coordinates in the target footprints. This walks every
 // plugin, but retains only membership and record kinds at those named locations; it is not a conflict detector.
@@ -400,7 +244,7 @@ foreach (var plugin in cfg.Plugins)
 {
     ISkyrimModGetter mod;
     try { mod = LoadOrderResolver.OpenOverlay(plugin.Path, dataDir); }
-    catch (Exception ex) { contributorFailures.Add($"'{plugin.Name}' could not be opened for the location-contributor walk — {Concise(ex)}"); continue; }
+    catch (Exception ex) { contributorFailures.Add($"'{plugin.Name}' could not be opened for the location-contributor walk — {TargetFootprint.Concise(ex)}"); continue; }
     try
     {
         void ScanCell(ICellGetter cell, FormKey worldspace, bool persistent)
@@ -461,7 +305,7 @@ foreach (var plugin in cfg.Plugins)
                     try { current = MaxHeightEntry(ws.MaxHeight, key.Item2, key.Item3); }
                     catch (Exception ex)
                     {
-                        contributorFailures.Add($"'{plugin.Name}' has an unreadable MaxHeight entry at worldspace {ws.FormKey} grid {key.Item2},{key.Item3} — {Concise(ex)}");
+                        contributorFailures.Add($"'{plugin.Name}' has an unreadable MaxHeight entry at worldspace {ws.FormKey} grid {key.Item2},{key.Item3} — {TargetFootprint.Concise(ex)}");
                         localMaxHeights.Remove(key);
                         continue;
                     }
@@ -493,7 +337,7 @@ foreach (var plugin in cfg.Plugins)
                     }
                     catch (Exception ex)
                     {
-                        contributorFailures.Add($"'{plugin.Name}' has unreadable large-reference entries at worldspace {ws.FormKey} grid {key.Item2},{key.Item3} — {Concise(ex)}");
+                        contributorFailures.Add($"'{plugin.Name}' has unreadable large-reference entries at worldspace {ws.FormKey} grid {key.Item2},{key.Item3} — {TargetFootprint.Concise(ex)}");
                         continue;
                     }
                     bool hadPrevious = localLargeReferences.TryGetValue(key, out var previousLocal);
@@ -517,7 +361,7 @@ foreach (var plugin in cfg.Plugins)
                             AddContributor(destination.Cell, plugin.Name, "persistent-placed-record");
                 }
     }
-    catch (Exception ex) { contributorFailures.Add($"'{plugin.Name}' could not be walked for location contributors — {Concise(ex)}"); }
+    catch (Exception ex) { contributorFailures.Add($"'{plugin.Name}' could not be walked for location contributors — {TargetFootprint.Concise(ex)}"); }
     finally { (mod as IDisposable)?.Dispose(); }
 }
 // The map's completeness is its own. It is kept out of walkFailures and the top-level `complete`, which say whether the
@@ -552,8 +396,7 @@ var unmeasured = new List<object>
     new { extent = "asset-replacers", why = "a mod that only ships meshes or textures has no records to enumerate and so no footprint here, though it changes what the game draws; model paths are read off records and never resolved against the VFS." },
     new { extent = "generated-output", why = "LOD, occlusion and patcher output generated from an earlier placement is not read, so whether any of it is now stale is outside this measurement." },
 };
-if (doorsUnresolved > 0)
-    unmeasured.Add(new { extent = "door-destinations", why = $"{doorsUnresolved} placed door(s) name a destination the winning order does not file in any cell; where those doors lead is not measured." });
+if (ScopeOutcome.DoorExtent(doorsUnresolved) is { } doorExtent) unmeasured.Add(doorExtent);
 
 var scope = new
 {
@@ -628,38 +471,7 @@ if (jsonPath is not null)
     File.WriteAllText(jsonPath, JsonSerializer.Serialize(scope, new JsonSerializerOptions { WriteIndented = true }));
     Console.WriteLine($"\nwrote {jsonPath}");
 }
-return complete ? 0 : 1;
-
-static string Concise(Exception ex) => ex.Message.Split('\n')[0].Trim();
-
-// The record's own signature, from the registration Mutagen carries. No list of record types: the corpus generator
-// reads TriggeringRecordType off StaticRegistration and cross-checks GrupRecordType, and this is the same read,
-// cached per runtime type. A type whose signature will not resolve is reported under its class name and counted in
-// signatureUnresolved — visible, never silently folded into another bucket.
-static (string Sig, string Class, bool Resolved) SignatureOf(Type runtime)
-{
-    if (SigCache.Map.TryGetValue(runtime, out var hit)) return hit;
-    var cls = runtime.Name.EndsWith("BinaryOverlay", StringComparison.Ordinal)
-        ? runtime.Name[..^"BinaryOverlay".Length]
-        : runtime.Name;
-    string? sig = null;
-    try
-    {
-        var reg = runtime.GetProperty("StaticRegistration", BindingFlags.Public | BindingFlags.Static)?.GetValue(null);
-        var field = reg?.GetType().GetField("TriggeringRecordType",
-            BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance | BindingFlags.Static);
-        if (field?.GetValue(reg) is RecordType rt) sig = rt.ToString();
-    }
-    catch { /* fall through to GrupRecordType */ }
-    if (sig is null)
-    {
-        var grup = runtime.GetField("GrupRecordType", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static);
-        if (grup?.GetValue(null) is RecordType g) sig = g.ToString();
-    }
-    var answer = sig is null ? (cls, cls, false) : (sig, cls, true);
-    SigCache.Map[runtime] = answer;
-    return answer;
-}
+return ScopeOutcome.ExitCode(complete);
 
 static class SigCache
 {
