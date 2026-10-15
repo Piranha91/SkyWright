@@ -288,7 +288,9 @@ def t9(root):
     r = b.es("set", "models.rewriteExplanations=off")
     check(r.returncode == 0, "9: off is accepted where allowed")
     r = b.es("set", "models.imageReview=off")
-    check(r.returncode == 2 and "set it to session" in r.stderr, "9: off is refused where not allowed")
+    check(r.returncode == 2 and "cannot be turned off" in r.stderr and "VALUE one of session" in r.stderr
+          and "off" not in r.stderr.split("one of")[-1],
+          "9: off is refused where not allowed, and not offered")
     before = sha(b.file)
     for v in SHORT_NAMES:
         r = b.es("set", f"models.imageReview={v}")
@@ -313,6 +315,12 @@ def t9(root):
                          "--out", str(b.dir / "report")], capture_output=True, text=True, env=b.env, timeout=120)
     check(rp.returncode != 0 and "short name" in rp.stderr,
           f"9: a saved short name makes evalreport refuse at its settings load ({rp.stderr.strip()[-200:]!r})")
+    fix = rp.stderr.split("run `", 1)[-1].split("`", 1)[0].replace("VALUE", ids[0])
+    check(fix == f"evalsettings.py set models.imageReview={ids[0]}", f"9: the refusal names the one-step fix ({fix!r})")
+    r = b.es(*fix.split()[1:])
+    v = b.es("validate", b.file)
+    check(r.returncode == 0 and v.returncode == 0 and load(b.file)["models"]["imageReview"] == ids[0],
+          f"9: that one `set` repairs the refused file ({(r.stdout + r.stderr).strip()[-200:]!r})")
 
 
 def t10(root):

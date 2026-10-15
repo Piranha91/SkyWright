@@ -305,10 +305,11 @@ def check_value(key: str, value, where: str) -> None:
     elif t == "model":
         ok = isinstance(value, str)
         if ok and value not in model_choices(o):
-            why = ("a short name the host can resolve to an older model" if not value.startswith("claude-")
+            why = ("but this step cannot be turned off" if value == "off"
+                   else "a short name the host can resolve to an older model" if not value.startswith("claude-")
                    else "which has no houseCARL agent to run it")
-            raise SettingsError(f"{where} sets `{key}` to `{value}`, {why}: set it to {_choices_text(o)}, or reopen "
-                                f"the window.")
+            raise SettingsError(f"{where} sets `{key}` to `{value}`, {why}: run `evalsettings.py set {key}=VALUE` "
+                                f"with VALUE one of {_choices_text(o)}.")
     if not ok:
         want = {"bool": "true or false", "int": "a whole number above zero", "number": "a number above zero",
                 "path": "a path", "string": "a non-empty text", "model": _choices_text(o)}[t]
@@ -358,18 +359,25 @@ def validate_doc(doc, where: str) -> dict:
     return chosen
 
 
-def read_file(path: Path) -> tuple[dict | None, bytes | None]:
-    """(document, raw bytes), or (None, None) when the file is absent. Raises SettingsError on a bad file."""
+def read_json(path: Path) -> tuple[dict | None, bytes | None]:
+    """(parsed JSON, raw bytes) with no option checks, or (None, None) when absent. Raises SettingsError on bad JSON."""
     if not path.exists():
         return None, None
     raw = path.read_bytes()
-    where = f"The evaluation settings file `{path}`"
     try:
-        doc = json.loads(raw.decode("utf-8-sig"))
+        return json.loads(raw.decode("utf-8-sig")), raw
     except (UnicodeDecodeError, json.JSONDecodeError) as ex:
         line = getattr(ex, "lineno", None)
-        raise SettingsError(f"{where} is not valid JSON" + (f" (line {line})" if line else "")
+        raise SettingsError(f"The evaluation settings file `{path}` is not valid JSON" + (f" (line {line})" if line else "")
                             + ": fix it, or run `evalsettings.py window` to replace it.") from None
+
+
+def read_file(path: Path) -> tuple[dict | None, bytes | None]:
+    """(document, raw bytes), or (None, None) when the file is absent. Raises SettingsError on a bad file."""
+    doc, raw = read_json(path)
+    if doc is None:
+        return None, None
+    where = f"The evaluation settings file `{path}`"
     chosen = validate_doc(doc, where)
     eff = {o["key"]: chosen.get(o["key"], o["default"]) for o in OPTIONS}
     check_combination(eff, where)
@@ -695,7 +703,11 @@ def cmd_window(a, run) -> int:
 
 def cmd_set(a, run) -> int:
     path = resolve_path(a.settings)
-    doc, _ = read_file(path)
+    # The merged result is what is checked, so `set` can repair the very value that makes the saved file refused.
+    doc, _ = read_json(path)
+    if doc is not None and not isinstance(doc, dict):
+        raise SettingsError(f"The evaluation settings file `{path}` is not a JSON object: fix it, or run "
+                            f"`evalsettings.py window` to replace it.")
     chosen = {}
     for pair in a.pairs:
         key, sep, text = pair.partition("=")
