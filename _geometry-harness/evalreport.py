@@ -2163,6 +2163,16 @@ def compile_plan(bundle_dir: Path, verify: dict, settings: dict, pr: dict, bundl
         a["locationPluginScope"]["sameAs"] = first_with.get(locs) if locs else None
         if locs:
             first_with.setdefault(locs, a["readerLabel"])
+    # the page prints a list up to the skill's bound and counts the rest, which the evidence index lists in full
+    # (Gate C round 1, H2: one footprint's list took about seven pages)
+    lo_words = reader_data.get("locationOrder") or {}
+    bound = lo_words.get("maxLocations")
+    for a in arms_out:
+        locs = list(a["locationPluginScope"].get("locations") or [])
+        k = bound if isinstance(bound, int) and bound > 0 else len(locs)
+        a["locationPluginScope"]["shown"] = locs[:k]
+        a["locationPluginScope"]["moreLine"] = (bind(lo_words["moreLocations"], {"count": fmt_n(len(locs) - k)})
+                                                if len(locs) > k else None)
     for f in findings:
         f["readerArmLabel"] = arm_labels.get(f.get("armId"), "Measured setup")
         c = f.get("counts") or {}

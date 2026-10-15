@@ -75,8 +75,11 @@ Evaluation record: {{ p.reader.context.evaluatedAt or "date not supplied" }}. St
 {% else %}Scope:
 
 ```text
-{{ (a.locationPluginScope.locations|join("; ") or "no CELL or worldspace location was supplied")|wordwrap(90, break_long_words=false, break_on_hyphens=false) }}
+{{ ((a.locationPluginScope.get("shown", a.locationPluginScope.locations))|join("; ") or "no CELL or worldspace location was supplied")|wordwrap(90, break_long_words=false, break_on_hyphens=false) }}
 ```
+{% if a.locationPluginScope.get("moreLine") %}
+{{ a.locationPluginScope.moreLine }} [Evidence index](evidence-index.md#scope).
+{% endif %}
 {% endif %}
 Coverage: {{ "all contributors to the listed locations identified" if a.locationPluginScope.complete else "incomplete — " ~ a.locationPluginScope.missingInput }}
 
