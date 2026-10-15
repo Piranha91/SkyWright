@@ -532,6 +532,8 @@ if (jsonPath is not null)
         slice = sliceJson,
         hostClassByKind = Enum.GetValues<HostEdgeKind>().ToDictionary(k => k.ToString(), k => Enum.GetValues<HostClass>().ToDictionary(c => c.ToString(), c => rows.Count(j => j.Row.Edge.Kind == k && j.Row.Facts.Host == c))),
         verdicts = Enum.GetValues<DependencyVerdict>().ToDictionary(v => v.ToString(), v => rows.Count(j => j.Verdict == v)),
+        // Edges given a verdict (Unjudgeable excluded): with verdicts.Unjudgeable it partitions `edges`.
+        edgesWithVerdict = rows.Count(j => j.Verdict != DependencyVerdict.Unjudgeable),
         unjudgeable = Enum.GetValues<DependencyBlocker>().Where(b => b != DependencyBlocker.None).ToDictionary(b => b.ToString(), b => rows.Count(j => j.Reason == b)),
         disabledWouldBeLeftBehind = disabledWouldBe,
         // Q32 — the host enable-state policy, its per-view coverage and what could not be read. Counts of EDGES and
