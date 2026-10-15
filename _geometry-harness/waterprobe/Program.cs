@@ -37,6 +37,7 @@ using HousecarlCore.Progress;
 //                   [--enable X.esp]* [--disable X.esp]* [--instance DIR] [--game DIR] [--profile NAME]
 
 using var __run = RunLog.BeginProcess("waterprobe", args);
+if (args.Length >= 1 && args[0] == "--self-test") return WaterSelfTest.Run();
 
 string Instance = HarnessTarget.Instance;
 string GamePath = HarnessTarget.Game;

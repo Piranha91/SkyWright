@@ -61,6 +61,7 @@ using Mutagen.Bethesda.Skyrim;
 // EXIT CODES: 0 complete, 1 written but incomplete (walk failures named in the file and on the console), 2 refused.
 
 using var __run = RunLog.BeginProcess("scopeprobe", args);
+if (args.Length >= 1 && args[0] == "--self-test") return ScopeSelfTest.Run();
 
 string Instance = HarnessTarget.Instance;
 string GamePath = HarnessTarget.Game;

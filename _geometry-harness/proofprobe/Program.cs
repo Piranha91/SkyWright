@@ -3253,140 +3253,13 @@ Console.WriteLine("\nPROOF — cell water: the seam and the missing-water rules 
 Console.WriteLine("\nPROOF — cell water: a synthetic order through CellBoundaryIndex.JudgeWater (Mutagen-written, kinds by filename)");
 {
     var root = Path.Combine(Path.GetTempPath(), "proofprobe-water-" + Environment.ProcessId);
-    Directory.CreateDirectory(root);
     var release = SkyrimRelease.SkyrimSE;
-    var skyK = new ModKey("Skyrim", ModType.Master);
-    var updK = new ModKey("Update", ModType.Master);
-    var usK = ModKey.FromNameAndExtension(PluginKinds.Ussep);
-    var wmK = new ModKey("WaterMod", ModType.Plugin);
-    var portK = new ModKey("Port", ModType.Plugin);
-    var laterK = new ModKey("Later", ModType.Plugin);
-    var genK = new ModKey("DynDOLOD", ModType.Plugin);
-    var modxK = new ModKey("ModX", ModType.Plugin);
-    FormKey S(uint id) => new(skyK, id);
-    var worldK = S(0x800); var topK = S(0x801);
-    var defWater = S(0x810); var riverWater = S(0x811);
-    var flowBlend = new FormKey(updK, 0x801);
-    var wmWater = new FormKey(wmK, 0x801);
-    FormKey C(int x) => S((uint)(0x900 + x));          // grid cell (x, 0)
-    FormKey L(int x) => S((uint)(0xA00 + x));          // its LAND
-    var c01 = S(0x920); var l01 = S(0xA20);            // grid cell (0, 1)
-    var c30b = S(0x930); var l30b = S(0xA30);          // the duplicate at (3, 0)
-    var c50 = new FormKey(modxK, 0x801); var l50 = new FormKey(modxK, 0x802);   // a mod-defined cell at (5, 0)
-
-    // A flat LAND at world height h: offset h/8, gradients all zero.
-    static Landscape Flat(FormKey key, float h, FormKey? baseTex = null)
-    {
-        var land = new Landscape(key, SkyrimRelease.SkyrimSE) { VertexHeightMap = new LandscapeVertexHeightMap { Offset = h / 8f, HeightMap = new Array2d<sbyte>(new sbyte[33, 33]) } };
-        if (baseTex is { } bt)
-            foreach (var q in new[] { Quadrant.BottomLeft, Quadrant.BottomRight, Quadrant.TopLeft, Quadrant.TopRight })
-            { var bl = new BaseLayer { Header = new LayerHeader { Quadrant = q, LayerNumber = 0 } }; bl.Header.Texture.SetTo(bt); land.Layers.Add(bl); }
-        return land;
-    }
-    static Cell Grid(FormKey key, int x, int y, bool hasWater, FormKey? water, float? height, Landscape? land, string? edid = null, Vector3? vel = null, string? noise = null)
-    {
-        var c = new Cell(key, SkyrimRelease.SkyrimSE) { EditorID = edid, Flags = hasWater ? Cell.Flag.HasWater : default, Grid = new CellGrid { Point = new P2Int(x, y) }, WaterHeight = height, Landscape = land };
-        if (water is { } w) c.Water.SetTo(w);
-        if (vel is { } v) c.WaterVelocity = new CellWaterVelocity { Angle = new P3Float(v.X, v.Y, v.Z), Offset = new P3Float(0, 0, 0) };
-        if (noise is not null) c.WaterNoiseTexture = noise;
-        return c;
-    }
-    static Worldspace WorldWith(FormKey wKey, FormKey topK, FormKey? water, float? defaultHeight, params Cell[] cells)
-    {
-        var ws = new Worldspace(wKey, SkyrimRelease.SkyrimSE) { EditorID = "WaterWorld" };
-        if (water is { } w) ws.Water.SetTo(w);
-        if (defaultHeight is { } dh) ws.LandDefaults = new WorldspaceLandDefaults { DefaultLandHeight = 0, DefaultWaterHeight = dh };
-        ws.TopCell = new Cell(topK, SkyrimRelease.SkyrimSE) { Flags = default, Grid = new CellGrid { Point = new P2Int(0, 0) } };   // the persistent cell, stamped (0,0) like the CK does
-        var blk = new WorldspaceBlock { BlockNumberX = 0, BlockNumberY = 0, GroupType = GroupTypeEnum.ExteriorCellBlock };
-        var sub = new WorldspaceSubBlock { BlockNumberX = 0, BlockNumberY = 0, GroupType = GroupTypeEnum.ExteriorCellSubBlock };
-        foreach (var c in cells) sub.Items.Add(c);
-        blk.Items.Add(sub); ws.SubCells.Add(blk);
-        return ws;
-    }
-    string Write(SkyrimMod mod, params ISkyrimModGetter[] masters)
-    {
-        var path = Path.Combine(root, mod.ModKey.FileName.String);
-        mod.BeginWrite.ToPath(path).WithLoadOrder(masters).Write();
-        return path;
-    }
-
-    // Skyrim.esm — the pre-Update state: HasWater, no WATR link, the sentinel; the sea floor at -15000 (visible), C11 dry land.
-    var sky = new SkyrimMod(skyK, release);
-    sky.Waters.Add(new Water(defWater, release) { EditorID = "DefaultWater" });
-    sky.Waters.Add(new Water(riverWater, release) { EditorID = "RiverWater" });
-    sky.Worldspaces.Add(WorldWith(worldK, topK, defWater, -14000f,
-        Grid(C(0), 0, 0, true, null, float.MaxValue, Flat(L(0), -15000f, defWater), "C00"),
-        Grid(C(1), 1, 0, true, null, float.MaxValue, Flat(L(1), -15000f), "C10"),
-        Grid(C(2), 2, 0, true, null, -14000f, Flat(L(2), -15000f), "C20"),
-        Grid(C(3), 3, 0, true, null, float.MaxValue, Flat(L(3), -15000f), "C30"),
-        Grid(c30b, 3, 0, true, null, float.MaxValue, Flat(l30b, -15000f), "C30b"),
-        Grid(C(4), 4, 0, true, null, float.MaxValue, Flat(L(4), 0f), "C40"),                 // the control: land above the sea everywhere
-        Grid(C(6), 6, 0, true, null, float.MaxValue, Flat(L(6), -15000f), "C60"),
-        Grid(C(7), 7, 0, true, null, float.MaxValue, Flat(L(7), -15000f), "C70"),
-        Grid(c01, 0, 1, true, null, float.MaxValue, Flat(l01, -15000f), "C01"),
-        Grid(S(0x921), 1, 1, false, null, null, Flat(S(0xA21), 0f), "C11")));
-    var skyPath = Write(sky);
-    using var skyOv = SkyrimMod.CreateFromBinaryOverlay(skyPath, release);
-
-    // Update.esm — the SE water: a flow-blend WATR, velocity, noise, on every sea cell but C30/C30b (the wrinkle stays vanilla).
-    var upd = new SkyrimMod(updK, release);
-    upd.Waters.Add(new Water(flowBlend, release) { EditorID = "DefaultWaterFlowBlend" });
-    var vel = new Vector3(1, 0, 0);
-    upd.Worldspaces.Add(WorldWith(worldK, topK, defWater, -14000f,
-        Grid(C(0), 0, 0, true, flowBlend, float.MaxValue, null, "C00", vel, "n.dds"),
-        Grid(C(1), 1, 0, true, flowBlend, float.MaxValue, null, "C10", vel, "n.dds"),
-        Grid(C(2), 2, 0, true, flowBlend, -14000f, null, "C20", vel, "n.dds"),
-        Grid(C(4), 4, 0, true, flowBlend, float.MaxValue, null, "C40", vel, "n.dds"),
-        Grid(C(6), 6, 0, true, flowBlend, float.MaxValue, null, "C60", vel, "n.dds"),
-        Grid(C(7), 7, 0, true, flowBlend, float.MaxValue, null, "C70", vel, "n.dds"),
-        Grid(c01, 0, 1, true, flowBlend, float.MaxValue, null, "C01", vel, "n.dds")));
-    var updPath = Write(upd, skyOv);
-    using var updOv = SkyrimMod.CreateFromBinaryOverlay(updPath, release);
-
-    // USSEP — forwards C00 exactly (no snap; the truth is still Update's tuple).
-    var us = new SkyrimMod(usK, release);
-    us.Worldspaces.Add(WorldWith(worldK, topK, defWater, -14000f, Grid(C(0), 0, 0, true, flowBlend, float.MaxValue, null, "C00", vel, "n.dds")));
-    var usPath = Write(us, skyOv, updOv);
-    using var usOv = SkyrimMod.CreateFromBinaryOverlay(usPath, release);
-
-    // WaterMod.esp — overrides a vanilla WATR (the rule's first clause) and retypes C01 to a WATR of its own.
-    var wm = new SkyrimMod(wmK, release);
-    wm.Waters.Add(new Water(defWater, release) { EditorID = "DefaultWater" });
-    wm.Waters.Add(new Water(wmWater, release) { EditorID = "WaterModWater" });
-    wm.Worldspaces.Add(WorldWith(worldK, topK, defWater, -14000f, Grid(c01, 0, 1, true, wmWater, float.MaxValue, null, "C01", vel, "n.dds")));
-    var wmPath = Write(wm, skyOv, updOv);
-    using var wmOv = SkyrimMod.CreateFromBinaryOverlay(wmPath, release);
-
-    // Port.esp — an Oldrim port: C10 back to Skyrim.esm's tuple; C20 HasWater cleared; C60 the link nulled; C70 a real height where the sentinel was.
-    var port = new SkyrimMod(portK, release);
-    port.Worldspaces.Add(WorldWith(worldK, topK, defWater, -14000f,
-        Grid(C(1), 1, 0, true, null, float.MaxValue, null, "C10"),
-        Grid(C(2), 2, 0, false, flowBlend, -14000f, null, "C20", vel, "n.dds"),
-        Grid(C(6), 6, 0, true, null, float.MaxValue, null, "C60", vel, "n.dds"),
-        Grid(C(7), 7, 0, true, flowBlend, -14000f, null, "C70", vel, "n.dds")));
-    var portPath = Write(port, skyOv, updOv);
-    using var portOv = SkyrimMod.CreateFromBinaryOverlay(portPath, release);
-
-    // Later.esp (masters WaterMod) — forwards the water mod's C01 exactly.
-    var later = new SkyrimMod(laterK, release);
-    later.Worldspaces.Add(WorldWith(worldK, topK, defWater, -14000f, Grid(c01, 0, 1, true, wmWater, float.MaxValue, null, "C01", vel, "n.dds")));
-    var laterPath = Write(later, skyOv, updOv, wmOv);
-
-    // DynDOLOD.esp — a generated plugin winning C40 (forwarded, but unjudgeable by kind).
-    var gen = new SkyrimMod(genK, release);
-    gen.Worldspaces.Add(WorldWith(worldK, topK, defWater, -14000f, Grid(C(4), 4, 0, true, flowBlend, float.MaxValue, null, "C40", vel, "n.dds")));
-    var genPath = Write(gen, skyOv, updOv);
-
-    // ModX.esp — defines its own cell at (5,0) with river water; Later2 (below) retypes it.
-    var modx = new SkyrimMod(modxK, release);
-    modx.Worldspaces.Add(WorldWith(worldK, topK, defWater, -14000f, Grid(c50, 5, 0, true, riverWater, float.MaxValue, Flat(l50, -15000f), "C50")));
-    var modxPath = Write(modx, skyOv);
-    using var modxOv = SkyrimMod.CreateFromBinaryOverlay(modxPath, release);
-    var later2 = new SkyrimMod(new ModKey("Later2", ModType.Plugin), release);
-    later2.Worldspaces.Add(WorldWith(worldK, topK, defWater, -14000f, Grid(c50, 5, 0, true, defWater, float.MaxValue, null, "C50")));
-    var later2Path = Write(later2, skyOv, modxOv);
-
-    var order = new[] { skyPath, updPath, usPath, wmPath, portPath, laterPath, genPath, modxPath, later2Path };
+    // The order is _shared/CellBoundaryFixture.cs WaterFixture (the probes' --self-test reads the same writer).
+    var written = WaterFixture.Write(root);
+    FormKey C(int x) => WaterFixture.C(x);
+    var c01 = WaterFixture.C01; var c50 = WaterFixture.C50;
+    var defWater = WaterFixture.DefaultWater; var flowBlend = WaterFixture.FlowBlend;
+    var order = written.Order.ToArray();
     var idx = new CellBoundaryIndex();
     for (int p = 0; p < order.Length; p++)
     {
@@ -3445,7 +3318,7 @@ Console.WriteLine("\nPROOF — cell water: a synthetic order through CellBoundar
     Check("water/synthetic: C40's truth surface is under the ground everywhere (the control shape, visible 0%)", j.VisTruth == 0f, $"vis {j.VisTruth}");
     j = J(c50);
     Check("water/synthetic: C50 — a mod-defined cell retyped by a later plugin -> Retyped with author truth", j.Verdict == WaterVerdict.Retyped && j.AuthorTruth && j.TruthPlugin == 7, $"{j.Verdict} author {j.AuthorTruth} truth {j.TruthPlugin}");
-    j = J(S(0x921));
+    j = J(WaterFixture.C11);
     Check("water/synthetic: C11 — no flag, no height, land above the default -> Forwarded; the default sea resolves under the ground (the control), not a candidate", j.Verdict == WaterVerdict.Forwarded && !j.Missing && j.RTruth.Has && j.VisTruth == 0f, $"{j.MissingWhy} has={j.RTruth.Has} vis={j.VisTruth}");
 
     // Seams over the synthetic row: C00|C10 (forwarded | reverted) and C10|C20 (reverted | dropped).
@@ -3499,90 +3372,12 @@ Console.WriteLine("\nPROOF — landscape seams: the VHGT decode (LandHeight), th
 Console.WriteLine("\nPROOF — landscape seams: a synthetic order through CellBoundaryIndex.MeasurePair (Mutagen-written)");
 {
     var root = Path.Combine(Path.GetTempPath(), "proofprobe-seam-" + Environment.ProcessId);
-    Directory.CreateDirectory(root);
     var release = SkyrimRelease.SkyrimSE;
-    var skyK = new ModKey("Skyrim", ModType.Master);
-    var aK = new ModKey("SeamA", ModType.Plugin);
-    var bK = new ModKey("SeamB", ModType.Plugin);
-    var cK = new ModKey("SeamC", ModType.Plugin);
-    FormKey S(uint id) => new(skyK, id);
-    var worldK = S(0x800); var topK = S(0x801);
-    var texA = S(0x810); var texB = S(0x811);
-    // cells (x, y) for x in 0..2, y in 0..1
-    FormKey C(int x, int y) => S((uint)(0x900 + y * 16 + x));
-    FormKey L(int x, int y) => S((uint)(0xA00 + y * 16 + x));
-
-    static Landscape Land(FormKey key, float h, FormKey tex, Action<sbyte[,]>? shape = null)
-    {
-        var g = new sbyte[33, 33];
-        shape?.Invoke(g);
-        var land = new Landscape(key, SkyrimRelease.SkyrimSE) { VertexHeightMap = new LandscapeVertexHeightMap { Offset = h / 8f, HeightMap = new Array2d<sbyte>(g) } };
-        foreach (var q in new[] { Quadrant.BottomLeft, Quadrant.BottomRight, Quadrant.TopLeft, Quadrant.TopRight })
-        { var bl = new BaseLayer { Header = new LayerHeader { Quadrant = q, LayerNumber = 0 } }; bl.Header.Texture.SetTo(tex); land.Layers.Add(bl); }
-        return land;
-    }
-    static Cell Grid(FormKey key, int x, int y, Landscape land, string edid)
-        => new(key, SkyrimRelease.SkyrimSE) { EditorID = edid, Flags = default, Grid = new CellGrid { Point = new P2Int(x, y) }, Landscape = land };
-    static Worldspace WorldWith(FormKey wKey, FormKey topK, params Cell[] cells)
-    {
-        var ws = new Worldspace(wKey, SkyrimRelease.SkyrimSE) { EditorID = "SeamWorld" };
-        ws.TopCell = new Cell(topK, SkyrimRelease.SkyrimSE) { Flags = default };
-        var blk = new WorldspaceBlock { BlockNumberX = 0, BlockNumberY = 0, GroupType = GroupTypeEnum.ExteriorCellBlock };
-        var sub = new WorldspaceSubBlock { BlockNumberX = 0, BlockNumberY = 0, GroupType = GroupTypeEnum.ExteriorCellSubBlock };
-        foreach (var c in cells) sub.Items.Add(c);
-        blk.Items.Add(sub); ws.SubCells.Add(blk);
-        return ws;
-    }
-    string Write(SkyrimMod mod, params ISkyrimModGetter[] masters)
-    {
-        var path = Path.Combine(root, mod.ModKey.FileName.String);
-        mod.BeginWrite.ToPath(path).WithLoadOrder(masters).Write();
-        return path;
-    }
-    // Raise the INTERIOR of the east edge (x = 32, rows 1..31) by `units` heightmap units: a gradient at x=32 on those
-    // rows. The corner vertices are left alone on purpose — a corner is shared by four cells, so a fixture that moved
-    // one would put a step on two edges at once and the cases below could not name whose seam is whose.
-    static Action<sbyte[,]> EastEdge(sbyte units) => g => { for (int y = 1; y < 32; y++) g[32, y] = units; };
-    // Raise the interior of the west edge: rows 1..31 start `units` higher (column 0 accumulates down the rows: +units
-    // at row 1, back at row 32), and each of those rows steps back down at x = 1.
-    static Action<sbyte[,]> WestEdge(sbyte units) => g => { g[0, 1] = units; g[0, 32] = (sbyte)-units; for (int y = 1; y < 32; y++) g[1, y] = (sbyte)-units; };
-
-    // Skyrim.esm: a 3×2 block of flat cells at 0, matching edges everywhere, except a vanilla seam between (2,0) and (2,1)
-    // (the north edge of (2,0) 16 u up — Bethesda ships one).
-    var sky = new SkyrimMod(skyK, release);
-    sky.Worldspaces.Add(WorldWith(worldK, topK,
-        Grid(C(0, 0), 0, 0, Land(L(0, 0), 0, texA), "S00"), Grid(C(1, 0), 1, 0, Land(L(1, 0), 0, texA), "S10"),
-        Grid(C(2, 0), 2, 0, Land(L(2, 0), 0, texA, g => { g[1, 32] = 2; g[32, 32] = -2; }), "S20"),   // row 32, x = 1..31, 16 u up: a vanilla seam, corners untouched
-        Grid(C(0, 1), 0, 1, Land(L(0, 1), 0, texA), "S01"), Grid(C(1, 1), 1, 1, Land(L(1, 1), 0, texB), "S11"),
-        Grid(C(2, 1), 2, 1, Land(L(2, 1), 0, texA), "S21")));
-    var skyPath = Write(sky);
-    using var skyOv = SkyrimMod.CreateFromBinaryOverlay(skyPath, release);
-
-    // SeamA (masters Skyrim): re-shapes (0,0) AND (1,0) consistently — the shared edge at +2 units (16 u) on both sides;
-    // and (0,1)'s east edge alone (+4 units, 32 u) against a (1,1) it left alone — its own seam, Seen.
-    var a = new SkyrimMod(aK, release);
-    a.Worldspaces.Add(WorldWith(worldK, topK,
-        Grid(C(0, 0), 0, 0, Land(L(0, 0), 0, texA, EastEdge(2)), "S00"),
-        Grid(C(1, 0), 1, 0, Land(L(1, 0), 0, texA, WestEdge(2)), "S10"),
-        Grid(C(0, 1), 0, 1, Land(L(0, 1), 0, texA, EastEdge(4)), "S01")));
-    var aPath = Write(a, skyOv);
-    using var aOv = SkyrimMod.CreateFromBinaryOverlay(aPath, release);
-
-    // SeamB (masters Skyrim only — blind to A): re-shapes (1,0) from the VANILLA base: west edge back to 0, its own interior
-    // texture changed to texB. Loads after A. Under B's view (1,0)'s west edge matches vanilla (0,0) (Δ 0); together: 16 u.
-    var b = new SkyrimMod(bK, release);
-    b.Worldspaces.Add(WorldWith(worldK, topK, Grid(C(1, 0), 1, 0, Land(L(1, 0), 0, texB), "S10")));
-    var bPath = Write(b, skyOv);
-
-    // SeamC (masters Skyrim and A): re-cuts (1,1)'s west edge to +4 units to meet A's (0,1) — the patch shape (joins the seam);
-    // and re-states (2,1) with the vanilla seam against (2,0) untouched — Inherited.
-    var c = new SkyrimMod(cK, release);
-    c.Worldspaces.Add(WorldWith(worldK, topK,
-        Grid(C(1, 1), 1, 1, Land(L(1, 1), 0, texB, WestEdge(4)), "S11"),
-        Grid(C(2, 1), 2, 1, Land(L(2, 1), 0, texB), "S21")));
-    var cPath = Write(c, skyOv, aOv);
-
-    var order = new[] { skyPath, aPath, bPath, cPath };
+    // The order is _shared/CellBoundaryFixture.cs SeamFixture (the probes' --self-test reads the same writer).
+    var written = SeamFixture.Write(root);
+    FormKey C(int x, int y) => SeamFixture.C(x, y);
+    var texA = SeamFixture.TexA; var texB = SeamFixture.TexB;
+    var order = written.Order.Append(written.Fix).ToArray();
     var idx = new CellBoundaryIndex();
     var masters = new HashSet<int>[] { new(), new() { 0 }, new() { 0 }, new() { 0, 1 } };
     for (int p = 0; p < order.Length; p++)
