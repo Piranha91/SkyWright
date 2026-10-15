@@ -155,6 +155,67 @@ static class NavownSelfTest
                     nvPaths.Select(Path.GetFileName).SequenceEqual(NavownFixture.Order), string.Join(", ", nvPaths.Select(Path.GetFileName)));
             t.Check("PD-F0 NvB masters only NvMaster.esm (so NvA's re-cuts are undeclared)", Masters(5) == "NvMaster.esm", Masters(5));
             t.Check("PD-F0 NvFix masters NvA.esp and NvB.esp", Masters(6).Contains("NvA.esp") && Masters(6).Contains("NvB.esp"), Masters(6));
+
+            // The walk's inputs for the first n plugins, read as navownprobe's main walk reads them.
+            (string[] Names, HashSet<int>[] Closure, NavVersions Versions, Dictionary<(FormKey, int), NavmeshGeometry> Geom) Order(int n)
+            {
+                var names = nvMods.Take(n).Select(mo => mo.ModKey.FileName.String).ToArray();
+                var direct = new HashSet<int>[n];
+                var versions = new NavVersions();
+                var geom = new Dictionary<(FormKey, int), NavmeshGeometry>();
+                for (int i = 0; i < n; i++)
+                {
+                    var ms = nvMods[i].ModHeader.MasterReferences.Select(r => r.Master.FileName.String).ToHashSet(StringComparer.OrdinalIgnoreCase);
+                    direct[i] = Enumerable.Range(0, i).Where(q => ms.Contains(names[q])).ToHashSet();
+                    var deletedHere = nvMods[i].EnumerateMajorRecords<Mutagen.Bethesda.Skyrim.INavigationMeshGetter>().Where(x => x.IsDeleted).Select(x => x.FormKey).ToHashSet();
+                    foreach (var cp in UncutPopulation.Cells(nvMods[i])) versions.Note(cp, i, deletedHere, ClobberFindings.GeomHash);
+                    foreach (var cp in PlacementExtract.FromMod(nvMods[i]))
+                        foreach (var nav in cp.Navmeshes) geom[(nav.FormKey, i)] = nav;
+                }
+                return (names, DetectorModel.MasterClosure(direct), versions, geom);
+            }
+            string NvName(FormKey k) => k == NavownFixture.NMOD ? "NMOD" : k == NavownFixture.NFWD ? "NFWD" : k == NavownFixture.NNEAR ? "NNEAR"
+                                      : k == NavownFixture.NUS ? "NUS" : k == NavownFixture.NVAN ? "NVAN" : k.ToString();
+            var o6 = Order(6);
+            var clob = ClobberFindings.Find(o6.Versions.Providers, o6.Closure, o6.Versions.Size, _ => true);
+            ClobberPopulation PopOf((FormKey Nav, int Loser, int Winner, int LoserT, int WinnerT, bool Material) c)
+                => ClobberFindings.Population(o6.Names[c.Loser], o6.Names[c.Winner], ClobberFindings.Vanilla);
+            string Row((FormKey Nav, int Loser, int Winner, int LoserT, int WinnerT, bool Material) c)
+                => $"{NvName(c.Nav)} {o6.Names[c.Loser]}->{o6.Names[c.Winner]}";
+
+            // PD-N1: the findings are the material clobbers outside the Bethesda floor.
+            var findings = clob.Where(c => ClobberFindings.IsFinding(c.Material, PopOf(c))).Select(Row).OrderBy(x => x).ToList();
+            t.Check("PD-N1 clobber findings: NMOD and NNEAR (NvA->NvB) and NUS (USSEP->NvB); NVAN (class A) and NFWD (not material) withheld",
+                    findings.SequenceEqual(new[] { "NMOD NvA.esp->NvB.esp", "NNEAR NvA.esp->NvB.esp", "NUS Unofficial Skyrim Special Edition Patch.esp->NvB.esp" }),
+                    string.Join(" | ", findings));
+            var all = clob.Select(c => $"{Row(c)} material={c.Material}").OrderBy(x => x).ToList();
+            t.Check("PD-N1 the clobber walk itself finds all five chains, NFWD not material",
+                    all.SequenceEqual(new[] { "NFWD NvA.esp->NvB.esp material=False", "NMOD NvA.esp->NvB.esp material=True",
+                                              "NNEAR NvA.esp->NvB.esp material=True", "NUS Unofficial Skyrim Special Edition Patch.esp->NvB.esp material=True",
+                                              "NVAN Dawnguard.esm->HearthFires.esm material=True" }), string.Join(" | ", all));
+
+            // PD-N2: the population by file name.
+            var pops = clob.Select(c => $"{NvName(c.Nav)}:{PopOf(c)}").OrderBy(x => x).ToList();
+            t.Check("PD-N2 populations: NUS UssepDiscarded, NVAN BethesdaFloor, NMOD/NNEAR/NFWD ModOnMod",
+                    pops.SequenceEqual(new[] { "NFWD:ModOnMod", "NMOD:ModOnMod", "NNEAR:ModOnMod", "NUS:UssepDiscarded", "NVAN:BethesdaFloor" }),
+                    string.Join(", ", pops));
+            t.Check("PD-N2 file names match whatever their letter case: dawnguard.esm x HEARTHFIRES.ESM is the floor; a lower-case USSEP loser is USSEP's",
+                    ClobberFindings.Population("dawnguard.esm", "HEARTHFIRES.ESM", ClobberFindings.Vanilla) == ClobberPopulation.BethesdaFloor
+                    && ClobberFindings.Population("unofficial skyrim special edition patch.esp", "NvB.esp", ClobberFindings.Vanilla) == ClobberPopulation.UssepDiscarded,
+                    "");
+
+            // PD-N3: the physical predicate.
+            var holdMod = ClobberFindings.Predicate(NavownFixture.NMOD, 4, 5, o6.Geom, "NvB.esp");
+            var near = ClobberFindings.Predicate(NavownFixture.NNEAR, 4, 5, o6.Geom, "NvB.esp");
+            var same = ClobberFindings.Predicate(NavownFixture.NMOD, 4, 4, o6.Geom, "NvA.esp");
+            var missing = ClobberFindings.Predicate(NavownFixture.NMOD, 4, 5, new Dictionary<(FormKey, int), NavmeshGeometry>(), "NvB.esp");
+            var o7 = Order(7);
+            var fixedMod = ClobberFindings.Predicate(NavownFixture.NMOD, 4, 6, o7.Geom, "NvFix.esp");
+            t.Check("PD-N3 NMOD: NvA's island about 2,500 u from NvB's ground is victim-only ground: Holds", holdMod.State == PhysicalState.Holds, holdMod.Detail);
+            t.Check("PD-N3 NNEAR: every NvA point within 50 u of NvB's ground: Gone", near.State == PhysicalState.Gone, near.Detail);
+            t.Check("PD-N3 loser == winner: the loser's own version wins: Gone", same.State == PhysicalState.Gone, same.Detail);
+            t.Check("PD-N3 a version's geometry unread: Unmeasured", missing.State == PhysicalState.Unmeasured, missing.Detail);
+            t.Check("PD-N3 under NvFix, which restores the island: Gone", fixedMod.State == PhysicalState.Gone, fixedMod.Detail);
         }
         finally { foreach (var mo in nvMods) (mo as IDisposable)?.Dispose(); }
     });

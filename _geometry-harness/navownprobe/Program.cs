@@ -121,11 +121,7 @@ Console.WriteLine();
 
 // Which base records can physically obstruct. XMarkers have no mesh and no collision; a dropped
 // coin is not a wall. Kept as data here rather than hard-coded judgement anywhere deeper.
-// Bethesda's own shipped content. A dangling link with no mod on either end is theirs and permanent.
-// Creation Club plugins (ccbgssse*.esl and the rest) are deliberately NOT in this set: their changes, including navmesh
-// deletions, are reported like any mod's (decided 2026-09-28).
-var Vanilla = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
-{ "Skyrim.esm", "Update.esm", "Dawnguard.esm", "HearthFires.esm", "Dragonborn.esm", "SkyrimVR.esm", "_ResourcePack.esl" };
+var Vanilla = ClobberFindings.Vanilla;   // Bethesda's own shipped content (ClobberFindings.cs)
 
 var Obstructing = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
 { "Static", "MoveableStatic", "Tree", "Furniture", "Door", "Container", "Activator", "Flora" };
@@ -248,7 +244,7 @@ for (int p = 0; p < paths.Count; p++)
             cellName[cp.Cell] = (cp.CellEditorId, cp.Interior);
             cellSpace[cp.Cell] = (cp.Worldspace, cp.Grid?.X ?? int.MinValue, cp.Grid?.Y ?? int.MinValue, cp.Interior);
 
-            navVersions.Note(cp, p, deletedHere, NavGeomHash);
+            navVersions.Note(cp, p, deletedHere, ClobberFindings.GeomHash);
 
             foreach (var r in cp.Refs) enableFacts.Note(r);
             uncutPop.Note(cp, p, mod.ModKey);
@@ -290,40 +286,19 @@ bool Wanted(int p) => onlyPlugin is null || string.Equals(pluginKey[p].FileName,
 // "no declared dependency", never "cannot have seen".
 // The decision itself is DetectorModel.FindClobber — proven by construction in proofprobe, so
 // this loop only feeds it providers, the closure, and the per-provider geometry triple.
-var clobber = new List<(FormKey Nav, int Loser, int Winner, int LoserT, int WinnerT, bool Material)>();
-foreach (var (nav, provs) in navProviders)
-{
-    var hit = DetectorModel.FindClobber(
-        provs,
-        (w, l) => masterClosure[w].Contains(l),
-        pi => navSize.GetValueOrDefault((nav, pi)),
-        (l, w) => Wanted(l) || Wanted(w));
-    if (hit is not { } h) continue;
-    clobber.Add((nav, h.Loser, h.Winner,
-                 navSize.GetValueOrDefault((nav, h.Loser)).T,
-                 navSize.GetValueOrDefault((nav, h.Winner)).T, h.Material));
-}
+var clobber = ClobberFindings.Find(navProviders, masterClosure, navSize, Wanted);   // ClobberFindings.cs
 
 // Rule 12, finally applied to CLOBBERED itself. The count carried an unmeasured floor for two
 // sessions: Dawnguard × HearthFires is Bethesda re-cutting Bethesda — permanent, shipped that way,
 // and exactly the class-A population the dangling-link split already names. USSEP-as-loser is kept
 // as its own line (a mod discarding USSEP's navmesh fixes IS a finding, but it is a different
 // conversation from mod-on-mod, because nearly nothing masters USSEP on purpose).
-const string Ussep = "Unofficial Skyrim Special Edition Patch.esp";
+ClobberPopulation ClobberPop((FormKey Nav, int Loser, int Winner, int LoserT, int WinnerT, bool Material) c) =>
+    ClobberFindings.Population(pluginKey[c.Loser].FileName.String, pluginKey[c.Winner].FileName.String, Vanilla);
 string ClobberClass((FormKey Nav, int Loser, int Winner, int LoserT, int WinnerT, bool Material) c) =>
-    DetectorModel.ClassifyClobber(
-        Vanilla.Contains(pluginKey[c.Loser].FileName.String),
-        Vanilla.Contains(pluginKey[c.Winner].FileName.String),
-        string.Equals(pluginKey[c.Loser].FileName.String, Ussep, StringComparison.OrdinalIgnoreCase)) switch
-    {
-        ClobberPopulation.BethesdaFloor => "A. Bethesda-on-Bethesda (permanent FLOOR)",
-        ClobberPopulation.UssepDiscarded => "B. USSEP's work discarded by a mod",
-        _ => "C. mod-on-mod",
-    };
-bool ClobberFloor((FormKey Nav, int Loser, int Winner, int LoserT, int WinnerT, bool Material) c) =>
-    ClobberClass(c).StartsWith("A.");
+    ClobberFindings.ClassLabel(ClobberPop(c));
 
-var clobberFindings = clobber.Where(c => c.Material && !ClobberFloor(c)).ToList();
+var clobberFindings = clobber.Where(c => ClobberFindings.IsFinding(c.Material, ClobberPop(c))).ToList();
 Console.WriteLine($"\n==== CLOBBERED: one mod's navmesh work silently discarded by another ====");
 Console.WriteLine($"   navmesh records affected : {clobber.Count:N0}"
                 + $"   ({clobber.Count(c => c.Material):N0} where the geometry actually differs)");
@@ -352,8 +327,8 @@ foreach (var g in clobber.Where(c => c.Material)
 }
 
 // The reach pass's constants, shared with the clobber predicate below.
-const float ReachClearance = 120f;   // the oracle's measured resolution: closer reads reachable
-const float ReachSpacing = 64f;      // sampling bound — a loss beyond clearance+spacing cannot be missed
+const float ReachClearance = ClobberFindings.ReachClearance;
+const float ReachSpacing = ClobberFindings.ReachSpacing;
 const float WellClear = 240f;        // 2x resolution: what a probe-worthy candidate must exceed
 
 // Full geometry for exactly the (record, plugin) pairs a pass names: the main pass keeps counts and hashes only, because
@@ -384,24 +359,9 @@ static (List<System.Numerics.Vector3> V, List<(int A, int B, int C, int Flags)> 
     => (g.Vertices.Select(v => new System.Numerics.Vector3(v.X, v.Y, v.Z)).ToList(),
         g.Triangles.Select(t => ((int)t.A, (int)t.B, (int)t.C, t.Flags)).ToList());
 
-// THE PHYSICAL PREDICATE of a CLOBBERED row (2026-09-03; handoff 2026-09-12): victim-only ground remains — some point of
-// the loser's mesh lies farther than the reach clearance from the winner's, whoever the winner is under the arm being
-// read. This is the class's physical half on its own: "the winner declares no dependency on the loser" is the provenance
-// half, and a sham patch that masters both and forwards the winner's navmesh unchanged flips only that. Not used: the
-// content-hash Material test (symmetric — a true merge also differs from the loser), the neighbour-navmesh rescue and the
-// witness join (the reach pass's refinements). A row whose loser is within clearance everywhere reads Gone in its own
-// base arm: a declared-dependency clobber with no loss this instrument can see. The credit rule counts that apart.
+// THE PHYSICAL PREDICATE of a CLOBBERED row: ClobberFindings.Predicate (ClobberFindings.cs).
 (PhysicalState State, string Detail) ClobberPredicate(FormKey nav, int loser, int winner, Dictionary<(FormKey Nav, int Plugin), NavmeshGeometry> geom)
-{
-    if (loser == winner) return (PhysicalState.Gone, "the loser's own version is the winning one");
-    if (!geom.TryGetValue((nav, loser), out var lg) || !geom.TryGetValue((nav, winner), out var wg))
-        return (PhysicalState.Unmeasured, "a version's geometry could not be read");
-    var L = Mesh(lg); var W = Mesh(wg);
-    var victim = DetectorModel.CoverageLoss(L.V, L.T, W.V, W.T, ReachClearance, ReachSpacing);
-    return victim.Count > 0
-        ? (PhysicalState.Holds, $"victim-only ground: {victim.Count} sample(s) of the loser's mesh farther than {ReachClearance:0}u from the winner's ({pluginKey[winner].FileName})")
-        : (PhysicalState.Gone, $"no point of the loser's mesh is farther than {ReachClearance:0}u from the winner's ({pluginKey[winner].FileName})");
-}
+    => ClobberFindings.Predicate(nav, loser, winner, geom, $"{pluginKey[winner].FileName}");
 
 // The physical predicate of a dangling-link row: the same exact check the finding came from, re-asked of the winning
 // state under this arm. Exact, no geometry: the index still exceeds the winning count (or still points into a navmesh the
@@ -1181,22 +1141,3 @@ if (emitPath is not null)
 
 Console.WriteLine($"\nelapsed {sw.Elapsed.TotalSeconds:0.0}s");
 return 0;
-
-// FNV-1a over every vertex component, triangle index and flag, in record order. Not cryptographic
-// and does not need to be: it only has to make "byte-identical forward" and "re-cut" distinguishable.
-static int NavGeomHash(NavmeshGeometry nav)
-{
-    unchecked
-    {
-        int h = (int)2166136261;
-        void Mix(int v) => h = (h ^ v) * 16777619;
-        foreach (var v in nav.Vertices)
-        {
-            Mix(BitConverter.SingleToInt32Bits(v.X));
-            Mix(BitConverter.SingleToInt32Bits(v.Y));
-            Mix(BitConverter.SingleToInt32Bits(v.Z));
-        }
-        foreach (var t in nav.Triangles) { Mix(t.A); Mix(t.B); Mix(t.C); Mix(t.Flags); }
-        return h;
-    }
-}

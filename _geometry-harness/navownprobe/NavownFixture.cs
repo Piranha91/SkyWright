@@ -12,7 +12,7 @@ using SkCell = Mutagen.Bethesda.Skyrim.Cell;
 // Load order: NvMaster.esm, Dawnguard.esm, HearthFires.esm, Unofficial Skyrim Special Edition Patch.esp, NvA.esp, NvB.esp,
 // NvFix.esp. The two .esm names and the USSEP name are the probe's own file-name populations, used on purpose. Every
 // navmesh is filed in one interior cell IC. G0 = one triangle (0,0)(400,0)(0,400); ISLAND = G0 plus a second triangle at
-// (2000,2000), 1,600 u and more from G0; NEAR = G0 with its third vertex at (0,450), within 50 u of G0.
+// (2000,2000), about 2,500 u from G0; NEAR = G0 with its third vertex at (0,450), within 50 u of G0.
 //
 //   id     master        later plugins                                   answer (worked by hand)
 //   NMOD   G0            NvA: ISLAND; NvB (masters only NvMaster): G0     CLOBBERED A->B, class C, material, predicate Holds
