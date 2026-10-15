@@ -1391,8 +1391,9 @@ foreach (var h in sweep.CrossHits)
         maxTrianglePairs, TimeSpan.FromSeconds(pairSeconds), popMode == PopulationMode.Flags ? null : arms));
     __run.Advance();
 }
-var provenanceUnknown = rows.Where(r => r.CounterfactualStatus == "unknown").ToList();
-var provenanceRows = rows.Where(r => r.CounterfactualStatus != "unknown").ToList();
+var split = OverlapClass.Of(rows, PopOf);   // overlapprobe/OverlapClass.cs
+var provenanceUnknown = split.ProvenanceUnknown;
+var provenanceRows = split.Provenance;
 int seenRows = rows.Count(r => r.Sight == OverlapSight.Seen);
 Console.WriteLine($"\n==== PROVENANCE — actual surface with vs without the later plugin ({rows.Count:N0} intersections) ====");
 Console.WriteLine($"   Seen rows {seenRows:N0}; declared intersections {sweep.CrossDeclaredIntersects:N0}; counterfactual unknown {provenanceUnknown.Count:N0}");
@@ -1400,9 +1401,8 @@ Console.WriteLine($"   Seen rows {seenRows:N0}; declared intersections {sweep.Cr
 string Verdict(SurfaceOverlapRow r) => $"{r.Origin} + {r.Sight}";
 var introduced = provenanceRows.Where(r => r.Origin == OverlapOrigin.Introduced).ToList();
 Console.WriteLine($"   Introduced {introduced.Count:N0} of {provenanceRows.Count:N0} assessed; Blind {introduced.Count(r => r.Sight == OverlapSight.Blind):N0}");
-var cls = provenanceRows.Where(r => r.Origin == OverlapOrigin.Introduced && r.Sight == OverlapSight.Blind
-    && PopOf(r.Hit) != OverlapPopulation.BethesdaFloor).ToList();
-var floorRows = provenanceRows.Where(r => PopOf(r.Hit) == OverlapPopulation.BethesdaFloor).ToList();
+var cls = split.Class;
+var floorRows = split.Floor;
 
 (string, string) PairKey(SurfaceOverlapRow r)
 {
@@ -1427,8 +1427,8 @@ Console.WriteLine($"\n   ---- first {listN} by canonical reference identity; rel
 foreach (var r in cls.OrderBy(r => r.Hit.A.Key.ToString(), StringComparer.Ordinal).ThenBy(r => r.Hit.B.Key.ToString(), StringComparer.Ordinal).Take(listN))
     Console.WriteLine("   " + Describe(r));
 
-var knowing = provenanceRows.Where(r => r.Origin == OverlapOrigin.Introduced && r.Sight == OverlapSight.Seen).ToList();
-var inherited = provenanceRows.Where(r => r.Origin == OverlapOrigin.Inherited).ToList();
+var knowing = split.Knowing;
+var inherited = split.Inherited;
 Console.WriteLine($"\nintroduced + seen intersections: {knowing.Count:N0}; inherited: {inherited.Count:N0}; Bethesda same-responsible relationships: {floorRows.Count:N0}");
 foreach (var r in floorRows.OrderBy(r => r.Hit.A.Key.ToString(), StringComparer.Ordinal).Take(listN))
     Console.WriteLine($"   {Verdict(r),-22} {Describe(r)}");
