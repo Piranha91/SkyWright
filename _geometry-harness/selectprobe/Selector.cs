@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using HarnessShared;
 using HousecarlCore;
+using Mutagen.Bethesda.Plugins;
 using Mutagen.Bethesda.Skyrim;
 
 // The order index and the per-newcomer selection. One Selector holds one resolved order; every newcomer is selected
@@ -262,15 +263,31 @@ sealed class Selector
     //  One newcomer's selection
     // ------------------------------------------------------------------------------------------------------------
 
-    public Selection Select(NewcomerSpec s)
+    /// <summary>What both rules share for one newcomer: the order after removal, the dependencies, every installed
+    /// plugin to judge with its facts, and the parts of the output that do not depend on the rule.</summary>
+    sealed class Ctx
     {
-        var facts = s.Facts!;
+        public NewcomerFacts Facts = null!;
+        public List<SelNamed> Removed = new(), Deps = new(), Unreadable = new();
+        public List<SelExcluded> BaseExcluded = new();
+        public List<InstalledFacts> Judged = new();
+        public List<SelAssetOnly> AssetOnly = new();
+        public List<string> Unmeasured = new();
+        public SelNewcomer Newcomer = null!;
+        public SelOrder Order = null!;
+        public bool Incomplete;
+    }
+
+    Ctx Prepare(NewcomerSpec s)
+    {
+        var x = new Ctx();
+        var facts = x.Facts = s.Facts!;
         _newcomerDirs = s.FolderPath is null ? new() : new List<string> { s.FolderPath.TrimEnd('\\', '/') }.Concat(s.Companions).ToList();
         var newcomerNames = facts.Plugins;
         var newcomerFolder = s.FolderPath;
 
         // 1. take the newcomer (and its packaged patches) out of the order, with everything that masters them
-        var removed = new List<SelNamed>();
+        var removed = x.Removed;
         var gone = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         foreach (var n in newcomerNames.Concat(s.Packaged.Select(p => p.Plugin)))
             if (_byName.ContainsKey(n) && gone.Add(n))
@@ -298,7 +315,6 @@ sealed class Selector
                     throw new RefusalException($"newcomer plugin '{fp.Name}' masters '{m}', which this order does not load; add or enable it first.");
 
         // 3. dependencies: the newcomer's masters, transitively, within the order
-        var deps = new List<SelNamed>();
         var depSet = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var stack = new Stack<string>(_newcomerPlugin.Where(kv => s.PluginPaths.Contains(kv.Key, StringComparer.OrdinalIgnoreCase))
                                                      .SelectMany(kv => kv.Value.Masters).Where(m => !newcomerNames.Contains(m)));
@@ -308,65 +324,108 @@ sealed class Selector
             if (!depSet.Add(m)) continue;
             if (_byName.TryGetValue(m, out var cp)) foreach (var mm in cp.Masters) stack.Push(mm);
         }
-        foreach (var p in order) if (depSet.Contains(p.Name) && !_base.Contains(p.Name)) deps.Add(new SelNamed(p.Name, "a master of the newcomer (a dependency, not a clash partner)"));
+        foreach (var p in order) if (depSet.Contains(p.Name) && !_base.Contains(p.Name)) x.Deps.Add(new SelNamed(p.Name, "a master of the newcomer (a dependency, not a clash partner)"));
 
-        // 4. judge every other installed plugin
-        var picked = new List<(string, string?, SelEvidence, SelNoted, List<string>)>();
-        var excluded = new List<SelExcluded>();
-        var unreadable = new List<SelNamed>();
+        // 4. every other installed plugin, with the facts a rule judges
         foreach (var p in order)
         {
             string? folder = p.Provider is "Data" ? null : p.Provider;
-            if (_base.Contains(p.Name)) { excluded.Add(new SelExcluded(p.Name, folder, "base game (provided by the game's Data folder)", null)); continue; }
+            if (_base.Contains(p.Name)) { x.BaseExcluded.Add(new SelExcluded(p.Name, folder, "base game (provided by the game's Data folder)", null)); continue; }
             if (depSet.Contains(p.Name)) continue;
             if (!_fp.TryGetValue(p.Name, out var bfp)) { _fp[p.Name] = bfp = Footprint.Read(p.Path, _dataDir, _reverseLinks, false); FootprintsRead++; }
-            if (bfp.Error is not null) { unreadable.Add(new SelNamed(p.Name, bfp.Error)); continue; }
+            if (bfp.Error is not null) { x.Unreadable.Add(new SelNamed(p.Name, bfp.Error)); continue; }
             var bAssets = AssetsOf(folder, newcomerFolder, inOrder);
             var nb = new HashSet<string>(bfp.Masters.Where(m => !_base.Contains(m)), StringComparer.OrdinalIgnoreCase);
-            var (ev, noted, kinds) = SelectionRule.Judge(facts, new InstalledFacts(p.Name, folder, bfp, bAssets, nb));
-            if (kinds.Count > 0) picked.Add((p.Name, folder, ev, noted, kinds));
-            else excluded.Add(new SelExcluded(p.Name, folder, SelectionRule.ExcludedReason(noted), noted));
+            x.Judged.Add(new InstalledFacts(p.Name, folder, bfp, bAssets, nb));
         }
 
         // 5. asset-only folders: enabled folders that ship no plugin the order knows, sharing a path with the newcomer
-        var assetOnly = new List<SelAssetOnly>();
         foreach (var (folder, hits) in _looseHits)
         {
             if (_folderPlugins.ContainsKey(folder) || IsNewcomerFolder(folder, newcomerFolder)) continue;
-            var h = hits.Where(facts.Assets.Contains).OrderBy(x => x, StringComparer.Ordinal).ToList();
-            if (h.Count > 0) assetOnly.Add(new SelAssetOnly(folder, h.Count, h.Take(20).ToList()));
+            var h = hits.Where(facts.Assets.Contains).OrderBy(v => v, StringComparer.Ordinal).ToList();
+            if (h.Count > 0) x.AssetOnly.Add(new SelAssetOnly(folder, h.Count, h.Take(20).ToList()));
         }
-        assetOnly.Sort((a, b) => b.Assets != a.Assets ? b.Assets.CompareTo(a.Assets) : string.Compare(a.Folder, b.Folder, StringComparison.OrdinalIgnoreCase));
+        x.AssetOnly.Sort((a, b) => b.Assets != a.Assets ? b.Assets.CompareTo(a.Assets) : string.Compare(a.Folder, b.Folder, StringComparison.OrdinalIgnoreCase));
 
-        var unmeasured = new List<string>
+        x.Unmeasured.AddRange(new[]
         {
             "script logic: scripts are counted (newcomer.scriptFiles, newcomer.scriptCarriers), never read",
             "runtime layers (SKSE plugin configs, SPID, KID, SkyPatcher, BOS, OAR): the newcomer's .ini/.json files are listed (newcomer.runtimeLayerFiles), not interpreted",
             "door teleport destinations, LOD, and exterior cells beyond ring 2",
             "a patch packaged in the newcomer's folder: its loose assets cannot be told from the newcomer's and are counted as the newcomer's",
-        };
-        if (!_reverseLinks) unmeasured.Add("reverse form links (installed records pointing at the newcomer's) were not read: noted.reverseFormLinks is null");
-        unmeasured.AddRange(_assetFailures);
-        unmeasured.AddRange(s.Notes);
+        });
+        if (!_reverseLinks) x.Unmeasured.Add("reverse form links (installed records pointing at the newcomer's) were not read: noted.reverseFormLinks is null");
+        x.Unmeasured.AddRange(_assetFailures);
+        x.Unmeasured.AddRange(s.Notes);
 
         var narrowed = _cfg.NarrowedTo(order.Select(p => p.Path).ToList(), $"the newcomer and the {removed.Count} plugin(s) leaving with it are taken out");
         var identity = narrowed.Identity("newcomer-selection", "load-time");
-        var newcomer = new SelNewcomer(newcomerFolder, s.Companions,
+        x.Newcomer = new SelNewcomer(newcomerFolder, s.Companions,
             s.PluginPaths.Select(p => _newcomerPlugin[p]).Select(fp => new SelNewcomerPlugin(fp.Name, fp.Path, ConfigurationIdentity.Sha256File(fp.Path), fp.Masters, fp.NewRecords, fp.Overrides)).ToList(),
             s.Packaged, facts.Fp.Keys.Count, facts.Fp.Interior.Count, facts.Fp.Exterior.Count, facts.Assets.Count, s.Loose, s.InArchives,
             s.ArchivesRead, facts.Fp.ScriptCarriers, s.RuntimeFiles.Take(50).ToList(), s.ScriptFiles);
+        x.Order = new SelOrder(_cfg.Source, identity.Short, order.Count, removed);
+        x.Incomplete = x.Unreadable.Count > 0 || _assetFailures.Count > 0;
+        return x;
+    }
 
-        return new Selection("selectprobe", 1, newcomer,
-            new SelOrder(_cfg.Source, identity.Short, order.Count, removed),
-            deps, SelectionRule.Rank(picked), assetOnly,
+    /// <summary>Rule v1 (4.26 part 1), its output unchanged.</summary>
+    public Selection Select(NewcomerSpec s)
+    {
+        var x = Prepare(s);
+        var picked = new List<(string, string?, SelEvidence, SelNoted, List<string>)>();
+        var excluded = new List<SelExcluded>(x.BaseExcluded);
+        foreach (var b in x.Judged)
+        {
+            var (ev, noted, kinds) = SelectionRule.Judge(x.Facts, b);
+            if (kinds.Count > 0) picked.Add((b.Name, b.Folder, ev, noted, kinds));
+            else excluded.Add(new SelExcluded(b.Name, b.Folder, SelectionRule.ExcludedReason(noted), noted));
+        }
+        return new Selection("selectprobe", 1, x.Newcomer, x.Order, x.Deps, SelectionRule.Rank(picked), x.AssetOnly,
             excluded.OrderBy(e => e.Plugin, StringComparer.OrdinalIgnoreCase).ToList(),
-            unreadable, unreadable.Count > 0 || _assetFailures.Count > 0, unmeasured,
+            x.Unreadable, x.Incomplete, x.Unmeasured,
             new SelRule(SelectionRule.Ring, SelectionRule.ContainerKinds, SelectionRule.SelectingKinds, SelectionRule.NotedKinds, _reverseLinks, SelectionRule.Ranking),
             null);
     }
 
-    /// <summary>Rule v2 (scaffold: not yet implemented; returns the v1 selection).</summary>
-    public Selection SelectV2(NewcomerSpec s) => Select(s);
+    /// <summary>Rule v2 (selection v2): v1's kinds plus form links, features, a score and the control rank R-0.</summary>
+    public SelectionV2 SelectV2(NewcomerSpec s)
+    {
+        var x = Prepare(s);
+        var judged = new List<(InstalledFacts B, SelEvidence Ev, SelNoted Noted, List<string> Kinds, PairItems It)>();
+        var df = new SelectionRuleV2.Multiplicity();
+        foreach (var b in x.Judged)
+        {
+            var (ev, noted, kinds) = SelectionRule.Judge(x.Facts, b);
+            var it = SelectionRuleV2.Items(x.Facts, b);
+            df.Add(it);
+            judged.Add((b, ev, noted, kinds, it));
+        }
+        var N = x.Facts.Fp;
+        string Rec(FormKey k) => N.Info is not null && N.Info.TryGetValue(k, out var i) ? $"{k} {i.Type}{(i.Edid is null ? "" : " " + i.Edid)}" : k.ToString();
+        var picked = new List<(string, string?, List<string>, SelEvidenceV2, Dictionary<string, double>, SelNoted)>();
+        var excluded = new List<SelExcluded>(x.BaseExcluded);
+        foreach (var (b, ev, noted, kinds, it) in judged)
+        {
+            var f = SelectionRuleV2.Features(x.Facts, b, it, noted, df);
+            var k2 = new List<string>(kinds);
+            if (SelectionRuleV2.LinksSelect(f)) k2.Add("formLinks");
+            if (k2.Count == 0) { excluded.Add(new SelExcluded(b.Name, b.Folder, SelectionRuleV2.ExcludedReason(noted, it.LinksOut.Count + it.LinksIn.Count), noted)); continue; }
+            var linkEx = it.LinksOut.OrderBy(k => k.ToString()).Select(k => "newcomer points at " + k)
+                .Concat(it.LinksIn.OrderBy(k => k.ToString()).Select(k => "they point at " + Rec(k))).Take(20).ToList();
+            var ev2 = new SelEvidenceV2(ev.Records, ev.RecordExamples, ev.Cells, ev.CellExamples, ev.Neighbours, ev.NeighbourExamples,
+                                        ev.Assets, ev.AssetExamples, ev.NewcomerPlacesTheirBase, ev.TheyPlaceNewcomerBase, ev.BaseLinkExamples,
+                                        it.LinksOut.Count, it.LinksIn.Count, linkEx);
+            picked.Add((b.Name, b.Folder, k2, ev2, f, noted));
+        }
+        return new SelectionV2("selectprobe", 2, x.Newcomer, x.Order, x.Deps, SelectionRuleV2.Rank(picked), x.AssetOnly,
+            excluded.OrderBy(e => e.Plugin, StringComparer.OrdinalIgnoreCase).ToList(),
+            x.Unreadable, x.Incomplete, x.Unmeasured,
+            new SelRuleV2(SelectionRuleV2.Version, SelectionRule.Ring, SelectionRule.ContainerKinds, SelectionRuleV2.SelectingKinds, SelectionRuleV2.NotedKinds,
+                          _reverseLinks, SelectionRuleV2.LinkMin, SelectionRuleV2.Ranking, SelectionRuleV2.ControlRanking),
+            null);
+    }
 
     List<string> _newcomerDirs = new();
 
