@@ -470,7 +470,7 @@
         "result": {
           "kind": "catalogue",
           "findings": "verdicts.LeftBehind",
-          "judged": "hostEnableState.edgesJudged",
+          "judged": "edgesWithVerdict",
           "unjudgeable": "verdicts.Unjudgeable"
         },
         "commonFlags": true
