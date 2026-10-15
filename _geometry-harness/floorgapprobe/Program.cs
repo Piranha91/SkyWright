@@ -86,6 +86,9 @@ bool ownOnly = false, winning = false, flagsOnly = false;
 // reach mode, opt-in (G1 Stage B): --band LO,HI adds the distance to the navmesh swept up from +LO to +HI (a standing
 // body); --under adds the floor straight under the subject (this probe's floor rule, --depth / --reach window).
 float[]? band = null; bool under = false;
+// clear mode: --band LO,HI is the body's column above the floor (default the humanoid band); --within R names a point
+// blocked when an actor-solid surface stands nearer than R to the column, and caps the search there.
+float within = float.NaN;
 int maxCells = int.MaxValue;
 Vec3? at = null; float heading = 0f, span = 384f, every = 16f;
 var positional = new List<string>();
@@ -106,6 +109,7 @@ for (int i = 0; i < args.Length; i++)
         case "--json": jsonPath = Next(); break;
         case "--band": { var b = Next().Split(','); band = new[] { F(b[0]), F(b[1]) }; if (!(band[1] > band[0])) { Console.Error.WriteLine("--band LO,HI needs HI > LO"); return 2; } break; }
         case "--under": under = true; break;
+        case "--within": within = float.Parse(Next(), CultureInfo.InvariantCulture); break;
         case "--tris": trisPath = Next(); break;
         case "--verdicts": verdictsDir = Next(); break;
         case "--own": ownOnly = true; break;
@@ -127,7 +131,7 @@ for (int i = 0; i < args.Length; i++)
     }
 }
 static float F(string s) => float.Parse(s, CultureInfo.InvariantCulture);
-if (positional.Count == 0) { Console.Error.WriteLine("usage: floorgapprobe sweep [maxCells] | cell <Cell> | line <Cell> --at X,Y,Z --heading DEG | points <Cell> <file>"); return 2; }
+if (positional.Count == 0) { Console.Error.WriteLine("usage: floorgapprobe sweep [maxCells] | cell <Cell> | line <Cell> --at X,Y,Z --heading DEG | points <Cell> <file> | clear <Cell> <file>"); return 2; }
 string mode = positional[0];
 Instance = HarnessTarget.Require(Instance, "MO2 instance directory", "instance", "--instance");
 GamePath = HarnessTarget.Require(GamePath, "game directory", "game", "--game");
@@ -416,6 +420,74 @@ if (mode == "reach")
     };
     File.WriteAllText(jsonPath, System.Text.Json.JsonSerializer.Serialize(outDoc, new System.Text.Json.JsonSerializerOptions { WriteIndented = true }));
     Console.WriteLine($"wrote navmesh distances: {rows.Count} subject(s), {tris.Count:N0} triangles -> {jsonPath}");
+    return 0;
+}
+
+// ================================================================================================ clear ====
+// clear <Cell> <file>: per line "x y floorZ [label]", the horizontal clearance of a standing body's column, floorZ + LO ..
+// floorZ + HI (--band; default the humanoid band ActorBand.PhysicalStep .. PhysicalControllerTop(ScaleOneHeight)), against
+// the floor rule's own population and geometry: every reference of the cell's 3x3 neighbourhood that is there at load
+// (the enable chain, or the flag under --flags), by its actor-solid collision where complete, else its render soup
+// (labelled fallback). HousecarlCore.ColumnClearance clips each triangle to the column's heights and reads the horizontal
+// distance; the nearest reference is named. --within R reads "blocked" below R and caps the search at R.
+if (mode == "clear")
+{
+    if (positional.Count < 3) { Console.Error.WriteLine("clear needs <Cell> <file of x y floorZ [label] lines>"); return 2; }
+    var e = FindCell(positional[1]);
+    if (e is null) { Console.Error.WriteLine($"cell '{positional[1]}' not found"); return 2; }
+    float lo = band?[0] ?? ActorBand.PhysicalStep, hi = band?[1] ?? ActorBand.PhysicalControllerTop(ActorBand.ScaleOneHeight);
+    float cap = float.IsNaN(within) ? 1024f : within;
+    var refs = e.Interior || ownOnly || e.Grid is not { } cg || !refsByWorld.ContainsKey(e.Worldspace)
+        ? e.Refs : fwalk.Floor.NeighbourhoodOf(e.Worldspace, cg).Refs;
+    var enabledAt = pop.Predicate;
+    var placed = new List<(PlacedRef R, Aabb World, Geo G)>();
+    int skippedOff = 0;
+    foreach (var r in refs)
+    {
+        if (r.Deleted || r.Base is not { } b || !baseMesh.TryGetValue(b, out var bm)) continue;
+        if (enabledAt is null ? r.InitiallyDisabled : !enabledAt(r.FormKey)) { skippedOff++; continue; }
+        var g = Geometry(bm.Mesh);
+        if (g.Soup is null || g.Box.IsEmpty) continue;
+        placed.Add((r, SpatialOverlap.ToWorld(g.Box, r.Position, r.Rotation, r.Scale), g));
+    }
+    var worldSoup = new Dictionary<FormKey, TriangleSoup>();
+    Console.WriteLine($"{Name(e)} ({World(e)}): {placed.Count:N0} references with geometry ({skippedOff:N0} not there at load); column floor +{lo:0.#} .. +{hi:0.#} u; search cap {cap:0} u{(float.IsNaN(within) ? "" : $", blocked below {within:0} u")}");
+    Console.WriteLine($"   {"x",9} {"y",9} {"floorZ",8} {"clear",7}  verdict  nearest (geometry)  label");
+    var rows = new List<object>();
+    foreach (var raw in File.ReadLines(positional[2]))
+    {
+        var parts = raw.Split(new[] { ' ', '	', ',' }, StringSplitOptions.RemoveEmptyEntries);
+        if (parts.Length < 3 || !float.TryParse(parts[0], NumberStyles.Float, CultureInfo.InvariantCulture, out float x)) continue;
+        float y = F(parts[1]), fz = F(parts[2]);
+        string label = parts.Length > 3 ? string.Join(" ", parts.Skip(3)) : "";
+        double z0 = fz + lo, z1 = fz + hi, best = cap; PlacedRef? who = null; string? src = null;
+        foreach (var (r, wb, g) in placed)
+        {
+            if (wb.Max.Z < z0 || wb.Min.Z > z1) continue;
+            double dx = Math.Max(0, Math.Max(wb.Min.X - x, x - wb.Max.X)), dy = Math.Max(0, Math.Max(wb.Min.Y - y, y - wb.Max.Y));
+            if (Math.Sqrt(dx * dx + dy * dy) >= best) continue;
+            if (!worldSoup.TryGetValue(r.FormKey, out var ws))
+                worldSoup[r.FormKey] = ws = SpatialOverlap.TransformSoup(g.Soup!, r.Position, r.Rotation, r.Scale);
+            var rd = ColumnClearance.Measure(ws, x, y, z0, z1, best);
+            if (rd.Triangle >= 0 && rd.Distance < best) { best = rd.Distance; who = r; src = g.Source; }
+        }
+        string verdict = float.IsNaN(within) ? "-" : best < within ? "blocked" : "clear";
+        string model = who?.Base is { } wbk && baseMesh.TryGetValue(wbk, out var wm) ? Path.GetFileName(wm.Mesh) : "";
+        Console.WriteLine($"   {x,9:0.0} {y,9:0.0} {fz,8:0.0} {(who is null ? $">={cap:0}" : best.ToString("0.0")),7}  {verdict,-7}  {(who is null ? "none within the cap" : $"{who.FormKey} {model} ({src})")}  {label}");
+        rows.Add(new { x, y, floorZ = fz, label, clearance = who is null ? (double?)null : Math.Round(best, 2), atLeast = who is null ? cap : (float?)null,
+                       verdict, nearest = who?.FormKey.ToString(), model, geometry = src });
+    }
+    if (jsonPath is not null)
+    {
+        File.WriteAllText(jsonPath, System.Text.Json.JsonSerializer.Serialize(new
+        {
+            schema = "housecarl.column-clearance/1", cell = Name(e), profile = profileName, winning, columnAboveFloor = new[] { lo, hi },
+            cap, within = float.IsNaN(within) ? (float?)null : within,
+            note = "horizontal distance from the point to the nearest actor-solid surface inside the column's heights (render soup where a model's collision is incomplete: geometry 'fallback')",
+            points = rows,
+        }, new System.Text.Json.JsonSerializerOptions { WriteIndented = true }));
+        Console.WriteLine($"wrote {rows.Count} point(s) -> {jsonPath}");
+    }
     return 0;
 }
 

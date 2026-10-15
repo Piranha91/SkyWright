@@ -3526,6 +3526,8 @@ MotionProof.RunPairMeshDefects(Check);
 MotionProof.RunPlacedCollapse(Check);
 // Usage-week M4 (2026-10-14): a model-less actor's body in box contact; EditorMarker shapes are not drawn (red until implemented).
 MotionProof.RunM4CannotTell(Check);
+// Column clearance (2026-10-15): the horizontal distance from a standing body's column to the nearest surface, cc 4300-4310.
+ColumnClearanceProof.Run(Check);
 // Motion rigs (2026-10-14): the motion reader's shapes and the swept never-tests answer to ShapeDrawing (MR-1..MR-9).
 MotionProof.RunMotionRigs(Check);
 // Lane B item 2 (2026-10-13): the actual-shape relation skips zero-area-in-model triangles and uses the pair frame (red until implemented).
