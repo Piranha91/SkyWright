@@ -9,7 +9,7 @@
 
 <p>Complete in every mode: every finding with all of its rows, every evidence file with its sha256, every media row. Generated {{ p.generatedUtc }} from the bundle at <code>{{ p.source.bundleDir }}</code> (manifest <code>{{ p.source.manifestSha256 }}</code>, disposition <code>{{ p.source.dispositionSha256 }}</code>, ledger <code>{{ p.source.ledgerSha256 }}</code>). Back to <a href="report.html">report.html</a>; the same index as data is <a href="evidence-index.md">evidence-index.md</a>.</p>
 
-<h2>Technical scope</h2>
+<h2 id="scope">Technical scope</h2>
 
 <ul>
 <li>target identities: <code>{{ p.scope.targets|tojson }}</code></li>
@@ -34,6 +34,7 @@
 {% endfor %}
 </ul>
 
+{% if p.reader.get("enrichment") %}<h2 id="derived-after-measurement">Derived after measurement ({{ p.reader.enrichment|length }})</h2><p>{{ p.reader.enrichmentLine }}</p><ul>{% for e in p.reader.enrichment %}<li><code>{{ e.path }}</code> ({{ e.enrichment }}{% if e.checkId %}, <code>{{ e.checkId }}</code> on {{ e.armId }}{% endif %}), sha256 <code>{{ e.sha256 }}</code>; derived from {% for d in e.derivedFrom or [] %}<code>{{ d.path }}</code> (<code>{{ d.sha256 }}</code>){{ ", " if not loop.last else "" }}{% else %}nothing recorded{% endfor %}</li>{% endfor %}</ul>{% endif %}
 <h2 id="prediction-record">Prediction record ({{ p.reader.prediction.record|length }})</h2>
 
 <p>Every record on the setup the prediction reads ({{ p.reader.prediction.predictionArm }}), with whether it counts as a clash between mods (<code>admitted</code>) or why it is set aside, and how an admitted one is attributed.</p>

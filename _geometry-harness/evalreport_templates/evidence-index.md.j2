@@ -3,6 +3,7 @@
 
 Complete in every mode: every finding with all of its rows, every evidence file with its sha256, every media row. Generated {{ p.generatedUtc }} from the bundle at `{{ p.source.bundleDir }}` (manifest `{{ p.source.manifestSha256 }}`, disposition `{{ p.source.dispositionSha256 }}`, ledger `{{ p.source.ledgerSha256 }}`). Back to [report.md](report.md).
 
+<a id="scope"></a>
 ## Technical scope
 
 - target identities: `{{ p.scope.targets|tojson }}`
@@ -39,6 +40,16 @@ The single-mod setups this prediction reads were measured in a separate bundle: 
 {% for role, arm in sib.roles.items() %}- {{ role }}: `{{ arm|txt }}`
 {% endfor %}
 {% for c in sib.checks %}- `{{ c.checkId }}`: {{ "joined" if c.joined else "not joined — " ~ c.why }}
+{% endfor %}
+{% endif %}
+
+{% if p.reader.get("enrichment") %}
+<a id="derived-after-measurement"></a>
+## Derived after measurement ({{ p.reader.enrichment|length }})
+
+{{ p.reader.enrichmentLine }}
+
+{% for e in p.reader.enrichment %}- `{{ e.path|txt }}` ({{ e.enrichment }}{% if e.checkId %}, `{{ e.checkId }}` on {{ e.armId }}{% endif %}), sha256 `{{ e.sha256|txt }}`; derived from {% for d in e.derivedFrom or [] %}`{{ d.path|txt }}` (`{{ d.sha256|txt }}`){{ ", " if not loop.last else "" }}{% else %}nothing recorded{% endfor %}
 {% endfor %}
 {% endif %}
 

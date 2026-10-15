@@ -63,11 +63,14 @@ def plan(patch=True, by_item=True, patch_problems=0, hits=4, open_=0):
                "admission": "admitted", "attribution": "single-mod", "attributionMod": A} for r in alias_rows]
            + [{"checkId": "environment.land-seams", "kind": "LAND-SEAM", "A": OTHER, "B": B, "formKey": "000D01:ModB.esp",
                "summary": "seam", "admission": "admitted", "attribution": "not-separable", "attributionMod": None}])
-    items = [{"checkId": CONTACT, "kind": "CONTACT", "mods": [A, B], "count": 4, "attribution": "needs-both",
+    items = [{"checkId": CONTACT, "kind": "CONTACT", "mods": [A, B], "count": 4, "relationships": 4, "objects": 3,
+              "attribution": "needs-both",
               "attributionMod": None, "findingIds": ["F-1"], "title": "Objects left without their supporting surface"},
-             {"checkId": ALIAS, "kind": "SPLIT", "mods": [A, OTHER], "count": 2, "attribution": "single-mod",
+             {"checkId": ALIAS, "kind": "SPLIT", "mods": [A, OTHER], "count": 2, "relationships": 2, "objects": 2,
+              "attribution": "single-mod",
               "attributionMod": A, "findingIds": ["F-2"], "title": "Quest aliases split between mods"},
              {"checkId": "environment.land-seams", "kind": "LAND-SEAM", "mods": [B, OTHER], "count": 1,
+              "relationships": 1, "objects": 1,
               "attribution": "not-separable", "attributionMod": None, "findingIds": [], "title": "Seams"}]
     val = {"status": "compared" if patch else "no-patch", "patches": [PATCH] if patch else [],
            "hits": hits if patch else None, "open": (open_ + 2) if patch else None,
@@ -177,6 +180,121 @@ def case_17_order_sentences():
     assert od["free"].split("(")[0] in md, md
     md, _, _ = build(plan())
     assert od["unknown"] in md, md
+
+
+# ---- 4.24 phase 1 (cases 19-31)
+
+def build_kw(p, **kw):
+    """RD.build with the phase-1 keywords; a build that does not take them fails on an assertion, not a crash."""
+    try:
+        return RD.build(p, WORDS, kw.pop("mod_names", {A: "Mod A", B: "Mod B"}), kw.pop("names", None), None,
+                        kw.pop("single", "show"), "evidence-index.html", **kw)
+    except TypeError as ex:
+        raise AssertionError(f"build does not take {sorted(kw)}: {ex}")
+
+
+PLAN_NAMES = {"places": {"PlaceOne": {"name": "First Hall", "formKey": "000A01:ModA.esp"}},
+              "objects": {"Chair01": {"name": "Chair", "formKey": "000B01:ModA.esp"}},
+              "mods": {A: {"name": "Mod A Ordinary", "source": "declared"}},
+              "missing": [], "derivedFrom": [{"path": "X:/x/ModA.esp", "sha256": "0" * 64}]}
+
+
+def case_19_manifest_keeps_the_single_mod_list():
+    _, _, man = build(plan())
+    items = man.get("singleModItems")
+    assert isinstance(items, list) and len(items) == 1 and items[0]["checkId"] == ALIAS, items
+    assert man.get("singleModMode") == "show", man.get("singleModMode")
+    assert man.get("singleMod") != "show", "the switch value still overwrites the item list"
+
+
+def case_21_refuses_a_plan_without_or_disagreeing_with_the_compiler_counts():
+    old = copy.deepcopy(plan())
+    for it in old["reader"]["prediction"]["items"]:
+        it.pop("objects"), it.pop("relationships")
+    try:
+        build(old)
+    except RD.Refused as ex:
+        assert "recompile" in str(ex).lower(), ex
+    else:
+        raise AssertionError("a plan without per-item object counts was not refused")
+    bad = copy.deepcopy(plan())
+    bad["reader"]["prediction"]["items"][0]["objects"] = 5
+    try:
+        build(bad)
+    except RD.Refused as ex:
+        assert "5" in str(ex) and "3" in str(ex), ex
+    else:
+        raise AssertionError("a plan whose object count disagrees with its rows was not refused")
+
+
+def case_23_headline_unit_default_objects_and_switch():
+    md, _, man = build_kw(plan())
+    assert "3 objects" in section(md, H["problems"]) and man.get("headlineUnit") == "objects", man.get("headlineUnit")
+    md2, _, man2 = build_kw(plan(), unit="relationships")
+    probs = section(md2, H["problems"])
+    assert man2.get("headlineUnit") == "relationships" and "4 " in probs and "3 objects" not in probs, probs
+
+
+def case_25_names_come_from_the_plan():
+    p = plan()
+    p["reader"]["names"] = PLAN_NAMES
+    md, _, man = build_kw(p, mod_names={})
+    probs = section(md, H["problems"])
+    assert "First Hall" in probs and "chair" in probs, probs
+    assert man.get("namesSource") == "plan", man.get("namesSource")
+    assert "Mod A Ordinary" in md.splitlines()[0], md.splitlines()[0]
+
+
+def case_27_a_names_file_overrides_the_plan_and_says_so():
+    p = plan()
+    p["reader"]["names"] = PLAN_NAMES
+    md, _, man = build_kw(p, names={"places": {"PlaceOne": "Other Hall"}, "objects": {}}, mod_names={})
+    assert "Other Hall" in section(md, H["problems"]), section(md, H["problems"])
+    assert man.get("namesSource") == "override", man.get("namesSource")
+
+
+def case_29_single_mod_mode_follows_the_plan():
+    p = plan()
+    p["reader"]["prediction"]["singleModMode"] = "aside"
+    md, _, man = build_kw(p, single=None)
+    assert H["alone"] not in md and man.get("singleModMode") == "aside", man.get("singleModMode")
+
+
+def case_31_mod_name_sources_are_recorded():
+    p = plan()
+    p["reader"]["names"] = PLAN_NAMES
+    md, _, man = build_kw(p, mod_names={})
+    src = man.get("modNameSources") or {}
+    assert src.get(A) == "declared" and src.get(B) == "plugin-name", src
+    assert man["mods"][B] == "ModB", man["mods"]
+
+
+def case_33_record_fields_the_patch_sets_are_not_counted_as_fixed():
+    """Gate C (Q5): a lost record field the patch sets is the patch's choice; the install rule weighs what it fixes."""
+    p = plan(hits=4, open_=0)
+    rec_rows = [{"formKey": f"00070{i}:Skyrim.esm", "label": "Cell Hall", "summary": f"Cell Hall: Music{i}"}
+                for i in (1, 2)]
+    p["findings"].append({"id": "F-3", "allRows": rec_rows})
+    p["reader"]["prediction"]["items"].insert(1, {
+        "checkId": "records.contested-fields", "kind": "LOST-EDIT", "mods": [A, B], "count": 2, "relationships": 2,
+        "objects": 2, "attribution": "needs-both", "attributionMod": None, "findingIds": ["F-3"], "title": "Fields"})
+    p["reader"]["prediction"]["record"] += [{"checkId": "records.contested-fields", "kind": "LOST-EDIT", "A": A, "B": B,
+                                             "formKey": r["formKey"], "summary": r["summary"], "admission": "admitted",
+                                             "attribution": "needs-both", "attributionMod": None} for r in rec_rows]
+    p["reader"]["validation"]["byItem"].insert(1, {"hits": 1, "open": 1, "notMeasured": 0})
+    md, s_, _ = build(p)
+    assert WORDS["install"]["all"] in s_, s_
+    lead = WORDS["patchSetsFields"].split("{")[0]
+    assert lead in section(md, H["patch"]), section(md, H["patch"])
+    assert "sets 1 " in section(md, H["patch"]), section(md, H["patch"])
+
+
+def case_35_a_place_with_no_in_game_name_is_counted_not_printed():
+    """Gate C lint: Group 6's page printed editor names such as BlackreachSpiderLair02 for unnamed places."""
+    md, _, man = build(plan(), names={"places": {"PlaceOne": "First Hall"}, "objects": {}})
+    probs = section(md, H["problems"])
+    assert "PlaceTwo" not in probs and "1 place with no in-game name" in probs, probs
+    assert "PlaceTwo" in man["namesMissing"]["places"], man["namesMissing"]
 
 
 def main():

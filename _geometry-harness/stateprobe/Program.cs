@@ -33,6 +33,10 @@ using HousecarlCore.Progress;
 //                    baseline's floor mixes two worlds. Fields are keyed on (cell, state) and the baseline's field is
 //                    reused where the flip changes nothing in that cell, so the cost is a lookup, not a rebuild.
 //   --emit FILE      the measured class as a ConflictFile (STATE-CONTACT / STATE-ROUTE @ state); STATE-OVERLAP is explicitly unmeasured
+//   --empty-space F  LEFT IN EMPTY SPACE for each state's ARRIVING references (_shared/ContactAssembly.cs, DetectorModel.EmptySpace):
+//                    in the state, a fixture whose assembly reached a floor or wall some plugin removed or moved, and reaches none
+//                    under the winner; rows to F, the class to --emit as STATE-EMPTY @ state (a fixture that only exists after a
+//                    quest flips its switch is judged in the state that brings it in, which the load-time contact pass cannot see)
 
 using var __run = RunLog.BeginProcess("stateprobe", args);
 // Known answers for which version of a moved or deleted reference this probe's walk keeps (_shared/MovedRefFixture.cs).
@@ -57,7 +61,7 @@ string overwriteDir = Path.Combine(Instance, "overwrite");
 string dataDir = Path.Combine(GamePath, "Data");
 
 int listN = 25;
-string? jsonPath = null, emitPath = null, mapPath = null;
+string? jsonPath = null, emitPath = null, mapPath = null, emptySpaceOut = null;
 bool all = false, routeOn = true;
 var stateSpecs = new List<string>(); var cellFilters = new List<string>();
 var enablePlugins = new List<string>(); var disablePlugins = new List<string>();
@@ -67,6 +71,7 @@ for (int i = 0; i < args.Length; i++)
     if (args[i] == "--list" && i + 1 < args.Length) listN = int.Parse(args[++i]);
     else if (args[i] == "--json" && i + 1 < args.Length) jsonPath = args[++i];
     else if (args[i] == "--emit" && i + 1 < args.Length) emitPath = args[++i];
+    else if (args[i] == "--empty-space" && i + 1 < args.Length) emptySpaceOut = args[++i];
     else if (args[i] == "--switch-map" && i + 1 < args.Length) mapPath = args[++i];
     else if (args[i] == "--state" && i + 1 < args.Length) stateSpecs.Add(args[++i]);
     else if (args[i] == "--states-file" && i + 1 < args.Length)
@@ -156,6 +161,7 @@ var idx = cidx.Index;
 // Pass 1 — every plugin once, into the shared index.
 // ---------------------------------------------------------------------------------------
 var pluginKey = new ModKey[paths.Count];
+var masterIdx = new HashSet<int>[paths.Count];   // the master closure, for the empty-space pass's arm without a mover's side
 var unreadable = new List<string>();
 __run.Feature("plugins", paths.Count, "plugins").Stage("scan", "reading plugins", paths.Count, "plugins");
 
@@ -164,8 +170,20 @@ for (int p = 0; p < paths.Count; p++)
     __run.Advance();
     ISkyrimModGetter mod;
     try { mod = SkyrimMod.CreateFromBinaryOverlay(paths[p], SkyrimRelease.SkyrimSE); }
-    catch { unreadable.Add(Path.GetFileName(paths[p])); pluginKey[p] = ModKey.Null; continue; }
-    using (mod as IDisposable) { pluginKey[p] = mod.ModKey; idx.Ingest(p, mod); }
+    catch { unreadable.Add(Path.GetFileName(paths[p])); pluginKey[p] = ModKey.Null; masterIdx[p] = new HashSet<int>(); continue; }
+    using (mod as IDisposable)
+    {
+        pluginKey[p] = mod.ModKey;
+        var mset = new HashSet<int>();
+        try
+        {
+            var names = mod.ModHeader.MasterReferences.Select(m => m.Master).ToHashSet();
+            for (int q = 0; q < p; q++) if (names.Contains(pluginKey[q])) mset.Add(q);
+        }
+        catch { }
+        masterIdx[p] = mset;
+        idx.Ingest(p, mod);
+    }
     if ((p + 1) % 150 == 0) Console.WriteLine($"   ... {p + 1}/{paths.Count} plugins, {idx.Placements:N0} placements, {sw.Elapsed.TotalSeconds:0}s");
 }
 Console.WriteLine($"indexed {idx.Placements:N0} placements over {idx.History.Count:N0} refs  ({sw.Elapsed.TotalSeconds:0.0}s); unreadable plugins {unreadable.Count}");
@@ -439,6 +457,49 @@ if (routeFloorLine is not null) Console.WriteLine("   " + routeFloorLine());
 Console.WriteLine($"   set aside (rule 6): {tally.NoBox:N0} changed refs without a box (no geometry, a marker, or a navcut without a primitive); route: {routeNoNav:N0} in a cell without navmesh, {routeNoGeo:N0} without actor-solid geometry, {routeSetAside:N0} doors / movables, {routeNoCross:N0} never entering an actor column, {tally.RouteUnjudged:N0} unjudged");
 Console.WriteLine($"   state overlap: unmeasured for {tally.StateOverlapUnmeasured:N0} changed obstructing reference-state(s); strict placed render-surface migration is pending, so no box overlap is a finding or repair predicate");
 
+// ---- LEFT IN EMPTY SPACE per state (--empty-space): each state's arriving fixtures against every plugin that stepped on a
+// floor or wall near them; the ContactIndex arms carry the state, and the state is cleared again before anything else reads them.
+var esRows = new List<EmptySpaceRow>();
+var esTrigger = new Dictionary<EmptySpaceRow, string>(ReferenceEqualityComparer.Instance);
+long esAbsent = 0, esNoRelation = 0, esFalls = 0, esPairs = 0;
+EmptySpaceSearch? es = null;
+if (emptySpaceOut is not null)
+{
+    sw.Restart();
+    var closure = DetectorModel.MasterClosure(masterIdx);
+    es = new EmptySpaceSearch(cidx, closure, PluginName, EmptySpaceOutput.NodeCheck(idx, assets), f => PluginKinds.IsBethesda(f), p => IsVanilla(p) || IsUssep(p));
+    int esDone = 0;
+    foreach (var arm in arms)
+    {
+        if (++esDone % 250 == 0) Console.WriteLine($"   ... empty space: {esDone:N0}/{arms.Count:N0} states, {esRows.Count:N0} rows, {sw.Elapsed.TotalSeconds:0}s");
+        foreach (var (r, sk) in es.JudgeArrivals(arm, sx))
+        {
+            esPairs++;
+            if (r.Verdict == EmptySpaceVerdict.Absent) { esAbsent++; continue; }
+            if (r.Verdict == EmptySpaceVerdict.NoRelation) { esNoRelation++; continue; }
+            if (r.Verdict == EmptySpaceVerdict.Falls) { esFalls++; continue; }
+            esRows.Add(r); esTrigger[r] = map?.TriggerOf(sk).Status ?? "(no map)";
+        }
+    }
+    var esCls = esRows.Where(r => r.Verdict == EmptySpaceVerdict.LeftInEmptySpace).ToList();
+    Console.WriteLine($"\n==== EMPTY SPACE per state - {esPairs:N0} arriving-fixture x mover pairs (absent {esAbsent:N0}, no relation {esNoRelation:N0}, falls {esFalls:N0}; counted, not listed) in {sw.Elapsed.TotalSeconds:0.0}s; touch tests {es.TouchTests:N0} ====");
+    foreach (var g in esRows.GroupBy(r => r.Verdict).OrderBy(g => g.Key))
+        Console.WriteLine($"      {g.Key,-20} {g.Count(),8:N0}   distinct fixtures {g.Select(r => r.Fixture).Distinct().Count(),7:N0}   states {g.Select(r => r.State).Distinct().Count(),6:N0}");
+    foreach (var r in esCls.OrderBy(r => r.State).ThenBy(r => r.Fixture.ToString()).Take(listN))
+        Console.WriteLine($"   @ {r.State}: {RefLabel(r.Fixture)} ({r.HeldBy}) in {CellOf(r.Cell)}: {PluginName(r.Mover)} removed or moved {string.Join(" ", r.Authoring.ChangedAnchors.Take(3))}; assembly {r.Winner.Members}");
+    var dirE = Path.GetDirectoryName(Path.GetFullPath(emptySpaceOut));
+    if (!string.IsNullOrEmpty(dirE)) Directory.CreateDirectory(dirE);
+    File.WriteAllText(emptySpaceOut, JsonSerializer.Serialize(new
+    {
+        Schema = "housecarl.empty-space/1", States = arms.Count,
+        Parameters = new { Epsilon = cidx.Epsilon, es.MinAnchorDim, es.MaxMembers, es.AnchorReport, Reach = es.Reach },
+        Counts = esRows.GroupBy(r => r.Verdict.ToString()).ToDictionary(g => g.Key, g => g.Count()),
+        Pairs = esPairs, Absent = esAbsent, NoRelation = esNoRelation, Falls = esFalls,
+        Rows = esRows.Select(r => EmptySpaceOutput.Row(r, PluginName, BaseLabel, CellOf)).ToList(),
+    }, new JsonSerializerOptions { WriteIndented = false, NumberHandling = System.Text.Json.Serialization.JsonNumberHandling.AllowNamedFloatingPointLiterals }));
+    Console.WriteLine($"wrote {esRows.Count:N0} empty-space rows -> {emptySpaceOut}");
+}
+
 var cls = rows.Where(r => r.Verdict == StateVerdict.StateConditional && !r.SameSet && !r.SameAuthor).ToList();
 var resolved = rows.Where(r => r.Verdict == StateVerdict.StateResolved && !r.SameSet && !r.SameAuthor).ToList();
 var ownFloor = rows.Where(r => r.Verdict == StateVerdict.StateConditional && !r.SameSet && r.SameAuthor).ToList();
@@ -532,6 +593,8 @@ if (emitPath is not null)
             $"{r.Kind} {r.Verdict} under {sx.Switches[r.Switch].Label} ({PluginName(r.SwitchOwner)}): {RefLabel(r.Member)} {(r.Arrives ? "arrives" : "leaves")} — {r.Why} in {CellOf(r.Cell)}",
             new List<ConflictRecord> { new(r.Member.ToString(), "placed-ref", CellOf(r.Cell), r.Physical, r.PhysicalDetail) },
             r.Other is { } o ? new List<ConflictRecord> { new(o.ToString(), "placed-ref", null) } : null));
+    foreach (var r in esRows.Where(r => r.Verdict == EmptySpaceVerdict.LeftInEmptySpace))
+        conflicts.Add(EmptySpaceOutput.ToConflict(r, PluginName, BaseLabel, CellOf, state: true) with { Kind = $"{EmptySpaceOutput.StateKind}@{r.State}@{esTrigger[r]}" });
     var coverage = new List<CoverageLine>
     {
         new("plugins", paths.Count - unreadable.Count, new Dictionary<string, long> { ["UnreadablePlugin"] = unreadable.Count }),
@@ -543,6 +606,12 @@ if (emitPath is not null)
         new("route obstacles", routeMeasured, new Dictionary<string, long> { ["NoNavmesh"] = routeNoNav, ["NoGeometry"] = routeNoGeo, ["Unjudged"] = tally.RouteUnjudged }, new Dictionary<string, long> { ["DoorOrMovable"] = routeSetAside, ["NeverEntersColumn"] = routeNoCross }),
         new("contact pairs", tally.HostsLeaving + tally.HostsArriving + tally.DepsArriving, new Dictionary<string, long> { ["Unmeasured"] = tally.ContactUnmeasured }, new Dictionary<string, long> { ["ReSupported"] = tally.ReSupported, ["TouchingOnArrival"] = tally.TouchingOnArrival, ["FloatingOnArrival"] = tally.FloatingOnArrival }),
     };
+    if (es is not null)
+        coverage.Add(new("empty-space arriving-fixture x mover pairs", esPairs - esAbsent,
+            esRows.Where(r => r.Verdict == EmptySpaceVerdict.Refused).GroupBy(r => r.Why.StartsWith("exterior") ? "Exterior" : "AssemblyOverCap").ToDictionary(g => g.Key, g => (long)g.Count()),
+            new Dictionary<string, long> { ["AbsentInArm"] = esAbsent, ["Falls"] = esFalls, ["NoRelation"] = esNoRelation,
+                                           ["FloatsAsShipped"] = esRows.Count(r => r.Verdict == EmptySpaceVerdict.FloatsAsShipped), ["FloorPopulation"] = esRows.Count(r => r.Verdict == EmptySpaceVerdict.FloorPopulation) },
+            $"class {esRows.Count(r => r.Verdict == EmptySpaceVerdict.LeftInEmptySpace):N0}"));
     // Every row of this emit is a DIFFERENTIAL between the baseline and one flipped state, so the emit's own state is
     // the baseline it differs from; the state each row belongs to is in the row's own kind (STATE-<kind>@<state>@<trigger>).
     ConflictIo.Write(emitPath, new ConflictFile("stateprobe", Instance, DateTime.UtcNow.ToString("yyyy-MM-dd HH:mm:ssZ"), conflicts, coverage,

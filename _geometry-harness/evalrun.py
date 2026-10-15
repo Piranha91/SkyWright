@@ -4223,6 +4223,20 @@ def origin_refusals(doc: dict, plan: dict, arm_id, captured_time, request: tuple
                                 "capturedUtc": doc.get("capturedUtc"), "planCreatedUtc": plan.get("createdUtc")}}
 
 
+def rows_output_errors(path: Path, arm: dict | None) -> list[str]:
+    """An import's `rows` output: the conflict-file shape, every pair naming plugins of the arm it is imported for."""
+    doc = load_json(path)
+    if not isinstance(doc, dict) or not isinstance(doc.get("Conflicts"), list):
+        return [f"rows-invalid: {path.name} is not a conflict file (an object with a Conflicts list)"]
+    names = {str(x.get("name") or "").lower() for x in ((arm or {}).get("requested") or {}).get("plugins") or []}
+    foreign = sorted({str(c.get(k)) for c in doc["Conflicts"] if isinstance(c, dict) for k in ("A", "B")
+                      if c.get(k) and str(c.get(k)).lower() not in names})
+    if foreign:
+        return [f"rows-foreign: {path.name} names " + ", ".join(foreign) + ", which is not a plugin of arm "
+                f"{(arm or {}).get('armId')}"]
+    return []
+
+
 def _cmd_import_results(a, runlog: Run) -> int:
     """Bind already-produced MCP evidence to one frozen plan arm and write a normal receipt."""
     run, src = Path(a.run), Path(a.file)
@@ -4335,10 +4349,11 @@ def _cmd_import_results(a, runlog: Run) -> int:
         if not errors and judged <= 0:
             errors.append(f"extraction-failed: imported evidence judged {judged} with "
                           f"{unjudgeable} unjudgeable")
-    if not isinstance(rows, list) or len(rows) != 2:
-        errors.append("output-missing: outputs must include the raw MCP request and response files")
-    elif {str(x.get("role")) for x in rows if isinstance(x, dict)} != {"request", "response"}:
-        errors.append("output-missing: outputs must contain exactly the roles request and response")
+    roles = [str(x.get("role")) for x in rows if isinstance(x, dict)] if isinstance(rows, list) else []
+    if not isinstance(rows, list) or len(rows) not in (2, 3):
+        errors.append("output-missing: outputs must include the raw MCP request and response files, and may add rows")
+    elif sorted(roles) not in (["request", "response"], ["request", "response", "rows"]):
+        errors.append("output-missing: outputs must contain the roles request and response, and at most one rows")
 
     sources, request = [], None
     if isinstance(rows, list):
@@ -4362,6 +4377,8 @@ def _cmd_import_results(a, runlog: Run) -> int:
                 sources.append(path)
                 if row.get("role") == "request":
                     request = (path, str(row["sha256"]).lower())
+                if row.get("role") == "rows":
+                    errors.extend(rows_output_errors(path, arm))
 
     # Option A: where the evidence came from, checked on the hash-checked request bytes themselves.
     # This runs BEFORE the identity checks so they know which of two things they are reading: a capture
@@ -4421,10 +4438,11 @@ def _cmd_import_results(a, runlog: Run) -> int:
     temp = Path(tempfile.mkdtemp(prefix=key + "-", dir=dest.parent))
     try:
         (temp / "result.json").write_bytes(manifest_bytes)
-        for i, path in enumerate(sources, start=1):
-            shutil.copy2(path, temp / f"{i:02d}-{path.name}")
-        copied_hashes = [sha256_file(temp / f"{i:02d}-{path.name}")
-                         for i, path in enumerate(sources, start=1)]
+        names = [f"{i:02d}-rows.json" if str(r.get("role")) == "rows" else f"{i:02d}-{path.name}"
+                 for i, (path, r) in enumerate(zip(sources, rows), start=1)]
+        for path, name in zip(sources, names):
+            shutil.copy2(path, temp / name)
+        copied_hashes = [sha256_file(temp / name) for name in names]
         approved_hashes = [str(row["sha256"]).lower() for row in rows]
         if sha256_file(temp / "result.json") != manifest_sha256 or copied_hashes != approved_hashes:
             return refuse("output-stale: imported evidence changed while it was being copied")
@@ -4432,8 +4450,7 @@ def _cmd_import_results(a, runlog: Run) -> int:
     finally:
         if temp.exists():
             shutil.rmtree(temp, ignore_errors=True)
-    copied = [dest / "result.json"] + [dest / f"{i:02d}-{path.name}"
-                                        for i, path in enumerate(sources, start=1)]
+    copied = [dest / "result.json"] + [dest / name for name in names]
     manifest_copy = copied[0]
 
     runlog.feature("outputs", len(copied), "files")
@@ -5610,6 +5627,9 @@ def cmd_verify_bundle(a) -> int:
                     defect("disposition-unsupported-claim", None,
                            f"disposition.evaluation.{label} names {key}, which the ledger does not hold "
                            f"as a terminal-ok {want_detector} entry")
+        # (7) evidence derived after measurement: sources, reads, and the disposition it was derived beside
+        import bundleenrich
+        bundleenrich.verify(d, manifest, plan, defect, memo.sha256)
         if ev.get("complete") and (ev.get("missing") or ev.get("unknownApplicability")):
             defect("disposition-complete-contradiction", "disposition.json",
                    "evaluation.complete is true while missing or unknownApplicability is non-empty")
@@ -5642,6 +5662,57 @@ def cmd_verify_bundle(a) -> int:
     for x in defects[:20]:
         print(f"   {x['kind']}: {x['path'] or '-'} — {x['detail']}", file=sys.stderr)
     return EXIT_OK if complete else EXIT_REFUSED_RESULT
+
+
+# ------------------------------------------------------------------------------------ enrich --
+
+def cmd_enrich(a) -> int:
+    """Evidence derived after measurement, added to a bundle (bundle standard §8): verified first, refused by name."""
+    import bundleenrich
+    d = Path(a.bundle)
+    # the run history goes to the configured store, never into the bundle
+    with Run("evalrun-enrich", stage_source="counted") as r:
+        r.stage("enrich", total=1, unit="enrichments")
+        if verify_quiet(d) != EXIT_OK:
+            msg = (f"enrich refused: {d} does not verify (see its verify.json); an enrichment is added only to an "
+                   f"intact bundle")
+            print(f"REFUSED: {msg}", file=sys.stderr)
+            r.refuse(msg, EXIT_REFUSED_INPUT)
+            return EXIT_REFUSED_INPUT
+        mods = {}
+        for x in a.mod_name or []:
+            if "=" not in x:
+                return refuse(f"--mod-name takes PLUGIN=NAME, got {x!r}")
+            k, v = x.split("=", 1)
+            mods[k.strip()] = v.strip()
+        env = dict(x.split("=", 1) for x in a.reader_env or [] if "=" in x)
+        try:
+            if a.kind == "record-rows":
+                out = bundleenrich.enrich_record_rows(d)
+            else:
+                if not a.reader_cmd:
+                    raise bundleenrich.Refused("--kind names needs --reader-cmd, the houseCARL MCP server to read with")
+                out = bundleenrich.enrich_names(d, a.reader_cmd, mods, env)
+        except bundleenrich.Refused as ex:
+            msg = f"enrich refused: {ex}"
+            print(f"REFUSED: {msg}", file=sys.stderr)
+            r.refuse(msg, EXIT_REFUSED_INPUT)
+            return EXIT_REFUSED_INPUT
+        if verify_quiet(d) != EXIT_OK:
+            msg = f"enrich wrote {a.kind} but the bundle no longer verifies; see its verify.json"
+            print(f"REFUSED: {msg}", file=sys.stderr)
+            r.refuse(msg, EXIT_REFUSED_RESULT)
+            return EXIT_REFUSED_RESULT
+        r.advance()
+        print(json.dumps(out))
+        return EXIT_OK
+
+
+def verify_quiet(d: Path) -> int:
+    import contextlib
+    import io
+    with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+        return cmd_verify_bundle(SimpleNamespace(dir=str(d)))
 
 
 # ------------------------------------------------------------------------------------ status --
@@ -5749,6 +5820,15 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("verify-bundle", help="recompute every hash from the bundle-relative paths")
     p.add_argument("dir")
     p.set_defaults(fn=cmd_verify_bundle)
+
+    p = sub.add_parser("enrich", help="add evidence derived after measurement to a bundle (record rows, names)")
+    p.add_argument("--bundle", required=True)
+    p.add_argument("--kind", required=True, choices=("record-rows", "names"))
+    p.add_argument("--reader-cmd", help="names: the houseCARL MCP server command line to read records with")
+    p.add_argument("--reader-env", action="append", metavar="KEY=VALUE",
+                   help="names: an environment variable for the reader, such as a private HOUSECARL_DATA_DIR")
+    p.add_argument("--mod-name", action="append", metavar="PLUGIN=NAME", help="names: a mod's declared ordinary name")
+    p.set_defaults(fn=cmd_enrich)
 
     p = sub.add_parser("status", help="print the ledger as a table")
     p.add_argument("--run", required=True)

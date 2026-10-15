@@ -1,0 +1,23 @@
+{
+  "about": "Which record fields the record-lane comparator (_geometry-harness/recordrows.py) does NOT compare as authored game data, named exactly as the generated schema reference (mutagen-reference/references/*.jsonl) names them. Everything else the schema lists for a record type is compared. A field whose type is, or transitively contains, another major record is a child record and is decided by the schema, not listed here. Every name below must exist in the schema; tests/test_recordrows.py case 1 fails on one that does not. runtimeMerged mirrors runtime-merged-data.md's table where the schema models the field: DIAL's info count (TIFC) and the story-manager nodes' child (SNAM) are not fields of the generated schema, so they cannot be listed and are not compared either way. anglesRadians names fields whose values are angles in radians, compared modulo a full turn (a patch that writes -0.61 as 5.67 has not changed the rotation).",
+  "fileBookkeeping": ["FormVersion", "Version2", "VersionControl", "IsCompressed", "MajorRecordFlagsRaw"],
+  "structBookkeeping": ["Versioning"],
+  "groupBookkeeping": {
+    "Cell": ["Timestamp", "UnknownGroupData", "PersistentTimestamp", "PersistentUnknownGroupData", "TemporaryTimestamp", "TemporaryUnknownGroupData"],
+    "Worldspace": ["SubCellsTimestamp", "SubCellsUnknown"],
+    "DialogTopic": ["Timestamp"]
+  },
+  "runtimeMerged": {
+    "Location": ["EnableParentReferencesAdded", "EnableParentReferencesStatic", "InitiallyDisabledReferencesAdded", "InitiallyDisabledReferencesStatic", "LocationRefTypeReferencesAdded", "LocationRefTypeReferencesRemoved", "LocationRefTypeReferencesStatic", "PersistentActorReferencesAdded", "PersistentActorReferencesRemoved", "PersistentActorReferencesStatic", "UniqueActorReferencesAdded", "UniqueActorReferencesRemoved", "UniqueActorReferencesStatic", "WorldspaceCellsAdded", "WorldspaceCellsRemoved", "WorldspaceCellsStatic"],
+    "Worldspace": ["ObjectBoundsMin", "ObjectBoundsMax"],
+    "DialogResponses": ["PreviousDialog"],
+    "DefaultObjectManager": ["Objects"],
+    "IdleAnimation": ["RelatedIdles"]
+  },
+  "generatedBookkeeping": {
+    "about": "Generated bookkeeping, not authored game data, and not compared: a worldspace's LargeReferences is the list of large references by grid cell that the editing tools generate from the placed references (ruled not compared at the 4.24 phase-1 Gate C review, 2026-10-14; session 1's scorecard left it out with the worldspace container).",
+    "Worldspace": ["LargeReferences"]
+  },
+  "runtimeMergedRecords": ["NavigationMeshInfoMap"],
+  "anglesRadians": ["Placement.Rotation"]
+}
