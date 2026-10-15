@@ -69,5 +69,43 @@ static class SwitchSelfTest
                 scripts.Count == 3 && scriptsDecompiled == 2 && pexUnreadable == 1 && pexDecompileFailed == 0
                 && unreadWhy.GetValueOrDefault("pex not in the VFS") == 1 && source.TryGetValue(F.MissingScript, out var miss) && miss is null,
                 $"bound {scripts.Count}, decompiled {scriptsDecompiled}, unreadable {pexUnreadable} ({string.Join(", ", unreadWhy.Select(kv => $"{kv.Key} {kv.Value}"))}), refused {pexDecompileFailed}");
+
+        // 4c: per switch (TriggerMap.Status).
+        var jointFlips = new Dictionary<string, HashSet<Mutagen.Bethesda.Plugins.FormKey>>(StringComparer.OrdinalIgnoreCase);
+        var status = new Dictionary<Mutagen.Bethesda.Plugins.FormKey, (string Status, string Kind, List<string> By)>();
+        TriggerMap.Status(sx.Switches.Values.ToList(), bindings, source, questFragmentStage, recordEdid, jointFlips, status);
+        string S(Mutagen.Bethesda.Plugins.FormKey k) => status.TryGetValue(k, out var v) ? $"{v.Status} | {v.Kind} | {string.Join(" / ", v.By)}" : "(none)";
+        t.Check("PD3-S-T1 M1 is Triggered by quest SwQ at stage 10 (SwQScript.Fragment_0)",
+                status[F.M1].Status == "Triggered" && status[F.M1].Kind == "quest stage" && status[F.M1].By.SequenceEqual(new[] { "quest SwQ stage 10 (SwQScript.Fragment_0: Gate1.Enable()" }), S(F.M1));
+        t.Check("PD3-S-J the joint flips are exactly SwQ:10 -> {M1}",
+                jointFlips.Count == 1 && jointFlips.TryGetValue("SwQ:10", out var jf) && jf.SetEquals(new[] { F.M1 }),
+                string.Join(", ", jointFlips.Select(kv => $"{kv.Key} {kv.Value.Count}")));
+        t.Check("PD3-S-B1 M2 is BoundUnread: its script was read and makes no call on Gate2",
+                status[F.M2].Status == "BoundUnread" && status[F.M2].Kind == "bound, no Enable/Disable call found on the property", S(F.M2));
+        t.Check("PD3-S-B2 M3 is BoundUnread: its script could not be read",
+                status[F.M3].Status == "BoundUnread" && status[F.M3].Kind == "bound, the script could not be read", S(F.M3));
+        t.Check("PD3-S-T2 M4 is Triggered by a ref event, OnActivate",
+                status[F.M4].Status == "Triggered" && status[F.M4].Kind == "ref event OnActivate", S(F.M4));
+        t.Check("PD3-S-U M5 is Unknown: nothing binds it", status[F.M5].Status == "Unknown" && status[F.M5].Kind == "no binding", S(F.M5));
+
+        // SW2: ScriptCalls, unchanged in Program.cs, over decompiled-source text.
+        string Calls(string src, string prop) => string.Join(", ", ScriptCalls.Parse(src, 0).CallsOn(prop).Select(c => $"{c.Function}:{c.Text}"));
+        t.Check("PD3-S-C1 Gate.Enable() in Fragment_0 is a call on Gate in Fragment_0",
+                Calls("Function Fragment_0()\n    Gate.Enable()\nEndFunction\n", "Gate") == "Fragment_0:Gate.Enable(", Calls("Function Fragment_0()\n    Gate.Enable()\nEndFunction\n", "Gate"));
+        t.Check("PD3-S-C2 EnableList[i].Enable() is a call on EnableList (a list-bound marker)",
+                Calls("Event OnInit()\n    EnableList[i].Enable()\nEndEvent\n", "EnableList").StartsWith("OnInit:"), Calls("Event OnInit()\n    EnableList[i].Enable()\nEndEvent\n", "EnableList"));
+        t.Check("PD3-S-C3 a call through a local (ObjectReference x = Gate; x.Disable()) is a call on Gate",
+                Calls("Function F()\n    ObjectReference x = Gate\n    x.Disable()\nEndFunction\n", "Gate").StartsWith("F:"), Calls("Function F()\n    ObjectReference x = Gate\n    x.Disable()\nEndFunction\n", "Gate"));
+        t.Check("PD3-S-C4 gate.enable() is found for property Gate (case does not matter)",
+                Calls("Function F()\n    gate.enable()\nEndFunction\n", "Gate").StartsWith("F:"), Calls("Function F()\n    gate.enable()\nEndFunction\n", "Gate"));
+        t.Check("PD3-S-C5 Alias_Door.GetReference().Enable() is a call on Alias_Door",
+                Calls("Function F()\n    Alias_Door.GetReference().Enable()\nEndFunction\n", "Alias_Door").StartsWith("F:"), Calls("Function F()\n    Alias_Door.GetReference().Enable()\nEndFunction\n", "Alias_Door"));
+        t.Check("PD3-S-C6 GetLinkedRef().Enable() is a call on GetLinkedRef",
+                Calls("Event OnActivate()\n    GetLinkedRef().Enable()\nEndEvent\n", "GetLinkedRef").StartsWith("OnActivate:"), Calls("Event OnActivate()\n    GetLinkedRef().Enable()\nEndEvent\n", "GetLinkedRef"));
+        var self = ScriptCalls.Parse("Event OnActivate()\n    Enable()\nEndEvent\n", 0);
+        t.Check("PD3-S-C7 a bare Enable() is a call on Self and sets SelfCall",
+                self.SelfCall && self.CallsOn("Self").Any(c => c.Function == "OnActivate"), string.Join(", ", self.Calls));
+        t.Check("PD3-S-C8 Gate.EnableLinkChain() is not a call (today's call names; the copied-rules task owns the difference)",
+                Calls("Function F()\n    Gate.EnableLinkChain()\nEndFunction\n", "Gate") == "", Calls("Function F()\n    Gate.EnableLinkChain()\nEndFunction\n", "Gate"));
     });
 }

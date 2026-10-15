@@ -309,39 +309,7 @@ if (triggers)
     Console.WriteLine($"   scripts bound: {scripts.Count:N0}; decompiled {scriptsDecompiled:N0}; pex missing or unreadable {pexUnreadable:N0} ({string.Join(", ", unreadWhy.Select(kv => $"{kv.Key} {kv.Value}"))}); with a function the decompiler refused {pexDecompileFailed:N0}  ({sw.Elapsed.TotalSeconds:0.0}s)");
 
     // 4c. per switch: Triggered / BoundUnread / Unknown, with the kind and the callers.
-    foreach (var s in switches)
-    {
-        if (!bindings.TryGetValue(s.Key, out var bl)) { triggerStatus[s.Key] = ("Unknown", "no binding", new List<string>()); continue; }
-        var by = new List<string>(); var kinds = new List<string>();
-        foreach (var b in bl)
-        {
-            if (!source.TryGetValue(b.Script, out var sc) || sc is null) continue;
-            foreach (var call in sc.CallsOn(b.Property))
-            {
-                string where;
-                if (b.Kind == "quest" && questFragmentStage.TryGetValue((b.Record, call.Function), out var stage))
-                {
-                    where = $"quest {recordEdid.GetValueOrDefault(b.Record) ?? b.Record.ToString()} stage {stage} ({b.Script}.{call.Function}: {call.Text})";
-                    kinds.Add("quest stage");
-                    string jk = $"{recordEdid.GetValueOrDefault(b.Record) ?? b.Record.ToString()}:{stage}";
-                    if (!jointFlips.TryGetValue(jk, out var js)) jointFlips[jk] = js = new HashSet<FormKey>();
-                    js.Add(s.Key);
-                }
-                else
-                {
-                    where = $"{b.Kind} {recordEdid.GetValueOrDefault(b.Record) ?? b.Record.ToString()} ({b.Script}.{call.Function}: {call.Text}{(b.Via.Contains("alias") ? $"; via alias {b.AliasName}" : "")})";
-                    kinds.Add(b.Kind == "ref" ? $"ref event {call.Function}" : b.Kind == "scene" ? "scene" : b.Kind);
-                }
-                if (!by.Contains(where)) by.Add(where);
-            }
-        }
-        if (by.Count > 0) triggerStatus[s.Key] = ("Triggered", string.Join("+", kinds.Distinct().OrderBy(k => k)), by);
-        else
-        {
-            bool anyRead = bl.Any(b => source.TryGetValue(b.Script, out var sc) && sc is not null);
-            triggerStatus[s.Key] = ("BoundUnread", anyRead ? "bound, no Enable/Disable call found on the property" : "bound, the script could not be read", bl.Select(b => $"{b.Kind} {recordEdid.GetValueOrDefault(b.Record) ?? b.Record.ToString()} {b.Script}.{b.Property} [{b.Via}]").Distinct().ToList());
-        }
-    }
+    TriggerMap.Status(switches, bindings, source, questFragmentStage, recordEdid, jointFlips, triggerStatus);
     int nT = triggerStatus.Count(kv => kv.Value.Status == "Triggered"), nB = triggerStatus.Count(kv => kv.Value.Status == "BoundUnread"), nU = triggerStatus.Count(kv => kv.Value.Status == "Unknown");
     Console.WriteLine($"\n   TRIGGERED {nT:N0} ({Rate(nT, switches.Count):0.0}%)   BOUND BUT UNREAD {nB:N0} ({Rate(nB, switches.Count):0.0}%)   UNKNOWN {nU:N0} ({Rate(nU, switches.Count):0.0}%)   of {switches.Count:N0} switches");
     Console.WriteLine($"   vanilla-owned: " + string.Join("   ", new[] { "Triggered", "BoundUnread", "Unknown" }.Select(st => $"{st} {switches.Count(s => IsVanilla(s.Owner) && triggerStatus[s.Key].Status == st):N0}")) + $"   of {switches.Count(s => IsVanilla(s.Owner)):N0}");
