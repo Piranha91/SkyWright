@@ -1198,36 +1198,8 @@ IReadOnlyList<SettledGravity> SettledGravities()
     return settledGravities = list;
 }
 
-(PhysicalState State, string Detail) OverlapPredicate(FormKey laterKey, FormKey otherKey)
-{
-    var sl = idx.WinningGeometryPose(laterKey); var so = idx.WinningGeometryPose(otherKey);
-    if (sl is null || so is null) return (PhysicalState.Unmeasured, "a ref is not placed in this order");
-    if (sl.Value.Deleted || idx.IsDeletedNow(laterKey) || so.Value.Deleted || idx.IsDeletedNow(otherKey)) return (PhysicalState.Gone, "a ref is deleted under this order");
-    if (popMode != PopulationMode.Flags)
-    {
-        var el = resolvedArms!.Winner(laterKey); var eo = resolvedArms.Winner(otherKey);
-        if (!el.Resolved || !eo.Resolved) return (PhysicalState.Unmeasured, "a ref's enable-parent chain is unresolved");
-        if (!el.Enabled || !eo.Enabled) return (PhysicalState.Gone, "a ref is disabled at runtime under this state");
-    }
-    else if (sl.Value.Disabled || so.Value.Disabled) return (PhysicalState.Gone, "a ref is initially disabled under this order");
-    if ((idx.BosSwaps.TryGetValue(laterKey, out var bosLater) && (bosLater.Random || bosLater.PerSession || bosLater.PropertiesRandom || bosLater.Alternatives.Count != 1))
-     || (idx.BosSwaps.TryGetValue(otherKey, out var bosOther) && (bosOther.Random || bosOther.PerSession || bosOther.PropertiesRandom || bosOther.Alternatives.Count != 1)))
-        return (PhysicalState.Unmeasured, "a ref has more than one possible BOS runtime outcome");
-    if (sl.Value.Space != so.Value.Space) return (PhysicalState.Gone, "the refs are no longer in the same space");
-    if (!idx.RefBase.TryGetValue(laterKey, out var bl) || !idx.RefBase.TryGetValue(otherKey, out var bo)) return (PhysicalState.Unmeasured, "a ref has no base record");
-    var (modelL, srcL, whyL) = SurfaceGeometryOf(bl); var (modelO, srcO, whyO) = SurfaceGeometryOf(bo);
-    if (modelL is not { TriangleCount: > 0 } || modelO is not { TriangleCount: > 0 })
-        return (PhysicalState.Unmeasured, "a ref's strict decoded render geometry is unavailable");
-    var worldL = SpatialOverlap.TransformSoup(modelL, sl.Value.Pos, sl.Value.Rot, sl.Value.Scale);
-    var worldO = SpatialOverlap.TransformSoup(modelO, so.Value.Pos, so.Value.Rot, so.Value.Scale);
-    var q = SurfaceQueryOutcome.QueryPlaced(worldL, new(modelL, sl.Value.Pos, sl.Value.Rot, sl.Value.Scale),
-        worldO, new(modelO, so.Value.Pos, so.Value.Rot, so.Value.Scale), surfaceTolerance, maxTrianglePairs, TimeSpan.FromSeconds(pairSeconds));
-    if (q.Intersects == true)
-        return (PhysicalState.Holds, $"actual render surfaces: {q.SurfaceRelation}; containment {q.Containment}; {q.TrianglePairsTested:N0} triangle pairs [{srcL}{srcO}]");
-    if (q.Intersects == false)
-        return (PhysicalState.Gone, $"actual render surfaces are separated; containment {q.Containment}; {q.TrianglePairsTested:N0} triangle pairs [{srcL}{srcO}]");
-    return (PhysicalState.Unmeasured, q.Reason ?? whyL ?? whyO ?? "actual render-surface query is unknown");
-}
+(PhysicalState State, string Detail) OverlapPredicate(FormKey laterKey, FormKey otherKey)   // overlapprobe/OverlapCredit.cs
+    => new OverlapCredit(idx, popMode, resolvedArms, SurfaceGeometryOf, surfaceTolerance, maxTrianglePairs, pairSeconds).Predicate(laterKey, otherKey);
 
 // ---------------------------------------------------------------------------------------
 // Pass 3 — candidates, placed triangle soups, conservative bounds sweep, actual-shape pairs.

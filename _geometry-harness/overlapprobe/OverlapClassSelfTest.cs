@@ -116,5 +116,28 @@ static class OverlapClassSelfTest
         t.Check("PD4-O-C2 the Bethesda floor is exactly E1xD1, withheld from the class", Pairs(split.Floor) == Expect((F.E1, F.D1)), Pairs(split.Floor));
         t.Check("PD4-O-C3 introduced + seen is exactly S1xA2 (OcSeen masters OcA)", Pairs(split.Knowing) == Expect((F.S1, F.A2)), Pairs(split.Knowing));
         t.Check("PD4-O-C4 inherited is exactly XxY (X already crossed Y at its OcA place)", Pairs(split.Inherited) == Expect((F.X, F.Y)), Pairs(split.Inherited));
+
+        // OV3: overlapprobe/OverlapCredit.cs on each base row (necessary x A1), under the load-time population, under --flags,
+        // and with a work cap of one triangle pair.
+        var load = new OverlapCredit(pl.Index, PopulationMode.LoadTime, pl.Arms, pl.Geometry, 1e-5, 2_000_000, 120);
+        var flags = load with { Mode = PopulationMode.Flags };
+        var capped = load with { MaxTrianglePairs = 1 };
+        void P(string id, OverlapCredit c, FormKey necessary, PhysicalState state, string detailStart)
+        {
+            var (st, why) = c.Predicate(necessary, F.A1);
+            t.Check($"{id} {necessary} x A1: {state}, {detailStart}", st == state && why.StartsWith(detailStart, StringComparison.Ordinal), $"{st}: {why}");
+        }
+        P("PD4-O-P1 ", load, F.B1, PhysicalState.Holds, "actual render surfaces: crossing");
+        P("PD4-O-P2 ", load, F.A2, PhysicalState.Gone, "actual render surfaces are separated");
+        P("PD4-O-P3 ", load, F.Kd, PhysicalState.Gone, "a ref is deleted under this order");
+        P("PD4-O-P4 ", load, F.K, PhysicalState.Gone, "a ref is disabled at runtime under this state");
+        P("PD4-O-P5 ", load, F.Q, PhysicalState.Gone, "the refs are no longer in the same space");
+        P("PD4-O-P6 ", load, F.G, PhysicalState.Unmeasured, "a ref's strict decoded render geometry is unavailable");
+        P("PD4-O-P7 ", load, F.Ghost, PhysicalState.Unmeasured, "a ref is not placed in this order");
+        P("PD4-O-P8 ", load, F.U, PhysicalState.Unmeasured, "a ref's enable-parent chain is unresolved");
+        P("PD4-O-P9 ", load, F.R2, PhysicalState.Unmeasured, "a ref has more than one possible BOS runtime outcome");
+        P("PD4-O-P4f", flags, F.K, PhysicalState.Gone, "a ref is initially disabled under this order");
+        P("PD4-O-P8f", flags, F.U, PhysicalState.Gone, "actual render surfaces are separated");
+        P("PD4-O-Pc ", capped, F.A2, PhysicalState.Unmeasured, "triangle_pair_budget_exhausted");
     }
 }
