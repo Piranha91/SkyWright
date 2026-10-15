@@ -364,10 +364,20 @@ long meshesMeasured = 0, hostColl = 0, hostRender = 0, depColl = 0, depRender = 
 // per base, and a mesh evicted from the budget is decoded again from the same bytes. The run's mesh counters, the wind labels and
 // --geom-report lines are written on a mesh's first decode only. The other modes memoise every base's geometry, as before.
 bool boundedGeometry = selectedModes == 0;
+long readAlloc = 0, decodeAlloc = 0, readCount = 0, readBytes = 0;   // HC_MEMSTAGES counters
 byte[]? ReadMesh(string full)
 {
+    long a0 = MemStages.On ? GC.GetAllocatedBytesForCurrentThread() : 0;
     var res = assets.ResolveForPlacement(full);
-    return res.Sources.Count > 0 ? AssetResolver.ReadPlacementSource(res.Sources[0]).Bytes : null;
+    var b = res.Sources.Count > 0 ? AssetResolver.ReadPlacementSource(res.Sources[0]).Bytes : null;
+    if (MemStages.On)
+    {
+        long ra = GC.GetAllocatedBytesForCurrentThread() - a0;
+        readAlloc += ra; readCount++; readBytes += b?.Length ?? 0;
+        if (ra > 64L << 20)
+            Console.WriteLine($"   [memstages] read {full}: allocated {ra / 1e6:0.0} MB for {b?.Length ?? 0:N0} bytes from {(res.Sources.Count > 0 ? res.Sources[0].ArchivePath ?? res.Sources[0].LooseFilePath : "(none)")}");
+    }
+    return b;
 }
 RefGeometry? DecodeMesh(string full, byte[] bytes, bool first)
 {
@@ -450,7 +460,19 @@ RefGeometry? DecodeMesh(string full, byte[] bytes, bool first)
     }
     return g;
 }
-var meshReader = new MeshGeometryReader(ReadMesh, DecodeMesh);
+// HC_MEMSTAGES: a decode that allocates over 256 MB is named, with its bytes and triangles (diagnostic only).
+RefGeometry? DecodeMeshTraced(string full, byte[] bytes, bool first)
+{
+    if (!MemStages.On) return DecodeMesh(full, bytes, first);
+    long a0 = GC.GetAllocatedBytesForCurrentThread(); var t0 = sw.Elapsed.TotalSeconds;
+    var g = DecodeMesh(full, bytes, first);
+    long a = GC.GetAllocatedBytesForCurrentThread() - a0;
+    decodeAlloc += a;
+    if (a > 256L << 20)
+        Console.WriteLine($"   [memstages] decode {full}: {bytes.Length:N0} file bytes allocated {a / 1e9:0.000} GB in {sw.Elapsed.TotalSeconds - t0:0.0}s; host {g?.HostSoup.TriangleCount ?? 0:N0} tris ({g?.HostSrc}), dep {g?.DepSoup.TriangleCount ?? 0:N0} ({g?.DepSrc}); first {first}");
+    return g;
+}
+var meshReader = new MeshGeometryReader(ReadMesh, DecodeMeshTraced);
 var basesCounted = new HashSet<FormKey>();   // the OBND and no-geometry counters count a base once, however often it is asked for
 RefGeometry? GeomOf(FormKey baseKey)
 {
@@ -819,6 +841,8 @@ var skips = new ContactSkips();
 ProbeTraceCollector? traceSink = traceOut is null ? null : new ProbeTraceCollector(traceKeys);
 cidx.Trace = traceSink;
 MemStages.Print("index", cidx, 0, 0);
+if (MemStages.On) cidx.StageProbe = (stage, refs) => { if (refs % 100_000 == 0) MemStages.Print($"{stage}, {refs:N0} refs", cidx, 0, 0); else MemStages.Light($"{stage}, {refs:N0} refs"); };
+MemStages.Extra = () => $"mesh reads {readCount:N0} ({readBytes / 1e9:0.000} GB of files, {readAlloc / 1e9:0.000} GB allocated), decodes allocated {decodeAlloc / 1e9:0.000} GB, process total allocated {GC.GetTotalAllocatedBytes() / 1e9:0.000} GB";
 var hosts = cidx.MovedHosts(skips, closure);
 Console.WriteLine($"\n==== 1. PLUMBING ====");
 Console.WriteLine($"   hosts (physical, furniture-scale or larger, whose last placement step is a move, a relocation or a removal): {hosts.Count:N0}");

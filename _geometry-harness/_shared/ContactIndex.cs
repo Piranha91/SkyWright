@@ -288,6 +288,8 @@ public sealed class ContactIndex
     /// Called at every exit of <see cref="MovedHosts"/>, <see cref="DependentSnaps"/>, <see cref="PhysicalWinners"/>,
     /// <see cref="PhysicalWithout"/> and <see cref="Judge"/>; each counted exit emits under the coverage key it counts.</summary>
     public IProbeTraceSink? Trace { get; set; }
+    /// <summary>Diagnostic (contactprobe HC_MEMSTAGES): called every 10,000 references inside the two hashes. Null: nothing is called.</summary>
+    public Action<string, int>? StageProbe { get; set; }
 
     /// <summary>Whether the attached sink wants events for this key (false with no sink — the untraced path does no work).</summary>
     bool Tw(FormKey key) => Trace is { } t && t.Wants(key);
@@ -756,8 +758,10 @@ public sealed class ContactIndex
     public BoxHash<(FormKey Key, int Snap)> DependentSnaps(ContactSkips skips)
     {
         var h = new BoxHash<(FormKey, int)>();
+        int seenRefs = 0;
         foreach (var (key, snaps) in Index.History.Refs)
         {
+            if (StageProbe is not null && ++seenRefs % 10_000 == 0) StageProbe("dependents hashing", seenRefs);
             // Trace: one role-level event per key, decided at the LAST snap (the snap the coverage counters count), with the
             // number of snaps hashed in the detail — the authoring arm may still judge an earlier one.
             bool tw = Tw(key);
@@ -792,8 +796,10 @@ public sealed class ContactIndex
     {
         var h = new BoxHash<FormKey>();
         const string W = TraceRole.WinnerArm;
+        int seenRefs = 0;
         foreach (var (key, snaps) in Index.History.Refs)
         {
+            if (StageProbe is not null && ++seenRefs % 10_000 == 0) StageProbe("winner arm hashing", seenRefs);
             bool tw = Tw(key);
             var s = snaps[^1];
             if (s.Deleted || Index.IsDeletedNow(key)) { if (tw) Te(key, W, TraceOutcome.Never, "DeletedNow"); continue; }
